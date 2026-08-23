@@ -15,6 +15,40 @@
       Para reproducir en otra máquina Linux: `nvm install --lts` (o el paquete de la distro).
 - [x] Inicializar git en el proyecto — repositorio creado, rama `main`, sin commits todavía.
 
+## Testing (transversal) ← **base montada**
+
+> Regla desde aquí en adelante: código nuevo entra con su test. La suite ya
+> mata mutantes reales (efecto sin limpieza, borde de rejilla exclusivo), no
+> solo cuenta líneas.
+
+**Dos capas deliberadas.** Phaser no se puede ni *importar* bajo jsdom:
+`CanvasFeatures.js` llama a `getContext('2d')` al cargar el módulo y jsdom
+devuelve `null`. Por eso todo lo que toca el motor vive en la capa de navegador,
+contra Chromium y WebGL de verdad; mockearlo en jsdom solo probaría el mock.
+
+- [x] Vitest 4 con dos proyectos en `vite.config.ts`: `unit` (jsdom) y `browser`
+      (Chromium headless vía `@vitest/browser-playwright`).
+- [x] Capa jsdom (10 tests) — lo que no toca Phaser, con `createGame` mockeado en
+      el borde del módulo: ciclo de vida de `GameCanvas` (el bug de StrictMode),
+      composición de `App`, guarda de `#root` en `main.tsx`.
+- [x] Capa navegador (20 tests) — `createGame` (AUTO resuelve a WebGL, `pixelArt`
+      sin antialias, escala al contenedor, `destroy(true)` retira el canvas),
+      `BootScene` (aritmética de la rejilla + escena real con sus 3 objetos) y
+      `GameCanvas` integrado con Phaser real.
+- [x] Cobertura combinada de ambas capas: 100% de líneas, 97% de sentencias.
+      Único hueco: la guarda defensiva `if (!host)` de `GameCanvas`, inalcanzable
+      en la práctica porque el ref siempre está montado cuando corre el efecto.
+- [ ] Envolver `infra/livekit/test-recording.sh` en una suite con asserts y código
+      de salida (bats o similar). Hoy valida a mano y necesita Docker, así que
+      quedó fuera de la suite ejecutable.
+- [ ] Tests del servidor Colyseus cuando exista (sección 2).
+- [ ] E2E de proximidad con dos clientes en el mismo mapa, cuando el cliente hable
+      con LiveKit de verdad (depende de 2.4).
+- [ ] CI que corra `pnpm test:all`, `pnpm typecheck` y `pnpm build`.
+
+Comandos: `pnpm test` (jsdom, rápido), `pnpm test:browser`, `pnpm test:all`,
+`pnpm test:coverage`, `pnpm test:watch`.
+
 ## 1. Migrar el prototipo al stack real del PRD (sección 6.1)
 
 - [x] Scaffolding con **Vite 8 + React 19 + TypeScript 7**. Hecho a mano: `create-vite@9.1.2` ignora

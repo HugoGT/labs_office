@@ -79,4 +79,13 @@ del frontend.
 3. Port de `prototype/js/app.js` a módulos TypeScript y la UI DOM a React.
 4. Conectar el cliente al SDK de LiveKit para audio/vídeo por proximidad real.
 
+## Pruebas
+
+Dos capas, porque Phaser no se puede importar bajo jsdom (`CanvasFeatures` llama a
+`getContext('2d')` al cargar el módulo):
+
+- `pnpm test` — capa jsdom, lo que no toca el motor. Rápida, para el bucle de trabajo.
+- `pnpm test:browser` — Chromium real vía Playwright, para todo `src/game/`.
+- `pnpm test:all` — las dos. `pnpm test:coverage` mide ambas juntas.
+
 El detalle está en `TODOS.md`.

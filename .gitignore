@@ -11,6 +11,12 @@ build/
 .env.*
 !.env.example
 
+# Testing
+coverage/
+**/__screenshots__/
+.vitest-reports/
+.vitest-attachments/
+
 # Artefactos de tooling de agentes
 .atl/
 
