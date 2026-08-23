@@ -1,0 +1,114 @@
+# Stack self-hosted de audio/video para la Fase 0 (PRD 6.3 y 6.5).
+#
+#   livekit   SFU: reparte los streams (no P2P — P2P no pasa de ~6 por sala)
+#   egress    graba una sala a MP4 y la sube a MinIO
+#   minio     almacenamiento S3-compatible propio para las grabaciones
+#   redis     canal de control entre livekit y egress (egress lo necesita)
+#
+# Arranque:  docker compose up -d
+# Estado:    docker compose ps
+
+name: oficina-virtual-av
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [av]
+
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --config /etc/livekit.yaml
+    environment:
+      # Formato que espera LiveKit: "clave: secreto"
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7880:7880"                 # HTTP / WebSocket (senalizacion)
+      - "7881:7881"                 # RTC sobre TCP (fallback tras firewall)
+      - "50000-50019:50000-50019/udp"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [av]
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD}"
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"                 # API S3
+      - "9001:9001"                 # consola web
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [av]
+
+  # Crea el bucket de grabaciones y termina. No es un servicio permanente.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD}"
+      MINIO_BUCKET: "${MINIO_BUCKET}"
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\" &&
+      mc mb --ignore-existing \"local/$$MINIO_BUCKET\" &&
+      mc ls local &&
+      echo 'bucket listo'
+      "
+    restart: "no"
+    networks: [av]
+
+  egress:
+    image: livekit/egress:latest
+    environment:
+      EGRESS_CONFIG_BODY: |
+        redis:
+          address: redis:6379
+        api_key: ${LIVEKIT_API_KEY}
+        api_secret: ${LIVEKIT_API_SECRET}
+        ws_url: ws://livekit:7880
+        insecure: true
+        s3:
+          access_key: ${MINIO_ROOT_USER}
+          secret: ${MINIO_ROOT_PASSWORD}
+          region: us-east-1
+          endpoint: http://minio:9000
+          bucket: ${MINIO_BUCKET}
+          force_path_style: true
+        log_level: info
+    # Egress corre un Chrome headless para componer la sala; necesita SYS_ADMIN
+    # para su sandbox y bastante /dev/shm o el navegador muere al renderizar.
+    cap_add:
+      - SYS_ADMIN
+    shm_size: 1gb
+    depends_on:
+      redis:
+        condition: service_healthy
+      livekit:
+        condition: service_started
+    networks: [av]
+
+volumes:
+  minio-data:
+
+networks:
+  av:
+    driver: bridge

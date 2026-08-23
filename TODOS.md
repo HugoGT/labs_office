@@ -29,11 +29,19 @@
 - [ ] Reemplazar las texturas generadas por código por **sprites/tilemaps reales** (formato Tiled `.json`, PRD 4.1 y 6.1).
       Alcance acotado por PRD 14 decisión 5: mapa base prediseñado + assets modificables encima, no un editor de tiles completo.
 
-## 2. Completar Fase 0 del PRD — prototipo técnico ← **siguiente**
+## 2. Completar Fase 0 del PRD — prototipo técnico ← **en curso**
 
+- [x] **LiveKit self-hosted** (Docker): server v1.13.5 + Redis arriba en `infra/livekit/`.
+      coturn NO se despliega a propósito — sin IP pública ni TLS un TURN local no atraviesa
+      nada. La travesía de NAT es trabajo de Fase 1; ver `infra/livekit/README.md`.
+- [x] **LiveKit Egress + MinIO**: grabación real validada end-to-end. MP4 en MinIO,
+      decodificado y verificado: H.264 Main 1280×720 @30fps + AAC 44.1 kHz, seekable.
+      Reproducible con `infra/livekit/test-recording.sh`.
+      Capacidad medida: `max cost 4` sobre 16 CPUs → ~4 grabaciones concurrentes.
 - [ ] **Colyseus** (servidor Node): sincronizar posición de avatares reales por WebSocket — hoy los NPCs son simulados (PRD 6.2).
-- [ ] **LiveKit self-hosted** (Docker): server + coturn, audio/vídeo real por proximidad — hoy los anillos de "hablando" y el mute son visuales (PRD 6.3).
-- [ ] **LiveKit Egress + MinIO**: prueba de concepto de grabación real de una sala a MP4 — hoy el botón ⏺ Grabar solo simula el flujo (PRD 4.9).
+- [ ] Conectar el cliente al stack: audio/vídeo real por proximidad con el SDK de LiveKit
+      — hoy los anillos de "hablando" y el mute son visuales (PRD 6.3), y el botón ⏺ Grabar
+      solo simula el flujo (PRD 4.9). Depende del port del frontend (sección 1).
 
 ## 3. Fase 1 — MVP (después de validar Fase 0)
 

@@ -51,6 +51,12 @@ src/
 prototype/                # prototipo standalone previo — solo referencia
 ├── index.html            # UI en español (barra inferior, menú contextual, badges)
 └── js/app.js             # motor completo: mapa, NPCs, proximidad, salas
+
+infra/livekit/            # stack self-hosted de audio/vídeo (PRD 6.3)
+├── docker-compose.yml    # livekit + egress + minio + redis
+├── livekit.yaml
+├── test-recording.sh     # prueba end-to-end de grabación
+└── README.md             # estado validado, gotchas y decisiones
 ```
 
 `prototype/` es la implementación de la que se porta el código, no se ejecuta como
@@ -67,9 +73,10 @@ Lo que falta para cerrar Fase 0 según PRD 12 — y el orden importa: el PRD 13 
 el WebRTC self-hosted como **riesgo #1 del proyecto**, así que va antes del port
 del frontend.
 
-1. LiveKit self-hosted (server + coturn) y Egress grabando a MinIO — la validación
-   que el propio PRD pide como siguiente paso.
+1. ~~LiveKit self-hosted y Egress grabando a MinIO~~ — **hecho y validado**.
+   Stack en `infra/livekit/`, grabación real verificada. Ver su README.
 2. Colyseus: WebSocket de posición (hoy los NPCs del prototipo son simulados).
 3. Port de `prototype/js/app.js` a módulos TypeScript y la UI DOM a React.
+4. Conectar el cliente al SDK de LiveKit para audio/vídeo por proximidad real.
 
 El detalle está en `TODOS.md`.

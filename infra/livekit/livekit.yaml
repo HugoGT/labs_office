@@ -1,0 +1,28 @@
+# LiveKit server — PoC Fase 0 (PRD 6.3).
+#
+# Las claves NO viven aqui: se inyectan por la variable LIVEKIT_KEYS desde .env,
+# para que este archivo sea commiteable sin secretos.
+
+port: 7880
+
+rtc:
+  tcp_port: 7881
+  # Rango UDP deliberadamente pequeno (20 puertos). Publicar el rango completo
+  # 50000-60000 en Docker hace que el arranque tarde minutos, y para una PoC de
+  # pocos participantes 20 sobran. En produccion se amplia.
+  port_range_start: 50000
+  port_range_end: 50019
+  # Entorno local: no hay IP publica que descubrir.
+  use_external_ip: false
+
+redis:
+  address: redis:6379
+
+# TURN embebido apagado en local: sin IP publica ni certificados no aporta nada
+# y solo agrega ruido en los logs. Ver README para la decision coturn vs TURN
+# embebido en produccion.
+turn:
+  enabled: false
+
+logging:
+  level: info
