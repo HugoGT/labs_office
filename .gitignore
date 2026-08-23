@@ -1,0 +1,22 @@
+# Dependencias
+node_modules/
+
+# Build
+dist/
+build/
+*.local
+
+# Entorno
+.env
+.env.*
+!.env.example
+
+# Artefactos de tooling de agentes
+.atl/
+
+# Editor / SO
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+.DS_Store

@@ -1,0 +1,12 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0d1117;
+  color: #e5e7eb;
+  font-family: system-ui, 'Segoe UI', Cantarell, 'Noto Sans', 'DejaVu Sans', sans-serif;
+}
+
+canvas { image-rendering: pixelated; display: block; }
