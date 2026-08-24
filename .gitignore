@@ -19,6 +19,8 @@ coverage/
 
 # Artefactos de tooling de agentes
 .atl/
+# Indice de CodeGraph: es por-checkout, nunca se comparte ni se reutiliza
+.codegraph/
 
 # Editor / SO
 .vscode/*
