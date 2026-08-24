@@ -120,4 +120,61 @@ describe('OfficeShell', () => {
     expect(screen.getByText('🔊 Ana')).toBeInTheDocument();
     expect(screen.getByText('🔊 Beto')).toBeInTheDocument();
   });
+
+  it('al recibir npcmenu del bridge, abre el ContextMenu con nombre y estado', () => {
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() =>
+      bridge.emit('npcmenu', { id: 3, name: 'Pablo', status: 'Disponible', statusCode: 'g', x: 10, y: 10 }),
+    );
+
+    expect(screen.getByText('Pablo')).toBeInTheDocument();
+    expect(screen.getByText('Disponible')).toBeInTheDocument();
+  });
+
+  it('closemenu del bridge cierra el ContextMenu abierto', () => {
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() =>
+      bridge.emit('npcmenu', { id: 3, name: 'Pablo', status: 'Disponible', statusCode: 'g', x: 10, y: 10 }),
+    );
+    expect(screen.getByText('Pablo')).toBeInTheDocument();
+
+    act(() => bridge.emit('closemenu', undefined));
+
+    expect(screen.queryByText('Pablo')).not.toBeInTheDocument();
+  });
+
+  it('"Ir a su escritorio" llama a bridge.teleportTo con el id del NPC, muestra un toast y cierra el menu', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const teleportSpy = vi.spyOn(bridge, 'teleportTo');
+
+    act(() =>
+      bridge.emit('npcmenu', { id: 7, name: 'Jordan Távara', status: 'Disponible', statusCode: 'g', x: 10, y: 10 }),
+    );
+    await user.click(screen.getByRole('button', { name: /Ir a su escritorio/ }));
+
+    expect(teleportSpy).toHaveBeenCalledWith(7);
+    expect(screen.queryByRole('button', { name: /Ir a su escritorio/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/Te teletransportaste junto a/)).toBeInTheDocument();
+  });
+
+  it('"Llamar" muestra un toast y cierra el menu sin teletransportar', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const teleportSpy = vi.spyOn(bridge, 'teleportTo');
+
+    act(() =>
+      bridge.emit('npcmenu', { id: 3, name: 'Pablo', status: 'Disponible', statusCode: 'g', x: 10, y: 10 }),
+    );
+    await user.click(screen.getByRole('button', { name: /Llamar/ }));
+
+    expect(teleportSpy).not.toHaveBeenCalled();
+    expect(screen.getByText(/Llamando a/)).toBeInTheDocument();
+  });
 });

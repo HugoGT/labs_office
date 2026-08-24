@@ -263,6 +263,24 @@ describe('OfficeScene: comando teleportTo via el puente (app.js:474-486, D2)', (
     });
   });
 
+  it('funciona igual para un segundo NPC (confirma el mismo mecanismo que usa ContextMenu "Ir a su escritorio", slice 9)', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const player = findPlayer(scene);
+    const npcs = findNpcs(scene);
+    const targetNpc = npcs[npcs.length - 1];
+
+    bridge.teleportTo(targetNpc.npcId);
+
+    await vi.waitFor(() => {
+      const dx = Math.abs(player.x - targetNpc.x) / TILE;
+      const dy = Math.abs(player.y - targetNpc.y) / TILE;
+      expect(dx).toBeLessThanOrEqual(1);
+      expect(dy).toBeLessThanOrEqual(1);
+      expect(dx + dy).toBeGreaterThan(0);
+    });
+  });
+
   it('desuscribe el handler de onCommand al apagar la escena (SHUTDOWN, D2)', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);

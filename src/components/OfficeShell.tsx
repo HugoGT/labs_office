@@ -1,7 +1,8 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
-import { createOfficeBridge } from '../game/officeBridge';
+import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { useOfficeBridge } from '../hooks/useOfficeBridge';
 import { BottomBar } from './BottomBar';
+import { ContextMenu, type NpcMenuAction } from './ContextMenu';
 import { GameCanvas } from './GameCanvas';
 import { RecBadge } from './RecBadge';
 import { Toast } from './Toast';
@@ -12,12 +13,12 @@ const TOAST_TIMEOUT_MS = 3200;
 /**
  * Unico dueno del `OfficeBridge` (D3): lo crea via `useState`, se suscribe
  * con `useOfficeBridge` y compone `GameCanvas` + el HUD. Los componentes
- * presentacionales del HUD (Toast, RecBadge, BottomBar y, desde la slice 9,
- * ContextMenu) nunca reciben el bridge, solo props planas.
+ * presentacionales del HUD (Toast, RecBadge, BottomBar, ContextMenu) nunca
+ * reciben el bridge, solo props planas.
  */
 export function OfficeShell() {
   const [bridge] = useState(createOfficeBridge);
-  const { room, nearby } = useOfficeBridge(bridge);
+  const { room, nearby, menu, closeMenu } = useOfficeBridge(bridge);
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   const [recording, setRecording] = useState(false);
@@ -47,10 +48,36 @@ export function OfficeShell() {
     return () => clearTimeout(timer);
   }, [toastMessage]);
 
+  /** Acciones del menu contextual (`app.js:474-486,602-604`): solo `goto` mueve al jugador. */
+  function handleMenuAction(action: NpcMenuAction, target: OfficeEventMap['npcmenu']): void {
+    closeMenu();
+    if (action === 'call') {
+      setToastMessage(
+        <>
+          📞 Llamando a <b>{target.name}</b>… (prototipo: la videollamada 1:1 llegará con LiveKit)
+        </>,
+      );
+    } else if (action === 'goto') {
+      bridge.teleportTo(target.id);
+      setToastMessage(
+        <>
+          🚶 Te teletransportaste junto a <b>{target.name}</b>
+        </>,
+      );
+    } else {
+      setToastMessage(
+        <>
+          👤 <b>{target.name}</b> · Empleado · {target.status}
+        </>,
+      );
+    }
+  }
+
   return (
     <div id="office-shell">
       <GameCanvas bridge={bridge} />
       <RecBadge visible={recording} />
+      <ContextMenu menu={menu} onAction={handleMenuAction} onClose={closeMenu} />
       <BottomBar
         micOn={micOn}
         camOn={camOn}
