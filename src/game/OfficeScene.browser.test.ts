@@ -1,7 +1,16 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CharacterContainer, NpcContainer } from './characters';
-import { DESK_ROWS, GROUND_TEX, MAP_H, MAP_W, TILE, TREES, ZONE_LABELS } from './mapData';
+import {
+  DESK_ROWS,
+  GROUND_TEX,
+  MAP_H,
+  MAP_W,
+  PROX_RADIUS,
+  TILE,
+  TREES,
+  ZONE_LABELS,
+} from './mapData';
 import { NPCS } from './npcData';
 import { createOfficeBridge } from './officeBridge';
 import { OFFICE_SCENE_KEY, OfficeScene } from './OfficeScene';
@@ -225,6 +234,37 @@ describe('OfficeScene: proximidad y salas (app.js:444-471, cada 250ms)', () => {
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(events.length).toBe(countAfterFirstNotification);
   });
+
+  it(
+    'el anillo de habla se apaga estando cerca: no es proximidad pura (app.js:452)',
+    async () => {
+      const { scene } = await bootOfficeScene();
+      const player = findPlayer(scene);
+      // El primer NPC del roster no tiene wander, asi que no se mueve durante la muestra.
+      const npc = findNpcs(scene)[0];
+      // Justo encima del NPC: la distancia se mantiene en 0 durante toda la prueba.
+      player.setPosition(npc.x, npc.y);
+
+      // Primero esperamos a verlo ENCENDIDO. Esto ancla la prueba: demuestra que el
+      // tick de proximidad corre y que estamos dentro del radio. Sin este anclaje, el
+      // `false` inicial de `spawnNpcs` (el anillo nace invisible) bastaria para dar el
+      // test por bueno sin haber observado el ciclo siquiera.
+      await vi.waitFor(() => expect(npc.ring.visible).toBe(true), { timeout: 6000 });
+
+      // Ya encendido y sin movernos, tiene que apagarse dentro de un ciclo de 4000ms:
+      // `speaking = near && ((now + phase) % 4000) < 1800`. Esto es lo que cae si
+      // alguien simplifica a `setVisible(near)` o a `setVisible(true)`.
+      let wentSilentWhileNear = false;
+      for (let i = 0; i < 50 && !wentSilentWhileNear; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const d = Phaser.Math.Distance.Between(player.x, player.y, npc.x, npc.y);
+        wentSilentWhileNear = d < PROX_RADIUS && !npc.ring.visible;
+      }
+
+      expect(wentSilentWhileNear).toBe(true);
+    },
+    20000,
+  );
 
   it('emite "room" al entrar a una sala', async () => {
     const bridge = createOfficeBridge();

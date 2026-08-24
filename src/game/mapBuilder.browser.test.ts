@@ -106,6 +106,27 @@ describe('placeFurniture', () => {
     expect(solidAfter[19][51]).toBe(true);
   });
 
+  it('no marca solidas las sillas ni los taburetes: se puede caminar entre asientos (app.js:264-297)', async () => {
+    const solidAfter = await withScene((scene) => {
+      const grid = buildTerrainGrid();
+      placeFurniture(scene, grid);
+      return grid.solid;
+    });
+
+    // El prototipo solo llama a setSolid para escritorios, las dos mesas y los
+    // barriles. Las sillas y los taburetes se dibujan encima sin bloquear el paso,
+    // asi que marcarlos solidos encerraria a los NPCs de la Sala de Juntas.
+    // Sillas de la Sala de Juntas: filas y=5 y y=11, fuera de setSolid(53,6,7,5).
+    expect(solidAfter[5][53]).toBe(false);
+    expect(solidAfter[11][59]).toBe(false);
+    // Sillas laterales en las columnas x=52 y x=60, tambien fuera de la mesa.
+    expect(solidAfter[7][52]).toBe(false);
+    expect(solidAfter[7][60]).toBe(false);
+    // Taburetes de la Cafeteria: filas y=22 y y=26, fuera de setSolid(53,23,5,3).
+    expect(solidAfter[22][53]).toBe(false);
+    expect(solidAfter[26][53]).toBe(false);
+  });
+
   it('coloca la textura de escritorio en cada tile declarada por DESK_ROWS', async () => {
     const deskImages = await withScene((scene) => {
       placeFurniture(scene, buildTerrainGrid());

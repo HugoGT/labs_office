@@ -109,6 +109,19 @@ describe('spawnNpcs', () => {
     expect(ringColors[0]).toBe(0x22c55e);
   });
 
+  it('el anillo de habla nace invisible: solo lo enciende la proximidad (app.js:327)', async () => {
+    const ringsVisible = await withScene((scene) => {
+      const grid = buildTerrainGrid();
+      const bridge = createOfficeBridge();
+      return spawnNpcs(scene, grid, bridge).map((c) => c.ring.visible);
+    });
+
+    // `setVisible(false)` al construir: sin esto la oficina arrancaria con los 33
+    // NPCs marcados como hablando antes del primer tick de proximidad.
+    expect(ringsVisible).toHaveLength(NPCS.length);
+    expect(ringsVisible.every((v) => v === false)).toBe(true);
+  });
+
   it('al hacer clic en un NPC, emite npcmenu por el bridge con sus datos', async () => {
     const received: OfficeEventMap['npcmenu'][] = [];
     const target = await withScene((scene) => {
