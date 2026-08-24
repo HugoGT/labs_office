@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createGame } from './createGame';
+import { createOfficeBridge } from './officeBridge';
 
 /**
  * Capa de navegador: Chromium real, WebGL real. Phaser no se puede ni importar
@@ -20,12 +21,12 @@ function mountHost(width = 320, height = 240): HTMLElement {
   return host;
 }
 
-/** Arranca el juego y espera a que BootScene haya corrido su `create()`. */
+/** Arranca el juego y espera a que OfficeScene haya corrido su `create()`. */
 async function bootedGame(host: HTMLElement): Promise<Phaser.Game> {
-  const game = createGame(host);
+  const game = createGame(host, createOfficeBridge());
   games.push(game);
   await vi.waitFor(() => {
-    expect(game.scene.getScene('boot')?.scene.settings.status).toBe(
+    expect(game.scene.getScene('office')?.scene.settings.status).toBe(
       Phaser.Scenes.RUNNING,
     );
   });
@@ -66,10 +67,10 @@ describe('createGame en un navegador real', () => {
     expect(game.scale.gameSize.height).toBe(240);
   });
 
-  it('arranca en BootScene', async () => {
+  it('arranca en OfficeScene', async () => {
     const game = await bootedGame(mountHost());
 
-    expect(game.scene.isActive('boot')).toBe(true);
+    expect(game.scene.isActive('office')).toBe(true);
   });
 
   it('destroy(true) retira el canvas del DOM', async () => {

@@ -31,4 +31,18 @@ describe('App', () => {
 
     expect(container.querySelector('main')?.contains(host)).toBe(true);
   });
+
+  it('provee un OfficeBridge real a GameCanvas (D3, provisional hasta OfficeShell)', () => {
+    render(<App />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    expect(bridge).toEqual(
+      expect.objectContaining({
+        on: expect.any(Function),
+        emit: expect.any(Function),
+        onCommand: expect.any(Function),
+        teleportTo: expect.any(Function),
+      }),
+    );
+  });
 });

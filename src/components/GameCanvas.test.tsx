@@ -2,11 +2,13 @@ import { render } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGame } from '../game/createGame';
+import { createOfficeBridge } from '../game/officeBridge';
 import { GameCanvas } from './GameCanvas';
 
 vi.mock('../game/createGame', () => ({ createGame: vi.fn() }));
 
 const createGameMock = vi.mocked(createGame);
+const bridge = createOfficeBridge();
 
 /** Contabiliza instancias vivas: es lo unico que delata una fuga de Phaser. */
 function trackInstances() {
@@ -31,17 +33,17 @@ describe('GameCanvas', () => {
   it('crea el juego dentro de su propio contenedor, no en document.body', () => {
     trackInstances();
 
-    const { container } = render(<GameCanvas />);
+    const { container } = render(<GameCanvas bridge={bridge} />);
     const host = container.firstElementChild;
 
     expect(createGameMock).toHaveBeenCalledTimes(1);
-    expect(createGameMock).toHaveBeenCalledWith(host);
+    expect(createGameMock).toHaveBeenCalledWith(host, bridge);
   });
 
   it('destruye el juego al desmontar y pide que retire el canvas', () => {
     const state = trackInstances();
 
-    const { unmount } = render(<GameCanvas />);
+    const { unmount } = render(<GameCanvas bridge={bridge} />);
     expect(state.destroyed).toBe(0);
 
     unmount();
@@ -56,7 +58,7 @@ describe('GameCanvas', () => {
 
     render(
       <StrictMode>
-        <GameCanvas />
+        <GameCanvas bridge={bridge} />
       </StrictMode>,
     );
 
@@ -69,9 +71,9 @@ describe('GameCanvas', () => {
   it('no recrea el juego en re-renders', () => {
     trackInstances();
 
-    const { rerender } = render(<GameCanvas />);
-    rerender(<GameCanvas />);
-    rerender(<GameCanvas />);
+    const { rerender } = render(<GameCanvas bridge={bridge} />);
+    rerender(<GameCanvas bridge={bridge} />);
+    rerender(<GameCanvas bridge={bridge} />);
 
     expect(createGameMock).toHaveBeenCalledTimes(1);
   });
@@ -79,7 +81,7 @@ describe('GameCanvas', () => {
   it('no deja referencias al juego destruido tras un ciclo completo', () => {
     const state = trackInstances();
 
-    const { unmount } = render(<GameCanvas />);
+    const { unmount } = render(<GameCanvas bridge={bridge} />);
     unmount();
 
     expect(state.created).toBe(state.destroyed);

@@ -2,6 +2,7 @@ import { cleanup, render } from '@testing-library/react';
 import Phaser from 'phaser';
 import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createOfficeBridge } from '../game/officeBridge';
 import { GameCanvas } from './GameCanvas';
 
 /**
@@ -34,7 +35,7 @@ afterEach(() => {
 
 describe('GameCanvas con Phaser real', () => {
   it('monta un canvas dentro de su contenedor', async () => {
-    const { container } = render(<GameCanvas />);
+    const { container } = render(<GameCanvas bridge={createOfficeBridge()} />);
 
     await vi.waitFor(() => {
       expect(container.querySelectorAll('canvas')).toHaveLength(1);
@@ -44,7 +45,7 @@ describe('GameCanvas con Phaser real', () => {
   it('bajo StrictMode deja un solo canvas, no dos juegos peleandose', async () => {
     const { container } = render(
       <StrictMode>
-        <GameCanvas />
+        <GameCanvas bridge={createOfficeBridge()} />
       </StrictMode>,
     );
 
@@ -64,7 +65,7 @@ describe('GameCanvas con Phaser real', () => {
     const destroy = vi.spyOn(Phaser.Game.prototype, 'destroy');
     const { wrapper, container } = nestedContainer();
 
-    const { unmount } = render(<GameCanvas />, { container });
+    const { unmount } = render(<GameCanvas bridge={createOfficeBridge()} />, { container });
     await vi.waitFor(() => {
       expect(wrapper.querySelectorAll('canvas')).toHaveLength(1);
     });
@@ -87,7 +88,7 @@ describe('GameCanvas con Phaser real', () => {
       const container = document.createElement('div');
       wrapper.append(container);
 
-      const { unmount } = render(<GameCanvas />, { container });
+      const { unmount } = render(<GameCanvas bridge={createOfficeBridge()} />, { container });
       await vi.waitFor(() => {
         expect(wrapper.querySelectorAll('canvas')).toHaveLength(1);
       });
