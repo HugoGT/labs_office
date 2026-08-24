@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Una ejecucion por rama: un push nuevo cancela el anterior en curso.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck, tests and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # La version de pnpm sale del campo packageManager de package.json.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # La capa `browser` corre contra Chromium real: Phaser no se puede ni
+      # importar bajo jsdom, asi que sin este navegador esa capa no existe.
+      - name: Install Chromium for the browser test layer
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Tests (jsdom + Chromium)
+        run: pnpm test:all
+
+      - name: Build
+        run: pnpm build
