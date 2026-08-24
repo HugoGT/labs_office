@@ -1,0 +1,73 @@
+/**
+ * Roster de NPCs, portado verbatim de `prototype/js/app.js:38-54`.
+ * Decision registrada: los nombres reales se mantienen tal cual (ver
+ * sdd/port-prototype-to-react-phaser/decision-npc-roster).
+ */
+
+export type NpcStatus = 'g' | 'y' | 'r';
+
+export interface NpcSeed {
+  name: string;
+  tx: number;
+  ty: number;
+  status: NpcStatus;
+  wander: boolean;
+}
+
+type RawNpc = [string, number, number, NpcStatus] | [string, number, number, NpcStatus, true];
+
+const RAW_NPCS: readonly RawNpc[] = [
+  ['Franklin Ga', 4, 7, 'g'],
+  ['Dennis ZR', 6, 7, 'g'],
+  ['Ariana Colan', 14, 6, 'g'],
+  ['Christopher', 21, 6, 'g'],
+  ['Alejandro', 23, 6, 'y'],
+  ['Dario Calero', 4, 16, 'g'],
+  ['paulotijero', 6, 16, 'y'],
+  ['Mili', 13, 17, 'r'],
+  ['Sebastian Rios', 15, 17, 'g'],
+  ['Angélica', 26, 17, 'g'],
+  ['Alvaro Torres', 34, 16, 'g'],
+  ['Jimmy Loloy', 36, 16, 'g'],
+  ['Anderson', 4, 26, 'r'],
+  ['Pablo', 6, 26, 'g', true],
+  ['Nimer Cerna', 5, 27, 'g'],
+  ['Jean', 7, 27, 'g'],
+  ['Milko', 17, 26, 'g'],
+  ['DiegoLopez', 19, 26, 'g'],
+  ['Jordan Távara', 20, 28, 'g', true],
+  ['Alberto', 28, 26, 'g'],
+  ['Fernando.Aquino', 30, 26, 'g'],
+  ['Paul Llanque', 31, 27, 'g'],
+  ['Mike Vera', 33, 26, 'g'],
+  ['Junior Ange', 5, 38, 'g'],
+  ['Paul Tijero', 7, 38, 'g'],
+  ['Iberson Silva', 5, 40, 'g'],
+  ['Kendry Soto', 8, 40, 'g'],
+  ['kevin', 17, 38, 'g', true],
+  ['ivan herbas', 18, 39, 'g'],
+  ['Joaquin', 20, 38, 'g'],
+  ['Jeraldine', 29, 38, 'g'],
+  ['Alexis Perdomo', 31, 38, 'g'],
+  ['Luis', 33, 38, 'r'],
+];
+
+export const NPCS: readonly NpcSeed[] = RAW_NPCS.map(([name, tx, ty, status, wander]) => ({
+  name,
+  tx,
+  ty,
+  status,
+  wander: wander === true,
+}));
+
+export const STATUS_COLOR: Record<NpcStatus, number> = {
+  g: 0x22c55e,
+  y: 0xeab308,
+  r: 0xef4444,
+};
+
+export const STATUS_TXT: Record<NpcStatus, string> = {
+  g: 'Disponible',
+  y: 'Ausente',
+  r: 'En reunión',
+};
