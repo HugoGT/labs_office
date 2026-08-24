@@ -1,0 +1,92 @@
+import { act, render, screen } from '@testing-library/react';
+import { userEvent } from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createGame } from '../game/createGame';
+import { OfficeShell } from './OfficeShell';
+
+vi.mock('../game/createGame', () => ({ createGame: vi.fn() }));
+
+const createGameMock = vi.mocked(createGame);
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  createGameMock.mockReturnValue({ destroy: vi.fn() } as unknown as Phaser.Game);
+});
+
+describe('OfficeShell', () => {
+  it('provee un OfficeBridge real a GameCanvas (D3: unico dueno del bridge)', () => {
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    expect(bridge).toEqual(
+      expect.objectContaining({
+        on: expect.any(Function),
+        emit: expect.any(Function),
+        onCommand: expect.any(Function),
+        teleportTo: expect.any(Function),
+      }),
+    );
+  });
+
+  it('al entrar a una sala, muestra un toast compuesto con el nombre en <b>', () => {
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('room', { room: 'Sala de Juntas' }));
+
+    expect(screen.getByText('Sala de Juntas').tagName).toBe('B');
+    expect(screen.getByText(/Entraste a/)).toBeInTheDocument();
+  });
+
+  it('un nombre de sala con marcado renderiza como texto literal (sin dangerouslySetInnerHTML)', () => {
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('room', { room: '<img src=x onerror=alert(1)>' }));
+
+    expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeInTheDocument();
+    expect(document.querySelector('#office-shell img')).toBeNull();
+  });
+
+  it('el toast desaparece por si solo tras su timeout', () => {
+    vi.useFakeTimers();
+    try {
+      render(<OfficeShell />);
+      const bridge = createGameMock.mock.calls[0][1];
+
+      act(() => bridge.emit('room', { room: 'Sala de Juntas' }));
+      expect(screen.getByText(/Entraste a/)).toBeInTheDocument();
+
+      act(() => vi.advanceTimersByTime(3200));
+
+      expect(screen.queryByText(/Entraste a/)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('detiene la grabacion activa y muestra el toast al salir, ocultando el REC badge', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('room', { room: 'Sala de Juntas' }));
+    await user.click(screen.getByRole('button', { name: /Grabar/ }));
+    expect(screen.getByText(/REC/)).toBeInTheDocument();
+
+    act(() => bridge.emit('room', { room: null }));
+
+    expect(screen.queryByText(/REC/)).not.toBeInTheDocument();
+    expect(screen.getByText('💾 Saliste de la sala: grabación detenida')).toBeInTheDocument();
+  });
+
+  it('salir de una sala sin grabacion activa no muestra el toast de detencion', () => {
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('room', { room: 'Sala de Juntas' }));
+    act(() => bridge.emit('room', { room: null }));
+
+    expect(screen.queryByText('💾 Saliste de la sala: grabación detenida')).not.toBeInTheDocument();
+  });
+});
