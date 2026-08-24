@@ -31,20 +31,27 @@ contra Chromium y WebGL de verdad; mockearlo en jsdom solo probaría el mock.
 - [x] Capa jsdom (10 tests) — lo que no toca Phaser, con `createGame` mockeado en
       el borde del módulo: ciclo de vida de `GameCanvas` (el bug de StrictMode),
       composición de `App`, guarda de `#root` en `main.tsx`.
-- [x] Capa navegador (20 tests) — `createGame` (AUTO resuelve a WebGL, `pixelArt`
-      sin antialias, escala al contenedor, `destroy(true)` retira el canvas),
-      `BootScene` (aritmética de la rejilla + escena real con sus 3 objetos) y
-      `GameCanvas` integrado con Phaser real.
+- [x] Capa navegador — `createGame` (AUTO resuelve a WebGL, `pixelArt` sin
+      antialias, escala al contenedor, `destroy(true)` retira el canvas) y
+      `GameCanvas` integrado con Phaser real. `BootScene` y sus 8 tests se
+      retiraron en `076ee3d` al entrar `OfficeScene`: no es cobertura perdida,
+      `createGame.browser.test.ts` ejercita el mismo arranque contra la escena real.
 - [x] Cobertura combinada de ambas capas: 100% de líneas, 97% de sentencias.
       Único hueco: la guarda defensiva `if (!host)` de `GameCanvas`, inalcanzable
       en la práctica porque el ref siempre está montado cuando corre el efecto.
+- [x] Suite tras el port del prototipo: **120 tests en 21 ficheros** (jsdom + Chromium),
+      typecheck y build limpios. Todo el código del port entró en RED→GREEN.
 - [ ] Envolver `infra/livekit/test-recording.sh` en una suite con asserts y código
       de salida (bats o similar). Hoy valida a mano y necesita Docker, así que
       quedó fuera de la suite ejecutable.
 - [ ] Tests del servidor Colyseus cuando exista (sección 2).
 - [ ] E2E de proximidad con dos clientes en el mismo mapa, cuando el cliente hable
       con LiveKit de verdad (depende de 2.4).
-- [ ] CI que corra `pnpm test:all`, `pnpm typecheck` y `pnpm build`.
+- [x] CI en `.github/workflows/ci.yml`: un job secuencial con typecheck, ambas capas
+      de test y build, sobre push y PR a `main`. Un solo job a propósito: separarlo en
+      jobs paralelos pagaría la instalación de Chromium más de una vez, que es el paso
+      caro. Instala Chromium explícitamente porque sin navegador la capa `browser` no
+      existe. Todavía **no ha corrido en GitHub Actions** (nada pusheado).
 
 Comandos: `pnpm test` (jsdom, rápido), `pnpm test:browser`, `pnpm test:all`,
 `pnpm test:coverage`, `pnpm test:watch`.
@@ -58,10 +65,20 @@ Comandos: `pnpm test` (jsdom, rápido), `pnpm test:browser`, `pnpm test:all`,
       el port no arrastra encima una migración de motor.
 - [x] React montando Phaser con ciclo de vida resuelto (`GameCanvas.tsx` destruye la instancia al
       desmontar — sin eso StrictMode deja dos juegos peleando por el canvas).
-- [ ] Portar `prototype/js/app.js` a módulos TypeScript (escena, texturas, datos del mapa separados).
-- [ ] Mover la UI DOM (barra inferior, menú contextual, toasts) a componentes React.
+- [x] Portar `prototype/js/app.js` a módulos TypeScript. Partido por un solo eje: **¿el
+      módulo importa `phaser` en runtime?** Lo que no lo importa (`mapData`, `npcData`,
+      `terrainGrid`, `colliderMerge`, `proximity`, `officeBridge`) se prueba en jsdom; lo
+      que sí (`textures`, `mapBuilder`, `characters`, `OfficeScene`) solo en Chromium.
+- [x] Mover la UI DOM a componentes React: `BottomBar`, `ContextMenu`, `Toast`, `RecBadge`,
+      compuestos por `OfficeShell`, que es el único dueño del bridge. El `window.officeAPI`
+      global del prototipo desaparece: se sustituye por un bridge tipado por instancia sobre
+      `EventTarget`, donde cada suscriptor posee su propio cierre de baja. Sin
+      `dangerouslySetInnerHTML`: el prototipo concatenaba nombres dentro de `innerHTML`.
 - [ ] Reemplazar las texturas generadas por código por **sprites/tilemaps reales** (formato Tiled `.json`, PRD 4.1 y 6.1).
       Alcance acotado por PRD 14 decisión 5: mapa base prediseñado + assets modificables encima, no un editor de tiles completo.
+      **Bloqueado por adquisición de arte, no por código**: no hay un solo asset en el repo (`public/` está vacío, no existe
+      `src/assets/`). Decisión pendiente: quién produce el mapa base y el tileset. Hasta entonces las texturas siguen siendo
+      procedurales, que es exactamente lo que hacía el prototipo.
 
 ## 2. Completar Fase 0 del PRD — prototipo técnico ← **en curso**
 
@@ -75,7 +92,9 @@ Comandos: `pnpm test` (jsdom, rápido), `pnpm test:browser`, `pnpm test:all`,
 - [ ] **Colyseus** (servidor Node): sincronizar posición de avatares reales por WebSocket — hoy los NPCs son simulados (PRD 6.2).
 - [ ] Conectar el cliente al stack: audio/vídeo real por proximidad con el SDK de LiveKit
       — hoy los anillos de "hablando" y el mute son visuales (PRD 6.3), y el botón ⏺ Grabar
-      solo simula el flujo (PRD 4.9). Depende del port del frontend (sección 1).
+      solo simula el flujo (PRD 4.9). **Ya desbloqueado**: dependía del port de la sección 1,
+      que está hecho. El HUD emite y recibe por el bridge, así que conectar LiveKit es
+      sustituir el simulacro detrás de esos eventos, no rehacer la UI.
 
 ## 3. Fase 1 — MVP (después de validar Fase 0)
 
