@@ -34,7 +34,11 @@ describe('OfficeShell', () => {
 
     act(() => bridge.emit('room', { room: 'Sala de Juntas' }));
 
-    expect(screen.getByText('Sala de Juntas').tagName).toBe('B');
+    // BottomBar's status text and the entry toast both render the room name
+    // in bold; assert every occurrence is a real <b> element, not a string.
+    const occurrences = screen.getAllByText('Sala de Juntas');
+    expect(occurrences.length).toBeGreaterThan(0);
+    occurrences.forEach((el) => expect(el.tagName).toBe('B'));
     expect(screen.getByText(/Entraste a/)).toBeInTheDocument();
   });
 
@@ -44,7 +48,9 @@ describe('OfficeShell', () => {
 
     act(() => bridge.emit('room', { room: '<img src=x onerror=alert(1)>' }));
 
-    expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeInTheDocument();
+    const occurrences = screen.getAllByText('<img src=x onerror=alert(1)>');
+    expect(occurrences.length).toBeGreaterThan(0);
+    occurrences.forEach((el) => expect(el.tagName).toBe('B'));
     expect(document.querySelector('#office-shell img')).toBeNull();
   });
 
@@ -88,5 +94,30 @@ describe('OfficeShell', () => {
     act(() => bridge.emit('room', { room: null }));
 
     expect(screen.queryByText('💾 Saliste de la sala: grabación detenida')).not.toBeInTheDocument();
+  });
+
+  it('mic se activa/desactiva independientemente de la camara', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell />);
+
+    const micButton = screen.getByRole('button', { name: /Mic/ });
+    const camButton = screen.getByRole('button', { name: /Cámara/ });
+    expect(micButton).toHaveAttribute('aria-pressed', 'true');
+    expect(camButton).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(micButton);
+
+    expect(micButton).toHaveAttribute('aria-pressed', 'false');
+    expect(camButton).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('reenvia los nearby recibidos del bridge a los chips de BottomBar', () => {
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('nearby', { names: ['Ana', 'Beto'] }));
+
+    expect(screen.getByText('🔊 Ana')).toBeInTheDocument();
+    expect(screen.getByText('🔊 Beto')).toBeInTheDocument();
   });
 });
