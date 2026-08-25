@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
+import { preloadOfficeAssets } from './assets';
 import {
+  setCharacterFacing,
   spawnNpcs,
   spawnPlayer,
   walkNpcTo,
@@ -10,6 +12,7 @@ import { mergeColliderRects } from './colliderMerge';
 import { placeFurniture, placeNature, placeZoneLabels, renderGround } from './mapBuilder';
 import { PROX_RADIUS, ROOMS, TILE, WORLD_H, WORLD_W } from './mapData';
 import type { OfficeBridge } from './officeBridge';
+import { DEFAULT_FACING, facingFrom, type Facing } from './officeProtocol';
 import { detectRoom, isSpeaking, nearbyIndices, nearbyKey, type Point } from './proximity';
 import { buildTerrainGrid, findFreeAdjacentTile, type TerrainGrid } from './terrainGrid';
 import { createOfficeTextures } from './textures';
@@ -51,10 +54,16 @@ export class OfficeScene extends Phaser.Scene {
   private currentRoom: string | null = null;
   private unsubscribeTeleport?: () => void;
   private unsubscribeCallNpc?: () => void;
+  private facing: Facing = DEFAULT_FACING;
 
   constructor(bridge: OfficeBridge) {
     super(OFFICE_SCENE_KEY);
     this.bridge = bridge;
+  }
+
+  /** Las hojas Kenney tienen que estar cargadas antes de que `create()` dibuje. */
+  preload(): void {
+    preloadOfficeAssets(this);
   }
 
   create(): void {
@@ -224,6 +233,8 @@ export class OfficeScene extends Phaser.Scene {
     const body = this.player.body as Phaser.Physics.Arcade.Body;
     body.setVelocity(velocity.x, velocity.y);
     this.player.setDepth(this.player.y);
+    this.facing = facingFrom(vx, vy, this.facing);
+    setCharacterFacing(this.player, this.facing);
 
     for (const npc of this.npcs) npc.setDepth(npc.y);
 

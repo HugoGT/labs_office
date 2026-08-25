@@ -1,16 +1,8 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CharacterContainer, NpcContainer } from './characters';
-import {
-  DESK_ROWS,
-  GROUND_TEX,
-  MAP_H,
-  MAP_W,
-  PROX_RADIUS,
-  TILE,
-  TREES,
-  ZONE_LABELS,
-} from './mapData';
+import { DESK_ROWS, MAP_H, MAP_W, PROX_RADIUS, TILE, TREES, ZONE_LABELS } from './mapData';
+import { TERRAIN_SHEET } from './assets';
 import { NPCS } from './npcData';
 import { createOfficeBridge } from './officeBridge';
 import { OFFICE_SCENE_KEY, OfficeScene } from './OfficeScene';
@@ -107,13 +99,15 @@ describe('OfficeScene dentro de un Phaser.Game real: mapa, NPCs y jugador', () =
       (c): c is Phaser.GameObjects.Text => c.type === 'Text',
     );
 
-    const groundKeys = new Set<string>([...GROUND_TEX, 'grassB']);
-    const groundImages = images.filter((img) => groundKeys.has(img.texture.key));
+    const tiled = scene.children.list.filter((c) => c.type === 'TileSprite');
+    const terrainImages = images.filter((img) => img.texture.key === TERRAIN_SHEET);
     const deskCount = DESK_ROWS.reduce((sum, [, , n]) => sum + n, 0);
 
-    expect(groundImages).toHaveLength(MAP_W * MAP_H);
-    expect(images.filter((img) => img.texture.key === 'desk')).toHaveLength(deskCount);
-    expect(images.filter((img) => img.texture.key === 'tree')).toHaveLength(TREES.length);
+    // Suelo (una imagen por tile) + arboles, todos de la hoja de terreno.
+    expect(terrainImages.length).toBeGreaterThanOrEqual(MAP_W * MAP_H + TREES.length);
+    // Escritorios y las dos mesas de sala se dibujan con tileSprite, que repite
+    // el tile de 16px en vez de estirar uno solo.
+    expect(tiled).toHaveLength(deskCount + 2);
     expect(texts).toHaveLength(ZONE_LABELS.length);
   });
 

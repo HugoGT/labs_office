@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GROUND, GROUND_TEX, MAP_H, MAP_W, PROX_RADIUS, ROOMS, TILE } from './mapData';
+import { GROUND, MAP_H, MAP_W, PROX_RADIUS, ROOMS, TILE } from './mapData';
 
 describe('mapData', () => {
   it('define las dimensiones y el radio de proximidad del prototipo (app.js:6-8)', () => {
@@ -9,10 +9,10 @@ describe('mapData', () => {
     expect(PROX_RADIUS).toBe(170);
   });
 
-  it('mapea cada codigo de suelo a su textura (app.js:11-12)', () => {
-    expect(GROUND_TEX[GROUND.WALL]).toBe('wall');
-    expect(GROUND_TEX[GROUND.WATER]).toBe('water');
-    expect(GROUND_TEX[GROUND.BRIDGE]).toBe('bridge');
+  it('los codigos de suelo son consecutivos desde 0, para indexar GROUND_FRAMES', () => {
+    // El mapeo a material vive ahora en `assets.ts` (frames de la hoja Kenney)
+    // y se indexa por estos codigos; que sean 0..n-1 es lo que lo hace valido.
+    expect(Object.values(GROUND).sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
   });
 
   it('ubica la Sala de Juntas en tile (50,2) de 13x14 (app.js:56-59)', () => {

@@ -1,5 +1,6 @@
 /**
  * Datos estaticos del mapa, portados de `prototype/js/app.js:6-35,56-64`.
+ *
  * Sin dependencias de Phaser: se prueba en jsdom.
  */
 
@@ -23,17 +24,6 @@ export const GROUND = {
 } as const;
 
 export type GroundCode = (typeof GROUND)[keyof typeof GROUND];
-
-export const GROUND_TEX: readonly string[] = [
-  'grassA',
-  'grassDark',
-  'water',
-  'bridge',
-  'floor',
-  'woodf',
-  'wall',
-  'corridor',
-];
 
 /** Filas de escritorios: [tileX, tileY, cantidad] (app.js:16-21). Cada escritorio ocupa 2x1 tiles. */
 export const DESK_ROWS: readonly (readonly [number, number, number])[] = [

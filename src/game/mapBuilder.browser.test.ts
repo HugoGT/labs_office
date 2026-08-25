@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { TERRAIN, TERRAIN_SHEET, preloadOfficeAssets } from './assets';
 import { DESK_ROWS, MAP_H, MAP_W, TILE, TREES, ZONE_LABELS } from './mapData';
 import { placeFurniture, placeNature, placeZoneLabels, renderGround } from './mapBuilder';
 import { buildTerrainGrid } from './terrainGrid';
@@ -30,6 +31,11 @@ async function withScene<T>(run: (scene: Phaser.Scene) => T): Promise<T> {
     constructor() {
       super('probe');
     }
+    // Las hojas Kenney son ficheros: hay que cargarlas antes de `create()`, o
+    // cada `add.image` pediria una textura que aun no existe.
+    preload(): void {
+      preloadOfficeAssets(this);
+    }
     create(): void {
       createOfficeTextures(this);
       result = run(this);
@@ -58,29 +64,49 @@ function images(scene: Phaser.Scene): Phaser.GameObjects.Image[] {
   );
 }
 
+function tileSprites(scene: Phaser.Scene): Phaser.GameObjects.TileSprite[] {
+  return scene.children.list.filter(
+    (child): child is Phaser.GameObjects.TileSprite => child.type === 'TileSprite',
+  );
+}
+
+/** Frame concreto de la hoja que un objeto esta mostrando. */
+function frameOf(obj: { frame: Phaser.Textures.Frame }): number {
+  return Number(obj.frame.name);
+}
+
 describe('renderGround', () => {
-  it('pinta MAP_W*MAP_H imagenes, alternando grassA/grassB por paridad de fila', async () => {
+  it('pinta MAP_W*MAP_H tiles de la hoja de terreno, alternando cesped por paridad de fila', async () => {
     const list = await withScene((scene) => {
       renderGround(scene, buildTerrainGrid());
-      return images(scene).map((img) => ({ x: img.x, y: img.y, key: img.texture.key }));
+      return images(scene).map((img) => ({
+        x: img.x,
+        y: img.y,
+        key: img.texture.key,
+        frame: frameOf(img),
+        scale: img.scaleX,
+      }));
     });
 
     expect(list).toHaveLength(MAP_W * MAP_H);
+    expect(new Set(list.map((i) => i.key))).toEqual(new Set([TERRAIN_SHEET]));
+    // Escala 2: el tile de 16px del pack tiene que cubrir el de 32px del mundo.
+    expect(new Set(list.map((i) => i.scale))).toEqual(new Set([2]));
 
-    // (5,4): fila par, cesped por defecto -> grassA. (5,5): fila impar -> grassB.
-    expect(list.find((i) => i.x === 5 * TILE && i.y === 4 * TILE)?.key).toBe('grassA');
-    expect(list.find((i) => i.x === 5 * TILE && i.y === 5 * TILE)?.key).toBe('grassB');
+    // (5,4): fila par, cesped por defecto. (5,5): fila impar -> variante.
+    expect(list.find((i) => i.x === 5 * TILE && i.y === 4 * TILE)?.frame).toBe(TERRAIN.grass);
+    expect(list.find((i) => i.x === 5 * TILE && i.y === 5 * TILE)?.frame).toBe(TERRAIN.grassAlt);
   });
 
-  it('usa la textura declarada en GROUND_TEX para tiles que no son cesped llano', async () => {
+  it('usa el frame declarado en GROUND_FRAMES para tiles que no son cesped llano', async () => {
     const list = await withScene((scene) => {
       renderGround(scene, buildTerrainGrid());
-      return images(scene).map((img) => ({ x: img.x, y: img.y, key: img.texture.key }));
+      return images(scene).map((img) => ({ x: img.x, y: img.y, frame: frameOf(img) }));
     });
 
-    // Borde de seto solido en (0,0) -> grassDark; rio en (1,19) fuera de los puentes -> water.
-    expect(list.find((i) => i.x === 0 && i.y === 0)?.key).toBe('grassDark');
-    expect(list.find((i) => i.x === 1 * TILE && i.y === 19 * TILE)?.key).toBe('water');
+    // Borde de seto solido en (0,0) -> cesped oscuro; rio en (1,19) fuera de los puentes -> agua.
+    expect(list.find((i) => i.x === 0 && i.y === 0)?.frame).toBe(TERRAIN.grassDark);
+    expect(list.find((i) => i.x === 1 * TILE && i.y === 19 * TILE)?.frame).toBe(TERRAIN.water);
   });
 });
 
@@ -102,7 +128,7 @@ describe('placeFurniture', () => {
     expect(solidAfter[6][53]).toBe(true);
     expect(solidAfter[10][59]).toBe(true);
 
-    // Barril en (51,19).
+    // Planta de esquina en (51,19), que ocupaba el barril del prototipo.
     expect(solidAfter[19][51]).toBe(true);
   });
 
@@ -127,19 +153,48 @@ describe('placeFurniture', () => {
     expect(solidAfter[26][53]).toBe(false);
   });
 
-  it('coloca la textura de escritorio en cada tile declarada por DESK_ROWS', async () => {
-    const deskImages = await withScene((scene) => {
+  it('coloca un escritorio de 2x1 tiles en cada posicion declarada por DESK_ROWS', async () => {
+    const desks = await withScene((scene) => {
       placeFurniture(scene, buildTerrainGrid());
-      return images(scene)
-        .filter((img) => img.texture.key === 'desk')
-        .map((img) => ({ x: img.x, y: img.y }));
+      // El `texture.key` de un TileSprite NO es la hoja de origen: Phaser
+      // renderiza el frame en un lienzo interno con nombre generado para poder
+      // repetirlo. Por eso aqui se comprueba geometria, no la clave.
+      return tileSprites(scene)
+        .filter((sprite) => sprite.width === 2 * TILE && sprite.height === 1 * TILE)
+        .map((sprite) => ({
+          x: sprite.x,
+          y: sprite.y,
+          tileScale: sprite.tileScaleX,
+        }));
     });
 
     const expectedDesks = DESK_ROWS.flatMap(([x, y, n]) =>
-      Array.from({ length: n }, (_, i) => ({ x: (x + i * 2) * TILE, y: y * TILE })),
+      Array.from({ length: n }, (_, i) => ({
+        x: (x + i * 2) * TILE,
+        y: y * TILE,
+        tileScale: 2,
+      })),
     );
-    expect(deskImages).toHaveLength(expectedDesks.length);
-    expect(deskImages).toEqual(expect.arrayContaining(expectedDesks));
+    expect(desks).toHaveLength(expectedDesks.length);
+    expect(desks).toEqual(expect.arrayContaining(expectedDesks));
+  });
+
+  it('las mesas de sala repiten el tile en vez de estirar uno solo', async () => {
+    const tables = await withScene((scene) => {
+      placeFurniture(scene, buildTerrainGrid());
+      return tileSprites(scene)
+        .filter((sprite) => sprite.width > 2 * TILE)
+        .map((sprite) => ({ w: sprite.width, h: sprite.height, tileScale: sprite.tileScaleX }));
+    });
+
+    // Estirar un tile de 16px a 7 tiles de ancho lo dejaria borroso; repetirlo
+    // mantiene el pixel art nitido. `tileScale` 2 hace que repita cada 32px.
+    expect(tables).toEqual(
+      expect.arrayContaining([
+        { w: 7 * TILE, h: 5 * TILE, tileScale: 2 },
+        { w: 5 * TILE, h: 3 * TILE, tileScale: 2 },
+      ]),
+    );
   });
 });
 
@@ -149,8 +204,11 @@ describe('placeNature', () => {
       const grid = buildTerrainGrid();
       placeFurniture(scene, grid);
       placeNature(scene, grid);
-      const treeImages = images(scene).filter((img) => img.texture.key === 'tree');
-      return { treeCount: treeImages.length, solid: grid.solid };
+      const trees = images(scene).filter((img) => {
+        const frame = frameOf(img);
+        return frame === TERRAIN.treeGreen || frame === TERRAIN.treeOrange;
+      });
+      return { treeCount: trees.length, solid: grid.solid };
     });
 
     expect(result.treeCount).toBe(TREES.length);
@@ -159,31 +217,34 @@ describe('placeNature', () => {
     }
   });
 
-  it('dispersa arbustos y flores de forma deterministica sin salir del mapa', async () => {
+  it('dispersa parcelas de flores de forma deterministica sin salir del mapa', async () => {
+    const flowerFrames = [TERRAIN.flowersOrange, TERRAIN.flowersWhite, TERRAIN.flowersBlue];
     const scattered = await withScene((scene) => {
       const grid = buildTerrainGrid();
       placeFurniture(scene, grid);
       placeNature(scene, grid);
       return images(scene)
-        .filter((img) => img.texture.key === 'bush' || img.texture.key === 'flower')
-        .map((img) => ({ x: img.x, y: img.y, key: img.texture.key }));
+        .filter((img) => flowerFrames.includes(frameOf(img) as never))
+        .map((img) => ({ x: img.x, y: img.y, frame: frameOf(img) }));
     });
 
     expect(scattered.length).toBeGreaterThan(0);
     expect(scattered.length).toBeLessThanOrEqual(90);
     for (const item of scattered) {
       expect(item.x).toBeGreaterThanOrEqual(TILE);
-      expect(item.x).toBeLessThanOrEqual((MAP_W - 2) * TILE + TILE);
+      expect(item.x).toBeLessThanOrEqual((MAP_W - 2) * TILE);
       expect(item.y).toBeGreaterThanOrEqual(TILE);
-      expect(item.y).toBeLessThanOrEqual((MAP_H - 2) * TILE + TILE);
+      expect(item.y).toBeLessThanOrEqual((MAP_H - 2) * TILE);
     }
 
-    // i=0 -> tile (6,12), G y libre -> primer bush; i=1 -> tile (19,41), G y libre -> primer flower.
-    expect(scattered.find((s) => s.x === 6 * TILE + 16 && s.y === 12 * TILE + 24)?.key).toBe(
-      'bush',
+    // i=0 -> tile (6,12), cesped libre; i=1 -> tile (19,41), tambien libre. Las
+    // flores del pack son tiles de suelo completos, asi que van alineadas a la
+    // rejilla, no centradas dentro de la tile como las calcomanias anteriores.
+    expect(scattered.find((s) => s.x === 6 * TILE && s.y === 12 * TILE)?.frame).toBe(
+      TERRAIN.flowersOrange,
     );
-    expect(scattered.find((s) => s.x === 19 * TILE + 16 && s.y === 41 * TILE + 24)?.key).toBe(
-      'flower',
+    expect(scattered.find((s) => s.x === 19 * TILE && s.y === 41 * TILE)?.frame).toBe(
+      TERRAIN.flowersWhite,
     );
   });
 });

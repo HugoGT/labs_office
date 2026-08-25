@@ -13,6 +13,8 @@ import Phaser from 'phaser';
 import { TILE, WORLD_H, WORLD_W } from './mapData';
 import { NPCS, STATUS_COLOR, STATUS_TXT, type NpcStatus } from './npcData';
 import type { OfficeBridge } from './officeBridge';
+import { DEFAULT_FACING, type Facing } from './officeProtocol';
+import { avatarTextureKey } from './textures';
 
 const LABEL_STYLE = {
   fontFamily: 'Cantarell, Noto Sans, DejaVu Sans, Segoe UI, sans-serif',
@@ -25,6 +27,11 @@ const LABEL_STYLE = {
 export interface CharacterContainer extends Phaser.GameObjects.Container {
   ring: Phaser.GameObjects.Ellipse;
   nameText: string;
+  /** Sprite del cuerpo, expuesto para poder cambiarle la orientacion. */
+  sprite: Phaser.GameObjects.Sprite;
+  /** Clave base (`av3`), sin el sufijo de orientacion. */
+  baseTexture: string;
+  facing: Facing;
 }
 
 /** Contenedor de NPC: agrega la metadata de roster que usan el clic y la llamada. */
@@ -63,7 +70,7 @@ export function makeCharacter(
   const py = ty * TILE + 16;
 
   const ring = scene.add.ellipse(0, 18, 34, 14).setStrokeStyle(2.5, 0x22c55e).setVisible(false);
-  const spr = scene.add.sprite(0, 0, texKey).setScale(2);
+  const spr = scene.add.sprite(0, 0, avatarTextureKey(texKey, DEFAULT_FACING)).setScale(2);
 
   const label = scene.add.text(0, 0, name, LABEL_STYLE).setOrigin(0, 0.5);
   const pillW = label.width + 24;
@@ -84,7 +91,22 @@ export function makeCharacter(
   container.setSize(32, 44);
   container.ring = ring;
   container.nameText = name;
+  container.sprite = spr;
+  container.baseTexture = texKey;
+  container.facing = DEFAULT_FACING;
   return container;
+}
+
+/**
+ * Cambia la orientacion visible de un personaje. Sale pronto si no cambia
+ * nada: se llama en cada frame para el jugador local y en cada mensaje para
+ * los remotos, y reasignar la misma textura 60 veces por segundo es trabajo
+ * tirado.
+ */
+export function setCharacterFacing(character: CharacterContainer, facing: Facing): void {
+  if (character.facing === facing) return;
+  character.facing = facing;
+  character.sprite.setTexture(avatarTextureKey(character.baseTexture, facing));
 }
 
 /**

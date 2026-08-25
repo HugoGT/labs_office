@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { GROUND, GROUND_TEX, TILE } from './mapData';
-import { AVATAR_KEYS, PLAYER_TEXTURE, createOfficeTextures } from './textures';
+import { FACINGS } from './officeProtocol';
+import { AVATAR_KEYS, PLAYER_TEXTURE, avatarTextureKey, createOfficeTextures } from './textures';
 
 /**
  * Capa navegador: `Graphics#generateTexture` necesita un contexto WebGL/canvas
@@ -52,39 +52,63 @@ async function withScene<T>(run: (scene: Phaser.Scene) => T): Promise<T> {
 }
 
 describe('createOfficeTextures', () => {
-  it('genera las 8 claves de textura de suelo declaradas en GROUND_TEX', async () => {
+  it('genera las cuatro orientaciones de cada avatar y del jugador', async () => {
     const exists = await withScene((scene) => {
       createOfficeTextures(scene);
-      return GROUND_TEX.map((key) => scene.textures.exists(key));
-    });
-
-    expect(exists).toEqual(GROUND_TEX.map(() => true));
-    expect(GROUND_TEX).toHaveLength(8);
-  });
-
-  it('grassA mide 32x32 (TILE), igual que el resto de tiles de suelo', async () => {
-    const size = await withScene((scene) => {
-      createOfficeTextures(scene);
-      const frame = scene.textures.get('grassA').getSourceImage();
-      return { width: frame.width, height: frame.height };
-    });
-
-    expect(size).toEqual({ width: TILE, height: TILE });
-    expect(GROUND_TEX[GROUND.G]).toBe('grassA');
-  });
-
-  it('genera 10 claves de avatar (AVATAR_KEYS) mas la textura del jugador (PLAYER_TEXTURE)', async () => {
-    const exists = await withScene((scene) => {
-      createOfficeTextures(scene);
-      return {
-        avatars: AVATAR_KEYS.map((key) => scene.textures.exists(key)),
-        player: scene.textures.exists(PLAYER_TEXTURE),
-      };
+      const bases = [...AVATAR_KEYS, PLAYER_TEXTURE];
+      return bases.flatMap((base) =>
+        FACINGS.map((facing) => ({
+          key: avatarTextureKey(base, facing),
+          present: scene.textures.exists(avatarTextureKey(base, facing)),
+        })),
+      );
     });
 
     expect(AVATAR_KEYS).toHaveLength(10);
-    expect(exists.avatars).toEqual(AVATAR_KEYS.map(() => true));
-    expect(exists.player).toBe(true);
-    expect(PLAYER_TEXTURE).toBe('avP');
+    expect(exists).toHaveLength(11 * 4);
+    expect(exists.filter((e) => !e.present)).toEqual([]);
+  });
+
+  it('ya no genera texturas de mapa: eso lo cubren las hojas Kenney', async () => {
+    const leftovers = await withScene((scene) => {
+      createOfficeTextures(scene);
+      // Claves del generador procedural anterior. Si alguna reaparece, hay dos
+      // fuentes de verdad para el mismo material.
+      return ['grassA', 'grassB', 'water', 'wall', 'desk', 'tree', 'tableGray'].filter((key) =>
+        scene.textures.exists(key),
+      );
+    });
+
+    expect(leftovers).toEqual([]);
+  });
+
+  it('las orientaciones de un mismo avatar son imagenes distintas', async () => {
+    const sizes = await withScene((scene) => {
+      createOfficeTextures(scene);
+      return FACINGS.map((facing) => {
+        const image = scene.textures.get(avatarTextureKey('av0', facing)).getSourceImage();
+        return { w: image.width, h: image.height };
+      });
+    });
+
+    // Mismo lienzo de 16x20 para las cuatro: lo que cambia es el dibujo, no el
+    // tamaño, o el personaje daria un salto al girarse.
+    for (const size of sizes) expect(size).toEqual({ w: 16, h: 20 });
+  });
+
+  it('de espaldas no se dibujan ojos', async () => {
+    const pixels = await withScene((scene) => {
+      createOfficeTextures(scene);
+      // (6,5) es la posicion del ojo izquierdo mirando de frente.
+      const read = (facing: 'down' | 'up') =>
+        scene.textures.getPixel(6, 5, avatarTextureKey('av0', facing));
+      return { down: read('down'), up: read('up') };
+    });
+
+    // Mirando de frente ese pixel es el ojo (casi negro); de espaldas no puede
+    // serlo, porque ahi va la nuca cubierta de pelo.
+    expect(pixels.down).not.toBeNull();
+    expect(pixels.up).not.toBeNull();
+    expect(pixels.up?.color).not.toBe(pixels.down?.color);
   });
 });

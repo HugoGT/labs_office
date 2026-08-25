@@ -3,112 +3,156 @@
  * `renderGround`/`placeFurniture`/`placeNature`/`placeZoneLabels`
  * (`prototype/js/app.js:255-322`). Depende de Phaser en tiempo de ejecucion
  * (`scene.add.image`/`scene.add.text`): se prueba en la capa navegador.
+ *
+ * Los materiales ya no son texturas generadas por codigo sino frames de las
+ * hojas Kenney (CC0, ver `assets.ts`). El mobiliario que ocupa varias tiles se
+ * dibuja con `tileSprite`, que REPITE el tile de 16px, en vez de estirar uno
+ * solo: estirar un escritorio a 7 tiles de ancho lo deja borroso.
  */
 
 import type Phaser from 'phaser';
-import { DESK_ROWS, GROUND, GROUND_TEX, MAP_H, MAP_W, TILE, TREES, ZONE_LABELS } from './mapData';
+import {
+  ASSET_SCALE,
+  GROUND_FRAMES,
+  INDOOR,
+  INDOOR_SHEET,
+  TERRAIN,
+  TERRAIN_SHEET,
+} from './assets';
+import { DESK_ROWS, GROUND, MAP_H, MAP_W, TILE, TREES, ZONE_LABELS } from './mapData';
 import { markSolid, type TerrainGrid } from './terrainGrid';
 
-/** Pinta el suelo tile por tile; el cesped llano alterna grassA/grassB por fila (app.js:255-262). */
+/** Coloca un tile suelto de una hoja, alineado a la rejilla del mundo. */
+function putTile(
+  scene: Phaser.Scene,
+  sheet: string,
+  frame: number,
+  tx: number,
+  ty: number,
+  depth: number,
+): Phaser.GameObjects.Image {
+  return scene.add
+    .image(tx * TILE, ty * TILE, sheet, frame)
+    .setOrigin(0)
+    .setScale(ASSET_SCALE)
+    .setDepth(depth);
+}
+
+/**
+ * Cubre un rectangulo de tiles repitiendo un frame. `tileScale` va a
+ * `ASSET_SCALE` para que el patron se repita cada 32px del mundo y no cada 16.
+ */
+function putTiledArea(
+  scene: Phaser.Scene,
+  sheet: string,
+  frame: number,
+  tx: number,
+  ty: number,
+  tilesWide: number,
+  tilesHigh: number,
+  depth: number,
+): Phaser.GameObjects.TileSprite {
+  const sprite = scene.add
+    .tileSprite(tx * TILE, ty * TILE, tilesWide * TILE, tilesHigh * TILE, sheet, frame)
+    .setOrigin(0)
+    .setDepth(depth);
+  sprite.tileScaleX = ASSET_SCALE;
+  sprite.tileScaleY = ASSET_SCALE;
+  return sprite;
+}
+
+/** Pinta el suelo tile por tile; el cesped llano alterna por fila (app.js:255-262). */
 export function renderGround(scene: Phaser.Scene, grid: TerrainGrid): void {
   for (let y = 0; y < MAP_H; y++) {
     for (let x = 0; x < MAP_W; x++) {
       const code = grid.ground[y][x];
-      const key = code === GROUND.G ? (y % 2 === 0 ? 'grassA' : 'grassB') : GROUND_TEX[code];
-      scene.add.image(x * TILE, y * TILE, key).setOrigin(0).setDepth(0);
+      const frame =
+        code === GROUND.G
+          ? y % 2 === 0
+            ? TERRAIN.grass
+            : TERRAIN.grassAlt
+          : GROUND_FRAMES[code];
+      putTile(scene, TERRAIN_SHEET, frame, x, y, 0);
     }
   }
 }
 
 /**
- * Coloca escritorios, mesas, sillas, taburetes y barriles (app.js:264-297).
- * Marca solidas las tiles de escritorios, mesas y barriles vía `markSolid`
- * *antes* de que `OfficeScene` fusione colisiones (D6) — las sillas y
- * taburetes son puramente decorativos en el prototipo y nunca se marcan
- * solidos.
+ * Coloca escritorios, mesas, sillas y plantas (app.js:264-297). Marca solidas
+ * las tiles de escritorios y mesas vía `markSolid` *antes* de que
+ * `OfficeScene` fusione colisiones (D6) — las sillas y plantas son
+ * decorativas y nunca se marcan solidas, igual que en el prototipo.
  */
 export function placeFurniture(scene: Phaser.Scene, grid: TerrainGrid): void {
   for (const [x, y, n] of DESK_ROWS) {
     for (let i = 0; i < n; i++) {
       const tx = x + i * 2;
-      scene.add.image(tx * TILE, y * TILE, 'desk').setOrigin(0).setDepth((y + 1) * TILE);
+      // Alterna los dos frentes de escritorio del pack para que una fila de
+      // seis no se vea como el mismo mueble clonado.
+      const frame = i % 2 === 0 ? INDOOR.desk : INDOOR.deskAlt;
+      putTiledArea(scene, INDOOR_SHEET, frame, tx, y, 2, 1, (y + 1) * TILE);
       markSolid(grid.solid, tx, y, 2, 1);
     }
   }
 
-  // Sala de Juntas: mesa gris + sillas azules.
-  scene.add.image(53 * TILE, 6 * TILE, 'tableGray').setOrigin(0).setDepth(11 * TILE);
+  // Sala de Juntas: mesa larga + sillas alrededor.
+  putTiledArea(scene, INDOOR_SHEET, INDOOR.tableTop, 53, 6, 7, 5, 11 * TILE);
   markSolid(grid.solid, 53, 6, 7, 5);
   for (let i = 0; i < 7; i++) {
-    scene.add
-      .image((53 + i) * TILE + 16, 5 * TILE + 16, 'chairB')
-      .setScale(1.5)
-      .setDepth(6 * TILE);
-    scene.add
-      .image((53 + i) * TILE + 16, 11 * TILE + 16, 'chairB')
-      .setScale(1.5)
-      .setDepth(12 * TILE);
+    putTile(scene, INDOOR_SHEET, INDOOR.chairBack, 53 + i, 5, 6 * TILE);
+    putTile(scene, INDOOR_SHEET, INDOOR.chair, 53 + i, 11, 12 * TILE);
   }
   for (let j = 0; j < 5; j++) {
-    scene.add
-      .image(52 * TILE + 16, (6 + j) * TILE + 16, 'chairB')
-      .setScale(1.5)
-      .setDepth((7 + j) * TILE);
-    scene.add
-      .image(60 * TILE + 16, (6 + j) * TILE + 16, 'chairB')
-      .setScale(1.5)
-      .setDepth((7 + j) * TILE);
+    putTile(scene, INDOOR_SHEET, INDOOR.chairWhite, 52, 6 + j, (7 + j) * TILE);
+    putTile(scene, INDOOR_SHEET, INDOOR.chairWhite, 60, 6 + j, (7 + j) * TILE);
   }
 
-  // Cafeteria: mesa de madera + bancos + barriles.
-  scene.add.image(53 * TILE, 23 * TILE, 'tableWood').setOrigin(0).setDepth(26 * TILE);
+  // Cafeteria: mesa de madera + asientos + plantas en las esquinas.
+  putTiledArea(scene, INDOOR_SHEET, INDOOR.tableTop, 53, 23, 5, 3, 26 * TILE);
   markSolid(grid.solid, 53, 23, 5, 3);
   for (let i = 0; i < 5; i++) {
-    scene.add
-      .image((53 + i) * TILE + 16, 22 * TILE + 16, 'stool')
-      .setScale(1.6)
-      .setDepth(23 * TILE);
-    scene.add
-      .image((53 + i) * TILE + 16, 26 * TILE + 16, 'stool')
-      .setScale(1.6)
-      .setDepth(27 * TILE);
+    putTile(scene, INDOOR_SHEET, INDOOR.chairBack, 53 + i, 22, 23 * TILE);
+    putTile(scene, INDOOR_SHEET, INDOOR.chair, 53 + i, 26, 27 * TILE);
   }
-  const barrels: readonly (readonly [number, number])[] = [
+  const plants: readonly (readonly [number, number])[] = [
     [51, 19],
     [61, 19],
     [51, 30],
     [61, 30],
   ];
-  for (const [bx, by] of barrels) {
-    scene.add
-      .image(bx * TILE + 16, (by + 1) * TILE, 'barrel')
-      .setOrigin(0.5, 1)
-      .setScale(1.4)
-      .setDepth((by + 1) * TILE);
-    markSolid(grid.solid, bx, by, 1, 1);
+  for (const [px, py] of plants) {
+    putTile(scene, INDOOR_SHEET, INDOOR.plant, px, py, (py + 1) * TILE);
+    markSolid(grid.solid, px, py, 1, 1);
   }
 }
 
 /**
- * Coloca arboles (app.js:299-305, marcan su tile solida) y dispersa
- * arbustos/flores de forma deterministica evitando tiles solidas o de agua
- * (app.js:306-312).
+ * Coloca arboles (app.js:299-305, marcan su tile solida) y esparce parcelas de
+ * flores de forma deterministica evitando tiles solidas o que no sean cesped
+ * llano (app.js:306-312).
+ *
+ * Las flores del pack son tiles de suelo completos, no calcomanias con
+ * transparencia: se pintan encima del cesped, no junto a el.
  */
 export function placeNature(scene: Phaser.Scene, grid: TerrainGrid): void {
-  for (const [x, y] of TREES) {
+  TREES.forEach(([x, y], i) => {
+    const frame = i % 4 === 3 ? TERRAIN.treeOrange : TERRAIN.treeGreen;
     scene.add
-      .image((x + 0.5) * TILE, (y + 1) * TILE + 4, 'tree')
+      .image((x + 0.5) * TILE, (y + 1) * TILE, TERRAIN_SHEET, frame)
       .setOrigin(0.5, 1)
+      // Los arboles van a 1.5x el tile: a escala 1:1 con el suelo se perderian
+      // entre el cesped en vez de leerse como volumen.
+      .setScale(ASSET_SCALE * 1.5)
       .setDepth((y + 1) * TILE);
     markSolid(grid.solid, x, y, 1, 1);
-  }
+  });
 
+  const flowerFrames = [TERRAIN.flowersOrange, TERRAIN.flowersWhite, TERRAIN.flowersBlue];
   for (let i = 0; i < 90; i++) {
     const x = 1 + ((i * 13 + 5) % 46);
     const y = 1 + ((i * 29 + 11) % 41);
     if (grid.solid[y][x] || grid.ground[y][x] !== GROUND.G) continue;
-    const key = i % 3 === 0 ? 'bush' : 'flower';
-    scene.add.image(x * TILE + 16, y * TILE + 24, key).setDepth(1);
+    putTile(scene, TERRAIN_SHEET, flowerFrames[i % flowerFrames.length], x, y, 1);
   }
 }
 
