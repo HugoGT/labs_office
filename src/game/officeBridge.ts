@@ -22,6 +22,7 @@ export interface OfficeEventMap {
 
 export interface OfficeCommandMap {
   teleportTo: { npcId: number };
+  callNpc: { npcId: number };
 }
 
 export interface OfficeBridge {
@@ -32,6 +33,7 @@ export interface OfficeBridge {
     handler: (payload: OfficeCommandMap[K]) => void,
   ): () => void;
   teleportTo(npcId: number): void;
+  callNpc(npcId: number): void;
 }
 
 export function createOfficeBridge(): OfficeBridge {
@@ -60,6 +62,9 @@ export function createOfficeBridge(): OfficeBridge {
     },
     teleportTo(npcId) {
       commands.dispatchEvent(new CustomEvent('teleportTo', { detail: { npcId } }));
+    },
+    callNpc(npcId) {
+      commands.dispatchEvent(new CustomEvent('callNpc', { detail: { npcId } }));
     },
   };
 }

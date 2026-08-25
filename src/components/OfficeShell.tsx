@@ -48,13 +48,19 @@ export function OfficeShell() {
     return () => clearTimeout(timer);
   }, [toastMessage]);
 
-  /** Acciones del menu contextual (`app.js:474-486,602-604`): solo `goto` mueve al jugador. */
+  /**
+   * Acciones del menu contextual (`app.js:474-486,602-604`). `call` y `goto`
+   * son opuestos y conviene no confundirlos: `call` trae al NPC hasta ti,
+   * `goto` te lleva a ti hasta su escritorio.
+   */
   function handleMenuAction(action: NpcMenuAction, target: OfficeEventMap['npcmenu']): void {
     closeMenu();
     if (action === 'call') {
+      bridge.callNpc(target.id);
       setToastMessage(
         <>
-          📞 Llamando a <b>{target.name}</b>… (prototipo: la videollamada 1:1 llegará con LiveKit)
+          📞 <b>{target.name}</b> viene hacia ti… (prototipo: la videollamada 1:1 llegará con
+          LiveKit)
         </>,
       );
     } else if (action === 'goto') {

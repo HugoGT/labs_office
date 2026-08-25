@@ -337,3 +337,80 @@ describe('OfficeScene: comando teleportTo via el puente (app.js:474-486, D2)', (
     expect(player.y).toBe(beforeY);
   });
 });
+
+describe('OfficeScene: comando callNpc via el puente (el NPC acude a la llamada)', () => {
+  it('el NPC llamado camina hasta una tile adyacente al jugador', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const player = findPlayer(scene);
+    const npc = findNpcs(scene)[0];
+    // El NPC 0 nace en (4,7) y el jugador en (22,28): arrancan lejos.
+    const startDistance = Phaser.Math.Distance.Between(player.x, player.y, npc.x, npc.y);
+    expect(startDistance).toBeGreaterThan(PROX_RADIUS);
+
+    bridge.callNpc(npc.npcId);
+
+    await vi.waitFor(
+      () => {
+        const dx = Math.abs(npc.x - player.x) / TILE;
+        const dy = Math.abs(npc.y - player.y) / TILE;
+        expect(dx).toBeLessThanOrEqual(1);
+        expect(dy).toBeLessThanOrEqual(1);
+        // Queda *junto al* jugador, no encima de el.
+        expect(dx + dy).toBeGreaterThan(0);
+      },
+      { timeout: 15000 },
+    );
+  }, 20000);
+
+  it('llamar a un NPC mueve al NPC, no al jugador (al reves que teleportTo)', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const player = findPlayer(scene);
+    const npc = findNpcs(scene)[0];
+    const playerX = player.x;
+    const playerY = player.y;
+    const npcX = npc.x;
+
+    bridge.callNpc(npc.npcId);
+    await vi.waitFor(() => expect(npc.x).not.toBe(npcX), { timeout: 5000 });
+
+    expect(player.x).toBe(playerX);
+    expect(player.y).toBe(playerY);
+  }, 10000);
+
+  it('un NPC quieto no se mueve solo: sin llamada no hay desplazamiento', async () => {
+    const { scene } = await bootOfficeScene();
+    const npcs = findNpcs(scene);
+    const before = npcs.map((c) => ({ x: c.x, y: c.y }));
+
+    // Antes, los tres NPCs con `wander:true` se reprogramaban cada 2.5-6s. Esta
+    // ventana cubre de sobra ese peor caso: si alguien resucita el bucle, cae aqui.
+    await new Promise((resolve) => setTimeout(resolve, 7000));
+
+    npcs.forEach((c, i) => {
+      expect({ x: c.x, y: c.y }).toEqual(before[i]);
+    });
+  }, 15000);
+
+  it('desuscribe el handler de callNpc al apagar la escena (SHUTDOWN, D2)', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const npc = findNpcs(scene)[0];
+
+    bridge.callNpc(npc.npcId);
+    // `walkNpcTo` crea el tween de forma sincrona, asi que basta con mirarlo.
+    expect(npc.walkTween).toBeDefined();
+    npc.walkTween?.stop();
+    npc.walkTween = undefined;
+
+    scene.sys.events.emit(Phaser.Scenes.Events.SHUTDOWN);
+    bridge.callNpc(npc.npcId);
+
+    // Se comprueba sin esperar a proposito: tras un SHUTDOWN emitido a mano el
+    // bucle del juego sigue pisando `update()` con el jugador ya desmontado, y
+    // dormir aqui solo probaria ese artefacto del arnes, no la desuscripcion.
+    expect(npc.walkTween).toBeUndefined();
+  });
+});
+

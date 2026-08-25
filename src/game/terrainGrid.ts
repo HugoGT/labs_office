@@ -109,3 +109,43 @@ export function isBlocked(grid: TerrainGrid, tx: number, ty: number): boolean {
   if (tx < 1 || ty < 1 || tx > MAP_W - 2 || ty > MAP_H - 2) return true;
   return grid.solid[ty][tx] || grid.ground[ty][tx] === GROUND.WATER;
 }
+
+/**
+ * Orden en que se prueban los vecinos al buscar una tile libre junto a otra.
+ * Vivia dentro de `OfficeScene` como `TELEPORT_OFFSETS` (app.js:477), pero el
+ * mismo recorrido lo necesitan ahora las dos direcciones: el jugador yendo al
+ * escritorio de un NPC y el NPC acudiendo a una llamada. Vive aqui, junto al
+ * predicado de bloqueo que consulta.
+ */
+export const ADJACENT_OFFSETS: readonly (readonly [number, number])[] = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [1, 1],
+  [-1, 1],
+];
+
+export interface TileCoord {
+  tx: number;
+  ty: number;
+}
+
+/**
+ * Primera tile libre adyacente a `(tx, ty)` siguiendo `ADJACENT_OFFSETS`, o
+ * `null` si todas estan bloqueadas. Ningun offset es `[0,0]`, asi que nunca
+ * devuelve la propia tile objetivo: el destino siempre es *junto a*, no
+ * *encima de*.
+ */
+export function findFreeAdjacentTile(
+  grid: TerrainGrid,
+  tx: number,
+  ty: number,
+): TileCoord | null {
+  for (const [dx, dy] of ADJACENT_OFFSETS) {
+    const nx = tx + dx;
+    const ny = ty + dy;
+    if (!isBlocked(grid, nx, ny)) return { tx: nx, ty: ny };
+  }
+  return null;
+}

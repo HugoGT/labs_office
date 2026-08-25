@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { GROUND, MAP_H, MAP_W, ROOMS, TILE } from './mapData';
-import { buildTerrainGrid, isBlocked, markSolid } from './terrainGrid';
+import {
+  ADJACENT_OFFSETS,
+  buildTerrainGrid,
+  findFreeAdjacentTile,
+  isBlocked,
+  markSolid,
+} from './terrainGrid';
 
 describe('buildTerrainGrid', () => {
   it('tiene las dimensiones declaradas y todo el borde exterior es seto solido (app.js:217-231)', () => {
@@ -144,5 +150,39 @@ describe('isBlocked', () => {
     expect(isBlocked(grid, MAP_W - 1, 20)).toBe(true);
     expect(isBlocked(grid, 20, 0)).toBe(true);
     expect(isBlocked(grid, 20, MAP_H - 1)).toBe(true);
+  });
+});
+
+describe('findFreeAdjacentTile', () => {
+  it('devuelve la primera tile libre siguiendo ADJACENT_OFFSETS en orden', () => {
+    const grid = buildTerrainGrid();
+
+    // (6,26) es cesped libre; su primer offset [1,0] apunta a (7,26), tambien libre.
+    expect(findFreeAdjacentTile(grid, 6, 26)).toEqual({ tx: 7, ty: 26 });
+    expect(ADJACENT_OFFSETS[0]).toEqual([1, 0]);
+  });
+
+  it('salta los offsets bloqueados en vez de rendirse en el primero', () => {
+    const grid = buildTerrainGrid();
+    // Bloquea a mano el vecino [1,0] de (6,26): debe caer al siguiente offset [-1,0].
+    grid.solid[26][7] = true;
+
+    expect(findFreeAdjacentTile(grid, 6, 26)).toEqual({ tx: 5, ty: 26 });
+  });
+
+  it('devuelve null cuando ningun vecino esta libre', () => {
+    const grid = buildTerrainGrid();
+    for (const [dx, dy] of ADJACENT_OFFSETS) {
+      grid.solid[26 + dy][6 + dx] = true;
+    }
+
+    expect(findFreeAdjacentTile(grid, 6, 26)).toBeNull();
+  });
+
+  it('nunca devuelve la propia tile objetivo', () => {
+    const grid = buildTerrainGrid();
+
+    const found = findFreeAdjacentTile(grid, 6, 26);
+    expect(found).not.toEqual({ tx: 6, ty: 26 });
   });
 });

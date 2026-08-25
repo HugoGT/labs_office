@@ -1,16 +1,18 @@
 /**
- * Fabrica de personajes: NPCs, jugador y su comportamiento de deambular,
- * portados de `makeCharacter`, `spawnNPCs`, `scheduleWander` y `spawnPlayer`
+ * Fabrica de personajes: NPCs, jugador y la caminata de los NPCs simulados,
+ * portados de `makeCharacter`, `spawnNPCs` y `spawnPlayer`
  * (`prototype/js/app.js:325-390`). Depende de Phaser (`scene.add.container`,
- * `scene.physics`, `scene.time`, `scene.tweens`): se prueba en la capa
- * navegador.
+ * `scene.physics`, `scene.tweens`): se prueba en la capa navegador.
+ *
+ * `scheduleWander` del prototipo se retiro: los NPCs ya no deambulan por su
+ * cuenta. Se quedan en su escritorio para que la oficina no se vea vacia y
+ * solo se mueven cuando se les llama, via `walkNpcTo`.
  */
 
 import Phaser from 'phaser';
 import { TILE, WORLD_H, WORLD_W } from './mapData';
 import { NPCS, STATUS_COLOR, STATUS_TXT, type NpcStatus } from './npcData';
 import type { OfficeBridge } from './officeBridge';
-import { isBlocked, type TerrainGrid } from './terrainGrid';
 
 const LABEL_STYLE = {
   fontFamily: 'Cantarell, Noto Sans, DejaVu Sans, Segoe UI, sans-serif',
@@ -25,14 +27,23 @@ export interface CharacterContainer extends Phaser.GameObjects.Container {
   nameText: string;
 }
 
-/** Contenedor de NPC: agrega metadata de roster necesaria para clic y wander. */
+/** Contenedor de NPC: agrega la metadata de roster que usan el clic y la llamada. */
 export interface NpcContainer extends CharacterContainer {
   npcId: number;
   status: NpcStatus;
   homeTx: number;
   homeTy: number;
   phase: number;
+  /** Caminata en curso, si la hay. Se cancela al recibir una llamada nueva. */
+  walkTween?: Phaser.Tweens.Tween;
 }
+
+/**
+ * Ritmo de caminata de un NPC llamado. La duracion se deriva de la distancia
+ * (no es fija) para que la velocidad aparente sea la misma tanto si cruza la
+ * oficina como si da un paso.
+ */
+export const NPC_WALK_MS_PER_TILE = 260;
 
 const PLAYER_NAME = 'HugoGT';
 const PLAYER_SPAWN_TX = 22;
@@ -77,15 +88,11 @@ export function makeCharacter(
 }
 
 /**
- * Crea los NPCs del roster, cablea clic -> `bridge.emit('npcmenu')` (en vez
- * de `document.dispatchEvent`, D1) y programa wander para los flagged
- * (app.js:349-368).
+ * Crea los NPCs del roster y cablea clic -> `bridge.emit('npcmenu')` (en vez
+ * de `document.dispatchEvent`, D1). Ya no programa temporizadores: el unico
+ * comportamiento de un NPC es reactivo (`walkNpcTo` al ser llamado).
  */
-export function spawnNpcs(
-  scene: Phaser.Scene,
-  grid: TerrainGrid,
-  bridge: OfficeBridge,
-): NpcContainer[] {
+export function spawnNpcs(scene: Phaser.Scene, bridge: OfficeBridge): NpcContainer[] {
   return NPCS.map((npc, i) => {
     const c = makeCharacter(
       scene,
@@ -113,35 +120,41 @@ export function spawnNpcs(
       });
     });
 
-    if (npc.wander) scheduleWander(scene, grid, c);
     return c;
   });
 }
 
 /**
- * Reprograma un destino aleatorio dentro de bordes validos cada 2.5-6s
- * (app.js:370-382). Reusa `isBlocked` (D6) en vez de duplicar el predicado
- * solido-o-agua-o-fuera-de-rango.
+ * Camina al NPC hasta el centro de la tile `(tx, ty)`. Cancela cualquier
+ * caminata en curso: sin eso, dos llamadas seguidas dejarian dos tweens
+ * peleando por `x`/`y` del mismo contenedor y el NPC vibraria entre destinos.
+ *
+ * Quien llama elige la tile (ver `findFreeAdjacentTile`); aqui solo se anima.
  */
-export function scheduleWander(scene: Phaser.Scene, grid: TerrainGrid, c: NpcContainer): void {
-  scene.time.addEvent({
-    delay: Phaser.Math.Between(2500, 6000),
-    loop: true,
-    callback: () => {
-      const dx = Phaser.Math.Between(-2, 2);
-      const dy = Phaser.Math.Between(-2, 2);
-      const nx = c.homeTx + dx;
-      const ny = c.homeTy + dy;
-      if (isBlocked(grid, nx, ny)) return;
-      scene.tweens.add({
-        targets: c,
-        x: nx * TILE + 16,
-        y: ny * TILE + 16,
-        duration: 900,
-        ease: 'Sine.inOut',
-      });
+export function walkNpcTo(
+  scene: Phaser.Scene,
+  npc: NpcContainer,
+  tx: number,
+  ty: number,
+): Phaser.Tweens.Tween {
+  const x = tx * TILE + 16;
+  const y = ty * TILE + 16;
+
+  npc.walkTween?.stop();
+
+  const tiles = Math.hypot(x - npc.x, y - npc.y) / TILE;
+  const tween = scene.tweens.add({
+    targets: npc,
+    x,
+    y,
+    duration: Math.max(NPC_WALK_MS_PER_TILE, tiles * NPC_WALK_MS_PER_TILE),
+    ease: 'Sine.inOut',
+    onComplete: () => {
+      npc.walkTween = undefined;
     },
   });
+  npc.walkTween = tween;
+  return tween;
 }
 
 /** Crea al jugador con cuerpo fisico y limites de mundo (app.js:384-390). */

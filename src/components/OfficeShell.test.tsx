@@ -24,6 +24,7 @@ describe('OfficeShell', () => {
         emit: expect.any(Function),
         onCommand: expect.any(Function),
         teleportTo: expect.any(Function),
+        callNpc: expect.any(Function),
       }),
     );
   });
@@ -163,18 +164,23 @@ describe('OfficeShell', () => {
     expect(screen.getByText(/Te teletransportaste junto a/)).toBeInTheDocument();
   });
 
-  it('"Llamar" muestra un toast y cierra el menu sin teletransportar', async () => {
+  it('"Llamar" pide al NPC que venga via bridge.callNpc, sin mover al jugador', async () => {
     const user = userEvent.setup();
     render(<OfficeShell />);
     const bridge = createGameMock.mock.calls[0][1];
     const teleportSpy = vi.spyOn(bridge, 'teleportTo');
+    const callSpy = vi.spyOn(bridge, 'callNpc');
 
     act(() =>
       bridge.emit('npcmenu', { id: 3, name: 'Pablo', status: 'Disponible', statusCode: 'g', x: 10, y: 10 }),
     );
     await user.click(screen.getByRole('button', { name: /Llamar/ }));
 
+    // Llamar y "Ir a su escritorio" son opuestos: uno trae al NPC, el otro
+    // lleva al jugador. Confundirlos es el error facil aqui.
+    expect(callSpy).toHaveBeenCalledWith(3);
     expect(teleportSpy).not.toHaveBeenCalled();
-    expect(screen.getByText(/Llamando a/)).toBeInTheDocument();
+    expect(screen.getByText(/viene hacia ti/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Llamar/ })).not.toBeInTheDocument();
   });
 });

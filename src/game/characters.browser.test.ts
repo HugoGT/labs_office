@@ -1,16 +1,16 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  NPC_WALK_MS_PER_TILE,
   makeCharacter,
-  scheduleWander,
   spawnNpcs,
   spawnPlayer,
+  walkNpcTo,
   type NpcContainer,
 } from './characters';
 import { TILE } from './mapData';
 import { NPCS, STATUS_COLOR } from './npcData';
 import { createOfficeBridge, type OfficeEventMap } from './officeBridge';
-import { buildTerrainGrid } from './terrainGrid';
 import { createOfficeTextures } from './textures';
 
 /**
@@ -65,9 +65,8 @@ async function withScene<T>(run: (scene: Phaser.Scene) => T): Promise<T> {
 describe('spawnNpcs', () => {
   it('crea un contenedor por cada NPC del roster, posicionado en su tile declarada', async () => {
     const list = await withScene((scene) => {
-      const grid = buildTerrainGrid();
       const bridge = createOfficeBridge();
-      return spawnNpcs(scene, grid, bridge).map((c) => ({ x: c.x, y: c.y }));
+      return spawnNpcs(scene, bridge).map((c) => ({ x: c.x, y: c.y }));
     });
 
     expect(list).toHaveLength(NPCS.length);
@@ -82,9 +81,8 @@ describe('spawnNpcs', () => {
     // siguiente test) sino el `dot` de la pildora de nombre. La fuente
     // (app.js:327,338) es inequivoca: solo `dot` recibe `statusColor`.
     const dotColors = await withScene((scene) => {
-      const grid = buildTerrainGrid();
       const bridge = createOfficeBridge();
-      return spawnNpcs(scene, grid, bridge).map((c) => {
+      return spawnNpcs(scene, bridge).map((c) => {
         const dot = c.list[3] as Phaser.GameObjects.Arc;
         return dot.fillColor;
       });
@@ -100,9 +98,8 @@ describe('spawnNpcs', () => {
 
   it('el anillo de habla siempre usa el mismo color fijo, no el color de estado (app.js:327)', async () => {
     const ringColors = await withScene((scene) => {
-      const grid = buildTerrainGrid();
       const bridge = createOfficeBridge();
-      return spawnNpcs(scene, grid, bridge).map((c) => c.ring.strokeColor);
+      return spawnNpcs(scene, bridge).map((c) => c.ring.strokeColor);
     });
 
     expect(new Set(ringColors).size).toBe(1);
@@ -111,9 +108,8 @@ describe('spawnNpcs', () => {
 
   it('el anillo de habla nace invisible: solo lo enciende la proximidad (app.js:327)', async () => {
     const ringsVisible = await withScene((scene) => {
-      const grid = buildTerrainGrid();
       const bridge = createOfficeBridge();
-      return spawnNpcs(scene, grid, bridge).map((c) => c.ring.visible);
+      return spawnNpcs(scene, bridge).map((c) => c.ring.visible);
     });
 
     // `setVisible(false)` al construir: sin esto la oficina arrancaria con los 33
@@ -122,13 +118,25 @@ describe('spawnNpcs', () => {
     expect(ringsVisible.every((v) => v === false)).toBe(true);
   });
 
+  it('no programa ningun temporizador: los NPCs simulados ya no deambulan solos', async () => {
+    const scheduledCount = await withScene((scene) => {
+      const bridge = createOfficeBridge();
+      const addEventSpy = vi.spyOn(scene.time, 'addEvent');
+      spawnNpcs(scene, bridge);
+      return addEventSpy.mock.calls.length;
+    });
+
+    // Antes eran 3 (los `wander:true` del roster). Su unico comportamiento
+    // ahora es acudir a una llamada, que es reactivo, no periodico.
+    expect(scheduledCount).toBe(0);
+  });
+
   it('al hacer clic en un NPC, emite npcmenu por el bridge con sus datos', async () => {
     const received: OfficeEventMap['npcmenu'][] = [];
     const target = await withScene((scene) => {
-      const grid = buildTerrainGrid();
       const bridge = createOfficeBridge();
       bridge.on('npcmenu', (payload) => received.push(payload));
-      return spawnNpcs(scene, grid, bridge)[0];
+      return spawnNpcs(scene, bridge)[0];
     });
 
     target.emit('pointerdown', {
@@ -148,76 +156,80 @@ describe('spawnNpcs', () => {
   });
 });
 
-describe('scheduleWander', () => {
-  it('reprograma solo a los NPCs marcados wander:true (Pablo, Jordan Tavara, kevin)', async () => {
-    const scheduledCount = await withScene((scene) => {
-      const grid = buildTerrainGrid();
-      const bridge = createOfficeBridge();
-      const addEventSpy = vi.spyOn(scene.time, 'addEvent');
-      spawnNpcs(scene, grid, bridge);
-      return addEventSpy.mock.calls.length;
-    });
-
-    const wanderCount = NPCS.filter((n) => n.wander).length;
-    expect(wanderCount).toBe(3);
-    expect(scheduledCount).toBe(3);
-  });
-
-  it('no reprograma tween cuando el destino cae fuera del rango interior (borde solido)', async () => {
-    const tweenCallCount = await withScene((scene) => {
-      const grid = buildTerrainGrid();
-      const c = makeCharacter(scene, 'Test', 1, 1, 'av0', STATUS_COLOR.g) as NpcContainer;
-      c.homeTx = 1;
-      c.homeTy = 1;
-
-      let callback: (() => void) | undefined;
-      vi.spyOn(scene.time, 'addEvent').mockImplementation((config) => {
-        callback = (config as { callback: () => void }).callback;
-        return {} as Phaser.Time.TimerEvent;
-      });
-      const tweenSpy = vi.spyOn(scene.tweens, 'add');
-      const betweenSpy = vi.spyOn(Phaser.Math, 'Between');
-
-      scheduleWander(scene, grid, c);
-      // dx=-1, dy=-1 desde (1,1) -> destino (0,0): fuera del rango interior (tx<1||ty<1).
-      betweenSpy.mockReturnValueOnce(-1).mockReturnValueOnce(-1);
-      callback?.();
-      betweenSpy.mockRestore();
-
-      return tweenSpy.mock.calls.length;
-    });
-
-    expect(tweenCallCount).toBe(0);
-  });
-
-  it('tween al destino cuando la tile no es solida ni agua', async () => {
-    const tweenTarget = await withScene((scene) => {
-      const grid = buildTerrainGrid();
+describe('walkNpcTo', () => {
+  it('tween al centro exacto de la tile destino', async () => {
+    const target = await withScene((scene) => {
       const c = makeCharacter(scene, 'Test', 6, 26, 'av0', STATUS_COLOR.g) as NpcContainer;
-      c.homeTx = 6;
-      c.homeTy = 26;
-
-      let callback: (() => void) | undefined;
-      vi.spyOn(scene.time, 'addEvent').mockImplementation((config) => {
-        callback = (config as { callback: () => void }).callback;
-        return {} as Phaser.Time.TimerEvent;
-      });
       const tweenSpy = vi
         .spyOn(scene.tweens, 'add')
-        .mockImplementation(() => ({}) as Phaser.Tweens.Tween);
-      const betweenSpy = vi.spyOn(Phaser.Math, 'Between');
+        .mockImplementation(() => ({ stop: () => {} }) as unknown as Phaser.Tweens.Tween);
 
-      scheduleWander(scene, grid, c);
-      // dx=1, dy=0 desde (6,26) -> destino (7,26): tile de cesped libre.
-      betweenSpy.mockReturnValueOnce(1).mockReturnValueOnce(0);
-      callback?.();
-      betweenSpy.mockRestore();
+      walkNpcTo(scene, c, 9, 26);
 
       const config = tweenSpy.mock.calls[0]?.[0] as unknown as { x: number; y: number };
       return { x: config.x, y: config.y };
     });
 
-    expect(tweenTarget).toEqual({ x: 7 * TILE + 16, y: 26 * TILE + 16 });
+    expect(target).toEqual({ x: 9 * TILE + 16, y: 26 * TILE + 16 });
+  });
+
+  it('la duracion escala con la distancia recorrida, no es un valor fijo', async () => {
+    const durations = await withScene((scene) => {
+      const near = makeCharacter(scene, 'Near', 6, 26, 'av0', STATUS_COLOR.g) as NpcContainer;
+      const far = makeCharacter(scene, 'Far', 6, 26, 'av0', STATUS_COLOR.g) as NpcContainer;
+      const tweenSpy = vi
+        .spyOn(scene.tweens, 'add')
+        .mockImplementation(() => ({ stop: () => {} }) as unknown as Phaser.Tweens.Tween);
+
+      walkNpcTo(scene, near, 8, 26); // 2 tiles
+      walkNpcTo(scene, far, 14, 26); // 8 tiles
+
+      return tweenSpy.mock.calls.map(
+        (call) => (call[0] as unknown as { duration: number }).duration,
+      );
+    });
+
+    // Sin esto, un `duration: 900` fijo haria que cruzar la oficina entera
+    // fuese tan rapido como dar un paso. 8 tiles deben tardar 4x lo de 2.
+    expect(durations[0]).toBeCloseTo(2 * NPC_WALK_MS_PER_TILE, 0);
+    expect(durations[1]).toBeCloseTo(8 * NPC_WALK_MS_PER_TILE, 0);
+  });
+
+  it('una segunda llamada detiene el tween anterior en vez de acumularlo', async () => {
+    const stopped = await withScene((scene) => {
+      const c = makeCharacter(scene, 'Test', 6, 26, 'av0', STATUS_COLOR.g) as NpcContainer;
+      const stops: number[] = [];
+      let created = 0;
+      vi.spyOn(scene.tweens, 'add').mockImplementation(() => {
+        const id = created++;
+        return { stop: () => stops.push(id) } as unknown as Phaser.Tweens.Tween;
+      });
+
+      walkNpcTo(scene, c, 8, 26);
+      walkNpcTo(scene, c, 10, 26);
+
+      return stops;
+    });
+
+    // El primer tween (id 0) queda cancelado; si no, dos tweens pelean por
+    // `x`/`y` del mismo contenedor y el NPC vibra entre ambos destinos.
+    expect(stopped).toEqual([0]);
+  });
+
+  it('mueve de verdad al NPC hacia el destino dentro de un Phaser.Game real', async () => {
+    const c = await withScene((scene) => {
+      const npc = makeCharacter(scene, 'Test', 6, 26, 'av0', STATUS_COLOR.g) as NpcContainer;
+      walkNpcTo(scene, npc, 10, 26);
+      return npc;
+    });
+    const startX = c.x;
+
+    await vi.waitFor(
+      () => {
+        expect(c.x).toBeGreaterThan(startX);
+      },
+      { timeout: 3000 },
+    );
   });
 });
 

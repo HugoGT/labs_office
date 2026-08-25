@@ -1,11 +1,17 @@
 import Phaser from 'phaser';
-import { spawnNpcs, spawnPlayer, type CharacterContainer, type NpcContainer } from './characters';
+import {
+  spawnNpcs,
+  spawnPlayer,
+  walkNpcTo,
+  type CharacterContainer,
+  type NpcContainer,
+} from './characters';
 import { mergeColliderRects } from './colliderMerge';
 import { placeFurniture, placeNature, placeZoneLabels, renderGround } from './mapBuilder';
 import { PROX_RADIUS, ROOMS, TILE, WORLD_H, WORLD_W } from './mapData';
 import type { OfficeBridge } from './officeBridge';
 import { detectRoom, isSpeaking, nearbyIndices, nearbyKey, type Point } from './proximity';
-import { buildTerrainGrid, isBlocked, type TerrainGrid } from './terrainGrid';
+import { buildTerrainGrid, findFreeAdjacentTile, type TerrainGrid } from './terrainGrid';
 import { createOfficeTextures } from './textures';
 
 /** Clave de la escena (D5): reemplaza `BootScene`, que se retira en este mismo cambio. */
@@ -13,15 +19,6 @@ export const OFFICE_SCENE_KEY = 'office';
 
 const PLAYER_SPEED = 230;
 const PROXIMITY_TICK_MS = 250;
-/** Desplazamientos de tile probados en orden al buscar un destino de teletransporte (app.js:477). */
-const TELEPORT_OFFSETS: readonly (readonly [number, number])[] = [
-  [1, 0],
-  [-1, 0],
-  [0, 1],
-  [0, -1],
-  [1, 1],
-  [-1, 1],
-];
 const MINIMAP_WIDTH = 200;
 const MINIMAP_HEIGHT = 140;
 const MINIMAP_MARGIN = 14;
@@ -53,6 +50,7 @@ export class OfficeScene extends Phaser.Scene {
   private lastNearbyKey = '';
   private currentRoom: string | null = null;
   private unsubscribeTeleport?: () => void;
+  private unsubscribeCallNpc?: () => void;
 
   constructor(bridge: OfficeBridge) {
     super(OFFICE_SCENE_KEY);
@@ -69,7 +67,7 @@ export class OfficeScene extends Phaser.Scene {
     placeNature(this, grid);
     placeZoneLabels(this);
 
-    this.npcs = spawnNpcs(this, grid, this.bridge);
+    this.npcs = spawnNpcs(this, this.bridge);
     this.player = spawnPlayer(this);
 
     this.buildColliders(grid);
@@ -79,8 +77,12 @@ export class OfficeScene extends Phaser.Scene {
     this.unsubscribeTeleport = this.bridge.onCommand('teleportTo', ({ npcId }) => {
       this.teleportTo(npcId);
     });
+    this.unsubscribeCallNpc = this.bridge.onCommand('callNpc', ({ npcId }) => {
+      this.callNpc(npcId);
+    });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.unsubscribeTeleport?.();
+      this.unsubscribeCallNpc?.();
     });
 
     this.time.addEvent({
@@ -176,17 +178,38 @@ export class OfficeScene extends Phaser.Scene {
     const target = this.npcs[npcId];
     if (!target) return;
 
-    const tx = Math.floor(target.x / TILE);
-    const ty = Math.floor(target.y / TILE);
-    for (const [dx, dy] of TELEPORT_OFFSETS) {
-      const nx = tx + dx;
-      const ny = ty + dy;
-      if (!isBlocked(this.grid, nx, ny)) {
-        this.player.setPosition(nx * TILE + 16, ny * TILE + 16);
-        this.cameras.main.flash(200, 255, 255, 255, false);
-        return;
-      }
-    }
+    const destination = findFreeAdjacentTile(
+      this.grid,
+      Math.floor(target.x / TILE),
+      Math.floor(target.y / TILE),
+    );
+    if (!destination) return;
+
+    this.player.setPosition(destination.tx * TILE + 16, destination.ty * TILE + 16);
+    this.cameras.main.flash(200, 255, 255, 255, false);
+  }
+
+  /**
+   * Hace que el NPC llamado camine hasta una tile libre junto al jugador. Es
+   * el reflejo de `teleportTo`: alli se mueve el jugador hacia el NPC, aqui el
+   * NPC hacia el jugador, y por eso ambos comparten `findFreeAdjacentTile`.
+   *
+   * El destino se calcula al recibir la llamada, no se persigue: si el jugador
+   * se mueve despues, el NPC termina donde el jugador estaba. Perseguir exige
+   * pathfinding sobre la rejilla, que no toca todavia.
+   */
+  private callNpc(npcId: number): void {
+    const npc = this.npcs[npcId];
+    if (!npc) return;
+
+    const destination = findFreeAdjacentTile(
+      this.grid,
+      Math.floor(this.player.x / TILE),
+      Math.floor(this.player.y / TILE),
+    );
+    if (!destination) return;
+
+    walkNpcTo(this, npc, destination.tx, destination.ty);
   }
 
   update(): void {

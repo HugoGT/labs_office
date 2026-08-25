@@ -50,4 +50,32 @@ describe('createOfficeBridge', () => {
     bridge.teleportTo(8);
     expect(handler).toHaveBeenCalledTimes(1);
   });
+
+  it('callNpc entrega el comando de llamada y respeta la desuscripcion', () => {
+    const bridge = createOfficeBridge();
+    const handler = vi.fn();
+
+    const unsubscribe = bridge.onCommand('callNpc', handler);
+    bridge.callNpc(3);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith({ npcId: 3 });
+
+    unsubscribe();
+    bridge.callNpc(4);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('callNpc y teleportTo son canales distintos: uno no dispara el handler del otro', () => {
+    const bridge = createOfficeBridge();
+    const onCall = vi.fn();
+    const onTeleport = vi.fn();
+
+    bridge.onCommand('callNpc', onCall);
+    bridge.onCommand('teleportTo', onTeleport);
+
+    bridge.callNpc(1);
+
+    expect(onCall).toHaveBeenCalledTimes(1);
+    expect(onTeleport).not.toHaveBeenCalled();
+  });
 });

@@ -1,7 +1,11 @@
 /**
- * Roster de NPCs, portado verbatim de `prototype/js/app.js:38-54`.
+ * Roster de NPCs, portado de `prototype/js/app.js:38-54`.
  * Decision registrada: los nombres reales se mantienen tal cual (ver
  * sdd/port-prototype-to-react-phaser/decision-npc-roster).
+ *
+ * El campo `wander` del prototipo se retiro: los NPCs simulados ya no
+ * deambulan solos. Siguen presentes para que la oficina no se vea vacia, pero
+ * su unico comportamiento es acudir cuando se les llama (`walkNpcTo`).
  */
 
 export type NpcStatus = 'g' | 'y' | 'r';
@@ -11,10 +15,9 @@ export interface NpcSeed {
   tx: number;
   ty: number;
   status: NpcStatus;
-  wander: boolean;
 }
 
-type RawNpc = [string, number, number, NpcStatus] | [string, number, number, NpcStatus, true];
+type RawNpc = readonly [string, number, number, NpcStatus];
 
 const RAW_NPCS: readonly RawNpc[] = [
   ['Franklin Ga', 4, 7, 'g'],
@@ -30,12 +33,12 @@ const RAW_NPCS: readonly RawNpc[] = [
   ['Alvaro Torres', 34, 16, 'g'],
   ['Jimmy Loloy', 36, 16, 'g'],
   ['Anderson', 4, 26, 'r'],
-  ['Pablo', 6, 26, 'g', true],
+  ['Pablo', 6, 26, 'g'],
   ['Nimer Cerna', 5, 27, 'g'],
   ['Jean', 7, 27, 'g'],
   ['Milko', 17, 26, 'g'],
   ['DiegoLopez', 19, 26, 'g'],
-  ['Jordan Távara', 20, 28, 'g', true],
+  ['Jordan Távara', 20, 28, 'g'],
   ['Alberto', 28, 26, 'g'],
   ['Fernando.Aquino', 30, 26, 'g'],
   ['Paul Llanque', 31, 27, 'g'],
@@ -44,7 +47,7 @@ const RAW_NPCS: readonly RawNpc[] = [
   ['Paul Tijero', 7, 38, 'g'],
   ['Iberson Silva', 5, 40, 'g'],
   ['Kendry Soto', 8, 40, 'g'],
-  ['kevin', 17, 38, 'g', true],
+  ['kevin', 17, 38, 'g'],
   ['ivan herbas', 18, 39, 'g'],
   ['Joaquin', 20, 38, 'g'],
   ['Jeraldine', 29, 38, 'g'],
@@ -52,12 +55,11 @@ const RAW_NPCS: readonly RawNpc[] = [
   ['Luis', 33, 38, 'r'],
 ];
 
-export const NPCS: readonly NpcSeed[] = RAW_NPCS.map(([name, tx, ty, status, wander]) => ({
+export const NPCS: readonly NpcSeed[] = RAW_NPCS.map(([name, tx, ty, status]) => ({
   name,
   tx,
   ty,
   status,
-  wander: wander === true,
 }));
 
 export const STATUS_COLOR: Record<NpcStatus, number> = {
