@@ -1,15 +1,25 @@
 /**
- * Orientacion de un personaje y como derivarla del movimiento.
+ * Contrato compartido entre el cliente y el servidor Colyseus. Vive en `src/`
+ * y no en `server/` a proposito: el cliente es quien no puede importar del
+ * servidor (arrastraria `@colyseus/core` al bundle del navegador), asi que la
+ * dependencia va en el unico sentido que no rompe nada.
  *
- * Sin dependencias de Phaser: es logica pura y se prueba en jsdom, aunque
- * quien la consume (`textures.ts`, `characters.ts`) viva en la capa navegador.
+ * Sin dependencias de Phaser ni de Node: lo cargan los dos lados.
  */
+
+export const OFFICE_ROOM_NAME = 'office';
+
+/** Cada cuanto publica el jugador local su posicion (ver `createMoveThrottle`). */
+export const MOVE_INTERVAL_MS = 100;
 
 export type Facing = 'down' | 'up' | 'left' | 'right';
 
 export const FACINGS: readonly Facing[] = ['down', 'up', 'left', 'right'];
 export const DEFAULT_FACING: Facing = 'down';
 
+/** Tope de nombre visible. Recortar es preferible a rechazar: no expulsa a nadie. */
+export const MAX_NAME_LENGTH = 24;
+export const DEFAULT_NAME = 'Invitado';
 
 /**
  * Orientacion a partir del vector de movimiento. En diagonal manda el eje

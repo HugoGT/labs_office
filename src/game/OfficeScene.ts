@@ -13,6 +13,13 @@ import { placeFurniture, placeNature, placeZoneLabels, renderGround } from './ma
 import { PROX_RADIUS, ROOMS, TILE, WORLD_H, WORLD_W } from './mapData';
 import type { OfficeBridge } from './officeBridge';
 import { DEFAULT_FACING, facingFrom, type Facing } from './officeProtocol';
+import {
+  connectOfficeRoom,
+  type ConnectOfficeRoomOptions,
+  type OfficeConnection,
+} from './officeRoomClient';
+import { createRemoteAvatarRegistry, type RemoteAvatarRegistry } from './remoteAvatars';
+import { createPhaserAvatarSink, type RemoteAvatarContainer } from './remoteAvatarSink';
 import { detectRoom, isSpeaking, nearbyIndices, nearbyKey, type Point } from './proximity';
 import { buildTerrainGrid, findFreeAdjacentTile, type TerrainGrid } from './terrainGrid';
 import { createOfficeTextures } from './textures';
@@ -25,6 +32,18 @@ const PROXIMITY_TICK_MS = 250;
 const MINIMAP_WIDTH = 200;
 const MINIMAP_HEIGHT = 140;
 const MINIMAP_MARGIN = 14;
+
+/**
+ * Como se conecta la escena al servidor. `connect` se inyecta para poder
+ * probar el cableado sin levantar un Colyseus real: el protocolo por cable ya
+ * lo cubren los tests de la capa node contra un servidor de verdad.
+ */
+export interface OfficeSceneOptions {
+  /** `null` desactiva el multijugador: la oficina corre en solitario. */
+  endpoint?: string | null;
+  playerName?: string;
+  connect?: (options: ConnectOfficeRoomOptions) => Promise<OfficeConnection>;
+}
 
 interface WasdKeys {
   W: Phaser.Input.Keyboard.Key;
@@ -54,11 +73,18 @@ export class OfficeScene extends Phaser.Scene {
   private currentRoom: string | null = null;
   private unsubscribeTeleport?: () => void;
   private unsubscribeCallNpc?: () => void;
-  private facing: Facing = DEFAULT_FACING;
 
-  constructor(bridge: OfficeBridge) {
+  private readonly options: OfficeSceneOptions;
+  private remotes?: RemoteAvatarRegistry<RemoteAvatarContainer>;
+  private connection?: OfficeConnection;
+  private facing: Facing = DEFAULT_FACING;
+  /** Vivo mientras la escena lo este: corta las respuestas tardias de la red. */
+  private alive = true;
+
+  constructor(bridge: OfficeBridge, options: OfficeSceneOptions = {}) {
     super(OFFICE_SCENE_KEY);
     this.bridge = bridge;
+    this.options = options;
   }
 
   /** Las hojas Kenney tienen que estar cargadas antes de que `create()` dibuje. */
@@ -90,8 +116,12 @@ export class OfficeScene extends Phaser.Scene {
       this.callNpc(npcId);
     });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.alive = false;
       this.unsubscribeTeleport?.();
       this.unsubscribeCallNpc?.();
+      this.remotes?.clear();
+      void this.connection?.leave();
+      this.connection = undefined;
     });
 
     this.time.addEvent({
@@ -99,6 +129,63 @@ export class OfficeScene extends Phaser.Scene {
       loop: true,
       callback: () => this.proximityTick(),
     });
+
+    void this.connectToOffice();
+  }
+
+  /**
+   * Conecta con el servidor de avatares reales (PRD 6.2). Un fallo NO es
+   * fatal: la oficina se queda en solitario con los NPCs simulados y se avisa
+   * por el puente. Cualquier otra cosa dejaria la pantalla en negro cada vez
+   * que el servidor no este levantado, que en desarrollo es la mitad del rato.
+   */
+  private async connectToOffice(): Promise<void> {
+    const { endpoint, connect = connectOfficeRoom, playerName = this.player.nameText } =
+      this.options;
+
+    if (endpoint === null || endpoint === undefined) {
+      this.bridge.emit('presence', { online: false, peers: 0 });
+      return;
+    }
+
+    try {
+      const connection = await connect({
+        endpoint,
+        name: playerName,
+        handlers: {
+          onAdd: (snapshot) => {
+            this.remotes?.upsert(snapshot);
+            this.emitPresence(true);
+          },
+          onChange: (snapshot) => this.remotes?.upsert(snapshot),
+          onRemove: (sessionId) => {
+            this.remotes?.remove(sessionId);
+            this.emitPresence(true);
+          },
+        },
+      });
+
+      // La escena pudo apagarse mientras el `await` estaba en vuelo. Sin esta
+      // guarda quedaria una conexion viva publicando la posicion de un jugador
+      // ya destruido.
+      if (!this.alive) {
+        void connection.leave();
+        return;
+      }
+
+      this.connection = connection;
+      this.remotes = createRemoteAvatarRegistry(createPhaserAvatarSink(this), {
+        ignoreSessionId: connection.sessionId,
+      });
+      this.emitPresence(true);
+    } catch {
+      if (!this.alive) return;
+      this.bridge.emit('presence', { online: false, peers: 0 });
+    }
+  }
+
+  private emitPresence(online: boolean): void {
+    this.bridge.emit('presence', { online, peers: this.remotes?.sessionIds().length ?? 0 });
   }
 
   /** Fusiona tiles solidos en rectangulos estaticos y los colisiona con el jugador (app.js:392-408, D6). */
@@ -205,7 +292,8 @@ export class OfficeScene extends Phaser.Scene {
    *
    * El destino se calcula al recibir la llamada, no se persigue: si el jugador
    * se mueve despues, el NPC termina donde el jugador estaba. Perseguir exige
-   * pathfinding sobre la rejilla, que no toca todavia.
+   * pathfinding sobre la rejilla, que no toca hasta que los avatares remotos
+   * de Colyseus definan como se navega.
    */
   private callNpc(npcId: number): void {
     const npc = this.npcs[npcId];
@@ -237,6 +325,14 @@ export class OfficeScene extends Phaser.Scene {
     setCharacterFacing(this.player, this.facing);
 
     for (const npc of this.npcs) npc.setDepth(npc.y);
+    for (const sessionId of this.remotes?.sessionIds() ?? []) {
+      const avatar = this.remotes?.get(sessionId);
+      if (avatar) avatar.setDepth(avatar.y);
+    }
+
+    // Se publica cada frame a proposito: el agrupado de `createMoveThrottle`
+    // decide que sale por el cable y que se descarta por no haber cambiado.
+    this.connection?.sendMove(this.player.x, this.player.y, this.facing);
 
     this.mmMarker?.setPosition(this.player.x, this.player.y);
   }

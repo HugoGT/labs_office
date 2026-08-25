@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { OfficeScene } from './OfficeScene';
+import { OfficeScene, type OfficeSceneOptions } from './OfficeScene';
 import type { OfficeBridge } from './officeBridge';
 
 /**
@@ -8,7 +8,11 @@ import type { OfficeBridge } from './officeBridge';
  * por `registry`. Fisica arcade habilitada: el jugador (slice 6) necesita un
  * cuerpo fisico.
  */
-export function createGame(parent: HTMLElement, bridge: OfficeBridge): Phaser.Game {
+export function createGame(
+  parent: HTMLElement,
+  bridge: OfficeBridge,
+  options: OfficeSceneOptions = {},
+): Phaser.Game {
   return new Phaser.Game({
     type: Phaser.AUTO,
     parent,
@@ -22,6 +26,6 @@ export function createGame(parent: HTMLElement, bridge: OfficeBridge): Phaser.Ga
       mode: Phaser.Scale.RESIZE,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-    scene: [new OfficeScene(bridge)],
+    scene: [new OfficeScene(bridge, options)],
   });
 }

@@ -5,7 +5,8 @@ import { DESK_ROWS, MAP_H, MAP_W, PROX_RADIUS, TILE, TREES, ZONE_LABELS } from '
 import { TERRAIN_SHEET } from './assets';
 import { NPCS } from './npcData';
 import { createOfficeBridge } from './officeBridge';
-import { OFFICE_SCENE_KEY, OfficeScene } from './OfficeScene';
+import type { OfficeConnection, OfficeRoomHandlers } from './officeRoomClient';
+import { OFFICE_SCENE_KEY, OfficeScene, type OfficeSceneOptions } from './OfficeScene';
 
 /**
  * `OfficeScene` orquesta fisica, camaras, tweens y timers desde el slice 7 en
@@ -21,7 +22,10 @@ afterEach(() => {
   for (const host of hosts.splice(0)) host.remove();
 });
 
-async function bootOfficeScene(bridge = createOfficeBridge()): Promise<{
+async function bootOfficeScene(
+  bridge = createOfficeBridge(),
+  options: OfficeSceneOptions = {},
+): Promise<{
   scene: Phaser.Scene;
   bridge: ReturnType<typeof createOfficeBridge>;
 }> {
@@ -37,7 +41,7 @@ async function bootOfficeScene(bridge = createOfficeBridge()): Promise<{
     width: 320,
     height: 240,
     physics: { default: 'arcade' },
-    scene: [new OfficeScene(bridge)],
+    scene: [new OfficeScene(bridge, options)],
   });
   games.push(game);
 
@@ -408,3 +412,170 @@ describe('OfficeScene: comando callNpc via el puente (el NPC acude a la llamada)
   });
 });
 
+/**
+ * Doble de conexion: captura los handlers que la escena registra para poder
+ * simular altas, cambios y bajas remotas sin levantar un Colyseus. El
+ * protocolo real ya se prueba contra un servidor de verdad en la capa node
+ * (`officeRoomClient.node.test.ts`); lo que se prueba aqui es el cableado.
+ */
+function fakeConnector(sessionId = 'yo') {
+  const sent: { x: number; y: number; facing: string }[] = [];
+  let captured: OfficeRoomHandlers | undefined;
+  let left = false;
+
+  const connection: OfficeConnection = {
+    sessionId,
+    sendMove: (x, y, facing) => sent.push({ x, y, facing }),
+    leave: async () => {
+      left = true;
+    },
+  };
+
+  return {
+    sent,
+    handlers: () => captured,
+    hasLeft: () => left,
+    connect: async (options: { handlers: OfficeRoomHandlers }) => {
+      captured = options.handlers;
+      return connection;
+    },
+  };
+}
+
+function remoteSnapshot(overrides: Record<string, unknown> = {}) {
+  return {
+    sessionId: 'remota-1',
+    name: 'Ana Remota',
+    x: 500,
+    y: 600,
+    status: 'g',
+    facing: 'down',
+    ...overrides,
+  } as Parameters<OfficeRoomHandlers['onAdd']>[0];
+}
+
+function findRemoteAvatars(scene: Phaser.Scene): CharacterContainer[] {
+  return scene.children.list.filter(
+    (c): c is CharacterContainer =>
+      c.type === 'Container' && !('npcId' in c) && (c as CharacterContainer).nameText !== 'HugoGT',
+  );
+}
+
+describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
+  it('sin endpoint corre en solitario y lo anuncia por el puente', async () => {
+    const bridge = createOfficeBridge();
+    const presence: { online: boolean; peers: number }[] = [];
+    bridge.on('presence', (p) => presence.push(p));
+
+    const { scene } = await bootOfficeScene(bridge, { endpoint: null });
+
+    await vi.waitFor(() => expect(presence).toContainEqual({ online: false, peers: 0 }));
+    expect(findRemoteAvatars(scene)).toHaveLength(0);
+  });
+
+  it('un alta remota dibuja un avatar nuevo en las coordenadas del servidor', async () => {
+    const connector = fakeConnector();
+    const { scene } = await bootOfficeScene(createOfficeBridge(), {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    connector.handlers()!.onAdd(remoteSnapshot({ x: 500, y: 600 }));
+
+    const avatars = findRemoteAvatars(scene);
+    expect(avatars).toHaveLength(1);
+    expect({ x: avatars[0].x, y: avatars[0].y }).toEqual({ x: 500, y: 600 });
+    expect(avatars[0].nameText).toBe('Ana Remota');
+  });
+
+  it('no dibuja un clon del jugador local aunque el servidor lo incluya', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(createOfficeBridge(), {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'mi-sesion', name: 'HugoGT' }));
+
+    // El jugador local ya responde al teclado al instante; su copia remota
+    // llegaria con el retardo de la red y se veria como un doble pisandole.
+    expect(findRemoteAvatars(scene)).toHaveLength(0);
+  });
+
+  it('una baja remota retira el avatar de la escena', async () => {
+    const connector = fakeConnector();
+    const { scene } = await bootOfficeScene(createOfficeBridge(), {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'se-va' }));
+    expect(findRemoteAvatars(scene)).toHaveLength(1);
+
+    connector.handlers()!.onRemove('se-va');
+
+    expect(findRemoteAvatars(scene)).toHaveLength(0);
+  });
+
+  it('emite presence con el numero de companeros conectados', async () => {
+    const bridge = createOfficeBridge();
+    const presence: { online: boolean; peers: number }[] = [];
+    bridge.on('presence', (p) => presence.push(p));
+    const connector = fakeConnector();
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'a' }));
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'b' }));
+
+    expect(presence.at(-1)).toEqual({ online: true, peers: 2 });
+  });
+
+  it('si el servidor no responde, la oficina sigue jugable en solitario', async () => {
+    const bridge = createOfficeBridge();
+    const presence: { online: boolean; peers: number }[] = [];
+    bridge.on('presence', (p) => presence.push(p));
+
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: async () => {
+        throw new Error('ECONNREFUSED');
+      },
+    });
+
+    // Lo que se prueba es que un servidor caido no deja la pantalla en negro:
+    // en desarrollo eso seria la mitad del tiempo.
+    await vi.waitFor(() => expect(presence).toContainEqual({ online: false, peers: 0 }));
+    expect(findPlayer(scene).nameText).toBe('HugoGT');
+    expect(findNpcs(scene)).toHaveLength(NPCS.length);
+  });
+
+  it('publica la posicion del jugador local en cada frame', async () => {
+    const connector = fakeConnector();
+    await bootOfficeScene(createOfficeBridge(), {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+
+    // El agrupado decide que sale por el cable; la escena publica siempre.
+    await vi.waitFor(() => expect(connector.sent.length).toBeGreaterThan(0));
+    expect(connector.sent[0]).toMatchObject({ facing: 'down' });
+  });
+
+  it('cierra la conexion al apagar la escena', async () => {
+    const connector = fakeConnector();
+    const { scene } = await bootOfficeScene(createOfficeBridge(), {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+
+    scene.sys.events.emit(Phaser.Scenes.Events.SHUTDOWN);
+
+    // Sin esto, cada remonte de StrictMode dejaria un socket vivo publicando la
+    // posicion de un jugador ya destruido.
+    await vi.waitFor(() => expect(connector.hasLeft()).toBe(true));
+  });
+});

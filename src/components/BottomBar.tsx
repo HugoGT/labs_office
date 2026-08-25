@@ -6,6 +6,7 @@ export interface BottomBarProps {
   recording: boolean;
   room: string | null;
   nearby: string[];
+  presence: { online: boolean; peers: number };
   onToggleMic: () => void;
   onToggleCam: () => void;
   onToggleRecord: () => void;
@@ -25,6 +26,7 @@ export function BottomBar({
   recording,
   room,
   nearby,
+  presence,
   onToggleMic,
   onToggleCam,
   onToggleRecord,
@@ -36,6 +38,16 @@ export function BottomBar({
     <div className={styles.bar}>
       <div className={styles.me}>
         <span className={styles.meDot} /> HugoGT
+      </div>
+      <div
+        className={styles.presence}
+        title={
+          presence.online
+            ? 'Conectado al servidor de avatares reales'
+            : 'Sin servidor: la oficina corre en solitario con los NPCs simulados'
+        }
+      >
+        {presence.online ? `🟢 ${presence.peers} en línea` : '⚪ Sin servidor'}
       </div>
       <button type="button" className={styles.btn} aria-pressed={micOn} onClick={onToggleMic}>
         {micOn ? '🎙️ Mic' : '🔇 Mic'}

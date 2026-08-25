@@ -1,0 +1,26 @@
+{
+  // Proyecto aparte y NO composite a proposito. El servidor y el cliente
+  // comparten ficheros de `src/game` (mapData, officeProtocol), y con
+  // proyectos composite un mismo fichero no puede pertenecer a dos: daria
+  // TS6307. Al no ser composite, TS arrastra esos ficheros por el grafo de
+  // imports sin reclamar su propiedad.
+  //
+  // `allowImportingTsExtensions` porque el servidor lo ejecuta Node borrando
+  // tipos, y ESM en Node exige la extension explicita en los imports.
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["server/**/*.ts", "src/**/*.node.test.ts"]
+}

@@ -42,7 +42,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Tests (jsdom + Chromium)
+      # Tres capas: `unit` (jsdom), `server` (Node, levanta un Colyseus real en
+      # un puerto efimero) y `browser` (Chromium). `test:all` corre las tres.
+      - name: Tests (jsdom + Node + Chromium)
         run: pnpm test:all
 
       - name: Build

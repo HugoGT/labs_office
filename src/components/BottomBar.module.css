@@ -32,6 +32,14 @@
   background: #22c55e;
 }
 
+.presence {
+  font-size: 12px;
+  color: #9ca3af;
+  padding-right: 10px;
+  border-right: 1px solid #2b3444;
+  white-space: nowrap;
+}
+
 .btn {
   background: #1f2937;
   color: #e5e7eb;

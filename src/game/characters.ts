@@ -10,7 +10,7 @@
  */
 
 import Phaser from 'phaser';
-import { TILE, WORLD_H, WORLD_W } from './mapData';
+import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from './mapData';
 import { NPCS, STATUS_COLOR, STATUS_TXT, type NpcStatus } from './npcData';
 import type { OfficeBridge } from './officeBridge';
 import { DEFAULT_FACING, type Facing } from './officeProtocol';
@@ -53,8 +53,6 @@ export interface NpcContainer extends CharacterContainer {
 export const NPC_WALK_MS_PER_TILE = 260;
 
 const PLAYER_NAME = 'HugoGT';
-const PLAYER_SPAWN_TX = 22;
-const PLAYER_SPAWN_TY = 28;
 const PLAYER_TEXTURE = 'avP';
 
 /** Construye un personaje: anillo de habla + sprite + pildora de nombre (app.js:325-347). */

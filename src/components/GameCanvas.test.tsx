@@ -37,7 +37,27 @@ describe('GameCanvas', () => {
     const host = container.firstElementChild;
 
     expect(createGameMock).toHaveBeenCalledTimes(1);
-    expect(createGameMock).toHaveBeenCalledWith(host, bridge);
+    expect(createGameMock).toHaveBeenCalledWith(host, bridge, { endpoint: null });
+  });
+
+  it('sin endpoint monta la oficina en solitario, no adivina un servidor', () => {
+    trackInstances();
+
+    render(<GameCanvas bridge={bridge} />);
+
+    // Quien decide donde esta el servidor es `OfficeShell`, que si tiene acceso
+    // a la configuracion; este componente no inventa una URL por su cuenta.
+    expect(createGameMock).toHaveBeenCalledWith(expect.anything(), bridge, { endpoint: null });
+  });
+
+  it('reenvia el endpoint recibido tal cual a createGame', () => {
+    trackInstances();
+
+    render(<GameCanvas bridge={bridge} endpoint="ws://oficina.local:2567" />);
+
+    expect(createGameMock).toHaveBeenCalledWith(expect.anything(), bridge, {
+      endpoint: 'ws://oficina.local:2567',
+    });
   });
 
   it('destruye el juego al desmontar y pide que retire el canvas', () => {

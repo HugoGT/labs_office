@@ -41,20 +41,31 @@ contra Chromium y WebGL de verdad; mockearlo en jsdom solo probaría el mock.
       en la práctica porque el ref siempre está montado cuando corre el efecto.
 - [x] Suite tras el port del prototipo: **120 tests en 21 ficheros** (jsdom + Chromium),
       typecheck y build limpios. Todo el código del port entró en RED→GREEN.
+- [x] Tercera capa `server` (Node) en `vite.config.ts`: levanta un Colyseus real en un puerto
+      efímero y habla con él usando el cliente real. No es ceremonia: el fallo caro de este
+      stack está en el protocolo por cable (schema 3 contra schema 4), y un doble lo pasaría
+      por alto. Incluye `src/**/*.node.test.ts`, que es donde vive el test del envoltorio de
+      cliente.
 - [ ] Envolver `infra/livekit/test-recording.sh` en una suite con asserts y código
       de salida (bats o similar). Hoy valida a mano y necesita Docker, así que
       quedó fuera de la suite ejecutable.
-- [ ] Tests del servidor Colyseus cuando exista (sección 2).
+- [x] Tests del servidor Colyseus: 10 de integración sobre presencia, movimiento y validación
+      («el cliente no es de fiar»: recorte a los límites del mundo, descarte de `move` no
+      numérico, nombre acotado).
 - [ ] E2E de proximidad con dos clientes en el mismo mapa, cuando el cliente hable
-      con LiveKit de verdad (depende de 2.4).
+      con LiveKit de verdad (depende de 2.4). **Parcialmente desbloqueado**: dos clientes en
+      el mismo mapa ya se ven y se sincronizan (verificado con dos pestañas reales de
+      Chromium contra el servidor). Lo que falta es el audio, no la presencia.
 - [x] CI en `.github/workflows/ci.yml`: un job secuencial con typecheck, ambas capas
       de test y build, sobre push y PR a `main`. Un solo job a propósito: separarlo en
       jobs paralelos pagaría la instalación de Chromium más de una vez, que es el paso
       caro. Instala Chromium explícitamente porque sin navegador la capa `browser` no
-      existe. Todavía **no ha corrido en GitHub Actions** (nada pusheado).
+      existe. `pnpm test:all` cubre ya las tres capas (jsdom, Node y Chromium).
+      Todavía **no ha corrido en GitHub Actions** (nada pusheado).
 
-Comandos: `pnpm test` (jsdom, rápido), `pnpm test:browser`, `pnpm test:all`,
-`pnpm test:coverage`, `pnpm test:watch`.
+Comandos: `pnpm test` (jsdom, rápido), `pnpm test:server`, `pnpm test:browser`,
+`pnpm test:all`, `pnpm test:coverage`, `pnpm test:watch`.
+Para levantar la oficina completa en local: `pnpm server` y `pnpm dev` en paralelo.
 
 ## 1. Migrar el prototipo al stack real del PRD (sección 6.1)
 
@@ -74,11 +85,22 @@ Comandos: `pnpm test` (jsdom, rápido), `pnpm test:browser`, `pnpm test:all`,
       global del prototipo desaparece: se sustituye por un bridge tipado por instancia sobre
       `EventTarget`, donde cada suscriptor posee su propio cierre de baja. Sin
       `dangerouslySetInnerHTML`: el prototipo concatenaba nombres dentro de `innerHTML`.
-- [ ] Reemplazar las texturas generadas por código por **sprites/tilemaps reales** (formato Tiled `.json`, PRD 4.1 y 6.1).
-      Alcance acotado por PRD 14 decisión 5: mapa base prediseñado + assets modificables encima, no un editor de tiles completo.
-      **Bloqueado por adquisición de arte, no por código**: no hay un solo asset en el repo (`public/` está vacío, no existe
-      `src/assets/`). Decisión pendiente: quién produce el mapa base y el tileset. Hasta entonces las texturas siguen siendo
-      procedurales, que es exactamente lo que hacía el prototipo.
+- [x] **Assets open source como relleno provisional** (Kenney, CC0 / dominio público) en
+      `public/assets/kenney/`, con sus licencias originales al lado. El suelo, el mobiliario y
+      la naturaleza son ahora frames de dos hojas reales (`roguelike-rpg`, `roguelike-indoors`)
+      en vez de rectángulos de color generados por código. Los índices de frame están
+      verificados uno a uno: buena parte del pack son autotiles 3x3, así que el tile de relleno
+      es el **centro** del bloque, no su esquina — coger la esquina mete bordillos de piedra en
+      mitad del césped.
+- [x] Avatares con **orientación en 4 direcciones**. Siguen siendo procedurales, y es una
+      decisión, no una deuda: ningún pack CC0 de Kenney trae personas de cuerpo entero en vista
+      3/4 (los de `roguelike-characters` son bustos frontales), y la alternativa con animación
+      real (LPC) es CC-BY-SA, licencia vírica que no encaja en un producto comercial.
+- [ ] **Tilemap Tiled `.json` propio y arte definitivo** (PRD 4.1 y 6.1). Lo de arriba es
+      relleno «por mientras»: el layout sigue generándose por código en `terrainGrid.ts`, no se
+      carga de un `.json` de Tiled. Sigue **bloqueado por adquisición de arte**: decisión
+      pendiente de quién produce el mapa base y el tileset definitivos. Cambiar de arte no
+      debería tocar lógica, solo `assets.ts`.
 
 ## 2. Completar Fase 0 del PRD — prototipo técnico ← **en curso**
 
@@ -89,12 +111,24 @@ Comandos: `pnpm test` (jsdom, rápido), `pnpm test:browser`, `pnpm test:all`,
       decodificado y verificado: H.264 Main 1280×720 @30fps + AAC 44.1 kHz, seekable.
       Reproducible con `infra/livekit/test-recording.sh`.
       Capacidad medida: `max cost 4` sobre 16 CPUs → ~4 grabaciones concurrentes.
-- [ ] **Colyseus** (servidor Node): sincronizar posición de avatares reales por WebSocket — hoy los NPCs son simulados (PRD 6.2).
+- [x] **Colyseus** (servidor Node) en `server/`: sincroniza por WebSocket la posición de los
+      avatares reales (PRD 6.2). Dos clientes se ven, se mueven y se dan de baja; verificado
+      con dos pestañas reales de Chromium, no solo en test. Si el servidor no está levantado la
+      oficina **no se rompe**: cae a modo solitario y la barra lo indica (`⚪ Sin servidor`).
+      Las tres trampas de versiones de este stack están documentadas en `server/README.md`.
+- [x] Los **NPCs simulados se quedan** para que la oficina no se vea vacía, pero pierden el
+      deambular aleatorio. Su único comportamiento es acudir cuando se les llama desde el menú
+      contextual: «📞 Llamar» hace que el NPC camine hasta una tile libre junto al jugador.
+      Es el reflejo de «🚶 Ir a su escritorio», que mueve al jugador en vez de al NPC.
 - [ ] Conectar el cliente al stack: audio/vídeo real por proximidad con el SDK de LiveKit
       — hoy los anillos de "hablando" y el mute son visuales (PRD 6.3), y el botón ⏺ Grabar
       solo simula el flujo (PRD 4.9). **Ya desbloqueado**: dependía del port de la sección 1,
       que está hecho. El HUD emite y recibe por el bridge, así que conectar LiveKit es
-      sustituir el simulacro detrás de esos eventos, no rehacer la UI.
+      sustituir el simulacro detrás de esos eventos, no rehacer la UI. Ahora además hay
+      identidad de sesión real (`sessionId` de Colyseus) sobre la que colgar las pistas.
+- [ ] **Nombre e identidad reales**: hoy los dos clientes entran como `HugoGT` porque el nombre
+      está fijo en `characters.ts`. El servidor ya acepta y sanea un nombre por sesión, así que
+      el hueco es de UI/auth, no de protocolo. Se cierra de verdad con Google OAuth (sección 3).
 
 ## 3. Fase 1 — MVP (después de validar Fase 0)
 

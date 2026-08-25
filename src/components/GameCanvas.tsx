@@ -5,6 +5,8 @@ import type { OfficeBridge } from '../game/officeBridge';
 
 export interface GameCanvasProps {
   bridge: OfficeBridge;
+  /** `null` corre la oficina en solitario, sin avatares reales. */
+  endpoint?: string | null;
 }
 
 /**
@@ -16,7 +18,7 @@ export interface GameCanvasProps {
  * este componente (D3). Aun no es `OfficeShell` (slice 8s) — ver nota en
  * `App.tsx`.
  */
-export function GameCanvas({ bridge }: GameCanvasProps) {
+export function GameCanvas({ bridge, endpoint = null }: GameCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
 
@@ -24,13 +26,13 @@ export function GameCanvas({ bridge }: GameCanvasProps) {
     const host = hostRef.current;
     if (!host) return;
 
-    gameRef.current = createGame(host, bridge);
+    gameRef.current = createGame(host, bridge, { endpoint });
 
     return () => {
       gameRef.current?.destroy(true);
       gameRef.current = null;
     };
-  }, [bridge]);
+  }, [bridge, endpoint]);
 
   return <div ref={hostRef} style={{ position: 'absolute', inset: 0 }} />;
 }

@@ -1,7 +1,10 @@
 /**
  * Datos estaticos del mapa, portados de `prototype/js/app.js:6-35,56-64`.
  *
- * Sin dependencias de Phaser: se prueba en jsdom.
+ * Sin imports, y no por casualidad: lo carga tambien el servidor Colyseus, que
+ * corre en Node borrando tipos y por tanto exigiria extension `.ts` explicita
+ * en cualquier import que hubiera aqui. Mantenerlo sin dependencias evita esa
+ * fricción y deja claro que es dato puro.
  */
 
 export const TILE = 32;
@@ -10,6 +13,14 @@ export const MAP_H = 44;
 export const WORLD_W = MAP_W * TILE;
 export const WORLD_H = MAP_H * TILE;
 export const PROX_RADIUS = 170;
+
+/**
+ * Tile de aparicion del jugador. Vive aqui, y no en `characters.ts`, porque el
+ * servidor Colyseus tambien la necesita para situar a los avatares remotos y
+ * `characters.ts` importa Phaser, que en Node no se puede ni cargar.
+ */
+export const PLAYER_SPAWN_TX = 22;
+export const PLAYER_SPAWN_TY = 28;
 
 /** Codigos de suelo (app.js:11). */
 export const GROUND = {

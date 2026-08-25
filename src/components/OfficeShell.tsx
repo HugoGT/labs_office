@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
+import { resolveOfficeEndpoint } from '../game/officeEndpoint';
 import { useOfficeBridge } from '../hooks/useOfficeBridge';
 import { BottomBar } from './BottomBar';
 import { ContextMenu, type NpcMenuAction } from './ContextMenu';
@@ -18,7 +19,15 @@ const TOAST_TIMEOUT_MS = 3200;
  */
 export function OfficeShell() {
   const [bridge] = useState(createOfficeBridge);
-  const { room, nearby, menu, closeMenu } = useOfficeBridge(bridge);
+  const { room, nearby, menu, presence, closeMenu } = useOfficeBridge(bridge);
+  // Se resuelve una sola vez: cambiarlo remontaria Phaser entero.
+  const [endpoint] = useState(() =>
+    resolveOfficeEndpoint({
+      configured: import.meta.env.VITE_COLYSEUS_URL as string | undefined,
+      protocol: window.location.protocol,
+      hostname: window.location.hostname,
+    }),
+  );
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   const [recording, setRecording] = useState(false);
@@ -81,7 +90,7 @@ export function OfficeShell() {
 
   return (
     <div id="office-shell">
-      <GameCanvas bridge={bridge} />
+      <GameCanvas bridge={bridge} endpoint={endpoint} />
       <RecBadge visible={recording} />
       <ContextMenu menu={menu} onAction={handleMenuAction} onClose={closeMenu} />
       <BottomBar
@@ -90,6 +99,7 @@ export function OfficeShell() {
         recording={recording}
         room={room}
         nearby={nearby}
+        presence={presence}
         onToggleMic={() => setMicOn((value) => !value)}
         onToggleCam={() => setCamOn((value) => !value)}
         onToggleRecord={() => {

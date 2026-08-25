@@ -18,6 +18,12 @@ export interface OfficeEventMap {
   room: { room: string | null };
   npcmenu: { id: number; name: string; status: string; statusCode: NpcStatus; x: number; y: number };
   closemenu: undefined;
+  /**
+   * Estado de la conexion con el servidor Colyseus y cuantos avatares reales
+   * hay ademas del propio. `online: false` no es un error a mostrar en rojo:
+   * la oficina sigue siendo jugable en solitario con los NPCs simulados.
+   */
+  presence: { online: boolean; peers: number };
 }
 
 export interface OfficeCommandMap {

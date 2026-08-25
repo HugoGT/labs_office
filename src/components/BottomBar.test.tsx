@@ -11,6 +11,7 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
     recording: false,
     room: null as string | null,
     nearby: [] as string[],
+    presence: { online: false, peers: 0 },
     onToggleMic: vi.fn(),
     onToggleCam: vi.fn(),
     onToggleRecord: vi.fn(),
@@ -58,6 +59,7 @@ describe('BottomBar', () => {
         recording={false}
         room={null}
         nearby={[]}
+        presence={{ online: false, peers: 0 }}
         onToggleMic={vi.fn()}
         onToggleCam={vi.fn()}
         onToggleRecord={vi.fn()}
@@ -72,6 +74,7 @@ describe('BottomBar', () => {
         recording={false}
         room="Cafeteria"
         nearby={[]}
+        presence={{ online: false, peers: 0 }}
         onToggleMic={vi.fn()}
         onToggleCam={vi.fn()}
         onToggleRecord={vi.fn()}
@@ -92,5 +95,27 @@ describe('BottomBar', () => {
 
     expect(screen.getAllByText(/^🔊 /)).toHaveLength(6);
     expect(screen.getByText('+2')).toBeInTheDocument();
+  });
+});
+
+describe('BottomBar: presencia de avatares reales', () => {
+  it('muestra cuantos companeros reales hay conectados', () => {
+    renderBar({ presence: { online: true, peers: 3 } });
+
+    expect(screen.getByText('🟢 3 en línea')).toBeInTheDocument();
+  });
+
+  it('sin servidor lo dice en neutro, no como error', () => {
+    renderBar({ presence: { online: false, peers: 0 } });
+
+    // Estar en solitario es un modo valido: la oficina sigue jugable con los
+    // NPCs simulados, asi que no se pinta como fallo.
+    expect(screen.getByText('⚪ Sin servidor')).toBeInTheDocument();
+  });
+
+  it('conectado y solo sigue siendo "en línea", con cero companeros', () => {
+    renderBar({ presence: { online: true, peers: 0 } });
+
+    expect(screen.getByText('🟢 0 en línea')).toBeInTheDocument();
   });
 });
