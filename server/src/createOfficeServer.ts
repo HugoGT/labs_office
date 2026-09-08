@@ -17,11 +17,66 @@ import { WebSocketTransport } from '@colyseus/ws-transport';
 import express from 'express';
 import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { LIVEKIT_ROOM_NAME } from '../../src/game/officeProtocol.ts';
+import { createLiveSessionRegistry, type LiveSessionRegistry } from './liveSessions.ts';
+import { mintOfficeToken } from './livekitToken.ts';
 import { OFFICE_ROOM_NAME, OfficeRoom } from './OfficeRoom.ts';
+
+interface LivekitTokenResult {
+  status: 200 | 400 | 403 | 503;
+  body: Record<string, unknown>;
+}
+
+/**
+ * Adaptador HTTP puro (sin `req`/`res`) sobre `mintOfficeToken`, para poder
+ * probar las cuatro ramas del contrato sin montar Express. D5: el cuerpo solo
+ * aporta `sessionId`; cualquier `room`/`permissions` que mande el cliente se
+ * IGNORA, no se valida — no hay nada legitimo que el cliente pueda decir ahi.
+ */
+async function handleLivekitToken(
+  body: unknown,
+  sessions: LiveSessionRegistry,
+): Promise<LivekitTokenResult> {
+  const sessionId = (body as { sessionId?: unknown } | null)?.sessionId;
+  if (typeof sessionId !== 'string' || sessionId.length === 0) {
+    return { status: 400, body: { error: 'invalid-request' } };
+  }
+
+  if (!sessions.has(sessionId)) {
+    return { status: 403, body: { error: 'unknown-session' } };
+  }
+
+  const apiKey = process.env.LIVEKIT_API_KEY;
+  const apiSecret = process.env.LIVEKIT_API_SECRET;
+  if (!apiKey || !apiSecret) {
+    return { status: 503, body: { error: 'livekit-not-configured' } };
+  }
+
+  const token = await mintOfficeToken(
+    { apiKey, apiSecret },
+    {
+      identity: sessionId,
+      room: LIVEKIT_ROOM_NAME,
+      permissions: { canPublish: true, canSubscribe: true, canPublishData: true },
+    },
+  );
+
+  return {
+    status: 200,
+    body: {
+      token,
+      url: process.env.LIVEKIT_URL ?? 'ws://localhost:7880',
+      identity: sessionId,
+      room: LIVEKIT_ROOM_NAME,
+    },
+  };
+}
 
 export interface OfficeServer {
   gameServer: Server;
   httpServer: HttpServer;
+  /** Registro de sesiones vivas (D4); expuesto para la ruta y para tests. */
+  sessions: LiveSessionRegistry;
   /** Puerto realmente asignado. Con `listen(0)` lo elige el sistema. */
   port(): number;
   listen(port: number): Promise<number>;
@@ -30,19 +85,38 @@ export interface OfficeServer {
 
 export function createOfficeServer(): OfficeServer {
   const app = express();
+  app.use(express.json());
+
+  const sessions = createLiveSessionRegistry();
+
   app.get('/health', (_req, res) => {
     res.json({ ok: true, room: OFFICE_ROOM_NAME });
+  });
+
+  app.post('/livekit/token', (req, res) => {
+    handleLivekitToken(req.body, sessions)
+      .then((result) => {
+        res.status(result.status).json(result.body);
+      })
+      .catch(() => {
+        // Nunca se registra el error crudo: podria arrastrar el secreto por
+        // accidente si `mintOfficeToken` fallase con un mensaje inesperado
+        // del SDK. El cliente recibe la misma respuesta que "no configurado".
+        res.status(503).json({ error: 'livekit-not-configured' });
+      });
   });
 
   const httpServer = createServer(app);
   const gameServer = new Server({
     transport: new WebSocketTransport({ server: httpServer }),
   });
-  gameServer.define(OFFICE_ROOM_NAME, OfficeRoom);
+  // D4: el registro se inyecta via options, `OfficeRoom` no lo crea.
+  gameServer.define(OFFICE_ROOM_NAME, OfficeRoom, { sessions });
 
   return {
     gameServer,
     httpServer,
+    sessions,
     port() {
       const address = httpServer.address() as AddressInfo | null;
       if (!address) throw new Error('server is not listening yet');

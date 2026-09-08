@@ -23,6 +23,7 @@ import {
   MAX_NAME_LENGTH,
   OFFICE_ROOM_NAME,
 } from '../../src/game/officeProtocol.ts';
+import type { LiveSessionRegistry } from './liveSessions.ts';
 import { OfficeState, createPlayerState } from './schema.ts';
 
 export { DEFAULT_NAME, MAX_NAME_LENGTH, OFFICE_ROOM_NAME };
@@ -73,11 +74,23 @@ export function sanitizeStatus(raw: unknown): string {
   return typeof raw === 'string' && STATUSES.has(raw) ? raw : DEFAULT_STATUS;
 }
 
+export interface OfficeRoomOptions {
+  /**
+   * Registro de sesiones vivas para LiveKit (D4), inyectado por
+   * `createOfficeServer.ts` via `gameServer.define(name, Room, { sessions })`.
+   * `OfficeRoom` no crea su propio registro: si lo hiciera como singleton de
+   * modulo, los tests quedarian acoplados al orden de ejecucion.
+   */
+  sessions?: LiveSessionRegistry;
+}
+
 export class OfficeRoom extends Room<OfficeState> {
   private joinCount = 0;
+  private sessions?: LiveSessionRegistry;
 
-  onCreate(): void {
+  onCreate(options?: OfficeRoomOptions): void {
     this.state = new OfficeState();
+    this.sessions = options?.sessions;
 
     this.onMessage('move', (client: Client, message: MoveMessage) => {
       const player = this.state.players.get(client.sessionId);
@@ -109,9 +122,12 @@ export class OfficeRoom extends Room<OfficeState> {
         facing: DEFAULT_FACING,
       }),
     );
+
+    this.sessions?.add(client.sessionId);
   }
 
   onLeave(client: Client): void {
     this.state.players.delete(client.sessionId);
+    this.sessions?.remove(client.sessionId);
   }
 }

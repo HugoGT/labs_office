@@ -186,3 +186,21 @@ describe('OfficeRoom: el cliente no es de fiar', () => {
     expect(long.state.players.get(blank.sessionId)?.name).toBe(DEFAULT_NAME);
   });
 });
+
+describe('OfficeRoom: registro de sesiones vivas para LiveKit (D4)', () => {
+  it('quien entra queda registrado de inmediato, via join real', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+
+    expect(server.sessions.has(room.sessionId)).toBe(true);
+  });
+
+  it('quien sale se quita del registro, via leave real', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+    const sessionId = room.sessionId;
+
+    await room.leave();
+    await waitFor(() => !server.sessions.has(sessionId));
+  });
+});

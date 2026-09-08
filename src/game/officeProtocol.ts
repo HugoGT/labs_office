@@ -9,6 +9,15 @@
 
 export const OFFICE_ROOM_NAME = 'office';
 
+/**
+ * Nombre de la sala LiveKit (PRD 6.3). Distinta constante de
+ * `OFFICE_ROOM_NAME` a proposito aunque hoy compartan valor conceptual: una
+ * es el nombre de sala de Colyseus, la otra el "room" del grant de LiveKit, y
+ * nada obliga a que coincidan si algun dia hay varias oficinas Colyseus
+ * compartiendo una sola sala de audio, o al reves.
+ */
+export const LIVEKIT_ROOM_NAME = 'office-livekit';
+
 /** Cada cuanto publica el jugador local su posicion (ver `createMoveThrottle`). */
 export const MOVE_INTERVAL_MS = 100;
 
