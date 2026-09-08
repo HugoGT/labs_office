@@ -78,4 +78,34 @@ describe('createOfficeBridge', () => {
     expect(onCall).toHaveBeenCalledTimes(1);
     expect(onTeleport).not.toHaveBeenCalled();
   });
+
+  it('entrega el payload de "voice" completo y deja de notificar tras desuscribirse (D3)', () => {
+    const bridge = createOfficeBridge();
+    const handler = vi.fn();
+
+    const unsubscribe = bridge.on('voice', handler);
+    bridge.emit('voice', { selfSessionId: 'yo', sessionIds: ['par-1', 'par-2'], room: 'Cafetería' });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith({
+      selfSessionId: 'yo',
+      sessionIds: ['par-1', 'par-2'],
+      room: 'Cafetería',
+    });
+
+    unsubscribe();
+    bridge.emit('voice', { selfSessionId: null, sessionIds: [], room: null });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('"nearby" conserva exactamente su forma { names: string[] } tras añadir "voice" (guarda de regresion)', () => {
+    const bridge = createOfficeBridge();
+    const handler = vi.fn();
+
+    bridge.on('nearby', handler);
+    bridge.emit('nearby', { names: ['Ana'] });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    const payload = handler.mock.calls[0][0] as Record<string, unknown>;
+    expect(Object.keys(payload)).toEqual(['names']);
+  });
 });

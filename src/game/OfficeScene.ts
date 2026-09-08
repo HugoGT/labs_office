@@ -21,6 +21,7 @@ import {
 import { createRemoteAvatarRegistry, type RemoteAvatarRegistry } from './remoteAvatars';
 import { createPhaserAvatarSink, type RemoteAvatarContainer } from './remoteAvatarSink';
 import { detectRoom, isSpeaking, nearbyIndices, nearbyKey, type Point } from './proximity';
+import { audiblePeers, type AudioPeer } from './proximityAudio';
 import { buildTerrainGrid, findFreeAdjacentTile, type TerrainGrid } from './terrainGrid';
 import { createOfficeTextures } from './textures';
 
@@ -70,6 +71,8 @@ export class OfficeScene extends Phaser.Scene {
   private wasd!: WasdKeys;
   private mmMarker?: Phaser.GameObjects.Arc;
   private lastNearbyKey = '';
+  /** Clave de dedupe de "voice" (D3): incluye sala y `selfSessionId`, no solo los pares. */
+  private lastVoiceKey = '';
   private currentRoom: string | null = null;
   private unsubscribeTeleport?: () => void;
   private unsubscribeCallNpc?: () => void;
@@ -145,6 +148,8 @@ export class OfficeScene extends Phaser.Scene {
 
     if (endpoint === null || endpoint === undefined) {
       this.bridge.emit('presence', { online: false, peers: 0 });
+      // Sin sesion Colyseus nunca se intenta LiveKit (matriz de degradacion, PRD 6.3).
+      this.emitVoice(null, [], this.currentRoom);
       return;
     }
 
@@ -178,14 +183,33 @@ export class OfficeScene extends Phaser.Scene {
         ignoreSessionId: connection.sessionId,
       });
       this.emitPresence(true);
+      // Sesion viva, todavia sin pares conocidos (el primer tic los completa).
+      this.emitVoice(connection.sessionId, [], this.currentRoom);
     } catch {
       if (!this.alive) return;
       this.bridge.emit('presence', { online: false, peers: 0 });
+      this.emitVoice(null, [], this.currentRoom);
     }
   }
 
   private emitPresence(online: boolean): void {
     this.bridge.emit('presence', { online, peers: this.remotes?.sessionIds().length ?? 0 });
+  }
+
+  /**
+   * Unico punto de emision de "voice" (D3): tic, conexion exitosa y fallo de
+   * conexion comparten el mismo `lastVoiceKey`, asi que un evento disparado
+   * por conexion que no cambia nada frente al ultimo tic no duplica el aviso.
+   */
+  private emitVoice(
+    selfSessionId: string | null,
+    sessionIds: string[],
+    room: string | null,
+  ): void {
+    const key = `${nearbyKey(sessionIds)}|${room ?? ''}|${selfSessionId ?? ''}`;
+    if (key === this.lastVoiceKey) return;
+    this.lastVoiceKey = key;
+    this.bridge.emit('voice', { selfSessionId, sessionIds, room });
   }
 
   /** Fusiona tiles solidos en rectangulos estaticos y los colisiona con el jugador (app.js:392-408, D6). */
@@ -242,31 +266,63 @@ export class OfficeScene extends Phaser.Scene {
     );
   }
 
-  /** Cercania + deteccion de sala cada 250 ms (app.js:444-471), emitidas por el puente (D1). */
+  /**
+   * Cercania + deteccion de sala cada 250 ms (app.js:444-471), emitidas por el
+   * puente (D1). Desde este cambio (D7) tambien pliega `this.remotes` en la
+   * misma regla de audibilidad que gobierna las suscripciones de LiveKit:
+   * los chips y el audio nunca pueden desacordar sobre quien esta presente.
+   */
   private proximityTick(): void {
     const player = this.player;
     const now = this.time.now;
+    const room = detectRoom({ x: player.x, y: player.y }, ROOMS);
+    const selfSessionId = this.connection?.sessionId ?? null;
+
+    // Sala detectada POR PAR, no la del jugador: cada avatar remoto puede
+    // estar en una sala distinta a la propia.
+    const audioPeers: AudioPeer[] = (this.remotes?.sessionIds() ?? []).flatMap((sessionId) => {
+      const avatar = this.remotes?.get(sessionId);
+      if (!avatar) return [];
+      return [{ sessionId, x: avatar.x, y: avatar.y, room: detectRoom(avatar, ROOMS) }];
+    });
+    const audibleIds = audiblePeers({
+      self: { sessionId: selfSessionId, x: player.x, y: player.y, room },
+      peers: audioPeers,
+      radius: PROX_RADIUS,
+    });
+    const peerNames = audibleIds
+      .map((id) => this.remotes?.get(id)?.nameText)
+      .filter((name): name is string => name !== undefined);
+
     const points: Point[] = this.npcs.map((c) => ({ x: c.x, y: c.y }));
     const nearSet = new Set(nearbyIndices({ x: player.x, y: player.y }, points, PROX_RADIUS));
 
-    const names: string[] = [];
+    const npcNames: string[] = [];
     this.npcs.forEach((c, i) => {
       const near = nearSet.has(i);
       c.ring.setVisible(near && isSpeaking(now, c.phase));
-      if (near) names.push(c.nameText);
+      if (near) npcNames.push(c.nameText);
     });
 
+    // D7: los pares reales lideran el arreglo. `BottomBar` recorta a
+    // `NEARBY_CHIP_LIMIT`; con los NPCs primero un companero audible podria
+    // quedar en el "+N" y eso deshace la decision que este cambio implementa.
+    // La asimetria es deliberada: los NPCs no tienen audio, son simulacion
+    // local y su seleccion sigue siendo pura por radio -- aplicarles la regla
+    // de sala cambiaria su comportamiento visible sin ningun beneficio.
+    const names = [...peerNames, ...npcNames];
     const key = nearbyKey(names);
     if (key !== this.lastNearbyKey) {
       this.lastNearbyKey = key;
       this.bridge.emit('nearby', { names });
     }
 
-    const room = detectRoom({ x: player.x, y: player.y }, ROOMS);
     if (room !== this.currentRoom) {
       this.currentRoom = room;
       this.bridge.emit('room', { room });
     }
+
+    this.emitVoice(selfSessionId, audibleIds, room);
   }
 
   /** Mueve al jugador a una tile libre adyacente al NPC objetivo (app.js:474-486). */

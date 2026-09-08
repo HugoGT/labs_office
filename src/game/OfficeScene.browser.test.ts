@@ -283,6 +283,146 @@ describe('OfficeScene: proximidad y salas (app.js:444-471, cada 250ms)', () => {
   });
 });
 
+describe('OfficeScene: audio por proximidad (D3) y D7 (pares reales en los chips)', () => {
+  it('emite "voice" con los sessionIds reales audibles, sin repetir en tics identicos', async () => {
+    const bridge = createOfficeBridge();
+    const voices: { selfSessionId: string | null; sessionIds: string[]; room: string | null }[] =
+      [];
+    bridge.on('voice', (payload) => voices.push(payload));
+    const connector = fakeConnector('mi-sesion');
+
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    const player = findPlayer(scene);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', x: player.x, y: player.y }));
+
+    await vi.waitFor(() => {
+      expect(voices.some((v) => v.sessionIds.includes('par-1'))).toBe(true);
+    });
+
+    const countAfterFirstNotification = voices.length;
+    // Sin mover a nadie, el proximo tic (250ms) no debe repetir la notificacion.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(voices.length).toBe(countAfterFirstNotification);
+  });
+
+  it('un cruce de sala reemite "voice" aunque el conjunto de pares audibles no cambie', async () => {
+    const bridge = createOfficeBridge();
+    const voices: { selfSessionId: string | null; sessionIds: string[]; room: string | null }[] =
+      [];
+    bridge.on('voice', (payload) => voices.push(payload));
+    const connector = fakeConnector('mi-sesion');
+
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    const player = findPlayer(scene);
+    // Un par lejano que nunca entra por radio ni por sala en ningun lado del cruce.
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'lejano', x: 5000, y: 5000 }));
+
+    await vi.waitFor(() => expect(voices.length).toBeGreaterThan(0));
+    const countBeforeCrossing = voices.length;
+
+    // Sala de Juntas: tile (50,2) tamano 13x14 -> dentro en (52,4).
+    player.setPosition(52 * TILE, 4 * TILE);
+
+    await vi.waitFor(() => {
+      expect(voices.at(-1)?.room).toBe('Sala de Juntas');
+    });
+    expect(voices.length).toBeGreaterThan(countBeforeCrossing);
+    // El conjunto audible sigue vacio: la clave de dedupe cambio solo por la sala.
+    expect(voices.at(-1)?.sessionIds).toEqual([]);
+  });
+
+  it('"nearby" incluye el nombre de un par real audible antes que los nombres de NPCs (D7)', async () => {
+    const bridge = createOfficeBridge();
+    const events: string[][] = [];
+    bridge.on('nearby', (payload) => events.push(payload.names));
+    const connector = fakeConnector('mi-sesion');
+
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    const player = findPlayer(scene);
+    const closestNpc = findNpcs(scene)[0];
+    player.setPosition(closestNpc.x, closestNpc.y);
+    connector
+      .handlers()!
+      .onAdd(remoteSnapshot({ sessionId: 'par-1', name: 'Ana Real', x: player.x, y: player.y }));
+
+    await vi.waitFor(
+      () => {
+        expect(
+          events.some((names) => names[0] === 'Ana Real' && names.includes(closestNpc.nameText)),
+        ).toBe(true);
+      },
+      { timeout: 2000 },
+    );
+  });
+
+  it(
+    'D7 asimetria: un par fuera de la sala del jugador queda fuera de "voice" y de "nearby" ' +
+      'mientras un par DENTRO de la sala y un NPC en radio si aparecen en "nearby"',
+    async () => {
+      const bridge = createOfficeBridge();
+      const voices: { sessionIds: string[] }[] = [];
+      const nearbyEvents: string[][] = [];
+      bridge.on('voice', (payload) => voices.push(payload));
+      bridge.on('nearby', (payload) => nearbyEvents.push(payload.names));
+      const connector = fakeConnector('mi-sesion');
+
+      const { scene } = await bootOfficeScene(bridge, {
+        endpoint: 'ws://fake',
+        connect: connector.connect,
+      });
+      await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+      const player = findPlayer(scene);
+      const npc = findNpcs(scene)[0];
+      // Jugador dentro de "Sala de Juntas"; el NPC se reubica junto a el (regla pura de radio,
+      // ajena a la sala: por eso el NPC sigue apareciendo aunque no "comparta sala" con nadie).
+      player.setPosition(52 * TILE, 4 * TILE);
+      npc.setPosition(52 * TILE, 4 * TILE);
+      // Par legitimo: comparte la misma sala que el jugador -> audible y en los chips.
+      connector.handlers()!.onAdd(
+        remoteSnapshot({
+          sessionId: 'companera-en-sala',
+          name: 'Compañera De Sala',
+          x: 52 * TILE,
+          y: 4 * TILE,
+        }),
+      );
+      // Par excluido: un pixel al oeste del limite de la sala, dentro del radio pero fuera de ella.
+      connector.handlers()!.onAdd(
+        remoteSnapshot({
+          sessionId: 'vecina-de-puerta',
+          name: 'Vecina De Puerta',
+          x: 50 * TILE - 1,
+          y: 4 * TILE,
+        }),
+      );
+
+      await vi.waitFor(
+        () => {
+          expect(voices.some((v) => v.sessionIds.includes('companera-en-sala'))).toBe(true);
+          expect(nearbyEvents.some((names) => names.includes('Compañera De Sala'))).toBe(true);
+          expect(nearbyEvents.some((names) => names.includes(npc.nameText))).toBe(true);
+        },
+        { timeout: 2000 },
+      );
+
+      expect(voices.some((v) => v.sessionIds.includes('vecina-de-puerta'))).toBe(false);
+      expect(nearbyEvents.every((names) => !names.includes('Vecina De Puerta'))).toBe(true);
+    },
+  );
+});
+
 describe('OfficeScene: comando teleportTo via el puente (app.js:474-486, D2)', () => {
   it('mueve al jugador a una tile libre adyacente al NPC objetivo', async () => {
     const bridge = createOfficeBridge();

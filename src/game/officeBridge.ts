@@ -24,6 +24,14 @@ export interface OfficeEventMap {
    * la oficina sigue siendo jugable en solitario con los NPCs simulados.
    */
   presence: { online: boolean; peers: number };
+  /**
+   * Instantanea completa de la capa de audio (D3): quien soy, a quien
+   * escucho y en que sala estoy. Un solo evento aditivo en vez de dos
+   * (sesion + audibles) para que quien lo consuma nunca actue sobre un par
+   * a medio actualizar (sala nueva, pares viejos). `selfSessionId: null`
+   * significa "desconectate de LiveKit"; no null dispara pedir un token.
+   */
+  voice: { selfSessionId: string | null; sessionIds: string[]; room: string | null };
 }
 
 export interface OfficeCommandMap {
