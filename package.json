@@ -24,6 +24,8 @@
     "@colyseus/ws-transport": "~0.16.5",
     "colyseus.js": "0.16.22",
     "express": "^4.22.2",
+    "livekit-client": "2.22.3",
+    "livekit-server-sdk": "2.18.0",
     "phaser": "3.90.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"

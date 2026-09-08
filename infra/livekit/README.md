@@ -107,3 +107,93 @@ separado como dice el PRD. No la resolvimos porque no toca todavía.
   necesita CPU dedicada por participante activo y Egress transcodifica en tiempo real.
 - **Política de retención.** El PRD §13 avisa que el vídeo diario acumula varios
   GB/semana. Aquí no hay ninguna regla de borrado.
+
+## Spike de compatibilidad `livekit-client` (slice 1 de `livekit-proximity-audio`, 2026-09-07)
+
+Ejecutado con `node infra/livekit/spike-client-compat.mjs` contra el stack pineado
+de esta misma carpeta (`livekit` + `redis`). Registro empírico, no documentación:
+cada valor de la tabla proviene de un evento observado en una ejecución real con
+dos páginas de Chromium (Playwright) y `livekit-client@2.22.3`.
+
+### Imágenes pineadas (antes flotaban en `:latest`)
+
+| Servicio | Tag | Digest |
+|---|---|---|
+| `livekit/livekit-server` | `v1.13.5` | `sha256:3497163e15c48fef6e7830c78716f9e9d5edc28abf7aa90b61c86e93bbc306b1` |
+| `livekit/egress` | `v1.14.1` | `sha256:bf2b648b947349c3e9ff7aa8c718f00378d5c06af7624652a3653318e00333ce` |
+| `minio/minio` | `RELEASE.2025-09-07T16-13-09Z` | `sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e` |
+| `minio/mc` | `RELEASE.2025-08-13T08-35-41Z` | `sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727` |
+| `redis` | `7.4.11-alpine` | `sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf` |
+
+Solo la versión de `livekit-server` estaba en el registro de la validación anterior
+(este README, sección "Estado"). Las otras cuatro nunca se anotaron, así que
+inventar un número habría falseado la validación: se resolvieron corriendo
+`docker compose pull` y luego `docker image inspect --format '{{index
+.RepoDigests 0}}'`, y el tag semántico/`RELEASE.*` de cada una se confirmó
+haciendo `docker pull <imagen>:<tag>` por separado y comprobando que el digest
+resultante es idéntico (sí lo es, para las cuatro).
+
+### Las seis evidencias exigidas por el diseño
+
+| # | Evidencia | Resultado observado |
+|---|---|---|
+| 1 | Versión de servidor + protocolo negociado | `room.serverInfo` en el cliente: `{"edition":"Standard","version":"1.13.5","protocol":17,"nodeId":"ND_VizRcAFYr2Vo","agentProtocol":1}` — coincide con el pin `v1.13.5` |
+| 2 | B no recibe `TrackSubscribed` antes de llamar `setSubscribed(true)` | `false` (ningún evento indebido en una ventana de espera de 500 ms tras publicar A) |
+| 3 | B recibe `TrackSubscribed` con `MediaStreamTrack` real tras `setSubscribed(true)` | `{"hasMediaStreamTrack":true,"mediaStreamTrackKind":"audio","mediaStreamTrackReadyState":"live"}` |
+| 4 | B recibe `TrackUnsubscribed` tras `setSubscribed(false)` | `{"fired":true,"publicationSubscribed":false}` |
+| 5 | Firma real de `AccessToken.toJwt()` | Confirmado por ejecución: devuelve una `Promise<string>` (no se asumió del `.d.ts`, se comprobó `result instanceof Promise === true`) |
+| 6 | Digests resueltos de las 5 imágenes | Ver tabla de arriba |
+
+**Ningún STOP-GATE se disparó.** Las fases 2–4 de `livekit-proximity-audio` pueden proceder.
+
+### Hallazgos ADJUST — resultado empírico distinto al asumido en el diseño
+
+El diseño (#323) asumió dos comportamientos sin poder confirmarlos en ese momento.
+Este spike los comprobó y **ambos resultaron distintos de lo asumido**:
+
+**a) `livekit-client` bajo jsdom.** Se asumió que el módulo era "hostil a jsdom"
+y que por eso `useProximityAudio.ts` necesitaría un `import()` dinámico de
+`livekitRoom.ts`. Comprobado con un test real bajo el proyecto `unit` (jsdom):
+- `import('livekit-client')` **no lanza** bajo jsdom.
+- `new Room()` **no lanza** bajo jsdom.
+- Solo `room.connect(...)` lanza, y lo hace con un `Error` normal y capturable:
+  `"LiveKit doesn't seem to be supported on this browser. Try to update your
+  browser and make sure no browser extensions are disabling webRTC."`
+
+  Es decir: el módulo se puede importar estáticamente sin romper jsdom: el
+  único punto de fallo es `connect()`, que ya es exactamente el punto que
+  `useProximityAudio.ts` debe envolver en un `try/catch` para degradar a
+  `available:false` sin relanzar (ver spec, "Permission denial degrades to
+  off"). El `import()` dinámico dejó de ser una necesidad de compatibilidad
+  jsdom demostrada; sigue siendo una opción defendible por otras razones
+  (aislar el bundle, mantener el seno explícito como con `createGame`), pero
+  la fase 4A debe decidirlo sabiendo que la premisa original no se sostuvo.
+
+**b) Flags de dispositivo falso bajo `@vitest/browser-playwright` 4.1.11.** Se
+asumió que no eran configurables y que los tests de micrófono/cámara de
+`livekitRoom.browser.test.ts` (tarea 4A.5) tendrían que ser manuales. Comprobado
+con un test real bajo el proyecto `browser`, agregando temporalmente a
+`vite.config.ts`:
+
+```ts
+provider: playwright({
+  launchOptions: { args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] },
+  contextOptions: { permissions: ['microphone', 'camera'] },
+}),
+```
+
+Resultado: `navigator.mediaDevices.enumerateDevices()` sí devolvió dispositivos
+falsos (`"Fake Default Audio Input"`, `"fake_device_0"`, etc.) y
+`getUserMedia({ audio: true })` entregó un track real con `readyState: "live"`.
+**Los flags sí son configurables** vía `PlaywrightProviderOptions.launchOptions`
+y `contextOptions.permissions`, expuestos por el propio paquete instalado. El
+cambio de configuración se revirtió después de esta comprobación porque no es
+tarea del slice 1 — pero la fase 4A ya no tiene que asumir que
+`livekitRoom.browser.test.ts` es forzosamente manual; puede intentar correrlo
+en `pnpm test:all` con esta configuración antes de resignarse al
+`describe.skipIf`.
+
+Ninguno de los dos hallazgos detiene las fases 2–4. Ambos quedan registrados
+aquí y en Engram (`sdd/livekit-proximity-audio/apply-progress`) para que la
+fase 4A los use al decidir su propio diseño, en vez de heredar una premisa que
+este spike refutó.

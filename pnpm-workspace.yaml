@@ -14,3 +14,6 @@ overrides:
 # CI no necesita toolchain de compilacion nativa.
 allowBuilds:
   msgpackr-extract: false
+
+minimumReleaseAgeExclude:
+  - livekit-client@2.22.3
