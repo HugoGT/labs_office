@@ -46,9 +46,6 @@ contra Chromium y WebGL de verdad; mockearlo en jsdom solo probaría el mock.
       stack está en el protocolo por cable (schema 3 contra schema 4), y un doble lo pasaría
       por alto. Incluye `src/**/*.node.test.ts`, que es donde vive el test del envoltorio de
       cliente.
-- [ ] Envolver `infra/livekit/test-recording.sh` en una suite con asserts y código
-      de salida (bats o similar). Hoy valida a mano y necesita Docker, así que
-      quedó fuera de la suite ejecutable.
 - [x] Tests del servidor Colyseus: 10 de integración sobre presencia, movimiento y validación
       («el cliente no es de fiar»: recorte a los límites del mundo, descarte de `move` no
       numérico, nombre acotado).
