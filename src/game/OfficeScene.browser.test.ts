@@ -22,6 +22,28 @@ afterEach(() => {
   for (const host of hosts.splice(0)) host.remove();
 });
 
+/**
+ * Margen unico para toda espera que dependa del bucle de Phaser. En el runner
+ * de CI el hilo principal se atasca segundos enteros: una prueba con 2000ms de
+ * margen tardo 8263ms de reloj de pared alli y fallo sin que la escena hubiese
+ * hecho nada mal. El margen se fija holgado a proposito -- lo que decide la
+ * prueba es la condicion, no el cronometro.
+ */
+const LOOP_WAIT = { timeout: 20000, interval: 50 } as const;
+
+/**
+ * Espera avanzando el RELOJ DEL JUEGO, que solo corre cuando corren los frames.
+ * Un `setTimeout` real puede vencer sin que la escena haya dado un solo tick de
+ * proximidad (250ms de reloj de juego), y entonces la prueba mide la velocidad
+ * del runner en vez de la regla que dice medir.
+ */
+async function advanceGameClock(scene: Phaser.Scene, ms: number): Promise<void> {
+  const target = scene.time.now + ms;
+  await vi.waitFor(() => {
+    expect(scene.time.now).toBeGreaterThanOrEqual(target);
+  }, LOOP_WAIT);
+}
+
 async function bootOfficeScene(
   bridge = createOfficeBridge(),
   options: OfficeSceneOptions = {},
@@ -49,7 +71,7 @@ async function bootOfficeScene(
     expect(game.scene.getScene(OFFICE_SCENE_KEY)?.scene.settings.status).toBe(
       Phaser.Scenes.RUNNING,
     );
-  });
+  }, LOOP_WAIT);
 
   return { scene: game.scene.getScene(OFFICE_SCENE_KEY) as Phaser.Scene, bridge };
 }
@@ -220,16 +242,15 @@ describe('OfficeScene: proximidad y salas (app.js:444-471, cada 250ms)', () => {
     // Coloca al jugador justo sobre el primer NPC: queda estrictamente dentro del radio.
     player.setPosition(closestNpc.x, closestNpc.y);
 
-    await vi.waitFor(
-      () => {
-        expect(events.some((names) => names.includes(closestNpc.nameText))).toBe(true);
-      },
-      { timeout: 2000 },
-    );
+    await vi.waitFor(() => {
+      expect(events.some((names) => names.includes(closestNpc.nameText))).toBe(true);
+    }, LOOP_WAIT);
 
     const countAfterFirstNotification = events.length;
-    // Sin mover al jugador, el proximo tick (250ms) no debe repetir la notificacion.
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    // Sin mover al jugador, los proximos tics (250ms cada uno) no deben repetir
+    // la notificacion. La ventana se mide en reloj de juego: 600ms reales pueden
+    // no contener ni un tic y entonces el dedupe no quedaria probado.
+    await advanceGameClock(scene, 600);
     expect(events.length).toBe(countAfterFirstNotification);
   });
 
@@ -247,21 +268,26 @@ describe('OfficeScene: proximidad y salas (app.js:444-471, cada 250ms)', () => {
       // tick de proximidad corre y que estamos dentro del radio. Sin este anclaje, el
       // `false` inicial de `spawnNpcs` (el anillo nace invisible) bastaria para dar el
       // test por bueno sin haber observado el ciclo siquiera.
-      await vi.waitFor(() => expect(npc.ring.visible).toBe(true), { timeout: 6000 });
+      await vi.waitFor(() => expect(npc.ring.visible).toBe(true), LOOP_WAIT);
 
       // Ya encendido y sin movernos, tiene que apagarse dentro de un ciclo de 4000ms:
       // `speaking = near && ((now + phase) % 4000) < 1800`. Esto es lo que cae si
       // alguien simplifica a `setVisible(near)` o a `setVisible(true)`.
+      //
+      // El muestreo avanza por reloj de juego (dos ciclos completos de 4000ms):
+      // 50 esperas reales de 100ms no garantizan ni un ciclo cuando el runner
+      // rinde a una fraccion de la velocidad local.
       let wentSilentWhileNear = false;
-      for (let i = 0; i < 50 && !wentSilentWhileNear; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
+      const deadline = scene.time.now + 2 * 4000;
+      while (!wentSilentWhileNear && scene.time.now < deadline) {
+        await advanceGameClock(scene, 100);
         const d = Phaser.Math.Distance.Between(player.x, player.y, npc.x, npc.y);
         wentSilentWhileNear = d < PROX_RADIUS && !npc.ring.visible;
       }
 
       expect(wentSilentWhileNear).toBe(true);
     },
-    20000,
+    60000,
   );
 
   it('emite "room" al entrar a una sala', async () => {
@@ -274,12 +300,9 @@ describe('OfficeScene: proximidad y salas (app.js:444-471, cada 250ms)', () => {
     // Sala de Juntas: tile (50,2) tamano 13x14 -> dentro en (52,4).
     player.setPosition(52 * TILE, 4 * TILE);
 
-    await vi.waitFor(
-      () => {
-        expect(rooms).toContain('Sala de Juntas');
-      },
-      { timeout: 2000 },
-    );
+    await vi.waitFor(() => {
+      expect(rooms).toContain('Sala de Juntas');
+    }, LOOP_WAIT);
   });
 });
 
@@ -295,17 +318,18 @@ describe('OfficeScene: audio por proximidad (D3) y D7 (pares reales en los chips
       endpoint: 'ws://fake',
       connect: connector.connect,
     });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
     const player = findPlayer(scene);
     connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', x: player.x, y: player.y }));
 
     await vi.waitFor(() => {
       expect(voices.some((v) => v.sessionIds.includes('par-1'))).toBe(true);
-    });
+    }, LOOP_WAIT);
 
     const countAfterFirstNotification = voices.length;
-    // Sin mover a nadie, el proximo tic (250ms) no debe repetir la notificacion.
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    // Sin mover a nadie, los proximos tics (250ms cada uno) no deben repetir la
+    // notificacion; la ventana se cuenta en reloj de juego, no de pared.
+    await advanceGameClock(scene, 600);
     expect(voices.length).toBe(countAfterFirstNotification);
   });
 
@@ -320,12 +344,12 @@ describe('OfficeScene: audio por proximidad (D3) y D7 (pares reales en los chips
       endpoint: 'ws://fake',
       connect: connector.connect,
     });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
     const player = findPlayer(scene);
     // Un par lejano que nunca entra por radio ni por sala en ningun lado del cruce.
     connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'lejano', x: 5000, y: 5000 }));
 
-    await vi.waitFor(() => expect(voices.length).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(voices.length).toBeGreaterThan(0), LOOP_WAIT);
     const countBeforeCrossing = voices.length;
 
     // Sala de Juntas: tile (50,2) tamano 13x14 -> dentro en (52,4).
@@ -333,7 +357,7 @@ describe('OfficeScene: audio por proximidad (D3) y D7 (pares reales en los chips
 
     await vi.waitFor(() => {
       expect(voices.at(-1)?.room).toBe('Sala de Juntas');
-    });
+    }, LOOP_WAIT);
     expect(voices.length).toBeGreaterThan(countBeforeCrossing);
     // El conjunto audible sigue vacio: la clave de dedupe cambio solo por la sala.
     expect(voices.at(-1)?.sessionIds).toEqual([]);
@@ -349,7 +373,7 @@ describe('OfficeScene: audio por proximidad (D3) y D7 (pares reales en los chips
       endpoint: 'ws://fake',
       connect: connector.connect,
     });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
     const player = findPlayer(scene);
     const closestNpc = findNpcs(scene)[0];
     player.setPosition(closestNpc.x, closestNpc.y);
@@ -357,14 +381,11 @@ describe('OfficeScene: audio por proximidad (D3) y D7 (pares reales en los chips
       .handlers()!
       .onAdd(remoteSnapshot({ sessionId: 'par-1', name: 'Ana Real', x: player.x, y: player.y }));
 
-    await vi.waitFor(
-      () => {
-        expect(
-          events.some((names) => names[0] === 'Ana Real' && names.includes(closestNpc.nameText)),
-        ).toBe(true);
-      },
-      { timeout: 2000 },
-    );
+    await vi.waitFor(() => {
+      expect(
+        events.some((names) => names[0] === 'Ana Real' && names.includes(closestNpc.nameText)),
+      ).toBe(true);
+    }, LOOP_WAIT);
   });
 
   it(
@@ -382,7 +403,7 @@ describe('OfficeScene: audio por proximidad (D3) y D7 (pares reales en los chips
         endpoint: 'ws://fake',
         connect: connector.connect,
       });
-      await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+      await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
       const player = findPlayer(scene);
       const npc = findNpcs(scene)[0];
       // Jugador dentro de "Sala de Juntas"; el NPC se reubica junto a el (regla pura de radio,
@@ -408,14 +429,11 @@ describe('OfficeScene: audio por proximidad (D3) y D7 (pares reales en los chips
         }),
       );
 
-      await vi.waitFor(
-        () => {
-          expect(voices.some((v) => v.sessionIds.includes('companera-en-sala'))).toBe(true);
-          expect(nearbyEvents.some((names) => names.includes('Compañera De Sala'))).toBe(true);
-          expect(nearbyEvents.some((names) => names.includes(npc.nameText))).toBe(true);
-        },
-        { timeout: 2000 },
-      );
+      await vi.waitFor(() => {
+        expect(voices.some((v) => v.sessionIds.includes('companera-en-sala'))).toBe(true);
+        expect(nearbyEvents.some((names) => names.includes('Compañera De Sala'))).toBe(true);
+        expect(nearbyEvents.some((names) => names.includes(npc.nameText))).toBe(true);
+      }, LOOP_WAIT);
 
       expect(voices.some((v) => v.sessionIds.includes('vecina-de-puerta'))).toBe(false);
       expect(nearbyEvents.every((names) => !names.includes('Vecina De Puerta'))).toBe(true);
