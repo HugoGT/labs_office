@@ -76,8 +76,13 @@ export function BottomBar({
         )}
       </div>
       <div className={styles.nearby}>
-        {visibleChips.map((name) => (
-          <span key={name} className={styles.chip}>
+        {visibleChips.map((name, index) => (
+          // Nombres duplicados son alcanzables entre companeros reales
+          // (#321: ambos siguen como "HugoGT" hasta que llegue Google OAuth),
+          // asi que `key={name}` colisionaria. La key se cualifica por
+          // posicion en vez de deduplicar nombres (D7): perder un chip por
+          // colision de key ocultaria a una persona real que si se escucha.
+          <span key={`${name}-${index}`} className={styles.chip}>
             🔊 {name}
           </span>
         ))}

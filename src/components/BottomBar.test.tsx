@@ -98,6 +98,66 @@ describe('BottomBar', () => {
   });
 });
 
+describe('BottomBar: chips de companeros reales (D7)', () => {
+  /**
+   * Control: demuestra que el spy de `console.error` SI detecta la
+   * advertencia real de React por keys duplicadas cuando estas ocurren de
+   * verdad, fuera de `BottomBar`. Sin este control, una aserción de ausencia
+   * en el siguiente test sería vacía — no probaría que el mecanismo de
+   * deteccion funciona.
+   */
+  it('control: el spy de console.error detecta la advertencia real de React ante keys duplicadas', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      render(
+        <div>
+          {['x', 'x'].map((n) => (
+            <span key={n}>{n}</span>
+          ))}
+        </div>,
+      );
+
+      const sawDuplicateKeyWarning = errorSpy.mock.calls.some((args) =>
+        String(args[0]).includes('two children with the same key'),
+      );
+      expect(sawDuplicateKeyWarning).toBe(true);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('dos companeros reales con el mismo nombre no disparan la advertencia de React por keys duplicadas', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      renderBar({ nearby: ['HugoGT', 'HugoGT'] });
+
+      const sawDuplicateKeyWarning = errorSpy.mock.calls.some((args) =>
+        String(args[0]).includes('two children with the same key'),
+      );
+      expect(sawDuplicateKeyWarning).toBe(false);
+      // Ademas de no advertir, ambos chips deben seguir en el DOM: la
+      // regresion prohibida es deduplicar nombres, no solo silenciar el warning.
+      expect(screen.getAllByText('🔊 HugoGT')).toHaveLength(2);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('los chips de companeros reales se renderizan antes que los de NPCs, en el orden recibido', () => {
+    renderBar({ nearby: ['HugoGT', 'Ana'] });
+
+    const chips = screen.getAllByText(/^🔊 /).map((el) => el.textContent);
+    expect(chips).toEqual(['🔊 HugoGT', '🔊 Ana']);
+  });
+
+  it('el indicador de desborde cuenta la lista fusionada, incluyendo nombres duplicados', () => {
+    renderBar({ nearby: ['HugoGT', 'HugoGT', 'Ana', 'Beto', 'Caro', 'Dani', 'Eli'] });
+
+    expect(screen.getAllByText(/^🔊 /)).toHaveLength(6);
+    expect(screen.getByText('+1')).toBeInTheDocument();
+  });
+});
+
 describe('BottomBar: presencia de avatares reales', () => {
   it('muestra cuantos companeros reales hay conectados', () => {
     renderBar({ presence: { online: true, peers: 3 } });

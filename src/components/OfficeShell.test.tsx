@@ -122,6 +122,19 @@ describe('OfficeShell', () => {
     expect(screen.getByText('🔊 Beto')).toBeInTheDocument();
   });
 
+  it('la lista fusionada de nearby llega a BottomBar sin filtrar ni reordenar (companeros reales primero, tal cual la emite la escena)', () => {
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    // `OfficeScene.proximityTick` (3A) ya antepone companeros reales a NPCs
+    // y puede repetir nombres (D7); `OfficeShell` no debe filtrar, ordenar
+    // ni deduplicar nada de eso antes de pasarlo a `BottomBar`.
+    act(() => bridge.emit('nearby', { names: ['HugoGT', 'HugoGT', 'Ana', 'Beto'] }));
+
+    const chips = screen.getAllByText(/^🔊 /).map((el) => el.textContent);
+    expect(chips).toEqual(['🔊 HugoGT', '🔊 HugoGT', '🔊 Ana', '🔊 Beto']);
+  });
+
   it('al recibir npcmenu del bridge, abre el ContextMenu con nombre y estado', () => {
     render(<OfficeShell />);
     const bridge = createGameMock.mock.calls[0][1];
