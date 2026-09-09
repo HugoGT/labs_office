@@ -3,6 +3,8 @@ import styles from './BottomBar.module.css';
 export interface BottomBarProps {
   micOn: boolean;
   camOn: boolean;
+  /** `false` mientras no hay conexion viva a LiveKit (matriz de degradacion). */
+  audioAvailable: boolean;
   recording: boolean;
   room: string | null;
   nearby: string[];
@@ -15,6 +17,9 @@ export interface BottomBarProps {
 /** Cuantos chips cercanos se muestran antes de colapsar el resto (`app.js:565`). */
 const NEARBY_CHIP_LIMIT = 6;
 
+/** Explica el `disabled` de mic/camara cuando no hay conexion viva a LiveKit. */
+const AUDIO_UNAVAILABLE_TITLE = 'Audio no disponible: sin conexion a LiveKit';
+
 /**
  * Barra inferior: mic/camara/grabar + estado de audio + chips de cercania,
  * portada de `#bar` (`index.html`, `app.js:516-571`). Puramente
@@ -23,6 +28,7 @@ const NEARBY_CHIP_LIMIT = 6;
 export function BottomBar({
   micOn,
   camOn,
+  audioAvailable,
   recording,
   room,
   nearby,
@@ -49,10 +55,26 @@ export function BottomBar({
       >
         {presence.online ? `🟢 ${presence.peers} en línea` : '⚪ Sin servidor'}
       </div>
-      <button type="button" className={styles.btn} aria-pressed={micOn} onClick={onToggleMic}>
+      {/* `disabled`+`title` mientras LiveKit no esta disponible, espejando el
+          patron ya existente en el boton de grabar (`disabled={room === null}`). */}
+      <button
+        type="button"
+        className={styles.btn}
+        aria-pressed={micOn}
+        disabled={!audioAvailable}
+        title={!audioAvailable ? AUDIO_UNAVAILABLE_TITLE : undefined}
+        onClick={onToggleMic}
+      >
         {micOn ? '🎙️ Mic' : '🔇 Mic'}
       </button>
-      <button type="button" className={styles.btn} aria-pressed={camOn} onClick={onToggleCam}>
+      <button
+        type="button"
+        className={styles.btn}
+        aria-pressed={camOn}
+        disabled={!audioAvailable}
+        title={!audioAvailable ? AUDIO_UNAVAILABLE_TITLE : undefined}
+        onClick={onToggleCam}
+      >
         {camOn ? '📷 Cámara' : '🚫 Cámara'}
       </button>
       <button

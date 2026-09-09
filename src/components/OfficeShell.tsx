@@ -1,7 +1,9 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { resolveLivekitConfig } from '../game/livekitEndpoint';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
 import { useOfficeBridge } from '../hooks/useOfficeBridge';
+import { useProximityAudio } from '../hooks/useProximityAudio';
 import { BottomBar } from './BottomBar';
 import { ContextMenu, type NpcMenuAction } from './ContextMenu';
 import { GameCanvas } from './GameCanvas';
@@ -28,8 +30,17 @@ export function OfficeShell() {
       hostname: window.location.hostname,
     }),
   );
-  const [micOn, setMicOn] = useState(true);
-  const [camOn, setCamOn] = useState(true);
+  // Se resuelve una sola vez, en el mismo espiritu que `endpoint`: cambiar la
+  // configuracion de LiveKit a mitad de sesion no tiene sentido de producto.
+  const [livekitConfig] = useState(() =>
+    resolveLivekitConfig({
+      configuredUrl: import.meta.env.VITE_LIVEKIT_URL as string | undefined,
+      officeEndpoint: endpoint,
+    }),
+  );
+  const { micOn, camOn, audioAvailable, toggleMic, toggleCam } = useProximityAudio(bridge, {
+    config: livekitConfig,
+  });
   const [recording, setRecording] = useState(false);
   const [toastMessage, setToastMessage] = useState<ReactNode | null>(null);
   const previousRoomRef = useRef<string | null>(null);
@@ -96,12 +107,13 @@ export function OfficeShell() {
       <BottomBar
         micOn={micOn}
         camOn={camOn}
+        audioAvailable={audioAvailable}
         recording={recording}
         room={room}
         nearby={nearby}
         presence={presence}
-        onToggleMic={() => setMicOn((value) => !value)}
-        onToggleCam={() => setCamOn((value) => !value)}
+        onToggleMic={toggleMic}
+        onToggleCam={toggleCam}
         onToggleRecord={() => {
           if (!room) return;
           setRecording((value) => !value);

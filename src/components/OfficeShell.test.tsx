@@ -2,15 +2,31 @@ import { act, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGame } from '../game/createGame';
+import { useProximityAudio } from '../hooks/useProximityAudio';
 import { OfficeShell } from './OfficeShell';
 
 vi.mock('../game/createGame', () => ({ createGame: vi.fn() }));
+// El hook ya tiene su propia suite (`useProximityAudio.test.ts`, slice 4A);
+// aqui solo importa que OfficeShell lo llame y reenvie lo que devuelve,
+// igual que `createGame` se mockea para aislar Phaser (mismo patron ya
+// establecido en este archivo).
+vi.mock('../hooks/useProximityAudio', () => ({ useProximityAudio: vi.fn() }));
 
 const createGameMock = vi.mocked(createGame);
+const useProximityAudioMock = vi.mocked(useProximityAudio);
 
 beforeEach(() => {
   vi.clearAllMocks();
   createGameMock.mockReturnValue({ destroy: vi.fn() } as unknown as Phaser.Game);
+  // Por defecto: apagado y sin LiveKit disponible (#321 decision 2 y 3) — los
+  // tests que necesitan otro estado lo sobreescriben explicitamente.
+  useProximityAudioMock.mockReturnValue({
+    micOn: false,
+    camOn: false,
+    audioAvailable: false,
+    toggleMic: vi.fn(),
+    toggleCam: vi.fn(),
+  });
 });
 
 describe('OfficeShell', () => {
@@ -97,19 +113,77 @@ describe('OfficeShell', () => {
     expect(screen.queryByText('💾 Saliste de la sala: grabación detenida')).not.toBeInTheDocument();
   });
 
-  it('mic se activa/desactiva independientemente de la camara', async () => {
-    const user = userEvent.setup();
+  it('mic y camara empiezan apagados en el montaje (#321 decision 2): ningun dispositivo se pide al unirse', () => {
     render(<OfficeShell />);
 
+    expect(screen.getByRole('button', { name: /Mic/ })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: /Cámara/ })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('micOn/camOn/audioAvailable fluyen del hook a BottomBar, no de estado local propio', () => {
+    useProximityAudioMock.mockReturnValue({
+      micOn: true,
+      camOn: false,
+      audioAvailable: true,
+      toggleMic: vi.fn(),
+      toggleCam: vi.fn(),
+    });
+
+    render(<OfficeShell />);
+
+    // Si OfficeShell aun tuviera su propio `useState(true)` para mic/cam,
+    // esta combinacion asimetrica (mic prendido, cam apagado) no podria
+    // distinguirse de un valor fijo: por eso los dos difieren entre si.
     const micButton = screen.getByRole('button', { name: /Mic/ });
     const camButton = screen.getByRole('button', { name: /Cámara/ });
     expect(micButton).toHaveAttribute('aria-pressed', 'true');
-    expect(camButton).toHaveAttribute('aria-pressed', 'true');
+    expect(camButton).toHaveAttribute('aria-pressed', 'false');
+    expect(micButton).toBeEnabled();
+    expect(camButton).toBeEnabled();
+  });
 
-    await user.click(micButton);
+  it('audioAvailable en false deshabilita mic y camara en BottomBar (matriz de degradacion)', () => {
+    useProximityAudioMock.mockReturnValue({
+      micOn: false,
+      camOn: false,
+      audioAvailable: false,
+      toggleMic: vi.fn(),
+      toggleCam: vi.fn(),
+    });
 
-    expect(micButton).toHaveAttribute('aria-pressed', 'false');
-    expect(camButton).toHaveAttribute('aria-pressed', 'true');
+    render(<OfficeShell />);
+
+    expect(screen.getByRole('button', { name: /Mic/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Cámara/ })).toBeDisabled();
+  });
+
+  it('clicar mic/camara invoca toggleMic/toggleCam del hook, no un setState local', async () => {
+    const user = userEvent.setup();
+    const toggleMic = vi.fn();
+    const toggleCam = vi.fn();
+    useProximityAudioMock.mockReturnValue({
+      micOn: false,
+      camOn: false,
+      audioAvailable: true,
+      toggleMic,
+      toggleCam,
+    });
+
+    render(<OfficeShell />);
+    await user.click(screen.getByRole('button', { name: /Mic/ }));
+
+    expect(toggleMic).toHaveBeenCalledTimes(1);
+    expect(toggleCam).not.toHaveBeenCalled();
+  });
+
+  it('OfficeShell es el unico dueno del bridge: se lo pasa al hook, BottomBar solo recibe props planas', () => {
+    render(<OfficeShell />);
+
+    expect(useProximityAudioMock).toHaveBeenCalledTimes(1);
+    const [bridgeArg] = useProximityAudioMock.mock.calls[0];
+    expect(bridgeArg).toEqual(
+      expect.objectContaining({ on: expect.any(Function), emit: expect.any(Function) }),
+    );
   });
 
   it('reenvia los nearby recibidos del bridge a los chips de BottomBar', () => {

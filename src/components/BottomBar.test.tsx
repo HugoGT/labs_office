@@ -8,6 +8,7 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
   const props = {
     micOn: true,
     camOn: true,
+    audioAvailable: true,
     recording: false,
     room: null as string | null,
     nearby: [] as string[],
@@ -56,6 +57,7 @@ describe('BottomBar', () => {
       <BottomBar
         micOn
         camOn
+        audioAvailable
         recording={false}
         room={null}
         nearby={[]}
@@ -71,6 +73,7 @@ describe('BottomBar', () => {
       <BottomBar
         micOn
         camOn
+        audioAvailable
         recording={false}
         room="Cafeteria"
         nearby={[]}
@@ -155,6 +158,27 @@ describe('BottomBar: chips de companeros reales (D7)', () => {
 
     expect(screen.getAllByText(/^🔊 /)).toHaveLength(6);
     expect(screen.getByText('+1')).toBeInTheDocument();
+  });
+});
+
+describe('BottomBar: degradacion cuando LiveKit no esta disponible', () => {
+  it('mic y camara se deshabilitan con un title explicativo cuando audioAvailable es false', () => {
+    renderBar({ audioAvailable: false });
+
+    const micButton = screen.getByRole('button', { name: /Mic/ });
+    const camButton = screen.getByRole('button', { name: /Cámara/ });
+
+    expect(micButton).toBeDisabled();
+    expect(camButton).toBeDisabled();
+    expect(micButton.getAttribute('title')).toBeTruthy();
+    expect(camButton.getAttribute('title')).toBeTruthy();
+  });
+
+  it('mic y camara siguen habilitados cuando audioAvailable es true', () => {
+    renderBar({ audioAvailable: true });
+
+    expect(screen.getByRole('button', { name: /Mic/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Cámara/ })).toBeEnabled();
   });
 });
 
