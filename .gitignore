@@ -3,6 +3,7 @@ node_modules/
 
 # Build
 dist/
+dist-e2e/
 build/
 *.local
 
@@ -10,6 +11,8 @@ build/
 .env
 .env.*
 !.env.example
+# Sin secretos: solo el flag del hook de test y la URL local de Colyseus (D1/D5).
+!.env.e2e
 
 # Testing
 coverage/

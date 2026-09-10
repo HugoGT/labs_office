@@ -41,6 +41,30 @@ export function OfficeShell() {
   const { micOn, camOn, audioAvailable, toggleMic, toggleCam } = useProximityAudio(bridge, {
     config: livekitConfig,
   });
+
+  // D4: unico bloque muerto en produccion de este archivo. Bajo `__OFFICE_E2E__`
+  // (compilado a `false` en el build normal, ver vite.config.ts D2) instala el
+  // hook de posicionamiento de test sobre el mismo `bridge` que ya posee este
+  // componente (D3: unico dueno). El `import()` dinamico deja el modulo entero
+  // fuera del grafo cuando la guarda es `false` -- mas fuerte que tree-shaking
+  // un import estatico.
+  useEffect(() => {
+    if (!__OFFICE_E2E__) return undefined;
+
+    let uninstall: (() => void) | undefined;
+    let cancelled = false;
+
+    void import('../game/officeTestHook').then(({ installOfficeTestHook }) => {
+      if (cancelled) return;
+      uninstall = installOfficeTestHook(bridge);
+    });
+
+    return () => {
+      cancelled = true;
+      uninstall?.();
+    };
+  }, [bridge]);
+
   const [recording, setRecording] = useState(false);
   const [toastMessage, setToastMessage] = useState<ReactNode | null>(null);
   const previousRoomRef = useRef<string | null>(null);

@@ -37,6 +37,13 @@ export interface OfficeEventMap {
 export interface OfficeCommandMap {
   teleportTo: { npcId: number };
   callNpc: { npcId: number };
+  /**
+   * Test-only command (D4): moves the local player directly onto a tile.
+   * Only ever emitted by `officeTestHook.ts`, which is itself dead-code
+   * eliminated from the production bundle behind `__OFFICE_E2E__`. Adding
+   * the type here does not add any production-visible runtime surface.
+   */
+  teleportToTile: { tx: number; ty: number };
 }
 
 export interface OfficeBridge {
@@ -46,6 +53,13 @@ export interface OfficeBridge {
     type: K,
     handler: (payload: OfficeCommandMap[K]) => void,
   ): () => void;
+  /**
+   * Generic command emitter, symmetric with `emit` for events. `commands` is
+   * a closure-private `EventTarget`, so this is the only way for code
+   * outside this module (e.g. `officeTestHook.ts`) to trigger a command
+   * without this module exposing `commands` itself.
+   */
+  emitCommand<K extends keyof OfficeCommandMap>(type: K, payload: OfficeCommandMap[K]): void;
   teleportTo(npcId: number): void;
   callNpc(npcId: number): void;
 }
@@ -64,6 +78,13 @@ export function createOfficeBridge(): OfficeBridge {
     return () => controller.abort();
   }
 
+  function dispatchCommand<K extends keyof OfficeCommandMap>(
+    type: K,
+    payload: OfficeCommandMap[K],
+  ): void {
+    commands.dispatchEvent(new CustomEvent(type, { detail: payload }));
+  }
+
   return {
     on(type, handler) {
       return subscribe(events, type, handler);
@@ -74,11 +95,12 @@ export function createOfficeBridge(): OfficeBridge {
     onCommand(type, handler) {
       return subscribe(commands, type, handler);
     },
+    emitCommand: dispatchCommand,
     teleportTo(npcId) {
-      commands.dispatchEvent(new CustomEvent('teleportTo', { detail: { npcId } }));
+      dispatchCommand('teleportTo', { npcId });
     },
     callNpc(npcId) {
-      commands.dispatchEvent(new CustomEvent('callNpc', { detail: { npcId } }));
+      dispatchCommand('callNpc', { npcId });
     },
   };
 }

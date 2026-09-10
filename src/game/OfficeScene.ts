@@ -22,7 +22,7 @@ import { createRemoteAvatarRegistry, type RemoteAvatarRegistry } from './remoteA
 import { createPhaserAvatarSink, type RemoteAvatarContainer } from './remoteAvatarSink';
 import { detectRoom, isSpeaking, nearbyIndices, nearbyKey, type Point } from './proximity';
 import { audiblePeers, type AudioPeer } from './proximityAudio';
-import { buildTerrainGrid, findFreeAdjacentTile, type TerrainGrid } from './terrainGrid';
+import { buildTerrainGrid, findFreeAdjacentTile, isBlocked, type TerrainGrid } from './terrainGrid';
 import { createOfficeTextures } from './textures';
 
 /** Clave de la escena (D5): reemplaza `BootScene`, que se retira en este mismo cambio. */
@@ -76,6 +76,8 @@ export class OfficeScene extends Phaser.Scene {
   private currentRoom: string | null = null;
   private unsubscribeTeleport?: () => void;
   private unsubscribeCallNpc?: () => void;
+  /** Solo se asigna bajo `__OFFICE_E2E__` (D4): produccion nunca la toca. */
+  private unsubscribeTeleportToTile?: () => void;
 
   private readonly options: OfficeSceneOptions;
   private remotes?: RemoteAvatarRegistry<RemoteAvatarContainer>;
@@ -118,10 +120,24 @@ export class OfficeScene extends Phaser.Scene {
     this.unsubscribeCallNpc = this.bridge.onCommand('callNpc', ({ npcId }) => {
       this.callNpc(npcId);
     });
+
+    // D4: unico bloque muerto en produccion de este archivo -- deja tanto el
+    // literal 'teleportToTile' como su handler fuera de `dist/`. Espeja
+    // `teleportTo`, pero mueve al jugador a una tile exacta, sin buscar una
+    // libre adyacente: el hook de test necesita entrar a una sala concreta,
+    // no aterrizar junto a un NPC.
+    if (__OFFICE_E2E__) {
+      this.unsubscribeTeleportToTile = this.bridge.onCommand('teleportToTile', ({ tx, ty }) => {
+        if (isBlocked(this.grid, tx, ty)) return;
+        this.player.setPosition(tx * TILE + 16, ty * TILE + 16);
+      });
+    }
+
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.alive = false;
       this.unsubscribeTeleport?.();
       this.unsubscribeCallNpc?.();
+      this.unsubscribeTeleportToTile?.();
       this.remotes?.clear();
       void this.connection?.leave();
       this.connection = undefined;

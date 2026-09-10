@@ -97,6 +97,34 @@ describe('createOfficeBridge', () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
+  it('emitCommand entrega comandos genericos y respeta la desuscripcion (base del hook de test, D4)', () => {
+    const bridge = createOfficeBridge();
+    const handler = vi.fn();
+
+    const unsubscribe = bridge.onCommand('teleportToTile', handler);
+    bridge.emitCommand('teleportToTile', { tx: 56, ty: 25 });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith({ tx: 56, ty: 25 });
+
+    unsubscribe();
+    bridge.emitCommand('teleportToTile', { tx: 1, ty: 1 });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('emitCommand y teleportTo comparten canal pero no se confunden entre tipos', () => {
+    const bridge = createOfficeBridge();
+    const onTeleportToTile = vi.fn();
+    const onTeleportTo = vi.fn();
+
+    bridge.onCommand('teleportToTile', onTeleportToTile);
+    bridge.onCommand('teleportTo', onTeleportTo);
+
+    bridge.emitCommand('teleportToTile', { tx: 10, ty: 12 });
+
+    expect(onTeleportToTile).toHaveBeenCalledTimes(1);
+    expect(onTeleportTo).not.toHaveBeenCalled();
+  });
+
   it('"nearby" conserva exactamente su forma { names: string[] } tras añadir "voice" (guarda de regresion)', () => {
     const bridge = createOfficeBridge();
     const handler = vi.fn();
