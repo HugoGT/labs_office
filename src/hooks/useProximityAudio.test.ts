@@ -14,6 +14,7 @@ function fakeConnection(overrides: Partial<LivekitRoomConnection> = {}): Livekit
     setDesiredPeers: vi.fn(),
     setMicrophoneEnabled: vi.fn(async (enabled: boolean) => enabled),
     setCameraEnabled: vi.fn(async (enabled: boolean) => enabled),
+    startAudio: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
     ...overrides,
   };
@@ -200,5 +201,96 @@ describe('useProximityAudio', () => {
     });
 
     expect(result.current.camOn).toBe(false);
+  });
+
+  describe('autoreproduccion bloqueada por el navegador (#18)', () => {
+    /** Conecta y devuelve el aviso de reproduccion que el hook le paso a connect. */
+    async function connectAndCapture() {
+      const bridge = createOfficeBridge();
+      const connection = fakeConnection();
+      let notify: ((canPlayback: boolean) => void) | undefined;
+      const connect = vi.fn(async (opts: { onAudioPlaybackChanged?: (ok: boolean) => void }) => {
+        notify = opts.onAudioPlaybackChanged;
+        return connection;
+      });
+      const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+      const rendered = renderHook(() =>
+        useProximityAudio(bridge, { config: CONFIG, connect, fetchToken }),
+      );
+
+      await act(async () => {
+        bridge.emit('voice', { selfSessionId: 'yo', sessionIds: [], room: null });
+      });
+
+      return { ...rendered, bridge, connection, notify: notify! };
+    }
+
+    it('empieza desbloqueado: no se molesta al usuario sin motivo', async () => {
+      const { result } = await connectAndCapture();
+
+      expect(result.current.audioBlocked).toBe(false);
+    });
+
+    it('el aviso del SDK marca el audio como bloqueado', async () => {
+      const { result, notify } = await connectAndCapture();
+
+      await act(async () => notify(false));
+
+      expect(result.current.audioBlocked).toBe(true);
+    });
+
+    it('unblockAudio pide el desbloqueo a la sala (el gesto del usuario)', async () => {
+      const { result, connection, notify } = await connectAndCapture();
+      await act(async () => notify(false));
+
+      await act(async () => result.current.unblockAudio());
+
+      expect(connection.startAudio).toHaveBeenCalledTimes(1);
+    });
+
+    it('el desbloqueo solo se da por bueno cuando el SDK lo confirma', async () => {
+      const { result, notify } = await connectAndCapture();
+      await act(async () => notify(false));
+
+      // `startAudio()` resolver no prueba nada: quien decide es la politica
+      // del navegador, y lo dice por evento. Marcarlo aqui seria mentir.
+      await act(async () => result.current.unblockAudio());
+      expect(result.current.audioBlocked).toBe(true);
+
+      await act(async () => notify(true));
+      expect(result.current.audioBlocked).toBe(false);
+    });
+
+    it('desconectar limpia el bloqueo: no queda un aviso sin sala detras', async () => {
+      const { result, bridge, notify } = await connectAndCapture();
+      await act(async () => notify(false));
+
+      await act(async () => {
+        bridge.emit('voice', { selfSessionId: null, sessionIds: [], room: null });
+      });
+
+      expect(result.current.audioBlocked).toBe(false);
+    });
+
+    it('un aviso de una conexion ya reemplazada no reactiva el bloqueo', async () => {
+      const { result, bridge, notify } = await connectAndCapture();
+
+      await act(async () => {
+        bridge.emit('voice', { selfSessionId: null, sessionIds: [], room: null });
+      });
+      await act(async () => notify(false));
+
+      expect(result.current.audioBlocked).toBe(false);
+    });
+
+    it('unblockAudio sin conexion viva no lanza', async () => {
+      const bridge = createOfficeBridge();
+      const { result } = renderHook(() =>
+        useProximityAudio(bridge, { config: CONFIG, connect: vi.fn(), fetchToken: vi.fn() }),
+      );
+
+      expect(() => result.current.unblockAudio()).not.toThrow();
+    });
   });
 });

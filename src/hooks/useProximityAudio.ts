@@ -17,7 +17,11 @@ export interface UseProximityAudioOptions {
   /** `null` = Colyseus abajo (D6): nunca se intenta LiveKit. */
   config: LivekitConfig | null;
   /** Inyectable para pruebas; por defecto la implementacion real. */
-  connect?: (opts: { url: string; token: string }) => Promise<LivekitRoomConnection>;
+  connect?: (opts: {
+    url: string;
+    token: string;
+    onAudioPlaybackChanged?: (canPlayback: boolean) => void;
+  }) => Promise<LivekitRoomConnection>;
   fetchToken?: (tokenUrl: string, sessionId: string) => Promise<LivekitTokenResponse>;
 }
 
@@ -26,8 +30,16 @@ export interface UseProximityAudioResult {
   camOn: boolean;
   /** `false` mientras no hay conexion viva a LiveKit (matriz de degradacion). */
   audioAvailable: boolean;
+  /**
+   * `true` cuando el navegador bloqueo la reproduccion por su politica de
+   * autoplay: hay conexion y hay pistas, pero no sonara hasta que el usuario
+   * haga un gesto. Es distinto de `audioAvailable` y se arregla distinto.
+   */
+  audioBlocked: boolean;
   toggleMic: () => void;
   toggleCam: () => void;
+  /** Gesto de usuario que levanta el bloqueo de autoplay. */
+  unblockAudio: () => void;
 }
 
 export function useProximityAudio(
@@ -37,6 +49,7 @@ export function useProximityAudio(
   const [micOn, setMicOn] = useState(false);
   const [camOn, setCamOn] = useState(false);
   const [audioAvailable, setAudioAvailable] = useState(false);
+  const [audioBlocked, setAudioBlocked] = useState(false);
   const connectionRef = useRef<LivekitRoomConnection | null>(null);
   /** Sesion actualmente conectada o en vuelo de conexion; evita reconectar por cada tick. */
   const sessionRef = useRef<string | null>(null);
@@ -49,6 +62,7 @@ export function useProximityAudio(
       connectionRef.current = null;
       sessionRef.current = null;
       setAudioAvailable(false);
+      setAudioBlocked(false);
       if (connection) await connection.disconnect();
     }
 
@@ -77,6 +91,13 @@ export function useProximityAudio(
           const connection = await connect({
             url: config.url ?? tokenResponse.url,
             token: tokenResponse.token,
+            // El aviso puede llegar despues de que esta sesion haya sido
+            // reemplazada: sin la guarda, una sala muerta encenderia un aviso
+            // en el HUD que ningun gesto podria apagar.
+            onAudioPlaybackChanged: (canPlayback) => {
+              if (sessionRef.current !== pendingSessionId) return;
+              setAudioBlocked(!canPlayback);
+            },
           });
 
           // La sesion pudo cambiar (o el hook desmontarse) mientras el
@@ -107,6 +128,15 @@ export function useProximityAudio(
     };
   }, [bridge, config, connect, fetchToken]);
 
+  /**
+   * No marca nada como desbloqueado: quien decide es la politica del
+   * navegador y lo comunica por `AudioPlaybackStatusChanged`. Darlo por bueno
+   * aqui apagaria el aviso dejando al usuario en silencio y sin salida.
+   */
+  const unblockAudio = useCallback(() => {
+    void connectionRef.current?.startAudio();
+  }, []);
+
   const toggleMic = useCallback(() => {
     const connection = connectionRef.current;
     if (!connection) return;
@@ -127,5 +157,5 @@ export function useProximityAudio(
     })();
   }, [camOn]);
 
-  return { micOn, camOn, audioAvailable, toggleMic, toggleCam };
+  return { micOn, camOn, audioAvailable, audioBlocked, toggleMic, toggleCam, unblockAudio };
 }

@@ -4,6 +4,7 @@ import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
 import { useOfficeBridge } from '../hooks/useOfficeBridge';
 import { useProximityAudio } from '../hooks/useProximityAudio';
+import { AudioUnblockPrompt } from './AudioUnblockPrompt';
 import { BottomBar } from './BottomBar';
 import { ContextMenu, type NpcMenuAction } from './ContextMenu';
 import { GameCanvas } from './GameCanvas';
@@ -38,9 +39,8 @@ export function OfficeShell() {
       officeEndpoint: endpoint,
     }),
   );
-  const { micOn, camOn, audioAvailable, toggleMic, toggleCam } = useProximityAudio(bridge, {
-    config: livekitConfig,
-  });
+  const { micOn, camOn, audioAvailable, audioBlocked, toggleMic, toggleCam, unblockAudio } =
+    useProximityAudio(bridge, { config: livekitConfig });
 
   // D4: unico bloque muerto en produccion de este archivo. Bajo `__OFFICE_E2E__`
   // (compilado a `false` en el build normal, ver vite.config.ts D2) instala el
@@ -143,6 +143,7 @@ export function OfficeShell() {
           setRecording((value) => !value);
         }}
       />
+      <AudioUnblockPrompt blocked={audioBlocked} onUnblock={unblockAudio} />
       <Toast message={toastMessage} />
     </div>
   );

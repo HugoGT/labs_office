@@ -146,5 +146,48 @@ describe.skipIf(!import.meta.env.VITE_LIVEKIT_E2E)(
 
       expect(enabled).toBe(true);
     });
+
+    it('la pista suscrita se adjunta al documento: es lo que la convierte en sonido', async () => {
+      const publisherIdentity = `pub-${Date.now()}`;
+      await connectPublisher(publisherIdentity);
+      const { connection, room } = await connectWrapped(`sub-${Date.now()}`);
+
+      const subscribed = new Promise<void>((resolve) => {
+        room.on(RoomEvent.TrackSubscribed, () => resolve());
+      });
+      connection.setDesiredPeers([publisherIdentity]);
+      await subscribed;
+
+      // El evento lo entrega el SDK; el handler del modulo corre justo
+      // despues, asi que se cede un turno antes de mirar el DOM.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const elements = document.querySelectorAll('audio');
+      expect(elements).toHaveLength(1);
+      // Un `<audio>` sin `srcObject` es un elemento decorativo: la prueba de
+      // que la pista real llego hasta el navegador es el MediaStream.
+      expect((elements[0] as HTMLAudioElement).srcObject).toBeInstanceOf(MediaStream);
+    });
+
+    it('al salir del conjunto deseado no queda ningun elemento adjunto', async () => {
+      const publisherIdentity = `pub-${Date.now()}`;
+      await connectPublisher(publisherIdentity);
+      const { connection, room } = await connectWrapped(`sub-${Date.now()}`);
+
+      const subscribed = new Promise<void>((resolve) => {
+        room.on(RoomEvent.TrackSubscribed, () => resolve());
+      });
+      connection.setDesiredPeers([publisherIdentity]);
+      await subscribed;
+
+      const unsubscribed = new Promise<void>((resolve) => {
+        room.on(RoomEvent.TrackUnsubscribed, () => resolve());
+      });
+      connection.setDesiredPeers([]);
+      await unsubscribed;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(document.querySelectorAll('audio')).toHaveLength(0);
+    });
   },
 );
