@@ -148,6 +148,14 @@ Para levantar la oficina completa en local: `pnpm server` y `pnpm dev` en parale
 
 - [ ] Backend **NestJS + PostgreSQL + Redis**: usuarios, roles (Admin/Empleado/Invitado), invitaciones (PRD 6.4, modelo de datos sección 7).
 - [ ] Autenticación con **Google OAuth 2.0** (PRD sección 10).
+- [ ] **Estrechar el CORS del servidor al entrar OAuth**: `createOfficeServer` responde hoy
+      `Access-Control-Allow-Origin: *` porque el SPA y el servidor están en orígenes distintos
+      y `POST /livekit/token` fuerza un preflight. Es defendible mientras la ruta no use
+      cookies y valide el `sessionId` contra las sesiones vivas, pero con `*` cualquier web
+      que visite un usuario puede pedir un token: si acierta un `sessionId` vivo recibe
+      permiso de publicar y suscribirse en la sala compartida, y los `sessionId` de Colyseus
+      son cortos y no son secretos. Al cerrar OAuth hay que pasarlo a una allowlist de
+      orígenes y colgar la ruta de la sesión autenticada, no del `sessionId` a secas.
 - [ ] Espacios delimitados configurables por Admin sobre el mapa base (PRD 4.5).
 - [ ] Decoración drag & drop del escritorio propio (PRD 4.4).
 - [ ] Videollamada 1:1 real desde el menú "📞 Llamar" (hoy solo muestra un toast).
