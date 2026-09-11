@@ -1,0 +1,22 @@
+# Copiar a terraform.tfvars y rellenar. El fichero real NO se commitea: no
+# lleva secretos, pero fija el proyecto y el correo de contacto y cada entorno
+# tendra el suyo.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+
+project_id = "vaulted-channel-505114-f0"
+acme_email = "cambiar@ejemplo.com"
+
+# Los demas valores tienen default en variables.tf y solo se tocan para crear
+# un entorno distinto de test.
+#
+# env               = "test"
+# region            = "us-central1"
+# zone              = "us-central1-a"
+# machine_type      = "e2-medium"
+# boot_disk_size_gb = 20
+# github_repository = "HugoGT/labs_office"
+
+# Tag de imagenes. Se deja vacio: lo fija el workflow de despliegue en cada
+# push, no una edicion manual de este fichero.
+# image_tag = ""
