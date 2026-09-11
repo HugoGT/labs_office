@@ -130,11 +130,16 @@ Para levantar la oficina completa en local: `pnpm server` y `pnpm dev` en parale
       simulacro). Probado end-to-end con dos clientes reales de Chromium, incluida la caída
       de LiveKit (sección Testing, ítem E2E de proximidad).
 - [ ] Grabación real desde el HUD: el botón ⏺ Grabar solo simula el flujo (PRD 4.9); no
-      dispara una grabación de Egress real todavía. La infraestructura ya está validada
-      (LiveKit Egress + MinIO, más arriba en esta sección), así que lo que falta es cablear
-      el botón al endpoint de grabación, no montar Egress desde cero. Diferido a la Fase 1
-      (decisión de scope del ciclo `two-client-proximity-e2e`): no bloqueaba ni el E2E de
-      proximidad ni el resto de esta sección.
+      dispara una grabación de Egress real todavía. **No es cuestión de cablear el botón**:
+      Egress graba a nivel de sala de LiveKit y esta app usa una sola sala compartida
+      (`LIVEKIT_ROOM_NAME = 'office-livekit'`, `src/game/officeProtocol.ts:19`). La privacidad
+      por espacio la impone solo el cliente filtrando suscripciones, así que
+      `startRoomCompositeEgress` grabaría toda la oficina, incluida gente que nunca entró en
+      el espacio que se quería grabar: incumple el PRD 4.9. Hueco colateral del mismo
+      requisito: `recording` es un `useState` local de `OfficeShell`, no vive en
+      `OfficeState`, así que el ⏺ solo lo ve quien lo pulsa y el «aviso a todos los
+      participantes» del PRD 4.9 está incumplido al margen de Egress. Diferido a la Fase 1
+      junto con el backend, donde se decide la topología de salas.
 - [ ] **Nombre e identidad reales**: hoy los dos clientes entran como `HugoGT` porque el nombre
       está fijo en `characters.ts`. El servidor ya acepta y sanea un nombre por sesión, así que
       el hueco es de UI/auth, no de protocolo. Se cierra de verdad con Google OAuth (sección 3).
