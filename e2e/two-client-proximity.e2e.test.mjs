@@ -77,6 +77,36 @@ test('S4: returning to the open floor reverses room isolation', async () => {
   await waitForPeerChipCount(pageA, 1); // W2: A sees B's chip again -- isolation was reversible
 });
 
+test('S9: both clients entering the same room see each other', async () => {
+  // Two distinct non-solid Cafeteria tiles, verified against the same
+  // furniture audit as S3's (58, 20): the table occupies x 53-57 y 23-25
+  // (mapBuilder.ts `markSolid(grid.solid, 53, 23, 5, 3)`), and the four
+  // decorative plants sit at (51,19)/(61,19)/(51,30)/(61,30).
+  await teleportToTile(pageA, 59, 21);
+  await teleportToTile(pageB, 58, 20);
+
+  // W3 first, on BOTH clients, before trusting any chip count: on the open
+  // floor both already show exactly one peer chip each (S2's steady state),
+  // so asserting "one peer chip each" alone would still pass even if one or
+  // both teleports silently no-op'd. Only after both room indicators are
+  // confirmed does the mutual-chip assertion actually prove same-room
+  // visibility rather than merely re-observing the pre-existing spawn state.
+  await waitForRoomIndicator(pageA, 'Cafetería');
+  await waitForRoomIndicator(pageB, 'Cafetería');
+
+  await waitForOnlineCount(pageA, 1);
+  await waitForOnlineCount(pageB, 1);
+  await waitForPeerChipCount(pageA, 1); // each sees the other's chip while sharing the room
+  await waitForPeerChipCount(pageB, 1);
+
+  // Restore both to the open floor so S6/S5's assertions start from the
+  // same known state the rest of the suite expects.
+  await teleportToTile(pageA, 22, 28);
+  await teleportToTile(pageB, 22, 28);
+  await waitForPeerChipCount(pageA, 1);
+  await waitForPeerChipCount(pageB, 1);
+});
+
 test('S6: with no LiveKit reachable, both HUDs report audio unavailable and presence stays intact', async () => {
   // W6: mic/cam disabled with the exact degradation title, on both clients,
   // while the S2 state (both online, mutually chipped) still holds.
