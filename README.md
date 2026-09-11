@@ -88,4 +88,4 @@ Dos capas, porque Phaser no se puede importar bajo jsdom (`CanvasFeatures` llama
 - `pnpm test:browser` — Chromium real vía Playwright, para todo `src/game/`.
 - `pnpm test:all` — las dos. `pnpm test:coverage` mide ambas juntas.
 
-El detalle está en `TODOS.md`.
+El trabajo pendiente se sigue en los [issues del repositorio](https://github.com/HugoGT/labs_office/issues).
