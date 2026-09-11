@@ -17,7 +17,9 @@
     "test:all": "vitest run",
     "test:coverage": "vitest run --coverage",
     "server": "node server/src/main.ts",
-    "test:server": "vitest run --project=server"
+    "test:server": "vitest run --project=server",
+    "test:e2e": "node --test e2e/bundle-hook-absent.e2e.test.mjs e2e/two-client-proximity.e2e.test.mjs",
+    "e2e": "pnpm build && pnpm build:e2e && pnpm test:e2e"
   },
   "dependencies": {
     "@colyseus/core": "0.16.24",
