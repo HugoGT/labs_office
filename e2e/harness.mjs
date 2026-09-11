@@ -237,3 +237,23 @@ export async function waitForRoomIndicator(page, roomName) {
     { timeout: READINESS_DEADLINE_MS },
   );
 }
+
+/** D7 W6: mic/cam buttons carry `disabled` + the exact degradation title
+ * (`BottomBar.tsx`'s `AUDIO_UNAVAILABLE_TITLE`) while LiveKit is unreachable.
+ * Attribute checks can't key on `#office-shell` textContent alone (D7's other
+ * predicates), so this walks the real button elements instead of the hashed
+ * CSS module classes. */
+export async function waitForAudioUnavailable(page) {
+  await page.waitForFunction(
+    () => {
+      const title = 'Audio no disponible: sin conexion a LiveKit';
+      const buttons = Array.from(document.querySelectorAll('#office-shell button'));
+      const mic = buttons.find((button) => button.textContent?.includes('Mic'));
+      const cam = buttons.find((button) => button.textContent?.includes('Cámara'));
+      if (!mic || !cam) return false;
+      return mic.disabled && mic.title === title && cam.disabled && cam.title === title;
+    },
+    undefined,
+    { timeout: READINESS_DEADLINE_MS },
+  );
+}

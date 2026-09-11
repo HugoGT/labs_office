@@ -49,10 +49,16 @@ contra Chromium y WebGL de verdad; mockearlo en jsdom solo probaría el mock.
 - [x] Tests del servidor Colyseus: 10 de integración sobre presencia, movimiento y validación
       («el cliente no es de fiar»: recorte a los límites del mundo, descarte de `move` no
       numérico, nombre acotado).
-- [ ] E2E de proximidad con dos clientes en el mismo mapa, cuando el cliente hable
-      con LiveKit de verdad (depende de 2.4). **Parcialmente desbloqueado**: dos clientes en
-      el mismo mapa ya se ven y se sincronizan (verificado con dos pestañas reales de
-      Chromium contra el servidor). Lo que falta es el audio, no la presencia.
+- [x] E2E de proximidad con dos clientes en el mismo mapa, contra el bundle real. Arnés
+      `node:test` + `playwright` en `e2e/`: levanta un Colyseus real y un `vite preview` real
+      del build instrumentado, y conduce dos contextos de Chromium independientes.
+      Cubre presencia y chips al spawnear, aislamiento mutuo al entrar/salir de una sala
+      privada (Cafetería), caída de chip al cerrar un contexto, y degradación con LiveKit
+      caído (mic/cámara deshabilitados con el título correcto, cero `pageerror`). Corre
+      sin Docker y está cableado en `ci.yml` tras el `Build` (`pnpm build:e2e` +
+      `pnpm test:e2e`). Lo que queda fuera: comprobar que el audio LiveKit real se
+      escucha entre clientes (no solo que se conecta), que sigue siendo manual y
+      requiere Docker levantado en local.
 - [x] CI en `.github/workflows/ci.yml`: un job secuencial con typecheck, ambas capas
       de test y build, sobre push y PR a `main`. Un solo job a propósito: separarlo en
       jobs paralelos pagaría la instalación de Chromium más de una vez, que es el paso
@@ -117,12 +123,18 @@ Para levantar la oficina completa en local: `pnpm server` y `pnpm dev` en parale
       deambular aleatorio. Su único comportamiento es acudir cuando se les llama desde el menú
       contextual: «📞 Llamar» hace que el NPC camine hasta una tile libre junto al jugador.
       Es el reflejo de «🚶 Ir a su escritorio», que mueve al jugador en vez de al NPC.
-- [ ] Conectar el cliente al stack: audio/vídeo real por proximidad con el SDK de LiveKit
-      — hoy los anillos de "hablando" y el mute son visuales (PRD 6.3), y el botón ⏺ Grabar
-      solo simula el flujo (PRD 4.9). **Ya desbloqueado**: dependía del port de la sección 1,
-      que está hecho. El HUD emite y recibe por el bridge, así que conectar LiveKit es
-      sustituir el simulacro detrás de esos eventos, no rehacer la UI. Ahora además hay
-      identidad de sesión real (`sessionId` de Colyseus) sobre la que colgar las pistas.
+- [x] Conectar el cliente al stack: audio/vídeo real por proximidad con el SDK de LiveKit
+      (PRD 6.3). Cableado en `useProximityAudio` + `BottomBar` (commit `3eaa371`): mic/cámara
+      reales por sesión de Colyseus, y degradación explícita cuando LiveKit no responde
+      (botones deshabilitados con título, en vez de fallar en silencio o quedarse en el
+      simulacro). Probado end-to-end con dos clientes reales de Chromium, incluida la caída
+      de LiveKit (sección Testing, ítem E2E de proximidad).
+- [ ] Grabación real desde el HUD: el botón ⏺ Grabar solo simula el flujo (PRD 4.9); no
+      dispara una grabación de Egress real todavía. La infraestructura ya está validada
+      (LiveKit Egress + MinIO, más arriba en esta sección), así que lo que falta es cablear
+      el botón al endpoint de grabación, no montar Egress desde cero. Diferido a la Fase 1
+      (decisión de scope del ciclo `two-client-proximity-e2e`): no bloqueaba ni el E2E de
+      proximidad ni el resto de esta sección.
 - [ ] **Nombre e identidad reales**: hoy los dos clientes entran como `HugoGT` porque el nombre
       está fijo en `characters.ts`. El servidor ya acepta y sanea un nombre por sesión, así que
       el hueco es de UI/auth, no de protocolo. Se cierra de verdad con Google OAuth (sección 3).

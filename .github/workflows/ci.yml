@@ -49,3 +49,15 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      # Segundo build, solo para el arnes E2E: expone el hook de test-only
+      # detras de un flag (`__OFFICE_E2E__`), el `dist` de arriba se queda
+      # limpio y sirve de control negativo.
+      - name: Build the instrumented E2E bundle
+        run: pnpm build:e2e
+
+      # Dos clientes reales de Chromium contra Colyseus real y `vite preview`
+      # real; LiveKit va sin credenciales a proposito (D6), asi que esta capa
+      # no necesita Docker.
+      - name: Two-client E2E (Colyseus + preview, no LiveKit)
+        run: pnpm test:e2e

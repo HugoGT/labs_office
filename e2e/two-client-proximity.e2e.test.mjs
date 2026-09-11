@@ -5,11 +5,17 @@
 //
 // Slice C adds S3 (entering a private room isolates the occupant from the
 // open-floor peer, mutually) and S4 (leaving the room reverses isolation).
-// S1 lives in `bundle-hook-absent.e2e.test.mjs`; S6 lands in a later slice.
+// S1 lives in `bundle-hook-absent.e2e.test.mjs`. Slice D adds S6: with no
+// LiveKit server reachable, the harness's shared server spawn already scrubs
+// `LIVEKIT_API_KEY`/`SECRET` (D6), so this is a characterization test of the
+// degradation path shipped in `useProximityAudio.ts`/`BottomBar.tsx`
+// (commit `3eaa371`), not test-driven new behaviour.
 import { after, before, test } from 'node:test';
+import assert from 'node:assert/strict';
 import {
   startHarness,
   teleportToTile,
+  waitForAudioUnavailable,
   waitForOnlineCount,
   waitForPeerChipCount,
   waitForRoomIndicator,
@@ -21,6 +27,10 @@ let contextA;
 let contextB;
 let pageA;
 let pageB;
+/** D7 W6 / spec "LiveKit-down degradation": collected for the whole run, not
+ * just S6, so any unhandled exception anywhere in the suite fails it. */
+let pageErrorsA;
+let pageErrorsB;
 
 before(async () => {
   harness = await startHarness();
@@ -28,6 +38,10 @@ before(async () => {
   contextB = await harness.newContext();
   pageA = await contextA.newPage();
   pageB = await contextB.newPage();
+  pageErrorsA = [];
+  pageErrorsB = [];
+  pageA.on('pageerror', (error) => pageErrorsA.push(error));
+  pageB.on('pageerror', (error) => pageErrorsB.push(error));
   await pageA.goto(harness.previewUrl);
   await pageB.goto(harness.previewUrl);
 });
@@ -63,8 +77,22 @@ test('S4: returning to the open floor reverses room isolation', async () => {
   await waitForPeerChipCount(pageA, 1); // W2: A sees B's chip again -- isolation was reversible
 });
 
+test('S6: with no LiveKit reachable, both HUDs report audio unavailable and presence stays intact', async () => {
+  // W6: mic/cam disabled with the exact degradation title, on both clients,
+  // while the S2 state (both online, mutually chipped) still holds.
+  await waitForAudioUnavailable(pageA);
+  await waitForAudioUnavailable(pageB);
+  await waitForOnlineCount(pageA, 1);
+  await waitForOnlineCount(pageB, 1);
+  await waitForPeerChipCount(pageA, 1);
+  await waitForPeerChipCount(pageB, 1);
+  assert.equal(pageErrorsA.length, 0, `pageA had unhandled errors: ${pageErrorsA.join(', ')}`);
+  assert.equal(pageErrorsB.length, 0, `pageB had unhandled errors: ${pageErrorsB.join(', ')}`);
+});
+
 test('S5: closing one browser context drops the other client\'s peer chip', async () => {
   await contextB.close();
   await waitForOnlineCount(pageA, 0);
   await waitForPeerChipCount(pageA, 0);
+  assert.equal(pageErrorsA.length, 0, `pageA had unhandled errors: ${pageErrorsA.join(', ')}`);
 });
