@@ -1,0 +1,108 @@
+# Topologia de la VM de despliegue (issue #3). Vive en /opt/office/ y lo
+# escribe ahi `office-deploy` desde la metadata de la instancia.
+#
+#   caddy      unico proceso con los puertos 80/443. Termina TLS y reparte
+#   web        el SPA ya construido, servido como ficheros estaticos
+#   colyseus   el servidor de Node: salas, /health y /livekit/token
+#   livekit    el SFU
+#
+# NO hay Redis, a diferencia de infra/livekit/docker-compose.yml. LiveKit solo
+# necesita Redis para coordinar varios nodos entre si y para hablar con Egress;
+# aqui hay un unico nodo y la grabacion esta aplazada al issue #5, asi que
+# Redis no coordinaria nada. Vuelve a hacer falta el dia que se despliegue
+# Egress o un segundo SFU.
+#
+# Las variables salen de /opt/office/.env, que `office-deploy` regenera en cada
+# despliegue con los secretos recien leidos de Secret Manager.
+
+name: labs-office
+
+# Sin limite de log, los ficheros de Docker se comen el disco de 20 GB en
+# semanas y la VM muere por espacio, no por carga.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  caddy:
+    image: caddy:2.11-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      APP_HOST: "${APP_HOST}"
+      LK_HOST: "${LK_HOST}"
+      ACME_EMAIL: "${ACME_EMAIL}"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Volumen con nombre y no bind: aqui viven las claves privadas de los
+      # certificados y el estado de la cuenta ACME. Perderlo obliga a reemitir,
+      # y reemitir cuenta contra el limite compartido de sslip.io (ver README).
+      # LiveKit lo monta en solo lectura para leer el certificado de lk.
+      - caddy-data:/data
+      - caddy-config:/config
+    # LiveKit corre en la red del host (ver mas abajo), asi que Caddy no puede
+    # alcanzarlo por nombre de servicio: necesita la puerta del bridge.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - web
+      - colyseus
+    networks: [office]
+
+  web:
+    image: "${REGISTRY}/web:${IMAGE_TAG}"
+    restart: unless-stopped
+    logging: *logging
+    # Sin `ports`: solo Caddy le habla, por la red interna del compose.
+    networks: [office]
+
+  colyseus:
+    image: "${REGISTRY}/colyseus:${IMAGE_TAG}"
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      PORT: "2567"
+      # El servidor es la fuente de verdad de esta URL: la devuelve en la
+      # respuesta de /livekit/token y el cliente la usa tal cual
+      # (src/game/livekitEndpoint.ts). Por eso NO se hornea en el bundle del SPA.
+      LIVEKIT_URL: "wss://${LK_HOST}"
+      LIVEKIT_API_KEY: "${LIVEKIT_API_KEY}"
+      LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET}"
+    # Tampoco publica el 2567 al host: la unica entrada es Caddy sobre 443.
+    networks: [office]
+
+  livekit:
+    image: livekit/livekit-server:v1.13.5@sha256:3497163e15c48fef6e7830c78716f9e9d5edc28abf7aa90b61c86e93bbc306b1
+    restart: unless-stopped
+    logging: *logging
+    command: --config /etc/livekit.yaml
+    # Red del host a proposito. Publicar el rango 50000-60000/udp con el
+    # mecanismo normal de Docker crea una regla (y con el proxy en espacio de
+    # usuario, un proceso) por puerto: el arranque tarda minutos y el consumo
+    # de memoria es absurdo. Es el mismo problema que en la PoC obligo a
+    # recortar el rango a 20 puertos, pero aqui la solucion es no publicar
+    # nada y dejar que el SFU escuche directamente en la interfaz de la VM.
+    # Efecto secundario querido: LiveKit ve la IP real del cliente, que es lo
+    # que ICE necesita para elegir candidatos.
+    network_mode: host
+    environment:
+      # Formato que espera LiveKit: "clave: secreto".
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+      # Solo lectura: LiveKit toma de aqui el certificado que Caddy emitio para
+      # el hostname lk.*, y lo usa para el TURN sobre TLS del puerto 5349.
+      - caddy-data:/caddy-data:ro
+
+volumes:
+  caddy-data:
+  caddy-config:
+
+networks:
+  office:
+    driver: bridge

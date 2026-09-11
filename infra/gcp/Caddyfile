@@ -1,0 +1,69 @@
+# Caddy es el unico proceso con los puertos 80 y 443 de la VM. Emite y renueva
+# los certificados solo, sin cron ni certbot.
+#
+# Los dos hostnames (app.* y lk.*) apuntan a la MISMA IP via sslip.io, que
+# resuelve <lo-que-sea>.<ip-con-guiones>.sslip.io a esa IP. Caddy los separa por
+# SNI, asi que una sola maquina sirve los dos sitios sobre 443.
+#
+# Limite conocido de sslip.io: es un dominio compartido por todo el mundo que lo
+# use, y Let's Encrypt aplica sus limites de emision por dominio registrado. Si
+# alguien ajeno quema la cuota, nuestras emisiones fallan. La exposicion real es
+# pequena (dos certificados que se renuevan cada ~60 dias) y Caddy cae solo a
+# ZeroSSL cuando Let's Encrypt rechaza, asi que no se monta nada para evitarlo;
+# queda anotado para cuando el issue #8 traiga un dominio propio.
+{
+	email {$ACME_EMAIL}
+}
+
+{$APP_HOST} {
+	encode zstd gzip
+
+	# El WebSocket de Colyseus NO tiene un prefijo de ruta fijo. Verificado en
+	# el paquete instalado: el cliente construye el endpoint como
+	# `/{processId}/{roomId}?sessionId=...` (colyseus.js buildEndpoint) y el
+	# transporte del servidor lo valida con la expresion
+	# /\/[a-zA-Z0-9_\-]+\/([a-zA-Z0-9_\-]+)$/ (@colyseus/ws-transport). Es
+	# decir: dos segmentos cualesquiera en la raiz, indistinguibles por forma
+	# de un `/assets/index-abc.js`.
+	#
+	# Por eso el criterio no es la ruta sino la cabecera de upgrade: cualquier
+	# peticion que pida convertirse en WebSocket va al servidor de Colyseus, y
+	# todo lo demas se resuelve por ruta mas abajo. Es exacto, no una
+	# aproximacion: los ficheros estaticos nunca llevan estas cabeceras.
+	@websocket {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	handle @websocket {
+		reverse_proxy colyseus:2567
+	}
+
+	# Emparejamiento HTTP de Colyseus. Verificado igual: el cliente hace
+	# POST matchmake/<metodo>/<sala> y el servidor busca la constante
+	# `matchmakeRoute = "matchmake"` dentro de la URL.
+	handle /matchmake/* {
+		reverse_proxy colyseus:2567
+	}
+
+	# Rutas HTTP propias del servidor (server/src/createOfficeServer.ts).
+	handle /livekit/token {
+		reverse_proxy colyseus:2567
+	}
+
+	handle /health {
+		reverse_proxy colyseus:2567
+	}
+
+	# Todo lo demas es el SPA ya construido, en su propio contenedor.
+	handle {
+		reverse_proxy web:80
+	}
+}
+
+{$LK_HOST} {
+	# LiveKit corre en la red del host, asi que no responde a un nombre de
+	# servicio del compose. `reverse_proxy` de Caddy ya propaga el upgrade a
+	# WebSocket sin configuracion extra: la senalizacion de LiveKit es un
+	# WebSocket sobre este mismo 443.
+	reverse_proxy host.docker.internal:7880
+}
