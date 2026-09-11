@@ -1,0 +1,136 @@
+name: Deploy (test)
+
+# Separado de ci.yml a proposito: ci.yml verifica y no publica nada, y tiene
+# que seguir corriendo en los pull requests de forks sin ninguna credencial.
+# Este workflow toca infraestructura y solo corre sobre main.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Sin cancel-in-progress: un despliegue a medias deja la VM con imagenes
+# nuevas y contenedores viejos. Los despliegues hacen cola, no se matan.
+concurrency:
+  group: deploy-test
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # Necesario para que GitHub emita el token OIDC con el que GCP nos identifica.
+  # Es lo que sustituye a una clave JSON de cuenta de servicio guardada como
+  # secreto: aquella no caduca nunca y quien la lea una vez la tiene para
+  # siempre.
+  id-token: write
+
+jobs:
+  deploy:
+    name: Build, push and deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      REGISTRY: ${{ vars.GCP_REGION || 'us-central1' }}-docker.pkg.dev
+      REPOSITORY: ${{ vars.GCP_AR_REPOSITORY || 'labs-office-test' }}
+      INSTANCE: ${{ vars.GCP_INSTANCE || 'labs-office-test' }}
+      ZONE: ${{ vars.GCP_ZONE || 'us-central1-a' }}
+      APP_HOST: ${{ vars.APP_HOST }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # APP_HOST se deriva de la IP estatica y lo fija una persona una sola vez
+      # desde `terraform output` (ver infra/gcp/README.md). Fallar aqui, antes
+      # de construir nada, es mucho mas barato que descubrirlo cuando el SPA ya
+      # esta publicado apuntando al host equivocado.
+      - name: Check the deploy variables are set
+        run: |
+          test -n "${APP_HOST}" || { echo "Falta la variable de repositorio APP_HOST"; exit 1; }
+          test -n "${{ vars.GCP_PROJECT_ID }}" || { echo "Falta la variable GCP_PROJECT_ID"; exit 1; }
+          test -n "${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}" || { echo "Falta la variable GCP_WORKLOAD_IDENTITY_PROVIDER"; exit 1; }
+          test -n "${{ vars.GCP_DEPLOYER_SA }}" || { echo "Falta la variable GCP_DEPLOYER_SA"; exit 1; }
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Log in to Artifact Registry
+        run: gcloud auth configure-docker "${REGISTRY}" --quiet
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Las imagenes se etiquetan con el SHA del commit, nunca con `latest`:
+      # `latest` hace que no se pueda saber que corre en la VM ni volver a una
+      # version anterior sin reconstruir.
+      - name: Build and push the Colyseus image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/gcp/docker/colyseus.Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ vars.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/colyseus:${{ github.sha }}
+          cache-from: type=gha,scope=colyseus
+          cache-to: type=gha,scope=colyseus,mode=max
+
+      # VITE_COLYSEUS_URL se hornea en el bundle en tiempo de build: es la unica
+      # forma de que el cliente hable wss://app.../ y no ws://<host>:2567, que
+      # es lo que deduce solo y que no pasa por Caddy.
+      - name: Build and push the web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/gcp/docker/web.Dockerfile
+          push: true
+          build-args: |
+            VITE_COLYSEUS_URL=wss://${{ env.APP_HOST }}
+          tags: ${{ env.REGISTRY }}/${{ vars.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/web:${{ github.sha }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+      # El tag viaja como argumento hasta la VM; el fichero compose de alli lee
+      # IMAGE_TAG de su .env y nadie lo edita a mano por SSH. Asi lo que corre
+      # en la maquina es siempre reconstruible desde este repositorio.
+      #
+      # El tunel de IAP evita tener que abrir el 22 a internet: la VM solo
+      # acepta SSH desde el rango de IAP y la autenticacion es la identidad
+      # federada de este workflow, no una clave privada guardada en un secreto.
+      - name: Deploy over the IAP tunnel
+        run: |
+          gcloud compute ssh "${INSTANCE}" \
+            --zone "${ZONE}" \
+            --tunnel-through-iap \
+            --quiet \
+            --command "sudo /usr/local/bin/office-deploy ${{ github.sha }}"
+
+      # Sin esto el workflow diria "desplegado" en cuanto docker compose
+      # devuelve el control, que es antes de que ningun contenedor conteste.
+      # Se golpea la ruta de salud real, por HTTPS y por el hostname publico:
+      # cubre de una vez el certificado, Caddy, el enrutado y el servidor.
+      - name: Smoke check
+        run: |
+          url="https://${APP_HOST}/health"
+          echo "comprobando ${url}"
+
+          # Hasta 20 intentos: en el primer despliegue Caddy todavia esta
+          # negociando el certificado con Let's Encrypt y eso tarda decenas de
+          # segundos.
+          for attempt in $(seq 1 20); do
+            code="$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 10 "${url}" || echo 000)"
+            if [ "${code}" = "200" ]; then
+              echo "200 OK:"
+              cat /tmp/health.json
+              exit 0
+            fi
+            echo "intento ${attempt}: HTTP ${code}"
+            sleep 15
+          done
+
+          echo "::error::/health nunca devolvio 200. Revisar: gcloud compute ssh ${INSTANCE} --zone ${ZONE} --tunnel-through-iap --command 'sudo docker compose --project-directory /opt/office logs --tail 100'"
+          exit 1
