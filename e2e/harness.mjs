@@ -215,3 +215,25 @@ export async function waitForPeerChipCount(page, count) {
     { timeout: READINESS_DEADLINE_MS },
   );
 }
+
+/** D4: drives the local player onto a tile through the gated `__officeE2E`
+ * test hook, bypassing keyboard input. */
+export async function teleportToTile(page, tx, ty) {
+  await page.evaluate(
+    ([x, y]) => window.__officeE2E.teleportToTile(x, y),
+    [tx, ty],
+  );
+}
+
+/** D7 W3: the private-room indicator (`BottomBar.tsx`) names the room the
+ * local player is currently inside. */
+export async function waitForRoomIndicator(page, roomName) {
+  await page.waitForFunction(
+    (name) => {
+      const text = document.querySelector('#office-shell')?.textContent ?? '';
+      return text.includes(`\u{1F512} Sala privada: ${name}`);
+    },
+    roomName,
+    { timeout: READINESS_DEADLINE_MS },
+  );
+}
