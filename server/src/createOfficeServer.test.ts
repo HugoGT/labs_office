@@ -144,6 +144,42 @@ describe('POST /livekit/token', () => {
     expect((await readBody(res)).error).toBe('livekit-not-configured');
   });
 
+  it('responde el preflight CORS de /livekit/token (cliente y servidor viven en origenes distintos)', async () => {
+    // El SPA (vite preview / build estatico) y este servidor Colyseus corren
+    // en puertos distintos (D5: 2599 fijo para el servidor); el navegador
+    // manda un preflight OPTIONS antes del POST con `Content-Type:
+    // application/json` (no es un "simple request"). Descubierto por Slice E
+    // (`two-client-audio.e2e.test.mjs`): sin esto, la conexion LiveKit real
+    // nunca progresa -- el fetch del token se bloquea antes de llegar aqui.
+    const res = await fetch(`${baseUrl}/livekit/token`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'http://localhost:9999',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'content-type',
+      },
+    });
+
+    expect(res.status).toBe(204);
+    expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    expect(res.headers.get('access-control-allow-methods')).toContain('POST');
+  });
+
+  it('incluye Access-Control-Allow-Origin en la respuesta real del POST', async () => {
+    process.env.LIVEKIT_API_KEY = 'devkey';
+    process.env.LIVEKIT_API_SECRET = 'un-secreto-suficientemente-largo-para-hs256';
+    const room = await join('Ana');
+
+    const res = await fetch(`${baseUrl}/livekit/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', Origin: 'http://localhost:9999' },
+      body: JSON.stringify({ sessionId: room.sessionId }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBe('*');
+  });
+
   it('el secreto de LiveKit nunca aparece en la respuesta ni en la consola', async () => {
     const secret = 'secreto-unico-de-esta-prueba-que-jamas-debe-filtrarse';
     process.env.LIVEKIT_API_KEY = 'devkey';

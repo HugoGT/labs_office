@@ -85,6 +85,26 @@ export interface OfficeServer {
 
 export function createOfficeServer(): OfficeServer {
   const app = express();
+
+  // El SPA y este servidor corren en origenes distintos (D5: puerto 2599
+  // fijo para el servidor, el preview/dev del cliente en cualquier otro).
+  // `Content-Type: application/json` no es un "simple request" (CORS spec),
+  // asi que el navegador manda un preflight OPTIONS antes del POST real.
+  // Descubierto por Slice E (`two-client-audio.e2e.test.mjs`): sin esto, el
+  // fetch del token de LiveKit se bloquea antes de llegar a esta ruta, y
+  // `connectLivekitRoom` jamas progresa. `*` es seguro aqui: la ruta no usa
+  // cookies/credenciales, solo el `sessionId` del cuerpo, ya validado contra
+  // `sessions` mas abajo.
+  app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
   app.use(express.json());
 
   const sessions = createLiveSessionRegistry();

@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import net from 'node:net';
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -26,6 +27,38 @@ const CHROMIUM_LAUNCH_ARGS = [
   '--disable-backgrounding-occluded-windows',
   '--disable-renderer-backgrounding',
 ];
+
+/** Slice E: same fake-device recipe already used by the Vitest browser layer
+ * (`vite.config.ts`'s `browser.provider` for `livekitRoom.browser.test.ts`)
+ * so `connectLivekitRoom`'s `setMicrophoneEnabled`/`setCameraEnabled` can
+ * actually publish against a real LiveKit server instead of rejecting for
+ * lack of a real camera/mic in the sandbox. */
+const FAKE_MEDIA_LAUNCH_ARGS = [
+  '--use-fake-device-for-media-stream',
+  '--use-fake-ui-for-media-stream',
+];
+
+/** Mirrors `vite.config.ts`'s `loadLivekitEnv()`: reads `infra/livekit/.env`
+ * from Node (never from the browser bundle) to inject real LiveKit
+ * credentials into the spawned server's env for Slice E's gated audio
+ * harness. Returns `{}` if the file is absent -- callers decide whether
+ * that is fatal. */
+function loadLivekitEnv() {
+  try {
+    const content = readFileSync(path.join(projectRoot, 'infra', 'livekit', '.env'), 'utf8');
+    const vars = {};
+    for (const rawLine of content.split('\n')) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (eq === -1) continue;
+      vars[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+    }
+    return vars;
+  } catch {
+    return {};
+  }
+}
 
 /** D5 preflight: fails fast if the fixed port is already occupied, instead
  * of the harness silently talking to someone else's server. */
@@ -127,14 +160,37 @@ function killProcessGroup(child) {
   }, TEARDOWN_GRACE_MS).unref();
 }
 
-export async function startHarness() {
+/**
+ * @param {{ realLivekit?: boolean, fakeMedia?: boolean }} [options]
+ *   `realLivekit`: inject real `LIVEKIT_API_KEY`/`SECRET` (from
+ *   `infra/livekit/.env`) into the spawned server's env instead of D6's
+ *   default scrub, so `/livekit/token` mints real tokens (Slice E, gated
+ *   behind `VITE_LIVEKIT_E2E` at the call site, never in CI).
+ *   `fakeMedia`: launch Chromium with the fake-device flags and grant
+ *   mic/camera permissions on every context, so `connectLivekitRoom` can
+ *   actually publish (Slice E only -- the unattended CI scenarios never
+ *   need it).
+ */
+export async function startHarness({ realLivekit = false, fakeMedia = false } = {}) {
   await checkPortFree(SERVER_PORT);
 
-  // D6: server env is scrubbed of LiveKit credentials so `/livekit/token`
-  // deterministically answers 503 -- no `.env.e2e`/CI ever provides them.
   const serverEnv = { ...process.env, PORT: String(SERVER_PORT) };
-  delete serverEnv.LIVEKIT_API_KEY;
-  delete serverEnv.LIVEKIT_API_SECRET;
+  if (realLivekit) {
+    const livekitEnv = loadLivekitEnv();
+    if (!livekitEnv.LIVEKIT_API_KEY || !livekitEnv.LIVEKIT_API_SECRET) {
+      throw new Error(
+        'realLivekit: true but infra/livekit/.env is missing LIVEKIT_API_KEY/LIVEKIT_API_SECRET',
+      );
+    }
+    serverEnv.LIVEKIT_API_KEY = livekitEnv.LIVEKIT_API_KEY;
+    serverEnv.LIVEKIT_API_SECRET = livekitEnv.LIVEKIT_API_SECRET;
+    if (livekitEnv.LIVEKIT_URL) serverEnv.LIVEKIT_URL = livekitEnv.LIVEKIT_URL;
+  } else {
+    // D6: server env is scrubbed of LiveKit credentials so `/livekit/token`
+    // deterministically answers 503 -- no `.env.e2e`/CI ever provides them.
+    delete serverEnv.LIVEKIT_API_KEY;
+    delete serverEnv.LIVEKIT_API_SECRET;
+  }
 
   const serverProcess = spawn('node', [path.join(projectRoot, 'server', 'src', 'main.ts')], {
     cwd: projectRoot,
@@ -170,13 +226,16 @@ export async function startHarness() {
     const previewUrl = await waitForUrlOnStdout(previewProcess, 'vite preview');
     await pollUntilOk(previewUrl, 'vite preview');
 
-    const browser = await chromium.launch({ args: CHROMIUM_LAUNCH_ARGS });
+    const launchArgs = fakeMedia
+      ? [...CHROMIUM_LAUNCH_ARGS, ...FAKE_MEDIA_LAUNCH_ARGS]
+      : CHROMIUM_LAUNCH_ARGS;
+    const browser = await chromium.launch({ args: launchArgs });
 
     return {
       previewUrl,
       browser,
       newContext() {
-        return browser.newContext();
+        return browser.newContext(fakeMedia ? { permissions: ['microphone', 'camera'] } : {});
       },
       async teardown() {
         process.off('exit', killAll);
@@ -254,6 +313,51 @@ export async function waitForAudioUnavailable(page) {
       return mic.disabled && mic.title === title && cam.disabled && cam.title === title;
     },
     undefined,
+    { timeout: READINESS_DEADLINE_MS },
+  );
+}
+
+// --- Slice E: gated real-LiveKit audio subscription ------------------------
+// Reads the gated test-only hook's `lastVoice()` (D4), the same event object
+// `useProximityAudio.ts` consumes to drive `connectLivekitRoom`'s
+// `setDesiredPeers`. Only meaningful with `startHarness({ realLivekit: true,
+// fakeMedia: true })` and a real LiveKit server reachable.
+
+/** The page's own Colyseus/LiveKit identity -- exactly the id the *other*
+ * client's audible set must contain while both are on the open floor. */
+export async function getOwnSessionId(page) {
+  return page.evaluate(() => window.__officeE2E?.lastVoice()?.selfSessionId ?? null);
+}
+
+/** Inverse of `waitForAudioUnavailable`: mic/cam enabled, no degradation title. */
+export async function waitForAudioAvailable(page) {
+  await page.waitForFunction(
+    () => {
+      const buttons = Array.from(document.querySelectorAll('#office-shell button'));
+      const mic = buttons.find((button) => button.textContent?.includes('Mic'));
+      const cam = buttons.find((button) => button.textContent?.includes('Cámara'));
+      if (!mic || !cam) return false;
+      return !mic.disabled && !cam.disabled;
+    },
+    undefined,
+    { timeout: READINESS_DEADLINE_MS },
+  );
+}
+
+/** `hook.lastVoice().sessionIds` contains `sessionId` (presence). */
+export async function waitForAudibleSessionId(page, sessionId) {
+  await page.waitForFunction(
+    (id) => (window.__officeE2E?.lastVoice()?.sessionIds ?? []).includes(id),
+    sessionId,
+    { timeout: READINESS_DEADLINE_MS },
+  );
+}
+
+/** `hook.lastVoice().sessionIds` no longer contains `sessionId` (absence). */
+export async function waitForNoAudibleSessionId(page, sessionId) {
+  await page.waitForFunction(
+    (id) => !(window.__officeE2E?.lastVoice()?.sessionIds ?? []).includes(id),
+    sessionId,
     { timeout: READINESS_DEADLINE_MS },
   );
 }
