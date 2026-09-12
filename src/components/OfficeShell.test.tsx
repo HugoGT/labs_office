@@ -15,18 +15,32 @@ vi.mock('../hooks/useProximityAudio', () => ({ useProximityAudio: vi.fn() }));
 const createGameMock = vi.mocked(createGame);
 const useProximityAudioMock = vi.mocked(useProximityAudio);
 
+/**
+ * Base del valor que devuelve el hook mockeado. Cada test sobreescribe solo
+ * lo que ejerce: asi ampliar `UseProximityAudioResult` no obliga a tocar
+ * todos los tests que no hablan de ese campo.
+ */
+function proximityAudio(
+  overrides: Partial<ReturnType<typeof useProximityAudio>> = {},
+): ReturnType<typeof useProximityAudio> {
+  return {
+    micOn: false,
+    camOn: false,
+    audioAvailable: false,
+    audioBlocked: false,
+    toggleMic: vi.fn(),
+    toggleCam: vi.fn(),
+    unblockAudio: vi.fn(),
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   createGameMock.mockReturnValue({ destroy: vi.fn() } as unknown as Phaser.Game);
   // Por defecto: apagado y sin LiveKit disponible (#321 decision 2 y 3) — los
   // tests que necesitan otro estado lo sobreescriben explicitamente.
-  useProximityAudioMock.mockReturnValue({
-    micOn: false,
-    camOn: false,
-    audioAvailable: false,
-    toggleMic: vi.fn(),
-    toggleCam: vi.fn(),
-  });
+  useProximityAudioMock.mockReturnValue(proximityAudio());
 });
 
 describe('OfficeShell', () => {
@@ -121,13 +135,7 @@ describe('OfficeShell', () => {
   });
 
   it('micOn/camOn/audioAvailable fluyen del hook a BottomBar, no de estado local propio', () => {
-    useProximityAudioMock.mockReturnValue({
-      micOn: true,
-      camOn: false,
-      audioAvailable: true,
-      toggleMic: vi.fn(),
-      toggleCam: vi.fn(),
-    });
+    useProximityAudioMock.mockReturnValue(proximityAudio({ micOn: true, audioAvailable: true }));
 
     render(<OfficeShell />);
 
@@ -143,13 +151,7 @@ describe('OfficeShell', () => {
   });
 
   it('audioAvailable en false deshabilita mic y camara en BottomBar (matriz de degradacion)', () => {
-    useProximityAudioMock.mockReturnValue({
-      micOn: false,
-      camOn: false,
-      audioAvailable: false,
-      toggleMic: vi.fn(),
-      toggleCam: vi.fn(),
-    });
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: false }));
 
     render(<OfficeShell />);
 
@@ -161,13 +163,9 @@ describe('OfficeShell', () => {
     const user = userEvent.setup();
     const toggleMic = vi.fn();
     const toggleCam = vi.fn();
-    useProximityAudioMock.mockReturnValue({
-      micOn: false,
-      camOn: false,
-      audioAvailable: true,
-      toggleMic,
-      toggleCam,
-    });
+    useProximityAudioMock.mockReturnValue(
+      proximityAudio({ audioAvailable: true, toggleMic, toggleCam }),
+    );
 
     render(<OfficeShell />);
     await user.click(screen.getByRole('button', { name: /Mic/ }));
@@ -269,5 +267,23 @@ describe('OfficeShell', () => {
     expect(teleportSpy).not.toHaveBeenCalled();
     expect(screen.getByText(/viene hacia ti/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Llamar/ })).not.toBeInTheDocument();
+  });
+
+  it('sin bloqueo de autoplay no muestra ningun aviso de audio', () => {
+    render(<OfficeShell />);
+
+    expect(screen.queryByText(/bloqueó el audio/)).not.toBeInTheDocument();
+  });
+
+  it('con el audio bloqueado por el navegador, ofrece desbloquearlo (#18)', async () => {
+    const unblockAudio = vi.fn();
+    useProximityAudioMock.mockReturnValue(
+      proximityAudio({ audioAvailable: true, audioBlocked: true, unblockAudio }),
+    );
+
+    render(<OfficeShell />);
+    await userEvent.click(screen.getByRole('button', { name: /activar el audio/i }));
+
+    expect(unblockAudio).toHaveBeenCalledTimes(1);
   });
 });
