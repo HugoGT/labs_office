@@ -97,6 +97,12 @@ variable "enable_identity_admin_secret" {
   default     = false
 }
 
+variable "identity_admin_from_metadata" {
+  description = "Hace que el servidor pida el token de Identity Platform al servidor de metadata de la VM, con la identidad que la maquina ya tiene, en vez de leerlo de una clave de cuenta de servicio (issue #24). Es la alternativa SIN claves, y existe porque la politica de organizacion 'constraints/iam.disableServiceAccountKeyCreation' puede prohibir crear esa clave: cuando esta aplicada no hay JSON que cargar en el secreto y este es el unico camino viable. Activarlo concede roles/identitytoolkit.admin a la cuenta de servicio de la VM; con la clave presente en el entorno, manda la clave."
+  type        = bool
+  default     = false
+}
+
 variable "image_tag" {
   description = "Tag inicial de las imagenes (SHA de commit). Vacio en el primer apply porque todavia no hay nada publicado: la VM escribe la configuracion y no levanta contenedores hasta que el primer despliegue le pase un tag."
   type        = string

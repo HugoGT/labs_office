@@ -68,6 +68,14 @@ BOOTSTRAP_SUPERADMIN_EMAIL="$(metadata office-bootstrap-superadmin-email || true
 # Opcional de verdad: la funcion de invitar cuentas puede no estar montada.
 SECRET_IDENTITY_ADMIN_NAME="$(metadata office-secret-identity-admin || true)"
 
+# El camino sin clave: el servidor pide el token al servidor de metadata con la
+# identidad de esta VM. Existe porque la politica de organizacion
+# 'constraints/iam.disableServiceAccountKeyCreation' puede impedir crear la
+# clave de cuenta de servicio. Con `|| true` y vacio por defecto por lo mismo
+# que las demas opcionales: que falte no puede tumbar el redespliegue de una VM
+# anterior a este cambio.
+IDENTITY_ADMIN_USE_METADATA="$(metadata office-identity-admin-from-metadata || true)"
+
 # Proyecto de Identity Platform que firma los ID tokens (issue #8). Con `|| true`
 # y vacio por defecto A PROPOSITO: si faltase y esto abortara, un redespliegue de
 # una VM antigua moriria; y si en cambio se rellenase solo con PROJECT_ID, el
@@ -201,6 +209,9 @@ trap 'rm -f "${TMP_ENV}"' EXIT
   # Vacia mientras no haya cuenta de servicio de Identity Platform. El servidor
   # arranca igual y solo el endpoint de invitar responde 503.
   echo "IDENTITY_ADMIN_CREDENTIALS=${IDENTITY_ADMIN_CREDENTIALS}"
+  # La alternativa a la anterior cuando la clave no se puede crear. No es un
+  # secreto: es un interruptor. Si estan las dos, el servidor usa la clave.
+  echo "IDENTITY_ADMIN_USE_METADATA=${IDENTITY_ADMIN_USE_METADATA}"
 } >"${TMP_ENV}"
 
 chown root:root "${TMP_ENV}"
@@ -225,6 +236,24 @@ echo "${ACCESS_TOKEN}" |
 log "desplegando ${IMAGE_TAG}"
 docker compose --project-directory "${WORKDIR}" pull --quiet
 docker compose --project-directory "${WORKDIR}" up -d --remove-orphans
+
+# Caddy no vigila su fichero de configuracion. El Caddyfile entra por bind mount
+# y la definicion del servicio no cambia entre despliegues, asi que `up -d` no
+# recrea el contenedor y Caddy sigue sirviendo la configuracion que leyo al
+# arrancar. Sin esta recarga, una ruta nueva del servidor NO existe aunque su
+# `handle` ya este escrito en el fichero: cae en el `handle` final, nginx
+# responde el index.html y el navegador recibe un 200 con HTML donde esperaba
+# JSON. Eso es exactamente lo que dejo `/admin/*` invisible durante dias.
+#
+# `caddy reload` es en caliente: no corta conexiones vivas ni reemite
+# certificados. El `restart` de reserva cubre el caso de que el contenedor este
+# parado, donde `exec` no puede entrar; si tampoco eso funciona, el despliegue
+# falla, que es mejor que anunciar como desplegada una configuracion que nadie
+# esta sirviendo.
+log "recargando la configuracion de Caddy"
+docker compose --project-directory "${WORKDIR}" exec -T caddy \
+  caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile ||
+  docker compose --project-directory "${WORKDIR}" restart caddy
 
 # Las imagenes viejas se acumulan una por despliegue y el disco son 20 GB.
 docker image prune -af --filter "until=168h" >/dev/null || true

@@ -301,6 +301,19 @@ resource "google_project_iam_member" "vm_log_writer" {
   member  = "serviceAccount:${google_service_account.vm.email}"
 }
 
+# Tambien a nivel de proyecto, y por el mismo motivo que logWriter: Identity
+# Platform no tiene un recurso mas fino al que atar el rol, porque las cuentas
+# cuelgan del proyecto entero. Solo se concede cuando el servidor va a
+# administrar cuentas con la identidad de la VM; con la clave de cuenta de
+# servicio quien necesita el rol es esa otra cuenta, no esta.
+resource "google_project_iam_member" "vm_identity_toolkit_admin" {
+  count = var.identity_admin_from_metadata ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/identitytoolkit.admin"
+  member  = "serviceAccount:${google_service_account.vm.email}"
+}
+
 # ---------------------------------------------------------------------------
 # VM
 # ---------------------------------------------------------------------------
@@ -379,6 +392,12 @@ resource "google_compute_instance" "office" {
     # `office-deploy` lee esta clave con `|| true` y, si no hay nombre, ni
     # siquiera intenta la lectura del secreto.
     office-secret-identity-admin = var.enable_identity_admin_secret ? google_secret_manager_secret.identity_admin[0].secret_id : ""
+
+    # El camino sin claves: el servidor pide el token al servidor de metadata
+    # con la identidad de la VM. Vacia mientras no se active, que es como se ha
+    # comportado hasta ahora; `office-deploy` la lee con `|| true` para que un
+    # redespliegue de una VM anterior a este cambio no muera por su ausencia.
+    office-identity-admin-from-metadata = var.identity_admin_from_metadata ? "true" : ""
 
     # No es un secreto y por eso no pasa por Secret Manager: es el id de un
     # proyecto de GCP, publico por naturaleza. Lo que protege la oficina son las

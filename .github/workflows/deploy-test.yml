@@ -126,13 +126,21 @@ jobs:
       # El tunel de IAP evita tener que abrir el 22 a internet: la VM solo
       # acepta SSH desde el rango de IAP y la autenticacion es la identidad
       # federada de este workflow, no una clave privada guardada en un secreto.
+      # El script se refresca desde la metadata ANTES de correrlo, y no es
+      # paranoia: `/usr/local/bin/office-deploy` solo se escribe en el arranque
+      # de la VM (ver startup-script.sh), asi que un `terraform apply` que
+      # cambie el script deja la copia del disco vieja hasta el siguiente
+      # reinicio. El fichero compose, en cambio, se lee de la metadata en cada
+      # despliegue. Esa pareja descuadrada es exactamente lo que rompio el
+      # despliegue del 2026-09-17: compose nuevo con Postgres, script viejo que
+      # no sabia escribir sus variables, y la base arrancando sin contrasena.
       - name: Deploy over the IAP tunnel
         run: |
           gcloud compute ssh "${INSTANCE}" \
             --zone "${ZONE}" \
             --tunnel-through-iap \
             --quiet \
-            --command "sudo /usr/local/bin/office-deploy ${{ github.sha }}"
+            --command "sudo curl -sS -f -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/attributes/office-deploy-script -o /usr/local/bin/office-deploy && sudo chmod 0755 /usr/local/bin/office-deploy && sudo /usr/local/bin/office-deploy ${{ github.sha }}"
 
       # Sin esto el workflow diria "desplegado" en cuanto docker compose
       # devuelve el control, que es antes de que ningun contenedor conteste.

@@ -50,6 +50,23 @@
  * seria "doy de alta a alguien y no puede entrar", sin un solo error. La clave
  * de servicio ya trae su `project_id` y es, por construccion, el proyecto donde
  * esa clave puede hacer algo.
+ *
+ * ## Por que hay DOS formas de conseguir el token
+ *
+ * Porque la clave de cuenta de servicio no siempre se puede crear: la politica
+ * de organizacion `constraints/iam.disableServiceAccountKeyCreation` la
+ * prohibe, y entonces no hay JSON que poner en `IDENTITY_ADMIN_CREDENTIALS`.
+ * El servidor corre dentro de una VM de GCE que ya tiene identidad propia con
+ * scope `cloud-platform`, asi que puede pedirle el token al servidor de
+ * metadata y no guardar ninguna credencial en ninguna parte. Es el mismo
+ * razonamiento que este repositorio ya defiende en
+ * `.github/workflows/deploy-test.yml`, donde la federacion OIDC sustituyo a la
+ * clave descargada por las mismas razones.
+ *
+ * `CredentialSource` es la costura entre las dos: lo unico que el adaptador
+ * necesita saber es de que proyecto se trata y como conseguir un token fresco.
+ * El cacheo del token se queda FUERA de la fuente, en el adaptador, para que no
+ * haya dos politicas de caducidad que mantener sincronizadas.
  */
 
 import { importPKCS8, SignJWT } from 'jose';
@@ -69,6 +86,13 @@ const SCOPE = 'https://www.googleapis.com/auth/identitytoolkit';
 
 /** Vida de la asercion. El maximo que acepta Google es una hora. */
 const ASSERTION_TTL_SECONDS = 3600;
+
+/**
+ * Cuanto se supone que dura un token cuando la respuesta no lo dice. Una hora
+ * es lo que Google concede siempre; suponer mas seria inventarse una caducidad
+ * que nadie ha prometido, y el margen de abajo cubre el resto.
+ */
+const TOKEN_TTL_FALLBACK_SECONDS = 3600;
 
 /**
  * Margen con el que se considera caducado el token de acceso antes de tiempo.
@@ -121,8 +145,163 @@ export function parseServiceAccountKey(raw: string | undefined): ServiceAccountK
   };
 }
 
+/** Un token recien pedido, con lo que dice durar. */
+export interface TokenGrant {
+  token: string;
+  expiresInSeconds: number;
+}
+
+/**
+ * De donde salen el proyecto y el token. Dos implementaciones: la clave de
+ * cuenta de servicio y el servidor de metadata de la VM (ver la cabecera).
+ */
+export interface CredentialSource {
+  /** Proyecto donde esta credencial puede administrar cuentas. */
+  projectId(): Promise<string>;
+  /** Pide un token NUEVO; el cacheo con su caducidad es del llamante. */
+  requestToken(): Promise<TokenGrant>;
+}
+
+/**
+ * La credencial clasica: un JWT RS256 firmado con la clave privada de la cuenta
+ * de servicio, canjeado por un token de acceso en el flujo JWT-bearer.
+ */
+export function serviceAccountSource(
+  credentials: ServiceAccountKey,
+  fetchImpl: typeof fetch = fetch,
+): CredentialSource {
+  /**
+   * `importPKCS8` es asincrono y el resultado es reutilizable, asi que se
+   * importa una sola vez y se guarda la promesa. Importarla por peticion
+   * pagaria un parseo de clave RSA cada vez, y sobre todo dejaria copias del
+   * material de clave repartidas por el heap sin motivo.
+   */
+  let signingKey: Promise<CryptoKey> | null = null;
+  function key(): Promise<CryptoKey> {
+    signingKey ??= importPKCS8(credentials.private_key, 'RS256') as Promise<CryptoKey>;
+    return signingKey;
+  }
+
+  return {
+    // Sale de la propia clave y no del entorno, por lo que explica la cabecera:
+    // es, por construccion, el proyecto donde esa clave puede hacer algo.
+    projectId: () => Promise.resolve(credentials.project_id),
+
+    async requestToken() {
+      const issuedAt = Math.floor(Date.now() / 1000);
+      const assertion = await new SignJWT({ scope: SCOPE })
+        .setProtectedHeader({ alg: 'RS256' })
+        .setIssuer(credentials.client_email)
+        .setAudience(credentials.token_uri)
+        .setIssuedAt(issuedAt)
+        .setExpirationTime(issuedAt + ASSERTION_TTL_SECONDS)
+        .sign(await key());
+
+      const response = await fetchImpl(credentials.token_uri, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+          assertion,
+        }).toString(),
+      });
+
+      const body = (await response.json().catch(() => null)) as {
+        access_token?: unknown;
+        expires_in?: unknown;
+      } | null;
+      if (!response.ok || !isNonEmptyText(body?.access_token)) {
+        throw new IdentityAdminError('unavailable');
+      }
+
+      return {
+        token: body.access_token,
+        expiresInSeconds:
+          typeof body.expires_in === 'number' ? body.expires_in : TOKEN_TTL_FALLBACK_SECONDS,
+      };
+    },
+  };
+}
+
+/**
+ * Base del servidor de metadata. Se usa la IP de enlace local y NO el nombre
+ * `metadata.google.internal` a proposito: ese nombre lo resuelve el
+ * `/etc/hosts` que Google escribe en la VM, y los contenedores no lo heredan,
+ * asi que dentro del contenedor no resuelve. La IP si es alcanzable desde la
+ * red del contenedor, y es la misma en todas las instancias de GCE.
+ */
+const METADATA_BASE = 'http://169.254.169.254/computeMetadata/v1';
+
+/**
+ * Obligatoria en las dos peticiones: sin ella el servidor de metadata responde
+ * 403. Es su defensa contra el SSRF, porque una peticion reflejada desde fuera
+ * (un navegador, un proxy despistado) no anade cabeceras a medida.
+ */
+const METADATA_HEADERS = { 'Metadata-Flavor': 'Google' };
+
+/**
+ * La credencial sin clave: el token lo emite el servidor de metadata para la
+ * cuenta de servicio de la propia VM. No hay nada que descargar, nada que
+ * guardar y nada que rotar, y por eso es el unico camino viable cuando la
+ * organizacion prohibe crear claves de cuenta de servicio.
+ *
+ * El scope no se puede estrechar aqui como en el flujo de la clave: lo fija la
+ * VM (`cloud-platform`), que incluye `identitytoolkit`. Quien acota de verdad
+ * lo que esta identidad puede hacer son sus roles IAM.
+ */
+export function metadataServerSource(fetchImpl: typeof fetch = fetch): CredentialSource {
+  // El project id no cambia en toda la vida de la VM, asi que se pide una vez.
+  // Se cachea el VALOR y solo tras una lectura buena: guardar aqui un fallo
+  // dejaria la funcion rota hasta reiniciar el contenedor.
+  let cachedProjectId: string | null = null;
+
+  async function get(path: string): Promise<Response> {
+    try {
+      return await fetchImpl(`${METADATA_BASE}${path}`, { headers: METADATA_HEADERS });
+    } catch {
+      // `fetch` lanza `TypeError` cuando no hay ruta hasta la IP de enlace
+      // local: fuera de GCE, o con la red del contenedor mal montada. El
+      // llamante solo sabe tratar `IdentityAdminError`.
+      throw new IdentityAdminError('unavailable');
+    }
+  }
+
+  return {
+    async projectId() {
+      if (cachedProjectId !== null) return cachedProjectId;
+
+      const response = await get('/project/project-id');
+      // Texto plano, no JSON: este endpoint devuelve el id pelado.
+      const text = response.ok ? await response.text().catch(() => '') : '';
+      if (text.trim().length === 0) throw new IdentityAdminError('unavailable');
+
+      cachedProjectId = text.trim();
+      return cachedProjectId;
+    },
+
+    async requestToken() {
+      const response = await get('/instance/service-accounts/default/token');
+
+      const body = (await response.json().catch(() => null)) as {
+        access_token?: unknown;
+        expires_in?: unknown;
+      } | null;
+      if (!response.ok || !isNonEmptyText(body?.access_token)) {
+        throw new IdentityAdminError('unavailable');
+      }
+
+      return {
+        token: body.access_token,
+        expiresInSeconds:
+          typeof body.expires_in === 'number' ? body.expires_in : TOKEN_TTL_FALLBACK_SECONDS,
+      };
+    },
+  };
+}
+
 export interface GcpIdentityAdminOptions {
-  credentials: ServiceAccountKey;
+  /** De donde salen el proyecto y el token: la clave o el servidor de metadata. */
+  source: CredentialSource;
   /** Inyectable para probar el contrato entero sin red, como en `adminClient.ts`. */
   fetchImpl?: typeof fetch;
   /** Reloj inyectable: sin el, la caducidad del token dependeria de la hora. */
@@ -145,22 +324,10 @@ function codeForIdentityError(body: unknown): 'email-exists' | 'unavailable' {
 }
 
 export function createGcpIdentityAdmin({
-  credentials,
+  source,
   fetchImpl = fetch,
   now = Date.now,
 }: GcpIdentityAdminOptions): IdentityAdmin {
-  /**
-   * `importPKCS8` es asincrono y el resultado es reutilizable, asi que se
-   * importa una sola vez y se guarda la promesa. Importarla por peticion
-   * pagaria un parseo de clave RSA cada vez, y sobre todo dejaria copias del
-   * material de clave repartidas por el heap sin motivo.
-   */
-  let signingKey: Promise<CryptoKey> | null = null;
-  function key(): Promise<CryptoKey> {
-    signingKey ??= importPKCS8(credentials.private_key, 'RS256') as Promise<CryptoKey>;
-    return signingKey;
-  }
-
   /**
    * El token de acceso vale una hora; pedirlo por operacion serian dos viajes a
    * googleapis.com por cada alta y por cada revocacion. Se cachea CON su
@@ -171,36 +338,12 @@ export function createGcpIdentityAdmin({
   async function accessToken(): Promise<string> {
     if (cached && cached.expiresAt - TOKEN_EXPIRY_MARGIN_MS > now()) return cached.token;
 
-    const issuedAt = Math.floor(now() / 1000);
-    const assertion = await new SignJWT({ scope: SCOPE })
-      .setProtectedHeader({ alg: 'RS256' })
-      .setIssuer(credentials.client_email)
-      .setAudience(credentials.token_uri)
-      .setIssuedAt(issuedAt)
-      .setExpirationTime(issuedAt + ASSERTION_TTL_SECONDS)
-      .sign(await key());
+    // Si la fuente falla lanza `IdentityAdminError` y aqui no se asigna nada:
+    // NO se cachea el camino de fallo, porque un token vacio guardado haria que
+    // todos los intentos siguientes fallasen igual hasta reiniciar.
+    const grant = await source.requestToken();
 
-    const response = await fetchImpl(credentials.token_uri, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-        assertion,
-      }).toString(),
-    });
-
-    const body = (await response.json().catch(() => null)) as {
-      access_token?: unknown;
-      expires_in?: unknown;
-    } | null;
-    if (!response.ok || !isNonEmptyText(body?.access_token)) {
-      // NO se cachea nada en el camino de fallo: un token vacio guardado aqui
-      // haria que todos los intentos siguientes fallasen igual hasta reiniciar.
-      throw new IdentityAdminError('unavailable');
-    }
-
-    const ttl = typeof body.expires_in === 'number' ? body.expires_in : ASSERTION_TTL_SECONDS;
-    cached = { token: body.access_token, expiresAt: now() + ttl * 1000 };
+    cached = { token: grant.token, expiresAt: now() + grant.expiresInSeconds * 1000 };
     return cached.token;
   }
 
@@ -213,10 +356,11 @@ export function createGcpIdentityAdmin({
    */
   async function call(path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
     const token = await accessToken();
+    const projectId = await source.projectId();
 
     let response: Response;
     try {
-      response = await fetchImpl(`${IDENTITY_TOOLKIT}/${credentials.project_id}/${path}`, {
+      response = await fetchImpl(`${IDENTITY_TOOLKIT}/${projectId}/${path}`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -267,16 +411,43 @@ export function createGcpIdentityAdmin({
 }
 
 /**
+ * `true` o `1`, sin distinguir mayusculas y recortando espacios. El valor lo
+ * escribe un script de shell dentro de un `.env`, donde un espacio de mas es un
+ * descuido corriente y no una forma de decir que no.
+ */
+function isEnabled(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === 'true' || normalized === '1';
+}
+
+/**
  * Cableado desde el entorno, hermano de `directoryFromEnv` y de
  * `authVerifierFromEnv`. `null` -- y no `undefined` -- porque el override de
  * `createOfficeServer` distingue "no configurado" de "no pasado", igual que con
  * el directorio.
+ *
+ * La clave manda sobre la metadata, y la precedencia es explicita a proposito:
+ * una clave puesta en el entorno nombra una identidad concreta que alguien
+ * eligio, mientras que la metadata es la identidad que la VM tiene de todas
+ * formas. Si estan las dos, gana la decision deliberada.
  */
 export function identityAdminFromEnv(
-  env: { IDENTITY_ADMIN_CREDENTIALS?: string },
+  env: { IDENTITY_ADMIN_CREDENTIALS?: string; IDENTITY_ADMIN_USE_METADATA?: string },
   fetchImpl?: typeof fetch,
 ): IdentityAdmin | null {
   const credentials = parseServiceAccountKey(env.IDENTITY_ADMIN_CREDENTIALS);
-  if (credentials === null) return null;
-  return createGcpIdentityAdmin({ credentials, fetchImpl });
+  if (credentials !== null) {
+    return createGcpIdentityAdmin({
+      source: serviceAccountSource(credentials, fetchImpl),
+      fetchImpl,
+    });
+  }
+
+  if (isEnabled(env.IDENTITY_ADMIN_USE_METADATA)) {
+    return createGcpIdentityAdmin({ source: metadataServerSource(fetchImpl), fetchImpl });
+  }
+
+  // Sin ninguna de las dos se degrada igual que hasta ahora: invitar responde
+  // 503 y el resto del panel sigue en pie.
+  return null;
 }

@@ -413,7 +413,11 @@ arranque que funciona por casualidad y unos logs que no explican por qué.
 |---|---|---|---|
 | `DATABASE_URL` | sin directorio; el servidor se comporta igual que antes | migra el esquema al arrancar y sirve el panel | la compone `office-deploy` con la contraseña de Secret Manager |
 | `BOOTSTRAP_SUPERADMIN_EMAIL` | nadie puede hacer el arranque en frío | ese correo se promociona a superadmin | **no**: es una dirección de correo |
-| `IDENTITY_ADMIN_CREDENTIALS` | invitar cuentas devuelve 503; el resto del panel funciona | el servidor puede dar de alta cuentas en Identity Platform | **sí** |
+| `IDENTITY_ADMIN_CREDENTIALS` | invitar cuentas devuelve 503; el resto del panel funciona | el servidor da de alta cuentas con la clave de esa cuenta de servicio | **sí** |
+| `IDENTITY_ADMIN_USE_METADATA` | el servidor no usa la identidad de la VM para esto | el servidor pide el token al servidor de metadata y da de alta cuentas **sin ninguna clave** | **no**: es un interruptor (`true`) |
+
+Las dos últimas son dos formas de lo mismo y se excluyen: si están las dos, manda
+la clave. Sin ninguna, invitar devuelve 503.
 
 La degradación es la misma convención que `FIREBASE_PROJECT_ID`: sin configuración,
 el comportamiento anterior; con ella, la función nueva. `GET /health` dice en qué
@@ -521,6 +525,39 @@ cuenta de servicio de Identity Platform y su clave esté cargada en Secret Manag
 Es una degradación querida, no un fallo: la función es opcional y no debe tumbar el
 despliegue.
 
+Hay **dos caminos** y basta con uno. Si la organización aplica la política
+`constraints/iam.disableServiceAccountKeyCreation`, el primero es el único posible:
+la clave no se puede crear.
+
+#### Camino sin clave: la identidad de la propia VM
+
+La VM ya corre con una cuenta de servicio dedicada y scope `cloud-platform`, así
+que puede pedirle un token al servidor de metadata. No hay nada que descargar, nada
+que guardar en Secret Manager y nada que rotar. Es el mismo razonamiento que ya
+aplica `.github/workflows/deploy-test.yml` para el CI, donde la federación OIDC
+sustituyó a la clave descargada.
+
+```hcl
+# terraform.tfvars
+identity_admin_from_metadata = true
+```
+
+Y aplicar. Eso concede `roles/identitytoolkit.admin` a la cuenta de servicio de la
+VM (a nivel de proyecto porque Identity Platform no tiene un recurso más fino al
+que atarlo, igual que `logging.logWriter`) y escribe la metadata que
+`office-deploy` traduce a `IDENTITY_ADMIN_USE_METADATA` en el `.env`. Después,
+redesplegar.
+
+En este modo el secreto `identity_admin` **no hace falta**:
+`enable_identity_admin_secret` puede quedarse en `false` y no hay ninguna clave que
+cargar.
+
+El precio es que el permiso lo tiene la VM entera, no una identidad separada: quien
+consiga ejecutar código dentro de la máquina hereda el rol. A cambio no existe
+ninguna clave que se pueda filtrar, copiar o quedar viva para siempre en un portátil.
+
+#### Camino con clave de cuenta de servicio
+
 Los tres pasos, en orden:
 
 1. **Crear la cuenta de servicio** y darle el rol mínimo que permite crear y
@@ -564,9 +601,11 @@ Los tres pasos, en orden:
    primera línea. Sigue siendo el mismo JSON.
 
    La clave sí es de las que no caducan, que es justo lo que se evitó para el CI con
-   la federación de GitHub. Aquí no hay alternativa equivalente: el servidor corre
-   dentro de la VM y necesita credenciales de una identidad distinta a la suya.
-   Rotarla es repetir este paso y borrar la versión vieja de la cuenta de servicio.
+   la federación de GitHub. Rotarla es repetir este paso y borrar la versión vieja de
+   la cuenta de servicio. La alternativa que no tiene ese problema es el camino sin
+   clave de más arriba, y además es el único que queda cuando la política de la
+   organización prohíbe crear claves de cuenta de servicio: `gcloud iam
+   service-accounts keys create` falla y no hay nada que cargar aquí.
 
 Después, redesplegar.
 
