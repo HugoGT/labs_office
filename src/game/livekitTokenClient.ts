@@ -16,15 +16,33 @@ export interface LivekitTokenResponse {
   room: string;
 }
 
+/**
+ * Peticion agrupada en un objeto y no en parametros sueltos (#8): el ID token
+ * entro como tercer dato de la peticion, y una lista posicional que mezcla
+ * datos con el `fetch` inyectado se lee mal y se equivoca facil.
+ */
+export interface LivekitTokenRequest {
+  tokenUrl: string;
+  /** La sesion de Colyseus; sigue siendo la `identity` que devuelve el servidor. */
+  sessionId: string;
+  /**
+   * ID token de quien pide (#8). Ausente o nulo cuando no hay autenticacion
+   * configurada: el servidor lo trata como el modo abierto de siempre.
+   */
+  token?: string | null;
+}
+
 export async function fetchLivekitToken(
-  tokenUrl: string,
-  sessionId: string,
+  { tokenUrl, sessionId, token }: LivekitTokenRequest,
   fetchImpl: typeof fetch = fetch,
 ): Promise<LivekitTokenResponse> {
   const response = await fetchImpl(tokenUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId }),
+    // El token se omite en vez de viajar como `null`: sin sesion no hay nada
+    // que probar, y un `null` explicito seria un intento de autenticacion con
+    // un valor invalido (400) en vez de la ausencia que el servidor espera.
+    body: JSON.stringify(token ? { sessionId, token } : { sessionId }),
   });
 
   if (!response.ok) {

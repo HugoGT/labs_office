@@ -46,6 +46,13 @@ ACME_EMAIL="$(metadata office-acme-email)"
 SECRET_KEY_NAME="$(metadata office-secret-key)"
 SECRET_SECRET_NAME="$(metadata office-secret-secret)"
 
+# Proyecto de Identity Platform que firma los ID tokens (issue #8). Con `|| true`
+# y vacio por defecto A PROPOSITO: si faltase y esto abortara, un redespliegue de
+# una VM antigua moriria; y si en cambio se rellenase solo con PROJECT_ID, el
+# servidor pasaria a exigir autenticacion sin que nadie lo haya pedido y dejaria
+# fuera a todo el mundo hasta que existan cuentas. Vacio = como hasta ahora.
+AUTH_PROJECT_ID="$(metadata office-auth-project-id || true)"
+
 # Precedencia del tag: argumento > variable de entorno > metadata > el que ya
 # esta desplegado. La ultima opcion es la que hace que un reinicio de la VM no
 # retroceda a una version vieja.
@@ -115,6 +122,8 @@ trap 'rm -f "${TMP_ENV}"' EXIT
   echo "IMAGE_TAG=${IMAGE_TAG}"
   echo "LIVEKIT_API_KEY=${LIVEKIT_API_KEY}"
   echo "LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}"
+  # No es un secreto: es el id del proyecto de GCP. No pasa por Secret Manager.
+  echo "FIREBASE_PROJECT_ID=${AUTH_PROJECT_ID}"
 } >"${TMP_ENV}"
 
 chown root:root "${TMP_ENV}"

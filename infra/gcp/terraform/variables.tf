@@ -70,6 +70,12 @@ variable "acme_email" {
   type        = string
 }
 
+variable "auth_project_id" {
+  description = "Proyecto de GCP Identity Platform que firma los ID tokens de email+password (issue #8). Vacio deja el servidor SIN autenticacion, que es como corrio hasta ahora: ponerlo es una decision explicita, porque a partir de ese momento solo entran cuentas que existan en ese proyecto. Normalmente coincide con project_id."
+  type        = string
+  default     = ""
+}
+
 variable "image_tag" {
   description = "Tag inicial de las imagenes (SHA de commit). Vacio en el primer apply porque todavia no hay nada publicado: la VM escribe la configuracion y no levanta contenedores hasta que el primer despliegue le pase un tag."
   type        = string

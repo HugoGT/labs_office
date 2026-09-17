@@ -13,7 +13,14 @@ overrides:
 # proposito: msgpackr cae a su implementacion en JS sin perder correccion, y asi
 # CI no necesita toolchain de compilacion nativa.
 allowBuilds:
+  # Los dos scripts que arrastra `firebase` tampoco se ejecutan. `protobufjs`
+  # solo lo usan Firestore y Functions, que este proyecto no importa: de
+  # `firebase` solo entra el subcamino `firebase/auth`. Y el de `@firebase/util`
+  # no produce nada que el runtime necesite. Mismo criterio que msgpackr: si CI
+  # no necesita toolchain nativa, mejor no pedirsela.
+  '@firebase/util': false
   msgpackr-extract: false
+  protobufjs: false
 
 minimumReleaseAgeExclude:
   - livekit-client@2.22.3

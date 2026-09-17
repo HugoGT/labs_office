@@ -4,9 +4,10 @@
  * ejercita contra un `onJoin`/`onLeave` reales; un doble de `sessions`
  * pasaria por alto justo el bug que este slice quiere evitar.
  *
- * Recordatorio (D5, no se repite en cada test): este guard demuestra que el
- * sessionId esta conectado ahora, NO que quien llama es su dueno. Eso llega
- * con Google OAuth (PRD 10), fuera de alcance aqui.
+ * Con la auth desactivada (el `describe` de arriba) ese guard sigue demostrando
+ * solo que el sessionId esta conectado ahora, NO que quien llama sea su dueno.
+ * El bloque de abajo, con auth activa, es el que cierra ese hueco: exige un ID
+ * token verificado cuyo uid coincida con el dueno de la sesion (#8).
  */
 
 import { Client } from 'colyseus.js';
@@ -15,6 +16,7 @@ import { LIVEKIT_ROOM_NAME } from '../../src/game/officeProtocol.ts';
 import { createOfficeServer, type OfficeServer } from './createOfficeServer.ts';
 import { OFFICE_ROOM_NAME } from './OfficeRoom.ts';
 import type { OfficeState } from './schema.ts';
+import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 
 process.setMaxListeners(50);
 
@@ -205,5 +207,233 @@ describe('POST /livekit/token', () => {
     logSpy.mockRestore();
     errorSpy.mockRestore();
     warnSpy.mockRestore();
+  });
+});
+
+describe('GET /health', () => {
+  it('con la auth desactivada informa `auth: disabled`', async () => {
+    const res = await fetch(`${baseUrl}/health`);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, room: OFFICE_ROOM_NAME, auth: 'disabled' });
+  });
+});
+
+/**
+ * Con auth activa el contrato cambia, y el cambio es el punto de #8: hasta
+ * ahora cualquiera podia leer el `sessionId` de otro participante del estado de
+ * la sala y pedir un token en su nombre. Estos tests levantan su propio
+ * servidor con un verificador inyectado, sin tocar `process.env`.
+ */
+describe('POST /livekit/token con auth activa (#8)', () => {
+  const ANA: VerifiedIdentity = { uid: 'uid-ana', email: 'ana@example.com', name: 'Ana' };
+  const BETO: VerifiedIdentity = { uid: 'uid-beto', email: 'beto@example.com', name: 'Beto' };
+
+  /**
+   * Doble indexado por token. Las firmas de verdad ya las prueba
+   * `verifyIdToken.test.ts`; lo que falta demostrar aqui es la guarda de dueno.
+   */
+  const verifier: IdTokenVerifier = {
+    async verify(token: unknown) {
+      if (token === 'token-de-ana') return ANA;
+      if (token === 'token-de-beto') return BETO;
+      return null;
+    },
+  };
+
+  let authServer: OfficeServer;
+  let authBaseUrl: string;
+  let authWsUrl: string;
+
+  beforeEach(async () => {
+    authServer = createOfficeServer({ auth: verifier });
+    const port = await authServer.listen(0);
+    authBaseUrl = `http://localhost:${port}`;
+    authWsUrl = `ws://localhost:${port}`;
+    process.env.LIVEKIT_API_KEY = 'devkey';
+    process.env.LIVEKIT_API_SECRET = 'un-secreto-suficientemente-largo-para-hs256';
+  });
+
+  afterEach(async () => {
+    await authServer.shutdown();
+  });
+
+  async function joinAuth(token: string) {
+    const room = await new Client(authWsUrl).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token });
+    openRooms.push(room);
+    return room;
+  }
+
+  function postAuthToken(body: unknown) {
+    return fetch(`${authBaseUrl}/livekit/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it('informa `auth: enabled` en /health', async () => {
+    const res = await fetch(`${authBaseUrl}/health`);
+
+    expect(await res.json()).toEqual({ ok: true, room: OFFICE_ROOM_NAME, auth: 'enabled' });
+  });
+
+  it('200 cuando el uid del token es el dueno de la sesion', async () => {
+    const room = await joinAuth('token-de-ana');
+
+    const res = await postAuthToken({ sessionId: room.sessionId, token: 'token-de-ana' });
+
+    expect(res.status).toBe(200);
+    const body = await readBody(res);
+    expect(body.room).toBe(LIVEKIT_ROOM_NAME);
+    expect(typeof body.token).toBe('string');
+  });
+
+  it('la identity sigue siendo el sessionId, NUNCA el uid', async () => {
+    // `useProximityAudio` empareja participantes de LiveKit por sessionId de
+    // Colyseus (`src/hooks/useProximityAudio.ts`, que pasa `payload.sessionIds`
+    // a `setDesiredPeers` y estos acaban en `room.remoteParticipants.get(...)`).
+    // Cambiar la identity al uid mataria el audio por proximidad en silencio:
+    // los tokens se emitirian bien, la sala conectaria, y nadie se oiria.
+    const room = await joinAuth('token-de-ana');
+
+    const res = await postAuthToken({ sessionId: room.sessionId, token: 'token-de-ana' });
+
+    const body = await readBody(res);
+    expect(body.identity).toBe(room.sessionId);
+    expect(body.identity).not.toBe('uid-ana');
+  });
+
+  it('403 forbidden-session si el token es valido pero de otra persona', async () => {
+    // El agujero que cierra #8: Beto lee el sessionId de Ana en el estado de la
+    // sala y pide un token en su nombre, con su propio token, que es valido.
+    const ana = await joinAuth('token-de-ana');
+    await joinAuth('token-de-beto');
+
+    const res = await postAuthToken({ sessionId: ana.sessionId, token: 'token-de-beto' });
+
+    expect(res.status).toBe(403);
+    expect((await readBody(res)).error).toBe('forbidden-session');
+  });
+
+  it('401 unauthorized si el token es invalido', async () => {
+    const room = await joinAuth('token-de-ana');
+
+    const res = await postAuthToken({ sessionId: room.sessionId, token: 'token-forjado' });
+
+    expect(res.status).toBe(401);
+    expect((await readBody(res)).error).toBe('unauthorized');
+  });
+
+  it('401 (no 400) si falta el token o no es texto, aunque el sessionId sea valido', async () => {
+    // Deliberadamente NO se distingue "cuerpo mal formado" de "token invalido":
+    // un 400 aqui le diria a quien sondea que el `sessionId` que probo si es
+    // bueno y que solo le falta la credencial.
+    const room = await joinAuth('token-de-ana');
+
+    const missing = await postAuthToken({ sessionId: room.sessionId });
+    expect(missing.status).toBe(401);
+    expect((await readBody(missing)).error).toBe('unauthorized');
+
+    const wrongType = await postAuthToken({ sessionId: room.sessionId, token: 42 });
+    expect(wrongType.status).toBe(401);
+    expect((await readBody(wrongType)).error).toBe('unauthorized');
+  });
+
+  it('400 invalid-request si falta el sessionId: esa rama no cambia', async () => {
+    const res = await postAuthToken({ token: 'token-de-ana' });
+
+    expect(res.status).toBe(400);
+    expect((await readBody(res)).error).toBe('invalid-request');
+  });
+
+  it('403 unknown-session mantiene su semantica para quien SI trae token valido', async () => {
+    const res = await postAuthToken({ sessionId: 'jamas-existio', token: 'token-de-ana' });
+
+    expect(res.status).toBe(403);
+    expect((await readBody(res)).error).toBe('unknown-session');
+  });
+
+  it('REGRESION: sin token valido, una sesion viva y una inventada responden igual', async () => {
+    // El orden de las guardas es la defensa. Si `unknown-session` se comprobase
+    // antes que el token, estas dos respuestas serian distintas (403 la falsa,
+    // 401 la viva) y cualquiera podria ir probando sessionIds hasta acertar uno
+    // conectado sin tener credencial ninguna. Los sessionId de Colyseus son
+    // cortos y no son secretos: es exactamente el sondeo que describe la #9.
+    const room = await joinAuth('token-de-ana');
+
+    const viva = await postAuthToken({ sessionId: room.sessionId, token: 'token-forjado' });
+    const inventada = await postAuthToken({ sessionId: 'jamas-existio', token: 'token-forjado' });
+
+    expect(viva.status).toBe(401);
+    expect(inventada.status).toBe(401);
+    expect(await readBody(viva)).toEqual(await readBody(inventada));
+  });
+
+  it('503 si falta la configuracion de LiveKit, despues de pasar las guardas', async () => {
+    const room = await joinAuth('token-de-ana');
+    delete process.env.LIVEKIT_API_KEY;
+    delete process.env.LIVEKIT_API_SECRET;
+
+    const res = await postAuthToken({ sessionId: room.sessionId, token: 'token-de-ana' });
+
+    expect(res.status).toBe(503);
+    expect((await readBody(res)).error).toBe('livekit-not-configured');
+  });
+
+  it('un token valido no sirve tras salir de la sala', async () => {
+    const room = await joinAuth('token-de-ana');
+    const sessionId = room.sessionId;
+
+    await room.leave();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const res = await postAuthToken({ sessionId, token: 'token-de-ana' });
+    expect(res.status).toBe(403);
+    expect((await readBody(res)).error).toBe('unknown-session');
+  });
+});
+
+describe('POST /livekit/token con auth desactivada: nada cambia', () => {
+  it('REGRESION: un cuerpo sin token sigue dando 200, no 401', async () => {
+    // El modo sin auth tiene que seguir siendo byte por byte el de antes de #8:
+    // es lo que permite levantar la oficina en local sin proyecto de Firebase.
+    process.env.LIVEKIT_API_KEY = 'devkey';
+    process.env.LIVEKIT_API_SECRET = 'un-secreto-suficientemente-largo-para-hs256';
+    const room = await join('Ana');
+
+    const res = await postToken({ sessionId: room.sessionId });
+
+    expect(res.status).toBe(200);
+    const body = await readBody(res);
+    expect(body.identity).toBe(room.sessionId);
+    expect(body.room).toBe(LIVEKIT_ROOM_NAME);
+  });
+
+  it('REGRESION: un token cualquiera en el cuerpo se ignora, no se verifica', async () => {
+    process.env.LIVEKIT_API_KEY = 'devkey';
+    process.env.LIVEKIT_API_SECRET = 'un-secreto-suficientemente-largo-para-hs256';
+    const room = await join('Ana');
+
+    const res = await postToken({ sessionId: room.sessionId, token: 'basura-absoluta' });
+
+    expect(res.status).toBe(200);
+  });
+
+  it('REGRESION: las cuatro ramas de siempre conservan codigo y cuerpo', async () => {
+    const sinSessionId = await postToken({});
+    expect(sinSessionId.status).toBe(400);
+    expect((await readBody(sinSessionId)).error).toBe('invalid-request');
+
+    const desconocida = await postToken({ sessionId: 'jamas-existio' });
+    expect(desconocida.status).toBe(403);
+    expect((await readBody(desconocida)).error).toBe('unknown-session');
+
+    delete process.env.LIVEKIT_API_KEY;
+    delete process.env.LIVEKIT_API_SECRET;
+    const room = await join('Ana');
+    const sinLivekit = await postToken({ sessionId: room.sessionId });
+    expect(sinLivekit.status).toBe(503);
+    expect((await readBody(sinLivekit)).error).toBe('livekit-not-configured');
   });
 });

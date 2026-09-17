@@ -95,7 +95,11 @@ describe('useProximityAudio', () => {
     });
 
     expect(fetchToken).toHaveBeenCalledTimes(1);
-    expect(fetchToken).toHaveBeenCalledWith(CONFIG.tokenUrl, 'yo');
+    expect(fetchToken).toHaveBeenCalledWith({
+      tokenUrl: CONFIG.tokenUrl,
+      sessionId: 'yo',
+      token: null,
+    });
     expect(connect).toHaveBeenCalledTimes(1);
     expect(result.current.audioAvailable).toBe(true);
 
@@ -542,5 +546,147 @@ describe('useProximityAudio', () => {
       expect(connection.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
       expect(connection.setCameraEnabled).toHaveBeenLastCalledWith(false);
     });
+  });
+});
+
+describe('useProximityAudio: sesion autenticada (#8)', () => {
+  it('pide un token fresco a la sesion y lo manda al servidor de tokens', async () => {
+    const bridge = createOfficeBridge();
+    const connect = vi.fn(async () => fakeConnection());
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+    const getIdToken = vi.fn(async () => 'id-token');
+
+    renderHook(() =>
+      useProximityAudio(bridge, {
+        config: CONFIG,
+        status: 'g',
+        session: { displayName: 'Ana', getIdToken },
+        connect,
+        fetchToken,
+      }),
+    );
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+    });
+
+    // El servidor cruza el token con la sesion de Colyseus (`forbidden-session`):
+    // sin esto, `POST /livekit/token` responde 401 y no hay audio.
+    expect(getIdToken).toHaveBeenCalledTimes(1);
+    expect(fetchToken).toHaveBeenCalledWith({
+      tokenUrl: CONFIG.tokenUrl,
+      sessionId: 'yo',
+      token: 'id-token',
+    });
+  });
+
+  it('una sesion sin token (caducada, sin usuario) no inventa uno', async () => {
+    const bridge = createOfficeBridge();
+    const connect = vi.fn(async () => fakeConnection());
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    renderHook(() =>
+      useProximityAudio(bridge, {
+        config: CONFIG,
+        status: 'g',
+        session: { displayName: 'Ana', getIdToken: async () => null },
+        connect,
+        fetchToken,
+      }),
+    );
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+    });
+
+    expect(fetchToken).toHaveBeenCalledWith({
+      tokenUrl: CONFIG.tokenUrl,
+      sessionId: 'yo',
+      token: null,
+    });
+  });
+
+  it('si pedir el token falla, degrada a sin audio en vez de romper la oficina', async () => {
+    const bridge = createOfficeBridge();
+    const connect = vi.fn(async () => fakeConnection());
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, {
+        config: CONFIG,
+        status: 'g',
+        session: {
+          displayName: 'Ana',
+          getIdToken: async () => {
+            throw new Error('red caida');
+          },
+        },
+        connect,
+        fetchToken,
+      }),
+    );
+
+    await expect(
+      act(async () => {
+        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+      }),
+    ).resolves.not.toThrow();
+
+    expect(result.current.audioAvailable).toBe(false);
+    expect(connect).not.toHaveBeenCalled();
+  });
+});
+
+describe('useProximityAudio: el desmontaje no puede realimentar al propio efecto', () => {
+  /**
+   * `teardown()` corre tambien en la limpieza del efecto de conexion, cuyas
+   * dependencias incluyen `session` (#8). Si limpiar emitiera colecciones
+   * nuevas aun estando ya vacias, cada limpieza provocaria un render, ese
+   * render traeria una `session` con identidad nueva y el efecto volveria a
+   * limpiarse: bucle infinito que revienta el proceso por memoria.
+   */
+  it('limpiar con todo ya vacio conserva la identidad de las colecciones', async () => {
+    const bridge = createOfficeBridge();
+    const connect = vi.fn(async () => fakeConnection());
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+
+    const videoTracks = result.current.videoTracks;
+    const speakers = result.current.speakers;
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), room: null });
+    });
+
+    expect(result.current.videoTracks).toBe(videoTracks);
+    expect(result.current.speakers).toBe(speakers);
+  });
+
+  it('una sesion con identidad nueva en cada render no reconecta en bucle', async () => {
+    const bridge = createOfficeBridge();
+    const connect = vi.fn(async () => fakeConnection());
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+    const getIdToken = async () => 'id-token';
+
+    renderHook(() =>
+      // La identidad cambia en cada render a proposito: es lo que haria un
+      // llamador que construya la sesion en linea.
+      useProximityAudio(bridge, {
+        config: CONFIG,
+        status: 'g',
+        session: { displayName: 'Ana', getIdToken },
+        connect,
+        fetchToken,
+      }),
+    );
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+    });
+
+    expect(fetchToken.mock.calls.length).toBeLessThanOrEqual(2);
   });
 });

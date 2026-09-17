@@ -51,6 +51,12 @@ export interface OfficeSceneOptions {
   /** `null` desactiva el multijugador: la oficina corre en solitario. */
   endpoint?: string | null;
   playerName?: string;
+  /**
+   * ID token de la sesion (#8), reenviado tal cual al cliente de la sala.
+   * Ausente sin autenticacion: la sala vuelve a ser la puerta abierta de
+   * siempre y la escena no nota la diferencia.
+   */
+  getIdToken?: () => Promise<string | null>;
   connect?: (options: ConnectOfficeRoomOptions) => Promise<OfficeConnection>;
 }
 
@@ -187,8 +193,12 @@ export class OfficeScene extends Phaser.Scene {
    * que el servidor no este levantado, que en desarrollo es la mitad del rato.
    */
   private async connectToOffice(): Promise<void> {
-    const { endpoint, connect = connectOfficeRoom, playerName = this.player.nameText } =
-      this.options;
+    const {
+      endpoint,
+      connect = connectOfficeRoom,
+      playerName = this.player.nameText,
+      getIdToken,
+    } = this.options;
 
     if (endpoint === null || endpoint === undefined) {
       this.bridge.emit('presence', { online: false, peers: 0 });
@@ -204,6 +214,7 @@ export class OfficeScene extends Phaser.Scene {
         endpoint,
         name: playerName,
         status: joinedStatus,
+        getIdToken,
         handlers: {
           onAdd: (snapshot) => {
             this.remotes?.upsert(snapshot);

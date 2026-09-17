@@ -356,3 +356,36 @@ describe('OfficeShell: habla real llega al anillo del avatar por comando (issue 
     expect(commands.at(-1)).toEqual({ sessionIds: [] });
   });
 });
+
+describe('OfficeShell: sesion autenticada (#8)', () => {
+  const session = { displayName: 'Ana Torres', getIdToken: async () => 'id-token' };
+
+  it('sin sesion la oficina se monta igual que antes, sin nombre ni token', () => {
+    render(<OfficeShell />);
+
+    // El camino del desarrollo local y de la suite e2e: `AuthGate` entrega
+    // `null` y aqui no debe cambiar nada.
+    expect(createGameMock.mock.calls[0][2]).toEqual({ endpoint: expect.anything() });
+    expect(useProximityAudioMock.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ session: null }),
+    );
+  });
+
+  it('reenvia la sesion a la escena, que la necesita para entrar a la sala', () => {
+    render(<OfficeShell session={session} />);
+
+    expect(createGameMock.mock.calls[0][2]).toEqual(
+      expect.objectContaining({ playerName: 'Ana Torres', getIdToken: expect.any(Function) }),
+    );
+  });
+
+  it('reenvia la sesion al hook de audio, que la necesita para pedir el token de LiveKit', () => {
+    render(<OfficeShell session={session} />);
+
+    // Son los dos unicos sitios que hablan con el servidor: la sala de
+    // Colyseus y `POST /livekit/token`. Ambos verifican el mismo ID token.
+    expect(useProximityAudioMock.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ session }),
+    );
+  });
+});

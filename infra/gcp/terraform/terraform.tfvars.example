@@ -20,3 +20,8 @@ acme_email = "cambiar@ejemplo.com"
 # Tag de imagenes. Se deja vacio: lo fija el workflow de despliegue en cada
 # push, no una edicion manual de este fichero.
 # image_tag = ""
+
+# Autenticacion (issue #8). Descomentar SOLO despues de habilitar Identity
+# Platform y crear al menos una cuenta (ver infra/gcp/README.md): en cuanto
+# tenga valor, el servidor deja de aceptar a quien no traiga un ID token valido.
+# auth_project_id = "vaulted-channel-505114-f0"
