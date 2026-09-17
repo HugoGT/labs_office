@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { ScreenAnchor } from './anchorChannel';
-import { INITIAL_COLLAPSE_STATE, nextCollapseState } from './tileLayout';
+import {
+  INITIAL_COLLAPSE_STATE,
+  INITIAL_TILE_LAYOUT_STATE,
+  nextCollapseState,
+  TRANSITION_DURATION_MS,
+  tileLayout,
+  type CollapseState,
+} from './tileLayout';
 
 /**
  * `nextCollapseState` decide que tiles colapsan a la fila fija cuando el
@@ -180,5 +187,207 @@ describe('nextCollapseState: histeresis de salida, sin parpadeo en el borde (iss
     state = nextCollapseState({ anchors: withoutC, previous: state, now: 10 });
 
     expect(state.collapsedIds.has('c')).toBe(false);
+  });
+});
+
+/**
+ * `tileLayout` traduce el estado de colapso a una posicion de pantalla por
+ * tile (issue #17, D6). Lo no obvio: el suavizado de 150ms vive DENTRO de
+ * esta funcion pura, nunca en CSS -- una transicion CSS estandar suavizaria
+ * TAMBIEN el seguimiento anclado continuo (el `transform` se reescribe cada
+ * cuadro), atrasando visiblemente al sprite. Por eso solo se interpola
+ * durante los 150ms posteriores a un cambio de `mode`; fuera de esa ventana
+ * el tile sigue su objetivo en vivo, cuadro a cuadro, sin interpolar.
+ */
+function anchorFrame(entries: readonly [string, ScreenAnchor][]): Map<string, ScreenAnchor> {
+  return new Map(entries);
+}
+
+function collapseStateWith(ids: readonly string[]): CollapseState {
+  return { collapsedIds: new Set(ids), restoreSince: new Map() };
+}
+
+describe('tileLayout: posicion anclada', () => {
+  it('en modo anclado, la posicion es exactamente la del ancla', () => {
+    const anchors = anchorFrame([['a', { x: 42, y: 17, onScreen: true }]]);
+
+    const state = tileLayout({
+      anchors,
+      collapsed: INITIAL_COLLAPSE_STATE,
+      viewport: { width: 1024, height: 768 },
+      now: 0,
+      previous: INITIAL_TILE_LAYOUT_STATE,
+    });
+
+    const position = state.positions.get('a')!;
+    expect(position.x).toBe(42);
+    expect(position.y).toBe(17);
+    expect(position.mode).toBe('anchored');
+  });
+
+  it('oculto cuando el ancla reporta onScreen=false', () => {
+    const anchors = anchorFrame([['a', { x: 42, y: 17, onScreen: false }]]);
+
+    const state = tileLayout({
+      anchors,
+      collapsed: INITIAL_COLLAPSE_STATE,
+      viewport: { width: 1024, height: 768 },
+      now: 0,
+      previous: INITIAL_TILE_LAYOUT_STATE,
+    });
+
+    expect(state.positions.get('a')!.visible).toBe(false);
+  });
+
+  it('un tile anclado sigue el objetivo en vivo cuadro a cuadro, sin interpolar (nunca se atrasa)', () => {
+    let anchors = anchorFrame([['a', { x: 0, y: 0, onScreen: true }]]);
+    let state = tileLayout({
+      anchors,
+      collapsed: INITIAL_COLLAPSE_STATE,
+      viewport: { width: 1024, height: 768 },
+      now: 0,
+      previous: INITIAL_TILE_LAYOUT_STATE,
+    });
+
+    anchors = anchorFrame([['a', { x: 500, y: 0, onScreen: true }]]);
+    state = tileLayout({
+      anchors,
+      collapsed: INITIAL_COLLAPSE_STATE,
+      viewport: { width: 1024, height: 768 },
+      now: 16,
+      previous: state,
+    });
+
+    // Sin cambio de modo: el salto de 0 a 500 en un solo cuadro se refleja
+    // de inmediato, no se suaviza -- esa suavizacion es exactamente el
+    // "smear" que el diseno rechaza para el seguimiento continuo.
+    expect(state.positions.get('a')!.x).toBe(500);
+  });
+});
+
+describe('tileLayout: fila colapsada', () => {
+  it('los tiles colapsados reciben un slot fijo en la fila, ordenados de forma estable', () => {
+    const anchors = anchorFrame([
+      ['b', { x: 10, y: 10, onScreen: true }],
+      ['a', { x: 20, y: 20, onScreen: true }],
+      ['c', { x: 30, y: 30, onScreen: true }],
+    ]);
+
+    const state = tileLayout({
+      anchors,
+      collapsed: collapseStateWith(['a', 'b', 'c']),
+      viewport: { width: 1024, height: 768 },
+      now: 0,
+      previous: INITIAL_TILE_LAYOUT_STATE,
+    });
+
+    const a = state.positions.get('a')!;
+    const b = state.positions.get('b')!;
+    const c = state.positions.get('c')!;
+    expect(a.mode).toBe('row');
+    expect(b.mode).toBe('row');
+    expect(c.mode).toBe('row');
+    // Misma fila: comparten y. Orden estable (alfabetico) -> a esta a la
+    // izquierda de b, y b a la izquierda de c.
+    expect(a.y).toBe(b.y);
+    expect(b.y).toBe(c.y);
+    expect(a.x).toBeLessThan(b.x);
+    expect(b.x).toBeLessThan(c.x);
+  });
+});
+
+describe('tileLayout: suavizado de 150ms SOLO en la transicion de modo (issue #17, D6)', () => {
+  it('una posicion nueva (sin estado previo) aparece directo en destino, sin animar', () => {
+    const anchors = anchorFrame([['a', { x: 42, y: 17, onScreen: true }]]);
+
+    const state = tileLayout({
+      anchors,
+      collapsed: INITIAL_COLLAPSE_STATE,
+      viewport: { width: 1024, height: 768 },
+      now: 0,
+      previous: INITIAL_TILE_LAYOUT_STATE,
+    });
+
+    expect(state.positions.get('a')).toMatchObject({ x: 42, y: 17 });
+  });
+
+  it('a mitad de los 150ms de una transicion anclado->fila, la posicion esta a mitad de camino', () => {
+    const anchoredAnchors = anchorFrame([['a', { x: 0, y: 100, onScreen: true }]]);
+    const anchoredState = tileLayout({
+      anchors: anchoredAnchors,
+      collapsed: INITIAL_COLLAPSE_STATE,
+      viewport: { width: 200, height: 300 },
+      now: 0,
+      previous: INITIAL_TILE_LAYOUT_STATE,
+    });
+    expect(anchoredState.positions.get('a')!.mode).toBe('anchored');
+
+    // Colapsa a fila unica (solo 'a' en `collapsed`, para tener un slot
+    // determinista): destino = { x: viewport.width/2, y: viewport.height - 56 } = (100, 244).
+    const collapsed = collapseStateWith(['a']);
+    // El cuadro en que se DETECTA el cambio de modo es el que arranca la
+    // transicion (elapsed=0 ahi mismo, como en un bucle de rAF real).
+    const transitionStarted = tileLayout({
+      anchors: anchoredAnchors,
+      collapsed,
+      viewport: { width: 200, height: 300 },
+      now: 0,
+      previous: anchoredState,
+    });
+
+    const halfway = TRANSITION_DURATION_MS / 2;
+    const midState = tileLayout({
+      anchors: anchoredAnchors,
+      collapsed,
+      viewport: { width: 200, height: 300 },
+      now: halfway,
+      previous: transitionStarted,
+    });
+
+    const position = midState.positions.get('a')!;
+    expect(position.mode).toBe('row');
+    // A mitad de camino entre (0, 100) y (100, 244): (50, 172).
+    expect(position.x).toBeCloseTo(50);
+    expect(position.y).toBeCloseTo(172);
+  });
+
+  it('tras completarse los 150ms, la posicion queda exactamente en destino y deja de interpolar', () => {
+    const anchoredAnchors = anchorFrame([['a', { x: 0, y: 100, onScreen: true }]]);
+    const anchoredState = tileLayout({
+      anchors: anchoredAnchors,
+      collapsed: INITIAL_COLLAPSE_STATE,
+      viewport: { width: 200, height: 300 },
+      now: 0,
+      previous: INITIAL_TILE_LAYOUT_STATE,
+    });
+
+    const collapsed = collapseStateWith(['a']);
+    const transitionStarted = tileLayout({
+      anchors: anchoredAnchors,
+      collapsed,
+      viewport: { width: 200, height: 300 },
+      now: 0,
+      previous: anchoredState,
+    });
+
+    let state = tileLayout({
+      anchors: anchoredAnchors,
+      collapsed,
+      viewport: { width: 200, height: 300 },
+      now: TRANSITION_DURATION_MS,
+      previous: transitionStarted,
+    });
+    expect(state.positions.get('a')).toMatchObject({ x: 100, y: 244 });
+
+    // Un cuadro mas, mucho despues: sigue exactamente en el slot de fila, sin
+    // arrastrar ninguna interpolacion vieja.
+    state = tileLayout({
+      anchors: anchoredAnchors,
+      collapsed,
+      viewport: { width: 200, height: 300 },
+      now: TRANSITION_DURATION_MS + 1000,
+      previous: state,
+    });
+    expect(state.positions.get('a')).toMatchObject({ x: 100, y: 244 });
   });
 });
