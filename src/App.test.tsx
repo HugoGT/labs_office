@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import type { AuthUser } from './auth/authPort';
@@ -34,10 +34,21 @@ beforeEach(() => {
   createGameMock.mockReturnValue({ destroy: vi.fn() } as unknown as Phaser.Game);
 });
 
-describe('App', () => {
-  it('monta un unico lienzo de juego', () => {
-    render(<App />);
+/**
+ * La oficina entra por `import()` diferido (#24, punto 8: su chunk arrastra
+ * Phaser), asi que no esta montada al volver de `render`. Esperar a que
+ * aparezca es lo que antes era inmediato; lo que se comprueba despues no
+ * cambia.
+ */
+async function waitForOffice(container: HTMLElement): Promise<void> {
+  await waitFor(() => expect(container.querySelector('#office-shell')).not.toBeNull());
+}
 
+describe('App', () => {
+  it('monta un unico lienzo de juego', async () => {
+    const { container } = render(<App />);
+
+    await waitForOffice(container);
     expect(createGameMock).toHaveBeenCalledTimes(1);
   });
 
@@ -47,8 +58,9 @@ describe('App', () => {
     expect(container.querySelector('main')).not.toBeNull();
   });
 
-  it('el contenedor del juego cuelga del <main>', () => {
+  it('el contenedor del juego cuelga del <main>', async () => {
     const { container } = render(<App />);
+    await waitForOffice(container);
     const host = createGameMock.mock.calls[0][0];
 
     expect(container.querySelector('main')?.contains(host)).toBe(true);
@@ -60,8 +72,9 @@ describe('App: autenticacion (#8)', () => {
     vi.unstubAllEnvs();
   });
 
-  it('sin configuracion de firebase entra directo, sin pantalla de login', () => {
-    render(<App />);
+  it('sin configuracion de firebase entra directo, sin pantalla de login', async () => {
+    const { container } = render(<App />);
+    await waitForOffice(container);
 
     // Desarrollo local y suite e2e (`.env.e2e` fija las variables a vacio):
     // nadie autentica y nadie queda fuera.
@@ -131,7 +144,9 @@ describe('App: autenticacion (#8)', () => {
     emit(ana);
     emit({ ...ana });
 
-    expect(createGameMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(createGameMock).toHaveBeenCalledTimes(1));
+    // Y sigue siendo uno solo cuando el arbol se asienta.
+    await waitFor(() => expect(createGameMock).toHaveBeenCalledTimes(1));
   });
 
   it('con sesion monta la oficina y le pasa el nombre y el token de esa sesion', async () => {
@@ -143,9 +158,67 @@ describe('App: autenticacion (#8)', () => {
 
     emit({ uid: 'uid-ana', email: 'ana@example.com', displayName: 'Ana' });
 
-    expect(createGameMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(createGameMock).toHaveBeenCalledTimes(1));
     const options = createGameMock.mock.calls[0][2];
     expect(options?.playerName).toBe('Ana');
     await expect(options?.getIdToken?.()).resolves.toBe('id-token');
+  });
+});
+
+describe('App: enrutado (#24)', () => {
+  afterEach(() => {
+    window.history.pushState({}, '', '/');
+  });
+
+  it('en /dashboard no monta la oficina: el panel no paga Phaser', async () => {
+    window.history.pushState({}, '', '/dashboard');
+
+    render(<App />);
+
+    // El motor de juego vive tras el `import()` de `OfficeShell`, que esta
+    // ruta no toca (#24, punto 8). `createGame` es el testigo de que no se
+    // cargo: si el arbol montase la oficina, se habria llamado.
+    expect(await screen.findByText(/sin autenticación/i)).toBeInTheDocument();
+    expect(createGameMock).not.toHaveBeenCalled();
+  });
+
+  it('el panel vive dentro del mismo landmark <main>', async () => {
+    window.history.pushState({}, '', '/dashboard');
+
+    const { container } = render(<App />);
+
+    const aviso = await screen.findByText(/sin autenticación/i);
+    expect(container.querySelector('main')?.contains(aviso)).toBe(true);
+  });
+
+  it('/dashboard/ con barra final llega al mismo sitio', async () => {
+    window.history.pushState({}, '', '/dashboard/');
+
+    render(<App />);
+
+    expect(await screen.findByText(/sin autenticación/i)).toBeInTheDocument();
+  });
+
+  it('cualquier otra ruta sigue siendo la oficina', async () => {
+    window.history.pushState({}, '', '/dashboards');
+
+    const { container } = render(<App />);
+
+    await waitForOffice(container);
+  });
+
+  it('REGRESION: la oficina no ofrece ningun camino al panel', async () => {
+    // Requisito explicito de #24: a `/dashboard` se llega escribiendo la URL
+    // y por ningun otro sitio. Un enlace o un boton en el HUD convertiria una
+    // pantalla de administracion en parte de la oficina para todo el mundo.
+    const { container } = render(<App />);
+    await waitForOffice(container);
+
+    expect(container.querySelector('a[href*="dashboard"]')).toBeNull();
+    expect(container.querySelector('[href*="admin"]')).toBeNull();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /panel|dashboard|invitaci/i }),
+    ).not.toBeInTheDocument();
   });
 });
