@@ -188,6 +188,20 @@ describe('OfficeShell', () => {
     );
   });
 
+  it('emitir "nearby" (evento retirado, D9) no renderiza ningun chip: BottomBar ya no lo recibe', () => {
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    // `nearby` ya no existe en `OfficeEventMap`; el cast prueba que, aunque
+    // alguien lo emitiera de forma insegura, no hay ningun consumidor vivo
+    // que lo convierta en un chip visible.
+    act(() =>
+      (bridge.emit as (type: string, payload: unknown) => void)('nearby', { names: ['Ana'] }),
+    );
+
+    expect(screen.queryByText(/^🔊/)).not.toBeInTheDocument();
+  });
+
   it('al recibir npcmenu del bridge, abre el ContextMenu con nombre y estado', () => {
     render(<OfficeShell />);
     const bridge = createGameMock.mock.calls[0][1];

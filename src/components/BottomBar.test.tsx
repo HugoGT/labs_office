@@ -24,6 +24,14 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
   return props;
 }
 
+describe('BottomBar: retiro de los chips de cercania (issue #17, D9)', () => {
+  it('no renderiza ningun chip: cada companero audible ahora tiene su propia tile de video', () => {
+    renderBar();
+
+    expect(screen.queryByText(/^🔊/)).not.toBeInTheDocument();
+  });
+});
+
 describe('BottomBar', () => {
   it('aria-pressed de mic refleja micOn, independiente de camOn', () => {
     renderBar({ micOn: false, camOn: true });
