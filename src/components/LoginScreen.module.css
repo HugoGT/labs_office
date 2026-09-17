@@ -1,0 +1,91 @@
+.screen {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0d1117;
+  color: #e5e7eb;
+  padding: 16px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 340px;
+  background: #111827f2;
+  border: 1px solid #2b3444;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 8px 30px #0009;
+}
+
+.title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.input {
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.input:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+.submit {
+  background: #1d4ed8;
+  color: #eff6ff;
+  border: 1px solid #3b82f6;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.submit:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.submit:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.error {
+  background: #7f1d1d66;
+  border: 1px solid #b91c1c;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #fecaca;
+}

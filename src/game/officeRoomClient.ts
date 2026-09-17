@@ -69,6 +69,43 @@ export interface ConnectOfficeRoomOptions {
   moveIntervalMs?: number;
   /** Estado con el que se entra, para no aparecer "En linea" sin haberlo pedido. */
   status?: PresenceStatus;
+  /**
+   * ID token de la sesion (#8), pedido justo antes de entrar para que viaje
+   * fresco. Ausente cuando no hay autenticacion configurada, que es el modo en
+   * el que el servidor sigue abriendo la puerta a cualquiera.
+   */
+  getIdToken?: () => Promise<string | null>;
+}
+
+/** Lo que viaja en el `joinOrCreate`; ver `buildJoinOptions`. */
+export interface OfficeJoinOptions {
+  name: string;
+  status: PresenceStatus;
+  token?: string;
+}
+
+/**
+ * Compone las opciones del join (#8). Separada y pura porque es un contrato
+ * con el servidor, no un detalle: con autenticacion encendida `OfficeRoom`
+ * exige `token` e IGNORA `name` (deriva el nombre del token verificado), y con
+ * autenticacion apagada `name` es lo unico que tiene. Mandar siempre `name` y
+ * anadir `token` solo cuando existe es lo que hace que un mismo cliente sirva
+ * para los dos modos.
+ *
+ * Un token vacio no es un token: viajaria como un intento de autenticacion
+ * fallido en vez de como la ausencia de sesion que es.
+ */
+export function buildJoinOptions({
+  name,
+  status,
+  token,
+}: {
+  name: string;
+  status: PresenceStatus;
+  token?: string | null;
+}): OfficeJoinOptions {
+  if (!token) return { name, status };
+  return { name, status, token };
 }
 
 export interface OfficeConnection {
@@ -95,12 +132,18 @@ export async function connectOfficeRoom({
   handlers,
   moveIntervalMs = MOVE_INTERVAL_MS,
   status = DEFAULT_STATUS,
+  getIdToken,
 }: ConnectOfficeRoomOptions): Promise<OfficeConnection> {
   const client = new Client(endpoint);
-  const room: Room<OfficeRoomState> = await client.joinOrCreate(OFFICE_ROOM_NAME, {
-    name,
-    status,
-  });
+  // El token se pide aqui y no antes: entre elegir estado y llegar a este
+  // punto puede haber pasado tiempo, y el que importa es el del momento del
+  // join. Un fallo al pedirlo no se traga: la escena ya degrada a solitario
+  // cuando este `connect` rechaza.
+  const token = getIdToken ? await getIdToken() : null;
+  const room: Room<OfficeRoomState> = await client.joinOrCreate(
+    OFFICE_ROOM_NAME,
+    buildJoinOptions({ name, status, token }),
+  );
 
   const $ = getStateCallbacks(room) as unknown as {
     (target: OfficeRoomState): { players: PlayersCallbacks };

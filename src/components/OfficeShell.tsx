@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
+import type { OfficeSession } from '../auth/authPort';
 import { resolveLivekitConfig } from '../game/livekitEndpoint';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
@@ -15,13 +16,26 @@ import { Toast } from './Toast';
 /** Duracion del toast antes de auto-ocultarse (`app.js:525`, `ms || 3200`). */
 const TOAST_TIMEOUT_MS = 3200;
 
+export interface OfficeShellProps {
+  /**
+   * Sesion autenticada (#8), o `null` sin autenticacion. No se resuelve aqui:
+   * la entrega `AuthGate`, que es quien conoce el puerto. Por defecto `null`,
+   * que es la oficina abierta de siempre.
+   */
+  session?: OfficeSession | null;
+}
+
 /**
  * Unico dueno del `OfficeBridge` (D3): lo crea via `useState`, se suscribe
  * con `useOfficeBridge` y compone `GameCanvas` + el HUD. Los componentes
  * presentacionales del HUD (Toast, RecBadge, BottomBar, ContextMenu) nunca
  * reciben el bridge, solo props planas.
+ *
+ * La sesion solo la reparte: la escena la necesita para entrar a la sala de
+ * Colyseus y el hook de audio para pedir el token de LiveKit; son los dos
+ * unicos puntos que hablan con el servidor.
  */
-export function OfficeShell() {
+export function OfficeShell({ session = null }: OfficeShellProps) {
   const [bridge] = useState(createOfficeBridge);
   const { room, nearby, menu, presence, closeMenu } = useOfficeBridge(bridge);
   // Se resuelve una sola vez: cambiarlo remontaria Phaser entero.
@@ -48,7 +62,7 @@ export function OfficeShell() {
    */
   const [status, setStatus] = useState<PresenceStatus>(DEFAULT_STATUS);
   const { micOn, camOn, audioAvailable, audioBlocked, toggleMic, toggleCam, unblockAudio } =
-    useProximityAudio(bridge, { config: livekitConfig, status });
+    useProximityAudio(bridge, { config: livekitConfig, status, session });
 
   function handleChangeStatus(next: PresenceStatus): void {
     setStatus(next);
@@ -138,7 +152,7 @@ export function OfficeShell() {
 
   return (
     <div id="office-shell">
-      <GameCanvas bridge={bridge} endpoint={endpoint} />
+      <GameCanvas bridge={bridge} endpoint={endpoint} session={session} />
       <RecBadge visible={recording} />
       <ContextMenu menu={menu} onAction={handleMenuAction} onClose={closeMenu} />
       <BottomBar
