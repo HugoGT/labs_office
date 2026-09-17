@@ -286,14 +286,32 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
-   * Proyecta la posicion de cada avatar remoto a coordenadas de pantalla y
-   * las publica por el canal de anclas (issue #17, D4). Se ejecuta cada
-   * cuadro, no cada tic de proximidad: la posicion es continua, la
-   * existencia/contenido del tile no lo es.
+   * Proyecta la posicion del jugador local y de cada avatar remoto a
+   * coordenadas de pantalla y las publica por el canal de anclas (issue #17,
+   * D4). Se ejecuta cada cuadro, no cada tic de proximidad: la posicion es
+   * continua, la existencia/contenido del tile no lo es.
+   *
+   * El jugador local se proyecta con la MISMA formula que un avatar remoto
+   * (decision F, textual del mantenedor: "Tu propio recuadro cuelga de tu
+   * avatar igual que el de los demas") -- el self-tile deja de ser un overlay
+   * fijo en una esquina y pasa a anclarse y seguir al avatar como cualquier
+   * otro. Sin `selfSessionId` (aun sin conexion) no hay a que clave publicar,
+   * asi que se omite ese ancla ese cuadro.
    */
   private publishAnchors(): void {
     if (!this.anchorWriter) return;
     const cam = this.cameras.main;
+    const selfSessionId = this.connection?.sessionId ?? null;
+    if (selfSessionId !== null) {
+      const screenX = (this.player.x - cam.scrollX) * cam.zoom;
+      const screenY = (this.player.y - cam.scrollY) * cam.zoom;
+      this.anchorWriter.set(
+        selfSessionId,
+        screenX,
+        screenY,
+        cam.worldView.contains(this.player.x, this.player.y),
+      );
+    }
     for (const sessionId of this.remotes?.sessionIds() ?? []) {
       const avatar = this.remotes?.get(sessionId);
       if (!avatar) continue;

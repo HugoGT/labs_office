@@ -32,9 +32,15 @@ const INITIAL_VOICE: OfficeEventMap['voice'] = {
  * `requestAnimationFrame` lee `bridge.anchors.snapshot()` y escribe
  * `transform`/`visibility` directo a los nodos. Cero `setState` por cuadro.
  *
- * El self-tile NO pasa por el canal de anclas -- `OfficeScene` nunca proyecta
- * la posicion del propio jugador (solo la de avatares remotos) -- por eso se
- * renderiza aparte, siempre visible, en vez de registrarse en `nodesRef`.
+ * El self-tile pasa por el MISMO canal de anclas que un par (decision F,
+ * textual del mantenedor: "Tu propio recuadro cuelga de tu avatar igual que
+ * el de los demas") -- `OfficeScene.publishAnchors()` proyecta tambien la
+ * posicion del jugador local, con la identica formula de camara, asi que el
+ * self-tile se registra en `nodesRef` igual que cualquier tile de par y
+ * queda sujeto a la misma regla "sin ancla este cuadro -> oculto, nunca
+ * desmontado" (D4/D5). Lo unico que lo distingue de un par es el origen de
+ * sus props (nombre/pista propios en vez de los de un par) y que su video
+ * nunca pasa por el gate de sala (D8): la posicion es identica en ambos.
  */
 export function VideoTiles({ bridge, videoTracks, speakers, localVideoTrack }: VideoTilesProps) {
   const [voice, setVoice] = useState<OfficeEventMap['voice']>(INITIAL_VOICE);
@@ -97,7 +103,8 @@ export function VideoTiles({ bridge, videoTracks, speakers, localVideoTrack }: V
       {voice.selfSessionId !== null && (
         <div
           key={voice.selfSessionId}
-          className={styles.selfTile}
+          ref={registerNode(voice.selfSessionId)}
+          className={styles.tile}
           data-mode="self"
           data-session-id={voice.selfSessionId}
         >

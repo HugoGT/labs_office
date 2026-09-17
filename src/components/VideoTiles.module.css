@@ -21,21 +21,6 @@
   will-change: transform, visibility;
 }
 
-/*
- * El self-tile no pasa por el canal de anclas (issue #17, D8): `OfficeScene`
- * nunca proyecta la posicion del propio jugador, solo la de avatares
- * remotos. Se fija en una esquina de la pantalla, siempre visible, en vez de
- * escribirse desde el bucle de rAF como los tiles de pares.
- */
-.selfTile {
-  position: fixed;
-  left: 16px;
-  bottom: 88px;
-  width: 96px;
-  height: 96px;
-  pointer-events: none;
-}
-
 .content {
   position: relative;
   width: 100%;

@@ -1,9 +1,33 @@
 import { act, render, screen } from '@testing-library/react';
 import type { ComponentProps } from 'react';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AttachableTrack } from '../game/attachableTrack';
 import { createOfficeBridge } from '../game/officeBridge';
 import { VideoTiles } from './VideoTiles';
+
+/**
+ * jsdom no implementa `requestAnimationFrame` (ver `VideoTiles.tsx`), asi que
+ * el bucle de posicionamiento del componente nunca arranca por defecto ahi.
+ * Para probar deterministicamente el canal de anclas (decision F: el
+ * self-tile ahora pasa por el mismo canal que un par) esta doble stubea
+ * `requestAnimationFrame`/`cancelAnimationFrame` para poder disparar cada
+ * "cuadro" a mano, sin depender de un `setTimeout` real.
+ */
+function stubAnimationFrame() {
+  const queue: FrameRequestCallback[] = [];
+  vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+    queue.push(cb);
+    return queue.length;
+  });
+  vi.stubGlobal('cancelAnimationFrame', () => {});
+  return {
+    /** Ejecuta el proximo cuadro en cola de forma sincronica. */
+    tick() {
+      const cb = queue.shift();
+      cb?.(0);
+    },
+  };
+}
 
 /** Doble estructural minimo de una pista, mismo patron que `VideoTile.test.tsx`. */
 function fakeVideoTrack(): AttachableTrack {
@@ -70,6 +94,62 @@ describe('VideoTiles: self-tile ungated (issue #17, D8)', () => {
     renderTiles();
 
     expect(screen.queryAllByTestId('tile-name')).toHaveLength(0);
+  });
+});
+
+/**
+ * Decision F (el mantenedor, textual): "Tu propio recuadro cuelga de tu
+ * avatar igual que el de los demas". El self-tile ya NO es un overlay fijo en
+ * una esquina -- pasa por el MISMO canal de anclas que un par (D4), lo que
+ * incluye la regla "sin ancla este cuadro -> oculto, nunca desmontado".
+ */
+describe('VideoTiles: el self-tile se ancla igual que un par (decision F)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('sin ancla publicada aun para el jugador local, el self-tile queda oculto pero sigue en el DOM (D4 aplica igual que a un par)', () => {
+    const raf = stubAnimationFrame();
+    const { bridge } = renderTiles();
+
+    act(() => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers: [], room: null });
+    });
+    act(() => {
+      raf.tick();
+    });
+
+    const tileNode = document.querySelector('[data-session-id="yo"]') as HTMLElement | null;
+    expect(tileNode).not.toBeNull();
+    // Oculto, NUNCA desmontado (D4/D5) -- la unica diferencia frente a antes
+    // es que ahora el self-tile SI puede pasar por este estado transitorio.
+    expect(document.body.contains(tileNode)).toBe(true);
+    expect(tileNode!.style.visibility).toBe('hidden');
+  });
+
+  it('al llegar el ancla del jugador local por el mismo canal que usa OfficeScene, el self-tile se posiciona y se muestra', () => {
+    const raf = stubAnimationFrame();
+    const { bridge } = renderTiles();
+
+    act(() => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers: [], room: null });
+    });
+    act(() => {
+      raf.tick();
+    });
+
+    // Simula lo que hara `OfficeScene.publishAnchors()` cada cuadro para el
+    // jugador local: la MISMA proyeccion de camara que ya usa para pares.
+    const writer = bridge.anchors.open();
+    writer.set('yo', 120, 80, true);
+    writer.commit();
+    act(() => {
+      raf.tick();
+    });
+
+    const tileNode = document.querySelector('[data-session-id="yo"]') as HTMLElement;
+    expect(tileNode.style.visibility).toBe('visible');
+    expect(tileNode.style.transform).toBe('translate(120px, 80px)');
   });
 });
 
