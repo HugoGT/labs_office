@@ -126,3 +126,55 @@ describe('connectOfficeRoom', () => {
     ).rejects.toBeDefined();
   }, 20000);
 });
+
+describe('connectOfficeRoom: estado de presencia (#1)', () => {
+  it('sendStatus propaga el estado nuevo al otro cliente', async () => {
+    const watcher = recorder();
+    await connect('Ana', watcher.handlers);
+    const b = await connect('Beto', recorder().handlers);
+    await waitFor(() => watcher.added.some((s) => s.sessionId === b.sessionId));
+
+    b.sendStatus('r');
+
+    await waitFor(() =>
+      watcher.changed.some((s) => s.sessionId === b.sessionId && s.status === 'r'),
+    );
+  });
+
+  it('dos cambios seguidos terminan en el ultimo, no en el primero', async () => {
+    const watcher = recorder();
+    await connect('Ana', watcher.handlers);
+    const b = await connect('Beto', recorder().handlers);
+    await waitFor(() => watcher.added.some((s) => s.sessionId === b.sessionId));
+
+    // `sendStatus` no agrupa como `sendMove`; lo que si agrupa es el propio
+    // sincronizado de Colyseus, asi que el estado intermedio puede no
+    // observarse. Lo que no puede pasar es quedarse en el.
+    b.sendStatus('r');
+    b.sendStatus('y');
+
+    await waitFor(() =>
+      watcher.changed.some((s) => s.sessionId === b.sessionId && s.status === 'y'),
+    );
+    const ultimo = watcher.changed.filter((s) => s.sessionId === b.sessionId).at(-1);
+    expect(ultimo?.status).toBe('y');
+  });
+
+  it('el estado elegido antes de conectar viaja en el join, no se pierde', async () => {
+    const watcher = recorder();
+    await connect('Ana', watcher.handlers);
+    const aislada = await connectOfficeRoom({
+      endpoint,
+      name: 'Beto',
+      status: 'r',
+      handlers: recorder().handlers,
+    });
+    connections.push(aislada);
+
+    // Sin esto, quien pone "No molestar" mientras el servidor aun no responde
+    // entraria "En linea" y publicaria audio hasta el siguiente cambio.
+    await waitFor(() =>
+      watcher.added.some((s) => s.sessionId === aislada.sessionId && s.status === 'r'),
+    );
+  });
+});

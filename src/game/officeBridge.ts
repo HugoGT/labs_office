@@ -45,6 +45,13 @@ export interface OfficeCommandMap {
   teleportTo: { npcId: number };
   callNpc: { npcId: number };
   /**
+   * Cambio de estado de presencia (#1). React es el dueno del estado y la
+   * escena lo sigue. No lleva metodo de conveniencia como los dos de arriba:
+   * esos existen por paridad con el prototipo, y ampliar esa superficie por
+   * cada comando nuevo reconstruiria el `window.officeAPI` que D1 retiro.
+   */
+  setStatus: { status: PresenceStatus };
+  /**
    * Test-only command (D4): moves the local player directly onto a tile.
    * Only ever emitted by `officeTestHook.ts`, which is itself dead-code
    * eliminated from the production bundle behind `__OFFICE_E2E__`. Adding

@@ -12,7 +12,13 @@
 
 import { Client, getStateCallbacks, type Room } from 'colyseus.js';
 import { createMoveThrottle } from './moveThrottle';
-import { MOVE_INTERVAL_MS, OFFICE_ROOM_NAME, type Facing } from './officeProtocol';
+import {
+  DEFAULT_STATUS,
+  MOVE_INTERVAL_MS,
+  OFFICE_ROOM_NAME,
+  type Facing,
+  type PresenceStatus,
+} from './officeProtocol';
 import type { RemotePlayerSnapshot } from './remoteAvatars';
 
 /**
@@ -61,11 +67,14 @@ export interface ConnectOfficeRoomOptions {
   name: string;
   handlers: OfficeRoomHandlers;
   moveIntervalMs?: number;
+  /** Estado con el que se entra, para no aparecer "En linea" sin haberlo pedido. */
+  status?: PresenceStatus;
 }
 
 export interface OfficeConnection {
   sessionId: string;
   sendMove(x: number, y: number, facing: Facing): void;
+  sendStatus(status: PresenceStatus): void;
   leave(): Promise<void>;
 }
 
@@ -85,9 +94,13 @@ export async function connectOfficeRoom({
   name,
   handlers,
   moveIntervalMs = MOVE_INTERVAL_MS,
+  status = DEFAULT_STATUS,
 }: ConnectOfficeRoomOptions): Promise<OfficeConnection> {
   const client = new Client(endpoint);
-  const room: Room<OfficeRoomState> = await client.joinOrCreate(OFFICE_ROOM_NAME, { name });
+  const room: Room<OfficeRoomState> = await client.joinOrCreate(OFFICE_ROOM_NAME, {
+    name,
+    status,
+  });
 
   const $ = getStateCallbacks(room) as unknown as {
     (target: OfficeRoomState): { players: PlayersCallbacks };
@@ -114,6 +127,11 @@ export async function connectOfficeRoom({
     sessionId: room.sessionId,
     sendMove(x, y, facing) {
       throttle.push({ x, y, facing });
+    },
+    // Sin agrupar, al contrario que `sendMove`: cambiar de estado es un gesto
+    // humano y raro, y agrupar podria tragarse justo el que aisla a alguien.
+    sendStatus(next) {
+      room.send('status', { status: next });
     },
     async leave() {
       throttle.dispose();

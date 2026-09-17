@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { preloadOfficeAssets } from './assets';
 import {
   setCharacterFacing,
+  setCharacterStatus,
   spawnNpcs,
   spawnPlayer,
   walkNpcTo,
@@ -82,6 +83,7 @@ export class OfficeScene extends Phaser.Scene {
   private currentRoom: string | null = null;
   private unsubscribeTeleport?: () => void;
   private unsubscribeCallNpc?: () => void;
+  private unsubscribeSetStatus?: () => void;
   /** Solo se asigna bajo `__OFFICE_E2E__` (D4): produccion nunca la toca. */
   private unsubscribeTeleportToTile?: () => void;
 
@@ -128,6 +130,9 @@ export class OfficeScene extends Phaser.Scene {
     this.unsubscribeCallNpc = this.bridge.onCommand('callNpc', ({ npcId }) => {
       this.callNpc(npcId);
     });
+    this.unsubscribeSetStatus = this.bridge.onCommand('setStatus', ({ status }) => {
+      this.setStatus(status);
+    });
 
     // D4: unico bloque muerto en produccion de este archivo -- deja tanto el
     // literal 'teleportToTile' como su handler fuera de `dist/`. Espeja
@@ -145,6 +150,7 @@ export class OfficeScene extends Phaser.Scene {
       this.alive = false;
       this.unsubscribeTeleport?.();
       this.unsubscribeCallNpc?.();
+      this.unsubscribeSetStatus?.();
       this.unsubscribeTeleportToTile?.();
       this.remotes?.clear();
       void this.connection?.leave();
@@ -177,10 +183,13 @@ export class OfficeScene extends Phaser.Scene {
       return;
     }
 
+    const joinedStatus = this.status;
+
     try {
       const connection = await connect({
         endpoint,
         name: playerName,
+        status: joinedStatus,
         handlers: {
           onAdd: (snapshot) => {
             this.remotes?.upsert(snapshot);
@@ -203,6 +212,11 @@ export class OfficeScene extends Phaser.Scene {
       }
 
       this.connection = connection;
+      // El `await` de arriba dura lo que dure el saludo con el servidor, y
+      // `setStatus` no tenia conexion a la que publicar mientras tanto. Sin
+      // esta reconciliacion, quien elige "No molestar" durante ese hueco queda
+      // publicado "En linea": aislado en su cliente y audible para el resto.
+      if (this.status !== joinedStatus) connection.sendStatus(this.status);
       this.remotes = createRemoteAvatarRegistry(createPhaserAvatarSink(this), {
         ignoreSessionId: connection.sessionId,
       });
@@ -214,6 +228,20 @@ export class OfficeScene extends Phaser.Scene {
       this.bridge.emit('presence', { online: false, peers: 0 });
       this.emitVoice(null, [], this.currentRoom);
     }
+  }
+
+  /**
+   * Aplica el estado que eligio el usuario en el HUD: lo pinta, lo publica y
+   * reconcilia el audio en el acto. Lo ultimo es lo que no puede esperar al
+   * siguiente tic: un cambio a "No molestar" que tarda un cuarto de segundo en
+   * cortar el audio no es un corte, es un retraso.
+   */
+  private setStatus(status: PresenceStatus): void {
+    if (this.status === status) return;
+    this.status = status;
+    setCharacterStatus(this.player, status);
+    this.connection?.sendStatus(status);
+    this.proximityTick();
   }
 
   private emitPresence(online: boolean): void {

@@ -125,6 +125,29 @@ describe('createOfficeBridge', () => {
     expect(onTeleportTo).not.toHaveBeenCalled();
   });
 
+  it('setStatus viaja por el canal de comandos y respeta la desuscripcion (#1)', () => {
+    const bridge = createOfficeBridge();
+    const handler = vi.fn();
+
+    const unsubscribe = bridge.onCommand('setStatus', handler);
+    bridge.emitCommand('setStatus', { status: 'r' });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith({ status: 'r' });
+
+    unsubscribe();
+    bridge.emitCommand('setStatus', { status: 'g' });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('setStatus no tiene metodo de conveniencia propio: se emite como comando generico', () => {
+    // `teleportTo` y `callNpc` los tienen por paridad con el prototipo, no
+    // porque haga falta. Ampliar esa superficie por cada comando nuevo la
+    // convertiria en el `window.officeAPI` que D1 vino a retirar.
+    const bridge = createOfficeBridge();
+
+    expect(bridge).not.toHaveProperty('setStatus');
+  });
+
   it('"nearby" conserva exactamente su forma { names: string[] } tras añadir "voice" (guarda de regresion)', () => {
     const bridge = createOfficeBridge();
     const handler = vi.fn();
