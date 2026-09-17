@@ -1,7 +1,7 @@
 import { Room, RoomEvent } from 'livekit-client';
 import { describe, expect, it, vi } from 'vitest';
+import type { AttachableTrack } from './attachableTrack';
 import { connectLivekitRoom } from './livekitRoom';
-import type { AttachableTrack } from './remoteAudioSink';
 
 /**
  * Sala falsa: reproduce solo la superficie de `Room` que este modulo usa. El

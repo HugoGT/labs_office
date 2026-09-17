@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { createRemoteAudioSink, type AttachableTrack } from './remoteAudioSink';
+import type { AttachableTrack } from './attachableTrack';
+import { createRemoteAudioSink } from './remoteAudioSink';
 
 /**
  * Doble estructural de una pista de LiveKit. Reproduce el contrato REAL del
