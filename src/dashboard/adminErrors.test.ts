@@ -39,6 +39,16 @@ describe('describeAdminError', () => {
     );
   });
 
+  it('las frases compartidas por los dos flujos no nombran solo uno', () => {
+    // `invalid-request` y `conflict` los devuelven tanto el alta de invitacion
+    // como la de alguien de casa. Una frase que diga "invitación" convertiria
+    // un 409 al dar de alta a un empleado en una explicacion falsa: ese correo
+    // no tiene ninguna invitacion, tiene una cuenta.
+    for (const code of ['invalid-request', 'conflict'] as const) {
+      expect(describeAdminError(new AdminError(code))).not.toMatch(/invitaci/i);
+    }
+  });
+
   it('lo que no es un AdminError cae al mensaje generico', () => {
     // Un `throw` raro o un rechazo con string no puede dejar la pantalla muda.
     expect(describeAdminError(new Error('boom'))).toBe(describeAdminError(null));

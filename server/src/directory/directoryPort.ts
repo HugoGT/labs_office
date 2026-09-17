@@ -45,6 +45,23 @@ export interface CreateInvitationInput {
   uid: string;
 }
 
+/**
+ * Los roles que el panel puede repartir. `superadmin` no esta porque lo protege
+ * el indice unico parcial de `schema.sql`, y `guest` porque un invitado sin
+ * caducidad es justo lo que el flujo de invitaciones existe para impedir. Ver
+ * `userRules.ts`.
+ */
+export type AssignableRole = 'employee' | 'admin';
+
+export interface CreateUserInput {
+  email: string;
+  role: AssignableRole;
+  /** uid de Identity Platform de la cuenta ya creada. */
+  uid: string;
+  /** id (no uid) del administrador que da de alta. */
+  createdById: string;
+}
+
 export interface InvitationRow extends DirectoryUser {
   /** Email de quien invito, resuelto por JOIN. null si no se puede resolver. */
   invitedByEmail: string | null;
@@ -65,6 +82,14 @@ export interface UserDirectory {
   /** Solo los que vinieron por invitacion (invited_by no nulo), mas recientes primero. */
   listInvitations(): Promise<InvitationRow[]>;
   createInvitation(input: CreateInvitationInput): Promise<DirectoryUser>;
+  /**
+   * Alta de alguien de casa: sin caducidad y sin `invited_by`. Esos dos nulos
+   * son lo que lo separa de `createInvitation`, y no son cosmeticos -- sin
+   * `invited_by` la fila no aparece en `listInvitations` y `revoke` no la
+   * toca, que es la garantia de que el panel de invitaciones no se convierte
+   * en un boton de expulsion del personal.
+   */
+  createUser(input: CreateUserInput): Promise<DirectoryUser>;
   /** Devuelve null si ese id no existe o no es una invitacion. */
   revoke(id: string, actorId: string): Promise<DirectoryUser | null>;
   close(): Promise<void>;

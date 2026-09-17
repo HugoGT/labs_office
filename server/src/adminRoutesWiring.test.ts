@@ -136,6 +136,43 @@ describe('rutas /admin montadas (#24)', () => {
     expect(await res.json()).toEqual({ error: 'identity-admin-not-configured' });
   });
 
+  it('POST /admin/users exige rol de administracion', async () => {
+    const res = await as('tok-curra', '/admin/users', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'nueva@example.com', role: 'employee' }),
+    });
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'forbidden' });
+  });
+
+  it('POST /admin/users hace llegar el cuerpo al handler', async () => {
+    // Sin credencial de Identity Platform el alta responde 503, y eso es
+    // precisamente lo que distingue "el handler corrio" de "Express no tenia
+    // ruta": un 404 sin cuerpo JSON seria indistinguible del index.html que
+    // Caddy sirve cuando falta el bloque `handle /admin/*`.
+    const res = await as('tok-jefa', '/admin/users', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'nueva@example.com', role: 'employee' }),
+    });
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'identity-admin-not-configured' });
+  });
+
+  it('POST /admin/users con un rol que no se reparte responde 400 del handler', async () => {
+    // El 503 de arriba ya prueba que el cuerpo llega (con un rol invalido seria
+    // 400); esto prueba lo contrario, que la guarda de roles del handler se
+    // alcanza por HTTP y no solo llamandolo a mano desde un test.
+    const res = await as('tok-jefa', '/admin/users', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'nueva@example.com', role: 'superadmin' }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid-request' });
+  });
+
   it('POST /admin/invitations/:id/revoke hace llegar el id al handler', async () => {
     // Un id inexistente tiene que dar 404 del HANDLER, no 404 de Express por no
     // haber ruta: si el parametro no se cableara, el handler nunca correria y

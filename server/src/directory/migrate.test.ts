@@ -126,6 +126,29 @@ describe('schema.sql: lo que no puede faltar', () => {
   it('la auditoria guarda actor, accion y sujeto (PRD 10, punto 7 del issue)', () => {
     expect(schema).toContain('actor_id uuid references users(id)');
     expect(schema).toContain('subject_id uuid references users(id)');
-    expect(schema).toContain("check (action in ('invite', 'revoke'))");
+    expect(schema).toContain("check (action in ('invite', 'revoke', 'create-user'))");
+  });
+
+  it('refresca el CHECK de la auditoria en un despliegue que ya tenia la tabla', () => {
+    // `CREATE TABLE IF NOT EXISTS` NO actualiza una tabla que ya existe: en un
+    // despliegue vivo el CHECK viejo seguiria permitiendo solo 'invite' y
+    // 'revoke', y cada alta de alguien de casa moriria con una violacion de
+    // restriccion justo en el peor momento -- con la cuenta de Identity
+    // Platform ya creada, es decir en el camino de la cuenta huerfana. El DROP
+    // ... IF EXISTS delante es lo que lo hace idempotente, que es lo que este
+    // fichero exige de todo lo que contiene.
+    expect(schema).toContain('alter table audit_log drop constraint if exists audit_log_action_check');
+    expect(schema).toContain(
+      "alter table audit_log add constraint audit_log_action_check check (action in ('invite', 'revoke', 'create-user'))",
+    );
+  });
+
+  it('el refresco del CHECK viaja en el MISMO script que el resto del esquema', () => {
+    // `migrate` manda el fichero entero en una sola consulta y Postgres lo
+    // envuelve en una transaccion implicita. Si el ALTER se ejecutase aparte,
+    // podria quedar aplicado a medias respecto de la tabla que acota.
+    const sentencias = readSchemaSql();
+
+    expect(sentencias).toContain('ALTER TABLE audit_log');
   });
 });

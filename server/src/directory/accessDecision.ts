@@ -27,7 +27,7 @@
  * "caduco solo", y el operador no sabria si el boton de revocar hizo algo.
  */
 
-import type { DirectoryUser, Role } from './directoryPort.ts';
+import type { AssignableRole, DirectoryUser, Role } from './directoryPort.ts';
 
 export type AccessDecision = 'allow' | 'expired' | 'revoked' | 'not-provisioned';
 
@@ -55,4 +55,27 @@ export function decideAccess(user: DirectoryUser | null, now: Date): AccessDecis
  */
 export function canAdminister(role: Role): boolean {
   return role === 'superadmin' || role === 'admin';
+}
+
+/**
+ * Quien puede dar de alta a alguien de casa, y con que rol. Vive aqui y no en
+ * la ruta por el mismo motivo que `canAdminister`: quien puede repartir que rol
+ * es una regla de dominio, no un detalle de Express, y probarla no puede exigir
+ * montar un servidor.
+ *
+ * Un `admin` NO puede crear otros `admin`. Si pudiera, el rol se reproduciria
+ * solo: una sola cuenta de administrador comprometida bastaria para llenar la
+ * oficina de administradores, y ninguno de los nuevos tendria detras la
+ * decision de quien manda de verdad. Dejarlo en manos del superadmin mantiene
+ * un unico origen para ese rol, que es el mismo criterio con el que el
+ * bootstrap deja la promocion a superadmin en manos de quien configura el
+ * entorno y no de quien mira una pantalla.
+ *
+ * Lista blanca otra vez: el rol objetivo llega ya acotado a `AssignableRole`
+ * por `assertAssignableRole`, asi que aqui no hay que decidir nada sobre
+ * `superadmin` ni sobre `guest`.
+ */
+export function canAssignRole(actor: Role, target: AssignableRole): boolean {
+  if (target === 'admin') return actor === 'superadmin';
+  return canAdminister(actor);
 }

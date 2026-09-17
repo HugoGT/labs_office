@@ -21,6 +21,7 @@ import { LIVEKIT_ROOM_NAME } from '../../src/game/officeProtocol.ts';
 import {
   handleAdminSession,
   handleCreateInvitation,
+  handleCreateUser,
   handleListInvitations,
   handleRevokeInvitation,
   type AdminDeps,
@@ -353,8 +354,8 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
 
   // `/admin/session` NO exige rol de administracion: el panel la usa para
   // decidir si se pinta a si mismo o la pantalla de "no autorizado". Exigirlo
-  // aqui haria esa pantalla irrepresentable. El guard de rol vive en las tres
-  // rutas de abajo, que son las que hacen algo.
+  // aqui haria esa pantalla irrepresentable. El guard de rol vive en las
+  // cuatro rutas de abajo, que son las que hacen algo.
   app.get(
     '/admin/session',
     admin((req, deps) => handleAdminSession(req.header('Authorization'), deps)),
@@ -373,6 +374,15 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   app.post(
     '/admin/invitations/:id/revoke',
     admin((req, deps) => handleRevokeInvitation(req.header('Authorization'), req.params.id, deps)),
+  );
+
+  // El alta de alguien de casa cuelga de `/admin/users` y no de
+  // `/admin/invitations`: no crea una invitacion, y compartir la ruta obligaria
+  // a mirar el cuerpo para saber que operacion se pidio. Quien puede repartir
+  // que rol lo decide el handler, no este cableado.
+  app.post(
+    '/admin/users',
+    admin((req, deps) => handleCreateUser(req.header('Authorization'), req.body, deps)),
   );
 
   app.post('/livekit/token', (req, res) => {

@@ -23,16 +23,18 @@
 import type {
   AccountStatus,
   CreateInvitationInput,
+  CreateUserInput,
   DirectoryUser,
   InvitationRow,
   Role,
   UserDirectory,
 } from './directoryPort.ts';
 import { expiresAtFrom, normalizeEmail, normalizeInvitationInput } from './invitationRules.ts';
+import { normalizeUserInput } from './userRules.ts';
 
 export interface AuditEntry {
   actorId: string;
-  action: 'invite' | 'revoke';
+  action: 'invite' | 'revoke' | 'create-user';
   subjectId: string;
 }
 
@@ -178,6 +180,31 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
         invitedBy: invitedById,
       });
       audit.push({ actorId: invitedById, action: 'invite', subjectId: created.id });
+
+      return snapshot(created);
+    },
+
+    async createUser(input: CreateUserInput) {
+      // Validar ANTES de tocar nada, mismo motivo que en `createInvitation`:
+      // medio alta es peor que ninguna, porque quien administra ve un error y
+      // la fila existe igual.
+      const { email, role, uid, createdById } = normalizeUserInput(input);
+
+      const created = insert({
+        uid,
+        email,
+        // El nombre visible lo trae el token en el primer login
+        // (`resolveOnLogin`); inventarlo aqui a partir del correo pintaria en
+        // la oficina un nombre que esa persona no eligio.
+        displayName: null,
+        role,
+        status: 'active',
+        // Los dos nulos son el alta entera: no caduca, y sin `invitedBy` la
+        // fila no sale en `listInvitations` ni la toca `revoke`.
+        expiresAt: null,
+        invitedBy: null,
+      });
+      audit.push({ actorId: createdById, action: 'create-user', subjectId: created.id });
 
       return snapshot(created);
     },

@@ -17,6 +17,7 @@ import type { IdTokenVerifier } from '../verifyIdToken.ts';
 import {
   handleAdminSession,
   handleCreateInvitation,
+  handleCreateUser,
   handleListInvitations,
   handleRevokeInvitation,
   type AdminDeps,
@@ -137,8 +138,8 @@ function harness(
 }
 
 /**
- * Las cuatro rutas comparten el mismo principio de las guardas. Se recorren en
- * bucle para que anadir una quinta ruta sin su guarda salte aqui, en vez de
+ * Las cinco rutas comparten el mismo principio de las guardas. Se recorren en
+ * bucle para que anadir una sexta ruta sin su guarda salte aqui, en vez de
  * quedarse como un endpoint abierto que nadie mira.
  */
 const rutas: { nombre: string; llamar: (auth: unknown, deps: AdminDeps) => Promise<unknown> }[] = [
@@ -152,9 +153,14 @@ const rutas: { nombre: string; llamar: (auth: unknown, deps: AdminDeps) => Promi
     nombre: 'POST /admin/invitations/:id/revoke',
     llamar: (auth, deps) => handleRevokeInvitation(auth, CADUCADO.id, deps),
   },
+  {
+    nombre: 'POST /admin/users',
+    llamar: (auth, deps) =>
+      handleCreateUser(auth, { email: 'x@example.com', role: 'employee' }, deps),
+  },
 ];
 
-describe('autenticacion, comun a las cuatro rutas', () => {
+describe('autenticacion, comun a las cinco rutas', () => {
   for (const { nombre, llamar } of rutas) {
     describe(nombre, () => {
       it('401 sin cabecera Authorization', async () => {
@@ -868,5 +874,266 @@ describe('POST /admin/invitations/:id/revoke', () => {
 
     expect(otra).toEqual({ status: 200, body: { id: invitada.id, status: 'revoked' } });
     expect(h.directory.auditLog()).toHaveLength(1);
+  });
+});
+
+describe('POST /admin/users', () => {
+  function crear(body: unknown, token = TOKEN_ADMIN, options?: Parameters<typeof harness>[0]) {
+    const h = harness(options);
+    return { h, result: handleCreateUser(bearer(token), body, h.deps) };
+  }
+
+  describe('validacion, antes de tocar nada', () => {
+    it('400 si el email falta, no es texto o no tiene forma de email', async () => {
+      for (const email of [undefined, null, 42, '', '   ', 'sin-arroba', 'a@b', 'a b@c.com']) {
+        const { result } = crear({ email, role: 'employee' });
+        expect(await result).toEqual({ status: 400, body: { error: 'invalid-request' } });
+      }
+    });
+
+    it('400 si el rol falta o no es uno de los que se reparten', async () => {
+      // La lista vive en `assertAssignableRole`; aqui solo se comprueba que la
+      // ruta la USA, sin reescribirla en un segundo sitio. `superadmin` y
+      // `guest` estan fuera a proposito: ver la cabecera de `userRules.ts`.
+      for (const role of [undefined, null, 42, '', 'superadmin', 'guest', 'Admin', 'jefe']) {
+        const { result } = crear({ email: 'ana@example.com', role });
+        expect(await result).toEqual({ status: 400, body: { error: 'invalid-request' } });
+      }
+    });
+
+    it('400 si el cuerpo no es ni un objeto', async () => {
+      for (const body of [undefined, null, 'texto', 42, []]) {
+        const { result } = crear(body);
+        expect(await result).toEqual({ status: 400, body: { error: 'invalid-request' } });
+      }
+    });
+
+    it('la validacion corre ANTES de mirar si hay adaptador de Identity', async () => {
+      // Al reves, quien escribe mal el correo recibiria
+      // "identity-admin-not-configured" y se pondria a revisar el despliegue por
+      // una errata suya.
+      const { result } = crear({ email: 'mal', role: 'employee' }, TOKEN_ADMIN, {
+        identityAdmin: null,
+      });
+
+      expect(await result).toEqual({ status: 400, body: { error: 'invalid-request' } });
+    });
+
+    it('no crea ninguna cuenta cuando la validacion falla', async () => {
+      const { h, result } = crear({ email: 'mal', role: 'employee' });
+      await result;
+
+      expect(h.created).toEqual([]);
+    });
+  });
+
+  describe('quien puede repartir que rol', () => {
+    it('un admin da de alta empleados', async () => {
+      const { result } = crear({ email: 'nueva@example.com', role: 'employee' });
+
+      expect((await result).status).toBe(201);
+    });
+
+    it('un admin NO puede crear otro admin: 403', async () => {
+      // Si pudiera, el rol se reproduciria solo y una sola cuenta comprometida
+      // bastaria para llenar la oficina de administradores. La guarda vive en
+      // `canAssignRole`; esto afirma que la ruta no la rodea.
+      const { result } = crear({ email: 'nueva@example.com', role: 'admin' });
+
+      expect(await result).toEqual({ status: 403, body: { error: 'forbidden' } });
+    });
+
+    it('un superadmin SI puede crear admins', async () => {
+      const { h, result } = crear({ email: 'nueva@example.com', role: 'admin' }, TOKEN_SUPER);
+
+      expect((await result).status).toBe(201);
+      expect((await h.directory.findByUid('uid-nuevo-1'))?.role).toBe('admin');
+    });
+
+    it('el 403 llega antes de crear ninguna cuenta en Identity Platform', async () => {
+      // Un rechazo que ya ha dejado una credencial creada no es un rechazo.
+      const { h, result } = crear({ email: 'nueva@example.com', role: 'admin' });
+      await result;
+
+      expect(h.created).toEqual([]);
+      expect(await h.directory.findByUid('uid-nuevo-1')).toBeNull();
+    });
+
+    it('el cuerpo se valida antes que el rol de quien llama, y eso no abre nada', async () => {
+      // Este 403 llega DESPUES del 400, al reves que en el resto de las rutas, y
+      // es inevitable: no se puede saber que rol se esta pidiendo sin leer el
+      // cuerpo. No es un canal lateral, porque quien llega hasta aqui ya ha
+      // probado que administra; lo unico que aprende es que no reparte ese rol.
+      const { result } = crear({ email: 'mal', role: 'admin' });
+
+      expect(await result).toEqual({ status: 400, body: { error: 'invalid-request' } });
+    });
+  });
+
+  it('503 identity-admin-not-configured cuando no hay credencial de servicio', async () => {
+    const { h, result } = crear({ email: 'nueva@example.com', role: 'employee' }, TOKEN_ADMIN, {
+      identityAdmin: null,
+    });
+
+    expect(await result).toEqual({
+      status: 503,
+      body: { error: 'identity-admin-not-configured' },
+    });
+    expect(await h.directory.findByUid('uid-nuevo-1')).toBeNull();
+  });
+
+  it('201 con id, email, rol y contrasena, y sin caducidad en el cuerpo', async () => {
+    // No se devuelve `expiresAt`: esta cuenta no vence, y mandar un `null` que
+    // el panel tiene que interpretar es peor que no mandar nada.
+    const { result } = crear({ email: 'nueva@example.com', role: 'employee' });
+    const { status, body } = await result;
+
+    expect(status).toBe(201);
+    expect(body.email).toBe('nueva@example.com');
+    expect(body.role).toBe('employee');
+    expect(typeof body.id).toBe('string');
+    expect(String(body.password)).toHaveLength(PASSWORD_LENGTH);
+  });
+
+  it('crea la cuenta en Identity Platform con la MISMA contrasena que devuelve', async () => {
+    // Si divergiesen, el alta responderia 201 y la persona no podria entrar
+    // nunca, sin un solo error en ninguna parte.
+    const { h, result } = crear({ email: 'nueva@example.com', role: 'employee' });
+    const { body } = await result;
+
+    expect(h.created).toEqual([{ email: 'nueva@example.com', password: body.password }]);
+  });
+
+  it('normaliza el email antes de crear la cuenta y la fila', async () => {
+    const { h, result } = crear({ email: '  Nueva@Example.COM  ', role: 'employee' });
+    const { body } = await result;
+
+    expect(body.email).toBe('nueva@example.com');
+    expect(h.created[0].email).toBe('nueva@example.com');
+    expect((await h.directory.findByUid('uid-nuevo-1'))?.email).toBe('nueva@example.com');
+  });
+
+  it('la fila nace sin caducidad y sin quien la invito, con su rastro de auditoria', async () => {
+    const { h, result } = crear({ email: 'nueva@example.com', role: 'employee' });
+    await result;
+
+    const fila = (await h.directory.findByUid('uid-nuevo-1'))!;
+    expect(fila).toMatchObject({ role: 'employee', status: 'active', expiresAt: null, invitedBy: null });
+    expect(h.directory.auditLog()).toEqual([
+      { actorId: ADMIN.id, action: 'create-user', subjectId: fila.id },
+    ]);
+  });
+
+  it('quien entra por aqui NO aparece en la lista de invitaciones', async () => {
+    // Es la consecuencia del `invitedBy` nulo, y la razon de que no haya un
+    // boton para revocarlo: alguien de casa no se echa desde el panel de
+    // invitaciones.
+    const { h, result } = crear({ email: 'nueva@example.com', role: 'employee' });
+    await result;
+
+    const lista = await handleListInvitations(bearer(TOKEN_ADMIN), h.deps);
+
+    expect(JSON.stringify(lista.body)).not.toContain('nueva@example.com');
+  });
+
+  it('409 conflict cuando ese correo ya tiene cuenta', async () => {
+    const { h, result } = crear({ email: 'nueva@example.com', role: 'employee' }, TOKEN_ADMIN, {
+      createAccount: async () => {
+        throw new IdentityAdminError('email-exists');
+      },
+    });
+
+    expect(await result).toEqual({ status: 409, body: { error: 'conflict' } });
+    expect(await h.directory.findByUid('uid-nuevo-1')).toBeNull();
+  });
+
+  it('503 cuando Identity Platform no responde', async () => {
+    const { h, result } = crear({ email: 'nueva@example.com', role: 'employee' }, TOKEN_ADMIN, {
+      createAccount: async () => {
+        throw new IdentityAdminError('unavailable');
+      },
+    });
+
+    expect(await result).toEqual({
+      status: 503,
+      body: { error: 'identity-admin-not-configured' },
+    });
+    expect(await h.directory.findByUid('uid-nuevo-1')).toBeNull();
+  });
+
+  describe('la cuenta huerfana', () => {
+    /**
+     * Mismo hueco que en el alta de invitacion: `createAccount` funciona y
+     * `createUser` falla despues, asi que queda una cuenta en Identity Platform
+     * sin fila en el directorio. Puede autenticarse, alguien conoce su
+     * contrasena, y nadie la ve desde el panel. Es una credencial fuera de
+     * inventario, que es el peor sitio donde puede estar una credencial.
+     */
+    function conFalloAlGuardar(disableAccount?: (uid: string) => Promise<void>) {
+      const h = harness({ disableAccount });
+      vi.spyOn(h.directory, 'createUser').mockRejectedValue(new Error('la base de datos'));
+      return {
+        h,
+        result: handleCreateUser(
+          bearer(TOKEN_ADMIN),
+          { email: 'nueva@example.com', role: 'employee' },
+          h.deps,
+        ),
+      };
+    }
+
+    it('compensa desactivando la cuenta que se acaba de crear', async () => {
+      const { h, result } = conFalloAlGuardar();
+      await result;
+
+      expect(h.disabled).toEqual(['uid-nuevo-1']);
+    });
+
+    it('responde 500 y no finge que el alta salio bien', async () => {
+      const { result } = conFalloAlGuardar();
+
+      expect(await result).toEqual({ status: 500, body: { error: 'internal' } });
+    });
+
+    it('deja constancia en el log de las dos cosas que pasaron', async () => {
+      const { h, result } = conFalloAlGuardar();
+      await result;
+
+      const log = h.logged.join('\n');
+      expect(log).toContain('huerfana');
+      expect(log).toContain('uid-nuevo-1');
+    });
+
+    it('si la compensacion tambien falla, lo grita en el log y sigue respondiendo 500', async () => {
+      // Aqui si queda una credencial viva fuera de inventario y hace falta
+      // desactivarla a mano desde la consola de GCP. El log es la unica forma
+      // de saber cual.
+      const { h, result } = conFalloAlGuardar(async () => {
+        throw new IdentityAdminError('unavailable');
+      });
+
+      expect(await result).toEqual({ status: 500, body: { error: 'internal' } });
+      expect(h.logged.join('\n')).toContain('a mano');
+    });
+  });
+
+  it('REGRESION: la contrasena no llega al logger inyectado', async () => {
+    // Misma regla que en el alta de invitacion: se entrega UNA vez en el cuerpo
+    // del 201 y no existe en ningun otro sitio. Ver `generatePassword.ts`.
+    const { h, result } = crear({ email: 'nueva@example.com', role: 'employee' });
+    const { body } = await result;
+
+    expect(h.logged.join('\n')).not.toContain(String(body.password));
+  });
+
+  it('REGRESION: la contrasena no se guarda en el directorio ni en la auditoria', async () => {
+    const { h, result } = crear({ email: 'nueva@example.com', role: 'employee' });
+    const { body } = await result;
+
+    const almacen = JSON.stringify([
+      await h.directory.findByUid('uid-nuevo-1'),
+      h.directory.auditLog(),
+    ]);
+    expect(almacen).not.toContain(String(body.password));
   });
 });

@@ -50,12 +50,39 @@ export interface CreatedInvitation {
   expiresAt: string;
 }
 
+/**
+ * Los roles que el panel puede repartir al dar de alta a alguien de casa. Ni
+ * `superadmin` (lo protege un indice unico en la base de datos, y la unica
+ * promocion es la del bootstrap) ni `guest` (un invitado sin caducidad es lo
+ * que el flujo de invitaciones existe para impedir).
+ */
+export type AssignableRole = 'employee' | 'admin';
+
+/**
+ * Lo que se devuelve UNA sola vez al dar de alta. Misma regla que
+ * `CreatedInvitation`: la contrasena no vuelve en ninguna consulta posterior,
+ * asi que no forma parte de ningun tipo que se consulte. No lleva `expiresAt`
+ * porque esta cuenta no caduca.
+ */
+export interface CreatedUser {
+  id: string;
+  email: string;
+  role: AssignableRole;
+  password: string;
+}
+
 export interface AdminPort {
   /** Quien consulta, segun el servidor. Es la unica fuente del rol. */
   session(): Promise<AdminSession>;
   listInvitations(): Promise<Invitation[]>;
   /** `days` entre 1 y 90 (#24); el servidor vuelve a validarlo. */
   createInvitation(email: string, days: number): Promise<CreatedInvitation>;
+  /**
+   * Alta de alguien de casa: sin caducidad. Solo un superadmin puede pedir
+   * `'admin'`; el servidor responde 403 a cualquier otro, y esconder la opcion
+   * en la pantalla no es la guarda.
+   */
+  createUser(email: string, role: AssignableRole): Promise<CreatedUser>;
   revoke(id: string): Promise<void>;
 }
 

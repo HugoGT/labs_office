@@ -16,8 +16,11 @@ const GENERIC_MESSAGE = 'No se pudo completar la operación.';
 const MESSAGES: Readonly<Record<AdminErrorCode, string>> = {
   unauthorized: 'Tu sesión caducó. Vuelve a entrar.',
   forbidden: 'No tienes permiso para esta acción.',
-  'invalid-request': 'El servidor no aceptó los datos de la invitación.',
-  conflict: 'Ese correo ya tiene una invitación activa.',
+  // Sin nombrar la invitacion: estos dos codigos los devuelven los DOS flujos
+  // de alta, y decir "invitación" al dar de alta a un empleado seria una
+  // explicacion falsa (ese correo no tiene una invitacion, tiene una cuenta).
+  'invalid-request': 'El servidor no aceptó los datos del alta.',
+  conflict: 'Ese correo ya tiene una cuenta.',
   // No es un fallo de quien invita: el servidor no tiene credenciales de
   // administracion de Identity Platform (#24, seccion 3). Decir "inténtalo de
   // nuevo" le haria repetir el intento para siempre.

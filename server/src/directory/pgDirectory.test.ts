@@ -15,6 +15,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { InvalidInvitationError } from './invitationRules.ts';
+import { InvalidUserError } from './userRules.ts';
 import { createPgDirectory, type DirectoryPool, type DirectoryQueryResult } from './pgDirectory.ts';
 
 interface RecordedQuery {
@@ -412,6 +413,117 @@ describe('pgDirectory: createInvitation', () => {
       squash(text).startsWith('insert into users') ? new Error('boom') : { rows: [], rowCount: 0 },
     );
     await expect(directoryOver(failing).createInvitation(INPUT)).rejects.toThrow('boom');
+    expect(failing.released).toBe(1);
+  });
+});
+
+describe('pgDirectory: createUser', () => {
+  const EMPLOYEE_ROW = {
+    ...USER_ROW,
+    id: '33333333-3333-4333-8333-333333333333',
+    uid: 'uid-nueva',
+    email: 'nueva@example.com',
+    display_name: null,
+    role: 'employee',
+    expires_at: null,
+    invited_by: null,
+  };
+
+  const INPUT = {
+    email: 'Nueva@Example.com',
+    role: 'employee' as const,
+    uid: 'uid-nueva',
+    createdById: USER_ROW.id,
+  };
+
+  function creatingPool() {
+    return fakePool((text) =>
+      squash(text).startsWith('insert into users')
+        ? { rows: [EMPLOYEE_ROW], rowCount: 1 }
+        : { rows: [], rowCount: 0 },
+    );
+  }
+
+  it('valida el rol ANTES de abrir nada: ni conexion ni transaccion', async () => {
+    // Misma razon que en `createInvitation`: con la guarda dentro de la
+    // transaccion, cada peticion con un rol que no se reparte costaria una
+    // conexion del pool y un BEGIN/ROLLBACK.
+    const pool = fakePool();
+
+    await expect(
+      directoryOver(pool).createUser({ ...INPUT, role: 'superadmin' as never }),
+    ).rejects.toBeInstanceOf(InvalidUserError);
+    expect(pool.queries).toHaveLength(0);
+  });
+
+  it('inserta la fila y su rastro de auditoria en la MISMA transaccion', async () => {
+    const pool = creatingPool();
+
+    await directoryOver(pool).createUser(INPUT);
+
+    const sqls = pool.queries.map((query) => squash(query.text));
+    expect(sqls[0]).toBe('begin');
+    expect(sqls[1]).toContain('insert into users');
+    expect(sqls[2]).toContain('insert into audit_log');
+    expect(sqls[3]).toBe('commit');
+  });
+
+  it('nace activo, sin caducidad y sin quien lo invito, con el email normalizado', async () => {
+    // `expires_at` NULL y `invited_by` NULL son el alta entera: sin el primero
+    // la cuenta no vence, y sin el segundo no aparece en `listInvitations` ni
+    // la alcanza el `revoke`, que exige `invited_by IS NOT NULL`.
+    const pool = creatingPool();
+
+    const created = await directoryOver(pool).createUser(INPUT);
+
+    const insert = squash(pool.queries[1].text);
+    expect(insert).toContain('insert into users');
+    expect(insert).toContain("'active'");
+    expect(insert).toContain('null, null');
+    expect(created).toMatchObject({ role: 'employee', expiresAt: null, invitedBy: null });
+  });
+
+  it('el rol viaja como PARAMETRO, nunca interpolado en el texto del SQL', async () => {
+    // Interpolarlo pondria un valor que entra por HTTP dentro de la sentencia.
+    // Hoy `assertAssignableRole` lo acota antes, pero una guarda que se pueda
+    // quitar sin que nada falle no es donde debe vivir esa proteccion.
+    const pool = creatingPool();
+
+    await directoryOver(pool).createUser({ ...INPUT, role: 'admin' });
+
+    expect(squash(pool.queries[1].text)).not.toContain("'admin'");
+    expect(pool.queries[1].values).toEqual(['uid-nueva', 'nueva@example.com', 'admin']);
+  });
+
+  it('la auditoria registra a quien da de alta como actor y al nuevo como sujeto', async () => {
+    const pool = creatingPool();
+
+    await directoryOver(pool).createUser(INPUT);
+
+    expect(pool.queries[2].values).toEqual([USER_ROW.id, 'create-user', EMPLOYEE_ROW.id]);
+  });
+
+  it('si algo falla se hace ROLLBACK y no queda media alta', async () => {
+    const pool = fakePool((text) =>
+      squash(text).startsWith('insert into audit_log')
+        ? new Error('audit_log no existe')
+        : { rows: [EMPLOYEE_ROW], rowCount: 1 },
+    );
+
+    await expect(directoryOver(pool).createUser(INPUT)).rejects.toThrow('audit_log no existe');
+
+    expect(pool.queries.map((query) => squash(query.text))).toContain('rollback');
+  });
+
+  it('devuelve la conexion al pool pase lo que pase', async () => {
+    const ok = creatingPool();
+    await directoryOver(ok).createUser(INPUT);
+    expect(ok.released).toBe(1);
+
+    const failing = fakePool((text) =>
+      squash(text).startsWith('insert into users') ? new Error('boom') : { rows: [], rowCount: 0 },
+    );
+    await expect(directoryOver(failing).createUser(INPUT)).rejects.toThrow('boom');
     expect(failing.released).toBe(1);
   });
 });

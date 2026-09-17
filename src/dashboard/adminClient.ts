@@ -10,7 +10,9 @@ import {
   type AdminErrorCode,
   type AdminPort,
   type AdminSession,
+  type AssignableRole,
   type CreatedInvitation,
+  type CreatedUser,
   type Invitation,
 } from './adminPort';
 
@@ -129,6 +131,12 @@ export function createAdminClient(
 
     createInvitation(email: string, days: number): Promise<CreatedInvitation> {
       return request<CreatedInvitation>('/invitations', jsonBody({ email, days }));
+    },
+
+    createUser(email: string, role: AssignableRole): Promise<CreatedUser> {
+      // Ruta propia y no `/invitations`: lo que se crea aqui no es una
+      // invitacion, no lleva caducidad y no vuelve en esa lista.
+      return request<CreatedUser>('/users', jsonBody({ email, role }));
     },
 
     async revoke(id: string): Promise<void> {

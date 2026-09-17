@@ -4,7 +4,7 @@ import {
   AdminError,
   type AdminPort,
   type AdminSession,
-  type CreatedInvitation,
+  type AssignableRole,
   type Invitation,
   type Role,
 } from './adminPort';
@@ -127,8 +127,104 @@ export function InviteForm({ onSubmit, pending, error }: InviteFormProps) {
   );
 }
 
+export interface UserFormProps {
+  /** Devuelve `true` si el alta se hizo; solo entonces se limpia. */
+  onSubmit: (email: string, role: AssignableRole) => Promise<boolean>;
+  pending: boolean;
+  /** Ya traducido a texto (`describeAdminError`), nunca el error crudo. */
+  error: string | null;
+  /**
+   * Si se ofrece el rol de administrador. Es un booleano plano y no la sesion
+   * entera: este componente no tiene por que saber que existe un rol de quien
+   * mira, solo si esa opcion se pinta (D3).
+   */
+  canCreateAdmins: boolean;
+}
+
+/**
+ * Alta de alguien de casa. Presentacional (D3), igual que `InviteForm`: no
+ * conoce el puerto y solo avisa hacia arriba. `<form>` de verdad para que Enter
+ * envie y el navegador exija el correo.
+ *
+ * Esconder la opcion de administrador es COSMETICO, en el mismo sentido que la
+ * pantalla de "no autorizado" de mas abajo: `/admin/users` es una url publica y
+ * cualquiera con un ID token valido puede pedir `role: 'admin'` a mano con
+ * curl. La guarda de verdad es `canAssignRole` en el servidor, que responde 403
+ * a un admin que intente crear otro admin. Esto solo evita ofrecer una opcion
+ * que a esa persona le va a fallar siempre.
+ */
+export function UserForm({ onSubmit, pending, error, canCreateAdmins }: UserFormProps) {
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState<AssignableRole>('employee');
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    // Sin esto el navegador navegaria a la misma URL y se perderia el estado.
+    event.preventDefault();
+    if (pending) return;
+
+    const done = await onSubmit(email.trim(), role);
+    // Solo se limpia si de verdad se creo: tras un fallo, quien da de alta
+    // quiere corregir un caracter, no volver a escribirlo todo.
+    if (!done) return;
+    setEmail('');
+    setRole('employee');
+  }
+
+  return (
+    <form className={styles.form} onSubmit={handleSubmit}>
+      <div className={`${styles.field} ${styles.emailField}`}>
+        <label className={styles.label} htmlFor="user-email">
+          Correo
+        </label>
+        <input
+          className={styles.input}
+          id="user-email"
+          type="email"
+          autoComplete="off"
+          required
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+        />
+      </div>
+
+      <div className={styles.field}>
+        <label className={styles.label} htmlFor="user-role">
+          Rol
+        </label>
+        <select
+          className={`${styles.input} ${styles.roleSelect}`}
+          id="user-role"
+          value={role}
+          onChange={(event) => setRole(event.target.value as AssignableRole)}
+        >
+          <option value="employee">{ROLE_LABELS.employee}</option>
+          {canCreateAdmins && <option value="admin">{ROLE_LABELS.admin}</option>}
+        </select>
+      </div>
+
+      <button className={styles.submit} type="submit" disabled={pending}>
+        {pending ? 'Creando…' : 'Crear usuario'}
+      </button>
+
+      {/* `role="alert"`, como en `InviteForm`: el fallo aparece lejos del foco
+          y sin anunciarlo no existe para un lector de pantalla. */}
+      {error !== null && (
+        <div className={styles.error} role="alert">
+          {error}
+        </div>
+      )}
+    </form>
+  );
+}
+
 export interface GeneratedPasswordProps {
-  created: CreatedInvitation;
+  /**
+   * Forma estructural y no `CreatedInvitation`: los dos flujos entregan una
+   * credencial y solo se diferencian en si hay fecha de vencimiento, asi que
+   * pedir lo minimo que hace falta para pintarla evita un segundo panel
+   * identico que habria que mantener en paralelo.
+   */
+  created: { email: string; password: string; expiresAt: string | null };
   onDismiss: () => void;
 }
 
@@ -149,7 +245,14 @@ export function GeneratedPassword({ created, onDismiss }: GeneratedPasswordProps
         Cópiala y entrégala ahora: no se volverá a mostrar en ningún sitio.
       </p>
       <p className={styles.secretValue}>{created.password}</p>
-      <p className={styles.subtitle}>El acceso caduca el {formatUtcDate(created.expiresAt)}.</p>
+      {/* Decirlo y no callarlo: con las dos altas en la misma pantalla, esta
+          linea es lo unico que distingue un acceso temporal de uno que se
+          queda, justo cuando quien administra acaba de hacer una de las dos. */}
+      <p className={styles.subtitle}>
+        {created.expiresAt === null
+          ? 'El acceso no caduca.'
+          : `El acceso caduca el ${formatUtcDate(created.expiresAt)}.`}
+      </p>
       <button className={styles.secretDismiss} type="button" onClick={onDismiss}>
         Entendido, ya la copié
       </button>
@@ -239,9 +342,19 @@ export function DashboardScreen({ admin }: DashboardScreenProps) {
   const [phase, setPhase] = useState<Phase>('loading');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
-  const [created, setCreated] = useState<CreatedInvitation | null>(null);
+  /**
+   * La credencial recien entregada, venga del alta que venga: el panel es el
+   * mismo y solo cambia si hay caducidad que anunciar. `expiresAt: null`
+   * significa "no caduca", que es exactamente lo que el servidor guarda.
+   */
+  const [created, setCreated] = useState<GeneratedPasswordProps['created'] | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // Estado propio para el alta de usuario, separado del de invitar a proposito:
+  // con uno solo, un fallo al dar de alta pintaria un error rojo dentro del
+  // formulario de invitacion, diciendo que fallo algo que ni se intento.
+  const [userError, setUserError] = useState<string | null>(null);
+  const [creatingUser, setCreatingUser] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
 
   /**
@@ -313,6 +426,26 @@ export function DashboardScreen({ admin }: DashboardScreenProps) {
     }
   }
 
+  async function handleCreateUser(email: string, role: AssignableRole): Promise<boolean> {
+    setUserError(null);
+    setCreatingUser(true);
+    try {
+      const user = await admin.createUser(email, role);
+      // `expiresAt: null` no es un hueco por rellenar: es el dato. Quien entra
+      // por aqui es de casa y su acceso no vence.
+      setCreated({ email: user.email, password: user.password, expiresAt: null });
+      // Y NO se llama a `refresh()`: la fila nace sin `invited_by`, asi que el
+      // servidor no la devuelve en `listInvitations` y releer la lista solo
+      // gastaria un viaje para pintar exactamente lo mismo.
+      return true;
+    } catch (error) {
+      setUserError(describeAdminError(error));
+      return false;
+    } finally {
+      setCreatingUser(false);
+    }
+  }
+
   async function handleRevoke(id: string): Promise<void> {
     setActionError(null);
     setRevokingId(id);
@@ -357,7 +490,7 @@ export function DashboardScreen({ admin }: DashboardScreenProps) {
     return (
       <div className={styles.screen}>
         <div className={styles.content}>
-          <h1 className={styles.title}>Invitaciones</h1>
+          <h1 className={styles.title}>Administración</h1>
           <div className={styles.error} role="alert">
             {loadError ?? describeAdminError(null)}
           </div>
@@ -370,7 +503,9 @@ export function DashboardScreen({ admin }: DashboardScreenProps) {
     <div className={styles.screen}>
       <div className={styles.content}>
         <header>
-          <h1 className={styles.title}>Invitaciones</h1>
+          {/* El panel ya no hace una sola cosa: titularlo "Invitaciones"
+              dejaria fuera el alta de alguien de casa, que no es una. */}
+          <h1 className={styles.title}>Administración</h1>
           <p className={styles.subtitle}>
             {session.email} · {ROLE_LABELS[session.role]}
           </p>
@@ -380,11 +515,41 @@ export function DashboardScreen({ admin }: DashboardScreenProps) {
           <GeneratedPassword created={created} onDismiss={() => setCreated(null)} />
         )}
 
-        <section className={styles.card}>
+        {/* Cada tarjeta lleva su encabezado y su `aria-labelledby`: con dos
+            altas en la misma pantalla, un campo "Correo" suelto no dice a cual
+            de las dos pertenece, ni mirandolo ni oyendolo. */}
+        <section className={styles.card} aria-labelledby="nueva-invitacion">
+          <h2 className={styles.cardTitle} id="nueva-invitacion">
+            Nueva invitación
+          </h2>
+          <p className={styles.cardSubtitle}>
+            Acceso temporal para alguien de fuera: caduca solo y se puede revocar.
+          </p>
           <InviteForm onSubmit={handleCreate} pending={creating} error={actionError} />
         </section>
 
-        <section className={styles.card}>
+        <section className={styles.card} aria-labelledby="nuevo-usuario">
+          <h2 className={styles.cardTitle} id="nuevo-usuario">
+            Nuevo usuario
+          </h2>
+          <p className={styles.cardSubtitle}>
+            Alguien de la empresa: su acceso no caduca y no aparece en la lista de
+            invitaciones.
+          </p>
+          <UserForm
+            onSubmit={handleCreateUser}
+            pending={creatingUser}
+            error={userError}
+            // El rol de quien mira lo dice el SERVIDOR (`session()`), no el ID
+            // token del navegador, que es manipulable.
+            canCreateAdmins={session.role === 'superadmin'}
+          />
+        </section>
+
+        <section className={styles.card} aria-labelledby="lista-invitaciones">
+          <h2 className={styles.cardTitle} id="lista-invitaciones">
+            Invitaciones
+          </h2>
           <InvitationsTable
             invitations={invitations}
             onRevoke={(id) => void handleRevoke(id)}

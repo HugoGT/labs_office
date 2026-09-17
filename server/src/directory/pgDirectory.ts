@@ -41,12 +41,14 @@
 import type {
   AccountStatus,
   CreateInvitationInput,
+  CreateUserInput,
   DirectoryUser,
   InvitationRow,
   Role,
   UserDirectory,
 } from './directoryPort.ts';
 import { normalizeEmail, normalizeInvitationInput } from './invitationRules.ts';
+import { normalizeUserInput } from './userRules.ts';
 
 /**
  * La forma minima de `pg` que usa este fichero. Declararla aqui (en vez de
@@ -271,6 +273,44 @@ export function createPgDirectory(
         );
 
         return guest;
+      });
+    },
+
+    async createUser(input: CreateUserInput) {
+      // Validar ANTES de pedir conexion, misma razon que en `createInvitation`:
+      // una guarda dentro de la transaccion cobraria una conexion del pool y un
+      // BEGIN/ROLLBACK por cada peticion con un rol que no se reparte.
+      const { email, role, uid, createdById } = normalizeUserInput(input);
+
+      return inTransaction(async (client) => {
+        // `expires_at` y `invited_by` van NULL escritos en la sentencia y no
+        // como parametros: no son valores que alguien elija, son la definicion
+        // de este alta. El primero es "no caduca" para `decideAccess`; el
+        // segundo es lo que mantiene la fila fuera de `listInvitations` y fuera
+        // del alcance de `revoke`, que exige `invited_by IS NOT NULL`.
+        //
+        // El rol SI es un parametro, aunque `assertAssignableRole` ya lo acote:
+        // es un valor que entra por HTTP, y una proteccion que desaparece si
+        // alguien mueve esa guarda no protege de nada.
+        const inserted = await client.query(
+          `
+            INSERT INTO users (uid, email, display_name, role, status, expires_at, invited_by)
+            VALUES ($1, lower($2), NULL, $3, 'active', NULL, NULL)
+            RETURNING ${USER_COLUMNS}
+          `,
+          [uid, email, role],
+        );
+        const created = toDirectoryUser(inserted.rows[0]);
+
+        // En la MISMA transaccion que el alta, igual que al invitar: una fila
+        // sin rastro deja sin respuesta la pregunta de la seccion 10 del PRD,
+        // que es quien dio de alta a quien.
+        await client.query(
+          'INSERT INTO audit_log (actor_id, action, subject_id) VALUES ($1, $2, $3)',
+          [createdById, 'create-user', created.id],
+        );
+
+        return created;
       });
     },
 

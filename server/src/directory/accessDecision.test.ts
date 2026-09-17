@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { canAdminister, decideAccess } from './accessDecision.ts';
+import { canAdminister, canAssignRole, decideAccess } from './accessDecision.ts';
 import type { DirectoryUser, Role } from './directoryPort.ts';
 
 const NOW = new Date('2026-09-17T12:00:00.000Z');
@@ -103,5 +103,28 @@ describe('canAdminister', () => {
     // accesos no es una capacidad que se reparta por estar dentro.
     expect(canAdminister('employee')).toBe(false);
     expect(canAdminister('guest')).toBe(false);
+  });
+});
+
+describe('canAssignRole', () => {
+  it('cualquiera que administre puede dar de alta a un empleado', () => {
+    expect(canAssignRole('superadmin', 'employee')).toBe(true);
+    expect(canAssignRole('admin', 'employee')).toBe(true);
+  });
+
+  it('SOLO un superadmin puede crear administradores', () => {
+    // Si un admin pudiese crear admins, el rol se reproduciria solo: bastaria
+    // con uno comprometido para llenar la oficina de administradores, y ninguno
+    // de los nuevos tendria detras la decision de quien manda de verdad. Que el
+    // rol solo lo reparta el superadmin mantiene un unico origen.
+    expect(canAssignRole('superadmin', 'admin')).toBe(true);
+    expect(canAssignRole('admin', 'admin')).toBe(false);
+  });
+
+  it('quien no administra no asigna ningun rol', () => {
+    for (const actor of ['employee', 'guest'] as const) {
+      expect(canAssignRole(actor, 'employee')).toBe(false);
+      expect(canAssignRole(actor, 'admin')).toBe(false);
+    }
   });
 });

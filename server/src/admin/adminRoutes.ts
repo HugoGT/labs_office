@@ -40,19 +40,30 @@
  *
  * `GET /admin/session` es la excepcion deliberada y corre 1 y 2 pero NO 3. Ver
  * `handleAdminSession`.
+ *
+ * `POST /admin/users` anade un CUARTO filtro que si vive despues del cuerpo,
+ * porque no puede vivir antes: comprobar que quien administra puede repartir el
+ * rol que pide exige leer que rol pide. Ver `handleCreateUser`.
  */
 
 import {
   canAdminister,
+  canAssignRole,
   decideAccess,
   type AccessDecision,
 } from '../directory/accessDecision.ts';
-import type { DirectoryUser, InvitationRow, UserDirectory } from '../directory/directoryPort.ts';
+import type {
+  AssignableRole,
+  DirectoryUser,
+  InvitationRow,
+  UserDirectory,
+} from '../directory/directoryPort.ts';
 import {
   assertValidInvitationDays,
   InvalidInvitationError,
   normalizeEmail,
 } from '../directory/invitationRules.ts';
+import { assertAssignableRole, InvalidUserError } from '../directory/userRules.ts';
 import type { IdTokenVerifier } from '../verifyIdToken.ts';
 import { generatePassword } from './generatePassword.ts';
 import { IdentityAdminError, type IdentityAdmin } from './identityAdminPort.ts';
@@ -385,6 +396,128 @@ export async function handleCreateInvitation(
       // La unica vez que este valor sale de este proceso.
       password,
       expiresAt: toIso(created.expiresAt),
+    },
+  };
+}
+
+/**
+ * Alta de alguien de casa: un empleado o un administrador, sin caducidad y sin
+ * `invited_by`. Es la otra mitad del panel; la de arriba da acceso temporal a
+ * gente de fuera y esta incorpora a alguien que se queda.
+ *
+ * El orden es el mismo que el del alta de invitacion, y por el mismo motivo:
+ * cada paso tiene que fallar antes de que el siguiente deje algo a medias.
+ *
+ *   1. autorizar (401 mudo / 403 a quien no administra),
+ *   2. el cuerpo tiene que ser un objeto,
+ *   3. email con forma de email,
+ *   4. rol de los que se reparten (`assertAssignableRole`),
+ *   5. quien llama puede repartir ESE rol (`canAssignRole`),
+ *   6. hay adaptador de Identity Platform,
+ *   7. generar contrasena y crear la cuenta,
+ *   8. guardar la fila, y compensar la cuenta si eso falla.
+ *
+ * ## Por que el 403 del paso 5 va DESPUES de validar el cuerpo
+ *
+ * En las demas rutas el rol se comprueba antes de mirar el cuerpo, para que el
+ * 400 no sea un canal lateral con el que ir aprendiendo la forma del endpoint.
+ * Aqui no se puede: la pregunta no es "puede administrar" -- eso ya se resolvio
+ * en el paso 1 -- sino "puede repartir ESTE rol", y ese rol viene en el cuerpo.
+ * No abre nada: quien llega al paso 5 ya ha probado que administra, y lo unico
+ * que aprende es que los administradores no se crean solos.
+ *
+ * ## Por que `invited_by` se queda en NULL
+ *
+ * No es un descuido ni un campo que falte rellenar: es la marca que separa a un
+ * invitado de alguien de casa. Sin ella, la fila no aparece en
+ * `listInvitations` y `revoke` no la alcanza -- su guarda es
+ * `invited_by IS NOT NULL` --, asi que dar de alta a un empleado no anade un
+ * boton para expulsarlo desde el panel de invitaciones, que es otra decision y
+ * no esta tomada.
+ */
+export async function handleCreateUser(
+  authorization: unknown,
+  body: unknown,
+  deps: AdminDeps,
+): Promise<AdminResult> {
+  const authorized = await authorize(authorization, deps);
+  if (!authorized.ok) return authorized.result;
+
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return INVALID_REQUEST;
+  const { email: rawEmail, role: rawRole } = body as { email?: unknown; role?: unknown };
+
+  const email = validEmail(rawEmail);
+  if (email === null) return INVALID_REQUEST;
+
+  // La lista de roles asignables NO se reescribe aqui: vive en `userRules.ts` y
+  // la comparten esta ruta y los dos adaptadores del directorio.
+  let role: AssignableRole;
+  try {
+    assertAssignableRole(rawRole);
+    role = rawRole;
+  } catch (error) {
+    if (error instanceof InvalidUserError) return INVALID_REQUEST;
+    throw error;
+  }
+
+  if (!canAssignRole(authorized.user.role, role)) return FORBIDDEN;
+
+  // Despues de validar, igual que en el alta de invitacion: quien escribio mal
+  // el correo tiene que leer "peticion invalida" y no "el despliegue no tiene
+  // credencial", o se pondria a revisar el secreto de GCP por una errata suya.
+  const identityAdmin = deps.identityAdmin;
+  if (!identityAdmin) return IDENTITY_UNAVAILABLE;
+
+  // Unica copia del valor en todo el proceso: no se registra, no se guarda y no
+  // entra en ningun mensaje de error. Ver la cabecera de `generatePassword.ts`.
+  const password = generatePassword();
+
+  let uid: string;
+  try {
+    uid = await identityAdmin.createAccount(email, password);
+  } catch (error) {
+    if (error instanceof IdentityAdminError && error.code === 'email-exists') {
+      return { status: 409, body: { error: 'conflict' } };
+    }
+    logger(deps)(`no se pudo crear la cuenta de ${email} en Identity Platform`);
+    return IDENTITY_UNAVAILABLE;
+  }
+
+  let created: DirectoryUser;
+  try {
+    created = await deps.directory.createUser({
+      email,
+      role,
+      uid,
+      createdById: authorized.user.id,
+    });
+  } catch {
+    // Mismo hueco y misma compensacion que en el alta de invitacion: la cuenta
+    // ya existe en Identity Platform y su fila no, asi que es una credencial
+    // que nadie puede ver ni revocar desde el panel. Se desactiva, que es la
+    // operacion inversa exacta de lo unico que llego a pasar, y no se borra:
+    // desactivar es reversible por un operador y borrar no.
+    logger(deps)(`no se pudo guardar el alta de ${email}: cuenta huerfana uid=${uid}`);
+    try {
+      await identityAdmin.disableAccount(uid);
+      logger(deps)(`cuenta huerfana uid=${uid} desactivada por compensacion`);
+    } catch {
+      logger(deps)(
+        `FALLO LA COMPENSACION: la cuenta uid=${uid} (${email}) sigue activa en Identity ` +
+          `Platform y no tiene fila en el directorio; hay que desactivarla a mano en GCP`,
+      );
+    }
+    return INTERNAL;
+  }
+
+  return {
+    status: 201,
+    body: {
+      id: created.id,
+      email: created.email,
+      role: created.role,
+      // La unica vez que este valor sale de este proceso.
+      password,
     },
   };
 }

@@ -58,10 +58,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_single_superadmin ON users ((role))
 CREATE TABLE IF NOT EXISTS audit_log (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   actor_id uuid REFERENCES users(id),
-  action text NOT NULL CHECK (action IN ('invite', 'revoke')),
+  action text NOT NULL CHECK (action IN ('invite', 'revoke', 'create-user')),
   subject_id uuid REFERENCES users(id),
   created_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- `CREATE TABLE IF NOT EXISTS` no toca una tabla que ya existe: en un
+-- despliegue vivo, la de arriba se salta entera y el CHECK se queda con la
+-- lista de acciones del dia que se creo. Sin este refresco, el primer alta de
+-- alguien de casa contra ese despliegue moriria con una violacion de
+-- restriccion en el peor momento posible -- con la cuenta de Identity Platform
+-- ya creada, es decir en el camino de la cuenta huerfana que `adminRoutes.ts`
+-- tiene que compensar.
+--
+-- El DROP ... IF EXISTS delante es lo que lo hace idempotente y converger igual
+-- en una base nueva y en una vieja, que es lo unico que este fichero promete.
+ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_action_check;
+ALTER TABLE audit_log ADD CONSTRAINT audit_log_action_check CHECK (action IN ('invite', 'revoke', 'create-user'));
 
 -- El panel consulta el rastro por sujeto ("quien invito a esta persona"), no
 -- recorriendo la tabla entera.

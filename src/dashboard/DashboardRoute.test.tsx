@@ -25,6 +25,7 @@ function fakePort(): AdminPort {
     })),
     listInvitations: vi.fn(async () => []),
     createInvitation: vi.fn(),
+    createUser: vi.fn(),
     revoke: vi.fn(async () => undefined),
   };
 }

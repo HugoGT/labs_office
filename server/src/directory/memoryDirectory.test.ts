@@ -13,6 +13,7 @@
 import { describe, expect, it } from 'vitest';
 import { InvalidInvitationError } from './invitationRules.ts';
 import { createMemoryDirectory } from './memoryDirectory.ts';
+import { InvalidUserError } from './userRules.ts';
 
 const HUGO = { uid: 'uid-hugo', email: 'Hugo@Example.com', name: 'Hugo' };
 const ANA = { uid: 'uid-ana', email: 'ana@example.com', name: 'Ana' };
@@ -353,6 +354,135 @@ describe('memoryDirectory: revocacion', () => {
 
     expect(second?.status).toBe('revoked');
     expect(directory.auditLog().filter((entry) => entry.action === 'revoke')).toHaveLength(1);
+  });
+});
+
+describe('memoryDirectory: alta de alguien de casa', () => {
+  async function withAdmin() {
+    const directory = createMemoryDirectory({ bootstrapSuperadminEmail: 'hugo@example.com' });
+    const admin = await directory.resolveOnLogin(HUGO);
+    return { directory, admin: admin! };
+  }
+
+  it('crea la fila sin caducidad y sin quien la invito', async () => {
+    // Los dos nulos son el alta entera: `expiresAt` null es "no caduca" para
+    // `decideAccess`, e `invitedBy` null es lo que la separa de un invitado.
+    const { directory, admin } = await withAdmin();
+
+    const created = await directory.createUser({
+      email: 'Nueva@Example.COM',
+      role: 'employee',
+      uid: 'uid-nueva',
+      createdById: admin.id,
+    });
+
+    expect(created).toMatchObject({
+      uid: 'uid-nueva',
+      email: 'nueva@example.com',
+      displayName: null,
+      role: 'employee',
+      status: 'active',
+      expiresAt: null,
+      invitedBy: null,
+    });
+  });
+
+  it('da de alta tambien administradores', async () => {
+    const { directory, admin } = await withAdmin();
+
+    const created = await directory.createUser({
+      email: 'jefa@example.com',
+      role: 'admin',
+      uid: 'uid-jefa',
+      createdById: admin.id,
+    });
+
+    expect(created.role).toBe('admin');
+  });
+
+  it('deja rastro en la auditoria de quien dio de alta a quien (PRD 10)', async () => {
+    const { directory, admin } = await withAdmin();
+
+    const created = await directory.createUser({
+      email: 'nueva@example.com',
+      role: 'employee',
+      uid: 'uid-nueva',
+      createdById: admin.id,
+    });
+
+    expect(directory.auditLog()).toEqual([
+      { actorId: admin.id, action: 'create-user', subjectId: created.id },
+    ]);
+  });
+
+  it('rechaza un rol que el panel no reparte', async () => {
+    const { directory, admin } = await withAdmin();
+
+    await expect(
+      directory.createUser({
+        email: 'nueva@example.com',
+        role: 'superadmin' as never,
+        uid: 'uid-nueva',
+        createdById: admin.id,
+      }),
+    ).rejects.toBeInstanceOf(InvalidUserError);
+  });
+
+  it('un rol invalido no deja ni fila ni rastro de auditoria', async () => {
+    // La validacion va ANTES de tocar nada: medio alta es peor que ninguna,
+    // porque quien administra ve un error y la fila existe igual.
+    const { directory, admin } = await withAdmin();
+
+    await expect(
+      directory.createUser({
+        email: 'nueva@example.com',
+        role: 'guest' as never,
+        uid: 'uid-nueva',
+        createdById: admin.id,
+      }),
+    ).rejects.toBeInstanceOf(InvalidUserError);
+
+    expect(await directory.findByUid('uid-nueva')).toBeNull();
+    expect(directory.auditLog()).toEqual([]);
+  });
+
+  it('la fila NO aparece en la lista de invitaciones', async () => {
+    // Es la primera de las dos garantias del `invitedBy` nulo: quien entra por
+    // aqui no es un invitado y el panel de invitaciones no tiene que ensenarlo
+    // como si lo fuera, con una caducidad que no existe.
+    const { directory, admin } = await withAdmin();
+    await directory.createUser({
+      email: 'nueva@example.com',
+      role: 'employee',
+      uid: 'uid-nueva',
+      createdById: admin.id,
+    });
+    await directory.createInvitation({
+      email: 'externo@example.com',
+      days: 7,
+      invitedById: admin.id,
+      uid: 'uid-externo',
+    });
+
+    const emails = (await directory.listInvitations()).map((row) => row.email);
+
+    expect(emails).toEqual(['externo@example.com']);
+  });
+
+  it('y NO se puede revocar desde el panel de invitaciones', async () => {
+    // La segunda garantia, y la que de verdad importa: `revoke` devuelve `null`
+    // para una fila sin `invitedBy`, asi que el panel de invitaciones no se
+    // convierte en un boton de expulsion del personal.
+    const { directory, admin } = await withAdmin();
+    const created = await directory.createUser({
+      email: 'nueva@example.com',
+      role: 'employee',
+      uid: 'uid-nueva',
+      createdById: admin.id,
+    });
+
+    expect(await directory.revoke(created.id, admin.id)).toBeNull();
+    expect((await directory.findById(created.id))?.status).toBe('active');
   });
 });
 

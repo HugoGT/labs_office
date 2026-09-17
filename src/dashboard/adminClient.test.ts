@@ -117,6 +117,52 @@ describe('createAdminClient: contrato del servidor', () => {
     expect(created.password).toBe('generada');
   });
 
+  it('POST /admin/users manda { email, role } y devuelve la credencial', async () => {
+    const fetchImpl = fetchWith(201, {
+      id: 'user-1',
+      email: 'nueva@example.com',
+      role: 'employee',
+      password: 'generada',
+    });
+
+    const created = await clientWith(fetchImpl).createUser('nueva@example.com', 'employee');
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    // Ruta propia y no `/admin/invitations`: lo que se crea aqui no es una
+    // invitacion y no aparecera nunca en esa lista.
+    expect(url).toBe('http://localhost:2567/admin/users');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(init?.body as string)).toEqual({
+      email: 'nueva@example.com',
+      role: 'employee',
+    });
+    expect(created).toEqual({
+      id: 'user-1',
+      email: 'nueva@example.com',
+      role: 'employee',
+      password: 'generada',
+    });
+  });
+
+  it('POST /admin/users manda el ID token como Bearer, igual que el resto', async () => {
+    const fetchImpl = fetchWith(201, {});
+
+    await clientWith(fetchImpl).createUser('nueva@example.com', 'admin');
+
+    expect(sentHeaders(fetchImpl).Authorization).toBe('Bearer id-token');
+  });
+
+  it('un 403 al crear un admin llega como AdminError(forbidden)', async () => {
+    // Es la respuesta del servidor cuando un admin intenta crear otro admin. La
+    // pantalla esconde esa opcion, pero eso es cosmetico: el endpoint es
+    // publico y la traduccion del 403 tiene que existir igual.
+    const fetchImpl = fetchWith(403, { error: 'forbidden' });
+
+    const code = await codeOf(clientWith(fetchImpl).createUser('nueva@example.com', 'admin'));
+
+    expect(code).toBe('forbidden');
+  });
+
   it('POST /admin/invitations/{id}/revoke escapa el identificador', async () => {
     const fetchImpl = fetchWith(200, { id: 'inv/1', status: 'revoked' });
 

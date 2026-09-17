@@ -218,3 +218,21 @@
   font-size: 14px;
   color: #9ca3af;
 }
+
+.cardTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.cardSubtitle {
+  margin: 4px 0 14px;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+/* Ancho fijo, como `.daysInput`: sin el, el desplegable se estira hasta el
+   ancho de su opcion mas larga y las dos tarjetas dejan de alinearse. */
+.roleSelect {
+  width: 160px;
+}

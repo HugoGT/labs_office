@@ -40,18 +40,46 @@ function fakeAdmin(overrides: Partial<AdminPort> = {}): AdminPort {
       password: 'Zx9-clave-generada',
       expiresAt: '2026-09-24T00:00:00.000Z',
     })),
+    createUser: vi.fn(async () => ({
+      id: 'user-1',
+      email: 'nueva@example.com',
+      role: 'employee' as const,
+      password: 'Qp7-clave-de-casa',
+    })),
     revoke: vi.fn(async () => undefined),
     ...overrides,
   };
 }
 
+/**
+ * Las dos altas tienen un campo "Correo", asi que las consultas van SIEMPRE
+ * acotadas a su tarjeta. Sin acotar, `getByLabelText(/correo/i)` encontraria
+ * dos campos y el test fallaria por ambiguo en vez de por lo que prueba.
+ */
+function tarjeta(nombre: RegExp) {
+  return screen.getByRole('region', { name: nombre });
+}
+
 /** Rellena el formulario de invitacion y lo envia. */
 async function invitar(user: ReturnType<typeof userEvent.setup>, email: string, days: string) {
-  await user.type(screen.getByLabelText(/correo/i), email);
-  const dias = screen.getByLabelText(/días/i);
+  const form = within(tarjeta(/nueva invitación/i));
+  await user.type(form.getByLabelText(/correo/i), email);
+  const dias = form.getByLabelText(/días/i);
   await user.clear(dias);
   await user.type(dias, days);
-  await user.click(screen.getByRole('button', { name: /invitar/i }));
+  await user.click(form.getByRole('button', { name: /invitar/i }));
+}
+
+/** Rellena el alta de alguien de casa y la envia. */
+async function darDeAlta(
+  user: ReturnType<typeof userEvent.setup>,
+  email: string,
+  rol?: RegExp,
+) {
+  const form = within(tarjeta(/nuevo usuario/i));
+  await user.type(form.getByLabelText(/correo/i), email);
+  if (rol) await user.selectOptions(form.getByLabelText(/rol/i), form.getByRole('option', { name: rol }));
+  await user.click(form.getByRole('button', { name: /crear usuario/i }));
 }
 
 describe('DashboardScreen: quien puede mirar', () => {
@@ -221,10 +249,11 @@ describe('DashboardScreen: invitar', () => {
   it('91 dias saltandose la validacion nativa tampoco llega, y se explica', async () => {
     const user = userEvent.setup();
     const admin = fakeAdmin();
-    const { container } = render(<DashboardScreen admin={admin} />);
+    render(<DashboardScreen admin={admin} />);
     await screen.findByRole('table');
-    await user.type(screen.getByLabelText(/correo/i), 'nuevo@example.com');
-    const dias = screen.getByLabelText(/días/i);
+    const form = within(tarjeta(/nueva invitación/i));
+    await user.type(form.getByLabelText(/correo/i), 'nuevo@example.com');
+    const dias = form.getByLabelText(/días/i);
     await user.clear(dias);
     await user.type(dias, '91');
 
@@ -232,7 +261,7 @@ describe('DashboardScreen: invitar', () => {
     // quitando el atributo desde las herramientas del navegador: la guarda de
     // JavaScript existe para ese caso, y el servidor para cuando tambien se
     // salta esta.
-    fireEvent.submit(container.querySelector('form') as HTMLFormElement);
+    fireEvent.submit(tarjeta(/nueva invitación/i).querySelector('form') as HTMLFormElement);
 
     expect(admin.createInvitation).not.toHaveBeenCalled();
     expect(await screen.findByRole('alert')).toHaveTextContent(/1 y 90/);
@@ -334,5 +363,139 @@ describe('DashboardScreen: la contrasena generada', () => {
       expect(escrito).not.toContain('Zx9-clave-generada');
       spy.mockRestore();
     }
+  });
+});
+
+describe('DashboardScreen: dar de alta a alguien de casa', () => {
+  const SUPER = { ...ADMIN, role: 'superadmin' as const };
+
+  it('manda al puerto el correo sin espacios y el rol elegido', async () => {
+    const user = userEvent.setup();
+    const admin = fakeAdmin();
+    render(<DashboardScreen admin={admin} />);
+    await screen.findByRole('table');
+
+    await darDeAlta(user, '  nueva@example.com  ');
+
+    expect(admin.createUser).toHaveBeenCalledWith('nueva@example.com', 'employee');
+  });
+
+  it('un superadmin puede elegir el rol de administrador', async () => {
+    const user = userEvent.setup();
+    const admin = fakeAdmin({ session: vi.fn(async () => SUPER) });
+    render(<DashboardScreen admin={admin} />);
+    await screen.findByRole('table');
+
+    await darDeAlta(user, 'jefa@example.com', /administrador/i);
+
+    expect(admin.createUser).toHaveBeenCalledWith('jefa@example.com', 'admin');
+  });
+
+  it('a un admin no se le ofrece crear administradores', async () => {
+    // Esconderlo es COSMETICO: el endpoint es publico y cualquiera puede pedir
+    // `role: 'admin'` con curl. La guarda de verdad es `canAssignRole` en el
+    // servidor, que responde 403. Esto solo evita ensenar una opcion que a esta
+    // persona le va a dar error siempre.
+    render(<DashboardScreen admin={fakeAdmin()} />);
+    await screen.findByRole('table');
+
+    const form = within(tarjeta(/nuevo usuario/i));
+    expect(form.getByRole('option', { name: /empleado/i })).toBeInTheDocument();
+    expect(form.queryByRole('option', { name: /administrador/i })).not.toBeInTheDocument();
+  });
+
+  it('NO relee la lista de invitaciones: quien entra por aqui no sale en ella', async () => {
+    const user = userEvent.setup();
+    const admin = fakeAdmin();
+    render(<DashboardScreen admin={admin} />);
+    await screen.findByRole('table');
+
+    await darDeAlta(user, 'nueva@example.com');
+
+    await screen.findByText('Qp7-clave-de-casa');
+    expect(admin.listInvitations).toHaveBeenCalledTimes(1);
+  });
+
+  it('un fallo al dar de alta no pinta el error dentro del formulario de invitacion', async () => {
+    // Dos flujos distintos con dos estados distintos: un error del alta dentro
+    // del formulario de invitar diria que fallo algo que ni se intento.
+    const user = userEvent.setup();
+    const admin = fakeAdmin({
+      createUser: vi.fn(async () => {
+        throw new AdminError('conflict');
+      }),
+    });
+    render(<DashboardScreen admin={admin} />);
+    await screen.findByRole('table');
+
+    await darDeAlta(user, 'repetida@example.com');
+
+    expect(await within(tarjeta(/nuevo usuario/i)).findByRole('alert')).toHaveTextContent(/ya/i);
+    expect(within(tarjeta(/nueva invitación/i)).queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('tras un fallo los campos se conservan, para corregir en vez de reescribir', async () => {
+    const user = userEvent.setup();
+    const admin = fakeAdmin({
+      createUser: vi.fn(async () => {
+        throw new AdminError('invalid-request');
+      }),
+    });
+    render(<DashboardScreen admin={admin} />);
+    await screen.findByRole('table');
+
+    await darDeAlta(user, 'nueva@example.com');
+
+    const form = within(tarjeta(/nuevo usuario/i));
+    expect(await form.findByRole('alert')).toBeInTheDocument();
+    expect(form.getByLabelText(/correo/i)).toHaveValue('nueva@example.com');
+  });
+
+  it('un fallo al invitar no pinta el error dentro del alta de usuario', async () => {
+    const user = userEvent.setup();
+    const admin = fakeAdmin({
+      createInvitation: vi.fn(async () => {
+        throw new AdminError('conflict');
+      }),
+    });
+    render(<DashboardScreen admin={admin} />);
+    await screen.findByRole('table');
+
+    await invitar(user, 'repetido@example.com', '30');
+
+    expect(await within(tarjeta(/nueva invitación/i)).findByRole('alert')).toBeInTheDocument();
+    expect(within(tarjeta(/nuevo usuario/i)).queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('ensena la contrasena generada y dice que el acceso NO caduca', async () => {
+    // La misma regla de entrega unica que en la invitacion, con la diferencia
+    // que define este flujo: aqui no hay fecha de vencimiento que anunciar, y
+    // callarla dejaria a quien administra sin saber cual de las dos altas hizo.
+    const user = userEvent.setup();
+    render(<DashboardScreen admin={fakeAdmin()} />);
+    await screen.findByRole('table');
+
+    await darDeAlta(user, 'nueva@example.com');
+
+    expect(await screen.findByText('Qp7-clave-de-casa')).toBeInTheDocument();
+    // Acotado al panel de credenciales: la tarjeta del alta ya explica que el
+    // acceso no caduca, y sin acotar el test pasaria por ese texto en vez de
+    // por el del panel.
+    const panel = within(tarjeta(/credenciales/i));
+    expect(panel.getByText(/no caduca/i)).toBeInTheDocument();
+    expect(panel.getByText(/no se volverá a mostrar/i)).toBeInTheDocument();
+  });
+
+  it('el panel de la invitacion sigue anunciando su fecha de vencimiento', async () => {
+    // El mismo componente sirve a los dos flujos; esto afirma que generalizarlo
+    // no borro la unica linea que distingue un acceso temporal de uno que no lo
+    // es.
+    const user = userEvent.setup();
+    render(<DashboardScreen admin={fakeAdmin()} />);
+    await screen.findByRole('table');
+
+    await invitar(user, 'nuevo@example.com', '30');
+
+    expect(await screen.findByText(/caduca el 24\/09\/2026/i)).toBeInTheDocument();
   });
 });
