@@ -1,10 +1,11 @@
 import { act, renderHook } from '@testing-library/react';
 import { Room } from 'livekit-client';
 import { describe, expect, it, vi } from 'vitest';
+import type { AttachableTrack } from '../game/attachableTrack';
 import { createOfficeBridge } from '../game/officeBridge';
 import type { PresenceStatus } from '../game/officeProtocol';
 import type { LivekitConfig } from '../game/livekitEndpoint';
-import type { LivekitRoomConnection } from '../game/livekitRoom';
+import type { ConnectLivekitRoomOptions, LivekitRoomConnection } from '../game/livekitRoom';
 import type { LivekitTokenResponse } from '../game/livekitTokenClient';
 import { useProximityAudio } from './useProximityAudio';
 
@@ -12,7 +13,8 @@ const CONFIG: LivekitConfig = { tokenUrl: 'http://localhost:2567/livekit/token',
 
 function fakeConnection(overrides: Partial<LivekitRoomConnection> = {}): LivekitRoomConnection {
   return {
-    setDesiredPeers: vi.fn(),
+    setDesiredAudioPeers: vi.fn(),
+    setDesiredVideoPeers: vi.fn(),
     setMicrophoneEnabled: vi.fn(async (enabled: boolean) => enabled),
     setCameraEnabled: vi.fn(async (enabled: boolean) => enabled),
     startAudio: vi.fn(async () => undefined),
@@ -23,6 +25,19 @@ function fakeConnection(overrides: Partial<LivekitRoomConnection> = {}): Livekit
 
 function fakeTokenResponse(): LivekitTokenResponse {
   return { token: 'jwt', url: 'ws://localhost:7880', identity: 'yo', room: 'office-livekit' };
+}
+
+/** Construye `voice.peers` a partir de una lista simple de sessionIds. */
+function peersOf(sessionIds: string[]): { sessionId: string; name: string }[] {
+  return sessionIds.map((sessionId) => ({ sessionId, name: sessionId }));
+}
+
+function fakeAttachableTrack(): AttachableTrack {
+  return {
+    kind: 'video',
+    attach: () => document.createElement('video'),
+    detach: () => [],
+  };
 }
 
 describe('useProximityAudio', () => {
@@ -58,7 +73,7 @@ describe('useProximityAudio', () => {
     renderHook(() => useProximityAudio(bridge, { config: null, status: 'g', connect, fetchToken }));
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', sessionIds: [], room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
     });
 
     expect(fetchToken).not.toHaveBeenCalled();
@@ -76,7 +91,7 @@ describe('useProximityAudio', () => {
     );
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', sessionIds: [], room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
     });
 
     expect(fetchToken).toHaveBeenCalledTimes(1);
@@ -89,12 +104,140 @@ describe('useProximityAudio', () => {
     expect(result.current.audioAvailable).toBe(true);
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', sessionIds: ['ana'], room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), room: null });
     });
 
     // Mismo selfSessionId: NO reconecta, solo reenvia el conjunto deseado.
     expect(connect).toHaveBeenCalledTimes(1);
-    expect(connection.setDesiredPeers).toHaveBeenCalledWith(['ana']);
+    expect(connection.setDesiredAudioPeers).toHaveBeenCalledWith(['ana']);
+  });
+
+  it('reenvia el conjunto de VIDEO por separado, aplicando la regla mas angosta (issue #17)', async () => {
+    const bridge = createOfficeBridge();
+    const connection = fakeConnection();
+    const connect = vi.fn(async () => connection);
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+    });
+
+    // Piso abierto (room null): audio ya deseado vacio, y video TAMBIEN vacio.
+    expect(connection.setDesiredVideoPeers).toHaveBeenLastCalledWith([]);
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), room: null });
+    });
+
+    // Piso abierto con un par audible: audio lo pide, video NUNCA (D8/#17).
+    expect(connection.setDesiredAudioPeers).toHaveBeenLastCalledWith(['ana']);
+    expect(connection.setDesiredVideoPeers).toHaveBeenLastCalledWith([]);
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), room: 'Sala de Juntas' });
+    });
+
+    // Compartiendo sala: video pide exactamente los mismos ids que el audio.
+    expect(connection.setDesiredAudioPeers).toHaveBeenLastCalledWith(['ana']);
+    expect(connection.setDesiredVideoPeers).toHaveBeenLastCalledWith(['ana']);
+  });
+
+  describe('video subscrito y habla real llegan al hook (issue #17, D3/D7)', () => {
+    /** Conecta y captura las opciones (incluidos los callbacks) con las que el hook llamo a `connect`. */
+    async function connectAndCaptureCallbacks() {
+      const bridge = createOfficeBridge();
+      const connection = fakeConnection();
+      let captured: ConnectLivekitRoomOptions | undefined;
+      const connect = vi.fn(async (opts: ConnectLivekitRoomOptions) => {
+        captured = opts;
+        return connection;
+      });
+      const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+      const rendered = renderHook(() =>
+        useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+      );
+
+      await act(async () => {
+        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+      });
+
+      return { ...rendered, bridge, connection, callbacks: captured! };
+    }
+
+    it('empieza sin pistas, sin hablantes y sin camara local', () => {
+      const bridge = createOfficeBridge();
+      const { result } = renderHook(() =>
+        useProximityAudio(bridge, { config: CONFIG, status: 'g', connect: vi.fn(), fetchToken: vi.fn() }),
+      );
+
+      expect(result.current.videoTracks.size).toBe(0);
+      expect(result.current.speakers.size).toBe(0);
+      expect(result.current.localVideoTrack).toBeNull();
+    });
+
+    it('onVideoTrackSubscribed agrega el peer a videoTracks, indexado por sessionId', async () => {
+      const { result, callbacks } = await connectAndCaptureCallbacks();
+      const track = fakeAttachableTrack();
+
+      await act(async () => callbacks.onVideoTrackSubscribed?.('ana', track));
+
+      expect(result.current.videoTracks.get('ana')).toBe(track);
+    });
+
+    it('onVideoTrackUnsubscribed retira exactamente ese peer, sin tocar a los demas', async () => {
+      const { result, callbacks } = await connectAndCaptureCallbacks();
+      const anaTrack = fakeAttachableTrack();
+      const beaTrack = fakeAttachableTrack();
+
+      await act(async () => callbacks.onVideoTrackSubscribed?.('ana', anaTrack));
+      await act(async () => callbacks.onVideoTrackSubscribed?.('bea', beaTrack));
+      await act(async () => callbacks.onVideoTrackUnsubscribed?.('ana', anaTrack));
+
+      expect(result.current.videoTracks.has('ana')).toBe(false);
+      expect(result.current.videoTracks.get('bea')).toBe(beaTrack);
+    });
+
+    it('onLocalVideoTrackChanged fija y limpia la camara propia', async () => {
+      const { result, callbacks } = await connectAndCaptureCallbacks();
+      const track = fakeAttachableTrack();
+
+      await act(async () => callbacks.onLocalVideoTrackChanged?.(track));
+      expect(result.current.localVideoTrack).toBe(track);
+
+      await act(async () => callbacks.onLocalVideoTrackChanged?.(null));
+      expect(result.current.localVideoTrack).toBeNull();
+    });
+
+    it('onActiveSpeakersChanged reemplaza el conjunto de hablantes con las identidades reportadas', async () => {
+      const { result, callbacks } = await connectAndCaptureCallbacks();
+
+      await act(async () => callbacks.onActiveSpeakersChanged?.(['ana', 'yo']));
+      expect(result.current.speakers.has('ana')).toBe(true);
+      expect(result.current.speakers.has('yo')).toBe(true);
+
+      await act(async () => callbacks.onActiveSpeakersChanged?.([]));
+      expect(result.current.speakers.size).toBe(0);
+    });
+
+    it('desconectar limpia video, hablantes y camara local: nada queda colgado tras salir', async () => {
+      const { result, callbacks, bridge } = await connectAndCaptureCallbacks();
+      await act(async () => callbacks.onVideoTrackSubscribed?.('ana', fakeAttachableTrack()));
+      await act(async () => callbacks.onLocalVideoTrackChanged?.(fakeAttachableTrack()));
+      await act(async () => callbacks.onActiveSpeakersChanged?.(['ana']));
+
+      await act(async () => {
+        bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), room: null });
+      });
+
+      expect(result.current.videoTracks.size).toBe(0);
+      expect(result.current.speakers.size).toBe(0);
+      expect(result.current.localVideoTrack).toBeNull();
+    });
   });
 
   it('el rechazo de connect deja audioAvailable en false, sin lanzar y sin reintentar', async () => {
@@ -110,7 +253,7 @@ describe('useProximityAudio', () => {
 
     await expect(
       act(async () => {
-        bridge.emit('voice', { selfSessionId: 'yo', sessionIds: [], room: null });
+        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
       }),
     ).resolves.not.toThrow();
 
@@ -118,7 +261,7 @@ describe('useProximityAudio', () => {
 
     // Un segundo evento con el MISMO selfSessionId no reintenta la conexion.
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', sessionIds: ['ana'], room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), room: null });
     });
     expect(connect).toHaveBeenCalledTimes(1);
   });
@@ -134,12 +277,12 @@ describe('useProximityAudio', () => {
     );
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', sessionIds: [], room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
     });
     expect(result.current.audioAvailable).toBe(true);
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: null, sessionIds: [], room: null });
+      bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), room: null });
     });
 
     expect(connection.disconnect).toHaveBeenCalledTimes(1);
@@ -157,7 +300,7 @@ describe('useProximityAudio', () => {
     );
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', sessionIds: [], room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
     });
 
     unmount();
@@ -176,7 +319,7 @@ describe('useProximityAudio', () => {
     );
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', sessionIds: [], room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
     });
 
     await act(async () => {
@@ -198,7 +341,7 @@ describe('useProximityAudio', () => {
     );
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', sessionIds: [], room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
     });
 
     await act(async () => {
@@ -225,7 +368,7 @@ describe('useProximityAudio', () => {
       );
 
       await act(async () => {
-        bridge.emit('voice', { selfSessionId: 'yo', sessionIds: [], room: null });
+        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
       });
 
       return { ...rendered, bridge, connection, notify: notify! };
@@ -272,7 +415,7 @@ describe('useProximityAudio', () => {
       await act(async () => notify(false));
 
       await act(async () => {
-        bridge.emit('voice', { selfSessionId: null, sessionIds: [], room: null });
+        bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), room: null });
       });
 
       expect(result.current.audioBlocked).toBe(false);
@@ -282,7 +425,7 @@ describe('useProximityAudio', () => {
       const { result, bridge, notify } = await connectAndCapture();
 
       await act(async () => {
-        bridge.emit('voice', { selfSessionId: null, sessionIds: [], room: null });
+        bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), room: null });
       });
       await act(async () => notify(false));
 
@@ -319,7 +462,7 @@ describe('useProximityAudio', () => {
       );
 
       await act(async () => {
-        bridge.emit('voice', { selfSessionId: 'yo', sessionIds: [], room: null });
+        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
       });
 
       return { ...rendered, bridge, connection, connect };
@@ -424,7 +567,7 @@ describe('useProximityAudio: sesion autenticada (#8)', () => {
     );
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', sessionIds: [], room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
     });
 
     // El servidor cruza el token con la sesion de Colyseus (`forbidden-session`):
@@ -453,7 +596,7 @@ describe('useProximityAudio: sesion autenticada (#8)', () => {
     );
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', sessionIds: [], room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
     });
 
     expect(fetchToken).toHaveBeenCalledWith({
@@ -485,11 +628,65 @@ describe('useProximityAudio: sesion autenticada (#8)', () => {
 
     await expect(
       act(async () => {
-        bridge.emit('voice', { selfSessionId: 'yo', sessionIds: [], room: null });
+        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
       }),
     ).resolves.not.toThrow();
 
     expect(result.current.audioAvailable).toBe(false);
     expect(connect).not.toHaveBeenCalled();
+  });
+});
+
+describe('useProximityAudio: el desmontaje no puede realimentar al propio efecto', () => {
+  /**
+   * `teardown()` corre tambien en la limpieza del efecto de conexion, cuyas
+   * dependencias incluyen `session` (#8). Si limpiar emitiera colecciones
+   * nuevas aun estando ya vacias, cada limpieza provocaria un render, ese
+   * render traeria una `session` con identidad nueva y el efecto volveria a
+   * limpiarse: bucle infinito que revienta el proceso por memoria.
+   */
+  it('limpiar con todo ya vacio conserva la identidad de las colecciones', async () => {
+    const bridge = createOfficeBridge();
+    const connect = vi.fn(async () => fakeConnection());
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+
+    const videoTracks = result.current.videoTracks;
+    const speakers = result.current.speakers;
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), room: null });
+    });
+
+    expect(result.current.videoTracks).toBe(videoTracks);
+    expect(result.current.speakers).toBe(speakers);
+  });
+
+  it('una sesion con identidad nueva en cada render no reconecta en bucle', async () => {
+    const bridge = createOfficeBridge();
+    const connect = vi.fn(async () => fakeConnection());
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+    const getIdToken = async () => 'id-token';
+
+    renderHook(() =>
+      // La identidad cambia en cada render a proposito: es lo que haria un
+      // llamador que construya la sesion en linea.
+      useProximityAudio(bridge, {
+        config: CONFIG,
+        status: 'g',
+        session: { displayName: 'Ana', getIdToken },
+        connect,
+        fetchToken,
+      }),
+    );
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+    });
+
+    expect(fetchToken.mock.calls.length).toBeLessThanOrEqual(2);
   });
 });

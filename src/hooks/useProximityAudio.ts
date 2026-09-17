@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OfficeSession } from '../auth/authPort';
+import type { AttachableTrack } from '../game/attachableTrack';
 import type { LivekitConfig } from '../game/livekitEndpoint';
-import { connectLivekitRoom, type LivekitRoomConnection } from '../game/livekitRoom';
+import {
+  connectLivekitRoom,
+  type ConnectLivekitRoomOptions,
+  type LivekitRoomConnection,
+} from '../game/livekitRoom';
 import {
   fetchLivekitToken,
   type LivekitTokenRequest,
@@ -9,6 +14,7 @@ import {
 } from '../game/livekitTokenClient';
 import type { OfficeBridge } from '../game/officeBridge';
 import { DO_NOT_DISTURB, type PresenceStatus } from '../game/officeProtocol';
+import { videoPeers } from '../game/proximityVideo';
 
 /**
  * Conduce la sala de LiveKit a partir del evento `voice` del puente (D3).
@@ -32,11 +38,7 @@ export interface UseProximityAudioOptions {
    */
   session?: OfficeSession | null;
   /** Inyectable para pruebas; por defecto la implementacion real. */
-  connect?: (opts: {
-    url: string;
-    token: string;
-    onAudioPlaybackChanged?: (canPlayback: boolean) => void;
-  }) => Promise<LivekitRoomConnection>;
+  connect?: (opts: ConnectLivekitRoomOptions) => Promise<LivekitRoomConnection>;
   fetchToken?: (request: LivekitTokenRequest) => Promise<LivekitTokenResponse>;
 }
 
@@ -57,6 +59,12 @@ export interface UseProximityAudioResult {
   toggleCam: () => void;
   /** Gesto de usuario que levanta el bloqueo de autoplay. */
   unblockAudio: () => void;
+  /** Video de peers suscritos, indexado por sessionId (issue #17, D3). React (no este hook) lo adjunta al DOM. */
+  videoTracks: ReadonlyMap<string, AttachableTrack>;
+  /** Identidades hablando AHORA MISMO segun LiveKit (D7). Nunca deriva de `micOn`. */
+  speakers: ReadonlySet<string>;
+  /** Camara propia, o `null` si esta apagada/no publicada. */
+  localVideoTrack: AttachableTrack | null;
 }
 
 export function useProximityAudio(
@@ -74,6 +82,9 @@ export function useProximityAudio(
   const [camOn, setCamOn] = useState(false);
   const [audioAvailable, setAudioAvailable] = useState(false);
   const [audioBlocked, setAudioBlocked] = useState(false);
+  const [videoTracks, setVideoTracks] = useState<ReadonlyMap<string, AttachableTrack>>(new Map());
+  const [speakers, setSpeakers] = useState<ReadonlySet<string>>(new Set());
+  const [localVideoTrack, setLocalVideoTrack] = useState<AttachableTrack | null>(null);
   const connectionRef = useRef<LivekitRoomConnection | null>(null);
   /** Sesion actualmente conectada o en vuelo de conexion; evita reconectar por cada tick. */
   const sessionRef = useRef<string | null>(null);
@@ -87,6 +98,16 @@ export function useProximityAudio(
       sessionRef.current = null;
       setAudioAvailable(false);
       setAudioBlocked(false);
+      // Ninguna pista, hablante o camara sobrevive a la sala que las reporto:
+      // sin esto, salir de una sala dejaria el ultimo estado colgado en React.
+      // Estando ya vacias se devuelve la MISMA coleccion, no una nueva: este
+      // `teardown` tambien corre en la limpieza del efecto de conexion, que
+      // depende de `session` (#8). Emitir una coleccion nueva provocaria un
+      // render, ese render traeria una `session` con identidad nueva y el
+      // efecto volveria a limpiarse -- bucle infinito.
+      setVideoTracks((current) => (current.size === 0 ? current : new Map()));
+      setSpeakers((current) => (current.size === 0 ? current : new Set()));
+      setLocalVideoTrack(null);
       if (connection) await connection.disconnect();
     }
 
@@ -99,14 +120,20 @@ export function useProximityAudio(
       // D6: sin configuracion (Colyseus abajo) nunca se intenta LiveKit.
       if (config === null) return;
 
+      const audibleSessionIds = payload.peers.map((peer) => peer.sessionId);
+
       if (sessionRef.current === payload.selfSessionId) {
-        // Misma sesion: solo reenvia el conjunto deseado, no reconecta.
-        connectionRef.current?.setDesiredPeers(payload.sessionIds);
+        // Misma sesion: solo reenvia los conjuntos deseados, no reconecta.
+        connectionRef.current?.setDesiredAudioPeers(audibleSessionIds);
+        connectionRef.current?.setDesiredVideoPeers(
+          videoPeers({ room: payload.room, audibleSessionIds }),
+        );
         return;
       }
 
       const pendingSessionId = payload.selfSessionId;
-      const pendingSessionIds = payload.sessionIds;
+      const pendingSessionIds = audibleSessionIds;
+      const pendingRoom = payload.room;
       sessionRef.current = pendingSessionId;
 
       void (async () => {
@@ -129,6 +156,29 @@ export function useProximityAudio(
               if (sessionRef.current !== pendingSessionId) return;
               setAudioBlocked(!canPlayback);
             },
+            // Misma guarda que arriba (D6 de #18): un aviso tardio de una
+            // sesion ya reemplazada no debe corromper el estado actual.
+            onVideoTrackSubscribed: (sessionId, track) => {
+              if (sessionRef.current !== pendingSessionId) return;
+              setVideoTracks((current) => new Map(current).set(sessionId, track));
+            },
+            onVideoTrackUnsubscribed: (sessionId) => {
+              if (sessionRef.current !== pendingSessionId) return;
+              setVideoTracks((current) => {
+                if (!current.has(sessionId)) return current;
+                const next = new Map(current);
+                next.delete(sessionId);
+                return next;
+              });
+            },
+            onLocalVideoTrackChanged: (track) => {
+              if (sessionRef.current !== pendingSessionId) return;
+              setLocalVideoTrack(track);
+            },
+            onActiveSpeakersChanged: (identities) => {
+              if (sessionRef.current !== pendingSessionId) return;
+              setSpeakers(new Set(identities));
+            },
           });
 
           // La sesion pudo cambiar (o el hook desmontarse) mientras el
@@ -141,7 +191,10 @@ export function useProximityAudio(
 
           connectionRef.current = connection;
           setAudioAvailable(true);
-          connection.setDesiredPeers(pendingSessionIds);
+          connection.setDesiredAudioPeers(pendingSessionIds);
+          connection.setDesiredVideoPeers(
+            videoPeers({ room: pendingRoom, audibleSessionIds: pendingSessionIds }),
+          );
         } catch {
           // Rechazo de connect(), de la peticion del token o de la propia
           // sesion (p.ej. navegador sin soporte, servidor caido, token
@@ -213,5 +266,17 @@ export function useProximityAudio(
     })();
   }, [camOn, dnd]);
 
-  return { micOn, camOn, audioAvailable, audioBlocked, dnd, toggleMic, toggleCam, unblockAudio };
+  return {
+    micOn,
+    camOn,
+    audioAvailable,
+    audioBlocked,
+    dnd,
+    toggleMic,
+    toggleCam,
+    unblockAudio,
+    videoTracks,
+    speakers,
+    localVideoTrack,
+  };
 }

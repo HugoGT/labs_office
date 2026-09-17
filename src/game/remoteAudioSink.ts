@@ -17,12 +17,7 @@
  * en la pagina.
  */
 
-/** Lo minimo que este sink necesita de una pista; `RemoteTrack` lo cumple. */
-export interface AttachableTrack {
-  readonly kind: string;
-  attach(): HTMLMediaElement;
-  detach(): HTMLMediaElement[];
-}
+import type { AttachableTrack } from './attachableTrack';
 
 export interface RemoteAudioSink {
   /** Adjunta y reproduce. Idempotente: la misma pista nunca suena dos veces. */

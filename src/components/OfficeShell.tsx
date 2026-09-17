@@ -12,6 +12,7 @@ import { ContextMenu, type NpcMenuAction } from './ContextMenu';
 import { GameCanvas } from './GameCanvas';
 import { RecBadge } from './RecBadge';
 import { Toast } from './Toast';
+import { VideoTiles } from './VideoTiles';
 
 /** Duracion del toast antes de auto-ocultarse (`app.js:525`, `ms || 3200`). */
 const TOAST_TIMEOUT_MS = 3200;
@@ -37,7 +38,7 @@ export interface OfficeShellProps {
  */
 export function OfficeShell({ session = null }: OfficeShellProps) {
   const [bridge] = useState(createOfficeBridge);
-  const { room, nearby, menu, presence, closeMenu } = useOfficeBridge(bridge);
+  const { room, menu, presence, closeMenu } = useOfficeBridge(bridge);
   // Se resuelve una sola vez: cambiarlo remontaria Phaser entero.
   const [endpoint] = useState(() =>
     resolveOfficeEndpoint({
@@ -61,8 +62,27 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
    * escena confirmase cada cambio para redibujarse.
    */
   const [status, setStatus] = useState<PresenceStatus>(DEFAULT_STATUS);
-  const { micOn, camOn, audioAvailable, audioBlocked, toggleMic, toggleCam, unblockAudio } =
-    useProximityAudio(bridge, { config: livekitConfig, status, session });
+  const {
+    micOn,
+    camOn,
+    audioAvailable,
+    audioBlocked,
+    speakers,
+    toggleMic,
+    toggleCam,
+    unblockAudio,
+    videoTracks,
+    localVideoTrack,
+  } = useProximityAudio(bridge, { config: livekitConfig, status, session });
+
+  /**
+   * Mismo patron que `setStatus` (D7): React es el dueno del `Set` de
+   * hablantes (LiveKit se lo entrega via `useProximityAudio`) y la escena solo
+   * lo sigue por comando, para encender el anillo de los avatares remotos.
+   */
+  useEffect(() => {
+    bridge.emitCommand('speakers', { sessionIds: [...speakers] });
+  }, [bridge, speakers]);
 
   function handleChangeStatus(next: PresenceStatus): void {
     setStatus(next);
@@ -153,6 +173,12 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
   return (
     <div id="office-shell">
       <GameCanvas bridge={bridge} endpoint={endpoint} session={session} />
+      <VideoTiles
+        bridge={bridge}
+        videoTracks={videoTracks}
+        speakers={speakers}
+        localVideoTrack={localVideoTrack}
+      />
       <RecBadge visible={recording} />
       <ContextMenu menu={menu} onAction={handleMenuAction} onClose={closeMenu} />
       <BottomBar
@@ -161,7 +187,6 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
         audioAvailable={audioAvailable}
         recording={recording}
         room={room}
-        nearby={nearby}
         presence={presence}
         status={status}
         onChangeStatus={handleChangeStatus}

@@ -11,10 +11,10 @@
  * desmonta nada referencia el puente y queda para el recolector de basura.
  */
 
+import { createAnchorChannel, type AnchorChannel } from './anchorChannel';
 import type { PresenceStatus } from './officeProtocol';
 
 export interface OfficeEventMap {
-  nearby: { names: string[] };
   room: { room: string | null };
   npcmenu: {
     id: number;
@@ -32,13 +32,27 @@ export interface OfficeEventMap {
    */
   presence: { online: boolean; peers: number };
   /**
-   * Instantanea completa de la capa de audio (D3): quien soy, a quien
+   * Instantanea completa de la capa de audio/video (D3): quien soy, a quien
    * escucho y en que sala estoy. Un solo evento aditivo en vez de dos
    * (sesion + audibles) para que quien lo consuma nunca actue sobre un par
    * a medio actualizar (sala nueva, pares viejos). `selfSessionId: null`
    * significa "desconectate de LiveKit"; no null dispara pedir un token.
+   * `peers` trae el nombre de cada audible (issue #17): la etiqueta del tile
+   * lo resuelve de aqui, sin reintroducir el contrato de los chips `nearby`.
    */
-  voice: { selfSessionId: string | null; sessionIds: string[]; room: string | null };
+  voice: {
+    selfSessionId: string | null;
+    selfName: string;
+    peers: readonly { sessionId: string; name: string }[];
+    room: string | null;
+  };
+  /**
+   * Retratos fieles exportados una sola vez desde `create()` (issue #17, D1):
+   * la clave base (`av0`..`av9`, `avP`) a su textura real codificada en base64
+   * (`scene.textures.getBase64`). Es un evento discreto, no el canal continuo
+   * de `anchors` -- el contenido no cambia cuadro a cuadro.
+   */
+  portraits: { byKey: Record<string, string> };
 }
 
 export interface OfficeCommandMap {
@@ -58,6 +72,14 @@ export interface OfficeCommandMap {
    * the type here does not add any production-visible runtime surface.
    */
   teleportToTile: { tx: number; ty: number };
+  /**
+   * Habla real (issue #17, D7): React es dueno del `Set` de hablantes (lo
+   * deriva de `RoomEvent.ActiveSpeakersChanged`, nunca de `micOn`) y la escena
+   * lo sigue por comando, mismo patron que `setStatus`. Solo enciende el
+   * anillo de `RemoteAvatarContainer`s -- el jugador local no tiene por que
+   * ver su propio anillo encenderse en el canvas.
+   */
+  speakers: { sessionIds: string[] };
 }
 
 export interface OfficeBridge {
@@ -76,11 +98,18 @@ export interface OfficeBridge {
   emitCommand<K extends keyof OfficeCommandMap>(type: K, payload: OfficeCommandMap[K]): void;
   teleportTo(npcId: number): void;
   callNpc(npcId: number): void;
+  /**
+   * Canal continuo posicion-por-cuadro (issue #17, D4): deliberadamente NO es
+   * un `EventTarget`. La escena escribe cada `update()`; el overlay de tiles
+   * lo lee desde un unico `requestAnimationFrame`, nunca via `on`/`emit`.
+   */
+  readonly anchors: AnchorChannel;
 }
 
 export function createOfficeBridge(): OfficeBridge {
   const events = new EventTarget();
   const commands = new EventTarget();
+  const anchors = createAnchorChannel();
 
   function subscribe<T>(target: EventTarget, type: string, handler: (payload: T) => void): () => void {
     const controller = new AbortController();
@@ -116,5 +145,6 @@ export function createOfficeBridge(): OfficeBridge {
     callNpc(npcId) {
       dispatchCommand('callNpc', { npcId });
     },
+    anchors,
   };
 }

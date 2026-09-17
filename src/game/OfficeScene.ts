@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import type { AnchorWriter } from './anchorChannel';
 import { preloadOfficeAssets } from './assets';
 import {
   setCharacterFacing,
@@ -30,7 +31,7 @@ import { createPhaserAvatarSink, type RemoteAvatarContainer } from './remoteAvat
 import { detectRoom, isSpeaking, nearbyIndices, nearbyKey, type Point } from './proximity';
 import { audiblePeers, type AudioPeer } from './proximityAudio';
 import { buildTerrainGrid, findFreeAdjacentTile, isBlocked, type TerrainGrid } from './terrainGrid';
-import { createOfficeTextures } from './textures';
+import { AVATAR_KEYS, PLAYER_TEXTURE, avatarTextureKey, createOfficeTextures } from './textures';
 
 /** Clave de la escena (D5): reemplaza `BootScene`, que se retira en este mismo cambio. */
 export const OFFICE_SCENE_KEY = 'office';
@@ -83,15 +84,17 @@ export class OfficeScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WasdKeys;
   private mmMarker?: Phaser.GameObjects.Arc;
-  private lastNearbyKey = '';
   /** Clave de dedupe de "voice" (D3): incluye sala y `selfSessionId`, no solo los pares. */
   private lastVoiceKey = '';
   private currentRoom: string | null = null;
   private unsubscribeTeleport?: () => void;
   private unsubscribeCallNpc?: () => void;
   private unsubscribeSetStatus?: () => void;
+  private unsubscribeSpeakers?: () => void;
   /** Solo se asigna bajo `__OFFICE_E2E__` (D4): produccion nunca la toca. */
   private unsubscribeTeleportToTile?: () => void;
+  /** Escritor del canal de anclas (issue #17, D4); abierto en `create()`, cerrado en SHUTDOWN. */
+  private anchorWriter?: AnchorWriter;
 
   private readonly options: OfficeSceneOptions;
   private remotes?: RemoteAvatarRegistry<RemoteAvatarContainer>;
@@ -115,6 +118,11 @@ export class OfficeScene extends Phaser.Scene {
 
   create(): void {
     createOfficeTextures(this);
+    // Una sola vez, no por sesion: la fidelidad exige la textura real, no un
+    // redibujo en React que duplicaria `drawAvatar` y podria desincronizarse
+    // de forma invisible (issue #17, D1).
+    this.bridge.emit('portraits', { byKey: this.exportPortraits() });
+    this.anchorWriter = this.bridge.anchors.open();
 
     const grid: TerrainGrid = buildTerrainGrid();
     this.grid = grid;
@@ -139,6 +147,9 @@ export class OfficeScene extends Phaser.Scene {
     this.unsubscribeSetStatus = this.bridge.onCommand('setStatus', ({ status }) => {
       this.setStatus(status);
     });
+    this.unsubscribeSpeakers = this.bridge.onCommand('speakers', ({ sessionIds }) => {
+      this.applySpeakers(sessionIds);
+    });
 
     // D4: unico bloque muerto en produccion de este archivo -- deja tanto el
     // literal 'teleportToTile' como su handler fuera de `dist/`. Espeja
@@ -157,7 +168,10 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeTeleport?.();
       this.unsubscribeCallNpc?.();
       this.unsubscribeSetStatus?.();
+      this.unsubscribeSpeakers?.();
       this.unsubscribeTeleportToTile?.();
+      this.anchorWriter?.close();
+      this.anchorWriter = undefined;
       this.remotes?.clear();
       void this.connection?.leave();
       this.connection = undefined;
@@ -255,6 +269,70 @@ export class OfficeScene extends Phaser.Scene {
     this.proximityTick();
   }
 
+  /**
+   * Aplica el conjunto de habla real reportado por React (D7): solo enciende
+   * el anillo de avatares REMOTOS. El jugador local no tiene tile ni anillo
+   * propio que mostrar en este canvas -- eso lo cubrira React en PR3b. El
+   * comando trae el conjunto AUTORITATIVO completo (no un delta), asi que
+   * cada sessionId conocido se apaga salvo que este en el arreglo.
+   */
+  private applySpeakers(sessionIds: readonly string[]): void {
+    const speaking = new Set(sessionIds);
+    for (const sessionId of this.remotes?.sessionIds() ?? []) {
+      this.remotes?.get(sessionId)?.ring.setVisible(speaking.has(sessionId));
+    }
+  }
+
+  /**
+   * Retrato real de cada clave base de avatar (issue #17, D1): exporta la
+   * textura de orientacion "down" ya generada por `createOfficeTextures`, no
+   * un redibujo. `getBase64` es sincrono (canvas real, sin WebGL).
+   */
+  private exportPortraits(): Record<string, string> {
+    const byKey: Record<string, string> = {};
+    for (const base of [...AVATAR_KEYS, PLAYER_TEXTURE]) {
+      byKey[base] = this.textures.getBase64(avatarTextureKey(base, 'down'));
+    }
+    return byKey;
+  }
+
+  /**
+   * Proyecta la posicion del jugador local y de cada avatar remoto a
+   * coordenadas de pantalla y las publica por el canal de anclas (issue #17,
+   * D4). Se ejecuta cada cuadro, no cada tic de proximidad: la posicion es
+   * continua, la existencia/contenido del tile no lo es.
+   *
+   * El jugador local se proyecta con la MISMA formula que un avatar remoto
+   * (decision F, textual del mantenedor: "Tu propio recuadro cuelga de tu
+   * avatar igual que el de los demas") -- el self-tile deja de ser un overlay
+   * fijo en una esquina y pasa a anclarse y seguir al avatar como cualquier
+   * otro. Sin `selfSessionId` (aun sin conexion) no hay a que clave publicar,
+   * asi que se omite ese ancla ese cuadro.
+   */
+  private publishAnchors(): void {
+    if (!this.anchorWriter) return;
+    const cam = this.cameras.main;
+    const selfSessionId = this.connection?.sessionId ?? null;
+    if (selfSessionId !== null) {
+      const screenX = (this.player.x - cam.scrollX) * cam.zoom;
+      const screenY = (this.player.y - cam.scrollY) * cam.zoom;
+      this.anchorWriter.set(
+        selfSessionId,
+        screenX,
+        screenY,
+        cam.worldView.contains(this.player.x, this.player.y),
+      );
+    }
+    for (const sessionId of this.remotes?.sessionIds() ?? []) {
+      const avatar = this.remotes?.get(sessionId);
+      if (!avatar) continue;
+      const screenX = (avatar.x - cam.scrollX) * cam.zoom;
+      const screenY = (avatar.y - cam.scrollY) * cam.zoom;
+      this.anchorWriter.set(sessionId, screenX, screenY, cam.worldView.contains(avatar.x, avatar.y));
+    }
+    this.anchorWriter.commit();
+  }
+
   private emitPresence(online: boolean): void {
     this.bridge.emit('presence', { online, peers: this.remotes?.sessionIds().length ?? 0 });
   }
@@ -266,13 +344,21 @@ export class OfficeScene extends Phaser.Scene {
    */
   private emitVoice(
     selfSessionId: string | null,
-    sessionIds: string[],
+    peers: readonly { sessionId: string; name: string }[],
     room: string | null,
   ): void {
-    const key = `${nearbyKey(sessionIds)}|${room ?? ''}|${selfSessionId ?? ''}`;
+    // El nombre entra en la clave de dedupe (issue #17): un cambio de nombre
+    // sin cambio de conjunto de pares SI debe reemitir, o la etiqueta del
+    // tile quedaria pegada al valor viejo.
+    const key = `${nearbyKey(peers.map((peer) => `${peer.sessionId}:${peer.name}`))}|${room ?? ''}|${selfSessionId ?? ''}`;
     if (key === this.lastVoiceKey) return;
     this.lastVoiceKey = key;
-    this.bridge.emit('voice', { selfSessionId, sessionIds, room });
+    this.bridge.emit('voice', {
+      selfSessionId,
+      selfName: this.player.nameText,
+      peers,
+      room,
+    });
   }
 
   /** Fusiona tiles solidos en rectangulos estaticos y los colisiona con el jugador (app.js:392-408, D6). */
@@ -364,39 +450,29 @@ export class OfficeScene extends Phaser.Scene {
       peers: audioPeers,
       radius: PROX_RADIUS,
     });
-    const peerNames = audibleIds
-      .map((id) => this.remotes?.get(id)?.nameText)
-      .filter((name): name is string => name !== undefined);
+    // Nombre de cada audible (issue #17, D-voz): la etiqueta del tile se
+    // resuelve desde aqui, nunca redibujada -- misma fuente que ya pintaba
+    // los chips retirados (D9).
+    const peers = audibleIds.flatMap((sessionId) => {
+      const name = this.remotes?.get(sessionId)?.nameText;
+      return name === undefined ? [] : [{ sessionId, name }];
+    });
 
     const points: Point[] = this.npcs.map((c) => ({ x: c.x, y: c.y }));
     const nearSet = new Set(nearbyIndices({ x: player.x, y: player.y }, points, PROX_RADIUS));
 
-    const npcNames: string[] = [];
+    // Los NPCs nunca tienen tile ni chip (D9): conservan solo su anillo en
+    // canvas, que sigue siendo pura simulacion local por radio.
     this.npcs.forEach((c, i) => {
-      const near = nearSet.has(i);
-      c.ring.setVisible(near && isSpeaking(now, c.phase));
-      if (near) npcNames.push(c.nameText);
+      c.ring.setVisible(nearSet.has(i) && isSpeaking(now, c.phase));
     });
-
-    // D7: los pares reales lideran el arreglo. `BottomBar` recorta a
-    // `NEARBY_CHIP_LIMIT`; con los NPCs primero un companero audible podria
-    // quedar en el "+N" y eso deshace la decision que este cambio implementa.
-    // La asimetria es deliberada: los NPCs no tienen audio, son simulacion
-    // local y su seleccion sigue siendo pura por radio -- aplicarles la regla
-    // de sala cambiaria su comportamiento visible sin ningun beneficio.
-    const names = [...peerNames, ...npcNames];
-    const key = nearbyKey(names);
-    if (key !== this.lastNearbyKey) {
-      this.lastNearbyKey = key;
-      this.bridge.emit('nearby', { names });
-    }
 
     if (room !== this.currentRoom) {
       this.currentRoom = room;
       this.bridge.emit('room', { room });
     }
 
-    this.emitVoice(selfSessionId, audibleIds, room);
+    this.emitVoice(selfSessionId, peers, room);
   }
 
   /** Mueve al jugador a una tile libre adyacente al NPC objetivo (app.js:474-486). */
@@ -465,5 +541,7 @@ export class OfficeScene extends Phaser.Scene {
     this.connection?.sendMove(this.player.x, this.player.y, this.facing);
 
     this.mmMarker?.setPosition(this.player.x, this.player.y);
+
+    this.publishAnchors();
   }
 }

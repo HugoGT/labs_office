@@ -1,12 +1,23 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CharacterContainer, NpcContainer } from './characters';
-import { DESK_ROWS, MAP_H, MAP_W, PROX_RADIUS, TILE, TREES, ZONE_LABELS } from './mapData';
+import {
+  DESK_ROWS,
+  MAP_H,
+  MAP_W,
+  PROX_RADIUS,
+  TILE,
+  TREES,
+  WORLD_H,
+  WORLD_W,
+  ZONE_LABELS,
+} from './mapData';
 import { TERRAIN_SHEET } from './assets';
 import { NPCS } from './npcData';
 import { createOfficeBridge } from './officeBridge';
 import { DEFAULT_STATUS, type PresenceStatus } from './officeProtocol';
 import { STATUS_COLOR } from './presence';
+import { AVATAR_KEYS, PLAYER_TEXTURE } from './textures';
 import type {
   ConnectOfficeRoomOptions,
   OfficeConnection,
@@ -237,29 +248,6 @@ describe('OfficeScene: depth-sorting por y (app.js:497-499)', () => {
 });
 
 describe('OfficeScene: proximidad y salas (app.js:444-471, cada 250ms)', () => {
-  it('emite "nearby" por el puente solo cuando el conjunto cercano cambia', async () => {
-    const bridge = createOfficeBridge();
-    const events: string[][] = [];
-    bridge.on('nearby', (payload) => events.push(payload.names));
-
-    const { scene } = await bootOfficeScene(bridge);
-    const player = findPlayer(scene);
-    const closestNpc = findNpcs(scene)[0];
-    // Coloca al jugador justo sobre el primer NPC: queda estrictamente dentro del radio.
-    player.setPosition(closestNpc.x, closestNpc.y);
-
-    await vi.waitFor(() => {
-      expect(events.some((names) => names.includes(closestNpc.nameText))).toBe(true);
-    }, LOOP_WAIT);
-
-    const countAfterFirstNotification = events.length;
-    // Sin mover al jugador, los proximos tics (250ms cada uno) no deben repetir
-    // la notificacion. La ventana se mide en reloj de juego: 600ms reales pueden
-    // no contener ni un tic y entonces el dedupe no quedaria probado.
-    await advanceGameClock(scene, 600);
-    expect(events.length).toBe(countAfterFirstNotification);
-  });
-
   it(
     'el anillo de habla se apaga estando cerca: no es proximidad pura (app.js:452)',
     async () => {
@@ -312,10 +300,10 @@ describe('OfficeScene: proximidad y salas (app.js:444-471, cada 250ms)', () => {
   });
 });
 
-describe('OfficeScene: audio por proximidad (D3) y D7 (pares reales en los chips)', () => {
-  it('emite "voice" con los sessionIds reales audibles, sin repetir en tics identicos', async () => {
+describe('OfficeScene: audio/video por proximidad (D3, issue #17)', () => {
+  it('emite "voice" con los peers reales audibles (sessionId + nombre), sin repetir en tics identicos', async () => {
     const bridge = createOfficeBridge();
-    const voices: { selfSessionId: string | null; sessionIds: string[]; room: string | null }[] =
+    const voices: { selfSessionId: string | null; peers: readonly { sessionId: string; name: string }[]; room: string | null }[] =
       [];
     bridge.on('voice', (payload) => voices.push(payload));
     const connector = fakeConnector('mi-sesion');
@@ -329,7 +317,7 @@ describe('OfficeScene: audio por proximidad (D3) y D7 (pares reales en los chips
     connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', x: player.x, y: player.y }));
 
     await vi.waitFor(() => {
-      expect(voices.some((v) => v.sessionIds.includes('par-1'))).toBe(true);
+      expect(voices.some((v) => v.peers.some((peer) => peer.sessionId === 'par-1'))).toBe(true);
     }, LOOP_WAIT);
 
     const countAfterFirstNotification = voices.length;
@@ -341,7 +329,7 @@ describe('OfficeScene: audio por proximidad (D3) y D7 (pares reales en los chips
 
   it('un cruce de sala reemite "voice" aunque el conjunto de pares audibles no cambie', async () => {
     const bridge = createOfficeBridge();
-    const voices: { selfSessionId: string | null; sessionIds: string[]; room: string | null }[] =
+    const voices: { selfSessionId: string | null; peers: readonly { sessionId: string; name: string }[]; room: string | null }[] =
       [];
     bridge.on('voice', (payload) => voices.push(payload));
     const connector = fakeConnector('mi-sesion');
@@ -366,43 +354,16 @@ describe('OfficeScene: audio por proximidad (D3) y D7 (pares reales en los chips
     }, LOOP_WAIT);
     expect(voices.length).toBeGreaterThan(countBeforeCrossing);
     // El conjunto audible sigue vacio: la clave de dedupe cambio solo por la sala.
-    expect(voices.at(-1)?.sessionIds).toEqual([]);
-  });
-
-  it('"nearby" incluye el nombre de un par real audible antes que los nombres de NPCs (D7)', async () => {
-    const bridge = createOfficeBridge();
-    const events: string[][] = [];
-    bridge.on('nearby', (payload) => events.push(payload.names));
-    const connector = fakeConnector('mi-sesion');
-
-    const { scene } = await bootOfficeScene(bridge, {
-      endpoint: 'ws://fake',
-      connect: connector.connect,
-    });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
-    const player = findPlayer(scene);
-    const closestNpc = findNpcs(scene)[0];
-    player.setPosition(closestNpc.x, closestNpc.y);
-    connector
-      .handlers()!
-      .onAdd(remoteSnapshot({ sessionId: 'par-1', name: 'Ana Real', x: player.x, y: player.y }));
-
-    await vi.waitFor(() => {
-      expect(
-        events.some((names) => names[0] === 'Ana Real' && names.includes(closestNpc.nameText)),
-      ).toBe(true);
-    }, LOOP_WAIT);
+    expect(voices.at(-1)?.peers).toEqual([]);
   });
 
   it(
-    'D7 asimetria: un par fuera de la sala del jugador queda fuera de "voice" y de "nearby" ' +
-      'mientras un par DENTRO de la sala y un NPC en radio si aparecen en "nearby"',
+    'D7 asimetria: un par fuera de la sala del jugador queda fuera de "voice" mientras un par ' +
+      'DENTRO de la sala si aparece, con su nombre',
     async () => {
       const bridge = createOfficeBridge();
-      const voices: { sessionIds: string[] }[] = [];
-      const nearbyEvents: string[][] = [];
+      const voices: { peers: readonly { sessionId: string; name: string }[] }[] = [];
       bridge.on('voice', (payload) => voices.push(payload));
-      bridge.on('nearby', (payload) => nearbyEvents.push(payload.names));
       const connector = fakeConnector('mi-sesion');
 
       const { scene } = await bootOfficeScene(bridge, {
@@ -411,12 +372,9 @@ describe('OfficeScene: audio por proximidad (D3) y D7 (pares reales en los chips
       });
       await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
       const player = findPlayer(scene);
-      const npc = findNpcs(scene)[0];
-      // Jugador dentro de "Sala de Juntas"; el NPC se reubica junto a el (regla pura de radio,
-      // ajena a la sala: por eso el NPC sigue apareciendo aunque no "comparta sala" con nadie).
+      // Jugador dentro de "Sala de Juntas" (tile (50,2) tamano 13x14 -> dentro en (52,4)).
       player.setPosition(52 * TILE, 4 * TILE);
-      npc.setPosition(52 * TILE, 4 * TILE);
-      // Par legitimo: comparte la misma sala que el jugador -> audible y en los chips.
+      // Par legitimo: comparte la misma sala que el jugador -> audible.
       connector.handlers()!.onAdd(
         remoteSnapshot({
           sessionId: 'companera-en-sala',
@@ -436,13 +394,16 @@ describe('OfficeScene: audio por proximidad (D3) y D7 (pares reales en los chips
       );
 
       await vi.waitFor(() => {
-        expect(voices.some((v) => v.sessionIds.includes('companera-en-sala'))).toBe(true);
-        expect(nearbyEvents.some((names) => names.includes('Compañera De Sala'))).toBe(true);
-        expect(nearbyEvents.some((names) => names.includes(npc.nameText))).toBe(true);
+        expect(
+          voices.some((v) =>
+            v.peers.some((peer) => peer.sessionId === 'companera-en-sala' && peer.name === 'Compañera De Sala'),
+          ),
+        ).toBe(true);
       }, LOOP_WAIT);
 
-      expect(voices.some((v) => v.sessionIds.includes('vecina-de-puerta'))).toBe(false);
-      expect(nearbyEvents.every((names) => !names.includes('Vecina De Puerta'))).toBe(true);
+      expect(
+        voices.some((v) => v.peers.some((peer) => peer.sessionId === 'vecina-de-puerta')),
+      ).toBe(false);
     },
   );
 });
@@ -776,7 +737,7 @@ describe('OfficeScene: comando setStatus via el puente (#1)', () => {
 
   it('corta el audio al instante, sin esperar al siguiente tic de proximidad', async () => {
     const bridge = createOfficeBridge();
-    const voices: { sessionIds: string[] }[] = [];
+    const voices: { peers: readonly { sessionId: string; name: string }[] }[] = [];
     bridge.on('voice', (payload) => voices.push(payload));
     const connector = fakeConnector('mi-sesion');
 
@@ -788,19 +749,19 @@ describe('OfficeScene: comando setStatus via el puente (#1)', () => {
     const player = findPlayer(scene);
     connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', x: player.x, y: player.y }));
     await vi.waitFor(() => {
-      expect(voices.some((v) => v.sessionIds.includes('par-1'))).toBe(true);
+      expect(voices.some((v) => v.peers.some((peer) => peer.sessionId === 'par-1'))).toBe(true);
     }, LOOP_WAIT);
 
     bridge.emitCommand('setStatus', { status: 'r' });
 
     // Sin esperar nada: un "No molestar" que tarda un cuarto de segundo en
     // cortar el audio no es un corte, es un retraso.
-    expect(voices.at(-1)?.sessionIds).toEqual([]);
+    expect(voices.at(-1)?.peers).toEqual([]);
   });
 
   it('un par que pasa a "No molestar" deja de ser audible en el siguiente tic', async () => {
     const bridge = createOfficeBridge();
-    const voices: { sessionIds: string[] }[] = [];
+    const voices: { peers: readonly { sessionId: string; name: string }[] }[] = [];
     bridge.on('voice', (payload) => voices.push(payload));
     const connector = fakeConnector('mi-sesion');
 
@@ -812,7 +773,7 @@ describe('OfficeScene: comando setStatus via el puente (#1)', () => {
     const player = findPlayer(scene);
     connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', x: player.x, y: player.y }));
     await vi.waitFor(() => {
-      expect(voices.some((v) => v.sessionIds.includes('par-1'))).toBe(true);
+      expect(voices.some((v) => v.peers.some((peer) => peer.sessionId === 'par-1'))).toBe(true);
     }, LOOP_WAIT);
 
     connector
@@ -820,7 +781,7 @@ describe('OfficeScene: comando setStatus via el puente (#1)', () => {
       .onChange(remoteSnapshot({ sessionId: 'par-1', x: player.x, y: player.y, status: 'r' }));
 
     await vi.waitFor(() => {
-      expect(voices.at(-1)?.sessionIds).toEqual([]);
+      expect(voices.at(-1)?.peers).toEqual([]);
     }, LOOP_WAIT);
   });
 
@@ -889,5 +850,171 @@ describe('OfficeScene: comando setStatus via el puente (#1)', () => {
     bridge.emitCommand('setStatus', { status: 'r' });
 
     expect(player.status).toBe(DEFAULT_STATUS);
+  });
+});
+
+describe('OfficeScene: comando speakers via el puente (issue #17, D7 -- habla real enciende el anillo)', () => {
+  it('enciende el anillo de un avatar remoto real cuando su sessionId reporta estar hablando', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1' }));
+    const avatar = findRemoteAvatars(scene)[0];
+    expect(avatar.ring.visible).toBe(false);
+
+    bridge.emitCommand('speakers', { sessionIds: ['par-1'] });
+
+    expect(avatar.ring.visible).toBe(true);
+  });
+
+  it('apaga el anillo cuando su sessionId deja de aparecer en el conjunto reportado', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1' }));
+    const avatar = findRemoteAvatars(scene)[0];
+    bridge.emitCommand('speakers', { sessionIds: ['par-1'] });
+    expect(avatar.ring.visible).toBe(true);
+
+    bridge.emitCommand('speakers', { sessionIds: [] });
+
+    expect(avatar.ring.visible).toBe(false);
+  });
+
+  it('un sessionId ajeno en el comando no enciende avatares que no coinciden', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1' }));
+    const avatar = findRemoteAvatars(scene)[0];
+
+    bridge.emitCommand('speakers', { sessionIds: ['alguien-mas'] });
+
+    expect(avatar.ring.visible).toBe(false);
+  });
+
+  it('desuscribe el handler de speakers al apagar la escena (SHUTDOWN, D2)', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1' }));
+    const avatar = findRemoteAvatars(scene)[0];
+
+    scene.sys.events.emit(Phaser.Scenes.Events.SHUTDOWN);
+    bridge.emitCommand('speakers', { sessionIds: ['par-1'] });
+
+    expect(avatar.ring.visible).toBe(false);
+  });
+});
+
+describe('OfficeScene: canal de anclas de posicion por cuadro (issue #17, D4)', () => {
+  it('proyecta la posicion de un avatar remoto a pantalla, honrando scroll y zoom reales de la camara', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', x: 500, y: 700 }));
+    const cam = scene.cameras.main;
+    cam.setZoom(1.75);
+
+    // La expectativa lee scroll/zoom REALES de la camara en cada intento, no
+    // un valor fijo: asi la prueba sigue valida aunque `startFollow` este
+    // todavia suavizando el desplazamiento del jugador.
+    await vi.waitFor(() => {
+      const anchor = bridge.anchors.snapshot().anchors.get('par-1');
+      expect(anchor).toBeDefined();
+      expect(anchor!.x).toBeCloseTo((500 - cam.scrollX) * cam.zoom, 1);
+      expect(anchor!.y).toBeCloseTo((700 - cam.scrollY) * cam.zoom, 1);
+    }, LOOP_WAIT);
+  });
+
+  it('marca onScreen en false para un avatar muy fuera del area visible de la camara', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    connector
+      .handlers()!
+      .onAdd(remoteSnapshot({ sessionId: 'lejos', x: WORLD_W + 5000, y: WORLD_H + 5000 }));
+
+    await vi.waitFor(() => {
+      const anchor = bridge.anchors.snapshot().anchors.get('lejos');
+      expect(anchor).toBeDefined();
+      expect(anchor!.onScreen).toBe(false);
+    }, LOOP_WAIT);
+  });
+
+  it('una baja remota poda su ancla del siguiente cuadro en adelante', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'se-va', x: 100, y: 100 }));
+    await vi.waitFor(() => expect(bridge.anchors.snapshot().anchors.has('se-va')).toBe(true), LOOP_WAIT);
+
+    connector.handlers()!.onRemove('se-va');
+
+    await vi.waitFor(() => expect(bridge.anchors.snapshot().anchors.has('se-va')).toBe(false), LOOP_WAIT);
+  });
+
+  it('cierra el escritor de anclas al apagar la escena (SHUTDOWN, D4)', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', x: 100, y: 100 }));
+    await vi.waitFor(() => expect(bridge.anchors.snapshot().anchors.has('par-1')).toBe(true), LOOP_WAIT);
+    const generationBeforeShutdown = bridge.anchors.snapshot().generation;
+
+    scene.sys.events.emit(Phaser.Scenes.Events.SHUTDOWN);
+
+    // Se comprueba sin esperar a proposito, mismo motivo que las demas
+    // pruebas de SHUTDOWN de este archivo: tras un SHUTDOWN emitido a mano el
+    // bucle del juego sigue pisando update() con sistemas ya desmontados, y
+    // dormir aqui solo probaria ese artefacto del arnes, no el cierre del
+    // escritor.
+    expect(bridge.anchors.snapshot().generation).toBe(generationBeforeShutdown);
+  });
+});
+
+describe('OfficeScene: retratos fieles exportados una vez desde create() (issue #17, D1)', () => {
+  it('emite "portraits" una sola vez con una URL de datos PNG decodificable por cada clave base', async () => {
+    const bridge = createOfficeBridge();
+    const events: { byKey: Record<string, string> }[] = [];
+    bridge.on('portraits', (payload) => events.push(payload));
+
+    await bootOfficeScene(bridge);
+
+    expect(events).toHaveLength(1);
+    const { byKey } = events[0];
+    const expectedKeys = [...AVATAR_KEYS, PLAYER_TEXTURE].sort();
+    expect(Object.keys(byKey).sort()).toEqual(expectedKeys);
+    for (const key of expectedKeys) {
+      const dataUrl = byKey[key];
+      expect(dataUrl.startsWith('data:image/png;base64,')).toBe(true);
+      expect(atob(dataUrl.split(',')[1]).length).toBeGreaterThan(0);
+    }
   });
 });

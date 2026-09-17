@@ -32,6 +32,9 @@ function proximityAudio(
     toggleMic: vi.fn(),
     toggleCam: vi.fn(),
     unblockAudio: vi.fn(),
+    videoTracks: new Map(),
+    speakers: new Set(),
+    localVideoTrack: null,
     ...overrides,
   };
 }
@@ -185,27 +188,18 @@ describe('OfficeShell', () => {
     );
   });
 
-  it('reenvia los nearby recibidos del bridge a los chips de BottomBar', () => {
+  it('emitir "nearby" (evento retirado, D9) no renderiza ningun chip: BottomBar ya no lo recibe', () => {
     render(<OfficeShell />);
     const bridge = createGameMock.mock.calls[0][1];
 
-    act(() => bridge.emit('nearby', { names: ['Ana', 'Beto'] }));
+    // `nearby` ya no existe en `OfficeEventMap`; el cast prueba que, aunque
+    // alguien lo emitiera de forma insegura, no hay ningun consumidor vivo
+    // que lo convierta en un chip visible.
+    act(() =>
+      (bridge.emit as (type: string, payload: unknown) => void)('nearby', { names: ['Ana'] }),
+    );
 
-    expect(screen.getByText('🔊 Ana')).toBeInTheDocument();
-    expect(screen.getByText('🔊 Beto')).toBeInTheDocument();
-  });
-
-  it('la lista fusionada de nearby llega a BottomBar sin filtrar ni reordenar (companeros reales primero, tal cual la emite la escena)', () => {
-    render(<OfficeShell />);
-    const bridge = createGameMock.mock.calls[0][1];
-
-    // `OfficeScene.proximityTick` (3A) ya antepone companeros reales a NPCs
-    // y puede repetir nombres (D7); `OfficeShell` no debe filtrar, ordenar
-    // ni deduplicar nada de eso antes de pasarlo a `BottomBar`.
-    act(() => bridge.emit('nearby', { names: ['HugoGT', 'HugoGT', 'Ana', 'Beto'] }));
-
-    const chips = screen.getAllByText(/^🔊 /).map((el) => el.textContent);
-    expect(chips).toEqual(['🔊 HugoGT', '🔊 HugoGT', '🔊 Ana', '🔊 Beto']);
+    expect(screen.queryByText(/^🔊/)).not.toBeInTheDocument();
   });
 
   it('al recibir npcmenu del bridge, abre el ContextMenu con nombre y estado', () => {
@@ -333,6 +327,33 @@ describe('OfficeShell: estado de presencia (#1)', () => {
 
     expect(screen.getByRole('button', { name: /Mic/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: /Cámara/ })).toBeDisabled();
+  });
+});
+
+describe('OfficeShell: habla real llega al anillo del avatar por comando (issue #17, D7)', () => {
+  it('reenvia el conjunto de hablantes del hook como comando "speakers" a la escena', () => {
+    const { rerender } = render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const commands: { sessionIds: string[] }[] = [];
+    bridge.onCommand('speakers', (payload) => commands.push(payload));
+
+    useProximityAudioMock.mockReturnValue(proximityAudio({ speakers: new Set(['par-1']) }));
+    rerender(<OfficeShell />);
+
+    expect(commands.at(-1)).toEqual({ sessionIds: ['par-1'] });
+  });
+
+  it('un conjunto de hablantes vacio tambien se reenvia: apaga el anillo cuando nadie habla', () => {
+    useProximityAudioMock.mockReturnValue(proximityAudio({ speakers: new Set(['par-1']) }));
+    const { rerender } = render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const commands: { sessionIds: string[] }[] = [];
+    bridge.onCommand('speakers', (payload) => commands.push(payload));
+
+    useProximityAudioMock.mockReturnValue(proximityAudio({ speakers: new Set() }));
+    rerender(<OfficeShell />);
+
+    expect(commands.at(-1)).toEqual({ sessionIds: [] });
   });
 });
 
