@@ -47,6 +47,13 @@ jobs:
       - name: Tests (jsdom + Node + Chromium)
         run: pnpm test:all
 
+      # Pruebas puras del arnes E2E (extraccion de la URL de `vite preview`).
+      # Van antes de los builds a proposito: no necesitan bundle y cuestan
+      # milisegundos, asi que un arnes roto se ve en el minuto 1 y no tras los
+      # dos builds y diez escenarios de navegador.
+      - name: Harness unit tests
+        run: pnpm test:harness
+
       - name: Build
         run: pnpm build
 

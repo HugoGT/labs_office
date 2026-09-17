@@ -10,6 +10,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { extractPreviewUrl } from './preview-url.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -107,38 +108,68 @@ async function pollUntilOk(url, description, deadlineMs = READINESS_DEADLINE_MS)
     await new Promise((resolve) => setTimeout(resolve, READINESS_POLL_INTERVAL_MS));
   }
   throw new Error(
-    `${description} did not become ready within ${deadlineMs}ms polling ${url}: ` +
+    `${description} did not start listening within ${deadlineMs}ms polling ${url}: ` +
       `${lastError?.message ?? 'unknown error'}`,
   );
 }
 
-/** `vite preview` prints its serving URL on stdout; the harness treats that
- * printed URL as truth rather than assuming the requested port was honored. */
+/**
+ * `vite preview` prints its serving URL on stdout; the harness treats that
+ * printed URL as truth rather than assuming the requested port was honored.
+ *
+ * Parsing is delegated to `extractPreviewUrl`, which waits for a terminated
+ * `Local:` line and de-colors it first. A line that arrives complete but
+ * unparseable rejects immediately instead of being handed to `fetch()`: that
+ * is the difference between "the URL was never readable" and "the server never
+ * came up", and conflating the two is what made this take three red CI runs to
+ * find.
+ */
 function waitForUrlOnStdout(child, description) {
   return new Promise((resolve, reject) => {
     let buffer = '';
+    let settled = false;
 
-    const timer = setTimeout(() => {
+    function cleanup() {
+      settled = true;
+      clearTimeout(timer);
       child.stdout?.off('data', onData);
-      reject(new Error(`${description} did not print its URL within ${READINESS_DEADLINE_MS}ms`));
-    }, READINESS_DEADLINE_MS);
+      child.off('error', onError);
+    }
+
+    function succeed(url) {
+      if (settled) return;
+      cleanup();
+      resolve(url);
+    }
+
+    function fail(error) {
+      if (settled) return;
+      cleanup();
+      reject(error);
+    }
 
     function onData(chunk) {
       buffer += chunk.toString();
-      const match = buffer.match(/https?:\/\/[^\s]+/);
-      if (match) {
-        clearTimeout(timer);
-        child.stdout?.off('data', onData);
-        resolve(match[0].replace(/\/+$/, ''));
+      let url;
+      try {
+        url = extractPreviewUrl(buffer);
+      } catch (error) {
+        fail(error);
+        return;
       }
+      if (url) succeed(url);
     }
 
+    function onError(error) {
+      fail(error);
+    }
+
+    const timer = setTimeout(() => {
+      fail(new Error(`${description} did not print its URL within ${READINESS_DEADLINE_MS}ms`));
+    }, READINESS_DEADLINE_MS);
+
     child.stdout?.on('data', onData);
-    child.once('error', (error) => {
-      clearTimeout(timer);
-      child.stdout?.off('data', onData);
-      reject(error);
-    });
+    child.on('error', onError);
   });
 }
 
