@@ -37,8 +37,17 @@ export interface IdentityAdmin {
  * llama, que no puede hacer nada distinto con ninguno de ellos.
  */
 export class IdentityAdminError extends Error {
-  constructor(readonly code: 'email-exists' | 'unavailable') {
+  // El campo se declara y se asigna a mano en vez de usar una propiedad de
+  // parametro (`constructor(readonly code: ...)`): el servidor corre los `.ts`
+  // directamente con Node, que solo borra los tipos y no transforma nada, y
+  // esa forma le hace reventar al cargar el modulo
+  // (ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX). Es un fallo de arranque, no de tipos:
+  // `tsc` la acepta sin quejarse y el contenedor se queda reiniciandose.
+  readonly code: 'email-exists' | 'unavailable';
+
+  constructor(code: 'email-exists' | 'unavailable') {
     super(`Fallo de Identity Platform (${code})`);
+    this.code = code;
     // Sin esto, `error.name` seria 'Error' en cualquier traza y en cualquier
     // log, que es justo donde hace falta reconocerlo.
     this.name = 'IdentityAdminError';
