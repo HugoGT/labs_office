@@ -47,6 +47,28 @@ function fakeTrack(kind: 'audio' | 'video' = 'audio'): AttachableTrack {
   };
 }
 
+/**
+ * Publicacion falsa que refleja su propio `isSubscribed` cuando `setSubscribed`
+ * se invoca -- necesario para probar que `reconcileKind` observa el estado
+ * VIVO (D2) en vez de asumirlo, igual que hace el `reconcile()` de audio.
+ */
+function fakePublication(kind: 'audio' | 'video') {
+  const publication = {
+    kind,
+    isSubscribed: false,
+    setSubscribed: vi.fn((value: boolean) => {
+      publication.isSubscribed = value;
+    }),
+  };
+  return publication;
+}
+
+function fakeParticipant(publications: ReturnType<typeof fakePublication>[]) {
+  return {
+    trackPublications: new Map(publications.map((publication, i) => [`pub${i}`, publication])),
+  };
+}
+
 function connect(room: ReturnType<typeof fakeRoom>, container: HTMLElement) {
   return connectLivekitRoom({
     url: 'ws://localhost:7880',
@@ -140,5 +162,43 @@ describe('connectLivekitRoom (cableado de reproduccion, #18)', () => {
     const connection = await connect(room, document.createElement('div'));
 
     await expect(connection.startAudio()).resolves.toBeUndefined();
+  });
+});
+
+describe('reconciliacion consciente del kind (issue #17): audio y video son deltas independientes', () => {
+  it('retirar el peer del video deseado desuscribe SOLO su publicacion de video: el audio sigue', async () => {
+    const audioPub = fakePublication('audio');
+    const videoPub = fakePublication('video');
+    const room = fakeRoom();
+    room.remoteParticipants.set('p1', fakeParticipant([audioPub, videoPub]));
+    const connection = await connect(room, document.createElement('div'));
+
+    connection.setDesiredAudioPeers(['p1']);
+    connection.setDesiredVideoPeers(['p1']);
+    expect(audioPub.isSubscribed).toBe(true);
+    expect(videoPub.isSubscribed).toBe(true);
+
+    connection.setDesiredVideoPeers([]);
+
+    expect(videoPub.isSubscribed).toBe(false);
+    expect(audioPub.isSubscribed).toBe(true);
+  });
+
+  it('retirar el peer del audio deseado desuscribe SOLO su publicacion de audio: el video sigue', async () => {
+    const audioPub = fakePublication('audio');
+    const videoPub = fakePublication('video');
+    const room = fakeRoom();
+    room.remoteParticipants.set('p1', fakeParticipant([audioPub, videoPub]));
+    const connection = await connect(room, document.createElement('div'));
+
+    connection.setDesiredAudioPeers(['p1']);
+    connection.setDesiredVideoPeers(['p1']);
+    expect(audioPub.isSubscribed).toBe(true);
+    expect(videoPub.isSubscribed).toBe(true);
+
+    connection.setDesiredAudioPeers([]);
+
+    expect(audioPub.isSubscribed).toBe(false);
+    expect(videoPub.isSubscribed).toBe(true);
   });
 });

@@ -75,14 +75,14 @@ describe.skipIf(!import.meta.env.VITE_LIVEKIT_E2E)(
       });
 
       // Ventana breve para detectar una suscripcion indebida: si el wrapper
-      // suscribiera solo (sin que nadie llame setDesiredPeers), esto tendria
-      // tiempo de dispararse.
+      // suscribiera solo (sin que nadie llame setDesiredAudioPeers), esto
+      // tendria tiempo de dispararse.
       await new Promise((resolve) => setTimeout(resolve, 500));
 
       expect(subscribedEarly).toBe(false);
     });
 
-    it('setDesiredPeers suscribe al publicador cuando aparece en el conjunto deseado', async () => {
+    it('setDesiredAudioPeers suscribe al publicador cuando aparece en el conjunto deseado', async () => {
       const publisherIdentity = `pub-${Date.now()}`;
       await connectPublisher(publisherIdentity);
       const { connection, room } = await connectWrapped(`sub-${Date.now()}`);
@@ -91,7 +91,7 @@ describe.skipIf(!import.meta.env.VITE_LIVEKIT_E2E)(
         room.on(RoomEvent.TrackSubscribed, () => resolve());
       });
 
-      connection.setDesiredPeers([publisherIdentity]);
+      connection.setDesiredAudioPeers([publisherIdentity]);
 
       await expect(subscribed).resolves.toBeUndefined();
     });
@@ -104,13 +104,13 @@ describe.skipIf(!import.meta.env.VITE_LIVEKIT_E2E)(
       const subscribed = new Promise<void>((resolve) => {
         room.on(RoomEvent.TrackSubscribed, () => resolve());
       });
-      connection.setDesiredPeers([publisherIdentity]);
+      connection.setDesiredAudioPeers([publisherIdentity]);
       await subscribed;
 
       const unsubscribed = new Promise<void>((resolve) => {
         room.on(RoomEvent.TrackUnsubscribed, () => resolve());
       });
-      connection.setDesiredPeers([]);
+      connection.setDesiredAudioPeers([]);
 
       await expect(unsubscribed).resolves.toBeUndefined();
     });
@@ -120,7 +120,7 @@ describe.skipIf(!import.meta.env.VITE_LIVEKIT_E2E)(
       const { connection, room } = await connectWrapped(`sub-${Date.now()}`);
 
       // El peer se pide ANTES de que exista: solo publica despues.
-      connection.setDesiredPeers([publisherIdentity]);
+      connection.setDesiredAudioPeers([publisherIdentity]);
 
       const subscribed = new Promise<void>((resolve) => {
         room.on(RoomEvent.TrackSubscribed, () => resolve());
@@ -155,7 +155,7 @@ describe.skipIf(!import.meta.env.VITE_LIVEKIT_E2E)(
       const subscribed = new Promise<void>((resolve) => {
         room.on(RoomEvent.TrackSubscribed, () => resolve());
       });
-      connection.setDesiredPeers([publisherIdentity]);
+      connection.setDesiredAudioPeers([publisherIdentity]);
       await subscribed;
 
       // El evento lo entrega el SDK; el handler del modulo corre justo
@@ -177,13 +177,13 @@ describe.skipIf(!import.meta.env.VITE_LIVEKIT_E2E)(
       const subscribed = new Promise<void>((resolve) => {
         room.on(RoomEvent.TrackSubscribed, () => resolve());
       });
-      connection.setDesiredPeers([publisherIdentity]);
+      connection.setDesiredAudioPeers([publisherIdentity]);
       await subscribed;
 
       const unsubscribed = new Promise<void>((resolve) => {
         room.on(RoomEvent.TrackUnsubscribed, () => resolve());
       });
-      connection.setDesiredPeers([]);
+      connection.setDesiredAudioPeers([]);
       await unsubscribed;
       await new Promise((resolve) => setTimeout(resolve, 0));
 

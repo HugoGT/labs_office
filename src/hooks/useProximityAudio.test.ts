@@ -12,7 +12,8 @@ const CONFIG: LivekitConfig = { tokenUrl: 'http://localhost:2567/livekit/token',
 
 function fakeConnection(overrides: Partial<LivekitRoomConnection> = {}): LivekitRoomConnection {
   return {
-    setDesiredPeers: vi.fn(),
+    setDesiredAudioPeers: vi.fn(),
+    setDesiredVideoPeers: vi.fn(),
     setMicrophoneEnabled: vi.fn(async (enabled: boolean) => enabled),
     setCameraEnabled: vi.fn(async (enabled: boolean) => enabled),
     startAudio: vi.fn(async () => undefined),
@@ -90,7 +91,41 @@ describe('useProximityAudio', () => {
 
     // Mismo selfSessionId: NO reconecta, solo reenvia el conjunto deseado.
     expect(connect).toHaveBeenCalledTimes(1);
-    expect(connection.setDesiredPeers).toHaveBeenCalledWith(['ana']);
+    expect(connection.setDesiredAudioPeers).toHaveBeenCalledWith(['ana']);
+  });
+
+  it('reenvia el conjunto de VIDEO por separado, aplicando la regla mas angosta (issue #17)', async () => {
+    const bridge = createOfficeBridge();
+    const connection = fakeConnection();
+    const connect = vi.fn(async () => connection);
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', sessionIds: [], room: null });
+    });
+
+    // Piso abierto (room null): audio ya deseado vacio, y video TAMBIEN vacio.
+    expect(connection.setDesiredVideoPeers).toHaveBeenLastCalledWith([]);
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', sessionIds: ['ana'], room: null });
+    });
+
+    // Piso abierto con un par audible: audio lo pide, video NUNCA (D8/#17).
+    expect(connection.setDesiredAudioPeers).toHaveBeenLastCalledWith(['ana']);
+    expect(connection.setDesiredVideoPeers).toHaveBeenLastCalledWith([]);
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', sessionIds: ['ana'], room: 'Sala de Juntas' });
+    });
+
+    // Compartiendo sala: video pide exactamente los mismos ids que el audio.
+    expect(connection.setDesiredAudioPeers).toHaveBeenLastCalledWith(['ana']);
+    expect(connection.setDesiredVideoPeers).toHaveBeenLastCalledWith(['ana']);
   });
 
   it('el rechazo de connect deja audioAvailable en false, sin lanzar y sin reintentar', async () => {

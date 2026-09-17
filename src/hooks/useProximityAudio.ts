@@ -4,6 +4,7 @@ import { connectLivekitRoom, type LivekitRoomConnection } from '../game/livekitR
 import { fetchLivekitToken, type LivekitTokenResponse } from '../game/livekitTokenClient';
 import type { OfficeBridge } from '../game/officeBridge';
 import { DO_NOT_DISTURB, type PresenceStatus } from '../game/officeProtocol';
+import { videoPeers } from '../game/proximityVideo';
 
 /**
  * Conduce la sala de LiveKit a partir del evento `voice` del puente (D3).
@@ -87,13 +88,17 @@ export function useProximityAudio(
       if (config === null) return;
 
       if (sessionRef.current === payload.selfSessionId) {
-        // Misma sesion: solo reenvia el conjunto deseado, no reconecta.
-        connectionRef.current?.setDesiredPeers(payload.sessionIds);
+        // Misma sesion: solo reenvia los conjuntos deseados, no reconecta.
+        connectionRef.current?.setDesiredAudioPeers(payload.sessionIds);
+        connectionRef.current?.setDesiredVideoPeers(
+          videoPeers({ room: payload.room, audibleSessionIds: payload.sessionIds }),
+        );
         return;
       }
 
       const pendingSessionId = payload.selfSessionId;
       const pendingSessionIds = payload.sessionIds;
+      const pendingRoom = payload.room;
       sessionRef.current = pendingSessionId;
 
       void (async () => {
@@ -121,7 +126,10 @@ export function useProximityAudio(
 
           connectionRef.current = connection;
           setAudioAvailable(true);
-          connection.setDesiredPeers(pendingSessionIds);
+          connection.setDesiredAudioPeers(pendingSessionIds);
+          connection.setDesiredVideoPeers(
+            videoPeers({ room: pendingRoom, audibleSessionIds: pendingSessionIds }),
+          );
         } catch {
           // Rechazo de connect() (p.ej. navegador sin soporte, servidor
           // caido): degrada a sin audio, nunca lanza, nunca reintenta solo.

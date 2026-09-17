@@ -14,13 +14,23 @@
  * el siguiente tick en vez de dejar una fuga de audio permanente y silenciosa.
  */
 
-import { Room, RoomEvent, type RemoteParticipant, type RemoteTrack } from 'livekit-client';
+import { Room, RoomEvent, Track, type RemoteParticipant, type RemoteTrack } from 'livekit-client';
 import { reconcileSubscriptions } from './proximityAudio';
 import { createRemoteAudioSink } from './remoteAudioSink';
 
+/** Los dos kinds que este modulo reconcilia por separado (issue #17, decision D2). */
+type TrackKind = Track.Kind.Audio | Track.Kind.Video;
+
 export interface LivekitRoomConnection {
-  /** Guarda el conjunto deseado y reconcilia contra el estado vivo de la sala. */
-  setDesiredPeers(sessionIds: readonly string[]): void;
+  /** Guarda el conjunto de AUDIO deseado y reconcilia ese kind contra el estado vivo de la sala. */
+  setDesiredAudioPeers(sessionIds: readonly string[]): void;
+  /**
+   * Guarda el conjunto de VIDEO deseado y reconcilia ese kind por separado
+   * (issue #17): deliberadamente mas angosto que el audio, ver
+   * `proximityVideo.ts`. Nunca afecta las publicaciones de audio del mismo
+   * peer -- son deltas independientes por kind.
+   */
+  setDesiredVideoPeers(sessionIds: readonly string[]): void;
   /** Devuelve el estado real: `false` si el dispositivo se deniega. */
   setMicrophoneEnabled(enabled: boolean): Promise<boolean>;
   setCameraEnabled(enabled: boolean): Promise<boolean>;
@@ -47,12 +57,17 @@ export interface ConnectLivekitRoomOptions {
   onAudioPlaybackChanged?: (canPlayback: boolean) => void;
 }
 
-/** Identidades con al menos una publicacion suscrita AHORA MISMO (D2: observado, no cacheado). */
-function currentlySubscribed(room: Room): string[] {
+/**
+ * Identidades con al menos una publicacion de ESTE kind suscrita AHORA MISMO
+ * (D2: observado, no cacheado). Filtrar por `kind` es lo que hace que audio y
+ * video puedan divergir: un peer puede tener su audio suscrito y su video no,
+ * o viceversa.
+ */
+function currentlySubscribed(room: Room, kind: TrackKind): string[] {
   const subscribed: string[] = [];
   room.remoteParticipants.forEach((participant: RemoteParticipant, identity: string) => {
     const hasSubscribed = Array.from(participant.trackPublications.values()).some(
-      (publication) => publication.isSubscribed,
+      (publication) => publication.kind === kind && publication.isSubscribed,
     );
     if (hasSubscribed) subscribed.push(identity);
   });
@@ -68,26 +83,44 @@ export async function connectLivekitRoom({
 }: ConnectLivekitRoomOptions): Promise<LivekitRoomConnection> {
   const room = createRoom();
   const sink = createRemoteAudioSink(audioContainer);
-  let desired: readonly string[] = [];
+  let desiredAudio: readonly string[] = [];
+  let desiredVideo: readonly string[] = [];
 
-  function reconcile(): void {
-    const current = currentlySubscribed(room);
+  /**
+   * Reconcilia UN kind a la vez contra su propio conjunto deseado. Cada kind
+   * tiene su propio delta minimo (`reconcileSubscriptions` sigue siendo la
+   * misma funcion pura de `proximityAudio.ts`, la disciplina de deltas no
+   * cambia, solo se aplica dos veces, una por kind) -- por eso desuscribir
+   * video de un peer nunca toca su publicacion de audio, y viceversa.
+   */
+  function reconcileKind(kind: TrackKind): void {
+    const desired = kind === Track.Kind.Audio ? desiredAudio : desiredVideo;
+    const current = currentlySubscribed(room, kind);
     const { subscribe, unsubscribe } = reconcileSubscriptions(current, desired);
 
     for (const identity of subscribe) {
       const participant = room.remoteParticipants.get(identity);
-      participant?.trackPublications.forEach((publication) => publication.setSubscribed(true));
+      participant?.trackPublications.forEach((publication) => {
+        if (publication.kind === kind) publication.setSubscribed(true);
+      });
     }
     for (const identity of unsubscribe) {
       const participant = room.remoteParticipants.get(identity);
-      participant?.trackPublications.forEach((publication) => publication.setSubscribed(false));
+      participant?.trackPublications.forEach((publication) => {
+        if (publication.kind === kind) publication.setSubscribed(false);
+      });
     }
+  }
+
+  function reconcileAll(): void {
+    reconcileKind(Track.Kind.Audio);
+    reconcileKind(Track.Kind.Video);
   }
 
   // Re-ejecuta la reconciliacion cuando una publicacion llega TARDE (un peer
   // ya deseado que aun no habia publicado nada al pedirlo).
-  room.on(RoomEvent.TrackPublished, () => reconcile());
-  room.on(RoomEvent.ParticipantConnected, () => reconcile());
+  room.on(RoomEvent.TrackPublished, () => reconcileAll());
+  room.on(RoomEvent.ParticipantConnected, () => reconcileAll());
 
   // D-reproduccion (#18): `reconcile()` solo PIDE la pista; el sonido empieza
   // cuando llega por `TrackSubscribed` y se adjunta al documento. Son dos
@@ -106,9 +139,13 @@ export async function connectLivekitRoom({
   onAudioPlaybackChanged?.(room.canPlaybackAudio);
 
   return {
-    setDesiredPeers(sessionIds) {
-      desired = sessionIds;
-      reconcile();
+    setDesiredAudioPeers(sessionIds) {
+      desiredAudio = sessionIds;
+      reconcileKind(Track.Kind.Audio);
+    },
+    setDesiredVideoPeers(sessionIds) {
+      desiredVideo = sessionIds;
+      reconcileKind(Track.Kind.Video);
     },
     async setMicrophoneEnabled(enabled) {
       try {
