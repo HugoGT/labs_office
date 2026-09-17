@@ -76,6 +76,27 @@ variable "auth_project_id" {
   default     = ""
 }
 
+variable "bootstrap_superadmin_email" {
+  description = "Correo que se promociona a superadmin en su PRIMER inicio de sesion, y solo mientras el directorio no tenga ya un superadmin (issue #24). La cuenta tiene que existir antes en Identity Platform: el issue #8 desactivo el alta por cuenta propia, asi que un correo que nadie pueda usar para entrar deja la oficina sin nadie que pueda administrarla. Vacio: no hay arranque en frio."
+  type        = string
+  default     = ""
+
+  validation {
+    # Comprobacion deliberadamente laxa: solo descarta los errores que se ven
+    # (un nombre de usuario suelto, un espacio de mas, un dominio sin punto).
+    # Validar direcciones de correo de verdad no se puede desde aqui, y el
+    # unico veredicto que cuenta es el de Identity Platform al firmar el token.
+    condition     = var.bootstrap_superadmin_email == "" || can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.bootstrap_superadmin_email))
+    error_message = "bootstrap_superadmin_email debe ser una direccion de correo (usuario@dominio.tld) o quedar vacio."
+  }
+}
+
+variable "enable_identity_admin_secret" {
+  description = "Crea el contenedor del secreto con la clave de cuenta de servicio de Identity Platform, la que el servidor usa para dar de alta cuentas al aceptar una invitacion (issue #24). Desactivado por defecto porque esa cuenta de servicio se crea a mano y puede no existir: sin ella el panel funciona entero salvo el endpoint de invitar, que responde 503. Activarlo solo crea el contenedor; el valor se anade despues con `gcloud secrets versions add`."
+  type        = bool
+  default     = false
+}
+
 variable "image_tag" {
   description = "Tag inicial de las imagenes (SHA de commit). Vacio en el primer apply porque todavia no hay nada publicado: la VM escribe la configuracion y no levanta contenedores hasta que el primer despliegue le pase un tag."
   type        = string

@@ -45,6 +45,28 @@ LK_HOST="$(metadata office-lk-host)"
 ACME_EMAIL="$(metadata office-acme-email)"
 SECRET_KEY_NAME="$(metadata office-secret-key)"
 SECRET_SECRET_NAME="$(metadata office-secret-secret)"
+SECRET_DB_PASSWORD_NAME="$(metadata office-secret-db-password)"
+
+# Usuario y base del contenedor de Postgres. Constantes y no metadata: no hay
+# ninguna decision que tomar aqui (el servidor es el unico cliente y la base
+# vive dentro del compose), y parametrizarlas solo anadiria dos sitios mas
+# donde descuadrar el .env con el volumen ya inicializado. Cambiar estos dos
+# valores sobre un volumen existente NO renombra nada: Postgres solo los usa
+# en la primera inicializacion, asi que el servidor se quedaria buscando una
+# base que no existe.
+POSTGRES_USER="office"
+POSTGRES_DB="office"
+
+# Correo que se promociona a superadmin en su primer inicio de sesion (issue
+# #24). Sale de la metadata y no de Secret Manager porque no es un secreto: es
+# una direccion de correo, exactamente el mismo criterio que AUTH_PROJECT_ID.
+# Con `|| true` y vacio por defecto por la misma razon que aquel: que falte no
+# puede tumbar el redespliegue de una VM anterior a este cambio.
+BOOTSTRAP_SUPERADMIN_EMAIL="$(metadata office-bootstrap-superadmin-email || true)"
+
+# Nombre del secreto con la clave de cuenta de servicio de Identity Platform.
+# Opcional de verdad: la funcion de invitar cuentas puede no estar montada.
+SECRET_IDENTITY_ADMIN_NAME="$(metadata office-secret-identity-admin || true)"
 
 # Proyecto de Identity Platform que firma los ID tokens (issue #8). Con `|| true`
 # y vacio por defecto A PROPOSITO: si faltase y esto abortara, un redespliegue de
@@ -102,11 +124,52 @@ secret_value() {
 # asignacion si aborta.
 LIVEKIT_API_KEY="$(secret_value "${SECRET_KEY_NAME}")"
 LIVEKIT_API_SECRET="$(secret_value "${SECRET_SECRET_NAME}")"
+POSTGRES_PASSWORD="$(secret_value "${SECRET_DB_PASSWORD_NAME}")"
 
-if [[ -z "${LIVEKIT_API_KEY}" || -z "${LIVEKIT_API_SECRET}" ]]; then
+if [[ -z "${LIVEKIT_API_KEY}" || -z "${LIVEKIT_API_SECRET}" || -z "${POSTGRES_PASSWORD}" ]]; then
   echo "[office-deploy] Secret Manager devolvio un valor vacio. Falta anadir la version del secreto (ver infra/gcp/README.md)." >&2
   exit 1
 fi
+
+# Esta NO entra en el guardia de arriba, y es deliberado. Las claves de LiveKit
+# vacias son siempre un fallo (sin ellas no hay audio para nadie); esta puede
+# faltar legitimamente, porque la cuenta de servicio de Identity Platform es
+# opcional y mientras no exista lo unico que se degrada es el endpoint que
+# crea cuentas, que responde 503. Abortar el despliegue por esto tumbaria toda
+# la oficina por una funcion que nadie ha pedido todavia.
+#
+# Por eso el `|| true`: si el secreto existe pero aun no tiene version, la
+# lectura falla y aqui eso es un aviso, no el final del despliegue.
+IDENTITY_ADMIN_CREDENTIALS=""
+if [[ -n "${SECRET_IDENTITY_ADMIN_NAME}" ]]; then
+  IDENTITY_ADMIN_CREDENTIALS="$(secret_value "${SECRET_IDENTITY_ADMIN_NAME}" || true)"
+  if [[ -z "${IDENTITY_ADMIN_CREDENTIALS}" ]]; then
+    log "aviso: ${SECRET_IDENTITY_ADMIN_NAME} no tiene valor todavia; invitar cuentas devolvera 503"
+  else
+    # Una clave de cuenta de servicio se descarga como JSON con saltos de linea.
+    # Un valor multilinea rompe el .env (el compose leeria solo la primera
+    # linea), asi que se compacta a una sola linea. Sigue siendo el MISMO JSON:
+    # los saltos que van dentro de la clave privada quedan escapados como \n,
+    # que es como el JSON los representa de todas formas.
+    IDENTITY_ADMIN_CREDENTIALS="$(
+      printf '%s' "${IDENTITY_ADMIN_CREDENTIALS}" |
+        python3 -c 'import json,sys; sys.stdout.write(json.dumps(json.load(sys.stdin), separators=(",", ":")))'
+    )"
+  fi
+fi
+
+# La contrasena viaja dentro de una URL, asi que hay que escaparla: un `/`, un
+# `@` o un `#` en el valor partirian la cadena de conexion por el sitio
+# equivocado y el error seria "host desconocido", que no apunta aqui. El README
+# recomienda generarla en hexadecimal (donde esto nunca haria falta), pero el
+# valor lo pone un humano en Secret Manager y no se puede dar por supuesto.
+#
+# El host es `postgres`: el nombre del servicio en la red interna del compose.
+POSTGRES_PASSWORD_ENC="$(
+  printf '%s' "${POSTGRES_PASSWORD}" |
+    python3 -c 'import sys,urllib.parse; sys.stdout.write(urllib.parse.quote(sys.stdin.read(), safe=""))'
+)"
+DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD_ENC}@postgres:5432/${POSTGRES_DB}"
 
 # Se escribe a un temporal y se mueve: si algo falla a mitad, el .env anterior
 # sigue intacto y el stack sigue en pie.
@@ -124,6 +187,20 @@ trap 'rm -f "${TMP_ENV}"' EXIT
   echo "LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}"
   # No es un secreto: es el id del proyecto de GCP. No pasa por Secret Manager.
   echo "FIREBASE_PROJECT_ID=${AUTH_PROJECT_ID}"
+  # Directorio de usuarios e invitaciones (issue #24). Las tres POSTGRES_* las
+  # consume el contenedor de la base; DATABASE_URL la consume el servidor. Se
+  # escriben las cuatro porque describen los dos lados de la misma conexion y
+  # descuadrarlas es el fallo que hay que hacer imposible.
+  echo "POSTGRES_USER=${POSTGRES_USER}"
+  echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
+  echo "POSTGRES_DB=${POSTGRES_DB}"
+  echo "DATABASE_URL=${DATABASE_URL}"
+  # Tampoco es un secreto: es una direccion de correo. Mismo criterio que
+  # FIREBASE_PROJECT_ID.
+  echo "BOOTSTRAP_SUPERADMIN_EMAIL=${BOOTSTRAP_SUPERADMIN_EMAIL}"
+  # Vacia mientras no haya cuenta de servicio de Identity Platform. El servidor
+  # arranca igual y solo el endpoint de invitar responde 503.
+  echo "IDENTITY_ADMIN_CREDENTIALS=${IDENTITY_ADMIN_CREDENTIALS}"
 } >"${TMP_ENV}"
 
 chown root:root "${TMP_ENV}"
