@@ -19,6 +19,8 @@ import {
   OfficeRoom,
   type StatusMessage,
 } from './OfficeRoom.ts';
+import type { DirectoryUser, UserDirectory } from './directory/directoryPort.ts';
+import { createMemoryDirectory } from './directory/memoryDirectory.ts';
 import type { OfficeState } from './schema.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 
@@ -29,7 +31,9 @@ const openRooms: { leave: () => Promise<number> }[] = [];
 // Un servidor por test da aislamiento de estado, pero cada `Server` de Colyseus
 // registra su propio handler de `uncaughtException` y con 10 tests se pasa del
 // limite por defecto de 10. Es ruido del arnes, no una fuga del codigo propio.
-process.setMaxListeners(50);
+// Subido a 100 al anadir los tests del directorio (#24), que levantan un
+// servidor mas por caso.
+process.setMaxListeners(100);
 
 beforeEach(async () => {
   server = createOfficeServer();
@@ -479,5 +483,212 @@ describe('OfficeRoom: nombre derivado de la identidad (#8)', () => {
     );
 
     expect(name).toHaveLength(MAX_NAME_LENGTH);
+  });
+});
+
+/**
+ * Directorio en `onAuth` (#24). El verificador y el directorio responden dos
+ * preguntas distintas y ambas tienen que decir que si: la firma prueba QUIEN
+ * es, y el directorio dice si esa persona puede entrar HOY. Sin la segunda, un
+ * invitado de un dia entra para siempre, porque Identity Platform renueva su
+ * token indefinidamente mientras la cuenta exista.
+ *
+ * Se usa el directorio en memoria y no Postgres por lo mismo que el resto de la
+ * suite: una prueba que exige infraestructura levantada acaba sin correrse.
+ */
+function seededUser(overrides: Partial<DirectoryUser>): DirectoryUser {
+  return {
+    id: '11111111-1111-4111-8111-111111111111',
+    uid: 'uid-ana',
+    email: 'ana@example.com',
+    displayName: 'Ana',
+    role: 'employee',
+    status: 'active',
+    expiresAt: null,
+    invitedBy: null,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+async function startServerWithDirectory(directory: UserDirectory) {
+  const withDirectory = createOfficeServer({
+    auth: stubVerifier({ 'token-de-ana': ANA }),
+    directory,
+  });
+  const port = await withDirectory.listen(0);
+  return { server: withDirectory, endpoint: `ws://localhost:${port}` };
+}
+
+describe('OfficeRoom: onAuth con directorio (#24)', () => {
+  let directoryServer: OfficeServer;
+  let directoryEndpoint: string;
+
+  async function start(directory: UserDirectory) {
+    const started = await startServerWithDirectory(directory);
+    directoryServer = started.server;
+    directoryEndpoint = started.endpoint;
+  }
+
+  function joinWithToken(token = 'token-de-ana') {
+    return new Client(directoryEndpoint).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token });
+  }
+
+  afterEach(async () => {
+    await directoryServer?.shutdown();
+  });
+
+  it('un usuario activo del directorio entra igual que antes', async () => {
+    await start(createMemoryDirectory());
+
+    const room = await joinWithToken();
+    openRooms.push(room);
+    await waitFor(() => room.state.players.size === 1);
+
+    expect(room.state.players.get(room.sessionId)?.name).toBe('Ana Gomez');
+    expect(directoryServer.sessions.uidOf(room.sessionId)).toBe('uid-ana');
+  });
+
+  it('el primer login crea la fila: entrar con un token valido basta', async () => {
+    const directory = createMemoryDirectory();
+    await start(directory);
+
+    const room = await joinWithToken();
+    openRooms.push(room);
+    await waitFor(() => room.state.players.size === 1);
+
+    expect((await directory.findByUid('uid-ana'))?.email).toBe('ana@example.com');
+  });
+
+  it('un invitado caducado NO entra, aunque su token siga siendo valido', async () => {
+    // El nucleo del issue: la firma de Google sigue siendo buena y el token se
+    // renueva solo. Lo unico que cierra la puerta es la fecha de esta tabla.
+    await start(
+      createMemoryDirectory({
+        seed: [seededUser({ role: 'guest', expiresAt: new Date('2020-01-01T00:00:00.000Z') })],
+      }),
+    );
+
+    await expect(joinWithToken()).rejects.toMatchObject({ code: 401 });
+  });
+
+  it('un invitado con la caducidad en el futuro si entra', async () => {
+    await start(
+      createMemoryDirectory({
+        seed: [seededUser({ role: 'guest', expiresAt: new Date('2099-01-01T00:00:00.000Z') })],
+      }),
+    );
+
+    const room = await joinWithToken();
+    openRooms.push(room);
+    await waitFor(() => room.state.players.size === 1);
+
+    expect(directoryServer.sessions.has(room.sessionId)).toBe(true);
+  });
+
+  it('una cuenta revocada NO entra', async () => {
+    await start(createMemoryDirectory({ seed: [seededUser({ status: 'revoked' })] }));
+
+    await expect(joinWithToken()).rejects.toMatchObject({ code: 401 });
+  });
+
+  it('quien no esta en el directorio NO entra', async () => {
+    // El directorio en memoria devuelve `null` cuando el token no trae email,
+    // que es el caso real de una cuenta anonima o por telefono: no hay clave
+    // humana con la que casar una invitacion.
+    const withDirectory = createOfficeServer({
+      auth: stubVerifier({
+        'token-sin-email': { uid: 'uid-anon', email: null, name: null },
+      }),
+      directory: createMemoryDirectory(),
+    });
+    const port = await withDirectory.listen(0);
+
+    await expect(
+      new Client(`ws://localhost:${port}`).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, {
+        token: 'token-sin-email',
+      }),
+    ).rejects.toMatchObject({ code: 401 });
+
+    await withDirectory.shutdown();
+  });
+
+  it('el rechazo del directorio es el MISMO 401 mudo que el de un token forjado', async () => {
+    // A proposito: si "caducado" y "token invalido" se distinguiesen desde
+    // fuera, quien sondea sabria que esa cuenta existe y que existio un acceso
+    // legitimo. El motivo va al log del servidor, que no lo lee nadie de fuera.
+    await start(createMemoryDirectory({ seed: [seededUser({ status: 'revoked' })] }));
+
+    await expect(joinWithToken()).rejects.toMatchObject({ code: 401 });
+    await expect(joinWithToken('token-forjado')).rejects.toMatchObject({ code: 401 });
+  });
+
+  it('un rechazo del directorio no deja rastro en el registro de sesiones', async () => {
+    await start(createMemoryDirectory({ seed: [seededUser({ status: 'revoked' })] }));
+
+    await expect(joinWithToken()).rejects.toThrow();
+
+    expect(directoryServer.sessions.size()).toBe(0);
+  });
+});
+
+describe('OfficeRoom: el motivo del rechazo se registra en el servidor (#24)', () => {
+  /**
+   * Se invoca `onAuth` directamente en vez de por WebSocket: lo que se prueba
+   * es lo que el operador vera en el log, y eso no viaja por la red. El mismo
+   * recurso que usa el test del "status fantasma" de mas arriba.
+   */
+  async function denyAndCaptureLog(directory: UserDirectory) {
+    const logged: string[] = [];
+    const room = new OfficeRoom();
+    (room as unknown as { onMessage: unknown }).onMessage = () => () => {};
+    room.onCreate({
+      auth: stubVerifier({ 'token-de-ana': ANA }),
+      directory,
+      logDirectoryDenial: (decision, uid) => logged.push(`${decision}:${uid}`),
+    });
+
+    await expect(
+      room.onAuth({} as ServerClient, { token: 'token-de-ana' }, {} as never),
+    ).rejects.toThrow();
+
+    return logged;
+  }
+
+  it('registra "expired" con el uid cuando caduca la invitacion', async () => {
+    // El log SI distingue, y esa es la unica razon por la que existe: "todo el
+    // mundo cae en not-provisioned" (las migraciones no corrieron) y "un
+    // invitado caduco" son la misma respuesta HTTP y dos incidencias distintas.
+    const logged = await denyAndCaptureLog(
+      createMemoryDirectory({
+        seed: [seededUser({ role: 'guest', expiresAt: new Date('2020-01-01T00:00:00.000Z') })],
+      }),
+    );
+
+    expect(logged).toEqual(['expired:uid-ana']);
+  });
+
+  it('registra "revoked" cuando la cuenta esta revocada', async () => {
+    const logged = await denyAndCaptureLog(
+      createMemoryDirectory({ seed: [seededUser({ status: 'revoked' })] }),
+    );
+
+    expect(logged).toEqual(['revoked:uid-ana']);
+  });
+
+  it('no registra nada cuando la persona entra', async () => {
+    const logged: string[] = [];
+    const room = new OfficeRoom();
+    (room as unknown as { onMessage: unknown }).onMessage = () => () => {};
+    room.onCreate({
+      auth: stubVerifier({ 'token-de-ana': ANA }),
+      directory: createMemoryDirectory(),
+      logDirectoryDenial: (decision, uid) => logged.push(`${decision}:${uid}`),
+    });
+
+    await expect(
+      room.onAuth({} as ServerClient, { token: 'token-de-ana' }, {} as never),
+    ).resolves.toMatchObject({ uid: 'uid-ana' });
+    expect(logged).toEqual([]);
   });
 });

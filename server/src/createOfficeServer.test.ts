@@ -14,6 +14,8 @@ import { Client } from 'colyseus.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LIVEKIT_ROOM_NAME } from '../../src/game/officeProtocol.ts';
 import { createOfficeServer, type OfficeServer } from './createOfficeServer.ts';
+import type { UserDirectory } from './directory/directoryPort.ts';
+import { createMemoryDirectory } from './directory/memoryDirectory.ts';
 import { OFFICE_ROOM_NAME } from './OfficeRoom.ts';
 import type { OfficeState } from './schema.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
@@ -211,11 +213,76 @@ describe('POST /livekit/token', () => {
 });
 
 describe('GET /health', () => {
-  it('con la auth desactivada informa `auth: disabled`', async () => {
+  it('con la auth y el directorio desactivados lo informa de los dos', async () => {
     const res = await fetch(`${baseUrl}/health`);
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, room: OFFICE_ROOM_NAME, auth: 'disabled' });
+    expect(await res.json()).toEqual({
+      ok: true,
+      room: OFFICE_ROOM_NAME,
+      auth: 'disabled',
+      directory: 'disabled',
+    });
+  });
+});
+
+/**
+ * El directorio (#24) tiene el mismo problema de diagnostico que la auth: un
+ * despliegue sin `DATABASE_URL` arranca perfectamente y deja entrar a todo el
+ * mundo para siempre, sin un solo error en el log. La unica forma de notarlo
+ * desde fuera es preguntarselo.
+ */
+describe('createOfficeServer con directorio (#24)', () => {
+  function serverWithDirectory(directory: UserDirectory) {
+    return createOfficeServer({ auth: null, directory });
+  }
+
+  it('informa `directory: enabled` en /health', async () => {
+    const withDirectory = serverWithDirectory(createMemoryDirectory());
+    const port = await withDirectory.listen(0);
+
+    const res = await fetch(`http://localhost:${port}/health`);
+
+    expect(await res.json()).toEqual({
+      ok: true,
+      room: OFFICE_ROOM_NAME,
+      auth: 'disabled',
+      directory: 'enabled',
+    });
+    await withDirectory.shutdown();
+  });
+
+  it('expone el directorio para las rutas de administracion y para los tests', async () => {
+    const directory = createMemoryDirectory();
+    const withDirectory = serverWithDirectory(directory);
+
+    expect(withDirectory.directory).toBe(directory);
+    await withDirectory.shutdown();
+  });
+
+  it('un `directory: null` explicito fuerza el modo sin directorio', async () => {
+    const withoutDirectory = createOfficeServer({ auth: null, directory: null });
+
+    expect(withoutDirectory.directory).toBeUndefined();
+    await withoutDirectory.shutdown();
+  });
+
+  it('shutdown() cierra el directorio', async () => {
+    // Sin esto, el pool de Postgres se queda con conexiones vivas: en
+    // produccion son conexiones que la base de datos sigue contando, y en los
+    // tests es un proceso de vitest que no termina.
+    const directory = createMemoryDirectory();
+    let closed = 0;
+    const withDirectory = serverWithDirectory({
+      ...directory,
+      async close() {
+        closed++;
+      },
+    });
+
+    await withDirectory.shutdown();
+
+    expect(closed).toBe(1);
   });
 });
 
@@ -275,7 +342,12 @@ describe('POST /livekit/token con auth activa (#8)', () => {
   it('informa `auth: enabled` en /health', async () => {
     const res = await fetch(`${authBaseUrl}/health`);
 
-    expect(await res.json()).toEqual({ ok: true, room: OFFICE_ROOM_NAME, auth: 'enabled' });
+    expect(await res.json()).toEqual({
+      ok: true,
+      room: OFFICE_ROOM_NAME,
+      auth: 'enabled',
+      directory: 'disabled',
+    });
   });
 
   it('200 cuando el uid del token es el dueno de la sesion', async () => {

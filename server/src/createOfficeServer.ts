@@ -19,6 +19,8 @@ import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { LIVEKIT_ROOM_NAME } from '../../src/game/officeProtocol.ts';
 import { resolveAuthConfig } from './authConfig.ts';
+import type { UserDirectory } from './directory/directoryPort.ts';
+import { directoryFromEnv, type DirectoryRuntime } from './directory/fromEnv.ts';
 import { createLiveSessionRegistry, type LiveSessionRegistry } from './liveSessions.ts';
 import { mintOfficeToken } from './livekitToken.ts';
 import { OFFICE_ROOM_NAME, OfficeRoom } from './OfficeRoom.ts';
@@ -116,6 +118,11 @@ export interface OfficeServer {
   httpServer: HttpServer;
   /** Registro de sesiones vivas (D4); expuesto para la ruta y para tests. */
   sessions: LiveSessionRegistry;
+  /**
+   * Directorio de usuarios (#24), o `undefined` si esta desactivado. Expuesto
+   * para las rutas de administracion y para los tests, igual que `sessions`.
+   */
+  directory?: UserDirectory;
   /** Puerto realmente asignado. Con `listen(0)` lo elige el sistema. */
   port(): number;
   listen(port: number): Promise<number>;
@@ -140,6 +147,14 @@ export interface OfficeServerOverrides {
    * justo lo que `liveSessions.ts` evita al no ser un singleton de modulo.
    */
   auth?: IdTokenVerifier | null;
+  /**
+   * Sustituye el directorio que saldria de `process.env` (#24). `null` fuerza
+   * el modo sin directorio. Existe por la misma razon que el de arriba, y por
+   * una mas: sin este override, probar la caducidad exigiria un Postgres
+   * levantado, y una suite que necesita infraestructura acaba sin correrse.
+   * Ver `memoryDirectory.ts`.
+   */
+  directory?: UserDirectory | null;
 }
 
 export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeServer {
@@ -190,12 +205,35 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
       ? (overrides.auth ?? undefined)
       : authVerifierFromEnv(process.env);
 
+  /**
+   * Mismo patron que `auth`, con una pieza mas: del entorno sale ademas la
+   * migracion, porque aplicar el esquema necesita el pool y el pool no sale del
+   * puerto (ver `fromEnv.ts`). Un directorio inyectado por un test no tiene
+   * esquema que aplicar, asi que su `migrate` no hace nada.
+   */
+  const directoryRuntime: DirectoryRuntime | undefined =
+    overrides?.directory !== undefined
+      ? overrides.directory
+        ? { directory: overrides.directory, async migrate() {} }
+        : undefined
+      : directoryFromEnv(process.env);
+  const directory = directoryRuntime?.directory;
+
   app.get('/health', (_req, res) => {
     // `auth` expone el modo EFECTIVO, no la variable de entorno: es la unica
     // forma de notar desde fuera que un despliegue se ha quedado sin
     // `FIREBASE_PROJECT_ID` y por tanto sin la guarda de dueno de sesion. No
     // dice el projectId: no hace falta para eso y es informacion del proyecto.
-    res.json({ ok: true, room: OFFICE_ROOM_NAME, auth: auth ? 'enabled' : 'disabled' });
+    //
+    // `directory` esta aqui por lo mismo (#24): sin `DATABASE_URL` el servidor
+    // arranca igual de bien y deja entrar a todo el mundo para siempre, sin un
+    // solo error en el log. Tampoco dice a que base de datos apunta.
+    res.json({
+      ok: true,
+      room: OFFICE_ROOM_NAME,
+      auth: auth ? 'enabled' : 'disabled',
+      directory: directory ? 'enabled' : 'disabled',
+    });
   });
 
   app.post('/livekit/token', (req, res) => {
@@ -217,23 +255,38 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   });
   // D4: el registro se inyecta via options, `OfficeRoom` no lo crea. Lo mismo
   // con el verificador (#8): la sala no lee `process.env`.
-  gameServer.define(OFFICE_ROOM_NAME, OfficeRoom, { sessions, auth });
+  gameServer.define(OFFICE_ROOM_NAME, OfficeRoom, { sessions, auth, directory });
 
   return {
     gameServer,
     httpServer,
     sessions,
+    directory,
     port() {
       const address = httpServer.address() as AddressInfo | null;
       if (!address) throw new Error('server is not listening yet');
       return address.port;
     },
     async listen(port) {
+      // Las migraciones van ANTES de aceptar conexiones, y su error se propaga
+      // en vez de tragarse. Un servidor escuchando sobre un esquema a medias
+      // aceptaria logins y fallaria en la primera consulta, con un error que no
+      // menciona las migraciones por ningun lado; fallar aqui deja el motivo
+      // real ("connection refused", "permission denied") en la primera linea.
+      //
+      // No contradice la degradacion de `bootstrapConfig.ts`: aquello es "sin
+      // configuracion, sin directorio", y esto es "con configuracion que no se
+      // puede cumplir". Lo segundo no es un modo degradado, es una averia.
+      await directoryRuntime?.migrate();
       await gameServer.listen(port);
       return this.port();
     },
     async shutdown() {
       await gameServer.gracefullyShutdown(false);
+      // El pool queda con conexiones vivas si no se cierra: en produccion son
+      // conexiones que la base de datos sigue contando, y en los tests es un
+      // proceso de vitest que no termina.
+      await directory?.close();
     },
   };
 }
