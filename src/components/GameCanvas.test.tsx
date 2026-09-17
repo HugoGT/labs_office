@@ -107,3 +107,51 @@ describe('GameCanvas', () => {
     expect(state.created).toBe(state.destroyed);
   });
 });
+
+describe('GameCanvas: sesion autenticada (#8)', () => {
+  const session = { displayName: 'Ana Torres', getIdToken: async () => 'id-token' };
+
+  it('sin sesion no manda nada de mas a createGame: la oficina abierta no cambia', () => {
+    trackInstances();
+
+    render(<GameCanvas bridge={bridge} endpoint="ws://oficina.local:2567" />);
+
+    // Ni `playerName` ni `getIdToken` viajan como `undefined`: el camino sin
+    // autenticacion tiene que seguir siendo exactamente el de antes.
+    expect(createGameMock).toHaveBeenCalledWith(expect.anything(), bridge, {
+      endpoint: 'ws://oficina.local:2567',
+    });
+  });
+
+  it('con sesion lleva el nombre y el modo de pedir el token hasta la escena', () => {
+    trackInstances();
+
+    render(<GameCanvas bridge={bridge} endpoint="ws://oficina.local:2567" session={session} />);
+
+    expect(createGameMock).toHaveBeenCalledWith(expect.anything(), bridge, {
+      endpoint: 'ws://oficina.local:2567',
+      playerName: 'Ana Torres',
+      getIdToken: expect.any(Function),
+    });
+  });
+
+  it('el getIdToken que llega a la escena delega en la sesion, no lleva un token copiado', async () => {
+    trackInstances();
+
+    render(<GameCanvas bridge={bridge} session={session} />);
+    const options = createGameMock.mock.calls[0][2];
+
+    await expect(options?.getIdToken?.()).resolves.toBe('id-token');
+  });
+
+  it('con la misma sesion no recrea Phaser en cada render', () => {
+    const state = trackInstances();
+
+    const { rerender } = render(<GameCanvas bridge={bridge} session={session} />);
+    rerender(<GameCanvas bridge={bridge} session={session} />);
+
+    // La identidad de la sesion la mantiene `AuthGate` con `useMemo`; si aqui
+    // se recrease algo por render, el juego se caeria y se levantaria solo.
+    expect(state.created).toBe(1);
+  });
+});

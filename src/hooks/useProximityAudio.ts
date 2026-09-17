@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { OfficeSession } from '../auth/authPort';
 import type { LivekitConfig } from '../game/livekitEndpoint';
 import { connectLivekitRoom, type LivekitRoomConnection } from '../game/livekitRoom';
-import { fetchLivekitToken, type LivekitTokenResponse } from '../game/livekitTokenClient';
+import {
+  fetchLivekitToken,
+  type LivekitTokenRequest,
+  type LivekitTokenResponse,
+} from '../game/livekitTokenClient';
 import type { OfficeBridge } from '../game/officeBridge';
 import { DO_NOT_DISTURB, type PresenceStatus } from '../game/officeProtocol';
 
@@ -19,13 +24,20 @@ export interface UseProximityAudioOptions {
   config: LivekitConfig | null;
   /** Estado de presencia elegido por el usuario; React es su dueno (ver `OfficeShell`). */
   status: PresenceStatus;
+  /**
+   * Sesion autenticada (#8), o `null` sin autenticacion. El servidor cruza el
+   * ID token con la sesion de Colyseus antes de emitir el token de LiveKit
+   * (`forbidden-session`), asi que sin el no hay audio cuando la auth esta
+   * encendida. Con ella apagada la peticion viaja igual que antes.
+   */
+  session?: OfficeSession | null;
   /** Inyectable para pruebas; por defecto la implementacion real. */
   connect?: (opts: {
     url: string;
     token: string;
     onAudioPlaybackChanged?: (canPlayback: boolean) => void;
   }) => Promise<LivekitRoomConnection>;
-  fetchToken?: (tokenUrl: string, sessionId: string) => Promise<LivekitTokenResponse>;
+  fetchToken?: (request: LivekitTokenRequest) => Promise<LivekitTokenResponse>;
 }
 
 export interface UseProximityAudioResult {
@@ -52,6 +64,7 @@ export function useProximityAudio(
   {
     config,
     status,
+    session = null,
     connect = connectLivekitRoom,
     fetchToken = fetchLivekitToken,
   }: UseProximityAudioOptions,
@@ -98,7 +111,14 @@ export function useProximityAudio(
 
       void (async () => {
         try {
-          const tokenResponse = await fetchToken(config.tokenUrl, pendingSessionId);
+          // Se pide en cada conexion y no una vez al entrar: el ID token dura
+          // mas o menos una hora y esta ruta puede correr mucho despues.
+          const idToken = session ? await session.getIdToken() : null;
+          const tokenResponse = await fetchToken({
+            tokenUrl: config.tokenUrl,
+            sessionId: pendingSessionId,
+            token: idToken,
+          });
           const connection = await connect({
             url: config.url ?? tokenResponse.url,
             token: tokenResponse.token,
@@ -123,8 +143,9 @@ export function useProximityAudio(
           setAudioAvailable(true);
           connection.setDesiredPeers(pendingSessionIds);
         } catch {
-          // Rechazo de connect() (p.ej. navegador sin soporte, servidor
-          // caido): degrada a sin audio, nunca lanza, nunca reintenta solo.
+          // Rechazo de connect(), de la peticion del token o de la propia
+          // sesion (p.ej. navegador sin soporte, servidor caido, token
+          // caducado): degrada a sin audio, nunca lanza, nunca reintenta solo.
           if (sessionRef.current === pendingSessionId) {
             setAudioAvailable(false);
           }
@@ -137,7 +158,7 @@ export function useProximityAudio(
       unsubscribe();
       void teardown();
     };
-  }, [bridge, config, connect, fetchToken]);
+  }, [bridge, config, session, connect, fetchToken]);
 
   /**
    * Efecto aparte del de conexion: meter `status` en las dependencias de

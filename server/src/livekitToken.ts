@@ -8,20 +8,31 @@
  *
  * ## El limite exacto de la guarda de sesion (referida desde `liveSessions.ts`)
  *
- * El adaptador de `createOfficeServer.ts` solo emite token si el `sessionId`
- * esta en el registro de sesiones vivas. Eso es todo lo que comprueba.
+ * El adaptador de `createOfficeServer.ts` emite token si el `sessionId` esta en
+ * el registro de sesiones vivas y, cuando la auth esta activa, si ademas el
+ * cuerpo trae un ID token verificado cuyo uid es el que `OfficeRoom.onAuth`
+ * ligo a ese `sessionId` al entrar (#8).
  *
- * Lo que SI bloquea: ids inventados, ids caducados, y el replay despues de
- * que el cliente haga `leave()`.
+ * Lo que SI bloquea con la auth activa: ids inventados, ids caducados, el
+ * replay despues de `leave()`, y -- esto es lo nuevo -- que un participante lea
+ * el `sessionId` de otro en el estado de la sala y pida un token en su nombre.
+ * Eso ahora responde 403 `forbidden-session` aunque quien pregunte tenga un
+ * token perfectamente valido: la guarda es de propiedad, no solo de identidad.
  *
- * Lo que NO bloquea: el `sessionId` de cada participante es visible en el
- * estado de la sala, asi que cualquier cliente puede leer el de otro y pedir
- * un token en su nombre. Nada aqui demuestra la propiedad del WebSocket.
+ * Lo que sigue SIN estar resuelto, incluso con la auth activa:
  *
- * **Esto NO es autenticacion.** Es una barrera contra el reclamo accidental
- * de identidad, no contra un atacante. La frontera de verdad llega con Google
- * OAuth (PRD 10), fuera de alcance en este cambio. No anotar esto como
- * "auth resuelta".
+ * - Una misma persona con dos pestanas tiene dos sesiones y el mismo uid, asi
+ *   que puede pedir el token de cualquiera de sus dos sesiones. No es un
+ *   agujero de suplantacion, pero tampoco es aislamiento por conexion.
+ * - No hay roles ni permisos: todo el que entra recibe los mismos grants de
+ *   LiveKit. Quien puede publicar audio en que sitio es la issue #7.
+ * - No hay invitaciones: basta con tener cuenta en el proyecto de Identity
+ *   Platform, y hoy esas cuentas las crea un administrador a mano (issue #7).
+ * - El CORS de `createOfficeServer.ts` sigue abierto en `*` (issue #9).
+ *
+ * Y lo que desaparece del todo si no hay `FIREBASE_PROJECT_ID`: sin config no
+ * hay verificador, la guarda vuelve a ser solo "la sesion esta viva", y todo lo
+ * de arriba deja de aplicar. Ver `authConfig.ts`.
  */
 
 import { AccessToken } from 'livekit-server-sdk';

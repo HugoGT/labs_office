@@ -132,9 +132,11 @@ export function BottomBar({
       </div>
       <div className={styles.nearby}>
         {visibleChips.map((name, index) => (
-          // Nombres duplicados son alcanzables entre companeros reales
-          // (#321: ambos siguen como "HugoGT" hasta que llegue Google OAuth),
-          // asi que `key={name}` colisionaria. La key se cualifica por
+          // Nombres duplicados son alcanzables entre companeros reales, asi que
+          // `key={name}` colisionaria. Con #8 los nombres ya salen del token
+          // verificado, pero eso no los hace unicos: dos cuentas pueden
+          // llamarse igual, y sin autenticacion todo el mundo sigue entrando
+          // con el nombre por defecto. La key se cualifica por
           // posicion en vez de deduplicar nombres (D7): perder un chip por
           // colision de key ocultaria a una persona real que si se escucha.
           <span key={`${name}-${index}`} className={styles.chip}>

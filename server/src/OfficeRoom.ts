@@ -6,9 +6,14 @@
  * `move` se valida y se recorta contra los limites del mundo antes de tocar el
  * estado, porque cualquiera puede abrir una consola y mandar
  * `{ x: 1e9, y: -1 }`. Lo mismo con el nombre y con los enumerados.
+ *
+ * Desde #8 esa regla tiene un segundo piso: con un verificador inyectado,
+ * `onAuth` exige un ID token valido antes de dejar entrar, y el nombre pasa a
+ * salir del token en vez de `options.name`. Sin verificador la sala se comporta
+ * exactamente como antes, puerta abierta incluida.
  */
 
-import { Room, type Client } from '@colyseus/core';
+import { Room, ServerError, type AuthContext, type Client } from '@colyseus/core';
 import {
   PLAYER_SPAWN_TX,
   PLAYER_SPAWN_TY,
@@ -27,6 +32,7 @@ import {
 } from '../../src/game/officeProtocol.ts';
 import type { LiveSessionRegistry } from './liveSessions.ts';
 import { OfficeState, createPlayerState } from './schema.ts';
+import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 
 export { DEFAULT_NAME, MAX_NAME_LENGTH, OFFICE_ROOM_NAME };
 
@@ -78,6 +84,27 @@ export function sanitizeStatus(raw: unknown): string {
   return isPresenceStatus(raw) ? raw : DEFAULT_STATUS;
 }
 
+/**
+ * Nombre que se muestra sobre el avatar de alguien autenticado. El `name` del
+ * token es lo primero; si no viene (cuentas por telefono, anonimas, o un perfil
+ * sin rellenar) la parte local del email es lo que esa persona reconoce de si
+ * misma, y el dominio no aporta nada en una etiqueta.
+ *
+ * NO recorta la longitud a proposito: de eso se sigue encargando `sanitizeName`
+ * en `onJoin`, para que `MAX_NAME_LENGTH` viva en un solo sitio. Un `name` de
+ * 200 caracteres es perfectamente emitible en un token firmado -- viene firmado,
+ * no saneado.
+ */
+export function deriveIdentityName(identity: VerifiedIdentity, fallback: string): string {
+  const name = identity.name?.trim();
+  if (name) return name;
+
+  const localPart = identity.email?.split('@')[0]?.trim();
+  if (localPart) return localPart;
+
+  return fallback;
+}
+
 export interface OfficeRoomOptions {
   /**
    * Registro de sesiones vivas para LiveKit (D4), inyectado por
@@ -86,15 +113,34 @@ export interface OfficeRoomOptions {
    * modulo, los tests quedarian acoplados al orden de ejecucion.
    */
   sessions?: LiveSessionRegistry;
+  /**
+   * Verificador de ID tokens (#8), inyectado por la misma via y por la misma
+   * razon. Ausente significa auth desactivada: la sala vuelve a ser la puerta
+   * abierta de siempre. Ver `authConfig.ts` para cuando pasa eso.
+   */
+  auth?: IdTokenVerifier;
 }
 
-export class OfficeRoom extends Room<OfficeState> {
+/**
+ * Lo que Colyseus deja en `client.auth`. El `true` no es decorativo: Colyseus
+ * rechaza el join si `onAuth` devuelve algo falsy, asi que el modo sin auth
+ * tiene que devolver `true`, y ese `true` acaba en `client.auth` tal cual. Si
+ * el generico dijera solo `VerifiedIdentity`, `onJoin` trataria ese `true` como
+ * una identidad valida y le pondria a todo el mundo el nombre por defecto --
+ * ocurrio de verdad al implementarlo, y solo salto porque los tests del camino
+ * abierto siguen exigiendo `options.name`.
+ */
+type OfficeAuthData = VerifiedIdentity | true;
+
+export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthData> {
   private joinCount = 0;
   private sessions?: LiveSessionRegistry;
+  private auth?: IdTokenVerifier;
 
   onCreate(options?: OfficeRoomOptions): void {
     this.state = new OfficeState();
     this.sessions = options?.sessions;
+    this.auth = options?.auth;
 
     this.onMessage('move', (client: Client, message: MoveMessage) => {
       const player = this.state.players.get(client.sessionId);
@@ -124,14 +170,56 @@ export class OfficeRoom extends Room<OfficeState> {
     });
   }
 
-  onJoin(client: Client, options?: { name?: unknown; status?: unknown }): void {
+  /**
+   * Hook de instancia de Colyseus 0.16 (firma confirmada en
+   * `node_modules/@colyseus/core/build/Room.d.ts:149`). Corre ANTES de `onJoin`
+   * y de reservar el asiento, asi que un token invalido no llega a tocar ni el
+   * estado ni el registro de sesiones.
+   *
+   * Sin verificador devuelve `true`, que es literalmente lo que hacia la sala
+   * hasta ahora: nadie queda fuera. Con verificador, lo que devuelve es la
+   * identidad, y Colyseus la deja en `client.auth` para `onJoin`.
+   *
+   * `ServerError` SI lo exporta `@colyseus/core` (comprobado en su
+   * `build/index.d.ts`), asi que el cliente recibe un 401 con `unauthorized` en
+   * vez de un 500 generico. El mensaje es deliberadamente mudo: no distingue
+   * "sin token" de "token caducado" de "token forjado", por la misma razon que
+   * `verifyIdToken.verify` devuelve `null` y no un motivo.
+   */
+  async onAuth(
+    _client: Client<unknown, OfficeAuthData>,
+    options: unknown,
+    _context: AuthContext,
+  ): Promise<OfficeAuthData> {
+    if (!this.auth) return true;
+
+    const token = (options as { token?: unknown } | null | undefined)?.token;
+    const identity = await this.auth.verify(token);
+    if (identity === null) throw new ServerError(401, 'unauthorized');
+
+    return identity;
+  }
+
+  onJoin(
+    client: Client<unknown, OfficeAuthData>,
+    options?: { name?: unknown; status?: unknown },
+  ): void {
     const [dx, dy] = SPAWN_RING[this.joinCount % SPAWN_RING.length];
     this.joinCount++;
+
+    // Con identidad verificada, `options.name` deja de ser una fuente legitima:
+    // lo escribe el cliente y en una oficina autenticada dejaria a cualquiera
+    // rotularse con el nombre de otra persona. Sin identidad se mantiene el
+    // camino de siempre. En ambos casos pasa por `sanitizeName`, que es quien
+    // hace valer `MAX_NAME_LENGTH`.
+    const identity = client.auth === true ? undefined : client.auth;
 
     this.state.players.set(
       client.sessionId,
       createPlayerState({
-        name: sanitizeName(options?.name),
+        name: sanitizeName(
+          identity ? deriveIdentityName(identity, DEFAULT_NAME) : options?.name,
+        ),
         x: (PLAYER_SPAWN_TX + dx) * TILE + TILE / 2,
         y: (PLAYER_SPAWN_TY + dy) * TILE + TILE / 2,
         status: sanitizeStatus(options?.status),
@@ -139,7 +227,10 @@ export class OfficeRoom extends Room<OfficeState> {
       }),
     );
 
-    this.sessions?.add(client.sessionId);
+    // El uid es lo que convierte al registro en una prueba de propiedad: sin el
+    // (auth desactivada) solo prueba que la sesion esta viva. Ver
+    // `liveSessions.ts` y la guarda de `POST /livekit/token`.
+    this.sessions?.add(client.sessionId, identity?.uid);
   }
 
   onLeave(client: Client): void {

@@ -73,6 +73,11 @@ services:
       LIVEKIT_URL: "wss://${LK_HOST}"
       LIVEKIT_API_KEY: "${LIVEKIT_API_KEY}"
       LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET}"
+      # Issue #8. Vacia: el servidor no exige autenticacion, igual que antes.
+      # Con el id del proyecto de Identity Platform: falla cerrado y solo entran
+      # los que traen un ID token valido. `GET /health` dice en cual de los dos
+      # modos esta corriendo.
+      FIREBASE_PROJECT_ID: "${FIREBASE_PROJECT_ID:-}"
     # Tampoco publica el 2567 al host: la unica entrada es Caddy sobre 443.
     networks: [office]
 
