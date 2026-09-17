@@ -7,8 +7,16 @@
 
 import type Phaser from 'phaser';
 import { makeCharacter, setCharacterFacing, type CharacterContainer } from './characters';
-import { STATUS_COLOR, type NpcStatus } from './npcData';
-import { DEFAULT_FACING, FACINGS, MOVE_INTERVAL_MS, type Facing } from './officeProtocol';
+import {
+  DEFAULT_FACING,
+  DEFAULT_STATUS,
+  FACINGS,
+  MOVE_INTERVAL_MS,
+  isPresenceStatus,
+  type Facing,
+  type PresenceStatus,
+} from './officeProtocol';
+import { STATUS_COLOR } from './presence';
 import { avatarKeyFor, type RemoteAvatarSink, type RemotePlayerSnapshot } from './remoteAvatars';
 
 /** Contenedor de avatar remoto: guarda su interpolacion en curso. */
@@ -16,8 +24,13 @@ export interface RemoteAvatarContainer extends CharacterContainer {
   glideTween?: Phaser.Tweens.Tween;
 }
 
-function statusColorOf(status: string): number {
-  return STATUS_COLOR[status as NpcStatus] ?? STATUS_COLOR.g;
+/**
+ * Mismo limite de confianza que `facingOf`: el servidor ya sanea el estado,
+ * pero lo que llega aqui viene por red y un codigo desconocido dejaria el
+ * punto de la pildora sin color.
+ */
+function statusOf(raw: string): PresenceStatus {
+  return isPresenceStatus(raw) ? raw : DEFAULT_STATUS;
 }
 
 /**
@@ -42,7 +55,7 @@ export function createPhaserAvatarSink(
         0,
         0,
         avatarKeyFor(snapshot.sessionId),
-        statusColorOf(snapshot.status),
+        STATUS_COLOR[statusOf(snapshot.status)],
       ) as RemoteAvatarContainer;
       container.setPosition(snapshot.x, snapshot.y);
       container.setDepth(snapshot.y);

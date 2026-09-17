@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { OfficeEventMap } from '../game/officeBridge';
-import { STATUS_COLOR } from '../game/npcData';
+import { statusCssColor } from '../game/presence';
 import styles from './ContextMenu.module.css';
 
 export type NpcMenuAction = 'call' | 'goto' | 'profile';
@@ -42,7 +42,7 @@ export function ContextMenu({ menu, onAction, onClose }: ContextMenuProps) {
 
   if (!menu) return null;
 
-  const dotColor = `#${STATUS_COLOR[menu.statusCode].toString(16).padStart(6, '0')}`;
+  const dotColor = statusCssColor(menu.statusCode);
 
   return (
     <div

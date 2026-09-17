@@ -26,6 +26,30 @@ export type Facing = 'down' | 'up' | 'left' | 'right';
 export const FACINGS: readonly Facing[] = ['down', 'up', 'left', 'right'];
 export const DEFAULT_FACING: Facing = 'down';
 
+/**
+ * Estado de presencia (#1). Los tres codigos ya viajaban por el cable, pero
+ * eran decorativos; desde este cambio tienen semantica: `g` esta disponible,
+ * `y` esta ocupado pero se le puede hablar (senal social, el audio no cambia)
+ * y `r` esta aislado del audio de la oficina.
+ */
+export type PresenceStatus = 'g' | 'y' | 'r';
+
+export const PRESENCE_STATUSES: readonly PresenceStatus[] = ['g', 'y', 'r'];
+export const DEFAULT_STATUS: PresenceStatus = 'g';
+
+/** `r` es el unico estado con efecto sobre el audio; se nombra para no repetir el literal. */
+export const DO_NOT_DISTURB: PresenceStatus = 'r';
+
+/**
+ * Guarda de tipo, no saneador: devuelve si el valor es un estado valido en vez
+ * de sustituirlo por el de defecto. Quien llama decide que hacer con un valor
+ * invalido, y esa decision no es la misma en todas partes (ver el manejador de
+ * `status` del servidor).
+ */
+export function isPresenceStatus(raw: unknown): raw is PresenceStatus {
+  return typeof raw === 'string' && (PRESENCE_STATUSES as readonly string[]).includes(raw);
+}
+
 /** Tope de nombre visible. Recortar es preferible a rechazar: no expulsa a nadie. */
 export const MAX_NAME_LENGTH = 24;
 export const DEFAULT_NAME = 'Invitado';

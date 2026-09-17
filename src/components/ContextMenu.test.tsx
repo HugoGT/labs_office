@@ -7,7 +7,7 @@ import { ContextMenu } from './ContextMenu';
 const MENU: OfficeEventMap['npcmenu'] = {
   id: 3,
   name: 'Pablo',
-  status: 'Disponible',
+  status: 'En línea',
   statusCode: 'g',
   x: 100,
   y: 100,
@@ -26,7 +26,7 @@ describe('ContextMenu', () => {
     render(<ContextMenu menu={MENU} onAction={vi.fn()} onClose={vi.fn()} />);
 
     expect(screen.getByText('Pablo')).toBeInTheDocument();
-    expect(screen.getByText('Disponible')).toBeInTheDocument();
+    expect(screen.getByText('En línea')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Llamar/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Ir a su escritorio/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Ver perfil/ })).toBeInTheDocument();

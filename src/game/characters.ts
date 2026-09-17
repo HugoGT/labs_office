@@ -11,9 +11,10 @@
 
 import Phaser from 'phaser';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from './mapData';
-import { NPCS, STATUS_COLOR, STATUS_TXT, type NpcStatus } from './npcData';
+import { NPCS } from './npcData';
 import type { OfficeBridge } from './officeBridge';
-import { DEFAULT_FACING, type Facing } from './officeProtocol';
+import { DEFAULT_FACING, type Facing, type PresenceStatus } from './officeProtocol';
+import { STATUS_COLOR, STATUS_LABEL } from './presence';
 import { avatarTextureKey } from './textures';
 
 const LABEL_STYLE = {
@@ -37,7 +38,7 @@ export interface CharacterContainer extends Phaser.GameObjects.Container {
 /** Contenedor de NPC: agrega la metadata de roster que usan el clic y la llamada. */
 export interface NpcContainer extends CharacterContainer {
   npcId: number;
-  status: NpcStatus;
+  status: PresenceStatus;
   homeTx: number;
   homeTy: number;
   phase: number;
@@ -133,7 +134,7 @@ export function spawnNpcs(scene: Phaser.Scene, bridge: OfficeBridge): NpcContain
       bridge.emit('npcmenu', {
         id: i,
         name: npc.name,
-        status: STATUS_TXT[npc.status],
+        status: STATUS_LABEL[npc.status],
         statusCode: npc.status,
         x: (pointer.event as MouseEvent).clientX,
         y: (pointer.event as MouseEvent).clientY,

@@ -212,11 +212,11 @@ describe('OfficeShell', () => {
     const bridge = createGameMock.mock.calls[0][1];
 
     act(() =>
-      bridge.emit('npcmenu', { id: 3, name: 'Pablo', status: 'Disponible', statusCode: 'g', x: 10, y: 10 }),
+      bridge.emit('npcmenu', { id: 3, name: 'Pablo', status: 'En línea', statusCode: 'g', x: 10, y: 10 }),
     );
 
     expect(screen.getByText('Pablo')).toBeInTheDocument();
-    expect(screen.getByText('Disponible')).toBeInTheDocument();
+    expect(screen.getByText('En línea')).toBeInTheDocument();
   });
 
   it('closemenu del bridge cierra el ContextMenu abierto', () => {
@@ -224,7 +224,7 @@ describe('OfficeShell', () => {
     const bridge = createGameMock.mock.calls[0][1];
 
     act(() =>
-      bridge.emit('npcmenu', { id: 3, name: 'Pablo', status: 'Disponible', statusCode: 'g', x: 10, y: 10 }),
+      bridge.emit('npcmenu', { id: 3, name: 'Pablo', status: 'En línea', statusCode: 'g', x: 10, y: 10 }),
     );
     expect(screen.getByText('Pablo')).toBeInTheDocument();
 
@@ -240,7 +240,7 @@ describe('OfficeShell', () => {
     const teleportSpy = vi.spyOn(bridge, 'teleportTo');
 
     act(() =>
-      bridge.emit('npcmenu', { id: 7, name: 'Jordan Távara', status: 'Disponible', statusCode: 'g', x: 10, y: 10 }),
+      bridge.emit('npcmenu', { id: 7, name: 'Jordan Távara', status: 'En línea', statusCode: 'g', x: 10, y: 10 }),
     );
     await user.click(screen.getByRole('button', { name: /Ir a su escritorio/ }));
 
@@ -257,7 +257,7 @@ describe('OfficeShell', () => {
     const callSpy = vi.spyOn(bridge, 'callNpc');
 
     act(() =>
-      bridge.emit('npcmenu', { id: 3, name: 'Pablo', status: 'Disponible', statusCode: 'g', x: 10, y: 10 }),
+      bridge.emit('npcmenu', { id: 3, name: 'Pablo', status: 'En línea', statusCode: 'g', x: 10, y: 10 }),
     );
     await user.click(screen.getByRole('button', { name: /Llamar/ }));
 

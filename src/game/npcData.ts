@@ -6,18 +6,22 @@
  * El campo `wander` del prototipo se retiro: los NPCs simulados ya no
  * deambulan solos. Siguen presentes para que la oficina no se vea vacia, pero
  * su unico comportamiento es acudir cuando se les llama (`walkNpcTo`).
+ *
+ * El estado de cada NPC usa el mismo vocabulario que las personas reales
+ * (`PresenceStatus`): un NPC "No molestar" y un companero "No molestar" se
+ * pintan igual, aunque solo el segundo tenga audio que cortar.
  */
 
-export type NpcStatus = 'g' | 'y' | 'r';
+import type { PresenceStatus } from './officeProtocol';
 
 export interface NpcSeed {
   name: string;
   tx: number;
   ty: number;
-  status: NpcStatus;
+  status: PresenceStatus;
 }
 
-type RawNpc = readonly [string, number, number, NpcStatus];
+type RawNpc = readonly [string, number, number, PresenceStatus];
 
 const RAW_NPCS: readonly RawNpc[] = [
   ['Franklin Ga', 4, 7, 'g'],
@@ -61,15 +65,3 @@ export const NPCS: readonly NpcSeed[] = RAW_NPCS.map(([name, tx, ty, status]) =>
   ty,
   status,
 }));
-
-export const STATUS_COLOR: Record<NpcStatus, number> = {
-  g: 0x22c55e,
-  y: 0xeab308,
-  r: 0xef4444,
-};
-
-export const STATUS_TXT: Record<NpcStatus, string> = {
-  g: 'Disponible',
-  y: 'Ausente',
-  r: 'En reunión',
-};

@@ -11,12 +11,19 @@
  * desmonta nada referencia el puente y queda para el recolector de basura.
  */
 
-import type { NpcStatus } from './npcData';
+import type { PresenceStatus } from './officeProtocol';
 
 export interface OfficeEventMap {
   nearby: { names: string[] };
   room: { room: string | null };
-  npcmenu: { id: number; name: string; status: string; statusCode: NpcStatus; x: number; y: number };
+  npcmenu: {
+    id: number;
+    name: string;
+    status: string;
+    statusCode: PresenceStatus;
+    x: number;
+    y: number;
+  };
   closemenu: undefined;
   /**
    * Estado de la conexion con el servidor Colyseus y cuantos avatares reales

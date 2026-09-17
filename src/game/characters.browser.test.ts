@@ -9,7 +9,8 @@ import {
   type NpcContainer,
 } from './characters';
 import { TILE } from './mapData';
-import { NPCS, STATUS_COLOR } from './npcData';
+import { NPCS } from './npcData';
+import { STATUS_COLOR } from './presence';
 import { createOfficeBridge, type OfficeEventMap } from './officeBridge';
 import { createOfficeTextures } from './textures';
 
@@ -147,7 +148,7 @@ describe('spawnNpcs', () => {
       {
         id: 0,
         name: NPCS[0].name,
-        status: 'Disponible',
+        status: 'En línea',
         statusCode: 'g',
         x: 42,
         y: 84,
