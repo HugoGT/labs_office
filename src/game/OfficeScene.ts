@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import type { AnchorWriter } from './anchorChannel';
 import { preloadOfficeAssets } from './assets';
 import {
   setCharacterFacing,
@@ -30,7 +31,7 @@ import { createPhaserAvatarSink, type RemoteAvatarContainer } from './remoteAvat
 import { detectRoom, isSpeaking, nearbyIndices, nearbyKey, type Point } from './proximity';
 import { audiblePeers, type AudioPeer } from './proximityAudio';
 import { buildTerrainGrid, findFreeAdjacentTile, isBlocked, type TerrainGrid } from './terrainGrid';
-import { createOfficeTextures } from './textures';
+import { AVATAR_KEYS, PLAYER_TEXTURE, avatarTextureKey, createOfficeTextures } from './textures';
 
 /** Clave de la escena (D5): reemplaza `BootScene`, que se retira en este mismo cambio. */
 export const OFFICE_SCENE_KEY = 'office';
@@ -87,6 +88,8 @@ export class OfficeScene extends Phaser.Scene {
   private unsubscribeSpeakers?: () => void;
   /** Solo se asigna bajo `__OFFICE_E2E__` (D4): produccion nunca la toca. */
   private unsubscribeTeleportToTile?: () => void;
+  /** Escritor del canal de anclas (issue #17, D4); abierto en `create()`, cerrado en SHUTDOWN. */
+  private anchorWriter?: AnchorWriter;
 
   private readonly options: OfficeSceneOptions;
   private remotes?: RemoteAvatarRegistry<RemoteAvatarContainer>;
@@ -110,6 +113,11 @@ export class OfficeScene extends Phaser.Scene {
 
   create(): void {
     createOfficeTextures(this);
+    // Una sola vez, no por sesion: la fidelidad exige la textura real, no un
+    // redibujo en React que duplicaria `drawAvatar` y podria desincronizarse
+    // de forma invisible (issue #17, D1).
+    this.bridge.emit('portraits', { byKey: this.exportPortraits() });
+    this.anchorWriter = this.bridge.anchors.open();
 
     const grid: TerrainGrid = buildTerrainGrid();
     this.grid = grid;
@@ -157,6 +165,8 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeSetStatus?.();
       this.unsubscribeSpeakers?.();
       this.unsubscribeTeleportToTile?.();
+      this.anchorWriter?.close();
+      this.anchorWriter = undefined;
       this.remotes?.clear();
       void this.connection?.leave();
       this.connection = undefined;
@@ -261,6 +271,38 @@ export class OfficeScene extends Phaser.Scene {
     for (const sessionId of this.remotes?.sessionIds() ?? []) {
       this.remotes?.get(sessionId)?.ring.setVisible(speaking.has(sessionId));
     }
+  }
+
+  /**
+   * Retrato real de cada clave base de avatar (issue #17, D1): exporta la
+   * textura de orientacion "down" ya generada por `createOfficeTextures`, no
+   * un redibujo. `getBase64` es sincrono (canvas real, sin WebGL).
+   */
+  private exportPortraits(): Record<string, string> {
+    const byKey: Record<string, string> = {};
+    for (const base of [...AVATAR_KEYS, PLAYER_TEXTURE]) {
+      byKey[base] = this.textures.getBase64(avatarTextureKey(base, 'down'));
+    }
+    return byKey;
+  }
+
+  /**
+   * Proyecta la posicion de cada avatar remoto a coordenadas de pantalla y
+   * las publica por el canal de anclas (issue #17, D4). Se ejecuta cada
+   * cuadro, no cada tic de proximidad: la posicion es continua, la
+   * existencia/contenido del tile no lo es.
+   */
+  private publishAnchors(): void {
+    if (!this.anchorWriter) return;
+    const cam = this.cameras.main;
+    for (const sessionId of this.remotes?.sessionIds() ?? []) {
+      const avatar = this.remotes?.get(sessionId);
+      if (!avatar) continue;
+      const screenX = (avatar.x - cam.scrollX) * cam.zoom;
+      const screenY = (avatar.y - cam.scrollY) * cam.zoom;
+      this.anchorWriter.set(sessionId, screenX, screenY, cam.worldView.contains(avatar.x, avatar.y));
+    }
+    this.anchorWriter.commit();
   }
 
   private emitPresence(online: boolean): void {
@@ -473,5 +515,7 @@ export class OfficeScene extends Phaser.Scene {
     this.connection?.sendMove(this.player.x, this.player.y, this.facing);
 
     this.mmMarker?.setPosition(this.player.x, this.player.y);
+
+    this.publishAnchors();
   }
 }
