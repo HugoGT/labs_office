@@ -3,6 +3,7 @@ import type { LivekitConfig } from '../game/livekitEndpoint';
 import { connectLivekitRoom, type LivekitRoomConnection } from '../game/livekitRoom';
 import { fetchLivekitToken, type LivekitTokenResponse } from '../game/livekitTokenClient';
 import type { OfficeBridge } from '../game/officeBridge';
+import { DO_NOT_DISTURB, type PresenceStatus } from '../game/officeProtocol';
 
 /**
  * Conduce la sala de LiveKit a partir del evento `voice` del puente (D3).
@@ -16,6 +17,8 @@ import type { OfficeBridge } from '../game/officeBridge';
 export interface UseProximityAudioOptions {
   /** `null` = Colyseus abajo (D6): nunca se intenta LiveKit. */
   config: LivekitConfig | null;
+  /** Estado de presencia elegido por el usuario; React es su dueno (ver `OfficeShell`). */
+  status: PresenceStatus;
   /** Inyectable para pruebas; por defecto la implementacion real. */
   connect?: (opts: {
     url: string;
@@ -36,6 +39,8 @@ export interface UseProximityAudioResult {
    * haga un gesto. Es distinto de `audioAvailable` y se arregla distinto.
    */
   audioBlocked: boolean;
+  /** `true` en "No molestar": ni se publica ni se escucha audio de la oficina. */
+  dnd: boolean;
   toggleMic: () => void;
   toggleCam: () => void;
   /** Gesto de usuario que levanta el bloqueo de autoplay. */
@@ -44,8 +49,14 @@ export interface UseProximityAudioResult {
 
 export function useProximityAudio(
   bridge: OfficeBridge,
-  { config, connect = connectLivekitRoom, fetchToken = fetchLivekitToken }: UseProximityAudioOptions,
+  {
+    config,
+    status,
+    connect = connectLivekitRoom,
+    fetchToken = fetchLivekitToken,
+  }: UseProximityAudioOptions,
 ): UseProximityAudioResult {
+  const dnd = status === DO_NOT_DISTURB;
   const [micOn, setMicOn] = useState(false);
   const [camOn, setCamOn] = useState(false);
   const [audioAvailable, setAudioAvailable] = useState(false);
@@ -129,6 +140,28 @@ export function useProximityAudio(
   }, [bridge, config, connect, fetchToken]);
 
   /**
+   * Efecto aparte del de conexion: meter `status` en las dependencias de
+   * aquel reconstruiria la sala de LiveKit en cada cambio de estado. Depende
+   * tambien de `audioAvailable` para cubrir el orden inverso -- entrar ya en
+   * "No molestar" y conectar despues. La suscripcion ya la corta la escena (emite un conjunto de pares
+   * vacio); lo unico que falta aqui es dejar de PUBLICAR, y para eso no hace
+   * falta tirar la sala -- mantenerla viva hace que volver a "En linea" sea
+   * instantaneo en vez de costar un token nuevo y una reconexion.
+   *
+   * Al salir de "No molestar" NO se vuelve a publicar solo: reabrir el
+   * microfono sin que nadie lo pida seria lo contrario de lo prometido.
+   */
+  useEffect(() => {
+    if (!dnd) return;
+    const connection = connectionRef.current;
+    setMicOn(false);
+    setCamOn(false);
+    if (!connection) return;
+    void connection.setMicrophoneEnabled(false);
+    void connection.setCameraEnabled(false);
+  }, [dnd, audioAvailable]);
+
+  /**
    * No marca nada como desbloqueado: quien decide es la politica del
    * navegador y lo comunica por `AudioPlaybackStatusChanged`. Darlo por bueno
    * aqui apagaria el aviso dejando al usuario en silencio y sin salida.
@@ -139,23 +172,25 @@ export function useProximityAudio(
 
   const toggleMic = useCallback(() => {
     const connection = connectionRef.current;
-    if (!connection) return;
+    // Defensa en profundidad: el boton ya va `disabled`, pero un estado que
+    // solo protege mientras la UI coopere no protege.
+    if (!connection || dnd) return;
     void (async () => {
       const next = !micOn;
       const result = await connection.setMicrophoneEnabled(next);
       setMicOn(result);
     })();
-  }, [micOn]);
+  }, [micOn, dnd]);
 
   const toggleCam = useCallback(() => {
     const connection = connectionRef.current;
-    if (!connection) return;
+    if (!connection || dnd) return;
     void (async () => {
       const next = !camOn;
       const result = await connection.setCameraEnabled(next);
       setCamOn(result);
     })();
-  }, [camOn]);
+  }, [camOn, dnd]);
 
-  return { micOn, camOn, audioAvailable, audioBlocked, toggleMic, toggleCam, unblockAudio };
+  return { micOn, camOn, audioAvailable, audioBlocked, dnd, toggleMic, toggleCam, unblockAudio };
 }

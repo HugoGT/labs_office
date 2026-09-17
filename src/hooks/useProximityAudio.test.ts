@@ -2,6 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import { Room } from 'livekit-client';
 import { describe, expect, it, vi } from 'vitest';
 import { createOfficeBridge } from '../game/officeBridge';
+import type { PresenceStatus } from '../game/officeProtocol';
 import type { LivekitConfig } from '../game/livekitEndpoint';
 import type { LivekitRoomConnection } from '../game/livekitRoom';
 import type { LivekitTokenResponse } from '../game/livekitTokenClient';
@@ -39,7 +40,7 @@ describe('useProximityAudio', () => {
     const fetchToken = vi.fn();
 
     const { result } = renderHook(() =>
-      useProximityAudio(bridge, { config: CONFIG, connect, fetchToken }),
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
     );
 
     expect(result.current.micOn).toBe(false);
@@ -54,7 +55,7 @@ describe('useProximityAudio', () => {
     const connect = vi.fn();
     const fetchToken = vi.fn();
 
-    renderHook(() => useProximityAudio(bridge, { config: null, connect, fetchToken }));
+    renderHook(() => useProximityAudio(bridge, { config: null, status: 'g', connect, fetchToken }));
 
     await act(async () => {
       bridge.emit('voice', { selfSessionId: 'yo', sessionIds: [], room: null });
@@ -71,7 +72,7 @@ describe('useProximityAudio', () => {
     const fetchToken = vi.fn(async () => fakeTokenResponse());
 
     const { result } = renderHook(() =>
-      useProximityAudio(bridge, { config: CONFIG, connect, fetchToken }),
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
     );
 
     await act(async () => {
@@ -100,7 +101,7 @@ describe('useProximityAudio', () => {
     const fetchToken = vi.fn(async () => fakeTokenResponse());
 
     const { result } = renderHook(() =>
-      useProximityAudio(bridge, { config: CONFIG, connect, fetchToken }),
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
     );
 
     await expect(
@@ -125,7 +126,7 @@ describe('useProximityAudio', () => {
     const fetchToken = vi.fn(async () => fakeTokenResponse());
 
     const { result } = renderHook(() =>
-      useProximityAudio(bridge, { config: CONFIG, connect, fetchToken }),
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
     );
 
     await act(async () => {
@@ -148,7 +149,7 @@ describe('useProximityAudio', () => {
     const fetchToken = vi.fn(async () => fakeTokenResponse());
 
     const { unmount } = renderHook(() =>
-      useProximityAudio(bridge, { config: CONFIG, connect, fetchToken }),
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
     );
 
     await act(async () => {
@@ -167,7 +168,7 @@ describe('useProximityAudio', () => {
     const fetchToken = vi.fn(async () => fakeTokenResponse());
 
     const { result } = renderHook(() =>
-      useProximityAudio(bridge, { config: CONFIG, connect, fetchToken }),
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
     );
 
     await act(async () => {
@@ -189,7 +190,7 @@ describe('useProximityAudio', () => {
     const fetchToken = vi.fn(async () => fakeTokenResponse());
 
     const { result } = renderHook(() =>
-      useProximityAudio(bridge, { config: CONFIG, connect, fetchToken }),
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
     );
 
     await act(async () => {
@@ -216,7 +217,7 @@ describe('useProximityAudio', () => {
       const fetchToken = vi.fn(async () => fakeTokenResponse());
 
       const rendered = renderHook(() =>
-        useProximityAudio(bridge, { config: CONFIG, connect, fetchToken }),
+        useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
       );
 
       await act(async () => {
@@ -287,10 +288,116 @@ describe('useProximityAudio', () => {
     it('unblockAudio sin conexion viva no lanza', async () => {
       const bridge = createOfficeBridge();
       const { result } = renderHook(() =>
-        useProximityAudio(bridge, { config: CONFIG, connect: vi.fn(), fetchToken: vi.fn() }),
+        useProximityAudio(bridge, {
+          config: CONFIG,
+          status: 'g',
+          connect: vi.fn(),
+          fetchToken: vi.fn(),
+        }),
       );
 
       expect(() => result.current.unblockAudio()).not.toThrow();
+    });
+  });
+
+  describe('"No molestar" deja de publicar (#1)', () => {
+    /** Monta el hook con un estado cambiable y lo deja ya conectado a LiveKit. */
+    async function connectedWithStatus(initial: PresenceStatus = 'g') {
+      const bridge = createOfficeBridge();
+      const connection = fakeConnection();
+      const connect = vi.fn(async () => connection);
+      const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+      const rendered = renderHook(
+        ({ status }: { status: PresenceStatus }) =>
+          useProximityAudio(bridge, { config: CONFIG, status, connect, fetchToken }),
+        { initialProps: { status: initial } },
+      );
+
+      await act(async () => {
+        bridge.emit('voice', { selfSessionId: 'yo', sessionIds: [], room: null });
+      });
+
+      return { ...rendered, bridge, connection, connect };
+    }
+
+    it('entrar en "No molestar" apaga microfono y camara publicados', async () => {
+      const { result, rerender, connection } = await connectedWithStatus();
+      await act(async () => result.current.toggleMic());
+      await act(async () => result.current.toggleCam());
+      expect(result.current.micOn).toBe(true);
+      expect(result.current.camOn).toBe(true);
+
+      await act(async () => rerender({ status: 'r' }));
+
+      // La escena ya corta la SUSCRIPCION (emite un conjunto de pares vacio);
+      // lo que falta aqui es dejar de PUBLICAR.
+      expect(connection.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+      expect(connection.setCameraEnabled).toHaveBeenLastCalledWith(false);
+      expect(result.current.micOn).toBe(false);
+      expect(result.current.camOn).toBe(false);
+      expect(result.current.dnd).toBe(true);
+    });
+
+    it('no tira la sala al entrar en "No molestar"', async () => {
+      const { rerender, connection, connect } = await connectedWithStatus();
+
+      await act(async () => rerender({ status: 'r' }));
+
+      // Mantenerla viva hace que volver a "En línea" sea instantaneo, en vez
+      // de costar un token nuevo y una reconexion entera.
+      expect(connection.disconnect).not.toHaveBeenCalled();
+      expect(connect).toHaveBeenCalledTimes(1);
+    });
+
+    it('"Ocupado" no toca lo que se publica: es senal social', async () => {
+      const { result, rerender, connection } = await connectedWithStatus();
+      await act(async () => result.current.toggleMic());
+
+      await act(async () => rerender({ status: 'y' }));
+
+      expect(connection.setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+      expect(result.current.micOn).toBe(true);
+      expect(result.current.dnd).toBe(false);
+    });
+
+    it('volver a "En línea" no vuelve a publicar solo: decide el usuario', async () => {
+      const { result, rerender, connection } = await connectedWithStatus();
+      await act(async () => result.current.toggleMic());
+      await act(async () => rerender({ status: 'r' }));
+      vi.mocked(connection.setMicrophoneEnabled).mockClear();
+
+      await act(async () => rerender({ status: 'g' }));
+
+      // Reabrir el microfono sin pedirlo seria justo lo contrario de lo que
+      // "No molestar" prometio.
+      expect(connection.setMicrophoneEnabled).not.toHaveBeenCalled();
+      expect(result.current.micOn).toBe(false);
+    });
+
+    it('los toggles son inertes mientras dura "No molestar"', async () => {
+      const { result, rerender, connection } = await connectedWithStatus();
+      await act(async () => rerender({ status: 'r' }));
+      vi.mocked(connection.setMicrophoneEnabled).mockClear();
+      vi.mocked(connection.setCameraEnabled).mockClear();
+
+      await act(async () => result.current.toggleMic());
+      await act(async () => result.current.toggleCam());
+
+      // Defensa en profundidad: el boton ya va `disabled`, pero un estado que
+      // solo protege mientras la UI coopere no protege.
+      expect(connection.setMicrophoneEnabled).not.toHaveBeenCalled();
+      expect(connection.setCameraEnabled).not.toHaveBeenCalled();
+      expect(result.current.micOn).toBe(false);
+      expect(result.current.camOn).toBe(false);
+    });
+
+    it('montar ya en "No molestar" no deja nada publicado', async () => {
+      const { result, connection } = await connectedWithStatus('r');
+
+      expect(result.current.dnd).toBe(true);
+      expect(connection.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+      expect(connection.setCameraEnabled).toHaveBeenLastCalledWith(false);
     });
   });
 });

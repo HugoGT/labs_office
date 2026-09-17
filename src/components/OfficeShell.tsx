@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { resolveLivekitConfig } from '../game/livekitEndpoint';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
+import { DEFAULT_STATUS, type PresenceStatus } from '../game/officeProtocol';
 import { useOfficeBridge } from '../hooks/useOfficeBridge';
 import { useProximityAudio } from '../hooks/useProximityAudio';
 import { AudioUnblockPrompt } from './AudioUnblockPrompt';
@@ -39,8 +40,20 @@ export function OfficeShell() {
       officeEndpoint: endpoint,
     }),
   );
+  /**
+   * El estado de presencia vive aqui y no en la escena: React es su unico
+   * escritor y Phaser lo sigue por comando. Al reves -- Phaser como dueno y
+   * React leyendo por evento -- el selector tendria que esperar a que la
+   * escena confirmase cada cambio para redibujarse.
+   */
+  const [status, setStatus] = useState<PresenceStatus>(DEFAULT_STATUS);
   const { micOn, camOn, audioAvailable, audioBlocked, toggleMic, toggleCam, unblockAudio } =
-    useProximityAudio(bridge, { config: livekitConfig });
+    useProximityAudio(bridge, { config: livekitConfig, status });
+
+  function handleChangeStatus(next: PresenceStatus): void {
+    setStatus(next);
+    bridge.emitCommand('setStatus', { status: next });
+  }
 
   // D4: unico bloque muerto en produccion de este archivo. Bajo `__OFFICE_E2E__`
   // (compilado a `false` en el build normal, ver vite.config.ts D2) instala el
@@ -136,6 +149,8 @@ export function OfficeShell() {
         room={room}
         nearby={nearby}
         presence={presence}
+        status={status}
+        onChangeStatus={handleChangeStatus}
         onToggleMic={toggleMic}
         onToggleCam={toggleCam}
         onToggleRecord={() => {

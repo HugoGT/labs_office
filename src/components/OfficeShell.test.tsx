@@ -28,6 +28,7 @@ function proximityAudio(
     camOn: false,
     audioAvailable: false,
     audioBlocked: false,
+    dnd: false,
     toggleMic: vi.fn(),
     toggleCam: vi.fn(),
     unblockAudio: vi.fn(),
@@ -216,7 +217,10 @@ describe('OfficeShell', () => {
     );
 
     expect(screen.getByText('Pablo')).toBeInTheDocument();
-    expect(screen.getByText('En línea')).toBeInTheDocument();
+    // La etiqueta tambien aparece como opcion del selector propio, asi que se
+    // busca la del menu: el <span> del encabezado, no el <option>.
+    const menuStatus = screen.getAllByText('En línea').find((el) => el.tagName === 'SPAN');
+    expect(menuStatus).toBeInTheDocument();
   });
 
   it('closemenu del bridge cierra el ContextMenu abierto', () => {
@@ -285,5 +289,49 @@ describe('OfficeShell', () => {
     await userEvent.click(screen.getByRole('button', { name: /activar el audio/i }));
 
     expect(unblockAudio).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('OfficeShell: estado de presencia (#1)', () => {
+  it('arranca "En línea" y lo refleja en el selector', () => {
+    render(<OfficeShell />);
+
+    expect(screen.getByLabelText('Mi estado')).toHaveValue('g');
+  });
+
+  it('elegir un estado lo envia a la escena por el puente y lo refleja en el HUD', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const commands: { status: string }[] = [];
+    bridge.onCommand('setStatus', (payload) => commands.push(payload));
+
+    await user.selectOptions(screen.getByLabelText('Mi estado'), 'r');
+
+    // React es el unico escritor del estado; la escena lo sigue por comando.
+    expect(commands).toEqual([{ status: 'r' }]);
+    expect(screen.getByLabelText('Mi estado')).toHaveValue('r');
+  });
+
+  it('el estado elegido llega al hook de audio, que es quien deja de publicar', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell />);
+
+    await user.selectOptions(screen.getByLabelText('Mi estado'), 'r');
+
+    expect(useProximityAudioMock.mock.calls.at(-1)?.[1]).toEqual(
+      expect.objectContaining({ status: 'r' }),
+    );
+  });
+
+  it('en "No molestar" mic y camara quedan deshabilitados aunque haya LiveKit', async () => {
+    const user = userEvent.setup();
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: true }));
+
+    render(<OfficeShell />);
+    await user.selectOptions(screen.getByLabelText('Mi estado'), 'r');
+
+    expect(screen.getByRole('button', { name: /Mic/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Cámara/ })).toBeDisabled();
   });
 });
