@@ -52,15 +52,26 @@ ENV VITE_FIREBASE_AUTH_DOMAIN=${VITE_FIREBASE_AUTH_DOMAIN}
 # script tienen `noEmit: true`: son comprobacion de tipos, no generan nada, y
 # esa comprobacion ya la hace .github/workflows/ci.yml en cada push. Repetirla
 # aqui alarga el build sin anadir ninguna garantia nueva.
-# Encadenar los tres `test` con `||`/`&&` en una sola linea imprimiria el
-# mensaje del ultimo fallo, no el del primero: `&&` y `||` tienen la misma
-# precedencia y asocian a izquierdas. Un `if` por variable dice exactamente
-# cual falta.
+# Encadenar los `test` con `||`/`&&` en una sola linea imprimiria el mensaje del
+# ultimo fallo, no el del primero: `&&` y `||` tienen la misma precedencia y
+# asocian a izquierdas. Un `if` por variable dice exactamente cual falta.
+#
+# Las dos VITE_FIREBASE_* son todo o nada, no obligatorias: ninguna construye el
+# SPA sin login (el modo de siempre) y las dos lo construyen con login. Definir
+# solo una si es un error, y de los caros: el cliente se quedaria sin poder
+# autenticar contra un servidor que quiza si exige token, y el sintoma seria una
+# oficina vacia sin ningun mensaje.
 RUN set -eu; \
-  for var in VITE_COLYSEUS_URL VITE_FIREBASE_API_KEY VITE_FIREBASE_PROJECT_ID; do \
-    eval "value=\${$var:-}"; \
-    if [ -z "$value" ]; then echo "$var es obligatoria" >&2; exit 1; fi; \
-  done; \
+  if [ -z "${VITE_COLYSEUS_URL:-}" ]; then echo "VITE_COLYSEUS_URL es obligatoria" >&2; exit 1; fi; \
+  if [ -n "${VITE_FIREBASE_API_KEY:-}" ] && [ -z "${VITE_FIREBASE_PROJECT_ID:-}" ]; then \
+    echo "VITE_FIREBASE_API_KEY sin VITE_FIREBASE_PROJECT_ID: define las dos o ninguna" >&2; exit 1; \
+  fi; \
+  if [ -n "${VITE_FIREBASE_PROJECT_ID:-}" ] && [ -z "${VITE_FIREBASE_API_KEY:-}" ]; then \
+    echo "VITE_FIREBASE_PROJECT_ID sin VITE_FIREBASE_API_KEY: define las dos o ninguna" >&2; exit 1; \
+  fi; \
+  if [ -z "${VITE_FIREBASE_API_KEY:-}" ]; then \
+    echo "AVISO: sin VITE_FIREBASE_*, el SPA se construye sin pantalla de login" >&2; \
+  fi; \
   pnpm exec vite build
 
 FROM nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de AS runtime

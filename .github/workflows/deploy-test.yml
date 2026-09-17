@@ -49,7 +49,9 @@ jobs:
           test -n "${{ vars.GCP_PROJECT_ID }}" || { echo "Falta la variable GCP_PROJECT_ID"; exit 1; }
           test -n "${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}" || { echo "Falta la variable GCP_WORKLOAD_IDENTITY_PROVIDER"; exit 1; }
           test -n "${{ vars.GCP_DEPLOYER_SA }}" || { echo "Falta la variable GCP_DEPLOYER_SA"; exit 1; }
-          test -n "${{ vars.FIREBASE_API_KEY }}" || { echo "Falta la variable FIREBASE_API_KEY: el SPA se construiria sin pantalla de login (issue #8, ver infra/gcp/README.md)"; exit 1; }
+          if [ -z "${{ vars.FIREBASE_API_KEY }}" ]; then
+            echo "::warning::FIREBASE_API_KEY no está definida: el SPA se construye SIN pantalla de login (issue #8, ver infra/gcp/README.md)"
+          fi
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -86,9 +88,14 @@ jobs:
       #
       # Las tres VITE_FIREBASE_* viajan igual (issue #8). Son variables de
       # repositorio y no secretos: la apiKey de Firebase se publica en el bundle
-      # por diseno y no autoriza nada por si sola. Si FIREBASE_API_KEY no esta
-      # definida, este paso falla en el `test` del Dockerfile en vez de publicar
-      # una web sin pantalla de login.
+      # por diseno y no autoriza nada por si sola.
+      #
+      # Son OPCIONALES, igual que `auth_project_id` en Terraform: sin ellas el
+      # SPA se construye sin pantalla de login, que es como corrio hasta el #8.
+      # Exigirlas aqui dejaria el despliegue roto hasta que alguien diese de alta
+      # Identity Platform, y encender la autenticacion tiene que ser un gesto
+      # deliberado, no el precio de poder desplegar. Lo que el Dockerfile si
+      # rechaza es definir una a medias.
       - name: Build and push the web image
         uses: docker/build-push-action@v6
         with:

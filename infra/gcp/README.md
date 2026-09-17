@@ -143,7 +143,7 @@ terraform output
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | output `workload_identity_provider` |
 | `GCP_DEPLOYER_SA` | output `deployer_service_account` |
 | `APP_HOST` | output `app_host` |
-| `FIREBASE_API_KEY` | la API key del proyecto de Identity Platform (issue #8, ver más abajo) |
+| `FIREBASE_API_KEY` | opcional; sin ella el SPA se construye sin pantalla de login (issue #8, ver más abajo) |
 | `FIREBASE_PROJECT_ID` | opcional, solo si Identity Platform vive en otro proyecto que `GCP_PROJECT_ID` |
 | `FIREBASE_AUTH_DOMAIN` | opcional, por defecto `<projectId>.firebaseapp.com` |
 | `GCP_ZONE` | opcional, por defecto `us-central1-a` |
@@ -293,9 +293,10 @@ curl -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${AP
 
 ### Activarlo en el entorno desplegado
 
-1. Variables de repositorio en GitHub: `FIREBASE_API_KEY` (obligatoria a partir de
-   ahora; el workflow falla sin ella) y, si el proyecto de Identity Platform no es
-   el mismo que `GCP_PROJECT_ID`, también `FIREBASE_PROJECT_ID`.
+1. Variables de repositorio en GitHub: `FIREBASE_API_KEY` y, si el proyecto de
+   Identity Platform no es el mismo que `GCP_PROJECT_ID`, también
+   `FIREBASE_PROJECT_ID`. Mientras no existan, el despliegue sigue funcionando y
+   publica el SPA sin pantalla de login, avisando en el log del workflow.
 2. `auth_project_id` en `terraform/terraform.tfvars` y `terraform apply`. Eso escribe
    la metadata `office-auth-project-id` de la VM.
 3. Volver a desplegar. `office-deploy` la copia a `FIREBASE_PROJECT_ID` en
