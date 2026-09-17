@@ -11,9 +11,15 @@
 
 import Phaser from 'phaser';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from './mapData';
-import { NPCS, STATUS_COLOR, STATUS_TXT, type NpcStatus } from './npcData';
+import { NPCS } from './npcData';
 import type { OfficeBridge } from './officeBridge';
-import { DEFAULT_FACING, type Facing } from './officeProtocol';
+import {
+  DEFAULT_FACING,
+  DEFAULT_STATUS,
+  type Facing,
+  type PresenceStatus,
+} from './officeProtocol';
+import { STATUS_COLOR, STATUS_LABEL } from './presence';
 import { avatarTextureKey } from './textures';
 
 const LABEL_STYLE = {
@@ -32,12 +38,19 @@ export interface CharacterContainer extends Phaser.GameObjects.Container {
   /** Clave base (`av3`), sin el sufijo de orientacion. */
   baseTexture: string;
   facing: Facing;
+  /** Punto de estado de la pildora de nombre, expuesto para poder repintarlo. */
+  statusDot: Phaser.GameObjects.Arc;
+  /**
+   * Estado de presencia actual. Vive en el contenedor y no solo en el color
+   * del punto porque `proximityTick` lo lee para decidir el audio: deducirlo
+   * del pixel pintado invertiria la direccion del dato.
+   */
+  status: PresenceStatus;
 }
 
 /** Contenedor de NPC: agrega la metadata de roster que usan el clic y la llamada. */
 export interface NpcContainer extends CharacterContainer {
   npcId: number;
-  status: NpcStatus;
   homeTx: number;
   homeTy: number;
   phase: number;
@@ -62,7 +75,7 @@ export function makeCharacter(
   tx: number,
   ty: number,
   texKey: string,
-  statusColor: number,
+  status: PresenceStatus,
 ): CharacterContainer {
   const px = tx * TILE + 16;
   const py = ty * TILE + 16;
@@ -75,7 +88,9 @@ export function makeCharacter(
   const pill = scene.add.graphics();
   pill.fillStyle(0x111827, 0.85);
   pill.fillRoundedRect(-pillW / 2, -34 - 9, pillW, 18, 9);
-  const dot = scene.add.circle(-pillW / 2 + 11, -34, 3.5, statusColor);
+  // Toma el estado y no un color ya resuelto: con dos parametros el punto
+  // pintado y el estado que guarda el contenedor podrian discrepar.
+  const dot = scene.add.circle(-pillW / 2 + 11, -34, 3.5, STATUS_COLOR[status]);
   label.setPosition(-pillW / 2 + 19, -34);
 
   const container = scene.add.container(px, py, [
@@ -92,6 +107,8 @@ export function makeCharacter(
   container.sprite = spr;
   container.baseTexture = texKey;
   container.facing = DEFAULT_FACING;
+  container.statusDot = dot;
+  container.status = status;
   return container;
 }
 
@@ -108,6 +125,17 @@ export function setCharacterFacing(character: CharacterContainer, facing: Facing
 }
 
 /**
+ * Cambia el estado de presencia visible. Sale pronto si no cambia nada, por la
+ * misma razon que `setCharacterFacing`: se llama en cada mensaje de un avatar
+ * remoto, y casi ninguno trae un estado distinto del anterior.
+ */
+export function setCharacterStatus(character: CharacterContainer, status: PresenceStatus): void {
+  if (character.status === status) return;
+  character.status = status;
+  character.statusDot.setFillStyle(STATUS_COLOR[status]);
+}
+
+/**
  * Crea los NPCs del roster y cablea clic -> `bridge.emit('npcmenu')` (en vez
  * de `document.dispatchEvent`, D1). Ya no programa temporizadores: el unico
  * comportamiento de un NPC es reactivo (`walkNpcTo` al ser llamado).
@@ -120,10 +148,9 @@ export function spawnNpcs(scene: Phaser.Scene, bridge: OfficeBridge): NpcContain
       npc.tx,
       npc.ty,
       `av${i % 10}`,
-      STATUS_COLOR[npc.status],
+      npc.status,
     ) as NpcContainer;
     c.npcId = i;
-    c.status = npc.status;
     c.homeTx = npc.tx;
     c.homeTy = npc.ty;
     c.phase = (i * 777) % 4000;
@@ -133,7 +160,7 @@ export function spawnNpcs(scene: Phaser.Scene, bridge: OfficeBridge): NpcContain
       bridge.emit('npcmenu', {
         id: i,
         name: npc.name,
-        status: STATUS_TXT[npc.status],
+        status: STATUS_LABEL[npc.status],
         statusCode: npc.status,
         x: (pointer.event as MouseEvent).clientX,
         y: (pointer.event as MouseEvent).clientY,
@@ -185,7 +212,7 @@ export function spawnPlayer(scene: Phaser.Scene): CharacterContainer {
     PLAYER_SPAWN_TX,
     PLAYER_SPAWN_TY,
     PLAYER_TEXTURE,
-    STATUS_COLOR.g,
+    DEFAULT_STATUS,
   );
   scene.physics.add.existing(player);
   const body = player.body as Phaser.Physics.Arcade.Body;

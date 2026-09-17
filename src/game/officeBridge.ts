@@ -11,12 +11,19 @@
  * desmonta nada referencia el puente y queda para el recolector de basura.
  */
 
-import type { NpcStatus } from './npcData';
+import type { PresenceStatus } from './officeProtocol';
 
 export interface OfficeEventMap {
   nearby: { names: string[] };
   room: { room: string | null };
-  npcmenu: { id: number; name: string; status: string; statusCode: NpcStatus; x: number; y: number };
+  npcmenu: {
+    id: number;
+    name: string;
+    status: string;
+    statusCode: PresenceStatus;
+    x: number;
+    y: number;
+  };
   closemenu: undefined;
   /**
    * Estado de la conexion con el servidor Colyseus y cuantos avatares reales
@@ -37,6 +44,13 @@ export interface OfficeEventMap {
 export interface OfficeCommandMap {
   teleportTo: { npcId: number };
   callNpc: { npcId: number };
+  /**
+   * Cambio de estado de presencia (#1). React es el dueno del estado y la
+   * escena lo sigue. No lleva metodo de conveniencia como los dos de arriba:
+   * esos existen por paridad con el prototipo, y ampliar esa superficie por
+   * cada comando nuevo reconstruiria el `window.officeAPI` que D1 retiro.
+   */
+  setStatus: { status: PresenceStatus };
   /**
    * Test-only command (D4): moves the local player directly onto a tile.
    * Only ever emitted by `officeTestHook.ts`, which is itself dead-code

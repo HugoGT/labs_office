@@ -19,9 +19,11 @@ import {
 import {
   DEFAULT_FACING,
   DEFAULT_NAME,
+  DEFAULT_STATUS,
   FACINGS,
   MAX_NAME_LENGTH,
   OFFICE_ROOM_NAME,
+  isPresenceStatus,
 } from '../../src/game/officeProtocol.ts';
 import type { LiveSessionRegistry } from './liveSessions.ts';
 import { OfficeState, createPlayerState } from './schema.ts';
@@ -29,8 +31,6 @@ import { OfficeState, createPlayerState } from './schema.ts';
 export { DEFAULT_NAME, MAX_NAME_LENGTH, OFFICE_ROOM_NAME };
 
 const FACING_SET = new Set<string>(FACINGS);
-const STATUSES = new Set(['g', 'y', 'r']);
-const DEFAULT_STATUS = 'g';
 
 /**
  * Reparte a los que entran alrededor de la tile de spawn en vez de apilarlos
@@ -53,6 +53,10 @@ export interface MoveMessage {
   facing: string;
 }
 
+export interface StatusMessage {
+  status: string;
+}
+
 /** Recorta un numero al rango, descartando NaN/Infinity del cliente. */
 export function clamp(value: unknown, min: number, max: number): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
@@ -71,7 +75,7 @@ export function sanitizeFacing(raw: unknown): string {
 }
 
 export function sanitizeStatus(raw: unknown): string {
-  return typeof raw === 'string' && STATUSES.has(raw) ? raw : DEFAULT_STATUS;
+  return isPresenceStatus(raw) ? raw : DEFAULT_STATUS;
 }
 
 export interface OfficeRoomOptions {
@@ -105,6 +109,18 @@ export class OfficeRoom extends Room<OfficeState> {
       player.x = x;
       player.y = y;
       player.facing = sanitizeFacing(message?.facing);
+    });
+
+    this.onMessage('status', (client: Client, message: StatusMessage) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+
+      // Un estado desconocido se ignora entero en vez de caer al valor por
+      // defecto: degradar silenciosamente un "No molestar" a "En linea" seria
+      // una fuga de privacidad disfrazada de saneamiento. En `onJoin` si vale
+      // el valor por defecto, porque alli no hay estado previo que proteger.
+      if (!isPresenceStatus(message?.status)) return;
+      player.status = message.status;
     });
   }
 

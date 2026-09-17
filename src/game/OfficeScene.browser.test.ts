@@ -5,7 +5,13 @@ import { DESK_ROWS, MAP_H, MAP_W, PROX_RADIUS, TILE, TREES, ZONE_LABELS } from '
 import { TERRAIN_SHEET } from './assets';
 import { NPCS } from './npcData';
 import { createOfficeBridge } from './officeBridge';
-import type { OfficeConnection, OfficeRoomHandlers } from './officeRoomClient';
+import { DEFAULT_STATUS, type PresenceStatus } from './officeProtocol';
+import { STATUS_COLOR } from './presence';
+import type {
+  ConnectOfficeRoomOptions,
+  OfficeConnection,
+  OfficeRoomHandlers,
+} from './officeRoomClient';
 import { OFFICE_SCENE_KEY, OfficeScene, type OfficeSceneOptions } from './OfficeScene';
 
 /**
@@ -578,12 +584,15 @@ describe('OfficeScene: comando callNpc via el puente (el NPC acude a la llamada)
  */
 function fakeConnector(sessionId = 'yo') {
   const sent: { x: number; y: number; facing: string }[] = [];
+  const statuses: PresenceStatus[] = [];
   let captured: OfficeRoomHandlers | undefined;
+  let joinedWith: PresenceStatus | undefined;
   let left = false;
 
   const connection: OfficeConnection = {
     sessionId,
     sendMove: (x, y, facing) => sent.push({ x, y, facing }),
+    sendStatus: (status) => statuses.push(status),
     leave: async () => {
       left = true;
     },
@@ -591,10 +600,13 @@ function fakeConnector(sessionId = 'yo') {
 
   return {
     sent,
+    statuses,
     handlers: () => captured,
+    joinedWith: () => joinedWith,
     hasLeft: () => left,
-    connect: async (options: { handlers: OfficeRoomHandlers }) => {
+    connect: async (options: ConnectOfficeRoomOptions) => {
       captured = options.handlers;
+      joinedWith = options.status;
       return connection;
     },
   };
@@ -735,5 +747,147 @@ describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
     // Sin esto, cada remonte de StrictMode dejaria un socket vivo publicando la
     // posicion de un jugador ya destruido.
     await vi.waitFor(() => expect(connector.hasLeft()).toBe(true));
+  });
+});
+
+describe('OfficeScene: comando setStatus via el puente (#1)', () => {
+  it('repinta el punto de estado del jugador local', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const player = findPlayer(scene);
+    expect(player.statusDot.fillColor).toBe(STATUS_COLOR[DEFAULT_STATUS]);
+
+    bridge.emitCommand('setStatus', { status: 'r' });
+
+    expect(player.status).toBe('r');
+    expect(player.statusDot.fillColor).toBe(STATUS_COLOR.r);
+  });
+
+  it('publica el estado nuevo al servidor', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const bridge = createOfficeBridge();
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+
+    bridge.emitCommand('setStatus', { status: 'y' });
+
+    expect(connector.statuses).toEqual(['y']);
+  });
+
+  it('corta el audio al instante, sin esperar al siguiente tic de proximidad', async () => {
+    const bridge = createOfficeBridge();
+    const voices: { sessionIds: string[] }[] = [];
+    bridge.on('voice', (payload) => voices.push(payload));
+    const connector = fakeConnector('mi-sesion');
+
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const player = findPlayer(scene);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', x: player.x, y: player.y }));
+    await vi.waitFor(() => {
+      expect(voices.some((v) => v.sessionIds.includes('par-1'))).toBe(true);
+    }, LOOP_WAIT);
+
+    bridge.emitCommand('setStatus', { status: 'r' });
+
+    // Sin esperar nada: un "No molestar" que tarda un cuarto de segundo en
+    // cortar el audio no es un corte, es un retraso.
+    expect(voices.at(-1)?.sessionIds).toEqual([]);
+  });
+
+  it('un par que pasa a "No molestar" deja de ser audible en el siguiente tic', async () => {
+    const bridge = createOfficeBridge();
+    const voices: { sessionIds: string[] }[] = [];
+    bridge.on('voice', (payload) => voices.push(payload));
+    const connector = fakeConnector('mi-sesion');
+
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const player = findPlayer(scene);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', x: player.x, y: player.y }));
+    await vi.waitFor(() => {
+      expect(voices.some((v) => v.sessionIds.includes('par-1'))).toBe(true);
+    }, LOOP_WAIT);
+
+    connector
+      .handlers()!
+      .onChange(remoteSnapshot({ sessionId: 'par-1', x: player.x, y: player.y, status: 'r' }));
+
+    await vi.waitFor(() => {
+      expect(voices.at(-1)?.sessionIds).toEqual([]);
+    }, LOOP_WAIT);
+  });
+
+  it('el mismo estado dos veces no vuelve a publicarlo', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const bridge = createOfficeBridge();
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+
+    bridge.emitCommand('setStatus', { status: 'r' });
+    bridge.emitCommand('setStatus', { status: 'r' });
+
+    expect(connector.statuses).toEqual(['r']);
+  });
+
+  it('el join lleva el estado actual del jugador, no un valor fijo', async () => {
+    const connector = fakeConnector('mi-sesion');
+    await bootOfficeScene(createOfficeBridge(), {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+
+    await vi.waitFor(() => expect(connector.joinedWith()).toBe(DEFAULT_STATUS), LOOP_WAIT);
+  });
+
+  it('un cambio de estado mientras la conexion esta en vuelo no se pierde', async () => {
+    const bridge = createOfficeBridge();
+    const statuses: PresenceStatus[] = [];
+    let joinedWith: PresenceStatus | undefined;
+    let openGate!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      openGate = resolve;
+    });
+    const connection: OfficeConnection = {
+      sessionId: 'mi-sesion',
+      sendMove: () => {},
+      sendStatus: (status) => statuses.push(status),
+      leave: async () => {},
+    };
+
+    await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: async (options: ConnectOfficeRoomOptions) => {
+        joinedWith = options.status;
+        await gate;
+        return connection;
+      },
+    });
+
+    bridge.emitCommand('setStatus', { status: 'r' });
+    openGate();
+
+    // El join ya habia salido con el estado viejo: si nadie reconcilia al
+    // aterrizar, el servidor nos publica "En linea" habiendo pedido "No
+    // molestar", y el aislamiento local no se nota desde fuera.
+    await vi.waitFor(() => expect(statuses).toEqual(['r']), LOOP_WAIT);
+    expect(joinedWith).toBe(DEFAULT_STATUS);
+  });
+
+  it('desuscribe el handler de setStatus al apagar la escena (SHUTDOWN, D2)', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const player = findPlayer(scene);
+
+    scene.sys.events.emit(Phaser.Scenes.Events.SHUTDOWN);
+    bridge.emitCommand('setStatus', { status: 'r' });
+
+    expect(player.status).toBe(DEFAULT_STATUS);
   });
 });

@@ -1,3 +1,5 @@
+import { DO_NOT_DISTURB, PRESENCE_STATUSES, type PresenceStatus } from '../game/officeProtocol';
+import { STATUS_LABEL, statusCssColor } from '../game/presence';
 import styles from './BottomBar.module.css';
 
 export interface BottomBarProps {
@@ -9,6 +11,8 @@ export interface BottomBarProps {
   room: string | null;
   nearby: string[];
   presence: { online: boolean; peers: number };
+  status: PresenceStatus;
+  onChangeStatus: (status: PresenceStatus) => void;
   onToggleMic: () => void;
   onToggleCam: () => void;
   onToggleRecord: () => void;
@@ -19,6 +23,9 @@ const NEARBY_CHIP_LIMIT = 6;
 
 /** Explica el `disabled` de mic/camara cuando no hay conexion viva a LiveKit. */
 const AUDIO_UNAVAILABLE_TITLE = 'Audio no disponible: sin conexion a LiveKit';
+
+/** El otro motivo de `disabled`, y el unico que el usuario puede deshacer solo. */
+const DND_TITLE = 'No molestar: no publicas micrófono ni cámara';
 
 /**
  * Barra inferior: mic/camara/grabar + estado de audio + chips de cercania,
@@ -33,17 +40,39 @@ export function BottomBar({
   room,
   nearby,
   presence,
+  status,
+  onChangeStatus,
   onToggleMic,
   onToggleCam,
   onToggleRecord,
 }: BottomBarProps) {
   const visibleChips = nearby.slice(0, NEARBY_CHIP_LIMIT);
   const overflow = nearby.length - NEARBY_CHIP_LIMIT;
+  // Se deriva del estado en vez de recibirse como prop propia: dos fuentes
+  // para el mismo hecho acabarian discrepando en algun render.
+  const dnd = status === DO_NOT_DISTURB;
+  const audioDisabled = !audioAvailable || dnd;
+  // El motivo que el usuario puede deshacer va primero: sin LiveKit no hay
+  // nada que hacer desde aqui, pero salir de "No molestar" esta a un clic.
+  const audioTitle = dnd ? DND_TITLE : audioAvailable ? undefined : AUDIO_UNAVAILABLE_TITLE;
 
   return (
     <div className={styles.bar}>
       <div className={styles.me}>
-        <span className={styles.meDot} /> HugoGT
+        <span className={styles.meDot} style={{ background: statusCssColor(status) }} />{' '}
+        HugoGT
+        <select
+          className={styles.statusSelect}
+          aria-label="Mi estado"
+          value={status}
+          onChange={(event) => onChangeStatus(event.target.value as PresenceStatus)}
+        >
+          {PRESENCE_STATUSES.map((code) => (
+            <option key={code} value={code}>
+              {STATUS_LABEL[code]}
+            </option>
+          ))}
+        </select>
       </div>
       <div
         className={styles.presence}
@@ -61,8 +90,8 @@ export function BottomBar({
         type="button"
         className={styles.btn}
         aria-pressed={micOn}
-        disabled={!audioAvailable}
-        title={!audioAvailable ? AUDIO_UNAVAILABLE_TITLE : undefined}
+        disabled={audioDisabled}
+        title={audioTitle}
         onClick={onToggleMic}
       >
         {micOn ? '🎙️ Mic' : '🔇 Mic'}
@@ -71,8 +100,8 @@ export function BottomBar({
         type="button"
         className={styles.btn}
         aria-pressed={camOn}
-        disabled={!audioAvailable}
-        title={!audioAvailable ? AUDIO_UNAVAILABLE_TITLE : undefined}
+        disabled={audioDisabled}
+        title={audioTitle}
         onClick={onToggleCam}
       >
         {camOn ? '📷 Cámara' : '🚫 Cámara'}
@@ -87,7 +116,11 @@ export function BottomBar({
         {recording ? '⏹ Detener' : '⏺ Grabar'}
       </button>
       <div className={styles.status}>
-        {room ? (
+        {dnd ? (
+          // Anunciar "Audio por proximidad" mientras nada es audible seria
+          // mentir sobre lo unico que esta linea existe para contar.
+          <>🔴 No molestar: aislado del audio de la oficina</>
+        ) : room ? (
           <>
             🔒 Sala privada: <b>{room}</b> — audio aislado
           </>

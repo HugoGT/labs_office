@@ -3,14 +3,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   NPC_WALK_MS_PER_TILE,
   makeCharacter,
+  setCharacterStatus,
   spawnNpcs,
   spawnPlayer,
   walkNpcTo,
   type NpcContainer,
 } from './characters';
 import { TILE } from './mapData';
-import { NPCS, STATUS_COLOR } from './npcData';
+import { NPCS } from './npcData';
 import { createOfficeBridge, type OfficeEventMap } from './officeBridge';
+import { DEFAULT_STATUS } from './officeProtocol';
+import { STATUS_COLOR } from './presence';
 import { createOfficeTextures } from './textures';
 
 /**
@@ -82,10 +85,7 @@ describe('spawnNpcs', () => {
     // (app.js:327,338) es inequivoca: solo `dot` recibe `statusColor`.
     const dotColors = await withScene((scene) => {
       const bridge = createOfficeBridge();
-      return spawnNpcs(scene, bridge).map((c) => {
-        const dot = c.list[3] as Phaser.GameObjects.Arc;
-        return dot.fillColor;
-      });
+      return spawnNpcs(scene, bridge).map((c) => c.statusDot.fillColor);
     });
 
     const pabloIndex = NPCS.findIndex((n) => n.name === 'Pablo');
@@ -147,7 +147,7 @@ describe('spawnNpcs', () => {
       {
         id: 0,
         name: NPCS[0].name,
-        status: 'Disponible',
+        status: 'En línea',
         statusCode: 'g',
         x: 42,
         y: 84,
@@ -159,7 +159,7 @@ describe('spawnNpcs', () => {
 describe('walkNpcTo', () => {
   it('tween al centro exacto de la tile destino', async () => {
     const target = await withScene((scene) => {
-      const c = makeCharacter(scene, 'Test', 6, 26, 'av0', STATUS_COLOR.g) as NpcContainer;
+      const c = makeCharacter(scene, 'Test', 6, 26, 'av0', 'g') as NpcContainer;
       const tweenSpy = vi
         .spyOn(scene.tweens, 'add')
         .mockImplementation(() => ({ stop: () => {} }) as unknown as Phaser.Tweens.Tween);
@@ -175,8 +175,8 @@ describe('walkNpcTo', () => {
 
   it('la duracion escala con la distancia recorrida, no es un valor fijo', async () => {
     const durations = await withScene((scene) => {
-      const near = makeCharacter(scene, 'Near', 6, 26, 'av0', STATUS_COLOR.g) as NpcContainer;
-      const far = makeCharacter(scene, 'Far', 6, 26, 'av0', STATUS_COLOR.g) as NpcContainer;
+      const near = makeCharacter(scene, 'Near', 6, 26, 'av0', 'g') as NpcContainer;
+      const far = makeCharacter(scene, 'Far', 6, 26, 'av0', 'g') as NpcContainer;
       const tweenSpy = vi
         .spyOn(scene.tweens, 'add')
         .mockImplementation(() => ({ stop: () => {} }) as unknown as Phaser.Tweens.Tween);
@@ -197,7 +197,7 @@ describe('walkNpcTo', () => {
 
   it('una segunda llamada detiene el tween anterior en vez de acumularlo', async () => {
     const stopped = await withScene((scene) => {
-      const c = makeCharacter(scene, 'Test', 6, 26, 'av0', STATUS_COLOR.g) as NpcContainer;
+      const c = makeCharacter(scene, 'Test', 6, 26, 'av0', 'g') as NpcContainer;
       const stops: number[] = [];
       let created = 0;
       vi.spyOn(scene.tweens, 'add').mockImplementation(() => {
@@ -218,7 +218,7 @@ describe('walkNpcTo', () => {
 
   it('mueve de verdad al NPC hacia el destino dentro de un Phaser.Game real', async () => {
     const c = await withScene((scene) => {
-      const npc = makeCharacter(scene, 'Test', 6, 26, 'av0', STATUS_COLOR.g) as NpcContainer;
+      const npc = makeCharacter(scene, 'Test', 6, 26, 'av0', 'g') as NpcContainer;
       walkNpcTo(scene, npc, 10, 26);
       return npc;
     });
@@ -250,5 +250,51 @@ describe('spawnPlayer', () => {
     expect(result.y).toBe(28 * TILE + 16);
     expect(result.hasArcadeBody).toBe(true);
     expect(result.collideWorldBounds).toBe(true);
+  });
+});
+
+describe('setCharacterStatus', () => {
+  it('repinta el punto de la pildora con el color del estado nuevo', async () => {
+    const colors = await withScene((scene) => {
+      const character = makeCharacter(scene, 'Test', 6, 26, 'av0', 'g');
+      const before = character.statusDot.fillColor;
+      setCharacterStatus(character, 'r');
+      return { before, after: character.statusDot.fillColor, status: character.status };
+    });
+
+    expect(colors.before).toBe(STATUS_COLOR.g);
+    expect(colors.after).toBe(STATUS_COLOR.r);
+    expect(colors.status).toBe('r');
+  });
+
+  it('el estado nace en el contenedor, no hay que preguntarselo al punto pintado', async () => {
+    // El contenedor es la fuente que lee `proximityTick` para decidir audio:
+    // deducir el estado del color seria invertir la direccion del dato.
+    const status = await withScene((scene) => makeCharacter(scene, 'Test', 6, 26, 'av0', 'y').status);
+
+    expect(status).toBe('y');
+  });
+
+  it('sale pronto si el estado no cambia, sin tocar el objeto pintado', async () => {
+    // Espeja `setCharacterFacing`: se llama desde cada mensaje remoto y
+    // repintar lo mismo una y otra vez es trabajo tirado.
+    const repaints = await withScene((scene) => {
+      const character = makeCharacter(scene, 'Test', 6, 26, 'av0', 'g');
+      const spy = vi.spyOn(character.statusDot, 'setFillStyle');
+      setCharacterStatus(character, 'g');
+      return spy.mock.calls.length;
+    });
+
+    expect(repaints).toBe(0);
+  });
+
+  it('el jugador local arranca "En línea" (DEFAULT_STATUS), no con un color inventado', async () => {
+    const player = await withScene((scene) => {
+      const created = spawnPlayer(scene);
+      return { status: created.status, color: created.statusDot.fillColor };
+    });
+
+    expect(player.status).toBe(DEFAULT_STATUS);
+    expect(player.color).toBe(STATUS_COLOR[DEFAULT_STATUS]);
   });
 });

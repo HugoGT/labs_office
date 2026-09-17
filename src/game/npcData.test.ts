@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { NPCS, STATUS_COLOR, STATUS_TXT } from './npcData';
+import { NPCS } from './npcData';
+import { PRESENCE_STATUSES } from './officeProtocol';
 
 describe('npcData', () => {
   it('porta las 33 entradas del prototipo en orden, con nombres verbatim (app.js:38-51)', () => {
@@ -22,8 +23,11 @@ describe('npcData', () => {
     }
   });
 
-  it('mapea cada estado a su color y texto (app.js:53-54)', () => {
-    expect(STATUS_COLOR).toEqual({ g: 0x22c55e, y: 0xeab308, r: 0xef4444 });
-    expect(STATUS_TXT).toEqual({ g: 'Disponible', y: 'Ausente', r: 'En reunión' });
+  it('cada entrada trae un estado del vocabulario compartido, no una letra cualquiera', () => {
+    // El color y la etiqueta ya no viven aqui (ver `presence.test.ts`): el
+    // roster solo aporta que estado arranca cada NPC.
+    for (const npc of NPCS) {
+      expect(PRESENCE_STATUSES).toContain(npc.status);
+    }
   });
 });

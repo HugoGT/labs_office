@@ -6,11 +6,18 @@
  * sin verlo; un round-trip de verdad lo estrella.
  */
 
+import type { Client as ServerClient } from '@colyseus/core';
 import { Client } from 'colyseus.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from '../../src/game/mapData.ts';
 import { createOfficeServer, type OfficeServer } from './createOfficeServer.ts';
-import { DEFAULT_NAME, MAX_NAME_LENGTH, OFFICE_ROOM_NAME } from './OfficeRoom.ts';
+import {
+  DEFAULT_NAME,
+  MAX_NAME_LENGTH,
+  OFFICE_ROOM_NAME,
+  OfficeRoom,
+  type StatusMessage,
+} from './OfficeRoom.ts';
 import type { OfficeState } from './schema.ts';
 
 let server: OfficeServer;
@@ -42,8 +49,11 @@ afterEach(async () => {
   await server.shutdown();
 });
 
-async function join(name: string) {
-  const room = await new Client(endpoint).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { name });
+async function join(name: string, options: Record<string, unknown> = {}) {
+  const room = await new Client(endpoint).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, {
+    name,
+    ...options,
+  });
   openRooms.push(room);
   return room;
 }
@@ -202,5 +212,82 @@ describe('OfficeRoom: registro de sesiones vivas para LiveKit (D4)', () => {
 
     await room.leave();
     await waitFor(() => !server.sessions.has(sessionId));
+  });
+});
+
+describe('OfficeRoom: estado de presencia (#1)', () => {
+  it('el cambio de estado de un cliente llega al estado que ve el otro', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+
+    a.send('status', { status: 'y' });
+
+    await waitFor(() => b.state.players.get(a.sessionId)?.status === 'y');
+  });
+
+  it('quien entra sin pedir estado arranca "En linea"', async () => {
+    const room = await join('Ana');
+
+    await waitFor(() => room.state.players.size === 1);
+    expect(room.state.players.get(room.sessionId)?.status).toBe('g');
+  });
+
+  it('al entrar, un estado invalido si cae al valor por defecto', async () => {
+    // En `onJoin` no hay estado previo que proteger: rechazar el join entero
+    // por una opcion mal escrita dejaria a alguien fuera de la oficina.
+    const room = await join('Ana', { status: 'moradito' });
+
+    await waitFor(() => room.state.players.size === 1);
+    expect(room.state.players.get(room.sessionId)?.status).toBe('g');
+  });
+
+  it('un "status" inventado deja intacto el anterior, no lo degrada al de defecto', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+    room.send('status', { status: 'r' });
+    await waitFor(() => room.state.players.get(room.sessionId)?.status === 'r');
+
+    room.send('status', { status: 'invisible' });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    // Degradar en silencio un "No molestar" a "En linea" seria una fuga de
+    // privacidad disfrazada de saneamiento: quien pidio aislarse dejaria de
+    // estarlo sin enterarse, y el saneamiento se veria como correcto.
+    expect(room.state.players.get(room.sessionId)?.status).toBe('r');
+  });
+
+  it('un "status" sin el campo tampoco toca el estado anterior', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+    room.send('status', { status: 'r' });
+    await waitFor(() => room.state.players.get(room.sessionId)?.status === 'r');
+
+    room.send('status', {});
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(room.state.players.get(room.sessionId)?.status).toBe('r');
+  });
+
+  it('un "status" de una sesion que no esta en el estado no crea un jugador fantasma', () => {
+    // No es alcanzable por WebSocket (todo cliente conectado tiene su entrada),
+    // asi que se invoca el manejador directamente: la guarda existe para el
+    // mensaje que llega justo despues de la baja.
+    const handlers = new Map<string, (client: ServerClient, message: unknown) => void>();
+    const room = new OfficeRoom();
+    (room as unknown as { onMessage: unknown }).onMessage = (
+      type: string,
+      handler: (client: ServerClient, message: unknown) => void,
+    ) => {
+      handlers.set(type, handler);
+      return () => {};
+    };
+    room.onCreate();
+
+    const message: StatusMessage = { status: 'r' };
+    expect(() =>
+      handlers.get('status')!({ sessionId: 'fantasma' } as ServerClient, message),
+    ).not.toThrow();
+    expect(room.state.players.size).toBe(0);
   });
 });
