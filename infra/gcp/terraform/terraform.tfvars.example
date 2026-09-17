@@ -25,3 +25,15 @@ acme_email = "cambiar@ejemplo.com"
 # Platform y crear al menos una cuenta (ver infra/gcp/README.md): en cuanto
 # tenga valor, el servidor deja de aceptar a quien no traiga un ID token valido.
 # auth_project_id = "vaulted-channel-505114-f0"
+
+# Directorio y panel de administracion (issue #24). El correo se promociona a
+# superadmin en su PRIMER inicio de sesion, y solo mientras no exista ya uno.
+# La cuenta tiene que existir antes en Identity Platform (el issue #8 desactivo
+# el alta por cuenta propia): si no, nadie podra hacer el arranque en frio.
+# bootstrap_superadmin_email = "gthugo@outlook.com"
+
+# Activar solo cuando exista la cuenta de servicio de Identity Platform con la
+# que el servidor da de alta cuentas al aceptar una invitacion. Mientras este
+# en false, el panel funciona entero salvo el endpoint de invitar, que responde
+# 503 (ver infra/gcp/README.md).
+# enable_identity_admin_secret = true

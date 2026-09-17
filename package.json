@@ -32,6 +32,7 @@
     "jose": "6.2.12",
     "livekit-client": "2.22.3",
     "livekit-server-sdk": "2.18.0",
+    "pg": "^8.23.0",
     "phaser": "3.90.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
@@ -43,6 +44,7 @@
     "@testing-library/user-event": "^14.6.6",
     "@types/express": "^4.17.25",
     "@types/node": "^26.2.0",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.1.0",

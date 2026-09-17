@@ -11,6 +11,13 @@
  * `onAuth` exige un ID token valido antes de dejar entrar, y el nombre pasa a
  * salir del token en vez de `options.name`. Sin verificador la sala se comporta
  * exactamente como antes, puerta abierta incluida.
+ *
+ * Y desde #24 tiene un tercero: con un directorio inyectado, la firma valida ya
+ * no basta. Son dos preguntas distintas y las dos tienen que decir que si -- la
+ * firma prueba QUIEN es, el directorio dice si esa persona puede entrar HOY.
+ * Hace falta justo porque Identity Platform no sabe caducar cuentas: su token
+ * dura una hora y se renueva indefinidamente mientras la cuenta exista, asi que
+ * sin esta segunda puerta un invitado de un dia entraria para siempre.
  */
 
 import { Room, ServerError, type AuthContext, type Client } from '@colyseus/core';
@@ -30,6 +37,8 @@ import {
   OFFICE_ROOM_NAME,
   isPresenceStatus,
 } from '../../src/game/officeProtocol.ts';
+import { decideAccess, type AccessDecision } from './directory/accessDecision.ts';
+import type { UserDirectory } from './directory/directoryPort.ts';
 import type { LiveSessionRegistry } from './liveSessions.ts';
 import { OfficeState, createPlayerState } from './schema.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
@@ -119,7 +128,28 @@ export interface OfficeRoomOptions {
    * abierta de siempre. Ver `authConfig.ts` para cuando pasa eso.
    */
   auth?: IdTokenVerifier;
+  /**
+   * Directorio de usuarios (#24), inyectado por la misma via y por la misma
+   * razon. Ausente significa directorio desactivado: nadie caduca y nadie queda
+   * fuera por no estar en una tabla, que es el comportamiento anterior a este
+   * cambio. Ver `bootstrapConfig.ts` para cuando pasa eso.
+   *
+   * Solo se consulta con `auth` presente: sin verificador no hay identidad que
+   * buscar, y preguntar por un usuario que nadie ha probado que exista no
+   * significa nada.
+   */
+  directory?: UserDirectory;
+  /**
+   * Inyectable para que los tests afirmen sobre lo que se registra, igual que
+   * `logFailure` en `verifyIdToken.ts` y por el mismo motivo: el motivo del
+   * rechazo no viaja al cliente, asi que la unica forma de probar que existe es
+   * capturarlo aqui.
+   */
+  logDirectoryDenial?: DirectoryDenialLogger;
 }
+
+/** Registro del motivo por el que el directorio cerro la puerta. */
+export type DirectoryDenialLogger = (decision: AccessDecision, uid: string) => void;
 
 /**
  * Lo que Colyseus deja en `client.auth`. El `true` no es decorativo: Colyseus
@@ -136,11 +166,16 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private joinCount = 0;
   private sessions?: LiveSessionRegistry;
   private auth?: IdTokenVerifier;
+  private directory?: UserDirectory;
+  private logDirectoryDenial: DirectoryDenialLogger = (decision, uid) =>
+    console.warn(`[directory] acceso denegado (${decision}): ${uid}`);
 
   onCreate(options?: OfficeRoomOptions): void {
     this.state = new OfficeState();
     this.sessions = options?.sessions;
     this.auth = options?.auth;
+    this.directory = options?.directory;
+    if (options?.logDirectoryDenial) this.logDirectoryDenial = options.logDirectoryDenial;
 
     this.onMessage('move', (client: Client, message: MoveMessage) => {
       const player = this.state.players.get(client.sessionId);
@@ -185,6 +220,15 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
    * vez de un 500 generico. El mensaje es deliberadamente mudo: no distingue
    * "sin token" de "token caducado" de "token forjado", por la misma razon que
    * `verifyIdToken.verify` devuelve `null` y no un motivo.
+   *
+   * Los cuatro rechazos del directorio (#24) colapsan en ESE MISMO 401, y no en
+   * uno propio, por lo mismo: distinguir "caducado" de "token invalido" le
+   * diria a quien sondea que esa cuenta existe y que hubo un acceso legitimo
+   * que caduco. Pero el LOG del servidor si lo distingue -- nadie de fuera lo
+   * lee, asi que callar ahi no defiende de nada y cuesta caro: "todo el mundo
+   * cae en not-provisioned" (las migraciones no corrieron, o el despliegue
+   * apunta a otra base de datos) y "un invitado caduco" son la misma respuesta
+   * HTTP y dos incidencias completamente distintas.
    */
   async onAuth(
     _client: Client<unknown, OfficeAuthData>,
@@ -196,6 +240,18 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     const token = (options as { token?: unknown } | null | undefined)?.token;
     const identity = await this.auth.verify(token);
     if (identity === null) throw new ServerError(401, 'unauthorized');
+
+    if (this.directory) {
+      // La hora se toma aqui y se pasa a `decideAccess`, que es pura: asi la
+      // regla de caducidad se puede probar en sus bordes exactos sin tocar el
+      // reloj del proceso.
+      const user = await this.directory.resolveOnLogin(identity);
+      const decision = decideAccess(user, new Date());
+      if (decision !== 'allow') {
+        this.logDirectoryDenial(decision, identity.uid);
+        throw new ServerError(401, 'unauthorized');
+      }
+    }
 
     return identity;
   }

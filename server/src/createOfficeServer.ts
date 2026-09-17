@@ -18,7 +18,20 @@ import express from 'express';
 import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { LIVEKIT_ROOM_NAME } from '../../src/game/officeProtocol.ts';
+import {
+  handleAdminSession,
+  handleCreateInvitation,
+  handleCreateUser,
+  handleListInvitations,
+  handleRevokeInvitation,
+  type AdminDeps,
+  type AdminResult,
+} from './admin/adminRoutes.ts';
+import { identityAdminFromEnv } from './admin/gcpIdentityAdmin.ts';
+import type { IdentityAdmin } from './admin/identityAdminPort.ts';
 import { resolveAuthConfig } from './authConfig.ts';
+import type { UserDirectory } from './directory/directoryPort.ts';
+import { directoryFromEnv, type DirectoryRuntime } from './directory/fromEnv.ts';
 import { createLiveSessionRegistry, type LiveSessionRegistry } from './liveSessions.ts';
 import { mintOfficeToken } from './livekitToken.ts';
 import { OFFICE_ROOM_NAME, OfficeRoom } from './OfficeRoom.ts';
@@ -116,6 +129,11 @@ export interface OfficeServer {
   httpServer: HttpServer;
   /** Registro de sesiones vivas (D4); expuesto para la ruta y para tests. */
   sessions: LiveSessionRegistry;
+  /**
+   * Directorio de usuarios (#24), o `undefined` si esta desactivado. Expuesto
+   * para las rutas de administracion y para los tests, igual que `sessions`.
+   */
+  directory?: UserDirectory;
   /** Puerto realmente asignado. Con `listen(0)` lo elige el sistema. */
   port(): number;
   listen(port: number): Promise<number>;
@@ -140,6 +158,38 @@ export interface OfficeServerOverrides {
    * justo lo que `liveSessions.ts` evita al no ser un singleton de modulo.
    */
   auth?: IdTokenVerifier | null;
+  /**
+   * Sustituye el directorio que saldria de `process.env` (#24). `null` fuerza
+   * el modo sin directorio. Existe por la misma razon que el de arriba, y por
+   * una mas: sin este override, probar la caducidad exigiria un Postgres
+   * levantado, y una suite que necesita infraestructura acaba sin correrse.
+   * Ver `memoryDirectory.ts`.
+   */
+  directory?: UserDirectory | null;
+  /**
+   * Sustituye el administrador de Identity Platform que saldria de
+   * `process.env` (#24). `null` fuerza el modo sin credencial, que es el estado
+   * REAL del despliegue mientras no exista la cuenta de servicio: el alta
+   * responde 503 y todo lo demas del panel funciona.
+   */
+  identityAdmin?: IdentityAdmin | null;
+  /**
+   * Lista blanca de origenes para `/admin/*`, normalmente de `ALLOWED_ORIGIN`.
+   * Vacia o ausente mantiene el `*` de hoy (ver el middleware de CORS).
+   */
+  allowedOrigins?: readonly string[];
+}
+
+/**
+ * Lee `ALLOWED_ORIGIN` como lista separada por comas. Ausente o vacia devuelve
+ * lista vacia, que el middleware interpreta como "sigue el comportamiento de
+ * hoy": sin esto, un despliegue existente se quedaria sin panel al actualizar.
+ */
+function allowedOriginsFromEnv(env: { ALLOWED_ORIGIN?: string }): readonly string[] {
+  return (env.ALLOWED_ORIGIN ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
 }
 
 export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeServer {
@@ -162,11 +212,51 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   // pagina pida un token para un `sessionId` que haya averiguado, que es
   // exactamente el modo degradado que describe `authConfig.ts`.
   //
-  // Apretar CORS es la issue #9 y queda fuera de este cambio a proposito.
+  // Apretar CORS del TODO sigue siendo la issue #9. Lo que #24 cambia es solo
+  // `/admin/*`, y por dos motivos concretos:
+  //
+  //  1. Es la primera ruta del servidor que autentica por CABECERA
+  //     (`Authorization: Bearer`) y no por el cuerpo. Una cabecera que no es
+  //     "simple" segun la spec de CORS obliga a declararla en
+  //     `Access-Control-Allow-Headers`, o el navegador bloquea la peticion
+  //     antes de que salga. Con la lista de `Content-Type` a secas que valia
+  //     para `/livekit/token`, el panel entero no llegaria ni a intentarlo.
+  //  2. Detras hay endpoints que CREAN cuentas. El argumento de arriba -- "`*`
+  //     se sostiene porque no hay credenciales de navegador" -- sigue siendo
+  //     cierto, pero deja de ser suficiente como unica defensa: `ALLOWED_ORIGIN`
+  //     es lo que hace que una pagina ajena no pueda ni empezar la conversacion.
+  //
+  // Sin `ALLOWED_ORIGIN` se mantiene exactamente el comportamiento de hoy. No
+  // es dejadez: el desarrollo local y la suite e2e viven de ese `*`, y un
+  // default que los rompiese convertiria este cambio en una migracion forzosa.
+  const allowedOrigins = overrides?.allowedOrigins ?? allowedOriginsFromEnv(process.env);
+
   app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
+    const isAdmin = req.path.startsWith('/admin');
+    const origin = req.header('Origin');
+
+    if (isAdmin && allowedOrigins.length > 0) {
+      // Se REFLEJA el origen concreto en vez de devolver la lista: la spec solo
+      // admite un valor. `Vary: Origin` evita que una cache intermedia sirva la
+      // respuesta de un origen permitido a otro que no lo esta.
+      res.header('Vary', 'Origin');
+      if (origin !== undefined && allowedOrigins.includes(origin)) {
+        res.header('Access-Control-Allow-Origin', origin);
+      }
+    } else {
+      res.header('Access-Control-Allow-Origin', '*');
+    }
+
     res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type');
+    // `Authorization` se declara siempre y no solo bajo `/admin`: el preflight
+    // llega a este middleware antes de que nadie mire la ruta, y una lista que
+    // dependiese del path se equivocaria justo en la peticion que importa.
+    //
+    // NO se anade `Access-Control-Allow-Credentials`: se autentica con un
+    // bearer que el cliente pone a mano en cada peticion, no con cookies.
+    // Concederlo ampliaria la superficie sin que nada lo necesite, y ademas la
+    // spec prohibe combinarlo con el `*` de la rama de arriba.
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     if (req.method === 'OPTIONS') {
       res.sendStatus(204);
       return;
@@ -190,13 +280,110 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
       ? (overrides.auth ?? undefined)
       : authVerifierFromEnv(process.env);
 
+  /**
+   * Mismo patron que `auth`, con una pieza mas: del entorno sale ademas la
+   * migracion, porque aplicar el esquema necesita el pool y el pool no sale del
+   * puerto (ver `fromEnv.ts`). Un directorio inyectado por un test no tiene
+   * esquema que aplicar, asi que su `migrate` no hace nada.
+   */
+  const directoryRuntime: DirectoryRuntime | undefined =
+    overrides?.directory !== undefined
+      ? overrides.directory
+        ? { directory: overrides.directory, async migrate() {} }
+        : undefined
+      : directoryFromEnv(process.env);
+  const directory = directoryRuntime?.directory;
+
   app.get('/health', (_req, res) => {
     // `auth` expone el modo EFECTIVO, no la variable de entorno: es la unica
     // forma de notar desde fuera que un despliegue se ha quedado sin
     // `FIREBASE_PROJECT_ID` y por tanto sin la guarda de dueno de sesion. No
     // dice el projectId: no hace falta para eso y es informacion del proyecto.
-    res.json({ ok: true, room: OFFICE_ROOM_NAME, auth: auth ? 'enabled' : 'disabled' });
+    //
+    // `directory` esta aqui por lo mismo (#24): sin `DATABASE_URL` el servidor
+    // arranca igual de bien y deja entrar a todo el mundo para siempre, sin un
+    // solo error en el log. Tampoco dice a que base de datos apunta.
+    res.json({
+      ok: true,
+      room: OFFICE_ROOM_NAME,
+      auth: auth ? 'enabled' : 'disabled',
+      directory: directory ? 'enabled' : 'disabled',
+    });
   });
+
+  /**
+   * Credencial de administracion de Identity Platform (#24). Mismo patron de
+   * override que `auth` y `directory`, por la misma razon de aislamiento.
+   */
+  const identityAdmin =
+    overrides?.identityAdmin !== undefined
+      ? overrides.identityAdmin
+      : identityAdminFromEnv(process.env);
+
+  /**
+   * Adaptador HTTP de las rutas de administracion. Los handlers son puros y
+   * devuelven `{ status, body }` (mismo contrato que `handleLivekitToken`), asi
+   * que aqui no queda ninguna decision: solo traducir.
+   *
+   * La guarda de "sin directorio" responde 503 y NO 404 a proposito. Un 404 en
+   * `/admin/*` es indistinguible del `index.html` que Caddy sirve cuando falta
+   * su bloque `handle` (issue #24 punto 3): dos averias con sintomas identicos
+   * y causas opuestas. El 503 afirma que la ruta existe y que lo que falta es
+   * la configuracion.
+   */
+  function admin(run: (req: express.Request, deps: AdminDeps) => Promise<AdminResult>) {
+    return (req: express.Request, res: express.Response): void => {
+      if (directory === undefined) {
+        res.status(503).json({ error: 'directory-not-configured' });
+        return;
+      }
+
+      run(req, { directory, auth, identityAdmin })
+        .then((result) => {
+          res.status(result.status).json(result.body);
+        })
+        .catch(() => {
+          // El error crudo no sale nunca al cliente, por lo mismo que en
+          // `/livekit/token`: podria arrastrar una contrasena generada o un
+          // fragmento de la credencial de servicio en el mensaje de un SDK.
+          console.error('[admin] fallo no controlado en una ruta de administracion');
+          res.status(500).json({ error: 'internal' });
+        });
+    };
+  }
+
+  // `/admin/session` NO exige rol de administracion: el panel la usa para
+  // decidir si se pinta a si mismo o la pantalla de "no autorizado". Exigirlo
+  // aqui haria esa pantalla irrepresentable. El guard de rol vive en las
+  // cuatro rutas de abajo, que son las que hacen algo.
+  app.get(
+    '/admin/session',
+    admin((req, deps) => handleAdminSession(req.header('Authorization'), deps)),
+  );
+
+  app.get(
+    '/admin/invitations',
+    admin((req, deps) => handleListInvitations(req.header('Authorization'), deps)),
+  );
+
+  app.post(
+    '/admin/invitations',
+    admin((req, deps) => handleCreateInvitation(req.header('Authorization'), req.body, deps)),
+  );
+
+  app.post(
+    '/admin/invitations/:id/revoke',
+    admin((req, deps) => handleRevokeInvitation(req.header('Authorization'), req.params.id, deps)),
+  );
+
+  // El alta de alguien de casa cuelga de `/admin/users` y no de
+  // `/admin/invitations`: no crea una invitacion, y compartir la ruta obligaria
+  // a mirar el cuerpo para saber que operacion se pidio. Quien puede repartir
+  // que rol lo decide el handler, no este cableado.
+  app.post(
+    '/admin/users',
+    admin((req, deps) => handleCreateUser(req.header('Authorization'), req.body, deps)),
+  );
 
   app.post('/livekit/token', (req, res) => {
     handleLivekitToken(req.body, sessions, auth)
@@ -217,23 +404,38 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   });
   // D4: el registro se inyecta via options, `OfficeRoom` no lo crea. Lo mismo
   // con el verificador (#8): la sala no lee `process.env`.
-  gameServer.define(OFFICE_ROOM_NAME, OfficeRoom, { sessions, auth });
+  gameServer.define(OFFICE_ROOM_NAME, OfficeRoom, { sessions, auth, directory });
 
   return {
     gameServer,
     httpServer,
     sessions,
+    directory,
     port() {
       const address = httpServer.address() as AddressInfo | null;
       if (!address) throw new Error('server is not listening yet');
       return address.port;
     },
     async listen(port) {
+      // Las migraciones van ANTES de aceptar conexiones, y su error se propaga
+      // en vez de tragarse. Un servidor escuchando sobre un esquema a medias
+      // aceptaria logins y fallaria en la primera consulta, con un error que no
+      // menciona las migraciones por ningun lado; fallar aqui deja el motivo
+      // real ("connection refused", "permission denied") en la primera linea.
+      //
+      // No contradice la degradacion de `bootstrapConfig.ts`: aquello es "sin
+      // configuracion, sin directorio", y esto es "con configuracion que no se
+      // puede cumplir". Lo segundo no es un modo degradado, es una averia.
+      await directoryRuntime?.migrate();
       await gameServer.listen(port);
       return this.port();
     },
     async shutdown() {
       await gameServer.gracefullyShutdown(false);
+      // El pool queda con conexiones vivas si no se cierra: en produccion son
+      // conexiones que la base de datos sigue contando, y en los tests es un
+      // proceso de vitest que no termina.
+      await directory?.close();
     },
   };
 }
