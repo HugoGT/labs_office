@@ -1,10 +1,11 @@
 import { act, renderHook } from '@testing-library/react';
 import { Room } from 'livekit-client';
 import { describe, expect, it, vi } from 'vitest';
+import type { AttachableTrack } from '../game/attachableTrack';
 import { createOfficeBridge } from '../game/officeBridge';
 import type { PresenceStatus } from '../game/officeProtocol';
 import type { LivekitConfig } from '../game/livekitEndpoint';
-import type { LivekitRoomConnection } from '../game/livekitRoom';
+import type { ConnectLivekitRoomOptions, LivekitRoomConnection } from '../game/livekitRoom';
 import type { LivekitTokenResponse } from '../game/livekitTokenClient';
 import { useProximityAudio } from './useProximityAudio';
 
@@ -24,6 +25,14 @@ function fakeConnection(overrides: Partial<LivekitRoomConnection> = {}): Livekit
 
 function fakeTokenResponse(): LivekitTokenResponse {
   return { token: 'jwt', url: 'ws://localhost:7880', identity: 'yo', room: 'office-livekit' };
+}
+
+function fakeAttachableTrack(): AttachableTrack {
+  return {
+    kind: 'video',
+    attach: () => document.createElement('video'),
+    detach: () => [],
+  };
 }
 
 describe('useProximityAudio', () => {
@@ -126,6 +135,100 @@ describe('useProximityAudio', () => {
     // Compartiendo sala: video pide exactamente los mismos ids que el audio.
     expect(connection.setDesiredAudioPeers).toHaveBeenLastCalledWith(['ana']);
     expect(connection.setDesiredVideoPeers).toHaveBeenLastCalledWith(['ana']);
+  });
+
+  describe('video subscrito y habla real llegan al hook (issue #17, D3/D7)', () => {
+    /** Conecta y captura las opciones (incluidos los callbacks) con las que el hook llamo a `connect`. */
+    async function connectAndCaptureCallbacks() {
+      const bridge = createOfficeBridge();
+      const connection = fakeConnection();
+      let captured: ConnectLivekitRoomOptions | undefined;
+      const connect = vi.fn(async (opts: ConnectLivekitRoomOptions) => {
+        captured = opts;
+        return connection;
+      });
+      const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+      const rendered = renderHook(() =>
+        useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+      );
+
+      await act(async () => {
+        bridge.emit('voice', { selfSessionId: 'yo', sessionIds: [], room: null });
+      });
+
+      return { ...rendered, bridge, connection, callbacks: captured! };
+    }
+
+    it('empieza sin pistas, sin hablantes y sin camara local', () => {
+      const bridge = createOfficeBridge();
+      const { result } = renderHook(() =>
+        useProximityAudio(bridge, { config: CONFIG, status: 'g', connect: vi.fn(), fetchToken: vi.fn() }),
+      );
+
+      expect(result.current.videoTracks.size).toBe(0);
+      expect(result.current.speakers.size).toBe(0);
+      expect(result.current.localVideoTrack).toBeNull();
+    });
+
+    it('onVideoTrackSubscribed agrega el peer a videoTracks, indexado por sessionId', async () => {
+      const { result, callbacks } = await connectAndCaptureCallbacks();
+      const track = fakeAttachableTrack();
+
+      await act(async () => callbacks.onVideoTrackSubscribed?.('ana', track));
+
+      expect(result.current.videoTracks.get('ana')).toBe(track);
+    });
+
+    it('onVideoTrackUnsubscribed retira exactamente ese peer, sin tocar a los demas', async () => {
+      const { result, callbacks } = await connectAndCaptureCallbacks();
+      const anaTrack = fakeAttachableTrack();
+      const beaTrack = fakeAttachableTrack();
+
+      await act(async () => callbacks.onVideoTrackSubscribed?.('ana', anaTrack));
+      await act(async () => callbacks.onVideoTrackSubscribed?.('bea', beaTrack));
+      await act(async () => callbacks.onVideoTrackUnsubscribed?.('ana', anaTrack));
+
+      expect(result.current.videoTracks.has('ana')).toBe(false);
+      expect(result.current.videoTracks.get('bea')).toBe(beaTrack);
+    });
+
+    it('onLocalVideoTrackChanged fija y limpia la camara propia', async () => {
+      const { result, callbacks } = await connectAndCaptureCallbacks();
+      const track = fakeAttachableTrack();
+
+      await act(async () => callbacks.onLocalVideoTrackChanged?.(track));
+      expect(result.current.localVideoTrack).toBe(track);
+
+      await act(async () => callbacks.onLocalVideoTrackChanged?.(null));
+      expect(result.current.localVideoTrack).toBeNull();
+    });
+
+    it('onActiveSpeakersChanged reemplaza el conjunto de hablantes con las identidades reportadas', async () => {
+      const { result, callbacks } = await connectAndCaptureCallbacks();
+
+      await act(async () => callbacks.onActiveSpeakersChanged?.(['ana', 'yo']));
+      expect(result.current.speakers.has('ana')).toBe(true);
+      expect(result.current.speakers.has('yo')).toBe(true);
+
+      await act(async () => callbacks.onActiveSpeakersChanged?.([]));
+      expect(result.current.speakers.size).toBe(0);
+    });
+
+    it('desconectar limpia video, hablantes y camara local: nada queda colgado tras salir', async () => {
+      const { result, callbacks, bridge } = await connectAndCaptureCallbacks();
+      await act(async () => callbacks.onVideoTrackSubscribed?.('ana', fakeAttachableTrack()));
+      await act(async () => callbacks.onLocalVideoTrackChanged?.(fakeAttachableTrack()));
+      await act(async () => callbacks.onActiveSpeakersChanged?.(['ana']));
+
+      await act(async () => {
+        bridge.emit('voice', { selfSessionId: null, sessionIds: [], room: null });
+      });
+
+      expect(result.current.videoTracks.size).toBe(0);
+      expect(result.current.speakers.size).toBe(0);
+      expect(result.current.localVideoTrack).toBeNull();
+    });
   });
 
   it('el rechazo de connect deja audioAvailable en false, sin lanzar y sin reintentar', async () => {

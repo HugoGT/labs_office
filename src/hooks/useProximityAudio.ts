@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { AttachableTrack } from '../game/attachableTrack';
 import type { LivekitConfig } from '../game/livekitEndpoint';
-import { connectLivekitRoom, type LivekitRoomConnection } from '../game/livekitRoom';
+import {
+  connectLivekitRoom,
+  type ConnectLivekitRoomOptions,
+  type LivekitRoomConnection,
+} from '../game/livekitRoom';
 import { fetchLivekitToken, type LivekitTokenResponse } from '../game/livekitTokenClient';
 import type { OfficeBridge } from '../game/officeBridge';
 import { DO_NOT_DISTURB, type PresenceStatus } from '../game/officeProtocol';
@@ -21,11 +26,7 @@ export interface UseProximityAudioOptions {
   /** Estado de presencia elegido por el usuario; React es su dueno (ver `OfficeShell`). */
   status: PresenceStatus;
   /** Inyectable para pruebas; por defecto la implementacion real. */
-  connect?: (opts: {
-    url: string;
-    token: string;
-    onAudioPlaybackChanged?: (canPlayback: boolean) => void;
-  }) => Promise<LivekitRoomConnection>;
+  connect?: (opts: ConnectLivekitRoomOptions) => Promise<LivekitRoomConnection>;
   fetchToken?: (tokenUrl: string, sessionId: string) => Promise<LivekitTokenResponse>;
 }
 
@@ -46,6 +47,12 @@ export interface UseProximityAudioResult {
   toggleCam: () => void;
   /** Gesto de usuario que levanta el bloqueo de autoplay. */
   unblockAudio: () => void;
+  /** Video de peers suscritos, indexado por sessionId (issue #17, D3). React (no este hook) lo adjunta al DOM. */
+  videoTracks: ReadonlyMap<string, AttachableTrack>;
+  /** Identidades hablando AHORA MISMO segun LiveKit (D7). Nunca deriva de `micOn`. */
+  speakers: ReadonlySet<string>;
+  /** Camara propia, o `null` si esta apagada/no publicada. */
+  localVideoTrack: AttachableTrack | null;
 }
 
 export function useProximityAudio(
@@ -62,6 +69,9 @@ export function useProximityAudio(
   const [camOn, setCamOn] = useState(false);
   const [audioAvailable, setAudioAvailable] = useState(false);
   const [audioBlocked, setAudioBlocked] = useState(false);
+  const [videoTracks, setVideoTracks] = useState<ReadonlyMap<string, AttachableTrack>>(new Map());
+  const [speakers, setSpeakers] = useState<ReadonlySet<string>>(new Set());
+  const [localVideoTrack, setLocalVideoTrack] = useState<AttachableTrack | null>(null);
   const connectionRef = useRef<LivekitRoomConnection | null>(null);
   /** Sesion actualmente conectada o en vuelo de conexion; evita reconectar por cada tick. */
   const sessionRef = useRef<string | null>(null);
@@ -75,6 +85,11 @@ export function useProximityAudio(
       sessionRef.current = null;
       setAudioAvailable(false);
       setAudioBlocked(false);
+      // Ninguna pista, hablante o camara sobrevive a la sala que las reporto:
+      // sin esto, salir de una sala dejaria el ultimo estado colgado en React.
+      setVideoTracks(new Map());
+      setSpeakers(new Set());
+      setLocalVideoTrack(null);
       if (connection) await connection.disconnect();
     }
 
@@ -113,6 +128,29 @@ export function useProximityAudio(
             onAudioPlaybackChanged: (canPlayback) => {
               if (sessionRef.current !== pendingSessionId) return;
               setAudioBlocked(!canPlayback);
+            },
+            // Misma guarda que arriba (D6 de #18): un aviso tardio de una
+            // sesion ya reemplazada no debe corromper el estado actual.
+            onVideoTrackSubscribed: (sessionId, track) => {
+              if (sessionRef.current !== pendingSessionId) return;
+              setVideoTracks((current) => new Map(current).set(sessionId, track));
+            },
+            onVideoTrackUnsubscribed: (sessionId) => {
+              if (sessionRef.current !== pendingSessionId) return;
+              setVideoTracks((current) => {
+                if (!current.has(sessionId)) return current;
+                const next = new Map(current);
+                next.delete(sessionId);
+                return next;
+              });
+            },
+            onLocalVideoTrackChanged: (track) => {
+              if (sessionRef.current !== pendingSessionId) return;
+              setLocalVideoTrack(track);
+            },
+            onActiveSpeakersChanged: (identities) => {
+              if (sessionRef.current !== pendingSessionId) return;
+              setSpeakers(new Set(identities));
             },
           });
 
@@ -200,5 +238,17 @@ export function useProximityAudio(
     })();
   }, [camOn, dnd]);
 
-  return { micOn, camOn, audioAvailable, audioBlocked, dnd, toggleMic, toggleCam, unblockAudio };
+  return {
+    micOn,
+    camOn,
+    audioAvailable,
+    audioBlocked,
+    dnd,
+    toggleMic,
+    toggleCam,
+    unblockAudio,
+    videoTracks,
+    speakers,
+    localVideoTrack,
+  };
 }
