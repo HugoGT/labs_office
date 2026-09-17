@@ -13,12 +13,14 @@ import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from '../../
 import { createOfficeServer, type OfficeServer } from './createOfficeServer.ts';
 import {
   DEFAULT_NAME,
+  deriveIdentityName,
   MAX_NAME_LENGTH,
   OFFICE_ROOM_NAME,
   OfficeRoom,
   type StatusMessage,
 } from './OfficeRoom.ts';
 import type { OfficeState } from './schema.ts';
+import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 
 let server: OfficeServer;
 let endpoint: string;
@@ -289,5 +291,193 @@ describe('OfficeRoom: estado de presencia (#1)', () => {
       handlers.get('status')!({ sessionId: 'fantasma' } as ServerClient, message),
     ).not.toThrow();
     expect(room.state.players.size).toBe(0);
+  });
+});
+
+/**
+ * Verificador de mentira indexado por token. Aqui es lo correcto: que un token
+ * de Firebase sea valido o no ya lo prueba a fondo `verifyIdToken.test.ts` con
+ * firmas reales. Lo que estos tests tienen que demostrar es el cableado de la
+ * sala -- que un `null` cierra la puerta, que la identidad llega a `client.auth`
+ * y que el uid acaba en el registro -- y para eso un doble es mas honesto que
+ * montar un JWKS.
+ */
+function stubVerifier(valid: Record<string, VerifiedIdentity>): IdTokenVerifier {
+  return {
+    async verify(token: unknown) {
+      return typeof token === 'string' ? (valid[token] ?? null) : null;
+    },
+  };
+}
+
+const ANA: VerifiedIdentity = { uid: 'uid-ana', email: 'ana@example.com', name: 'Ana Gomez' };
+
+/** Levanta un segundo servidor con auth activa, en su propio puerto efimero. */
+async function startAuthenticatedServer(verifier: IdTokenVerifier) {
+  const authServer = createOfficeServer({ auth: verifier });
+  const port = await authServer.listen(0);
+  return { authServer, endpoint: `ws://localhost:${port}` };
+}
+
+describe('deriveIdentityName (#8)', () => {
+  it('prefiere el name del token verificado', () => {
+    expect(deriveIdentityName(ANA, DEFAULT_NAME)).toBe('Ana Gomez');
+  });
+
+  it('cae a la parte local del email cuando no hay name', () => {
+    // Mejor "ana" que "Invitado": es lo que la persona reconoce de si misma, y
+    // el dominio no pinta nada en una etiqueta sobre un avatar.
+    expect(
+      deriveIdentityName({ uid: 'uid-ana', email: 'ana@example.com', name: null }, DEFAULT_NAME),
+    ).toBe('ana');
+  });
+
+  it('cae al valor por defecto cuando el token no trae ni name ni email', () => {
+    expect(deriveIdentityName({ uid: 'uid-ana', email: null, name: null }, DEFAULT_NAME)).toBe(
+      DEFAULT_NAME,
+    );
+  });
+
+  it('trata un name en blanco como ausente en vez de mostrar una etiqueta vacia', () => {
+    expect(
+      deriveIdentityName({ uid: 'uid-ana', email: 'ana@example.com', name: '   ' }, DEFAULT_NAME),
+    ).toBe('ana');
+  });
+
+  it('cae al valor por defecto si la parte local del email queda vacia', () => {
+    expect(
+      deriveIdentityName({ uid: 'uid-ana', email: '@example.com', name: null }, DEFAULT_NAME),
+    ).toBe(DEFAULT_NAME);
+  });
+
+  it('recorta los espacios de alrededor del name', () => {
+    expect(
+      deriveIdentityName({ uid: 'uid-ana', email: null, name: '  Ana Gomez  ' }, DEFAULT_NAME),
+    ).toBe('Ana Gomez');
+  });
+
+  it('no recorta la longitud: de eso se encarga sanitizeName despues', () => {
+    // Separar las dos reglas evita que un cambio en MAX_NAME_LENGTH haya que
+    // perseguirlo por dos sitios.
+    const largo = 'N'.repeat(200);
+    expect(
+      deriveIdentityName({ uid: 'uid-ana', email: null, name: largo }, DEFAULT_NAME),
+    ).toHaveLength(200);
+  });
+});
+
+describe('OfficeRoom: onAuth sin verificador (comportamiento de hoy)', () => {
+  it('deja entrar sin token y la sesion queda sin dueno', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+
+    expect(server.sessions.has(room.sessionId)).toBe(true);
+    expect(server.sessions.uidOf(room.sessionId)).toBeUndefined();
+  });
+
+  it('REGRESION: sin verificador el nombre sigue saliendo de options.name', async () => {
+    // Colyseus rechaza el join si `onAuth` devuelve algo falsy, asi que el modo
+    // abierto devuelve `true` -- y ese `true` aterriza en `client.auth`. La
+    // primera version de `onJoin` lo tomo por una identidad y le puso "Invitado"
+    // a todo el mundo con la auth desactivada. Este test es el que lo caza.
+    const room = await join('Ana', { token: 'da-igual-lo-que-ponga-aqui' });
+    await waitFor(() => room.state.players.size === 1);
+
+    expect(room.state.players.get(room.sessionId)?.name).toBe('Ana');
+  });
+});
+
+describe('OfficeRoom: onAuth con verificador (#8)', () => {
+  let authServer: OfficeServer;
+  let authEndpoint: string;
+
+  beforeEach(async () => {
+    const started = await startAuthenticatedServer(stubVerifier({ 'token-de-ana': ANA }));
+    authServer = started.authServer;
+    authEndpoint = started.endpoint;
+  });
+
+  afterEach(async () => {
+    await authServer.shutdown();
+  });
+
+  function joinAuth(options: Record<string, unknown>) {
+    return new Client(authEndpoint).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, options);
+  }
+
+  it('un token valido entra y su uid queda ligado al sessionId', async () => {
+    const room = await joinAuth({ token: 'token-de-ana' });
+    openRooms.push(room);
+    await waitFor(() => room.state.players.size === 1);
+
+    expect(authServer.sessions.has(room.sessionId)).toBe(true);
+    expect(authServer.sessions.uidOf(room.sessionId)).toBe('uid-ana');
+  });
+
+  it('el nombre sale del token, no del `name` que mande el cliente', async () => {
+    // Este es el punto: con auth activa `options.name` deja de ser una fuente
+    // legitima. Si se respetase, cualquiera podria entrar autenticado como si
+    // mismo y rotularse con el nombre de otra persona de la oficina.
+    const room = await joinAuth({ token: 'token-de-ana', name: 'Director General' });
+    openRooms.push(room);
+    await waitFor(() => room.state.players.size === 1);
+
+    expect(room.state.players.get(room.sessionId)?.name).toBe('Ana Gomez');
+  });
+
+  it('un token invalido no entra: 401 unauthorized', async () => {
+    await expect(joinAuth({ token: 'token-forjado' })).rejects.toMatchObject({ code: 401 });
+  });
+
+  it('entrar sin token tampoco cuela cuando la auth esta activa', async () => {
+    await expect(joinAuth({ name: 'Ana' })).rejects.toMatchObject({ code: 401 });
+  });
+
+  it('un token invalido no deja rastro en el registro de sesiones', async () => {
+    await expect(joinAuth({ token: 'token-forjado' })).rejects.toThrow();
+
+    expect(authServer.sessions.size()).toBe(0);
+  });
+});
+
+describe('OfficeRoom: nombre derivado de la identidad (#8)', () => {
+  async function joinWithIdentity(identity: VerifiedIdentity, options: Record<string, unknown>) {
+    const { authServer, endpoint: authEndpoint } = await startAuthenticatedServer(
+      stubVerifier({ 'un-token': identity }),
+    );
+    const room = await new Client(authEndpoint).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, {
+      token: 'un-token',
+      ...options,
+    });
+    await waitFor(() => room.state.players.size === 1);
+    const name = room.state.players.get(room.sessionId)?.name;
+    await authServer.shutdown();
+    return name;
+  }
+
+  it('usa la parte local del email cuando el token no trae name', async () => {
+    const name = await joinWithIdentity(
+      { uid: 'uid-beto', email: 'beto@example.com', name: null },
+      { name: 'ignorame' },
+    );
+
+    expect(name).toBe('beto');
+  });
+
+  it('usa el nombre por defecto cuando el token no trae ni name ni email', async () => {
+    const name = await joinWithIdentity({ uid: 'uid-anon', email: null, name: null }, {});
+
+    expect(name).toBe(DEFAULT_NAME);
+  });
+
+  it('recorta a MAX_NAME_LENGTH un name desmesurado que venga en el token', async () => {
+    // El token viene firmado por Google, no saneado: un `name` de 200 caracteres
+    // es perfectamente emitible y romperia el render igual que uno del cliente.
+    const name = await joinWithIdentity(
+      { uid: 'uid-largo', email: null, name: 'N'.repeat(200) },
+      {},
+    );
+
+    expect(name).toHaveLength(MAX_NAME_LENGTH);
   });
 });
