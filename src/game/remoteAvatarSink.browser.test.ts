@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { STATUS_COLOR } from './presence';
 import { createRemoteAvatarRegistry, type RemotePlayerSnapshot } from './remoteAvatars';
 import { createPhaserAvatarSink } from './remoteAvatarSink';
 import { createOfficeTextures } from './textures';
@@ -164,13 +165,42 @@ describe('createPhaserAvatarSink: datos que llegan por red', () => {
     expect(facing).toBe('down');
   });
 
-  it('un estado desconocido usa el color de "disponible" en vez de quedarse sin color', async () => {
+  it('un estado desconocido cae a "En línea" en vez de quedarse sin color', async () => {
     const created = await withScene((scene) => {
       const sink = createPhaserAvatarSink(scene);
       return sink.create(snapshot({ status: 'estado-inventado' }));
     });
 
-    expect(created).toBeDefined();
+    expect(created.status).toBe('g');
+    expect(created.statusDot.fillColor).toBe(STATUS_COLOR.g);
     expect(created.nameText).toBe('Ana');
+  });
+
+  it('un cambio de estado remoto repinta el punto: antes solo se reconciliaban posicion y orientacion', async () => {
+    // Regresion de #1: el estado era inmutable, asi que `update` podia
+    // ignorarlo sin consecuencias. Ahora cualquiera puede pasar a "No
+    // molestar" en mitad de la sesion y el resto tiene que verlo.
+    const dot = await withScene((scene) => {
+      const sink = createPhaserAvatarSink(scene);
+      const avatar = sink.create(snapshot({ status: 'g' }));
+      const before = avatar.statusDot.fillColor;
+      sink.update(avatar, snapshot({ status: 'r' }));
+      return { before, after: avatar.statusDot.fillColor, status: avatar.status };
+    });
+
+    expect(dot.before).toBe(STATUS_COLOR.g);
+    expect(dot.after).toBe(STATUS_COLOR.r);
+    expect(dot.status).toBe('r');
+  });
+
+  it('un estado desconocido en un update no borra el color: cae al valor por defecto', async () => {
+    const dot = await withScene((scene) => {
+      const sink = createPhaserAvatarSink(scene);
+      const avatar = sink.create(snapshot({ status: 'r' }));
+      sink.update(avatar, snapshot({ status: 'moradito' }));
+      return avatar.statusDot.fillColor;
+    });
+
+    expect(dot).toBe(STATUS_COLOR.g);
   });
 });

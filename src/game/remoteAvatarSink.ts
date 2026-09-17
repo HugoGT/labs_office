@@ -6,7 +6,12 @@
  */
 
 import type Phaser from 'phaser';
-import { makeCharacter, setCharacterFacing, type CharacterContainer } from './characters';
+import {
+  makeCharacter,
+  setCharacterFacing,
+  setCharacterStatus,
+  type CharacterContainer,
+} from './characters';
 import {
   DEFAULT_FACING,
   DEFAULT_STATUS,
@@ -16,7 +21,6 @@ import {
   type Facing,
   type PresenceStatus,
 } from './officeProtocol';
-import { STATUS_COLOR } from './presence';
 import { avatarKeyFor, type RemoteAvatarSink, type RemotePlayerSnapshot } from './remoteAvatars';
 
 /** Contenedor de avatar remoto: guarda su interpolacion en curso. */
@@ -55,7 +59,7 @@ export function createPhaserAvatarSink(
         0,
         0,
         avatarKeyFor(snapshot.sessionId),
-        STATUS_COLOR[statusOf(snapshot.status)],
+        statusOf(snapshot.status),
       ) as RemoteAvatarContainer;
       container.setPosition(snapshot.x, snapshot.y);
       container.setDepth(snapshot.y);
@@ -64,6 +68,10 @@ export function createPhaserAvatarSink(
 
     update(avatar, snapshot) {
       setCharacterFacing(avatar, facingOf(snapshot.facing));
+      // Antes de #1 el estado era inmutable y `update` podia ignorarlo sin
+      // consecuencias. Ahora cambia en mitad de la sesion, y no reconciliarlo
+      // dejaria a alguien pintado "En linea" mientras esta en "No molestar".
+      setCharacterStatus(avatar, statusOf(snapshot.status));
       avatar.glideTween?.stop();
       // Se interpola en vez de saltar: el servidor publica ~10 veces por
       // segundo, asi que un `setPosition` directo haria que los demas se
