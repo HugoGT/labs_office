@@ -11,6 +11,7 @@ import { ContextMenu, type NpcMenuAction } from './ContextMenu';
 import { GameCanvas } from './GameCanvas';
 import { RecBadge } from './RecBadge';
 import { Toast } from './Toast';
+import { VideoTiles } from './VideoTiles';
 
 /** Duracion del toast antes de auto-ocultarse (`app.js:525`, `ms || 3200`). */
 const TOAST_TIMEOUT_MS = 3200;
@@ -148,6 +149,7 @@ export function OfficeShell() {
   return (
     <div id="office-shell">
       <GameCanvas bridge={bridge} endpoint={endpoint} />
+      <VideoTiles bridge={bridge} />
       <RecBadge visible={recording} />
       <ContextMenu menu={menu} onAction={handleMenuAction} onClose={closeMenu} />
       <BottomBar
