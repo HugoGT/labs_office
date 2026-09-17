@@ -202,3 +202,137 @@ describe('reconciliacion consciente del kind (issue #17): audio y video son delt
     expect(videoPub.isSubscribed).toBe(true);
   });
 });
+
+describe('video, camara local y habla llegan hacia afuera (issue #17, D3/D7): livekitRoom REPORTA, nunca adjunta video', () => {
+  it('onVideoTrackSubscribed dispara solo para pistas de video, con la identidad de quien la publica', async () => {
+    const room = fakeRoom();
+    const onVideoTrackSubscribed = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onVideoTrackSubscribed,
+    });
+    const audioTrack = fakeTrack('audio');
+    const videoTrack = fakeTrack('video');
+
+    room.emit(RoomEvent.TrackSubscribed, audioTrack, undefined, { identity: 'p1' });
+    room.emit(RoomEvent.TrackSubscribed, videoTrack, undefined, { identity: 'p1' });
+
+    expect(onVideoTrackSubscribed).toHaveBeenCalledTimes(1);
+    expect(onVideoTrackSubscribed).toHaveBeenCalledWith('p1', videoTrack);
+  });
+
+  it('onVideoTrackUnsubscribed dispara solo para pistas de video, con la misma identidad', async () => {
+    const room = fakeRoom();
+    const onVideoTrackUnsubscribed = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onVideoTrackUnsubscribed,
+    });
+    const audioTrack = fakeTrack('audio');
+    const videoTrack = fakeTrack('video');
+
+    room.emit(RoomEvent.TrackUnsubscribed, audioTrack, undefined, { identity: 'p1' });
+    room.emit(RoomEvent.TrackUnsubscribed, videoTrack, undefined, { identity: 'p1' });
+
+    expect(onVideoTrackUnsubscribed).toHaveBeenCalledTimes(1);
+    expect(onVideoTrackUnsubscribed).toHaveBeenCalledWith('p1', videoTrack);
+  });
+
+  it('onLocalVideoTrackChanged reporta la pista al publicarse la camara local', async () => {
+    const room = fakeRoom();
+    const onLocalVideoTrackChanged = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onLocalVideoTrackChanged,
+    });
+    const localTrack = fakeTrack('video');
+
+    room.emit(RoomEvent.LocalTrackPublished, { kind: 'video', track: localTrack });
+
+    expect(onLocalVideoTrackChanged).toHaveBeenCalledWith(localTrack);
+  });
+
+  it('onLocalVideoTrackChanged reporta null al despublicarse la camara: no queda huerfano el ultimo valor', async () => {
+    const room = fakeRoom();
+    const onLocalVideoTrackChanged = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onLocalVideoTrackChanged,
+    });
+
+    room.emit(RoomEvent.LocalTrackPublished, { kind: 'video', track: fakeTrack('video') });
+    room.emit(RoomEvent.LocalTrackUnpublished, { kind: 'video' });
+
+    expect(onLocalVideoTrackChanged).toHaveBeenLastCalledWith(null);
+  });
+
+  it('publicar/despublicar audio local nunca dispara onLocalVideoTrackChanged: el gate es por kind, no por "es local"', async () => {
+    const room = fakeRoom();
+    const onLocalVideoTrackChanged = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onLocalVideoTrackChanged,
+    });
+
+    room.emit(RoomEvent.LocalTrackPublished, { kind: 'audio', track: fakeTrack('audio') });
+    room.emit(RoomEvent.LocalTrackUnpublished, { kind: 'audio' });
+
+    expect(onLocalVideoTrackChanged).not.toHaveBeenCalled();
+  });
+
+  it('onActiveSpeakersChanged mapea los participantes reportados a sus identidades', async () => {
+    const room = fakeRoom();
+    const onActiveSpeakersChanged = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onActiveSpeakersChanged,
+    });
+
+    room.emit(RoomEvent.ActiveSpeakersChanged, [{ identity: 'p1' }, { identity: 'yo' }]);
+
+    expect(onActiveSpeakersChanged).toHaveBeenCalledWith(['p1', 'yo']);
+  });
+
+  it('un arreglo vacio de speakers tambien se reporta: nadie habla ya no puede quedar colgado del ultimo valor', async () => {
+    const room = fakeRoom();
+    const onActiveSpeakersChanged = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onActiveSpeakersChanged,
+    });
+
+    room.emit(RoomEvent.ActiveSpeakersChanged, [{ identity: 'p1' }]);
+    room.emit(RoomEvent.ActiveSpeakersChanged, []);
+
+    expect(onActiveSpeakersChanged).toHaveBeenLastCalledWith([]);
+  });
+
+  it('guarda contra micOn: activar el microfono real jamas dispara onActiveSpeakersChanged (D7, tarea 2.9)', async () => {
+    const room = fakeRoom();
+    const onActiveSpeakersChanged = vi.fn();
+    const connection = await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onActiveSpeakersChanged,
+    });
+
+    await connection.setMicrophoneEnabled(true);
+
+    expect(onActiveSpeakersChanged).not.toHaveBeenCalled();
+  });
+});

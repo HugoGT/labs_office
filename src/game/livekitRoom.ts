@@ -14,7 +14,16 @@
  * el siguiente tick en vez de dejar una fuga de audio permanente y silenciosa.
  */
 
-import { Room, RoomEvent, Track, type RemoteParticipant, type RemoteTrack } from 'livekit-client';
+import {
+  Room,
+  RoomEvent,
+  Track,
+  type LocalTrackPublication,
+  type Participant,
+  type RemoteParticipant,
+  type RemoteTrack,
+} from 'livekit-client';
+import type { AttachableTrack } from './attachableTrack';
 import { reconcileSubscriptions } from './proximityAudio';
 import { createRemoteAudioSink } from './remoteAudioSink';
 
@@ -55,6 +64,26 @@ export interface ConnectLivekitRoomOptions {
    * audio y hace falta un gesto del usuario (`startAudio`).
    */
   onAudioPlaybackChanged?: (canPlayback: boolean) => void;
+  /**
+   * Video de un peer YA suscrito (issue #17, D3). Este modulo solo REPORTA:
+   * a diferencia del audio, no existe un `remoteVideoSink.ts` que lo adjunte
+   * el mismo -- React es el unico dueno del `<video>` (ver `attachableTrack.ts`).
+   */
+  onVideoTrackSubscribed?: (sessionId: string, track: AttachableTrack) => void;
+  /** Contraparte de `onVideoTrackSubscribed`: la pista ya no esta disponible. */
+  onVideoTrackUnsubscribed?: (sessionId: string, track: AttachableTrack) => void;
+  /**
+   * Camara local. `null` cuando se despublica (camara apagada o desconexion):
+   * el consumidor no tiene que adivinar el "apagado" a partir de un valor
+   * previo que dejo de ser valido.
+   */
+  onLocalVideoTrackChanged?: (track: AttachableTrack | null) => void;
+  /**
+   * Identidades reportando voz activa AHORA MISMO (D7): la UNICA fuente de
+   * habla. Deliberadamente no deriva de `micOn` ni de un umbral de
+   * `audioLevel` propio -- ver la guarda en `livekitRoom.test.ts` (tarea 2.9).
+   */
+  onActiveSpeakersChanged?: (identities: readonly string[]) => void;
 }
 
 /**
@@ -80,6 +109,10 @@ export async function connectLivekitRoom({
   createRoom = () => new Room(),
   audioContainer,
   onAudioPlaybackChanged,
+  onVideoTrackSubscribed,
+  onVideoTrackUnsubscribed,
+  onLocalVideoTrackChanged,
+  onActiveSpeakersChanged,
 }: ConnectLivekitRoomOptions): Promise<LivekitRoomConnection> {
   const room = createRoom();
   const sink = createRemoteAudioSink(audioContainer);
@@ -126,11 +159,41 @@ export async function connectLivekitRoom({
   // cuando llega por `TrackSubscribed` y se adjunta al documento. Son dos
   // pasos distintos y perder el segundo da el peor sintoma posible: conexion
   // sana, suscripcion concedida y silencio.
-  room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack) => sink.add(track));
-  room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => sink.remove(track));
+  room.on(
+    RoomEvent.TrackSubscribed,
+    (track: RemoteTrack, _publication: unknown, participant: RemoteParticipant) => {
+      sink.add(track);
+      // D3 (#17): el video NUNCA se adjunta aqui -- solo se reporta. Adjuntar
+      // vive en React (la unica pieza con un renderer para video).
+      if (track.kind === Track.Kind.Video) onVideoTrackSubscribed?.(participant.identity, track);
+    },
+  );
+  room.on(
+    RoomEvent.TrackUnsubscribed,
+    (track: RemoteTrack, _publication: unknown, participant: RemoteParticipant) => {
+      sink.remove(track);
+      if (track.kind === Track.Kind.Video) onVideoTrackUnsubscribed?.(participant.identity, track);
+    },
+  );
   room.on(RoomEvent.AudioPlaybackStatusChanged, () =>
     onAudioPlaybackChanged?.(room.canPlaybackAudio),
   );
+  // Camara local: gate por `kind`, no por "es una publicacion local" (D8 en el
+  // diseno separa self-view de la regla de peers, pero el gate de KIND es el
+  // mismo para ambos -- audio local nunca debe disparar este callback).
+  room.on(RoomEvent.LocalTrackPublished, (publication: LocalTrackPublication) => {
+    if (publication.kind === Track.Kind.Video && publication.track) {
+      onLocalVideoTrackChanged?.(publication.track);
+    }
+  });
+  room.on(RoomEvent.LocalTrackUnpublished, (publication: LocalTrackPublication) => {
+    if (publication.kind === Track.Kind.Video) onLocalVideoTrackChanged?.(null);
+  });
+  // D7: unica fuente de habla. No lee `micOn` ni ningun umbral de audioLevel
+  // propio -- solo lo que LiveKit ya calculo y reporta por este evento.
+  room.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
+    onActiveSpeakersChanged?.(speakers.map((speaker) => speaker.identity));
+  });
 
   await room.connect(url, token, { autoSubscribe: false });
 
