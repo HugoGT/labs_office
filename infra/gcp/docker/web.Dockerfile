@@ -12,6 +12,16 @@
 # desarrollo; en produccion la URL del SFU la devuelve el servidor dentro de la
 # respuesta de /livekit/token y el cliente usa esa
 # (src/game/livekitEndpoint.ts). Hornearla duplicaria la fuente de verdad.
+#
+# VITE_FIREBASE_API_KEY y VITE_FIREBASE_PROJECT_ID (issue #8) tambien son
+# OBLIGATORIAS: sin ellas el cliente se construye sin pantalla de login y
+# cualquiera que alcance la web entra a la oficina. El servidor las rechazaria
+# despues, con su FIREBASE_PROJECT_ID puesto, pero el usuario solo veria una
+# oficina rota sin saber por que. Fallar aqui, en el build, es mas barato.
+#
+# La apiKey no es un secreto: Firebase la publica en el bundle por diseno y no
+# autoriza nada por si sola. Quien decide quien entra son las cuentas del
+# proyecto y la verificacion del ID token en server/src/verifyIdToken.ts.
 
 FROM node:24-bookworm-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553 AS builder
 
@@ -31,12 +41,27 @@ COPY . .
 ARG VITE_COLYSEUS_URL
 ENV VITE_COLYSEUS_URL=${VITE_COLYSEUS_URL}
 
+ARG VITE_FIREBASE_API_KEY
+ARG VITE_FIREBASE_PROJECT_ID
+ARG VITE_FIREBASE_AUTH_DOMAIN
+ENV VITE_FIREBASE_API_KEY=${VITE_FIREBASE_API_KEY}
+ENV VITE_FIREBASE_PROJECT_ID=${VITE_FIREBASE_PROJECT_ID}
+ENV VITE_FIREBASE_AUTH_DOMAIN=${VITE_FIREBASE_AUTH_DOMAIN}
+
 # `vite build` solo, no `pnpm build`. Los dos pasos de `tsc` que lleva ese
 # script tienen `noEmit: true`: son comprobacion de tipos, no generan nada, y
 # esa comprobacion ya la hace .github/workflows/ci.yml en cada push. Repetirla
 # aqui alarga el build sin anadir ninguna garantia nueva.
-RUN test -n "${VITE_COLYSEUS_URL}" || (echo "VITE_COLYSEUS_URL es obligatoria" >&2 && exit 1) \
-  && pnpm exec vite build
+# Encadenar los tres `test` con `||`/`&&` en una sola linea imprimiria el
+# mensaje del ultimo fallo, no el del primero: `&&` y `||` tienen la misma
+# precedencia y asocian a izquierdas. Un `if` por variable dice exactamente
+# cual falta.
+RUN set -eu; \
+  for var in VITE_COLYSEUS_URL VITE_FIREBASE_API_KEY VITE_FIREBASE_PROJECT_ID; do \
+    eval "value=\${$var:-}"; \
+    if [ -z "$value" ]; then echo "$var es obligatoria" >&2; exit 1; fi; \
+  done; \
+  pnpm exec vite build
 
 FROM nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de AS runtime
 

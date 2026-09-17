@@ -314,6 +314,11 @@ resource "google_compute_instance" "office" {
     office-secret-key    = google_secret_manager_secret.livekit_api_key.secret_id
     office-secret-secret = google_secret_manager_secret.livekit_api_secret.secret_id
 
+    # No es un secreto y por eso no pasa por Secret Manager: es el id de un
+    # proyecto de GCP, publico por naturaleza. Lo que protege la oficina son las
+    # cuentas de ese proyecto y la verificacion de la firma en el servidor.
+    office-auth-project-id = var.auth_project_id
+
     # Vacio en el primer apply: todavia no hay imagenes publicadas. El script de
     # arranque escribe la configuracion y se detiene sin levantar nada hasta que
     # el primer despliegue le pasa un SHA.

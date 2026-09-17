@@ -143,6 +143,9 @@ terraform output
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | output `workload_identity_provider` |
 | `GCP_DEPLOYER_SA` | output `deployer_service_account` |
 | `APP_HOST` | output `app_host` |
+| `FIREBASE_API_KEY` | la API key del proyecto de Identity Platform (issue #8, ver más abajo) |
+| `FIREBASE_PROJECT_ID` | opcional, solo si Identity Platform vive en otro proyecto que `GCP_PROJECT_ID` |
+| `FIREBASE_AUTH_DOMAIN` | opcional, por defecto `<projectId>.firebaseapp.com` |
 | `GCP_ZONE` | opcional, por defecto `us-central1-a` |
 | `GCP_REGION` | opcional, por defecto `us-central1` |
 | `GCP_INSTANCE` | opcional, por defecto `labs-office-test` |
@@ -232,6 +235,108 @@ El proyecto tiene además una regla preexistente `default-allow-ssh` que abre el
 desde `0.0.0.0/0` sin etiquetas. No se toca: afecta también a la VM ajena. El
 diseño de aquí simplemente no depende de ella.
 
+## Autenticación con usuario y contraseña (issue #8)
+
+Hasta este cambio no había autenticación: cualquiera que alcanzara la web entraba a
+la oficina. Ahora el acceso lo decide **GCP Identity Platform** (el mismo motor que
+Firebase Authentication), con cuentas de correo y contraseña.
+
+El reparto de responsabilidades es el que importa entender:
+
+- **Identity Platform** guarda las cuentas, comprueba la contraseña y firma un ID
+  token (un JWT RS256 de una hora). Nosotros nunca vemos ni almacenamos contraseñas.
+- **El SPA** (`src/auth/`) enseña la pantalla de login, pide ese token y lo adjunta
+  al entrar a la sala y al pedir el token de LiveKit.
+- **El servidor** (`server/src/verifyIdToken.ts`) verifica la firma contra las claves
+  públicas de Google y comprueba emisor, audiencia y caducidad. Sin token válido no
+  hay sala ni audio. La pantalla sola no protegería nada: el WebSocket se puede abrir
+  sin pasar por ella.
+
+Los dos lados se activan por configuración y **por separado**, y ninguno de los dos
+está activo por defecto:
+
+| Dónde | Variable | Vacía | Con valor |
+|---|---|---|---|
+| Servidor | `FIREBASE_PROJECT_ID` | sin autenticación, como antes | falla cerrado |
+| SPA (build) | `VITE_FIREBASE_API_KEY` + `VITE_FIREBASE_PROJECT_ID` | sin pantalla de login | pide login |
+
+Tenerlos descuadrados da los dos síntomas obvios: solo el servidor, y nadie entra;
+solo el SPA, y el login es decorativo. `GET https://<APP_HOST>/health` devuelve
+`auth: "enabled" | "disabled"` para saber en cuál de los dos modos corre el servidor.
+
+### Puesta en marcha, una sola vez
+
+```sh
+PROJECT_ID=vaulted-channel-505114-f0
+
+gcloud services enable identitytoolkit.googleapis.com --project "${PROJECT_ID}"
+```
+
+Después, en la consola de GCP, **Identity Platform → Providers → Add a provider →
+Email/Password**, con "Allow password sign-up" *desactivado*: la oficina es de una
+sola organización y las cuentas las crea un administrador, no cualquiera que
+encuentre la URL. La sección 10 del PRD las trata como invitaciones, no como
+registro abierto.
+
+La API key del cliente sale de **APIs & Services → Credentials**. No es un secreto:
+Firebase la publica en el bundle por diseño y no autoriza nada por sí sola. Quien
+decide el acceso son las cuentas y la verificación del token en el servidor.
+
+Crear la primera cuenta (con el sign-up aún permitido, o desde la consola en
+**Users → Add user**):
+
+```sh
+curl -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${API_KEY}" \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"alguien@ejemplo.com","password":"...","returnSecureToken":true}'
+```
+
+### Activarlo en el entorno desplegado
+
+1. Variables de repositorio en GitHub: `FIREBASE_API_KEY` (obligatoria a partir de
+   ahora; el workflow falla sin ella) y, si el proyecto de Identity Platform no es
+   el mismo que `GCP_PROJECT_ID`, también `FIREBASE_PROJECT_ID`.
+2. `auth_project_id` en `terraform/terraform.tfvars` y `terraform apply`. Eso escribe
+   la metadata `office-auth-project-id` de la VM.
+3. Volver a desplegar. `office-deploy` la copia a `FIREBASE_PROJECT_ID` en
+   `/opt/office/.env` y el servidor arranca ya exigiendo token.
+
+El orden importa: si se activa el servidor antes de que existan cuentas, nadie puede
+entrar. Por eso `auth_project_id` está vacío por defecto y activarlo es un gesto
+deliberado, no el efecto colateral de un redespliegue.
+
+### Alta de cuentas: siempre a mano
+
+No hay registro en la aplicación, ni lo va a haber por ahora: **las cuentas las crea
+un administrador** desde la consola de GCP, una por persona invitada. Es una decisión,
+no una carencia, y es lo que cierra el issue #8.
+
+Con "Allow password sign-up" desactivado en el proveedor, nadie puede darse de alta
+por su cuenta aunque conozca la URL: el único camino hacia una cuenta pasa por alguien
+que ya está dentro. Una lista de invitados en configuración no añadiría nada sobre
+esto, solo un sitio más donde equivocarse.
+
+El día que haga falta autoservicio (que alguien invitado ponga su propia contraseña),
+el mecanismo de GCP es una *blocking function* `beforeUserCreated` que rechace los
+correos fuera de la lista. Entonces sí hará falta, porque el alta dejaría de pasar por
+un humano, y también si algún día se enciende el acceso con Google, que crea la cuenta
+sola en el primer inicio de sesión.
+
+### Lo que este cambio NO resuelve
+
+- **Roles** (Admin/Empleado/Invitado): hace falta el backend del issue #7. Hoy toda
+  cuenta válida entra con los mismos permisos.
+- **CORS**: sigue en `*`. Es el issue #9, y ahora que la ruta del token está atada a
+  la sesión autenticada su riesgo es mucho menor, pero no desaparece.
+
+Fuera de alcance por decisión, no por pendiente:
+
+- **Entrar con Google.** Correo y contraseña cubren el acceso a la oficina, así que el
+  segundo proveedor no aporta nada hoy. Ojo con un detalle del PRD: la sección 4.10
+  ata Google OAuth a la integración con Google Calendar (issue #14), porque leer el
+  calendario de alguien exige su consentimiento OAuth. Ese issue tendrá que traerse su
+  propio acceso con Google; no lo hereda de aquí.
+
 ## Caveats conocidos
 
 ### sslip.io comparte el límite de emisión de Let's Encrypt
@@ -267,10 +372,12 @@ camino que documenta el propio proveedor, comparte claves y ciclo de vida con el
 SFU, y evita mantener un servicio más con su propia configuración y sus propios
 certificados.
 
-## Cuando llegue el dominio propio (issue #8)
+## Cuando llegue el dominio propio
 
-El login con Google necesita orígenes de redirección estables, así que ese issue es
-el que va a traer un dominio real. Lo que hay que tocar:
+Ya no lo trae el issue #8: el login con correo y contraseña funciona sobre `sslip.io`
+tal cual, porque no usa redirecciones. Quien lo necesitará es la integración con Google
+Calendar (issue #14), que sí exige orígenes de redirección estables para su OAuth.
+Cuando toque, lo que hay que tocar:
 
 1. Apuntar dos registros `A` (`app.` y `lk.`, o los nombres que se elijan) a la IP
    estática, que no cambia.

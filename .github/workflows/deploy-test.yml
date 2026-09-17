@@ -49,6 +49,7 @@ jobs:
           test -n "${{ vars.GCP_PROJECT_ID }}" || { echo "Falta la variable GCP_PROJECT_ID"; exit 1; }
           test -n "${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}" || { echo "Falta la variable GCP_WORKLOAD_IDENTITY_PROVIDER"; exit 1; }
           test -n "${{ vars.GCP_DEPLOYER_SA }}" || { echo "Falta la variable GCP_DEPLOYER_SA"; exit 1; }
+          test -n "${{ vars.FIREBASE_API_KEY }}" || { echo "Falta la variable FIREBASE_API_KEY: el SPA se construiria sin pantalla de login (issue #8, ver infra/gcp/README.md)"; exit 1; }
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -82,6 +83,12 @@ jobs:
       # VITE_COLYSEUS_URL se hornea en el bundle en tiempo de build: es la unica
       # forma de que el cliente hable wss://app.../ y no ws://<host>:2567, que
       # es lo que deduce solo y que no pasa por Caddy.
+      #
+      # Las tres VITE_FIREBASE_* viajan igual (issue #8). Son variables de
+      # repositorio y no secretos: la apiKey de Firebase se publica en el bundle
+      # por diseno y no autoriza nada por si sola. Si FIREBASE_API_KEY no esta
+      # definida, este paso falla en el `test` del Dockerfile en vez de publicar
+      # una web sin pantalla de login.
       - name: Build and push the web image
         uses: docker/build-push-action@v6
         with:
@@ -90,6 +97,9 @@ jobs:
           push: true
           build-args: |
             VITE_COLYSEUS_URL=wss://${{ env.APP_HOST }}
+            VITE_FIREBASE_API_KEY=${{ vars.FIREBASE_API_KEY }}
+            VITE_FIREBASE_PROJECT_ID=${{ vars.FIREBASE_PROJECT_ID || vars.GCP_PROJECT_ID }}
+            VITE_FIREBASE_AUTH_DOMAIN=${{ vars.FIREBASE_AUTH_DOMAIN }}
           tags: ${{ env.REGISTRY }}/${{ vars.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/web:${{ github.sha }}
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
