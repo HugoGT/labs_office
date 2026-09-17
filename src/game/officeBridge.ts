@@ -58,6 +58,14 @@ export interface OfficeCommandMap {
    * the type here does not add any production-visible runtime surface.
    */
   teleportToTile: { tx: number; ty: number };
+  /**
+   * Habla real (issue #17, D7): React es dueno del `Set` de hablantes (lo
+   * deriva de `RoomEvent.ActiveSpeakersChanged`, nunca de `micOn`) y la escena
+   * lo sigue por comando, mismo patron que `setStatus`. Solo enciende el
+   * anillo de `RemoteAvatarContainer`s -- el jugador local no tiene por que
+   * ver su propio anillo encenderse en el canvas.
+   */
+  speakers: { sessionIds: string[] };
 }
 
 export interface OfficeBridge {

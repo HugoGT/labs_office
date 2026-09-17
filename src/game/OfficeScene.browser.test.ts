@@ -891,3 +891,73 @@ describe('OfficeScene: comando setStatus via el puente (#1)', () => {
     expect(player.status).toBe(DEFAULT_STATUS);
   });
 });
+
+describe('OfficeScene: comando speakers via el puente (issue #17, D7 -- habla real enciende el anillo)', () => {
+  it('enciende el anillo de un avatar remoto real cuando su sessionId reporta estar hablando', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1' }));
+    const avatar = findRemoteAvatars(scene)[0];
+    expect(avatar.ring.visible).toBe(false);
+
+    bridge.emitCommand('speakers', { sessionIds: ['par-1'] });
+
+    expect(avatar.ring.visible).toBe(true);
+  });
+
+  it('apaga el anillo cuando su sessionId deja de aparecer en el conjunto reportado', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1' }));
+    const avatar = findRemoteAvatars(scene)[0];
+    bridge.emitCommand('speakers', { sessionIds: ['par-1'] });
+    expect(avatar.ring.visible).toBe(true);
+
+    bridge.emitCommand('speakers', { sessionIds: [] });
+
+    expect(avatar.ring.visible).toBe(false);
+  });
+
+  it('un sessionId ajeno en el comando no enciende avatares que no coinciden', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1' }));
+    const avatar = findRemoteAvatars(scene)[0];
+
+    bridge.emitCommand('speakers', { sessionIds: ['alguien-mas'] });
+
+    expect(avatar.ring.visible).toBe(false);
+  });
+
+  it('desuscribe el handler de speakers al apagar la escena (SHUTDOWN, D2)', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1' }));
+    const avatar = findRemoteAvatars(scene)[0];
+
+    scene.sys.events.emit(Phaser.Scenes.Events.SHUTDOWN);
+    bridge.emitCommand('speakers', { sessionIds: ['par-1'] });
+
+    expect(avatar.ring.visible).toBe(false);
+  });
+});

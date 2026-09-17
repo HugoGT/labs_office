@@ -32,6 +32,9 @@ function proximityAudio(
     toggleMic: vi.fn(),
     toggleCam: vi.fn(),
     unblockAudio: vi.fn(),
+    videoTracks: new Map(),
+    speakers: new Set(),
+    localVideoTrack: null,
     ...overrides,
   };
 }
@@ -333,5 +336,32 @@ describe('OfficeShell: estado de presencia (#1)', () => {
 
     expect(screen.getByRole('button', { name: /Mic/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: /Cámara/ })).toBeDisabled();
+  });
+});
+
+describe('OfficeShell: habla real llega al anillo del avatar por comando (issue #17, D7)', () => {
+  it('reenvia el conjunto de hablantes del hook como comando "speakers" a la escena', () => {
+    const { rerender } = render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const commands: { sessionIds: string[] }[] = [];
+    bridge.onCommand('speakers', (payload) => commands.push(payload));
+
+    useProximityAudioMock.mockReturnValue(proximityAudio({ speakers: new Set(['par-1']) }));
+    rerender(<OfficeShell />);
+
+    expect(commands.at(-1)).toEqual({ sessionIds: ['par-1'] });
+  });
+
+  it('un conjunto de hablantes vacio tambien se reenvia: apaga el anillo cuando nadie habla', () => {
+    useProximityAudioMock.mockReturnValue(proximityAudio({ speakers: new Set(['par-1']) }));
+    const { rerender } = render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const commands: { sessionIds: string[] }[] = [];
+    bridge.onCommand('speakers', (payload) => commands.push(payload));
+
+    useProximityAudioMock.mockReturnValue(proximityAudio({ speakers: new Set() }));
+    rerender(<OfficeShell />);
+
+    expect(commands.at(-1)).toEqual({ sessionIds: [] });
   });
 });

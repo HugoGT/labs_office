@@ -47,8 +47,17 @@ export function OfficeShell() {
    * escena confirmase cada cambio para redibujarse.
    */
   const [status, setStatus] = useState<PresenceStatus>(DEFAULT_STATUS);
-  const { micOn, camOn, audioAvailable, audioBlocked, toggleMic, toggleCam, unblockAudio } =
+  const { micOn, camOn, audioAvailable, audioBlocked, speakers, toggleMic, toggleCam, unblockAudio } =
     useProximityAudio(bridge, { config: livekitConfig, status });
+
+  /**
+   * Mismo patron que `setStatus` (D7): React es el dueno del `Set` de
+   * hablantes (LiveKit se lo entrega via `useProximityAudio`) y la escena solo
+   * lo sigue por comando, para encender el anillo de los avatares remotos.
+   */
+  useEffect(() => {
+    bridge.emitCommand('speakers', { sessionIds: [...speakers] });
+  }, [bridge, speakers]);
 
   function handleChangeStatus(next: PresenceStatus): void {
     setStatus(next);

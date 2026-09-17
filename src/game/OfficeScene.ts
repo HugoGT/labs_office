@@ -84,6 +84,7 @@ export class OfficeScene extends Phaser.Scene {
   private unsubscribeTeleport?: () => void;
   private unsubscribeCallNpc?: () => void;
   private unsubscribeSetStatus?: () => void;
+  private unsubscribeSpeakers?: () => void;
   /** Solo se asigna bajo `__OFFICE_E2E__` (D4): produccion nunca la toca. */
   private unsubscribeTeleportToTile?: () => void;
 
@@ -133,6 +134,9 @@ export class OfficeScene extends Phaser.Scene {
     this.unsubscribeSetStatus = this.bridge.onCommand('setStatus', ({ status }) => {
       this.setStatus(status);
     });
+    this.unsubscribeSpeakers = this.bridge.onCommand('speakers', ({ sessionIds }) => {
+      this.applySpeakers(sessionIds);
+    });
 
     // D4: unico bloque muerto en produccion de este archivo -- deja tanto el
     // literal 'teleportToTile' como su handler fuera de `dist/`. Espeja
@@ -151,6 +155,7 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeTeleport?.();
       this.unsubscribeCallNpc?.();
       this.unsubscribeSetStatus?.();
+      this.unsubscribeSpeakers?.();
       this.unsubscribeTeleportToTile?.();
       this.remotes?.clear();
       void this.connection?.leave();
@@ -242,6 +247,20 @@ export class OfficeScene extends Phaser.Scene {
     setCharacterStatus(this.player, status);
     this.connection?.sendStatus(status);
     this.proximityTick();
+  }
+
+  /**
+   * Aplica el conjunto de habla real reportado por React (D7): solo enciende
+   * el anillo de avatares REMOTOS. El jugador local no tiene tile ni anillo
+   * propio que mostrar en este canvas -- eso lo cubrira React en PR3b. El
+   * comando trae el conjunto AUTORITATIVO completo (no un delta), asi que
+   * cada sessionId conocido se apaga salvo que este en el arreglo.
+   */
+  private applySpeakers(sessionIds: readonly string[]): void {
+    const speaking = new Set(sessionIds);
+    for (const sessionId of this.remotes?.sessionIds() ?? []) {
+      this.remotes?.get(sessionId)?.ring.setVisible(speaking.has(sessionId));
+    }
   }
 
   private emitPresence(online: boolean): void {
