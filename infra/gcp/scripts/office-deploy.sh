@@ -237,6 +237,24 @@ log "desplegando ${IMAGE_TAG}"
 docker compose --project-directory "${WORKDIR}" pull --quiet
 docker compose --project-directory "${WORKDIR}" up -d --remove-orphans
 
+# Caddy no vigila su fichero de configuracion. El Caddyfile entra por bind mount
+# y la definicion del servicio no cambia entre despliegues, asi que `up -d` no
+# recrea el contenedor y Caddy sigue sirviendo la configuracion que leyo al
+# arrancar. Sin esta recarga, una ruta nueva del servidor NO existe aunque su
+# `handle` ya este escrito en el fichero: cae en el `handle` final, nginx
+# responde el index.html y el navegador recibe un 200 con HTML donde esperaba
+# JSON. Eso es exactamente lo que dejo `/admin/*` invisible durante dias.
+#
+# `caddy reload` es en caliente: no corta conexiones vivas ni reemite
+# certificados. El `restart` de reserva cubre el caso de que el contenedor este
+# parado, donde `exec` no puede entrar; si tampoco eso funciona, el despliegue
+# falla, que es mejor que anunciar como desplegada una configuracion que nadie
+# esta sirviendo.
+log "recargando la configuracion de Caddy"
+docker compose --project-directory "${WORKDIR}" exec -T caddy \
+  caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile ||
+  docker compose --project-directory "${WORKDIR}" restart caddy
+
 # Las imagenes viejas se acumulan una por despliegue y el disco son 20 GB.
 docker image prune -af --filter "until=168h" >/dev/null || true
 
