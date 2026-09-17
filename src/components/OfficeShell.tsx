@@ -24,7 +24,7 @@ const TOAST_TIMEOUT_MS = 3200;
  */
 export function OfficeShell() {
   const [bridge] = useState(createOfficeBridge);
-  const { room, nearby, menu, presence, closeMenu } = useOfficeBridge(bridge);
+  const { room, menu, presence, closeMenu } = useOfficeBridge(bridge);
   // Se resuelve una sola vez: cambiarlo remontaria Phaser entero.
   const [endpoint] = useState(() =>
     resolveOfficeEndpoint({
@@ -48,8 +48,18 @@ export function OfficeShell() {
    * escena confirmase cada cambio para redibujarse.
    */
   const [status, setStatus] = useState<PresenceStatus>(DEFAULT_STATUS);
-  const { micOn, camOn, audioAvailable, audioBlocked, speakers, toggleMic, toggleCam, unblockAudio } =
-    useProximityAudio(bridge, { config: livekitConfig, status });
+  const {
+    micOn,
+    camOn,
+    audioAvailable,
+    audioBlocked,
+    speakers,
+    toggleMic,
+    toggleCam,
+    unblockAudio,
+    videoTracks,
+    localVideoTrack,
+  } = useProximityAudio(bridge, { config: livekitConfig, status });
 
   /**
    * Mismo patron que `setStatus` (D7): React es el dueno del `Set` de
@@ -149,7 +159,12 @@ export function OfficeShell() {
   return (
     <div id="office-shell">
       <GameCanvas bridge={bridge} endpoint={endpoint} />
-      <VideoTiles bridge={bridge} />
+      <VideoTiles
+        bridge={bridge}
+        videoTracks={videoTracks}
+        speakers={speakers}
+        localVideoTrack={localVideoTrack}
+      />
       <RecBadge visible={recording} />
       <ContextMenu menu={menu} onAction={handleMenuAction} onClose={closeMenu} />
       <BottomBar
@@ -158,7 +173,6 @@ export function OfficeShell() {
         audioAvailable={audioAvailable}
         recording={recording}
         room={room}
-        nearby={nearby}
         presence={presence}
         status={status}
         onChangeStatus={handleChangeStatus}
