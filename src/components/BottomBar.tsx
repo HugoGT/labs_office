@@ -9,7 +9,6 @@ export interface BottomBarProps {
   audioAvailable: boolean;
   recording: boolean;
   room: string | null;
-  nearby: string[];
   presence: { online: boolean; peers: number };
   status: PresenceStatus;
   onChangeStatus: (status: PresenceStatus) => void;
@@ -18,9 +17,6 @@ export interface BottomBarProps {
   onToggleRecord: () => void;
 }
 
-/** Cuantos chips cercanos se muestran antes de colapsar el resto (`app.js:565`). */
-const NEARBY_CHIP_LIMIT = 6;
-
 /** Explica el `disabled` de mic/camara cuando no hay conexion viva a LiveKit. */
 const AUDIO_UNAVAILABLE_TITLE = 'Audio no disponible: sin conexion a LiveKit';
 
@@ -28,9 +24,11 @@ const AUDIO_UNAVAILABLE_TITLE = 'Audio no disponible: sin conexion a LiveKit';
 const DND_TITLE = 'No molestar: no publicas micrófono ni cámara';
 
 /**
- * Barra inferior: mic/camara/grabar + estado de audio + chips de cercania,
- * portada de `#bar` (`index.html`, `app.js:516-571`). Puramente
- * presentacional (D3): no recibe el bridge, solo props y callbacks.
+ * Barra inferior: mic/camara/grabar + estado de audio, portada de `#bar`
+ * (`index.html`, `app.js:516-571`). Puramente presentacional (D3): no recibe
+ * el bridge, solo props y callbacks. Los chips de cercania se retiraron
+ * (issue #17, D9): cada companero audible ahora tiene su propio tile de
+ * video, que ya trae su nombre -- la informacion no se perdio, cambio de casa.
  */
 export function BottomBar({
   micOn,
@@ -38,7 +36,6 @@ export function BottomBar({
   audioAvailable,
   recording,
   room,
-  nearby,
   presence,
   status,
   onChangeStatus,
@@ -46,8 +43,6 @@ export function BottomBar({
   onToggleCam,
   onToggleRecord,
 }: BottomBarProps) {
-  const visibleChips = nearby.slice(0, NEARBY_CHIP_LIMIT);
-  const overflow = nearby.length - NEARBY_CHIP_LIMIT;
   // Se deriva del estado en vez de recibirse como prop propia: dos fuentes
   // para el mismo hecho acabarian discrepando en algun render.
   const dnd = status === DO_NOT_DISTURB;
@@ -129,19 +124,6 @@ export function BottomBar({
             Audio por <b>proximidad</b>
           </>
         )}
-      </div>
-      <div className={styles.nearby}>
-        {visibleChips.map((name, index) => (
-          // Nombres duplicados son alcanzables entre companeros reales
-          // (#321: ambos siguen como "HugoGT" hasta que llegue Google OAuth),
-          // asi que `key={name}` colisionaria. La key se cualifica por
-          // posicion en vez de deduplicar nombres (D7): perder un chip por
-          // colision de key ocultaria a una persona real que si se escucha.
-          <span key={`${name}-${index}`} className={styles.chip}>
-            🔊 {name}
-          </span>
-        ))}
-        {overflow > 0 && <span className={styles.chip}>+{overflow}</span>}
       </div>
     </div>
   );

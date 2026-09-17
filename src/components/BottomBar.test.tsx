@@ -12,7 +12,6 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
     audioAvailable: true,
     recording: false,
     room: null as string | null,
-    nearby: [] as string[],
     presence: { online: false, peers: 0 },
     status: 'g' as const,
     onChangeStatus: vi.fn(),
@@ -63,7 +62,6 @@ describe('BottomBar', () => {
         audioAvailable
         recording={false}
         room={null}
-        nearby={[]}
         presence={{ online: false, peers: 0 }}
         status="g"
         onChangeStatus={vi.fn()}
@@ -81,7 +79,6 @@ describe('BottomBar', () => {
         audioAvailable
         recording={false}
         room="Cafeteria"
-        nearby={[]}
         presence={{ online: false, peers: 0 }}
         status="g"
         onChangeStatus={vi.fn()}
@@ -91,80 +88,6 @@ describe('BottomBar', () => {
       />,
     );
     expect(screen.getByText('Cafeteria').tagName).toBe('B');
-  });
-
-  it('seis o menos NPCs cercanos renderizan un chip cada uno sin indicador de desborde', () => {
-    renderBar({ nearby: ['Ana', 'Beto', 'Caro', 'Dani', 'Eli', 'Fer'] });
-
-    expect(screen.getAllByText(/^🔊 /)).toHaveLength(6);
-    expect(screen.queryByText(/^\+\d/)).not.toBeInTheDocument();
-  });
-
-  it('mas de seis NPCs cercanos colapsan el resto en un indicador "+N"', () => {
-    renderBar({ nearby: ['Ana', 'Beto', 'Caro', 'Dani', 'Eli', 'Fer', 'Gus', 'Hugo'] });
-
-    expect(screen.getAllByText(/^🔊 /)).toHaveLength(6);
-    expect(screen.getByText('+2')).toBeInTheDocument();
-  });
-});
-
-describe('BottomBar: chips de companeros reales (D7)', () => {
-  /**
-   * Control: demuestra que el spy de `console.error` SI detecta la
-   * advertencia real de React por keys duplicadas cuando estas ocurren de
-   * verdad, fuera de `BottomBar`. Sin este control, una aserción de ausencia
-   * en el siguiente test sería vacía — no probaría que el mecanismo de
-   * deteccion funciona.
-   */
-  it('control: el spy de console.error detecta la advertencia real de React ante keys duplicadas', () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    try {
-      render(
-        <div>
-          {['x', 'x'].map((n) => (
-            <span key={n}>{n}</span>
-          ))}
-        </div>,
-      );
-
-      const sawDuplicateKeyWarning = errorSpy.mock.calls.some((args) =>
-        String(args[0]).includes('two children with the same key'),
-      );
-      expect(sawDuplicateKeyWarning).toBe(true);
-    } finally {
-      errorSpy.mockRestore();
-    }
-  });
-
-  it('dos companeros reales con el mismo nombre no disparan la advertencia de React por keys duplicadas', () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    try {
-      renderBar({ nearby: ['HugoGT', 'HugoGT'] });
-
-      const sawDuplicateKeyWarning = errorSpy.mock.calls.some((args) =>
-        String(args[0]).includes('two children with the same key'),
-      );
-      expect(sawDuplicateKeyWarning).toBe(false);
-      // Ademas de no advertir, ambos chips deben seguir en el DOM: la
-      // regresion prohibida es deduplicar nombres, no solo silenciar el warning.
-      expect(screen.getAllByText('🔊 HugoGT')).toHaveLength(2);
-    } finally {
-      errorSpy.mockRestore();
-    }
-  });
-
-  it('los chips de companeros reales se renderizan antes que los de NPCs, en el orden recibido', () => {
-    renderBar({ nearby: ['HugoGT', 'Ana'] });
-
-    const chips = screen.getAllByText(/^🔊 /).map((el) => el.textContent);
-    expect(chips).toEqual(['🔊 HugoGT', '🔊 Ana']);
-  });
-
-  it('el indicador de desborde cuenta la lista fusionada, incluyendo nombres duplicados', () => {
-    renderBar({ nearby: ['HugoGT', 'HugoGT', 'Ana', 'Beto', 'Caro', 'Dani', 'Eli'] });
-
-    expect(screen.getAllByText(/^🔊 /)).toHaveLength(6);
-    expect(screen.getByText('+1')).toBeInTheDocument();
   });
 });
 
@@ -240,7 +163,6 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
         audioAvailable
         recording={false}
         room={null}
-        nearby={[]}
         presence={{ online: false, peers: 0 }}
         status="g"
         onChangeStatus={vi.fn()}
@@ -261,7 +183,6 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
         audioAvailable
         recording={false}
         room={null}
-        nearby={[]}
         presence={{ online: false, peers: 0 }}
         status="r"
         onChangeStatus={vi.fn()}

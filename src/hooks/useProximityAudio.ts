@@ -102,17 +102,19 @@ export function useProximityAudio(
       // D6: sin configuracion (Colyseus abajo) nunca se intenta LiveKit.
       if (config === null) return;
 
+      const audibleSessionIds = payload.peers.map((peer) => peer.sessionId);
+
       if (sessionRef.current === payload.selfSessionId) {
         // Misma sesion: solo reenvia los conjuntos deseados, no reconecta.
-        connectionRef.current?.setDesiredAudioPeers(payload.sessionIds);
+        connectionRef.current?.setDesiredAudioPeers(audibleSessionIds);
         connectionRef.current?.setDesiredVideoPeers(
-          videoPeers({ room: payload.room, audibleSessionIds: payload.sessionIds }),
+          videoPeers({ room: payload.room, audibleSessionIds }),
         );
         return;
       }
 
       const pendingSessionId = payload.selfSessionId;
-      const pendingSessionIds = payload.sessionIds;
+      const pendingSessionIds = audibleSessionIds;
       const pendingRoom = payload.room;
       sessionRef.current = pendingSessionId;
 

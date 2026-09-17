@@ -78,7 +78,6 @@ export class OfficeScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WasdKeys;
   private mmMarker?: Phaser.GameObjects.Arc;
-  private lastNearbyKey = '';
   /** Clave de dedupe de "voice" (D3): incluye sala y `selfSessionId`, no solo los pares. */
   private lastVoiceKey = '';
   private currentRoom: string | null = null;
@@ -316,13 +315,21 @@ export class OfficeScene extends Phaser.Scene {
    */
   private emitVoice(
     selfSessionId: string | null,
-    sessionIds: string[],
+    peers: readonly { sessionId: string; name: string }[],
     room: string | null,
   ): void {
-    const key = `${nearbyKey(sessionIds)}|${room ?? ''}|${selfSessionId ?? ''}`;
+    // El nombre entra en la clave de dedupe (issue #17): un cambio de nombre
+    // sin cambio de conjunto de pares SI debe reemitir, o la etiqueta del
+    // tile quedaria pegada al valor viejo.
+    const key = `${nearbyKey(peers.map((peer) => `${peer.sessionId}:${peer.name}`))}|${room ?? ''}|${selfSessionId ?? ''}`;
     if (key === this.lastVoiceKey) return;
     this.lastVoiceKey = key;
-    this.bridge.emit('voice', { selfSessionId, sessionIds, room });
+    this.bridge.emit('voice', {
+      selfSessionId,
+      selfName: this.player.nameText,
+      peers,
+      room,
+    });
   }
 
   /** Fusiona tiles solidos en rectangulos estaticos y los colisiona con el jugador (app.js:392-408, D6). */
@@ -414,39 +421,29 @@ export class OfficeScene extends Phaser.Scene {
       peers: audioPeers,
       radius: PROX_RADIUS,
     });
-    const peerNames = audibleIds
-      .map((id) => this.remotes?.get(id)?.nameText)
-      .filter((name): name is string => name !== undefined);
+    // Nombre de cada audible (issue #17, D-voz): la etiqueta del tile se
+    // resuelve desde aqui, nunca redibujada -- misma fuente que ya pintaba
+    // los chips retirados (D9).
+    const peers = audibleIds.flatMap((sessionId) => {
+      const name = this.remotes?.get(sessionId)?.nameText;
+      return name === undefined ? [] : [{ sessionId, name }];
+    });
 
     const points: Point[] = this.npcs.map((c) => ({ x: c.x, y: c.y }));
     const nearSet = new Set(nearbyIndices({ x: player.x, y: player.y }, points, PROX_RADIUS));
 
-    const npcNames: string[] = [];
+    // Los NPCs nunca tienen tile ni chip (D9): conservan solo su anillo en
+    // canvas, que sigue siendo pura simulacion local por radio.
     this.npcs.forEach((c, i) => {
-      const near = nearSet.has(i);
-      c.ring.setVisible(near && isSpeaking(now, c.phase));
-      if (near) npcNames.push(c.nameText);
+      c.ring.setVisible(nearSet.has(i) && isSpeaking(now, c.phase));
     });
-
-    // D7: los pares reales lideran el arreglo. `BottomBar` recorta a
-    // `NEARBY_CHIP_LIMIT`; con los NPCs primero un companero audible podria
-    // quedar en el "+N" y eso deshace la decision que este cambio implementa.
-    // La asimetria es deliberada: los NPCs no tienen audio, son simulacion
-    // local y su seleccion sigue siendo pura por radio -- aplicarles la regla
-    // de sala cambiaria su comportamiento visible sin ningun beneficio.
-    const names = [...peerNames, ...npcNames];
-    const key = nearbyKey(names);
-    if (key !== this.lastNearbyKey) {
-      this.lastNearbyKey = key;
-      this.bridge.emit('nearby', { names });
-    }
 
     if (room !== this.currentRoom) {
       this.currentRoom = room;
       this.bridge.emit('room', { room });
     }
 
-    this.emitVoice(selfSessionId, audibleIds, room);
+    this.emitVoice(selfSessionId, peers, room);
   }
 
   /** Mueve al jugador a una tile libre adyacente al NPC objetivo (app.js:474-486). */

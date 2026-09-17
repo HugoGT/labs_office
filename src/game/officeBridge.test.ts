@@ -2,20 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { createOfficeBridge } from './officeBridge';
 
 describe('createOfficeBridge', () => {
-  it('entrega el payload emitido y deja de notificar tras desuscribirse (D1)', () => {
-    const bridge = createOfficeBridge();
-    const handler = vi.fn();
-
-    const unsubscribe = bridge.on('nearby', handler);
-    bridge.emit('nearby', { names: ['Ana'] });
-    expect(handler).toHaveBeenCalledTimes(1);
-    expect(handler).toHaveBeenCalledWith({ names: ['Ana'] });
-
-    unsubscribe();
-    bridge.emit('nearby', { names: ['Ana', 'Beto'] });
-    expect(handler).toHaveBeenCalledTimes(1);
-  });
-
   it('dos instancias independientes no comparten entrega de eventos (office-bridge spec)', () => {
     const bridgeA = createOfficeBridge();
     const bridgeB = createOfficeBridge();
@@ -79,21 +65,26 @@ describe('createOfficeBridge', () => {
     expect(onTeleport).not.toHaveBeenCalled();
   });
 
-  it('entrega el payload de "voice" completo y deja de notificar tras desuscribirse (D3)', () => {
+  it('entrega el payload de "voice" completo (con nombres) y deja de notificar tras desuscribirse (D3, issue #17)', () => {
     const bridge = createOfficeBridge();
     const handler = vi.fn();
+    const peers = [
+      { sessionId: 'par-1', name: 'Ana Real' },
+      { sessionId: 'par-2', name: 'Beto Real' },
+    ];
 
     const unsubscribe = bridge.on('voice', handler);
-    bridge.emit('voice', { selfSessionId: 'yo', sessionIds: ['par-1', 'par-2'], room: 'Cafetería' });
+    bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers, room: 'Cafetería' });
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler).toHaveBeenCalledWith({
       selfSessionId: 'yo',
-      sessionIds: ['par-1', 'par-2'],
+      selfName: 'HugoGT',
+      peers,
       room: 'Cafetería',
     });
 
     unsubscribe();
-    bridge.emit('voice', { selfSessionId: null, sessionIds: [], room: null });
+    bridge.emit('voice', { selfSessionId: null, selfName: 'HugoGT', peers: [], room: null });
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
@@ -178,17 +169,5 @@ describe('createOfficeBridge', () => {
     unsubscribe();
     bridge.emit('portraits', { byKey: {} });
     expect(handler).toHaveBeenCalledTimes(1);
-  });
-
-  it('"nearby" conserva exactamente su forma { names: string[] } tras añadir "voice" (guarda de regresion)', () => {
-    const bridge = createOfficeBridge();
-    const handler = vi.fn();
-
-    bridge.on('nearby', handler);
-    bridge.emit('nearby', { names: ['Ana'] });
-
-    expect(handler).toHaveBeenCalledTimes(1);
-    const payload = handler.mock.calls[0][0] as Record<string, unknown>;
-    expect(Object.keys(payload)).toEqual(['names']);
   });
 });

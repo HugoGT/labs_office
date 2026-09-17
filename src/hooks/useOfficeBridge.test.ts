@@ -9,17 +9,15 @@ describe('useOfficeBridge', () => {
 
     const { result } = renderHook(() => useOfficeBridge(bridge));
 
-    expect(result.current.nearby).toEqual([]);
     expect(result.current.room).toBeNull();
     expect(result.current.menu).toBeNull();
   });
 
-  it('refleja los eventos emitidos por el puente (nearby, room, npcmenu)', () => {
+  it('refleja los eventos emitidos por el puente (room, npcmenu)', () => {
     const bridge = createOfficeBridge();
     const { result } = renderHook(() => useOfficeBridge(bridge));
 
     act(() => {
-      bridge.emit('nearby', { names: ['Ana', 'Beto'] });
       bridge.emit('room', { room: 'Cafetería' });
       bridge.emit('npcmenu', {
         id: 3,
@@ -31,7 +29,6 @@ describe('useOfficeBridge', () => {
       });
     });
 
-    expect(result.current.nearby).toEqual(['Ana', 'Beto']);
     expect(result.current.room).toBe('Cafetería');
     expect(result.current.menu).toEqual({
       id: 3,
@@ -71,9 +68,9 @@ describe('useOfficeBridge', () => {
     unmount();
 
     act(() => {
-      bridge.emit('nearby', { names: ['Ana'] });
+      bridge.emit('room', { room: 'Cafetería' });
     });
 
-    expect(result.current.nearby).toEqual([]);
+    expect(result.current.room).toBeNull();
   });
 });

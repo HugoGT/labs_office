@@ -78,17 +78,3 @@
   font-weight: 600;
 }
 
-.nearby {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  max-width: 300px;
-}
-
-.chip {
-  background: #14532d;
-  color: #bbf7d0;
-  border-radius: 999px;
-  padding: 3px 10px;
-  font-size: 11px;
-}

@@ -63,11 +63,26 @@ describe('installOfficeTestHook', () => {
     const hook = target[OFFICE_TEST_HOOK_KEY] as { lastVoice(): unknown };
     expect(hook.lastVoice()).toBeNull();
 
-    bridge.emit('voice', { selfSessionId: 'self-1', sessionIds: ['peer-1'], room: null });
-    expect(hook.lastVoice()).toEqual({ selfSessionId: 'self-1', sessionIds: ['peer-1'], room: null });
+    bridge.emit('voice', {
+      selfSessionId: 'self-1',
+      selfName: 'Yo',
+      peers: [{ sessionId: 'peer-1', name: 'Peer Uno' }],
+      room: null,
+    });
+    expect(hook.lastVoice()).toEqual({
+      selfSessionId: 'self-1',
+      selfName: 'Yo',
+      peers: [{ sessionId: 'peer-1', name: 'Peer Uno' }],
+      room: null,
+    });
 
-    bridge.emit('voice', { selfSessionId: 'self-1', sessionIds: [], room: 'Cafetería' });
-    expect(hook.lastVoice()).toEqual({ selfSessionId: 'self-1', sessionIds: [], room: 'Cafetería' });
+    bridge.emit('voice', { selfSessionId: 'self-1', selfName: 'Yo', peers: [], room: 'Cafetería' });
+    expect(hook.lastVoice()).toEqual({
+      selfSessionId: 'self-1',
+      selfName: 'Yo',
+      peers: [],
+      room: 'Cafetería',
+    });
   });
 
   it('uninstall stops updating lastVoice from further "voice" events', () => {
@@ -76,13 +91,23 @@ describe('installOfficeTestHook', () => {
 
     const uninstall = installOfficeTestHook(bridge, target);
     const hook = target[OFFICE_TEST_HOOK_KEY] as { lastVoice(): unknown };
-    bridge.emit('voice', { selfSessionId: 'self-1', sessionIds: [], room: null });
+    bridge.emit('voice', { selfSessionId: 'self-1', selfName: 'Yo', peers: [], room: null });
     expect(hook.lastVoice()).not.toBeNull();
 
     uninstall();
-    bridge.emit('voice', { selfSessionId: 'self-1', sessionIds: ['peer-2'], room: 'Cafetería' });
+    bridge.emit('voice', {
+      selfSessionId: 'self-1',
+      selfName: 'Yo',
+      peers: [{ sessionId: 'peer-2', name: 'Peer Dos' }],
+      room: 'Cafetería',
+    });
 
-    expect(hook.lastVoice()).toEqual({ selfSessionId: 'self-1', sessionIds: [], room: null });
+    expect(hook.lastVoice()).toEqual({
+      selfSessionId: 'self-1',
+      selfName: 'Yo',
+      peers: [],
+      room: null,
+    });
   });
 
   it('never reintroduces a global window.officeAPI (matches office-bridge spec)', () => {
