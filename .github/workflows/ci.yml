@@ -47,6 +47,13 @@ jobs:
       - name: Tests (jsdom + Node + Chromium)
         run: pnpm test:all
 
+      # Pruebas puras del arnes E2E (extraccion de la URL de `vite preview`).
+      # Van antes de los builds a proposito: no necesitan bundle y cuestan
+      # milisegundos, asi que un arnes roto se ve en el minuto 1 y no tras los
+      # dos builds y diez escenarios de navegador.
+      - name: Harness unit tests
+        run: pnpm test:harness
+
       - name: Build
         run: pnpm build
 
@@ -59,5 +66,13 @@ jobs:
       # Dos clientes reales de Chromium contra Colyseus real y `vite preview`
       # real; LiveKit va sin credenciales a proposito (D6), asi que esta capa
       # no necesita Docker.
+      #
+      # No se desactiva el color: con `CI` definido vite colorea su banner
+      # (issue #22), y dejarlo asi hace que este paso ejercite de verdad la ruta
+      # con secuencias ANSI en vez de esconderla detras de `NO_COLOR`.
+      # El plazo sube a 30s porque un runner frio arranca `node` y `vite` mas
+      # despacio que una maquina local; el arnes usa 15s por defecto.
       - name: Two-client E2E (Colyseus + preview, no LiveKit)
         run: pnpm test:e2e
+        env:
+          E2E_READINESS_TIMEOUT_MS: 30000

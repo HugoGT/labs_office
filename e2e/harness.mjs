@@ -10,15 +10,22 @@ import net from 'node:net';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { extractPreviewUrl, PreviewUrlParseError } from './preview-url.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /** D5: fixed dedicated port, baked into `.env.e2e`'s `VITE_COLYSEUS_URL`. */
 const SERVER_PORT = 2599;
 const HEALTH_URL = `http://localhost:${SERVER_PORT}/health`;
-const READINESS_DEADLINE_MS = 15000;
+/** 15s is comfortable locally but tight on a cold GitHub runner (first `node`
+ * start, cold page cache). Overridable so CI can buy headroom without every
+ * in-page Playwright predicate inheriting a slower timeout by accident. */
+const READINESS_DEADLINE_MS = Number(process.env.E2E_READINESS_TIMEOUT_MS) || 15000;
 const READINESS_POLL_INTERVAL_MS = 100;
 const TEARDOWN_GRACE_MS = 3000;
+/** How much of each child's output is retained for error messages. Also the
+ * point of retaining *anything*: see `captureOutput`. */
+const OUTPUT_TAIL_LIMIT = 8192;
 
 /** D8: disables Chromium's background-tab throttling so a second, unfocused
  * page still ticks Phaser's `update()` loop fast enough for `sendMove`. */
@@ -92,8 +99,62 @@ function findFreePort() {
   });
 }
 
+/** Keeps the last `OUTPUT_TAIL_LIMIT` characters, cutting on a line boundary so
+ * the retained text stays readable in an error message. */
+function trimToTail(text) {
+  if (text.length <= OUTPUT_TAIL_LIMIT) return text;
+  const cut = text.length - OUTPUT_TAIL_LIMIT;
+  const newline = text.indexOf('\n', cut);
+  return newline === -1 ? text.slice(cut) : text.slice(newline + 1);
+}
+
+/**
+ * Attaches a permanent reader to both of a child's piped streams.
+ *
+ * Both children are spawned with `stdio: ['ignore', 'pipe', 'pipe']`. A pipe
+ * nobody reads fills at ~64KB and then blocks the writing process forever --
+ * and CI is exactly where the extra warnings that get there live. Draining is
+ * the point; the retained tail is the bonus, and it is what turns "did not
+ * print its URL" into an error a human can act on.
+ */
+function captureOutput(child, description) {
+  const buffers = { stdout: '', stderr: '' };
+  const watchers = new Set();
+
+  for (const name of ['stdout', 'stderr']) {
+    const stream = child[name];
+    if (!stream) continue;
+    stream.setEncoding('utf8');
+    stream.on('data', (chunk) => {
+      buffers[name] = trimToTail(buffers[name] + chunk);
+      if (name !== 'stdout') return;
+      for (const watcher of [...watchers]) watcher(buffers.stdout);
+    });
+    // An EPIPE after teardown must not take the test runner down with it.
+    stream.on('error', () => {});
+  }
+
+  return {
+    description,
+    get stdout() {
+      return buffers.stdout;
+    },
+    watchStdout(watcher) {
+      watchers.add(watcher);
+      return () => watchers.delete(watcher);
+    },
+    /** Non-empty output tails, formatted for appending to an error message. */
+    report() {
+      return ['stdout', 'stderr']
+        .filter((name) => buffers[name].trim())
+        .map((name) => `\n--- ${description} ${name} ---\n${buffers[name].trimEnd()}`)
+        .join('');
+    },
+  };
+}
+
 /** D6: readiness by polling a real endpoint, never a fixed sleep. */
-async function pollUntilOk(url, description, deadlineMs = READINESS_DEADLINE_MS) {
+async function pollUntilOk(url, description, capture, deadlineMs = READINESS_DEADLINE_MS) {
   const start = Date.now();
   let lastError;
   while (Date.now() - start < deadlineMs) {
@@ -107,38 +168,88 @@ async function pollUntilOk(url, description, deadlineMs = READINESS_DEADLINE_MS)
     await new Promise((resolve) => setTimeout(resolve, READINESS_POLL_INTERVAL_MS));
   }
   throw new Error(
-    `${description} did not become ready within ${deadlineMs}ms polling ${url}: ` +
-      `${lastError?.message ?? 'unknown error'}`,
+    `${description} did not start listening within ${deadlineMs}ms polling ${url}: ` +
+      `${lastError?.message ?? 'unknown error'}${capture?.report() ?? ''}`,
   );
 }
 
-/** `vite preview` prints its serving URL on stdout; the harness treats that
- * printed URL as truth rather than assuming the requested port was honored. */
-function waitForUrlOnStdout(child, description) {
+/**
+ * `vite preview` prints its serving URL on stdout; the harness treats that
+ * printed URL as truth rather than assuming the requested port was honored.
+ *
+ * Parsing is delegated to `extractPreviewUrl`, which waits for a terminated
+ * `Local:` line and de-colors it first. A line that arrives complete but
+ * unparseable rejects immediately with `PreviewUrlParseError` instead of being
+ * handed to `fetch()`: #22 burned a full readiness deadline polling a URL that
+ * could never have worked, and reported it as a server that never came up.
+ */
+function waitForUrlOnStdout(child, capture) {
   return new Promise((resolve, reject) => {
-    let buffer = '';
+    let settled = false;
 
-    const timer = setTimeout(() => {
-      child.stdout?.off('data', onData);
-      reject(new Error(`${description} did not print its URL within ${READINESS_DEADLINE_MS}ms`));
-    }, READINESS_DEADLINE_MS);
-
-    function onData(chunk) {
-      buffer += chunk.toString();
-      const match = buffer.match(/https?:\/\/[^\s]+/);
-      if (match) {
-        clearTimeout(timer);
-        child.stdout?.off('data', onData);
-        resolve(match[0].replace(/\/+$/, ''));
-      }
+    function cleanup() {
+      settled = true;
+      clearTimeout(timer);
+      unwatch();
+      child.off('error', onError);
+      child.off('exit', onExit);
     }
 
-    child.stdout?.on('data', onData);
-    child.once('error', (error) => {
-      clearTimeout(timer);
-      child.stdout?.off('data', onData);
+    function succeed(url) {
+      if (settled) return;
+      cleanup();
+      resolve(url);
+    }
+
+    function fail(error) {
+      if (settled) return;
+      cleanup();
       reject(error);
-    });
+    }
+
+    function onError(error) {
+      fail(error);
+    }
+
+    function onExit(code, signal) {
+      fail(
+        new Error(
+          `${capture.description} exited (code ${code}, signal ${signal}) ` +
+            `before printing its URL${capture.report()}`,
+        ),
+      );
+    }
+
+    function onStdout(buffer) {
+      let url;
+      try {
+        url = extractPreviewUrl(buffer);
+      } catch (error) {
+        if (error instanceof PreviewUrlParseError) {
+          fail(new Error(`${error.message}${capture.report()}`));
+          return;
+        }
+        fail(error);
+        return;
+      }
+      if (url) succeed(url);
+    }
+
+    const timer = setTimeout(() => {
+      fail(
+        new Error(
+          `${capture.description} did not print its URL within ` +
+            `${READINESS_DEADLINE_MS}ms${capture.report()}`,
+        ),
+      );
+    }, READINESS_DEADLINE_MS);
+
+    const unwatch = capture.watchStdout(onStdout);
+    child.on('error', onError);
+    child.on('exit', onExit);
+    // Output can land between spawn and this call; never wait for a chunk that
+    // has already been delivered.
+    onStdout(capture.stdout);
   });
 }
 
@@ -200,6 +311,8 @@ export async function startHarness({ realLivekit = false, fakeMedia = false } = 
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
+  const serverCapture = captureOutput(serverProcess, 'Colyseus server');
+
   const children = [serverProcess];
   function killAll() {
     for (const child of children) killProcessGroup(child);
@@ -208,12 +321,17 @@ export async function startHarness({ realLivekit = false, fakeMedia = false } = 
   process.on('exit', killAll);
 
   try {
-    await pollUntilOk(HEALTH_URL, 'Colyseus server /health');
+    await pollUntilOk(HEALTH_URL, 'Colyseus server /health', serverCapture);
 
+    // `findFreePort` closes its probe socket before vite binds, so another
+    // process on the runner can take the port in between. `--strictPort` used
+    // to turn that lost race into a hard exit; without it vite walks forward to
+    // the next free port, and the harness finds out which one from the banner
+    // it already parses. The probe stays as a collision *hint*, not a contract.
     const previewPort = await findFreePort();
     const previewProcess = spawn(
       path.join(projectRoot, 'node_modules', '.bin', 'vite'),
-      ['preview', '--outDir', 'dist-e2e', '--port', String(previewPort), '--strictPort'],
+      ['preview', '--outDir', 'dist-e2e', '--port', String(previewPort)],
       {
         cwd: projectRoot,
         detached: true,
@@ -222,9 +340,10 @@ export async function startHarness({ realLivekit = false, fakeMedia = false } = 
       },
     );
     children.push(previewProcess);
+    const previewCapture = captureOutput(previewProcess, 'vite preview');
 
-    const previewUrl = await waitForUrlOnStdout(previewProcess, 'vite preview');
-    await pollUntilOk(previewUrl, 'vite preview');
+    const previewUrl = await waitForUrlOnStdout(previewProcess, previewCapture);
+    await pollUntilOk(previewUrl, 'vite preview', previewCapture);
 
     const launchArgs = fakeMedia
       ? [...CHROMIUM_LAUNCH_ARGS, ...FAKE_MEDIA_LAUNCH_ARGS]
