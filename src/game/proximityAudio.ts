@@ -6,6 +6,7 @@
  * suscripcion que se queda pegada). Cero Phaser, cero `livekit-client`.
  */
 
+import { DO_NOT_DISTURB, type PresenceStatus } from './officeProtocol';
 import { nearbyIndices, type Point } from './proximity';
 
 export interface AudioPeer {
@@ -14,10 +15,17 @@ export interface AudioPeer {
   y: number;
   /** Sala detectada para ESTE par, no la del jugador local. `null` = piso abierto. */
   room: string | null;
+  status: PresenceStatus;
 }
 
 export interface AudibleInput {
-  self: { sessionId: string | null; x: number; y: number; room: string | null };
+  self: {
+    sessionId: string | null;
+    x: number;
+    y: number;
+    room: string | null;
+    status: PresenceStatus;
+  };
   peers: readonly AudioPeer[];
   radius: number;
 }
@@ -33,12 +41,22 @@ export interface AudibleInput {
  * afuera. El aislamiento es mutuo -- protege a la sala de quien esta afuera y
  * protege a quien esta afuera de escuchar la sala; una audibilidad de un solo
  * sentido seria el bug de privacidad que este modulo existe para evitar.
+ *
+ * "No molestar" (#1) aisla con la misma regla y por la misma razon: ni oye a
+ * la oficina ni la oficina lo oye. Se decide aqui, y no en la escena ni en el
+ * hook de LiveKit, para que los chips de cercania y las suscripciones queden
+ * de acuerdo por construccion -- la escena deriva ambos de esta salida.
+ * "Ocupado" no aparece en esta funcion a proposito: es senal social y no
+ * promete nada sobre el audio.
  */
 export function audiblePeers(input: AudibleInput): string[] {
   const { self, peers, radius } = input;
   if (self.sessionId === null) return [];
+  if (self.status === DO_NOT_DISTURB) return [];
 
-  const others = peers.filter((peer) => peer.sessionId !== self.sessionId);
+  const others = peers.filter(
+    (peer) => peer.sessionId !== self.sessionId && peer.status !== DO_NOT_DISTURB,
+  );
 
   let audible: readonly AudioPeer[];
   if (self.room !== null) {

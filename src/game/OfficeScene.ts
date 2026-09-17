@@ -12,7 +12,13 @@ import { mergeColliderRects } from './colliderMerge';
 import { placeFurniture, placeNature, placeZoneLabels, renderGround } from './mapBuilder';
 import { PROX_RADIUS, ROOMS, TILE, WORLD_H, WORLD_W } from './mapData';
 import type { OfficeBridge } from './officeBridge';
-import { DEFAULT_FACING, facingFrom, type Facing } from './officeProtocol';
+import {
+  DEFAULT_FACING,
+  DEFAULT_STATUS,
+  facingFrom,
+  type Facing,
+  type PresenceStatus,
+} from './officeProtocol';
 import {
   connectOfficeRoom,
   type ConnectOfficeRoomOptions,
@@ -83,6 +89,8 @@ export class OfficeScene extends Phaser.Scene {
   private remotes?: RemoteAvatarRegistry<RemoteAvatarContainer>;
   private connection?: OfficeConnection;
   private facing: Facing = DEFAULT_FACING;
+  /** Estado de presencia del jugador local; React es quien lo cambia (ver `setStatus`). */
+  private status: PresenceStatus = DEFAULT_STATUS;
   /** Vivo mientras la escena lo este: corta las respuestas tardias de la red. */
   private alive = true;
 
@@ -299,10 +307,21 @@ export class OfficeScene extends Phaser.Scene {
     const audioPeers: AudioPeer[] = (this.remotes?.sessionIds() ?? []).flatMap((sessionId) => {
       const avatar = this.remotes?.get(sessionId);
       if (!avatar) return [];
-      return [{ sessionId, x: avatar.x, y: avatar.y, room: detectRoom(avatar, ROOMS) }];
+      // El estado sale del contenedor, que el sink ya mantiene al dia con lo
+      // que llega del servidor: es la misma fuente que pinta el punto, asi que
+      // el color y el audio no pueden contarse historias distintas.
+      return [
+        {
+          sessionId,
+          x: avatar.x,
+          y: avatar.y,
+          room: detectRoom(avatar, ROOMS),
+          status: avatar.status,
+        },
+      ];
     });
     const audibleIds = audiblePeers({
-      self: { sessionId: selfSessionId, x: player.x, y: player.y, room },
+      self: { sessionId: selfSessionId, x: player.x, y: player.y, room, status: this.status },
       peers: audioPeers,
       radius: PROX_RADIUS,
     });
