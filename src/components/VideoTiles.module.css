@@ -1,0 +1,49 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/*
+ * Un unico contenedor plano por sessionId (D5): la posicion/`data-mode` se
+ * escriben aqui, directo al DOM, desde el bucle de rAF -- nunca via React.
+ * `will-change` evita que Chrome recalcule layout en cada `transform`.
+ */
+.tile {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 72px;
+  height: 72px;
+  margin-left: -36px;
+  margin-top: -36px;
+  will-change: transform, visibility;
+}
+
+.content {
+  width: 100%;
+  height: 100%;
+}
+
+.portrait {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 2px solid #2b3444;
+  /*
+   * La fuente es un PNG de 16x20 escalado x4.5 (issue #17, D1): sin esto el
+   * navegador suaviza el retrato y se ve borroso frente al avatar nitido que
+   * se ve en el canvas.
+   */
+  image-rendering: pixelated;
+}
+
+.placeholder {
+  width: 100%;
+  height: 100%;
+  border-radius: 10px;
+  border: 2px solid #2b3444;
+  background: #1f2937;
+}
