@@ -236,3 +236,125 @@ describe('VideoTiles: D5 -- ningun remonte al cambiar data-mode', () => {
     expect(tileNode!.querySelector('video')).toBe(videoNode);
   });
 });
+
+/**
+ * PR3b (3b.9) probo el no-remonte forzando `dataset.mode` a mano. Esta
+ * seccion re-confirma la MISMA invariante (D5) pero disparada por la regla
+ * de colapso REAL (`nextCollapseState`/`tileLayout`, D6) -- la version que
+ * de verdad puede fallar si el bucle de rAF alguna vez reconciliara distinto
+ * en vez de escribir estilos sobre el mismo nodo persistente.
+ */
+describe('VideoTiles: colapso real por densidad, sin remonte (issue #17, D6/D5)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('un cluster real de 3+ tiles colapsa a fila y luego restaura, preservando el mismo nodo y el mismo <video>', () => {
+    const raf = stubAnimationFrame();
+    vi.spyOn(Date, 'now').mockReturnValue(0);
+    const par1Track = fakeVideoTrack();
+    const { bridge } = renderTiles({
+      videoTracks: new Map([
+        ['par-1', par1Track],
+        ['par-2', fakeVideoTrack()],
+      ]),
+    });
+
+    act(() => {
+      bridge.emit('voice', {
+        selfSessionId: 'yo',
+        selfName: 'HugoGT',
+        peers: [
+          { sessionId: 'par-1', name: 'Ana' },
+          { sessionId: 'par-2', name: 'Beto' },
+        ],
+        room: 'Sala de Juntas',
+      });
+    });
+
+    const selfNode = document.querySelector('[data-session-id="yo"]') as HTMLElement;
+    const par1Node = document.querySelector('[data-session-id="par-1"]') as HTMLElement;
+    const par1Video = par1Node.querySelector('video');
+    expect(par1Video).not.toBeNull();
+
+    // Cuadro 1: las tres anclas quedan a <104px entre si -- cluster denso real.
+    let writer = bridge.anchors.open();
+    writer.set('yo', 0, 0, true);
+    writer.set('par-1', 50, 0, true);
+    writer.set('par-2', 100, 0, true);
+    writer.commit();
+    act(() => raf.tick());
+
+    expect(selfNode.dataset.mode).toBe('row');
+    expect(par1Node.dataset.mode).toBe('row');
+    expect(document.body.contains(par1Node)).toBe(true);
+    expect(par1Node.querySelector('video')).toBe(par1Video);
+
+    // Se dispersan mas alla de 140px; el reloj de espera arranca en el
+    // primer cuadro disperso (Date.now = 10) y se sostiene hasta superar los
+    // 750ms (Date.now = 900) en un segundo cuadro disperso.
+    vi.spyOn(Date, 'now').mockReturnValue(10);
+    writer = bridge.anchors.open();
+    writer.set('yo', 0, 0, true);
+    writer.set('par-1', 500, 0, true);
+    writer.set('par-2', 1000, 0, true);
+    writer.commit();
+    act(() => raf.tick());
+
+    vi.spyOn(Date, 'now').mockReturnValue(900);
+    writer = bridge.anchors.open();
+    writer.set('yo', 0, 0, true);
+    writer.set('par-1', 500, 0, true);
+    writer.set('par-2', 1000, 0, true);
+    writer.commit();
+    act(() => raf.tick());
+
+    expect(selfNode.dataset.mode).toBe('anchored');
+    expect(par1Node.dataset.mode).toBe('anchored');
+    expect(document.body.contains(par1Node)).toBe(true);
+    expect(par1Node.querySelector('video')).toBe(par1Video);
+  });
+});
+
+/**
+ * Decision del mantenedor, cerrada esta sesion: el self-tile colapsa
+ * exactamente igual que cualquier otro tile, sin excepcion. Como el self-tile
+ * ya se registra en el mismo `nodesRef` y viaja por el mismo canal de anclas
+ * que un par (correccion post-3b), esto no deberia requerir ningun caso
+ * especial -- pero se afirma con un test en vez de asumirlo.
+ */
+describe('VideoTiles: el self-tile colapsa igual que un par, sin excepcion (decision I)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('en un cluster denso que incluye al self-tile, tambien colapsa a fila', () => {
+    const raf = stubAnimationFrame();
+    vi.spyOn(Date, 'now').mockReturnValue(0);
+    const { bridge } = renderTiles();
+
+    act(() => {
+      bridge.emit('voice', {
+        selfSessionId: 'yo',
+        selfName: 'HugoGT',
+        peers: [
+          { sessionId: 'par-1', name: 'Ana' },
+          { sessionId: 'par-2', name: 'Beto' },
+        ],
+        room: 'Sala de Juntas',
+      });
+    });
+
+    const writer = bridge.anchors.open();
+    writer.set('yo', 0, 0, true);
+    writer.set('par-1', 40, 0, true);
+    writer.set('par-2', 80, 0, true);
+    writer.commit();
+    act(() => raf.tick());
+
+    const selfNode = document.querySelector('[data-session-id="yo"]') as HTMLElement;
+    expect(selfNode.dataset.mode).toBe('row');
+  });
+});

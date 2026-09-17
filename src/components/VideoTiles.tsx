@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AttachableTrack } from '../game/attachableTrack';
 import type { OfficeBridge, OfficeEventMap } from '../game/officeBridge';
+import {
+  INITIAL_COLLAPSE_STATE,
+  INITIAL_TILE_LAYOUT_STATE,
+  nextCollapseState,
+  tileLayout,
+} from '../game/tileLayout';
 import { VideoTile } from './VideoTile';
 import styles from './VideoTiles.module.css';
 
@@ -67,16 +73,41 @@ export function VideoTiles({ bridge, videoTracks, speakers, localVideoTrack }: V
 
     let frameId: number;
     let lastGeneration = -1;
+    // Estado de colapso/posicion entre cuadros (issue #17, D6): variables
+    // locales al efecto, igual que `lastGeneration` -- no hace falta un
+    // `useRef` porque viven y mueren con esta misma instancia del bucle.
+    let collapseState = INITIAL_COLLAPSE_STATE;
+    let layoutState = INITIAL_TILE_LAYOUT_STATE;
 
     function tick(): void {
       const frame = bridge.anchors.snapshot();
       if (frame.generation !== lastGeneration) {
         lastGeneration = frame.generation;
+        const now = Date.now();
+        // Regla pura de densidad (D6): decide que ids colapsan a la fila
+        // fija. Sin ella, `tileLayout` no distinguiria un tile anclado de
+        // uno colapsado.
+        collapseState = nextCollapseState({ anchors: frame.anchors, previous: collapseState, now });
+        // Posicion + el suavizado de 150ms de la transicion de modo viven
+        // por completo dentro de esta funcion pura, nunca via CSS (D6): una
+        // transicion CSS estandar suavizaria tambien el seguimiento anclado
+        // continuo, que reescribe `transform` en cada cuadro.
+        layoutState = tileLayout({
+          anchors: frame.anchors,
+          collapsed: collapseState,
+          viewport: { width: window.innerWidth, height: window.innerHeight },
+          now,
+          previous: layoutState,
+        });
+
         for (const [sessionId, node] of nodesRef.current) {
-          const anchor = frame.anchors.get(sessionId);
-          if (anchor) {
-            node.style.transform = `translate(${anchor.x}px, ${anchor.y}px)`;
-            node.style.visibility = anchor.onScreen ? 'visible' : 'hidden';
+          const position = layoutState.positions.get(sessionId);
+          if (position) {
+            node.style.transform = `translate(${position.x}px, ${position.y}px)`;
+            node.style.visibility = position.visible ? 'visible' : 'hidden';
+            // El self-tile no se exime (decision del mantenedor): el MISMO
+            // atributo, escrito por la MISMA regla, para todo sessionId.
+            node.dataset.mode = position.mode;
           } else {
             // Sin ancla este cuadro (aun no reportada, o podada): oculto,
             // nunca desmontado (D4/D5).
