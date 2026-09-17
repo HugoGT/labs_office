@@ -11,6 +11,7 @@
  * desmonta nada referencia el puente y queda para el recolector de basura.
  */
 
+import { createAnchorChannel, type AnchorChannel } from './anchorChannel';
 import type { PresenceStatus } from './officeProtocol';
 
 export interface OfficeEventMap {
@@ -39,6 +40,13 @@ export interface OfficeEventMap {
    * significa "desconectate de LiveKit"; no null dispara pedir un token.
    */
   voice: { selfSessionId: string | null; sessionIds: string[]; room: string | null };
+  /**
+   * Retratos fieles exportados una sola vez desde `create()` (issue #17, D1):
+   * la clave base (`av0`..`av9`, `avP`) a su textura real codificada en base64
+   * (`scene.textures.getBase64`). Es un evento discreto, no el canal continuo
+   * de `anchors` -- el contenido no cambia cuadro a cuadro.
+   */
+  portraits: { byKey: Record<string, string> };
 }
 
 export interface OfficeCommandMap {
@@ -84,11 +92,18 @@ export interface OfficeBridge {
   emitCommand<K extends keyof OfficeCommandMap>(type: K, payload: OfficeCommandMap[K]): void;
   teleportTo(npcId: number): void;
   callNpc(npcId: number): void;
+  /**
+   * Canal continuo posicion-por-cuadro (issue #17, D4): deliberadamente NO es
+   * un `EventTarget`. La escena escribe cada `update()`; el overlay de tiles
+   * lo lee desde un unico `requestAnimationFrame`, nunca via `on`/`emit`.
+   */
+  readonly anchors: AnchorChannel;
 }
 
 export function createOfficeBridge(): OfficeBridge {
   const events = new EventTarget();
   const commands = new EventTarget();
+  const anchors = createAnchorChannel();
 
   function subscribe<T>(target: EventTarget, type: string, handler: (payload: T) => void): () => void {
     const controller = new AbortController();
@@ -124,5 +139,6 @@ export function createOfficeBridge(): OfficeBridge {
     callNpc(npcId) {
       dispatchCommand('callNpc', { npcId });
     },
+    anchors,
   };
 }

@@ -148,6 +148,38 @@ describe('createOfficeBridge', () => {
     expect(bridge).not.toHaveProperty('setStatus');
   });
 
+  it('expone un canal de anclas independiente por instancia, ajeno al EventTarget de eventos (issue #17, D4)', () => {
+    const bridgeA = createOfficeBridge();
+    const bridgeB = createOfficeBridge();
+
+    const writer = bridgeA.anchors.open();
+    writer.set('par-1', 10, 20, true);
+    writer.commit();
+
+    expect(bridgeA.anchors.snapshot().anchors.get('par-1')).toEqual({
+      x: 10,
+      y: 20,
+      onScreen: true,
+    });
+    // Dos instancias no comparten canal de anclas, igual que no comparten eventos.
+    expect(bridgeB.anchors.snapshot().anchors.size).toBe(0);
+  });
+
+  it('entrega el payload de "portraits" y deja de notificar tras desuscribirse (issue #17, D1)', () => {
+    const bridge = createOfficeBridge();
+    const handler = vi.fn();
+    const byKey = { av0: 'data:image/png;base64,AAAA' };
+
+    const unsubscribe = bridge.on('portraits', handler);
+    bridge.emit('portraits', { byKey });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith({ byKey });
+
+    unsubscribe();
+    bridge.emit('portraits', { byKey: {} });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
   it('"nearby" conserva exactamente su forma { names: string[] } tras añadir "voice" (guarda de regresion)', () => {
     const bridge = createOfficeBridge();
     const handler = vi.fn();
