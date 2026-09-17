@@ -15,7 +15,9 @@ import { IdentityAdminError } from './identityAdminPort.ts';
 import {
   createGcpIdentityAdmin,
   identityAdminFromEnv,
+  metadataServerSource,
   parseServiceAccountKey,
+  serviceAccountSource,
 } from './gcpIdentityAdmin.ts';
 
 /**
@@ -46,6 +48,11 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+/** El servidor de metadata responde el project id en texto plano, no en JSON. */
+function textResponse(body: string, status = 200): Response {
+  return new Response(body, { status, headers: { 'content-type': 'text/plain' } });
+}
+
 /** Cola de respuestas + registro de llamadas. Nada de red, nada de reloj real. */
 function fakeFetch(responses: (() => Response | Promise<Response>)[]) {
   const calls: RecordedCall[] = [];
@@ -60,6 +67,18 @@ function fakeFetch(responses: (() => Response | Promise<Response>)[]) {
 }
 
 const tokenOk = () => jsonResponse({ access_token: 'token-de-acceso', expires_in: 3600 });
+
+/**
+ * La IP de enlace local, no `metadata.google.internal`: ese nombre no resuelve
+ * dentro del contenedor y la IP si es alcanzable. Si alguien cambia la base,
+ * este literal es lo que lo delata.
+ */
+const METADATA_BASE = 'http://169.254.169.254/computeMetadata/v1';
+const METADATA_TOKEN_URL = `${METADATA_BASE}/instance/service-accounts/default/token`;
+const METADATA_PROJECT_URL = `${METADATA_BASE}/project/project-id`;
+
+const metadataTokenOk = () => jsonResponse({ access_token: 'token-de-la-vm', expires_in: 3600 });
+const metadataProjectOk = () => textResponse('oficina-de-la-vm');
 
 function bodyOf(call: RecordedCall): Record<string, unknown> {
   return JSON.parse(String(call.init?.body)) as Record<string, unknown>;
@@ -116,8 +135,12 @@ describe('parseServiceAccountKey', () => {
 });
 
 describe('identityAdminFromEnv', () => {
-  it('sin IDENTITY_ADMIN_CREDENTIALS devuelve null (la ruta respondera 503)', () => {
+  it('sin ninguna de las dos variables devuelve null (la ruta respondera 503)', () => {
     expect(identityAdminFromEnv({})).toBeNull();
+    expect(identityAdminFromEnv({ IDENTITY_ADMIN_CREDENTIALS: '{no es json' })).toBeNull();
+    expect(identityAdminFromEnv({ IDENTITY_ADMIN_USE_METADATA: '' })).toBeNull();
+    expect(identityAdminFromEnv({ IDENTITY_ADMIN_USE_METADATA: 'false' })).toBeNull();
+    expect(identityAdminFromEnv({ IDENTITY_ADMIN_USE_METADATA: 'no' })).toBeNull();
   });
 
   it('con credenciales validas construye el adaptador', () => {
@@ -126,6 +149,50 @@ describe('identityAdminFromEnv', () => {
     expect(admin).not.toBeNull();
     expect(typeof admin?.createAccount).toBe('function');
     expect(typeof admin?.disableAccount).toBe('function');
+  });
+
+  it('con IDENTITY_ADMIN_USE_METADATA construye el adaptador sin ninguna clave', async () => {
+    // El camino que existe porque la politica de organizacion
+    // `constraints/iam.disableServiceAccountKeyCreation` impide crear la clave.
+    const { impl, calls } = fakeFetch([
+      metadataTokenOk,
+      metadataProjectOk,
+      () => jsonResponse({ localId: 'uid-vm' }),
+    ]);
+
+    const admin = identityAdminFromEnv({ IDENTITY_ADMIN_USE_METADATA: 'true' }, impl);
+    await admin?.createAccount('ana@example.com', 'x');
+
+    expect(calls[0].url).toBe(METADATA_TOKEN_URL);
+    expect(calls[2].url).toBe(
+      'https://identitytoolkit.googleapis.com/v1/projects/oficina-de-la-vm/accounts',
+    );
+  });
+
+  it('acepta `1` y no distingue mayusculas ni espacios de mas', () => {
+    for (const value of ['1', 'TRUE', ' true ', ' 1\t']) {
+      expect(identityAdminFromEnv({ IDENTITY_ADMIN_USE_METADATA: value })).not.toBeNull();
+    }
+  });
+
+  it('la clave manda sobre la metadata cuando estan las dos', async () => {
+    // Precedencia explicita: una clave puesta a proposito describe una
+    // identidad concreta, mientras que la metadata es el camino de reserva.
+    const { impl, calls } = fakeFetch([tokenOk, () => jsonResponse({ localId: 'uid-clave' })]);
+
+    const admin = identityAdminFromEnv(
+      {
+        IDENTITY_ADMIN_CREDENTIALS: JSON.stringify(CREDENTIALS),
+        IDENTITY_ADMIN_USE_METADATA: 'true',
+      },
+      impl,
+    );
+    await admin?.createAccount('ana@example.com', 'x');
+
+    expect(calls[0].url).toBe('https://oauth2.googleapis.com/token');
+    expect(calls[1].url).toBe(
+      'https://identitytoolkit.googleapis.com/v1/projects/oficina-de-prueba/accounts',
+    );
   });
 });
 
@@ -141,7 +208,7 @@ describe('createGcpIdentityAdmin', () => {
     return {
       calls,
       admin: createGcpIdentityAdmin({
-        credentials: parseServiceAccountKey(JSON.stringify(CREDENTIALS))!,
+        source: serviceAccountSource(parseServiceAccountKey(JSON.stringify(CREDENTIALS))!, impl),
         fetchImpl: impl,
         now: () => now,
       }),
@@ -175,7 +242,10 @@ describe('createGcpIdentityAdmin', () => {
       expect(claims.iss).toBe(CREDENTIALS.client_email);
       expect(claims.aud).toBe('https://oauth2.googleapis.com/token');
       expect(claims.scope).toBe('https://www.googleapis.com/auth/identitytoolkit');
-      expect(claims.iat).toBe(Math.floor(now / 1000));
+      // La asercion la fecha el reloj real y no el inyectado: el reloj de
+      // pruebas gobierna la CADUCIDAD del token cacheado, que es lo unico que
+      // el adaptador decide. La vida de la asercion la juzga Google.
+      expect(Number(claims.iat)).toBeCloseTo(Math.floor(Date.now() / 1000), -1);
       // Google rechaza aserciones con mas de una hora de vida.
       expect(Number(claims.exp) - Number(claims.iat)).toBeLessThanOrEqual(3600);
     });
@@ -337,6 +407,151 @@ describe('createGcpIdentityAdmin', () => {
         code: 'unavailable',
       });
     });
+  });
+});
+
+describe('metadataServerSource', () => {
+  let now: number;
+
+  beforeEach(() => {
+    now = 1_700_000_000_000;
+  });
+
+  function admin(responses: (() => Response | Promise<Response>)[]) {
+    const { impl, calls } = fakeFetch(responses);
+    return {
+      calls,
+      admin: createGcpIdentityAdmin({
+        source: metadataServerSource(impl),
+        fetchImpl: impl,
+        now: () => now,
+      }),
+    };
+  }
+
+  it('pide el token a la cuenta de servicio de la VM, sin firmar ninguna asercion', async () => {
+    const { admin: subject, calls } = admin([
+      metadataTokenOk,
+      metadataProjectOk,
+      () => jsonResponse({ localId: 'uid-ana' }),
+    ]);
+
+    await subject.createAccount('ana@example.com', 'x');
+
+    const token = calls[0];
+    expect(token.url).toBe(METADATA_TOKEN_URL);
+    // Sin esta cabecera el servidor de metadata responde 403: es lo que impide
+    // que se lo saque un SSRF a traves de un proxy despistado.
+    expect(headerOf(token, 'Metadata-Flavor')).toBe('Google');
+    expect(headerOf(calls[2], 'Authorization')).toBe('Bearer token-de-la-vm');
+  });
+
+  it('lee el project id en texto plano y con el compone la url de Identity Toolkit', async () => {
+    const { admin: subject, calls } = admin([
+      metadataTokenOk,
+      metadataProjectOk,
+      () => jsonResponse({ localId: 'uid-ana' }),
+    ]);
+
+    await subject.createAccount('ana@example.com', 'x');
+
+    const project = calls[1];
+    expect(project.url).toBe(METADATA_PROJECT_URL);
+    expect(headerOf(project, 'Metadata-Flavor')).toBe('Google');
+    expect(calls[2].url).toBe(
+      'https://identitytoolkit.googleapis.com/v1/projects/oficina-de-la-vm/accounts',
+    );
+  });
+
+  it('cachea el project id: no cambia en toda la vida de la VM', async () => {
+    const { admin: subject, calls } = admin([
+      metadataTokenOk,
+      metadataProjectOk,
+      () => jsonResponse({ localId: 'uid-1' }),
+      () => jsonResponse({}),
+    ]);
+
+    await subject.createAccount('ana@example.com', 'x');
+    await subject.disableAccount('uid-1');
+
+    expect(calls.filter((call) => call.url === METADATA_PROJECT_URL)).toHaveLength(1);
+  });
+
+  it('reutiliza el token cacheado, igual que con la clave de servicio', async () => {
+    const { admin: subject, calls } = admin([
+      metadataTokenOk,
+      metadataProjectOk,
+      () => jsonResponse({ localId: 'uid-1' }),
+      () => jsonResponse({}),
+    ]);
+
+    await subject.createAccount('ana@example.com', 'x');
+    await subject.disableAccount('uid-1');
+
+    expect(calls.filter((call) => call.url === METADATA_TOKEN_URL)).toHaveLength(1);
+  });
+
+  it('se renueva el token cuando esta a punto de caducar', async () => {
+    const { admin: subject, calls } = admin([
+      () => jsonResponse({ access_token: 'primero', expires_in: 3600 }),
+      metadataProjectOk,
+      () => jsonResponse({ localId: 'uid-1' }),
+      () => jsonResponse({ access_token: 'segundo', expires_in: 3600 }),
+      () => jsonResponse({}),
+    ]);
+
+    await subject.createAccount('ana@example.com', 'x');
+    now += 3600 * 1000;
+    await subject.disableAccount('uid-1');
+
+    expect(calls.filter((call) => call.url === METADATA_TOKEN_URL)).toHaveLength(2);
+    expect(headerOf(calls[4], 'Authorization')).toBe('Bearer segundo');
+  });
+
+  it('cualquier fallo pidiendo el token es `unavailable`, nunca una excepcion cruda', async () => {
+    for (const response of [
+      () => jsonResponse({}, 500),
+      () => jsonResponse({ sin: 'access_token' }),
+      () => jsonResponse({ access_token: '' }),
+      () => textResponse('no soy json'),
+      () => Promise.reject(new TypeError('fetch failed')),
+    ]) {
+      const { admin: subject } = admin([response]);
+
+      await expect(subject.createAccount('ana@example.com', 'x')).rejects.toBeInstanceOf(
+        IdentityAdminError,
+      );
+    }
+  });
+
+  it('cualquier fallo leyendo el project id tambien es `unavailable`', async () => {
+    for (const response of [
+      () => textResponse('', 500),
+      () => textResponse(''),
+      () => textResponse('   '),
+      () => Promise.reject(new TypeError('fetch failed')),
+    ]) {
+      const { admin: subject } = admin([metadataTokenOk, response]);
+
+      await expect(subject.createAccount('ana@example.com', 'x')).rejects.toMatchObject({
+        code: 'unavailable',
+      });
+    }
+  });
+
+  it('no cachea un project id que no llego: el siguiente intento vuelve a pedirlo', async () => {
+    const { admin: subject, calls } = admin([
+      metadataTokenOk,
+      () => textResponse('', 500),
+      metadataProjectOk,
+      () => jsonResponse({ localId: 'uid-1' }),
+    ]);
+
+    await expect(subject.createAccount('ana@example.com', 'x')).rejects.toBeInstanceOf(
+      IdentityAdminError,
+    );
+    await expect(subject.createAccount('ana@example.com', 'x')).resolves.toBe('uid-1');
+    expect(calls.filter((call) => call.url === METADATA_PROJECT_URL)).toHaveLength(2);
   });
 });
 

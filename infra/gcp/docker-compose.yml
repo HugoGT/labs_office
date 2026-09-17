@@ -104,6 +104,11 @@ services:
       # de invitar devuelve 503, que es la degradacion querida: la funcion es
       # opcional y no debe tumbar el despliegue.
       IDENTITY_ADMIN_CREDENTIALS: "${IDENTITY_ADMIN_CREDENTIALS:-}"
+      # La alternativa sin clave a la variable de arriba: el servidor le pide el
+      # token al servidor de metadata con la identidad de la VM. Existe porque
+      # la organizacion puede tener prohibido crear claves de cuenta de
+      # servicio. Vacia: misma degradacion de siempre (invitar responde 503).
+      IDENTITY_ADMIN_USE_METADATA: "${IDENTITY_ADMIN_USE_METADATA:-}"
     # `depends_on` en forma de lista (la que usa caddy mas arriba) solo espera a
     # que el contenedor exista, no a que el servicio responda. Aqui no alcanza:
     # Postgres arranca su contenedor en milisegundos y tarda bastante mas en
