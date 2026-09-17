@@ -1,0 +1,41 @@
+/**
+ * Cableado del directorio desde el entorno (#24). Es el hermano de
+ * `authVerifierFromEnv` en `createOfficeServer.ts` y existe por la misma razon:
+ * que el "sin configuracion, sin directorio" se lea de un vistazo y en un solo
+ * sitio, en vez de repartido por el arranque.
+ *
+ * Devuelve tambien `migrate` y no solo el directorio porque aplicar el esquema
+ * necesita el pool, y el pool no sale del puerto -- ni debe: `UserDirectory`
+ * describe lo que la aplicacion hace con los usuarios, no como se administra su
+ * almacen. Atar las dos cosas aqui es lo que permite que `createOfficeServer`
+ * no vea nunca un `pg.Pool`.
+ */
+
+import { resolveDirectoryConfig } from './bootstrapConfig.ts';
+import type { UserDirectory } from './directoryPort.ts';
+import { migrate } from './migrate.ts';
+import { createPgDirectory, type DirectoryPool } from './pgDirectory.ts';
+import { createDirectoryPool } from './pool.ts';
+
+export interface DirectoryRuntime {
+  directory: UserDirectory;
+  /** Aplica el esquema. Idempotente: corre en cada arranque. Ver `migrate.ts`. */
+  migrate(): Promise<void>;
+}
+
+export function directoryFromEnv(
+  env: { DATABASE_URL?: string; BOOTSTRAP_SUPERADMIN_EMAIL?: string },
+  makePool: typeof createDirectoryPool = createDirectoryPool,
+): DirectoryRuntime | undefined {
+  const config = resolveDirectoryConfig(env);
+  // Sin config no se construye ni el pool: un pool sin destino seria un objeto
+  // vivo esperando una conexion que nadie ha pedido.
+  if (config === null) return undefined;
+
+  const pool: DirectoryPool = makePool(config);
+
+  return {
+    directory: createPgDirectory(pool, config),
+    migrate: () => migrate(pool),
+  };
+}

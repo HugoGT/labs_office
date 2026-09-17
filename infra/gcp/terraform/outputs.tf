@@ -61,5 +61,9 @@ output "secret_ids" {
   value = {
     livekit_api_key    = google_secret_manager_secret.livekit_api_key.secret_id
     livekit_api_secret = google_secret_manager_secret.livekit_api_secret.secret_id
+    db_password        = google_secret_manager_secret.db_password.secret_id
+    # Cadena vacia mientras `enable_identity_admin_secret` este en false: el
+    # contenedor no existe y no hay ningun valor que cargar.
+    identity_admin = var.enable_identity_admin_secret ? google_secret_manager_secret.identity_admin[0].secret_id : ""
   }
 }

@@ -1,0 +1,94 @@
+/**
+ * El cableado del directorio desde el entorno, probado con el constructor del
+ * pool inyectado: no hace falta Postgres para afirmar lo unico que puede
+ * romperse aqui, que es que la configuracion no llegue donde tiene que llegar.
+ */
+
+import { describe, expect, it } from 'vitest';
+import { directoryFromEnv } from './fromEnv.ts';
+import { readSchemaSql } from './migrate.ts';
+import type { DirectoryPool } from './pgDirectory.ts';
+
+interface FakePool extends DirectoryPool {
+  queries: { text: string; values: unknown[] }[];
+  ended: number;
+}
+
+function fakePool(): FakePool {
+  const queries: { text: string; values: unknown[] }[] = [];
+  const state = { ended: 0 };
+  const query = async (text: string, values: unknown[] = []) => {
+    queries.push({ text, values });
+    return { rows: [{}], rowCount: 1 };
+  };
+  return {
+    queries,
+    get ended() {
+      return state.ended;
+    },
+    query,
+    async connect() {
+      return { query, release() {} };
+    },
+    async end() {
+      state.ended++;
+    },
+  };
+}
+
+describe('directoryFromEnv', () => {
+  it('sin DATABASE_URL no construye nada: directorio desactivado', () => {
+    // Y no construye tampoco el pool: un pool sin destino seria un objeto vivo
+    // esperando una conexion que nadie pidio.
+    let built = 0;
+    const runtime = directoryFromEnv({}, () => {
+      built++;
+      return fakePool();
+    });
+
+    expect(runtime).toBeUndefined();
+    expect(built).toBe(0);
+  });
+
+  it('con DATABASE_URL construye el pool y el directorio', () => {
+    const pool = fakePool();
+    const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, () => pool);
+
+    expect(runtime?.directory).toBeDefined();
+  });
+
+  it('migrate() manda el esquema por ese mismo pool', async () => {
+    const pool = fakePool();
+    const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, () => pool);
+
+    await runtime!.migrate();
+
+    expect(pool.queries[0].text).toBe(readSchemaSql());
+  });
+
+  it('el email de bootstrap del entorno llega hasta la sentencia de login', async () => {
+    // Prueba de extremo a extremo del cableado: si se perdiese por el camino, el
+    // sintoma seria que nadie llega nunca a superadmin y no habria ningun error.
+    const pool = fakePool();
+    const runtime = directoryFromEnv(
+      {
+        DATABASE_URL: 'postgres://localhost/oficina',
+        BOOTSTRAP_SUPERADMIN_EMAIL: 'Hugo@Example.com',
+      },
+      () => pool,
+    );
+
+    await runtime!.directory.resolveOnLogin({ uid: 'uid-hugo', email: 'hugo@example.com', name: 'Hugo' });
+
+    expect(pool.queries[0].values[3]).toBe('hugo@example.com');
+  });
+
+  it('close() del directorio cierra el pool que se construyo', async () => {
+    const pool = fakePool();
+    const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, () => pool);
+
+    await runtime!.directory.close();
+
+    expect(pool.ended).toBe(1);
+  });
+});

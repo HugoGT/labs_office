@@ -3,8 +3,15 @@
 #
 #   caddy      unico proceso con los puertos 80/443. Termina TLS y reparte
 #   web        el SPA ya construido, servido como ficheros estaticos
-#   colyseus   el servidor de Node: salas, /health y /livekit/token
+#   colyseus   el servidor de Node: salas, /health, /livekit/token y /admin/*
 #   livekit    el SFU
+#   postgres   el directorio de usuarios e invitaciones (issue #24)
+#
+# Postgres es un contenedor mas en esta misma VM y no Cloud SQL. La instancia
+# mas barata de Cloud SQL cuesta mas que la VM entera y habria traido red
+# privada, IAM y mas Terraform para guardar unos centenares de filas. El precio
+# de la decision esta anotado y es real: las copias de seguridad son manuales y
+# la durabilidad del dato es la del disco de la VM (ver README).
 #
 # NO hay Redis, a diferencia de infra/livekit/docker-compose.yml. LiveKit solo
 # necesita Redis para coordinar varios nodos entre si y para hablar con Egress;
@@ -78,7 +85,61 @@ services:
       # los que traen un ID token valido. `GET /health` dice en cual de los dos
       # modos esta corriendo.
       FIREBASE_PROJECT_ID: "${FIREBASE_PROJECT_ID:-}"
+      # Issue #24. Vacia: no hay directorio, el servidor se comporta igual que
+      # antes y /admin/* responde que la funcion esta apagada. Con la cadena de
+      # conexion: el servidor migra el esquema al arrancar y sirve el panel.
+      # Misma convencion de degradacion que FIREBASE_PROJECT_ID, y `GET /health`
+      # tambien dice en cual de los dos modos esta corriendo.
+      DATABASE_URL: "${DATABASE_URL:-}"
+      # El correo que se promociona a superadmin en su primer inicio de sesion,
+      # y solo mientras no exista ya un superadmin. No es un secreto (es una
+      # direccion de correo), asi que no pasa por Secret Manager, por lo mismo
+      # que FIREBASE_PROJECT_ID: lo que protege la oficina es la verificacion
+      # de la firma del ID token, no que este valor sea desconocido. Vacio: no
+      # hay arranque en frio posible y el directorio se queda sin superadmin.
+      BOOTSTRAP_SUPERADMIN_EMAIL: "${BOOTSTRAP_SUPERADMIN_EMAIL:-}"
+      # Clave de cuenta de servicio con la que el servidor da de alta cuentas en
+      # Identity Platform al aceptar una invitacion. Esta SI es un secreto y sale
+      # de Secret Manager. Vacia: el resto del panel funciona y solo el endpoint
+      # de invitar devuelve 503, que es la degradacion querida: la funcion es
+      # opcional y no debe tumbar el despliegue.
+      IDENTITY_ADMIN_CREDENTIALS: "${IDENTITY_ADMIN_CREDENTIALS:-}"
+    # `depends_on` en forma de lista (la que usa caddy mas arriba) solo espera a
+    # que el contenedor exista, no a que el servicio responda. Aqui no alcanza:
+    # Postgres arranca su contenedor en milisegundos y tarda bastante mas en
+    # aceptar conexiones, y el servidor corre las migraciones nada mas arrancar.
+    # Sin la condicion, el primer arranque de la VM muere con un ECONNREFUSED
+    # que `restart: unless-stopped` acaba tapando tras unos reinicios, o sea: un
+    # arranque que funciona por casualidad y unos logs que no explican nada.
+    depends_on:
+      postgres:
+        condition: service_healthy
     # Tampoco publica el 2567 al host: la unica entrada es Caddy sobre 443.
+    networks: [office]
+
+  postgres:
+    image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+    restart: unless-stopped
+    logging: *logging
+    # Sin `ports`, por el mismo motivo que `web`: solo colyseus le habla, por la
+    # red interna del compose. Publicar el 5432 lo dejaria escuchando en la IP
+    # publica de la VM y dependiendo solo del firewall para no ser alcanzable.
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_DB: "${POSTGRES_DB}"
+    volumes:
+      - office-db:/var/lib/postgresql/data
+    # Lo que hace util la condicion `service_healthy` de colyseus. `pg_isready`
+    # es el propio cliente de Postgres preguntando por el socket, no un `sleep`
+    # disfrazado: devuelve 0 solo cuando el servidor acepta conexiones.
+    # `start_period` cubre el primer arranque, que ademas inicializa el cluster.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     networks: [office]
 
   livekit:
@@ -107,6 +168,13 @@ services:
 volumes:
   caddy-data:
   caddy-config:
+  # Aqui viven los usuarios, sus roles y las invitaciones. Perderlo NO es como
+  # perder caddy-data: un certificado se vuelve a emitir solo, y esto no se
+  # reemite desde ningun sitio. Borrar el volumen, o destruir la VM que lo
+  # contiene, borra el directorio entero y deja la oficina sin superadmin hasta
+  # que alguien vuelva a hacer el arranque en frio a mano. No hay copia
+  # automatica: el README explica el `pg_dump` que hay que correr a mano.
+  office-db:
 
 networks:
   office:

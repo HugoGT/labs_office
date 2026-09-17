@@ -54,7 +54,29 @@
 		reverse_proxy colyseus:2567
 	}
 
+	# API del panel de administracion (issue #24).
+	#
+	# LEE ESTO ANTES DE ANADIR UNA RUTA NUEVA AL SERVIDOR. Los bloques `handle`
+	# son excluyentes y se evaluan en orden, y el ultimo no tiene ruta: se queda
+	# con todo lo que no encajo antes. Una ruta del servidor sin su propio
+	# bloque aqui NO da 404: cae en ese `handle` final, nginx responde el
+	# index.html del SPA con un 200 y el cliente recibe HTML donde esperaba
+	# JSON. El sintoma es un `Unexpected token '<'` al parsear la respuesta, en
+	# el navegador, sin una sola linea en los logs del servidor, porque la
+	# peticion nunca llego hasta el. Se depura mirando aqui, no alli.
+	#
+	# El comodin es a proposito: las rutas de /admin/ se van a seguir anadiendo
+	# y todas viven en el mismo servidor, asi que se enrutan por prefijo una vez
+	# en vez de una linea por endpoint. El bloque sin ruta tiene que seguir
+	# siendo el ultimo del sitio.
+	handle /admin/* {
+		reverse_proxy colyseus:2567
+	}
+
 	# Todo lo demas es el SPA ya construido, en su propio contenedor.
+	# Incluye /dashboard: es una ruta del cliente, no del servidor, y tiene que
+	# llegar al index.html para que el SPA la resuelva (el `try_files` de
+	# docker/web-nginx.conf hace la otra mitad).
 	handle {
 		reverse_proxy web:80
 	}
