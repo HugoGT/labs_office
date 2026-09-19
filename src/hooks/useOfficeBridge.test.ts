@@ -18,7 +18,7 @@ describe('useOfficeBridge', () => {
     const { result } = renderHook(() => useOfficeBridge(bridge));
 
     act(() => {
-      bridge.emit('room', { room: 'Cafetería' });
+      bridge.emit('room', { spaceId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'Cafetería' });
       bridge.emit('npcmenu', {
         target: { kind: 'npc', npcId: 3 },
         name: 'Pablo',
@@ -68,7 +68,7 @@ describe('useOfficeBridge', () => {
     unmount();
 
     act(() => {
-      bridge.emit('room', { room: 'Cafetería' });
+      bridge.emit('room', { spaceId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'Cafetería' });
     });
 
     expect(result.current.room).toBeNull();

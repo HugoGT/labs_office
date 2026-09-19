@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GROUND, MAP_H, MAP_W, ROOMS, TILE } from './mapData';
+import { BUILT_IN_SPACES, GROUND, MAP_H, MAP_W, TILE } from './mapData';
 import {
   ADJACENT_OFFSETS,
   buildTerrainGrid,
@@ -64,7 +64,7 @@ describe('buildTerrainGrid', () => {
       { doorY: [24, 25], floorCode: GROUND.WOODF },
     ];
 
-    ROOMS.forEach((room, ri) => {
+    BUILT_IN_SPACES.forEach((room, ri) => {
       const x0 = room.x / TILE;
       const y0 = room.y / TILE;
       const x1 = x0 + room.w / TILE - 1;

@@ -126,14 +126,14 @@ export function useProximityAudio(
         // Misma sesion: solo reenvia los conjuntos deseados, no reconecta.
         connectionRef.current?.setDesiredAudioPeers(audibleSessionIds);
         connectionRef.current?.setDesiredVideoPeers(
-          videoPeers({ room: payload.room, audibleSessionIds }),
+          videoPeers({ spaceId: payload.spaceId, audibleSessionIds }),
         );
         return;
       }
 
       const pendingSessionId = payload.selfSessionId;
       const pendingSessionIds = audibleSessionIds;
-      const pendingRoom = payload.room;
+      const pendingSpaceId = payload.spaceId;
       sessionRef.current = pendingSessionId;
 
       void (async () => {
@@ -193,7 +193,7 @@ export function useProximityAudio(
           setAudioAvailable(true);
           connection.setDesiredAudioPeers(pendingSessionIds);
           connection.setDesiredVideoPeers(
-            videoPeers({ room: pendingRoom, audibleSessionIds: pendingSessionIds }),
+            videoPeers({ spaceId: pendingSpaceId, audibleSessionIds: pendingSessionIds }),
           );
         } catch {
           // Rechazo de connect(), de la peticion del token o de la propia

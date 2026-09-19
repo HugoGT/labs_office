@@ -13,7 +13,15 @@ import {
 } from './characters';
 import { mergeColliderRects } from './colliderMerge';
 import { placeFurniture, placeNature, placeZoneLabels, renderGround } from './mapBuilder';
-import { PROX_RADIUS, ROOMS, TILE, WORLD_H, WORLD_W } from './mapData';
+import {
+  BUILT_IN_SPACES,
+  BUILT_IN_SPACES_VERSION,
+  PROX_RADIUS,
+  TILE,
+  WORLD_H,
+  WORLD_W,
+  type Room,
+} from './mapData';
 import type { OfficeBridge } from './officeBridge';
 import {
   DEFAULT_FACING,
@@ -30,7 +38,7 @@ import {
 } from './officeRoomClient';
 import { createRemoteAvatarRegistry, type RemoteAvatarRegistry } from './remoteAvatars';
 import { createPhaserAvatarSink, type RemoteAvatarContainer } from './remoteAvatarSink';
-import { detectRoom, isSpeaking, nearbyIndices, nearbyKey, type Point } from './proximity';
+import { detectSpace, isSpeaking, nearbyIndices, nearbyKey, type Point } from './proximity';
 import { audiblePeers, type AudioPeer } from './proximityAudio';
 import { buildTerrainGrid, findFreeAdjacentTile, isBlocked, type TerrainGrid } from './terrainGrid';
 import { AVATAR_KEYS, PLAYER_TEXTURE, avatarTextureKey, createOfficeTextures } from './textures';
@@ -91,9 +99,23 @@ export class OfficeScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WasdKeys;
   private mmMarker?: Phaser.GameObjects.Arc;
-  /** Clave de dedupe de "voice" (D3): incluye sala y `selfSessionId`, no solo los pares. */
+  /** Clave de dedupe de "voice" (D3): incluye espacio y `selfSessionId`, no solo los pares. */
   private lastVoiceKey = '';
-  private currentRoom: string | null = null;
+  private currentSpaceId: string | null = null;
+  /**
+   * Config de espacios que la escena usa para derivar pertenencia (#7, D3).
+   * Empieza en `BUILT_IN_SPACES` y solo cambiaria al llegar la config
+   * servida -- que no existe todavia en esta slice (slice 3).
+   */
+  private spaces: readonly Room[] = BUILT_IN_SPACES;
+  /**
+   * Version que este cliente publica de su config de espacios (#7, D4). Se
+   * inicia en la constante fallback y viaja en el join Y en cada tic de
+   * proximidad -- sin fetch en esta slice, jamas cambia, y por eso el
+   * predicado mutuo de `audiblePeers` es constante-verdadero en produccion:
+   * la guarda llega ANTES del riesgo que defiende (D4).
+   */
+  private spacesVersion: string = BUILT_IN_SPACES_VERSION;
   private unsubscribeTeleport?: () => void;
   private unsubscribeCallNpc?: () => void;
   private unsubscribeSetStatus?: () => void;
@@ -241,7 +263,7 @@ export class OfficeScene extends Phaser.Scene {
     if (endpoint === null || endpoint === undefined) {
       this.bridge.emit('presence', { online: false, peers: 0 });
       // Sin sesion Colyseus nunca se intenta LiveKit (matriz de degradacion, PRD 6.3).
-      this.emitVoice(null, [], this.currentRoom);
+      this.emitVoice(null, [], this.currentSpaceId);
       return;
     }
 
@@ -252,6 +274,10 @@ export class OfficeScene extends Phaser.Scene {
         endpoint,
         name: playerName,
         status: joinedStatus,
+        // Viaja en el join (#7, D4), no en un mensaje posterior: sin esto este
+        // par quedaria "brevemente sin version" para todo el mundo hasta el
+        // primer tic de proximidad.
+        spacesVersion: this.spacesVersion,
         getIdToken,
         handlers: {
           onAdd: (snapshot) => {
@@ -294,11 +320,11 @@ export class OfficeScene extends Phaser.Scene {
       });
       this.emitPresence(true);
       // Sesion viva, todavia sin pares conocidos (el primer tic los completa).
-      this.emitVoice(connection.sessionId, [], this.currentRoom);
+      this.emitVoice(connection.sessionId, [], this.currentSpaceId);
     } catch {
       if (!this.alive) return;
       this.bridge.emit('presence', { online: false, peers: 0 });
-      this.emitVoice(null, [], this.currentRoom);
+      this.emitVoice(null, [], this.currentSpaceId);
     }
   }
 
@@ -392,19 +418,19 @@ export class OfficeScene extends Phaser.Scene {
   private emitVoice(
     selfSessionId: string | null,
     peers: readonly { sessionId: string; name: string }[],
-    room: string | null,
+    spaceId: string | null,
   ): void {
     // El nombre entra en la clave de dedupe (issue #17): un cambio de nombre
     // sin cambio de conjunto de pares SI debe reemitir, o la etiqueta del
     // tile quedaria pegada al valor viejo.
-    const key = `${nearbyKey(peers.map((peer) => `${peer.sessionId}:${peer.name}`))}|${room ?? ''}|${selfSessionId ?? ''}`;
+    const key = `${nearbyKey(peers.map((peer) => `${peer.sessionId}:${peer.name}`))}|${spaceId ?? ''}|${selfSessionId ?? ''}`;
     if (key === this.lastVoiceKey) return;
     this.lastVoiceKey = key;
     this.bridge.emit('voice', {
       selfSessionId,
       selfName: this.player.nameText,
       peers,
-      room,
+      spaceId,
     });
   }
 
@@ -471,29 +497,38 @@ export class OfficeScene extends Phaser.Scene {
   private proximityTick(): void {
     const player = this.player;
     const now = this.time.now;
-    const room = detectRoom({ x: player.x, y: player.y }, ROOMS);
+    const space = detectSpace({ x: player.x, y: player.y }, this.spaces);
     const selfSessionId = this.connection?.sessionId ?? null;
 
-    // Sala detectada POR PAR, no la del jugador: cada avatar remoto puede
-    // estar en una sala distinta a la propia.
+    // Espacio detectado POR PAR, no el del jugador: cada avatar remoto puede
+    // estar en un espacio distinto al propio.
     const audioPeers: AudioPeer[] = (this.remotes?.sessionIds() ?? []).flatMap((sessionId) => {
       const avatar = this.remotes?.get(sessionId);
       if (!avatar) return [];
-      // El estado sale del contenedor, que el sink ya mantiene al dia con lo
-      // que llega del servidor: es la misma fuente que pinta el punto, asi que
-      // el color y el audio no pueden contarse historias distintas.
+      // El estado y la version salen del contenedor, que el sink ya mantiene
+      // al dia con lo que llega del servidor: es la misma fuente que pinta el
+      // punto, asi que el color y el audio no pueden contarse historias
+      // distintas.
       return [
         {
           sessionId,
           x: avatar.x,
           y: avatar.y,
-          room: detectRoom(avatar, ROOMS),
+          spaceId: detectSpace(avatar, this.spaces)?.id ?? null,
+          spacesVersion: avatar.spacesVersion,
           status: avatar.status,
         },
       ];
     });
     const audibleIds = audiblePeers({
-      self: { sessionId: selfSessionId, x: player.x, y: player.y, room, status: this.status },
+      self: {
+        sessionId: selfSessionId,
+        x: player.x,
+        y: player.y,
+        spaceId: space?.id ?? null,
+        spacesVersion: this.spacesVersion,
+        status: this.status,
+      },
       peers: audioPeers,
       radius: PROX_RADIUS,
     });
@@ -514,12 +549,13 @@ export class OfficeScene extends Phaser.Scene {
       c.ring.setVisible(nearSet.has(i) && isSpeaking(now, c.phase));
     });
 
-    if (room !== this.currentRoom) {
-      this.currentRoom = room;
-      this.bridge.emit('room', { room });
+    const spaceId = space?.id ?? null;
+    if (spaceId !== this.currentSpaceId) {
+      this.currentSpaceId = spaceId;
+      this.bridge.emit('room', { spaceId, name: space?.name ?? null });
     }
 
-    this.emitVoice(selfSessionId, peers, room);
+    this.emitVoice(selfSessionId, peers, spaceId);
   }
 
   /** Mueve al jugador a una tile libre adyacente al NPC objetivo (app.js:474-486). */

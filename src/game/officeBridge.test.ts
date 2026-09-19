@@ -10,10 +10,13 @@ describe('createOfficeBridge', () => {
 
     bridgeA.on('room', handlerA);
     bridgeB.on('room', handlerB);
-    bridgeA.emit('room', { room: 'Cafetería' });
+    bridgeA.emit('room', { spaceId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'Cafetería' });
 
     expect(handlerA).toHaveBeenCalledTimes(1);
-    expect(handlerA).toHaveBeenCalledWith({ room: 'Cafetería' });
+    expect(handlerA).toHaveBeenCalledWith({
+      spaceId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      name: 'Cafetería',
+    });
     expect(handlerB).not.toHaveBeenCalled();
   });
 
@@ -74,17 +77,22 @@ describe('createOfficeBridge', () => {
     ];
 
     const unsubscribe = bridge.on('voice', handler);
-    bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers, room: 'Cafetería' });
+    bridge.emit('voice', {
+      selfSessionId: 'yo',
+      selfName: 'HugoGT',
+      peers,
+      spaceId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    });
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler).toHaveBeenCalledWith({
       selfSessionId: 'yo',
       selfName: 'HugoGT',
       peers,
-      room: 'Cafetería',
+      spaceId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
     });
 
     unsubscribe();
-    bridge.emit('voice', { selfSessionId: null, selfName: 'HugoGT', peers: [], room: null });
+    bridge.emit('voice', { selfSessionId: null, selfName: 'HugoGT', peers: [], spaceId: null });
     expect(handler).toHaveBeenCalledTimes(1);
   });
 

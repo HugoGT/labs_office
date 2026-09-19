@@ -19,6 +19,8 @@ export interface PlayerSeed {
   y: number;
   status: string;
   facing: string;
+  /** Version de config de espacios con la que este jugador deriva su sala (#7, D4). */
+  spacesVersion: string;
 }
 
 export interface PlayerState extends PlayerSeed {}
@@ -31,6 +33,7 @@ defineTypes(PlayerState, {
   y: 'number',
   status: 'string',
   facing: 'string',
+  spacesVersion: 'string',
 });
 
 /**
@@ -45,6 +48,7 @@ export function createPlayerState(seed: PlayerSeed): PlayerState {
   player.y = seed.y;
   player.status = seed.status;
   player.facing = seed.facing;
+  player.spacesVersion = seed.spacesVersion;
   return player;
 }
 

@@ -24,7 +24,7 @@ const INITIAL_VOICE: OfficeEventMap['voice'] = {
   selfSessionId: null,
   selfName: '',
   peers: [],
-  room: null,
+  spaceId: null,
 };
 
 /**
@@ -163,7 +163,7 @@ export function VideoTiles({ bridge, videoTracks, speakers, localVideoTrack }: V
             // Gate de video de PARES (D8, decision G): solo dentro de una
             // sala compartida. El self-tile de arriba NUNCA pasa por esta
             // regla -- la propia camara no cuesta downlink alguno.
-            track={voice.room !== null ? (videoTracks.get(peer.sessionId) ?? null) : null}
+            track={voice.spaceId !== null ? (videoTracks.get(peer.sessionId) ?? null) : null}
             speaking={speakers.has(peer.sessionId)}
           />
         </div>

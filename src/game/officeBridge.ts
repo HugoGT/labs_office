@@ -15,7 +15,13 @@ import { createAnchorChannel, type AnchorChannel } from './anchorChannel';
 import type { PresenceStatus } from './officeProtocol';
 
 export interface OfficeEventMap {
-  room: { room: string | null };
+  /**
+   * Espacio actual del jugador local (#7, D2). `spaceId` es la clave de
+   * pertenencia estable; `name` es lo unico que pinta el HUD -- por eso
+   * `useOfficeBridge` sigue exponiendo `room: string | null` = `name`, sin
+   * que el indicador visible note el cambio de identidad por debajo.
+   */
+  room: { spaceId: string | null; name: string | null };
   /**
    * Menu contextual al hacer clic en un personaje (issue #2, D1): union
    * discriminada por `target.kind`. Antes era un `id` plano que solo servia
@@ -72,7 +78,8 @@ export interface OfficeEventMap {
     selfSessionId: string | null;
     selfName: string;
     peers: readonly { sessionId: string; name: string }[];
-    room: string | null;
+    /** Espacio del jugador local (#7, D2). `null` = piso abierto. */
+    spaceId: string | null;
   };
   /**
    * Retratos fieles exportados una sola vez desde `create()` (issue #17, D1):

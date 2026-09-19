@@ -17,6 +17,7 @@ import {
   MAX_NAME_LENGTH,
   OFFICE_ROOM_NAME,
   OfficeRoom,
+  type SpacesVersionMessage,
   type StatusMessage,
 } from './OfficeRoom.ts';
 import type { DirectoryUser, UserDirectory } from './directory/directoryPort.ts';
@@ -293,6 +294,66 @@ describe('OfficeRoom: estado de presencia (#1)', () => {
     const message: StatusMessage = { status: 'r' };
     expect(() =>
       handlers.get('status')!({ sessionId: 'fantasma' } as ServerClient, message),
+    ).not.toThrow();
+    expect(room.state.players.size).toBe(0);
+  });
+});
+
+/**
+ * Version de config de espacios (#7, D4). Mismo criterio de prueba que
+ * "estado de presencia": el mensaje `spacesversion` espeja `status` linea a
+ * linea (`OfficeRoom.ts`), asi que su suite tambien lo hace.
+ */
+describe('OfficeRoom: version de config de espacios (#7, D4)', () => {
+  it('el cambio de version de un cliente llega al estado que ve el otro', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+
+    a.send('spacesversion', { version: 'v2edited' });
+
+    await waitFor(() => b.state.players.get(a.sessionId)?.spacesVersion === 'v2edited');
+  });
+
+  it('quien entra sin pedir version arranca con la version por defecto del servidor (#7, D4)', async () => {
+    const room = await join('Ana');
+
+    await waitFor(() => room.state.players.size === 1);
+    // Nunca vacia: un peer jamas queda "sin version" ni un instante, o
+    // audiblePeers() lo silenciaria contra todo el mundo por una version
+    // vacia que no coincide con nada.
+    expect(room.state.players.get(room.sessionId)?.spacesVersion).toBeTruthy();
+  });
+
+  it('el valor elegido antes de conectar viaja en el join, no se pierde (nunca "brevemente sin version")', async () => {
+    const room = await join('Ana', { spacesVersion: 'inicial123' });
+
+    await waitFor(() => room.state.players.size === 1);
+    expect(room.state.players.get(room.sessionId)?.spacesVersion).toBe('inicial123');
+  });
+
+  it('una "spacesversion" con un valor no-string cae al valor por defecto del servidor', async () => {
+    const room = await join('Ana', { spacesVersion: 12345 });
+
+    await waitFor(() => room.state.players.size === 1);
+    expect(room.state.players.get(room.sessionId)?.spacesVersion).not.toBe('12345');
+  });
+
+  it('una "spacesversion" de una sesion que no esta en el estado no crea un jugador fantasma', () => {
+    const handlers = new Map<string, (client: ServerClient, message: unknown) => void>();
+    const room = new OfficeRoom();
+    (room as unknown as { onMessage: unknown }).onMessage = (
+      type: string,
+      handler: (client: ServerClient, message: unknown) => void,
+    ) => {
+      handlers.set(type, handler);
+      return () => {};
+    };
+    room.onCreate();
+
+    const message: SpacesVersionMessage = { version: 'v9' };
+    expect(() =>
+      handlers.get('spacesversion')!({ sessionId: 'fantasma' } as ServerClient, message),
     ).not.toThrow();
     expect(room.state.players.size).toBe(0);
   });

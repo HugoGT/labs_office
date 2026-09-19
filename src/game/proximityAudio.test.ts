@@ -7,6 +7,9 @@ import {
   type AudioPeer,
 } from './proximityAudio';
 
+/** Version compartida por defecto: la mayoria de los casos no prueban D4, asi que comparten una sola version para no repetirla en cada objeto. */
+const V1 = 'v1';
+
 /**
  * `audiblePeers` es el objetivo mas valioso de esta prueba TDD: decide quien
  * escucha a quien. Un bug aqui es un defecto de privacidad, no de UX.
@@ -17,10 +20,18 @@ describe('audiblePeers: en una sala, la sala manda y el radio se ignora', () => 
       sessionId: 'yo',
       x: 0,
       y: 0,
-      room: 'Sala de Juntas',
+      spaceId: 'sala-de-juntas',
+      spacesVersion: V1,
       status: 'g',
     };
-    const peerFuera: AudioPeer = { sessionId: 'vecino', x: 0, y: 0, room: null, status: 'g' };
+    const peerFuera: AudioPeer = {
+      sessionId: 'vecino',
+      x: 0,
+      y: 0,
+      spaceId: null,
+      spacesVersion: V1,
+      status: 'g',
+    };
 
     const audibles = audiblePeers({ self, peers: [peerFuera], radius: PROX_RADIUS });
 
@@ -32,14 +43,16 @@ describe('audiblePeers: en una sala, la sala manda y el radio se ignora', () => 
       sessionId: 'yo',
       x: 0,
       y: 0,
-      room: 'Cafetería',
+      spaceId: 'cafeteria',
+      spacesVersion: V1,
       status: 'g',
     };
     const peerLejos: AudioPeer = {
       sessionId: 'companero',
       x: 99999,
       y: 99999,
-      room: 'Cafetería',
+      spaceId: 'cafeteria',
+      spacesVersion: V1,
       status: 'g',
     };
 
@@ -51,12 +64,20 @@ describe('audiblePeers: en una sala, la sala manda y el radio se ignora', () => 
 
 describe('audiblePeers: aislamiento mutuo desde el piso abierto', () => {
   it('un par dentro de una sala NUNCA es audible desde el piso abierto, aunque este cerca', () => {
-    const self: AudibleInput['self'] = { sessionId: 'yo', x: 0, y: 0, room: null, status: 'g' };
+    const self: AudibleInput['self'] = {
+      sessionId: 'yo',
+      x: 0,
+      y: 0,
+      spaceId: null,
+      spacesVersion: V1,
+      status: 'g',
+    };
     const peerEnSala: AudioPeer = {
       sessionId: 'reunido',
       x: 5,
       y: 5,
-      room: 'Sala de Juntas',
+      spaceId: 'sala-de-juntas',
+      spacesVersion: V1,
       status: 'g',
     };
 
@@ -66,8 +87,22 @@ describe('audiblePeers: aislamiento mutuo desde el piso abierto', () => {
   });
 
   it('en el piso abierto, un par tambien en el piso abierto y dentro del radio si es audible', () => {
-    const self: AudibleInput['self'] = { sessionId: 'yo', x: 0, y: 0, room: null, status: 'g' };
-    const peerCerca: AudioPeer = { sessionId: 'colega', x: 50, y: 0, room: null, status: 'g' };
+    const self: AudibleInput['self'] = {
+      sessionId: 'yo',
+      x: 0,
+      y: 0,
+      spaceId: null,
+      spacesVersion: V1,
+      status: 'g',
+    };
+    const peerCerca: AudioPeer = {
+      sessionId: 'colega',
+      x: 50,
+      y: 0,
+      spaceId: null,
+      spacesVersion: V1,
+      status: 'g',
+    };
 
     const audibles = audiblePeers({ self, peers: [peerCerca], radius: PROX_RADIUS });
 
@@ -77,12 +112,20 @@ describe('audiblePeers: aislamiento mutuo desde el piso abierto', () => {
 
 describe('audiblePeers: limite estricto del radio en el piso abierto', () => {
   it('exactamente en el radio queda excluido (d < radius, no d <= radius)', () => {
-    const self: AudibleInput['self'] = { sessionId: 'yo', x: 0, y: 0, room: null, status: 'g' };
+    const self: AudibleInput['self'] = {
+      sessionId: 'yo',
+      x: 0,
+      y: 0,
+      spaceId: null,
+      spacesVersion: V1,
+      status: 'g',
+    };
     const peerEnElBorde: AudioPeer = {
       sessionId: 'borde',
       x: PROX_RADIUS,
       y: 0,
-      room: null,
+      spaceId: null,
+      spacesVersion: V1,
       status: 'g',
     };
 
@@ -92,12 +135,20 @@ describe('audiblePeers: limite estricto del radio en el piso abierto', () => {
   });
 
   it('un pixel dentro del radio si es audible', () => {
-    const self: AudibleInput['self'] = { sessionId: 'yo', x: 0, y: 0, room: null, status: 'g' };
+    const self: AudibleInput['self'] = {
+      sessionId: 'yo',
+      x: 0,
+      y: 0,
+      spaceId: null,
+      spacesVersion: V1,
+      status: 'g',
+    };
     const peerDentro: AudioPeer = {
       sessionId: 'dentro',
       x: PROX_RADIUS - 1,
       y: 0,
-      room: null,
+      spaceId: null,
+      spacesVersion: V1,
       status: 'g',
     };
 
@@ -109,8 +160,22 @@ describe('audiblePeers: limite estricto del radio en el piso abierto', () => {
 
 describe('audiblePeers: casos limite defensivos', () => {
   it('el propio sessionId nunca aparece en el resultado aunque venga en peers', () => {
-    const self: AudibleInput['self'] = { sessionId: 'yo', x: 0, y: 0, room: null, status: 'g' };
-    const peerPropio: AudioPeer = { sessionId: 'yo', x: 0, y: 0, room: null, status: 'g' };
+    const self: AudibleInput['self'] = {
+      sessionId: 'yo',
+      x: 0,
+      y: 0,
+      spaceId: null,
+      spacesVersion: V1,
+      status: 'g',
+    };
+    const peerPropio: AudioPeer = {
+      sessionId: 'yo',
+      x: 0,
+      y: 0,
+      spaceId: null,
+      spacesVersion: V1,
+      status: 'g',
+    };
 
     const audibles = audiblePeers({ self, peers: [peerPropio], radius: PROX_RADIUS });
 
@@ -118,8 +183,22 @@ describe('audiblePeers: casos limite defensivos', () => {
   });
 
   it('sessionId propio null produce un arreglo vacio sin importar los peers', () => {
-    const self: AudibleInput['self'] = { sessionId: null, x: 0, y: 0, room: null, status: 'g' };
-    const peerCerca: AudioPeer = { sessionId: 'alguien', x: 0, y: 0, room: null, status: 'g' };
+    const self: AudibleInput['self'] = {
+      sessionId: null,
+      x: 0,
+      y: 0,
+      spaceId: null,
+      spacesVersion: V1,
+      status: 'g',
+    };
+    const peerCerca: AudioPeer = {
+      sessionId: 'alguien',
+      x: 0,
+      y: 0,
+      spaceId: null,
+      spacesVersion: V1,
+      status: 'g',
+    };
 
     const audibles = audiblePeers({ self, peers: [peerCerca], radius: PROX_RADIUS });
 
@@ -131,12 +210,13 @@ describe('audiblePeers: casos limite defensivos', () => {
       sessionId: 'yo',
       x: 0,
       y: 0,
-      room: 'Cafetería',
+      spaceId: 'cafeteria',
+      spacesVersion: V1,
       status: 'g',
     };
     const peers: AudioPeer[] = [
-      { sessionId: 'zeta', x: 0, y: 0, room: 'Cafetería', status: 'g' },
-      { sessionId: 'alfa', x: 0, y: 0, room: 'Cafetería', status: 'g' },
+      { sessionId: 'zeta', x: 0, y: 0, spaceId: 'cafeteria', spacesVersion: V1, status: 'g' },
+      { sessionId: 'alfa', x: 0, y: 0, spaceId: 'cafeteria', spacesVersion: V1, status: 'g' },
     ];
 
     const primerTic = audiblePeers({ self, peers, radius: PROX_RADIUS });
@@ -153,13 +233,14 @@ describe('audiblePeers: "No molestar" aisla en los dos sentidos (#1)', () => {
       sessionId: 'yo',
       x: 0,
       y: 0,
-      room: null,
+      spaceId: null,
+      spacesVersion: V1,
       status: 'r',
     };
-    const enSala: AudibleInput['self'] = { ...enPisoAbierto, room: 'Cafetería' };
+    const enSala: AudibleInput['self'] = { ...enPisoAbierto, spaceId: 'cafeteria' };
     const peers: AudioPeer[] = [
-      { sessionId: 'pegado', x: 0, y: 0, room: null, status: 'g' },
-      { sessionId: 'companero', x: 0, y: 0, room: 'Cafetería', status: 'g' },
+      { sessionId: 'pegado', x: 0, y: 0, spaceId: null, spacesVersion: V1, status: 'g' },
+      { sessionId: 'companero', x: 0, y: 0, spaceId: 'cafeteria', spacesVersion: V1, status: 'g' },
     ];
 
     expect(audiblePeers({ self: enPisoAbierto, peers, radius: PROX_RADIUS })).toEqual([]);
@@ -167,8 +248,22 @@ describe('audiblePeers: "No molestar" aisla en los dos sentidos (#1)', () => {
   });
 
   it('un par en "No molestar" no se escucha desde el piso abierto, aunque este encima', () => {
-    const self: AudibleInput['self'] = { sessionId: 'yo', x: 0, y: 0, room: null, status: 'g' };
-    const peerAislado: AudioPeer = { sessionId: 'aislada', x: 0, y: 0, room: null, status: 'r' };
+    const self: AudibleInput['self'] = {
+      sessionId: 'yo',
+      x: 0,
+      y: 0,
+      spaceId: null,
+      spacesVersion: V1,
+      status: 'g',
+    };
+    const peerAislado: AudioPeer = {
+      sessionId: 'aislada',
+      x: 0,
+      y: 0,
+      spaceId: null,
+      spacesVersion: V1,
+      status: 'r',
+    };
 
     const audibles = audiblePeers({ self, peers: [peerAislado], radius: PROX_RADIUS });
 
@@ -182,12 +277,27 @@ describe('audiblePeers: "No molestar" aisla en los dos sentidos (#1)', () => {
       sessionId: 'yo',
       x: 0,
       y: 0,
-      room: 'Sala de Juntas',
+      spaceId: 'sala-de-juntas',
+      spacesVersion: V1,
       status: 'g',
     };
     const peers: AudioPeer[] = [
-      { sessionId: 'aislada', x: 0, y: 0, room: 'Sala de Juntas', status: 'r' },
-      { sessionId: 'companero', x: 0, y: 0, room: 'Sala de Juntas', status: 'g' },
+      {
+        sessionId: 'aislada',
+        x: 0,
+        y: 0,
+        spaceId: 'sala-de-juntas',
+        spacesVersion: V1,
+        status: 'r',
+      },
+      {
+        sessionId: 'companero',
+        x: 0,
+        y: 0,
+        spaceId: 'sala-de-juntas',
+        spacesVersion: V1,
+        status: 'g',
+      },
     ];
 
     // Entrar a una sala es justo donde seria facil saltarse la regla: alli la
@@ -202,12 +312,13 @@ describe('audiblePeers: "No molestar" aisla en los dos sentidos (#1)', () => {
       sessionId: 'yo',
       x: 0,
       y: 0,
-      room: null,
+      spaceId: null,
+      spacesVersion: V1,
       status: 'y',
     };
     const peers: AudioPeer[] = [
-      { sessionId: 'ocupada', x: 10, y: 0, room: null, status: 'y' },
-      { sessionId: 'disponible', x: 20, y: 0, room: null, status: 'g' },
+      { sessionId: 'ocupada', x: 10, y: 0, spaceId: null, spacesVersion: V1, status: 'y' },
+      { sessionId: 'disponible', x: 20, y: 0, spaceId: null, spacesVersion: V1, status: 'g' },
     ];
 
     const comoOcupado = audiblePeers({ self: yoOcupado, peers, radius: PROX_RADIUS });
@@ -219,6 +330,119 @@ describe('audiblePeers: "No molestar" aisla en los dos sentidos (#1)', () => {
 
     expect(comoOcupado).toEqual(['disponible', 'ocupada']);
     expect(comoEnLinea).toEqual(comoOcupado);
+  });
+});
+
+/**
+ * Predicado mutuo de `spacesVersion` (#7, D4): precondicion evaluada ANTES de
+ * la regla de sala y ANTES de la rama de piso abierto, en el filtro `others`.
+ * Reemplaza por completo la guarda `spacesStale` propuesta en r2 -- no
+ * sobrevive ninguna version de ella (ver diseno). El caso mas valioso es el
+ * primero: la asimetria es exactamente lo que una prueba de un solo sentido
+ * dejaria pasar.
+ */
+describe('audiblePeers: predicado mutuo de spacesVersion (#7, D4)', () => {
+  it('versiones distintas en la MISMA sala: silencio calculado desde el lado de A Y desde el lado de B', () => {
+    const a: AudibleInput['self'] = {
+      sessionId: 'a',
+      x: 0,
+      y: 0,
+      spaceId: 'sala-de-juntas',
+      spacesVersion: 'v2',
+      status: 'g',
+    };
+    const b: AudibleInput['self'] = {
+      sessionId: 'b',
+      x: 0,
+      y: 0,
+      spaceId: 'sala-de-juntas',
+      spacesVersion: 'v1',
+      status: 'g',
+    };
+    const peerB: AudioPeer = {
+      sessionId: 'b',
+      x: 0,
+      y: 0,
+      spaceId: 'sala-de-juntas',
+      spacesVersion: 'v1',
+      status: 'g',
+    };
+    const peerA: AudioPeer = {
+      sessionId: 'a',
+      x: 0,
+      y: 0,
+      spaceId: 'sala-de-juntas',
+      spacesVersion: 'v2',
+      status: 'g',
+    };
+
+    // Dos comprobaciones independientes, una por cada lado del par: una
+    // asercion de un solo sentido pasaria aunque el otro lado si escuchase.
+    expect(audiblePeers({ self: a, peers: [peerB], radius: PROX_RADIUS })).toEqual([]);
+    expect(audiblePeers({ self: b, peers: [peerA], radius: PROX_RADIUS })).toEqual([]);
+  });
+
+  it('misma version, aunque sea vieja, compartiendo sala: mutuamente audibles (ninguna guarda global lo enmascara)', () => {
+    const self: AudibleInput['self'] = {
+      sessionId: 'yo',
+      x: 0,
+      y: 0,
+      spaceId: 'sala-de-juntas',
+      spacesVersion: 'viejaPeroIgual',
+      status: 'g',
+    };
+    const peer: AudioPeer = {
+      sessionId: 'companero',
+      x: 99999,
+      y: 99999,
+      spaceId: 'sala-de-juntas',
+      spacesVersion: 'viejaPeroIgual',
+      status: 'g',
+    };
+
+    expect(audiblePeers({ self, peers: [peer], radius: PROX_RADIUS })).toEqual(['companero']);
+  });
+
+  it('misma version vieja, ambos en piso abierto y dentro del radio: mutuamente audibles (la rama de piso abierto tambien esta protegida)', () => {
+    const self: AudibleInput['self'] = {
+      sessionId: 'yo',
+      x: 0,
+      y: 0,
+      spaceId: null,
+      spacesVersion: 'viejaPeroIgual',
+      status: 'g',
+    };
+    const peer: AudioPeer = {
+      sessionId: 'colega',
+      x: 50,
+      y: 0,
+      spaceId: null,
+      spacesVersion: 'viejaPeroIgual',
+      status: 'g',
+    };
+
+    expect(audiblePeers({ self, peers: [peer], radius: PROX_RADIUS })).toEqual(['colega']);
+  });
+
+  it('misma sala, versiones distintas: silencio -- la version se evalua ANTES de la regla de sala', () => {
+    const self: AudibleInput['self'] = {
+      sessionId: 'yo',
+      x: 0,
+      y: 0,
+      spaceId: 'cafeteria',
+      spacesVersion: 'v1',
+      status: 'g',
+    };
+    const peer: AudioPeer = {
+      sessionId: 'companero',
+      x: 0,
+      y: 0,
+      spaceId: 'cafeteria',
+      spacesVersion: 'v2',
+      status: 'g',
+    };
+
+    expect(audiblePeers({ self, peers: [peer], radius: PROX_RADIUS })).toEqual([]);
   });
 });
 

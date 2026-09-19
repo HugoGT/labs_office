@@ -89,19 +89,68 @@ export const ZONE_LABELS: readonly ZoneLabel[] = [
   { t: 'T E C H N O L O G Y', x: 12, y: 32.2 },
 ];
 
-/** Salas (app.js:56-59). Coordenadas y tamano en pixeles, como el prototipo original. */
+/**
+ * Salas/espacios (app.js:56-59). Coordenadas y tamano en pixeles, como el
+ * prototipo original. `id` es la clave de pertenencia estable (#7, D2): el
+ * nombre puede cambiar sin afectar quien esta dentro. `doorTiles`/
+ * `floorStyle` son puramente de dibujo del mapa base (D3) -- `terrainGrid.ts`
+ * los usa para trazar la puerta y el suelo de cada sala; un espacio servido
+ * desde config (slice 3) no los trae porque no redibuja paredes.
+ */
 export interface Room {
+  id: string;
   x: number;
   y: number;
   w: number;
   h: number;
   name: string;
+  /** Filas de la pared izquierda que son puerta, no muro (`terrainGrid.ts`). */
+  doorTiles: readonly [number, number];
+  /** Codigo de suelo interior de esta sala (`terrainGrid.ts`). */
+  floorStyle: GroundCode;
 }
 
-export const ROOMS: readonly Room[] = [
-  { x: 50 * TILE, y: 2 * TILE, w: 13 * TILE, h: 14 * TILE, name: 'Sala de Juntas' },
-  { x: 50 * TILE, y: 18 * TILE, w: 13 * TILE, h: 14 * TILE, name: 'Cafetería' },
+/**
+ * Los mismos ids/slugs/nombres/rectangulos que `BUILT_IN_SEED_SPACES` en
+ * `server/src/spaces/builtInSeed.ts` (#7, D4): un cliente en modo fallback y
+ * un despliegue sin editar deben coincidir en id Y en hash de version. No se
+ * importa ese modulo server-side aqui a proposito -- este fichero sigue sin
+ * imports (ver cabecera) -- los valores se copian a mano y la igualdad se fija
+ * con una prueba (`server/src/spaces/builtInSeed.test.ts`).
+ */
+export const BUILT_IN_SPACES: readonly Room[] = [
+  {
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    x: 50 * TILE,
+    y: 2 * TILE,
+    w: 13 * TILE,
+    h: 14 * TILE,
+    name: 'Sala de Juntas',
+    doorTiles: [8, 9],
+    floorStyle: GROUND.FLOOR,
+  },
+  {
+    id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    x: 50 * TILE,
+    y: 18 * TILE,
+    w: 13 * TILE,
+    h: 14 * TILE,
+    name: 'Cafetería',
+    doorTiles: [24, 25],
+    floorStyle: GROUND.WOODF,
+  },
 ];
+
+/**
+ * Version (D4) que un cliente en modo fallback publica: primeros 16 hex de
+ * sha256 sobre la lista canonica de `BUILT_IN_SPACES` (mismo algoritmo que
+ * `spaceRules.hashSpaces`, server-only). Literal, NO calculado aqui: el
+ * cliente nunca hashea nada -- `crypto.subtle.digest` es asincrono y
+ * `proximityTick` es sincrono (D4). Su igualdad con
+ * `server/src/spaces/builtInSeed.ts`'s `BUILT_IN_SEED_VERSION` esta fijada
+ * por una prueba, no dejada a la suerte.
+ */
+export const BUILT_IN_SPACES_VERSION = 'a489c5da5efd7c68';
 
 export const SKINS: readonly number[] = [0xf2c49b, 0xd9a066, 0x8d5524];
 export const HAIRS: readonly number[] = [0x2b2b2b, 0x5a3825, 0xd8b23c, 0x8a2f2f, 0x394a8a];
