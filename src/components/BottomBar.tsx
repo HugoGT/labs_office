@@ -3,6 +3,12 @@ import { STATUS_LABEL, statusCssColor } from '../game/presence';
 import styles from './BottomBar.module.css';
 
 export interface BottomBarProps {
+  /**
+   * Nombre del usuario local, ya resuelto por quien conoce la sesion (#6).
+   * Llega plano a proposito: esta barra es presentacional (D3) y no debe
+   * aprender que existe una sesion para poder escribir un nombre.
+   */
+  playerName: string;
   micOn: boolean;
   camOn: boolean;
   /** `false` mientras no hay conexion viva a LiveKit (matriz de degradacion). */
@@ -31,6 +37,7 @@ const DND_TITLE = 'No molestar: no publicas micrófono ni cámara';
  * video, que ya trae su nombre -- la informacion no se perdio, cambio de casa.
  */
 export function BottomBar({
+  playerName,
   micOn,
   camOn,
   audioAvailable,
@@ -55,7 +62,7 @@ export function BottomBar({
     <div className={styles.bar}>
       <div className={styles.me}>
         <span className={styles.meDot} style={{ background: statusCssColor(status) }} />{' '}
-        HugoGT
+        {playerName}
         <select
           className={styles.statusSelect}
           aria-label="Mi estado"

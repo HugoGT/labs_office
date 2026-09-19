@@ -65,7 +65,6 @@ export interface NpcContainer extends CharacterContainer {
  */
 export const NPC_WALK_MS_PER_TILE = 260;
 
-const PLAYER_NAME = 'HugoGT';
 const PLAYER_TEXTURE = 'avP';
 
 /** Construye un personaje: anillo de habla + sprite + pildora de nombre (app.js:325-347). */
@@ -204,11 +203,17 @@ export function walkNpcTo(
   return tween;
 }
 
-/** Crea al jugador con cuerpo fisico y limites de mundo (app.js:384-390). */
-export function spawnPlayer(scene: Phaser.Scene): CharacterContainer {
+/**
+ * Crea al jugador con cuerpo fisico y limites de mundo (app.js:384-390).
+ *
+ * El nombre entra por parametro y no vive aqui (#6): quien lo conoce es la
+ * sesion verificada, varias capas mas arriba. Cableado, la pildora del avatar
+ * local mostraba el nombre de una persona concreta a todo el que entrase.
+ */
+export function spawnPlayer(scene: Phaser.Scene, name: string): CharacterContainer {
   const player = makeCharacter(
     scene,
-    PLAYER_NAME,
+    name,
     PLAYER_SPAWN_TX,
     PLAYER_SPAWN_TY,
     PLAYER_TEXTURE,
