@@ -12,8 +12,13 @@ output "app_host" {
 }
 
 output "livekit_host" {
-  description = "Hostname de la senalizacion de LiveKit y de su TURN."
+  description = "Hostname de la senalizacion de LiveKit."
   value       = local.lk_host
+}
+
+output "turn_host" {
+  description = "Hostname dedicado del TURN (issue #19), separado del de senalizacion."
+  value       = local.turn_host
 }
 
 output "app_url" {

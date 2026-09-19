@@ -42,6 +42,10 @@ PROJECT_ID="$(metadata office-project-id)"
 REGISTRY="$(metadata office-registry)"
 APP_HOST="$(metadata office-app-host)"
 LK_HOST="$(metadata office-lk-host)"
+# Issue #19. Sin `|| true` a proposito: Caddy no puede levantar el bloque de
+# sitio turn.* sin este hostname, y un despliegue a medio configurar es peor
+# que uno que aborta con un mensaje claro.
+TURN_HOST="$(metadata office-turn-host)"
 ACME_EMAIL="$(metadata office-acme-email)"
 SECRET_KEY_NAME="$(metadata office-secret-key)"
 SECRET_SECRET_NAME="$(metadata office-secret-secret)"
@@ -92,9 +96,11 @@ metadata office-compose >"${WORKDIR}/docker-compose.yml"
 metadata office-caddyfile >"${WORKDIR}/Caddyfile"
 chmod 0644 "${WORKDIR}/docker-compose.yml" "${WORKDIR}/Caddyfile"
 
-# El hostname de LiveKit sale de la IP, que no se conoce hasta que Terraform la
+# Los hostnames salen de la IP, que no se conoce hasta que Terraform la
 # reserva: por eso livekit.yaml es una plantilla y no un fichero literal.
-metadata office-livekit-config | sed "s/__LK_HOST__/${LK_HOST}/g" >"${WORKDIR}/livekit.yaml"
+metadata office-livekit-config |
+  sed -e "s/__LK_HOST__/${LK_HOST}/g" -e "s/__TURN_HOST__/${TURN_HOST}/g" \
+    >"${WORKDIR}/livekit.yaml"
 chmod 0644 "${WORKDIR}/livekit.yaml"
 
 # --- Secretos --------------------------------------------------------------
@@ -180,6 +186,7 @@ trap 'rm -f "${TMP_ENV}"' EXIT
   echo "# Generado por office-deploy. No editar a mano: se reescribe en cada despliegue."
   echo "APP_HOST=${APP_HOST}"
   echo "LK_HOST=${LK_HOST}"
+  echo "TURN_HOST=${TURN_HOST}"
   echo "ACME_EMAIL=${ACME_EMAIL}"
   echo "REGISTRY=${REGISTRY}"
   echo "IMAGE_TAG=${IMAGE_TAG}"
@@ -221,6 +228,19 @@ fi
 # ninguna credencial persistente en la maquina.
 echo "${ACCESS_TOKEN}" |
   docker login -u oauth2accesstoken --password-stdin "https://${REGISTRY%%/*}" >/dev/null
+
+# La imagen de Caddy la construye este repositorio desde el issue #19. Rodar
+# IMAGE_TAG por debajo del commit que anadio ese paso apunta a un tag que nunca
+# se publico: `docker compose pull` aborta, y como el resto del script muere con
+# el, la "vuelta atras" no ocurre y los contenedores viejos siguen en pie sin
+# que nadie lo anuncie. Se comprueba antes para que el fallo diga que hacer.
+if ! docker manifest inspect "${REGISTRY}/caddy:${IMAGE_TAG}" >/dev/null 2>&1; then
+  echo "[office-deploy] no existe ${REGISTRY}/caddy:${IMAGE_TAG}." >&2
+  echo "[office-deploy] volver atras de un cambio de CONFIGURACION no es esto:" >&2
+  echo "[office-deploy]   1) terraform apply desde el commit antiguo (reescribe la metadata)" >&2
+  echo "[office-deploy]   2) office-deploy <sha-antiguo>" >&2
+  exit 1
+fi
 
 log "desplegando ${IMAGE_TAG}"
 docker compose --project-directory "${WORKDIR}" pull --quiet

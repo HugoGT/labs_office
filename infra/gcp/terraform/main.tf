@@ -44,6 +44,10 @@ locals {
   dashed_ip = replace(google_compute_address.office.address, ".", "-")
   app_host  = "app.${local.dashed_ip}.sslip.io"
   lk_host   = "lk.${local.dashed_ip}.sslip.io"
+  # Hostname dedicado del TURN (issue #19), distinto del de senalizacion. Es
+  # lo que permite que el multiplexor del Caddyfile separe TURN de la
+  # senalizacion mirando solo el SNI del ClientHello.
+  turn_host = "turn.${local.dashed_ip}.sslip.io"
 
   registry_host = "${var.region}-docker.pkg.dev"
   registry_path = "${local.registry_host}/${var.project_id}/${google_artifact_registry_repository.images.repository_id}"
@@ -364,12 +368,15 @@ resource "google_compute_instance" "office" {
     office-caddyfile      = file("${path.module}/../Caddyfile")
     office-livekit-config = file("${path.module}/../livekit.yaml.tpl")
     office-deploy-script  = file("${path.module}/../scripts/office-deploy.sh")
-    office-cert-script    = file("${path.module}/../scripts/office-cert-watch.sh")
 
     office-project-id         = var.project_id
     office-registry           = local.registry_path
     office-app-host           = local.app_host
     office-lk-host            = local.lk_host
+    # Issue #19. LiveKit deja de leer certificados de Caddy (turn.external_tls)
+    # y por eso ya no hace falta el vigilante que los reiniciaba: no hay
+    # equivalente a office-cert-script aqui.
+    office-turn-host          = local.turn_host
     office-acme-email         = var.acme_email
     office-secret-key         = google_secret_manager_secret.livekit_api_key.secret_id
     office-secret-secret      = google_secret_manager_secret.livekit_api_secret.secret_id
