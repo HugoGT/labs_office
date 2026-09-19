@@ -265,6 +265,15 @@
   cursor: not-allowed;
 }
 
+/* La casilla y su etiqueta en la misma linea: en columna, como el resto de
+   `.field`, una etiqueta larga dejaria la casilla flotando muy lejos de ella. */
+.checkboxField {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: center;
+}
+
 /* La frase que acompana a una confirmacion, dentro de su celda. `block` y no
    en linea: pegada a los botones se lee como la etiqueta de uno de ellos. */
 .confirmNote {
