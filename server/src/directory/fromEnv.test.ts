@@ -118,3 +118,35 @@ describe('directoryFromEnv, espacios (#7, slice 3)', () => {
     expect(pool.queries.at(-1)?.text).toContain('FROM spaces');
   });
 });
+
+describe('directoryFromEnv, decoracion (#7, slice 4)', () => {
+  it('con DATABASE_URL construye tambien el catalogo de decoracion', () => {
+    const pool = fakePool();
+    const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, () => pool);
+
+    expect(runtime?.decor).toBeDefined();
+  });
+
+  it('la decoracion sale del MISMO pool que el directorio y los espacios', async () => {
+    // Misma razon que los espacios: un tercer pool contra la misma base seria
+    // el triple de conexiones que la instancia cuenta, y `directory.close()`
+    // solo cerraria el suyo.
+    let built = 0;
+    const pool = fakePool();
+    const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, () => {
+      built++;
+      return pool;
+    });
+
+    await runtime!.decor.listAssets();
+
+    expect(built).toBe(1);
+    expect(pool.queries.at(-1)?.text).toContain('FROM assets');
+  });
+
+  it('no trae migracion propia: las tablas ya estan en el mismo schema.sql', () => {
+    const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, fakePool);
+
+    expect(Object.keys(runtime!)).toEqual(['directory', 'spaces', 'decor', 'migrate']);
+  });
+});
