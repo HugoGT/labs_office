@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CharacterContainer, NpcContainer } from './characters';
 import {
+  BUILT_IN_SPACES,
+  BUILT_IN_SPACES_VERSION,
   DESK_ROWS,
   MAP_H,
   MAP_W,
@@ -292,7 +294,7 @@ describe('OfficeScene: proximidad y salas (app.js:444-471, cada 250ms)', () => {
   it('emite "room" al entrar a una sala', async () => {
     const bridge = createOfficeBridge();
     const rooms: (string | null)[] = [];
-    bridge.on('room', (payload) => rooms.push(payload.room));
+    bridge.on('room', (payload) => rooms.push(payload.name));
 
     const { scene } = await bootOfficeScene(bridge);
     const player = findPlayer(scene);
@@ -303,13 +305,32 @@ describe('OfficeScene: proximidad y salas (app.js:444-471, cada 250ms)', () => {
       expect(rooms).toContain('Sala de Juntas');
     }, LOOP_WAIT);
   });
+
+  it('el "room" emitido trae el id estable del espacio, no solo el nombre (#7, D2)', async () => {
+    const bridge = createOfficeBridge();
+    const rooms: { spaceId: string | null; name: string | null }[] = [];
+    bridge.on('room', (payload) => rooms.push(payload));
+
+    const { scene } = await bootOfficeScene(bridge);
+    const player = findPlayer(scene);
+    player.setPosition(52 * TILE, 4 * TILE);
+
+    await vi.waitFor(() => {
+      expect(rooms.some((r) => r.name === 'Sala de Juntas')).toBe(true);
+    }, LOOP_WAIT);
+    const match = rooms.find((r) => r.name === 'Sala de Juntas');
+    expect(match?.spaceId).toBe(BUILT_IN_SPACES[0].id);
+  });
 });
 
 describe('OfficeScene: audio/video por proximidad (D3, issue #17)', () => {
   it('emite "voice" con los peers reales audibles (sessionId + nombre), sin repetir en tics identicos', async () => {
     const bridge = createOfficeBridge();
-    const voices: { selfSessionId: string | null; peers: readonly { sessionId: string; name: string }[]; room: string | null }[] =
-      [];
+    const voices: {
+      selfSessionId: string | null;
+      peers: readonly { sessionId: string; name: string }[];
+      spaceId: string | null;
+    }[] = [];
     bridge.on('voice', (payload) => voices.push(payload));
     const connector = fakeConnector('mi-sesion');
 
@@ -334,8 +355,11 @@ describe('OfficeScene: audio/video por proximidad (D3, issue #17)', () => {
 
   it('un cruce de sala reemite "voice" aunque el conjunto de pares audibles no cambie', async () => {
     const bridge = createOfficeBridge();
-    const voices: { selfSessionId: string | null; peers: readonly { sessionId: string; name: string }[]; room: string | null }[] =
-      [];
+    const voices: {
+      selfSessionId: string | null;
+      peers: readonly { sessionId: string; name: string }[];
+      spaceId: string | null;
+    }[] = [];
     bridge.on('voice', (payload) => voices.push(payload));
     const connector = fakeConnector('mi-sesion');
 
@@ -355,7 +379,7 @@ describe('OfficeScene: audio/video por proximidad (D3, issue #17)', () => {
     player.setPosition(52 * TILE, 4 * TILE);
 
     await vi.waitFor(() => {
-      expect(voices.at(-1)?.room).toBe('Sala de Juntas');
+      expect(voices.at(-1)?.spaceId).toBe(BUILT_IN_SPACES[0].id);
     }, LOOP_WAIT);
     expect(voices.length).toBeGreaterThan(countBeforeCrossing);
     // El conjunto audible sigue vacio: la clave de dedupe cambio solo por la sala.
@@ -555,15 +579,18 @@ function fakeConnector(sessionId = 'yo') {
   // ninguna unit emitia comandos de llamada todavia.
   const calls: string[] = [];
   const respondedCalls: { from: string; accept: boolean }[] = [];
+  const sentSpacesVersions: string[] = [];
   let captured: OfficeRoomHandlers | undefined;
   let joinedWith: PresenceStatus | undefined;
   let joinedName: string | undefined;
+  let joinedSpacesVersion: string | undefined;
   let left = false;
 
   const connection: OfficeConnection = {
     sessionId,
     sendMove: (x, y, facing) => sent.push({ x, y, facing }),
     sendStatus: (status) => statuses.push(status),
+    sendSpacesVersion: (version) => sentSpacesVersions.push(version),
     sendCall: (to) => calls.push(to),
     sendCallRespond: (from, accept) => respondedCalls.push({ from, accept }),
     leave: async () => {
@@ -576,14 +603,17 @@ function fakeConnector(sessionId = 'yo') {
     statuses,
     calls,
     respondedCalls,
+    sentSpacesVersions,
     handlers: () => captured,
     joinedWith: () => joinedWith,
     joinedName: () => joinedName,
+    joinedSpacesVersion: () => joinedSpacesVersion,
     hasLeft: () => left,
     connect: async (options: ConnectOfficeRoomOptions) => {
       captured = options.handlers;
       joinedWith = options.status;
       joinedName = options.name;
+      joinedSpacesVersion = options.spacesVersion;
       return connection;
     },
   };
@@ -597,6 +627,7 @@ function remoteSnapshot(overrides: Record<string, unknown> = {}) {
     y: 600,
     status: 'g',
     facing: 'down',
+    spacesVersion: BUILT_IN_SPACES_VERSION,
     ...overrides,
   } as Parameters<OfficeRoomHandlers['onAdd']>[0];
 }
@@ -824,6 +855,22 @@ describe('OfficeScene: comando setStatus via el puente (#1)', () => {
     await vi.waitFor(() => expect(connector.joinedWith()).toBe(DEFAULT_STATUS), LOOP_WAIT);
   });
 
+  it('el join lleva la version de config de espacios fallback (#7, D4)', async () => {
+    const connector = fakeConnector('mi-sesion');
+    await bootOfficeScene(createOfficeBridge(), {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+
+    // Sin fetch todavia en esta slice (D3/D4): la escena siempre publica la
+    // constante fallback al conectar, para que un cliente aislado y uno con
+    // exito de fetch en un despliegue sin editar sigan de acuerdo.
+    await vi.waitFor(
+      () => expect(connector.joinedSpacesVersion()).toBe(BUILT_IN_SPACES_VERSION),
+      LOOP_WAIT,
+    );
+  });
+
   it('un cambio de estado mientras la conexion esta en vuelo no se pierde', async () => {
     const bridge = createOfficeBridge();
     const statuses: PresenceStatus[] = [];
@@ -836,6 +883,7 @@ describe('OfficeScene: comando setStatus via el puente (#1)', () => {
       sessionId: 'mi-sesion',
       sendMove: () => {},
       sendStatus: (status) => statuses.push(status),
+      sendSpacesVersion: () => {},
       sendCall: () => {},
       sendCallRespond: () => {},
       leave: async () => {},

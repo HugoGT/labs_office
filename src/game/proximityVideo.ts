@@ -14,8 +14,8 @@
  */
 
 export interface VideoPeersInput {
-  /** Sala del jugador local. `null` = piso abierto: video de pares nunca se pide. */
-  room: string | null;
+  /** Espacio del jugador local (#7, D2). `null` = piso abierto: video de pares nunca se pide. */
+  spaceId: string | null;
   /**
    * Conjunto ya audible (salida de `audiblePeers()`): ya excluye al propio
    * sessionId y ya aplica "No molestar". El video reutiliza exactamente ese
@@ -25,10 +25,10 @@ export interface VideoPeersInput {
 }
 
 /**
- * `room !== null ? audibleSessionIds : []` (spec: reconciliacion de video).
+ * `spaceId !== null ? audibleSessionIds : []` (spec: reconciliacion de video).
  * Deliberadamente mas angosta que el audio: el piso abierto nunca suscribe
  * video de un par, sin importar la cercania.
  */
 export function videoPeers(input: VideoPeersInput): string[] {
-  return input.room !== null ? [...input.audibleSessionIds] : [];
+  return input.spaceId !== null ? [...input.audibleSessionIds] : [];
 }

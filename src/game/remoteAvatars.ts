@@ -14,6 +14,8 @@ export interface RemotePlayerSnapshot {
   y: number;
   status: string;
   facing: string;
+  /** Version de config de espacios con la que este par deriva su sala (#7, D4). */
+  spacesVersion: string;
 }
 
 export interface RemoteAvatarSink<TAvatar> {

@@ -22,6 +22,7 @@
 
 import { Room, ServerError, type AuthContext, type Client } from '@colyseus/core';
 import {
+  BUILT_IN_SPACES_VERSION,
   PLAYER_SPAWN_TX,
   PLAYER_SPAWN_TY,
   TILE,
@@ -74,6 +75,11 @@ export interface StatusMessage {
   status: string;
 }
 
+/** Mensaje que publica una nueva version de config de espacios (#7, D4). */
+export interface SpacesVersionMessage {
+  version: string;
+}
+
 /**
  * Mensajes de invitacion de llamada (issue #2). Viven aqui y no en
  * `officeProtocol.ts` a proposito (D4): el TTL que habria exigido vocabulario
@@ -112,6 +118,18 @@ export function sanitizeFacing(raw: unknown): string {
 
 export function sanitizeStatus(raw: unknown): string {
   return isPresenceStatus(raw) ? raw : DEFAULT_STATUS;
+}
+
+/**
+ * A diferencia de `sanitizeStatus`, no hay un enumerado cerrado que validar:
+ * `spacesVersion` es un hash opaco. Lo unico que se exige es que sea un
+ * string no vacio -- un cliente trucado o desactualizado que mande otra cosa
+ * cae al mismo valor que un cliente honesto en modo fallback (#7, D4), asi
+ * que el predicado mutuo de `audiblePeers` sigue comparando algo con sentido
+ * en vez de `undefined`.
+ */
+export function sanitizeSpacesVersion(raw: unknown): string {
+  return typeof raw === 'string' && raw.length > 0 ? raw : BUILT_IN_SPACES_VERSION;
 }
 
 /**
@@ -232,6 +250,16 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       player.status = message.status;
     });
 
+    // Espeja el manejador de `status` de arriba (#7, D4): mismo criterio,
+    // mismo tipo de guarda. Sin agrupar, como `sendStatus`: agrupar podria
+    // tragarse justo la actualizacion que aisla a alguien.
+    this.onMessage('spacesversion', (client: Client, message: SpacesVersionMessage) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+
+      player.spacesVersion = sanitizeSpacesVersion(message?.version);
+    });
+
     // El cliente no es de fiar tampoco aqui: `to`/`from` se comprueban como
     // string, el objetivo tiene que existir en `state.players`, y las dos
     // guardas de negocio (D5/D8) van antes de tocar el registro.
@@ -333,7 +361,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
 
   onJoin(
     client: Client<unknown, OfficeAuthData>,
-    options?: { name?: unknown; status?: unknown },
+    options?: { name?: unknown; status?: unknown; spacesVersion?: unknown },
   ): void {
     const [dx, dy] = SPAWN_RING[this.joinCount % SPAWN_RING.length];
     this.joinCount++;
@@ -355,6 +383,11 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
         y: (PLAYER_SPAWN_TY + dy) * TILE + TILE / 2,
         status: sanitizeStatus(options?.status),
         facing: DEFAULT_FACING,
+        // Viaja en el join (#7, D4), no en un mensaje posterior: sin esto un
+        // peer recien llegado quedaria un instante "sin version" y
+        // audiblePeers() lo silenciaria contra todo el mundo (una version
+        // vacia no coincide con ninguna otra).
+        spacesVersion: sanitizeSpacesVersion(options?.spacesVersion),
       }),
     );
 

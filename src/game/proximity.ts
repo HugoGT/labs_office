@@ -33,15 +33,21 @@ export function nearbyKey(names: readonly string[]): string {
   return names.join('|');
 }
 
-/** Limites semi-abiertos: `x0 <= x < x0+w`, `y0 <= y < y0+h` (app.js:465). */
-export function detectRoom(player: Point, rooms: readonly Room[]): string | null {
-  for (const room of rooms) {
+/**
+ * Limites semi-abiertos: `x0 <= x < x0+w`, `y0 <= y < y0+h` (app.js:465).
+ * Devuelve el espacio ENTERO, no solo el nombre (#7, D2): la clave de
+ * pertenencia (`id`) y la etiqueta del HUD (`name`) salen de UNA sola
+ * busqueda, para que nunca puedan desacordar por venir de dos lookups
+ * distintos.
+ */
+export function detectSpace(player: Point, spaces: readonly Room[]): Room | null {
+  for (const space of spaces) {
     const inside =
-      player.x >= room.x &&
-      player.x < room.x + room.w &&
-      player.y >= room.y &&
-      player.y < room.y + room.h;
-    if (inside) return room.name;
+      player.x >= space.x &&
+      player.x < space.x + space.w &&
+      player.y >= space.y &&
+      player.y < space.y + space.h;
+    if (inside) return space;
   }
   return null;
 }
