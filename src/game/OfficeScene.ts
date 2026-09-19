@@ -17,6 +17,7 @@ import { PROX_RADIUS, ROOMS, TILE, WORLD_H, WORLD_W } from './mapData';
 import type { OfficeBridge } from './officeBridge';
 import {
   DEFAULT_FACING,
+  DEFAULT_NAME,
   DEFAULT_STATUS,
   facingFrom,
   type Facing,
@@ -51,6 +52,11 @@ const MINIMAP_MARGIN = 14;
 export interface OfficeSceneOptions {
   /** `null` desactiva el multijugador: la oficina corre en solitario. */
   endpoint?: string | null;
+  /**
+   * Nombre de la sesion (#6): etiqueta la pildora del avatar local y viaja
+   * con el a la sala. Ausente sin autenticacion, donde la escena cae en
+   * `DEFAULT_NAME` en vez de inventarse un nombre propio.
+   */
   playerName?: string;
   /**
    * ID token de la sesion (#8), reenviado tal cual al cliente de la sala.
@@ -142,7 +148,10 @@ export class OfficeScene extends Phaser.Scene {
     placeZoneLabels(this);
 
     this.npcs = spawnNpcs(this, this.bridge);
-    this.player = spawnPlayer(this);
+    // El nombre de la sesion manda sobre la pildora del avatar local (#6).
+    // Sin sesion (desarrollo local, e2e) cae en `DEFAULT_NAME`, que es como
+    // llama el servidor a quien entra sin identidad verificada.
+    this.player = spawnPlayer(this, this.options.playerName ?? DEFAULT_NAME);
 
     this.buildColliders(grid);
     this.setupCameras();

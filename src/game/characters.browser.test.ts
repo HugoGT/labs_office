@@ -12,7 +12,7 @@ import {
 import { TILE } from './mapData';
 import { NPCS } from './npcData';
 import { createOfficeBridge, type OfficeEventMap } from './officeBridge';
-import { DEFAULT_STATUS } from './officeProtocol';
+import { DEFAULT_NAME, DEFAULT_STATUS } from './officeProtocol';
 import { STATUS_COLOR } from './presence';
 import { createOfficeTextures } from './textures';
 
@@ -237,7 +237,7 @@ describe('walkNpcTo', () => {
 describe('spawnPlayer', () => {
   it('crea al jugador en su tile declarada con cuerpo fisico y limites de colision', async () => {
     const result = await withScene((scene) => {
-      const player = spawnPlayer(scene);
+      const player = spawnPlayer(scene, DEFAULT_NAME);
       const body = player.body as Phaser.Physics.Arcade.Body;
       return {
         x: player.x,
@@ -251,6 +251,14 @@ describe('spawnPlayer', () => {
     expect(result.y).toBe(28 * TILE + 16);
     expect(result.hasArcadeBody).toBe(true);
     expect(result.collideWorldBounds).toBe(true);
+  });
+
+  it('etiqueta al jugador con el nombre recibido, no con uno propio (#6)', async () => {
+    const nameText = await withScene((scene) => spawnPlayer(scene, 'Ana Torres').nameText);
+
+    // El nombre entra por parametro porque esta fabrica no puede saberlo: lo
+    // sabe la sesion verificada, varias capas mas arriba.
+    expect(nameText).toBe('Ana Torres');
   });
 });
 
@@ -291,7 +299,7 @@ describe('setCharacterStatus', () => {
 
   it('el jugador local arranca "En línea" (DEFAULT_STATUS), no con un color inventado', async () => {
     const player = await withScene((scene) => {
-      const created = spawnPlayer(scene);
+      const created = spawnPlayer(scene, DEFAULT_NAME);
       return { status: created.status, color: created.statusDot.fillColor };
     });
 

@@ -15,7 +15,7 @@ import {
 import { TERRAIN_SHEET } from './assets';
 import { NPCS } from './npcData';
 import { createOfficeBridge } from './officeBridge';
-import { DEFAULT_STATUS, type PresenceStatus } from './officeProtocol';
+import { DEFAULT_NAME, DEFAULT_STATUS, type PresenceStatus } from './officeProtocol';
 import { STATUS_COLOR } from './presence';
 import { AVATAR_KEYS, PLAYER_TEXTURE } from './textures';
 import type {
@@ -93,10 +93,15 @@ async function bootOfficeScene(
   return { scene: game.scene.getScene(OFFICE_SCENE_KEY) as Phaser.Scene, bridge };
 }
 
+/**
+ * El jugador local es el unico contenedor con cuerpo fisico: ni los NPCs ni
+ * los avatares remotos lo tienen. Se busca asi y no por su nombre porque el
+ * nombre es justo lo que varias pruebas miden (#6): atarlo aqui haria que el
+ * helper dejase de encontrarlo en cuanto la sesion traiga otro.
+ */
 function findPlayer(scene: Phaser.Scene): CharacterContainer {
   const player = scene.children.list.find(
-    (c): c is CharacterContainer =>
-      c.type === 'Container' && (c as CharacterContainer).nameText === 'HugoGT',
+    (c): c is CharacterContainer => c.type === 'Container' && !('npcId' in c) && c.body !== null,
   );
   if (!player) throw new Error('player container not found in scene');
   return player;
@@ -160,7 +165,7 @@ describe('OfficeScene dentro de un Phaser.Game real: mapa, NPCs y jugador', () =
     const containers = scene.children.list.filter((c) => c.type === 'Container');
     expect(containers).toHaveLength(NPCS.length + 1);
     expect(findNpcs(scene)).toHaveLength(NPCS.length);
-    expect(findPlayer(scene).nameText).toBe('HugoGT');
+    expect(findPlayer(scene).nameText).toBe(DEFAULT_NAME);
   });
 });
 
@@ -552,6 +557,7 @@ function fakeConnector(sessionId = 'yo') {
   const respondedCalls: { from: string; accept: boolean }[] = [];
   let captured: OfficeRoomHandlers | undefined;
   let joinedWith: PresenceStatus | undefined;
+  let joinedName: string | undefined;
   let left = false;
 
   const connection: OfficeConnection = {
@@ -572,10 +578,12 @@ function fakeConnector(sessionId = 'yo') {
     respondedCalls,
     handlers: () => captured,
     joinedWith: () => joinedWith,
+    joinedName: () => joinedName,
     hasLeft: () => left,
     connect: async (options: ConnectOfficeRoomOptions) => {
       captured = options.handlers;
       joinedWith = options.status;
+      joinedName = options.name;
       return connection;
     },
   };
@@ -594,9 +602,10 @@ function remoteSnapshot(overrides: Record<string, unknown> = {}) {
 }
 
 function findRemoteAvatars(scene: Phaser.Scene): CharacterContainer[] {
+  // Complemento exacto de `findPlayer`, y por el mismo motivo: sin cuerpo
+  // fisico y sin `npcId` solo quedan los avatares que llegan por Colyseus.
   return scene.children.list.filter(
-    (c): c is CharacterContainer =>
-      c.type === 'Container' && !('npcId' in c) && (c as CharacterContainer).nameText !== 'HugoGT',
+    (c): c is CharacterContainer => c.type === 'Container' && !('npcId' in c) && c.body === null,
   );
 }
 
@@ -636,7 +645,7 @@ describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
     });
     await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
 
-    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'mi-sesion', name: 'HugoGT' }));
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'mi-sesion', name: DEFAULT_NAME }));
 
     // El jugador local ya responde al teclado al instante; su copia remota
     // llegaria con el retardo de la red y se veria como un doble pisandole.
@@ -687,7 +696,7 @@ describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
     // Lo que se prueba es que un servidor caido no deja la pantalla en negro:
     // en desarrollo eso seria la mitad del tiempo.
     await vi.waitFor(() => expect(presence).toContainEqual({ online: false, peers: 0 }));
-    expect(findPlayer(scene).nameText).toBe('HugoGT');
+    expect(findPlayer(scene).nameText).toBe(DEFAULT_NAME);
     expect(findNpcs(scene)).toHaveLength(NPCS.length);
   });
 
@@ -1268,5 +1277,57 @@ describe('OfficeScene: auto-caminata al aceptar una llamada (issue #2, D9/D10)',
 
     expect(player.x).toBe(startX);
     expect(player.y).toBe(startY);
+  });
+});
+
+describe('OfficeScene: nombre real del usuario local (#6)', () => {
+  it('la pildora del jugador local lleva el nombre de la sesion', async () => {
+    const { scene } = await bootOfficeScene(createOfficeBridge(), { playerName: 'Ana Torres' });
+
+    expect(findPlayer(scene).nameText).toBe('Ana Torres');
+  });
+
+  it('sin nombre de sesion el jugador local cae en DEFAULT_NAME, no en el de una persona', async () => {
+    const { scene } = await bootOfficeScene();
+
+    // Desarrollo local, e2e y la oficina sin autenticacion comparten este
+    // camino: la escena llama al usuario como lo llama el servidor.
+    expect(findPlayer(scene).nameText).toBe(DEFAULT_NAME);
+  });
+
+  it('entra a la sala de Colyseus con ese mismo nombre', async () => {
+    const connector = fakeConnector();
+    await bootOfficeScene(createOfficeBridge(), {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+      playerName: 'Ana Torres',
+    });
+
+    await vi.waitFor(() => expect(connector.joinedName()).toBe('Ana Torres'), LOOP_WAIT);
+  });
+
+  it('sin nombre de sesion entra a la sala con el de la pildora, no con undefined', async () => {
+    const connector = fakeConnector();
+    const { scene } = await bootOfficeScene(createOfficeBridge(), {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+
+    await vi.waitFor(() => expect(connector.joinedName()).toBeDefined(), LOOP_WAIT);
+    expect(connector.joinedName()).toBe(findPlayer(scene).nameText);
+  });
+
+  it('el tile de video propio se etiqueta con el mismo nombre que la pildora', async () => {
+    const bridge = createOfficeBridge();
+    const voices: { selfName: string }[] = [];
+    bridge.on('voice', (payload) => voices.push(payload));
+
+    const { scene } = await bootOfficeScene(bridge, { endpoint: null, playerName: 'Ana Torres' });
+
+    // `emitVoice` lee la pildora: si la pildora deja de ser la sesion, el tile
+    // propio se va con ella. Se comprueban juntas para que no se separen.
+    await vi.waitFor(() => expect(voices.length).toBeGreaterThan(0), LOOP_WAIT);
+    expect(voices.at(-1)?.selfName).toBe('Ana Torres');
+    expect(voices.at(-1)?.selfName).toBe(findPlayer(scene).nameText);
   });
 });

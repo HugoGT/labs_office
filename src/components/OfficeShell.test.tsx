@@ -2,6 +2,7 @@ import { act, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGame } from '../game/createGame';
+import { DEFAULT_NAME } from '../game/officeProtocol';
 import { useProximityAudio } from '../hooks/useProximityAudio';
 import { OfficeShell } from './OfficeShell';
 
@@ -471,5 +472,22 @@ describe('OfficeShell: sesion autenticada (#8)', () => {
     expect(useProximityAudioMock.mock.calls[0][1]).toEqual(
       expect.objectContaining({ session }),
     );
+  });
+});
+
+describe('OfficeShell: nombre real del usuario local (#6)', () => {
+  it('escribe en la barra el nombre de la sesion, no uno cableado', () => {
+    render(<OfficeShell session={{ displayName: 'Ana Torres', getIdToken: async () => null }} />);
+
+    expect(screen.getByText(/Ana Torres/)).toBeInTheDocument();
+    expect(screen.queryByText(/HugoGT/)).not.toBeInTheDocument();
+  });
+
+  it('sin sesion la barra cae en el nombre por defecto, no en el de una persona', () => {
+    render(<OfficeShell />);
+
+    // Desarrollo local, e2e y la oficina abierta comparten este camino: sin
+    // identidad verificada el HUD llama al usuario como lo llama el servidor.
+    expect(screen.getByText(new RegExp(DEFAULT_NAME))).toBeInTheDocument();
   });
 });
