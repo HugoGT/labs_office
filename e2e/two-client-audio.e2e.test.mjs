@@ -51,8 +51,9 @@ before(async () => {
   pageA = await contextA.newPage();
   await pageA.goto(harness.previewUrl);
   await waitForAudioAvailable(pageA);
-  // A REAL Playwright click (not `page.evaluate`): the browser's autoplay
-  // policy only lifts for an actual user gesture (#565 spike finding).
+  // Click real de Playwright, no `page.evaluate`: es el gesto de usuario que
+  // la politica de autoplay acepta sin discusion. Ver `enableMic` en
+  // `harness.mjs` para lo que aqui NO se afirma.
   await enableMic(pageA);
 
   contextB = await harness.newContext();

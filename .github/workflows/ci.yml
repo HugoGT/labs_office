@@ -1,10 +1,17 @@
 name: CI
 
 on:
-  # CI en pausa (2026-09-17): las comprobaciones de PR eran lentas y ademas el
-  # E2E esta roto, asi que no se dispara sola mientras dure esta tanda de
-  # cambios. Se lanza a mano desde Actions o con `gh workflow run ci.yml`.
-  # Para reactivarla, descomentar los dos disparadores de abajo.
+  # CI en pausa desde 2026-09-17 por dos motivos: las comprobaciones de PR
+  # eran lentas, y el E2E estaba roto. El segundo motivo YA NO APLICA: el E2E
+  # fallaba porque el harness buscaba un chip que el issue #17 habia retirado,
+  # y eso se arreglo en esta misma tanda (issue #16).
+  #
+  # Los disparadores siguen comentados a proposito, no por olvido: falta
+  # comprobar en un runner real que `livekit-server --dev` con `--network
+  # host` reune candidatos ICE alcanzables, algo que solo demuestra un
+  # `workflow_dispatch` de verdad. Para reactivar: lanzar la CI a mano, y tras
+  # tres corridas verdes seguidas descomentar los dos disparadores de abajo.
+  # Si la duracion empeora de forma apreciable, no reactivar y decidir aparte.
   # push:
   #   branches: [main]
   # pull_request:

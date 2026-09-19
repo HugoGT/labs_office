@@ -492,10 +492,16 @@ export async function getOwnSessionId(page) {
 
 /**
  * D6: a REAL Playwright click on the Mic button, located by text (same idiom
- * as `waitForAudioUnavailable`'s button lookup). A synthetic
- * `page.evaluate()` click is not a user gesture and cannot satisfy the
- * browser autoplay policy that gates `connection.setMicrophoneEnabled` /
- * remote playback (#565 spike finding).
+ * as `waitForAudioUnavailable`'s button lookup). Se usa un click real y no
+ * `page.evaluate()` porque es lo mas parecido a lo que hace una persona: un
+ * gesto de usuario de verdad, que es lo unico que la politica de autoplay del
+ * navegador acepta sin discusion.
+ *
+ * Lo que NO esta probado: que un click sintetico falle por ese motivo. Los
+ * spikes de #565 no lo midieron -- las corridas que contaron elementos
+ * `<audio>` usaron click real tanto en el caso que funcionaba como en el que
+ * fallaba, y la variable que de verdad cambiaba era el orden de llegada. El
+ * click real se elige por ser el camino seguro, no por una causa demostrada.
  */
 export async function enableMic(page) {
   await page.getByRole('button', { name: /Mic/ }).click();
