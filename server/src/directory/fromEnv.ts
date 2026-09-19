@@ -16,9 +16,22 @@ import type { UserDirectory } from './directoryPort.ts';
 import { migrate } from './migrate.ts';
 import { createPgDirectory, type DirectoryPool } from './pgDirectory.ts';
 import { createDirectoryPool } from './pool.ts';
+import { createPgSpaces } from '../spaces/pgSpaces.ts';
+import type { SpacesDirectory } from '../spaces/spacesPort.ts';
 
 export interface DirectoryRuntime {
   directory: UserDirectory;
+  /**
+   * Espacios del PRD 7 (#7, slice 3). Cuelga del MISMO runtime y no de una
+   * fabrica propia porque sale del MISMO `DATABASE_URL` y por tanto debe salir
+   * del MISMO pool: dos pools contra la misma base serian el doble de
+   * conexiones que la instancia cuenta, y `directory.close()` solo cerraria el
+   * suyo -- el otro sobreviviria al apagado.
+   *
+   * No lleva `migrate` propio: las cuatro tablas del PRD 7 ya estan en el
+   * mismo `schema.sql` que aplica `migrate()` de aqui abajo.
+   */
+  spaces: SpacesDirectory;
   /** Aplica el esquema. Idempotente: corre en cada arranque. Ver `migrate.ts`. */
   migrate(): Promise<void>;
 }
@@ -36,6 +49,7 @@ export function directoryFromEnv(
 
   return {
     directory: createPgDirectory(pool, config),
+    spaces: createPgSpaces(pool),
     migrate: () => migrate(pool),
   };
 }

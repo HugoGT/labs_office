@@ -2,6 +2,7 @@ import { act, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGame } from '../game/createGame';
+import { BUILT_IN_SPACES_VERSION } from '../game/mapData';
 import { DEFAULT_NAME } from '../game/officeProtocol';
 import { useProximityAudio } from '../hooks/useProximityAudio';
 import { OfficeShell } from './OfficeShell';
@@ -489,5 +490,45 @@ describe('OfficeShell: nombre real del usuario local (#6)', () => {
     // Desarrollo local, e2e y la oficina abierta comparten este camino: sin
     // identidad verificada el HUD llama al usuario como lo llama el servidor.
     expect(screen.getByText(new RegExp(DEFAULT_NAME))).toBeInTheDocument();
+  });
+});
+
+/**
+ * La config de espacios servida llegando a la escena (#7, slice 3). Lo que se
+ * prueba aqui es el ENVIO: que este componente la resuelve y la manda por
+ * comando. Que la escena la adopte lo cubre `OfficeScene.browser.test.ts`, y
+ * la lectura de `/spaces` la cubre `spacesConfig.test.ts`.
+ */
+describe('OfficeShell: config de espacios servida (#7, slice 3)', () => {
+  it('manda la config resuelta a la escena por comando, no por prop', async () => {
+    // Por prop entraria en las dependencias del efecto de `GameCanvas` y
+    // recrearia Phaser entero al llegar; por comando la escena la adopta en
+    // caliente y sigue corriendo.
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const configs: { spaces: readonly { id: string }[]; version: string }[] = [];
+    bridge.onCommand('spacesconfig', (payload) => configs.push(payload));
+
+    await vi.waitFor(() => expect(configs.length).toBeGreaterThan(0));
+  });
+
+  it('el juego se monta ANTES de que la config llegue: nadie espera a la red', async () => {
+    // Retrasar el montaje hasta tener la config le costaria a todo el mundo,
+    // en todo despliegue, un viaje de red antes de ver la oficina.
+    render(<OfficeShell />);
+
+    expect(createGameMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('sin servidor que responda manda el fallback incorporado', async () => {
+    // Es el camino de un despliegue sin `DATABASE_URL` (y el de jsdom, donde
+    // el fetch no llega a ninguna parte): todos los clientes caen en el mismo
+    // valor, asi que coinciden en version y se siguen oyendo.
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const versions: string[] = [];
+    bridge.onCommand('spacesconfig', ({ version }) => versions.push(version));
+
+    await vi.waitFor(() => expect(versions).toContain(BUILT_IN_SPACES_VERSION));
   });
 });

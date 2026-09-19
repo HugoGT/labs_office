@@ -14,8 +14,10 @@ import { Client } from 'colyseus.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LIVEKIT_ROOM_NAME } from '../../src/game/officeProtocol.ts';
 import { createOfficeServer, warnIfOriginsUnrestricted, type OfficeServer } from './createOfficeServer.ts';
-import type { UserDirectory } from './directory/directoryPort.ts';
+import type { DirectoryUser, UserDirectory } from './directory/directoryPort.ts';
 import { createMemoryDirectory } from './directory/memoryDirectory.ts';
+import { createMemorySpaces } from './spaces/memorySpaces.ts';
+import type { SpacesDirectory } from './spaces/spacesPort.ts';
 import { OFFICE_ROOM_NAME } from './OfficeRoom.ts';
 import type { OfficeState } from './schema.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
@@ -652,5 +654,143 @@ describe('warnIfOriginsUnrestricted', () => {
     warnIfOriginsUnrestricted([], {}, sink);
 
     expect(sink).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * El cableado de las rutas de espacios (#7, slice 3). Lo que se prueba aqui es
+ * la TRADUCCION -- que cada ruta existe, en su verbo, y que el estado "sin
+ * almacen" responde 503 y no 404 -- no las reglas, que ya cubre
+ * `spacesRoutes.test.ts` sin levantar servidor.
+ *
+ * Todo va por POST y ninguna por PUT/PATCH/DELETE a proposito: el middleware de
+ * CORS anuncia `GET,POST,OPTIONS`, asi que un verbo de mas se bloquearia en el
+ * preflight del navegador antes de llegar a Express. Es la misma forma que ya
+ * usa `/admin/invitations/:id/revoke`.
+ */
+describe('rutas de espacios (#7, slice 3)', () => {
+  const ADMIN_SPACES: DirectoryUser = {
+    id: 'id-admin',
+    uid: 'uid-admin',
+    email: 'admin@example.com',
+    displayName: 'Admin',
+    role: 'admin',
+    status: 'active',
+    expiresAt: null,
+    invitedBy: null,
+    createdAt: new Date('2025-12-01T00:00:00.000Z'),
+  };
+
+  const spacesVerifier: IdTokenVerifier = {
+    async verify(token: unknown) {
+      if (token !== 'valido-uid-admin') return null;
+      return { uid: 'uid-admin', email: 'admin@example.com', name: 'Admin' };
+    },
+  };
+
+  const BEARER = { Authorization: 'Bearer valido-uid-admin', 'Content-Type': 'application/json' };
+
+  async function spacesServer(overrides: { spaces?: SpacesDirectory | null } = {}) {
+    const spaces = overrides.spaces === undefined ? createMemorySpaces() : overrides.spaces;
+    const server = createOfficeServer({
+      auth: spacesVerifier,
+      directory: createMemoryDirectory({ seed: [ADMIN_SPACES] }),
+      spaces,
+      identityAdmin: null,
+    });
+    const port = await server.listen(0);
+    return { server, spaces, url: `http://localhost:${port}` };
+  }
+
+  it('GET /spaces sirve la config sin cabecera de autorizacion', async () => {
+    const { server, url } = await spacesServer();
+
+    const res = await fetch(`${url}/spaces`);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ spaces: [], version: expect.any(String) });
+    await server.shutdown();
+  });
+
+  it('GET /spaces sin almacen responde 503 y no 404', async () => {
+    // Un 404 aqui es indistinguible del `index.html` que sirve Caddy cuando
+    // falta su bloque `handle`: dos averias con el mismo sintoma y causas
+    // opuestas. El 503 afirma que la ruta existe y que falta la configuracion.
+    // El cliente cae al fallback ante cualquier respuesta que no sea 200, asi
+    // que un despliegue sin base de datos se comporta como hoy.
+    const { server, url } = await spacesServer({ spaces: null });
+
+    expect((await fetch(`${url}/spaces`)).status).toBe(503);
+    await server.shutdown();
+  });
+
+  it('POST /admin/spaces sin credencial responde 401', async () => {
+    const { server, url } = await spacesServer();
+
+    const res = await fetch(`${url}/admin/spaces`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: null }),
+    });
+
+    expect(res.status).toBe(401);
+    await server.shutdown();
+  });
+
+  it('POST /admin/spaces crea el espacio y GET /spaces ya lo devuelve', async () => {
+    const { server, url } = await spacesServer();
+
+    const created = await fetch(`${url}/admin/spaces`, {
+      method: 'POST',
+      headers: BEARER,
+      body: JSON.stringify({ name: 'Sala de Juntas', x: 1, y: 1, w: 4, h: 4, capacity: null }),
+    });
+
+    expect(created.status).toBe(201);
+    const config = (await (await fetch(`${url}/spaces`)).json()) as { spaces: { name: string }[] };
+    expect(config.spaces.map((space) => space.name)).toEqual(['Sala de Juntas']);
+    await server.shutdown();
+  });
+
+  it('POST /admin/spaces/:id renombra sin cambiar el id', async () => {
+    const { server, spaces, url } = await spacesServer();
+    const created = await spaces!.createSpace({ name: 'Antes', x: 1, y: 1, w: 4, h: 4, capacity: null });
+
+    const res = await fetch(`${url}/admin/spaces/${created.id}`, {
+      method: 'POST',
+      headers: BEARER,
+      body: JSON.stringify({ name: 'Despues' }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ id: created.id, name: 'Despues' });
+    await server.shutdown();
+  });
+
+  it('POST /admin/spaces/:id/delete borra el espacio', async () => {
+    const { server, spaces, url } = await spacesServer();
+    const created = await spaces!.createSpace({ name: 'Una', x: 1, y: 1, w: 4, h: 4, capacity: null });
+
+    const res = await fetch(`${url}/admin/spaces/${created.id}/delete`, {
+      method: 'POST',
+      headers: BEARER,
+    });
+
+    expect(res.status).toBe(200);
+    expect(await spaces!.listSpaces()).toEqual([]);
+    await server.shutdown();
+  });
+
+  it('las rutas de administracion sin almacen responden 503', async () => {
+    const { server, url } = await spacesServer({ spaces: null });
+
+    const res = await fetch(`${url}/admin/spaces`, {
+      method: 'POST',
+      headers: BEARER,
+      body: JSON.stringify({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: null }),
+    });
+
+    expect(res.status).toBe(503);
+    await server.shutdown();
   });
 });

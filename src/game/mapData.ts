@@ -97,13 +97,28 @@ export const ZONE_LABELS: readonly ZoneLabel[] = [
  * los usa para trazar la puerta y el suelo de cada sala; un espacio servido
  * desde config (slice 3) no los trae porque no redibuja paredes.
  */
-export interface Room {
+/**
+ * Lo minimo para decidir PERTENENCIA: identidad y rectangulo, en pixeles. Es
+ * lo que consumen `detectSpace` y `OfficeScene`, y es exactamente lo que sabe
+ * un espacio servido desde `GET /spaces` (slice 3) -- la tabla `spaces` no
+ * tiene columnas de dibujo, asi que un espacio creado por un Admin no puede
+ * traerlas.
+ *
+ * Existe separado de `Room` para que esa carencia sea un hecho del sistema de
+ * tipos y no un campo inventado. Un `doorTiles` de relleno en una config
+ * servida trazaria una puerta donde no hay ninguna.
+ */
+export interface SpaceArea {
   id: string;
   x: number;
   y: number;
   w: number;
   h: number;
   name: string;
+}
+
+/** Un `SpaceArea` que ADEMAS sabe dibujarse: solo los incorporados (D3). */
+export interface Room extends SpaceArea {
   /** Filas de la pared izquierda que son puerta, no muro (`terrainGrid.ts`). */
   doorTiles: readonly [number, number];
   /** Codigo de suelo interior de esta sala (`terrainGrid.ts`). */

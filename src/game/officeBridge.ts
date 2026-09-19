@@ -12,6 +12,7 @@
  */
 
 import { createAnchorChannel, type AnchorChannel } from './anchorChannel';
+import type { SpaceArea } from './mapData';
 import type { PresenceStatus } from './officeProtocol';
 
 export interface OfficeEventMap {
@@ -128,6 +129,22 @@ export interface OfficeCommandMap {
    */
   respondCall: { from: string; accept: boolean };
   walkToPeer: { sessionId: string };
+  /**
+   * Config de espacios servida (#7, slice 3). React la lee de `/spaces` una
+   * sola vez y la escena la sigue, mismo patron que `setStatus` y `speakers`.
+   *
+   * Es un comando y no una opcion de construccion porque llega DESPUES de que
+   * Phaser arranque: por prop entraria en las dependencias del efecto de
+   * `GameCanvas` y recrearia el juego entero, y retrasar el montaje hasta
+   * tenerla le costaria a todo el mundo una espera de red antes de ver la
+   * oficina.
+   *
+   * Las dos mitades viajan juntas y nunca por separado: los rectangulos con
+   * los que este cliente deriva pertenencia, y el hash que declara cuales son.
+   * Publicar una version que no corresponda a estos rectangulos es justo lo
+   * que el predicado mutuo de `proximityAudio.ts` NO puede detectar.
+   */
+  spacesconfig: { spaces: readonly SpaceArea[]; version: string };
 }
 
 export interface OfficeBridge {

@@ -7,6 +7,8 @@ import {
   DESK_ROWS,
   MAP_H,
   MAP_W,
+  PLAYER_SPAWN_TX,
+  PLAYER_SPAWN_TY,
   PROX_RADIUS,
   TILE,
   TREES,
@@ -862,9 +864,10 @@ describe('OfficeScene: comando setStatus via el puente (#1)', () => {
       connect: connector.connect,
     });
 
-    // Sin fetch todavia en esta slice (D3/D4): la escena siempre publica la
-    // constante fallback al conectar, para que un cliente aislado y uno con
-    // exito de fetch en un despliegue sin editar sigan de acuerdo.
+    // Sin `spacesVersion` en las opciones la escena publica la constante
+    // fallback, que es el camino de la oficina en solitario y el de un
+    // despliegue sin `DATABASE_URL`: todos sus clientes caen en el mismo valor
+    // y por tanto siguen de acuerdo.
     await vi.waitFor(
       () => expect(connector.joinedSpacesVersion()).toBe(BUILT_IN_SPACES_VERSION),
       LOOP_WAIT,
@@ -1377,5 +1380,94 @@ describe('OfficeScene: nombre real del usuario local (#6)', () => {
     await vi.waitFor(() => expect(voices.length).toBeGreaterThan(0), LOOP_WAIT);
     expect(voices.at(-1)?.selfName).toBe('Ana Torres');
     expect(voices.at(-1)?.selfName).toBe(findPlayer(scene).nameText);
+  });
+});
+
+/**
+ * La config servida llegando a la escena (#7, slice 3). Quien la LEE es
+ * `spacesConfig.ts` y quien la resuelve es `useSpacesConfig`, ambos probados
+ * sin Phaser. Lo que falta cubrir aqui es que, una vez dentro, gobierne de
+ * verdad la pertenencia y se anuncie a los pares.
+ *
+ * Entra por COMANDO y no por opcion de construccion: llega despues de que
+ * Phaser arranque, porque la escena no puede esperar a un viaje de red para
+ * existir.
+ */
+describe('OfficeScene: config de espacios servida (#7, slice 3)', () => {
+  /** Un espacio que NO existe en `BUILT_IN_SPACES`, en pixeles y sobre el spawn. */
+  const SERVIDO = {
+    id: 'id-espacio-servido',
+    name: 'Espacio Servido',
+    x: (PLAYER_SPAWN_TX - 2) * TILE,
+    y: (PLAYER_SPAWN_TY - 2) * TILE,
+    w: 6 * TILE,
+    h: 6 * TILE,
+  };
+
+  it('tras el comando deriva la pertenencia de los espacios servidos', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const rooms: { spaceId: string | null; name: string | null }[] = [];
+    bridge.on('room', (payload) => rooms.push(payload));
+
+    bridge.emitCommand('spacesconfig', { spaces: [SERVIDO], version: 'version-servida' });
+
+    // El jugador nace dentro de `SERVIDO`, que no es ninguna de las dos salas
+    // incorporadas: sin adoptar la config, el spawn caeria en piso abierto y
+    // este evento no llegaria nunca.
+    await advanceGameClock(scene, 600);
+    await vi.waitFor(() => expect(rooms.at(-1)?.spaceId).toBe(SERVIDO.id), LOOP_WAIT);
+  });
+
+  it('anuncia la version nueva a los pares con sendSpacesVersion', async () => {
+    // Es la mitad que hace util al predicado mutuo: un cliente que cambia de
+    // config tiene que DECIRLO, o el resto seguira creyendo que coinciden.
+    const connector = fakeConnector('mi-sesion');
+    const bridge = createOfficeBridge();
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.joinedSpacesVersion()).toBe(BUILT_IN_SPACES_VERSION), LOOP_WAIT);
+
+    bridge.emitCommand('spacesconfig', { spaces: [SERVIDO], version: 'version-servida' });
+
+    await vi.waitFor(() => expect(connector.sentSpacesVersions).toContain('version-servida'), LOOP_WAIT);
+  });
+
+  it('una config cuya version ya es la vigente no se reenvia', async () => {
+    // El caso normal de un despliegue sin editar: lo servido coincide con lo
+    // incorporado. Un mensaje por sesion que no dice nada nuevo es ruido.
+    const connector = fakeConnector('mi-sesion');
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(
+      () => expect(connector.joinedSpacesVersion()).toBe(BUILT_IN_SPACES_VERSION),
+      LOOP_WAIT,
+    );
+
+    bridge.emitCommand('spacesconfig', {
+      spaces: BUILT_IN_SPACES,
+      version: BUILT_IN_SPACES_VERSION,
+    });
+    await advanceGameClock(scene, 400);
+
+    expect(connector.sentSpacesVersions).toEqual([]);
+  });
+
+  it('una lista servida vacia deja al jugador en piso abierto', async () => {
+    // Un despliegue con la tabla vacia es legitimo. La escena no puede
+    // degradar a los incorporados: derivaria pertenencia de rectangulos que el
+    // servidor no tiene.
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    bridge.emitCommand('spacesconfig', { spaces: [], version: 'version-vacia' });
+    const rooms: { spaceId: string | null }[] = [];
+    bridge.on('room', (payload) => rooms.push(payload));
+
+    // Varios tics de proximidad (250ms cada uno) de reloj de JUEGO.
+    await advanceGameClock(scene, 800);
+
+    expect(rooms.every((room) => room.spaceId === null)).toBe(true);
   });
 });

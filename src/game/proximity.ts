@@ -3,7 +3,7 @@
  * (`prototype/js/app.js:444-471`). Puro: sin Phaser, sin efectos.
  */
 
-import type { Room } from './mapData';
+import type { SpaceArea } from './mapData';
 
 export interface Point {
   x: number;
@@ -40,7 +40,7 @@ export function nearbyKey(names: readonly string[]): string {
  * busqueda, para que nunca puedan desacordar por venir de dos lookups
  * distintos.
  */
-export function detectSpace(player: Point, spaces: readonly Room[]): Room | null {
+export function detectSpace(player: Point, spaces: readonly SpaceArea[]): SpaceArea | null {
   for (const space of spaces) {
     const inside =
       player.x >= space.x &&
