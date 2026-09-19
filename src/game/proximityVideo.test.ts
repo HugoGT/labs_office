@@ -9,14 +9,17 @@ import { videoPeers } from './proximityVideo';
  * video de un par, sin importar el radio.
  */
 describe('videoPeers: solo dentro de una sala compartida, nunca en el piso abierto', () => {
-  it('piso abierto (room null): no pide video de nadie, aunque haya pares audibles', () => {
-    const result = videoPeers({ room: null, audibleSessionIds: ['companero', 'otro'] });
+  it('piso abierto (spaceId null): no pide video de nadie, aunque haya pares audibles', () => {
+    const result = videoPeers({ spaceId: null, audibleSessionIds: ['companero', 'otro'] });
 
     expect(result).toEqual([]);
   });
 
   it('en una sala: pide video exactamente para los mismos ids que son audibles', () => {
-    const result = videoPeers({ room: 'Sala de Juntas', audibleSessionIds: ['ana', 'beto'] });
+    const result = videoPeers({
+      spaceId: 'sala-de-juntas',
+      audibleSessionIds: ['ana', 'beto'],
+    });
 
     expect(result).toEqual(['ana', 'beto']);
   });
@@ -26,16 +29,24 @@ describe('videoPeers: solo dentro de una sala compartida, nunca en el piso abier
       sessionId: 'yo',
       x: 0,
       y: 0,
-      room: 'Sala de Juntas',
+      spaceId: 'sala-de-juntas',
+      spacesVersion: 'v1',
       status: 'g',
     };
     const peers: AudioPeer[] = [
-      { sessionId: 'yo', x: 0, y: 0, room: 'Sala de Juntas', status: 'g' },
-      { sessionId: 'companero', x: 0, y: 0, room: 'Sala de Juntas', status: 'g' },
+      { sessionId: 'yo', x: 0, y: 0, spaceId: 'sala-de-juntas', spacesVersion: 'v1', status: 'g' },
+      {
+        sessionId: 'companero',
+        x: 0,
+        y: 0,
+        spaceId: 'sala-de-juntas',
+        spacesVersion: 'v1',
+        status: 'g',
+      },
     ];
     const audibleIds = audiblePeers({ self, peers, radius: 9999 });
 
-    const result = videoPeers({ room: self.room, audibleSessionIds: audibleIds });
+    const result = videoPeers({ spaceId: self.spaceId, audibleSessionIds: audibleIds });
 
     expect(result).toEqual(['companero']);
   });
@@ -45,15 +56,23 @@ describe('videoPeers: solo dentro de una sala compartida, nunca en el piso abier
       sessionId: 'yo',
       x: 0,
       y: 0,
-      room: 'Sala de Juntas',
+      spaceId: 'sala-de-juntas',
+      spacesVersion: 'v1',
       status: 'r',
     };
     const peers: AudioPeer[] = [
-      { sessionId: 'companero', x: 0, y: 0, room: 'Sala de Juntas', status: 'g' },
+      {
+        sessionId: 'companero',
+        x: 0,
+        y: 0,
+        spaceId: 'sala-de-juntas',
+        spacesVersion: 'v1',
+        status: 'g',
+      },
     ];
     const audibleIds = audiblePeers({ self, peers, radius: 9999 });
 
-    const result = videoPeers({ room: self.room, audibleSessionIds: audibleIds });
+    const result = videoPeers({ spaceId: self.spaceId, audibleSessionIds: audibleIds });
 
     expect(result).toEqual([]);
   });

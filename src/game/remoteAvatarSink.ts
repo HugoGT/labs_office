@@ -31,6 +31,12 @@ import { avatarKeyFor, type RemoteAvatarSink, type RemotePlayerSnapshot } from '
 /** Contenedor de avatar remoto: guarda su interpolacion en curso. */
 export interface RemoteAvatarContainer extends CharacterContainer {
   glideTween?: Phaser.Tweens.Tween;
+  /**
+   * Version de config de espacios con la que ESTE par deriva su sala (#7,
+   * D4). Vive en el contenedor por la misma razon que `status`:
+   * `proximityTick` la lee para el predicado mutuo de `audiblePeers`.
+   */
+  spacesVersion: string;
 }
 
 /**
@@ -69,6 +75,7 @@ export function createPhaserAvatarSink(
       ) as RemoteAvatarContainer;
       container.setPosition(snapshot.x, snapshot.y);
       container.setDepth(snapshot.y);
+      container.spacesVersion = snapshot.spacesVersion;
 
       // Issue #2, unit 8 (kill switch): un peer real se hace clicable igual
       // que un NPC (`characters.ts:spawnNpcs`), misma area de contacto y mismo
@@ -103,6 +110,7 @@ export function createPhaserAvatarSink(
       // consecuencias. Ahora cambia en mitad de la sesion, y no reconciliarlo
       // dejaria a alguien pintado "En linea" mientras esta en "No molestar".
       setCharacterStatus(avatar, statusOf(snapshot.status));
+      avatar.spacesVersion = snapshot.spacesVersion;
       avatar.glideTween?.stop();
       // Se interpola en vez de saltar: el servidor publica ~10 veces por
       // segundo, asi que un `setPosition` directo haria que los demas se

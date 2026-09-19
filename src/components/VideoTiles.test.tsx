@@ -68,7 +68,7 @@ describe('VideoTiles: self-tile ungated (issue #17, D8)', () => {
     const { bridge } = renderTiles();
 
     act(() => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers: [], room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers: [], spaceId: null });
     });
 
     // Sin el evento "portraits" (no emitido en este test), el contenido cae
@@ -83,7 +83,7 @@ describe('VideoTiles: self-tile ungated (issue #17, D8)', () => {
     const { bridge } = renderTiles({ localVideoTrack: fakeVideoTrack() });
 
     act(() => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers: [], room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers: [], spaceId: null });
     });
 
     expect(document.querySelectorAll('video')).toHaveLength(1);
@@ -113,7 +113,7 @@ describe('VideoTiles: el self-tile se ancla igual que un par (decision F)', () =
     const { bridge } = renderTiles();
 
     act(() => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers: [], room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers: [], spaceId: null });
     });
     act(() => {
       raf.tick();
@@ -132,7 +132,7 @@ describe('VideoTiles: el self-tile se ancla igual que un par (decision F)', () =
     const { bridge } = renderTiles();
 
     act(() => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers: [], room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers: [], spaceId: null });
     });
     act(() => {
       raf.tick();
@@ -168,7 +168,7 @@ describe('VideoTiles: gate de video de pares por sala (issue #17, D8)', () => {
         selfSessionId: 'yo',
         selfName: 'HugoGT',
         peers: [{ sessionId: 'par-1', name: 'Ana Real' }],
-        room: null,
+        spaceId: null,
       });
     });
 
@@ -187,7 +187,7 @@ describe('VideoTiles: gate de video de pares por sala (issue #17, D8)', () => {
         selfSessionId: 'yo',
         selfName: 'HugoGT',
         peers: [{ sessionId: 'par-1', name: 'Ana Real' }],
-        room: 'Sala de Juntas',
+        spaceId: 'sala-de-juntas-stub',
       });
     });
 
@@ -212,7 +212,7 @@ describe('VideoTiles: D5 -- ningun remonte al cambiar data-mode', () => {
         selfSessionId: 'yo',
         selfName: 'HugoGT',
         peers: [{ sessionId: 'par-1', name: 'Ana Real' }],
-        room: 'Sala de Juntas',
+        spaceId: 'sala-de-juntas-stub',
       });
     });
 
@@ -269,7 +269,7 @@ describe('VideoTiles: colapso real por densidad, sin remonte (issue #17, D6/D5)'
           { sessionId: 'par-1', name: 'Ana' },
           { sessionId: 'par-2', name: 'Beto' },
         ],
-        room: 'Sala de Juntas',
+        spaceId: 'sala-de-juntas-stub',
       });
     });
 
@@ -343,7 +343,7 @@ describe('VideoTiles: el self-tile colapsa igual que un par, sin excepcion (deci
           { sessionId: 'par-1', name: 'Ana' },
           { sessionId: 'par-2', name: 'Beto' },
         ],
-        room: 'Sala de Juntas',
+        spaceId: 'sala-de-juntas-stub',
       });
     });
 

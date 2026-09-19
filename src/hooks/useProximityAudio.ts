@@ -97,7 +97,7 @@ export function useProximityAudio(
    * en silencio. Esta ref guarda SIEMPRE el ultimo valor visto, se escriba
    * donde se escriba, y es lo que se aplica en cuanto la conexion queda lista.
    */
-  const desiredRef = useRef<{ sessionIds: readonly string[]; room: string | null } | null>(null);
+  const desiredRef = useRef<{ sessionIds: readonly string[]; spaceId: string | null } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -139,13 +139,13 @@ export function useProximityAudio(
       // Se guarda ANTES de la rama de abajo (D1): sirve tanto para la
       // conexion ya viva (rama "misma sesion") como para la que sigue en
       // vuelo -- un solo punto de escritura para las dos rutas.
-      desiredRef.current = { sessionIds: audibleSessionIds, room: payload.room };
+      desiredRef.current = { sessionIds: audibleSessionIds, spaceId: payload.spaceId };
 
       if (sessionRef.current === payload.selfSessionId) {
         // Misma sesion: solo reenvia los conjuntos deseados, no reconecta.
         connectionRef.current?.setDesiredAudioPeers(audibleSessionIds);
         connectionRef.current?.setDesiredVideoPeers(
-          videoPeers({ room: payload.room, audibleSessionIds }),
+          videoPeers({ spaceId: payload.spaceId, audibleSessionIds }),
         );
         return;
       }
@@ -215,7 +215,10 @@ export function useProximityAudio(
           const desired = desiredRef.current;
           connection.setDesiredAudioPeers(desired?.sessionIds ?? []);
           connection.setDesiredVideoPeers(
-            videoPeers({ room: desired?.room ?? null, audibleSessionIds: desired?.sessionIds ?? [] }),
+            videoPeers({
+              spaceId: desired?.spaceId ?? null,
+              audibleSessionIds: desired?.sessionIds ?? [],
+            }),
           );
         } catch {
           // Rechazo de connect(), de la peticion del token o de la propia

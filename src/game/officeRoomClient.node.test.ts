@@ -196,6 +196,61 @@ describe('connectOfficeRoom: estado de presencia (#1)', () => {
 });
 
 /**
+ * Version de config de espacios (#7, D4), a traves del envoltorio de
+ * cliente. Mismo criterio que la suite de presencia de mas arriba: el join
+ * lleva el valor inicial, y `sendSpacesVersion` es un metodo sin agrupar,
+ * igual que `sendStatus`.
+ */
+describe('connectOfficeRoom: version de config de espacios (#7, D4)', () => {
+  it('sendSpacesVersion propaga la version nueva al otro cliente', async () => {
+    const watcher = recorder();
+    await connect('Ana', watcher.handlers);
+    const b = await connect('Beto', recorder().handlers);
+    await waitFor(() => watcher.added.some((s) => s.sessionId === b.sessionId));
+
+    b.sendSpacesVersion('v2edited');
+
+    await waitFor(() =>
+      watcher.changed.some((s) => s.sessionId === b.sessionId && s.spacesVersion === 'v2edited'),
+    );
+  });
+
+  it('dos cambios seguidos terminan en el ultimo, no en el primero (sin agrupar, como sendStatus)', async () => {
+    const watcher = recorder();
+    await connect('Ana', watcher.handlers);
+    const b = await connect('Beto', recorder().handlers);
+    await waitFor(() => watcher.added.some((s) => s.sessionId === b.sessionId));
+
+    b.sendSpacesVersion('v2');
+    b.sendSpacesVersion('v3');
+
+    await waitFor(() =>
+      watcher.changed.some((s) => s.sessionId === b.sessionId && s.spacesVersion === 'v3'),
+    );
+    const ultimo = watcher.changed.filter((s) => s.sessionId === b.sessionId).at(-1);
+    expect(ultimo?.spacesVersion).toBe('v3');
+  });
+
+  it('la version elegida antes de conectar viaja en el join, no se pierde (nunca "brevemente sin version")', async () => {
+    const watcher = recorder();
+    await connect('Ana', watcher.handlers);
+    const conVersion = await connectOfficeRoom({
+      endpoint,
+      name: 'Beto',
+      spacesVersion: 'inicial123',
+      handlers: recorder().handlers,
+    });
+    connections.push(conVersion);
+
+    await waitFor(() =>
+      watcher.added.some(
+        (s) => s.sessionId === conVersion.sessionId && s.spacesVersion === 'inicial123',
+      ),
+    );
+  });
+});
+
+/**
  * Invitaciones de llamada (issue #2), a traves del envoltorio de cliente. El
  * cableado del lado servidor ya tiene su propia suite en `OfficeRoom.test.ts`;
  * aqui se prueba que `sendCall`/`sendCallRespond` viajan de verdad y que los

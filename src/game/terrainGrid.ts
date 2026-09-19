@@ -3,7 +3,7 @@
  * (`prototype/js/app.js:215-253`). Sin dependencias de Phaser.
  */
 
-import { GROUND, MAP_H, MAP_W, ROOMS, TILE, type GroundCode } from './mapData';
+import { BUILT_IN_SPACES, GROUND, MAP_H, MAP_W, TILE, type GroundCode, type Room } from './mapData';
 
 export interface TerrainGrid {
   ground: GroundCode[][];
@@ -35,7 +35,14 @@ function set(grid: TerrainGrid, x: number, y: number, code: GroundCode, isSolid 
   grid.solid[y][x] = isSolid;
 }
 
-export function buildTerrainGrid(): TerrainGrid {
+/**
+ * `spaces` tiene valor por defecto `BUILT_IN_SPACES` (D3): esta funcion sigue
+ * dibujando SOLO el mapa base -- muros, puertas, suelo -- nunca la config
+ * servida (slice 3). El parametro existe para que un futuro llamador con
+ * espacios propios (tests) no tenga que reimportar la constante, pero ninguna
+ * llamada existente sin argumento cambia de comportamiento.
+ */
+export function buildTerrainGrid(spaces: readonly Room[] = BUILT_IN_SPACES): TerrainGrid {
   const ground: GroundCode[][] = [];
   const solid: boolean[][] = [];
   for (let y = 0; y < MAP_H; y++) {
@@ -68,13 +75,13 @@ export function buildTerrainGrid(): TerrainGrid {
   }
 
   // Salas a la derecha (paredes con puerta al pasillo).
-  ROOMS.forEach((room, ri) => {
+  spaces.forEach((room) => {
     const x0 = room.x / TILE;
     const y0 = room.y / TILE;
     const x1 = x0 + room.w / TILE - 1;
     const y1 = y0 + room.h / TILE - 1;
-    const doorY = ri === 0 ? [8, 9] : [24, 25];
-    const floorCode = ri === 0 ? GROUND.FLOOR : GROUND.WOODF;
+    const doorY = room.doorTiles;
+    const floorCode = room.floorStyle;
 
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {

@@ -32,6 +32,8 @@ interface RemotePlayer {
   y: number;
   status: string;
   facing: string;
+  /** Version de config de espacios con la que este par deriva su sala (#7, D4). */
+  spacesVersion: string;
 }
 
 interface OfficeRoomState {
@@ -80,6 +82,12 @@ export interface ConnectOfficeRoomOptions {
   /** Estado con el que se entra, para no aparecer "En linea" sin haberlo pedido. */
   status?: PresenceStatus;
   /**
+   * Version inicial de config de espacios (#7, D4), para que este par no
+   * quede "brevemente sin version" mientras espera al primer
+   * `sendSpacesVersion`. Ausente cae al valor por defecto del servidor.
+   */
+  spacesVersion?: string;
+  /**
    * ID token de la sesion (#8), pedido justo antes de entrar para que viaje
    * fresco. Ausente cuando no hay autenticacion configurada, que es el modo en
    * el que el servidor sigue abriendo la puerta a cualquiera.
@@ -91,6 +99,7 @@ export interface ConnectOfficeRoomOptions {
 export interface OfficeJoinOptions {
   name: string;
   status: PresenceStatus;
+  spacesVersion?: string;
   token?: string;
 }
 
@@ -108,20 +117,31 @@ export interface OfficeJoinOptions {
 export function buildJoinOptions({
   name,
   status,
+  spacesVersion,
   token,
 }: {
   name: string;
   status: PresenceStatus;
+  spacesVersion?: string;
   token?: string | null;
 }): OfficeJoinOptions {
-  if (!token) return { name, status };
-  return { name, status, token };
+  const options: OfficeJoinOptions = { name, status };
+  if (spacesVersion !== undefined) options.spacesVersion = spacesVersion;
+  if (token) options.token = token;
+  return options;
 }
 
 export interface OfficeConnection {
   sessionId: string;
   sendMove(x: number, y: number, facing: Facing): void;
   sendStatus(status: PresenceStatus): void;
+  /**
+   * Publica una nueva version de config de espacios (#7, D4). Sin agrupar,
+   * como `sendStatus`: agrupar podria tragarse justo la actualizacion que
+   * aisla a alguien -- el predicado mutuo de `audiblePeers` depende de que
+   * cada cambio de version llegue, no solo el ultimo de una rafaga.
+   */
+  sendSpacesVersion(version: string): void;
   /** Pide invitar a `to` a una llamada. Sin agrupar, como `sendStatus`: es un gesto humano, no un flujo continuo. */
   sendCall(to: string): void;
   /** Responde a quien nos llamo: aceptar o pasar viajan por el mismo mensaje (D3, cableado del servidor). */
@@ -137,6 +157,7 @@ function toSnapshot(sessionId: string, player: RemotePlayer): RemotePlayerSnapsh
     y: player.y,
     status: player.status,
     facing: player.facing,
+    spacesVersion: player.spacesVersion,
   };
 }
 
@@ -146,6 +167,7 @@ export async function connectOfficeRoom({
   handlers,
   moveIntervalMs = MOVE_INTERVAL_MS,
   status = DEFAULT_STATUS,
+  spacesVersion,
   getIdToken,
 }: ConnectOfficeRoomOptions): Promise<OfficeConnection> {
   const client = new Client(endpoint);
@@ -156,7 +178,7 @@ export async function connectOfficeRoom({
   const token = getIdToken ? await getIdToken() : null;
   const room: Room<OfficeRoomState> = await client.joinOrCreate(
     OFFICE_ROOM_NAME,
-    buildJoinOptions({ name, status, token }),
+    buildJoinOptions({ name, status, spacesVersion, token }),
   );
 
   const $ = getStateCallbacks(room) as unknown as {
@@ -202,6 +224,9 @@ export async function connectOfficeRoom({
     // humano y raro, y agrupar podria tragarse justo el que aisla a alguien.
     sendStatus(next) {
       room.send('status', { status: next });
+    },
+    sendSpacesVersion(version) {
+      room.send('spacesversion', { version });
     },
     sendCall(to) {
       room.send('call', { to });

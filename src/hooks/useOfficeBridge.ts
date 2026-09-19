@@ -22,7 +22,10 @@ export function useOfficeBridge(bridge: OfficeBridge): UseOfficeBridgeResult {
   const [presence, setPresence] = useState<OfficeEventMap['presence']>(INITIAL_PRESENCE);
 
   useEffect(() => {
-    const unsubscribeRoom = bridge.on('room', (payload) => setRoom(payload.room));
+    // El campo publico sigue siendo el nombre (D2): la escena identifica al
+    // par por `spaceId`, pero el HUD sigue rotulando por nombre, y este hook
+    // no cambia su contrato publico solo porque la clave interna se movio.
+    const unsubscribeRoom = bridge.on('room', (payload) => setRoom(payload.name));
     const unsubscribeNpcMenu = bridge.on('npcmenu', (payload) => setMenu(payload));
     const unsubscribeCloseMenu = bridge.on('closemenu', () => setMenu(null));
     const unsubscribePresence = bridge.on('presence', (payload) => setPresence(payload));

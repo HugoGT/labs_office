@@ -67,21 +67,21 @@ describe('installOfficeTestHook', () => {
       selfSessionId: 'self-1',
       selfName: 'Yo',
       peers: [{ sessionId: 'peer-1', name: 'Peer Uno' }],
-      room: null,
+      spaceId: null,
     });
     expect(hook.lastVoice()).toEqual({
       selfSessionId: 'self-1',
       selfName: 'Yo',
       peers: [{ sessionId: 'peer-1', name: 'Peer Uno' }],
-      room: null,
+      spaceId: null,
     });
 
-    bridge.emit('voice', { selfSessionId: 'self-1', selfName: 'Yo', peers: [], room: 'Cafetería' });
+    bridge.emit('voice', { selfSessionId: 'self-1', selfName: 'Yo', peers: [], spaceId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' });
     expect(hook.lastVoice()).toEqual({
       selfSessionId: 'self-1',
       selfName: 'Yo',
       peers: [],
-      room: 'Cafetería',
+      spaceId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
     });
   });
 
@@ -91,7 +91,7 @@ describe('installOfficeTestHook', () => {
 
     const uninstall = installOfficeTestHook(bridge, target);
     const hook = target[OFFICE_TEST_HOOK_KEY] as { lastVoice(): unknown };
-    bridge.emit('voice', { selfSessionId: 'self-1', selfName: 'Yo', peers: [], room: null });
+    bridge.emit('voice', { selfSessionId: 'self-1', selfName: 'Yo', peers: [], spaceId: null });
     expect(hook.lastVoice()).not.toBeNull();
 
     uninstall();
@@ -99,14 +99,14 @@ describe('installOfficeTestHook', () => {
       selfSessionId: 'self-1',
       selfName: 'Yo',
       peers: [{ sessionId: 'peer-2', name: 'Peer Dos' }],
-      room: 'Cafetería',
+      spaceId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
     });
 
     expect(hook.lastVoice()).toEqual({
       selfSessionId: 'self-1',
       selfName: 'Yo',
       peers: [],
-      room: null,
+      spaceId: null,
     });
   });
 

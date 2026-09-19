@@ -84,7 +84,7 @@ describe('useProximityAudio', () => {
     renderHook(() => useProximityAudio(bridge, { config: null, status: 'g', connect, fetchToken }));
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
     });
 
     expect(fetchToken).not.toHaveBeenCalled();
@@ -102,7 +102,7 @@ describe('useProximityAudio', () => {
     );
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
     });
 
     expect(fetchToken).toHaveBeenCalledTimes(1);
@@ -115,7 +115,7 @@ describe('useProximityAudio', () => {
     expect(result.current.audioAvailable).toBe(true);
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: null });
     });
 
     // Mismo selfSessionId: NO reconecta, solo reenvia el conjunto deseado.
@@ -134,14 +134,14 @@ describe('useProximityAudio', () => {
     );
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
     });
 
     // Piso abierto (room null): audio ya deseado vacio, y video TAMBIEN vacio.
     expect(connection.setDesiredVideoPeers).toHaveBeenLastCalledWith([]);
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: null });
     });
 
     // Piso abierto con un par audible: audio lo pide, video NUNCA (D8/#17).
@@ -149,7 +149,7 @@ describe('useProximityAudio', () => {
     expect(connection.setDesiredVideoPeers).toHaveBeenLastCalledWith([]);
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), room: 'Sala de Juntas' });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: 'Sala de Juntas' });
     });
 
     // Compartiendo sala: video pide exactamente los mismos ids que el audio.
@@ -174,7 +174,7 @@ describe('useProximityAudio', () => {
       );
 
       await act(async () => {
-        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
       });
 
       return { ...rendered, bridge, connection, callbacks: captured! };
@@ -242,7 +242,7 @@ describe('useProximityAudio', () => {
       await act(async () => callbacks.onActiveSpeakersChanged?.(['ana']));
 
       await act(async () => {
-        bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), room: null });
+        bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), spaceId: null });
       });
 
       expect(result.current.videoTracks.size).toBe(0);
@@ -264,7 +264,7 @@ describe('useProximityAudio', () => {
 
     await expect(
       act(async () => {
-        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
       }),
     ).resolves.not.toThrow();
 
@@ -272,7 +272,7 @@ describe('useProximityAudio', () => {
 
     // Un segundo evento con el MISMO selfSessionId no reintenta la conexion.
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: null });
     });
     expect(connect).toHaveBeenCalledTimes(1);
   });
@@ -288,12 +288,12 @@ describe('useProximityAudio', () => {
     );
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
     });
     expect(result.current.audioAvailable).toBe(true);
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), room: null });
+      bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), spaceId: null });
     });
 
     expect(connection.disconnect).toHaveBeenCalledTimes(1);
@@ -311,7 +311,7 @@ describe('useProximityAudio', () => {
     );
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
     });
 
     unmount();
@@ -330,7 +330,7 @@ describe('useProximityAudio', () => {
     );
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
     });
 
     await act(async () => {
@@ -352,7 +352,7 @@ describe('useProximityAudio', () => {
     );
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
     });
 
     await act(async () => {
@@ -379,7 +379,7 @@ describe('useProximityAudio', () => {
       );
 
       await act(async () => {
-        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
       });
 
       return { ...rendered, bridge, connection, notify: notify! };
@@ -426,7 +426,7 @@ describe('useProximityAudio', () => {
       await act(async () => notify(false));
 
       await act(async () => {
-        bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), room: null });
+        bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), spaceId: null });
       });
 
       expect(result.current.audioBlocked).toBe(false);
@@ -436,7 +436,7 @@ describe('useProximityAudio', () => {
       const { result, bridge, notify } = await connectAndCapture();
 
       await act(async () => {
-        bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), room: null });
+        bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), spaceId: null });
       });
       await act(async () => notify(false));
 
@@ -473,7 +473,7 @@ describe('useProximityAudio', () => {
       );
 
       await act(async () => {
-        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
       });
 
       return { ...rendered, bridge, connection, connect };
@@ -572,13 +572,13 @@ describe('useProximityAudio: el conjunto deseado en vuelo no se pierde (obs #570
 
     // voice#1: el recien llegado, sin pares todavia (Colyseus no sincronizo).
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
     });
     expect(connect).toHaveBeenCalledTimes(1);
 
     // voice#2: llega el par mientras `connect()` sigue sin resolver.
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: null });
     });
     // Mismo selfSessionId: no reconecta.
     expect(connect).toHaveBeenCalledTimes(1);
@@ -603,7 +603,7 @@ describe('useProximityAudio: el conjunto deseado en vuelo no se pierde (obs #570
     renderHook(() => useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }));
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
     });
 
     // Comparte sala con el par: video pide los mismos ids que el audio.
@@ -612,7 +612,7 @@ describe('useProximityAudio: el conjunto deseado en vuelo no se pierde (obs #570
         selfSessionId: 'yo',
         selfName: 'Yo',
         peers: peersOf(['ana']),
-        room: 'Sala de Juntas',
+        spaceId: 'Sala de Juntas',
       });
     });
 
@@ -641,18 +641,23 @@ describe('useProximityAudio: el conjunto deseado en vuelo no se pierde (obs #570
 
     // Sesion 'yo' conecta y queda con ['ana'] deseado.
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: null });
     });
     expect(connection1.setDesiredAudioPeers).toHaveBeenLastCalledWith(['ana']);
 
     // Se desconecta: el disconnect() REAL queda en vuelo a proposito.
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), room: null });
+      bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), spaceId: null });
     });
 
     // Antes de que el disconnect viejo termine, arranca una sesion nueva.
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'bea', selfName: 'Bea', peers: peersOf(['carla']), room: null });
+      bridge.emit('voice', {
+        selfSessionId: 'bea',
+        selfName: 'Bea',
+        peers: peersOf(['carla']),
+        spaceId: null,
+      });
     });
     expect(connect).toHaveBeenCalledTimes(2);
 
@@ -692,7 +697,7 @@ describe('useProximityAudio: sesion autenticada (#8)', () => {
     );
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
     });
 
     // El servidor cruza el token con la sesion de Colyseus (`forbidden-session`):
@@ -721,7 +726,7 @@ describe('useProximityAudio: sesion autenticada (#8)', () => {
     );
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
     });
 
     expect(fetchToken).toHaveBeenCalledWith({
@@ -753,7 +758,7 @@ describe('useProximityAudio: sesion autenticada (#8)', () => {
 
     await expect(
       act(async () => {
-        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
       }),
     ).resolves.not.toThrow();
 
@@ -783,7 +788,7 @@ describe('useProximityAudio: el desmontaje no puede realimentar al propio efecto
     const speakers = result.current.speakers;
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), room: null });
+      bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), spaceId: null });
     });
 
     expect(result.current.videoTracks).toBe(videoTracks);
@@ -809,7 +814,7 @@ describe('useProximityAudio: el desmontaje no puede realimentar al propio efecto
     );
 
     await act(async () => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
     });
 
     expect(fetchToken.mock.calls.length).toBeLessThanOrEqual(2);

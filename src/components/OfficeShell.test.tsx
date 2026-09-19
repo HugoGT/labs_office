@@ -68,7 +68,7 @@ describe('OfficeShell', () => {
     render(<OfficeShell />);
     const bridge = createGameMock.mock.calls[0][1];
 
-    act(() => bridge.emit('room', { room: 'Sala de Juntas' }));
+    act(() => bridge.emit('room', { spaceId: 'space-stub', name: 'Sala de Juntas' }));
 
     // BottomBar's status text and the entry toast both render the room name
     // in bold; assert every occurrence is a real <b> element, not a string.
@@ -82,7 +82,7 @@ describe('OfficeShell', () => {
     render(<OfficeShell />);
     const bridge = createGameMock.mock.calls[0][1];
 
-    act(() => bridge.emit('room', { room: '<img src=x onerror=alert(1)>' }));
+    act(() => bridge.emit('room', { spaceId: 'space-stub', name: '<img src=x onerror=alert(1)>' }));
 
     const occurrences = screen.getAllByText('<img src=x onerror=alert(1)>');
     expect(occurrences.length).toBeGreaterThan(0);
@@ -96,7 +96,7 @@ describe('OfficeShell', () => {
       render(<OfficeShell />);
       const bridge = createGameMock.mock.calls[0][1];
 
-      act(() => bridge.emit('room', { room: 'Sala de Juntas' }));
+      act(() => bridge.emit('room', { spaceId: 'space-stub', name: 'Sala de Juntas' }));
       expect(screen.getByText(/Entraste a/)).toBeInTheDocument();
 
       act(() => vi.advanceTimersByTime(3200));
@@ -112,11 +112,11 @@ describe('OfficeShell', () => {
     render(<OfficeShell />);
     const bridge = createGameMock.mock.calls[0][1];
 
-    act(() => bridge.emit('room', { room: 'Sala de Juntas' }));
+    act(() => bridge.emit('room', { spaceId: 'space-stub', name: 'Sala de Juntas' }));
     await user.click(screen.getByRole('button', { name: /Grabar/ }));
     expect(screen.getByText(/REC/)).toBeInTheDocument();
 
-    act(() => bridge.emit('room', { room: null }));
+    act(() => bridge.emit('room', { spaceId: null, name: null }));
 
     expect(screen.queryByText(/REC/)).not.toBeInTheDocument();
     expect(screen.getByText('💾 Saliste de la sala: grabación detenida')).toBeInTheDocument();
@@ -126,8 +126,8 @@ describe('OfficeShell', () => {
     render(<OfficeShell />);
     const bridge = createGameMock.mock.calls[0][1];
 
-    act(() => bridge.emit('room', { room: 'Sala de Juntas' }));
-    act(() => bridge.emit('room', { room: null }));
+    act(() => bridge.emit('room', { spaceId: 'space-stub', name: 'Sala de Juntas' }));
+    act(() => bridge.emit('room', { spaceId: null, name: null }));
 
     expect(screen.queryByText('💾 Saliste de la sala: grabación detenida')).not.toBeInTheDocument();
   });

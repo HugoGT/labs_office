@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { PROX_RADIUS, ROOMS } from './mapData';
-import { detectRoom, isSpeaking, nearbyIndices, nearbyKey } from './proximity';
+import { BUILT_IN_SPACES, PROX_RADIUS } from './mapData';
+import { detectSpace, isSpeaking, nearbyIndices, nearbyKey } from './proximity';
 
 describe('nearbyIndices', () => {
   it('reporta solo los NPCs estrictamente dentro del radio (app.js:450-451)', () => {
@@ -45,22 +45,25 @@ describe('nearbyKey', () => {
   });
 });
 
-describe('detectRoom', () => {
-  it('reporta el nombre de la sala cuando el jugador esta dentro de sus limites', () => {
-    const room = ROOMS[0];
-    const insidePlayer = { x: room.x + 1, y: room.y + 1 };
+describe('detectSpace', () => {
+  it('reporta el espacio entero (id y nombre) cuando el jugador esta dentro de sus limites', () => {
+    const space = BUILT_IN_SPACES[0];
+    const insidePlayer = { x: space.x + 1, y: space.y + 1 };
 
-    expect(detectRoom(insidePlayer, ROOMS)).toBe(room.name);
+    const result = detectSpace(insidePlayer, BUILT_IN_SPACES);
+
+    expect(result?.id).toBe(space.id);
+    expect(result?.name).toBe(space.name);
   });
 
-  it('reporta null fuera de toda sala', () => {
-    expect(detectRoom({ x: 0, y: 0 }, ROOMS)).toBeNull();
+  it('reporta null fuera de todo espacio', () => {
+    expect(detectSpace({ x: 0, y: 0 }, BUILT_IN_SPACES)).toBeNull();
   });
 
   it('el limite superior es exclusivo (app.js:465)', () => {
-    const room = ROOMS[0];
-    const onFarEdge = { x: room.x + room.w, y: room.y };
+    const space = BUILT_IN_SPACES[0];
+    const onFarEdge = { x: space.x + space.w, y: space.y };
 
-    expect(detectRoom(onFarEdge, ROOMS)).toBeNull();
+    expect(detectSpace(onFarEdge, BUILT_IN_SPACES)).toBeNull();
   });
 });
