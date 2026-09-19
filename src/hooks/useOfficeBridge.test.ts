@@ -20,7 +20,7 @@ describe('useOfficeBridge', () => {
     act(() => {
       bridge.emit('room', { room: 'Cafetería' });
       bridge.emit('npcmenu', {
-        id: 3,
+        target: { kind: 'npc', npcId: 3 },
         name: 'Pablo',
         status: 'Disponible',
         statusCode: 'g',
@@ -31,7 +31,7 @@ describe('useOfficeBridge', () => {
 
     expect(result.current.room).toBe('Cafetería');
     expect(result.current.menu).toEqual({
-      id: 3,
+      target: { kind: 'npc', npcId: 3 },
       name: 'Pablo',
       status: 'Disponible',
       statusCode: 'g',
@@ -46,7 +46,7 @@ describe('useOfficeBridge', () => {
 
     act(() => {
       bridge.emit('npcmenu', {
-        id: 1,
+        target: { kind: 'npc', npcId: 1 },
         name: 'Ana',
         status: 'Disponible',
         statusCode: 'g',

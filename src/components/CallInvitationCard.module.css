@@ -1,0 +1,55 @@
+.card {
+  background: #111827f2;
+  border: 1px solid #374151;
+  border-radius: 12px;
+  padding: 10px 14px;
+  color: #e5e7eb;
+  font-size: 13px;
+  min-width: 220px;
+  box-shadow: 0 6px 24px #000a;
+}
+
+/* D11: pulso visual durante los primeros CALL_ALERT_MS -- el canal
+   garantizado del aviso, el sonido es solo aditivo. */
+.card[data-alerting='true'] {
+  animation: pulse 1s ease-in-out infinite;
+  border-color: #22c55e;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    box-shadow: 0 6px 24px #000a;
+  }
+  50% {
+    box-shadow: 0 6px 24px #22c55e88;
+  }
+}
+
+.body {
+  margin-bottom: 8px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.accept,
+.dismiss {
+  border: none;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.accept {
+  background: #22c55e;
+  color: #052e14;
+}
+
+.dismiss {
+  background: #374151;
+  color: #e5e7eb;
+}

@@ -551,6 +551,10 @@ describe('OfficeScene: comando callNpc via el puente (el NPC acude a la llamada)
 function fakeConnector(sessionId = 'yo') {
   const sent: { x: number; y: number; facing: string }[] = [];
   const statuses: PresenceStatus[] = [];
+  // Issue #2, unit 12: ahora si se registran -- antes eran no-ops porque
+  // ninguna unit emitia comandos de llamada todavia.
+  const calls: string[] = [];
+  const respondedCalls: { from: string; accept: boolean }[] = [];
   let captured: OfficeRoomHandlers | undefined;
   let joinedWith: PresenceStatus | undefined;
   let joinedName: string | undefined;
@@ -560,6 +564,8 @@ function fakeConnector(sessionId = 'yo') {
     sessionId,
     sendMove: (x, y, facing) => sent.push({ x, y, facing }),
     sendStatus: (status) => statuses.push(status),
+    sendCall: (to) => calls.push(to),
+    sendCallRespond: (from, accept) => respondedCalls.push({ from, accept }),
     leave: async () => {
       left = true;
     },
@@ -568,6 +574,8 @@ function fakeConnector(sessionId = 'yo') {
   return {
     sent,
     statuses,
+    calls,
+    respondedCalls,
     handlers: () => captured,
     joinedWith: () => joinedWith,
     joinedName: () => joinedName,
@@ -828,6 +836,8 @@ describe('OfficeScene: comando setStatus via el puente (#1)', () => {
       sessionId: 'mi-sesion',
       sendMove: () => {},
       sendStatus: (status) => statuses.push(status),
+      sendCall: () => {},
+      sendCallRespond: () => {},
       leave: async () => {},
     };
 
@@ -1025,6 +1035,248 @@ describe('OfficeScene: retratos fieles exportados una vez desde create() (issue 
       expect(dataUrl.startsWith('data:image/png;base64,')).toBe(true);
       expect(atob(dataUrl.split(',')[1]).length).toBeGreaterThan(0);
     }
+  });
+});
+
+/**
+ * Issue #2, unit 12 (kill switch final de la cadena, D3/D9/D10). Como el
+ * resto de este archivo, **no puede ejecutarse en este entorno**
+ * (`chrome-headless-shell` sin `libglib-2.0.so.0`, mismo fallo que arrastra
+ * toda la cadena desde PR3). Escrito y verificado a mano contra la
+ * implementacion, no contra una corrida verde -- mismo precedente que la
+ * unit 8 en PR3.
+ */
+describe('OfficeScene: comandos de llamada via el puente (issue #2, D3)', () => {
+  it('el comando callPeer reenvia el sessionId al transporte (connection.sendCall)', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+
+    bridge.emitCommand('callPeer', { sessionId: 'peer-1' });
+
+    expect(connector.calls).toEqual(['peer-1']);
+  });
+
+  it('el comando respondCall reenvia {from,accept} al transporte (connection.sendCallRespond)', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+
+    bridge.emitCommand('respondCall', { from: 'caller-1', accept: false });
+
+    expect(connector.respondedCalls).toEqual([{ from: 'caller-1', accept: false }]);
+  });
+
+  it('sin conexion activa, los comandos de llamada no lanzan (oficina en solitario)', async () => {
+    const bridge = createOfficeBridge();
+    await bootOfficeScene(bridge, { endpoint: null });
+
+    expect(() => bridge.emitCommand('callPeer', { sessionId: 'peer-1' })).not.toThrow();
+    expect(() => bridge.emitCommand('respondCall', { from: 'x', accept: true })).not.toThrow();
+    expect(() => bridge.emitCommand('walkToPeer', { sessionId: 'peer-1' })).not.toThrow();
+  });
+
+  it('desuscribe los tres handlers de llamada al apagar la escena (SHUTDOWN, D2)', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+
+    scene.sys.events.emit(Phaser.Scenes.Events.SHUTDOWN);
+    bridge.emitCommand('callPeer', { sessionId: 'peer-1' });
+    bridge.emitCommand('respondCall', { from: 'caller-1', accept: true });
+    bridge.emitCommand('walkToPeer', { sessionId: 'peer-1' });
+
+    expect(connector.calls).toEqual([]);
+    expect(connector.respondedCalls).toEqual([]);
+  });
+});
+
+describe('OfficeScene: mensajes de llamada del servidor se relanzan al puente (issue #2, D4)', () => {
+  it('onCallInvite del transporte se relanza como "callinvite"', async () => {
+    const bridge = createOfficeBridge();
+    const events: { from: string; name: string }[] = [];
+    bridge.on('callinvite', (payload) => events.push(payload));
+    const connector = fakeConnector('mi-sesion');
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+
+    connector.handlers()!.onCallInvite?.({ from: 'caller-1', name: 'Diego Soto' });
+
+    expect(events).toEqual([{ from: 'caller-1', name: 'Diego Soto' }]);
+  });
+
+  it('onCallerLeft del transporte se relanza como "callerleft"', async () => {
+    const bridge = createOfficeBridge();
+    const events: { from: string }[] = [];
+    bridge.on('callerleft', (payload) => events.push(payload));
+    const connector = fakeConnector('mi-sesion');
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+
+    connector.handlers()!.onCallerLeft?.({ from: 'caller-1' });
+
+    expect(events).toEqual([{ from: 'caller-1' }]);
+  });
+
+  it('onCallAccepted del transporte se relanza como "callaccepted"', async () => {
+    const bridge = createOfficeBridge();
+    const events: { by: string; name: string }[] = [];
+    bridge.on('callaccepted', (payload) => events.push(payload));
+    const connector = fakeConnector('mi-sesion');
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+
+    connector.handlers()!.onCallAccepted?.({ by: 'peer-1', name: 'Marta Ríos' });
+
+    expect(events).toEqual([{ by: 'peer-1', name: 'Marta Ríos' }]);
+  });
+});
+
+describe('OfficeScene: auto-caminata al aceptar una llamada (issue #2, D9/D10)', () => {
+  it(
+    'walkToPeer mueve al jugador junto al peer y LO DEJA QUIETO ahi -- regresion ' +
+      'directa de la trampa de renormalizar la velocidad del reductor (ver discovery ' +
+      '"update() renormaliza la velocidad del reductor"): normalize().scale() la ' +
+      'reescala a una magnitud constante y el jugador oscilaria alrededor del ' +
+      'destino sin llegar nunca. Si alguien reintroduce esa renormalizacion en el ' +
+      'camino de autoWalk, la velocidad jamas se asienta en (0,0) y esta prueba no ' +
+      'converge (timeout en el primer `vi.waitFor`, o la posicion sigue derivando en ' +
+      'el segundo chequeo).',
+    async () => {
+      const bridge = createOfficeBridge();
+      const connector = fakeConnector('mi-sesion');
+      const { scene } = await bootOfficeScene(bridge, {
+        endpoint: 'ws://fake',
+        connect: connector.connect,
+      });
+      await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+      const player = findPlayer(scene);
+      // Zona abierta del cesped, lejos del jugador y de cualquier colisionador.
+      const peerX = 30 * TILE;
+      const peerY = 30 * TILE;
+      connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'peer-1', x: peerX, y: peerY }));
+
+      bridge.emitCommand('walkToPeer', { sessionId: 'peer-1' });
+
+      await vi.waitFor(() => {
+        const d = Phaser.Math.Distance.Between(player.x, player.y, peerX, peerY);
+        expect(d).toBeLessThanOrEqual(TILE * 1.5);
+      }, LOOP_WAIT);
+
+      const body = player.body as Phaser.Physics.Arcade.Body;
+      await vi.waitFor(() => {
+        expect(body.velocity.x).toBe(0);
+        expect(body.velocity.y).toBe(0);
+      }, LOOP_WAIT);
+
+      // Asentado de verdad, no solo un cruce momentaneo de la ventana de
+      // ARRIVE_EPSILON_PX: la posicion no debe seguir derivando cuadros despues.
+      const settledX = player.x;
+      const settledY = player.y;
+      await advanceGameClock(scene, 300);
+      expect(player.x).toBe(settledX);
+      expect(player.y).toBe(settledY);
+    },
+    20000,
+  );
+
+  it('un toque de WASD durante la auto-caminata cancela y devuelve el control al instante', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const player = findPlayer(scene);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'peer-1', x: 30 * TILE, y: 30 * TILE }));
+    bridge.emitCommand('walkToPeer', { sessionId: 'peer-1' });
+    // Deja que la auto-caminata arranque de verdad antes de interrumpirla.
+    await vi.waitFor(() => {
+      const body = player.body as Phaser.Physics.Arcade.Body;
+      expect(body.velocity.x !== 0 || body.velocity.y !== 0).toBe(true);
+    }, LOOP_WAIT);
+
+    dispatchKey('keydown', KEY.RIGHT);
+    try {
+      // D10: el mismo cuadro que lee la tecla ya se mueve bajo velocidad de
+      // teclado -- esa lectura ES la cancelacion, sin listener aparte.
+      await vi.waitFor(() => {
+        const body = player.body as Phaser.Physics.Arcade.Body;
+        expect(body.velocity.x).toBeGreaterThan(0);
+        expect(body.velocity.y).toBe(0);
+      }, LOOP_WAIT);
+    } finally {
+      dispatchKey('keyup', KEY.RIGHT);
+    }
+  });
+
+  it('aceptar una llamada (respondCall accept:true) dispara la misma auto-caminata que walkToPeer', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const player = findPlayer(scene);
+    const peerX = 30 * TILE;
+    const peerY = 30 * TILE;
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'caller-1', x: peerX, y: peerY }));
+    const startDistance = Phaser.Math.Distance.Between(player.x, player.y, peerX, peerY);
+
+    bridge.emitCommand('respondCall', { from: 'caller-1', accept: true });
+
+    await vi.waitFor(() => {
+      const d = Phaser.Math.Distance.Between(player.x, player.y, peerX, peerY);
+      expect(d).toBeLessThan(startDistance);
+    }, LOOP_WAIT);
+    expect(connector.respondedCalls).toEqual([{ from: 'caller-1', accept: true }]);
+  });
+
+  it('pasar una llamada (respondCall accept:false) NO mueve al jugador', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const player = findPlayer(scene);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'caller-1', x: 30 * TILE, y: 30 * TILE }));
+    const startX = player.x;
+    const startY = player.y;
+
+    bridge.emitCommand('respondCall', { from: 'caller-1', accept: false });
+    await advanceGameClock(scene, 300);
+
+    expect(player.x).toBe(startX);
+    expect(player.y).toBe(startY);
+  });
+
+  it('walkToPeer sobre un sessionId desconocido no hace nada (peer ya desconectado)', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const player = findPlayer(scene);
+    const startX = player.x;
+    const startY = player.y;
+
+    expect(() => bridge.emitCommand('walkToPeer', { sessionId: 'fantasma' })).not.toThrow();
+    await advanceGameClock(scene, 300);
+
+    expect(player.x).toBe(startX);
+    expect(player.y).toBe(startY);
   });
 });
 

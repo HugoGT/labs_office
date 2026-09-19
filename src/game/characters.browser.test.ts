@@ -145,7 +145,8 @@ describe('spawnNpcs', () => {
 
     expect(received).toEqual([
       {
-        id: 0,
+        // D1: el id de NPC ahora vive dentro de la variante discriminada.
+        target: { kind: 'npc', npcId: 0 },
         name: NPCS[0].name,
         status: 'En línea',
         statusCode: 'g',

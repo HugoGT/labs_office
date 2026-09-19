@@ -8,7 +8,7 @@
 
 import type { Client as ServerClient } from '@colyseus/core';
 import { Client } from 'colyseus.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from '../../src/game/mapData.ts';
 import { createOfficeServer, type OfficeServer } from './createOfficeServer.ts';
 import {
@@ -295,6 +295,271 @@ describe('OfficeRoom: estado de presencia (#1)', () => {
       handlers.get('status')!({ sessionId: 'fantasma' } as ServerClient, message),
     ).not.toThrow();
     expect(room.state.players.size).toBe(0);
+  });
+});
+
+/**
+ * Invitaciones de llamada entre pares (issue #2). Mismo criterio que el resto
+ * del fichero: servidor y clientes reales sobre WebSocket, `callInvitations.ts`
+ * ya tiene su propia suite pura -- aqui se prueba el CABLEADO, no la logica de
+ * apilado en si (D5/D6/D7/D8).
+ */
+describe('OfficeRoom: invitaciones de llamada (issue #2)', () => {
+  function listenFor<T>(room: { onMessage(type: string, cb: (msg: T) => void): unknown }, type: string) {
+    const received: T[] = [];
+    room.onMessage(type, (msg: T) => received.push(msg));
+    return received;
+  }
+
+  it('dos llamantes distintos se apilan: ambas tarjetas llegan, en orden de llegada', async () => {
+    const a = await join('Ana');
+    const c = await join('Carla');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 3);
+    const invites = listenFor<{ from: string; name: string }>(b, 'callinvite');
+
+    a.send('call', { to: b.sessionId });
+    await waitFor(() => invites.length === 1);
+    c.send('call', { to: b.sessionId });
+    await waitFor(() => invites.length === 2);
+
+    expect(invites.map((i) => i.from)).toEqual([a.sessionId, c.sessionId]);
+    expect(invites.map((i) => i.name)).toEqual(['Ana', 'Carla']);
+  });
+
+  it('D5: la misma persona llamando dos veces produce una unica tarjeta', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    const invites = listenFor<{ from: string }>(b, 'callinvite');
+
+    a.send('call', { to: b.sessionId });
+    await waitFor(() => invites.length === 1);
+    a.send('call', { to: b.sessionId });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(invites).toHaveLength(1);
+  });
+
+  it('D8: el servidor no entrega una llamada dirigida a alguien en DND, aunque el cliente este trucado', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    b.send('status', { status: 'r' });
+    await waitFor(() => a.state.players.get(b.sessionId)?.status === 'r');
+    const invites = listenFor<unknown>(b, 'callinvite');
+
+    a.send('call', { to: b.sessionId });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(invites).toHaveLength(0);
+  });
+
+  it('una llamada a uno mismo se ignora', async () => {
+    const a = await join('Ana');
+    await waitFor(() => a.state.players.size === 1);
+    const invites = listenFor<unknown>(a, 'callinvite');
+
+    a.send('call', { to: a.sessionId });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(invites).toHaveLength(0);
+  });
+
+  it('una llamada a un sessionId inexistente se descarta en silencio', async () => {
+    const a = await join('Ana');
+    await waitFor(() => a.state.players.size === 1);
+    const invites = listenFor<unknown>(a, 'callinvite');
+
+    expect(() => a.send('call', { to: 'jamas-existio' })).not.toThrow();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(invites).toHaveLength(0);
+  });
+
+  it('aceptar produce callaccepted en el emisor, con el nombre de quien acepto', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    const accepted = listenFor<{ by: string; name: string }>(a, 'callaccepted');
+
+    a.send('call', { to: b.sessionId });
+    await waitFor(() => b.state.players.size === 2);
+    b.send('callrespond', { from: a.sessionId, accept: true });
+
+    await waitFor(() => accepted.length === 1);
+    expect(accepted[0]).toEqual({ by: b.sessionId, name: 'Beto' });
+  });
+
+  it('D3: pasar es silencioso, el emisor no recibe nada', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    const accepted = listenFor<unknown>(a, 'callaccepted');
+
+    a.send('call', { to: b.sessionId });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    b.send('callrespond', { from: a.sessionId, accept: false });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(accepted).toHaveLength(0);
+  });
+
+  it('una respuesta forjada, de alguien que nunca llamo, se descarta en silencio', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    const accepted = listenFor<unknown>(a, 'callaccepted');
+
+    expect(() => b.send('callrespond', { from: a.sessionId, accept: true })).not.toThrow();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(accepted).toHaveLength(0);
+  });
+
+  it('una respuesta repetida sobre una llamada ya resuelta es un no-op, no un segundo callaccepted', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    const accepted = listenFor<unknown>(a, 'callaccepted');
+
+    a.send('call', { to: b.sessionId });
+    await waitFor(() => b.state.players.size === 2);
+    b.send('callrespond', { from: a.sessionId, accept: true });
+    await waitFor(() => accepted.length === 1);
+    expect(() => b.send('callrespond', { from: a.sessionId, accept: true })).not.toThrow();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(accepted).toHaveLength(1);
+  });
+
+  it('D7: si el emisor se desconecta, el destinatario recibe callerleft', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    const left = listenFor<{ from: string }>(b, 'callerleft');
+
+    a.send('call', { to: b.sessionId });
+    await waitFor(() => b.state.players.size === 2);
+    await a.leave();
+
+    await waitFor(() => left.length === 1);
+    expect(left[0]).toEqual({ from: a.sessionId });
+  });
+
+  it('una invitacion sobrevive al reload de nadie: si el DESTINATARIO se va y vuelve, no le llega de nuevo', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    const firstInvites = listenFor<unknown>(b, 'callinvite');
+
+    a.send('call', { to: b.sessionId });
+    await waitFor(() => firstInvites.length === 1);
+    await b.leave();
+    await waitFor(() => a.state.players.size === 1);
+
+    // Lo que se prueba aqui es lo observable por cable: nada replica las
+    // invitaciones a quien entra, asi que recargar la pagina las pierde. Que
+    // el registro ademas se limpie por dentro al irse el destinatario lo
+    // prueba la suite pura de `callInvitations.ts` (`removeAllFor` en ambos
+    // roles); desde fuera esa limpieza no se ve, solo evita que crezca.
+    const reconnected = await join('Beto');
+    await waitFor(() => reconnected.state.players.size === 2);
+    const afterReconnect = listenFor<unknown>(reconnected, 'callinvite');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(reconnected.sessionId).not.toBe(b.sessionId);
+    expect(afterReconnect).toHaveLength(0);
+  });
+
+  it('D7: si el destinatario se desconecta, el emisor NO recibe callerleft (solo se avisa al reves)', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    const left = listenFor<unknown>(a, 'callerleft');
+
+    a.send('call', { to: b.sessionId });
+    await waitFor(() => b.state.players.size === 2);
+    await b.leave();
+    await waitFor(() => a.state.players.size === 1);
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(left).toHaveLength(0);
+  });
+
+  /**
+   * Sala sin transporte: se capturan sus manejadores y se le pone un `clients`
+   * de mentira que apunta cada envio. No es un atajo para ahorrarse el
+   * WebSocket -- es la unica forma de probar sin carreras las dos cosas de
+   * abajo: el paso del tiempo (temporizadores falsos y un socket vivo no se
+   * llevan bien) y un mensaje que llega DESPUES de que el objetivo cambiase
+   * de estado. Mismo criterio que la guarda del jugador fantasma de `status`.
+   */
+  function headlessRoom() {
+    const handlers = new Map<string, (client: ServerClient, message: unknown) => void>();
+    const sent: { to: string; type: string }[] = [];
+    const room = new OfficeRoom();
+    (room as unknown as { onMessage: unknown }).onMessage = (
+      type: string,
+      handler: (client: ServerClient, message: unknown) => void,
+    ) => {
+      handlers.set(type, handler);
+      return () => {};
+    };
+    (room as unknown as { clients: unknown }).clients = {
+      getById: (sessionId: string) => ({
+        send: (type: string) => sent.push({ to: sessionId, type }),
+      }),
+    };
+    room.onCreate();
+    return { room, handlers, sent };
+  }
+
+  function seat(room: OfficeRoom, sessionId: string, name: string): void {
+    room.onJoin({ sessionId, auth: true } as unknown as ServerClient, { name });
+  }
+
+  it('D6: sin caducidad, una invitacion sigue viva y aceptable pasado un minuto', () => {
+    vi.useFakeTimers();
+    try {
+      const { room, handlers, sent } = headlessRoom();
+      seat(room, 'ana', 'Ana');
+      seat(room, 'beto', 'Beto');
+
+      handlers.get('call')!({ sessionId: 'ana' } as ServerClient, { to: 'beto' });
+      expect(sent.filter((message) => message.type === 'callinvite')).toHaveLength(1);
+
+      // Con temporizadores falsos, CUALQUIER caducidad futura se dispararia
+      // aqui: `setTimeout`, `setInterval`, o el `clock` de Colyseus, que corre
+      // sobre ellos. Si alguien reintroduce un TTL, este test se cae, que es
+      // justo lo que se quiere -- la decision de producto es que la tarjeta
+      // vive hasta que se responde.
+      vi.advanceTimersByTime(60_000);
+
+      handlers.get('callrespond')!({ sessionId: 'beto' } as ServerClient, {
+        from: 'ana',
+        accept: true,
+      });
+
+      expect(sent.filter((message) => message.type === 'callaccepted')).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('D8: el estado se lee cuando llega el mensaje, no cuando se abrio el menu', () => {
+    const { room, handlers, sent } = headlessRoom();
+    seat(room, 'ana', 'Ana');
+    seat(room, 'beto', 'Beto');
+
+    // El menu de Ana se abrio con Beto en verde y Beto se pone en rojo justo
+    // despues. La llamada que sale de esa vista vieja tiene que morir igual:
+    // el boton deshabilitado del cliente no puede ser la unica defensa, porque
+    // llega tarde por definicion.
+    handlers.get('status')!({ sessionId: 'beto' } as ServerClient, { status: 'r' });
+    handlers.get('call')!({ sessionId: 'ana' } as ServerClient, { to: 'beto' });
+
+    expect(sent).toHaveLength(0);
   });
 });
 
