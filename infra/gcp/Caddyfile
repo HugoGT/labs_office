@@ -1,18 +1,128 @@
 # Caddy es el unico proceso con los puertos 80 y 443 de la VM. Emite y renueva
 # los certificados solo, sin cron ni certbot.
 #
-# Los dos hostnames (app.* y lk.*) apuntan a la MISMA IP via sslip.io, que
-# resuelve <lo-que-sea>.<ip-con-guiones>.sslip.io a esa IP. Caddy los separa por
-# SNI, asi que una sola maquina sirve los dos sitios sobre 443.
+# Desde el issue #19 este fichero trabaja en DOS capas:
+#
+#   1. Un multiplexor de nivel 4 (modulo caddy-l4, compilado en la imagen
+#      propia infra/gcp/docker/caddy.Dockerfile) que se queda con el :443 y
+#      reparte mirando SOLO el SNI del ClientHello. No descifra nada para
+#      decidir: inspeccionar el contenido de una conexion en el unico puerto
+#      de entrada de la aplicacion seria superficie nueva y delicada.
+#   2. La aplicacion HTTP de siempre, que ya NO escucha en el 443 sino en el
+#      8443 interno, porque el 443 lo ocupa el multiplexor.
+#
+# Los tres hostnames (app.*, lk.* y turn.*) apuntan a la MISMA IP via sslip.io,
+# que resuelve <lo-que-sea>.<ip-con-guiones>.sslip.io a esa IP.
 #
 # Limite conocido de sslip.io: es un dominio compartido por todo el mundo que lo
 # use, y Let's Encrypt aplica sus limites de emision por dominio registrado. Si
-# alguien ajeno quema la cuota, nuestras emisiones fallan. La exposicion real es
-# pequena (dos certificados que se renuevan cada ~60 dias) y Caddy cae solo a
-# ZeroSSL cuando Let's Encrypt rechaza, asi que no se monta nada para evitarlo;
-# queda anotado para cuando el issue #8 traiga un dominio propio.
+# alguien ajeno quema la cuota, nuestras emisiones fallan. La exposicion real
+# sigue siendo pequena (ahora tres certificados que se renuevan cada ~60 dias)
+# y Caddy cae solo a ZeroSSL cuando Let's Encrypt rechaza, asi que no se monta
+# nada para evitarlo; queda anotado para cuando el issue #3 traiga un dominio
+# propio.
 {
 	email {$ACME_EMAIL}
+
+	# La aplicacion HTTP se muda al 8443. Ese puerto NO se publica al host: el
+	# unico que llega hasta el es el multiplexor de aqui abajo, desde dentro de
+	# este mismo contenedor.
+	https_port 8443
+
+	# Unico gancho para la prueba local (infra/gcp/test/mux/). En produccion la
+	# variable esta definida y VACIA, asi que esta linea desaparece; el arnes la
+	# pone a `local_certs` para que Caddy emita con su CA interna en lugar de
+	# hablar con Let's Encrypt. Asi la prueba ejercita ESTE fichero y no una
+	# copia que podria divergir sin que nadie se entere.
+	{$CADDY_GLOBAL_EXTRA}
+
+	# El multiplexor. Las rutas se evaluan EN ORDEN y gana la primera que casa.
+	layer4 {
+		:443 {
+			# Primero el desafio TLS-ALPN-01 de ACME, por delante de todo lo
+			# demas. Caddy lo resuelve dentro del apreton TLS, asi que tiene que
+			# llegar entero a la aplicacion HTTP: si lo terminara el handler
+			# `tls` de mas abajo, la renovacion del certificado de turn.*
+			# fallaria y no se notaria hasta ~60 dias despues.
+			@acme tls {
+				alpn acme-tls/1
+			}
+			route @acme {
+				proxy {
+					proxy_protocol v2
+					upstream localhost:8443
+				}
+			}
+
+			# TURN sobre TLS. Aqui SI se termina el TLS: LiveKit recibe texto
+			# claro en su 5349 (`turn.external_tls: true` en livekit.yaml.tpl) y
+			# deja de leer certificados del disco. Eso es lo que permite retirar
+			# office-cert-watch en este mismo cambio.
+			#
+			# `proxy_protocol v2` no es decorativo. Sin la cabecera PROXY,
+			# LiveKit anunciaria en XOR-MAPPED-ADDRESS la direccion del propio
+			# multiplexor; Firefox rechaza ese candidato y el relay no se usa.
+			# Seria reproducir, en version mas fina, el fallo de audio que este
+			# issue viene a arreglar.
+			@turn tls {
+				sni {$TURN_HOST}
+			}
+			route @turn {
+				tls
+				proxy {
+					proxy_protocol v2
+					upstream {$TURN_UPSTREAM}
+				}
+			}
+
+			# Todo lo demas (app.* y lk.*) sigue el camino de siempre: los bytes
+			# TLS pasan SIN descifrar a la aplicacion HTTP, que los termina ella
+			# como hasta ahora. Un bloque `route` sin matcher es el que recoge el
+			# resto; no hay ruta por defecto implicita.
+			route {
+				proxy {
+					proxy_protocol v2
+					upstream localhost:8443
+				}
+			}
+		}
+	}
+
+	# Sin esto la aplicacion HTTP veria como cliente al multiplexor, o sea
+	# 127.0.0.1, en TODAS las peticiones: la lista de origenes permitidos, la
+	# autenticacion y el registro del panel (issues #9 y #24) estarian razonando
+	# sobre la direccion equivocada.
+	#
+	# El ORDEN importa y no es estetico. La cabecera PROXY v2 son los primeros
+	# bytes de la conexion, por delante del ClientHello: `proxy_protocol` tiene
+	# que leerla sobre la conexion en crudo y `tls` marca el punto de la cadena
+	# donde se descifra. Al reves, el descifrado intentaria interpretar la
+	# cabecera PROXY como un ClientHello y ningun apreton del 8443 funcionaria.
+	#
+	# `fallback_policy reject` hace ruidoso el fallo: una conexion al 8443 sin
+	# cabecera PROXY se rechaza, en vez de atribuirse a 127.0.0.1 en silencio.
+	servers :8443 {
+		listener_wrappers {
+			proxy_protocol {
+				timeout 5s
+				allow 127.0.0.1/32 ::1/128
+				fallback_policy reject
+			}
+			tls
+		}
+	}
+}
+
+# Redireccion explicita del 80 al 443, y tiene que ser explicita: la que Caddy
+# monta sola construye el destino con `https_port`, o sea que mandaria a los
+# navegadores a https://app.<ip>.sslip.io:8443/, un puerto que no esta
+# publicado. Declarar el sitio http:// desactiva la automatica para estos
+# hostnames, asi que las dos no compiten.
+#
+# Esto NO estorba a ACME: el desafio HTTP-01 lo atiende Caddy por delante de
+# estas rutas, en el mismo 80, que el multiplexor no toca.
+http://{$APP_HOST}, http://{$LK_HOST}, http://{$TURN_HOST} {
+	redir https://{host}{uri} 308
 }
 
 {$APP_HOST} {
@@ -88,4 +198,20 @@
 	# WebSocket sin configuracion extra: la senalizacion de LiveKit es un
 	# WebSocket sobre este mismo 443.
 	reverse_proxy host.docker.internal:7880
+}
+
+# turn.* no sirve NINGUN contenido: el multiplexor se lleva su trafico antes de
+# que llegue aqui. Este bloque existe por dos razones concretas:
+#
+#   1. Dar de alta el hostname en la gestion automatica de certificados. El
+#      handler `tls` del multiplexor USA el almacen de certificados de Caddy
+#      pero no registra dominios: si turn.* no aparece como direccion de ningun
+#      sitio, Caddy nunca pide su certificado y el mux terminaria TLS con un
+#      certificado que no existe.
+#   2. Terminar el apreton del desafio TLS-ALPN-01 que la regla @acme desvia
+#      hasta aqui.
+#
+# El 404 es la respuesta honesta a una peticion HTTP que nunca deberia llegar.
+{$TURN_HOST} {
+	respond 404
 }
