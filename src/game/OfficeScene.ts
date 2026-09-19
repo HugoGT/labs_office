@@ -20,7 +20,7 @@ import {
   TILE,
   WORLD_H,
   WORLD_W,
-  type Room,
+  type SpaceArea,
 } from './mapData';
 import type { OfficeBridge } from './officeBridge';
 import {
@@ -107,7 +107,7 @@ export class OfficeScene extends Phaser.Scene {
    * Empieza en `BUILT_IN_SPACES` y solo cambiaria al llegar la config
    * servida -- que no existe todavia en esta slice (slice 3).
    */
-  private spaces: readonly Room[] = BUILT_IN_SPACES;
+  private spaces: readonly SpaceArea[] = BUILT_IN_SPACES;
   /**
    * Version que este cliente publica de su config de espacios (#7, D4). Se
    * inicia en la constante fallback y viaja en el join Y en cada tic de
