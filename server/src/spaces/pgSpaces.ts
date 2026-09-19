@@ -16,6 +16,7 @@ import type {
   UpdateSpaceInput,
 } from './spacesPort.ts';
 import {
+  SpaceNameTakenError,
   SpaceOverlapError,
   hashSpaces,
   normalizeCreateSpaceInput,
@@ -29,6 +30,33 @@ const EXCLUSION_VIOLATION = '23P01';
 
 function isExclusionViolation(error: unknown): boolean {
   return (error as { code?: unknown } | null)?.code === EXCLUSION_VIOLATION;
+}
+
+/**
+ * Codigo de `unique_violation` de Postgres, el mismo que ya nombra
+ * `pgDirectory.ts`: lo que saltan `spaces_slug_unique` y `spaces_name_unique`.
+ */
+const UNIQUE_VIOLATION = '23505';
+
+function isUniqueViolation(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === UNIQUE_VIOLATION;
+}
+
+/**
+ * La traduccion que comparten el alta y el renombrado. Solo mira los dos
+ * codigos que este adaptador sabe leer y RELANZA todo lo demas: tragarse un
+ * fallo desconocido como 409 le diria al administrador que se equivoco el
+ * cuando el que se rompio fue el servidor, que es el mismo pecado que evitan
+ * los `translating` de las rutas, en la otra direccion.
+ */
+function translatePgError(error: unknown): never {
+  if (isExclusionViolation(error)) {
+    throw new SpaceOverlapError('el rectangulo solicitado se solapa con un espacio existente');
+  }
+  if (isUniqueViolation(error)) {
+    throw new SpaceNameTakenError('ya existe un espacio con ese nombre');
+  }
+  throw error;
 }
 
 const SPACE_COLUMNS = 'id, slug, name, x, y, w, h, capacity, created_at, updated_at';
@@ -126,13 +154,10 @@ export function createPgSpaces(pool: DirectoryPool): SpacesDirectory {
         );
         return toSpace(result.rows[0]);
       } catch (error) {
-        // La restriccion de exclusion de `schema.sql` es la garantia real;
-        // esto solo traduce su fallo a un error de dominio en vez de un 500
-        // pelado, misma logica que documenta `boundsOverlap`.
-        if (isExclusionViolation(error)) {
-          throw new SpaceOverlapError('el rectangulo solicitado se solapa con un espacio existente');
-        }
-        throw error;
+        // Las restricciones de `schema.sql` son la garantia real; esto solo
+        // traduce sus fallos a errores de dominio en vez de un 500 pelado,
+        // misma logica que documenta `boundsOverlap`.
+        translatePgError(error);
       }
     },
 
@@ -162,10 +187,9 @@ export function createPgSpaces(pool: DirectoryPool): SpacesDirectory {
         const row = result.rows[0];
         return row ? toSpace(row) : null;
       } catch (error) {
-        if (isExclusionViolation(error)) {
-          throw new SpaceOverlapError('el rectangulo solicitado se solapa con un espacio existente');
-        }
-        throw error;
+        // Renombrar choca con los mismos indices unicos que el alta:
+        // `normalizeUpdateSpaceInput` deriva un slug nuevo del nombre nuevo.
+        translatePgError(error);
       }
     },
 

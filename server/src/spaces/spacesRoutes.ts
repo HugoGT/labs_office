@@ -30,7 +30,7 @@ import {
   type AdminDeps,
   type AdminResult,
 } from '../admin/adminRoutes.ts';
-import { InvalidSpaceError, SpaceOverlapError } from './spaceRules.ts';
+import { InvalidSpaceError, SpaceNameTakenError, SpaceOverlapError } from './spaceRules.ts';
 import type { Space, SpacesDirectory, UpdateSpaceInput } from './spacesPort.ts';
 
 export interface SpacesDeps extends AdminDeps {
@@ -38,6 +38,16 @@ export interface SpacesDeps extends AdminDeps {
 }
 
 const CONFLICT: AdminResult = { status: 409, body: { error: 'space-overlap' } };
+
+/**
+ * El otro 409, con cuerpo PROPIO y no `space-overlap` reciclado. El codigo del
+ * cuerpo es lo unico que le dice al panel que hay que arreglar, y estas dos
+ * cosas se arreglan de formas opuestas: el solape moviendo el rectangulo, el
+ * nombre repetido escribiendo otro. Un solo codigo mandaria al administrador a
+ * mover una sala que estaba bien colocada. Misma separacion que ya hacen
+ * `desk-overlap` y `desk-taken` en `desksRoutes.ts`.
+ */
+const NAME_TAKEN: AdminResult = { status: 409, body: { error: 'space-name-taken' } };
 
 /**
  * Los mismos ocho campos que entran en el hash de version (`CanonicalSpace`),
@@ -66,6 +76,7 @@ async function translating(run: () => Promise<AdminResult>): Promise<AdminResult
   } catch (error) {
     if (error instanceof InvalidSpaceError) return INVALID_REQUEST;
     if (error instanceof SpaceOverlapError) return CONFLICT;
+    if (error instanceof SpaceNameTakenError) return NAME_TAKEN;
     throw error;
   }
 }

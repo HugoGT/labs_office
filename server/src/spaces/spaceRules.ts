@@ -34,6 +34,27 @@ export class SpaceOverlapError extends Error {
   }
 }
 
+/**
+ * Ese nombre ya es de otro espacio: lo que saltan `spaces_name_unique` y
+ * `spaces_slug_unique`, los dos sobre `lower(...)` en `schema.sql`.
+ *
+ * Es un tipo propio y no un `SpaceOverlapError` aunque los dos acaben en 409,
+ * misma razon que separa `DeskOverlapError` de `DeskTakenError`: se arreglan de
+ * formas distintas. El solape se corrige moviendo el rectangulo; esto se
+ * corrige eligiendo otro nombre. Colapsarlos mandaria al administrador a mover
+ * una sala que estaba perfectamente colocada.
+ *
+ * Los DOS indices dan el mismo error porque el admin solo escribe una cosa: el
+ * slug se DERIVA del nombre (`deriveSlug`), asi que no hay un segundo campo que
+ * pudiera corregir por separado.
+ */
+export class SpaceNameTakenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SpaceNameTakenError';
+  }
+}
+
 export interface SpaceBounds {
   x: number;
   y: number;

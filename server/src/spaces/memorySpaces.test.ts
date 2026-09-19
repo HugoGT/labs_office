@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { createMemorySpaces } from './memorySpaces.ts';
-import { InvalidSpaceError, SpaceOverlapError, hashSpaces } from './spaceRules.ts';
+import { InvalidSpaceError, SpaceNameTakenError, SpaceOverlapError, hashSpaces } from './spaceRules.ts';
 import { BUILT_IN_SEED_SPACES, BUILT_IN_SEED_VERSION } from './builtInSeed.ts';
 
 describe('createMemorySpaces', () => {
@@ -53,6 +53,52 @@ describe('createMemorySpaces', () => {
     await expect(
       spaces.createSpace({ name: 'Encima', x: 12, y: 12, w: 5, h: 5, capacity: null }),
     ).rejects.toThrow(SpaceOverlapError);
+  });
+
+  it('createSpace rechaza un nombre repetido que solo difiere en mayusculas', async () => {
+    // `spaces_name_unique` esta sobre `lower(name)`: para Postgres "Cafeteria"
+    // y "CAFETERIA" son la misma sala. Si este adaptador no lo reprodujese, la
+    // ruta pasaria el test contra memoria y devolveria un 500 en produccion.
+    const spaces = createMemorySpaces();
+    await spaces.createSpace({ name: 'Cafeteria', x: 1, y: 1, w: 4, h: 4, capacity: null });
+
+    await expect(
+      spaces.createSpace({ name: 'CAFETERIA', x: 30, y: 1, w: 4, h: 4, capacity: null }),
+    ).rejects.toThrow(SpaceNameTakenError);
+  });
+
+  it('createSpace rechaza dos nombres distintos que derivan el mismo slug', async () => {
+    // `spaces_slug_unique` muerde donde `spaces_name_unique` no llega: "Sala A"
+    // y "Sala-A" son nombres distintos hasta para `lower()`, pero el slug
+    // derivado es el mismo y el indice de slug los rechaza igual.
+    const spaces = createMemorySpaces();
+    await spaces.createSpace({ name: 'Sala A', x: 1, y: 1, w: 4, h: 4, capacity: null });
+
+    await expect(
+      spaces.createSpace({ name: 'Sala-A', x: 30, y: 1, w: 4, h: 4, capacity: null }),
+    ).rejects.toThrow(SpaceNameTakenError);
+  });
+
+  it('updateSpace rechaza renombrar a un nombre que ya es de otro espacio', async () => {
+    const spaces = createMemorySpaces();
+    await spaces.createSpace({ name: 'Cafeteria', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    const otra = await spaces.createSpace({ name: 'War Room', x: 30, y: 1, w: 4, h: 4, capacity: null });
+
+    await expect(spaces.updateSpace(otra.id, { name: 'cafeteria' })).rejects.toThrow(
+      SpaceNameTakenError,
+    );
+  });
+
+  it('updateSpace no cuenta el espacio consigo mismo al comprobar el nombre', async () => {
+    // Cambiarle las mayusculas a su propio nombre no choca con nadie: en
+    // Postgres el UPDATE reemplaza la entrada del indice de esa misma fila. Sin
+    // esta exclusion, corregir "cafeteria" a "Cafeteria" seria imposible.
+    const spaces = createMemorySpaces();
+    const created = await spaces.createSpace({ name: 'cafeteria', x: 1, y: 1, w: 4, h: 4, capacity: null });
+
+    const updated = await spaces.updateSpace(created.id, { name: 'Cafeteria' });
+
+    expect(updated?.name).toBe('Cafeteria');
   });
 
   it('la version cambia al renombrar: el nombre entra en el hash canonico', async () => {

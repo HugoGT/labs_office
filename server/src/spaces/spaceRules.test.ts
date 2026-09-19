@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   InvalidSpaceError,
+  SpaceNameTakenError,
   SpaceOverlapError,
   assertValidBounds,
   assertValidCapacity,
@@ -242,5 +243,23 @@ describe('SpaceOverlapError', () => {
     const error = new SpaceOverlapError('x');
     expect(error).toBeInstanceOf(SpaceOverlapError);
     expect(error.name).toBe('SpaceOverlapError');
+  });
+});
+
+describe('SpaceNameTakenError', () => {
+  it('es distinguible por instanceof, no por el texto del mensaje', () => {
+    const error = new SpaceNameTakenError('x');
+    expect(error).toBeInstanceOf(SpaceNameTakenError);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe('SpaceNameTakenError');
+  });
+
+  it('NO es un SpaceOverlapError: son los dos 409 de los espacios y se arreglan distinto', () => {
+    // Misma separacion que `DeskOverlapError`/`DeskTakenError`: los dos acaban
+    // en 409, pero uno se arregla moviendo el rectangulo y el otro eligiendo
+    // otro nombre. Colapsarlos le diria al administrador que corrija lo que no
+    // esta mal.
+    expect(new SpaceNameTakenError('x')).not.toBeInstanceOf(SpaceOverlapError);
+    expect(new SpaceOverlapError('x')).not.toBeInstanceOf(SpaceNameTakenError);
   });
 });
