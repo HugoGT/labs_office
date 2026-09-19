@@ -314,6 +314,62 @@ describe('OfficeShell', () => {
   });
 });
 
+describe('OfficeShell: llamar a un companero real (issue #2, unit 11, D3/D12)', () => {
+  it('"Llamar" sobre un peer emite el comando callPeer con su sessionId y muestra un toast de espera, sin tocar bridge.callNpc', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const callNpcSpy = vi.spyOn(bridge, 'callNpc');
+    const commands: { sessionId: string }[] = [];
+    bridge.onCommand('callPeer', (payload) => commands.push(payload));
+
+    act(() =>
+      bridge.emit('npcmenu', {
+        target: { kind: 'peer', sessionId: 'peer-1' },
+        name: 'Marta Ríos',
+        status: 'En línea',
+        statusCode: 'g',
+        x: 10,
+        y: 10,
+      }),
+    );
+    await user.click(screen.getByRole('button', { name: /Llamar/ }));
+
+    // D3: React solo pide la invitacion, nunca aprende que "aceptar" implica
+    // caminar -- por eso el unico comando que ve esta prueba es `callPeer`.
+    expect(commands).toEqual([{ sessionId: 'peer-1' }]);
+    expect(callNpcSpy).not.toHaveBeenCalled();
+    expect(screen.getByText(/Llamando a/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Llamar/ })).not.toBeInTheDocument();
+  });
+
+  it('"callaccepted" del bridge muestra un toast con quien viene hacia ti (regla de feedback del llamador)', () => {
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('callaccepted', { by: 'peer-1', name: 'Marta Ríos' }));
+
+    expect(screen.getByText(/viene hacia ti/)).toBeInTheDocument();
+    expect(screen.getByText('Marta Ríos')).toBeInTheDocument();
+  });
+
+  it('monta la pila de invitaciones (D12): una llamada entrante renderiza su tarjeta y aceptar emite respondCall', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const commands: { from: string; accept: boolean }[] = [];
+    bridge.onCommand('respondCall', (payload) => commands.push(payload));
+
+    act(() => bridge.emit('callinvite', { from: 'caller-1', name: 'Diego Soto' }));
+    expect(screen.getByText(/te está llamando/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Ir con la persona/ }));
+
+    expect(commands).toEqual([{ from: 'caller-1', accept: true }]);
+    expect(screen.queryByText(/te está llamando/)).not.toBeInTheDocument();
+  });
+});
+
 describe('OfficeShell: estado de presencia (#1)', () => {
   it('arranca "En línea" y lo refleja en el selector', () => {
     render(<OfficeShell />);

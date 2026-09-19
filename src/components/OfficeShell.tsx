@@ -4,10 +4,12 @@ import { resolveLivekitConfig } from '../game/livekitEndpoint';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
 import { DEFAULT_STATUS, type PresenceStatus } from '../game/officeProtocol';
+import { useCallInvitations } from '../hooks/useCallInvitations';
 import { useOfficeBridge } from '../hooks/useOfficeBridge';
 import { useProximityAudio } from '../hooks/useProximityAudio';
 import { AudioUnblockPrompt } from './AudioUnblockPrompt';
 import { BottomBar } from './BottomBar';
+import { CallInvitationStack } from './CallInvitationStack';
 import { ContextMenu, type NpcMenuAction } from './ContextMenu';
 import { GameCanvas } from './GameCanvas';
 import { RecBadge } from './RecBadge';
@@ -39,6 +41,10 @@ export interface OfficeShellProps {
 export function OfficeShell({ session = null }: OfficeShellProps) {
   const [bridge] = useState(createOfficeBridge);
   const { room, menu, presence, closeMenu } = useOfficeBridge(bridge);
+  // D12: la pila del receptor vive en su propio hook (temporizadores + chime
+  // + comandos), no en `useOfficeBridge`, que es deliberadamente un simple
+  // suscriptor evento->estado.
+  const { invitations, accept, dismiss } = useCallInvitations(bridge);
   // Se resuelve una sola vez: cambiarlo remontaria Phaser entero.
   const [endpoint] = useState(() =>
     resolveOfficeEndpoint({
@@ -140,6 +146,26 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
   }, [toastMessage]);
 
   /**
+   * Regla de feedback del llamador (issue #2, D3, sin cambios desde la
+   * propuesta): solo una aceptacion produce un toast servidor-origen. Pasar,
+   * DND, destino desconocido o duplicado son todos el mismo silencio, y ese
+   * silencio ya lo garantiza el servidor -- aqui no hay nada que descartar.
+   * Se suscribe DIRECTAMENTE en `OfficeShell` (D12), no en un hook, porque es
+   * un solo toast y `OfficeShell` ya es el unico dueno del bridge.
+   */
+  useEffect(
+    () =>
+      bridge.on('callaccepted', ({ name }) => {
+        setToastMessage(
+          <>
+            🚶 <b>{name}</b> viene hacia ti
+          </>,
+        );
+      }),
+    [bridge],
+  );
+
+  /**
    * Acciones del menu contextual (`app.js:474-486,602-604`). `call` y `goto`
    * son opuestos y conviene no confundirlos: `call` trae al NPC hasta ti,
    * `goto` te lleva a ti hasta su escritorio.
@@ -148,12 +174,22 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
     closeMenu();
 
     if (action === 'call' || action === 'goto') {
-      // D1: `call`/`goto` solo tienen sentido para un NPC en esta unit -- el
-      // branch completo del menu de un peer real (Llamar/Ver perfil, D2)
-      // llega en una unit posterior. Esto solo desenvuelve `npcId` para
-      // preservar el comportamiento de NPC byte-a-byte con la nueva union
-      // discriminada.
-      if (menu.target.kind !== 'npc') return;
+      // Peer real (issue #2, unit 11, D3): `ContextMenu` nunca ofrece "goto"
+      // para un peer (D2, sin escritorio propio), asi que solo `call` llega
+      // aqui. `respondCall` es UN comando, no accept/pass -- la escena es
+      // quien sabe que "aceptar" implica caminar y quien conoce coordenadas
+      // del mundo (D3); React solo pide la invitacion.
+      if (menu.target.kind === 'peer') {
+        if (action !== 'call') return;
+        bridge.emitCommand('callPeer', { sessionId: menu.target.sessionId });
+        setToastMessage(
+          <>
+            📞 Llamando a <b>{menu.name}</b>…
+          </>,
+        );
+        return;
+      }
+
       const { npcId } = menu.target;
 
       if (action === 'call') {
@@ -211,6 +247,7 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
       />
       <AudioUnblockPrompt blocked={audioBlocked} onUnblock={unblockAudio} />
       <Toast message={toastMessage} />
+      <CallInvitationStack invitations={invitations} onAccept={accept} onDismiss={dismiss} />
     </div>
   );
 }
