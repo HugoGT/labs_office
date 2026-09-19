@@ -96,6 +96,10 @@ services:
       # respuesta de /livekit/token y el cliente la usa tal cual
       # (src/game/livekitEndpoint.ts). Por eso NO se hornea en el bundle del SPA.
       LIVEKIT_URL: "wss://${LK_HOST}"
+      # Issue #9. Mismo patron que LIVEKIT_URL arriba: APP_HOST ya lo escribe
+      # office-deploy.sh en el .env generado, y aqui solo se interpola con el
+      # esquema que un navegador realmente manda en su cabecera Origin.
+      ALLOWED_ORIGIN: "https://${APP_HOST}"
       LIVEKIT_API_KEY: "${LIVEKIT_API_KEY}"
       LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET}"
       # Issue #8. Vacia: el servidor no exige autenticacion, igual que antes.

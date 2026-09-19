@@ -13,14 +13,14 @@
 import { Client } from 'colyseus.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LIVEKIT_ROOM_NAME } from '../../src/game/officeProtocol.ts';
-import { createOfficeServer, type OfficeServer } from './createOfficeServer.ts';
+import { createOfficeServer, warnIfOriginsUnrestricted, type OfficeServer } from './createOfficeServer.ts';
 import type { UserDirectory } from './directory/directoryPort.ts';
 import { createMemoryDirectory } from './directory/memoryDirectory.ts';
 import { OFFICE_ROOM_NAME } from './OfficeRoom.ts';
 import type { OfficeState } from './schema.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 
-process.setMaxListeners(50);
+process.setMaxListeners(100);
 
 let server: OfficeServer;
 let baseUrl: string;
@@ -507,5 +507,150 @@ describe('POST /livekit/token con auth desactivada: nada cambia', () => {
     const sinLivekit = await postToken({ sessionId: room.sessionId });
     expect(sinLivekit.status).toBe(503);
     expect((await readBody(sinLivekit)).error).toBe('livekit-not-configured');
+  });
+});
+
+const overriddenServers: OfficeServer[] = [];
+
+/**
+ * Arranca un servidor con overrides propios (lista blanca incluida) y lo
+ * registra para apagarse en `afterEach`, igual que en `adminRoutesWiring.test.ts:65-70`.
+ * Separado del `server`/`beforeEach` de arriba porque estos tests necesitan un
+ * `allowedOrigins` distinto por caso, no el servidor por defecto sin lista.
+ */
+async function start(overrides?: Parameters<typeof createOfficeServer>[0]): Promise<string> {
+  const overridden = createOfficeServer(overrides);
+  overriddenServers.push(overridden);
+  const port = await overridden.listen(0);
+  return `http://localhost:${port}`;
+}
+
+afterEach(async () => {
+  await Promise.all(overriddenServers.splice(0).map((s) => s.shutdown()));
+});
+
+describe('CORS con lista blanca (#9)', () => {
+  it('preflight de /livekit/token refleja un origen de la lista y marca Vary', async () => {
+    const url = await start({ allowedOrigins: ['https://app.example.com'] });
+
+    const res = await fetch(`${url}/livekit/token`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://app.example.com',
+        'Access-Control-Request-Method': 'POST',
+      },
+    });
+
+    expect(res.headers.get('access-control-allow-origin')).toBe('https://app.example.com');
+    expect(res.headers.get('vary')).toContain('Origin');
+  });
+
+  it('preflight de /livekit/token no responde nada a un origen ajeno', async () => {
+    const url = await start({ allowedOrigins: ['https://app.example.com'] });
+
+    const res = await fetch(`${url}/livekit/token`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://malo.example.com',
+        'Access-Control-Request-Method': 'POST',
+      },
+    });
+
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('la respuesta real del POST sigue la misma lista, no solo el preflight', async () => {
+    const url = await start({ allowedOrigins: ['https://app.example.com'] });
+
+    const res = await fetch(`${url}/livekit/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', Origin: 'https://malo.example.com' },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('/health sigue la misma politica que el resto: no hay excepcion', async () => {
+    const url = await start({ allowedOrigins: ['https://app.example.com'] });
+
+    const permitido = await fetch(`${url}/health`, {
+      headers: { Origin: 'https://app.example.com' },
+    });
+    const ajeno = await fetch(`${url}/health`, {
+      headers: { Origin: 'https://malo.example.com' },
+    });
+
+    expect(permitido.headers.get('access-control-allow-origin')).toBe('https://app.example.com');
+    expect(ajeno.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('/health sin Origin responde 200 con lista blanca', async () => {
+    // Nota de la regla de TDD estricta: esta no es una RED de verdad. El
+    // invariante que protege (`/health` nunca rechaza una peticion) ya se
+    // cumplia antes de este cambio, con o sin lista blanca configurada -- el
+    // healthcheck del contenedor (`colyseus.Dockerfile:63`) llama sin
+    // `Origin`. Se escribe igual como red de regresion para ese invariante.
+    const url = await start({ allowedOrigins: ['https://app.example.com'] });
+
+    const res = await fetch(`${url}/health`);
+
+    expect(res.status).toBe(200);
+    // Sin cabecera `Origin` no hay nada que reflejar. Se afirma aqui y no solo
+    // en el caso "ajeno" porque es un GIVEN distinto: alli el navegador manda
+    // un origen que no esta en la lista, aqui no manda ninguno.
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('no aparece Allow-Credentials con lista blanca configurada', async () => {
+    // La lista blanca es lo que haria tentador activar credenciales: reflejar
+    // un origen concreto es justo lo que exige la spec para permitirlas. No se
+    // activan. La autenticacion viaja en un bearer token, no en cookies, asi
+    // que la cabecera no debe existir ni con lista ni sin ella
+    // (`adminRoutesWiring.test.ts:214-221` cubre el caso sin lista).
+    const url = await start({ allowedOrigins: ['https://app.example.com'] });
+
+    const preflight = await fetch(`${url}/livekit/token`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://app.example.com',
+        'Access-Control-Request-Method': 'POST',
+      },
+    });
+    const real = await fetch(`${url}/health`, {
+      headers: { Origin: 'https://app.example.com' },
+    });
+
+    expect(preflight.headers.get('access-control-allow-credentials')).toBeNull();
+    expect(real.headers.get('access-control-allow-credentials')).toBeNull();
+  });
+});
+
+describe('warnIfOriginsUnrestricted', () => {
+  it('avisa en produccion cuando no hay lista blanca', () => {
+    const sink = vi.fn();
+
+    warnIfOriginsUnrestricted([], { NODE_ENV: 'production' }, sink);
+
+    expect(sink).toHaveBeenCalledTimes(1);
+    expect(sink.mock.calls[0]?.[0]).toContain('ALLOWED_ORIGIN');
+  });
+
+  it('no avisa en produccion si hay lista', () => {
+    const sink = vi.fn();
+
+    warnIfOriginsUnrestricted(['https://app.example.com'], { NODE_ENV: 'production' }, sink);
+
+    expect(sink).not.toHaveBeenCalled();
+  });
+
+  it('no avisa fuera de produccion aunque no haya lista', () => {
+    const sink = vi.fn();
+
+    warnIfOriginsUnrestricted([], { NODE_ENV: 'test' }, sink);
+    warnIfOriginsUnrestricted([], {}, sink);
+
+    expect(sink).not.toHaveBeenCalled();
   });
 });
