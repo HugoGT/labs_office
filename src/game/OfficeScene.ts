@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import type { AnchorWriter } from './anchorChannel';
 import { preloadOfficeAssets } from './assets';
+import { beginAutoWalk, stepAutoWalk, type AutoWalkState } from './autoWalk';
 import {
   setCharacterFacing,
   setCharacterStatus,
@@ -93,8 +94,17 @@ export class OfficeScene extends Phaser.Scene {
   private unsubscribeSpeakers?: () => void;
   /** Solo se asigna bajo `__OFFICE_E2E__` (D4): produccion nunca la toca. */
   private unsubscribeTeleportToTile?: () => void;
+  private unsubscribeCallPeer?: () => void;
+  private unsubscribeRespondCall?: () => void;
+  private unsubscribeWalkToPeer?: () => void;
   /** Escritor del canal de anclas (issue #17, D4); abierto en `create()`, cerrado en SHUTDOWN. */
   private anchorWriter?: AnchorWriter;
+  /**
+   * Objetivo de auto-caminata en curso (issue #2, D9/D10). `undefined` cuando
+   * nadie esta siendo perseguido: `update()` solo dirige al reductor mientras
+   * este campo tiene valor.
+   */
+  private autoWalk?: AutoWalkState;
 
   private readonly options: OfficeSceneOptions;
   private remotes?: RemoteAvatarRegistry<RemoteAvatarContainer>;
@@ -150,6 +160,22 @@ export class OfficeScene extends Phaser.Scene {
     this.unsubscribeSpeakers = this.bridge.onCommand('speakers', ({ sessionIds }) => {
       this.applySpeakers(sessionIds);
     });
+    // Issue #2, D3: los 3 comandos de llamada, cada uno suscrito por su
+    // cuenta como los de arriba -- `walkToPeer` es ademas un seam probable
+    // por si solo, sin tener que pasar por el apreton de manos completo de
+    // aceptar una invitacion.
+    this.unsubscribeCallPeer = this.bridge.onCommand('callPeer', ({ sessionId }) => {
+      this.connection?.sendCall(sessionId);
+    });
+    this.unsubscribeRespondCall = this.bridge.onCommand('respondCall', ({ from, accept }) => {
+      this.connection?.sendCallRespond(from, accept);
+      // D3: la escena es quien sabe que "aceptar" implica caminar y quien
+      // conoce coordenadas del mundo -- React nunca aprende esa consecuencia.
+      if (accept) this.walkToPeer(from);
+    });
+    this.unsubscribeWalkToPeer = this.bridge.onCommand('walkToPeer', ({ sessionId }) => {
+      this.walkToPeer(sessionId);
+    });
 
     // D4: unico bloque muerto en produccion de este archivo -- deja tanto el
     // literal 'teleportToTile' como su handler fuera de `dist/`. Espeja
@@ -170,6 +196,9 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeSetStatus?.();
       this.unsubscribeSpeakers?.();
       this.unsubscribeTeleportToTile?.();
+      this.unsubscribeCallPeer?.();
+      this.unsubscribeRespondCall?.();
+      this.unsubscribeWalkToPeer?.();
       this.anchorWriter?.close();
       this.anchorWriter = undefined;
       this.remotes?.clear();
@@ -225,6 +254,12 @@ export class OfficeScene extends Phaser.Scene {
             this.remotes?.remove(sessionId);
             this.emitPresence(true);
           },
+          // Issue #2: mensajes sueltos del servidor, no estado sincronizado
+          // (D4) -- se relanzan tal cual al puente, mismo patron que el resto
+          // de este objeto de handlers.
+          onCallInvite: (payload) => this.bridge.emit('callinvite', payload),
+          onCallerLeft: (payload) => this.bridge.emit('callerleft', payload),
+          onCallAccepted: (payload) => this.bridge.emit('callaccepted', payload),
         },
       });
 
@@ -518,7 +553,30 @@ export class OfficeScene extends Phaser.Scene {
     walkNpcTo(this, npc, destination.tx, destination.ty);
   }
 
-  update(): void {
+  /**
+   * Arranca la auto-caminata del jugador hasta una tile libre junto al peer
+   * (issue #2, D9/D10): el reflejo de `teleportTo`, pero por steering en vez
+   * de salto, y con destino congelado en el momento de aceptar (D10: "el
+   * caller se mueve mid-walk" no persigue, no hay pathfinding en este repo).
+   */
+  private walkToPeer(sessionId: string): void {
+    const peer = this.remotes?.get(sessionId);
+    if (!peer) return; // se desconecto antes de que esto corriera: no-op silencioso.
+
+    const destination = findFreeAdjacentTile(
+      this.grid,
+      Math.floor(peer.x / TILE),
+      Math.floor(peer.y / TILE),
+    );
+    if (!destination) return;
+
+    this.autoWalk = beginAutoWalk(
+      { x: destination.tx * TILE + 16, y: destination.ty * TILE + 16 },
+      this.player,
+    );
+  }
+
+  update(_time: number, delta: number): void {
     let vx = 0;
     let vy = 0;
     if (this.cursors.left.isDown || this.wasd.A.isDown) vx = -1;
@@ -526,11 +584,59 @@ export class OfficeScene extends Phaser.Scene {
     if (this.cursors.up.isDown || this.wasd.W.isDown) vy = -1;
     else if (this.cursors.down.isDown || this.wasd.S.isDown) vy = 1;
 
-    const velocity = new Phaser.Math.Vector2(vx, vy).normalize().scale(PLAYER_SPEED);
     const body = this.player.body as Phaser.Physics.Arcade.Body;
-    body.setVelocity(velocity.x, velocity.y);
+
+    // Auto-caminata (issue #2, D9/D10): se resuelve ANTES de decidir la
+    // velocidad final del cuadro, para que todo lo que viene despues (depth,
+    // facing, throttle de red, minimapa, anclas) siga leyendo this.player.x/y
+    // sin enterarse de este bloque, exactamente como pedia el diseno D9.
+    let steeredByAutoWalk = false;
+    if (this.autoWalk) {
+      const step = stepAutoWalk({
+        state: this.autoWalk,
+        position: this.player,
+        keyboard: { vx, vy },
+        deltaMs: delta,
+        speed: PLAYER_SPEED,
+      });
+
+      if (step.kind === 'walking') {
+        this.autoWalk = step.state;
+        // TRAMPA DE INTEGRACION (ver discovery de la unit 12): jamas
+        // renormalizar esto con `new Phaser.Math.Vector2(step.vx,
+        // step.vy).normalize().scale(PLAYER_SPEED)`. El reductor ya recorta
+        // la velocidad del ULTIMO cuadro para aterrizar dentro de
+        // ARRIVE_EPSILON_PX (D10); normalizar tira esa magnitud y la
+        // reescala a una velocidad constante, asi que el jugador oscilaria
+        // alrededor del destino sin llegar nunca. Se aplica DIRECTO al body.
+        body.setVelocity(step.vx, step.vy);
+        // `facingFrom` solo mira los signos, asi que funciona igual con la
+        // velocidad ya escalada del reductor -- pero jamas con (0,0), o el
+        // avatar se congelaria mirando la ultima direccion del teclado en vez
+        // de hacia donde camina.
+        this.facing = facingFrom(step.vx, step.vy, this.facing);
+        steeredByAutoWalk = true;
+      } else {
+        this.autoWalk = undefined;
+        // D10: llegar o bloquearse detienen en silencio -- un "no pude
+        // llegar" seria ruido si la tarjeta ya se fue. Una cancelacion por
+        // input YA se esta moviendo bajo la velocidad de teclado leida
+        // arriba: no hay nada que limpiar, cae al camino normal de abajo con
+        // ese vx/vy real (esa lectura ES la cancelacion, sin listener aparte).
+        if (step.kind !== 'cancelled' || step.reason === 'blocked') {
+          vx = 0;
+          vy = 0;
+        }
+      }
+    }
+
+    if (!steeredByAutoWalk) {
+      const velocity = new Phaser.Math.Vector2(vx, vy).normalize().scale(PLAYER_SPEED);
+      body.setVelocity(velocity.x, velocity.y);
+      this.facing = facingFrom(vx, vy, this.facing);
+    }
+
     this.player.setDepth(this.player.y);
-    this.facing = facingFrom(vx, vy, this.facing);
     setCharacterFacing(this.player, this.facing);
 
     for (const npc of this.npcs) npc.setDepth(npc.y);

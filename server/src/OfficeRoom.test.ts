@@ -8,7 +8,7 @@
 
 import type { Client as ServerClient } from '@colyseus/core';
 import { Client } from 'colyseus.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from '../../src/game/mapData.ts';
 import { createOfficeServer, type OfficeServer } from './createOfficeServer.ts';
 import {
@@ -447,6 +447,31 @@ describe('OfficeRoom: invitaciones de llamada (issue #2)', () => {
     expect(left[0]).toEqual({ from: a.sessionId });
   });
 
+  it('una invitacion sobrevive al reload de nadie: si el DESTINATARIO se va y vuelve, no le llega de nuevo', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    const firstInvites = listenFor<unknown>(b, 'callinvite');
+
+    a.send('call', { to: b.sessionId });
+    await waitFor(() => firstInvites.length === 1);
+    await b.leave();
+    await waitFor(() => a.state.players.size === 1);
+
+    // Lo que se prueba aqui es lo observable por cable: nada replica las
+    // invitaciones a quien entra, asi que recargar la pagina las pierde. Que
+    // el registro ademas se limpie por dentro al irse el destinatario lo
+    // prueba la suite pura de `callInvitations.ts` (`removeAllFor` en ambos
+    // roles); desde fuera esa limpieza no se ve, solo evita que crezca.
+    const reconnected = await join('Beto');
+    await waitFor(() => reconnected.state.players.size === 2);
+    const afterReconnect = listenFor<unknown>(reconnected, 'callinvite');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(reconnected.sessionId).not.toBe(b.sessionId);
+    expect(afterReconnect).toHaveLength(0);
+  });
+
   it('D7: si el destinatario se desconecta, el emisor NO recibe callerleft (solo se avisa al reves)', async () => {
     const a = await join('Ana');
     const b = await join('Beto');
@@ -460,6 +485,81 @@ describe('OfficeRoom: invitaciones de llamada (issue #2)', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(left).toHaveLength(0);
+  });
+
+  /**
+   * Sala sin transporte: se capturan sus manejadores y se le pone un `clients`
+   * de mentira que apunta cada envio. No es un atajo para ahorrarse el
+   * WebSocket -- es la unica forma de probar sin carreras las dos cosas de
+   * abajo: el paso del tiempo (temporizadores falsos y un socket vivo no se
+   * llevan bien) y un mensaje que llega DESPUES de que el objetivo cambiase
+   * de estado. Mismo criterio que la guarda del jugador fantasma de `status`.
+   */
+  function headlessRoom() {
+    const handlers = new Map<string, (client: ServerClient, message: unknown) => void>();
+    const sent: { to: string; type: string }[] = [];
+    const room = new OfficeRoom();
+    (room as unknown as { onMessage: unknown }).onMessage = (
+      type: string,
+      handler: (client: ServerClient, message: unknown) => void,
+    ) => {
+      handlers.set(type, handler);
+      return () => {};
+    };
+    (room as unknown as { clients: unknown }).clients = {
+      getById: (sessionId: string) => ({
+        send: (type: string) => sent.push({ to: sessionId, type }),
+      }),
+    };
+    room.onCreate();
+    return { room, handlers, sent };
+  }
+
+  function seat(room: OfficeRoom, sessionId: string, name: string): void {
+    room.onJoin({ sessionId, auth: true } as unknown as ServerClient, { name });
+  }
+
+  it('D6: sin caducidad, una invitacion sigue viva y aceptable pasado un minuto', () => {
+    vi.useFakeTimers();
+    try {
+      const { room, handlers, sent } = headlessRoom();
+      seat(room, 'ana', 'Ana');
+      seat(room, 'beto', 'Beto');
+
+      handlers.get('call')!({ sessionId: 'ana' } as ServerClient, { to: 'beto' });
+      expect(sent.filter((message) => message.type === 'callinvite')).toHaveLength(1);
+
+      // Con temporizadores falsos, CUALQUIER caducidad futura se dispararia
+      // aqui: `setTimeout`, `setInterval`, o el `clock` de Colyseus, que corre
+      // sobre ellos. Si alguien reintroduce un TTL, este test se cae, que es
+      // justo lo que se quiere -- la decision de producto es que la tarjeta
+      // vive hasta que se responde.
+      vi.advanceTimersByTime(60_000);
+
+      handlers.get('callrespond')!({ sessionId: 'beto' } as ServerClient, {
+        from: 'ana',
+        accept: true,
+      });
+
+      expect(sent.filter((message) => message.type === 'callaccepted')).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('D8: el estado se lee cuando llega el mensaje, no cuando se abrio el menu', () => {
+    const { room, handlers, sent } = headlessRoom();
+    seat(room, 'ana', 'Ana');
+    seat(room, 'beto', 'Beto');
+
+    // El menu de Ana se abrio con Beto en verde y Beto se pone en rojo justo
+    // despues. La llamada que sale de esa vista vieja tiene que morir igual:
+    // el boton deshabilitado del cliente no puede ser la unica defensa, porque
+    // llega tarde por definicion.
+    handlers.get('status')!({ sessionId: 'beto' } as ServerClient, { status: 'r' });
+    handlers.get('call')!({ sessionId: 'ana' } as ServerClient, { to: 'beto' });
+
+    expect(sent).toHaveLength(0);
   });
 });
 
