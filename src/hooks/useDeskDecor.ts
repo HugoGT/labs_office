@@ -53,13 +53,21 @@ export function useDeskDecor(
   officeEndpoint: string | null,
   session: OfficeSession | null,
 ): UseDeskDecorResult {
+  /**
+   * Sin servidor o sin credencial no hay nada que preguntar, y tampoco hay
+   * espera que hacer: las dos rutas exigen token. Se resuelve ANTES del primer
+   * render, misma forma que `useDesks`, para no arrancar en `loading` y
+   * volver en el mismo instante -- ese render de mas lo pagaria la oficina
+   * entera, incluida la abierta, que nunca va a tener editor.
+   */
+  const unavailable = officeEndpoint === null || session === null;
   const baseUrl = officeEndpoint === null ? null : deriveDesksBaseUrl(officeEndpoint);
   const getIdToken = session?.getIdToken ?? null;
 
   const [catalog, setCatalog] = useState<readonly DeskDecorAsset[]>(NO_DESK_ASSETS);
   /** `null` es "no se pudo leer", y NO un escritorio pelado: ver la cabecera. */
   const [items, setItems] = useState<readonly PlacedDeskItem[] | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!unavailable);
   /**
    * Cada relectura es un valor nuevo de este contador, misma razon que en
    * `useDesks`: asi la peticion la sigue lanzando el MISMO efecto, que es

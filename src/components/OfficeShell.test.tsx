@@ -2,6 +2,8 @@ import { act, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGame } from '../game/createGame';
+import { fetchDeskCatalog, fetchMyDeskItems, saveMyDesk } from '../game/deskDecorClient';
+import type { DeskDecorAsset, PlacedDeskItem } from '../game/deskDecorPort';
 import { claimDesk, fetchOfficeDesks, releaseDesk } from '../game/desksClient';
 import type { OfficeDesk } from '../game/desksPort';
 import { BUILT_IN_SPACES_VERSION } from '../game/mapData';
@@ -17,6 +19,15 @@ vi.mock('../game/desksClient', async (importOriginal) => ({
   fetchOfficeDesks: vi.fn(),
   claimDesk: vi.fn(),
   releaseDesk: vi.fn(),
+}));
+// Mismo criterio con el editor de decoracion: doblar el unico modulo que
+// habla con `/assets` y `/me/desk` deja este archivo probando el CABLEADO --
+// que el editor se ofrece donde debe y que la escena se entera de lo guardado.
+vi.mock('../game/deskDecorClient', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../game/deskDecorClient')>()),
+  fetchDeskCatalog: vi.fn(),
+  fetchMyDeskItems: vi.fn(),
+  saveMyDesk: vi.fn(),
 }));
 // El hook ya tiene su propia suite (`useProximityAudio.test.ts`, slice 4A);
 // aqui solo importa que OfficeShell lo llame y reenvie lo que devuelve,
@@ -54,6 +65,12 @@ function proximityAudio(
 beforeEach(() => {
   vi.clearAllMocks();
   createGameMock.mockReturnValue({ destroy: vi.fn() } as unknown as Phaser.Game);
+  // Por defecto, sin decoracion que ofrecer: es el estado de un despliegue sin
+  // base de datos, y deja a cada bloque declarar lo suyo sin que los demas
+  // tengan que saber que existe un editor.
+  vi.mocked(fetchDeskCatalog).mockResolvedValue([]);
+  vi.mocked(fetchMyDeskItems).mockResolvedValue(null);
+  vi.mocked(saveMyDesk).mockResolvedValue('failed');
   // Por defecto: apagado y sin LiveKit disponible (#321 decision 2 y 3) — los
   // tests que necesitan otro estado lo sobreescriben explicitamente.
   useProximityAudioMock.mockReturnValue(proximityAudio());
@@ -657,5 +674,145 @@ describe('OfficeShell: escritorios asignables (#7, slice 5)', () => {
     expect(releaseDesk).toHaveBeenCalledWith(expect.not.objectContaining({ deskId: 'id-mesa' }));
     expect(await screen.findByText(/Dejaste/)).toBeInTheDocument();
     await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(2));
+  });
+});
+
+/**
+ * El editor de decoracion llegando a quien ocupa un escritorio (#7, slice 6).
+ * Lo que se prueba aqui es el CABLEADO: donde se ofrece el editor, donde NO,
+ * y que la escena se entera de lo guardado sin recargar la pagina.
+ *
+ * Las reglas del editor las cubre `DeskDecorEditor.test.tsx`, las lecturas
+ * `deskDecorClient.test.ts` y el ciclo de vida `useDeskDecor.test.ts`.
+ */
+describe('OfficeShell: editor de decoracion (#7, slice 6)', () => {
+  const SESION = { displayName: 'Ana Torres', getIdToken: async () => 'id-token' };
+
+  const MIA: OfficeDesk = {
+    id: 'id-mesa',
+    label: 'Mesa 4',
+    x: 320,
+    y: 384,
+    w: 96,
+    h: 96,
+    occupant: { id: 'id-ana', displayName: 'Ana Torres', items: [] },
+    mine: true,
+  };
+
+  const PLANTA: DeskDecorAsset = {
+    id: 'id-planta',
+    name: 'Planta',
+    kind: 'plant',
+    textureKey: 'plant-small',
+  };
+
+  const PUESTA: PlacedDeskItem = {
+    id: 'id-item',
+    assetId: 'id-planta',
+    slot: 4,
+    rotation: 0,
+    textureKey: 'plant-small',
+    name: 'Planta',
+  };
+
+  beforeEach(() => {
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([MIA]);
+    vi.mocked(claimDesk).mockResolvedValue('claimed');
+    vi.mocked(releaseDesk).mockResolvedValue('released');
+    vi.mocked(fetchDeskCatalog).mockResolvedValue([PLANTA]);
+    vi.mocked(fetchMyDeskItems).mockResolvedValue([PUESTA]);
+    vi.mocked(saveMyDesk).mockResolvedValue('saved');
+  });
+
+  /**
+   * Espera a que las dos lecturas del editor hayan aterrizado. El aviso del
+   * escritorio propio se compone cuando llega el clic, asi que ofrecer
+   * "Decorar" depende de lo que se sepa EN ESE INSTANTE.
+   */
+  async function readyToDecorate(): Promise<void> {
+    await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
+    await act(async () => {});
+  }
+
+  it('clicar el propio escritorio ofrece decorarlo, ademas de dejarlo', async () => {
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await readyToDecorate();
+
+    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+
+    await userEvent.click(await screen.findByRole('button', { name: /Decorar/ }));
+    expect(await screen.findByRole('dialog', { name: /Mesa 4/ })).toBeInTheDocument();
+  });
+
+  it('clicar un escritorio libre NO abre el editor: solo se decora el propio', async () => {
+    // El escritorio ajeno ni siquiera es clicable en la escena, y el libre lo
+    // que ofrece es sentarse. Un editor abierto sobre un sitio que no es tuyo
+    // guardaria tu decoracion mientras miras el de otra persona.
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await vi.waitFor(() => expect(fetchDeskCatalog).toHaveBeenCalled());
+
+    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'claim' }));
+
+    expect(await screen.findByText(/Te sentaste en/)).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('sin catalogo no se ofrece decorar nada', async () => {
+    // La degradacion de la slice: un despliegue sin `DATABASE_URL` responde
+    // 503 y la oficina se comporta exactamente como antes, sin editor.
+    vi.mocked(fetchDeskCatalog).mockResolvedValue([]);
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await vi.waitFor(() => expect(fetchDeskCatalog).toHaveBeenCalled());
+
+    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+
+    expect(await screen.findByRole('button', { name: /Dejarlo/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Decorar/ })).not.toBeInTheDocument();
+  });
+
+  it('sin poder leer el escritorio propio tampoco se ofrece decorar', async () => {
+    // Guardar reemplaza el escritorio entero: con lo puesto sin leer, el
+    // primer guardado borraria lo que nunca se vio.
+    vi.mocked(fetchMyDeskItems).mockResolvedValue(null);
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
+
+    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+
+    expect(await screen.findByRole('button', { name: /Dejarlo/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Decorar/ })).not.toBeInTheDocument();
+  });
+
+  it('guardar vuelve a leer los escritorios: la escena lo refleja sin recargar', async () => {
+    // Mismo camino que coger y soltar sitio: la lista es autoritativa y la
+    // escena redibuja lo que le llega por comando.
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(1));
+    await readyToDecorate();
+    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+    await userEvent.click(await screen.findByRole('button', { name: /Decorar/ }));
+
+    await userEvent.click(await screen.findByRole('button', { name: /^Guardar/ }));
+
+    expect(saveMyDesk).toHaveBeenCalledWith(
+      expect.objectContaining({ items: [{ assetId: 'id-planta', slot: 4, rotation: 0 }] }),
+    );
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(2));
+  });
+
+  it('sin sesion no hay editor ni peticiones de decoracion', async () => {
+    // La oficina abierta (desarrollo local, e2e) no tiene a quien atribuirle
+    // un escritorio, y las dos rutas solo podrian contestar 401.
+    render(<OfficeShell />);
+    await vi.waitFor(() => expect(createGameMock).toHaveBeenCalled());
+
+    expect(fetchDeskCatalog).not.toHaveBeenCalled();
+    expect(fetchMyDeskItems).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
