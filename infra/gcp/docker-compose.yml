@@ -159,7 +159,13 @@ services:
     networks: [office]
 
   livekit:
-    image: livekit/livekit-server:v1.13.5@sha256:3497163e15c48fef6e7830c78716f9e9d5edc28abf7aa90b61c86e93bbc306b1
+    # v1.13.7, no v1.13.5: turn.proxy_protocol / proxy_protocol_trusted_cidrs
+    # (issue #19) solo existen desde v1.13.7 (commit adf44a2e, 2026-09-09,
+    # publicado en el tag el 2026-09-14). v1.13.5 ignora en SILENCIO cualquier
+    # clave de livekit.yaml.tpl que no reconoce, asi que subir esta version es
+    # obligatorio en el MISMO commit que anade esas dos claves: escribirlas
+    # antes de esta linea seria una trampa de fallo silencioso, no un error.
+    image: livekit/livekit-server:v1.13.7@sha256:6fd3b7088874c4d119160dd688798dfec852bc014786d392caad15f6f63912a3
     restart: unless-stopped
     logging: *logging
     command: --config /etc/livekit.yaml
