@@ -53,6 +53,14 @@ describe('describeAdminError', () => {
     }
   });
 
+  it('el 400 tampoco nombra un alta: tambien lo dan mover y retirar', () => {
+    // Desde que los paneles de escritorios y de catalogo comparten este
+    // vocabulario, un 400 puede venir de unas coordenadas invalidas al MOVER
+    // un escritorio. "Los datos del alta" seria una explicacion falsa: ahi no
+    // se esta dando de alta nada.
+    expect(describeAdminError(new AdminError('invalid-request'))).not.toMatch(/alta|crear/i);
+  });
+
   it('el solape dice QUE choca, no solo que fallo', () => {
     // Un escritorio ocupa 3x3 y ni siquiera puede tocar el borde de otro. Sin
     // nombrar las coordenadas ni el tamano, quien administra solo sabe que el
