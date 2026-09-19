@@ -119,9 +119,15 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): DecorCatalo
 
     async replaceDeskConfig(userId: string, items: readonly DeskItemInput[]) {
       // El catalogo se pasa ENTERO y sin filtrar archivados, igual que la
-      // consulta de validacion de `pgDecor`: archivar impide colocar de nuevo
-      // desde el panel, no invalida el escritorio de quien ya lo tenia.
-      const normalized = normalizeDeskConfig(items, [...assets.values()]);
+      // consulta de validacion de `pgDecor`: lo retirado hay que poder MIRARLO
+      // para decidir, no esconderlo. Y junto a el va el escritorio ACTUAL de
+      // esta persona, leido antes de tocar nada, que es lo que distingue
+      // conservar una pieza retirada de volver a anadirla (D1b).
+      //
+      // La retencion es por escritorio y no global: se lee el de `userId`, no
+      // todos. Que otra persona tenga puesta la pieza no da derecho a ponersela.
+      const alreadyPlaced = (desks.get(userId) ?? []).map((row) => row.assetId);
+      const normalized = normalizeDeskConfig(items, [...assets.values()], alreadyPlaced);
 
       // El estado solo se toca cuando ya no queda nada que pueda fallar: es lo
       // que hace el ROLLBACK de `pgDecor`, y sin esto un rechazo dejaria el

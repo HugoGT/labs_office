@@ -86,15 +86,36 @@ const DESK_ROW = {
 
 const USER_ID = '55555555-5555-4555-8555-555555555555';
 
+interface DeskPoolOptions {
+  /** Lo que el catalogo contesta para el asset consultado. */
+  archivedAt?: Date | null;
+  /** `asset_id`s que la lectura del escritorio actual devuelve dentro de la transaccion. */
+  placed?: readonly string[];
+}
+
 /** Responde el catalogo a la consulta de validacion y la fila de escritorio al resto. */
-function deskPool(respond?: Responder): FakePool {
+function deskPool(respond?: Responder, options: DeskPoolOptions = {}): FakePool {
   return fakePool((text, values) => {
     if (respond) {
       const custom = respond(text, values);
       if (custom instanceof Error) return custom;
     }
-    if (squash(text).startsWith('select id, placeable_on_desk from assets')) {
-      return { rows: [{ id: ASSET_ROW.id, placeable_on_desk: true }], rowCount: 1 };
+    const sql = squash(text);
+    if (sql.startsWith('select id, placeable_on_desk')) {
+      return {
+        rows: [
+          {
+            id: ASSET_ROW.id,
+            placeable_on_desk: true,
+            archived_at: options.archivedAt ?? null,
+          },
+        ],
+        rowCount: 1,
+      };
+    }
+    if (sql.startsWith('select asset_id from user_desk_configs')) {
+      const placed = options.placed ?? [];
+      return { rows: placed.map((id) => ({ asset_id: id })), rowCount: placed.length };
     }
     return { rows: [DESK_ROW], rowCount: 1 };
   });
@@ -336,8 +357,8 @@ describe('pgDecor: replaceDeskConfig', () => {
 
   it('un asset que no es colocable se rechaza y no llega a escribir', async () => {
     const pool = fakePool((text) =>
-      squash(text).startsWith('select id, placeable_on_desk from assets')
-        ? { rows: [{ id: ASSET_ROW.id, placeable_on_desk: false }], rowCount: 1 }
+      squash(text).startsWith('select id, placeable_on_desk')
+        ? { rows: [{ id: ASSET_ROW.id, placeable_on_desk: false, archived_at: null }], rowCount: 1 }
         : { rows: [], rowCount: 0 },
     );
 
@@ -352,11 +373,7 @@ describe('pgDecor: replaceDeskConfig', () => {
   });
 
   it('un assetId que no existe se rechaza como 400 y no como violacion de FK', async () => {
-    const pool = fakePool((text) =>
-      squash(text).startsWith('select id, placeable_on_desk from assets')
-        ? { rows: [], rowCount: 0 }
-        : { rows: [], rowCount: 0 },
-    );
+    const pool = fakePool(() => ({ rows: [], rowCount: 0 }));
 
     await expect(
       createPgDecor(pool).replaceDeskConfig(USER_ID, [
@@ -365,10 +382,11 @@ describe('pgDecor: replaceDeskConfig', () => {
     ).rejects.toThrow(InvalidDeskConfigError);
   });
 
-  it('la consulta del catalogo tampoco filtra archivados: reguardar un escritorio no lo vacia', async () => {
-    // Archivar es "no se puede colocar de NUEVO desde el panel", no "tu
-    // escritorio deja de ser valido". Si esta consulta filtrase, la persona
-    // que moviese una pieza cualquiera perderia la retirada que ya tenia.
+  it('la consulta del catalogo no FILTRA archivados, los TRAE para poder decidir', async () => {
+    // Si filtrase, un asset retirado seria indistinguible de uno inexistente y
+    // la persona que moviese una pieza cualquiera perderia la retirada que ya
+    // tenia. Lo que hace falta es leer `archived_at`, no esconderlo: quien
+    // decide es `assertNotReAddingArchived`, con el escritorio actual delante.
     const pool = deskPool();
 
     await createPgDecor(pool).replaceDeskConfig(USER_ID, [
@@ -376,10 +394,60 @@ describe('pgDecor: replaceDeskConfig', () => {
     ]);
 
     const catalogQuery = pool.queries.find((q) =>
-      squash(q.text).startsWith('select id, placeable_on_desk from assets'),
+      squash(q.text).startsWith('select id, placeable_on_desk'),
     );
     expect(catalogQuery).toBeDefined();
-    expect(squash(catalogQuery!.text)).not.toContain('archived_at');
+    expect(squash(catalogQuery!.text)).toContain('archived_at');
+    expect(squash(catalogQuery!.text)).not.toContain('archived_at is null');
+  });
+
+  it('lee el escritorio actual DENTRO de la transaccion, antes del DELETE', async () => {
+    // Fuera de la transaccion, una escritura concurrente decidiria si una
+    // pieza retirada cuenta como retenida: dos guardados simultaneos podrian
+    // acordar entre ellos que si estaba puesta cuando ya no lo estaba.
+    const pool = deskPool(undefined, { placed: [ASSET_ROW.id] });
+
+    await createPgDecor(pool).replaceDeskConfig(USER_ID, [
+      { assetId: ASSET_ROW.id, slot: 0, rotation: 0 },
+    ]);
+
+    const texts = pool.queries.map((q) => squash(q.text));
+    const lectura = texts.findIndex((t) => t.startsWith('select asset_id from user_desk_configs'));
+    const borrado = texts.findIndex((t) => t.startsWith('delete from user_desk_configs'));
+    expect(lectura).toBeGreaterThan(texts.indexOf('begin'));
+    expect(lectura).toBeLessThan(borrado);
+    expect(pool.queries[lectura].values).toEqual([USER_ID]);
+  });
+
+  it('conserva una pieza retirada que ya estaba en ese escritorio (D1b)', async () => {
+    const pool = deskPool(undefined, {
+      archivedAt: new Date('2026-02-01T00:00:00.000Z'),
+      placed: [ASSET_ROW.id],
+    });
+
+    const items = await createPgDecor(pool).replaceDeskConfig(USER_ID, [
+      { assetId: ASSET_ROW.id, slot: 3, rotation: 180 },
+    ]);
+
+    expect(items).toHaveLength(1);
+    expect(pool.queries.map((q) => squash(q.text)).at(-1)).toBe('commit');
+  });
+
+  it('rechaza anadir una pieza retirada que no estaba en ese escritorio (D1b)', async () => {
+    const pool = deskPool(undefined, {
+      archivedAt: new Date('2026-02-01T00:00:00.000Z'),
+      placed: [],
+    });
+
+    await expect(
+      createPgDecor(pool).replaceDeskConfig(USER_ID, [
+        { assetId: ASSET_ROW.id, slot: 0, rotation: 0 },
+      ]),
+    ).rejects.toThrow(InvalidDeskConfigError);
+
+    const texts = pool.queries.map((q) => squash(q.text));
+    expect(texts.some((t) => t.startsWith('insert into user_desk_configs'))).toBe(false);
+    expect(texts.at(-1)).toBe('rollback');
   });
 
   it('relee la configuracion cruzada dentro de la transaccion y devuelve el tipo del puerto', async () => {

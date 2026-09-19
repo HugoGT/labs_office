@@ -182,8 +182,23 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
       const ids = [...new Set(items.map((item) => item.assetId))];
 
       return inTransaction(async (client) => {
+        // El escritorio ACTUAL se lee dentro de la MISMA transaccion que luego
+        // borra e inserta, y antes del DELETE. Fuera de ella, una escritura
+        // concurrente decidiria si una pieza retirada cuenta como retenida:
+        // dos guardados simultaneos podrian acordar entre ellos que si estaba
+        // puesta cuando ya no lo estaba. Despues del DELETE seria peor todavia
+        // -- el escritorio actual siempre estaria vacio y ninguna retirada se
+        // conservaria nunca.
+        const current = await client.query(
+          'SELECT asset_id FROM user_desk_configs WHERE user_id = $1',
+          [userId],
+        );
+
+        // `archived_at` se TRAE, no se filtra: filtrar haria que un asset
+        // retirado fuese indistinguible de uno inexistente, y quien lo tuviese
+        // puesto lo perderia al guardar cualquier otro cambio (D1b).
         const catalog = await client.query(
-          'SELECT id, placeable_on_desk FROM assets WHERE id = ANY($1::uuid[])',
+          'SELECT id, placeable_on_desk, archived_at FROM assets WHERE id = ANY($1::uuid[])',
           [ids],
         );
         const normalized = normalizeDeskConfig(
@@ -191,7 +206,9 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
           catalog.rows.map((row) => ({
             id: row.id as string,
             placeableOnDesk: row.placeable_on_desk as boolean,
+            archivedAt: (row.archived_at as Date | null) ?? null,
           })),
+          current.rows.map((row) => row.asset_id as string),
         );
 
         await client.query('DELETE FROM user_desk_configs WHERE user_id = $1', [userId]);

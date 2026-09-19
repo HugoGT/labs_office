@@ -27,9 +27,16 @@ import {
   normalizeDeskConfig,
 } from './decorRules.ts';
 
-const PLANTA = { id: 'asset-planta', placeableOnDesk: true };
-const SOFA = { id: 'asset-sofa', placeableOnDesk: false };
-const CATALOG = [PLANTA, SOFA];
+const RETIRADO_EL = new Date('2026-02-01T00:00:00.000Z');
+
+const PLANTA = { id: 'asset-planta', placeableOnDesk: true, archivedAt: null };
+const SOFA = { id: 'asset-sofa', placeableOnDesk: false, archivedAt: null };
+/** Retirada del catalogo: quien ya la tenia la conserva, nadie la vuelve a poner. */
+const RETIRADA = { id: 'asset-retirada', placeableOnDesk: true, archivedAt: RETIRADO_EL };
+const CATALOG = [PLANTA, SOFA, RETIRADA];
+
+/** Escritorio de partida vacio: la mayoria de los casos no habla de retenidos. */
+const NADA_PUESTO: readonly string[] = [];
 
 describe('assertValidSlot', () => {
   it('acepta los seis slots del escritorio', () => {
@@ -245,12 +252,12 @@ describe('assertValidDeskShape', () => {
 
 describe('normalizeDeskConfig', () => {
   it('acepta una configuracion vacia: un escritorio se puede dejar pelado', () => {
-    expect(normalizeDeskConfig([], CATALOG)).toEqual([]);
+    expect(normalizeDeskConfig([], CATALOG, NADA_PUESTO)).toEqual([]);
   });
 
   it('devuelve los items validados', () => {
     expect(
-      normalizeDeskConfig([{ assetId: PLANTA.id, slot: 0, rotation: 90 }], CATALOG),
+      normalizeDeskConfig([{ assetId: PLANTA.id, slot: 0, rotation: 90 }], CATALOG, NADA_PUESTO),
     ).toEqual([{ assetId: PLANTA.id, slot: 0, rotation: 90 }]);
   });
 
@@ -264,25 +271,26 @@ describe('normalizeDeskConfig', () => {
           { assetId: PLANTA.id, slot: 2, rotation: 90 },
         ],
         CATALOG,
+        NADA_PUESTO,
       ),
     ).toThrow(InvalidDeskConfigError);
   });
 
   it('rechaza un slot fuera de rango', () => {
     expect(() =>
-      normalizeDeskConfig([{ assetId: PLANTA.id, slot: 6, rotation: 0 }], CATALOG),
+      normalizeDeskConfig([{ assetId: PLANTA.id, slot: 6, rotation: 0 }], CATALOG, NADA_PUESTO),
     ).toThrow(InvalidDeskConfigError);
   });
 
   it('rechaza una rotacion que la base de datos no admite', () => {
     expect(() =>
-      normalizeDeskConfig([{ assetId: PLANTA.id, slot: 0, rotation: 45 }], CATALOG),
+      normalizeDeskConfig([{ assetId: PLANTA.id, slot: 0, rotation: 45 }], CATALOG, NADA_PUESTO),
     ).toThrow(InvalidDeskConfigError);
   });
 
   it('rechaza un asset que no es colocable en un escritorio', () => {
     expect(() =>
-      normalizeDeskConfig([{ assetId: SOFA.id, slot: 0, rotation: 0 }], CATALOG),
+      normalizeDeskConfig([{ assetId: SOFA.id, slot: 0, rotation: 0 }], CATALOG, NADA_PUESTO),
     ).toThrow(InvalidDeskConfigError);
   });
 
@@ -290,7 +298,7 @@ describe('normalizeDeskConfig', () => {
     // La FK de `schema.sql` tambien lo atraparia, pero como un 23503 que el
     // adaptador no puede distinguir de una averia: aqui es un 400 honesto.
     expect(() =>
-      normalizeDeskConfig([{ assetId: 'no-existe', slot: 0, rotation: 0 }], CATALOG),
+      normalizeDeskConfig([{ assetId: 'no-existe', slot: 0, rotation: 0 }], CATALOG, NADA_PUESTO),
     ).toThrow(InvalidDeskConfigError);
   });
 
@@ -299,7 +307,82 @@ describe('normalizeDeskConfig', () => {
       normalizeDeskConfig(
         [{ assetId: 7 as unknown as string, slot: 0, rotation: 0 }],
         CATALOG,
+        NADA_PUESTO,
       ),
+    ).toThrow(InvalidDeskConfigError);
+  });
+
+  /**
+   * La mitad de D1b que no es "sigue pintandose": una pieza retirada se
+   * conserva y se puede quitar, pero NO se puede volver a poner.
+   *
+   * Las dos direcciones importan y se contradicen si se implementa cualquiera
+   * de las dos a lo bruto. Un filtro que rechazase todo lo archivado haria que
+   * mover una pieza cualquiera le borrase a esa persona la retirada que ya
+   * tenia; no filtrar nada deja que cualquiera se ponga hoy lo que el catalogo
+   * retiro ayer. Lo que decide no es el asset, es si YA estaba en ESE
+   * escritorio.
+   */
+  it('deja conservar una pieza retirada que ya estaba en el escritorio', () => {
+    expect(
+      normalizeDeskConfig([{ assetId: RETIRADA.id, slot: 0, rotation: 0 }], CATALOG, [
+        RETIRADA.id,
+      ]),
+    ).toEqual([{ assetId: RETIRADA.id, slot: 0, rotation: 0 }]);
+  });
+
+  it('rechaza anadir una pieza retirada que no estaba en el escritorio', () => {
+    expect(() =>
+      normalizeDeskConfig([{ assetId: RETIRADA.id, slot: 0, rotation: 0 }], CATALOG, NADA_PUESTO),
+    ).toThrow(InvalidDeskConfigError);
+  });
+
+  it('mover de slot una pieza retirada retenida sigue valiendo: es el mismo asset', () => {
+    // Retener no es recolocar. Mientras el id siga en el escritorio, cambiar
+    // su hueco o su giro no es volver a anadirla.
+    expect(
+      normalizeDeskConfig([{ assetId: RETIRADA.id, slot: 4, rotation: 180 }], CATALOG, [
+        RETIRADA.id,
+      ]),
+    ).toEqual([{ assetId: RETIRADA.id, slot: 4, rotation: 180 }]);
+  });
+
+  it('retener una retirada no abre la puerta a anadir otra distinta', () => {
+    const OTRA_RETIRADA = {
+      id: 'asset-otra-retirada',
+      placeableOnDesk: true,
+      archivedAt: RETIRADO_EL,
+    };
+
+    expect(() =>
+      normalizeDeskConfig(
+        [
+          { assetId: RETIRADA.id, slot: 0, rotation: 0 },
+          { assetId: OTRA_RETIRADA.id, slot: 1, rotation: 0 },
+        ],
+        [...CATALOG, OTRA_RETIRADA],
+        [RETIRADA.id],
+      ),
+    ).toThrow(InvalidDeskConfigError);
+  });
+
+  it('quitar una pieza retirada siempre se puede: lo que no viene no se valida', () => {
+    // Es la otra mitad de "se puede quitar": un escritorio que ya no la
+    // menciona no tiene nada que justificar.
+    expect(normalizeDeskConfig([], CATALOG, [RETIRADA.id])).toEqual([]);
+  });
+
+  it('un asset vivo no necesita estar ya puesto', () => {
+    expect(
+      normalizeDeskConfig([{ assetId: PLANTA.id, slot: 0, rotation: 0 }], CATALOG, NADA_PUESTO),
+    ).toHaveLength(1);
+  });
+
+  it('estar ya puesto no salva a un asset que no es colocable', () => {
+    // La retencion perdona el archivado, no el resto de las reglas: un asset
+    // marcado como no colocable nunca debio estar ahi.
+    expect(() =>
+      normalizeDeskConfig([{ assetId: SOFA.id, slot: 0, rotation: 0 }], CATALOG, [SOFA.id]),
     ).toThrow(InvalidDeskConfigError);
   });
 
@@ -309,6 +392,6 @@ describe('normalizeDeskConfig', () => {
       { assetId: PLANTA.id, slot: 1, rotation: 180 },
     ];
 
-    expect(normalizeDeskConfig(items, CATALOG).map((item) => item.slot)).toEqual([3, 1]);
+    expect(normalizeDeskConfig(items, CATALOG, NADA_PUESTO).map((item) => item.slot)).toEqual([3, 1]);
   });
 });

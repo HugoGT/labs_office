@@ -964,6 +964,58 @@ describe('rutas de decoracion (#7, slice 4)', () => {
     await server.shutdown();
   });
 
+  it('POST /me/desk conserva una pieza retirada ya puesta, pero rechaza anadirla de nuevo (D1b)', async () => {
+    // El diseno dice que una pieza retirada se conserva, se puede quitar y no
+    // se puede volver a anadir. Las tres, de extremo a extremo: sin el 400 del
+    // final, "no se puede re-anadir" seria solo que el selector la esconde.
+    const { server, url } = await decorServer();
+    const created = (await (
+      await fetch(`${url}/admin/assets`, {
+        method: 'POST',
+        headers: BEARER_ADMIN,
+        body: JSON.stringify(ASSET),
+      })
+    ).json()) as { id: string };
+    const items = [{ assetId: created.id, slot: 0, rotation: 90 }];
+
+    await fetch(`${url}/me/desk`, {
+      method: 'POST',
+      headers: BEARER_EMPLEADO,
+      body: JSON.stringify({ items }),
+    });
+    await fetch(`${url}/admin/assets/${created.id}/archive`, {
+      method: 'POST',
+      headers: BEARER_ADMIN,
+    });
+
+    // Conservarla al reguardar: sigue ahi.
+    const conservada = await fetch(`${url}/me/desk`, {
+      method: 'POST',
+      headers: BEARER_EMPLEADO,
+      body: JSON.stringify({ items: [{ assetId: created.id, slot: 3, rotation: 0 }] }),
+    });
+    expect(conservada.status).toBe(200);
+
+    // Quitarla: se puede.
+    const vaciada = await fetch(`${url}/me/desk`, {
+      method: 'POST',
+      headers: BEARER_EMPLEADO,
+      body: JSON.stringify({ items: [] }),
+    });
+    expect(vaciada.status).toBe(200);
+
+    // Volver a ponerla: ya no.
+    const reanadida = await fetch(`${url}/me/desk`, {
+      method: 'POST',
+      headers: BEARER_EMPLEADO,
+      body: JSON.stringify({ items }),
+    });
+    expect(reanadida.status).toBe(400);
+    expect(await reanadida.json()).toEqual({ error: 'invalid-request' });
+
+    await server.shutdown();
+  });
+
   it('POST /me/desk con un slot invalido responde 400', async () => {
     const { server, url } = await decorServer();
 

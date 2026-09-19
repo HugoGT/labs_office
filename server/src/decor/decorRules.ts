@@ -170,11 +170,45 @@ export function normalizeCreateAssetInput(input: CreateAssetInput): NormalizedCr
 export interface PlaceableAsset {
   id: string;
   placeableOnDesk: boolean;
+  /** `null` mientras siga en el catalogo. Ver `assertNotReAddingArchived`. */
+  archivedAt: Date | null;
 }
 
 export function assertPlaceableOnDesk(asset: PlaceableAsset): void {
   if (!asset.placeableOnDesk) {
     throw new InvalidDeskConfigError(`el asset ${asset.id} no se puede colocar en un escritorio`);
+  }
+}
+
+/**
+ * La mitad de D1b que no es "sigue pintandose". La frase entera del diseno es
+ * que una pieza retirada se conserva, se puede quitar y NO se puede volver a
+ * anadir, y las tres partes tienen que ser ciertas a la vez.
+ *
+ * Por eso lo que decide no es el asset sino si YA estaba en ESE escritorio:
+ *
+ *   - Rechazar todo lo archivado cumpliria "no se puede re-anadir" y romperia
+ *     "se conserva": como `replaceDeskConfig` manda el escritorio entero,
+ *     mover una pieza cualquiera reenviaria tambien la retirada y esa persona
+ *     la perderia al guardar, sin haber pedido nada de eso.
+ *   - No comprobar nada cumpliria "se conserva" y romperia "no se puede
+ *     re-anadir": cualquiera podria ponerse hoy lo que el catalogo retiro
+ *     ayer, y retirar algo del catalogo no significaria nada.
+ *
+ * Retener tampoco es recolocar: mientras el id siga en el escritorio, cambiar
+ * su hueco o su giro es seguir teniendo la misma pieza, no volver a anadirla.
+ * Y esta excepcion perdona el archivado y NADA MAS -- `assertPlaceableOnDesk`
+ * se sigue aplicando igual, porque un asset que nunca debio estar ahi no gana
+ * el derecho a quedarse por llevar tiempo.
+ */
+export function assertNotReAddingArchived(
+  asset: PlaceableAsset,
+  alreadyPlaced: ReadonlySet<string>,
+): void {
+  if (asset.archivedAt !== null && !alreadyPlaced.has(asset.id)) {
+    throw new InvalidDeskConfigError(
+      `el asset ${asset.id} esta retirado del catalogo y no estaba en este escritorio`,
+    );
   }
 }
 
@@ -223,21 +257,27 @@ export function assertValidDeskShape(items: readonly DeskItemInput[]): void {
 
 /**
  * Valida una configuracion de escritorio completa contra el catalogo: la forma
- * de arriba, mas que cada asset exista y admita ir en un escritorio.
+ * de arriba, mas que cada asset exista, admita ir en un escritorio y, si esta
+ * retirado, ya estuviese en ese escritorio (ver `assertNotReAddingArchived`).
  *
  * El orden de llegada se conserva. Ordenar aqui esconderia que el orden no
  * significa nada -- quien lo lee es `getDeskConfig`, que ordena por slot.
  *
- * El catalogo se pasa como argumento en vez de consultarse: este modulo no
- * habla con ningun almacen, igual que `spaceRules.ts` recibe los rectangulos
- * con los que comparar.
+ * `catalog` y `alreadyPlaced` se pasan como argumentos en vez de consultarse:
+ * este modulo no habla con ningun almacen, igual que `spaceRules.ts` recibe
+ * los rectangulos con los que comparar. Quien los lee es el adaptador, y en
+ * `pgDecor` los lee DENTRO de la misma transaccion que luego escribe -- si
+ * `alreadyPlaced` viniese de una lectura de fuera, una escritura concurrente
+ * decidiria si esta retirada se retiene o se rechaza.
  */
 export function normalizeDeskConfig(
   items: readonly DeskItemInput[],
   catalog: readonly PlaceableAsset[],
+  alreadyPlaced: readonly string[],
 ): NormalizedDeskItem[] {
   assertValidDeskShape(items);
   const byId = new Map(catalog.map((asset) => [asset.id, asset]));
+  const retained = new Set(alreadyPlaced);
 
   return items.map((item) => {
     const asset = byId.get(item.assetId);
@@ -247,6 +287,7 @@ export function normalizeDeskConfig(
       throw new InvalidDeskConfigError(`el asset ${item.assetId} no existe en el catalogo`);
     }
     assertPlaceableOnDesk(asset);
+    assertNotReAddingArchived(asset, retained);
 
     return { assetId: item.assetId, slot: item.slot, rotation: item.rotation as DeskRotation };
   });

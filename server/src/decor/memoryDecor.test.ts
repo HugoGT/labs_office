@@ -254,11 +254,18 @@ describe('createMemoryDecor: replaceDeskConfig', () => {
     expect((await catalog.getDeskConfig(USER)).map((item) => item.slot)).toEqual([5]);
   });
 
-  it('deja colocar un asset ya archivado que la persona vuelve a guardar (D1b)', async () => {
-    // Archivar es "no se puede colocar de NUEVO desde el panel", no "tu
-    // escritorio deja de ser valido": si esto fallase, mover una pieza
-    // cualquiera le borraria a esa persona la retirada que ya tenia puesta.
+  /**
+   * D1b entero: una pieza retirada se conserva, se puede quitar y no se puede
+   * volver a anadir. Mismo comportamiento que `pgDecor`, y no por simetria
+   * decorativa: las rutas se prueban contra ESTE adaptador, asi que si aqui
+   * bastase con que el asset existiera, la suite certificaria una permisividad
+   * que produccion no tiene.
+   */
+  it('conserva un asset archivado que la persona ya tenia puesto (D1b)', async () => {
+    // Si esto fallase, mover una pieza cualquiera le borraria a esa persona la
+    // retirada que ya tenia, sin que hubiese pedido nada de eso.
     const catalog = decor();
+    await catalog.replaceDeskConfig(USER, [{ assetId: PLANTA.id, slot: 0, rotation: 0 }]);
     await catalog.archiveAsset(PLANTA.id);
 
     const items = await catalog.replaceDeskConfig(USER, [
@@ -266,5 +273,51 @@ describe('createMemoryDecor: replaceDeskConfig', () => {
     ]);
 
     expect(items).toHaveLength(1);
+  });
+
+  it('rechaza anadir un asset archivado que no estaba en ese escritorio (D1b)', async () => {
+    const catalog = decor();
+    await catalog.archiveAsset(PLANTA.id);
+
+    await expect(
+      catalog.replaceDeskConfig(USER, [{ assetId: PLANTA.id, slot: 0, rotation: 0 }]),
+    ).rejects.toThrow(InvalidDeskConfigError);
+  });
+
+  it('mover de slot o girar una pieza retirada retenida sigue valiendo', async () => {
+    // Retener no es recolocar: es el mismo asset id, asi que cambiar su hueco
+    // no es volver a anadirlo.
+    const catalog = decor();
+    await catalog.replaceDeskConfig(USER, [{ assetId: PLANTA.id, slot: 0, rotation: 0 }]);
+    await catalog.archiveAsset(PLANTA.id);
+
+    const items = await catalog.replaceDeskConfig(USER, [
+      { assetId: PLANTA.id, slot: 5, rotation: 270 },
+    ]);
+
+    expect(items).toEqual([expect.objectContaining({ slot: 5, rotation: 270 })]);
+  });
+
+  it('quitar una pieza retirada se puede, y luego ya no se puede recuperar', async () => {
+    // Las dos mitades de la frase del diseno, en el mismo test: se puede
+    // quitar, y una vez fuera no vuelve.
+    const catalog = decor();
+    await catalog.replaceDeskConfig(USER, [{ assetId: PLANTA.id, slot: 0, rotation: 0 }]);
+    await catalog.archiveAsset(PLANTA.id);
+
+    expect(await catalog.replaceDeskConfig(USER, [])).toEqual([]);
+    await expect(
+      catalog.replaceDeskConfig(USER, [{ assetId: PLANTA.id, slot: 0, rotation: 0 }]),
+    ).rejects.toThrow(InvalidDeskConfigError);
+  });
+
+  it('el escritorio de otra persona no sirve para retener: la retencion es por escritorio', async () => {
+    const catalog = decor();
+    await catalog.replaceDeskConfig(USER, [{ assetId: PLANTA.id, slot: 0, rotation: 0 }]);
+    await catalog.archiveAsset(PLANTA.id);
+
+    await expect(
+      catalog.replaceDeskConfig('otra-persona', [{ assetId: PLANTA.id, slot: 0, rotation: 0 }]),
+    ).rejects.toThrow(InvalidDeskConfigError);
   });
 });

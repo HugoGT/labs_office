@@ -545,6 +545,61 @@ describe('handleReplaceDeskConfig', () => {
     expect((result.body.items as { slot: number }[]).map((item) => item.slot)).toEqual([0]);
   });
 
+  /**
+   * D1b sobre HTTP. El puerto ya distingue conservar de re-anadir; lo que
+   * falta por comprobar es que la ruta traduce ese rechazo a 400 y no lo deja
+   * escapar como 500 -- es un cuerpo que el cliente puede corregir, no una
+   * averia del servidor.
+   */
+  it('conservar una pieza retirada que ya estaba puesta responde 200', async () => {
+    const { deps, decor } = harness();
+    await handleReplaceDeskConfig(BEARER_EMPLEADO, { items }, deps);
+    await decor.archiveAsset(PLANTA.id);
+
+    const result = await handleReplaceDeskConfig(BEARER_EMPLEADO, { items }, deps);
+
+    expect(result.status).toBe(200);
+    expect((result.body.items as unknown[]).length).toBe(1);
+  });
+
+  it('anadir una pieza retirada que no estaba puesta responde 400, no 500', async () => {
+    const { deps, decor } = harness();
+    await decor.archiveAsset(PLANTA.id);
+
+    const result = await handleReplaceDeskConfig(BEARER_EMPLEADO, { items }, deps);
+
+    expect(result.status).toBe(400);
+    expect(result.body).toEqual({ error: 'invalid-request' });
+  });
+
+  it('mover de slot una pieza retirada retenida responde 200', async () => {
+    const { deps, decor } = harness();
+    await handleReplaceDeskConfig(BEARER_EMPLEADO, { items }, deps);
+    await decor.archiveAsset(PLANTA.id);
+
+    const result = await handleReplaceDeskConfig(
+      BEARER_EMPLEADO,
+      { items: [{ assetId: PLANTA.id, slot: 4, rotation: 180 }] },
+      deps,
+    );
+
+    expect(result.status).toBe(200);
+    expect((result.body.items as { slot: number }[])[0].slot).toBe(4);
+  });
+
+  it('el escritorio de otra persona no sirve para retener una pieza retirada', async () => {
+    // La retencion la gana el escritorio propio: si valiese el de cualquiera,
+    // bastaria con que una sola persona tuviese la pieza para que el catalogo
+    // retirado siguiese repartiendose.
+    const { deps, decor } = harness();
+    await decor.replaceDeskConfig(OTRA.id, [{ assetId: PLANTA.id, slot: 0, rotation: 0 }]);
+    await decor.archiveAsset(PLANTA.id);
+
+    const result = await handleReplaceDeskConfig(BEARER_EMPLEADO, { items }, deps);
+
+    expect(result.status).toBe(400);
+  });
+
   it('un error desconocido del almacen se relanza para que el cableado conteste 500', async () => {
     const { deps } = harness();
     const roto: DecorDeps = {
