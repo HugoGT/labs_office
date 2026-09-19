@@ -242,7 +242,10 @@ export class OfficeScene extends Phaser.Scene {
       // esta reconciliacion, quien elige "No molestar" durante ese hueco queda
       // publicado "En linea": aislado en su cliente y audible para el resto.
       if (this.status !== joinedStatus) connection.sendStatus(this.status);
-      this.remotes = createRemoteAvatarRegistry(createPhaserAvatarSink(this), {
+      // Unit 8 (issue #2): el sink ahora necesita el bridge para poder emitir
+      // `npcmenu` al clicar un peer real; toque mecanico, la escena ya guarda
+      // `this.bridge` desde su constructor.
+      this.remotes = createRemoteAvatarRegistry(createPhaserAvatarSink(this, this.bridge), {
         ignoreSessionId: connection.sessionId,
       });
       this.emitPresence(true);
