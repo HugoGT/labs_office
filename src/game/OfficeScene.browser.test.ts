@@ -554,6 +554,11 @@ function fakeConnector(sessionId = 'yo') {
     sessionId,
     sendMove: (x, y, facing) => sent.push({ x, y, facing }),
     sendStatus: (status) => statuses.push(status),
+    // Invitaciones de llamada (issue #2): sin doble propio todavia, esta
+    // escena no las emite hasta la unidad 12. Se declaran para satisfacer el
+    // contrato de `OfficeConnection`.
+    sendCall: () => {},
+    sendCallRespond: () => {},
     leave: async () => {
       left = true;
     },
@@ -819,6 +824,8 @@ describe('OfficeScene: comando setStatus via el puente (#1)', () => {
       sessionId: 'mi-sesion',
       sendMove: () => {},
       sendStatus: (status) => statuses.push(status),
+      sendCall: () => {},
+      sendCallRespond: () => {},
       leave: async () => {},
     };
 
