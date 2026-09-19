@@ -152,3 +152,88 @@ describe('schema.sql: lo que no puede faltar', () => {
     expect(sentencias).toContain('ALTER TABLE audit_log');
   });
 });
+
+describe('schema.sql: las cuatro tablas de PRD-7 (#7)', () => {
+  it('crea las cuatro tablas nuevas solo si no existen', () => {
+    expect(schema).toContain('create table if not exists spaces');
+    expect(schema).toContain('create table if not exists assets');
+    expect(schema).toContain('create table if not exists space_layouts');
+    expect(schema).toContain('create table if not exists user_desk_configs');
+  });
+
+  it('acota las coordenadas y el tamano de un espacio con CHECK', () => {
+    expect(schema).toContain('x integer not null check (x >= 0)');
+    expect(schema).toContain('y integer not null check (y >= 0)');
+    expect(schema).toContain('w integer not null check (w > 0)');
+    expect(schema).toContain('h integer not null check (h > 0)');
+  });
+
+  it('la capacidad es opcional pero, si esta, es positiva', () => {
+    expect(schema).toContain('capacity integer check (capacity is null or capacity > 0)');
+  });
+
+  it('un espacio NO tiene archived_at: borrarlo es un DELETE de verdad (D1b)', () => {
+    // Acotado al bloque de `spaces`, no al fichero entero: `assets` SI tiene
+    // `archived_at` (siguiente bloque), asi que una busqueda global no
+    // distinguiria "ausente en spaces" de "ausente en todas partes".
+    const spacesBlock = schema.slice(
+      schema.indexOf('create table if not exists spaces'),
+      schema.indexOf('create table if not exists assets'),
+    );
+    expect(spacesBlock).not.toContain('archived_at');
+    expect(schema).toContain('archived_at timestamptz');
+  });
+
+  it('impide dos espacios solapados con una restriccion de exclusion GiST, sin extension', () => {
+    // Verificado empiricamente en la fase de apply de este cambio (#7) contra
+    // Postgres real (WASM, sin ninguna extension instalada): `box`/GiST
+    // (box_ops) es de nucleo, `EXCLUDE USING gist` no necesita `postgis` ni
+    // ninguna `CREATE EXTENSION`. Ver nota del spike en apply-progress.
+    expect(schema).toContain('drop constraint if exists spaces_no_overlap');
+    expect(schema).toContain(
+      'exclude using gist (box(point(x, y), point(x + w, y + h)) with &&)',
+    );
+    expect(schema).not.toContain('create extension');
+  });
+
+  it('slug y nombre de un espacio son unicos sin distinguir mayusculas', () => {
+    expect(schema).toContain('unique index if not exists spaces_slug_unique on spaces (lower(slug))');
+    expect(schema).toContain('unique index if not exists spaces_name_unique on spaces (lower(name))');
+  });
+
+  it('el catalogo de assets acota el tipo y el slug es unico', () => {
+    expect(schema).toContain("check (kind in ('furniture', 'decor', 'plant'))");
+    expect(schema).toContain('unique index if not exists assets_slug_unique on assets (lower(slug))');
+  });
+
+  it('un layout referencia espacio y asset con acciones de borrado distintas (D1b)', () => {
+    // Borrar un Space es un DELETE de verdad y se lleva su layout con el
+    // (CASCADE); borrar un Asset esta BLOQUEADO mientras algo lo use
+    // (RESTRICT) -- eso es lo que obliga al admin a confrontar que esta
+    // borrando colocaciones ajenas.
+    expect(schema).toContain('space_id uuid not null references spaces(id) on delete cascade');
+    expect(schema).toContain('asset_id uuid not null references assets(id) on delete restrict');
+  });
+
+  it('la rotacion de un layout esta acotada a los cuatro giros de 90 grados', () => {
+    expect(schema).toContain('rotation smallint not null default 0 check (rotation in (0, 90, 180, 270))');
+  });
+
+  it('la decoracion de escritorio referencia al usuario con CASCADE y un slot unico por usuario', () => {
+    // CASCADE en `user_id`: si se borra la cuenta, su decoracion de
+    // escritorio no tiene a quien pertenecer.
+    expect(schema).toContain('user_id uuid not null references users(id) on delete cascade');
+    expect(schema).toContain('slot smallint not null check (slot between 0 and 5)');
+    expect(schema).toContain('unique index if not exists user_desk_slot_unique on user_desk_configs (user_id, slot)');
+  });
+
+  it('siembra los dos espacios de siempre de forma idempotente', () => {
+    expect(schema).toContain('insert into spaces (id, slug, name, x, y, w, h) values');
+    expect(schema).toContain('on conflict (id) do nothing');
+  });
+
+  it('NO pide ninguna extension nueva para las cuatro tablas de PRD-7', () => {
+    expect(schema).not.toContain('create extension');
+    expect(schema).not.toContain('postgis');
+  });
+});
