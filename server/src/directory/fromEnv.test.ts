@@ -92,3 +92,29 @@ describe('directoryFromEnv', () => {
     expect(pool.ended).toBe(1);
   });
 });
+
+describe('directoryFromEnv, espacios (#7, slice 3)', () => {
+  it('con DATABASE_URL construye tambien el directorio de espacios', () => {
+    const pool = fakePool();
+    const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, () => pool);
+
+    expect(runtime?.spaces).toBeDefined();
+  });
+
+  it('los espacios salen del MISMO pool que el directorio de usuarios', async () => {
+    // Un segundo pool contra la misma base seria el doble de conexiones que la
+    // instancia cuenta, y ademas `directory.close()` solo cerraria el suyo:
+    // el otro quedaria vivo tras el apagado.
+    let built = 0;
+    const pool = fakePool();
+    const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, () => {
+      built++;
+      return pool;
+    });
+
+    await runtime!.spaces.listSpaces();
+
+    expect(built).toBe(1);
+    expect(pool.queries.at(-1)?.text).toContain('FROM spaces');
+  });
+});

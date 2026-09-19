@@ -311,15 +311,20 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
    * Mismo patron que `auth`, con una pieza mas: del entorno sale ademas la
    * migracion, porque aplicar el esquema necesita el pool y el pool no sale del
    * puerto (ver `fromEnv.ts`). Un directorio inyectado por un test no tiene
-   * esquema que aplicar, asi que su `migrate` no hace nada.
+   * esquema que aplicar, asi que no hay `migrate` que llamar.
+   *
+   * El runtime del entorno se resuelve UNA vez y de el se sacan sus dos piezas
+   * por separado (#7, slice 3). Antes esta rama fabricaba un `DirectoryRuntime`
+   * postizo alrededor del directorio inyectado; ya no cabe, porque el runtime
+   * de verdad trae ademas los espacios y un test que inyecta un directorio en
+   * memoria no tiene espacios que inyectar con el. Cada pieza sigue su propio
+   * override, igual que `auth` e `identityAdmin`.
    */
-  const directoryRuntime: DirectoryRuntime | undefined =
-    overrides?.directory !== undefined
-      ? overrides.directory
-        ? { directory: overrides.directory, async migrate() {} }
-        : undefined
-      : directoryFromEnv(process.env);
-  const directory = directoryRuntime?.directory;
+  const envRuntime: DirectoryRuntime | undefined =
+    overrides?.directory === undefined ? directoryFromEnv(process.env) : undefined;
+
+  const directory =
+    overrides?.directory !== undefined ? (overrides.directory ?? undefined) : envRuntime?.directory;
 
   app.get('/health', (_req, res) => {
     // `auth` expone el modo EFECTIVO, no la variable de entorno: es la unica
@@ -453,7 +458,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
       // No contradice la degradacion de `bootstrapConfig.ts`: aquello es "sin
       // configuracion, sin directorio", y esto es "con configuracion que no se
       // puede cumplir". Lo segundo no es un modo degradado, es una averia.
-      await directoryRuntime?.migrate();
+      await envRuntime?.migrate();
       await gameServer.listen(port);
       return this.port();
     },
