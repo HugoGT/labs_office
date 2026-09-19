@@ -14,6 +14,13 @@ let server: OfficeServer;
 let endpoint: string;
 const connections: OfficeConnection[] = [];
 
+// Un servidor por test da aislamiento de estado, y cada `Server` de Colyseus
+// registra su propio handler de `uncaughtException`; con las pruebas de
+// invitaciones de llamada (issue #2) se pasa del limite por defecto de 10.
+// Es ruido del arnes, no una fuga del codigo propio -- mismo ajuste que
+// `OfficeRoom.test.ts`.
+process.setMaxListeners(100);
+
 beforeEach(async () => {
   server = createOfficeServer();
   endpoint = `ws://localhost:${await server.listen(0)}`;
@@ -32,14 +39,23 @@ function recorder() {
   const added: RemotePlayerSnapshot[] = [];
   const changed: RemotePlayerSnapshot[] = [];
   const removed: string[] = [];
+  const callInvites: { from: string; name: string }[] = [];
+  const callersLeft: { from: string }[] = [];
+  const callsAccepted: { by: string; name: string }[] = [];
   return {
     added,
     changed,
     removed,
+    callInvites,
+    callersLeft,
+    callsAccepted,
     handlers: {
       onAdd: (s: RemotePlayerSnapshot) => added.push(s),
       onChange: (s: RemotePlayerSnapshot) => changed.push(s),
       onRemove: (id: string) => removed.push(id),
+      onCallInvite: (payload: { from: string; name: string }) => callInvites.push(payload),
+      onCallerLeft: (payload: { from: string }) => callersLeft.push(payload),
+      onCallAccepted: (payload: { by: string; name: string }) => callsAccepted.push(payload),
     },
   };
 }
@@ -176,5 +192,67 @@ describe('connectOfficeRoom: estado de presencia (#1)', () => {
     await waitFor(() =>
       watcher.added.some((s) => s.sessionId === aislada.sessionId && s.status === 'r'),
     );
+  });
+});
+
+/**
+ * Invitaciones de llamada (issue #2), a traves del envoltorio de cliente. El
+ * cableado del lado servidor ya tiene su propia suite en `OfficeRoom.test.ts`;
+ * aqui se prueba que `sendCall`/`sendCallRespond` viajan de verdad y que los
+ * tres handlers nuevos disparan con la forma que promete `OfficeRoomHandlers`.
+ */
+describe('connectOfficeRoom: invitaciones de llamada (issue #2)', () => {
+  it('sendCall llega al otro cliente como onCallInvite, con quien llama y su nombre', async () => {
+    const watcher = recorder();
+    const b = await connect('Beto', watcher.handlers);
+    const a = await connect('Ana', recorder().handlers);
+    await waitFor(() => watcher.added.some((s) => s.sessionId === a.sessionId));
+
+    a.sendCall(b.sessionId);
+
+    await waitFor(() => watcher.callInvites.length === 1);
+    expect(watcher.callInvites[0]).toEqual({ from: a.sessionId, name: 'Ana' });
+  });
+
+  it('sendCallRespond con accept:true llega como onCallAccepted a quien llamo', async () => {
+    const watcherA = recorder();
+    const a = await connect('Ana', watcherA.handlers);
+    const b = await connect('Beto', recorder().handlers);
+    await waitFor(() => watcherA.added.some((s) => s.sessionId === b.sessionId));
+
+    a.sendCall(b.sessionId);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    b.sendCallRespond(a.sessionId, true);
+
+    await waitFor(() => watcherA.callsAccepted.length === 1);
+    expect(watcherA.callsAccepted[0]).toEqual({ by: b.sessionId, name: 'Beto' });
+  });
+
+  it('sendCallRespond con accept:false no dispara onCallAccepted: pasar es silencioso', async () => {
+    const watcherA = recorder();
+    const a = await connect('Ana', watcherA.handlers);
+    const b = await connect('Beto', recorder().handlers);
+    await waitFor(() => watcherA.added.some((s) => s.sessionId === b.sessionId));
+
+    a.sendCall(b.sessionId);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    b.sendCallRespond(a.sessionId, false);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(watcherA.callsAccepted).toHaveLength(0);
+  });
+
+  it('cuando quien llamo se desconecta, el destinatario ve onCallerLeft', async () => {
+    const watcherB = recorder();
+    const a = await connect('Ana', recorder().handlers);
+    const b = await connect('Beto', watcherB.handlers);
+    await waitFor(() => watcherB.added.some((s) => s.sessionId === a.sessionId));
+
+    a.sendCall(b.sessionId);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await a.leave();
+
+    await waitFor(() => watcherB.callersLeft.length === 1);
+    expect(watcherB.callersLeft[0]).toEqual({ from: a.sessionId });
   });
 });

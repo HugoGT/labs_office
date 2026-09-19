@@ -60,6 +60,16 @@ export interface OfficeRoomHandlers {
   onAdd(snapshot: RemotePlayerSnapshot): void;
   onChange(snapshot: RemotePlayerSnapshot): void;
   onRemove(sessionId: string): void;
+  /**
+   * Invitaciones de llamada (issue #2). Opcionales porque los mensajes que las
+   * disparan son server-local (D4, no viven en `officeProtocol.ts`): un
+   * consumidor que aun no sabe de llamadas -- como el arnes de pruebas de
+   * `OfficeScene.browser.test.ts` -- no tiene que declarar tres manejadores
+   * mudos solo para seguir compilando.
+   */
+  onCallInvite?(payload: { from: string; name: string }): void;
+  onCallerLeft?(payload: { from: string }): void;
+  onCallAccepted?(payload: { by: string; name: string }): void;
 }
 
 export interface ConnectOfficeRoomOptions {
@@ -112,6 +122,10 @@ export interface OfficeConnection {
   sessionId: string;
   sendMove(x: number, y: number, facing: Facing): void;
   sendStatus(status: PresenceStatus): void;
+  /** Pide invitar a `to` a una llamada. Sin agrupar, como `sendStatus`: es un gesto humano, no un flujo continuo. */
+  sendCall(to: string): void;
+  /** Responde a quien nos llamo: aceptar o pasar viajan por el mismo mensaje (D3, cableado del servidor). */
+  sendCallRespond(from: string, accept: boolean): void;
   leave(): Promise<void>;
 }
 
@@ -161,6 +175,19 @@ export async function connectOfficeRoom({
     handlers.onRemove(sessionId);
   });
 
+  // Mensajes sueltos del servidor (issue #2), no estado sincronizado: no hay
+  // `players.onChange` que los cubra porque no describen a nadie del mapa,
+  // describen un evento puntual.
+  room.onMessage('callinvite', (payload: { from: string; name: string }) => {
+    handlers.onCallInvite?.(payload);
+  });
+  room.onMessage('callerleft', (payload: { from: string }) => {
+    handlers.onCallerLeft?.(payload);
+  });
+  room.onMessage('callaccepted', (payload: { by: string; name: string }) => {
+    handlers.onCallAccepted?.(payload);
+  });
+
   const throttle = createMoveThrottle({
     intervalMs: moveIntervalMs,
     send: (move) => room.send('move', move),
@@ -175,6 +202,12 @@ export async function connectOfficeRoom({
     // humano y raro, y agrupar podria tragarse justo el que aisla a alguien.
     sendStatus(next) {
       room.send('status', { status: next });
+    },
+    sendCall(to) {
+      room.send('call', { to });
+    },
+    sendCallRespond(from, accept) {
+      room.send('callrespond', { from, accept });
     },
     async leave() {
       throttle.dispose();
