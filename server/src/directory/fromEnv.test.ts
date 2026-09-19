@@ -147,6 +147,38 @@ describe('directoryFromEnv, decoracion (#7, slice 4)', () => {
   it('no trae migracion propia: las tablas ya estan en el mismo schema.sql', () => {
     const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, fakePool);
 
-    expect(Object.keys(runtime!)).toEqual(['directory', 'spaces', 'decor', 'migrate']);
+    expect(Object.keys(runtime!)).toEqual(['directory', 'spaces', 'decor', 'desks', 'migrate']);
+  });
+});
+
+describe('directoryFromEnv, escritorios (#7, slice 5)', () => {
+  it('con DATABASE_URL construye tambien el directorio de escritorios', () => {
+    const pool = fakePool();
+    const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, () => pool);
+
+    expect(runtime?.desks).toBeDefined();
+  });
+
+  it('los escritorios salen del MISMO pool que todo lo demas', async () => {
+    // Misma razon que los espacios y la decoracion: un cuarto pool contra la
+    // misma base seria el cuadruple de conexiones que la instancia cuenta, y
+    // `directory.close()` solo cerraria el suyo.
+    let built = 0;
+    const pool = fakePool();
+    const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, () => {
+      built++;
+      return pool;
+    });
+
+    await runtime!.desks.listDesks();
+
+    expect(built).toBe(1);
+    expect(pool.queries.at(-1)?.text).toContain('FROM desks');
+  });
+
+  it('sin DATABASE_URL no hay escritorios que servir', () => {
+    // Es el estado real de cualquier despliegue sin base de datos, y lo que
+    // convierte las rutas en 503. Ver `createOfficeServer`.
+    expect(directoryFromEnv({}, fakePool)).toBeUndefined();
   });
 });

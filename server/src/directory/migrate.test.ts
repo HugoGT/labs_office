@@ -223,8 +223,42 @@ describe('schema.sql: las cuatro tablas de PRD-7 (#7)', () => {
     // CASCADE en `user_id`: si se borra la cuenta, su decoracion de
     // escritorio no tiene a quien pertenecer.
     expect(schema).toContain('user_id uuid not null references users(id) on delete cascade');
-    expect(schema).toContain('slot smallint not null check (slot between 0 and 5)');
+    expect(schema).toContain('slot smallint not null check (slot between 0 and 8)');
     expect(schema).toContain('unique index if not exists user_desk_slot_unique on user_desk_configs (user_id, slot)');
+  });
+
+  it('el escritorio tiene NUEVE huecos, y el CHECK se refresca en una base que ya existia', () => {
+    // El rango nacio en 0..5 y el escritorio resulto ser de 3x3 tiles, que son
+    // nueve cajas. Las tres que faltaban no se pueden ganar reescribiendo el
+    // `CREATE TABLE`: `IF NOT EXISTS` no toca una tabla que ya existe, asi que
+    // en un despliegue vivo el CHECK viejo seguiria rechazando el slot 6 y la
+    // persona veria un 500 al decorar la fila de abajo de su escritorio.
+    //
+    // Mismo par DROP/ADD idempotente que `audit_log_action_check`, y por la
+    // misma razon. El nombre no se inventa: es el que Postgres le pone al
+    // CHECK en linea de `slot`, `<tabla>_<columna>_check`.
+    expect(schema).toContain(
+      'alter table user_desk_configs drop constraint if exists user_desk_configs_slot_check',
+    );
+    expect(schema).toContain(
+      'alter table user_desk_configs add constraint user_desk_configs_slot_check check (slot between 0 and 8)',
+    );
+  });
+
+  it('el CHECK en linea y el refrescado dicen lo MISMO', () => {
+    // Converge igual en una base nueva y en una vieja solo si las dos copias
+    // coinciden: en la nueva el `CREATE TABLE` pone la primera y el ADD la
+    // sustituye por la segunda, y dos rangos distintos harian que el esquema
+    // significase una cosa antes del ALTER y otra despues. Mismo precedente
+    // que `audit_log`, que tambien repite su lista en los dos sitios.
+    const enLinea = schema.match(/slot smallint not null check \(slot between (\d+) and (\d+)\)/);
+    const refrescado = schema.match(
+      /add constraint user_desk_configs_slot_check check \(slot between (\d+) and (\d+)\)/,
+    );
+
+    expect(enLinea).not.toBeNull();
+    expect(refrescado).not.toBeNull();
+    expect(enLinea!.slice(1)).toEqual(refrescado!.slice(1));
   });
 
   it('siembra los dos espacios de siempre de forma idempotente', () => {
@@ -235,5 +269,63 @@ describe('schema.sql: las cuatro tablas de PRD-7 (#7)', () => {
   it('NO pide ninguna extension nueva para las cuatro tablas de PRD-7', () => {
     expect(schema).not.toContain('create extension');
     expect(schema).not.toContain('postgis');
+  });
+});
+
+describe('schema.sql: los escritorios asignables (#7, slice 5)', () => {
+  const desksBlock = schema.slice(schema.indexOf('create table if not exists desks'));
+
+  it('crea la tabla solo si no existe', () => {
+    expect(schema).toContain('create table if not exists desks');
+  });
+
+  it('guarda TILES y no pixeles, igual que spaces', () => {
+    expect(desksBlock).toContain('x integer not null check (x >= 0), y integer not null check (y >= 0)');
+  });
+
+  it('NO guarda w ni h: un escritorio es 3x3 SIEMPRE', () => {
+    // Una columna que pudiese decir otra cosa que 3 contradiria al CHECK de
+    // `slot`, que cuenta nueve cajas, y a la restriccion de exclusion de aqui
+    // abajo, que mide el area con un 3 literal. Dos fuentes para el mismo
+    // numero es una de mas.
+    expect(desksBlock).not.toMatch(/\bw integer\b/);
+    expect(desksBlock).not.toMatch(/\bh integer\b/);
+  });
+
+  it('el ocupante es una FK a users que se ANULA al borrar la cuenta', () => {
+    // SET NULL y no CASCADE: el escritorio es mobiliario de la oficina, no
+    // propiedad de quien lo usa. Borrar a una persona libera su sitio; borrar
+    // el sitio no deberia poder pasarle a nadie por borrar una cuenta.
+    expect(desksBlock).toContain('occupant_id uuid references users(id) on delete set null');
+  });
+
+  it('una persona ocupa como mucho UN escritorio, con un indice unico parcial', () => {
+    // Parcial porque muchos escritorios pueden estar libres a la vez y NULL no
+    // colisiona consigo mismo en un unique normal de forma fiable de leer.
+    // Mismo precedente que `users_single_superadmin`.
+    expect(schema).toContain('create unique index if not exists desks_single_occupant on desks (occupant_id)');
+    expect(schema).toContain('where occupant_id is not null');
+  });
+
+  it('impide dos escritorios solapados con una restriccion de exclusion GiST, sin extension', () => {
+    // Mismo mecanismo y mismo par DROP/ADD que `spaces_no_overlap`: no existe
+    // forma `IF NOT EXISTS` para una restriccion de exclusion.
+    expect(schema).toContain('drop constraint if exists desks_no_overlap');
+    expect(schema).toContain(
+      'exclude using gist (box(point(x, y), point(x + 3, y + 3)) with &&)',
+    );
+    expect(schema).not.toContain('create extension');
+  });
+
+  it('la decoracion NO se ata al escritorio, sino a la persona', () => {
+    // La propiedad del producto: la decoracion de alguien le SIGUE al
+    // escritorio que ocupe. `user_desk_configs` ya esta indexada por
+    // `user_id`; una columna `desk_id` la anclaria a un sitio y la perderia en
+    // cuanto esa persona se mudase a otro.
+    const deskConfigsBlock = schema.slice(
+      schema.indexOf('create table if not exists user_desk_configs'),
+      schema.indexOf('unique index if not exists user_desk_slot_unique'),
+    );
+    expect(deskConfigsBlock).not.toContain('desk_id');
   });
 });

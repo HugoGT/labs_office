@@ -471,7 +471,7 @@ describe('handleReplaceDeskConfig', () => {
 
     const result = await handleReplaceDeskConfig(
       BEARER_EMPLEADO,
-      { items: [{ assetId: PLANTA.id, slot: 6, rotation: 0 }] },
+      { items: [{ assetId: PLANTA.id, slot: 9, rotation: 0 }] },
       deps,
     );
 

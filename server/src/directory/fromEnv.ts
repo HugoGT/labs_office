@@ -18,6 +18,8 @@ import { createPgDirectory, type DirectoryPool } from './pgDirectory.ts';
 import { createDirectoryPool } from './pool.ts';
 import { createPgDecor } from '../decor/pgDecor.ts';
 import type { DecorCatalog } from '../decor/decorPort.ts';
+import { createPgDesks } from '../desks/pgDesks.ts';
+import type { DeskDirectory } from '../desks/desksPort.ts';
 import { createPgSpaces } from '../spaces/pgSpaces.ts';
 import type { SpacesDirectory } from '../spaces/spacesPort.ts';
 
@@ -45,6 +47,17 @@ export interface DirectoryRuntime {
    * el mismo `schema.sql` que aplica `migrate()` de aqui abajo.
    */
   decor: DecorCatalog;
+  /**
+   * Escritorios asignables del PRD 7 (#7, slice 5). Cuelga del MISMO runtime y
+   * del MISMO pool que los otros tres, por la misma razon exacta: sale del
+   * MISMO `DATABASE_URL`, y un cuarto pool contra la misma base seria el
+   * cuadruple de conexiones que la instancia cuenta con `directory.close()`
+   * cerrando solo una de ellas.
+   *
+   * Tampoco lleva `migrate` propio: `desks` ya esta en el mismo `schema.sql`
+   * que aplica `migrate()` de aqui abajo.
+   */
+  desks: DeskDirectory;
   /** Aplica el esquema. Idempotente: corre en cada arranque. Ver `migrate.ts`. */
   migrate(): Promise<void>;
 }
@@ -64,6 +77,7 @@ export function directoryFromEnv(
     directory: createPgDirectory(pool, config),
     spaces: createPgSpaces(pool),
     decor: createPgDecor(pool),
+    desks: createPgDesks(pool),
     migrate: () => migrate(pool),
   };
 }

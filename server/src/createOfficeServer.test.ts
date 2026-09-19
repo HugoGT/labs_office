@@ -18,6 +18,8 @@ import type { DirectoryUser, UserDirectory } from './directory/directoryPort.ts'
 import { createMemoryDirectory } from './directory/memoryDirectory.ts';
 import { createMemoryDecor } from './decor/memoryDecor.ts';
 import type { DecorCatalog } from './decor/decorPort.ts';
+import { createMemoryDesks } from './desks/memoryDesks.ts';
+import type { DeskDirectory } from './desks/desksPort.ts';
 import { createMemorySpaces } from './spaces/memorySpaces.ts';
 import type { SpacesDirectory } from './spaces/spacesPort.ts';
 import { OFFICE_ROOM_NAME } from './OfficeRoom.ts';
@@ -1053,6 +1055,311 @@ describe('rutas de decoracion (#7, slice 4)', () => {
 
     expect(respuestas.map((res) => res.status)).toEqual([503, 503, 503, 503, 503]);
     expect(await respuestas[0].json()).toEqual({ error: 'decor-not-configured' });
+    await server.shutdown();
+  });
+});
+
+/**
+ * El cableado de las rutas de escritorios (#7, slice 5). Lo que se prueba aqui
+ * es la TRADUCCION -- que cada ruta existe, en su verbo, y que el estado "sin
+ * almacen" responde 503 y no 404 -- no las reglas, que ya cubre
+ * `desksRoutes.test.ts` sin levantar servidor.
+ *
+ * Con una excepcion que si vale la pena de extremo a extremo: que un cuerpo
+ * con un `userId` ajeno no pueda sentar ni levantar a otra persona. Los
+ * handlers puros ni siquiera reciben cuerpo, pero eso solo significa algo si
+ * Express tampoco se lo pasa, y eso se ve aqui.
+ *
+ * Todo va por POST y ninguna por PUT/PATCH/DELETE a proposito: el middleware
+ * de CORS anuncia `GET,POST,OPTIONS`, asi que un verbo de mas se bloquearia en
+ * el preflight del navegador antes de llegar a Express. Misma forma que
+ * `/admin/spaces/:id/delete` y `/admin/assets/:id/archive`.
+ */
+describe('rutas de escritorios (#7, slice 5)', () => {
+  const ADMIN_DESKS: DirectoryUser = {
+    id: 'id-admin',
+    uid: 'uid-admin',
+    email: 'admin@example.com',
+    displayName: 'Admin',
+    role: 'admin',
+    status: 'active',
+    expiresAt: null,
+    invitedBy: null,
+    createdAt: new Date('2025-12-01T00:00:00.000Z'),
+  };
+
+  const ANA_DESKS: DirectoryUser = {
+    ...ADMIN_DESKS,
+    id: 'id-ana',
+    uid: 'uid-ana',
+    email: 'ana@example.com',
+    displayName: 'Ana',
+    role: 'employee',
+  };
+
+  const BRUNO_DESKS: DirectoryUser = {
+    ...ANA_DESKS,
+    id: 'id-bruno',
+    uid: 'uid-bruno',
+    email: 'bruno@example.com',
+    displayName: 'Bruno',
+  };
+
+  const desksVerifier: IdTokenVerifier = {
+    async verify(token: unknown) {
+      for (const person of [ADMIN_DESKS, ANA_DESKS, BRUNO_DESKS]) {
+        if (token === `valido-${person.uid}`) {
+          return { uid: person.uid!, email: person.email, name: person.displayName };
+        }
+      }
+      return null;
+    },
+  };
+
+  const JSON_HEADERS = { 'Content-Type': 'application/json' };
+  const BEARER_ADMIN = { Authorization: 'Bearer valido-uid-admin', ...JSON_HEADERS };
+  const BEARER_ANA = { Authorization: 'Bearer valido-uid-ana', ...JSON_HEADERS };
+  const BEARER_BRUNO = { Authorization: 'Bearer valido-uid-bruno', ...JSON_HEADERS };
+
+  async function desksServer(overrides: { desks?: DeskDirectory | null } = {}) {
+    const directory = createMemoryDirectory({ seed: [ADMIN_DESKS, ANA_DESKS, BRUNO_DESKS] });
+    const decor = createMemoryDecor();
+    const desks =
+      overrides.desks === undefined ? createMemoryDesks({ directory, decor }) : overrides.desks;
+    const server = createOfficeServer({
+      auth: desksVerifier,
+      directory,
+      decor,
+      desks,
+      identityAdmin: null,
+    });
+    const port = await server.listen(0);
+    return { server, desks, decor, url: `http://localhost:${port}` };
+  }
+
+  async function createDesk(url: string, body: Record<string, unknown>) {
+    const res = await fetch(`${url}/admin/desks`, {
+      method: 'POST',
+      headers: BEARER_ADMIN,
+      body: JSON.stringify(body),
+    });
+    return (await res.json()) as { id: string };
+  }
+
+  it('GET /desks exige credencial, a diferencia de GET /spaces', async () => {
+    const { server, url } = await desksServer();
+
+    expect((await fetch(`${url}/desks`)).status).toBe(401);
+    await server.shutdown();
+  });
+
+  it('GET /desks con credencial sirve la oficina entera', async () => {
+    const { server, url } = await desksServer();
+
+    const res = await fetch(`${url}/desks`, { headers: BEARER_ANA });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ desks: [] });
+    await server.shutdown();
+  });
+
+  it('POST /admin/desks crea el escritorio y GET /desks ya lo devuelve', async () => {
+    const { server, url } = await desksServer();
+
+    await createDesk(url, { label: 'Mesa 1', x: 4, y: 4 });
+
+    const office = (await (await fetch(`${url}/desks`, { headers: BEARER_ANA })).json()) as {
+      desks: { label: string; w: number; occupant: unknown }[];
+    };
+    expect(office.desks).toEqual([
+      expect.objectContaining({ label: 'Mesa 1', x: 4, y: 4, w: 3, h: 3, occupant: null }),
+    ]);
+    await server.shutdown();
+  });
+
+  it('POST /admin/desks sin rol de administracion responde 403', async () => {
+    const { server, url } = await desksServer();
+
+    const res = await fetch(`${url}/admin/desks`, {
+      method: 'POST',
+      headers: BEARER_ANA,
+      body: JSON.stringify({ label: 'Mesa', x: 0, y: 0 }),
+    });
+
+    expect(res.status).toBe(403);
+    await server.shutdown();
+  });
+
+  it('POST /admin/desks/:id renombra sin cambiar el id', async () => {
+    const { server, url } = await desksServer();
+    const created = await createDesk(url, { label: 'Antes', x: 0, y: 0 });
+
+    const res = await fetch(`${url}/admin/desks/${created.id}`, {
+      method: 'POST',
+      headers: BEARER_ADMIN,
+      body: JSON.stringify({ label: 'Despues' }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ id: created.id, label: 'Despues' });
+    await server.shutdown();
+  });
+
+  it('POST /admin/desks/:id encima de otro responde 409', async () => {
+    const { server, url } = await desksServer();
+    await createDesk(url, { label: 'Mesa 1', x: 0, y: 0 });
+    const segundo = await createDesk(url, { label: 'Mesa 2', x: 8, y: 0 });
+
+    const res = await fetch(`${url}/admin/desks/${segundo.id}`, {
+      method: 'POST',
+      headers: BEARER_ADMIN,
+      body: JSON.stringify({ x: 1, y: 0 }),
+    });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'desk-overlap' });
+    await server.shutdown();
+  });
+
+  it('POST /admin/desks/:id con un id que no existe responde 404', async () => {
+    const { server, url } = await desksServer();
+
+    const res = await fetch(`${url}/admin/desks/no-existe`, {
+      method: 'POST',
+      headers: BEARER_ADMIN,
+      body: JSON.stringify({ label: 'Mesa' }),
+    });
+
+    expect(res.status).toBe(404);
+    await server.shutdown();
+  });
+
+  it('POST /admin/desks/:id/delete borra el escritorio', async () => {
+    const { server, desks, url } = await desksServer();
+    const created = await createDesk(url, { label: 'Mesa', x: 0, y: 0 });
+
+    const res = await fetch(`${url}/admin/desks/${created.id}/delete`, {
+      method: 'POST',
+      headers: BEARER_ADMIN,
+    });
+
+    expect(res.status).toBe(200);
+    expect(await desks!.listDesks()).toEqual([]);
+    await server.shutdown();
+  });
+
+  it('POST /desks/:id/claim sienta a quien manda el token, no a quien diga el cuerpo', async () => {
+    // La propiedad de la slice, comprobada de extremo a extremo: un `userId`
+    // ajeno en el cuerpo no puede sentar a otra persona. Los handlers puros ni
+    // reciben cuerpo, pero eso solo significa algo si Express tampoco lo pasa.
+    const { server, desks, url } = await desksServer();
+    const created = await createDesk(url, { label: 'Mesa', x: 0, y: 0 });
+
+    const res = await fetch(`${url}/desks/${created.id}/claim`, {
+      method: 'POST',
+      headers: BEARER_ANA,
+      body: JSON.stringify({ userId: BRUNO_DESKS.id, occupantId: BRUNO_DESKS.id }),
+    });
+
+    expect(res.status).toBe(200);
+    expect((await desks!.getDesk(created.id))?.occupantId).toBe(ANA_DESKS.id);
+    await server.shutdown();
+  });
+
+  it('POST /desks/:id/claim de un escritorio ya ocupado responde 409', async () => {
+    const { server, url } = await desksServer();
+    const created = await createDesk(url, { label: 'Mesa', x: 0, y: 0 });
+    await fetch(`${url}/desks/${created.id}/claim`, { method: 'POST', headers: BEARER_ANA });
+
+    const res = await fetch(`${url}/desks/${created.id}/claim`, {
+      method: 'POST',
+      headers: BEARER_BRUNO,
+    });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'desk-taken' });
+    await server.shutdown();
+  });
+
+  it('coger otro escritorio suelta el anterior y la decoracion SIGUE a la persona', async () => {
+    const { server, decor, url } = await desksServer();
+    const viejo = await createDesk(url, { label: 'Mesa 1', x: 0, y: 0 });
+    const nuevo = await createDesk(url, { label: 'Mesa 2', x: 8, y: 0 });
+    const asset = (await (
+      await fetch(`${url}/admin/assets`, {
+        method: 'POST',
+        headers: BEARER_ADMIN,
+        body: JSON.stringify({
+          name: 'Planta Grande',
+          kind: 'plant',
+          textureKey: 'plant-large',
+          w: 1,
+          h: 1,
+          placeableOnDesk: true,
+        }),
+      })
+    ).json()) as { id: string };
+    await decor!.replaceDeskConfig(ANA_DESKS.id, [
+      { assetId: asset.id, slot: 8, rotation: 0 },
+    ]);
+
+    await fetch(`${url}/desks/${viejo.id}/claim`, { method: 'POST', headers: BEARER_ANA });
+    await fetch(`${url}/desks/${nuevo.id}/claim`, { method: 'POST', headers: BEARER_ANA });
+
+    const office = (await (await fetch(`${url}/desks`, { headers: BEARER_ANA })).json()) as {
+      desks: { id: string; occupant: { items: unknown[] } | null }[];
+    };
+    expect(office.desks.find((desk) => desk.id === viejo.id)?.occupant).toBeNull();
+    expect(office.desks.find((desk) => desk.id === nuevo.id)?.occupant?.items).toHaveLength(1);
+    await server.shutdown();
+  });
+
+  it('POST /me/desk/release es idempotente y solo suelta lo propio', async () => {
+    const { server, desks, url } = await desksServer();
+    const deAna = await createDesk(url, { label: 'Mesa 1', x: 0, y: 0 });
+    const deBruno = await createDesk(url, { label: 'Mesa 2', x: 8, y: 0 });
+    await fetch(`${url}/desks/${deAna.id}/claim`, { method: 'POST', headers: BEARER_ANA });
+    await fetch(`${url}/desks/${deBruno.id}/claim`, { method: 'POST', headers: BEARER_BRUNO });
+
+    const primera = await fetch(`${url}/me/desk/release`, {
+      method: 'POST',
+      headers: BEARER_ANA,
+      body: JSON.stringify({ userId: BRUNO_DESKS.id }),
+    });
+    const segunda = await fetch(`${url}/me/desk/release`, { method: 'POST', headers: BEARER_ANA });
+
+    expect([primera.status, segunda.status]).toEqual([200, 200]);
+    expect((await desks!.getDesk(deAna.id))?.occupantId).toBeNull();
+    expect((await desks!.getDesk(deBruno.id))?.occupantId).toBe(BRUNO_DESKS.id);
+    await server.shutdown();
+  });
+
+  it('sin almacen las seis rutas responden 503 y nunca 404', async () => {
+    // Un 404 aqui es indistinguible del `index.html` que sirve Caddy cuando
+    // falta su bloque `handle`: dos averias con el mismo sintoma y causas
+    // opuestas. El 503 afirma que la ruta existe y que falta la configuracion.
+    // El cliente degrada a no pintar ningun escritorio asignable.
+    const { server, url } = await desksServer({ desks: null });
+
+    const respuestas = await Promise.all([
+      fetch(`${url}/desks`, { headers: BEARER_ANA }),
+      fetch(`${url}/admin/desks`, {
+        method: 'POST',
+        headers: BEARER_ADMIN,
+        body: JSON.stringify({ label: 'Mesa', x: 0, y: 0 }),
+      }),
+      fetch(`${url}/admin/desks/cualquiera`, {
+        method: 'POST',
+        headers: BEARER_ADMIN,
+        body: JSON.stringify({ label: 'Mesa' }),
+      }),
+      fetch(`${url}/admin/desks/cualquiera/delete`, { method: 'POST', headers: BEARER_ADMIN }),
+      fetch(`${url}/desks/cualquiera/claim`, { method: 'POST', headers: BEARER_ANA }),
+      fetch(`${url}/me/desk/release`, { method: 'POST', headers: BEARER_ANA }),
+    ]);
+
+    expect(respuestas.map((res) => res.status)).toEqual([503, 503, 503, 503, 503, 503]);
+    expect(await respuestas[0].json()).toEqual({ error: 'desks-not-configured' });
     await server.shutdown();
   });
 });
