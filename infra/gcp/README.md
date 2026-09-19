@@ -363,8 +363,8 @@ sola en el primer inicio de sesión.
 - **Roles** (Admin/Empleado/Invitado): hace falta el backend del issue #7. Hoy toda
   cuenta válida entra con los mismos permisos. El issue #24 trae el directorio que
   los guarda y el panel que los reparte; ver más abajo.
-- **CORS**: sigue en `*`. Es el issue #9, y ahora que la ruta del token está atada a
-  la sesión autenticada su riesgo es mucho menor, pero no desaparece.
+- ~~**CORS**: sigue en `*`.~~ Resuelto por el issue #9: `ALLOWED_ORIGIN` ya viaja en
+  el `.env` que genera `office-deploy.sh`, con `APP_HOST` como origen permitido.
 
 Fuera de alcance por decisión, no por pendiente:
 
@@ -620,7 +620,8 @@ Cuando toque, lo que hay que tocar:
    `build-arg` que el workflow deriva de `APP_HOST`.
 3. Actualizar la variable de repositorio `APP_HOST` y volver a desplegar, para que
    el bundle se reconstruya con el `VITE_COLYSEUS_URL` nuevo.
-4. Estrechar el `Access-Control-Allow-Origin: *` de
-   `server/src/createOfficeServer.ts` al origen real (ya anotado en `TODOS.md`).
+4. Confirmar que `ALLOWED_ORIGIN` sigue al `APP_HOST` nuevo: `office-deploy.sh`
+   ya lo interpola en el `.env` generado (issue #9), no hace falta tocar nada
+   a mano salvo que el host cambie de esquema.
 
 No hace falta recrear la VM ni la IP en ninguno de los cuatro pasos.
