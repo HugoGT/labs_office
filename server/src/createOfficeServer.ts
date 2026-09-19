@@ -174,8 +174,10 @@ export interface OfficeServerOverrides {
    */
   identityAdmin?: IdentityAdmin | null;
   /**
-   * Lista blanca de origenes para `/admin/*`, normalmente de `ALLOWED_ORIGIN`.
-   * Vacia o ausente mantiene el `*` de hoy (ver el middleware de CORS).
+   * Lista blanca de origenes para TODAS las rutas que sirve Express
+   * (`/livekit/token`, `/health`, `/admin/*`), normalmente de
+   * `ALLOWED_ORIGIN`. Vacia o ausente mantiene el `*` de hoy (ver el
+   * middleware de CORS).
    */
   allowedOrigins?: readonly string[];
 }
@@ -183,7 +185,8 @@ export interface OfficeServerOverrides {
 /**
  * Lee `ALLOWED_ORIGIN` como lista separada por comas. Ausente o vacia devuelve
  * lista vacia, que el middleware interpreta como "sigue el comportamiento de
- * hoy": sin esto, un despliegue existente se quedaria sin panel al actualizar.
+ * hoy": sin esto, un despliegue existente se quedaria abierto de par en par al
+ * actualizar.
  */
 function allowedOriginsFromEnv(env: { ALLOWED_ORIGIN?: string }): readonly string[] {
   return (env.ALLOWED_ORIGIN ?? '')
@@ -203,39 +206,40 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   // fetch del token de LiveKit se bloquea antes de llegar a esta ruta, y
   // `connectLivekitRoom` jamas progresa.
   //
-  // Por que `*` se sostiene AHORA, que no es lo que decia esta nota antes de
-  // #8: la ruta sigue sin usar cookies ni credenciales de navegador, asi que
-  // ningun origen tercero puede hacer que el navegador adjunte una sesion
-  // ajena. Lo que ha cambiado es que ya no basta con el `sessionId`: con auth
-  // activa hace falta ademas un ID token en el CUERPO, que un sitio tercero no
-  // tiene forma de obtener. Sin auth, en cambio, `*` si deja que cualquier
-  // pagina pida un token para un `sessionId` que haya averiguado, que es
-  // exactamente el modo degradado que describe `authConfig.ts`.
+  // La politica es UNA para todo lo que sirve Express (#9). #24 la estreno
+  // solo bajo `/admin/*`; mantener esa excepcion obligaba a justificar ruta
+  // por ruta por que `/livekit/token` seguia abierto de par en par, y la
+  // respuesta honesta era que nadie lo habia vuelto a mirar. Se borra la
+  // rama en vez de ampliarla: una condicion menos que leer y ningun hueco
+  // que recordar.
   //
-  // Apretar CORS del TODO sigue siendo la issue #9. Lo que #24 cambia es solo
-  // `/admin/*`, y por dos motivos concretos:
+  // Tampoco hay excepcion para `/health`. Las cabeceras de CORS solo las
+  // hace cumplir un navegador, y sus tres consumidores reales no lo son: el
+  // healthcheck del contenedor (`colyseus.Dockerfile`), el humo de CI y el
+  // arranque de los e2e (`e2e/harness.mjs`) llaman sin `Origin` y no leen la
+  // respuesta. Una excepcion no protegeria a nadie y si anadiria una rama.
   //
-  //  1. Es la primera ruta del servidor que autentica por CABECERA
-  //     (`Authorization: Bearer`) y no por el cuerpo. Una cabecera que no es
-  //     "simple" segun la spec de CORS obliga a declararla en
-  //     `Access-Control-Allow-Headers`, o el navegador bloquea la peticion
-  //     antes de que salga. Con la lista de `Content-Type` a secas que valia
-  //     para `/livekit/token`, el panel entero no llegaria ni a intentarlo.
-  //  2. Detras hay endpoints que CREAN cuentas. El argumento de arriba -- "`*`
-  //     se sostiene porque no hay credenciales de navegador" -- sigue siendo
-  //     cierto, pero deja de ser suficiente como unica defensa: `ALLOWED_ORIGIN`
-  //     es lo que hace que una pagina ajena no pueda ni empezar la conversacion.
+  // Nada de esto RECHAZA una peticion: aqui solo se decide si se emite
+  // `Access-Control-Allow-Origin`. Un cliente que no sea navegador entra
+  // igual, con lista o sin ella. Lo que la lista impide es que una pagina de
+  // un origen ajeno pueda LEER la respuesta.
   //
-  // Sin `ALLOWED_ORIGIN` se mantiene exactamente el comportamiento de hoy. No
-  // es dejadez: el desarrollo local y la suite e2e viven de ese `*`, y un
-  // default que los rompiese convertiria este cambio en una migracion forzosa.
+  // Ojo con el alcance: `/matchmake/*` no pasa por aqui. Colyseus se queda
+  // con el listener de `request` del servidor HTTP y responde esas rutas por
+  // su cuenta, con su propio `*`. Este middleware cubre Express, no el
+  // puerto entero.
+  //
+  // Sin `ALLOWED_ORIGIN` se mantiene exactamente el `*` de hoy. No es
+  // dejadez: el desarrollo local y la suite e2e viven de el -- el preview de
+  // Vite escoge puerto en cada corrida, asi que no hay origen fijo que
+  // declarar -- y un default que los rompiese convertiria este cambio en una
+  // migracion forzosa.
   const allowedOrigins = overrides?.allowedOrigins ?? allowedOriginsFromEnv(process.env);
 
   app.use((req, res, next) => {
-    const isAdmin = req.path.startsWith('/admin');
     const origin = req.header('Origin');
 
-    if (isAdmin && allowedOrigins.length > 0) {
+    if (allowedOrigins.length > 0) {
       // Se REFLEJA el origen concreto en vez de devolver la lista: la spec solo
       // admite un valor. `Vary: Origin` evita que una cache intermedia sirva la
       // respuesta de un origen permitido a otro que no lo esta.

@@ -20,7 +20,7 @@ import { OFFICE_ROOM_NAME } from './OfficeRoom.ts';
 import type { OfficeState } from './schema.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 
-process.setMaxListeners(50);
+process.setMaxListeners(100);
 
 let server: OfficeServer;
 let baseUrl: string;
@@ -507,5 +507,97 @@ describe('POST /livekit/token con auth desactivada: nada cambia', () => {
     const sinLivekit = await postToken({ sessionId: room.sessionId });
     expect(sinLivekit.status).toBe(503);
     expect((await readBody(sinLivekit)).error).toBe('livekit-not-configured');
+  });
+});
+
+const overriddenServers: OfficeServer[] = [];
+
+/**
+ * Arranca un servidor con overrides propios (lista blanca incluida) y lo
+ * registra para apagarse en `afterEach`, igual que en `adminRoutesWiring.test.ts:65-70`.
+ * Separado del `server`/`beforeEach` de arriba porque estos tests necesitan un
+ * `allowedOrigins` distinto por caso, no el servidor por defecto sin lista.
+ */
+async function start(overrides?: Parameters<typeof createOfficeServer>[0]): Promise<string> {
+  const overridden = createOfficeServer(overrides);
+  overriddenServers.push(overridden);
+  const port = await overridden.listen(0);
+  return `http://localhost:${port}`;
+}
+
+afterEach(async () => {
+  await Promise.all(overriddenServers.splice(0).map((s) => s.shutdown()));
+});
+
+describe('CORS con lista blanca (#9)', () => {
+  it('preflight de /livekit/token refleja un origen de la lista y marca Vary', async () => {
+    const url = await start({ allowedOrigins: ['https://app.example.com'] });
+
+    const res = await fetch(`${url}/livekit/token`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://app.example.com',
+        'Access-Control-Request-Method': 'POST',
+      },
+    });
+
+    expect(res.headers.get('access-control-allow-origin')).toBe('https://app.example.com');
+    expect(res.headers.get('vary')).toContain('Origin');
+  });
+
+  it('preflight de /livekit/token no responde nada a un origen ajeno', async () => {
+    const url = await start({ allowedOrigins: ['https://app.example.com'] });
+
+    const res = await fetch(`${url}/livekit/token`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://malo.example.com',
+        'Access-Control-Request-Method': 'POST',
+      },
+    });
+
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('la respuesta real del POST sigue la misma lista, no solo el preflight', async () => {
+    const url = await start({ allowedOrigins: ['https://app.example.com'] });
+
+    const res = await fetch(`${url}/livekit/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', Origin: 'https://malo.example.com' },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('/health sigue la misma politica que el resto: no hay excepcion', async () => {
+    const url = await start({ allowedOrigins: ['https://app.example.com'] });
+
+    const permitido = await fetch(`${url}/health`, {
+      headers: { Origin: 'https://app.example.com' },
+    });
+    const ajeno = await fetch(`${url}/health`, {
+      headers: { Origin: 'https://malo.example.com' },
+    });
+
+    expect(permitido.headers.get('access-control-allow-origin')).toBe('https://app.example.com');
+    expect(ajeno.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('/health sin Origin responde 200 con lista blanca', async () => {
+    // Nota de la regla de TDD estricta: esta no es una RED de verdad. El
+    // invariante que protege (`/health` nunca rechaza una peticion) ya se
+    // cumplia antes de este cambio, con o sin lista blanca configurada -- el
+    // healthcheck del contenedor (`colyseus.Dockerfile:63`) llama sin
+    // `Origin`. Se escribe igual como red de regresion para ese invariante; la
+    // ausencia del propio `access-control-allow-origin` ya la cubre el caso
+    // "ajeno" de la prueba anterior.
+    const url = await start({ allowedOrigins: ['https://app.example.com'] });
+
+    const res = await fetch(`${url}/health`);
+
+    expect(res.status).toBe(200);
   });
 });
