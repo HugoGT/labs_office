@@ -34,12 +34,28 @@ x-logging: &logging
 
 services:
   caddy:
-    image: caddy:2.11-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    # Imagen propia, construida por este repositorio desde el issue #19: la
+    # oficial no trae el modulo layer4 que multiplexa TURN/TLS sobre el 443.
+    # Mismo patron que `web` y `colyseus`, y con la misma trampa de
+    # IMAGE_TAG documentada en office-deploy.sh.
+    image: "${REGISTRY}/caddy:${IMAGE_TAG}"
     restart: unless-stopped
     logging: *logging
     environment:
       APP_HOST: "${APP_HOST}"
       LK_HOST: "${LK_HOST}"
+      # Hostname dedicado del TURN (issue #19). Ver el bloque layer4 del
+      # Caddyfile: es lo que permite separar TURN de la senalizacion mirando
+      # solo el SNI, los dos sobre el mismo 443.
+      TURN_HOST: "${TURN_HOST}"
+      # A donde reenvia el mux el TURN ya con TLS terminado. LiveKit corre en
+      # la red del host (ver mas abajo), de ahi `host.docker.internal`.
+      TURN_UPSTREAM: "host.docker.internal:5349"
+      # Vacia en produccion: esta linea desaparece al sustituir la variable y
+      # el Caddyfile no gana ninguna opcion global de mas. La usa el arnes
+      # local (infra/gcp/test/mux/) para forzar la CA interna de Caddy sin
+      # tocar ni copiar este fichero.
+      CADDY_GLOBAL_EXTRA: ""
       ACME_EMAIL: "${ACME_EMAIL}"
     ports:
       - "80:80"
@@ -179,3 +195,13 @@ volumes:
 networks:
   office:
     driver: bridge
+    # Subred fijada a proposito (issue #19, D5). LiveKit necesita saber desde
+    # que origenes puede aceptar una cabecera PROXY
+    # (turn.proxy_protocol_trusted_cidrs en livekit.yaml.tpl) y Caddy le habla
+    # desde su direccion de esta red. Sin fijarla, Docker elige la subred de
+    # un pool y ese valor dejaria de cuadrar en la siguiente recreacion de la
+    # red, en silencio. Coste aceptado: cambiar esta subred recrea la red y,
+    # con ella, todos los contenedores.
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
