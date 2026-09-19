@@ -7,6 +7,7 @@ import { DEFAULT_NAME, DEFAULT_STATUS, type PresenceStatus } from '../game/offic
 import { useCallInvitations } from '../hooks/useCallInvitations';
 import { useOfficeBridge } from '../hooks/useOfficeBridge';
 import { useProximityAudio } from '../hooks/useProximityAudio';
+import { useSpacesConfig } from '../hooks/useSpacesConfig';
 import { AudioUnblockPrompt } from './AudioUnblockPrompt';
 import { BottomBar } from './BottomBar';
 import { CallInvitationStack } from './CallInvitationStack';
@@ -55,6 +56,29 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
       hostname: window.location.hostname,
     }),
   );
+  /**
+   * Config de espacios servida (#7, slice 3). Vive aqui y no en `GameCanvas`
+   * por la misma razon que `endpoint`: quien sabe donde esta el servidor es
+   * este componente, y `GameCanvas` no inventa urls por su cuenta.
+   *
+   * Viaja a la escena por COMANDO y no por prop, mismo patron que `setStatus`
+   * y `speakers`: React es el dueno del dato y la escena lo sigue. Por prop
+   * entraria en las dependencias del efecto de `GameCanvas` y recrearia Phaser
+   * entero al llegar; y retrasar el montaje hasta tenerla le costaria a TODO
+   * el mundo, en todo despliegue, una espera de red antes de ver la oficina.
+   *
+   * La escena arranca mientras tanto con sus `BUILT_IN_SPACES` y cambia al
+   * llegar el comando. La ventana entre una cosa y otra es de un viaje de red,
+   * y durante ella este cliente publica la version fallback: queda mutuamente
+   * inaudible con quien ya tenga la servida, que es el modo de fallo seguro
+   * que `proximityAudio.ts` garantiza -- nunca audibilidad de un solo sentido.
+   */
+  const spacesConfig = useSpacesConfig(endpoint);
+
+  useEffect(() => {
+    if (spacesConfig === null) return;
+    bridge.emitCommand('spacesconfig', spacesConfig);
+  }, [bridge, spacesConfig]);
   // Se resuelve una sola vez, en el mismo espiritu que `endpoint`: cambiar la
   // configuracion de LiveKit a mitad de sesion no tiene sentido de producto.
   const [livekitConfig] = useState(() =>

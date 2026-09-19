@@ -125,6 +125,7 @@ export class OfficeScene extends Phaser.Scene {
   private unsubscribeCallPeer?: () => void;
   private unsubscribeRespondCall?: () => void;
   private unsubscribeWalkToPeer?: () => void;
+  private unsubscribeSpacesConfig?: () => void;
   /** Escritor del canal de anclas (issue #17, D4); abierto en `create()`, cerrado en SHUTDOWN. */
   private anchorWriter?: AnchorWriter;
   /**
@@ -208,6 +209,11 @@ export class OfficeScene extends Phaser.Scene {
       this.walkToPeer(sessionId);
     });
 
+    // #7, slice 3. Llega una sola vez por sesion, poco despues de arrancar.
+    this.unsubscribeSpacesConfig = this.bridge.onCommand('spacesconfig', ({ spaces, version }) => {
+      this.applySpacesConfig(spaces, version);
+    });
+
     // D4: unico bloque muerto en produccion de este archivo -- deja tanto el
     // literal 'teleportToTile' como su handler fuera de `dist/`. Espeja
     // `teleportTo`, pero mueve al jugador a una tile exacta, sin buscar una
@@ -230,6 +236,7 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeCallPeer?.();
       this.unsubscribeRespondCall?.();
       this.unsubscribeWalkToPeer?.();
+      this.unsubscribeSpacesConfig?.();
       this.anchorWriter?.close();
       this.anchorWriter = undefined;
       this.remotes?.clear();
@@ -404,6 +411,37 @@ export class OfficeScene extends Phaser.Scene {
       this.anchorWriter.set(sessionId, screenX, screenY, cam.worldView.contains(avatar.x, avatar.y));
     }
     this.anchorWriter.commit();
+  }
+
+  /**
+   * Adopta la config servida (#7, slice 3). Llega por comando poco despues de
+   * arrancar, porque la escena no puede esperar a un viaje de red para
+   * existir.
+   *
+   * Los dos campos cambian JUNTOS y en la misma vuelta: entre el momento en
+   * que `spaces` fuese la nueva y `spacesVersion` la vieja, este cliente
+   * estaria derivando pertenencia de unos rectangulos mientras declara otros,
+   * y eso es exactamente lo que el predicado mutuo de `proximityAudio.ts` no
+   * puede ver.
+   *
+   * No hace falta invalidar `lastVoiceKey` ni `currentSpaceId`: los dos se
+   * comparan cada tic contra un valor RECALCULADO desde `this.spaces`, asi que
+   * un cambio de config se propaga solo en el siguiente tic, y una config que
+   * deja al jugador donde estaba no emite nada -- que es lo correcto.
+   */
+  private applySpacesConfig(spaces: readonly SpaceArea[], version: string): void {
+    // Misma version = misma config. Es el caso normal de un despliegue sin
+    // editar, donde lo servido coincide con lo incorporado; reenviarlo al
+    // servidor seria un mensaje por sesion que no dice nada nuevo.
+    if (version === this.spacesVersion) return;
+
+    this.spaces = spaces;
+    this.spacesVersion = version;
+
+    // Los pares tienen que enterarse, o seguiran creyendo que coincidimos.
+    // Si la conexion todavia no existe no hay nada que anunciar: el join lee
+    // `this.spacesVersion` cuando se construya, y ya llevara esta.
+    this.connection?.sendSpacesVersion(version);
   }
 
   private emitPresence(online: boolean): void {
