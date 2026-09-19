@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DESK_SLOT_COUNT } from '../game/deskLayout';
+import { DESK_SLOT_COLUMNS, DESK_SLOT_COUNT } from '../game/deskLayout';
 import {
   DESK_ROTATIONS,
   type DeskDecorAsset,
@@ -180,7 +180,14 @@ export function DeskDecorEditor({
         Elige una caja del escritorio y luego la pieza que quieres poner en ella.
       </p>
 
-      <div className={styles.grid}>
+      {/* Las columnas salen de `deskLayout` y no de una copia en el CSS: el
+          reparto por filas es un CONTRATO con la escena, que coloca cada pieza
+          con `deskSlotRect`. Dos copias del 3 dejarian esta rejilla
+          transpuesta el dia que cambie el lado del area. */}
+      <div
+        className={styles.grid}
+        style={{ gridTemplateColumns: `repeat(${DESK_SLOT_COLUMNS}, 1fr)` }}
+      >
         {Array.from({ length: DESK_SLOT_COUNT }, (_unused, slot) => {
           const item = draft.get(slot);
           return (

@@ -39,11 +39,11 @@
   font-size: 11px;
 }
 
-/* Tres columnas, las mismas que tiles de lado tiene el escritorio: la rejilla
-   se lee como el sitio que se esta decorando y no como una lista. */
+/* Rejilla y no lista: se lee como el sitio que se esta decorando.
+   `grid-template-columns` lo pone el componente desde `deskLayout` -- el numero
+   de columnas es un contrato con la escena y no puede vivir copiado aqui. */
 .grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
   gap: 4px;
   margin-bottom: 10px;
 }

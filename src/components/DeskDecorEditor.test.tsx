@@ -17,6 +17,7 @@
 import { render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import { DESK_SLOT_COLUMNS } from '../game/deskLayout';
 import type { DeskDecorAsset, PlacedDeskItem } from '../game/deskDecorPort';
 import { DeskDecorEditor } from './DeskDecorEditor';
 
@@ -80,6 +81,18 @@ describe('DeskDecorEditor', () => {
     editor();
 
     expect(screen.getAllByRole('button', { name: /^Caja \d/ })).toHaveLength(9);
+  });
+
+  it('reparte las cajas en las columnas que dice `deskLayout`, sin repetir el numero', () => {
+    // El reparto por filas (0,1,2 arriba) es un CONTRATO con la escena, que
+    // coloca cada pieza con `deskSlotRect`. Una segunda copia del 3 dejaria
+    // esta rejilla transpuesta respecto al escritorio el dia que cambie el
+    // lado del area, y el sintoma seria decoracion que se mueve sola.
+    editor();
+
+    expect(box(1).parentElement).toHaveStyle({
+      gridTemplateColumns: `repeat(${DESK_SLOT_COLUMNS}, 1fr)`,
+    });
   });
 
   it('pinta en su caja lo que ya estaba puesto', () => {
