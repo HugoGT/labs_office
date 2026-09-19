@@ -16,6 +16,8 @@ import { LIVEKIT_ROOM_NAME } from '../../src/game/officeProtocol.ts';
 import { createOfficeServer, warnIfOriginsUnrestricted, type OfficeServer } from './createOfficeServer.ts';
 import type { DirectoryUser, UserDirectory } from './directory/directoryPort.ts';
 import { createMemoryDirectory } from './directory/memoryDirectory.ts';
+import { createMemoryDecor } from './decor/memoryDecor.ts';
+import type { DecorCatalog } from './decor/decorPort.ts';
 import { createMemorySpaces } from './spaces/memorySpaces.ts';
 import type { SpacesDirectory } from './spaces/spacesPort.ts';
 import { OFFICE_ROOM_NAME } from './OfficeRoom.ts';
@@ -791,6 +793,214 @@ describe('rutas de espacios (#7, slice 3)', () => {
     });
 
     expect(res.status).toBe(503);
+    await server.shutdown();
+  });
+});
+
+/**
+ * El cableado de las rutas de decoracion (#7, slice 4). Lo que se prueba aqui
+ * es la TRADUCCION -- que cada ruta existe, en su verbo, y que el estado "sin
+ * almacen" responde 503 y no 404 -- no las reglas, que ya cubre
+ * `decorRoutes.test.ts` sin levantar servidor.
+ *
+ * Archivar va por `POST .../archive` y no por `DELETE`, y nada usa `PUT`: el
+ * middleware de CORS anuncia `GET,POST,OPTIONS`, asi que un verbo de mas se
+ * bloquearia en el preflight del navegador antes de llegar a Express, y
+ * ampliar esa lista seria ensanchar una cabecera de seguridad para todo el
+ * servidor (#9). Misma forma que `/admin/spaces/:id/delete`.
+ */
+describe('rutas de decoracion (#7, slice 4)', () => {
+  const ADMIN_DECOR: DirectoryUser = {
+    id: 'id-admin',
+    uid: 'uid-admin',
+    email: 'admin@example.com',
+    displayName: 'Admin',
+    role: 'admin',
+    status: 'active',
+    expiresAt: null,
+    invitedBy: null,
+    createdAt: new Date('2025-12-01T00:00:00.000Z'),
+  };
+
+  const EMPLEADO_DECOR: DirectoryUser = {
+    ...ADMIN_DECOR,
+    id: 'id-empleado',
+    uid: 'uid-empleado',
+    email: 'empleado@example.com',
+    displayName: 'Empleado',
+    role: 'employee',
+  };
+
+  const decorVerifier: IdTokenVerifier = {
+    async verify(token: unknown) {
+      if (token === 'valido-uid-admin') {
+        return { uid: 'uid-admin', email: 'admin@example.com', name: 'Admin' };
+      }
+      if (token === 'valido-uid-empleado') {
+        return { uid: 'uid-empleado', email: 'empleado@example.com', name: 'Empleado' };
+      }
+      return null;
+    },
+  };
+
+  const JSON_HEADERS = { 'Content-Type': 'application/json' };
+  const BEARER_ADMIN = { Authorization: 'Bearer valido-uid-admin', ...JSON_HEADERS };
+  const BEARER_EMPLEADO = { Authorization: 'Bearer valido-uid-empleado', ...JSON_HEADERS };
+
+  const ASSET = {
+    name: 'Planta Grande',
+    kind: 'plant',
+    textureKey: 'plant-large',
+    w: 1,
+    h: 1,
+    placeableOnDesk: true,
+  };
+
+  async function decorServer(overrides: { decor?: DecorCatalog | null } = {}) {
+    const decor = overrides.decor === undefined ? createMemoryDecor() : overrides.decor;
+    const server = createOfficeServer({
+      auth: decorVerifier,
+      directory: createMemoryDirectory({ seed: [ADMIN_DECOR, EMPLEADO_DECOR] }),
+      decor,
+      identityAdmin: null,
+    });
+    const port = await server.listen(0);
+    return { server, decor, url: `http://localhost:${port}` };
+  }
+
+  it('GET /admin/assets sin credencial responde 401', async () => {
+    const { server, url } = await decorServer();
+
+    expect((await fetch(`${url}/admin/assets`)).status).toBe(401);
+    await server.shutdown();
+  });
+
+  it('POST /admin/assets crea el asset y GET /admin/assets ya lo devuelve', async () => {
+    const { server, url } = await decorServer();
+
+    const created = await fetch(`${url}/admin/assets`, {
+      method: 'POST',
+      headers: BEARER_ADMIN,
+      body: JSON.stringify(ASSET),
+    });
+
+    expect(created.status).toBe(201);
+    const listed = (await (
+      await fetch(`${url}/admin/assets`, { headers: BEARER_ADMIN })
+    ).json()) as { assets: { slug: string }[] };
+    expect(listed.assets.map((asset) => asset.slug)).toEqual(['planta-grande']);
+    await server.shutdown();
+  });
+
+  it('POST /admin/assets/:id/archive retira del catalogo sin borrar (D1b)', async () => {
+    const { server, url } = await decorServer();
+    const created = (await (
+      await fetch(`${url}/admin/assets`, {
+        method: 'POST',
+        headers: BEARER_ADMIN,
+        body: JSON.stringify(ASSET),
+      })
+    ).json()) as { id: string };
+
+    const res = await fetch(`${url}/admin/assets/${created.id}/archive`, {
+      method: 'POST',
+      headers: BEARER_ADMIN,
+    });
+
+    expect(res.status).toBe(200);
+    const listed = (await (
+      await fetch(`${url}/admin/assets`, { headers: BEARER_ADMIN })
+    ).json()) as { assets: unknown[] };
+    expect(listed.assets).toEqual([]);
+    await server.shutdown();
+  });
+
+  it('POST /admin/assets/:id/archive con un id desconocido responde 404', async () => {
+    const { server, url } = await decorServer();
+
+    const res = await fetch(`${url}/admin/assets/no-existe/archive`, {
+      method: 'POST',
+      headers: BEARER_ADMIN,
+    });
+
+    expect(res.status).toBe(404);
+    await server.shutdown();
+  });
+
+  it('GET /me/desk no exige rol de administracion', async () => {
+    const { server, url } = await decorServer();
+
+    const res = await fetch(`${url}/me/desk`, { headers: BEARER_EMPLEADO });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ items: [] });
+    await server.shutdown();
+  });
+
+  it('POST /me/desk guarda el escritorio de quien manda el token, no el del cuerpo', async () => {
+    // La propiedad de la slice, comprobada tambien de extremo a extremo: un
+    // `userId` ajeno en el cuerpo no puede escribir el sitio de otra persona.
+    const { server, decor, url } = await decorServer();
+    const created = (await (
+      await fetch(`${url}/admin/assets`, {
+        method: 'POST',
+        headers: BEARER_ADMIN,
+        body: JSON.stringify(ASSET),
+      })
+    ).json()) as { id: string };
+
+    const res = await fetch(`${url}/me/desk`, {
+      method: 'POST',
+      headers: BEARER_EMPLEADO,
+      body: JSON.stringify({
+        userId: ADMIN_DECOR.id,
+        items: [{ assetId: created.id, slot: 0, rotation: 90 }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await decor!.getDeskConfig(EMPLEADO_DECOR.id)).toHaveLength(1);
+    expect(await decor!.getDeskConfig(ADMIN_DECOR.id)).toEqual([]);
+    await server.shutdown();
+  });
+
+  it('POST /me/desk con un slot invalido responde 400', async () => {
+    const { server, url } = await decorServer();
+
+    const res = await fetch(`${url}/me/desk`, {
+      method: 'POST',
+      headers: BEARER_EMPLEADO,
+      body: JSON.stringify({ items: [{ assetId: 'cualquiera', slot: 99, rotation: 0 }] }),
+    });
+
+    expect(res.status).toBe(400);
+    await server.shutdown();
+  });
+
+  it('sin almacen las cinco rutas responden 503 y nunca 404', async () => {
+    // Un 404 aqui es indistinguible del `index.html` que sirve Caddy cuando
+    // falta su bloque `handle`: dos averias con el mismo sintoma y causas
+    // opuestas. El 503 afirma que la ruta existe y que falta la configuracion.
+    const { server, url } = await decorServer({ decor: null });
+
+    const respuestas = await Promise.all([
+      fetch(`${url}/admin/assets`, { headers: BEARER_ADMIN }),
+      fetch(`${url}/admin/assets`, {
+        method: 'POST',
+        headers: BEARER_ADMIN,
+        body: JSON.stringify(ASSET),
+      }),
+      fetch(`${url}/admin/assets/cualquiera/archive`, { method: 'POST', headers: BEARER_ADMIN }),
+      fetch(`${url}/me/desk`, { headers: BEARER_EMPLEADO }),
+      fetch(`${url}/me/desk`, {
+        method: 'POST',
+        headers: BEARER_EMPLEADO,
+        body: JSON.stringify({ items: [] }),
+      }),
+    ]);
+
+    expect(respuestas.map((res) => res.status)).toEqual([503, 503, 503, 503, 503]);
+    expect(await respuestas[0].json()).toEqual({ error: 'decor-not-configured' });
     await server.shutdown();
   });
 });

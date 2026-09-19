@@ -29,6 +29,15 @@ import {
 } from './admin/adminRoutes.ts';
 import { identityAdminFromEnv } from './admin/gcpIdentityAdmin.ts';
 import type { IdentityAdmin } from './admin/identityAdminPort.ts';
+import type { DecorCatalog } from './decor/decorPort.ts';
+import {
+  handleArchiveAsset,
+  handleCreateAsset,
+  handleGetDeskConfig,
+  handleListAssets,
+  handleReplaceDeskConfig,
+  type DecorDeps,
+} from './decor/decorRoutes.ts';
 import type { SpacesDirectory } from './spaces/spacesPort.ts';
 import {
   handleCreateSpace,
@@ -193,6 +202,16 @@ export interface OfficeServerOverrides {
    */
   spaces?: SpacesDirectory | null;
   /**
+   * Sustituye el catalogo de decoracion que saldria de `process.env` (#7,
+   * slice 4). `null` fuerza el modo sin catalogo: las cinco rutas responden
+   * 503 y el resto del servidor se comporta como antes de esta slice.
+   *
+   * Es un override propio y no una pieza del de `spaces` por la misma razon
+   * que aquel no lo es del de `directory`: probar `/me/desk` no deberia
+   * obligar a sembrar rectangulos.
+   */
+  decor?: DecorCatalog | null;
+  /**
    * Lista blanca de origenes para TODAS las rutas que sirve Express
    * (`/livekit/token`, `/health`, `/admin/*`), normalmente de
    * `ALLOWED_ORIGIN`. Vacia o ausente mantiene el `*` de hoy (ver el
@@ -348,6 +367,9 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   const spaces =
     overrides?.spaces !== undefined ? (overrides.spaces ?? undefined) : envRuntime?.spaces;
 
+  const decor =
+    overrides?.decor !== undefined ? (overrides.decor ?? undefined) : envRuntime?.decor;
+
   app.get('/health', (_req, res) => {
     // `auth` expone el modo EFECTIVO, no la variable de entorno: es la unica
     // forma de notar desde fuera que un despliegue se ha quedado sin
@@ -492,6 +514,65 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   app.post(
     '/admin/spaces/:id/delete',
     spacesRoute((req, deps) => handleDeleteSpace(req.header('Authorization'), req.params.id, deps)),
+  );
+
+  /**
+   * Mismo adaptador que `spacesRoute(...)`, con el catalogo de decoracion en
+   * las dependencias y la misma guarda de "sin almacen -> 503, nunca 404" por
+   * la misma razon (ver el comentario de `admin`). El directorio tambien hace
+   * falta aqui: las guardas lo consultan para saber si quien llama sigue
+   * siendo una cuenta que esta oficina admite, y `/me/desk` ademas saca de esa
+   * fila el `userId` cuyo escritorio se lee o se escribe.
+   */
+  function decorRoute(run: (req: express.Request, deps: DecorDeps) => Promise<AdminResult>) {
+    return (req: express.Request, res: express.Response): void => {
+      if (directory === undefined || decor === undefined) {
+        res.status(503).json({ error: 'decor-not-configured' });
+        return;
+      }
+
+      run(req, { directory, decor, auth, identityAdmin })
+        .then((result) => {
+          res.status(result.status).json(result.body);
+        })
+        .catch(() => {
+          console.error('[decor] fallo no controlado en una ruta de decoracion');
+          res.status(500).json({ error: 'internal' });
+        });
+    };
+  }
+
+  app.get(
+    '/admin/assets',
+    decorRoute((req, deps) => handleListAssets(req.header('Authorization'), deps)),
+  );
+
+  app.post(
+    '/admin/assets',
+    decorRoute((req, deps) => handleCreateAsset(req.header('Authorization'), req.body, deps)),
+  );
+
+  // Archivar va por POST y no por DELETE: el middleware de CORS de arriba
+  // anuncia `GET,POST,OPTIONS`, asi que ese verbo moriria en el preflight del
+  // navegador antes de llegar a Express, y ampliar la lista por una ruta seria
+  // ensanchar una cabecera de seguridad para todo el servidor (#9). Misma
+  // forma que `/admin/invitations/:id/revoke` y `/admin/spaces/:id/delete`.
+  app.post(
+    '/admin/assets/:id/archive',
+    decorRoute((req, deps) => handleArchiveAsset(req.header('Authorization'), req.params.id, deps)),
+  );
+
+  // `/me/desk` cuelga de la raiz y no de `/admin`: el escritorio es de quien
+  // lo usa, no de quien administra. La ruta lo dice tan claro como la guarda
+  // que corre dentro (ver la cabecera de `decorRoutes.ts`).
+  app.get(
+    '/me/desk',
+    decorRoute((req, deps) => handleGetDeskConfig(req.header('Authorization'), deps)),
+  );
+
+  app.post(
+    '/me/desk',
+    decorRoute((req, deps) => handleReplaceDeskConfig(req.header('Authorization'), req.body, deps)),
   );
 
   app.post('/livekit/token', (req, res) => {
