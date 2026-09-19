@@ -15,17 +15,18 @@ Todo está parametrizado por `var.env` para que el segundo entorno sea un
 |---|---|
 | `terraform/` | Estado de la infraestructura: VM, red, IAM, registro de imágenes, secretos, federación con GitHub |
 | `docker-compose.yml` | Los cinco servicios de la VM. Vive en `/opt/office/` |
-| `Caddyfile` | Terminación TLS y enrutado de los dos hostnames |
-| `livekit.yaml.tpl` | Configuración del SFU. Plantilla: el hostname se sustituye al desplegar |
-| `startup-script.sh` | Arranque de la VM: instala Docker y los scripts de operación |
+| `Caddyfile` | Terminación TLS y multiplexado de los tres hostnames sobre el 443 (issue #19) |
+| `livekit.yaml.tpl` | Configuración del SFU. Plantilla: los hostnames se sustituyen al desplegar |
+| `startup-script.sh` | Arranque de la VM: instala Docker y el script de operación |
 | `scripts/office-deploy.sh` | Despliegue idempotente. Se instala como `/usr/local/bin/office-deploy` |
-| `scripts/office-cert-watch.sh` | Reinicia LiveKit cuando Caddy renueva su certificado |
+| `docker/caddy.Dockerfile` | Imagen propia de Caddy con el módulo `layer4` (issue #19) |
 | `docker/colyseus.Dockerfile` | Imagen del servidor de Node |
 | `docker/web.Dockerfile` | Imagen del SPA construido |
 | `docker/web-nginx.conf` | Configuración de la capa estática del SPA |
+| `test/mux/` | Arnés local del multiplexado TURN/TLS (`pnpm test:mux`, issue #19). Nunca corre en CI |
 
 El workflow de despliegue es `.github/workflows/deploy-test.yml`, separado de
-`ci.yml`. El `.dockerignore` de la raíz acota el contexto de build de las dos
+`ci.yml`. El `.dockerignore` de la raíz acota el contexto de build de las tres
 imágenes.
 
 ## Por qué una sola VM
@@ -52,13 +53,15 @@ de la VM.** Está desarrollado más abajo, en *Copias de seguridad*.
 ## Hostnames sin dominio propio
 
 Todavía no hay dominio. Se usa [sslip.io](https://sslip.io), que resuelve
-`<lo-que-sea>.<ip-con-guiones>.sslip.io` a esa misma IP. Dos hostnames sobre la
-misma IP estática, separados por SNI:
+`<lo-que-sea>.<ip-con-guiones>.sslip.io` a esa misma IP. Tres hostnames sobre la
+misma IP estática, separados por SNI en el multiplexor de nivel 4 del
+Caddyfile (issue #19):
 
 | Hostname | Qué sirve |
 |---|---|
 | `app.<ip>.sslip.io` | El SPA, el WebSocket de Colyseus, `/livekit/token`, `/health` y `/admin/*` |
-| `lk.<ip>.sslip.io` | Señalización de LiveKit y su TURN |
+| `lk.<ip>.sslip.io` | Señalización de LiveKit |
+| `turn.<ip>.sslip.io` | TURN sobre TLS de LiveKit, multiplexado sobre el mismo 443. El navegador lo recibe en la lista de servidores ICE que devuelve la propia señalización, nunca del bundle del SPA |
 
 La IP reservada **no es opcional**: el hostname se deriva de ella, así que una IP
 efímera cambiaría la URL en cada reinicio y dejaría inválido el certificado.
@@ -188,8 +191,9 @@ alguna vez cambia la IP, hay que actualizar esta variable.
 git push origin main          # o lanzar "Deploy (test)" a mano desde Actions
 ```
 
-El workflow construye las dos imágenes, las publica etiquetadas con el SHA del
-commit, entra por el túnel IAP y ejecuta `office-deploy <sha>`. Ese script relee la
+El workflow construye las tres imágenes (`caddy`, `web`, `colyseus`), las
+publica etiquetadas con el SHA del commit, entra por el túnel IAP y ejecuta
+`office-deploy <sha>`. Ese script relee la
 configuración de la metadata, vuelve a leer los secretos, reescribe
 `/opt/office/.env` con permisos `0600` de root y levanta el compose.
 
@@ -206,12 +210,38 @@ repositorio.
 
 Las imágenes se etiquetan con el SHA del commit, **nunca** con `latest`. Con
 `latest` no se puede saber qué corre en la VM ni volver atrás sin reconstruir.
-Volver a una versión anterior es entrar y pasarle el SHA viejo:
+Volver a una versión anterior de las **imágenes** es entrar y pasarle el SHA
+viejo:
 
 ```sh
 gcloud compute ssh labs-office-test --zone us-central1-a --tunnel-through-iap \
   --command "sudo /usr/local/bin/office-deploy <sha-anterior>"
 ```
+
+**Esto NO revierte la configuración.** `Caddyfile`, `docker-compose.yml` y
+`livekit.yaml.tpl` llegan a la VM como metadata de la instancia, escrita por
+`terraform apply` (ver `office-compose`/`office-caddyfile`/`office-livekit-config`
+en `terraform/main.tf`); `office-deploy` solo relee esa metadata y nunca la
+cambia. Si lo que hay que deshacer es un cambio de **configuración** (por
+ejemplo, un `Caddyfile` con el multiplexado del issue #19 mal ajustado), la
+vuelta atrás real son dos pasos, en este orden:
+
+```sh
+git checkout <commit-anterior> -- infra/gcp   # o un checkout completo del commit
+cd infra/gcp/terraform
+terraform apply                                # reescribe la metadata de la VM
+gcloud compute ssh labs-office-test --zone us-central1-a --tunnel-through-iap \
+  --command "sudo /usr/local/bin/office-deploy <sha-anterior>"
+```
+
+`office-deploy <sha>` solo, sin el `terraform apply` previo, deja la
+configuración nueva corriendo con imágenes viejas: no es una vuelta atrás.
+
+Desde el issue #19, `office-deploy` comprueba con `docker manifest inspect`
+que la imagen de `caddy:<IMAGE_TAG>` existe antes de tocar nada. Bajar
+`IMAGE_TAG` por debajo del commit que introdujo esa imagen aborta con un
+mensaje que señala estos mismos dos pasos, en vez de fallar a mitad de
+`docker compose pull` con los contenedores viejos ya parados.
 
 ### Diagnóstico
 
@@ -578,24 +608,58 @@ Después, redesplegar.
 Let's Encrypt aplica sus límites de emisión por dominio registrado. Si alguien
 ajeno quema la cuota, nuestras emisiones fallan.
 
-La exposición real es pequeña: dos certificados que se renuevan cada ~60 días. Y
-Caddy cae solo a ZeroSSL cuando Let's Encrypt rechaza, sin configuración extra. Por
-eso no se monta nada para evitarlo. Desaparece con un dominio propio.
+La exposición real es pequeña: tres certificados que se renuevan cada ~60 días
+(desde el issue #19, también el de `turn.*`). Y Caddy cae solo a ZeroSSL cuando
+Let's Encrypt rechaza, sin configuración extra. Por eso no se monta nada para
+evitarlo. Desaparece con un dominio propio.
 
-Efecto secundario si esa caída a ZeroSSL ocurre: la ruta donde Caddy guarda el
-certificado contiene el nombre del directorio de la autoridad emisora, y
-`livekit.yaml.tpl` la tiene fija apuntando a Let's Encrypt. El TURN sobre TLS
-dejaría de encontrar su certificado hasta actualizar esas dos líneas; el TURN sobre
-UDP seguiría funcionando.
+Desde el issue #19 esta caída a ZeroSSL ya no tiene el efecto secundario que
+tenía antes: LiveKit no lee certificados del disco (`turn.external_tls: true`
+en `livekit.yaml.tpl`), así que un cambio de autoridad emisora lo resuelve
+Caddy solo, sin tocar ninguna ruta a mano.
 
-### El TURN no cubre redes que solo dejan salir por el 443
+### Multiplexado de TURN/TLS sobre el 443 (issue #19)
 
-El TURN embebido escucha en `udp:3478` y `tcp:5349`. Una red corporativa que solo
-permita salida por el 443 no llega a ninguno de los dos.
+El TURN embebido escuchaba solo en `udp:3478` y `tcp:5349`, y una red
+corporativa que solo permita salida por el 443 no llegaba a ninguno de los
+dos. Desde este cambio, Caddy multiplexa el TURN sobre TLS del mismo 443 que
+ya usan `app.*`/`lk.*` (módulo `layer4`, ver `Caddyfile` y
+`docker/caddy.Dockerfile`), mirando solo el SNI del ClientHello: `turn.*` va
+al TURN, todo lo demás sigue su camino de siempre. `udp:3478`/`tcp:5349`
+siguen abiertos y en uso para quien sí pueda alcanzarlos directamente.
 
-Multiplexar TURN/TLS sobre el mismo 443 exigiría compilar Caddy con el módulo
-`layer4`, porque Caddy ocupa ese puerto para HTTPS. Se aplaza a un issue hijo. En
-esas redes el audio no conecta; el resto de la aplicación sí.
+**Qué queda probado y qué no.** `pnpm test:mux` (arnés local, nunca en CI)
+prueba con Docker y backends de mentira que el enrutado por SNI funciona,
+que la cabecera PROXY v2 recupera la dirección real del cliente en vez de la
+del propio multiplexor, y que `app.*`/`lk.*` no cambiaron de comportamiento.
+Por separado, se corrió la imagen fijada de LiveKit v1.13.7 con la
+configuración ya sustituida y se confirmó que arranca el TURN con
+`proxy_protocol`/`external_tls` sin error de configuración:
+
+```sh
+docker run --rm -d --name livekit-config-check \
+  -v "$(pwd)/livekit.yaml:/etc/livekit.yaml:ro" \
+  -e LIVEKIT_KEYS="testkey: testsecretvaluethatislongenough32" \
+  livekit/livekit-server:v1.13.7@sha256:6fd3b7088874c4d119160dd688798dfec852bc014786d392caad15f6f63912a3 \
+  --config /etc/livekit.yaml
+docker logs livekit-config-check   # busca "turn.externalTLS":true, "turn.proxyProtocol":true
+docker rm -f livekit-config-check
+```
+
+Lo que **NO** queda probado por ninguno de los dos métodos, porque el issue
+#19 se decidió a propósito verificar e implementar solo en local (ningún
+`terraform apply` ni `office-deploy` contra la VM real): que un cliente detrás
+de una red que de verdad solo permite salida por el 443 conecte el audio. Esa
+es la condición de cierre original del issue, y sigue abierto pendiente de
+esa prueba en un entorno real — bloqueado además por el issue #18 (el audio
+remoto se suscribe pero nunca se reproduce), así que la demostración extremo
+a extremo no es posible aunque el transporte quede perfecto.
+
+**Activación.** El cambio queda inerte al fusionarse: CI publica la imagen
+nueva de `caddy`, pero la VM sigue sirviendo el `Caddyfile`/compose/config de
+LiveKit anteriores (metadata de Terraform) hasta que alguien decida activarlo
+con `terraform apply` (escribe la metadata nueva y la clave `office-turn-host`)
+seguido de `office-deploy <sha>`. Aprobar el PR no es aprobar el despliegue.
 
 ### TURN embebido en lugar de coturn
 
@@ -612,12 +676,13 @@ tal cual, porque no usa redirecciones. Quien lo necesitará es la integración c
 Calendar (issue #14), que sí exige orígenes de redirección estables para su OAuth.
 Cuando toque, lo que hay que tocar:
 
-1. Apuntar dos registros `A` (`app.` y `lk.`, o los nombres que se elijan) a la IP
-   estática, que no cambia.
-2. Cambiar `local.app_host` y `local.lk_host` en `terraform/main.tf` por los
-   nuevos nombres. Todo lo demás los consume desde ahí: el Caddyfile por variable
-   de entorno, `livekit.yaml` por sustitución en la plantilla, y el SPA por el
-   `build-arg` que el workflow deriva de `APP_HOST`.
+1. Apuntar tres registros `A` (`app.`, `lk.` y `turn.`, o los nombres que se
+   elijan) a la IP estática, que no cambia.
+2. Cambiar `local.app_host`, `local.lk_host` y `local.turn_host` en
+   `terraform/main.tf` por los nuevos nombres. Todo lo demás los consume desde
+   ahí: el Caddyfile por variable de entorno, `livekit.yaml` por sustitución en
+   la plantilla, y el SPA por el `build-arg` que el workflow deriva de
+   `APP_HOST`.
 3. Actualizar la variable de repositorio `APP_HOST` y volver a desplegar, para que
    el bundle se reconstruya con el `VITE_COLYSEUS_URL` nuevo.
 4. Estrechar el `Access-Control-Allow-Origin: *` de
