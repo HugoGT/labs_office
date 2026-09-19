@@ -17,6 +17,8 @@ import {
   ZONE_LABELS,
 } from './mapData';
 import { TERRAIN_SHEET } from './assets';
+import { deskZoneName } from './deskLayout';
+import type { DeskDecorItem, DeskOccupant, OfficeDesk } from './desksPort';
 import { NPCS } from './npcData';
 import { createOfficeBridge } from './officeBridge';
 import { DEFAULT_NAME, DEFAULT_STATUS, type PresenceStatus } from './officeProtocol';
@@ -1469,5 +1471,262 @@ describe('OfficeScene: config de espacios servida (#7, slice 3)', () => {
     await advanceGameClock(scene, 800);
 
     expect(rooms.every((room) => room.spaceId === null)).toBe(true);
+  });
+});
+
+/**
+ * Los escritorios asignables llegando a la escena (#7, slice 5). Quien los LEE
+ * es `desksClient.ts` y quien los resuelve es `useDesks`, ambos probados sin
+ * Phaser. Lo que falta cubrir aqui es el DIBUJO y el clic: que cada zona de
+ * 3x3 aparece donde toca, que la decoracion de su ocupante cae en su caja, que
+ * el propio se distingue del ajeno y que solo se puede clicar lo que es de uno
+ * o lo que esta libre.
+ *
+ * Entran por COMANDO y no por opcion de construccion, misma razon que
+ * `spacesconfig`: llegan despues de que Phaser arranque, porque la escena no
+ * puede esperar a un viaje de red para existir.
+ */
+describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
+  function servedDesk(overrides: Partial<OfficeDesk> = {}): OfficeDesk {
+    return {
+      id: 'id-mesa',
+      label: 'Mesa 4',
+      x: 10 * TILE,
+      y: 12 * TILE,
+      w: 3 * TILE,
+      h: 3 * TILE,
+      occupant: null,
+      ...overrides,
+    };
+  }
+
+  function occupant(displayName: string | null, items: DeskDecorItem[] = []): DeskOccupant {
+    return { id: `id-${displayName ?? 'anonimo'}`, displayName, items };
+  }
+
+  function fakePointer(): Phaser.Input.Pointer {
+    return { event: { stopPropagation: vi.fn() } } as unknown as Phaser.Input.Pointer;
+  }
+
+  function findZone(scene: Phaser.Scene, deskId: string): Phaser.GameObjects.Rectangle | null {
+    return scene.children.getByName(deskZoneName(deskId)) as Phaser.GameObjects.Rectangle | null;
+  }
+
+  function countZones(scene: Phaser.Scene): number {
+    return scene.children.list.filter((child) => child.name.startsWith('desk:')).length;
+  }
+
+  it('arranca sin ningun escritorio asignable: nadie espera a la red', async () => {
+    // La escena existe antes que la respuesta de `/desks`, igual que existe
+    // antes que la de `/spaces`.
+    const { scene } = await bootOfficeScene();
+
+    expect(countZones(scene)).toBe(0);
+  });
+
+  it('tras el comando dibuja la zona de 3x3 de cada escritorio, en pixeles del mundo', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+
+    bridge.emitCommand('desks', { desks: [servedDesk()] });
+
+    const zone = findZone(scene, 'id-mesa');
+    expect(zone).not.toBeNull();
+    // Origen arriba a la izquierda, 96x96: el rectangulo de Phaser se ancla en
+    // su centro, asi que la esquina es centro menos medio lado.
+    expect(zone!.x - zone!.width / 2).toBe(10 * TILE);
+    expect(zone!.y - zone!.height / 2).toBe(12 * TILE);
+    expect(zone!.width).toBe(3 * TILE);
+    expect(zone!.height).toBe(3 * TILE);
+  });
+
+  it('no toca los 39 escritorios del mapa base: son mobiliario, no sitios que se cojan', async () => {
+    // `DESK_ROWS` son 2x1 y van pegados de dos en dos. Un escritorio asignable
+    // se dibuja ENCIMA, como un `SpaceArea` es algo aparte de un `Room`.
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const deskCount = DESK_ROWS.reduce((sum, [, , n]) => sum + n, 0);
+
+    bridge.emitCommand('desks', { desks: [servedDesk()] });
+
+    const tiled = scene.children.list.filter((c) => c.type === 'TileSprite');
+    expect(tiled).toHaveLength(deskCount + 2);
+  });
+
+  it('pinta la decoracion del ocupante dentro de su caja, no en cualquier sitio', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+
+    bridge.emitCommand('desks', {
+      desks: [
+        servedDesk({
+          occupant: occupant('Ana Torres', [
+            { id: 'id-item', slot: 8, rotation: 0, textureKey: 'no-existe-en-el-bundle' },
+          ]),
+        }),
+      ],
+    });
+
+    // El slot 8 es la caja de abajo a la derecha (`deskSlotRect`): su centro
+    // cae a dos tiles y medio del origen del escritorio.
+    const decor = scene.children.getByName('desk-item:id-item') as Phaser.GameObjects.Rectangle;
+    expect(decor).not.toBeNull();
+    expect(decor.x).toBe(10 * TILE + 2.5 * TILE);
+    expect(decor.y).toBe(12 * TILE + 2.5 * TILE);
+  });
+
+  it('una pieza con un slot que no existe se salta sin llevarse el escritorio por delante', async () => {
+    // El dato viene de la red. Pintarla en una caja inventada la dejaria fuera
+    // del escritorio, y no pintar nada dejaria la oficina sin ese sitio.
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+
+    bridge.emitCommand('desks', {
+      desks: [
+        servedDesk({
+          occupant: occupant('Ana Torres', [
+            { id: 'id-fuera', slot: 99, rotation: 0, textureKey: 'x' },
+          ]),
+        }),
+      ],
+    });
+
+    expect(scene.children.getByName('desk-item:id-fuera')).toBeNull();
+    expect(findZone(scene, 'id-mesa')).not.toBeNull();
+  });
+
+  it('el escritorio propio se distingue del de otra persona', async () => {
+    // El servidor no dice cual es el tuyo: el unico cruce que ofrece es el
+    // nombre visible del ocupante, que es el mismo con el que Colyseus pinta
+    // los avatares (por eso `DeskOccupant.displayName` viaja).
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge, { playerName: 'Ana Torres' });
+
+    bridge.emitCommand('desks', {
+      desks: [
+        servedDesk({ id: 'mia', occupant: occupant('Ana Torres') }),
+        servedDesk({ id: 'ajena', x: 20 * TILE, occupant: occupant('Luis Paz') }),
+      ],
+    });
+
+    expect(findZone(scene, 'mia')!.fillColor).not.toBe(findZone(scene, 'ajena')!.fillColor);
+  });
+
+  it('un escritorio libre se distingue de uno ocupado', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+
+    bridge.emitCommand('desks', {
+      desks: [
+        servedDesk({ id: 'libre' }),
+        servedDesk({ id: 'ocupada', x: 20 * TILE, occupant: occupant('Luis Paz') }),
+      ],
+    });
+
+    expect(findZone(scene, 'libre')!.fillColor).not.toBe(findZone(scene, 'ocupada')!.fillColor);
+  });
+
+  it('la profundidad es el borde inferior, misma convencion que el mobiliario del mapa', async () => {
+    // `placeFurniture` usa `(y + alto) * TILE` para cada mueble. Con cualquier
+    // otra cosa, un avatar de pie delante del escritorio se dibujaria DEBAJO.
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+
+    bridge.emitCommand('desks', { desks: [servedDesk()] });
+
+    expect(findZone(scene, 'id-mesa')!.depth).toBe(12 * TILE + 3 * TILE);
+  });
+
+  it('clicar un escritorio libre pide cogerlo', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const clicks: unknown[] = [];
+    bridge.on('deskclick', (payload) => clicks.push(payload));
+
+    bridge.emitCommand('desks', { desks: [servedDesk()] });
+    findZone(scene, 'id-mesa')!.emit('pointerdown', fakePointer());
+
+    // La escena sabe que hay dibujado; quien habla con el servidor es React.
+    expect(clicks).toEqual([{ deskId: 'id-mesa', label: 'Mesa 4', action: 'claim' }]);
+  });
+
+  it('clicar el propio ofrece dejarlo', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge, { playerName: 'Ana Torres' });
+    const clicks: unknown[] = [];
+    bridge.on('deskclick', (payload) => clicks.push(payload));
+
+    bridge.emitCommand('desks', { desks: [servedDesk({ occupant: occupant('Ana Torres') })] });
+    findZone(scene, 'id-mesa')!.emit('pointerdown', fakePointer());
+
+    expect(clicks).toEqual([{ deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }]);
+  });
+
+  it('clicar el de otra persona no hace nada', async () => {
+    // Ni siquiera se hace clicable: un escritorio ajeno no tiene ninguna
+    // accion que ofrecer, y `release` solo suelta el propio.
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge, { playerName: 'Ana Torres' });
+    const clicks: unknown[] = [];
+    bridge.on('deskclick', (payload) => clicks.push(payload));
+
+    bridge.emitCommand('desks', { desks: [servedDesk({ occupant: occupant('Luis Paz') })] });
+    const zone = findZone(scene, 'id-mesa')!;
+    zone.emit('pointerdown', fakePointer());
+
+    expect(zone.input).toBeNull();
+    expect(clicks).toEqual([]);
+  });
+
+  it('el clic no se cuela al mapa de fondo', async () => {
+    // Mismo `stopPropagation` que el clic de un NPC o de un peer: sin el, el
+    // `pointerdown` de la escena cerraria el menu contextual a la vez.
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const pointer = fakePointer();
+
+    bridge.emitCommand('desks', { desks: [servedDesk()] });
+    findZone(scene, 'id-mesa')!.emit('pointerdown', pointer);
+
+    const { stopPropagation } = pointer.event as unknown as { stopPropagation: () => void };
+    expect(stopPropagation).toHaveBeenCalled();
+  });
+
+  it('una lista nueva reemplaza a la anterior en vez de acumularse encima', async () => {
+    // Cada refresco trae el estado COMPLETO, no un delta: quien solto su sitio
+    // tiene que dejar de verse ocupado, y dibujar encima lo dejaria pintado.
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+
+    bridge.emitCommand('desks', { desks: [servedDesk({ id: 'primera' })] });
+    bridge.emitCommand('desks', { desks: [servedDesk({ id: 'segunda' })] });
+
+    expect(countZones(scene)).toBe(1);
+    expect(findZone(scene, 'primera')).toBeNull();
+    expect(findZone(scene, 'segunda')).not.toBeNull();
+  });
+
+  it('una lista vacia deja la oficina sin escritorios asignables y sin tocar nada mas', async () => {
+    // Es el despliegue sin directorio configurado, donde `/desks` responde 503
+    // y el cliente degrada a no pintar ninguno. Todo lo demas sigue igual.
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+
+    bridge.emitCommand('desks', { desks: [servedDesk()] });
+    bridge.emitCommand('desks', { desks: [] });
+
+    expect(countZones(scene)).toBe(0);
+    expect(findNpcs(scene)).toHaveLength(NPCS.length);
+    expect(findPlayer(scene)).toBeDefined();
+  });
+
+  it('desuscribe el handler de desks al apagar la escena (SHUTDOWN, D2)', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+
+    scene.sys.events.emit(Phaser.Scenes.Events.SHUTDOWN);
+    bridge.emitCommand('desks', { desks: [servedDesk()] });
+
+    expect(countZones(scene)).toBe(0);
   });
 });
