@@ -195,6 +195,27 @@ function allowedOriginsFromEnv(env: { ALLOWED_ORIGIN?: string }): readonly strin
     .filter((origin) => origin.length > 0);
 }
 
+/**
+ * Avisa UNA vez al construir el servidor cuando en produccion no hay lista
+ * blanca. El `*` sigue siendo el comportamiento; lo que se acaba es el
+ * silencio. Atado a `NODE_ENV=production` (lo fija `colyseus.Dockerfile`)
+ * para que el desarrollo local, los e2e y la suite no paguen el ruido: un
+ * aviso que salta siempre es un aviso que nadie lee.
+ *
+ * Recibe `env` y el sumidero por parametro, como el resto de lectores de
+ * entorno de este fichero, y como `createIdTokenVerifier` recibe su
+ * `logFailure`: asi un test lo afirma sin tocar `process.env`, que es estado
+ * global del proceso.
+ */
+export function warnIfOriginsUnrestricted(
+  origins: readonly string[],
+  env: { NODE_ENV?: string },
+  warn: (message: string) => void = (message) => console.warn(message),
+): void {
+  if (origins.length > 0 || env.NODE_ENV !== 'production') return;
+  warn('[cors] ALLOWED_ORIGIN vacia en produccion: se responde Access-Control-Allow-Origin: * a cualquier origen');
+}
+
 export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeServer {
   const app = express();
 
@@ -233,8 +254,10 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   // dejadez: el desarrollo local y la suite e2e viven de el -- el preview de
   // Vite escoge puerto en cada corrida, asi que no hay origen fijo que
   // declarar -- y un default que los rompiese convertiria este cambio en una
-  // migracion forzosa.
+  // migracion forzosa. Lo que si cambia es que en produccion ese silencio se
+  // acaba: ver `warnIfOriginsUnrestricted`.
   const allowedOrigins = overrides?.allowedOrigins ?? allowedOriginsFromEnv(process.env);
+  warnIfOriginsUnrestricted(allowedOrigins, process.env);
 
   app.use((req, res, next) => {
     const origin = req.header('Origin');

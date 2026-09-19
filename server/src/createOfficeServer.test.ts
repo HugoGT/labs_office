@@ -13,7 +13,7 @@
 import { Client } from 'colyseus.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LIVEKIT_ROOM_NAME } from '../../src/game/officeProtocol.ts';
-import { createOfficeServer, type OfficeServer } from './createOfficeServer.ts';
+import { createOfficeServer, warnIfOriginsUnrestricted, type OfficeServer } from './createOfficeServer.ts';
 import type { UserDirectory } from './directory/directoryPort.ts';
 import { createMemoryDirectory } from './directory/memoryDirectory.ts';
 import { OFFICE_ROOM_NAME } from './OfficeRoom.ts';
@@ -599,5 +599,33 @@ describe('CORS con lista blanca (#9)', () => {
     const res = await fetch(`${url}/health`);
 
     expect(res.status).toBe(200);
+  });
+});
+
+describe('warnIfOriginsUnrestricted', () => {
+  it('avisa en produccion cuando no hay lista blanca', () => {
+    const sink = vi.fn();
+
+    warnIfOriginsUnrestricted([], { NODE_ENV: 'production' }, sink);
+
+    expect(sink).toHaveBeenCalledTimes(1);
+    expect(sink.mock.calls[0]?.[0]).toContain('ALLOWED_ORIGIN');
+  });
+
+  it('no avisa en produccion si hay lista', () => {
+    const sink = vi.fn();
+
+    warnIfOriginsUnrestricted(['https://app.example.com'], { NODE_ENV: 'production' }, sink);
+
+    expect(sink).not.toHaveBeenCalled();
+  });
+
+  it('no avisa fuera de produccion aunque no haya lista', () => {
+    const sink = vi.fn();
+
+    warnIfOriginsUnrestricted([], { NODE_ENV: 'test' }, sink);
+    warnIfOriginsUnrestricted([], {}, sink);
+
+    expect(sink).not.toHaveBeenCalled();
   });
 });
