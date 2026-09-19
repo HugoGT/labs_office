@@ -24,7 +24,13 @@ const server = createServer((req, res) => {
     path: req.url,
     xff: req.headers['x-forwarded-for'] ?? null,
   });
-  res.writeHead(200, { 'content-type': 'application/json' });
+  // Explicit Content-Length instead of letting Node fall back to chunked
+  // transfer encoding: the probe's minimal HTTP/1.1 client parses a plain
+  // `\r\n\r\n`-delimited body, not chunk framing.
+  res.writeHead(200, {
+    'content-type': 'application/json',
+    'content-length': Buffer.byteLength(body),
+  });
   res.end(body);
 });
 
