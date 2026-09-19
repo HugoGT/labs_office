@@ -34,12 +34,28 @@ x-logging: &logging
 
 services:
   caddy:
-    image: caddy:2.11-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    # Imagen propia, construida por este repositorio desde el issue #19: la
+    # oficial no trae el modulo layer4 que multiplexa TURN/TLS sobre el 443.
+    # Mismo patron que `web` y `colyseus`, y con la misma trampa de
+    # IMAGE_TAG documentada en office-deploy.sh.
+    image: "${REGISTRY}/caddy:${IMAGE_TAG}"
     restart: unless-stopped
     logging: *logging
     environment:
       APP_HOST: "${APP_HOST}"
       LK_HOST: "${LK_HOST}"
+      # Hostname dedicado del TURN (issue #19). Ver el bloque layer4 del
+      # Caddyfile: es lo que permite separar TURN de la senalizacion mirando
+      # solo el SNI, los dos sobre el mismo 443.
+      TURN_HOST: "${TURN_HOST}"
+      # A donde reenvia el mux el TURN ya con TLS terminado. LiveKit corre en
+      # la red del host (ver mas abajo), de ahi `host.docker.internal`.
+      TURN_UPSTREAM: "host.docker.internal:5349"
+      # Vacia en produccion: esta linea desaparece al sustituir la variable y
+      # el Caddyfile no gana ninguna opcion global de mas. La usa el arnes
+      # local (infra/gcp/test/mux/) para forzar la CA interna de Caddy sin
+      # tocar ni copiar este fichero.
+      CADDY_GLOBAL_EXTRA: ""
       ACME_EMAIL: "${ACME_EMAIL}"
     ports:
       - "80:80"
@@ -49,7 +65,9 @@ services:
       # Volumen con nombre y no bind: aqui viven las claves privadas de los
       # certificados y el estado de la cuenta ACME. Perderlo obliga a reemitir,
       # y reemitir cuenta contra el limite compartido de sslip.io (ver README).
-      # LiveKit lo monta en solo lectura para leer el certificado de lk.
+      # Issue #19: ya no lo monta ningun otro contenedor. LiveKit terminaba
+      # TLS leyendo de aqui el certificado de lk.*; ahora Caddy termina el TLS
+      # del TURN en el propio mux, asi que solo Caddy necesita estas claves.
       - caddy-data:/data
       - caddy-config:/config
     # LiveKit corre en la red del host (ver mas abajo), asi que Caddy no puede
@@ -148,7 +166,13 @@ services:
     networks: [office]
 
   livekit:
-    image: livekit/livekit-server:v1.13.5@sha256:3497163e15c48fef6e7830c78716f9e9d5edc28abf7aa90b61c86e93bbc306b1
+    # v1.13.7, no v1.13.5: turn.proxy_protocol / proxy_protocol_trusted_cidrs
+    # (issue #19) solo existen desde v1.13.7 (commit adf44a2e, 2026-09-09,
+    # publicado en el tag el 2026-09-14). v1.13.5 ignora en SILENCIO cualquier
+    # clave de livekit.yaml.tpl que no reconoce, asi que subir esta version es
+    # obligatorio en el MISMO commit que anade esas dos claves: escribirlas
+    # antes de esta linea seria una trampa de fallo silencioso, no un error.
+    image: livekit/livekit-server:v1.13.7@sha256:6fd3b7088874c4d119160dd688798dfec852bc014786d392caad15f6f63912a3
     restart: unless-stopped
     logging: *logging
     command: --config /etc/livekit.yaml
@@ -166,11 +190,14 @@ services:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
     volumes:
       - ./livekit.yaml:/etc/livekit.yaml:ro
-      # Solo lectura: LiveKit toma de aqui el certificado que Caddy emitio para
-      # el hostname lk.*, y lo usa para el TURN sobre TLS del puerto 5349.
-      - caddy-data:/caddy-data:ro
 
 volumes:
+  # Issue #19: LiveKit ya NO monta este volumen. Terminaba TLS leyendo el
+  # certificado de lk.* de aqui, con acceso de solo lectura a las claves
+  # privadas de TODOS los hostnames de Caddy, no solo al suyo; ahora Caddy
+  # termina el TLS del TURN en el mux y le entrega texto claro con PROXY v2
+  # (turn.external_tls en livekit.yaml.tpl), asi que ningun contenedor salvo
+  # Caddy puede leer las claves de Caddy.
   caddy-data:
   caddy-config:
   # Aqui viven los usuarios, sus roles y las invitaciones. Perderlo NO es como
@@ -184,3 +211,13 @@ volumes:
 networks:
   office:
     driver: bridge
+    # Subred fijada a proposito (issue #19, D5). LiveKit necesita saber desde
+    # que origenes puede aceptar una cabecera PROXY
+    # (turn.proxy_protocol_trusted_cidrs en livekit.yaml.tpl) y Caddy le habla
+    # desde su direccion de esta red. Sin fijarla, Docker elige la subred de
+    # un pool y ese valor dejaria de cuadrar en la siguiente recreacion de la
+    # red, en silencio. Coste aceptado: cambiar esta subred recrea la red y,
+    # con ella, todos los contenedores.
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

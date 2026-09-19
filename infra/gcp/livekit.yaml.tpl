@@ -1,6 +1,7 @@
 # LiveKit server para el entorno desplegado. Plantilla: `office-deploy`
-# sustituye __LK_HOST__ por el hostname real (derivado de la IP estatica via
-# sslip.io) y escribe el resultado en /opt/office/livekit.yaml.
+# sustituye __LK_HOST__ y __TURN_HOST__ por los hostnames reales (derivados de
+# la IP estatica via sslip.io) y escribe el resultado en
+# /opt/office/livekit.yaml.
 #
 # Las claves NO viven aqui: entran por la variable LIVEKIT_KEYS que el compose
 # toma de /opt/office/.env, y ese fichero lo regenera cada despliegue leyendo
@@ -37,22 +38,45 @@ rtc:
 # SFU, y evita mantener un servicio mas con su propia configuracion y sus
 # propios certificados.
 #
-# LIMITE CONOCIDO: esto NO cubre las redes que solo dejan salir por el 443.
-# Caddy ocupa el 443 para HTTPS y multiplexar TURN/TLS sobre ese mismo puerto
-# exigiria compilar Caddy con el modulo layer4. Se aplaza a un issue hijo: en
-# esas redes el audio no conecta, el resto de la aplicacion si.
+# Cubre ahora tambien las redes que solo dejan salir por el 443 (issue #19).
+# Caddy multiplexa TURN/TLS y la senalizacion sobre ese mismo puerto (modulo
+# layer4, ver el bloque `layer4` de Caddyfile), mirando solo el SNI del
+# ClientHello: turn.* va al TURN de aqui debajo, todo lo demas sigue su camino
+# de siempre.
 turn:
   enabled: true
-  domain: __LK_HOST__
+
+  # Hostname propio para el TURN, distinto del de senalizacion (issue #19). Es
+  # lo que permite que el multiplexor del 443 separe el TURN del WebSocket de
+  # senalizacion mirando SOLO el SNI: los dos viajan por el mismo puerto y son
+  # indistinguibles hasta que se mira el nombre de servidor del ClientHello.
+  #
+  # El navegador NO conoce este nombre por el bundle del SPA: lo recibe en la
+  # lista de servidores ICE que devuelve la propia senalizacion de LiveKit. Por
+  # eso este cambio no toca ni una linea del cliente.
+  domain: __TURN_HOST__
+
   udp_port: 3478
   tls_port: 5349
-  # Certificado emitido por Caddy para este mismo hostname y leido del volumen
-  # compartido en solo lectura. La ruta la fija Caddy y contiene el directorio
-  # de la autoridad emisora: si alguna emision cayera a ZeroSSL (el respaldo
-  # automatico de Caddy), el directorio cambia de nombre y hay que actualizar
-  # estas dos lineas. El TURN sobre UDP (3478) seguiria funcionando entretanto.
-  cert_file: /caddy-data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/__LK_HOST__/__LK_HOST__.crt
-  key_file: /caddy-data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/__LK_HOST__/__LK_HOST__.key
+
+  # Caddy termina el TLS (ver el bloque layer4 del Caddyfile) y entrega texto
+  # claro en el 5349. LiveKit deja de leer certificados del disco: eso retira
+  # office-cert-watch y, de paso, el montaje de solo lectura que le daba acceso
+  # a TODAS las claves privadas de Caddy, no solo a la suya.
+  external_tls: true
+
+  # Sin esto LiveKit veria como cliente al contenedor de Caddy y anunciaria esa
+  # direccion en XOR-MAPPED-ADDRESS; Firefox rechaza ese candidato y el relay
+  # queda inservible. La cabecera PROXY v2 la manda el handler `proxy` del
+  # multiplexor. Solo existe desde v1.13.7 (ver el comentario junto al pin de
+  # imagen en docker-compose.yml): v1.13.5 ignoraria esta clave en silencio.
+  proxy_protocol: true
+
+  # Solo la subred del bridge del compose, fijada a proposito en
+  # docker-compose.yml. Sin fijarla, Docker elige una del pool y este valor
+  # dejaria de cuadrar en la siguiente recreacion de la red, en silencio.
+  proxy_protocol_trusted_cidrs:
+    - 172.30.0.0/24
 
 logging:
   level: info

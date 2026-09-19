@@ -1,0 +1,101 @@
+# Arnes local del multiplexado TURN/TLS sobre 443 (issue #19). Construye la
+# imagen REAL de Caddy (infra/gcp/docker/caddy.Dockerfile) y monta el
+# Caddyfile REAL de produccion (infra/gcp/Caddyfile): la prueba ejercita ese
+# fichero, nunca una copia que podria divergir sin que nadie se entere.
+#
+# Nunca corre en CI, ni siquiera detras de un filtro de ruta `infra/`: la
+# primera ejecucion compila Caddy con xcaddy, y ese coste solo lo paga quien
+# lo pide con `pnpm test:mux`.
+#
+# Truco de red deliberado: `lk-stub` recibe el alias `host.docker.internal`
+# en esta misma red. El Caddyfile real apunta la senalizacion de LiveKit a
+# ese nombre literal (no es una variable de entorno), y en produccion lo
+# resuelve el `extra_hosts: host-gateway` de docker-compose.yml. Aqui, al NO
+# declarar ese `extra_hosts`, Caddy resuelve el nombre por el DNS interno de
+# Docker hacia este contenedor en vez de hacia la maquina anfitriona, sin
+# tocar ni una linea del Caddyfile.
+name: office-mux-harness
+
+services:
+  caddy:
+    build:
+      context: ../../../..
+      dockerfile: infra/gcp/docker/caddy.Dockerfile
+    volumes:
+      - ../../Caddyfile:/etc/caddy/Caddyfile:ro
+    environment:
+      APP_HOST: app.local.test
+      LK_HOST: lk.local.test
+      TURN_HOST: turn.local.test
+      ACME_EMAIL: test@local.test
+      # Fuerza la CA interna de Caddy pase lo que pase con la heuristica de
+      # TLDs reservados (.test, .local, ...): la prueba no depende de un
+      # detalle de version de Caddy para conseguir certificados sin ACME.
+      CADDY_GLOBAL_EXTRA: local_certs
+      TURN_UPSTREAM: turn-stub:5349
+    depends_on:
+      - web
+      - colyseus
+      - lk-stub
+      - turn-stub
+    networks: [mux]
+
+  web:
+    image: node:24-alpine@sha256:83f1c388c31fb2e51f7cbd4dea949b96260798c98f206e8e4696bc93bd964e3a
+    command: ["node", "/stub/http-stub.mjs"]
+    environment:
+      STUB_NAME: web
+      PORT: "80"
+    volumes:
+      - ./stubs:/stub:ro
+    networks: [mux]
+
+  colyseus:
+    image: node:24-alpine@sha256:83f1c388c31fb2e51f7cbd4dea949b96260798c98f206e8e4696bc93bd964e3a
+    command: ["node", "/stub/http-stub.mjs"]
+    environment:
+      STUB_NAME: colyseus
+      PORT: "2567"
+    volumes:
+      - ./stubs:/stub:ro
+    networks: [mux]
+
+  # Sustituye a `host.docker.internal:7880`, la senalizacion de LiveKit en
+  # produccion. El alias es lo que hace el truco: ver la nota de arriba.
+  lk-stub:
+    image: node:24-alpine@sha256:83f1c388c31fb2e51f7cbd4dea949b96260798c98f206e8e4696bc93bd964e3a
+    command: ["node", "/stub/http-stub.mjs"]
+    environment:
+      STUB_NAME: lk
+      PORT: "7880"
+    volumes:
+      - ./stubs:/stub:ro
+    networks:
+      mux:
+        aliases:
+          - host.docker.internal
+
+  turn-stub:
+    image: node:24-alpine@sha256:83f1c388c31fb2e51f7cbd4dea949b96260798c98f206e8e4696bc93bd964e3a
+    command: ["node", "/stub/turn-stub.mjs"]
+    environment:
+      PORT: "5349"
+    volumes:
+      - ./stubs:/stub:ro
+    networks: [mux]
+
+  # Cliente de la prueba. Vive en la MISMA red que caddy para que su
+  # direccion sea una IP de contenedor real y distinguible: es lo que
+  # convierte la asercion 4/5 en una prueba honesta y no algo que un
+  # loopback pudiera falsear. Se queda inactivo (`sleep infinity`) y el
+  # driver (mux.test.mjs) le manda cada sonda con `docker compose exec`.
+  probe:
+    image: node:24-alpine@sha256:83f1c388c31fb2e51f7cbd4dea949b96260798c98f206e8e4696bc93bd964e3a
+    command: ["sleep", "infinity"]
+    volumes:
+      - .:/harness:ro
+    networks: [mux]
+
+networks:
+  mux:
+    driver: bridge
