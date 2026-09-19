@@ -3,7 +3,7 @@ import type { OfficeSession } from '../auth/authPort';
 import { resolveLivekitConfig } from '../game/livekitEndpoint';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
-import { DEFAULT_STATUS, type PresenceStatus } from '../game/officeProtocol';
+import { DEFAULT_NAME, DEFAULT_STATUS, type PresenceStatus } from '../game/officeProtocol';
 import { useOfficeBridge } from '../hooks/useOfficeBridge';
 import { useProximityAudio } from '../hooks/useProximityAudio';
 import { AudioUnblockPrompt } from './AudioUnblockPrompt';
@@ -34,7 +34,9 @@ export interface OfficeShellProps {
  *
  * La sesion solo la reparte: la escena la necesita para entrar a la sala de
  * Colyseus y el hook de audio para pedir el token de LiveKit; son los dos
- * unicos puntos que hablan con el servidor.
+ * unicos puntos que hablan con el servidor. Al HUD no le baja la sesion sino
+ * el nombre ya resuelto (#6): `BottomBar` es presentacional y no tiene por que
+ * aprender que existe una sesion para poder escribir un nombre.
  */
 export function OfficeShell({ session = null }: OfficeShellProps) {
   const [bridge] = useState(createOfficeBridge);
@@ -182,6 +184,7 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
       <RecBadge visible={recording} />
       <ContextMenu menu={menu} onAction={handleMenuAction} onClose={closeMenu} />
       <BottomBar
+        playerName={session?.displayName ?? DEFAULT_NAME}
         micOn={micOn}
         camOn={camOn}
         audioAvailable={audioAvailable}

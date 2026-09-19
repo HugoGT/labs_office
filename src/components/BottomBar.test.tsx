@@ -2,11 +2,13 @@ import { render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
+import { DEFAULT_NAME } from '../game/officeProtocol';
 import { STATUS_COLOR, statusCssColor } from '../game/presence';
 import { BottomBar } from './BottomBar';
 
 function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
   const props = {
+    playerName: DEFAULT_NAME,
     micOn: true,
     camOn: true,
     audioAvailable: true,
@@ -65,6 +67,7 @@ describe('BottomBar', () => {
   it('muestra el estado de proximidad fuera de una sala y el de sala privada dentro', () => {
     const { rerender } = render(
       <BottomBar
+        playerName={DEFAULT_NAME}
         micOn
         camOn
         audioAvailable
@@ -82,6 +85,7 @@ describe('BottomBar', () => {
 
     rerender(
       <BottomBar
+        playerName={DEFAULT_NAME}
         micOn
         camOn
         audioAvailable
@@ -166,6 +170,7 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
   it('el punto junto al nombre toma el color del estado, no un verde fijo', () => {
     const { rerender } = render(
       <BottomBar
+        playerName={DEFAULT_NAME}
         micOn={false}
         camOn={false}
         audioAvailable
@@ -186,6 +191,7 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
 
     rerender(
       <BottomBar
+        playerName={DEFAULT_NAME}
         micOn={false}
         camOn={false}
         audioAvailable
@@ -242,5 +248,22 @@ describe('BottomBar: "No molestar" en el HUD (#1)', () => {
     renderBar({ status: 'r', room: 'Sala de Juntas' });
 
     expect(screen.getByText(/aislado del audio de la oficina/)).toBeInTheDocument();
+  });
+});
+
+describe('BottomBar: nombre real del usuario local (#6)', () => {
+  it('muestra el nombre que recibe por prop, no uno decidido aqui', () => {
+    renderBar({ playerName: 'Ana Torres' });
+
+    expect(screen.getByText(/Ana Torres/)).toBeInTheDocument();
+  });
+
+  it('no queda ningun nombre cableado en la barra', () => {
+    renderBar({ playerName: DEFAULT_NAME });
+
+    // `HugoGT` vivio cableado aqui: el nombre de una persona concreta
+    // haciendose pasar por el de cualquiera que abriese la oficina.
+    expect(screen.queryByText(/HugoGT/)).not.toBeInTheDocument();
+    expect(screen.getByText(new RegExp(DEFAULT_NAME))).toBeInTheDocument();
   });
 });
