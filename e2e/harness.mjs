@@ -382,14 +382,24 @@ export async function waitForOnlineCount(page, count) {
   );
 }
 
-export async function waitForPeerChipCount(page, count) {
+/** D4: counts session-identity tile nodes under `#office-shell`, excluding
+ * the caller's own session id (`VideoTiles.tsx:140,157`), instead of reading
+ * removed chip text or the per-frame `data-mode` attribute (rewritten every
+ * animation frame, including on the self-tile). Replaces
+ * `waitForPeerChipCount`, which read a `🔊 <name>` chip string that no
+ * longer exists in the DOM and therefore always resolved with 0 matches
+ * regardless of actual visibility (obs #561). `:not(audio)` excludes the
+ * remote-audio sink elements (D3), which also carry `data-session-id` but
+ * are not tiles. */
+export async function waitForPeerTileCount(page, count) {
+  const ownSessionId = await getOwnSessionId(page);
   await page.waitForFunction(
-    (n) => {
-      const text = document.querySelector('#office-shell')?.textContent ?? '';
-      const matches = text.match(/\u{1F50A} HugoGT/gu) ?? [];
-      return matches.length === n;
+    ({ n, own }) => {
+      const nodes = document.querySelectorAll('#office-shell [data-session-id]:not(audio)');
+      const peers = Array.from(nodes).filter((node) => node.dataset.sessionId !== own);
+      return peers.length === n;
     },
-    count,
+    { n: count, own: ownSessionId },
     { timeout: READINESS_DEADLINE_MS },
   );
 }
