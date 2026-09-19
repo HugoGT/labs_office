@@ -84,9 +84,20 @@ describe('connectLivekitRoom (cableado de reproduccion, #18)', () => {
     const room = fakeRoom();
     await connect(room, container);
 
-    room.emit(RoomEvent.TrackSubscribed, fakeTrack());
+    room.emit(RoomEvent.TrackSubscribed, fakeTrack(), undefined, { identity: 'p1' });
 
     expect(container.querySelectorAll('audio')).toHaveLength(1);
+  });
+
+  it('la pista adjunta lleva la identidad del participante que la publica (D3, spec "remote-audio-playback")', async () => {
+    const container = document.createElement('div');
+    const room = fakeRoom();
+    await connect(room, container);
+
+    room.emit(RoomEvent.TrackSubscribed, fakeTrack(), undefined, { identity: 'p1' });
+
+    const [element] = container.querySelectorAll('audio');
+    expect(element.dataset.sessionId).toBe('p1');
   });
 
   it('TrackUnsubscribed retira el elemento: salir del radio corta el audio', async () => {
@@ -95,8 +106,8 @@ describe('connectLivekitRoom (cableado de reproduccion, #18)', () => {
     await connect(room, container);
     const track = fakeTrack();
 
-    room.emit(RoomEvent.TrackSubscribed, track);
-    room.emit(RoomEvent.TrackUnsubscribed, track);
+    room.emit(RoomEvent.TrackSubscribed, track, undefined, { identity: 'p1' });
+    room.emit(RoomEvent.TrackUnsubscribed, track, undefined, { identity: 'p1' });
 
     expect(container.querySelectorAll('audio')).toHaveLength(0);
   });
@@ -106,7 +117,7 @@ describe('connectLivekitRoom (cableado de reproduccion, #18)', () => {
     const room = fakeRoom();
     const connection = await connect(room, container);
 
-    room.emit(RoomEvent.TrackSubscribed, fakeTrack());
+    room.emit(RoomEvent.TrackSubscribed, fakeTrack(), undefined, { identity: 'p1' });
     await connection.disconnect();
 
     expect(container.querySelectorAll('audio')).toHaveLength(0);

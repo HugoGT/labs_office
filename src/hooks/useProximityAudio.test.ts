@@ -32,6 +32,17 @@ function peersOf(sessionIds: string[]): { sessionId: string; name: string }[] {
   return sessionIds.map((sessionId) => ({ sessionId, name: sessionId }));
 }
 
+/** Promesa controlable desde afuera: deja un `connect()`/`disconnect()` en
+ * vuelo a voluntad, para reproducir la carrera de obs #570 (el `voice` que
+ * SI trae el par llega mientras `connect()` todavia no resolvio). */
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 function fakeAttachableTrack(): AttachableTrack {
   return {
     kind: 'video',
@@ -546,6 +557,120 @@ describe('useProximityAudio', () => {
       expect(connection.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
       expect(connection.setCameraEnabled).toHaveBeenLastCalledWith(false);
     });
+  });
+});
+
+describe('useProximityAudio: el conjunto deseado en vuelo no se pierde (obs #570, D1)', () => {
+  it('un voice() con el par mientras connect() sigue en vuelo se aplica al resolver, no el vacio inicial', async () => {
+    const bridge = createOfficeBridge();
+    const connection = fakeConnection();
+    const gate = deferred<LivekitRoomConnection>();
+    const connect = vi.fn(() => gate.promise);
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    renderHook(() => useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }));
+
+    // voice#1: el recien llegado, sin pares todavia (Colyseus no sincronizo).
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+    });
+    expect(connect).toHaveBeenCalledTimes(1);
+
+    // voice#2: llega el par mientras `connect()` sigue sin resolver.
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), room: null });
+    });
+    // Mismo selfSessionId: no reconecta.
+    expect(connect).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      gate.resolve(connection);
+      await gate.promise;
+    });
+
+    // HOY: se aplica la instantanea vacia de voice#1 (`pendingSessionIds`).
+    // CON EL ARREGLO: se aplica lo ultimo conocido (`desiredRef`), es decir ['ana'].
+    expect(connection.setDesiredAudioPeers).toHaveBeenLastCalledWith(['ana']);
+  });
+
+  it('la misma actualizacion en vuelo tambien llega al conjunto de VIDEO, no solo al de audio', async () => {
+    const bridge = createOfficeBridge();
+    const connection = fakeConnection();
+    const gate = deferred<LivekitRoomConnection>();
+    const connect = vi.fn(() => gate.promise);
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    renderHook(() => useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }));
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), room: null });
+    });
+
+    // Comparte sala con el par: video pide los mismos ids que el audio.
+    await act(async () => {
+      bridge.emit('voice', {
+        selfSessionId: 'yo',
+        selfName: 'Yo',
+        peers: peersOf(['ana']),
+        room: 'Sala de Juntas',
+      });
+    });
+
+    await act(async () => {
+      gate.resolve(connection);
+      await gate.promise;
+    });
+
+    expect(connection.setDesiredVideoPeers).toHaveBeenLastCalledWith(['ana']);
+  });
+
+  it('el teardown no deja un conjunto deseado viejo filtrarse a la sesion siguiente', async () => {
+    const bridge = createOfficeBridge();
+    const connection1 = fakeConnection();
+    const disconnectGate = deferred<void>();
+    connection1.disconnect = vi.fn(() => disconnectGate.promise);
+    const connection2 = fakeConnection();
+    const connect2Gate = deferred<LivekitRoomConnection>();
+    const connect = vi
+      .fn<(opts: ConnectLivekitRoomOptions) => Promise<LivekitRoomConnection>>()
+      .mockImplementationOnce(async () => connection1)
+      .mockImplementationOnce(() => connect2Gate.promise);
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    renderHook(() => useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }));
+
+    // Sesion 'yo' conecta y queda con ['ana'] deseado.
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), room: null });
+    });
+    expect(connection1.setDesiredAudioPeers).toHaveBeenLastCalledWith(['ana']);
+
+    // Se desconecta: el disconnect() REAL queda en vuelo a proposito.
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), room: null });
+    });
+
+    // Antes de que el disconnect viejo termine, arranca una sesion nueva.
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'bea', selfName: 'Bea', peers: peersOf(['carla']), room: null });
+    });
+    expect(connect).toHaveBeenCalledTimes(2);
+
+    // Se resuelve el disconnect viejo DESPUES de que la sesion nueva ya
+    // escribio su propio conjunto deseado: si el reset de `desiredRef`
+    // corriera tras el `await` de teardown (en vez de antes), borraria lo
+    // que 'bea' ya dejo escrito.
+    await act(async () => {
+      disconnectGate.resolve();
+      await disconnectGate.promise;
+    });
+
+    await act(async () => {
+      connect2Gate.resolve(connection2);
+      await connect2Gate.promise;
+    });
+
+    expect(connection2.setDesiredAudioPeers).toHaveBeenLastCalledWith(['carla']);
   });
 });
 

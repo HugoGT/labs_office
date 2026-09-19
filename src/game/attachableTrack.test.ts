@@ -27,7 +27,7 @@ describe('AttachableTrack (contrato compartido, movido de remoteAudioSink.ts)', 
     const container = document.createElement('div');
     const sink = createRemoteAudioSink(container);
 
-    sink.add(fakeTrack('audio'));
+    sink.add(fakeTrack('audio'), 'peer-1');
 
     expect(container.querySelectorAll('audio')).toHaveLength(1);
   });
@@ -37,7 +37,7 @@ describe('AttachableTrack (contrato compartido, movido de remoteAudioSink.ts)', 
     const sink = createRemoteAudioSink(container);
     const track = fakeTrack('video');
 
-    sink.add(track);
+    sink.add(track, 'peer-1');
 
     // El contrato estructural no distingue kinds; la regla de "solo audio"
     // vive en el sink, no en el tipo. Por eso el elemento existe (attach() ya
