@@ -20,8 +20,13 @@
 import type { AttachableTrack } from './attachableTrack';
 
 export interface RemoteAudioSink {
-  /** Adjunta y reproduce. Idempotente: la misma pista nunca suena dos veces. */
-  add(track: AttachableTrack): void;
+  /**
+   * Adjunta y reproduce. Idempotente: la misma pista nunca suena dos veces.
+   * `sessionId` es OBLIGATORIO (D3): un parametro opcional dejaria que un
+   * futuro call site produjera en silencio un elemento no seleccionable por
+   * el arnes E2E, que identifica cada `<audio>` por esta misma identidad.
+   */
+  add(track: AttachableTrack, sessionId: string): void;
   /** Desvincula y retira del DOM. Una pista desconocida es un no-op. */
   remove(track: AttachableTrack): void;
   /** Retira todas las pistas vivas. Es lo que corre al desconectar la sala. */
@@ -46,12 +51,16 @@ export function createRemoteAudioSink(container: HTMLElement = document.body): R
   }
 
   return {
-    add(track) {
+    add(track, sessionId) {
       if (track.kind !== AUDIO_KIND || attached.has(track)) return;
       const element = track.attach();
       element.autoplay = true;
       // Sin layout: es una superficie de reproduccion, no un control visible.
       element.hidden = true;
+      // D3: misma forma que los wrappers de tile (`data-session-id`,
+      // `VideoTiles.tsx:140,157`), escrito ANTES de `appendChild` para que el
+      // arnes nunca observe el elemento sin su identidad.
+      element.dataset.sessionId = sessionId;
       attached.set(track, element);
       container.appendChild(element);
     },

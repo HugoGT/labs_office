@@ -67,6 +67,31 @@ function loadLivekitEnv() {
   }
 }
 
+/**
+ * D7: `livekit-server --dev`'s reachable HTTP health surface, derived from
+ * the same `ws(s)://` URL the harness already gives `livekit-client`. Pure --
+ * no network, no `fetch` -- so it gets its own unit test
+ * (`livekit-health-url.test.mjs`) without a real server.
+ */
+export function livekitHealthUrl(wsUrl) {
+  let parsed;
+  try {
+    parsed = new URL(wsUrl);
+  } catch {
+    throw new Error(`livekitHealthUrl: not a valid URL: ${JSON.stringify(wsUrl)}`);
+  }
+  if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
+    throw new Error(
+      `livekitHealthUrl: expected a ws:// or wss:// URL, got ${JSON.stringify(parsed.protocol)}`,
+    );
+  }
+  parsed.protocol = parsed.protocol === 'wss:' ? 'https:' : 'http:';
+  parsed.pathname = '/';
+  parsed.search = '';
+  parsed.hash = '';
+  return parsed.toString();
+}
+
 /** D5 preflight: fails fast if the fixed port is already occupied, instead
  * of the harness silently talking to someone else's server. */
 function checkPortFree(port) {
@@ -295,7 +320,14 @@ export async function startHarness({ realLivekit = false, fakeMedia = false } = 
     }
     serverEnv.LIVEKIT_API_KEY = livekitEnv.LIVEKIT_API_KEY;
     serverEnv.LIVEKIT_API_SECRET = livekitEnv.LIVEKIT_API_SECRET;
+    // Mismo default que `createOfficeServer.ts:120`, para que la sonda de
+    // arriba consulte exactamente el mismo servidor al que el propio server
+    // Colyseus se conectara.
+    const wsUrl = livekitEnv.LIVEKIT_URL ?? 'ws://localhost:7880';
     if (livekitEnv.LIVEKIT_URL) serverEnv.LIVEKIT_URL = livekitEnv.LIVEKIT_URL;
+    // D7: nunca se abren contextos de Chromium (ni se arranca nada) contra un
+    // LiveKit que todavia no responde -- sondeo real, nunca un sleep fijo.
+    await pollUntilOk(livekitHealthUrl(wsUrl), 'LiveKit server');
   } else {
     // D6: server env is scrubbed of LiveKit credentials so `/livekit/token`
     // deterministically answers 503 -- no `.env.e2e`/CI ever provides them.
@@ -382,14 +414,24 @@ export async function waitForOnlineCount(page, count) {
   );
 }
 
-export async function waitForPeerChipCount(page, count) {
+/** D4: counts session-identity tile nodes under `#office-shell`, excluding
+ * the caller's own session id (`VideoTiles.tsx:140,157`), instead of reading
+ * removed chip text or the per-frame `data-mode` attribute (rewritten every
+ * animation frame, including on the self-tile). Replaces
+ * `waitForPeerChipCount`, which read a `🔊 <name>` chip string that no
+ * longer exists in the DOM and therefore always resolved with 0 matches
+ * regardless of actual visibility (obs #561). `:not(audio)` excludes the
+ * remote-audio sink elements (D3), which also carry `data-session-id` but
+ * are not tiles. */
+export async function waitForPeerTileCount(page, count) {
+  const ownSessionId = await getOwnSessionId(page);
   await page.waitForFunction(
-    (n) => {
-      const text = document.querySelector('#office-shell')?.textContent ?? '';
-      const matches = text.match(/\u{1F50A} HugoGT/gu) ?? [];
-      return matches.length === n;
+    ({ n, own }) => {
+      const nodes = document.querySelectorAll('#office-shell [data-session-id]:not(audio)');
+      const peers = Array.from(nodes).filter((node) => node.dataset.sessionId !== own);
+      return peers.length === n;
     },
-    count,
+    { n: count, own: ownSessionId },
     { timeout: READINESS_DEADLINE_MS },
   );
 }
@@ -448,6 +490,23 @@ export async function getOwnSessionId(page) {
   return page.evaluate(() => window.__officeE2E?.lastVoice()?.selfSessionId ?? null);
 }
 
+/**
+ * D6: a REAL Playwright click on the Mic button, located by text (same idiom
+ * as `waitForAudioUnavailable`'s button lookup). Se usa un click real y no
+ * `page.evaluate()` porque es lo mas parecido a lo que hace una persona: un
+ * gesto de usuario de verdad, que es lo unico que la politica de autoplay del
+ * navegador acepta sin discusion.
+ *
+ * Lo que NO esta probado: que un click sintetico falle por ese motivo. Los
+ * spikes de #565 no lo midieron -- las corridas que contaron elementos
+ * `<audio>` usaron click real tanto en el caso que funcionaba como en el que
+ * fallaba, y la variable que de verdad cambiaba era el orden de llegada. El
+ * click real se elige por ser el camino seguro, no por una causa demostrada.
+ */
+export async function enableMic(page) {
+  await page.getByRole('button', { name: /Mic/ }).click();
+}
+
 /** Inverse of `waitForAudioUnavailable`: mic/cam enabled, no degradation title. */
 export async function waitForAudioAvailable(page) {
   await page.waitForFunction(
@@ -463,19 +522,51 @@ export async function waitForAudioAvailable(page) {
   );
 }
 
-/** `hook.lastVoice().sessionIds` contains `sessionId` (presence). */
-export async function waitForAudibleSessionId(page, sessionId) {
+/**
+ * D4: proves actual local PLAYBACK, not merely subscription -- the blocking
+ * signal the spec requires ("remote-audio-playback"). Chromium's fake audio
+ * device does not reliably drive `data-speaking`/`ActiveSpeakersChanged` to
+ * `true` (empirically confirmed spike), so this instead polls the
+ * subscribing client's own attached `<audio data-session-id="...">` for
+ * three samples of strictly-increasing `currentTime` -- a stalled-but-nonzero
+ * clock would pass a single non-zero read but never two increasing ones.
+ */
+export async function waitForPeerAudioPlaying(page, sessionId) {
+  // Sample history lives on a plain object Playwright injects at runtime via
+  // CDP into whatever page it drives -- never part of the built bundle (the
+  // app never references this name), so it does not touch the
+  // `__officeE2E`/`teleportToTile` sentinel scan in `bundle-hook-absent`.
+  // Cleared before every call: a repeat call for the same session id (e.g.
+  // after it left and rejoined) must never resolve on a history left behind
+  // by an earlier call.
+  await page.evaluate((id) => {
+    delete (window.__e2eAudioSamples ??= {})[id];
+  }, sessionId);
   await page.waitForFunction(
-    (id) => (window.__officeE2E?.lastVoice()?.sessionIds ?? []).includes(id),
+    (id) => {
+      const registry = (window.__e2eAudioSamples ??= {});
+      const element = document.querySelector(`audio[data-session-id="${id}"]`);
+      if (!element || element.paused) return false;
+      const history = registry[id] ?? [];
+      const last = history[history.length - 1];
+      // Avoid pushing a duplicate sample when the poll happens to land twice
+      // on the same rendered frame.
+      const next = last === element.currentTime ? history : [...history, element.currentTime].slice(-3);
+      registry[id] = next;
+      if (next.length < 3) return false;
+      return next[0] < next[1] && next[1] < next[2];
+    },
     sessionId,
-    { timeout: READINESS_DEADLINE_MS },
+    { timeout: READINESS_DEADLINE_MS, polling: READINESS_POLL_INTERVAL_MS },
   );
 }
 
-/** `hook.lastVoice().sessionIds` no longer contains `sessionId` (absence). */
-export async function waitForNoAudibleSessionId(page, sessionId) {
+/** Inverse of `waitForPeerAudioPlaying`: the peer's remote `<audio>` element
+ * is gone from the DOM. `remoteAudioSink.ts`'s `detachTrack` removes it on
+ * `TrackUnsubscribed`, so absence here is real and can fail. */
+export async function waitForNoPeerAudio(page, sessionId) {
   await page.waitForFunction(
-    (id) => !(window.__officeE2E?.lastVoice()?.sessionIds ?? []).includes(id),
+    (id) => !document.querySelector(`audio[data-session-id="${id}"]`),
     sessionId,
     { timeout: READINESS_DEADLINE_MS },
   );

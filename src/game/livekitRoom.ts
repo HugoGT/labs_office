@@ -162,7 +162,7 @@ export async function connectLivekitRoom({
   room.on(
     RoomEvent.TrackSubscribed,
     (track: RemoteTrack, _publication: unknown, participant: RemoteParticipant) => {
-      sink.add(track);
+      sink.add(track, participant.identity);
       // D3 (#17): el video NUNCA se adjunta aqui -- solo se reporta. Adjuntar
       // vive en React (la unica pieza con un renderer para video).
       if (track.kind === Track.Kind.Video) onVideoTrackSubscribed?.(participant.identity, track);

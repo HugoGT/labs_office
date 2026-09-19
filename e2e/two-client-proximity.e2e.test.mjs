@@ -17,7 +17,7 @@ import {
   teleportToTile,
   waitForAudioUnavailable,
   waitForOnlineCount,
-  waitForPeerChipCount,
+  waitForPeerTileCount,
   waitForRoomIndicator,
 } from './harness.mjs';
 
@@ -53,8 +53,8 @@ after(async () => {
 test('S2: both open-floor peers see each other online and chipped at spawn', async () => {
   await waitForOnlineCount(pageA, 1);
   await waitForOnlineCount(pageB, 1);
-  await waitForPeerChipCount(pageA, 1);
-  await waitForPeerChipCount(pageB, 1);
+  await waitForPeerTileCount(pageA, 1);
+  await waitForPeerTileCount(pageB, 1);
 });
 
 test('S3: entering a private room isolates its occupant from the open-floor peer', async () => {
@@ -64,17 +64,17 @@ test('S3: entering a private room isolates its occupant from the open-floor peer
   await teleportToTile(pageB, 58, 20);
   await waitForRoomIndicator(pageB, 'Cafetería'); // W3: B sees the private-room indicator
   await waitForOnlineCount(pageB, 1); // positive control: B is still connected, not stalled
-  await waitForPeerChipCount(pageB, 0); // W4: B no longer sees A's chip
+  await waitForPeerTileCount(pageB, 0); // W4: B no longer sees A's chip
   await waitForOnlineCount(pageA, 1); // positive control: A is still connected and reading online
-  await waitForPeerChipCount(pageA, 0); // W4: A no longer sees B's chip
+  await waitForPeerTileCount(pageA, 0); // W4: A no longer sees B's chip
 });
 
 test('S4: returning to the open floor reverses room isolation', async () => {
   await teleportToTile(pageB, 22, 28); // PLAYER_SPAWN_TX/TY (mapData.ts) -- back on the open floor
   await waitForOnlineCount(pageB, 1);
-  await waitForPeerChipCount(pageB, 1); // W2: B sees A's chip again
+  await waitForPeerTileCount(pageB, 1); // W2: B sees A's chip again
   await waitForOnlineCount(pageA, 1);
-  await waitForPeerChipCount(pageA, 1); // W2: A sees B's chip again -- isolation was reversible
+  await waitForPeerTileCount(pageA, 1); // W2: A sees B's chip again -- isolation was reversible
 });
 
 test('S9: both clients entering the same room see each other', async () => {
@@ -96,15 +96,15 @@ test('S9: both clients entering the same room see each other', async () => {
 
   await waitForOnlineCount(pageA, 1);
   await waitForOnlineCount(pageB, 1);
-  await waitForPeerChipCount(pageA, 1); // each sees the other's chip while sharing the room
-  await waitForPeerChipCount(pageB, 1);
+  await waitForPeerTileCount(pageA, 1); // each sees the other's chip while sharing the room
+  await waitForPeerTileCount(pageB, 1);
 
   // Restore both to the open floor so S6/S5's assertions start from the
   // same known state the rest of the suite expects.
   await teleportToTile(pageA, 22, 28);
   await teleportToTile(pageB, 22, 28);
-  await waitForPeerChipCount(pageA, 1);
-  await waitForPeerChipCount(pageB, 1);
+  await waitForPeerTileCount(pageA, 1);
+  await waitForPeerTileCount(pageB, 1);
 });
 
 test('S6: with no LiveKit reachable, both HUDs report audio unavailable and presence stays intact', async () => {
@@ -114,8 +114,8 @@ test('S6: with no LiveKit reachable, both HUDs report audio unavailable and pres
   await waitForAudioUnavailable(pageB);
   await waitForOnlineCount(pageA, 1);
   await waitForOnlineCount(pageB, 1);
-  await waitForPeerChipCount(pageA, 1);
-  await waitForPeerChipCount(pageB, 1);
+  await waitForPeerTileCount(pageA, 1);
+  await waitForPeerTileCount(pageB, 1);
   assert.equal(pageErrorsA.length, 0, `pageA had unhandled errors: ${pageErrorsA.join(', ')}`);
   assert.equal(pageErrorsB.length, 0, `pageB had unhandled errors: ${pageErrorsB.join(', ')}`);
 });
@@ -123,6 +123,6 @@ test('S6: with no LiveKit reachable, both HUDs report audio unavailable and pres
 test('S5: closing one browser context drops the other client\'s peer chip', async () => {
   await contextB.close();
   await waitForOnlineCount(pageA, 0);
-  await waitForPeerChipCount(pageA, 0);
+  await waitForPeerTileCount(pageA, 0);
   assert.equal(pageErrorsA.length, 0, `pageA had unhandled errors: ${pageErrorsA.join(', ')}`);
 });

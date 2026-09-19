@@ -32,7 +32,7 @@ describe('createRemoteAudioSink', () => {
     const container = document.createElement('div');
     const sink = createRemoteAudioSink(container);
 
-    sink.add(fakeTrack());
+    sink.add(fakeTrack(), 'peer-1');
 
     expect(attachedElements(container)).toHaveLength(1);
   });
@@ -41,18 +41,28 @@ describe('createRemoteAudioSink', () => {
     const container = document.createElement('div');
     const sink = createRemoteAudioSink(container);
 
-    sink.add(fakeTrack());
+    sink.add(fakeTrack(), 'peer-1');
     const [element] = attachedElements(container);
 
     expect(element.autoplay).toBe(true);
     expect(element.hidden).toBe(true);
   });
 
+  it('marca el elemento con la identidad de sesion del par (D3): el arnes E2E selecciona por ella', () => {
+    const container = document.createElement('div');
+    const sink = createRemoteAudioSink(container);
+
+    sink.add(fakeTrack(), 'peer-1');
+    const [element] = attachedElements(container);
+
+    expect(element.dataset.sessionId).toBe('peer-1');
+  });
+
   it('ignora las pistas de video: este sink solo existe para el audio (#17 tiene la suya)', () => {
     const container = document.createElement('div');
     const sink = createRemoteAudioSink(container);
 
-    sink.add(fakeTrack('video'));
+    sink.add(fakeTrack('video'), 'peer-1');
 
     expect(attachedElements(container)).toHaveLength(0);
   });
@@ -62,8 +72,8 @@ describe('createRemoteAudioSink', () => {
     const sink = createRemoteAudioSink(container);
     const track = fakeTrack();
 
-    sink.add(track);
-    sink.add(track);
+    sink.add(track, 'peer-1');
+    sink.add(track, 'peer-1');
 
     expect(attachedElements(container)).toHaveLength(1);
   });
@@ -73,7 +83,7 @@ describe('createRemoteAudioSink', () => {
     const sink = createRemoteAudioSink(container);
     const track = fakeTrack();
 
-    sink.add(track);
+    sink.add(track, 'peer-1');
     sink.remove(track);
 
     expect(attachedElements(container)).toHaveLength(0);
@@ -83,7 +93,7 @@ describe('createRemoteAudioSink', () => {
     const container = document.createElement('div');
     const sink = createRemoteAudioSink(container);
     const attached = fakeTrack();
-    sink.add(attached);
+    sink.add(attached, 'peer-1');
 
     expect(() => sink.remove(fakeTrack())).not.toThrow();
     expect(attachedElements(container)).toHaveLength(1);
@@ -92,8 +102,8 @@ describe('createRemoteAudioSink', () => {
   it('clear vacia todas las pistas vivas: es lo que corre en disconnect', () => {
     const container = document.createElement('div');
     const sink = createRemoteAudioSink(container);
-    sink.add(fakeTrack());
-    sink.add(fakeTrack());
+    sink.add(fakeTrack(), 'peer-1');
+    sink.add(fakeTrack(), 'peer-2');
 
     sink.clear();
 
@@ -105,9 +115,9 @@ describe('createRemoteAudioSink', () => {
     const sink = createRemoteAudioSink(container);
     const track = fakeTrack();
 
-    sink.add(track);
+    sink.add(track, 'peer-1');
     sink.clear();
-    sink.add(track);
+    sink.add(track, 'peer-1');
 
     expect(attachedElements(container)).toHaveLength(1);
   });

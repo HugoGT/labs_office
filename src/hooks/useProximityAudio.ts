@@ -88,6 +88,16 @@ export function useProximityAudio(
   const connectionRef = useRef<LivekitRoomConnection | null>(null);
   /** Sesion actualmente conectada o en vuelo de conexion; evita reconectar por cada tick. */
   const sessionRef = useRef<string | null>(null);
+  /**
+   * Ultimo conjunto deseado conocido (obs #570, D1): el recien llegado recibe
+   * su primer `voice` con `peers: []` (Colyseus aun no sincronizo), asi que
+   * `connect()` arranca con una instantanea vacia. El `voice` que SI trae el
+   * par puede llegar mientras esa conexion sigue en vuelo -- `connectionRef`
+   * todavia es `null` y el encadenamiento opcional de mas abajo lo descarta
+   * en silencio. Esta ref guarda SIEMPRE el ultimo valor visto, se escriba
+   * donde se escriba, y es lo que se aplica en cuanto la conexion queda lista.
+   */
+  const desiredRef = useRef<{ sessionIds: readonly string[]; spaceId: string | null } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,6 +106,10 @@ export function useProximityAudio(
       const connection = connectionRef.current;
       connectionRef.current = null;
       sessionRef.current = null;
+      // Antes del `await` de mas abajo (D1): si se pusiera despues, una
+      // sesion nueva que ya escribio la suya mientras este disconnect todavia
+      // estaba en vuelo se veria borrada por este reset tardio.
+      desiredRef.current = null;
       setAudioAvailable(false);
       setAudioBlocked(false);
       // Ninguna pista, hablante o camara sobrevive a la sala que las reporto:
@@ -122,6 +136,11 @@ export function useProximityAudio(
 
       const audibleSessionIds = payload.peers.map((peer) => peer.sessionId);
 
+      // Se guarda ANTES de la rama de abajo (D1): sirve tanto para la
+      // conexion ya viva (rama "misma sesion") como para la que sigue en
+      // vuelo -- un solo punto de escritura para las dos rutas.
+      desiredRef.current = { sessionIds: audibleSessionIds, spaceId: payload.spaceId };
+
       if (sessionRef.current === payload.selfSessionId) {
         // Misma sesion: solo reenvia los conjuntos deseados, no reconecta.
         connectionRef.current?.setDesiredAudioPeers(audibleSessionIds);
@@ -132,8 +151,6 @@ export function useProximityAudio(
       }
 
       const pendingSessionId = payload.selfSessionId;
-      const pendingSessionIds = audibleSessionIds;
-      const pendingSpaceId = payload.spaceId;
       sessionRef.current = pendingSessionId;
 
       void (async () => {
@@ -191,9 +208,17 @@ export function useProximityAudio(
 
           connectionRef.current = connection;
           setAudioAvailable(true);
-          connection.setDesiredAudioPeers(pendingSessionIds);
+          // D1: se aplica lo ultimo conocido (`desiredRef`), no la instantanea
+          // capturada cuando arranco esta conexion -- esa instantanea puede
+          // llevar mucho tiempo obsoleta si un `voice` intermedio se descarto
+          // arriba por llegar con la conexion todavia en vuelo.
+          const desired = desiredRef.current;
+          connection.setDesiredAudioPeers(desired?.sessionIds ?? []);
           connection.setDesiredVideoPeers(
-            videoPeers({ spaceId: pendingSpaceId, audibleSessionIds: pendingSessionIds }),
+            videoPeers({
+              spaceId: desired?.spaceId ?? null,
+              audibleSessionIds: desired?.sessionIds ?? [],
+            }),
           );
         } catch {
           // Rechazo de connect(), de la peticion del token o de la propia

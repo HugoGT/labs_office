@@ -1,10 +1,17 @@
 name: CI
 
 on:
-  # CI en pausa (2026-09-17): las comprobaciones de PR eran lentas y ademas el
-  # E2E esta roto, asi que no se dispara sola mientras dure esta tanda de
-  # cambios. Se lanza a mano desde Actions o con `gh workflow run ci.yml`.
-  # Para reactivarla, descomentar los dos disparadores de abajo.
+  # CI en pausa desde 2026-09-17 por dos motivos: las comprobaciones de PR
+  # eran lentas, y el E2E estaba roto. El segundo motivo YA NO APLICA: el E2E
+  # fallaba porque el harness buscaba un chip que el issue #17 habia retirado,
+  # y eso se arreglo en esta misma tanda (issue #16).
+  #
+  # Los disparadores siguen comentados a proposito, no por olvido: falta
+  # comprobar en un runner real que `livekit-server --dev` con `--network
+  # host` reune candidatos ICE alcanzables, algo que solo demuestra un
+  # `workflow_dispatch` de verdad. Para reactivar: lanzar la CI a mano, y tras
+  # tres corridas verdes seguidas descomentar los dos disparadores de abajo.
+  # Si la duracion empeora de forma apreciable, no reactivar y decidir aparte.
   # push:
   #   branches: [main]
   # pull_request:
@@ -81,3 +88,45 @@ jobs:
         run: pnpm test:e2e
         env:
           E2E_READINESS_TIMEOUT_MS: 30000
+
+      # D7: `--network host` puts the SFU and this same runner process in one
+      # network namespace. `use_external_ip: false` (`infra/livekit/livekit.yaml`)
+      # makes LiveKit advertise ICE candidates that are only reachable this way
+      # on a GitHub-hosted runner -- a bridged `docker compose` network or the
+      # unmodified `services:` block would advertise an address Chromium can
+      # never actually reach (obs #562 Q3). Same digest-pinned image as
+      # `infra/livekit/docker-compose.yml:25`, one version-pin surface.
+      - name: Start a real LiveKit server for the audio E2E gate
+        run: |
+          docker run -d --network host --name ci-livekit \
+            livekit/livekit-server:v1.13.5@sha256:3497163e15c48fef6e7830c78716f9e9d5edc28abf7aa90b61c86e93bbc306b1 \
+            --dev
+
+      # `--dev` mints its own fixed `devkey`/`secret` pair -- never a real
+      # secret, so no GitHub Secret is needed. Written to the already
+      # gitignored `.gitignore:11-15` path; deleted again in the cleanup step
+      # below regardless of job outcome.
+      - name: Write ephemeral LiveKit credentials for the audio E2E gate
+        run: |
+          cat > infra/livekit/.env <<'EOF'
+          LIVEKIT_API_KEY=devkey
+          LIVEKIT_API_SECRET=secret
+          LIVEKIT_URL=ws://localhost:7880
+          EOF
+
+      # Blocking, never `continue-on-error` (D9): an advisory gate cannot
+      # fail, which is the exact vacuity this change exists to remove -- and
+      # it already caught a real product bug (obs #570) this way. The harness
+      # itself gates on a real readiness probe (`livekitHealthUrl`) before
+      # opening any browser context, so this step needs no extra wait.
+      - name: Two-client audio E2E (real LiveKit, both arrival orders)
+        run: pnpm test:e2e:audio
+        env:
+          VITE_LIVEKIT_E2E: 1
+          E2E_READINESS_TIMEOUT_MS: 30000
+
+      - name: Stop the real LiveKit server and drop its credentials
+        if: always()
+        run: |
+          docker rm -f ci-livekit || true
+          rm -f infra/livekit/.env
