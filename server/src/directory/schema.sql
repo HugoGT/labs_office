@@ -168,6 +168,49 @@ CREATE UNIQUE INDEX IF NOT EXISTS user_desk_slot_unique ON user_desk_configs (us
 ALTER TABLE user_desk_configs DROP CONSTRAINT IF EXISTS user_desk_configs_slot_check;
 ALTER TABLE user_desk_configs ADD CONSTRAINT user_desk_configs_slot_check CHECK (slot BETWEEN 0 AND 8);
 
+-- Escritorios asignables (#7, slice 5). Dos personas distintas actuan sobre
+-- esta tabla y hacen cosas distintas: el administrador decide cuantos hay y
+-- donde estan, y cada quien elige el suyo entre los libres. Por eso el ocupante
+-- es una columna de ESTA tabla y no una tabla de asignaciones: una persona
+-- ocupa un escritorio o ninguno, nunca un historico.
+--
+-- La decoracion NO cuelga de aqui. `user_desk_configs` esta indexada por
+-- `user_id`, asi que la decoracion de alguien le SIGUE al escritorio que
+-- ocupe; una columna `desk_id` alli la anclaria a un sitio y se la borraria en
+-- cuanto esa persona se mudase a otro.
+CREATE TABLE IF NOT EXISTS desks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  label text NOT NULL,
+  -- TILES, no pixeles, igual que `spaces`. Un escritorio son 3x3 SIEMPRE, asi
+  -- que w/h no se guardan: una columna que pudiese decir otra cosa que 3
+  -- podria contradecir al CHECK de `slot`, que cuenta nueve cajas, y a la
+  -- restriccion de exclusion de aqui abajo, que mide el area con un 3 literal.
+  x integer NOT NULL CHECK (x >= 0), y integer NOT NULL CHECK (y >= 0),
+  -- ON DELETE SET NULL y no CASCADE: borrar a una PERSONA libera su escritorio
+  -- en vez de llevarselo por delante. El escritorio es mobiliario de la
+  -- oficina, no propiedad de quien lo usa. Al reves si es cascada natural:
+  -- borrar la fila del escritorio se lleva su ocupacion con ella, y esa
+  -- persona simplemente se queda sin sitio.
+  occupant_id uuid REFERENCES users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Una persona, un escritorio. Parcial porque muchos escritorios pueden estar
+-- libres a la vez; mismo precedente que `users_single_superadmin`. Es lo que
+-- obliga a que reclamar un sitio nuevo suelte el anterior en la MISMA
+-- transaccion (ver `pgDesks.claimDesk`).
+CREATE UNIQUE INDEX IF NOT EXISTS desks_single_occupant ON desks (occupant_id)
+  WHERE occupant_id IS NOT NULL;
+
+-- Dos escritorios solapados serian dos sitios que se pintan encima y una
+-- persona sentada en los dos a la vez para quien mire el mapa. Mismo mecanismo
+-- y mismo par DROP/ADD que `spaces_no_overlap`: no existe forma
+-- `IF NOT EXISTS` para una restriccion de exclusion.
+ALTER TABLE desks DROP CONSTRAINT IF EXISTS desks_no_overlap;
+ALTER TABLE desks ADD CONSTRAINT desks_no_overlap
+  EXCLUDE USING gist (box(point(x, y), point(x + 3, y + 3)) WITH &&);
+
 -- Semilla: los dos espacios de siempre, con los MISMOS uuids literales que
 -- usara `BUILT_IN_SPACES` en mapData.ts cuando aterrice la identidad de
 -- espacio (#7), para que un cliente en modo fallback y uno servido coincidan

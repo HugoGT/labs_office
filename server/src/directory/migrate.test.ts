@@ -271,3 +271,61 @@ describe('schema.sql: las cuatro tablas de PRD-7 (#7)', () => {
     expect(schema).not.toContain('postgis');
   });
 });
+
+describe('schema.sql: los escritorios asignables (#7, slice 5)', () => {
+  const desksBlock = schema.slice(schema.indexOf('create table if not exists desks'));
+
+  it('crea la tabla solo si no existe', () => {
+    expect(schema).toContain('create table if not exists desks');
+  });
+
+  it('guarda TILES y no pixeles, igual que spaces', () => {
+    expect(desksBlock).toContain('x integer not null check (x >= 0), y integer not null check (y >= 0)');
+  });
+
+  it('NO guarda w ni h: un escritorio es 3x3 SIEMPRE', () => {
+    // Una columna que pudiese decir otra cosa que 3 contradiria al CHECK de
+    // `slot`, que cuenta nueve cajas, y a la restriccion de exclusion de aqui
+    // abajo, que mide el area con un 3 literal. Dos fuentes para el mismo
+    // numero es una de mas.
+    expect(desksBlock).not.toMatch(/\bw integer\b/);
+    expect(desksBlock).not.toMatch(/\bh integer\b/);
+  });
+
+  it('el ocupante es una FK a users que se ANULA al borrar la cuenta', () => {
+    // SET NULL y no CASCADE: el escritorio es mobiliario de la oficina, no
+    // propiedad de quien lo usa. Borrar a una persona libera su sitio; borrar
+    // el sitio no deberia poder pasarle a nadie por borrar una cuenta.
+    expect(desksBlock).toContain('occupant_id uuid references users(id) on delete set null');
+  });
+
+  it('una persona ocupa como mucho UN escritorio, con un indice unico parcial', () => {
+    // Parcial porque muchos escritorios pueden estar libres a la vez y NULL no
+    // colisiona consigo mismo en un unique normal de forma fiable de leer.
+    // Mismo precedente que `users_single_superadmin`.
+    expect(schema).toContain('create unique index if not exists desks_single_occupant on desks (occupant_id)');
+    expect(schema).toContain('where occupant_id is not null');
+  });
+
+  it('impide dos escritorios solapados con una restriccion de exclusion GiST, sin extension', () => {
+    // Mismo mecanismo y mismo par DROP/ADD que `spaces_no_overlap`: no existe
+    // forma `IF NOT EXISTS` para una restriccion de exclusion.
+    expect(schema).toContain('drop constraint if exists desks_no_overlap');
+    expect(schema).toContain(
+      'exclude using gist (box(point(x, y), point(x + 3, y + 3)) with &&)',
+    );
+    expect(schema).not.toContain('create extension');
+  });
+
+  it('la decoracion NO se ata al escritorio, sino a la persona', () => {
+    // La propiedad del producto: la decoracion de alguien le SIGUE al
+    // escritorio que ocupe. `user_desk_configs` ya esta indexada por
+    // `user_id`; una columna `desk_id` la anclaria a un sitio y la perderia en
+    // cuanto esa persona se mudase a otro.
+    const deskConfigsBlock = schema.slice(
+      schema.indexOf('create table if not exists user_desk_configs'),
+      schema.indexOf('unique index if not exists user_desk_slot_unique'),
+    );
+    expect(deskConfigsBlock).not.toContain('desk_id');
+  });
+});
