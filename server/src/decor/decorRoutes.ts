@@ -128,6 +128,31 @@ export async function handleListAssets(
   return { status: 200, body: { assets: assets.map(toAssetBody) } };
 }
 
+/**
+ * El MISMO catalogo, para quien lo va a colocar y no lo administra (#7, slice
+ * 6). Corre `authenticate` y no `authorize`, igual que `/me/desk` y por lo
+ * mismo: decorar el escritorio propio no es administrar nada, y exigir rol
+ * aqui dejaria el selector vacio para todo el mundo menos para quien no lo
+ * necesita.
+ *
+ * Tampoco pasa `includeArchived`, y eso no es una omision: este es el selector
+ * de quien anade, y `assertNotReAddingArchived` rechaza anadir una pieza
+ * retirada (D1b). Ofrecerla aqui seria ofrecer un 400.
+ *
+ * El cuerpo es el de `handleListAssets` y no uno propio: dos formas del mismo
+ * asset segun quien pregunte obligarian al cliente a aprender las dos.
+ */
+export async function handleListOfficeAssets(
+  authorization: unknown,
+  deps: DecorDeps,
+): Promise<AdminResult> {
+  const authenticated = await authenticate(authorization, deps);
+  if (!authenticated.ok) return authenticated.result;
+
+  const assets = await deps.decor.listAssets();
+  return { status: 200, body: { assets: assets.map(toAssetBody) } };
+}
+
 export async function handleCreateAsset(
   authorization: unknown,
   body: unknown,

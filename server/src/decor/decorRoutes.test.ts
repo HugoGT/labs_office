@@ -25,6 +25,7 @@ import {
   handleCreateAsset,
   handleGetDeskConfig,
   handleListAssets,
+  handleListOfficeAssets,
   handleReplaceDeskConfig,
   type DecorDeps,
 } from './decorRoutes.ts';
@@ -639,5 +640,65 @@ describe('handleReplaceDeskConfig', () => {
     await expect(handleReplaceDeskConfig(BEARER_EMPLEADO, { items }, roto)).rejects.toThrow(
       'connection terminated',
     );
+  });
+});
+
+/**
+ * La lectura del catalogo que NO es de administracion (#7, slice 6). Existe
+ * porque el selector del editor de decoracion lo necesita y `/admin/assets`
+ * corre la guarda de rol: sin esta ruta, la unica gente que puede ver que
+ * piezas hay es justo la que no va a colocarlas.
+ */
+describe('handleListOfficeAssets', () => {
+  it('sin cabecera responde 401', async () => {
+    const { deps } = harness();
+
+    expect((await handleListOfficeAssets(undefined, deps)).status).toBe(401);
+  });
+
+  it('NO exige rol de administracion: un empleado ve el catalogo', async () => {
+    // Es la diferencia con `handleListAssets`, y la razon de que esta ruta
+    // exista: quien decora su escritorio no administra nada.
+    const { deps } = harness();
+
+    const result = await handleListOfficeAssets(BEARER_EMPLEADO, deps);
+
+    expect(result.status).toBe(200);
+    // El orden es el deterministico del catalogo (kind, slug, id), el mismo
+    // que ve la lectura de administracion.
+    expect((result.body.assets as { id: string }[]).map((a) => a.id)).toEqual([
+      SOFA.id,
+      PLANTA.id,
+    ]);
+  });
+
+  it('una cuenta que la oficina ya no admite responde 401', async () => {
+    // El paso 2 sigue corriendo aunque el 3 no: quien ya no entra a la oficina
+    // tampoco mira su catalogo.
+    const { deps } = harness();
+
+    expect((await handleListOfficeAssets(BEARER_CADUCADO, deps)).status).toBe(401);
+  });
+
+  it('filtra los archivados: el selector no puede ofrecer lo retirado (D1b)', async () => {
+    // Es el selector de quien coloca, y una pieza retirada no se puede volver
+    // a anadir. Ofrecerla aqui seria ofrecer un 400.
+    const { deps, decor } = harness();
+    await decor.archiveAsset(PLANTA.id);
+
+    const result = await handleListOfficeAssets(BEARER_EMPLEADO, deps);
+
+    expect((result.body.assets as { id: string }[]).map((a) => a.id)).toEqual([SOFA.id]);
+  });
+
+  it('publica los mismos campos que la lectura de administracion', async () => {
+    // Un cuerpo propio obligaria al cliente a aprender dos formas del mismo
+    // asset segun quien pregunte.
+    const { deps } = harness([PLANTA]);
+
+    const empleado = await handleListOfficeAssets(BEARER_EMPLEADO, deps);
+    const admin = await handleListAssets(BEARER_ADMIN, deps);
+
+    expect(empleado.body.assets).toEqual(admin.body.assets);
   });
 });

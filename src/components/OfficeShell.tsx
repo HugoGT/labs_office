@@ -4,7 +4,9 @@ import { resolveLivekitConfig } from '../game/livekitEndpoint';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
 import { DEFAULT_NAME, DEFAULT_STATUS, type PresenceStatus } from '../game/officeProtocol';
+import type { DeskItemPlacement, SaveDeskOutcome } from '../game/deskDecorPort';
 import { useCallInvitations } from '../hooks/useCallInvitations';
+import { useDeskDecor } from '../hooks/useDeskDecor';
 import { useDesks } from '../hooks/useDesks';
 import { useOfficeBridge } from '../hooks/useOfficeBridge';
 import { useProximityAudio } from '../hooks/useProximityAudio';
@@ -13,6 +15,7 @@ import { AudioUnblockPrompt } from './AudioUnblockPrompt';
 import { BottomBar } from './BottomBar';
 import { CallInvitationStack } from './CallInvitationStack';
 import { ContextMenu, type NpcMenuAction } from './ContextMenu';
+import { DeskDecorEditor } from './DeskDecorEditor';
 import { GameCanvas } from './GameCanvas';
 import { RecBadge } from './RecBadge';
 import { Toast } from './Toast';
@@ -93,7 +96,28 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
    * escritorios asignables, exactamente igual que un despliegue sin
    * directorio, y todo lo demas sigue igual.
    */
-  const { desks, claim, release } = useDesks(endpoint, session);
+  const { desks, claim, release, refresh: refreshDesks } = useDesks(endpoint, session);
+  /**
+   * Lo que el editor de decoracion necesita saber (#7, slice 6). Vive aqui por
+   * lo mismo que `desks`: quien sabe donde esta el servidor es este
+   * componente.
+   *
+   * Es una lectura APARTE de `/desks` y no un campo mas de aquella. `/desks`
+   * trae la decoracion de todo el mundo ya resuelta para PINTARLA, sin el
+   * `assetId` con el que se vuelve a guardar; y el catalogo de lo que se puede
+   * colocar no es una propiedad de ningun escritorio. Ver `deskDecorPort.ts`.
+   */
+  const decor = useDeskDecor(endpoint, session);
+  const [decorOpen, setDecorOpen] = useState(false);
+  /**
+   * El escritorio propio, que es el UNICO que se puede decorar. Lo contesta el
+   * servidor (`OfficeDesk.mine`) y no se deduce comparando nombres: ver
+   * `desksPort.OfficeDesk.mine`.
+   *
+   * `null` es un estado legitimo -- nadie esta obligado a sentarse -- y el
+   * editor lo cuenta ofreciendo coger un sitio, no una pantalla atada a nada.
+   */
+  const myDesk = desks?.find((desk) => desk.mine) ?? null;
 
   useEffect(() => {
     // `null` es "todavia no": mandar una lista vacia antes de tiempo pintaria
@@ -267,6 +291,26 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
     [release],
   );
 
+  const decorReady = decor.phase === 'ready';
+
+  /**
+   * Guardar la decoracion del escritorio propio (#7, slice 6). El escritorio
+   * entero, que es lo que lee `POST /me/desk`.
+   *
+   * Un guardado bueno RELEE `/desks`, y ese es el camino por el que la escena
+   * se entera sin recargar la pagina: la lista es autoritativa y viaja por
+   * comando, igual que despues de coger o soltar sitio. Sin esto, la pieza
+   * recien colocada solo existiria dentro de este panel.
+   */
+  const saveDecor = useCallback(
+    async (items: readonly DeskItemPlacement[]): Promise<SaveDeskOutcome> => {
+      const outcome = await decor.save(items);
+      if (outcome === 'saved') refreshDesks();
+      return outcome;
+    },
+    [decor, refreshDesks],
+  );
+
   /**
    * Clic en un escritorio asignable (#7, slice 5). Se suscribe DIRECTAMENTE
    * aqui y no en un hook, misma razon que `callaccepted`: es un toast y este
@@ -288,13 +332,29 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
         setToastMessage(
           <>
             🪑 <b>{label}</b> es tu escritorio ·{' '}
+            {/* Decorar solo se ofrece cuando de verdad se puede: sin catalogo
+                o sin haber podido leer lo que ya hay puesto, el editor no
+                tendria ni que ofrecer ni que conservar.
+                El aviso se compone con lo que se sepa en el instante del clic
+                -- por eso `decorReady` esta en las dependencias de abajo, para
+                que el siguiente clic ya lo ofrezca. Las dos lecturas arrancan
+                al montar, a la vez que `/desks`, asi que cuando hay un
+                escritorio propio que clicar ya han aterrizado. */}
+            {decorReady && (
+              <>
+                <button type="button" onClick={() => setDecorOpen(true)}>
+                  Decorar
+                </button>{' '}
+                ·{' '}
+              </>
+            )}
             <button type="button" onClick={() => void leaveDesk(label)}>
               Dejarlo
             </button>
           </>,
         );
       }),
-    [bridge, takeDesk, leaveDesk],
+    [bridge, takeDesk, leaveDesk, decorReady],
   );
 
   /**
@@ -378,6 +438,15 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
           setRecording((value) => !value);
         }}
       />
+      {decorOpen && decorReady && (
+        <DeskDecorEditor
+          deskLabel={myDesk?.label ?? null}
+          catalog={decor.catalog}
+          items={decor.items}
+          onSave={saveDecor}
+          onClose={() => setDecorOpen(false)}
+        />
+      )}
       <AudioUnblockPrompt blocked={audioBlocked} onUnblock={unblockAudio} />
       <Toast message={toastMessage} />
       <CallInvitationStack invitations={invitations} onAccept={accept} onDismiss={dismiss} />
