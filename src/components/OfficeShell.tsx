@@ -144,30 +144,42 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
    * son opuestos y conviene no confundirlos: `call` trae al NPC hasta ti,
    * `goto` te lleva a ti hasta su escritorio.
    */
-  function handleMenuAction(action: NpcMenuAction, target: OfficeEventMap['npcmenu']): void {
+  function handleMenuAction(action: NpcMenuAction, menu: OfficeEventMap['npcmenu']): void {
     closeMenu();
-    if (action === 'call') {
-      bridge.callNpc(target.id);
-      setToastMessage(
-        <>
-          📞 <b>{target.name}</b> viene hacia ti… (prototipo: la videollamada 1:1 llegará con
-          LiveKit)
-        </>,
-      );
-    } else if (action === 'goto') {
-      bridge.teleportTo(target.id);
-      setToastMessage(
-        <>
-          🚶 Te teletransportaste junto a <b>{target.name}</b>
-        </>,
-      );
-    } else {
-      setToastMessage(
-        <>
-          👤 <b>{target.name}</b> · Empleado · {target.status}
-        </>,
-      );
+
+    if (action === 'call' || action === 'goto') {
+      // D1: `call`/`goto` solo tienen sentido para un NPC en esta unit -- el
+      // branch completo del menu de un peer real (Llamar/Ver perfil, D2)
+      // llega en una unit posterior. Esto solo desenvuelve `npcId` para
+      // preservar el comportamiento de NPC byte-a-byte con la nueva union
+      // discriminada.
+      if (menu.target.kind !== 'npc') return;
+      const { npcId } = menu.target;
+
+      if (action === 'call') {
+        bridge.callNpc(npcId);
+        setToastMessage(
+          <>
+            📞 <b>{menu.name}</b> viene hacia ti… (prototipo: la videollamada 1:1 llegará con
+            LiveKit)
+          </>,
+        );
+      } else {
+        bridge.teleportTo(npcId);
+        setToastMessage(
+          <>
+            🚶 Te teletransportaste junto a <b>{menu.name}</b>
+          </>,
+        );
+      }
+      return;
     }
+
+    setToastMessage(
+      <>
+        👤 <b>{menu.name}</b> · Empleado · {menu.status}
+      </>,
+    );
   }
 
   return (

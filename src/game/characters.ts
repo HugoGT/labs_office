@@ -158,7 +158,8 @@ export function spawnNpcs(scene: Phaser.Scene, bridge: OfficeBridge): NpcContain
     c.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       pointer.event.stopPropagation();
       bridge.emit('npcmenu', {
-        id: i,
+        // D1: el id de NPC ahora vive dentro de la variante discriminada.
+        target: { kind: 'npc', npcId: i },
         name: npc.name,
         status: STATUS_LABEL[npc.status],
         statusCode: npc.status,

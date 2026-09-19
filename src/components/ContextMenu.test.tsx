@@ -5,7 +5,7 @@ import type { OfficeEventMap } from '../game/officeBridge';
 import { ContextMenu } from './ContextMenu';
 
 const MENU: OfficeEventMap['npcmenu'] = {
-  id: 3,
+  target: { kind: 'npc', npcId: 3 },
   name: 'Pablo',
   status: 'En línea',
   statusCode: 'g',

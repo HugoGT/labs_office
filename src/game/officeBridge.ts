@@ -16,8 +16,17 @@ import type { PresenceStatus } from './officeProtocol';
 
 export interface OfficeEventMap {
   room: { room: string | null };
+  /**
+   * Menu contextual al hacer clic en un personaje (issue #2, D1): union
+   * discriminada por `target.kind`. Antes era un `id` plano que solo servia
+   * para NPCs simulados; ahora un peer real se direcciona por `sessionId` y
+   * un NPC sigue direccionandose por `npcId` (renombrado desde `id`, movido
+   * DENTRO de la variante). `ContextMenu`/`OfficeShell` ramifican sobre
+   * `target.kind`; `characters.ts` (NPCs) y `remoteAvatarSink.ts` (peers)
+   * son los unicos emisores.
+   */
   npcmenu: {
-    id: number;
+    target: { kind: 'npc'; npcId: number } | { kind: 'peer'; sessionId: string };
     name: string;
     status: string;
     statusCode: PresenceStatus;
@@ -25,6 +34,25 @@ export interface OfficeEventMap {
     y: number;
   };
   closemenu: undefined;
+  /**
+   * Invitacion de llamada entrante (issue #2, D3/D5): una por llamador
+   * pendiente, sin id de invitacion -- el propio `from` (sessionId del
+   * llamador) identifica la tarjeta, porque el registro del servidor ya
+   * deduplica por llamador (D5).
+   */
+  callinvite: { from: string; name: string };
+  /**
+   * El llamador de una invitacion pendiente se desconecto (issue #2, D7). La
+   * tarjeta sobrevive del lado del receptor como un "tombstone": deja de
+   * poder aceptarse, solo puede descartarse.
+   */
+  callerleft: { from: string };
+  /**
+   * El receptor acepto la llamada (issue #2, D3). Es la UNICA reaccion que
+   * el llamador recibe -- pasar, DND, destino desconocido y duplicado son
+   * todos el mismo silencio (regla de feedback del llamador).
+   */
+  callaccepted: { by: string; name: string };
   /**
    * Estado de la conexion con el servidor Colyseus y cuantos avatares reales
    * hay ademas del propio. `online: false` no es un error a mostrar en rojo:
@@ -80,6 +108,19 @@ export interface OfficeCommandMap {
    * ver su propio anillo encenderse en el canvas.
    */
   speakers: { sessionIds: string[] };
+  /**
+   * Los 3 comandos de llamada (issue #2, D3) viajan solo por `emitCommand`,
+   * como `setStatus`: ningun metodo de conveniencia nuevo (`bridge.callPeer()`
+   * no existe) para no regrowth-ear el `window.officeAPI` que D1 retiro.
+   */
+  callPeer: { sessionId: string };
+  /**
+   * Un solo comando para aceptar/pasar (D3), no dos: la escena es quien sabe
+   * que "aceptar" implica caminar y quien conoce coordenadas del mundo.
+   * React nunca aprende esa consecuencia.
+   */
+  respondCall: { from: string; accept: boolean };
+  walkToPeer: { sessionId: string };
 }
 
 export interface OfficeBridge {
