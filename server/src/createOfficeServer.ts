@@ -38,6 +38,16 @@ import {
   handleReplaceDeskConfig,
   type DecorDeps,
 } from './decor/decorRoutes.ts';
+import type { DeskDirectory } from './desks/desksPort.ts';
+import {
+  handleClaimDesk,
+  handleCreateDesk,
+  handleDeleteDesk,
+  handleListDesks,
+  handleReleaseDesk,
+  handleUpdateDesk,
+  type DesksDeps,
+} from './desks/desksRoutes.ts';
 import type { SpacesDirectory } from './spaces/spacesPort.ts';
 import {
   handleCreateSpace,
@@ -212,6 +222,16 @@ export interface OfficeServerOverrides {
    */
   decor?: DecorCatalog | null;
   /**
+   * Sustituye los escritorios asignables que saldrian de `process.env` (#7,
+   * slice 5). `null` fuerza el modo sin escritorios: las seis rutas responden
+   * 503 y el cliente degrada a no pintar ninguno, que es exactamente lo que
+   * hay en un despliegue sin `DATABASE_URL`.
+   *
+   * Es un override propio por la misma razon que los otros tres: probar quien
+   * se sienta donde no deberia obligar a sembrar rectangulos ni assets.
+   */
+  desks?: DeskDirectory | null;
+  /**
    * Lista blanca de origenes para TODAS las rutas que sirve Express
    * (`/livekit/token`, `/health`, `/admin/*`), normalmente de
    * `ALLOWED_ORIGIN`. Vacia o ausente mantiene el `*` de hoy (ver el
@@ -369,6 +389,9 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
 
   const decor =
     overrides?.decor !== undefined ? (overrides.decor ?? undefined) : envRuntime?.decor;
+
+  const desks =
+    overrides?.desks !== undefined ? (overrides.desks ?? undefined) : envRuntime?.desks;
 
   app.get('/health', (_req, res) => {
     // `auth` expone el modo EFECTIVO, no la variable de entorno: es la unica
@@ -573,6 +596,79 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   app.post(
     '/me/desk',
     decorRoute((req, deps) => handleReplaceDeskConfig(req.header('Authorization'), req.body, deps)),
+  );
+
+  /**
+   * Mismo adaptador que `spacesRoute(...)`/`decorRoute(...)`, con los
+   * escritorios en las dependencias y la misma guarda de "sin almacen -> 503,
+   * nunca 404" por la misma razon (ver el comentario de `admin`). El
+   * directorio tambien hace falta aqui: las guardas lo consultan para saber si
+   * quien llama sigue siendo una cuenta que esta oficina admite, y de esa fila
+   * sale ademas el `userId` que se sienta o se levanta.
+   */
+  function desksRoute(run: (req: express.Request, deps: DesksDeps) => Promise<AdminResult>) {
+    return (req: express.Request, res: express.Response): void => {
+      if (directory === undefined || desks === undefined) {
+        res.status(503).json({ error: 'desks-not-configured' });
+        return;
+      }
+
+      run(req, { directory, desks, auth, identityAdmin })
+        .then((result) => {
+          res.status(result.status).json(result.body);
+        })
+        .catch(() => {
+          console.error('[desks] fallo no controlado en una ruta de escritorios');
+          res.status(500).json({ error: 'internal' });
+        });
+    };
+  }
+
+  // `/desks` cuelga de la raiz y no de `/admin` -- lo lee cada cliente al
+  // arrancar, no solo el panel -- pero a diferencia de `/spaces` SI exige
+  // credencial: quien se sienta donde es informacion del directorio sobre
+  // personas reales. La cabecera de `desksRoutes.ts` lo explica.
+  app.get(
+    '/desks',
+    desksRoute((req, deps) => handleListDesks(req.header('Authorization'), deps)),
+  );
+
+  // Las cuatro de escritura van por POST y ninguna por PUT/PATCH/DELETE: el
+  // middleware de CORS de arriba anuncia `GET,POST,OPTIONS`, asi que cualquier
+  // otro verbo moriria en el preflight del navegador antes de llegar a
+  // Express. Misma forma que `/admin/spaces/:id/delete`.
+  app.post(
+    '/admin/desks',
+    desksRoute((req, deps) => handleCreateDesk(req.header('Authorization'), req.body, deps)),
+  );
+
+  app.post(
+    '/admin/desks/:id',
+    desksRoute((req, deps) =>
+      handleUpdateDesk(req.header('Authorization'), req.params.id, req.body, deps),
+    ),
+  );
+
+  app.post(
+    '/admin/desks/:id/delete',
+    desksRoute((req, deps) => handleDeleteDesk(req.header('Authorization'), req.params.id, deps)),
+  );
+
+  // Coger y dejar sitio NO cuelgan de `/admin`: quien administra decide cuantos
+  // escritorios hay y donde estan, no quien se sienta en cual.
+  //
+  // `req.body` NO se pasa a ninguno de los dos handlers, y no es un descuido:
+  // el ocupante es la identidad verificada de quien llama y nada mas. Si el
+  // cuerpo llegase hasta alli, bastaria un `userId` ajeno para sentar o
+  // levantar a otra persona. Ver la cabecera de `desksRoutes.ts`.
+  app.post(
+    '/desks/:id/claim',
+    desksRoute((req, deps) => handleClaimDesk(req.header('Authorization'), req.params.id, deps)),
+  );
+
+  app.post(
+    '/me/desk/release',
+    desksRoute((req, deps) => handleReleaseDesk(req.header('Authorization'), deps)),
   );
 
   app.post('/livekit/token', (req, res) => {
