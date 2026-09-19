@@ -133,8 +133,18 @@ export type Authenticated =
 /**
  * Pasos 1 y 2: quien llama tiene una credencial valida Y una cuenta que esta
  * oficina admite ahora mismo. Todo lo que no sea las dos cosas es el MISMO 401.
+ *
+ * Se exporta por lo mismo que `authorize` de aqui abajo, pero para el caso
+ * contrario: `/me/desk` (#7, slice 4) es de quien la usa y no de quien
+ * administra, asi que necesita los pasos 1 y 2 SIN el 3. Copiarlos alli
+ * separaria las dos superficies -- un dia una aprenderia a rechazar a un
+ * invitado caducado y la otra no -- y lo que quedaria abierto es el escritorio
+ * de una cuenta que la oficina ya no admite.
  */
-async function authenticate(authorization: unknown, deps: AdminDeps): Promise<Authenticated> {
+export async function authenticate(
+  authorization: unknown,
+  deps: AdminDeps,
+): Promise<Authenticated> {
   if (!deps.auth) {
     // Falla cerrado. Un servidor sin verificador no puede identificar a nadie,
     // y "como la auth esta desactivada dejo pasar" convertiria el panel de
