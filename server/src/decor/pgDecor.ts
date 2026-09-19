@@ -29,11 +29,22 @@ import type {
   ListAssetsOptions,
 } from './decorPort.ts';
 import {
+  AssetNameTakenError,
   assertValidDeskShape,
   normalizeCreateAssetInput,
   normalizeDeskConfig,
 } from './decorRules.ts';
 import type { DirectoryPool, DirectoryQueryable } from '../directory/pgDirectory.ts';
+
+/**
+ * Codigo de `unique_violation` de Postgres, el mismo que ya nombran
+ * `pgDirectory.ts` y `pgSpaces.ts`: lo que salta `assets_slug_unique`.
+ */
+const UNIQUE_VIOLATION = '23505';
+
+function isUniqueViolation(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === UNIQUE_VIOLATION;
+}
 
 const ASSET_COLUMNS =
   'id, slug, name, kind, texture_key, w, h, placeable_on_desk, archived_at, created_at';
@@ -125,23 +136,38 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
       // un asset mal escrito no debe costar una consulta.
       const normalized = normalizeCreateAssetInput(input);
 
-      const result = await pool.query(
-        `
-          INSERT INTO assets (slug, name, kind, texture_key, w, h, placeable_on_desk)
-          VALUES ($1, $2, $3, $4, $5, $6, $7)
-          RETURNING ${ASSET_COLUMNS}
-        `,
-        [
-          normalized.slug,
-          normalized.name,
-          normalized.kind,
-          normalized.textureKey,
-          normalized.w,
-          normalized.h,
-          normalized.placeableOnDesk,
-        ],
-      );
-      return toAsset(result.rows[0]);
+      try {
+        const result = await pool.query(
+          `
+            INSERT INTO assets (slug, name, kind, texture_key, w, h, placeable_on_desk)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING ${ASSET_COLUMNS}
+          `,
+          [
+            normalized.slug,
+            normalized.name,
+            normalized.kind,
+            normalized.textureKey,
+            normalized.w,
+            normalized.h,
+            normalized.placeableOnDesk,
+          ],
+        );
+        return toAsset(result.rows[0]);
+      } catch (error) {
+        // `assets_slug_unique` es la garantia real; esto solo traduce su fallo
+        // a un error de dominio en vez de un 500 pelado, misma logica que ya
+        // documenta la cabecera de `decorRules.ts` para los CHECK.
+        //
+        // Se mira SOLO ese codigo y todo lo demas se relanza: tragarse un fallo
+        // desconocido como 409 le diria al administrador que se equivoco el
+        // cuando el que se rompio fue el servidor, que es el mismo pecado que
+        // evita el `translating` de la ruta, en la otra direccion.
+        if (isUniqueViolation(error)) {
+          throw new AssetNameTakenError('ya existe un asset con ese nombre');
+        }
+        throw error;
+      }
     },
 
     async archiveAsset(id: string) {

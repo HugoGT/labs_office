@@ -35,7 +35,7 @@ import type {
   DeskItemInput,
   ListAssetsOptions,
 } from './decorPort.ts';
-import { normalizeCreateAssetInput, normalizeDeskConfig } from './decorRules.ts';
+import { AssetNameTakenError, normalizeCreateAssetInput, normalizeDeskConfig } from './decorRules.ts';
 
 export interface MemoryDecorOptions {
   /** Catalogo de partida. */
@@ -96,6 +96,29 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): DecorCatalo
 
     async createAsset(input: CreateAssetInput) {
       const normalized = normalizeCreateAssetInput(input);
+
+      // El equivalente de `assets_slug_unique`, sobre `lower(slug)`. Se
+      // reproduce por la misma razon que la regla de archivados de D1b: las
+      // rutas se prueban contra ESTE adaptador, asi que un alta que aqui
+      // pasase y en Postgres diese 500 dejaria la suite certificando un
+      // comportamiento que produccion no tiene.
+      //
+      // Recorre el catalogo ENTERO y no solo lo vivo: el indice de
+      // `schema.sql` no es parcial, asi que una pieza retirada sigue ocupando
+      // su slug. Filtrar por `archivedAt` aqui daria por buena un alta que la
+      // base de datos rechaza.
+      //
+      // Solo el slug y no tambien el nombre, al reves que `memorySpaces`:
+      // `assets` tiene UN indice y no dos. Anadir aqui una comprobacion de
+      // nombre rechazaria altas que Postgres acepta, que es el mismo desfase
+      // en la otra direccion.
+      const slug = normalized.slug.toLowerCase();
+      for (const existing of assets.values()) {
+        if (existing.slug.toLowerCase() === slug) {
+          throw new AssetNameTakenError('ya existe un asset con ese nombre');
+        }
+      }
+
       const asset: Asset = { id: newId(), ...normalized, archivedAt: null, createdAt: now() };
       assets.set(asset.id, asset);
       return asset;

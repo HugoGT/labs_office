@@ -42,11 +42,19 @@ import {
   type AdminResult,
 } from '../admin/adminRoutes.ts';
 import type { Asset, DecorCatalog, DeskItem, DeskItemInput } from './decorPort.ts';
-import { InvalidAssetError, InvalidDeskConfigError } from './decorRules.ts';
+import { AssetNameTakenError, InvalidAssetError, InvalidDeskConfigError } from './decorRules.ts';
 
 export interface DecorDeps extends AdminDeps {
   decor: DecorCatalog;
 }
+
+/**
+ * El unico 409 de esta slice, con cuerpo PROPIO y no uno reciclado de otra. El
+ * codigo del cuerpo es lo unico que le dice al panel que hay que arreglar, y
+ * `space-overlap`, `desk-overlap` y `desk-taken` se arreglan cada uno de una
+ * forma que no tiene nada que ver con elegir otro nombre para una pieza.
+ */
+const NAME_TAKEN: AdminResult = { status: 409, body: { error: 'asset-name-taken' } };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -100,6 +108,7 @@ async function translating(run: () => Promise<AdminResult>): Promise<AdminResult
   } catch (error) {
     if (error instanceof InvalidAssetError) return INVALID_REQUEST;
     if (error instanceof InvalidDeskConfigError) return INVALID_REQUEST;
+    if (error instanceof AssetNameTakenError) return NAME_TAKEN;
     throw error;
   }
 }

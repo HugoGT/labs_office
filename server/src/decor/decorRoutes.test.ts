@@ -248,6 +248,30 @@ describe('handleCreateAsset', () => {
     expect(result.body.archivedAt).toBeNull();
   });
 
+  it('un nombre repetido que solo difiere en mayusculas responde 409 y no 500', async () => {
+    // `assets_slug_unique` esta sobre `lower(slug)` y el slug se DERIVA del
+    // nombre: dar de alta una pieza que ya existe es una equivocacion corriente
+    // del administrador, no una averia del servidor.
+    const { deps } = harness();
+
+    const result = await handleCreateAsset(BEARER_ADMIN, assetBody({ name: 'PLANTA' }), deps);
+
+    expect(result).toEqual({ status: 409, body: { error: 'asset-name-taken' } });
+  });
+
+  it('el 409 de nombre repetido NO recicla el cuerpo de los otros 409 del servidor', async () => {
+    // El codigo del cuerpo es lo unico que le dice al panel que arreglar, y ya
+    // hay tres 409 distintos (`space-overlap`, `desk-overlap`, `desk-taken`).
+    // Reciclar uno haria que el panel ofreciese la correccion equivocada.
+    const { deps } = harness();
+
+    const result = await handleCreateAsset(BEARER_ADMIN, assetBody({ name: 'Planta' }), deps);
+
+    expect(result.body).not.toEqual({ error: 'space-overlap' });
+    expect(result.body).not.toEqual({ error: 'desk-taken' });
+    expect(result.body).toEqual({ error: 'asset-name-taken' });
+  });
+
   it('un error desconocido del almacen se relanza para que el cableado conteste 500', async () => {
     // Tragarselo como 400 le diria al administrador que se equivoco el,
     // cuando el que se rompio fue el servidor.
