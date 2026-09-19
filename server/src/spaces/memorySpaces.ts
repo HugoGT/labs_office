@@ -32,6 +32,7 @@ import type {
   UpdateSpaceInput,
 } from './spacesPort.ts';
 import {
+  SpaceNameTakenError,
   SpaceOverlapError,
   boundsOverlap,
   hashSpaces,
@@ -89,6 +90,33 @@ export function createMemorySpaces(options: MemorySpacesOptions = {}): SpacesDir
     }
   }
 
+  /**
+   * El equivalente de `spaces_slug_unique` y `spaces_name_unique`, los dos
+   * sobre `lower(...)`. Se reproducen aqui por la misma razon que
+   * `assertNoOverlap` reproduce `EXCLUDE USING gist`: sin esto, un test de ruta
+   * pasaria contra este adaptador y la misma peticion daria un 500 contra
+   * Postgres, que es justo el desfase que este fichero existe para evitar.
+   *
+   * Se comprueban los DOS y no solo el slug aunque casi siempre coincidan: son
+   * dos indices distintos en `schema.sql`, y reproducir uno solo seria dar por
+   * bueno un alta que la base de datos puede rechazar.
+   *
+   * `exceptId` existe por lo mismo que en `assertNoOverlap`: en Postgres el
+   * UPDATE reemplaza la entrada de indice de su propia fila, asi que
+   * renombrarse a si mismo no choca. Sin la exclusion, un nombre mal escrito
+   * seria imposible de corregir.
+   */
+  function assertNameFree(candidate: { slug: string; name: string }, exceptId?: string): void {
+    const slug = candidate.slug.toLowerCase();
+    const name = candidate.name.toLowerCase();
+    for (const existing of spaces.values()) {
+      if (existing.id === exceptId) continue;
+      if (existing.slug.toLowerCase() === slug || existing.name.toLowerCase() === name) {
+        throw new SpaceNameTakenError('ya existe un espacio con ese nombre');
+      }
+    }
+  }
+
   return {
     async listSpaces() {
       // Mismo orden que `pgSpaces`: (x, y, id).
@@ -103,6 +131,7 @@ export function createMemorySpaces(options: MemorySpacesOptions = {}): SpacesDir
 
     async createSpace(input: CreateSpaceInput) {
       const normalized = normalizeCreateSpaceInput(input);
+      assertNameFree(normalized);
       assertNoOverlap(normalized);
 
       const at = now();
@@ -120,6 +149,7 @@ export function createMemorySpaces(options: MemorySpacesOptions = {}): SpacesDir
       if (Object.keys(patch).length === 0) return current;
 
       const next: Space = { ...current, ...patch, updatedAt: now() };
+      assertNameFree(next, id);
       assertNoOverlap(next, id);
       spaces.set(id, next);
       return next;

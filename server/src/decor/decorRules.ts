@@ -40,6 +40,28 @@ export class InvalidDeskConfigError extends Error {
   }
 }
 
+/**
+ * Ese nombre ya es de otra pieza del catalogo: lo que salta
+ * `assets_slug_unique`, sobre `lower(slug)` en `schema.sql`.
+ *
+ * No es un `InvalidAssetError` aunque las dos las provoque el mismo
+ * administrador escribiendo el alta, misma razon que separa
+ * `SpaceOverlapError` de `SpaceNameTakenError`: un cuerpo mal escrito es un 400
+ * y ni siquiera llega a la base de datos, y esto es un 409 que solo puede
+ * decidir quien conoce las filas que ya hay. El tipo es lo que mantiene los dos
+ * codigos HTTP separados.
+ *
+ * El nombre y no el slug es lo que se nombra en el error porque es lo unico que
+ * el admin escribio: el slug se DERIVA (`deriveAssetSlug`), asi que no hay un
+ * segundo campo que pudiera corregir por separado.
+ */
+export class AssetNameTakenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AssetNameTakenError';
+  }
+}
+
 /** Los mismos tres del `CHECK (kind IN (...))` de `schema.sql`. */
 export const ASSET_KINDS = ['furniture', 'decor', 'plant'] as const;
 export type AssetKind = (typeof ASSET_KINDS)[number];

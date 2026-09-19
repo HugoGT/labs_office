@@ -12,6 +12,7 @@ import {
   DESK_ROTATIONS,
   DESK_SLOT_MAX,
   DESK_SLOT_MIN,
+  AssetNameTakenError,
   InvalidAssetError,
   InvalidDeskConfigError,
   assertPlaceableOnDesk,
@@ -396,5 +397,23 @@ describe('normalizeDeskConfig', () => {
     ];
 
     expect(normalizeDeskConfig(items, CATALOG, NADA_PUESTO).map((item) => item.slot)).toEqual([3, 1]);
+  });
+});
+
+describe('AssetNameTakenError', () => {
+  it('es distinguible por instanceof, no por el texto del mensaje', () => {
+    const error = new AssetNameTakenError('x');
+    expect(error).toBeInstanceOf(AssetNameTakenError);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe('AssetNameTakenError');
+  });
+
+  it('NO es un InvalidAssetError: uno es 400 y el otro 409', () => {
+    // Misma separacion que `InvalidSpaceError`/`SpaceNameTakenError`. El
+    // cuerpo mal escrito no llega a la base de datos; el nombre repetido si
+    // llega y lo rechaza un indice. Colapsarlos daria el codigo HTTP
+    // equivocado a una de las dos.
+    expect(new AssetNameTakenError('x')).not.toBeInstanceOf(InvalidAssetError);
+    expect(new InvalidAssetError('x')).not.toBeInstanceOf(AssetNameTakenError);
   });
 });

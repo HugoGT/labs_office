@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { InvalidSpaceError, SpaceOverlapError } from './spaceRules.ts';
+import { InvalidSpaceError, SpaceNameTakenError, SpaceOverlapError } from './spaceRules.ts';
 import { createPgSpaces } from './pgSpaces.ts';
 import type { DirectoryPool, DirectoryQueryResult } from '../directory/pgDirectory.ts';
 
@@ -59,6 +59,14 @@ function exclusionViolation(): Error {
   return Object.assign(new Error('conflicting key value violates exclusion constraint "spaces_no_overlap"'), {
     code: '23P01',
   });
+}
+
+/** Error con la forma que trae `pg` cuando un indice unico salta. */
+function uniqueViolation(constraint: string): Error {
+  return Object.assign(
+    new Error(`duplicate key value violates unique constraint "${constraint}"`),
+    { code: '23505', constraint },
+  );
 }
 
 const SPACE_ROW = {
@@ -177,6 +185,60 @@ describe('pgSpaces: createSpace', () => {
       createPgSpaces(pool).createSpace({ name: 'X', x: 0, y: 0, w: 1, h: 1, capacity: null }),
     ).rejects.toThrow('connection terminated');
   });
+
+  it('traduce una violacion de unicidad en SpaceNameTakenError, no un 500 pelado', async () => {
+    const pool = fakePool(() => uniqueViolation('spaces_name_unique'));
+
+    await expect(
+      createPgSpaces(pool).createSpace({
+        name: 'Cafeteria',
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+        capacity: null,
+      }),
+    ).rejects.toThrow(SpaceNameTakenError);
+  });
+
+  it('el choque de slug se traduce igual: el admin solo escribio el nombre', async () => {
+    // `spaces_slug_unique` y `spaces_name_unique` son dos indices, pero una
+    // sola equivocacion: el slug se DERIVA del nombre, asi que quien llama no
+    // tiene otro campo que corregir.
+    const pool = fakePool(() => uniqueViolation('spaces_slug_unique'));
+
+    await expect(
+      createPgSpaces(pool).createSpace({ name: 'Sala-A', x: 0, y: 0, w: 1, h: 1, capacity: null }),
+    ).rejects.toThrow(SpaceNameTakenError);
+  });
+
+  it('una violacion de unicidad NO se confunde con un solape', async () => {
+    // Los dos acaban en 409 y por eso es facil colapsarlos, pero el solape se
+    // arregla moviendo el rectangulo y el nombre repetido eligiendo otro
+    // nombre. Un solo tipo mandaria al administrador a corregir lo que no esta
+    // mal.
+    const pool = fakePool(() => uniqueViolation('spaces_name_unique'));
+
+    const thrown = await createPgSpaces(pool)
+      .createSpace({ name: 'Cafeteria', x: 0, y: 0, w: 1, h: 1, capacity: null })
+      .catch((error: unknown) => error);
+
+    expect(thrown).toBeInstanceOf(SpaceNameTakenError);
+    expect(thrown).not.toBeInstanceOf(SpaceOverlapError);
+  });
+
+  it('un error de integridad que NO es de unicidad se propaga tal cual', async () => {
+    // `23503` es una violacion de clave ajena: nada que el administrador haya
+    // escrito mal. Tragarsela como 409 le diria que se equivoco el cuando el
+    // que se rompio fue el servidor.
+    const pool = fakePool(() =>
+      Object.assign(new Error('violates foreign key constraint'), { code: '23503' }),
+    );
+
+    await expect(
+      createPgSpaces(pool).createSpace({ name: 'X', x: 0, y: 0, w: 1, h: 1, capacity: null }),
+    ).rejects.toThrow('violates foreign key constraint');
+  });
 });
 
 describe('pgSpaces: updateSpace', () => {
@@ -224,6 +286,27 @@ describe('pgSpaces: updateSpace', () => {
     await expect(
       createPgSpaces(pool).updateSpace(SPACE_ROW.id, { x: 0, y: 0, w: 5, h: 5 }),
     ).rejects.toThrow(SpaceOverlapError);
+  });
+
+  it('traduce una violacion de unicidad al renombrar un espacio', async () => {
+    // Renombrar tambien choca: `normalizeUpdateSpaceInput` deriva un slug nuevo
+    // del nombre nuevo, y los dos indices unicos siguen ahi. Sin esta
+    // traduccion, el alta daria 409 y el renombrado 500 por la misma falta.
+    const pool = fakePool(() => uniqueViolation('spaces_name_unique'));
+
+    await expect(
+      createPgSpaces(pool).updateSpace(SPACE_ROW.id, { name: 'Cafeteria' }),
+    ).rejects.toThrow(SpaceNameTakenError);
+  });
+
+  it('un error de integridad que NO es de unicidad se propaga tal cual al renombrar', async () => {
+    const pool = fakePool(() =>
+      Object.assign(new Error('violates check constraint'), { code: '23514' }),
+    );
+
+    await expect(
+      createPgSpaces(pool).updateSpace(SPACE_ROW.id, { name: 'Cafeteria' }),
+    ).rejects.toThrow('violates check constraint');
   });
 });
 

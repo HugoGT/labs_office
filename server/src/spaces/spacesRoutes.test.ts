@@ -202,6 +202,49 @@ describe('handleCreateSpace', () => {
     expect((await handleCreateSpace(BEARER_ADMIN, body(), deps)).status).toBe(409);
   });
 
+  it('un nombre repetido que solo difiere en mayusculas responde 409 y no 500', async () => {
+    // Los indices unicos de `schema.sql` estan sobre `lower(slug)` y
+    // `lower(name)`: escribir "SALA NUEVA" donde ya hay una "Sala Nueva" es una
+    // equivocacion corriente del administrador, no una averia del servidor.
+    const { deps, spaces } = harness();
+    await spaces.createSpace({ name: 'Sala Nueva', x: 30, y: 1, w: 4, h: 4, capacity: null });
+
+    const result = await handleCreateSpace(BEARER_ADMIN, body({ name: 'SALA NUEVA' }), deps);
+
+    expect(result).toEqual({ status: 409, body: { error: 'space-name-taken' } });
+  });
+
+  it('el 409 de nombre repetido NO se confunde con el de solape', async () => {
+    // El cuerpo es lo unico que le dice al panel que arreglar: el solape se
+    // corrige moviendo el rectangulo y el nombre repetido eligiendo otro
+    // nombre. Si los dos dijesen `space-overlap`, el admin moveria una sala que
+    // estaba bien colocada.
+    const { deps, spaces } = harness();
+    await spaces.createSpace({ name: 'Ocupa', x: 1, y: 1, w: 4, h: 4, capacity: null });
+
+    const solape = await handleCreateSpace(BEARER_ADMIN, body(), deps);
+    const repetido = await handleCreateSpace(
+      BEARER_ADMIN,
+      body({ name: 'Ocupa', x: 30, y: 1 }),
+      deps,
+    );
+
+    expect(solape.body).toEqual({ error: 'space-overlap' });
+    expect(repetido.body).toEqual({ error: 'space-name-taken' });
+  });
+
+  it('dos nombres distintos que derivan el mismo slug responden 409', async () => {
+    // `spaces_slug_unique` muerde donde `spaces_name_unique` no llega: "Sala A"
+    // y "Sala-A" no son el mismo nombre ni para `lower()`, pero si el mismo
+    // slug.
+    const { deps, spaces } = harness();
+    await spaces.createSpace({ name: 'Sala A', x: 30, y: 1, w: 4, h: 4, capacity: null });
+
+    const result = await handleCreateSpace(BEARER_ADMIN, body({ name: 'Sala-A' }), deps);
+
+    expect(result).toEqual({ status: 409, body: { error: 'space-name-taken' } });
+  });
+
   it('ignora un id y un slug puestos a mano en el cuerpo', async () => {
     // El id es la clave de pertenencia (rebanada 2) y el slug se DERIVA del
     // nombre: dejar que el cuerpo los fije seria dejar que quien llama eligiese
@@ -306,6 +349,30 @@ describe('handleUpdateSpace', () => {
     const result = await handleUpdateSpace(BEARER_ADMIN, id, { x: 21, y: 21, w: 4, h: 4 }, deps);
 
     expect(result.status).toBe(409);
+  });
+
+  it('renombrar al nombre de otro espacio responde 409 y no 500', async () => {
+    // Renombrar choca con los mismos dos indices que el alta: dejar que aqui
+    // saliese un 500 haria que la misma falta se contase de dos maneras segun
+    // por que puerta entrase.
+    const { deps, spaces, id } = await conEspacio();
+    await spaces.createSpace({ name: 'Cafeteria', x: 20, y: 20, w: 4, h: 4, capacity: null });
+
+    const result = await handleUpdateSpace(BEARER_ADMIN, id, { name: 'CAFETERIA' }, deps);
+
+    expect(result).toEqual({ status: 409, body: { error: 'space-name-taken' } });
+  });
+
+  it('renombrarse a si mismo cambiando mayusculas responde 200', async () => {
+    // No es un choque: en Postgres el UPDATE reemplaza la entrada de indice de
+    // esa misma fila. Un 409 aqui dejaria un nombre mal escrito imposible de
+    // corregir.
+    const { deps, id } = await conEspacio();
+
+    const result = await handleUpdateSpace(BEARER_ADMIN, id, { name: 'ANTES' }, deps);
+
+    expect(result.status).toBe(200);
+    expect(result.body.name).toBe('ANTES');
   });
 });
 

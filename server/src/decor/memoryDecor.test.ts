@@ -12,7 +12,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { Asset } from './decorPort.ts';
-import { InvalidAssetError, InvalidDeskConfigError } from './decorRules.ts';
+import { AssetNameTakenError, InvalidAssetError, InvalidDeskConfigError } from './decorRules.ts';
 import { createMemoryDecor } from './memoryDecor.ts';
 
 const NOW = new Date('2026-01-15T12:00:00.000Z');
@@ -82,6 +82,41 @@ describe('createMemoryDecor: createAsset', () => {
     expect(created.name).toBe('Planta Grande');
     expect(created.archivedAt).toBeNull();
     expect(created.createdAt).toEqual(NOW);
+  });
+
+  it('rechaza un nombre repetido que solo difiere en mayusculas', async () => {
+    // `assets_slug_unique` esta sobre `lower(slug)` y el slug se deriva del
+    // nombre, asi que "Planta" y "PLANTA" son la misma pieza para Postgres. Sin
+    // esto, la ruta pasaria el test contra memoria y daria 500 en produccion.
+    await expect(
+      decor().createAsset({
+        name: 'PLANTA',
+        kind: 'plant',
+        textureKey: 'plant',
+        w: 1,
+        h: 1,
+        placeableOnDesk: true,
+      }),
+    ).rejects.toThrow(AssetNameTakenError);
+  });
+
+  it('un asset retirado sigue ocupando su nombre', async () => {
+    // El indice unico de `schema.sql` NO es parcial: la fila archivada sigue
+    // ahi con su slug. Dejar que memoria lo reutilizase haria pasar un alta que
+    // Postgres rechaza (D1b: archivar no borra).
+    const catalog = decor();
+    await catalog.archiveAsset(PLANTA.id);
+
+    await expect(
+      catalog.createAsset({
+        name: 'Planta',
+        kind: 'plant',
+        textureKey: 'plant',
+        w: 1,
+        h: 1,
+        placeableOnDesk: true,
+      }),
+    ).rejects.toThrow(AssetNameTakenError);
   });
 
   it('comparte decorRules con pgDecor: un tipo invalido se rechaza igual', async () => {

@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { InvalidAssetError, InvalidDeskConfigError } from './decorRules.ts';
+import { AssetNameTakenError, InvalidAssetError, InvalidDeskConfigError } from './decorRules.ts';
 import { createPgDecor } from './pgDecor.ts';
 import type { DirectoryPool, DirectoryQueryResult } from '../directory/pgDirectory.ts';
 
@@ -57,6 +57,14 @@ function fakePool(respond: Responder = () => ({ rows: [], rowCount: 0 })): FakeP
     },
     async end() {},
   };
+}
+
+/** Error con la forma que trae `pg` cuando un indice unico salta. */
+function uniqueViolation(constraint: string): Error {
+  return Object.assign(
+    new Error(`duplicate key value violates unique constraint "${constraint}"`),
+    { code: '23505', constraint },
+  );
 }
 
 const ASSET_ROW = {
@@ -214,6 +222,41 @@ describe('pgDecor: createAsset', () => {
     const pool = fakePool(() => Object.assign(new Error('connection terminated'), { code: '08006' }));
 
     await expect(createPgDecor(pool).createAsset(VALIDO)).rejects.toThrow('connection terminated');
+  });
+
+  it('traduce una violacion de unicidad en AssetNameTakenError, no un 500 pelado', async () => {
+    // `assets_slug_unique` esta sobre `lower(slug)` y el slug se DERIVA del
+    // nombre: dar de alta "Planta Grande" donde ya hay una es una equivocacion
+    // corriente del administrador, no una averia del servidor.
+    const pool = fakePool(() => uniqueViolation('assets_slug_unique'));
+
+    await expect(createPgDecor(pool).createAsset(VALIDO)).rejects.toThrow(AssetNameTakenError);
+  });
+
+  it('una violacion de unicidad NO se confunde con un cuerpo mal escrito', async () => {
+    // `InvalidAssetError` acaba en 400 y este en 409: el primero dice "esto no
+    // es un asset", el segundo "este asset ya existe".
+    const pool = fakePool(() => uniqueViolation('assets_slug_unique'));
+
+    const thrown = await createPgDecor(pool)
+      .createAsset(VALIDO)
+      .catch((error: unknown) => error);
+
+    expect(thrown).toBeInstanceOf(AssetNameTakenError);
+    expect(thrown).not.toBeInstanceOf(InvalidAssetError);
+  });
+
+  it('un error de integridad que NO es de unicidad se propaga tal cual', async () => {
+    // `23514` es un CHECK que no cuadra: nada que el administrador haya escrito
+    // mal en el nombre. Tragarselo como 409 le diria que se equivoco el cuando
+    // el que se rompio fue el servidor.
+    const pool = fakePool(() =>
+      Object.assign(new Error('violates check constraint'), { code: '23514' }),
+    );
+
+    await expect(createPgDecor(pool).createAsset(VALIDO)).rejects.toThrow(
+      'violates check constraint',
+    );
   });
 });
 
