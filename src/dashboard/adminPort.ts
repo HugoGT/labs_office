@@ -96,7 +96,22 @@ export type AdminErrorCode =
   | 'forbidden'
   | 'invalid-request'
   | 'conflict'
+  /** El id ya no esta: otra persona lo quito entre la lectura y el clic. */
+  | 'not-found'
+  /**
+   * Dos escritorios de 3x3 pisandose. Es un 409 propio y no `conflict` porque
+   * se arregla escribiendo otras coordenadas, no cambiando de correo.
+   */
+  | 'desk-overlap'
+  /**
+   * Los TRES "no configurado" viajan separados porque son tres piezas
+   * distintas del despliegue: credenciales de Identity Platform la primera y
+   * `DATABASE_URL` las otras dos. Un codigo comun obligaria a quien despliega
+   * a probarlas todas para saber cual falta.
+   */
   | 'identity-admin-not-configured'
+  | 'desks-not-configured'
+  | 'decor-not-configured'
   | 'network'
   | 'unknown';
 

@@ -15,27 +15,26 @@ import {
   type CreatedUser,
   type Invitation,
 } from './adminPort';
+import { resolveOfficeApiBaseUrl, type OfficeApiBaseUrlSources } from './officeApiBaseUrl';
 
-export interface AdminBaseUrlSources {
-  /** El endpoint de Colyseus ya resuelto (`resolveOfficeEndpoint`). */
-  officeEndpoint?: string | null;
-}
+export type AdminBaseUrlSources = OfficeApiBaseUrlSources;
 
 /**
  * Misma derivacion que `resolveLivekitConfig`: el panel vive en el mismo
  * `http.Server` que la sala, asi que basta con cambiar de esquema y colgar el
  * prefijo. Puro y sin `import.meta` dentro, para probarlo sin montar Vite.
  *
+ * El cambio de esquema lo hace `resolveOfficeApiBaseUrl` y aqui solo se cuelga
+ * el prefijo: esta superficie vive entera bajo `/admin`, pero la de
+ * escritorios no (ver la cabecera de aquel modulo), y repetir la derivacion
+ * dejaria dos copias que un dia divergen.
+ *
  * `null` cuando no hay servidor: sin el no hay invitaciones que administrar,
  * y una URL inventada solo produciria un fallo de red confuso.
  */
-export function resolveAdminBaseUrl({ officeEndpoint }: AdminBaseUrlSources): string | null {
-  if (officeEndpoint === null || officeEndpoint === undefined) return null;
-
-  const httpBase = officeEndpoint
-    .replace(/^wss:\/\//, 'https://')
-    .replace(/^ws:\/\//, 'http://');
-  return `${httpBase}/admin`;
+export function resolveAdminBaseUrl(sources: AdminBaseUrlSources): string | null {
+  const httpBase = resolveOfficeApiBaseUrl(sources);
+  return httpBase === null ? null : `${httpBase}/admin`;
 }
 
 export interface AdminClientOptions {

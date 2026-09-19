@@ -16,16 +16,33 @@ const GENERIC_MESSAGE = 'No se pudo completar la operación.';
 const MESSAGES: Readonly<Record<AdminErrorCode, string>> = {
   unauthorized: 'Tu sesión caducó. Vuelve a entrar.',
   forbidden: 'No tienes permiso para esta acción.',
-  // Sin nombrar la invitacion: estos dos codigos los devuelven los DOS flujos
-  // de alta, y decir "invitación" al dar de alta a un empleado seria una
-  // explicacion falsa (ese correo no tiene una invitacion, tiene una cuenta).
-  'invalid-request': 'El servidor no aceptó los datos del alta.',
+  // Sin nombrar la invitacion NI el alta: este codigo lo devuelven los dos
+  // flujos de alta, pero tambien mover un escritorio a unas coordenadas
+  // invalidas. Decir "invitación" al dar de alta a un empleado ya era falso
+  // (ese correo no tiene una invitacion, tiene una cuenta); decir "del alta"
+  // al mover algo que ya existe lo es igual.
+  'invalid-request': 'El servidor no aceptó esos datos.',
   conflict: 'Ese correo ya tiene una cuenta.',
+  // No dice "no se encontró": el dato que se mando estaba bien cuando se leyo
+  // la lista. Lo que cambio fue el servidor, y decirlo asi evita que quien
+  // administra revise unas coordenadas que no tenian nada de malo.
+  'not-found': 'Eso ya no está en el servidor: alguien lo quitó mientras mirabas.',
+  // Las coordenadas Y el tamano, porque sin los dos no se puede corregir: un
+  // escritorio ocupa 3x3 casillas y el contacto exacto de un borde ya cuenta
+  // como solape (`deskBoundsOverlap`), asi que "al lado" no siempre cabe.
+  'desk-overlap':
+    'Esas coordenadas chocan con otro escritorio: cada uno ocupa 3×3 casillas y ni los bordes pueden tocarse.',
   // No es un fallo de quien invita: el servidor no tiene credenciales de
   // administracion de Identity Platform (#24, seccion 3). Decir "inténtalo de
   // nuevo" le haria repetir el intento para siempre.
   'identity-admin-not-configured':
     'La creación de cuentas no está configurada en el servidor.',
+  // Tampoco son fallos de quien administra, y ademas NO son averias: un
+  // despliegue sin `DATABASE_URL` es un estado legitimo (la oficina funciona,
+  // simplemente no hay escritorios ni catalogo que administrar). De ahi que la
+  // frase no pida reintentar nada.
+  'desks-not-configured': 'Los escritorios asignables no están configurados en este servidor.',
+  'decor-not-configured': 'El catálogo de decoración no está configurado en este servidor.',
   network: 'No se pudo contactar con el servidor.',
   unknown: GENERIC_MESSAGE,
 };
