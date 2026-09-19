@@ -27,6 +27,7 @@ function servedDesk(overrides: Record<string, unknown> = {}): Record<string, unk
     w: 3,
     h: 3,
     occupant: null,
+    mine: false,
     ...overrides,
   };
 }
@@ -129,6 +130,39 @@ describe('fetchOfficeDesks', () => {
     });
 
     expect(desks[0].occupant).toBeNull();
+  });
+
+  it('copia el `mine` que calculo el servidor en vez de deducirlo', async () => {
+    // Cual es el propio lo contesta quien sabe quien pregunta. Aqui no hay
+    // nada que deducir: `occupantId` no viaja, y el unico cruce que quedaria
+    // seria el nombre visible -- que es justo lo que la slice 1 de esta issue
+    // retiro de `proximityAudio.ts`, donde un renombrado cambiaba en silencio
+    // quien oye a quien.
+    const desks = await fetchOfficeDesks({
+      baseUrl: 'http://x',
+      getIdToken: TOKEN,
+      fetchImpl: respondWith({
+        desks: [servedDesk({ occupant: servedOccupant(), mine: true })],
+      }),
+    });
+
+    expect(desks[0].mine).toBe(true);
+  });
+
+  it('una fila sin `mine` descarta la lista entera', async () => {
+    // Darlo por `false` dejaria a quien mira sin su propio escritorio y sin
+    // saber por que, que es la degradacion silenciosa que este campo existe
+    // para quitar de en medio.
+    const sinMine = servedDesk();
+    delete sinMine.mine;
+
+    const desks = await fetchOfficeDesks({
+      baseUrl: 'http://x',
+      getIdToken: TOKEN,
+      fetchImpl: respondWith({ desks: [sinMine] }),
+    });
+
+    expect(desks).toBe(NO_DESKS);
   });
 
   it('una lista vacia servida es una respuesta valida, no un fallo', async () => {

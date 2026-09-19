@@ -50,10 +50,10 @@ export interface DeskDecorItem {
 /**
  * Quien ocupa un escritorio, con su decoracion ya resuelta.
  *
- * `displayName` es la UNICA forma que tiene el cliente de cruzar esta fila con
- * lo que ya esta pintando: el estado de Colyseus identifica a cada jugador por
- * su nombre, y `id` es del directorio, que alli no aparece. Por eso el
- * servidor lo manda (ver `server/src/desks/desksPort.ts`).
+ * `displayName` es para ETIQUETAR, nunca para decidir de quien es el sitio:
+ * eso lo contesta `OfficeDesk.mine`. Dos personas del directorio pueden
+ * llamarse igual, y un Admin puede renombrar a cualquiera en cualquier
+ * momento.
  */
 export interface DeskOccupant {
   id: string;
@@ -72,6 +72,20 @@ export interface OfficeDesk {
   h: number;
   /** `null` mientras este libre. */
   occupant: DeskOccupant | null;
+  /**
+   * Si este es el escritorio de quien esta mirando. Lo calcula el SERVIDOR,
+   * que es el unico que sabe quien pregunta, y llega ya contestado.
+   *
+   * No se deduce aqui, y no por comodidad: `occupantId` no viaja -- ver la
+   * cabecera de `server/src/desks/desksPort.ts` -- asi que el unico cruce que
+   * le quedaria al cliente seria comparar `occupant.displayName` con el nombre
+   * del jugador local. Comparar nombres visibles es exactamente lo que la
+   * slice 1 de esta issue retiro de `proximityAudio.ts`, donde decidia quien
+   * oye a quien y renombrar un espacio lo cambiaba en silencio. Aqui
+   * renombrar a una persona cambiaria de manos un escritorio en pantalla, y
+   * dos homonimos verian los dos el mismo resaltado.
+   */
+  mine: boolean;
 }
 
 /**

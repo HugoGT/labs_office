@@ -34,6 +34,7 @@ const MESA: OfficeDesk = {
   w: 96,
   h: 96,
   occupant: null,
+  mine: false,
 };
 
 /**

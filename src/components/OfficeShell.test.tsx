@@ -564,6 +564,7 @@ describe('OfficeShell: escritorios asignables (#7, slice 5)', () => {
     w: 96,
     h: 96,
     occupant: null,
+    mine: false,
   };
 
   beforeEach(() => {

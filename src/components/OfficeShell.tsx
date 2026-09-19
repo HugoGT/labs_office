@@ -229,7 +229,7 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
       if (outcome === 'claimed') {
         setToastMessage(
           <>
-            Te sentaste en <b>{label}</b>
+            🪑 Te sentaste en <b>{label}</b>
           </>,
         );
         return;
@@ -237,11 +237,11 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
       setToastMessage(
         outcome === 'taken' ? (
           <>
-            Alguien se adelantó y ocupó <b>{label}</b>
+            🪑 Alguien se adelantó y ocupó <b>{label}</b>
           </>
         ) : (
           <>
-            No se pudo coger <b>{label}</b>
+            🪑 No se pudo coger <b>{label}</b>
           </>
         ),
       );
@@ -255,11 +255,11 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
       setToastMessage(
         outcome === 'released' ? (
           <>
-            Dejaste <b>{label}</b>
+            🪑 Dejaste <b>{label}</b>
           </>
         ) : (
           <>
-            No se pudo dejar <b>{label}</b>
+            🪑 No se pudo dejar <b>{label}</b>
           </>
         ),
       );
@@ -287,7 +287,7 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
         }
         setToastMessage(
           <>
-            <b>{label}</b> es tu escritorio ·{' '}
+            🪑 <b>{label}</b> es tu escritorio ·{' '}
             <button type="button" onClick={() => void leaveDesk(label)}>
               Dejarlo
             </button>

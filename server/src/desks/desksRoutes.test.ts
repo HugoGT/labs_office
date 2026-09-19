@@ -73,10 +73,15 @@ interface Harness {
   desks: DeskDirectory;
 }
 
-function harness(): Harness {
+/**
+ * `seed` se puede sustituir para probar la unica propiedad que el nombre
+ * visible NO puede dar: un RENOMBRADO es este mismo directorio devolviendo
+ * otro `displayName` para el MISMO `id`.
+ */
+function harness(seed: DirectoryUser[] = [ADMIN, ANA, BRUNO, CADUCADO]): Harness {
   const directory = createMemoryDirectory({
     now: () => NOW,
-    seed: [ADMIN, ANA, BRUNO, CADUCADO],
+    seed,
   });
   const decor = createMemoryDecor({ now: () => NOW });
   const desks = createMemoryDesks({ now: () => NOW, directory, decor });
@@ -161,6 +166,88 @@ describe('handleListDesks', () => {
 
     expect((result.body.desks as Record<string, unknown>[])[0]).not.toHaveProperty('createdAt');
     expect((result.body.desks as Record<string, unknown>[])[0]).not.toHaveProperty('updatedAt');
+  });
+
+  /**
+   * Cual de estos escritorios es el de quien pregunta (#7, slice 5).
+   *
+   * Lo contesta el SERVIDOR y no el cliente, y esa es toda la razon de que
+   * este campo exista. El cliente no tiene con que averiguarlo: `occupantId`
+   * no viaja (ver la prueba de aqui abajo, y la cabecera de `desksPort.ts`) y
+   * el unico cruce que le queda seria el nombre visible. Comparar nombres es
+   * exactamente lo que la slice 1 de esta misma issue retiro de
+   * `proximityAudio.ts` -- alli decidia quien oye a quien y un renombrado lo
+   * cambiaba en silencio. Reintroducirlo aqui haria que renombrar a alguien
+   * cambiase de manos un escritorio en la pantalla.
+   *
+   * Lo que se publica es una RESPUESTA SOBRE QUIEN PREGUNTA, no un dato de
+   * nadie mas: es la misma informacion que `/me/desk` ya le da, y ningun uuid
+   * del directorio sale con ella.
+   */
+  it('marca como propio el escritorio de quien pregunta, y solo ese', async () => {
+    const { deps, desks } = harness();
+    const deAna = await desks.createDesk({ label: 'Mesa Ana', x: 0, y: 0 });
+    const deBruno = await desks.createDesk({ label: 'Mesa Bruno', x: 4, y: 0 });
+    await desks.claimDesk(deAna.id, ANA.id);
+    await desks.claimDesk(deBruno.id, BRUNO.id);
+
+    const result = await handleListDesks(BEARER_ANA, deps);
+
+    expect(result.body.desks).toEqual([
+      expect.objectContaining({ id: deAna.id, mine: true }),
+      expect.objectContaining({ id: deBruno.id, mine: false }),
+    ]);
+  });
+
+  it('la misma lista vista por otra persona mueve la marca a su escritorio', async () => {
+    // Es la mitad que demuestra que la respuesta es sobre QUIEN PREGUNTA y no
+    // una propiedad del escritorio: los mismos dos, el flag en el otro.
+    const { deps, desks } = harness();
+    const deAna = await desks.createDesk({ label: 'Mesa Ana', x: 0, y: 0 });
+    const deBruno = await desks.createDesk({ label: 'Mesa Bruno', x: 4, y: 0 });
+    await desks.claimDesk(deAna.id, ANA.id);
+    await desks.claimDesk(deBruno.id, BRUNO.id);
+
+    const result = await handleListDesks(BEARER_BRUNO, deps);
+
+    expect(result.body.desks).toEqual([
+      expect.objectContaining({ id: deAna.id, mine: false }),
+      expect.objectContaining({ id: deBruno.id, mine: true }),
+    ]);
+  });
+
+  it('un escritorio libre nunca es de nadie', async () => {
+    // `mine` sale de `occupant_id`, no de la ausencia de ocupante: sin esta
+    // prueba, un `occupantId === viewerId` con los dos a null marcaria como
+    // propio TODO escritorio libre.
+    const { deps, desks } = harness();
+    await desks.createDesk({ label: 'Mesa 1', x: 0, y: 0 });
+
+    const result = await handleListDesks(BEARER_ANA, deps);
+
+    expect(result.body.desks).toEqual([expect.objectContaining({ occupant: null, mine: false })]);
+  });
+
+  it('renombrar a una persona no cambia de manos ningun escritorio', async () => {
+    // La propiedad que el nombre visible no puede dar, y la razon de que este
+    // campo lo calcule el servidor. Un renombrado es este mismo directorio
+    // devolviendo otro `displayName` para el MISMO `id`: aqui Ana pasa a
+    // llamarse como Bruno, que es el peor caso que un cruce por nombre podria
+    // encontrarse.
+    const renombrada = { ...ANA, displayName: 'Bruno' };
+    const { deps, desks } = harness([ADMIN, renombrada, BRUNO, CADUCADO]);
+    const deAna = await desks.createDesk({ label: 'Mesa Ana', x: 0, y: 0 });
+    const deBruno = await desks.createDesk({ label: 'Mesa Bruno', x: 4, y: 0 });
+    await desks.claimDesk(deAna.id, ANA.id);
+    await desks.claimDesk(deBruno.id, BRUNO.id);
+
+    const result = await handleListDesks(BEARER_ANA, deps);
+
+    // Los dos se llaman igual en la pantalla y aun asi el suyo es el suyo.
+    expect(result.body.desks).toEqual([
+      expect.objectContaining({ id: deAna.id, mine: true }),
+      expect.objectContaining({ id: deBruno.id, mine: false }),
+    ]);
   });
 
   it('NO publica el occupantId suelto: el ocupante entero ya lo trae', async () => {

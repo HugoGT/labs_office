@@ -1496,6 +1496,7 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
       w: 3 * TILE,
       h: 3 * TILE,
       occupant: null,
+      mine: false,
       ...overrides,
     };
   }
@@ -1596,20 +1597,43 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
   });
 
   it('el escritorio propio se distingue del de otra persona', async () => {
-    // El servidor no dice cual es el tuyo: el unico cruce que ofrece es el
-    // nombre visible del ocupante, que es el mismo con el que Colyseus pinta
-    // los avatares (por eso `DeskOccupant.displayName` viaja).
+    // Cual es el propio lo dice el SERVIDOR (`mine`), que es quien sabe quien
+    // pregunta. La escena lo lee, no lo deduce.
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge, { playerName: 'Ana Torres' });
 
     bridge.emitCommand('desks', {
       desks: [
-        servedDesk({ id: 'mia', occupant: occupant('Ana Torres') }),
+        servedDesk({ id: 'mia', occupant: occupant('Ana Torres'), mine: true }),
         servedDesk({ id: 'ajena', x: 20 * TILE, occupant: occupant('Luis Paz') }),
       ],
     });
 
     expect(findZone(scene, 'mia')!.fillColor).not.toBe(findZone(scene, 'ajena')!.fillColor);
+  });
+
+  it('un homonimo NO hereda tu escritorio: manda `mine`, no el nombre', async () => {
+    // El pin de regresion de esta slice. Decidir la pertenencia comparando el
+    // nombre visible es lo que la slice 1 de esta misma issue retiro de
+    // `proximityAudio.ts`: alli un renombrado cambiaba en silencio quien oye a
+    // quien, y aqui cambiaria de manos un escritorio. Dos personas del
+    // directorio pueden llamarse igual, y una de ellas puede llamarse como tu
+    // desde que un Admin la renombro.
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge, { playerName: 'Ana Torres' });
+
+    bridge.emitCommand('desks', {
+      desks: [
+        servedDesk({ id: 'homonima', occupant: occupant('Ana Torres'), mine: false }),
+        servedDesk({ id: 'ajena', x: 20 * TILE, occupant: occupant('Luis Paz') }),
+      ],
+    });
+
+    // Se ve como lo que es: el escritorio de otra persona, y sin nada que
+    // ofrecer al clicarlo.
+    const homonima = findZone(scene, 'homonima')!;
+    expect(homonima.fillColor).toBe(findZone(scene, 'ajena')!.fillColor);
+    expect(homonima.input).toBeNull();
   });
 
   it('un escritorio libre se distingue de uno ocupado', async () => {
@@ -1656,7 +1680,9 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
     const clicks: unknown[] = [];
     bridge.on('deskclick', (payload) => clicks.push(payload));
 
-    bridge.emitCommand('desks', { desks: [servedDesk({ occupant: occupant('Ana Torres') })] });
+    bridge.emitCommand('desks', {
+      desks: [servedDesk({ occupant: occupant('Ana Torres'), mine: true })],
+    });
     findZone(scene, 'id-mesa')!.emit('pointerdown', fakePointer());
 
     expect(clicks).toEqual([{ deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }]);

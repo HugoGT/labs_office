@@ -508,7 +508,12 @@ export class OfficeScene extends Phaser.Scene {
    * escritorio.
    */
   private drawDesk(desk: OfficeDesk): void {
-    const mine = this.isOwnDesk(desk);
+    // Lo contesta el servidor y la escena lo lee (`OfficeDesk.mine`). Deducirlo
+    // comparando `occupant.displayName` con el nombre del jugador local haria
+    // que renombrar a alguien cambiase de manos un escritorio en pantalla --
+    // la misma trampa que la slice 1 de esta issue retiro de
+    // `proximityAudio.ts`.
+    const mine = desk.mine;
     const color =
       desk.occupant === null ? DESK_COLOR.free : mine ? DESK_COLOR.mine : DESK_COLOR.taken;
     const depth = desk.y + desk.h;
@@ -588,26 +593,6 @@ export class OfficeScene extends Phaser.Scene {
       .setAngle(rotation)
       .setDepth(depth)
       .setName(name);
-  }
-
-  /**
-   * Si un escritorio es el de quien esta jugando.
-   *
-   * El servidor NO dice cual es el tuyo: `occupant.id` es del directorio y ese
-   * id no aparece en ninguna otra cosa que este cliente tenga. El unico cruce
-   * que ofrece es el nombre visible, y por eso `DeskOccupant.displayName`
-   * viaja (ver `server/src/desks/desksPort.ts`) -- es el mismo nombre con el
-   * que Colyseus pinta los avatares, que es lo que la escena ya tiene.
-   *
-   * Dos personas del directorio con el mismo nombre visible verian las dos el
-   * mismo escritorio resaltado. Es un fallo de ETIQUETA y no de permisos:
-   * soltar no lleva id -- `POST /me/desk/release` suelta el de la identidad
-   * verificada de quien llama -- asi que ese resalte de mas no puede levantar
-   * a nadie de su sitio.
-   */
-  private isOwnDesk(desk: OfficeDesk): boolean {
-    const displayName = desk.occupant?.displayName ?? null;
-    return displayName !== null && displayName === this.player.nameText;
   }
 
   private emitPresence(online: boolean): void {

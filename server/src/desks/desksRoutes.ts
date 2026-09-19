@@ -94,8 +94,22 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * oficina. `occupantId` tampoco viaja suelto -- `occupant` ya lo trae dentro,
  * y dos formas de decir lo mismo en el mismo cuerpo invitan a que el cliente
  * use una cuando la otra dice algo distinto.
+ *
+ * ## `mine` lo calcula el SERVIDOR, y no es un `occupantId` disfrazado
+ *
+ * Es la respuesta a "cual de estos es el mio", y tiene que darla quien ya sabe
+ * quien pregunta. El cliente no puede deducirla: `occupantId` no viaja -- ni
+ * debe, ver la cabecera de `desksPort.ts` -- asi que el unico cruce que le
+ * quedaria es el NOMBRE VISIBLE del ocupante. Comparar nombres es exactamente
+ * lo que la slice 1 de esta misma issue retiro de `proximityAudio.ts`, donde
+ * decidia quien oye a quien y un renombrado del Admin lo cambiaba en silencio.
+ * Aqui haria que renombrar a alguien cambiase de manos un escritorio en la
+ * pantalla de todo el mundo.
+ *
+ * Un booleano no es el uuid: lo que se publica es una respuesta SOBRE QUIEN
+ * PREGUNTA, la misma que `/me/desk` ya le da, y no un dato de nadie mas.
  */
-function toDeskBody(desk: OfficeDesk): Record<string, unknown> {
+function toDeskBody(desk: OfficeDesk, viewerId: string | null): Record<string, unknown> {
   return {
     id: desk.id,
     label: desk.label,
@@ -104,12 +118,19 @@ function toDeskBody(desk: OfficeDesk): Record<string, unknown> {
     w: DESK_SIDE,
     h: DESK_SIDE,
     occupant: desk.occupant,
+    // Los dos a `null` NO son una coincidencia: un escritorio libre no es de
+    // nadie, y sin la primera mitad todos lo serian de quien preguntase.
+    mine: desk.occupantId !== null && desk.occupantId === viewerId,
   };
 }
 
-/** Lo que devuelven las escrituras del panel: un escritorio sin resolver ocupante. */
+/**
+ * Lo que devuelven las escrituras del panel: un escritorio sin resolver
+ * ocupante. `viewerId` es `null` porque quien administra no se sienta al
+ * crear ni al mover -- un escritorio recien puesto no es de nadie.
+ */
 function toAdminDeskBody(desk: Desk): Record<string, unknown> {
-  return toDeskBody({ ...desk, occupant: null });
+  return toDeskBody({ ...desk, occupant: null }, null);
 }
 
 /**
@@ -148,7 +169,10 @@ export async function handleListDesks(
   // oficina que todavia no ha colocado ninguno es un estado legitimo, y nadie
   // los siembra.
   const desks = await deps.desks.listOfficeDesks();
-  return { status: 200, body: { desks: desks.map(toDeskBody) } };
+  // La identidad VERIFICADA de quien llama, no un parametro: "cual es el mio"
+  // solo se puede contestar sobre quien acaba de probar quien es.
+  const viewerId = authenticated.user.id;
+  return { status: 200, body: { desks: desks.map((desk) => toDeskBody(desk, viewerId)) } };
 }
 
 export async function handleCreateDesk(

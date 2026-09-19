@@ -105,6 +105,11 @@ function toOfficeDesk(raw: unknown): OfficeDesk | null {
   if (!isNonEmptyString(row.id) || !isNonEmptyString(row.label)) return null;
   if (!isFiniteNumber(row.x) || !isFiniteNumber(row.y)) return null;
   if (!isFiniteNumber(row.w) || !isFiniteNumber(row.h)) return null;
+  // Ausente NO se da por `false`: quien mira se quedaria sin su propio
+  // escritorio y sin saber por que, que es la degradacion silenciosa que este
+  // campo existe para quitar de en medio. Y no se deduce del nombre del
+  // ocupante -- ver `desksPort.OfficeDesk.mine`.
+  if (typeof row.mine !== 'boolean') return null;
 
   // `undefined` no vale: un escritorio libre llega con `occupant: null`
   // explicito, y una respuesta a la que le falta el campo no es la de este
@@ -120,6 +125,7 @@ function toOfficeDesk(raw: unknown): OfficeDesk | null {
     w: row.w * TILE,
     h: row.h * TILE,
     occupant,
+    mine: row.mine,
   };
 }
 
