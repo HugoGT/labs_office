@@ -29,6 +29,14 @@ import {
 } from './admin/adminRoutes.ts';
 import { identityAdminFromEnv } from './admin/gcpIdentityAdmin.ts';
 import type { IdentityAdmin } from './admin/identityAdminPort.ts';
+import type { SpacesDirectory } from './spaces/spacesPort.ts';
+import {
+  handleCreateSpace,
+  handleDeleteSpace,
+  handleGetSpacesConfig,
+  handleUpdateSpace,
+  type SpacesDeps,
+} from './spaces/spacesRoutes.ts';
 import { resolveAuthConfig } from './authConfig.ts';
 import type { UserDirectory } from './directory/directoryPort.ts';
 import { directoryFromEnv, type DirectoryRuntime } from './directory/fromEnv.ts';
@@ -173,6 +181,17 @@ export interface OfficeServerOverrides {
    * responde 503 y todo lo demas del panel funciona.
    */
   identityAdmin?: IdentityAdmin | null;
+  /**
+   * Sustituye el almacen de espacios que saldria de `process.env` (#7, slice
+   * 3). `null` fuerza el modo sin espacios, que es el estado real de cualquier
+   * despliegue sin `DATABASE_URL`: `/spaces` responde 503, el cliente cae a
+   * `BUILT_IN_SPACES` y todo se comporta como antes de esta slice.
+   *
+   * Es un override propio y no una pieza del de `directory` porque un test que
+   * inyecta un directorio en memoria no tiene por que traer espacios, y al
+   * reves: probar `/spaces` no deberia obligar a sembrar usuarios.
+   */
+  spaces?: SpacesDirectory | null;
   /**
    * Lista blanca de origenes para TODAS las rutas que sirve Express
    * (`/livekit/token`, `/health`, `/admin/*`), normalmente de
@@ -326,6 +345,9 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   const directory =
     overrides?.directory !== undefined ? (overrides.directory ?? undefined) : envRuntime?.directory;
 
+  const spaces =
+    overrides?.spaces !== undefined ? (overrides.spaces ?? undefined) : envRuntime?.spaces;
+
   app.get('/health', (_req, res) => {
     // `auth` expone el modo EFECTIVO, no la variable de entorno: es la unica
     // forma de notar desde fuera que un despliegue se ha quedado sin
@@ -415,6 +437,61 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   app.post(
     '/admin/users',
     admin((req, deps) => handleCreateUser(req.header('Authorization'), req.body, deps)),
+  );
+
+  /**
+   * Mismo adaptador que `admin(...)` de arriba, con el almacen de espacios
+   * anadido a las dependencias y la misma guarda de "sin almacen -> 503, nunca
+   * 404" por la misma razon (ver el comentario de `admin`). El directorio
+   * tambien hace falta aqui: la guarda de rol lo consulta para saber si quien
+   * llama sigue siendo una cuenta que esta oficina admite.
+   */
+  function spacesRoute(run: (req: express.Request, deps: SpacesDeps) => Promise<AdminResult>) {
+    return (req: express.Request, res: express.Response): void => {
+      if (directory === undefined || spaces === undefined) {
+        res.status(503).json({ error: 'spaces-not-configured' });
+        return;
+      }
+
+      run(req, { directory, spaces, auth, identityAdmin })
+        .then((result) => {
+          res.status(result.status).json(result.body);
+        })
+        .catch(() => {
+          console.error('[spaces] fallo no controlado en una ruta de espacios');
+          res.status(500).json({ error: 'internal' });
+        });
+    };
+  }
+
+  // Config que lee CADA cliente al arrancar, no solo el panel: por eso cuelga
+  // de la raiz y no de `/admin`. Va sin autenticar a proposito -- la cabecera
+  // de `spacesRoutes.ts` explica por que.
+  app.get(
+    '/spaces',
+    spacesRoute((_req, deps) => handleGetSpacesConfig(deps)),
+  );
+
+  // Las tres de escritura van por POST y ninguna por PUT/PATCH/DELETE: el
+  // middleware de CORS de arriba anuncia `GET,POST,OPTIONS`, asi que cualquier
+  // otro verbo moriria en el preflight del navegador antes de llegar a Express.
+  // Ampliar esa lista por tres rutas seria ensanchar una cabecera de seguridad
+  // para todo el servidor; `/admin/invitations/:id/revoke` ya sento la forma.
+  app.post(
+    '/admin/spaces',
+    spacesRoute((req, deps) => handleCreateSpace(req.header('Authorization'), req.body, deps)),
+  );
+
+  app.post(
+    '/admin/spaces/:id',
+    spacesRoute((req, deps) =>
+      handleUpdateSpace(req.header('Authorization'), req.params.id, req.body, deps),
+    ),
+  );
+
+  app.post(
+    '/admin/spaces/:id/delete',
+    spacesRoute((req, deps) => handleDeleteSpace(req.header('Authorization'), req.params.id, deps)),
   );
 
   app.post('/livekit/token', (req, res) => {
