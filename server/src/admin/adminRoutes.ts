@@ -91,8 +91,9 @@ export interface AdminDeps {
 
 const UNAUTHORIZED: AdminResult = { status: 401, body: { error: 'unauthorized' } };
 const FORBIDDEN: AdminResult = { status: 403, body: { error: 'forbidden' } };
-const INVALID_REQUEST: AdminResult = { status: 400, body: { error: 'invalid-request' } };
-const NOT_FOUND: AdminResult = { status: 404, body: { error: 'not-found' } };
+/** Compartidos con `spacesRoutes.ts`: dos superficies de administracion no pueden contestar cuerpos distintos al mismo fallo. */
+export const INVALID_REQUEST: AdminResult = { status: 400, body: { error: 'invalid-request' } };
+export const NOT_FOUND: AdminResult = { status: 404, body: { error: 'not-found' } };
 const IDENTITY_UNAVAILABLE: AdminResult = {
   status: 503,
   body: { error: 'identity-admin-not-configured' },
@@ -125,7 +126,7 @@ function bearerToken(authorization: unknown): string | null {
   return match ? match[1] : null;
 }
 
-type Authenticated =
+export type Authenticated =
   | { ok: true; user: DirectoryUser }
   | { ok: false; result: AdminResult };
 
@@ -164,8 +165,16 @@ async function authenticate(authorization: unknown, deps: AdminDeps): Promise<Au
   return { ok: true, user };
 }
 
-/** Pasos 1, 2 y 3. Lo que usa todo menos `GET /admin/session`. */
-async function authorize(authorization: unknown, deps: AdminDeps): Promise<Authenticated> {
+/**
+ * Pasos 1, 2 y 3. Lo que usa todo menos `GET /admin/session`.
+ *
+ * Se exporta para que las rutas de espacios (#7, slice 3) monten la MISMA
+ * guarda en vez de una copia. Duplicar los tres pasos es exactamente como se
+ * separan dos superficies de administracion: un dia una aprende a distinguir
+ * un invitado caducado y la otra no, y nadie se entera hasta que alguien
+ * caducado crea un espacio.
+ */
+export async function authorize(authorization: unknown, deps: AdminDeps): Promise<Authenticated> {
   const authenticated = await authenticate(authorization, deps);
   if (!authenticated.ok) return authenticated;
 
