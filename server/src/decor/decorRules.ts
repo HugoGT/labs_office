@@ -191,10 +191,39 @@ export interface NormalizedDeskItem {
 }
 
 /**
- * Valida una configuracion de escritorio completa contra el catalogo. Es
- * "completa" y no incremental porque `replaceDeskConfig` borra e inserta: lo
- * que llega aqui es el escritorio entero, asi que los slots repetidos se ven
- * de una sola pasada sin consultar lo que ya habia.
+ * La mitad de la validacion que NO necesita el catalogo: forma del `assetId`,
+ * rango de slot, rotacion y slots repetidos.
+ *
+ * Esta separada a proposito. El adaptador la corre ANTES de pedir conexion, de
+ * modo que un slot repetido o una rotacion de 45 grados se rechazan sin
+ * gastar una consulta; lo unico que de verdad obliga a mirar el almacen es
+ * saber si cada asset existe y es colocable.
+ *
+ * Es "completa" y no incremental porque `replaceDeskConfig` borra e inserta:
+ * lo que llega aqui es el escritorio entero, asi que los slots repetidos se
+ * ven de una sola pasada sin consultar lo que ya habia.
+ */
+export function assertValidDeskShape(items: readonly DeskItemInput[]): void {
+  const seenSlots = new Set<number>();
+
+  for (const item of items) {
+    if (typeof item?.assetId !== 'string' || item.assetId.length === 0) {
+      throw new InvalidDeskConfigError('assetId debe ser una cadena no vacia');
+    }
+    assertValidSlot(item.slot);
+    assertValidRotation(item.rotation);
+
+    if (seenSlots.has(item.slot)) {
+      // El indice unico `(user_id, slot)` de `schema.sql` es la garantia real.
+      throw new InvalidDeskConfigError(`el slot ${item.slot} aparece dos veces`);
+    }
+    seenSlots.add(item.slot);
+  }
+}
+
+/**
+ * Valida una configuracion de escritorio completa contra el catalogo: la forma
+ * de arriba, mas que cada asset exista y admita ir en un escritorio.
  *
  * El orden de llegada se conserva. Ordenar aqui esconderia que el orden no
  * significa nada -- quien lo lee es `getDeskConfig`, que ordena por slot.
@@ -207,22 +236,10 @@ export function normalizeDeskConfig(
   items: readonly DeskItemInput[],
   catalog: readonly PlaceableAsset[],
 ): NormalizedDeskItem[] {
+  assertValidDeskShape(items);
   const byId = new Map(catalog.map((asset) => [asset.id, asset]));
-  const seenSlots = new Set<number>();
 
   return items.map((item) => {
-    if (typeof item?.assetId !== 'string' || item.assetId.length === 0) {
-      throw new InvalidDeskConfigError('assetId debe ser una cadena no vacia');
-    }
-    assertValidSlot(item.slot);
-    assertValidRotation(item.rotation);
-
-    if (seenSlots.has(item.slot)) {
-      // El indice unico `(user_id, slot)` de `schema.sql` es la garantia real.
-      throw new InvalidDeskConfigError(`el slot ${item.slot} aparece dos veces`);
-    }
-    seenSlots.add(item.slot);
-
     const asset = byId.get(item.assetId);
     if (asset === undefined) {
       // La FK tambien lo atraparia, pero como un 23503 indistinguible de una

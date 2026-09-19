@@ -15,6 +15,7 @@ import {
   InvalidAssetError,
   InvalidDeskConfigError,
   assertPlaceableOnDesk,
+  assertValidDeskShape,
   assertValidAssetKind,
   assertValidAssetSize,
   assertValidRotation,
@@ -202,6 +203,43 @@ describe('assertPlaceableOnDesk', () => {
 
   it('rechaza uno que no lo esta', () => {
     expect(() => assertPlaceableOnDesk(SOFA)).toThrow(InvalidDeskConfigError);
+  });
+});
+
+describe('assertValidDeskShape', () => {
+  /**
+   * Es la mitad de la validacion que NO necesita el catalogo, y existe
+   * separada por eso: el adaptador la corre antes de pedir conexion, asi que
+   * un slot repetido o una rotacion de 45 grados no cuestan una consulta.
+   */
+  it('acepta una configuracion bien formada', () => {
+    expect(() =>
+      assertValidDeskShape([
+        { assetId: PLANTA.id, slot: 0, rotation: 0 },
+        { assetId: SOFA.id, slot: 1, rotation: 270 },
+      ]),
+    ).not.toThrow();
+  });
+
+  it('no consulta el catalogo: un assetId desconocido pasa esta mitad', () => {
+    expect(() =>
+      assertValidDeskShape([{ assetId: 'todavia-no-se-sabe', slot: 0, rotation: 0 }]),
+    ).not.toThrow();
+  });
+
+  it('rechaza slots repetidos, slots fuera de rango y rotaciones invalidas', () => {
+    expect(() =>
+      assertValidDeskShape([
+        { assetId: PLANTA.id, slot: 1, rotation: 0 },
+        { assetId: PLANTA.id, slot: 1, rotation: 0 },
+      ]),
+    ).toThrow(InvalidDeskConfigError);
+    expect(() => assertValidDeskShape([{ assetId: PLANTA.id, slot: 9, rotation: 0 }])).toThrow(
+      InvalidDeskConfigError,
+    );
+    expect(() => assertValidDeskShape([{ assetId: PLANTA.id, slot: 0, rotation: 45 }])).toThrow(
+      InvalidDeskConfigError,
+    );
   });
 });
 
