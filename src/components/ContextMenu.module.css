@@ -48,3 +48,13 @@
   background: #2b3444;
   color: #fff;
 }
+
+.action:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.action:disabled:hover {
+  background: none;
+  color: #d1d5db;
+}

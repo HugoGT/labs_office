@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { OfficeEventMap } from '../game/officeBridge';
+import { DO_NOT_DISTURB } from '../game/officeProtocol';
 import { statusCssColor } from '../game/presence';
 import styles from './ContextMenu.module.css';
 
@@ -43,6 +44,12 @@ export function ContextMenu({ menu, onAction, onClose }: ContextMenuProps) {
   if (!menu) return null;
 
   const dotColor = statusCssColor(menu.statusCode);
+  const isPeer = menu.target.kind === 'peer';
+  // D2: un peer real no tiene escritorio -- "Ir a su escritorio" es
+  // exclusivamente de NPC. D8: ademas del rechazo silencioso del servidor,
+  // el cliente deshabilita "Llamar" cuando el peer esta en No molestar; un
+  // NPC nunca esta en `r` en la practica, pero la regla es la misma union.
+  const callDisabled = isPeer && menu.statusCode === DO_NOT_DISTURB;
 
   return (
     <div
@@ -55,12 +62,20 @@ export function ContextMenu({ menu, onAction, onClose }: ContextMenuProps) {
         {menu.name}
         <span className={styles.statusText}>{menu.status}</span>
       </div>
-      <button type="button" className={styles.action} onClick={() => onAction('call', menu)}>
+      <button
+        type="button"
+        className={styles.action}
+        disabled={callDisabled}
+        title={callDisabled ? 'No molestar: no se puede llamar ahora' : undefined}
+        onClick={() => onAction('call', menu)}
+      >
         📞 Llamar
       </button>
-      <button type="button" className={styles.action} onClick={() => onAction('goto', menu)}>
-        🚶 Ir a su escritorio
-      </button>
+      {!isPeer && (
+        <button type="button" className={styles.action} onClick={() => onAction('goto', menu)}>
+          🚶 Ir a su escritorio
+        </button>
+      )}
       <button type="button" className={styles.action} onClick={() => onAction('profile', menu)}>
         👤 Ver perfil
       </button>
