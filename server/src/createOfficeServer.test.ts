@@ -591,14 +591,39 @@ describe('CORS con lista blanca (#9)', () => {
     // invariante que protege (`/health` nunca rechaza una peticion) ya se
     // cumplia antes de este cambio, con o sin lista blanca configurada -- el
     // healthcheck del contenedor (`colyseus.Dockerfile:63`) llama sin
-    // `Origin`. Se escribe igual como red de regresion para ese invariante; la
-    // ausencia del propio `access-control-allow-origin` ya la cubre el caso
-    // "ajeno" de la prueba anterior.
+    // `Origin`. Se escribe igual como red de regresion para ese invariante.
     const url = await start({ allowedOrigins: ['https://app.example.com'] });
 
     const res = await fetch(`${url}/health`);
 
     expect(res.status).toBe(200);
+    // Sin cabecera `Origin` no hay nada que reflejar. Se afirma aqui y no solo
+    // en el caso "ajeno" porque es un GIVEN distinto: alli el navegador manda
+    // un origen que no esta en la lista, aqui no manda ninguno.
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('no aparece Allow-Credentials con lista blanca configurada', async () => {
+    // La lista blanca es lo que haria tentador activar credenciales: reflejar
+    // un origen concreto es justo lo que exige la spec para permitirlas. No se
+    // activan. La autenticacion viaja en un bearer token, no en cookies, asi
+    // que la cabecera no debe existir ni con lista ni sin ella
+    // (`adminRoutesWiring.test.ts:214-221` cubre el caso sin lista).
+    const url = await start({ allowedOrigins: ['https://app.example.com'] });
+
+    const preflight = await fetch(`${url}/livekit/token`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://app.example.com',
+        'Access-Control-Request-Method': 'POST',
+      },
+    });
+    const real = await fetch(`${url}/health`, {
+      headers: { Origin: 'https://app.example.com' },
+    });
+
+    expect(preflight.headers.get('access-control-allow-credentials')).toBeNull();
+    expect(real.headers.get('access-control-allow-credentials')).toBeNull();
   });
 });
 
