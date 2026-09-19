@@ -75,6 +75,11 @@ export function useCallInvitations(bridge: OfficeBridge): UseCallInvitationsResu
           { from, name, alerting: true, callerPresent: true },
         ]);
 
+        // El aviso ANUNCIA la llegada (decision humana #305.3), que es lo
+        // unico que la persona no puede ver si esta en otra ventana. Sonar al
+        // responder avisaria de algo que acaba de hacer ella misma.
+        chimeRef.current.play();
+
         const timer = setTimeout(() => {
           alertTimers.current.delete(from);
           setInvitations((current) =>
@@ -100,7 +105,6 @@ export function useCallInvitations(bridge: OfficeBridge): UseCallInvitationsResu
     (from: string) => {
       clearAlertTimer(from);
       bridge.emitCommand('respondCall', { from, accept: true });
-      chimeRef.current.play();
       setInvitations((current) => current.filter((invite) => invite.from !== from));
     },
     [bridge],

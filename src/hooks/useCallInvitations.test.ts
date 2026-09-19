@@ -96,7 +96,30 @@ describe('useCallInvitations', () => {
     expect(result.current.invitations).toEqual([]);
   });
 
-  it('accept emite respondCall{accept:true}, hace sonar la campanilla y quita la tarjeta (D3/D11)', () => {
+  it('la campanilla suena al LLEGAR la invitacion, no al responderla (decision humana #305.3)', () => {
+    const bridge = createOfficeBridge();
+    const { result } = renderHook(() => useCallInvitations(bridge));
+
+    act(() => bridge.emit('callinvite', { from: 'A', name: 'Ana' }));
+
+    // El aviso de 4 s ANUNCIA la llegada: si sonase al responder, avisaria de
+    // algo que la persona acaba de hacer ella misma, y la llegada -- lo unico
+    // que no puede ver si esta en otra ventana -- pasaria en silencio.
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(result.current.invitations[0]?.alerting).toBe(true);
+  });
+
+  it('cada invitacion que llega trae su propia campanilla', () => {
+    const bridge = createOfficeBridge();
+    renderHook(() => useCallInvitations(bridge));
+
+    act(() => bridge.emit('callinvite', { from: 'A', name: 'Ana' }));
+    act(() => bridge.emit('callinvite', { from: 'B', name: 'Berto' }));
+
+    expect(play).toHaveBeenCalledTimes(2);
+  });
+
+  it('accept emite respondCall{accept:true} y quita la tarjeta, sin sonar de nuevo (D3)', () => {
     const bridge = createOfficeBridge();
     const received: unknown[] = [];
     bridge.onCommand('respondCall', (payload) => received.push(payload));
@@ -106,11 +129,12 @@ describe('useCallInvitations', () => {
     act(() => result.current.accept('A'));
 
     expect(received).toEqual([{ from: 'A', accept: true }]);
+    // Una sola vez, la de la llegada: responder no vuelve a sonar.
     expect(play).toHaveBeenCalledTimes(1);
     expect(result.current.invitations).toEqual([]);
   });
 
-  it('dismiss emite respondCall{accept:false}, quita la tarjeta y no suena nada (Pasar es silencioso)', () => {
+  it('dismiss emite respondCall{accept:false} y quita la tarjeta (Pasar no avisa al llamador)', () => {
     const bridge = createOfficeBridge();
     const received: unknown[] = [];
     bridge.onCommand('respondCall', (payload) => received.push(payload));
@@ -120,7 +144,8 @@ describe('useCallInvitations', () => {
     act(() => result.current.dismiss('A'));
 
     expect(received).toEqual([{ from: 'A', accept: false }]);
-    expect(play).not.toHaveBeenCalled();
+    // La unica campanilla es la de la llegada; pasar no anade ninguna.
+    expect(play).toHaveBeenCalledTimes(1);
     expect(result.current.invitations).toEqual([]);
   });
 
