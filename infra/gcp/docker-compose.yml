@@ -65,7 +65,9 @@ services:
       # Volumen con nombre y no bind: aqui viven las claves privadas de los
       # certificados y el estado de la cuenta ACME. Perderlo obliga a reemitir,
       # y reemitir cuenta contra el limite compartido de sslip.io (ver README).
-      # LiveKit lo monta en solo lectura para leer el certificado de lk.
+      # Issue #19: ya no lo monta ningun otro contenedor. LiveKit terminaba
+      # TLS leyendo de aqui el certificado de lk.*; ahora Caddy termina el TLS
+      # del TURN en el propio mux, asi que solo Caddy necesita estas claves.
       - caddy-data:/data
       - caddy-config:/config
     # LiveKit corre en la red del host (ver mas abajo), asi que Caddy no puede
@@ -183,11 +185,14 @@ services:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
     volumes:
       - ./livekit.yaml:/etc/livekit.yaml:ro
-      # Solo lectura: LiveKit toma de aqui el certificado que Caddy emitio para
-      # el hostname lk.*, y lo usa para el TURN sobre TLS del puerto 5349.
-      - caddy-data:/caddy-data:ro
 
 volumes:
+  # Issue #19: LiveKit ya NO monta este volumen. Terminaba TLS leyendo el
+  # certificado de lk.* de aqui, con acceso de solo lectura a las claves
+  # privadas de TODOS los hostnames de Caddy, no solo al suyo; ahora Caddy
+  # termina el TLS del TURN en el mux y le entrega texto claro con PROXY v2
+  # (turn.external_tls en livekit.yaml.tpl), asi que ningun contenedor salvo
+  # Caddy puede leer las claves de Caddy.
   caddy-data:
   caddy-config:
   # Aqui viven los usuarios, sus roles y las invitaciones. Perderlo NO es como

@@ -3,9 +3,9 @@
 # root en CADA arranque, asi que todo lo de aqui tiene que ser idempotente.
 #
 # Su unica responsabilidad es dejar la maquina en condiciones de correr
-# `office-deploy`: instalar Docker, bajar los scripts que viajan en la metadata
-# de la instancia y programar el vigilante del certificado. El despliegue en si
-# lo hace `office-deploy`, que tambien invoca el workflow de CI por SSH.
+# `office-deploy`: instalar Docker y bajar el script que viaja en la metadata
+# de la instancia. El despliegue en si lo hace `office-deploy`, que tambien
+# invoca el workflow de CI por SSH.
 #
 # Los ficheros de configuracion viajan por metadata en vez de clonarse desde
 # git para que la VM no necesite credenciales de git ni acceso de salida a
@@ -65,45 +65,6 @@ install -d -m 0755 /opt/office
 
 metadata office-deploy-script >/usr/local/bin/office-deploy
 chmod 0755 /usr/local/bin/office-deploy
-
-metadata office-cert-script >/usr/local/bin/office-cert-watch
-chmod 0755 /usr/local/bin/office-cert-watch
-
-# Caddy renueva los certificados solo, pero LiveKit lee el suyo del disco una
-# vez al arrancar: sin este vigilante el TURN sobre TLS empezaria a servir un
-# certificado caducado a los ~60 dias, en silencio. El temporizador compara el
-# fichero con la copia que LiveKit tiene cargada y solo reinicia si cambio.
-cat >/etc/systemd/system/office-cert-watch.service <<'UNIT'
-[Unit]
-Description=Reinicia LiveKit cuando Caddy renueva su certificado
-After=docker.service
-Requires=docker.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/office-cert-watch
-UNIT
-
-cat >/etc/systemd/system/office-cert-watch.timer <<'UNIT'
-[Unit]
-Description=Comprobacion periodica del certificado de LiveKit
-
-# Cada 15 minutos y no una vez al dia. La renovacion sola se conformaria con
-# una comprobacion diaria, pero el caso urgente es el primer despliegue:
-# LiveKit arranca antes de que Caddy termine de emitir el certificado, y hasta
-# que no se le reinicie el TURN sobre TLS esta caido sin dar ninguna senal.
-# Con cadencia diaria eso duraria hasta 24 horas.
-[Timer]
-OnBootSec=2min
-OnUnitActiveSec=15min
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-UNIT
-
-systemctl daemon-reload
-systemctl enable --now office-cert-watch.timer
 
 # --- Despliegue ------------------------------------------------------------
 
