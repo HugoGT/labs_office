@@ -1,10 +1,11 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { OfficeSession } from '../auth/authPort';
 import { resolveLivekitConfig } from '../game/livekitEndpoint';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
 import { DEFAULT_NAME, DEFAULT_STATUS, type PresenceStatus } from '../game/officeProtocol';
 import { useCallInvitations } from '../hooks/useCallInvitations';
+import { useDesks } from '../hooks/useDesks';
 import { useOfficeBridge } from '../hooks/useOfficeBridge';
 import { useProximityAudio } from '../hooks/useProximityAudio';
 import { useSpacesConfig } from '../hooks/useSpacesConfig';
@@ -79,6 +80,27 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
     if (spacesConfig === null) return;
     bridge.emitCommand('spacesconfig', spacesConfig);
   }, [bridge, spacesConfig]);
+  /**
+   * Escritorios asignables servidos (#7, slice 5). Vive aqui por lo mismo que
+   * `spacesConfig`, y viaja a la escena por COMANDO por lo mismo tambien:
+   * llega despues de que Phaser arranque, y por prop recrearia el juego
+   * entero al llegar. La diferencia esta en la frecuencia -- esta lista se
+   * relee cada vez que alguien coge o suelta un sitio, asi que por prop el
+   * juego se recrearia entero cada vez que alguien se sienta.
+   *
+   * Sin sesion no se pide: `GET /desks` publica quien vino hoy y quien esta al
+   * lado de quien. La oficina abierta (desarrollo local, e2e) se queda sin
+   * escritorios asignables, exactamente igual que un despliegue sin
+   * directorio, y todo lo demas sigue igual.
+   */
+  const { desks, claim, release } = useDesks(endpoint, session);
+
+  useEffect(() => {
+    // `null` es "todavia no": mandar una lista vacia antes de tiempo pintaria
+    // la oficina sin escritorios y luego con ellos.
+    if (desks === null) return;
+    bridge.emitCommand('desks', { desks });
+  }, [bridge, desks]);
   // Se resuelve una sola vez, en el mismo espiritu que `endpoint`: cambiar la
   // configuracion de LiveKit a mitad de sesion no tiene sentido de producto.
   const [livekitConfig] = useState(() =>
@@ -189,6 +211,90 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
         );
       }),
     [bridge],
+  );
+
+  /**
+   * Coger un sitio libre (#7, slice 5). La escena decide QUE se puede hacer
+   * con cada escritorio -- es quien sabe que hay dibujado y de quien es cada
+   * uno -- y aqui se habla con el servidor y se cuenta lo que paso.
+   *
+   * Los tres finales se cuentan por separado y ninguno se traga. El 409 es el
+   * que importa: alguien se adelanto, y decir "hecho" dejaria el escritorio
+   * pintado como tuyo sin serlo. `useDesks` ya vuelve a leer la lista en ese
+   * caso, porque la vista de quien hizo clic dejo de valer.
+   */
+  const takeDesk = useCallback(
+    async (deskId: string, label: string): Promise<void> => {
+      const outcome = await claim(deskId);
+      if (outcome === 'claimed') {
+        setToastMessage(
+          <>
+            Te sentaste en <b>{label}</b>
+          </>,
+        );
+        return;
+      }
+      setToastMessage(
+        outcome === 'taken' ? (
+          <>
+            Alguien se adelantó y ocupó <b>{label}</b>
+          </>
+        ) : (
+          <>
+            No se pudo coger <b>{label}</b>
+          </>
+        ),
+      );
+    },
+    [claim],
+  );
+
+  const leaveDesk = useCallback(
+    async (label: string): Promise<void> => {
+      const outcome = await release();
+      setToastMessage(
+        outcome === 'released' ? (
+          <>
+            Dejaste <b>{label}</b>
+          </>
+        ) : (
+          <>
+            No se pudo dejar <b>{label}</b>
+          </>
+        ),
+      );
+    },
+    [release],
+  );
+
+  /**
+   * Clic en un escritorio asignable (#7, slice 5). Se suscribe DIRECTAMENTE
+   * aqui y no en un hook, misma razon que `callaccepted`: es un toast y este
+   * componente ya es el unico dueno del puente.
+   *
+   * Dejar el sitio se OFRECE, no se hace: el toast que el HUD ya tiene lleva
+   * el boton, y solo suelta quien lo pulsa. Soltar al primer clic es demasiado
+   * facil de hacer sin querer -- basta con volver a clicar el propio sitio --
+   * y una pantalla de confirmacion propia seria una superficie nueva para una
+   * sola pregunta.
+   */
+  useEffect(
+    () =>
+      bridge.on('deskclick', ({ deskId, label, action }) => {
+        if (action === 'claim') {
+          void takeDesk(deskId, label);
+          return;
+        }
+        setToastMessage(
+          <>
+            <b>{label}</b> es tu escritorio ·{' '}
+            <button type="button" onClick={() => void leaveDesk(label)}>
+              Dejarlo
+            </button>
+          </>,
+        );
+      }),
+    [bridge, takeDesk, leaveDesk],
   );
 
   /**
