@@ -299,6 +299,171 @@ describe('OfficeRoom: estado de presencia (#1)', () => {
 });
 
 /**
+ * Invitaciones de llamada entre pares (issue #2). Mismo criterio que el resto
+ * del fichero: servidor y clientes reales sobre WebSocket, `callInvitations.ts`
+ * ya tiene su propia suite pura -- aqui se prueba el CABLEADO, no la logica de
+ * apilado en si (D5/D6/D7/D8).
+ */
+describe('OfficeRoom: invitaciones de llamada (issue #2)', () => {
+  function listenFor<T>(room: { onMessage(type: string, cb: (msg: T) => void): unknown }, type: string) {
+    const received: T[] = [];
+    room.onMessage(type, (msg: T) => received.push(msg));
+    return received;
+  }
+
+  it('dos llamantes distintos se apilan: ambas tarjetas llegan, en orden de llegada', async () => {
+    const a = await join('Ana');
+    const c = await join('Carla');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 3);
+    const invites = listenFor<{ from: string; name: string }>(b, 'callinvite');
+
+    a.send('call', { to: b.sessionId });
+    await waitFor(() => invites.length === 1);
+    c.send('call', { to: b.sessionId });
+    await waitFor(() => invites.length === 2);
+
+    expect(invites.map((i) => i.from)).toEqual([a.sessionId, c.sessionId]);
+    expect(invites.map((i) => i.name)).toEqual(['Ana', 'Carla']);
+  });
+
+  it('D5: la misma persona llamando dos veces produce una unica tarjeta', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    const invites = listenFor<{ from: string }>(b, 'callinvite');
+
+    a.send('call', { to: b.sessionId });
+    await waitFor(() => invites.length === 1);
+    a.send('call', { to: b.sessionId });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(invites).toHaveLength(1);
+  });
+
+  it('D8: el servidor no entrega una llamada dirigida a alguien en DND, aunque el cliente este trucado', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    b.send('status', { status: 'r' });
+    await waitFor(() => a.state.players.get(b.sessionId)?.status === 'r');
+    const invites = listenFor<unknown>(b, 'callinvite');
+
+    a.send('call', { to: b.sessionId });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(invites).toHaveLength(0);
+  });
+
+  it('una llamada a uno mismo se ignora', async () => {
+    const a = await join('Ana');
+    await waitFor(() => a.state.players.size === 1);
+    const invites = listenFor<unknown>(a, 'callinvite');
+
+    a.send('call', { to: a.sessionId });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(invites).toHaveLength(0);
+  });
+
+  it('una llamada a un sessionId inexistente se descarta en silencio', async () => {
+    const a = await join('Ana');
+    await waitFor(() => a.state.players.size === 1);
+    const invites = listenFor<unknown>(a, 'callinvite');
+
+    expect(() => a.send('call', { to: 'jamas-existio' })).not.toThrow();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(invites).toHaveLength(0);
+  });
+
+  it('aceptar produce callaccepted en el emisor, con el nombre de quien acepto', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    const accepted = listenFor<{ by: string; name: string }>(a, 'callaccepted');
+
+    a.send('call', { to: b.sessionId });
+    await waitFor(() => b.state.players.size === 2);
+    b.send('callrespond', { from: a.sessionId, accept: true });
+
+    await waitFor(() => accepted.length === 1);
+    expect(accepted[0]).toEqual({ by: b.sessionId, name: 'Beto' });
+  });
+
+  it('D3: pasar es silencioso, el emisor no recibe nada', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    const accepted = listenFor<unknown>(a, 'callaccepted');
+
+    a.send('call', { to: b.sessionId });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    b.send('callrespond', { from: a.sessionId, accept: false });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(accepted).toHaveLength(0);
+  });
+
+  it('una respuesta forjada, de alguien que nunca llamo, se descarta en silencio', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    const accepted = listenFor<unknown>(a, 'callaccepted');
+
+    expect(() => b.send('callrespond', { from: a.sessionId, accept: true })).not.toThrow();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(accepted).toHaveLength(0);
+  });
+
+  it('una respuesta repetida sobre una llamada ya resuelta es un no-op, no un segundo callaccepted', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    const accepted = listenFor<unknown>(a, 'callaccepted');
+
+    a.send('call', { to: b.sessionId });
+    await waitFor(() => b.state.players.size === 2);
+    b.send('callrespond', { from: a.sessionId, accept: true });
+    await waitFor(() => accepted.length === 1);
+    expect(() => b.send('callrespond', { from: a.sessionId, accept: true })).not.toThrow();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(accepted).toHaveLength(1);
+  });
+
+  it('D7: si el emisor se desconecta, el destinatario recibe callerleft', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    const left = listenFor<{ from: string }>(b, 'callerleft');
+
+    a.send('call', { to: b.sessionId });
+    await waitFor(() => b.state.players.size === 2);
+    await a.leave();
+
+    await waitFor(() => left.length === 1);
+    expect(left[0]).toEqual({ from: a.sessionId });
+  });
+
+  it('D7: si el destinatario se desconecta, el emisor NO recibe callerleft (solo se avisa al reves)', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    const left = listenFor<unknown>(a, 'callerleft');
+
+    a.send('call', { to: b.sessionId });
+    await waitFor(() => b.state.players.size === 2);
+    await b.leave();
+    await waitFor(() => a.state.players.size === 1);
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(left).toHaveLength(0);
+  });
+});
+
+/**
  * Verificador de mentira indexado por token. Aqui es lo correcto: que un token
  * de Firebase sea valido o no ya lo prueba a fondo `verifyIdToken.test.ts` con
  * firmas reales. Lo que estos tests tienen que demostrar es el cableado de la

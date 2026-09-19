@@ -32,11 +32,13 @@ import {
   DEFAULT_FACING,
   DEFAULT_NAME,
   DEFAULT_STATUS,
+  DO_NOT_DISTURB,
   FACINGS,
   MAX_NAME_LENGTH,
   OFFICE_ROOM_NAME,
   isPresenceStatus,
 } from '../../src/game/officeProtocol.ts';
+import { createCallInvitationRegistry, type CallInvitationRegistry } from './callInvitations.ts';
 import { decideAccess, type AccessDecision } from './directory/accessDecision.ts';
 import type { UserDirectory } from './directory/directoryPort.ts';
 import type { LiveSessionRegistry } from './liveSessions.ts';
@@ -70,6 +72,25 @@ export interface MoveMessage {
 
 export interface StatusMessage {
   status: string;
+}
+
+/**
+ * Mensajes de invitacion de llamada (issue #2). Viven aqui y no en
+ * `officeProtocol.ts` a proposito (D4): el TTL que habria exigido vocabulario
+ * compartido se elimino (#305.3), asi que no queda nada que las dos partes
+ * necesiten declarar juntas -- el unico simbolo compartido sigue siendo
+ * `DO_NOT_DISTURB`, que ya vivia alli.
+ *
+ * Sin id de invitacion (D5): una tarjeta se identifica en el cable por el
+ * `sessionId` de quien llama, asi que no hace falta generar ni transportar uno.
+ */
+export interface CallMessage {
+  to: string;
+}
+
+export interface CallRespondMessage {
+  from: string;
+  accept: boolean;
 }
 
 /** Recorta un numero al rango, descartando NaN/Infinity del cliente. */
@@ -167,6 +188,13 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private sessions?: LiveSessionRegistry;
   private auth?: IdTokenVerifier;
   private directory?: UserDirectory;
+  /**
+   * Registro de invitaciones de llamada (issue #2). A diferencia de `sessions`
+   * NO se inyecta: es estado propio de esta sala, no algo compartido entre
+   * salas ni con las rutas HTTP, asi que se crea aqui mismo, igual que
+   * `this.state`.
+   */
+  private invitations: CallInvitationRegistry = createCallInvitationRegistry();
   private logDirectoryDenial: DirectoryDenialLogger = (decision, uid) =>
     console.warn(`[directory] acceso denegado (${decision}): ${uid}`);
 
@@ -203,6 +231,53 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       if (!isPresenceStatus(message?.status)) return;
       player.status = message.status;
     });
+
+    // El cliente no es de fiar tampoco aqui: `to`/`from` se comprueban como
+    // string, el objetivo tiene que existir en `state.players`, y las dos
+    // guardas de negocio (D5/D8) van antes de tocar el registro.
+    this.onMessage('call', (client: Client, message: CallMessage) => {
+      const caller = this.state.players.get(client.sessionId);
+      if (!caller) return;
+
+      const to = typeof message?.to === 'string' ? message.to : undefined;
+      if (!to || to === client.sessionId) return; // string valido y no un auto-llamado
+
+      const target = this.state.players.get(to);
+      if (!target) return; // sessionId inexistente o ya desconectado
+
+      // D8: el objetivo en DND se comporta igual con un cliente honesto (boton
+      // deshabilitado) que con uno trucado que manda el mensaje de todos modos.
+      if (target.status === DO_NOT_DISTURB) return;
+
+      // D5: una segunda llamada del mismo emisor a este destinatario es un
+      // no-op. Sin esto, 20 clicks de "Llamar" serian 20 tarjetas.
+      if (!this.invitations.add(client.sessionId, to)) return;
+
+      this.sendTo(to, 'callinvite', { from: client.sessionId, name: caller.name });
+    });
+
+    // `respondCall` sirve tanto para aceptar como para pasar (D3): una sola
+    // ruta, no dos mensajes. `remove()` devolviendo `false` es lo que rechaza
+    // una respuesta forjada (nunca hubo tal llamada) o tardia (ya resuelta).
+    this.onMessage('callrespond', (client: Client, message: CallRespondMessage) => {
+      const from = typeof message?.from === 'string' ? message.from : undefined;
+      if (!from) return;
+
+      if (!this.invitations.remove(from, client.sessionId)) return;
+
+      // Pasar es silencioso a proposito (D3, regla de feedback del emisor sin
+      // cambios respecto a la propuesta): solo un accept genera aviso, y es el
+      // UNICO caso en el que el emisor se entera de algo tras enviar su "Llamando...".
+      if (message?.accept !== true) return;
+
+      const recipient = this.state.players.get(client.sessionId);
+      this.sendTo(from, 'callaccepted', { by: client.sessionId, name: recipient?.name ?? DEFAULT_NAME });
+    });
+  }
+
+  /** Unico punto de salida hacia un sessionId concreto; `undefined` si ya no esta conectado. */
+  private sendTo(sessionId: string, type: string, payload: unknown): void {
+    this.clients.getById(sessionId)?.send(type, payload);
   }
 
   /**
@@ -292,5 +367,17 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   onLeave(client: Client): void {
     this.state.players.delete(client.sessionId);
     this.sessions?.remove(client.sessionId);
+
+    // D7: sin caducidad, la unica limpieza posible es la baja de una de las
+    // dos partes. `removeAllFor` cubre a quien se va como emisor Y como
+    // destinatario de un solo barrido; solo el primer caso avisa a alguien --
+    // si el que se va era el DESTINATARIO, la tarjeta ya la tiene el que
+    // llamo y no hay a quien notificar (el emisor no vuelve a saber de esto
+    // hasta que el destinatario responda o se vaya el).
+    for (const entry of this.invitations.removeAllFor(client.sessionId)) {
+      if (entry.from === client.sessionId) {
+        this.sendTo(entry.to, 'callerleft', { from: entry.from });
+      }
+    }
   }
 }
