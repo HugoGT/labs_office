@@ -499,3 +499,47 @@ describe('DashboardScreen: dar de alta a alguien de casa', () => {
     expect(await screen.findByText(/caduca el 24\/09\/2026/i)).toBeInTheDocument();
   });
 });
+
+describe('DashboardScreen: los paneles que cuelgan debajo', () => {
+  /**
+   * Los paneles de escritorios y de catalogo llegan como hijos desde la raiz
+   * de composicion (`DashboardRoute`), y no como puertos propios: asi esta
+   * pantalla no tiene que saber que existen ni de que hablan, y sigue siendo
+   * la de invitaciones y altas con un hueco debajo.
+   */
+  const OTRO_PANEL = <p>Panel de escritorios</p>;
+
+  it('pinta debajo los paneles que le pasa la raiz de composicion', async () => {
+    render(<DashboardScreen admin={fakeAdmin()}>{OTRO_PANEL}</DashboardScreen>);
+
+    expect(await screen.findByText('Panel de escritorios')).toBeInTheDocument();
+  });
+
+  it('a quien no administra no le pinta ninguno', async () => {
+    const admin = fakeAdmin({
+      session: vi.fn(async () => ({ ...ADMIN, role: 'employee' as const })),
+    });
+
+    render(<DashboardScreen admin={admin}>{OTRO_PANEL}</DashboardScreen>);
+
+    // La guarda de rol ya estaba aqui y vale para todo lo que cuelgue: cada
+    // panel repitiendola por su cuenta seria la copia que un dia se olvida.
+    expect(await screen.findByText(/no autorizado/i)).toBeInTheDocument();
+    expect(screen.queryByText('Panel de escritorios')).not.toBeInTheDocument();
+  });
+
+  it('si no se sabe quien consulta, tampoco', async () => {
+    const admin = fakeAdmin({
+      session: vi.fn(async () => {
+        throw new AdminError('network');
+      }),
+    });
+
+    render(<DashboardScreen admin={admin}>{OTRO_PANEL}</DashboardScreen>);
+
+    // Sin saber si quien mira administra, los paneles pedirian sus listas y
+    // pintarian siete errores a quien no tiene nada que hacer aqui.
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.queryByText('Panel de escritorios')).not.toBeInTheDocument();
+  });
+});

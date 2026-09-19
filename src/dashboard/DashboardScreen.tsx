@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { describeAdminError } from './adminErrors';
 import {
   AdminError,
@@ -325,6 +325,20 @@ export function InvitationsTable({ invitations, onRevoke, revokingId }: Invitati
 export interface DashboardScreenProps {
   /** Puerto ya construido (`DashboardRoute`); esta pantalla no sabe de HTTP. */
   admin: AdminPort;
+  /**
+   * Otros paneles de administracion, ya construidos por la raiz de composicion
+   * (#7, slice 5: escritorios y catalogo de decoracion).
+   *
+   * Llegan como hijos y NO como puertos propios, a proposito: esta pantalla no
+   * tiene que saber que existen ni de que hablan, y cada panel sigue siendo el
+   * unico dueno de su puerto y de su estado. Recibirlos aqui la convertiria en
+   * el sitio donde se acumula cada superficie nueva.
+   *
+   * Solo se pintan cuando el SERVIDOR ha dicho que quien mira administra: la
+   * guarda de rol de esta pantalla vale para todo lo que cuelgue, y que cada
+   * panel la repitiese por su cuenta seria la copia que un dia se olvida.
+   */
+  children?: ReactNode;
 }
 
 type Phase = 'loading' | 'denied' | 'failed' | 'ready';
@@ -337,7 +351,7 @@ type Phase = 'loading' | 'denied' | 'failed' | 'ready';
  * Lo que se ve al llegar sale de `session()`, es decir del SERVIDOR: el rol no
  * se deduce del ID token en el navegador, que es manipulable.
  */
-export function DashboardScreen({ admin }: DashboardScreenProps) {
+export function DashboardScreen({ admin, children }: DashboardScreenProps) {
   const [session, setSession] = useState<AdminSession | null>(null);
   const [phase, setPhase] = useState<Phase>('loading');
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -556,6 +570,12 @@ export function DashboardScreen({ admin }: DashboardScreenProps) {
             revokingId={revokingId}
           />
         </section>
+
+        {/* Los demas paneles de administracion, ya construidos por la raiz de
+            composicion. Van aqui abajo y no antes porque las invitaciones son
+            lo que trajo esta pantalla al mundo (#24); los escritorios y el
+            catalogo llegaron despues (#7). */}
+        {children}
       </div>
     </div>
   );
