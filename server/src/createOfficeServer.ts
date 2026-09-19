@@ -35,6 +35,7 @@ import {
   handleCreateAsset,
   handleGetDeskConfig,
   handleListAssets,
+  handleListOfficeAssets,
   handleReplaceDeskConfig,
   type DecorDeps,
 } from './decor/decorRoutes.ts';
@@ -583,6 +584,17 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   app.post(
     '/admin/assets/:id/archive',
     decorRoute((req, deps) => handleArchiveAsset(req.header('Authorization'), req.params.id, deps)),
+  );
+
+  // `/assets` cuelga de la raiz y no de `/admin`, y es la MISMA lista con otra
+  // guarda: la de `/admin/assets` exige rol porque el catalogo lo cura
+  // alguien, y quien decora su escritorio no administra nada. Sin esta ruta,
+  // la unica gente que podria ver que piezas hay seria justo la que no las
+  // coloca. Credencial si pide, como `/desks`: el catalogo cuenta que tiene
+  // dentro esta oficina.
+  app.get(
+    '/assets',
+    decorRoute((req, deps) => handleListOfficeAssets(req.header('Authorization'), deps)),
   );
 
   // `/me/desk` cuelga de la raiz y no de `/admin`: el escritorio es de quien

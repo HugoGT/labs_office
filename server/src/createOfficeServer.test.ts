@@ -929,6 +929,66 @@ describe('rutas de decoracion (#7, slice 4)', () => {
     await server.shutdown();
   });
 
+  it('GET /assets deja ver el catalogo a quien no administra', async () => {
+    // `/admin/assets` corre la guarda de rol, asi que sin esta ruta la unica
+    // gente que podria ver que piezas hay seria justo la que no las coloca.
+    const { server, url } = await decorServer();
+    await fetch(`${url}/admin/assets`, {
+      method: 'POST',
+      headers: BEARER_ADMIN,
+      body: JSON.stringify(ASSET),
+    });
+
+    const res = await fetch(`${url}/assets`, { headers: BEARER_EMPLEADO });
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { assets: { slug: string }[] }).assets.map((a) => a.slug)).toEqual(
+      ['planta-grande'],
+    );
+    await server.shutdown();
+  });
+
+  it('GET /assets sin credencial responde 401', async () => {
+    // Cuelga de la raiz como `/desks`, y como `/desks` SI pide credencial: el
+    // catalogo dice que tiene dentro esta oficina.
+    const { server, url } = await decorServer();
+
+    expect((await fetch(`${url}/assets`)).status).toBe(401);
+    await server.shutdown();
+  });
+
+  it('GET /assets no ofrece lo retirado (D1b)', async () => {
+    // Es el selector de quien coloca, y una pieza retirada no se puede volver
+    // a anadir: ofrecerla seria ofrecer un 400.
+    const { server, url } = await decorServer();
+    const created = (await (
+      await fetch(`${url}/admin/assets`, {
+        method: 'POST',
+        headers: BEARER_ADMIN,
+        body: JSON.stringify(ASSET),
+      })
+    ).json()) as { id: string };
+    await fetch(`${url}/admin/assets/${created.id}/archive`, {
+      method: 'POST',
+      headers: BEARER_ADMIN,
+    });
+
+    const res = await fetch(`${url}/assets`, { headers: BEARER_EMPLEADO });
+
+    expect(((await res.json()) as { assets: unknown[] }).assets).toEqual([]);
+    await server.shutdown();
+  });
+
+  it('GET /assets sin almacen responde 503 y no 404', async () => {
+    // La misma guarda que el resto de rutas de decoracion: el 503 afirma que
+    // la ruta existe y que falta la configuracion, y es lo que deja al cliente
+    // degradar sin editor en vez de creer que se equivoco de url.
+    const { server, url } = await decorServer({ decor: null });
+
+    expect((await fetch(`${url}/assets`, { headers: BEARER_EMPLEADO })).status).toBe(503);
+    await server.shutdown();
+  });
+
   it('GET /me/desk no exige rol de administracion', async () => {
     const { server, url } = await decorServer();
 
