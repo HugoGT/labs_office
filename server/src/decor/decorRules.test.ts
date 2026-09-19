@@ -39,15 +39,18 @@ const CATALOG = [PLANTA, SOFA, RETIRADA];
 const NADA_PUESTO: readonly string[] = [];
 
 describe('assertValidSlot', () => {
-  it('acepta los seis slots del escritorio', () => {
+  it('acepta los nueve slots del escritorio', () => {
     for (let slot = DESK_SLOT_MIN; slot <= DESK_SLOT_MAX; slot++) {
       expect(() => assertValidSlot(slot)).not.toThrow();
     }
   });
 
-  it('el rango es 0..5 inclusive, igual que el CHECK de schema.sql', () => {
+  it('el rango es 0..8 inclusive, igual que el CHECK de schema.sql', () => {
+    // Nueve cajas y no seis. Un escritorio ocupa 3x3 tiles (`deskRules.ts`),
+    // asi que los huecos que hay para decorar son los nueve de esa cuadricula:
+    // un rango mas corto dejaria tres cajas del area que nadie puede usar.
     expect(DESK_SLOT_MIN).toBe(0);
-    expect(DESK_SLOT_MAX).toBe(5);
+    expect(DESK_SLOT_MAX).toBe(8);
   });
 
   it('rechaza un slot por debajo del rango', () => {
@@ -55,7 +58,7 @@ describe('assertValidSlot', () => {
   });
 
   it('rechaza un slot por encima del rango', () => {
-    expect(() => assertValidSlot(6)).toThrow(InvalidDeskConfigError);
+    expect(() => assertValidSlot(9)).toThrow(InvalidDeskConfigError);
   });
 
   it('rechaza un slot no entero: un body HTTP sin tipar puede mandar 2.5', () => {
@@ -278,7 +281,7 @@ describe('normalizeDeskConfig', () => {
 
   it('rechaza un slot fuera de rango', () => {
     expect(() =>
-      normalizeDeskConfig([{ assetId: PLANTA.id, slot: 6, rotation: 0 }], CATALOG, NADA_PUESTO),
+      normalizeDeskConfig([{ assetId: PLANTA.id, slot: 9, rotation: 0 }], CATALOG, NADA_PUESTO),
     ).toThrow(InvalidDeskConfigError);
   });
 

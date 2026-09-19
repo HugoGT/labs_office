@@ -217,7 +217,7 @@ describe('createMemoryDecor: replaceDeskConfig', () => {
 
   it('rechaza un slot fuera de rango y una rotacion invalida', async () => {
     await expect(
-      decor().replaceDeskConfig(USER, [{ assetId: PLANTA.id, slot: 6, rotation: 0 }]),
+      decor().replaceDeskConfig(USER, [{ assetId: PLANTA.id, slot: 9, rotation: 0 }]),
     ).rejects.toThrow(InvalidDeskConfigError);
     await expect(
       decor().replaceDeskConfig(USER, [

@@ -48,9 +48,13 @@ export type AssetKind = (typeof ASSET_KINDS)[number];
 export const DESK_ROTATIONS = [0, 90, 180, 270] as const;
 export type DeskRotation = (typeof DESK_ROTATIONS)[number];
 
-/** El mismo `CHECK (slot BETWEEN 0 AND 5)` de `schema.sql`. Seis huecos, ni uno mas. */
+/**
+ * El mismo `CHECK (slot BETWEEN 0 AND 8)` de `schema.sql`. Nueve huecos, ni
+ * uno mas: un escritorio ocupa 3x3 tiles (ver `desks/deskRules.DESK_SIDE`), y
+ * un rango mas corto dejaria cajas del area que nadie podria decorar.
+ */
 export const DESK_SLOT_MIN = 0;
-export const DESK_SLOT_MAX = 5;
+export const DESK_SLOT_MAX = 8;
 
 /**
  * Recibe numeros sin tipar a proposito, igual que `assertValidBounds`: el

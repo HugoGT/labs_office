@@ -146,11 +146,27 @@ CREATE TABLE IF NOT EXISTS user_desk_configs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   asset_id uuid NOT NULL REFERENCES assets(id) ON DELETE RESTRICT,
-  slot smallint NOT NULL CHECK (slot BETWEEN 0 AND 5),
+  -- Nueve cajas, no seis: un escritorio ocupa 3x3 tiles (ver `desks`), asi que
+  -- los huecos decorables son los nueve de esa cuadricula.
+  slot smallint NOT NULL CHECK (slot BETWEEN 0 AND 8),
   rotation smallint NOT NULL DEFAULT 0 CHECK (rotation IN (0, 90, 180, 270)),
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS user_desk_slot_unique ON user_desk_configs (user_id, slot);
+
+-- El rango nacio en 0..5 y el `CREATE TABLE IF NOT EXISTS` de arriba NO toca
+-- una tabla que ya existe: en un despliegue vivo el CHECK viejo seguiria
+-- rechazando el slot 6, y quien decorase la fila de abajo de su escritorio
+-- recibiria un 500 sin nada en el cuerpo que explicase por que. El par
+-- DROP/ADD es lo que lo refresca de forma idempotente, mismo precedente que
+-- `audit_log_action_check`. El nombre no esta inventado: es el que Postgres le
+-- pone al CHECK en linea de una columna, `<tabla>_<columna>_check`.
+--
+-- El CHECK de arriba se queda y dice lo MISMO, tambien como en `audit_log`:
+-- asi el bloque de la tabla se lee solo, sin tener que buscar veinte lineas
+-- mas abajo cual es el rango de verdad.
+ALTER TABLE user_desk_configs DROP CONSTRAINT IF EXISTS user_desk_configs_slot_check;
+ALTER TABLE user_desk_configs ADD CONSTRAINT user_desk_configs_slot_check CHECK (slot BETWEEN 0 AND 8);
 
 -- Semilla: los dos espacios de siempre, con los MISMOS uuids literales que
 -- usara `BUILT_IN_SPACES` en mapData.ts cuando aterrice la identidad de

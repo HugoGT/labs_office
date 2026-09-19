@@ -69,7 +69,7 @@ export interface CreateAssetInput {
 export interface DeskItem {
   id: string;
   assetId: string;
-  /** 0..5 inclusive. Ver `decorRules.DESK_SLOT_MAX`. */
+  /** 0..8 inclusive, una por caja del area de 3x3. Ver `decorRules.DESK_SLOT_MAX`. */
   slot: number;
   rotation: DeskRotation;
   textureKey: string;

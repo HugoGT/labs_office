@@ -223,8 +223,42 @@ describe('schema.sql: las cuatro tablas de PRD-7 (#7)', () => {
     // CASCADE en `user_id`: si se borra la cuenta, su decoracion de
     // escritorio no tiene a quien pertenecer.
     expect(schema).toContain('user_id uuid not null references users(id) on delete cascade');
-    expect(schema).toContain('slot smallint not null check (slot between 0 and 5)');
+    expect(schema).toContain('slot smallint not null check (slot between 0 and 8)');
     expect(schema).toContain('unique index if not exists user_desk_slot_unique on user_desk_configs (user_id, slot)');
+  });
+
+  it('el escritorio tiene NUEVE huecos, y el CHECK se refresca en una base que ya existia', () => {
+    // El rango nacio en 0..5 y el escritorio resulto ser de 3x3 tiles, que son
+    // nueve cajas. Las tres que faltaban no se pueden ganar reescribiendo el
+    // `CREATE TABLE`: `IF NOT EXISTS` no toca una tabla que ya existe, asi que
+    // en un despliegue vivo el CHECK viejo seguiria rechazando el slot 6 y la
+    // persona veria un 500 al decorar la fila de abajo de su escritorio.
+    //
+    // Mismo par DROP/ADD idempotente que `audit_log_action_check`, y por la
+    // misma razon. El nombre no se inventa: es el que Postgres le pone al
+    // CHECK en linea de `slot`, `<tabla>_<columna>_check`.
+    expect(schema).toContain(
+      'alter table user_desk_configs drop constraint if exists user_desk_configs_slot_check',
+    );
+    expect(schema).toContain(
+      'alter table user_desk_configs add constraint user_desk_configs_slot_check check (slot between 0 and 8)',
+    );
+  });
+
+  it('el CHECK en linea y el refrescado dicen lo MISMO', () => {
+    // Converge igual en una base nueva y en una vieja solo si las dos copias
+    // coinciden: en la nueva el `CREATE TABLE` pone la primera y el ADD la
+    // sustituye por la segunda, y dos rangos distintos harian que el esquema
+    // significase una cosa antes del ALTER y otra despues. Mismo precedente
+    // que `audit_log`, que tambien repite su lista en los dos sitios.
+    const enLinea = schema.match(/slot smallint not null check \(slot between (\d+) and (\d+)\)/);
+    const refrescado = schema.match(
+      /add constraint user_desk_configs_slot_check check \(slot between (\d+) and (\d+)\)/,
+    );
+
+    expect(enLinea).not.toBeNull();
+    expect(refrescado).not.toBeNull();
+    expect(enLinea!.slice(1)).toEqual(refrescado!.slice(1));
   });
 
   it('siembra los dos espacios de siempre de forma idempotente', () => {
