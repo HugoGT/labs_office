@@ -50,6 +50,9 @@ export const OFFICE_SCENE_KEY = 'office';
 
 const PLAYER_SPEED = 230;
 const PROXIMITY_TICK_MS = 250;
+const MINIMAP_WIDTH = 200;
+const MINIMAP_HEIGHT = 140;
+const MINIMAP_MARGIN = 14;
 /**
  * Los tres estados en los que se puede ver un escritorio asignable (#7, slice
  * 5). Es lo unico que los distingue, y basta: un tinte se lee de un vistazo
@@ -66,9 +69,6 @@ const DESK_COLOR = {
 } as const;
 const DESK_FILL_ALPHA = 0.22;
 const DESK_STROKE_WIDTH = 2;
-const MINIMAP_WIDTH = 200;
-const MINIMAP_HEIGHT = 140;
-const MINIMAP_MARGIN = 14;
 
 /**
  * Como se conecta la escena al servidor. `connect` se inyecta para poder
@@ -479,8 +479,8 @@ export class OfficeScene extends Phaser.Scene {
 
   /**
    * Adopta la lista de escritorios asignables servida (#7, slice 5). Llega por
-   * comando poco despues de arrancar, y otra vez tras cada vez que alguien
-   * coge o suelta un sitio.
+   * comando poco despues de arrancar, y otra vez cada vez que alguien coge o
+   * suelta un sitio.
    *
    * La lista es AUTORITATIVA y completa, no un delta, asi que lo dibujado se
    * retira entero antes de volver a dibujar. Reconciliar objeto a objeto seria
