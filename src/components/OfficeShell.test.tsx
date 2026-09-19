@@ -2,12 +2,22 @@ import { act, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGame } from '../game/createGame';
+import { claimDesk, fetchOfficeDesks, releaseDesk } from '../game/desksClient';
+import type { OfficeDesk } from '../game/desksPort';
 import { BUILT_IN_SPACES_VERSION } from '../game/mapData';
 import { DEFAULT_NAME } from '../game/officeProtocol';
 import { useProximityAudio } from '../hooks/useProximityAudio';
 import { OfficeShell } from './OfficeShell';
 
 vi.mock('../game/createGame', () => ({ createGame: vi.fn() }));
+// Unico modulo del cliente que habla con `/desks`: doblarlo aqui deja este
+// archivo probando el CABLEADO -- comando, clic, peticion y aviso -- sin red.
+vi.mock('../game/desksClient', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../game/desksClient')>()),
+  fetchOfficeDesks: vi.fn(),
+  claimDesk: vi.fn(),
+  releaseDesk: vi.fn(),
+}));
 // El hook ya tiene su propia suite (`useProximityAudio.test.ts`, slice 4A);
 // aqui solo importa que OfficeShell lo llame y reenvie lo que devuelve,
 // igual que `createGame` se mockea para aislar Phaser (mismo patron ya
@@ -530,5 +540,122 @@ describe('OfficeShell: config de espacios servida (#7, slice 3)', () => {
     bridge.onCommand('spacesconfig', ({ version }) => versions.push(version));
 
     await vi.waitFor(() => expect(versions).toContain(BUILT_IN_SPACES_VERSION));
+  });
+});
+
+/**
+ * Los escritorios asignables llegando a la escena y repartiendose (#7, slice
+ * 5). Lo que se prueba aqui es el CABLEADO: que este componente resuelve la
+ * lista y la manda por comando, y que un clic en el canvas acaba en la
+ * peticion correcta y en un aviso que dice la verdad.
+ *
+ * Que la escena los dibuje lo cubre `OfficeScene.browser.test.ts`, la lectura
+ * de `/desks` la cubre `desksClient.test.ts` y el ciclo de vida del enganche
+ * lo cubre `useDesks.test.ts`.
+ */
+describe('OfficeShell: escritorios asignables (#7, slice 5)', () => {
+  const SESION = { displayName: 'Ana Torres', getIdToken: async () => 'id-token' };
+
+  const MESA: OfficeDesk = {
+    id: 'id-mesa',
+    label: 'Mesa 4',
+    x: 320,
+    y: 384,
+    w: 96,
+    h: 96,
+    occupant: null,
+    mine: false,
+  };
+
+  beforeEach(() => {
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([MESA]);
+    vi.mocked(claimDesk).mockResolvedValue('claimed');
+    vi.mocked(releaseDesk).mockResolvedValue('released');
+  });
+
+  it('manda la lista resuelta a la escena por comando, no por prop', async () => {
+    // Misma razon que `spacesconfig`: por prop entraria en las dependencias
+    // del efecto de `GameCanvas` y recrearia Phaser entero en cada refresco,
+    // que aqui ocurre cada vez que alguien coge o suelta un sitio.
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const listas: { desks: readonly OfficeDesk[] }[] = [];
+    bridge.onCommand('desks', (payload) => listas.push(payload));
+
+    await vi.waitFor(() => expect(listas.at(-1)?.desks).toEqual([MESA]));
+  });
+
+  it('sin sesion no pregunta por los escritorios de nadie', async () => {
+    // `GET /desks` publica quien vino hoy y quien esta al lado de quien. Sin
+    // credencial no hay nada que preguntar, y la oficina abierta (desarrollo
+    // local, e2e) sigue funcionando igual, sin escritorios asignables.
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const listas: { desks: readonly OfficeDesk[] }[] = [];
+    bridge.onCommand('desks', (payload) => listas.push(payload));
+
+    // Nunca se pide, asi que a la escena no puede llegarle ni un escritorio:
+    // que sin comando no dibuje ninguno lo fija `OfficeScene.browser.test.ts`.
+    await vi.waitFor(() => expect(createGameMock).toHaveBeenCalled());
+    expect(fetchOfficeDesks).not.toHaveBeenCalled();
+    expect(listas.every(({ desks }) => desks.length === 0)).toBe(true);
+  });
+
+  it('clicar un escritorio libre lo coge y lo dice', async () => {
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'claim' }));
+
+    expect(await screen.findByText(/Te sentaste en/)).toBeInTheDocument();
+    expect(claimDesk).toHaveBeenCalledWith(expect.objectContaining({ deskId: 'id-mesa' }));
+  });
+
+  it('un 409 dice que alguien se adelanto y vuelve a leer la lista', async () => {
+    // Tragarlo dejaria el escritorio pintado como tuyo sin serlo, y la vista
+    // de quien hizo clic ya no vale: hay que releerla.
+    vi.mocked(claimDesk).mockResolvedValue('taken');
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(1));
+
+    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'claim' }));
+
+    expect(await screen.findByText(/se adelant/)).toBeInTheDocument();
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(2));
+  });
+
+  it('un fallo al coger no se cuenta como conseguido', async () => {
+    vi.mocked(claimDesk).mockResolvedValue('failed');
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'claim' }));
+
+    expect(await screen.findByText(/No se pudo coger/)).toBeInTheDocument();
+  });
+
+  it('clicar el propio OFRECE dejarlo, no lo suelta por su cuenta', async () => {
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+
+    expect(await screen.findByRole('button', { name: /Dejarlo/ })).toBeInTheDocument();
+    expect(releaseDesk).not.toHaveBeenCalled();
+  });
+
+  it('aceptar la oferta suelta el escritorio y vuelve a leer la lista', async () => {
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(1));
+    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+
+    await userEvent.click(await screen.findByRole('button', { name: /Dejarlo/ }));
+
+    // Sin id: el servidor suelta el de la identidad verificada de quien llama.
+    expect(releaseDesk).toHaveBeenCalledWith(expect.not.objectContaining({ deskId: 'id-mesa' }));
+    expect(await screen.findByText(/Dejaste/)).toBeInTheDocument();
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(2));
   });
 });

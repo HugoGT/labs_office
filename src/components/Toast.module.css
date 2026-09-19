@@ -14,3 +14,20 @@
   text-align: center;
   pointer-events: none;
 }
+
+/*
+ * El contenedor sigue sin recibir punteros (`pointer-events: none` arriba):
+ * flota sobre el canvas y tragarse los clics del mapa seria peor que no
+ * poder pulsarlo. Se los devuelve SOLO a lo interactivo que lleve dentro, que
+ * desde #7 slice 5 es la oferta de dejar el escritorio propio.
+ */
+.toast button {
+  pointer-events: auto;
+  font: inherit;
+  color: #93c5fd;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}

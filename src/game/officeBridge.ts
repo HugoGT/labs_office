@@ -12,6 +12,7 @@
  */
 
 import { createAnchorChannel, type AnchorChannel } from './anchorChannel';
+import type { OfficeDesk } from './desksPort';
 import type { SpaceArea } from './mapData';
 import type { PresenceStatus } from './officeProtocol';
 
@@ -89,6 +90,20 @@ export interface OfficeEventMap {
    * de `anchors` -- el contenido no cambia cuadro a cuadro.
    */
   portraits: { byKey: Record<string, string> };
+  /**
+   * Alguien hizo clic en un escritorio asignable sobre el que SI hay algo que
+   * hacer (#7, slice 5). Un escritorio ajeno no emite nada: no se ofrece.
+   *
+   * La escena decide `action` y React no la recalcula, por la misma razon que
+   * `respondCall` es UN comando y no dos: quien sabe que hay dibujado y de
+   * quien es cada sitio es la escena, y quien habla con el servidor es React.
+   * Recalcularlo en React exigiria que React mantuviese su propia copia de la
+   * ocupacion y las dos podrian discrepar justo en el instante del clic.
+   *
+   * `label` viaja porque es lo que hay que decirle a quien mira ("cogiste Mesa
+   * 4"), y buscarlo otra vez por id seria pedirle a React esa misma copia.
+   */
+  deskclick: { deskId: string; label: string; action: 'claim' | 'release' };
 }
 
 export interface OfficeCommandMap {
@@ -145,6 +160,21 @@ export interface OfficeCommandMap {
    * que el predicado mutuo de `proximityAudio.ts` NO puede detectar.
    */
   spacesconfig: { spaces: readonly SpaceArea[]; version: string };
+  /**
+   * Escritorios asignables servidos (#7, slice 5). Mismo patron y misma razon
+   * que `spacesconfig`: React los lee de `/desks` y la escena los sigue.
+   *
+   * Es un comando y no una opcion de construccion porque llega DESPUES de que
+   * Phaser arranque. La escena empieza sin ninguno y los adopta al llegar; si
+   * no llegan nunca -- 503 sin directorio, red caida -- se queda sin ninguno
+   * para siempre y el resto de la oficina no se entera.
+   *
+   * A diferencia de `spacesconfig`, este comando llega VARIAS veces por
+   * sesion: cada vez que alguien coge o suelta un sitio hay que releer la
+   * lista. Trae siempre el estado COMPLETO, nunca un delta -- ver
+   * `applyDesks`.
+   */
+  desks: { desks: readonly OfficeDesk[] };
 }
 
 export interface OfficeBridge {

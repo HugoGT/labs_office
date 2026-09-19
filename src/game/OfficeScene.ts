@@ -12,6 +12,8 @@ import {
   type NpcContainer,
 } from './characters';
 import { mergeColliderRects } from './colliderMerge';
+import { deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
+import type { OfficeDesk } from './desksPort';
 import { placeFurniture, placeNature, placeZoneLabels, renderGround } from './mapBuilder';
 import {
   BUILT_IN_SPACES,
@@ -51,6 +53,22 @@ const PROXIMITY_TICK_MS = 250;
 const MINIMAP_WIDTH = 200;
 const MINIMAP_HEIGHT = 140;
 const MINIMAP_MARGIN = 14;
+/**
+ * Los tres estados en los que se puede ver un escritorio asignable (#7, slice
+ * 5). Es lo unico que los distingue, y basta: un tinte se lee de un vistazo
+ * desde cualquier punto del mapa, y esta slice solo dibuja -- el editor de
+ * decoracion es otra PR.
+ */
+const DESK_COLOR = {
+  /** Libre: se puede coger. */
+  free: 0x22c55e,
+  /** El propio. El unico que se puede soltar. */
+  mine: 0x3b82f6,
+  /** De otra persona. No ofrece nada. */
+  taken: 0x6b7280,
+} as const;
+const DESK_FILL_ALPHA = 0.22;
+const DESK_STROKE_WIDTH = 2;
 
 /**
  * Como se conecta la escena al servidor. `connect` se inyecta para poder
@@ -126,6 +144,14 @@ export class OfficeScene extends Phaser.Scene {
   private unsubscribeRespondCall?: () => void;
   private unsubscribeWalkToPeer?: () => void;
   private unsubscribeSpacesConfig?: () => void;
+  private unsubscribeDesks?: () => void;
+  /**
+   * Todo lo dibujado del ultimo comando `desks` (#7, slice 5): zonas,
+   * etiquetas y decoracion. Se guarda entero porque cada lista nueva sustituye
+   * a la anterior y hay que poder retirar la vieja de una vez -- dibujar
+   * encima dejaria pintado como ocupado un sitio que alguien acaba de soltar.
+   */
+  private deskObjects: Phaser.GameObjects.GameObject[] = [];
   /** Escritor del canal de anclas (issue #17, D4); abierto en `create()`, cerrado en SHUTDOWN. */
   private anchorWriter?: AnchorWriter;
   /**
@@ -214,6 +240,12 @@ export class OfficeScene extends Phaser.Scene {
       this.applySpacesConfig(spaces, version);
     });
 
+    // #7, slice 5. A diferencia del anterior, llega cada vez que alguien coge
+    // o suelta un sitio.
+    this.unsubscribeDesks = this.bridge.onCommand('desks', ({ desks }) => {
+      this.applyDesks(desks);
+    });
+
     // D4: unico bloque muerto en produccion de este archivo -- deja tanto el
     // literal 'teleportToTile' como su handler fuera de `dist/`. Espeja
     // `teleportTo`, pero mueve al jugador a una tile exacta, sin buscar una
@@ -237,6 +269,7 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeRespondCall?.();
       this.unsubscribeWalkToPeer?.();
       this.unsubscribeSpacesConfig?.();
+      this.unsubscribeDesks?.();
       this.anchorWriter?.close();
       this.anchorWriter = undefined;
       this.remotes?.clear();
@@ -442,6 +475,124 @@ export class OfficeScene extends Phaser.Scene {
     // Si la conexion todavia no existe no hay nada que anunciar: el join lee
     // `this.spacesVersion` cuando se construya, y ya llevara esta.
     this.connection?.sendSpacesVersion(version);
+  }
+
+  /**
+   * Adopta la lista de escritorios asignables servida (#7, slice 5). Llega por
+   * comando poco despues de arrancar, y otra vez cada vez que alguien coge o
+   * suelta un sitio.
+   *
+   * La lista es AUTORITATIVA y completa, no un delta, asi que lo dibujado se
+   * retira entero antes de volver a dibujar. Reconciliar objeto a objeto seria
+   * mas rapido y no hace falta: son unas decenas de rectangulos que solo se
+   * redibujan cuando alguien se sienta o se levanta, y el estado incremental
+   * es justo donde aparecerian los escritorios fantasma.
+   *
+   * Una lista vacia es un estado legitimo y el modo degradado a la vez: sin
+   * directorio configurado `/desks` responde 503, `desksClient` devuelve
+   * `NO_DESKS` y la oficina se dibuja exactamente como antes de esta slice.
+   */
+  private applyDesks(desks: readonly OfficeDesk[]): void {
+    for (const object of this.deskObjects.splice(0)) object.destroy();
+    for (const desk of desks) this.drawDesk(desk);
+  }
+
+  /**
+   * Dibuja la zona de 3x3 de un escritorio, su etiqueta y la decoracion de
+   * quien lo ocupe.
+   *
+   * La profundidad es el borde INFERIOR del area, misma convencion que
+   * `placeFurniture` (`(y + alto) * TILE`) y misma razon: los avatares se
+   * dibujan a la altura de sus pies (`setDepth(this.player.y)` en `update`),
+   * asi que cualquier otro valor pondria a quien pasa por delante DEBAJO del
+   * escritorio.
+   */
+  private drawDesk(desk: OfficeDesk): void {
+    // Lo contesta el servidor y la escena lo lee (`OfficeDesk.mine`). Deducirlo
+    // comparando `occupant.displayName` con el nombre del jugador local haria
+    // que renombrar a alguien cambiase de manos un escritorio en pantalla --
+    // la misma trampa que la slice 1 de esta issue retiro de
+    // `proximityAudio.ts`.
+    const mine = desk.mine;
+    const color =
+      desk.occupant === null ? DESK_COLOR.free : mine ? DESK_COLOR.mine : DESK_COLOR.taken;
+    const depth = desk.y + desk.h;
+
+    const zone = this.add
+      .rectangle(desk.x + desk.w / 2, desk.y + desk.h / 2, desk.w, desk.h, color, DESK_FILL_ALPHA)
+      .setStrokeStyle(DESK_STROKE_WIDTH, color)
+      .setDepth(depth)
+      .setName(deskZoneName(desk.id));
+    this.deskObjects.push(zone);
+
+    const label = this.add
+      .text(desk.x + 3, desk.y + 2, desk.label, {
+        fontFamily: 'Cantarell, Noto Sans, DejaVu Sans, Segoe UI, sans-serif',
+        fontSize: '11px',
+        color: '#e5e7eb',
+      })
+      .setDepth(depth);
+    this.deskObjects.push(label);
+
+    for (const item of desk.occupant?.items ?? []) {
+      // `null` = ese slot no es una de las nueve cajas. Se salta la pieza y no
+      // el escritorio: pintarla en una caja inventada la dejaria fuera del
+      // area, y renunciar al escritorio entero quitaria un sitio que si existe.
+      const box = deskSlotRect(desk, item.slot);
+      if (box === null) continue;
+      this.deskObjects.push(this.drawDeskItem(item.id, item.textureKey, item.rotation, box, depth));
+    }
+
+    // Un escritorio ajeno no se hace clicable siquiera: no tiene ninguna
+    // accion que ofrecer, y `release` solo suelta el propio.
+    if (desk.occupant !== null && !mine) return;
+
+    zone.setInteractive();
+    zone.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      // Mismo `stopPropagation` que el clic de un NPC o de un peer: sin el, el
+      // `pointerdown` de la escena cerraria el menu contextual a la vez.
+      pointer.event.stopPropagation();
+      this.bridge.emit('deskclick', {
+        deskId: desk.id,
+        label: desk.label,
+        action: mine ? 'release' : 'claim',
+      });
+    });
+  }
+
+  /**
+   * Una pieza de decoracion ocupando su caja.
+   *
+   * Si la textura no esta cargada se dibuja un recuadro neutro en su sitio.
+   * El catalogo es curado y promete claves que el bundle ya trae, pero esto
+   * lee una respuesta de red: `add.image` con una clave desconocida pinta la
+   * textura de error verde y negra de Phaser en mitad de la oficina, y un
+   * hueco silencioso escondería que ese escritorio SI tiene algo puesto.
+   */
+  private drawDeskItem(
+    itemId: string,
+    textureKey: string,
+    rotation: number,
+    box: { x: number; y: number; w: number; h: number },
+    depth: number,
+  ): Phaser.GameObjects.GameObject {
+    const cx = box.x + box.w / 2;
+    const cy = box.y + box.h / 2;
+    const name = deskItemName(itemId);
+
+    if (!this.textures.exists(textureKey)) {
+      return this.add
+        .rectangle(cx, cy, box.w, box.h, DESK_COLOR.taken, DESK_FILL_ALPHA)
+        .setDepth(depth)
+        .setName(name);
+    }
+
+    return this.add
+      .image(cx, cy, textureKey)
+      .setDisplaySize(box.w, box.h)
+      .setAngle(rotation)
+      .setDepth(depth)
+      .setName(name);
   }
 
   private emitPresence(online: boolean): void {
