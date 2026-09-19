@@ -1,0 +1,270 @@
+/**
+ * El segundo adaptador de `DecorCatalog`, probado por COMPORTAMIENTO y no por
+ * la forma de su SQL (que no tiene). Mismo papel y misma justificacion que
+ * `memorySpaces.test.ts`.
+ *
+ * Lo que mas se vigila aqui es la regla de archivados de D1b, y no por
+ * completitud: las rutas de la slice se prueban contra ESTE adaptador, asi que
+ * si aqui `getDeskConfig` filtrase por archivados y en `pgDecor` no, la suite
+ * entera estaria certificando un comportamiento que produccion no tiene. Un
+ * test que pasa contra memoria y falla contra Postgres es peor que ningun test.
+ */
+
+import { describe, expect, it } from 'vitest';
+import type { Asset } from './decorPort.ts';
+import { InvalidAssetError, InvalidDeskConfigError } from './decorRules.ts';
+import { createMemoryDecor } from './memoryDecor.ts';
+
+const NOW = new Date('2026-01-15T12:00:00.000Z');
+
+function asset(overrides: Partial<Asset> & Pick<Asset, 'id'>): Asset {
+  return {
+    slug: overrides.id,
+    name: overrides.id,
+    kind: 'decor',
+    textureKey: `${overrides.id}-tex`,
+    w: 1,
+    h: 1,
+    placeableOnDesk: true,
+    archivedAt: null,
+    createdAt: NOW,
+    ...overrides,
+  };
+}
+
+const PLANTA = asset({ id: 'asset-planta', slug: 'planta', name: 'Planta', kind: 'plant' });
+const SOFA = asset({ id: 'asset-sofa', slug: 'sofa', name: 'Sofa', placeableOnDesk: false });
+const USER = 'user-hugo';
+
+function decor(seed: readonly Asset[] = [PLANTA, SOFA]) {
+  return createMemoryDecor({ seed, now: () => NOW });
+}
+
+describe('createMemoryDecor: listAssets', () => {
+  it('arranca vacio sin semilla', async () => {
+    expect(await createMemoryDecor().listAssets()).toEqual([]);
+  });
+
+  it('devuelve la semilla en orden deterministico (kind, slug, id), igual que pgDecor', async () => {
+    const catalog = decor();
+
+    expect((await catalog.listAssets()).map((a) => a.id)).toEqual([SOFA.id, PLANTA.id]);
+  });
+
+  it('filtra los archivados por defecto (D1b)', async () => {
+    const catalog = decor([PLANTA, { ...SOFA, archivedAt: NOW }]);
+
+    expect((await catalog.listAssets()).map((a) => a.id)).toEqual([PLANTA.id]);
+  });
+
+  it('con includeArchived los devuelve todos', async () => {
+    const catalog = decor([PLANTA, { ...SOFA, archivedAt: NOW }]);
+
+    expect((await catalog.listAssets({ includeArchived: true })).map((a) => a.id)).toEqual([
+      SOFA.id,
+      PLANTA.id,
+    ]);
+  });
+});
+
+describe('createMemoryDecor: createAsset', () => {
+  it('deriva el slug del nombre, igual que el adaptador de Postgres', async () => {
+    const created = await decor().createAsset({
+      name: 'Planta Grande',
+      kind: 'plant',
+      textureKey: 'plant-large',
+      w: 1,
+      h: 1,
+      placeableOnDesk: true,
+    });
+
+    expect(created.slug).toBe('planta-grande');
+    expect(created.name).toBe('Planta Grande');
+    expect(created.archivedAt).toBeNull();
+    expect(created.createdAt).toEqual(NOW);
+  });
+
+  it('comparte decorRules con pgDecor: un tipo invalido se rechaza igual', async () => {
+    await expect(
+      decor().createAsset({
+        name: 'X',
+        kind: 'rug' as unknown as 'plant',
+        textureKey: 'x',
+        w: 1,
+        h: 1,
+        placeableOnDesk: true,
+      }),
+    ).rejects.toThrow(InvalidAssetError);
+  });
+
+  it('el asset creado ya sale en el catalogo', async () => {
+    const catalog = createMemoryDecor({ now: () => NOW });
+    await catalog.createAsset({
+      name: 'Planta',
+      kind: 'plant',
+      textureKey: 'plant',
+      w: 1,
+      h: 1,
+      placeableOnDesk: true,
+    });
+
+    expect(await catalog.listAssets()).toHaveLength(1);
+  });
+});
+
+describe('createMemoryDecor: archiveAsset', () => {
+  it('marca archivedAt y lo saca del catalogo, sin borrarlo', async () => {
+    const catalog = decor();
+
+    const archived = await catalog.archiveAsset(PLANTA.id);
+
+    expect(archived?.archivedAt).toEqual(NOW);
+    expect((await catalog.listAssets()).map((a) => a.id)).toEqual([SOFA.id]);
+    expect((await catalog.listAssets({ includeArchived: true })).map((a) => a.id)).toContain(
+      PLANTA.id,
+    );
+  });
+
+  it('devuelve null cuando el id no existe', async () => {
+    expect(await decor().archiveAsset('no-existe')).toBeNull();
+  });
+
+  it('no toca las colocaciones ya existentes (D1b)', async () => {
+    // Es la propiedad entera de la decision: archivar dice que pieza se puede
+    // colocar MANANA, no reescribe el escritorio de quien ya la puso.
+    const catalog = decor();
+    await catalog.replaceDeskConfig(USER, [{ assetId: PLANTA.id, slot: 0, rotation: 0 }]);
+
+    await catalog.archiveAsset(PLANTA.id);
+
+    const items = await catalog.getDeskConfig(USER);
+    expect(items).toHaveLength(1);
+    expect(items[0].textureKey).toBe(PLANTA.textureKey);
+  });
+});
+
+describe('createMemoryDecor: getDeskConfig', () => {
+  it('un escritorio sin configurar es una lista vacia, no un error', async () => {
+    expect(await decor().getDeskConfig('nadie')).toEqual([]);
+  });
+
+  it('resuelve los campos del asset que hacen falta para pintar', async () => {
+    const catalog = decor();
+    await catalog.replaceDeskConfig(USER, [{ assetId: PLANTA.id, slot: 2, rotation: 90 }]);
+
+    expect(await catalog.getDeskConfig(USER)).toEqual([
+      {
+        id: expect.any(String),
+        assetId: PLANTA.id,
+        slot: 2,
+        rotation: 90,
+        textureKey: PLANTA.textureKey,
+        w: PLANTA.w,
+        h: PLANTA.h,
+        name: PLANTA.name,
+        createdAt: NOW,
+      },
+    ]);
+  });
+
+  it('ordena por slot, igual que el ORDER BY de pgDecor', async () => {
+    const catalog = decor();
+    await catalog.replaceDeskConfig(USER, [
+      { assetId: PLANTA.id, slot: 4, rotation: 0 },
+      { assetId: PLANTA.id, slot: 1, rotation: 0 },
+    ]);
+
+    expect((await catalog.getDeskConfig(USER)).map((item) => item.slot)).toEqual([1, 4]);
+  });
+
+  it('el escritorio de una persona no se ve desde el de otra', async () => {
+    const catalog = decor();
+    await catalog.replaceDeskConfig(USER, [{ assetId: PLANTA.id, slot: 0, rotation: 0 }]);
+
+    expect(await catalog.getDeskConfig('otra-persona')).toEqual([]);
+  });
+});
+
+describe('createMemoryDecor: replaceDeskConfig', () => {
+  it('reemplaza entero: lo que no viene en la lista deja de estar', async () => {
+    const catalog = decor();
+    await catalog.replaceDeskConfig(USER, [
+      { assetId: PLANTA.id, slot: 0, rotation: 0 },
+      { assetId: PLANTA.id, slot: 1, rotation: 0 },
+    ]);
+
+    await catalog.replaceDeskConfig(USER, [{ assetId: PLANTA.id, slot: 1, rotation: 180 }]);
+
+    expect((await catalog.getDeskConfig(USER)).map((item) => item.slot)).toEqual([1]);
+  });
+
+  it('una lista vacia deja el escritorio pelado', async () => {
+    const catalog = decor();
+    await catalog.replaceDeskConfig(USER, [{ assetId: PLANTA.id, slot: 0, rotation: 0 }]);
+
+    expect(await catalog.replaceDeskConfig(USER, [])).toEqual([]);
+    expect(await catalog.getDeskConfig(USER)).toEqual([]);
+  });
+
+  it('rechaza dos items en el mismo slot, igual que el indice unico de schema.sql', async () => {
+    await expect(
+      decor().replaceDeskConfig(USER, [
+        { assetId: PLANTA.id, slot: 0, rotation: 0 },
+        { assetId: PLANTA.id, slot: 0, rotation: 90 },
+      ]),
+    ).rejects.toThrow(InvalidDeskConfigError);
+  });
+
+  it('rechaza un slot fuera de rango y una rotacion invalida', async () => {
+    await expect(
+      decor().replaceDeskConfig(USER, [{ assetId: PLANTA.id, slot: 6, rotation: 0 }]),
+    ).rejects.toThrow(InvalidDeskConfigError);
+    await expect(
+      decor().replaceDeskConfig(USER, [
+        { assetId: PLANTA.id, slot: 0, rotation: 45 as unknown as 0 },
+      ]),
+    ).rejects.toThrow(InvalidDeskConfigError);
+  });
+
+  it('rechaza un asset que no es colocable en un escritorio', async () => {
+    await expect(
+      decor().replaceDeskConfig(USER, [{ assetId: SOFA.id, slot: 0, rotation: 0 }]),
+    ).rejects.toThrow(InvalidDeskConfigError);
+  });
+
+  it('rechaza un assetId que no existe', async () => {
+    await expect(
+      decor().replaceDeskConfig(USER, [{ assetId: 'no-existe', slot: 0, rotation: 0 }]),
+    ).rejects.toThrow(InvalidDeskConfigError);
+  });
+
+  it('un rechazo no deja el escritorio a medias', async () => {
+    // El equivalente del ROLLBACK de `pgDecor`: si el segundo item es
+    // invalido, el primero tampoco entra.
+    const catalog = decor();
+    await catalog.replaceDeskConfig(USER, [{ assetId: PLANTA.id, slot: 5, rotation: 0 }]);
+
+    await expect(
+      catalog.replaceDeskConfig(USER, [
+        { assetId: PLANTA.id, slot: 0, rotation: 0 },
+        { assetId: SOFA.id, slot: 1, rotation: 0 },
+      ]),
+    ).rejects.toThrow(InvalidDeskConfigError);
+
+    expect((await catalog.getDeskConfig(USER)).map((item) => item.slot)).toEqual([5]);
+  });
+
+  it('deja colocar un asset ya archivado que la persona vuelve a guardar (D1b)', async () => {
+    // Archivar es "no se puede colocar de NUEVO desde el panel", no "tu
+    // escritorio deja de ser valido": si esto fallase, mover una pieza
+    // cualquiera le borraria a esa persona la retirada que ya tenia puesta.
+    const catalog = decor();
+    await catalog.archiveAsset(PLANTA.id);
+
+    const items = await catalog.replaceDeskConfig(USER, [
+      { assetId: PLANTA.id, slot: 0, rotation: 0 },
+    ]);
+
+    expect(items).toHaveLength(1);
+  });
+});
