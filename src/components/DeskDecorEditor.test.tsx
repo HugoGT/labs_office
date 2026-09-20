@@ -14,7 +14,7 @@
  *      atada a nada.
  */
 
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { DESK_SLOT_COLUMNS } from '../game/deskLayout';
@@ -260,5 +260,143 @@ describe('DeskDecorEditor', () => {
 
     const picker = screen.getByRole('list', { name: /piezas/i });
     expect(within(picker).getAllByRole('button')).toHaveLength(2);
+  });
+});
+
+/**
+ * El elemento arrastrable de una pieza del catalogo es su `<li>`, no el boton:
+ * el boton esta deshabilitado mientras no haya caja elegida y un control
+ * deshabilitado no dispara eventos de arrastre. Arrastrar dice el destino por
+ * si mismo, asi que no depende de que se haya elegido caja antes.
+ */
+function piece(name: RegExp): HTMLElement {
+  const picker = screen.getByRole('list', { name: /piezas/i });
+  const found = within(picker)
+    .getAllByRole('listitem')
+    .find((item) => within(item).queryByRole('button', { name }) !== null);
+  if (found === undefined) throw new Error(`No hay ninguna pieza ${String(name)} en el selector`);
+  return found;
+}
+
+/**
+ * `userEvent` no cubre el arrastre HTML5, asi que el gesto se compone a mano.
+ * `dataTransfer` es un doble minimo: jsdom implementa `DataTransfer` a medias y
+ * el componente solo escribe en el, nunca lo lee de vuelta.
+ */
+function drag(source: HTMLElement, target: HTMLElement): void {
+  fireEvent.dragStart(source, { dataTransfer: { setData: vi.fn() } });
+  fireEvent.dragOver(target);
+  fireEvent.drop(target);
+  fireEvent.dragEnd(source);
+}
+
+describe('DeskDecorEditor: arrastrar y soltar', () => {
+  it('arrastrar una pieza del catálogo hasta una caja la coloca ahí', async () => {
+    const { onSave } = editor();
+
+    drag(piece(/Planta/), box(1));
+
+    expect(box(1)).toHaveAccessibleName(/Planta/);
+
+    await userEvent.click(screen.getByRole('button', { name: /Guardar/ }));
+
+    expect(onSave).toHaveBeenCalledWith([{ assetId: 'id-planta', slot: 0, rotation: 0 }]);
+  });
+
+  it('una pieza del catálogo se arrastra aunque no haya ninguna caja elegida', () => {
+    // El boton sigue deshabilitado -- colocar a ciegas seguiria adivinando la
+    // caja -- pero el gesto de arrastrar ya nombra el destino, asi que no tiene
+    // que pedir que se elija una antes.
+    editor();
+
+    expect(screen.getByRole('button', { name: 'Planta' })).toBeDisabled();
+
+    drag(piece(/Planta/), box(3));
+
+    expect(box(3)).toHaveAccessibleName(/Planta/);
+  });
+
+  it('arrastrar de una caja ocupada a una vacía mueve la pieza', async () => {
+    const { onSave } = editor({ items: [PUESTA] });
+
+    drag(box(5), box(1));
+
+    expect(box(1)).toHaveAccessibleName(/Planta/);
+    expect(box(5)).toHaveAccessibleName(/vacía/);
+
+    await userEvent.click(screen.getByRole('button', { name: /Guardar/ }));
+
+    expect(onSave).toHaveBeenCalledWith([{ assetId: 'id-planta', slot: 0, rotation: 0 }]);
+  });
+
+  it('arrastrar sobre una caja ocupada intercambia las dos piezas con su giro', async () => {
+    // ESTA es la propiedad del movimiento interno: sustituir destruiria en
+    // silencio una pieza que su dueno ya habia colocado. El intercambio no
+    // pierde nada y se deshace repitiendo el gesto.
+    const { onSave } = editor({ items: [RETIRADA, PUESTA] });
+
+    drag(box(1), box(5));
+
+    expect(box(1)).toHaveAccessibleName(/Planta/);
+    expect(box(5)).toHaveAccessibleName(/Alfombra vieja/);
+
+    await userEvent.click(screen.getByRole('button', { name: /Guardar/ }));
+
+    expect(onSave).toHaveBeenCalledWith([
+      { assetId: 'id-planta', slot: 0, rotation: 0 },
+      { assetId: 'id-alfombra', slot: 4, rotation: 90 },
+    ]);
+  });
+
+  it('arrastrar una caja vacía no cambia nada', async () => {
+    const { onSave } = editor({ items: [PUESTA] });
+
+    drag(box(1), box(5));
+
+    expect(box(1)).toHaveAccessibleName(/vacía/);
+    expect(box(5)).toHaveAccessibleName(/Planta/);
+
+    await userEvent.click(screen.getByRole('button', { name: /Guardar/ }));
+
+    expect(onSave).toHaveBeenCalledWith([{ assetId: 'id-planta', slot: 4, rotation: 0 }]);
+  });
+
+  it('soltar una pieza sobre su propia caja no cambia nada', async () => {
+    const { onSave } = editor({ items: [PUESTA] });
+
+    drag(box(5), box(5));
+
+    expect(box(5)).toHaveAccessibleName(/Planta/);
+
+    await userEvent.click(screen.getByRole('button', { name: /Guardar/ }));
+
+    expect(onSave).toHaveBeenCalledWith([{ assetId: 'id-planta', slot: 4, rotation: 0 }]);
+  });
+
+  it('arrastrar construye el borrador pero no guarda por sí solo', async () => {
+    // El arrastre es una forma de colocar, no de confirmar: `POST /me/desk`
+    // borra e inserta, y dispararlo con cada gesto escribiria el escritorio a
+    // medio componer.
+    const { onSave } = editor();
+
+    drag(piece(/Planta/), box(2));
+
+    expect(onSave).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: /Guardar/ }));
+
+    expect(onSave).toHaveBeenCalledWith([{ assetId: 'id-planta', slot: 1, rotation: 0 }]);
+  });
+
+  it('tras soltar, girar y quitar actúan sobre la caja de destino', async () => {
+    // Quien acaba de mover una pieza la esta mirando: dejar elegida la caja de
+    // origen haria que el siguiente "Girar" tocase otra cosa.
+    const { onSave } = editor({ items: [PUESTA] });
+
+    drag(box(5), box(2));
+    await userEvent.click(screen.getByRole('button', { name: /Girar/ }));
+    await userEvent.click(screen.getByRole('button', { name: /Guardar/ }));
+
+    expect(onSave).toHaveBeenCalledWith([{ assetId: 'id-planta', slot: 1, rotation: 90 }]);
   });
 });
