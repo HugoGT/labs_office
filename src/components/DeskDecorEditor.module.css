@@ -78,6 +78,18 @@
   color: #6b7280;
 }
 
+/* Afordancia del arrastre. El destino bajo el cursor se enciende con el MISMO
+   verde que la caja elegida -- un color propio contaria un estado distinto del
+   que hay -- y el origen se atenua para que se vea de donde sale la pieza. */
+.slotOver {
+  background: #2b3444;
+  border-color: #22c55e;
+}
+
+.slotSource {
+  opacity: 0.4;
+}
+
 .actions {
   display: flex;
   gap: 8px;
@@ -91,6 +103,15 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+/* El `<li>` es el asa del arrastre, no el boton: ver el componente. */
+.pieceItem {
+  cursor: grab;
+}
+
+.pieceItem:active {
+  cursor: grabbing;
 }
 
 .piece {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type DragEvent } from 'react';
 import { DESK_SLOT_COLUMNS, DESK_SLOT_COUNT } from '../game/deskLayout';
 import {
   DESK_ROTATIONS,
@@ -30,6 +30,12 @@ import styles from './DeskDecorEditor.module.css';
  * conserva, se puede quitar, y no se puede volver a anadir porque el selector
  * no la trae.
  *
+ * ## Arrastrar se suma al clic, no lo sustituye
+ *
+ * Elegir caja y luego pieza sigue siendo el camino que funciona con teclado y
+ * lector de pantalla; el arrastre solo anade un atajo con raton encima. Por eso
+ * el boton del selector conserva su `disabled` y el arrastrable es el `<li>`.
+ *
  * ## Sin escritorio no hay editor
  *
  * La decoracion cuelga de la persona, pero se ve en el sitio donde esa persona
@@ -43,6 +49,15 @@ interface DraftItem {
   rotation: DeskRotation;
   name: string;
 }
+
+/**
+ * Lo que va en el puno mientras se arrastra. Vive en estado de React y NO en
+ * `dataTransfer`: jsdom implementa `DataTransfer` a medias, y un handler que
+ * leyese `getData` dejaria esta interaccion sin poder probarse en la capa unit.
+ */
+type DragLoad =
+  | { from: 'catalog'; assetId: string; name: string }
+  | { from: 'slot'; slot: number };
 
 export interface DeskDecorEditorProps {
   /** Como se llama el escritorio propio, o `null` si no se ocupa ninguno. */
@@ -89,6 +104,8 @@ export function DeskDecorEditor({
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dragLoad, setDragLoad] = useState<DragLoad | null>(null);
+  const [dragOverSlot, setDragOverSlot] = useState<number | null>(null);
 
   if (deskLabel === null) {
     return (
@@ -115,6 +132,81 @@ export function DeskDecorEditor({
     setDraft((current) =>
       new Map(current).set(selected, { assetId: asset.id, rotation: 0, name: asset.name }),
     );
+  }
+
+  function startDrag(event: DragEvent<HTMLElement>, load: DragLoad): void {
+    // Firefox no arranca un arrastre si nadie asigna datos, aunque luego no los
+    // lea nadie: el `setData` esta por eso y no porque haga falta aqui -- la
+    // carga viaja en `dragLoad`. El `?.` porque el evento puede llegar sin
+    // `dataTransfer` (jsdom no lo pone siempre).
+    event.dataTransfer?.setData(
+      'text/plain',
+      load.from === 'catalog' ? load.assetId : String(load.slot),
+    );
+    setDragLoad(load);
+  }
+
+  function startSlotDrag(event: DragEvent<HTMLElement>, slot: number): void {
+    // Una caja vacia no lleva nada: sin este corte, soltarla sobre otra borraria
+    // la pieza del destino con un movimiento que no transportaba ninguna.
+    if (!draft.has(slot)) return;
+    startDrag(event, { from: 'slot', slot });
+  }
+
+  function allowDrop(event: DragEvent<HTMLElement>, slot: number): void {
+    if (dragLoad === null) return;
+    // Sin `preventDefault` el navegador toma la caja por destino invalido y el
+    // `drop` no se dispara NUNCA. Es el fallo clasico de esta API.
+    event.preventDefault();
+    setDragOverSlot(slot);
+  }
+
+  function leaveSlot(slot: number): void {
+    // Solo se apaga la caja que se esta dejando: al pasar de una a otra el
+    // `dragLeave` de la vieja llega despues del `dragOver` de la nueva, y
+    // apagarlo a ciegas dejaria el rastro siempre apagado.
+    setDragOverSlot((current) => (current === slot ? null : current));
+  }
+
+  function drop(event: DragEvent<HTMLElement>, slot: number): void {
+    // Firefox intentaria navegar al texto soltado si nadie lo impide.
+    event.preventDefault();
+    const load = dragLoad;
+    endDrag();
+    if (load === null) return;
+
+    const next = new Map(draft);
+    if (load.from === 'catalog') {
+      // Misma semantica que `place`: sustituye, porque una caja es una pieza.
+      next.set(slot, { assetId: load.assetId, rotation: 0, name: load.name });
+    } else {
+      // Soltar una pieza donde ya estaba no es un movimiento.
+      if (load.slot === slot) return;
+      const moved = draft.get(load.slot);
+      if (moved === undefined) return;
+      const displaced = draft.get(slot);
+      next.set(slot, moved);
+      // INTERCAMBIO, y no la sustitucion que hace `place`: en un movimiento
+      // interno, sustituir destruiria en silencio una pieza que su dueno ya
+      // habia colocado, y el gesto nunca dijo "tira esa". El intercambio no
+      // pierde nada y se deshace repitiendo el arrastre al reves. Si el destino
+      // estaba vacio es el caso simple: el origen se queda sin nada.
+      if (displaced === undefined) next.delete(load.slot);
+      else next.set(load.slot, displaced);
+    }
+
+    setDraft(next);
+    setSaved(false);
+    // El destino queda elegido para que "Girar" y "Quitar" actuen sobre lo que
+    // se acaba de mover, que es lo que mira quien lo movio. Soltar NO guarda:
+    // `POST /me/desk` borra e inserta, y dispararlo con cada gesto escribiria el
+    // escritorio a medio componer.
+    setSelected(slot);
+  }
+
+  function endDrag(): void {
+    setDragLoad(null);
+    setDragOverSlot(null);
   }
 
   function rotate(): void {
@@ -177,7 +269,8 @@ export function DeskDecorEditor({
       </div>
 
       <p className={styles.hint}>
-        Elige una caja del escritorio y luego la pieza que quieres poner en ella.
+        Arrastra una pieza hasta una caja, o elige la caja y luego la pieza. Arrastra una caja sobre
+        otra para mover o intercambiar.
       </p>
 
       {/* Las columnas salen de `deskLayout` y no de una copia en el CSS: el
@@ -190,6 +283,14 @@ export function DeskDecorEditor({
       >
         {Array.from({ length: DESK_SLOT_COUNT }, (_unused, slot) => {
           const item = draft.get(slot);
+          const className = [
+            styles.slot,
+            item === undefined ? styles.slotEmpty : '',
+            dragOverSlot === slot ? styles.slotOver : '',
+            dragLoad?.from === 'slot' && dragLoad.slot === slot ? styles.slotSource : '',
+          ]
+            .filter((name) => name !== '')
+            .join(' ');
           return (
             <button
               key={slot}
@@ -199,8 +300,15 @@ export function DeskDecorEditor({
               // esta ocupada.
               aria-label={`Caja ${slot + 1}: ${item?.name ?? 'vacía'}`}
               aria-pressed={selected === slot}
-              className={`${styles.slot} ${item === undefined ? styles.slotEmpty : ''}`}
+              className={className}
+              // Solo una caja con pieza se arrastra; toda caja recibe.
+              draggable={item !== undefined}
               onClick={() => setSelected(slot)}
+              onDragStart={(event) => startSlotDrag(event, slot)}
+              onDragOver={(event) => allowDrop(event, slot)}
+              onDragLeave={() => leaveSlot(slot)}
+              onDrop={(event) => drop(event, slot)}
+              onDragEnd={endDrag}
             >
               {item?.name ?? '+'}
             </button>
@@ -232,10 +340,23 @@ export function DeskDecorEditor({
       ) : (
         <ul className={styles.pieces} aria-label="Piezas que puedes colocar">
           {catalog.map((asset) => (
-            <li key={asset.id}>
-              {/* Deshabilitado mientras no haya caja elegida: colocar en "la
-                  primera libre" adivinaria donde la quiere quien mira, y el
-                  escritorio tiene nueve cajas justo para que lo diga. */}
+            /* El arrastrable es el `<li>` y no el boton: un control
+               deshabilitado no dispara eventos de arrastre, y el boton lo esta
+               mientras no haya caja elegida. Arrastrar si nombra el destino por
+               si mismo, asi que no espera a que se elija una. */
+            <li
+              key={asset.id}
+              className={styles.pieceItem}
+              draggable
+              onDragStart={(event) =>
+                startDrag(event, { from: 'catalog', assetId: asset.id, name: asset.name })
+              }
+              onDragEnd={endDrag}
+            >
+              {/* Deshabilitado mientras no haya caja elegida: colocar con un
+                  clic en "la primera libre" adivinaria donde la quiere quien
+                  mira, y el escritorio tiene nueve cajas justo para que lo
+                  diga. El arrastre no adivina nada, por eso no se deshabilita. */}
               <button
                 className={styles.piece}
                 type="button"
