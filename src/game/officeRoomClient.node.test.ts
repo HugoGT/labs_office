@@ -5,9 +5,15 @@
  * decodificar de verdad.
  */
 
+import { matchMaker } from '@colyseus/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createOfficeServer, type OfficeServer } from '../../server/src/createOfficeServer.ts';
-import { connectOfficeRoom, type OfficeConnection } from './officeRoomClient';
+import { OFFICE_ROOM_NAME } from './officeProtocol';
+import {
+  connectOfficeRoom,
+  type OfficeConnection,
+  type OfficeConnectionState,
+} from './officeRoomClient';
 import type { RemotePlayerSnapshot } from './remoteAvatars';
 
 let server: OfficeServer;
@@ -18,8 +24,9 @@ const connections: OfficeConnection[] = [];
 // registra su propio handler de `uncaughtException`; con las pruebas de
 // invitaciones de llamada (issue #2) se pasa del limite por defecto de 10.
 // Es ruido del arnes, no una fuga del codigo propio -- mismo ajuste que
-// `OfficeRoom.test.ts`.
-process.setMaxListeners(100);
+// `OfficeRoom.test.ts`. Subido a 150 al anadir los de reconexion (#52), que
+// levantan un servidor mas por caso.
+process.setMaxListeners(150);
 
 beforeEach(async () => {
   server = createOfficeServer();
@@ -42,6 +49,15 @@ function recorder() {
   const callInvites: { from: string; name: string }[] = [];
   const callersLeft: { from: string }[] = [];
   const callsAccepted: { by: string; name: string }[] = [];
+  // Issue #52: la secuencia importa tanto como los valores -- "reconectando"
+  // DESPUES de "conectado" seria un HUD que miente al reves.
+  const states: OfficeConnectionState[] = [];
+  const resyncs: string[] = [];
+  // Orden real de lo que llega, en una sola linea del tiempo. Hace falta
+  // porque parte del contrato de #52 no es QUE pasa sino CUANDO: el resync
+  // tiene que caer antes del replay, o quien lo escuche vaciaria su registro
+  // justo despues de haberlo repoblado.
+  const timeline: string[] = [];
   return {
     added,
     changed,
@@ -49,13 +65,26 @@ function recorder() {
     callInvites,
     callersLeft,
     callsAccepted,
+    states,
+    resyncs,
+    timeline,
     handlers: {
-      onAdd: (s: RemotePlayerSnapshot) => added.push(s),
+      onAdd: (s: RemotePlayerSnapshot) => {
+        added.push(s);
+        timeline.push(`add:${s.sessionId}`);
+      },
       onChange: (s: RemotePlayerSnapshot) => changed.push(s),
       onRemove: (id: string) => removed.push(id),
       onCallInvite: (payload: { from: string; name: string }) => callInvites.push(payload),
       onCallerLeft: (payload: { from: string }) => callersLeft.push(payload),
       onCallAccepted: (payload: { by: string; name: string }) => callsAccepted.push(payload),
+      onConnectionState: (state: OfficeConnectionState) => states.push(state),
+      // Se guarda el estado en el momento del resync para poder afirmar el
+      // orden contra `states` sin un reloj.
+      onResync: () => {
+        resyncs.push(states.at(-1) ?? '');
+        timeline.push('resync');
+      },
     },
   };
 }
@@ -310,4 +339,122 @@ describe('connectOfficeRoom: invitaciones de llamada (issue #2)', () => {
     await waitFor(() => watcherB.callersLeft.length === 1);
     expect(watcherB.callersLeft[0]).toEqual({ from: a.sessionId });
   });
+});
+
+/**
+ * Reconexion tras una caida (issue #52), de punta a punta: servidor real,
+ * socket cortado de verdad, y el envoltorio recuperandose solo.
+ *
+ * La mitad servidor (el avatar que sobrevive la ventana) ya tiene su suite en
+ * `server/src/OfficeRoom.test.ts`. Lo que se prueba aqui es la otra mitad: que
+ * el cliente se entera de la caida -- antes de este cambio no registraba
+ * `onLeave` ni `onError` y simplemente se quedaba mudo -- y que la sesion que
+ * vuelve sirve para algo, no solo esta viva.
+ */
+describe('connectOfficeRoom: reconexion tras una caida (issue #52)', () => {
+  /**
+   * Mata el socket desde el servidor con `terminate()`, que es EXACTAMENTE lo
+   * que hace el transporte en produccion con un cliente que deja de responder
+   * a los pings (`autoTerminateUnresponsiveClients` en
+   * `@colyseus/ws-transport`). Un `close(code)` ordenado seria un cierre
+   * educado y este bug nace de los que no lo son: `terminate()` deja el codigo
+   * en 1006, que es el que llega cuando un socket muere sin despedirse.
+   *
+   * `ref` esta tipado como `EventEmitter` en el contrato publico de Colyseus,
+   * pero el objeto real es el WebSocket de `ws`; el casteo vive aqui, en el
+   * arnes, y no en codigo de produccion.
+   */
+  async function terminateSocketOf(sessionId: string): Promise<void> {
+    const [cache] = await matchMaker.query({ name: OFFICE_ROOM_NAME });
+    const room = matchMaker.getLocalRoomById(cache.roomId);
+    const ref = room.clients.getById(sessionId)?.ref as unknown as
+      | { terminate(): void }
+      | undefined;
+    if (!ref) throw new Error(`no hay cliente ${sessionId} en la sala`);
+    ref.terminate();
+  }
+
+  it('el que sobrevive nunca ve la baja del que se cayo', async () => {
+    const watcher = recorder();
+    await connect('Ana', watcher.handlers);
+    const b = await connect('Beto', recorder().handlers);
+    await waitFor(() => watcher.added.some((s) => s.sessionId === b.sessionId));
+
+    await terminateSocketOf(b.sessionId);
+
+    // El corazon de la issue: si esto falla, al otro le desaparece el avatar y
+    // ya no vuelve -- `onRemove` es definitivo para `RemoteAvatarRegistry`.
+    // Se espera bastante mas que el primer escalon del backoff (500 ms) para
+    // que una baja prematura haya tenido tiempo de sobra de llegar.
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    expect(watcher.removed).not.toContain(b.sessionId);
+  }, 20000);
+
+  it('el que se cayo pasa por "reconectando" y termina en "conectado", con un resync por medio', async () => {
+    const watcher = recorder();
+    await connect('Ana', watcher.handlers);
+    const dropped = recorder();
+    const b = await connect('Beto', dropped.handlers);
+    await waitFor(() => watcher.added.some((s) => s.sessionId === b.sessionId));
+
+    await terminateSocketOf(b.sessionId);
+
+    await waitFor(() => dropped.states.includes('connected'), 15000);
+    // El orden es la mitad del contrato: el HUD tiene que poder pintar el
+    // amarillo ANTES del verde, no descubrirlo despues.
+    expect(dropped.states.indexOf('reconnecting')).toBeGreaterThanOrEqual(0);
+    expect(dropped.states.indexOf('reconnecting')).toBeLessThan(
+      dropped.states.indexOf('connected'),
+    );
+    // El resync avisa de que llega un replay completo, y llega ANTES de
+    // declarar "conectado": quien lo escuche tiene que poder tirar lo que sabia
+    // de los pares mientras el estado nuevo aun se esta repartiendo.
+    expect(dropped.resyncs).toEqual(['reconnecting']);
+  }, 20000);
+
+  it('la sesion recuperada sigue publicando: un sendMove posterior llega al otro', async () => {
+    const watcher = recorder();
+    await connect('Ana', watcher.handlers);
+    const dropped = recorder();
+    const b = await connect('Beto', dropped.handlers);
+    await waitFor(() => watcher.added.some((s) => s.sessionId === b.sessionId));
+
+    await terminateSocketOf(b.sessionId);
+    await waitFor(() => dropped.states.includes('connected'), 15000);
+
+    // Sin volver a cablear el envoltorio contra la sala NUEVA, esto se enviaria
+    // por un socket muerto y nadie se enteraria de nada.
+    b.sendMove(300, 400, 'left');
+
+    await waitFor(() =>
+      watcher.changed.some((s) => s.sessionId === b.sessionId && s.x === 300 && s.y === 400),
+    );
+  }, 20000);
+
+  it('tras reconectar, el replay completo vuelve a dar de alta a los presentes', async () => {
+    const watcher = recorder();
+    const a = await connect('Ana', watcher.handlers);
+    const dropped = recorder();
+    const b = await connect('Beto', dropped.handlers);
+    await waitFor(() => dropped.added.some((s) => s.sessionId === a.sessionId));
+    const altasAntes = dropped.added.filter((s) => s.sessionId === a.sessionId).length;
+
+    await terminateSocketOf(b.sessionId);
+    await waitFor(() => dropped.states.includes('connected'), 15000);
+
+    // Es lo que hace seguro el `remotes.clear()` del resync: la sala nueva
+    // reparte el estado entero, asi que vaciar el registro no puede dejar a
+    // nadie fuera.
+    await waitFor(
+      () => dropped.added.filter((s) => s.sessionId === a.sessionId).length > altasAntes,
+    );
+
+    // Y el orden es parte del contrato, no una casualidad: el replay tiene que
+    // caer DESPUES del resync. Al reves, la escena vaciaria su registro justo
+    // despues de haberlo repoblado y el avatar del otro no volveria a
+    // aparecer -- exactamente el sintoma de la issue, movido de sitio.
+    const resyncAt = dropped.timeline.lastIndexOf('resync');
+    expect(resyncAt).toBeGreaterThanOrEqual(0);
+    expect(dropped.timeline.slice(resyncAt)).toContain(`add:${a.sessionId}`);
+  }, 20000);
 });
