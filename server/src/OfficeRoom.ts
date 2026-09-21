@@ -51,6 +51,26 @@ export { DEFAULT_NAME, MAX_NAME_LENGTH, OFFICE_ROOM_NAME };
 const FACING_SET = new Set<string>(FACINGS);
 
 /**
+ * Cuanto se guarda el asiento -- y con el, el avatar y la sesion de LiveKit --
+ * de alguien que se cayo sin avisar (issue #52).
+ *
+ * 30 s, y no el maximo que Colyseus admite, porque la ventana paga dos precios
+ * opuestos y hay que quedarse en medio. Corta de mas, una siesta de wifi o una
+ * NAT que reabre hacen desaparecer el avatar y ya no hay vuelta: el borrado
+ * viajo a todo el mundo como `onRemove`. Larga de mas, quien cierra la pestana
+ * de golpe -- o se queda sin bateria -- deja un fantasma de pie en mitad de la
+ * oficina durante minutos, y los demas le hablan a un avatar que no escucha.
+ *
+ * El suelo lo fija el cliente: su escalera de reintentos
+ * (`RECONNECT_DELAYS_MS`, `src/game/reconnectPolicy.ts`) suma 15,5 s y corre EN
+ * PARALELO a esta ventana, porque las dos arrancan del mismo suceso -- el
+ * socket muriendo. 30 s deja casi el doble de margen sobre el ultimo escalon,
+ * que es lo que absorbe la parte que nadie controla: el reloj de las dos
+ * maquinas no es el mismo y el reintento aun tiene que viajar.
+ */
+export const RECONNECTION_WINDOW_SECONDS = 30;
+
+/**
  * Reparte a los que entran alrededor de la tile de spawn en vez de apilarlos
  * todos en el mismo pixel, que haria ilegible una entrada de varias personas.
  */
@@ -185,6 +205,18 @@ export interface OfficeRoomOptions {
    * capturarlo aqui.
    */
   logDirectoryDenial?: DirectoryDenialLogger;
+  /**
+   * Ventana de reconexion en segundos (issue #52), inyectada por la misma via
+   * que `sessions`/`auth`/`directory` y por la misma razon: los tests necesitan
+   * una ventana corta, y la alternativa -- falsear el reloj -- dejaria de
+   * probar el camino que importa. `allowReconnection` reserva el asiento en
+   * Colyseus y es SU temporizador el que rechaza el `Deferred`; con un reloj
+   * falso se probaria un doble de ese camino, no el camino.
+   *
+   * Ausente cae en `RECONNECTION_WINDOW_SECONDS`, que es lo que corre en
+   * produccion.
+   */
+  reconnectionWindowSeconds?: number;
 }
 
 /** Registro del motivo por el que el directorio cerro la puerta. */
@@ -215,6 +247,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private invitations: CallInvitationRegistry = createCallInvitationRegistry();
   private logDirectoryDenial: DirectoryDenialLogger = (decision, uid) =>
     console.warn(`[directory] acceso denegado (${decision}): ${uid}`);
+  private reconnectionWindowSeconds = RECONNECTION_WINDOW_SECONDS;
 
   onCreate(options?: OfficeRoomOptions): void {
     this.state = new OfficeState();
@@ -222,6 +255,9 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     this.auth = options?.auth;
     this.directory = options?.directory;
     if (options?.logDirectoryDenial) this.logDirectoryDenial = options.logDirectoryDenial;
+    if (options?.reconnectionWindowSeconds !== undefined) {
+      this.reconnectionWindowSeconds = options.reconnectionWindowSeconds;
+    }
 
     this.onMessage('move', (client: Client, message: MoveMessage) => {
       const player = this.state.players.get(client.sessionId);
@@ -397,7 +433,51 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     this.sessions?.add(client.sessionId, identity?.uid);
   }
 
-  onLeave(client: Client): void {
+  /**
+   * Hook de Colyseus 0.16: el segundo argumento dice si la baja fue PEDIDA
+   * (`room.leave()`, cerrar la pestana) o sufrida (el socket se murio). La
+   * diferencia lo es todo aqui (issue #52).
+   *
+   * Pedida, se suelta en el acto: es el comportamiento de siempre, y esperar
+   * dejaria un fantasma de pie medio minuto tras algo tan comun como cerrar la
+   * pestana.
+   *
+   * Sufrida, se espera. Y mientras se espera el avatar SIGUE VISIBLE para todos
+   * los demas a proposito: que no parpadee es el punto entero de este cambio.
+   * Un borrado "provisional" no existe en este protocolo -- `state.players`
+   * viaja como `onRemove` a cada cliente en el instante en que se toca, y
+   * ningun cliente sabe deshacer eso.
+   *
+   * `allowReconnection` devuelve un `Deferred` que RESUELVE si vuelve y RECHAZA
+   * al vencer la ventana; por eso la unica liberacion vive en el `catch`. Al
+   * volver, Colyseus no repite `onAuth` ni `onJoin` y conserva el `sessionId`
+   * (`@colyseus/core/build/Room.js`, `_onJoin` con `isWaitingReconnection`):
+   * el estado y `this.sessions` siguen exactamente donde estaban, asi que aqui
+   * no hay nada que rehacer, solo algo que NO deshacer.
+   */
+  async onLeave(client: Client, consented: boolean): Promise<void> {
+    if (consented) {
+      this.releaseSession(client);
+      return;
+    }
+
+    try {
+      await this.allowReconnection(client, this.reconnectionWindowSeconds);
+    } catch {
+      this.releaseSession(client);
+    }
+  }
+
+  /**
+   * Todo lo que deja de existir cuando alguien se va de verdad. Vive aparte de
+   * `onLeave` porque sus tres efectos son irreversibles de cara a los demas --
+   * el avatar desaparece, el token de LiveKit deja de poder pedirse y la
+   * tarjeta de llamada se marca como huerfana -- y por tanto los tres tienen
+   * que aplazarse juntos mientras dure la ventana. Aplicar uno solo antes de
+   * tiempo daria el peor resultado posible: alguien a quien se ve pero no se
+   * oye, o al reves.
+   */
+  private releaseSession(client: Client): void {
     this.state.players.delete(client.sessionId);
     this.sessions?.remove(client.sessionId);
 

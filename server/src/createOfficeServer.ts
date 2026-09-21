@@ -65,6 +65,33 @@ import { mintOfficeToken } from './livekitToken.ts';
 import { OFFICE_ROOM_NAME, OfficeRoom } from './OfficeRoom.ts';
 import { createIdTokenVerifier, type IdTokenVerifier } from './verifyIdToken.ts';
 
+/**
+ * Cada cuanto el transporte sondea a un cliente callado, y cuantos sondeos sin
+ * respuesta tolera antes de matarle la sesion (issue #52). 5 s x 4 = ~20 s de
+ * silencio admitido.
+ *
+ * Los valores por defecto de `@colyseus/ws-transport` son 3 s x 2 = ~6 s, y son
+ * demasiado agresivos para lo que esto es: una oficina donde la gente deja la
+ * pestana de fondo en un portatil que suspende la wifi, cambia de celda o pasa
+ * por un tunel. Seis segundos de tren subterraneo bastaban para matar la
+ * sesion, y una sesion muerta acaba -- pasada la ventana de
+ * `RECONNECTION_WINDOW_SECONDS` -- en un avatar que desaparece de la pantalla
+ * de los demas.
+ *
+ * Subirlos no oculta nada: un cliente que de verdad se fue se detecta igual,
+ * solo que 14 s mas tarde, y durante esos 14 s su avatar sigue donde lo dejo --
+ * que es exactamente lo que el usuario espera de alguien que acaba de perder
+ * cobertura. Lo que si serian valores mucho mas altos es memoria retenida por
+ * conexiones zombis, y por eso ~20 s y no minutos.
+ *
+ * Se sondea con mas frecuencia de la necesaria a proposito (4 reintentos de 5 s
+ * en vez de 2 de 10 s): la tolerancia total es la misma, pero un cliente que
+ * revive tras un parpadeo responde al siguiente ping y nunca llega a contarse
+ * como caido.
+ */
+const PING_INTERVAL_MS = 5_000;
+const PING_MAX_RETRIES = 4;
+
 interface LivekitTokenResult {
   status: 200 | 400 | 401 | 403 | 503;
   body: Record<string, unknown>;
@@ -239,6 +266,14 @@ export interface OfficeServerOverrides {
    * middleware de CORS).
    */
   allowedOrigins?: readonly string[];
+  /**
+   * Acorta la ventana de reconexion de `OfficeRoom` (#52). Ausente deja la de
+   * produccion (`RECONNECTION_WINDOW_SECONDS`). Existe por la misma razon que
+   * los overrides de arriba: sin el, probar que el avatar sobrevive una caida
+   * Y que acaba desapareciendo costaria medio minuto de reloj por caso, y una
+   * suite que tarda eso deja de correrse.
+   */
+  reconnectionWindowSeconds?: number;
 }
 
 /**
@@ -698,11 +733,21 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
 
   const httpServer = createServer(app);
   const gameServer = new Server({
-    transport: new WebSocketTransport({ server: httpServer }),
+    transport: new WebSocketTransport({
+      server: httpServer,
+      pingInterval: PING_INTERVAL_MS,
+      pingMaxRetries: PING_MAX_RETRIES,
+    }),
   });
   // D4: el registro se inyecta via options, `OfficeRoom` no lo crea. Lo mismo
-  // con el verificador (#8): la sala no lee `process.env`.
-  gameServer.define(OFFICE_ROOM_NAME, OfficeRoom, { sessions, auth, directory });
+  // con el verificador (#8): la sala no lee `process.env`. Y lo mismo con la
+  // ventana de reconexion (#52), que ademas los tests acortan.
+  gameServer.define(OFFICE_ROOM_NAME, OfficeRoom, {
+    sessions,
+    auth,
+    directory,
+    reconnectionWindowSeconds: overrides?.reconnectionWindowSeconds,
+  });
 
   return {
     gameServer,

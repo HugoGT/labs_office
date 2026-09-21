@@ -33,8 +33,9 @@ const openRooms: { leave: () => Promise<number> }[] = [];
 // registra su propio handler de `uncaughtException` y con 10 tests se pasa del
 // limite por defecto de 10. Es ruido del arnes, no una fuga del codigo propio.
 // Subido a 100 al anadir los tests del directorio (#24), que levantan un
-// servidor mas por caso.
-process.setMaxListeners(100);
+// servidor mas por caso, y a 150 al anadir los de la ventana de reconexion
+// (#52), que hacen lo mismo.
+process.setMaxListeners(150);
 
 beforeEach(async () => {
   server = createOfficeServer();
@@ -1016,5 +1017,110 @@ describe('OfficeRoom: el motivo del rechazo se registra en el servidor (#24)', (
       room.onAuth({} as ServerClient, { token: 'token-de-ana' }, {} as never),
     ).resolves.toMatchObject({ uid: 'uid-ana' });
     expect(logged).toEqual([]);
+  });
+});
+
+/**
+ * Reconexion tras una caida (issue #52). El fallo que estos tests fijan es el
+ * que se veia en produccion: a un cliente le desaparecia el avatar del otro y
+ * solo recargando LAS DOS pestanas volvia. Nada del lado del cliente puede
+ * arreglarlo si el servidor borra el jugador del estado en el primer instante
+ * de silencio, porque ese borrado ya viajo a todo el mundo como `onRemove`.
+ *
+ * La ventana se inyecta corta (1 s) en vez de falsear el reloj: el camino que
+ * importa es el de Colyseus de verdad -- `allowReconnection` reservando el
+ * asiento y su temporizador rechazando el `Deferred` -- y un reloj falso no
+ * prueba ese camino, prueba un doble de el.
+ */
+describe('OfficeRoom: ventana de reconexion (issue #52)', () => {
+  let dropServer: OfficeServer;
+  let dropEndpoint: string;
+
+  beforeEach(async () => {
+    dropServer = createOfficeServer({ reconnectionWindowSeconds: 1 });
+    dropEndpoint = `ws://localhost:${await dropServer.listen(0)}`;
+  });
+
+  afterEach(async () => {
+    await dropServer.shutdown();
+  });
+
+  function joinDropServer(name: string) {
+    return new Client(dropEndpoint).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { name });
+  }
+
+  /**
+   * Corta el socket sin mandar el `LEAVE_ROOM` consentido, que es literalmente
+   * lo que hace `room.leave(false)` en `colyseus.js` (`Room.js:70-86`:
+   * `consented` manda el frame, `!consented` llama a `connection.close()`).
+   * Eso es una caida simulada, no una salida: el servidor recibe un codigo de
+   * cierre que NO es 4000 y por tanto `onLeave(client, consented=false)`.
+   */
+  function dropSocket(room: { leave(consented?: boolean): Promise<number> }): Promise<number> {
+    return room.leave(false);
+  }
+
+  it('una caida no consentida deja el avatar en pie para los demas', async () => {
+    const a = await joinDropServer('Ana');
+    const b = await joinDropServer('Beto');
+    openRooms.push(a);
+    await waitFor(() => a.state.players.size === 2);
+    const droppedId = b.sessionId;
+
+    const closeCode = await dropSocket(b);
+
+    // La premisa del test: si esto fuese 4000 estariamos probando una salida
+    // voluntaria y no una caida, y el resto de la asercion no valdria nada.
+    expect(closeCode).not.toBe(4000);
+    // Margen suficiente para que un borrado inmediato hubiese llegado ya: la
+    // sincronizacion de Colyseus es de milisegundos, no de cientos.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(a.state.players.has(droppedId)).toBe(true);
+  });
+
+  it('agotada la ventana, el avatar del que se cayo si desaparece', async () => {
+    const a = await joinDropServer('Ana');
+    const b = await joinDropServer('Beto');
+    openRooms.push(a);
+    await waitFor(() => a.state.players.size === 2);
+    const droppedId = b.sessionId;
+
+    await dropSocket(b);
+
+    // Un fantasma de pie para siempre seria tan malo como el parpadeo: la
+    // ventana tiene que cerrarse sola.
+    await waitFor(() => !a.state.players.has(droppedId), 4000);
+  });
+
+  it('una salida voluntaria no espera la ventana: se va en el acto', async () => {
+    const a = await joinDropServer('Ana');
+    const b = await joinDropServer('Beto');
+    openRooms.push(a);
+    await waitFor(() => a.state.players.size === 2);
+    const leftId = b.sessionId;
+
+    await b.leave();
+
+    // La ventana es de 1 s; esto tiene que resolverse muy por debajo de eso, o
+    // cerrar la pestana dejaria un avatar plantado un segundo entero.
+    await waitFor(() => !a.state.players.has(leftId), 500);
+  });
+
+  it('la sesion de LiveKit sobrevive la ventana y solo muere al expirar', async () => {
+    const a = await joinDropServer('Ana');
+    const b = await joinDropServer('Beto');
+    openRooms.push(a);
+    await waitFor(() => a.state.players.size === 2);
+    const droppedId = b.sessionId;
+
+    await dropSocket(b);
+
+    // Sin esto, el que vuelve tendria avatar pero no podria pedir token de
+    // LiveKit: se le veria y no se le oiria, que es un modo degradado peor de
+    // diagnosticar que la desaparicion entera.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(dropServer.sessions.has(droppedId)).toBe(true);
+
+    await waitFor(() => !dropServer.sessions.has(droppedId), 4000);
   });
 });
