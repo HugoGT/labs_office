@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CharacterContainer, NpcContainer } from './characters';
+import type { CharacterContainer } from './characters';
 import {
   BUILT_IN_SPACES,
   BUILT_IN_SPACES_VERSION,
@@ -9,7 +9,6 @@ import {
   MAP_W,
   PLAYER_SPAWN_TX,
   PLAYER_SPAWN_TY,
-  PROX_RADIUS,
   TILE,
   TREES,
   WORLD_H,
@@ -19,7 +18,6 @@ import {
 import { TERRAIN_SHEET } from './assets';
 import { deskZoneName } from './deskLayout';
 import type { DeskDecorItem, DeskOccupant, OfficeDesk } from './desksPort';
-import { NPCS } from './npcData';
 import { createOfficeBridge } from './officeBridge';
 import { DEFAULT_NAME, DEFAULT_STATUS, type PresenceStatus } from './officeProtocol';
 import { STATUS_COLOR } from './presence';
@@ -100,23 +98,17 @@ async function bootOfficeScene(
 }
 
 /**
- * El jugador local es el unico contenedor con cuerpo fisico: ni los NPCs ni
- * los avatares remotos lo tienen. Se busca asi y no por su nombre porque el
- * nombre es justo lo que varias pruebas miden (#6): atarlo aqui haria que el
- * helper dejase de encontrarlo en cuanto la sesion traiga otro.
+ * El jugador local es el unico contenedor con cuerpo fisico: los avatares
+ * remotos no lo tienen. Se busca asi y no por su nombre porque el nombre es
+ * justo lo que varias pruebas miden (#6): atarlo aqui haria que el helper
+ * dejase de encontrarlo en cuanto la sesion traiga otro.
  */
 function findPlayer(scene: Phaser.Scene): CharacterContainer {
   const player = scene.children.list.find(
-    (c): c is CharacterContainer => c.type === 'Container' && !('npcId' in c) && c.body !== null,
+    (c): c is CharacterContainer => c.type === 'Container' && c.body !== null,
   );
   if (!player) throw new Error('player container not found in scene');
   return player;
-}
-
-function findNpcs(scene: Phaser.Scene): NpcContainer[] {
-  return scene.children.list.filter(
-    (c): c is NpcContainer => c.type === 'Container' && 'npcId' in c,
-  );
 }
 
 /** Codigos de tecla legacy (`keyCode`), que es lo que Phaser's Key matching usa internamente. */
@@ -142,7 +134,7 @@ describe('OfficeScene: identidad y construccion (D2/D5)', () => {
   });
 });
 
-describe('OfficeScene dentro de un Phaser.Game real: mapa, NPCs y jugador', () => {
+describe('OfficeScene dentro de un Phaser.Game real: mapa y jugador', () => {
   it('pinta el suelo completo, mobiliario, arboles y etiquetas de zona en create()', async () => {
     const { scene } = await bootOfficeScene();
 
@@ -165,12 +157,11 @@ describe('OfficeScene dentro de un Phaser.Game real: mapa, NPCs y jugador', () =
     expect(texts).toHaveLength(ZONE_LABELS.length);
   });
 
-  it('crea los 33 NPCs del roster mas el jugador (slice 7 completa el esqueleto de la 5b/6)', async () => {
+  it('crea al jugador local y a nadie mas: la oficina arranca vacia de companeros', async () => {
     const { scene } = await bootOfficeScene();
 
     const containers = scene.children.list.filter((c) => c.type === 'Container');
-    expect(containers).toHaveLength(NPCS.length + 1);
-    expect(findNpcs(scene)).toHaveLength(NPCS.length);
+    expect(containers).toHaveLength(1);
     expect(findPlayer(scene).nameText).toBe(DEFAULT_NAME);
   });
 });
@@ -246,55 +237,32 @@ describe('OfficeScene: colisiones (app.js: colisionador fusionado, D6)', () => {
 });
 
 describe('OfficeScene: depth-sorting por y (app.js:497-499)', () => {
-  it('el sprite con mayor y queda por delante del de menor y tras update()', async () => {
-    const { scene } = await bootOfficeScene();
-    const npcs = findNpcs(scene);
-    const lower = npcs.reduce((a, b) => (a.y < b.y ? a : b));
-    const higher = npcs.reduce((a, b) => (a.y > b.y ? a : b));
-
-    await vi.waitFor(() => {
-      expect(higher.depth).toBeGreaterThan(lower.depth);
+  it('el contenedor con mayor y queda por delante del de menor y tras update()', async () => {
+    const connector = fakeConnector();
+    const { scene } = await bootOfficeScene(createOfficeBridge(), {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
     });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const player = findPlayer(scene);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', x: player.x, y: player.y }));
+    const remote = findRemoteAvatars(scene)[0];
+
+    // Se mueve al jugador SIN tocar su `depth`: quien reordena es `update()`,
+    // y no la profundidad que cada contenedor recibio al crearse.
+    player.setPosition(player.x, remote.y - 4 * TILE);
+    await vi.waitFor(() => {
+      expect(player.depth).toBeLessThan(remote.depth);
+    }, LOOP_WAIT);
+
+    player.setPosition(player.x, remote.y + 4 * TILE);
+    await vi.waitFor(() => {
+      expect(player.depth).toBeGreaterThan(remote.depth);
+    }, LOOP_WAIT);
   });
 });
 
 describe('OfficeScene: proximidad y salas (app.js:444-471, cada 250ms)', () => {
-  it(
-    'el anillo de habla se apaga estando cerca: no es proximidad pura (app.js:452)',
-    async () => {
-      const { scene } = await bootOfficeScene();
-      const player = findPlayer(scene);
-      // El primer NPC del roster no tiene wander, asi que no se mueve durante la muestra.
-      const npc = findNpcs(scene)[0];
-      // Justo encima del NPC: la distancia se mantiene en 0 durante toda la prueba.
-      player.setPosition(npc.x, npc.y);
-
-      // Primero esperamos a verlo ENCENDIDO. Esto ancla la prueba: demuestra que el
-      // tick de proximidad corre y que estamos dentro del radio. Sin este anclaje, el
-      // `false` inicial de `spawnNpcs` (el anillo nace invisible) bastaria para dar el
-      // test por bueno sin haber observado el ciclo siquiera.
-      await vi.waitFor(() => expect(npc.ring.visible).toBe(true), LOOP_WAIT);
-
-      // Ya encendido y sin movernos, tiene que apagarse dentro de un ciclo de 4000ms:
-      // `speaking = near && ((now + phase) % 4000) < 1800`. Esto es lo que cae si
-      // alguien simplifica a `setVisible(near)` o a `setVisible(true)`.
-      //
-      // El muestreo avanza por reloj de juego (dos ciclos completos de 4000ms):
-      // 50 esperas reales de 100ms no garantizan ni un ciclo cuando el runner
-      // rinde a una fraccion de la velocidad local.
-      let wentSilentWhileNear = false;
-      const deadline = scene.time.now + 2 * 4000;
-      while (!wentSilentWhileNear && scene.time.now < deadline) {
-        await advanceGameClock(scene, 100);
-        const d = Phaser.Math.Distance.Between(player.x, player.y, npc.x, npc.y);
-        wentSilentWhileNear = d < PROX_RADIUS && !npc.ring.visible;
-      }
-
-      expect(wentSilentWhileNear).toBe(true);
-    },
-    60000,
-  );
-
   it('emite "room" al entrar a una sala', async () => {
     const bridge = createOfficeBridge();
     const rooms: (string | null)[] = [];
@@ -441,135 +409,6 @@ describe('OfficeScene: audio/video por proximidad (D3, issue #17)', () => {
   );
 });
 
-describe('OfficeScene: comando teleportTo via el puente (app.js:474-486, D2)', () => {
-  it('mueve al jugador a una tile libre adyacente al NPC objetivo', async () => {
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge);
-    const player = findPlayer(scene);
-    const targetNpc = findNpcs(scene)[0];
-
-    bridge.teleportTo(targetNpc.npcId);
-
-    await vi.waitFor(() => {
-      const dx = Math.abs(player.x - targetNpc.x) / TILE;
-      const dy = Math.abs(player.y - targetNpc.y) / TILE;
-      expect(dx).toBeLessThanOrEqual(1);
-      expect(dy).toBeLessThanOrEqual(1);
-      expect(dx + dy).toBeGreaterThan(0);
-    });
-  });
-
-  it('funciona igual para un segundo NPC (confirma el mismo mecanismo que usa ContextMenu "Ir a su escritorio", slice 9)', async () => {
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge);
-    const player = findPlayer(scene);
-    const npcs = findNpcs(scene);
-    const targetNpc = npcs[npcs.length - 1];
-
-    bridge.teleportTo(targetNpc.npcId);
-
-    await vi.waitFor(() => {
-      const dx = Math.abs(player.x - targetNpc.x) / TILE;
-      const dy = Math.abs(player.y - targetNpc.y) / TILE;
-      expect(dx).toBeLessThanOrEqual(1);
-      expect(dy).toBeLessThanOrEqual(1);
-      expect(dx + dy).toBeGreaterThan(0);
-    });
-  });
-
-  it('desuscribe el handler de onCommand al apagar la escena (SHUTDOWN, D2)', async () => {
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge);
-    const player = findPlayer(scene);
-    const targetNpc = findNpcs(scene)[0];
-    const beforeX = player.x;
-    const beforeY = player.y;
-
-    scene.sys.events.emit(Phaser.Scenes.Events.SHUTDOWN);
-    bridge.teleportTo(targetNpc.npcId);
-
-    // Handler desuscrito: la posicion del jugador no cambia tras SHUTDOWN.
-    expect(player.x).toBe(beforeX);
-    expect(player.y).toBe(beforeY);
-  });
-});
-
-describe('OfficeScene: comando callNpc via el puente (el NPC acude a la llamada)', () => {
-  it('el NPC llamado camina hasta una tile adyacente al jugador', async () => {
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge);
-    const player = findPlayer(scene);
-    const npc = findNpcs(scene)[0];
-    // El NPC 0 nace en (4,7) y el jugador en (22,28): arrancan lejos.
-    const startDistance = Phaser.Math.Distance.Between(player.x, player.y, npc.x, npc.y);
-    expect(startDistance).toBeGreaterThan(PROX_RADIUS);
-
-    bridge.callNpc(npc.npcId);
-
-    await vi.waitFor(
-      () => {
-        const dx = Math.abs(npc.x - player.x) / TILE;
-        const dy = Math.abs(npc.y - player.y) / TILE;
-        expect(dx).toBeLessThanOrEqual(1);
-        expect(dy).toBeLessThanOrEqual(1);
-        // Queda *junto al* jugador, no encima de el.
-        expect(dx + dy).toBeGreaterThan(0);
-      },
-      { timeout: 15000 },
-    );
-  }, 20000);
-
-  it('llamar a un NPC mueve al NPC, no al jugador (al reves que teleportTo)', async () => {
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge);
-    const player = findPlayer(scene);
-    const npc = findNpcs(scene)[0];
-    const playerX = player.x;
-    const playerY = player.y;
-    const npcX = npc.x;
-
-    bridge.callNpc(npc.npcId);
-    await vi.waitFor(() => expect(npc.x).not.toBe(npcX), { timeout: 5000 });
-
-    expect(player.x).toBe(playerX);
-    expect(player.y).toBe(playerY);
-  }, 10000);
-
-  it('un NPC quieto no se mueve solo: sin llamada no hay desplazamiento', async () => {
-    const { scene } = await bootOfficeScene();
-    const npcs = findNpcs(scene);
-    const before = npcs.map((c) => ({ x: c.x, y: c.y }));
-
-    // Antes, los tres NPCs con `wander:true` se reprogramaban cada 2.5-6s. Esta
-    // ventana cubre de sobra ese peor caso: si alguien resucita el bucle, cae aqui.
-    await new Promise((resolve) => setTimeout(resolve, 7000));
-
-    npcs.forEach((c, i) => {
-      expect({ x: c.x, y: c.y }).toEqual(before[i]);
-    });
-  }, 15000);
-
-  it('desuscribe el handler de callNpc al apagar la escena (SHUTDOWN, D2)', async () => {
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge);
-    const npc = findNpcs(scene)[0];
-
-    bridge.callNpc(npc.npcId);
-    // `walkNpcTo` crea el tween de forma sincrona, asi que basta con mirarlo.
-    expect(npc.walkTween).toBeDefined();
-    npc.walkTween?.stop();
-    npc.walkTween = undefined;
-
-    scene.sys.events.emit(Phaser.Scenes.Events.SHUTDOWN);
-    bridge.callNpc(npc.npcId);
-
-    // Se comprueba sin esperar a proposito: tras un SHUTDOWN emitido a mano el
-    // bucle del juego sigue pisando `update()` con el jugador ya desmontado, y
-    // dormir aqui solo probaria ese artefacto del arnes, no la desuscripcion.
-    expect(npc.walkTween).toBeUndefined();
-  });
-});
-
 /**
  * Doble de conexion: captura los handlers que la escena registra para poder
  * simular altas, cambios y bajas remotas sin levantar un Colyseus. El
@@ -638,9 +477,9 @@ function remoteSnapshot(overrides: Record<string, unknown> = {}) {
 
 function findRemoteAvatars(scene: Phaser.Scene): CharacterContainer[] {
   // Complemento exacto de `findPlayer`, y por el mismo motivo: sin cuerpo
-  // fisico y sin `npcId` solo quedan los avatares que llegan por Colyseus.
+  // fisico solo quedan los avatares que llegan por Colyseus.
   return scene.children.list.filter(
-    (c): c is CharacterContainer => c.type === 'Container' && !('npcId' in c) && c.body === null,
+    (c): c is CharacterContainer => c.type === 'Container' && c.body === null,
   );
 }
 
@@ -732,7 +571,6 @@ describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
     // en desarrollo eso seria la mitad del tiempo.
     await vi.waitFor(() => expect(presence).toContainEqual({ online: false, peers: 0 }));
     expect(findPlayer(scene).nameText).toBe(DEFAULT_NAME);
-    expect(findNpcs(scene)).toHaveLength(NPCS.length);
   });
 
   it('publica la posicion del jugador local en cada frame', async () => {
@@ -1705,7 +1543,7 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
   });
 
   it('el clic no se cuela al mapa de fondo', async () => {
-    // Mismo `stopPropagation` que el clic de un NPC o de un peer: sin el, el
+    // Mismo `stopPropagation` que el clic de un peer: sin el, el
     // `pointerdown` de la escena cerraria el menu contextual a la vez.
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
@@ -1742,7 +1580,6 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
     bridge.emitCommand('desks', { desks: [] });
 
     expect(countZones(scene)).toBe(0);
-    expect(findNpcs(scene)).toHaveLength(NPCS.length);
     expect(findPlayer(scene)).toBeDefined();
   });
 

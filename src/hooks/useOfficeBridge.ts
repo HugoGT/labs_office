@@ -3,7 +3,7 @@ import type { OfficeBridge, OfficeEventMap } from '../game/officeBridge';
 
 export interface UseOfficeBridgeResult {
   room: string | null;
-  menu: OfficeEventMap['npcmenu'] | null;
+  menu: OfficeEventMap['peermenu'] | null;
   presence: OfficeEventMap['presence'];
   closeMenu: () => void;
 }
@@ -18,7 +18,7 @@ const INITIAL_PRESENCE: OfficeEventMap['presence'] = { online: false, peers: 0 }
  */
 export function useOfficeBridge(bridge: OfficeBridge): UseOfficeBridgeResult {
   const [room, setRoom] = useState<string | null>(null);
-  const [menu, setMenu] = useState<OfficeEventMap['npcmenu'] | null>(null);
+  const [menu, setMenu] = useState<OfficeEventMap['peermenu'] | null>(null);
   const [presence, setPresence] = useState<OfficeEventMap['presence']>(INITIAL_PRESENCE);
 
   useEffect(() => {
@@ -26,13 +26,13 @@ export function useOfficeBridge(bridge: OfficeBridge): UseOfficeBridgeResult {
     // par por `spaceId`, pero el HUD sigue rotulando por nombre, y este hook
     // no cambia su contrato publico solo porque la clave interna se movio.
     const unsubscribeRoom = bridge.on('room', (payload) => setRoom(payload.name));
-    const unsubscribeNpcMenu = bridge.on('npcmenu', (payload) => setMenu(payload));
+    const unsubscribePeerMenu = bridge.on('peermenu', (payload) => setMenu(payload));
     const unsubscribeCloseMenu = bridge.on('closemenu', () => setMenu(null));
     const unsubscribePresence = bridge.on('presence', (payload) => setPresence(payload));
 
     return () => {
       unsubscribeRoom();
-      unsubscribeNpcMenu();
+      unsubscribePeerMenu();
       unsubscribeCloseMenu();
       unsubscribePresence();
     };

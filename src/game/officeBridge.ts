@@ -25,16 +25,13 @@ export interface OfficeEventMap {
    */
   room: { spaceId: string | null; name: string | null };
   /**
-   * Menu contextual al hacer clic en un personaje (issue #2, D1): union
-   * discriminada por `target.kind`. Antes era un `id` plano que solo servia
-   * para NPCs simulados; ahora un peer real se direcciona por `sessionId` y
-   * un NPC sigue direccionandose por `npcId` (renombrado desde `id`, movido
-   * DENTRO de la variante). `ContextMenu`/`OfficeShell` ramifican sobre
-   * `target.kind`; `characters.ts` (NPCs) y `remoteAvatarSink.ts` (peers)
-   * son los unicos emisores.
+   * Menu contextual al hacer clic en un personaje. Al retirarse los NPCs
+   * simulados dejo de ser una union discriminada: el unico personaje clicable
+   * es un peer real, asi que el destino es su `sessionId` a secas y
+   * `remoteAvatarSink.ts` es el unico emisor.
    */
-  npcmenu: {
-    target: { kind: 'npc'; npcId: number } | { kind: 'peer'; sessionId: string };
+  peermenu: {
+    sessionId: string;
     name: string;
     status: string;
     statusCode: PresenceStatus;
@@ -64,7 +61,7 @@ export interface OfficeEventMap {
   /**
    * Estado de la conexion con el servidor Colyseus y cuantos avatares reales
    * hay ademas del propio. `online: false` no es un error a mostrar en rojo:
-   * la oficina sigue siendo jugable en solitario con los NPCs simulados.
+   * la oficina sigue siendo recorrible en solitario.
    */
   presence: { online: boolean; peers: number };
   /**
@@ -107,13 +104,12 @@ export interface OfficeEventMap {
 }
 
 export interface OfficeCommandMap {
-  teleportTo: { npcId: number };
-  callNpc: { npcId: number };
   /**
    * Cambio de estado de presencia (#1). React es el dueno del estado y la
-   * escena lo sigue. No lleva metodo de conveniencia como los dos de arriba:
-   * esos existen por paridad con el prototipo, y ampliar esa superficie por
-   * cada comando nuevo reconstruiria el `window.officeAPI` que D1 retiro.
+   * escena lo sigue. Viaja por `emitCommand` sin metodo de conveniencia: los
+   * dos que existian (`teleportTo`/`callNpc`) se fueron con los NPCs, y
+   * reponer esa superficie por cada comando nuevo reconstruiria el
+   * `window.officeAPI` que D1 retiro.
    */
   setStatus: { status: PresenceStatus };
   /**
@@ -133,8 +129,8 @@ export interface OfficeCommandMap {
   speakers: { sessionIds: string[] };
   /**
    * Los 3 comandos de llamada (issue #2, D3) viajan solo por `emitCommand`,
-   * como `setStatus`: ningun metodo de conveniencia nuevo (`bridge.callPeer()`
-   * no existe) para no regrowth-ear el `window.officeAPI` que D1 retiro.
+   * como `setStatus`: ningun metodo de conveniencia (`bridge.callPeer()` no
+   * existe) para no regrowth-ear el `window.officeAPI` que D1 retiro.
    */
   callPeer: { sessionId: string };
   /**
@@ -191,8 +187,6 @@ export interface OfficeBridge {
    * without this module exposing `commands` itself.
    */
   emitCommand<K extends keyof OfficeCommandMap>(type: K, payload: OfficeCommandMap[K]): void;
-  teleportTo(npcId: number): void;
-  callNpc(npcId: number): void;
   /**
    * Canal continuo posicion-por-cuadro (issue #17, D4): deliberadamente NO es
    * un `EventTarget`. La escena escribe cada `update()`; el overlay de tiles
@@ -234,12 +228,6 @@ export function createOfficeBridge(): OfficeBridge {
       return subscribe(commands, type, handler);
     },
     emitCommand: dispatchCommand,
-    teleportTo(npcId) {
-      dispatchCommand('teleportTo', { npcId });
-    },
-    callNpc(npcId) {
-      dispatchCommand('callNpc', { npcId });
-    },
     anchors,
   };
 }

@@ -26,48 +26,6 @@ describe('createOfficeBridge', () => {
     expect((window as unknown as { officeAPI?: unknown }).officeAPI).toBeUndefined();
   });
 
-  it('onCommand entrega comandos tipados y respeta la desuscripcion', () => {
-    const bridge = createOfficeBridge();
-    const handler = vi.fn();
-
-    const unsubscribe = bridge.onCommand('teleportTo', handler);
-    bridge.teleportTo(7);
-    expect(handler).toHaveBeenCalledTimes(1);
-    expect(handler).toHaveBeenCalledWith({ npcId: 7 });
-
-    unsubscribe();
-    bridge.teleportTo(8);
-    expect(handler).toHaveBeenCalledTimes(1);
-  });
-
-  it('callNpc entrega el comando de llamada y respeta la desuscripcion', () => {
-    const bridge = createOfficeBridge();
-    const handler = vi.fn();
-
-    const unsubscribe = bridge.onCommand('callNpc', handler);
-    bridge.callNpc(3);
-    expect(handler).toHaveBeenCalledTimes(1);
-    expect(handler).toHaveBeenCalledWith({ npcId: 3 });
-
-    unsubscribe();
-    bridge.callNpc(4);
-    expect(handler).toHaveBeenCalledTimes(1);
-  });
-
-  it('callNpc y teleportTo son canales distintos: uno no dispara el handler del otro', () => {
-    const bridge = createOfficeBridge();
-    const onCall = vi.fn();
-    const onTeleport = vi.fn();
-
-    bridge.onCommand('callNpc', onCall);
-    bridge.onCommand('teleportTo', onTeleport);
-
-    bridge.callNpc(1);
-
-    expect(onCall).toHaveBeenCalledTimes(1);
-    expect(onTeleport).not.toHaveBeenCalled();
-  });
-
   it('entrega el payload de "voice" completo (con nombres) y deja de notificar tras desuscribirse (D3, issue #17)', () => {
     const bridge = createOfficeBridge();
     const handler = vi.fn();
@@ -110,18 +68,18 @@ describe('createOfficeBridge', () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
-  it('emitCommand y teleportTo comparten canal pero no se confunden entre tipos', () => {
+  it('dos comandos comparten canal pero no se confunden entre tipos', () => {
     const bridge = createOfficeBridge();
     const onTeleportToTile = vi.fn();
-    const onTeleportTo = vi.fn();
+    const onSetStatus = vi.fn();
 
     bridge.onCommand('teleportToTile', onTeleportToTile);
-    bridge.onCommand('teleportTo', onTeleportTo);
+    bridge.onCommand('setStatus', onSetStatus);
 
     bridge.emitCommand('teleportToTile', { tx: 10, ty: 12 });
 
     expect(onTeleportToTile).toHaveBeenCalledTimes(1);
-    expect(onTeleportTo).not.toHaveBeenCalled();
+    expect(onSetStatus).not.toHaveBeenCalled();
   });
 
   it('setStatus viaja por el canal de comandos y respeta la desuscripcion (#1)', () => {
@@ -138,13 +96,16 @@ describe('createOfficeBridge', () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
-  it('setStatus no tiene metodo de conveniencia propio: se emite como comando generico', () => {
-    // `teleportTo` y `callNpc` los tienen por paridad con el prototipo, no
-    // porque haga falta. Ampliar esa superficie por cada comando nuevo la
-    // convertiria en el `window.officeAPI` que D1 vino a retirar.
+  it('ningun comando tiene metodo de conveniencia: todos se emiten como comando generico', () => {
+    // `teleportTo` y `callNpc` eran los dos ultimos que quedaban, por paridad
+    // con el prototipo y no porque hiciesen falta; se fueron con los NPCs
+    // simulados. Reponer esa superficie por cada comando nuevo reconstruiria
+    // el `window.officeAPI` que D1 vino a retirar.
     const bridge = createOfficeBridge();
 
     expect(bridge).not.toHaveProperty('setStatus');
+    expect(bridge).not.toHaveProperty('teleportTo');
+    expect(bridge).not.toHaveProperty('callNpc');
   });
 
   it('expone un canal de anclas independiente por instancia, ajeno al EventTarget de eventos (issue #17, D4)', () => {

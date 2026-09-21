@@ -225,11 +225,11 @@ describe('createPhaserAvatarSink: clic en un avatar de peer real (issue #2, D1)'
     } as unknown as Phaser.Input.Pointer;
   }
 
-  it('un pointerdown emite npcmenu con el target peer, direccionado por el sessionId del avatar', async () => {
+  it('un pointerdown emite peermenu direccionado por el sessionId del avatar', async () => {
     const received: unknown[] = [];
     await withScene((scene) => {
       const bridge = createOfficeBridge();
-      bridge.on('npcmenu', (payload) => received.push(payload));
+      bridge.on('peermenu', (payload) => received.push(payload));
 
       const avatar = createPhaserAvatarSink(scene, bridge).create(
         snapshot({ sessionId: 'peer-42', name: 'Ana', status: 'g' }),
@@ -242,7 +242,7 @@ describe('createPhaserAvatarSink: clic en un avatar de peer real (issue #2, D1)'
 
     expect(received).toEqual([
       {
-        target: { kind: 'peer', sessionId: 'peer-42' },
+        sessionId: 'peer-42',
         name: 'Ana',
         status: 'En línea',
         statusCode: 'g',
@@ -256,7 +256,7 @@ describe('createPhaserAvatarSink: clic en un avatar de peer real (issue #2, D1)'
     const received: unknown[] = [];
     await withScene((scene) => {
       const bridge = createOfficeBridge();
-      bridge.on('npcmenu', (payload) => received.push(payload));
+      bridge.on('peermenu', (payload) => received.push(payload));
 
       const sink = createPhaserAvatarSink(scene, bridge);
       const avatar = sink.create(snapshot({ sessionId: 'peer-7', name: 'Ana', status: 'g' }));
@@ -267,15 +267,15 @@ describe('createPhaserAvatarSink: clic en un avatar de peer real (issue #2, D1)'
       avatar.emit('pointerdown', fakePointer());
     });
 
-    // Si el handler cerrase sobre el snapshot de creacion (como un NPC, cuyo
-    // estado es fijo para siempre), esto seguiria diciendo "g": ofrecer
-    // "Llamar" sobre alguien que acaba de pasar a No molestar.
+    // Si el handler cerrase sobre el snapshot de creacion, cuyo estado queda
+    // fijo para siempre, esto seguiria diciendo "g": ofrecer "Llamar" sobre
+    // alguien que acaba de pasar a No molestar.
     expect(received).toHaveLength(1);
     expect((received[0] as { statusCode: string }).statusCode).toBe('r');
     expect((received[0] as { status: string }).status).toBe('No molestar');
   });
 
-  it('el pointerdown detiene la propagacion, igual que el de un NPC (no debe disparar tambien el clic de mapa)', async () => {
+  it('el pointerdown detiene la propagacion (no debe disparar tambien el clic de mapa)', async () => {
     const stopPropagation = vi.fn();
     await withScene((scene) => {
       const bridge = createOfficeBridge();

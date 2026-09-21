@@ -7,7 +7,7 @@
 
 // Import de VALOR, no de tipo (a diferencia de antes de la unit 8): hace
 // falta `Phaser.Geom.Rectangle`/`.Contains` en tiempo de ejecucion para el
-// area de contacto del clic, igual que en `characters.ts:spawnNpcs`.
+// area de contacto del clic del menu contextual.
 import Phaser from 'phaser';
 import {
   makeCharacter,
@@ -77,22 +77,21 @@ export function createPhaserAvatarSink(
       container.setDepth(snapshot.y);
       container.spacesVersion = snapshot.spacesVersion;
 
-      // Issue #2, unit 8 (kill switch): un peer real se hace clicable igual
-      // que un NPC (`characters.ts:spawnNpcs`), misma area de contacto y mismo
-      // `stopPropagation` para no colar el clic al mapa de fondo. La diferencia
-      // que importa (D1, comentario del diseno): nombre y estado se leen del
-      // CONTENEDOR en el momento del clic, nunca del `snapshot` de creacion --
-      // a diferencia de un NPC, un peer muta via `update()` mientras vive, y
-      // cerrar sobre el snapshot ofreceria "Llamar" sobre alguien que acaba de
-      // pasar a "No molestar".
+      // Issue #2, unit 8 (kill switch): el peer es el unico personaje clicable
+      // de la oficina, con `stopPropagation` para no colar el clic al mapa de
+      // fondo. Lo que importa (D1, comentario del diseno): nombre y estado se
+      // leen del CONTENEDOR en el momento del clic, nunca del `snapshot` de
+      // creacion -- un peer muta via `update()` mientras vive, y cerrar sobre
+      // el snapshot ofreceria "Llamar" sobre alguien que acaba de pasar a
+      // "No molestar".
       container.setInteractive(
         new Phaser.Geom.Rectangle(-16, -22, 32, 44),
         Phaser.Geom.Rectangle.Contains,
       );
       container.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
         pointer.event.stopPropagation();
-        bridge.emit('npcmenu', {
-          target: { kind: 'peer', sessionId: snapshot.sessionId },
+        bridge.emit('peermenu', {
+          sessionId: snapshot.sessionId,
           name: container.nameText,
           status: STATUS_LABEL[container.status],
           statusCode: container.status,

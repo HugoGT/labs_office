@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { BUILT_IN_SPACES, PROX_RADIUS } from './mapData';
-import { detectSpace, isSpeaking, nearbyIndices, nearbyKey } from './proximity';
+import { detectSpace, nearbyIndices, nearbyKey } from './proximity';
 
 describe('nearbyIndices', () => {
-  it('reporta solo los NPCs estrictamente dentro del radio (app.js:450-451)', () => {
+  it('reporta solo los puntos estrictamente dentro del radio (app.js:450-451)', () => {
     const player = { x: 0, y: 0 };
     const inside = { x: 100, y: 0 };
     const exactlyOnRadius = { x: PROX_RADIUS, y: 0 };
@@ -12,20 +12,6 @@ describe('nearbyIndices', () => {
     const indices = nearbyIndices(player, [inside, exactlyOnRadius, outside], PROX_RADIUS);
 
     expect(indices).toEqual([0]);
-  });
-});
-
-describe('isSpeaking', () => {
-  it('es verdadero solo durante la primera parte del ciclo de 4000ms (app.js:452)', () => {
-    expect(isSpeaking(0, 0)).toBe(true);
-    expect(isSpeaking(1799, 0)).toBe(true);
-    expect(isSpeaking(1800, 0)).toBe(false);
-    expect(isSpeaking(3999, 0)).toBe(false);
-  });
-
-  it('el desfase de fase corre el ciclo', () => {
-    expect(isSpeaking(0, 2000)).toBe(false);
-    expect(isSpeaking(2000, 2000)).toBe(true);
   });
 });
 

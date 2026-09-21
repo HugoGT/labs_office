@@ -4,19 +4,19 @@ import { DO_NOT_DISTURB } from '../game/officeProtocol';
 import { statusCssColor } from '../game/presence';
 import styles from './ContextMenu.module.css';
 
-export type NpcMenuAction = 'call' | 'goto' | 'profile';
+export type PeerMenuAction = 'call' | 'profile';
 
 export interface ContextMenuProps {
-  menu: OfficeEventMap['npcmenu'] | null;
-  onAction: (action: NpcMenuAction, menu: OfficeEventMap['npcmenu']) => void;
+  menu: OfficeEventMap['peermenu'] | null;
+  onAction: (action: PeerMenuAction, menu: OfficeEventMap['peermenu']) => void;
   onClose: () => void;
 }
 
 /**
- * Menu contextual al hacer clic en un NPC, portado de `#ctxmenu`
- * (`index.html`, `app.js:474-486,588-608`). Se cierra con Escape o un clic
- * fuera de si mismo; ninguna accion abre una llamada/perfil real todavia
- * (`call`/`profile` solo notifican via toast, `goto` teletransporta).
+ * Menu contextual al hacer clic en un companero real, portado de `#ctxmenu`
+ * (`index.html`, `app.js:588-608`). Se cierra con Escape o un clic fuera de
+ * si mismo. "Ir a su escritorio" se fue con los NPCs simulados: una persona
+ * real no tiene escritorio asignado en el mapa (D2).
  */
 export function ContextMenu({ menu, onAction, onClose }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -44,12 +44,9 @@ export function ContextMenu({ menu, onAction, onClose }: ContextMenuProps) {
   if (!menu) return null;
 
   const dotColor = statusCssColor(menu.statusCode);
-  const isPeer = menu.target.kind === 'peer';
-  // D2: un peer real no tiene escritorio -- "Ir a su escritorio" es
-  // exclusivamente de NPC. D8: ademas del rechazo silencioso del servidor,
-  // el cliente deshabilita "Llamar" cuando el peer esta en No molestar; un
-  // NPC nunca esta en `r` en la practica, pero la regla es la misma union.
-  const callDisabled = isPeer && menu.statusCode === DO_NOT_DISTURB;
+  // D8: ademas del rechazo silencioso del servidor, el cliente deshabilita
+  // "Llamar" cuando el companero esta en No molestar.
+  const callDisabled = menu.statusCode === DO_NOT_DISTURB;
 
   return (
     <div
@@ -71,11 +68,6 @@ export function ContextMenu({ menu, onAction, onClose }: ContextMenuProps) {
       >
         📞 Llamar
       </button>
-      {!isPeer && (
-        <button type="button" className={styles.action} onClick={() => onAction('goto', menu)}>
-          🚶 Ir a su escritorio
-        </button>
-      )}
       <button type="button" className={styles.action} onClick={() => onAction('profile', menu)}>
         👤 Ver perfil
       </button>

@@ -119,10 +119,9 @@ export function isBlocked(grid: TerrainGrid, tx: number, ty: number): boolean {
 
 /**
  * Orden en que se prueban los vecinos al buscar una tile libre junto a otra.
- * Vivia dentro de `OfficeScene` como `TELEPORT_OFFSETS` (app.js:477), pero el
- * mismo recorrido lo necesitan ahora las dos direcciones: el jugador yendo al
- * escritorio de un NPC y el NPC acudiendo a una llamada. Vive aqui, junto al
- * predicado de bloqueo que consulta.
+ * Vivia dentro de `OfficeScene` como `TELEPORT_OFFSETS` (app.js:477). Vive
+ * aqui, junto al predicado de bloqueo que consulta, porque lo usa la
+ * auto-caminata hacia un companero que acepta una llamada.
  */
 export const ADJACENT_OFFSETS: readonly (readonly [number, number])[] = [
   [1, 0],

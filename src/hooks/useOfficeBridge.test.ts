@@ -13,14 +13,14 @@ describe('useOfficeBridge', () => {
     expect(result.current.menu).toBeNull();
   });
 
-  it('refleja los eventos emitidos por el puente (room, npcmenu)', () => {
+  it('refleja los eventos emitidos por el puente (room, peermenu)', () => {
     const bridge = createOfficeBridge();
     const { result } = renderHook(() => useOfficeBridge(bridge));
 
     act(() => {
       bridge.emit('room', { spaceId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'Cafetería' });
-      bridge.emit('npcmenu', {
-        target: { kind: 'npc', npcId: 3 },
+      bridge.emit('peermenu', {
+        sessionId: 'sess-3',
         name: 'Pablo',
         status: 'Disponible',
         statusCode: 'g',
@@ -31,7 +31,7 @@ describe('useOfficeBridge', () => {
 
     expect(result.current.room).toBe('Cafetería');
     expect(result.current.menu).toEqual({
-      target: { kind: 'npc', npcId: 3 },
+      sessionId: 'sess-3',
       name: 'Pablo',
       status: 'Disponible',
       statusCode: 'g',
@@ -45,8 +45,8 @@ describe('useOfficeBridge', () => {
     const { result } = renderHook(() => useOfficeBridge(bridge));
 
     act(() => {
-      bridge.emit('npcmenu', {
-        target: { kind: 'npc', npcId: 1 },
+      bridge.emit('peermenu', {
+        sessionId: 'sess-1',
         name: 'Ana',
         status: 'Disponible',
         statusCode: 'g',

@@ -20,7 +20,7 @@ import type Phaser from 'phaser';
 import { HAIRS, PANTS, SHIRTS, SKINS } from './mapData';
 import { FACINGS, type Facing } from './officeProtocol';
 
-/** Claves base de avatar de NPC (app.js:206-208): `av0`..`av9`. */
+/** Claves base de avatar (app.js:206-208): `av0`..`av9`, repartidas entre companeros reales. */
 export const AVATAR_KEYS: readonly string[] = Array.from({ length: 10 }, (_, i) => `av${i}`);
 
 /** Clave base de la textura del jugador (app.js:209): camisa amarilla distintiva. */

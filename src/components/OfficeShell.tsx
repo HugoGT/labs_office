@@ -14,7 +14,7 @@ import { useSpacesConfig } from '../hooks/useSpacesConfig';
 import { AudioUnblockPrompt } from './AudioUnblockPrompt';
 import { BottomBar } from './BottomBar';
 import { CallInvitationStack } from './CallInvitationStack';
-import { ContextMenu, type NpcMenuAction } from './ContextMenu';
+import { ContextMenu, type PeerMenuAction } from './ContextMenu';
 import { DeskDecorEditor } from './DeskDecorEditor';
 import { GameCanvas } from './GameCanvas';
 import { RecBadge } from './RecBadge';
@@ -358,48 +358,22 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
   );
 
   /**
-   * Acciones del menu contextual (`app.js:474-486,602-604`). `call` y `goto`
-   * son opuestos y conviene no confundirlos: `call` trae al NPC hasta ti,
-   * `goto` te lleva a ti hasta su escritorio.
+   * Acciones del menu contextual (`app.js:602-604`). Solo quedan dos desde que
+   * se retiraron los NPCs simulados: `call` pide la invitacion y `profile`
+   * muestra la ficha. `respondCall` es UN comando, no accept/pass -- la escena
+   * es quien sabe que "aceptar" implica caminar y quien conoce coordenadas del
+   * mundo (D3); React solo pide la invitacion.
    */
-  function handleMenuAction(action: NpcMenuAction, menu: OfficeEventMap['npcmenu']): void {
+  function handleMenuAction(action: PeerMenuAction, menu: OfficeEventMap['peermenu']): void {
     closeMenu();
 
-    if (action === 'call' || action === 'goto') {
-      // Peer real (issue #2, unit 11, D3): `ContextMenu` nunca ofrece "goto"
-      // para un peer (D2, sin escritorio propio), asi que solo `call` llega
-      // aqui. `respondCall` es UN comando, no accept/pass -- la escena es
-      // quien sabe que "aceptar" implica caminar y quien conoce coordenadas
-      // del mundo (D3); React solo pide la invitacion.
-      if (menu.target.kind === 'peer') {
-        if (action !== 'call') return;
-        bridge.emitCommand('callPeer', { sessionId: menu.target.sessionId });
-        setToastMessage(
-          <>
-            📞 Llamando a <b>{menu.name}</b>…
-          </>,
-        );
-        return;
-      }
-
-      const { npcId } = menu.target;
-
-      if (action === 'call') {
-        bridge.callNpc(npcId);
-        setToastMessage(
-          <>
-            📞 <b>{menu.name}</b> viene hacia ti… (prototipo: la videollamada 1:1 llegará con
-            LiveKit)
-          </>,
-        );
-      } else {
-        bridge.teleportTo(npcId);
-        setToastMessage(
-          <>
-            🚶 Te teletransportaste junto a <b>{menu.name}</b>
-          </>,
-        );
-      }
+    if (action === 'call') {
+      bridge.emitCommand('callPeer', { sessionId: menu.sessionId });
+      setToastMessage(
+        <>
+          📞 Llamando a <b>{menu.name}</b>…
+        </>,
+      );
       return;
     }
 

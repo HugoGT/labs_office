@@ -86,8 +86,7 @@ describe('OfficeShell', () => {
         on: expect.any(Function),
         emit: expect.any(Function),
         onCommand: expect.any(Function),
-        teleportTo: expect.any(Function),
-        callNpc: expect.any(Function),
+        emitCommand: expect.any(Function),
       }),
     );
   });
@@ -231,13 +230,13 @@ describe('OfficeShell', () => {
     expect(screen.queryByText(/^🔊/)).not.toBeInTheDocument();
   });
 
-  it('al recibir npcmenu del bridge, abre el ContextMenu con nombre y estado', () => {
+  it('al recibir peermenu del bridge, abre el ContextMenu con nombre y estado', () => {
     render(<OfficeShell />);
     const bridge = createGameMock.mock.calls[0][1];
 
     act(() =>
-      bridge.emit('npcmenu', {
-        target: { kind: 'npc', npcId: 3 },
+      bridge.emit('peermenu', {
+        sessionId: 'peer-3',
         name: 'Pablo',
         status: 'En línea',
         statusCode: 'g',
@@ -258,8 +257,8 @@ describe('OfficeShell', () => {
     const bridge = createGameMock.mock.calls[0][1];
 
     act(() =>
-      bridge.emit('npcmenu', {
-        target: { kind: 'npc', npcId: 3 },
+      bridge.emit('peermenu', {
+        sessionId: 'peer-3',
         name: 'Pablo',
         status: 'En línea',
         statusCode: 'g',
@@ -274,15 +273,14 @@ describe('OfficeShell', () => {
     expect(screen.queryByText('Pablo')).not.toBeInTheDocument();
   });
 
-  it('"Ir a su escritorio" llama a bridge.teleportTo con el id del NPC, muestra un toast y cierra el menu', async () => {
+  it('"Ver perfil" muestra la ficha del companero en un toast y cierra el menu', async () => {
     const user = userEvent.setup();
     render(<OfficeShell />);
     const bridge = createGameMock.mock.calls[0][1];
-    const teleportSpy = vi.spyOn(bridge, 'teleportTo');
 
     act(() =>
-      bridge.emit('npcmenu', {
-        target: { kind: 'npc', npcId: 7 },
+      bridge.emit('peermenu', {
+        sessionId: 'peer-7',
         name: 'Jordan Távara',
         status: 'En línea',
         statusCode: 'g',
@@ -290,38 +288,10 @@ describe('OfficeShell', () => {
         y: 10,
       }),
     );
-    await user.click(screen.getByRole('button', { name: /Ir a su escritorio/ }));
+    await user.click(screen.getByRole('button', { name: /Ver perfil/ }));
 
-    expect(teleportSpy).toHaveBeenCalledWith(7);
-    expect(screen.queryByRole('button', { name: /Ir a su escritorio/ })).not.toBeInTheDocument();
-    expect(screen.getByText(/Te teletransportaste junto a/)).toBeInTheDocument();
-  });
-
-  it('"Llamar" pide al NPC que venga via bridge.callNpc, sin mover al jugador', async () => {
-    const user = userEvent.setup();
-    render(<OfficeShell />);
-    const bridge = createGameMock.mock.calls[0][1];
-    const teleportSpy = vi.spyOn(bridge, 'teleportTo');
-    const callSpy = vi.spyOn(bridge, 'callNpc');
-
-    act(() =>
-      bridge.emit('npcmenu', {
-        target: { kind: 'npc', npcId: 3 },
-        name: 'Pablo',
-        status: 'En línea',
-        statusCode: 'g',
-        x: 10,
-        y: 10,
-      }),
-    );
-    await user.click(screen.getByRole('button', { name: /Llamar/ }));
-
-    // Llamar y "Ir a su escritorio" son opuestos: uno trae al NPC, el otro
-    // lleva al jugador. Confundirlos es el error facil aqui.
-    expect(callSpy).toHaveBeenCalledWith(3);
-    expect(teleportSpy).not.toHaveBeenCalled();
-    expect(screen.getByText(/viene hacia ti/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Llamar/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/Empleado/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Ver perfil/ })).not.toBeInTheDocument();
   });
 
   it('sin bloqueo de autoplay no muestra ningun aviso de audio', () => {
@@ -344,17 +314,16 @@ describe('OfficeShell', () => {
 });
 
 describe('OfficeShell: llamar a un companero real (issue #2, unit 11, D3/D12)', () => {
-  it('"Llamar" sobre un peer emite el comando callPeer con su sessionId y muestra un toast de espera, sin tocar bridge.callNpc', async () => {
+  it('"Llamar" sobre un peer emite el comando callPeer con su sessionId y muestra un toast de espera', async () => {
     const user = userEvent.setup();
     render(<OfficeShell />);
     const bridge = createGameMock.mock.calls[0][1];
-    const callNpcSpy = vi.spyOn(bridge, 'callNpc');
     const commands: { sessionId: string }[] = [];
     bridge.onCommand('callPeer', (payload) => commands.push(payload));
 
     act(() =>
-      bridge.emit('npcmenu', {
-        target: { kind: 'peer', sessionId: 'peer-1' },
+      bridge.emit('peermenu', {
+        sessionId: 'peer-1',
         name: 'Marta Ríos',
         status: 'En línea',
         statusCode: 'g',
@@ -367,7 +336,6 @@ describe('OfficeShell: llamar a un companero real (issue #2, unit 11, D3/D12)', 
     // D3: React solo pide la invitacion, nunca aprende que "aceptar" implica
     // caminar -- por eso el unico comando que ve esta prueba es `callPeer`.
     expect(commands).toEqual([{ sessionId: 'peer-1' }]);
-    expect(callNpcSpy).not.toHaveBeenCalled();
     expect(screen.getByText(/Llamando a/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Llamar/ })).not.toBeInTheDocument();
   });

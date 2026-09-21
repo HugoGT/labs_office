@@ -4,24 +4,16 @@ import { describe, expect, it, vi } from 'vitest';
 import type { OfficeEventMap } from '../game/officeBridge';
 import { ContextMenu } from './ContextMenu';
 
-const MENU: OfficeEventMap['npcmenu'] = {
-  target: { kind: 'npc', npcId: 3 },
+// D2: el unico personaje clicable es un peer real, y un peer real no tiene
+// escritorio asignado en el mapa, asi que su menu no lleva "Ir a su
+// escritorio" -- solo Llamar y Ver perfil.
+const MENU: OfficeEventMap['peermenu'] = {
+  sessionId: 'sess-1',
   name: 'Pablo',
   status: 'En línea',
   statusCode: 'g',
   x: 100,
   y: 100,
-};
-
-// D2: un peer real no tiene escritorio, asi que su menu no lleva "Ir a su
-// escritorio" -- solo Llamar y Ver perfil.
-const PEER_MENU: OfficeEventMap['npcmenu'] = {
-  target: { kind: 'peer', sessionId: 'sess-1' },
-  name: 'Ana',
-  status: 'En línea',
-  statusCode: 'g',
-  x: 50,
-  y: 60,
 };
 
 describe('ContextMenu', () => {
@@ -33,14 +25,16 @@ describe('ContextMenu', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('renderiza el nombre del NPC, su estado y las 3 acciones', () => {
+  it('renderiza el nombre del companero, su estado y las 2 acciones que quedan', () => {
     render(<ContextMenu menu={MENU} onAction={vi.fn()} onClose={vi.fn()} />);
 
     expect(screen.getByText('Pablo')).toBeInTheDocument();
     expect(screen.getByText('En línea')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Llamar/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Ir a su escritorio/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Ver perfil/ })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Ir a su escritorio/ }),
+    ).not.toBeInTheDocument();
   });
 
   it('Escape cierra el menu', async () => {
@@ -78,16 +72,6 @@ describe('ContextMenu', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('clic en "Ir a su escritorio" llama a onAction con "goto" y el payload del menu', async () => {
-    const onAction = vi.fn();
-    const user = userEvent.setup();
-    render(<ContextMenu menu={MENU} onAction={onAction} onClose={vi.fn()} />);
-
-    await user.click(screen.getByRole('button', { name: /Ir a su escritorio/ }));
-
-    expect(onAction).toHaveBeenCalledWith('goto', MENU);
-  });
-
   it('clic en "Llamar" llama a onAction con "call" y el payload del menu', async () => {
     const onAction = vi.fn();
     const user = userEvent.setup();
@@ -97,50 +81,27 @@ describe('ContextMenu', () => {
 
     expect(onAction).toHaveBeenCalledWith('call', MENU);
   });
-});
 
-describe('ContextMenu: menu de un peer real (issue #2, D2)', () => {
-  it('solo muestra Llamar y Ver perfil, sin "Ir a su escritorio"', () => {
-    render(<ContextMenu menu={PEER_MENU} onAction={vi.fn()} onClose={vi.fn()} />);
+  it('clic en "Ver perfil" llama a onAction con "profile" y el payload del menu', async () => {
+    const onAction = vi.fn();
+    const user = userEvent.setup();
+    render(<ContextMenu menu={MENU} onAction={onAction} onClose={vi.fn()} />);
 
-    expect(screen.getByText('Ana')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Llamar/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Ver perfil/ })).toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /Ir a su escritorio/ }),
-    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Ver perfil/ }));
+
+    expect(onAction).toHaveBeenCalledWith('profile', MENU);
   });
 
-  it('Llamar esta deshabilitado cuando el peer esta en No molestar (D8)', () => {
-    const dndMenu: OfficeEventMap['npcmenu'] = { ...PEER_MENU, statusCode: 'r' };
+  it('Llamar esta deshabilitado cuando el companero esta en No molestar (D8)', () => {
+    const dndMenu: OfficeEventMap['peermenu'] = { ...MENU, statusCode: 'r' };
     render(<ContextMenu menu={dndMenu} onAction={vi.fn()} onClose={vi.fn()} />);
 
     expect(screen.getByRole('button', { name: /Llamar/ })).toBeDisabled();
   });
 
-  it('Llamar sigue habilitado para un peer que no esta en No molestar', () => {
-    render(<ContextMenu menu={PEER_MENU} onAction={vi.fn()} onClose={vi.fn()} />);
+  it('Llamar sigue habilitado para un companero que no esta en No molestar', () => {
+    render(<ContextMenu menu={MENU} onAction={vi.fn()} onClose={vi.fn()} />);
 
     expect(screen.getByRole('button', { name: /Llamar/ })).toBeEnabled();
-  });
-
-  it('clic en "Llamar" sobre un peer llama a onAction con "call" y el payload del menu', async () => {
-    const onAction = vi.fn();
-    const user = userEvent.setup();
-    render(<ContextMenu menu={PEER_MENU} onAction={onAction} onClose={vi.fn()} />);
-
-    await user.click(screen.getByRole('button', { name: /Llamar/ }));
-
-    expect(onAction).toHaveBeenCalledWith('call', PEER_MENU);
-  });
-
-  it('clic en "Ver perfil" sobre un peer llama a onAction con "profile"', async () => {
-    const onAction = vi.fn();
-    const user = userEvent.setup();
-    render(<ContextMenu menu={PEER_MENU} onAction={onAction} onClose={vi.fn()} />);
-
-    await user.click(screen.getByRole('button', { name: /Ver perfil/ }));
-
-    expect(onAction).toHaveBeenCalledWith('profile', PEER_MENU);
   });
 });
