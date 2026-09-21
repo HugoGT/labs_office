@@ -18,7 +18,7 @@ import {
 import { TERRAIN_SHEET } from './assets';
 import { deskZoneName } from './deskLayout';
 import type { DeskDecorItem, DeskOccupant, OfficeDesk } from './desksPort';
-import { createOfficeBridge } from './officeBridge';
+import { createOfficeBridge, type OfficeEventMap } from './officeBridge';
 import { DEFAULT_NAME, DEFAULT_STATUS, type PresenceStatus } from './officeProtocol';
 import { STATUS_COLOR } from './presence';
 import { AVATAR_KEYS, PLAYER_TEXTURE } from './textures';
@@ -428,6 +428,10 @@ function fakeConnector(sessionId = 'yo') {
   let joinedName: string | undefined;
   let joinedSpacesVersion: string | undefined;
   let left = false;
+  // Issue #52: el comando `reconnect` se prueba contando entradas, no
+  // inspeccionando la conexion -- lo que tiene que pasar es que la escena
+  // vuelva a entrar, no como quede por dentro el doble.
+  let connectCount = 0;
 
   const connection: OfficeConnection = {
     sessionId,
@@ -452,7 +456,9 @@ function fakeConnector(sessionId = 'yo') {
     joinedName: () => joinedName,
     joinedSpacesVersion: () => joinedSpacesVersion,
     hasLeft: () => left,
+    connectCount: () => connectCount,
     connect: async (options: ConnectOfficeRoomOptions) => {
+      connectCount++;
       captured = options.handlers;
       joinedWith = options.status;
       joinedName = options.name;
@@ -486,12 +492,22 @@ function findRemoteAvatars(scene: Phaser.Scene): CharacterContainer[] {
 describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
   it('sin endpoint corre en solitario y lo anuncia por el puente', async () => {
     const bridge = createOfficeBridge();
-    const presence: { online: boolean; peers: number }[] = [];
+    const presence: OfficeEventMap['presence'][] = [];
     bridge.on('presence', (p) => presence.push(p));
 
     const { scene } = await bootOfficeScene(bridge, { endpoint: null });
 
-    await vi.waitFor(() => expect(presence).toContainEqual({ online: false, peers: 0 }));
+    // Sin endpoint no hay nada que reintentar, y por eso `canRetry` es falso:
+    // ofrecer un boton de reintento en modo solitario seria ofrecer un boton que
+    // no puede hacer nada.
+    await vi.waitFor(() =>
+      expect(presence).toContainEqual({
+        online: false,
+        peers: 0,
+        state: 'offline',
+        canRetry: false,
+      }),
+    );
     expect(findRemoteAvatars(scene)).toHaveLength(0);
   });
 
@@ -543,7 +559,7 @@ describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
 
   it('emite presence con el numero de companeros conectados', async () => {
     const bridge = createOfficeBridge();
-    const presence: { online: boolean; peers: number }[] = [];
+    const presence: OfficeEventMap['presence'][] = [];
     bridge.on('presence', (p) => presence.push(p));
     const connector = fakeConnector();
     await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
@@ -552,12 +568,17 @@ describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
     connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'a' }));
     connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'b' }));
 
-    expect(presence.at(-1)).toEqual({ online: true, peers: 2 });
+    expect(presence.at(-1)).toEqual({
+      online: true,
+      peers: 2,
+      state: 'connected',
+      canRetry: true,
+    });
   });
 
   it('si el servidor no responde, la oficina sigue jugable en solitario', async () => {
     const bridge = createOfficeBridge();
-    const presence: { online: boolean; peers: number }[] = [];
+    const presence: OfficeEventMap['presence'][] = [];
     bridge.on('presence', (p) => presence.push(p));
 
     const { scene } = await bootOfficeScene(bridge, {
@@ -569,7 +590,16 @@ describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
 
     // Lo que se prueba es que un servidor caido no deja la pantalla en negro:
     // en desarrollo eso seria la mitad del tiempo.
-    await vi.waitFor(() => expect(presence).toContainEqual({ online: false, peers: 0 }));
+    // Con endpoint configurado SI hay algo que reintentar, aunque el primer
+    // intento fallase: el servidor puede estar solo arrancando.
+    await vi.waitFor(() =>
+      expect(presence).toContainEqual({
+        online: false,
+        peers: 0,
+        state: 'offline',
+        canRetry: true,
+      }),
+    );
     expect(findPlayer(scene).nameText).toBe(DEFAULT_NAME);
   });
 
@@ -1591,5 +1621,164 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
     bridge.emitCommand('desks', { desks: [servedDesk()] });
 
     expect(countZones(scene)).toBe(0);
+  });
+});
+
+/**
+ * Cableado de la reconexion en la escena (issue #52). El viaje por cable ya lo
+ * cubre `officeRoomClient.node.test.ts` contra un Colyseus real; lo que se
+ * prueba aqui es lo que la escena TIENE que hacer cuando ese viaje termina
+ * bien: tirar los avatares viejos y, sobre todo, dejar que el audio vuelva.
+ */
+describe('OfficeScene: reconexion (issue #52)', () => {
+  it('un resync vacia el registro: el replay de la sala nueva es quien repuebla', async () => {
+    const connector = fakeConnector();
+    const { scene } = await bootOfficeScene(createOfficeBridge(), {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'se-fue-durante-la-caida' }));
+    expect(findRemoteAvatars(scene)).toHaveLength(1);
+
+    connector.handlers()!.onResync!();
+
+    // Quien se haya ido mientras duraba la caida no tiene `onRemove` que lo
+    // retire: ese borrado ocurrio en una sala que ya no existe. Si no se vacia
+    // aqui, se queda pintado para siempre.
+    expect(findRemoteAvatars(scene)).toHaveLength(0);
+  });
+
+  it('tras un resync el audio vuelve a emitirse aunque el conjunto de pares sea identico', async () => {
+    const bridge = createOfficeBridge();
+    const voices: {
+      selfSessionId: string | null;
+      peers: readonly { sessionId: string; name: string }[];
+      spaceId: string | null;
+    }[] = [];
+    bridge.on('voice', (payload) => voices.push(payload));
+    const connector = fakeConnector('mi-sesion');
+
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const player = findPlayer(scene);
+    const audible = () => remoteSnapshot({ sessionId: 'par-1', x: player.x, y: player.y });
+    connector.handlers()!.onAdd(audible());
+
+    await vi.waitFor(() => {
+      expect(voices.some((v) => v.peers.some((peer) => peer.sessionId === 'par-1'))).toBe(true);
+    }, LOOP_WAIT);
+    const emitidosAntes = voices.length;
+
+    // Resync y replay en la MISMA vuelta, sin tic por medio: asi el conjunto de
+    // pares que ve el siguiente tic es identico al de antes, y lo unico que
+    // puede hacer que se reemita es haber borrado la clave de dedupe.
+    connector.handlers()!.onResync!();
+    connector.handlers()!.onAdd(audible());
+
+    // Esta es la trampa de la issue #41 vuelta a pisar: `emitVoice` deduplica
+    // por `lastVoiceKey`, asi que sin invalidarla el par recuperado se veria y
+    // no se oiria -- nadie volveria a pedirle a LiveKit que lo suscriba.
+    await vi.waitFor(() => expect(voices.length).toBeGreaterThan(emitidosAntes), LOOP_WAIT);
+    expect(voices.at(-1)?.peers.map((peer) => peer.sessionId)).toEqual(['par-1']);
+  });
+
+  it('el estado de conexion viaja por "presence" sin cambiarle el significado a `online`', async () => {
+    const bridge = createOfficeBridge();
+    const presence: OfficeEventMap['presence'][] = [];
+    bridge.on('presence', (p) => presence.push(p));
+    const connector = fakeConnector();
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+
+    connector.handlers()!.onConnectionState!('reconnecting');
+
+    // `online` sigue significando lo mismo que siempre (hay sesion viva), para
+    // que nada rio abajo cambie de sentido en silencio al ensancharse el evento.
+    expect(presence.at(-1)).toEqual({
+      online: false,
+      peers: 0,
+      state: 'reconnecting',
+      canRetry: true,
+    });
+  });
+
+  it('el comando "reconnect" tira la sesion muerta, limpia la oficina y vuelve a entrar', async () => {
+    const connector = fakeConnector();
+    const { scene, bridge } = await bootOfficeScene(createOfficeBridge(), {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'de-la-sesion-vieja' }));
+    expect(findRemoteAvatars(scene)).toHaveLength(1);
+
+    bridge.emitCommand('reconnect', undefined);
+
+    await vi.waitFor(() => expect(connector.connectCount()).toBe(2), LOOP_WAIT);
+    expect(connector.hasLeft()).toBe(true);
+    // Los avatares de la sesion anterior no pueden sobrevivir a la nueva: el
+    // join reparte los suyos, y mezclarlos dejaria fantasmas.
+    expect(findRemoteAvatars(scene)).toHaveLength(0);
+  });
+
+  it('deja de escuchar "reconnect" al apagarse la escena', async () => {
+    const connector = fakeConnector();
+    const { scene, bridge } = await bootOfficeScene(createOfficeBridge(), {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+
+    scene.sys.events.emit(Phaser.Scenes.Events.SHUTDOWN);
+    bridge.emitCommand('reconnect', undefined);
+
+    // Un comando tardio del HUD no puede resucitar una escena destruida: seria
+    // el mismo socket huerfano que la guarda `alive` lleva evitando desde el
+    // principio, entrando por otra puerta. El doble cuenta la entrada de forma
+    // sincrona, asi que no hace falta esperar a nada para afirmarlo.
+    expect(connector.connectCount()).toBe(1);
+  });
+
+  it('el reintento manual se anuncia como "reconectando" antes de esperar al servidor', async () => {
+    const bridge = createOfficeBridge();
+    const presence: OfficeEventMap['presence'][] = [];
+    const connector = fakeConnector();
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    connector.handlers()!.onConnectionState!('offline');
+    bridge.on('presence', (p) => presence.push(p));
+
+    bridge.emitCommand('reconnect', undefined);
+
+    // El aviso sale ANTES del `await` del join, no despues: entrar tarda lo que
+    // tarde la red, y durante ese rato el HUD seguiria pintando "Sin servidor"
+    // con su boton al lado -- o sea, sin acuse de recibo de un clic que SI hizo
+    // algo. Es el mismo sintoma que esta issue viene a quitar, en pequeno.
+    expect(presence.at(-1)?.state).toBe('reconnecting');
+  });
+
+  it('dos clics seguidos en Reintentar no abren dos sesiones', async () => {
+    const connector = fakeConnector();
+    const { bridge } = await bootOfficeScene(createOfficeBridge(), {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+
+    bridge.emitCommand('reconnect', undefined);
+    bridge.emitCommand('reconnect', undefined);
+
+    // Entrar es asincrono, asi que sin guarda el segundo clic arranca un join
+    // mientras el primero sigue en vuelo: gana el que resuelva el ultimo y el
+    // otro queda huerfano, vivo y publicando la posicion del jugador. Dos
+    // sesiones para una persona son DOS avatares suyos en la oficina de los
+    // demas -- justo la clase de fantasma que esta issue viene a quitar.
+    await vi.waitFor(() => expect(connector.connectCount()).toBe(2), LOOP_WAIT);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(connector.connectCount()).toBe(2);
   });
 });

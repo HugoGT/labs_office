@@ -34,6 +34,7 @@ import {
   connectOfficeRoom,
   type ConnectOfficeRoomOptions,
   type OfficeConnection,
+  type OfficeConnectionState,
 } from './officeRoomClient';
 import { createRemoteAvatarRegistry, type RemoteAvatarRegistry } from './remoteAvatars';
 import { createPhaserAvatarSink, type RemoteAvatarContainer } from './remoteAvatarSink';
@@ -140,6 +141,7 @@ export class OfficeScene extends Phaser.Scene {
   private unsubscribeWalkToPeer?: () => void;
   private unsubscribeSpacesConfig?: () => void;
   private unsubscribeDesks?: () => void;
+  private unsubscribeReconnect?: () => void;
   /**
    * Todo lo dibujado del ultimo comando `desks` (#7, slice 5): zonas,
    * etiquetas y decoracion. Se guarda entero porque cada lista nueva sustituye
@@ -164,6 +166,19 @@ export class OfficeScene extends Phaser.Scene {
   private status: PresenceStatus = DEFAULT_STATUS;
   /** Vivo mientras la escena lo este: corta las respuestas tardias de la red. */
   private alive = true;
+  /**
+   * Ultima salud de la sesion publicada por el puente (#52). Se guarda porque
+   * `emitPresence` se dispara tambien desde altas y bajas de pares, que cambian
+   * el recuento pero NO el estado: sin recordarlo, cada alta durante una
+   * reconexion volveria a anunciar "conectado".
+   */
+  private connectionState: OfficeConnectionState = 'offline';
+  /**
+   * Hay un reintento manual en vuelo (#52). Protege el unico camino de este
+   * archivo que puede reentrarse desde fuera: el comando `reconnect` lo dispara
+   * el HUD, y un humano nervioso pulsa el boton mas de una vez.
+   */
+  private reconnecting = false;
 
   constructor(bridge: OfficeBridge, options: OfficeSceneOptions = {}) {
     super(OFFICE_SCENE_KEY);
@@ -234,6 +249,38 @@ export class OfficeScene extends Phaser.Scene {
       this.applyDesks(desks);
     });
 
+    // #52: reintento manual, el ultimo recurso cuando la escalera automatica
+    // de `reconnectPolicy` ya se rindio. No reutiliza la sesion caida -- de eso
+    // se encarga el envoltorio mientras le quedan intentos -- sino que entra de
+    // cero, que es lo unico que queda cuando el servidor ya solto el asiento.
+    this.unsubscribeReconnect = this.bridge.onCommand('reconnect', () => {
+      // Entrar es asincrono, asi que sin esta guarda un segundo clic arranca un
+      // join mientras el primero sigue en vuelo: gana el que resuelva el ultimo
+      // y el otro queda huerfano, vivo y publicando la posicion del jugador. Dos
+      // sesiones para una persona son DOS avatares suyos en la oficina de los
+      // demas -- la misma clase de fantasma que esta issue viene a quitar.
+      if (this.reconnecting) return;
+      this.reconnecting = true;
+      // Se anuncia ANTES del `await` del join, no despues: entrar tarda lo que
+      // tarde la red, y durante ese rato el HUD seguiria pintando "Sin
+      // servidor" con su boton al lado, o sea, sin acuse de recibo de un clic
+      // que si hizo algo. Ademas es lo que retira el boton de en medio, que es
+      // la otra mitad de la guarda de arriba.
+      this.emitPresence('reconnecting');
+      // La conexion vieja se suelta sin esperarla: puede estar colgada contra
+      // un socket muerto, y bloquear el reintento en ella seria hacer que el
+      // boton no respondiese justo cuando la red esta mal.
+      void this.connection?.leave();
+      this.connection = undefined;
+      // Los avatares de la sesion anterior no sobreviven a la nueva, por la
+      // misma razon que en un resync: el join reparte los suyos y mezclarlos
+      // dejaria fantasmas que ningun `onRemove` va a retirar.
+      this.remotes?.clear();
+      void this.connectToOffice().finally(() => {
+        this.reconnecting = false;
+      });
+    });
+
     // D4: unico bloque muerto en produccion de este archivo -- deja tanto el
     // literal 'teleportToTile' como su handler fuera de `dist/`. Mueve al
     // jugador a una tile exacta, sin buscar una libre adyacente: el hook de
@@ -255,6 +302,7 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeWalkToPeer?.();
       this.unsubscribeSpacesConfig?.();
       this.unsubscribeDesks?.();
+      this.unsubscribeReconnect?.();
       this.anchorWriter?.close();
       this.anchorWriter = undefined;
       this.remotes?.clear();
@@ -286,7 +334,7 @@ export class OfficeScene extends Phaser.Scene {
     } = this.options;
 
     if (endpoint === null || endpoint === undefined) {
-      this.bridge.emit('presence', { online: false, peers: 0 });
+      this.emitPresence('offline');
       // Sin sesion Colyseus nunca se intenta LiveKit (matriz de degradacion, PRD 6.3).
       this.emitVoice(null, [], this.currentSpaceId);
       return;
@@ -307,12 +355,12 @@ export class OfficeScene extends Phaser.Scene {
         handlers: {
           onAdd: (snapshot) => {
             this.remotes?.upsert(snapshot);
-            this.emitPresence(true);
+            this.emitPresence();
           },
           onChange: (snapshot) => this.remotes?.upsert(snapshot),
           onRemove: (sessionId) => {
             this.remotes?.remove(sessionId);
-            this.emitPresence(true);
+            this.emitPresence();
           },
           // Issue #2: mensajes sueltos del servidor, no estado sincronizado
           // (D4) -- se relanzan tal cual al puente, mismo patron que el resto
@@ -320,6 +368,8 @@ export class OfficeScene extends Phaser.Scene {
           onCallInvite: (payload) => this.bridge.emit('callinvite', payload),
           onCallerLeft: (payload) => this.bridge.emit('callerleft', payload),
           onCallAccepted: (payload) => this.bridge.emit('callaccepted', payload),
+          onConnectionState: (state) => this.emitPresence(state),
+          onResync: () => this.resyncAfterReconnect(),
         },
       });
 
@@ -343,14 +393,42 @@ export class OfficeScene extends Phaser.Scene {
       this.remotes = createRemoteAvatarRegistry(createPhaserAvatarSink(this, this.bridge), {
         ignoreSessionId: connection.sessionId,
       });
-      this.emitPresence(true);
+      this.emitPresence('connected');
       // Sesion viva, todavia sin pares conocidos (el primer tic los completa).
       this.emitVoice(connection.sessionId, [], this.currentSpaceId);
     } catch {
       if (!this.alive) return;
-      this.bridge.emit('presence', { online: false, peers: 0 });
+      this.emitPresence('offline');
       this.emitVoice(null, [], this.currentSpaceId);
     }
+  }
+
+  /**
+   * La sesion volvio tras una caida (#52): olvida lo que sabias de los pares,
+   * viene un replay completo de la sala nueva.
+   *
+   * Vaciar el registro es seguro justo POR ese replay -- la sala nueva reparte
+   * a todos los presentes como altas, asi que no depende de ningun supuesto de
+   * orden ni puede dejar a nadie fuera. Y es necesario porque quien se fuese
+   * durante la caida no tiene `onRemove` que lo retire: ese borrado ocurrio en
+   * una sala que ya no existe.
+   *
+   * `lastVoiceKey` se borra por la trampa que ya mordio en la issue #41:
+   * `emitVoice` deduplica por esa clave, y tras una reconexion el conjunto de
+   * pares audibles suele ser IDENTICO al de antes de la caida -- misma gente,
+   * mismas posiciones. Sin invalidarla, el evento nunca se reemitiria y el par
+   * recuperado se veria pero no se oiria, porque nadie volveria a pedirle a
+   * LiveKit que lo suscriba.
+   *
+   * Y NO se llama a `proximityTick()` aqui a proposito: el registro acaba de
+   * quedarse vacio, asi que una emision inmediata publicaria cero pares y
+   * tumbaria el audio de todos durante un instante. El siguiente tic natural
+   * (<=250 ms) ya publica el conjunto repoblado, y como la clave esta borrada
+   * reemite aunque ese conjunto no haya cambiado ni un byte.
+   */
+  private resyncAfterReconnect(): void {
+    this.remotes?.clear();
+    this.lastVoiceKey = '';
   }
 
   /**
@@ -580,8 +658,26 @@ export class OfficeScene extends Phaser.Scene {
       .setName(name);
   }
 
-  private emitPresence(online: boolean): void {
-    this.bridge.emit('presence', { online, peers: this.remotes?.sessionIds().length ?? 0 });
+  /**
+   * Unico punto de emision de "presence". Sin argumento reemite la salud
+   * vigente y solo refresca el recuento, que es lo que quieren las altas y
+   * bajas de pares; con argumento la cambia.
+   *
+   * `canRetry` sale del endpoint y no del estado: sin endpoint la oficina corre
+   * en solitario por decision, no por averia, y no hay absolutamente nada que
+   * un boton de reintento pudiera hacer ahi.
+   */
+  private emitPresence(state: OfficeConnectionState = this.connectionState): void {
+    this.connectionState = state;
+    const endpoint = this.options.endpoint;
+    this.bridge.emit('presence', {
+      // Se conserva con su significado exacto de siempre para que ensanchar el
+      // evento no le cambie el sentido en silencio a nada rio abajo.
+      online: state === 'connected',
+      peers: this.remotes?.sessionIds().length ?? 0,
+      state,
+      canRetry: endpoint !== null && endpoint !== undefined,
+    });
   }
 
   /**

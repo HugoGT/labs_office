@@ -4,7 +4,19 @@ import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_NAME } from '../game/officeProtocol';
 import { STATUS_COLOR, statusCssColor } from '../game/presence';
+import type { OfficeEventMap } from '../game/officeBridge';
 import { BottomBar } from './BottomBar';
+
+/** Modo solitario: sin endpoint configurado, no hay nada que reintentar. */
+const OFFLINE_SOLO: OfficeEventMap['presence'] = {
+  online: false,
+  peers: 0,
+  state: 'offline',
+  canRetry: false,
+};
+
+/** Sesion perdida con servidor configurado: aqui el reintento si significa algo. */
+const OFFLINE_RETRYABLE: OfficeEventMap['presence'] = { ...OFFLINE_SOLO, canRetry: true };
 
 function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
   const props = {
@@ -14,12 +26,13 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
     audioAvailable: true,
     recording: false,
     room: null as string | null,
-    presence: { online: false, peers: 0 },
+    presence: OFFLINE_SOLO,
     status: 'g' as const,
     onChangeStatus: vi.fn(),
     onToggleMic: vi.fn(),
     onToggleCam: vi.fn(),
     onToggleRecord: vi.fn(),
+    onRetryConnection: vi.fn(),
     ...overrides,
   };
   render(<BottomBar {...props} />);
@@ -73,12 +86,13 @@ describe('BottomBar', () => {
         audioAvailable
         recording={false}
         room={null}
-        presence={{ online: false, peers: 0 }}
+        presence={OFFLINE_SOLO}
         status="g"
         onChangeStatus={vi.fn()}
         onToggleMic={vi.fn()}
         onToggleCam={vi.fn()}
         onToggleRecord={vi.fn()}
+        onRetryConnection={vi.fn()}
       />,
     );
     expect(screen.getByText('proximidad').tagName).toBe('B');
@@ -91,12 +105,13 @@ describe('BottomBar', () => {
         audioAvailable
         recording={false}
         room="Cafeteria"
-        presence={{ online: false, peers: 0 }}
+        presence={OFFLINE_SOLO}
         status="g"
         onChangeStatus={vi.fn()}
         onToggleMic={vi.fn()}
         onToggleCam={vi.fn()}
         onToggleRecord={vi.fn()}
+        onRetryConnection={vi.fn()}
       />,
     );
     expect(screen.getByText('Cafeteria').tagName).toBe('B');
@@ -126,13 +141,13 @@ describe('BottomBar: degradacion cuando LiveKit no esta disponible', () => {
 
 describe('BottomBar: presencia de avatares reales', () => {
   it('muestra cuantos companeros reales hay conectados', () => {
-    renderBar({ presence: { online: true, peers: 3 } });
+    renderBar({ presence: { online: true, peers: 3, state: 'connected', canRetry: true } });
 
     expect(screen.getByText('🟢 3 en línea')).toBeInTheDocument();
   });
 
   it('sin servidor lo dice en neutro, no como error', () => {
-    renderBar({ presence: { online: false, peers: 0 } });
+    renderBar({ presence: OFFLINE_SOLO });
 
     // Estar en solitario es un modo valido: la oficina sigue jugable con los
     // NPCs simulados, asi que no se pinta como fallo.
@@ -140,7 +155,7 @@ describe('BottomBar: presencia de avatares reales', () => {
   });
 
   it('conectado y solo sigue siendo "en línea", con cero companeros', () => {
-    renderBar({ presence: { online: true, peers: 0 } });
+    renderBar({ presence: { online: true, peers: 0, state: 'connected', canRetry: true } });
 
     expect(screen.getByText('🟢 0 en línea')).toBeInTheDocument();
   });
@@ -176,12 +191,13 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
         audioAvailable
         recording={false}
         room={null}
-        presence={{ online: false, peers: 0 }}
+        presence={OFFLINE_SOLO}
         status="g"
         onChangeStatus={vi.fn()}
         onToggleMic={vi.fn()}
         onToggleCam={vi.fn()}
         onToggleRecord={vi.fn()}
+        onRetryConnection={vi.fn()}
       />,
     );
     // El punto es decorativo y no lleva marcado de prueba: se alcanza desde
@@ -197,12 +213,13 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
         audioAvailable
         recording={false}
         room={null}
-        presence={{ online: false, peers: 0 }}
+        presence={OFFLINE_SOLO}
         status="r"
         onChangeStatus={vi.fn()}
         onToggleMic={vi.fn()}
         onToggleCam={vi.fn()}
         onToggleRecord={vi.fn()}
+        onRetryConnection={vi.fn()}
       />,
     );
     expect(dot).toHaveStyle({ background: statusCssColor('r') });
@@ -265,5 +282,100 @@ describe('BottomBar: nombre real del usuario local (#6)', () => {
     // haciendose pasar por el de cualquiera que abriese la oficina.
     expect(screen.queryByText(/HugoGT/)).not.toBeInTheDocument();
     expect(screen.getByText(new RegExp(DEFAULT_NAME))).toBeInTheDocument();
+  });
+});
+
+/**
+ * Los tres estados de la sesion (issue #52). Antes eran dos, y ese era el
+ * problema: una caida a mitad de sesion se pintaba como "🟢 N en línea" porque
+ * la barra no tenia forma de decir otra cosa.
+ */
+describe('BottomBar: reconexion (issue #52)', () => {
+  it('reconectando no se pinta ni como conectado ni como sin servidor', () => {
+    renderBar({ presence: { online: false, peers: 2, state: 'reconnecting', canRetry: true } });
+
+    expect(screen.getByText('🟡 Reconectando...')).toBeInTheDocument();
+    // Anunciar los pares de antes de la caida seria contar como presente a
+    // gente con la que ahora mismo no hay canal.
+    expect(screen.queryByText(/en línea/)).not.toBeInTheDocument();
+    expect(screen.queryByText('⚪ Sin servidor')).not.toBeInTheDocument();
+  });
+
+  it('cada estado trae su propio title: el de reconexion explica que hay algo en curso', () => {
+    const { rerender } = render(
+      <BottomBar
+        playerName={DEFAULT_NAME}
+        micOn
+        camOn
+        audioAvailable
+        recording={false}
+        room={null}
+        presence={{ online: true, peers: 1, state: 'connected', canRetry: true }}
+        status="g"
+        onChangeStatus={vi.fn()}
+        onToggleMic={vi.fn()}
+        onToggleCam={vi.fn()}
+        onToggleRecord={vi.fn()}
+        onRetryConnection={vi.fn()}
+      />,
+    );
+    const conectado = screen.getByText('🟢 1 en línea').getAttribute('title');
+
+    rerender(
+      <BottomBar
+        playerName={DEFAULT_NAME}
+        micOn
+        camOn
+        audioAvailable
+        recording={false}
+        room={null}
+        presence={{ online: false, peers: 1, state: 'reconnecting', canRetry: true }}
+        status="g"
+        onChangeStatus={vi.fn()}
+        onToggleMic={vi.fn()}
+        onToggleCam={vi.fn()}
+        onToggleRecord={vi.fn()}
+        onRetryConnection={vi.fn()}
+      />,
+    );
+
+    // Un title reciclado dejaria a quien pasa el raton leyendo "Conectado al
+    // servidor" mientras la barra dice que no lo esta.
+    expect(screen.getByText('🟡 Reconectando...').getAttribute('title')).not.toBe(conectado);
+    expect(screen.getByText('🟡 Reconectando...').getAttribute('title')).toMatch(/recuperando/i);
+  });
+
+  it('ofrece reintentar solo cuando la sesion se perdio y hay servidor al que volver', () => {
+    renderBar({ presence: OFFLINE_RETRYABLE });
+
+    expect(screen.getByRole('button', { name: /Reintentar/ })).toBeInTheDocument();
+  });
+
+  it('en modo solitario no ofrece reintentar: no hay nada a lo que volver', () => {
+    renderBar({ presence: OFFLINE_SOLO });
+
+    // Un boton que no puede hacer nada es peor que ninguno: invita a pulsarlo.
+    expect(screen.queryByRole('button', { name: /Reintentar/ })).not.toBeInTheDocument();
+  });
+
+  it('mientras reconecta no ofrece reintentar: ya se esta reintentando solo', () => {
+    renderBar({ presence: { online: false, peers: 0, state: 'reconnecting', canRetry: true } });
+
+    expect(screen.queryByRole('button', { name: /Reintentar/ })).not.toBeInTheDocument();
+  });
+
+  it('conectado tampoco lo ofrece', () => {
+    renderBar({ presence: { online: true, peers: 1, state: 'connected', canRetry: true } });
+
+    expect(screen.queryByRole('button', { name: /Reintentar/ })).not.toBeInTheDocument();
+  });
+
+  it('pulsar reintentar avisa hacia arriba: la barra no sabe reconectar nada', async () => {
+    const user = userEvent.setup();
+    const props = renderBar({ presence: OFFLINE_RETRYABLE });
+
+    await user.click(screen.getByRole('button', { name: /Reintentar/ }));
+
+    expect(props.onRetryConnection).toHaveBeenCalledTimes(1);
   });
 });
