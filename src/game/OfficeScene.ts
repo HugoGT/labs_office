@@ -5,11 +5,8 @@ import { beginAutoWalk, stepAutoWalk, type AutoWalkState } from './autoWalk';
 import {
   setCharacterFacing,
   setCharacterStatus,
-  spawnNpcs,
   spawnPlayer,
-  walkNpcTo,
   type CharacterContainer,
-  type NpcContainer,
 } from './characters';
 import { mergeColliderRects } from './colliderMerge';
 import { deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
@@ -40,7 +37,7 @@ import {
 } from './officeRoomClient';
 import { createRemoteAvatarRegistry, type RemoteAvatarRegistry } from './remoteAvatars';
 import { createPhaserAvatarSink, type RemoteAvatarContainer } from './remoteAvatarSink';
-import { detectSpace, isSpeaking, nearbyIndices, nearbyKey, type Point } from './proximity';
+import { detectSpace, nearbyKey } from './proximity';
 import { audiblePeers, type AudioPeer } from './proximityAudio';
 import { buildTerrainGrid, findFreeAdjacentTile, isBlocked, type TerrainGrid } from './terrainGrid';
 import { AVATAR_KEYS, PLAYER_TEXTURE, avatarTextureKey, createOfficeTextures } from './textures';
@@ -102,8 +99,9 @@ interface WasdKeys {
 
 /**
  * Escena principal de la oficina virtual, portada de `OfficeScene`
- * (`prototype/js/app.js:67-96,325-501`). Orquesta texturas, mapa, NPCs,
- * jugador, input, camaras, colisiones y el ciclo de proximidad/salas.
+ * (`prototype/js/app.js:67-96,325-501`). Orquesta texturas, mapa, jugador,
+ * input, camaras, colisiones y el ciclo de proximidad/salas. Los unicos
+ * personajes que pinta son reales: el jugador local y los avatares remotos.
  *
  * El puente se inyecta por constructor (D2), no por `registry`: es
  * deterministico y evita depender de que una escritura llegue antes de que
@@ -112,7 +110,6 @@ interface WasdKeys {
 export class OfficeScene extends Phaser.Scene {
   private readonly bridge: OfficeBridge;
   private grid!: TerrainGrid;
-  private npcs: NpcContainer[] = [];
   private player!: CharacterContainer;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WasdKeys;
@@ -134,8 +131,6 @@ export class OfficeScene extends Phaser.Scene {
    * la guarda llega ANTES del riesgo que defiende (D4).
    */
   private spacesVersion: string = BUILT_IN_SPACES_VERSION;
-  private unsubscribeTeleport?: () => void;
-  private unsubscribeCallNpc?: () => void;
   private unsubscribeSetStatus?: () => void;
   private unsubscribeSpeakers?: () => void;
   /** Solo se asigna bajo `__OFFICE_E2E__` (D4): produccion nunca la toca. */
@@ -196,7 +191,6 @@ export class OfficeScene extends Phaser.Scene {
     placeNature(this, grid);
     placeZoneLabels(this);
 
-    this.npcs = spawnNpcs(this, this.bridge);
     // El nombre de la sesion manda sobre la pildora del avatar local (#6).
     // Sin sesion (desarrollo local, e2e) cae en `DEFAULT_NAME`, que es como
     // llama el servidor a quien entra sin identidad verificada.
@@ -206,12 +200,6 @@ export class OfficeScene extends Phaser.Scene {
     this.setupCameras();
     this.setupInput();
 
-    this.unsubscribeTeleport = this.bridge.onCommand('teleportTo', ({ npcId }) => {
-      this.teleportTo(npcId);
-    });
-    this.unsubscribeCallNpc = this.bridge.onCommand('callNpc', ({ npcId }) => {
-      this.callNpc(npcId);
-    });
     this.unsubscribeSetStatus = this.bridge.onCommand('setStatus', ({ status }) => {
       this.setStatus(status);
     });
@@ -247,10 +235,9 @@ export class OfficeScene extends Phaser.Scene {
     });
 
     // D4: unico bloque muerto en produccion de este archivo -- deja tanto el
-    // literal 'teleportToTile' como su handler fuera de `dist/`. Espeja
-    // `teleportTo`, pero mueve al jugador a una tile exacta, sin buscar una
-    // libre adyacente: el hook de test necesita entrar a una sala concreta,
-    // no aterrizar junto a un NPC.
+    // literal 'teleportToTile' como su handler fuera de `dist/`. Mueve al
+    // jugador a una tile exacta, sin buscar una libre adyacente: el hook de
+    // test necesita entrar a una sala concreta, no junto a nadie.
     if (__OFFICE_E2E__) {
       this.unsubscribeTeleportToTile = this.bridge.onCommand('teleportToTile', ({ tx, ty }) => {
         if (isBlocked(this.grid, tx, ty)) return;
@@ -260,8 +247,6 @@ export class OfficeScene extends Phaser.Scene {
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.alive = false;
-      this.unsubscribeTeleport?.();
-      this.unsubscribeCallNpc?.();
       this.unsubscribeSetStatus?.();
       this.unsubscribeSpeakers?.();
       this.unsubscribeTeleportToTile?.();
@@ -288,7 +273,7 @@ export class OfficeScene extends Phaser.Scene {
 
   /**
    * Conecta con el servidor de avatares reales (PRD 6.2). Un fallo NO es
-   * fatal: la oficina se queda en solitario con los NPCs simulados y se avisa
+   * fatal: la oficina se queda en solitario, sin nadie mas, y se avisa
    * por el puente. Cualquier otra cosa dejaria la pantalla en negro cada vez
    * que el servidor no este levantado, que en desarrollo es la mitad del rato.
    */
@@ -353,7 +338,7 @@ export class OfficeScene extends Phaser.Scene {
       // publicado "En linea": aislado en su cliente y audible para el resto.
       if (this.status !== joinedStatus) connection.sendStatus(this.status);
       // Unit 8 (issue #2): el sink ahora necesita el bridge para poder emitir
-      // `npcmenu` al clicar un peer real; toque mecanico, la escena ya guarda
+      // `peermenu` al clicar un peer real; toque mecanico, la escena ya guarda
       // `this.bridge` desde su constructor.
       this.remotes = createRemoteAvatarRegistry(createPhaserAvatarSink(this, this.bridge), {
         ignoreSessionId: connection.sessionId,
@@ -549,7 +534,7 @@ export class OfficeScene extends Phaser.Scene {
 
     zone.setInteractive();
     zone.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      // Mismo `stopPropagation` que el clic de un NPC o de un peer: sin el, el
+      // Mismo `stopPropagation` que el clic de un peer: sin el, el
       // `pointerdown` de la escena cerraria el menu contextual a la vez.
       pointer.event.stopPropagation();
       this.bridge.emit('deskclick', {
@@ -685,7 +670,6 @@ export class OfficeScene extends Phaser.Scene {
    */
   private proximityTick(): void {
     const player = this.player;
-    const now = this.time.now;
     const space = detectSpace({ x: player.x, y: player.y }, this.spaces);
     const selfSessionId = this.connection?.sessionId ?? null;
 
@@ -729,15 +713,6 @@ export class OfficeScene extends Phaser.Scene {
       return name === undefined ? [] : [{ sessionId, name }];
     });
 
-    const points: Point[] = this.npcs.map((c) => ({ x: c.x, y: c.y }));
-    const nearSet = new Set(nearbyIndices({ x: player.x, y: player.y }, points, PROX_RADIUS));
-
-    // Los NPCs nunca tienen tile ni chip (D9): conservan solo su anillo en
-    // canvas, que sigue siendo pura simulacion local por radio.
-    this.npcs.forEach((c, i) => {
-      c.ring.setVisible(nearSet.has(i) && isSpeaking(now, c.phase));
-    });
-
     const spaceId = space?.id ?? null;
     if (spaceId !== this.currentSpaceId) {
       this.currentSpaceId = spaceId;
@@ -745,46 +720,6 @@ export class OfficeScene extends Phaser.Scene {
     }
 
     this.emitVoice(selfSessionId, peers, spaceId);
-  }
-
-  /** Mueve al jugador a una tile libre adyacente al NPC objetivo (app.js:474-486). */
-  private teleportTo(npcId: number): void {
-    const target = this.npcs[npcId];
-    if (!target) return;
-
-    const destination = findFreeAdjacentTile(
-      this.grid,
-      Math.floor(target.x / TILE),
-      Math.floor(target.y / TILE),
-    );
-    if (!destination) return;
-
-    this.player.setPosition(destination.tx * TILE + 16, destination.ty * TILE + 16);
-    this.cameras.main.flash(200, 255, 255, 255, false);
-  }
-
-  /**
-   * Hace que el NPC llamado camine hasta una tile libre junto al jugador. Es
-   * el reflejo de `teleportTo`: alli se mueve el jugador hacia el NPC, aqui el
-   * NPC hacia el jugador, y por eso ambos comparten `findFreeAdjacentTile`.
-   *
-   * El destino se calcula al recibir la llamada, no se persigue: si el jugador
-   * se mueve despues, el NPC termina donde el jugador estaba. Perseguir exige
-   * pathfinding sobre la rejilla, que no toca hasta que los avatares remotos
-   * de Colyseus definan como se navega.
-   */
-  private callNpc(npcId: number): void {
-    const npc = this.npcs[npcId];
-    if (!npc) return;
-
-    const destination = findFreeAdjacentTile(
-      this.grid,
-      Math.floor(this.player.x / TILE),
-      Math.floor(this.player.y / TILE),
-    );
-    if (!destination) return;
-
-    walkNpcTo(this, npc, destination.tx, destination.ty);
   }
 
   /**
@@ -873,7 +808,6 @@ export class OfficeScene extends Phaser.Scene {
     this.player.setDepth(this.player.y);
     setCharacterFacing(this.player, this.facing);
 
-    for (const npc of this.npcs) npc.setDepth(npc.y);
     for (const sessionId of this.remotes?.sessionIds() ?? []) {
       const avatar = this.remotes?.get(sessionId);
       if (avatar) avatar.setDepth(avatar.y);

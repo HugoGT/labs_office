@@ -23,11 +23,6 @@ export function nearbyIndices(player: Point, others: readonly Point[], radius: n
   return indices;
 }
 
-/** `((now + phase) % 4000) < 1800` (app.js:452). */
-export function isSpeaking(now: number, phase: number): boolean {
-  return ((now + phase) % 4000) < 1800;
-}
-
 /** Clave de dedupe para el conjunto de cercanos (app.js:456). */
 export function nearbyKey(names: readonly string[]): string {
   return names.join('|');

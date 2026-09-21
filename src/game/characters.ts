@@ -1,25 +1,24 @@
 /**
- * Fabrica de personajes: NPCs, jugador y la caminata de los NPCs simulados,
- * portados de `makeCharacter`, `spawnNPCs` y `spawnPlayer`
+ * Fabrica de personajes: el jugador local y el molde compartido que reusa el
+ * sink de avatares remotos, portados de `makeCharacter` y `spawnPlayer`
  * (`prototype/js/app.js:325-390`). Depende de Phaser (`scene.add.container`,
- * `scene.physics`, `scene.tweens`): se prueba en la capa navegador.
+ * `scene.physics`): se prueba en la capa navegador.
  *
- * `scheduleWander` del prototipo se retiro: los NPCs ya no deambulan por su
- * cuenta. Se quedan en su escritorio para que la oficina no se vea vacia y
- * solo se mueven cuando se les llama, via `walkNpcTo`.
+ * El roster de NPCs simulados se retiro por completo: la oficina solo pinta
+ * personas reales (el jugador local y los peers que llegan por Colyseus). Con
+ * el se fueron `spawnNpcs`, `walkNpcTo` y `NpcContainer`, que no tenian otro
+ * consumidor.
  */
 
-import Phaser from 'phaser';
+import type Phaser from 'phaser';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from './mapData';
-import { NPCS } from './npcData';
-import type { OfficeBridge } from './officeBridge';
 import {
   DEFAULT_FACING,
   DEFAULT_STATUS,
   type Facing,
   type PresenceStatus,
 } from './officeProtocol';
-import { STATUS_COLOR, STATUS_LABEL } from './presence';
+import { STATUS_COLOR } from './presence';
 import { avatarTextureKey } from './textures';
 
 const LABEL_STYLE = {
@@ -47,23 +46,6 @@ export interface CharacterContainer extends Phaser.GameObjects.Container {
    */
   status: PresenceStatus;
 }
-
-/** Contenedor de NPC: agrega la metadata de roster que usan el clic y la llamada. */
-export interface NpcContainer extends CharacterContainer {
-  npcId: number;
-  homeTx: number;
-  homeTy: number;
-  phase: number;
-  /** Caminata en curso, si la hay. Se cancela al recibir una llamada nueva. */
-  walkTween?: Phaser.Tweens.Tween;
-}
-
-/**
- * Ritmo de caminata de un NPC llamado. La duracion se deriva de la distancia
- * (no es fija) para que la velocidad aparente sea la misma tanto si cruza la
- * oficina como si da un paso.
- */
-export const NPC_WALK_MS_PER_TILE = 260;
 
 const PLAYER_TEXTURE = 'avP';
 
@@ -132,76 +114,6 @@ export function setCharacterStatus(character: CharacterContainer, status: Presen
   if (character.status === status) return;
   character.status = status;
   character.statusDot.setFillStyle(STATUS_COLOR[status]);
-}
-
-/**
- * Crea los NPCs del roster y cablea clic -> `bridge.emit('npcmenu')` (en vez
- * de `document.dispatchEvent`, D1). Ya no programa temporizadores: el unico
- * comportamiento de un NPC es reactivo (`walkNpcTo` al ser llamado).
- */
-export function spawnNpcs(scene: Phaser.Scene, bridge: OfficeBridge): NpcContainer[] {
-  return NPCS.map((npc, i) => {
-    const c = makeCharacter(
-      scene,
-      npc.name,
-      npc.tx,
-      npc.ty,
-      `av${i % 10}`,
-      npc.status,
-    ) as NpcContainer;
-    c.npcId = i;
-    c.homeTx = npc.tx;
-    c.homeTy = npc.ty;
-    c.phase = (i * 777) % 4000;
-    c.setInteractive(new Phaser.Geom.Rectangle(-16, -22, 32, 44), Phaser.Geom.Rectangle.Contains);
-    c.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      pointer.event.stopPropagation();
-      bridge.emit('npcmenu', {
-        // D1: el id de NPC ahora vive dentro de la variante discriminada.
-        target: { kind: 'npc', npcId: i },
-        name: npc.name,
-        status: STATUS_LABEL[npc.status],
-        statusCode: npc.status,
-        x: (pointer.event as MouseEvent).clientX,
-        y: (pointer.event as MouseEvent).clientY,
-      });
-    });
-
-    return c;
-  });
-}
-
-/**
- * Camina al NPC hasta el centro de la tile `(tx, ty)`. Cancela cualquier
- * caminata en curso: sin eso, dos llamadas seguidas dejarian dos tweens
- * peleando por `x`/`y` del mismo contenedor y el NPC vibraria entre destinos.
- *
- * Quien llama elige la tile (ver `findFreeAdjacentTile`); aqui solo se anima.
- */
-export function walkNpcTo(
-  scene: Phaser.Scene,
-  npc: NpcContainer,
-  tx: number,
-  ty: number,
-): Phaser.Tweens.Tween {
-  const x = tx * TILE + 16;
-  const y = ty * TILE + 16;
-
-  npc.walkTween?.stop();
-
-  const tiles = Math.hypot(x - npc.x, y - npc.y) / TILE;
-  const tween = scene.tweens.add({
-    targets: npc,
-    x,
-    y,
-    duration: Math.max(NPC_WALK_MS_PER_TILE, tiles * NPC_WALK_MS_PER_TILE),
-    ease: 'Sine.inOut',
-    onComplete: () => {
-      npc.walkTween = undefined;
-    },
-  });
-  npc.walkTween = tween;
-  return tween;
 }
 
 /**

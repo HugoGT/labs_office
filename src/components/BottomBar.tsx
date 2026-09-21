@@ -81,7 +81,7 @@ export function BottomBar({
         title={
           presence.online
             ? 'Conectado al servidor de avatares reales'
-            : 'Sin servidor: la oficina corre en solitario con los NPCs simulados'
+            : 'Sin servidor: la oficina corre en solitario'
         }
       >
         {presence.online ? `🟢 ${presence.peers} en línea` : '⚪ Sin servidor'}
