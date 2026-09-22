@@ -191,6 +191,11 @@ alguna vez cambia la IP, hay que actualizar esta variable.
 git push origin main          # o lanzar "Deploy (test)" a mano desde Actions
 ```
 
+El push a `main` dispara primero la CI. **El despliegue no arranca hasta que la
+CI termina, y solo si termina en verde**: `deploy-test.yml` escucha el
+`workflow_run` de `ci.yml`, no el push. Un commit con los tests rojos no llega a
+la VM.
+
 El workflow construye las tres imágenes (`caddy`, `web`, `colyseus`), las
 publica etiquetadas con el SHA del commit, entra por el túnel IAP y ejecuta
 `office-deploy <sha>`. Ese script relee la
@@ -203,10 +208,31 @@ segundos. Si nunca devuelve 200, el job falla.
 
 ## Cómo se despliega a partir de ahí
 
-Cada push a `main` dispara el workflow. No hay nada que editar a mano en la VM: el
-tag de imagen viaja como argumento hasta `office-deploy` y de ahí al `.env` que lee
-el compose, así que lo que corre en la máquina siempre es reconstruible desde este
-repositorio.
+Cada push a `main` **que pase la CI** dispara el workflow. No hay nada que editar a
+mano en la VM: el tag de imagen viaja como argumento hasta `office-deploy` y de ahí
+al `.env` que lee el compose, así que lo que corre en la máquina siempre es
+reconstruible desde este repositorio.
+
+El encadenado es `ci.yml` → `deploy-test.yml` vía `workflow_run`, y hay dos detalles
+que se notan al operarlo:
+
+- El SHA que se despliega sale de `workflow_run.head_sha`, no de `github.sha`. Es el
+  commit que la CI verificó, aunque `main` haya avanzado mientras tanto.
+- Si la CI queda **cancelada** (un segundo push a `main` cancela la anterior, por el
+  `cancel-in-progress` de `ci.yml`), ese commit no se despliega. Lo hace el siguiente,
+  que es el comportamiento que se quiere.
+
+`gh workflow run deploy-test.yml` sigue existiendo y **se salta la CI a propósito**:
+es la vía para redesplegar sin cambiar código (por ejemplo, después de un
+`terraform apply`). Ahí el SHA es el del commit elegido a mano.
+
+**Terraform no corre en la CI, y es deliberado.** La cuenta de servicio de despliegue
+solo puede escribir en el Artifact Registry, tunelizar por IAP hacia *esta* instancia y
+entrar en ella (ver `terraform/main.tf`, cada binding acotado a su recurso). Un
+`terraform apply` automático exigiría darle administración de compute, IAM, roles y
+Secret Manager sobre un proyecto que es **compartido** y aloja recursos ajenos. Los
+`terraform apply` los sigue lanzando una persona, como describe el resto de este
+documento.
 
 Las imágenes se etiquetan con el SHA del commit, **nunca** con `latest`. Con
 `latest` no se puede saber qué corre en la VM ni volver atrás sin reconstruir.
