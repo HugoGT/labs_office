@@ -1,5 +1,4 @@
 import Phaser from 'phaser';
-import type { AnchorWriter } from './anchorChannel';
 import { preloadOfficeAssets } from './assets';
 import { beginAutoWalk, stepAutoWalk, type AutoWalkState } from './autoWalk';
 import {
@@ -149,8 +148,6 @@ export class OfficeScene extends Phaser.Scene {
    * encima dejaria pintado como ocupado un sitio que alguien acaba de soltar.
    */
   private deskObjects: Phaser.GameObjects.GameObject[] = [];
-  /** Escritor del canal de anclas (issue #17, D4); abierto en `create()`, cerrado en SHUTDOWN. */
-  private anchorWriter?: AnchorWriter;
   /**
    * Objetivo de auto-caminata en curso (issue #2, D9/D10). `undefined` cuando
    * nadie esta siendo perseguido: `update()` solo dirige al reductor mientras
@@ -197,7 +194,6 @@ export class OfficeScene extends Phaser.Scene {
     // redibujo en React que duplicaria `drawAvatar` y podria desincronizarse
     // de forma invisible (issue #17, D1).
     this.bridge.emit('portraits', { byKey: this.exportPortraits() });
-    this.anchorWriter = this.bridge.anchors.open();
 
     const grid: TerrainGrid = buildTerrainGrid();
     this.grid = grid;
@@ -303,8 +299,6 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeSpacesConfig?.();
       this.unsubscribeDesks?.();
       this.unsubscribeReconnect?.();
-      this.anchorWriter?.close();
-      this.anchorWriter = undefined;
       this.remotes?.clear();
       void this.connection?.leave();
       this.connection = undefined;
@@ -470,43 +464,6 @@ export class OfficeScene extends Phaser.Scene {
       byKey[base] = this.textures.getBase64(avatarTextureKey(base, 'down'));
     }
     return byKey;
-  }
-
-  /**
-   * Proyecta la posicion del jugador local y de cada avatar remoto a
-   * coordenadas de pantalla y las publica por el canal de anclas (issue #17,
-   * D4). Se ejecuta cada cuadro, no cada tic de proximidad: la posicion es
-   * continua, la existencia/contenido del tile no lo es.
-   *
-   * El jugador local se proyecta con la MISMA formula que un avatar remoto
-   * (decision F, textual del mantenedor: "Tu propio recuadro cuelga de tu
-   * avatar igual que el de los demas") -- el self-tile deja de ser un overlay
-   * fijo en una esquina y pasa a anclarse y seguir al avatar como cualquier
-   * otro. Sin `selfSessionId` (aun sin conexion) no hay a que clave publicar,
-   * asi que se omite ese ancla ese cuadro.
-   */
-  private publishAnchors(): void {
-    if (!this.anchorWriter) return;
-    const cam = this.cameras.main;
-    const selfSessionId = this.connection?.sessionId ?? null;
-    if (selfSessionId !== null) {
-      const screenX = (this.player.x - cam.scrollX) * cam.zoom;
-      const screenY = (this.player.y - cam.scrollY) * cam.zoom;
-      this.anchorWriter.set(
-        selfSessionId,
-        screenX,
-        screenY,
-        cam.worldView.contains(this.player.x, this.player.y),
-      );
-    }
-    for (const sessionId of this.remotes?.sessionIds() ?? []) {
-      const avatar = this.remotes?.get(sessionId);
-      if (!avatar) continue;
-      const screenX = (avatar.x - cam.scrollX) * cam.zoom;
-      const screenY = (avatar.y - cam.scrollY) * cam.zoom;
-      this.anchorWriter.set(sessionId, screenX, screenY, cam.worldView.contains(avatar.x, avatar.y));
-    }
-    this.anchorWriter.commit();
   }
 
   /**
@@ -853,7 +810,7 @@ export class OfficeScene extends Phaser.Scene {
 
     // Auto-caminata (issue #2, D9/D10): se resuelve ANTES de decidir la
     // velocidad final del cuadro, para que todo lo que viene despues (depth,
-    // facing, throttle de red, minimapa, anclas) siga leyendo this.player.x/y
+    // facing, throttle de red, minimapa) siga leyendo this.player.x/y
     // sin enterarse de este bloque, exactamente como pedia el diseno D9.
     let steeredByAutoWalk = false;
     if (this.autoWalk) {
@@ -914,7 +871,5 @@ export class OfficeScene extends Phaser.Scene {
     this.connection?.sendMove(this.player.x, this.player.y, this.facing);
 
     this.mmMarker?.setPosition(this.player.x, this.player.y);
-
-    this.publishAnchors();
   }
 }

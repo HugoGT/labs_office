@@ -11,8 +11,6 @@ import {
   PLAYER_SPAWN_TY,
   TILE,
   TREES,
-  WORLD_H,
-  WORLD_W,
   ZONE_LABELS,
 } from './mapData';
 import { TERRAIN_SHEET } from './assets';
@@ -860,82 +858,6 @@ describe('OfficeScene: comando speakers via el puente (issue #17, D7 -- habla re
     bridge.emitCommand('speakers', { sessionIds: ['par-1'] });
 
     expect(avatar.ring.visible).toBe(false);
-  });
-});
-
-describe('OfficeScene: canal de anclas de posicion por cuadro (issue #17, D4)', () => {
-  it('proyecta la posicion de un avatar remoto a pantalla, honrando scroll y zoom reales de la camara', async () => {
-    const bridge = createOfficeBridge();
-    const connector = fakeConnector('mi-sesion');
-    const { scene } = await bootOfficeScene(bridge, {
-      endpoint: 'ws://fake',
-      connect: connector.connect,
-    });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
-    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', x: 500, y: 700 }));
-    const cam = scene.cameras.main;
-    cam.setZoom(1.75);
-
-    // La expectativa lee scroll/zoom REALES de la camara en cada intento, no
-    // un valor fijo: asi la prueba sigue valida aunque `startFollow` este
-    // todavia suavizando el desplazamiento del jugador.
-    await vi.waitFor(() => {
-      const anchor = bridge.anchors.snapshot().anchors.get('par-1');
-      expect(anchor).toBeDefined();
-      expect(anchor!.x).toBeCloseTo((500 - cam.scrollX) * cam.zoom, 1);
-      expect(anchor!.y).toBeCloseTo((700 - cam.scrollY) * cam.zoom, 1);
-    }, LOOP_WAIT);
-  });
-
-  it('marca onScreen en false para un avatar muy fuera del area visible de la camara', async () => {
-    const bridge = createOfficeBridge();
-    const connector = fakeConnector('mi-sesion');
-    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
-    connector
-      .handlers()!
-      .onAdd(remoteSnapshot({ sessionId: 'lejos', x: WORLD_W + 5000, y: WORLD_H + 5000 }));
-
-    await vi.waitFor(() => {
-      const anchor = bridge.anchors.snapshot().anchors.get('lejos');
-      expect(anchor).toBeDefined();
-      expect(anchor!.onScreen).toBe(false);
-    }, LOOP_WAIT);
-  });
-
-  it('una baja remota poda su ancla del siguiente cuadro en adelante', async () => {
-    const bridge = createOfficeBridge();
-    const connector = fakeConnector('mi-sesion');
-    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
-    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'se-va', x: 100, y: 100 }));
-    await vi.waitFor(() => expect(bridge.anchors.snapshot().anchors.has('se-va')).toBe(true), LOOP_WAIT);
-
-    connector.handlers()!.onRemove('se-va');
-
-    await vi.waitFor(() => expect(bridge.anchors.snapshot().anchors.has('se-va')).toBe(false), LOOP_WAIT);
-  });
-
-  it('cierra el escritor de anclas al apagar la escena (SHUTDOWN, D4)', async () => {
-    const bridge = createOfficeBridge();
-    const connector = fakeConnector('mi-sesion');
-    const { scene } = await bootOfficeScene(bridge, {
-      endpoint: 'ws://fake',
-      connect: connector.connect,
-    });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
-    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', x: 100, y: 100 }));
-    await vi.waitFor(() => expect(bridge.anchors.snapshot().anchors.has('par-1')).toBe(true), LOOP_WAIT);
-    const generationBeforeShutdown = bridge.anchors.snapshot().generation;
-
-    scene.sys.events.emit(Phaser.Scenes.Events.SHUTDOWN);
-
-    // Se comprueba sin esperar a proposito, mismo motivo que las demas
-    // pruebas de SHUTDOWN de este archivo: tras un SHUTDOWN emitido a mano el
-    // bucle del juego sigue pisando update() con sistemas ya desmontados, y
-    // dormir aqui solo probaria ese artefacto del arnes, no el cierre del
-    // escritor.
-    expect(bridge.anchors.snapshot().generation).toBe(generationBeforeShutdown);
   });
 });
 

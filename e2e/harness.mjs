@@ -425,9 +425,8 @@ export async function waitForOnlineCount(page, count) {
 }
 
 /** D4: counts session-identity tile nodes under `#office-shell`, excluding
- * the caller's own session id (`VideoTiles.tsx:140,157`), instead of reading
- * removed chip text or the per-frame `data-mode` attribute (rewritten every
- * animation frame, including on the self-tile). Replaces
+ * the caller's own session id -- the tile bar renders one node per audible
+ * participant (`VideoTiles.tsx`), so identity is the stable signal. Replaces
  * `waitForPeerChipCount`, which read a `🔊 <name>` chip string that no
  * longer exists in the DOM and therefore always resolved with 0 matches
  * regardless of actual visibility (obs #561). `:not(audio)` excludes the

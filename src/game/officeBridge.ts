@@ -11,7 +11,6 @@
  * desmonta nada referencia el puente y queda para el recolector de basura.
  */
 
-import { createAnchorChannel, type AnchorChannel } from './anchorChannel';
 import type { OfficeDesk } from './desksPort';
 import type { SpaceArea } from './mapData';
 import type { PresenceStatus } from './officeProtocol';
@@ -216,18 +215,11 @@ export interface OfficeBridge {
    * without this module exposing `commands` itself.
    */
   emitCommand<K extends keyof OfficeCommandMap>(type: K, payload: OfficeCommandMap[K]): void;
-  /**
-   * Canal continuo posicion-por-cuadro (issue #17, D4): deliberadamente NO es
-   * un `EventTarget`. La escena escribe cada `update()`; el overlay de tiles
-   * lo lee desde un unico `requestAnimationFrame`, nunca via `on`/`emit`.
-   */
-  readonly anchors: AnchorChannel;
 }
 
 export function createOfficeBridge(): OfficeBridge {
   const events = new EventTarget();
   const commands = new EventTarget();
-  const anchors = createAnchorChannel();
 
   function subscribe<T>(target: EventTarget, type: string, handler: (payload: T) => void): () => void {
     const controller = new AbortController();
@@ -257,6 +249,5 @@ export function createOfficeBridge(): OfficeBridge {
       return subscribe(commands, type, handler);
     },
     emitCommand: dispatchCommand,
-    anchors,
   };
 }
