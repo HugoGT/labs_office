@@ -13,7 +13,12 @@
 import { Client } from 'colyseus.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LIVEKIT_ROOM_NAME } from '../../src/game/officeProtocol.ts';
-import { createOfficeServer, warnIfOriginsUnrestricted, type OfficeServer } from './createOfficeServer.ts';
+import {
+  createOfficeServer,
+  reconnectionWindowFromEnv,
+  warnIfOriginsUnrestricted,
+  type OfficeServer,
+} from './createOfficeServer.ts';
 import type { DirectoryUser, UserDirectory } from './directory/directoryPort.ts';
 import { createMemoryDirectory } from './directory/memoryDirectory.ts';
 import { createMemoryDecor } from './decor/memoryDecor.ts';
@@ -22,7 +27,7 @@ import { createMemoryDesks } from './desks/memoryDesks.ts';
 import type { DeskDirectory } from './desks/desksPort.ts';
 import { createMemorySpaces } from './spaces/memorySpaces.ts';
 import type { SpacesDirectory } from './spaces/spacesPort.ts';
-import { OFFICE_ROOM_NAME } from './OfficeRoom.ts';
+import { OFFICE_ROOM_NAME, RECONNECTION_WINDOW_SECONDS } from './OfficeRoom.ts';
 import type { OfficeState } from './schema.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 
@@ -1421,5 +1426,37 @@ describe('rutas de escritorios (#7, slice 5)', () => {
     expect(respuestas.map((res) => res.status)).toEqual([503, 503, 503, 503, 503, 503]);
     expect(await respuestas[0].json()).toEqual({ error: 'desks-not-configured' });
     await server.shutdown();
+  });
+});
+
+/**
+ * Ventana de reconexion desde el entorno (issue #52). Existe para que el
+ * despliegue pueda ajustarla sin tocar codigo, y para que el arnes E2E pueda
+ * pedir una corta: una suite que espera 30 s por escenario deja de correrse.
+ */
+describe('reconnectionWindowFromEnv', () => {
+  it('sin variable cae en la ventana de produccion', () => {
+    expect(reconnectionWindowFromEnv({})).toBe(RECONNECTION_WINDOW_SECONDS);
+  });
+
+  it('un numero valido manda sobre el valor por defecto', () => {
+    expect(reconnectionWindowFromEnv({ OFFICE_RECONNECTION_WINDOW_SECONDS: '2' })).toBe(2);
+  });
+
+  it('cero es una ventana legitima: desactiva la espera', () => {
+    // No es lo mismo que "sin variable". Un despliegue con problemas puede
+    // querer volver al comportamiento anterior sin revertir el codigo.
+    expect(reconnectionWindowFromEnv({ OFFICE_RECONNECTION_WINDOW_SECONDS: '0' })).toBe(0);
+  });
+
+  it('una basura no apaga la ventana en silencio', () => {
+    // Caer en 0 ante un valor ilegible seria lo peor de los dos mundos: la
+    // proteccion desactivada y nadie enterandose. Se ignora y se conserva la
+    // de produccion.
+    for (const raw of ['', 'pronto', '-5', 'NaN', '1e999']) {
+      expect(reconnectionWindowFromEnv({ OFFICE_RECONNECTION_WINDOW_SECONDS: raw })).toBe(
+        RECONNECTION_WINDOW_SECONDS,
+      );
+    }
   });
 });

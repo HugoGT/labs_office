@@ -411,6 +411,10 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
           if (!room) return;
           setRecording((value) => !value);
         }}
+        // #52: la barra solo avisa; quien sabe reconectar es la escena, y el
+        // comando viaja por `emitCommand` como el resto -- sin metodo de
+        // conveniencia en el puente.
+        onRetryConnection={() => bridge.emitCommand('reconnect', undefined)}
       />
       {decorOpen && decorReady && (
         <DeskDecorEditor

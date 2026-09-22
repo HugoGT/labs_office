@@ -15,6 +15,7 @@ import { createAnchorChannel, type AnchorChannel } from './anchorChannel';
 import type { OfficeDesk } from './desksPort';
 import type { SpaceArea } from './mapData';
 import type { PresenceStatus } from './officeProtocol';
+import type { OfficeConnectionState } from './officeRoomClient';
 
 export interface OfficeEventMap {
   /**
@@ -62,8 +63,24 @@ export interface OfficeEventMap {
    * Estado de la conexion con el servidor Colyseus y cuantos avatares reales
    * hay ademas del propio. `online: false` no es un error a mostrar en rojo:
    * la oficina sigue siendo recorrible en solitario.
+   *
+   * `online` se conserva (issue #52) y sigue significando EXACTAMENTE lo mismo
+   * que antes -- `state === 'connected'` -- para que ensanchar este evento no
+   * le cambie el sentido en silencio a nada rio abajo. Lo que aporta `state` es
+   * el tercer caso que `online` no sabia expresar: hay sesion que recuperar y
+   * se esta intentando, que no es ni estar conectado ni estar en solitario.
+   *
+   * `canRetry` distingue "no hay servidor porque no hay ninguno configurado"
+   * (modo solitario: no hay nada que reintentar y ofrecer un boton seria
+   * ofrecer uno muerto) de "no hay servidor porque se perdio". Lo decide la
+   * escena, que es la unica que sabe si hay endpoint.
    */
-  presence: { online: boolean; peers: number };
+  presence: {
+    online: boolean;
+    peers: number;
+    state: OfficeConnectionState;
+    canRetry: boolean;
+  };
   /**
    * Instantanea completa de la capa de audio/video (D3): quien soy, a quien
    * escucho y en que sala estoy. Un solo evento aditivo en vez de dos
@@ -171,6 +188,18 @@ export interface OfficeCommandMap {
    * `applyDesks`.
    */
   desks: { desks: readonly OfficeDesk[] };
+  /**
+   * Reintento manual de la conexion con el servidor de avatares (#52), el
+   * ultimo recurso cuando la escalera de backoff se agoto y el HUD ya pinta
+   * "Sin servidor". Viaja solo por `emitCommand`, como `setStatus` y los tres
+   * de llamada, y por la misma razon: un metodo de conveniencia por comando
+   * reconstruiria el `window.officeAPI` que D1 retiro.
+   *
+   * Sin payload porque no hay nada que decidir desde fuera: la escena ya sabe a
+   * que endpoint iba y con que identidad. Pasarle parametros seria dejar que el
+   * HUD reabriese una sesion distinta de la que se cayo.
+   */
+  reconnect: undefined;
 }
 
 export interface OfficeBridge {

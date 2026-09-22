@@ -1,3 +1,4 @@
+import type { OfficeEventMap } from '../game/officeBridge';
 import { DO_NOT_DISTURB, PRESENCE_STATUSES, type PresenceStatus } from '../game/officeProtocol';
 import { STATUS_LABEL, statusCssColor } from '../game/presence';
 import styles from './BottomBar.module.css';
@@ -15,12 +16,24 @@ export interface BottomBarProps {
   audioAvailable: boolean;
   recording: boolean;
   room: string | null;
-  presence: { online: boolean; peers: number };
+  /**
+   * Salud de la sesion con el servidor de avatares (#52). Llega entera desde
+   * el puente, tal cual: esta barra no deriva `state` de `online` ni al reves
+   * -- dos fuentes para el mismo hecho acabarian discrepando en algun render,
+   * por la misma razon que `dnd` se deriva de `status` y no se recibe aparte.
+   */
+  presence: OfficeEventMap['presence'];
   status: PresenceStatus;
   onChangeStatus: (status: PresenceStatus) => void;
   onToggleMic: () => void;
   onToggleCam: () => void;
   onToggleRecord: () => void;
+  /**
+   * Pide reintentar la conexion perdida (#52). Callback y no accion propia: la
+   * barra sigue siendo presentacional (D3) y no sabe que existe un puente, ni
+   * mucho menos un servidor al que volver.
+   */
+  onRetryConnection: () => void;
 }
 
 /** Explica el `disabled` de mic/camara cuando no hay conexion viva a LiveKit. */
@@ -28,6 +41,17 @@ const AUDIO_UNAVAILABLE_TITLE = 'Audio no disponible: sin conexion a LiveKit';
 
 /** El otro motivo de `disabled`, y el unico que el usuario puede deshacer solo. */
 const DND_TITLE = 'No molestar: no publicas micrófono ni cámara';
+
+/**
+ * Un title por estado de sesion (#52). Reciclar el de "conectado" para la
+ * reconexion dejaria a quien pasa el raton leyendo que hay servidor justo
+ * mientras la barra dice que no lo hay.
+ */
+const PRESENCE_TITLE = {
+  connected: 'Conectado al servidor de avatares reales',
+  reconnecting: 'Se perdio la conexión: recuperando la sesión sin recargar la página',
+  offline: 'Sin servidor: la oficina corre en solitario',
+} as const;
 
 /**
  * Barra inferior: mic/camara/grabar + estado de audio, portada de `#bar`
@@ -49,6 +73,7 @@ export function BottomBar({
   onToggleMic,
   onToggleCam,
   onToggleRecord,
+  onRetryConnection,
 }: BottomBarProps) {
   // Se deriva del estado en vez de recibirse como prop propia: dos fuentes
   // para el mismo hecho acabarian discrepando en algun render.
@@ -76,16 +101,31 @@ export function BottomBar({
           ))}
         </select>
       </div>
-      <div
-        className={styles.presence}
-        title={
-          presence.online
-            ? 'Conectado al servidor de avatares reales'
-            : 'Sin servidor: la oficina corre en solitario'
-        }
-      >
-        {presence.online ? `🟢 ${presence.peers} en línea` : '⚪ Sin servidor'}
+      <div className={styles.presence} title={PRESENCE_TITLE[presence.state]}>
+        {presence.state === 'connected' ? (
+          `🟢 ${presence.peers} en línea`
+        ) : presence.state === 'reconnecting' ? (
+          // Sin recuento: los pares de antes de la caida siguen en el registro
+          // de la escena, pero ahora mismo no hay canal con ninguno, y contarlos
+          // seria decir que estan cuando no se les oye.
+          <>🟡 Reconectando...</>
+        ) : (
+          <>⚪ Sin servidor</>
+        )}
       </div>
+      {/* Solo cuando la sesion se perdio Y hay servidor configurado al que
+          volver: en modo solitario no hay nada que reintentar, y mientras
+          reconecta ya se esta reintentando solo. */}
+      {presence.state === 'offline' && presence.canRetry && (
+        <button
+          type="button"
+          className={styles.btn}
+          title="Volver a conectar con el servidor de avatares reales"
+          onClick={onRetryConnection}
+        >
+          🔄 Reintentar
+        </button>
+      )}
       {/* `disabled`+`title` mientras LiveKit no esta disponible, espejando el
           patron ya existente en el boton de grabar (`disabled={room === null}`). */}
       <button

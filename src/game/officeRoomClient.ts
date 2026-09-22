@@ -6,8 +6,11 @@
  * Solo importa `colyseus.js`, nunca `@colyseus/core`: el paquete de servidor
  * arrastraria Node al bundle del navegador.
  *
- * No captura los fallos de conexion. Rechaza, y quien llama decide: la oficina
- * tiene que seguir siendo jugable en solitario si el servidor no esta.
+ * No captura los fallos de conexion INICIALES. Rechaza, y quien llama decide:
+ * la oficina tiene que seguir siendo jugable en solitario si el servidor no
+ * esta. Lo que si gestiona -- desde la issue #52 -- son las caidas a mitad de
+ * sesion: ahi no hay nadie a quien rechazarle nada, porque la promesa del join
+ * se resolvio hace rato. Ver `reconnectPolicy.ts` y `handleLeave`.
  */
 
 import { Client, getStateCallbacks, type Room } from 'colyseus.js';
@@ -19,6 +22,8 @@ import {
   type Facing,
   type PresenceStatus,
 } from './officeProtocol';
+import { onPageHide } from './pageLifecycle';
+import { decideReconnect } from './reconnectPolicy';
 import type { RemotePlayerSnapshot } from './remoteAvatars';
 
 /**
@@ -58,6 +63,14 @@ interface PlayerCallbacks {
   onChange(handler: () => void): () => void;
 }
 
+/**
+ * Salud de la sesion con el servidor (issue #52). Tres estados y no un
+ * booleano: "reconectando" es exactamente lo que faltaba antes -- el HUD solo
+ * sabia decir conectado o sin servidor, asi que una caida a mitad de sesion se
+ * seguia anunciando como "N en linea" cuando ya no lo era.
+ */
+export type OfficeConnectionState = 'connected' | 'reconnecting' | 'offline';
+
 export interface OfficeRoomHandlers {
   onAdd(snapshot: RemotePlayerSnapshot): void;
   onChange(snapshot: RemotePlayerSnapshot): void;
@@ -72,6 +85,26 @@ export interface OfficeRoomHandlers {
   onCallInvite?(payload: { from: string; name: string }): void;
   onCallerLeft?(payload: { from: string }): void;
   onCallAccepted?(payload: { by: string; name: string }): void;
+  /**
+   * Cambios de salud de la sesion (issue #52). Opcional por la MISMA razon que
+   * los tres de arriba: el arnes de `OfficeScene.browser.test.ts` construye
+   * este objeto a mano, y obligarle a declarar manejadores mudos por cada
+   * capacidad nueva convierte cada cambio de esta interfaz en un cambio de
+   * todos sus consumidores.
+   */
+  onConnectionState?(state: OfficeConnectionState): void;
+  /**
+   * Se acaba de reconectar: olvida TODO lo que sabias de los pares, viene un
+   * replay completo (issue #52).
+   *
+   * Hace falta porque la sala nueva no es la vieja con otro socket: es otro
+   * objeto `Room` con su propio estado, que reparte a todos los presentes como
+   * altas. Sin este aviso, quien lleve un registro de avatares acumularia el
+   * estado viejo y el nuevo, y cualquiera que se hubiese ido durante la caida
+   * se quedaria pintado para siempre -- nunca habra un `onRemove` que lo
+   * retire, porque ese borrado ocurrio en una sala que ya no existe.
+   */
+  onResync?(): void;
 }
 
 export interface ConnectOfficeRoomOptions {
@@ -176,46 +209,190 @@ export async function connectOfficeRoom({
   // join. Un fallo al pedirlo no se traga: la escena ya degrada a solitario
   // cuando este `connect` rechaza.
   const token = getIdToken ? await getIdToken() : null;
-  const room: Room<OfficeRoomState> = await client.joinOrCreate(
+  /**
+   * La sala VIVA, mutable a proposito (issue #52). `client.reconnect` devuelve
+   * un `Room` NUEVO, no revive el viejo, asi que todo lo que publica --
+   * `sendMove`, `sendStatus`, el `send` del agrupador -- tiene que leer esta
+   * variable en cada llamada. Capturar la sala en una constante dejaria a la
+   * sesion recuperada hablandole a un socket muerto sin que nada fallase.
+   */
+  let room: Room<OfficeRoomState> = await client.joinOrCreate(
     OFFICE_ROOM_NAME,
     buildJoinOptions({ name, status, spacesVersion, token }),
   );
 
-  const $ = getStateCallbacks(room) as unknown as {
-    (target: OfficeRoomState): { players: PlayersCallbacks };
-    (target: RemotePlayer): PlayerCallbacks;
-  };
+  /** Reintentos ya fallidos; `reconnectPolicy` lo traduce a retardo o rendicion. */
+  let attempt = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * `leave()` ya corrio. Corta cualquier reintento en vuelo: una escena que se
+   * apaga a mitad del backoff no puede resucitar la sesion cuando venza el
+   * temporizador, o quedaria una conexion publicando la posicion de un jugador
+   * que ya no existe -- el mismo fallo que la guarda `alive` de `OfficeScene`.
+   */
+  let disposed = false;
 
-  $(room.state).players.onAdd((player, sessionId) => {
-    handlers.onAdd(toSnapshot(sessionId, player));
-    // La suscripcion por jugador se registra dentro del alta: `onChange` a
-    // nivel de mapa solo avisa de altas y bajas, no de campos que mutan.
-    $(player).onChange(() => handlers.onChange(toSnapshot(sessionId, player)));
-  });
+  /**
+   * Cablea una sala -- la del join o la de un reconnect -- con todo lo que este
+   * modulo escucha. Existe como funcion y no en linea porque el constructor de
+   * `Room` de `colyseus.js` hace `this.onLeave(() => this.removeAllListeners())`:
+   * al morir una sala se lleva por delante TODOS sus manejadores, asi que la
+   * sala nueva llega virgen y hay que repetir el cableado entero. Tener un solo
+   * sitio donde se registra es lo que impide que join y reconnect se separen.
+   */
+  function registerRoom(target: Room<OfficeRoomState>): void {
+    const $ = getStateCallbacks(target) as unknown as {
+      (state: OfficeRoomState): { players: PlayersCallbacks };
+      (player: RemotePlayer): PlayerCallbacks;
+    };
 
-  $(room.state).players.onRemove((_player, sessionId) => {
-    handlers.onRemove(sessionId);
-  });
+    $(target.state).players.onAdd((player, sessionId) => {
+      handlers.onAdd(toSnapshot(sessionId, player));
+      // La suscripcion por jugador se registra dentro del alta: `onChange` a
+      // nivel de mapa solo avisa de altas y bajas, no de campos que mutan.
+      $(player).onChange(() => handlers.onChange(toSnapshot(sessionId, player)));
+    });
 
-  // Mensajes sueltos del servidor (issue #2), no estado sincronizado: no hay
-  // `players.onChange` que los cubra porque no describen a nadie del mapa,
-  // describen un evento puntual.
-  room.onMessage('callinvite', (payload: { from: string; name: string }) => {
-    handlers.onCallInvite?.(payload);
-  });
-  room.onMessage('callerleft', (payload: { from: string }) => {
-    handlers.onCallerLeft?.(payload);
-  });
-  room.onMessage('callaccepted', (payload: { by: string; name: string }) => {
-    handlers.onCallAccepted?.(payload);
-  });
+    $(target.state).players.onRemove((_player, sessionId) => {
+      handlers.onRemove(sessionId);
+    });
+
+    // Mensajes sueltos del servidor (issue #2), no estado sincronizado: no hay
+    // `players.onChange` que los cubra porque no describen a nadie del mapa,
+    // describen un evento puntual.
+    target.onMessage('callinvite', (payload: { from: string; name: string }) => {
+      handlers.onCallInvite?.(payload);
+    });
+    target.onMessage('callerleft', (payload: { from: string }) => {
+      handlers.onCallerLeft?.(payload);
+    });
+    target.onMessage('callaccepted', (payload: { by: string; name: string }) => {
+      handlers.onCallAccepted?.(payload);
+    });
+
+    // No dispara el reintento -- de eso se encarga `onLeave`, que es el unico
+    // que sabe si la sala se murio -- pero tragarselo en silencio es
+    // exactamente lo que hizo invisible la issue #52 durante semanas: el
+    // cliente tenia el motivo del fallo y no lo decia en ningun sitio.
+    target.onError((code, message) => {
+      console.warn(`[office] error de sala (${code}): ${message ?? 'sin mensaje'}`);
+    });
+
+    target.onLeave((code) => {
+      // El token se lee de la sala que MUERE y lo primero de todo: es lo unico
+      // que sobrevive a su cierre, y la variable `room` puede apuntar a otra
+      // antes de que el temporizador venza.
+      handleLeave(code, target.reconnectionToken);
+    });
+  }
+
+  /** Programa el siguiente escalon, o declara la sesion perdida si no queda. */
+  function handleLeave(closeCode: number, reconnectionToken: string): void {
+    if (disposed) return;
+
+    // El codigo de cierre es la unica pista que queda de POR QUE se cayo, y se
+    // pierde en el instante en que este manejador vuelve. La issue #52 explica
+    // la consecuencia de la caida pero no su causa, y sin este registro la
+    // proxima vez que ocurra volveria a no haber nada que mirar.
+    //
+    // Que buscar: 1006 es un cierre abrupto SIN trama de cierre, y es ambiguo
+    // por si solo -- lo produce tanto un transporte que se muere (wifi, NAT,
+    // el multiplexor del 443) como el propio servidor matando a un cliente que
+    // dejo de responder a los pings, porque `autoTerminateUnresponsiveClients`
+    // llama a `terminate()`. Quien deshace ese empate es el servidor: con
+    // `DEBUG=colyseus:connection` registra "terminating unresponsive client"
+    // solo en el segundo caso. 1001 es la pestana yendose, y 4002 un error del
+    // lado del servidor.
+    console.warn(`[office] sesion cerrada (${closeCode}); intento ${attempt}`);
+
+    const decision = decideReconnect({ closeCode, attempt });
+    if (decision.kind !== 'retry') {
+      // Tanto la salida voluntaria como la rendicion acaban aqui: para quien
+      // escucha, las dos significan "ya no hay sesion". La diferencia la nota
+      // en `canRetry`, que la decide la escena, no este modulo.
+      handlers.onConnectionState?.('offline');
+      return;
+    }
+
+    // Se avisa YA, no al vencer el retardo: durante esos segundos el HUD
+    // seguiria anunciando "en línea" a alguien que no lo esta, que es
+    // literalmente el sintoma que esta issue viene a quitar.
+    handlers.onConnectionState?.('reconnecting');
+    retryTimer = setTimeout(() => {
+      void reconnect(closeCode, reconnectionToken);
+    }, decision.delayMs);
+  }
+
+  async function reconnect(closeCode: number, reconnectionToken: string): Promise<void> {
+    retryTimer = undefined;
+    if (disposed) return;
+
+    try {
+      const recovered = (await client.reconnect(reconnectionToken)) as Room<OfficeRoomState>;
+      // La escena pudo apagarse mientras el reconnect estaba en vuelo; misma
+      // guarda y misma razon que en `OfficeScene.connectToOffice`.
+      if (disposed) {
+        void recovered.leave();
+        return;
+      }
+
+      room = recovered;
+      attempt = 0;
+      // El resync va ANTES de cablear la sala nueva, y el orden no es
+      // cosmetico: `players.onAdd` de `@colyseus/schema` puede reproducir de
+      // golpe lo que ya venga decodificado en el estado. Avisando primero,
+      // quien escuche vacia lo viejo y el replay entra sobre limpio; al reves,
+      // vaciaria justo DESPUES de haber repoblado y el avatar del otro no
+      // volveria a aparecer -- el sintoma de la issue, movido de sitio.
+      handlers.onResync?.();
+      registerRoom(recovered);
+      // Y "conectado" va el ultimo, cuando ya hay por donde escuchar.
+      handlers.onConnectionState?.('connected');
+    } catch {
+      if (disposed) return;
+      // Un intento fallido gasta escalon, no la escalera: se sigue con el
+      // MISMO token, que es el que el servidor tiene reservado -- la sala
+      // muerta no va a emitir otro.
+      attempt++;
+      handleLeave(closeCode, reconnectionToken);
+    }
+  }
+
+  registerRoom(room);
 
   const throttle = createMoveThrottle({
     intervalMs: moveIntervalMs,
     send: (move) => room.send('move', move),
   });
 
+  /**
+   * Cerrar la pestana es una salida PEDIDA, y hay que decirlo antes de irse.
+   *
+   * El servidor no puede distinguirlo por su cuenta: una pestana que se cierra
+   * y una red que se muere llegan las dos como un socket cerrado sin la trama
+   * consentida, y desde que existe la ventana de reconexion eso significa
+   * guardar el asiento 30 s. Sin este aviso, cerrar la pestana dejaria el
+   * avatar plantado en la oficina de los demas todo ese rato -- que es el
+   * fantasma que la propia issue #52 nombraba como el precio de una ventana
+   * larga. Aqui no se paga porque la salida limpia se anuncia.
+   *
+   * `room.leave()` manda la trama de forma sincrona sobre un socket que aun
+   * esta abierto, que es lo unico que se puede confiar en que salga mientras
+   * la pagina se desmonta; la promesa que devuelve no se espera porque ya no
+   * hay nadie para recibirla.
+   */
+  const stopPageHide = onPageHide(() => {
+    disposed = true;
+    if (retryTimer !== undefined) clearTimeout(retryTimer);
+    retryTimer = undefined;
+    throttle.dispose();
+    void room.leave();
+  });
+
   return {
+    // Se fija al entrar y no se relee: Colyseus conserva el `sessionId` a
+    // traves de una reconexion (no repite `onJoin`), asi que la sala nueva
+    // devuelve el mismo valor.
     sessionId: room.sessionId,
     sendMove(x, y, facing) {
       throttle.push({ x, y, facing });
@@ -235,6 +412,13 @@ export async function connectOfficeRoom({
       room.send('callrespond', { from, accept });
     },
     async leave() {
+      // El orden importa: marcar primero es lo que hace que el `onLeave` que
+      // este mismo `room.leave()` provoca no se lea como una caida, y que un
+      // reintento ya programado muera en vez de resucitar la sesion.
+      disposed = true;
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+      retryTimer = undefined;
+      stopPageHide();
       throttle.dispose();
       await room.leave();
     },

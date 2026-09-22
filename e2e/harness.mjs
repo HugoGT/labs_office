@@ -310,7 +310,17 @@ function killProcessGroup(child) {
 export async function startHarness({ realLivekit = false, fakeMedia = false } = {}) {
   await checkPortFree(SERVER_PORT);
 
-  const serverEnv = { ...process.env, PORT: String(SERVER_PORT) };
+  const serverEnv = {
+    ...process.env,
+    PORT: String(SERVER_PORT),
+    // Issue #52: the reconnection window is real and blocking, so the 30s
+    // production value would cost half a minute of wall clock for every
+    // scenario where a client goes away -- and a suite that slow stops being
+    // run. 2s is long enough that a seat is demonstrably held (S5 asserts the
+    // peer survives the close before it drops) and short enough to stay well
+    // inside the harness deadline.
+    OFFICE_RECONNECTION_WINDOW_SECONDS: '2',
+  };
   if (realLivekit) {
     const livekitEnv = loadLivekitEnv();
     if (!livekitEnv.LIVEKIT_API_KEY || !livekitEnv.LIVEKIT_API_SECRET) {

@@ -8,8 +8,19 @@ export interface UseOfficeBridgeResult {
   closeMenu: () => void;
 }
 
-/** Antes de que la escena diga nada, se asume solitario, no conectado. */
-const INITIAL_PRESENCE: OfficeEventMap['presence'] = { online: false, peers: 0 };
+/**
+ * Antes de que la escena diga nada, se asume solitario, no conectado.
+ *
+ * `canRetry: false` (#52) por lo mismo: todavia no consta que haya servidor
+ * alguno, y un boton de reintento en el primer render prometeria algo que
+ * quiza no existe. La escena corrige en cuanto sabe si hay endpoint.
+ */
+const INITIAL_PRESENCE: OfficeEventMap['presence'] = {
+  online: false,
+  peers: 0,
+  state: 'offline',
+  canRetry: false,
+};
 
 /**
  * Suscribe el arbol de React a un `OfficeBridge` ya creado (D3: el puente lo
