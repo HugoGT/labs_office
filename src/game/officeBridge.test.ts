@@ -108,23 +108,6 @@ describe('createOfficeBridge', () => {
     expect(bridge).not.toHaveProperty('callNpc');
   });
 
-  it('expone un canal de anclas independiente por instancia, ajeno al EventTarget de eventos (issue #17, D4)', () => {
-    const bridgeA = createOfficeBridge();
-    const bridgeB = createOfficeBridge();
-
-    const writer = bridgeA.anchors.open();
-    writer.set('par-1', 10, 20, true);
-    writer.commit();
-
-    expect(bridgeA.anchors.snapshot().anchors.get('par-1')).toEqual({
-      x: 10,
-      y: 20,
-      onScreen: true,
-    });
-    // Dos instancias no comparten canal de anclas, igual que no comparten eventos.
-    expect(bridgeB.anchors.snapshot().anchors.size).toBe(0);
-  });
-
   it('entrega "callinvite" y deja de notificar tras desuscribirse (issue #2, D3)', () => {
     const bridge = createOfficeBridge();
     const handler = vi.fn();

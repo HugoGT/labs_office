@@ -25,6 +25,16 @@ export interface VideoTileProps {
 }
 
 /**
+ * Tamaño fuente del retrato: el PNG que exporta `textures.ts` mide 16x20, y
+ * se pinta a una escala ENTERA fija (nunca estirado al tamaño del tile). Con
+ * `object-fit: cover` el personaje se escalaba x4.5 y ademas se recortaba,
+ * de modo que ocupaba el tile entero y cambiaba de tamaño con el.
+ */
+export const PORTRAIT_SOURCE_WIDTH = 16;
+export const PORTRAIT_SOURCE_HEIGHT = 20;
+export const PORTRAIT_SCALE = 3;
+
+/**
  * Contenido de un tile de conversacion (issue #17, PR3b): video real cuando
  * hay una pista adjuntable, retrato fiel en caso contrario -- el mismo mapa
  * de bits que ya pinta el avatar en el canvas (D1). Nombre y borde de habla
@@ -59,7 +69,13 @@ export function VideoTile({ sessionId, name, portraits, track, speaking }: Video
       {track ? (
         <div className={styles.videoHost} ref={videoHostRef} />
       ) : dataUrl ? (
-        <img className={styles.portrait} src={dataUrl} alt={`Retrato de ${sessionId}`} />
+        <img
+          className={styles.portrait}
+          src={dataUrl}
+          alt={`Retrato de ${sessionId}`}
+          width={PORTRAIT_SOURCE_WIDTH * PORTRAIT_SCALE}
+          height={PORTRAIT_SOURCE_HEIGHT * PORTRAIT_SCALE}
+        />
       ) : (
         <div className={styles.placeholder} aria-hidden="true" />
       )}

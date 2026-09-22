@@ -1,12 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { AttachableTrack } from '../game/attachableTrack';
 import type { OfficeBridge, OfficeEventMap } from '../game/officeBridge';
-import {
-  INITIAL_COLLAPSE_STATE,
-  INITIAL_TILE_LAYOUT_STATE,
-  nextCollapseState,
-  tileLayout,
-} from '../game/tileLayout';
 import { VideoTile } from './VideoTile';
 import styles from './VideoTiles.module.css';
 
@@ -27,31 +21,30 @@ const INITIAL_VOICE: OfficeEventMap['voice'] = {
   spaceId: null,
 };
 
+interface TileEntry {
+  readonly sessionId: string;
+  readonly name: string;
+  readonly track: AttachableTrack | null;
+}
+
 /**
- * Overlay de tiles de conversacion (issue #17): un contenedor plano unico con
- * un hijo por sessionId -- el propio y cada par audible --, `key={sessionId}`
- * (D5) -- lo que en PR4 garantizara que anclado<->fila sea un cambio de
- * estilo, nunca un remonte que se llevaria un `<video>` real por delante.
+ * Barra de tiles de conversacion (issue #17): una fila fija arriba al centro
+ * de la pantalla, con un tile por participante audible -- el propio primero y
+ * cada par despues -- que se apila y se recentra sola segun cuantos haya.
  *
- * Existencia/contenido son discretos (React, via "voice"/"portraits");
- * posicion es continua y SALTA React por completo (D4): un unico
- * `requestAnimationFrame` lee `bridge.anchors.snapshot()` y escribe
- * `transform`/`visibility` directo a los nodos. Cero `setState` por cuadro.
+ * Deliberadamente NO sigue al avatar por el mundo: la posicion no depende de
+ * la camara del juego ni de ningun bucle por cuadro, asi que aqui no hay
+ * `requestAnimationFrame`, ni canal de anclas, ni escritura directa al DOM.
+ * Existencia y contenido son discretos y los decide React desde dos eventos
+ * del puente ("voice" y "portraits"); el resto es layout de CSS.
  *
- * El self-tile pasa por el MISMO canal de anclas que un par (decision F,
- * textual del mantenedor: "Tu propio recuadro cuelga de tu avatar igual que
- * el de los demas") -- `OfficeScene.publishAnchors()` proyecta tambien la
- * posicion del jugador local, con la identica formula de camara, asi que el
- * self-tile se registra en `nodesRef` igual que cualquier tile de par y
- * queda sujeto a la misma regla "sin ancla este cuadro -> oculto, nunca
- * desmontado" (D4/D5). Lo unico que lo distingue de un par es el origen de
- * sus props (nombre/pista propios en vez de los de un par) y que su video
- * nunca pasa por el gate de sala (D8): la posicion es identica en ambos.
+ * `key={sessionId}` (D5) sigue siendo la invariante que importa: que un par
+ * entre o salga reordena la fila, pero nunca remonta el tile de al lado -- un
+ * remonte se llevaria por delante el `<video>` real que cuelga de el.
  */
 export function VideoTiles({ bridge, videoTracks, speakers, localVideoTrack }: VideoTilesProps) {
   const [voice, setVoice] = useState<OfficeEventMap['voice']>(INITIAL_VOICE);
   const [portraits, setPortraits] = useState<Record<string, string> | null>(null);
-  const nodesRef = useRef(new Map<string, HTMLDivElement>());
 
   useEffect(() => {
     const unsubscribeVoice = bridge.on('voice', setVoice);
@@ -65,106 +58,31 @@ export function VideoTiles({ bridge, videoTracks, speakers, localVideoTrack }: V
     };
   }, [bridge]);
 
-  useEffect(() => {
-    // jsdom no implementa `requestAnimationFrame` (confirmado): el bucle solo
-    // arranca donde de verdad existe, para que montar este componente bajo
-    // los tests de `OfficeShell` no explote.
-    if (typeof requestAnimationFrame !== 'function') return undefined;
-
-    let frameId: number;
-    let lastGeneration = -1;
-    // Estado de colapso/posicion entre cuadros (issue #17, D6): variables
-    // locales al efecto, igual que `lastGeneration` -- no hace falta un
-    // `useRef` porque viven y mueren con esta misma instancia del bucle.
-    let collapseState = INITIAL_COLLAPSE_STATE;
-    let layoutState = INITIAL_TILE_LAYOUT_STATE;
-
-    function tick(): void {
-      const frame = bridge.anchors.snapshot();
-      if (frame.generation !== lastGeneration) {
-        lastGeneration = frame.generation;
-        const now = Date.now();
-        // Regla pura de densidad (D6): decide que ids colapsan a la fila
-        // fija. Sin ella, `tileLayout` no distinguiria un tile anclado de
-        // uno colapsado.
-        collapseState = nextCollapseState({ anchors: frame.anchors, previous: collapseState, now });
-        // Posicion + el suavizado de 150ms de la transicion de modo viven
-        // por completo dentro de esta funcion pura, nunca via CSS (D6): una
-        // transicion CSS estandar suavizaria tambien el seguimiento anclado
-        // continuo, que reescribe `transform` en cada cuadro.
-        layoutState = tileLayout({
-          anchors: frame.anchors,
-          collapsed: collapseState,
-          viewport: { width: window.innerWidth, height: window.innerHeight },
-          now,
-          previous: layoutState,
-        });
-
-        for (const [sessionId, node] of nodesRef.current) {
-          const position = layoutState.positions.get(sessionId);
-          if (position) {
-            node.style.transform = `translate(${position.x}px, ${position.y}px)`;
-            node.style.visibility = position.visible ? 'visible' : 'hidden';
-            // El self-tile no se exime (decision del mantenedor): el MISMO
-            // atributo, escrito por la MISMA regla, para todo sessionId.
-            node.dataset.mode = position.mode;
-          } else {
-            // Sin ancla este cuadro (aun no reportada, o podada): oculto,
-            // nunca desmontado (D4/D5).
-            node.style.visibility = 'hidden';
-          }
-        }
-      }
-      frameId = requestAnimationFrame(tick);
-    }
-
-    frameId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frameId);
-  }, [bridge]);
-
-  function registerNode(sessionId: string) {
-    return (node: HTMLDivElement | null) => {
-      if (node) nodesRef.current.set(sessionId, node);
-      else nodesRef.current.delete(sessionId);
-    };
+  const entries: TileEntry[] = [];
+  if (voice.selfSessionId !== null) {
+    // El self-tile NUNCA pasa por el gate de sala (D8, decision G): la propia
+    // camara no cuesta downlink alguno.
+    entries.push({ sessionId: voice.selfSessionId, name: voice.selfName, track: localVideoTrack });
+  }
+  for (const peer of voice.peers) {
+    entries.push({
+      sessionId: peer.sessionId,
+      name: peer.name,
+      // Gate de video de PARES (D8): solo dentro de una sala compartida.
+      track: voice.spaceId !== null ? (videoTracks.get(peer.sessionId) ?? null) : null,
+    });
   }
 
   return (
-    <div className={styles.overlay}>
-      {voice.selfSessionId !== null && (
-        <div
-          key={voice.selfSessionId}
-          ref={registerNode(voice.selfSessionId)}
-          className={styles.tile}
-          data-mode="self"
-          data-session-id={voice.selfSessionId}
-        >
+    <div className={styles.bar} data-testid="video-tile-bar">
+      {entries.map((entry) => (
+        <div key={entry.sessionId} className={styles.tile} data-session-id={entry.sessionId}>
           <VideoTile
-            sessionId={voice.selfSessionId}
-            name={voice.selfName}
+            sessionId={entry.sessionId}
+            name={entry.name}
             portraits={portraits}
-            track={localVideoTrack}
-            speaking={speakers.has(voice.selfSessionId)}
-          />
-        </div>
-      )}
-      {voice.peers.map((peer) => (
-        <div
-          key={peer.sessionId}
-          ref={registerNode(peer.sessionId)}
-          className={styles.tile}
-          data-mode="anchored"
-          data-session-id={peer.sessionId}
-        >
-          <VideoTile
-            sessionId={peer.sessionId}
-            name={peer.name}
-            portraits={portraits}
-            // Gate de video de PARES (D8, decision G): solo dentro de una
-            // sala compartida. El self-tile de arriba NUNCA pasa por esta
-            // regla -- la propia camara no cuesta downlink alguno.
-            track={voice.spaceId !== null ? (videoTracks.get(peer.sessionId) ?? null) : null}
-            speaking={speakers.has(peer.sessionId)}
+            track={entry.track}
+            speaking={speakers.has(entry.sessionId)}
           />
         </div>
       ))}

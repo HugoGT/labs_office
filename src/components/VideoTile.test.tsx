@@ -2,7 +2,12 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { AttachableTrack } from '../game/attachableTrack';
 import { avatarKeyFor } from '../game/remoteAvatars';
-import { VideoTile } from './VideoTile';
+import {
+  PORTRAIT_SCALE,
+  PORTRAIT_SOURCE_HEIGHT,
+  PORTRAIT_SOURCE_WIDTH,
+  VideoTile,
+} from './VideoTile';
 
 /** Doble estructural minimo de una pista, mismo patron que `remoteAudioSink.test.ts`. */
 function fakeVideoTrack(): AttachableTrack {
@@ -212,5 +217,27 @@ describe('VideoTile: borde de habla solo desde voz real (issue #17, D7)', () => 
     );
 
     expect(screen.getByTestId('tile-name').parentElement).toHaveAttribute('data-speaking', 'false');
+  });
+});
+
+/**
+ * El retrato es el MISMO PNG de 16x20 que genera `textures.ts`, y se pinta a
+ * una escala entera fija, nunca estirado al tamaño del tile: con `object-fit:
+ * cover` el personaje se escalaba x4.5 y se recortaba, ocupando el tile
+ * entero. El tamaño se fija con los atributos intrinsecos de la imagen (no
+ * solo con CSS) para que sea el mismo este el tile donde este.
+ */
+describe('VideoTile: el retrato tiene tamaño fijo, sin re-size (issue #17, D1)', () => {
+  it('pinta el retrato a la escala entera declarada, no al tamaño del tile', () => {
+    const sessionId = 'par-1';
+    const portraits = { [avatarKeyFor(sessionId)]: 'data:image/png;base64,AAAA' };
+
+    render(
+      <VideoTile sessionId={sessionId} name="Par Uno" portraits={portraits} track={null} speaking={false} />,
+    );
+
+    const img = screen.getByAltText(`Retrato de ${sessionId}`);
+    expect(img).toHaveAttribute('width', String(PORTRAIT_SOURCE_WIDTH * PORTRAIT_SCALE));
+    expect(img).toHaveAttribute('height', String(PORTRAIT_SOURCE_HEIGHT * PORTRAIT_SCALE));
   });
 });

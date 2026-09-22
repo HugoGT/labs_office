@@ -1,31 +1,44 @@
-.overlay {
+/*
+ * Fila fija arriba al centro, por encima del canvas. `pointer-events: none`
+ * porque la barra solo informa: nada de lo que hay debajo (clic en un
+ * escritorio, en un avatar) puede quedar tapado por ella.
+ */
+.bar {
   position: fixed;
-  inset: 0;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-width: calc(100vw - 24px);
   pointer-events: none;
   z-index: 5;
 }
 
 /*
- * Un unico contenedor plano por sessionId (D5): la posicion/`data-mode` se
- * escriben aqui, directo al DOM, desde el bucle de rAF -- nunca via React.
- * `will-change` evita que Chrome recalcule layout en cada `transform`.
+ * Tamaño FIJO, identico para todos: el tile no crece ni encoge con su
+ * contenido (video, retrato o placeholder), asi que cambiar de contenido
+ * nunca mueve a los vecinos de la fila.
  */
 .tile {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 72px;
-  height: 72px;
-  margin-left: -36px;
-  margin-top: -36px;
-  will-change: transform, visibility;
+  flex: none;
+  width: 176px;
+  height: 99px;
 }
 
 .content {
   position: relative;
   width: 100%;
   height: 100%;
+  /* Centra el retrato, que tiene tamaño propio y no llena el tile. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
   border-radius: 10px;
+  background: #1f2937;
   /*
    * El borde vive aqui, en el contenedor comun a video/retrato/placeholder
    * (issue #17, D7): asi cambiar de contenido nunca mueve ni redimensiona el
@@ -44,30 +57,27 @@
   height: 100%;
 }
 
+/* La camara SI llena el tile: recortar un video apaisado es lo esperado. */
 .video {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border-radius: 8px;
 }
 
+/*
+ * El retrato NO se estira: su tamaño lo fijan los atributos `width`/`height`
+ * de la imagen (`VideoTile.tsx`, escala entera sobre el PNG de 16x20), y
+ * aqui solo se impide que nada lo reescale. `image-rendering: pixelated`
+ * mantiene el personaje tan nitido como en el canvas.
+ */
 .portrait {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: 8px;
-  /*
-   * La fuente es un PNG de 16x20 escalado x4.5 (issue #17, D1): sin esto el
-   * navegador suaviza el retrato y se ve borroso frente al avatar nitido que
-   * se ve en el canvas.
-   */
+  flex: none;
   image-rendering: pixelated;
 }
 
 .placeholder {
   width: 100%;
   height: 100%;
-  border-radius: 8px;
   background: #1f2937;
 }
 
@@ -80,9 +90,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.2;
-  padding: 1px 4px;
+  padding: 1px 5px;
   border-radius: 4px;
   background: #000000b3;
   color: #e5e7eb;
