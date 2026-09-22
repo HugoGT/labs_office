@@ -120,8 +120,25 @@ test('S6: with no LiveKit reachable, both HUDs report audio unavailable and pres
   assert.equal(pageErrorsB.length, 0, `pageB had unhandled errors: ${pageErrorsB.join(', ')}`);
 });
 
-test('S5: closing one browser context drops the other client\'s peer chip', async () => {
+test('S5: an abruptly killed client holds its seat, then drops once the window closes', async () => {
+  // Issue #52 changed what this scenario proves. `context.close()` tears the
+  // browser down without running any page lifecycle handler, so the server sees
+  // a socket that died without the consented frame -- indistinguishable from a
+  // laptop losing wifi, which is exactly the case the reconnection window
+  // exists to survive. The seat is therefore held on purpose, and the peer must
+  // NOT vanish on the spot: that instant removal was the old bug, not the
+  // contract. The harness shortens the window to 2s (`OFFICE_RECONNECTION_
+  // WINDOW_SECONDS`) so this stays fast.
+  //
+  // A real user closing a real tab does not take this path: `pagehide` fires
+  // and `officeRoomClient` announces a consented leave, so the drop is
+  // immediate. Playwright cannot exercise that here, which is why this asserts
+  // the violent-death path instead of pretending to cover both.
   await contextB.close();
+  await waitForOnlineCount(pageA, 1);
+
+  // And the seat is held, not leaked: a window that never closed would leave a
+  // ghost standing in the office forever, which is just as broken.
   await waitForOnlineCount(pageA, 0);
   await waitForPeerTileCount(pageA, 0);
   assert.equal(pageErrorsA.length, 0, `pageA had unhandled errors: ${pageErrorsA.join(', ')}`);

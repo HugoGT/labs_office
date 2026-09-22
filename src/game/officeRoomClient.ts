@@ -22,6 +22,7 @@ import {
   type Facing,
   type PresenceStatus,
 } from './officeProtocol';
+import { onPageHide } from './pageLifecycle';
 import { decideReconnect } from './reconnectPolicy';
 import type { RemotePlayerSnapshot } from './remoteAvatars';
 
@@ -364,6 +365,30 @@ export async function connectOfficeRoom({
     send: (move) => room.send('move', move),
   });
 
+  /**
+   * Cerrar la pestana es una salida PEDIDA, y hay que decirlo antes de irse.
+   *
+   * El servidor no puede distinguirlo por su cuenta: una pestana que se cierra
+   * y una red que se muere llegan las dos como un socket cerrado sin la trama
+   * consentida, y desde que existe la ventana de reconexion eso significa
+   * guardar el asiento 30 s. Sin este aviso, cerrar la pestana dejaria el
+   * avatar plantado en la oficina de los demas todo ese rato -- que es el
+   * fantasma que la propia issue #52 nombraba como el precio de una ventana
+   * larga. Aqui no se paga porque la salida limpia se anuncia.
+   *
+   * `room.leave()` manda la trama de forma sincrona sobre un socket que aun
+   * esta abierto, que es lo unico que se puede confiar en que salga mientras
+   * la pagina se desmonta; la promesa que devuelve no se espera porque ya no
+   * hay nadie para recibirla.
+   */
+  const stopPageHide = onPageHide(() => {
+    disposed = true;
+    if (retryTimer !== undefined) clearTimeout(retryTimer);
+    retryTimer = undefined;
+    throttle.dispose();
+    void room.leave();
+  });
+
   return {
     // Se fija al entrar y no se relee: Colyseus conserva el `sessionId` a
     // traves de una reconexion (no repite `onJoin`), asi que la sala nueva
@@ -393,6 +418,7 @@ export async function connectOfficeRoom({
       disposed = true;
       if (retryTimer !== undefined) clearTimeout(retryTimer);
       retryTimer = undefined;
+      stopPageHide();
       throttle.dispose();
       await room.leave();
     },

@@ -62,7 +62,7 @@ import type { UserDirectory } from './directory/directoryPort.ts';
 import { directoryFromEnv, type DirectoryRuntime } from './directory/fromEnv.ts';
 import { createLiveSessionRegistry, type LiveSessionRegistry } from './liveSessions.ts';
 import { mintOfficeToken } from './livekitToken.ts';
-import { OFFICE_ROOM_NAME, OfficeRoom } from './OfficeRoom.ts';
+import { OFFICE_ROOM_NAME, OfficeRoom, RECONNECTION_WINDOW_SECONDS } from './OfficeRoom.ts';
 import { createIdTokenVerifier, type IdTokenVerifier } from './verifyIdToken.ts';
 
 /**
@@ -282,6 +282,37 @@ export interface OfficeServerOverrides {
  * hoy": sin esto, un despliegue existente se quedaria abierto de par en par al
  * actualizar.
  */
+/**
+ * Ventana de reconexion desde el entorno (issue #52), con la misma forma que
+ * el resto de lectores de este fichero: recibe `env` en vez de leer el global,
+ * para que un test la afirme sin tocar estado del proceso.
+ *
+ * Existe por dos motivos. Uno, que un despliegue pueda ajustarla -- o volver al
+ * comportamiento anterior poniendola a 0 -- sin revertir codigo ni reconstruir
+ * imagenes. Y dos, que el arnes E2E pueda pedir una corta: la ventana es real y
+ * bloquea de verdad, asi que con los 30 s de produccion cada escenario de
+ * salida costaria medio minuto de reloj, y una suite que tarda eso deja de
+ * correrse.
+ *
+ * Un valor ilegible se ignora y conserva el de produccion, en vez de caer en 0.
+ * Caer en 0 seria lo peor de los dos mundos: la proteccion desactivada por una
+ * errata y nadie enterandose. El 0 explicito si se respeta, porque ahi alguien
+ * lo esta pidiendo.
+ */
+export function reconnectionWindowFromEnv(env: {
+  OFFICE_RECONNECTION_WINDOW_SECONDS?: string;
+}): number {
+  const raw = env.OFFICE_RECONNECTION_WINDOW_SECONDS;
+  if (raw === undefined || raw.trim() === '') return RECONNECTION_WINDOW_SECONDS;
+
+  const parsed = Number(raw);
+  // `Number.isSafeInteger` descarta de una vez NaN, Infinity, los decimales y
+  // los desbordamientos como `1e999`, que `parseInt` dejaria pasar a medias.
+  if (!Number.isSafeInteger(parsed) || parsed < 0) return RECONNECTION_WINDOW_SECONDS;
+
+  return parsed;
+}
+
 function allowedOriginsFromEnv(env: { ALLOWED_ORIGIN?: string }): readonly string[] {
   return (env.ALLOWED_ORIGIN ?? '')
     .split(',')
@@ -746,7 +777,8 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     sessions,
     auth,
     directory,
-    reconnectionWindowSeconds: overrides?.reconnectionWindowSeconds,
+    reconnectionWindowSeconds:
+      overrides?.reconnectionWindowSeconds ?? reconnectionWindowFromEnv(process.env),
   });
 
   return {
