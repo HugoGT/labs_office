@@ -1,21 +1,22 @@
 name: CI
 
 on:
-  # CI en pausa desde 2026-09-17 por dos motivos: las comprobaciones de PR
-  # eran lentas, y el E2E estaba roto. El segundo motivo YA NO APLICA: el E2E
-  # fallaba porque el harness buscaba un chip que el issue #17 habia retirado,
-  # y eso se arreglo en esta misma tanda (issue #16).
+  # Disparadores automaticos reactivados el 2026-09-21, cumpliendo la condicion
+  # que dejo escrita la pausa del 2026-09-17: se pedian tres corridas verdes
+  # seguidas por `workflow_dispatch` antes de descomentarlos, y hubo ocho
+  # (`gh run list --workflow=ci.yml`), la ultima el 2026-09-19. Eso cubre la
+  # duda que quedaba abierta: que `livekit-server --dev` con `--network host`
+  # reune candidatos ICE alcanzables en un runner real.
   #
-  # Los disparadores siguen comentados a proposito, no por olvido: falta
-  # comprobar en un runner real que `livekit-server --dev` con `--network
-  # host` reune candidatos ICE alcanzables, algo que solo demuestra un
-  # `workflow_dispatch` de verdad. Para reactivar: lanzar la CI a mano, y tras
-  # tres corridas verdes seguidas descomentar los dos disparadores de abajo.
-  # Si la duracion empeora de forma apreciable, no reactivar y decidir aparte.
-  # push:
-  #   branches: [main]
-  # pull_request:
-  #   branches: [main]
+  # La otra objecion era la duracion. Tambien se midio: las corridas verdes van
+  # entre 3m54s y 4m36s, con el `timeout-minutes: 20` de abajo muy lejos.
+  #
+  # `push` se acota a main y `pull_request` a los PR contra main: una rama de
+  # trabajo con PR abierto se verifica una sola vez, no dos.
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 # Una ejecucion por rama: un push nuevo cancela el anterior en curso.
