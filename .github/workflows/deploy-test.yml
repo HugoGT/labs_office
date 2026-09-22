@@ -4,11 +4,31 @@ name: Deploy (test)
 # que seguir corriendo en los pull requests de forks sin ninguna credencial.
 # Este workflow toca infraestructura y solo corre sobre main.
 on:
-  # Despliegue en pausa (2026-09-17): no sale solo en cada merge a main, solo
-  # a mano con `gh workflow run deploy-test.yml`. Para reactivarlo, descomentar
-  # el disparador de push.
-  # push:
-  #   branches: [main]
+  # Despliegue automatico reactivado el 2026-09-21, y NO con `push` a secas.
+  #
+  # `push: [main]` habria lanzado este workflow EN PARALELO con ci.yml, que
+  # tambien corre en cada push a main: las imagenes se publicarian y la VM se
+  # actualizaria sin esperar al veredicto de los tests. El unico freno seria el
+  # smoke check final, y ese solo ve si /health contesta 200, no si una prueba
+  # unitaria se puso roja.
+  #
+  # `workflow_run` invierte el orden: este workflow no arranca hasta que la CI
+  # TERMINA, y el `if` del job de abajo lo descarta salvo que haya terminado en
+  # verde. Un commit rojo en main no llega nunca a la maquina.
+  #
+  # Dos consecuencias de `workflow_run` que conviene tener presentes:
+  #
+  #   1. GitHub solo atiende este disparador con la version del fichero que hay
+  #      en la rama por defecto. Este cambio no surte efecto hasta que aterriza
+  #      en main; probarlo desde la rama del PR no dispara nada.
+  #   2. El checkout por defecto seria la punta de main, no el commit que la CI
+  #      verifico. Por eso todo lo de abajo resuelve el SHA desde
+  #      `workflow_run.head_sha` y nunca desde `github.sha`, que aqui apunta al
+  #      commit del disparador y no al que se esta desplegando.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 # Sin cancel-in-progress: un despliegue a medias deja la VM con imagenes
@@ -31,16 +51,50 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
+    # El filtro que convierte "la CI acabo" en "la CI acabo bien". Las tres
+    # condiciones son necesarias y ninguna sobra:
+    #
+    #   - `conclusion == 'success'`: `workflow_run`/`completed` tambien salta
+    #     con la CI en rojo, cancelada o saltada. Sin esto desplegariamos justo
+    #     los commits que no hay que desplegar.
+    #   - `head_branch == 'main'`: el `branches:` del disparador ya filtra, pero
+    #     repetirlo aqui hace que el job explique su propia condicion y no
+    #     dependa de leer el bloque `on:`.
+    #   - `event == 'push'`: descarta las corridas de CI de los pull requests.
+    #     Importa de verdad con los forks: un PR desde una rama llamada `main`
+    #     traeria `head_branch == 'main'` sin haberse fusionado nada.
+    #
+    # La primera rama del `or` conserva el `gh workflow run deploy-test.yml` de
+    # siempre, que sigue siendo la via para redesplegar sin tocar codigo.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.event == 'push')
+
     env:
       REGISTRY: ${{ vars.GCP_REGION || 'us-central1' }}-docker.pkg.dev
       REPOSITORY: ${{ vars.GCP_AR_REPOSITORY || 'labs-office-test' }}
       INSTANCE: ${{ vars.GCP_INSTANCE || 'labs-office-test' }}
       ZONE: ${{ vars.GCP_ZONE || 'us-central1-a' }}
       APP_HOST: ${{ vars.APP_HOST }}
+      # El commit que se despliega, y la unica fuente de verdad para el tag de
+      # las tres imagenes y para el argumento de `office-deploy`.
+      #
+      # Por `workflow_run` vale el SHA que la CI verifico; por
+      # `workflow_dispatch` ese campo no existe y cae a `github.sha`, que
+      # entonces SI es el commit elegido a mano. Escrito una sola vez arriba
+      # para que no haya forma de que una de las cuatro referencias de abajo se
+      # quede apuntando a otro commit.
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
 
     steps:
+      # `ref` explicito: sin el, `workflow_run` haria checkout de la punta de
+      # main, que puede haber avanzado desde que la CI dio el visto bueno.
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
 
       # APP_HOST se deriva de la IP estatica y lo fija una persona una sola vez
       # desde `terraform output` (ver infra/gcp/README.md). Fallar aqui, antes
@@ -85,7 +139,7 @@ jobs:
           context: .
           file: infra/gcp/docker/caddy.Dockerfile
           push: true
-          tags: ${{ env.REGISTRY }}/${{ vars.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/caddy:${{ github.sha }}
+          tags: ${{ env.REGISTRY }}/${{ vars.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/caddy:${{ env.DEPLOY_SHA }}
           cache-from: type=gha,scope=caddy
           cache-to: type=gha,scope=caddy,mode=max
 
@@ -95,7 +149,7 @@ jobs:
           context: .
           file: infra/gcp/docker/colyseus.Dockerfile
           push: true
-          tags: ${{ env.REGISTRY }}/${{ vars.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/colyseus:${{ github.sha }}
+          tags: ${{ env.REGISTRY }}/${{ vars.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/colyseus:${{ env.DEPLOY_SHA }}
           cache-from: type=gha,scope=colyseus
           cache-to: type=gha,scope=colyseus,mode=max
 
@@ -129,7 +183,7 @@ jobs:
             VITE_FIREBASE_API_KEY=${{ vars.FIREBASE_API_KEY }}
             VITE_FIREBASE_PROJECT_ID=${{ vars.FIREBASE_API_KEY && (vars.FIREBASE_PROJECT_ID || vars.GCP_PROJECT_ID) || '' }}
             VITE_FIREBASE_AUTH_DOMAIN=${{ vars.FIREBASE_AUTH_DOMAIN }}
-          tags: ${{ env.REGISTRY }}/${{ vars.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/web:${{ github.sha }}
+          tags: ${{ env.REGISTRY }}/${{ vars.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/web:${{ env.DEPLOY_SHA }}
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
 
@@ -154,7 +208,7 @@ jobs:
             --zone "${ZONE}" \
             --tunnel-through-iap \
             --quiet \
-            --command "sudo curl -sS -f -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/attributes/office-deploy-script -o /usr/local/bin/office-deploy && sudo chmod 0755 /usr/local/bin/office-deploy && sudo /usr/local/bin/office-deploy ${{ github.sha }}"
+            --command "sudo curl -sS -f -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/attributes/office-deploy-script -o /usr/local/bin/office-deploy && sudo chmod 0755 /usr/local/bin/office-deploy && sudo /usr/local/bin/office-deploy ${{ env.DEPLOY_SHA }}"
 
       # Sin esto el workflow diria "desplegado" en cuanto docker compose
       # devuelve el control, que es antes de que ningun contenedor conteste.
