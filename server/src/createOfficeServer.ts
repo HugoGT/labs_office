@@ -17,7 +17,7 @@ import { WebSocketTransport } from '@colyseus/ws-transport';
 import express from 'express';
 import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { LIVEKIT_ROOM_NAME } from '../../src/game/officeProtocol.ts';
+import { livekitRoomFor } from '../../src/game/officeProtocol.ts';
 import {
   handleAdminSession,
   handleCreateInvitation,
@@ -63,6 +63,7 @@ import { directoryFromEnv, type DirectoryRuntime } from './directory/fromEnv.ts'
 import { createLiveSessionRegistry, type LiveSessionRegistry } from './liveSessions.ts';
 import { mintOfficeToken } from './livekitToken.ts';
 import { OFFICE_ROOM_NAME, OfficeRoom, RECONNECTION_WINDOW_SECONDS } from './OfficeRoom.ts';
+import { spaceIdAt } from './spaces/spaceMembership.ts';
 import { createIdTokenVerifier, type IdTokenVerifier } from './verifyIdToken.ts';
 
 /**
@@ -109,16 +110,36 @@ interface LivekitTokenResult {
  * entrar. Sin `auth` la funcion se comporta exactamente como antes, guardas y
  * orden incluidos: `identity` se queda en `null` y las dos ramas nuevas no
  * llegan a mirarse.
+ *
+ * Con `spaces` presente se anade la guarda de posicion (#10, #12): un
+ * `spaceId` en el cuerpo exige que la ULTIMA posicion trackeada de esta sesion
+ * (`sessions.positionOf`, D4) caiga dentro de ese espacio (`spaceIdAt`, D4).
+ * El 403 es el MISMO tanto si el espacio no existe como si la sesion nunca se
+ * movio: distinguirlos le daria a quien pide el token un oraculo de que
+ * espacios existen y de quien esta donde, exactamente el mismo riesgo que
+ * `unknown-session`/`forbidden-session` ya evitan arriba. Sin almacen de
+ * espacios (D5), el `spaceId` se ignora entero y se emite el corredor, para
+ * que un despliegue sin base de datos siga funcionando igual que hoy.
  */
 async function handleLivekitToken(
   body: unknown,
   sessions: LiveSessionRegistry,
   auth?: IdTokenVerifier,
+  spaces?: SpacesDirectory,
 ): Promise<LivekitTokenResult> {
   const sessionId = (body as { sessionId?: unknown } | null)?.sessionId;
   if (typeof sessionId !== 'string' || sessionId.length === 0) {
     return { status: 400, body: { error: 'invalid-request' } };
   }
+
+  // Mismo 400 que el de arriba y por la misma razon: un `spaceId` con un tipo
+  // que no es ni texto ni ausencia deliberada (`null`) es un cuerpo mal
+  // formado, no una pregunta de autorizacion.
+  const rawSpaceId = (body as { spaceId?: unknown } | null)?.spaceId;
+  if (rawSpaceId !== undefined && rawSpaceId !== null && typeof rawSpaceId !== 'string') {
+    return { status: 400, body: { error: 'invalid-request' } };
+  }
+  const spaceId: string | null = typeof rawSpaceId === 'string' ? rawSpaceId : null;
 
   // Con auth activa, la credencial se comprueba ANTES que nada que hable de la
   // sesion. El orden no es cosmetico: si `unknown-session` fuese primero, quien
@@ -146,11 +167,30 @@ async function handleLivekitToken(
     return { status: 403, body: { error: 'forbidden-session' } };
   }
 
+  // La guarda de espacio va DESPUES de las dos de sesion/dueno arriba y ANTES
+  // del 503 de abajo: comprueba primero quien eres, luego donde estas. Sin
+  // almacen de espacios el `spaceId` no se mira -- ni siquiera para saber si
+  // existe -- asi que un despliegue sin `DATABASE_URL` mantiene el
+  // comportamiento de hoy exactamente: `mintedSpaceId` se queda en `null` y
+  // `livekitRoomFor` emite el corredor.
+  let mintedSpaceId: string | null = null;
+  if (spaceId !== null && spaces) {
+    const known = await spaces.listSpaces();
+    const pos = sessions.positionOf(sessionId);
+    const actual = pos ? spaceIdAt(pos, known) : null;
+    if (actual !== spaceId) {
+      return { status: 403, body: { error: 'forbidden-space' } };
+    }
+    mintedSpaceId = spaceId;
+  }
+
   const apiKey = process.env.LIVEKIT_API_KEY;
   const apiSecret = process.env.LIVEKIT_API_SECRET;
   if (!apiKey || !apiSecret) {
     return { status: 503, body: { error: 'livekit-not-configured' } };
   }
+
+  const room = livekitRoomFor(mintedSpaceId);
 
   const token = await mintOfficeToken(
     { apiKey, apiSecret },
@@ -163,7 +203,7 @@ async function handleLivekitToken(
       // el token se emite, la sala conecta, y nadie se oye. Es lo mas fragil de
       // todo este cambio.
       identity: sessionId,
-      room: LIVEKIT_ROOM_NAME,
+      room,
       permissions: { canPublish: true, canSubscribe: true, canPublishData: true },
     },
   );
@@ -174,7 +214,7 @@ async function handleLivekitToken(
       token,
       url: process.env.LIVEKIT_URL ?? 'ws://localhost:7880',
       identity: sessionId,
-      room: LIVEKIT_ROOM_NAME,
+      room,
     },
   };
 }
@@ -750,7 +790,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   );
 
   app.post('/livekit/token', (req, res) => {
-    handleLivekitToken(req.body, sessions, auth)
+    handleLivekitToken(req.body, sessions, auth, spaces)
       .then((result) => {
         res.status(result.status).json(result.body);
       })
