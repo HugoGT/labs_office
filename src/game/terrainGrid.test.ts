@@ -215,6 +215,22 @@ describe('findWalkDestination', () => {
     expect(ADJACENT_OFFSETS[0]).toEqual([1, 0]);
   });
 
+  it('con el peer en el borde del rectangulo, salta el primer offset que cae fuera y toma el siguiente que cae dentro', () => {
+    const grid = buildTerrainGrid();
+    const rect: TileRect = { x0: 10, y0: 26, x1: 12, y1: 28 };
+    // Borde derecho del rectangulo, no el centro: [1,0] -> (13,27) cae FUERA
+    // (x1=12), asi que la fase adyacente debe seguir probando offsets en vez
+    // de rendirse o saltar directamente al escaneo del rectangulo.
+    const peer = { tx: 12, ty: 27 };
+
+    // El rectangulo esta libre entero: si el resultado fuese el del escaneo
+    // (distancia Chebyshev) o el del fallback fuera del rectangulo, esta
+    // asercion lo distinguiria de (11,27).
+    expect(findWalkDestination(grid, peer, rect)).toEqual({ tx: 11, ty: 27 });
+    expect(ADJACENT_OFFSETS[0]).toEqual([1, 0]);
+    expect(ADJACENT_OFFSETS[1]).toEqual([-1, 0]);
+  });
+
   it('si los ADJACENT_OFFSETS del peer estan todos bloqueados, escanea el rectangulo por distancia Chebyshev (empate: dy, luego dx)', () => {
     const grid = buildTerrainGrid();
     const rect: TileRect = { x0: 10, y0: 26, x1: 12, y1: 28 };
