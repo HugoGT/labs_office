@@ -155,3 +155,67 @@ export function findFreeAdjacentTile(
   }
   return null;
 }
+
+/** Rectangulo de tiles inclusivo (`x0..x1`, `y0..y1`), como lo devuelve un `SpaceArea` convertido de pixeles a tiles. */
+export interface TileRect {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+function insideRect(rect: TileRect, tx: number, ty: number): boolean {
+  return tx >= rect.x0 && tx <= rect.x1 && ty >= rect.y0 && ty <= rect.y1;
+}
+
+/**
+ * Destino de la auto-caminata al aceptar una llamada (issue #10, S2 3.1),
+ * cuando quien llama esta dentro de un espacio (sala o cubiculo de
+ * escritorio, ambos son `TileRect` para esta funcion -- no distingue tipo).
+ *
+ * `peerSpaceTiles: null` (piso abierto): delega enteramente en
+ * `findFreeAdjacentTile`, comportamiento de hoy sin cambios (D-diseno).
+ *
+ * Con espacio: primero el primer `ADJACENT_OFFSETS` que cae DENTRO del
+ * rectangulo y libre -- el caso comun, pegado a quien llama. Si ninguno
+ * califica (bloqueados o fuera del rectangulo), escanea TODO el rectangulo
+ * ordenado por distancia Chebyshev al peer (empate: `dy` luego `dx`,
+ * ascendente), saltando la propia tile del peer, y toma la primera libre.
+ * Si el rectangulo entero esta bloqueado, cae a `findFreeAdjacentTile` sin
+ * restriccion de rectangulo -- ese fallback puede aterrizar fuera del
+ * espacio, pero es mejor que no moverse.
+ */
+export function findWalkDestination(
+  grid: TerrainGrid,
+  peerTile: TileCoord,
+  peerSpaceTiles: TileRect | null,
+): TileCoord | null {
+  if (!peerSpaceTiles) return findFreeAdjacentTile(grid, peerTile.tx, peerTile.ty);
+
+  for (const [dx, dy] of ADJACENT_OFFSETS) {
+    const nx = peerTile.tx + dx;
+    const ny = peerTile.ty + dy;
+    if (insideRect(peerSpaceTiles, nx, ny) && !isBlocked(grid, nx, ny)) return { tx: nx, ty: ny };
+  }
+
+  const candidates: TileCoord[] = [];
+  for (let ty = peerSpaceTiles.y0; ty <= peerSpaceTiles.y1; ty++) {
+    for (let tx = peerSpaceTiles.x0; tx <= peerSpaceTiles.x1; tx++) {
+      if (tx === peerTile.tx && ty === peerTile.ty) continue;
+      candidates.push({ tx, ty });
+    }
+  }
+  candidates.sort((a, b) => {
+    const distanceA = Math.max(Math.abs(a.tx - peerTile.tx), Math.abs(a.ty - peerTile.ty));
+    const distanceB = Math.max(Math.abs(b.tx - peerTile.tx), Math.abs(b.ty - peerTile.ty));
+    if (distanceA !== distanceB) return distanceA - distanceB;
+    if (a.ty !== b.ty) return a.ty - b.ty;
+    return a.tx - b.tx;
+  });
+
+  for (const candidate of candidates) {
+    if (!isBlocked(grid, candidate.tx, candidate.ty)) return candidate;
+  }
+
+  return findFreeAdjacentTile(grid, peerTile.tx, peerTile.ty);
+}

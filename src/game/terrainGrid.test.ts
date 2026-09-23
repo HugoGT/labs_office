@@ -4,8 +4,10 @@ import {
   ADJACENT_OFFSETS,
   buildTerrainGrid,
   findFreeAdjacentTile,
+  findWalkDestination,
   isBlocked,
   markSolid,
+  type TileRect,
 } from './terrainGrid';
 
 describe('buildTerrainGrid', () => {
@@ -184,5 +186,67 @@ describe('findFreeAdjacentTile', () => {
 
     const found = findFreeAdjacentTile(grid, 6, 26);
     expect(found).not.toEqual({ tx: 6, ty: 26 });
+  });
+});
+
+/**
+ * `findWalkDestination` (issue #10, S2 3.1): el destino de la auto-caminata al
+ * aceptar una llamada cuando quien llama esta dentro de un espacio (sala o
+ * cubiculo). `peerSpaceTiles: null` (piso abierto) delega enteramente en
+ * `findFreeAdjacentTile` -- comportamiento de hoy, sin cambios.
+ */
+describe('findWalkDestination', () => {
+  it('con peerSpaceTiles null, es exactamente findFreeAdjacentTile (piso abierto, sin cambios)', () => {
+    const grid = buildTerrainGrid();
+
+    expect(findWalkDestination(grid, { tx: 6, ty: 26 }, null)).toEqual(
+      findFreeAdjacentTile(grid, 6, 26),
+    );
+    expect(findWalkDestination(grid, { tx: 6, ty: 26 }, null)).toEqual({ tx: 7, ty: 26 });
+  });
+
+  it('dentro de un espacio, prefiere el primer ADJACENT_OFFSETS que cae DENTRO del rectangulo', () => {
+    const grid = buildTerrainGrid();
+    // Rectangulo 3x3 en cesped abierto, lejos de cualquier colisionador del
+    // mapa base. El peer esta en el centro: [1,0] -> (12,27) cae dentro.
+    const rect: TileRect = { x0: 10, y0: 26, x1: 12, y1: 28 };
+
+    expect(findWalkDestination(grid, { tx: 11, ty: 27 }, rect)).toEqual({ tx: 12, ty: 27 });
+    expect(ADJACENT_OFFSETS[0]).toEqual([1, 0]);
+  });
+
+  it('si los ADJACENT_OFFSETS del peer estan todos bloqueados, escanea el rectangulo por distancia Chebyshev (empate: dy, luego dx)', () => {
+    const grid = buildTerrainGrid();
+    const rect: TileRect = { x0: 10, y0: 26, x1: 12, y1: 28 };
+    const peer = { tx: 11, ty: 27 };
+
+    // Bloquea los 6 vecinos de ADJACENT_OFFSETS (todos caen dentro del
+    // rectangulo porque el peer esta en su centro). Quedan libres las dos
+    // esquinas que ADJACENT_OFFSETS nunca prueba: (10,26) y (12,26).
+    for (const [dx, dy] of ADJACENT_OFFSETS) grid.solid[peer.ty + dy][peer.tx + dx] = true;
+
+    // Ambas esquinas estan a distancia Chebyshev 1 del peer; el empate lo
+    // rompe primero dy (ambas dy=-1, igual) y luego dx ascendente: -1 antes
+    // que 1, asi que (10,26) gana sobre (12,26).
+    expect(findWalkDestination(grid, peer, rect)).toEqual({ tx: 10, ty: 26 });
+  });
+
+  it('con el rectangulo entero bloqueado, cae a findFreeAdjacentTile FUERA del rectangulo', () => {
+    const grid = buildTerrainGrid();
+    const rect: TileRect = { x0: 10, y0: 26, x1: 12, y1: 28 };
+    const peer = { tx: 12, ty: 27 }; // borde derecho del rectangulo.
+
+    // Bloquea las 9 tiles del rectangulo (incluidas las dos esquinas que la
+    // prueba anterior dejaba libres): ni la fase adyacente ni el escaneo
+    // encuentran nada dentro.
+    for (let ty = rect.y0; ty <= rect.y1; ty++) {
+      for (let tx = rect.x0; tx <= rect.x1; tx++) grid.solid[ty][tx] = true;
+    }
+
+    // (13,27) esta FUERA del rectangulo (x1=12) y libre: la fase adyacente
+    // restringida al rectangulo la descarta, pero el fallback incondicional
+    // a `findFreeAdjacentTile` (que ignora el rectangulo) la encuentra.
+    expect(findWalkDestination(grid, peer, rect)).toEqual({ tx: 13, ty: 27 });
+    expect(findFreeAdjacentTile(grid, peer.tx, peer.ty)).toEqual({ tx: 13, ty: 27 });
   });
 });
