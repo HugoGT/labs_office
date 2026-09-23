@@ -149,6 +149,40 @@ describe('OfficeShell', () => {
     expect(screen.getByText('💾 Saliste de la sala: grabación detenida')).toBeInTheDocument();
   });
 
+  /**
+   * Cobertura de regresion (issue #10, S2 3.4, spec livekit-room-topology
+   * "Recording is possible only inside a space"): el gate de
+   * `onToggleRecord` (`if (!room) return`) lee `room`, que es solo un
+   * NOMBRE de cadena emitido por la escena para CUALQUIER espacio -- sala
+   * incorporada o cubiculo de escritorio, `bridge.emit('room', ...)` no
+   * distingue el tipo. La prueba de "Sala de Juntas" ya existente (arriba)
+   * ejercita el gate con una sala; esta la ejercita con un cubiculo,
+   * exactamente el escenario que la spec de esta slice anade.
+   */
+  it('la grabacion no distingue sala incorporada de cubiculo de escritorio: el gate no bloquea por tipo', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('room', { spaceId: 'desk-stub', name: 'Escritorio de Ana' }));
+    await user.click(screen.getByRole('button', { name: /Grabar/ }));
+
+    expect(screen.getByText(/REC/)).toBeInTheDocument();
+  });
+
+  it('en piso abierto (sin sala) el boton de grabar queda deshabilitado y la grabacion nunca se activa', () => {
+    render(<OfficeShell />);
+
+    const recordButton = screen.getByRole('button', { name: /Grabar/ });
+
+    // El propio atributo `disabled` -- que depende del mismo `room` que lee
+    // el gate -- es la prueba de que un click real de usuario no puede
+    // siquiera llegar al handler mientras no haya sala: ningun navegador
+    // despacha `click` sobre un boton deshabilitado.
+    expect(recordButton).toBeDisabled();
+    expect(screen.queryByText(/REC/)).not.toBeInTheDocument();
+  });
+
   it('salir de una sala sin grabacion activa no muestra el toast de detencion', () => {
     render(<OfficeShell />);
     const bridge = createGameMock.mock.calls[0][1];
