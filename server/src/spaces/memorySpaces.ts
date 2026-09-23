@@ -59,7 +59,9 @@ export function createMemorySpaces(options: MemorySpacesOptions = {}): SpacesDir
 
   for (const seeded of options.seed ?? []) {
     const at = now();
-    spaces.set(seeded.id, { ...seeded, createdAt: at, updatedAt: at });
+    // Los espacios de partida son siempre salas: este adaptador todavia no
+    // sabe crear cubiculos de escritorio (llega en S1b, tarea 2.5).
+    spaces.set(seeded.id, { ...seeded, deskId: null, createdAt: at, updatedAt: at });
   }
 
   function canonical(): CanonicalSpace[] {
@@ -135,7 +137,10 @@ export function createMemorySpaces(options: MemorySpacesOptions = {}): SpacesDir
       assertNoOverlap(normalized);
 
       const at = now();
-      const space: Space = { id: newId(), ...normalized, createdAt: at, updatedAt: at };
+      // `createSpace` solo crea salas (deskId: null): un cubiculo de
+      // escritorio nunca nace por esta ruta, solo como efecto secundario del
+      // CRUD de escritorios (`pgDesks`, S1b).
+      const space: Space = { id: newId(), ...normalized, deskId: null, createdAt: at, updatedAt: at };
       spaces.set(space.id, space);
       return space;
     },

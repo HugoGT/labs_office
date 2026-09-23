@@ -16,7 +16,7 @@ import { createMemoryDirectory } from '../directory/memoryDirectory.ts';
 import type { IdTokenVerifier } from '../verifyIdToken.ts';
 import { createMemorySpaces } from './memorySpaces.ts';
 import { hashSpaces } from './spaceRules.ts';
-import type { SpacesDirectory } from './spacesPort.ts';
+import type { Space, SpacesDirectory } from './spacesPort.ts';
 import {
   handleCreateSpace,
   handleDeleteSpace,
@@ -110,11 +110,12 @@ describe('handleGetSpacesConfig', () => {
     expect(result.body.version).toBe(hashSpaces([]));
   });
 
-  it('publica solo los campos que entran en el hash, nunca las marcas de tiempo', async () => {
+  it('publica solo los campos que entran en el hash, mas kind, nunca las marcas de tiempo', async () => {
     // `createdAt`/`updatedAt` no afectan a la pertenencia, asi que no los
     // necesita nadie del lado del cliente. Y si viajasen, invitarian a que
     // alguien los metiese en su propio calculo de version y divergiese del
-    // servidor (D4).
+    // servidor (D4). `kind` SI viaja aunque no entre en el hash (D8): es
+    // derivado de `deskId`, no un dato propio que pudiese divergir.
     const { deps, spaces } = harness();
     await spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: 8 });
 
@@ -124,12 +125,52 @@ describe('handleGetSpacesConfig', () => {
       'capacity',
       'h',
       'id',
+      'kind',
       'name',
       'slug',
       'w',
       'x',
       'y',
     ]);
+  });
+
+  it('una sala (sin desk_id) reporta kind "room" (#10 + #12)', async () => {
+    const { deps, spaces } = harness();
+    await spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: null });
+
+    const result = await handleGetSpacesConfig(deps);
+
+    expect((result.body.spaces as Record<string, unknown>[])[0].kind).toBe('room');
+  });
+
+  it('un cubiculo de escritorio (con desk_id) reporta kind "desk" (#10 + #12)', async () => {
+    // memorySpaces todavia no sabe crear cubiculos de escritorio (eso llega
+    // en S1b, tarea 2.5): se inyecta un `SpacesDirectory` minimo para probar
+    // solo la traduccion `toConfigBody`, sin esperar a esa slice.
+    const { deps } = harness();
+    const cubiculo: Space = {
+      id: 'id-cubiculo-1',
+      slug: 'desk-id-mesa-1',
+      name: 'Mesa 1',
+      x: 10,
+      y: 10,
+      w: 3,
+      h: 3,
+      capacity: null,
+      deskId: 'id-mesa-1',
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    const spacesConCubiculo: SpacesDirectory = {
+      ...deps.spaces,
+      async listSpaces() {
+        return [cubiculo];
+      },
+    };
+
+    const result = await handleGetSpacesConfig({ ...deps, spaces: spacesConCubiculo });
+
+    expect((result.body.spaces as Record<string, unknown>[])[0].kind).toBe('desk');
   });
 });
 

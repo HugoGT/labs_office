@@ -78,6 +78,7 @@ const SPACE_ROW = {
   w: 13,
   h: 14,
   capacity: null,
+  desk_id: null,
   created_at: new Date('2026-01-01T00:00:00.000Z'),
   updated_at: new Date('2026-01-01T00:00:00.000Z'),
 };
@@ -109,11 +110,31 @@ describe('pgSpaces: listSpaces', () => {
         w: 13,
         h: 14,
         capacity: null,
+        deskId: null,
         createdAt: SPACE_ROW.created_at,
         updatedAt: SPACE_ROW.updated_at,
       },
     ]);
     expect(squash(pool.queries[0].text)).toContain('order by x, y, id');
+  });
+
+  it('selecciona desk_id, para poder distinguir una sala de un cubiculo (#10 + #12)', async () => {
+    const pool = fakePool(() => ({ rows: [SPACE_ROW], rowCount: 1 }));
+
+    await createPgSpaces(pool).listSpaces();
+
+    expect(squash(pool.queries[0].text)).toContain('desk_id');
+  });
+
+  it('mapea desk_id a deskId cuando el espacio es un cubiculo de escritorio', async () => {
+    const pool = fakePool(() => ({
+      rows: [{ ...SPACE_ROW, desk_id: 'id-escritorio-1' }],
+      rowCount: 1,
+    }));
+
+    const [space] = await createPgSpaces(pool).listSpaces();
+
+    expect(space.deskId).toBe('id-escritorio-1');
   });
 });
 

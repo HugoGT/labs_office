@@ -55,9 +55,14 @@ const NAME_TAKEN: AdminResult = { status: 409, body: { error: 'space-name-taken'
  * pertenencia y porque, si viajasen, invitarian a que alguien los metiese en su
  * propio calculo de version y divergiese del servidor (D4).
  */
+/**
+ * `kind` viaja aunque no entre en el hash de version (D8 del diseno): es
+ * derivado de `deskId`, no un dato propio que pudiese divergir entre el
+ * cliente y el servidor.
+ */
 function toConfigBody(space: Space): Record<string, unknown> {
-  const { id, slug, name, x, y, w, h, capacity } = space;
-  return { id, slug, name, x, y, w, h, capacity };
+  const { id, slug, name, x, y, w, h, capacity, deskId } = space;
+  return { id, slug, name, x, y, w, h, capacity, kind: deskId === null ? 'room' : 'desk' };
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

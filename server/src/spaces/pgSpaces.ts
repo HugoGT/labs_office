@@ -59,7 +59,7 @@ function translatePgError(error: unknown): never {
   throw error;
 }
 
-const SPACE_COLUMNS = 'id, slug, name, x, y, w, h, capacity, created_at, updated_at';
+const SPACE_COLUMNS = 'id, slug, name, x, y, w, h, capacity, desk_id, created_at, updated_at';
 
 function toSpace(row: Record<string, unknown>): Space {
   return {
@@ -71,6 +71,7 @@ function toSpace(row: Record<string, unknown>): Space {
     w: row.w as number,
     h: row.h as number,
     capacity: (row.capacity as number | null) ?? null,
+    deskId: (row.desk_id as string | null) ?? null,
     createdAt: row.created_at as Date,
     updatedAt: row.updated_at as Date,
   };
