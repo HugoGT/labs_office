@@ -1121,6 +1121,69 @@ describe('OfficeScene: auto-caminata al aceptar una llamada (issue #2, D9/D10)',
     expect(player.x).toBe(startX);
     expect(player.y).toBe(startY);
   });
+
+  it(
+    'el destino respeta el espacio de quien llama (issue #10, S2 3.2): el jugador aterriza ' +
+      'DENTRO del rectangulo servido, no solo cerca del peer -- regresion directa de usar ' +
+      'findFreeAdjacentTile sin el rectangulo, que aterrizaria fuera de un espacio cuando el ' +
+      'primer offset del peer cae al otro lado del borde',
+    async () => {
+      const bridge = createOfficeBridge();
+      const connector = fakeConnector('mi-sesion');
+      const { scene } = await bootOfficeScene(bridge, {
+        endpoint: 'ws://fake',
+        connect: connector.connect,
+      });
+      await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+      const player = findPlayer(scene);
+
+      // Cubiculo 3x3 en cesped abierto, lejos de cualquier colisionador del
+      // mapa base (mismas tiles que `terrainGrid.test.ts`).
+      const rect = { x0: 30, y0: 30, x1: 32, y1: 32 };
+      const cubiculo = {
+        id: 'desk-borde',
+        name: 'Escritorio de Borde',
+        x: rect.x0 * TILE,
+        y: rect.y0 * TILE,
+        w: (rect.x1 - rect.x0 + 1) * TILE,
+        h: (rect.y1 - rect.y0 + 1) * TILE,
+      };
+      bridge.emitCommand('spacesconfig', { spaces: [cubiculo], version: 'version-cubiculo' });
+
+      // El peer esta en el borde DERECHO del cubiculo: su primer
+      // ADJACENT_OFFSETS ([1,0]) cae en (33,31), fuera del rectangulo. Sin la
+      // restriccion de espacio, `findFreeAdjacentTile` aterrizaria ahi mismo.
+      const peerX = rect.x1 * TILE + 16;
+      const peerY = 31 * TILE + 16;
+      connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'peer-1', x: peerX, y: peerY }));
+
+      bridge.emitCommand('walkToPeer', { sessionId: 'peer-1' });
+
+      // Primero confirma que la auto-caminata REALMENTE arranco (velocidad
+      // distinta de cero en algun momento) antes de esperar a que se asiente:
+      // sin este chequeo intermedio, un `walkToPeer` que aborta temprano
+      // (peer no encontrado, destino null) pasaria el chequeo de asentado de
+      // forma trivial -- la velocidad ya es (0,0) en reposo desde el inicio.
+      await vi.waitFor(() => {
+        const body = player.body as Phaser.Physics.Arcade.Body;
+        expect(body.velocity.x !== 0 || body.velocity.y !== 0).toBe(true);
+      }, LOOP_WAIT);
+
+      await vi.waitFor(() => {
+        const body = player.body as Phaser.Physics.Arcade.Body;
+        expect(body.velocity.x).toBe(0);
+        expect(body.velocity.y).toBe(0);
+      }, LOOP_WAIT);
+
+      const landedTx = Math.floor(player.x / TILE);
+      const landedTy = Math.floor(player.y / TILE);
+      expect(landedTx).toBeGreaterThanOrEqual(rect.x0);
+      expect(landedTx).toBeLessThanOrEqual(rect.x1);
+      expect(landedTy).toBeGreaterThanOrEqual(rect.y0);
+      expect(landedTy).toBeLessThanOrEqual(rect.y1);
+    },
+    20000,
+  );
 });
 
 describe('OfficeScene: nombre real del usuario local (#6)', () => {

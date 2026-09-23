@@ -39,7 +39,13 @@ import { createRemoteAvatarRegistry, type RemoteAvatarRegistry } from './remoteA
 import { createPhaserAvatarSink, type RemoteAvatarContainer } from './remoteAvatarSink';
 import { detectSpace, nearbyKey } from './proximity';
 import { audiblePeers, type AudioPeer } from './proximityAudio';
-import { buildTerrainGrid, findFreeAdjacentTile, isBlocked, type TerrainGrid } from './terrainGrid';
+import {
+  buildTerrainGrid,
+  findWalkDestination,
+  isBlocked,
+  type TerrainGrid,
+  type TileRect,
+} from './terrainGrid';
 import { AVATAR_KEYS, PLAYER_TEXTURE, avatarTextureKey, createOfficeTextures } from './textures';
 
 /** Clave de la escena (D5): reemplaza `BootScene`, que se retira en este mismo cambio. */
@@ -780,16 +786,29 @@ export class OfficeScene extends Phaser.Scene {
    * (issue #2, D9/D10): el reflejo de `teleportTo`, pero por steering en vez
    * de salto, y con destino congelado en el momento de aceptar (D10: "el
    * caller se mueve mid-walk" no persigue, no hay pathfinding en este repo).
+   *
+   * Issue #10, S2 3.2: si quien llama esta dentro de un espacio (sala o
+   * cubiculo de escritorio, `detectSpace` no distingue), el destino se
+   * restringe a ESE rectangulo (`findWalkDestination`) en vez de la tile
+   * libre mas cercana sin mas -- aterrizar justo al otro lado de un muro o
+   * fuera del cubiculo dejaria al jugador fuera del audio de quien llamo.
    */
   private walkToPeer(sessionId: string): void {
     const peer = this.remotes?.get(sessionId);
     if (!peer) return; // se desconecto antes de que esto corriera: no-op silencioso.
 
-    const destination = findFreeAdjacentTile(
-      this.grid,
-      Math.floor(peer.x / TILE),
-      Math.floor(peer.y / TILE),
-    );
+    const peerTile = { tx: Math.floor(peer.x / TILE), ty: Math.floor(peer.y / TILE) };
+    const peerSpace = detectSpace({ x: peer.x, y: peer.y }, this.spaces);
+    const peerSpaceTiles: TileRect | null = peerSpace
+      ? {
+          x0: peerSpace.x / TILE,
+          y0: peerSpace.y / TILE,
+          x1: peerSpace.x / TILE + peerSpace.w / TILE - 1,
+          y1: peerSpace.y / TILE + peerSpace.h / TILE - 1,
+        }
+      : null;
+
+    const destination = findWalkDestination(this.grid, peerTile, peerSpaceTiles);
     if (!destination) return;
 
     this.autoWalk = beginAutoWalk(
