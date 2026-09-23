@@ -13,7 +13,7 @@
 
 import { resolveDirectoryConfig } from './bootstrapConfig.ts';
 import type { UserDirectory } from './directoryPort.ts';
-import { migrate } from './migrate.ts';
+import { migrate, reportDesksWithoutSpace } from './migrate.ts';
 import { createPgDirectory, type DirectoryPool } from './pgDirectory.ts';
 import { createDirectoryPool } from './pool.ts';
 import { createPgDecor } from '../decor/pgDecor.ts';
@@ -58,7 +58,13 @@ export interface DirectoryRuntime {
    * que aplica `migrate()` de aqui abajo.
    */
   desks: DeskDirectory;
-  /** Aplica el esquema. Idempotente: corre en cada arranque. Ver `migrate.ts`. */
+  /**
+   * Aplica el esquema. Idempotente: corre en cada arranque. Ver `migrate.ts`.
+   *
+   * Tambien avisa, DESPUES de aplicar el esquema, de los escritorios que el
+   * backfill de cubiculos (#10 + #12) dejo sin espacio emparejado -- ver
+   * `reportDesksWithoutSpace`.
+   */
   migrate(): Promise<void>;
 }
 
@@ -78,6 +84,9 @@ export function directoryFromEnv(
     spaces: createPgSpaces(pool),
     decor: createPgDecor(pool),
     desks: createPgDesks(pool),
-    migrate: () => migrate(pool),
+    migrate: async () => {
+      await migrate(pool);
+      await reportDesksWithoutSpace(pool);
+    },
   };
 }

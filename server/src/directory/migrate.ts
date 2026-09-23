@@ -33,3 +33,35 @@ export function readSchemaSql(): string {
 export async function migrate(db: DirectoryQueryable): Promise<void> {
   await db.query(readSchemaSql());
 }
+
+/**
+ * Avisa de los escritorios que el backfill de `schema.sql` dejo sin cubiculo
+ * emparejado -- el caso es un escritorio que ya existia y solapa una sala,
+ * asi que el `INSERT ... ON CONFLICT DO NOTHING` del backfill lo salta en
+ * silencio en vez de tumbar el arranque entero (misma logica que
+ * `boundsOverlap` mas amable que la restriccion real). Sin este aviso nadie
+ * se entera, porque el propio escritorio sigue existiendo y respondiendo con
+ * normalidad hasta que alguien intenta moverlo o renombrarlo y choca con
+ * `desk-space-overlap` (tarea 1.4).
+ *
+ * `warn` inyectable por lo mismo que `createOfficeServer.ts:338`: un test no
+ * tiene por que escribir en la consola real para afirmar cuantas veces se
+ * avisa.
+ */
+export async function reportDesksWithoutSpace(
+  db: DirectoryQueryable,
+  warn: (message: string) => void = (message) => console.warn(message),
+): Promise<void> {
+  const result = await db.query(`
+    SELECT d.id, d.label, d.x, d.y
+    FROM desks d
+    LEFT JOIN spaces s ON s.desk_id = d.id
+    WHERE s.id IS NULL
+  `);
+
+  for (const row of result.rows) {
+    warn(
+      `[desks] escritorio sin cubiculo (solapa una sala): id=${row.id} label="${row.label}" x=${row.x} y=${row.y}`,
+    );
+  }
+}

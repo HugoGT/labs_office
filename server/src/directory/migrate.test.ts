@@ -11,7 +11,12 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { migrate, readSchemaSql } from './migrate.ts';
+import { migrate, readSchemaSql, reportDesksWithoutSpace } from './migrate.ts';
+
+/** Comparar SQL con saltos de linea y sangria es comparar formato, no contrato. */
+function squash(sql: string): string {
+  return sql.replace(/\s+/g, ' ').trim().toLowerCase();
+}
 
 /**
  * Solo las sentencias: los comentarios del fichero nombran `citext` para
@@ -390,5 +395,91 @@ describe('schema.sql: cubiculos de escritorio son espacios (#10 + #12, S1a)', ()
     await migrate(db);
 
     expect(db.texts[0]).toBe(db.texts[1]);
+  });
+});
+
+describe('reportDesksWithoutSpace (#10 + #12, S1a tarea 1.2)', () => {
+  it('consulta los escritorios sin espacio emparejado por desk_id', async () => {
+    const texts: string[] = [];
+    const db = {
+      async query(text: string) {
+        texts.push(text);
+        return { rows: [] };
+      },
+    };
+
+    await reportDesksWithoutSpace(db, () => {});
+
+    expect(squash(texts[0])).toContain('left join spaces s on s.desk_id = d.id');
+    expect(squash(texts[0])).toContain('where s.id is null');
+  });
+
+  it('avisa una vez por cada escritorio que la migracion dejo sin cubiculo', async () => {
+    // El caso real: un escritorio que ya existia y solapa una sala se salta
+    // en el backfill de schema.sql (ON CONFLICT DO NOTHING), y esta es la
+    // unica forma de que alguien se entere.
+    const db = {
+      async query() {
+        return {
+          rows: [{ id: 'id-mesa-1', label: 'Mesa 1', x: 52, y: 3 }],
+        };
+      },
+    };
+    const warnings: string[] = [];
+
+    await reportDesksWithoutSpace(db, (message) => warnings.push(message));
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('[desks] escritorio sin cubiculo (solapa una sala)');
+    expect(warnings[0]).toContain('id-mesa-1');
+  });
+
+  it('avisa una vez POR ESCRITORIO, no una vez en total', async () => {
+    const db = {
+      async query() {
+        return {
+          rows: [
+            { id: 'id-mesa-1', label: 'Mesa 1', x: 52, y: 3 },
+            { id: 'id-mesa-2', label: 'Mesa 2', x: 55, y: 3 },
+          ],
+        };
+      },
+    };
+    const warnings: string[] = [];
+
+    await reportDesksWithoutSpace(db, (message) => warnings.push(message));
+
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0]).toContain('id-mesa-1');
+    expect(warnings[1]).toContain('id-mesa-2');
+  });
+
+  it('sin escritorios huerfanos no avisa nada', async () => {
+    const db = { async query() { return { rows: [] }; } };
+    const warnings: string[] = [];
+
+    await reportDesksWithoutSpace(db, (message) => warnings.push(message));
+
+    expect(warnings).toHaveLength(0);
+  });
+
+  it('sin un warn inyectado, usa console.warn por defecto', async () => {
+    const db = {
+      async query() {
+        return { rows: [{ id: 'id-mesa-1', label: 'Mesa 1', x: 52, y: 3 }] };
+      },
+    };
+    const spy: string[] = [];
+    const original = console.warn;
+    console.warn = (message: string) => spy.push(message);
+
+    try {
+      await reportDesksWithoutSpace(db);
+    } finally {
+      console.warn = original;
+    }
+
+    expect(spy).toHaveLength(1);
+    expect(spy[0]).toContain('[desks] escritorio sin cubiculo');
   });
 });

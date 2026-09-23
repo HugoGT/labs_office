@@ -66,6 +66,18 @@ describe('directoryFromEnv', () => {
     expect(pool.queries[0].text).toBe(readSchemaSql());
   });
 
+  it('migrate() avisa DESPUES de escritorios que el backfill dejo sin cubiculo (#10 + #12, S1a tarea 1.2)', async () => {
+    const pool = fakePool();
+    const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, () => pool);
+
+    await runtime!.migrate();
+
+    // La primera consulta es el esquema entero (ya afirmado arriba); la
+    // segunda es `reportDesksWithoutSpace`, y tiene que llegar DESPUES del
+    // backfill para poder ver lo que este dejo sin cubiculo.
+    expect(pool.queries[1].text).toContain('LEFT JOIN spaces s ON s.desk_id = d.id');
+  });
+
   it('el email de bootstrap del entorno llega hasta la sentencia de login', async () => {
     // Prueba de extremo a extremo del cableado: si se perdiese por el camino, el
     // sintoma seria que nadie llega nunca a superadmin y no habria ningun error.
