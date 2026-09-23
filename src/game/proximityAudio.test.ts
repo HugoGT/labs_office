@@ -158,6 +158,84 @@ describe('audiblePeers: limite estricto del radio en el piso abierto', () => {
   });
 });
 
+/**
+ * Cobertura de regresion (issue #10, S2 3.3, spec proximity-audio): un
+ * cubiculo de escritorio es un `Space` como cualquier otro para esta
+ * funcion -- el `spaceId` es una cadena opaca, `audiblePeers` no sabe ni
+ * necesita saber si viene de una sala incorporada o de un escritorio (#7,
+ * D2). Estos dos escenarios ya estaban cubiertos GENERICAMENTE por las
+ * suites de arriba con nombres de sala; se nombran aqui explicitamente en
+ * terminos de escritorio porque son los escenarios que pide la spec de esta
+ * slice, y una regresion que solo rompiese el caso "escritorio" (por
+ * ejemplo, un futuro guard `kind === 'room'`) no tendria ninguna prueba que
+ * la detecte sin este bloque.
+ */
+describe('audiblePeers: aislamiento de cubiculo de escritorio identico al de sala (#10, S2 3.3)', () => {
+  it('un cubiculo aisla a un par de piso abierto dentro del radio, igual que una sala', () => {
+    const enCubiculo: AudibleInput['self'] = {
+      sessionId: 'yo',
+      x: 0,
+      y: 0,
+      spaceId: 'cubiculo-d1',
+      spacesVersion: V1,
+      status: 'g',
+    };
+    // Dentro del radio (PROX_RADIUS), pero en piso abierto: sin la regla de
+    // sala/cubiculo, el radio lo haria audible.
+    const vecinoDePasillo: AudioPeer = {
+      sessionId: 'vecino',
+      x: PROX_RADIUS - 1,
+      y: 0,
+      spaceId: null,
+      spacesVersion: V1,
+      status: 'g',
+    };
+
+    const audibles = audiblePeers({ self: enCubiculo, peers: [vecinoDePasillo], radius: PROX_RADIUS });
+
+    expect(audibles).toEqual([]);
+  });
+
+  it('dos personas en el mismo cubiculo se escuchan, y el piso abierto sigue funcionando sin verse afectado por el cubiculo', () => {
+    const self: AudibleInput['self'] = {
+      sessionId: 'yo',
+      x: 0,
+      y: 0,
+      spaceId: 'cubiculo-d1',
+      spacesVersion: V1,
+      status: 'g',
+    };
+    const companeroDeCubiculo: AudioPeer = {
+      sessionId: 'companero',
+      x: 99999,
+      y: 99999,
+      spaceId: 'cubiculo-d1',
+      spacesVersion: V1,
+      status: 'g',
+    };
+
+    expect(audiblePeers({ self, peers: [companeroDeCubiculo], radius: PROX_RADIUS })).toEqual([
+      'companero',
+    ]);
+
+    // El piso abierto (solo radio, sin cubiculos de por medio) no cambia:
+    // misma prueba que la suite generica de arriba, repetida aqui para dejar
+    // el contraste explicito en el mismo bloque.
+    const enPisoAbierto: AudibleInput['self'] = { ...self, spaceId: null };
+    const peerCerca: AudioPeer = {
+      sessionId: 'colega',
+      x: 50,
+      y: 0,
+      spaceId: null,
+      spacesVersion: V1,
+      status: 'g',
+    };
+    expect(audiblePeers({ self: enPisoAbierto, peers: [peerCerca], radius: PROX_RADIUS })).toEqual(
+      ['colega'],
+    );
+  });
+});
+
 describe('audiblePeers: casos limite defensivos', () => {
   it('el propio sessionId nunca aparece en el resultado aunque venga en peers', () => {
     const self: AudibleInput['self'] = {
