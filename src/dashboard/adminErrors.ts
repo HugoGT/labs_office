@@ -37,6 +37,17 @@ const MESSAGES: Readonly<Record<AdminErrorCode, string>> = {
   // sala existente (issue #10, S2 3.5).
   'desk-space-overlap':
     'Esas coordenadas chocan con una sala: el cubiculo de 3×3 del escritorio no puede pisar su rectángulo.',
+  // Dos salas pisandose (#10 + #12, S3a). Mismo criterio que `desk-overlap`:
+  // se arregla escribiendo otras coordenadas, no cambiando de nombre.
+  'space-overlap': 'Esas coordenadas chocan con otra sala existente.',
+  // El nombre, no las coordenadas: cambiar de sitio una sala con nombre
+  // repetido no arregla nada. Distinguirlo de `space-overlap` evita que quien
+  // administra mueva un rectangulo que estaba bien colocado.
+  'space-name-taken': 'Ya existe una sala con ese nombre.',
+  // No es un fallo de quien administra: ese espacio es el cubiculo de un
+  // escritorio, y se administra desde el panel de escritorios, no desde este.
+  'space-owned-by-desk':
+    'Ese espacio es el cubículo de un escritorio: se administra desde el panel de escritorios.',
   // No es un fallo de quien invita: el servidor no tiene credenciales de
   // administracion de Identity Platform (#24, seccion 3). Decir "inténtalo de
   // nuevo" le haria repetir el intento para siempre.
@@ -48,6 +59,9 @@ const MESSAGES: Readonly<Record<AdminErrorCode, string>> = {
   // frase no pida reintentar nada.
   'desks-not-configured': 'Los escritorios asignables no están configurados en este servidor.',
   'decor-not-configured': 'El catálogo de decoración no está configurado en este servidor.',
+  // Cuarta pieza del mismo despliegue sin `DATABASE_URL`: tampoco hay tabla de
+  // espacios que administrar.
+  'spaces-not-configured': 'Las salas no están configuradas en este servidor.',
   network: 'No se pudo contactar con el servidor.',
   unknown: GENERIC_MESSAGE,
 };

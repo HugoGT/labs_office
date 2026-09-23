@@ -10,9 +10,13 @@ const CODES: AdminErrorCode[] = [
   'not-found',
   'desk-overlap',
   'desk-space-overlap',
+  'space-overlap',
+  'space-name-taken',
+  'space-owned-by-desk',
   'identity-admin-not-configured',
   'desks-not-configured',
   'decor-not-configured',
+  'spaces-not-configured',
   'network',
   'unknown',
 ];
@@ -85,13 +89,38 @@ describe('describeAdminError', () => {
   });
 
   it('cada "no configurado" nombra la pieza que falta en el despliegue', () => {
-    // Son TRES cosas distintas de configurar y las tres se arreglan en el
+    // Son CUATRO cosas distintas de configurar y las cuatro se arreglan en el
     // servidor, pero no en el mismo sitio: credenciales de Identity Platform,
-    // `DATABASE_URL` para los escritorios y la misma para el catalogo. Una
-    // frase comun obligaria a quien despliega a probarlas todas.
+    // `DATABASE_URL` para los escritorios, la misma para el catalogo y la
+    // misma para las salas. Una frase comun obligaria a quien despliega a
+    // probarlas todas.
     expect(describeAdminError(new AdminError('desks-not-configured'))).toMatch(/escritorio/i);
     expect(describeAdminError(new AdminError('decor-not-configured'))).toMatch(/cat[áa]logo/i);
+    expect(describeAdminError(new AdminError('spaces-not-configured'))).toMatch(/sala/i);
     expect(describeAdminError(new AdminError('identity-admin-not-configured'))).toMatch(/cuenta/i);
+  });
+
+  it('las dos salas pisandose son un motivo propio, distinto del solape con un cubiculo (#10 + #12, S3a)', () => {
+    const message = describeAdminError(new AdminError('space-overlap'));
+
+    expect(message).toMatch(/sala/i);
+    expect(message).not.toBe(describeAdminError(new AdminError('desk-space-overlap')));
+  });
+
+  it('el nombre repetido de una sala dice QUE se repite, no que hay un solape', () => {
+    // Distinguirlo de `space-overlap` evita que quien administra mueva un
+    // rectangulo que estaba bien colocado cuando lo que hay que cambiar es el
+    // nombre.
+    const message = describeAdminError(new AdminError('space-name-taken'));
+
+    expect(message).toMatch(/nombre/i);
+    expect(message).not.toBe(describeAdminError(new AdminError('space-overlap')));
+  });
+
+  it('tocar el cubiculo de un escritorio desde el panel de salas dice donde administrarlo de verdad', () => {
+    const message = describeAdminError(new AdminError('space-owned-by-desk'));
+
+    expect(message).toMatch(/escritorio/i);
   });
 
   it('un 404 no acusa a quien administra de haberse equivocado', () => {

@@ -111,6 +111,26 @@ export type AdminErrorCode =
    */
   | 'desk-space-overlap'
   /**
+   * Dos salas pisandose (#10 + #12, S3a). Es su propio codigo y no
+   * `desk-overlap` reciclado porque las dos filas con las que puede chocar
+   * una sala son de otra naturaleza -- ver `spacesRoutes.ts`.
+   */
+  | 'space-overlap'
+  /**
+   * El nombre de una sala ya lo usa otra (spacesRoutes.ts). No es
+   * `space-overlap`: el solape se arregla moviendo el rectangulo, el nombre
+   * repetido escribiendo otro. Un solo codigo mandaria a mover una sala que
+   * estaba bien colocada.
+   */
+  | 'space-name-taken'
+  /**
+   * El espacio pedido es en realidad el cubiculo de un escritorio, no una
+   * sala: se administra desde `DesksPanel`, no desde `SpacesPanel`. Mismo
+   * codigo que ya usa `pgSpaces.updateSpace`/`deleteSpace` en el servidor
+   * (#10 + #12, tarea 1.4) para el intento directo por la API.
+   */
+  | 'space-owned-by-desk'
+  /**
    * Los TRES "no configurado" viajan separados porque son tres piezas
    * distintas del despliegue: credenciales de Identity Platform la primera y
    * `DATABASE_URL` las otras dos. Un codigo comun obligaria a quien despliega
@@ -119,6 +139,8 @@ export type AdminErrorCode =
   | 'identity-admin-not-configured'
   | 'desks-not-configured'
   | 'decor-not-configured'
+  /** Mismas tres piezas de arriba, cuarta superficie: sin `DATABASE_URL` tampoco hay tabla de espacios que administrar. */
+  | 'spaces-not-configured'
   | 'network'
   | 'unknown';
 
