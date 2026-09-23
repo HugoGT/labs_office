@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fetchLivekitToken } from './livekitTokenClient';
+import { LivekitTokenError, fetchLivekitToken } from './livekitTokenClient';
 
 const TOKEN_URL = 'http://localhost:2567/livekit/token';
 
@@ -97,5 +97,58 @@ describe('fetchLivekitToken', () => {
     await expect(
       fetchLivekitToken({ tokenUrl: TOKEN_URL, sessionId: 'abc' }, fetchImpl),
     ).rejects.toThrow();
+  });
+
+  it('spaceId presente se manda en el cuerpo, junto a sessionId y token', async () => {
+    const fetchImpl = okFetch();
+
+    await fetchLivekitToken(
+      { tokenUrl: TOKEN_URL, sessionId: 'abc', token: 'id-token', spaceId: 's1' },
+      fetchImpl,
+    );
+
+    expect(sentBody(fetchImpl)).toEqual({ sessionId: 'abc', token: 'id-token', spaceId: 's1' });
+  });
+
+  it('spaceId ausente o null no viaja en el cuerpo: pedirlo asi es lo que hoy manda el corredor', async () => {
+    const fetchImpl = okFetch();
+
+    await fetchLivekitToken({ tokenUrl: TOKEN_URL, sessionId: 'abc' }, fetchImpl);
+    expect(sentBody(fetchImpl)).not.toHaveProperty('spaceId');
+
+    const fetchImpl2 = okFetch();
+    await fetchLivekitToken({ tokenUrl: TOKEN_URL, sessionId: 'abc', spaceId: null }, fetchImpl2);
+    expect(sentBody(fetchImpl2)).not.toHaveProperty('spaceId');
+  });
+
+  it('el rechazo trae LivekitTokenError con el status y el codigo del cuerpo de error', async () => {
+    const fetchImpl = vi.fn(async () => fakeResponse(403, { error: 'forbidden-space' }));
+
+    await fetchLivekitToken({ tokenUrl: TOKEN_URL, sessionId: 'abc', spaceId: 's1' }, fetchImpl).catch(
+      (err: unknown) => {
+        expect(err).toBeInstanceOf(LivekitTokenError);
+        expect((err as LivekitTokenError).status).toBe(403);
+        expect((err as LivekitTokenError).code).toBe('forbidden-space');
+      },
+    );
+  });
+
+  it('un cuerpo de error sin JSON valido igual rechaza con LivekitTokenError, codigo "unknown"', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 503,
+      json: async () => {
+        throw new Error('not json');
+      },
+    }) as unknown as Response);
+
+    const rejection = fetchLivekitToken({ tokenUrl: TOKEN_URL, sessionId: 'abc' }, fetchImpl);
+
+    await rejection.catch((err: unknown) => {
+      expect(err).toBeInstanceOf(LivekitTokenError);
+      const tokenError = err as LivekitTokenError;
+      expect(tokenError.status).toBe(503);
+      expect(tokenError.code).toBe('unknown');
+    });
   });
 });
