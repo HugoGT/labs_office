@@ -40,20 +40,28 @@ export interface OfficeAdminRequestOptions {
    */
   notConfigured: AdminErrorCode;
   /**
-   * El UNICO 409 que estas rutas pueden dar. En escritorios es un solape de
-   * coordenadas; el otro 409 del servidor (`desk-taken`) lo provoca alguien
-   * cogiendo sitio desde la oficina y por estas rutas no puede llegar.
+   * Los 409 que estas rutas pueden dar (issue #10, S2 3.5: antes era uno
+   * solo). El cuerpo del 409 trae `{error: AdminErrorCode}`; se lee y se usa
+   * SOLO si esta en esta lista -- un codigo ajeno a esta ruta, o un cuerpo
+   * que no se puede leer, cae al primero de la lista (D-diseno seccion 7).
    */
-  conflict: AdminErrorCode;
+  conflicts: readonly AdminErrorCode[];
 }
 
 /**
  * Traduccion fija del contrato del servidor. Cualquier estado no listado es
  * `unknown` a proposito: inventarle un significado a un 500 haria que la
  * pantalla contase una historia que el servidor no conto.
+ *
+ * El 409 es el unico que necesita el CUERPO de la respuesta, no solo el
+ * estado: la misma ruta puede dar mas de un motivo (issue #10, S2 3.5), y
+ * solo el servidor sabe cual de los declarados en `conflicts` es este.
  */
-function codeForStatus(status: number, { notConfigured, conflict }: OfficeAdminRequestOptions) {
-  switch (status) {
+async function codeForStatus(
+  response: Response,
+  { notConfigured, conflicts }: OfficeAdminRequestOptions,
+): Promise<AdminErrorCode> {
+  switch (response.status) {
     case 400:
       return 'invalid-request';
     case 401:
@@ -62,8 +70,19 @@ function codeForStatus(status: number, { notConfigured, conflict }: OfficeAdminR
       return 'forbidden';
     case 404:
       return 'not-found';
-    case 409:
-      return conflict;
+    case 409: {
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        return conflicts[0];
+      }
+      const error =
+        typeof body === 'object' && body !== null ? (body as Record<string, unknown>).error : undefined;
+      return typeof error === 'string' && (conflicts as readonly string[]).includes(error)
+        ? (error as AdminErrorCode)
+        : conflicts[0];
+    }
     case 503:
       return notConfigured;
     default:
@@ -100,7 +119,7 @@ export function createOfficeAdminRequest(
       throw new AdminError('network');
     }
 
-    if (!response.ok) throw new AdminError(codeForStatus(response.status, options));
+    if (!response.ok) throw new AdminError(await codeForStatus(response, options));
 
     try {
       return (await response.json()) as T;

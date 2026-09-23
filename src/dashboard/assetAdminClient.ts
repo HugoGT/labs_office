@@ -97,7 +97,7 @@ export function createAssetAdminClient(
       notConfigured: 'decor-not-configured',
       // Estas rutas no devuelven ningun 409 hoy. Se declara el generico para
       // no inventarle un motivo propio a un estado que el servidor no da.
-      conflict: 'conflict',
+      conflicts: ['conflict'],
     },
     fetchImpl,
   );

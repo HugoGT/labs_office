@@ -9,6 +9,7 @@ const CODES: AdminErrorCode[] = [
   'conflict',
   'not-found',
   'desk-overlap',
+  'desk-space-overlap',
   'identity-admin-not-configured',
   'desks-not-configured',
   'decor-not-configured',
@@ -70,6 +71,17 @@ describe('describeAdminError', () => {
 
     expect(message).toMatch(/coordenadas|posici/i);
     expect(message).toMatch(/3×3|3x3/);
+  });
+
+  it('el solape de un escritorio con una sala dice QUE choca y por que se rechazo (#10, S2 3.5)', () => {
+    // Es un 409 propio y no `desk-overlap`: aqui el problema no es OTRO
+    // escritorio (dos de 3x3 pisandose) sino una SALA -- el cubiculo del
+    // escritorio pisa el rectangulo de una sala existente. Confundir los dos
+    // mensajes le haria buscar el choque en el sitio equivocado.
+    const message = describeAdminError(new AdminError('desk-space-overlap'));
+
+    expect(message).toMatch(/sala/i);
+    expect(message).not.toBe(describeAdminError(new AdminError('desk-overlap')));
   });
 
   it('cada "no configurado" nombra la pieza que falta en el despliegue', () => {

@@ -104,6 +104,13 @@ export type AdminErrorCode =
    */
   | 'desk-overlap'
   /**
+   * El cubiculo de 3x3 de un escritorio pisa una SALA existente, no otro
+   * escritorio (issue #10, S2 3.5). Es su propio codigo y no `desk-overlap`
+   * porque el rectangulo con el que choca es de otra naturaleza -- confundir
+   * los dos mensajes haria buscar el choque contra el escritorio equivocado.
+   */
+  | 'desk-space-overlap'
+  /**
    * Los TRES "no configurado" viajan separados porque son tres piezas
    * distintas del despliegue: credenciales de Identity Platform la primera y
    * `DATABASE_URL` las otras dos. Un codigo comun obligaria a quien despliega

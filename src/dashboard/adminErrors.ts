@@ -32,6 +32,11 @@ const MESSAGES: Readonly<Record<AdminErrorCode, string>> = {
   // como solape (`deskBoundsOverlap`), asi que "al lado" no siempre cabe.
   'desk-overlap':
     'Esas coordenadas chocan con otro escritorio: cada uno ocupa 3×3 casillas y ni los bordes pueden tocarse.',
+  // El choque es contra una SALA, no contra otro escritorio: el cubiculo de
+  // 3x3 que acompaña a cada escritorio no puede pisar el rectangulo de una
+  // sala existente (issue #10, S2 3.5).
+  'desk-space-overlap':
+    'Esas coordenadas chocan con una sala: el cubiculo de 3×3 del escritorio no puede pisar su rectángulo.',
   // No es un fallo de quien invita: el servidor no tiene credenciales de
   // administracion de Identity Platform (#24, seccion 3). Decir "inténtalo de
   // nuevo" le haria repetir el intento para siempre.
