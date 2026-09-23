@@ -331,7 +331,7 @@ describe('handleCreateDesk', () => {
   });
 
   it('un escritorio que choca con una sala responde 409 desk-space-overlap (#10 + #12, tarea 2.2)', async () => {
-    const { deps } = harness(undefined, {
+    const { deps, desks } = harness(undefined, {
       seed: [
         { id: 'sala-1', slug: 'sala-1', name: 'Sala de Juntas', x: 50, y: 2, w: 13, h: 14, capacity: null },
       ],
@@ -340,6 +340,9 @@ describe('handleCreateDesk', () => {
     const result = await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa', x: 50, y: 2 }, deps);
 
     expect(result).toEqual({ status: 409, body: { error: 'desk-space-overlap' } });
+    // El rollback de la transaccion (D1) es total: el 409 no deja NINGUN
+    // escritorio a medio crear, ni siquiera uno sin su cubiculo emparejado.
+    expect(await desks.listDesks()).toEqual([]);
   });
 
   it('el 409 de sala NO se confunde con el de otro escritorio', async () => {
@@ -437,6 +440,9 @@ describe('handleUpdateDesk', () => {
     const result = await handleUpdateDesk(BEARER_ADMIN, desk.id, { x: 50, y: 2 }, deps);
 
     expect(result).toEqual({ status: 409, body: { error: 'desk-space-overlap' } });
+    // El rollback de la transaccion (D1) es total: el 409 no mueve el
+    // escritorio ni un poco, se queda exactamente donde estaba.
+    expect(await desks.getDesk(desk.id)).toMatchObject({ x: 0, y: 0 });
   });
 
   it('un escritorio que el backfill dejo sin cubiculo se rechaza aunque solo se renombre (tarea 2.4)', async () => {
