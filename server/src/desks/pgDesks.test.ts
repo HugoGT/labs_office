@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { DeskOverlapError, DeskTakenError, InvalidDeskError } from './deskRules.ts';
+import { DeskOverlapError, DeskSpaceOverlapError, DeskTakenError, InvalidDeskError } from './deskRules.ts';
 import { createPgDesks } from './pgDesks.ts';
 import type { DirectoryPool, DirectoryQueryResult } from '../directory/pgDirectory.ts';
 
@@ -63,9 +63,9 @@ function fakePool(respond: Responder = () => ({ rows: [], rowCount: 0 })): FakeP
 }
 
 /** Error con la forma que trae `pg` cuando una restriccion de exclusion salta. */
-function exclusionViolation(): Error {
+function exclusionViolation(constraint = 'desks_no_overlap'): Error {
   return Object.assign(
-    new Error('conflicting key value violates exclusion constraint "desks_no_overlap"'),
+    new Error(`conflicting key value violates exclusion constraint "${constraint}"`),
     { code: '23P01' },
   );
 }
@@ -132,8 +132,12 @@ describe('pgDesks: createDesk', () => {
 
     await createPgDesks(pool).createDesk({ label: '  Mesa 1 ', x: 4, y: 6 });
 
-    expect(pool.queries[0].values).toEqual(['Mesa 1', 4, 6]);
-    expect(sqls(pool)[0]).toContain('insert into desks (label, x, y)');
+    // `createDesk` corre dentro de una transaccion (S1b): el INSERT en
+    // `desks` ya no es la primera consulta -- BEGIN lo es -- asi que se busca
+    // por texto en vez de por indice.
+    const insert = pool.queries.find((q) => squash(q.text).startsWith('insert into desks'))!;
+    expect(insert.values).toEqual(['Mesa 1', 4, 6]);
+    expect(squash(insert.text)).toContain('insert into desks (label, x, y)');
   });
 
   it('NO inserta occupant_id: un escritorio nace libre', async () => {
@@ -144,13 +148,14 @@ describe('pgDesks: createDesk', () => {
     // Acotado a lo que se ESCRIBE: el `RETURNING` si nombra `occupant_id`,
     // porque la fila que vuelve lo trae, y una busqueda sobre la consulta
     // entera no distinguiria las dos cosas.
-    const escritura = sqls(pool)[0].slice(0, sqls(pool)[0].indexOf('returning'));
+    const insert = squash(pool.queries.find((q) => squash(q.text).startsWith('insert into desks'))!.text);
+    const escritura = insert.slice(0, insert.indexOf('returning'));
 
     expect(escritura).not.toContain('occupant_id');
   });
 
   it('traduce la violacion de exclusion a un error de dominio, no a un 500', async () => {
-    const pool = fakePool(() => exclusionViolation());
+    const pool = txPool({ deskError: exclusionViolation() });
 
     await expect(
       createPgDesks(pool).createDesk({ label: 'Mesa', x: 0, y: 0 }),
@@ -158,14 +163,107 @@ describe('pgDesks: createDesk', () => {
   });
 });
 
+/**
+ * Responde a la transaccion completa de `createDesk`/`updateDesk` (#10 + #12,
+ * S1b): BEGIN, el escritorio, el UPSERT del cubiculo emparejado en `spaces`,
+ * COMMIT. `deskRows` es lo que `RETURNING` del escritorio devuelve; sin el se
+ * usa `DESK_ROW`.
+ */
+function txPool(
+  options: { deskRows?: Record<string, unknown>[]; deskError?: Error; spaceError?: Error } = {},
+) {
+  return fakePool((text) => {
+    const sql = squash(text);
+    if (sql === 'begin' || sql === 'commit' || sql === 'rollback') {
+      return { rows: [], rowCount: 0 };
+    }
+    if (sql.startsWith('insert into desks') || sql.startsWith('update desks')) {
+      if (options.deskError) return options.deskError;
+      const rows = options.deskRows ?? [DESK_ROW];
+      return { rows, rowCount: rows.length };
+    }
+    if (sql.startsWith('insert into spaces')) {
+      if (options.spaceError) return options.spaceError;
+      return { rows: [], rowCount: 1 };
+    }
+    return { rows: [], rowCount: 0 };
+  });
+}
+
+describe('pgDesks: createDesk sincroniza su cubiculo (#10 + #12, tarea 2.1)', () => {
+  it('crea el cubiculo emparejado en la MISMA transaccion que el escritorio', async () => {
+    const pool = txPool();
+
+    await createPgDesks(pool).createDesk({ label: 'Mesa 1', x: 4, y: 6 });
+
+    const ejecutadas = sqls(pool);
+    expect(ejecutadas[0]).toBe('begin');
+    expect(ejecutadas.some((sql) => sql.startsWith('insert into desks'))).toBe(true);
+    expect(ejecutadas.some((sql) => sql.startsWith('insert into spaces'))).toBe(true);
+    expect(ejecutadas.at(-1)).toBe('commit');
+  });
+
+  it('el cubiculo es 3x3, sin capacidad, con el id/etiqueta/posicion del escritorio recien creado', async () => {
+    const pool = txPool();
+
+    await createPgDesks(pool).createDesk({ label: '  Mesa 1 ', x: 4, y: 6 });
+
+    const sync = sqls(pool).find((sql) => sql.startsWith('insert into spaces'))!;
+    expect(sync).toContain('on conflict (desk_id) do update');
+    const query = pool.queries.find((q) => squash(q.text).startsWith('insert into spaces'))!;
+    // DESK_ROW.id es lo que devuelve el RETURNING del INSERT en desks, y es lo
+    // que syncDeskSpace tiene que usar como desk_id -- no el id que se le
+    // habria pedido a `newId`, si lo hubiera.
+    expect(query.values).toEqual([DESK_ROW.id, `desk-${DESK_ROW.id}`, 'Mesa 1', 4, 6, 3]);
+  });
+
+  it('un cubiculo que choca con una sala responde DeskSpaceOverlapError, no un 500 (tarea 2.2)', async () => {
+    const pool = txPool({ spaceError: exclusionViolation('spaces_no_overlap') });
+
+    await expect(
+      createPgDesks(pool).createDesk({ label: 'Mesa', x: 50, y: 2 }),
+    ).rejects.toThrow(DeskSpaceOverlapError);
+  });
+
+  it('el choque de cubiculo hace ROLLBACK: ni el escritorio ni el cubiculo quedan en pie', async () => {
+    const pool = txPool({ spaceError: exclusionViolation('spaces_no_overlap') });
+
+    await expect(
+      createPgDesks(pool).createDesk({ label: 'Mesa', x: 50, y: 2 }),
+    ).rejects.toThrow(DeskSpaceOverlapError);
+
+    expect(sqls(pool)).toContain('rollback');
+    expect(sqls(pool)).not.toContain('commit');
+  });
+
+  it('el choque contra OTRO escritorio sigue siendo DeskOverlapError, no DeskSpaceOverlapError', async () => {
+    // Los dos son `exclusion_violation` (23P01); solo el nombre de la
+    // restriccion en el mensaje de Postgres los distingue, y este adaptador no
+    // lo mira -- por eso la traduccion va por QUE SENTENCIA fallo (D3), no por
+    // el texto del error.
+    const pool = txPool({ deskError: exclusionViolation('desks_no_overlap') });
+
+    const thrown = await createPgDesks(pool)
+      .createDesk({ label: 'Mesa', x: 0, y: 0 })
+      .catch((error: unknown) => error);
+
+    expect(thrown).toBeInstanceOf(DeskOverlapError);
+    expect(thrown).not.toBeInstanceOf(DeskSpaceOverlapError);
+  });
+});
+
 describe('pgDesks: updateDesk', () => {
-  it('un patch vacio RELEE en vez de pisar updated_at sin motivo', async () => {
+  it('un patch vacio RELEE en vez de pisar updated_at sin motivo, y no sincroniza nada', async () => {
     const pool = fakePool(() => ({ rows: [DESK_ROW], rowCount: 1 }));
 
     await createPgDesks(pool).updateDesk(DESK_ROW.id, {});
 
     expect(sqls(pool)[0]).toContain('select');
     expect(sqls(pool)[0]).not.toContain('update desks');
+    // Nada cambio, asi que no hay ninguna razon para reabrir una transaccion
+    // ni tocar el cubiculo emparejado.
+    expect(sqls(pool)).not.toContain('begin');
+    expect(sqls(pool).some((sql) => sql.startsWith('insert into spaces'))).toBe(false);
   });
 
   it('actualiza solo los campos presentes y refresca updated_at', async () => {
@@ -173,8 +271,11 @@ describe('pgDesks: updateDesk', () => {
 
     await createPgDesks(pool).updateDesk(DESK_ROW.id, { label: 'Mesa 9' });
 
-    expect(sqls(pool)[0]).toContain('update desks set label = $2, updated_at = now()');
-    expect(pool.queries[0].values).toEqual([DESK_ROW.id, 'Mesa 9']);
+    // Un patch no vacio corre dentro de una transaccion (S1b): BEGIN es la
+    // primera consulta, y el UPDATE se busca por texto.
+    const update = pool.queries.find((q) => squash(q.text).startsWith('update desks'))!;
+    expect(squash(update.text)).toContain('update desks set label = $2, updated_at = now()');
+    expect(update.values).toEqual([DESK_ROW.id, 'Mesa 9']);
   });
 
   it('NO toca occupant_id: mover o renombrar no levanta a quien lo ocupa', async () => {
@@ -182,7 +283,8 @@ describe('pgDesks: updateDesk', () => {
 
     await createPgDesks(pool).updateDesk(DESK_ROW.id, { x: 1, y: 2 });
 
-    expect(sqls(pool)[0]).not.toContain('occupant_id =');
+    const update = pool.queries.find((q) => squash(q.text).startsWith('update desks'))!;
+    expect(squash(update.text)).not.toContain('occupant_id =');
   });
 
   it('devuelve null si ese id no existe', async () => {
@@ -192,11 +294,64 @@ describe('pgDesks: updateDesk', () => {
   });
 
   it('traduce la violacion de exclusion a un error de dominio', async () => {
-    const pool = fakePool(() => exclusionViolation());
+    const pool = txPool({ deskError: exclusionViolation() });
 
     await expect(
       createPgDesks(pool).updateDesk(DESK_ROW.id, { x: 1, y: 1 }),
     ).rejects.toThrow(DeskOverlapError);
+  });
+});
+
+describe('pgDesks: updateDesk sincroniza su cubiculo (#10 + #12, tareas 2.3-2.4)', () => {
+  it('mover un escritorio TAMBIEN mueve su cubiculo, en la MISMA transaccion (tarea 2.3)', async () => {
+    const pool = txPool({ deskRows: [{ ...DESK_ROW, x: 8, y: 9 }] });
+
+    await createPgDesks(pool).updateDesk(DESK_ROW.id, { x: 8, y: 9 });
+
+    const ejecutadas = sqls(pool);
+    expect(ejecutadas[0]).toBe('begin');
+    expect(ejecutadas.some((sql) => sql.startsWith('update desks'))).toBe(true);
+    const query = pool.queries.find((q) => squash(q.text).startsWith('insert into spaces'))!;
+    expect(query.values).toEqual([DESK_ROW.id, `desk-${DESK_ROW.id}`, DESK_ROW.label, 8, 9, 3]);
+    expect(ejecutadas.at(-1)).toBe('commit');
+  });
+
+  it('renombrar sin mover TAMBIEN sincroniza el cubiculo: un patch no vacio siempre resincroniza', async () => {
+    // Es lo que hace posible la tarea 2.4: el UPSERT corre en CUALQUIER
+    // escritura no vacia, no solo cuando x/y cambian.
+    const pool = txPool({ deskRows: [{ ...DESK_ROW, label: 'Mesa 9' }] });
+
+    await createPgDesks(pool).updateDesk(DESK_ROW.id, { label: 'Mesa 9' });
+
+    expect(sqls(pool).some((sql) => sql.startsWith('insert into spaces'))).toBe(true);
+  });
+
+  it('un escritorio que el backfill dejo sin cubiculo se autosana al dejar de chocar (tarea 2.4)', async () => {
+    // El UPSERT sobre ON CONFLICT (desk_id) es el MISMO camino tanto si el
+    // cubiculo ya existia como si nunca llego a crearse -- el backfill de S1a
+    // lo salta cuando el escritorio choca con una sala. Sin fila previa que
+    // conflictue por desk_id, es sencillamente un INSERT nuevo.
+    const pool = txPool({ deskRows: [{ ...DESK_ROW, x: 90, y: 90 }] });
+
+    const updated = await createPgDesks(pool).updateDesk(DESK_ROW.id, { x: 90, y: 90 });
+
+    expect(updated).not.toBeNull();
+    expect(sqls(pool).some((sql) => sql.startsWith('insert into spaces'))).toBe(true);
+  });
+
+  it('mientras el escritorio siga chocando, cualquier update sigue respondiendo DeskSpaceOverlapError (tarea 2.4)', async () => {
+    const pool = txPool({ spaceError: exclusionViolation('spaces_no_overlap') });
+
+    await expect(
+      createPgDesks(pool).updateDesk(DESK_ROW.id, { label: 'Mesa renombrada' }),
+    ).rejects.toThrow(DeskSpaceOverlapError);
+  });
+
+  it('un id que no existe no intenta sincronizar ningun cubiculo', async () => {
+    const pool = txPool({ deskRows: [] });
+
+    expect(await createPgDesks(pool).updateDesk('no-existe', { label: 'X' })).toBeNull();
+    expect(sqls(pool).some((sql) => sql.startsWith('insert into spaces'))).toBe(false);
   });
 });
 
@@ -212,6 +367,15 @@ describe('pgDesks: deleteDesk', () => {
     const pool = fakePool(() => ({ rows: [], rowCount: 0 }));
 
     expect(await createPgDesks(pool).deleteDesk('no-existe')).toBe(false);
+  });
+
+  it('NO toca spaces: la cascada de la FK desk_id se lleva el cubiculo (#10 + #12, tarea 2.3)', async () => {
+    const pool = fakePool(() => ({ rows: [], rowCount: 1 }));
+
+    await createPgDesks(pool).deleteDesk(DESK_ROW.id);
+
+    expect(sqls(pool)).toHaveLength(1);
+    expect(sqls(pool)[0]).not.toContain('spaces');
   });
 });
 
