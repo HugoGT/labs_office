@@ -15,7 +15,7 @@ import type { DirectoryUser } from '../directory/directoryPort.ts';
 import { createMemoryDirectory } from '../directory/memoryDirectory.ts';
 import type { IdTokenVerifier } from '../verifyIdToken.ts';
 import { createMemorySpaces } from './memorySpaces.ts';
-import { hashSpaces } from './spaceRules.ts';
+import { SpaceOwnedByDeskError, hashSpaces } from './spaceRules.ts';
 import type { Space, SpacesDirectory } from './spacesPort.ts';
 import {
   handleCreateSpace,
@@ -415,6 +415,28 @@ describe('handleUpdateSpace', () => {
     expect(result.status).toBe(200);
     expect(result.body.name).toBe('ANTES');
   });
+
+  it('un intento de renombrar o mover un cubiculo de escritorio responde 409 space-owned-by-desk (#10 + #12, tarea 1.4)', async () => {
+    // memorySpaces todavia no sabe crear cubiculos de escritorio (S1b): se
+    // inyecta un `SpacesDirectory` minimo para probar solo la traduccion
+    // HTTP de `SpaceOwnedByDeskError`, sin esperar a esa slice.
+    const { deps, id } = await conEspacio();
+    const spacesDeCubiculo: SpacesDirectory = {
+      ...deps.spaces,
+      async updateSpace() {
+        throw new SpaceOwnedByDeskError('este espacio pertenece a un escritorio');
+      },
+    };
+
+    const result = await handleUpdateSpace(
+      BEARER_ADMIN,
+      id,
+      { name: 'Otro' },
+      { ...deps, spaces: spacesDeCubiculo },
+    );
+
+    expect(result).toEqual({ status: 409, body: { error: 'space-owned-by-desk' } });
+  });
 });
 
 describe('handleDeleteSpace', () => {
@@ -444,5 +466,25 @@ describe('handleDeleteSpace', () => {
     const { deps } = harness();
 
     expect((await handleDeleteSpace(BEARER_ADMIN, 'no-existe', deps)).status).toBe(404);
+  });
+
+  it('un intento de borrar un cubiculo de escritorio responde 409 space-owned-by-desk (#10 + #12, tarea 1.4)', async () => {
+    // Prueba tambien que `handleDeleteSpace` quedo envuelto en `translating`:
+    // antes de la tarea 1.4 este handler dejaba pasar cualquier error de
+    // dominio sin traducir, y aqui reventaria como 500.
+    const { deps } = harness();
+    const spacesDeCubiculo: SpacesDirectory = {
+      ...deps.spaces,
+      async deleteSpace() {
+        throw new SpaceOwnedByDeskError('este espacio pertenece a un escritorio');
+      },
+    };
+
+    const result = await handleDeleteSpace(BEARER_ADMIN, 'id-cubiculo', {
+      ...deps,
+      spaces: spacesDeCubiculo,
+    });
+
+    expect(result).toEqual({ status: 409, body: { error: 'space-owned-by-desk' } });
   });
 });

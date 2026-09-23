@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { InvalidSpaceError, SpaceNameTakenError, SpaceOverlapError } from './spaceRules.ts';
+import { InvalidSpaceError, SpaceNameTakenError, SpaceOverlapError, SpaceOwnedByDeskError } from './spaceRules.ts';
 import { createPgSpaces } from './pgSpaces.ts';
 import type { DirectoryPool, DirectoryQueryResult } from '../directory/pgDirectory.ts';
 
@@ -329,17 +329,46 @@ describe('pgSpaces: updateSpace', () => {
       createPgSpaces(pool).updateSpace(SPACE_ROW.id, { name: 'Cafeteria' }),
     ).rejects.toThrow('violates check constraint');
   });
+
+  it('el UPDATE excluye las filas de un cubiculo de escritorio (#10 + #12, tarea 1.4)', async () => {
+    const pool = fakePool(() => ({ rows: [SPACE_ROW], rowCount: 1 }));
+
+    await createPgSpaces(pool).updateSpace(SPACE_ROW.id, { name: 'X' });
+
+    expect(squash(pool.queries[0].text)).toContain('and desk_id is null');
+  });
+
+  it('actualizar un cubiculo de escritorio responde SpaceOwnedByDeskError, no un 500', async () => {
+    // Cero filas del UPDATE (la clausula `desk_id IS NULL` lo excluye), y la
+    // lectura explicativa de despues confirma que el id SI existe -- luego es
+    // de un escritorio. Mismo precedente que `pgDesks.claimDesk`.
+    const pool = fakePool((text) =>
+      squash(text).startsWith('update spaces set')
+        ? { rows: [], rowCount: 0 }
+        : { rows: [{ ...SPACE_ROW, desk_id: 'id-escritorio-1' }], rowCount: 1 },
+    );
+
+    await expect(
+      createPgSpaces(pool).updateSpace(SPACE_ROW.id, { name: 'X' }),
+    ).rejects.toThrow(SpaceOwnedByDeskError);
+  });
+
+  it('actualizar un id que no existe sigue devolviendo null, no SpaceOwnedByDeskError', async () => {
+    const pool = fakePool(() => ({ rows: [], rowCount: 0 }));
+
+    expect(await createPgSpaces(pool).updateSpace('no-existe', { name: 'X' })).toBeNull();
+  });
 });
 
 describe('pgSpaces: deleteSpace', () => {
-  it('emite un unico DELETE FROM spaces: la cascada la lleva la FK, no este adaptador', async () => {
+  it('emite un unico DELETE FROM spaces, con la exclusion de los cubiculos de escritorio', async () => {
     const pool = fakePool(() => ({ rows: [], rowCount: 1 }));
 
     const deleted = await createPgSpaces(pool).deleteSpace(SPACE_ROW.id);
 
     expect(deleted).toBe(true);
     expect(pool.queries).toHaveLength(1);
-    expect(squash(pool.queries[0].text)).toBe('delete from spaces where id = $1');
+    expect(squash(pool.queries[0].text)).toBe('delete from spaces where id = $1 and desk_id is null');
     expect(squash(pool.queries[0].text)).not.toContain('space_layouts');
   });
 
@@ -347,6 +376,18 @@ describe('pgSpaces: deleteSpace', () => {
     const pool = fakePool(() => ({ rows: [], rowCount: 0 }));
 
     expect(await createPgSpaces(pool).deleteSpace('nope')).toBe(false);
+  });
+
+  it('borrar un cubiculo de escritorio responde SpaceOwnedByDeskError, no un 500 (#10 + #12, tarea 1.4)', async () => {
+    const pool = fakePool((text) =>
+      squash(text).startsWith('delete from spaces')
+        ? { rows: [], rowCount: 0 }
+        : { rows: [{ ...SPACE_ROW, desk_id: 'id-escritorio-1' }], rowCount: 1 },
+    );
+
+    await expect(createPgSpaces(pool).deleteSpace(SPACE_ROW.id)).rejects.toThrow(
+      SpaceOwnedByDeskError,
+    );
   });
 });
 

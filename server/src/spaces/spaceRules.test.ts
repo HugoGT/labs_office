@@ -11,6 +11,7 @@ import {
   InvalidSpaceError,
   SpaceNameTakenError,
   SpaceOverlapError,
+  SpaceOwnedByDeskError,
   assertValidBounds,
   assertValidCapacity,
   boundsOverlap,
@@ -261,5 +262,22 @@ describe('SpaceNameTakenError', () => {
     // esta mal.
     expect(new SpaceNameTakenError('x')).not.toBeInstanceOf(SpaceOverlapError);
     expect(new SpaceOverlapError('x')).not.toBeInstanceOf(SpaceNameTakenError);
+  });
+});
+
+describe('SpaceOwnedByDeskError (#10 + #12)', () => {
+  it('es distinguible por instanceof, no por el texto del mensaje', () => {
+    const error = new SpaceOwnedByDeskError('x');
+    expect(error).toBeInstanceOf(SpaceOwnedByDeskError);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe('SpaceOwnedByDeskError');
+  });
+
+  it('NO es ni un SpaceOverlapError ni un SpaceNameTakenError', () => {
+    // Un tercer 409 con su propio codigo (tarea 1.4): este no se arregla
+    // moviendo el rectangulo ni eligiendo otro nombre, se arregla desde
+    // `DesksPanel` y no desde aqui.
+    expect(new SpaceOwnedByDeskError('x')).not.toBeInstanceOf(SpaceOverlapError);
+    expect(new SpaceOwnedByDeskError('x')).not.toBeInstanceOf(SpaceNameTakenError);
   });
 });

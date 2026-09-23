@@ -55,6 +55,23 @@ export class SpaceNameTakenError extends Error {
   }
 }
 
+/**
+ * El tercer 409 de los espacios (#10 + #12): quien llama intento crear,
+ * renombrar, mover/redimensionar o borrar un espacio que en realidad es el
+ * cubiculo de un escritorio (`desk_id` no nulo). Esos espacios NO se
+ * administran por esta ruta -- solo como efecto secundario del CRUD de
+ * escritorios (`pgDesks`, S1b) -- asi que ni moviendo el rectangulo ni
+ * eligiendo otro nombre se arregla: hay que ir a `DesksPanel`. Tipo propio y
+ * no `SpaceOverlapError`/`SpaceNameTakenError` reciclados, misma razon que
+ * separa esos dos entre si.
+ */
+export class SpaceOwnedByDeskError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SpaceOwnedByDeskError';
+  }
+}
+
 export interface SpaceBounds {
   x: number;
   y: number;

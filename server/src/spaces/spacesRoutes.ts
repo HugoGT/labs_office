@@ -30,7 +30,7 @@ import {
   type AdminDeps,
   type AdminResult,
 } from '../admin/adminRoutes.ts';
-import { InvalidSpaceError, SpaceNameTakenError, SpaceOverlapError } from './spaceRules.ts';
+import { InvalidSpaceError, SpaceNameTakenError, SpaceOverlapError, SpaceOwnedByDeskError } from './spaceRules.ts';
 import type { Space, SpacesDirectory, UpdateSpaceInput } from './spacesPort.ts';
 
 export interface SpacesDeps extends AdminDeps {
@@ -48,6 +48,13 @@ const CONFLICT: AdminResult = { status: 409, body: { error: 'space-overlap' } };
  * `desk-overlap` y `desk-taken` en `desksRoutes.ts`.
  */
 const NAME_TAKEN: AdminResult = { status: 409, body: { error: 'space-name-taken' } };
+
+/**
+ * El tercer 409 (#10 + #12, tarea 1.4): el espacio pedido es en realidad el
+ * cubiculo de un escritorio. Se arregla desde `DesksPanel`, no aqui, asi que
+ * necesita su propio codigo y no uno de los dos de arriba.
+ */
+const OWNED_BY_DESK: AdminResult = { status: 409, body: { error: 'space-owned-by-desk' } };
 
 /**
  * Los mismos ocho campos que entran en el hash de version (`CanonicalSpace`),
@@ -82,6 +89,7 @@ async function translating(run: () => Promise<AdminResult>): Promise<AdminResult
     if (error instanceof InvalidSpaceError) return INVALID_REQUEST;
     if (error instanceof SpaceOverlapError) return CONFLICT;
     if (error instanceof SpaceNameTakenError) return NAME_TAKEN;
+    if (error instanceof SpaceOwnedByDeskError) return OWNED_BY_DESK;
     throw error;
   }
 }
@@ -173,9 +181,11 @@ export async function handleDeleteSpace(
 
   if (typeof id !== 'string') return INVALID_REQUEST;
 
-  const deleted = await deps.spaces.deleteSpace(id);
-  if (!deleted) return NOT_FOUND;
-  // El layout del espacio se va con el por la cascada de `schema.sql`; el
-  // adaptador no lo borra a mano (D1b).
-  return { status: 200, body: { deleted: true } };
+  return translating(async () => {
+    const deleted = await deps.spaces.deleteSpace(id);
+    if (!deleted) return NOT_FOUND;
+    // El layout del espacio se va con el por la cascada de `schema.sql`; el
+    // adaptador no lo borra a mano (D1b).
+    return { status: 200, body: { deleted: true } };
+  });
 }
