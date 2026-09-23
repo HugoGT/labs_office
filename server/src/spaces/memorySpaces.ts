@@ -23,6 +23,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { DESK_SIDE, DeskSpaceOverlapError } from '../desks/deskRules.ts';
+import type { MemoryDeskSpaces } from '../desks/memoryDesks.ts';
 import type {
   CreateSpaceInput,
   LayoutItemInput,
@@ -34,11 +36,13 @@ import type {
 import {
   SpaceNameTakenError,
   SpaceOverlapError,
+  SpaceOwnedByDeskError,
   boundsOverlap,
   hashSpaces,
   normalizeCreateSpaceInput,
   normalizeUpdateSpaceInput,
   type CanonicalSpace,
+  type SpaceBounds,
 } from './spaceRules.ts';
 
 export interface MemorySpacesOptions {
@@ -50,7 +54,9 @@ export interface MemorySpacesOptions {
   newId?: () => string;
 }
 
-export function createMemorySpaces(options: MemorySpacesOptions = {}): SpacesDirectory {
+export function createMemorySpaces(
+  options: MemorySpacesOptions = {},
+): SpacesDirectory & { deskSpaces: MemoryDeskSpaces } {
   const now = options.now ?? (() => new Date());
   const newId = options.newId ?? (() => randomUUID());
 
@@ -113,11 +119,78 @@ export function createMemorySpaces(options: MemorySpacesOptions = {}): SpacesDir
     const name = candidate.name.toLowerCase();
     for (const existing of spaces.values()) {
       if (existing.id === exceptId) continue;
+      // `spaces_room_name_unique` (schema.sql, S1a) es `WHERE desk_id IS
+      // NULL`: solo compara SALAS entre si. Un cubiculo de escritorio se
+      // llama como se llame el escritorio, y eso nunca deberia bloquear (ni
+      // ser bloqueado por) el nombre de una sala nueva (#10 + #12).
+      if (existing.deskId !== null) continue;
       if (existing.slug.toLowerCase() === slug || existing.name.toLowerCase() === name) {
         throw new SpaceNameTakenError('ya existe un espacio con ese nombre');
       }
     }
   }
+
+  /** El area fija de un cubiculo de escritorio: DESK_SIDE x DESK_SIDE, mismo tamano que `pgDesks.syncDeskSpace`. */
+  function deskBounds(desk: { x: number; y: number }): SpaceBounds {
+    return { x: desk.x, y: desk.y, w: DESK_SIDE, h: DESK_SIDE };
+  }
+
+  function findDeskSpace(deskId: string): Space | undefined {
+    return [...spaces.values()].find((space) => space.deskId === deskId);
+  }
+
+  /**
+   * Espejo en memoria de `pgDesks.syncDeskSpace` (#10 + #12, tarea 2.5):
+   * comparte el `spaces` Map de este adaptador, asi que lo que escribe aqui lo
+   * ve inmediatamente `listSpaces`/`getSpace`. No es del puerto
+   * `SpacesDirectory` -- es la afordancia que `memoryDesks` necesita para
+   * mantener el cubiculo de un escritorio sincronizado sin depender de
+   * Postgres.
+   */
+  const deskSpaces: MemoryDeskSpaces = {
+    assertDeskFits(desk) {
+      const bounds = deskBounds(desk);
+      for (const existing of spaces.values()) {
+        // El cubiculo ANTERIOR de este mismo escritorio no cuenta: moverse
+        // dentro de su propia area vieja es legal, mismo argumento que
+        // `assertNoOverlap`/`exceptId`.
+        if (existing.deskId === desk.id) continue;
+        if (boundsOverlap(bounds, existing)) {
+          throw new DeskSpaceOverlapError('el escritorio solicitado se solapa con una sala existente');
+        }
+      }
+    },
+
+    upsertDeskSpace(desk) {
+      const at = now();
+      const current = findDeskSpace(desk.id);
+      const bounds = deskBounds(desk);
+      if (current) {
+        spaces.set(current.id, { ...current, name: desk.label, ...bounds, updatedAt: at });
+        return;
+      }
+      const space: Space = {
+        id: newId(),
+        slug: `desk-${desk.id}`,
+        name: desk.label,
+        ...bounds,
+        capacity: null,
+        deskId: desk.id,
+        createdAt: at,
+        updatedAt: at,
+      };
+      spaces.set(space.id, space);
+    },
+
+    removeDeskSpace(deskId) {
+      const current = findDeskSpace(deskId);
+      if (!current) return;
+      // Misma cascada a mano que `deleteSpace`: sin ella el layout de un
+      // cubiculo borrado quedaria huerfano en el Map.
+      layouts.delete(current.id);
+      spaces.delete(current.id);
+    },
+  };
 
   return {
     async listSpaces() {
@@ -150,8 +223,17 @@ export function createMemorySpaces(options: MemorySpacesOptions = {}): SpacesDir
       const current = spaces.get(id);
       if (!current) return null;
 
-      // El patch vacio relee sin tocar `updatedAt`, igual que `pgSpaces`.
+      // El patch vacio relee sin tocar `updatedAt`, igual que `pgSpaces`
+      // (mismo comportamiento: la relectura de un patch vacio NO comprueba
+      // `deskId`, mirroring exacto de `pgSpaces.updateSpace`, S1a).
       if (Object.keys(patch).length === 0) return current;
+
+      // Un cubiculo de escritorio NO se administra por esta ruta -- solo como
+      // efecto secundario del CRUD de escritorios (#10 + #12, tarea 1.4,
+      // mirroring de `pgSpaces.updateSpace`, pgSpaces.ts:164-208).
+      if (current.deskId !== null) {
+        throw new SpaceOwnedByDeskError('este espacio pertenece a un escritorio y no se administra aqui');
+      }
 
       const next: Space = { ...current, ...patch, updatedAt: now() };
       assertNameFree(next, id);
@@ -161,6 +243,14 @@ export function createMemorySpaces(options: MemorySpacesOptions = {}): SpacesDir
     },
 
     async deleteSpace(id: string) {
+      const current = spaces.get(id);
+      if (!current) return false;
+
+      // Misma exclusion que `updateSpace`, mirroring de `pgSpaces.deleteSpace`.
+      if (current.deskId !== null) {
+        throw new SpaceOwnedByDeskError('este espacio pertenece a un escritorio y no se administra aqui');
+      }
+
       // La cascada de `space_layouts` la hace `ON DELETE CASCADE` en
       // `schema.sql`; aqui se reproduce a mano para que el comportamiento
       // observable sea el mismo.
@@ -184,5 +274,7 @@ export function createMemorySpaces(options: MemorySpacesOptions = {}): SpacesDir
     async version() {
       return hashSpaces(canonical());
     },
+
+    deskSpaces,
   };
 }
