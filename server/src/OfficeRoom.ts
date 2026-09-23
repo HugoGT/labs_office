@@ -272,6 +272,13 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       player.x = x;
       player.y = y;
       player.facing = sanitizeFacing(message?.facing);
+
+      // Posicion YA recortada (#10, #12): `POST /livekit/token` compara esto
+      // contra un `spaceId`, y confiar en la cruda dejaria a un cliente
+      // reclamar un espacio fuera del mundo que el clamp de arriba nunca deja
+      // pisar. `moveTo` es no-op si la sesion no existe en el registro, igual
+      // que aqui `player` ya se comprobo antes de tocar nada.
+      this.sessions?.moveTo(client.sessionId, x, y);
     });
 
     this.onMessage('status', (client: Client, message: StatusMessage) => {
@@ -408,6 +415,8 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     // camino de siempre. En ambos casos pasa por `sanitizeName`, que es quien
     // hace valer `MAX_NAME_LENGTH`.
     const identity = client.auth === true ? undefined : client.auth;
+    const spawnX = (PLAYER_SPAWN_TX + dx) * TILE + TILE / 2;
+    const spawnY = (PLAYER_SPAWN_TY + dy) * TILE + TILE / 2;
 
     this.state.players.set(
       client.sessionId,
@@ -415,8 +424,8 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
         name: sanitizeName(
           identity ? deriveIdentityName(identity, DEFAULT_NAME) : options?.name,
         ),
-        x: (PLAYER_SPAWN_TX + dx) * TILE + TILE / 2,
-        y: (PLAYER_SPAWN_TY + dy) * TILE + TILE / 2,
+        x: spawnX,
+        y: spawnY,
         status: sanitizeStatus(options?.status),
         facing: DEFAULT_FACING,
         // Viaja en el join (#7, D4), no en un mensaje posterior: sin esto un
@@ -431,6 +440,12 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     // (auth desactivada) solo prueba que la sesion esta viva. Ver
     // `liveSessions.ts` y la guarda de `POST /livekit/token`.
     this.sessions?.add(client.sessionId, identity?.uid);
+
+    // La posicion de spawn entra al registro en el mismo instante que al
+    // estado (#10, #12): sin esto, un token pedido antes del primer `move`
+    // (por ejemplo al aceptar una llamada nada mas entrar) encontraria la
+    // sesion sin posicion trackeada y caeria siempre en `forbidden-space`.
+    this.sessions?.moveTo(client.sessionId, spawnX, spawnY);
   }
 
   /**

@@ -148,6 +148,47 @@ describe('OfficeRoom: movimiento', () => {
   });
 });
 
+describe('OfficeRoom: posicion trackeada en el registro de sesiones (#10, #12)', () => {
+  it('onJoin registra la posicion de spawn en el registro, no solo en el estado', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+
+    const me = room.state.players.get(room.sessionId);
+    expect(server.sessions.positionOf(room.sessionId)).toEqual({ x: me?.x, y: me?.y });
+  });
+
+  it('un move valido actualiza la posicion trackeada en el registro', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+
+    room.send('move', { x: 300, y: 400, facing: 'left' });
+
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === 300);
+    expect(server.sessions.positionOf(room.sessionId)).toEqual({ x: 300, y: 400 });
+  });
+
+  it('un move fuera de los limites del mundo trackea la posicion YA recortada, no la cruda', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+
+    room.send('move', { x: 999999, y: -999999, facing: 'down' });
+
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === WORLD_W);
+    expect(server.sessions.positionOf(room.sessionId)).toEqual({ x: WORLD_W, y: 0 });
+  });
+
+  it('un move invalido (ignorado por el estado) tampoco toca la posicion trackeada', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+    const before = server.sessions.positionOf(room.sessionId);
+
+    room.send('move', { x: 'aqui', y: null, facing: 'down' });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(server.sessions.positionOf(room.sessionId)).toEqual(before);
+  });
+});
+
 describe('OfficeRoom: el cliente no es de fiar', () => {
   it('recorta una posicion fuera de los limites del mundo en vez de aceptarla', async () => {
     const room = await join('Ana');
