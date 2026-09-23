@@ -59,7 +59,7 @@ import {
   type AdminDeps,
   type AdminResult,
 } from '../admin/adminRoutes.ts';
-import { DESK_SIDE, DeskOverlapError, DeskTakenError, InvalidDeskError } from './deskRules.ts';
+import { DESK_SIDE, DeskOverlapError, DeskSpaceOverlapError, DeskTakenError, InvalidDeskError } from './deskRules.ts';
 import type { Desk, DeskDirectory, OfficeDesk, UpdateDeskInput } from './desksPort.ts';
 
 export interface DesksDeps extends AdminDeps {
@@ -67,14 +67,16 @@ export interface DesksDeps extends AdminDeps {
 }
 
 /**
- * Los DOS 409 de esta slice, separados a proposito. Los provocan dos personas
- * distintas haciendo dos cosas distintas, y se arreglan de formas distintas:
- * uno eligiendo otro escritorio y el otro corrigiendo unas coordenadas. Un
- * cuerpo comun obligaria al cliente a adivinar cual de las dos cosas decirle a
- * quien esta mirando la pantalla.
+ * Los TRES 409 de esta slice, separados a proposito. Los provocan situaciones
+ * distintas y se arreglan de formas distintas: `OVERLAP` eligiendo otro
+ * escritorio, `TAKEN` esperando o pidiendo otro sitio, y `SPACE_OVERLAP`
+ * corrigiendo unas coordenadas porque el cubiculo emparejado cae encima de
+ * una sala (#10 + #12, tarea 2.2). Un cuerpo comun obligaria al cliente a
+ * adivinar cual de las tres cosas decirle a quien esta mirando la pantalla.
  */
 const OVERLAP: AdminResult = { status: 409, body: { error: 'desk-overlap' } };
 const TAKEN: AdminResult = { status: 409, body: { error: 'desk-taken' } };
+const SPACE_OVERLAP: AdminResult = { status: 409, body: { error: 'desk-space-overlap' } };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -145,6 +147,7 @@ async function translating(run: () => Promise<AdminResult>): Promise<AdminResult
   } catch (error) {
     if (error instanceof InvalidDeskError) return INVALID_REQUEST;
     if (error instanceof DeskOverlapError) return OVERLAP;
+    if (error instanceof DeskSpaceOverlapError) return SPACE_OVERLAP;
     if (error instanceof DeskTakenError) return TAKEN;
     throw error;
   }
