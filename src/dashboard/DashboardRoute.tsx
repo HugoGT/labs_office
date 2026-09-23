@@ -9,6 +9,9 @@ import { AssetsPanel } from './AssetsPanel';
 import { createDeskAdminClient } from './deskAdminClient';
 import type { DeskAdminPort } from './deskAdminPort';
 import { DesksPanel } from './DesksPanel';
+import { createSpacesAdminClient } from './spacesAdminClient';
+import type { SpacesAdminPort } from './spacesAdminPort';
+import { SpacesPanel } from './SpacesPanel';
 import { DashboardScreen } from './DashboardScreen';
 import styles from './DashboardScreen.module.css';
 import { resolveOfficeApiBaseUrl } from './officeApiBaseUrl';
@@ -31,15 +34,16 @@ export interface DashboardRouteProps {
  * aqui evita el envoltorio `.then(m => ({ default: m.X }))` en `App`.
  */
 /**
- * Los tres puertos del panel, construidos de una vez. Van juntos porque
+ * Los cuatro puertos del panel, construidos de una vez. Van juntos porque
  * dependen de lo mismo -- el endpoint de la oficina y la sesion -- y porque
  * ninguno se puede construir si el otro no: o hay servidor y sesion para los
- * tres, o no hay panel.
+ * cuatro, o no hay panel.
  */
 interface DashboardPorts {
   admin: AdminPort;
   desks: DeskAdminPort;
   assets: AssetAdminPort;
+  spaces: SpacesAdminPort;
 }
 
 export default function DashboardRoute({ session }: DashboardRouteProps) {
@@ -71,6 +75,9 @@ export default function DashboardRoute({ session }: DashboardRouteProps) {
       admin: createAdminClient({ baseUrl: adminBaseUrl, getIdToken }),
       desks: createDeskAdminClient({ baseUrl: apiBaseUrl, getIdToken }),
       assets: createAssetAdminClient({ baseUrl: apiBaseUrl, getIdToken }),
+      // Misma raiz que `desks`: `GET /spaces` tampoco cuelga de `/admin`
+      // (ver la cabecera de `spacesAdminClient.ts`).
+      spaces: createSpacesAdminClient({ baseUrl: apiBaseUrl, getIdToken }),
     };
   });
 
@@ -114,6 +121,7 @@ export default function DashboardRoute({ session }: DashboardRouteProps) {
   return (
     <DashboardScreen admin={ports.admin}>
       <DesksPanel desks={ports.desks} />
+      <SpacesPanel spaces={ports.spaces} />
       <AssetsPanel assets={ports.assets} />
     </DashboardScreen>
   );
