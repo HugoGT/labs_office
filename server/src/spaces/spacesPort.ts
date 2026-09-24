@@ -19,6 +19,14 @@ export interface Space {
   w: number;
   h: number;
   capacity: number | null;
+  /**
+   * FK al escritorio dueno de este cubiculo (#10 + #12), o `null` para una
+   * sala. Es lo unico que distingue las dos: mismo mecanismo generico de
+   * pertenencia (`detectSpace`, `audiblePeers`, el evento `room` del bridge)
+   * para ambas. NUNCA se fija a mano por la ruta admin -- solo `pgDesks`
+   * (S1b) lo escribe, como efecto secundario del CRUD de escritorios.
+   */
+  deskId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

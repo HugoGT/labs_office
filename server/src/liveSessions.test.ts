@@ -98,3 +98,62 @@ describe('createLiveSessionRegistry: dueno de la sesion (#8)', () => {
     expect(registry.uidOf('sess-b')).toBe('uid-beto');
   });
 });
+
+describe('createLiveSessionRegistry: posicion de la sesion (#10, #12, D4)', () => {
+  it('una sesion recien anadida no tiene posicion', () => {
+    const registry = createLiveSessionRegistry();
+
+    registry.add('sess-a');
+
+    expect(registry.positionOf('sess-a')).toBeUndefined();
+  });
+
+  it('moveTo fija la posicion y positionOf la devuelve', () => {
+    const registry = createLiveSessionRegistry();
+    registry.add('sess-a');
+
+    registry.moveTo('sess-a', 160, 320);
+
+    expect(registry.positionOf('sess-a')).toEqual({ x: 160, y: 320 });
+  });
+
+  it('moveTo sobre un id desconocido no resucita la sesion', () => {
+    const registry = createLiveSessionRegistry();
+
+    registry.moveTo('jamas-existio', 10, 10);
+
+    expect(registry.has('jamas-existio')).toBe(false);
+    expect(registry.positionOf('jamas-existio')).toBeUndefined();
+  });
+
+  it('moveTo repetido se queda con la ultima posicion, no la primera', () => {
+    const registry = createLiveSessionRegistry();
+    registry.add('sess-a');
+
+    registry.moveTo('sess-a', 32, 32);
+    registry.moveTo('sess-a', 500, 700);
+
+    expect(registry.positionOf('sess-a')).toEqual({ x: 500, y: 700 });
+  });
+
+  it('moveTo no borra el uid ya registrado', () => {
+    const registry = createLiveSessionRegistry();
+    registry.add('sess-a', 'uid-ana');
+
+    registry.moveTo('sess-a', 64, 64);
+
+    expect(registry.uidOf('sess-a')).toBe('uid-ana');
+    expect(registry.positionOf('sess-a')).toEqual({ x: 64, y: 64 });
+  });
+
+  it('remove borra tambien la posicion, no solo la presencia', () => {
+    const registry = createLiveSessionRegistry();
+    registry.add('sess-a');
+    registry.moveTo('sess-a', 64, 64);
+
+    registry.remove('sess-a');
+    registry.add('sess-a');
+
+    expect(registry.positionOf('sess-a')).toBeUndefined();
+  });
+});

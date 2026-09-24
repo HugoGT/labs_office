@@ -104,7 +104,6 @@ CREATE TABLE IF NOT EXISTS spaces (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS spaces_slug_unique ON spaces (lower(slug));
-CREATE UNIQUE INDEX IF NOT EXISTS spaces_name_unique ON spaces (lower(name));
 
 -- Dos espacios solapados harian que `detectSpace` dependiese del orden de
 -- comparacion en el cliente, y ese orden puede diferir entre clientes:
@@ -210,6 +209,40 @@ CREATE UNIQUE INDEX IF NOT EXISTS desks_single_occupant ON desks (occupant_id)
 ALTER TABLE desks DROP CONSTRAINT IF EXISTS desks_no_overlap;
 ALTER TABLE desks ADD CONSTRAINT desks_no_overlap
   EXCLUDE USING gist (box(point(x, y), point(x + 3, y + 3)) WITH &&);
+
+-- Cada escritorio es tambien un espacio (#10 + #12): su cubiculo propio, con
+-- el mismo mecanismo generico de pertenencia (`detectSpace`, `audiblePeers`,
+-- el evento `room` del bridge) que ya tienen las salas. `desk_id` va DESPUES
+-- de `desks`, porque la FK necesita esa tabla ya creada.
+--
+-- UNIQUE en `desk_id`: un escritorio tiene, como mucho, UN cubiculo
+-- emparejado. El upsert de `pgDesks` (slice S1b) se apoya en este indice con
+-- `ON CONFLICT (desk_id) DO UPDATE`. CASCADE porque borrar el escritorio se
+-- lleva su cubiculo con el -- no tiene sentido un cubiculo sin dueno.
+ALTER TABLE spaces ADD COLUMN IF NOT EXISTS desk_id uuid UNIQUE REFERENCES desks(id) ON DELETE CASCADE;
+
+-- El indice de nombre unico de arriba protegia la tabla ENTERA. Con
+-- cubiculos en la misma tabla eso rechazaria dos escritorios que compartan
+-- nombre (dos personas llamadas "Ana" no pueden tener las dos una "Mesa de
+-- Ana"), asi que se sustituye por uno acotado a las salas. El nombre nuevo
+-- y no `IF NOT EXISTS` sobre el viejo: `IF NOT EXISTS` solo mira el nombre
+-- del indice, no su definicion, y dejaria vivo al que protegia la tabla
+-- entera.
+DROP INDEX IF EXISTS spaces_name_unique;
+CREATE UNIQUE INDEX IF NOT EXISTS spaces_room_name_unique ON spaces (lower(name)) WHERE desk_id IS NULL;
+
+-- Backfill: un cubiculo 3x3 para cada escritorio que todavia no tiene uno,
+-- en las MISMAS coordenadas del escritorio (igual que `syncDeskSpace` en
+-- adelante). `ON CONFLICT DO NOTHING` sin target absorbe tambien el choque
+-- contra `spaces_no_overlap`: un escritorio sentado encima de una sala
+-- existente se salta en vez de tumbar el arranque entero. `WHERE NOT EXISTS`
+-- es lo que hace idempotente volver a correr esto en cada arranque, y
+-- `reportDesksWithoutSpace` (migrate.ts) es quien avisa de los que quedan sin
+-- cubiculo.
+INSERT INTO spaces (desk_id, slug, name, x, y, w, h, capacity)
+SELECT d.id, 'desk-' || d.id::text, d.label, d.x, d.y, 3, 3, NULL FROM desks d
+WHERE NOT EXISTS (SELECT 1 FROM spaces s WHERE s.desk_id = d.id)
+ON CONFLICT DO NOTHING;
 
 -- Semilla: los dos espacios de siempre, con los MISMOS uuids literales que
 -- usara `BUILT_IN_SPACES` en mapData.ts cuando aterrice la identidad de

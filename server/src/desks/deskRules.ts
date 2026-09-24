@@ -63,6 +63,26 @@ export class DeskTakenError extends Error {
   }
 }
 
+/**
+ * El escritorio (y su cubiculo emparejado, ver `pgDesks.syncDeskSpace`) choca
+ * con una sala existente (#10 + #12, S1b): lo que salta `spaces_no_overlap`
+ * cuando el cubiculo 3x3 de un escritorio se sincroniza en `spaces`.
+ *
+ * Tipo propio y no `DeskOverlapError` reciclado, aunque los dos acaben en 409
+ * y los dos los dispare un solape: son dos restricciones DISTINTAS
+ * (`desks_no_overlap` contra `desks_no_overlap`; este contra
+ * `spaces_no_overlap`) y se arreglan de formas distintas. Un escritorio
+ * puede tener sitio libre entre otros escritorios y aun asi caer encima de
+ * una sala -- confundirlos mandaria al administrador a mover algo que ya
+ * estaba bien colocado respecto a los demas escritorios.
+ */
+export class DeskSpaceOverlapError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DeskSpaceOverlapError';
+  }
+}
+
 export interface DeskPosition {
   x: number;
   y: number;

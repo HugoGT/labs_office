@@ -173,6 +173,37 @@ describe('createDeskAdminClient: como cuenta los fallos', () => {
     expect(await codeOf(client.createDesk({ label: 'Mesa 4', x: 6, y: 9 }))).toBe('desk-overlap');
   });
 
+  it('un escritorio que pisa una sala es su propio 409, distinto del solape entre escritorios (#10, S2 3.5)', async () => {
+    const client = clientWith(fetchWith(409, { error: 'desk-space-overlap' }));
+
+    expect(await codeOf(client.createDesk({ label: 'Mesa 4', x: 6, y: 9 }))).toBe(
+      'desk-space-overlap',
+    );
+  });
+
+  it('un 409 cuyo cuerpo trae un motivo que esta ruta no declara cae al primero de la lista', async () => {
+    // El cuerpo trae un codigo ajeno a esta ruta (por ejemplo, uno de otra
+    // superficie); sin poder confiar en el, se cuenta como el 409 mas
+    // frecuente de las dos que puede dar `createDesk`.
+    const client = clientWith(fetchWith(409, { error: 'space-owned-by-desk' }));
+
+    expect(await codeOf(client.createDesk({ label: 'Mesa 4', x: 6, y: 9 }))).toBe('desk-overlap');
+  });
+
+  it('un 409 sin cuerpo JSON legible tambien cae al primero de la lista', async () => {
+    const client = clientWith(
+      vi.fn(async () => ({
+        ok: false,
+        status: 409,
+        json: async () => {
+          throw new SyntaxError('Unexpected end of JSON input');
+        },
+      })) as unknown as typeof fetch,
+    );
+
+    expect(await codeOf(client.createDesk({ label: 'Mesa 4', x: 6, y: 9 }))).toBe('desk-overlap');
+  });
+
   it('un id que ya no existe es un 404 y se cuenta como tal', async () => {
     const client = clientWith(fetchWith(404, {}));
 

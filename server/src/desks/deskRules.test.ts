@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DESK_SIDE,
   DeskOverlapError,
+  DeskSpaceOverlapError,
   DeskTakenError,
   InvalidDeskError,
   assertValidDeskPosition,
@@ -169,5 +170,17 @@ describe('los errores de dominio son tipos y no textos', () => {
     expect(new InvalidDeskError('x')).toBeInstanceOf(Error);
     expect(new DeskOverlapError('x')).toBeInstanceOf(Error);
     expect(new DeskTakenError('x')).toBeInstanceOf(Error);
+  });
+
+  it('"el cubiculo choca con una sala" (#10 + #12) es un tipo propio y no DeskOverlapError reciclado', () => {
+    // Los dos acaban en 409 y los dos los dispara un solape, pero contra dos
+    // tablas distintas: `DeskOverlapError` es `desks_no_overlap` (otro
+    // escritorio), `DeskSpaceOverlapError` es `spaces_no_overlap` sobre el
+    // cubiculo emparejado (una sala). Colapsarlos le diria al administrador
+    // "elige otro escritorio" cuando el problema es que esa esquina de la
+    // oficina ya es una sala.
+    expect(new DeskSpaceOverlapError('x').name).toBe('DeskSpaceOverlapError');
+    expect(new DeskSpaceOverlapError('x')).toBeInstanceOf(Error);
+    expect(new DeskSpaceOverlapError('x')).not.toBeInstanceOf(DeskOverlapError);
   });
 });

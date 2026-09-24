@@ -41,6 +41,32 @@ import {
   normalizeUpdateDeskInput,
 } from './deskRules.ts';
 
+/**
+ * Contrato minimo que necesita `memoryDesks` de `memorySpaces` para mantener
+ * el cubiculo de un escritorio sincronizado (#10 + #12, S1b, tarea 2.5) --
+ * espejo en memoria de lo que hace `pgDesks.syncDeskSpace` dentro de su
+ * transaccion. No es del puerto `DeskDirectory`, es una afordancia: la
+ * implementa `createMemorySpaces` y la expone como `deskSpaces`, igual que
+ * `directory`/`decor` no son del puerto `SpacesDirectory` de `pgSpaces`.
+ *
+ * `assertDeskFits`/`upsertDeskSpace` reciben la misma forma minima --
+ * `id`/`x`/`y` para comprobar, `+ label` para escribir -- para que
+ * `memoryDesks` no tenga que construir un `Space` entero solo para preguntar.
+ */
+export interface MemoryDeskSpaces {
+  /**
+   * Rechaza con `DeskSpaceOverlapError` si el area 3x3 de `desk` choca con
+   * otra fila de `spaces` (tipicamente una sala). NO cuenta el propio
+   * cubiculo de `desk.id`, si ya tiene uno: moverse dentro de su antigua
+   * posicion es legal, mismo argumento que `assertNoOverlap`/`exceptId`.
+   */
+  assertDeskFits(desk: { id: string; x: number; y: number }): void;
+  /** Crea el cubiculo emparejado con `desk.id` la primera vez, o lo mueve/renombra las siguientes. */
+  upsertDeskSpace(desk: { id: string; label: string; x: number; y: number }): void;
+  /** Borra el cubiculo emparejado con `deskId`, si tiene uno. Idempotente. */
+  removeDeskSpace(deskId: string): void;
+}
+
 export interface MemoryDesksOptions {
   /** Escritorios de partida. */
   seed?: readonly Desk[];
@@ -61,6 +87,13 @@ export interface MemoryDesksOptions {
    * `pgDesks` para quien no ha decorado nada.
    */
   decor?: Pick<DecorCatalog, 'getDeskConfig'>;
+  /**
+   * La afordancia `deskSpaces` de `createMemorySpaces` (#10 + #12, tarea 2.5).
+   * Sin ella, crear/mover/renombrar un escritorio no sincroniza ningun
+   * cubiculo -- el comportamiento de antes de esta slice, y el que siguen
+   * teniendo los tests que no le pasan nada.
+   */
+  spaces?: MemoryDeskSpaces;
 }
 
 export function createMemoryDesks(options: MemoryDesksOptions = {}): DeskDirectory {
@@ -139,7 +172,12 @@ export function createMemoryDesks(options: MemoryDesksOptions = {}): DeskDirecto
       // `occupantId: null` explicito: un escritorio NACE libre. Quien se
       // sienta lo decide esa persona con `claimDesk`, no quien lo crea.
       const desk: Desk = { id: newId(), ...normalized, occupantId: null, createdAt: at, updatedAt: at };
+      // El cubiculo se valida ANTES de guardar el escritorio (#10 + #12, tarea
+      // 2.1/2.2): si choca con una sala, ni el uno ni el otro quedan en pie.
+      // Mismo orden observable que la transaccion de `pgDesks.createDesk`.
+      options.spaces?.assertDeskFits(desk);
       desks.set(desk.id, desk);
+      options.spaces?.upsertDeskSpace(desk);
       return desk;
     },
 
@@ -148,14 +186,23 @@ export function createMemoryDesks(options: MemoryDesksOptions = {}): DeskDirecto
       const current = desks.get(id);
       if (!current) return null;
 
-      // El patch vacio relee sin tocar `updatedAt`, igual que `pgDesks`.
+      // El patch vacio relee sin tocar `updatedAt`, igual que `pgDesks`, y sin
+      // sincronizar ningun cubiculo: nada cambio.
       if (Object.keys(patch).length === 0) return current;
 
       // `occupantId` se arrastra del actual y nunca del patch: mover o
       // renombrar un escritorio no levanta a quien lo ocupa.
       const next: Desk = { ...current, ...patch, updatedAt: now() };
       assertNoOverlap(next, id);
+      // Mismo orden que `createDesk`: el cubiculo se valida ANTES de guardar
+      // el escritorio movido/renombrado. Cualquier patch no vacio resincroniza
+      // -- no solo un movimiento -- que es lo que autosana un escritorio que
+      // el backfill de S1a dejo sin cubiculo en cuanto deja de chocar (tarea
+      // 2.4): `upsertDeskSpace` no distingue "ya tenia uno" de "nunca llego a
+      // tener uno".
+      options.spaces?.assertDeskFits(next);
       desks.set(id, next);
+      options.spaces?.upsertDeskSpace(next);
       return next;
     },
 
@@ -163,7 +210,12 @@ export function createMemoryDesks(options: MemoryDesksOptions = {}): DeskDirecto
       // La ocupacion se va con la fila, que es lo que hace Postgres al borrar:
       // esa persona se queda sin sitio y puede coger otro. Conservarla la
       // dejaria atrapada en un escritorio que ya no existe.
-      return desks.delete(id);
+      const existed = desks.delete(id);
+      // El cubiculo emparejado se va con el (#10 + #12, tarea 2.3): en
+      // Postgres lo hace la cascada de la FK `desk_id`, aqui hay que pedirlo a
+      // mano porque no hay ninguna cascada real sobre la que apoyarse.
+      if (existed) options.spaces?.removeDeskSpace(id);
+      return existed;
     },
 
     async claimDesk(deskId: string, userId: string) {

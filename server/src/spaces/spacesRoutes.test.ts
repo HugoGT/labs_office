@@ -15,8 +15,8 @@ import type { DirectoryUser } from '../directory/directoryPort.ts';
 import { createMemoryDirectory } from '../directory/memoryDirectory.ts';
 import type { IdTokenVerifier } from '../verifyIdToken.ts';
 import { createMemorySpaces } from './memorySpaces.ts';
-import { hashSpaces } from './spaceRules.ts';
-import type { SpacesDirectory } from './spacesPort.ts';
+import { SpaceOwnedByDeskError, hashSpaces } from './spaceRules.ts';
+import type { Space, SpacesDirectory } from './spacesPort.ts';
 import {
   handleCreateSpace,
   handleDeleteSpace,
@@ -110,11 +110,12 @@ describe('handleGetSpacesConfig', () => {
     expect(result.body.version).toBe(hashSpaces([]));
   });
 
-  it('publica solo los campos que entran en el hash, nunca las marcas de tiempo', async () => {
+  it('publica solo los campos que entran en el hash, mas kind, nunca las marcas de tiempo', async () => {
     // `createdAt`/`updatedAt` no afectan a la pertenencia, asi que no los
     // necesita nadie del lado del cliente. Y si viajasen, invitarian a que
     // alguien los metiese en su propio calculo de version y divergiese del
-    // servidor (D4).
+    // servidor (D4). `kind` SI viaja aunque no entre en el hash (D8): es
+    // derivado de `deskId`, no un dato propio que pudiese divergir.
     const { deps, spaces } = harness();
     await spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: 8 });
 
@@ -124,12 +125,52 @@ describe('handleGetSpacesConfig', () => {
       'capacity',
       'h',
       'id',
+      'kind',
       'name',
       'slug',
       'w',
       'x',
       'y',
     ]);
+  });
+
+  it('una sala (sin desk_id) reporta kind "room" (#10 + #12)', async () => {
+    const { deps, spaces } = harness();
+    await spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: null });
+
+    const result = await handleGetSpacesConfig(deps);
+
+    expect((result.body.spaces as Record<string, unknown>[])[0].kind).toBe('room');
+  });
+
+  it('un cubiculo de escritorio (con desk_id) reporta kind "desk" (#10 + #12)', async () => {
+    // memorySpaces todavia no sabe crear cubiculos de escritorio (eso llega
+    // en S1b, tarea 2.5): se inyecta un `SpacesDirectory` minimo para probar
+    // solo la traduccion `toConfigBody`, sin esperar a esa slice.
+    const { deps } = harness();
+    const cubiculo: Space = {
+      id: 'id-cubiculo-1',
+      slug: 'desk-id-mesa-1',
+      name: 'Mesa 1',
+      x: 10,
+      y: 10,
+      w: 3,
+      h: 3,
+      capacity: null,
+      deskId: 'id-mesa-1',
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    const spacesConCubiculo: SpacesDirectory = {
+      ...deps.spaces,
+      async listSpaces() {
+        return [cubiculo];
+      },
+    };
+
+    const result = await handleGetSpacesConfig({ ...deps, spaces: spacesConCubiculo });
+
+    expect((result.body.spaces as Record<string, unknown>[])[0].kind).toBe('desk');
   });
 });
 
@@ -374,6 +415,28 @@ describe('handleUpdateSpace', () => {
     expect(result.status).toBe(200);
     expect(result.body.name).toBe('ANTES');
   });
+
+  it('un intento de renombrar o mover un cubiculo de escritorio responde 409 space-owned-by-desk (#10 + #12, tarea 1.4)', async () => {
+    // memorySpaces todavia no sabe crear cubiculos de escritorio (S1b): se
+    // inyecta un `SpacesDirectory` minimo para probar solo la traduccion
+    // HTTP de `SpaceOwnedByDeskError`, sin esperar a esa slice.
+    const { deps, id } = await conEspacio();
+    const spacesDeCubiculo: SpacesDirectory = {
+      ...deps.spaces,
+      async updateSpace() {
+        throw new SpaceOwnedByDeskError('este espacio pertenece a un escritorio');
+      },
+    };
+
+    const result = await handleUpdateSpace(
+      BEARER_ADMIN,
+      id,
+      { name: 'Otro' },
+      { ...deps, spaces: spacesDeCubiculo },
+    );
+
+    expect(result).toEqual({ status: 409, body: { error: 'space-owned-by-desk' } });
+  });
 });
 
 describe('handleDeleteSpace', () => {
@@ -403,5 +466,25 @@ describe('handleDeleteSpace', () => {
     const { deps } = harness();
 
     expect((await handleDeleteSpace(BEARER_ADMIN, 'no-existe', deps)).status).toBe(404);
+  });
+
+  it('un intento de borrar un cubiculo de escritorio responde 409 space-owned-by-desk (#10 + #12, tarea 1.4)', async () => {
+    // Prueba tambien que `handleDeleteSpace` quedo envuelto en `translating`:
+    // antes de la tarea 1.4 este handler dejaba pasar cualquier error de
+    // dominio sin traducir, y aqui reventaria como 500.
+    const { deps } = harness();
+    const spacesDeCubiculo: SpacesDirectory = {
+      ...deps.spaces,
+      async deleteSpace() {
+        throw new SpaceOwnedByDeskError('este espacio pertenece a un escritorio');
+      },
+    };
+
+    const result = await handleDeleteSpace(BEARER_ADMIN, 'id-cubiculo', {
+      ...deps,
+      spaces: spacesDeCubiculo,
+    });
+
+    expect(result).toEqual({ status: 409, body: { error: 'space-owned-by-desk' } });
   });
 });

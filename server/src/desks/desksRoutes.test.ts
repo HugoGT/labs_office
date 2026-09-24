@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest';
 import { createMemoryDecor } from '../decor/memoryDecor.ts';
 import type { DirectoryUser } from '../directory/directoryPort.ts';
 import { createMemoryDirectory } from '../directory/memoryDirectory.ts';
+import { createMemorySpaces } from '../spaces/memorySpaces.ts';
 import type { IdTokenVerifier } from '../verifyIdToken.ts';
 import type { DeskDirectory } from './desksPort.ts';
 import { createMemoryDesks } from './memoryDesks.ts';
@@ -71,22 +72,32 @@ const BEARER_CADUCADO = 'Bearer valido-uid-caducado';
 interface Harness {
   deps: DesksDeps;
   desks: DeskDirectory;
+  spaces: ReturnType<typeof createMemorySpaces>;
 }
 
 /**
  * `seed` se puede sustituir para probar la unica propiedad que el nombre
  * visible NO puede dar: un RENOMBRADO es este mismo directorio devolviendo
  * otro `displayName` para el MISMO `id`.
+ *
+ * `spaces` cablea la afordancia `deskSpaces` de `memorySpaces` (#10 + #12,
+ * S1b, tarea 2.5): sin ella, ningun escritorio sincroniza su cubiculo y el
+ * 409 `desk-space-overlap` nunca podria dispararse en estas pruebas.
  */
-function harness(seed: DirectoryUser[] = [ADMIN, ANA, BRUNO, CADUCADO]): Harness {
+function harness(
+  seed: DirectoryUser[] = [ADMIN, ANA, BRUNO, CADUCADO],
+  roomSeed: Parameters<typeof createMemorySpaces>[0] = {},
+): Harness {
   const directory = createMemoryDirectory({
     now: () => NOW,
     seed,
   });
   const decor = createMemoryDecor({ now: () => NOW });
-  const desks = createMemoryDesks({ now: () => NOW, directory, decor });
+  const spaces = createMemorySpaces({ now: () => NOW, ...roomSeed });
+  const desks = createMemoryDesks({ now: () => NOW, directory, decor, spaces: spaces.deskSpaces });
   return {
     desks,
+    spaces,
     deps: { directory, desks, auth: verifier, now: () => NOW, log: () => {} },
   };
 }
@@ -321,6 +332,33 @@ describe('handleCreateDesk', () => {
     expect(result).toEqual({ status: 409, body: { error: 'desk-overlap' } });
   });
 
+  it('un escritorio que choca con una sala responde 409 desk-space-overlap (#10 + #12, tarea 2.2)', async () => {
+    const { deps, desks } = harness(undefined, {
+      seed: [
+        { id: 'sala-1', slug: 'sala-1', name: 'Sala de Juntas', x: 50, y: 2, w: 13, h: 14, capacity: null },
+      ],
+    });
+
+    const result = await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa', x: 50, y: 2 }, deps);
+
+    expect(result).toEqual({ status: 409, body: { error: 'desk-space-overlap' } });
+    // El rollback de la transaccion (D1) es total: el 409 no deja NINGUN
+    // escritorio a medio crear, ni siquiera uno sin su cubiculo emparejado.
+    expect(await desks.listDesks()).toEqual([]);
+  });
+
+  it('el 409 de sala NO se confunde con el de otro escritorio', async () => {
+    const { deps } = harness(undefined, {
+      seed: [
+        { id: 'sala-1', slug: 'sala-1', name: 'Sala de Juntas', x: 50, y: 2, w: 13, h: 14, capacity: null },
+      ],
+    });
+
+    const contraSala = await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa', x: 50, y: 2 }, deps);
+
+    expect(contraSala.body).not.toEqual({ error: 'desk-overlap' });
+  });
+
   it('un occupantId en el cuerpo NO sienta a nadie: crear no reparte sitios', async () => {
     const { deps } = harness();
 
@@ -393,6 +431,55 @@ describe('handleUpdateDesk', () => {
     );
   });
 
+  it('moverlo encima de una sala responde 409 desk-space-overlap (#10 + #12, tarea 2.2)', async () => {
+    const { deps, desks } = harness(undefined, {
+      seed: [
+        { id: 'sala-1', slug: 'sala-1', name: 'Sala de Juntas', x: 50, y: 2, w: 13, h: 14, capacity: null },
+      ],
+    });
+    const desk = await desks.createDesk({ label: 'Mesa', x: 0, y: 0 });
+
+    const result = await handleUpdateDesk(BEARER_ADMIN, desk.id, { x: 50, y: 2 }, deps);
+
+    expect(result).toEqual({ status: 409, body: { error: 'desk-space-overlap' } });
+    // El rollback de la transaccion (D1) es total: el 409 no mueve el
+    // escritorio ni un poco, se queda exactamente donde estaba.
+    expect(await desks.getDesk(desk.id)).toMatchObject({ x: 0, y: 0 });
+  });
+
+  it('un escritorio que el backfill dejo sin cubiculo se rechaza aunque solo se renombre (tarea 2.4)', async () => {
+    // Simula el escritorio que el backfill de S1a dejo sin cubiculo: `seed` lo
+    // pone directamente en `desks` ya encima de una sala (saltandose
+    // `normalizeCreateDeskInput`/`assertNoOverlap`, igual que hace el
+    // `INSERT ... ON CONFLICT DO NOTHING` del backfill en `schema.sql`), y sin
+    // fila emparejada en `spaces` todavia.
+    const directory = createMemoryDirectory({ now: () => NOW, seed: [ADMIN] });
+    const decor = createMemoryDecor({ now: () => NOW });
+    const spaces = createMemorySpaces({
+      now: () => NOW,
+      seed: [{ id: 'sala-1', slug: 'sala-1', name: 'Sala de Juntas', x: 50, y: 2, w: 13, h: 14, capacity: null }],
+    });
+    const D0 = {
+      id: 'id-d0',
+      label: 'Escritorio atascado',
+      x: 50,
+      y: 2,
+      occupantId: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    const desks = createMemoryDesks({ now: () => NOW, directory, decor, spaces: spaces.deskSpaces, seed: [D0] });
+    const deps: DesksDeps = { directory, desks, auth: verifier, now: () => NOW, log: () => {} };
+
+    // Un renombrado no lo mueve, y sigue chocando: 409 desk-space-overlap.
+    const renombrado = await handleUpdateDesk(BEARER_ADMIN, D0.id, { label: 'Sigue chocando' }, deps);
+    expect(renombrado).toEqual({ status: 409, body: { error: 'desk-space-overlap' } });
+
+    // Moverlo a un sitio libre lo cura: se crea su cubiculo por primera vez.
+    const movido = await handleUpdateDesk(BEARER_ADMIN, D0.id, { x: 90, y: 90 }, deps);
+    expect(movido.status).toBe(200);
+  });
+
   it('un occupantId en el cuerpo NO levanta ni sienta a nadie', async () => {
     // La otra mitad de "quien administra no reparte sitios": ni al crear ni al
     // mover. Lo que no se lee no se puede olvidar de comprobar.
@@ -446,6 +533,27 @@ describe('handleDeleteDesk', () => {
     await handleDeleteDesk(BEARER_ADMIN, desk.id, deps);
 
     expect((await handleClaimDesk(BEARER_ANA, otro.id, deps)).status).toBe(200);
+  });
+
+  /**
+   * S6 (remediacion): `desk-assignment` "Delete a desk deletes its cubicle
+   * space" pide que el cubiculo emparejado se borre CON el escritorio.
+   * `pgDesks.test.ts` ya afirma el lado Postgres (una unica sentencia, sin
+   * tocar `spaces`, apoyada en la cascada de la FK `desk_id`). Este archivo ya
+   * cablea `memorySpaces` de verdad via `spaces: spaces.deskSpaces` (ver
+   * comentario de `harness`) precisamente para poder afirmar lo mismo del
+   * lado en memoria -- que hasta ahora ningun test hacia: `removeDeskSpace`
+   * esta cableado en `memoryDesks.deleteDesk` pero nunca se comprobaba que
+   * `listSpaces()` reflejase la ausencia tras pasar por la ruta HTTP.
+   */
+  it('un admin borra un escritorio: el cubiculo emparejado desaparece de listSpaces (memoria, #10 + #12)', async () => {
+    const { deps, desks, spaces } = harness();
+    const desk = await desks.createDesk({ label: 'Mesa 1', x: 0, y: 0 });
+    expect(await spaces.listSpaces()).toHaveLength(1);
+
+    await handleDeleteDesk(BEARER_ADMIN, desk.id, deps);
+
+    expect(await spaces.listSpaces()).toEqual([]);
   });
 });
 

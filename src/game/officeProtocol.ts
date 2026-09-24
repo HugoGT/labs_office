@@ -18,6 +18,18 @@ export const OFFICE_ROOM_NAME = 'office';
  */
 export const LIVEKIT_ROOM_NAME = 'office-livekit';
 
+/**
+ * Sala LiveKit para un `spaceId` (#10, #12): `null` (fuera de todo espacio) da
+ * el corredor de siempre, sin cambio de comportamiento. Un `spaceId` da una
+ * sala propia, namespaced por prefijo, para que cada cubiculo/sala tenga su
+ * propio LiveKit/Egress compartido y nadie de fuera se cuele por escuchar en
+ * el corredor. La respuesta de `POST /livekit/token` refleja en `room` lo que
+ * esta funcion devuelve: nunca hay que adivinar que sala se emitio.
+ */
+export function livekitRoomFor(spaceId: string | null): string {
+  return spaceId === null ? LIVEKIT_ROOM_NAME : `office-livekit-space-${spaceId}`;
+}
+
 /** Cada cuanto publica el jugador local su posicion (ver `createMoveThrottle`). */
 export const MOVE_INTERVAL_MS = 100;
 

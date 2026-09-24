@@ -477,6 +477,249 @@ describe('POST /livekit/token con auth activa (#8)', () => {
   });
 });
 
+/**
+ * Autorizacion del token contra la posicion trackeada en el servidor (#10,
+ * #12). Threat matrix de la spec `livekit-room-topology`: la unica pregunta
+ * que estas pruebas cierran es "el que pide el token esta REALMENTE donde dice
+ * que esta", y la respuesta a un fallo tiene que ser indistinguible entre "el
+ * espacio no existe", "no estoy dentro" y "el servidor no sabe donde estoy"
+ * (403 `forbidden-space` uniforme, sin oraculo de existencia).
+ *
+ * `moveTo` se llama aqui DIRECTAMENTE sobre `server.sessions` (el registro
+ * real que expone `createOfficeServer`, no un doble) en vez de mandar un
+ * mensaje `move` por Colyseus: la relectura de `OfficeRoom` hacia el registro
+ * es la tarea 6.3, todavia no aplica en este bloque, y sigue siendo el mismo
+ * objeto real que prueba la guarda.
+ */
+describe('POST /livekit/token con spaceId (#10, #12): autorizacion contra la posicion trackeada', () => {
+  async function tokenServerWithSpace() {
+    const spaces = createMemorySpaces();
+    // Rectangulo en tiles (10,10)-(13,13) -> pixeles (320,320)-(416,416).
+    const created = await spaces.createSpace({
+      name: 'Sala de pruebas',
+      x: 10,
+      y: 10,
+      w: 3,
+      h: 3,
+      capacity: null,
+    });
+    const server = createOfficeServer({ spaces });
+    const port = await server.listen(0);
+    process.env.LIVEKIT_API_KEY = 'devkey';
+    process.env.LIVEKIT_API_SECRET = 'un-secreto-suficientemente-largo-para-hs256';
+    return { server, spaceId: created.id, url: `http://localhost:${port}` };
+  }
+
+  async function joinAt(wsUrl: string) {
+    const room = await new Client(wsUrl).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { name: 'Ana' });
+    openRooms.push(room);
+    return room;
+  }
+
+  function postTokenTo(url: string, body: unknown) {
+    return fetch(`${url}/livekit/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it('200 y una sala propia cuando la posicion trackeada esta dentro del espacio reclamado', async () => {
+    const { server, spaceId, url } = await tokenServerWithSpace();
+    const wsUrl = url.replace('http://', 'ws://');
+    const room = await joinAt(wsUrl);
+    server.sessions.moveTo(room.sessionId, 330, 330); // dentro de (320,320)-(416,416)
+
+    const res = await postTokenTo(url, { sessionId: room.sessionId, spaceId });
+
+    expect(res.status).toBe(200);
+    const body = await readBody(res);
+    expect(body.room).toBe(`office-livekit-space-${spaceId}`);
+    expect(body.room).not.toBe(LIVEKIT_ROOM_NAME);
+    expect(typeof body.token).toBe('string');
+    await server.shutdown();
+  });
+
+  it('403 forbidden-space cuando la posicion trackeada esta fuera del espacio reclamado', async () => {
+    const { server, spaceId, url } = await tokenServerWithSpace();
+    const wsUrl = url.replace('http://', 'ws://');
+    const room = await joinAt(wsUrl);
+    server.sessions.moveTo(room.sessionId, 0, 0); // fuera de (320,320)-(416,416)
+
+    const res = await postTokenTo(url, { sessionId: room.sessionId, spaceId });
+
+    expect(res.status).toBe(403);
+    expect(await readBody(res)).toEqual({ error: 'forbidden-space' });
+    await server.shutdown();
+  });
+
+  it('403 forbidden-space, mismo cuerpo, para un spaceId que no existe (sin oraculo)', async () => {
+    const { server, url } = await tokenServerWithSpace();
+    const wsUrl = url.replace('http://', 'ws://');
+    const room = await joinAt(wsUrl);
+    server.sessions.moveTo(room.sessionId, 330, 330); // dentro de la sala real
+
+    const res = await postTokenTo(url, { sessionId: room.sessionId, spaceId: 'jamas-existio' });
+
+    expect(res.status).toBe(403);
+    expect(await readBody(res)).toEqual({ error: 'forbidden-space' });
+    await server.shutdown();
+  });
+
+  it('403 forbidden-space, mismo cuerpo, cuando la sesion aun no tiene posicion trackeada', async () => {
+    const { server, spaceId, url } = await tokenServerWithSpace();
+    const wsUrl = url.replace('http://', 'ws://');
+    const room = await joinAt(wsUrl);
+    // Sin moveTo: la sesion existe pero no tiene `pos` todavia.
+
+    const res = await postTokenTo(url, { sessionId: room.sessionId, spaceId });
+
+    expect(res.status).toBe(403);
+    expect(await readBody(res)).toEqual({ error: 'forbidden-space' });
+    await server.shutdown();
+  });
+
+  it('sin spaceId, la sala corredor no cambia aunque haya espacios configurados', async () => {
+    const { server, url } = await tokenServerWithSpace();
+    const wsUrl = url.replace('http://', 'ws://');
+    const room = await joinAt(wsUrl);
+
+    const res = await postTokenTo(url, { sessionId: room.sessionId });
+
+    expect(res.status).toBe(200);
+    const body = await readBody(res);
+    expect(body.room).toBe(LIVEKIT_ROOM_NAME);
+    await server.shutdown();
+  });
+
+  it('400 invalid-request si spaceId no es texto ni null', async () => {
+    const { server, url } = await tokenServerWithSpace();
+    const wsUrl = url.replace('http://', 'ws://');
+    const room = await joinAt(wsUrl);
+
+    const res = await postTokenTo(url, { sessionId: room.sessionId, spaceId: 42 });
+
+    expect(res.status).toBe(400);
+    expect((await readBody(res)).error).toBe('invalid-request');
+    await server.shutdown();
+  });
+
+  it('con auth activa, forbidden-session gana a forbidden-space aunque ambas guardas fallarian', async () => {
+    const ANA: VerifiedIdentity = { uid: 'uid-ana', email: 'ana@example.com', name: 'Ana' };
+    const BETO: VerifiedIdentity = { uid: 'uid-beto', email: 'beto@example.com', name: 'Beto' };
+    const verifier: IdTokenVerifier = {
+      async verify(token: unknown) {
+        if (token === 'token-de-ana') return ANA;
+        if (token === 'token-de-beto') return BETO;
+        return null;
+      },
+    };
+    const spaces = createMemorySpaces();
+    const created = await spaces.createSpace({
+      name: 'Sala de pruebas',
+      x: 10,
+      y: 10,
+      w: 3,
+      h: 3,
+      capacity: null,
+    });
+    const authServer = createOfficeServer({ auth: verifier, spaces });
+    const port = await authServer.listen(0);
+    const authUrl = `http://localhost:${port}`;
+    const authWsUrl = `ws://localhost:${port}`;
+    process.env.LIVEKIT_API_KEY = 'devkey';
+    process.env.LIVEKIT_API_SECRET = 'un-secreto-suficientemente-largo-para-hs256';
+
+    const ana = await new Client(authWsUrl).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, {
+      token: 'token-de-ana',
+    });
+    openRooms.push(ana);
+    // Ana ni siquiera esta en el espacio: si forbidden-space se comprobase
+    // antes, esta peticion respondería igual de todos modos y la prueba no
+    // demostraria el orden. Lo que la demuestra es que Beto -- que NO es el
+    // dueno de la sesion -- recibe forbidden-session y no forbidden-space.
+
+    const res = await fetch(`${authUrl}/livekit/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId: ana.sessionId, token: 'token-de-beto', spaceId: created.id }),
+    });
+
+    expect(res.status).toBe(403);
+    expect((await readBody(res)).error).toBe('forbidden-session');
+    await authServer.shutdown();
+  });
+
+  it('D5: sin almacen de espacios configurado, un spaceId se ignora y emite el corredor (200)', async () => {
+    // `spaces: null` fuerza el modo sin almacen (igual que `GET /spaces`
+    // respondiendo 503): el estado real de cualquier despliegue sin
+    // `DATABASE_URL`. El cliente no tiene forma de distinguir "no hay
+    // espacios" de "no se comprobo la posicion", asi que la unica opcion
+    // honesta es no rechazar algo que no se puede verificar (D5).
+    const server = createOfficeServer({ spaces: null });
+    const port = await server.listen(0);
+    const url = `http://localhost:${port}`;
+    const wsUrl = `ws://localhost:${port}`;
+    process.env.LIVEKIT_API_KEY = 'devkey';
+    process.env.LIVEKIT_API_SECRET = 'un-secreto-suficientemente-largo-para-hs256';
+    const room = await joinAt(wsUrl);
+
+    const res = await postTokenTo(url, { sessionId: room.sessionId, spaceId: 'cualquiera' });
+
+    expect(res.status).toBe(200);
+    const body = await readBody(res);
+    expect(body.room).toBe(LIVEKIT_ROOM_NAME);
+    await server.shutdown();
+  });
+
+  it('D10: si listSpaces falla, degrada al 503 existente y no emite token', async () => {
+    // Reusa el catch de `/livekit/token` (createOfficeServer.ts) en vez de una
+    // rama de error propia: ese catch ya nunca registra el error crudo, que
+    // podria arrastrar detalle de una consulta fallida a la base de datos.
+    const failingSpaces: SpacesDirectory = {
+      async listSpaces() {
+        throw new Error('fallo de consulta simulado');
+      },
+      async getSpace() {
+        return null;
+      },
+      async createSpace() {
+        throw new Error('no usado en esta prueba');
+      },
+      async updateSpace() {
+        return null;
+      },
+      async deleteSpace() {
+        return false;
+      },
+      async listLayout() {
+        return [];
+      },
+      async replaceLayout() {
+        return [];
+      },
+      async version() {
+        return 'v0';
+      },
+    };
+    const server = createOfficeServer({ spaces: failingSpaces });
+    const port = await server.listen(0);
+    const url = `http://localhost:${port}`;
+    const wsUrl = `ws://localhost:${port}`;
+    process.env.LIVEKIT_API_KEY = 'devkey';
+    process.env.LIVEKIT_API_SECRET = 'un-secreto-suficientemente-largo-para-hs256';
+    const room = await joinAt(wsUrl);
+
+    const res = await postTokenTo(url, { sessionId: room.sessionId, spaceId: 'cualquiera' });
+
+    expect(res.status).toBe(503);
+    const body = await readBody(res);
+    expect(body.error).toBe('livekit-not-configured');
+    expect(body.token).toBeUndefined();
+    await server.shutdown();
+  });
+});
+
 describe('POST /livekit/token con auth desactivada: nada cambia', () => {
   it('REGRESION: un cuerpo sin token sigue dando 200, no 401', async () => {
     // El modo sin auth tiene que seguir siendo byte por byte el de antes de #8:

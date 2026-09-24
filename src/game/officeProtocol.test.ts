@@ -4,9 +4,11 @@ import {
   DEFAULT_STATUS,
   DO_NOT_DISTURB,
   FACINGS,
+  LIVEKIT_ROOM_NAME,
   PRESENCE_STATUSES,
   facingFrom,
   isPresenceStatus,
+  livekitRoomFor,
 } from './officeProtocol';
 
 describe('facingFrom', () => {
@@ -68,5 +70,21 @@ describe('vocabulario de presencia', () => {
     expect(isPresenceStatus(undefined)).toBe(false);
     expect(isPresenceStatus(0)).toBe(false);
     expect(isPresenceStatus({ status: 'g' })).toBe(false);
+  });
+});
+
+describe('livekitRoomFor', () => {
+  it('null (fuera de todo espacio) da la sala corredor compartida', () => {
+    expect(livekitRoomFor(null)).toBe(LIVEKIT_ROOM_NAME);
+    expect(livekitRoomFor(null)).toBe('office-livekit');
+  });
+
+  it('un spaceId da una sala con prefijo propio, distinta del corredor', () => {
+    expect(livekitRoomFor('s1')).toBe('office-livekit-space-s1');
+    expect(livekitRoomFor('s1')).not.toBe(LIVEKIT_ROOM_NAME);
+  });
+
+  it('dos spaceId distintos dan dos salas distintas (namespacing, no una constante)', () => {
+    expect(livekitRoomFor('s1')).not.toBe(livekitRoomFor('s2'));
   });
 });

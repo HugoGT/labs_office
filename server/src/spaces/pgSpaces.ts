@@ -18,6 +18,7 @@ import type {
 import {
   SpaceNameTakenError,
   SpaceOverlapError,
+  SpaceOwnedByDeskError,
   hashSpaces,
   normalizeCreateSpaceInput,
   normalizeUpdateSpaceInput,
@@ -59,7 +60,7 @@ function translatePgError(error: unknown): never {
   throw error;
 }
 
-const SPACE_COLUMNS = 'id, slug, name, x, y, w, h, capacity, created_at, updated_at';
+const SPACE_COLUMNS = 'id, slug, name, x, y, w, h, capacity, desk_id, created_at, updated_at';
 
 function toSpace(row: Record<string, unknown>): Space {
   return {
@@ -71,6 +72,7 @@ function toSpace(row: Record<string, unknown>): Space {
     w: row.w as number,
     h: row.h as number,
     capacity: (row.capacity as number | null) ?? null,
+    deskId: (row.desk_id as string | null) ?? null,
     createdAt: row.created_at as Date,
     updatedAt: row.updated_at as Date,
   };
@@ -179,16 +181,27 @@ export function createPgSpaces(pool: DirectoryPool): SpacesDirectory {
         const result = await pool.query(
           `
             UPDATE spaces SET ${setClause}, updated_at = now()
-            WHERE id = $1
+            WHERE id = $1 AND desk_id IS NULL
             RETURNING ${SPACE_COLUMNS}
           `,
           [id, ...values],
         );
         const row = result.rows[0];
-        return row ? toSpace(row) : null;
+        if (row) return toSpace(row);
+
+        // Cero filas: `desk_id IS NULL` en el WHERE las excluye por dos
+        // motivos distintos, y solo una lectura de mas los separa -- mismo
+        // precedente que `pgDesks.claimDesk`. El id no existe: null, un 404.
+        // El id existe pero es de un escritorio: SpaceOwnedByDeskError, un
+        // 409 (tarea 1.4).
+        const existing = await getSpace(id);
+        if (existing === null) return null;
+        throw new SpaceOwnedByDeskError('este espacio pertenece a un escritorio y no se administra aqui');
       } catch (error) {
         // Renombrar choca con los mismos indices unicos que el alta:
         // `normalizeUpdateSpaceInput` deriva un slug nuevo del nombre nuevo.
+        // `SpaceOwnedByDeskError` no tiene forma de error de Postgres (sin
+        // `.code`), asi que `translatePgError` la relanza tal cual.
         translatePgError(error);
       }
     },
@@ -196,8 +209,17 @@ export function createPgSpaces(pool: DirectoryPool): SpacesDirectory {
     async deleteSpace(id: string) {
       // Un unico DELETE: `space_layouts.space_id ON DELETE CASCADE` en
       // `schema.sql` es quien se lleva el layout, no este adaptador (D1b).
-      const result = await pool.query('DELETE FROM spaces WHERE id = $1', [id]);
-      return (result.rowCount ?? 0) > 0;
+      // `desk_id IS NULL` excluye los cubiculos de escritorio, igual que en
+      // `updateSpace` (tarea 1.4).
+      const result = await pool.query('DELETE FROM spaces WHERE id = $1 AND desk_id IS NULL', [id]);
+      if ((result.rowCount ?? 0) > 0) return true;
+
+      // Cero filas: mismo doble motivo que en `updateSpace`. El id no
+      // existe: false, un 404. El id existe pero es de un escritorio:
+      // SpaceOwnedByDeskError, un 409.
+      const existing = await getSpace(id);
+      if (existing === null) return false;
+      throw new SpaceOwnedByDeskError('este espacio pertenece a un escritorio y no se administra aqui');
     },
 
     async listLayout(spaceId: string) {

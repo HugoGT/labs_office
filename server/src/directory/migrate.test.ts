@@ -11,7 +11,12 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { migrate, readSchemaSql } from './migrate.ts';
+import { migrate, readSchemaSql, reportDesksWithoutSpace } from './migrate.ts';
+
+/** Comparar SQL con saltos de linea y sangria es comparar formato, no contrato. */
+function squash(sql: string): string {
+  return sql.replace(/\s+/g, ' ').trim().toLowerCase();
+}
 
 /**
  * Solo las sentencias: los comentarios del fichero nombran `citext` para
@@ -196,9 +201,11 @@ describe('schema.sql: las cuatro tablas de PRD-7 (#7)', () => {
     expect(schema).not.toContain('create extension');
   });
 
-  it('slug y nombre de un espacio son unicos sin distinguir mayusculas', () => {
+  it('el slug de un espacio es unico sin distinguir mayusculas', () => {
+    // La unicidad de nombre se mueve a un indice parcial acotado a las salas
+    // (ver 'schema.sql: cubiculos de escritorio son espacios' mas abajo): dos
+    // cubiculos pueden compartir el nombre del escritorio que los dueno.
     expect(schema).toContain('unique index if not exists spaces_slug_unique on spaces (lower(slug))');
-    expect(schema).toContain('unique index if not exists spaces_name_unique on spaces (lower(name))');
   });
 
   it('el catalogo de assets acota el tipo y el slug es unico', () => {
@@ -327,5 +334,152 @@ describe('schema.sql: los escritorios asignables (#7, slice 5)', () => {
       schema.indexOf('unique index if not exists user_desk_slot_unique'),
     );
     expect(deskConfigsBlock).not.toContain('desk_id');
+  });
+});
+
+describe('schema.sql: cubiculos de escritorio son espacios (#10 + #12, S1a)', () => {
+  it('anade desk_id como FK unica a desks, con cascada de borrado', () => {
+    // UNIQUE porque un escritorio tiene, como mucho, UN cubiculo emparejado
+    // (D2 del diseno: el upsert de `pgDesks` apunta a `ON CONFLICT (desk_id)`).
+    // CASCADE porque borrar el escritorio se lleva su cubiculo con el.
+    expect(schema).toContain(
+      'alter table spaces add column if not exists desk_id uuid unique references desks(id) on delete cascade',
+    );
+  });
+
+  it('retira el indice de nombre unico sobre la tabla entera', () => {
+    expect(schema).toContain('drop index if exists spaces_name_unique');
+    expect(schema).not.toContain(
+      'create unique index if not exists spaces_name_unique on spaces (lower(name))',
+    );
+  });
+
+  it('el nombre unico ahora solo protege a las salas, no a los cubiculos', () => {
+    // Dos cubiculos pueden compartir el nombre del escritorio que los dueno
+    // (dos personas llamadas "Ana" tendrian dos "Mesa de Ana"); dos salas no.
+    expect(schema).toContain(
+      'create unique index if not exists spaces_room_name_unique on spaces (lower(name)) where desk_id is null',
+    );
+  });
+
+  it('reserva un cubiculo 3x3 para cada escritorio que todavia no tiene uno', () => {
+    expect(schema).toContain('insert into spaces (desk_id, slug, name, x, y, w, h, capacity)');
+    expect(schema).toContain(
+      "select d.id, 'desk-' || d.id::text, d.label, d.x, d.y, 3, 3, null from desks d",
+    );
+    expect(schema).toContain('where not exists (select 1 from spaces s where s.desk_id = d.id)');
+  });
+
+  it('el backfill se salta, sin reventar, un escritorio que solapa una sala', () => {
+    // `ON CONFLICT DO NOTHING` sin target absorbe tambien el choque contra
+    // `spaces_no_overlap`: un escritorio sentado encima de una sala se salta
+    // en vez de tumbar el arranque entero. `reportDesksWithoutSpace` (S1a,
+    // tarea 1.2) es quien avisa de los que se quedan sin cubiculo.
+    const backfillBlock = schema.slice(
+      schema.indexOf('insert into spaces (desk_id'),
+      schema.indexOf('insert into spaces (id, slug, name, x, y, w, h) values'),
+    );
+    expect(backfillBlock).toContain('on conflict do nothing');
+  });
+
+  it('el bloque de desk_id va DESPUES de desks_no_overlap: la FK necesita la tabla desks', () => {
+    expect(schema.indexOf('desks_no_overlap')).toBeLessThan(
+      schema.indexOf('alter table spaces add column if not exists desk_id'),
+    );
+  });
+
+  it('correr el esquema dos veces seguidas no cambia lo que se manda (backfill idempotente)', async () => {
+    const db = recorder();
+
+    await migrate(db);
+    await migrate(db);
+
+    expect(db.texts[0]).toBe(db.texts[1]);
+  });
+});
+
+describe('reportDesksWithoutSpace (#10 + #12, S1a tarea 1.2)', () => {
+  it('consulta los escritorios sin espacio emparejado por desk_id', async () => {
+    const texts: string[] = [];
+    const db = {
+      async query(text: string) {
+        texts.push(text);
+        return { rows: [] };
+      },
+    };
+
+    await reportDesksWithoutSpace(db, () => {});
+
+    expect(squash(texts[0])).toContain('left join spaces s on s.desk_id = d.id');
+    expect(squash(texts[0])).toContain('where s.id is null');
+  });
+
+  it('avisa una vez por cada escritorio que la migracion dejo sin cubiculo', async () => {
+    // El caso real: un escritorio que ya existia y solapa una sala se salta
+    // en el backfill de schema.sql (ON CONFLICT DO NOTHING), y esta es la
+    // unica forma de que alguien se entere.
+    const db = {
+      async query() {
+        return {
+          rows: [{ id: 'id-mesa-1', label: 'Mesa 1', x: 52, y: 3 }],
+        };
+      },
+    };
+    const warnings: string[] = [];
+
+    await reportDesksWithoutSpace(db, (message) => warnings.push(message));
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('[desks] escritorio sin cubiculo (solapa una sala)');
+    expect(warnings[0]).toContain('id-mesa-1');
+  });
+
+  it('avisa una vez POR ESCRITORIO, no una vez en total', async () => {
+    const db = {
+      async query() {
+        return {
+          rows: [
+            { id: 'id-mesa-1', label: 'Mesa 1', x: 52, y: 3 },
+            { id: 'id-mesa-2', label: 'Mesa 2', x: 55, y: 3 },
+          ],
+        };
+      },
+    };
+    const warnings: string[] = [];
+
+    await reportDesksWithoutSpace(db, (message) => warnings.push(message));
+
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0]).toContain('id-mesa-1');
+    expect(warnings[1]).toContain('id-mesa-2');
+  });
+
+  it('sin escritorios huerfanos no avisa nada', async () => {
+    const db = { async query() { return { rows: [] }; } };
+    const warnings: string[] = [];
+
+    await reportDesksWithoutSpace(db, (message) => warnings.push(message));
+
+    expect(warnings).toHaveLength(0);
+  });
+
+  it('sin un warn inyectado, usa console.warn por defecto', async () => {
+    const db = {
+      async query() {
+        return { rows: [{ id: 'id-mesa-1', label: 'Mesa 1', x: 52, y: 3 }] };
+      },
+    };
+    const spy: string[] = [];
+    const original = console.warn;
+    console.warn = (message: string) => spy.push(message);
+
+    try {
+      await reportDesksWithoutSpace(db);
+    } finally {
+      console.warn = original;
+    }
+
+    expect(spy).toHaveLength(1);
+    expect(spy[0]).toContain('[desks] escritorio sin cubiculo');
   });
 });

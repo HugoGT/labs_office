@@ -1,12 +1,16 @@
 import { act, renderHook } from '@testing-library/react';
 import { Room } from 'livekit-client';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AttachableTrack } from '../game/attachableTrack';
 import { createOfficeBridge } from '../game/officeBridge';
 import type { PresenceStatus } from '../game/officeProtocol';
 import type { LivekitConfig } from '../game/livekitEndpoint';
 import type { ConnectLivekitRoomOptions, LivekitRoomConnection } from '../game/livekitRoom';
-import type { LivekitTokenResponse } from '../game/livekitTokenClient';
+import {
+  LivekitTokenError,
+  type LivekitTokenRequest,
+  type LivekitTokenResponse,
+} from '../game/livekitTokenClient';
 import { useProximityAudio } from './useProximityAudio';
 
 const CONFIG: LivekitConfig = { tokenUrl: 'http://localhost:2567/livekit/token', url: null };
@@ -818,5 +822,427 @@ describe('useProximityAudio: el desmontaje no puede realimentar al propio efecto
     });
 
     expect(fetchToken.mock.calls.length).toBeLessThanOrEqual(2);
+  });
+});
+
+describe('useProximityAudio: reconecta al cambiar de espacio (#12, D7, targetRef{sessionId,spaceId})', () => {
+  it('el mismo sessionId con un spaceId nuevo reconecta a una sala nueva y conserva los pares deseados', async () => {
+    const bridge = createOfficeBridge();
+    const connection1 = fakeConnection();
+    const connection2 = fakeConnection();
+    const connect = vi
+      .fn<(opts: ConnectLivekitRoomOptions) => Promise<LivekitRoomConnection>>()
+      .mockResolvedValueOnce(connection1)
+      .mockResolvedValueOnce(connection2);
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    renderHook(() => useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }));
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: null });
+    });
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(connection1.setDesiredAudioPeers).toHaveBeenLastCalledWith(['ana']);
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: 's1' });
+    });
+
+    // Mismo sessionId, spaceId distinto: SI reconecta (D7), a diferencia del
+    // caso de mismo (sessionId, spaceId) ya cubierto arriba en el archivo. La
+    // sala nueva arranca YA con el par deseado ('ana'), sin pasar por un
+    // vacio intermedio: "teardown menos el reset de desiredRef".
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(fetchToken).toHaveBeenLastCalledWith({
+      tokenUrl: CONFIG.tokenUrl,
+      sessionId: 'yo',
+      token: null,
+      spaceId: 's1',
+    });
+    expect(connection1.disconnect).toHaveBeenCalledTimes(1);
+    expect(connection2.setDesiredAudioPeers).toHaveBeenLastCalledWith(['ana']);
+    expect(connection2.setDesiredVideoPeers).toHaveBeenLastCalledWith(['ana']);
+  });
+
+  it('un segundo cambio de espacio mientras el primero sigue en vuelo: la conexion tardia se descarta', async () => {
+    const bridge = createOfficeBridge();
+    const staleConnection = fakeConnection();
+    const connectGateStale = deferred<LivekitRoomConnection>();
+    const finalConnection = fakeConnection();
+    const connect = vi
+      .fn<(opts: ConnectLivekitRoomOptions) => Promise<LivekitRoomConnection>>()
+      .mockImplementationOnce(() => connectGateStale.promise)
+      .mockResolvedValueOnce(finalConnection);
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    renderHook(() => useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }));
+
+    // Primer objetivo ('s1'): su connect() queda en vuelo.
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+    // Segundo objetivo ('s2') antes de que 's1' resuelva.
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's2' });
+    });
+    expect(connect).toHaveBeenCalledTimes(2);
+
+    // La conexion de 's1' resuelve TARDE: el objetivo ya es 's2', asi que se
+    // descarta (se desconecta) en vez de quedar viva.
+    await act(async () => {
+      connectGateStale.resolve(staleConnection);
+    });
+
+    expect(staleConnection.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('flap A->B->A2: la conexion tardia de la A original no pisa la conexion viva de A2 (fuga de conexion)', async () => {
+    const bridge = createOfficeBridge();
+    const connectGateA = deferred<LivekitRoomConnection>();
+    const connectionB = fakeConnection();
+    const connectionA2 = fakeConnection();
+    const staleConnectionA = fakeConnection();
+    const connect = vi
+      .fn<(opts: ConnectLivekitRoomOptions) => Promise<LivekitRoomConnection>>()
+      .mockImplementationOnce(() => connectGateA.promise)
+      .mockResolvedValueOnce(connectionB)
+      .mockResolvedValueOnce(connectionA2);
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+
+    // A original ('s1'): su connect() queda en vuelo.
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+    // B ('s2'): conecta rapido.
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's2' });
+    });
+    expect(connect).toHaveBeenCalledTimes(2);
+    // A2: MISMO valor (sessionId,spaceId) que A original, pero un intento posterior. Conecta rapido.
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+    expect(connect).toHaveBeenCalledTimes(3);
+
+    // La conexion de A original resuelve TARDE, despues de que A2 ya esta viva.
+    // Comparar por VALOR (sessionId,spaceId) confundiria esto con "sigue vigente",
+    // porque A2 tiene el mismo valor que A original -- debe descartarse igual.
+    await act(async () => {
+      connectGateA.resolve(staleConnectionA);
+    });
+
+    expect(staleConnectionA.disconnect).toHaveBeenCalledTimes(1);
+    expect(connectionA2.disconnect).not.toHaveBeenCalled();
+
+    // Una accion del usuario actua sobre la conexion VIVA (A2), nunca sobre la huerfana.
+    await act(async () => {
+      result.current.toggleMic();
+    });
+    expect(connectionA2.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+    expect(staleConnectionA.setMicrophoneEnabled).not.toHaveBeenCalled();
+  });
+});
+
+describe('useProximityAudio: 403 forbidden-space reintenta antes de caer al corredor (#12, diseno sec.6)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('reintenta con las demoras 150/300/600 y luego cae al corredor', async () => {
+    vi.useFakeTimers();
+    const bridge = createOfficeBridge();
+    const corridorConnection = fakeConnection();
+    const connect = vi.fn(async () => corridorConnection);
+    const fetchToken = vi.fn(async (request: LivekitTokenRequest) => {
+      if (request.spaceId) throw new LivekitTokenError(403, 'forbidden-space');
+      return fakeTokenResponse();
+    });
+
+    renderHook(() => useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }));
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+    expect(fetchToken).toHaveBeenCalledTimes(1);
+
+    // Secuencia exacta de las demoras (150/300/600) ya la prueba
+    // `voiceRoomTarget.test.ts`; aqui solo importa que el hook las use: tres
+    // reintentos mas, y sin mas demora que esperar cae al corredor -- 5
+    // llamadas en total dentro de este avance combinado.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150 + 300 + 600);
+    });
+    expect(fetchToken).toHaveBeenCalledTimes(5);
+    expect(fetchToken.mock.calls[4][0]).not.toHaveProperty('spaceId');
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  it('un error que no es forbidden-space (p.ej. 503) no reintenta: degrada de inmediato', async () => {
+    const bridge = createOfficeBridge();
+    const connect = vi.fn();
+    const fetchToken = vi.fn(async () => {
+      throw new LivekitTokenError(503, 'livekit-not-configured');
+    });
+
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+
+    expect(fetchToken).toHaveBeenCalledTimes(1);
+    expect(connect).not.toHaveBeenCalled();
+    expect(result.current.audioAvailable).toBe(false);
+  });
+
+  it('agotados los reintentos, cada 5s reintenta el token del espacio y cambia de sala si tiene exito', async () => {
+    vi.useFakeTimers();
+    const bridge = createOfficeBridge();
+    const corridorConnection = fakeConnection();
+    const spaceConnection = fakeConnection();
+    const connect = vi
+      .fn<(opts: ConnectLivekitRoomOptions) => Promise<LivekitRoomConnection>>()
+      .mockResolvedValueOnce(corridorConnection)
+      .mockResolvedValueOnce(spaceConnection);
+    let spaceRequests = 0;
+    const fetchToken = vi.fn(async (request: LivekitTokenRequest) => {
+      if (request.spaceId) {
+        spaceRequests++;
+        if (spaceRequests <= 4) throw new LivekitTokenError(403, 'forbidden-space');
+        return fakeTokenResponse();
+      }
+      return fakeTokenResponse();
+    });
+
+    renderHook(() => useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }));
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150 + 300 + 600);
+    });
+    // Ya en el corredor tras agotar los reintentos rapidos.
+    expect(connect).toHaveBeenCalledTimes(1);
+
+    // El reintento lento (5s) ahora SI consigue el token del espacio.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(corridorConnection.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('el reintento lento se detiene tras 6 intentos y se queda en el corredor', async () => {
+    vi.useFakeTimers();
+    const bridge = createOfficeBridge();
+    const corridorConnection = fakeConnection();
+    const connect = vi.fn(async () => corridorConnection);
+    const fetchToken = vi.fn(async (request: LivekitTokenRequest) => {
+      if (request.spaceId) throw new LivekitTokenError(403, 'forbidden-space');
+      return fakeTokenResponse();
+    });
+
+    renderHook(() => useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }));
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150 + 300 + 600); // 3 reintentos rapidos + caida al corredor.
+    });
+    const callsAfterFastRetries = fetchToken.mock.calls.length;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6 * 5000); // 6 reintentos lentos, todos fallando.
+    });
+    expect(fetchToken.mock.calls.length).toBe(callsAfterFastRetries + 6);
+
+    // Avanzar mucho mas no debe generar un 7mo reintento: el tope de 6 es real.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10 * 5000);
+    });
+    expect(fetchToken.mock.calls.length).toBe(callsAfterFastRetries + 6);
+    expect(connect).toHaveBeenCalledTimes(1); // sigue en el corredor.
+  });
+
+  it('el reintento lento se detiene si el objetivo cambia antes de que dispare el temporizador de 5s', async () => {
+    vi.useFakeTimers();
+    const bridge = createOfficeBridge();
+    const corridorConnection = fakeConnection();
+    const otherConnection = fakeConnection();
+    const connect = vi
+      .fn<(opts: ConnectLivekitRoomOptions) => Promise<LivekitRoomConnection>>()
+      .mockResolvedValueOnce(corridorConnection)
+      .mockResolvedValueOnce(otherConnection);
+    const fetchToken = vi.fn(async (request: LivekitTokenRequest) => {
+      if (request.spaceId === 's1') throw new LivekitTokenError(403, 'forbidden-space');
+      return fakeTokenResponse();
+    });
+
+    renderHook(() => useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }));
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150 + 300 + 600); // cae al corredor, arranca el reintento lento.
+    });
+    const callsBeforeChange = fetchToken.mock.calls.length;
+
+    // El usuario se mueve a 's2' antes de que el reintento lento de 5s dispare.
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's2' });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    // El reintento lento viejo (para 's1') se abandono: solo la peticion de 's2' se sumo.
+    expect(fetchToken.mock.calls.length).toBe(callsBeforeChange + 1);
+    expect(connect).toHaveBeenCalledTimes(2); // corredor + 's2', nunca un tercer connect() para 's1'.
+  });
+
+  it('si el objetivo cambia durante el reintento rapido, se abandona la cadena vieja sin conectar', async () => {
+    vi.useFakeTimers();
+    const bridge = createOfficeBridge();
+    const finalConnection = fakeConnection();
+    // Solo UNA resolucion configurada: si la cadena vieja ('s1') tambien
+    // llegara a `connect()`, la segunda llamada devolveria `undefined` y
+    // reventaria el `await connect(...)` del hook, fallando el test.
+    const connect = vi
+      .fn<(opts: ConnectLivekitRoomOptions) => Promise<LivekitRoomConnection>>()
+      .mockResolvedValueOnce(finalConnection);
+    const fetchToken = vi.fn(async (request: LivekitTokenRequest) => {
+      if (request.spaceId === 's1') throw new LivekitTokenError(403, 'forbidden-space');
+      return fakeTokenResponse();
+    });
+
+    renderHook(() => useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }));
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+
+    // Mientras el reintento espera, el usuario ya se movio a 's2' (exito directo).
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's2' });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150);
+    });
+
+    // El primer objetivo ('s1') no debe generar una conexion al corredor
+    // colgada: solo la conexion final de 's2' debe existir.
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  it('desmontar durante un reintento rapido o lento en espera no reintenta ni actualiza estado', async () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const bridge = createOfficeBridge();
+    const connect = vi.fn(async () => fakeConnection());
+    const fetchToken = vi.fn(async (request: LivekitTokenRequest) => {
+      if (request.spaceId) throw new LivekitTokenError(403, 'forbidden-space');
+      return fakeTokenResponse();
+    });
+
+    const { unmount } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+    const callsBeforeUnmount = fetchToken.mock.calls.length;
+
+    unmount();
+
+    // El temporizador falso sigue "programado", pero el efecto ya se limpio:
+    // avanzar el tiempo (reintentos rapidos + uno lento) no debe reintentar ni conectar.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150 + 300 + 600 + 5000);
+    });
+
+    expect(fetchToken.mock.calls.length).toBe(callsBeforeUnmount);
+    expect(connect).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+});
+
+describe('useProximityAudio: reaplica microfono/camara tras cada conexion (#12, la sala nueva no arrancaba en silencio)', () => {
+  it('reconectar a un espacio nuevo re-publica el microfono ya encendido, sin que el usuario lo repita', async () => {
+    const bridge = createOfficeBridge();
+    const connection1 = fakeConnection();
+    const connection2 = fakeConnection();
+    const connect = vi
+      .fn<(opts: ConnectLivekitRoomOptions) => Promise<LivekitRoomConnection>>()
+      .mockResolvedValueOnce(connection1)
+      .mockResolvedValueOnce(connection2);
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
+    });
+    await act(async () => {
+      result.current.toggleMic();
+    });
+    expect(result.current.micOn).toBe(true);
+    vi.mocked(connection2.setMicrophoneEnabled).mockClear();
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+
+    // Hoy la sala nueva arrancaba sin publicar nada: esto es lo que el
+    // slice arregla -- el intento de publicar sobrevive a la reconexion.
+    expect(connection2.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it('en "No molestar" el reconnect no re-publica, aunque hubiera microfono encendido antes de entrar', async () => {
+    const bridge = createOfficeBridge();
+    const connection1 = fakeConnection();
+    const connection2 = fakeConnection();
+    const connect = vi
+      .fn<(opts: ConnectLivekitRoomOptions) => Promise<LivekitRoomConnection>>()
+      .mockResolvedValueOnce(connection1)
+      .mockResolvedValueOnce(connection2);
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    const { result, rerender } = renderHook(
+      ({ status }: { status: PresenceStatus }) =>
+        useProximityAudio(bridge, { config: CONFIG, status, connect, fetchToken }),
+      { initialProps: { status: 'g' as PresenceStatus } },
+    );
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
+    });
+    await act(async () => {
+      result.current.toggleMic();
+    });
+    expect(result.current.micOn).toBe(true);
+
+    // Entra en "No molestar": el microfono ya se apaga (comportamiento existente).
+    await act(async () => rerender({ status: 'r' }));
+    expect(result.current.micOn).toBe(false);
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+
+    expect(connection2.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
   });
 });

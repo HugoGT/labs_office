@@ -8,8 +8,15 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { DeskSpaceOverlapError } from '../desks/deskRules.ts';
 import { createMemorySpaces } from './memorySpaces.ts';
-import { InvalidSpaceError, SpaceNameTakenError, SpaceOverlapError, hashSpaces } from './spaceRules.ts';
+import {
+  InvalidSpaceError,
+  SpaceNameTakenError,
+  SpaceOverlapError,
+  SpaceOwnedByDeskError,
+  hashSpaces,
+} from './spaceRules.ts';
 import { BUILT_IN_SEED_SPACES, BUILT_IN_SEED_VERSION } from './builtInSeed.ts';
 
 describe('createMemorySpaces', () => {
@@ -171,5 +178,122 @@ describe('createMemorySpaces', () => {
     await spaces.deleteSpace(created.id);
 
     expect(await spaces.listLayout(created.id)).toEqual([]);
+  });
+
+  it('createSpace NO choca de nombre con un cubiculo de escritorio: el indice parcial solo protege salas (#10 + #12)', async () => {
+    // `spaces_room_name_unique` de `schema.sql` (S1a) es `WHERE desk_id IS
+    // NULL`: solo compara salas entre si. Un escritorio llamado igual que una
+    // sala nueva no tiene por que chocar.
+    const spaces = createMemorySpaces();
+    spaces.deskSpaces.upsertDeskSpace({ id: 'd1', label: 'Sala de Juntas', x: 0, y: 0 });
+
+    const created = await spaces.createSpace({
+      name: 'Sala de Juntas',
+      x: 30,
+      y: 1,
+      w: 4,
+      h: 4,
+      capacity: null,
+    });
+
+    expect(created.name).toBe('Sala de Juntas');
+  });
+
+  it('updateSpace rechaza un cubiculo de escritorio con SpaceOwnedByDeskError, no un 500 (#10 + #12)', async () => {
+    // Mirroring de `pgSpaces.updateSpace` (S1a, pgSpaces.ts:164-208): un
+    // cubiculo NO se administra por esta ruta, solo como efecto secundario del
+    // CRUD de escritorios.
+    const spaces = createMemorySpaces();
+    spaces.deskSpaces.upsertDeskSpace({ id: 'd1', label: 'Mesa 1', x: 0, y: 0 });
+    const [cubiculo] = await spaces.listSpaces();
+
+    await expect(spaces.updateSpace(cubiculo.id, { name: 'Otra cosa' })).rejects.toThrow(
+      SpaceOwnedByDeskError,
+    );
+  });
+
+  it('updateSpace sigue devolviendo null para un id que no existe, y no SpaceOwnedByDeskError', async () => {
+    const spaces = createMemorySpaces();
+
+    expect(await spaces.updateSpace('no-existe', { name: 'X' })).toBeNull();
+  });
+
+  it('deleteSpace rechaza un cubiculo de escritorio con SpaceOwnedByDeskError, no un 500 (#10 + #12)', async () => {
+    const spaces = createMemorySpaces();
+    spaces.deskSpaces.upsertDeskSpace({ id: 'd1', label: 'Mesa 1', x: 0, y: 0 });
+    const [cubiculo] = await spaces.listSpaces();
+
+    await expect(spaces.deleteSpace(cubiculo.id)).rejects.toThrow(SpaceOwnedByDeskError);
+  });
+
+  it('deleteSpace sigue devolviendo false para un id que no existe', async () => {
+    const spaces = createMemorySpaces();
+
+    expect(await spaces.deleteSpace('no-existe')).toBe(false);
+  });
+});
+
+describe('createMemorySpaces: deskSpaces (#10 + #12, tarea 2.5)', () => {
+  it('upsertDeskSpace crea el cubiculo la primera vez: 3x3, sin capacidad, emparejado por deskId', async () => {
+    const spaces = createMemorySpaces();
+
+    spaces.deskSpaces.upsertDeskSpace({ id: 'd1', label: 'Mesa 1', x: 4, y: 6 });
+
+    const [cubiculo] = await spaces.listSpaces();
+    expect(cubiculo).toMatchObject({
+      name: 'Mesa 1',
+      x: 4,
+      y: 6,
+      w: 3,
+      h: 3,
+      capacity: null,
+      deskId: 'd1',
+    });
+  });
+
+  it('upsertDeskSpace MUEVE el mismo cubiculo la segunda vez, no crea uno nuevo', async () => {
+    const spaces = createMemorySpaces();
+    spaces.deskSpaces.upsertDeskSpace({ id: 'd1', label: 'Mesa 1', x: 4, y: 6 });
+    const [primero] = await spaces.listSpaces();
+
+    spaces.deskSpaces.upsertDeskSpace({ id: 'd1', label: 'Mesa 1', x: 8, y: 9 });
+
+    const listado = await spaces.listSpaces();
+    expect(listado).toHaveLength(1);
+    expect(listado[0]).toMatchObject({ id: primero.id, x: 8, y: 9 });
+  });
+
+  it('assertDeskFits rechaza con DeskSpaceOverlapError si el area 3x3 choca con una sala', async () => {
+    const spaces = createMemorySpaces({
+      seed: [{ id: 'sala-1', slug: 'sala-1', name: 'Sala de Juntas', x: 50, y: 2, w: 13, h: 14, capacity: null }],
+    });
+
+    expect(() => spaces.deskSpaces.assertDeskFits({ id: 'd1', x: 50, y: 2 })).toThrow(
+      DeskSpaceOverlapError,
+    );
+  });
+
+  it('assertDeskFits NO cuenta el cubiculo del propio escritorio: moverse dentro de su propia area es legal', async () => {
+    // Mismo argumento que `assertNoOverlap`/`exceptId`: el rectangulo viejo
+    // deja de existir en el mismo movimiento.
+    const spaces = createMemorySpaces();
+    spaces.deskSpaces.upsertDeskSpace({ id: 'd1', label: 'Mesa 1', x: 4, y: 6 });
+
+    expect(() => spaces.deskSpaces.assertDeskFits({ id: 'd1', x: 5, y: 6 })).not.toThrow();
+  });
+
+  it('removeDeskSpace borra el cubiculo emparejado', async () => {
+    const spaces = createMemorySpaces();
+    spaces.deskSpaces.upsertDeskSpace({ id: 'd1', label: 'Mesa 1', x: 4, y: 6 });
+
+    spaces.deskSpaces.removeDeskSpace('d1');
+
+    expect(await spaces.listSpaces()).toEqual([]);
+  });
+
+  it('removeDeskSpace sin cubiculo emparejado no es un error: idempotente, como releaseDesk', async () => {
+    const spaces = createMemorySpaces();
+
+    expect(() => spaces.deskSpaces.removeDeskSpace('no-existe')).not.toThrow();
   });
 });

@@ -30,7 +30,14 @@ import type {
   OfficeDesk,
   UpdateDeskInput,
 } from './desksPort.ts';
-import { DeskOverlapError, DeskTakenError, normalizeCreateDeskInput, normalizeUpdateDeskInput } from './deskRules.ts';
+import {
+  DESK_SIDE,
+  DeskOverlapError,
+  DeskSpaceOverlapError,
+  DeskTakenError,
+  normalizeCreateDeskInput,
+  normalizeUpdateDeskInput,
+} from './deskRules.ts';
 import type { DeskItem } from '../decor/decorPort.ts';
 import type { DirectoryPool, DirectoryQueryable } from '../directory/pgDirectory.ts';
 
@@ -124,6 +131,44 @@ export function createPgDesks(pool: DirectoryPool): DeskDirectory {
     return row ? toDesk(row) : null;
   }
 
+  /**
+   * El cubiculo emparejado con `desk` (D1, D2): un UPSERT sobre `desk_id`, que
+   * crea la fila la primera vez y la mueve/renombra las siguientes. La MISMA
+   * sentencia sana un escritorio que el backfill de S1a dejo sin cubiculo
+   * (tarea 2.4) -- sin fila previa que conflictue por `desk_id`, es
+   * sencillamente un INSERT nuevo.
+   *
+   * `w`/`h`/`capacity` no vienen de `desk`: un cubiculo es SIEMPRE
+   * `DESK_SIDE` x `DESK_SIDE` y sin limite de capacidad, igual que
+   * `toDeskBody` en `desksRoutes.ts` los deriva y no los guarda.
+   *
+   * Se llama SIEMPRE dentro de la transaccion de `createDesk`/`updateDesk`, y
+   * nunca sola: si `spaces_no_overlap` salta aqui, el ROLLBACK se lleva
+   * tambien el escritorio que se acababa de escribir (D2).
+   */
+  async function syncDeskSpace(client: DirectoryQueryable, desk: Desk): Promise<void> {
+    try {
+      await client.query(
+        `
+          INSERT INTO spaces (desk_id, slug, name, x, y, w, h, capacity)
+          VALUES ($1, $2, $3, $4, $5, $6, $6, NULL)
+          ON CONFLICT (desk_id) DO UPDATE SET
+            name = EXCLUDED.name, x = EXCLUDED.x, y = EXCLUDED.y, updated_at = now()
+        `,
+        [desk.id, `desk-${desk.id}`, desk.label, desk.x, desk.y, DESK_SIDE],
+      );
+    } catch (error) {
+      // `spaces_no_overlap` es la garantia real (aplica a TODAS las filas de
+      // `spaces`, salas y cubiculos por igual); esto solo la traduce a un
+      // error de dominio DISTINTO del que dispara `desks_no_overlap` (D3): la
+      // sentencia que fallo es la que decide cual de los dos 409 es.
+      if (isExclusionViolation(error)) {
+        throw new DeskSpaceOverlapError('el escritorio solicitado se solapa con una sala existente');
+      }
+      throw error;
+    }
+  }
+
   return {
     async listDesks() {
       const result = await pool.query(`SELECT ${DESK_COLUMNS} FROM desks ORDER BY x, y, id`);
@@ -176,26 +221,34 @@ export function createPgDesks(pool: DirectoryPool): DeskDirectory {
       // una posicion mal escrita no debe costar una consulta.
       const normalized = normalizeCreateDeskInput(input);
 
-      try {
-        const result = await pool.query(
-          `
-            INSERT INTO desks (label, x, y)
-            VALUES ($1, $2, $3)
-            RETURNING ${DESK_COLUMNS}
-          `,
-          [normalized.label, normalized.x, normalized.y],
-        );
-        // `occupant_id` no se inserta: el DEFAULT es NULL y un escritorio nace
-        // libre. Quien se sienta lo decide esa persona, no quien lo crea.
-        return toDesk(result.rows[0]);
-      } catch (error) {
-        // `desks_no_overlap` es la garantia real; esto solo traduce su fallo a
-        // un error de dominio en vez de un 500 pelado.
-        if (isExclusionViolation(error)) {
-          throw new DeskOverlapError('el escritorio solicitado se solapa con otro existente');
+      // Dentro de una transaccion (D1): el escritorio y su cubiculo se
+      // escriben juntos o ninguno de los dos queda en pie (tarea 2.1, 2.2).
+      return inTransaction(async (client) => {
+        let desk: Desk;
+        try {
+          const result = await client.query(
+            `
+              INSERT INTO desks (label, x, y)
+              VALUES ($1, $2, $3)
+              RETURNING ${DESK_COLUMNS}
+            `,
+            [normalized.label, normalized.x, normalized.y],
+          );
+          // `occupant_id` no se inserta: el DEFAULT es NULL y un escritorio
+          // nace libre. Quien se sienta lo decide esa persona, no quien lo crea.
+          desk = toDesk(result.rows[0]);
+        } catch (error) {
+          // `desks_no_overlap` es la garantia real; esto solo traduce su fallo
+          // a un error de dominio en vez de un 500 pelado.
+          if (isExclusionViolation(error)) {
+            throw new DeskOverlapError('el escritorio solicitado se solapa con otro existente');
+          }
+          throw error;
         }
-        throw error;
-      }
+
+        await syncDeskSpace(client, desk);
+        return desk;
+      });
     },
 
     async updateDesk(id: string, input: UpdateDeskInput) {
@@ -204,7 +257,9 @@ export function createPgDesks(pool: DirectoryPool): DeskDirectory {
 
       if (Object.keys(patch).length === 0) {
         // Un patch vacio no tiene nada que cambiar: relee en vez de mandar un
-        // UPDATE cuyo unico efecto seria pisar `updated_at` sin motivo.
+        // UPDATE cuyo unico efecto seria pisar `updated_at` sin motivo, y sin
+        // abrir ninguna transaccion -- nada cambio, asi que el cubiculo
+        // tampoco tiene nada que resincronizar.
         return getDesk(id);
       }
 
@@ -215,23 +270,37 @@ export function createPgDesks(pool: DirectoryPool): DeskDirectory {
       const setClause = fields.map((field, index) => `${field} = $${index + 2}`).join(', ');
       const values = fields.map((field) => patch[field]);
 
-      try {
-        const result = await pool.query(
-          `
-            UPDATE desks SET ${setClause}, updated_at = now()
-            WHERE id = $1
-            RETURNING ${DESK_COLUMNS}
-          `,
-          [id, ...values],
-        );
-        const row = result.rows[0];
-        return row ? toDesk(row) : null;
-      } catch (error) {
-        if (isExclusionViolation(error)) {
-          throw new DeskOverlapError('el escritorio solicitado se solapa con otro existente');
+      // Igual que `createDesk`: cualquier escritura no vacia resincroniza el
+      // cubiculo, no solo un movimiento (tarea 2.3). Es lo que autosana un
+      // escritorio que el backfill dejo sin cubiculo en cuanto deja de chocar
+      // (tarea 2.4): el UPSERT de `syncDeskSpace` no distingue "ya tenia uno"
+      // de "nunca llego a tener uno".
+      return inTransaction(async (client) => {
+        let desk: Desk | null;
+        try {
+          const result = await client.query(
+            `
+              UPDATE desks SET ${setClause}, updated_at = now()
+              WHERE id = $1
+              RETURNING ${DESK_COLUMNS}
+            `,
+            [id, ...values],
+          );
+          const row = result.rows[0];
+          desk = row ? toDesk(row) : null;
+        } catch (error) {
+          if (isExclusionViolation(error)) {
+            throw new DeskOverlapError('el escritorio solicitado se solapa con otro existente');
+          }
+          throw error;
         }
-        throw error;
-      }
+
+        // Ese id no existe: nada que sincronizar, y el 404 lo decide la ruta.
+        if (desk === null) return null;
+
+        await syncDeskSpace(client, desk);
+        return desk;
+      });
     },
 
     async deleteDesk(id: string) {
@@ -239,6 +308,10 @@ export function createPgDesks(pool: DirectoryPool): DeskDirectory {
       // `deleteSpace`). La ocupacion se va con la fila: quien estuviese
       // sentado se queda sin sitio, que es lo correcto -- el escritorio ya no
       // existe -- y puede coger otro sin chocar con `desks_single_occupant`.
+      //
+      // El cubiculo emparejado NO se borra aqui: `spaces.desk_id ... ON DELETE
+      // CASCADE` (schema.sql, S1a) ya se lo lleva. Un DELETE aparte duplicaria
+      // lo que la base de datos garantiza sola (tarea 2.3).
       const result = await pool.query('DELETE FROM desks WHERE id = $1', [id]);
       return (result.rowCount ?? 0) > 0;
     },
