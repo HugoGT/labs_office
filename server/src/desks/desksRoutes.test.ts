@@ -72,6 +72,7 @@ const BEARER_CADUCADO = 'Bearer valido-uid-caducado';
 interface Harness {
   deps: DesksDeps;
   desks: DeskDirectory;
+  spaces: ReturnType<typeof createMemorySpaces>;
 }
 
 /**
@@ -96,6 +97,7 @@ function harness(
   const desks = createMemoryDesks({ now: () => NOW, directory, decor, spaces: spaces.deskSpaces });
   return {
     desks,
+    spaces,
     deps: { directory, desks, auth: verifier, now: () => NOW, log: () => {} },
   };
 }
@@ -531,6 +533,27 @@ describe('handleDeleteDesk', () => {
     await handleDeleteDesk(BEARER_ADMIN, desk.id, deps);
 
     expect((await handleClaimDesk(BEARER_ANA, otro.id, deps)).status).toBe(200);
+  });
+
+  /**
+   * S6 (remediacion): `desk-assignment` "Delete a desk deletes its cubicle
+   * space" pide que el cubiculo emparejado se borre CON el escritorio.
+   * `pgDesks.test.ts` ya afirma el lado Postgres (una unica sentencia, sin
+   * tocar `spaces`, apoyada en la cascada de la FK `desk_id`). Este archivo ya
+   * cablea `memorySpaces` de verdad via `spaces: spaces.deskSpaces` (ver
+   * comentario de `harness`) precisamente para poder afirmar lo mismo del
+   * lado en memoria -- que hasta ahora ningun test hacia: `removeDeskSpace`
+   * esta cableado en `memoryDesks.deleteDesk` pero nunca se comprobaba que
+   * `listSpaces()` reflejase la ausencia tras pasar por la ruta HTTP.
+   */
+  it('un admin borra un escritorio: el cubiculo emparejado desaparece de listSpaces (memoria, #10 + #12)', async () => {
+    const { deps, desks, spaces } = harness();
+    const desk = await desks.createDesk({ label: 'Mesa 1', x: 0, y: 0 });
+    expect(await spaces.listSpaces()).toHaveLength(1);
+
+    await handleDeleteDesk(BEARER_ADMIN, desk.id, deps);
+
+    expect(await spaces.listSpaces()).toEqual([]);
   });
 });
 
