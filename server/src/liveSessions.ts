@@ -16,7 +16,24 @@
  * `uidOf` devuelve `undefined`. En ese modo el registro vuelve a demostrar solo
  * que el sessionId esta conectado ahora; ver `livekitToken.ts` para el limite
  * exacto que queda abierto incluso con auth activa.
+ *
+ * Desde #10/#12 guarda tambien DONDE esta cada sesion: la ultima posicion en
+ * pixeles que `OfficeRoom` acepto (tras el `clamp` del manejador de `move`, o
+ * la de spawn en `onJoin`). Es lo que permite a `POST /livekit/token` verificar
+ * que quien pide un token de un espacio esta REALMENTE dentro de el, en vez de
+ * confiar en el `spaceId` que manda el cliente (ver `spaceMembership.ts`).
  */
+
+export interface SessionPosition {
+  x: number;
+  y: number;
+}
+
+/** Valor interno por sesion: dueno opcional + posicion opcional, nunca dos mapas. */
+interface SessionEntry {
+  uid?: string;
+  pos?: SessionPosition;
+}
 
 export interface LiveSessionRegistry {
   add(id: string, uid?: string): void;
@@ -24,18 +41,27 @@ export interface LiveSessionRegistry {
   has(id: string): boolean;
   /** uid del dueno, o `undefined` si la sesion no existe o entro sin auth. */
   uidOf(id: string): string | undefined;
+  /**
+   * Fija la posicion vigente de una sesion. No-op sobre un id desconocido: un
+   * `move` tardio de una sesion que ya se fue no debe resucitarla en el
+   * registro (D4).
+   */
+  moveTo(id: string, x: number, y: number): void;
+  /** Ultima posicion conocida, o `undefined` si la sesion no existe o aun no se ha movido. */
+  positionOf(id: string): SessionPosition | undefined;
   size(): number;
 }
 
 export function createLiveSessionRegistry(): LiveSessionRegistry {
-  // Un solo Map en vez de Set + Map: dos estructuras podrian desincronizarse y
-  // dejar un uid huerfano apuntando a una sesion ya cerrada. `undefined` como
-  // valor significa "presente, sin dueno", que es el modo sin auth.
-  const sessions = new Map<string, string | undefined>();
+  // Un solo Map en vez de uno por campo: dos estructuras podrian
+  // desincronizarse y dejar un uid o una posicion huerfanos apuntando a una
+  // sesion ya cerrada. Cada entrada es su propio objeto para poder mutar la
+  // posicion sin reconstruir el uid, que casi nunca cambia.
+  const sessions = new Map<string, SessionEntry>();
 
   return {
     add(id, uid) {
-      sessions.set(id, uid);
+      sessions.set(id, { uid });
     },
     remove(id) {
       sessions.delete(id);
@@ -44,7 +70,15 @@ export function createLiveSessionRegistry(): LiveSessionRegistry {
       return sessions.has(id);
     },
     uidOf(id) {
-      return sessions.get(id);
+      return sessions.get(id)?.uid;
+    },
+    moveTo(id, x, y) {
+      const entry = sessions.get(id);
+      if (!entry) return;
+      entry.pos = { x, y };
+    },
+    positionOf(id) {
+      return sessions.get(id)?.pos;
     },
     size() {
       return sessions.size;

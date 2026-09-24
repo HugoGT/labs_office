@@ -8,6 +8,7 @@ import {
   type LivekitRoomConnection,
 } from '../game/livekitRoom';
 import {
+  LivekitTokenError,
   fetchLivekitToken,
   type LivekitTokenRequest,
   type LivekitTokenResponse,
@@ -15,6 +16,22 @@ import {
 import type { OfficeBridge } from '../game/officeBridge';
 import { DO_NOT_DISTURB, type PresenceStatus } from '../game/officeProtocol';
 import { videoPeers } from '../game/proximityVideo';
+import {
+  MAX_SLOW_RETRIES,
+  SLOW_RETRY_MS,
+  decideVoiceTransition,
+  tokenRetryDelay,
+  type VoiceTarget,
+} from '../game/voiceRoomTarget';
+
+/** Espera real (no cancelable por si sola): quien llama vuelve a comprobar el objetivo al despertar. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isForbiddenSpace(err: unknown): boolean {
+  return err instanceof LivekitTokenError && err.status === 403 && err.code === 'forbidden-space';
+}
 
 /**
  * Conduce la sala de LiveKit a partir del evento `voice` del puente (D3).
@@ -86,8 +103,24 @@ export function useProximityAudio(
   const [speakers, setSpeakers] = useState<ReadonlySet<string>>(new Set());
   const [localVideoTrack, setLocalVideoTrack] = useState<AttachableTrack | null>(null);
   const connectionRef = useRef<LivekitRoomConnection | null>(null);
-  /** Sesion actualmente conectada o en vuelo de conexion; evita reconectar por cada tick. */
-  const sessionRef = useRef<string | null>(null);
+  /** Objetivo (sessionId, spaceId) conectado o en vuelo (#12, D7): reemplaza al `sessionRef` de solo-sesion, porque un cambio de espacio con la MISMA sesion tambien exige sala nueva. */
+  const targetRef = useRef<VoiceTarget | null>(null);
+  /**
+   * Numero de intento de reconexion, incrementado en CADA `handleReconnect`
+   * y en `teardown` (correccion S5 validator, hallazgo #1). `targetRef`
+   * compara por VALOR: un flap A->B->A2 deja a A2 con el MISMO
+   * (sessionId,spaceId) que la A original, asi que la continuacion tardia de
+   * A original superaria `sameTarget` aunque ya no sea el intento vigente.
+   * La generacion identifica el intento en si, no su valor, y es la unica
+   * comprobacion de vigencia correcta dentro de una continuacion async.
+   */
+  const generationRef = useRef(0);
+  /** Temporizador del reintento lento (D-sec.6) en vuelo; se cancela al empezar otro reconnect o al desmontar. */
+  const slowRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Espejo por-ref de `micOn`/`camOn`/`dnd` (#12): el efecto de conexion no depende de `status` ni de la publicacion, asi que una reconexion tardia necesita el valor FRESCO, no el capturado por el closure. */
+  const micOnRef = useRef(false);
+  const camOnRef = useRef(false);
+  const dndRef = useRef(false);
   /**
    * Ultimo conjunto deseado conocido (obs #570, D1): el recien llegado recibe
    * su primer `voice` con `peers: []` (Colyseus aun no sincronizo), asi que
@@ -102,10 +135,37 @@ export function useProximityAudio(
   useEffect(() => {
     let cancelled = false;
 
+    function clearSlowRetry(): void {
+      if (slowRetryTimerRef.current !== null) {
+        clearTimeout(slowRetryTimerRef.current);
+        slowRetryTimerRef.current = null;
+      }
+    }
+
+    /** Reaplica el microfono/camara deseados tras CUALQUIER conexion nueva (#12): sin esto, una sala recien conectada arranca sin publicar nada aunque el usuario ya lo hubiera encendido en la sala anterior. */
+    function reapplyPublishIntent(connection: LivekitRoomConnection): void {
+      if (dndRef.current) return;
+      if (micOnRef.current) void connection.setMicrophoneEnabled(true);
+      if (camOnRef.current) void connection.setCameraEnabled(true);
+    }
+
+    function applyDesired(connection: LivekitRoomConnection): void {
+      const desired = desiredRef.current;
+      connection.setDesiredAudioPeers(desired?.sessionIds ?? []);
+      connection.setDesiredVideoPeers(
+        videoPeers({ spaceId: desired?.spaceId ?? null, audibleSessionIds: desired?.sessionIds ?? [] }),
+      );
+    }
+
     async function teardown(): Promise<void> {
+      // Invalida cualquier reconnect/retry en vuelo (generacion, hallazgo #1):
+      // sin esto, una continuacion tardia con el mismo VALOR de objetivo que
+      // uno posterior podria resucitar una conexion despues del teardown.
+      generationRef.current += 1;
+      clearSlowRetry();
       const connection = connectionRef.current;
       connectionRef.current = null;
-      sessionRef.current = null;
+      targetRef.current = null;
       // Antes del `await` de mas abajo (D1): si se pusiera despues, una
       // sesion nueva que ya escribio la suya mientras este disconnect todavia
       // estaba en vuelo se veria borrada por este reset tardio.
@@ -125,24 +185,193 @@ export function useProximityAudio(
       if (connection) await connection.disconnect();
     }
 
+    /** Callbacks de `connect()` atados a `generation`: un aviso tardio de un intento ya reemplazado no debe corromper el estado actual (D6 de #18; generacion, no VALOR, hallazgo #1). */
+    function connectOptionsFor(
+      generation: number,
+      tokenResponse: LivekitTokenResponse,
+    ): ConnectLivekitRoomOptions {
+      const isCurrent = () => generationRef.current === generation;
+      return {
+        url: config?.url ?? tokenResponse.url,
+        token: tokenResponse.token,
+        onAudioPlaybackChanged: (canPlayback) => {
+          if (!isCurrent()) return;
+          setAudioBlocked(!canPlayback);
+        },
+        onVideoTrackSubscribed: (sessionId, track) => {
+          if (!isCurrent()) return;
+          setVideoTracks((current) => new Map(current).set(sessionId, track));
+        },
+        onVideoTrackUnsubscribed: (sessionId) => {
+          if (!isCurrent()) return;
+          setVideoTracks((current) => {
+            if (!current.has(sessionId)) return current;
+            const next = new Map(current);
+            next.delete(sessionId);
+            return next;
+          });
+        },
+        onLocalVideoTrackChanged: (track) => {
+          if (!isCurrent()) return;
+          setLocalVideoTrack(track);
+        },
+        onActiveSpeakersChanged: (identities) => {
+          if (!isCurrent()) return;
+          setSpeakers(new Set(identities));
+        },
+      };
+    }
+
+    /** Pide un token fresco para `target`, con `spaceId` sustituido por `forSpaceId` (D5: `null` pide el corredor). */
+    async function requestToken(
+      target: VoiceTarget,
+      forSpaceId: string | null,
+    ): Promise<LivekitTokenResponse> {
+      if (config === null) throw new Error('LiveKit no configurado (D6)');
+      // Se pide en cada conexion y no una vez al entrar: el ID token dura
+      // mas o menos una hora y esta ruta puede correr mucho despues.
+      const idToken = session ? await session.getIdToken() : null;
+      // `spaceId` se omite entero para el corredor (`forSpaceId === null`),
+      // igual que `fetchLivekitToken` omite `token` sin sesion: la ausencia
+      // es la peticion de modo abierto, no un valor `null` a validar.
+      return fetchToken(
+        forSpaceId === null
+          ? { tokenUrl: config.tokenUrl, sessionId: target.sessionId, token: idToken }
+          : { tokenUrl: config.tokenUrl, sessionId: target.sessionId, token: idToken, spaceId: forSpaceId },
+      );
+    }
+
+    /** Consigue el token para `target` (diseno sec.6): un 403 `forbidden-space` reintenta con `tokenRetryDelay`; agotado, cae al corredor. Otro error, o `generation` quedando obsoleta en la espera, aborta sin corredor -- lo resuelve el reconnect del intento nuevo. */
+    async function acquireToken(
+      target: VoiceTarget,
+      generation: number,
+    ): Promise<{ response: LivekitTokenResponse; corridor: boolean } | null> {
+      if (target.spaceId !== null) {
+        let attempt = 0;
+        for (;;) {
+          try {
+            const response = await requestToken(target, target.spaceId);
+            return { response, corridor: false };
+          } catch (err) {
+            if (!isForbiddenSpace(err)) return null;
+            const delay = tokenRetryDelay(attempt);
+            if (delay === null) break; // reintentos rapidos agotados: cae al corredor abajo
+            await sleep(delay);
+            if (cancelled || generationRef.current !== generation) return null;
+            attempt++;
+          }
+        }
+      }
+      try {
+        const response = await requestToken(target, null);
+        return { response, corridor: target.spaceId !== null };
+      } catch {
+        return null;
+      }
+    }
+
+    /** Reintento lento (diseno sec.6): cada `SLOW_RETRY_MS` reintenta el token del espacio mientras `generation` siga vigente, hasta `MAX_SLOW_RETRIES` veces. `connectionRef` no se toca hasta reconfirmar `generation` justo antes de asignar la conexion nueva, para no pisar un `handleReconnect` real concurrente (generacion, no VALOR, hallazgo #1). */
+    function scheduleSlowRetry(target: VoiceTarget, generation: number, attempt: number): void {
+      if (attempt >= MAX_SLOW_RETRIES) return;
+      slowRetryTimerRef.current = setTimeout(() => {
+        slowRetryTimerRef.current = null;
+        void (async () => {
+          if (cancelled || generationRef.current !== generation || target.spaceId === null) return;
+          try {
+            const response = await requestToken(target, target.spaceId);
+            if (cancelled || generationRef.current !== generation) return;
+            const connection = await connect(connectOptionsFor(generation, response));
+            if (cancelled || generationRef.current !== generation) {
+              void connection.disconnect();
+              return;
+            }
+            // `generation` sigue vigente: `connectionRef.current` sigue
+            // siendo la sala del corredor que este reintento arranco.
+            const oldConnection = connectionRef.current;
+            connectionRef.current = connection;
+            setAudioAvailable(true);
+            reapplyPublishIntent(connection);
+            applyDesired(connection);
+            if (oldConnection) void oldConnection.disconnect();
+          } catch {
+            scheduleSlowRetry(target, generation, attempt + 1);
+          }
+        })();
+      }, SLOW_RETRY_MS);
+    }
+
+    function handleReconnect(target: VoiceTarget): void {
+      clearSlowRetry();
+      // Generacion propia de ESTE intento (hallazgo #1): `target` compara por
+      // VALOR y un flap A->B->A2 deja a A2 con el mismo (sessionId,spaceId)
+      // que una A anterior todavia en vuelo, asi que solo un numero de
+      // intento estrictamente creciente distingue "vigente" de "superado".
+      generationRef.current += 1;
+      const generation = generationRef.current;
+      targetRef.current = target;
+      const oldConnection = connectionRef.current;
+      connectionRef.current = null;
+      // Arranca el disconnect viejo SIN esperarlo, solapado con el token nuevo (D7); se espera justo antes de `connect()`.
+      const disconnecting = oldConnection ? oldConnection.disconnect() : Promise.resolve();
+
+      void (async () => {
+        const acquired = await acquireToken(target, generation);
+        await disconnecting;
+
+        if (cancelled || generationRef.current !== generation) return;
+
+        if (acquired === null) {
+          // Degrada a sin audio, nunca lanza, nunca reintenta solo (ver el catch de mas abajo).
+          setAudioAvailable(false);
+          return;
+        }
+
+        try {
+          const connection = await connect(connectOptionsFor(generation, acquired.response));
+
+          // Otro intento pudo superar a este (o el hook desmontarse) en el `await`: una conexion tardia quedaria huerfana y con audio filtrado.
+          if (cancelled || generationRef.current !== generation) {
+            void connection.disconnect();
+            return;
+          }
+
+          // Defensa igual que en `scheduleSlowRetry` (hallazgo #1): nunca
+          // pisar `connectionRef.current` sin desconectar lo que hubiera
+          // antes, aunque por construccion no deberia haber nada vivo aqui.
+          const stale = connectionRef.current;
+          connectionRef.current = connection;
+          if (stale) void stale.disconnect();
+          setAudioAvailable(true);
+          reapplyPublishIntent(connection);
+          applyDesired(connection); // D1: lo ultimo conocido, no la instantanea capturada al arrancar.
+
+          // Se pidio el espacio pero se conecto al corredor (reintentos rapidos agotados, D5): sigue intentando cada 5s.
+          if (acquired.corridor) scheduleSlowRetry(target, generation, 0);
+        } catch {
+          if (generationRef.current === generation) setAudioAvailable(false);
+        }
+      })();
+    }
+
     const unsubscribe = bridge.on('voice', (payload) => {
+      // D6: sin configuracion nunca se intenta LiveKit, ni para decidir teardown/forward/reconnect.
       if (payload.selfSessionId === null) {
         void teardown();
         return;
       }
-
-      // D6: sin configuracion (Colyseus abajo) nunca se intenta LiveKit.
       if (config === null) return;
 
       const audibleSessionIds = payload.peers.map((peer) => peer.sessionId);
-
-      // Se guarda ANTES de la rama de abajo (D1): sirve tanto para la
-      // conexion ya viva (rama "misma sesion") como para la que sigue en
-      // vuelo -- un solo punto de escritura para las dos rutas.
+      // Se guarda ANTES de la rama de abajo (D1): sirve tanto a la conexion viva como a la que sigue en vuelo.
       desiredRef.current = { sessionIds: audibleSessionIds, spaceId: payload.spaceId };
 
-      if (sessionRef.current === payload.selfSessionId) {
-        // Misma sesion: solo reenvia los conjuntos deseados, no reconecta.
+      const transition = decideVoiceTransition(targetRef.current, {
+        sessionId: payload.selfSessionId,
+        spaceId: payload.spaceId,
+      });
+
+      if (transition === 'forward') {
+        // Mismo objetivo (sessionId, spaceId): solo reenvia los conjuntos deseados, no reconecta.
         connectionRef.current?.setDesiredAudioPeers(audibleSessionIds);
         connectionRef.current?.setDesiredVideoPeers(
           videoPeers({ spaceId: payload.spaceId, audibleSessionIds }),
@@ -150,93 +379,23 @@ export function useProximityAudio(
         return;
       }
 
-      const pendingSessionId = payload.selfSessionId;
-      sessionRef.current = pendingSessionId;
-
-      void (async () => {
-        try {
-          // Se pide en cada conexion y no una vez al entrar: el ID token dura
-          // mas o menos una hora y esta ruta puede correr mucho despues.
-          const idToken = session ? await session.getIdToken() : null;
-          const tokenResponse = await fetchToken({
-            tokenUrl: config.tokenUrl,
-            sessionId: pendingSessionId,
-            token: idToken,
-          });
-          const connection = await connect({
-            url: config.url ?? tokenResponse.url,
-            token: tokenResponse.token,
-            // El aviso puede llegar despues de que esta sesion haya sido
-            // reemplazada: sin la guarda, una sala muerta encenderia un aviso
-            // en el HUD que ningun gesto podria apagar.
-            onAudioPlaybackChanged: (canPlayback) => {
-              if (sessionRef.current !== pendingSessionId) return;
-              setAudioBlocked(!canPlayback);
-            },
-            // Misma guarda que arriba (D6 de #18): un aviso tardio de una
-            // sesion ya reemplazada no debe corromper el estado actual.
-            onVideoTrackSubscribed: (sessionId, track) => {
-              if (sessionRef.current !== pendingSessionId) return;
-              setVideoTracks((current) => new Map(current).set(sessionId, track));
-            },
-            onVideoTrackUnsubscribed: (sessionId) => {
-              if (sessionRef.current !== pendingSessionId) return;
-              setVideoTracks((current) => {
-                if (!current.has(sessionId)) return current;
-                const next = new Map(current);
-                next.delete(sessionId);
-                return next;
-              });
-            },
-            onLocalVideoTrackChanged: (track) => {
-              if (sessionRef.current !== pendingSessionId) return;
-              setLocalVideoTrack(track);
-            },
-            onActiveSpeakersChanged: (identities) => {
-              if (sessionRef.current !== pendingSessionId) return;
-              setSpeakers(new Set(identities));
-            },
-          });
-
-          // La sesion pudo cambiar (o el hook desmontarse) mientras el
-          // `await` estaba en vuelo: una conexion tardia para una sesion que
-          // ya no es la actual quedaria huerfana y con audio filtrado.
-          if (cancelled || sessionRef.current !== pendingSessionId) {
-            void connection.disconnect();
-            return;
-          }
-
-          connectionRef.current = connection;
-          setAudioAvailable(true);
-          // D1: se aplica lo ultimo conocido (`desiredRef`), no la instantanea
-          // capturada cuando arranco esta conexion -- esa instantanea puede
-          // llevar mucho tiempo obsoleta si un `voice` intermedio se descarto
-          // arriba por llegar con la conexion todavia en vuelo.
-          const desired = desiredRef.current;
-          connection.setDesiredAudioPeers(desired?.sessionIds ?? []);
-          connection.setDesiredVideoPeers(
-            videoPeers({
-              spaceId: desired?.spaceId ?? null,
-              audibleSessionIds: desired?.sessionIds ?? [],
-            }),
-          );
-        } catch {
-          // Rechazo de connect(), de la peticion del token o de la propia
-          // sesion (p.ej. navegador sin soporte, servidor caido, token
-          // caducado): degrada a sin audio, nunca lanza, nunca reintenta solo.
-          if (sessionRef.current === pendingSessionId) {
-            setAudioAvailable(false);
-          }
-        }
-      })();
+      // 'reconnect': primera conexion, cambio de sesion (#52 manual) o cambio de espacio (D7) -- los tres exigen sala nueva.
+      handleReconnect({ sessionId: payload.selfSessionId, spaceId: payload.spaceId });
     });
 
     return () => {
       cancelled = true;
+      clearSlowRetry();
       unsubscribe();
       void teardown();
     };
   }, [bridge, config, session, connect, fetchToken]);
+
+  useEffect(() => {
+    micOnRef.current = micOn;
+    camOnRef.current = camOn;
+    dndRef.current = dnd;
+  }, [micOn, camOn, dnd]);
 
   /**
    * Efecto aparte del de conexion: meter `status` en las dependencias de
