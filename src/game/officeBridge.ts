@@ -12,6 +12,7 @@
  */
 
 import type { OfficeDesk } from './desksPort';
+import type { LayoutEditCommand } from './layoutEditor';
 import type { SpaceArea } from './mapData';
 import type { PresenceStatus, RecordingReadyPayload } from './officeProtocol';
 import type { RosterPeer } from './roster';
@@ -146,6 +147,20 @@ export interface OfficeEventMap {
    * (`createStaleSpacesVersionTracker` en `spacesConfig.ts`).
    */
   spacesstale: { version: string };
+  /**
+   * Se clico un rectangulo pickable del editor de layout (#74, PR3b): un
+   * escritorio o sala existente, elegible para mover o borrar. Lo emite
+   * `LayoutEditLayer`, no la escena -- es la capa quien sabe que rectangulo
+   * dibujado corresponde a que id.
+   */
+  layoutpick: { id: string };
+  /**
+   * Se confirmo una colocacion (crear o mover) en el editor de layout (#74,
+   * PR3b): la posicion ya viene encajada a tile y con su validez de
+   * pre-chequeo resuelta (`layoutEditor.isPlacementValid`) -- el reductor en
+   * React decide que hacer con eso, incluido pedirselo al servidor.
+   */
+  layoutplace: { tx: number; ty: number; valid: boolean };
 }
 
 export interface OfficeCommandMap {
@@ -228,6 +243,15 @@ export interface OfficeCommandMap {
    * HUD reabriese una sesion distinta de la que se cayo.
    */
   reconnect: undefined;
+  /**
+   * Estado del editor de layout que la escena debe seguir (#74, PR3b),
+   * proyectado por `layoutEditor.toLayoutEditCommand` desde el reductor que
+   * React posee. `null` = salir del modo edicion: sin esto la escena no
+   * tendria forma de saber que ya no hay nada pickable ni ghost que mostrar,
+   * mismo motivo por el que `spacesconfig` viaja como comando y no como
+   * opcion de construccion.
+   */
+  layoutedit: LayoutEditCommand | null;
 }
 
 export interface OfficeBridge {

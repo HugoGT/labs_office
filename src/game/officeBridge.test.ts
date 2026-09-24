@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createOfficeBridge } from './officeBridge';
+import { createOfficeBridge, type OfficeCommandMap } from './officeBridge';
 
 describe('createOfficeBridge', () => {
   it('dos instancias independientes no comparten entrega de eventos (office-bridge spec)', () => {
@@ -228,6 +228,58 @@ describe('createOfficeBridge', () => {
 
     unsubscribe();
     bridge.emit('spacesstale', { version: 'otra-version' });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('"layoutedit" viaja por el canal de comandos, null incluido (#74, PR3b)', () => {
+    const bridge = createOfficeBridge();
+    const handler = vi.fn();
+    const command: OfficeCommandMap['layoutedit'] = {
+      pickable: [{ id: 'desk-1', x0: 2, y0: 2, x1: 4, y1: 4 }],
+      selectedId: null,
+      placing: null,
+    };
+
+    const unsubscribe = bridge.onCommand('layoutedit', handler);
+    bridge.emitCommand('layoutedit', command);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith(command);
+
+    // null es la senal de salir del modo edicion, no un payload ausente.
+    bridge.emitCommand('layoutedit', null);
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(handler).toHaveBeenLastCalledWith(null);
+
+    unsubscribe();
+    bridge.emitCommand('layoutedit', null);
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it('entrega el payload de "layoutpick" y deja de notificar tras desuscribirse (#74, PR3b)', () => {
+    const bridge = createOfficeBridge();
+    const handler = vi.fn();
+
+    const unsubscribe = bridge.on('layoutpick', handler);
+    bridge.emit('layoutpick', { id: 'desk-1' });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith({ id: 'desk-1' });
+
+    unsubscribe();
+    bridge.emit('layoutpick', { id: 'desk-2' });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('entrega el payload de "layoutplace" y deja de notificar tras desuscribirse (#74, PR3b)', () => {
+    const bridge = createOfficeBridge();
+    const handler = vi.fn();
+
+    const unsubscribe = bridge.on('layoutplace', handler);
+    bridge.emit('layoutplace', { tx: 5, ty: 5, valid: true });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith({ tx: 5, ty: 5, valid: true });
+
+    unsubscribe();
+    bridge.emit('layoutplace', { tx: 1, ty: 1, valid: false });
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
