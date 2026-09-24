@@ -28,10 +28,17 @@ function renderTiles(overrides: Partial<ComponentProps<typeof VideoTiles>> = {})
     videoTracks: new Map<string, AttachableTrack>(),
     speakers: new Set<string>(),
     localVideoTrack: null as AttachableTrack | null,
+    screenShareTracks: new Map<string, AttachableTrack>(),
+    localScreenShareTrack: null as AttachableTrack | null,
+    activeScreenSharer: null as string | null,
     ...overrides,
   };
-  render(<VideoTiles {...props} />);
-  return props;
+  const { rerender } = render(<VideoTiles {...props} />);
+  return {
+    ...props,
+    rerender: (next: Partial<ComponentProps<typeof VideoTiles>>) =>
+      rerender(<VideoTiles {...props} {...next} />),
+  };
 }
 
 function tileIds(): string[] {
@@ -190,5 +197,86 @@ describe('VideoTiles: gate de video de pares por sala (issue #17, D8)', () => {
 
     expect(document.querySelectorAll('video')).toHaveLength(1);
     expect(screen.queryByAltText('Retrato de par-1')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Stage layout (#20), like Google Meet: while someone in the space shares,
+ * the share takes the big stage and the participant tiles move to a column
+ * on the right. With nobody sharing, the row stays exactly as it was.
+ */
+describe('VideoTiles: screen share stage (#20)', () => {
+  const IN_SPACE = {
+    selfSessionId: 'yo',
+    selfName: 'HugoGT',
+    peers: [{ sessionId: 'ana', name: 'Ana' }],
+    spaceId: 'sala-de-juntas-stub',
+  };
+
+  it('nobody sharing: no stage, the tiles keep their row', () => {
+    const { bridge } = renderTiles();
+
+    act(() => bridge.emit('voice', IN_SPACE));
+
+    expect(screen.queryByTestId('screen-share-stage')).not.toBeInTheDocument();
+    expect(screen.getByTestId('video-tile-bar')).toHaveAttribute('data-layout', 'row');
+  });
+
+  it('a peer sharing takes the stage and the tiles move to the side column, camera tile included', () => {
+    const { bridge } = renderTiles({
+      screenShareTracks: new Map([['ana', fakeVideoTrack()]]),
+      activeScreenSharer: 'ana',
+    });
+
+    act(() => bridge.emit('voice', IN_SPACE));
+
+    const stage = screen.getByTestId('screen-share-stage');
+    expect(stage).toHaveAttribute('data-session-id', 'ana');
+    expect(stage.querySelectorAll('video')).toHaveLength(1);
+    expect(stage).toHaveTextContent('Pantalla de Ana');
+    expect(screen.getByTestId('video-tile-bar')).toHaveAttribute('data-layout', 'column');
+    // The share sits NEXT to the person, it never replaces their tile.
+    expect(tileIds()).toEqual(['yo', 'ana']);
+  });
+
+  it('the sharer sees their own screen on the stage', () => {
+    const { bridge } = renderTiles({
+      localScreenShareTrack: fakeVideoTrack(),
+      activeScreenSharer: 'yo',
+    });
+
+    act(() => bridge.emit('voice', IN_SPACE));
+
+    const stage = screen.getByTestId('screen-share-stage');
+    expect(stage).toHaveAttribute('data-session-id', 'yo');
+    expect(stage).toHaveTextContent('Tu pantalla');
+  });
+
+  it('opening and closing the stage never remounts the participant tiles', () => {
+    const { bridge, rerender } = renderTiles();
+    act(() => bridge.emit('voice', IN_SPACE));
+    const selfNode = document.querySelector('[data-session-id="yo"]');
+
+    rerender({ screenShareTracks: new Map([['ana', fakeVideoTrack()]]), activeScreenSharer: 'ana' });
+    expect(document.querySelector('[data-session-id="yo"]')).toBe(selfNode);
+
+    rerender({ activeScreenSharer: null });
+    expect(document.querySelector('[data-session-id="yo"]')).toBe(selfNode);
+  });
+
+  it('when the share ends the stage and its video leave the DOM', () => {
+    const track = fakeVideoTrack();
+    const { bridge, rerender } = renderTiles({
+      screenShareTracks: new Map([['ana', track]]),
+      activeScreenSharer: 'ana',
+    });
+    act(() => bridge.emit('voice', IN_SPACE));
+    expect(document.querySelectorAll('video')).toHaveLength(1);
+
+    rerender({ screenShareTracks: new Map(), activeScreenSharer: null });
+
+    expect(screen.queryByTestId('screen-share-stage')).not.toBeInTheDocument();
+    expect(document.querySelectorAll('video')).toHaveLength(0);
+    expect(screen.getByTestId('video-tile-bar')).toHaveAttribute('data-layout', 'row');
   });
 });

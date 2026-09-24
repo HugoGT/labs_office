@@ -163,6 +163,9 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
     screenShareOn,
     screenShareAvailable,
     toggleScreenShare,
+    screenShareTracks,
+    localScreenShareTrack,
+    activeScreenSharer,
   } = useProximityAudio(bridge, { config: livekitConfig, status, session });
 
   /**
@@ -523,6 +526,9 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
         videoTracks={videoTracks}
         speakers={speakers}
         localVideoTrack={localVideoTrack}
+        screenShareTracks={screenShareTracks}
+        localScreenShareTrack={localScreenShareTrack}
+        activeScreenSharer={activeScreenSharer?.sessionId ?? null}
       />
       <RecBadge visible={recording} />
       <ContextMenu menu={menu} onAction={handleMenuAction} onClose={closeMenu} />

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { AttachableTrack } from '../game/attachableTrack';
 import type { OfficeBridge, OfficeEventMap } from '../game/officeBridge';
+import { selectScreenShareStage } from '../game/screenShare';
 import { VideoTile } from './VideoTile';
 import styles from './VideoTiles.module.css';
 
@@ -12,6 +13,12 @@ export interface VideoTilesProps {
   speakers: ReadonlySet<string>;
   /** Camara propia, o `null` si esta apagada/no publicada (D8: ungated). */
   localVideoTrack: AttachableTrack | null;
+  /** Subscribed peer screen shares, keyed by sessionId (#20): never mixed with `videoTracks`. */
+  screenShareTracks: ReadonlyMap<string, AttachableTrack>;
+  /** Own screen share, or `null` when not sharing. */
+  localScreenShareTrack: AttachableTrack | null;
+  /** SessionId holding the single share slot of the space, or `null` (#20). */
+  activeScreenSharer: string | null;
 }
 
 const INITIAL_VOICE: OfficeEventMap['voice'] = {
@@ -42,7 +49,15 @@ interface TileEntry {
  * entre o salga reordena la fila, pero nunca remonta el tile de al lado -- un
  * remonte se llevaria por delante el `<video>` real que cuelga de el.
  */
-export function VideoTiles({ bridge, videoTracks, speakers, localVideoTrack }: VideoTilesProps) {
+export function VideoTiles({
+  bridge,
+  videoTracks,
+  speakers,
+  localVideoTrack,
+  screenShareTracks,
+  localScreenShareTrack,
+  activeScreenSharer,
+}: VideoTilesProps) {
   const [voice, setVoice] = useState<OfficeEventMap['voice']>(INITIAL_VOICE);
   const [portraits, setPortraits] = useState<Record<string, string> | null>(null);
 
@@ -73,19 +88,59 @@ export function VideoTiles({ bridge, videoTracks, speakers, localVideoTrack }: V
     });
   }
 
+  const stage = selectScreenShareStage({
+    activeSharer: activeScreenSharer,
+    selfSessionId: voice.selfSessionId,
+    localTrack: localScreenShareTrack,
+    // Same room gate as peer cameras (D8): peer video only inside a space.
+    remoteTracks: voice.spaceId !== null ? screenShareTracks : new Map(),
+  });
+  const stageOwner = stage && entries.find((entry) => entry.sessionId === stage.sessionId);
+  const stageLabel =
+    stage?.sessionId === voice.selfSessionId
+      ? 'Tu pantalla'
+      : stageOwner
+        ? `Pantalla de ${stageOwner.name}`
+        : 'Pantalla compartida';
+
+  // Stage layout (#20), like Google Meet: while a share is up it takes the
+  // big stage and the tiles move to a column on the right. The stage comes
+  // BEFORE the bar in the same position whether it exists or not, and the
+  // bar only changes its `data-layout`, so opening or closing the stage never
+  // remounts a tile (and the `<video>` hanging from it). The stage is keyed
+  // by (participant, source): a new sharer gets a fresh element.
   return (
-    <div className={styles.bar} data-testid="video-tile-bar">
-      {entries.map((entry) => (
-        <div key={entry.sessionId} className={styles.tile} data-session-id={entry.sessionId}>
+    <>
+      {stage && (
+        <div
+          key={`${stage.sessionId}:screen_share`}
+          className={styles.stage}
+          data-testid="screen-share-stage"
+          data-session-id={stage.sessionId}
+        >
           <VideoTile
-            sessionId={entry.sessionId}
-            name={entry.name}
+            sessionId={stage.sessionId}
+            name={stageLabel}
             portraits={portraits}
-            track={entry.track}
-            speaking={speakers.has(entry.sessionId)}
+            track={stage.track}
+            speaking={false}
+            fit="contain"
           />
         </div>
-      ))}
-    </div>
+      )}
+      <div className={styles.bar} data-layout={stage ? 'column' : 'row'} data-testid="video-tile-bar">
+        {entries.map((entry) => (
+          <div key={entry.sessionId} className={styles.tile} data-session-id={entry.sessionId}>
+            <VideoTile
+              sessionId={entry.sessionId}
+              name={entry.name}
+              portraits={portraits}
+              track={entry.track}
+              speaking={speakers.has(entry.sessionId)}
+            />
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
