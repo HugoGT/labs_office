@@ -67,6 +67,12 @@ function proximityAudio(
     videoTracks: new Map(),
     speakers: new Set(),
     localVideoTrack: null,
+    screenShareOn: false,
+    screenShareAvailable: false,
+    toggleScreenShare: vi.fn(),
+    screenShareTracks: new Map(),
+    localScreenShareTrack: null,
+    activeScreenSharer: null,
     ...overrides,
   };
 }

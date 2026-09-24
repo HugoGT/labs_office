@@ -1247,3 +1247,154 @@ describe('useProximityAudio: reaplica microfono/camara tras cada conexion (#12, 
     expect(connection2.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
   });
 });
+
+describe('useProximityAudio: screen share (#20)', () => {
+  /** Connected to a space room (or the open floor), with the connect callbacks captured. */
+  async function connectedTo(spaceId: string | null, initialStatus: PresenceStatus = 'g') {
+    const bridge = createOfficeBridge();
+    const connection = fakeConnection();
+    const captured: ConnectLivekitRoomOptions[] = [];
+    const connect = vi.fn(async (opts: ConnectLivekitRoomOptions) => {
+      captured.push(opts);
+      return connection;
+    });
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    const rendered = renderHook(
+      ({ status }: { status: PresenceStatus }) =>
+        useProximityAudio(bridge, { config: CONFIG, status, connect, fetchToken }),
+      { initialProps: { status: initialStatus } },
+    );
+
+    await act(async () => {
+      bridge.emit('voice', {
+        selfSessionId: 'yo',
+        selfName: 'Yo',
+        peers: [{ sessionId: 'ana', name: 'Ana' }],
+        spaceId,
+      });
+    });
+
+    return { ...rendered, bridge, connection, connect, callbacks: () => captured[captured.length - 1] };
+  }
+
+  it('starts off, and is only available inside a space: the open floor never shares', async () => {
+    const corridor = await connectedTo(null);
+    const space = await connectedTo('sala-1');
+
+    expect(corridor.result.current.screenShareOn).toBe(false);
+    expect(corridor.result.current.screenShareAvailable).toBe(false);
+    expect(space.result.current.screenShareAvailable).toBe(true);
+  });
+
+  it('the toggle asks the room to share, and stays off until the share is really published', async () => {
+    const { result, connection, callbacks } = await connectedTo('sala-1');
+
+    await act(async () => result.current.toggleScreenShare());
+
+    expect(connection.setScreenShareEnabled).toHaveBeenCalledWith(true);
+    expect(result.current.screenShareOn).toBe(false);
+
+    const track = fakeAttachableTrack();
+    await act(async () => callbacks().onLocalScreenShareChanged?.(track));
+
+    expect(result.current.screenShareOn).toBe(true);
+    expect(result.current.localScreenShareTrack).toBe(track);
+  });
+
+  it('toggling while sharing stops the share', async () => {
+    const { result, connection, callbacks } = await connectedTo('sala-1');
+    await act(async () => callbacks().onLocalScreenShareChanged?.(fakeAttachableTrack()));
+
+    await act(async () => result.current.toggleScreenShare());
+
+    expect(connection.setScreenShareEnabled).toHaveBeenLastCalledWith(false);
+  });
+
+  it('a share ended from outside (browser bar, takeover) resets the button', async () => {
+    const { result, callbacks } = await connectedTo('sala-1');
+    await act(async () => callbacks().onLocalScreenShareChanged?.(fakeAttachableTrack()));
+
+    await act(async () => callbacks().onLocalScreenShareChanged?.(null));
+
+    expect(result.current.screenShareOn).toBe(false);
+    expect(result.current.localScreenShareTrack).toBeNull();
+  });
+
+  it('a second click while the picker is still open does not open another one', async () => {
+    const picker = deferred<boolean>();
+    const { result, connection } = await connectedTo('sala-1');
+    vi.mocked(connection.setScreenShareEnabled).mockReturnValueOnce(picker.promise);
+
+    await act(async () => result.current.toggleScreenShare());
+    await act(async () => result.current.toggleScreenShare());
+
+    expect(connection.setScreenShareEnabled).toHaveBeenCalledTimes(1);
+    await act(async () => picker.resolve(false));
+  });
+
+  it('the toggle is inert on the open floor', async () => {
+    const { result, connection } = await connectedTo(null);
+
+    await act(async () => result.current.toggleScreenShare());
+
+    expect(connection.setScreenShareEnabled).not.toHaveBeenCalled();
+  });
+
+  it('peer shares are kept apart from their cameras, keyed by sessionId', async () => {
+    const { result, callbacks } = await connectedTo('sala-1');
+    const camera = fakeAttachableTrack();
+    const screen = fakeAttachableTrack();
+
+    await act(async () => callbacks().onVideoTrackSubscribed?.('ana', camera));
+    await act(async () => callbacks().onScreenShareTrackSubscribed?.('ana', screen));
+
+    expect(result.current.videoTracks.get('ana')).toBe(camera);
+    expect(result.current.screenShareTracks.get('ana')).toBe(screen);
+
+    await act(async () => callbacks().onScreenShareTrackUnsubscribed?.('ana', screen));
+
+    expect(result.current.screenShareTracks.has('ana')).toBe(false);
+    expect(result.current.videoTracks.get('ana')).toBe(camera);
+  });
+
+  it('the active sharer comes with the name to announce, own name included', async () => {
+    const { result, callbacks } = await connectedTo('sala-1');
+
+    await act(async () => callbacks().onActiveScreenSharerChanged?.('ana'));
+    expect(result.current.activeScreenSharer).toEqual({ sessionId: 'ana', name: 'Ana' });
+
+    await act(async () => callbacks().onActiveScreenSharerChanged?.('yo'));
+    expect(result.current.activeScreenSharer).toEqual({ sessionId: 'yo', name: 'Yo' });
+
+    await act(async () => callbacks().onActiveScreenSharerChanged?.(null));
+    expect(result.current.activeScreenSharer).toBeNull();
+  });
+
+  it('entering "No molestar" stops the share, like mic and camera', async () => {
+    const { rerender, connection, callbacks } = await connectedTo('sala-1');
+    await act(async () => callbacks().onLocalScreenShareChanged?.(fakeAttachableTrack()));
+
+    await act(async () => rerender({ status: 'r' }));
+
+    expect(connection.setScreenShareEnabled).toHaveBeenLastCalledWith(false);
+  });
+
+  it('changing space drops every share of the old room and never republishes the own one', async () => {
+    const { result, bridge, connection, callbacks } = await connectedTo('sala-1');
+    await act(async () => callbacks().onLocalScreenShareChanged?.(fakeAttachableTrack()));
+    await act(async () => callbacks().onScreenShareTrackSubscribed?.('ana', fakeAttachableTrack()));
+    await act(async () => callbacks().onActiveScreenSharerChanged?.('ana'));
+    vi.mocked(connection.setScreenShareEnabled).mockClear();
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 'sala-2' });
+    });
+
+    expect(result.current.screenShareOn).toBe(false);
+    expect(result.current.screenShareTracks.size).toBe(0);
+    expect(result.current.activeScreenSharer).toBeNull();
+    // A new share needs the browser picker again, which only a click can open.
+    expect(connection.setScreenShareEnabled).not.toHaveBeenCalledWith(true);
+  });
+});
