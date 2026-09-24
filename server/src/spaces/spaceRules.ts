@@ -10,6 +10,15 @@
  */
 
 import { createHash } from 'node:crypto';
+import { boundsOverlap, type SpaceBounds } from '../../../src/game/layoutGeometry.ts';
+
+// Reexportados tal cual (#74, PR3a): `boundsOverlap` se mudo a
+// `src/game/layoutGeometry.ts` porque el editor de layout en oficina (PR3b)
+// necesita el MISMO pre-chequeo del lado del cliente, que no puede importar
+// este modulo entero (arrastra `node:crypto` via `hashSpaces`). Reexportar en
+// vez de duplicar es lo que garantiza que las dos copias nunca diverjan; ver
+// la cabecera de `layoutGeometry.ts` para la nota completa.
+export { boundsOverlap, type SpaceBounds };
 
 /**
  * Errores propios y no `Error` pelado, misma razon que `InvalidInvitationError`
@@ -72,13 +81,6 @@ export class SpaceOwnedByDeskError extends Error {
   }
 }
 
-export interface SpaceBounds {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
 /**
  * Recibe `unknown`-shaped numbers a proposito, igual que
  * `assertValidInvitationDays`: el cuerpo de una peticion HTTP es JSON sin
@@ -111,25 +113,6 @@ export function assertValidCapacity(capacity: number | null): void {
   if (capacity <= 0) {
     throw new InvalidSpaceError('capacity debe ser mayor que 0');
   }
-}
-
-/**
- * Pre-chequeo de solape en aplicacion, para devolver 409 en vez del 500 que
- * daria dejar que la restriccion de exclusion de `schema.sql` lo atrape
- * primero (misma logica que `assertValidInvitationDays` valida antes de
- * pedir conexion). La restriccion de la base de datos sigue siendo la
- * garantia real -- esta funcion es la version amable, igual que el `CASE` de
- * `pgDirectory.resolveOnLogin` lo es del indice parcial del superadmin.
- *
- * `<=` y no `<`: el spike de la tarea 2.1 (contra Postgres real, sin ninguna
- * extension) probo que `box && box` trata el contacto exacto de un borde
- * como solape -- dos rectangulos que solo se tocan en una linea, sin area en
- * comun, siguen chocando contra `spaces_no_overlap`. Un `<` estricto aqui
- * dejaria pasar algo que la base de datos rechaza, y el pre-chequeo dejaria
- * de cumplir su proposito.
- */
-export function boundsOverlap(a: SpaceBounds, b: SpaceBounds): boolean {
-  return a.x <= b.x + b.w && b.x <= a.x + a.w && a.y <= b.y + b.h && b.y <= a.y + a.h;
 }
 
 /**
