@@ -67,6 +67,16 @@ describe('useLayoutEditor (#74, PR3c)', () => {
     expect(result.current.state).toEqual({ tag: 'selected', kind: 'desk', id: 'id-mesa' });
   });
 
+  it('select() elige el mismo escritorio que un layoutpick, sin pasar por el bridge', async () => {
+    const { result } = setup(fakeDesks());
+    act(() => result.current.enter());
+    await waitFor(() => expect(result.current.desks).toHaveLength(2));
+
+    act(() => result.current.select('id-otra'));
+
+    expect(result.current.state).toEqual({ tag: 'selected', kind: 'desk', id: 'id-otra' });
+  });
+
   it('crear: un layoutplace valido llama a createDesk con la etiqueta pedida y la posicion encajada', async () => {
     const desks = fakeDesks();
     const { bridge, refreshDesks, refreshSpaces, result } = setup(desks);

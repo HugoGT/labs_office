@@ -70,6 +70,8 @@ export interface UseLayoutEditorResult {
   startCreate: (label: string) => void;
   startMove: () => void;
   cancelPlacing: () => void;
+  /** Selecciona un escritorio existente por id, igual que un `layoutpick` del mapa (misma accion del reductor). */
+  select: (id: string) => void;
   deselect: () => void;
   /** Borra el seleccionado. Ver la nota de cabecera: no pasa por `saving`. */
   remove: () => Promise<void>;
@@ -184,6 +186,8 @@ export function useLayoutEditor({
     dispatch({ type: 'cancelPlacing' });
   }, []);
 
+  const select = useCallback((id: string) => dispatch({ type: 'select', id }), []);
+
   const deselect = useCallback(() => dispatch({ type: 'deselect' }), []);
 
   const remove = useCallback(async (): Promise<void> => {
@@ -232,6 +236,7 @@ export function useLayoutEditor({
     startCreate,
     startMove,
     cancelPlacing,
+    select,
     deselect,
     remove,
   };
