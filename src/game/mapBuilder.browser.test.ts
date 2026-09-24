@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { waitForSceneRunning } from '../test/phaserScene';
 import { TERRAIN, TERRAIN_SHEET, preloadOfficeAssets } from './assets';
 import { DESK_ROWS, MAP_H, MAP_W, TILE, TREES, ZONE_LABELS } from './mapData';
 import { placeFurniture, placeNature, placeZoneLabels, renderGround } from './mapBuilder';
@@ -51,9 +52,7 @@ async function withScene<T>(run: (scene: Phaser.Scene) => T): Promise<T> {
   });
   games.push(game);
 
-  await vi.waitFor(() => {
-    expect(game.scene.getScene('probe')?.scene.settings.status).toBe(Phaser.Scenes.RUNNING);
-  });
+  await waitForSceneRunning(game, 'probe');
 
   return result;
 }
