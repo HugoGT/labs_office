@@ -183,6 +183,48 @@ http://{$APP_HOST}, http://{$LK_HOST}, http://{$TURN_HOST} {
 		reverse_proxy colyseus:2567
 	}
 
+	# Config de espacios (issue #7, slice 3): la lee cada cliente al arrancar,
+	# no solo el panel, y cuelga de la raiz y no de /admin por eso mismo.
+	handle /spaces {
+		reverse_proxy colyseus:2567
+	}
+
+	# Catalogo de decoracion (issue #7, slice 4). Exacto y NUNCA con comodin:
+	# el build de Vite sirve sus propios bundles bajo /assets/*, y un
+	# `handle /assets/*` aqui se los robaria al contenedor `web` antes de que
+	# el navegador los vea.
+	handle /assets {
+		reverse_proxy colyseus:2567
+	}
+
+	# Escritorios asignables (issue #7, slice 5): listado y coger/dejar sitio.
+	# `/desks` y `/desks/*` (que cubre `/desks/:id/claim`) van por separado
+	# porque el comodin de un solo segmento no casa la ruta exacta.
+	handle /desks {
+		reverse_proxy colyseus:2567
+	}
+
+	handle /desks/* {
+		reverse_proxy colyseus:2567
+	}
+
+	# El escritorio de quien lo usa, no de quien administra (ver la cabecera
+	# de `decorRoutes.ts`/`desksRoutes.ts`). `/me/desk/*` cubre
+	# `/me/desk/release`; `/me/desk` en solitario cubre GET y POST sobre esa
+	# misma ruta exacta.
+	handle /me/desk {
+		reverse_proxy colyseus:2567
+	}
+
+	handle /me/desk/* {
+		reverse_proxy colyseus:2567
+	}
+
+	# Grabacion (issue #5, #58): start/stop/url.
+	handle /recordings/* {
+		reverse_proxy colyseus:2567
+	}
+
 	# Todo lo demas es el SPA ya construido, en su propio contenedor.
 	# Incluye /dashboard: es una ruta del cliente, no del servidor, y tiene que
 	# llegar al index.html para que el SPA la resuelva (el `try_files` de
