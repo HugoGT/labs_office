@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BUILT_IN_SPACES, GROUND, MAP_H, MAP_W, TILE } from './mapData';
+import { audiblePeers, type AudibleInput, type AudioPeer } from './proximityAudio';
 import {
   ADJACENT_OFFSETS,
   buildTerrainGrid,
@@ -264,5 +265,58 @@ describe('findWalkDestination', () => {
     // a `findFreeAdjacentTile` (que ignora el rectangulo) la encuentra.
     expect(findWalkDestination(grid, peer, rect)).toEqual({ tx: 13, ty: 27 });
     expect(findFreeAdjacentTile(grid, peer.tx, peer.ty)).toEqual({ tx: 13, ty: 27 });
+  });
+
+  /**
+   * S6 (remediacion), escenario call-invitation "A third participant can join
+   * an occupied cubicle": la spec pide que un tercero pueda entrar a un
+   * cubiculo ya ocupado por dos, sin tope de participantes.
+   *
+   * Honestidad de nivel: `findWalkDestination` no tiene ningun concepto de
+   * ocupacion -- los avatares NO son colisionadores (D-diseno de esta
+   * funcion), asi que "tile libre" significa "no bloqueada por el mapa"
+   * (pared/agua), nunca "no ocupada por otro jugador". Esta prueba NO afirma
+   * una garantia general de no-solape que la funcion no promete; fija el
+   * resultado DETERMINISTA de este algoritmo para esta geometria concreta
+   * (identica al caso "prefiere el primer ADJACENT_OFFSETS" de arriba) y deja
+   * constancia explicita, via el aserto de "distinto de B", de que la ausencia
+   * de tope viene precisamente de que el algoritmo ignora a los demas
+   * ocupantes -- no de que los evite a proposito.
+   */
+  it('un tercer participante puede unirse a un cubiculo ya ocupado por dos: aterriza en una tile distinta a la de A y B, y los tres quedan mutuamente audibles sin tope', () => {
+    const grid = buildTerrainGrid();
+    const rect: TileRect = { x0: 10, y0: 26, x1: 12, y1: 28 }; // mismo cubiculo 3x3 de los casos de arriba.
+    const aTile = { tx: 11, ty: 27 }; // centro del cubiculo, donde esta A.
+    const bTile = { tx: 10, ty: 28 }; // otra tile del mismo cubiculo, ya ocupada por B.
+
+    // C acepta la invitacion de A: mismo resultado que "prefiere el primer
+    // ADJACENT_OFFSETS que cae DENTRO del rectangulo" (arriba), porque la
+    // funcion no sabe que B existe.
+    const destinoDeC = findWalkDestination(grid, aTile, rect);
+
+    expect(destinoDeC).toEqual({ tx: 12, ty: 27 });
+    expect(destinoDeC).not.toEqual(aTile);
+    expect(destinoDeC).not.toEqual(bTile);
+
+    // Sin tope de participantes: los tres, compartiendo spaceId, quedan
+    // MUTUAMENTE audibles -- se afirma desde las tres perspectivas, no solo
+    // un par, porque `audiblePeers` en general ya esta probado por pares en
+    // proximityAudio.test.ts.
+    const V1 = 'v1';
+    const a: AudioPeer = { sessionId: 'a', x: 0, y: 0, spaceId: 'd1', spacesVersion: V1, status: 'g' };
+    const b: AudioPeer = { sessionId: 'b', x: 0, y: 0, spaceId: 'd1', spacesVersion: V1, status: 'g' };
+    const c: AudioPeer = { sessionId: 'c', x: 0, y: 0, spaceId: 'd1', spacesVersion: V1, status: 'g' };
+    const asSelf = (peer: AudioPeer): AudibleInput['self'] => ({
+      sessionId: peer.sessionId,
+      x: peer.x,
+      y: peer.y,
+      spaceId: peer.spaceId,
+      spacesVersion: peer.spacesVersion,
+      status: peer.status,
+    });
+
+    expect(audiblePeers({ self: asSelf(a), peers: [b, c], radius: 1 })).toEqual(['b', 'c']);
+    expect(audiblePeers({ self: asSelf(b), peers: [a, c], radius: 1 })).toEqual(['a', 'c']);
+    expect(audiblePeers({ self: asSelf(c), peers: [a, b], radius: 1 })).toEqual(['a', 'b']);
   });
 });
