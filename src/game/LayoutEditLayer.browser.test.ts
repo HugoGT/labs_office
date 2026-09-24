@@ -118,6 +118,53 @@ describe('LayoutEditLayer: contorno pickable', () => {
   });
 });
 
+describe('LayoutEditLayer: sala (kind !== desk) como contorno, no arte de piso (#74, PR4)', () => {
+  it('una sala rectangular no cuadrada se dibuja como contorno del tamano exacto, sin relleno', async () => {
+    // A diferencia de un escritorio (siempre 3x3), una sala puede tener
+    // cualquier w/h: este pickable de 6x2 prueba que el contorno sigue el
+    // rectangulo pedido y no un tamano fijo -- mismo codigo que un escritorio,
+    // sin ninguna rama por `kind` (no existe tal campo en `PickableRect`).
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    new LayoutEditLayer(scene, bridge);
+
+    bridge.emitCommand('layoutedit', {
+      pickable: [{ id: 'room-1', x0: 3, y0: 3, x1: 8, y1: 4 }],
+      selectedId: null,
+      placing: null,
+    });
+
+    const zone = findPickable(scene, 'room-1');
+    expect(zone).not.toBeNull();
+    expect(zone!.width).toBe(6 * TILE);
+    expect(zone!.height).toBe(2 * TILE);
+    expect(zone!.isStroked).toBe(true);
+    expect(zone!.isFilled).toBe(false);
+  });
+
+  it('mover el ghost de una sala solo redibuja el contorno: ningun tile de piso se toca', async () => {
+    // No hay ninguna llamada a pintar terreno en este archivo -- `updateGhost`
+    // solo reposiciona el rectangulo del ghost. Esta asercion prueba que el
+    // unico objeto Phaser que cambia de posicion es el ghost mismo.
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    new LayoutEditLayer(scene, bridge);
+
+    bridge.emitCommand('layoutedit', {
+      pickable: [],
+      selectedId: 'room-1',
+      placing: { w: 6, h: 2, obstacles: [] },
+    });
+    const beforeCount = scene.children.list.length;
+    scene.input.emit('pointermove', fakePointer(10 * TILE, 10 * TILE));
+    const afterCount = scene.children.list.length;
+
+    expect(afterCount).toBe(beforeCount);
+    expect(findGhost(scene)!.width).toBe(6 * TILE);
+    expect(findGhost(scene)!.height).toBe(2 * TILE);
+  });
+});
+
 describe('LayoutEditLayer: ghost de colocacion', () => {
   it('pinta el ghost en verde cuando la posicion encajada no solapa ningun obstaculo', async () => {
     const scene = await bootHostScene();
