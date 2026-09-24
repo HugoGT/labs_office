@@ -34,6 +34,17 @@ export function livekitApiUrlFrom(env: RecordingEnv): string {
 }
 
 /**
+ * Room composite layout. `grid` already follows the screen share rule of the
+ * UI (#20): the default Egress template (livekit/egress v1.14.1,
+ * `template-default/src/Room.tsx`) switches `grid` to `speaker` while a
+ * screen share is subscribed, and `speaker` shows the share in the large
+ * focus area with the cameras in a side column. With no share it stays a
+ * grid of cameras. Setting `speaker` here would only make recordings without
+ * a share focus on one speaker.
+ */
+export const RECORDING_LAYOUT = 'grid';
+
+/**
  * Where Egress writes the MP4: `key` in the GCS `bucket`. The upload block
  * travels in EVERY request: the storage section of the Egress config is not
  * applied as a default, and without it Egress attempts a local upload and
@@ -66,7 +77,7 @@ export function egressFromEnv(env: RecordingEnv): EgressPort | null {
   return {
     async start(roomName, filepath) {
       const file = gcsFileOutput(bucket, filepath);
-      const info = await client.startRoomCompositeEgress(roomName, { file }, { layout: 'grid' });
+      const info = await client.startRoomCompositeEgress(roomName, { file }, { layout: RECORDING_LAYOUT });
       return { egressId: info.egressId };
     },
     async stop(egressId) {
