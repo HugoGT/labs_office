@@ -16,6 +16,7 @@ function space(overrides: Partial<Space> & Pick<Space, 'id' | 'x' | 'y' | 'w' | 
     slug: `space-${overrides.id}`,
     name: `Space ${overrides.id}`,
     capacity: null,
+    deskId: null,
     createdAt: now,
     updatedAt: now,
     ...overrides,
