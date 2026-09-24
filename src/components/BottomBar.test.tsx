@@ -149,10 +149,10 @@ describe('BottomBar: degradacion cuando LiveKit no esta disponible', () => {
 });
 
 describe('BottomBar: presencia de avatares reales', () => {
-  it('muestra cuantos companeros reales hay conectados', () => {
+  it('conectado no muestra recuento: quien esta en linea vive en la barra lateral', () => {
     renderBar({ presence: { online: true, peers: 3, state: 'connected', canRetry: true } });
 
-    expect(screen.getByText('🟢 3 en línea')).toBeInTheDocument();
+    expect(screen.queryByText(/en línea/)).not.toBeInTheDocument();
   });
 
   it('sin servidor lo dice en neutro, no como error', () => {
@@ -163,10 +163,10 @@ describe('BottomBar: presencia de avatares reales', () => {
     expect(screen.getByText('⚪ Sin servidor')).toBeInTheDocument();
   });
 
-  it('conectado y solo sigue siendo "en línea", con cero companeros', () => {
+  it('conectado y solo tampoco muestra "0 en línea"', () => {
     renderBar({ presence: { online: true, peers: 0, state: 'connected', canRetry: true } });
 
-    expect(screen.getByText('🟢 0 en línea')).toBeInTheDocument();
+    expect(screen.queryByText(/en línea/)).not.toBeInTheDocument();
   });
 });
 
@@ -317,53 +317,18 @@ describe('BottomBar: reconexion (issue #52)', () => {
   });
 
   it('cada estado trae su propio title: el de reconexion explica que hay algo en curso', () => {
-    const { rerender } = render(
-      <BottomBar
-        playerName={DEFAULT_NAME}
-        micOn
-        camOn
-        audioAvailable
-        recording={false}
-        room={null}
-        presence={{ online: true, peers: 1, state: 'connected', canRetry: true }}
-        status="g"
-        onChangeStatus={vi.fn()}
-        onToggleMic={vi.fn()}
-        onToggleCam={vi.fn()}
-        onToggleRecord={vi.fn()}
-        onRetryConnection={vi.fn()}
-        screenShareOn={false}
-        screenShareAvailable={false}
-        onToggleScreenShare={vi.fn()}
-      />,
-    );
-    const conectado = screen.getByText('🟢 1 en línea').getAttribute('title');
+    renderBar({ presence: { online: false, peers: 1, state: 'reconnecting', canRetry: true } });
+    const reconectando = screen.getByText('🟡 Reconectando...').getAttribute('title');
 
-    rerender(
-      <BottomBar
-        playerName={DEFAULT_NAME}
-        micOn
-        camOn
-        audioAvailable
-        recording={false}
-        room={null}
-        presence={{ online: false, peers: 1, state: 'reconnecting', canRetry: true }}
-        status="g"
-        onChangeStatus={vi.fn()}
-        onToggleMic={vi.fn()}
-        onToggleCam={vi.fn()}
-        onToggleRecord={vi.fn()}
-        onRetryConnection={vi.fn()}
-        screenShareOn={false}
-        screenShareAvailable={false}
-        onToggleScreenShare={vi.fn()}
-      />,
+    // Un title reciclado dejaria a quien pasa el raton leyendo que no hay
+    // servidor mientras la barra dice que se esta recuperando la sesion.
+    expect(reconectando).toMatch(/recuperando/i);
+    expect(reconectando).not.toBe(
+      (() => {
+        renderBar({ presence: OFFLINE_SOLO });
+        return screen.getByText('⚪ Sin servidor').getAttribute('title');
+      })(),
     );
-
-    // Un title reciclado dejaria a quien pasa el raton leyendo "Conectado al
-    // servidor" mientras la barra dice que no lo esta.
-    expect(screen.getByText('🟡 Reconectando...').getAttribute('title')).not.toBe(conectado);
-    expect(screen.getByText('🟡 Reconectando...').getAttribute('title')).toMatch(/recuperando/i);
   });
 
   it('ofrece reintentar solo cuando la sesion se perdio y hay servidor al que volver', () => {
@@ -456,29 +421,36 @@ describe('BottomBar: screen share button (#20)', () => {
   });
 });
 
-describe('BottomBar: two-row layout (#67)', () => {
+describe('BottomBar: one row when wide, two when narrow (#67 follow-up)', () => {
   const CALL_BUTTONS = [/Mic/, /Cámara/, /Compartir/, /Grabar/];
 
-  it('keeps identity and indicators on the top row and the call controls on the bottom row', () => {
+  it('splits identity, call controls and indicators into three sibling blocks', () => {
     renderBar({ room: 'Sala de Juntas', presence: OFFLINE_RETRYABLE });
 
-    const info = screen.getByRole('group', { name: 'Estado' });
+    const identity = screen.getByRole('group', { name: 'Identidad' });
     const controls = screen.getByRole('toolbar', { name: 'Controles de llamada' });
+    const info = screen.getByRole('group', { name: 'Estado' });
+    // Siblings, not nested: the CSS grid places each block on its own (left,
+    // center, right when wide; identity and indicators over the controls when
+    // narrow), which it can only do with direct children of the bar.
+    expect(controls.parentElement).toBe(identity.parentElement);
+    expect(info.parentElement).toBe(identity.parentElement);
+    expect(within(identity).getByText(DEFAULT_NAME)).toBeInTheDocument();
+    expect(within(identity).getByLabelText('Mi estado')).toBeInTheDocument();
     for (const name of CALL_BUTTONS) {
       expect(within(controls).getByRole('button', { name })).toBeInTheDocument();
     }
-    expect(within(info).getByLabelText('Mi estado')).toBeInTheDocument();
     expect(within(info).getByText(/Sala privada/)).toBeInTheDocument();
     expect(within(info).getByText(/Sin servidor/)).toBeInTheDocument();
     // Retrying is about the connection, so it sits next to the connection indicator.
     expect(within(info).getByRole('button', { name: /Reintentar/ })).toBeInTheDocument();
-    expect(within(controls).queryByLabelText('Mi estado')).not.toBeInTheDocument();
   });
 
-  it('stays in two rows in the corridor, only without the private room line', () => {
+  it('keeps the same blocks in the corridor, only without the private room line', () => {
     renderBar({ room: null });
 
-    expect(screen.getByRole('group', { name: 'Estado' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Identidad' })).toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: 'Estado' })).getByText(/proximidad/)).toBeInTheDocument();
     const controls = screen.getByRole('toolbar', { name: 'Controles de llamada' });
     for (const name of CALL_BUTTONS) {
       expect(within(controls).getByRole('button', { name })).toBeInTheDocument();
