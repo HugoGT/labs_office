@@ -83,8 +83,8 @@ export function VideoTiles({
     entries.push({
       sessionId: peer.sessionId,
       name: peer.name,
-      // Gate de video de PARES (D8): solo dentro de una sala compartida.
-      track: voice.spaceId !== null ? (videoTracks.get(peer.sessionId) ?? null) : null,
+      // No room gate (#75): the subscription already follows proximity.
+      track: videoTracks.get(peer.sessionId) ?? null,
     });
   }
 
@@ -92,7 +92,7 @@ export function VideoTiles({
     activeSharer: activeScreenSharer,
     selfSessionId: voice.selfSessionId,
     localTrack: localScreenShareTrack,
-    // Same room gate as peer cameras (D8): peer video only inside a space.
+    // Screen share stays space-only: the open floor never shares (#20).
     remoteTracks: voice.spaceId !== null ? screenShareTracks : new Map(),
   });
   const stageOwner = stage && entries.find((entry) => entry.sessionId === stage.sessionId);

@@ -45,9 +45,8 @@ export interface LivekitRoomConnection {
   setDesiredAudioPeers(sessionIds: readonly string[]): void;
   /**
    * Guarda el conjunto de VIDEO deseado y reconcilia ese kind por separado
-   * (issue #17): deliberadamente mas angosto que el audio, ver
-   * `proximityVideo.ts`. Nunca afecta las publicaciones de audio del mismo
-   * peer -- son deltas independientes por kind.
+   * (issue #17). Hoy coincide con el de audio (#75), pero nunca afecta las
+   * publicaciones de audio del mismo peer -- son deltas independientes por kind.
    */
   setDesiredVideoPeers(sessionIds: readonly string[]): void;
   /** Devuelve el estado real: `false` si el dispositivo se deniega. */

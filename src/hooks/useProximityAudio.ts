@@ -15,7 +15,6 @@ import {
 } from '../game/livekitTokenClient';
 import type { OfficeBridge } from '../game/officeBridge';
 import { DO_NOT_DISTURB, type PresenceStatus } from '../game/officeProtocol';
-import { videoPeers } from '../game/proximityVideo';
 import {
   MAX_SLOW_RETRIES,
   SLOW_RETRY_MS,
@@ -162,7 +161,7 @@ export function useProximityAudio(
    * en silencio. Esta ref guarda SIEMPRE el ultimo valor visto, se escriba
    * donde se escriba, y es lo que se aplica en cuanto la conexion queda lista.
    */
-  const desiredRef = useRef<{ sessionIds: readonly string[]; spaceId: string | null } | null>(null);
+  const desiredRef = useRef<{ sessionIds: readonly string[] } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -184,9 +183,8 @@ export function useProximityAudio(
     function applyDesired(connection: LivekitRoomConnection): void {
       const desired = desiredRef.current;
       connection.setDesiredAudioPeers(desired?.sessionIds ?? []);
-      connection.setDesiredVideoPeers(
-        videoPeers({ spaceId: desired?.spaceId ?? null, audibleSessionIds: desired?.sessionIds ?? [] }),
-      );
+      // Video follows the same proximity set as audio, corridor included (#75).
+      connection.setDesiredVideoPeers(desired?.sessionIds ?? []);
     }
 
     async function teardown(): Promise<void> {
@@ -443,7 +441,7 @@ export function useProximityAudio(
       ]);
       const audibleSessionIds = payload.peers.map((peer) => peer.sessionId);
       // Se guarda ANTES de la rama de abajo (D1): sirve tanto a la conexion viva como a la que sigue en vuelo.
-      desiredRef.current = { sessionIds: audibleSessionIds, spaceId: payload.spaceId };
+      desiredRef.current = { sessionIds: audibleSessionIds };
 
       const transition = decideVoiceTransition(targetRef.current, {
         sessionId: payload.selfSessionId,
@@ -453,9 +451,7 @@ export function useProximityAudio(
       if (transition === 'forward') {
         // Mismo objetivo (sessionId, spaceId): solo reenvia los conjuntos deseados, no reconecta.
         connectionRef.current?.setDesiredAudioPeers(audibleSessionIds);
-        connectionRef.current?.setDesiredVideoPeers(
-          videoPeers({ spaceId: payload.spaceId, audibleSessionIds }),
-        );
+        connectionRef.current?.setDesiredVideoPeers(audibleSessionIds);
         return;
       }
 
