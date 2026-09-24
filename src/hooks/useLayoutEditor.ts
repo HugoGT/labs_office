@@ -39,10 +39,9 @@
  * `selected` -- solo `deselect` y `startMove`. Borrar no necesita un ghost
  * que suspender, asi que este hook lo trata como un efecto lateral fuera del
  * reductor: `pending` (propio, no del reductor) desactiva el boton mientras
- * la peticion esta en vuelo, y al acabar se dispara `deselect` en exito O en
- * fallo -- el item ya no existe en cualquiera de los dos casos si tuvo exito,
- * y si fallo seguir "seleccionando" un borrado que no ocurrio no aporta nada
- * que `error` no diga ya.
+ * la peticion esta en vuelo. Solo en exito se dispara `deselect`, porque el
+ * item ya no existe; en fallo la seleccion se mantiene para que el admin
+ * pueda reintentar, y `error` explica por que no se borro.
  */
 
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
