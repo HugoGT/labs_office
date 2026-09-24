@@ -122,18 +122,22 @@ describe('fetchLivekitToken', () => {
   });
 
   it('el rechazo trae LivekitTokenError con el status y el codigo del cuerpo de error', async () => {
+    // expect.assertions evita un pase vacio: si algun dia dejara de rechazar,
+    // el catch nunca correria y el test pasaria sin comprobar nada.
+    expect.assertions(3);
     const fetchImpl = vi.fn(async () => fakeResponse(403, { error: 'forbidden-space' }));
 
-    await fetchLivekitToken({ tokenUrl: TOKEN_URL, sessionId: 'abc', spaceId: 's1' }, fetchImpl).catch(
-      (err: unknown) => {
-        expect(err).toBeInstanceOf(LivekitTokenError);
-        expect((err as LivekitTokenError).status).toBe(403);
-        expect((err as LivekitTokenError).code).toBe('forbidden-space');
-      },
-    );
+    try {
+      await fetchLivekitToken({ tokenUrl: TOKEN_URL, sessionId: 'abc', spaceId: 's1' }, fetchImpl);
+    } catch (err) {
+      expect(err).toBeInstanceOf(LivekitTokenError);
+      expect((err as LivekitTokenError).status).toBe(403);
+      expect((err as LivekitTokenError).code).toBe('forbidden-space');
+    }
   });
 
   it('un cuerpo de error sin JSON valido igual rechaza con LivekitTokenError, codigo "unknown"', async () => {
+    expect.assertions(3);
     const fetchImpl = vi.fn(async () => ({
       ok: false,
       status: 503,
@@ -142,13 +146,12 @@ describe('fetchLivekitToken', () => {
       },
     }) as unknown as Response);
 
-    const rejection = fetchLivekitToken({ tokenUrl: TOKEN_URL, sessionId: 'abc' }, fetchImpl);
-
-    await rejection.catch((err: unknown) => {
+    try {
+      await fetchLivekitToken({ tokenUrl: TOKEN_URL, sessionId: 'abc' }, fetchImpl);
+    } catch (err) {
       expect(err).toBeInstanceOf(LivekitTokenError);
-      const tokenError = err as LivekitTokenError;
-      expect(tokenError.status).toBe(503);
-      expect(tokenError.code).toBe('unknown');
-    });
+      expect((err as LivekitTokenError).status).toBe(503);
+      expect((err as LivekitTokenError).code).toBe('unknown');
+    }
   });
 });
