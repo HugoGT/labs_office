@@ -203,6 +203,38 @@ describe('toLayoutEditCommand', () => {
     expect(command?.placing?.obstacles).toEqual([{ x0: 2, y0: 2, x1: 4, y1: 4 }]);
   });
 
+  it('placing usa obstacleItems (si se da) para el pre-chequeo, no items: pickable sigue viniendo de items', () => {
+    // Escenario del cruce desk<->room (#74, PR4 addition): `items` es lo
+    // pickable (p.ej. solo escritorios mientras se edita escritorios), pero
+    // el pre-chequeo de colocacion tiene que ver TAMBIEN las salas, que no
+    // son pickable en ese modo.
+    const onlyDesk: LayoutObstacleItem[] = [{ id: 'desk-1', kind: 'desk', x: 2, y: 2, w: 3, h: 3 }];
+    const roomObstacle: LayoutObstacleItem = { id: 'room-9', kind: 'room', x: 10, y: 10, w: 5, h: 5 };
+
+    const command = toLayoutEditCommand(
+      { tag: 'placing', kind: 'desk', mode: 'create' },
+      { items: onlyDesk, obstacleItems: [...onlyDesk, roomObstacle], placingSize: { w: 3, h: 3 } },
+    );
+
+    expect(command?.pickable).toEqual([{ id: 'desk-1', x0: 2, y0: 2, x1: 4, y1: 4 }]);
+    expect(command?.placing?.obstacles).toEqual([
+      { x0: 2, y0: 2, x1: 4, y1: 4 },
+      { x0: 10, y0: 10, x1: 14, y1: 14 },
+    ]);
+  });
+
+  it('sin obstacleItems, el pre-chequeo sigue usando items (compatibilidad hacia atras)', () => {
+    const command = toLayoutEditCommand(
+      { tag: 'placing', kind: 'room', mode: 'create' },
+      { items, placingSize: { w: 4, h: 4 } },
+    );
+
+    expect(command?.placing?.obstacles).toEqual([
+      { x0: 2, y0: 2, x1: 4, y1: 4 },
+      { x0: 10, y0: 10, x1: 14, y1: 14 },
+    ]);
+  });
+
   it('saving no expone pickable ni ghost: no hay nada que clicar mientras se guarda', () => {
     expect(toLayoutEditCommand({ tag: 'saving', kind: 'room' }, { items })).toEqual({
       pickable: [],

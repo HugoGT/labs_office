@@ -202,6 +202,14 @@ export interface LayoutEditCommand {
 
 export interface ToLayoutEditCommandOptions {
   items: readonly LayoutObstacleItem[];
+  /**
+   * Fuente del pre-chequeo de colocacion, si distinta de `items` (#74, PR4
+   * addition: editar escritorios pinta solo escritorios como pickable, pero
+   * el ghost tiene que ver TAMBIEN las salas, que no son pickable en ese
+   * modo). Ausente = usa `items`, mismo comportamiento que antes de esta
+   * opcion.
+   */
+  obstacleItems?: readonly LayoutObstacleItem[];
   /** Tamano del item en colocacion. Requerido solo mientras `state.tag === 'placing'`. */
   placingSize?: { w: number; h: number };
   /** Que excluir de los obstaculos mientras se mueve un item existente. Ausente al crear uno nuevo. */
@@ -228,7 +236,8 @@ export function toLayoutEditCommand(
   }
 
   const { w, h } = options.placingSize ?? { w: 0, h: 0 };
-  const obstacles = computeObstacles(options.items, options.moving ?? null).map(toObstacleTileRect);
+  const obstacleSource = options.obstacleItems ?? options.items;
+  const obstacles = computeObstacles(obstacleSource, options.moving ?? null).map(toObstacleTileRect);
 
   return { pickable, selectedId: null, placing: { w, h, obstacles } };
 }
