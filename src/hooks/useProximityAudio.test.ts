@@ -128,7 +128,7 @@ describe('useProximityAudio', () => {
     expect(connection.setDesiredAudioPeers).toHaveBeenCalledWith(['ana']);
   });
 
-  it('reenvia el conjunto de VIDEO por separado, aplicando la regla mas angosta (issue #17)', async () => {
+  it('reenvia el conjunto de VIDEO por separado: los mismos pares audibles, tambien en el pasillo (#75)', async () => {
     const bridge = createOfficeBridge();
     const connection = fakeConnection();
     const connect = vi.fn(async () => connection);
@@ -142,16 +142,17 @@ describe('useProximityAudio', () => {
       bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
     });
 
-    // Piso abierto (room null): audio ya deseado vacio, y video TAMBIEN vacio.
+    // Piso abierto sin pares: nada que pedir.
     expect(connection.setDesiredVideoPeers).toHaveBeenLastCalledWith([]);
 
     await act(async () => {
       bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: null });
     });
 
-    // Piso abierto con un par audible: audio lo pide, video NUNCA (D8/#17).
+    // Piso abierto con un par audible: el video sigue a la proximidad igual
+    // que el audio (#75). Antes se cortaba fuera de las salas (D8/#17).
     expect(connection.setDesiredAudioPeers).toHaveBeenLastCalledWith(['ana']);
-    expect(connection.setDesiredVideoPeers).toHaveBeenLastCalledWith([]);
+    expect(connection.setDesiredVideoPeers).toHaveBeenLastCalledWith(['ana']);
 
     await act(async () => {
       bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: 'Sala de Juntas' });

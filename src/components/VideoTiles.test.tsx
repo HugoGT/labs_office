@@ -158,12 +158,11 @@ describe('VideoTiles: self-tile ungated (issue #17, D8)', () => {
 });
 
 /**
- * Gate de video de PARES: solo dentro de una sala compartida (D8, decision
- * G). El retrato sigue existiendo siempre -- lo que cambia es solo el
- * contenido, nunca la existencia del tile.
+ * Peer video follows proximity everywhere (#75): the corridor used to hide it
+ * (D8), which left only audio outside the spaces.
  */
-describe('VideoTiles: gate de video de pares por sala (issue #17, D8)', () => {
-  it('en el piso abierto (room null), el par tiene tile pero SIN video, aunque haya una pista suscrita', () => {
+describe('VideoTiles: peer video in the corridor and in spaces (#75)', () => {
+  it('en el piso abierto (room null), el par muestra su video suscrito', () => {
     const peerTrack = fakeVideoTrack();
     const { bridge } = renderTiles({ videoTracks: new Map([['par-1', peerTrack]]) });
 
@@ -176,10 +175,8 @@ describe('VideoTiles: gate de video de pares por sala (issue #17, D8)', () => {
       });
     });
 
-    // El tile del par existe (con su placeholder, sin "portraits" emitido en
-    // este test), pero ningun <video> real: eso es lo que este test fija.
     expect(document.querySelector('[data-session-id="par-1"]')).not.toBeNull();
-    expect(document.querySelectorAll('video')).toHaveLength(0);
+    expect(document.querySelectorAll('video')).toHaveLength(1);
   });
 
   it('compartiendo sala, el par muestra su video real', () => {
