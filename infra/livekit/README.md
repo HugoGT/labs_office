@@ -11,7 +11,7 @@ Grabación real producida y verificada el 2026-08-23:
 |---|---|
 | LiveKit server arranca | v1.13.5, Redis conectado, 0 errores |
 | Egress se registra | `service ready`, `cpu available: 16 → max cost: 4` |
-| Bucket de grabaciones | `recordings` creado en MinIO |
+| Bucket de grabaciones | `recordings` creado en MinIO (reemplazado por GCS, issues #5/#58) |
 | Grabación → MinIO | `sala-prueba-*.mp4`, 6.4 MiB + manifiesto JSON |
 | El MP4 decodifica | H.264 Main 1280×720 @30fps + AAC 44.1 kHz estéreo, 18.2 s, seekable |
 
@@ -24,8 +24,7 @@ Escala por CPU, no por usuarios conectados.
 | Servicio | Rol |
 |---|---|
 | `livekit` | SFU: reparte los streams. No P2P — P2P no pasa de ~6 por sala (PRD 6.3) |
-| `egress` | Compone la sala en un Chrome headless y graba a MP4 |
-| `minio` | Almacenamiento S3-compatible propio para las grabaciones |
+| `egress` | Compone la sala en un Chrome headless, graba a MP4 y lo sube a GCS |
 | `redis` | Canal de control entre `livekit` y `egress`. Egress no funciona sin él |
 
 ## Uso
@@ -39,7 +38,6 @@ docker compose ps
 | Endpoint | Para qué |
 |---|---|
 | `http://localhost:7880` | LiveKit: señalización HTTP/WebSocket |
-| `http://localhost:9001` | consola web de MinIO (usuario/clave del `.env`) |
 
 Prueba end-to-end de grabación:
 
@@ -49,20 +47,77 @@ DURACION=45 ./test-recording.sh demo   # sala "demo", 45 s
 ```
 
 Publica vídeo de prueba, graba con Egress, y falla con exit ≠ 0 si el MP4 no
-aterriza en MinIO o pesa 0 B.
+aterriza en el bucket de GCS de desarrollo o pesa 0 B.
 
-Bajar todo (`-v` borra también las grabaciones):
+Bajar todo:
 
 ```sh
-docker compose down          # conserva el volumen de MinIO
-docker compose down -v       # borra las grabaciones
+docker compose down
 ```
+
+## Local recording (GCS dev bucket)
+
+Recordings go to Google Cloud Storage, in production and locally (issues #5,
+#58). MinIO is gone: GCS has no local emulator that LiveKit Egress can upload
+to, so local recording needs a real **dev** bucket (never the production one)
+and credentials mounted into the Egress container and given to the server.
+Without them the stack still starts and the office works; only recording fails
+(the server answers 503 `recording-not-configured` without a bucket).
+
+The server needs credentials that can SIGN (V4 URLs), and the shared project
+enforces `constraints/iam.disableServiceAccountKeyCreation`, so there are no
+key files. The keyless way is Application Default Credentials that impersonate
+a dev service account: the Go client in Egress and the Node client in the
+server both read that file, and signing goes through the IAM Credentials API.
+
+One-time setup (the dev bucket may live in the same project, it is separate
+from the deployed one):
+
+```sh
+PROJECT_ID=vaulted-channel-505114-f0
+BUCKET=${PROJECT_ID}-office-dev-recordings
+SA=office-dev-recorder@${PROJECT_ID}.iam.gserviceaccount.com
+ME=$(gcloud config get-value account)
+
+gcloud storage buckets create gs://${BUCKET} --project=${PROJECT_ID} \
+  --location=us-central1 --uniform-bucket-level-access --public-access-prevention
+# Same retention as production (RECORDING_RETENTION_DAYS, 30 days).
+gcloud storage buckets update gs://${BUCKET} \
+  --lifecycle-file=../gcp/recordings-lifecycle.json --clear-soft-delete
+
+gcloud iam service-accounts create office-dev-recorder --project=${PROJECT_ID}
+gcloud storage buckets add-iam-policy-binding gs://${BUCKET} \
+  --member=serviceAccount:${SA} --role=roles/storage.objectCreator
+gcloud storage buckets add-iam-policy-binding gs://${BUCKET} \
+  --member=serviceAccount:${SA} --role=roles/storage.objectViewer
+# You may act as (and sign as) the dev service account.
+gcloud iam service-accounts add-iam-policy-binding ${SA} --project=${PROJECT_ID} \
+  --member=user:${ME} --role=roles/iam.serviceAccountTokenCreator
+
+# Writes ~/.config/gcloud/application_default_credentials.json
+gcloud auth application-default login --impersonate-service-account=${SA}
+```
+
+Then:
+
+- `infra/livekit/.env`: `GCS_BUCKET=<bucket>` and
+  `GCS_CREDENTIALS_FILE=$HOME/.config/gcloud/application_default_credentials.json`
+  (absolute path). Compose mounts it into the Egress container as its
+  Application Default Credentials.
+- Root `.env` (the Node server): `RECORDING_GCS_BUCKET=<bucket>`. The server
+  finds the same ADC file on its own; `GOOGLE_APPLICATION_CREDENTIALS` is only
+  needed to point it elsewhere.
+
+Plain `gcloud auth application-default login` (without impersonation) uploads
+and checks objects but cannot sign URLs: 'Ver' and 'Descargar' would fail.
+Where service account keys are allowed, a key JSON works as well, in both
+places.
 
 ## Gotchas que costaron tiempo
 
-**1. El bloque `s3` del config de Egress NO es un destino por defecto.**
-El más caro de los cinco. Con `s3` configurado en `EGRESS_CONFIG_BODY` pero sin
-destino en el request, Egress no sube a S3: intenta una *escritura local* en la raíz
+**1. El bloque de storage (`s3`, `gcp`) del config de Egress NO es un destino por defecto.**
+El más caro de los cinco (observado con MinIO, antes de pasar a GCS). Con `s3`
+configurado en `EGRESS_CONFIG_BODY` pero sin destino en el request, Egress no sube: intenta una *escritura local* en la raíz
 del filesystem y muere con `Local upload failed: open /<archivo>.mp4: permission
 denied`. El destino va **en el request, dentro de cada `file_output`**. El síntoma
 engaña: la grabación funciona, el MP4 existe en `/home/egress/tmp/<egressID>/`, y
@@ -105,8 +160,8 @@ separado como dice el PRD. No la resolvimos porque no toca todavía.
 - **Travesía de NAT/firewall corporativo** — necesita IP pública y TLS.
 - **Escala.** Se validó con un publicador. El PRD apunta a 500 concurrentes; el SFU
   necesita CPU dedicada por participante activo y Egress transcodifica en tiempo real.
-- **Política de retención.** El PRD §13 avisa que el vídeo diario acumula varios
-  GB/semana. Aquí no hay ninguna regla de borrado.
+- **Política de retención.** Resuelta fuera de esta PoC: el bucket borra cada
+  grabación a los 30 días (`RECORDING_RETENTION_DAYS`, ver `infra/gcp/README.md`).
 
 ## Spike de compatibilidad `livekit-client` (slice 1 de `livekit-proximity-audio`, 2026-09-07)
 
@@ -121,12 +176,13 @@ dos páginas de Chromium (Playwright) y `livekit-client@2.22.3`.
 |---|---|---|
 | `livekit/livekit-server` | `v1.13.5` | `sha256:3497163e15c48fef6e7830c78716f9e9d5edc28abf7aa90b61c86e93bbc306b1` |
 | `livekit/egress` | `v1.14.1` | `sha256:bf2b648b947349c3e9ff7aa8c718f00378d5c06af7624652a3653318e00333ce` |
-| `minio/minio` | `RELEASE.2025-09-07T16-13-09Z` | `sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e` |
-| `minio/mc` | `RELEASE.2025-08-13T08-35-41Z` | `sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727` |
 | `redis` | `7.4.11-alpine` | `sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf` |
 
+El spike también pineó `minio/minio` y `minio/mc`; ambos salieron del compose
+cuando las grabaciones pasaron a GCS (issues #5/#58), así que ya no se listan.
+
 Solo la versión de `livekit-server` estaba en el registro de la validación anterior
-(este README, sección "Estado"). Las otras cuatro nunca se anotaron, así que
+(este README, sección "Estado"). Las otras cuatro (egress, redis y las dos de MinIO) nunca se anotaron, así que
 inventar un número habría falseado la validación: se resolvieron corriendo
 `docker compose pull` y luego `docker image inspect --format '{{index
 .RepoDigests 0}}'`, y el tag semántico/`RELEASE.*` de cada una se confirmó

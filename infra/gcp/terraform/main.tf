@@ -319,6 +319,85 @@ resource "google_project_iam_member" "vm_identity_toolkit_admin" {
 }
 
 # ---------------------------------------------------------------------------
+# Recordings (issues #5, #58)
+# ---------------------------------------------------------------------------
+
+# Egress uploads each recording here as MP4 (plus its JSON manifest), and the
+# server signs short-lived V4 URLs to watch or download it. Nothing is ever
+# public: access is the signed URL, and only participants of the recording get
+# one from the server.
+#
+# The name carries the project id because bucket names are GLOBAL across all of
+# GCP; `labs-office-test-recordings` alone could already belong to someone.
+resource "google_storage_bucket" "recordings" {
+  name = "${var.project_id}-${local.name}-recordings"
+  # Same region as the VM: Egress uploads and the readiness HEADs stay in
+  # region (no inter-region egress charge, lower latency).
+  location      = upper(var.region)
+  storage_class = "STANDARD"
+  labels        = local.labels
+
+  # IAM only, no per-object ACLs: the bindings below are the whole access
+  # story, and an ACL can never quietly make one recording public.
+  uniform_bucket_level_access = true
+  # Refuses allUsers/allAuthenticatedUsers bindings even if someone adds one.
+  public_access_prevention = "enforced"
+
+  # The retention: GCS deletes every object RECORDING_RETENTION_DAYS after it
+  # was created (uploaded), independently of the app. The app counts from the
+  # stop, which is never later than the upload, so it declares a recording
+  # expired no later than it disappears. Lifecycle actions are asynchronous
+  # and may land up to about a day after the object qualifies.
+  lifecycle_rule {
+    action {
+      type = "Delete"
+    }
+    condition {
+      age = var.recording_retention_days
+    }
+  }
+
+  # Without this, objects removed by the lifecycle rule would linger (and be
+  # billed) for the default 7-day soft delete window. "Lives one month" means
+  # one month.
+  soft_delete_policy {
+    retention_duration_seconds = 0
+  }
+
+  # A non-empty bucket holds user recordings: destroying it must be a
+  # deliberate `gcloud storage rm`, never a side effect of `terraform destroy`.
+  force_destroy = false
+}
+
+# Bucket-level, never project-level: the shared project hosts another bucket
+# that is not ours. Create (Egress uploads) plus read (the server's readiness
+# HEAD and the signed URLs, which act with the signer's own permissions). No
+# delete: the lifecycle rule is the only thing that removes recordings.
+resource "google_storage_bucket_iam_member" "vm_recordings_creator" {
+  bucket = google_storage_bucket.recordings.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.vm.email}"
+}
+
+resource "google_storage_bucket_iam_member" "vm_recordings_viewer" {
+  bucket = google_storage_bucket.recordings.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.vm.email}"
+}
+
+# V4 signed URLs from a GCE VM. The metadata server hands out access tokens but
+# no private key, so `@google-cloud/storage` signs through the IAM Credentials
+# `signBlob` API, which requires iam.serviceAccounts.signBlob on the signing
+# account ITSELF. Granted on this one service account, never on the project,
+# where it would let the VM mint tokens for every account in it (including the
+# foreign ones). Requires iamcredentials.googleapis.com enabled (README).
+resource "google_service_account_iam_member" "vm_signs_as_itself" {
+  service_account_id = google_service_account.vm.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.vm.email}"
+}
+
+# ---------------------------------------------------------------------------
 # VM
 # ---------------------------------------------------------------------------
 
@@ -416,6 +495,10 @@ resource "google_compute_instance" "office" {
     # iniciar sesion con una cuenta verificada de Identity Platform que tenga
     # ese correo, y solo mientras no exista ya un superadmin (issue #24).
     office-bootstrap-superadmin-email = var.bootstrap_superadmin_email
+
+    # Recordings bucket (issues #5, #58). Not a secret: the VM service account
+    # is what grants access. office-deploy writes it as RECORDING_GCS_BUCKET.
+    office-recording-bucket = google_storage_bucket.recordings.name
 
     # Vacio en el primer apply: todavia no hay imagenes publicadas. El script de
     # arranque escribe la configuracion y se detiene sin levantar nada hasta que

@@ -72,3 +72,8 @@ output "secret_ids" {
     identity_admin = var.enable_identity_admin_secret ? google_secret_manager_secret.identity_admin[0].secret_id : ""
   }
 }
+
+output "recording_bucket" {
+  description = "Recordings bucket (issues #5, #58). Egress uploads here; objects are deleted after var.recording_retention_days."
+  value       = google_storage_bucket.recordings.name
+}

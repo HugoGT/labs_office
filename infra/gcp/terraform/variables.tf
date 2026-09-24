@@ -108,3 +108,14 @@ variable "image_tag" {
   type        = string
   default     = ""
 }
+
+variable "recording_retention_days" {
+  description = "Days a recording lives in the bucket before the lifecycle rule deletes it (issues #5, #58). MUST equal RECORDING_RETENTION_DAYS in src/game/officeProtocol.ts: the app answers 410 recording-expired and shows \"Disponible hasta\" from that constant, and server/src/recording/retention.test.ts fails if the two drift."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.recording_retention_days >= 1
+    error_message = "recording_retention_days must be at least 1."
+  }
+}

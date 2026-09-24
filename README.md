@@ -53,7 +53,7 @@ prototype/                # prototipo standalone previo — solo referencia
 └── js/app.js             # motor completo: mapa, NPCs, proximidad, salas
 
 infra/livekit/            # stack self-hosted de audio/vídeo (PRD 6.3)
-├── docker-compose.yml    # livekit + egress + minio + redis
+├── docker-compose.yml    # livekit + egress + redis (grabaciones a GCS)
 ├── livekit.yaml
 ├── test-recording.sh     # prueba end-to-end de grabación
 └── README.md             # estado validado, gotchas y decisiones
@@ -74,7 +74,9 @@ el WebRTC self-hosted como **riesgo #1 del proyecto**, así que va antes del por
 del frontend.
 
 1. ~~LiveKit self-hosted y Egress grabando a MinIO~~ — **hecho y validado**.
-   Stack en `infra/livekit/`, grabación real verificada. Ver su README.
+   Stack en `infra/livekit/`, grabación real verificada. Ver su README. Desde
+   los issues #5/#58 las grabaciones van a Google Cloud Storage (MinIO retirado),
+   se conservan 30 días y se descargan con una URL firmada.
 2. Colyseus: WebSocket de posición (hoy los NPCs del prototipo son simulados).
 3. Port de `prototype/js/app.js` a módulos TypeScript y la UI DOM a React.
 4. Conectar el cliente al SDK de LiveKit para audio/vídeo por proximidad real.

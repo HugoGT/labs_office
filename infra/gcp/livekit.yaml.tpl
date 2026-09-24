@@ -10,7 +10,8 @@
 # Diferencias deliberadas con infra/livekit/livekit.yaml (la PoC local):
 #   - hay IP publica y certificados, asi que el TURN embebido se enciende
 #   - el rango UDP es el completo, no los 20 puertos de la PoC
-#   - no hay seccion `redis`: un solo nodo y sin Egress no coordina nada
+#   - `redis` on 127.0.0.1, not by service name: LiveKit runs on the host
+#     network (see docker-compose.yml)
 
 port: 7880
 
@@ -29,6 +30,12 @@ rtc:
   # LiveKit descubre la IP publica y anuncia esa. En la PoC iba en false porque
   # en localhost no hay nada que descubrir.
   use_external_ip: true
+
+# Control channel with Egress (issue #5): LiveKit hands recording requests to
+# Egress through Redis, and without this section every start fails. Redis is
+# published on the VM loopback only (docker-compose.yml), never outside it.
+redis:
+  address: 127.0.0.1:6379
 
 # TURN embebido, no coturn.
 #
