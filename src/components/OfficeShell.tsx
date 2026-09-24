@@ -160,6 +160,12 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
     unblockAudio,
     videoTracks,
     localVideoTrack,
+    screenShareOn,
+    screenShareAvailable,
+    toggleScreenShare,
+    screenShareTracks,
+    localScreenShareTrack,
+    activeScreenSharer,
   } = useProximityAudio(bridge, { config: livekitConfig, status, session });
 
   /**
@@ -214,6 +220,31 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
       );
     }
   }, [room]);
+
+  /**
+   * Who started sharing, for everyone in the space (#20). A takeover is a new
+   * start with a new sharer, so it is announced as well; a share ending is
+   * not. The same person sharing again after stopping is a new start.
+   */
+  const previousSharerRef = useRef<string | null>(null);
+  const sharerSessionId = activeScreenSharer?.sessionId ?? null;
+  const sharerName = activeScreenSharer?.name ?? null;
+
+  useEffect(() => {
+    if (sharerSessionId === previousSharerRef.current) return;
+    previousSharerRef.current = sharerSessionId;
+    if (sharerSessionId === null || sharerName === null) return;
+
+    setToastMessage(
+      sharerSessionId === selfSessionId ? (
+        'Empezaste a compartir tu pantalla'
+      ) : (
+        <>
+          <b>{sharerName}</b> empezó a compartir pantalla
+        </>
+      ),
+    );
+  }, [sharerSessionId, sharerName, selfSessionId]);
 
   /**
    * Recording is server-owned (#5): whether this room is being recorded is
@@ -520,6 +551,9 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
         videoTracks={videoTracks}
         speakers={speakers}
         localVideoTrack={localVideoTrack}
+        screenShareTracks={screenShareTracks}
+        localScreenShareTrack={localScreenShareTrack}
+        activeScreenSharer={activeScreenSharer?.sessionId ?? null}
       />
       <RecBadge visible={recording} />
       <ContextMenu menu={menu} onAction={handleMenuAction} onClose={closeMenu} />
@@ -536,6 +570,9 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
         onToggleMic={toggleMic}
         onToggleCam={toggleCam}
         onToggleRecord={() => void toggleRecording()}
+        screenShareOn={screenShareOn}
+        screenShareAvailable={screenShareAvailable}
+        onToggleScreenShare={toggleScreenShare}
         // #52: la barra solo avisa; quien sabe reconectar es la escena, y el
         // comando viaja por `emitCommand` como el resto -- sin metodo de
         // conveniencia en el puente.

@@ -18,6 +18,39 @@
 }
 
 /*
+ * Side column (#20): while a screen share holds the stage, the same tiles
+ * stack on the left, the same side the recording template puts the cameras,
+ * so the app and the recorded video look alike. Only the placement changes,
+ * never the tile size, so moving between row and column never resizes a video.
+ */
+.bar[data-layout='column'] {
+  top: 12px;
+  left: 12px;
+  bottom: 88px;
+  transform: none;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  max-width: none;
+  overflow: hidden;
+}
+
+/*
+ * Screen share stage (#20): everything between the top edge, the side column
+ * and the bottom bar. Informative only, like the bar: `pointer-events: none`
+ * keeps the office underneath clickable.
+ */
+.stage {
+  position: fixed;
+  top: 12px;
+  left: 200px;
+  right: 12px;
+  bottom: 88px;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/*
  * Tamaño FIJO, identico para todos: el tile no crece ni encoge con su
  * contenido (video, retrato o placeholder), asi que cambiar de contenido
  * nunca mueve a los vecinos de la fila.
@@ -55,6 +88,14 @@
 .videoHost {
   width: 100%;
   height: 100%;
+}
+
+/* A shared screen is shown whole: cropping would cut off the text on it (#20). */
+.screenVideo {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #0b0f17;
 }
 
 /* La camara SI llena el tile: recortar un video apaisado es lo esperado. */

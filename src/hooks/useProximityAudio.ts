@@ -82,7 +82,29 @@ export interface UseProximityAudioResult {
   speakers: ReadonlySet<string>;
   /** Camara propia, o `null` si esta apagada/no publicada. */
   localVideoTrack: AttachableTrack | null;
+  /** Own screen share is published right now (#20). Follows the room, not the click. */
+  screenShareOn: boolean;
+  /**
+   * Connected to a SPACE room (#20). Shares are for everyone in a space; the
+   * open floor never subscribes peer video, so there is nobody to share with.
+   */
+  screenShareAvailable: boolean;
+  toggleScreenShare: () => void;
+  /** Subscribed peer screen shares, keyed by sessionId, apart from `videoTracks` (#20). */
+  screenShareTracks: ReadonlyMap<string, AttachableTrack>;
+  /** Own screen share, or `null` when not sharing. */
+  localScreenShareTrack: AttachableTrack | null;
+  /** Holder of the single share slot of this space, with the name to announce (#20). */
+  activeScreenSharer: ActiveScreenSharer | null;
 }
+
+export interface ActiveScreenSharer {
+  sessionId: string;
+  name: string;
+}
+
+/** Name for a sharer this client has no name for yet (joined a moment ago). */
+const UNKNOWN_SHARER_NAME = 'Alguien';
 
 export function useProximityAudio(
   bridge: OfficeBridge,
@@ -102,6 +124,16 @@ export function useProximityAudio(
   const [videoTracks, setVideoTracks] = useState<ReadonlyMap<string, AttachableTrack>>(new Map());
   const [speakers, setSpeakers] = useState<ReadonlySet<string>>(new Set());
   const [localVideoTrack, setLocalVideoTrack] = useState<AttachableTrack | null>(null);
+  const [localScreenShareTrack, setLocalScreenShareTrack] = useState<AttachableTrack | null>(null);
+  const [screenShareTracks, setScreenShareTracks] = useState<ReadonlyMap<string, AttachableTrack>>(
+    new Map(),
+  );
+  const [activeScreenSharer, setActiveScreenSharer] = useState<ActiveScreenSharer | null>(null);
+  const [inSpaceRoom, setInSpaceRoom] = useState(false);
+  /** Names from the latest `voice` (self included), to announce who started sharing (#20). */
+  const namesRef = useRef<ReadonlyMap<string, string>>(new Map());
+  /** A share request in flight: the browser picker is open, a second click must not open another. */
+  const screenShareBusyRef = useRef(false);
   const connectionRef = useRef<LivekitRoomConnection | null>(null);
   /** Objetivo (sessionId, spaceId) conectado o en vuelo (#12, D7): reemplaza al `sessionRef` de solo-sesion, porque un cambio de espacio con la MISMA sesion tambien exige sala nueva. */
   const targetRef = useRef<VoiceTarget | null>(null);
@@ -182,7 +214,19 @@ export function useProximityAudio(
       setVideoTracks((current) => (current.size === 0 ? current : new Map()));
       setSpeakers((current) => (current.size === 0 ? current : new Set()));
       setLocalVideoTrack(null);
+      resetScreenShare();
       if (connection) await connection.disconnect();
+    }
+
+    /**
+     * No share outlives the room that reported it (#20). Same identity rule
+     * as the collections above: an already empty map is kept as it is.
+     */
+    function resetScreenShare(): void {
+      setInSpaceRoom(false);
+      setLocalScreenShareTrack(null);
+      setScreenShareTracks((current) => (current.size === 0 ? current : new Map()));
+      setActiveScreenSharer(null);
     }
 
     /** Callbacks de `connect()` atados a `generation`: un aviso tardio de un intento ya reemplazado no debe corromper el estado actual (D6 de #18; generacion, no VALOR, hallazgo #1). */
@@ -218,6 +262,31 @@ export function useProximityAudio(
         onActiveSpeakersChanged: (identities) => {
           if (!isCurrent()) return;
           setSpeakers(new Set(identities));
+        },
+        onScreenShareTrackSubscribed: (sessionId, track) => {
+          if (!isCurrent()) return;
+          setScreenShareTracks((current) => new Map(current).set(sessionId, track));
+        },
+        onScreenShareTrackUnsubscribed: (sessionId) => {
+          if (!isCurrent()) return;
+          setScreenShareTracks((current) => {
+            if (!current.has(sessionId)) return current;
+            const next = new Map(current);
+            next.delete(sessionId);
+            return next;
+          });
+        },
+        onLocalScreenShareChanged: (track) => {
+          if (!isCurrent()) return;
+          setLocalScreenShareTrack(track);
+        },
+        onActiveScreenSharerChanged: (sessionId) => {
+          if (!isCurrent()) return;
+          setActiveScreenSharer(
+            sessionId === null
+              ? null
+              : { sessionId, name: namesRef.current.get(sessionId) ?? UNKNOWN_SHARER_NAME },
+          );
         },
       };
     }
@@ -290,6 +359,7 @@ export function useProximityAudio(
             const oldConnection = connectionRef.current;
             connectionRef.current = connection;
             setAudioAvailable(true);
+            setInSpaceRoom(true);
             reapplyPublishIntent(connection);
             applyDesired(connection);
             if (oldConnection) void oldConnection.disconnect();
@@ -311,6 +381,10 @@ export function useProximityAudio(
       targetRef.current = target;
       const oldConnection = connectionRef.current;
       connectionRef.current = null;
+      // A new room starts without shares, and the own one is not republished:
+      // capturing the screen again needs the browser picker, and only a click
+      // can open it.
+      resetScreenShare();
       // Arranca el disconnect viejo SIN esperarlo, solapado con el token nuevo (D7); se espera justo antes de `connect()`.
       const disconnecting = oldConnection ? oldConnection.disconnect() : Promise.resolve();
 
@@ -342,6 +416,8 @@ export function useProximityAudio(
           connectionRef.current = connection;
           if (stale) void stale.disconnect();
           setAudioAvailable(true);
+          // Fallen back to the corridor (D5) is not a space: no sharing there.
+          setInSpaceRoom(target.spaceId !== null && !acquired.corridor);
           reapplyPublishIntent(connection);
           applyDesired(connection); // D1: lo ultimo conocido, no la instantanea capturada al arrancar.
 
@@ -361,6 +437,10 @@ export function useProximityAudio(
       }
       if (config === null) return;
 
+      namesRef.current = new Map([
+        [payload.selfSessionId, payload.selfName],
+        ...payload.peers.map((peer): [string, string] => [peer.sessionId, peer.name]),
+      ]);
       const audibleSessionIds = payload.peers.map((peer) => peer.sessionId);
       // Se guarda ANTES de la rama de abajo (D1): sirve tanto a la conexion viva como a la que sigue en vuelo.
       desiredRef.current = { sessionIds: audibleSessionIds, spaceId: payload.spaceId };
@@ -417,6 +497,7 @@ export function useProximityAudio(
     if (!connection) return;
     void connection.setMicrophoneEnabled(false);
     void connection.setCameraEnabled(false);
+    void connection.setScreenShareEnabled(false);
   }, [dnd, audioAvailable]);
 
   /**
@@ -450,6 +531,23 @@ export function useProximityAudio(
     })();
   }, [camOn, dnd]);
 
+  const screenShareAvailable = audioAvailable && inSpaceRoom;
+  const screenShareOn = localScreenShareTrack !== null;
+
+  /**
+   * Only ASKS (#20): whether the share is on is what the room reports through
+   * `onLocalScreenShareChanged`, because it can also end without this toggle
+   * (browser bar, a takeover) and the button must never stay lit by itself.
+   */
+  const toggleScreenShare = useCallback(() => {
+    const connection = connectionRef.current;
+    if (!connection || dnd || !screenShareAvailable || screenShareBusyRef.current) return;
+    screenShareBusyRef.current = true;
+    void connection.setScreenShareEnabled(!screenShareOn).finally(() => {
+      screenShareBusyRef.current = false;
+    });
+  }, [dnd, screenShareAvailable, screenShareOn]);
+
   return {
     micOn,
     camOn,
@@ -462,5 +560,11 @@ export function useProximityAudio(
     videoTracks,
     speakers,
     localVideoTrack,
+    screenShareOn,
+    screenShareAvailable,
+    toggleScreenShare,
+    screenShareTracks,
+    localScreenShareTrack,
+    activeScreenSharer,
   };
 }

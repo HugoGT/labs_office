@@ -22,6 +22,11 @@ export interface VideoTileProps {
   track: AttachableTrack | null;
   /** Habla real reportada por `RoomEvent.ActiveSpeakersChanged` (D7): binario, nunca un nivel. */
   speaking: boolean;
+  /**
+   * `cover` crops a camera to fill the tile. A screen share is `contain`
+   * (#20): cropping it would cut off the text people share it to read.
+   */
+  fit?: 'cover' | 'contain';
 }
 
 /**
@@ -40,7 +45,7 @@ export const PORTRAIT_SCALE = 3;
  * de bits que ya pinta el avatar en el canvas (D1). Nombre y borde de habla
  * se muestran en ambos estados, sin salto de layout entre ellos.
  */
-export function VideoTile({ sessionId, name, portraits, track, speaking }: VideoTileProps) {
+export function VideoTile({ sessionId, name, portraits, track, speaking, fit = 'cover' }: VideoTileProps) {
   const videoHostRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -50,7 +55,7 @@ export function VideoTile({ sessionId, name, portraits, track, speaking }: Video
 
     const element = track.attach();
     element.autoplay = true;
-    element.className = styles.video;
+    element.className = fit === 'contain' ? styles.screenVideo : styles.video;
     host.appendChild(element);
 
     return () => {
@@ -60,7 +65,7 @@ export function VideoTile({ sessionId, name, portraits, track, speaking }: Video
       for (const detached of track.detach()) detached.remove();
       element.remove();
     };
-  }, [track]);
+  }, [track, fit]);
 
   const dataUrl = portraits?.[avatarKeyFor(sessionId)];
 

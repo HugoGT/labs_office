@@ -33,6 +33,9 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
     onToggleCam: vi.fn(),
     onToggleRecord: vi.fn(),
     onRetryConnection: vi.fn(),
+    screenShareOn: false,
+    screenShareAvailable: true,
+    onToggleScreenShare: vi.fn(),
     ...overrides,
   };
   render(<BottomBar {...props} />);
@@ -93,6 +96,9 @@ describe('BottomBar', () => {
         onToggleCam={vi.fn()}
         onToggleRecord={vi.fn()}
         onRetryConnection={vi.fn()}
+        screenShareOn={false}
+        screenShareAvailable={false}
+        onToggleScreenShare={vi.fn()}
       />,
     );
     expect(screen.getByText('proximidad').tagName).toBe('B');
@@ -112,6 +118,9 @@ describe('BottomBar', () => {
         onToggleCam={vi.fn()}
         onToggleRecord={vi.fn()}
         onRetryConnection={vi.fn()}
+        screenShareOn={false}
+        screenShareAvailable={false}
+        onToggleScreenShare={vi.fn()}
       />,
     );
     expect(screen.getByText('Cafeteria').tagName).toBe('B');
@@ -198,6 +207,9 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
         onToggleCam={vi.fn()}
         onToggleRecord={vi.fn()}
         onRetryConnection={vi.fn()}
+        screenShareOn={false}
+        screenShareAvailable={false}
+        onToggleScreenShare={vi.fn()}
       />,
     );
     // El punto es decorativo y no lleva marcado de prueba: se alcanza desde
@@ -220,6 +232,9 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
         onToggleCam={vi.fn()}
         onToggleRecord={vi.fn()}
         onRetryConnection={vi.fn()}
+        screenShareOn={false}
+        screenShareAvailable={false}
+        onToggleScreenShare={vi.fn()}
       />,
     );
     expect(dot).toHaveStyle({ background: statusCssColor('r') });
@@ -317,6 +332,9 @@ describe('BottomBar: reconexion (issue #52)', () => {
         onToggleCam={vi.fn()}
         onToggleRecord={vi.fn()}
         onRetryConnection={vi.fn()}
+        screenShareOn={false}
+        screenShareAvailable={false}
+        onToggleScreenShare={vi.fn()}
       />,
     );
     const conectado = screen.getByText('🟢 1 en línea').getAttribute('title');
@@ -336,6 +354,9 @@ describe('BottomBar: reconexion (issue #52)', () => {
         onToggleCam={vi.fn()}
         onToggleRecord={vi.fn()}
         onRetryConnection={vi.fn()}
+        screenShareOn={false}
+        screenShareAvailable={false}
+        onToggleScreenShare={vi.fn()}
       />,
     );
 
@@ -377,5 +398,60 @@ describe('BottomBar: reconexion (issue #52)', () => {
     await user.click(screen.getByRole('button', { name: /Reintentar/ }));
 
     expect(props.onRetryConnection).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('BottomBar: screen share button (#20)', () => {
+  it('reflects screenShareOn and only asks through onToggleScreenShare', async () => {
+    const user = userEvent.setup();
+    const props = renderBar({ screenShareOn: false });
+
+    const button = screen.getByRole('button', { name: 'Compartir pantalla' });
+    expect(button).toHaveAttribute('aria-pressed', 'false');
+    await user.click(button);
+
+    expect(props.onToggleScreenShare).toHaveBeenCalledTimes(1);
+    expect(props.onToggleMic).not.toHaveBeenCalled();
+  });
+
+  it('while sharing it offers to stop', () => {
+    renderBar({ screenShareOn: true });
+
+    expect(screen.getByRole('button', { name: 'Dejar de compartir' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('without LiveKit it is disabled with the same title as mic and camera', () => {
+    renderBar({ audioAvailable: false, screenShareAvailable: false });
+
+    const button = screen.getByRole('button', { name: 'Compartir pantalla' });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('title', 'Audio no disponible: sin conexion a LiveKit');
+  });
+
+  it('outside a space it is disabled and says why', () => {
+    renderBar({ audioAvailable: true, screenShareAvailable: false });
+
+    const button = screen.getByRole('button', { name: 'Compartir pantalla' });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('title', 'Solo disponible dentro de una sala');
+  });
+
+  it('in "No molestar" it is disabled with the reason the user can undo', () => {
+    renderBar({ status: 'r' });
+
+    const button = screen.getByRole('button', { name: 'Compartir pantalla' });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('title', 'No molestar: no compartes pantalla');
+  });
+
+  it('inside a space with LiveKit it is enabled, without a title', () => {
+    renderBar({ audioAvailable: true, screenShareAvailable: true });
+
+    const button = screen.getByRole('button', { name: 'Compartir pantalla' });
+    expect(button).toBeEnabled();
+    expect(button).not.toHaveAttribute('title');
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { egressFromEnv, gcsFileOutput, livekitApiUrlFrom } from './egressPort.ts';
+import { RECORDING_LAYOUT, egressFromEnv, gcsFileOutput, livekitApiUrlFrom } from './egressPort.ts';
 
 const COMPLETE = {
   LIVEKIT_API_KEY: 'devkey',
@@ -49,5 +49,15 @@ describe('gcsFileOutput', () => {
     const file = gcsFileOutput('b', 'k.mp4');
 
     expect(file.output.case === 'gcp' && file.output.value.credentials).toBe('');
+  });
+});
+
+describe('RECORDING_LAYOUT (#20)', () => {
+  it('stays grid: the Egress template itself turns grid into speaker while a screen share is up', () => {
+    // livekit/egress v1.14.1 template-default/src/Room.tsx swaps `grid` for
+    // `speaker` whenever a screen share is subscribed, and `speaker` puts the
+    // share in the focus area with the cameras in a side carousel. `speaker`
+    // here would also make every recording WITHOUT a share speaker-focused.
+    expect(RECORDING_LAYOUT).toBe('grid');
   });
 });

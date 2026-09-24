@@ -67,6 +67,12 @@ function proximityAudio(
     videoTracks: new Map(),
     speakers: new Set(),
     localVideoTrack: null,
+    screenShareOn: false,
+    screenShareAvailable: false,
+    toggleScreenShare: vi.fn(),
+    screenShareTracks: new Map(),
+    localScreenShareTrack: null,
+    activeScreenSharer: null,
     ...overrides,
   };
 }
@@ -1016,5 +1022,74 @@ describe('OfficeShell: editor de decoracion (#7, slice 6)', () => {
     expect(fetchDeskCatalog).not.toHaveBeenCalled();
     expect(fetchMyDeskItems).not.toHaveBeenCalled();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+
+describe('OfficeShell: screen share (#20)', () => {
+  const SELF = 'ses-me';
+
+  function renderInSpace() {
+    const rendered = render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    act(() => bridge.emit('voice', { selfSessionId: SELF, selfName: 'Yo', peers: [], spaceId: 'space-stub' }));
+    return { ...rendered, bridge };
+  }
+
+  function share(sessionId: string, name: string) {
+    useProximityAudioMock.mockReturnValue(proximityAudio({ activeScreenSharer: { sessionId, name } }));
+  }
+
+  it('everyone in the space is told who started sharing, the name in <b>', () => {
+    const { rerender } = renderInSpace();
+
+    share('ses-ana', 'Ana');
+    rerender(<OfficeShell />);
+
+    expect(screen.getByText(/empezó a compartir pantalla/)).toBeInTheDocument();
+    expect(screen.getByText('Ana').tagName).toBe('B');
+  });
+
+  it('a takeover is announced too, with the new sharer', () => {
+    const { rerender } = renderInSpace();
+    share('ses-ana', 'Ana');
+    rerender(<OfficeShell />);
+
+    share('ses-beto', 'Beto');
+    rerender(<OfficeShell />);
+
+    expect(screen.getByText('Beto').tagName).toBe('B');
+    expect(screen.queryByText('Ana')).not.toBeInTheDocument();
+  });
+
+  it('the sharer is told in the second person', () => {
+    const { rerender } = renderInSpace();
+
+    share(SELF, 'Yo');
+    rerender(<OfficeShell />);
+
+    expect(screen.getByText('Empezaste a compartir tu pantalla')).toBeInTheDocument();
+  });
+
+  it('the same person sharing again after stopping is announced again', () => {
+    const { rerender } = renderInSpace();
+    share('ses-ana', 'Ana');
+    rerender(<OfficeShell />);
+
+    useProximityAudioMock.mockReturnValue(proximityAudio({ activeScreenSharer: null }));
+    rerender(<OfficeShell />);
+    share('ses-ana', 'Ana');
+    rerender(<OfficeShell />);
+
+    expect(screen.getByText(/empezó a compartir pantalla/)).toBeInTheDocument();
+  });
+
+  it('hands the share state to the bottom bar and the tiles', () => {
+    useProximityAudioMock.mockReturnValue(
+      proximityAudio({ audioAvailable: true, screenShareAvailable: true, screenShareOn: true }),
+    );
+
+    renderInSpace();
+
+    expect(screen.getByRole('button', { name: 'Dejar de compartir' })).toBeEnabled();
   });
 });

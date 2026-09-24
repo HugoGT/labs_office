@@ -34,6 +34,11 @@ export interface BottomBarProps {
    * mucho menos un servidor al que volver.
    */
   onRetryConnection: () => void;
+  /** Own screen share is published (#20). */
+  screenShareOn: boolean;
+  /** Connected to a space room: shares are per space, never on the open floor (#20). */
+  screenShareAvailable: boolean;
+  onToggleScreenShare: () => void;
 }
 
 /** Explica el `disabled` de mic/camara cuando no hay conexion viva a LiveKit. */
@@ -41,6 +46,11 @@ const AUDIO_UNAVAILABLE_TITLE = 'Audio no disponible: sin conexion a LiveKit';
 
 /** El otro motivo de `disabled`, y el unico que el usuario puede deshacer solo. */
 const DND_TITLE = 'No molestar: no publicas micrófono ni cámara';
+
+/** Same reason and wording as the record button: both only exist inside a space. */
+const ONLY_IN_SPACE_TITLE = 'Solo disponible dentro de una sala';
+
+const SCREEN_SHARE_DND_TITLE = 'No molestar: no compartes pantalla';
 
 /**
  * Un title por estado de sesion (#52). Reciclar el de "conectado" para la
@@ -74,6 +84,9 @@ export function BottomBar({
   onToggleCam,
   onToggleRecord,
   onRetryConnection,
+  screenShareOn,
+  screenShareAvailable,
+  onToggleScreenShare,
 }: BottomBarProps) {
   // Se deriva del estado en vez de recibirse como prop propia: dos fuentes
   // para el mismo hecho acabarian discrepando en algun render.
@@ -82,6 +95,15 @@ export function BottomBar({
   // El motivo que el usuario puede deshacer va primero: sin LiveKit no hay
   // nada que hacer desde aqui, pero salir de "No molestar" esta a un clic.
   const audioTitle = dnd ? DND_TITLE : audioAvailable ? undefined : AUDIO_UNAVAILABLE_TITLE;
+  // Same order of reasons, plus the one only sharing has: being in a space.
+  const screenShareDisabled = audioDisabled || !screenShareAvailable;
+  const screenShareTitle = dnd
+    ? SCREEN_SHARE_DND_TITLE
+    : !audioAvailable
+      ? AUDIO_UNAVAILABLE_TITLE
+      : screenShareAvailable
+        ? undefined
+        : ONLY_IN_SPACE_TITLE;
 
   return (
     <div className={styles.bar}>
@@ -151,8 +173,18 @@ export function BottomBar({
       <button
         type="button"
         className={styles.btn}
+        aria-pressed={screenShareOn}
+        disabled={screenShareDisabled}
+        title={screenShareTitle}
+        onClick={onToggleScreenShare}
+      >
+        {screenShareOn ? 'Dejar de compartir' : 'Compartir pantalla'}
+      </button>
+      <button
+        type="button"
+        className={styles.btn}
         disabled={room === null}
-        title={room === null ? 'Solo disponible dentro de una sala' : undefined}
+        title={room === null ? ONLY_IN_SPACE_TITLE : undefined}
         onClick={onToggleRecord}
       >
         {recording ? '⏹ Detener' : '⏺ Grabar'}
