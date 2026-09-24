@@ -160,6 +160,9 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
     unblockAudio,
     videoTracks,
     localVideoTrack,
+    screenShareOn,
+    screenShareAvailable,
+    toggleScreenShare,
   } = useProximityAudio(bridge, { config: livekitConfig, status, session });
 
   /**
@@ -536,6 +539,9 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
         onToggleMic={toggleMic}
         onToggleCam={toggleCam}
         onToggleRecord={() => void toggleRecording()}
+        screenShareOn={screenShareOn}
+        screenShareAvailable={screenShareAvailable}
+        onToggleScreenShare={toggleScreenShare}
         // #52: la barra solo avisa; quien sabe reconectar es la escena, y el
         // comando viaja por `emitCommand` como el resto -- sin metodo de
         // conveniencia en el puente.
