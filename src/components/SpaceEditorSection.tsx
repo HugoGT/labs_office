@@ -30,6 +30,8 @@ export interface SpaceEditorSectionProps {
   onEditingChange?: (editing: boolean) => void;
   /** Flanco a `true` fuerza salir del modo edicion, mismo patron que `DeskEditorSection.forceExit`. */
   forceExit?: boolean;
+  /** Se llama ANTES de `editor.enter()` (#74, PR4 correction): ver `DeskEditorSection.onRequestActive`. */
+  onRequestActive?: () => void;
 }
 
 interface CreateFormValues {
@@ -64,6 +66,7 @@ export function SpaceEditorSection({
   refreshSpaces,
   onEditingChange,
   forceExit = false,
+  onRequestActive,
 }: SpaceEditorSectionProps) {
   const editor = useSpaceEditor({ bridge, spaces, desks, refreshDesks, refreshSpaces });
   const [form, setForm] = useState<CreateFormValues>(EMPTY_FORM);
@@ -95,10 +98,15 @@ export function SpaceEditorSection({
     }
   }, [editor.state, editor.error]);
 
+  function handleEnter(): void {
+    onRequestActive?.();
+    editor.enter();
+  }
+
   if (!active) {
     return (
       <div className={styles.section}>
-        <button type="button" className={styles.enter} onClick={editor.enter}>
+        <button type="button" className={styles.enter} onClick={handleEnter}>
           Editar salas
         </button>
       </div>

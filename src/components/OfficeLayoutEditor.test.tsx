@@ -1,8 +1,9 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { AdminSpace, SpacesAdminPort } from '../dashboard/spacesAdminPort';
+import type { LayoutEditCommand } from '../game/layoutEditor';
 import { createOfficeBridge } from '../game/officeBridge';
 import OfficeLayoutEditor from './OfficeLayoutEditor';
 
@@ -106,5 +107,93 @@ describe('OfficeLayoutEditor (#74, PR4): monta ambas secciones', () => {
 
     expect(screen.queryByRole('button', { name: /Salir/ })).not.toBeInTheDocument();
     expect(onEditingChange).toHaveBeenLastCalledWith(false);
+  });
+});
+
+/**
+ * Exclusividad entre las dos secciones (#74, PR4 correction): las dos son
+ * reductores separados sobre el MISMO overlay (`LayoutEditLayer`), asi que a
+ * lo sumo una puede estar activa. Ver la nota de cabecera de este archivo.
+ */
+describe('OfficeLayoutEditor (#74, PR4 correction): exclusividad escritorios<->salas', () => {
+  it('entrar en salas mientras escritorios esta activo saca a escritorios: solo queda un boton "Salir"', async () => {
+    renderEditor();
+
+    await userEvent.click(screen.getByRole('button', { name: /Editar escritorios/ }));
+    expect(await screen.findByText('Mesa 4')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
+
+    expect(screen.getAllByRole('button', { name: /Salir/ })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: /Editar escritorios/ })).toBeInTheDocument();
+  });
+
+  it('entrar en escritorios mientras salas esta activo saca a salas: solo queda un boton "Salir"', async () => {
+    renderEditor();
+
+    await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
+    expect(await screen.findByText('Sala grande')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /Editar escritorios/ }));
+
+    expect(screen.getAllByRole('button', { name: /Salir/ })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: /Editar salas/ })).toBeInTheDocument();
+  });
+
+  it('entrar en salas mientras escritorios esta activo: el bridge recibe null (sale escritorios) y LUEGO el comando de salas, en ese orden', async () => {
+    const bridge = createOfficeBridge();
+    const commands: (LayoutEditCommand | null)[] = [];
+    bridge.onCommand('layoutedit', (command) => commands.push(command));
+    render(
+      <OfficeLayoutEditor
+        bridge={bridge}
+        desks={fakeDesks()}
+        spaces={fakeSpaces()}
+        refreshDesks={vi.fn()}
+        refreshSpaces={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /Editar escritorios/ }));
+    await screen.findByText('Mesa 4');
+    const before = commands.length;
+
+    await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
+
+    // Las salas todavia no han terminado de cargar en este instante sincrono
+    // (`listSpaces()` es async): el comando real de salas todavia pinta
+    // `pickable: []`, pero YA es un comando de salas, no el `null` de
+    // escritorios saliendo -- eso es justo lo que ordena esta asercion.
+    expect(commands.slice(before, before + 2)).toEqual([
+      null,
+      { pickable: [], selectedId: null, placing: null },
+    ]);
+  });
+
+  it('un layoutpick lo atiende solo la seccion activa: seleccionar una sala no reactiva ni "selecciona" nada en escritorios', async () => {
+    const bridge = createOfficeBridge();
+    render(
+      <OfficeLayoutEditor
+        bridge={bridge}
+        desks={fakeDesks()}
+        spaces={fakeSpaces()}
+        refreshDesks={vi.fn()}
+        refreshSpaces={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /Editar escritorios/ }));
+    await screen.findByText('Mesa 4');
+    await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
+    await screen.findByText('Sala grande');
+
+    act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
+
+    // La seccion activa (salas) SI reacciona: la sala pasa a seleccionada.
+    expect(await screen.findByRole('button', { name: /^Mover/ })).toBeInTheDocument();
+    // Escritorios sigue fuera de edicion -- el hook, ya en `off`, ignora el
+    // mismo evento en vez de "seleccionar" el id de una sala como si fuese un
+    // escritorio.
+    expect(screen.getByRole('button', { name: /Editar escritorios/ })).toBeInTheDocument();
   });
 });

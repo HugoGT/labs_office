@@ -1,4 +1,5 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import type { OfficeBridge } from '../game/officeBridge';
@@ -17,6 +18,22 @@ import { SpaceEditorSection } from './SpaceEditorSection';
  *
  * Export por defecto a proposito: es lo que `React.lazy` espera, mismo
  * criterio que `DashboardRoute.tsx`.
+ *
+ * ## Exclusividad escritorios<->salas (#74, PR4 correction)
+ *
+ * Las dos secciones son reductores SEPARADOS que emiten al MISMO overlay
+ * (`LayoutEditLayer`, un unico `bridge.emitCommand('layoutedit', ...)`): sin
+ * nada que lo impida, las dos podian entrar a la vez y "quien emite ultimo
+ * gana" -- el `null` de una al salir podia apagar el overlay que la otra
+ * seguia usando. `activeSection` es la unica fuente de verdad de "cual, si
+ * alguna" -- mismo patron rising-edge que `forceExitLayoutEditing` (decor),
+ * pero ADEMAS envuelto en `flushSync`: sin eso, el `exit()` de la seccion
+ * saliente (disparado por su propio efecto de `forceExit`, no por el mismo
+ * dispatch sincrono que el `enter()` de la entrante) siempre aterriza UN
+ * render despues -- su `null` llegaria SIEMPRE despues del comando nuevo,
+ * jamas antes, sin importar el orden en el JSX. `flushSync` fuerza a que ese
+ * `exit()` -- y el `null` que su propio efecto emite -- se resuelva del todo
+ * ANTES de que el `enter()` de la seccion entrante se dispare siquiera.
  */
 
 export interface OfficeLayoutEditorProps {
@@ -28,6 +45,8 @@ export interface OfficeLayoutEditorProps {
   onEditingChange?: (editing: boolean) => void;
   forceExit?: boolean;
 }
+
+type LayoutEditorSection = 'desk' | 'room';
 
 export default function OfficeLayoutEditor({
   bridge,
@@ -43,6 +62,9 @@ export default function OfficeLayoutEditor({
   // "cualquiera de las dos lo esta", no solo escritorios.
   const [deskEditing, setDeskEditing] = useState(false);
   const [spaceEditing, setSpaceEditing] = useState(false);
+  // Cual seccion, si alguna, tiene derecho al overlay compartido ahora mismo
+  // -- ver la nota de cabecera "Exclusividad escritorios<->salas".
+  const [activeSection, setActiveSection] = useState<LayoutEditorSection | null>(null);
 
   const handleDeskEditingChange = useCallback(
     (editing: boolean) => {
@@ -60,6 +82,25 @@ export default function OfficeLayoutEditor({
     [onEditingChange, deskEditing],
   );
 
+  // Cada seccion pide "activarme" ANTES de dispararse a si misma un `enter`
+  // (ver `handleEnter` en `DeskEditorSection.tsx`/`SpaceEditorSection.tsx`).
+  // `flushSync` es lo que garantiza el orden -- ver la nota de cabecera.
+  const requestActive = useCallback((section: LayoutEditorSection) => {
+    flushSync(() => setActiveSection(section));
+  }, []);
+
+  // Autocorreccion: si la seccion que `activeSection` sigue senalando como
+  // activa sale por SU CUENTA -- su propio "Salir", o el `forceExit` externo
+  // de `DeskDecorEditor` -- hay que soltarla tambien. Sin esto se quedaria
+  // forzando para siempre la salida de la OTRA seccion aunque ya no hubiese
+  // nada activo.
+  useEffect(() => {
+    if (activeSection === 'desk' && !deskEditing) setActiveSection(null);
+  }, [activeSection, deskEditing]);
+  useEffect(() => {
+    if (activeSection === 'room' && !spaceEditing) setActiveSection(null);
+  }, [activeSection, spaceEditing]);
+
   return (
     <>
       <DeskEditorSection
@@ -69,7 +110,8 @@ export default function OfficeLayoutEditor({
         refreshDesks={refreshDesks}
         refreshSpaces={refreshSpaces}
         onEditingChange={handleDeskEditingChange}
-        forceExit={forceExit}
+        forceExit={(forceExit ?? false) || activeSection === 'room'}
+        onRequestActive={() => requestActive('desk')}
       />
       <SpaceEditorSection
         bridge={bridge}
@@ -78,7 +120,8 @@ export default function OfficeLayoutEditor({
         refreshDesks={refreshDesks}
         refreshSpaces={refreshSpaces}
         onEditingChange={handleSpaceEditingChange}
-        forceExit={forceExit}
+        forceExit={(forceExit ?? false) || activeSection === 'desk'}
+        onRequestActive={() => requestActive('room')}
       />
     </>
   );

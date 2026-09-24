@@ -30,6 +30,13 @@ export interface DeskEditorSectionProps {
   onEditingChange?: (editing: boolean) => void;
   /** Flanco a `true` fuerza salir del modo edicion, mismo patron que `OfficeSidebar.forceCollapsed`. */
   forceExit?: boolean;
+  /**
+   * Se llama ANTES de `editor.enter()` (#74, PR4 correction: exclusividad
+   * con `SpaceEditorSection`). `OfficeLayoutEditor` lo usa para sacar a la
+   * otra seccion -- envuelto en `flushSync` de su lado, para que ese `exit`
+   * quede resuelto del todo antes de que este `enter()` se dispare.
+   */
+  onRequestActive?: () => void;
 }
 
 export function DeskEditorSection({
@@ -40,6 +47,7 @@ export function DeskEditorSection({
   refreshSpaces,
   onEditingChange,
   forceExit = false,
+  onRequestActive,
 }: DeskEditorSectionProps) {
   const editor = useLayoutEditor({ bridge, desks, spaces, refreshDesks, refreshSpaces });
   const [label, setLabel] = useState('');
@@ -76,10 +84,15 @@ export function DeskEditorSection({
     }
   }, [editor.state, editor.error]);
 
+  function handleEnter(): void {
+    onRequestActive?.();
+    editor.enter();
+  }
+
   if (!active) {
     return (
       <div className={styles.section}>
-        <button type="button" className={styles.enter} onClick={editor.enter}>
+        <button type="button" className={styles.enter} onClick={handleEnter}>
           Editar escritorios
         </button>
       </div>

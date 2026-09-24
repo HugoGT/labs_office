@@ -1418,4 +1418,32 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
     expect(screen.queryByRole('button', { name: /Decorar/ })).not.toBeInTheDocument();
     expect(vi.mocked(releaseDesk)).not.toHaveBeenCalled();
   });
+
+  /**
+   * `layoutEditing` en `OfficeShell` viene de `onLayoutEditingChange`, que
+   * `OfficeLayoutEditor` ya calcula como "cualquiera de las dos secciones"
+   * (deski O sala). Este test es el mismo que "mientras se edita, un
+   * deskclick no abre..." de arriba pero entrando por SALAS en vez de
+   * escritorios (#74, PR4 correction): prueba que ese "cualquiera de las
+   * dos" de verdad suspende `deskclick` tambien cuando quien edita es la
+   * seccion de salas, no solo la de escritorios.
+   */
+  it('mientras se edita SALAS, un deskclick no abre el editor de decoracion ni ofrece dejar el sitio', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await openSidebar(user);
+    await user.click(await screen.findByRole('button', { name: /Editar salas/ }));
+    expect(screen.getByRole('button', { name: /Salir/ })).toBeInTheDocument();
+    await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
+    await act(async () => {});
+
+    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+
+    expect(screen.queryByRole('button', { name: /Dejarlo/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Decorar/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(vi.mocked(releaseDesk)).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /Salir/ })).toBeInTheDocument();
+  });
 });
