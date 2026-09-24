@@ -113,10 +113,15 @@ chmod 0644 "${WORKDIR}/docker-compose.yml" "${WORKDIR}/Caddyfile"
 
 # Los hostnames salen de la IP, que no se conoce hasta que Terraform la
 # reserva: por eso livekit.yaml es una plantilla y no un fichero literal.
+#
+# The checksum before and after tells the restart step at the end whether
+# LiveKit must reread its config (see "LiveKit only reads livekit.yaml").
+LIVEKIT_CONFIG_BEFORE="$(sha256sum "${WORKDIR}/livekit.yaml" 2>/dev/null || true)"
 metadata office-livekit-config |
   sed -e "s/__LK_HOST__/${LK_HOST}/g" -e "s/__TURN_HOST__/${TURN_HOST}/g" \
     >"${WORKDIR}/livekit.yaml"
 chmod 0644 "${WORKDIR}/livekit.yaml"
+LIVEKIT_CONFIG_AFTER="$(sha256sum "${WORKDIR}/livekit.yaml")"
 
 # --- Secretos --------------------------------------------------------------
 
@@ -283,6 +288,17 @@ log "recargando la configuracion de Caddy"
 docker compose --project-directory "${WORKDIR}" exec -T caddy \
   caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile ||
   docker compose --project-directory "${WORKDIR}" restart caddy
+
+# LiveKit only reads livekit.yaml at startup and has no reload. Like the
+# Caddyfile, it enters by bind mount, so `up -d` keeps the old process and the
+# old config. That is what left recording dead after #5/#58: the new file had
+# the `redis` section, LiveKit kept "single-node routing", and every
+# StartEgress timed out because Egress listens on Redis. A restart drops every
+# live call, so it happens only when the file actually changed.
+if [[ "${LIVEKIT_CONFIG_BEFORE}" != "${LIVEKIT_CONFIG_AFTER}" ]]; then
+  log "livekit.yaml changed: restarting LiveKit"
+  docker compose --project-directory "${WORKDIR}" restart livekit
+fi
 
 # Las imagenes viejas se acumulan una por despliegue y el disco son 20 GB.
 docker image prune -af --filter "until=168h" >/dev/null || true
