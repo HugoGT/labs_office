@@ -12,7 +12,7 @@
 
 import { Client } from 'colyseus.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LIVEKIT_ROOM_NAME } from '../../src/game/officeProtocol.ts';
+import { LIVEKIT_ROOM_NAME, recordingAvailableUntil } from '../../src/game/officeProtocol.ts';
 import {
   createOfficeServer,
   reconnectionWindowFromEnv,
@@ -28,6 +28,8 @@ import type { DeskDirectory } from './desks/desksPort.ts';
 import { createMemorySpaces } from './spaces/memorySpaces.ts';
 import type { SpacesDirectory } from './spaces/spacesPort.ts';
 import { OFFICE_ROOM_NAME, RECONNECTION_WINDOW_SECONDS } from './OfficeRoom.ts';
+import type { EgressPort } from './recording/egressPort.ts';
+import type { RecordingStoragePort } from './recording/recordingStorage.ts';
 import type { OfficeState } from './schema.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 
@@ -1701,5 +1703,207 @@ describe('reconnectionWindowFromEnv', () => {
         RECONNECTION_WINDOW_SECONDS,
       );
     }
+  });
+});
+
+/**
+ * Real recording (#5) end to end minus LiveKit: HTTP routes, the registry and
+ * its mirror in the synced state, with a fake Egress. The state is what every
+ * occupant reads, so this is the "everyone is notified" guarantee.
+ */
+describe('recordings (#5): routes, synced state and cleanup', () => {
+  interface FakeEgress extends EgressPort {
+    started: string[];
+    filepaths: string[];
+    stopped: string[];
+  }
+
+  function fakeEgress(): FakeEgress {
+    const egress: FakeEgress = {
+      started: [],
+      filepaths: [],
+      stopped: [],
+      async start(roomName, filepath) {
+        egress.started.push(roomName);
+        egress.filepaths.push(filepath);
+        return { egressId: `EG_${egress.started.length}` };
+      },
+      async stop(egressId) {
+        egress.stopped.push(egressId);
+      },
+    };
+    return egress;
+  }
+
+  /** Every key counts as uploaded: readiness is then one poll away. */
+  const uploadedStorage: RecordingStoragePort = {
+    async exists() {
+      return true;
+    },
+    async presign(key) {
+      return `http://localhost:9000/recordings/${key}`;
+    },
+  };
+
+  async function recordingServer(
+    egress: EgressPort | null = fakeEgress(),
+    storage: RecordingStoragePort | null = uploadedStorage,
+  ) {
+    const spaces = createMemorySpaces();
+    // Tiles (10,10)-(13,13) -> pixels (320,320)-(416,416).
+    const created = await spaces.createSpace({ name: 'Sala', x: 10, y: 10, w: 3, h: 3, capacity: null });
+    const recServer = createOfficeServer({
+      spaces,
+      egress,
+      storage,
+      recordingReadiness: { intervalMs: 10, timeoutMs: 2000 },
+    });
+    const port = await recServer.listen(0);
+    return { recServer, spaceId: created.id, url: `http://localhost:${port}`, ws: `ws://localhost:${port}` };
+  }
+
+  async function joinInside(ws: string, recServer: OfficeServer, name: string) {
+    const room = await new Client(ws).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { name });
+    openRooms.push(room);
+    recServer.sessions.moveTo(room.sessionId, 330, 330);
+    return room;
+  }
+
+  function post(url: string, path: string, body: unknown) {
+    return fetch(`${url}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  async function waitFor(predicate: () => boolean, timeoutMs = 4000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      try {
+        if (predicate()) return;
+      } catch {
+        /* state not there yet */
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error('condition not met before the timeout');
+  }
+
+  it('a start is visible to every occupant through the synced state, and a stop clears it', async () => {
+    const { recServer, spaceId, url, ws } = await recordingServer();
+    const ana = await joinInside(ws, recServer, 'Ana');
+    const bruno = await joinInside(ws, recServer, 'Bruno');
+
+    const started = await post(url, '/recordings/start', { sessionId: ana.sessionId, spaceId });
+    expect(started.status).toBe(200);
+    expect(await started.json()).toMatchObject({ spaceId, startedBy: ana.sessionId });
+
+    await waitFor(() => bruno.state.recordings.get(spaceId)?.startedBy === ana.sessionId);
+
+    const stopped = await post(url, '/recordings/stop', { sessionId: bruno.sessionId, spaceId });
+    expect(stopped.status).toBe(200);
+    await waitFor(() => ana.state.recordings.get(spaceId) === undefined);
+    await recServer.shutdown();
+  });
+
+  it('a late joiner sees a recording that was already running', async () => {
+    const { recServer, spaceId, url, ws } = await recordingServer();
+    const ana = await joinInside(ws, recServer, 'Ana');
+    await post(url, '/recordings/start', { sessionId: ana.sessionId, spaceId });
+
+    const late = await joinInside(ws, recServer, 'Tarde');
+
+    await waitFor(() => late.state.recordings.get(spaceId)?.startedBy === ana.sessionId);
+    await recServer.shutdown();
+  });
+
+  it('when the starter leaves the office, the recording is stopped in Egress and cleared for everyone', async () => {
+    const egress = fakeEgress();
+    const { recServer, spaceId, url, ws } = await recordingServer(egress);
+    const ana = await joinInside(ws, recServer, 'Ana');
+    const bruno = await joinInside(ws, recServer, 'Bruno');
+    await post(url, '/recordings/start', { sessionId: ana.sessionId, spaceId });
+    await waitFor(() => bruno.state.recordings.get(spaceId) !== undefined);
+
+    await ana.leave();
+
+    await waitFor(() => bruno.state.recordings.get(spaceId) === undefined);
+    await waitFor(() => egress.stopped.includes('EG_1'));
+    await recServer.shutdown();
+  });
+
+  it('a second start in the same space answers 409 already-recording', async () => {
+    const { recServer, spaceId, url, ws } = await recordingServer();
+    const ana = await joinInside(ws, recServer, 'Ana');
+    const bruno = await joinInside(ws, recServer, 'Bruno');
+    await post(url, '/recordings/start', { sessionId: ana.sessionId, spaceId });
+
+    const second = await post(url, '/recordings/start', { sessionId: bruno.sessionId, spaceId });
+
+    expect(second.status).toBe(409);
+    expect(await second.json()).toEqual({ error: 'already-recording' });
+    await recServer.shutdown();
+  });
+
+  it('without Egress configured both routes answer 503 recording-not-configured', async () => {
+    const { recServer, spaceId, url, ws } = await recordingServer(null);
+    const ana = await joinInside(ws, recServer, 'Ana');
+
+    for (const path of ['/recordings/start', '/recordings/stop']) {
+      const res = await post(url, path, { sessionId: ana.sessionId, spaceId });
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ error: 'recording-not-configured' });
+    }
+    await recServer.shutdown();
+  });
+
+  it('(#58) once uploaded, only the people who were in the space are told it is ready, and can fetch it', async () => {
+    const { recServer, spaceId, url, ws } = await recordingServer();
+    const ana = await joinInside(ws, recServer, 'Ana');
+    const bruno = await joinInside(ws, recServer, 'Bruno');
+    const outsider = await new Client(ws).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { name: 'Fuera' });
+    openRooms.push(outsider);
+    recServer.sessions.moveTo(outsider.sessionId, 0, 0);
+    const ready: Record<string, unknown[]> = { ana: [], bruno: [], outsider: [] };
+    ana.onMessage('recordingready', (payload) => ready.ana.push(payload));
+    bruno.onMessage('recordingready', (payload) => ready.bruno.push(payload));
+    outsider.onMessage('recordingready', (payload) => ready.outsider.push(payload));
+
+    await post(url, '/recordings/start', { sessionId: ana.sessionId, spaceId });
+    const beforeStop = Date.now();
+    const stopped = await post(url, '/recordings/stop', { sessionId: ana.sessionId, spaceId });
+    const afterStop = Date.now();
+    const { recordingId } = (await stopped.json()) as { recordingId: string };
+
+    await waitFor(() => ready.ana.length === 1 && ready.bruno.length === 1);
+    // The notice says until when the recording is kept, so the UI can show it.
+    expect(ready.ana).toEqual([{ recordingId, spaceId, availableUntil: expect.any(Number) }]);
+    const { availableUntil } = ready.ana[0] as { availableUntil: number };
+    expect(availableUntil).toBeGreaterThanOrEqual(recordingAvailableUntil(beforeStop));
+    expect(availableUntil).toBeLessThanOrEqual(recordingAvailableUntil(afterStop));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(ready.outsider).toEqual([]);
+
+    const allowed = await post(url, '/recordings/url', { sessionId: bruno.sessionId, recordingId });
+    expect(allowed.status).toBe(200);
+    expect(((await allowed.json()) as { url: string }).url).toContain('recordings/');
+    const denied = await post(url, '/recordings/url', { sessionId: outsider.sessionId, recordingId });
+    expect(denied.status).toBe(403);
+    await recServer.shutdown();
+  });
+
+  it('(#58) a recording stopped because its starter left is also filed as finished', async () => {
+    const { recServer, spaceId, url, ws } = await recordingServer();
+    const ana = await joinInside(ws, recServer, 'Ana');
+    const bruno = await joinInside(ws, recServer, 'Bruno');
+    const ready: unknown[] = [];
+    bruno.onMessage('recordingready', (payload) => ready.push(payload));
+    await post(url, '/recordings/start', { sessionId: ana.sessionId, spaceId });
+
+    await ana.leave();
+
+    await waitFor(() => ready.length === 1);
+    await recServer.shutdown();
   });
 });

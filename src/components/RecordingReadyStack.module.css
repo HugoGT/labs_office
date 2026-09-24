@@ -1,0 +1,17 @@
+/* Top left: the top right belongs to the call invitations. */
+.stack {
+  position: fixed;
+  left: 16px;
+  top: 16px;
+  z-index: 28;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Retention notice (#5): secondary to the headline. */
+.expiry {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #9ca3af;
+}

@@ -368,6 +368,8 @@ export class OfficeScene extends Phaser.Scene {
           onCallInvite: (payload) => this.bridge.emit('callinvite', payload),
           onCallerLeft: (payload) => this.bridge.emit('callerleft', payload),
           onCallAccepted: (payload) => this.bridge.emit('callaccepted', payload),
+          onRecordings: (active) => this.bridge.emit('recordings', { active }),
+          onRecordingReady: (payload) => this.bridge.emit('recordingready', payload),
           onConnectionState: (state) => this.emitPresence(state),
           onResync: () => this.resyncAfterReconnect(),
         },

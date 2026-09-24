@@ -24,6 +24,7 @@ Todo está parametrizado por `var.env` para que el segundo entorno sea un
 | `docker/web.Dockerfile` | Imagen del SPA construido |
 | `docker/web-nginx.conf` | Configuración de la capa estática del SPA |
 | `test/mux/` | Arnés local del multiplexado TURN/TLS (`pnpm test:mux`, issue #19). Nunca corre en CI |
+| `recordings-lifecycle.json` | Retention rule for dev recording buckets created with gcloud (issues #5, #58). The deployed bucket gets the same rule from Terraform |
 
 El workflow de despliegue es `.github/workflows/deploy-test.yml`, separado de
 `ci.yml`. El `.dockerignore` de la raíz acota el contexto de build de las tres
@@ -37,10 +38,8 @@ Una vez pagada esa VM, partir Colyseus y el SPA hacia Cloud Run habría signific
 dos superficies de despliegue y dos formas de leer logs para salvar un proceso de
 Node que cabe de sobra en la misma máquina.
 
-**Sin Redis**, a diferencia de `infra/livekit/docker-compose.yml`. LiveKit solo lo
-necesita para coordinar varios nodos entre sí y para hablar con Egress; aquí hay un
-único nodo y la grabación está aplazada al issue #5. Vuelve a hacer falta el día que
-se despliegue Egress o un segundo SFU.
+**Redis and Egress** arrived with recording (issues #5, #58): LiveKit hands
+recording requests to Egress through Redis. See *Recordings* below.
 
 **Con Postgres, y también dentro de la misma VM** (issue #24). El directorio de
 usuarios e invitaciones necesita una base de datos, y la instancia más barata de
@@ -664,6 +663,112 @@ Los tres pasos, en orden:
    service-accounts keys create` falla y no hay nada que cargar aquí.
 
 Después, redesplegar.
+
+## Recordings (issues #5, #58)
+
+A space is recorded by LiveKit Egress (room composite, grid layout) running as
+one more container on the VM. The MP4 goes to a Google Cloud Storage bucket,
+lives there **30 days** and is watched or downloaded through a V4 signed URL
+the server issues to participants only ('Ver' inline, 'Descargar' with
+`Content-Disposition: attachment`), valid for 10 minutes.
+
+### What is where
+
+| Piece | Where |
+|---|---|
+| Bucket `<project>-labs-office-<env>-recordings` | `google_storage_bucket.recordings`, `terraform/main.tf`. Region of the VM, uniform bucket-level access, public access prevention enforced, soft delete off |
+| Retention: Delete at age 30 days | `lifecycle_rule` of that bucket, age `var.recording_retention_days` (default 30) |
+| The same 30 in the app | `RECORDING_RETENTION_DAYS`, `src/game/officeProtocol.ts`: 410 `recording-expired` past it (or when the object is gone), "Disponible hasta" in the notice. `server/src/recording/retention.test.ts` fails if Terraform or `recordings-lifecycle.json` drift from it |
+| Upload (Egress) | `roles/storage.objectCreator` on the bucket for the VM service account |
+| Upload check and signed reads (server) | `roles/storage.objectViewer` on the bucket for the VM service account |
+| Signing without a key | `roles/iam.serviceAccountTokenCreator` of the VM service account **on itself** |
+| Bucket name to the server | metadata `office-recording-bucket` -> `office-deploy` -> `RECORDING_GCS_BUCKET` in `/opt/office/.env` |
+| LiveKit API for the server | `LIVEKIT_API_URL=http://host.docker.internal:7880` in `docker-compose.yml` (not the public wss URL) |
+| Redis | `127.0.0.1:6379` only, for LiveKit on the host network; `livekit.yaml.tpl` has the `redis` section |
+
+No credential is stored anywhere: Egress and the server both use the VM
+service account through the metadata server (Application Default
+Credentials). No delete permission is granted: the lifecycle rule is the only
+thing that removes recordings.
+
+### Provisioning (by hand, once)
+
+Both APIs are already enabled in the project (checked 2026-09-23), so this is
+only in case of a new project:
+
+```sh
+gcloud services enable storage.googleapis.com iamcredentials.googleapis.com --project "${PROJECT_ID}"
+```
+
+Then, from `infra/gcp/terraform`:
+
+```sh
+terraform plan     # expect: the bucket, 3 IAM members, new VM metadata
+terraform apply
+gh workflow run deploy-test.yml   # pulls the new compose (redis, egress) and .env
+```
+
+Resize the VM in the same `apply` if recordings must actually work (next
+section): `machine_type = "e2-standard-4"` in `terraform.tfvars`. The VM stops
+for the change (`allow_stopping_for_update`): a few minutes of downtime.
+
+### Capacity: the VM size decides whether recording works at all
+
+Egress admits a request only if
+`vCPUs * 0.8 (max_cpu_utilization) - CPU its recordings already use >= cost`.
+The default room composite cost is 4, which no VM under 6 vCPUs can satisfy.
+`docker-compose.yml` lowers it to 3, so:
+
+| Machine | Admission budget | Concurrent recordings |
+|---|---|---|
+| `e2-medium` (2 vCPU, 4 GB, current default) | 1.6 | **0**: every start answers 502 `egress-failed` |
+| `e2-standard-4` (4 vCPU, 16 GB) | 3.2 | 1 |
+| `e2-standard-8` (8 vCPU, 32 GB) | 6.4 | 2 |
+
+The refusal on `e2-medium` is deliberate: a headless Chrome encoding 720p on 2
+shared vCPUs would starve the SFU and degrade every live call. For reference,
+the local validation (`infra/livekit/README.md`) measured about 4 concurrent
+recordings on 16 CPUs at the default cost. Changing the machine type multiplies
+the VM bill (about 4x from `e2-medium` to `e2-standard-4`); it is a decision,
+so the Terraform default stays `e2-medium` until someone makes it.
+
+Other limits of this single VM:
+
+- **Disk.** The Egress image is several GB, and Egress writes each MP4 to the
+  container's disk before uploading it: about 1.3 GB per hour of 720p (the
+  local test measured about 3 Mbit/s). The boot disk is 20 GB.
+- **Memory.** Chrome takes 1 to 2 GB per recording.
+- **Storage cost** is small (Standard storage, 30 days at most); downloads to
+  the internet are billed as network egress.
+
+### GCP gotchas
+
+- **Signing needs `signBlob` on itself.** The metadata server gives tokens but
+  no private key, so the Node client signs through the IAM Credentials API.
+  Without the self-binding above, uploads work, the recording notice appears,
+  and 'Ver'/'Descargar' answer 500 (`[recording] unhandled failure` in the
+  colyseus logs).
+- **Service account keys are forbidden** in this project
+  (`constraints/iam.disableServiceAccountKeyCreation`), which is why nothing
+  here uses one, and why local development impersonates instead
+  (`infra/livekit/README.md`).
+- **Lifecycle deletion is asynchronous**: GCS may delete up to about a day
+  after the object reaches 30 days. The app counts from the stop and answers
+  410 from day 30 regardless.
+- **Egress media path.** Egress's Chrome joins through
+  `ws://host.docker.internal:7880`, but the media ICE candidates LiveKit
+  announces are the public IP (`use_external_ip`), so the media hairpins
+  through the VM's own external address (or TURN). Not yet verified on the VM:
+  if a recording comes out black and silent, look there first.
+
+### Diagnosis
+
+```sh
+sudo docker compose --project-directory /opt/office logs --tail 100 egress
+# "cpu available ... max cost" at start; "not enough cpu" on refusals
+sudo docker compose --project-directory /opt/office logs --tail 100 colyseus | grep recording
+gcloud storage ls -l "gs://$(terraform output -raw recording_bucket)/recordings/"
+```
 
 ## Caveats conocidos
 

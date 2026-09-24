@@ -49,6 +49,8 @@ export interface LiveSessionRegistry {
   moveTo(id: string, x: number, y: number): void;
   /** Ultima posicion conocida, o `undefined` si la sesion no existe o aun no se ha movido. */
   positionOf(id: string): SessionPosition | undefined;
+  /** Every live session id; used to find who is inside a space (#58). */
+  ids(): string[];
   size(): number;
 }
 
@@ -79,6 +81,9 @@ export function createLiveSessionRegistry(): LiveSessionRegistry {
     },
     positionOf(id) {
       return sessions.get(id)?.pos;
+    },
+    ids() {
+      return [...sessions.keys()];
     },
     size() {
       return sessions.size;

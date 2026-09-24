@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Prueba end-to-end de grabacion: publica video en una sala, la graba con Egress
-# y confirma que el MP4 aterriza en MinIO. Es la validacion que el PRD pide como
-# siguiente paso (riesgo #1: seccion 13).
+# y confirma que el MP4 aterriza en el bucket de GCS de desarrollo (issues #5,
+# #58; GCS_BUCKET y GCS_CREDENTIALS_FILE en .env). Es la validacion que el PRD
+# pide como siguiente paso (riesgo #1: seccion 13).
 #
 #   ./test-recording.sh [nombre-de-sala]
 #   DURACION=30 ./test-recording.sh
@@ -10,6 +11,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 [ -f .env ] || { echo "falta .env — copiar de .env.example"; exit 1; }
 set -a; . ./.env; set +a
+command -v gcloud >/dev/null || { echo "falta gcloud en el host (para comprobar el bucket)"; exit 1; }
+[ -n "${GCS_BUCKET:-}" ] || { echo "falta GCS_BUCKET en .env (bucket de GCS de desarrollo)"; exit 1; }
+[ -f "${GCS_CREDENTIALS_FILE:-}" ] || { echo "falta GCS_CREDENTIALS_FILE en .env (fichero ADC, ver README.md)"; exit 1; }
 
 ROOM="${1:-sala-prueba}"
 DUR="${DURACION:-20}"
@@ -25,9 +29,10 @@ cli() {
     "$CLI" "$@"
 }
 
-mc_run() {
-  docker run --rm --network "$NET" --entrypoint /bin/sh "minio/mc:latest" -c "
-    mc alias set local http://minio:9000 '$MINIO_ROOT_USER' '$MINIO_ROOT_PASSWORD' >/dev/null && $1"
+# Lists the bucket with the host gcloud (the same identity that set up the dev
+# bucket). Egress itself uploads with the ADC file mounted by docker-compose.yml.
+gcs_ls() {
+  gcloud storage ls -l "$1"
 }
 
 PUB=""
@@ -53,25 +58,20 @@ for i in $(seq 1 30); do
 done
 
 echo "==> 3/5 arrancando egress room-composite (${DUR}s)"
-# El destino de subida va EN EL REQUEST, por cada file_output. El bloque `s3`
-# de egress.yaml NO se aplica como default: sin este bloque Egress intenta una
+# El destino de subida va EN EL REQUEST, por cada file_output: la config de
+# Egress no aplica un destino por defecto, y sin este bloque Egress intenta una
 # "Local upload" a la raiz del filesystem y muere con permission denied.
-# JSON armado con python para no interpolar secretos en un formato de shell.
+# Sin `credentials`: Egress usa las Application Default Credentials de su
+# contenedor, el fichero montado por docker-compose.yml (como hace el servidor).
+# Prefijo `smoke/` para no mezclar estas pruebas con las grabaciones de la app.
 REQ=$(ROOM="$ROOM" python3 -c '
 import json, os
 print(json.dumps({
     "room_name": os.environ["ROOM"],
     "layout": "grid",
     "file_outputs": [{
-        "filepath": os.environ["ROOM"] + "-{time}.mp4",
-        "s3": {
-            "access_key": os.environ["MINIO_ROOT_USER"],
-            "secret": os.environ["MINIO_ROOT_PASSWORD"],
-            "region": "us-east-1",
-            "endpoint": "http://minio:9000",
-            "bucket": os.environ["MINIO_BUCKET"],
-            "force_path_style": True,
-        },
+        "filepath": "smoke/" + os.environ["ROOM"] + "-{time}.mp4",
+        "gcp": {"bucket": os.environ["GCS_BUCKET"]},
     }],
 }))
 ')
@@ -89,9 +89,9 @@ EGRESS_ID=""
 # Egress sube el archivo despues de cerrar el contenedor de grabacion.
 sleep 8
 
-echo "==> 5/5 verificando el MP4 en MinIO (bucket '$MINIO_BUCKET')"
-LISTADO="$(mc_run "mc ls --recursive local/$MINIO_BUCKET")"
+echo "==> 5/5 verificando el MP4 en GCS (gs://$GCS_BUCKET/smoke/)"
+LISTADO="$(gcs_ls "gs://$GCS_BUCKET/smoke/$ROOM-*")"
 echo "$LISTADO"
 echo "$LISTADO" | grep -q '\.mp4' || { echo "FALLO: no hay ningun mp4 en el bucket"; exit 1; }
-echo "$LISTADO" | grep -qE '\b0B\b.*\.mp4' && { echo "FALLO: el mp4 pesa 0B"; exit 1; }
-echo "OK: grabacion subida a MinIO"
+echo "$LISTADO" | grep -qE '^ *0 +.*\.mp4' && { echo "FALLO: el mp4 pesa 0 B"; exit 1; }
+echo "OK: grabacion subida a GCS"

@@ -87,6 +87,13 @@ IDENTITY_ADMIN_USE_METADATA="$(metadata office-identity-admin-from-metadata || t
 # fuera a todo el mundo hasta que existan cuentas. Vacio = como hasta ahora.
 AUTH_PROJECT_ID="$(metadata office-auth-project-id || true)"
 
+# Recordings bucket (issues #5, #58). From metadata and not Secret Manager: a
+# bucket name is not a secret, the VM service account is what grants access.
+# `|| true` and empty by default for the same reason as the optional values
+# above: a VM from before this change must still redeploy, and an empty value
+# only turns /recordings/* into 503 recording-not-configured.
+RECORDING_GCS_BUCKET="$(metadata office-recording-bucket || true)"
+
 # Precedencia del tag: argumento > variable de entorno > metadata > el que ya
 # esta desplegado. La ultima opcion es la que hace que un reinicio de la VM no
 # retroceda a una version vieja.
@@ -219,6 +226,8 @@ trap 'rm -f "${TMP_ENV}"' EXIT
   # La alternativa a la anterior cuando la clave no se puede crear. No es un
   # secreto: es un interruptor. Si estan las dos, el servidor usa la clave.
   echo "IDENTITY_ADMIN_USE_METADATA=${IDENTITY_ADMIN_USE_METADATA}"
+  # Not a secret either: the bucket name. Empty disables recording (503).
+  echo "RECORDING_GCS_BUCKET=${RECORDING_GCS_BUCKET}"
 } >"${TMP_ENV}"
 
 chown root:root "${TMP_ENV}"

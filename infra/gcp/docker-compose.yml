@@ -6,6 +6,8 @@
 #   colyseus   el servidor de Node: salas, /health, /livekit/token y /admin/*
 #   livekit    el SFU
 #   postgres   el directorio de usuarios e invitaciones (issue #24)
+#   redis      control channel between livekit and egress (issue #5)
+#   egress     records a space to MP4 and uploads it to GCS (issues #5, #58)
 #
 # Postgres es un contenedor mas en esta misma VM y no Cloud SQL. La instancia
 # mas barata de Cloud SQL cuesta mas que la VM entera y habria traido red
@@ -13,11 +15,11 @@
 # de la decision esta anotado y es real: las copias de seguridad son manuales y
 # la durabilidad del dato es la del disco de la VM (ver README).
 #
-# NO hay Redis, a diferencia de infra/livekit/docker-compose.yml. LiveKit solo
-# necesita Redis para coordinar varios nodos entre si y para hablar con Egress;
-# aqui hay un unico nodo y la grabacion esta aplazada al issue #5, asi que
-# Redis no coordinaria nada. Vuelve a hacer falta el dia que se despliegue
-# Egress o un segundo SFU.
+# Redis and Egress arrive with recording (issue #5). LiveKit only needs Redis to
+# talk to Egress (or to a second SFU node); Egress does not work without it.
+# Egress uploads straight to the GCS recordings bucket with the VM service
+# account (Application Default Credentials through the metadata server), so no
+# storage key lives on this machine. Capacity: see "Recordings" in README.md.
 #
 # Las variables salen de /opt/office/.env, que `office-deploy` regenera en cada
 # despliegue con los secretos recien leidos de Secret Manager.
@@ -131,6 +133,16 @@ services:
       # la organizacion puede tener prohibido crear claves de cuenta de
       # servicio. Vacia: misma degradacion de siempre (invitar responde 503).
       IDENTITY_ADMIN_USE_METADATA: "${IDENTITY_ADMIN_USE_METADATA:-}"
+      # Recording (issues #5, #58). LIVEKIT_URL above is the PUBLIC wss URL for
+      # browsers; the Egress API is reached directly over the bridge gateway,
+      # since LiveKit runs on the host network (see `livekit` below).
+      LIVEKIT_API_URL: "http://host.docker.internal:7880"
+      # Empty: /recordings/* answers 503 recording-not-configured and the rest
+      # of the office works as before. Not a secret: a bucket name. The
+      # credentials are the VM service account, through the metadata server.
+      RECORDING_GCS_BUCKET: "${RECORDING_GCS_BUCKET:-}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # `depends_on` en forma de lista (la que usa caddy mas arriba) solo espera a
     # que el contenedor exista, no a que el servicio responda. Aqui no alcanza:
     # Postgres arranca su contenedor en milisegundos y tarda bastante mas en
@@ -194,6 +206,71 @@ services:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
     volumes:
       - ./livekit.yaml:/etc/livekit.yaml:ro
+    # LiveKit reads `redis.address: 127.0.0.1:6379` (livekit.yaml.tpl) and
+    # refuses to start without it once the section exists.
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:7.4.11-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+    restart: unless-stopped
+    logging: *logging
+    # Pure message bus between LiveKit and Egress: nothing to persist.
+    command: redis-server --save "" --appendonly no
+    # Published on loopback ONLY: LiveKit runs on the host network and cannot
+    # use the service name. Never on 0.0.0.0, where the firewall would be the
+    # only thing keeping an unauthenticated Redis off the internet.
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [office]
+
+  egress:
+    # Same pin as infra/livekit/docker-compose.yml, where it was validated.
+    image: livekit/egress:v1.14.1@sha256:bf2b648b947349c3e9ff7aa8c718f00378d5c06af7624652a3653318e00333ce
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      # No storage section: the upload target (bucket and key) travels in
+      # every request (server/src/recording/egressPort.ts), and with no
+      # credentials in it Egress uses the VM service account through the
+      # metadata server.
+      #
+      # cpu_cost: Egress admits a request only if
+      #   cores * max_cpu_utilization (0.8) - in use >= cost,
+      # and the default room composite cost is 4, which no VM under 6 vCPU can
+      # ever satisfy: every start would answer 502 egress-failed. 3 admits ONE
+      # recording on 4 vCPU (e2-standard-4: 3.2 >= 3) and none on the default
+      # e2-medium (1.6), which is the intent: a headless Chrome encoding video
+      # on 2 shared vCPUs would starve the SFU and degrade every live call.
+      EGRESS_CONFIG_BODY: |
+        redis:
+          address: redis:6379
+        api_key: ${LIVEKIT_API_KEY}
+        api_secret: ${LIVEKIT_API_SECRET}
+        ws_url: ws://host.docker.internal:7880
+        insecure: true
+        cpu_cost:
+          room_composite_cpu_cost: 3
+        log_level: info
+    # Egress runs a headless Chrome to compose the room: SYS_ADMIN for its
+    # sandbox and a large /dev/shm, or the browser dies while rendering.
+    cap_add:
+      - SYS_ADMIN
+    shm_size: 1gb
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+      livekit:
+        condition: service_started
+    networks: [office]
 
 volumes:
   # Issue #19: LiveKit ya NO monta este volumen. Terminaba TLS leyendo el

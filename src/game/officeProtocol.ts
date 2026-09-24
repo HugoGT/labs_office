@@ -30,6 +30,35 @@ export function livekitRoomFor(spaceId: string | null): string {
   return spaceId === null ? LIVEKIT_ROOM_NAME : `office-livekit-space-${spaceId}`;
 }
 
+/**
+ * How long a finished recording is kept (#5, #58). The single source of truth
+ * for the number: the server answers 410 `recording-expired` past it, the UI
+ * shows "Disponible hasta", and the bucket lifecycle rule deletes the object
+ * at this age (`recording_retention_days` in infra/gcp/terraform/variables.tf,
+ * pinned to this constant by `server/src/recording/retention.test.ts`).
+ */
+export const RECORDING_RETENTION_DAYS = 30;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Epoch milliseconds after which a recording stopped at `stoppedAt` is gone.
+ * Counted from the stop, which is never later than the upload that starts the
+ * bucket's own age clock, so the app declares it expired no later than GCS
+ * deletes it.
+ */
+export function recordingAvailableUntil(stoppedAt: number): number {
+  return stoppedAt + RECORDING_RETENTION_DAYS * DAY_MS;
+}
+
+/** `recordingready` message: a finished recording is uploaded (#58). */
+export interface RecordingReadyPayload {
+  recordingId: string;
+  spaceId: string;
+  /** Epoch milliseconds, `recordingAvailableUntil` of its stop. */
+  availableUntil: number;
+}
+
 /** Cada cuanto publica el jugador local su posicion (ver `createMoveThrottle`). */
 export const MOVE_INTERVAL_MS = 100;
 

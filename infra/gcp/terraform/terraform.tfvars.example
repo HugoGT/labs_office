@@ -14,6 +14,11 @@ acme_email = "cambiar@ejemplo.com"
 # region            = "us-central1"
 # zone              = "us-central1-a"
 # machine_type      = "e2-medium"
+#
+# Recording (issues #5, #58): on e2-medium Egress refuses every recording
+# (502 egress-failed), on purpose, so it cannot starve the SFU. One concurrent
+# recording needs 4 vCPU; see "Recordings" in infra/gcp/README.md.
+# machine_type = "e2-standard-4"
 # boot_disk_size_gb = 20
 # github_repository = "HugoGT/labs_office"
 

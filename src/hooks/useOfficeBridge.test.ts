@@ -73,4 +73,39 @@ describe('useOfficeBridge', () => {
 
     expect(result.current.room).toBeNull();
   });
+
+  it('exposes the current spaceId next to the room name (#5)', () => {
+    const bridge = createOfficeBridge();
+    const { result } = renderHook(() => useOfficeBridge(bridge));
+    expect(result.current.spaceId).toBeNull();
+
+    act(() => bridge.emit('room', { spaceId: 'sala-1', name: 'Sala' }));
+    expect(result.current.spaceId).toBe('sala-1');
+
+    act(() => bridge.emit('room', { spaceId: null, name: null }));
+    expect(result.current.spaceId).toBeNull();
+  });
+
+  it('exposes the active recordings map, replaced whole on every event (#5)', () => {
+    const bridge = createOfficeBridge();
+    const { result } = renderHook(() => useOfficeBridge(bridge));
+    expect(result.current.recordings).toEqual({});
+
+    act(() => bridge.emit('recordings', { active: { a: { startedBy: 'ses-1', startedAt: 1 } } }));
+    expect(result.current.recordings).toEqual({ a: { startedBy: 'ses-1', startedAt: 1 } });
+
+    act(() => bridge.emit('recordings', { active: {} }));
+    expect(result.current.recordings).toEqual({});
+  });
+
+  it('exposes the own Colyseus sessionId from the voice snapshot (#5)', () => {
+    const bridge = createOfficeBridge();
+    const { result } = renderHook(() => useOfficeBridge(bridge));
+    expect(result.current.selfSessionId).toBeNull();
+
+    act(() =>
+      bridge.emit('voice', { selfSessionId: 'ses-me', selfName: 'Ana', peers: [], spaceId: null }),
+    );
+    expect(result.current.selfSessionId).toBe('ses-me');
+  });
 });

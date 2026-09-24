@@ -4,6 +4,14 @@ import { resolveLivekitConfig } from '../game/livekitEndpoint';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
 import { DEFAULT_NAME, DEFAULT_STATUS, type PresenceStatus } from '../game/officeProtocol';
+import {
+  RecordingError,
+  getRecordingUrl,
+  resolveRecordingsUrl,
+  startRecording,
+  stopRecording,
+  type RecordingRequest,
+} from '../game/recordingClient';
 import type { DeskItemPlacement, SaveDeskOutcome } from '../game/deskDecorPort';
 import { useCallInvitations } from '../hooks/useCallInvitations';
 import { useDeskDecor } from '../hooks/useDeskDecor';
@@ -18,6 +26,7 @@ import { ContextMenu, type PeerMenuAction } from './ContextMenu';
 import { DeskDecorEditor } from './DeskDecorEditor';
 import { GameCanvas } from './GameCanvas';
 import { RecBadge } from './RecBadge';
+import { RecordingReadyStack, type RecordingReadyNotice } from './RecordingReadyStack';
 import { Toast } from './Toast';
 import { VideoTiles } from './VideoTiles';
 
@@ -47,7 +56,7 @@ export interface OfficeShellProps {
  */
 export function OfficeShell({ session = null }: OfficeShellProps) {
   const [bridge] = useState(createOfficeBridge);
-  const { room, menu, presence, closeMenu } = useOfficeBridge(bridge);
+  const { room, spaceId, recordings, selfSessionId, menu, presence, closeMenu } = useOfficeBridge(bridge);
   // D12: la pila del receptor vive en su propio hook (temporizadores + chime
   // + comandos), no en `useOfficeBridge`, que es deliberadamente un simple
   // suscriptor evento->estado.
@@ -190,13 +199,11 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
     };
   }, [bridge]);
 
-  const [recording, setRecording] = useState(false);
   const [toastMessage, setToastMessage] = useState<ReactNode | null>(null);
   const previousRoomRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (room === previousRoomRef.current) return;
-    const leftRoom = previousRoomRef.current !== null && room === null;
     previousRoomRef.current = room;
 
     if (room) {
@@ -205,11 +212,132 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
           Entraste a <b>{room}</b>: solo escuchas a quienes están dentro
         </>,
       );
-    } else if (leftRoom && recording) {
-      setRecording(false);
-      setToastMessage('💾 Saliste de la sala: grabación detenida');
     }
-  }, [room, recording]);
+  }, [room]);
+
+  /**
+   * Recording is server-owned (#5): whether this room is being recorded is
+   * read from the synced state every occupant receives, never from a local
+   * flag. The button only asks; the badge follows the state.
+   */
+  const [recordingsUrl] = useState(() => resolveRecordingsUrl(endpoint));
+  const activeRecording = spaceId !== null ? recordings[spaceId] : undefined;
+  const recording = activeRecording !== undefined;
+
+  const recordingRequest = useCallback(
+    async (forSpaceId: string, sessionId: string): Promise<RecordingRequest | null> => {
+      if (recordingsUrl === null) return null;
+      const token = session ? await session.getIdToken() : null;
+      return { url: recordingsUrl, sessionId, token, spaceId: forSpaceId };
+    },
+    [recordingsUrl, session],
+  );
+
+  async function toggleRecording(): Promise<void> {
+    if (spaceId === null || selfSessionId === null) return;
+    const request = await recordingRequest(spaceId, selfSessionId);
+    if (request === null) return;
+    try {
+      if (recording) await stopRecording(request);
+      else await startRecording(request);
+    } catch (err) {
+      if (err instanceof RecordingError && err.status === 409) {
+        setToastMessage('Ya se está grabando esta sala');
+      } else {
+        setToastMessage(recording ? 'No se pudo detener la grabación' : 'No se pudo iniciar la grabación');
+      }
+    }
+  }
+
+  /**
+   * Tells every occupant when the recording of THEIR room flips, which is the
+   * notice the issue asks for. Entering a room already being recorded counts
+   * as a flip. Walking out is not a flip: the starter stops it on the way out
+   * (nobody is left to stop it otherwise), anyone else just loses the badge.
+   */
+  const previousRecordingRef = useRef<{ spaceId: string | null; active: boolean; mine: boolean }>({
+    spaceId: null,
+    active: false,
+    mine: false,
+  });
+
+  useEffect(() => {
+    const previous = previousRecordingRef.current;
+    const mine = activeRecording !== undefined && activeRecording.startedBy === selfSessionId;
+    previousRecordingRef.current = { spaceId, active: recording, mine };
+
+    if (spaceId !== previous.spaceId) {
+      if (previous.spaceId !== null && previous.active && previous.mine && selfSessionId !== null) {
+        const leftSpaceId = previous.spaceId;
+        void recordingRequest(leftSpaceId, selfSessionId).then((request) =>
+          request ? stopRecording(request).catch(() => undefined) : undefined,
+        );
+        setToastMessage('💾 Saliste de la sala: grabación detenida');
+      }
+      if (recording) setToastMessage('⏺ Esta sala se está grabando');
+      return;
+    }
+
+    if (!previous.active && recording) setToastMessage('⏺ Esta sala se está grabando');
+    else if (previous.active && !recording) setToastMessage('⏹ Grabación detenida');
+  }, [spaceId, recording, activeRecording, selfSessionId, recordingRequest]);
+
+  /**
+   * Finished recordings this user took part in, once uploaded (#58). Only
+   * participants receive `recordingready`; the notice stays until dismissed.
+   */
+  const [readyRecordings, setReadyRecordings] = useState<readonly RecordingReadyNotice[]>([]);
+
+  useEffect(
+    () =>
+      bridge.on('recordingready', (notice) =>
+        setReadyRecordings((current) =>
+          current.some((item) => item.recordingId === notice.recordingId) ? current : [...current, notice],
+        ),
+      ),
+    [bridge],
+  );
+
+  const dismissReadyRecording = useCallback((recordingId: string) => {
+    setReadyRecordings((current) => current.filter((item) => item.recordingId !== recordingId));
+  }, []);
+
+  /**
+   * 'Ver' opens the tab INSIDE the click and only fills it in after the URL
+   * arrives: a window opened after a network round trip is no longer a user
+   * gesture, and popup blockers stop it. 'Descargar' navigates this tab: the
+   * URL answers with `Content-Disposition: attachment`, so the page stays.
+   */
+  async function openRecording(recordingId: string, download: boolean): Promise<void> {
+    const tab = download ? null : window.open('', '_blank');
+    try {
+      if (recordingsUrl === null || selfSessionId === null) throw new Error('no session');
+      const token = session ? await session.getIdToken() : null;
+      const { url } = await getRecordingUrl({
+        url: recordingsUrl,
+        sessionId: selfSessionId,
+        token,
+        recordingId,
+        download,
+      });
+      if (download) {
+        window.open(url, '_self');
+      } else if (tab) {
+        tab.opener = null;
+        tab.location.href = url;
+      }
+    } catch (error) {
+      tab?.close();
+      // Past the retention the bucket has deleted it (#5): retrying is
+      // pointless, so the notice goes away with the explanation.
+      if (error instanceof RecordingError && error.code === 'recording-expired') {
+        dismissReadyRecording(recordingId);
+        setToastMessage('La grabación ya no está disponible');
+        return;
+      }
+      setToastMessage(download ? 'No se pudo descargar la grabación' : 'No se pudo abrir la grabación');
+    }
+  }
 
   useEffect(() => {
     if (toastMessage === null) return undefined;
@@ -407,10 +535,7 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
         onChangeStatus={handleChangeStatus}
         onToggleMic={toggleMic}
         onToggleCam={toggleCam}
-        onToggleRecord={() => {
-          if (!room) return;
-          setRecording((value) => !value);
-        }}
+        onToggleRecord={() => void toggleRecording()}
         // #52: la barra solo avisa; quien sabe reconectar es la escena, y el
         // comando viaja por `emitCommand` como el resto -- sin metodo de
         // conveniencia en el puente.
@@ -428,6 +553,12 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
       <AudioUnblockPrompt blocked={audioBlocked} onUnblock={unblockAudio} />
       <Toast message={toastMessage} />
       <CallInvitationStack invitations={invitations} onAccept={accept} onDismiss={dismiss} />
+      <RecordingReadyStack
+        notices={readyRecordings}
+        onView={(recordingId) => void openRecording(recordingId, false)}
+        onDownload={(recordingId) => void openRecording(recordingId, true)}
+        onDismiss={dismissReadyRecording}
+      />
     </div>
   );
 }
