@@ -13,13 +13,22 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  openSidebar,
+  searchSidebar,
+  sidebarRosterNames,
   startHarness,
   teleportToTile,
   waitForAudioUnavailable,
   waitForOnlineCount,
   waitForPeerTileCount,
   waitForRoomIndicator,
+  waitForSidebarPeerCount,
 } from './harness.mjs';
+
+/** Both clients join with no auth (e2e defaults), so both render
+ * `DEFAULT_NAME` (`officeProtocol.ts`) -- there is no per-client identity to
+ * assert on here, only that the OTHER client's entry reaches the roster. */
+const DEFAULT_NAME = 'Invitado';
 
 /** @type {Awaited<ReturnType<typeof startHarness>>} */
 let harness;
@@ -55,6 +64,28 @@ test('S2: both open-floor peers see each other online and chipped at spawn', asy
   await waitForOnlineCount(pageB, 1);
   await waitForPeerTileCount(pageA, 1);
   await waitForPeerTileCount(pageB, 1);
+});
+
+test('S10: the sidebar roster shows the peer and its search box filters by name (#74)', async () => {
+  await openSidebar(pageA);
+  await waitForSidebarPeerCount(pageA, 1);
+  const names = await sidebarRosterNames(pageA);
+  assert.ok(
+    names.some((name) => name.includes(DEFAULT_NAME)),
+    `expected a roster entry containing "${DEFAULT_NAME}", got: ${names.join(' | ')}`,
+  );
+
+  // Part of the name still matches (case-insensitive, per rosterView.ts).
+  await searchSidebar(pageA, DEFAULT_NAME.slice(0, 4).toUpperCase());
+  await waitForSidebarPeerCount(pageA, 1);
+
+  // A query nothing matches filters the peer out.
+  await searchSidebar(pageA, 'zzz-nadie-se-llama-asi');
+  await waitForSidebarPeerCount(pageA, 0);
+
+  // Restore the box empty so the rest of the suite starts from a clean roster.
+  await searchSidebar(pageA, '');
+  await waitForSidebarPeerCount(pageA, 1);
 });
 
 test('S3: entering a private room isolates its occupant from the open-floor peer', async () => {
