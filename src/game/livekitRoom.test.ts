@@ -20,8 +20,14 @@ function fakeRoom() {
     connect: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
     localParticipant: {
+      identity: 'yo',
+      trackPublications: new Map<string, ReturnType<typeof fakePublication>>(),
       setMicrophoneEnabled: vi.fn(async () => undefined),
       setCameraEnabled: vi.fn(async () => undefined),
+      setScreenShareEnabled: vi.fn(async () => undefined),
+      createScreenTracks: vi.fn(async (): Promise<ReturnType<typeof fakeLocalTrack>[]> => []),
+      publishTrack: vi.fn(async () => undefined),
+      unpublishTrack: vi.fn(async () => undefined),
     },
     on(event: string, handler: (...args: unknown[]) => void) {
       handlers.set(event, [...(handlers.get(event) ?? []), handler]);
@@ -52,9 +58,15 @@ function fakeTrack(kind: 'audio' | 'video' = 'audio'): AttachableTrack {
  * se invoca -- necesario para probar que `reconcileKind` observa el estado
  * VIVO (D2) en vez de asumirlo, igual que hace el `reconcile()` de audio.
  */
-function fakePublication(kind: 'audio' | 'video') {
+function fakePublication(
+  kind: 'audio' | 'video',
+  { source, trackName, track }: { source?: string; trackName?: string; track?: unknown } = {},
+) {
   const publication = {
     kind,
+    source,
+    trackName,
+    track,
     isSubscribed: false,
     setSubscribed: vi.fn((value: boolean) => {
       publication.isSubscribed = value;
@@ -345,5 +357,304 @@ describe('video, camara local y habla llegan hacia afuera (issue #17, D3/D7): li
     await connection.setMicrophoneEnabled(true);
 
     expect(onActiveSpeakersChanged).not.toHaveBeenCalled();
+  });
+});
+
+/** Captured screen track, as `createScreenTracks` returns it. */
+function fakeLocalTrack(source: 'screen_share' | 'screen_share_audio') {
+  return { source, kind: source === 'screen_share' ? 'video' : 'audio', stop: vi.fn() };
+}
+
+/** Subscribed remote track carrying its LiveKit source. */
+function fakeSourcedTrack(source: string): AttachableTrack & { source: string } {
+  return { ...fakeTrack(source === 'screen_share_audio' ? 'audio' : 'video'), source };
+}
+
+/** Puts a share in the local participant's publications, as the SDK does before `LocalTrackPublished`. */
+function publishLocalShare(room: ReturnType<typeof fakeRoom>, claim: number) {
+  const track = fakeSourcedTrack('screen_share');
+  const publication = fakePublication('video', {
+    source: 'screen_share',
+    trackName: `screen_share#${claim}`,
+    track,
+  });
+  room.localParticipant.trackPublications.set('local-screen', publication);
+  room.emit(RoomEvent.LocalTrackPublished, publication);
+  return publication;
+}
+
+/** A peer of the same room publishing a share (`TrackPublished`, not yet subscribed). */
+function publishRemoteShare(room: ReturnType<typeof fakeRoom>, identity: string, claim: number) {
+  const publication = fakePublication('video', {
+    source: 'screen_share',
+    trackName: `screen_share#${claim}`,
+  });
+  room.remoteParticipants.set(identity, fakeParticipant([publication]));
+  room.emit(RoomEvent.TrackPublished, publication, { identity });
+  return publication;
+}
+
+describe('per-publication reconcile (#20): a share next to the camera is subscribed too', () => {
+  it('a screen share published after the camera was subscribed gets subscribed', async () => {
+    const cameraPub = fakePublication('video', { source: 'camera' });
+    const room = fakeRoom();
+    const participant = fakeParticipant([cameraPub]);
+    room.remoteParticipants.set('p1', participant);
+    const connection = await connect(room, document.createElement('div'));
+    connection.setDesiredVideoPeers(['p1']);
+    expect(cameraPub.isSubscribed).toBe(true);
+
+    const screenPub = fakePublication('video', { source: 'screen_share' });
+    participant.trackPublications.set('screen', screenPub);
+    room.emit(RoomEvent.TrackPublished, screenPub, participant);
+
+    expect(screenPub.isSubscribed).toBe(true);
+    // The camera is not asked for again: only what is missing is requested.
+    expect(cameraPub.setSubscribed).toHaveBeenCalledTimes(1);
+  });
+
+  it('screen share audio published after the microphone was subscribed gets subscribed', async () => {
+    const micPub = fakePublication('audio', { source: 'microphone' });
+    const room = fakeRoom();
+    const participant = fakeParticipant([micPub]);
+    room.remoteParticipants.set('p1', participant);
+    const connection = await connect(room, document.createElement('div'));
+    connection.setDesiredAudioPeers(['p1']);
+
+    const screenAudioPub = fakePublication('audio', { source: 'screen_share_audio' });
+    participant.trackPublications.set('screen-audio', screenAudioPub);
+    room.emit(RoomEvent.TrackPublished, screenAudioPub, participant);
+
+    expect(screenAudioPub.isSubscribed).toBe(true);
+  });
+
+  it('screen share audio plays through the same sink as voice (#18)', async () => {
+    const container = document.createElement('div');
+    const room = fakeRoom();
+    await connect(room, container);
+
+    room.emit(RoomEvent.TrackSubscribed, fakeSourcedTrack('screen_share_audio'), undefined, { identity: 'p1' });
+
+    expect(container.querySelectorAll('audio')).toHaveLength(1);
+  });
+});
+
+describe('screen share tracks are reported apart from the camera (#20)', () => {
+  it('a subscribed share goes to onScreenShareTrackSubscribed, never replacing the camera', async () => {
+    const room = fakeRoom();
+    const onVideoTrackSubscribed = vi.fn();
+    const onScreenShareTrackSubscribed = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onVideoTrackSubscribed,
+      onScreenShareTrackSubscribed,
+    });
+    const screen = fakeSourcedTrack('screen_share');
+
+    room.emit(RoomEvent.TrackSubscribed, screen, undefined, { identity: 'p1' });
+
+    expect(onScreenShareTrackSubscribed).toHaveBeenCalledWith('p1', screen);
+    expect(onVideoTrackSubscribed).not.toHaveBeenCalled();
+  });
+
+  it('an unsubscribed share goes to onScreenShareTrackUnsubscribed', async () => {
+    const room = fakeRoom();
+    const onVideoTrackUnsubscribed = vi.fn();
+    const onScreenShareTrackUnsubscribed = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onVideoTrackUnsubscribed,
+      onScreenShareTrackUnsubscribed,
+    });
+    const screen = fakeSourcedTrack('screen_share');
+
+    room.emit(RoomEvent.TrackUnsubscribed, screen, undefined, { identity: 'p1' });
+
+    expect(onScreenShareTrackUnsubscribed).toHaveBeenCalledWith('p1', screen);
+    expect(onVideoTrackUnsubscribed).not.toHaveBeenCalled();
+  });
+
+  it('the own share is reported on its own callback, not as the camera', async () => {
+    const room = fakeRoom();
+    const onLocalVideoTrackChanged = vi.fn();
+    const onLocalScreenShareChanged = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onLocalVideoTrackChanged,
+      onLocalScreenShareChanged,
+    });
+
+    const publication = publishLocalShare(room, 1);
+
+    expect(onLocalScreenShareChanged).toHaveBeenCalledWith(publication.track);
+    expect(onLocalVideoTrackChanged).not.toHaveBeenCalled();
+  });
+
+  it('ending the share (our button or the browser bar) reports null and leaves no audio published', async () => {
+    const room = fakeRoom();
+    const onLocalScreenShareChanged = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onLocalScreenShareChanged,
+    });
+    const publication = publishLocalShare(room, 1);
+    const audioTrack = fakeSourcedTrack('screen_share_audio');
+    room.localParticipant.trackPublications.set(
+      'local-screen-audio',
+      fakePublication('audio', { source: 'screen_share_audio', track: audioTrack }),
+    );
+
+    // The SDK unpublishes the video on its own when the browser ends it.
+    room.localParticipant.trackPublications.delete('local-screen');
+    room.emit(RoomEvent.LocalTrackUnpublished, publication);
+
+    expect(onLocalScreenShareChanged).toHaveBeenLastCalledWith(null);
+    expect(room.localParticipant.unpublishTrack).toHaveBeenCalledWith(audioTrack);
+  });
+});
+
+describe('setScreenShareEnabled (#20)', () => {
+  it('captures with audio offered and publishes every track with the next claim', async () => {
+    const room = fakeRoom();
+    const video = fakeLocalTrack('screen_share');
+    const audio = fakeLocalTrack('screen_share_audio');
+    room.localParticipant.createScreenTracks.mockResolvedValueOnce([video, audio]);
+    const connection = await connect(room, document.createElement('div'));
+    publishRemoteShare(room, 'p1', 4);
+
+    await expect(connection.setScreenShareEnabled(true)).resolves.toBe(true);
+
+    expect(room.localParticipant.createScreenTracks).toHaveBeenCalledWith({ audio: true });
+    expect(room.localParticipant.publishTrack).toHaveBeenCalledWith(video, { name: 'screen_share#5' });
+    expect(room.localParticipant.publishTrack).toHaveBeenCalledWith(audio, { name: 'screen_share#5' });
+  });
+
+  it('sharing without audio publishes only the video: a valid state, not an error', async () => {
+    const room = fakeRoom();
+    const video = fakeLocalTrack('screen_share');
+    room.localParticipant.createScreenTracks.mockResolvedValueOnce([video]);
+    const connection = await connect(room, document.createElement('div'));
+
+    await expect(connection.setScreenShareEnabled(true)).resolves.toBe(true);
+
+    expect(room.localParticipant.publishTrack).toHaveBeenCalledTimes(1);
+    expect(room.localParticipant.publishTrack).toHaveBeenCalledWith(video, { name: 'screen_share#1' });
+  });
+
+  it('closing the browser picker resolves false without throwing and publishes nothing', async () => {
+    const room = fakeRoom();
+    room.localParticipant.createScreenTracks.mockRejectedValueOnce(new Error('NotAllowedError'));
+    const connection = await connect(room, document.createElement('div'));
+
+    await expect(connection.setScreenShareEnabled(true)).resolves.toBe(false);
+
+    expect(room.localParticipant.publishTrack).not.toHaveBeenCalled();
+  });
+
+  it('a failed publish stops the captured tracks and unpublishes whatever did go out', async () => {
+    const room = fakeRoom();
+    const video = fakeLocalTrack('screen_share');
+    room.localParticipant.createScreenTracks.mockResolvedValueOnce([video]);
+    room.localParticipant.publishTrack.mockRejectedValueOnce(new Error('publish failed'));
+    const connection = await connect(room, document.createElement('div'));
+
+    await expect(connection.setScreenShareEnabled(true)).resolves.toBe(false);
+
+    expect(video.stop).toHaveBeenCalled();
+    expect(room.localParticipant.setScreenShareEnabled).toHaveBeenCalledWith(false);
+  });
+
+  it('disabling unpublishes the share through the SDK and resolves false', async () => {
+    const room = fakeRoom();
+    const connection = await connect(room, document.createElement('div'));
+
+    await expect(connection.setScreenShareEnabled(false)).resolves.toBe(false);
+
+    expect(room.localParticipant.setScreenShareEnabled).toHaveBeenCalledWith(false);
+  });
+});
+
+describe('one sharer per space (#20): takeover and the start race', () => {
+  it('a peer taking over stops the own share', async () => {
+    const room = fakeRoom();
+    await connect(room, document.createElement('div'));
+    publishLocalShare(room, 1);
+    expect(room.localParticipant.setScreenShareEnabled).not.toHaveBeenCalled();
+
+    publishRemoteShare(room, 'p1', 2);
+
+    expect(room.localParticipant.setScreenShareEnabled).toHaveBeenCalledWith(false);
+  });
+
+  it('an older peer share never stops the own, newer one', async () => {
+    const room = fakeRoom();
+    await connect(room, document.createElement('div'));
+    publishRemoteShare(room, 'p1', 1);
+
+    publishLocalShare(room, 2);
+
+    expect(room.localParticipant.setScreenShareEnabled).not.toHaveBeenCalled();
+  });
+
+  it('two shares started together (same claim): the identity decides, on both sides alike', async () => {
+    // Local identity is 'yo'. 'zz' ranks above it, 'aa' below it.
+    const outranked = fakeRoom();
+    await connect(outranked, document.createElement('div'));
+    publishLocalShare(outranked, 3);
+    publishRemoteShare(outranked, 'zz', 3);
+
+    const outranking = fakeRoom();
+    await connect(outranking, document.createElement('div'));
+    publishLocalShare(outranking, 3);
+    publishRemoteShare(outranking, 'aa', 3);
+
+    expect(outranked.localParticipant.setScreenShareEnabled).toHaveBeenCalledWith(false);
+    expect(outranking.localParticipant.setScreenShareEnabled).not.toHaveBeenCalled();
+  });
+
+  it('reports the active sharer of the space on every change, null when the share ends', async () => {
+    const room = fakeRoom();
+    const onActiveScreenSharerChanged = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onActiveScreenSharerChanged,
+    });
+
+    const publication = publishRemoteShare(room, 'p1', 1);
+    publishRemoteShare(room, 'p2', 2);
+    room.remoteParticipants.delete('p1');
+    room.emit(RoomEvent.TrackUnpublished, publication, { identity: 'p1' });
+    room.remoteParticipants.delete('p2');
+    room.emit(RoomEvent.ParticipantDisconnected, { identity: 'p2' });
+
+    expect(onActiveScreenSharerChanged.mock.calls).toEqual([['p1'], ['p2'], [null]]);
+  });
+
+  it('a share already running when joining the space is reported right after connecting', async () => {
+    const room = fakeRoom();
+    room.remoteParticipants.set(
+      'p1',
+      fakeParticipant([fakePublication('video', { source: 'screen_share', trackName: 'screen_share#1' })]),
+    );
+    const onActiveScreenSharerChanged = vi.fn();
+
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onActiveScreenSharerChanged,
+    });
+
+    expect(onActiveScreenSharerChanged).toHaveBeenCalledWith('p1');
   });
 });
