@@ -1,8 +1,10 @@
 import { render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
 import { SIDEBAR_TOP } from '../game/hudLayout';
+import { createOfficeBridge } from '../game/officeBridge';
 import type { RosterPeer } from '../game/roster';
 import { OfficeSidebar } from './OfficeSidebar';
 
@@ -84,5 +86,66 @@ describe('OfficeSidebar (#74)', () => {
     rerender(<OfficeSidebar self={SELF} peers={[ANA]} forceCollapsed />);
 
     expect(screen.getByRole('button', { name: /Personas/ })).toHaveAttribute('aria-expanded', 'false');
+  });
+});
+
+describe('OfficeSidebar: seccion de administracion de escritorios (#74, PR3c)', () => {
+  const MESA: AdminDesk = { id: 'id-mesa', label: 'Mesa 4', x: 10, y: 10, w: 3, h: 3, occupant: null };
+
+  function fakeDesks(): DeskAdminPort {
+    return {
+      listDesks: vi.fn(async () => [MESA]),
+      createDesk: vi.fn(async () => MESA),
+      updateDesk: vi.fn(async () => MESA),
+      deleteDesk: vi.fn(async () => undefined),
+    };
+  }
+
+  it('sin rol de administracion, expandida, no ofrece nada de edicion', async () => {
+    const user = userEvent.setup();
+    renderSidebar({ role: 'employee' });
+
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    expect(screen.queryByRole('button', { name: /Editar escritorios/ })).not.toBeInTheDocument();
+  });
+
+  it('sin saber el rol todavia (null), no ofrece nada de edicion', async () => {
+    const user = userEvent.setup();
+    renderSidebar({ role: null });
+
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    expect(screen.queryByRole('button', { name: /Editar escritorios/ })).not.toBeInTheDocument();
+  });
+
+  it('con rol admin, expandida, ofrece la seccion de escritorios (cargada de forma diferida)', async () => {
+    const user = userEvent.setup();
+    renderSidebar({
+      role: 'admin',
+      bridge: createOfficeBridge(),
+      desks: fakeDesks(),
+      refreshDesks: vi.fn(),
+      refreshSpaces: vi.fn(),
+    });
+
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    expect(await screen.findByRole('button', { name: /Editar escritorios/ })).toBeInTheDocument();
+  });
+
+  it('con rol superadmin, expandida, ofrece la seccion de escritorios', async () => {
+    const user = userEvent.setup();
+    renderSidebar({
+      role: 'superadmin',
+      bridge: createOfficeBridge(),
+      desks: fakeDesks(),
+      refreshDesks: vi.fn(),
+      refreshSpaces: vi.fn(),
+    });
+
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    expect(await screen.findByRole('button', { name: /Editar escritorios/ })).toBeInTheDocument();
   });
 });
