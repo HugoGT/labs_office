@@ -691,6 +691,69 @@ describe('OfficeScene: roster de personas conectadas via el puente (#74)', () =>
   });
 });
 
+describe('OfficeScene: drift de spacesVersion entre pares (#74, PR3a)', () => {
+  it('un alta con una version distinta de la mia emite "spacesstale" con esa version', async () => {
+    const connector = fakeConnector();
+    const bridge = createOfficeBridge();
+    const stale: OfficeEventMap['spacesstale'][] = [];
+    bridge.on('spacesstale', (s) => stale.push(s));
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+
+    connector.handlers()!.onAdd(remoteSnapshot({ spacesVersion: 'version-editada' }));
+
+    expect(stale).toEqual([{ version: 'version-editada' }]);
+  });
+
+  it('la MISMA version que la mia no emite nada: nadie esta desacompasado', async () => {
+    const connector = fakeConnector();
+    const bridge = createOfficeBridge();
+    const stale: OfficeEventMap['spacesstale'][] = [];
+    bridge.on('spacesstale', (s) => stale.push(s));
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+
+    // `remoteSnapshot()` por defecto ya lleva `BUILT_IN_SPACES_VERSION`, la
+    // misma con la que arranca la escena.
+    connector.handlers()!.onAdd(remoteSnapshot());
+
+    expect(stale).toHaveLength(0);
+  });
+
+  it('un onChange con version distinta TAMBIEN emite: cubre la edicion de un par ya conectado', async () => {
+    // Una edicion desde /dashboard o desde el editor en oficina desacompasa a
+    // un par YA conectado -- su alta ya paso, asi que solo un onChange puede
+    // avisar de esto.
+    const connector = fakeConnector();
+    const bridge = createOfficeBridge();
+    const stale: OfficeEventMap['spacesstale'][] = [];
+    bridge.on('spacesstale', (s) => stale.push(s));
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1' }));
+
+    connector.handlers()!.onChange(remoteSnapshot({ sessionId: 'par-1', spacesVersion: 'version-editada' }));
+
+    expect(stale).toEqual([{ version: 'version-editada' }]);
+  });
+
+  it('una version ya vista no vuelve a emitir, la reporte el mismo par o uno distinto', async () => {
+    const connector = fakeConnector();
+    const bridge = createOfficeBridge();
+    const stale: OfficeEventMap['spacesstale'][] = [];
+    bridge.on('spacesstale', (s) => stale.push(s));
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', spacesVersion: 'version-editada' }));
+
+    connector
+      .handlers()!
+      .onAdd(remoteSnapshot({ sessionId: 'par-2', spacesVersion: 'version-editada' }));
+
+    expect(stale).toEqual([{ version: 'version-editada' }]);
+  });
+});
+
 describe('OfficeScene: comando setStatus via el puente (#1)', () => {
   it('repinta el punto de estado del jugador local', async () => {
     const bridge = createOfficeBridge();

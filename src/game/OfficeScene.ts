@@ -41,6 +41,7 @@ import { createRemoteAvatarRegistry, type RemoteAvatarRegistry } from './remoteA
 import { createPhaserAvatarSink, type RemoteAvatarContainer } from './remoteAvatarSink';
 import { detectSpace, nearbyKey } from './proximity';
 import { createRosterTracker, type RosterPeer, type RosterTracker } from './roster';
+import { createStaleSpacesVersionTracker } from './spacesConfig';
 import { audiblePeers, type AudioPeer } from './proximityAudio';
 import {
   buildTerrainGrid,
@@ -183,6 +184,14 @@ export class OfficeScene extends Phaser.Scene {
    * propio jugador.
    */
   private roster?: RosterTracker;
+  /**
+   * Detector de drift de `spacesVersion` entre pares (#74, PR3a). A
+   * diferencia de `remotes`/`roster`, vive DESDE EL ARRANQUE y no se recrea
+   * por conexion: el limite de un aviso por version distinta debe sobrevivir
+   * a una reconexion, o un `resync` volveria a avisar de una version que ya
+   * se atendio.
+   */
+  private readonly staleSpacesVersion = createStaleSpacesVersionTracker();
   private connection?: OfficeConnection;
   private facing: Facing = DEFAULT_FACING;
   /** Estado de presencia del jugador local; React es quien lo cambia (ver `setStatus`). */
@@ -378,11 +387,13 @@ export class OfficeScene extends Phaser.Scene {
           onAdd: (snapshot) => {
             this.remotes?.upsert(snapshot);
             this.roster?.upsert(rosterPeerOf(snapshot));
+            this.checkSpacesVersionDrift(snapshot.spacesVersion);
             this.emitPresence();
           },
           onChange: (snapshot) => {
             this.remotes?.upsert(snapshot);
             this.roster?.upsert(rosterPeerOf(snapshot));
+            this.checkSpacesVersionDrift(snapshot.spacesVersion);
           },
           onRemove: (sessionId) => {
             this.remotes?.remove(sessionId);
@@ -534,6 +545,19 @@ export class OfficeScene extends Phaser.Scene {
     // Si la conexion todavia no existe no hay nada que anunciar: el join lee
     // `this.spacesVersion` cuando se construya, y ya llevara esta.
     this.connection?.sendSpacesVersion(version);
+  }
+
+  /**
+   * Un par reporto una version distinta de la mia (#74, PR3a): sea porque
+   * acaba de llegar con ella (`onAdd`) o porque un par ya conectado la cambio
+   * (`onChange`, tras una edicion en oficina o desde `/dashboard` -- las dos
+   * publican por el mismo estado replicado). El predicado decide si vale la
+   * pena avisar; `OfficeShell` es quien de verdad relee `/spaces` y `/desks`.
+   */
+  private checkSpacesVersionDrift(peerVersion: string): void {
+    if (this.staleSpacesVersion(peerVersion, this.spacesVersion)) {
+      this.bridge.emit('spacesstale', { version: peerVersion });
+    }
   }
 
   /**

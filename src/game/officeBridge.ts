@@ -135,6 +135,17 @@ export interface OfficeEventMap {
    * nombre y estado por otra via y los antepone en `rosterView.ts`.
    */
   roster: { peers: readonly RosterPeer[] };
+  /**
+   * Un par reporto una `spacesVersion` distinta de la mia (#74, PR3a):
+   * `spacesVersion` NO es un push de cambios de layout, es el propio cliente
+   * reportando su hash (ver `OfficeScene.applySpacesConfig`), asi que un par
+   * desacompasado es la unica senal de que hay algo nuevo que pedir. Cubre
+   * TANTO una edicion en la oficina como una hecha desde `/dashboard`, porque
+   * las dos publican por el mismo estado replicado. `OfficeShell` reacciona
+   * releyendo `/spaces` y `/desks`, como mucho una vez por version distinta
+   * (`createStaleSpacesVersionTracker` en `spacesConfig.ts`).
+   */
+  spacesstale: { version: string };
 }
 
 export interface OfficeCommandMap {

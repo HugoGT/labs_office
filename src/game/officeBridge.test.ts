@@ -217,6 +217,20 @@ describe('createOfficeBridge', () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
+  it('entrega el payload de "spacesstale" y deja de notificar tras desuscribirse (#74, PR3a)', () => {
+    const bridge = createOfficeBridge();
+    const handler = vi.fn();
+
+    const unsubscribe = bridge.on('spacesstale', handler);
+    bridge.emit('spacesstale', { version: 'version-de-un-par' });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith({ version: 'version-de-un-par' });
+
+    unsubscribe();
+    bridge.emit('spacesstale', { version: 'otra-version' });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
   it('entrega el payload de "portraits" y deja de notificar tras desuscribirse (issue #17, D1)', () => {
     const bridge = createOfficeBridge();
     const handler = vi.fn();
