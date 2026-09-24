@@ -1,0 +1,110 @@
+/* Mismo vocabulario visual que OfficeSidebar.module.css: vive DENTRO del panel expandido. */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid #2b3444;
+  padding-top: 8px;
+}
+
+.enter {
+  align-self: flex-start;
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e5e7eb;
+}
+
+.exit {
+  background: transparent;
+  color: #9ca3af;
+  border: none;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  font-size: 12px;
+  color: #e5e7eb;
+}
+
+.rowActions {
+  display: flex;
+  gap: 4px;
+}
+
+.button {
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.form {
+  display: flex;
+  gap: 4px;
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.hint {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.error {
+  font-size: 12px;
+  color: #fca5a5;
+}
