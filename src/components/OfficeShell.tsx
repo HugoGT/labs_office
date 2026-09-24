@@ -3,6 +3,8 @@ import type { OfficeSession } from '../auth/authPort';
 import { createDeskAdminClient } from '../dashboard/deskAdminClient';
 import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import { resolveOfficeApiBaseUrl } from '../dashboard/officeApiBaseUrl';
+import { createSpacesAdminClient } from '../dashboard/spacesAdminClient';
+import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import { resolveLivekitConfig } from '../game/livekitEndpoint';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
@@ -106,6 +108,18 @@ export function OfficeShell({ session = null, onLeaveOffice }: OfficeShellProps)
     const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
     if (apiBaseUrl === null) return null;
     return createDeskAdminClient({ baseUrl: apiBaseUrl, getIdToken: () => session?.getIdToken() ?? Promise.resolve(null) });
+  });
+  /**
+   * Mismo motivo y mismo patron que `deskAdminPort` (#74, PR4): tanto la
+   * seccion de salas del sidebar como el cruce escritorio<->sala de
+   * `useLayoutEditor.ts` (#74, PR4 addition) necesitan este puerto, y
+   * construirlo de nuevo en cada render reiniciaria en bucle el efecto de
+   * lectura de cualquiera de los dos hooks que lo consuman.
+   */
+  const [spacesAdminPort] = useState<SpacesAdminPort | null>(() => {
+    const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
+    if (apiBaseUrl === null) return null;
+    return createSpacesAdminClient({ baseUrl: apiBaseUrl, getIdToken: () => session?.getIdToken() ?? Promise.resolve(null) });
   });
   /**
    * Exclusividad entre el modo edicion de layout y `DeskDecorEditor` (#74,
@@ -658,6 +672,7 @@ export function OfficeShell({ session = null, onLeaveOffice }: OfficeShellProps)
         role={adminRole}
         bridge={bridge}
         desks={deskAdminPort}
+        spaces={spacesAdminPort}
         refreshDesks={refreshDesks}
         refreshSpaces={refreshSpaces}
         onLayoutEditingChange={setLayoutEditing}

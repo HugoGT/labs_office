@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { Role } from '../dashboard/adminPort';
+import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import { SIDEBAR_TOP } from '../game/hudLayout';
 import type { OfficeBridge } from '../game/officeBridge';
 import type { RosterPeer } from '../game/roster';
@@ -39,6 +40,8 @@ export interface OfficeSidebarProps {
    */
   bridge?: OfficeBridge;
   desks?: DeskAdminPort | null;
+  /** Salas admin (#74, PR4): sin esto tampoco se monta nada de edicion, aunque `desks` este presente -- ambas secciones comparten la misma frontera lazy. */
+  spaces?: SpacesAdminPort | null;
   refreshDesks?: () => void;
   refreshSpaces?: () => void;
   /** Reenviado tal cual a `OfficeLayoutEditor` (#74, PR3c: exclusividad con `DeskDecorEditor`). */
@@ -62,6 +65,7 @@ export function OfficeSidebar({
   role = null,
   bridge,
   desks,
+  spaces,
   refreshDesks,
   refreshSpaces,
   onLayoutEditingChange,
@@ -80,6 +84,8 @@ export function OfficeSidebar({
     bridge !== undefined &&
     desks !== undefined &&
     desks !== null &&
+    spaces !== undefined &&
+    spaces !== null &&
     refreshDesks !== undefined &&
     refreshSpaces !== undefined;
 
@@ -130,6 +136,7 @@ export function OfficeSidebar({
               <OfficeLayoutEditorLazy
                 bridge={bridge}
                 desks={desks}
+                spaces={spaces}
                 refreshDesks={refreshDesks}
                 refreshSpaces={refreshSpaces}
                 onEditingChange={onLayoutEditingChange}

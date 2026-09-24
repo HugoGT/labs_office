@@ -3,6 +3,7 @@ import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { AdminError } from '../dashboard/adminPort';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
+import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import { createOfficeBridge } from '../game/officeBridge';
 import { DeskEditorSection } from './DeskEditorSection';
 
@@ -18,10 +19,20 @@ function fakeDesks(overrides: Partial<DeskAdminPort> = {}): DeskAdminPort {
   };
 }
 
+/** Sin salas en ninguno de estos tests: el cruce escritorio<->sala tiene su propia cobertura en `useLayoutEditor.test.ts`. */
+function fakeSpaces(): SpacesAdminPort {
+  return {
+    listSpaces: vi.fn(async () => []),
+    createSpace: vi.fn(),
+    updateSpace: vi.fn(),
+    deleteSpace: vi.fn(),
+  } as unknown as SpacesAdminPort;
+}
+
 describe('DeskEditorSection (#74, PR3c)', () => {
   it('fuera de modo edicion solo ofrece el boton de entrar', () => {
     const bridge = createOfficeBridge();
-    render(<DeskEditorSection bridge={bridge} desks={fakeDesks()} refreshDesks={vi.fn()} refreshSpaces={vi.fn()} />);
+    render(<DeskEditorSection bridge={bridge} desks={fakeDesks()} spaces={fakeSpaces()} refreshDesks={vi.fn()} refreshSpaces={vi.fn()} />);
 
     expect(screen.getByRole('button', { name: /Editar escritorios/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Salir/ })).not.toBeInTheDocument();
@@ -34,6 +45,7 @@ describe('DeskEditorSection (#74, PR3c)', () => {
       <DeskEditorSection
         bridge={bridge}
         desks={fakeDesks()}
+        spaces={fakeSpaces()}
         refreshDesks={vi.fn()}
         refreshSpaces={vi.fn()}
         onEditingChange={onEditingChange}
@@ -54,6 +66,7 @@ describe('DeskEditorSection (#74, PR3c)', () => {
       <DeskEditorSection
         bridge={bridge}
         desks={fakeDesks()}
+        spaces={fakeSpaces()}
         refreshDesks={vi.fn()}
         refreshSpaces={vi.fn()}
         onEditingChange={onEditingChange}
@@ -70,7 +83,7 @@ describe('DeskEditorSection (#74, PR3c)', () => {
 
   it('seleccionar un escritorio de la lista ofrece moverlo y eliminarlo', async () => {
     const bridge = createOfficeBridge();
-    render(<DeskEditorSection bridge={bridge} desks={fakeDesks()} refreshDesks={vi.fn()} refreshSpaces={vi.fn()} />);
+    render(<DeskEditorSection bridge={bridge} desks={fakeDesks()} spaces={fakeSpaces()} refreshDesks={vi.fn()} refreshSpaces={vi.fn()} />);
     await userEvent.click(screen.getByRole('button', { name: /Editar escritorios/ }));
     await screen.findByText('Mesa 4');
 
@@ -83,7 +96,7 @@ describe('DeskEditorSection (#74, PR3c)', () => {
   it('mover pide colocar en el mapa y un clic valido llama a updateDesk', async () => {
     const desks = fakeDesks();
     const bridge = createOfficeBridge();
-    render(<DeskEditorSection bridge={bridge} desks={desks} refreshDesks={vi.fn()} refreshSpaces={vi.fn()} />);
+    render(<DeskEditorSection bridge={bridge} desks={desks} spaces={fakeSpaces()} refreshDesks={vi.fn()} refreshSpaces={vi.fn()} />);
     await userEvent.click(screen.getByRole('button', { name: /Editar escritorios/ }));
     await screen.findByText('Mesa 4');
     await userEvent.click(screen.getByRole('button', { name: /Seleccionar Mesa 4/ }));
@@ -99,7 +112,7 @@ describe('DeskEditorSection (#74, PR3c)', () => {
   it('eliminar llama a deleteDesk con el id seleccionado', async () => {
     const desks = fakeDesks();
     const bridge = createOfficeBridge();
-    render(<DeskEditorSection bridge={bridge} desks={desks} refreshDesks={vi.fn()} refreshSpaces={vi.fn()} />);
+    render(<DeskEditorSection bridge={bridge} desks={desks} spaces={fakeSpaces()} refreshDesks={vi.fn()} refreshSpaces={vi.fn()} />);
     await userEvent.click(screen.getByRole('button', { name: /Editar escritorios/ }));
     await screen.findByText('Mesa 4');
     await userEvent.click(screen.getByRole('button', { name: /Seleccionar Mesa 4/ }));
@@ -112,7 +125,7 @@ describe('DeskEditorSection (#74, PR3c)', () => {
   it('crear: escribir una etiqueta y colocar en el mapa llama a createDesk', async () => {
     const desks = fakeDesks();
     const bridge = createOfficeBridge();
-    render(<DeskEditorSection bridge={bridge} desks={desks} refreshDesks={vi.fn()} refreshSpaces={vi.fn()} />);
+    render(<DeskEditorSection bridge={bridge} desks={desks} spaces={fakeSpaces()} refreshDesks={vi.fn()} refreshSpaces={vi.fn()} />);
     await userEvent.click(screen.getByRole('button', { name: /Editar escritorios/ }));
     await screen.findByText('Mesa 4');
 
@@ -128,7 +141,7 @@ describe('DeskEditorSection (#74, PR3c)', () => {
       createDesk: vi.fn(async () => Promise.reject(new AdminError('desk-overlap'))),
     });
     const bridge = createOfficeBridge();
-    render(<DeskEditorSection bridge={bridge} desks={desks} refreshDesks={vi.fn()} refreshSpaces={vi.fn()} />);
+    render(<DeskEditorSection bridge={bridge} desks={desks} spaces={fakeSpaces()} refreshDesks={vi.fn()} refreshSpaces={vi.fn()} />);
     await userEvent.click(screen.getByRole('button', { name: /Editar escritorios/ }));
     await screen.findByText('Mesa 4');
 
@@ -152,6 +165,7 @@ describe('DeskEditorSection (#74, PR3c)', () => {
       <DeskEditorSection
         bridge={bridge}
         desks={fakeDesks()}
+        spaces={fakeSpaces()}
         refreshDesks={vi.fn()}
         refreshSpaces={vi.fn()}
         onEditingChange={onEditingChange}
@@ -164,6 +178,7 @@ describe('DeskEditorSection (#74, PR3c)', () => {
       <DeskEditorSection
         bridge={bridge}
         desks={fakeDesks()}
+        spaces={fakeSpaces()}
         refreshDesks={vi.fn()}
         refreshSpaces={vi.fn()}
         onEditingChange={onEditingChange}

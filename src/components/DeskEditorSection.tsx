@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { DeskAdminPort } from '../dashboard/deskAdminPort';
+import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import type { OfficeBridge } from '../game/officeBridge';
 import { useLayoutEditor } from '../hooks/useLayoutEditor';
 import styles from './DeskEditorSection.module.css';
@@ -20,6 +21,8 @@ import styles from './DeskEditorSection.module.css';
 export interface DeskEditorSectionProps {
   bridge: OfficeBridge;
   desks: DeskAdminPort;
+  /** Solo para el pre-chequeo del ghost (#74, PR4 addition): una sala tambien cuenta como obstaculo. Ver `useLayoutEditor.ts`. */
+  spaces: SpacesAdminPort;
   /** Releidos tras cada mutacion con exito, para que la escena converja (paired-space sync). */
   refreshDesks: () => void;
   refreshSpaces: () => void;
@@ -32,12 +35,13 @@ export interface DeskEditorSectionProps {
 export function DeskEditorSection({
   bridge,
   desks,
+  spaces,
   refreshDesks,
   refreshSpaces,
   onEditingChange,
   forceExit = false,
 }: DeskEditorSectionProps) {
-  const editor = useLayoutEditor({ bridge, desks, refreshDesks, refreshSpaces });
+  const editor = useLayoutEditor({ bridge, desks, spaces, refreshDesks, refreshSpaces });
   const [label, setLabel] = useState('');
   const wasCreatingRef = useRef(false);
 

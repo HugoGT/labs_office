@@ -21,6 +21,18 @@
  * `describeAdminError`. Ampliar el pre-chequeo a salas es trabajo de cuando
  * exista una lectura compartida de `AdminSpace[]`, no de esta PR.
  *
+ * ## Cruce escritorio<->sala (#74, PR4 addition)
+ *
+ * Deviation de PR3c (ver Engram #814/apply-progress): "el pre-chequeo del
+ * ghost en esta PR solo ve OTROS ESCRITORIOS como obstaculo, nunca salas".
+ * Este hook ahora TAMBIEN lee `spaces.listSpaces()` -- filtrado a `kind:
+ * 'room'`, los cubiculos de escritorio se descartan enteros: ya estan en
+ * `desks.listDesks()`, y sumarlos tambien duplicaria el mismo escritorio dos
+ * veces -- y los pasa como `obstacleItems` a `toLayoutEditCommand` (PR4) sin
+ * ofrecerlos NUNCA como pickable: `items` (lo pickable/seleccionable) sigue
+ * siendo solo escritorios, porque `layoutpick`/`layoutplace` en ESTE hook
+ * siguen resolviendo contra `DeskAdminPort` unicamente.
+ *
  * ## `saving` del reductor solo cubre crear/mover, nunca borrar
  *
  * El reductor (PR3b) no tiene una transicion propia para borrar desde
@@ -36,6 +48,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { describeAdminError } from '../dashboard/adminErrors';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
+import type { AdminSpace, SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import {
   OFF_STATE,
   reduceEditorState,
@@ -51,6 +64,8 @@ const NEW_DESK_TILES = 3;
 export interface UseLayoutEditorOptions {
   bridge: OfficeBridge;
   desks: DeskAdminPort;
+  /** Solo para el pre-chequeo del ghost (#74, PR4 addition): ver la cabecera. */
+  spaces: SpacesAdminPort;
   /** Se llaman tras cada mutacion con exito, para que la escena y el resto de la oficina converjan (paired-space sync). */
   refreshDesks: () => void;
   refreshSpaces: () => void;
@@ -81,14 +96,25 @@ function toObstacleItem(desk: AdminDesk): LayoutObstacleItem {
   return { id: desk.id, kind: 'desk', x: desk.x, y: desk.y, w: desk.w, h: desk.h };
 }
 
+function isRoom(space: AdminSpace): boolean {
+  return space.kind === 'room';
+}
+
+function toRoomObstacleItem(space: AdminSpace): LayoutObstacleItem {
+  return { id: space.id, kind: 'room', x: space.x, y: space.y, w: space.w, h: space.h };
+}
+
 export function useLayoutEditor({
   bridge,
   desks,
+  spaces,
   refreshDesks,
   refreshSpaces,
 }: UseLayoutEditorOptions): UseLayoutEditorResult {
   const [state, dispatch] = useReducer(reduceEditorState, OFF_STATE);
   const [list, setList] = useState<readonly AdminDesk[]>([]);
+  /** Solo para obstaculos (#74, PR4 addition): nunca pickable, ver la cabecera. */
+  const [roomObstacles, setRoomObstacles] = useState<readonly AdminSpace[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   /** La etiqueta pedida para el proximo `createDesk`, guardada fuera del reductor: no tiene sitio propio en `EditorState`. */
@@ -103,16 +129,18 @@ export function useLayoutEditor({
 
     let cancelled = false;
     void (async () => {
-      const resolved = await desks.listDesks();
+      const [resolvedDesks, resolvedSpaces] = await Promise.all([desks.listDesks(), spaces.listSpaces()]);
       // Una respuesta tras salir del modo edicion no toca la lista: mismo
       // motivo que `useDesks`/`useSpacesConfig`.
-      if (!cancelled) setList(resolved);
+      if (cancelled) return;
+      setList(resolvedDesks);
+      setRoomObstacles(resolvedSpaces.filter(isRoom));
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [active, desks]);
+  }, [active, desks, spaces]);
 
   useEffect(() => bridge.on('layoutpick', ({ id }) => dispatch({ type: 'select', id })), [bridge]);
 
@@ -144,7 +172,9 @@ export function useLayoutEditor({
             dispatch({ type: 'saveSucceeded' });
             refreshDesks();
             refreshSpaces();
-            setList(await desks.listDesks());
+            const [resolvedDesks, resolvedSpaces] = await Promise.all([desks.listDesks(), spaces.listSpaces()]);
+            setList(resolvedDesks);
+            setRoomObstacles(resolvedSpaces.filter(isRoom));
           } catch (err) {
             // Fallo del servidor: se cuenta con `describeAdminError` y NO se
             // relee nada -- nada cambio que valga la pena volver a leer, y
@@ -156,7 +186,7 @@ export function useLayoutEditor({
           }
         })();
       }),
-    [bridge, desks, refreshDesks, refreshSpaces],
+    [bridge, desks, spaces, refreshDesks, refreshSpaces],
   );
 
   const enter = useCallback(() => {
@@ -201,13 +231,15 @@ export function useLayoutEditor({
       dispatch({ type: 'deselect' });
       refreshDesks();
       refreshSpaces();
-      setList(await desks.listDesks());
+      const [resolvedDesks, resolvedSpaces] = await Promise.all([desks.listDesks(), spaces.listSpaces()]);
+      setList(resolvedDesks);
+      setRoomObstacles(resolvedSpaces.filter(isRoom));
     } catch (err) {
       setError(describeAdminError(err));
     } finally {
       setPending(false);
     }
-  }, [desks, refreshDesks, refreshSpaces]);
+  }, [desks, spaces, refreshDesks, refreshSpaces]);
 
   useEffect(() => {
     const moving =
@@ -220,11 +252,12 @@ export function useLayoutEditor({
 
     const command = toLayoutEditCommand(state, {
       items: list.map(toObstacleItem),
+      obstacleItems: [...list.map(toObstacleItem), ...roomObstacles.map(toRoomObstacleItem)],
       placingSize: state.tag === 'placing' ? { w: NEW_DESK_TILES, h: NEW_DESK_TILES } : undefined,
       moving,
     });
     bridge.emitCommand('layoutedit', command);
-  }, [state, list, bridge]);
+  }, [state, list, roomObstacles, bridge]);
 
   return {
     state,

@@ -10,11 +10,15 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { AdminError } from '../dashboard/adminPort';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
+import type { AdminSpace, SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import { createOfficeBridge, type OfficeCommandMap } from '../game/officeBridge';
 import { useLayoutEditor } from './useLayoutEditor';
 
 const MESA: AdminDesk = { id: 'id-mesa', label: 'Mesa 4', x: 10, y: 10, w: 3, h: 3, occupant: null };
 const OTRA: AdminDesk = { id: 'id-otra', label: 'Mesa 5', x: 20, y: 20, w: 3, h: 3, occupant: null };
+// Cubiculo de MESA en /spaces: mismo x/y, id DISTINTO -- no debe duplicar a MESA en los obstaculos (#74, PR4 addition).
+const CUBICULO_MESA: AdminSpace = { id: 'id-space-mesa', name: 'Mesa 4', x: 10, y: 10, w: 3, h: 3, capacity: null, kind: 'desk' };
+const SALA: AdminSpace = { id: 'id-sala', name: 'Sala grande', x: 0, y: 0, w: 4, h: 4, capacity: null, kind: 'room' };
 
 function fakeDesks(overrides: Partial<DeskAdminPort> = {}): DeskAdminPort {
   return {
@@ -26,16 +30,26 @@ function fakeDesks(overrides: Partial<DeskAdminPort> = {}): DeskAdminPort {
   };
 }
 
-function setup(desks: DeskAdminPort) {
+function fakeSpaces(overrides: Partial<SpacesAdminPort> = {}): SpacesAdminPort {
+  return {
+    listSpaces: vi.fn(async () => [CUBICULO_MESA, SALA]),
+    createSpace: vi.fn(),
+    updateSpace: vi.fn(),
+    deleteSpace: vi.fn(),
+    ...overrides,
+  } as SpacesAdminPort;
+}
+
+function setup(desks: DeskAdminPort, spaces: SpacesAdminPort = fakeSpaces()) {
   const bridge = createOfficeBridge();
   const refreshDesks = vi.fn();
   const refreshSpaces = vi.fn();
   const commands: (OfficeCommandMap['layoutedit'])[] = [];
   bridge.onCommand('layoutedit', (command) => commands.push(command));
 
-  const view = renderHook(() => useLayoutEditor({ bridge, desks, refreshDesks, refreshSpaces }));
+  const view = renderHook(() => useLayoutEditor({ bridge, desks, spaces, refreshDesks, refreshSpaces }));
 
-  return { bridge, desks, refreshDesks, refreshSpaces, commands, ...view };
+  return { bridge, desks, spaces, refreshDesks, refreshSpaces, commands, ...view };
 }
 
 describe('useLayoutEditor (#74, PR3c)', () => {
@@ -168,6 +182,63 @@ describe('useLayoutEditor (#74, PR3c)', () => {
     expect(result.current.error).toBe('No se pudo completar la operación.');
     expect(refreshDesks).not.toHaveBeenCalled();
     expect(result.current.state).toEqual({ tag: 'selected', kind: 'desk', id: 'id-mesa' });
+  });
+
+  describe('cruce escritorio<->sala (#74, PR4 addition)', () => {
+    it('crear un escritorio incluye las salas como obstaculo, sin ofrecerlas como pickable', async () => {
+      const { commands, result } = setup(fakeDesks(), fakeSpaces());
+      act(() => result.current.enter());
+      await waitFor(() => expect(result.current.desks).toHaveLength(2));
+
+      act(() => result.current.startCreate('Mesa 6'));
+
+      await waitFor(() => {
+        const obstacles = commands.at(-1)?.placing?.obstacles ?? [];
+        expect(obstacles).toContainEqual({ x0: 0, y0: 0, x1: 3, y1: 3 });
+      });
+      expect(commands.at(-1)?.pickable.map((rect) => rect.id)).not.toContain('id-sala');
+    });
+
+    it('el cubiculo de un escritorio en /spaces no duplica el obstaculo de ese mismo escritorio', async () => {
+      const { commands, result } = setup(fakeDesks(), fakeSpaces());
+      act(() => result.current.enter());
+      await waitFor(() => expect(result.current.desks).toHaveLength(2));
+
+      act(() => result.current.startCreate('Mesa 6'));
+
+      await waitFor(() => {
+        const obstacles = commands.at(-1)?.placing?.obstacles ?? [];
+        // MESA (10,10,3,3) aparece una sola vez, no dos (una por desks, otra por el cubiculo de /spaces).
+        expect(obstacles.filter((rect) => rect.x0 === 10 && rect.y0 === 10)).toHaveLength(1);
+      });
+    });
+
+    it('mover un escritorio a su propio sitio anterior es valido: se excluye a si mismo, la sala sigue siendo obstaculo', async () => {
+      const { bridge, commands, result } = setup(fakeDesks(), fakeSpaces());
+      act(() => result.current.enter());
+      await waitFor(() => expect(result.current.desks).toHaveLength(2));
+      act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+      act(() => result.current.startMove());
+
+      await waitFor(() => {
+        const obstacles = commands.at(-1)?.placing?.obstacles ?? [];
+        expect(obstacles).not.toContainEqual({ x0: 10, y0: 10, x1: 12, y1: 12 });
+        expect(obstacles).toContainEqual({ x0: 0, y0: 0, x1: 3, y1: 3 });
+      });
+    });
+
+    it('una mutacion con exito relee tambien las salas, no solo los escritorios', async () => {
+      const desks = fakeDesks();
+      const spaces = fakeSpaces();
+      const { bridge, result } = setup(desks, spaces);
+      act(() => result.current.enter());
+      await waitFor(() => expect(result.current.desks).toHaveLength(2));
+      act(() => result.current.startCreate('Mesa 6'));
+
+      act(() => bridge.emit('layoutplace', { tx: 7, ty: 8, valid: true }));
+
+      await waitFor(() => expect(spaces.listSpaces).toHaveBeenCalledTimes(2));
+    });
   });
 
   it('exit vuelve a off y deja de publicar comando (null)', async () => {

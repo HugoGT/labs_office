@@ -3,6 +3,7 @@ import { userEvent } from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
+import type { AdminSpace, SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import { SIDEBAR_TOP } from '../game/hudLayout';
 import { createOfficeBridge } from '../game/officeBridge';
 import type { RosterPeer } from '../game/roster';
@@ -89,8 +90,9 @@ describe('OfficeSidebar (#74)', () => {
   });
 });
 
-describe('OfficeSidebar: seccion de administracion de escritorios (#74, PR3c)', () => {
+describe('OfficeSidebar: seccion de administracion de escritorios (#74, PR3c + PR4)', () => {
   const MESA: AdminDesk = { id: 'id-mesa', label: 'Mesa 4', x: 10, y: 10, w: 3, h: 3, occupant: null };
+  const SALA: AdminSpace = { id: 'id-sala', name: 'Sala grande', x: 0, y: 0, w: 4, h: 4, capacity: null, kind: 'room' };
 
   function fakeDesks(): DeskAdminPort {
     return {
@@ -99,6 +101,15 @@ describe('OfficeSidebar: seccion de administracion de escritorios (#74, PR3c)', 
       updateDesk: vi.fn(async () => MESA),
       deleteDesk: vi.fn(async () => undefined),
     };
+  }
+
+  function fakeSpaces(): SpacesAdminPort {
+    return {
+      listSpaces: vi.fn(async () => [SALA]),
+      createSpace: vi.fn(),
+      updateSpace: vi.fn(),
+      deleteSpace: vi.fn(),
+    } as unknown as SpacesAdminPort;
   }
 
   it('sin rol de administracion, expandida, no ofrece nada de edicion', async () => {
@@ -125,6 +136,7 @@ describe('OfficeSidebar: seccion de administracion de escritorios (#74, PR3c)', 
       role: 'admin',
       bridge: createOfficeBridge(),
       desks: fakeDesks(),
+      spaces: fakeSpaces(),
       refreshDesks: vi.fn(),
       refreshSpaces: vi.fn(),
     });
@@ -140,6 +152,7 @@ describe('OfficeSidebar: seccion de administracion de escritorios (#74, PR3c)', 
       role: 'superadmin',
       bridge: createOfficeBridge(),
       desks: fakeDesks(),
+      spaces: fakeSpaces(),
       refreshDesks: vi.fn(),
       refreshSpaces: vi.fn(),
     });
@@ -147,5 +160,20 @@ describe('OfficeSidebar: seccion de administracion de escritorios (#74, PR3c)', 
     await user.click(screen.getByRole('button', { name: /Personas/ }));
 
     expect(await screen.findByRole('button', { name: /Editar escritorios/ })).toBeInTheDocument();
+  });
+
+  it('con rol admin y el resto de props, pero sin spaces, no ofrece nada de edicion (#74, PR4 addition)', async () => {
+    const user = userEvent.setup();
+    renderSidebar({
+      role: 'admin',
+      bridge: createOfficeBridge(),
+      desks: fakeDesks(),
+      refreshDesks: vi.fn(),
+      refreshSpaces: vi.fn(),
+    });
+
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    expect(screen.queryByRole('button', { name: /Editar escritorios/ })).not.toBeInTheDocument();
   });
 });

@@ -3,6 +3,8 @@ import { userEvent } from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDeskAdminClient } from '../dashboard/deskAdminClient';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
+import { createSpacesAdminClient } from '../dashboard/spacesAdminClient';
+import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import { createGame } from '../game/createGame';
 import { fetchDeskCatalog, fetchMyDeskItems, saveMyDesk } from '../game/deskDecorClient';
 import type { DeskDecorAsset, PlacedDeskItem } from '../game/deskDecorPort';
@@ -54,11 +56,16 @@ vi.mock('../game/recordingClient', async (importOriginal) => ({
 // que la seccion de administracion, montada de forma diferida, dispare una
 // peticion real al entrar en modo edicion.
 vi.mock('../dashboard/deskAdminClient', () => ({ createDeskAdminClient: vi.fn() }));
+// Mismo criterio con `/admin/spaces` (#74, PR4): tanto la seccion de salas
+// como el cruce escritorio<->sala de `useLayoutEditor.ts` lo necesitan
+// SIEMPRE que hay rol admin, no solo cuando se entra a editar salas.
+vi.mock('../dashboard/spacesAdminClient', () => ({ createSpacesAdminClient: vi.fn() }));
 
 const createGameMock = vi.mocked(createGame);
 const useProximityAudioMock = vi.mocked(useProximityAudio);
 const useOfficeAdminRoleMock = vi.mocked(useOfficeAdminRole);
 const createDeskAdminClientMock = vi.mocked(createDeskAdminClient);
+const createSpacesAdminClientMock = vi.mocked(createSpacesAdminClient);
 
 /** Puerto falso por defecto (#74, PR3c): sin llamadas en vuelo salvo que un test las controle. */
 function fakeDeskAdminPort(overrides: Partial<DeskAdminPort> = {}): DeskAdminPort {
@@ -71,6 +78,21 @@ function fakeDeskAdminPort(overrides: Partial<DeskAdminPort> = {}): DeskAdminPor
       throw new Error('not stubbed');
     }),
     deleteDesk: vi.fn(async () => undefined),
+    ...overrides,
+  };
+}
+
+/** Puerto falso por defecto (#74, PR4): sin salas salvo que un test las controle. */
+function fakeSpacesAdminPort(overrides: Partial<SpacesAdminPort> = {}): SpacesAdminPort {
+  return {
+    listSpaces: vi.fn(async () => []),
+    createSpace: vi.fn(async () => {
+      throw new Error('not stubbed');
+    }),
+    updateSpace: vi.fn(async () => {
+      throw new Error('not stubbed');
+    }),
+    deleteSpace: vi.fn(async () => undefined),
     ...overrides,
   };
 }
@@ -121,6 +143,7 @@ beforeEach(() => {
   // sobreescriben esto explicitamente.
   useOfficeAdminRoleMock.mockReturnValue(null);
   createDeskAdminClientMock.mockReturnValue(fakeDeskAdminPort());
+  createSpacesAdminClientMock.mockReturnValue(fakeSpacesAdminPort());
 });
 
 describe('OfficeShell', () => {
