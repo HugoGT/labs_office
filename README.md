@@ -42,7 +42,7 @@ More detail: [AGENTS.md](AGENTS.md#architecture), `server/README.md`, `infra/liv
 - Node.js 24 (CI and the server image use Node 24; the server runs `.ts` files directly through Node type stripping).
 - pnpm 11 (pinned in `package.json` `packageManager`; `corepack enable` picks it up). The lockfile is `pnpm-lock.yaml`.
 - Chromium for Playwright, for browser and E2E tests: `pnpm exec playwright install chromium`.
-- Optional: Docker with Compose, for the local LiveKit stack and `pnpm test:mux`.
+- Optional: Docker with Compose, for the full local stack, the local LiveKit stack and `pnpm test:mux`.
 - Optional: `gcloud`, for local recording against a GCS dev bucket and for deployment.
 
 ## Quick start
@@ -57,9 +57,27 @@ With no `.env` at all this runs without login, without the directory, and withou
 
 ## Running locally with Docker
 
-Docker runs the backing services (LiveKit, Egress, Redis and optionally Postgres). The app itself (Node server and Vite SPA) runs on the host with pnpm. There is no single compose file for the whole app: `infra/gcp/docker-compose.yml` is the deployed VM topology (registry images, Caddy with public sslip.io hostnames) and is not meant for local use.
+Two ways, both driven by the root `.env`. `infra/gcp/docker-compose.yml` is the deployed VM topology (registry images, Caddy with public sslip.io hostnames) and is not meant for local use.
 
-Requirements: Docker with Compose v2, Node 24 and pnpm 11. Ports used: `2567` (server), `5173` (SPA), `7880`, `7881/tcp` and `50000-50019/udp` (LiveKit), `5432` (Postgres).
+Requirements: Docker with Compose v2 (2.20 or newer, for `include`). Option 2 also needs Node 24 and pnpm 11. Ports used: `2567` (server), `7880`, `7881/tcp` and `50000-50019/udp` (LiveKit), `5432` (Postgres), plus `8080` (option 1) or `5173` (option 2). The two options use the same ports, so run one at a time.
+
+### Option 1: full stack, one command
+
+The root `docker-compose.yml` builds the server and SPA images from `infra/gcp/docker/` and starts them with Postgres, reusing LiveKit, Egress and Redis from `infra/livekit/docker-compose.yml` (through Compose `include`). No Node or pnpm on the host.
+
+```sh
+cp .env.example .env
+# set LIVEKIT_API_SECRET to the output of: openssl rand -hex 32
+docker compose up -d --build
+docker compose ps                    # postgres, server: healthy; livekit, egress, redis, web: running
+curl http://localhost:2567/health    # "ok":true, "directory":"enabled"
+```
+
+Open http://localhost:8080 (two windows to test proximity audio/video). The directory is always on in this stack. `/dashboard` additionally needs auth: without the Firebase variables it only explains that. The stack reads `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` and the optional feature variables from `.env`; `DATABASE_URL`, `LIVEKIT_URL`, `LIVEKIT_API_URL` and `VITE_COLYSEUS_URL` are set by the compose file and any value in `.env` is ignored. There is no hot reload: rebuild with `docker compose up -d --build` after a change.
+
+Stop with `docker compose down` (add `-v` to also wipe the Postgres volume).
+
+### Option 2: backing services in Docker, app on the host (hot reload)
 
 1. Start LiveKit + Egress + Redis:
 
@@ -87,8 +105,9 @@ Requirements: Docker with Compose v2, Node 24 and pnpm 11. Ports used: `2567` (s
 
    Then edit it:
    - Set `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` to the same values as `infra/livekit/.env`.
-   - Delete the `VITE_COLYSEUS_URL=` line (or set it to `ws://localhost:2567`). Vite exposes the empty value, and an empty `VITE_COLYSEUS_URL` explicitly disables multiplayer.
    - If you ran step 2: `DATABASE_URL=postgres://office:office@localhost:5432/office`.
+
+   `VITE_COLYSEUS_URL` ships commented out, so the client derives `ws://localhost:2567`. Uncommenting it empty disables multiplayer on purpose.
 
 4. Install dependencies and run the app (two terminals):
 
@@ -107,7 +126,7 @@ Requirements: Docker with Compose v2, Node 24 and pnpm 11. Ports used: `2567` (s
    docker rm -f office-pg
    ```
 
-Without `FIREBASE_PROJECT_ID` and the `VITE_FIREBASE_*` variables there is no login screen, which is the normal local setup. Open two browser windows to test proximity audio/video between avatars. Local recording additionally needs a real GCS dev bucket and impersonated Application Default Credentials (`GCS_CREDENTIALS_FILE`, `RECORDING_GCS_BUCKET`); see "Local recording" in `infra/livekit/README.md`.
+Without `FIREBASE_PROJECT_ID` and the `VITE_FIREBASE_*` variables there is no login screen, which is the normal local setup (in option 1 the `VITE_FIREBASE_*` values are baked at image build time, so rebuild after changing them). Local recording additionally needs a real GCS dev bucket and impersonated Application Default Credentials (`GCS_CREDENTIALS_FILE`, `RECORDING_GCS_BUCKET`, in the root `.env` for option 1); see "Local recording" in `infra/livekit/README.md`.
 
 ## Scripts
 
@@ -140,13 +159,14 @@ Copy `.env.example` to `.env` and fill in only what you need. Every variable is 
 | Group | Variables | Unset means |
 |---|---|---|
 | Client | `VITE_COLYSEUS_URL`, `VITE_LIVEKIT_URL` | derived automatically |
+| Server | `PORT`, `NODE_ENV`, `OFFICE_RECONNECTION_WINDOW_SECONDS` | port 2567, development mode, 30 s reconnection window |
 | LiveKit | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL`, `LIVEKIT_API_URL` | no audio/video tokens |
 | Recording | `RECORDING_GCS_BUCKET` | `/recordings/*` answers 503 |
 | CORS | `ALLOWED_ORIGIN` | `*` |
 | Auth | `FIREBASE_PROJECT_ID` (server), `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_AUTH_DOMAIN` (client) | no login |
 | Directory | `DATABASE_URL`, `BOOTSTRAP_SUPERADMIN_EMAIL`, `IDENTITY_ADMIN_CREDENTIALS`, `IDENTITY_ADMIN_USE_METADATA` | no roles, invitations, spaces or desks |
 
-The local LiveKit stack has its own `infra/livekit/.env` (from `infra/livekit/.env.example`). `GET /health` reports whether auth and the directory are enabled. Never commit a real `.env`.
+The standalone LiveKit stack has its own `infra/livekit/.env` (from `infra/livekit/.env.example`); the full Docker stack (`docker-compose.yml`) reads only the root `.env`, LiveKit included. `GET /health` reports whether auth and the directory are enabled. Never commit a real `.env`.
 
 ## Testing
 
