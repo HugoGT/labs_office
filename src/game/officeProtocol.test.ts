@@ -6,9 +6,11 @@ import {
   FACINGS,
   LIVEKIT_ROOM_NAME,
   PRESENCE_STATUSES,
+  RECORDING_RETENTION_DAYS,
   facingFrom,
   isPresenceStatus,
   livekitRoomFor,
+  recordingAvailableUntil,
 } from './officeProtocol';
 
 describe('facingFrom', () => {
@@ -86,5 +88,17 @@ describe('livekitRoomFor', () => {
 
   it('dos spaceId distintos dan dos salas distintas (namespacing, no una constante)', () => {
     expect(livekitRoomFor('s1')).not.toBe(livekitRoomFor('s2'));
+  });
+});
+
+describe('recording retention (#5, #58)', () => {
+  it('keeps a recording for 30 days, the age at which the bucket lifecycle deletes it', () => {
+    expect(RECORDING_RETENTION_DAYS).toBe(30);
+  });
+
+  it('a recording is available until 30 days after it stopped', () => {
+    const stoppedAt = Date.UTC(2026, 8, 23, 10, 0, 0);
+
+    expect(recordingAvailableUntil(stoppedAt)).toBe(Date.UTC(2026, 9, 23, 10, 0, 0));
   });
 });

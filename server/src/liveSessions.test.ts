@@ -157,3 +157,14 @@ describe('createLiveSessionRegistry: posicion de la sesion (#10, #12, D4)', () =
     expect(registry.positionOf('sess-a')).toBeUndefined();
   });
 });
+
+describe('createLiveSessionRegistry: ids (#58)', () => {
+  it('lists every live session, and forgets the ones removed', () => {
+    const registry = createLiveSessionRegistry();
+    registry.add('sess-a');
+    registry.add('sess-b');
+    registry.remove('sess-a');
+
+    expect(registry.ids()).toEqual(['sess-b']);
+  });
+});

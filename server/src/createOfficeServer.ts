@@ -63,7 +63,19 @@ import { directoryFromEnv, type DirectoryRuntime } from './directory/fromEnv.ts'
 import { createLiveSessionRegistry, type LiveSessionRegistry } from './liveSessions.ts';
 import { mintOfficeToken } from './livekitToken.ts';
 import { OFFICE_ROOM_NAME, OfficeRoom, RECONNECTION_WINDOW_SECONDS } from './OfficeRoom.ts';
-import { spaceIdAt } from './spaces/spaceMembership.ts';
+import { egressFromEnv, type EgressPort } from './recording/egressPort.ts';
+import { createFinishedRecordingStore } from './recording/finishedRecordings.ts';
+import { createRecordingRegistry, type RecordingRegistry } from './recording/recordingRegistry.ts';
+import {
+  finishRecording,
+  handleRecordingUrl,
+  handleStartRecording,
+  handleStopRecording,
+  type RecordingDeps,
+  type RecordingResult,
+} from './recording/recordingRoutes.ts';
+import { recordingStorageFromEnv, type RecordingStoragePort } from './recording/recordingStorage.ts';
+import { guardSessionRequest, sessionIsInSpace } from './sessionGuard.ts';
 import { createIdTokenVerifier, type IdTokenVerifier } from './verifyIdToken.ts';
 
 /**
@@ -127,45 +139,9 @@ async function handleLivekitToken(
   auth?: IdTokenVerifier,
   spaces?: SpacesDirectory,
 ): Promise<LivekitTokenResult> {
-  const sessionId = (body as { sessionId?: unknown } | null)?.sessionId;
-  if (typeof sessionId !== 'string' || sessionId.length === 0) {
-    return { status: 400, body: { error: 'invalid-request' } };
-  }
-
-  // Mismo 400 que el de arriba y por la misma razon: un `spaceId` con un tipo
-  // que no es ni texto ni ausencia deliberada (`null`) es un cuerpo mal
-  // formado, no una pregunta de autorizacion.
-  const rawSpaceId = (body as { spaceId?: unknown } | null)?.spaceId;
-  if (rawSpaceId !== undefined && rawSpaceId !== null && typeof rawSpaceId !== 'string') {
-    return { status: 400, body: { error: 'invalid-request' } };
-  }
-  const spaceId: string | null = typeof rawSpaceId === 'string' ? rawSpaceId : null;
-
-  // Con auth activa, la credencial se comprueba ANTES que nada que hable de la
-  // sesion. El orden no es cosmetico: si `unknown-session` fuese primero, quien
-  // sondea sin token distinguiria un `sessionId` vivo (401) de uno inventado
-  // (403), que es justo el oraculo que este 401 mudo quiere negarle. Un token
-  // ausente o con el tipo cambiado tambien cae aqui, y responde 401 y no 400,
-  // por lo mismo: el llamante solo aprende "no autorizado".
-  const identity = auth ? await auth.verify((body as { token?: unknown }).token) : null;
-  if (auth && identity === null) {
-    return { status: 401, body: { error: 'unauthorized' } };
-  }
-
-  if (!sessions.has(sessionId)) {
-    return { status: 403, body: { error: 'unknown-session' } };
-  }
-
-  // La guarda de verdad: estar autenticado no basta, hay que ser el dueno de
-  // ESTA sesion. Sin esto cualquier participante podia leer el `sessionId` de
-  // otro en el estado de la sala y mintar un token en su nombre -- con su
-  // propio token valido, asi que la verificacion de firma no lo habria
-  // frenado. Se separa del 401 a proposito: aqui el llamante ya ha probado
-  // quien es, y decirle que esa sesion no es suya no le revela nada que no
-  // supiese.
-  if (identity !== null && sessions.uidOf(sessionId) !== identity.uid) {
-    return { status: 403, body: { error: 'forbidden-session' } };
-  }
+  const guard = await guardSessionRequest(body, sessions, auth);
+  if (!guard.ok) return { status: guard.status, body: guard.body };
+  const { sessionId, spaceId } = guard;
 
   // La guarda de espacio va DESPUES de las dos de sesion/dueno arriba y ANTES
   // del 503 de abajo: comprueba primero quien eres, luego donde estas. Sin
@@ -175,10 +151,7 @@ async function handleLivekitToken(
   // `livekitRoomFor` emite el corredor.
   let mintedSpaceId: string | null = null;
   if (spaceId !== null && spaces) {
-    const known = await spaces.listSpaces();
-    const pos = sessions.positionOf(sessionId);
-    const actual = pos ? spaceIdAt(pos, known) : null;
-    if (actual !== spaceId) {
+    if (!(await sessionIsInSpace(sessionId, spaceId, sessions, spaces))) {
       return { status: 403, body: { error: 'forbidden-space' } };
     }
     mintedSpaceId = spaceId;
@@ -224,6 +197,8 @@ export interface OfficeServer {
   httpServer: HttpServer;
   /** Registro de sesiones vivas (D4); expuesto para la ruta y para tests. */
   sessions: LiveSessionRegistry;
+  /** Active recordings (#5); exposed for tests, like `sessions`. */
+  recordings: RecordingRegistry;
   /**
    * Directorio de usuarios (#24), o `undefined` si esta desactivado. Expuesto
    * para las rutas de administracion y para los tests, igual que `sessions`.
@@ -299,6 +274,16 @@ export interface OfficeServerOverrides {
    * se sienta donde no deberia obligar a sembrar rectangulos ni assets.
    */
   desks?: DeskDirectory | null;
+  /**
+   * Replaces the Egress adapter that would come from `process.env` (#5).
+   * `null` forces "not configured". Same reason as the overrides above: the
+   * suite must not need a LiveKit stack to exercise the recording routes.
+   */
+  egress?: EgressPort | null;
+  /** Same as `egress`, for the recordings bucket (#58). */
+  storage?: RecordingStoragePort | null;
+  /** Shortens the upload polling after a stop (#58), for the same reason as the window below. */
+  recordingReadiness?: { intervalMs: number; timeoutMs: number };
   /**
    * Lista blanca de origenes para TODAS las rutas que sirve Express
    * (`/livekit/token`, `/health`, `/admin/*`), normalmente de
@@ -458,6 +443,25 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   app.use(express.json());
 
   const sessions = createLiveSessionRegistry();
+  const recordings = createRecordingRegistry();
+  const finished = createFinishedRecordingStore();
+  // Read per call, like the LiveKit credentials of `/livekit/token`.
+  const egressFor = (): EgressPort | null =>
+    overrides?.egress !== undefined ? overrides.egress : egressFromEnv(process.env);
+  // Built ONCE, unlike Egress: the GCS client caches its access token, and one
+  // client per request would go back to the metadata server every time.
+  const storage: RecordingStoragePort | null =
+    overrides?.storage !== undefined ? overrides.storage : recordingStorageFromEnv(process.env);
+  const recordingDeps = (): RecordingDeps => ({
+    sessions,
+    recordings,
+    finished,
+    egress: egressFor(),
+    storage,
+    auth,
+    spaces,
+    readiness: overrides?.recordingReadiness,
+  });
 
   /**
    * El verificador se construye UNA vez, al arrancar: `createRemoteJWKSet`
@@ -802,6 +806,28 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
       });
   });
 
+  /**
+   * Same adapter as the others. An unexpected failure (e.g. `listSpaces`
+   * throwing) is a 500 without the raw error, which could carry a secret.
+   */
+  function recordingRoute(run: (body: unknown, deps: RecordingDeps) => Promise<RecordingResult>) {
+    return (req: express.Request, res: express.Response): void => {
+      run(req.body, recordingDeps())
+        .then((result) => {
+          res.status(result.status).json(result.body);
+        })
+        .catch(() => {
+          console.error('[recording] unhandled failure in a recording route');
+          res.status(500).json({ error: 'internal' });
+        });
+    };
+  }
+
+  // POST and not DELETE for stop, same CORS reason as the admin routes above.
+  app.post('/recordings/start', recordingRoute(handleStartRecording));
+  app.post('/recordings/stop', recordingRoute(handleStopRecording));
+  app.post('/recordings/url', recordingRoute(handleRecordingUrl));
+
   const httpServer = createServer(app);
   const gameServer = new Server({
     transport: new WebSocketTransport({
@@ -817,6 +843,12 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     sessions,
     auth,
     directory,
+    recordings,
+    finished,
+    stopRecording: (entry: Parameters<typeof finishRecording>[0]) => {
+      const deps = recordingDeps();
+      return finishRecording(entry, deps.egress, deps).then(() => undefined);
+    },
     reconnectionWindowSeconds:
       overrides?.reconnectionWindowSeconds ?? reconnectionWindowFromEnv(process.env),
   });
@@ -825,6 +857,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     gameServer,
     httpServer,
     sessions,
+    recordings,
     directory,
     port() {
       const address = httpServer.address() as AddressInfo | null;

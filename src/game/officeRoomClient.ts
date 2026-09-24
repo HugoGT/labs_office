@@ -21,6 +21,7 @@ import {
   OFFICE_ROOM_NAME,
   type Facing,
   type PresenceStatus,
+  type RecordingReadyPayload,
 } from './officeProtocol';
 import { onPageHide } from './pageLifecycle';
 import { decideReconnect } from './reconnectPolicy';
@@ -41,10 +42,17 @@ interface RemotePlayer {
   spacesVersion: string;
 }
 
+/** Active recording of a space, as synced (#5). Keyed by spaceId. */
+export interface ActiveRecordingSnapshot {
+  startedBy: string;
+  startedAt: number;
+}
+
 interface OfficeRoomState {
   players: {
     get(sessionId: string): RemotePlayer | undefined;
   };
+  recordings: unknown;
 }
 
 /**
@@ -61,6 +69,11 @@ interface PlayersCallbacks {
 
 interface PlayerCallbacks {
   onChange(handler: () => void): () => void;
+}
+
+interface RecordingsCallbacks {
+  onAdd(handler: (recording: ActiveRecordingSnapshot, spaceId: string) => void): () => void;
+  onRemove(handler: (recording: ActiveRecordingSnapshot, spaceId: string) => void): () => void;
 }
 
 /**
@@ -105,6 +118,13 @@ export interface OfficeRoomHandlers {
    * retire, porque ese borrado ocurrio en una sala que ya no existe.
    */
   onResync?(): void;
+  /**
+   * Every active recording, keyed by spaceId (#5). Always the whole map, never
+   * a delta; optional for the same reason as the call handlers.
+   */
+  onRecordings?(active: Record<string, ActiveRecordingSnapshot>): void;
+  /** A finished recording this session took part in is uploaded (#58). */
+  onRecordingReady?(payload: RecordingReadyPayload): void;
 }
 
 export interface ConnectOfficeRoomOptions {
@@ -242,7 +262,7 @@ export async function connectOfficeRoom({
    */
   function registerRoom(target: Room<OfficeRoomState>): void {
     const $ = getStateCallbacks(target) as unknown as {
-      (state: OfficeRoomState): { players: PlayersCallbacks };
+      (state: OfficeRoomState): { players: PlayersCallbacks; recordings: RecordingsCallbacks };
       (player: RemotePlayer): PlayerCallbacks;
     };
 
@@ -257,6 +277,29 @@ export async function connectOfficeRoom({
       handlers.onRemove(sessionId);
     });
 
+    // Recordings (#5). A fresh map per wired room, and nothing is reported
+    // until that room's first state sync: after a reconnect the replay adds
+    // entries one by one, and reporting halfway would flash "stopped" for a
+    // recording that never stopped. The first sync also covers one that DID
+    // stop during the outage, since it is simply absent from the new map.
+    const recordings: Record<string, ActiveRecordingSnapshot> = {};
+    let synced = false;
+    const reportRecordings = () => {
+      if (synced) handlers.onRecordings?.({ ...recordings });
+    };
+    $(target.state).recordings.onAdd((recording, spaceId) => {
+      recordings[spaceId] = { startedBy: recording.startedBy, startedAt: recording.startedAt };
+      reportRecordings();
+    });
+    $(target.state).recordings.onRemove((_recording, spaceId) => {
+      delete recordings[spaceId];
+      reportRecordings();
+    });
+    target.onStateChange.once(() => {
+      synced = true;
+      reportRecordings();
+    });
+
     // Mensajes sueltos del servidor (issue #2), no estado sincronizado: no hay
     // `players.onChange` que los cubra porque no describen a nadie del mapa,
     // describen un evento puntual.
@@ -268,6 +311,9 @@ export async function connectOfficeRoom({
     });
     target.onMessage('callaccepted', (payload: { by: string; name: string }) => {
       handlers.onCallAccepted?.(payload);
+    });
+    target.onMessage('recordingready', (payload: RecordingReadyPayload) => {
+      handlers.onRecordingReady?.(payload);
     });
 
     // No dispara el reintento -- de eso se encarga `onLeave`, que es el unico

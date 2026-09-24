@@ -979,6 +979,24 @@ describe('OfficeScene: mensajes de llamada del servidor se relanzan al puente (i
 
     expect(events).toEqual([{ by: 'peer-1', name: 'Marta Ríos' }]);
   });
+
+  it('onRecordings and onRecordingReady are forwarded as "recordings" and "recordingready" (#5, #58)', async () => {
+    const bridge = createOfficeBridge();
+    const events: unknown[] = [];
+    bridge.on('recordings', (payload) => events.push(payload));
+    bridge.on('recordingready', (payload) => events.push(payload));
+    const connector = fakeConnector('mi-sesion');
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+
+    connector.handlers()!.onRecordings?.({ sala: { startedBy: 'ses-1', startedAt: 1 } });
+    connector.handlers()!.onRecordingReady?.({ recordingId: 'rec-1', spaceId: 'sala', availableUntil: 2 });
+
+    expect(events).toEqual([
+      { active: { sala: { startedBy: 'ses-1', startedAt: 1 } } },
+      { recordingId: 'rec-1', spaceId: 'sala', availableUntil: 2 },
+    ]);
+  });
 });
 
 describe('OfficeScene: auto-caminata al aceptar una llamada (issue #2, D9/D10)', () => {

@@ -13,8 +13,8 @@
 
 import type { OfficeDesk } from './desksPort';
 import type { SpaceArea } from './mapData';
-import type { PresenceStatus } from './officeProtocol';
-import type { OfficeConnectionState } from './officeRoomClient';
+import type { PresenceStatus, RecordingReadyPayload } from './officeProtocol';
+import type { ActiveRecordingSnapshot, OfficeConnectionState } from './officeRoomClient';
 
 export interface OfficeEventMap {
   /**
@@ -117,6 +117,16 @@ export interface OfficeEventMap {
    * 4"), y buscarlo otra vez por id seria pedirle a React esa misma copia.
    */
   deskclick: { deskId: string; label: string; action: 'claim' | 'release' };
+  /**
+   * Every active recording in the office, keyed by spaceId (#5). Server-owned
+   * synced state, so every occupant gets the same map; always the whole map.
+   */
+  recordings: { active: Record<string, ActiveRecordingSnapshot> };
+  /**
+   * A finished recording this user took part in is uploaded and can be
+   * watched or downloaded (#58). Only participants receive it.
+   */
+  recordingready: RecordingReadyPayload;
 }
 
 export interface OfficeCommandMap {

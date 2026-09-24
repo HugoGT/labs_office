@@ -52,15 +52,38 @@ export function createPlayerState(seed: PlayerSeed): PlayerState {
   return player;
 }
 
+/**
+ * Active recording of a space (#5), keyed by spaceId in `OfficeState.recordings`.
+ * A mirror of `RecordingRegistry` for clients: the egress id stays on the
+ * server, nobody else has a use for it.
+ */
+export interface RecordingState {
+  startedBy: string;
+  startedAt: number;
+}
+
+export class RecordingState extends Schema {}
+
+defineTypes(RecordingState, { startedBy: 'string', startedAt: 'number' });
+
+export function createRecordingState(seed: { startedBy: string; startedAt: number }): RecordingState {
+  const recording = new RecordingState();
+  recording.startedBy = seed.startedBy;
+  recording.startedAt = seed.startedAt;
+  return recording;
+}
+
 export interface OfficeState {
   players: MapSchema<PlayerState>;
+  recordings: MapSchema<RecordingState>;
 }
 
 export class OfficeState extends Schema {
   constructor() {
     super();
     this.players = new MapSchema<PlayerState>();
+    this.recordings = new MapSchema<RecordingState>();
   }
 }
 
-defineTypes(OfficeState, { players: { map: PlayerState } });
+defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState } });

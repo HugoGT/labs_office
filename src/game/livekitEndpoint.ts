@@ -29,13 +29,17 @@ export interface LivekitConfigSources {
   officeEndpoint?: string | null;
 }
 
+/**
+ * HTTP base of the office server. El mismo `http.Server` sirve WebSocket
+ * (Colyseus) y HTTP (la ruta del token, `createOfficeServer.ts`), asi que basta
+ * con cambiar de esquema. Also used by `recordingClient.ts` (#5).
+ */
+export function officeHttpBase(officeEndpoint: string): string {
+  return officeEndpoint.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://');
+}
+
 function deriveTokenUrl(officeEndpoint: string): string {
-  // El mismo `http.Server` sirve WebSocket (Colyseus) y HTTP (la ruta del
-  // token, `createOfficeServer.ts`), asi que basta con cambiar de esquema.
-  const httpBase = officeEndpoint
-    .replace(/^wss:\/\//, 'https://')
-    .replace(/^ws:\/\//, 'http://');
-  return `${httpBase}/livekit/token`;
+  return `${officeHttpBase(officeEndpoint)}/livekit/token`;
 }
 
 export function resolveLivekitConfig({

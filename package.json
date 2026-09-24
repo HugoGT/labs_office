@@ -28,6 +28,7 @@
     "@colyseus/core": "0.16.24",
     "@colyseus/schema": "^3.0.76",
     "@colyseus/ws-transport": "~0.16.5",
+    "@google-cloud/storage": "^8.2.0",
     "colyseus.js": "0.16.22",
     "express": "^4.22.2",
     "firebase": "12.19.0",

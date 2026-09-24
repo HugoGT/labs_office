@@ -458,3 +458,61 @@ describe('connectOfficeRoom: reconexion tras una caida (issue #52)', () => {
     expect(dropped.timeline.slice(resyncAt)).toContain(`add:${a.sessionId}`);
   }, 20000);
 });
+
+/**
+ * Active recordings (#5) travel as synced state, so every occupant, late
+ * joiners included, learns about them without asking. The client hands out
+ * the whole map each time: the UI compares it to its own space.
+ */
+describe('connectOfficeRoom: recordings', () => {
+  function recordingsRecorder() {
+    const snapshots: Record<string, { startedBy: string; startedAt: number }>[] = [];
+    const base = recorder();
+    const handlers = {
+      ...base.handlers,
+      onRecordings: (active: Record<string, { startedBy: string; startedAt: number }>) =>
+        snapshots.push(active),
+    };
+    return { snapshots, handlers, states: base.states, last: () => snapshots.at(-1) };
+  }
+
+  it('reports a recording that starts and stops while connected', async () => {
+    const watcher = recordingsRecorder();
+    await connect('Ana', watcher.handlers);
+
+    server.recordings.set({ spaceId: 'sala', egressId: 'EG_1', startedBy: 'ses-x', startedAt: 42, key: 'k.mp4', participants: [] });
+    await waitFor(() => watcher.last()?.sala?.startedBy === 'ses-x');
+    expect(watcher.last()).toEqual({ sala: { startedBy: 'ses-x', startedAt: 42 } });
+
+    server.recordings.delete('sala');
+    await waitFor(() => watcher.last() !== undefined && !('sala' in watcher.last()!));
+  });
+
+  it('a late joiner gets the recordings already running on its first sync', async () => {
+    await connect('Ana', recorder().handlers);
+    server.recordings.set({ spaceId: 'sala', egressId: 'EG_1', startedBy: 'ses-x', startedAt: 42, key: 'k.mp4', participants: [] });
+
+    const late = recordingsRecorder();
+    await connect('Tarde', late.handlers);
+
+    await waitFor(() => late.last()?.sala?.startedBy === 'ses-x');
+  });
+
+  it('after a reconnect, a recording stopped during the outage is gone', async () => {
+    const dropped = recordingsRecorder();
+    const b = await connect('Beto', dropped.handlers);
+    await connect('Ana', recorder().handlers);
+    server.recordings.set({ spaceId: 'sala', egressId: 'EG_1', startedBy: 'ses-x', startedAt: 42, key: 'k.mp4', participants: [] });
+    await waitFor(() => dropped.last()?.sala !== undefined);
+
+    // Same abrupt drop as `terminateSocketOf` in the reconnection block.
+    const [cache] = await matchMaker.query({ name: OFFICE_ROOM_NAME });
+    const ref = matchMaker.getLocalRoomById(cache.roomId).clients.getById(b.sessionId)?.ref as unknown as {
+      terminate(): void;
+    };
+    ref.terminate();
+    server.recordings.delete('sala');
+
+    await waitFor(() => dropped.states.includes('connected') && !('sala' in (dropped.last() ?? {})), 15000);
+  }, 20000);
+});

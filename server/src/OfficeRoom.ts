@@ -38,12 +38,15 @@ import {
   MAX_NAME_LENGTH,
   OFFICE_ROOM_NAME,
   isPresenceStatus,
+  recordingAvailableUntil,
 } from '../../src/game/officeProtocol.ts';
 import { createCallInvitationRegistry, type CallInvitationRegistry } from './callInvitations.ts';
 import { decideAccess, type AccessDecision } from './directory/accessDecision.ts';
 import type { UserDirectory } from './directory/directoryPort.ts';
 import type { LiveSessionRegistry } from './liveSessions.ts';
-import { OfficeState, createPlayerState } from './schema.ts';
+import { participantKeyOf, type FinishedRecordingStore } from './recording/finishedRecordings.ts';
+import type { ActiveRecording, RecordingRegistry } from './recording/recordingRegistry.ts';
+import { OfficeState, createPlayerState, createRecordingState } from './schema.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 
 export { DEFAULT_NAME, MAX_NAME_LENGTH, OFFICE_ROOM_NAME };
@@ -217,6 +220,19 @@ export interface OfficeRoomOptions {
    * produccion.
    */
   reconnectionWindowSeconds?: number;
+  /**
+   * Active recordings (#5), shared with the `/recordings/*` routes. The room
+   * mirrors it into `state.recordings` so every occupant sees it, and stops
+   * whatever a session started when that session is released.
+   */
+  recordings?: RecordingRegistry;
+  /** Stops and files one recording (`finishRecording`), for that cleanup. */
+  stopRecording?: (entry: ActiveRecording) => Promise<void>;
+  /**
+   * Finished recordings (#58). The room tells the participants still
+   * connected when one is uploaded, as a `recordingready` message.
+   */
+  finished?: FinishedRecordingStore;
 }
 
 /** Registro del motivo por el que el directorio cerro la puerta. */
@@ -248,6 +264,10 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private logDirectoryDenial: DirectoryDenialLogger = (decision, uid) =>
     console.warn(`[directory] acceso denegado (${decision}): ${uid}`);
   private reconnectionWindowSeconds = RECONNECTION_WINDOW_SECONDS;
+  private recordings?: RecordingRegistry;
+  private stopRecording?: (entry: ActiveRecording) => Promise<void>;
+  private unsubscribeRecordings?: () => void;
+  private unsubscribeReady?: () => void;
 
   onCreate(options?: OfficeRoomOptions): void {
     this.state = new OfficeState();
@@ -258,6 +278,26 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     if (options?.reconnectionWindowSeconds !== undefined) {
       this.reconnectionWindowSeconds = options.reconnectionWindowSeconds;
     }
+    this.stopRecording = options?.stopRecording;
+    this.recordings = options?.recordings;
+    // Late joiners get the mirror for free: it is plain synced state.
+    for (const entry of this.recordings?.list() ?? []) {
+      this.state.recordings.set(entry.spaceId, createRecordingState(entry));
+    }
+    this.unsubscribeRecordings = this.recordings?.subscribe((spaceId, entry) => {
+      if (entry) this.state.recordings.set(spaceId, createRecordingState(entry));
+      else this.state.recordings.delete(spaceId);
+    });
+    // Only to participants: a recording is private to the people in it.
+    // `availableUntil` is when the bucket lifecycle deletes it (#5), for the
+    // "Disponible hasta" of the notice.
+    this.unsubscribeReady = options?.finished?.onReady(({ recordingId, spaceId, participants, stoppedAt }) => {
+      const notice = { recordingId, spaceId, availableUntil: recordingAvailableUntil(stoppedAt) };
+      for (const client of this.clients) {
+        const key = this.sessions ? participantKeyOf(this.sessions, client.sessionId) : client.sessionId;
+        if (participants.includes(key)) client.send('recordingready', notice);
+      }
+    });
 
     this.onMessage('move', (client: Client, message: MoveMessage) => {
       const player = this.state.players.get(client.sessionId);
@@ -344,6 +384,11 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       const recipient = this.state.players.get(client.sessionId);
       this.sendTo(from, 'callaccepted', { by: client.sessionId, name: recipient?.name ?? DEFAULT_NAME });
     });
+  }
+
+  onDispose(): void {
+    this.unsubscribeRecordings?.();
+    this.unsubscribeReady?.();
   }
 
   /** Unico punto de salida hacia un sessionId concreto; `undefined` si ya no esta conectado. */
@@ -495,6 +540,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private releaseSession(client: Client): void {
     this.state.players.delete(client.sessionId);
     this.sessions?.remove(client.sessionId);
+    this.stopRecordingsOf(client.sessionId);
 
     // D7: sin caducidad, la unica limpieza posible es la baja de una de las
     // dos partes. `removeAllFor` cubre a quien se va como emisor Y como
@@ -505,6 +551,23 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     for (const entry of this.invitations.removeAllFor(client.sessionId)) {
       if (entry.from === client.sessionId) {
         this.sendTo(entry.to, 'callerleft', { from: entry.from });
+      }
+    }
+  }
+
+  /**
+   * Whoever started a recording and is gone for good cannot stop it anymore,
+   * so the server does (#5), and files it like a manual stop (#58). Best
+   * effort: `stopRecording` clears the badge before it talks to Egress.
+   */
+  private stopRecordingsOf(sessionId: string): void {
+    for (const entry of this.recordings?.bySession(sessionId) ?? []) {
+      if (this.stopRecording) {
+        this.stopRecording(entry).catch(() => {
+          console.error('[recording] failed to stop the recording of a session that left');
+        });
+      } else {
+        this.recordings?.delete(entry.spaceId);
       }
     }
   }

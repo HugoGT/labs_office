@@ -8,6 +8,7 @@ import { claimDesk, fetchOfficeDesks, releaseDesk } from '../game/desksClient';
 import type { OfficeDesk } from '../game/desksPort';
 import { BUILT_IN_SPACES_VERSION } from '../game/mapData';
 import { DEFAULT_NAME } from '../game/officeProtocol';
+import { RecordingError, getRecordingUrl, startRecording, stopRecording } from '../game/recordingClient';
 import { useProximityAudio } from '../hooks/useProximityAudio';
 import { OfficeShell } from './OfficeShell';
 
@@ -34,6 +35,14 @@ vi.mock('../game/deskDecorClient', async (importOriginal) => ({
 // igual que `createGame` se mockea para aislar Phaser (mismo patron ya
 // establecido en este archivo).
 vi.mock('../hooks/useProximityAudio', () => ({ useProximityAudio: vi.fn() }));
+// The only module that talks to `/recordings/*` (#5): whether a room is being
+// recorded comes from the bridge, never from these calls.
+vi.mock('../game/recordingClient', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../game/recordingClient')>()),
+  startRecording: vi.fn(),
+  stopRecording: vi.fn(),
+  getRecordingUrl: vi.fn(),
+}));
 
 const createGameMock = vi.mocked(createGame);
 const useProximityAudioMock = vi.mocked(useProximityAudio);
@@ -134,40 +143,231 @@ describe('OfficeShell', () => {
     }
   });
 
-  it('detiene la grabacion activa y muestra el toast al salir, ocultando el REC badge', async () => {
-    const user = userEvent.setup();
-    render(<OfficeShell />);
-    const bridge = createGameMock.mock.calls[0][1];
+  describe('recording (#5): server-owned, visible to every occupant', () => {
+    const SELF = 'ses-me';
 
-    act(() => bridge.emit('room', { spaceId: 'space-stub', name: 'Sala de Juntas' }));
-    await user.click(screen.getByRole('button', { name: /Grabar/ }));
-    expect(screen.getByText(/REC/)).toBeInTheDocument();
+    function renderInRoom(spaceId = 'space-stub', name = 'Sala de Juntas') {
+      render(<OfficeShell />);
+      const bridge = createGameMock.mock.calls[0][1];
+      act(() => bridge.emit('voice', { selfSessionId: SELF, selfName: 'Yo', peers: [], spaceId }));
+      act(() => bridge.emit('room', { spaceId, name }));
+      return bridge;
+    }
 
-    act(() => bridge.emit('room', { spaceId: null, name: null }));
+    it('clicking Grabar asks the server to start; the badge waits for the synced state', async () => {
+      const user = userEvent.setup();
+      vi.mocked(startRecording).mockResolvedValue({ spaceId: 'space-stub', startedBy: SELF, startedAt: 1 });
+      renderInRoom();
 
-    expect(screen.queryByText(/REC/)).not.toBeInTheDocument();
-    expect(screen.getByText('💾 Saliste de la sala: grabación detenida')).toBeInTheDocument();
-  });
+      await user.click(screen.getByRole('button', { name: /Grabar/ }));
 
-  /**
-   * Cobertura de regresion (issue #10, S2 3.4, spec livekit-room-topology
-   * "Recording is possible only inside a space"): el gate de
-   * `onToggleRecord` (`if (!room) return`) lee `room`, que es solo un
-   * NOMBRE de cadena emitido por la escena para CUALQUIER espacio -- sala
-   * incorporada o cubiculo de escritorio, `bridge.emit('room', ...)` no
-   * distingue el tipo. La prueba de "Sala de Juntas" ya existente (arriba)
-   * ejercita el gate con una sala; esta la ejercita con un cubiculo,
-   * exactamente el escenario que la spec de esta slice anade.
-   */
-  it('la grabacion no distingue sala incorporada de cubiculo de escritorio: el gate no bloquea por tipo', async () => {
-    const user = userEvent.setup();
-    render(<OfficeShell />);
-    const bridge = createGameMock.mock.calls[0][1];
+      expect(startRecording).toHaveBeenCalledWith({
+        url: expect.stringMatching(/\/recordings$/),
+        sessionId: SELF,
+        token: null,
+        spaceId: 'space-stub',
+      });
+      expect(screen.queryByText(/REC/)).not.toBeInTheDocument();
+    });
 
-    act(() => bridge.emit('room', { spaceId: 'desk-stub', name: 'Escritorio de Ana' }));
-    await user.click(screen.getByRole('button', { name: /Grabar/ }));
+    it('a cubicle records like any room: the gate does not look at the space type', async () => {
+      const user = userEvent.setup();
+      vi.mocked(startRecording).mockResolvedValue({ spaceId: 'desk-stub', startedBy: SELF, startedAt: 1 });
+      renderInRoom('desk-stub', 'Escritorio de Ana');
 
-    expect(screen.getByText(/REC/)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /Grabar/ }));
+
+      expect(startRecording).toHaveBeenCalledWith(expect.objectContaining({ spaceId: 'desk-stub' }));
+    });
+
+    it('someone else starting it shows the badge and tells this occupant too', () => {
+      const bridge = renderInRoom();
+
+      act(() => bridge.emit('recordings', { active: { 'space-stub': { startedBy: 'ses-other', startedAt: 1 } } }));
+
+      expect(screen.getByText(/REC/)).toBeInTheDocument();
+      expect(screen.getByText('⏺ Esta sala se está grabando')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Detener/ })).toBeInTheDocument();
+    });
+
+    it('entering a room that is already being recorded tells you so', () => {
+      render(<OfficeShell />);
+      const bridge = createGameMock.mock.calls[0][1];
+      act(() => bridge.emit('recordings', { active: { 'space-stub': { startedBy: 'ses-other', startedAt: 1 } } }));
+      expect(screen.queryByText(/REC/)).not.toBeInTheDocument();
+
+      act(() => bridge.emit('room', { spaceId: 'space-stub', name: 'Sala de Juntas' }));
+
+      expect(screen.getByText(/REC/)).toBeInTheDocument();
+      expect(screen.getByText('⏺ Esta sala se está grabando')).toBeInTheDocument();
+    });
+
+    it('a recording in another room shows nothing here', () => {
+      const bridge = renderInRoom();
+
+      act(() => bridge.emit('recordings', { active: { 'otra-sala': { startedBy: 'ses-other', startedAt: 1 } } }));
+
+      expect(screen.queryByText(/REC/)).not.toBeInTheDocument();
+    });
+
+    it('when it stops while you stay in the room, the badge goes and you are told', () => {
+      const bridge = renderInRoom();
+      act(() => bridge.emit('recordings', { active: { 'space-stub': { startedBy: 'ses-other', startedAt: 1 } } }));
+
+      act(() => bridge.emit('recordings', { active: {} }));
+
+      expect(screen.queryByText(/REC/)).not.toBeInTheDocument();
+      expect(screen.getByText('⏹ Grabación detenida')).toBeInTheDocument();
+    });
+
+    it('Detener asks the server to stop, whoever started it', async () => {
+      const user = userEvent.setup();
+      vi.mocked(stopRecording).mockResolvedValue(undefined);
+      const bridge = renderInRoom();
+      act(() => bridge.emit('recordings', { active: { 'space-stub': { startedBy: 'ses-other', startedAt: 1 } } }));
+
+      await user.click(screen.getByRole('button', { name: /Detener/ }));
+
+      expect(stopRecording).toHaveBeenCalledWith(expect.objectContaining({ sessionId: SELF, spaceId: 'space-stub' }));
+      expect(startRecording).not.toHaveBeenCalled();
+    });
+
+    it('a 409 says the room is already being recorded; other failures say it could not start', async () => {
+      const user = userEvent.setup();
+      renderInRoom();
+
+      vi.mocked(startRecording).mockRejectedValueOnce(new RecordingError(409, 'already-recording'));
+      await user.click(screen.getByRole('button', { name: /Grabar/ }));
+      expect(await screen.findByText('Ya se está grabando esta sala')).toBeInTheDocument();
+
+      vi.mocked(startRecording).mockRejectedValueOnce(new RecordingError(502, 'egress-failed'));
+      await user.click(screen.getByRole('button', { name: /Grabar/ }));
+      expect(await screen.findByText('No se pudo iniciar la grabación')).toBeInTheDocument();
+    });
+
+    it('the starter walking out stops it on the server and is told, and the badge goes', async () => {
+      vi.mocked(stopRecording).mockResolvedValue(undefined);
+      const bridge = renderInRoom();
+      act(() => bridge.emit('recordings', { active: { 'space-stub': { startedBy: SELF, startedAt: 1 } } }));
+
+      act(() => bridge.emit('room', { spaceId: null, name: null }));
+
+      await vi.waitFor(() =>
+        expect(stopRecording).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: SELF, spaceId: 'space-stub' }),
+        ),
+      );
+      expect(screen.queryByText(/REC/)).not.toBeInTheDocument();
+      expect(screen.getByText('💾 Saliste de la sala: grabación detenida')).toBeInTheDocument();
+    });
+
+    describe('finished recording ready (#58)', () => {
+      const READY = { recordingId: 'rec-1', spaceId: 'space-stub', availableUntil: Date.UTC(2026, 9, 23, 12) };
+
+      function fakeTab() {
+        return { location: { href: '' }, opener: {} as unknown, close: vi.fn() };
+      }
+
+      it('shows a persistent notice that outlives the toast timeout', () => {
+        vi.useFakeTimers();
+        try {
+          const bridge = renderInRoom();
+          act(() => bridge.emit('recordingready', READY));
+
+          act(() => vi.advanceTimersByTime(10_000));
+
+          expect(screen.getByText('La grabación está lista')).toBeInTheDocument();
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('Ver fetches a URL and opens it in a new tab', async () => {
+        const user = userEvent.setup();
+        const tab = fakeTab();
+        const open = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+        vi.mocked(getRecordingUrl).mockResolvedValue({ url: 'http://m/k?sig', expiresAt: 1 });
+        const bridge = renderInRoom();
+        act(() => bridge.emit('recordingready', READY));
+
+        await user.click(screen.getByRole('button', { name: 'Ver' }));
+
+        expect(getRecordingUrl).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: SELF, recordingId: 'rec-1', download: false }),
+        );
+        // The tab is opened inside the click, before the await: a window opened
+        // after a network round trip is what popup blockers stop.
+        expect(open).toHaveBeenCalledWith('', '_blank');
+        await vi.waitFor(() => expect(tab.location.href).toBe('http://m/k?sig'));
+        expect(tab.opener).toBeNull();
+        open.mockRestore();
+      });
+
+      it('Descargar fetches an attachment URL and navigates to it', async () => {
+        const user = userEvent.setup();
+        const open = vi.spyOn(window, 'open').mockReturnValue(null);
+        vi.mocked(getRecordingUrl).mockResolvedValue({ url: 'http://m/k?attach', expiresAt: 1 });
+        const bridge = renderInRoom();
+        act(() => bridge.emit('recordingready', READY));
+
+        await user.click(screen.getByRole('button', { name: 'Descargar' }));
+
+        expect(getRecordingUrl).toHaveBeenCalledWith(expect.objectContaining({ recordingId: 'rec-1', download: true }));
+        await vi.waitFor(() => expect(open).toHaveBeenCalledWith('http://m/k?attach', '_self'));
+        open.mockRestore();
+      });
+
+      it('a failure closes the blank tab and says so in a toast', async () => {
+        const user = userEvent.setup();
+        const tab = fakeTab();
+        const open = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+        vi.mocked(getRecordingUrl).mockRejectedValue(new RecordingError(403, 'forbidden-recording'));
+        const bridge = renderInRoom();
+        act(() => bridge.emit('recordingready', READY));
+
+        await user.click(screen.getByRole('button', { name: 'Ver' }));
+
+        expect(await screen.findByText('No se pudo abrir la grabación')).toBeInTheDocument();
+        expect(tab.close).toHaveBeenCalled();
+        open.mockRestore();
+      });
+
+      it('(#5) an expired recording says so and drops its notice', async () => {
+        const user = userEvent.setup();
+        const open = vi.spyOn(window, 'open').mockReturnValue(null);
+        vi.mocked(getRecordingUrl).mockRejectedValue(new RecordingError(410, 'recording-expired'));
+        const bridge = renderInRoom();
+        act(() => bridge.emit('recordingready', READY));
+
+        await user.click(screen.getByRole('button', { name: 'Descargar' }));
+
+        expect(await screen.findByText('La grabación ya no está disponible')).toBeInTheDocument();
+        expect(screen.queryByText('La grabación está lista')).not.toBeInTheDocument();
+        open.mockRestore();
+      });
+
+      it('Cerrar dismisses the notice', async () => {
+        const user = userEvent.setup();
+        const bridge = renderInRoom();
+        act(() => bridge.emit('recordingready', READY));
+
+        await user.click(screen.getByRole('button', { name: 'Cerrar' }));
+
+        expect(screen.queryByText('La grabación está lista')).not.toBeInTheDocument();
+      });
+    });
+
+    it('someone who did not start it walks out silently and the recording keeps going', () => {
+      const bridge = renderInRoom();
+      act(() => bridge.emit('recordings', { active: { 'space-stub': { startedBy: 'ses-other', startedAt: 1 } } }));
+
+      act(() => bridge.emit('room', { spaceId: null, name: null }));
+
+      expect(stopRecording).not.toHaveBeenCalled();
+      expect(screen.queryByText(/REC/)).not.toBeInTheDocument();
+      expect(screen.queryByText('💾 Saliste de la sala: grabación detenida')).not.toBeInTheDocument();
+      expect(screen.queryByText('⏹ Grabación detenida')).not.toBeInTheDocument();
+    });
   });
 
   it('en piso abierto (sin sala) el boton de grabar queda deshabilitado y la grabacion nunca se activa', () => {
