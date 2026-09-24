@@ -10,6 +10,7 @@ import {
 import { mergeColliderRects } from './colliderMerge';
 import { deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
 import type { OfficeDesk } from './desksPort';
+import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH } from './hudLayout';
 import { placeFurniture, placeNature, placeZoneLabels, renderGround } from './mapBuilder';
 import {
   BUILT_IN_SPACES,
@@ -53,9 +54,6 @@ export const OFFICE_SCENE_KEY = 'office';
 
 const PLAYER_SPEED = 230;
 const PROXIMITY_TICK_MS = 250;
-const MINIMAP_WIDTH = 200;
-const MINIMAP_HEIGHT = 140;
-const MINIMAP_MARGIN = 14;
 /**
  * Los tres estados en los que se puede ver un escritorio asignable (#7, slice
  * 5). Es lo unico que los distingue, y basta: un tinte se lee de un vistazo
