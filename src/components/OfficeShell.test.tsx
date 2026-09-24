@@ -1137,3 +1137,54 @@ describe('OfficeShell: exit controls (#66)', () => {
     expect(onLeaveOffice).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('OfficeShell: barra lateral de personas (#74)', () => {
+  it('el roster que llega por el puente se ve al expandir la barra lateral', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('roster', { peers: [{ sessionId: 'a', name: 'Ana Remota', status: 'g' }] }));
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    expect(screen.getByText(/Ana Remota/)).toBeInTheDocument();
+  });
+
+  it('el nombre propio que ve la barra inferior es el mismo que se antepone en la barra lateral', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell session={{ displayName: 'Ana Torres', getIdToken: async () => null }} />);
+
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    expect(screen.getAllByText(/Ana Torres/).length).toBeGreaterThan(0);
+  });
+
+  it('abrir el editor de decoracion colapsa la barra lateral, aunque estuviese expandida', async () => {
+    const SESION = { displayName: 'Ana Torres', getIdToken: async () => 'id-token' };
+    const MIA: OfficeDesk = {
+      id: 'id-mesa',
+      label: 'Mesa 4',
+      x: 320,
+      y: 384,
+      w: 96,
+      h: 96,
+      occupant: { id: 'id-ana', displayName: 'Ana Torres', items: [] },
+      mine: true,
+    };
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([MIA]);
+    vi.mocked(fetchDeskCatalog).mockResolvedValue([{ id: 'p', name: 'Planta', kind: 'plant', textureKey: 'plant-small' }]);
+    vi.mocked(fetchMyDeskItems).mockResolvedValue([]);
+
+    const user = userEvent.setup();
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+    expect(screen.getByRole('button', { name: /Personas/ })).toHaveAttribute('aria-expanded', 'true');
+    await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
+
+    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+    await user.click(await screen.findByRole('button', { name: /Decorar/ }));
+
+    expect(screen.getByRole('button', { name: /Personas/ })).toHaveAttribute('aria-expanded', 'false');
+  });
+});

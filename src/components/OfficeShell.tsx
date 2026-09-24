@@ -13,11 +13,13 @@ import {
   type RecordingRequest,
 } from '../game/recordingClient';
 import type { DeskItemPlacement, SaveDeskOutcome } from '../game/deskDecorPort';
+import type { RosterPeer } from '../game/roster';
 import { useCallInvitations } from '../hooks/useCallInvitations';
 import { useDeskDecor } from '../hooks/useDeskDecor';
 import { useDesks } from '../hooks/useDesks';
 import { useOfficeBridge } from '../hooks/useOfficeBridge';
 import { useProximityAudio } from '../hooks/useProximityAudio';
+import { useRoster } from '../hooks/useRoster';
 import { useSpacesConfig } from '../hooks/useSpacesConfig';
 import { AudioUnblockPrompt } from './AudioUnblockPrompt';
 import { BottomBar } from './BottomBar';
@@ -26,6 +28,7 @@ import { ContextMenu, type PeerMenuAction } from './ContextMenu';
 import { DeskDecorEditor } from './DeskDecorEditor';
 import { ExitControls } from './ExitControls';
 import { GameCanvas } from './GameCanvas';
+import { OfficeSidebar } from './OfficeSidebar';
 import { RecBadge } from './RecBadge';
 import { RecordingReadyStack, type RecordingReadyNotice } from './RecordingReadyStack';
 import { Toast } from './Toast';
@@ -63,6 +66,12 @@ export interface OfficeShellProps {
 export function OfficeShell({ session = null, onLeaveOffice }: OfficeShellProps) {
   const [bridge] = useState(createOfficeBridge);
   const { room, spaceId, recordings, selfSessionId, menu, presence, closeMenu } = useOfficeBridge(bridge);
+  /**
+   * Roster en vivo para la barra lateral (#74). Vive aqui y no dentro de
+   * `OfficeSidebar` por la misma razon que el resto del HUD: el puente es de
+   * `OfficeShell`, y la barra es presentacional (D3).
+   */
+  const rosterPeers = useRoster(bridge);
   // D12: la pila del receptor vive en su propio hook (temporizadores + chime
   // + comandos), no en `useOfficeBridge`, que es deliberadamente un simple
   // suscriptor evento->estado.
@@ -558,6 +567,19 @@ export function OfficeShell({ session = null, onLeaveOffice }: OfficeShellProps)
     }
   }
 
+  /**
+   * Uno mismo para anteponer en la barra lateral (#74): el mismo nombre que ya
+   * ve `BottomBar` y el mismo `status` que React ya posee -- dos fuentes para
+   * el mismo hecho acabarian discrepando en algun render. Sin sesion de
+   * Colyseus `selfSessionId` es `null`; una clave fija basta porque el roster
+   * del puente nunca trae una entrada real con ese id.
+   */
+  const rosterSelf: RosterPeer = {
+    sessionId: selfSessionId ?? 'self',
+    name: session?.displayName ?? DEFAULT_NAME,
+    status,
+  };
+
   return (
     <div id="office-shell">
       <GameCanvas bridge={bridge} endpoint={endpoint} session={session} />
@@ -572,6 +594,7 @@ export function OfficeShell({ session = null, onLeaveOffice }: OfficeShellProps)
       />
       <RecBadge visible={recording} />
       <ContextMenu menu={menu} onAction={handleMenuAction} onClose={closeMenu} />
+      <OfficeSidebar self={rosterSelf} peers={rosterPeers} forceCollapsed={decorOpen} />
       <BottomBar
         playerName={session?.displayName ?? DEFAULT_NAME}
         micOn={micOn}
