@@ -6,6 +6,8 @@
  * Phaser ni red aqui dentro: se prueba en jsdom sin montar ningun juego.
  */
 
+import { MAP_H, MAP_W, TILE } from './mapData';
+
 /** Las dos clases de item editable (#74). `room` cubre tambien las salas incorporadas. */
 export type EditorKind = 'desk' | 'room';
 
@@ -79,4 +81,29 @@ export function reduceEditorState(state: EditorState, action: EditorAction): Edi
     default:
       return state;
   }
+}
+
+export interface TilePosition {
+  tx: number;
+  ty: number;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+/**
+ * Encaja el ghost de w x h tiles sobre el puntero: lo centra y lo recorta a
+ * `[0, MAP_W-w] x [0, MAP_H-h]` para que nunca se pueda soltar mitad fuera
+ * del mapa. `worldX`/`worldY` llegan en PIXELES (mismo espacio que
+ * `Pointer.worldX/worldY`); `w`/`h` en TILES.
+ */
+export function snapToTile(worldX: number, worldY: number, w: number, h: number): TilePosition {
+  const rawTx = Math.round(worldX / TILE - w / 2);
+  const rawTy = Math.round(worldY / TILE - h / 2);
+
+  return {
+    tx: clamp(rawTx, 0, MAP_W - w),
+    ty: clamp(rawTy, 0, MAP_H - h),
+  };
 }
