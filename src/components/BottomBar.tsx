@@ -58,7 +58,6 @@ const SCREEN_SHARE_DND_TITLE = 'No molestar: no compartes pantalla';
  * mientras la barra dice que no lo hay.
  */
 const PRESENCE_TITLE = {
-  connected: 'Conectado al servidor de avatares reales',
   reconnecting: 'Se perdio la conexión: recuperando la sesión sin recargar la página',
   offline: 'Sin servidor: la oficina corre en solitario',
 } as const;
@@ -106,66 +105,25 @@ export function BottomBar({
         : ONLY_IN_SPACE_TITLE;
 
   return (
-    // Always two rows (#67): who you are and where you stand on top, what you
-    // can do below. Leaving a space only drops the room line, never the row.
+    // Three sibling blocks placed by the CSS grid: one row on wide screens
+    // (identity left, controls centered, indicators right), two on narrow
+    // ones. The height never depends on how much the indicators say (#67).
     <div className={styles.bar}>
-      <div className={styles.info} role="group" aria-label="Estado">
-        <div className={styles.me}>
-          <span className={styles.meDot} style={{ background: statusCssColor(status) }} />{' '}
-          {playerName}
-          <select
-            className={styles.statusSelect}
-            aria-label="Mi estado"
-            value={status}
-            onChange={(event) => onChangeStatus(event.target.value as PresenceStatus)}
-          >
-            {PRESENCE_STATUSES.map((code) => (
-              <option key={code} value={code}>
-                {STATUS_EMOJI[code]} {STATUS_LABEL[code]}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className={styles.status}>
-          {dnd ? (
-            // Anunciar "Audio por proximidad" mientras nada es audible seria
-            // mentir sobre lo unico que esta linea existe para contar.
-            <>🔴 No molestar: aislado del audio de la oficina</>
-          ) : room ? (
-            <>
-              🔒 Sala privada: <b>{room}</b>
-            </>
-          ) : (
-            <>
-              Audio por <b>proximidad</b>
-            </>
-          )}
-        </div>
-        <div className={styles.presence} title={PRESENCE_TITLE[presence.state]}>
-          {presence.state === 'connected' ? (
-            `🟢 ${presence.peers} en línea`
-          ) : presence.state === 'reconnecting' ? (
-            // Sin recuento: los pares de antes de la caida siguen en el registro
-            // de la escena, pero ahora mismo no hay canal con ninguno, y contarlos
-            // seria decir que estan cuando no se les oye.
-            <>🟡 Reconectando...</>
-          ) : (
-            <>⚪ Sin servidor</>
-          )}
-        </div>
-        {/* Solo cuando la sesion se perdio Y hay servidor configurado al que
-            volver: en modo solitario no hay nada que reintentar, y mientras
-            reconecta ya se esta reintentando solo. */}
-        {presence.state === 'offline' && presence.canRetry && (
-          <button
-            type="button"
-            className={styles.btn}
-            title="Volver a conectar con el servidor de avatares reales"
-            onClick={onRetryConnection}
-          >
-            🔄 Reintentar
-          </button>
-        )}
+      <div className={styles.me} role="group" aria-label="Identidad">
+        <span className={styles.meDot} style={{ background: statusCssColor(status) }} />{' '}
+        {playerName}
+        <select
+          className={styles.statusSelect}
+          aria-label="Mi estado"
+          value={status}
+          onChange={(event) => onChangeStatus(event.target.value as PresenceStatus)}
+        >
+          {PRESENCE_STATUSES.map((code) => (
+            <option key={code} value={code}>
+              {STATUS_EMOJI[code]} {STATUS_LABEL[code]}
+            </option>
+          ))}
+        </select>
       </div>
       <div className={styles.controls} role="toolbar" aria-label="Controles de llamada">
         {/* `disabled`+`title` mientras LiveKit no esta disponible, espejando el
@@ -209,6 +167,50 @@ export function BottomBar({
         >
           {recording ? '⏹ Detener' : '⏺ Grabar'}
         </button>
+      </div>
+      <div className={styles.info} role="group" aria-label="Estado">
+        <div className={styles.status}>
+          {dnd ? (
+            // Anunciar "Audio por proximidad" mientras nada es audible seria
+            // mentir sobre lo unico que esta linea existe para contar.
+            <>🔴 No molestar: aislado del audio de la oficina</>
+          ) : room ? (
+            <>
+              🔒 Sala privada: <b>{room}</b>
+            </>
+          ) : (
+            <>
+              Audio por <b>proximidad</b>
+            </>
+          )}
+        </div>
+        {/* Connected says nothing here: who is online, and how many, lives in
+            the sidebar roster. Only a broken session earns a spot in the bar. */}
+        {presence.state !== 'connected' && (
+          <div className={styles.presence} title={PRESENCE_TITLE[presence.state]}>
+            {presence.state === 'reconnecting' ? (
+              // Sin recuento: los pares de antes de la caida siguen en el registro
+              // de la escena, pero ahora mismo no hay canal con ninguno, y contarlos
+              // seria decir que estan cuando no se les oye.
+              <>🟡 Reconectando...</>
+            ) : (
+              <>⚪ Sin servidor</>
+            )}
+          </div>
+        )}
+        {/* Solo cuando la sesion se perdio Y hay servidor configurado al que
+            volver: en modo solitario no hay nada que reintentar, y mientras
+            reconecta ya se esta reintentando solo. */}
+        {presence.state === 'offline' && presence.canRetry && (
+          <button
+            type="button"
+            className={styles.btn}
+            title="Volver a conectar con el servidor de avatares reales"
+            onClick={onRetryConnection}
+          >
+            🔄 Reintentar
+          </button>
+        )}
       </div>
     </div>
   );

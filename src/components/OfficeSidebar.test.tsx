@@ -27,6 +27,17 @@ describe('OfficeSidebar (#74)', () => {
     expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
   });
 
+  it('muestra cuantos hay en linea, contandose a uno mismo, tambien expandida', async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+    const toggle = screen.getByRole('button', { name: /Personas/ });
+
+    // The online count moved here from BottomBar: it belongs next to the list.
+    expect(toggle).toHaveTextContent('Personas (3)');
+    await user.click(toggle);
+    expect(toggle).toHaveTextContent('Personas (3)');
+  });
+
   it('activar el boton la expande y volver a activarlo la colapsa', async () => {
     const user = userEvent.setup();
     renderSidebar();

@@ -1,13 +1,28 @@
 .bar {
   position: fixed;
   bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
+  /*
+   * Centered with left/right + auto margins, not left: 50% + translate: that
+   * capped the shrink-to-fit width at half the viewport, which is what pushed
+   * the content onto extra lines.
+   */
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: fit-content;
   z-index: 10;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 8px;
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+  /* Narrow: identity and indicators share the top row, controls below. */
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-areas:
+    'me info'
+    'controls controls';
+  justify-content: center;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 8px;
   background: #111827f2;
   border: 1px solid #2b3444;
   border-radius: 16px;
@@ -16,15 +31,20 @@
   box-shadow: 0 8px 30px #0009;
 }
 
-.info {
+.me {
+  grid-area: me;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 10px;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
   white-space: nowrap;
+  padding-right: 10px;
+  border-right: 1px solid #2b3444;
 }
 
 .controls {
+  grid-area: controls;
   display: flex;
   justify-content: center;
   gap: 10px;
@@ -32,14 +52,42 @@
   border-top: 1px solid #2b3444;
 }
 
-.me {
+.info {
+  grid-area: info;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  font-size: 14px;
-  padding-right: 10px;
-  border-right: 1px solid #2b3444;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+/*
+ * Wide: a single row. Equal 1fr side columns keep the controls exactly
+ * centered whatever the identity or the indicators measure (#67 follow-up).
+ */
+@media (min-width: 1200px) {
+  .bar {
+    grid-template-columns: 1fr auto 1fr;
+    grid-template-areas: 'me controls info';
+    column-gap: 16px;
+  }
+
+  .me {
+    justify-self: start;
+    padding-right: 0;
+    border-right: none;
+  }
+
+  .controls {
+    padding: 0 16px;
+    border-top: none;
+    border-left: 1px solid #2b3444;
+    border-right: 1px solid #2b3444;
+  }
+
+  .info {
+    justify-self: end;
+  }
 }
 
 .meDot {
@@ -104,10 +152,10 @@
 .status {
   font-size: 12px;
   color: #9ca3af;
-  padding-right: 10px;
-  border-right: 1px solid #2b3444;
+  /* One line always: a long room name is cut, never allowed to grow the bar. */
+  overflow: hidden;
+  text-overflow: ellipsis;
   max-width: 340px;
-  white-space: normal;
 }
 
 .status b {
@@ -115,3 +163,9 @@
   font-weight: 600;
 }
 
+
+/* Same separator the old row had, only when a connection indicator follows. */
+.status + .presence {
+  padding-left: 10px;
+  border-left: 1px solid #2b3444;
+}

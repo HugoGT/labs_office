@@ -108,7 +108,7 @@ export function OfficeSidebar({
         aria-expanded={expanded}
         onClick={() => setExpanded((current) => !current)}
       >
-        👥 Personas{expanded ? '' : ` (${peers.length + 1})`}
+        👥 Personas ({peers.length + 1})
       </button>
       {expanded && (
         <div className={styles.panel}>
