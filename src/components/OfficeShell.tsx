@@ -101,7 +101,7 @@ export function OfficeShell({ session = null, onLeaveOffice }: OfficeShellProps)
    * inaudible con quien ya tenga la servida, que es el modo de fallo seguro
    * que `proximityAudio.ts` garantiza -- nunca audibilidad de un solo sentido.
    */
-  const spacesConfig = useSpacesConfig(endpoint);
+  const { config: spacesConfig } = useSpacesConfig(endpoint);
 
   useEffect(() => {
     if (spacesConfig === null) return;
