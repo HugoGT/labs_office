@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { MAP_H, MAP_W, TILE } from './mapData';
-import { reduceEditorState, snapToTile, type EditorState } from './layoutEditor';
+import {
+  computeObstacles,
+  isPlacementValid,
+  reduceEditorState,
+  snapToTile,
+  toLayoutEditCommand,
+  type EditorState,
+  type LayoutObstacleItem,
+} from './layoutEditor';
 
 describe('reduceEditorState', () => {
   it('recorre off -> idle -> selected -> placing -> saving -> idle', () => {
@@ -84,5 +92,122 @@ describe('snapToTile', () => {
     const worldY = (2 + 1) * TILE; // centro de una caja de h=2 en ty=2
 
     expect(snapToTile(worldX, worldY, 4, 2)).toEqual({ tx: 2, ty: 2 });
+  });
+});
+
+describe('computeObstacles', () => {
+  const room: LayoutObstacleItem = { id: 'room-1', kind: 'room', x: 10, y: 10, w: 5, h: 5 };
+  const deskCubicle: LayoutObstacleItem = { id: 'space-of-desk-1', kind: 'desk', x: 2, y: 2, w: 3, h: 3 };
+  const otherDeskCubicle: LayoutObstacleItem = {
+    id: 'space-of-desk-2',
+    kind: 'desk',
+    x: 20,
+    y: 20,
+    w: 3,
+    h: 3,
+  };
+
+  it('sin item en movimiento, todos los admin spaces son obstaculo', () => {
+    expect(computeObstacles([room, deskCubicle], null)).toEqual([
+      { x: 10, y: 10, w: 5, h: 5 },
+      { x: 2, y: 2, w: 3, h: 3 },
+    ]);
+  });
+
+  it('moviendo una sala, se excluye la propia por id', () => {
+    const obstacles = computeObstacles([room, deskCubicle], { kind: 'room', id: 'room-1' });
+
+    expect(obstacles).toEqual([{ x: 2, y: 2, w: 3, h: 3 }]);
+  });
+
+  it('moviendo un escritorio, se excluye el cubiculo que comparte su x/y actual, no por id', () => {
+    // El escritorio no comparte id con su fila en /spaces (id-de-desk vs
+    // id-de-space son cosas distintas); el emparejamiento es por kind+x/y.
+    const obstacles = computeObstacles([room, deskCubicle, otherDeskCubicle], {
+      kind: 'desk',
+      x: 2,
+      y: 2,
+    });
+
+    expect(obstacles).toEqual([
+      { x: 10, y: 10, w: 5, h: 5 },
+      { x: 20, y: 20, w: 3, h: 3 },
+    ]);
+  });
+});
+
+describe('isPlacementValid', () => {
+  it('valido cuando no solapa ningun obstaculo', () => {
+    const valid = isPlacementValid({ x: 0, y: 0, w: 3, h: 3 }, [{ x0: 10, y0: 10, x1: 12, y1: 12 }]);
+
+    expect(valid).toBe(true);
+  });
+
+  it('invalido cuando solapa un obstaculo', () => {
+    const valid = isPlacementValid({ x: 0, y: 0, w: 3, h: 3 }, [{ x0: 2, y0: 2, x1: 4, y1: 4 }]);
+
+    expect(valid).toBe(false);
+  });
+});
+
+describe('toLayoutEditCommand', () => {
+  const items: LayoutObstacleItem[] = [
+    { id: 'desk-1', kind: 'desk', x: 2, y: 2, w: 3, h: 3 },
+    { id: 'room-1', kind: 'room', x: 10, y: 10, w: 5, h: 5 },
+  ];
+
+  it('off no produce comando: null es la senal de salir del modo edicion', () => {
+    expect(toLayoutEditCommand({ tag: 'off' }, { items })).toBeNull();
+  });
+
+  it('idle expone todo lo pickable, sin seleccion ni colocacion', () => {
+    expect(toLayoutEditCommand({ tag: 'idle', kind: 'desk' }, { items })).toEqual({
+      pickable: [
+        { id: 'desk-1', x0: 2, y0: 2, x1: 4, y1: 4 },
+        { id: 'room-1', x0: 10, y0: 10, x1: 14, y1: 14 },
+      ],
+      selectedId: null,
+      placing: null,
+    });
+  });
+
+  it('selected marca selectedId y no expone ghost', () => {
+    const command = toLayoutEditCommand({ tag: 'selected', kind: 'room', id: 'room-1' }, { items });
+
+    expect(command?.selectedId).toBe('room-1');
+    expect(command?.placing).toBeNull();
+  });
+
+  it('placing en modo crear no excluye nada de los obstaculos', () => {
+    const command = toLayoutEditCommand(
+      { tag: 'placing', kind: 'room', mode: 'create' },
+      { items, placingSize: { w: 4, h: 4 } },
+    );
+
+    expect(command?.placing).toEqual({
+      w: 4,
+      h: 4,
+      obstacles: [
+        { x0: 2, y0: 2, x1: 4, y1: 4 },
+        { x0: 10, y0: 10, x1: 14, y1: 14 },
+      ],
+    });
+  });
+
+  it('placing en modo mover excluye el item propio de los obstaculos', () => {
+    const command = toLayoutEditCommand(
+      { tag: 'placing', kind: 'room', mode: 'move', id: 'room-1' },
+      { items, placingSize: { w: 5, h: 5 }, moving: { kind: 'room', id: 'room-1' } },
+    );
+
+    expect(command?.placing?.obstacles).toEqual([{ x0: 2, y0: 2, x1: 4, y1: 4 }]);
+  });
+
+  it('saving no expone pickable ni ghost: no hay nada que clicar mientras se guarda', () => {
+    expect(toLayoutEditCommand({ tag: 'saving', kind: 'room' }, { items })).toEqual({
+      pickable: [],
+      selectedId: null,
+      placing: null,
+    });
   });
 });
