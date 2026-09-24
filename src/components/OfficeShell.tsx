@@ -24,6 +24,7 @@ import { BottomBar } from './BottomBar';
 import { CallInvitationStack } from './CallInvitationStack';
 import { ContextMenu, type PeerMenuAction } from './ContextMenu';
 import { DeskDecorEditor } from './DeskDecorEditor';
+import { ExitControls } from './ExitControls';
 import { GameCanvas } from './GameCanvas';
 import { RecBadge } from './RecBadge';
 import { RecordingReadyStack, type RecordingReadyNotice } from './RecordingReadyStack';
@@ -40,6 +41,11 @@ export interface OfficeShellProps {
    * que es la oficina abierta de siempre.
    */
   session?: OfficeSession | null;
+  /**
+   * Takes the user out of the office (#66). Whoever mounted the shell owns
+   * this: leaving means unmounting it, which the shell cannot do to itself.
+   */
+  onLeaveOffice?: () => void;
 }
 
 /**
@@ -54,7 +60,7 @@ export interface OfficeShellProps {
  * el nombre ya resuelto (#6): `BottomBar` es presentacional y no tiene por que
  * aprender que existe una sesion para poder escribir un nombre.
  */
-export function OfficeShell({ session = null }: OfficeShellProps) {
+export function OfficeShell({ session = null, onLeaveOffice }: OfficeShellProps) {
   const [bridge] = useState(createOfficeBridge);
   const { room, spaceId, recordings, selfSessionId, menu, presence, closeMenu } = useOfficeBridge(bridge);
   // D12: la pila del receptor vive en su propio hook (temporizadores + chime
@@ -543,6 +549,15 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
     );
   }
 
+  async function signOut(current: OfficeSession): Promise<void> {
+    try {
+      await current.signOut?.();
+    } catch {
+      // Still signed in: the office stays, so it has to say why nothing happened.
+      setToastMessage('No se pudo cerrar la sesión');
+    }
+  }
+
   return (
     <div id="office-shell">
       <GameCanvas bridge={bridge} endpoint={endpoint} session={session} />
@@ -587,6 +602,10 @@ export function OfficeShell({ session = null }: OfficeShellProps) {
           onClose={() => setDecorOpen(false)}
         />
       )}
+      <ExitControls
+        onSignOut={session?.signOut ? () => void signOut(session) : null}
+        onLeaveOffice={onLeaveOffice ?? null}
+      />
       <AudioUnblockPrompt blocked={audioBlocked} onUnblock={unblockAudio} />
       <Toast message={toastMessage} />
       <CallInvitationStack invitations={invitations} onAccept={accept} onDismiss={dismiss} />

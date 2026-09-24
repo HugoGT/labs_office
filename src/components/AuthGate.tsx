@@ -40,6 +40,7 @@ export function AuthGate({ auth, children }: AuthGateProps) {
     return {
       displayName: user.displayName,
       getIdToken: () => auth.getIdToken(),
+      signOut: () => auth.signOut(),
     };
   }, [auth, user]);
 

@@ -150,6 +150,19 @@ describe('AuthGate: autenticacion encendida', () => {
     expect(office.sessions.at(-1)).toBe(first);
   });
 
+  it('the session signs out through the port (#66)', async () => {
+    const office = officeSpy();
+    const { port, emit } = fakePort();
+    render(<AuthGate auth={port}>{office.render}</AuthGate>);
+    emit(ANA);
+
+    await office.sessions.at(-1)?.signOut?.();
+
+    // The port's listener then reports `null`, which is what brings back the
+    // login (see the test below): the office never decides that by itself.
+    expect(port.signOut).toHaveBeenCalledTimes(1);
+  });
+
   it('cerrar la sesion devuelve al login sin desmontar el resto de la pagina', () => {
     const office = officeSpy();
     const { port, emit } = fakePort();
