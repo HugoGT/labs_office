@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { waitForSceneRunning } from '../test/phaserScene';
 import { FACINGS } from './officeProtocol';
 import { AVATAR_KEYS, PLAYER_TEXTURE, avatarTextureKey, createOfficeTextures } from './textures';
 
@@ -44,9 +45,7 @@ async function withScene<T>(run: (scene: Phaser.Scene) => T): Promise<T> {
   });
   games.push(game);
 
-  await vi.waitFor(() => {
-    expect(game.scene.getScene('probe')?.scene.settings.status).toBe(Phaser.Scenes.RUNNING);
-  });
+  await waitForSceneRunning(game, 'probe');
 
   return result;
 }

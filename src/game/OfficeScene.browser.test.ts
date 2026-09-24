@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { waitForSceneRunning } from '../test/phaserScene';
 import type { CharacterContainer } from './characters';
 import {
   BUILT_IN_SPACES,
@@ -86,11 +87,7 @@ async function bootOfficeScene(
   });
   games.push(game);
 
-  await vi.waitFor(() => {
-    expect(game.scene.getScene(OFFICE_SCENE_KEY)?.scene.settings.status).toBe(
-      Phaser.Scenes.RUNNING,
-    );
-  }, LOOP_WAIT);
+  await waitForSceneRunning(game, OFFICE_SCENE_KEY);
 
   return { scene: game.scene.getScene(OFFICE_SCENE_KEY) as Phaser.Scene, bridge };
 }

@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import type { AuthUser } from './auth/authPort';
 import { createFirebaseAuthAdapter } from './auth/firebaseAuthAdapter';
@@ -29,6 +29,15 @@ function fakePort() {
   };
   return { port, emit: (user: AuthUser | null) => act(() => listener?.(user)) };
 }
+
+// Both screens enter through `import()` (#24), and the first test to mount one
+// paid its cold module load inside `waitFor`'s 1s default: under a full
+// `test:all` that alone timed out (#68). Loading them here, under the hook's
+// 10s budget, leaves the tests waiting only on React; `createGame` stays the
+// witness of whether the office mounted.
+beforeAll(async () => {
+  await Promise.all([import('./components/OfficeShell'), import('./dashboard/DashboardRoute')]);
+});
 
 beforeEach(() => {
   vi.clearAllMocks();

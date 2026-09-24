@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { waitForSceneRunning } from '../test/phaserScene';
 import { createOfficeBridge } from './officeBridge';
 import { STATUS_COLOR } from './presence';
 import { createRemoteAvatarRegistry, type RemotePlayerSnapshot } from './remoteAvatars';
@@ -41,9 +42,7 @@ async function withScene<T>(run: (scene: Phaser.Scene) => T): Promise<T> {
   });
   games.push(game);
 
-  await vi.waitFor(() => {
-    expect(game.scene.getScene('probe')?.scene.settings.status).toBe(Phaser.Scenes.RUNNING);
-  });
+  await waitForSceneRunning(game, 'probe');
 
   return result;
 }

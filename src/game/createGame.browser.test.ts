@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { waitForSceneRunning } from '../test/phaserScene';
 import { createGame } from './createGame';
 import { createOfficeBridge } from './officeBridge';
 
@@ -25,11 +26,7 @@ function mountHost(width = 320, height = 240): HTMLElement {
 async function bootedGame(host: HTMLElement): Promise<Phaser.Game> {
   const game = createGame(host, createOfficeBridge());
   games.push(game);
-  await vi.waitFor(() => {
-    expect(game.scene.getScene('office')?.scene.settings.status).toBe(
-      Phaser.Scenes.RUNNING,
-    );
-  });
+  await waitForSceneRunning(game, 'office');
   return game;
 }
 

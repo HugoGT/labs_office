@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { waitForSceneRunning } from '../test/phaserScene';
 import { LayoutEditLayer, layoutPickName } from './LayoutEditLayer';
 import { TILE } from './mapData';
 import { createOfficeBridge } from './officeBridge';
@@ -19,7 +20,6 @@ afterEach(() => {
   for (const host of hosts.splice(0)) host.remove();
 });
 
-const LOOP_WAIT = { timeout: 20000, interval: 50 } as const;
 const HOST_SCENE_KEY = 'layout-edit-layer-host';
 
 class HostScene extends Phaser.Scene {
@@ -44,9 +44,7 @@ async function bootHostScene(): Promise<Phaser.Scene> {
   });
   games.push(game);
 
-  await vi.waitFor(() => {
-    expect(game.scene.getScene(HOST_SCENE_KEY)?.scene.settings.status).toBe(Phaser.Scenes.RUNNING);
-  }, LOOP_WAIT);
+  await waitForSceneRunning(game, HOST_SCENE_KEY);
 
   return game.scene.getScene(HOST_SCENE_KEY) as Phaser.Scene;
 }

@@ -102,6 +102,10 @@ export default defineConfig(({ mode }) => {
           test: {
             name: { label: 'browser', color: 'magenta' },
             include: ['src/**/*.browser.test.{ts,tsx}'],
+            // Scene waits get 20s (`SCENE_BOOT_TIMEOUT_MS`, `LOOP_WAIT`) because
+            // the CI main thread stalls for whole seconds (#68). Under the 5s
+            // default those budgets were cut short; this fits two boots in a row.
+            testTimeout: 60_000,
             setupFiles: ['./src/test/officeE2eGlobal.setup.ts'],
             browser: {
               enabled: true,
