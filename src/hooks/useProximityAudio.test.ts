@@ -895,6 +895,56 @@ describe('useProximityAudio: reconecta al cambiar de espacio (#12, D7, targetRef
 
     expect(staleConnection.disconnect).toHaveBeenCalledTimes(1);
   });
+
+  it('flap A->B->A2: la conexion tardia de la A original no pisa la conexion viva de A2 (fuga de conexion)', async () => {
+    const bridge = createOfficeBridge();
+    const connectGateA = deferred<LivekitRoomConnection>();
+    const connectionB = fakeConnection();
+    const connectionA2 = fakeConnection();
+    const staleConnectionA = fakeConnection();
+    const connect = vi
+      .fn<(opts: ConnectLivekitRoomOptions) => Promise<LivekitRoomConnection>>()
+      .mockImplementationOnce(() => connectGateA.promise)
+      .mockResolvedValueOnce(connectionB)
+      .mockResolvedValueOnce(connectionA2);
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+
+    // A original ('s1'): su connect() queda en vuelo.
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+    // B ('s2'): conecta rapido.
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's2' });
+    });
+    expect(connect).toHaveBeenCalledTimes(2);
+    // A2: MISMO valor (sessionId,spaceId) que A original, pero un intento posterior. Conecta rapido.
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+    expect(connect).toHaveBeenCalledTimes(3);
+
+    // La conexion de A original resuelve TARDE, despues de que A2 ya esta viva.
+    // Comparar por VALOR (sessionId,spaceId) confundiria esto con "sigue vigente",
+    // porque A2 tiene el mismo valor que A original -- debe descartarse igual.
+    await act(async () => {
+      connectGateA.resolve(staleConnectionA);
+    });
+
+    expect(staleConnectionA.disconnect).toHaveBeenCalledTimes(1);
+    expect(connectionA2.disconnect).not.toHaveBeenCalled();
+
+    // Una accion del usuario actua sobre la conexion VIVA (A2), nunca sobre la huerfana.
+    await act(async () => {
+      result.current.toggleMic();
+    });
+    expect(connectionA2.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+    expect(staleConnectionA.setMicrophoneEnabled).not.toHaveBeenCalled();
+  });
 });
 
 describe('useProximityAudio: 403 forbidden-space reintenta antes de caer al corredor (#12, diseno sec.6)', () => {
@@ -1023,6 +1073,43 @@ describe('useProximityAudio: 403 forbidden-space reintenta antes de caer al corr
     expect(connect).toHaveBeenCalledTimes(1); // sigue en el corredor.
   });
 
+  it('el reintento lento se detiene si el objetivo cambia antes de que dispare el temporizador de 5s', async () => {
+    vi.useFakeTimers();
+    const bridge = createOfficeBridge();
+    const corridorConnection = fakeConnection();
+    const otherConnection = fakeConnection();
+    const connect = vi
+      .fn<(opts: ConnectLivekitRoomOptions) => Promise<LivekitRoomConnection>>()
+      .mockResolvedValueOnce(corridorConnection)
+      .mockResolvedValueOnce(otherConnection);
+    const fetchToken = vi.fn(async (request: LivekitTokenRequest) => {
+      if (request.spaceId === 's1') throw new LivekitTokenError(403, 'forbidden-space');
+      return fakeTokenResponse();
+    });
+
+    renderHook(() => useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }));
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150 + 300 + 600); // cae al corredor, arranca el reintento lento.
+    });
+    const callsBeforeChange = fetchToken.mock.calls.length;
+
+    // El usuario se mueve a 's2' antes de que el reintento lento de 5s dispare.
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's2' });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    // El reintento lento viejo (para 's1') se abandono: solo la peticion de 's2' se sumo.
+    expect(fetchToken.mock.calls.length).toBe(callsBeforeChange + 1);
+    expect(connect).toHaveBeenCalledTimes(2); // corredor + 's2', nunca un tercer connect() para 's1'.
+  });
+
   it('si el objetivo cambia durante el reintento rapido, se abandona la cadena vieja sin conectar', async () => {
     vi.useFakeTimers();
     const bridge = createOfficeBridge();
@@ -1055,6 +1142,39 @@ describe('useProximityAudio: 403 forbidden-space reintenta antes de caer al corr
     // El primer objetivo ('s1') no debe generar una conexion al corredor
     // colgada: solo la conexion final de 's2' debe existir.
     expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  it('desmontar durante un reintento rapido o lento en espera no reintenta ni actualiza estado', async () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const bridge = createOfficeBridge();
+    const connect = vi.fn(async () => fakeConnection());
+    const fetchToken = vi.fn(async (request: LivekitTokenRequest) => {
+      if (request.spaceId) throw new LivekitTokenError(403, 'forbidden-space');
+      return fakeTokenResponse();
+    });
+
+    const { unmount } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+    const callsBeforeUnmount = fetchToken.mock.calls.length;
+
+    unmount();
+
+    // El temporizador falso sigue "programado", pero el efecto ya se limpio:
+    // avanzar el tiempo (reintentos rapidos + uno lento) no debe reintentar ni conectar.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150 + 300 + 600 + 5000);
+    });
+
+    expect(fetchToken.mock.calls.length).toBe(callsBeforeUnmount);
+    expect(connect).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 });
 
