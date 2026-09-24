@@ -629,6 +629,68 @@ describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
   });
 });
 
+describe('OfficeScene: roster de personas conectadas via el puente (#74)', () => {
+  it('un alta remota emite "roster" con ese par', async () => {
+    const bridge = createOfficeBridge();
+    const roster: OfficeEventMap['roster'][] = [];
+    bridge.on('roster', (r) => roster.push(r));
+    const connector = fakeConnector();
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', name: 'Ana Remota', status: 'g' }));
+
+    expect(roster.at(-1)).toEqual({
+      peers: [{ sessionId: 'par-1', name: 'Ana Remota', status: 'g' }],
+    });
+  });
+
+  it('no incluye al propio jugador aunque el servidor lo repita en el estado (mismo ignoreSessionId que los avatares)', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const bridge = createOfficeBridge();
+    const roster: OfficeEventMap['roster'][] = [];
+    bridge.on('roster', (r) => roster.push(r));
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'mi-sesion', name: DEFAULT_NAME }));
+
+    expect(roster).toHaveLength(0);
+  });
+
+  it('una baja remota emite "roster" sin ese par', async () => {
+    const connector = fakeConnector();
+    const bridge = createOfficeBridge();
+    const roster: OfficeEventMap['roster'][] = [];
+    bridge.on('roster', (r) => roster.push(r));
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'se-va', name: 'Se Va' }));
+    await vi.waitFor(() => expect(roster.at(-1)?.peers).toHaveLength(1));
+
+    connector.handlers()!.onRemove('se-va');
+
+    expect(roster.at(-1)).toEqual({ peers: [] });
+  });
+
+  it('un onChange de solo posicion no reemite "roster"', async () => {
+    const connector = fakeConnector();
+    const bridge = createOfficeBridge();
+    const roster: OfficeEventMap['roster'][] = [];
+    bridge.on('roster', (r) => roster.push(r));
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', name: 'Ana Remota', status: 'g' }));
+    const emissionsAfterAdd = roster.length;
+
+    connector.handlers()!.onChange(
+      remoteSnapshot({ sessionId: 'par-1', name: 'Ana Remota', status: 'g', x: 999, y: 999 }),
+    );
+
+    expect(roster).toHaveLength(emissionsAfterAdd);
+  });
+});
+
 describe('OfficeScene: comando setStatus via el puente (#1)', () => {
   it('repinta el punto de estado del jugador local', async () => {
     const bridge = createOfficeBridge();

@@ -27,6 +27,7 @@ import {
   DEFAULT_NAME,
   DEFAULT_STATUS,
   facingFrom,
+  isPresenceStatus,
   type Facing,
   type PresenceStatus,
 } from './officeProtocol';
@@ -39,6 +40,7 @@ import {
 import { createRemoteAvatarRegistry, type RemoteAvatarRegistry } from './remoteAvatars';
 import { createPhaserAvatarSink, type RemoteAvatarContainer } from './remoteAvatarSink';
 import { detectSpace, nearbyKey } from './proximity';
+import { createRosterTracker, type RosterPeer, type RosterTracker } from './roster';
 import { audiblePeers, type AudioPeer } from './proximityAudio';
 import {
   buildTerrainGrid,
@@ -102,6 +104,20 @@ interface WasdKeys {
 }
 
 /**
+ * Reduce un snapshot remoto (con posicion) a lo unico que el roster mira
+ * (#74). Mismo limite de confianza que `statusOf` en `remoteAvatarSink.ts`:
+ * el servidor ya sanea el estado, pero un codigo desconocido no debe dejar la
+ * lista sin poder pintar un color.
+ */
+function rosterPeerOf(snapshot: { sessionId: string; name: string; status: string }): RosterPeer {
+  return {
+    sessionId: snapshot.sessionId,
+    name: snapshot.name,
+    status: isPresenceStatus(snapshot.status) ? snapshot.status : DEFAULT_STATUS,
+  };
+}
+
+/**
  * Escena principal de la oficina virtual, portada de `OfficeScene`
  * (`prototype/js/app.js:67-96,325-501`). Orquesta texturas, mapa, jugador,
  * input, camaras, colisiones y el ciclo de proximidad/salas. Los unicos
@@ -161,6 +177,12 @@ export class OfficeScene extends Phaser.Scene {
 
   private readonly options: OfficeSceneOptions;
   private remotes?: RemoteAvatarRegistry<RemoteAvatarContainer>;
+  /**
+   * Roster de personas conectadas (#74). Creado junto a `this.remotes`, con el
+   * mismo `ignoreSessionId`: la lista visible en el HUD nunca incluye al
+   * propio jugador.
+   */
+  private roster?: RosterTracker;
   private connection?: OfficeConnection;
   private facing: Facing = DEFAULT_FACING;
   /** Estado de presencia del jugador local; React es quien lo cambia (ver `setStatus`). */
@@ -276,6 +298,7 @@ export class OfficeScene extends Phaser.Scene {
       // misma razon que en un resync: el join reparte los suyos y mezclarlos
       // dejaria fantasmas que ningun `onRemove` va a retirar.
       this.remotes?.clear();
+      this.roster?.clear();
       void this.connectToOffice().finally(() => {
         this.reconnecting = false;
       });
@@ -304,6 +327,7 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeDesks?.();
       this.unsubscribeReconnect?.();
       this.remotes?.clear();
+      this.roster?.clear();
       void this.connection?.leave();
       this.connection = undefined;
     });
@@ -353,11 +377,16 @@ export class OfficeScene extends Phaser.Scene {
         handlers: {
           onAdd: (snapshot) => {
             this.remotes?.upsert(snapshot);
+            this.roster?.upsert(rosterPeerOf(snapshot));
             this.emitPresence();
           },
-          onChange: (snapshot) => this.remotes?.upsert(snapshot),
+          onChange: (snapshot) => {
+            this.remotes?.upsert(snapshot);
+            this.roster?.upsert(rosterPeerOf(snapshot));
+          },
           onRemove: (sessionId) => {
             this.remotes?.remove(sessionId);
+            this.roster?.remove(sessionId);
             this.emitPresence();
           },
           // Issue #2: mensajes sueltos del servidor, no estado sincronizado
@@ -391,6 +420,9 @@ export class OfficeScene extends Phaser.Scene {
       // `peermenu` al clicar un peer real; toque mecanico, la escena ya guarda
       // `this.bridge` desde su constructor.
       this.remotes = createRemoteAvatarRegistry(createPhaserAvatarSink(this, this.bridge), {
+        ignoreSessionId: connection.sessionId,
+      });
+      this.roster = createRosterTracker((peers) => this.bridge.emit('roster', { peers }), {
         ignoreSessionId: connection.sessionId,
       });
       this.emitPresence('connected');
@@ -428,6 +460,7 @@ export class OfficeScene extends Phaser.Scene {
    */
   private resyncAfterReconnect(): void {
     this.remotes?.clear();
+    this.roster?.clear();
     this.lastVoiceKey = '';
   }
 

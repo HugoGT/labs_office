@@ -14,6 +14,7 @@
 import type { OfficeDesk } from './desksPort';
 import type { SpaceArea } from './mapData';
 import type { PresenceStatus, RecordingReadyPayload } from './officeProtocol';
+import type { RosterPeer } from './roster';
 import type { ActiveRecordingSnapshot, OfficeConnectionState } from './officeRoomClient';
 
 export interface OfficeEventMap {
@@ -127,6 +128,13 @@ export interface OfficeEventMap {
    * watched or downloaded (#58). Only participants receive it.
    */
   recordingready: RecordingReadyPayload;
+  /**
+   * Roster de personas conectadas (#74), reenviado tal cual desde
+   * `createRosterTracker`. Nunca incluye al propio jugador (mismo
+   * `ignoreSessionId` que `remoteAvatars.ts`): el HUD ya conoce su propio
+   * nombre y estado por otra via y los antepone en `rosterView.ts`.
+   */
+  roster: { peers: readonly RosterPeer[] };
 }
 
 export interface OfficeCommandMap {

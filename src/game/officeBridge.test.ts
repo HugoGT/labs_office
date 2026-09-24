@@ -202,6 +202,21 @@ describe('createOfficeBridge', () => {
     expect(bridge).not.toHaveProperty('walkToPeer');
   });
 
+  it('entrega el payload de "roster" y deja de notificar tras desuscribirse (#74)', () => {
+    const bridge = createOfficeBridge();
+    const handler = vi.fn();
+    const peers = [{ sessionId: 'par-1', name: 'Ana Real', status: 'g' as const }];
+
+    const unsubscribe = bridge.on('roster', handler);
+    bridge.emit('roster', { peers });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith({ peers });
+
+    unsubscribe();
+    bridge.emit('roster', { peers: [] });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
   it('entrega el payload de "portraits" y deja de notificar tras desuscribirse (issue #17, D1)', () => {
     const bridge = createOfficeBridge();
     const handler = vi.fn();
