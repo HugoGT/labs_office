@@ -176,4 +176,20 @@ describe('OfficeSidebar: seccion de administracion de escritorios (#74, PR3c + P
 
     expect(screen.queryByRole('button', { name: /Editar escritorios/ })).not.toBeInTheDocument();
   });
+
+  it('con rol admin y spaces, ofrece TAMBIEN la seccion de salas', async () => {
+    const user = userEvent.setup();
+    renderSidebar({
+      role: 'admin',
+      bridge: createOfficeBridge(),
+      desks: fakeDesks(),
+      spaces: fakeSpaces(),
+      refreshDesks: vi.fn(),
+      refreshSpaces: vi.fn(),
+    });
+
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    expect(await screen.findByRole('button', { name: /Editar salas/ })).toBeInTheDocument();
+  });
 });

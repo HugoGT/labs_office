@@ -1334,6 +1334,30 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
     expect(await screen.findByRole('button', { name: /Editar escritorios/ })).toBeInTheDocument();
   });
 
+  it('con rol admin, la seccion de salas TAMBIEN se ofrece en el sidebar (#74, PR4)', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell session={SESION} />);
+    await openSidebar(user);
+
+    expect(await screen.findByRole('button', { name: /Editar salas/ })).toBeInTheDocument();
+  });
+
+  it('entrar en modo edicion de SALAS tambien cierra el editor de decoracion (#74, PR4)', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
+    await act(async () => {});
+    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+    await user.click(await screen.findByRole('button', { name: /Decorar/ }));
+    expect(await screen.findByRole('dialog', { name: /Mesa 4/ })).toBeInTheDocument();
+
+    await openSidebar(user);
+    await user.click(await screen.findByRole('button', { name: /Editar salas/ }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('entrar en modo edicion cierra el editor de decoracion si estaba abierto', async () => {
     const user = userEvent.setup();
     render(<OfficeShell session={SESION} />);
