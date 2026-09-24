@@ -32,6 +32,16 @@ export const STATUS_LABEL: Record<PresenceStatus, string> = {
 };
 
 /**
+ * The same color as a glyph, for places that only take text: a native
+ * `<option>` cannot hold the styled dot next to the name (#67).
+ */
+export const STATUS_EMOJI: Record<PresenceStatus, string> = {
+  g: '🟢',
+  y: '🟡',
+  r: '🔴',
+};
+
+/**
  * El mismo color, en la forma que entiende el DOM. La conversion vive aqui y
  * no repetida en cada componente: el relleno a seis digitos es facil de
  * olvidar y un color a medio escribir no falla, simplemente se pinta mal.

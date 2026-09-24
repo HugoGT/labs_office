@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PRESENCE_STATUSES } from './officeProtocol';
-import { STATUS_COLOR, STATUS_LABEL, statusCssColor } from './presence';
+import { STATUS_COLOR, STATUS_EMOJI, STATUS_LABEL, statusCssColor } from './presence';
 
 describe('presence: vocabulario de presentacion', () => {
   it('mapea cada estado a su color (app.js:53)', () => {
@@ -16,6 +16,10 @@ describe('presence: vocabulario de presentacion', () => {
       y: 'Ocupado',
       r: 'No molestar',
     });
+  });
+
+  it('each status has the colored circle that matches its dot (#67)', () => {
+    expect(STATUS_EMOJI).toEqual({ g: '🟢', y: '🟡', r: '🔴' });
   });
 
   it('cada estado del protocolo tiene color y etiqueta: nada queda sin pintar ni sin nombre', () => {

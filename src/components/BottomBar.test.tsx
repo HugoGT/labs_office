@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -176,9 +176,9 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
 
     const select = screen.getByLabelText('Mi estado');
     expect(select).toHaveValue('g');
-    expect(screen.getByRole('option', { name: 'En línea' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Ocupado' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'No molestar' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '🟢 En línea' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '🟡 Ocupado' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '🔴 No molestar' })).toBeInTheDocument();
   });
 
   it('elegir un estado avisa con su codigo, no con su etiqueta', async () => {
@@ -406,7 +406,7 @@ describe('BottomBar: screen share button (#20)', () => {
     const user = userEvent.setup();
     const props = renderBar({ screenShareOn: false });
 
-    const button = screen.getByRole('button', { name: 'Compartir pantalla' });
+    const button = screen.getByRole('button', { name: '🖥️ Compartir' });
     expect(button).toHaveAttribute('aria-pressed', 'false');
     await user.click(button);
 
@@ -417,7 +417,7 @@ describe('BottomBar: screen share button (#20)', () => {
   it('while sharing it offers to stop', () => {
     renderBar({ screenShareOn: true });
 
-    expect(screen.getByRole('button', { name: 'Dejar de compartir' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: '🖥️ Dejar de compartir' })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
@@ -426,7 +426,7 @@ describe('BottomBar: screen share button (#20)', () => {
   it('without LiveKit it is disabled with the same title as mic and camera', () => {
     renderBar({ audioAvailable: false, screenShareAvailable: false });
 
-    const button = screen.getByRole('button', { name: 'Compartir pantalla' });
+    const button = screen.getByRole('button', { name: '🖥️ Compartir' });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute('title', 'Audio no disponible: sin conexion a LiveKit');
   });
@@ -434,7 +434,7 @@ describe('BottomBar: screen share button (#20)', () => {
   it('outside a space it is disabled and says why', () => {
     renderBar({ audioAvailable: true, screenShareAvailable: false });
 
-    const button = screen.getByRole('button', { name: 'Compartir pantalla' });
+    const button = screen.getByRole('button', { name: '🖥️ Compartir' });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute('title', 'Solo disponible dentro de una sala');
   });
@@ -442,7 +442,7 @@ describe('BottomBar: screen share button (#20)', () => {
   it('in "No molestar" it is disabled with the reason the user can undo', () => {
     renderBar({ status: 'r' });
 
-    const button = screen.getByRole('button', { name: 'Compartir pantalla' });
+    const button = screen.getByRole('button', { name: '🖥️ Compartir' });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute('title', 'No molestar: no compartes pantalla');
   });
@@ -450,8 +450,47 @@ describe('BottomBar: screen share button (#20)', () => {
   it('inside a space with LiveKit it is enabled, without a title', () => {
     renderBar({ audioAvailable: true, screenShareAvailable: true });
 
-    const button = screen.getByRole('button', { name: 'Compartir pantalla' });
+    const button = screen.getByRole('button', { name: '🖥️ Compartir' });
     expect(button).toBeEnabled();
     expect(button).not.toHaveAttribute('title');
+  });
+});
+
+describe('BottomBar: two-row layout (#67)', () => {
+  const CALL_BUTTONS = [/Mic/, /Cámara/, /Compartir/, /Grabar/];
+
+  it('keeps identity and indicators on the top row and the call controls on the bottom row', () => {
+    renderBar({ room: 'Sala de Juntas', presence: OFFLINE_RETRYABLE });
+
+    const info = screen.getByRole('group', { name: 'Estado' });
+    const controls = screen.getByRole('toolbar', { name: 'Controles de llamada' });
+    for (const name of CALL_BUTTONS) {
+      expect(within(controls).getByRole('button', { name })).toBeInTheDocument();
+    }
+    expect(within(info).getByLabelText('Mi estado')).toBeInTheDocument();
+    expect(within(info).getByText(/Sala privada/)).toBeInTheDocument();
+    expect(within(info).getByText(/Sin servidor/)).toBeInTheDocument();
+    // Retrying is about the connection, so it sits next to the connection indicator.
+    expect(within(info).getByRole('button', { name: /Reintentar/ })).toBeInTheDocument();
+    expect(within(controls).queryByLabelText('Mi estado')).not.toBeInTheDocument();
+  });
+
+  it('stays in two rows in the corridor, only without the private room line', () => {
+    renderBar({ room: null });
+
+    expect(screen.getByRole('group', { name: 'Estado' })).toBeInTheDocument();
+    const controls = screen.getByRole('toolbar', { name: 'Controles de llamada' });
+    for (const name of CALL_BUTTONS) {
+      expect(within(controls).getByRole('button', { name })).toBeInTheDocument();
+    }
+    expect(screen.queryByText(/Sala privada/)).not.toBeInTheDocument();
+  });
+
+  it('names the private room without the "audio aislado" suffix', () => {
+    renderBar({ room: 'Sala de Juntas' });
+
+    const line = screen.getByText(/Sala privada/);
+    expect(line).toHaveTextContent(/^🔒 Sala privada: Sala de Juntas$/);
+    expect(screen.queryByText(/audio aislado/)).not.toBeInTheDocument();
   });
 });

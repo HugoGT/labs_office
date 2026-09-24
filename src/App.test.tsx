@@ -1,4 +1,5 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
+import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import type { AuthUser } from './auth/authPort';
@@ -162,6 +163,66 @@ describe('App: autenticacion (#8)', () => {
     const options = createGameMock.mock.calls[0][2];
     expect(options?.playerName).toBe('Ana');
     await expect(options?.getIdToken?.()).resolves.toBe('id-token');
+  });
+});
+
+describe('App: leaving the office (#66)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('leaving unmounts the office, which tears the game down, and shows the notice', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+    await waitForOffice(container);
+    const game = createGameMock.mock.results[0].value as { destroy: ReturnType<typeof vi.fn> };
+
+    await user.click(screen.getByRole('button', { name: /Salir de la oficina/ }));
+
+    // Destroying the game is what leaves the Colyseus room and, with the
+    // shell gone, the LiveKit room: the avatar disappears for everyone.
+    expect(game.destroy).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('#office-shell')).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Saliste de la oficina' })).toBeInTheDocument();
+  });
+
+  it('"Volver a ingresar" mounts the office again with the same session, no login', async () => {
+    vi.stubEnv('VITE_FIREBASE_API_KEY', 'AIza-publica');
+    vi.stubEnv('VITE_FIREBASE_PROJECT_ID', 'oficina-virtual');
+    const { port, emit } = fakePort();
+    createAdapterMock.mockReturnValue(port);
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+    emit({ uid: 'uid-ana', email: 'ana@example.com', displayName: 'Ana' });
+    await waitForOffice(container);
+
+    await user.click(screen.getByRole('button', { name: /Salir de la oficina/ }));
+    await user.click(screen.getByRole('button', { name: 'Volver a ingresar' }));
+
+    await waitForOffice(container);
+    expect(createGameMock).toHaveBeenCalledTimes(2);
+    expect(createGameMock.mock.calls[1][2]?.playerName).toBe('Ana');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(port.signOut).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText(/contraseña/i)).not.toBeInTheDocument();
+  });
+
+  it('"Cerrar sesión" signs out through the auth port and brings back the login', async () => {
+    vi.stubEnv('VITE_FIREBASE_API_KEY', 'AIza-publica');
+    vi.stubEnv('VITE_FIREBASE_PROJECT_ID', 'oficina-virtual');
+    const { port, emit } = fakePort();
+    createAdapterMock.mockReturnValue(port);
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+    emit({ uid: 'uid-ana', email: 'ana@example.com', displayName: 'Ana' });
+    await waitForOffice(container);
+
+    await user.click(screen.getByRole('button', { name: /Cerrar sesión/ }));
+    expect(port.signOut).toHaveBeenCalledTimes(1);
+    emit(null);
+
+    expect(screen.getByLabelText(/contraseña/i)).toBeInTheDocument();
+    expect(container.querySelector('#office-shell')).toBeNull();
   });
 });
 

@@ -37,6 +37,11 @@ export interface AuthPort {
 export interface OfficeSession {
   displayName: string;
   getIdToken(): Promise<string | null>;
+  /**
+   * Ends the auth session (#66). Optional because only the office offers it;
+   * the port's listener then reports `null` and `AuthGate` shows the login.
+   */
+  signOut?(): Promise<void>;
 }
 
 /**

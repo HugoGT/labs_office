@@ -1090,6 +1090,50 @@ describe('OfficeShell: screen share (#20)', () => {
 
     renderInSpace();
 
-    expect(screen.getByRole('button', { name: 'Dejar de compartir' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '🖥️ Dejar de compartir' })).toBeEnabled();
+  });
+});
+
+describe('OfficeShell: exit controls (#66)', () => {
+  it('"Cerrar sesión" signs out through the session', async () => {
+    const user = userEvent.setup();
+    const signOut = vi.fn(async () => undefined);
+    render(
+      <OfficeShell session={{ displayName: 'Ana Torres', getIdToken: async () => null, signOut }} />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /Cerrar sesión/ }));
+
+    expect(signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed sign out is told, not swallowed', async () => {
+    const user = userEvent.setup();
+    const signOut = vi.fn(async () => {
+      throw new Error('network');
+    });
+    render(
+      <OfficeShell session={{ displayName: 'Ana Torres', getIdToken: async () => null, signOut }} />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /Cerrar sesión/ }));
+
+    expect(await screen.findByText('No se pudo cerrar la sesión')).toBeInTheDocument();
+  });
+
+  it('without a session there is no "Cerrar sesión"', () => {
+    render(<OfficeShell onLeaveOffice={vi.fn()} />);
+
+    expect(screen.queryByRole('button', { name: /Cerrar sesión/ })).not.toBeInTheDocument();
+  });
+
+  it('"Salir de la oficina" hands leaving to whoever mounted the office', async () => {
+    const user = userEvent.setup();
+    const onLeaveOffice = vi.fn();
+    render(<OfficeShell onLeaveOffice={onLeaveOffice} />);
+
+    await user.click(screen.getByRole('button', { name: /Salir de la oficina/ }));
+
+    expect(onLeaveOffice).toHaveBeenCalledTimes(1);
   });
 });
