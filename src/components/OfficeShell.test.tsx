@@ -769,6 +769,52 @@ describe('OfficeShell: config de espacios servida (#7, slice 3)', () => {
 });
 
 /**
+ * Convergencia tras el drift de un par (#74, PR3a). `OfficeScene` ya acota el
+ * evento a UNA vez por version distinta (`OfficeScene.browser.test.ts`); lo
+ * que se prueba aqui es que este componente REACCIONA a cada evento que le
+ * llega releyendo las dos listas, sin filtrar nada por su cuenta.
+ */
+describe('OfficeShell: convergencia tras drift de un par (#74, PR3a)', () => {
+  const SESION = { displayName: 'Ana Torres', getIdToken: async () => 'id-token' };
+
+  it('un "spacesstale" del puente relee tanto /desks como /spaces', async () => {
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([]);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('sin red en jsdom'));
+
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(1));
+    const spacesCallsBeforeStale = fetchSpy.mock.calls.length;
+
+    act(() => bridge.emit('spacesstale', { version: 'version-editada' }));
+
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(fetchSpy.mock.calls.length).toBeGreaterThan(spacesCallsBeforeStale),
+    );
+
+    fetchSpy.mockRestore();
+  });
+
+  it('dos versiones distintas relean dos veces, una por evento recibido', async () => {
+    // El acotado a "una vez por version" vive en la escena, no aqui: este
+    // componente no vuelve a filtrar lo que ya le llega filtrado.
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([]);
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('sin red en jsdom'));
+
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(1));
+
+    act(() => bridge.emit('spacesstale', { version: 'version-a' }));
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(2));
+
+    act(() => bridge.emit('spacesstale', { version: 'version-b' }));
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(3));
+  });
+});
+
+/**
  * Los escritorios asignables llegando a la escena y repartiendose (#7, slice
  * 5). Lo que se prueba aqui es el CABLEADO: que este componente resuelve la
  * lista y la manda por comando, y que un clic en el canvas acaba en la

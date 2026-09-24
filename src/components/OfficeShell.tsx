@@ -101,7 +101,7 @@ export function OfficeShell({ session = null, onLeaveOffice }: OfficeShellProps)
    * inaudible con quien ya tenga la servida, que es el modo de fallo seguro
    * que `proximityAudio.ts` garantiza -- nunca audibilidad de un solo sentido.
    */
-  const { config: spacesConfig } = useSpacesConfig(endpoint);
+  const { config: spacesConfig, refresh: refreshSpaces } = useSpacesConfig(endpoint);
 
   useEffect(() => {
     if (spacesConfig === null) return;
@@ -121,6 +121,18 @@ export function OfficeShell({ session = null, onLeaveOffice }: OfficeShellProps)
    * directorio, y todo lo demas sigue igual.
    */
   const { desks, claim, release, refresh: refreshDesks } = useDesks(endpoint, session);
+  /**
+   * Convergencia tras el drift de un par (#74, PR3a): la escena ya acota
+   * `spacesstale` a una vez por version distinta observada
+   * (`createStaleSpacesVersionTracker`), asi que este componente no vuelve a
+   * filtrar nada -- cada evento que le llega relee AMBAS listas. Las dos y no
+   * solo una: un escritorio movido cambia el hash igual que una sala, y
+   * `useDesks`/`useSpacesConfig` no comparten cache entre si.
+   */
+  useEffect(() => bridge.on('spacesstale', () => {
+    refreshDesks();
+    refreshSpaces();
+  }), [bridge, refreshDesks, refreshSpaces]);
   /**
    * Lo que el editor de decoracion necesita saber (#7, slice 6). Vive aqui por
    * lo mismo que `desks`: quien sabe donde esta el servidor es este
