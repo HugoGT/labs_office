@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { PROX_RADIUS } from './mapData';
+import { PROX_RADIUS, type SpaceArea } from './mapData';
+import { detectSpace } from './proximity';
 import {
   audiblePeers,
   reconcileSubscriptions,
@@ -521,6 +522,64 @@ describe('audiblePeers: predicado mutuo de spacesVersion (#7, D4)', () => {
     };
 
     expect(audiblePeers({ self, peers: [peer], radius: PROX_RADIUS })).toEqual([]);
+  });
+});
+
+/**
+ * Cadena cliente completa para dos escenarios de la spec (S6, cobertura de
+ * remediacion): `space-configuration` "Delete an occupied room" y
+ * `desk-assignment` "Delete a desk deletes its cubicle space" prometen que
+ * quien ocupaba el espacio borrado "queda desasignado (piso abierto) para
+ * audio". El mecanismo es el MISMO para ambos casos -- un cubiculo de
+ * escritorio es un `Space` opaco identico a una sala para `detectSpace`/
+ * `audiblePeers` (#7, D2) -- asi que una sola prueba cubre las dos ramas.
+ *
+ * Honestidad de nivel: la config de espacios NO tiene recarga en vivo (fuera
+ * de alcance, documentado en el diseno). Esta prueba NO simula el evento de
+ * borrado en si (eso es responsabilidad del servidor + `spacesconfig`/
+ * refetch, ya cubierto por otras suites); modela el estado DESPUES de que el
+ * cliente ya obtuvo una config que ya no incluye la sala/cubiculo borrado, y
+ * verifica que la cadena pura `detectSpace` -> `audiblePeers` deja a ese
+ * ocupante en la regla de radio de pasillo, exactamente como si siempre
+ * hubiese estado en piso abierto.
+ */
+describe('detectSpace + audiblePeers: ocupante de un espacio borrado queda desasignado (space-configuration "Delete an occupied room", desk-assignment "Delete a desk deletes its cubicle space")', () => {
+  it('tras el borrado, detectSpace ya no encuentra el espacio y audiblePeers aplica la regla de radio de pasillo', () => {
+    const salaBorrada: SpaceArea = { id: 'sala-1', name: 'Sala 1', x: 100, y: 100, w: 50, h: 50 };
+    const posicionDelOcupante = { x: salaBorrada.x + 1, y: salaBorrada.y + 1 };
+
+    // Antes del borrado: el ocupante SI pertenece a la sala.
+    expect(detectSpace(posicionDelOcupante, [salaBorrada])).toEqual(salaBorrada);
+
+    // Config servida tras el borrado (S6: incluye el caso desk-assignment,
+    // donde el cubiculo emparejado desaparece igual que una sala): la lista
+    // ya no trae la entrada, sin importar si era `kind: "room"` o `"desk"`.
+    const configTrasBorrado: readonly SpaceArea[] = [];
+    const spaceIdDelOcupante = detectSpace(posicionDelOcupante, configTrasBorrado)?.id ?? null;
+    expect(spaceIdDelOcupante).toBeNull();
+
+    const ocupante: AudibleInput['self'] = {
+      sessionId: 'ocupante',
+      x: posicionDelOcupante.x,
+      y: posicionDelOcupante.y,
+      spaceId: spaceIdDelOcupante,
+      spacesVersion: V1,
+      status: 'g',
+    };
+    // Un colega en piso abierto, dentro del radio: SOLO audible si la regla
+    // de radio de pasillo (no la de sala/cubiculo) es la que ahora aplica.
+    const colegaDePasillo: AudioPeer = {
+      sessionId: 'colega',
+      x: posicionDelOcupante.x + PROX_RADIUS - 1,
+      y: posicionDelOcupante.y,
+      spaceId: null,
+      spacesVersion: V1,
+      status: 'g',
+    };
+
+    expect(audiblePeers({ self: ocupante, peers: [colegaDePasillo], radius: PROX_RADIUS })).toEqual([
+      'colega',
+    ]);
   });
 });
 
