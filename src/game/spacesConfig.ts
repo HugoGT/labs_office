@@ -118,6 +118,36 @@ function parseSpacesConfig(payload: unknown): SpacesConfig | null {
   return { spaces, version: body.version };
 }
 
+/**
+ * Predicado de obsolescencia para la version de un PAR (#74, PR3a), acotado a
+ * UN refetch por version distinta observada. `spacesVersion` no es un push de
+ * cambios de layout -- es el propio cliente reportando su hash (ver
+ * `OfficeScene.applySpacesConfig`) -- asi que un par con una version distinta
+ * es la unica senal de que hay algo nuevo que pedir. `Set`-backed: una vez
+ * marcada obsoleta una version, DEJA de estarlo para siempre, sin importar
+ * cuantos pares distintos la repitan despues (no es un refetch por par, es
+ * uno por version).
+ *
+ * La version incorporada (`BUILT_IN_SPACES_VERSION`) nunca se marca obsoleta:
+ * es lo que reporta quien no tiene nada mejor que ofrecer (503, red caida), y
+ * pedirle `/spaces` a ese par no traeria una config mas nueva, solo repetiria
+ * la misma llamada que ya fallo para el.
+ */
+export type StaleSpacesVersionPredicate = (peerVersion: string, myVersion: string) => boolean;
+
+export function createStaleSpacesVersionTracker(): StaleSpacesVersionPredicate {
+  const seen = new Set<string>();
+
+  return function isStaleSpacesVersion(peerVersion, myVersion) {
+    if (peerVersion === myVersion) return false;
+    if (peerVersion === BUILT_IN_SPACES_VERSION) return false;
+    if (seen.has(peerVersion)) return false;
+
+    seen.add(peerVersion);
+    return true;
+  };
+}
+
 export interface FetchSpacesConfigOptions {
   url: string;
   fetchImpl?: typeof fetch;

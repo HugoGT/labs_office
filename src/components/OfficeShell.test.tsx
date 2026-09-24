@@ -1,6 +1,10 @@
 import { act, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createDeskAdminClient } from '../dashboard/deskAdminClient';
+import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
+import { createSpacesAdminClient } from '../dashboard/spacesAdminClient';
+import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import { createGame } from '../game/createGame';
 import { fetchDeskCatalog, fetchMyDeskItems, saveMyDesk } from '../game/deskDecorClient';
 import type { DeskDecorAsset, PlacedDeskItem } from '../game/deskDecorPort';
@@ -9,6 +13,7 @@ import type { OfficeDesk } from '../game/desksPort';
 import { BUILT_IN_SPACES_VERSION } from '../game/mapData';
 import { DEFAULT_NAME } from '../game/officeProtocol';
 import { RecordingError, getRecordingUrl, startRecording, stopRecording } from '../game/recordingClient';
+import { useOfficeAdminRole } from '../hooks/useOfficeAdminRole';
 import { useProximityAudio } from '../hooks/useProximityAudio';
 import { OfficeShell } from './OfficeShell';
 
@@ -35,6 +40,10 @@ vi.mock('../game/deskDecorClient', async (importOriginal) => ({
 // igual que `createGame` se mockea para aislar Phaser (mismo patron ya
 // establecido en este archivo).
 vi.mock('../hooks/useProximityAudio', () => ({ useProximityAudio: vi.fn() }));
+// El sondeo de rol ya tiene su propia suite (`useOfficeAdminRole.test.ts`,
+// PR3a); aqui solo importa que `OfficeShell` lo llame y ofrezca (o no) la
+// seccion de administracion segun lo que devuelva (#74, PR3c).
+vi.mock('../hooks/useOfficeAdminRole', () => ({ useOfficeAdminRole: vi.fn() }));
 // The only module that talks to `/recordings/*` (#5): whether a room is being
 // recorded comes from the bridge, never from these calls.
 vi.mock('../game/recordingClient', async (importOriginal) => ({
@@ -43,9 +52,50 @@ vi.mock('../game/recordingClient', async (importOriginal) => ({
   stopRecording: vi.fn(),
   getRecordingUrl: vi.fn(),
 }));
+// Unico modulo que habla con `/admin/desks` (#74, PR3c): doblarlo aqui evita
+// que la seccion de administracion, montada de forma diferida, dispare una
+// peticion real al entrar en modo edicion.
+vi.mock('../dashboard/deskAdminClient', () => ({ createDeskAdminClient: vi.fn() }));
+// Mismo criterio con `/admin/spaces` (#74, PR4): tanto la seccion de salas
+// como el cruce escritorio<->sala de `useLayoutEditor.ts` lo necesitan
+// SIEMPRE que hay rol admin, no solo cuando se entra a editar salas.
+vi.mock('../dashboard/spacesAdminClient', () => ({ createSpacesAdminClient: vi.fn() }));
 
 const createGameMock = vi.mocked(createGame);
 const useProximityAudioMock = vi.mocked(useProximityAudio);
+const useOfficeAdminRoleMock = vi.mocked(useOfficeAdminRole);
+const createDeskAdminClientMock = vi.mocked(createDeskAdminClient);
+const createSpacesAdminClientMock = vi.mocked(createSpacesAdminClient);
+
+/** Puerto falso por defecto (#74, PR3c): sin llamadas en vuelo salvo que un test las controle. */
+function fakeDeskAdminPort(overrides: Partial<DeskAdminPort> = {}): DeskAdminPort {
+  return {
+    listDesks: vi.fn(async () => []),
+    createDesk: vi.fn(async () => {
+      throw new Error('not stubbed');
+    }),
+    updateDesk: vi.fn(async () => {
+      throw new Error('not stubbed');
+    }),
+    deleteDesk: vi.fn(async () => undefined),
+    ...overrides,
+  };
+}
+
+/** Puerto falso por defecto (#74, PR4): sin salas salvo que un test las controle. */
+function fakeSpacesAdminPort(overrides: Partial<SpacesAdminPort> = {}): SpacesAdminPort {
+  return {
+    listSpaces: vi.fn(async () => []),
+    createSpace: vi.fn(async () => {
+      throw new Error('not stubbed');
+    }),
+    updateSpace: vi.fn(async () => {
+      throw new Error('not stubbed');
+    }),
+    deleteSpace: vi.fn(async () => undefined),
+    ...overrides,
+  };
+}
 
 /**
  * Base del valor que devuelve el hook mockeado. Cada test sobreescribe solo
@@ -89,6 +139,11 @@ beforeEach(() => {
   // Por defecto: apagado y sin LiveKit disponible (#321 decision 2 y 3) — los
   // tests que necesitan otro estado lo sobreescriben explicitamente.
   useProximityAudioMock.mockReturnValue(proximityAudio());
+  // Por defecto nadie administra: los tests de la seccion de escritorios
+  // sobreescriben esto explicitamente.
+  useOfficeAdminRoleMock.mockReturnValue(null);
+  createDeskAdminClientMock.mockReturnValue(fakeDeskAdminPort());
+  createSpacesAdminClientMock.mockReturnValue(fakeSpacesAdminPort());
 });
 
 describe('OfficeShell', () => {
@@ -769,6 +824,52 @@ describe('OfficeShell: config de espacios servida (#7, slice 3)', () => {
 });
 
 /**
+ * Convergencia tras el drift de un par (#74, PR3a). `OfficeScene` ya acota el
+ * evento a UNA vez por version distinta (`OfficeScene.browser.test.ts`); lo
+ * que se prueba aqui es que este componente REACCIONA a cada evento que le
+ * llega releyendo las dos listas, sin filtrar nada por su cuenta.
+ */
+describe('OfficeShell: convergencia tras drift de un par (#74, PR3a)', () => {
+  const SESION = { displayName: 'Ana Torres', getIdToken: async () => 'id-token' };
+
+  it('un "spacesstale" del puente relee tanto /desks como /spaces', async () => {
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([]);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('sin red en jsdom'));
+
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(1));
+    const spacesCallsBeforeStale = fetchSpy.mock.calls.length;
+
+    act(() => bridge.emit('spacesstale', { version: 'version-editada' }));
+
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(fetchSpy.mock.calls.length).toBeGreaterThan(spacesCallsBeforeStale),
+    );
+
+    fetchSpy.mockRestore();
+  });
+
+  it('dos versiones distintas relean dos veces, una por evento recibido', async () => {
+    // El acotado a "una vez por version" vive en la escena, no aqui: este
+    // componente no vuelve a filtrar lo que ya le llega filtrado.
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([]);
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('sin red en jsdom'));
+
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(1));
+
+    act(() => bridge.emit('spacesstale', { version: 'version-a' }));
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(2));
+
+    act(() => bridge.emit('spacesstale', { version: 'version-b' }));
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(3));
+  });
+});
+
+/**
  * Los escritorios asignables llegando a la escena y repartiendose (#7, slice
  * 5). Lo que se prueba aqui es el CABLEADO: que este componente resuelve la
  * lista y la manda por comando, y que un clic en el canvas acaba en la
@@ -1135,5 +1236,214 @@ describe('OfficeShell: exit controls (#66)', () => {
     await user.click(screen.getByRole('button', { name: /Salir de la oficina/ }));
 
     expect(onLeaveOffice).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('OfficeShell: barra lateral de personas (#74)', () => {
+  it('el roster que llega por el puente se ve al expandir la barra lateral', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('roster', { peers: [{ sessionId: 'a', name: 'Ana Remota', status: 'g' }] }));
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    expect(screen.getByText(/Ana Remota/)).toBeInTheDocument();
+  });
+
+  it('el nombre propio que ve la barra inferior es el mismo que se antepone en la barra lateral', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell session={{ displayName: 'Ana Torres', getIdToken: async () => null }} />);
+
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    expect(screen.getAllByText(/Ana Torres/).length).toBeGreaterThan(0);
+  });
+
+  it('abrir el editor de decoracion colapsa la barra lateral, aunque estuviese expandida', async () => {
+    const SESION = { displayName: 'Ana Torres', getIdToken: async () => 'id-token' };
+    const MIA: OfficeDesk = {
+      id: 'id-mesa',
+      label: 'Mesa 4',
+      x: 320,
+      y: 384,
+      w: 96,
+      h: 96,
+      occupant: { id: 'id-ana', displayName: 'Ana Torres', items: [] },
+      mine: true,
+    };
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([MIA]);
+    vi.mocked(fetchDeskCatalog).mockResolvedValue([{ id: 'p', name: 'Planta', kind: 'plant', textureKey: 'plant-small' }]);
+    vi.mocked(fetchMyDeskItems).mockResolvedValue([]);
+
+    const user = userEvent.setup();
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+    expect(screen.getByRole('button', { name: /Personas/ })).toHaveAttribute('aria-expanded', 'true');
+    await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
+
+    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+    await user.click(await screen.findByRole('button', { name: /Decorar/ }));
+
+    expect(screen.getByRole('button', { name: /Personas/ })).toHaveAttribute('aria-expanded', 'false');
+  });
+});
+
+/**
+ * Exclusividad entre el modo edicion de layout y `DeskDecorEditor`, y
+ * suspension de coger/soltar sitio mientras se edita (#74, PR3c). El puerto
+ * de escritorios ya se dobla en el `beforeEach` de arriba; aqui cada test solo
+ * fija el rol y, si hace falta, controla la lista que ve el editor.
+ */
+describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
+  const SESION = { displayName: 'Ana Torres', getIdToken: async () => 'id-token' };
+
+  const MIA: OfficeDesk = {
+    id: 'id-mesa',
+    label: 'Mesa 4',
+    x: 320,
+    y: 384,
+    w: 96,
+    h: 96,
+    occupant: { id: 'id-ana', displayName: 'Ana Torres', items: [] },
+    mine: true,
+  };
+
+  const MESA_ADMIN: AdminDesk = { id: 'id-mesa', label: 'Mesa 4', x: 10, y: 10, w: 3, h: 3, occupant: null };
+
+  beforeEach(() => {
+    useOfficeAdminRoleMock.mockReturnValue('admin');
+    createDeskAdminClientMock.mockReturnValue(fakeDeskAdminPort({ listDesks: vi.fn(async () => [MESA_ADMIN]) }));
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([MIA]);
+    vi.mocked(fetchDeskCatalog).mockResolvedValue([
+      { id: 'p', name: 'Planta', kind: 'plant', textureKey: 'plant-small' },
+    ]);
+    vi.mocked(fetchMyDeskItems).mockResolvedValue([]);
+  });
+
+  async function openSidebar(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+  }
+
+  it('con rol admin, la seccion de escritorios se ofrece en el sidebar', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell session={SESION} />);
+    await openSidebar(user);
+
+    expect(await screen.findByRole('button', { name: /Editar escritorios/ })).toBeInTheDocument();
+  });
+
+  it('con rol admin, la seccion de salas TAMBIEN se ofrece en el sidebar (#74, PR4)', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell session={SESION} />);
+    await openSidebar(user);
+
+    expect(await screen.findByRole('button', { name: /Editar salas/ })).toBeInTheDocument();
+  });
+
+  it('entrar en modo edicion de SALAS tambien cierra el editor de decoracion (#74, PR4)', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
+    await act(async () => {});
+    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+    await user.click(await screen.findByRole('button', { name: /Decorar/ }));
+    expect(await screen.findByRole('dialog', { name: /Mesa 4/ })).toBeInTheDocument();
+
+    await openSidebar(user);
+    await user.click(await screen.findByRole('button', { name: /Editar salas/ }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('entrar en modo edicion cierra el editor de decoracion si estaba abierto', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
+    await act(async () => {});
+    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+    await user.click(await screen.findByRole('button', { name: /Decorar/ }));
+    expect(await screen.findByRole('dialog', { name: /Mesa 4/ })).toBeInTheDocument();
+
+    await openSidebar(user);
+    await user.click(await screen.findByRole('button', { name: /Editar escritorios/ }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  /**
+   * El sentido inverso ("abrir decorar sale de edicion") no es alcanzable por
+   * interaccion real en ESTE integration test: la unica puerta a
+   * `DeskDecorEditor` es un `deskclick` de accion `release`, y ese mismo
+   * evento esta SUPRIMIDO mientras se edita (ver el siguiente test, y
+   * `OfficeScene.ts`'s `layoutEditing` de PR3b) -- "tratar el clic como
+   * seleccion de edicion" significa que NINGUN `deskclick` sale, ni el de
+   * `claim`/`release` ni el que ofreceria "Decorar". El cableado
+   * `forceExitLayoutEditing` existe igual como defensa en profundidad, y su
+   * propio efecto SI se prueba de punta a punta en
+   * `DeskEditorSection.test.tsx` ("forceExit saca del modo edicion aunque
+   * estuviese activo"), donde forzarlo no depende de ese camino irrealizable.
+   */
+  it('mientras se edita, un deskclick no abre el editor de decoracion (la unica puerta a el)', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await openSidebar(user);
+    await user.click(await screen.findByRole('button', { name: /Editar escritorios/ }));
+    expect(screen.getByRole('button', { name: /Salir/ })).toBeInTheDocument();
+    await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
+    await act(async () => {});
+
+    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+
+    expect(screen.queryByRole('button', { name: /Decorar/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Salir/ })).toBeInTheDocument();
+  });
+
+  it('mientras se edita, un deskclick del propio escritorio no ofrece dejarlo ni decorarlo', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await openSidebar(user);
+    await user.click(await screen.findByRole('button', { name: /Editar escritorios/ }));
+    await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
+
+    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+
+    expect(screen.queryByRole('button', { name: /Dejarlo/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Decorar/ })).not.toBeInTheDocument();
+    expect(vi.mocked(releaseDesk)).not.toHaveBeenCalled();
+  });
+
+  /**
+   * `layoutEditing` en `OfficeShell` viene de `onLayoutEditingChange`, que
+   * `OfficeLayoutEditor` ya calcula como "cualquiera de las dos secciones"
+   * (deski O sala). Este test es el mismo que "mientras se edita, un
+   * deskclick no abre..." de arriba pero entrando por SALAS en vez de
+   * escritorios (#74, PR4 correction): prueba que ese "cualquiera de las
+   * dos" de verdad suspende `deskclick` tambien cuando quien edita es la
+   * seccion de salas, no solo la de escritorios.
+   */
+  it('mientras se edita SALAS, un deskclick no abre el editor de decoracion ni ofrece dejar el sitio', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await openSidebar(user);
+    await user.click(await screen.findByRole('button', { name: /Editar salas/ }));
+    expect(screen.getByRole('button', { name: /Salir/ })).toBeInTheDocument();
+    await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
+    await act(async () => {});
+
+    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+
+    expect(screen.queryByRole('button', { name: /Dejarlo/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Decorar/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(vi.mocked(releaseDesk)).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /Salir/ })).toBeInTheDocument();
   });
 });

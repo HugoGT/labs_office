@@ -10,6 +10,8 @@ import {
 import { mergeColliderRects } from './colliderMerge';
 import { deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
 import type { OfficeDesk } from './desksPort';
+import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH } from './hudLayout';
+import { LayoutEditLayer } from './LayoutEditLayer';
 import { placeFurniture, placeNature, placeZoneLabels, renderGround } from './mapBuilder';
 import {
   BUILT_IN_SPACES,
@@ -26,6 +28,7 @@ import {
   DEFAULT_NAME,
   DEFAULT_STATUS,
   facingFrom,
+  isPresenceStatus,
   type Facing,
   type PresenceStatus,
 } from './officeProtocol';
@@ -38,6 +41,8 @@ import {
 import { createRemoteAvatarRegistry, type RemoteAvatarRegistry } from './remoteAvatars';
 import { createPhaserAvatarSink, type RemoteAvatarContainer } from './remoteAvatarSink';
 import { detectSpace, nearbyKey } from './proximity';
+import { createRosterTracker, type RosterPeer, type RosterTracker } from './roster';
+import { createStaleSpacesVersionTracker } from './spacesConfig';
 import { audiblePeers, type AudioPeer } from './proximityAudio';
 import {
   buildTerrainGrid,
@@ -53,9 +58,6 @@ export const OFFICE_SCENE_KEY = 'office';
 
 const PLAYER_SPEED = 230;
 const PROXIMITY_TICK_MS = 250;
-const MINIMAP_WIDTH = 200;
-const MINIMAP_HEIGHT = 140;
-const MINIMAP_MARGIN = 14;
 /**
  * Los tres estados en los que se puede ver un escritorio asignable (#7, slice
  * 5). Es lo unico que los distingue, y basta: un tinte se lee de un vistazo
@@ -104,6 +106,20 @@ interface WasdKeys {
 }
 
 /**
+ * Reduce un snapshot remoto (con posicion) a lo unico que el roster mira
+ * (#74). Mismo limite de confianza que `statusOf` en `remoteAvatarSink.ts`:
+ * el servidor ya sanea el estado, pero un codigo desconocido no debe dejar la
+ * lista sin poder pintar un color.
+ */
+function rosterPeerOf(snapshot: { sessionId: string; name: string; status: string }): RosterPeer {
+  return {
+    sessionId: snapshot.sessionId,
+    name: snapshot.name,
+    status: isPresenceStatus(snapshot.status) ? snapshot.status : DEFAULT_STATUS,
+  };
+}
+
+/**
  * Escena principal de la oficina virtual, portada de `OfficeScene`
  * (`prototype/js/app.js:67-96,325-501`). Orquesta texturas, mapa, jugador,
  * input, camaras, colisiones y el ciclo de proximidad/salas. Los unicos
@@ -147,6 +163,21 @@ export class OfficeScene extends Phaser.Scene {
   private unsubscribeSpacesConfig?: () => void;
   private unsubscribeDesks?: () => void;
   private unsubscribeReconnect?: () => void;
+  private unsubscribeLayoutEdit?: () => void;
+  /**
+   * Capa de overlays del editor de layout (#74, PR3b). Se crea siempre en
+   * `create()`, este o no activo el modo edicion -- igual que `remotes`/
+   * `roster`, cuesta poco y evita un `undefined` que cada punto de uso
+   * tendria que comprobar.
+   */
+  private layoutEditLayer?: LayoutEditLayer;
+  /**
+   * Si el modo edicion esta activo (#74, PR3b): la UNICA cosa que la escena
+   * necesita saber de el para suspender claim/release en `drawDesk`. Todo lo
+   * demas -- que dibujar, que es pickable, donde va el ghost -- lo sigue
+   * `layoutEditLayer` por su cuenta desde el mismo comando `layoutedit`.
+   */
+  private layoutEditing = false;
   /**
    * Todo lo dibujado del ultimo comando `desks` (#7, slice 5): zonas,
    * etiquetas y decoracion. Se guarda entero porque cada lista nueva sustituye
@@ -163,6 +194,20 @@ export class OfficeScene extends Phaser.Scene {
 
   private readonly options: OfficeSceneOptions;
   private remotes?: RemoteAvatarRegistry<RemoteAvatarContainer>;
+  /**
+   * Roster de personas conectadas (#74). Creado junto a `this.remotes`, con el
+   * mismo `ignoreSessionId`: la lista visible en el HUD nunca incluye al
+   * propio jugador.
+   */
+  private roster?: RosterTracker;
+  /**
+   * Detector de drift de `spacesVersion` entre pares (#74, PR3a). A
+   * diferencia de `remotes`/`roster`, vive DESDE EL ARRANQUE y no se recrea
+   * por conexion: el limite de un aviso por version distinta debe sobrevivir
+   * a una reconexion, o un `resync` volveria a avisar de una version que ya
+   * se atendio.
+   */
+  private readonly staleSpacesVersion = createStaleSpacesVersionTracker();
   private connection?: OfficeConnection;
   private facing: Facing = DEFAULT_FACING;
   /** Estado de presencia del jugador local; React es quien lo cambia (ver `setStatus`). */
@@ -251,6 +296,14 @@ export class OfficeScene extends Phaser.Scene {
       this.applyDesks(desks);
     });
 
+    // #74, PR3b. La capa dibuja overlays y traduce input por su cuenta
+    // (mismo comando); la escena solo se queda con el flag que necesita para
+    // gatear `drawDesk`.
+    this.layoutEditLayer = new LayoutEditLayer(this, this.bridge);
+    this.unsubscribeLayoutEdit = this.bridge.onCommand('layoutedit', (command) => {
+      this.layoutEditing = command !== null;
+    });
+
     // #52: reintento manual, el ultimo recurso cuando la escalera automatica
     // de `reconnectPolicy` ya se rindio. No reutiliza la sesion caida -- de eso
     // se encarga el envoltorio mientras le quedan intentos -- sino que entra de
@@ -278,6 +331,7 @@ export class OfficeScene extends Phaser.Scene {
       // misma razon que en un resync: el join reparte los suyos y mezclarlos
       // dejaria fantasmas que ningun `onRemove` va a retirar.
       this.remotes?.clear();
+      this.roster?.clear();
       void this.connectToOffice().finally(() => {
         this.reconnecting = false;
       });
@@ -305,7 +359,10 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeSpacesConfig?.();
       this.unsubscribeDesks?.();
       this.unsubscribeReconnect?.();
+      this.unsubscribeLayoutEdit?.();
+      this.layoutEditLayer?.destroy();
       this.remotes?.clear();
+      this.roster?.clear();
       void this.connection?.leave();
       this.connection = undefined;
     });
@@ -355,11 +412,18 @@ export class OfficeScene extends Phaser.Scene {
         handlers: {
           onAdd: (snapshot) => {
             this.remotes?.upsert(snapshot);
+            this.roster?.upsert(rosterPeerOf(snapshot));
+            this.checkSpacesVersionDrift(snapshot.spacesVersion);
             this.emitPresence();
           },
-          onChange: (snapshot) => this.remotes?.upsert(snapshot),
+          onChange: (snapshot) => {
+            this.remotes?.upsert(snapshot);
+            this.roster?.upsert(rosterPeerOf(snapshot));
+            this.checkSpacesVersionDrift(snapshot.spacesVersion);
+          },
           onRemove: (sessionId) => {
             this.remotes?.remove(sessionId);
+            this.roster?.remove(sessionId);
             this.emitPresence();
           },
           // Issue #2: mensajes sueltos del servidor, no estado sincronizado
@@ -393,6 +457,9 @@ export class OfficeScene extends Phaser.Scene {
       // `peermenu` al clicar un peer real; toque mecanico, la escena ya guarda
       // `this.bridge` desde su constructor.
       this.remotes = createRemoteAvatarRegistry(createPhaserAvatarSink(this, this.bridge), {
+        ignoreSessionId: connection.sessionId,
+      });
+      this.roster = createRosterTracker((peers) => this.bridge.emit('roster', { peers }), {
         ignoreSessionId: connection.sessionId,
       });
       this.emitPresence('connected');
@@ -430,6 +497,7 @@ export class OfficeScene extends Phaser.Scene {
    */
   private resyncAfterReconnect(): void {
     this.remotes?.clear();
+    this.roster?.clear();
     this.lastVoiceKey = '';
   }
 
@@ -506,6 +574,19 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
+   * Un par reporto una version distinta de la mia (#74, PR3a): sea porque
+   * acaba de llegar con ella (`onAdd`) o porque un par ya conectado la cambio
+   * (`onChange`, tras una edicion en oficina o desde `/dashboard` -- las dos
+   * publican por el mismo estado replicado). El predicado decide si vale la
+   * pena avisar; `OfficeShell` es quien de verdad relee `/spaces` y `/desks`.
+   */
+  private checkSpacesVersionDrift(peerVersion: string): void {
+    if (this.staleSpacesVersion(peerVersion, this.spacesVersion)) {
+      this.bridge.emit('spacesstale', { version: peerVersion });
+    }
+  }
+
+  /**
    * Adopta la lista de escritorios asignables servida (#7, slice 5). Llega por
    * comando poco despues de arrancar, y otra vez cada vez que alguien coge o
    * suelta un sitio.
@@ -577,6 +658,11 @@ export class OfficeScene extends Phaser.Scene {
 
     zone.setInteractive();
     zone.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      // #74, PR3b: en modo edicion, un clic sobre un escritorio es cosa del
+      // editor de layout (`layoutEditLayer`, que ya escucha su propio
+      // `pointerdown` global), no una oferta de coger/soltar. Se retorna sin
+      // `stopPropagation` para no tragarse el clic que el editor necesita.
+      if (this.layoutEditing) return;
       // Mismo `stopPropagation` que el clic de un peer: sin el, el
       // `pointerdown` de la escena cerraria el menu contextual a la vez.
       pointer.event.stopPropagation();
@@ -716,6 +802,11 @@ export class OfficeScene extends Phaser.Scene {
     this.input.on(
       'pointerdown',
       (_pointer: Phaser.Input.Pointer, currentlyOver: Phaser.GameObjects.GameObject[]) => {
+        // #74, PR3b: un clic en el mapa en modo edicion es una confirmacion
+        // de colocacion para `layoutEditLayer` (su propio listener global en
+        // el mismo `this.input`), no una peticion de cerrar el menu
+        // contextual -- que ademas no puede haber abierto mientras se edita.
+        if (this.layoutEditing) return;
         if (!currentlyOver || currentlyOver.length === 0) {
           this.bridge.emit('closemenu', undefined);
         }

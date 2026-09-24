@@ -629,6 +629,131 @@ describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
   });
 });
 
+describe('OfficeScene: roster de personas conectadas via el puente (#74)', () => {
+  it('un alta remota emite "roster" con ese par', async () => {
+    const bridge = createOfficeBridge();
+    const roster: OfficeEventMap['roster'][] = [];
+    bridge.on('roster', (r) => roster.push(r));
+    const connector = fakeConnector();
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', name: 'Ana Remota', status: 'g' }));
+
+    expect(roster.at(-1)).toEqual({
+      peers: [{ sessionId: 'par-1', name: 'Ana Remota', status: 'g' }],
+    });
+  });
+
+  it('no incluye al propio jugador aunque el servidor lo repita en el estado (mismo ignoreSessionId que los avatares)', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const bridge = createOfficeBridge();
+    const roster: OfficeEventMap['roster'][] = [];
+    bridge.on('roster', (r) => roster.push(r));
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'mi-sesion', name: DEFAULT_NAME }));
+
+    expect(roster).toHaveLength(0);
+  });
+
+  it('una baja remota emite "roster" sin ese par', async () => {
+    const connector = fakeConnector();
+    const bridge = createOfficeBridge();
+    const roster: OfficeEventMap['roster'][] = [];
+    bridge.on('roster', (r) => roster.push(r));
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'se-va', name: 'Se Va' }));
+    await vi.waitFor(() => expect(roster.at(-1)?.peers).toHaveLength(1));
+
+    connector.handlers()!.onRemove('se-va');
+
+    expect(roster.at(-1)).toEqual({ peers: [] });
+  });
+
+  it('un onChange de solo posicion no reemite "roster"', async () => {
+    const connector = fakeConnector();
+    const bridge = createOfficeBridge();
+    const roster: OfficeEventMap['roster'][] = [];
+    bridge.on('roster', (r) => roster.push(r));
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', name: 'Ana Remota', status: 'g' }));
+    const emissionsAfterAdd = roster.length;
+
+    connector.handlers()!.onChange(
+      remoteSnapshot({ sessionId: 'par-1', name: 'Ana Remota', status: 'g', x: 999, y: 999 }),
+    );
+
+    expect(roster).toHaveLength(emissionsAfterAdd);
+  });
+});
+
+describe('OfficeScene: drift de spacesVersion entre pares (#74, PR3a)', () => {
+  it('un alta con una version distinta de la mia emite "spacesstale" con esa version', async () => {
+    const connector = fakeConnector();
+    const bridge = createOfficeBridge();
+    const stale: OfficeEventMap['spacesstale'][] = [];
+    bridge.on('spacesstale', (s) => stale.push(s));
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+
+    connector.handlers()!.onAdd(remoteSnapshot({ spacesVersion: 'version-editada' }));
+
+    expect(stale).toEqual([{ version: 'version-editada' }]);
+  });
+
+  it('la MISMA version que la mia no emite nada: nadie esta desacompasado', async () => {
+    const connector = fakeConnector();
+    const bridge = createOfficeBridge();
+    const stale: OfficeEventMap['spacesstale'][] = [];
+    bridge.on('spacesstale', (s) => stale.push(s));
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+
+    // `remoteSnapshot()` por defecto ya lleva `BUILT_IN_SPACES_VERSION`, la
+    // misma con la que arranca la escena.
+    connector.handlers()!.onAdd(remoteSnapshot());
+
+    expect(stale).toHaveLength(0);
+  });
+
+  it('un onChange con version distinta TAMBIEN emite: cubre la edicion de un par ya conectado', async () => {
+    // Una edicion desde /dashboard o desde el editor en oficina desacompasa a
+    // un par YA conectado -- su alta ya paso, asi que solo un onChange puede
+    // avisar de esto.
+    const connector = fakeConnector();
+    const bridge = createOfficeBridge();
+    const stale: OfficeEventMap['spacesstale'][] = [];
+    bridge.on('spacesstale', (s) => stale.push(s));
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1' }));
+
+    connector.handlers()!.onChange(remoteSnapshot({ sessionId: 'par-1', spacesVersion: 'version-editada' }));
+
+    expect(stale).toEqual([{ version: 'version-editada' }]);
+  });
+
+  it('una version ya vista no vuelve a emitir, la reporte el mismo par o uno distinto', async () => {
+    const connector = fakeConnector();
+    const bridge = createOfficeBridge();
+    const stale: OfficeEventMap['spacesstale'][] = [];
+    bridge.on('spacesstale', (s) => stale.push(s));
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', spacesVersion: 'version-editada' }));
+
+    connector
+      .handlers()!
+      .onAdd(remoteSnapshot({ sessionId: 'par-2', spacesVersion: 'version-editada' }));
+
+    expect(stale).toEqual([{ version: 'version-editada' }]);
+  });
+});
+
 describe('OfficeScene: comando setStatus via el puente (#1)', () => {
   it('repinta el punto de estado del jugador local', async () => {
     const bridge = createOfficeBridge();
@@ -1783,5 +1908,76 @@ describe('OfficeScene: reconexion (issue #52)', () => {
     await vi.waitFor(() => expect(connector.connectCount()).toBe(2), LOOP_WAIT);
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(connector.connectCount()).toBe(2);
+  });
+});
+
+/**
+ * Modo edicion de layout (#74, PR3b): la escena solo sabe SI se esta
+ * editando (para suspender claim/release) y delega el resto -- overlays,
+ * ghost, pick/place -- en `LayoutEditLayer`, ya probado por su cuenta en
+ * `LayoutEditLayer.browser.test.ts`. Lo que falta cubrir aqui es la
+ * integracion: que el flag realmente gatea el clic de escritorio, y que el
+ * `pointerdown` global de la escena de verdad llega a la capa.
+ */
+describe('OfficeScene: modo edicion de layout (#74, PR3b)', () => {
+  function fakePointer(worldX = 0, worldY = 0): Phaser.Input.Pointer {
+    return { worldX, worldY, event: { stopPropagation: vi.fn() } } as unknown as Phaser.Input.Pointer;
+  }
+
+  function editableDesk(): OfficeDesk {
+    return {
+      id: 'id-mesa',
+      label: 'Mesa 4',
+      x: 10 * TILE,
+      y: 12 * TILE,
+      w: 3 * TILE,
+      h: 3 * TILE,
+      occupant: null,
+      mine: false,
+    };
+  }
+
+  it('mientras se edita, clicar un escritorio no ofrece cogerlo ni soltarlo', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const clicks: unknown[] = [];
+    bridge.on('deskclick', (payload) => clicks.push(payload));
+
+    bridge.emitCommand('layoutedit', { pickable: [], selectedId: null, placing: null });
+    bridge.emitCommand('desks', { desks: [editableDesk()] });
+
+    const zone = scene.children.getByName(deskZoneName('id-mesa')) as Phaser.GameObjects.Rectangle;
+    zone.emit('pointerdown', fakePointer());
+
+    expect(clicks).toEqual([]);
+  });
+
+  it('fuera del modo edicion, el clic del escritorio sigue ofreciendo cogerlo (sin regresion)', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const clicks: unknown[] = [];
+    bridge.on('deskclick', (payload) => clicks.push(payload));
+
+    bridge.emitCommand('desks', { desks: [editableDesk()] });
+    const zone = scene.children.getByName(deskZoneName('id-mesa')) as Phaser.GameObjects.Rectangle;
+    zone.emit('pointerdown', fakePointer());
+
+    expect(clicks).toEqual([{ deskId: 'id-mesa', label: 'Mesa 4', action: 'claim' }]);
+  });
+
+  it('un clic en el mapa mientras se coloca emite layoutplace con la posicion encajada', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const placements: unknown[] = [];
+    bridge.on('layoutplace', (payload) => placements.push(payload));
+
+    bridge.emitCommand('layoutedit', {
+      pickable: [],
+      selectedId: null,
+      placing: { w: 3, h: 3, obstacles: [] },
+    });
+    scene.input.emit('pointerdown', fakePointer(10 * TILE, 10 * TILE));
+
+    expect(placements).toEqual([{ tx: 9, ty: 9, valid: true }]);
   });
 });

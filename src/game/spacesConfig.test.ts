@@ -11,7 +11,12 @@
 
 import { describe, expect, it } from 'vitest';
 import { BUILT_IN_SPACES, BUILT_IN_SPACES_VERSION, TILE } from './mapData';
-import { BUILT_IN_SPACES_CONFIG, deriveSpacesUrl, fetchSpacesConfig } from './spacesConfig';
+import {
+  BUILT_IN_SPACES_CONFIG,
+  createStaleSpacesVersionTracker,
+  deriveSpacesUrl,
+  fetchSpacesConfig,
+} from './spacesConfig';
 
 /** Una fila tal cual la sirve `GET /spaces`: en TILES, sin campos de dibujo. */
 function servedSpace(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -178,5 +183,42 @@ describe('fetchSpacesConfig', () => {
   it('el fallback incorporado son los espacios y la version que ya usaba el cliente', () => {
     expect(BUILT_IN_SPACES_CONFIG.spaces).toBe(BUILT_IN_SPACES);
     expect(BUILT_IN_SPACES_CONFIG.version).toBe(BUILT_IN_SPACES_VERSION);
+  });
+});
+
+describe('createStaleSpacesVersionTracker (#74)', () => {
+  it('una version de un par distinta de la mia es obsoleta', () => {
+    const isStale = createStaleSpacesVersionTracker();
+    expect(isStale('version-nueva', 'version-mia')).toBe(true);
+  });
+
+  it('la misma version que la mia nunca es obsoleta', () => {
+    const isStale = createStaleSpacesVersionTracker();
+    expect(isStale('version-mia', 'version-mia')).toBe(false);
+  });
+
+  it('la version incorporada nunca es obsoleta: nadie tiene a quien pedirle una mejor', () => {
+    const isStale = createStaleSpacesVersionTracker();
+    expect(isStale(BUILT_IN_SPACES_VERSION, 'version-mia')).toBe(false);
+  });
+
+  it('una version ya vista no vuelve a marcarse obsoleta', () => {
+    const isStale = createStaleSpacesVersionTracker();
+    expect(isStale('version-nueva', 'version-mia')).toBe(true);
+    expect(isStale('version-nueva', 'version-mia')).toBe(false);
+  });
+
+  it('un peer distinto reportando la MISMA version ya vista tampoco vuelve a marcarla', () => {
+    const isStale = createStaleSpacesVersionTracker();
+    expect(isStale('version-nueva', 'version-mia')).toBe(true);
+    // Simula un segundo par reportando la misma version: acotado a UN refetch
+    // por version distinta, no por par.
+    expect(isStale('version-nueva', 'version-mia')).toBe(false);
+  });
+
+  it('versiones distintas se marcan cada una la primera vez', () => {
+    const isStale = createStaleSpacesVersionTracker();
+    expect(isStale('version-a', 'version-mia')).toBe(true);
+    expect(isStale('version-b', 'version-mia')).toBe(true);
   });
 });

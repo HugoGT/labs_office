@@ -14,12 +14,13 @@
  * La espera esta acotada: `fetchSpacesConfig` nunca lanza y tiene plazo propio,
  * asi que este enganche siempre acaba entregando algo.
  *
- * No hay recarga en vivo en esta slice: un cambio del Admin llega en la
- * siguiente recarga del cliente. Mientras tanto, el par desacompasado queda
- * mutuamente inaudible, que es seguro pero silencioso.
+ * `refresh()` (#74, PR3a) cierra el hueco que la nota de arriba daba por
+ * definitivo: `OfficeShell` lo llama cuando un par reporta una version
+ * distinta de la mia (ver `spacesConfig.createStaleSpacesVersionTracker`),
+ * asi que un cambio del Admin ya NO espera a una recarga manual.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   BUILT_IN_SPACES_CONFIG,
   deriveSpacesUrl,
@@ -41,16 +42,29 @@ export interface UseSpacesConfigOptions {
  */
 const DEFAULT_FETCH_CONFIG = (url: string): Promise<SpacesConfig> => fetchSpacesConfig({ url });
 
+export interface UseSpacesConfigResult {
+  /** `null` mientras no se sabe. Ver la cabecera. */
+  config: SpacesConfig | null;
+  /** Vuelve a pedir `/spaces` (#74, PR3a). Sin degradar: ver la cabecera. */
+  refresh: () => void;
+}
+
 export function useSpacesConfig(
   officeEndpoint: string | null,
   { fetchConfig = DEFAULT_FETCH_CONFIG }: UseSpacesConfigOptions = {},
-): SpacesConfig | null {
+): UseSpacesConfigResult {
   // La oficina en solitario no tiene servidor al que preguntar, asi que su
   // config es la incorporada desde el primer render: esperar a un fetch que no
   // va a ocurrir la dejaria sin arrancar.
   const [config, setConfig] = useState<SpacesConfig | null>(
     officeEndpoint === null ? BUILT_IN_SPACES_CONFIG : null,
   );
+  /**
+   * Mismo contador que `useDesks.reads` y misma razon: cada relectura es un
+   * valor nuevo, no una llamada suelta, para que la siga lanzando el MISMO
+   * efecto -- que ya sabe cancelarse al desmontar o al cambiar de endpoint.
+   */
+  const [reads, setReads] = useState(0);
 
   useEffect(() => {
     if (officeEndpoint === null) {
@@ -63,13 +77,26 @@ export function useSpacesConfig(
       const resolved = await fetchConfig(deriveSpacesUrl(officeEndpoint));
       // Una respuesta que llega tras desmontar (o tras cambiar de endpoint) no
       // toca el estado: el fetch tardio de un endpoint viejo pisaria al nuevo.
-      if (!cancelled) setConfig(resolved);
+      if (cancelled) return;
+      // Chequeo de IDENTIDAD y no de forma (#74, PR3a): `fetchSpacesConfig`
+      // nunca lanza, asi que un refetch fallido (red caida, 503) devuelve el
+      // mismo objeto `BUILT_IN_SPACES_CONFIG` en vez de tirar. Adoptarlo aqui
+      // desharia una config servida real por la incorporada, que es una
+      // degradacion peor que simplemente no haber refrescado -- ver la nota de
+      // "Failed refresh keeps the current config" en la spec.
+      if (resolved === BUILT_IN_SPACES_CONFIG && config !== null) return;
+      setConfig(resolved);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [officeEndpoint, fetchConfig]);
+    // `config` no entra en las dependencias a proposito: solo se lee dentro
+    // del efecto para el chequeo de identidad de arriba, y anadirlo relanzaria
+    // el fetch cada vez que este mismo efecto acaba de fijar una config nueva.
+  }, [officeEndpoint, fetchConfig, reads]);
 
-  return config;
+  const refresh = useCallback(() => setReads((count) => count + 1), []);
+
+  return { config, refresh };
 }

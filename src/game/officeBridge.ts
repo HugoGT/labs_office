@@ -12,8 +12,10 @@
  */
 
 import type { OfficeDesk } from './desksPort';
+import type { LayoutEditCommand } from './layoutEditor';
 import type { SpaceArea } from './mapData';
 import type { PresenceStatus, RecordingReadyPayload } from './officeProtocol';
+import type { RosterPeer } from './roster';
 import type { ActiveRecordingSnapshot, OfficeConnectionState } from './officeRoomClient';
 
 export interface OfficeEventMap {
@@ -127,6 +129,38 @@ export interface OfficeEventMap {
    * watched or downloaded (#58). Only participants receive it.
    */
   recordingready: RecordingReadyPayload;
+  /**
+   * Roster de personas conectadas (#74), reenviado tal cual desde
+   * `createRosterTracker`. Nunca incluye al propio jugador (mismo
+   * `ignoreSessionId` que `remoteAvatars.ts`): el HUD ya conoce su propio
+   * nombre y estado por otra via y los antepone en `rosterView.ts`.
+   */
+  roster: { peers: readonly RosterPeer[] };
+  /**
+   * Un par reporto una `spacesVersion` distinta de la mia (#74, PR3a):
+   * `spacesVersion` NO es un push de cambios de layout, es el propio cliente
+   * reportando su hash (ver `OfficeScene.applySpacesConfig`), asi que un par
+   * desacompasado es la unica senal de que hay algo nuevo que pedir. Cubre
+   * TANTO una edicion en la oficina como una hecha desde `/dashboard`, porque
+   * las dos publican por el mismo estado replicado. `OfficeShell` reacciona
+   * releyendo `/spaces` y `/desks`, como mucho una vez por version distinta
+   * (`createStaleSpacesVersionTracker` en `spacesConfig.ts`).
+   */
+  spacesstale: { version: string };
+  /**
+   * Se clico un rectangulo pickable del editor de layout (#74, PR3b): un
+   * escritorio o sala existente, elegible para mover o borrar. Lo emite
+   * `LayoutEditLayer`, no la escena -- es la capa quien sabe que rectangulo
+   * dibujado corresponde a que id.
+   */
+  layoutpick: { id: string };
+  /**
+   * Se confirmo una colocacion (crear o mover) en el editor de layout (#74,
+   * PR3b): la posicion ya viene encajada a tile y con su validez de
+   * pre-chequeo resuelta (`layoutEditor.isPlacementValid`) -- el reductor en
+   * React decide que hacer con eso, incluido pedirselo al servidor.
+   */
+  layoutplace: { tx: number; ty: number; valid: boolean };
 }
 
 export interface OfficeCommandMap {
@@ -209,6 +243,15 @@ export interface OfficeCommandMap {
    * HUD reabriese una sesion distinta de la que se cayo.
    */
   reconnect: undefined;
+  /**
+   * Estado del editor de layout que la escena debe seguir (#74, PR3b),
+   * proyectado por `layoutEditor.toLayoutEditCommand` desde el reductor que
+   * React posee. `null` = salir del modo edicion: sin esto la escena no
+   * tendria forma de saber que ya no hay nada pickable ni ghost que mostrar,
+   * mismo motivo por el que `spacesconfig` viaja como comando y no como
+   * opcion de construccion.
+   */
+  layoutedit: LayoutEditCommand | null;
 }
 
 export interface OfficeBridge {

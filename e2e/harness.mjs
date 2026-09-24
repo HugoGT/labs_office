@@ -467,6 +467,41 @@ export async function waitForRoomIndicator(page, roomName) {
   );
 }
 
+/** #74: opens the collapsible people sidebar, closed by default. */
+export async function openSidebar(page) {
+  await page.getByRole('button', { name: /Personas/ }).click();
+}
+
+/** #74: types into the sidebar's search box, replacing whatever was there. */
+export async function searchSidebar(page, query) {
+  await page.getByRole('searchbox', { name: /Buscar personas/ }).fill(query);
+}
+
+/** #74: waits until the sidebar roster shows exactly `count` PEERS, excluding
+ * the self entry. Self is identified by the `(tú)` suffix `OfficeSidebar.tsx`
+ * renders for it, not by list position: `rosterView.ts` filters self by the
+ * search query too, so self is not always present to subtract by index. */
+export async function waitForSidebarPeerCount(page, count) {
+  await page.waitForFunction(
+    (n) => {
+      const items = Array.from(document.querySelectorAll('#office-shell [role="complementary"] li'));
+      const peers = items.filter((li) => !(li.textContent ?? '').includes('(tú)'));
+      return peers.length === n;
+    },
+    count,
+    { timeout: READINESS_DEADLINE_MS },
+  );
+}
+
+/** #74: peer names currently visible in the sidebar roster (self included, first). */
+export async function sidebarRosterNames(page) {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll('#office-shell [role="complementary"] li')).map(
+      (li) => li.textContent ?? '',
+    ),
+  );
+}
+
 /** D7 W6: mic/cam buttons carry `disabled` + the exact degradation title
  * (`BottomBar.tsx`'s `AUDIO_UNAVAILABLE_TITLE`) while LiveKit is unreachable.
  * Attribute checks can't key on `#office-shell` textContent alone (D7's other

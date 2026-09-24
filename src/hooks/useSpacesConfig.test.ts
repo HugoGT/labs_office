@@ -30,7 +30,7 @@ describe('useSpacesConfig', () => {
     // esperar en vez de arrancar con el fallback y cambiar despues: arrancar y
     // cambiar recrearia Phaser entero, y arrancar sin cambiar dejaria a este
     // cliente en una version distinta de la del resto para siempre.
-    expect(result.current).toBeNull();
+    expect(result.current.config).toBeNull();
   });
 
   it('entrega la config servida cuando llega', async () => {
@@ -38,7 +38,7 @@ describe('useSpacesConfig', () => {
       useSpacesConfig('ws://oficina.local:2567', { fetchConfig: async () => SERVIDA }),
     );
 
-    await waitFor(() => expect(result.current).toEqual(SERVIDA));
+    await waitFor(() => expect(result.current.config).toEqual(SERVIDA));
   });
 
   it('deriva la url de /spaces del endpoint de la oficina', async () => {
@@ -58,7 +58,7 @@ describe('useSpacesConfig', () => {
 
     const { result } = renderHook(() => useSpacesConfig(null, { fetchConfig }));
 
-    expect(result.current).toBe(BUILT_IN_SPACES_CONFIG);
+    expect(result.current.config).toBe(BUILT_IN_SPACES_CONFIG);
     expect(fetchConfig).not.toHaveBeenCalled();
   });
 
@@ -68,7 +68,7 @@ describe('useSpacesConfig', () => {
     const { rerender, result } = renderHook(() =>
       useSpacesConfig('ws://oficina.local:2567', { fetchConfig }),
     );
-    await waitFor(() => expect(result.current).not.toBeNull());
+    await waitFor(() => expect(result.current.config).not.toBeNull());
     rerender();
     rerender();
 
@@ -102,10 +102,50 @@ describe('useSpacesConfig', () => {
     real.mockResolvedValue(SERVIDA);
 
     const { rerender, result } = renderHook(() => useSpacesConfig('ws://oficina.local:2567'));
-    await waitFor(() => expect(result.current).not.toBeNull());
+    await waitFor(() => expect(result.current.config).not.toBeNull());
     rerender();
     rerender();
 
     expect(real).toHaveBeenCalledTimes(1);
+  });
+
+  describe('refresh (#74, PR3a: convergencia tras drift de un par)', () => {
+    it('refresh() vuelve a pedir /spaces y adopta la nueva config', async () => {
+      const NUEVA: SpacesConfig = { spaces: [], version: 'version-editada' };
+      const fetchConfig = vi.fn(async () => SERVIDA);
+
+      const { result } = renderHook(() =>
+        useSpacesConfig('ws://oficina.local:2567', { fetchConfig }),
+      );
+      await waitFor(() => expect(result.current.config).toEqual(SERVIDA));
+
+      fetchConfig.mockResolvedValueOnce(NUEVA);
+      result.current.refresh();
+
+      await waitFor(() => expect(result.current.config).toEqual(NUEVA));
+      expect(fetchConfig).toHaveBeenCalledTimes(2);
+    });
+
+    it('un refresh que cae al fallback (identity check) NO degrada la config actual', async () => {
+      // `fetchSpacesConfig` nunca lanza: un refetch fallido devuelve el mismo
+      // objeto `BUILT_IN_SPACES_CONFIG` (identidad, no forma). Adoptarlo aqui
+      // desharia una config servida real por la incorporada, que es peor que
+      // no haber refrescado.
+      const fetchConfig = vi.fn(async () => SERVIDA);
+
+      const { result } = renderHook(() =>
+        useSpacesConfig('ws://oficina.local:2567', { fetchConfig }),
+      );
+      await waitFor(() => expect(result.current.config).toEqual(SERVIDA));
+
+      fetchConfig.mockResolvedValueOnce(BUILT_IN_SPACES_CONFIG);
+      result.current.refresh();
+
+      // Nada que esperar con `waitFor`: la propiedad es que NO cambia. Un tic
+      // de microtareas basta para que el `then` fallido, de haberlo, ya corriera.
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(result.current.config).toEqual(SERVIDA);
+    });
   });
 });
