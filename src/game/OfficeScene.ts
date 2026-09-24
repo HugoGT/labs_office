@@ -11,6 +11,7 @@ import { mergeColliderRects } from './colliderMerge';
 import { deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH } from './hudLayout';
+import { LayoutEditLayer } from './LayoutEditLayer';
 import { placeFurniture, placeNature, placeZoneLabels, renderGround } from './mapBuilder';
 import {
   BUILT_IN_SPACES,
@@ -162,6 +163,21 @@ export class OfficeScene extends Phaser.Scene {
   private unsubscribeSpacesConfig?: () => void;
   private unsubscribeDesks?: () => void;
   private unsubscribeReconnect?: () => void;
+  private unsubscribeLayoutEdit?: () => void;
+  /**
+   * Capa de overlays del editor de layout (#74, PR3b). Se crea siempre en
+   * `create()`, este o no activo el modo edicion -- igual que `remotes`/
+   * `roster`, cuesta poco y evita un `undefined` que cada punto de uso
+   * tendria que comprobar.
+   */
+  private layoutEditLayer?: LayoutEditLayer;
+  /**
+   * Si el modo edicion esta activo (#74, PR3b): la UNICA cosa que la escena
+   * necesita saber de el para suspender claim/release en `drawDesk`. Todo lo
+   * demas -- que dibujar, que es pickable, donde va el ghost -- lo sigue
+   * `layoutEditLayer` por su cuenta desde el mismo comando `layoutedit`.
+   */
+  private layoutEditing = false;
   /**
    * Todo lo dibujado del ultimo comando `desks` (#7, slice 5): zonas,
    * etiquetas y decoracion. Se guarda entero porque cada lista nueva sustituye
@@ -280,6 +296,14 @@ export class OfficeScene extends Phaser.Scene {
       this.applyDesks(desks);
     });
 
+    // #74, PR3b. La capa dibuja overlays y traduce input por su cuenta
+    // (mismo comando); la escena solo se queda con el flag que necesita para
+    // gatear `drawDesk`.
+    this.layoutEditLayer = new LayoutEditLayer(this, this.bridge);
+    this.unsubscribeLayoutEdit = this.bridge.onCommand('layoutedit', (command) => {
+      this.layoutEditing = command !== null;
+    });
+
     // #52: reintento manual, el ultimo recurso cuando la escalera automatica
     // de `reconnectPolicy` ya se rindio. No reutiliza la sesion caida -- de eso
     // se encarga el envoltorio mientras le quedan intentos -- sino que entra de
@@ -335,6 +359,8 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeSpacesConfig?.();
       this.unsubscribeDesks?.();
       this.unsubscribeReconnect?.();
+      this.unsubscribeLayoutEdit?.();
+      this.layoutEditLayer?.destroy();
       this.remotes?.clear();
       this.roster?.clear();
       void this.connection?.leave();
@@ -632,6 +658,11 @@ export class OfficeScene extends Phaser.Scene {
 
     zone.setInteractive();
     zone.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      // #74, PR3b: en modo edicion, un clic sobre un escritorio es cosa del
+      // editor de layout (`layoutEditLayer`, que ya escucha su propio
+      // `pointerdown` global), no una oferta de coger/soltar. Se retorna sin
+      // `stopPropagation` para no tragarse el clic que el editor necesita.
+      if (this.layoutEditing) return;
       // Mismo `stopPropagation` que el clic de un peer: sin el, el
       // `pointerdown` de la escena cerraria el menu contextual a la vez.
       pointer.event.stopPropagation();
@@ -771,6 +802,11 @@ export class OfficeScene extends Phaser.Scene {
     this.input.on(
       'pointerdown',
       (_pointer: Phaser.Input.Pointer, currentlyOver: Phaser.GameObjects.GameObject[]) => {
+        // #74, PR3b: un clic en el mapa en modo edicion es una confirmacion
+        // de colocacion para `layoutEditLayer` (su propio listener global en
+        // el mismo `this.input`), no una peticion de cerrar el menu
+        // contextual -- que ademas no puede haber abierto mientras se edita.
+        if (this.layoutEditing) return;
         if (!currentlyOver || currentlyOver.length === 0) {
           this.bridge.emit('closemenu', undefined);
         }

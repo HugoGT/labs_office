@@ -1910,3 +1910,74 @@ describe('OfficeScene: reconexion (issue #52)', () => {
     expect(connector.connectCount()).toBe(2);
   });
 });
+
+/**
+ * Modo edicion de layout (#74, PR3b): la escena solo sabe SI se esta
+ * editando (para suspender claim/release) y delega el resto -- overlays,
+ * ghost, pick/place -- en `LayoutEditLayer`, ya probado por su cuenta en
+ * `LayoutEditLayer.browser.test.ts`. Lo que falta cubrir aqui es la
+ * integracion: que el flag realmente gatea el clic de escritorio, y que el
+ * `pointerdown` global de la escena de verdad llega a la capa.
+ */
+describe('OfficeScene: modo edicion de layout (#74, PR3b)', () => {
+  function fakePointer(worldX = 0, worldY = 0): Phaser.Input.Pointer {
+    return { worldX, worldY, event: { stopPropagation: vi.fn() } } as unknown as Phaser.Input.Pointer;
+  }
+
+  function editableDesk(): OfficeDesk {
+    return {
+      id: 'id-mesa',
+      label: 'Mesa 4',
+      x: 10 * TILE,
+      y: 12 * TILE,
+      w: 3 * TILE,
+      h: 3 * TILE,
+      occupant: null,
+      mine: false,
+    };
+  }
+
+  it('mientras se edita, clicar un escritorio no ofrece cogerlo ni soltarlo', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const clicks: unknown[] = [];
+    bridge.on('deskclick', (payload) => clicks.push(payload));
+
+    bridge.emitCommand('layoutedit', { pickable: [], selectedId: null, placing: null });
+    bridge.emitCommand('desks', { desks: [editableDesk()] });
+
+    const zone = scene.children.getByName(deskZoneName('id-mesa')) as Phaser.GameObjects.Rectangle;
+    zone.emit('pointerdown', fakePointer());
+
+    expect(clicks).toEqual([]);
+  });
+
+  it('fuera del modo edicion, el clic del escritorio sigue ofreciendo cogerlo (sin regresion)', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const clicks: unknown[] = [];
+    bridge.on('deskclick', (payload) => clicks.push(payload));
+
+    bridge.emitCommand('desks', { desks: [editableDesk()] });
+    const zone = scene.children.getByName(deskZoneName('id-mesa')) as Phaser.GameObjects.Rectangle;
+    zone.emit('pointerdown', fakePointer());
+
+    expect(clicks).toEqual([{ deskId: 'id-mesa', label: 'Mesa 4', action: 'claim' }]);
+  });
+
+  it('un clic en el mapa mientras se coloca emite layoutplace con la posicion encajada', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const placements: unknown[] = [];
+    bridge.on('layoutplace', (payload) => placements.push(payload));
+
+    bridge.emitCommand('layoutedit', {
+      pickable: [],
+      selectedId: null,
+      placing: { w: 3, h: 3, obstacles: [] },
+    });
+    scene.input.emit('pointerdown', fakePointer(10 * TILE, 10 * TILE));
+
+    expect(placements).toEqual([{ tx: 9, ty: 9, valid: true }]);
+  });
+});
