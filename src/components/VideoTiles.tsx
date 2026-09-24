@@ -104,7 +104,7 @@ export function VideoTiles({
         : 'Pantalla compartida';
 
   // Stage layout (#20), like Google Meet: while a share is up it takes the
-  // big stage and the tiles move to a column on the right. The stage comes
+  // big stage and the tiles move to a column on the left. The stage comes
   // BEFORE the bar in the same position whether it exists or not, and the
   // bar only changes its `data-layout`, so opening or closing the stage never
   // remounts a tile (and the `<video>` hanging from it). The stage is keyed

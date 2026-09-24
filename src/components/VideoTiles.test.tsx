@@ -203,7 +203,7 @@ describe('VideoTiles: gate de video de pares por sala (issue #17, D8)', () => {
 /**
  * Stage layout (#20), like Google Meet: while someone in the space shares,
  * the share takes the big stage and the participant tiles move to a column
- * on the right. With nobody sharing, the row stays exactly as it was.
+ * on the left. With nobody sharing, the row stays exactly as it was.
  */
 describe('VideoTiles: screen share stage (#20)', () => {
   const IN_SPACE = {

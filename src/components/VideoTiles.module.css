@@ -19,13 +19,13 @@
 
 /*
  * Side column (#20): while a screen share holds the stage, the same tiles
- * stack on the right, like Google Meet. Only the placement changes, never the
- * tile size, so moving between row and column never resizes a video.
+ * stack on the left, the same side the recording template puts the cameras,
+ * so the app and the recorded video look alike. Only the placement changes,
+ * never the tile size, so moving between row and column never resizes a video.
  */
 .bar[data-layout='column'] {
   top: 12px;
-  right: 12px;
-  left: auto;
+  left: 12px;
   bottom: 88px;
   transform: none;
   flex-direction: column;
@@ -43,8 +43,8 @@
 .stage {
   position: fixed;
   top: 12px;
-  left: 12px;
-  right: 200px;
+  left: 200px;
+  right: 12px;
   bottom: 88px;
   pointer-events: none;
   z-index: 5;
