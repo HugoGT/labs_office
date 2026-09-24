@@ -1,5 +1,8 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { OfficeSession } from '../auth/authPort';
+import { createDeskAdminClient } from '../dashboard/deskAdminClient';
+import type { DeskAdminPort } from '../dashboard/deskAdminPort';
+import { resolveOfficeApiBaseUrl } from '../dashboard/officeApiBaseUrl';
 import { resolveLivekitConfig } from '../game/livekitEndpoint';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
@@ -17,6 +20,7 @@ import type { RosterPeer } from '../game/roster';
 import { useCallInvitations } from '../hooks/useCallInvitations';
 import { useDeskDecor } from '../hooks/useDeskDecor';
 import { useDesks } from '../hooks/useDesks';
+import { useOfficeAdminRole } from '../hooks/useOfficeAdminRole';
 import { useOfficeBridge } from '../hooks/useOfficeBridge';
 import { useProximityAudio } from '../hooks/useProximityAudio';
 import { useRoster } from '../hooks/useRoster';
@@ -85,6 +89,34 @@ export function OfficeShell({ session = null, onLeaveOffice }: OfficeShellProps)
     }),
   );
   /**
+   * Sondeo de rol para el sidebar (#74, PR3a wired en PR3c): cosmetico, la
+   * guarda de verdad sigue en el servidor. Se llama con `endpoint`/`session`
+   * directamente, como `useDesks`/`useSpacesConfig`, en vez de envolverlo en
+   * `useState`: no hay nada caro que memoizar aqui, el propio hook ya evita
+   * pedir de mas.
+   */
+  const adminRole = useOfficeAdminRole(endpoint, session);
+  /**
+   * Puerto de administracion de escritorios para la seccion del sidebar (#74,
+   * PR3c). Construido UNA vez, mismo motivo que `endpoint`/`livekitConfig`: un
+   * puerto nuevo por render cambiaria la identidad que `useLayoutEditor`
+   * recibe y reiniciaria su efecto de lectura en bucle.
+   */
+  const [deskAdminPort] = useState<DeskAdminPort | null>(() => {
+    const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
+    if (apiBaseUrl === null) return null;
+    return createDeskAdminClient({ baseUrl: apiBaseUrl, getIdToken: () => session?.getIdToken() ?? Promise.resolve(null) });
+  });
+  /**
+   * Exclusividad entre el modo edicion de layout y `DeskDecorEditor` (#74,
+   * PR3c): los dos reclaman el mismo rincon del HUD y el mismo escritorio
+   * clicable, asi que solo uno puede estar activo. `DeskEditorSection` (via
+   * `OfficeSidebar`) reporta sus cambios aqui; el sentido inverso -- salir de
+   * edicion cuando se abre decorar -- viaja hacia abajo con
+   * `forceExitLayoutEditing`, mismo patron rising-edge que `forceCollapsed`.
+   */
+  const [layoutEditing, setLayoutEditing] = useState(false);
+  /**
    * Config de espacios servida (#7, slice 3). Vive aqui y no en `GameCanvas`
    * por la misma razon que `endpoint`: quien sabe donde esta el servidor es
    * este componente, y `GameCanvas` no inventa urls por su cuenta.
@@ -145,6 +177,13 @@ export function OfficeShell({ session = null, onLeaveOffice }: OfficeShellProps)
    */
   const decor = useDeskDecor(endpoint, session);
   const [decorOpen, setDecorOpen] = useState(false);
+
+  // Entrar en modo edicion cierra el editor de decoracion si estaba abierto
+  // (#74, PR3c): el sentido inverso vive en `DeskEditorSection` via
+  // `forceExitLayoutEditing={decorOpen}`, mas abajo en el JSX.
+  useEffect(() => {
+    if (layoutEditing) setDecorOpen(false);
+  }, [layoutEditing]);
   /**
    * El escritorio propio, que es el UNICO que se puede decorar. Lo contesta el
    * servidor (`OfficeDesk.mine`) y no se deduce comparando nombres: ver
@@ -507,10 +546,16 @@ export function OfficeShell({ session = null, onLeaveOffice }: OfficeShellProps)
    * facil de hacer sin querer -- basta con volver a clicar el propio sitio --
    * y una pantalla de confirmacion propia seria una superficie nueva para una
    * sola pregunta.
+   *
+   * `layoutEditing` se comprueba primero (#74, PR3c): la escena YA suprime
+   * `deskclick` mientras se edita (`OfficeScene.ts`, PR3b), pero esta guarda
+   * es defensa en profundidad -- y la unica que un test de este archivo, sin
+   * Phaser real, puede ejercer emitiendo el evento directamente.
    */
   useEffect(
     () =>
       bridge.on('deskclick', ({ deskId, label, action }) => {
+        if (layoutEditing) return;
         if (action === 'claim') {
           void takeDesk(deskId, label);
           return;
@@ -540,7 +585,7 @@ export function OfficeShell({ session = null, onLeaveOffice }: OfficeShellProps)
           </>,
         );
       }),
-    [bridge, takeDesk, leaveDesk, decorReady],
+    [bridge, takeDesk, leaveDesk, decorReady, layoutEditing],
   );
 
   /**
@@ -606,7 +651,18 @@ export function OfficeShell({ session = null, onLeaveOffice }: OfficeShellProps)
       />
       <RecBadge visible={recording} />
       <ContextMenu menu={menu} onAction={handleMenuAction} onClose={closeMenu} />
-      <OfficeSidebar self={rosterSelf} peers={rosterPeers} forceCollapsed={decorOpen} />
+      <OfficeSidebar
+        self={rosterSelf}
+        peers={rosterPeers}
+        forceCollapsed={decorOpen}
+        role={adminRole}
+        bridge={bridge}
+        desks={deskAdminPort}
+        refreshDesks={refreshDesks}
+        refreshSpaces={refreshSpaces}
+        onLayoutEditingChange={setLayoutEditing}
+        forceExitLayoutEditing={decorOpen}
+      />
       <BottomBar
         playerName={session?.displayName ?? DEFAULT_NAME}
         micOn={micOn}
