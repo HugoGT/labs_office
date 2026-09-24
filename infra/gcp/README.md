@@ -1,7 +1,8 @@
 # Despliegue en GCP - entorno `test`
 
 Infraestructura del entorno desplegado de la oficina virtual (issue #3). Una sola
-VM de Compute Engine corre los cinco contenedores; Terraform crea todo lo demás.
+VM de Compute Engine corre los siete contenedores (caddy, web, colyseus, livekit,
+postgres, redis, egress); Terraform crea todo lo demás.
 
 **Solo existe el entorno `test`.** Producción espera a que aterrice el login con
 Google (issue #8): hasta entonces no hay nada que proteger detrás de una
@@ -14,7 +15,7 @@ Todo está parametrizado por `var.env` para que el segundo entorno sea un
 | Ruta | Qué es |
 |---|---|
 | `terraform/` | Estado de la infraestructura: VM, red, IAM, registro de imágenes, secretos, federación con GitHub |
-| `docker-compose.yml` | Los cinco servicios de la VM. Vive en `/opt/office/` |
+| `docker-compose.yml` | Los siete servicios de la VM (caddy, web, colyseus, livekit, postgres, redis, egress). Vive en `/opt/office/` |
 | `Caddyfile` | Terminación TLS y multiplexado de los tres hostnames sobre el 443 (issue #19) |
 | `livekit.yaml.tpl` | Configuración del SFU. Plantilla: los hostnames se sustituyen al desplegar |
 | `startup-script.sh` | Arranque de la VM: instala Docker y el script de operación |

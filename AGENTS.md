@@ -25,6 +25,7 @@ server/src/             Node server, run directly by Node type stripping (no bui
   admin/ decor/ desks/ directory/ recording/ spaces/   feature modules (ports and adapters)
   directory/schema.sql  Postgres schema, applied idempotently on every start
 e2e/                    real-process E2E harness (node:test + Playwright)
+docker-compose.yml      full local stack (include of infra/livekit + postgres + server + web images)
 infra/livekit/          local LiveKit + Egress + Redis docker compose stack
 infra/gcp/              deployed `test` environment: Terraform, VM compose, Caddy, office-deploy
 prototype/              pre-port standalone prototype, reference only (not built, not run)
@@ -74,7 +75,17 @@ First-time browser setup: `pnpm exec playwright install chromium` (CI uses `--wi
 
 Pre-PR check that mirrors CI: `pnpm typecheck && pnpm test:all && pnpm test:harness && pnpm build && pnpm build:e2e && pnpm test:e2e`.
 
-Local LiveKit stack (optional, for real audio/video and recording):
+Full local stack (whole app in Docker, no hot reload; reads only the root `.env`):
+
+```sh
+cp .env.example .env   # set LIVEKIT_API_SECRET (openssl rand -hex 32)
+docker compose up -d --build   # SPA http://localhost:8080, server :2567, Postgres :5432 (loopback)
+docker compose down -v         # -v also wipes the Postgres volume
+```
+
+It builds `infra/gcp/docker/{colyseus,web}.Dockerfile`, pulls LiveKit + Egress + Redis in with Compose `include` of `infra/livekit/docker-compose.yml` (interpolated from the root `.env`), and hardcodes `DATABASE_URL`, `LIVEKIT_URL` (browser, `ws://localhost:7880`), `LIVEKIT_API_URL` (`http://livekit:7880`) and `VITE_COLYSEUS_URL` (`ws://localhost:2567`). Same ports as the hybrid path below: run one or the other.
+
+Local LiveKit stack only (optional, for real audio/video and recording with the app on the host):
 
 ```sh
 cp infra/livekit/.env.example infra/livekit/.env   # regenerate LIVEKIT_API_SECRET
@@ -95,10 +106,9 @@ Root `.env` (server and SPA):
 - CORS: `ALLOWED_ORIGIN`
 - Auth: `FIREBASE_PROJECT_ID`
 - Directory: `DATABASE_URL`, `BOOTSTRAP_SUPERADMIN_EMAIL`, `IDENTITY_ADMIN_CREDENTIALS`, `IDENTITY_ADMIN_USE_METADATA`
+- Server process: `PORT`, `NODE_ENV`, `OFFICE_RECONNECTION_WINDOW_SECONDS` (commented out in `.env.example`; an empty `PORT` means port 0, a random port)
 
-Read by code but not in `.env.example`: `PORT`, `NODE_ENV`, `OFFICE_RECONNECTION_WINDOW_SECONDS`.
-
-`infra/livekit/.env`: `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `GCS_CREDENTIALS_FILE`, `GCS_BUCKET`. Also read by `vite.config.ts` and `e2e/harness.mjs` to mint real LiveKit tokens from Node.
+`infra/livekit/.env`: `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `GCS_CREDENTIALS_FILE`, `GCS_BUCKET`. Also read by `vite.config.ts` and `e2e/harness.mjs` to mint real LiveKit tokens from Node. The full stack (root `docker-compose.yml`) does not read it: it interpolates the included LiveKit services, `GCS_CREDENTIALS_FILE` included, from the root `.env`.
 
 Test-only: `.env.e2e` (committed, no secrets: `VITE_E2E_HOOK`, `VITE_COLYSEUS_URL=ws://localhost:2599`, empty Firebase keys), `VITE_LIVEKIT_E2E` (enables LiveKit-gated tests), `E2E_READINESS_TIMEOUT_MS` (harness readiness deadline, default 15000).
 
@@ -132,7 +142,7 @@ Server module pattern (hexagonal), per feature folder in `server/src/`:
 
 Client follows the same idea: `*Port.ts` + `*Client.ts` (with injected `fetch`) + UI component; pure helpers (`proximity.ts`, `reconnectPolicy.ts`, `route.ts`) take inputs instead of touching `window`.
 
-Infra: locally `infra/livekit/` runs LiveKit + Egress + Redis. Deployed, one GCE VM runs caddy, web (nginx SPA), colyseus, postgres, livekit, redis, egress via `infra/gcp/docker-compose.yml`. Caddy terminates TLS and multiplexes `app.*`, `lk.*`, `turn.*` sslip.io hostnames on 443 by SNI.
+Infra: locally `infra/livekit/` runs LiveKit + Egress + Redis, and the root `docker-compose.yml` adds Postgres, the server and the SPA on top of it. Deployed, one GCE VM runs caddy, web (nginx SPA), colyseus, postgres, livekit, redis, egress via `infra/gcp/docker-compose.yml`. Caddy terminates TLS and multiplexes `app.*`, `lk.*`, `turn.*` sslip.io hostnames on 443 by SNI.
 
 ## Coding conventions
 
@@ -178,7 +188,7 @@ Only a `test` environment exists (`infra/gcp/README.md` is the full runbook).
 - A new server route needs its own `handle` in `infra/gcp/Caddyfile`, before the final catch-all `handle`. Otherwise it returns `index.html` with 200 (browser shows `Unexpected token '<'`, server logs nothing).
 - `office-deploy` on disk is only rewritten at VM boot; the workflow refreshes it from metadata before running. Keep that step if you touch the workflow.
 - `pnpm server` does not load `.env`; export variables or use `node --env-file=.env server/src/main.ts`.
-- Copying `.env.example` to `.env` verbatim disables multiplayer: Vite exposes the empty `VITE_COLYSEUS_URL=` as `""`, which `resolveOfficeEndpoint` treats as "off". Remove the line or set it. Local Docker setup: README "Running locally with Docker".
+- `VITE_COLYSEUS_URL` is commented out in `.env.example` on purpose: Vite exposes an empty `VITE_COLYSEUS_URL=` as `""`, which `resolveOfficeEndpoint` treats as "multiplayer off" (unset derives `ws(s)://<host>:2567`). Never ship it uncommented and empty. Local Docker setup: README "Running locally with Docker".
 - Phaser cannot be imported under jsdom; anything touching it must be a `*.browser.test.ts(x)`.
 - `vite.config.ts` repeats `define` per Vitest project on purpose (`test.projects` does not inherit it); `__OFFICE_E2E__` must be defined in each.
 - `.env.e2e` keeps Firebase keys empty on purpose so a developer's real `.env` does not leak into the e2e bundle.
@@ -189,4 +199,3 @@ Only a `test` environment exists (`infra/gcp/README.md` is the full runbook).
 - Postgres reads its password only when the volume is first initialized; rotating the secret alone breaks the connection. There are no automatic DB backups.
 - Secret values in Secret Manager must have no trailing newline (use `printf` / `tr -d '\n'`), or LiveKit token signatures fail silently.
 - Local `infra/livekit/livekit.yaml` publishes only UDP 50000-50019 and has TURN disabled; the deployed config is `infra/gcp/livekit.yaml.tpl`.
-- `infra/gcp/README.md` still says the VM runs five containers; `infra/gcp/docker-compose.yml` now defines seven services (redis and egress were added for recording).

@@ -1,0 +1,123 @@
+# Full local stack: the whole office with one command, for trying it out or
+# testing a branch end to end without Node or pnpm on the host.
+#
+#   cp .env.example .env     # set LIVEKIT_API_SECRET to: openssl rand -hex 32
+#   docker compose up -d --build
+#   open http://localhost:8080 (office) and http://localhost:8080/dashboard
+#
+#   livekit    SFU                      } reused verbatim from
+#   egress     recording to GCS         } infra/livekit/docker-compose.yml
+#   redis      livekit <-> egress bus   } through `include`, never copied
+#   postgres   directory, spaces, desks, decor (issue #24)
+#   server     the Node server (infra/gcp/docker/colyseus.Dockerfile), :2567
+#   web        the built SPA on nginx (infra/gcp/docker/web.Dockerfile), :8080
+#
+# It lives at the repo root because that is the build context of both images
+# (.dockerignore sits here) and because Compose then reads the root `.env` on
+# its own: one env file for this stack and for the hybrid path of README.md.
+#
+# This is NOT the deployed topology. infra/gcp/docker-compose.yml runs registry
+# images behind Caddy with public sslip.io hostnames; here everything is plain
+# ws/http on localhost. For hot reload, run the app on the host instead
+# (README.md, "Running locally with Docker", option 2).
+
+name: oficina-virtual-local
+
+include:
+  # `env_file` points the included file at the root `.env`: by default an
+  # included file interpolates from the `.env` next to it (infra/livekit/.env),
+  # and a second copy of the LiveKit secret is exactly the drift this avoids.
+  # Its relative paths (./livekit.yaml) still resolve from infra/livekit/.
+  - path: infra/livekit/docker-compose.yml
+    env_file: .env
+
+services:
+  postgres:
+    # Same pin as infra/gcp/docker-compose.yml.
+    image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+    environment:
+      # Local throwaway credentials, not a secret: the port is published on
+      # loopback only, for psql from the host.
+      POSTGRES_USER: office
+      POSTGRES_PASSWORD: office
+      POSTGRES_DB: office
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - office-db:/var/lib/postgresql/data
+    # What makes `condition: service_healthy` in `server` mean something: the
+    # server migrates the schema on start and dies on ECONNREFUSED otherwise.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U office -d office"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks: [av]
+
+  server:
+    build:
+      context: .
+      dockerfile: infra/gcp/docker/colyseus.Dockerfile
+    environment:
+      PORT: "2567"
+      # Browser-facing: the server hands this URL out in /livekit/token and the
+      # browser runs on the host, so it is localhost, not the service name.
+      LIVEKIT_URL: ws://localhost:7880
+      # Server-to-LiveKit (Egress API, recording). Inside the network the SFU
+      # is `livekit`; derived from LIVEKIT_URL it would point at the server
+      # container itself.
+      LIVEKIT_API_URL: http://livekit:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY in .env (see .env.example)}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET in .env (openssl rand -hex 32)}
+      # Always on here: the point of the full stack is the whole app, dashboard
+      # included. The hybrid path's DATABASE_URL (localhost) would not resolve
+      # inside the container, so it is never read from .env.
+      DATABASE_URL: postgres://office:office@postgres:5432/office
+      # Optional features, passed through from .env. Empty keeps each one off,
+      # with the same degradation as on the host (.env.example).
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+      BOOTSTRAP_SUPERADMIN_EMAIL: ${BOOTSTRAP_SUPERADMIN_EMAIL:-}
+      IDENTITY_ADMIN_CREDENTIALS: ${IDENTITY_ADMIN_CREDENTIALS:-}
+      ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
+      OFFICE_RECONNECTION_WINDOW_SECONDS: ${OFFICE_RECONNECTION_WINDOW_SECONDS:-}
+      RECORDING_GCS_BUCKET: ${RECORDING_GCS_BUCKET:-}
+      # Signed recording URLs need ADC that can sign: the same file Egress
+      # mounts (GCS_CREDENTIALS_FILE, infra/livekit/README.md). Only read when
+      # RECORDING_GCS_BUCKET is set.
+      GOOGLE_APPLICATION_CREDENTIALS: /etc/gcp/adc.json
+    volumes:
+      - ${GCS_CREDENTIALS_FILE:-/dev/null}:/etc/gcp/adc.json:ro
+    ports:
+      - "2567:2567"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      livekit:
+        condition: service_started
+    networks: [av]
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/gcp/docker/web.Dockerfile
+      args:
+        # Baked into the bundle. The browser runs on the host, so it reaches
+        # the server through the published port. The dashboard API base is
+        # derived from it (src/dashboard/officeApiBaseUrl.ts).
+        VITE_COLYSEUS_URL: ws://localhost:2567
+        # All or nothing (web.Dockerfile fails the build on only one). Empty:
+        # no login screen, the normal local setup.
+        VITE_FIREBASE_API_KEY: ${VITE_FIREBASE_API_KEY:-}
+        VITE_FIREBASE_PROJECT_ID: ${VITE_FIREBASE_PROJECT_ID:-}
+        VITE_FIREBASE_AUTH_DOMAIN: ${VITE_FIREBASE_AUTH_DOMAIN:-}
+    ports:
+      # 8080, not 5173: `pnpm dev` keeps its port free for the hybrid path.
+      - "8080:80"
+    depends_on:
+      - server
+    networks: [av]
+
+volumes:
+  # Users, roles, invitations, spaces. `docker compose down -v` wipes it.
+  office-db:
