@@ -26,7 +26,7 @@
 .bar[data-layout='column'] {
   top: 12px;
   left: 12px;
-  bottom: 88px;
+  bottom: 137px;
   transform: none;
   flex-direction: column;
   flex-wrap: nowrap;
@@ -45,7 +45,7 @@
   top: 12px;
   left: 200px;
   right: 12px;
-  bottom: 88px;
+  bottom: 137px;
   pointer-events: none;
   z-index: 5;
 }

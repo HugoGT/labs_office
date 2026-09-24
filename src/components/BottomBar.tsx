@@ -1,6 +1,6 @@
 import type { OfficeEventMap } from '../game/officeBridge';
 import { DO_NOT_DISTURB, PRESENCE_STATUSES, type PresenceStatus } from '../game/officeProtocol';
-import { STATUS_LABEL, statusCssColor } from '../game/presence';
+import { STATUS_EMOJI, STATUS_LABEL, statusCssColor } from '../game/presence';
 import styles from './BottomBar.module.css';
 
 export interface BottomBarProps {
@@ -106,103 +106,109 @@ export function BottomBar({
         : ONLY_IN_SPACE_TITLE;
 
   return (
+    // Always two rows (#67): who you are and where you stand on top, what you
+    // can do below. Leaving a space only drops the room line, never the row.
     <div className={styles.bar}>
-      <div className={styles.me}>
-        <span className={styles.meDot} style={{ background: statusCssColor(status) }} />{' '}
-        {playerName}
-        <select
-          className={styles.statusSelect}
-          aria-label="Mi estado"
-          value={status}
-          onChange={(event) => onChangeStatus(event.target.value as PresenceStatus)}
-        >
-          {PRESENCE_STATUSES.map((code) => (
-            <option key={code} value={code}>
-              {STATUS_LABEL[code]}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className={styles.presence} title={PRESENCE_TITLE[presence.state]}>
-        {presence.state === 'connected' ? (
-          `🟢 ${presence.peers} en línea`
-        ) : presence.state === 'reconnecting' ? (
-          // Sin recuento: los pares de antes de la caida siguen en el registro
-          // de la escena, pero ahora mismo no hay canal con ninguno, y contarlos
-          // seria decir que estan cuando no se les oye.
-          <>🟡 Reconectando...</>
-        ) : (
-          <>⚪ Sin servidor</>
+      <div className={styles.info} role="group" aria-label="Estado">
+        <div className={styles.me}>
+          <span className={styles.meDot} style={{ background: statusCssColor(status) }} />{' '}
+          {playerName}
+          <select
+            className={styles.statusSelect}
+            aria-label="Mi estado"
+            value={status}
+            onChange={(event) => onChangeStatus(event.target.value as PresenceStatus)}
+          >
+            {PRESENCE_STATUSES.map((code) => (
+              <option key={code} value={code}>
+                {STATUS_EMOJI[code]} {STATUS_LABEL[code]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className={styles.status}>
+          {dnd ? (
+            // Anunciar "Audio por proximidad" mientras nada es audible seria
+            // mentir sobre lo unico que esta linea existe para contar.
+            <>🔴 No molestar: aislado del audio de la oficina</>
+          ) : room ? (
+            <>
+              🔒 Sala privada: <b>{room}</b>
+            </>
+          ) : (
+            <>
+              Audio por <b>proximidad</b>
+            </>
+          )}
+        </div>
+        <div className={styles.presence} title={PRESENCE_TITLE[presence.state]}>
+          {presence.state === 'connected' ? (
+            `🟢 ${presence.peers} en línea`
+          ) : presence.state === 'reconnecting' ? (
+            // Sin recuento: los pares de antes de la caida siguen en el registro
+            // de la escena, pero ahora mismo no hay canal con ninguno, y contarlos
+            // seria decir que estan cuando no se les oye.
+            <>🟡 Reconectando...</>
+          ) : (
+            <>⚪ Sin servidor</>
+          )}
+        </div>
+        {/* Solo cuando la sesion se perdio Y hay servidor configurado al que
+            volver: en modo solitario no hay nada que reintentar, y mientras
+            reconecta ya se esta reintentando solo. */}
+        {presence.state === 'offline' && presence.canRetry && (
+          <button
+            type="button"
+            className={styles.btn}
+            title="Volver a conectar con el servidor de avatares reales"
+            onClick={onRetryConnection}
+          >
+            🔄 Reintentar
+          </button>
         )}
       </div>
-      {/* Solo cuando la sesion se perdio Y hay servidor configurado al que
-          volver: en modo solitario no hay nada que reintentar, y mientras
-          reconecta ya se esta reintentando solo. */}
-      {presence.state === 'offline' && presence.canRetry && (
+      <div className={styles.controls} role="toolbar" aria-label="Controles de llamada">
+        {/* `disabled`+`title` mientras LiveKit no esta disponible, espejando el
+            patron ya existente en el boton de grabar (`disabled={room === null}`). */}
         <button
           type="button"
           className={styles.btn}
-          title="Volver a conectar con el servidor de avatares reales"
-          onClick={onRetryConnection}
+          aria-pressed={micOn}
+          disabled={audioDisabled}
+          title={audioTitle}
+          onClick={onToggleMic}
         >
-          🔄 Reintentar
+          {micOn ? '🎙️ Mic' : '🔇 Mic'}
         </button>
-      )}
-      {/* `disabled`+`title` mientras LiveKit no esta disponible, espejando el
-          patron ya existente en el boton de grabar (`disabled={room === null}`). */}
-      <button
-        type="button"
-        className={styles.btn}
-        aria-pressed={micOn}
-        disabled={audioDisabled}
-        title={audioTitle}
-        onClick={onToggleMic}
-      >
-        {micOn ? '🎙️ Mic' : '🔇 Mic'}
-      </button>
-      <button
-        type="button"
-        className={styles.btn}
-        aria-pressed={camOn}
-        disabled={audioDisabled}
-        title={audioTitle}
-        onClick={onToggleCam}
-      >
-        {camOn ? '📷 Cámara' : '🚫 Cámara'}
-      </button>
-      <button
-        type="button"
-        className={styles.btn}
-        aria-pressed={screenShareOn}
-        disabled={screenShareDisabled}
-        title={screenShareTitle}
-        onClick={onToggleScreenShare}
-      >
-        {screenShareOn ? 'Dejar de compartir' : 'Compartir pantalla'}
-      </button>
-      <button
-        type="button"
-        className={styles.btn}
-        disabled={room === null}
-        title={room === null ? ONLY_IN_SPACE_TITLE : undefined}
-        onClick={onToggleRecord}
-      >
-        {recording ? '⏹ Detener' : '⏺ Grabar'}
-      </button>
-      <div className={styles.status}>
-        {dnd ? (
-          // Anunciar "Audio por proximidad" mientras nada es audible seria
-          // mentir sobre lo unico que esta linea existe para contar.
-          <>🔴 No molestar: aislado del audio de la oficina</>
-        ) : room ? (
-          <>
-            🔒 Sala privada: <b>{room}</b> — audio aislado
-          </>
-        ) : (
-          <>
-            Audio por <b>proximidad</b>
-          </>
-        )}
+        <button
+          type="button"
+          className={styles.btn}
+          aria-pressed={camOn}
+          disabled={audioDisabled}
+          title={audioTitle}
+          onClick={onToggleCam}
+        >
+          {camOn ? '📷 Cámara' : '🚫 Cámara'}
+        </button>
+        <button
+          type="button"
+          className={styles.btn}
+          aria-pressed={screenShareOn}
+          disabled={screenShareDisabled}
+          title={screenShareTitle}
+          onClick={onToggleScreenShare}
+        >
+          {screenShareOn ? '🖥️ Dejar de compartir' : '🖥️ Compartir'}
+        </button>
+        <button
+          type="button"
+          className={styles.btn}
+          disabled={room === null}
+          title={room === null ? ONLY_IN_SPACE_TITLE : undefined}
+          onClick={onToggleRecord}
+        >
+          {recording ? '⏹ Detener' : '⏺ Grabar'}
+        </button>
       </div>
     </div>
   );

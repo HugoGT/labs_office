@@ -1090,6 +1090,6 @@ describe('OfficeShell: screen share (#20)', () => {
 
     renderInSpace();
 
-    expect(screen.getByRole('button', { name: 'Dejar de compartir' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '🖥️ Dejar de compartir' })).toBeEnabled();
   });
 });

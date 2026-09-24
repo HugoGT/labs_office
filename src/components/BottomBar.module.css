@@ -5,14 +5,31 @@
   transform: translateX(-50%);
   z-index: 10;
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   background: #111827f2;
   border: 1px solid #2b3444;
   border-radius: 16px;
   padding: 10px 16px;
   color: #e5e7eb;
   box-shadow: 0 8px 30px #0009;
+}
+
+.info {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.controls {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #2b3444;
 }
 
 .me {
@@ -33,20 +50,39 @@
 }
 
 .statusSelect {
-  background: #1f2937;
+  appearance: none;
+  /* Own caret instead of the native one, so the box matches the bar (#67). */
+  background: #1f2937
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239ca3af' stroke-width='1.5'/%3E%3C/svg%3E")
+    no-repeat right 10px center;
   color: #e5e7eb;
   border: 1px solid #374151;
   border-radius: 10px;
-  padding: 4px 6px;
+  /* 5px more on each side than before (#67): the label no longer looks clipped. */
+  padding: 4px 30px 4px 11px;
+  font: inherit;
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
+}
+
+.statusSelect:hover {
+  border-color: #4b5563;
+}
+
+.statusSelect:focus-visible {
+  outline: 2px solid #4ade80;
+  outline-offset: 1px;
+}
+
+.statusSelect option {
+  background: #1f2937;
+  color: #e5e7eb;
 }
 
 .presence {
   font-size: 12px;
   color: #9ca3af;
-  padding-right: 10px;
-  border-right: 1px solid #2b3444;
   white-space: nowrap;
 }
 
@@ -68,9 +104,10 @@
 .status {
   font-size: 12px;
   color: #9ca3af;
-  padding-left: 10px;
-  border-left: 1px solid #2b3444;
+  padding-right: 10px;
+  border-right: 1px solid #2b3444;
   max-width: 340px;
+  white-space: normal;
 }
 
 .status b {
