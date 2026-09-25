@@ -15,11 +15,15 @@ interface FakePool extends DirectoryPool {
 }
 
 function fakePool(): FakePool {
+  return fakePoolAnswering([{}]);
+}
+
+function fakePoolAnswering(rows: Record<string, unknown>[]): FakePool {
   const queries: { text: string; values: unknown[] }[] = [];
   const state = { ended: 0 };
   const query = async (text: string, values: unknown[] = []) => {
     queries.push({ text, values });
-    return { rows: [{}], rowCount: 1 };
+    return { rows, rowCount: rows.length };
   };
   return {
     queries,
@@ -48,6 +52,24 @@ describe('directoryFromEnv', () => {
 
     expect(runtime).toBeUndefined();
     expect(built).toBe(0);
+  });
+
+  it('la ruta del CA de la base de datos llega hasta el pool (#72)', () => {
+    // Si se perdiese por el camino, el pool conectaria sin TLS y Cloud SQL
+    // (ENCRYPTED_ONLY) lo rechazaria con un error que no apunta aqui.
+    const configs: unknown[] = [];
+    directoryFromEnv(
+      {
+        DATABASE_URL: 'postgres://office@10.100.0.3:5432/office',
+        DATABASE_SSL_CA_FILE: '/etc/office/db-server-ca.pem',
+      },
+      (config) => {
+        configs.push(config);
+        return fakePool();
+      },
+    );
+
+    expect(configs).toMatchObject([{ databaseSslCaFile: '/etc/office/db-server-ca.pem' }]);
   });
 
   it('con DATABASE_URL construye el pool y el directorio', () => {
@@ -81,7 +103,9 @@ describe('directoryFromEnv', () => {
   it('el email de bootstrap del entorno llega hasta la sentencia de login', async () => {
     // Prueba de extremo a extremo del cableado: si se perdiese por el camino, el
     // sintoma seria que nadie llega nunca a superadmin y no habria ningun error.
-    const pool = fakePool();
+    // Sin filas: nadie existe todavia, asi que el login llega al INSERT de
+    // bootstrap, que es la sentencia que necesita ese email (#72).
+    const pool = fakePoolAnswering([]);
     const runtime = directoryFromEnv(
       {
         DATABASE_URL: 'postgres://localhost/oficina',
@@ -92,7 +116,8 @@ describe('directoryFromEnv', () => {
 
     await runtime!.directory.resolveOnLogin({ uid: 'uid-hugo', email: 'hugo@example.com', name: 'Hugo' });
 
-    expect(pool.queries[0].values[3]).toBe('hugo@example.com');
+    const insert = pool.queries.find((query) => /^\s*insert into users/i.test(query.text));
+    expect(insert?.values[3]).toBe('hugo@example.com');
   });
 
   it('close() del directorio cierra el pool que se construyo', async () => {

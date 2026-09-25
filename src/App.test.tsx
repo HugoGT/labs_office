@@ -187,7 +187,7 @@ describe('App: leaving the office (#66)', () => {
     await waitForOffice(container);
     const game = createGameMock.mock.results[0].value as { destroy: ReturnType<typeof vi.fn> };
 
-    await user.click(screen.getByRole('button', { name: /Salir de la oficina/ }));
+    await user.click(screen.getByRole('button', { name: 'Salir' }));
 
     // Destroying the game is what leaves the Colyseus room and, with the
     // shell gone, the LiveKit room: the avatar disappears for everyone.
@@ -206,7 +206,7 @@ describe('App: leaving the office (#66)', () => {
     emit({ uid: 'uid-ana', email: 'ana@example.com', displayName: 'Ana' });
     await waitForOffice(container);
 
-    await user.click(screen.getByRole('button', { name: /Salir de la oficina/ }));
+    await user.click(screen.getByRole('button', { name: 'Salir' }));
     await user.click(screen.getByRole('button', { name: 'Volver a ingresar' }));
 
     await waitForOffice(container);

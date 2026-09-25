@@ -1,8 +1,9 @@
 # Despliegue en GCP - entorno `test`
 
 Infraestructura del entorno desplegado de la oficina virtual (issue #3). Una sola
-VM de Compute Engine corre los siete contenedores (caddy, web, colyseus, livekit,
-postgres, redis, egress); Terraform crea todo lo demás.
+VM de Compute Engine corre los seis contenedores (caddy, web, colyseus, livekit,
+redis, egress); el directorio vive en Cloud SQL (issue #72) y Terraform crea todo
+lo demás.
 
 **Solo existe el entorno `test`.** Producción espera a que aterrice el login con
 Google (issue #8): hasta entonces no hay nada que proteger detrás de una
@@ -14,8 +15,8 @@ Todo está parametrizado por `var.env` para que el segundo entorno sea un
 
 | Ruta | Qué es |
 |---|---|
-| `terraform/` | Estado de la infraestructura: VM, red, IAM, registro de imágenes, secretos, federación con GitHub |
-| `docker-compose.yml` | Los siete servicios de la VM (caddy, web, colyseus, livekit, postgres, redis, egress). Vive en `/opt/office/` |
+| `terraform/` | Estado de la infraestructura: VM, red, IAM, registro de imágenes, secretos, federación con GitHub. `database.tf`: Cloud SQL del directorio (issue #72) |
+| `docker-compose.yml` | Los seis servicios de la VM (caddy, web, colyseus, livekit, redis, egress). Vive en `/opt/office/` |
 | `Caddyfile` | Terminación TLS y multiplexado de los tres hostnames sobre el 443 (issue #19) |
 | `livekit.yaml.tpl` | Configuración del SFU. Plantilla: los hostnames se sustituyen al desplegar |
 | `startup-script.sh` | Arranque de la VM: instala Docker y el script de operación |
@@ -42,13 +43,12 @@ Node que cabe de sobra en la misma máquina.
 **Redis and Egress** arrived with recording (issues #5, #58): LiveKit hands
 recording requests to Egress through Redis. See *Recordings* below.
 
-**Con Postgres, y también dentro de la misma VM** (issue #24). El directorio de
-usuarios e invitaciones necesita una base de datos, y la instancia más barata de
-Cloud SQL cuesta más que la VM entera, además de traer red privada, IAM y más
-Terraform para guardar unos centenares de filas. Corre como un contenedor más,
-sobre un volumen con nombre. El precio de esa decisión es real y está aceptado:
-**las copias de seguridad son manuales y la durabilidad del dato es la del disco
-de la VM.** Está desarrollado más abajo, en *Copias de seguridad*.
+**The directory database is NOT on the VM** (issue #72). Until #72 it was a
+`postgres` container on the VM boot disk, chosen because Cloud SQL costs more
+than the VM. That price came due on 2026-09-21: a `terraform apply` replaced the
+VM (a `startup-script.sh` edit is ForceNew) and the directory went with its boot
+disk, with no backup to restore. It now lives in Cloud SQL, private IP only, with
+automated backups and point-in-time recovery. See *Directory database* below.
 
 ## Hostnames sin dominio propio
 
@@ -100,6 +100,22 @@ terraform plan
 terraform apply
 ```
 
+Requires **Terraform >= 1.11** (write-only arguments, see *Directory database*).
+
+On a brand-new environment the first `apply` stops at `google_sql_user.office`:
+its password is read from the `db-password` secret, and that secret has no
+version yet. Create the secret containers first, load the values (step 3), then
+run the full apply:
+
+```sh
+terraform apply -target=google_secret_manager_secret.db_password
+# step 3: gcloud secrets versions add labs-office-test-db-password ...
+terraform apply
+```
+
+Before the first apply that creates Cloud SQL, run the Private Service Access
+pre-check in *Directory database*: the GCP project is shared.
+
 En este punto la VM ya existe y arranca, pero **todavía no levanta contenedores**:
 no hay imágenes publicadas ni valores de secreto. El script de arranque instala
 Docker, escribe la configuración en `/opt/office/` y se detiene al no encontrar
@@ -121,7 +137,7 @@ printf 'labs-office' | \
 openssl rand -hex 32 | tr -d '\n' | \
   gcloud secrets versions add labs-office-test-livekit-api-secret --data-file=-
 
-# Contraseña del Postgres del directorio (issue #24).
+# Password of the directory database user (issues #24, #72).
 openssl rand -hex 32 | tr -d '\n' | \
   gcloud secrets versions add labs-office-test-db-password --data-file=-
 ```
@@ -134,12 +150,20 @@ Hexadecimal no es casualidad: esa contraseña acaba dentro de una URL
 (`DATABASE_URL`), y aunque el script la escapa antes de componerla, un valor sin
 caracteres raros se lee mejor en cualquier diagnóstico.
 
-Y un aviso que solo aplica a este secreto: **Postgres lee la contraseña una única
-vez, cuando inicializa el volumen**. Añadir una versión nueva al secreto más
-adelante cambia lo que el servidor intenta usar, pero no lo que la base espera, y
-el resultado es un servidor que ya no conecta. Rotarla de verdad es entrar por SSH
-y hacer `ALTER USER office WITH PASSWORD ...` dentro del contenedor antes de
-redesplegar.
+This secret has two readers since #72: `office-deploy` (it builds
+`DATABASE_URL`) and Terraform, which sets it on the Cloud SQL user. Adding a new
+version changes neither on its own. Rotating it is, in this order:
+
+```sh
+openssl rand -hex 32 | tr -d '\n' | \
+  gcloud secrets versions add labs-office-test-db-password --data-file=-
+# bump db_password_version in terraform.tfvars (1 -> 2), then:
+terraform apply        # pushes the new password to the Cloud SQL user
+gh workflow run deploy-test.yml   # office-deploy rewrites DATABASE_URL
+```
+
+Between the apply and the redeploy the running server keeps its open
+connections but cannot open new ones; keep the two steps together.
 
 Los dos valores van **sin salto de línea final**, y por eso están el `printf` (que no
 lo añade, al contrario que `echo`) y el `tr -d '\n'` (porque `openssl rand` sí lo
@@ -281,10 +305,17 @@ sudo journalctl -u google-startup-scripts     # problemas de arranque de la VM
 
 ## Secretos: de dónde salen y dónde no están
 
-`LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, la contraseña de Postgres y la clave de la
-cuenta de servicio de Identity Platform viven **solo** en Secret Manager. No están
-en el repositorio, ni en un `.env` commiteado, ni en los secretos de GitHub, ni en
-el estado de Terraform.
+`LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, la contraseña de la base de datos y la
+clave de la cuenta de servicio de Identity Platform viven **solo** en Secret
+Manager. No están en el repositorio, ni en un `.env` commiteado, ni en los
+secretos de GitHub, ni en el estado de Terraform.
+
+The database password is the one Terraform touches (issue #72), and it still
+never reaches the state: `database.tf` reads it through an `ephemeral`
+Secret Manager resource (never persisted) into the write-only `password_wo` of
+`google_sql_user` (nulled before the state is written; only
+`password_wo_version` is stored). A `data` source would NOT do: data sources are
+saved in the state, `secret_data` included.
 
 Las dos primeras y la contraseña de la base son obligatorias: si Secret Manager
 devuelve un valor vacío, `office-deploy` aborta antes de escribir nada. La clave de
@@ -437,38 +468,81 @@ había ni roles ni forma de invitar a nadie sin abrir la consola de GCP. Esto a�
 un directorio propio (usuarios, roles e invitaciones) y un panel para
 administrarlo.
 
-### El contenedor y el volumen
+### Directory database (Cloud SQL, issue #72)
 
-| Pieza | Qué es |
+| Piece | What it is |
 |---|---|
-| Contenedor `postgres` | `postgres:17-alpine`, fijado por tag **y** digest como `caddy` y `livekit`. No publica ningún puerto: el único que le habla es `colyseus`, por la red interna del compose |
-| Volumen `office-db` | `/var/lib/postgresql/data`. Aquí viven los usuarios, sus roles y las invitaciones |
+| `google_sql_database_instance.directory` | `labs-office-test-db`, PostgreSQL 17, edition ENTERPRISE, tier `var.db_tier` (default `db-f1-micro`), zonal, same region/zone as the VM |
+| Network | Private IP only (`ipv4_enabled = false`) through Private Service Access on `default`, range `var.db_psa_cidr` (default `10.100.0.0/20`, pinned clear of the Docker bridges `172.17.0.0/16` and `172.30.0.0/24`) |
+| TLS | `ssl_mode = ENCRYPTED_ONLY`. The server verifies the instance against its own CA (libpq `verify-ca`): Terraform puts the CA in the `office-db-server-ca` metadata key, `office-deploy` writes it to `/opt/office/db-server-ca.pem` and colyseus mounts it as `DATABASE_SSL_CA_FILE`. The hostname is not checked because the Cloud SQL certificate does not carry the private IP |
+| Backups | Daily automated backups at 08:00 UTC, 7 kept, point-in-time recovery with 7 days of logs, kept after an instance deletion (`retain_backups_on_delete`) |
+| Protection | `deletion_protection` (Terraform) and `deletion_protection_enabled` (API: console and gcloud too) |
+| `google_sql_database.office` / `google_sql_user.office` | Database `office`, user `office`, password from the `db-password` secret (write-only, never in state) |
 
-`caddy-data` y `office-db` no se parecen en nada aunque los dos sean volúmenes con
-nombre: un certificado perdido se vuelve a emitir solo, y esto **no se reemite
-desde ningún sitio**.
+How `DATABASE_URL` reaches the server: Terraform writes `office-db-host` (the
+private IP), `office-db-name` and `office-db-user` to instance metadata;
+`office-deploy` reads them plus the password secret and writes
+`DATABASE_URL=postgresql://office:<pw>@<private-ip>:5432/office` to
+`/opt/office/.env`. Same channel as every other setting.
 
-`colyseus` espera a que Postgres esté *sano*, no solo arrancado:
+The VM needs **no** extra IAM and no firewall rule for this: it connects
+directly to the private IP over the VPC peering (egress is open by default),
+and `roles/cloudsql.client` is only needed by the Cloud SQL Auth Proxy and the
+language connectors, which are not used.
 
-```yaml
-depends_on:
-  postgres:
-    condition: service_healthy
+**Private Service Access pre-check (the project is shared).** A network has one
+service networking connection, shared by every producer service. Before the
+first apply that creates Cloud SQL:
+
+```sh
+gcloud services vpc-peerings list --network=default --project=vaulted-channel-505114-f0
+gcloud compute addresses list --global --filter="purpose=VPC_PEERING" \
+  --project=vaulted-channel-505114-f0
 ```
 
-El `depends_on` en forma de lista que usa `caddy` no serviría aquí. Solo espera a
-que el contenedor exista, y Postgres arranca su contenedor en milisegundos pero
-tarda bastante más en aceptar conexiones. Como el servidor corre las migraciones
-nada más arrancar, sin la condición el primer despliegue muere con un
-`ECONNREFUSED` que `restart: unless-stopped` acaba tapando tras unos reinicios: un
-arranque que funciona por casualidad y unos logs que no explican por qué.
+If the first command lists a connection for `servicenetworking.googleapis.com`,
+**stop**: creating ours would fail, and forcing it would replace the reserved
+ranges other services depend on. Import it
+(`terraform import google_service_networking_connection.sql
+"projects/vaulted-channel-505114-f0/global/networks/default:servicenetworking.googleapis.com"`)
+and add its existing range names to `reserved_peering_ranges` next to ours. If
+the second command shows a range overlapping `10.100.0.0/20`, change
+`db_psa_cidr`.
+
+`google_service_networking_connection.sql` has `deletion_policy = "ABANDON"`: a
+`terraform destroy` of this stack leaves the peering in place, since other
+private services may use it. Likewise the two `google_project_service` APIs are
+never disabled on destroy.
+
+### Startup script changes no longer replace the VM
+
+`metadata_startup_script` is ForceNew in the Google provider: any edit to
+`startup-script.sh` used to plan a delete + create of the VM, which is what
+wiped the directory on 2026-09-21. `google_compute_instance.office` now ignores
+that attribute. Consequences:
+
+- Editing `startup-script.sh` and running `terraform apply` changes **nothing** on
+  the VM. Roll the new script out in place (it runs on the next boot):
+
+  ```sh
+  gcloud compute instances add-metadata labs-office-test --zone us-central1-a \
+    --metadata-from-file startup-script=infra/gcp/startup-script.sh
+  ```
+
+- Replacing the VM is now always explicit:
+  `terraform apply -replace=google_compute_instance.office`. It still drops every
+  live call and Caddy's certificates (reissued on boot), but no longer the
+  directory.
+- Every plan that touches the instance should read `update in-place`. If it
+  ever says `must be replaced`, stop and find out which attribute forces it.
 
 ### Variables que añade
 
 | Variable | Vacía | Con valor | ¿Secreto? |
 |---|---|---|---|
-| `DATABASE_URL` | sin directorio; el servidor se comporta igual que antes | migra el esquema al arrancar y sirve el panel | la compone `office-deploy` con la contraseña de Secret Manager |
-| `BOOTSTRAP_SUPERADMIN_EMAIL` | nadie puede hacer el arranque en frío | ese correo se promociona a superadmin | **no**: es una dirección de correo |
+| `DATABASE_URL` | sin directorio; el servidor se comporta igual que antes | migra el esquema al arrancar y sirve el panel | la compone `office-deploy` con la IP privada de Cloud SQL y la contraseña de Secret Manager |
+| `DATABASE_SSL_CA_FILE` | conexión sin TLS (solo el Postgres local) | exige TLS y verifica el CA de la instancia | **no**: ruta fija en el compose a un certificado público |
+| `BOOTSTRAP_SUPERADMIN_EMAIL` | nadie puede hacer el arranque en frío | ese correo se crea como superadmin en su primer login, y es la única cuenta que el login crea sola (issue #72) | **no**: es una dirección de correo |
 | `IDENTITY_ADMIN_CREDENTIALS` | invitar cuentas devuelve 503; el resto del panel funciona | el servidor da de alta cuentas con la clave de esa cuenta de servicio | **sí** |
 | `IDENTITY_ADMIN_USE_METADATA` | el servidor no usa la identidad de la VM para esto | el servidor pide el token al servidor de metadata y da de alta cuentas **sin ninguna clave** | **no**: es un interruptor (`true`) |
 
@@ -494,6 +568,13 @@ La regla, exacta:
 En cuanto existe uno, la regla deja de aplicarse: cambiar el valor de la variable
 más adelante no promociona a nadie. A partir de ahí los roles se reparten desde el
 panel.
+
+Es también la **única** fila que el inicio de sesión crea por su cuenta (issue
+#72). Cualquier otra cuenta de Identity Platform sin fila en `users` se rechaza
+con 401 y el servidor registra `not-provisioned`: empleados y administradores se
+dan de alta desde el panel, invitados con una invitación. Si el directorio se
+vacía, solo el superadmin de bootstrap vuelve a entrar; nadie más se recrea como
+empleado permanente.
 
 **Y aquí está la trampa.** El issue #8 desactivó "Allow password sign-up" en el
 proveedor de Identity Platform: nadie puede darse de alta por su cuenta. Así que la
@@ -538,40 +619,33 @@ handle /admin/* {
 El comodín cubre las rutas de `/admin/` que vengan después. El `handle` sin ruta
 tiene que seguir siendo **el último** del sitio.
 
-### Copias de seguridad
+### Backups and restore
 
-**No hay ninguna copia automática. Ninguna.** No hay snapshot programado del disco,
-ni `pg_dump` en un temporizador, ni exportación a un bucket. Destruir la VM, o
-borrar el volumen `office-db`, **destruye el directorio entero**: todos los
-usuarios, todos los roles y todas las invitaciones. No se recupera de ningún sitio.
-
-Es el precio aceptado de correr Postgres en la misma VM en vez de en Cloud SQL, y
-está escrito aquí para que sea una decisión y no una sorpresa.
-
-La copia se hace a mano, y esto es lo que hay que ejecutar:
+Automated since issue #72, on the Cloud SQL instance: one backup a day at 08:00
+UTC (03:00 in Lima), the last 7 kept, plus point-in-time recovery over the last 7
+days. Backups survive the deletion of the instance (`retain_backups_on_delete`).
+The dumps hold emails and roles, never passwords (those live in Identity
+Platform).
 
 ```sh
-gcloud compute ssh labs-office-test --zone us-central1-a --tunnel-through-iap \
-  --command "sudo docker compose --project-directory /opt/office exec -T postgres \
-    pg_dump -U office -d office --clean --if-exists" \
-  > "office-db-$(date +%Y%m%d-%H%M).sql"
+DB=labs-office-test-db
+P=vaulted-channel-505114-f0
+
+gcloud sql backups list --instance "$DB" --project "$P"
+
+# Before anything risky, an on-demand backup:
+gcloud sql backups create --instance "$DB" --project "$P" --description "before <change>"
+
+# Restore a backup ONTO the instance (overwrites the directory):
+gcloud sql backups restore <BACKUP_ID> --restore-instance "$DB" --project "$P"
+
+# Point in time: clone to a new instance at a timestamp, check it, then point
+# the stack at it or copy the rows back.
+gcloud sql instances clone "$DB" "$DB-pitr" --project "$P" \
+  --point-in-time "2026-09-20T12:00:00Z"
 ```
 
-Restaurar es el mismo camino al revés:
-
-```sh
-gcloud compute ssh labs-office-test --zone us-central1-a --tunnel-through-iap \
-  --command "sudo docker compose --project-directory /opt/office exec -T postgres \
-    psql -U office -d office" \
-  < office-db-20260101-1200.sql
-```
-
-El `-T` no es opcional: sin él Docker intenta reservar un TTY y el volcado sale
-corrupto. El fichero resultante lleva el directorio completo en texto plano
-(correos y roles, nunca contraseñas: esas viven en Identity Platform), así que no
-va al repositorio ni a un sitio compartido.
-
-Conviene correrlo antes de cualquier `terraform apply` que pueda recrear la VM.
+A clone is a separate instance, outside Terraform, billed until deleted.
 
 ### Lo que falta para que las invitaciones funcionen de verdad
 
@@ -696,6 +770,59 @@ If the email cannot be sent when an account is created, the account and its dire
 row stay, the response carries `emailSent: false`, the server logs the uid, and the
 admin re-sends from the dashboard (`POST /admin/users/:id/password-reset`, already
 covered by the `/admin/*` Caddy block).
+
+## Moving the directory to Cloud SQL (issue #72, one time)
+
+The Cloud SQL database starts **empty**. There is no data migration: the
+directory on the VM was already wiped on 2026-09-21 and what it holds now was
+auto-provisioned by the very bug #72 fixes, so it is discarded on purpose. After the
+cutover only the bootstrap superadmin is recreated (on first login); everyone
+else is added again from `/dashboard`.
+
+In this order:
+
+1. **Merge** the PR. CI deploys the new image with the old configuration: the
+   server (with login failing closed) still talks to the `postgres` container.
+2. **Pre-check** Private Service Access (see *Directory database*) and check
+   `terraform version` is >= 1.11.
+3. **Apply** from `main`:
+
+   ```sh
+   cd infra/gcp/terraform
+   terraform init -upgrade
+   terraform plan    # google_compute_instance.office MUST say "update in-place"
+   terraform apply   # creating the Cloud SQL instance takes ~10-15 minutes
+   ```
+
+   The plan must show no `must be replaced` for the VM and no value of the
+   database password (it shows `password_wo = (write-only attribute)`).
+4. **Redeploy**, so `office-deploy` picks up the new metadata:
+   `gh workflow run deploy-test.yml`. It writes the CA, the new compose and a
+   `DATABASE_URL` pointing at the private IP; `up -d --remove-orphans` removes the
+   old `postgres` container. The server migrates the schema on Cloud SQL at
+   startup.
+5. **Verify**: `curl https://<APP_HOST>/health` says `"directory":"enabled"`;
+   `docker compose --project-directory /opt/office logs --tail 50 colyseus` shows
+   no migration or TLS error; sign in as `BOOTSTRAP_SUPERADMIN_EMAIL`, then
+   recreate accounts and invitations from `/dashboard`.
+6. **Clean up** the old volume on the VM, once 5 is green (it is not in the
+   compose any more, so nothing uses it):
+
+   ```sh
+   gcloud compute ssh labs-office-test --zone us-central1-a --tunnel-through-iap \
+     --command "sudo docker volume rm labs-office_office-db"
+   ```
+
+Rollback caveats, once step 4 is done:
+
+- An image older than this change cannot reach the directory: it has no TLS
+  support and Cloud SQL only accepts TLS. `office-deploy <old-sha>` brings the
+  office up without a working directory; roll forward instead.
+- Do not `terraform apply` from a commit older than this change. That
+  configuration does not know the Cloud SQL resources and plans to destroy them.
+  The data survives (the database and user are `ABANDON`, the instance has
+  deletion protection), but the apply fails halfway. Never remove the protection
+  to make such a plan pass.
 
 ## Recordings (issues #5, #58)
 

@@ -119,3 +119,26 @@ variable "recording_retention_days" {
     error_message = "recording_retention_days must be at least 1."
   }
 }
+
+variable "db_tier" {
+  description = "Cloud SQL machine tier for the directory database (issue #72). db-f1-micro is the smallest shared-core tier: enough for a few hundred rows in a test environment, with no SLA. Needs edition ENTERPRISE, which database.tf sets."
+  type        = string
+  default     = "db-f1-micro"
+}
+
+variable "db_psa_cidr" {
+  description = "Private Service Access range on the default network, where the Cloud SQL private IP is allocated (issue #72). Must not overlap the VPC subnets (auto-mode default uses 10.128.0.0/9) nor the Docker bridges on the VM (172.17.0.0/16, 172.30.0.0/24)."
+  type        = string
+  default     = "10.100.0.0/20"
+
+  validation {
+    condition     = can(cidrhost(var.db_psa_cidr, 0)) && tonumber(split("/", var.db_psa_cidr)[1]) <= 24
+    error_message = "db_psa_cidr must be a CIDR block of /24 or larger."
+  }
+}
+
+variable "db_password_version" {
+  description = "Bump to push a new Secret Manager version of the DB password to the Cloud SQL user (issue #72). The password itself is write-only and never stored in state; only this number is."
+  type        = number
+  default     = 1
+}

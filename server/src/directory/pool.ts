@@ -16,13 +16,35 @@
  * `localhost` por defecto en mitad de un despliegue.
  */
 
+import { readFileSync } from 'node:fs';
 import pg from 'pg';
 import type { DirectoryConfig } from './bootstrapConfig.ts';
 import type { DirectoryPool } from './pgDirectory.ts';
 
+/**
+ * TLS towards Cloud SQL over its private IP (#72): libpq's `verify-ca`.
+ *
+ * The chain IS verified against the instance's own CA, which Terraform hands
+ * to the VM. That is what proves the peer is our instance and not something
+ * else inside the VPC; `rejectUnauthorized: false` would encrypt towards
+ * whoever answers. The hostname is NOT checked: the Cloud SQL server
+ * certificate does not carry the private IP, so that check would always fail.
+ *
+ * The CA is read once, at startup. A missing file throws instead of falling
+ * back to clear text: the instance only accepts TLS (ENCRYPTED_ONLY), and a
+ * "connection refused" later would point at the network, not at this file.
+ */
+function sslOptions(caFile: string, readFile: (path: string) => string) {
+  return { ca: readFile(caFile), checkServerIdentity: () => undefined };
+}
+
 export function createDirectoryPool(
   config: DirectoryConfig,
   PoolConstructor: typeof pg.Pool = pg.Pool,
+  readFile: (path: string) => string = (path) => readFileSync(path, 'utf8'),
 ): DirectoryPool {
-  return new PoolConstructor({ connectionString: config.databaseUrl }) as unknown as DirectoryPool;
+  return new PoolConstructor({
+    connectionString: config.databaseUrl,
+    ...(config.databaseSslCaFile ? { ssl: sslOptions(config.databaseSslCaFile, readFile) } : {}),
+  }) as unknown as DirectoryPool;
 }

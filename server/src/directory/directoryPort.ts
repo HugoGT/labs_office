@@ -69,8 +69,12 @@ export interface InvitationRow extends DirectoryUser {
 
 export interface UserDirectory {
   /**
-   * Resuelve al usuario del ID token ya verificado, creandolo la primera vez.
-   * Aplica el bootstrap de superadmin. Idempotente por uid.
+   * Resuelve al usuario del ID token ya verificado: devuelve su fila por uid
+   * (refrescando solo el nombre visible) o `null` si no la tiene, que
+   * `decideAccess` deniega como `not-provisioned`. Falla cerrado (#72): la
+   * UNICA fila que puede crear es la del superadmin de bootstrap (email igual a
+   * `BOOTSTRAP_SUPERADMIN_EMAIL` y ningun superadmin todavia). Cualquier otra
+   * cuenta se da de alta desde el panel. Idempotente por uid.
    */
   resolveOnLogin(identity: {
     uid: string;

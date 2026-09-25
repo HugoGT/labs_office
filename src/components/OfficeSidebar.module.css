@@ -1,6 +1,14 @@
 /* Same visual vocabulary as BottomBar/ExitControls: dark card, same border. */
 .sidebar {
-  right: 12px;
+  right: var(--hud-sidebar-right);
+  width: var(--hud-sidebar-width);
+  /*
+   * Stops above the bottom row (#86): from 720px up the bar and the exit
+   * controls both sit 16px from the bottom and publish their real heights
+   * (`useHeightCssVar`), which vary with the breakpoint, the fonts and
+   * wrapping on tight windows. Below 720px the open sidebar is full screen.
+   */
+  bottom: calc(16px + max(var(--hud-bar-height, 0px), var(--hud-exit-height, 0px)) + 8px);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -10,6 +18,9 @@
 
 .toggle {
   pointer-events: auto;
+  /* Same column as the search input below it (#90). */
+  align-self: stretch;
+  margin: 0 var(--hud-rail-inset);
   background: #111827f2;
   color: #e5e7eb;
   border: 1px solid #2b3444;
@@ -36,7 +47,7 @@
   background: #111827f2;
   border: 1px solid #2b3444;
   border-radius: 16px;
-  padding: 10px;
+  padding: var(--hud-sidebar-padding);
   box-shadow: 0 8px 30px #0009;
 }
 
@@ -72,4 +83,49 @@
 
 .self {
   font-weight: 600;
+}
+
+.close {
+  display: none;
+  pointer-events: auto;
+  align-self: flex-end;
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: 10px;
+  width: 32px;
+  height: 32px;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.close:hover {
+  border-color: #4b5563;
+}
+
+/*
+ * Very small screens (#86): below 720px the bar can no longer keep its
+ * controls on one row beside the exit controls, and a 280px panel squeezed
+ * between minimap and bar leaves little to read. Open, the sidebar covers the
+ * whole screen instead; its opaque background also keeps clicks from reaching
+ * the bar and the exit controls underneath. Collapsed it stays a toggle.
+ */
+@media (max-width: 719px) {
+  .sidebar.expanded {
+    /* `!important` only to beat the inline SIDEBAR_TOP of the docked sidebar. */
+    top: 0 !important;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    padding: 12px;
+    background: #0d1117;
+    pointer-events: auto;
+  }
+
+  .close {
+    display: block;
+  }
 }

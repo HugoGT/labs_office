@@ -41,7 +41,7 @@ Shared code: the server imports `src/game/officeProtocol.ts` and `src/game/mapDa
 - Frontend: Vite 8, React 19, TypeScript 7, Phaser 3.90.0 (pinned to line 3 on purpose), `livekit-client` 2.22.3, `colyseus.js` 0.16.22, `firebase` (only `firebase/auth`).
 - Server: `@colyseus/core` 0.16.24 + `@colyseus/ws-transport`, Express 4, `livekit-server-sdk`, `pg`, `jose` (ID token verification), `@google-cloud/storage`.
 - Tests: Vitest 4 (projects `unit` jsdom, `server` node, `browser` Chromium via `@vitest/browser-playwright`), Testing Library, Playwright for E2E.
-- Infra: Docker Compose, LiveKit server v1.13.x + Egress + Redis, Caddy (custom image with `layer4`), Postgres 17, Terraform on GCP (single Compute Engine VM), GitHub Actions with Workload Identity Federation.
+- Infra: Docker Compose, LiveKit server v1.13.x + Egress + Redis, Caddy (custom image with `layer4`), Postgres 17 (local Docker; Cloud SQL with private IP when deployed), Terraform on GCP (single Compute Engine VM + Cloud SQL), GitHub Actions with Workload Identity Federation.
 - `pnpm-workspace.yaml` is not a monorepo: it exists only for `overrides` and `allowBuilds`.
 
 ## Commands
@@ -105,7 +105,7 @@ Root `.env` (server and SPA):
 - Recording: `RECORDING_GCS_BUCKET`, `GOOGLE_APPLICATION_CREDENTIALS` (commented out; ADC is found automatically)
 - CORS: `ALLOWED_ORIGIN`
 - Auth: `FIREBASE_PROJECT_ID`
-- Directory: `DATABASE_URL`, `BOOTSTRAP_SUPERADMIN_EMAIL`, `IDENTITY_ADMIN_CREDENTIALS`, `IDENTITY_ADMIN_USE_METADATA`
+- Directory: `DATABASE_URL`, `DATABASE_SSL_CA_FILE` (commented out; set only when the database requires TLS), `BOOTSTRAP_SUPERADMIN_EMAIL`, `IDENTITY_ADMIN_CREDENTIALS`, `IDENTITY_ADMIN_USE_METADATA`
 - Server process: `PORT`, `NODE_ENV`, `OFFICE_RECONNECTION_WINDOW_SECONDS` (commented out in `.env.example`; an empty `PORT` means port 0, a random port)
 
 `infra/livekit/.env`: `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `GCS_CREDENTIALS_FILE`, `GCS_BUCKET`. Also read by `vite.config.ts` and `e2e/harness.mjs` to mint real LiveKit tokens from Node. The full stack (root `docker-compose.yml`) does not read it: it interpolates the included LiveKit services, `GCS_CREDENTIALS_FILE` included, from the root `.env`.
@@ -143,7 +143,7 @@ Server module pattern (hexagonal), per feature folder in `server/src/`:
 
 Client follows the same idea: `*Port.ts` + `*Client.ts` (with injected `fetch`) + UI component; pure helpers (`proximity.ts`, `reconnectPolicy.ts`, `route.ts`) take inputs instead of touching `window`.
 
-Infra: locally `infra/livekit/` runs LiveKit + Egress + Redis, and the root `docker-compose.yml` adds Postgres, the server and the SPA on top of it. Deployed, one GCE VM runs caddy, web (nginx SPA), colyseus, postgres, livekit, redis, egress via `infra/gcp/docker-compose.yml`. Caddy terminates TLS and multiplexes `app.*`, `lk.*`, `turn.*` sslip.io hostnames on 443 by SNI.
+Infra: locally `infra/livekit/` runs LiveKit + Egress + Redis, and the root `docker-compose.yml` adds Postgres, the server and the SPA on top of it. Deployed, one GCE VM runs caddy, web (nginx SPA), colyseus, livekit, redis, egress via `infra/gcp/docker-compose.yml`; the directory database is a Cloud SQL PostgreSQL 17 instance (`infra/gcp/terraform/database.tf`) reached over its private IP with TLS (`DATABASE_SSL_CA_FILE`), with automated backups and point-in-time recovery. Caddy terminates TLS and multiplexes `app.*`, `lk.*`, `turn.*` sslip.io hostnames on 443 by SNI.
 
 ## Coding conventions
 
@@ -197,7 +197,9 @@ Only a `test` environment exists (`infra/gcp/README.md` is the full runbook).
 - Recording on the default `e2-medium` VM is refused by Egress admission (every start returns 502 `egress-failed`); `e2-standard-4` allows one concurrent recording.
 - Signed URLs need the VM service account to have `roles/iam.serviceAccountTokenCreator` on itself; service account keys are forbidden in the GCP project. Locally, use impersonated ADC (`infra/livekit/README.md`, "Local recording"); plain user ADC cannot sign.
 - Egress needs the upload destination in each request; the storage block in its config is not a default destination.
-- Postgres reads its password only when the volume is first initialized; rotating the secret alone breaks the connection. There are no automatic DB backups.
+- The deployed directory DB is Cloud SQL (#72). Its user password comes from the `db-password` secret through an ephemeral resource into write-only `password_wo` (never in state; needs Terraform >= 1.11). Rotating: new secret version, bump `db_password_version`, `terraform apply`, redeploy. Backups: daily + 7 days of PITR (`infra/gcp/README.md`, "Backups and restore").
+- `google_compute_instance.office` ignores `metadata_startup_script` (ForceNew: an edit used to replace the VM, which wiped the directory in #72). Roll startup script changes out with `gcloud compute instances add-metadata ... startup-script=`; replacing the VM is an explicit `terraform apply -replace=...`.
+- Login fails closed (#72): `resolveOnLogin` never creates rows except the bootstrap superadmin; every other account must be added from `/dashboard` or it gets 401 `not-provisioned`.
 - Secret values in Secret Manager must have no trailing newline (use `printf` / `tr -d '\n'`), or LiveKit token signatures fail silently.
 - Local `infra/livekit/livekit.yaml` publishes only UDP 50000-50019 and has TURN disabled; the deployed config is `infra/gcp/livekit.yaml.tpl`.
 - Password-reset emails (#94) depend on Identity Platform console settings that no code manages: the *Password reset* email template, the IAM permission `firebaseauth.users.sendEmail` on the server identity, and authorized domains if a continue URL is ever added (none is sent today). See `infra/gcp/README.md`, "Password-reset email".

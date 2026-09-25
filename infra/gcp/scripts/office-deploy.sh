@@ -51,15 +51,14 @@ SECRET_KEY_NAME="$(metadata office-secret-key)"
 SECRET_SECRET_NAME="$(metadata office-secret-secret)"
 SECRET_DB_PASSWORD_NAME="$(metadata office-secret-db-password)"
 
-# Usuario y base del contenedor de Postgres. Constantes y no metadata: no hay
-# ninguna decision que tomar aqui (el servidor es el unico cliente y la base
-# vive dentro del compose), y parametrizarlas solo anadiria dos sitios mas
-# donde descuadrar el .env con el volumen ya inicializado. Cambiar estos dos
-# valores sobre un volumen existente NO renombra nada: Postgres solo los usa
-# en la primera inicializacion, asi que el servidor se quedaria buscando una
-# base que no existe.
-POSTGRES_USER="office"
-POSTGRES_DB="office"
+# Directory database on Cloud SQL (issue #72). Host, database and user come
+# from metadata written by the SAME `terraform apply` that created them, so
+# they cannot drift from the instance. No `|| true`: this script and those
+# keys travel together in that metadata, and a deploy without a database host
+# would bring the server up with a DATABASE_URL pointing nowhere.
+DB_HOST="$(metadata office-db-host)"
+DB_NAME="$(metadata office-db-name)"
+DB_USER="$(metadata office-db-user)"
 
 # Correo que se promociona a superadmin en su primer inicio de sesion (issue
 # #24). Sale de la metadata y no de Secret Manager porque no es un secreto: es
@@ -111,6 +110,19 @@ metadata office-compose >"${WORKDIR}/docker-compose.yml"
 metadata office-caddyfile >"${WORKDIR}/Caddyfile"
 chmod 0644 "${WORKDIR}/docker-compose.yml" "${WORKDIR}/Caddyfile"
 
+# CA of the Cloud SQL instance (issue #72), bind-mounted into colyseus as
+# DATABASE_SSL_CA_FILE. Public, hence 0644 and not in the .env. Written in
+# place, not through a temporary + mv: a single-file bind mount follows the
+# inode, and a rename would leave the running container on the old file. An
+# empty file would make every connection fail TLS verification, so it aborts
+# here with a message that says where to look.
+metadata office-db-server-ca >"${WORKDIR}/db-server-ca.pem"
+chmod 0644 "${WORKDIR}/db-server-ca.pem"
+if ! grep -q 'BEGIN CERTIFICATE' "${WORKDIR}/db-server-ca.pem"; then
+  echo "[office-deploy] office-db-server-ca no contiene un certificado. Falta un terraform apply (ver infra/gcp/README.md)." >&2
+  exit 1
+fi
+
 # Los hostnames salen de la IP, que no se conoce hasta que Terraform la
 # reserva: por eso livekit.yaml es una plantilla y no un fichero literal.
 #
@@ -150,9 +162,9 @@ secret_value() {
 # asignacion si aborta.
 LIVEKIT_API_KEY="$(secret_value "${SECRET_KEY_NAME}")"
 LIVEKIT_API_SECRET="$(secret_value "${SECRET_SECRET_NAME}")"
-POSTGRES_PASSWORD="$(secret_value "${SECRET_DB_PASSWORD_NAME}")"
+DB_PASSWORD="$(secret_value "${SECRET_DB_PASSWORD_NAME}")"
 
-if [[ -z "${LIVEKIT_API_KEY}" || -z "${LIVEKIT_API_SECRET}" || -z "${POSTGRES_PASSWORD}" ]]; then
+if [[ -z "${LIVEKIT_API_KEY}" || -z "${LIVEKIT_API_SECRET}" || -z "${DB_PASSWORD}" ]]; then
   echo "[office-deploy] Secret Manager devolvio un valor vacio. Falta anadir la version del secreto (ver infra/gcp/README.md)." >&2
   exit 1
 fi
@@ -190,12 +202,14 @@ fi
 # recomienda generarla en hexadecimal (donde esto nunca haria falta), pero el
 # valor lo pone un humano en Secret Manager y no se puede dar por supuesto.
 #
-# El host es `postgres`: el nombre del servicio en la red interna del compose.
-POSTGRES_PASSWORD_ENC="$(
-  printf '%s' "${POSTGRES_PASSWORD}" |
+# The host is the Cloud SQL private IP (issue #72). The same secret is the
+# password Terraform set on the Cloud SQL user (password_wo in
+# terraform/database.tf), so both sides read one value.
+DB_PASSWORD_ENC="$(
+  printf '%s' "${DB_PASSWORD}" |
     python3 -c 'import sys,urllib.parse; sys.stdout.write(urllib.parse.quote(sys.stdin.read(), safe=""))'
 )"
-DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD_ENC}@postgres:5432/${POSTGRES_DB}"
+DATABASE_URL="postgresql://${DB_USER}:${DB_PASSWORD_ENC}@${DB_HOST}:5432/${DB_NAME}"
 
 # Se escribe a un temporal y se mueve: si algo falla a mitad, el .env anterior
 # sigue intacto y el stack sigue en pie.
@@ -214,13 +228,8 @@ trap 'rm -f "${TMP_ENV}"' EXIT
   echo "LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}"
   # No es un secreto: es el id del proyecto de GCP. No pasa por Secret Manager.
   echo "FIREBASE_PROJECT_ID=${AUTH_PROJECT_ID}"
-  # Directorio de usuarios e invitaciones (issue #24). Las tres POSTGRES_* las
-  # consume el contenedor de la base; DATABASE_URL la consume el servidor. Se
-  # escriben las cuatro porque describen los dos lados de la misma conexion y
-  # descuadrarlas es el fallo que hay que hacer imposible.
-  echo "POSTGRES_USER=${POSTGRES_USER}"
-  echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
-  echo "POSTGRES_DB=${POSTGRES_DB}"
+  # Directorio de usuarios e invitaciones (issues #24, #72). Only the server
+  # needs it now: there is no database container on this VM to configure.
   echo "DATABASE_URL=${DATABASE_URL}"
   # Tampoco es un secreto: es una direccion de correo. Mismo criterio que
   # FIREBASE_PROJECT_ID.
