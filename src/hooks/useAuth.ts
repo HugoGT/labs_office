@@ -16,7 +16,15 @@ export interface AuthState {
   pending: boolean;
   /** Ya traducido a texto para la persona; el error crudo no sale de aqui. */
   error: string | null;
-  signIn: (email: string, password: string) => Promise<void>;
+  /**
+   * `Promise<boolean>` y no `Promise<void>` (#100, D9): `true` si el proveedor
+   * no lanzo, `false` si lanzo -- NUNCA rechaza. `AuthGate` encadena el
+   * reclamo del nombre visible con este valor, de forma imperativa y no
+   * dentro de un efecto: un re-login con el MISMO uid deja el objeto `user`
+   * igual (`isSameUser`), asi que un efecto atado a `user` no volveria a
+   * dispararse.
+   */
+  signIn: (email: string, password: string) => Promise<boolean>;
   signOut: () => Promise<void>;
 }
 
@@ -83,18 +91,20 @@ export function useAuth(auth: AuthPort | null): AuthState {
   }, [auth]);
 
   const signIn = useCallback(
-    async (email: string, password: string): Promise<void> => {
-      if (auth === null) return;
+    async (email: string, password: string): Promise<boolean> => {
+      if (auth === null) return true;
 
       setError(null);
       setPending(true);
       try {
         await auth.signIn(email, password);
+        return true;
       } catch (cause) {
         // No se relanza: el fallo de credenciales es parte normal del flujo,
         // no una excepcion que alguien arriba deba manejar. Vive en el estado,
         // que es donde la pantalla puede mostrarlo.
         if (aliveRef.current) setError(describeAuthError(cause));
+        return false;
       } finally {
         if (aliveRef.current) setPending(false);
       }
