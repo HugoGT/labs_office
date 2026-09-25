@@ -50,6 +50,14 @@ export interface CharacterContainer extends Phaser.GameObjects.Container {
 
 const PLAYER_TEXTURE = 'avP';
 
+/**
+ * Geometria del cuerpo Arcade compartida por el jugador local (`spawnPlayer`)
+ * y los peers remotos (`enablePeerBody`, #59): mismo tamano y offset para que
+ * el colisionador vea a todo el mundo como el mismo tipo de obstaculo.
+ */
+const BODY_SIZE = { w: 22, h: 14 } as const;
+const BODY_OFFSET = { x: -11, y: 6 } as const;
+
 /** Construye un personaje: anillo de habla + sprite + pildora de nombre (app.js:325-347). */
 export function makeCharacter(
   scene: Phaser.Scene,
@@ -137,8 +145,26 @@ export function spawnPlayer(scene: Phaser.Scene, name: string): CharacterContain
   );
   scene.physics.add.existing(player);
   const body = player.body as Phaser.Physics.Arcade.Body;
-  body.setSize(22, 14).setOffset(-11, 6);
+  body.setSize(BODY_SIZE.w, BODY_SIZE.h).setOffset(BODY_OFFSET.x, BODY_OFFSET.y);
   body.setCollideWorldBounds(true);
   scene.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
   return player;
+}
+
+/**
+ * Da a un avatar remoto un cuerpo Arcade inmovible (#59): el jugador no
+ * puede atravesarlo, pero el peer nunca se desplaza por la separacion --
+ * `moves=false` deja el tween de `remoteAvatarSink` como unica fuente de
+ * verdad de su posicion (design.md, "Peer collision"). Phaser resincroniza
+ * `updateFromGameObject()` en cada `preUpdate` de un cuerpo DYNAMIC, asi que
+ * el cuerpo sigue al contenedor tween sin sincronizacion manual.
+ */
+export function enablePeerBody(scene: Phaser.Scene, container: CharacterContainer): void {
+  scene.physics.add.existing(container);
+  const body = container.body as Phaser.Physics.Arcade.Body;
+  body
+    .setSize(BODY_SIZE.w, BODY_SIZE.h)
+    .setOffset(BODY_OFFSET.x, BODY_OFFSET.y)
+    .setImmovable(true);
+  body.moves = false;
 }

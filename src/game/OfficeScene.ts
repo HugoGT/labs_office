@@ -178,6 +178,14 @@ export class OfficeScene extends Phaser.Scene {
    */
   private layoutEditLayer?: LayoutEditLayer;
   /**
+   * Grupo de cuerpos de peers vivos (#59): se crea UNA vez en `buildColliders`
+   * junto a un unico `collider(player, peerGroup)`, y cada `createPhaserAvatarSink`
+   * nuevo (una por conexion, D-diseno) recibe el MISMO grupo -- una
+   * reconexion no duplica el colisionador ni pierde a los peers que la
+   * sobreviven.
+   */
+  private peerGroup?: Phaser.GameObjects.Group;
+  /**
    * Si el modo edicion esta activo (#74, PR3b): la UNICA cosa que la escena
    * necesita saber de el para suspender claim/release en `drawDesk`. Todo lo
    * demas -- que dibujar, que es pickable, donde va el ghost -- lo sigue
@@ -461,10 +469,13 @@ export class OfficeScene extends Phaser.Scene {
       if (this.status !== joinedStatus) connection.sendStatus(this.status);
       // Unit 8 (issue #2): el sink ahora necesita el bridge para poder emitir
       // `peermenu` al clicar un peer real; toque mecanico, la escena ya guarda
-      // `this.bridge` desde su constructor.
-      this.remotes = createRemoteAvatarRegistry(createPhaserAvatarSink(this, this.bridge), {
-        ignoreSessionId: connection.sessionId,
-      });
+      // `this.bridge` desde su constructor. Issue #59: tambien recibe
+      // `peerGroup`, el mismo de siempre, para que cada peer nazca con
+      // cuerpo de colision.
+      this.remotes = createRemoteAvatarRegistry(
+        createPhaserAvatarSink(this, this.bridge, this.peerGroup),
+        { ignoreSessionId: connection.sessionId },
+      );
       this.roster = createRosterTracker((peers) => this.bridge.emit('roster', { peers }), {
         ignoreSessionId: connection.sessionId,
       });
@@ -766,7 +777,12 @@ export class OfficeScene extends Phaser.Scene {
     });
   }
 
-  /** Fusiona tiles solidos en rectangulos estaticos y los colisiona con el jugador (app.js:392-408, D6). */
+  /**
+   * Fusiona tiles solidos en rectangulos estaticos y los colisiona con el
+   * jugador (app.js:392-408, D6). Tambien crea el grupo de peers (#59) y su
+   * unico colisionador: vacio al arrancar, se llena segun `remoteAvatarSink`
+   * les da cuerpo en `create()`.
+   */
   private buildColliders(grid: TerrainGrid): void {
     const rects = mergeColliderRects(grid.solid).map((r) => {
       const w = r.w * TILE;
@@ -776,6 +792,9 @@ export class OfficeScene extends Phaser.Scene {
       return rect;
     });
     this.physics.add.collider(this.player, rects);
+
+    this.peerGroup = this.add.group();
+    this.physics.add.collider(this.player, this.peerGroup);
   }
 
   /** Camara principal siguiendo al jugador + minimapa en la esquina superior derecha (app.js:410-431). */

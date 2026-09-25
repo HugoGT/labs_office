@@ -10,6 +10,7 @@
 // area de contacto del clic del menu contextual.
 import Phaser from 'phaser';
 import {
+  enablePeerBody,
   makeCharacter,
   setCharacterFacing,
   setCharacterStatus,
@@ -61,6 +62,11 @@ function facingOf(raw: string): Facing {
 export function createPhaserAvatarSink(
   scene: Phaser.Scene,
   bridge: OfficeBridge,
+  // #59: opcional para no romper a quien todavia llama con dos argumentos
+  // (tests existentes, cualquier otro consumidor futuro sin fisica). Con un
+  // grupo, cada peer nace con un cuerpo Arcade inmovible y se une a el; sin
+  // el, comportamiento de hoy -- ningun peer bloquea al jugador.
+  peerBodies?: Phaser.GameObjects.Group,
 ): RemoteAvatarSink<RemoteAvatarContainer> {
   return {
     create(snapshot: RemotePlayerSnapshot) {
@@ -77,6 +83,14 @@ export function createPhaserAvatarSink(
       container.setPosition(snapshot.x, snapshot.y);
       container.setDepth(avatarDepth(snapshot.y));
       container.spacesVersion = snapshot.spacesVersion;
+
+      // #59: cuerpo de colision, solo si el llamador nos dio donde unirse.
+      // `Group.add` registra su propio listener de DESTROY (Group.js:615),
+      // asi que `destroy()` mas abajo no necesita retirarlo a mano.
+      if (peerBodies) {
+        enablePeerBody(scene, container);
+        peerBodies.add(container);
+      }
 
       // Issue #2, unit 8 (kill switch): el peer es el unico personaje clicable
       // de la oficina, con `stopPropagation` para no colar el clic al mapa de

@@ -94,14 +94,21 @@ async function bootOfficeScene(
 }
 
 /**
- * El jugador local es el unico contenedor con cuerpo fisico: los avatares
- * remotos no lo tienen. Se busca asi y no por su nombre porque el nombre es
- * justo lo que varias pruebas miden (#6): atarlo aqui haria que el helper
- * dejase de encontrarlo en cuanto la sesion traiga otro.
+ * Desde #59 tanto el jugador como los peers remotos tienen cuerpo fisico:
+ * `body !== null` dejo de distinguirlos. Lo que sigue distinguiendolos es
+ * `moves` -- el cuerpo del jugador se mueve por velocidad (D-diseno,
+ * `spawnPlayer`); el de un peer es `enablePeerBody` (`moves=false`, el tween
+ * es la unica fuente de verdad de su posicion). Se busca asi y no por el
+ * nombre porque el nombre es justo lo que varias pruebas miden (#6): atarlo
+ * aqui haria que el helper dejase de encontrarlo en cuanto la sesion traiga
+ * otro.
  */
 function findPlayer(scene: Phaser.Scene): CharacterContainer {
   const player = scene.children.list.find(
-    (c): c is CharacterContainer => c.type === 'Container' && c.body !== null,
+    (c): c is CharacterContainer =>
+      c.type === 'Container' &&
+      c.body !== null &&
+      (c.body as Phaser.Physics.Arcade.Body).moves !== false,
   );
   if (!player) throw new Error('player container not found in scene');
   return player;
@@ -483,10 +490,13 @@ function remoteSnapshot(overrides: Record<string, unknown> = {}) {
 }
 
 function findRemoteAvatars(scene: Phaser.Scene): CharacterContainer[] {
-  // Complemento exacto de `findPlayer`, y por el mismo motivo: sin cuerpo
-  // fisico solo quedan los avatares que llegan por Colyseus.
+  // Complemento exacto de `findPlayer` (ver su comentario, #59): un peer
+  // remoto o no tiene cuerpo (sin `peerGroup`, no deberia pasar en
+  // produccion) o lo tiene con `moves=false`.
   return scene.children.list.filter(
-    (c): c is CharacterContainer => c.type === 'Container' && c.body === null,
+    (c): c is CharacterContainer =>
+      c.type === 'Container' &&
+      (c.body === null || (c.body as Phaser.Physics.Arcade.Body).moves === false),
   );
 }
 

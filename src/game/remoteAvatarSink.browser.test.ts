@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
+import { spawnPlayer } from './characters';
 import { createOfficeBridge } from './officeBridge';
 import { STATUS_COLOR } from './presence';
 import { createRemoteAvatarRegistry, type RemotePlayerSnapshot } from './remoteAvatars';
@@ -46,6 +47,46 @@ async function withScene<T>(run: (scene: Phaser.Scene) => T): Promise<T> {
 
   return result;
 }
+
+/**
+ * Igual que `withScene`, pero con fisica Arcade real -- lo que necesitan las
+ * pruebas de `enablePeerBody`/colision (#59): un cuerpo, un colisionador y
+ * velocidad de verdad, no una superficie falsa.
+ */
+async function withPhysicsScene<T>(run: (scene: Phaser.Scene) => T): Promise<T> {
+  const host = document.createElement('div');
+  host.style.width = '320px';
+  host.style.height = '240px';
+  document.body.append(host);
+  hosts.push(host);
+
+  let result!: T;
+  class ProbeScene extends Phaser.Scene {
+    constructor() {
+      super('probe-physics');
+    }
+    create(): void {
+      createOfficeTextures(this);
+      result = run(this);
+    }
+  }
+
+  const game = new Phaser.Game({
+    type: Phaser.AUTO,
+    parent: host,
+    width: 320,
+    height: 240,
+    physics: { default: 'arcade' },
+    scene: [ProbeScene],
+  });
+  games.push(game);
+
+  await waitForSceneRunning(game, 'probe-physics');
+
+  return result;
+}
+
+const PHYSICS_WAIT = { timeout: 20000, interval: 50 } as const;
 
 function snapshot(overrides: Partial<RemotePlayerSnapshot> = {}): RemotePlayerSnapshot {
   return {
@@ -283,5 +324,150 @@ describe('createPhaserAvatarSink: clic en un avatar de peer real (issue #2, D1)'
     });
 
     expect(stopPropagation).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Cuerpo fisico del peer (#59, D-diseno "Peer collision"): `createPhaserAvatarSink`
+ * acepta un `peerBodies` opcional -- sin el, comportamiento de hoy, sin
+ * cuerpo. Con el, cada peer se anade a ESE grupo, que `OfficeScene` colisiona
+ * una sola vez con el jugador (`buildColliders`).
+ */
+describe('createPhaserAvatarSink: cuerpo fisico del peer con peerBodies (#59)', () => {
+  it('sin peerBodies, el peer no tiene cuerpo fisico (compatibilidad con lo de hoy)', async () => {
+    const hasBody = await withPhysicsScene((scene) => {
+      const sink = createPhaserAvatarSink(scene, createOfficeBridge());
+      return sink.create(snapshot()).body !== null;
+    });
+
+    expect(hasBody).toBe(false);
+  });
+
+  it('con peerBodies, create() da cuerpo Arcade al peer y lo anade al grupo', async () => {
+    const result = await withPhysicsScene((scene) => {
+      const group = scene.add.group();
+      const sink = createPhaserAvatarSink(scene, createOfficeBridge(), group);
+      const avatar = sink.create(snapshot());
+      return { hasBody: avatar.body !== null, inGroup: group.contains(avatar) };
+    });
+
+    expect(result).toEqual({ hasBody: true, inGroup: true });
+  });
+
+  it('destroy() retira al peer del grupo (sin fantasmas al desconectar)', async () => {
+    const result = await withPhysicsScene((scene) => {
+      const group = scene.add.group();
+      const sink = createPhaserAvatarSink(scene, createOfficeBridge(), group);
+      const avatar = sink.create(snapshot());
+      const before = group.getLength();
+      sink.destroy(avatar);
+      return { before, after: group.getLength() };
+    });
+
+    expect(result).toEqual({ before: 1, after: 0 });
+  });
+
+  it('un grupo de varias altas y bajas termina vacio, sin fantasmas', async () => {
+    const finalLength = await withPhysicsScene((scene) => {
+      const group = scene.add.group();
+      const sink = createPhaserAvatarSink(scene, createOfficeBridge(), group);
+      const avatars = ['p1', 'p2', 'p3'].map((sessionId) => sink.create(snapshot({ sessionId })));
+      for (const avatar of avatars) sink.destroy(avatar);
+      return group.getLength();
+    });
+
+    expect(finalLength).toBe(0);
+  });
+
+  it('el cuerpo del peer sigue al tween en vuelo, no solo la posicion final', async () => {
+    const { avatar, body } = await withPhysicsScene((scene) => {
+      const group = scene.add.group();
+      const sink = createPhaserAvatarSink(scene, createOfficeBridge(), group);
+      const avatar = sink.create(snapshot({ x: 0, y: 0 }));
+      sink.update(avatar, snapshot({ x: 640, y: 0 }));
+      return { avatar, body: avatar.body as Phaser.Physics.Arcade.Body };
+    });
+
+    // A mitad de camino del tween, el CONTENEDOR ya se movio Y el CUERPO lo
+    // sigue de cerca (una tolerancia de un par de cuadros, no exacta al
+    // pixel: `updateFromGameObject` corre en el `preUpdate` del cuerpo, que
+    // puede ir un cuadro por detras del `x` que el tween ya escribio). Si
+    // `moves=false` cortase TAMBIEN ese resync (en vez de solo la escritura
+    // de vuelta de Arcade), el colisionador seguiria viendo al peer plantado
+    // en el origen mientras el sprite ya viaja -- exactamente el "no
+    // auto-resync" que el diseno descarta para cuerpos DYNAMIC.
+    await vi.waitFor(() => {
+      expect(avatar.x).toBeGreaterThan(0);
+      expect(avatar.x).toBeLessThan(640);
+      expect(Math.abs(body.center.x - avatar.x)).toBeLessThan(24);
+    }, PHYSICS_WAIT);
+  });
+});
+
+describe('createPhaserAvatarSink: el jugador no atraviesa a un peer con cuerpo (#59)', () => {
+  it('el jugador se detiene antes de solapar a un peer quieto', async () => {
+    const { player, peerX } = await withPhysicsScene((scene) => {
+      const group = scene.add.group();
+      const sink = createPhaserAvatarSink(scene, createOfficeBridge(), group);
+      const peer = sink.create(snapshot({ x: 300, y: 100 }));
+      const player = spawnPlayer(scene, 'Yo');
+      player.setPosition(100, 100);
+      scene.physics.add.collider(player, group);
+      (player.body as Phaser.Physics.Arcade.Body).setVelocity(400, 0);
+      return { player, peerX: peer.x };
+    });
+
+    await vi.waitFor(() => {
+      const body = player.body as Phaser.Physics.Arcade.Body;
+      expect(body.velocity.x).toBe(0);
+    }, PHYSICS_WAIT);
+    // Cuerpos de 22px de ancho centrados: nunca puede cruzar el centro del peer.
+    expect(player.x).toBeLessThan(peerX);
+  });
+
+  it('un peer en pleno tween que se desliza hacia un jugador quieto no lo atraviesa', async () => {
+    const { player, avatar } = await withPhysicsScene((scene) => {
+      const group = scene.add.group();
+      const sink = createPhaserAvatarSink(scene, createOfficeBridge(), group);
+      const avatar = sink.create(snapshot({ x: 300, y: 100 }));
+      const player = spawnPlayer(scene, 'Yo');
+      player.setPosition(150, 100);
+      scene.physics.add.collider(player, group);
+      // El peer se desliza HACIA el jugador quieto (ritmo por debajo del
+      // margen de sincronizacion que el diseno acepta, ~4px por paso fisico
+      // a 60Hz: 100px en 100ms son ~16.7px/paso). Si el cuerpo no siguiera el
+      // tween (solo se resincronizase al terminar), el jugador quedaria
+      // embebido en la posicion final sin que la separacion progresiva de
+      // Arcade lo empuje hacia atras cuadro a cuadro.
+      sink.update(avatar, snapshot({ x: 200, y: 100 }));
+      return { player, avatar };
+    });
+
+    await vi.waitFor(() => {
+      expect(avatar.glideTween).toBeUndefined();
+    }, PHYSICS_WAIT);
+    // Asentado: el jugador nunca quedo al otro lado del peer.
+    expect(player.x).toBeLessThan(avatar.x);
+  });
+
+  it('el jugador nacido encima de un peer puede alejarse (regla embedded de Arcade)', async () => {
+    // Todo el mundo nace en la misma tile de spawn (mapData): esta prueba fija
+    // el caso limite en el que el jugador aparece exactamente sobre un peer ya
+    // presente. La regla `embedded` de Arcade (GetOverlapX/Y) debe dejarlo
+    // salir en vez de trabar la separacion contra si misma.
+    const { player, peerX } = await withPhysicsScene((scene) => {
+      const group = scene.add.group();
+      const sink = createPhaserAvatarSink(scene, createOfficeBridge(), group);
+      const peer = sink.create(snapshot({ x: 200, y: 200 }));
+      const player = spawnPlayer(scene, 'Yo');
+      player.setPosition(200, 200); // exactamente encima del peer.
+      scene.physics.add.collider(player, group);
+      (player.body as Phaser.Physics.Arcade.Body).setVelocity(400, 0);
+      return { player, peerX: peer.x };
+    });
+
+    await vi.waitFor(() => {
+      expect(player.x).toBeGreaterThan(peerX + 20);
+    }, PHYSICS_WAIT);
   });
 });
