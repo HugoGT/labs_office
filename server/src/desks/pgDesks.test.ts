@@ -575,6 +575,24 @@ describe('pgDesks: listOfficeDesks', () => {
     expect(pool.queries.at(-1)?.values).toEqual([[ANA]]);
   });
 
+  it('resolves above_avatars from the asset so the scene can pick the render layer (#71)', async () => {
+    const pool = officePool([OCCUPIED_ROW], [{ ...ITEM_ROW, above_avatars: true }]);
+
+    const office = await createPgDesks(pool).listOfficeDesks();
+
+    expect(office[0].occupant?.items[0].aboveAvatars).toBe(true);
+    const items = sqls(pool).find((sql) => sql.includes('user_desk_configs'))!;
+    expect(items).toContain('a.above_avatars');
+  });
+
+  it('an item row without above_avatars is a normal asset (#71)', async () => {
+    const pool = officePool([OCCUPIED_ROW], [ITEM_ROW]);
+
+    const office = await createPgDesks(pool).listOfficeDesks();
+
+    expect(office[0].occupant?.items[0].aboveAvatars).toBe(false);
+  });
+
   it('la decoracion NO filtra archivados: quien ya la tenia puesta la sigue viendo (D1b)', async () => {
     const pool = officePool([OCCUPIED_ROW], [ITEM_ROW]);
 

@@ -483,3 +483,15 @@ describe('reportDesksWithoutSpace (#10 + #12, S1a tarea 1.2)', () => {
     expect(spy[0]).toContain('[desks] escritorio sin cubiculo');
   });
 });
+
+describe('schema.sql: assets drawn above avatars (#71)', () => {
+  it('adds the flag to databases that already exist, defaulting every existing asset to normal', () => {
+    // `CREATE TABLE IF NOT EXISTS assets` never touches a live table, so the
+    // column has to arrive through its own idempotent ALTER. NOT NULL DEFAULT
+    // false backfills every existing row as a normal asset: nothing becomes
+    // special by migrating.
+    expect(schema).toContain(
+      'alter table assets add column if not exists above_avatars boolean not null default false',
+    );
+  });
+});

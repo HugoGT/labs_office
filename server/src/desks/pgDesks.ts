@@ -71,7 +71,7 @@ const OFFICE_SELECT = `
  */
 const OFFICE_ITEMS_SELECT = `
   SELECT d.id, d.user_id, d.asset_id, d.slot, d.rotation, d.created_at,
-         a.texture_key, a.w, a.h, a.name
+         a.texture_key, a.w, a.h, a.name, a.above_avatars
   FROM user_desk_configs d
   JOIN assets a ON a.id = d.asset_id
   WHERE d.user_id = ANY($1::uuid[])
@@ -100,6 +100,8 @@ function toDeskItem(row: Record<string, unknown>): DeskItem {
     w: row.w as number,
     h: row.h as number,
     name: row.name as string,
+    // Same read as `pgDecor.toDeskItem`: anything but `true` is a normal asset (#71).
+    aboveAvatars: row.above_avatars === true,
     createdAt: row.created_at as Date,
   };
 }

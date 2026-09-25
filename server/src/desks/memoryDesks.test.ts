@@ -49,6 +49,7 @@ const PLANTA: Asset = {
   w: 1,
   h: 1,
   placeableOnDesk: true,
+  aboveAvatars: false,
   archivedAt: null,
   createdAt: NOW,
 };

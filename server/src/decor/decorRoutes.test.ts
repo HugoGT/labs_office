@@ -27,6 +27,7 @@ import {
   handleListAssets,
   handleListOfficeAssets,
   handleReplaceDeskConfig,
+  handleUpdateAsset,
   type DecorDeps,
 } from './decorRoutes.ts';
 
@@ -76,6 +77,7 @@ function seedAsset(overrides: Partial<Asset> & Pick<Asset, 'id'>): Asset {
     w: 1,
     h: 1,
     placeableOnDesk: true,
+    aboveAvatars: false,
     archivedAt: null,
     createdAt: NOW,
     ...overrides,
@@ -164,12 +166,39 @@ describe('handleListAssets', () => {
       w: 1,
       h: 1,
       placeableOnDesk: true,
+      aboveAvatars: false,
       archivedAt: null,
     });
   });
 });
 
 describe('handleCreateAsset', () => {
+  it('an asset is created normal when the body does not mention aboveAvatars (#71)', async () => {
+    const { deps } = harness();
+
+    const result = await handleCreateAsset(BEARER_ADMIN, assetBody(), deps);
+
+    expect(result.status).toBe(201);
+    expect(result.body.aboveAvatars).toBe(false);
+  });
+
+  it('an admin can create an asset already marked as drawn above avatars (#71)', async () => {
+    const { deps } = harness();
+
+    const result = await handleCreateAsset(BEARER_ADMIN, assetBody({ aboveAvatars: true }), deps);
+
+    expect(result.status).toBe(201);
+    expect(result.body.aboveAvatars).toBe(true);
+  });
+
+  it('a non-boolean aboveAvatars answers 400 (#71)', async () => {
+    const { deps } = harness();
+
+    const result = await handleCreateAsset(BEARER_ADMIN, assetBody({ aboveAvatars: 'si' }), deps);
+
+    expect(result.status).toBe(400);
+  });
+
   it('sin cabecera responde 401', async () => {
     const { deps } = harness();
 
@@ -344,6 +373,88 @@ describe('handleArchiveAsset', () => {
   });
 });
 
+describe('handleUpdateAsset (#71)', () => {
+  it('without a header answers 401', async () => {
+    const { deps } = harness();
+
+    expect((await handleUpdateAsset(undefined, PLANTA.id, { aboveAvatars: true }, deps)).status).toBe(
+      401,
+    );
+  });
+
+  it('an employee answers 403, before the id lookup and before the body', async () => {
+    const { deps } = harness();
+
+    expect((await handleUpdateAsset(BEARER_EMPLEADO, 'no-existe', 'basura', deps)).status).toBe(403);
+  });
+
+  it('an admin marks an asset as drawn above avatars and gets the row back', async () => {
+    const { deps } = harness();
+
+    const result = await handleUpdateAsset(BEARER_ADMIN, PLANTA.id, { aboveAvatars: true }, deps);
+
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ id: PLANTA.id, aboveAvatars: true, name: 'Planta' });
+  });
+
+  it('an admin unmarks it again', async () => {
+    const { deps, decor } = harness([{ ...PLANTA, aboveAvatars: true }]);
+
+    const result = await handleUpdateAsset(BEARER_ADMIN, PLANTA.id, { aboveAvatars: false }, deps);
+
+    expect(result.status).toBe(200);
+    expect((await decor.listAssets())[0].aboveAvatars).toBe(false);
+  });
+
+  it('ignores any other field in the body: name, slug and archiving are not editable here', async () => {
+    const { deps, decor } = harness([PLANTA]);
+
+    await handleUpdateAsset(
+      BEARER_ADMIN,
+      PLANTA.id,
+      { aboveAvatars: true, name: 'Otro', slug: 'otro', archivedAt: NOW.toISOString() },
+      deps,
+    );
+
+    const [stored] = await decor.listAssets();
+    expect(stored).toMatchObject({ name: 'Planta', slug: 'planta', archivedAt: null });
+  });
+
+  it('a body that is not an object answers 400', async () => {
+    const { deps } = harness();
+
+    expect((await handleUpdateAsset(BEARER_ADMIN, PLANTA.id, [true], deps)).status).toBe(400);
+  });
+
+  it('a body with nothing to change answers 400', async () => {
+    const { deps } = harness();
+
+    expect((await handleUpdateAsset(BEARER_ADMIN, PLANTA.id, {}, deps)).status).toBe(400);
+  });
+
+  it('a non-boolean flag answers 400', async () => {
+    const { deps } = harness();
+
+    expect(
+      (await handleUpdateAsset(BEARER_ADMIN, PLANTA.id, { aboveAvatars: 'si' }, deps)).status,
+    ).toBe(400);
+  });
+
+  it('an unknown id answers 404', async () => {
+    const { deps } = harness();
+
+    expect(
+      (await handleUpdateAsset(BEARER_ADMIN, 'no-existe', { aboveAvatars: true }, deps)).status,
+    ).toBe(404);
+  });
+
+  it('an id that is not a string answers 400', async () => {
+    const { deps } = harness();
+
+    expect((await handleUpdateAsset(BEARER_ADMIN, 7, { aboveAvatars: true }, deps)).status).toBe(400);
+  });
+});
+
 describe('handleGetDeskConfig', () => {
   it('sin cabecera responde 401', async () => {
     const { deps } = harness();
@@ -383,6 +494,7 @@ describe('handleGetDeskConfig', () => {
         w: 1,
         h: 1,
         name: 'Planta',
+        aboveAvatars: false,
       },
     ]);
   });

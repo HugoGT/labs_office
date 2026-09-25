@@ -26,6 +26,7 @@ import {
   normalizeAssetName,
   normalizeCreateAssetInput,
   normalizeDeskConfig,
+  normalizeUpdateAssetInput,
 } from './decorRules.ts';
 
 const RETIRADO_EL = new Date('2026-02-01T00:00:00.000Z');
@@ -175,7 +176,19 @@ describe('normalizeCreateAssetInput', () => {
       w: 1,
       h: 1,
       placeableOnDesk: true,
+      aboveAvatars: false,
     });
+  });
+
+  it('an asset is normal unless it asks to be drawn above avatars (#71)', () => {
+    expect(normalizeCreateAssetInput(VALIDO).aboveAvatars).toBe(false);
+    expect(normalizeCreateAssetInput({ ...VALIDO, aboveAvatars: true }).aboveAvatars).toBe(true);
+  });
+
+  it('aboveAvatars, when present, must be a boolean (#71)', () => {
+    expect(() =>
+      normalizeCreateAssetInput({ ...VALIDO, aboveAvatars: 'si' as unknown as boolean }),
+    ).toThrow(InvalidAssetError);
   });
 
   it('recorta la clave de textura', () => {
@@ -204,6 +217,31 @@ describe('normalizeCreateAssetInput', () => {
     expect(() =>
       normalizeCreateAssetInput({ ...VALIDO, placeableOnDesk: 'si' as unknown as boolean }),
     ).toThrow(InvalidAssetError);
+  });
+});
+
+describe('normalizeUpdateAssetInput (#71)', () => {
+  it('marks and unmarks an asset as drawn above avatars', () => {
+    expect(normalizeUpdateAssetInput({ aboveAvatars: true })).toEqual({ aboveAvatars: true });
+    expect(normalizeUpdateAssetInput({ aboveAvatars: false })).toEqual({ aboveAvatars: false });
+  });
+
+  it('rejects a non-boolean flag', () => {
+    expect(() => normalizeUpdateAssetInput({ aboveAvatars: 1 as unknown as boolean })).toThrow(
+      InvalidAssetError,
+    );
+  });
+
+  it('rejects an update with nothing to change', () => {
+    // An empty body would be a 200 that did nothing, which reads as "saved".
+    expect(() => normalizeUpdateAssetInput({})).toThrow(InvalidAssetError);
+  });
+
+  it('drops any other field: identity, size and archiving are not editable here', () => {
+    const input = { aboveAvatars: true, name: 'Otro', archivedAt: null } as unknown as {
+      aboveAvatars: boolean;
+    };
+    expect(normalizeUpdateAssetInput(input)).toEqual({ aboveAvatars: true });
   });
 });
 

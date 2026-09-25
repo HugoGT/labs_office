@@ -76,6 +76,7 @@ const ASSET_ROW = {
   w: 1,
   h: 1,
   placeable_on_desk: true,
+  above_avatars: false,
   archived_at: null,
   created_at: new Date('2026-01-01T00:00:00.000Z'),
 };
@@ -90,6 +91,7 @@ const DESK_ROW = {
   w: ASSET_ROW.w,
   h: ASSET_ROW.h,
   name: ASSET_ROW.name,
+  above_avatars: ASSET_ROW.above_avatars,
 };
 
 const USER_ID = '55555555-5555-4555-8555-555555555555';
@@ -145,11 +147,21 @@ describe('pgDecor: listAssets', () => {
         w: 1,
         h: 1,
         placeableOnDesk: true,
+        aboveAvatars: false,
         archivedAt: null,
         createdAt: ASSET_ROW.created_at,
       },
     ]);
     expect(squash(pool.queries[0].text)).toContain('order by kind, slug, id');
+  });
+
+  it('selects and maps above_avatars (#71)', async () => {
+    const pool = fakePool(() => ({ rows: [{ ...ASSET_ROW, above_avatars: true }], rowCount: 1 }));
+
+    const assets = await createPgDecor(pool).listAssets();
+
+    expect(squash(pool.queries[0].text)).toContain('above_avatars');
+    expect(assets[0].aboveAvatars).toBe(true);
   });
 
   it('la lectura normal del catalogo filtra los archivados (D1b)', async () => {
@@ -215,7 +227,18 @@ describe('pgDecor: createAsset', () => {
       1,
       1,
       true,
+      false,
     ]);
+  });
+
+  it('inserts aboveAvatars when the admin marks the asset as special (#71)', async () => {
+    const pool = fakePool(() => ({ rows: [{ ...ASSET_ROW, above_avatars: true }], rowCount: 1 }));
+
+    const asset = await createPgDecor(pool).createAsset({ ...VALIDO, aboveAvatars: true });
+
+    expect(squash(pool.queries[0].text)).toContain('above_avatars');
+    expect(pool.queries[0].values.at(-1)).toBe(true);
+    expect(asset.aboveAvatars).toBe(true);
   });
 
   it('un error del motor se propaga tal cual', async () => {
@@ -290,6 +313,35 @@ describe('pgDecor: archiveAsset', () => {
   });
 });
 
+describe('pgDecor: updateAsset (#71)', () => {
+  it('updates only above_avatars and returns the row', async () => {
+    const pool = fakePool(() => ({ rows: [{ ...ASSET_ROW, above_avatars: true }], rowCount: 1 }));
+
+    const asset = await createPgDecor(pool).updateAsset(ASSET_ROW.id, { aboveAvatars: true });
+
+    const sql = squash(pool.queries[0].text);
+    expect(sql).toContain('update assets set above_avatars = $2 where id = $1');
+    expect(sql).not.toContain('archived_at =');
+    expect(pool.queries[0].values).toEqual([ASSET_ROW.id, true]);
+    expect(asset?.aboveAvatars).toBe(true);
+  });
+
+  it('validates BEFORE touching the pool', async () => {
+    const pool = fakePool();
+
+    await expect(
+      createPgDecor(pool).updateAsset(ASSET_ROW.id, { aboveAvatars: 'si' as unknown as boolean }),
+    ).rejects.toThrow(InvalidAssetError);
+    expect(pool.queries).toHaveLength(0);
+  });
+
+  it('returns null when the id does not exist', async () => {
+    const pool = fakePool(() => ({ rows: [], rowCount: 0 }));
+
+    expect(await createPgDecor(pool).updateAsset('no-existe', { aboveAvatars: true })).toBeNull();
+  });
+});
+
 describe('pgDecor: getDeskConfig', () => {
   it('cruza con assets SIN filtrar archivados: una pieza retirada se sigue pintando (D1b)', async () => {
     // Es la mitad que hace que archivar no sea un borrado retroactivo. Si esta
@@ -322,9 +374,19 @@ describe('pgDecor: getDeskConfig', () => {
         w: 1,
         h: 1,
         name: 'Planta Grande',
+        aboveAvatars: false,
         createdAt: DESK_ROW.created_at,
       },
     ]);
+  });
+
+  it('resolves above_avatars from the asset, so the scene knows the render layer (#71)', async () => {
+    const pool = fakePool(() => ({ rows: [{ ...DESK_ROW, above_avatars: true }], rowCount: 1 }));
+
+    const items = await createPgDecor(pool).getDeskConfig(USER_ID);
+
+    expect(squash(pool.queries[0].text)).toContain('a.above_avatars');
+    expect(items[0].aboveAvatars).toBe(true);
   });
 });
 
@@ -510,6 +572,7 @@ describe('pgDecor: replaceDeskConfig', () => {
         w: 1,
         h: 1,
         name: 'Planta Grande',
+        aboveAvatars: false,
         createdAt: DESK_ROW.created_at,
       },
     ]);
