@@ -59,6 +59,19 @@ export interface RecordingReadyPayload {
   availableUntil: number;
 }
 
+/**
+ * Close code the server uses when the same account joins again elsewhere
+ * (#78): the last join wins and the older tab is closed with this code. It is
+ * shared so the client can tell "replaced" apart from a drop and never retry
+ * it, since retrying would just evict the newer tab back.
+ *
+ * In the 4000-4999 application range and clear of every code Colyseus 0.16
+ * already uses there: 4000 (consented), 4002 (server error), 4010 (dev mode
+ * restart), 4201-4202 (server disconnect, too many clients) and 4210-4217
+ * (matchmaking and auth errors).
+ */
+export const SESSION_REPLACED_CLOSE_CODE = 4100;
+
 /** Cada cuanto publica el jugador local su posicion (ver `createMoveThrottle`). */
 export const MOVE_INTERVAL_MS = 100;
 

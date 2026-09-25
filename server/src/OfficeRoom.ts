@@ -20,7 +20,7 @@
  * sin esta segunda puerta un invitado de un dia entraria para siempre.
  */
 
-import { Room, ServerError, type AuthContext, type Client } from '@colyseus/core';
+import { Room, ServerError, type AuthContext, type Client, type Deferred } from '@colyseus/core';
 import {
   BUILT_IN_SPACES_VERSION,
   PLAYER_SPAWN_TX,
@@ -37,6 +37,7 @@ import {
   FACINGS,
   MAX_NAME_LENGTH,
   OFFICE_ROOM_NAME,
+  SESSION_REPLACED_CLOSE_CODE,
   isPresenceStatus,
   recordingAvailableUntil,
 } from '../../src/game/officeProtocol.ts';
@@ -249,6 +250,11 @@ export type DirectoryDenialLogger = (decision: AccessDecision, uid: string) => v
  */
 type OfficeAuthData = VerifiedIdentity | true;
 
+/** Account behind a client, or `undefined` in the open office (#78). */
+function accountOf(client: Client<unknown, OfficeAuthData>): string | undefined {
+  return client.auth === true ? undefined : client.auth?.uid;
+}
+
 export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthData> {
   private joinCount = 0;
   private sessions?: LiveSessionRegistry;
@@ -268,6 +274,18 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private stopRecording?: (entry: ActiveRecording) => Promise<void>;
   private unsubscribeRecordings?: () => void;
   private unsubscribeReady?: () => void;
+  /**
+   * Sessions a newer join of the same account already released (#78). Their
+   * own `onLeave` arrives later, as a plain non-consented close, and must
+   * neither grant a reconnection window nor release them a second time.
+   */
+  private replaced = new Set<string>();
+  /**
+   * Sessions waiting in their reconnection window, by owner (#78). They are
+   * no longer in `this.clients`, so this is the only way a newer join of the
+   * same account can find them and cancel the seat.
+   */
+  private pendingReconnections = new Map<string, { uid: string; seat: Deferred<Client> }>();
 
   onCreate(options?: OfficeRoomOptions): void {
     this.state = new OfficeState();
@@ -460,6 +478,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     // camino de siempre. En ambos casos pasa por `sanitizeName`, que es quien
     // hace valer `MAX_NAME_LENGTH`.
     const identity = client.auth === true ? undefined : client.auth;
+    if (identity) this.replaceOtherSessionsOf(identity.uid, client);
     const spawnX = (PLAYER_SPAWN_TX + dx) * TILE + TILE / 2;
     const spawnY = (PLAYER_SPAWN_TY + dy) * TILE + TILE / 2;
 
@@ -515,16 +534,53 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
    * el estado y `this.sessions` siguen exactamente donde estaban, asi que aqui
    * no hay nada que rehacer, solo algo que NO deshacer.
    */
-  async onLeave(client: Client, consented: boolean): Promise<void> {
+  async onLeave(client: Client<unknown, OfficeAuthData>, consented: boolean): Promise<void> {
+    // Already released by the join that replaced it (#78); a window here would
+    // let the old tab reconnect and take the account back.
+    if (this.replaced.delete(client.sessionId)) return;
+
     if (consented) {
-      this.releaseSession(client);
+      this.releaseSession(client.sessionId);
       return;
     }
 
+    const seat = this.allowReconnection(client, this.reconnectionWindowSeconds);
+    const uid = accountOf(client);
+    if (uid !== undefined) this.pendingReconnections.set(client.sessionId, { uid, seat });
     try {
-      await this.allowReconnection(client, this.reconnectionWindowSeconds);
+      await seat;
     } catch {
-      this.releaseSession(client);
+      if (!this.replaced.delete(client.sessionId)) this.releaseSession(client.sessionId);
+    } finally {
+      this.pendingReconnections.delete(client.sessionId);
+    }
+  }
+
+  /**
+   * Last join wins (#78): every other session of `uid`, connected or waiting
+   * to reconnect, is released right here, before this join adds its own player,
+   * so the first state the new tab receives already holds exactly one avatar
+   * for the account.
+   *
+   * A connected tab is closed with `SESSION_REPLACED_CLOSE_CODE`, which its
+   * client reads as "do not retry". A tab inside its reconnection window has
+   * its seat rejected, which is what makes its old reconnection token useless.
+   * Both are marked in `replaced` so their late `onLeave` does nothing.
+   */
+  private replaceOtherSessionsOf(uid: string, newcomer: Client): void {
+    for (const other of this.clients) {
+      if (other === newcomer || accountOf(other) !== uid) continue;
+      this.replaced.add(other.sessionId);
+      this.releaseSession(other.sessionId);
+      other.leave(SESSION_REPLACED_CLOSE_CODE);
+    }
+
+    for (const [sessionId, pending] of this.pendingReconnections) {
+      if (pending.uid !== uid) continue;
+      this.pendingReconnections.delete(sessionId);
+      this.replaced.add(sessionId);
+      this.releaseSession(sessionId);
+      pending.seat.reject(new Error('session-replaced'));
     }
   }
 
@@ -537,10 +593,10 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
    * tiempo daria el peor resultado posible: alguien a quien se ve pero no se
    * oye, o al reves.
    */
-  private releaseSession(client: Client): void {
-    this.state.players.delete(client.sessionId);
-    this.sessions?.remove(client.sessionId);
-    this.stopRecordingsOf(client.sessionId);
+  private releaseSession(sessionId: string): void {
+    this.state.players.delete(sessionId);
+    this.sessions?.remove(sessionId);
+    this.stopRecordingsOf(sessionId);
 
     // D7: sin caducidad, la unica limpieza posible es la baja de una de las
     // dos partes. `removeAllFor` cubre a quien se va como emisor Y como
@@ -548,8 +604,8 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     // si el que se va era el DESTINATARIO, la tarjeta ya la tiene el que
     // llamo y no hay a quien notificar (el emisor no vuelve a saber de esto
     // hasta que el destinatario responda o se vaya el).
-    for (const entry of this.invitations.removeAllFor(client.sessionId)) {
-      if (entry.from === client.sessionId) {
+    for (const entry of this.invitations.removeAllFor(sessionId)) {
+      if (entry.from === sessionId) {
         this.sendTo(entry.to, 'callerleft', { from: entry.from });
       }
     }
