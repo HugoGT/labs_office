@@ -62,6 +62,7 @@ import { resolveAuthConfig } from './authConfig.ts';
 import type { UserDirectory } from './directory/directoryPort.ts';
 import { directoryFromEnv, type DirectoryRuntime } from './directory/fromEnv.ts';
 import { createLiveSessionRegistry, type LiveSessionRegistry } from './liveSessions.ts';
+import { createSessionEvictionHub, type SessionEvictor } from './sessionEviction.ts';
 import { mintOfficeToken } from './livekitToken.ts';
 import { OFFICE_ROOM_NAME, OfficeRoom, RECONNECTION_WINDOW_SECONDS } from './OfficeRoom.ts';
 import { egressFromEnv, type EgressPort } from './recording/egressPort.ts';
@@ -200,6 +201,8 @@ export interface OfficeServer {
   sessions: LiveSessionRegistry;
   /** Active recordings (#5); exposed for tests, like `sessions`. */
   recordings: RecordingRegistry;
+  /** Live eviction of a revoked account (#93); exposed for tests, like `sessions`. */
+  eviction: SessionEvictor;
   /**
    * Directorio de usuarios (#24), o `undefined` si esta desactivado. Expuesto
    * para las rutas de administracion y para los tests, igual que `sessions`.
@@ -446,6 +449,8 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   const sessions = createLiveSessionRegistry();
   const recordings = createRecordingRegistry();
   const finished = createFinishedRecordingStore();
+  // Shared by the room (which registers) and the admin routes (which evict) (#93).
+  const eviction = createSessionEvictionHub();
   // Read per call, like the LiveKit credentials of `/livekit/token`.
   const egressFor = (): EgressPort | null =>
     overrides?.egress !== undefined ? overrides.egress : egressFromEnv(process.env);
@@ -855,6 +860,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     directory,
     recordings,
     finished,
+    eviction,
     stopRecording: (entry: Parameters<typeof finishRecording>[0]) => {
       const deps = recordingDeps();
       return finishRecording(entry, deps.egress, deps).then(() => undefined);
@@ -868,6 +874,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     httpServer,
     sessions,
     recordings,
+    eviction,
     directory,
     port() {
       const address = httpServer.address() as AddressInfo | null;
