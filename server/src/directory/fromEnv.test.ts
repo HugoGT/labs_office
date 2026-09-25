@@ -54,6 +54,24 @@ describe('directoryFromEnv', () => {
     expect(built).toBe(0);
   });
 
+  it('la ruta del CA de la base de datos llega hasta el pool (#72)', () => {
+    // Si se perdiese por el camino, el pool conectaria sin TLS y Cloud SQL
+    // (ENCRYPTED_ONLY) lo rechazaria con un error que no apunta aqui.
+    const configs: unknown[] = [];
+    directoryFromEnv(
+      {
+        DATABASE_URL: 'postgres://office@10.100.0.3:5432/office',
+        DATABASE_SSL_CA_FILE: '/etc/office/db-server-ca.pem',
+      },
+      (config) => {
+        configs.push(config);
+        return fakePool();
+      },
+    );
+
+    expect(configs).toMatchObject([{ databaseSslCaFile: '/etc/office/db-server-ca.pem' }]);
+  });
+
   it('con DATABASE_URL construye el pool y el directorio', () => {
     const pool = fakePool();
     const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, () => pool);

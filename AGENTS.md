@@ -105,7 +105,7 @@ Root `.env` (server and SPA):
 - Recording: `RECORDING_GCS_BUCKET`, `GOOGLE_APPLICATION_CREDENTIALS` (commented out; ADC is found automatically)
 - CORS: `ALLOWED_ORIGIN`
 - Auth: `FIREBASE_PROJECT_ID`
-- Directory: `DATABASE_URL`, `BOOTSTRAP_SUPERADMIN_EMAIL`, `IDENTITY_ADMIN_CREDENTIALS`, `IDENTITY_ADMIN_USE_METADATA`
+- Directory: `DATABASE_URL`, `DATABASE_SSL_CA_FILE` (commented out; set only when the database requires TLS), `BOOTSTRAP_SUPERADMIN_EMAIL`, `IDENTITY_ADMIN_CREDENTIALS`, `IDENTITY_ADMIN_USE_METADATA`
 - Server process: `PORT`, `NODE_ENV`, `OFFICE_RECONNECTION_WINDOW_SECONDS` (commented out in `.env.example`; an empty `PORT` means port 0, a random port)
 
 `infra/livekit/.env`: `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `GCS_CREDENTIALS_FILE`, `GCS_BUCKET`. Also read by `vite.config.ts` and `e2e/harness.mjs` to mint real LiveKit tokens from Node. The full stack (root `docker-compose.yml`) does not read it: it interpolates the included LiveKit services, `GCS_CREDENTIALS_FILE` included, from the root `.env`.
