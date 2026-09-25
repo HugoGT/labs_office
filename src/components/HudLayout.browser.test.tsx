@@ -5,6 +5,7 @@ import type { ComponentProps } from 'react';
 import * as vitestBrowser from 'vitest/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BottomBar } from './BottomBar';
+import { ExitControls } from './ExitControls';
 import { OfficeSidebar } from './OfficeSidebar';
 
 // Same cast as `livekitRoom.browser.test.ts`: the `vitest/browser` type
@@ -45,6 +46,11 @@ async function renderOpenSidebar() {
 function expectSameColumn(element: Element, reference: Element) {
   expect(box(element).left).toBeCloseTo(box(reference).left, 0);
   expect(box(element).right).toBeCloseTo(box(reference).right, 0);
+}
+
+function renderExits() {
+  render(<ExitControls onSignOut={vi.fn()} onLeaveOffice={vi.fn()} />);
+  return screen.getByRole('button', { name: /Cerrar sesión/ }).parentElement!;
 }
 
 function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
@@ -120,5 +126,15 @@ describe('HUD layout: sidebar toggle (#90)', () => {
     await renderOpenSidebar();
 
     expect(box(screen.getByRole('complementary', { name: 'Personas' })).width).toBe(280);
+  });
+});
+
+describe('HUD layout: exit controls (#89)', () => {
+  it('at full width they are as wide as the sidebar search input and aligned with it', async () => {
+    await page.viewport(WIDE, 800);
+    const exits = renderExits();
+    const { search } = await renderOpenSidebar();
+
+    expectSameColumn(exits, search);
   });
 });

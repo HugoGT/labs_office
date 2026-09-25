@@ -1,7 +1,9 @@
 /* Same vocabulary as the bottom bar: its buttons, on the same dark card. */
 .controls {
   position: fixed;
-  right: 16px;
+  /* Under the sidebar, in the column of its search input (#89). */
+  right: var(--hud-rail-right);
+  width: var(--hud-rail-width);
   bottom: 16px;
   z-index: 10;
   display: flex;
@@ -14,6 +16,9 @@
 }
 
 .btn {
+  /* Share the fixed width between the buttons instead of leaving a hole. */
+  flex: 1 1 auto;
+  white-space: nowrap;
   background: #1f2937;
   color: #e5e7eb;
   border: 1px solid #374151;
