@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
 import { spawnPlayer } from './characters';
 import { createOfficeBridge } from './officeBridge';
+import { MOVE_INTERVAL_MS } from './officeProtocol';
 import { STATUS_COLOR } from './presence';
 import { createRemoteAvatarRegistry, type RemotePlayerSnapshot } from './remoteAvatars';
 import { createPhaserAvatarSink } from './remoteAvatarSink';
@@ -374,6 +375,11 @@ describe('createPhaserAvatarSink: cuerpo fisico del peer con peerBodies (#59)', 
       const sink = createPhaserAvatarSink(scene, createOfficeBridge(), group);
       const avatar = sink.create(snapshot({ x: 0, y: 0 }));
       sink.update(avatar, snapshot({ x: 640, y: 0 }));
+      // Se congela el tween a mitad de camino: dura solo MOVE_INTERVAL_MS, y en
+      // un runner de CI cargado el primer sondeo podia llegar cuando ya habia
+      // terminado (x === 640) y no verlo nunca en vuelo.
+      avatar.glideTween?.seek(MOVE_INTERVAL_MS / 2);
+      avatar.glideTween?.pause();
       return { avatar, body: avatar.body as Phaser.Physics.Arcade.Body };
     });
 
