@@ -104,6 +104,9 @@ export function createPhaserAvatarSink(
         Phaser.Geom.Rectangle.Contains,
       );
       container.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+        // #98: por el minimapa el clic es navegacion (`CameraPanLayer`), no
+        // un menu sobre un avatar que ahi mide unos pixeles.
+        if (pointer.camera && pointer.camera !== scene.cameras.main) return;
         pointer.event.stopPropagation();
         bridge.emit('peermenu', {
           sessionId: snapshot.sessionId,

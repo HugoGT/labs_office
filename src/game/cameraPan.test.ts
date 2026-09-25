@@ -14,7 +14,7 @@ describe('reduceCameraPan: idle', () => {
   it('down elegible arma el pan, sin efecto todavia (no hay drag hasta cruzar el umbral)', () => {
     const { state, effect } = reduceCameraPan(IDLE, { kind: 'down', x: 10, y: 20, eligible: true });
 
-    expect(state).toEqual({ kind: 'armed', originX: 10, originY: 20 });
+    expect(state).toEqual({ kind: 'armed', originX: 10, originY: 20, detached: false });
     expect(effect).toEqual({ kind: 'none' });
   });
 
@@ -41,7 +41,7 @@ describe('reduceCameraPan: idle', () => {
 });
 
 describe('reduceCameraPan: armed', () => {
-  const armed: CameraPanState = { kind: 'armed', originX: 100, originY: 100 };
+  const armed: CameraPanState = { kind: 'armed', originX: 100, originY: 100, detached: false };
 
   it('un segundo down se ignora: se queda armado en el mismo origen', () => {
     const { state, effect } = reduceCameraPan(armed, {
@@ -126,5 +126,79 @@ describe('reduceCameraPan: panning', () => {
 
     expect(state).toEqual(IDLE);
     expect(effect).toEqual({ kind: 'resumeFollow' });
+  });
+});
+
+describe('reduceCameraPan: click en el minimapa (#98)', () => {
+  const FOCUSED: CameraPanState = { kind: 'focused' };
+
+  it('desde idle enfoca la camara en el punto del mundo y la deja desacoplada del jugador', () => {
+    const { state, effect } = reduceCameraPan(IDLE, { kind: 'minimap', x: 640, y: 320 });
+
+    expect(state).toEqual(FOCUSED);
+    expect(effect).toEqual({ kind: 'focus', x: 640, y: 320 });
+  });
+
+  it('un segundo click en el minimapa re-enfoca en el nuevo punto', () => {
+    const { state, effect } = reduceCameraPan(FOCUSED, { kind: 'minimap', x: 10, y: 20 });
+
+    expect(state).toEqual(FOCUSED);
+    expect(effect).toEqual({ kind: 'focus', x: 10, y: 20 });
+  });
+
+  it('en medio de un gesto sobre el mapa (armed o panning) se ignora: el primer boton sigue decidiendo', () => {
+    const armed: CameraPanState = { kind: 'armed', originX: 1, originY: 1, detached: false };
+    const panning: CameraPanState = { kind: 'panning', lastX: 1, lastY: 1 };
+
+    for (const state of [armed, panning]) {
+      expect(reduceCameraPan(state, { kind: 'minimap', x: 5, y: 5 })).toEqual({
+        state,
+        effect: { kind: 'none' },
+      });
+    }
+  });
+});
+
+describe('reduceCameraPan: focused (camara desacoplada tras el minimapa)', () => {
+  const FOCUSED: CameraPanState = { kind: 'focused' };
+
+  it('en cuanto el jugador se mueve, la camara vuelve a seguirlo', () => {
+    const { state, effect } = reduceCameraPan(FOCUSED, { kind: 'playerMoved' });
+
+    expect(state).toEqual(IDLE);
+    expect(effect).toEqual({ kind: 'resumeFollow' });
+  });
+
+  it('playerMoved fuera de focused no hace nada: seguir o panear ya tienen su propio criterio', () => {
+    const panning: CameraPanState = { kind: 'panning', lastX: 1, lastY: 1 };
+
+    for (const state of [IDLE, panning]) {
+      expect(reduceCameraPan(state, { kind: 'playerMoved' })).toEqual({ state, effect: { kind: 'none' } });
+    }
+  });
+
+  it('un click plano sobre el mapa (down+up sin drag) no la saca de focused', () => {
+    const down = reduceCameraPan(FOCUSED, { kind: 'down', x: 50, y: 50, eligible: true });
+    expect(down.state).toEqual({ kind: 'armed', originX: 50, originY: 50, detached: true });
+
+    const up = reduceCameraPan(down.state, { kind: 'up' });
+    expect(up).toEqual({ state: FOCUSED, effect: { kind: 'none' } });
+  });
+
+  it('un drag desde focused es un pan normal: al soltar vuelve al jugador (criterio de #53)', () => {
+    const armed: CameraPanState = { kind: 'armed', originX: 50, originY: 50, detached: true };
+    const move = reduceCameraPan(armed, { kind: 'move', x: 80, y: 50 });
+    expect(move.effect).toEqual({ kind: 'beginPan', dx: 30, dy: 0 });
+
+    expect(reduceCameraPan(move.state, { kind: 'up' })).toEqual({
+      state: IDLE,
+      effect: { kind: 'resumeFollow' },
+    });
+  });
+
+  it('un down no elegible en focused se queda en focused', () => {
+    const result = reduceCameraPan(FOCUSED, { kind: 'down', x: 1, y: 1, eligible: false });
+
+    expect(result).toEqual({ state: FOCUSED, effect: { kind: 'none' } });
   });
 });
