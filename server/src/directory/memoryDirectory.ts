@@ -34,7 +34,7 @@ import { normalizeUserInput } from './userRules.ts';
 
 export interface AuditEntry {
   actorId: string;
-  action: 'invite' | 'revoke' | 'create-user';
+  action: 'invite' | 'revoke' | 'create-user' | 'revoke-user';
   subjectId: string;
 }
 
@@ -231,6 +231,26 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
       if (row.status !== 'revoked') {
         row.status = 'revoked';
         audit.push({ actorId, action: 'revoke', subjectId: row.id });
+      }
+
+      return snapshot(row);
+    },
+
+    async listUsers() {
+      // Insertion order is creation order here, like `created_at ASC` in
+      // `pgDirectory.ts`.
+      return rows.map(snapshot);
+    },
+
+    async revokeUser(id, actorId) {
+      const row = byId(id);
+      // Same second lock as the WHERE of `pgDirectory.revokeUser`.
+      if (!row || row.role === 'superadmin') return null;
+
+      // Only the real change is audited, same as `revoke`.
+      if (row.status !== 'revoked') {
+        row.status = 'revoked';
+        audit.push({ actorId, action: 'revoke-user', subjectId: row.id });
       }
 
       return snapshot(row);

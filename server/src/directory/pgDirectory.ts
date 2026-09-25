@@ -373,6 +373,46 @@ export function createPgDirectory(
       });
     },
 
+    async listUsers() {
+      const result = await pool.query(
+        `SELECT ${USER_COLUMNS} FROM users ORDER BY created_at ASC`,
+      );
+      return result.rows.map(toDirectoryUser);
+    },
+
+    async revokeUser(id, actorId) {
+      return inTransaction(async (client) => {
+        // Both guards live in the WHERE, like `invited_by` in `revoke`: no
+        // window between checking and updating, and no way to call this that
+        // revokes the superadmin. `status <> 'revoked'` is what keeps a second
+        // revocation out of the audit trail.
+        const updated = await client.query(
+          `
+            UPDATE users SET status = 'revoked'
+            WHERE id = $1 AND role <> 'superadmin' AND status <> 'revoked'
+            RETURNING ${USER_COLUMNS}
+          `,
+          [id],
+        );
+        const row = updated.rows[0];
+        if (row) {
+          await client.query(
+            'INSERT INTO audit_log (actor_id, action, subject_id) VALUES ($1, $2, $3)',
+            [actorId, 'revoke-user', id],
+          );
+          return toDirectoryUser(row);
+        }
+
+        // Nothing changed: unknown id, the superadmin, or already revoked.
+        // Only the last one is a success, and it comes back as it is.
+        const existing = await client.query(
+          `SELECT ${USER_COLUMNS} FROM users WHERE id = $1 AND role <> 'superadmin'`,
+          [id],
+        );
+        return existing.rows[0] ? toDirectoryUser(existing.rows[0]) : null;
+      });
+    },
+
     close() {
       // Sin esto, `shutdown()` deja conexiones vivas y el proceso de vitest no
       // termina despues de un test que levanta y apaga el servidor.

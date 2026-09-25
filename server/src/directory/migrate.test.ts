@@ -131,7 +131,7 @@ describe('schema.sql: lo que no puede faltar', () => {
   it('la auditoria guarda actor, accion y sujeto (PRD 10, punto 7 del issue)', () => {
     expect(schema).toContain('actor_id uuid references users(id)');
     expect(schema).toContain('subject_id uuid references users(id)');
-    expect(schema).toContain("check (action in ('invite', 'revoke', 'create-user'))");
+    expect(schema).toContain("check (action in ('invite', 'revoke', 'create-user', 'revoke-user'))");
   });
 
   it('refresca el CHECK de la auditoria en un despliegue que ya tenia la tabla', () => {
@@ -144,7 +144,7 @@ describe('schema.sql: lo que no puede faltar', () => {
     // fichero exige de todo lo que contiene.
     expect(schema).toContain('alter table audit_log drop constraint if exists audit_log_action_check');
     expect(schema).toContain(
-      "alter table audit_log add constraint audit_log_action_check check (action in ('invite', 'revoke', 'create-user'))",
+      "alter table audit_log add constraint audit_log_action_check check (action in ('invite', 'revoke', 'create-user', 'revoke-user'))",
     );
   });
 

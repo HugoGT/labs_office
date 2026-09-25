@@ -96,5 +96,20 @@ export interface UserDirectory {
   createUser(input: CreateUserInput): Promise<DirectoryUser>;
   /** Devuelve null si ese id no existe o no es una invitacion. */
   revoke(id: string, actorId: string): Promise<DirectoryUser | null>;
+  /**
+   * Every user of the directory, invitations included, oldest first (#93). The
+   * panel needs the staff too: without them there is nobody to take access
+   * away from.
+   */
+  listUsers(): Promise<DirectoryUser[]>;
+  /**
+   * Takes access away from anyone but the superadmin (#93): `status =
+   * 'revoked'` plus a `revoke-user` audit entry, atomically. Unlike `revoke`
+   * it does not require an invitation; WHO may remove whom is `canRemove`, and
+   * the route checks it first. Refusing the superadmin here too is the second
+   * lock. Returns null for an unknown id or the superadmin; an already revoked
+   * user comes back unchanged and is not audited again.
+   */
+  revokeUser(id: string, actorId: string): Promise<DirectoryUser | null>;
   close(): Promise<void>;
 }

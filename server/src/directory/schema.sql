@@ -58,7 +58,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_single_superadmin ON users ((role))
 CREATE TABLE IF NOT EXISTS audit_log (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   actor_id uuid REFERENCES users(id),
-  action text NOT NULL CHECK (action IN ('invite', 'revoke', 'create-user')),
+  action text NOT NULL CHECK (action IN ('invite', 'revoke', 'create-user', 'revoke-user')),
   subject_id uuid REFERENCES users(id),
   created_at timestamptz NOT NULL DEFAULT now()
 );
@@ -73,8 +73,11 @@ CREATE TABLE IF NOT EXISTS audit_log (
 --
 -- El DROP ... IF EXISTS delante es lo que lo hace idempotente y converger igual
 -- en una base nueva y en una vieja, que es lo unico que este fichero promete.
+-- 'revoke-user' (#93) is its own action and not 'revoke': taking access away
+-- from staff is a different decision from withdrawing an invitation, and the
+-- trail has to tell them apart.
 ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_action_check;
-ALTER TABLE audit_log ADD CONSTRAINT audit_log_action_check CHECK (action IN ('invite', 'revoke', 'create-user'));
+ALTER TABLE audit_log ADD CONSTRAINT audit_log_action_check CHECK (action IN ('invite', 'revoke', 'create-user', 'revoke-user'));
 
 -- El panel consulta el rastro por sujeto ("quien invito a esta persona"), no
 -- recorriendo la tabla entera.
