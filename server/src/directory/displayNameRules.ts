@@ -43,6 +43,20 @@ export class InvalidDisplayNameError extends Error {
   }
 }
 
+/**
+ * El indice parcial `users_display_name_unique` de `schema.sql` es el arbitro
+ * de verdad (D3): ni `pgDirectory` ni `memoryDirectory` deciden por su cuenta
+ * si un nombre esta libre, solo traducen el 23505 -- o, en memoria, el mismo
+ * resultado por comportamiento -- a este error propio para que la ruta HTTP lo
+ * distinga por `instanceof` de cualquier otro fallo.
+ */
+export class DisplayNameTakenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DisplayNameTakenError';
+  }
+}
+
 /** Caracteres de control Unicode que `\s` no colapsa (ni tabuladores ni saltos de linea, que ya son `\s`). */
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHAR = /\p{Cc}/u;

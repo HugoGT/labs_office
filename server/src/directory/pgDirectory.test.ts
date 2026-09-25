@@ -14,6 +14,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { DisplayNameTakenError } from './displayNameRules.ts';
 import { InvalidInvitationError } from './invitationRules.ts';
 import { InvalidUserError } from './userRules.ts';
 import { createPgDirectory, type DirectoryPool, type DirectoryQueryResult } from './pgDirectory.ts';
@@ -130,20 +131,30 @@ describe('pgDirectory: resolveOnLogin', () => {
     });
   });
 
-  it('a quien ya tiene fila lo resuelve en UNA sentencia que solo refresca el nombre', async () => {
-    // El rol, el estado y la caducidad los decide esta oficina desde el panel;
-    // el token solo aporta el nombre visible. Un UPDATE por uid no puede crear
-    // nada, que es exactamente lo que se quiere del camino normal.
+  it('a quien ya tiene fila lo resuelve con un SELECT que no escribe nada (D4)', async () => {
+    // #100, D4: el login ya NO refresca `display_name`. Solo la ruta explicita
+    // `/me/display-name` lo escribe; el token de Identity Platform no vuelve a
+    // tocar esa columna en ningun login, ni siquiera para "rellenarla".
     const pool = fakePool(() => ({ rows: [USER_ROW], rowCount: 1 }));
 
     await directoryOver(pool).resolveOnLogin(ANA);
 
     expect(pool.queries).toHaveLength(1);
     const sql = squash(pool.queries[0].text);
-    expect(sql).toContain('update users set display_name = $2 where uid = $1');
-    const setClause = sql.slice(sql.indexOf(' set '), sql.indexOf(' where '));
-    expect(setClause).toBe(' set display_name = $2');
-    expect(pool.queries[0].values).toEqual(['uid-ana', 'Ana']);
+    expect(sql).toContain('select');
+    expect(sql).toContain('where uid = $1');
+    expect(sql).not.toContain('update');
+    expect(sql).not.toContain('display_name = $2');
+    expect(pool.queries[0].values).toEqual(['uid-ana']);
+  });
+
+  it('un nombre distinto en el token no toca display_name (D4)', async () => {
+    const pool = fakePool(() => ({ rows: [USER_ROW], rowCount: 1 }));
+
+    const user = await directoryOver(pool).resolveOnLogin({ ...ANA, name: 'Otro Nombre' });
+
+    expect(user?.displayName).toBe(USER_ROW.display_name);
+    expect(pool.queries.every((query) => !squash(query.text).includes('update users'))).toBe(true);
   });
 
   it('una cuenta sin fila NO se da de alta sola: devuelve null y no inserta (#72)', async () => {
@@ -187,7 +198,7 @@ describe('pgDirectory: resolveOnLogin', () => {
     const sql = squash(insert.text);
     expect(sql).toContain("'superadmin'");
     expect(sql).toContain("not exists (select 1 from users where role = 'superadmin')");
-    expect(sql).toContain('lower($2) = lower($4)');
+    expect(sql).toContain('lower($2) = lower($3)');
     expect(sql).toContain('on conflict (uid) do update');
   });
 
@@ -203,7 +214,17 @@ describe('pgDirectory: resolveOnLogin', () => {
     });
 
     const insert = pool.queries.find((query) => isInsert(query.text))!;
-    expect(insert.values).toEqual(['uid-hugo', 'hugo@example.com', 'Hugo', 'hugo@example.com']);
+    // El nombre del token YA NO viaja (D4): el bootstrap nace sin nombre.
+    expect(insert.values).toEqual(['uid-hugo', 'hugo@example.com', 'hugo@example.com']);
+  });
+
+  it('el bootstrap nace con display_name NULL, nunca con el nombre del token (D4)', async () => {
+    const pool = fakePool((text) => (isInsert(text) ? { rows: [SUPERADMIN_ROW], rowCount: 1 } : NO_ROW));
+
+    await directoryOver(pool, 'hugo@example.com').resolveOnLogin(HUGO);
+
+    const insert = pool.queries.find((query) => isInsert(query.text))!;
+    expect(squash(insert.text)).toContain('select $1, lower($2), null,');
   });
 
   it('si ya hay superadmin, el INSERT no devuelve fila y se relee por uid', async () => {
@@ -658,6 +679,56 @@ describe('pgDirectory: revoke', () => {
     await directoryOver(pool).revoke('00000000-0000-4000-8000-000000000000', USER_ROW.id);
 
     expect(pool.released).toBe(1);
+  });
+});
+
+describe('pgDirectory: setDisplayName (#100)', () => {
+  const NAMED_ROW = { ...USER_ROW, display_name: 'Ana Lopez' };
+
+  it('escribe el valor YA canonicalizado por quien llama', async () => {
+    const pool = fakePool(() => ({ rows: [NAMED_ROW], rowCount: 1 }));
+
+    const user = await directoryOver(pool).setDisplayName(USER_ROW.id, 'Ana Lopez');
+
+    expect(squash(pool.queries[0].text)).toContain('update users set display_name = $2');
+    expect(squash(pool.queries[0].text)).toContain('where id = $1');
+    expect(pool.queries[0].values).toEqual([USER_ROW.id, 'Ana Lopez']);
+    expect(user?.displayName).toBe('Ana Lopez');
+  });
+
+  it('un 23505 (choque con el indice de unicidad) se traduce a DisplayNameTakenError', async () => {
+    const pool = fakePool(() => uniqueViolation());
+
+    await expect(directoryOver(pool).setDisplayName(USER_ROW.id, 'Ana Lopez')).rejects.toBeInstanceOf(
+      DisplayNameTakenError,
+    );
+  });
+
+  it('actualizar al propio nombre actual no es un conflicto: la sentencia solo toca la propia fila', async () => {
+    // El indice compara TODAS las filas, pero volver a poner en la propia fila
+    // el valor que ya tenia no puede duplicar nada -- sigue siendo una sola
+    // fila con esa clave. No hay una guarda especial que probar aqui mas alla
+    // de que el WHERE acota por id: si acotase por otra cosa, podria tocar la
+    // fila equivocada.
+    const pool = fakePool(() => ({ rows: [NAMED_ROW], rowCount: 1 }));
+
+    await directoryOver(pool).setDisplayName(USER_ROW.id, 'Ana Lopez');
+
+    expect(pool.queries).toHaveLength(1);
+  });
+
+  it('un id que no existe devuelve null en vez de reventar', async () => {
+    const pool = fakePool(() => NO_ROW);
+
+    expect(await directoryOver(pool).setDisplayName('00000000-0000-4000-8000-000000000000', 'Ana')).toBeNull();
+  });
+
+  it('un error que no sea de indice unico se propaga', async () => {
+    const pool = fakePool(() => Object.assign(new Error('connection terminated'), { code: '08006' }));
+
+    await expect(directoryOver(pool).setDisplayName(USER_ROW.id, 'Ana')).rejects.toThrow(
+      'connection terminated',
+    );
   });
 });
 

@@ -117,7 +117,7 @@ describe('directoryFromEnv', () => {
     await runtime!.directory.resolveOnLogin({ uid: 'uid-hugo', email: 'hugo@example.com', name: 'Hugo' });
 
     const insert = pool.queries.find((query) => /^\s*insert into users/i.test(query.text));
-    expect(insert?.values[3]).toBe('hugo@example.com');
+    expect(insert?.values[2]).toBe('hugo@example.com');
   });
 
   it('close() del directorio cierra el pool que se construyo', async () => {

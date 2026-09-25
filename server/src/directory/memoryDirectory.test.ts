@@ -12,6 +12,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { DirectoryUser } from './directoryPort.ts';
+import { DisplayNameTakenError } from './displayNameRules.ts';
 import { InvalidInvitationError } from './invitationRules.ts';
 import { createMemoryDirectory } from './memoryDirectory.ts';
 import { InvalidUserError } from './userRules.ts';
@@ -72,18 +73,19 @@ describe('memoryDirectory: resolveOnLogin (falla cerrado, #72)', () => {
     expect(second?.id).toBe(first?.id);
   });
 
-  it('refresca el nombre visible en cada login, pero no el rol ni el estado', async () => {
-    // El `name` del token es lo que la persona ve sobre su avatar y cambia
-    // cuando cambia su perfil. El rol NO puede salir del token: lo decide esta
-    // oficina, no Identity Platform, y sobrescribirlo en cada login borraria
-    // cualquier promocion o revocacion hecha desde el panel.
+  it('NO refresca el nombre visible en el login (#100, D4), ni el rol ni el estado', async () => {
+    // El unico camino que escribe `displayName` es la ruta explicita
+    // `/me/display-name`. El `name` del token de Identity Platform ya no toca
+    // esa columna en ningun login. El rol tampoco puede salir del token: lo
+    // decide esta oficina, y sobrescribirlo en cada login borraria cualquier
+    // promocion o revocacion hecha desde el panel.
     const directory = createMemoryDirectory({
-      seed: [provisioned({ role: 'admin', status: 'revoked' })],
+      seed: [provisioned({ displayName: 'Ana Original', role: 'admin', status: 'revoked' })],
     });
 
     const again = await directory.resolveOnLogin({ ...ANA, name: 'Ana Gomez' });
 
-    expect(again?.displayName).toBe('Ana Gomez');
+    expect(again?.displayName).toBe('Ana Original');
     expect(again?.role).toBe('admin');
     expect(again?.status).toBe('revoked');
   });
@@ -97,12 +99,12 @@ describe('memoryDirectory: resolveOnLogin (falla cerrado, #72)', () => {
     expect(await directory.resolveOnLogin({ uid: 'uid-anon', email: null, name: null })).toBeNull();
   });
 
-  it('acepta un token sin name: el nombre visible queda vacio, no la fila', async () => {
+  it('un token sin name no vacia el nombre ya guardado (#100, D4): el login no lo toca', async () => {
     const directory = createMemoryDirectory({ seed: [provisioned({ displayName: 'Ana' })] });
 
     const user = await directory.resolveOnLogin({ ...ANA, name: null });
 
-    expect(user?.displayName).toBeNull();
+    expect(user?.displayName).toBe('Ana');
     expect(user?.role).toBe('employee');
   });
 });
@@ -147,7 +149,8 @@ describe('memoryDirectory: bootstrap de superadmin', () => {
     expect(user).toMatchObject({
       uid: 'uid-hugo',
       email: 'hugo@example.com',
-      displayName: 'Hugo',
+      // #100, D4: el bootstrap nace sin nombre elegido, nunca con el del token.
+      displayName: null,
       role: 'superadmin',
       status: 'active',
       expiresAt: null,
@@ -582,6 +585,80 @@ describe('memoryDirectory: semilla y cierre', () => {
     const directory = createMemoryDirectory();
 
     await expect(directory.close()).resolves.toBeUndefined();
+  });
+});
+
+describe('memoryDirectory: setDisplayName (#100)', () => {
+  it('escribe el valor YA canonicalizado por quien llama', async () => {
+    const directory = createMemoryDirectory({ seed: [provisioned()] });
+
+    const user = await directory.setDisplayName(
+      'aaaaaaaa-aaaa-4aaa-8aaa-000000000001',
+      'Ana Lopez',
+    );
+
+    expect(user?.displayName).toBe('Ana Lopez');
+    expect((await directory.findById('aaaaaaaa-aaaa-4aaa-8aaa-000000000001'))?.displayName).toBe(
+      'Ana Lopez',
+    );
+  });
+
+  it('rechaza un nombre ya tomado por OTRA cuenta, comparado sin distinguir mayusculas/espacios', async () => {
+    const directory = createMemoryDirectory({
+      seed: [
+        provisioned({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000001', displayName: 'Ana Lopez' }),
+        provisioned({
+          id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000002',
+          uid: 'uid-bea',
+          email: 'bea@example.com',
+        }),
+      ],
+    });
+
+    await expect(
+      directory.setDisplayName('aaaaaaaa-aaaa-4aaa-8aaa-000000000002', 'ana   lopez'),
+    ).rejects.toBeInstanceOf(DisplayNameTakenError);
+  });
+
+  it('re-someter el propio nombre actual no es un conflicto (D4)', async () => {
+    const directory = createMemoryDirectory({
+      seed: [provisioned({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000001', displayName: 'Ana Lopez' })],
+    });
+
+    await expect(
+      directory.setDisplayName('aaaaaaaa-aaaa-4aaa-8aaa-000000000001', 'Ana Lopez'),
+    ).resolves.toMatchObject({ displayName: 'Ana Lopez' });
+  });
+
+  it('un id que no existe devuelve null', async () => {
+    const directory = createMemoryDirectory();
+
+    expect(
+      await directory.setDisplayName('00000000-0000-4000-8000-000000000000', 'Ana'),
+    ).toBeNull();
+  });
+
+  // Los nombres derivados ("Invitado", la parte local del correo) se calculan al
+  // entrar y nunca se guardan: no reservan nada, solo compite lo que otra cuenta
+  // eligio y quedo en `display_name`.
+  it('los nombres de respaldo no estan reservados: "Invitado" y la parte local del correo de otra cuenta se aceptan', async () => {
+    const directory = createMemoryDirectory({
+      seed: [
+        provisioned({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000001' }),
+        provisioned({
+          id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000002',
+          uid: 'uid-bea',
+          email: 'bea@example.com',
+        }),
+      ],
+    });
+
+    await expect(
+      directory.setDisplayName('aaaaaaaa-aaaa-4aaa-8aaa-000000000001', 'Invitado'),
+    ).resolves.toMatchObject({ displayName: 'Invitado' });
+    await expect(
+      directory.setDisplayName('aaaaaaaa-aaaa-4aaa-8aaa-000000000002', 'ana'),
+    ).resolves.toMatchObject({ displayName: 'ana' });
   });
 });
 

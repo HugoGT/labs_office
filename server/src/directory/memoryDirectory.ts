@@ -29,6 +29,11 @@ import type {
   Role,
   UserDirectory,
 } from './directoryPort.ts';
+import {
+  canonicalizeDisplayName,
+  displayNameKey,
+  DisplayNameTakenError,
+} from './displayNameRules.ts';
 import { expiresAtFrom, normalizeEmail, normalizeInvitationInput } from './invitationRules.ts';
 import { normalizeUserInput } from './userRules.ts';
 
@@ -121,10 +126,10 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
 
       const existing = byUid(identity.uid);
       if (existing) {
-        // Solo el nombre visible se refresca. El rol y el estado los decide
-        // esta oficina, no el token: sobrescribirlos en cada login borraria
-        // cualquier promocion o revocacion hecha desde el panel.
-        existing.displayName = identity.name;
+        // #100, D4: el login ya NO escribe `displayName`, ni siquiera para
+        // "rellenarlo" desde el token. El rol y el estado tampoco: los decide
+        // esta oficina, no Identity Platform, y sobrescribirlos en cada login
+        // borraria cualquier promocion o revocacion hecha desde el panel.
         return snapshot(existing);
       }
 
@@ -143,7 +148,9 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
         insert({
           uid: identity.uid,
           email,
-          displayName: identity.name,
+          // #100, D4: el bootstrap nace sin nombre elegido, nunca con el del
+          // token.
+          displayName: null,
           role: 'superadmin',
           status: 'active',
           expiresAt: null,
@@ -253,6 +260,30 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
         audit.push({ actorId, action: 'revoke-user', subjectId: row.id });
       }
 
+      return snapshot(row);
+    },
+
+    async setDisplayName(id, name) {
+      const row = byId(id);
+      if (!row) return null;
+
+      // Se vuelve a canonicalizar aunque la ruta HTTP ya lo haya hecho (D10):
+      // ningun llamante puede dejar un valor no canonico guardado.
+      const canonical = canonicalizeDisplayName(name);
+      const key = displayNameKey(canonical);
+
+      // Excluye la PROPIA fila del escaneo de unicidad (D4): re-someter el
+      // nombre que ya se tiene no es un conflicto consigo mismo, igual que en
+      // Postgres actualizar la propia fila nunca duplica su propia clave.
+      const taken = rows.some(
+        (other) =>
+          other.id !== id &&
+          other.displayName !== null &&
+          displayNameKey(other.displayName) === key,
+      );
+      if (taken) throw new DisplayNameTakenError('ese nombre ya esta en uso');
+
+      row.displayName = canonical;
       return snapshot(row);
     },
 

@@ -62,6 +62,7 @@ import type {
   Role,
   UserDirectory,
 } from './directoryPort.ts';
+import { canonicalizeDisplayName, DisplayNameTakenError } from './displayNameRules.ts';
 import { normalizeEmail, normalizeInvitationInput } from './invitationRules.ts';
 import { normalizeUserInput } from './userRules.ts';
 
@@ -129,14 +130,13 @@ function toInvitationRow(row: Record<string, unknown>): InvitationRow {
 }
 
 /**
- * El camino de todo el que ya existe. Solo el nombre visible se refresca: el
- * rol, el estado y la caducidad los decide esta oficina desde el panel, y
- * sobrescribirlos en cada login borraria cualquier promocion o revocacion.
+ * El camino de todo el que ya existe. Un simple SELECT por uid: desde #100 (D4)
+ * el login ya NO escribe `display_name` -- ni siquiera para "rellenarlo" desde
+ * el token -- y el rol, el estado y la caducidad los sigue decidiendo esta
+ * oficina desde el panel, nunca el propio login.
  */
-const REFRESH_ON_LOGIN_SQL = `
-  UPDATE users SET display_name = $2
-  WHERE uid = $1
-  RETURNING ${USER_COLUMNS}
+const SELECT_ON_LOGIN_SQL = `
+  SELECT ${USER_COLUMNS} FROM users WHERE uid = $1
 `;
 
 /**
@@ -144,18 +144,32 @@ const REFRESH_ON_LOGIN_SQL = `
  *
  * `lower($2)` aunque el email ya llegue normalizado desde `invitationRules`: la
  * normalizacion en JavaScript es la conveniencia y esta es la garantia. La
- * comparacion con `$4` se repite aqui aunque el llamante ya la haya hecho: si
+ * comparacion con `$3` se repite aqui aunque el llamante ya la haya hecho: si
  * alguien quitase esa guarda, esta sentencia seguiria sin poder crear a nadie
  * que no sea el email de bootstrap. El email de bootstrap va como PARAMETRO y
  * no interpolado: viene del entorno, pero un entorno con una comilla dentro no
  * tiene por que poder reescribir la sentencia.
+ *
+ * `display_name` nace NULL (#100, D4): el bootstrap NUNCA aporta un nombre
+ * elegido, ni siquiera el del token. `ON CONFLICT (uid) DO UPDATE SET uid =
+ * EXCLUDED.uid` es un no-op deliberado -- solo esta para que `RETURNING`
+ * tenga una fila que devolver cuando la carrera de dos pestanas de la MISMA
+ * persona choca contra el `uid` unico; un `DO NOTHING` dejaria ese caso sin
+ * fila que releer.
  */
 const BOOTSTRAP_SUPERADMIN_SQL = `
   INSERT INTO users (uid, email, display_name, role, status)
-  SELECT $1, lower($2), $3, 'superadmin', 'active'
-  WHERE $4::text IS NOT NULL AND lower($2) = lower($4)
+  SELECT $1, lower($2), NULL, 'superadmin', 'active'
+  WHERE $3::text IS NOT NULL AND lower($2) = lower($3)
     AND NOT EXISTS (SELECT 1 FROM users WHERE role = 'superadmin')
-  ON CONFLICT (uid) DO UPDATE SET display_name = EXCLUDED.display_name
+  ON CONFLICT (uid) DO UPDATE SET uid = EXCLUDED.uid
+  RETURNING ${USER_COLUMNS}
+`;
+
+/** El unico UPDATE que escribe `display_name` en todo el adaptador (#100). */
+const SET_DISPLAY_NAME_SQL = `
+  UPDATE users SET display_name = $2
+  WHERE id = $1
   RETURNING ${USER_COLUMNS}
 `;
 
@@ -223,8 +237,8 @@ export function createPgDirectory(
       if (identity.email === null) return null;
       const email = normalizeEmail(identity.email);
 
-      const refreshed = await pool.query(REFRESH_ON_LOGIN_SQL, [identity.uid, identity.name]);
-      if (refreshed.rows[0]) return toDirectoryUser(refreshed.rows[0]);
+      const existing = await pool.query(SELECT_ON_LOGIN_SQL, [identity.uid]);
+      if (existing.rows[0]) return toDirectoryUser(existing.rows[0]);
 
       // Sin fila, y no es el email de bootstrap: no aprovisionado. Ni se toca
       // la base de datos otra vez ni se le inventa una fila (#72).
@@ -234,7 +248,6 @@ export function createPgDirectory(
         const inserted = await pool.query(BOOTSTRAP_SUPERADMIN_SQL, [
           identity.uid,
           email,
-          identity.name,
           bootstrapEmail,
         ]);
         if (inserted.rows[0]) return toDirectoryUser(inserted.rows[0]);
@@ -411,6 +424,27 @@ export function createPgDirectory(
         );
         return existing.rows[0] ? toDirectoryUser(existing.rows[0]) : null;
       });
+    },
+
+    async setDisplayName(id, name) {
+      // Se vuelve a canonicalizar aunque la ruta HTTP ya lo haya hecho (D10):
+      // ningun llamante -- este incluido -- puede dejar un valor no canonico
+      // en la columna, o el indice de `schema.sql` dejaria de ser el mismo
+      // criterio que esta funcion.
+      const canonical = canonicalizeDisplayName(name);
+      try {
+        const updated = await pool.query(SET_DISPLAY_NAME_SQL, [id, canonical]);
+        const row = updated.rows[0];
+        return row ? toDirectoryUser(row) : null;
+      } catch (error) {
+        // El indice parcial `users_display_name_unique` es el arbitro de
+        // verdad (D3): actualizar la propia fila a su propio valor nunca
+        // colisiona, porque sigue siendo una unica fila con esa clave.
+        if (isUniqueViolation(error)) {
+          throw new DisplayNameTakenError('ese nombre ya esta en uso');
+        }
+        throw error;
+      }
     },
 
     close() {
