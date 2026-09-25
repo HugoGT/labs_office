@@ -35,7 +35,6 @@ import { DeskDecorEditor } from './DeskDecorEditor';
 import { ExitControls } from './ExitControls';
 import { GameCanvas } from './GameCanvas';
 import { OfficeSidebar } from './OfficeSidebar';
-import { RecBadge } from './RecBadge';
 import { RecordingReadyStack, type RecordingReadyNotice } from './RecordingReadyStack';
 import { Toast } from './Toast';
 import { VideoTiles } from './VideoTiles';
@@ -72,7 +71,7 @@ export interface OfficeShellProps {
 /**
  * Unico dueno del `OfficeBridge` (D3): lo crea via `useState`, se suscribe
  * con `useOfficeBridge` y compone `GameCanvas` + el HUD. Los componentes
- * presentacionales del HUD (Toast, RecBadge, BottomBar, ContextMenu) nunca
+ * presentacionales del HUD (Toast, BottomBar, ContextMenu) nunca
  * reciben el bridge, solo props planas.
  *
  * La sesion solo la reparte: la escena la necesita para entrar a la sala de
@@ -691,7 +690,6 @@ export function OfficeShell({
         localScreenShareTrack={localScreenShareTrack}
         activeScreenSharer={activeScreenSharer?.sessionId ?? null}
       />
-      <RecBadge visible={recording} />
       <ContextMenu menu={menu} onAction={handleMenuAction} onClose={closeMenu} />
       <OfficeSidebar
         self={rosterSelf}

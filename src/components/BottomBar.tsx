@@ -182,6 +182,12 @@ export function BottomBar({
           ) : room ? (
             <>
               🔒 Sala privada: <b>{room}</b>
+              {recording && (
+                <>
+                  {' | '}
+                  <span className={styles.recDot} /> REC
+                </>
+              )}
             </>
           ) : (
             <>
