@@ -1523,6 +1523,18 @@ describe('users: list everyone and remove access (#93)', () => {
       expect(evicted).toEqual(['uid-staff']);
     });
 
+    it('a revoked account gets no password-reset email afterwards (#94 route answers 404)', async () => {
+      const { h, deps } = setup();
+
+      expect((await handleRevokeUser(bearer(TOKEN_ADMIN), STAFF.id, deps)).status).toBe(200);
+
+      expect(await handleSendPasswordReset(bearer(TOKEN_ADMIN), STAFF.id, deps)).toEqual({
+        status: 404,
+        body: { error: 'not-found' },
+      });
+      expect(h.resets).toEqual([]);
+    });
+
     it('revokes an invited guest too', async () => {
       const { deps, evicted } = setup();
 
