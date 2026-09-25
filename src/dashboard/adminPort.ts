@@ -39,15 +39,16 @@ export interface Invitation {
 }
 
 /**
- * Lo que se devuelve UNA sola vez al crear la invitacion. La contrasena no
- * vuelve a estar disponible en ninguna consulta posterior, por eso no forma
- * parte de `Invitation`: el tipo es el primer sitio donde esa regla se nota.
+ * What creating an invitation returns. There is no password (#94): the server
+ * emails the person a link to set their own, and only says whether that email
+ * went out. `emailSent: false` means the account exists but the admin has to
+ * re-send the email (`sendPasswordReset`).
  */
 export interface CreatedInvitation {
   id: string;
   email: string;
-  password: string;
   expiresAt: string;
+  emailSent: boolean;
 }
 
 /**
@@ -59,16 +60,23 @@ export interface CreatedInvitation {
 export type AssignableRole = 'employee' | 'admin';
 
 /**
- * Lo que se devuelve UNA sola vez al dar de alta. Misma regla que
- * `CreatedInvitation`: la contrasena no vuelve en ninguna consulta posterior,
- * asi que no forma parte de ningun tipo que se consulte. No lleva `expiresAt`
- * porque esta cuenta no caduca.
+ * What creating a user returns. Same rule as `CreatedInvitation`: no password,
+ * only whether the set-your-password email went out (#94). No `expiresAt`
+ * because this account does not expire.
  */
 export interface CreatedUser {
   id: string;
   email: string;
   role: AssignableRole;
-  password: string;
+  emailSent: boolean;
+}
+
+/** Result of re-sending the password email (#94). */
+export interface PasswordResetResult {
+  id: string;
+  email: string;
+  /** `false` when Identity Platform did not send it: the admin can retry. */
+  emailSent: boolean;
 }
 
 export interface AdminPort {
@@ -84,6 +92,12 @@ export interface AdminPort {
    */
   createUser(email: string, role: AssignableRole): Promise<CreatedUser>;
   revoke(id: string): Promise<void>;
+  /**
+   * Re-sends the set-your-password email to the account with this directory
+   * id (#94), invitation or not. Resolves with `emailSent: false` when the
+   * server could not send it; rejects only when the request itself failed.
+   */
+  sendPasswordReset(id: string): Promise<PasswordResetResult>;
 }
 
 /**

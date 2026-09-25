@@ -6,10 +6,11 @@
  * el 409, el 503 y la compensacion de la cuenta huerfana sin un proyecto de
  * GCP detras.
  *
- * El puerto tiene DOS operaciones y no una por casualidad: crear la cuenta y
- * desactivarla son las dos mitades del ciclo de vida de un invitado, y la
- * segunda es la que hace que revocar signifique algo antes de que caduque su
- * ID token (ver `adminRoutes.ts`, `handleRevokeInvitation`).
+ * Crear la cuenta y desactivarla son las dos mitades del ciclo de vida de un
+ * invitado, y la segunda es la que hace que revocar signifique algo antes de
+ * que caduque su ID token (ver `adminRoutes.ts`, `handleRevokeInvitation`).
+ * The third operation, the password-reset email (#94), is how the owner gets
+ * a password nobody else knows.
  *
  * Es OPCIONAL de punta a punta, igual que el directorio: sin
  * `IDENTITY_ADMIN_CREDENTIALS` la fabrica devuelve `null`, el servidor arranca
@@ -21,6 +22,13 @@ export interface IdentityAdmin {
   createAccount(email: string, password: string): Promise<string>;
   /** Desactiva la cuenta para que deje de poder renovar su token. */
   disableAccount(uid: string): Promise<void>;
+  /**
+   * Asks Identity Platform to email the account a password-reset link (#94).
+   * This is how a new account gets its password: the one used to create it is
+   * random and thrown away, so nobody but the owner ever knows the real one.
+   * Google sends the email itself; the link never passes through this process.
+   */
+  sendPasswordReset(email: string): Promise<void>;
 }
 
 /**

@@ -1228,12 +1228,12 @@ describe('OfficeShell: exit controls (#66)', () => {
     expect(screen.queryByRole('button', { name: /Cerrar sesión/ })).not.toBeInTheDocument();
   });
 
-  it('"Salir de la oficina" hands leaving to whoever mounted the office', async () => {
+  it('"Salir" hands leaving to whoever mounted the office', async () => {
     const user = userEvent.setup();
     const onLeaveOffice = vi.fn();
     render(<OfficeShell onLeaveOffice={onLeaveOffice} />);
 
-    await user.click(screen.getByRole('button', { name: /Salir de la oficina/ }));
+    await user.click(screen.getByRole('button', { name: 'Salir' }));
 
     expect(onLeaveOffice).toHaveBeenCalledTimes(1);
   });

@@ -183,6 +183,30 @@ describe('rutas /admin montadas (#24)', () => {
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: 'not-found' });
   });
+
+  it('POST /admin/users/:id/password-reset is mounted and passes the id to the handler (#94)', async () => {
+    // Same reasoning as revoke: an unknown id must be the HANDLER's JSON 404.
+    const missing = await as('tok-jefa', '/admin/users/no-existe/password-reset', {
+      method: 'POST',
+    });
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: 'not-found' });
+
+    // A real id reaches the adapter check: without Identity Platform it is 503.
+    const known = await as('tok-jefa', `/admin/users/${EMPLEADA.id}/password-reset`, {
+      method: 'POST',
+    });
+    expect(known.status).toBe(503);
+    expect(await known.json()).toEqual({ error: 'identity-admin-not-configured' });
+  });
+
+  it('POST /admin/users/:id/password-reset requires an admin role', async () => {
+    const res = await as('tok-curra', `/admin/users/${EMPLEADA.id}/password-reset`, {
+      method: 'POST',
+    });
+
+    expect(res.status).toBe(403);
+  });
 });
 
 describe('/admin sin directorio configurado (#24)', () => {

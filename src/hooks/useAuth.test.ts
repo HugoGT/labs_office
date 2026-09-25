@@ -20,6 +20,7 @@ function fakePort(overrides: Partial<AuthPort> = {}) {
     }),
     signIn: vi.fn(async () => undefined),
     signOut: vi.fn(async () => undefined),
+    sendPasswordReset: vi.fn(async () => undefined),
     getIdToken: vi.fn(async () => 'jwt'),
     ...overrides,
   };

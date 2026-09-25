@@ -4,14 +4,16 @@
   /*
    * Centered with left/right + auto margins, not left: 50% + translate: that
    * capped the shrink-to-fit width at half the viewport, which is what pushed
-   * the content onto extra lines.
+   * the content onto extra lines. The right edge keeps the exit controls'
+   * footprint clear, so the bar centers in the room left of them and never
+   * slides under them (#88); on very small screens they move above it instead
+   * (`--hud-bar-right` in index.css, #86).
    */
-  left: 0;
-  right: 0;
+  left: 16px;
+  right: var(--hud-bar-right);
   margin: 0 auto;
   width: fit-content;
   z-index: 10;
-  max-width: calc(100vw - 32px);
   box-sizing: border-box;
   /* Narrow: identity and indicators share the top row, controls below. */
   display: grid;
@@ -46,6 +48,8 @@
 .controls {
   grid-area: controls;
   display: flex;
+  /* Only the tightest windows need it: better a second row than overflowing. */
+  flex-wrap: wrap;
   justify-content: center;
   gap: 10px;
   padding-top: 8px;
@@ -62,31 +66,28 @@
 }
 
 /*
- * Wide: a single row. Equal 1fr side columns keep the controls exactly
- * centered whatever the identity or the indicators measure (#67 follow-up).
+ * Wide: a single row sized by its content. The old equal 1fr side columns
+ * centered the controls exactly, but padded the shorter side with empty
+ * space, which left a gap before the indicators (#87).
  */
 @media (min-width: 1200px) {
   .bar {
-    grid-template-columns: 1fr auto 1fr;
+    grid-template-columns: auto auto auto;
     grid-template-areas: 'me controls info';
     column-gap: 16px;
   }
 
   .me {
-    justify-self: start;
     padding-right: 0;
     border-right: none;
   }
 
   .controls {
+    flex-wrap: nowrap;
     padding: 0 16px;
     border-top: none;
     border-left: 1px solid #2b3444;
     border-right: 1px solid #2b3444;
-  }
-
-  .info {
-    justify-self: end;
   }
 }
 

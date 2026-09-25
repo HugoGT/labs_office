@@ -22,6 +22,7 @@ import {
   handleListUsers,
   handleRevokeInvitation,
   handleRevokeUser,
+  handleSendPasswordReset,
   type AdminDeps,
 } from './adminRoutes.ts';
 import { PASSWORD_LENGTH } from './generatePassword.ts';
@@ -92,6 +93,8 @@ interface Harness {
   logged: string[];
   created: { email: string; password: string }[];
   disabled: string[];
+  /** Emails a password-reset link was requested for (#94), in order. */
+  resets: string[];
 }
 
 function harness(
@@ -101,6 +104,7 @@ function harness(
     auth?: IdTokenVerifier;
     createAccount?: (email: string, password: string) => Promise<string>;
     disableAccount?: (uid: string) => Promise<void>;
+    sendPasswordReset?: (email: string) => Promise<void>;
   } = {},
 ): Harness {
   const directory = createMemoryDirectory({
@@ -110,6 +114,7 @@ function harness(
   const logged: string[] = [];
   const created: { email: string; password: string }[] = [];
   const disabled: string[] = [];
+  const resets: string[] = [];
 
   const identityAdmin: IdentityAdmin = {
     async createAccount(email, password) {
@@ -121,6 +126,10 @@ function harness(
       disabled.push(uid);
       if (options.disableAccount) await options.disableAccount(uid);
     },
+    async sendPasswordReset(email) {
+      resets.push(email);
+      if (options.sendPasswordReset) await options.sendPasswordReset(email);
+    },
   };
 
   return {
@@ -129,6 +138,7 @@ function harness(
     logged,
     created,
     disabled,
+    resets,
     deps: {
       directory,
       auth: 'auth' in options ? options.auth : verifier,
@@ -160,9 +170,13 @@ const rutas: { nombre: string; llamar: (auth: unknown, deps: AdminDeps) => Promi
     llamar: (auth, deps) =>
       handleCreateUser(auth, { email: 'x@example.com', role: 'employee' }, deps),
   },
+  {
+    nombre: 'POST /admin/users/:id/password-reset',
+    llamar: (auth, deps) => handleSendPasswordReset(auth, EMPLEADO.id, deps),
+  },
 ];
 
-describe('autenticacion, comun a las cinco rutas', () => {
+describe('autenticacion, comun a todas las rutas', () => {
   for (const { nombre, llamar } of rutas) {
     describe(nombre, () => {
       it('401 sin cabecera Authorization', async () => {
@@ -554,24 +568,98 @@ describe('POST /admin/invitations', () => {
     await sinFilaPara(h, 'ana@example.com');
   });
 
-  it('201 con id, email, contrasena y caducidad', async () => {
+  it('201 with id, email, expiry and emailSent, and never a password (#94)', async () => {
     const { result } = crear({ email: 'ana@example.com', days: 7 });
     const { status, body } = await result;
 
     expect(status).toBe(201);
-    expect(body.email).toBe('ana@example.com');
-    expect(body.expiresAt).toBe('2026-01-22T12:00:00.000Z');
-    expect(typeof body.id).toBe('string');
-    expect(String(body.password)).toHaveLength(PASSWORD_LENGTH);
+    expect(body).toEqual({
+      id: expect.any(String),
+      email: 'ana@example.com',
+      expiresAt: '2026-01-22T12:00:00.000Z',
+      emailSent: true,
+    });
   });
 
-  it('crea la cuenta en Identity Platform con la MISMA contrasena que devuelve', async () => {
-    // Si divergiesen, el alta responderia 201 y la persona no podria entrar
-    // nunca, sin un solo error en ninguna parte.
+  it('creates the account with a strong random password that is never returned', async () => {
     const { h, result } = crear({ email: 'ana@example.com', days: 7 });
     const { body } = await result;
 
-    expect(h.created).toEqual([{ email: 'ana@example.com', password: body.password }]);
+    expect(h.created).toHaveLength(1);
+    expect(h.created[0].password).toHaveLength(PASSWORD_LENGTH);
+    expect(JSON.stringify(body)).not.toContain(h.created[0].password);
+  });
+
+  it('emails a password-reset link to the invited address once the row exists', async () => {
+    const { h, result } = crear({ email: '  Ana@Example.COM  ', days: 7 });
+    await result;
+
+    expect(h.resets).toEqual(['ana@example.com']);
+  });
+
+  it('sends the email AFTER saving the row: a failed save sends nothing', async () => {
+    const h = harness();
+    const order: string[] = [];
+    vi.spyOn(h.directory, 'createInvitation').mockImplementation(async () => {
+      order.push('row');
+      throw new Error('la base de datos');
+    });
+
+    await handleCreateInvitation(bearer(TOKEN_ADMIN), { email: 'ana@example.com', days: 7 }, h.deps);
+
+    expect(order).toEqual(['row']);
+    expect(h.resets).toEqual([]);
+  });
+
+  describe('when the reset email cannot be sent', () => {
+    function conFalloAlEnviar() {
+      const h = harness({
+        sendPasswordReset: async () => {
+          throw new IdentityAdminError('unavailable');
+        },
+      });
+      return {
+        h,
+        result: handleCreateInvitation(bearer(TOKEN_ADMIN), { email: 'ana@example.com', days: 7 }, h.deps),
+      };
+    }
+
+    it('keeps the invitation and answers 201 with emailSent: false so the admin retries', async () => {
+      const { h, result } = conFalloAlEnviar();
+      const { status, body } = await result;
+
+      expect(status).toBe(201);
+      expect(body.emailSent).toBe(false);
+      expect((await h.directory.listInvitations()).map((row) => row.email)).toContain(
+        'ana@example.com',
+      );
+      // Rolling back would throw away a valid account over a transient email
+      // failure; the admin can re-send instead.
+      expect(h.disabled).toEqual([]);
+    });
+
+    it('logs the uid so the operator can find the account, without the password', async () => {
+      const { h, result } = conFalloAlEnviar();
+      await result;
+
+      const log = h.logged.join('\n');
+      expect(log).toContain('uid-nuevo-1');
+      expect(log).not.toContain(h.created[0].password);
+    });
+  });
+
+  it('does not email anyone when the account already exists (409)', async () => {
+    const { h, result } = crear(
+      { email: 'ana@example.com', days: 7 },
+      {
+        createAccount: async () => {
+          throw new IdentityAdminError('email-exists');
+        },
+      },
+    );
+    await result;
+
+    expect(h.resets).toEqual([]);
   });
 
   it('normaliza el email antes de crear la cuenta y la fila', async () => {
@@ -684,9 +772,9 @@ describe('POST /admin/invitations', () => {
   describe('la contrasena no sale de la respuesta', () => {
     it('REGRESION: no llega al logger inyectado', async () => {
       const { h, result } = crear({ email: 'ana@example.com', days: 7 });
-      const { body } = await result;
+      await result;
 
-      expect(h.logged.join('\n')).not.toContain(String(body.password));
+      expect(h.logged.join('\n')).not.toContain(h.created[0].password);
     });
 
     it('REGRESION: no llega a la consola por ningun canal', async () => {
@@ -694,38 +782,36 @@ describe('POST /admin/invitations', () => {
         vi.spyOn(console, level).mockImplementation(() => {}),
       );
 
-      const { result } = crear({ email: 'ana@example.com', days: 7 });
-      const { body } = await result;
+      const { h, result } = crear({ email: 'ana@example.com', days: 7 });
+      await result;
 
       const escrito = spies
         .flatMap((spy) => spy.mock.calls)
         .flat()
         .map(String)
         .join('\n');
-      expect(escrito).not.toContain(String(body.password));
+      expect(escrito).not.toContain(h.created[0].password);
       for (const spy of spies) spy.mockRestore();
     });
 
     it('REGRESION: no se guarda en el directorio ni en el rastro de auditoria', async () => {
       const { h, result } = crear({ email: 'ana@example.com', days: 7 });
-      const { body } = await result;
+      await result;
 
       const almacen = JSON.stringify([
         await h.directory.listInvitations(),
         h.directory.auditLog(),
       ]);
-      expect(almacen).not.toContain(String(body.password));
+      expect(almacen).not.toContain(h.created[0].password);
     });
 
     it('REGRESION: no vuelve en ninguna consulta posterior', async () => {
-      // Se ensena UNA vez. `Invitation` en el cliente ni siquiera tiene el
-      // campo; esto afirma que el servidor tampoco lo manda por descuido.
       const { h, result } = crear({ email: 'ana@example.com', days: 7 });
-      const { body } = await result;
+      await result;
 
       const lista = await handleListInvitations(bearer(TOKEN_ADMIN), h.deps);
 
-      expect(JSON.stringify(lista.body)).not.toContain(String(body.password));
+      expect(JSON.stringify(lista.body)).not.toContain(h.created[0].password);
     });
 
     it('REGRESION: no aparece en el cuerpo de un 409 ni de un 503', async () => {
@@ -984,26 +1070,59 @@ describe('POST /admin/users', () => {
     expect(await h.directory.findByUid('uid-nuevo-1')).toBeNull();
   });
 
-  it('201 con id, email, rol y contrasena, y sin caducidad en el cuerpo', async () => {
+  it('201 with id, email, role and emailSent, no expiry and never a password (#94)', async () => {
     // No se devuelve `expiresAt`: esta cuenta no vence, y mandar un `null` que
     // el panel tiene que interpretar es peor que no mandar nada.
     const { result } = crear({ email: 'nueva@example.com', role: 'employee' });
     const { status, body } = await result;
 
     expect(status).toBe(201);
-    expect(body.email).toBe('nueva@example.com');
-    expect(body.role).toBe('employee');
-    expect(typeof body.id).toBe('string');
-    expect(String(body.password)).toHaveLength(PASSWORD_LENGTH);
+    expect(body).toEqual({
+      id: expect.any(String),
+      email: 'nueva@example.com',
+      role: 'employee',
+      emailSent: true,
+    });
   });
 
-  it('crea la cuenta en Identity Platform con la MISMA contrasena que devuelve', async () => {
-    // Si divergiesen, el alta responderia 201 y la persona no podria entrar
-    // nunca, sin un solo error en ninguna parte.
+  it('creates the account with a strong random password that is never returned', async () => {
     const { h, result } = crear({ email: 'nueva@example.com', role: 'employee' });
     const { body } = await result;
 
-    expect(h.created).toEqual([{ email: 'nueva@example.com', password: body.password }]);
+    expect(h.created).toHaveLength(1);
+    expect(h.created[0].password).toHaveLength(PASSWORD_LENGTH);
+    expect(JSON.stringify(body)).not.toContain(h.created[0].password);
+  });
+
+  it('emails a password-reset link to the new address once the row exists', async () => {
+    const { h, result } = crear({ email: '  Nueva@Example.COM  ', role: 'employee' });
+    await result;
+
+    expect(h.resets).toEqual(['nueva@example.com']);
+  });
+
+  it('a failed save sends no email', async () => {
+    const h = harness();
+    vi.spyOn(h.directory, 'createUser').mockRejectedValue(new Error('la base de datos'));
+
+    await handleCreateUser(bearer(TOKEN_ADMIN), { email: 'nueva@example.com', role: 'employee' }, h.deps);
+
+    expect(h.resets).toEqual([]);
+  });
+
+  it('when the email fails it keeps the user, answers 201 emailSent: false and logs the uid', async () => {
+    const { h, result } = crear({ email: 'nueva@example.com', role: 'employee' }, TOKEN_ADMIN, {
+      sendPasswordReset: async () => {
+        throw new IdentityAdminError('unavailable');
+      },
+    });
+    const { status, body } = await result;
+
+    expect(status).toBe(201);
+    expect(body.emailSent).toBe(false);
+    expect(await h.directory.findByUid('uid-nuevo-1')).not.toBeNull();
+    expect(h.disabled).toEqual([]);
+    expect(h.logged.join('\n')).toContain('uid-nuevo-1');
   });
 
   it('normaliza el email antes de crear la cuenta y la fila', async () => {
@@ -1067,7 +1186,7 @@ describe('POST /admin/users', () => {
     /**
      * Mismo hueco que en el alta de invitacion: `createAccount` funciona y
      * `createUser` falla despues, asi que queda una cuenta en Identity Platform
-     * sin fila en el directorio. Puede autenticarse, alguien conoce su
+     * sin fila en el directorio. Puede autenticarse, su dueno puede darle
      * contrasena, y nadie la ve desde el panel. Es una credencial fuera de
      * inventario, que es el peor sitio donde puede estar una credencial.
      */
@@ -1120,23 +1239,123 @@ describe('POST /admin/users', () => {
   });
 
   it('REGRESION: la contrasena no llega al logger inyectado', async () => {
-    // Misma regla que en el alta de invitacion: se entrega UNA vez en el cuerpo
-    // del 201 y no existe en ningun otro sitio. Ver `generatePassword.ts`.
+    // Misma regla que en el alta de invitacion: no sale de este proceso y no
+    // existe en ningun otro sitio. Ver `generatePassword.ts`.
     const { h, result } = crear({ email: 'nueva@example.com', role: 'employee' });
-    const { body } = await result;
+    await result;
 
-    expect(h.logged.join('\n')).not.toContain(String(body.password));
+    expect(h.logged.join('\n')).not.toContain(h.created[0].password);
   });
 
   it('REGRESION: la contrasena no se guarda en el directorio ni en la auditoria', async () => {
     const { h, result } = crear({ email: 'nueva@example.com', role: 'employee' });
-    const { body } = await result;
+    await result;
 
     const almacen = JSON.stringify([
       await h.directory.findByUid('uid-nuevo-1'),
       h.directory.auditLog(),
     ]);
-    expect(almacen).not.toContain(String(body.password));
+    expect(almacen).not.toContain(h.created[0].password);
+  });
+});
+
+describe('POST /admin/users/:id/password-reset (#94)', () => {
+  const invitada = user({
+    id: 'id-invitada',
+    uid: 'uid-invitada',
+    role: 'guest',
+    email: 'invitada@example.com',
+    expiresAt: at(3 * DAY),
+    invitedBy: ADMIN.id,
+  });
+  const otroAdmin = user({ id: 'id-otro-admin', uid: 'uid-otro-admin', role: 'admin' });
+
+  function reenviar(id: unknown, options: Parameters<typeof harness>[0] = {}, token = TOKEN_ADMIN) {
+    const h = harness({
+      seed: [ADMIN, SUPERADMIN, EMPLEADO, CADUCADO, REVOCADO, invitada, otroAdmin],
+      ...options,
+    });
+    return { h, result: handleSendPasswordReset(bearer(token), id, h.deps) };
+  }
+
+  it('re-sends the email to an active invitation and answers 200 emailSent: true', async () => {
+    const { h, result } = reenviar(invitada.id);
+
+    expect(await result).toEqual({
+      status: 200,
+      body: { id: invitada.id, email: 'invitada@example.com', emailSent: true },
+    });
+    expect(h.resets).toEqual(['invitada@example.com']);
+  });
+
+  it('re-sends it to an employee too: the admin could have created that account', async () => {
+    const { h, result } = reenviar(EMPLEADO.id);
+
+    expect((await result).status).toBe(200);
+    expect(h.resets).toEqual([EMPLEADO.email]);
+  });
+
+  it('404 for an id that does not exist or is not text, without emailing anyone', async () => {
+    for (const id of ['00000000-0000-4000-8000-000000000000', '', 42, undefined]) {
+      const { h, result } = reenviar(id);
+      expect(await result).toEqual({ status: 404, body: { error: 'not-found' } });
+      expect(h.resets).toEqual([]);
+    }
+  });
+
+  it('404 for a revoked or expired account: the office no longer admits them', async () => {
+    for (const id of [REVOCADO.id, CADUCADO.id]) {
+      const { h, result } = reenviar(id, {}, TOKEN_SUPER);
+      expect(await result).toEqual({ status: 404, body: { error: 'not-found' } });
+      expect(h.resets).toEqual([]);
+    }
+  });
+
+  it('403 when the caller could not have created that role (admin -> admin, anyone -> superadmin)', async () => {
+    for (const [token, id] of [
+      [TOKEN_ADMIN, otroAdmin.id],
+      [TOKEN_ADMIN, SUPERADMIN.id],
+      [TOKEN_SUPER, SUPERADMIN.id],
+    ] as const) {
+      const { h, result } = reenviar(id, {}, token);
+      expect(await result).toEqual({ status: 403, body: { error: 'forbidden' } });
+      expect(h.resets).toEqual([]);
+    }
+  });
+
+  it('a superadmin can re-send to an admin', async () => {
+    const { result } = reenviar(otroAdmin.id, {}, TOKEN_SUPER);
+
+    expect((await result).status).toBe(200);
+  });
+
+  it('503 identity-admin-not-configured without a service credential', async () => {
+    const { result } = reenviar(invitada.id, { identityAdmin: null });
+
+    expect(await result).toEqual({
+      status: 503,
+      body: { error: 'identity-admin-not-configured' },
+    });
+  });
+
+  it('200 emailSent: false when the send fails, and logs the uid', async () => {
+    const { h, result } = reenviar(invitada.id, {
+      sendPasswordReset: async () => {
+        throw new IdentityAdminError('unavailable');
+      },
+    });
+
+    expect(await result).toEqual({
+      status: 200,
+      body: { id: invitada.id, email: 'invitada@example.com', emailSent: false },
+    });
+    expect(h.logged.join('\n')).toContain('uid-invitada');
+  });
+
+  it('never exposes the uid in the body', async () => {
+    const { result } = reenviar(invitada.id);
+
+    expect(JSON.stringify((await result).body)).not.toContain('uid-invitada');
   });
 });
 

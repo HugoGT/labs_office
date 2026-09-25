@@ -72,6 +72,7 @@ function fakePort(): AdminPort {
     createInvitation: vi.fn(),
     createUser: vi.fn(),
     revoke: vi.fn(async () => undefined),
+    sendPasswordReset: vi.fn(),
   };
 }
 

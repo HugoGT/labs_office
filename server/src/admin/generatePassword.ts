@@ -6,13 +6,13 @@
  *
  * ## El ciclo de vida completo de este valor
  *
- * Se devuelve UNA sola vez, en el cuerpo del `201` de `POST /admin/invitations`.
- * No se guarda en el directorio (`schema.sql` no tiene columna para ella), no
- * se escribe en el rastro de auditoria, y no aparece en ningun log: quien la
- * necesite la copia de la pantalla en ese momento o no la tiene. Si se pierde,
- * el camino es revocar la invitacion y crear otra, no "recuperarla" -- porque
- * no hay nada que recuperar. `adminRoutes.test.ts` tiene una regresion
- * explicita que afirma que el logger inyectado no la recibe nunca.
+ * Since #94 it never leaves the process: it is passed to `createAccount` and
+ * dropped. The person sets their own password through the reset email that
+ * the route sends right after, so nobody -- not even the admin who created the
+ * account -- ever knows the real one. It is not returned, not stored in the
+ * directory (`schema.sql` no tiene columna para ella), not written to the
+ * audit trail and not logged. `adminRoutes.test.ts` has explicit regressions
+ * for each of those.
  *
  * Que no se almacene no es solo higiene: Identity Platform guarda el hash y es
  * la unica fuente de verdad de la credencial. Una segunda copia en nuestra base

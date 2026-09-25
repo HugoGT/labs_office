@@ -6,6 +6,7 @@ import {
   type AdminSession,
   type AssignableRole,
   type Invitation,
+  type PasswordResetResult,
   type Role,
 } from './adminPort';
 import styles from './DashboardScreen.module.css';
@@ -217,34 +218,47 @@ export function UserForm({ onSubmit, pending, error, canCreateAdmins }: UserForm
   );
 }
 
-export interface GeneratedPasswordProps {
+/** Shown when the server could not send the set-your-password email (#94). */
+const EMAIL_NOT_SENT = 'No se pudo enviar el correo para crear la contraseña. Vuelve a intentarlo.';
+
+export interface AccountCreatedProps {
   /**
-   * Forma estructural y no `CreatedInvitation`: los dos flujos entregan una
-   * credencial y solo se diferencian en si hay fecha de vencimiento, asi que
-   * pedir lo minimo que hace falta para pintarla evita un segundo panel
-   * identico que habria que mantener en paralelo.
+   * Forma estructural y no `CreatedInvitation`: los dos flujos crean una
+   * cuenta y solo se diferencian en si hay fecha de vencimiento, asi que pedir
+   * lo minimo que hace falta para pintarla evita un segundo panel identico.
    */
-  created: { email: string; password: string; expiresAt: string | null };
+  created: { email: string; expiresAt: string | null; emailSent: boolean };
+  onResend: () => void;
+  /** `true` while a re-send is in flight. */
+  resending: boolean;
+  /** Ya traducido a texto (`describeAdminError`), nunca el error crudo. */
+  error: string | null;
   onDismiss: () => void;
 }
 
 /**
- * La contrasena recien generada (#24, seccion 3). Se entrega UNA vez: no se
- * guarda en `localStorage`, no se escribe en ningun log y no viaja en ninguna
- * consulta posterior -- `Invitation` ni siquiera tiene el campo. Su unica
- * copia es el estado de React de esta pantalla, que muere al descartarla o al
- * recargar. Si se pierde, se revoca y se invita de nuevo.
+ * The account that was just created (#94). There is no password to show: the
+ * server created the account with a random one nobody knows and emailed the
+ * person a link to set their own. The admin only learns whether that email
+ * went out, and can re-send it when it did not.
  */
-export function GeneratedPassword({ created, onDismiss }: GeneratedPasswordProps) {
+export function AccountCreated({ created, onResend, resending, error, onDismiss }: AccountCreatedProps) {
   return (
-    <section className={styles.secret} aria-labelledby="credenciales-nuevas" aria-live="polite">
-      <h2 className={styles.secretTitle} id="credenciales-nuevas">
-        Credenciales de {created.email}
+    <section className={styles.secret} aria-labelledby="cuenta-creada" aria-live="polite">
+      <h2 className={styles.secretTitle} id="cuenta-creada">
+        Cuenta creada para {created.email}
       </h2>
-      <p className={styles.secretWarning}>
-        Cópiala y entrégala ahora: no se volverá a mostrar en ningún sitio.
-      </p>
-      <p className={styles.secretValue}>{created.password}</p>
+      {created.emailSent ? (
+        <p className={styles.secretWarning}>
+          Enviamos un correo a {created.email} para que cree su contraseña. Nadie más la conoce.
+        </p>
+      ) : (
+        // `role="alert"`: the admin has to act on it, and it appears away from
+        // the focus, which stays on the form that was just submitted.
+        <div className={styles.error} role="alert">
+          {error ?? EMAIL_NOT_SENT}
+        </div>
+      )}
       {/* Decirlo y no callarlo: con las dos altas en la misma pantalla, esta
           linea es lo unico que distingue un acceso temporal de uno que se
           queda, justo cuando quien administra acaba de hacer una de las dos. */}
@@ -253,9 +267,16 @@ export function GeneratedPassword({ created, onDismiss }: GeneratedPasswordProps
           ? 'El acceso no caduca.'
           : `El acceso caduca el ${formatUtcDate(created.expiresAt)}.`}
       </p>
-      <button className={styles.secretDismiss} type="button" onClick={onDismiss}>
-        Entendido, ya la copié
-      </button>
+      <div className={styles.actions}>
+        {!created.emailSent && (
+          <button className={styles.secretDismiss} type="button" onClick={onResend} disabled={resending}>
+            {resending ? 'Reenviando…' : 'Reenviar correo'}
+          </button>
+        )}
+        <button className={styles.secretDismiss} type="button" onClick={onDismiss}>
+          Entendido
+        </button>
+      </div>
     </section>
   );
 }
@@ -265,10 +286,20 @@ export interface InvitationsTableProps {
   onRevoke: (id: string) => void;
   /** Id de la invitacion con una revocacion en vuelo, o `null`. */
   revokingId: string | null;
+  /** Re-sends the set-your-password email (#94). */
+  onResend: (id: string) => void;
+  /** Id with a re-send in flight, or `null`. */
+  resendingId: string | null;
 }
 
 /** Tabla de invitaciones. Presentacional: props planas y un aviso hacia arriba. */
-export function InvitationsTable({ invitations, onRevoke, revokingId }: InvitationsTableProps) {
+export function InvitationsTable({
+  invitations,
+  onRevoke,
+  revokingId,
+  onResend,
+  resendingId,
+}: InvitationsTableProps) {
   if (invitations.length === 0) {
     // Una tabla con encabezados y sin filas se lee como un fallo de carga.
     return <p className={styles.empty}>Todavía no hay invitaciones.</p>;
@@ -304,14 +335,24 @@ export function InvitationsTable({ invitations, onRevoke, revokingId }: Invitati
               <td>{invitation.status === 'active' ? 'Activa' : 'Revocada'}</td>
               <td>
                 {invitation.status === 'active' && (
-                  <button
-                    className={styles.revoke}
-                    type="button"
-                    disabled={revokingId !== null}
-                    onClick={() => onRevoke(invitation.id)}
-                  >
-                    Revocar
-                  </button>
+                  <div className={styles.actions}>
+                    <button
+                      className={styles.resend}
+                      type="button"
+                      disabled={resendingId !== null}
+                      onClick={() => onResend(invitation.id)}
+                    >
+                      Reenviar correo
+                    </button>
+                    <button
+                      className={styles.revoke}
+                      type="button"
+                      disabled={revokingId !== null}
+                      onClick={() => onRevoke(invitation.id)}
+                    >
+                      Revocar
+                    </button>
+                  </div>
                 )}
               </td>
             </tr>
@@ -357,11 +398,21 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   /**
-   * La credencial recien entregada, venga del alta que venga: el panel es el
-   * mismo y solo cambia si hay caducidad que anunciar. `expiresAt: null`
-   * significa "no caduca", que es exactamente lo que el servidor guarda.
+   * La cuenta recien creada, venga del alta que venga: el panel es el mismo y
+   * solo cambia si hay caducidad que anunciar. `expiresAt: null` significa "no
+   * caduca", que es exactamente lo que el servidor guarda. The id is kept to
+   * re-send the password email (#94).
    */
-  const [created, setCreated] = useState<GeneratedPasswordProps['created'] | null>(null);
+  const [created, setCreated] = useState<
+    (AccountCreatedProps['created'] & { id: string }) | null
+  >(null);
+  const [resendingCreated, setResendingCreated] = useState(false);
+  const [createdError, setCreatedError] = useState<string | null>(null);
+  /** Re-send from the invitations table (#94): in-flight id and its outcome. */
+  const [resendingId, setResendingId] = useState<string | null>(null);
+  const [resendNotice, setResendNotice] = useState<
+    { ok: true; email: string } | { ok: false; message: string } | null
+  >(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   // Estado propio para el alta de usuario, separado del de invitar a proposito:
@@ -429,7 +480,9 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
 
     setCreating(true);
     try {
-      setCreated(await admin.createInvitation(email, days));
+      const invitation = await admin.createInvitation(email, days);
+      setCreatedError(null);
+      setCreated(invitation);
       await refresh();
       return true;
     } catch (error) {
@@ -447,7 +500,8 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
       const user = await admin.createUser(email, role);
       // `expiresAt: null` no es un hueco por rellenar: es el dato. Quien entra
       // por aqui es de casa y su acceso no vence.
-      setCreated({ email: user.email, password: user.password, expiresAt: null });
+      setCreatedError(null);
+      setCreated({ id: user.id, email: user.email, emailSent: user.emailSent, expiresAt: null });
       // Y NO se llama a `refresh()`: la fila nace sin `invited_by`, asi que el
       // servidor no la devuelve en `listInvitations` y releer la lista solo
       // gastaria un viaje para pintar exactamente lo mismo.
@@ -458,6 +512,46 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
     } finally {
       setCreatingUser(false);
     }
+  }
+
+  /**
+   * One place that re-sends and translates the outcome for both entry points:
+   * `null` plus a message when the request failed, the result otherwise (which
+   * may still say `emailSent: false`).
+   */
+  async function resend(
+    id: string,
+  ): Promise<{ result: PasswordResetResult; error: null } | { result: null; error: string }> {
+    try {
+      return { result: await admin.sendPasswordReset(id), error: null };
+    } catch (error) {
+      return { result: null, error: describeAdminError(error) };
+    }
+  }
+
+  async function handleResendCreated(): Promise<void> {
+    if (created === null) return;
+    setResendingCreated(true);
+    const { result, error } = await resend(created.id);
+    setResendingCreated(false);
+    if (result?.emailSent) {
+      setCreatedError(null);
+      setCreated({ ...created, emailSent: true });
+      return;
+    }
+    setCreatedError(error ?? EMAIL_NOT_SENT);
+  }
+
+  async function handleResendFromTable(id: string): Promise<void> {
+    setResendNotice(null);
+    setResendingId(id);
+    const { result, error } = await resend(id);
+    setResendingId(null);
+    if (result?.emailSent) {
+      setResendNotice({ ok: true, email: result.email });
+      return;
+    }
+    setResendNotice({ ok: false, message: error ?? EMAIL_NOT_SENT });
   }
 
   async function handleRevoke(id: string): Promise<void> {
@@ -526,7 +620,16 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
         </header>
 
         {created !== null && (
-          <GeneratedPassword created={created} onDismiss={() => setCreated(null)} />
+          <AccountCreated
+            created={created}
+            onResend={() => void handleResendCreated()}
+            resending={resendingCreated}
+            error={createdError}
+            onDismiss={() => {
+              setCreated(null);
+              setCreatedError(null);
+            }}
+          />
         )}
 
         {/* Cada tarjeta lleva su encabezado y su `aria-labelledby`: con dos
@@ -568,7 +671,19 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
             invitations={invitations}
             onRevoke={(id) => void handleRevoke(id)}
             revokingId={revokingId}
+            onResend={(id) => void handleResendFromTable(id)}
+            resendingId={resendingId}
           />
+          {resendNotice?.ok === true && (
+            <p className={styles.subtitle} role="status">
+              Correo reenviado a {resendNotice.email}.
+            </p>
+          )}
+          {resendNotice?.ok === false && (
+            <div className={styles.error} role="alert">
+              {resendNotice.message}
+            </div>
+          )}
         </section>
 
         {/* Los demas paneles de administracion, ya construidos por la raiz de

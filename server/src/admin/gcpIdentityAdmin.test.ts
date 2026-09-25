@@ -408,6 +408,79 @@ describe('createGcpIdentityAdmin', () => {
       });
     });
   });
+
+  // #94: the person sets their own password from the email; nobody else ever
+  // learns it.
+  describe('sendPasswordReset', () => {
+    it('asks the project-scoped sendOobCode endpoint for a PASSWORD_RESET email', async () => {
+      const { admin: subject, calls } = admin([
+        tokenOk,
+        () => jsonResponse({ kind: 'identitytoolkit#GetOobConfirmationCodeResponse', email: 'ana@example.com' }),
+      ]);
+
+      await subject.sendPasswordReset('ana@example.com');
+
+      const send = calls[1];
+      expect(send.url).toBe(
+        'https://identitytoolkit.googleapis.com/v1/projects/oficina-de-prueba/accounts:sendOobCode',
+      );
+      expect(send.init?.method).toBe('POST');
+      expect(headerOf(send, 'Authorization')).toBe('Bearer token-de-acceso');
+      expect(bodyOf(send)).toEqual({ requestType: 'PASSWORD_RESET', email: 'ana@example.com' });
+    });
+
+    it('never asks for the link back: Google must send the email, not hand us the code', async () => {
+      // `returnOobLink: true` suppresses the email and returns the reset link
+      // to whoever called, which would put a way to set the password in the
+      // admin's hands again.
+      const { admin: subject, calls } = admin([tokenOk, () => jsonResponse({})]);
+
+      await subject.sendPasswordReset('ana@example.com');
+
+      expect(bodyOf(calls[1])).not.toHaveProperty('returnOobLink');
+    });
+
+    it('reuses the cached access token like the other operations', async () => {
+      const { admin: subject, calls } = admin([
+        tokenOk,
+        () => jsonResponse({ localId: 'uid-1' }),
+        () => jsonResponse({}),
+      ]);
+
+      await subject.createAccount('ana@example.com', 'x');
+      await subject.sendPasswordReset('ana@example.com');
+
+      expect(calls.filter((call) => call.url.includes('oauth2'))).toHaveLength(1);
+    });
+
+    it('every failure is `unavailable`, including an unknown email and the rate limit', async () => {
+      for (const response of [
+        () => jsonResponse({ error: { code: 400, message: 'EMAIL_NOT_FOUND' } }, 400),
+        () => jsonResponse({ error: { code: 400, message: 'RESET_PASSWORD_EXCEED_LIMIT' } }, 400),
+        () => jsonResponse({ error: { code: 400, message: 'USER_DISABLED' } }, 400),
+        () => jsonResponse({ error: { message: 'PERMISSION_DENIED' } }, 403),
+        () => jsonResponse({}, 500),
+        () => new Response('<html>algo raro</html>', { status: 200 }),
+      ]) {
+        const { admin: subject } = admin([tokenOk, response]);
+        await expect(subject.sendPasswordReset('ana@example.com')).rejects.toMatchObject({
+          name: 'IdentityAdminError',
+          code: 'unavailable',
+        });
+      }
+    });
+
+    it('a network failure is `unavailable` too, never a loose fetch exception', async () => {
+      const { admin: subject } = admin([
+        tokenOk,
+        () => Promise.reject(new TypeError('fetch failed')),
+      ]);
+
+      await expect(subject.sendPasswordReset('ana@example.com')).rejects.toBeInstanceOf(
+        IdentityAdminError,
+      );
+    });
+  });
 });
 
 describe('metadataServerSource', () => {
