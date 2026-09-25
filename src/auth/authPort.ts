@@ -26,6 +26,12 @@ export interface AuthPort {
   signOut(): Promise<void>;
   /** `null` cuando no hay sesion: la oficina sigue siendo jugable sin ella. */
   getIdToken(): Promise<string | null>;
+  /**
+   * Asks the provider to email a password-reset link (#94). Lets the provider
+   * error through like `signIn`; the caller translates it with
+   * `describePasswordResetError`, which also hides whether the account exists.
+   */
+  sendPasswordReset(email: string): Promise<void>;
 }
 
 /**

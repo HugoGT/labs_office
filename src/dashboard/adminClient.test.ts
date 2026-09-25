@@ -100,12 +100,12 @@ describe('createAdminClient: contrato del servidor', () => {
     expect(invitations).toEqual([invitation]);
   });
 
-  it('POST /admin/invitations manda { email, days } y devuelve la credencial', async () => {
+  it('POST /admin/invitations manda { email, days } y devuelve si salio el correo (#94)', async () => {
     const fetchImpl = fetchWith(201, {
       id: 'inv-1',
       email: 'invitado@example.com',
-      password: 'generada',
       expiresAt: '2026-09-08T00:00:00.000Z',
+      emailSent: true,
     });
 
     const created = await clientWith(fetchImpl).createInvitation('invitado@example.com', 7);
@@ -114,15 +114,20 @@ describe('createAdminClient: contrato del servidor', () => {
     expect(url).toBe('http://localhost:2567/admin/invitations');
     expect(init?.method).toBe('POST');
     expect(JSON.parse(init?.body as string)).toEqual({ email: 'invitado@example.com', days: 7 });
-    expect(created.password).toBe('generada');
+    expect(created).toEqual({
+      id: 'inv-1',
+      email: 'invitado@example.com',
+      expiresAt: '2026-09-08T00:00:00.000Z',
+      emailSent: true,
+    });
   });
 
-  it('POST /admin/users manda { email, role } y devuelve la credencial', async () => {
+  it('POST /admin/users manda { email, role } y devuelve si salio el correo (#94)', async () => {
     const fetchImpl = fetchWith(201, {
       id: 'user-1',
       email: 'nueva@example.com',
       role: 'employee',
-      password: 'generada',
+      emailSent: false,
     });
 
     const created = await clientWith(fetchImpl).createUser('nueva@example.com', 'employee');
@@ -140,8 +145,20 @@ describe('createAdminClient: contrato del servidor', () => {
       id: 'user-1',
       email: 'nueva@example.com',
       role: 'employee',
-      password: 'generada',
+      emailSent: false,
     });
+  });
+
+  it('POST /admin/users/{id}/password-reset escapes the id and returns the result (#94)', async () => {
+    const fetchImpl = fetchWith(200, { id: 'user/1', email: 'nueva@example.com', emailSent: true });
+
+    const result = await clientWith(fetchImpl).sendPasswordReset('user/1');
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe('http://localhost:2567/admin/users/user%2F1/password-reset');
+    expect(init?.method).toBe('POST');
+    expect(sentHeaders(fetchImpl).Authorization).toBe('Bearer id-token');
+    expect(result).toEqual({ id: 'user/1', email: 'nueva@example.com', emailSent: true });
   });
 
   it('POST /admin/users manda el ID token como Bearer, igual que el resto', async () => {
@@ -237,6 +254,7 @@ describe('createAdminClient: traduccion de estados', () => {
     expect(await codeOf(client.listInvitations())).toBe('forbidden');
     expect(await codeOf(client.createInvitation('a@example.com', 7))).toBe('forbidden');
     expect(await codeOf(client.revoke('inv-1'))).toBe('forbidden');
+    expect(await codeOf(client.sendPasswordReset('inv-1'))).toBe('forbidden');
   });
 
   it('un fallo de red es otra cosa que un rechazo del servidor', async () => {

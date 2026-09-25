@@ -14,7 +14,7 @@
  * mas. Una dependencia que se instala para dos llamadas es una dependencia que
  * hay que auditar, actualizar y explicar para siempre.
  *
- * ## Los tres endpoints, y de donde sale cada uno
+ * ## Los endpoints, y de donde sale cada uno
  *
  * Todos CONFIRMADOS contra la documentacion oficial, no deducidos:
  *
@@ -38,7 +38,15 @@
  *    con `{ localId, disableUser: true }`.
  *    .../rest/v1/projects.accounts/update
  *
- * Los dos de identitytoolkit aceptan el scope `identitytoolkit` o el mas amplio
+ * 4. Password-reset email (#94):
+ *    `POST https://identitytoolkit.googleapis.com/v1/projects/{projectId}/accounts:sendOobCode`
+ *    with `{ requestType: "PASSWORD_RESET", email }`. The project-scoped form
+ *    needs an OAuth credential with `firebaseauth.users.sendEmail`, which
+ *    `roles/identitytoolkit.admin` includes. Google sends the email unless
+ *    `returnOobLink` is true, and that field is never sent.
+ *    .../rest/v1/projects.accounts/sendOobCode
+ *
+ * Los de identitytoolkit aceptan el scope `identitytoolkit` o el mas amplio
  * `cloud-platform`; se pide el estrecho, que es el unico que esta cuenta de
  * servicio necesita.
  *
@@ -406,6 +414,15 @@ export function createGcpIdentityAdmin({
 
     async disableAccount(uid) {
       await call('accounts:update', { localId: uid, disableUser: true });
+    },
+
+    async sendPasswordReset(email) {
+      // No `returnOobLink`: with it Google returns the reset link to the caller
+      // INSTEAD of emailing it, which would hand the admin a way to set the
+      // password again. Every failure (EMAIL_NOT_FOUND, USER_DISABLED, the
+      // RESET_PASSWORD_EXCEED_LIMIT rate limit, IAM) collapses into
+      // `unavailable` through `call`: the route handles them all the same way.
+      await call('accounts:sendOobCode', { requestType: 'PASSWORD_RESET', email });
     },
   };
 }

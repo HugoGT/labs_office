@@ -37,16 +37,21 @@ function fakeAdmin(overrides: Partial<AdminPort> = {}): AdminPort {
     createInvitation: vi.fn(async () => ({
       id: 'inv-3',
       email: 'nuevo@example.com',
-      password: 'Zx9-clave-generada',
       expiresAt: '2026-09-24T00:00:00.000Z',
+      emailSent: true,
     })),
     createUser: vi.fn(async () => ({
       id: 'user-1',
       email: 'nueva@example.com',
       role: 'employee' as const,
-      password: 'Qp7-clave-de-casa',
+      emailSent: true,
     })),
     revoke: vi.fn(async () => undefined),
+    sendPasswordReset: vi.fn(async (id: string) => ({
+      id,
+      email: 'invitado@example.com',
+      emailSent: true,
+    })),
     ...overrides,
   };
 }
@@ -313,56 +318,125 @@ describe('DashboardScreen: invitar', () => {
   });
 });
 
-describe('DashboardScreen: la contrasena generada', () => {
-  it('se ensena una vez, con el aviso de que no vuelve', async () => {
+describe('DashboardScreen: account created, the password is emailed (#94)', () => {
+  it('confirms the email went out and never shows a password', async () => {
     const user = userEvent.setup();
     render(<DashboardScreen admin={fakeAdmin()} />);
     await screen.findByRole('table');
 
     await invitar(user, 'nuevo@example.com', '30');
 
-    expect(await screen.findByText('Zx9-clave-generada')).toBeInTheDocument();
-    expect(screen.getByText(/no se volverá a mostrar/i)).toBeInTheDocument();
+    const panel = within(await screen.findByRole('region', { name: /cuenta creada/i }));
+    expect(panel.getByText(/enviamos un correo a nuevo@example.com/i)).toBeInTheDocument();
+    expect(panel.queryByText(/contraseña:/i)).not.toBeInTheDocument();
+    expect(panel.queryByRole('button', { name: /reenviar/i })).not.toBeInTheDocument();
   });
 
-  it('al descartarla desaparece y no vuelve por ningun lado', async () => {
+  it('when the email failed it says so and offers to re-send it', async () => {
+    const user = userEvent.setup();
+    const admin = fakeAdmin({
+      createInvitation: vi.fn(async () => ({
+        id: 'inv-3',
+        email: 'nuevo@example.com',
+        expiresAt: '2026-09-24T00:00:00.000Z',
+        emailSent: false,
+      })),
+      sendPasswordReset: vi.fn(async (id: string) => ({
+        id,
+        email: 'nuevo@example.com',
+        emailSent: true,
+      })),
+    });
+    render(<DashboardScreen admin={admin} />);
+    await screen.findByRole('table');
+    await invitar(user, 'nuevo@example.com', '30');
+
+    const panel = within(await screen.findByRole('region', { name: /cuenta creada/i }));
+    expect(panel.getByRole('alert')).toHaveTextContent(/no se pudo enviar el correo/i);
+
+    await user.click(panel.getByRole('button', { name: /reenviar correo/i }));
+
+    expect(admin.sendPasswordReset).toHaveBeenCalledWith('inv-3');
+    expect(await panel.findByText(/enviamos un correo a nuevo@example.com/i)).toBeInTheDocument();
+    expect(panel.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('a re-send that fails again keeps the retry and explains the server error', async () => {
+    const user = userEvent.setup();
+    const admin = fakeAdmin({
+      createUser: vi.fn(async () => ({
+        id: 'user-1',
+        email: 'nueva@example.com',
+        role: 'employee' as const,
+        emailSent: false,
+      })),
+      sendPasswordReset: vi.fn(async () => {
+        throw new AdminError('identity-admin-not-configured');
+      }),
+    });
+    render(<DashboardScreen admin={admin} />);
+    await screen.findByRole('table');
+    await darDeAlta(user, 'nueva@example.com');
+
+    const panel = within(await screen.findByRole('region', { name: /cuenta creada/i }));
+    await user.click(panel.getByRole('button', { name: /reenviar correo/i }));
+
+    expect(await panel.findByText(/no está configurada/i)).toBeInTheDocument();
+    expect(panel.getByRole('button', { name: /reenviar correo/i })).toBeEnabled();
+  });
+
+  it('dismissing it removes the panel', async () => {
     const user = userEvent.setup();
     render(<DashboardScreen admin={fakeAdmin()} />);
     await screen.findByRole('table');
     await invitar(user, 'nuevo@example.com', '30');
-    await screen.findByText('Zx9-clave-generada');
+    await screen.findByRole('region', { name: /cuenta creada/i });
 
     await user.click(screen.getByRole('button', { name: /entendido/i }));
 
-    expect(screen.queryByText('Zx9-clave-generada')).not.toBeInTheDocument();
-    // La lista se relee del servidor, y el servidor nunca devuelve la
-    // contrasena: si reapareciera, es que la estabamos guardando.
-    expect(screen.queryByText(/Zx9/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: /cuenta creada/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('DashboardScreen: re-send the password email from the table (#94)', () => {
+  it('re-sends by id for an active invitation and confirms it', async () => {
+    const user = userEvent.setup();
+    const admin = fakeAdmin();
+    render(<DashboardScreen admin={admin} />);
+    const fila = await screen.findByRole('row', { name: /invitado@example.com/i });
+
+    await user.click(within(fila).getByRole('button', { name: /reenviar correo/i }));
+
+    expect(admin.sendPasswordReset).toHaveBeenCalledWith('inv-1');
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      /correo reenviado a invitado@example.com/i,
+    );
   });
 
-  it('REGRESION: la contrasena no se guarda ni se registra en ningun sitio', async () => {
+  it('a revoked invitation does not offer it', async () => {
+    render(<DashboardScreen admin={fakeAdmin({ listInvitations: vi.fn(async () => [REVOCADO]) })} />);
+
+    const fila = await screen.findByRole('row', { name: /antiguo@example.com/i });
+    expect(within(fila).queryByRole('button', { name: /reenviar/i })).not.toBeInTheDocument();
+  });
+
+  it('says so when the server could not send it', async () => {
     const user = userEvent.setup();
-    const spies = [
-      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {}),
-      vi.spyOn(console, 'log').mockImplementation(() => {}),
-      vi.spyOn(console, 'info').mockImplementation(() => {}),
-      vi.spyOn(console, 'warn').mockImplementation(() => {}),
-      vi.spyOn(console, 'error').mockImplementation(() => {}),
-    ];
-    render(<DashboardScreen admin={fakeAdmin()} />);
-    await screen.findByRole('table');
+    const admin = fakeAdmin({
+      sendPasswordReset: vi.fn(async (id: string) => ({
+        id,
+        email: 'invitado@example.com',
+        emailSent: false,
+      })),
+    });
+    render(<DashboardScreen admin={admin} />);
+    const fila = await screen.findByRole('row', { name: /invitado@example.com/i });
 
-    await invitar(user, 'nuevo@example.com', '30');
-    await screen.findByText('Zx9-clave-generada');
+    await user.click(within(fila).getByRole('button', { name: /reenviar correo/i }));
 
-    // #24 seccion 3: se entrega una vez y no se almacena ni se registra. El
-    // unico sitio donde existe es el estado de React de esta pantalla, que
-    // muere con ella.
-    for (const spy of spies) {
-      const escrito = JSON.stringify(spy.mock.calls);
-      expect(escrito).not.toContain('Zx9-clave-generada');
-      spy.mockRestore();
-    }
+    expect(
+      await within(tarjeta(/^invitaciones$/i)).findByRole('alert'),
+    ).toHaveTextContent(/no se pudo enviar el correo/i);
   });
 });
 
@@ -412,7 +486,7 @@ describe('DashboardScreen: dar de alta a alguien de casa', () => {
 
     await darDeAlta(user, 'nueva@example.com');
 
-    await screen.findByText('Qp7-clave-de-casa');
+    await screen.findByRole('region', { name: /cuenta creada/i });
     expect(admin.listInvitations).toHaveBeenCalledTimes(1);
   });
 
@@ -467,23 +541,21 @@ describe('DashboardScreen: dar de alta a alguien de casa', () => {
     expect(within(tarjeta(/nuevo usuario/i)).queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('ensena la contrasena generada y dice que el acceso NO caduca', async () => {
-    // La misma regla de entrega unica que en la invitacion, con la diferencia
-    // que define este flujo: aqui no hay fecha de vencimiento que anunciar, y
-    // callarla dejaria a quien administra sin saber cual de las dos altas hizo.
+  it('confirms the email and says the access does NOT expire', async () => {
+    // Callar que no hay fecha de vencimiento dejaria a quien administra sin
+    // saber cual de las dos altas hizo.
     const user = userEvent.setup();
     render(<DashboardScreen admin={fakeAdmin()} />);
     await screen.findByRole('table');
 
     await darDeAlta(user, 'nueva@example.com');
 
-    expect(await screen.findByText('Qp7-clave-de-casa')).toBeInTheDocument();
-    // Acotado al panel de credenciales: la tarjeta del alta ya explica que el
-    // acceso no caduca, y sin acotar el test pasaria por ese texto en vez de
-    // por el del panel.
-    const panel = within(tarjeta(/credenciales/i));
+    // Acotado al panel: la tarjeta del alta ya explica que el acceso no
+    // caduca, y sin acotar el test pasaria por ese texto en vez de por el del
+    // panel.
+    const panel = within(await screen.findByRole('region', { name: /cuenta creada/i }));
+    expect(panel.getByText(/enviamos un correo a nueva@example.com/i)).toBeInTheDocument();
     expect(panel.getByText(/no caduca/i)).toBeInTheDocument();
-    expect(panel.getByText(/no se volverá a mostrar/i)).toBeInTheDocument();
   });
 
   it('el panel de la invitacion sigue anunciando su fecha de vencimiento', async () => {

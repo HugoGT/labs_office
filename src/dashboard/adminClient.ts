@@ -14,6 +14,7 @@ import {
   type CreatedInvitation,
   type CreatedUser,
   type Invitation,
+  type PasswordResetResult,
 } from './adminPort';
 import { resolveOfficeApiBaseUrl, type OfficeApiBaseUrlSources } from './officeApiBaseUrl';
 
@@ -145,6 +146,13 @@ export function createAdminClient(
         `/invitations/${encodeURIComponent(id)}/revoke`,
         { method: 'POST' },
       );
+    },
+
+    sendPasswordReset(id: string): Promise<PasswordResetResult> {
+      // Under `/users` and not `/invitations`: it serves both kinds of account.
+      return request<PasswordResetResult>(`/users/${encodeURIComponent(id)}/password-reset`, {
+        method: 'POST',
+      });
     },
   };
 }

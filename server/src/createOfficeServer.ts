@@ -24,6 +24,7 @@ import {
   handleCreateUser,
   handleListInvitations,
   handleRevokeInvitation,
+  handleSendPasswordReset,
   type AdminDeps,
   type AdminResult,
 } from './admin/adminRoutes.ts';
@@ -594,6 +595,16 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   app.post(
     '/admin/users',
     admin((req, deps) => handleCreateUser(req.header('Authorization'), req.body, deps)),
+  );
+
+  // Re-sends the password-reset email (#94) for any directory row, invitation
+  // or not, so it hangs from `/admin/users/:id`. POST for the same CORS reason
+  // as revoke. Inside `/admin/*`, so Caddy already proxies it.
+  app.post(
+    '/admin/users/:id/password-reset',
+    admin((req, deps) =>
+      handleSendPasswordReset(req.header('Authorization'), req.params.id, deps),
+    ),
   );
 
   /**

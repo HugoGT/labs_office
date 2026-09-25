@@ -15,6 +15,7 @@ function fakePort(overrides: Partial<AuthPort> = {}) {
     }),
     signIn: vi.fn(async () => undefined),
     signOut: vi.fn(async () => undefined),
+    sendPasswordReset: vi.fn(async () => undefined),
     getIdToken: vi.fn(async () => 'jwt'),
     ...overrides,
   };
@@ -174,5 +175,43 @@ describe('AuthGate: autenticacion encendida', () => {
 
     expect(screen.queryByTestId('office')).not.toBeInTheDocument();
     expect(screen.getByLabelText(/correo/i)).toBeInTheDocument();
+  });
+});
+
+describe('AuthGate: forgot password (#94)', () => {
+  async function requestReset(port: AuthPort, emit: (user: AuthUser | null) => void, email: string) {
+    const user = userEvent.setup();
+    const view = render(<AuthGate auth={port}>{officeSpy().render}</AuthGate>);
+    emit(null);
+    await user.click(screen.getByRole('button', { name: /olvidaste/i }));
+    await user.type(screen.getByLabelText(/correo/i), `${email}{Enter}`);
+    const status = await screen.findByRole('status');
+    const text = status.textContent;
+    view.unmount();
+    return text;
+  }
+
+  it('sends the reset email through the port', async () => {
+    const { port, emit } = fakePort();
+
+    await requestReset(port, emit, 'ana@example.com');
+
+    expect(port.sendPasswordReset).toHaveBeenCalledWith('ana@example.com');
+  });
+
+  it('REGRESSION: the confirmation is identical whether or not the account exists', async () => {
+    const existing = fakePort();
+    const missing = fakePort({
+      sendPasswordReset: vi.fn(async () => {
+        throw Object.assign(new Error('Firebase: Error (auth/user-not-found).'), {
+          code: 'auth/user-not-found',
+        });
+      }),
+    });
+
+    const forExisting = await requestReset(existing.port, existing.emit, 'ana@example.com');
+    const forMissing = await requestReset(missing.port, missing.emit, 'nadie@example.com');
+
+    expect(forMissing).toBe(forExisting);
   });
 });

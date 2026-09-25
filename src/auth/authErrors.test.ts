@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeAuthError } from './authErrors';
+import { describeAuthError, describePasswordResetError } from './authErrors';
 
 /** Imita el `FirebaseError` del SDK: lo unico que se lee de el es `code`. */
 function firebaseError(code: string, message = 'Firebase: Error (auth/...).'): unknown {
@@ -80,5 +80,41 @@ describe('describeAuthError: regresion de seguridad (enumeracion de cuentas)', (
     const message = describeAuthError(firebaseError('auth/user-not-found'));
 
     expect(message).not.toMatch(/existe|registrad|encontrad/i);
+  });
+});
+
+describe('describePasswordResetError (#94)', () => {
+  it('REGRESSION: an unknown or disabled account reads as sent, never as an error', () => {
+    // Anything else would turn "forgot your password" into an oracle that tells
+    // anyone probing addresses who has an account in the office.
+    for (const code of ['auth/user-not-found', 'auth/user-disabled']) {
+      expect(describePasswordResetError(firebaseError(code))).toBeNull();
+    }
+  });
+
+  it('translates the errors the person can act on', () => {
+    expect(describePasswordResetError(firebaseError('auth/invalid-email'))).toBe(
+      'El correo no tiene un formato válido.',
+    );
+    expect(describePasswordResetError(firebaseError('auth/too-many-requests'))).toBe(
+      'Demasiados intentos. Vuelve a probar en unos minutos.',
+    );
+    expect(describePasswordResetError(firebaseError('auth/network-request-failed'))).toBe(
+      'No se pudo contactar con el servidor de autenticación.',
+    );
+  });
+
+  it('falls back to a reset-specific message, not the sign-in one', () => {
+    for (const error of [firebaseError('auth/internal-error'), 'raro', null, undefined]) {
+      expect(describePasswordResetError(error)).toBe('No se pudo enviar el correo.');
+    }
+  });
+
+  it('never leaks the raw provider message', () => {
+    const message = describePasswordResetError(
+      firebaseError('auth/internal-error', 'Firebase: INTERNAL ASSERTION FAILED'),
+    );
+
+    expect(message).not.toMatch(/firebase|assertion/i);
   });
 });

@@ -1,6 +1,7 @@
 import { useMemo, type ReactNode } from 'react';
 import type { AuthPort, OfficeSession } from '../auth/authPort';
 import { useAuth } from '../hooks/useAuth';
+import { usePasswordReset } from '../hooks/usePasswordReset';
 import { LoginScreen } from './LoginScreen';
 
 export type { OfficeSession };
@@ -25,6 +26,7 @@ export interface AuthGateProps {
  */
 export function AuthGate({ auth, children }: AuthGateProps) {
   const { user, ready, pending, error, signIn } = useAuth(auth);
+  const reset = usePasswordReset(auth);
 
   /**
    * La identidad de la sesion importa tanto como su contenido: `GameCanvas`
@@ -46,7 +48,22 @@ export function AuthGate({ auth, children }: AuthGateProps) {
 
   if (auth === null) return <>{children(null)}</>;
   if (!ready) return null;
-  if (session === null) return <LoginScreen onSubmit={signIn} pending={pending} error={error} />;
+  if (session === null) {
+    return (
+      <LoginScreen
+        onSubmit={signIn}
+        pending={pending}
+        error={error}
+        passwordReset={{
+          onSend: (email) => void reset.sendReset(email),
+          onClear: reset.clear,
+          pending: reset.pending,
+          sent: reset.sent,
+          error: reset.error,
+        }}
+      />
+    );
+  }
 
   return <>{children(session)}</>;
 }
