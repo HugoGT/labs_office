@@ -1,7 +1,8 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { AuthPort, AuthUser, OfficeSession } from '../auth/authPort';
+import type { ClaimDisplayNameResult, DisplayNamePort } from '../auth/displayNamePort';
 import { AuthGate } from './AuthGate';
 
 const ANA: AuthUser = { uid: 'uid-ana', email: 'ana@example.com', displayName: 'Ana' };
@@ -25,6 +26,25 @@ function fakePort(overrides: Partial<AuthPort> = {}) {
       act(() => listener?.(user));
     },
   };
+}
+
+/** #100: doble de `DisplayNamePort`. `undefined` en las claves no sobreescritas. */
+function fakeDisplayNamePort(overrides: Partial<DisplayNamePort> = {}): DisplayNamePort {
+  return {
+    claim: vi.fn(async () => ({ outcome: 'ok' as const, displayName: 'Ana Lopez' })),
+    read: vi.fn(async () => ({ outcome: 'ok' as const, displayName: null })),
+    ...overrides,
+  };
+}
+
+/** Rellena y envia el formulario: Nombre, Correo, Contrasena, Enter. */
+async function submitLogin(
+  user: ReturnType<typeof userEvent.setup>,
+  { name = 'Ana Lopez', email = 'ana@example.com', password = 'secreta' } = {},
+) {
+  await user.type(screen.getByLabelText(/^nombre$/i), name);
+  await user.type(screen.getByLabelText(/correo/i), email);
+  await user.type(screen.getByLabelText(/contraseña/i), `${password}{Enter}`);
 }
 
 /** Registra cada sesion con la que se renderizan los hijos. */
@@ -85,8 +105,7 @@ describe('AuthGate: autenticacion encendida', () => {
     render(<AuthGate auth={port}>{officeSpy().render}</AuthGate>);
     emit(null);
 
-    await user.type(screen.getByLabelText(/correo/i), 'ana@example.com');
-    await user.type(screen.getByLabelText(/contraseña/i), 'secreta{Enter}');
+    await submitLogin(user);
 
     expect(port.signIn).toHaveBeenCalledWith('ana@example.com', 'secreta');
   });
@@ -103,8 +122,7 @@ describe('AuthGate: autenticacion encendida', () => {
     render(<AuthGate auth={port}>{officeSpy().render}</AuthGate>);
     emit(null);
 
-    await user.type(screen.getByLabelText(/correo/i), 'ana@example.com');
-    await user.type(screen.getByLabelText(/contraseña/i), 'mala{Enter}');
+    await submitLogin(user, { password: 'mala' });
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Correo o contraseña incorrectos.');
     expect(screen.queryByText(/Firebase/)).not.toBeInTheDocument();
@@ -213,5 +231,282 @@ describe('AuthGate: forgot password (#94)', () => {
     const forMissing = await requestReset(missing.port, missing.emit, 'nadie@example.com');
 
     expect(forMissing).toBe(forExisting);
+  });
+});
+
+describe('AuthGate: nombre visible auto-elegido en login (#100)', () => {
+  it('invariante de una sola rama: nunca se ven la oficina y el login a la vez', async () => {
+    const user = userEvent.setup();
+    const office = officeSpy();
+    const { port, emit } = fakePort();
+    const displayName = fakeDisplayNamePort();
+    render(
+      <AuthGate auth={port} displayName={displayName}>
+        {office.render}
+      </AuthGate>,
+    );
+    emit(null);
+
+    await submitLogin(user);
+    await act(async () => emit(ANA));
+
+    await waitFor(() => expect(screen.getByTestId('office')).toBeInTheDocument());
+    expect(screen.queryByLabelText(/^nombre$/i)).not.toBeInTheDocument();
+  });
+
+  it('tras entrar, reclama el nombre escrito en el formulario', async () => {
+    const user = userEvent.setup();
+    const { port, emit } = fakePort();
+    const displayName = fakeDisplayNamePort();
+    render(
+      <AuthGate auth={port} displayName={displayName}>
+        {officeSpy().render}
+      </AuthGate>,
+    );
+    emit(null);
+
+    await submitLogin(user, { name: 'Ana Lopez' });
+    await act(async () => emit(ANA));
+
+    await waitFor(() => expect(displayName.claim).toHaveBeenCalledWith('Ana Lopez'));
+  });
+
+  it('un nombre reclamado con exito se convierte en el nombre de la sesion', async () => {
+    const user = userEvent.setup();
+    const office = officeSpy();
+    const { port, emit } = fakePort();
+    const displayName = fakeDisplayNamePort({
+      claim: vi.fn(async () => ({ outcome: 'ok' as const, displayName: 'Ana Lopez' })),
+    });
+    render(
+      <AuthGate auth={port} displayName={displayName}>
+        {office.render}
+      </AuthGate>,
+    );
+    emit(null);
+
+    await submitLogin(user, { name: 'Ana   Lopez' });
+    await act(async () => emit(ANA));
+
+    await waitFor(() => expect(screen.getByTestId('office')).toHaveTextContent('Ana Lopez'));
+  });
+
+  it('un nombre ya elegido con exito se guarda con onNameClaimed (D8)', async () => {
+    const user = userEvent.setup();
+    const { port, emit } = fakePort();
+    const onNameClaimed = vi.fn();
+    const displayName = fakeDisplayNamePort({
+      claim: vi.fn(async () => ({ outcome: 'ok' as const, displayName: 'Ana Lopez' })),
+    });
+    render(
+      <AuthGate auth={port} displayName={displayName} onNameClaimed={onNameClaimed}>
+        {officeSpy().render}
+      </AuthGate>,
+    );
+    emit(null);
+
+    await submitLogin(user);
+    await act(async () => emit(ANA));
+
+    await waitFor(() => expect(onNameClaimed).toHaveBeenCalledWith('Ana Lopez'));
+  });
+
+  /**
+   * `claim` no resuelve hasta que el test lo suelte a mano: sin esto, los
+   * mocks (todos inmediatos) podrian terminar el `handleSubmit` entero --
+   * `claim` Y el `signOut` interno -- antes de que el test llegase a simular
+   * el aviso de sesion (`emit(ANA)`), y esa carrera decidiria el resultado
+   * segun el orden de microtareas en vez de segun la logica que se prueba.
+   */
+  function pendingClaim() {
+    let release: ((value: ClaimDisplayNameResult) => void) | undefined;
+    const claim = vi.fn(
+      () =>
+        new Promise<ClaimDisplayNameResult>((resolve) => {
+          release = resolve;
+        }),
+    );
+    return { claim, release: (value: ClaimDisplayNameResult) => release?.(value) };
+  }
+
+  /**
+   * Un solo caso representativo a proposito: las tres copias de rechazo
+   * (taken/invalid/failed) ya se prueban exhaustivamente en
+   * `useDisplayName.test.ts`. Lo que este test aporta que el hook no puede es
+   * la parte de integracion -- que `AuthGate` de verdad ensena el error y NO
+   * desmonta `LoginScreen`, con lo que los campos escritos sobreviven (D2).
+   */
+  it('un rechazo cierra la sesion, muestra el error y preserva los campos (D2)', async () => {
+    const user = userEvent.setup();
+    const { port, emit } = fakePort();
+    const { claim, release } = pendingClaim();
+    const displayName = fakeDisplayNamePort({ claim });
+    render(
+      <AuthGate auth={port} displayName={displayName}>
+        {officeSpy().render}
+      </AuthGate>,
+    );
+    emit(null);
+
+    await submitLogin(user, { name: 'Bea', email: 'ana@example.com', password: 'secreta' });
+    // El aviso de sesion llega MIENTRAS el reclamo sigue en vuelo, igual que
+    // en produccion (`onIdTokenChanged` no espera a que termine ningun POST).
+    await act(async () => emit(ANA));
+    await act(async () => release({ outcome: 'taken' }));
+
+    await waitFor(() => expect(port.signOut).toHaveBeenCalledTimes(1));
+    await act(async () => emit(null));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/ya está en uso/i);
+    // Los campos siguen ahi: LoginScreen nunca se desmonto (D2).
+    expect(screen.getByLabelText(/^nombre$/i)).toHaveValue('Bea');
+    expect(screen.getByLabelText(/correo/i)).toHaveValue('ana@example.com');
+  });
+
+  it('un rechazo NUNCA deja ver la oficina, ni por un instante', async () => {
+    const user = userEvent.setup();
+    const office = officeSpy();
+    const { port, emit } = fakePort();
+    const { claim, release } = pendingClaim();
+    const displayName = fakeDisplayNamePort({ claim });
+    render(
+      <AuthGate auth={port} displayName={displayName}>
+        {office.render}
+      </AuthGate>,
+    );
+    emit(null);
+
+    await submitLogin(user);
+    await act(async () => emit(ANA));
+    await act(async () => release({ outcome: 'taken' }));
+    await act(async () => emit(null));
+
+    expect(office.sessions).toEqual([]);
+  });
+
+  it('503/sin directorio (`displayName` null): entra con el nombre derivado, sin bloquear', async () => {
+    const office = officeSpy();
+    const { port, emit } = fakePort();
+    // `displayName` prop ausente: mismo comportamiento que sin servidor o sin
+    // `DATABASE_URL` (D7).
+    render(<AuthGate auth={port}>{office.render}</AuthGate>);
+
+    await act(async () => emit(ANA));
+
+    await waitFor(() => expect(screen.getByTestId('office')).toHaveTextContent('Ana'));
+  });
+
+  it('unavailable en el claim (403/503 durante el envio): entra con el derivado, sin cerrar sesion', async () => {
+    const user = userEvent.setup();
+    const office = officeSpy();
+    const { port, emit } = fakePort();
+    const displayName = fakeDisplayNamePort({
+      claim: vi.fn(async () => ({ outcome: 'unavailable' as const })),
+    });
+    render(
+      <AuthGate auth={port} displayName={displayName}>
+        {office.render}
+      </AuthGate>,
+    );
+    emit(null);
+
+    await submitLogin(user);
+    await act(async () => emit(ANA));
+
+    await waitFor(() => expect(screen.getByTestId('office')).toHaveTextContent('Ana'));
+    expect(port.signOut).not.toHaveBeenCalled();
+  });
+
+  it('sesion restaurada (sin pasar por el formulario): solo lee, nunca reclama', async () => {
+    const office = officeSpy();
+    const { port, emit } = fakePort();
+    const displayName = fakeDisplayNamePort({
+      read: vi.fn(async () => ({ outcome: 'ok' as const, displayName: 'Ana Lopez' })),
+    });
+    render(
+      <AuthGate auth={port} displayName={displayName}>
+        {office.render}
+      </AuthGate>,
+    );
+
+    await act(async () => emit(ANA));
+
+    await waitFor(() => expect(screen.getByTestId('office')).toHaveTextContent('Ana Lopez'));
+    expect(displayName.read).toHaveBeenCalledTimes(1);
+    expect(displayName.claim).not.toHaveBeenCalled();
+  });
+
+  it('sesion restaurada sin nombre elegido cae al derivado, sin reclamar nada', async () => {
+    const office = officeSpy();
+    const { port, emit } = fakePort();
+    const displayName = fakeDisplayNamePort({
+      read: vi.fn(async () => ({ outcome: 'ok' as const, displayName: null })),
+    });
+    render(
+      <AuthGate auth={port} displayName={displayName}>
+        {office.render}
+      </AuthGate>,
+    );
+
+    await act(async () => emit(ANA));
+
+    await waitFor(() => expect(screen.getByTestId('office')).toHaveTextContent('Ana'));
+    expect(displayName.claim).not.toHaveBeenCalled();
+  });
+
+  it('restaurar con un GET que falla NO cierra sesion: fail-open al derivado (D6)', async () => {
+    const office = officeSpy();
+    const { port, emit } = fakePort();
+    const displayName = fakeDisplayNamePort({
+      read: vi.fn(async () => ({ outcome: 'failed' as const })),
+    });
+    render(
+      <AuthGate auth={port} displayName={displayName}>
+        {office.render}
+      </AuthGate>,
+    );
+
+    await act(async () => emit(ANA));
+
+    await waitFor(() => expect(screen.getByTestId('office')).toHaveTextContent('Ana'));
+    expect(port.signOut).not.toHaveBeenCalled();
+  });
+
+  it('el campo Nombre se prellena con `initialName` (D8)', () => {
+    const { port, emit } = fakePort();
+    render(
+      <AuthGate auth={port} initialName="Ana Lopez">
+        {officeSpy().render}
+      </AuthGate>,
+    );
+    emit(null);
+
+    expect(screen.getByLabelText(/^nombre$/i)).toHaveValue('Ana Lopez');
+  });
+
+  it('recargar tras un rechazo no salta el login: sin sesion activa, se muestra el formulario', async () => {
+    // Es la misma invariante que ya prueba `cerrar la sesion devuelve al
+    // login`, pero es la que documenta el requisito de la especificacion: un
+    // reload nunca puede saltarse el login con una sesion cuyo nombre nunca se
+    // acepto.
+    const user = userEvent.setup();
+    const { port, emit } = fakePort();
+    const displayName = fakeDisplayNamePort({
+      claim: vi.fn(async () => ({ outcome: 'taken' as const })),
+    });
+    render(
+      <AuthGate auth={port} displayName={displayName}>
+        {officeSpy().render}
+      </AuthGate>,
+    );
+    emit(null);
+
+    await submitLogin(user);
+    await act(async () => emit(ANA));
+    await waitFor(() => expect(port.signOut).toHaveBeenCalledTimes(1));
+    await act(async () => emit(null));
+
+    expect(screen.getByLabelText(/correo/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('office')).not.toBeInTheDocument();
   });
 });

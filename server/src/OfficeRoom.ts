@@ -255,7 +255,7 @@ export type DirectoryDenialLogger = (decision: AccessDecision, uid: string) => v
  * ocurrio de verdad al implementarlo, y solo salto porque los tests del camino
  * abierto siguen exigiendo `options.name`.
  */
-type OfficeAuthData = VerifiedIdentity | true;
+type OfficeAuthData = (VerifiedIdentity & { directoryName: string | null }) | true;
 
 /** Account behind a client, or `undefined` in the open office (#78). */
 function accountOf(client: Client<unknown, OfficeAuthData>): string | undefined {
@@ -460,6 +460,12 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     const identity = await this.auth.verify(token);
     if (identity === null) throw new ServerError(401, 'unauthorized');
 
+    // #100, D5: el nombre visible ya elegido en el directorio viaja junto a la
+    // identidad, para que `onJoin` no tenga que volver a consultar la fila que
+    // `resolveOnLogin` ya trajo. `null` cubre tanto "sin directorio" como
+    // "todavia no eligio nombre" -- las dos caen al mismo `deriveIdentityName`.
+    let directoryName: string | null = null;
+
     if (this.directory) {
       // La hora se toma aqui y se pasa a `decideAccess`, que es pura: asi la
       // regla de caducidad se puede probar en sus bordes exactos sin tocar el
@@ -470,9 +476,12 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
         this.logDirectoryDenial(decision, identity.uid);
         throw new ServerError(401, 'unauthorized');
       }
+      // `decision === 'allow'` solo puede darse con `user` no nulo (ver
+      // `decideAccess`): el primer caso que cubre es justamente `null`.
+      directoryName = user!.displayName;
     }
 
-    return identity;
+    return { ...identity, directoryName };
   }
 
   onJoin(
@@ -495,8 +504,12 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     this.state.players.set(
       client.sessionId,
       createPlayerState({
+        // #100, D5: con identidad verificada, el nombre elegido en el
+        // directorio manda sobre el derivado del token -- es el mismo valor
+        // que ya devuelve `/me/display-name` -- y solo cae al derivado cuando
+        // todavia no eligio ninguno (`directoryName === null`).
         name: sanitizeName(
-          identity ? deriveIdentityName(identity, DEFAULT_NAME) : options?.name,
+          identity ? (identity.directoryName ?? deriveIdentityName(identity, DEFAULT_NAME)) : options?.name,
         ),
         x: spawnX,
         y: spawnY,

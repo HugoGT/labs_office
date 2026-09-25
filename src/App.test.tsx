@@ -43,6 +43,19 @@ beforeAll(async () => {
 beforeEach(() => {
   vi.clearAllMocks();
   createGameMock.mockReturnValue({ destroy: vi.fn() } as unknown as Phaser.Game);
+  // With auth on, `App` builds the display-name client (#100), which asks the
+  // server for the stored name before the office mounts. Unstubbed, that is a
+  // real request to localhost:2567: slow to fail under a full `test:all`, and
+  // a different answer whenever a dev server happens to be listening. A 503
+  // is the "no directory" path, so the office enters with the derived name.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => Response.json({ error: 'directory-not-configured' }, { status: 503 })),
+  );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 /**

@@ -21,7 +21,13 @@ export interface AuthPort {
    * la desuscripcion: sin llamarla, un listener sobrevive al desmontaje.
    */
   onChange(listener: (user: AuthUser | null) => void): () => void;
-  /** Deja propagar el error del proveedor; el llamante lo traduce (`authErrors.ts`). */
+  /**
+   * Deja propagar el error del proveedor; el llamante lo traduce
+   * (`authErrors.ts`). El puerto sigue lanzando -- es `useAuth.signIn` quien
+   * lo atrapa y lo convierte en el `Promise<boolean>` que consume `AuthGate`
+   * (#100, D9): el proveedor real no sabe nada del reclamo de nombre que viene
+   * despues, asi que no tiene por que cambiar su contrato.
+   */
   signIn(email: string, password: string): Promise<void>;
   signOut(): Promise<void>;
   /** `null` cuando no hay sesion: la oficina sigue siendo jugable sin ella. */

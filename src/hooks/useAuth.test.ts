@@ -46,7 +46,9 @@ describe('useAuth', () => {
   it('sin puerto, signIn y signOut no hacen nada y no revientan', async () => {
     const { result } = renderHook(() => useAuth(null));
 
-    await expect(result.current.signIn('ana@example.com', 'secreta')).resolves.toBeUndefined();
+    // #100, D9: sin puerto no hay nada que intentar y nada que falle, asi que
+    // el contrato booleano dice "true" -- no hay error que reportar.
+    await expect(result.current.signIn('ana@example.com', 'secreta')).resolves.toBe(true);
     await expect(result.current.signOut()).resolves.toBeUndefined();
     expect(result.current.user).toBeNull();
   });
@@ -93,6 +95,23 @@ describe('useAuth', () => {
     });
 
     expect(port.signIn).toHaveBeenCalledWith('ana@example.com', 'secreta');
+  });
+
+  it('#100, D9: signIn resuelve `true` cuando el puerto no lanza', async () => {
+    // El contrato booleano es lo que permite a `AuthGate` encadenar el
+    // reclamo del nombre de forma imperativa, sin depender de un efecto que
+    // reaccione al `user` cambiar (un re-login con el MISMO uid no cambiaria
+    // ese objeto).
+    const { port, emit } = fakePort();
+    const { result } = renderHook(() => useAuth(port));
+    act(() => emit(null));
+
+    let outcome: boolean | undefined;
+    await act(async () => {
+      outcome = await result.current.signIn('ana@example.com', 'secreta');
+    });
+
+    expect(outcome).toBe(true);
   });
 
   it('marca pending mientras el intento esta en vuelo y lo apaga al terminar', async () => {
@@ -150,7 +169,9 @@ describe('useAuth', () => {
     act(() => emit(null));
 
     await act(async () => {
-      await expect(result.current.signIn('ana@example.com', 'mala')).resolves.toBeUndefined();
+      // #100, D9: un fallo NUNCA lanza -- resuelve `false`, y el texto vive en
+      // `error`, que es lo que la pantalla puede mostrar.
+      await expect(result.current.signIn('ana@example.com', 'mala')).resolves.toBe(false);
     });
 
     expect(result.current.error).toBe('No se pudo iniciar sesión.');

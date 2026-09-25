@@ -918,8 +918,43 @@ describe('OfficeRoom: onAuth con directorio (#24)', () => {
     openRooms.push(room);
     await waitFor(() => room.state.players.size === 1);
 
-    expect(room.state.players.get(room.sessionId)?.name).toBe('Ana Gomez');
     expect(directoryServer.sessions.uidOf(room.sessionId)).toBe('uid-ana');
+  });
+
+  it('#100, D5: el nombre visible sale del directorio, no del token, cuando ya lo eligio', async () => {
+    // `seededUser` guarda `displayName: 'Ana'`, distinto del `name: 'Ana Gomez'`
+    // del token. El directorio manda: es lo que peers y self ven, y es lo mismo
+    // que ya devuelve `/me/display-name`.
+    await start(createMemoryDirectory({ seed: [seededUser({})] }));
+
+    const room = await joinWithToken();
+    openRooms.push(room);
+    await waitFor(() => room.state.players.size === 1);
+
+    expect(room.state.players.get(room.sessionId)?.name).toBe('Ana');
+  });
+
+  it('#100, D5: sin nombre elegido todavia, cae al nombre derivado del token', async () => {
+    await start(createMemoryDirectory({ seed: [seededUser({ displayName: null })] }));
+
+    const room = await joinWithToken();
+    openRooms.push(room);
+    await waitFor(() => room.state.players.size === 1);
+
+    expect(room.state.players.get(room.sessionId)?.name).toBe('Ana Gomez');
+  });
+
+  it('#100, D5: options.name sigue ignorado con directorio activo, incluso sin nombre elegido', async () => {
+    await start(createMemoryDirectory({ seed: [seededUser({ displayName: null })] }));
+
+    const room = await new Client(directoryEndpoint).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, {
+      token: 'token-de-ana',
+      name: 'Director General',
+    });
+    openRooms.push(room);
+    await waitFor(() => room.state.players.size === 1);
+
+    expect(room.state.players.get(room.sessionId)?.name).toBe('Ana Gomez');
   });
 
   it('una cuenta de Identity Platform sin fila en el directorio NO entra (#72)', async () => {
@@ -1082,6 +1117,32 @@ describe('OfficeRoom: el motivo del rechazo se registra en el servidor (#24)', (
       room.onAuth({} as ServerClient, { token: 'token-de-ana' }, {} as never),
     ).resolves.toMatchObject({ uid: 'uid-ana' });
     expect(logged).toEqual([]);
+  });
+
+  it('#100, D5: onAuth trae el nombre ya elegido en el directorio, junto a la identidad', async () => {
+    const room = new OfficeRoom();
+    (room as unknown as { onMessage: unknown }).onMessage = () => () => {};
+    room.onCreate({
+      auth: stubVerifier({ 'token-de-ana': ANA }),
+      directory: createMemoryDirectory({ seed: [seededUser({ displayName: 'Ana Lopez' })] }),
+    });
+
+    await expect(
+      room.onAuth({} as ServerClient, { token: 'token-de-ana' }, {} as never),
+    ).resolves.toMatchObject({ uid: 'uid-ana', directoryName: 'Ana Lopez' });
+  });
+
+  it('#100, D5: sin nombre elegido, onAuth trae directoryName null', async () => {
+    const room = new OfficeRoom();
+    (room as unknown as { onMessage: unknown }).onMessage = () => () => {};
+    room.onCreate({
+      auth: stubVerifier({ 'token-de-ana': ANA }),
+      directory: createMemoryDirectory({ seed: [seededUser({ displayName: null })] }),
+    });
+
+    await expect(
+      room.onAuth({} as ServerClient, { token: 'token-de-ana' }, {} as never),
+    ).resolves.toMatchObject({ uid: 'uid-ana', directoryName: null });
   });
 });
 

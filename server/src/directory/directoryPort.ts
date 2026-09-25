@@ -111,5 +111,16 @@ export interface UserDirectory {
    * user comes back unchanged and is not audited again.
    */
   revokeUser(id: string, actorId: string): Promise<DirectoryUser | null>;
+  /**
+   * Reclama un nombre visible auto-elegido (#100). `name` llega YA
+   * canonicalizado por quien llama (la ruta HTTP, via
+   * `canonicalizeDisplayName`); el adaptador vuelve a aplicar la misma
+   * canonicalizacion antes de escribir, para que ningun llamante pueda dejar
+   * un valor no canonico en la columna (D10). Devuelve `null` si `id` no
+   * existe. Lanza `DisplayNameTakenError` si el nombre, comparado por su clave
+   * (`displayNameKey`), ya pertenece a OTRA cuenta -- la propia fila nunca es
+   * un conflicto consigo misma (D4).
+   */
+  setDisplayName(id: string, name: string): Promise<DirectoryUser | null>;
   close(): Promise<void>;
 }
