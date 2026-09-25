@@ -140,5 +140,8 @@ variable "db_psa_cidr" {
 variable "db_password_version" {
   description = "Bump to push a new Secret Manager version of the DB password to the Cloud SQL user (issue #72). The password itself is write-only and never stored in state; only this number is."
   type        = number
-  default     = 1
+  # 2 since the test environment rotated the password to drop a trailing
+  # newline (#72). Bump it here, not in terraform.tfvars, so every checkout
+  # applies the same number and none pushes an older one back.
+  default = 2
 }

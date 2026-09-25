@@ -170,6 +170,11 @@ resource "google_sql_database" "office" {
 # Both need Terraform >= 1.11 (see versions.tf). The secret must already have a
 # version when this is planned; see the README.
 #
+# `trimspace` because a secret added with `echo` or plain `openssl rand` ends in
+# a newline: Terraform would set it on the user, while office-deploy drops it
+# (bash `$(...)` and its own strip), and every login fails with `password
+# authentication failed`. Both sides trim the same whitespace.
+#
 # To rotate: add a new secret version, bump `db_password_version`, apply, then
 # redeploy so office-deploy rewrites DATABASE_URL.
 ephemeral "google_secret_manager_secret_version" "db_password" {
@@ -180,7 +185,7 @@ resource "google_sql_user" "office" {
   name     = "office"
   instance = google_sql_database_instance.directory.name
 
-  password_wo         = ephemeral.google_secret_manager_secret_version.db_password.secret_data
+  password_wo         = trimspace(ephemeral.google_secret_manager_secret_version.db_password.secret_data)
   password_wo_version = var.db_password_version
 
   # A PostgreSQL role that owns objects cannot be dropped, so a delete would
