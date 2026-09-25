@@ -53,6 +53,10 @@ function renderExits() {
   return screen.getByRole('button', { name: /Cerrar sesión/ }).parentElement!;
 }
 
+function overlaps(a: DOMRect, b: DOMRect) {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+
 function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
   render(
     <BottomBar
@@ -136,5 +140,48 @@ describe('HUD layout: exit controls (#89)', () => {
     const { search } = await renderOpenSidebar();
 
     expectSameColumn(exits, search);
+  });
+});
+
+describe('HUD layout: exit controls on narrow screens (#88)', () => {
+  it('show only the emoji, keeping the accessible name', async () => {
+    for (const width of [NARROW, 1280]) {
+      await page.viewport(width, 800);
+      renderExits();
+
+      for (const name of ['Cerrar sesión', 'Salir']) {
+        const button = screen.getByRole('button', { name });
+        expect(button, `${name} at ${width}px`).toHaveAccessibleName(name);
+        expect(button.innerText.trim(), `${name} at ${width}px`).toMatch(/^\p{Extended_Pictographic}$/u);
+      }
+      cleanup();
+    }
+  });
+
+  it('show their labels once there is room for them', async () => {
+    await page.viewport(WIDE, 800);
+    renderExits();
+
+    for (const name of ['Cerrar sesión', 'Salir']) {
+      const button = screen.getByRole('button', { name });
+      expect(button.innerText).toContain(name);
+      // Both labels fit the rail width (#89) without spilling out of the button.
+      expect(button.scrollWidth).toBeLessThanOrEqual(button.clientWidth);
+    }
+  });
+
+  it('never overlap the bottom bar, even with its widest indicators', async () => {
+    for (const width of [640, 800, NARROW, 1024, 1199, 1200, 1280, 1439, WIDE, 1920]) {
+      await page.viewport(width, 800);
+      const exits = renderExits();
+      const { bar } = renderBar({
+        room: 'Sala de reuniones con un nombre larguisimo',
+        presence: { online: false, peers: 0, state: 'offline', canRetry: true },
+      });
+
+      expect(overlaps(box(exits), box(bar)), `at ${width}px`).toBe(false);
+      expect(box(bar).left, `at ${width}px`).toBeGreaterThanOrEqual(16);
+      cleanup();
+    }
   });
 });

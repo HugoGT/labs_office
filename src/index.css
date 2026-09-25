@@ -13,6 +13,19 @@
   --hud-rail-inset: calc(1px + var(--hud-sidebar-padding));
   --hud-rail-right: calc(var(--hud-sidebar-right) + var(--hud-rail-inset));
   --hud-rail-width: calc(var(--hud-sidebar-width) - 2 * var(--hud-rail-inset));
+  /*
+   * Footprint of the exit controls, which the bottom bar keeps clear so the
+   * two never overlap (#88): emoji only (two 36px buttons, 8px gap, 8px
+   * padding, 1px border) until their labels fit, then the whole rail.
+   */
+  --hud-exit-width: calc(2 * 36px + 8px + 2 * 8px + 2px);
+}
+
+/* Same breakpoint as the labels in ExitControls.module.css. */
+@media (min-width: 1440px) {
+  :root {
+    --hud-exit-width: var(--hud-rail-width);
+  }
 }
 
 html, body, #root {

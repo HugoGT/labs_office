@@ -4,14 +4,15 @@
   /*
    * Centered with left/right + auto margins, not left: 50% + translate: that
    * capped the shrink-to-fit width at half the viewport, which is what pushed
-   * the content onto extra lines.
+   * the content onto extra lines. The right edge keeps the exit controls'
+   * footprint clear, so the bar centers in the room left of them and never
+   * slides under them (#88).
    */
-  left: 0;
-  right: 0;
+  left: 16px;
+  right: calc(var(--hud-rail-right) + var(--hud-exit-width) + 16px);
   margin: 0 auto;
   width: fit-content;
   z-index: 10;
-  max-width: calc(100vw - 32px);
   box-sizing: border-box;
   /* Narrow: identity and indicators share the top row, controls below. */
   display: grid;
@@ -46,6 +47,8 @@
 .controls {
   grid-area: controls;
   display: flex;
+  /* Only the tightest windows need it: better a second row than overflowing. */
+  flex-wrap: wrap;
   justify-content: center;
   gap: 10px;
   padding-top: 8px;
@@ -79,6 +82,7 @@
   }
 
   .controls {
+    flex-wrap: nowrap;
     padding: 0 16px;
     border-top: none;
     border-left: 1px solid #2b3444;

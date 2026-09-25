@@ -17,16 +17,21 @@ export function ExitControls({ onSignOut, onLeaveOffice }: ExitControlsProps) {
 
   return (
     <div className={styles.controls}>
-      {onSignOut && (
-        <button type="button" className={styles.btn} onClick={onSignOut}>
-          🔑 Cerrar sesión
-        </button>
-      )}
-      {onLeaveOffice && (
-        <button type="button" className={styles.btn} onClick={onLeaveOffice}>
-          🚪 Salir de la oficina
-        </button>
-      )}
+      {onSignOut && <ExitButton emoji="🔑" label="Cerrar sesión" onClick={onSignOut} />}
+      {onLeaveOffice && <ExitButton emoji="🚪" label="Salir" onClick={onLeaveOffice} />}
     </div>
+  );
+}
+
+/**
+ * Narrow screens show only the emoji (#88), so the name is also carried by
+ * `aria-label` (screen readers) and `title` (hover) instead of the text alone.
+ */
+function ExitButton({ emoji, label, onClick }: { emoji: string; label: string; onClick: () => void }) {
+  return (
+    <button type="button" className={styles.btn} aria-label={label} title={label} onClick={onClick}>
+      <span aria-hidden="true">{emoji}</span>
+      <span className={styles.label}>{label}</span>
+    </button>
   );
 }

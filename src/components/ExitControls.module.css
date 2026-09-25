@@ -3,7 +3,7 @@
   position: fixed;
   /* Under the sidebar, in the column of its search input (#89). */
   right: var(--hud-rail-right);
-  width: var(--hud-rail-width);
+  width: var(--hud-exit-width);
   bottom: 16px;
   z-index: 10;
   display: flex;
@@ -18,6 +18,10 @@
 .btn {
   /* Share the fixed width between the buttons instead of leaving a hole. */
   flex: 1 1 auto;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
   white-space: nowrap;
   background: #1f2937;
   color: #e5e7eb;
@@ -31,4 +35,18 @@
 
 .btn:hover {
   border-color: #4b5563;
+}
+
+/*
+ * Narrow (#88): only the emoji, so the block fits the compact
+ * `--hud-exit-width` the bottom bar keeps clear. Same breakpoint as there.
+ */
+@media (max-width: 1439px) {
+  .btn {
+    padding: 8px 0;
+  }
+
+  .label {
+    display: none;
+  }
 }
