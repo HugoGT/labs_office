@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { MAX_NAME_LENGTH } from '../game/officeProtocol';
 import styles from './LoginScreen.module.css';
 
 /** The "forgot your password" flow (#94), already wired by `AuthGate`. */
@@ -14,19 +15,29 @@ export interface PasswordResetProps {
 }
 
 export interface LoginScreenProps {
-  onSubmit: (email: string, password: string) => void;
+  /** `name` es el texto crudo del campo; el servidor lo canonicaliza (#100, D10). */
+  onSubmit: (name: string, email: string, password: string) => void;
   /** `true` mientras el intento anterior sigue en vuelo. */
   pending: boolean;
   /** Ya traducido a texto para la persona (`describeAuthError`), nunca el error crudo. */
   error: string | null;
   /** Without it the "forgot your password" link is not offered. */
   passwordReset?: PasswordResetProps;
+  /** Prellena "Nombre" con el ultimo elegido con exito en este dispositivo (D8). */
+  initialName?: string;
 }
 
 /**
- * Pantalla de acceso con correo y contrasena (#8). Puramente presentacional
- * (D3): no importa ningun servicio ni conoce el puerto de autenticacion, solo
- * avisa hacia arriba con `onSubmit`. Quien inicia sesion es `AuthGate`.
+ * Pantalla de acceso, con nombre, correo y contrasena (#8, #100). Puramente
+ * presentacional (D3): no importa ningun servicio ni conoce el puerto de
+ * autenticacion, solo avisa hacia arriba con `onSubmit`. Quien inicia sesion y
+ * quien reclama el nombre visible es `AuthGate`.
+ *
+ * El orden de los campos es Nombre, Correo, Contrasena: es lo primero que se
+ * elige y lo primero que se ve. Un nombre vacio o solo espacio bloquea el
+ * envio antes de cualquier llamada de red -- `required` ya lo cubre para el
+ * caso vacio, pero deja pasar espacios, que si tiene que rechazar el propio
+ * manejador.
  *
  * Ocupa el viewport entero a proposito: es lo unico que hay entre quien llega
  * y la oficina, y dejar el canvas asomando detras sugeriria que se puede
@@ -47,7 +58,14 @@ export interface LoginScreenProps {
  * the same whether or not the email has an account, so it is not an
  * enumeration oracle.
  */
-export function LoginScreen({ onSubmit, pending, error, passwordReset }: LoginScreenProps) {
+export function LoginScreen({
+  onSubmit,
+  pending,
+  error,
+  passwordReset,
+  initialName,
+}: LoginScreenProps) {
+  const [name, setName] = useState(initialName ?? '');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [resetting, setResetting] = useState(false);
@@ -126,11 +144,32 @@ export function LoginScreen({ onSubmit, pending, error, passwordReset }: LoginSc
           // la query y se perderia todo el estado de React.
           event.preventDefault();
           if (pending) return;
-          onSubmit(email, password);
+          // Bloqueado ANTES de cualquier llamada de red (#100): un nombre vacio
+          // o solo espacio en blanco no llega ni siquiera a `onSubmit`. El
+          // `required` del input ya cubre al navegador; esto cubre al mismo
+          // navegador dejando pasar espacios, que `required` no rechaza.
+          if (name.trim().length === 0) return;
+          onSubmit(name, email, password);
         }}
       >
         <h1 className={styles.title}>Oficina Virtual</h1>
         <p className={styles.subtitle}>Entra con la cuenta que te dieron.</p>
+
+        <div className={styles.field}>
+          <label className={styles.label} htmlFor="login-name">
+            Nombre
+          </label>
+          <input
+            className={styles.input}
+            id="login-name"
+            type="text"
+            autoComplete="name"
+            required
+            maxLength={MAX_NAME_LENGTH}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+          />
+        </div>
 
         <div className={styles.field}>
           <label className={styles.label} htmlFor="login-email">

@@ -3,14 +3,38 @@ import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LoginScreen, type PasswordResetProps } from './LoginScreen';
 
+/** Rellena Nombre/Correo/Contrasena en ese orden, el orden que exige el diseno. */
+async function fillLoginForm(
+  user: ReturnType<typeof userEvent.setup>,
+  { name = 'Ana Lopez', email = 'ana@example.com', password = 'secreta' } = {},
+) {
+  if (name) await user.type(screen.getByLabelText(/^nombre$/i), name);
+  if (email) await user.type(screen.getByLabelText(/correo/i), email);
+  if (password) await user.type(screen.getByLabelText(/contraseña/i), password);
+}
+
 describe('LoginScreen', () => {
   it('los campos se alcanzan por su etiqueta accesible', () => {
     render(<LoginScreen onSubmit={vi.fn()} pending={false} error={null} />);
 
     // Si la etiqueta no esta asociada al input, `getByLabelText` no lo
     // encuentra: es la misma comprobacion que hace un lector de pantalla.
+    expect(screen.getByLabelText(/^nombre$/i)).toHaveAttribute('type', 'text');
     expect(screen.getByLabelText(/correo/i)).toHaveAttribute('type', 'email');
     expect(screen.getByLabelText(/contraseña/i)).toHaveAttribute('type', 'password');
+  });
+
+  it('el orden de los campos es Nombre, Correo, Contrasena (#100)', () => {
+    const { container } = render(<LoginScreen onSubmit={vi.fn()} pending={false} error={null} />);
+
+    const order = [...container.querySelectorAll('input')].map((input) => input.id);
+    expect(order).toEqual(['login-name', 'login-email', 'login-password']);
+  });
+
+  it('el campo Nombre tiene maxLength 24 (#100)', () => {
+    render(<LoginScreen onSubmit={vi.fn()} pending={false} error={null} />);
+
+    expect(screen.getByLabelText(/^nombre$/i)).toHaveAttribute('maxlength', '24');
   });
 
   it('declara autocompletado para que el gestor de contrasenas rellene', () => {
@@ -23,17 +47,16 @@ describe('LoginScreen', () => {
     );
   });
 
-  it('envia lo que se escribio', async () => {
+  it('envia lo que se escribio, con el nombre primero', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
     render(<LoginScreen onSubmit={onSubmit} pending={false} error={null} />);
 
-    await user.type(screen.getByLabelText(/correo/i), 'ana@example.com');
-    await user.type(screen.getByLabelText(/contraseña/i), 'secreta');
+    await fillLoginForm(user);
     await user.click(screen.getByRole('button', { name: /entrar/i }));
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith('ana@example.com', 'secreta');
+    expect(onSubmit).toHaveBeenCalledWith('Ana Lopez', 'ana@example.com', 'secreta');
   });
 
   it('la tecla Enter envia el formulario, sin recargar la pagina', async () => {
@@ -41,12 +64,49 @@ describe('LoginScreen', () => {
     const onSubmit = vi.fn();
     render(<LoginScreen onSubmit={onSubmit} pending={false} error={null} />);
 
+    await user.type(screen.getByLabelText(/^nombre$/i), 'Ana Lopez');
     await user.type(screen.getByLabelText(/correo/i), 'ana@example.com');
     await user.type(screen.getByLabelText(/contraseña/i), 'secreta{Enter}');
 
     // Un <form> de verdad con `preventDefault`: sin el, Enter navegaria y se
     // perderia todo el estado de React.
-    expect(onSubmit).toHaveBeenCalledWith('ana@example.com', 'secreta');
+    expect(onSubmit).toHaveBeenCalledWith('Ana Lopez', 'ana@example.com', 'secreta');
+  });
+
+  it('un nombre vacio o solo espacio bloquea el envio ANTES de cualquier llamada de red (#100)', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(<LoginScreen onSubmit={onSubmit} pending={false} error={null} />);
+
+    await fillLoginForm(user, { name: '   ' });
+    await user.click(screen.getByRole('button', { name: /entrar/i }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('un nombre completamente vacio tambien bloquea el envio', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(<LoginScreen onSubmit={onSubmit} pending={false} error={null} />);
+
+    await fillLoginForm(user, { name: '' });
+    await user.click(screen.getByRole('button', { name: /entrar/i }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('el campo Nombre se prellena con `initialName` (D8)', () => {
+    render(
+      <LoginScreen onSubmit={vi.fn()} pending={false} error={null} initialName="Ana Lopez" />,
+    );
+
+    expect(screen.getByLabelText(/^nombre$/i)).toHaveValue('Ana Lopez');
+  });
+
+  it('sin `initialName` el campo Nombre empieza vacio', () => {
+    render(<LoginScreen onSubmit={vi.fn()} pending={false} error={null} />);
+
+    expect(screen.getByLabelText(/^nombre$/i)).toHaveValue('');
   });
 
   it('no vuelve a enviar mientras el intento anterior esta en vuelo', async () => {
@@ -85,9 +145,10 @@ describe('LoginScreen', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('los dos campos son obligatorios: el navegador corta antes de enviar vacio', () => {
+  it('nombre, correo y contrasena son obligatorios: el navegador corta antes de enviar vacio', () => {
     render(<LoginScreen onSubmit={vi.fn()} pending={false} error={null} />);
 
+    expect(screen.getByLabelText(/^nombre$/i)).toBeRequired();
     expect(screen.getByLabelText(/correo/i)).toBeRequired();
     expect(screen.getByLabelText(/contraseña/i)).toBeRequired();
   });
@@ -96,6 +157,7 @@ describe('LoginScreen', () => {
     const onSubmit = vi.fn();
     render(<LoginScreen onSubmit={onSubmit} pending={false} error={null} />);
 
+    await userEvent.type(screen.getByLabelText(/^nombre$/i), 'Ana Lopez');
     await userEvent.type(screen.getByLabelText(/correo/i), 'ana@example.com');
     await userEvent.type(screen.getByLabelText(/contraseña/i), 'secreta{Enter}');
 
