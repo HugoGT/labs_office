@@ -2119,3 +2119,96 @@ describe('OfficeScene: render layers (#70, #71)', () => {
     expect(depthOf(scene.children.getByName('desk-item:id-especial')!)).toBeGreaterThan(remote.depth);
   });
 });
+
+describe('OfficeScene: integracion camera pan y colision de peers (#53, #59)', () => {
+  function screenPointer(
+    x: number,
+    y: number,
+    camera: Phaser.Cameras.Scene2D.Camera,
+  ): Phaser.Input.Pointer {
+    return { x, y, button: 0, camera } as unknown as Phaser.Input.Pointer;
+  }
+
+  it('walkToPeer aterriza en la tile al OESTE del peer cuando el jugador se acerca desde el oeste (#59)', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const player = findPlayer(scene);
+    const peerTx = 30;
+    const peerTy = 30;
+    // Bien al oeste del peer, misma fila: cesped abierto, lejos de cualquier
+    // colisionador del mapa base.
+    player.setPosition((peerTx - 10) * TILE + 16, peerTy * TILE + 16);
+    connector
+      .handlers()!
+      .onAdd(remoteSnapshot({ sessionId: 'peer-1', x: peerTx * TILE + 16, y: peerTy * TILE + 16 }));
+
+    bridge.emitCommand('walkToPeer', { sessionId: 'peer-1' });
+
+    // Primero confirma que la auto-caminata REALMENTE arranco (mismo chequeo
+    // que la regresion de arriba, y por la misma razon: sin el, el primer
+    // sondeo podria caer ANTES del primer `update()`, con velocidad (0,0)
+    // todavia de reposo, y el "asentado" de abajo pasaria trivialmente sin
+    // que el jugador se haya movido un pixel).
+    await vi.waitFor(() => {
+      const body = player.body as Phaser.Physics.Arcade.Body;
+      expect(body.velocity.x !== 0 || body.velocity.y !== 0).toBe(true);
+    }, LOOP_WAIT);
+    await vi.waitFor(() => {
+      const body = player.body as Phaser.Physics.Arcade.Body;
+      expect(body.velocity.x).toBe(0);
+      expect(body.velocity.y).toBe(0);
+    }, LOOP_WAIT);
+    // Antes de #59 el primer ADJACENT_OFFSETS ([1,0], ver terrainGrid.ts) lo
+    // habria aterrizado al ESTE del peer, sin enterarse de que el jugador
+    // venia del oeste.
+    expect(Math.floor(player.x / TILE)).toBe(peerTx - 1);
+    expect(Math.floor(player.y / TILE)).toBe(peerTy);
+  });
+
+  it('el colisionador vivo del peer bloquea al jugador (#59): no es solo la prueba aislada de remoteAvatarSink', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const player = findPlayer(scene);
+    // Cesped abierto, una tile al oeste del peer: un solo paso lo solaparia
+    // si no hubiese colisionador.
+    player.setPosition(29 * TILE + 16, 30 * TILE + 16);
+    connector
+      .handlers()!
+      .onAdd(remoteSnapshot({ sessionId: 'peer-1', x: 30 * TILE + 16, y: 30 * TILE + 16 }));
+
+    dispatchKey('keydown', KEY.RIGHT);
+    try {
+      await advanceGameClock(scene, 300);
+    } finally {
+      dispatchKey('keyup', KEY.RIGHT);
+    }
+
+    expect(player.x).toBeLessThan(30 * TILE + 16);
+  });
+
+  it('un drag por encima del umbral panea SOLO cameras.main; el minimapa queda intacto (#53)', async () => {
+    const { scene } = await bootOfficeScene();
+    const mainCam = scene.cameras.main;
+    const minimap = scene.cameras.cameras[1];
+    const minimapScrollX = minimap.scrollX;
+    const startScrollX = mainCam.scrollX;
+
+    scene.input.emit('pointerdown', screenPointer(50, 50, mainCam), []);
+    scene.input.emit('pointermove', screenPointer(70, 50, mainCam));
+
+    expect(mainCam.scrollX).not.toBe(startScrollX);
+    expect(minimap.scrollX).toBe(minimapScrollX);
+
+    scene.input.emit('pointerup', screenPointer(70, 50, mainCam));
+  });
+});
