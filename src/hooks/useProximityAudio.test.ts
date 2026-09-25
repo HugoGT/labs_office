@@ -1399,3 +1399,146 @@ describe('useProximityAudio: screen share (#20)', () => {
     expect(connection.setScreenShareEnabled).not.toHaveBeenCalledWith(true);
   });
 });
+
+describe('useProximityAudio: a room lost for good is rebuilt (#84)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Every `connect()` hands out the next connection and keeps its callbacks. */
+  function connectSeries(...connections: LivekitRoomConnection[]) {
+    const options: ConnectLivekitRoomOptions[] = [];
+    const connect = vi.fn(async (opts: ConnectLivekitRoomOptions) => {
+      options.push(opts);
+      const next = connections[options.length - 1];
+      if (!next) throw new Error('no connection left');
+      return next;
+    });
+    return { connect, options };
+  }
+
+  it('back from No molestar after the room died: a new room gets the peers and can share', async () => {
+    const bridge = createOfficeBridge();
+    const dead = fakeConnection();
+    const fresh = fakeConnection();
+    const { connect, options } = connectSeries(dead, fresh);
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    const { result, rerender } = renderHook(
+      ({ status }: { status: PresenceStatus }) =>
+        useProximityAudio(bridge, { config: CONFIG, status, connect, fetchToken }),
+      { initialProps: { status: 'g' as PresenceStatus } },
+    );
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: 's1' });
+    });
+
+    // No molestar: the scene empties the peer set; the room dies meanwhile.
+    await act(async () => rerender({ status: 'r' }));
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+    await act(async () => options[0].onDisconnected?.());
+
+    await act(async () => rerender({ status: 'g' }));
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: 's1' });
+    });
+
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(fetchToken).toHaveBeenLastCalledWith(expect.objectContaining({ spaceId: 's1' }));
+    expect(fresh.setDesiredVideoPeers).toHaveBeenLastCalledWith(['ana']);
+    expect(result.current.audioAvailable).toBe(true);
+    expect(result.current.screenShareAvailable).toBe(true);
+
+    await act(async () => result.current.toggleScreenShare());
+    expect(fresh.setScreenShareEnabled).toHaveBeenCalledWith(true);
+    expect(dead.setScreenShareEnabled).not.toHaveBeenCalledWith(true);
+  });
+
+  it('while the room is down nothing pretends to work', async () => {
+    const bridge = createOfficeBridge();
+    const gate = deferred<LivekitRoomConnection>();
+    const options: ConnectLivekitRoomOptions[] = [];
+    const connect = vi.fn(async (opts: ConnectLivekitRoomOptions) => {
+      options.push(opts);
+      return options.length === 1 ? fakeConnection() : gate.promise;
+    });
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: 's1' });
+    });
+    await act(async () => options[0].onVideoTrackSubscribed?.('ana', fakeAttachableTrack()));
+
+    await act(async () => options[0].onDisconnected?.());
+
+    // The new room is still connecting: the buttons must not offer a dead one.
+    expect(result.current.audioAvailable).toBe(false);
+    expect(result.current.screenShareAvailable).toBe(false);
+    expect(result.current.videoTracks.size).toBe(0);
+  });
+
+  it('keeps trying every SLOW_RETRY_MS while the room cannot be rebuilt', async () => {
+    vi.useFakeTimers();
+    const bridge = createOfficeBridge();
+    const fresh = fakeConnection();
+    const { connect, options } = connectSeries(fakeConnection(), fresh);
+    let failing = false;
+    const fetchToken = vi.fn(async () => {
+      if (failing) throw new TypeError('Failed to fetch');
+      return fakeTokenResponse();
+    });
+
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
+    });
+
+    // The network is still down when the room gives up.
+    failing = true;
+    await act(async () => options[0].onDisconnected?.());
+    expect(result.current.audioAvailable).toBe(false);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(connect).toHaveBeenCalledTimes(1);
+
+    failing = false;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(result.current.audioAvailable).toBe(true);
+  });
+
+  it('a late disconnect from a room already replaced changes nothing', async () => {
+    const bridge = createOfficeBridge();
+    const corridor = fakeConnection();
+    const space = fakeConnection();
+    const { connect, options } = connectSeries(corridor, space);
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
+    });
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+
+    await act(async () => options[0].onDisconnected?.());
+
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(space.disconnect).not.toHaveBeenCalled();
+    expect(result.current.audioAvailable).toBe(true);
+  });
+});
