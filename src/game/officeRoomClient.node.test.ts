@@ -561,4 +561,15 @@ describe('connectOfficeRoom: replaced by another tab of the same account (#78)',
     await new Promise((resolve) => setTimeout(resolve, 1000));
     expect(older.states).toEqual(['replaced']);
   });
+
+  it('a session evicted because its access was revoked reports "revoked" and never retries (#93)', async () => {
+    const session = recorder();
+    await connectAsAna(session.handlers);
+
+    authServer.eviction.evictAccount('uid-ana');
+
+    await waitFor(() => session.states.includes('revoked'));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    expect(session.states).toEqual(['revoked']);
+  });
 });

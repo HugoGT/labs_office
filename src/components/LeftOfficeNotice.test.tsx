@@ -42,3 +42,23 @@ describe('LeftOfficeNotice: replaced by another tab (#78)', () => {
     expect(onReenter).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('LeftOfficeNotice: access revoked (#93)', () => {
+  it('says an admin took the access away', () => {
+    render(<LeftOfficeNotice reason="revoked" onReenter={vi.fn()} />);
+
+    expect(
+      screen.getByRole('dialog', { name: 'Un administrador retiró tu acceso a la oficina' }),
+    ).toBeInTheDocument();
+  });
+
+  it('"Volver a intentar" asks to re-enter, which the server refuses unless access came back', async () => {
+    const user = userEvent.setup();
+    const onReenter = vi.fn();
+    render(<LeftOfficeNotice reason="revoked" onReenter={onReenter} />);
+
+    await user.click(screen.getByRole('button', { name: 'Volver a intentar' }));
+
+    expect(onReenter).toHaveBeenCalledTimes(1);
+  });
+});

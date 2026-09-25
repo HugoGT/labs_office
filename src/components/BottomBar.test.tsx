@@ -351,6 +351,17 @@ describe('BottomBar: reconexion (issue #52)', () => {
     expect(screen.queryByRole('button', { name: /Reintentar/ })).not.toBeInTheDocument();
   });
 
+  it('a session whose access was revoked says so, and offers no retry (#93)', () => {
+    renderBar({ presence: { online: false, peers: 0, state: 'revoked', canRetry: true } });
+
+    expect(screen.getByText('Acceso retirado')).toHaveAttribute(
+      'title',
+      expect.stringMatching(/retiró tu acceso/),
+    );
+    expect(screen.queryByText('⚪ Sin servidor')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Reintentar/ })).not.toBeInTheDocument();
+  });
+
   it('en modo solitario no ofrece reintentar: no hay nada a lo que volver', () => {
     renderBar({ presence: OFFLINE_SOLO });
 

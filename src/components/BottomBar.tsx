@@ -61,6 +61,7 @@ const PRESENCE_TITLE = {
   reconnecting: 'Se perdio la conexión: recuperando la sesión sin recargar la página',
   offline: 'Sin servidor: la oficina corre en solitario',
   replaced: 'Abriste la oficina en otra pestaña o dispositivo',
+  revoked: 'Un administrador retiró tu acceso a la oficina',
 } as const;
 
 /**
@@ -199,6 +200,9 @@ export function BottomBar({
               // the office before this paints; it is here so the bar never
               // claims "Sin servidor" for a server that is fine.
               <>Abierta en otra pestaña</>
+            ) : presence.state === 'revoked' ? (
+              // #93: same as above, for an account an admin removed.
+              <>Acceso retirado</>
             ) : (
               <>⚪ Sin servidor</>
             )}

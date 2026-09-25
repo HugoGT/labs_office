@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SESSION_REPLACED_CLOSE_CODE } from './officeProtocol';
+import { SESSION_REPLACED_CLOSE_CODE, SESSION_REVOKED_CLOSE_CODE } from './officeProtocol';
 import {
   CONSENTED_CLOSE_CODE,
   DEVMODE_RESTART_CLOSE_CODE,
@@ -45,6 +45,17 @@ describe('decideReconnect', () => {
     expect(
       decideReconnect({ closeCode: SESSION_REPLACED_CLOSE_CODE, attempt: RECONNECT_DELAYS_MS.length }),
     ).toEqual({ kind: 'stop', reason: 'replaced' });
+  });
+
+  it('a session whose access was revoked never retries, at any attempt (#93)', () => {
+    // The directory refuses the join anyway, and "give up" would offer a
+    // retry button that can only fail.
+    for (const attempt of [0, RECONNECT_DELAYS_MS.length]) {
+      expect(decideReconnect({ closeCode: SESSION_REVOKED_CLOSE_CODE, attempt })).toEqual({
+        kind: 'stop',
+        reason: 'revoked',
+      });
+    }
   });
 
   it('una caida reintenta con el retardo que toca a cada intento', () => {

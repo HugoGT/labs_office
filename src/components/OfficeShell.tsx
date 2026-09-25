@@ -61,6 +61,12 @@ export interface OfficeShellProps {
    * because the office cannot stay: its session is gone for good.
    */
   onSessionReplaced?: () => void;
+  /**
+   * An admin took this account's access away while it was inside (#93). Same
+   * reason as `onSessionReplaced` to be its own callback: another notice, and
+   * a session that is gone for good.
+   */
+  onAccessRevoked?: () => void;
 }
 
 /**
@@ -75,7 +81,12 @@ export interface OfficeShellProps {
  * el nombre ya resuelto (#6): `BottomBar` es presentacional y no tiene por que
  * aprender que existe una sesion para poder escribir un nombre.
  */
-export function OfficeShell({ session = null, onLeaveOffice, onSessionReplaced }: OfficeShellProps) {
+export function OfficeShell({
+  session = null,
+  onLeaveOffice,
+  onSessionReplaced,
+  onAccessRevoked,
+}: OfficeShellProps) {
   const [bridge] = useState(createOfficeBridge);
   const { room, spaceId, recordings, selfSessionId, menu, presence, closeMenu } = useOfficeBridge(bridge);
   /**
@@ -160,6 +171,11 @@ export function OfficeShell({ session = null, onLeaveOffice, onSessionReplaced }
   useEffect(() => {
     if (presence.state === 'replaced') onSessionReplaced?.();
   }, [presence.state, onSessionReplaced]);
+
+  // #93: same for an account whose access was revoked.
+  useEffect(() => {
+    if (presence.state === 'revoked') onAccessRevoked?.();
+  }, [presence.state, onAccessRevoked]);
 
   useEffect(() => {
     if (spacesConfig === null) return;

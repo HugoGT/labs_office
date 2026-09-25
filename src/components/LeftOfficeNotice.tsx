@@ -6,7 +6,7 @@ import styles from './LeftOfficeNotice.module.css';
  * it somewhere else and this tab was replaced. Same notice and same way back,
  * only the wording changes.
  */
-export type LeftOfficeReason = 'left' | 'replaced';
+export type LeftOfficeReason = 'left' | 'replaced' | 'revoked';
 
 export interface LeftOfficeNoticeProps {
   reason?: LeftOfficeReason;
@@ -18,6 +18,9 @@ const COPY: Record<LeftOfficeReason, { title: string; action: string }> = {
   // Re-entering is a fresh join, which replaces the other tab in turn: the
   // last one to enter always wins (#78).
   replaced: { title: 'Abriste la oficina en otra pestaña o dispositivo', action: 'Usar aquí' },
+  // #93: re-entering is a fresh join that the directory refuses while the
+  // access stays revoked; the button is there for when an admin gives it back.
+  revoked: { title: 'Un administrador retiró tu acceso a la oficina', action: 'Volver a intentar' },
 };
 
 /**

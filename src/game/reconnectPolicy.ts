@@ -13,7 +13,7 @@
  * quien puede cancelarlo al apagarse.
  */
 
-import { SESSION_REPLACED_CLOSE_CODE } from './officeProtocol';
+import { SESSION_REPLACED_CLOSE_CODE, SESSION_REVOKED_CLOSE_CODE } from './officeProtocol';
 
 /**
  * Cierre voluntario: alguien llamo a `room.leave()` o cerro la pestana.
@@ -61,6 +61,9 @@ export type ReconnectDecision =
   // #78: the same account joined elsewhere and took over. Not a drop, and
   // unlike `give-up` nothing to offer a retry for.
   | { kind: 'stop'; reason: 'replaced' }
+  // #93: an admin took the access away. The directory refuses the join, so a
+  // retry could only fail.
+  | { kind: 'stop'; reason: 'revoked' }
   | { kind: 'retry'; delayMs: number }
   | { kind: 'give-up' };
 
@@ -80,6 +83,7 @@ export interface ReconnectInput {
 export function decideReconnect({ closeCode, attempt }: ReconnectInput): ReconnectDecision {
   if (closeCode === CONSENTED_CLOSE_CODE) return { kind: 'stop', reason: 'consented' };
   if (closeCode === SESSION_REPLACED_CLOSE_CODE) return { kind: 'stop', reason: 'replaced' };
+  if (closeCode === SESSION_REVOKED_CLOSE_CODE) return { kind: 'stop', reason: 'revoked' };
 
   const delayMs = RECONNECT_DELAYS_MS[attempt];
   if (delayMs === undefined) return { kind: 'give-up' };

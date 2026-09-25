@@ -1264,6 +1264,20 @@ describe('OfficeShell: replaced by another tab (#78)', () => {
   });
 });
 
+describe('OfficeShell: access revoked (#93)', () => {
+  it('a revoked session hands leaving to whoever mounted the office', () => {
+    const onAccessRevoked = vi.fn();
+    const onSessionReplaced = vi.fn();
+    render(<OfficeShell onAccessRevoked={onAccessRevoked} onSessionReplaced={onSessionReplaced} />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('presence', { online: false, peers: 0, state: 'revoked', canRetry: true }));
+
+    expect(onAccessRevoked).toHaveBeenCalledTimes(1);
+    expect(onSessionReplaced).not.toHaveBeenCalled();
+  });
+});
+
 describe('OfficeShell: barra lateral de personas (#74)', () => {
   it('el roster que llega por el puente se ve al expandir la barra lateral', async () => {
     const user = userEvent.setup();
