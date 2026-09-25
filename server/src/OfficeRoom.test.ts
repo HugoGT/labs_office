@@ -10,6 +10,7 @@ import type { Client as ServerClient } from '@colyseus/core';
 import { Client } from 'colyseus.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from '../../src/game/mapData.ts';
+import { SESSION_REPLACED_CLOSE_CODE } from '../../src/game/officeProtocol.ts';
 import { createOfficeServer, type OfficeServer } from './createOfficeServer.ts';
 import {
   DEFAULT_NAME,
@@ -34,8 +35,9 @@ const openRooms: { leave: () => Promise<number> }[] = [];
 // limite por defecto de 10. Es ruido del arnes, no una fuga del codigo propio.
 // Subido a 100 al anadir los tests del directorio (#24), que levantan un
 // servidor mas por caso, y a 150 al anadir los de la ventana de reconexion
-// (#52), que hacen lo mismo.
-process.setMaxListeners(150);
+// (#52), que hacen lo mismo. Raised to 200 for the one-session-per-account
+// tests (#78), for the same reason.
+process.setMaxListeners(200);
 
 beforeEach(async () => {
   server = createOfficeServer();
@@ -1163,5 +1165,156 @@ describe('OfficeRoom: ventana de reconexion (issue #52)', () => {
     expect(dropServer.sessions.has(droppedId)).toBe(true);
 
     await waitFor(() => !dropServer.sessions.has(droppedId), 4000);
+  });
+});
+
+/**
+ * One live session per account (#78): the last join wins. Real server and real
+ * sockets, like the reconnection window tests above, because what has to hold
+ * is Colyseus' own close and reconnection path, not a double of it.
+ */
+describe('OfficeRoom: one session per account (#78)', () => {
+  const BETO: VerifiedIdentity = { uid: 'uid-beto', email: 'beto@example.com', name: 'Beto Ruiz' };
+  let singleServer: OfficeServer;
+  let singleEndpoint: string;
+
+  beforeEach(async () => {
+    singleServer = createOfficeServer({
+      auth: stubVerifier({ 'token-de-ana': ANA, 'token-de-beto': BETO }),
+      // Short, so a test that forgets to evict does not hide behind a window
+      // that outlives it.
+      reconnectionWindowSeconds: 2,
+    });
+    singleEndpoint = `ws://localhost:${await singleServer.listen(0)}`;
+  });
+
+  afterEach(async () => {
+    await singleServer.shutdown();
+  });
+
+  async function joinAs(token: string) {
+    const room = await new Client(singleEndpoint).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token });
+    openRooms.push(room);
+    return room;
+  }
+
+  function closeCodeOf(room: { onLeave(handler: (code: number) => void): void }): Promise<number> {
+    return new Promise((resolve) => room.onLeave(resolve));
+  }
+
+  it('a second join of the same account closes the first with the replaced code', async () => {
+    const first = await joinAs('token-de-ana');
+    await waitFor(() => first.state.players.size === 1);
+    const firstClosed = closeCodeOf(first);
+
+    const second = await joinAs('token-de-ana');
+
+    expect(await firstClosed).toBe(SESSION_REPLACED_CLOSE_CODE);
+    await waitFor(() => second.state.players.size === 1);
+    expect([...second.state.players.keys()]).toEqual([second.sessionId]);
+  });
+
+  it('the new tab never sees the old avatar: it is released before the join state is sent', async () => {
+    const first = await joinAs('token-de-ana');
+    await waitFor(() => first.state.players.size === 1);
+
+    const second = await joinAs('token-de-ana');
+    const firstSync = new Promise<number>((resolve) =>
+      second.onStateChange.once((state) => resolve(state.players.size)),
+    );
+
+    expect(await firstSync).toBe(1);
+    expect(singleServer.sessions.has(first.sessionId)).toBe(false);
+    expect(singleServer.sessions.uidOf(second.sessionId)).toBe('uid-ana');
+  });
+
+  it('a replaced session gets no reconnection window: its token is dead at once', async () => {
+    const first = await joinAs('token-de-ana');
+    await waitFor(() => first.state.players.size === 1);
+    const token = first.reconnectionToken;
+    const firstClosed = closeCodeOf(first);
+
+    await joinAs('token-de-ana');
+    await firstClosed;
+
+    await expect(new Client(singleEndpoint).reconnect(token)).rejects.toThrow();
+  });
+
+  it('a session waiting in its reconnection window is evicted too, and its token stops working', async () => {
+    const beto = await joinAs('token-de-beto');
+    const first = await joinAs('token-de-ana');
+    await waitFor(() => beto.state.players.size === 2);
+    const oldId = first.sessionId;
+    const token = first.reconnectionToken;
+
+    // Non-consented drop: the seat is held for the window (#52).
+    await first.leave(false);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(beto.state.players.has(oldId)).toBe(true);
+
+    const second = await joinAs('token-de-ana');
+
+    // Well below the 2 s window: the eviction, not the timeout, removed it.
+    await waitFor(() => !beto.state.players.has(oldId) && beto.state.players.has(second.sessionId), 1000);
+    expect(beto.state.players.size).toBe(2);
+    expect(singleServer.sessions.has(oldId)).toBe(false);
+    await expect(new Client(singleEndpoint).reconnect(token)).rejects.toThrow();
+  });
+
+  it('a pending call of the replaced session is withdrawn exactly once', async () => {
+    const beto = await joinAs('token-de-beto');
+    const first = await joinAs('token-de-ana');
+    await waitFor(() => beto.state.players.size === 2);
+    const callerLeft: unknown[] = [];
+    beto.onMessage('callerleft', (payload) => callerLeft.push(payload));
+    const invited = new Promise((resolve) => beto.onMessage('callinvite', resolve));
+    first.send('call', { to: beto.sessionId });
+    await invited;
+    const firstClosed = closeCodeOf(first);
+
+    await joinAs('token-de-ana');
+    await firstClosed;
+    // Room for a second release (from `onLeave`) to show up if it happened.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(callerLeft).toEqual([{ from: first.sessionId }]);
+  });
+
+  it('different accounts both stay', async () => {
+    const ana = await joinAs('token-de-ana');
+    const beto = await joinAs('token-de-beto');
+    let anaLeft = false;
+    ana.onLeave(() => {
+      anaLeft = true;
+    });
+
+    await waitFor(() => ana.state.players.size === 2 && beto.state.players.size === 2);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(anaLeft).toBe(false);
+    expect(ana.state.players.size).toBe(2);
+  });
+});
+
+/**
+ * Kept outside the block above on purpose: Colyseus' matchmaker is per process,
+ * so the `define` of the second server there would replace the open one.
+ */
+describe('OfficeRoom: one session per account without auth (#78)', () => {
+  it('without auth there is no account to deduplicate: two joins both stay', async () => {
+    // The open office (local dev, e2e) has no identity, so "same person" is
+    // not something the server can know.
+    const first = await join('Ana');
+    const second = await join('Ana');
+    let firstLeft = false;
+    first.onLeave(() => {
+      firstLeft = true;
+    });
+
+    await waitFor(() => first.state.players.size === 2 && second.state.players.size === 2);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(firstLeft).toBe(false);
+    expect(server.sessions.size()).toBe(2);
   });
 });

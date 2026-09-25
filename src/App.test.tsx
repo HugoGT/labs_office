@@ -235,6 +235,49 @@ describe('App: leaving the office (#66)', () => {
   });
 });
 
+describe('App: replaced by another tab (#78)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('a replaced session unmounts the office and says where it went', async () => {
+    const { container } = render(<App />);
+    await waitForOffice(container);
+    const game = createGameMock.mock.results[0].value as { destroy: ReturnType<typeof vi.fn> };
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('presence', { online: false, peers: 0, state: 'replaced', canRetry: true }));
+
+    // Unmounting is what drops LiveKit too: the old tab must not keep hearing.
+    expect(game.destroy).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('#office-shell')).toBeNull();
+    expect(
+      screen.getByRole('dialog', { name: 'Abriste la oficina en otra pestaña o dispositivo' }),
+    ).toBeInTheDocument();
+  });
+
+  it('"Usar aquí" enters again with the same session, no login', async () => {
+    vi.stubEnv('VITE_FIREBASE_API_KEY', 'AIza-publica');
+    vi.stubEnv('VITE_FIREBASE_PROJECT_ID', 'oficina-virtual');
+    const { port, emit } = fakePort();
+    createAdapterMock.mockReturnValue(port);
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+    emit({ uid: 'uid-ana', email: 'ana@example.com', displayName: 'Ana' });
+    await waitForOffice(container);
+    const bridge = createGameMock.mock.calls[0][1];
+    act(() => bridge.emit('presence', { online: false, peers: 0, state: 'replaced', canRetry: true }));
+
+    await user.click(screen.getByRole('button', { name: 'Usar aquí' }));
+
+    // A fresh join, which in turn replaces the other tab: last one wins.
+    await waitForOffice(container);
+    expect(createGameMock).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(port.signOut).not.toHaveBeenCalled();
+  });
+});
+
 describe('App: enrutado (#24)', () => {
   afterEach(() => {
     window.history.pushState({}, '', '/');

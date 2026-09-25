@@ -19,11 +19,13 @@
  * Eso ahora responde 403 `forbidden-session` aunque quien pregunte tenga un
  * token perfectamente valido: la guarda es de propiedad, no solo de identidad.
  *
+ * Desde #78 tampoco hay dos sesiones del mismo uid entre las que elegir: con la
+ * auth activa, entrar desde otra pestana o dispositivo expulsa a la sesion
+ * anterior de esa cuenta (`OfficeRoom.replaceOtherSessionsOf`), asi que cada uid
+ * tiene como mucho una sesion viva.
+ *
  * Lo que sigue SIN estar resuelto, incluso con la auth activa:
  *
- * - Una misma persona con dos pestanas tiene dos sesiones y el mismo uid, asi
- *   que puede pedir el token de cualquiera de sus dos sesiones. No es un
- *   agujero de suplantacion, pero tampoco es aislamiento por conexion.
  * - No hay roles ni permisos: todo el que entra recibe los mismos grants de
  *   LiveKit. Quien puede publicar audio en que sitio es la issue #7.
  * - No hay invitaciones: basta con tener cuenta en el proyecto de Identity

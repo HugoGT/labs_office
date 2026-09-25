@@ -81,8 +81,13 @@ interface RecordingsCallbacks {
  * booleano: "reconectando" es exactamente lo que faltaba antes -- el HUD solo
  * sabia decir conectado o sin servidor, asi que una caida a mitad de sesion se
  * seguia anunciando como "N en linea" cuando ya no lo era.
+ *
+ * `replaced` (#78) is its own state and not `offline` because what follows is
+ * different: offline may offer a retry, while a tab whose account joined from
+ * somewhere else has to leave the office, since retrying would evict the
+ * newer tab.
  */
-export type OfficeConnectionState = 'connected' | 'reconnecting' | 'offline';
+export type OfficeConnectionState = 'connected' | 'reconnecting' | 'offline' | 'replaced';
 
 export interface OfficeRoomHandlers {
   onAdd(snapshot: RemotePlayerSnapshot): void;
@@ -348,10 +353,14 @@ export async function connectOfficeRoom({
     // llama a `terminate()`. Quien deshace ese empate es el servidor: con
     // `DEBUG=colyseus:connection` registra "terminating unresponsive client"
     // solo en el segundo caso. 1001 es la pestana yendose, y 4002 un error del
-    // lado del servidor.
+    // lado del servidor. 4100 is this account joining from another tab (#78).
     console.warn(`[office] sesion cerrada (${closeCode}); intento ${attempt}`);
 
     const decision = decideReconnect({ closeCode, attempt });
+    if (decision.kind === 'stop' && decision.reason === 'replaced') {
+      handlers.onConnectionState?.('replaced');
+      return;
+    }
     if (decision.kind !== 'retry') {
       // Tanto la salida voluntaria como la rendicion acaban aqui: para quien
       // escucha, las dos significan "ya no hay sesion". La diferencia la nota

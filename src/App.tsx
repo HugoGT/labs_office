@@ -2,7 +2,7 @@ import { lazy, Suspense, useState } from 'react';
 import { resolveAuthConfig } from './auth/authConfig';
 import { createFirebaseAuthAdapter } from './auth/firebaseAuthAdapter';
 import { AuthGate } from './components/AuthGate';
-import { LeftOfficeNotice } from './components/LeftOfficeNotice';
+import { LeftOfficeNotice, type LeftOfficeReason } from './components/LeftOfficeNotice';
 import { resolveRoute } from './routing/route';
 
 /**
@@ -60,8 +60,11 @@ export default function App() {
    * shell down is what leaves the Colyseus and LiveKit rooms, so nobody keeps
    * seeing or hearing someone who believes they left. It lives here, above
    * `AuthGate`'s session, so coming back needs no login.
+   *
+   * Being replaced by another tab of the same account (#78) takes the same
+   * path with its own wording; `null` means the office is mounted.
    */
-  const [leftOffice, setLeftOffice] = useState(false);
+  const [leftOffice, setLeftOffice] = useState<LeftOfficeReason | null>(null);
 
   return (
     <main style={{ position: 'relative', width: '100%', height: '100%' }}>
@@ -74,9 +77,13 @@ export default function App() {
             {route === 'dashboard' ? (
               <DashboardRoute session={session} />
             ) : leftOffice ? (
-              <LeftOfficeNotice onReenter={() => setLeftOffice(false)} />
+              <LeftOfficeNotice reason={leftOffice} onReenter={() => setLeftOffice(null)} />
             ) : (
-              <OfficeShell session={session} onLeaveOffice={() => setLeftOffice(true)} />
+              <OfficeShell
+                session={session}
+                onLeaveOffice={() => setLeftOffice('left')}
+                onSessionReplaced={() => setLeftOffice('replaced')}
+              />
             )}
           </Suspense>
         )}

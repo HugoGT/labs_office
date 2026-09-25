@@ -516,3 +516,49 @@ describe('connectOfficeRoom: recordings', () => {
     await waitFor(() => dropped.states.includes('connected') && !('sala' in (dropped.last() ?? {})), 15000);
   }, 20000);
 });
+
+describe('connectOfficeRoom: replaced by another tab of the same account (#78)', () => {
+  let authServer: OfficeServer;
+  let authEndpoint: string;
+
+  beforeEach(async () => {
+    // Created after the open server of the outer `beforeEach`, so its room
+    // definition is the one Colyseus' per-process matchmaker keeps.
+    authServer = createOfficeServer({
+      auth: {
+        async verify(token: unknown) {
+          return token === 'token-de-ana' ? { uid: 'uid-ana', email: null, name: 'Ana' } : null;
+        },
+      },
+    });
+    authEndpoint = `ws://localhost:${await authServer.listen(0)}`;
+  });
+
+  afterEach(async () => {
+    await authServer.shutdown();
+  });
+
+  async function connectAsAna(handlers: Parameters<typeof connectOfficeRoom>[0]['handlers']) {
+    const connection = await connectOfficeRoom({
+      endpoint: authEndpoint,
+      name: 'Ana',
+      handlers,
+      getIdToken: async () => 'token-de-ana',
+    });
+    connections.push(connection);
+    return connection;
+  }
+
+  it('the older tab reports "replaced" and never tries to reconnect', async () => {
+    const older = recorder();
+    await connectAsAna(older.handlers);
+
+    await connectAsAna(recorder().handlers);
+
+    await waitFor(() => older.states.includes('replaced'));
+    // Past the first backoff step (500 ms): a retry would have shown by now,
+    // and it would evict the newer tab back.
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    expect(older.states).toEqual(['replaced']);
+  });
+});

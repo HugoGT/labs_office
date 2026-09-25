@@ -60,6 +60,7 @@ const SCREEN_SHARE_DND_TITLE = 'No molestar: no compartes pantalla';
 const PRESENCE_TITLE = {
   reconnecting: 'Se perdio la conexión: recuperando la sesión sin recargar la página',
   offline: 'Sin servidor: la oficina corre en solitario',
+  replaced: 'Abriste la oficina en otra pestaña o dispositivo',
 } as const;
 
 /**
@@ -193,6 +194,11 @@ export function BottomBar({
               // de la escena, pero ahora mismo no hay canal con ninguno, y contarlos
               // seria decir que estan cuando no se les oye.
               <>🟡 Reconectando...</>
+            ) : presence.state === 'replaced' ? (
+              // #78: the account moved to another tab. Normally `App` unmounts
+              // the office before this paints; it is here so the bar never
+              // claims "Sin servidor" for a server that is fine.
+              <>Abierta en otra pestaña</>
             ) : (
               <>⚪ Sin servidor</>
             )}
