@@ -44,6 +44,14 @@
  * `POST /admin/users` anade un CUARTO filtro que si vive despues del cuerpo,
  * porque no puede vivir antes: comprobar que quien administra puede repartir el
  * rol que pide exige leer que rol pide. Ver `handleCreateUser`.
+ *
+ * ## Nobody but the owner knows a password (#94)
+ *
+ * Both creation flows create the Identity Platform account with a random
+ * password that never leaves this process, then ask Identity Platform to email
+ * a password-reset link so the person sets their own. The admin only learns
+ * whether that email went out (`emailSent`), and can re-send it with
+ * `POST /admin/users/:id/password-reset`.
  */
 
 import {
@@ -56,6 +64,7 @@ import type {
   AssignableRole,
   DirectoryUser,
   InvitationRow,
+  Role,
   UserDirectory,
 } from '../directory/directoryPort.ts';
 import {
@@ -293,12 +302,38 @@ function validEmail(raw: unknown): string | null {
 }
 
 /**
+ * Sends the password-reset email and reports whether it went out, never
+ * throwing (#94). A failure here is NOT a failed creation: the account and its
+ * directory row already exist and are correct, and rolling them back over a
+ * transient email error would throw away a good account. The caller answers
+ * success with `emailSent: false` and the admin re-sends from the dashboard.
+ * The uid goes to the log so the operator can find the account in GCP.
+ */
+async function sendResetEmail(
+  identityAdmin: IdentityAdmin,
+  target: { email: string; uid: string | null },
+  deps: AdminDeps,
+): Promise<boolean> {
+  try {
+    await identityAdmin.sendPasswordReset(target.email);
+    return true;
+  } catch {
+    logger(deps)(
+      `could not send the password-reset email to ${target.email} (uid=${target.uid ?? 'none'}); ` +
+        `the account exists and the email can be re-sent from the dashboard`,
+    );
+    return false;
+  }
+}
+
+/**
  * Alta de invitacion. El orden de los pasos importa tanto como el de las
  * guardas, y por el mismo motivo: cada uno tiene que fallar antes de que el
  * siguiente deje algo a medias.
  *
  *   validar -> comprobar que hay adaptador -> generar contrasena -> crear la
- *   cuenta en Identity Platform -> guardar la fila en el directorio.
+ *   cuenta en Identity Platform -> guardar la fila en el directorio -> send
+ *   the password-reset email (#94).
  *
  * La fila va la ULTIMA a proposito. Es la unica de las dos operaciones con
  * efecto que se puede deshacer sola: si se guardase primero y el alta en Google
@@ -345,14 +380,13 @@ export async function handleCreateInvitation(
   const identityAdmin = deps.identityAdmin;
   if (!identityAdmin) return IDENTITY_UNAVAILABLE;
 
-  // Desde aqui hasta el `return`, esta variable es la unica copia del valor en
-  // todo el proceso. No se registra, no se guarda y no entra en ningun mensaje
-  // de error. Ver la cabecera de `generatePassword.ts`.
-  const password = generatePassword();
-
   let uid: string;
   try {
-    uid = await identityAdmin.createAccount(email, password);
+    // The password is generated inline and dropped: it only exists for the
+    // create call, and the person replaces it through the reset email (#94).
+    // It is not logged, stored, returned or put in any error message. See the
+    // header of `generatePassword.ts`.
+    uid = await identityAdmin.createAccount(email, generatePassword());
   } catch (error) {
     if (error instanceof IdentityAdminError && error.code === 'email-exists') {
       return { status: 409, body: { error: 'conflict' } };
@@ -377,7 +411,8 @@ export async function handleCreateInvitation(
     // La cuenta YA existe en Identity Platform y su fila no. Esa cuenta puede
     // autenticarse: `OfficeRoom.onAuth` la vera como `not-provisioned` y la
     // echara mientras el directorio siga configurado, pero la credencial existe
-    // de verdad, alguien conoce su contrasena, y nadie puede verla ni revocarla
+    // de verdad, su dueno puede darle contrasena con el enlace de recuperacion
+    // del login (#94), y nadie puede verla ni revocarla
     // desde el panel -- porque el panel lista filas del directorio y esa fila
     // no esta. Es una credencial fuera de inventario, que es el peor sitio
     // donde puede estar una credencial.
@@ -407,14 +442,17 @@ export async function handleCreateInvitation(
     return INTERNAL;
   }
 
+  // Only after the row exists: an email for an account the directory does not
+  // know would invite someone into an office that then turns them away.
+  const emailSent = await sendResetEmail(identityAdmin, { email, uid }, deps);
+
   return {
     status: 201,
     body: {
       id: created.id,
       email: created.email,
-      // La unica vez que este valor sale de este proceso.
-      password,
       expiresAt: toIso(created.expiresAt),
+      emailSent,
     },
   };
 }
@@ -434,7 +472,8 @@ export async function handleCreateInvitation(
  *   5. quien llama puede repartir ESE rol (`canAssignRole`),
  *   6. hay adaptador de Identity Platform,
  *   7. generar contrasena y crear la cuenta,
- *   8. guardar la fila, y compensar la cuenta si eso falla.
+ *   8. guardar la fila, y compensar la cuenta si eso falla,
+ *   9. send the password-reset email (#94); a failure only sets `emailSent`.
  *
  * ## Por que el 403 del paso 5 va DESPUES de validar el cuerpo
  *
@@ -487,13 +526,10 @@ export async function handleCreateUser(
   const identityAdmin = deps.identityAdmin;
   if (!identityAdmin) return IDENTITY_UNAVAILABLE;
 
-  // Unica copia del valor en todo el proceso: no se registra, no se guarda y no
-  // entra en ningun mensaje de error. Ver la cabecera de `generatePassword.ts`.
-  const password = generatePassword();
-
   let uid: string;
   try {
-    uid = await identityAdmin.createAccount(email, password);
+    // Same throwaway password as the invitation flow: see the comment there.
+    uid = await identityAdmin.createAccount(email, generatePassword());
   } catch (error) {
     if (error instanceof IdentityAdminError && error.code === 'email-exists') {
       return { status: 409, body: { error: 'conflict' } };
@@ -529,16 +565,68 @@ export async function handleCreateUser(
     return INTERNAL;
   }
 
+  const emailSent = await sendResetEmail(identityAdmin, { email, uid }, deps);
+
   return {
     status: 201,
     body: {
       id: created.id,
       email: created.email,
       role: created.role,
-      // La unica vez que este valor sale de este proceso.
-      password,
+      emailSent,
     },
   };
+}
+
+/**
+ * Whether `actor` may re-send the password email to an account with `target`
+ * role: exactly the accounts `actor` could have created. Any admin invites
+ * guests; employees and admins follow `canAssignRole`; nobody targets a
+ * superadmin (there is one, and it uses the login's own reset link).
+ */
+function canSendResetTo(actor: Role, target: Role): boolean {
+  if (target === 'guest') return canAdminister(actor);
+  if (target === 'superadmin') return false;
+  return canAssignRole(actor, target);
+}
+
+/**
+ * Re-sends the password-reset email (#94), for when the one sent at creation
+ * failed (`emailSent: false`) or got lost. Hangs from `/admin/users/:id` and not
+ * from `/admin/invitations` because it serves both flows: the id is a directory
+ * row either way.
+ *
+ * Only for accounts the office still admits (`decideAccess` allows them):
+ * emailing a revoked or expired person a way to set a password would invite
+ * them to an office that then turns them away. Those, like an unknown id,
+ * answer 404: this route has nothing to act on. And only for accounts the
+ * caller could have created (`canSendResetTo`), so an admin cannot spam the
+ * superadmin or another admin with reset emails.
+ *
+ * A failed send answers 200 with `emailSent: false`, same shape as creation:
+ * the request was valid, the email just did not go out, and the dashboard
+ * already knows how to tell the admin to retry.
+ */
+export async function handleSendPasswordReset(
+  authorization: unknown,
+  id: unknown,
+  deps: AdminDeps,
+): Promise<AdminResult> {
+  const authorized = await authorize(authorization, deps);
+  if (!authorized.ok) return authorized.result;
+
+  if (typeof id !== 'string' || id.length === 0) return NOT_FOUND;
+
+  const target = await deps.directory.findById(id);
+  if (target === null || decideAccess(target, clock(deps)) !== 'allow') return NOT_FOUND;
+
+  if (!canSendResetTo(authorized.user.role, target.role)) return FORBIDDEN;
+
+  const identityAdmin = deps.identityAdmin;
+  if (!identityAdmin) return IDENTITY_UNAVAILABLE;
+
+  const emailSent = await sendResetEmail(identityAdmin, target, deps);
+  return { status: 200, body: { id: target.id, email: target.email, emailSent } };
 }
 
 /**
