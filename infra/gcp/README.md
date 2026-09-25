@@ -157,13 +157,18 @@ version changes neither on its own. Rotating it is, in this order:
 ```sh
 openssl rand -hex 32 | tr -d '\n' | \
   gcloud secrets versions add labs-office-test-db-password --data-file=-
-# bump db_password_version in terraform.tfvars (1 -> 2), then:
+# bump the db_password_version default in terraform/variables.tf (2 -> 3), then:
 terraform apply        # pushes the new password to the Cloud SQL user
 gh workflow run deploy-test.yml   # office-deploy rewrites DATABASE_URL
 ```
 
 Between the apply and the redeploy the running server keeps its open
 connections but cannot open new ones; keep the two steps together.
+
+Both readers trim surrounding whitespace from this secret (`trimspace` in
+`database.tf`, `strip()` in `office-deploy`), so a stray trailing newline no
+longer splits the password in two. The first #72 deploy failed exactly that
+way. Still add it without one, like the LiveKit values below.
 
 Los dos valores van **sin salto de línea final**, y por eso están el `printf` (que no
 lo añade, al contrario que `echo`) y el `tr -d '\n'` (porque `openssl rand` sí lo

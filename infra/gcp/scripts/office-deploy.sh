@@ -204,10 +204,12 @@ fi
 #
 # The host is the Cloud SQL private IP (issue #72). The same secret is the
 # password Terraform set on the Cloud SQL user (password_wo in
-# terraform/database.tf), so both sides read one value.
+# terraform/database.tf), so both sides read one value. Terraform trims it with
+# `trimspace`; the strip here keeps both on the same bytes (`$(...)` alone only
+# drops trailing newlines).
 DB_PASSWORD_ENC="$(
   printf '%s' "${DB_PASSWORD}" |
-    python3 -c 'import sys,urllib.parse; sys.stdout.write(urllib.parse.quote(sys.stdin.read(), safe=""))'
+    python3 -c 'import sys,urllib.parse; sys.stdout.write(urllib.parse.quote(sys.stdin.read().strip(), safe=""))'
 )"
 DATABASE_URL="postgresql://${DB_USER}:${DB_PASSWORD_ENC}@${DB_HOST}:5432/${DB_NAME}"
 
