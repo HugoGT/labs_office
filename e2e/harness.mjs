@@ -4,6 +4,7 @@
 // against it. Nothing in this file is mocked: readiness, port occupancy,
 // and process teardown all come from a real subprocess or a real socket.
 import { chromium } from 'playwright';
+import { RoomServiceClient } from 'livekit-server-sdk';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import net from 'node:net';
@@ -321,6 +322,8 @@ export async function startHarness({ realLivekit = false, fakeMedia = false } = 
     // inside the harness deadline.
     OFFICE_RECONNECTION_WINDOW_SECONDS: '2',
   };
+  /** @type {RoomServiceClient | null} */
+  let roomService = null;
   if (realLivekit) {
     const livekitEnv = loadLivekitEnv();
     if (!livekitEnv.LIVEKIT_API_KEY || !livekitEnv.LIVEKIT_API_SECRET) {
@@ -338,6 +341,11 @@ export async function startHarness({ realLivekit = false, fakeMedia = false } = 
     // D7: nunca se abren contextos de Chromium (ni se arranca nada) contra un
     // LiveKit que todavia no responde -- sondeo real, nunca un sleep fijo.
     await pollUntilOk(livekitHealthUrl(wsUrl), 'LiveKit server');
+    roomService = new RoomServiceClient(
+      wsUrl.replace(/^ws/, 'http'),
+      livekitEnv.LIVEKIT_API_KEY,
+      livekitEnv.LIVEKIT_API_SECRET,
+    );
   } else {
     // D6: server env is scrubbed of LiveKit credentials so `/livekit/token`
     // deterministically answers 503 -- no `.env.e2e`/CI ever provides them.
@@ -397,6 +405,23 @@ export async function startHarness({ realLivekit = false, fakeMedia = false } = 
       browser,
       newContext() {
         return browser.newContext(fakeMedia ? { permissions: ['microphone', 'camera'] } : {});
+      },
+      /**
+       * Removes `identity` from every LiveKit room it is in, server side
+       * (#84): the client gets a `Disconnected` it did not ask for, the same
+       * event as LiveKit giving up on reconnecting, without waiting the ~50s
+       * of retries a real network cut costs. Needs `realLivekit: true`.
+       */
+      async dropFromLivekit(identity) {
+        if (!roomService) throw new Error('dropFromLivekit needs startHarness({ realLivekit: true })');
+        let removed = 0;
+        for (const room of await roomService.listRooms()) {
+          const participants = await roomService.listParticipants(room.name);
+          if (!participants.some((participant) => participant.identity === identity)) continue;
+          await roomService.removeParticipant(room.name, identity);
+          removed++;
+        }
+        if (removed === 0) throw new Error(`dropFromLivekit: ${identity} is in no LiveKit room`);
       },
       async teardown() {
         process.off('exit', killAll);
@@ -615,6 +640,74 @@ export async function waitForPeerAudioPlaying(page, sessionId) {
 export async function waitForNoPeerAudio(page, sessionId) {
   await page.waitForFunction(
     (id) => !document.querySelector(`audio[data-session-id="${id}"]`),
+    sessionId,
+    { timeout: READINESS_DEADLINE_MS },
+  );
+}
+
+/** Real click on the camera button, same reasoning as `enableMic`. */
+export async function enableCam(page) {
+  await page.getByRole('button', { name: /Cámara/ }).click();
+}
+
+/** Picks a presence status (`g`, `y`, `r`) from the bottom bar selector (#84). */
+export async function setStatus(page, status) {
+  await page.getByLabel('Mi estado').selectOption(status);
+}
+
+/**
+ * Proves the peer's camera is actually PLAYING in its tile, not only that a
+ * tile exists: the tile shows a portrait when there is no track, so presence
+ * of `<video>` plus a strictly advancing `currentTime` is the signal, same
+ * idea as `waitForPeerAudioPlaying`.
+ */
+export async function waitForPeerVideoPlaying(page, sessionId) {
+  await page.evaluate((id) => {
+    delete (window.__e2eVideoSamples ??= {})[id];
+  }, sessionId);
+  await page.waitForFunction(
+    (id) => {
+      const registry = (window.__e2eVideoSamples ??= {});
+      const element = document.querySelector(
+        `[data-testid="video-tile-bar"] [data-session-id="${id}"] video`,
+      );
+      if (!element || element.paused) return false;
+      const history = registry[id] ?? [];
+      const last = history[history.length - 1];
+      const next = last === element.currentTime ? history : [...history, element.currentTime].slice(-3);
+      registry[id] = next;
+      if (next.length < 3) return false;
+      return next[0] < next[1] && next[1] < next[2];
+    },
+    sessionId,
+    { timeout: READINESS_DEADLINE_MS, polling: READINESS_POLL_INTERVAL_MS },
+  );
+}
+
+/** Inverse of `waitForPeerVideoPlaying`: no `<video>` left in the peer's tile (or no tile). */
+export async function waitForNoPeerVideo(page, sessionId) {
+  await page.waitForFunction(
+    (id) => !document.querySelector(`[data-testid="video-tile-bar"] [data-session-id="${id}"] video`),
+    sessionId,
+    { timeout: READINESS_DEADLINE_MS },
+  );
+}
+
+/** Real click on "Compartir"; the fake-ui flag accepts the browser picker (#84). */
+export async function startScreenShare(page) {
+  await page.getByRole('button', { name: /Compartir/ }).click();
+  await page.getByRole('button', { name: /Dejar de compartir/ }).waitFor({ timeout: READINESS_DEADLINE_MS });
+}
+
+/** The peer's screen share reached this page's stage with a live `<video>`. */
+export async function waitForScreenShareStage(page, sessionId) {
+  await page.waitForFunction(
+    (id) => {
+      const element = document.querySelector(
+        `[data-testid="screen-share-stage"][data-session-id="${id}"] video`,
+      );
+      return Boolean(element && !element.paused && element.readyState >= 2);
+    },
     sessionId,
     { timeout: READINESS_DEADLINE_MS },
   );

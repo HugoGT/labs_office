@@ -65,7 +65,7 @@ All from the repo root. Every script below exists in `package.json`.
 | `pnpm test:coverage` | All projects with v8 coverage |
 | `pnpm test:harness` | Pure unit tests of the E2E harness helpers |
 | `pnpm test:e2e` | Two-client E2E against real server + `vite preview` (needs `dist-e2e/`) |
-| `pnpm test:e2e:audio` | Two-client audio E2E; needs a real LiveKit and `VITE_LIVEKIT_E2E=1` |
+| `pnpm test:e2e:audio` | Two-client audio and "No molestar" E2E; needs a real LiveKit and `VITE_LIVEKIT_E2E=1` (the screen share scenario also needs `DATABASE_URL`) |
 | `pnpm e2e` | `test:harness` + `build` + `build:e2e` + `test:e2e` |
 | `pnpm test:mux` | Local Docker harness for the Caddy TURN/TLS multiplexer. Never runs in CI |
 

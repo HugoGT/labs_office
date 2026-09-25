@@ -146,7 +146,7 @@ Without `FIREBASE_PROJECT_ID` and the `VITE_FIREBASE_*` variables there is no lo
 | `pnpm test:coverage` | All layers with coverage |
 | `pnpm test:harness` | Unit tests of the E2E harness helpers |
 | `pnpm test:e2e` | Two-client E2E (needs `pnpm build:e2e` first) |
-| `pnpm test:e2e:audio` | Two-client audio E2E against a real LiveKit |
+| `pnpm test:e2e:audio` | Two-client audio and "No molestar" E2E against a real LiveKit |
 | `pnpm e2e` | Harness tests, both builds and the E2E suite in one go |
 | `pnpm test:mux` | Local Docker harness for the TURN/TLS multiplexer |
 
