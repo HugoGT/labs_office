@@ -17,9 +17,9 @@ CREATE TABLE IF NOT EXISTS users (
   -- Nullable aunque el flujo de hoy lo rellene siempre: la cuenta de Identity
   -- Platform la crea el adaptador de administracion antes de esta fila, y si
   -- ese orden cambiase, una invitacion sin uid todavia seria una fila valida.
-  -- UNIQUE porque es lo que hace idempotente al login: `resolveOnLogin` se
-  -- apoya en `ON CONFLICT (uid)`, y sin este indice Postgres rechaza la
-  -- sentencia entera.
+  -- UNIQUE porque es lo que hace idempotente al login: el alta del superadmin
+  -- de bootstrap en `resolveOnLogin` se apoya en `ON CONFLICT (uid)`, y sin
+  -- este indice Postgres rechaza la sentencia entera.
   uid text UNIQUE,
   -- Guardado ya en minusculas (ver `invitationRules.normalizeEmail`). El indice
   -- de abajo es quien lo garantiza de verdad.
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users (lower(email));
 
 -- La garantia dura de todo este cambio: como mucho UN superadmin, jamas dos.
--- El `CASE ... NOT EXISTS` de `pgDirectory.resolveOnLogin` es la version amable
+-- El `WHERE ... NOT EXISTS` de `pgDirectory.resolveOnLogin` es la version amable
 -- y esta es la que no se puede esquivar: ni con dos logins simultaneos que
 -- pasen a la vez por el NOT EXISTS, ni con un UPDATE hecho a mano. Indice
 -- parcial porque la unicidad solo aplica a esa fila: puede haber tantos admins,

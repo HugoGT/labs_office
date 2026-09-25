@@ -164,7 +164,9 @@ Copy `.env.example` to `.env` and fill in only what you need. Every variable is 
 | Recording | `RECORDING_GCS_BUCKET` | `/recordings/*` answers 503 |
 | CORS | `ALLOWED_ORIGIN` | `*` |
 | Auth | `FIREBASE_PROJECT_ID` (server), `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_AUTH_DOMAIN` (client) | no login |
-| Directory | `DATABASE_URL`, `BOOTSTRAP_SUPERADMIN_EMAIL`, `IDENTITY_ADMIN_CREDENTIALS`, `IDENTITY_ADMIN_USE_METADATA` | no roles, invitations, spaces or desks |
+| Directory | `DATABASE_URL`, `DATABASE_SSL_CA_FILE`, `BOOTSTRAP_SUPERADMIN_EMAIL`, `IDENTITY_ADMIN_CREDENTIALS`, `IDENTITY_ADMIN_USE_METADATA` | no roles, invitations, spaces or desks; with `DATABASE_URL` but no CA file, a plain (non-TLS) connection |
+
+With auth and the directory both on, login fails closed (issue #72): only accounts that already have a row in `users` get in. The one exception is the first login of `BOOTSTRAP_SUPERADMIN_EMAIL` while no superadmin exists, which creates that superadmin; everyone else is added from `/dashboard`.
 
 The standalone LiveKit stack has its own `infra/livekit/.env` (from `infra/livekit/.env.example`); the full Docker stack (`docker-compose.yml`) reads only the root `.env`, LiveKit included. `GET /health` reports whether auth and the directory are enabled. Never commit a real `.env`.
 

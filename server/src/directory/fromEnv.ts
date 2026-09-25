@@ -69,7 +69,7 @@ export interface DirectoryRuntime {
 }
 
 export function directoryFromEnv(
-  env: { DATABASE_URL?: string; BOOTSTRAP_SUPERADMIN_EMAIL?: string },
+  env: { DATABASE_URL?: string; BOOTSTRAP_SUPERADMIN_EMAIL?: string; DATABASE_SSL_CA_FILE?: string },
   makePool: typeof createDirectoryPool = createDirectoryPool,
 ): DirectoryRuntime | undefined {
   const config = resolveDirectoryConfig(env);

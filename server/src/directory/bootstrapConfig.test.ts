@@ -17,6 +17,7 @@ describe('resolveDirectoryConfig', () => {
     ).toEqual({
       databaseUrl: 'postgres://user:pw@localhost:5432/oficina',
       bootstrapSuperadminEmail: 'hugo@example.com',
+      databaseSslCaFile: null,
     });
   });
 
@@ -29,6 +30,7 @@ describe('resolveDirectoryConfig', () => {
     ).toEqual({
       databaseUrl: 'postgres://localhost/oficina',
       bootstrapSuperadminEmail: 'hugo@example.com',
+      databaseSslCaFile: null,
     });
   });
 
@@ -46,12 +48,13 @@ describe('resolveDirectoryConfig', () => {
   });
 
   it('con base de datos pero sin email de bootstrap, el directorio sigue activo', () => {
-    // El directorio sirve para algo sin bootstrap: sigue creando filas y
-    // aplicando caducidades. Lo unico que no pasa es que nadie se promocione a
+    // El directorio sirve para algo sin bootstrap: sigue resolviendo a quien
+    // ya esta dado de alta y aplicando caducidades. Lo unico que no pasa es que nadie se promocione a
     // superadmin, que es exactamente lo que debe ocurrir si nadie lo ha pedido.
     expect(resolveDirectoryConfig({ DATABASE_URL: 'postgres://localhost/oficina' })).toEqual({
       databaseUrl: 'postgres://localhost/oficina',
       bootstrapSuperadminEmail: null,
+      databaseSslCaFile: null,
     });
   });
 
@@ -67,6 +70,31 @@ describe('resolveDirectoryConfig', () => {
     ).toEqual({
       databaseUrl: 'postgres://localhost/oficina',
       bootstrapSuperadminEmail: null,
+      databaseSslCaFile: null,
     });
+  });
+
+  it('lee la ruta del CA de la base de datos para exigir TLS verificado (#72)', () => {
+    // Cloud SQL por IP privada: el servidor verifica el certificado de la
+    // instancia contra SU propio CA. La ruta llega recortada, como las demas.
+    expect(
+      resolveDirectoryConfig({
+        DATABASE_URL: 'postgres://office@10.100.0.3:5432/office',
+        DATABASE_SSL_CA_FILE: ' /etc/office/db-server-ca.pem\n',
+      }),
+    ).toEqual({
+      databaseUrl: 'postgres://office@10.100.0.3:5432/office',
+      bootstrapSuperadminEmail: null,
+      databaseSslCaFile: '/etc/office/db-server-ca.pem',
+    });
+  });
+
+  it('una ruta de CA vacia cuenta como ausente: sin TLS, como en local', () => {
+    expect(
+      resolveDirectoryConfig({
+        DATABASE_URL: 'postgres://localhost/oficina',
+        DATABASE_SSL_CA_FILE: '  ',
+      })?.databaseSslCaFile,
+    ).toBeNull();
   });
 });

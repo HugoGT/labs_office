@@ -42,3 +42,10 @@ acme_email = "cambiar@ejemplo.com"
 # en false, el panel funciona entero salvo el endpoint de invitar, que responde
 # 503 (ver infra/gcp/README.md).
 # enable_identity_admin_secret = true
+
+# Directory database on Cloud SQL (issue #72). Defaults fit the test
+# environment; see "Directory database" in infra/gcp/README.md.
+# db_tier     = "db-f1-micro"
+# db_psa_cidr = "10.100.0.0/20"
+# Bump after adding a new version of the db-password secret, then redeploy.
+# db_password_version = 1

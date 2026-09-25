@@ -21,16 +21,24 @@
  * funcionando y simplemente no hay superadmin hasta que alguien defina la
  * variable. Ver `pgDirectory.ts` para por que la promocion se ata a un email
  * concreto y no a "el primero que entre".
+ *
+ * `DATABASE_SSL_CA_FILE` (#72) is the path to the PEM of the database server's
+ * CA. Set, the pool requires TLS and verifies the server against it (see
+ * `pool.ts`); unset, it connects in clear text, which is what the local
+ * docker-compose Postgres expects.
  */
 
 export interface DirectoryConfig {
   databaseUrl: string;
   bootstrapSuperadminEmail: string | null;
+  /** Path to the server CA PEM. null = no TLS (local dev). */
+  databaseSslCaFile: string | null;
 }
 
 export function resolveDirectoryConfig(env: {
   DATABASE_URL?: string;
   BOOTSTRAP_SUPERADMIN_EMAIL?: string;
+  DATABASE_SSL_CA_FILE?: string;
 }): DirectoryConfig | null {
   const databaseUrl = env.DATABASE_URL?.trim();
   if (!databaseUrl) return null;
@@ -39,9 +47,11 @@ export function resolveDirectoryConfig(env: {
   // intencion, es un `.env` a medio escribir, y dejarla pasar solo cambiaria
   // "no promociona porque no esta puesta" por "no promociona y no se sabe por que".
   const bootstrapSuperadminEmail = env.BOOTSTRAP_SUPERADMIN_EMAIL?.trim();
+  const databaseSslCaFile = env.DATABASE_SSL_CA_FILE?.trim();
 
   return {
     databaseUrl,
     bootstrapSuperadminEmail: bootstrapSuperadminEmail ? bootstrapSuperadminEmail : null,
+    databaseSslCaFile: databaseSslCaFile ? databaseSslCaFile : null,
   };
 }

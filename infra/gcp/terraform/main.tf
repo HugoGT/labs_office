@@ -1,8 +1,9 @@
 # Stack de despliegue de la oficina virtual en GCP (issue #3).
 #
-# Una sola VM corre los cinco contenedores (el quinto, Postgres, lo trae el
-# issue #24: cabe en la misma maquina y evita la factura de Cloud SQL, a cambio
-# de copias de seguridad manuales). La razon de la VM es el SFU: LiveKit
+# Una sola VM corre los contenedores de la aplicacion. El directorio NO: desde
+# el issue #72 vive en Cloud SQL (database.tf), porque como contenedor en el
+# disco de la VM se perdio entero cuando un apply reemplazo la maquina. La
+# razon de la VM es el SFU: LiveKit
 # necesita UDP (media WebRTC y TURN) y Cloud Run solo habla HTTP/1.x y HTTP/2
 # sobre TLS, asi que el SFU obliga a una VM de todas formas. Partir Colyseus y
 # el SPA a Cloud Run habria significado dos superficies de despliegue, dos
@@ -204,12 +205,12 @@ resource "google_secret_manager_secret" "livekit_api_secret" {
   }
 }
 
-# Contrasena del Postgres que corre como un contenedor mas en la VM (issue #24).
-# Mismo trato que las claves de LiveKit: Terraform crea el contenedor y el valor
-# se anade a mano una vez. Ojo con una diferencia que no tienen las otras dos:
-# Postgres solo lee esta contrasena cuando inicializa el volumen por primera
-# vez, asi que cambiar la version del secreto mas adelante NO cambia la del
-# servidor y deja al servidor sin poder conectarse.
+# Password of the directory database user (issues #24, #72). Same treatment
+# as the LiveKit keys: Terraform creates the container and the value is added
+# by hand once. Since #72 it has two readers: office-deploy (DATABASE_URL) and
+# the Cloud SQL user in database.tf, which reads it ephemerally so it never
+# lands in the state. Adding a new version alone changes neither side until
+# `db_password_version` is bumped and the stack is redeployed (README).
 resource "google_secret_manager_secret" "db_password" {
   secret_id = "${local.name}-db-password"
   labels    = local.labels
@@ -446,6 +447,19 @@ resource "google_compute_instance" "office" {
 
   metadata_startup_script = file("${path.module}/../startup-script.sh")
 
+  lifecycle {
+    # `metadata_startup_script` is ForceNew in the provider: ANY edit to
+    # startup-script.sh plans a delete + create of the VM. That is how the
+    # 2026-09-21 apply (after commit f1cb134) silently replaced the VM and,
+    # with Postgres still on its boot disk, wiped the directory (issue #72).
+    # The directory is on Cloud SQL now, but a replacement still drops every
+    # live call and loses Caddy's certificates, so it must be a deliberate
+    # `terraform apply -replace=google_compute_instance.office`, never a side
+    # effect. To roll out a startup script change in place, see the README
+    # ("Startup script changes").
+    ignore_changes = [metadata_startup_script]
+  }
+
   metadata = {
     # OS Login: las claves SSH las gestiona IAM en vez de vivir en la metadata
     # del proyecto. Es lo que permite que el despliegue entre con la identidad
@@ -461,10 +475,10 @@ resource "google_compute_instance" "office" {
     office-livekit-config = file("${path.module}/../livekit.yaml.tpl")
     office-deploy-script  = file("${path.module}/../scripts/office-deploy.sh")
 
-    office-project-id         = var.project_id
-    office-registry           = local.registry_path
-    office-app-host           = local.app_host
-    office-lk-host            = local.lk_host
+    office-project-id = var.project_id
+    office-registry   = local.registry_path
+    office-app-host   = local.app_host
+    office-lk-host    = local.lk_host
     # Issue #19. LiveKit deja de leer certificados de Caddy (turn.external_tls)
     # y por eso ya no hace falta el vigilante que los reiniciaba: no hay
     # equivalente a office-cert-script aqui.
@@ -473,6 +487,18 @@ resource "google_compute_instance" "office" {
     office-secret-key         = google_secret_manager_secret.livekit_api_key.secret_id
     office-secret-secret      = google_secret_manager_secret.livekit_api_secret.secret_id
     office-secret-db-password = google_secret_manager_secret.db_password.secret_id
+
+    # Directory on Cloud SQL (issue #72). office-deploy builds DATABASE_URL
+    # from these plus the password secret above. None is a secret: a private
+    # IP only reachable from inside the VPC, two names, and a CA certificate,
+    # which is public by nature (it proves the server, it does not grant
+    # access). The provider marks `server_ca_cert` sensitive anyway, and a
+    # single sensitive value hides the diff of the WHOLE metadata map in every
+    # plan, compose and Caddyfile changes included. Hence `nonsensitive`.
+    office-db-host      = google_sql_database_instance.directory.private_ip_address
+    office-db-name      = google_sql_database.office.name
+    office-db-user      = google_sql_user.office.name
+    office-db-server-ca = nonsensitive(google_sql_database_instance.directory.server_ca_cert[0].cert)
 
     # Vacia cuando la cuenta de servicio de Identity Platform no esta montada.
     # `office-deploy` lee esta clave con `|| true` y, si no hay nombre, ni
