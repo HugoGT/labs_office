@@ -151,6 +151,20 @@ describe('HUD layout: sidebar toggle (#90)', () => {
   });
 });
 
+describe('HUD layout: sidebar panel card matches the rail (#86)', () => {
+  it('the open panel card is as wide as the toggle above it and the search input inside it', async () => {
+    await page.viewport(WIDE, 800);
+    const { toggle, search } = await renderOpenSidebar();
+    const panel = search.parentElement!;
+
+    // Before #86 the card kept the full 280px sidebar box, 11px wider on
+    // each side than the toggle it sits under and the search input inside
+    // it, which is what made it visibly hang past both.
+    expectSameColumn(panel, toggle);
+    expectSameColumn(panel, search);
+  });
+});
+
 describe('HUD layout: exit controls (#89)', () => {
   it('at full width they are as wide as the sidebar search input and aligned with it', async () => {
     await page.viewport(WIDE, 800);

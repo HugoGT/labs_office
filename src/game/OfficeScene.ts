@@ -17,7 +17,7 @@ import {
 } from './depthLayers';
 import { deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
 import type { OfficeDesk } from './desksPort';
-import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH } from './hudLayout';
+import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
 import { LayoutEditLayer } from './LayoutEditLayer';
 import { placeFurniture, placeNature, placeZoneLabels, renderGround } from './mapBuilder';
 import {
@@ -827,7 +827,7 @@ export class OfficeScene extends Phaser.Scene {
     cam.setBackgroundColor('#0d1117');
 
     const minimap = this.cameras.add(
-      this.scale.width - (MINIMAP_WIDTH + 16),
+      this.scale.width - (MINIMAP_WIDTH + RAIL_RIGHT),
       MINIMAP_MARGIN,
       MINIMAP_WIDTH,
       MINIMAP_HEIGHT,
@@ -840,7 +840,7 @@ export class OfficeScene extends Phaser.Scene {
     cam.ignore(this.mmMarker);
 
     this.scale.on('resize', (gameSize: Phaser.Structs.Size) => {
-      minimap.setPosition(gameSize.width - (MINIMAP_WIDTH + 16), MINIMAP_MARGIN);
+      minimap.setPosition(gameSize.width - (MINIMAP_WIDTH + RAIL_RIGHT), MINIMAP_MARGIN);
     });
   }
 

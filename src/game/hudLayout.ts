@@ -5,7 +5,18 @@
  * desalinearse en silencio si el minimapa cambia de tamano.
  */
 
-export const MINIMAP_WIDTH = 200;
+/**
+ * Franja derecha compartida por el minimapa, el toggle de "Personas
+ * conectadas", el panel del buscador y los botones de salida (#86). Los
+ * mismos numeros viven, por separado, en las variables `--hud-rail-right` y
+ * `--hud-rail-width` de `src/index.css`: el DOM los toma de ahi porque CSS no
+ * puede importar este modulo, y el minimapa (Phaser, sin DOM) los toma de
+ * aqui. Si uno cambia, el otro debe seguirlo.
+ */
+export const RAIL_RIGHT = 23;
+export const RAIL_WIDTH = 258;
+
+export const MINIMAP_WIDTH = RAIL_WIDTH;
 export const MINIMAP_HEIGHT = 140;
 export const MINIMAP_MARGIN = 14;
 

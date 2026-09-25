@@ -21,11 +21,15 @@
   /* Same column as the search input below it (#90). */
   align-self: stretch;
   margin: 0 var(--hud-rail-inset);
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: #111827f2;
   color: #e5e7eb;
   border: 1px solid #2b3444;
   border-radius: 10px;
-  padding: 8px 12px;
+  padding: 0 12px;
   font: inherit;
   font-size: 13px;
   cursor: pointer;
@@ -40,7 +44,14 @@
   pointer-events: auto;
   flex: 1;
   min-height: 0;
-  width: 100%;
+  /*
+   * Same rail column as the toggle above and the exit controls below (#86):
+   * before, this card kept the sidebar's full 280px/right:12px box, 11px
+   * wider on each side than the toggle it sits under, which is what made the
+   * search panel visibly hang past the toggle and the exit buttons.
+   */
+  align-self: stretch;
+  margin: 0 var(--hud-rail-inset);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -52,11 +63,21 @@
 }
 
 .search {
+  /*
+   * Escapes the panel's own border+padding (#86): the panel now sits on the
+   * rail band itself (`--hud-rail-inset` margin above), so without this the
+   * search input would land `--hud-rail-inset` past it, narrower than the
+   * toggle and exit controls. This puts it back on the exact same column
+   * (`--hud-rail-inset` cancels the panel's own border-plus-padding, which
+   * shares that value on purpose).
+   */
+  margin: 0 calc(-1 * var(--hud-rail-inset));
+  height: 30px;
   background: #1f2937;
   color: #e5e7eb;
   border: 1px solid #374151;
   border-radius: 10px;
-  padding: 6px 10px;
+  padding: 0 10px;
   font: inherit;
   font-size: 13px;
 }
