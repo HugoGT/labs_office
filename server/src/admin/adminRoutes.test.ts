@@ -90,6 +90,8 @@ interface Harness {
   logged: string[];
   created: { email: string; password: string }[];
   disabled: string[];
+  /** Emails a password-reset link was requested for (#94), in order. */
+  resets: string[];
 }
 
 function harness(
@@ -99,6 +101,7 @@ function harness(
     auth?: IdTokenVerifier;
     createAccount?: (email: string, password: string) => Promise<string>;
     disableAccount?: (uid: string) => Promise<void>;
+    sendPasswordReset?: (email: string) => Promise<void>;
   } = {},
 ): Harness {
   const directory = createMemoryDirectory({
@@ -108,6 +111,7 @@ function harness(
   const logged: string[] = [];
   const created: { email: string; password: string }[] = [];
   const disabled: string[] = [];
+  const resets: string[] = [];
 
   const identityAdmin: IdentityAdmin = {
     async createAccount(email, password) {
@@ -119,6 +123,10 @@ function harness(
       disabled.push(uid);
       if (options.disableAccount) await options.disableAccount(uid);
     },
+    async sendPasswordReset(email) {
+      resets.push(email);
+      if (options.sendPasswordReset) await options.sendPasswordReset(email);
+    },
   };
 
   return {
@@ -127,6 +135,7 @@ function harness(
     logged,
     created,
     disabled,
+    resets,
     deps: {
       directory,
       auth: 'auth' in options ? options.auth : verifier,
