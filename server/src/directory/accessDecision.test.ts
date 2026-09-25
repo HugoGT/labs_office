@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { canAdminister, canAssignRole, decideAccess } from './accessDecision.ts';
+import { canAdminister, canAssignRole, canRemove, decideAccess } from './accessDecision.ts';
 import type { DirectoryUser, Role } from './directoryPort.ts';
 
 const NOW = new Date('2026-09-17T12:00:00.000Z');
@@ -125,6 +125,42 @@ describe('canAssignRole', () => {
     for (const actor of ['employee', 'guest'] as const) {
       expect(canAssignRole(actor, 'employee')).toBe(false);
       expect(canAssignRole(actor, 'admin')).toBe(false);
+    }
+  });
+});
+
+describe('canRemove (#93)', () => {
+  const ROLES: readonly Role[] = ['superadmin', 'admin', 'employee', 'guest'];
+  const ACTOR_ID = 'actor';
+  const TARGET_ID = 'target';
+
+  /**
+   * The whole table, written out by hand instead of derived: a test that
+   * recomputes the rule would pass with the rule inverted.
+   */
+  const ALLOWED: Record<Role, readonly Role[]> = {
+    superadmin: ['admin', 'employee', 'guest'],
+    admin: ['employee', 'guest'],
+    employee: [],
+    guest: [],
+  };
+
+  for (const actor of ROLES) {
+    for (const target of ROLES) {
+      const expected = ALLOWED[actor].includes(target);
+      it(`${actor} ${expected ? 'can' : 'cannot'} remove ${target}`, () => {
+        expect(canRemove({ id: ACTOR_ID, role: actor }, { id: TARGET_ID, role: target })).toBe(
+          expected,
+        );
+      });
+    }
+  }
+
+  it('nobody removes themself, whatever the role', () => {
+    // Otherwise the last admin could lock the office out by accident, and a
+    // superadmin could leave the office without one.
+    for (const role of ROLES) {
+      expect(canRemove({ id: ACTOR_ID, role }, { id: ACTOR_ID, role })).toBe(false);
     }
   });
 });
