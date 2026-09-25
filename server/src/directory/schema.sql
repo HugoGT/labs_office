@@ -251,6 +251,51 @@ SELECT d.id, 'desk-' || d.id::text, d.label, d.x, d.y, 3, 3, NULL FROM desks d
 WHERE NOT EXISTS (SELECT 1 FROM spaces s WHERE s.desk_id = d.id)
 ON CONFLICT DO NOTHING;
 
+-- Nombre visible auto-elegido en login (#100). El indice de abajo exige
+-- unicidad, y una unicidad no puede convivir con datos que ya la violan: por
+-- eso primero se limpia (D3) y luego se crea el indice, en el MISMO fichero
+-- que corre en cada arranque. En la practica no se espera que esto toque
+-- ninguna fila: nada escribe `display_name` todavia.
+--
+-- La expresion de clave se repite IDENTICA en las dos UPDATE de abajo y en el
+-- indice: es la MISMA garantia que `displayNameRules.canonicalizeDisplayName`
+-- + `displayNameKey` dan en JavaScript para cualquier fila NUEVA (ver la
+-- cabecera de ese fichero). `[[:space:]]` y no `\s` -- eso es sintaxis Perl
+-- que Postgres no entiende en un patron POSIX -- y sin escapar la barra
+-- invertida, para no depender de `standard_conforming_strings`. El colapso va
+-- ANTES de `btrim` porque `btrim(text)` solo quita U+0020: un tabulador al
+-- principio se quedaria sin recortar si `btrim` corriese primero.
+
+-- Un display_name en blanco o solo espacio no es un nombre elegido: se limpia
+-- a NULL para que no compita por el indice de unicidad contra si mismo ni
+-- contra nadie.
+UPDATE users
+SET display_name = NULL
+WHERE display_name IS NOT NULL
+  AND btrim(regexp_replace(display_name, '[[:space:]]+', ' ', 'g')) = '';
+
+-- Duplicados por la MISMA clave: se queda con el mas antiguo (created_at,
+-- y el id como desempate) y el resto vuelve a NULL, cayendo a su nombre
+-- derivado hasta que elija uno nuevo en un proximo login.
+UPDATE users u
+SET display_name = NULL
+WHERE display_name IS NOT NULL
+  AND EXISTS (
+    SELECT 1 FROM users older
+    WHERE lower(btrim(regexp_replace(older.display_name, '[[:space:]]+', ' ', 'g')))
+        = lower(btrim(regexp_replace(u.display_name, '[[:space:]]+', ' ', 'g')))
+      AND older.display_name IS NOT NULL
+      AND (older.created_at, older.id) < (u.created_at, u.id)
+  );
+
+-- El indice de verdad: como mucho una fila por clave canonica, y solo entre
+-- quien ya eligio un nombre (`display_name IS NOT NULL`). "Invitado" y
+-- cualquier nombre derivado del email nunca llegan a escribirse aqui, asi que
+-- no cuentan como ocupados.
+CREATE UNIQUE INDEX IF NOT EXISTS users_display_name_unique ON users (
+  lower(btrim(regexp_replace(display_name, '[[:space:]]+', ' ', 'g')))
+) WHERE display_name IS NOT NULL;
+
 -- Semilla: los dos espacios de siempre, con los MISMOS uuids literales que
 -- usara `BUILT_IN_SPACES` en mapData.ts cuando aterrice la identidad de
 -- espacio (#7), para que un cliente en modo fallback y uno servido coincidan

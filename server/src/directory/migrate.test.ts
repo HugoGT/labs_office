@@ -484,6 +484,51 @@ describe('reportDesksWithoutSpace (#10 + #12, S1a tarea 1.2)', () => {
   });
 });
 
+describe('schema.sql: nombre visible unico auto-elegido en login (#100, D3)', () => {
+  const KEY_EXPRESSION_RE =
+    /lower\(btrim\(regexp_replace\(([a-z.]*display_name), '\[\[:space:]]\+', ' ', 'g'\)\)\)/g;
+
+  it('limpia a NULL un display_name en blanco o solo espacio ANTES del indice', () => {
+    const cleanupIdx = schema.indexOf('display_name = null');
+    const indexIdx = schema.indexOf('create unique index if not exists users_display_name_unique');
+    expect(cleanupIdx).toBeGreaterThan(-1);
+    expect(indexIdx).toBeGreaterThan(-1);
+    expect(cleanupIdx).toBeLessThan(indexIdx);
+    expect(schema).toContain(
+      "btrim(regexp_replace(display_name, '[[:space:]]+', ' ', 'g')) = ''",
+    );
+  });
+
+  it('resuelve duplicados por la misma clave quedandose con el mas antiguo (created_at, id)', () => {
+    expect(schema).toContain('(older.created_at, older.id) < (u.created_at, u.id)');
+    // La comparacion de duplicados corre ANTES del indice: sin esto el CREATE
+    // UNIQUE INDEX fallaria contra datos que todavia violan la unicidad.
+    const dupIdx = schema.indexOf('(older.created_at, older.id)');
+    const indexIdx = schema.indexOf('create unique index if not exists users_display_name_unique');
+    expect(dupIdx).toBeLessThan(indexIdx);
+  });
+
+  it('crea el indice unico parcial sobre la clave canonica, solo para filas con nombre', () => {
+    expect(schema).toContain('create unique index if not exists users_display_name_unique on users');
+    expect(schema).toContain('where display_name is not null');
+  });
+
+  it('la clave del indice y la de las dos limpiezas son EXACTAMENTE la misma expresion (D3)', () => {
+    // Si divergieran, el indice podria aceptar dos filas que la limpieza de
+    // arriba considero identicas -- o al reves, rechazar una fila que la
+    // limpieza dejo pasar. `matchAll` recoge las tres apariciones: las dos
+    // UPDATE y el propio indice.
+    const matches = [...schema.matchAll(KEY_EXPRESSION_RE)].map((match) => match[1]);
+    expect(matches.length).toBeGreaterThanOrEqual(3);
+    const distinctColumnRefs = new Set(matches.map((ref) => ref.replace(/^u\.|^older\./, '')));
+    expect(distinctColumnRefs).toEqual(new Set(['display_name']));
+  });
+
+  it('el colapso de espacios va ANTES de btrim: btrim(text) solo quita U+0020', () => {
+    expect(schema).toContain("btrim(regexp_replace(display_name, '[[:space:]]+', ' ', 'g'))");
+  });
+});
+
 describe('schema.sql: assets drawn above avatars (#71)', () => {
   it('adds the flag to databases that already exist, defaulting every existing asset to normal', () => {
     // `CREATE TABLE IF NOT EXISTS assets` never touches a live table, so the
