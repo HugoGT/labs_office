@@ -343,28 +343,17 @@ describe('createPhaserAvatarSink: cuerpo fisico del peer con peerBodies (#59)', 
     expect(hasBody).toBe(false);
   });
 
-  it('con peerBodies, create() da cuerpo Arcade al peer y lo anade al grupo', async () => {
+  it('con peerBodies, create() da cuerpo Arcade y lo anade al grupo; destroy() lo retira (sin fantasmas)', async () => {
     const result = await withPhysicsScene((scene) => {
       const group = scene.add.group();
       const sink = createPhaserAvatarSink(scene, createOfficeBridge(), group);
       const avatar = sink.create(snapshot());
-      return { hasBody: avatar.body !== null, inGroup: group.contains(avatar) };
-    });
-
-    expect(result).toEqual({ hasBody: true, inGroup: true });
-  });
-
-  it('destroy() retira al peer del grupo (sin fantasmas al desconectar)', async () => {
-    const result = await withPhysicsScene((scene) => {
-      const group = scene.add.group();
-      const sink = createPhaserAvatarSink(scene, createOfficeBridge(), group);
-      const avatar = sink.create(snapshot());
-      const before = group.getLength();
+      const created = { hasBody: avatar.body !== null, inGroup: group.contains(avatar) };
       sink.destroy(avatar);
-      return { before, after: group.getLength() };
+      return { created, afterDestroy: group.getLength() };
     });
 
-    expect(result).toEqual({ before: 1, after: 0 });
+    expect(result).toEqual({ created: { hasBody: true, inGroup: true }, afterDestroy: 0 });
   });
 
   it('un grupo de varias altas y bajas termina vacio, sin fantasmas', async () => {

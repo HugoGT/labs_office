@@ -80,7 +80,7 @@ describe('CameraPanLayer: click por debajo del umbral deja el seguimiento intact
 });
 
 describe('CameraPanLayer: drag por encima del umbral desplaza la camara', () => {
-  it('el scroll se mueve por -delta/zoom, no por el delta crudo', async () => {
+  it('el scroll se mueve por -delta/zoom desde el ULTIMO move, no por el delta crudo desde el origen', async () => {
     const scene = await bootHostScene();
     const cam = scene.cameras.main;
     cam.setZoom(2);
@@ -90,44 +90,18 @@ describe('CameraPanLayer: drag por encima del umbral desplaza la camara', () => 
 
     scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, camera: cam }), []);
     scene.input.emit('pointermove', fakePointer({ x: 120, y: 90, camera: cam }));
-
     // dx=20, dy=-10, zoom=2 -> scrollX -= 10, scrollY -= -5.
     expect(cam.scrollX).toBeCloseTo(startScrollX - 10);
     expect(cam.scrollY).toBeCloseTo(startScrollY + 5);
-  });
 
-  it('sigue paneando por el delta desde el ULTIMO move, no desde el origen', async () => {
-    const scene = await bootHostScene();
-    const cam = scene.cameras.main;
-    new CameraPanLayer({ scene, camera: cam, target: scene.target, lerp: 0.12, isSuspended: () => false });
-
-    scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, camera: cam }), []);
-    scene.input.emit('pointermove', fakePointer({ x: 120, y: 100, camera: cam }));
-    const afterFirst = cam.scrollX;
-    scene.input.emit('pointermove', fakePointer({ x: 130, y: 100, camera: cam }));
-
-    // Segundo tramo: solo 10px mas (130-120), no 30 (130-100).
-    expect(cam.scrollX).toBeCloseTo(afterFirst - 10);
+    scene.input.emit('pointermove', fakePointer({ x: 130, y: 90, camera: cam }));
+    // Segundo tramo: solo 10px mas (130-120)/zoom=2 -> 5, no (130-100)/2=15.
+    expect(cam.scrollX).toBeCloseTo(startScrollX - 15);
   });
 });
 
 describe('CameraPanLayer: soltar reanuda el seguimiento sin saltar', () => {
-  it('justo tras soltar, el scroll es el mismo que tenia paneando (sin snap)', async () => {
-    const scene = await bootHostScene();
-    const cam = scene.cameras.main;
-    new CameraPanLayer({ scene, camera: cam, target: scene.target, lerp: 0.12, isSuspended: () => false });
-
-    scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, camera: cam }), []);
-    scene.input.emit('pointermove', fakePointer({ x: 130, y: 100, camera: cam }));
-    const scrollAtRelease = cam.scrollX;
-    scene.input.emit('pointerup', fakePointer({ x: 130, y: 100, camera: cam }));
-
-    // `startFollow` salta el scroll de golpe (Camera.js): el `setScroll`
-    // posterior debe devolverlo al mismo punto, no dejarlo en el del target.
-    expect(cam.scrollX).toBeCloseTo(scrollAtRelease);
-  });
-
-  it('tras soltar, la camara converge de vuelta al target con el paso de los cuadros', async () => {
+  it('el scroll justo tras soltar es el mismo que paneando, y luego converge de vuelta al target', async () => {
     const scene = await bootHostScene();
     const cam = scene.cameras.main;
     new CameraPanLayer({ scene, camera: cam, target: scene.target, lerp: 0.12, isSuspended: () => false });
@@ -137,6 +111,11 @@ describe('CameraPanLayer: soltar reanuda el seguimiento sin saltar', () => {
     const scrollAtRelease = cam.scrollX;
     scene.input.emit('pointerup', fakePointer({ x: 300, y: 100, camera: cam }));
 
+    // `startFollow` salta el scroll de golpe (Camera.js): el `setScroll`
+    // posterior debe devolverlo al mismo punto, no dejarlo en el del target.
+    expect(cam.scrollX).toBeCloseTo(scrollAtRelease);
+    // Y a partir de ahi el `preRender` de cada cuadro lo va acercando de
+    // vuelta -- el "glide" sin tween aparte.
     await vi.waitFor(() => {
       expect(cam.scrollX).not.toBeCloseTo(scrollAtRelease, 0);
     }, LOOP_WAIT);
@@ -157,40 +136,41 @@ describe('CameraPanLayer: soltar reanuda el seguimiento sin saltar', () => {
 });
 
 describe('CameraPanLayer: guardas que impiden armar el pan', () => {
-  it('con el editor de layout activo (isSuspended), no arma pan', async () => {
-    const scene = await bootHostScene();
-    const cam = scene.cameras.main;
-    const startScrollX = cam.scrollX;
-    new CameraPanLayer({ scene, camera: cam, target: scene.target, lerp: 0.12, isSuspended: () => true });
+  it('editor de layout activo, clic sobre algo interactivo, o boton distinto del izquierdo: ninguno arma pan', async () => {
+    const guards: Array<{
+      isSuspended: () => boolean;
+      currentlyOver: Phaser.GameObjects.GameObject[];
+      button: number;
+    }> = [
+      // isSuspended (editor de layout activo).
+      { isSuspended: () => true, currentlyOver: [], button: 0 },
+      // currentlyOver no vacio (clic sobre un peer/escritorio/pick).
+      { isSuspended: () => false, currentlyOver: [{} as Phaser.GameObjects.GameObject], button: 0 },
+      // Boton distinto del izquierdo.
+      { isSuspended: () => false, currentlyOver: [], button: 2 },
+    ];
 
-    scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, camera: cam }), []);
-    scene.input.emit('pointermove', fakePointer({ x: 200, y: 100, camera: cam }));
+    for (const guard of guards) {
+      const scene = await bootHostScene();
+      const cam = scene.cameras.main;
+      const startScrollX = cam.scrollX;
+      new CameraPanLayer({
+        scene,
+        camera: cam,
+        target: scene.target,
+        lerp: 0.12,
+        isSuspended: guard.isSuspended,
+      });
 
-    expect(cam.scrollX).toBe(startScrollX);
-  });
+      scene.input.emit(
+        'pointerdown',
+        fakePointer({ x: 100, y: 100, button: guard.button, camera: cam }),
+        guard.currentlyOver,
+      );
+      scene.input.emit('pointermove', fakePointer({ x: 200, y: 100, camera: cam }));
 
-  it('un down sobre algo interactivo (currentlyOver no vacio) no arma pan', async () => {
-    const scene = await bootHostScene();
-    const cam = scene.cameras.main;
-    const startScrollX = cam.scrollX;
-    new CameraPanLayer({ scene, camera: cam, target: scene.target, lerp: 0.12, isSuspended: () => false });
-
-    scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, camera: cam }), [scene.target]);
-    scene.input.emit('pointermove', fakePointer({ x: 200, y: 100, camera: cam }));
-
-    expect(cam.scrollX).toBe(startScrollX);
-  });
-
-  it('un down con boton distinto del izquierdo no arma pan', async () => {
-    const scene = await bootHostScene();
-    const cam = scene.cameras.main;
-    const startScrollX = cam.scrollX;
-    new CameraPanLayer({ scene, camera: cam, target: scene.target, lerp: 0.12, isSuspended: () => false });
-
-    scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, button: 2, camera: cam }), []);
-    scene.input.emit('pointermove', fakePointer({ x: 200, y: 100, camera: cam }));
-
-    expect(cam.scrollX).toBe(startScrollX);
+      expect(cam.scrollX).toBe(startScrollX);
+    }
   });
 
   it('un down sobre la camara del minimapa no arma pan en la camara principal, y el minimapa nunca se toca', async () => {
