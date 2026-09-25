@@ -55,6 +55,12 @@ export interface OfficeShellProps {
    * this: leaving means unmounting it, which the shell cannot do to itself.
    */
   onLeaveOffice?: () => void;
+  /**
+   * The same account joined from another tab or device and took over (#78).
+   * Apart from `onLeaveOffice` because the owner shows a different notice, and
+   * because the office cannot stay: its session is gone for good.
+   */
+  onSessionReplaced?: () => void;
 }
 
 /**
@@ -69,7 +75,7 @@ export interface OfficeShellProps {
  * el nombre ya resuelto (#6): `BottomBar` es presentacional y no tiene por que
  * aprender que existe una sesion para poder escribir un nombre.
  */
-export function OfficeShell({ session = null, onLeaveOffice }: OfficeShellProps) {
+export function OfficeShell({ session = null, onLeaveOffice, onSessionReplaced }: OfficeShellProps) {
   const [bridge] = useState(createOfficeBridge);
   const { room, spaceId, recordings, selfSessionId, menu, presence, closeMenu } = useOfficeBridge(bridge);
   /**
@@ -148,6 +154,12 @@ export function OfficeShell({ session = null, onLeaveOffice }: OfficeShellProps)
    * que `proximityAudio.ts` garantiza -- nunca audibilidad de un solo sentido.
    */
   const { config: spacesConfig, refresh: refreshSpaces } = useSpacesConfig(endpoint);
+
+  // #78: a replaced session never comes back on its own, so the office leaves
+  // instead of sitting there as "Sin servidor".
+  useEffect(() => {
+    if (presence.state === 'replaced') onSessionReplaced?.();
+  }, [presence.state, onSessionReplaced]);
 
   useEffect(() => {
     if (spacesConfig === null) return;

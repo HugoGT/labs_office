@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { SESSION_REPLACED_CLOSE_CODE } from './officeProtocol';
 import {
   CONSENTED_CLOSE_CODE,
   DEVMODE_RESTART_CLOSE_CODE,
@@ -28,6 +29,22 @@ describe('decideReconnect', () => {
       kind: 'stop',
       reason: 'consented',
     });
+  });
+
+  it('a session replaced by a newer join of the same account never retries (#78)', () => {
+    // Retrying would evict the newer tab, which would then retry and evict
+    // this one back: two tabs taking the account from each other forever.
+    expect(decideReconnect({ closeCode: SESSION_REPLACED_CLOSE_CODE, attempt: 0 })).toEqual({
+      kind: 'stop',
+      reason: 'replaced',
+    });
+  });
+
+  it('a replaced session stops as replaced even past the last attempt, not as give-up (#78)', () => {
+    // "Give up" offers a retry button; "replaced" must not.
+    expect(
+      decideReconnect({ closeCode: SESSION_REPLACED_CLOSE_CODE, attempt: RECONNECT_DELAYS_MS.length }),
+    ).toEqual({ kind: 'stop', reason: 'replaced' });
   });
 
   it('una caida reintenta con el retardo que toca a cada intento', () => {

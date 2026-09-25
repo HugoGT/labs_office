@@ -11,6 +11,8 @@
   box-sizing: border-box;
   width: 300px;
   height: 200px;
+  /* The replaced notice (#78) wraps to two lines. */
+  padding: 0 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -25,6 +27,7 @@
 
 .title {
   margin: 0;
+  text-align: center;
   font-size: 16px;
   font-weight: 600;
 }

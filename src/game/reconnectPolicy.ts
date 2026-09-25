@@ -13,6 +13,8 @@
  * quien puede cancelarlo al apagarse.
  */
 
+import { SESSION_REPLACED_CLOSE_CODE } from './officeProtocol';
+
 /**
  * Cierre voluntario: alguien llamo a `room.leave()` o cerro la pestana.
  *
@@ -50,12 +52,15 @@ export const DEVMODE_RESTART_CLOSE_CODE = 4010;
 export const RECONNECT_DELAYS_MS: readonly number[] = [500, 1000, 2000, 4000, 8000];
 
 /**
- * Las tres unicas salidas, discriminadas para que quien llama no pueda tratar
+ * Las unicas salidas, discriminadas para que quien llama no pueda tratar
  * "no reintentes porque se fue" igual que "no reintentes porque ya no queda":
  * la primera es normal y la segunda es la que tiene que ofrecer un boton.
  */
 export type ReconnectDecision =
   | { kind: 'stop'; reason: 'consented' }
+  // #78: the same account joined elsewhere and took over. Not a drop, and
+  // unlike `give-up` nothing to offer a retry for.
+  | { kind: 'stop'; reason: 'replaced' }
   | { kind: 'retry'; delayMs: number }
   | { kind: 'give-up' };
 
@@ -74,6 +79,7 @@ export interface ReconnectInput {
  */
 export function decideReconnect({ closeCode, attempt }: ReconnectInput): ReconnectDecision {
   if (closeCode === CONSENTED_CLOSE_CODE) return { kind: 'stop', reason: 'consented' };
+  if (closeCode === SESSION_REPLACED_CLOSE_CODE) return { kind: 'stop', reason: 'replaced' };
 
   const delayMs = RECONNECT_DELAYS_MS[attempt];
   if (delayMs === undefined) return { kind: 'give-up' };

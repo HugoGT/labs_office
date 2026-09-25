@@ -1239,6 +1239,31 @@ describe('OfficeShell: exit controls (#66)', () => {
   });
 });
 
+describe('OfficeShell: replaced by another tab (#78)', () => {
+  it('a replaced session hands leaving to whoever mounted the office', () => {
+    const onSessionReplaced = vi.fn();
+    const onLeaveOffice = vi.fn();
+    render(<OfficeShell onLeaveOffice={onLeaveOffice} onSessionReplaced={onSessionReplaced} />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('presence', { online: false, peers: 0, state: 'replaced', canRetry: true }));
+
+    expect(onSessionReplaced).toHaveBeenCalledTimes(1);
+    expect(onLeaveOffice).not.toHaveBeenCalled();
+  });
+
+  it('any other lost session stays in the office', () => {
+    const onSessionReplaced = vi.fn();
+    render(<OfficeShell onSessionReplaced={onSessionReplaced} />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('presence', { online: false, peers: 0, state: 'offline', canRetry: true }));
+    act(() => bridge.emit('presence', { online: false, peers: 0, state: 'reconnecting', canRetry: true }));
+
+    expect(onSessionReplaced).not.toHaveBeenCalled();
+  });
+});
+
 describe('OfficeShell: barra lateral de personas (#74)', () => {
   it('el roster que llega por el puente se ve al expandir la barra lateral', async () => {
     const user = userEvent.setup();

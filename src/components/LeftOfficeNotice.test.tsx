@@ -21,3 +21,24 @@ describe('LeftOfficeNotice (#66)', () => {
     expect(onReenter).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('LeftOfficeNotice: replaced by another tab (#78)', () => {
+  it('says the office was opened somewhere else', () => {
+    render(<LeftOfficeNotice reason="replaced" onReenter={vi.fn()} />);
+
+    expect(
+      screen.getByRole('dialog', { name: 'Abriste la oficina en otra pestaña o dispositivo' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Saliste de la oficina')).not.toBeInTheDocument();
+  });
+
+  it('"Usar aquí" asks to re-enter, which takes the office back to this tab', async () => {
+    const user = userEvent.setup();
+    const onReenter = vi.fn();
+    render(<LeftOfficeNotice reason="replaced" onReenter={onReenter} />);
+
+    await user.click(screen.getByRole('button', { name: 'Usar aquí' }));
+
+    expect(onReenter).toHaveBeenCalledTimes(1);
+  });
+});

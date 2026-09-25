@@ -337,6 +337,20 @@ describe('BottomBar: reconexion (issue #52)', () => {
     expect(screen.getByRole('button', { name: /Reintentar/ })).toBeInTheDocument();
   });
 
+  it('a session replaced by another tab says so, and offers no retry (#78)', () => {
+    // Normally the office unmounts right away (`App`); this is what the bar
+    // says if it is still up. "Sin servidor" would be false, and retrying would
+    // take the account back from the other tab.
+    renderBar({ presence: { online: false, peers: 0, state: 'replaced', canRetry: true } });
+
+    expect(screen.getByText('Abierta en otra pestaña')).toHaveAttribute(
+      'title',
+      expect.stringMatching(/otra pestaña o dispositivo/),
+    );
+    expect(screen.queryByText('⚪ Sin servidor')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Reintentar/ })).not.toBeInTheDocument();
+  });
+
   it('en modo solitario no ofrece reintentar: no hay nada a lo que volver', () => {
     renderBar({ presence: OFFLINE_SOLO });
 
