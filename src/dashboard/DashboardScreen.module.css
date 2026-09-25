@@ -124,22 +124,21 @@
   color: #fde68a;
 }
 
-.secretValue {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 18px;
-  letter-spacing: 0.04em;
-  background: #1f2937;
-  border: 1px solid #374151;
-  border-radius: 10px;
-  padding: 10px 12px;
-  color: #f9fafb;
-  overflow-wrap: anywhere;
-}
-
 .secretWarning {
   margin: 0;
   font-size: 12px;
   color: #fcd34d;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.secretDismiss:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .secretDismiss {
@@ -192,6 +191,22 @@
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
+}
+
+.resend {
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #4b5563;
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.resend:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .revoke:hover:not(:disabled) {
