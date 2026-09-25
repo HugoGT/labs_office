@@ -316,6 +316,20 @@ describe('createPhaserAvatarSink: clic en un avatar de peer real (issue #2, D1)'
     expect((received[0] as { status: string }).status).toBe('No molestar');
   });
 
+  it('un clic que llega por otra camara (el minimapa) no abre el menu del peer (#98)', async () => {
+    const received: unknown[] = [];
+    await withScene((scene) => {
+      const bridge = createOfficeBridge();
+      bridge.on('peermenu', (payload) => received.push(payload));
+      const minimap = scene.cameras.add(0, 0, 100, 100);
+
+      const avatar = createPhaserAvatarSink(scene, bridge).create(snapshot());
+      avatar.emit('pointerdown', { ...fakePointer(), camera: minimap } as Phaser.Input.Pointer);
+    });
+
+    expect(received).toEqual([]);
+  });
+
   it('el pointerdown detiene la propagacion (no debe disparar tambien el clic de mapa)', async () => {
     const stopPropagation = vi.fn();
     await withScene((scene) => {

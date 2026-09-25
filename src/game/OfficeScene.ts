@@ -145,6 +145,8 @@ export class OfficeScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WasdKeys;
   private mmMarker?: Phaser.GameObjects.Arc;
+  /** Lo crea `setupCameras`; `CameraPanLayer` lo necesita para el clic de navegacion (#98). */
+  private minimapCamera?: Phaser.Cameras.Scene2D.Camera;
   /** Clave de dedupe de "voice" (D3): incluye espacio y `selfSessionId`, no solo los pares. */
   private lastVoiceKey = '';
   private currentSpaceId: string | null = null;
@@ -294,6 +296,8 @@ export class OfficeScene extends Phaser.Scene {
       camera: this.cameras.main,
       target: this.player,
       lerp: FOLLOW_LERP,
+      worldBounds: { x: 0, y: 0, width: WORLD_W, height: WORLD_H },
+      minimap: this.minimapCamera,
       isSuspended: () => this.layoutEditing,
     });
 
@@ -707,6 +711,9 @@ export class OfficeScene extends Phaser.Scene {
       // `pointerdown` global), no una oferta de coger/soltar. Se retorna sin
       // `stopPropagation` para no tragarse el clic que el editor necesita.
       if (this.layoutEditing) return;
+      // #98: por el minimapa el clic es navegacion (`CameraPanLayer`), no
+      // una oferta de coger/soltar un escritorio que ahi mide unos pixeles.
+      if (pointer.camera && pointer.camera !== this.cameras.main) return;
       // Mismo `stopPropagation` que el clic de un peer: sin el, el
       // `pointerdown` de la escena cerraria el menu contextual a la vez.
       pointer.event.stopPropagation();
@@ -835,6 +842,7 @@ export class OfficeScene extends Phaser.Scene {
     minimap.setZoom(Math.min(MINIMAP_WIDTH / WORLD_W, MINIMAP_HEIGHT / WORLD_H));
     minimap.centerOn(WORLD_W / 2, WORLD_H / 2);
     minimap.setBackgroundColor(0x0d1117);
+    this.minimapCamera = minimap;
 
     this.mmMarker = this.add.circle(0, 0, 42, 0xffffff, 0.45).setDepth(MINIMAP_MARKER_DEPTH);
     cam.ignore(this.mmMarker);

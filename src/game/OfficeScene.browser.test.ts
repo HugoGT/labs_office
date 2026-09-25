@@ -1714,6 +1714,19 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
     expect(clicks).toEqual([]);
   });
 
+  it('un clic que llega por el minimapa no ofrece el escritorio: solo mueve la camara (#98)', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const clicks: unknown[] = [];
+    bridge.on('deskclick', (payload) => clicks.push(payload));
+
+    bridge.emitCommand('desks', { desks: [servedDesk()] });
+    const pointer = { ...fakePointer(), camera: scene.cameras.cameras[1] } as Phaser.Input.Pointer;
+    findZone(scene, 'id-mesa')!.emit('pointerdown', pointer);
+
+    expect(clicks).toEqual([]);
+  });
+
   it('el clic no se cuela al mapa de fondo', async () => {
     // Mismo `stopPropagation` que el clic de un peer: sin el, el
     // `pointerdown` de la escena cerraria el menu contextual a la vez.
@@ -2210,6 +2223,26 @@ describe('OfficeScene: integracion camera pan y colision de peers (#53, #59)', (
     expect(minimap.scrollX).toBe(minimapScrollX);
 
     scene.input.emit('pointerup', screenPointer(70, 50, mainCam));
+  });
+
+  it('un clic en el minimapa planea cameras.main hasta ese punto del mundo sin mover al jugador (#98)', async () => {
+    const { scene } = await bootOfficeScene();
+    const mainCam = scene.cameras.main;
+    const minimap = scene.cameras.cameras[1];
+    const player = findPlayer(scene);
+    const playerStart = { x: player.x, y: player.y };
+    const worldPoint = minimap.getWorldPoint(minimap.x + 20, minimap.y + 20);
+
+    scene.input.emit('pointerdown', screenPointer(minimap.x + 20, minimap.y + 20, minimap), []);
+    scene.input.emit('pointerup', screenPointer(minimap.x + 20, minimap.y + 20, minimap));
+
+    // Hasta 1px de diferencia: la oficina es pixel art y la camara redondea
+    // el scroll (`roundPixels`).
+    await vi.waitFor(() => {
+      expect(Math.abs(mainCam.midPoint.x - worldPoint.x)).toBeLessThanOrEqual(1);
+      expect(Math.abs(mainCam.midPoint.y - worldPoint.y)).toBeLessThanOrEqual(1);
+    }, LOOP_WAIT);
+    expect({ x: player.x, y: player.y }).toEqual(playerStart);
   });
 
   it('con el pan activo, las teclas de movimiento siguen moviendo al jugador y la camara no retoma el seguimiento (#53)', async () => {
