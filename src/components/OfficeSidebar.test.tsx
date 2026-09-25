@@ -33,9 +33,9 @@ describe('OfficeSidebar (#74)', () => {
     const toggle = screen.getByRole('button', { name: /Personas/ });
 
     // The online count moved here from BottomBar: it belongs next to the list.
-    expect(toggle).toHaveTextContent('Personas (3)');
+    expect(toggle).toHaveTextContent('Personas conectadas (3)');
     await user.click(toggle);
-    expect(toggle).toHaveTextContent('Personas (3)');
+    expect(toggle).toHaveTextContent('Personas conectadas (3)');
   });
 
   it('activar el boton la expande y volver a activarlo la colapsa', async () => {
@@ -84,9 +84,10 @@ describe('OfficeSidebar (#74)', () => {
       position: 'fixed',
       top: `${SIDEBAR_TOP}px`,
       bottom: '72px',
-      width: '280px',
       zIndex: '15',
     });
+    // The 280px width moved to the shared HUD tokens (`index.css`, #90), which
+    // jsdom does not load: `HudLayout.browser.test.tsx` measures it.
   });
 
   it('forceCollapsed en true colapsa aunque estuviese expandida', async () => {

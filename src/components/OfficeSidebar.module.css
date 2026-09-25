@@ -1,6 +1,7 @@
 /* Same visual vocabulary as BottomBar/ExitControls: dark card, same border. */
 .sidebar {
-  right: 12px;
+  right: var(--hud-sidebar-right);
+  width: var(--hud-sidebar-width);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -10,6 +11,9 @@
 
 .toggle {
   pointer-events: auto;
+  /* Same column as the search input below it (#90). */
+  align-self: stretch;
+  margin: 0 var(--hud-rail-inset);
   background: #111827f2;
   color: #e5e7eb;
   border: 1px solid #2b3444;
@@ -36,7 +40,7 @@
   background: #111827f2;
   border: 1px solid #2b3444;
   border-radius: 16px;
-  padding: 10px;
+  padding: var(--hud-sidebar-padding);
   box-shadow: 0 8px 30px #0009;
 }
 

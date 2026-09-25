@@ -1,5 +1,20 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/*
+ * HUD right rail (#89, #90). The sidebar search input is the reference: the
+ * toggle above it and the exit controls below it take its width and edges,
+ * derived here once instead of repeated as magic numbers.
+ */
+:root {
+  --hud-sidebar-right: 12px;
+  --hud-sidebar-width: 280px;
+  --hud-sidebar-padding: 10px;
+  /* The search input sits inside the panel's 1px border and its padding. */
+  --hud-rail-inset: calc(1px + var(--hud-sidebar-padding));
+  --hud-rail-right: calc(var(--hud-sidebar-right) + var(--hud-rail-inset));
+  --hud-rail-width: calc(var(--hud-sidebar-width) - 2 * var(--hud-rail-inset));
+}
+
 html, body, #root {
   width: 100%;
   height: 100%;

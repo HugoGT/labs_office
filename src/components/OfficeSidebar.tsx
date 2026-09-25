@@ -98,7 +98,6 @@ export function OfficeSidebar({
         position: 'fixed',
         top: SIDEBAR_TOP,
         bottom: 72,
-        width: 280,
         zIndex: 15,
       }}
     >
@@ -108,7 +107,7 @@ export function OfficeSidebar({
         aria-expanded={expanded}
         onClick={() => setExpanded((current) => !current)}
       >
-        👥 Personas ({peers.length + 1})
+        👥 Personas conectadas ({peers.length + 1})
       </button>
       {expanded && (
         <div className={styles.panel}>
