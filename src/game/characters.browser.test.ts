@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
-import { makeCharacter, setCharacterStatus, spawnPlayer } from './characters';
+import { enablePeerBody, makeCharacter, setCharacterStatus, spawnPlayer } from './characters';
 import { avatarDepth, worldAssetDepth } from './depthLayers';
 import { TILE, WORLD_H } from './mapData';
 import { DEFAULT_NAME, DEFAULT_STATUS } from './officeProtocol';
@@ -139,5 +139,50 @@ describe('makeCharacter: render band (#70)', () => {
     expect(depths.top).toBe(avatarDepth(1 * TILE + 16));
     expect(depths.top).toBeGreaterThan(worldAssetDepth(WORLD_H));
     expect(depths.bottom).toBeGreaterThan(depths.top);
+  });
+});
+
+/**
+ * `enablePeerBody` (#59): da a un avatar remoto un cuerpo Arcade inmovible,
+ * misma geometria que el jugador local (`spawnPlayer`) -- mismo colisionador
+ * en `OfficeScene`, mismo tamano para todo el mundo.
+ */
+describe('enablePeerBody', () => {
+  it('crea un cuerpo Arcade con la misma geometria que el jugador local (22x14, offset -11,6)', async () => {
+    const geometry = await withScene((scene) => {
+      const container = makeCharacter(scene, 'Ana', 0, 0, 'av1', 'g');
+      enablePeerBody(scene, container);
+      const body = container.body as Phaser.Physics.Arcade.Body;
+      return { width: body.width, height: body.height, offsetX: body.offset.x, offsetY: body.offset.y };
+    });
+
+    expect(geometry).toEqual({ width: 22, height: 14, offsetX: -11, offsetY: 6 });
+  });
+
+  it('el cuerpo es inmovible y no se mueve por su cuenta (moves=false)', async () => {
+    const flags = await withScene((scene) => {
+      const container = makeCharacter(scene, 'Ana', 0, 0, 'av1', 'g');
+      enablePeerBody(scene, container);
+      const body = container.body as Phaser.Physics.Arcade.Body;
+      return { immovable: body.immovable, moves: body.moves };
+    });
+
+    expect(flags).toEqual({ immovable: true, moves: false });
+  });
+
+  it('la geometria del cuerpo remoto es identica a la del jugador local (misma fabrica)', async () => {
+    const { playerGeometry, peerGeometry } = await withScene((scene) => {
+      const player = spawnPlayer(scene, 'Yo');
+      const container = makeCharacter(scene, 'Ana', 0, 0, 'av1', 'g');
+      enablePeerBody(scene, container);
+      const playerBody = player.body as Phaser.Physics.Arcade.Body;
+      const peerBody = container.body as Phaser.Physics.Arcade.Body;
+      return {
+        playerGeometry: { w: playerBody.width, h: playerBody.height },
+        peerGeometry: { w: peerBody.width, h: peerBody.height },
+      };
+    });
+
+    expect(peerGeometry).toEqual(playerGeometry);
   });
 });

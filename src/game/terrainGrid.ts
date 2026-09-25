@@ -219,3 +219,37 @@ export function findWalkDestination(
 
   return findFreeAdjacentTile(grid, peerTile.tx, peerTile.ty);
 }
+
+/**
+ * Destino de la auto-caminata hacia un peer (#59): a diferencia de
+ * `findWalkDestination`, que prueba `ADJACENT_OFFSETS` en un orden fijo sin
+ * enterarse de por donde viene el jugador, esta funcion apunta a la tile del
+ * lado del peer que el `walker` esta cruzando -- el eje de mayor distancia
+ * manda, y un empate exacto lo rompe el eje vertical (decision de usuario
+ * 2026-09-24: sin pathfinding, apuntar al lado lejano obligaria a atravesar
+ * al peer).
+ *
+ * Si el walker ya esta en la tile del peer, o la tile elegida esta bloqueada
+ * o cae fuera del rectangulo del espacio, cae intacto a
+ * `findWalkDestination` -- el mismo camino que ya cubren sus pruebas y la
+ * regresion de `OfficeScene.browser.test.ts`.
+ */
+export function pickApproachTile(
+  grid: TerrainGrid,
+  walker: TileCoord,
+  peer: TileCoord,
+  peerSpaceTiles: TileRect | null,
+): TileCoord | null {
+  const dx = walker.tx - peer.tx;
+  const dy = walker.ty - peer.ty;
+
+  if (dx === 0 && dy === 0) return findWalkDestination(grid, peer, peerSpaceTiles);
+
+  const [ox, oy] = Math.abs(dy) >= Math.abs(dx) ? [0, Math.sign(dy)] : [Math.sign(dx), 0];
+  const tile = { tx: peer.tx + ox, ty: peer.ty + oy };
+  const withinSpace = !peerSpaceTiles || insideRect(peerSpaceTiles, tile.tx, tile.ty);
+
+  if (withinSpace && !isBlocked(grid, tile.tx, tile.ty)) return tile;
+
+  return findWalkDestination(grid, peer, peerSpaceTiles);
+}

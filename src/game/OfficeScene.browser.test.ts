@@ -94,14 +94,21 @@ async function bootOfficeScene(
 }
 
 /**
- * El jugador local es el unico contenedor con cuerpo fisico: los avatares
- * remotos no lo tienen. Se busca asi y no por su nombre porque el nombre es
- * justo lo que varias pruebas miden (#6): atarlo aqui haria que el helper
- * dejase de encontrarlo en cuanto la sesion traiga otro.
+ * Desde #59 tanto el jugador como los peers remotos tienen cuerpo fisico:
+ * `body !== null` dejo de distinguirlos. Lo que sigue distinguiendolos es
+ * `moves` -- el cuerpo del jugador se mueve por velocidad (D-diseno,
+ * `spawnPlayer`); el de un peer es `enablePeerBody` (`moves=false`, el tween
+ * es la unica fuente de verdad de su posicion). Se busca asi y no por el
+ * nombre porque el nombre es justo lo que varias pruebas miden (#6): atarlo
+ * aqui haria que el helper dejase de encontrarlo en cuanto la sesion traiga
+ * otro.
  */
 function findPlayer(scene: Phaser.Scene): CharacterContainer {
   const player = scene.children.list.find(
-    (c): c is CharacterContainer => c.type === 'Container' && c.body !== null,
+    (c): c is CharacterContainer =>
+      c.type === 'Container' &&
+      c.body !== null &&
+      (c.body as Phaser.Physics.Arcade.Body).moves !== false,
   );
   if (!player) throw new Error('player container not found in scene');
   return player;
@@ -483,10 +490,13 @@ function remoteSnapshot(overrides: Record<string, unknown> = {}) {
 }
 
 function findRemoteAvatars(scene: Phaser.Scene): CharacterContainer[] {
-  // Complemento exacto de `findPlayer`, y por el mismo motivo: sin cuerpo
-  // fisico solo quedan los avatares que llegan por Colyseus.
+  // Complemento exacto de `findPlayer` (ver su comentario, #59): un peer
+  // remoto o no tiene cuerpo (sin `peerGroup`, no deberia pasar en
+  // produccion) o lo tiene con `moves=false`.
   return scene.children.list.filter(
-    (c): c is CharacterContainer => c.type === 'Container' && c.body === null,
+    (c): c is CharacterContainer =>
+      c.type === 'Container' &&
+      (c.body === null || (c.body as Phaser.Physics.Arcade.Body).moves === false),
   );
 }
 
@@ -2107,5 +2117,125 @@ describe('OfficeScene: render layers (#70, #71)', () => {
 
     await advanceGameClock(scene, 100);
     expect(depthOf(scene.children.getByName('desk-item:id-especial')!)).toBeGreaterThan(remote.depth);
+  });
+});
+
+describe('OfficeScene: integracion camera pan y colision de peers (#53, #59)', () => {
+  function screenPointer(
+    x: number,
+    y: number,
+    camera: Phaser.Cameras.Scene2D.Camera,
+  ): Phaser.Input.Pointer {
+    return { x, y, button: 0, camera } as unknown as Phaser.Input.Pointer;
+  }
+
+  it('walkToPeer aterriza en la tile al OESTE del peer cuando el jugador se acerca desde el oeste (#59)', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const player = findPlayer(scene);
+    const peerTx = 30;
+    const peerTy = 30;
+    // Bien al oeste del peer, misma fila: cesped abierto, lejos de cualquier
+    // colisionador del mapa base.
+    player.setPosition((peerTx - 10) * TILE + 16, peerTy * TILE + 16);
+    connector
+      .handlers()!
+      .onAdd(remoteSnapshot({ sessionId: 'peer-1', x: peerTx * TILE + 16, y: peerTy * TILE + 16 }));
+
+    bridge.emitCommand('walkToPeer', { sessionId: 'peer-1' });
+
+    // Primero confirma que la auto-caminata REALMENTE arranco (mismo chequeo
+    // que la regresion de arriba, y por la misma razon: sin el, el primer
+    // sondeo podria caer ANTES del primer `update()`, con velocidad (0,0)
+    // todavia de reposo, y el "asentado" de abajo pasaria trivialmente sin
+    // que el jugador se haya movido un pixel).
+    await vi.waitFor(() => {
+      const body = player.body as Phaser.Physics.Arcade.Body;
+      expect(body.velocity.x !== 0 || body.velocity.y !== 0).toBe(true);
+    }, LOOP_WAIT);
+    await vi.waitFor(() => {
+      const body = player.body as Phaser.Physics.Arcade.Body;
+      expect(body.velocity.x).toBe(0);
+      expect(body.velocity.y).toBe(0);
+    }, LOOP_WAIT);
+    // Antes de #59 el primer ADJACENT_OFFSETS ([1,0], ver terrainGrid.ts) lo
+    // habria aterrizado al ESTE del peer, sin enterarse de que el jugador
+    // venia del oeste.
+    expect(Math.floor(player.x / TILE)).toBe(peerTx - 1);
+    expect(Math.floor(player.y / TILE)).toBe(peerTy);
+  });
+
+  it('el colisionador vivo del peer bloquea al jugador (#59): no es solo la prueba aislada de remoteAvatarSink', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const player = findPlayer(scene);
+    // Cesped abierto, una tile al oeste del peer: un solo paso lo solaparia
+    // si no hubiese colisionador.
+    player.setPosition(29 * TILE + 16, 30 * TILE + 16);
+    connector
+      .handlers()!
+      .onAdd(remoteSnapshot({ sessionId: 'peer-1', x: 30 * TILE + 16, y: 30 * TILE + 16 }));
+
+    dispatchKey('keydown', KEY.RIGHT);
+    try {
+      await advanceGameClock(scene, 300);
+    } finally {
+      dispatchKey('keyup', KEY.RIGHT);
+    }
+
+    expect(player.x).toBeLessThan(30 * TILE + 16);
+  });
+
+  it('un drag por encima del umbral panea SOLO cameras.main; el minimapa queda intacto (#53)', async () => {
+    const { scene } = await bootOfficeScene();
+    const mainCam = scene.cameras.main;
+    const minimap = scene.cameras.cameras[1];
+    const minimapScrollX = minimap.scrollX;
+    const startScrollX = mainCam.scrollX;
+
+    scene.input.emit('pointerdown', screenPointer(50, 50, mainCam), []);
+    scene.input.emit('pointermove', screenPointer(70, 50, mainCam));
+
+    expect(mainCam.scrollX).not.toBe(startScrollX);
+    expect(minimap.scrollX).toBe(minimapScrollX);
+
+    scene.input.emit('pointerup', screenPointer(70, 50, mainCam));
+  });
+
+  it('con el pan activo, las teclas de movimiento siguen moviendo al jugador y la camara no retoma el seguimiento (#53)', async () => {
+    const { scene } = await bootOfficeScene();
+    const mainCam = scene.cameras.main;
+    const player = findPlayer(scene);
+    const startX = player.x;
+
+    scene.input.emit('pointerdown', screenPointer(50, 50, mainCam), []);
+    scene.input.emit('pointermove', screenPointer(70, 50, mainCam));
+    const pannedScrollX = mainCam.scrollX;
+    expect(pannedScrollX).not.toBe(0);
+
+    dispatchKey('keydown', KEY.RIGHT);
+    try {
+      await advanceGameClock(scene, 500);
+    } finally {
+      dispatchKey('keyup', KEY.RIGHT);
+    }
+
+    // El jugador se sigue moviendo por teclado aunque el pan siga activo...
+    expect(player.x).toBeGreaterThan(startX);
+    // ...y la camara se queda donde el drag la dejo: no retoma el seguimiento
+    // hasta soltar el pan (CameraPanLayer no comparte estado con el teclado).
+    expect(mainCam.scrollX).toBe(pannedScrollX);
+
+    scene.input.emit('pointerup', screenPointer(70, 50, mainCam));
   });
 });

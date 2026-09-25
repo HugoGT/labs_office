@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { preloadOfficeAssets } from './assets';
 import { beginAutoWalk, stepAutoWalk, type AutoWalkState } from './autoWalk';
+import { CameraPanLayer } from './CameraPanLayer';
 import {
   setCharacterFacing,
   setCharacterStatus,
@@ -52,8 +53,8 @@ import { createStaleSpacesVersionTracker } from './spacesConfig';
 import { audiblePeers, type AudioPeer } from './proximityAudio';
 import {
   buildTerrainGrid,
-  findWalkDestination,
   isBlocked,
+  pickApproachTile,
   type TerrainGrid,
   type TileRect,
 } from './terrainGrid';
@@ -64,6 +65,8 @@ export const OFFICE_SCENE_KEY = 'office';
 
 const PLAYER_SPEED = 230;
 const PROXIMITY_TICK_MS = 250;
+/** Suavizado de `startFollow` (#53): compartido entre `setupCameras` y el `resumeFollow` de `CameraPanLayer`. */
+const FOLLOW_LERP = 0.12;
 /**
  * Los tres estados en los que se puede ver un escritorio asignable (#7, slice
  * 5). Es lo unico que los distingue, y basta: un tinte se lee de un vistazo
@@ -178,6 +181,23 @@ export class OfficeScene extends Phaser.Scene {
    */
   private layoutEditLayer?: LayoutEditLayer;
   /**
+   * Capa del pan de camara (#53): se crea despues de `setupInput`, igual que
+   * `layoutEditLayer` se crea en su propio punto -- ambas escuchan el mismo
+   * `this.input`. `isSuspended` lee `this.layoutEditing` en el momento del
+   * `pointerdown` (mismo momento en que `closemenu` ya lo consulta): un
+   * `layoutedit` que llega a mitad de un pan ya en curso no lo corta, igual
+   * que hoy tampoco corta un auto-walk en curso.
+   */
+  private cameraPanLayer?: CameraPanLayer;
+  /**
+   * Grupo de cuerpos de peers vivos (#59): se crea UNA vez en `buildColliders`
+   * junto a un unico `collider(player, peerGroup)`, y cada `createPhaserAvatarSink`
+   * nuevo (una por conexion, D-diseno) recibe el MISMO grupo -- una
+   * reconexion no duplica el colisionador ni pierde a los peers que la
+   * sobreviven.
+   */
+  private peerGroup?: Phaser.GameObjects.Group;
+  /**
    * Si el modo edicion esta activo (#74, PR3b): la UNICA cosa que la escena
    * necesita saber de el para suspender claim/release en `drawDesk`. Todo lo
    * demas -- que dibujar, que es pickable, donde va el ghost -- lo sigue
@@ -267,6 +287,15 @@ export class OfficeScene extends Phaser.Scene {
     this.buildColliders(grid);
     this.setupCameras();
     this.setupInput();
+    // #53: despues de `setupInput` (comparte `this.input`, mismo momento en
+    // que `layoutEditLayer` se crea mas abajo).
+    this.cameraPanLayer = new CameraPanLayer({
+      scene: this,
+      camera: this.cameras.main,
+      target: this.player,
+      lerp: FOLLOW_LERP,
+      isSuspended: () => this.layoutEditing,
+    });
 
     this.unsubscribeSetStatus = this.bridge.onCommand('setStatus', ({ status }) => {
       this.setStatus(status);
@@ -367,6 +396,7 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeReconnect?.();
       this.unsubscribeLayoutEdit?.();
       this.layoutEditLayer?.destroy();
+      this.cameraPanLayer?.destroy();
       this.remotes?.clear();
       this.roster?.clear();
       void this.connection?.leave();
@@ -461,10 +491,13 @@ export class OfficeScene extends Phaser.Scene {
       if (this.status !== joinedStatus) connection.sendStatus(this.status);
       // Unit 8 (issue #2): el sink ahora necesita el bridge para poder emitir
       // `peermenu` al clicar un peer real; toque mecanico, la escena ya guarda
-      // `this.bridge` desde su constructor.
-      this.remotes = createRemoteAvatarRegistry(createPhaserAvatarSink(this, this.bridge), {
-        ignoreSessionId: connection.sessionId,
-      });
+      // `this.bridge` desde su constructor. Issue #59: tambien recibe
+      // `peerGroup`, el mismo de siempre, para que cada peer nazca con
+      // cuerpo de colision.
+      this.remotes = createRemoteAvatarRegistry(
+        createPhaserAvatarSink(this, this.bridge, this.peerGroup),
+        { ignoreSessionId: connection.sessionId },
+      );
       this.roster = createRosterTracker((peers) => this.bridge.emit('roster', { peers }), {
         ignoreSessionId: connection.sessionId,
       });
@@ -766,7 +799,12 @@ export class OfficeScene extends Phaser.Scene {
     });
   }
 
-  /** Fusiona tiles solidos en rectangulos estaticos y los colisiona con el jugador (app.js:392-408, D6). */
+  /**
+   * Fusiona tiles solidos en rectangulos estaticos y los colisiona con el
+   * jugador (app.js:392-408, D6). Tambien crea el grupo de peers (#59) y su
+   * unico colisionador: vacio al arrancar, se llena segun `remoteAvatarSink`
+   * les da cuerpo en `create()`.
+   */
   private buildColliders(grid: TerrainGrid): void {
     const rects = mergeColliderRects(grid.solid).map((r) => {
       const w = r.w * TILE;
@@ -776,13 +814,16 @@ export class OfficeScene extends Phaser.Scene {
       return rect;
     });
     this.physics.add.collider(this.player, rects);
+
+    this.peerGroup = this.add.group();
+    this.physics.add.collider(this.player, this.peerGroup);
   }
 
   /** Camara principal siguiendo al jugador + minimapa en la esquina superior derecha (app.js:410-431). */
   private setupCameras(): void {
     const cam = this.cameras.main;
     cam.setBounds(0, 0, WORLD_W, WORLD_H);
-    cam.startFollow(this.player, true, 0.12, 0.12);
+    cam.startFollow(this.player, true, FOLLOW_LERP, FOLLOW_LERP);
     cam.setBackgroundColor('#0d1117');
 
     const minimap = this.cameras.add(
@@ -893,14 +934,20 @@ export class OfficeScene extends Phaser.Scene {
    *
    * Issue #10, S2 3.2: si quien llama esta dentro de un espacio (sala o
    * cubiculo de escritorio, `detectSpace` no distingue), el destino se
-   * restringe a ESE rectangulo (`findWalkDestination`) en vez de la tile
-   * libre mas cercana sin mas -- aterrizar justo al otro lado de un muro o
-   * fuera del cubiculo dejaria al jugador fuera del audio de quien llamo.
+   * restringe a ESE rectangulo en vez de la tile libre mas cercana sin mas --
+   * aterrizar justo al otro lado de un muro o fuera del cubiculo dejaria al
+   * jugador fuera del audio de quien llamo.
+   *
+   * Issue #59: el lado elegido dentro de ese rectangulo (o alrededor del
+   * peer, sin espacio) ya no es un orden fijo -- `pickApproachTile` apunta al
+   * lado por el que el jugador se acerca, y cae a la busqueda de siempre si
+   * ese lado esta bloqueado o fuera del espacio.
    */
   private walkToPeer(sessionId: string): void {
     const peer = this.remotes?.get(sessionId);
     if (!peer) return; // se desconecto antes de que esto corriera: no-op silencioso.
 
+    const walkerTile = { tx: Math.floor(this.player.x / TILE), ty: Math.floor(this.player.y / TILE) };
     const peerTile = { tx: Math.floor(peer.x / TILE), ty: Math.floor(peer.y / TILE) };
     const peerSpace = detectSpace({ x: peer.x, y: peer.y }, this.spaces);
     const peerSpaceTiles: TileRect | null = peerSpace
@@ -912,7 +959,7 @@ export class OfficeScene extends Phaser.Scene {
         }
       : null;
 
-    const destination = findWalkDestination(this.grid, peerTile, peerSpaceTiles);
+    const destination = pickApproachTile(this.grid, walkerTile, peerTile, peerSpaceTiles);
     if (!destination) return;
 
     this.autoWalk = beginAutoWalk(
