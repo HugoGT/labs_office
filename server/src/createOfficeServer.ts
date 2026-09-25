@@ -32,6 +32,7 @@ import { handleListUsers, handleRevokeUser } from './admin/adminRoutes.ts';
 import { identityAdminFromEnv } from './admin/gcpIdentityAdmin.ts';
 import type { IdentityAdmin } from './admin/identityAdminPort.ts';
 import type { DecorCatalog } from './decor/decorPort.ts';
+import { handleGetDisplayName, handleSetDisplayName } from './directory/displayNameRoutes.ts';
 import {
   handleArchiveAsset,
   handleCreateAsset,
@@ -623,6 +624,22 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     admin((req, deps) =>
       handleSendPasswordReset(req.header('Authorization'), req.params.id, deps),
     ),
+  );
+
+  // Nombre visible auto-elegido en login (#100). Cuelga del MISMO `admin(...)`
+  // de arriba, no de uno propio: la unica guarda de configuracion es "sin
+  // directorio, 503", igual que `/admin/session`, y no hace falta un almacen
+  // adicional en las dependencias como el que si necesitan decoracion o
+  // escritorios. `authenticate` (no `authorize`) vive DENTRO de cada handler:
+  // elegir el propio nombre es de quien se sienta, no de quien administra.
+  app.get(
+    '/me/display-name',
+    admin((req, deps) => handleGetDisplayName(req.header('Authorization'), deps)),
+  );
+
+  app.post(
+    '/me/display-name',
+    admin((req, deps) => handleSetDisplayName(req.header('Authorization'), req.body, deps)),
   );
 
   /**

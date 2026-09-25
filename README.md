@@ -24,7 +24,7 @@ Browser (React 19 + Phaser 3 SPA, Vite)
   |-- WebSocket ------------> Node server (server/src)
   |                             Colyseus OfficeRoom: positions, status, calls, recording state
   |-- HTTP /livekit/token --->  Express API: /health, /livekit/token, /spaces, /desks,
-  |   /recordings/*, /admin/*   /me/desk, /assets, /recordings/*, /admin/*
+  |   /recordings/*, /admin/*   /me/desk, /me/display-name, /assets, /recordings/*, /admin/*
   |                             |-- Postgres (users, invitations, spaces, desks, decor)
   |                             |-- LiveKit server API + Egress (start/stop recordings)
   |                             '-- Google Cloud Storage (signed URLs)

@@ -1415,6 +1415,124 @@ describe('rutas de decoracion (#7, slice 4)', () => {
 });
 
 /**
+ * El cableado de `/me/display-name` (#100). Reusa el mismo `admin()` de
+ * `/admin/session`: la unica guarda de configuracion es "sin directorio, 503",
+ * no un almacen propio, asi que no hace falta un wiring dedicado como el de
+ * decoracion o escritorios. Las reglas en si (canonicalizacion, 400, 409) ya
+ * las cubre `displayNameRoutes.test.ts` sin levantar servidor.
+ */
+describe('rutas de nombre visible (#100)', () => {
+  const ANA_NAME: DirectoryUser = {
+    id: 'id-ana',
+    uid: 'uid-ana',
+    email: 'ana@example.com',
+    displayName: null,
+    role: 'employee',
+    status: 'active',
+    expiresAt: null,
+    invitedBy: null,
+    createdAt: new Date('2025-12-01T00:00:00.000Z'),
+  };
+
+  const BEA_NAME: DirectoryUser = {
+    ...ANA_NAME,
+    id: 'id-bea',
+    uid: 'uid-bea',
+    email: 'bea@example.com',
+    displayName: 'Bea',
+  };
+
+  const nameVerifier: IdTokenVerifier = {
+    async verify(token: unknown) {
+      if (token === 'valido-uid-ana') return { uid: 'uid-ana', email: 'ana@example.com', name: null };
+      if (token === 'valido-uid-bea') return { uid: 'uid-bea', email: 'bea@example.com', name: null };
+      return null;
+    },
+  };
+
+  const JSON_HEADERS = { 'Content-Type': 'application/json' };
+  const BEARER_ANA = { Authorization: 'Bearer valido-uid-ana', ...JSON_HEADERS };
+  const BEARER_BEA = { Authorization: 'Bearer valido-uid-bea', ...JSON_HEADERS };
+
+  async function nameServer(overrides: { directory?: UserDirectory | null } = {}) {
+    const directory =
+      overrides.directory === undefined
+        ? createMemoryDirectory({ seed: [ANA_NAME, BEA_NAME] })
+        : overrides.directory;
+    const server = createOfficeServer({ auth: nameVerifier, directory, identityAdmin: null });
+    const port = await server.listen(0);
+    return { server, url: `http://localhost:${port}` };
+  }
+
+  it('GET /me/display-name sin credencial responde 401', async () => {
+    const { server, url } = await nameServer();
+
+    expect((await fetch(`${url}/me/display-name`)).status).toBe(401);
+    await server.shutdown();
+  });
+
+  it('POST /me/display-name guarda y GET lo devuelve despues', async () => {
+    const { server, url } = await nameServer();
+
+    const posted = await fetch(`${url}/me/display-name`, {
+      method: 'POST',
+      headers: BEARER_ANA,
+      body: JSON.stringify({ name: 'Ana Lopez' }),
+    });
+    expect(posted.status).toBe(200);
+    expect(await posted.json()).toEqual({ displayName: 'Ana Lopez' });
+
+    const got = await fetch(`${url}/me/display-name`, { headers: BEARER_ANA });
+    expect(await got.json()).toEqual({ displayName: 'Ana Lopez' });
+
+    await server.shutdown();
+  });
+
+  it('un nombre ya tomado responde 409 de extremo a extremo', async () => {
+    const { server, url } = await nameServer();
+
+    const res = await fetch(`${url}/me/display-name`, {
+      method: 'POST',
+      headers: BEARER_ANA,
+      body: JSON.stringify({ name: 'bea' }),
+    });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'display-name-taken' });
+    await server.shutdown();
+  });
+
+  it('un nombre invalido responde 400 de extremo a extremo', async () => {
+    const { server, url } = await nameServer();
+
+    const res = await fetch(`${url}/me/display-name`, {
+      method: 'POST',
+      headers: BEARER_ANA,
+      body: JSON.stringify({ name: '   ' }),
+    });
+
+    expect(res.status).toBe(400);
+    await server.shutdown();
+  });
+
+  it('sin directorio, GET y POST responden 503 y no 404', async () => {
+    const { server, url } = await nameServer({ directory: null });
+
+    expect((await fetch(`${url}/me/display-name`, { headers: BEARER_BEA })).status).toBe(503);
+    expect(
+      (
+        await fetch(`${url}/me/display-name`, {
+          method: 'POST',
+          headers: BEARER_BEA,
+          body: JSON.stringify({ name: 'x' }),
+        })
+      ).status,
+    ).toBe(503);
+    await server.shutdown();
+  });
+});
+
+/**
  * El cableado de las rutas de escritorios (#7, slice 5). Lo que se prueba aqui
  * es la TRADUCCION -- que cada ruta existe, en su verbo, y que el estado "sin
  * almacen" responde 503 y no 404 -- no las reglas, que ya cubre

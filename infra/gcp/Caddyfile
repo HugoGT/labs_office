@@ -220,6 +220,12 @@ http://{$APP_HOST}, http://{$LK_HOST}, http://{$TURN_HOST} {
 		reverse_proxy colyseus:2567
 	}
 
+	# Nombre visible auto-elegido en login (issue #100): GET y POST sobre la
+	# misma ruta exacta, igual que /me/desk en solitario.
+	handle /me/display-name {
+		reverse_proxy colyseus:2567
+	}
+
 	# Grabacion (issue #5, #58): start/stop/url.
 	handle /recordings/* {
 		reverse_proxy colyseus:2567
