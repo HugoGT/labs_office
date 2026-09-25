@@ -7,7 +7,9 @@
 # ajenos que no gestionamos).
 
 terraform {
-  required_version = ">= 1.9"
+  # 1.11: the Cloud SQL user password is a write-only argument fed from an
+  # ephemeral Secret Manager read (database.tf), so it never reaches the state.
+  required_version = ">= 1.11"
 
   required_providers {
     google = {

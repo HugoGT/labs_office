@@ -77,3 +77,13 @@ output "recording_bucket" {
   description = "Recordings bucket (issues #5, #58). Egress uploads here; objects are deleted after var.recording_retention_days."
   value       = google_storage_bucket.recordings.name
 }
+
+output "db_instance" {
+  description = "Cloud SQL instance of the directory (issue #72), for gcloud sql commands (backups, restore, users)."
+  value       = google_sql_database_instance.directory.name
+}
+
+output "db_private_ip" {
+  description = "Private IP of the directory database. Only reachable from inside the VPC; office-deploy reads it from instance metadata."
+  value       = google_sql_database_instance.directory.private_ip_address
+}
