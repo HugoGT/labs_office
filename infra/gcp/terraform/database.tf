@@ -150,6 +150,12 @@ resource "google_sql_database_instance" "directory" {
 resource "google_sql_database" "office" {
   name     = "office"
   instance = google_sql_database_instance.directory.name
+
+  # Terraform destroys dependents first: without this, a destroy (or an apply
+  # from a commit that predates this file) would DROP the database, and only
+  # then hit the instance's deletion protection and fail. ABANDON leaves the
+  # data where it is.
+  deletion_policy = "ABANDON"
 }
 
 # The password comes from the SAME Secret Manager secret office-deploy reads to
