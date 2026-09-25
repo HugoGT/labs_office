@@ -26,6 +26,7 @@ function asset(overrides: Partial<Asset> & Pick<Asset, 'id'>): Asset {
     w: 1,
     h: 1,
     placeableOnDesk: true,
+    aboveAvatars: false,
     archivedAt: null,
     createdAt: NOW,
     ...overrides,
@@ -178,6 +179,55 @@ describe('createMemoryDecor: archiveAsset', () => {
   });
 });
 
+describe('createMemoryDecor: aboveAvatars (#71)', () => {
+  it('a created asset is normal unless it asks otherwise', async () => {
+    const catalog = decor();
+    const base = { kind: 'decor' as const, textureKey: 'x', w: 1, h: 1, placeableOnDesk: true };
+
+    expect((await catalog.createAsset({ ...base, name: 'Normal' })).aboveAvatars).toBe(false);
+    expect((await catalog.createAsset({ ...base, name: 'Arco', aboveAvatars: true })).aboveAvatars).toBe(
+      true,
+    );
+  });
+
+  it('updateAsset marks and unmarks an asset, and the catalog reflects it', async () => {
+    const catalog = decor();
+
+    expect((await catalog.updateAsset(PLANTA.id, { aboveAvatars: true }))?.aboveAvatars).toBe(true);
+    expect((await catalog.listAssets()).find((a) => a.id === PLANTA.id)?.aboveAvatars).toBe(true);
+
+    expect((await catalog.updateAsset(PLANTA.id, { aboveAvatars: false }))?.aboveAvatars).toBe(false);
+  });
+
+  it('updateAsset leaves every other field untouched', async () => {
+    const catalog = decor();
+
+    expect(await catalog.updateAsset(PLANTA.id, { aboveAvatars: true })).toEqual({
+      ...PLANTA,
+      aboveAvatars: true,
+    });
+  });
+
+  it('updateAsset returns null for an unknown id', async () => {
+    expect(await decor().updateAsset('no-existe', { aboveAvatars: true })).toBeNull();
+  });
+
+  it('updateAsset shares decorRules with pgDecor: a non-boolean flag is rejected', async () => {
+    await expect(
+      decor().updateAsset(PLANTA.id, { aboveAvatars: 'si' as unknown as boolean }),
+    ).rejects.toThrow(InvalidAssetError);
+  });
+
+  it('a placed piece picks up the new layer on the next read', async () => {
+    const catalog = decor();
+    await catalog.replaceDeskConfig(USER, [{ assetId: PLANTA.id, slot: 0, rotation: 0 }]);
+
+    await catalog.updateAsset(PLANTA.id, { aboveAvatars: true });
+
+    expect((await catalog.getDeskConfig(USER))[0].aboveAvatars).toBe(true);
+  });
+});
+
 describe('createMemoryDecor: getDeskConfig', () => {
   it('un escritorio sin configurar es una lista vacia, no un error', async () => {
     expect(await decor().getDeskConfig('nadie')).toEqual([]);
@@ -197,8 +247,23 @@ describe('createMemoryDecor: getDeskConfig', () => {
         w: PLANTA.w,
         h: PLANTA.h,
         name: PLANTA.name,
+        aboveAvatars: false,
         createdAt: NOW,
       },
+    ]);
+  });
+
+  it('resolves aboveAvatars from the asset, so the scene knows the render layer (#71)', async () => {
+    const ARCO = asset({ id: 'asset-arco', aboveAvatars: true });
+    const catalog = decor([PLANTA, ARCO]);
+    await catalog.replaceDeskConfig(USER, [
+      { assetId: PLANTA.id, slot: 0, rotation: 0 },
+      { assetId: ARCO.id, slot: 1, rotation: 0 },
+    ]);
+
+    expect((await catalog.getDeskConfig(USER)).map((item) => item.aboveAvatars)).toEqual([
+      false,
+      true,
     ]);
   });
 

@@ -34,8 +34,14 @@ import type {
   DeskItem,
   DeskItemInput,
   ListAssetsOptions,
+  UpdateAssetInput,
 } from './decorPort.ts';
-import { AssetNameTakenError, normalizeCreateAssetInput, normalizeDeskConfig } from './decorRules.ts';
+import {
+  AssetNameTakenError,
+  normalizeCreateAssetInput,
+  normalizeDeskConfig,
+  normalizeUpdateAssetInput,
+} from './decorRules.ts';
 
 export interface MemoryDecorOptions {
   /** Catalogo de partida. */
@@ -82,6 +88,7 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): DecorCatalo
           w: asset.w,
           h: asset.h,
           name: asset.name,
+          aboveAvatars: asset.aboveAvatars,
           createdAt: row.createdAt,
         };
       })
@@ -134,6 +141,18 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): DecorCatalo
       const archived: Asset = { ...current, archivedAt: now() };
       assets.set(id, archived);
       return archived;
+    },
+
+    async updateAsset(id: string, input: UpdateAssetInput) {
+      // Validated before the lookup, same order as `pgDecor`: a bad body is a
+      // 400 whether or not the id exists.
+      const normalized = normalizeUpdateAssetInput(input);
+      const current = assets.get(id);
+      if (!current) return null;
+
+      const updated: Asset = { ...current, ...normalized };
+      assets.set(id, updated);
+      return updated;
     },
 
     async getDeskConfig(userId: string) {

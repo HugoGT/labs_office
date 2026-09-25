@@ -129,6 +129,10 @@ CREATE TABLE IF NOT EXISTS assets (          -- antes que space_layouts: orden d
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS assets_slug_unique ON assets (lower(slug));
+-- Special assets (#71): drawn above every avatar instead of below it. Its own
+-- ALTER because `CREATE TABLE IF NOT EXISTS` never touches a live table, and
+-- NOT NULL DEFAULT false backfills every existing row as a normal asset.
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS above_avatars boolean NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS space_layouts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -8,6 +8,12 @@ import {
   type CharacterContainer,
 } from './characters';
 import { mergeColliderRects } from './colliderMerge';
+import {
+  avatarDepth,
+  MINIMAP_MARKER_DEPTH,
+  specialAssetDepth,
+  worldAssetDepth,
+} from './depthLayers';
 import { deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH } from './hudLayout';
@@ -610,11 +616,10 @@ export class OfficeScene extends Phaser.Scene {
    * Dibuja la zona de 3x3 de un escritorio, su etiqueta y la decoracion de
    * quien lo ocupe.
    *
-   * La profundidad es el borde INFERIOR del area, misma convencion que
-   * `placeFurniture` (`(y + alto) * TILE`) y misma razon: los avatares se
-   * dibujan a la altura de sus pies (`setDepth(this.player.y)` en `update`),
-   * asi que cualquier otro valor pondria a quien pasa por delante DEBAJO del
-   * escritorio.
+   * The depth is the BOTTOM edge of the area in the world band, same
+   * convention as `placeFurniture` (`(y + h) * TILE`), so the desk y-sorts
+   * against the furniture around it. Avatars live in their own band above it
+   * (#70, `depthLayers.ts`), so whoever walks over the desk is never hidden.
    */
   private drawDesk(desk: OfficeDesk): void {
     // Lo contesta el servidor y la escena lo lee (`OfficeDesk.mine`). Deducirlo
@@ -625,7 +630,8 @@ export class OfficeScene extends Phaser.Scene {
     const mine = desk.mine;
     const color =
       desk.occupant === null ? DESK_COLOR.free : mine ? DESK_COLOR.mine : DESK_COLOR.taken;
-    const depth = desk.y + desk.h;
+    const bottom = desk.y + desk.h;
+    const depth = worldAssetDepth(bottom);
 
     const zone = this.add
       .rectangle(desk.x + desk.w / 2, desk.y + desk.h / 2, desk.w, desk.h, color, DESK_FILL_ALPHA)
@@ -649,7 +655,12 @@ export class OfficeScene extends Phaser.Scene {
       // area, y renunciar al escritorio entero quitaria un sitio que si existe.
       const box = deskSlotRect(desk, item.slot);
       if (box === null) continue;
-      this.deskObjects.push(this.drawDeskItem(item.id, item.textureKey, item.rotation, box, depth));
+      // A special piece (#71) keeps the same bottom edge but moves to the band
+      // above avatars, so it covers whoever walks through the desk.
+      const itemDepth = item.aboveAvatars ? specialAssetDepth(bottom) : depth;
+      this.deskObjects.push(
+        this.drawDeskItem(item.id, item.textureKey, item.rotation, box, itemDepth),
+      );
     }
 
     // Un escritorio ajeno no se hace clicable siquiera: no tiene ninguna
@@ -784,7 +795,7 @@ export class OfficeScene extends Phaser.Scene {
     minimap.centerOn(WORLD_W / 2, WORLD_H / 2);
     minimap.setBackgroundColor(0x0d1117);
 
-    this.mmMarker = this.add.circle(0, 0, 42, 0xffffff, 0.45).setDepth(99999);
+    this.mmMarker = this.add.circle(0, 0, 42, 0xffffff, 0.45).setDepth(MINIMAP_MARKER_DEPTH);
     cam.ignore(this.mmMarker);
 
     this.scale.on('resize', (gameSize: Phaser.Structs.Size) => {
@@ -970,12 +981,12 @@ export class OfficeScene extends Phaser.Scene {
       this.facing = facingFrom(vx, vy, this.facing);
     }
 
-    this.player.setDepth(this.player.y);
+    this.player.setDepth(avatarDepth(this.player.y));
     setCharacterFacing(this.player, this.facing);
 
     for (const sessionId of this.remotes?.sessionIds() ?? []) {
       const avatar = this.remotes?.get(sessionId);
-      if (avatar) avatar.setDepth(avatar.y);
+      if (avatar) avatar.setDepth(avatarDepth(avatar.y));
     }
 
     // Se publica cada frame a proposito: el agrupado de `createMoveThrottle`

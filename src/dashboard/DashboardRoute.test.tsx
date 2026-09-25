@@ -71,6 +71,7 @@ function fakeAssetPort(): AssetAdminPort {
     listAssets: vi.fn(async () => []),
     createAsset: vi.fn(),
     archiveAsset: vi.fn(),
+    updateAsset: vi.fn(),
   };
 }
 

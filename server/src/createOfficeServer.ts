@@ -37,6 +37,7 @@ import {
   handleListAssets,
   handleListOfficeAssets,
   handleReplaceDeskConfig,
+  handleUpdateAsset,
   type DecorDeps,
 } from './decor/decorRoutes.ts';
 import type { DeskDirectory } from './desks/desksPort.ts';
@@ -694,6 +695,15 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   app.post(
     '/admin/assets/:id/archive',
     decorRoute((req, deps) => handleArchiveAsset(req.header('Authorization'), req.params.id, deps)),
+  );
+
+  // Partial update (#71: `aboveAvatars`). POST and not PATCH for the same CORS
+  // reason as archiving; same shape as `/admin/spaces/:id`.
+  app.post(
+    '/admin/assets/:id',
+    decorRoute((req, deps) =>
+      handleUpdateAsset(req.header('Authorization'), req.params.id, req.body, deps),
+    ),
   );
 
   // `/assets` cuelga de la raiz y no de `/admin`, y es la MISMA lista con otra

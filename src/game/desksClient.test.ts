@@ -118,8 +118,41 @@ describe('fetchOfficeDesks', () => {
     expect(desks[0].occupant).toEqual({
       id: 'id-persona',
       displayName: 'Ana Torres',
-      items: [{ id: 'id-item', slot: 4, rotation: 90, textureKey: 'plant-small' }],
+      items: [
+        { id: 'id-item', slot: 4, rotation: 90, textureKey: 'plant-small', aboveAvatars: false },
+      ],
     });
+  });
+
+  it('carries the render layer of each piece (#71)', async () => {
+    const [item] = servedOccupant().items as Record<string, unknown>[];
+    const desks = await fetchOfficeDesks({
+      baseUrl: 'http://x',
+      getIdToken: TOKEN,
+      fetchImpl: respondWith({
+        desks: [servedDesk({ occupant: servedOccupant({ items: [{ ...item, aboveAvatars: true }] }) })],
+      }),
+    });
+
+    expect(desks[0].occupant?.items[0].aboveAvatars).toBe(true);
+  });
+
+  it('a missing or malformed aboveAvatars is a normal piece, not a broken list (#71)', async () => {
+    // Older servers do not send the field. It only picks a render layer, so
+    // anything but `true` degrades to the safe default instead of blanking the
+    // office like a malformed slot does.
+    const [item] = servedOccupant().items as Record<string, unknown>[];
+    const desks = await fetchOfficeDesks({
+      baseUrl: 'http://x',
+      getIdToken: TOKEN,
+      fetchImpl: respondWith({
+        desks: [
+          servedDesk({ occupant: servedOccupant({ items: [{ ...item, aboveAvatars: 'si' }] }) }),
+        ],
+      }),
+    });
+
+    expect(desks[0].occupant?.items[0].aboveAvatars).toBe(false);
   });
 
   it('un escritorio libre llega con ocupante nulo, no ausente', async () => {

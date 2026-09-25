@@ -55,6 +55,7 @@ export interface AssetFormValues {
   w: string;
   h: string;
   placeableOnDesk: boolean;
+  aboveAvatars: boolean;
 }
 
 const EMPTY_FORM: AssetFormValues = {
@@ -66,6 +67,8 @@ const EMPTY_FORM: AssetFormValues = {
   // La mayoria del catalogo existe para ponerse encima de un escritorio, que
   // es la unica superficie que esta issue sabe decorar.
   placeableOnDesk: true,
+  // Special assets (#71) cover people walking through them: opt-in only.
+  aboveAvatars: false,
 };
 
 export interface AssetFormProps {
@@ -199,6 +202,18 @@ export function AssetForm({ onSubmit, pending, error }: AssetFormProps) {
         </label>
       </div>
 
+      <div className={styles.checkboxField}>
+        <input
+          id="asset-above-avatars"
+          type="checkbox"
+          checked={values.aboveAvatars}
+          onChange={(event) => set('aboveAvatars', event.target.checked)}
+        />
+        <label className={styles.label} htmlFor="asset-above-avatars">
+          Se dibuja por encima de los avatares
+        </label>
+      </div>
+
       <button className={styles.submit} type="submit" disabled={pending}>
         {pending ? 'Añadiendo…' : 'Añadir al catálogo'}
       </button>
@@ -221,6 +236,8 @@ export interface AssetsTableProps {
   onAskRetire: (id: string) => void;
   onCancelRetire: () => void;
   onRetire: (id: string) => void;
+  /** Marks or unmarks an asset as drawn above avatars (#71). */
+  onToggleAboveAvatars: (id: string, aboveAvatars: boolean) => void;
   /** Id con una escritura en vuelo, o `null`. */
   busyId: string | null;
 }
@@ -232,6 +249,7 @@ export function AssetsTable({
   onAskRetire,
   onCancelRetire,
   onRetire,
+  onToggleAboveAvatars,
   busyId,
 }: AssetsTableProps) {
   if (assets.length === 0) {
@@ -249,6 +267,7 @@ export function AssetsTable({
             <th scope="col">Textura</th>
             <th scope="col">Tamaño</th>
             <th scope="col">En escritorio</th>
+            <th scope="col">Sobre avatares</th>
             <th scope="col">Acciones</th>
           </tr>
         </thead>
@@ -264,6 +283,17 @@ export function AssetsTable({
                 {asset.w}×{asset.h}
               </td>
               <td>{asset.placeableOnDesk ? 'Sí' : 'No'}</td>
+              <td>
+                {/* Controlled by the served row: the box only flips once the
+                    server confirmed and the list was reread (#71). */}
+                <input
+                  type="checkbox"
+                  aria-label={`Dibujar ${asset.name} por encima de los avatares`}
+                  checked={asset.aboveAvatars}
+                  disabled={busyId !== null}
+                  onChange={(event) => onToggleAboveAvatars(asset.id, event.target.checked)}
+                />
+              </td>
               <td>
                 {confirmingId === asset.id ? (
                   <>
@@ -368,6 +398,7 @@ export function AssetsPanel({ assets }: AssetsPanelProps) {
         w: Number(values.w),
         h: Number(values.h),
         placeableOnDesk: values.placeableOnDesk,
+        aboveAvatars: values.aboveAvatars,
       });
       await refresh();
       return true;
@@ -385,6 +416,19 @@ export function AssetsPanel({ assets }: AssetsPanelProps) {
     try {
       await assets.archiveAsset(id);
       setConfirmingId(null);
+      await refresh();
+    } catch (error) {
+      setFormError(describeAdminError(error));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleToggleAboveAvatars(id: string, aboveAvatars: boolean): Promise<void> {
+    setFormError(null);
+    setBusyId(id);
+    try {
+      await assets.updateAsset(id, { aboveAvatars });
       await refresh();
     } catch (error) {
       setFormError(describeAdminError(error));
@@ -446,6 +490,7 @@ export function AssetsPanel({ assets }: AssetsPanelProps) {
         }}
         onCancelRetire={() => setConfirmingId(null)}
         onRetire={(id) => void handleRetire(id)}
+        onToggleAboveAvatars={(id, aboveAvatars) => void handleToggleAboveAvatars(id, aboveAvatars)}
         busyId={busyId}
       />
     </section>

@@ -10,7 +10,7 @@
  *
  * ## Dos superficies con dos guardas distintas, a proposito
  *
- *   - `/admin/assets` (listar, crear, archivar) corre `authorize`: credencial,
+ *   - `/admin/assets` (listar, crear, archivar, marcar `aboveAvatars`) corre `authorize`: credencial,
  *     cuenta que la oficina admite, y rol que administra. El catalogo lo CURA
  *     alguien; que cualquiera pudiese dar de alta una pieza convertiria una
  *     lista revisada en un vertedero.
@@ -78,6 +78,7 @@ function toAssetBody(asset: Asset): Record<string, unknown> {
     w: asset.w,
     h: asset.h,
     placeableOnDesk: asset.placeableOnDesk,
+    aboveAvatars: asset.aboveAvatars,
     archivedAt: asset.archivedAt === null ? null : asset.archivedAt.toISOString(),
   };
 }
@@ -93,6 +94,7 @@ function toDeskItemBody(item: DeskItem): Record<string, unknown> {
     w: item.w,
     h: item.h,
     name: item.name,
+    aboveAvatars: item.aboveAvatars,
   };
 }
 
@@ -177,8 +179,38 @@ export async function handleCreateAsset(
       w: body.w as number,
       h: body.h as number,
       placeableOnDesk: body.placeableOnDesk as boolean,
+      // Optional: a body without it creates a normal asset (#71).
+      aboveAvatars: body.aboveAvatars as boolean | undefined,
     });
     return { status: 201, body: toAssetBody(created) };
+  });
+}
+
+/**
+ * Marks or unmarks an asset as drawn above avatars (#71). Same guard as the
+ * rest of `/admin/assets`: which assets cover people is a curation decision.
+ *
+ * Only `aboveAvatars` is read from the body. Name, slug, size and archiving
+ * have their own rules (derived slug, archive-not-delete) and are not editable
+ * through this path, so a hand-written field for them is dropped here.
+ */
+export async function handleUpdateAsset(
+  authorization: unknown,
+  id: unknown,
+  body: unknown,
+  deps: DecorDeps,
+): Promise<AdminResult> {
+  const authorized = await authorize(authorization, deps);
+  if (!authorized.ok) return authorized.result;
+
+  if (typeof id !== 'string' || !isPlainObject(body)) return INVALID_REQUEST;
+
+  return translating(async () => {
+    const updated = await deps.decor.updateAsset(id, {
+      aboveAvatars: body.aboveAvatars as boolean | undefined,
+    });
+    if (updated === null) return NOT_FOUND;
+    return { status: 200, body: toAssetBody(updated) };
   });
 }
 

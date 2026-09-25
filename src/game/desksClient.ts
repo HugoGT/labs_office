@@ -70,7 +70,16 @@ function toDecorItem(raw: unknown): DeskDecorItem | null {
   if (!isFiniteNumber(row.slot) || row.slot < SLOT_MIN || row.slot > SLOT_MAX) return null;
   if (!isFiniteNumber(row.rotation)) return null;
 
-  return { id: row.id, slot: row.slot, rotation: row.rotation, textureKey: row.textureKey };
+  return {
+    id: row.id,
+    slot: row.slot,
+    rotation: row.rotation,
+    textureKey: row.textureKey,
+    // Only a render layer (#71): anything but `true` (an older server that
+    // does not send it, a malformed value) degrades to a normal piece instead
+    // of discarding the whole list like a bad slot does.
+    aboveAvatars: row.aboveAvatars === true,
+  };
 }
 
 function toOccupant(raw: unknown): DeskOccupant | null {

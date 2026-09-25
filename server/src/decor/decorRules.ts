@@ -152,6 +152,8 @@ export interface CreateAssetInput {
   w: number;
   h: number;
   placeableOnDesk: boolean;
+  /** Optional so older callers keep working: absent means a normal asset (#71). */
+  aboveAvatars?: boolean;
 }
 
 export interface NormalizedCreateAssetInput {
@@ -162,6 +164,18 @@ export interface NormalizedCreateAssetInput {
   w: number;
   h: number;
   placeableOnDesk: boolean;
+  aboveAvatars: boolean;
+}
+
+/** The only editable field of a catalog asset today (#71). */
+export interface UpdateAssetInput {
+  aboveAvatars?: boolean;
+}
+
+function assertOptionalAboveAvatars(value: unknown): void {
+  if (value !== undefined && typeof value !== 'boolean') {
+    throw new InvalidAssetError('aboveAvatars debe ser un booleano');
+  }
 }
 
 /** Valida y normaliza de una vez lo que entra por `DecorCatalog.createAsset`. */
@@ -180,6 +194,7 @@ export function normalizeCreateAssetInput(input: CreateAssetInput): NormalizedCr
   if (typeof input.placeableOnDesk !== 'boolean') {
     throw new InvalidAssetError('placeableOnDesk debe ser un booleano');
   }
+  assertOptionalAboveAvatars(input.aboveAvatars);
 
   return {
     slug,
@@ -189,7 +204,22 @@ export function normalizeCreateAssetInput(input: CreateAssetInput): NormalizedCr
     w: input.w,
     h: input.h,
     placeableOnDesk: input.placeableOnDesk,
+    aboveAvatars: input.aboveAvatars ?? false,
   };
+}
+
+/**
+ * Validates a partial asset update (#71). Only `aboveAvatars` comes out: name,
+ * slug, size and archiving are not editable through this path, so any other
+ * field in the input is dropped instead of silently persisted. An update with
+ * nothing to change is rejected: a 200 that did nothing reads as "saved".
+ */
+export function normalizeUpdateAssetInput(input: UpdateAssetInput): Required<UpdateAssetInput> {
+  if (input.aboveAvatars === undefined) {
+    throw new InvalidAssetError('no hay ningun campo que actualizar');
+  }
+  assertOptionalAboveAvatars(input.aboveAvatars);
+  return { aboveAvatars: input.aboveAvatars };
 }
 
 /** Lo minimo que hace falta saber de un asset para decidir si cabe en un escritorio. */

@@ -21,6 +21,7 @@ import {
   type AssetKind,
   type CatalogAsset,
   type CreateAssetInput,
+  type UpdateAssetInput,
 } from './assetAdminPort';
 import { createOfficeAdminRequest, jsonBody } from './officeAdminRequest';
 
@@ -58,6 +59,9 @@ function toCatalogAsset(raw: unknown): CatalogAsset | null {
   if (!isNonEmptyString(row.textureKey)) return null;
   if (!isFiniteNumber(row.w) || !isFiniteNumber(row.h)) return null;
   if (typeof row.placeableOnDesk !== 'boolean') return null;
+  // Absent is an older server and means a normal asset (#71); present, it
+  // must be a real boolean, same rule as `placeableOnDesk`.
+  if (row.aboveAvatars !== undefined && typeof row.aboveAvatars !== 'boolean') return null;
   // `undefined` no vale: una pieza viva llega con `archivedAt: null`
   // explicito. Darla por viva pintaria como disponible algo ya retirado.
   if (row.archivedAt !== null && typeof row.archivedAt !== 'string') return null;
@@ -71,6 +75,7 @@ function toCatalogAsset(raw: unknown): CatalogAsset | null {
     w: row.w,
     h: row.h,
     placeableOnDesk: row.placeableOnDesk,
+    aboveAvatars: row.aboveAvatars ?? false,
     archivedAt: row.archivedAt,
   };
 }
@@ -124,6 +129,7 @@ export function createAssetAdminClient(
             w: input.w,
             h: input.h,
             placeableOnDesk: input.placeableOnDesk,
+            aboveAvatars: input.aboveAvatars,
           }),
         ),
       );
@@ -134,6 +140,16 @@ export function createAssetAdminClient(
       // inventaria un segmento de ruta que el servidor no tiene.
       return parseCatalogAsset(
         await request(`/admin/assets/${encodeURIComponent(id)}/archive`, { method: 'POST' }),
+      );
+    },
+
+    async updateAsset(id: string, input: UpdateAssetInput): Promise<CatalogAsset> {
+      // Only the flag travels: the server ignores anything else on this path.
+      return parseCatalogAsset(
+        await request(
+          `/admin/assets/${encodeURIComponent(id)}`,
+          jsonBody({ aboveAvatars: input.aboveAvatars }),
+        ),
       );
     },
   };

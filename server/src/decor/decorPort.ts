@@ -41,6 +41,12 @@ export interface Asset {
   w: number;
   h: number;
   placeableOnDesk: boolean;
+  /**
+   * Special asset (#71): drawn above every avatar instead of below it. It is
+   * data, not a hardcoded list in the scene, and `false` for every asset
+   * unless an admin marks it.
+   */
+  aboveAvatars: boolean;
   /** `null` mientras siga en el catalogo. Ver la cabecera: retirar no es borrar. */
   archivedAt: Date | null;
   createdAt: Date;
@@ -53,6 +59,13 @@ export interface CreateAssetInput {
   w: number;
   h: number;
   placeableOnDesk: boolean;
+  /** Optional: absent means a normal asset (#71). */
+  aboveAvatars?: boolean;
+}
+
+/** Partial update of a catalog asset. Today only the render layer is editable (#71). */
+export interface UpdateAssetInput {
+  aboveAvatars?: boolean;
 }
 
 /**
@@ -76,6 +89,8 @@ export interface DeskItem {
   w: number;
   h: number;
   name: string;
+  /** Resolved from the asset like `textureKey`, so the scene knows its render layer (#71). */
+  aboveAvatars: boolean;
   createdAt: Date;
 }
 
@@ -100,6 +115,8 @@ export interface DecorCatalog {
   createAsset(input: CreateAssetInput): Promise<Asset>;
   /** Marca `archivedAt` y devuelve la fila; `null` si ese id no existe. NO borra, y NO toca ninguna colocacion (D1b). */
   archiveAsset(id: string): Promise<Asset | null>;
+  /** Applies a partial update and returns the row; `null` if that id does not exist (#71). */
+  updateAsset(id: string, input: UpdateAssetInput): Promise<Asset | null>;
   /** Ordenado por slot. SIN filtro de archivados: ver la cabecera. */
   getDeskConfig(userId: string): Promise<DeskItem[]>;
   /** Borra la configuracion existente e inserta la nueva en UNA transaccion. */

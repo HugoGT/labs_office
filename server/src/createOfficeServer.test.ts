@@ -1179,6 +1179,47 @@ describe('rutas de decoracion (#7, slice 4)', () => {
     await server.shutdown();
   });
 
+  it('POST /admin/assets/:id marks an asset as drawn above avatars and back (#71)', async () => {
+    const { server, url } = await decorServer();
+    const created = (await (
+      await fetch(`${url}/admin/assets`, {
+        method: 'POST',
+        headers: BEARER_ADMIN,
+        body: JSON.stringify(ASSET),
+      })
+    ).json()) as { id: string; aboveAvatars: boolean };
+    expect(created.aboveAvatars).toBe(false);
+
+    const marked = await fetch(`${url}/admin/assets/${created.id}`, {
+      method: 'POST',
+      headers: BEARER_ADMIN,
+      body: JSON.stringify({ aboveAvatars: true }),
+    });
+    expect(marked.status).toBe(200);
+    expect(((await marked.json()) as { aboveAvatars: boolean }).aboveAvatars).toBe(true);
+
+    const unmarked = await fetch(`${url}/admin/assets/${created.id}`, {
+      method: 'POST',
+      headers: BEARER_ADMIN,
+      body: JSON.stringify({ aboveAvatars: false }),
+    });
+    expect(((await unmarked.json()) as { aboveAvatars: boolean }).aboveAvatars).toBe(false);
+    await server.shutdown();
+  });
+
+  it('POST /admin/assets/:id is admin-only (#71)', async () => {
+    const { server, url } = await decorServer();
+
+    const res = await fetch(`${url}/admin/assets/cualquiera`, {
+      method: 'POST',
+      headers: BEARER_EMPLEADO,
+      body: JSON.stringify({ aboveAvatars: true }),
+    });
+
+    expect(res.status).toBe(403);
+    await server.shutdown();
+  });
+
   it('GET /assets deja ver el catalogo a quien no administra', async () => {
     // `/admin/assets` corre la guarda de rol, asi que sin esta ruta la unica
     // gente que podria ver que piezas hay seria justo la que no las coloca.

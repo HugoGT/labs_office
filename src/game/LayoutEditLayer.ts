@@ -19,6 +19,7 @@ import {
   type LayoutEditCommand,
   type PickableRect,
 } from './layoutEditor';
+import { LAYOUT_GHOST_DEPTH } from './depthLayers';
 import { TILE } from './mapData';
 import type { OfficeBridge } from './officeBridge';
 
@@ -27,8 +28,6 @@ const PICKABLE_STROKE_WIDTH = 2;
 const GHOST_VALID_COLOR = 0x22c55e;
 const GHOST_INVALID_COLOR = 0xef4444;
 const GHOST_ALPHA = 0.35;
-/** Por encima de cualquier cosa del mapa (mismo orden de magnitud que `mmMarker` en `OfficeScene`). */
-const GHOST_DEPTH = 100000;
 
 /** Nombre Phaser del contorno pickable de un item, para volver a encontrarlo (mismo idioma que `deskZoneName`). */
 export function layoutPickName(id: string): string {
@@ -84,7 +83,7 @@ export class LayoutEditLayer {
       // el primer `pointermove`, y hasta entonces esta oculto.
       this.ghost = this.scene.add
         .rectangle(0, 0, command.placing.w * TILE, command.placing.h * TILE)
-        .setDepth(GHOST_DEPTH)
+        .setDepth(LAYOUT_GHOST_DEPTH)
         .setVisible(false);
     }
   }

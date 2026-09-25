@@ -15,6 +15,7 @@ import {
   setCharacterStatus,
   type CharacterContainer,
 } from './characters';
+import { avatarDepth } from './depthLayers';
 import type { OfficeBridge } from './officeBridge';
 import {
   DEFAULT_FACING,
@@ -74,7 +75,7 @@ export function createPhaserAvatarSink(
         statusOf(snapshot.status),
       ) as RemoteAvatarContainer;
       container.setPosition(snapshot.x, snapshot.y);
-      container.setDepth(snapshot.y);
+      container.setDepth(avatarDepth(snapshot.y));
       container.spacesVersion = snapshot.spacesVersion;
 
       // Issue #2, unit 8 (kill switch): el peer es el unico personaje clicable

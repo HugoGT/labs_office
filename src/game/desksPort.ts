@@ -45,6 +45,11 @@ export interface DeskDecorItem {
   rotation: number;
   /** Clave del sprite. El catalogo es curado: apunta a algo que el bundle ya trae. */
   textureKey: string;
+  /**
+   * Special asset (#71): drawn above every avatar instead of below it.
+   * Resolved from the catalog by the server, like `textureKey`.
+   */
+  aboveAvatars: boolean;
 }
 
 /**

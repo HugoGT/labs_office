@@ -27,12 +27,14 @@ import type {
   DeskItem,
   DeskItemInput,
   ListAssetsOptions,
+  UpdateAssetInput,
 } from './decorPort.ts';
 import {
   AssetNameTakenError,
   assertValidDeskShape,
   normalizeCreateAssetInput,
   normalizeDeskConfig,
+  normalizeUpdateAssetInput,
 } from './decorRules.ts';
 import type { DirectoryPool, DirectoryQueryable } from '../directory/pgDirectory.ts';
 
@@ -47,7 +49,7 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 const ASSET_COLUMNS =
-  'id, slug, name, kind, texture_key, w, h, placeable_on_desk, archived_at, created_at';
+  'id, slug, name, kind, texture_key, w, h, placeable_on_desk, above_avatars, archived_at, created_at';
 
 /**
  * Las columnas del escritorio ya cruzadas con su asset. Se enumeran una a una
@@ -56,7 +58,7 @@ const ASSET_COLUMNS =
  */
 const DESK_COLUMNS = `
   d.id, d.asset_id, d.slot, d.rotation, d.created_at,
-  a.texture_key, a.w, a.h, a.name
+  a.texture_key, a.w, a.h, a.name, a.above_avatars
 `;
 
 const DESK_SELECT = `
@@ -77,6 +79,9 @@ function toAsset(row: Record<string, unknown>): Asset {
     w: row.w as number,
     h: row.h as number,
     placeableOnDesk: row.placeable_on_desk as boolean,
+    // `=== true` and not a cast: the column is NOT NULL DEFAULT false, but a
+    // row read before the migration ran must still come out as a normal asset.
+    aboveAvatars: row.above_avatars === true,
     archivedAt: (row.archived_at as Date | null) ?? null,
     createdAt: row.created_at as Date,
   };
@@ -92,6 +97,7 @@ function toDeskItem(row: Record<string, unknown>): DeskItem {
     w: row.w as number,
     h: row.h as number,
     name: row.name as string,
+    aboveAvatars: row.above_avatars === true,
     createdAt: row.created_at as Date,
   };
 }
@@ -139,8 +145,8 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
       try {
         const result = await pool.query(
           `
-            INSERT INTO assets (slug, name, kind, texture_key, w, h, placeable_on_desk)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO assets (slug, name, kind, texture_key, w, h, placeable_on_desk, above_avatars)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING ${ASSET_COLUMNS}
           `,
           [
@@ -151,6 +157,7 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
             normalized.w,
             normalized.h,
             normalized.placeableOnDesk,
+            normalized.aboveAvatars,
           ],
         );
         return toAsset(result.rows[0]);
@@ -179,6 +186,19 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
       const result = await pool.query(
         `UPDATE assets SET archived_at = now() WHERE id = $1 RETURNING ${ASSET_COLUMNS}`,
         [id],
+      );
+      const row = result.rows[0];
+      return row ? toAsset(row) : null;
+    },
+
+    async updateAsset(id: string, input: UpdateAssetInput) {
+      // Validated before asking for a connection, same as `createAsset`. The
+      // only editable column is the render layer (#71); it does not touch
+      // `archived_at` or any placement.
+      const normalized = normalizeUpdateAssetInput(input);
+      const result = await pool.query(
+        `UPDATE assets SET above_avatars = $2 WHERE id = $1 RETURNING ${ASSET_COLUMNS}`,
+        [id, normalized.aboveAvatars],
       );
       const row = result.rows[0];
       return row ? toAsset(row) : null;
