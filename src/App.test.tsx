@@ -25,6 +25,7 @@ function fakePort() {
     }),
     signIn: vi.fn(async () => undefined),
     signOut: vi.fn(async () => undefined),
+    sendPasswordReset: vi.fn(async () => undefined),
     getIdToken: vi.fn(async () => 'id-token'),
   };
   return { port, emit: (user: AuthUser | null) => act(() => listener?.(user)) };

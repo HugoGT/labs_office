@@ -13,6 +13,7 @@ import { initializeApp } from 'firebase/app';
 import {
   getAuth,
   onIdTokenChanged,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
 } from 'firebase/auth';
@@ -60,6 +61,16 @@ export function createFirebaseAuthAdapter(config: AuthConfig): AuthPort {
 
     async signOut(): Promise<void> {
       await firebaseSignOut(auth);
+    },
+
+    /**
+     * No `actionCodeSettings` (continue URL) on purpose: a continue URL must be
+     * an authorized domain of the Identity Platform project, and a missing one
+     * would make every reset fail. The default hosted page is enough; the
+     * person comes back to the office by its usual URL.
+     */
+    async sendPasswordReset(email: string): Promise<void> {
+      await sendPasswordResetEmail(auth, email);
     },
 
     async getIdToken(): Promise<string | null> {
