@@ -4,7 +4,8 @@
   /* Under the sidebar, in the column of its search input (#89). */
   right: var(--hud-rail-right);
   width: var(--hud-exit-width);
-  bottom: 16px;
+  /* Above the bar on very small screens (index.css, #86). */
+  bottom: var(--hud-exit-bottom);
   z-index: 10;
   display: flex;
   gap: 8px;

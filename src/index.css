@@ -19,6 +19,22 @@
    * padding, 1px border) until their labels fit, then the whole rail.
    */
   --hud-exit-width: calc(2 * 36px + 8px + 2 * 8px + 2px);
+  /* Both sit on the bottom row; the bar stops short of the exit controls. */
+  --hud-bar-right: calc(var(--hud-rail-right) + var(--hud-exit-width) + 16px);
+  --hud-exit-bottom: 16px;
+}
+
+/*
+ * Very small screens (#86): below 720px the bar cannot keep its controls on
+ * one row beside the exit controls, so it takes the whole width and the exit
+ * controls move above it, at its real published height (`useHeightCssVar`).
+ * Same breakpoint as the full-screen sidebar in OfficeSidebar.module.css.
+ */
+@media (max-width: 719px) {
+  :root {
+    --hud-bar-right: 16px;
+    --hud-exit-bottom: calc(16px + var(--hud-bar-height, 0px) + 8px);
+  }
 }
 
 /* Same breakpoint as the labels in ExitControls.module.css. */

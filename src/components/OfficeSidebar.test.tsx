@@ -83,11 +83,28 @@ describe('OfficeSidebar (#74)', () => {
     expect(panel).toHaveStyle({
       position: 'fixed',
       top: `${SIDEBAR_TOP}px`,
-      bottom: '72px',
       zIndex: '15',
     });
-    // The 280px width moved to the shared HUD tokens (`index.css`, #90), which
-    // jsdom does not load: `HudLayout.browser.test.tsx` measures it.
+    // The 280px width (#90) and the bottom edge, which now follows the bottom
+    // bar's real height (#86), live in CSS that jsdom does not load:
+    // `HudLayout.browser.test.tsx` measures both.
+  });
+
+  it('expandida ofrece un boton Cerrar que la colapsa (#86, pantallas muy chicas)', async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    await user.click(screen.getByRole('button', { name: 'Cerrar' }));
+
+    expect(screen.getByRole('button', { name: /Personas/ })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
+  });
+
+  it('colapsada no hay nada que cerrar', () => {
+    renderSidebar();
+
+    expect(screen.queryByRole('button', { name: 'Cerrar' })).not.toBeInTheDocument();
   });
 
   it('forceCollapsed en true colapsa aunque estuviese expandida', async () => {

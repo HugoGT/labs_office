@@ -1,6 +1,7 @@
 import type { OfficeEventMap } from '../game/officeBridge';
 import { DO_NOT_DISTURB, PRESENCE_STATUSES, type PresenceStatus } from '../game/officeProtocol';
 import { STATUS_EMOJI, STATUS_LABEL, statusCssColor } from '../game/presence';
+import { useHeightCssVar } from '../hooks/useHeightCssVar';
 import styles from './BottomBar.module.css';
 
 export interface BottomBarProps {
@@ -90,6 +91,8 @@ export function BottomBar({
 }: BottomBarProps) {
   // Se deriva del estado en vez de recibirse como prop propia: dos fuentes
   // para el mismo hecho acabarian discrepando en algun render.
+  // The open sidebar stops above the bar's real height, not a guess (#86).
+  const barRef = useHeightCssVar('--hud-bar-height');
   const dnd = status === DO_NOT_DISTURB;
   const audioDisabled = !audioAvailable || dnd;
   // El motivo que el usuario puede deshacer va primero: sin LiveKit no hay
@@ -109,7 +112,7 @@ export function BottomBar({
     // Three sibling blocks placed by the CSS grid: one row on wide screens
     // (identity, controls and indicators side by side, #87), two on narrow
     // ones. The height never depends on how much the indicators say (#67).
-    <div className={styles.bar}>
+    <div className={styles.bar} ref={barRef}>
       <div className={styles.me} role="group" aria-label="Identidad">
         <span className={styles.meDot} style={{ background: statusCssColor(status) }} />{' '}
         {playerName}

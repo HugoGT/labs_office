@@ -6,10 +6,11 @@
    * capped the shrink-to-fit width at half the viewport, which is what pushed
    * the content onto extra lines. The right edge keeps the exit controls'
    * footprint clear, so the bar centers in the room left of them and never
-   * slides under them (#88).
+   * slides under them (#88); on very small screens they move above it instead
+   * (`--hud-bar-right` in index.css, #86).
    */
   left: 16px;
-  right: calc(var(--hud-rail-right) + var(--hud-exit-width) + 16px);
+  right: var(--hud-bar-right);
   margin: 0 auto;
   width: fit-content;
   z-index: 10;

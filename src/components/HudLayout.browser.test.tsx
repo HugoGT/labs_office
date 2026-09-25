@@ -21,6 +21,14 @@ const { page } = vitestBrowser as unknown as {
  */
 const WIDE = 1440;
 const NARROW = 900;
+/** Below the 720px breakpoint the open sidebar becomes a full-screen overlay. */
+const VERY_SMALL = 640;
+
+/** The bar at its widest: long room name plus the offline indicator and retry. */
+const WIDEST_BAR = {
+  room: 'Sala de reuniones con un nombre larguisimo',
+  presence: { online: false, peers: 0, state: 'offline', canRetry: true },
+} as const;
 
 afterEach(() => {
   cleanup();
@@ -51,6 +59,16 @@ function expectSameColumn(element: Element, reference: Element) {
 function renderExits() {
   render(<ExitControls onSignOut={vi.fn()} onLeaveOffice={vi.fn()} />);
   return screen.getByRole('button', { name: /Cerrar sesión/ }).parentElement!;
+}
+
+function sidebar() {
+  return screen.getByRole('complementary', { name: 'Personas' });
+}
+
+/** Whatever a click at the center of `element` would land on. */
+function hitAtCenter(element: Element) {
+  const { left, top, width, height } = box(element);
+  return document.elementFromPoint(left + width / 2, top + height / 2);
 }
 
 function overlaps(a: DOMRect, b: DOMRect) {
@@ -171,17 +189,84 @@ describe('HUD layout: exit controls on narrow screens (#88)', () => {
   });
 
   it('never overlap the bottom bar, even with its widest indicators', async () => {
-    for (const width of [640, 800, NARROW, 1024, 1199, 1200, 1280, 1439, WIDE, 1920]) {
+    for (const width of [360, 390, VERY_SMALL, 719, 720, 800, NARROW, 1024, 1199, 1200, 1280, 1439, WIDE, 1920]) {
       await page.viewport(width, 800);
       const exits = renderExits();
-      const { bar } = renderBar({
-        room: 'Sala de reuniones con un nombre larguisimo',
-        presence: { online: false, peers: 0, state: 'offline', canRetry: true },
-      });
+      const { bar } = renderBar(WIDEST_BAR);
 
       expect(overlaps(box(exits), box(bar)), `at ${width}px`).toBe(false);
       expect(box(bar).left, `at ${width}px`).toBeGreaterThanOrEqual(16);
       cleanup();
     }
+  });
+});
+
+describe('HUD layout: open sidebar and the bottom row (#86)', () => {
+  it('the open panel stops above the bottom bar and the exit controls, however tall the bar gets', async () => {
+    // 720px is the tightest width that still docks the sidebar.
+    for (const width of [720, NARROW, 1199, 1200, WIDE, 1920]) {
+      await page.viewport(width, 800);
+      const exits = renderExits();
+      const { bar } = renderBar(WIDEST_BAR);
+      await renderOpenSidebar();
+
+      await expect
+        .poll(() => box(sidebar()).bottom, { message: `at ${width}px` })
+        .toBeLessThanOrEqual(Math.min(box(bar).top, box(exits).top));
+      cleanup();
+    }
+  });
+
+  it('follows the bar when it grows, instead of trusting a fixed height', async () => {
+    await page.viewport(NARROW, 800);
+    renderExits();
+    const { bar } = renderBar();
+    await renderOpenSidebar();
+
+    // Stands in for anything that makes the bar taller: fonts, zoom, wrapping.
+    bar.style.height = '300px';
+
+    await expect.poll(() => box(sidebar()).bottom).toBeLessThanOrEqual(box(bar).top);
+  });
+
+  it('on very small screens the open sidebar covers the whole screen, bottom row included', async () => {
+    for (const width of [VERY_SMALL, 390]) {
+      await page.viewport(width, 700);
+      const { bar } = renderBar();
+      const exits = renderExits();
+      await renderOpenSidebar();
+
+      const cover = box(sidebar());
+      expect([cover.left, cover.top, cover.width, cover.height], `at ${width}px`).toEqual([0, 0, width, 700]);
+      // Clicks aimed at the bar or the exits land on the overlay, not behind it.
+      expect(sidebar().contains(hitAtCenter(bar)), `bar at ${width}px`).toBe(true);
+      expect(sidebar().contains(hitAtCenter(exits)), `exits at ${width}px`).toBe(true);
+      cleanup();
+    }
+  });
+
+  it('on very small screens its close button shuts the overlay', async () => {
+    await page.viewport(VERY_SMALL, 700);
+    const { toggle } = await renderOpenSidebar();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Cerrar' }));
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
+  });
+
+  it('collapsed on very small screens it leaves the bottom row reachable', async () => {
+    await page.viewport(VERY_SMALL, 700);
+    const { bar } = renderBar();
+    render(<OfficeSidebar self={{ sessionId: 'yo', name: 'Hugo', status: 'g' }} peers={[]} />);
+
+    expect(bar.contains(hitAtCenter(bar))).toBe(true);
+  });
+
+  it('above very small screens there is no close button: the toggle closes it', async () => {
+    await page.viewport(720, 800);
+    await renderOpenSidebar();
+
+    expect(screen.queryByRole('button', { name: 'Cerrar' })).not.toBeInTheDocument();
   });
 });
