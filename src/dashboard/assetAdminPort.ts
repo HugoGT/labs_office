@@ -49,6 +49,11 @@ export interface CatalogAsset {
   h: number;
   placeableOnDesk: boolean;
   /**
+   * Special asset (#71): drawn above every avatar instead of below it. An
+   * older server that does not send the field reads as `false`.
+   */
+  aboveAvatars: boolean;
+  /**
    * ISO 8601 tal cual lo manda el servidor, `null` mientras siga en el
    * catalogo. El cliente no reinterpreta fechas (mismo criterio que
    * `Invitation.expiresAt`).
@@ -67,6 +72,12 @@ export interface CreateAssetInput {
   w: number;
   h: number;
   placeableOnDesk: boolean;
+  aboveAvatars: boolean;
+}
+
+/** Editable fields of an existing asset. Today only the render layer (#71). */
+export interface UpdateAssetInput {
+  aboveAvatars: boolean;
 }
 
 export interface AssetAdminPort {
@@ -75,4 +86,6 @@ export interface AssetAdminPort {
   createAsset(input: CreateAssetInput): Promise<CatalogAsset>;
   /** Retira del catalogo. NO borra y NO toca ninguna colocacion: ver la cabecera. */
   archiveAsset(id: string): Promise<CatalogAsset>;
+  /** Marks or unmarks an asset as drawn above avatars (#71). */
+  updateAsset(id: string, input: UpdateAssetInput): Promise<CatalogAsset>;
 }

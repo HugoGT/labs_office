@@ -14,6 +14,7 @@ const PLANTA: CatalogAsset = {
   w: 1,
   h: 1,
   placeableOnDesk: true,
+  aboveAvatars: false,
   archivedAt: null,
 };
 
@@ -32,6 +33,10 @@ function fakeAssets(overrides: Partial<AssetAdminPort> = {}): AssetAdminPort {
     listAssets: vi.fn(async () => [PLANTA, LAMPARA]),
     createAsset: vi.fn(async () => PLANTA),
     archiveAsset: vi.fn(async () => ({ ...PLANTA, archivedAt: '2026-09-19T10:00:00.000Z' })),
+    updateAsset: vi.fn(async (_id: string, input: { aboveAvatars: boolean }) => ({
+      ...PLANTA,
+      ...input,
+    })),
     ...overrides,
   };
 }
@@ -44,6 +49,7 @@ function failingAssets(code: AdminErrorCode): AssetAdminPort {
     listAssets: vi.fn(fail),
     createAsset: vi.fn(fail),
     archiveAsset: vi.fn(fail),
+    updateAsset: vi.fn(fail),
   };
 }
 
@@ -129,7 +135,7 @@ describe('AssetsPanel: lo que se ve', () => {
 });
 
 describe('AssetsPanel: dar de alta', () => {
-  it('manda los seis campos que el servidor lee, y relee la lista', async () => {
+  it('manda los campos que el servidor lee, y relee la lista', async () => {
     const user = userEvent.setup();
     const assets = fakeAssets();
     render(<AssetsPanel assets={assets} />);
@@ -146,8 +152,28 @@ describe('AssetsPanel: dar de alta', () => {
       w: 1,
       h: 1,
       placeableOnDesk: true,
+      aboveAvatars: false,
     });
     await waitFor(() => expect(assets.listAssets).toHaveBeenCalledTimes(2));
+  });
+
+  it('a new asset is drawn below avatars unless the admin asks otherwise (#71)', async () => {
+    render(<AssetsPanel assets={fakeAssets()} />);
+    await screen.findByText('Planta de interior');
+
+    expect(formulario().getByLabelText(/se dibuja por encima de los avatares/i)).not.toBeChecked();
+  });
+
+  it('can create an asset already drawn above avatars (#71)', async () => {
+    const user = userEvent.setup();
+    const assets = fakeAssets();
+    render(<AssetsPanel assets={assets} />);
+    await screen.findByText('Planta de interior');
+
+    await user.click(formulario().getByLabelText(/se dibuja por encima de los avatares/i));
+    await anadir(user);
+
+    expect(assets.createAsset).toHaveBeenCalledWith(expect.objectContaining({ aboveAvatars: true }));
   });
 
   it('un nombre que no deja slug lo cuenta el servidor, y se explica', async () => {
@@ -165,6 +191,64 @@ describe('AssetsPanel: dar de alta', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/no aceptó/i);
     // Tras un fallo no se borra lo escrito: se corrige un caracter.
     expect(formulario().getByLabelText(/nombre/i)).toHaveValue('Taza');
+  });
+});
+
+describe('AssetsPanel: drawn above avatars (#71)', () => {
+  function toggle(name: string) {
+    return fila(name).getByRole('checkbox', { name: /encima de los avatares/i });
+  }
+
+  it('shows each asset layer as a checkbox in its row', async () => {
+    const assets = fakeAssets({
+      listAssets: vi.fn(async () => [PLANTA, { ...LAMPARA, aboveAvatars: true }]),
+    });
+    render(<AssetsPanel assets={assets} />);
+    await screen.findByText('Planta de interior');
+
+    expect(toggle('Planta de interior')).not.toBeChecked();
+    expect(toggle('Lámpara')).toBeChecked();
+  });
+
+  it('marking an asset sends only the flag and rereads the list', async () => {
+    const user = userEvent.setup();
+    const assets = fakeAssets();
+    render(<AssetsPanel assets={assets} />);
+    await screen.findByText('Planta de interior');
+
+    await user.click(toggle('Planta de interior'));
+
+    expect(assets.updateAsset).toHaveBeenCalledWith('asset-1', { aboveAvatars: true });
+    await waitFor(() => expect(assets.listAssets).toHaveBeenCalledTimes(2));
+  });
+
+  it('unmarking a special asset sends false', async () => {
+    const user = userEvent.setup();
+    const assets = fakeAssets({
+      listAssets: vi.fn(async () => [{ ...PLANTA, aboveAvatars: true }]),
+    });
+    render(<AssetsPanel assets={assets} />);
+    await screen.findByText('Planta de interior');
+
+    await user.click(toggle('Planta de interior'));
+
+    expect(assets.updateAsset).toHaveBeenCalledWith('asset-1', { aboveAvatars: false });
+  });
+
+  it('a failed update is explained and does not pretend it saved', async () => {
+    const user = userEvent.setup();
+    const assets = fakeAssets({
+      updateAsset: vi.fn(async () => {
+        throw new AdminError('not-found');
+      }),
+    });
+    render(<AssetsPanel assets={assets} />);
+    await screen.findByText('Planta de interior');
+
+    await user.click(toggle('Planta de interior'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/ya no está/i);
+    expect(toggle('Planta de interior')).not.toBeChecked();
   });
 });
 

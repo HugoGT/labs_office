@@ -13,6 +13,7 @@ const SERVED_ASSET = {
   w: 1,
   h: 1,
   placeableOnDesk: true,
+  aboveAvatars: false,
   archivedAt: null,
 };
 
@@ -90,6 +91,7 @@ describe('createAssetAdminClient: contrato del servidor', () => {
       w: 1,
       h: 1,
       placeableOnDesk: true,
+      aboveAvatars: false,
     });
 
     const [url, init] = fetchImpl.mock.calls[0];
@@ -105,7 +107,51 @@ describe('createAssetAdminClient: contrato del servidor', () => {
       w: 1,
       h: 1,
       placeableOnDesk: true,
+      aboveAvatars: false,
     });
+  });
+
+  it('sends aboveAvatars when creating an asset (#71)', async () => {
+    const fetchImpl = fetchWith(201, { ...SERVED_ASSET, aboveAvatars: true });
+
+    const asset = await clientWith(fetchImpl).createAsset({
+      name: 'Arco',
+      kind: 'decor',
+      textureKey: 'arch',
+      w: 1,
+      h: 1,
+      placeableOnDesk: true,
+      aboveAvatars: true,
+    });
+
+    expect(sentBody(fetchImpl)).toMatchObject({ aboveAvatars: true });
+    expect(asset.aboveAvatars).toBe(true);
+  });
+
+  it('marks and unmarks with POST /admin/assets/:id and only the flag in the body (#71)', async () => {
+    // POST and not PATCH: the server CORS only announces `GET,POST,OPTIONS`.
+    const fetchImpl = fetchWith(200, { ...SERVED_ASSET, aboveAvatars: true });
+
+    const asset = await clientWith(fetchImpl).updateAsset('asset/1', { aboveAvatars: true });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe('http://localhost:2567/admin/assets/asset%2F1');
+    expect(init?.method).toBe('POST');
+    expect(sentBody(fetchImpl)).toEqual({ aboveAvatars: true });
+    expect(asset.aboveAvatars).toBe(true);
+  });
+
+  it('an older server without aboveAvatars reads as a normal asset (#71)', async () => {
+    const { aboveAvatars: _omitted, ...older } = SERVED_ASSET;
+    const fetchImpl = fetchWith(200, { assets: [older] });
+
+    expect((await clientWith(fetchImpl).listAssets())[0].aboveAvatars).toBe(false);
+  });
+
+  it('a non-boolean aboveAvatars rejects the list, like placeableOnDesk (#71)', async () => {
+    const client = clientWith(fetchWith(200, { assets: [{ ...SERVED_ASSET, aboveAvatars: 'si' }] }));
+
+    expect(await codeOf(client.listAssets())).toBe('unknown');
   });
 
   it('no manda ninguna imagen: el catalogo es curado', async () => {
@@ -120,6 +166,7 @@ describe('createAssetAdminClient: contrato del servidor', () => {
       w: 1,
       h: 1,
       placeableOnDesk: true,
+      aboveAvatars: false,
     });
 
     const headers = (fetchImpl.mock.calls[0][1]?.headers ?? {}) as Record<string, string>;
