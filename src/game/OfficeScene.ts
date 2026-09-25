@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { preloadOfficeAssets } from './assets';
 import { beginAutoWalk, stepAutoWalk, type AutoWalkState } from './autoWalk';
+import { CameraPanLayer } from './CameraPanLayer';
 import {
   setCharacterFacing,
   setCharacterStatus,
@@ -64,6 +65,8 @@ export const OFFICE_SCENE_KEY = 'office';
 
 const PLAYER_SPEED = 230;
 const PROXIMITY_TICK_MS = 250;
+/** Suavizado de `startFollow` (#53): compartido entre `setupCameras` y el `resumeFollow` de `CameraPanLayer`. */
+const FOLLOW_LERP = 0.12;
 /**
  * Los tres estados en los que se puede ver un escritorio asignable (#7, slice
  * 5). Es lo unico que los distingue, y basta: un tinte se lee de un vistazo
@@ -178,6 +181,15 @@ export class OfficeScene extends Phaser.Scene {
    */
   private layoutEditLayer?: LayoutEditLayer;
   /**
+   * Capa del pan de camara (#53): se crea despues de `setupInput`, igual que
+   * `layoutEditLayer` se crea en su propio punto -- ambas escuchan el mismo
+   * `this.input`. `isSuspended` lee `this.layoutEditing` en el momento del
+   * `pointerdown` (mismo momento en que `closemenu` ya lo consulta): un
+   * `layoutedit` que llega a mitad de un pan ya en curso no lo corta, igual
+   * que hoy tampoco corta un auto-walk en curso.
+   */
+  private cameraPanLayer?: CameraPanLayer;
+  /**
    * Grupo de cuerpos de peers vivos (#59): se crea UNA vez en `buildColliders`
    * junto a un unico `collider(player, peerGroup)`, y cada `createPhaserAvatarSink`
    * nuevo (una por conexion, D-diseno) recibe el MISMO grupo -- una
@@ -275,6 +287,15 @@ export class OfficeScene extends Phaser.Scene {
     this.buildColliders(grid);
     this.setupCameras();
     this.setupInput();
+    // #53: despues de `setupInput` (comparte `this.input`, mismo momento en
+    // que `layoutEditLayer` se crea mas abajo).
+    this.cameraPanLayer = new CameraPanLayer({
+      scene: this,
+      camera: this.cameras.main,
+      target: this.player,
+      lerp: FOLLOW_LERP,
+      isSuspended: () => this.layoutEditing,
+    });
 
     this.unsubscribeSetStatus = this.bridge.onCommand('setStatus', ({ status }) => {
       this.setStatus(status);
@@ -375,6 +396,7 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeReconnect?.();
       this.unsubscribeLayoutEdit?.();
       this.layoutEditLayer?.destroy();
+      this.cameraPanLayer?.destroy();
       this.remotes?.clear();
       this.roster?.clear();
       void this.connection?.leave();
@@ -801,7 +823,7 @@ export class OfficeScene extends Phaser.Scene {
   private setupCameras(): void {
     const cam = this.cameras.main;
     cam.setBounds(0, 0, WORLD_W, WORLD_H);
-    cam.startFollow(this.player, true, 0.12, 0.12);
+    cam.startFollow(this.player, true, FOLLOW_LERP, FOLLOW_LERP);
     cam.setBackgroundColor('#0d1117');
 
     const minimap = this.cameras.add(
