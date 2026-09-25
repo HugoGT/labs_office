@@ -2211,4 +2211,31 @@ describe('OfficeScene: integracion camera pan y colision de peers (#53, #59)', (
 
     scene.input.emit('pointerup', screenPointer(70, 50, mainCam));
   });
+
+  it('con el pan activo, las teclas de movimiento siguen moviendo al jugador y la camara no retoma el seguimiento (#53)', async () => {
+    const { scene } = await bootOfficeScene();
+    const mainCam = scene.cameras.main;
+    const player = findPlayer(scene);
+    const startX = player.x;
+
+    scene.input.emit('pointerdown', screenPointer(50, 50, mainCam), []);
+    scene.input.emit('pointermove', screenPointer(70, 50, mainCam));
+    const pannedScrollX = mainCam.scrollX;
+    expect(pannedScrollX).not.toBe(0);
+
+    dispatchKey('keydown', KEY.RIGHT);
+    try {
+      await advanceGameClock(scene, 500);
+    } finally {
+      dispatchKey('keyup', KEY.RIGHT);
+    }
+
+    // El jugador se sigue moviendo por teclado aunque el pan siga activo...
+    expect(player.x).toBeGreaterThan(startX);
+    // ...y la camara se queda donde el drag la dejo: no retoma el seguimiento
+    // hasta soltar el pan (CameraPanLayer no comparte estado con el teclado).
+    expect(mainCam.scrollX).toBe(pannedScrollX);
+
+    scene.input.emit('pointerup', screenPointer(70, 50, mainCam));
+  });
 });
