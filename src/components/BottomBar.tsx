@@ -107,7 +107,7 @@ export function BottomBar({
 
   return (
     // Three sibling blocks placed by the CSS grid: one row on wide screens
-    // (identity left, controls centered, indicators right), two on narrow
+    // (identity, controls and indicators side by side, #87), two on narrow
     // ones. The height never depends on how much the indicators say (#67).
     <div className={styles.bar}>
       <div className={styles.me} role="group" aria-label="Identidad">
