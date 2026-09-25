@@ -447,6 +447,18 @@ resource "google_compute_instance" "office" {
 
   metadata_startup_script = file("${path.module}/../startup-script.sh")
 
+  lifecycle {
+    # `metadata_startup_script` is ForceNew in the provider: ANY edit to
+    # startup-script.sh plans a delete + create of the VM. That is how the
+    # 2026-09-21 apply (after commit f1cb134) silently replaced the VM and,
+    # with Postgres still on its boot disk, wiped the directory (issue #72).
+    # The directory is on Cloud SQL now, but a replacement still drops every
+    # live call and loses Caddy's certificates, so it must be a deliberate
+    # `terraform apply -replace=google_compute_instance.office`, never a side
+    # effect. To roll out a startup script change in place, see the README
+    # ("Startup script changes").
+    ignore_changes = [metadata_startup_script]
+  }
 
   metadata = {
     # OS Login: las claves SSH las gestiona IAM en vez de vivir en la metadata
