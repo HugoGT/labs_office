@@ -8,6 +8,7 @@ import {
   findWalkDestination,
   isBlocked,
   markSolid,
+  pickApproachTile,
   type TileRect,
 } from './terrainGrid';
 
@@ -318,5 +319,95 @@ describe('findWalkDestination', () => {
     expect(audiblePeers({ self: asSelf(a), peers: [b, c], radius: 1 })).toEqual(['b', 'c']);
     expect(audiblePeers({ self: asSelf(b), peers: [a, c], radius: 1 })).toEqual(['a', 'c']);
     expect(audiblePeers({ self: asSelf(c), peers: [a, b], radius: 1 })).toEqual(['a', 'b']);
+  });
+});
+
+/**
+ * `pickApproachTile` (#59, near-side destination): a diferencia de
+ * `findWalkDestination`, que ignora la direccion, esta funcion elige la tile
+ * junto al peer en el lado por el que el jugador (`walker`) se acerca --
+ * cuanto mayor la distancia en un eje, ese eje manda; en empate gana el eje
+ * vertical (decision de usuario 2026-09-24, ver design.md).
+ */
+describe('pickApproachTile', () => {
+  const rect: TileRect = { x0: 10, y0: 26, x1: 12, y1: 28 };
+  const peer = { tx: 11, ty: 27 }; // centro del cubiculo 3x3.
+
+  it('walker al norte -> tile norte del peer', () => {
+    const grid = buildTerrainGrid();
+    const walker = { tx: 11, ty: 20 };
+
+    expect(pickApproachTile(grid, walker, peer, rect)).toEqual({ tx: 11, ty: 26 });
+  });
+
+  it('walker al sur -> tile sur del peer', () => {
+    const grid = buildTerrainGrid();
+    const walker = { tx: 11, ty: 34 };
+
+    expect(pickApproachTile(grid, walker, peer, rect)).toEqual({ tx: 11, ty: 28 });
+  });
+
+  it('walker al este -> tile este del peer', () => {
+    const grid = buildTerrainGrid();
+    const walker = { tx: 20, ty: 27 };
+
+    expect(pickApproachTile(grid, walker, peer, rect)).toEqual({ tx: 12, ty: 27 });
+  });
+
+  it('walker al oeste -> tile oeste del peer', () => {
+    const grid = buildTerrainGrid();
+    const walker = { tx: 2, ty: 27 };
+
+    expect(pickApproachTile(grid, walker, peer, rect)).toEqual({ tx: 10, ty: 27 });
+  });
+
+  it('empate diagonal (|dx| === |dy|) -> gana el eje vertical', () => {
+    const grid = buildTerrainGrid();
+    // dx = 16-11 = 5, dy = 22-27 = -5: mismo modulo, el eje vertical gana.
+    const walker = { tx: 16, ty: 22 };
+
+    expect(pickApproachTile(grid, walker, peer, rect)).toEqual({ tx: 11, ty: 26 });
+  });
+
+  it('walker en la misma tile que el peer -> cae a findWalkDestination', () => {
+    const grid = buildTerrainGrid();
+    const walker = { tx: 11, ty: 27 };
+
+    expect(pickApproachTile(grid, walker, peer, rect)).toEqual(
+      findWalkDestination(grid, peer, rect),
+    );
+  });
+
+  it('la tile del lado elegido esta bloqueada -> cae a findWalkDestination', () => {
+    const grid = buildTerrainGrid();
+    const walker = { tx: 11, ty: 20 }; // norte -> (11,26)
+    grid.solid[26][11] = true;
+
+    expect(pickApproachTile(grid, walker, peer, rect)).toEqual(
+      findWalkDestination(grid, peer, rect),
+    );
+    expect(pickApproachTile(grid, walker, peer, rect)).not.toEqual({ tx: 11, ty: 26 });
+  });
+
+  it('la tile del lado elegido cae fuera del rectangulo del espacio -> cae a findWalkDestination', () => {
+    const grid = buildTerrainGrid();
+    // Peer en el borde este del cubiculo: la tile este calculada (13,27) cae
+    // FUERA del rectangulo (x1=12), asi que debe usar el fallback restringido
+    // al rectangulo en vez de aterrizar fuera del espacio.
+    const edgePeer = { tx: 12, ty: 27 };
+    const walker = { tx: 20, ty: 27 }; // este
+
+    expect(pickApproachTile(grid, walker, edgePeer, rect)).toEqual(
+      findWalkDestination(grid, edgePeer, rect),
+    );
+    expect(pickApproachTile(grid, walker, edgePeer, rect)).not.toEqual({ tx: 13, ty: 27 });
+  });
+
+  it('sin rectangulo de espacio (piso abierto), la tile del lado elegido no se restringe a ningun rect', () => {
+    const grid = buildTerrainGrid();
+    const openPeer = { tx: 6, ty: 26 };
+    const walker = { tx: 6, ty: 10 }; // norte, cesped abierto.
+
+    expect(pickApproachTile(grid, walker, openPeer, null)).toEqual({ tx: 6, ty: 25 });
   });
 });

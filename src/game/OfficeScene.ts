@@ -52,8 +52,8 @@ import { createStaleSpacesVersionTracker } from './spacesConfig';
 import { audiblePeers, type AudioPeer } from './proximityAudio';
 import {
   buildTerrainGrid,
-  findWalkDestination,
   isBlocked,
+  pickApproachTile,
   type TerrainGrid,
   type TileRect,
 } from './terrainGrid';
@@ -893,14 +893,20 @@ export class OfficeScene extends Phaser.Scene {
    *
    * Issue #10, S2 3.2: si quien llama esta dentro de un espacio (sala o
    * cubiculo de escritorio, `detectSpace` no distingue), el destino se
-   * restringe a ESE rectangulo (`findWalkDestination`) en vez de la tile
-   * libre mas cercana sin mas -- aterrizar justo al otro lado de un muro o
-   * fuera del cubiculo dejaria al jugador fuera del audio de quien llamo.
+   * restringe a ESE rectangulo en vez de la tile libre mas cercana sin mas --
+   * aterrizar justo al otro lado de un muro o fuera del cubiculo dejaria al
+   * jugador fuera del audio de quien llamo.
+   *
+   * Issue #59: el lado elegido dentro de ese rectangulo (o alrededor del
+   * peer, sin espacio) ya no es un orden fijo -- `pickApproachTile` apunta al
+   * lado por el que el jugador se acerca, y cae a la busqueda de siempre si
+   * ese lado esta bloqueado o fuera del espacio.
    */
   private walkToPeer(sessionId: string): void {
     const peer = this.remotes?.get(sessionId);
     if (!peer) return; // se desconecto antes de que esto corriera: no-op silencioso.
 
+    const walkerTile = { tx: Math.floor(this.player.x / TILE), ty: Math.floor(this.player.y / TILE) };
     const peerTile = { tx: Math.floor(peer.x / TILE), ty: Math.floor(peer.y / TILE) };
     const peerSpace = detectSpace({ x: peer.x, y: peer.y }, this.spaces);
     const peerSpaceTiles: TileRect | null = peerSpace
@@ -912,7 +918,7 @@ export class OfficeScene extends Phaser.Scene {
         }
       : null;
 
-    const destination = findWalkDestination(this.grid, peerTile, peerSpaceTiles);
+    const destination = pickApproachTile(this.grid, walkerTile, peerTile, peerSpaceTiles);
     if (!destination) return;
 
     this.autoWalk = beginAutoWalk(
