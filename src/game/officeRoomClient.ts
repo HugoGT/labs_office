@@ -86,8 +86,17 @@ interface RecordingsCallbacks {
  * different: offline may offer a retry, while a tab whose account joined from
  * somewhere else has to leave the office, since retrying would evict the
  * newer tab.
+ *
+ * `revoked` (#93) is the same idea for an account whose access an admin took
+ * away while it was inside: the office has to leave, and saying so beats
+ * "Sin servidor".
  */
-export type OfficeConnectionState = 'connected' | 'reconnecting' | 'offline' | 'replaced';
+export type OfficeConnectionState =
+  | 'connected'
+  | 'reconnecting'
+  | 'offline'
+  | 'replaced'
+  | 'revoked';
 
 export interface OfficeRoomHandlers {
   onAdd(snapshot: RemotePlayerSnapshot): void;
@@ -353,12 +362,17 @@ export async function connectOfficeRoom({
     // llama a `terminate()`. Quien deshace ese empate es el servidor: con
     // `DEBUG=colyseus:connection` registra "terminating unresponsive client"
     // solo en el segundo caso. 1001 es la pestana yendose, y 4002 un error del
-    // lado del servidor. 4100 is this account joining from another tab (#78).
+    // lado del servidor. 4100 is this account joining from another tab (#78),
+    // and 4101 an admin revoking its access (#93).
     console.warn(`[office] sesion cerrada (${closeCode}); intento ${attempt}`);
 
     const decision = decideReconnect({ closeCode, attempt });
     if (decision.kind === 'stop' && decision.reason === 'replaced') {
       handlers.onConnectionState?.('replaced');
+      return;
+    }
+    if (decision.kind === 'stop' && decision.reason === 'revoked') {
+      handlers.onConnectionState?.('revoked');
       return;
     }
     if (decision.kind !== 'retry') {

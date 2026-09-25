@@ -79,3 +79,31 @@ export function canAssignRole(actor: Role, target: AssignableRole): boolean {
   if (target === 'admin') return actor === 'superadmin';
   return canAdminister(actor);
 }
+
+/**
+ * Who can take access away from whom (#93). Same home and same reason as
+ * `canAssignRole`: it is a domain rule, and testing it cannot require a
+ * server.
+ *
+ * It mirrors `canAssignRole` on purpose: an admin removes exactly the roles an
+ * admin could have handed out, and only the superadmin removes an admin, since
+ * otherwise one compromised admin account could empty the office of every
+ * other admin. The superadmin is removable by nobody: it is guarded by the
+ * bootstrap and the partial unique index of `schema.sql`, not by a screen.
+ *
+ * Nobody removes themself. The button would let the last admin lock the office
+ * out by a misclick, and the superadmin leave it without one.
+ *
+ * Whitelist again: a new role starts out able to remove nobody and removable
+ * only by the superadmin.
+ */
+export function canRemove(
+  actor: { id: string; role: Role },
+  target: { id: string; role: Role },
+): boolean {
+  if (actor.id === target.id) return false;
+  if (target.role === 'superadmin') return false;
+  if (actor.role === 'superadmin') return true;
+  if (actor.role === 'admin') return target.role === 'employee' || target.role === 'guest';
+  return false;
+}

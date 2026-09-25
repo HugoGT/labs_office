@@ -72,6 +72,15 @@ export interface RecordingReadyPayload {
  */
 export const SESSION_REPLACED_CLOSE_CODE = 4100;
 
+/**
+ * Close code the server uses when an admin takes the account's access away
+ * (#93): its live sessions are thrown out at once instead of staying until
+ * they leave. Its own code, next to the replaced one, so the client neither
+ * retries (the directory would refuse the join anyway) nor tells the user they
+ * opened the office somewhere else.
+ */
+export const SESSION_REVOKED_CLOSE_CODE = 4101;
+
 /** Cada cuanto publica el jugador local su posicion (ver `createMoveThrottle`). */
 export const MOVE_INTERVAL_MS = 100;
 

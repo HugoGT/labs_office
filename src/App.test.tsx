@@ -279,6 +279,24 @@ describe('App: replaced by another tab (#78)', () => {
   });
 });
 
+describe('App: access revoked (#93)', () => {
+  it('a revoked session unmounts the office and says why', async () => {
+    const { container } = render(<App />);
+    await waitForOffice(container);
+    const game = createGameMock.mock.results[0].value as { destroy: ReturnType<typeof vi.fn> };
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('presence', { online: false, peers: 0, state: 'revoked', canRetry: true }));
+
+    // Unmounting is what drops LiveKit too: nobody keeps hearing them.
+    expect(game.destroy).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('#office-shell')).toBeNull();
+    expect(
+      screen.getByRole('dialog', { name: 'Un administrador retiró tu acceso a la oficina' }),
+    ).toBeInTheDocument();
+  });
+});
+
 describe('App: enrutado (#24)', () => {
   afterEach(() => {
     window.history.pushState({}, '', '/');

@@ -10,7 +10,10 @@ import type { Client as ServerClient } from '@colyseus/core';
 import { Client } from 'colyseus.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from '../../src/game/mapData.ts';
-import { SESSION_REPLACED_CLOSE_CODE } from '../../src/game/officeProtocol.ts';
+import {
+  SESSION_REPLACED_CLOSE_CODE,
+  SESSION_REVOKED_CLOSE_CODE,
+} from '../../src/game/officeProtocol.ts';
 import { createOfficeServer, type OfficeServer } from './createOfficeServer.ts';
 import {
   DEFAULT_NAME,
@@ -1312,6 +1315,100 @@ describe('OfficeRoom: one session per account (#78)', () => {
 
     expect(anaLeft).toBe(false);
     expect(ana.state.players.size).toBe(2);
+  });
+});
+
+/**
+ * Live eviction of a revoked account (#93): the admin route calls
+ * `server.eviction.evictAccount(uid)`, and the room closes that account's
+ * sessions right away with the revoked code. Real server and real sockets for
+ * the same reason as the #78 tests above.
+ */
+describe('OfficeRoom: evicting a revoked account (#93)', () => {
+  const BETO: VerifiedIdentity = { uid: 'uid-beto', email: 'beto@example.com', name: 'Beto Ruiz' };
+  let evictServer: OfficeServer;
+  let evictEndpoint: string;
+
+  beforeEach(async () => {
+    evictServer = createOfficeServer({
+      auth: stubVerifier({ 'token-de-ana': ANA, 'token-de-beto': BETO }),
+      reconnectionWindowSeconds: 2,
+    });
+    evictEndpoint = `ws://localhost:${await evictServer.listen(0)}`;
+  });
+
+  afterEach(async () => {
+    await evictServer.shutdown();
+  });
+
+  async function joinAs(token: string) {
+    const room = await new Client(evictEndpoint).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token });
+    openRooms.push(room);
+    return room;
+  }
+
+  function closeCodeOf(room: { onLeave(handler: (code: number) => void): void }): Promise<number> {
+    return new Promise((resolve) => room.onLeave(resolve));
+  }
+
+  it('closes the live session with the revoked code and removes its avatar for everyone', async () => {
+    const beto = await joinAs('token-de-beto');
+    const ana = await joinAs('token-de-ana');
+    await waitFor(() => beto.state.players.size === 2);
+    const anaId = ana.sessionId;
+    const anaClosed = closeCodeOf(ana);
+
+    evictServer.eviction.evictAccount('uid-ana');
+
+    expect(await anaClosed).toBe(SESSION_REVOKED_CLOSE_CODE);
+    await waitFor(() => !beto.state.players.has(anaId), 1000);
+    expect(evictServer.sessions.has(anaId)).toBe(false);
+    expect(evictServer.sessions.has(beto.sessionId)).toBe(true);
+  });
+
+  it('an evicted session gets no reconnection window: its token is dead at once', async () => {
+    const ana = await joinAs('token-de-ana');
+    await waitFor(() => ana.state.players.size === 1);
+    const token = ana.reconnectionToken;
+    const anaClosed = closeCodeOf(ana);
+
+    evictServer.eviction.evictAccount('uid-ana');
+    await anaClosed;
+
+    await expect(new Client(evictEndpoint).reconnect(token)).rejects.toThrow();
+  });
+
+  it('a session waiting in its reconnection window is evicted too', async () => {
+    const beto = await joinAs('token-de-beto');
+    const ana = await joinAs('token-de-ana');
+    await waitFor(() => beto.state.players.size === 2);
+    const anaId = ana.sessionId;
+    const token = ana.reconnectionToken;
+    await ana.leave(false);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(beto.state.players.has(anaId)).toBe(true);
+
+    evictServer.eviction.evictAccount('uid-ana');
+
+    // Well below the 2 s window: the eviction, not the timeout, removed it.
+    await waitFor(() => !beto.state.players.has(anaId), 1000);
+    expect(evictServer.sessions.has(anaId)).toBe(false);
+    await expect(new Client(evictEndpoint).reconnect(token)).rejects.toThrow();
+  });
+
+  it('other accounts stay, and an account with no session is a no-op', async () => {
+    const beto = await joinAs('token-de-beto');
+    let betoLeft = false;
+    beto.onLeave(() => {
+      betoLeft = true;
+    });
+    await waitFor(() => beto.state.players.size === 1);
+
+    evictServer.eviction.evictAccount('uid-ana');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(betoLeft).toBe(false);
+    expect(beto.state.players.size).toBe(1);
   });
 });
 

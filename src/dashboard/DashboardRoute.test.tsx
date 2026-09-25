@@ -9,6 +9,8 @@ import { createDeskAdminClient } from './deskAdminClient';
 import type { DeskAdminPort } from './deskAdminPort';
 import { createSpacesAdminClient } from './spacesAdminClient';
 import type { SpacesAdminPort } from './spacesAdminPort';
+import { createUsersAdminClient } from './usersAdminClient';
+import type { UsersAdminPort } from './usersAdminPort';
 import DashboardRoute from './DashboardRoute';
 
 // El adaptador real habla HTTP; aqui solo importa con que se construye y que
@@ -36,6 +38,22 @@ vi.mock('./spacesAdminClient', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./spacesAdminClient')>()),
   createSpacesAdminClient: vi.fn(),
 }));
+
+// Users panel (#93): mocked for the same reason as the other adapters.
+vi.mock('./usersAdminClient', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./usersAdminClient')>()),
+  createUsersAdminClient: vi.fn(),
+}));
+
+const createUsersAdminClientMock = vi.mocked(createUsersAdminClient);
+
+function fakeUsersPort(): UsersAdminPort {
+  return { listUsers: vi.fn(async () => []), revokeUser: vi.fn(async () => undefined) };
+}
+
+beforeEach(() => {
+  createUsersAdminClientMock.mockReturnValue(fakeUsersPort());
+});
 
 const createAdminClientMock = vi.mocked(createAdminClient);
 const createDeskAdminClientMock = vi.mocked(createDeskAdminClient);
@@ -226,5 +244,28 @@ describe('DashboardRoute: los paneles de escritorios, espacios y catalogo', () =
     expect(await screen.findByRole('region', { name: /escritorios/i })).toBeInTheDocument();
     expect(await screen.findByRole('region', { name: /espacios/i })).toBeInTheDocument();
     expect(await screen.findByRole('region', { name: /catálogo/i })).toBeInTheDocument();
+  });
+});
+
+describe('DashboardRoute: users panel (#93)', () => {
+  it('builds its adapter with the server ROOT and the live session token, once', async () => {
+    const session = fakeSession();
+    createAdminClientMock.mockReturnValue(fakePort());
+
+    const { rerender } = render(<DashboardRoute session={session} />);
+    rerender(<DashboardRoute session={session} />);
+
+    expect(createUsersAdminClientMock).toHaveBeenCalledTimes(1);
+    expect(createUsersAdminClientMock.mock.calls[0][0].baseUrl).toBe('http://localhost:2567');
+    await createUsersAdminClientMock.mock.calls[0][0].getIdToken();
+    expect(session.getIdToken).toHaveBeenCalledTimes(1);
+  });
+
+  it('mounts the users panel inside the admin panel', async () => {
+    createAdminClientMock.mockReturnValue(fakePort());
+
+    render(<DashboardRoute session={fakeSession()} />);
+
+    expect(await screen.findByRole('region', { name: 'Usuarios' })).toBeInTheDocument();
   });
 });

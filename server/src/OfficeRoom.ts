@@ -38,6 +38,7 @@ import {
   MAX_NAME_LENGTH,
   OFFICE_ROOM_NAME,
   SESSION_REPLACED_CLOSE_CODE,
+  SESSION_REVOKED_CLOSE_CODE,
   isPresenceStatus,
   recordingAvailableUntil,
 } from '../../src/game/officeProtocol.ts';
@@ -45,6 +46,7 @@ import { createCallInvitationRegistry, type CallInvitationRegistry } from './cal
 import { decideAccess, type AccessDecision } from './directory/accessDecision.ts';
 import type { UserDirectory } from './directory/directoryPort.ts';
 import type { LiveSessionRegistry } from './liveSessions.ts';
+import type { SessionEvictionHub } from './sessionEviction.ts';
 import { participantKeyOf, type FinishedRecordingStore } from './recording/finishedRecordings.ts';
 import type { ActiveRecording, RecordingRegistry } from './recording/recordingRegistry.ts';
 import { OfficeState, createPlayerState, createRecordingState } from './schema.ts';
@@ -234,6 +236,11 @@ export interface OfficeRoomOptions {
    * connected when one is uploaded, as a `recordingready` message.
    */
   finished?: FinishedRecordingStore;
+  /**
+   * Live eviction (#93): the room registers here so an admin route can throw
+   * a revoked account out right away. Absent, nobody can evict from outside.
+   */
+  eviction?: SessionEvictionHub;
 }
 
 /** Registro del motivo por el que el directorio cerro la puerta. */
@@ -274,6 +281,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private stopRecording?: (entry: ActiveRecording) => Promise<void>;
   private unsubscribeRecordings?: () => void;
   private unsubscribeReady?: () => void;
+  private unregisterEviction?: () => void;
   /**
    * Sessions a newer join of the same account already released (#78). Their
    * own `onLeave` arrives later, as a plain non-consented close, and must
@@ -309,6 +317,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     // Only to participants: a recording is private to the people in it.
     // `availableUntil` is when the bucket lifecycle deletes it (#5), for the
     // "Disponible hasta" of the notice.
+    this.unregisterEviction = options?.eviction?.register((uid) => this.evictAccount(uid));
     this.unsubscribeReady = options?.finished?.onReady(({ recordingId, spaceId, participants, stoppedAt }) => {
       const notice = { recordingId, spaceId, availableUntil: recordingAvailableUntil(stoppedAt) };
       for (const client of this.clients) {
@@ -407,6 +416,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   onDispose(): void {
     this.unsubscribeRecordings?.();
     this.unsubscribeReady?.();
+    this.unregisterEviction?.();
   }
 
   /** Unico punto de salida hacia un sessionId concreto; `undefined` si ya no esta conectado. */
@@ -568,11 +578,29 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
    * Both are marked in `replaced` so their late `onLeave` does nothing.
    */
   private replaceOtherSessionsOf(uid: string, newcomer: Client): void {
+    this.closeSessionsOf(uid, SESSION_REPLACED_CLOSE_CODE, 'session-replaced', newcomer);
+  }
+
+  /**
+   * An admin took this account's access away (#93). The directory already
+   * refuses its next join; this throws out the sessions already inside, with
+   * the same mechanism as a replaced tab (#78) and its own close code.
+   */
+  private evictAccount(uid: string): void {
+    this.closeSessionsOf(uid, SESSION_REVOKED_CLOSE_CODE, 'session-revoked');
+  }
+
+  /**
+   * Releases every session of `uid` but `except`, connected or waiting in its
+   * reconnection window, and marks them in `replaced` so their late `onLeave`
+   * neither grants a window nor releases them twice.
+   */
+  private closeSessionsOf(uid: string, closeCode: number, reason: string, except?: Client): void {
     for (const other of this.clients) {
-      if (other === newcomer || accountOf(other) !== uid) continue;
+      if (other === except || accountOf(other) !== uid) continue;
       this.replaced.add(other.sessionId);
       this.releaseSession(other.sessionId);
-      other.leave(SESSION_REPLACED_CLOSE_CODE);
+      other.leave(closeCode);
     }
 
     for (const [sessionId, pending] of this.pendingReconnections) {
@@ -580,7 +608,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       this.pendingReconnections.delete(sessionId);
       this.replaced.add(sessionId);
       this.releaseSession(sessionId);
-      pending.seat.reject(new Error('session-replaced'));
+      pending.seat.reject(new Error(reason));
     }
   }
 

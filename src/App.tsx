@@ -83,6 +83,7 @@ export default function App() {
                 session={session}
                 onLeaveOffice={() => setLeftOffice('left')}
                 onSessionReplaced={() => setLeftOffice('replaced')}
+                onAccessRevoked={() => setLeftOffice('revoked')}
               />
             )}
           </Suspense>

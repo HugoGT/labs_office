@@ -672,3 +672,87 @@ describe('pgDirectory: close', () => {
     expect(pool.ended).toBe(1);
   });
 });
+
+describe('pgDirectory: listUsers (#93)', () => {
+  it('reads every row, with no invitation filter, oldest first', async () => {
+    const pool = fakePool(() => ({ rows: [SUPERADMIN_ROW, USER_ROW], rowCount: 2 }));
+
+    const users = await directoryOver(pool).listUsers();
+
+    const sql = squash(pool.queries[0].text);
+    expect(sql).toContain('from users');
+    expect(sql).not.toContain('where');
+    expect(sql).toContain('order by created_at asc');
+    expect(users.map((user) => user.role)).toEqual(['superadmin', 'employee']);
+    expect(users[1]).toMatchObject({ id: USER_ROW.id, displayName: 'Ana', invitedBy: null });
+  });
+
+  it('an empty directory is an empty list', async () => {
+    expect(await directoryOver(fakePool()).listUsers()).toEqual([]);
+  });
+});
+
+describe('pgDirectory: revokeUser (#93)', () => {
+  const REVOKED_EMPLOYEE = { ...USER_ROW, status: 'revoked' };
+
+  /** `update` answers the UPDATE, `select` the re-read when it changed nothing. */
+  function poolAnswering(update: Record<string, unknown>[], select: Record<string, unknown>[] = []) {
+    return fakePool((text) => {
+      const sql = squash(text);
+      if (sql.startsWith('update users')) return { rows: update, rowCount: update.length };
+      if (sql.startsWith('select')) return { rows: select, rowCount: select.length };
+      return NO_ROW;
+    });
+  }
+
+  it('revokes and audits in the same transaction', async () => {
+    const pool = poolAnswering([REVOKED_EMPLOYEE]);
+
+    const revoked = await directoryOver(pool).revokeUser(USER_ROW.id, SUPERADMIN_ROW.id);
+
+    const sqls = pool.queries.map((query) => squash(query.text));
+    expect(sqls[0]).toBe('begin');
+    expect(sqls[1]).toContain("set status = 'revoked'");
+    expect(sqls[2]).toContain('insert into audit_log');
+    expect(pool.queries[2].values).toEqual([SUPERADMIN_ROW.id, 'revoke-user', USER_ROW.id]);
+    expect(sqls[3]).toBe('commit');
+    expect(revoked?.status).toBe('revoked');
+  });
+
+  it('the statement itself refuses the superadmin and only changes an active row', async () => {
+    // In the WHERE and not in an `if`: no window between checking and
+    // updating, and no way to call this that revokes the superadmin.
+    const pool = poolAnswering([REVOKED_EMPLOYEE]);
+
+    await directoryOver(pool).revokeUser(USER_ROW.id, SUPERADMIN_ROW.id);
+
+    const update = squash(pool.queries[1].text);
+    expect(update).toContain("role <> 'superadmin'");
+    expect(update).toContain("status <> 'revoked'");
+    expect(update.split('returning')[0]).not.toContain('invited_by');
+    expect(pool.queries[1].values).toEqual([USER_ROW.id]);
+  });
+
+  it('an already revoked user comes back as is, without a second audit entry', async () => {
+    const pool = poolAnswering([], [REVOKED_EMPLOYEE]);
+
+    const revoked = await directoryOver(pool).revokeUser(USER_ROW.id, SUPERADMIN_ROW.id);
+
+    const sqls = pool.queries.map((query) => squash(query.text));
+    expect(revoked?.status).toBe('revoked');
+    expect(sqls.some((sql) => sql.startsWith('insert into audit_log'))).toBe(false);
+    expect(sqls.find((sql) => sql.startsWith('select'))).toContain("role <> 'superadmin'");
+  });
+
+  it('returns null and rolls back for an unknown id or the superadmin', async () => {
+    const pool = poolAnswering([], []);
+
+    const result = await directoryOver(pool).revokeUser(SUPERADMIN_ROW.id, USER_ROW.id);
+
+    const sqls = pool.queries.map((query) => squash(query.text));
+    expect(result).toBeNull();
+    expect(sqls).toContain('rollback');
+    expect(sqls.some((sql) => sql.startsWith('insert into audit_log'))).toBe(false);
+    expect(pool.released).toBe(1);
+  });
+});

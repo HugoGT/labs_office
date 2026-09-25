@@ -584,3 +584,106 @@ describe('memoryDirectory: semilla y cierre', () => {
     await expect(directory.close()).resolves.toBeUndefined();
   });
 });
+
+describe('memoryDirectory: listUsers (#93)', () => {
+  it('lists every user, not only invitations, oldest first', async () => {
+    const directory = createMemoryDirectory({ bootstrapSuperadminEmail: 'hugo@example.com' });
+    const superadmin = (await directory.resolveOnLogin(HUGO))!;
+    const employee = await directory.createUser({
+      email: 'ana@example.com',
+      role: 'employee',
+      uid: 'uid-ana',
+      createdById: superadmin.id,
+    });
+    const guest = await directory.createInvitation({
+      email: 'externo@example.com',
+      days: 7,
+      invitedById: superadmin.id,
+      uid: 'uid-externo',
+    });
+
+    const users = await directory.listUsers();
+
+    expect(users.map((user) => user.id)).toEqual([superadmin.id, employee.id, guest.id]);
+    expect(users[0]).toMatchObject({ role: 'superadmin', status: 'active', invitedBy: null });
+    expect(users[2]).toMatchObject({ role: 'guest', invitedBy: superadmin.id });
+    expect(users[2].expiresAt).toBeInstanceOf(Date);
+  });
+
+  it('returns copies: mutating the list does not touch the store', async () => {
+    const directory = createMemoryDirectory({ seed: [provisioned()] });
+
+    const [first] = await directory.listUsers();
+    first.status = 'revoked';
+
+    expect((await directory.listUsers())[0].status).toBe('active');
+  });
+});
+
+describe('memoryDirectory: revokeUser (#93)', () => {
+  const SUPERADMIN = provisioned({
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000009',
+    uid: 'uid-hugo',
+    email: 'hugo@example.com',
+    role: 'superadmin',
+  });
+
+  function withStaff() {
+    const employee = provisioned();
+    const directory = createMemoryDirectory({ seed: [SUPERADMIN, employee] });
+    return { directory, employee };
+  }
+
+  it('revokes someone who did not come by invitation and returns the changed row', async () => {
+    const { directory, employee } = withStaff();
+
+    const revoked = await directory.revokeUser(employee.id, SUPERADMIN.id);
+
+    expect(revoked?.status).toBe('revoked');
+    expect((await directory.findById(employee.id))?.status).toBe('revoked');
+  });
+
+  it('writes its own audit action', async () => {
+    const { directory, employee } = withStaff();
+
+    await directory.revokeUser(employee.id, SUPERADMIN.id);
+
+    expect(directory.auditLog()).toEqual([
+      { actorId: SUPERADMIN.id, action: 'revoke-user', subjectId: employee.id },
+    ]);
+  });
+
+  it('revokes an invitation too', async () => {
+    const guest = provisioned({ role: 'guest', invitedBy: SUPERADMIN.id });
+    const directory = createMemoryDirectory({ seed: [SUPERADMIN, guest] });
+
+    expect((await directory.revokeUser(guest.id, SUPERADMIN.id))?.status).toBe('revoked');
+  });
+
+  it('returns null for an unknown id', async () => {
+    const { directory } = withStaff();
+
+    expect(await directory.revokeUser('00000000-0000-4000-8000-000000000000', SUPERADMIN.id)).toBeNull();
+    expect(directory.auditLog()).toEqual([]);
+  });
+
+  it('never touches the superadmin, whoever asks', async () => {
+    // The route already refuses with `canRemove`; this is the second lock, so
+    // no caller of the port can lock the office out of its only superadmin.
+    const { directory, employee } = withStaff();
+
+    expect(await directory.revokeUser(SUPERADMIN.id, employee.id)).toBeNull();
+    expect((await directory.findById(SUPERADMIN.id))?.status).toBe('active');
+    expect(directory.auditLog()).toEqual([]);
+  });
+
+  it('revoking twice is harmless and audits only the real change', async () => {
+    const { directory, employee } = withStaff();
+
+    await directory.revokeUser(employee.id, SUPERADMIN.id);
+    const second = await directory.revokeUser(employee.id, SUPERADMIN.id);
+
+    expect(second?.status).toBe('revoked');
+    expect(directory.auditLog()).toHaveLength(1);
+  });
+});

@@ -12,6 +12,9 @@ import { DesksPanel } from './DesksPanel';
 import { createSpacesAdminClient } from './spacesAdminClient';
 import type { SpacesAdminPort } from './spacesAdminPort';
 import { SpacesPanel } from './SpacesPanel';
+import { createUsersAdminClient } from './usersAdminClient';
+import type { UsersAdminPort } from './usersAdminPort';
+import { UsersPanel } from './UsersPanel';
 import { DashboardScreen } from './DashboardScreen';
 import styles from './DashboardScreen.module.css';
 import { resolveOfficeApiBaseUrl } from './officeApiBaseUrl';
@@ -44,6 +47,8 @@ interface DashboardPorts {
   desks: DeskAdminPort;
   assets: AssetAdminPort;
   spaces: SpacesAdminPort;
+  /** Everyone in the directory and removing access (#93). */
+  users: UsersAdminPort;
 }
 
 export default function DashboardRoute({ session }: DashboardRouteProps) {
@@ -78,6 +83,7 @@ export default function DashboardRoute({ session }: DashboardRouteProps) {
       // Misma raiz que `desks`: `GET /spaces` tampoco cuelga de `/admin`
       // (ver la cabecera de `spacesAdminClient.ts`).
       spaces: createSpacesAdminClient({ baseUrl: apiBaseUrl, getIdToken }),
+      users: createUsersAdminClient({ baseUrl: apiBaseUrl, getIdToken }),
     };
   });
 
@@ -120,6 +126,9 @@ export default function DashboardRoute({ session }: DashboardRouteProps) {
    */
   return (
     <DashboardScreen admin={ports.admin}>
+      {/* First of the extra panels: who is in the office is what an admin
+          looks for right after the invitations (#93). */}
+      <UsersPanel users={ports.users} />
       <DesksPanel desks={ports.desks} />
       <SpacesPanel spaces={ports.spaces} />
       <AssetsPanel assets={ports.assets} />

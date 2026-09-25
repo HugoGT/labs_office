@@ -60,6 +60,7 @@ import {
   decideAccess,
   type AccessDecision,
 } from '../directory/accessDecision.ts';
+import { canRemove } from '../directory/accessDecision.ts';
 import type {
   AssignableRole,
   DirectoryUser,
@@ -74,6 +75,7 @@ import {
 } from '../directory/invitationRules.ts';
 import { assertAssignableRole, InvalidUserError } from '../directory/userRules.ts';
 import type { IdTokenVerifier } from '../verifyIdToken.ts';
+import type { SessionEvictor } from '../sessionEviction.ts';
 import { generatePassword } from './generatePassword.ts';
 import { IdentityAdminError, type IdentityAdmin } from './identityAdminPort.ts';
 
@@ -96,6 +98,11 @@ export interface AdminDeps {
   now?: () => Date;
   /** Inyectable para que los tests afirmen sobre lo que se registra, sin ruido. */
   log?: (message: string) => void;
+  /**
+   * Throws a revoked account out of the office right away (#93). Absent, the
+   * revocation still happens and only takes effect on the next join.
+   */
+  evictor?: SessionEvictor;
 }
 
 const UNAUTHORIZED: AdminResult = { status: 401, body: { error: 'unauthorized' } };
@@ -690,6 +697,123 @@ export async function handleRevokeInvitation(
         `invitacion ${id} revocada en el directorio, pero no se pudo desactivar la cuenta ` +
           `uid=${revoked.uid} en Identity Platform: hay que desactivarla a mano en GCP`,
       );
+    }
+  }
+
+  return { status: 200, body: { id: revoked.id, status: 'revoked' } };
+}
+
+/**
+ * Every user of the directory, for the users table of the panel (#93).
+ *
+ * Fields listed one by one for the same reason as `toInvitationBody`: no `uid`
+ * and no internal `invitedBy`. `removable` is `canRemove` evaluated for THIS
+ * caller on the server, so the panel shows the button from the very rule that
+ * the revoke route enforces instead of a client copy that could drift. It is
+ * only a hint for the screen; `handleRevokeUser` checks the rule again.
+ */
+function toUserBody(row: DirectoryUser, actor: DirectoryUser, now: Date): Record<string, unknown> {
+  return {
+    id: row.id,
+    email: row.email,
+    displayName: row.displayName,
+    role: row.role,
+    status: row.status,
+    createdAt: row.createdAt.toISOString(),
+    expiresAt: toIso(row.expiresAt),
+    daysLeft: daysLeft(row.expiresAt, now),
+    removable: row.status === 'active' && canRemove(actor, row),
+  };
+}
+
+export async function handleListUsers(
+  authorization: unknown,
+  deps: AdminDeps,
+): Promise<AdminResult> {
+  const authorized = await authorize(authorization, deps);
+  if (!authorized.ok) return authorized.result;
+
+  const now = clock(deps);
+  const rows = await deps.directory.listUsers();
+  return {
+    status: 200,
+    body: { users: rows.map((row) => toUserBody(row, authorized.user, now)) },
+  };
+}
+
+/**
+ * Shape of the ids `gen_random_uuid()` produces. Checked before the directory
+ * sees the id: Postgres rejects a malformed uuid with an error, which would
+ * turn "no such user" into a 500.
+ */
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Takes access away from anyone the caller outranks (#93). Three cuts, like
+ * `handleRevokeInvitation` plus one:
+ *
+ *   1. `directory.revokeUser` closes the door: the next join is refused.
+ *   2. `evictor.evictAccount` throws out the sessions already inside, which
+ *      `decideAccess` alone never would, since it only runs on join.
+ *   3. `identityAdmin.disableAccount` takes the key: no more token refresh.
+ *
+ * The eviction goes BEFORE disabling the account on purpose: it is local and
+ * instant, while disabling is a round trip to Google that can be slow or fail,
+ * and the person should not stay in the office meanwhile. A rejoin in between
+ * is already refused by the directory.
+ *
+ * Neither 2 nor 3 undoes 1 when it fails, for the reason
+ * `handleRevokeInvitation` gives: the revocation that matters happened, and
+ * handing access back because a later step failed would fail open. The missing
+ * half is logged with the uid, because it becomes manual work.
+ *
+ * 404 and 403 are distinguished here, unlike the silent 401: whoever reaches
+ * this already proved they administer and can list every user anyway.
+ */
+export async function handleRevokeUser(
+  authorization: unknown,
+  id: unknown,
+  deps: AdminDeps,
+): Promise<AdminResult> {
+  const authorized = await authorize(authorization, deps);
+  if (!authorized.ok) return authorized.result;
+
+  if (typeof id !== 'string' || !UUID_SHAPE.test(id)) return NOT_FOUND;
+
+  const target = await deps.directory.findById(id);
+  if (target === null) return NOT_FOUND;
+  if (!canRemove(authorized.user, target)) return FORBIDDEN;
+
+  const revoked = await deps.directory.revokeUser(id, authorized.user.id);
+  // Gone between the read and the write, or refused by the directory's own
+  // superadmin lock: either way there is nobody here to revoke.
+  if (revoked === null) return NOT_FOUND;
+
+  const uid = revoked.uid;
+  if (uid !== null) {
+    try {
+      deps.evictor?.evictAccount(uid);
+    } catch {
+      logger(deps)(
+        `usuario ${id} revocado, pero no se pudo expulsar de la oficina a uid=${uid}: ` +
+          `seguira dentro hasta que salga`,
+      );
+    }
+
+    if (!deps.identityAdmin) {
+      logger(deps)(
+        `usuario ${id} revocado en el directorio, pero no hay credencial de Identity ` +
+          `Platform: la cuenta uid=${uid} sigue activa y hay que desactivarla a mano`,
+      );
+    } else {
+      try {
+        await deps.identityAdmin.disableAccount(uid);
+      } catch {
+        logger(deps)(
+          `usuario ${id} revocado en el directorio, pero no se pudo desactivar la cuenta ` +
+            `uid=${uid} en Identity Platform: hay que desactivarla a mano en GCP`,
+        );
+      }
     }
   }
 
