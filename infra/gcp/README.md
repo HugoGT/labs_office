@@ -495,6 +495,13 @@ En cuanto existe uno, la regla deja de aplicarse: cambiar el valor de la variabl
 más adelante no promociona a nadie. A partir de ahí los roles se reparten desde el
 panel.
 
+Es también la **única** fila que el inicio de sesión crea por su cuenta (issue
+#72). Cualquier otra cuenta de Identity Platform sin fila en `users` se rechaza
+con 401 y el servidor registra `not-provisioned`: empleados y administradores se
+dan de alta desde el panel, invitados con una invitación. Si el directorio se
+vacía, solo el superadmin de bootstrap vuelve a entrar; nadie más se recrea como
+empleado permanente.
+
 **Y aquí está la trampa.** El issue #8 desactivó "Allow password sign-up" en el
 proveedor de Identity Platform: nadie puede darse de alta por su cuenta. Así que la
 cuenta de `BOOTSTRAP_SUPERADMIN_EMAIL` **tiene que existir antes**, creada a mano

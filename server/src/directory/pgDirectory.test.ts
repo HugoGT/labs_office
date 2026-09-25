@@ -94,6 +94,23 @@ function directoryOver(pool: DirectoryPool, bootstrapSuperadminEmail: string | n
   return createPgDirectory(pool, { bootstrapSuperadminEmail });
 }
 
+const HUGO = { uid: 'uid-hugo', email: 'Hugo@Example.com', name: 'Hugo' };
+
+const SUPERADMIN_ROW = {
+  ...USER_ROW,
+  id: '33333333-3333-4333-8333-333333333333',
+  uid: 'uid-hugo',
+  email: 'hugo@example.com',
+  display_name: 'Hugo',
+  role: 'superadmin',
+};
+
+const isInsert = (text: string) => squash(text).startsWith('insert into users');
+const isSelect = (text: string) => squash(text).startsWith('select');
+
+/** Nadie tiene fila todavia: el UPDATE por uid no toca nada. */
+const NO_ROW: DirectoryQueryResult = { rows: [], rowCount: 0 };
+
 describe('pgDirectory: resolveOnLogin', () => {
   it('traduce la fila de postgres al tipo del puerto', async () => {
     const pool = fakePool(() => ({ rows: [USER_ROW], rowCount: 1 }));
@@ -113,50 +130,119 @@ describe('pgDirectory: resolveOnLogin', () => {
     });
   });
 
-  it('resuelve el login en UNA sola sentencia', async () => {
-    // Un SELECT seguido de un INSERT tendria una ventana entre los dos: dos
-    // pestanas abriendo sesion a la vez pasarian ambas por el "no existe". Con
-    // `ON CONFLICT` la carrera la resuelve Postgres, que es quien puede.
+  it('a quien ya tiene fila lo resuelve en UNA sentencia que solo refresca el nombre', async () => {
+    // El rol, el estado y la caducidad los decide esta oficina desde el panel;
+    // el token solo aporta el nombre visible. Un UPDATE por uid no puede crear
+    // nada, que es exactamente lo que se quiere del camino normal.
     const pool = fakePool(() => ({ rows: [USER_ROW], rowCount: 1 }));
 
     await directoryOver(pool).resolveOnLogin(ANA);
 
     expect(pool.queries).toHaveLength(1);
     const sql = squash(pool.queries[0].text);
-    expect(sql).toContain('insert into users');
-    expect(sql).toContain('on conflict (uid) do update');
+    expect(sql).toContain('update users set display_name = $2 where uid = $1');
+    const setClause = sql.slice(sql.indexOf(' set '), sql.indexOf(' where '));
+    expect(setClause).toBe(' set display_name = $2');
+    expect(pool.queries[0].values).toEqual(['uid-ana', 'Ana']);
   });
 
-  it('la promocion a superadmin exige el email de bootstrap Y que no haya ninguno', async () => {
-    const pool = fakePool(() => ({ rows: [USER_ROW], rowCount: 1 }));
+  it('una cuenta sin fila NO se da de alta sola: devuelve null y no inserta (#72)', async () => {
+    // Antes el login hacia `INSERT ... ON CONFLICT` y cualquier cuenta de
+    // Identity Platform con email acababa de empleado permanente. Tras perder
+    // la base de datos, un invitado se recreo asi: sin caducidad, fuera del
+    // panel de invitaciones e irrevocable.
+    const pool = fakePool(() => NO_ROW);
 
-    await directoryOver(pool, 'hugo@example.com').resolveOnLogin(ANA);
+    const user = await directoryOver(pool, 'hugo@example.com').resolveOnLogin(ANA);
 
-    const sql = squash(pool.queries[0].text);
+    expect(user).toBeNull();
+    expect(pool.queries.some((query) => isInsert(query.text))).toBe(false);
+  });
+
+  it('sin email de bootstrap configurado nadie se crea, ni siquiera ese email', async () => {
+    const pool = fakePool(() => NO_ROW);
+
+    expect(await directoryOver(pool).resolveOnLogin(HUGO)).toBeNull();
+    expect(pool.queries.some((query) => isInsert(query.text))).toBe(false);
+  });
+
+  it('ninguna sentencia del login puede crear un empleado', async () => {
+    // La unica fila que el login puede escribir es la del superadmin. Si un
+    // `'employee'` volviese a aparecer en el SQL del login, el agujero de #72
+    // habria vuelto con el.
+    const pool = fakePool((text) => (isInsert(text) ? { rows: [SUPERADMIN_ROW], rowCount: 1 } : NO_ROW));
+
+    await directoryOver(pool, 'hugo@example.com').resolveOnLogin(HUGO);
+
+    for (const query of pool.queries) expect(squash(query.text)).not.toContain('employee');
+  });
+
+  it('el email de bootstrap sin fila crea al superadmin, solo si no hay ninguno', async () => {
+    const pool = fakePool((text) => (isInsert(text) ? { rows: [SUPERADMIN_ROW], rowCount: 1 } : NO_ROW));
+
+    const user = await directoryOver(pool, 'hugo@example.com').resolveOnLogin(HUGO);
+
+    expect(user?.role).toBe('superadmin');
+    const insert = pool.queries.find((query) => isInsert(query.text))!;
+    const sql = squash(insert.text);
+    expect(sql).toContain("'superadmin'");
     expect(sql).toContain("not exists (select 1 from users where role = 'superadmin')");
-    expect(sql).toContain("then 'superadmin' else 'employee' end");
+    expect(sql).toContain('lower($2) = lower($4)');
+    expect(sql).toContain('on conflict (uid) do update');
   });
 
   it('manda el email ya normalizado y el de bootstrap como parametro', async () => {
     // Como parametro y no interpolado: viene del entorno, pero un entorno con
     // una comilla dentro no tiene por que poder reescribir la sentencia.
-    const pool = fakePool(() => ({ rows: [USER_ROW], rowCount: 1 }));
+    const pool = fakePool((text) => (isInsert(text) ? { rows: [SUPERADMIN_ROW], rowCount: 1 } : NO_ROW));
 
     await directoryOver(pool, '  Hugo@Example.COM ').resolveOnLogin({
-      uid: 'uid-ana',
-      email: '  Ana@Example.com ',
-      name: 'Ana',
+      uid: 'uid-hugo',
+      email: '  Hugo@Example.com ',
+      name: 'Hugo',
     });
 
-    expect(pool.queries[0].values).toEqual(['uid-ana', 'ana@example.com', 'Ana', 'hugo@example.com']);
+    const insert = pool.queries.find((query) => isInsert(query.text))!;
+    expect(insert.values).toEqual(['uid-hugo', 'hugo@example.com', 'Hugo', 'hugo@example.com']);
   });
 
-  it('sin email de bootstrap manda null, no una cadena vacia', async () => {
-    const pool = fakePool(() => ({ rows: [USER_ROW], rowCount: 1 }));
+  it('si ya hay superadmin, el INSERT no devuelve fila y se relee por uid', async () => {
+    // El `NOT EXISTS` deja el INSERT vacio. Releer por uid cubre el unico caso
+    // en que eso no es un rechazo: que otra pestana de la MISMA persona haya
+    // creado su fila entre el UPDATE y el INSERT.
+    const pool = fakePool(() => NO_ROW);
 
-    await directoryOver(pool).resolveOnLogin(ANA);
+    const user = await directoryOver(pool, 'hugo@example.com').resolveOnLogin(HUGO);
 
-    expect(pool.queries[0].values[3]).toBeNull();
+    expect(user).toBeNull();
+    expect(isSelect(pool.queries[2].text)).toBe(true);
+    expect(pool.queries[2].values).toEqual(['uid-hugo']);
+  });
+
+  it('si salta un indice unico al crear al superadmin, relee por uid en vez de reventar', async () => {
+    // Dos cosas dan 23505 aqui: la carrera del bootstrap (otro login se quedo
+    // con el indice parcial de superadmin) o el email unico (ese email ya
+    // existe con otro uid). En ambos casos lo seguro es lo mismo: releer por
+    // uid, y si no hay fila, `null` -- ni se inventa una ni se deja entrar.
+    const pool = fakePool((text) => (isInsert(text) ? uniqueViolation() : NO_ROW));
+
+    const user = await directoryOver(pool, 'hugo@example.com').resolveOnLogin(HUGO);
+
+    expect(user).toBeNull();
+    expect(pool.queries.filter((query) => isInsert(query.text))).toHaveLength(1);
+    expect(isSelect(pool.queries[2].text)).toBe(true);
+  });
+
+  it('la relectura tras la carrera devuelve la fila si la otra pestana era la misma persona', async () => {
+    const pool = fakePool((text) => {
+      if (isInsert(text)) return uniqueViolation();
+      if (isSelect(text)) return { rows: [SUPERADMIN_ROW], rowCount: 1 };
+      return NO_ROW;
+    });
+
+    const user = await directoryOver(pool, 'hugo@example.com').resolveOnLogin(HUGO);
+
+    expect(user?.role).toBe('superadmin');
   });
 
   it('un token sin email no entra y no llega a tocar la base de datos', async () => {
@@ -172,44 +258,22 @@ describe('pgDirectory: resolveOnLogin', () => {
     expect(pool.queries).toHaveLength(0);
   });
 
-  it('reintenta una vez si salta un indice unico: es la carrera del bootstrap', async () => {
-    // Dos logins simultaneos pueden pasar los dos por el `NOT EXISTS` antes de
-    // que ninguno haya insertado; el indice parcial deja pasar solo a uno y el
-    // otro recibe 23505. Repetir la sentencia ya ve al superadmin y entra como
-    // empleado, que es exactamente lo que debia pasar.
-    let attempts = 0;
-    const pool = fakePool(() => {
-      attempts++;
-      return attempts === 1 ? uniqueViolation() : { rows: [USER_ROW], rowCount: 1 };
-    });
-
-    const user = await directoryOver(pool, 'ana@example.com').resolveOnLogin(ANA);
-
-    expect(attempts).toBe(2);
-    expect(user?.role).toBe('employee');
-  });
-
-  it('si el reintento tambien choca, relee por uid en vez de reventar el login', async () => {
-    // El segundo 23505 ya no es la carrera del superadmin sino el email unico:
-    // ese email existe con otro uid. Releer devuelve `null` para este uid y la
-    // decision de acceso lo tratara como no aprovisionado, que es el default
-    // seguro: no se le inventa una fila ni se le deja entrar.
-    const pool = fakePool((text) =>
-      squash(text).startsWith('insert into users') ? uniqueViolation() : { rows: [], rowCount: 0 },
-    );
-
-    const user = await directoryOver(pool, 'ana@example.com').resolveOnLogin(ANA);
-
-    expect(user).toBeNull();
-    expect(squash(pool.queries[2].text)).toContain('select');
-  });
-
   it('un error que no sea de indice unico se propaga', async () => {
     // "La base de datos esta caida" no puede disfrazarse de "esta persona no
     // esta en el directorio": el primero se arregla y el segundo no.
     const pool = fakePool(() => Object.assign(new Error('connection terminated'), { code: '08006' }));
 
     await expect(directoryOver(pool).resolveOnLogin(ANA)).rejects.toThrow('connection terminated');
+  });
+
+  it('tampoco se traga un error que no sea de indice unico al crear al superadmin', async () => {
+    const pool = fakePool((text) =>
+      isInsert(text) ? Object.assign(new Error('connection terminated'), { code: '08006' }) : NO_ROW,
+    );
+
+    await expect(
+      directoryOver(pool, 'hugo@example.com').resolveOnLogin(HUGO),
+    ).rejects.toThrow('connection terminated');
   });
 });
 

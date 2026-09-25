@@ -9,11 +9,25 @@
  * sobre la forma del SQL y los parametros sin levantar una base de datos. Una
  * suite que exige infraestructura acaba sin correrse, y entonces no protege.
  *
+ * ## El login falla cerrado (#72)
+ *
+ * `resolveOnLogin` NO da de alta a nadie, con una unica excepcion: el
+ * superadmin de bootstrap. Cualquier otra cuenta tiene que existir ya en
+ * `users`, creada desde el panel (`createUser` o `createInvitation`); si no
+ * existe, devuelve `null` y `decideAccess` la deniega como `not-provisioned`.
+ *
+ * Antes el login era un `INSERT ... ON CONFLICT` que convertia en empleado
+ * permanente a CUALQUIER cuenta de Identity Platform con email. Cuando se perdio
+ * la base de datos (#72), un invitado volvio a entrar y se recreo asi: sin
+ * caducidad, fuera del panel de invitaciones y sin forma de revocarlo. Un token
+ * firmado por Google prueba quien es alguien, no que esta oficina lo conozca.
+ *
  * ## La regla de bootstrap del superadmin, y por que es asi
  *
- * El primer login se promociona a `superadmin` SOLO si el email verificado del
- * token coincide (sin distinguir mayusculas) con `BOOTSTRAP_SUPERADMIN_EMAIL` Y
- * ademas no existe ya un superadmin. Todos los demas entran como `employee`.
+ * El login crea la fila SOLO si el email verificado del token coincide (sin
+ * distinguir mayusculas) con `BOOTSTRAP_SUPERADMIN_EMAIL` Y ademas no existe ya
+ * un superadmin. Esa fila nace `superadmin`; no hay otro rol que el login pueda
+ * escribir.
  *
  * Lo tentador seria "el primero que entre manda", y es exactamente lo que no se
  * hace: la URL de la oficina es publica y el alta la controla Identity
@@ -25,17 +39,18 @@
  * La segunda mitad (`NOT EXISTS`) es la que impide que sea una puerta trasera
  * permanente: una vez hay superadmin, volver a poner ese email en el entorno no
  * recupera nada. Y no vive solo aqui: `schema.sql` tiene un indice unico
- * parcial que hace fisicamente imposible un segundo superadmin. Este `CASE` es
+ * parcial que hace fisicamente imposible un segundo superadmin. El `WHERE` es
  * la version amable y el indice es la garantia -- si dos logins simultaneos
  * pasan a la vez por el `NOT EXISTS`, Postgres deja entrar a uno y al otro le
- * devuelve 23505, que abajo se reintenta.
+ * devuelve 23505, que abajo se resuelve releyendo por uid.
  *
- * ## Por que `resolveOnLogin` es UNA sentencia
+ * ## Por que el camino normal es UN UPDATE
  *
- * Un SELECT y luego un INSERT dejan una ventana entre los dos: dos pestanas
- * abriendo sesion a la vez pasan ambas por el "no existe" y la segunda revienta
- * contra el indice de `uid`. Con `ON CONFLICT (uid)` la carrera la resuelve
- * Postgres, que es el unico que puede.
+ * Quien ya tiene fila se resuelve con `UPDATE ... WHERE uid = $1 RETURNING`:
+ * refresca el nombre visible y devuelve la fila en una sola sentencia, sin
+ * ventana entre leer y escribir, y sin ninguna forma de crear nada. Solo si no
+ * hay fila Y el email es el de bootstrap se intenta el INSERT, con `ON CONFLICT
+ * (uid)` para la carrera de dos pestanas de la misma persona.
  */
 
 import type {
@@ -114,19 +129,32 @@ function toInvitationRow(row: Record<string, unknown>): InvitationRow {
 }
 
 /**
- * `lower($2)` aunque el email ya llegue normalizado desde `invitationRules`: la
- * normalizacion en JavaScript es la conveniencia y esta es la garantia, en el
- * unico sitio por el que pasan todas las escrituras. El email de bootstrap va
- * como PARAMETRO y no interpolado: viene del entorno, pero un entorno con una
- * comilla dentro no tiene por que poder reescribir la sentencia.
+ * El camino de todo el que ya existe. Solo el nombre visible se refresca: el
+ * rol, el estado y la caducidad los decide esta oficina desde el panel, y
+ * sobrescribirlos en cada login borraria cualquier promocion o revocacion.
  */
-const RESOLVE_ON_LOGIN_SQL = `
+const REFRESH_ON_LOGIN_SQL = `
+  UPDATE users SET display_name = $2
+  WHERE uid = $1
+  RETURNING ${USER_COLUMNS}
+`;
+
+/**
+ * La UNICA alta que puede hacer el login: el superadmin de bootstrap.
+ *
+ * `lower($2)` aunque el email ya llegue normalizado desde `invitationRules`: la
+ * normalizacion en JavaScript es la conveniencia y esta es la garantia. La
+ * comparacion con `$4` se repite aqui aunque el llamante ya la haya hecho: si
+ * alguien quitase esa guarda, esta sentencia seguiria sin poder crear a nadie
+ * que no sea el email de bootstrap. El email de bootstrap va como PARAMETRO y
+ * no interpolado: viene del entorno, pero un entorno con una comilla dentro no
+ * tiene por que poder reescribir la sentencia.
+ */
+const BOOTSTRAP_SUPERADMIN_SQL = `
   INSERT INTO users (uid, email, display_name, role, status)
-  VALUES ($1, lower($2), $3,
-    CASE WHEN $4::text IS NOT NULL AND lower($2) = lower($4)
-              AND NOT EXISTS (SELECT 1 FROM users WHERE role = 'superadmin')
-         THEN 'superadmin' ELSE 'employee' END,
-    'active')
+  SELECT $1, lower($2), $3, 'superadmin', 'active'
+  WHERE $4::text IS NOT NULL AND lower($2) = lower($4)
+    AND NOT EXISTS (SELECT 1 FROM users WHERE role = 'superadmin')
   ON CONFLICT (uid) DO UPDATE SET display_name = EXCLUDED.display_name
   RETURNING ${USER_COLUMNS}
 `;
@@ -193,30 +221,36 @@ export function createPgDirectory(
       // no tiene nada con que casar, y antes que inventarle una fila sin clave
       // humana se le niega la entrada. No llega a tocar la base de datos.
       if (identity.email === null) return null;
-      const values = [identity.uid, normalizeEmail(identity.email), identity.name, bootstrapEmail];
+      const email = normalizeEmail(identity.email);
+
+      const refreshed = await pool.query(REFRESH_ON_LOGIN_SQL, [identity.uid, identity.name]);
+      if (refreshed.rows[0]) return toDirectoryUser(refreshed.rows[0]);
+
+      // Sin fila, y no es el email de bootstrap: no aprovisionado. Ni se toca
+      // la base de datos otra vez ni se le inventa una fila (#72).
+      if (bootstrapEmail === null || email !== bootstrapEmail) return null;
 
       try {
-        const result = await pool.query(RESOLVE_ON_LOGIN_SQL, values);
-        return toDirectoryUser(result.rows[0]);
+        const inserted = await pool.query(BOOTSTRAP_SUPERADMIN_SQL, [
+          identity.uid,
+          email,
+          identity.name,
+          bootstrapEmail,
+        ]);
+        if (inserted.rows[0]) return toDirectoryUser(inserted.rows[0]);
       } catch (error) {
+        // 23505 aqui es la carrera del bootstrap (otro login se quedo con el
+        // indice parcial de superadmin) o el email unico (ese email ya existe
+        // con otro uid). Cualquier otro error -- la base caida -- se propaga:
+        // no puede disfrazarse de "no esta en el directorio".
         if (!isUniqueViolation(error)) throw error;
-
-        // Carrera del bootstrap: dos logins pasaron a la vez por el `NOT
-        // EXISTS` y el indice parcial dejo entrar solo a uno. Repetir la misma
-        // sentencia ya ve al superadmin y entra como empleado.
-        try {
-          const retry = await pool.query(RESOLVE_ON_LOGIN_SQL, values);
-          return toDirectoryUser(retry.rows[0]);
-        } catch (retryError) {
-          if (!isUniqueViolation(retryError)) throw retryError;
-
-          // El segundo choque ya no es esa carrera, sino el email unico: ese
-          // email existe con otro uid. Releer devuelve `null` para este uid y
-          // `decideAccess` lo tratara como no aprovisionado, que es el default
-          // seguro -- ni se le inventa una fila ni se le deja entrar.
-          return findOne('uid', identity.uid);
-        }
       }
+
+      // El INSERT no creo nada: ya hay superadmin, o salto un indice unico. La
+      // relectura por uid cubre el unico caso legitimo (otra pestana de la
+      // MISMA persona creo su fila entre el UPDATE y el INSERT); en los demas
+      // devuelve `null` y `decideAccess` lo trata como no aprovisionado.
+      return findOne('uid', identity.uid);
     },
 
     findByUid(uid) {

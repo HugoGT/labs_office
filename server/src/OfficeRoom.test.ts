@@ -909,7 +909,7 @@ describe('OfficeRoom: onAuth con directorio (#24)', () => {
   });
 
   it('un usuario activo del directorio entra igual que antes', async () => {
-    await start(createMemoryDirectory());
+    await start(createMemoryDirectory({ seed: [seededUser({})] }));
 
     const room = await joinWithToken();
     openRooms.push(room);
@@ -919,15 +919,28 @@ describe('OfficeRoom: onAuth con directorio (#24)', () => {
     expect(directoryServer.sessions.uidOf(room.sessionId)).toBe('uid-ana');
   });
 
-  it('el primer login crea la fila: entrar con un token valido basta', async () => {
+  it('una cuenta de Identity Platform sin fila en el directorio NO entra (#72)', async () => {
+    // El token es valido y trae email: antes eso bastaba para que el login
+    // creara a la persona como empleado permanente. Tras perder la base de
+    // datos, asi se recreo un invitado sin caducidad e irrevocable. Ahora un
+    // token valido solo prueba quien es; entrar exige una fila dada de alta.
     const directory = createMemoryDirectory();
+    await start(directory);
+
+    await expect(joinWithToken()).rejects.toMatchObject({ code: 401 });
+    expect(await directory.findByUid('uid-ana')).toBeNull();
+    expect(directoryServer.sessions.size()).toBe(0);
+  });
+
+  it('el superadmin de bootstrap si entra la primera vez, y se crea su fila', async () => {
+    const directory = createMemoryDirectory({ bootstrapSuperadminEmail: 'ana@example.com' });
     await start(directory);
 
     const room = await joinWithToken();
     openRooms.push(room);
     await waitFor(() => room.state.players.size === 1);
 
-    expect((await directory.findByUid('uid-ana'))?.email).toBe('ana@example.com');
+    expect((await directory.findByUid('uid-ana'))?.role).toBe('superadmin');
   });
 
   it('un invitado caducado NO entra, aunque su token siga siendo valido', async () => {
@@ -1038,6 +1051,12 @@ describe('OfficeRoom: el motivo del rechazo se registra en el servidor (#24)', (
     expect(logged).toEqual(['expired:uid-ana']);
   });
 
+  it('registra "not-provisioned" cuando la cuenta no tiene fila (#72)', async () => {
+    const logged = await denyAndCaptureLog(createMemoryDirectory());
+
+    expect(logged).toEqual(['not-provisioned:uid-ana']);
+  });
+
   it('registra "revoked" cuando la cuenta esta revocada', async () => {
     const logged = await denyAndCaptureLog(
       createMemoryDirectory({ seed: [seededUser({ status: 'revoked' })] }),
@@ -1052,7 +1071,7 @@ describe('OfficeRoom: el motivo del rechazo se registra en el servidor (#24)', (
     (room as unknown as { onMessage: unknown }).onMessage = () => () => {};
     room.onCreate({
       auth: stubVerifier({ 'token-de-ana': ANA }),
-      directory: createMemoryDirectory(),
+      directory: createMemoryDirectory({ seed: [seededUser({})] }),
       logDirectoryDenial: (decision, uid) => logged.push(`${decision}:${uid}`),
     });
 

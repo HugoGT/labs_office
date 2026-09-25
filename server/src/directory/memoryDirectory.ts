@@ -4,9 +4,9 @@
  *
  * La regla de bootstrap de superadmin es la mas peligrosa de todo el cambio --
  * si se invierte su condicion, cualquiera que entre se queda la oficina. En
- * `pgDirectory.ts` esa regla es un `CASE WHEN ... NOT EXISTS` dentro de un
- * INSERT, y un test que afirme "el SQL contiene NOT EXISTS" pasaria igual con
- * la condicion al reves. Aqui la misma regla se prueba entrando dos veces y
+ * `pgDirectory.ts` esa regla es un `WHERE ... NOT EXISTS` dentro de un INSERT,
+ * y un test que afirme "el SQL contiene NOT EXISTS" pasaria igual con la
+ * condicion al reves. Aqui la misma regla se prueba entrando dos veces y
  * mirando el rol, que es lo que de verdad importa. Las dos implementaciones
  * comparten `invitationRules.ts` para que no se separen en lo mecanico.
  *
@@ -128,14 +128,23 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
         return snapshot(existing);
       }
 
-      const promote = bootstrapEmail !== null && email === bootstrapEmail && !hasSuperadmin();
+      // Falla cerrado (#72): la unica fila que el login puede crear es la del
+      // superadmin de bootstrap. Cualquier otra cuenta tiene que existir ya,
+      // dada de alta desde el panel; si no, `null` y `decideAccess` la deniega
+      // como `not-provisioned`. La comprobacion del email repetido es la del
+      // indice unico de `users.email` en Postgres: sin ella, este adaptador
+      // crearia una fila que `pgDirectory` rechazaria.
+      const isBootstrap = bootstrapEmail !== null && email === bootstrapEmail;
+      if (!isBootstrap || hasSuperadmin() || rows.some((row) => row.email === email)) {
+        return null;
+      }
 
       return snapshot(
         insert({
           uid: identity.uid,
           email,
           displayName: identity.name,
-          role: promote ? 'superadmin' : 'employee',
+          role: 'superadmin',
           status: 'active',
           expiresAt: null,
           invitedBy: null,

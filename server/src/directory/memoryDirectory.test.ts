@@ -11,6 +11,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import type { DirectoryUser } from './directoryPort.ts';
 import { InvalidInvitationError } from './invitationRules.ts';
 import { createMemoryDirectory } from './memoryDirectory.ts';
 import { InvalidUserError } from './userRules.ts';
@@ -18,33 +19,52 @@ import { InvalidUserError } from './userRules.ts';
 const HUGO = { uid: 'uid-hugo', email: 'Hugo@Example.com', name: 'Hugo' };
 const ANA = { uid: 'uid-ana', email: 'ana@example.com', name: 'Ana' };
 
-describe('memoryDirectory: resolveOnLogin', () => {
-  it('crea la fila la primera vez, como empleado activo y sin caducidad', async () => {
+/** Fila ya dada de alta, como la dejaria el panel (`createUser`/`createInvitation`). */
+function provisioned(overrides: Partial<DirectoryUser> = {}): DirectoryUser {
+  return {
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000001',
+    uid: 'uid-ana',
+    email: 'ana@example.com',
+    displayName: null,
+    role: 'employee',
+    status: 'active',
+    expiresAt: null,
+    invitedBy: null,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+describe('memoryDirectory: resolveOnLogin (falla cerrado, #72)', () => {
+  it('una cuenta de Identity Platform sin fila NO se da de alta sola: devuelve null', async () => {
+    // El nucleo de #72: tras perder la base de datos, un invitado volvio a
+    // entrar y el login lo recreo como empleado permanente, invisible en el
+    // panel de invitaciones e irrevocable. Un token valido de Google no dice
+    // que esta oficina conozca a esa persona; eso solo lo dice una fila.
     const directory = createMemoryDirectory();
+
+    expect(await directory.resolveOnLogin(ANA)).toBeNull();
+    expect(await directory.findByUid('uid-ana')).toBeNull();
+  });
+
+  it('devuelve la fila existente por uid, tal cual la dejo el alta', async () => {
+    const directory = createMemoryDirectory({
+      seed: [provisioned({ role: 'guest', expiresAt: new Date('2099-01-01T00:00:00.000Z') })],
+    });
 
     const user = await directory.resolveOnLogin(ANA);
 
     expect(user).toMatchObject({
       uid: 'uid-ana',
       email: 'ana@example.com',
-      displayName: 'Ana',
-      role: 'employee',
+      role: 'guest',
       status: 'active',
-      expiresAt: null,
-      invitedBy: null,
+      expiresAt: new Date('2099-01-01T00:00:00.000Z'),
     });
   });
 
-  it('normaliza el email a minusculas al crear', async () => {
-    const directory = createMemoryDirectory();
-
-    const user = await directory.resolveOnLogin(HUGO);
-
-    expect(user?.email).toBe('hugo@example.com');
-  });
-
   it('es idempotente por uid: el segundo login no crea otra fila', async () => {
-    const directory = createMemoryDirectory();
+    const directory = createMemoryDirectory({ seed: [provisioned()] });
 
     const first = await directory.resolveOnLogin(ANA);
     const second = await directory.resolveOnLogin(ANA);
@@ -56,14 +76,16 @@ describe('memoryDirectory: resolveOnLogin', () => {
     // El `name` del token es lo que la persona ve sobre su avatar y cambia
     // cuando cambia su perfil. El rol NO puede salir del token: lo decide esta
     // oficina, no Identity Platform, y sobrescribirlo en cada login borraria
-    // cualquier promocion hecha desde el panel.
-    const directory = createMemoryDirectory({ bootstrapSuperadminEmail: 'ana@example.com' });
-    await directory.resolveOnLogin(ANA);
+    // cualquier promocion o revocacion hecha desde el panel.
+    const directory = createMemoryDirectory({
+      seed: [provisioned({ role: 'admin', status: 'revoked' })],
+    });
 
     const again = await directory.resolveOnLogin({ ...ANA, name: 'Ana Gomez' });
 
     expect(again?.displayName).toBe('Ana Gomez');
-    expect(again?.role).toBe('superadmin');
+    expect(again?.role).toBe('admin');
+    expect(again?.status).toBe('revoked');
   });
 
   it('devuelve null si el token no trae email: el directorio se indexa por email', async () => {
@@ -76,9 +98,9 @@ describe('memoryDirectory: resolveOnLogin', () => {
   });
 
   it('acepta un token sin name: el nombre visible queda vacio, no la fila', async () => {
-    const directory = createMemoryDirectory();
+    const directory = createMemoryDirectory({ seed: [provisioned({ displayName: 'Ana' })] });
 
-    const user = await directory.resolveOnLogin({ uid: 'uid-x', email: 'x@example.com', name: null });
+    const user = await directory.resolveOnLogin({ ...ANA, name: null });
 
     expect(user?.displayName).toBeNull();
     expect(user?.role).toBe('employee');
@@ -103,16 +125,57 @@ describe('memoryDirectory: bootstrap de superadmin', () => {
   it('NO promociona al primero que entre si no es el email de bootstrap', async () => {
     // Esta es la regla entera: "el primero que entre manda" seria una carrera
     // por quedarse la oficina sobre una URL publica. Ana llega antes que nadie
-    // y se queda de empleada.
+    // y no se queda con nada: ni el mando ni, desde #72, una fila de empleada.
     const directory = createMemoryDirectory({ bootstrapSuperadminEmail: 'hugo@example.com' });
 
-    expect((await directory.resolveOnLogin(ANA))?.role).toBe('employee');
+    expect(await directory.resolveOnLogin(ANA)).toBeNull();
+    expect(await directory.findByUid('uid-ana')).toBeNull();
   });
 
-  it('sin email de bootstrap no promociona a nadie', async () => {
+  it('sin email de bootstrap no promociona ni da de alta a nadie', async () => {
     const directory = createMemoryDirectory();
 
-    expect((await directory.resolveOnLogin(HUGO))?.role).toBe('employee');
+    expect(await directory.resolveOnLogin(HUGO)).toBeNull();
+    expect(await directory.findByUid('uid-hugo')).toBeNull();
+  });
+
+  it('normaliza el email a minusculas al crear al superadmin', async () => {
+    const directory = createMemoryDirectory({ bootstrapSuperadminEmail: 'hugo@example.com' });
+
+    const user = await directory.resolveOnLogin(HUGO);
+
+    expect(user).toMatchObject({
+      uid: 'uid-hugo',
+      email: 'hugo@example.com',
+      displayName: 'Hugo',
+      role: 'superadmin',
+      status: 'active',
+      expiresAt: null,
+      invitedBy: null,
+    });
+  });
+
+  it('el superadmin ya creado vuelve a entrar con su misma fila', async () => {
+    const directory = createMemoryDirectory({ bootstrapSuperadminEmail: 'hugo@example.com' });
+
+    const first = await directory.resolveOnLogin(HUGO);
+    const second = await directory.resolveOnLogin(HUGO);
+
+    expect(second?.id).toBe(first?.id);
+    expect(second?.role).toBe('superadmin');
+  });
+
+  it('no crea al superadmin si su email ya esta en otra fila con otro uid', async () => {
+    // El email es unico en `users`. En Postgres esto es un 23505 que acaba en
+    // "no aprovisionado"; aqui tiene que acabar igual, o los dos adaptadores
+    // dejarian de ser intercambiables justo en el camino que da el mando.
+    const directory = createMemoryDirectory({
+      bootstrapSuperadminEmail: 'hugo@example.com',
+      seed: [provisioned({ uid: 'uid-otro', email: 'hugo@example.com' })],
+    });
+
+    expect(await directory.resolveOnLogin(HUGO)).toBeNull();
+    expect(await directory.findByUid('uid-hugo')).toBeNull();
   });
 
   it('no promociona si ya existe un superadmin, aunque el email case', async () => {
@@ -120,7 +183,8 @@ describe('memoryDirectory: bootstrap de superadmin', () => {
     // arranque y no una puerta trasera permanente: si el mando ya esta en manos
     // de alguien, volver a poner un email en el entorno no lo recupera. Sin
     // esta mitad de la condicion, quien controle las variables del despliegue
-    // se promociona cuando quiera sobre una oficina en marcha.
+    // se promociona cuando quiera sobre una oficina en marcha. Y desde #72 ni
+    // siquiera entra: no tiene fila y ya no hay nada que crearle.
     const directory = createMemoryDirectory({
       bootstrapSuperadminEmail: 'hugo@example.com',
       seed: [
@@ -138,13 +202,14 @@ describe('memoryDirectory: bootstrap de superadmin', () => {
       ],
     });
 
-    expect((await directory.resolveOnLogin(HUGO))?.role).toBe('employee');
+    expect(await directory.resolveOnLogin(HUGO)).toBeNull();
+    expect(await directory.findByUid('uid-hugo')).toBeNull();
   });
 });
 
 describe('memoryDirectory: busquedas', () => {
   it('findByUid encuentra a quien ya entro y devuelve null para un uid desconocido', async () => {
-    const directory = createMemoryDirectory();
+    const directory = createMemoryDirectory({ seed: [provisioned()] });
     const created = await directory.resolveOnLogin(ANA);
 
     expect((await directory.findByUid('uid-ana'))?.id).toBe(created?.id);
@@ -152,7 +217,7 @@ describe('memoryDirectory: busquedas', () => {
   });
 
   it('findById encuentra por el id interno y devuelve null para uno inventado', async () => {
-    const directory = createMemoryDirectory();
+    const directory = createMemoryDirectory({ seed: [provisioned()] });
     const created = await directory.resolveOnLogin(ANA);
 
     expect((await directory.findById(created!.id))?.uid).toBe('uid-ana');
@@ -240,7 +305,12 @@ describe('memoryDirectory: invitaciones', () => {
 
   it('lista solo a los invitados, no a los empleados, y resuelve el email de quien invito', async () => {
     const { directory, admin } = await withAdmin();
-    await directory.resolveOnLogin(ANA);
+    await directory.createUser({
+      email: 'ana@example.com',
+      role: 'employee',
+      uid: 'uid-ana',
+      createdById: admin.id,
+    });
     await directory.createInvitation({
       email: 'externo@example.com',
       days: 7,
