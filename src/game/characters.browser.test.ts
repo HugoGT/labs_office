@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { makeCharacter, setCharacterStatus, spawnPlayer } from './characters';
-import { TILE } from './mapData';
+import { avatarDepth, worldAssetDepth } from './depthLayers';
+import { TILE, WORLD_H } from './mapData';
 import { DEFAULT_NAME, DEFAULT_STATUS } from './officeProtocol';
 import { STATUS_COLOR } from './presence';
 import { createOfficeTextures } from './textures';
@@ -126,5 +127,18 @@ describe('setCharacterStatus', () => {
 
     expect(player.status).toBe(DEFAULT_STATUS);
     expect(player.color).toBe(STATUS_COLOR[DEFAULT_STATUS]);
+  });
+});
+
+describe('makeCharacter: render band (#70)', () => {
+  it('is born in the avatar band, above any normal asset, y-sorted by its feet', async () => {
+    const depths = await withScene((scene) => ({
+      top: makeCharacter(scene, 'Arriba', 5, 1, 'av1', DEFAULT_STATUS).depth,
+      bottom: makeCharacter(scene, 'Abajo', 5, 40, 'av2', DEFAULT_STATUS).depth,
+    }));
+
+    expect(depths.top).toBe(avatarDepth(1 * TILE + 16));
+    expect(depths.top).toBeGreaterThan(worldAssetDepth(WORLD_H));
+    expect(depths.bottom).toBeGreaterThan(depths.top);
   });
 });

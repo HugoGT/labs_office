@@ -20,6 +20,7 @@ import {
   TERRAIN_SHEET,
 } from './assets';
 import { DESK_ROWS, GROUND, MAP_H, MAP_W, TILE, TREES, ZONE_LABELS } from './mapData';
+import { worldAssetDepth } from './depthLayers';
 import { markSolid, type TerrainGrid } from './terrainGrid';
 
 /** Coloca un tile suelto de una hoja, alineado a la rejilla del mundo. */
@@ -90,29 +91,29 @@ export function placeFurniture(scene: Phaser.Scene, grid: TerrainGrid): void {
       // Alterna los dos frentes de escritorio del pack para que una fila de
       // seis no se vea como el mismo mueble clonado.
       const frame = i % 2 === 0 ? INDOOR.desk : INDOOR.deskAlt;
-      putTiledArea(scene, INDOOR_SHEET, frame, tx, y, 2, 1, (y + 1) * TILE);
+      putTiledArea(scene, INDOOR_SHEET, frame, tx, y, 2, 1, worldAssetDepth((y + 1) * TILE));
       markSolid(grid.solid, tx, y, 2, 1);
     }
   }
 
   // Sala de Juntas: mesa larga + sillas alrededor.
-  putTiledArea(scene, INDOOR_SHEET, INDOOR.tableTop, 53, 6, 7, 5, 11 * TILE);
+  putTiledArea(scene, INDOOR_SHEET, INDOOR.tableTop, 53, 6, 7, 5, worldAssetDepth(11 * TILE));
   markSolid(grid.solid, 53, 6, 7, 5);
   for (let i = 0; i < 7; i++) {
-    putTile(scene, INDOOR_SHEET, INDOOR.chairBack, 53 + i, 5, 6 * TILE);
-    putTile(scene, INDOOR_SHEET, INDOOR.chair, 53 + i, 11, 12 * TILE);
+    putTile(scene, INDOOR_SHEET, INDOOR.chairBack, 53 + i, 5, worldAssetDepth(6 * TILE));
+    putTile(scene, INDOOR_SHEET, INDOOR.chair, 53 + i, 11, worldAssetDepth(12 * TILE));
   }
   for (let j = 0; j < 5; j++) {
-    putTile(scene, INDOOR_SHEET, INDOOR.chairWhite, 52, 6 + j, (7 + j) * TILE);
-    putTile(scene, INDOOR_SHEET, INDOOR.chairWhite, 60, 6 + j, (7 + j) * TILE);
+    putTile(scene, INDOOR_SHEET, INDOOR.chairWhite, 52, 6 + j, worldAssetDepth((7 + j) * TILE));
+    putTile(scene, INDOOR_SHEET, INDOOR.chairWhite, 60, 6 + j, worldAssetDepth((7 + j) * TILE));
   }
 
   // Cafeteria: mesa de madera + asientos + plantas en las esquinas.
-  putTiledArea(scene, INDOOR_SHEET, INDOOR.tableTop, 53, 23, 5, 3, 26 * TILE);
+  putTiledArea(scene, INDOOR_SHEET, INDOOR.tableTop, 53, 23, 5, 3, worldAssetDepth(26 * TILE));
   markSolid(grid.solid, 53, 23, 5, 3);
   for (let i = 0; i < 5; i++) {
-    putTile(scene, INDOOR_SHEET, INDOOR.chairBack, 53 + i, 22, 23 * TILE);
-    putTile(scene, INDOOR_SHEET, INDOOR.chair, 53 + i, 26, 27 * TILE);
+    putTile(scene, INDOOR_SHEET, INDOOR.chairBack, 53 + i, 22, worldAssetDepth(23 * TILE));
+    putTile(scene, INDOOR_SHEET, INDOOR.chair, 53 + i, 26, worldAssetDepth(27 * TILE));
   }
   const plants: readonly (readonly [number, number])[] = [
     [51, 19],
@@ -121,7 +122,7 @@ export function placeFurniture(scene: Phaser.Scene, grid: TerrainGrid): void {
     [61, 30],
   ];
   for (const [px, py] of plants) {
-    putTile(scene, INDOOR_SHEET, INDOOR.plant, px, py, (py + 1) * TILE);
+    putTile(scene, INDOOR_SHEET, INDOOR.plant, px, py, worldAssetDepth((py + 1) * TILE));
     markSolid(grid.solid, px, py, 1, 1);
   }
 }
@@ -143,7 +144,7 @@ export function placeNature(scene: Phaser.Scene, grid: TerrainGrid): void {
       // Los arboles van a 1.5x el tile: a escala 1:1 con el suelo se perderian
       // entre el cesped en vez de leerse como volumen.
       .setScale(ASSET_SCALE * 1.5)
-      .setDepth((y + 1) * TILE);
+      .setDepth(worldAssetDepth((y + 1) * TILE));
     markSolid(grid.solid, x, y, 1, 1);
   });
 

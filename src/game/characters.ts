@@ -11,6 +11,7 @@
  */
 
 import type Phaser from 'phaser';
+import { avatarDepth } from './depthLayers';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from './mapData';
 import {
   DEFAULT_FACING,
@@ -81,7 +82,9 @@ export function makeCharacter(
     dot,
     label,
   ]) as CharacterContainer;
-  container.setDepth(py);
+  // Avatar band (#70): above every normal asset, y-sorted among avatars. The
+  // ring, pill, dot and label are children, so they ride this depth.
+  container.setDepth(avatarDepth(py));
   container.setSize(32, 44);
   container.ring = ring;
   container.nameText = name;
