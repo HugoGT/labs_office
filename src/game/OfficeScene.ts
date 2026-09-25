@@ -11,6 +11,7 @@ import { mergeColliderRects } from './colliderMerge';
 import {
   avatarDepth,
   MINIMAP_MARKER_DEPTH,
+  specialAssetDepth,
   worldAssetDepth,
 } from './depthLayers';
 import { deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
@@ -654,7 +655,12 @@ export class OfficeScene extends Phaser.Scene {
       // area, y renunciar al escritorio entero quitaria un sitio que si existe.
       const box = deskSlotRect(desk, item.slot);
       if (box === null) continue;
-      this.deskObjects.push(this.drawDeskItem(item.id, item.textureKey, item.rotation, box, depth));
+      // A special piece (#71) keeps the same bottom edge but moves to the band
+      // above avatars, so it covers whoever walks through the desk.
+      const itemDepth = item.aboveAvatars ? specialAssetDepth(bottom) : depth;
+      this.deskObjects.push(
+        this.drawDeskItem(item.id, item.textureKey, item.rotation, box, itemDepth),
+      );
     }
 
     // Un escritorio ajeno no se hace clicable siquiera: no tiene ninguna

@@ -1564,7 +1564,7 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
       desks: [
         servedDesk({
           occupant: occupant('Ana Torres', [
-            { id: 'id-item', slot: 8, rotation: 0, textureKey: 'no-existe-en-el-bundle' },
+            { id: 'id-item', slot: 8, rotation: 0, textureKey: 'no-existe-en-el-bundle', aboveAvatars: false },
           ]),
         }),
       ],
@@ -1588,7 +1588,7 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
       desks: [
         servedDesk({
           occupant: occupant('Ana Torres', [
-            { id: 'id-fuera', slot: 99, rotation: 0, textureKey: 'x' },
+            { id: 'id-fuera', slot: 99, rotation: 0, textureKey: 'x', aboveAvatars: false },
           ]),
         }),
       ],
@@ -1990,11 +1990,11 @@ describe('OfficeScene: modo edicion de layout (#74, PR3b)', () => {
 });
 
 /**
- * Render layers (#70). The bands themselves are pinned by
+ * Render layers (#70, #71). The bands themselves are pinned by
  * `depthLayers.test.ts`; what is covered here is that the scene actually puts
  * each object in its band, for both the local player and remote peers.
  */
-describe('OfficeScene: render layers (#70)', () => {
+describe('OfficeScene: render layers (#70, #71)', () => {
   function renderDesk(items: DeskDecorItem[] = []): OfficeDesk {
     return {
       id: 'id-mesa-capas',
@@ -2034,6 +2034,7 @@ describe('OfficeScene: render layers (#70)', () => {
             slot: 4,
             rotation: 0,
             textureKey: 'no-existe-en-el-bundle',
+            aboveAvatars: false,
           },
         ]),
       ],
@@ -2065,5 +2066,49 @@ describe('OfficeScene: render layers (#70)', () => {
     expect(remote.depth).toBeGreaterThan(maxDepth(normalWorldObjects(scene)));
     await advanceGameClock(scene, 100);
     expect(remote.depth).toBeGreaterThan(maxDepth(normalWorldObjects(scene)));
+  });
+
+  it('a special asset covers a player passing under it; a normal one does not (#71)', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const desk = renderDesk([
+      { id: 'id-normal', slot: 3, rotation: 0, textureKey: 'no-existe-en-el-bundle', aboveAvatars: false },
+      { id: 'id-especial', slot: 5, rotation: 0, textureKey: 'no-existe-en-el-bundle', aboveAvatars: true },
+    ]);
+    bridge.emitCommand('desks', { desks: [desk] });
+    const normal = scene.children.getByName('desk-item:id-normal')!;
+    const special = scene.children.getByName('desk-item:id-especial')!;
+    const player = findPlayer(scene);
+
+    // Walking through the middle row of the desk, below both pieces' bottom
+    // edge: plain y-sorting would put the player over both.
+    player.setPosition(desk.x + desk.w / 2, desk.y + desk.h - 4);
+
+    await vi.waitFor(() => {
+      expect(player.depth).toBeGreaterThan(depthOf(normal));
+      expect(depthOf(special)).toBeGreaterThan(player.depth);
+    }, LOOP_WAIT);
+  });
+
+  it('a special asset covers remote peers as well (#71)', async () => {
+    const connector = fakeConnector();
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const desk = renderDesk([
+      { id: 'id-especial', slot: 4, rotation: 0, textureKey: 'no-existe-en-el-bundle', aboveAvatars: true },
+    ]);
+    bridge.emitCommand('desks', { desks: [desk] });
+
+    connector.handlers()!.onAdd(
+      remoteSnapshot({ sessionId: 'par-debajo', x: desk.x + desk.w / 2, y: desk.y + desk.h }),
+    );
+    const remote = findRemoteAvatars(scene)[0];
+
+    await advanceGameClock(scene, 100);
+    expect(depthOf(scene.children.getByName('desk-item:id-especial')!)).toBeGreaterThan(remote.depth);
   });
 });
