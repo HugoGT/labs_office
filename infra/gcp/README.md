@@ -665,6 +665,38 @@ Los tres pasos, en orden:
 
 Después, redesplegar.
 
+#### Password-reset email (issue #94)
+
+Nobody sees a generated password any more. `POST /admin/invitations` and
+`POST /admin/users` create the account with a random password that never leaves the
+server, then call Identity Toolkit `accounts:sendOobCode` (`requestType:
+PASSWORD_RESET`) so Identity Platform emails the person a link to set their own. The
+login also has a "¿Olvidaste tu contraseña?" link (Firebase `sendPasswordResetEmail`).
+Disabled accounts cannot use either: Identity Platform refuses them.
+
+Nothing is configured by Terraform or `office-deploy` for this. What operators check
+by hand, in the GCP console, once:
+
+- **IAM.** The server-side send needs `firebaseauth.users.sendEmail`.
+  `roles/identitytoolkit.admin` (keyless path above) includes it. For the key path,
+  confirm the role you granted includes it too.
+- **Email template.** Customize the *Password reset* template of the project (sender
+  name, Spanish subject and body, optional reply-to). The default sender is
+  `noreply@<project>.firebaseapp.com` and can land in spam; a custom SMTP sender is
+  optional.
+- **Authorized domains.** The reset link points at the project's auth domain
+  (`<project>.firebaseapp.com`), which is authorized by default. Neither the server nor
+  the SPA sends a continue URL, so the app host does not need to be added for this. If
+  a continue URL is added later, the app host (`APP_HOST`) must be in *Authorized
+  domains* or every reset fails.
+- **Email enumeration protection.** Recommended on. The login already shows the same
+  confirmation whether or not the account exists, independent of this setting.
+
+If the email cannot be sent when an account is created, the account and its directory
+row stay, the response carries `emailSent: false`, the server logs the uid, and the
+admin re-sends from the dashboard (`POST /admin/users/:id/password-reset`, already
+covered by the `/admin/*` Caddy block).
+
 ## Recordings (issues #5, #58)
 
 A space is recorded by LiveKit Egress (room composite, grid layout) running as
