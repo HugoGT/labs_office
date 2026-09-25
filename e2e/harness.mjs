@@ -414,14 +414,14 @@ export async function startHarness({ realLivekit = false, fakeMedia = false } = 
 // D7: wait predicates keyed on HUD text (CSS module class names are hashed
 // and duplicated, so identity has to come from what is actually rendered).
 // The count now lives only in the sidebar toggle, which includes oneself
-// (`Personas (n + 1)`); the bar shows a connection indicator only while the
-// session is broken, so its absence is what proves "connected".
+// (`Personas conectadas (n + 1)`); the bar shows a connection indicator only
+// while the session is broken, so its absence is what proves "connected".
 export async function waitForOnlineCount(page, count) {
   await page.waitForFunction(
     (n) => {
       const text = document.querySelector('#office-shell')?.textContent ?? '';
       const connected = !text.includes('Reconectando') && !text.includes('Sin servidor');
-      return connected && text.includes(`Personas (${n + 1})`);
+      return connected && text.includes(`Personas conectadas (${n + 1})`);
     },
     count,
     { timeout: READINESS_DEADLINE_MS },

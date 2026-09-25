@@ -10,8 +10,24 @@ describe('ExitControls (#66)', () => {
     const buttons = screen.getAllByRole('button');
     expect(buttons.map((button) => button.textContent)).toEqual([
       expect.stringContaining('Cerrar sesión'),
-      expect.stringContaining('Salir de la oficina'),
+      expect.stringContaining('Salir'),
     ]);
+  });
+
+  it('leaving is just "Salir" (#88)', () => {
+    render(<ExitControls onSignOut={vi.fn()} onLeaveOffice={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Salir' })).toHaveTextContent(/^🚪\s*Salir$/);
+  });
+
+  it('the name lives in aria-label and title too, so it survives narrow screens showing only the emoji (#88)', () => {
+    render(<ExitControls onSignOut={vi.fn()} onLeaveOffice={vi.fn()} />);
+
+    for (const name of ['Cerrar sesión', 'Salir']) {
+      const button = screen.getByRole('button', { name });
+      expect(button).toHaveAttribute('aria-label', name);
+      expect(button).toHaveAttribute('title', name);
+    }
   });
 
   it('each button only asks through its own callback', async () => {
@@ -24,7 +40,7 @@ describe('ExitControls (#66)', () => {
     expect(onSignOut).toHaveBeenCalledTimes(1);
     expect(onLeaveOffice).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole('button', { name: /Salir de la oficina/ }));
+    await user.click(screen.getByRole('button', { name: 'Salir' }));
     expect(onLeaveOffice).toHaveBeenCalledTimes(1);
     expect(onSignOut).toHaveBeenCalledTimes(1);
   });
@@ -33,7 +49,7 @@ describe('ExitControls (#66)', () => {
     render(<ExitControls onSignOut={null} onLeaveOffice={vi.fn()} />);
 
     expect(screen.queryByRole('button', { name: /Cerrar sesión/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Salir de la oficina/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Salir' })).toBeInTheDocument();
   });
 
   it('with neither action it renders nothing', () => {

@@ -33,9 +33,9 @@ describe('OfficeSidebar (#74)', () => {
     const toggle = screen.getByRole('button', { name: /Personas/ });
 
     // The online count moved here from BottomBar: it belongs next to the list.
-    expect(toggle).toHaveTextContent('Personas (3)');
+    expect(toggle).toHaveTextContent('Personas conectadas (3)');
     await user.click(toggle);
-    expect(toggle).toHaveTextContent('Personas (3)');
+    expect(toggle).toHaveTextContent('Personas conectadas (3)');
   });
 
   it('activar el boton la expande y volver a activarlo la colapsa', async () => {
@@ -83,10 +83,28 @@ describe('OfficeSidebar (#74)', () => {
     expect(panel).toHaveStyle({
       position: 'fixed',
       top: `${SIDEBAR_TOP}px`,
-      bottom: '72px',
-      width: '280px',
       zIndex: '15',
     });
+    // The 280px width (#90) and the bottom edge, which now follows the bottom
+    // bar's real height (#86), live in CSS that jsdom does not load:
+    // `HudLayout.browser.test.tsx` measures both.
+  });
+
+  it('expandida ofrece un boton Cerrar que la colapsa (#86, pantallas muy chicas)', async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    await user.click(screen.getByRole('button', { name: 'Cerrar' }));
+
+    expect(screen.getByRole('button', { name: /Personas/ })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
+  });
+
+  it('colapsada no hay nada que cerrar', () => {
+    renderSidebar();
+
+    expect(screen.queryByRole('button', { name: 'Cerrar' })).not.toBeInTheDocument();
   });
 
   it('forceCollapsed en true colapsa aunque estuviese expandida', async () => {

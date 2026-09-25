@@ -93,12 +93,10 @@ export function OfficeSidebar({
     <div
       role="complementary"
       aria-label="Personas"
-      className={styles.sidebar}
+      className={expanded ? `${styles.sidebar} ${styles.expanded}` : styles.sidebar}
       style={{
         position: 'fixed',
         top: SIDEBAR_TOP,
-        bottom: 72,
-        width: 280,
         zIndex: 15,
       }}
     >
@@ -108,10 +106,21 @@ export function OfficeSidebar({
         aria-expanded={expanded}
         onClick={() => setExpanded((current) => !current)}
       >
-        👥 Personas ({peers.length + 1})
+        👥 Personas conectadas ({peers.length + 1})
       </button>
       {expanded && (
         <div className={styles.panel}>
+          {/* Only shown by CSS on very small screens, where the open sidebar
+              covers the whole screen and the toggle alone is easy to miss (#86). */}
+          <button
+            type="button"
+            className={styles.close}
+            aria-label="Cerrar"
+            title="Cerrar"
+            onClick={() => setExpanded(false)}
+          >
+            ×
+          </button>
           <input
             type="search"
             className={styles.search}

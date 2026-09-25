@@ -1,5 +1,49 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/*
+ * HUD right rail (#89, #90). The sidebar search input is the reference: the
+ * toggle above it and the exit controls below it take its width and edges,
+ * derived here once instead of repeated as magic numbers.
+ */
+:root {
+  --hud-sidebar-right: 12px;
+  --hud-sidebar-width: 280px;
+  --hud-sidebar-padding: 10px;
+  /* The search input sits inside the panel's 1px border and its padding. */
+  --hud-rail-inset: calc(1px + var(--hud-sidebar-padding));
+  --hud-rail-right: calc(var(--hud-sidebar-right) + var(--hud-rail-inset));
+  --hud-rail-width: calc(var(--hud-sidebar-width) - 2 * var(--hud-rail-inset));
+  /*
+   * Footprint of the exit controls, which the bottom bar keeps clear so the
+   * two never overlap (#88): emoji only (two 36px buttons, 8px gap, 8px
+   * padding, 1px border) until their labels fit, then the whole rail.
+   */
+  --hud-exit-width: calc(2 * 36px + 8px + 2 * 8px + 2px);
+  /* Both sit on the bottom row; the bar stops short of the exit controls. */
+  --hud-bar-right: calc(var(--hud-rail-right) + var(--hud-exit-width) + 16px);
+  --hud-exit-bottom: 16px;
+}
+
+/*
+ * Very small screens (#86): below 720px the bar cannot keep its controls on
+ * one row beside the exit controls, so it takes the whole width and the exit
+ * controls move above it, at its real published height (`useHeightCssVar`).
+ * Same breakpoint as the full-screen sidebar in OfficeSidebar.module.css.
+ */
+@media (max-width: 719px) {
+  :root {
+    --hud-bar-right: 16px;
+    --hud-exit-bottom: calc(16px + var(--hud-bar-height, 0px) + 8px);
+  }
+}
+
+/* Same breakpoint as the labels in ExitControls.module.css. */
+@media (min-width: 1440px) {
+  :root {
+    --hud-exit-width: var(--hud-rail-width);
+  }
+}
+
 html, body, #root {
   width: 100%;
   height: 100%;
