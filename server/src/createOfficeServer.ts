@@ -27,6 +27,7 @@ import {
   type AdminDeps,
   type AdminResult,
 } from './admin/adminRoutes.ts';
+import { handleListUsers, handleRevokeUser } from './admin/adminRoutes.ts';
 import { identityAdminFromEnv } from './admin/gcpIdentityAdmin.ts';
 import type { IdentityAdmin } from './admin/identityAdminPort.ts';
 import type { DecorCatalog } from './decor/decorPort.ts';
@@ -554,7 +555,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
         return;
       }
 
-      run(req, { directory, auth, identityAdmin })
+      run(req, { directory, auth, identityAdmin, evictor: eviction })
         .then((result) => {
           res.status(result.status).json(result.body);
         })
@@ -599,6 +600,18 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   app.post(
     '/admin/users',
     admin((req, deps) => handleCreateUser(req.header('Authorization'), req.body, deps)),
+  );
+
+  // Everyone in the directory, and taking access away from any of them (#93).
+  // POST for the revoke, same CORS reason as `/admin/invitations/:id/revoke`.
+  app.get(
+    '/admin/users',
+    admin((req, deps) => handleListUsers(req.header('Authorization'), deps)),
+  );
+
+  app.post(
+    '/admin/users/:id/revoke',
+    admin((req, deps) => handleRevokeUser(req.header('Authorization'), req.params.id, deps)),
   );
 
   /**

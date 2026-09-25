@@ -19,7 +19,9 @@ import {
   handleCreateInvitation,
   handleCreateUser,
   handleListInvitations,
+  handleListUsers,
   handleRevokeInvitation,
+  handleRevokeUser,
   type AdminDeps,
 } from './adminRoutes.ts';
 import { PASSWORD_LENGTH } from './generatePassword.ts';
@@ -1135,5 +1137,288 @@ describe('POST /admin/users', () => {
       h.directory.auditLog(),
     ]);
     expect(almacen).not.toContain(String(body.password));
+  });
+});
+
+/**
+ * Listing and removing anyone (#93). Own section and own guard loop, instead
+ * of entries in `rutas`, so this feature stays in one place. Target ids are
+ * uuid-shaped because the route refuses anything else before the directory
+ * sees it (Postgres would reject a malformed uuid with a 500).
+ */
+describe('users: list everyone and remove access (#93)', () => {
+  const STAFF = user({
+    id: '00000000-0000-4000-8000-00000000000e',
+    uid: 'uid-staff',
+    email: 'staff@example.com',
+    role: 'employee',
+  });
+  const GUEST = user({
+    id: '00000000-0000-4000-8000-00000000000a',
+    uid: 'uid-guest',
+    email: 'guest@example.com',
+    role: 'guest',
+    expiresAt: at(3 * DAY),
+    invitedBy: ADMIN.id,
+  });
+  const OTHER_ADMIN = user({
+    id: '00000000-0000-4000-8000-0000000000ad',
+    uid: 'uid-other-admin',
+    role: 'admin',
+  });
+  const THE_SUPERADMIN = user({
+    id: '00000000-0000-4000-8000-0000000000ff',
+    uid: 'uid-super',
+    role: 'superadmin',
+  });
+  const ADMIN_ME = user({
+    id: '00000000-0000-4000-8000-0000000000a1',
+    uid: 'uid-admin',
+    role: 'admin',
+  });
+  const EMPLOYEE_ME = user({
+    id: '00000000-0000-4000-8000-0000000000e1',
+    uid: 'uid-empleado',
+    role: 'employee',
+  });
+
+  function setup(options: Parameters<typeof harness>[0] = {}) {
+    const h = harness({
+      seed: [THE_SUPERADMIN, ADMIN_ME, OTHER_ADMIN, EMPLOYEE_ME, STAFF, GUEST, REVOCADO],
+      ...options,
+    });
+    const evicted: string[] = [];
+    const deps: AdminDeps = { ...h.deps, evictor: { evictAccount: (uid) => evicted.push(uid) } };
+    return { h, deps, evicted };
+  }
+
+  const guarded: { name: string; call: (auth: unknown, deps: AdminDeps) => Promise<unknown> }[] = [
+    { name: 'GET /admin/users', call: (auth, deps) => handleListUsers(auth, deps) },
+    {
+      name: 'POST /admin/users/:id/revoke',
+      call: (auth, deps) => handleRevokeUser(auth, STAFF.id, deps),
+    },
+  ];
+
+  for (const { name, call } of guarded) {
+    describe(`${name}: same guards as every admin route`, () => {
+      it('401 without a credential, with a forged token, and for a revoked account', async () => {
+        const { deps } = setup();
+        for (const header of [undefined, bearer('token-forjado'), bearer(TOKEN_REVOCADO)]) {
+          expect(await call(header, deps)).toEqual({ status: 401, body: { error: 'unauthorized' } });
+        }
+      });
+
+      it('403 for an authenticated employee, before touching the directory', async () => {
+        const { h, deps } = setup();
+        const list = vi.spyOn(h.directory, 'listUsers');
+        const revoke = vi.spyOn(h.directory, 'revokeUser');
+
+        expect(await call(bearer(TOKEN_EMPLEADO), deps)).toEqual({
+          status: 403,
+          body: { error: 'forbidden' },
+        });
+        expect(list).not.toHaveBeenCalled();
+        expect(revoke).not.toHaveBeenCalled();
+      });
+    });
+  }
+
+  describe('GET /admin/users', () => {
+    it('lists everyone with role, status and expiry, not only invitations', async () => {
+      const { deps } = setup();
+
+      const result = await handleListUsers(bearer(TOKEN_ADMIN), deps);
+
+      expect(result.status).toBe(200);
+      const users = (result.body as { users: Record<string, unknown>[] }).users;
+      expect(users.map((row) => row.id)).toEqual([
+        THE_SUPERADMIN.id,
+        ADMIN_ME.id,
+        OTHER_ADMIN.id,
+        EMPLOYEE_ME.id,
+        STAFF.id,
+        GUEST.id,
+        REVOCADO.id,
+      ]);
+      expect(users.find((row) => row.id === GUEST.id)).toEqual({
+        id: GUEST.id,
+        email: 'guest@example.com',
+        displayName: null,
+        role: 'guest',
+        status: 'active',
+        createdAt: GUEST.createdAt.toISOString(),
+        expiresAt: at(3 * DAY).toISOString(),
+        daysLeft: 3,
+        removable: true,
+      });
+    });
+
+    it('never sends the Identity Platform uid or the internal inviter id', async () => {
+      const { deps } = setup();
+
+      const result = await handleListUsers(bearer(TOKEN_ADMIN), deps);
+
+      const serialized = JSON.stringify(result.body);
+      expect(serialized).not.toContain('uid-');
+      expect(serialized).not.toContain('invitedBy');
+    });
+
+    it('marks as removable exactly what canRemove allows for the caller, and only active rows', async () => {
+      const { deps } = setup();
+
+      const removableFor = async (token: string) => {
+        const result = await handleListUsers(bearer(token), deps);
+        return (result.body as { users: { id: string; removable: boolean }[] }).users
+          .filter((row) => row.removable)
+          .map((row) => row.id);
+      };
+
+      // An admin: employees and guests, never itself, another admin, the
+      // superadmin, or someone already revoked.
+      expect(await removableFor(TOKEN_ADMIN)).toEqual([EMPLOYEE_ME.id, STAFF.id, GUEST.id]);
+      // The superadmin: admins too, but still not itself.
+      expect(await removableFor(TOKEN_SUPER)).toEqual([
+        ADMIN_ME.id,
+        OTHER_ADMIN.id,
+        EMPLOYEE_ME.id,
+        STAFF.id,
+        GUEST.id,
+      ]);
+    });
+  });
+
+  describe('POST /admin/users/:id/revoke', () => {
+    it('revokes, audits, disables the account and evicts its live sessions', async () => {
+      const { h, deps, evicted } = setup();
+
+      expect(await handleRevokeUser(bearer(TOKEN_ADMIN), STAFF.id, deps)).toEqual({
+        status: 200,
+        body: { id: STAFF.id, status: 'revoked' },
+      });
+      expect((await h.directory.findById(STAFF.id))?.status).toBe('revoked');
+      expect(h.directory.auditLog()).toEqual([
+        { actorId: ADMIN_ME.id, action: 'revoke-user', subjectId: STAFF.id },
+      ]);
+      expect(h.disabled).toEqual(['uid-staff']);
+      expect(evicted).toEqual(['uid-staff']);
+    });
+
+    it('revokes an invited guest too', async () => {
+      const { deps, evicted } = setup();
+
+      expect((await handleRevokeUser(bearer(TOKEN_ADMIN), GUEST.id, deps)).status).toBe(200);
+      expect(evicted).toEqual(['uid-guest']);
+    });
+
+    it('403 when the hierarchy says no, and nothing changes', async () => {
+      const cases: [string, DirectoryUser][] = [
+        [TOKEN_ADMIN, OTHER_ADMIN],
+        [TOKEN_ADMIN, THE_SUPERADMIN],
+        [TOKEN_ADMIN, ADMIN_ME],
+        [TOKEN_SUPER, THE_SUPERADMIN],
+      ];
+      for (const [token, target] of cases) {
+        const { h, deps, evicted } = setup();
+
+        expect(await handleRevokeUser(bearer(token), target.id, deps)).toEqual({
+          status: 403,
+          body: { error: 'forbidden' },
+        });
+        expect((await h.directory.findById(target.id))?.status).toBe('active');
+        expect(h.disabled).toEqual([]);
+        expect(evicted).toEqual([]);
+      }
+    });
+
+    it('the superadmin can remove an admin', async () => {
+      const { deps, evicted } = setup();
+
+      expect((await handleRevokeUser(bearer(TOKEN_SUPER), OTHER_ADMIN.id, deps)).status).toBe(200);
+      expect(evicted).toEqual(['uid-other-admin']);
+    });
+
+    it('404 for an unknown, malformed or non-string id, without disabling anything', async () => {
+      for (const id of ['00000000-0000-4000-8000-000000000999', 'id-inventado', '', undefined, null, 42]) {
+        const { h, deps, evicted } = setup();
+        const find = vi.spyOn(h.directory, 'findById');
+
+        expect(await handleRevokeUser(bearer(TOKEN_ADMIN), id, deps)).toEqual({
+          status: 404,
+          body: { error: 'not-found' },
+        });
+        expect(h.disabled).toEqual([]);
+        expect(evicted).toEqual([]);
+        // A malformed id never reaches the directory: Postgres would throw
+        // on it and turn a 404 into a 500.
+        if (id !== '00000000-0000-4000-8000-000000000999') expect(find).not.toHaveBeenCalled();
+      }
+    });
+
+    it('revoking twice is safe: 200 again and a single audit entry', async () => {
+      const { h, deps } = setup();
+      await handleRevokeUser(bearer(TOKEN_ADMIN), STAFF.id, deps);
+
+      expect(await handleRevokeUser(bearer(TOKEN_ADMIN), STAFF.id, deps)).toEqual({
+        status: 200,
+        body: { id: STAFF.id, status: 'revoked' },
+      });
+      expect(h.directory.auditLog()).toHaveLength(1);
+    });
+
+    it('if disabling the account fails, the revocation and the eviction still stand, and it is logged', async () => {
+      const { h, deps, evicted } = setup({
+        disableAccount: async () => {
+          throw new IdentityAdminError('unavailable');
+        },
+      });
+
+      expect((await handleRevokeUser(bearer(TOKEN_ADMIN), STAFF.id, deps)).status).toBe(200);
+      expect((await h.directory.findById(STAFF.id))?.status).toBe('revoked');
+      expect(evicted).toEqual(['uid-staff']);
+      const log = h.logged.join('\n');
+      expect(log).toContain('uid-staff');
+      expect(log).toContain('a mano');
+    });
+
+    it('without an Identity Platform credential it still revokes and evicts, and logs the missing half', async () => {
+      const { h, deps, evicted } = setup({ identityAdmin: null });
+
+      expect((await handleRevokeUser(bearer(TOKEN_ADMIN), STAFF.id, deps)).status).toBe(200);
+      expect(evicted).toEqual(['uid-staff']);
+      expect(h.logged.join('\n')).toContain('a mano');
+    });
+
+    it('a row without uid has nothing to disable or evict', async () => {
+      const noUid = { ...STAFF, uid: null };
+      const { h, deps, evicted } = setup({ seed: [ADMIN_ME, noUid] });
+
+      expect((await handleRevokeUser(bearer(TOKEN_ADMIN), noUid.id, deps)).status).toBe(200);
+      expect(h.disabled).toEqual([]);
+      expect(evicted).toEqual([]);
+    });
+
+    it('a failing eviction does not undo the revocation', async () => {
+      const { h } = setup();
+      const deps: AdminDeps = {
+        ...h.deps,
+        evictor: {
+          evictAccount() {
+            throw new Error('room gone');
+          },
+        },
+      };
+
+      expect((await handleRevokeUser(bearer(TOKEN_ADMIN), STAFF.id, deps)).status).toBe(200);
+      expect((await h.directory.findById(STAFF.id))?.status).toBe('revoked');
+      expect(h.disabled).toEqual(['uid-staff']);
+      expect(h.logged.join('\n')).toContain('uid-staff');
+    });
+
+    it('without an evictor (no room wired) it still revokes', async () => {
+      const { h } = setup();
+
+      expect((await handleRevokeUser(bearer(TOKEN_ADMIN), STAFF.id, h.deps)).status).toBe(200);
+    });
   });
 });

@@ -12,7 +12,11 @@
 
 import { Client } from 'colyseus.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LIVEKIT_ROOM_NAME, recordingAvailableUntil } from '../../src/game/officeProtocol.ts';
+import {
+  LIVEKIT_ROOM_NAME,
+  SESSION_REVOKED_CLOSE_CODE,
+  recordingAvailableUntil,
+} from '../../src/game/officeProtocol.ts';
 import {
   createOfficeServer,
   reconnectionWindowFromEnv,
@@ -1946,5 +1950,84 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
 
     await waitFor(() => ready.length === 1);
     await recServer.shutdown();
+  });
+});
+
+/**
+ * Wiring of the users routes (#93): the rules are covered by
+ * `adminRoutes.test.ts` and the room eviction by `OfficeRoom.test.ts`; what
+ * only a real server proves is that the revoke route reaches the live room.
+ */
+describe('users routes (#93): revoking over HTTP evicts the live session', () => {
+  const ADMIN_USER: DirectoryUser = {
+    id: '00000000-0000-4000-8000-0000000000a1',
+    uid: 'uid-admin',
+    email: 'admin@example.com',
+    displayName: 'Admin',
+    role: 'admin',
+    status: 'active',
+    expiresAt: null,
+    invitedBy: null,
+    createdAt: new Date('2025-12-01T00:00:00.000Z'),
+  };
+  const STAFF_USER: DirectoryUser = {
+    ...ADMIN_USER,
+    id: '00000000-0000-4000-8000-0000000000e1',
+    uid: 'uid-staff',
+    email: 'staff@example.com',
+    displayName: 'Staff',
+    role: 'employee',
+  };
+  const identities: Record<string, VerifiedIdentity> = {
+    'token-admin': { uid: 'uid-admin', email: 'admin@example.com', name: 'Admin' },
+    'token-staff': { uid: 'uid-staff', email: 'staff@example.com', name: 'Staff' },
+  };
+  const usersVerifier: IdTokenVerifier = {
+    async verify(token: unknown) {
+      return typeof token === 'string' ? (identities[token] ?? null) : null;
+    },
+  };
+
+  it('GET /admin/users lists everyone and POST /admin/users/:id/revoke throws the account out', async () => {
+    const usersServer = createOfficeServer({
+      auth: usersVerifier,
+      directory: createMemoryDirectory({ seed: [ADMIN_USER, STAFF_USER] }),
+      identityAdmin: null,
+    });
+    const port = await usersServer.listen(0);
+    const url = `http://localhost:${port}`;
+    const headers = { Authorization: 'Bearer token-admin', 'Content-Type': 'application/json' };
+
+    try {
+      const staff = await new Client(`ws://localhost:${port}`).joinOrCreate<OfficeState>(
+        OFFICE_ROOM_NAME,
+        { token: 'token-staff' },
+      );
+      openRooms.push(staff);
+      const closed = new Promise<number>((resolve) => staff.onLeave(resolve));
+
+      const list = await fetch(`${url}/admin/users`, { headers });
+      expect(list.status).toBe(200);
+      const { users } = (await list.json()) as { users: { id: string; removable: boolean }[] };
+      expect(users.map((row) => [row.id, row.removable])).toEqual([
+        [ADMIN_USER.id, false],
+        [STAFF_USER.id, true],
+      ]);
+
+      const revoke = await fetch(`${url}/admin/users/${STAFF_USER.id}/revoke`, {
+        method: 'POST',
+        headers,
+      });
+
+      expect(revoke.status).toBe(200);
+      expect(await closed).toBe(SESSION_REVOKED_CLOSE_CODE);
+      expect(usersServer.sessions.size()).toBe(0);
+      // And the door stays closed: the directory refuses the next join.
+      await expect(
+        new Client(`ws://localhost:${port}`).joinOrCreate(OFFICE_ROOM_NAME, { token: 'token-staff' }),
+      ).rejects.toThrow();
+    } finally {
+      await usersServer.shutdown();
+    }
   });
 });
