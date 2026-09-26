@@ -85,7 +85,27 @@ export interface UserDirectory {
   findById(id: string): Promise<DirectoryUser | null>;
   /** Solo los que vinieron por invitacion (invited_by no nulo), mas recientes primero. */
   listInvitations(): Promise<InvitationRow[]>;
+  /**
+   * Busca por email ya normalizado (`normalizeEmail`); el adaptador NO lo
+   * normaliza el mismo, igual que `findByUid`/`findById` tampoco lo hacen con
+   * su clave. Es lo que permite a `handleCreateInvitation` distinguir, ANTES
+   * de pedirle una cuenta a Identity Platform, un reenvio (invitacion activa
+   * con esa misma direccion) de un alta de verdad nueva. En Postgres se apoya
+   * en el indice unico `users_email_unique` de `schema.sql`. `null` si nadie
+   * usa ese correo.
+   */
+  findByEmail(email: string): Promise<DirectoryUser | null>;
   createInvitation(input: CreateInvitationInput): Promise<DirectoryUser>;
+  /**
+   * Renueva la caducidad de una invitacion existente, en el sitio: mismo
+   * id/uid/invitedBy/createdAt, solo cambia `expiresAt`. Es el mecanismo de
+   * "reenviar" del panel -- volver a invitar a quien ya tiene una invitacion
+   * activa no le SUMA dias a los que le quedaban, se los REEMPLAZA por los que
+   * se acaban de pedir. `days` es un entero entre 1 y 90, la misma regla que
+   * `createInvitation` (`assertValidInvitationDays`). Devuelve `null` si `id`
+   * no existe o no es una invitacion (`invitedBy` nulo).
+   */
+  renewInvitation(id: string, days: number): Promise<DirectoryUser | null>;
   /**
    * Alta de alguien de casa: sin caducidad y sin `invited_by`. Esos dos nulos
    * son lo que lo separa de `createInvitation`, y no son cosmeticos -- sin

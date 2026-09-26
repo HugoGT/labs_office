@@ -338,15 +338,25 @@ async function sendResetEmail(
  * guardas, y por el mismo motivo: cada uno tiene que fallar antes de que el
  * siguiente deje algo a medias.
  *
- *   validar -> comprobar que hay adaptador -> generar contrasena -> crear la
+ *   validar -> comprobar que hay adaptador -> ¿ese correo ya tiene una
+ *   invitacion activa? renovarla y salir -> generar contrasena -> crear la
  *   cuenta en Identity Platform -> guardar la fila en el directorio -> send
  *   the password-reset email (#94).
  *
- * La fila va la ULTIMA a proposito. Es la unica de las dos operaciones con
- * efecto que se puede deshacer sola: si se guardase primero y el alta en Google
- * fallase, quedaria una invitacion en la tabla que no corresponde a ninguna
- * cuenta y que alguien tendria que limpiar a mano. Al reves -- que es el orden
- * de aqui -- la unica ventana mala se compensa, y se compensa abajo.
+ * La fila va la ULTIMA (en el camino de alta nueva) a proposito. Es la unica
+ * de las dos operaciones con efecto que se puede deshacer sola: si se
+ * guardase primero y el alta en Google fallase, quedaria una invitacion en la
+ * tabla que no corresponde a ninguna cuenta y que alguien tendria que limpiar
+ * a mano. Al reves -- que es el orden de aqui -- la unica ventana mala se
+ * compensa, y se compensa abajo.
+ *
+ * ## Reenviar es renovar
+ *
+ * Volver a invitar a un correo que YA tiene una invitacion activa no es un
+ * error: es como el panel reemplazo al boton "Reenviar correo" que tenia la
+ * tabla de invitaciones que se quito. Ver el bloque `existing` mas abajo para
+ * el detalle; la cuenta de Identity Platform ni se toca, solo se renueva la
+ * caducidad y se reenvia el correo.
  *
  * ## Sobre la validacion del email
  *
@@ -386,6 +396,44 @@ export async function handleCreateInvitation(
   // pondria a revisar el secreto de GCP por una errata suya.
   const identityAdmin = deps.identityAdmin;
   if (!identityAdmin) return IDENTITY_UNAVAILABLE;
+
+  // ## Reenviar es renovar
+  //
+  // ANTES de pedirle una cuenta nueva a Identity Platform, se mira si ese
+  // correo ya tiene una invitacion activa. Si la tiene, esto NO es un alta:
+  // es el reenvio que sustituyo al boton de la tabla que se quito del panel.
+  // La cuenta ya existe y esta bien -- no hace falta, ni se puede, crear otra
+  // --, asi que solo se renueva `expiresAt` con el `days` recien pedido
+  // (REEMPLAZA los que le quedaban, no los suma) y se reenvia el correo de
+  // contrasena por el uid que ya tiene.
+  //
+  // Una invitacion REVOCADA con ese correo, o un correo de alguien de casa
+  // (`invitedBy` nulo, de `createUser`), caen fuera de esta rama a proposito:
+  // revivir una invitacion revocada o "invitar" a un empleado ya de la casa
+  // es otra decision, no tomada aqui, y las dos siguen su camino de siempre
+  // -- que termina en el mismo 409 de hoy en cuanto Identity Platform dice
+  // que esa cuenta ya existe.
+  const existing = await deps.directory.findByEmail(email);
+  if (existing !== null && existing.invitedBy !== null && existing.status === 'active') {
+    const renewed = await deps.directory.renewInvitation(existing.id, days as number);
+    if (renewed === null) {
+      // La fila desaparecio entre encontrarla y renovarla (alguien la revoco
+      // al mismo tiempo): no hay nada que renovar, y no es un error de quien
+      // administra.
+      return NOT_FOUND;
+    }
+
+    const emailSent = await sendResetEmail(identityAdmin, { email, uid: renewed.uid }, deps);
+    return {
+      status: 201,
+      body: {
+        id: renewed.id,
+        email: renewed.email,
+        expiresAt: toIso(renewed.expiresAt),
+        emailSent,
+      },
+    };
+  }
 
   let uid: string;
   try {

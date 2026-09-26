@@ -832,6 +832,152 @@ describe('POST /admin/invitations', () => {
   });
 });
 
+/**
+ * Reenviar es renovar: volver a invitar a un correo que YA tiene una
+ * invitacion activa no es un error, es el mecanismo de reenvio que sustituye
+ * al boton "Reenviar correo" de la tabla que se quito del panel. La cuenta de
+ * Identity Platform ya existe y esta bien -- no hace falta (ni se puede)
+ * crear otra --, asi que solo se renueva `expiresAt` con el `days` que se
+ * acaba de pedir (REEMPLAZA, no suma) y se reenvia el correo de contrasena.
+ *
+ * Revivir una invitacion revocada, o "invitar" a alguien de casa
+ * (`createUser`), queda deliberadamente FUERA de alcance: las dos siguen
+ * respondiendo el mismo 409 de siempre.
+ */
+describe('POST /admin/invitations: reenviar es renovar', () => {
+  it('un correo con invitacion activa no crea otra cuenta: renueva la que ya tiene', async () => {
+    const h = harness();
+    const primera = await handleCreateInvitation(
+      bearer(TOKEN_ADMIN),
+      { email: 'externo@example.com', days: 90 },
+      h.deps,
+    );
+    expect(primera.status).toBe(201);
+
+    const segunda = await handleCreateInvitation(
+      bearer(TOKEN_ADMIN),
+      { email: 'externo@example.com', days: 7 },
+      h.deps,
+    );
+
+    // Ni una segunda cuenta en Identity Platform...
+    expect(h.created).toHaveLength(1);
+    // ...ni una segunda fila: el mismo id, con la caducidad renovada.
+    expect(segunda).toEqual({
+      status: 201,
+      body: {
+        id: (primera.body as { id: string }).id,
+        email: 'externo@example.com',
+        // 7 dias desde AHORA (el reloj del harness), no 90 + 7.
+        expiresAt: '2026-01-22T12:00:00.000Z',
+        emailSent: true,
+      },
+    });
+  });
+
+  it('la renovacion REEMPLAZA los dias, no los suma', async () => {
+    const h = harness();
+    await handleCreateInvitation(bearer(TOKEN_ADMIN), { email: 'externo@example.com', days: 90 }, h.deps);
+
+    const renovada = await handleCreateInvitation(
+      bearer(TOKEN_ADMIN),
+      { email: 'externo@example.com', days: 7 },
+      h.deps,
+    );
+
+    // Si sumase, serian 97 dias desde el alta original; el contrato es 7 dias
+    // desde AHORA, un total menor al que tenia.
+    expect(renovada.body.expiresAt).toBe('2026-01-22T12:00:00.000Z');
+  });
+
+  it('conserva id, uid, invitedBy y createdAt: solo expiresAt cambia', async () => {
+    const h = harness();
+    await handleCreateInvitation(bearer(TOKEN_ADMIN), { email: 'externo@example.com', days: 90 }, h.deps);
+    const [antes] = await h.directory.listInvitations();
+
+    await handleCreateInvitation(bearer(TOKEN_ADMIN), { email: 'externo@example.com', days: 7 }, h.deps);
+    const [despues] = await h.directory.listInvitations();
+
+    expect(despues.id).toBe(antes.id);
+    expect(despues.uid).toBe(antes.uid);
+    expect(despues.invitedBy).toBe(antes.invitedBy);
+    expect(despues.createdAt).toEqual(antes.createdAt);
+    expect(despues.expiresAt).not.toEqual(antes.expiresAt);
+  });
+
+  it('reenvia el correo de contrasena con el uid ya existente', async () => {
+    const h = harness();
+    await handleCreateInvitation(bearer(TOKEN_ADMIN), { email: 'externo@example.com', days: 90 }, h.deps);
+
+    await handleCreateInvitation(bearer(TOKEN_ADMIN), { email: 'externo@example.com', days: 7 }, h.deps);
+
+    // Una vez al invitar y otra al reenviar: las dos veces a la MISMA persona.
+    expect(h.resets).toEqual(['externo@example.com', 'externo@example.com']);
+  });
+
+  it('una invitacion revocada con ese correo sigue respondiendo 409: revivirla no esta en este cambio', async () => {
+    const revocada = user({
+      id: 'id-revocada-otra',
+      uid: 'uid-revocada-otra',
+      email: 'revocada@example.com',
+      role: 'guest',
+      status: 'revoked',
+      invitedBy: ADMIN.id,
+    });
+    const h = harness({
+      seed: [ADMIN, revocada],
+      createAccount: async () => {
+        throw new IdentityAdminError('email-exists');
+      },
+    });
+
+    const result = await handleCreateInvitation(
+      bearer(TOKEN_ADMIN),
+      { email: 'revocada@example.com', days: 7 },
+      h.deps,
+    );
+
+    expect(result).toEqual({ status: 409, body: { error: 'conflict' } });
+    // A diferencia del reenvio activo, aqui SI se intento crear la cuenta: es
+    // el mismo camino de siempre, sin el atajo del reenvio.
+    expect(h.created).toHaveLength(1);
+  });
+
+  it('el correo de alguien de casa (alta permanente) sigue respondiendo 409', async () => {
+    const h = harness({
+      // El seed por defecto ya trae a EMPLEADO (invitedBy null, alta con
+      // `createUser`); aqui solo hace falta que la cuenta ya exista en
+      // Identity Platform, como en la realidad.
+      createAccount: async () => {
+        throw new IdentityAdminError('email-exists');
+      },
+    });
+
+    const result = await handleCreateInvitation(
+      bearer(TOKEN_ADMIN),
+      { email: EMPLEADO.email, days: 7 },
+      h.deps,
+    );
+
+    expect(result).toEqual({ status: 409, body: { error: 'conflict' } });
+    expect(h.created).toHaveLength(1);
+  });
+
+  it('un correo de verdad nuevo sigue creando la cuenta en Identity Platform, sin cambios', async () => {
+    const h = harness();
+
+    const result = await handleCreateInvitation(
+      bearer(TOKEN_ADMIN),
+      { email: 'nuevisimo@example.com', days: 7 },
+      h.deps,
+    );
+
+    expect(result.status).toBe(201);
+    expect(h.created).toHaveLength(1);
+    expect(h.created[0].email).toBe('nuevisimo@example.com');
+  });
+});
+
 describe('POST /admin/invitations/:id/revoke', () => {
   const invitada = user({
     id: 'id-invitada',

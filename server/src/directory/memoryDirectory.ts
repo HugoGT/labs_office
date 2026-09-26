@@ -34,7 +34,12 @@ import {
   displayNameKey,
   DisplayNameTakenError,
 } from './displayNameRules.ts';
-import { expiresAtFrom, normalizeEmail, normalizeInvitationInput } from './invitationRules.ts';
+import {
+  assertValidInvitationDays,
+  expiresAtFrom,
+  normalizeEmail,
+  normalizeInvitationInput,
+} from './invitationRules.ts';
 import { normalizeUserInput } from './userRules.ts';
 
 export interface AuditEntry {
@@ -169,6 +174,11 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
       return row ? snapshot(row) : null;
     },
 
+    async findByEmail(email) {
+      const row = rows.find((row) => row.email === email);
+      return row ? snapshot(row) : null;
+    },
+
     async listInvitations() {
       const invitations: InvitationRow[] = [];
       for (const row of rows) {
@@ -198,6 +208,21 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
       audit.push({ actorId: invitedById, action: 'invite', subjectId: created.id });
 
       return snapshot(created);
+    },
+
+    async renewInvitation(id, days) {
+      // Validar ANTES de tocar nada, mismo motivo que en `createInvitation`:
+      // una fila a medio renovar es peor que ninguna.
+      assertValidInvitationDays(days);
+
+      const row = byId(id);
+      if (!row || row.invitedBy === null) return null;
+
+      // Reemplaza, no suma: quien vuelve a invitar a la misma persona pide
+      // "tienes N dias a partir de ahora", no "tienes N dias mas de los que
+      // le quedaban".
+      row.expiresAt = expiresAtFrom(now(), days);
+      return snapshot(row);
     },
 
     async createUser(input: CreateUserInput) {

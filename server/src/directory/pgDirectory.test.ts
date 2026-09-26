@@ -332,6 +332,22 @@ describe('pgDirectory: busquedas', () => {
       await directoryOver(pool).findById('00000000-0000-4000-8000-000000000000'),
     ).toBeNull();
   });
+
+  it('findByEmail consulta por lower(email), apoyandose en el indice unico', async () => {
+    const pool = fakePool(() => ({ rows: [USER_ROW], rowCount: 1 }));
+
+    const user = await directoryOver(pool).findByEmail('ana@example.com');
+
+    expect(pool.queries[0].values).toEqual(['ana@example.com']);
+    expect(squash(pool.queries[0].text)).toContain('where lower(email) = $1');
+    expect(user?.uid).toBe('uid-ana');
+  });
+
+  it('findByEmail devuelve null cuando nadie usa ese correo', async () => {
+    const pool = fakePool(() => ({ rows: [], rowCount: 0 }));
+
+    expect(await directoryOver(pool).findByEmail('nadie@example.com')).toBeNull();
+  });
 });
 
 describe('pgDirectory: listInvitations', () => {
@@ -499,6 +515,73 @@ describe('pgDirectory: createInvitation', () => {
     );
     await expect(directoryOver(failing).createInvitation(INPUT)).rejects.toThrow('boom');
     expect(failing.released).toBe(1);
+  });
+});
+
+describe('pgDirectory: renewInvitation', () => {
+  const RENEWED_ROW = {
+    ...USER_ROW,
+    id: '22222222-2222-4222-8222-222222222222',
+    uid: 'uid-externo',
+    email: 'externo@example.com',
+    display_name: null,
+    role: 'guest',
+    expires_at: new Date('2026-09-24T12:00:00.000Z'),
+    invited_by: USER_ROW.id,
+  };
+
+  function renewingPool(rows: Record<string, unknown>[]) {
+    return fakePool((text) =>
+      squash(text).startsWith('update users') ? { rows, rowCount: rows.length } : { rows: [], rowCount: 0 },
+    );
+  }
+
+  it('valida los dias ANTES de tocar el pool', async () => {
+    // Mismo motivo que en `createInvitation`: un `days` invalido no debe
+    // costar ni una consulta.
+    const pool = fakePool();
+
+    await expect(
+      directoryOver(pool).renewInvitation(RENEWED_ROW.id, 91),
+    ).rejects.toBeInstanceOf(InvalidInvitationError);
+    expect(pool.queries).toHaveLength(0);
+  });
+
+  it('reemplaza expires_at a partir de AHORA (reloj de postgres), sin sumar', async () => {
+    const pool = renewingPool([RENEWED_ROW]);
+
+    const renewed = await directoryOver(pool).renewInvitation(RENEWED_ROW.id, 7);
+
+    const update = pool.queries[0];
+    expect(squash(update.text)).toContain('now() + make_interval(days => $2::int)');
+    expect(update.values).toEqual([RENEWED_ROW.id, 7]);
+    expect(renewed?.expiresAt).toEqual(new Date('2026-09-24T12:00:00.000Z'));
+  });
+
+  it('solo renueva invitaciones: la propia sentencia lo exige', async () => {
+    // Mismo mecanismo que `revoke`: la guarda va en el WHERE, no en un `if` de
+    // TypeScript, para que no haya ventana entre comprobar y actualizar.
+    const pool = renewingPool([RENEWED_ROW]);
+
+    await directoryOver(pool).renewInvitation(RENEWED_ROW.id, 7);
+
+    expect(squash(pool.queries[0].text)).toContain('invited_by is not null');
+  });
+
+  it('no es una transaccion: una sola sentencia y sin rastro de auditoria', async () => {
+    // A diferencia de `createInvitation`/`revoke`, renovar no es una decision
+    // nueva sobre quien entra: no anade una fila a `audit_log`.
+    const pool = renewingPool([RENEWED_ROW]);
+
+    await directoryOver(pool).renewInvitation(RENEWED_ROW.id, 7);
+
+    expect(pool.queries).toHaveLength(1);
+  });
+
+  it('devuelve null cuando el id no existe o no es una invitacion', async () => {
+    const pool = renewingPool([]);
+
+    expect(await directoryOver(pool).renewInvitation(RENEWED_ROW.id, 7)).toBeNull();
   });
 });
 
