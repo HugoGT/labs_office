@@ -1,0 +1,20 @@
+/* Mismo tono que el resto del panel del sidebar (`OfficeSidebar.module.css`): sin
+   caja propia, este bloque vive ya dentro de `.panel`. */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #e5e7eb;
+}
+
+.body {
+  margin: 0;
+  font-size: 13px;
+  color: #9ca3af;
+}

@@ -3,8 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OfficeSession } from '../auth/authPort';
 import { createAdminClient } from './adminClient';
 import type { AdminPort } from './adminPort';
-import { createAssetAdminClient } from './assetAdminClient';
-import type { AssetAdminPort } from './assetAdminPort';
 import { createUsersAdminClient } from './usersAdminClient';
 import type { UsersAdminPort } from './usersAdminPort';
 import DashboardRoute from './DashboardRoute';
@@ -15,14 +13,6 @@ import DashboardRoute from './DashboardRoute';
 vi.mock('./adminClient', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./adminClient')>()),
   createAdminClient: vi.fn(),
-}));
-
-// El adaptador de catalogo se mockea igual y por lo mismo: aqui solo importa
-// con que se construye. Lo que hace con esa base ya lo prueba
-// `assetAdminClient.test.ts`.
-vi.mock('./assetAdminClient', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('./assetAdminClient')>()),
-  createAssetAdminClient: vi.fn(),
 }));
 
 // Users panel (#93): mocked for the same reason as the other adapters.
@@ -42,7 +32,6 @@ beforeEach(() => {
 });
 
 const createAdminClientMock = vi.mocked(createAdminClient);
-const createAssetAdminClientMock = vi.mocked(createAssetAdminClient);
 
 function fakePort(): AdminPort {
   return {
@@ -60,25 +49,9 @@ function fakePort(): AdminPort {
   };
 }
 
-function fakeAssetPort(): AssetAdminPort {
-  return {
-    listAssets: vi.fn(async () => []),
-    createAsset: vi.fn(),
-    archiveAsset: vi.fn(),
-    updateAsset: vi.fn(),
-  };
-}
-
 function fakeSession(): OfficeSession {
   return { displayName: 'Ana', getIdToken: vi.fn(async () => 'id-token') };
 }
-
-beforeEach(() => {
-  // El panel de catalogo se monta siempre que hay sesion y servidor, asi que
-  // sin un puerto de vuelta cualquier prueba de esta ruta reventaria dentro
-  // de el por algo que no es lo que prueba.
-  createAssetAdminClientMock.mockReturnValue(fakeAssetPort());
-});
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -145,71 +118,20 @@ describe('DashboardRoute', () => {
   });
 });
 
-describe('DashboardRoute: el panel de catalogo', () => {
-  it('construye su adaptador con la RAIZ, no con /admin', () => {
+describe('DashboardRoute: paneles legacy de escritorios y espacios (#107), y catalogo migrado', () => {
+  it('ya no monta las secciones de Escritorios, Espacios ni Catálogo', async () => {
     createAdminClientMock.mockReturnValue(fakePort());
 
     render(<DashboardRoute session={fakeSession()} />);
 
-    // `GET /admin/assets` cuelga de la raiz, escribiendo el prefijo entero en
-    // cada camino, y no de `adminBaseUrl` (que ya lo incluye).
-    expect(createAssetAdminClientMock.mock.calls[0][0].baseUrl).toBe('http://localhost:2567');
-  });
-
-  it('pide el token a la sesion, no a una copia', async () => {
-    const session = fakeSession();
-    createAdminClientMock.mockReturnValue(fakePort());
-
-    render(<DashboardRoute session={session} />);
-    await createAdminClientMock.mock.calls[0][0].getIdToken();
-    await createAssetAdminClientMock.mock.calls[0][0].getIdToken();
-
-    // El ID token caduca cada hora: una copia dejaria de valer a mitad de una
-    // sesion del panel sin que nada avisase.
-    expect(session.getIdToken).toHaveBeenCalledTimes(2);
-  });
-
-  it('no lo reconstruye en cada render', () => {
-    createAdminClientMock.mockReturnValue(fakePort());
-    const session = fakeSession();
-
-    const { rerender } = render(<DashboardRoute session={session} />);
-    rerender(<DashboardRoute session={session} />);
-
-    // Un puerto nuevo por render volveria a disparar la carga de la lista en
-    // bucle: es la dependencia del efecto del panel.
-    expect(createAssetAdminClientMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('sin servidor de oficina no lo construye', async () => {
-    vi.stubEnv('VITE_COLYSEUS_URL', '');
-
-    render(<DashboardRoute session={fakeSession()} />);
-
-    await screen.findByText(/no hay servidor/i);
-    expect(createAssetAdminClientMock).not.toHaveBeenCalled();
-  });
-
-  it('monta el panel de catalogo dentro del panel de administracion', async () => {
-    createAdminClientMock.mockReturnValue(fakePort());
-
-    render(<DashboardRoute session={fakeSession()} />);
-
-    expect(await screen.findByRole('region', { name: /catálogo/i })).toBeInTheDocument();
-  });
-});
-
-describe('DashboardRoute: paneles legacy de escritorios y espacios (#107)', () => {
-  it('ya no monta las secciones de Escritorios ni Espacios', async () => {
-    createAdminClientMock.mockReturnValue(fakePort());
-
-    render(<DashboardRoute session={fakeSession()} />);
-
-    // Sustituidos por la barra lateral de la oficina (#74), que edita lo mismo
-    // sobre el mapa en vez de por coordenadas escritas a mano.
-    expect(await screen.findByRole('region', { name: /catálogo/i })).toBeInTheDocument();
+    // Escritorios/Espacios: sustituidos por la barra lateral de la oficina
+    // (#74), que edita lo mismo sobre el mapa en vez de por coordenadas
+    // escritas a mano. Catálogo: migrado al panel "Personalizar" de esa misma
+    // barra lateral, junto a escritorios y salas.
+    await screen.findByRole('region', { name: /nuevo usuario/i });
     expect(screen.queryByRole('region', { name: /escritorios/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: /espacios/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: /catálogo/i })).not.toBeInTheDocument();
   });
 });
 

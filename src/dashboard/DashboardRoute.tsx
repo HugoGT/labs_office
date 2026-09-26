@@ -3,9 +3,6 @@ import type { OfficeSession } from '../auth/authPort';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
 import { createAdminClient, resolveAdminBaseUrl } from './adminClient';
 import type { AdminPort } from './adminPort';
-import { createAssetAdminClient } from './assetAdminClient';
-import type { AssetAdminPort } from './assetAdminPort';
-import { AssetsPanel } from './AssetsPanel';
 import { createUsersAdminClient } from './usersAdminClient';
 import type { UsersAdminPort } from './usersAdminPort';
 import { UsersPanel } from './UsersPanel';
@@ -41,10 +38,14 @@ export interface DashboardRouteProps {
  * duplicados con la barra lateral de la oficina (#74), que edita lo mismo
  * viendo el resultado en el mapa. `deskAdminClient.ts`/`spacesAdminClient.ts`
  * y sus puertos siguen vivos: `OfficeShell` los sigue usando para esa barra.
+ *
+ * El catalogo de decoracion tampoco tiene puerto aqui: migro al panel
+ * "Personalizar" de la barra lateral (`OfficeSidebar.tsx`), junto a
+ * escritorios y salas -- `AssetsPanel`/`assetAdminClient.ts` siguen vivos,
+ * `OfficeShell` los construye y los pasa para ese panel.
  */
 interface DashboardPorts {
   admin: AdminPort;
-  assets: AssetAdminPort;
   /** Everyone in the directory and removing access (#93). */
   users: UsersAdminPort;
 }
@@ -65,8 +66,8 @@ export default function DashboardRoute({ session }: DashboardRouteProps) {
     const adminBaseUrl = resolveAdminBaseUrl({ officeEndpoint });
     // Las dos bases salen del MISMO endpoint y solo se diferencian en el
     // prefijo: las invitaciones viven bajo `adminBaseUrl`, que ya lo incluye,
-    // mientras que catalogo y usuarios cuelgan de la raiz y escriben `/admin`
-    // entero en cada camino (ver `assetAdminClient.ts`/`usersAdminClient.ts`).
+    // mientras que usuarios cuelga de la raiz y escribe `/admin` entero en
+    // cada camino (ver `usersAdminClient.ts`).
     const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint });
     if (adminBaseUrl === null || apiBaseUrl === null) return null;
 
@@ -77,7 +78,6 @@ export default function DashboardRoute({ session }: DashboardRouteProps) {
 
     return {
       admin: createAdminClient({ baseUrl: adminBaseUrl, getIdToken }),
-      assets: createAssetAdminClient({ baseUrl: apiBaseUrl, getIdToken }),
       users: createUsersAdminClient({ baseUrl: apiBaseUrl, getIdToken }),
     };
   });
@@ -124,7 +124,6 @@ export default function DashboardRoute({ session }: DashboardRouteProps) {
       {/* First of the extra panels: who is in the office is what an admin
           looks for right after the invitations (#93). */}
       <UsersPanel users={ports.users} />
-      <AssetsPanel assets={ports.assets} />
     </DashboardScreen>
   );
 }

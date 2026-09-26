@@ -1,6 +1,8 @@
 import { act, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createAssetAdminClient } from '../dashboard/assetAdminClient';
+import type { AssetAdminPort } from '../dashboard/assetAdminPort';
 import { createDeskAdminClient } from '../dashboard/deskAdminClient';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
 import { createSpacesAdminClient } from '../dashboard/spacesAdminClient';
@@ -60,12 +62,16 @@ vi.mock('../dashboard/deskAdminClient', () => ({ createDeskAdminClient: vi.fn() 
 // como el cruce escritorio<->sala de `useLayoutEditor.ts` lo necesitan
 // SIEMPRE que hay rol admin, no solo cuando se entra a editar salas.
 vi.mock('../dashboard/spacesAdminClient', () => ({ createSpacesAdminClient: vi.fn() }));
+// Mismo criterio con `/admin/assets` (catalogo migrado a "Personalizar"):
+// doblarlo aqui evita que abrir el panel dispare una peticion real.
+vi.mock('../dashboard/assetAdminClient', () => ({ createAssetAdminClient: vi.fn() }));
 
 const createGameMock = vi.mocked(createGame);
 const useProximityAudioMock = vi.mocked(useProximityAudio);
 const useOfficeAdminRoleMock = vi.mocked(useOfficeAdminRole);
 const createDeskAdminClientMock = vi.mocked(createDeskAdminClient);
 const createSpacesAdminClientMock = vi.mocked(createSpacesAdminClient);
+const createAssetAdminClientMock = vi.mocked(createAssetAdminClient);
 
 /** Puerto falso por defecto (#74, PR3c): sin llamadas en vuelo salvo que un test las controle. */
 function fakeDeskAdminPort(overrides: Partial<DeskAdminPort> = {}): DeskAdminPort {
@@ -93,6 +99,23 @@ function fakeSpacesAdminPort(overrides: Partial<SpacesAdminPort> = {}): SpacesAd
       throw new Error('not stubbed');
     }),
     deleteSpace: vi.fn(async () => undefined),
+    ...overrides,
+  };
+}
+
+/** Puerto falso por defecto: sin piezas de catalogo salvo que un test las controle. */
+function fakeAssetAdminPort(overrides: Partial<AssetAdminPort> = {}): AssetAdminPort {
+  return {
+    listAssets: vi.fn(async () => []),
+    createAsset: vi.fn(async () => {
+      throw new Error('not stubbed');
+    }),
+    archiveAsset: vi.fn(async () => {
+      throw new Error('not stubbed');
+    }),
+    updateAsset: vi.fn(async () => {
+      throw new Error('not stubbed');
+    }),
     ...overrides,
   };
 }
@@ -144,6 +167,7 @@ beforeEach(() => {
   useOfficeAdminRoleMock.mockReturnValue(null);
   createDeskAdminClientMock.mockReturnValue(fakeDeskAdminPort());
   createSpacesAdminClientMock.mockReturnValue(fakeSpacesAdminPort());
+  createAssetAdminClientMock.mockReturnValue(fakeAssetAdminPort());
 });
 
 describe('OfficeShell', () => {
@@ -1362,7 +1386,9 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
   });
 
   async function openSidebar(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-    await user.click(screen.getByRole('button', { name: /Personas/ }));
+    // "Editar escritorios"/"Editar salas" migraron al panel "Personalizar":
+    // ya no viven bajo "Personas conectadas".
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
   }
 
   it('con rol admin, la seccion de escritorios se ofrece en el sidebar', async () => {

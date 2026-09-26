@@ -1,11 +1,13 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { Role } from '../dashboard/adminPort';
+import type { AssetAdminPort } from '../dashboard/assetAdminPort';
+import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import { SIDEBAR_TOP } from '../game/hudLayout';
 import type { OfficeBridge } from '../game/officeBridge';
+import { statusCssColor } from '../game/presence';
 import type { RosterPeer } from '../game/roster';
-import { STATUS_EMOJI } from '../game/presence';
+import { MiEspacioPanel } from './MiEspacioPanel';
 import { visibleRoster } from './rosterView';
 import styles from './OfficeSidebar.module.css';
 
@@ -15,6 +17,17 @@ import styles from './OfficeSidebar.module.css';
  * cargar -- en cada render. Quien no administra nunca descarga este chunk.
  */
 const OfficeLayoutEditorLazy = lazy(() => import('./OfficeLayoutEditor'));
+
+/**
+ * Migrado desde el dashboard (`DashboardRoute.tsx`): el catalogo de
+ * decoracion es una pieza de "Personalizar" ahora, no del panel `/dashboard`.
+ * `React.lazy` con el mismo motivo que `OfficeLayoutEditorLazy` -- quien no
+ * administra nunca descarga este chunk -- y el `.then` porque `AssetsPanel`
+ * es una exportacion nombrada, no la que `React.lazy` espera por defecto.
+ */
+const AssetsPanelLazy = lazy(() =>
+  import('../dashboard/AssetsPanel').then((assetsModule) => ({ default: assetsModule.AssetsPanel })),
+);
 
 export interface OfficeSidebarProps {
   /** Uno mismo, para anteponerlo (#74): el `roster` del puente ya lo excluye. */
@@ -47,6 +60,13 @@ export interface OfficeSidebarProps {
   /** Reenviado tal cual a `OfficeLayoutEditor` (#74, PR3c: exclusividad con `DeskDecorEditor`). */
   onLayoutEditingChange?: (editing: boolean) => void;
   forceExitLayoutEditing?: boolean;
+  /**
+   * Catalogo de decoracion, migrado desde el dashboard a "Personalizar".
+   * `undefined`/`null` -- sin servidor configurado, mismo criterio que
+   * `desks`/`spaces` -- simplemente deja sin montar esa seccion, aunque el
+   * rol si administre.
+   */
+  assets?: AssetAdminPort | null;
 }
 
 /**
@@ -70,12 +90,20 @@ export function OfficeSidebar({
   refreshSpaces,
   onLayoutEditingChange,
   forceExitLayoutEditing,
+  assets,
 }: OfficeSidebarProps) {
   const [expanded, setExpanded] = useState(false);
   const [query, setQuery] = useState('');
+  // "Personalizar" (migracion de la edicion de layout + catalogo, mas "Mi
+  // espacio"): panel INDEPENDIENTE del roster, con su propio expandir/colapsar
+  // -- mismo patron, distinto estado, para que abrir uno nunca cierre el otro.
+  const [personalizing, setPersonalizing] = useState(false);
 
   useEffect(() => {
-    if (forceCollapsed) setExpanded(false);
+    if (forceCollapsed) {
+      setExpanded(false);
+      setPersonalizing(false);
+    }
   }, [forceCollapsed]);
 
   const visible = visibleRoster(self, peers, query);
@@ -100,6 +128,55 @@ export function OfficeSidebar({
         zIndex: 15,
       }}
     >
+      {/*
+       * Entre el minimapa (renderizado por Phaser, arriba de este contenedor
+       * via `SIDEBAR_TOP`) y "Personas conectadas": quien administra elige
+       * entre escritorios/salas/catalogo/"Mi espacio"; quien no, no tiene
+       * nada que elegir y activarlo va derecho a "Mi espacio" -- un solo
+       * `personalizing` para ambos casos, la diferencia esta en el CONTENIDO.
+       */}
+      <button
+        type="button"
+        className={styles.toggle}
+        aria-expanded={personalizing}
+        onClick={() => setPersonalizing((current) => !current)}
+      >
+        🎨 Personalizar
+      </button>
+      {personalizing && (
+        <div className={styles.panel}>
+          <button
+            type="button"
+            className={styles.close}
+            aria-label="Cerrar"
+            title="Cerrar"
+            onClick={() => setPersonalizing(false)}
+          >
+            ×
+          </button>
+          {canAdminister && (
+            <Suspense fallback={null}>
+              <OfficeLayoutEditorLazy
+                bridge={bridge}
+                desks={desks}
+                spaces={spaces}
+                refreshDesks={refreshDesks}
+                refreshSpaces={refreshSpaces}
+                onEditingChange={onLayoutEditingChange}
+                forceExit={forceExitLayoutEditing}
+              />
+            </Suspense>
+          )}
+          {/* `assets` narrowed inline (no variable de por medio) para que
+              TypeScript sepa, en este mismo bloque, que ya no es `null`/`undefined`. */}
+          {canAdminister && assets !== undefined && assets !== null && (
+            <Suspense fallback={null}>
+              <AssetsPanelLazy assets={assets} />
+            </Suspense>
+          )}
+          <MiEspacioPanel />
+        </div>
+      )}
       <button
         type="button"
         className={styles.toggle}
@@ -132,7 +209,11 @@ export function OfficeSidebar({
           <ul className={styles.list}>
             {visible.map((person) => (
               <li key={person.sessionId} className={styles.entry}>
-                <span>{STATUS_EMOJI[person.status]}</span>
+                {/* Mismo lenguaje visual que `BottomBar.meDot`: un punto de
+                    color, no el emoji del selector -- las dos superficies que
+                    muestran el estado a la izquierda del nombre deben verse
+                    igual. */}
+                <span className={styles.personDot} style={{ background: statusCssColor(person.status) }} />
                 <span className={person.isSelf ? styles.self : undefined}>
                   {person.name}
                   {person.isSelf ? ' (tú)' : ''}
@@ -140,19 +221,6 @@ export function OfficeSidebar({
               </li>
             ))}
           </ul>
-          {canAdminister && (
-            <Suspense fallback={null}>
-              <OfficeLayoutEditorLazy
-                bridge={bridge}
-                desks={desks}
-                spaces={spaces}
-                refreshDesks={refreshDesks}
-                refreshSpaces={refreshSpaces}
-                onEditingChange={onLayoutEditingChange}
-                forceExit={forceExitLayoutEditing}
-              />
-            </Suspense>
-          )}
         </div>
       )}
     </div>
