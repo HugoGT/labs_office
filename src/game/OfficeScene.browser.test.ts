@@ -2255,10 +2255,16 @@ describe('OfficeScene: integracion camera pan y colision de peers (#53, #59)', (
     const minimap = scene.cameras.cameras[1];
     const player = findPlayer(scene);
     const playerStart = { x: player.x, y: player.y };
-    const worldPoint = minimap.getWorldPoint(minimap.x + 20, minimap.y + 20);
+    // Cerca del centro, no de una esquina: el ancho del minimapa ya no
+    // coincide con el ratio del mundo (#86, RAIL_WIDTH), asi que una esquina
+    // puede caer en el margen sin contenido; un punto centrado siempre mapea
+    // dentro de los bounds del mundo, sin depender del tamano del minimapa.
+    const clickX = minimap.x + minimap.width / 2 + 20;
+    const clickY = minimap.y + minimap.height / 2 + 15;
+    const worldPoint = minimap.getWorldPoint(clickX, clickY);
 
-    scene.input.emit('pointerdown', screenPointer(minimap.x + 20, minimap.y + 20, minimap), []);
-    scene.input.emit('pointerup', screenPointer(minimap.x + 20, minimap.y + 20, minimap));
+    scene.input.emit('pointerdown', screenPointer(clickX, clickY, minimap), []);
+    scene.input.emit('pointerup', screenPointer(clickX, clickY, minimap));
 
     // Hasta 1px de diferencia: la oficina es pixel art y la camara redondea
     // el scroll (`roundPixels`).
