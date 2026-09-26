@@ -38,7 +38,7 @@ function box(element: Element) {
   return element.getBoundingClientRect();
 }
 
-/** The sidebar search input is the width reference of the right rail (#89, #90). */
+/** The sidebar toggle is the width reference of the right rail (#89, #90). */
 async function renderOpenSidebar() {
   render(
     <OfficeSidebar
@@ -136,11 +136,13 @@ describe('HUD layout: bottom bar (#87)', () => {
 });
 
 describe('HUD layout: sidebar toggle (#90)', () => {
-  it('is as wide as the search input and aligned with it', async () => {
+  it('the search input sits inset within the panel, narrower than the toggle above it', async () => {
     await page.viewport(WIDE, 800);
     const { toggle, search } = await renderOpenSidebar();
 
-    expectSameColumn(toggle, search);
+    expect(box(search).width).toBeLessThan(box(toggle).width);
+    expect(box(search).left).toBeGreaterThan(box(toggle).left);
+    expect(box(search).right).toBeLessThan(box(toggle).right);
   });
 
   it('keeps the spec width of the sidebar, which the rail is derived from', async () => {
@@ -152,26 +154,25 @@ describe('HUD layout: sidebar toggle (#90)', () => {
 });
 
 describe('HUD layout: sidebar panel card matches the rail (#86)', () => {
-  it('the open panel card is as wide as the toggle above it and the search input inside it', async () => {
+  it('the open panel card is as wide as the toggle above it', async () => {
     await page.viewport(WIDE, 800);
     const { toggle, search } = await renderOpenSidebar();
     const panel = search.parentElement!;
 
     // Before #86 the card kept the full 280px sidebar box, 11px wider on
-    // each side than the toggle it sits under and the search input inside
-    // it, which is what made it visibly hang past both.
+    // each side than the toggle it sits under, which is what made it visibly
+    // hang past it. The search input inside stays inset from both on purpose.
     expectSameColumn(panel, toggle);
-    expectSameColumn(panel, search);
   });
 });
 
 describe('HUD layout: exit controls (#89)', () => {
-  it('at full width they are as wide as the sidebar search input and aligned with it', async () => {
+  it('at full width they are as wide as the sidebar toggle and aligned with it', async () => {
     await page.viewport(WIDE, 800);
     const exits = renderExits();
-    const { search } = await renderOpenSidebar();
+    const { toggle } = await renderOpenSidebar();
 
-    expectSameColumn(exits, search);
+    expectSameColumn(exits, toggle);
   });
 });
 

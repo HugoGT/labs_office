@@ -1,7 +1,7 @@
 /* Same vocabulary as the bottom bar: its buttons, on the same dark card. */
 .controls {
   position: fixed;
-  /* Under the sidebar, in the column of its search input (#89). */
+  /* Under the sidebar, in the column of its toggle and panel (#89). */
   right: var(--hud-rail-right);
   width: var(--hud-exit-width);
   /* Above the bar on very small screens (index.css, #86). */
@@ -11,7 +11,7 @@
   gap: 8px;
   background: #111827f2;
   border: 1px solid #2b3444;
-  border-radius: 16px;
+  border-radius: 8px;
   padding: 8px;
   box-shadow: 0 8px 30px #0009;
 }
@@ -28,7 +28,7 @@
   background: #1f2937;
   color: #e5e7eb;
   border: 1px solid #374151;
-  border-radius: 10px;
+  border-radius: 5px;
   padding: 0 12px;
   font-size: 13px;
   font-family: inherit;

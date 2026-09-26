@@ -18,7 +18,7 @@
 
 .toggle {
   pointer-events: auto;
-  /* Same column as the search input below it (#90). */
+  /* Same column as the panel below it (#90). */
   align-self: stretch;
   margin: 0 var(--hud-rail-inset);
   height: 32px;
@@ -28,7 +28,7 @@
   background: #111827f2;
   color: #e5e7eb;
   border: 1px solid #2b3444;
-  border-radius: 10px;
+  border-radius: 5px;
   padding: 0 12px;
   font: inherit;
   font-size: 13px;
@@ -57,26 +57,22 @@
   gap: 8px;
   background: #111827f2;
   border: 1px solid #2b3444;
-  border-radius: 16px;
+  border-radius: 8px;
   padding: var(--hud-sidebar-padding);
   box-shadow: 0 8px 30px #0009;
 }
 
 .search {
   /*
-   * Escapes the panel's own border+padding (#86): the panel now sits on the
-   * rail band itself (`--hud-rail-inset` margin above), so without this the
-   * search input would land `--hud-rail-inset` past it, narrower than the
-   * toggle and exit controls. This puts it back on the exact same column
-   * (`--hud-rail-inset` cancels the panel's own border-plus-padding, which
-   * shares that value on purpose).
+   * Inset within the panel's own padding, not stretched to its outer edges
+   * (the toggle/close column): a full-width search box read as if it were the
+   * panel itself, rather than a control sitting inside it.
    */
-  margin: 0 calc(-1 * var(--hud-rail-inset));
   height: 30px;
   background: #1f2937;
   color: #e5e7eb;
   border: 1px solid #374151;
-  border-radius: 10px;
+  border-radius: 5px;
   padding: 0 10px;
   font: inherit;
   font-size: 13px;
@@ -97,7 +93,7 @@
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: 4px;
   font-size: 13px;
   color: #e5e7eb;
 }
@@ -113,7 +109,7 @@
   background: #1f2937;
   color: #e5e7eb;
   border: 1px solid #374151;
-  border-radius: 10px;
+  border-radius: 5px;
   width: 32px;
   height: 32px;
   font: inherit;
