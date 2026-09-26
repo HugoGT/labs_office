@@ -491,3 +491,65 @@ describe('BottomBar: one row when wide, two when narrow (#67 follow-up)', () => 
     expect(screen.queryByText(/audio aislado/)).not.toBeInTheDocument();
   });
 });
+
+describe('BottomBar: indicador de grabacion junto a "Sala privada" (#85)', () => {
+  it('no muestra REC dentro de una sala que no se esta grabando', () => {
+    renderBar({ room: 'Sala de Juntas', recording: false });
+
+    expect(screen.queryByText(/REC/)).not.toBeInTheDocument();
+  });
+
+  it('muestra REC junto al nombre de la sala mientras se graba', () => {
+    renderBar({ room: 'Sala de Juntas', recording: true });
+
+    const line = screen.getByText(/Sala privada/);
+    expect(line).toHaveTextContent(/^🔒 Sala privada: Sala de Juntas \| REC$/);
+  });
+
+  it('deja de mostrar REC apenas la grabacion termina, sin desmontar la linea', () => {
+    const { rerender } = render(
+      <BottomBar
+        playerName={DEFAULT_NAME}
+        micOn
+        camOn
+        audioAvailable
+        recording={true}
+        room="Sala de Juntas"
+        presence={OFFLINE_SOLO}
+        status="g"
+        onChangeStatus={vi.fn()}
+        onToggleMic={vi.fn()}
+        onToggleCam={vi.fn()}
+        onToggleRecord={vi.fn()}
+        onRetryConnection={vi.fn()}
+        screenShareOn={false}
+        screenShareAvailable={false}
+        onToggleScreenShare={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/REC/)).toBeInTheDocument();
+
+    rerender(
+      <BottomBar
+        playerName={DEFAULT_NAME}
+        micOn
+        camOn
+        audioAvailable
+        recording={false}
+        room="Sala de Juntas"
+        presence={OFFLINE_SOLO}
+        status="g"
+        onChangeStatus={vi.fn()}
+        onToggleMic={vi.fn()}
+        onToggleCam={vi.fn()}
+        onToggleRecord={vi.fn()}
+        onRetryConnection={vi.fn()}
+        screenShareOn={false}
+        screenShareAvailable={false}
+        onToggleScreenShare={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/REC/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Sala privada/)).toHaveTextContent(/^🔒 Sala privada: Sala de Juntas$/);
+  });
+});

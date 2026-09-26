@@ -98,6 +98,22 @@
   background: #22c55e;
 }
 
+/* Recording indicator next to "Sala privada" (#85): short, on the bar, never floating over the video tiles. */
+.recDot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ef4444;
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
 .statusSelect {
   appearance: none;
   /* Own caret instead of the native one, so the box matches the bar (#67). */

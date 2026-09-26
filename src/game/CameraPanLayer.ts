@@ -52,6 +52,16 @@ export class CameraPanLayer {
   /** Verdadero mientras la camara navega sin el jugador (bounds ampliados). */
   private detached = false;
   private glide: Glide | null = null;
+  /**
+   * Progreso propio del planeo, en vez de releer `camera.scrollX/Y`: con
+   * `roundPixels` (createGame.ts) `preRender` trunca el scroll a entero cada
+   * cuadro, y con un lerp pequeno el paso siguiente puede recalcularse desde
+   * el mismo entero una y otra vez -- la camara se queda corta del destino
+   * para siempre. Llevando el float aqui, el planeo si converge; solo el
+   * render final se ve a pixel entero.
+   */
+  private glideScrollX = 0;
+  private glideScrollY = 0;
   /** Donde estaba el jugador al enfocar desde el minimapa: moverse de ahi devuelve la camara. */
   private focusedFrom: { x: number; y: number } | null = null;
 
@@ -158,12 +168,16 @@ export class CameraPanLayer {
         // golpe, `preRender` clamparia el scroll en el mismo cuadro -- un salto.
         // El planeo lleva la camara dentro de ellos y ahi se reponen.
         this.glide = { kind: 'return' };
+        this.glideScrollX = this.camera.scrollX;
+        this.glideScrollY = this.camera.scrollY;
         this.focusedFrom = null;
         return;
 
       case 'focus':
         this.detach();
         this.glide = { kind: 'focus', x: effect.x, y: effect.y };
+        this.glideScrollX = this.camera.scrollX;
+        this.glideScrollY = this.camera.scrollY;
         this.focusedFrom = { x: this.target.x, y: this.target.y };
         return;
     }
@@ -199,8 +213,10 @@ export class CameraPanLayer {
       targetY = Phaser.Math.Clamp(centeredScroll(this.target.y, cam.height), rangeY.min, rangeY.max);
     }
 
-    const stepX = glideStep(cam.scrollX, targetX, this.lerp);
-    const stepY = glideStep(cam.scrollY, targetY, this.lerp);
+    const stepX = glideStep(this.glideScrollX, targetX, this.lerp);
+    const stepY = glideStep(this.glideScrollY, targetY, this.lerp);
+    this.glideScrollX = stepX.value;
+    this.glideScrollY = stepY.value;
     cam.setScroll(stepX.value, stepY.value);
     if (!stepX.arrived || !stepY.arrived) return;
 
