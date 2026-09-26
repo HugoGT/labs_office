@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { AdminError, type AdminPort, type AdminSession, type Invitation } from './adminPort';
+import { AdminError, type AdminPort, type AdminSession } from './adminPort';
 import { DashboardScreen } from './DashboardScreen';
 
 const ADMIN: AdminSession = {
@@ -11,29 +11,10 @@ const ADMIN: AdminSession = {
   expiresAt: null,
 };
 
-const INVITADO: Invitation = {
-  id: 'inv-1',
-  email: 'invitado@example.com',
-  role: 'guest',
-  status: 'active',
-  createdAt: '2026-09-01T00:00:00.000Z',
-  expiresAt: '2026-09-08T00:00:00.000Z',
-  daysLeft: 7,
-  invitedByEmail: 'ana@example.com',
-};
-
-const REVOCADO: Invitation = {
-  ...INVITADO,
-  id: 'inv-2',
-  email: 'antiguo@example.com',
-  status: 'revoked',
-  daysLeft: null,
-};
-
 function fakeAdmin(overrides: Partial<AdminPort> = {}): AdminPort {
   return {
     session: vi.fn(async () => ADMIN),
-    listInvitations: vi.fn(async () => [INVITADO]),
+    listInvitations: vi.fn(async () => []),
     createInvitation: vi.fn(async () => ({
       id: 'inv-3',
       email: 'nuevo@example.com',
@@ -67,7 +48,7 @@ function tarjeta(nombre: RegExp) {
 
 /** Rellena el formulario de invitacion y lo envia. */
 async function invitar(user: ReturnType<typeof userEvent.setup>, email: string, days: string) {
-  const form = within(tarjeta(/nueva invitación/i));
+  const form = within(tarjeta(/^invitaciones$/i));
   await user.type(form.getByLabelText(/correo/i), email);
   const dias = form.getByLabelText(/días/i);
   await user.clear(dias);
@@ -104,8 +85,7 @@ describe('DashboardScreen: quien puede mirar', () => {
     render(<DashboardScreen admin={admin} />);
 
     expect(await screen.findByText(/no autorizado/i)).toBeInTheDocument();
-    expect(screen.queryByRole('table')).not.toBeInTheDocument();
-    expect(admin.listInvitations).not.toHaveBeenCalled();
+    expect(screen.queryByRole('region', { name: /nuevo usuario/i })).not.toBeInTheDocument();
   });
 
   it('un 403 del servidor tambien es "no autorizado"', async () => {
@@ -127,7 +107,7 @@ describe('DashboardScreen: quien puede mirar', () => {
 
     render(<DashboardScreen admin={admin} />);
 
-    expect(await screen.findByRole('table')).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: /nuevo usuario/i })).toBeInTheDocument();
   });
 
   it('un fallo de red no se disfraza de falta de permisos', async () => {
@@ -145,89 +125,52 @@ describe('DashboardScreen: quien puede mirar', () => {
   });
 });
 
-describe('DashboardScreen: la tabla de invitaciones', () => {
-  it('ensena correo, rol, quien invito, vencimiento, dias restantes y estado', async () => {
+describe('DashboardScreen: las dos tarjetas de alta', () => {
+  it('"Nuevo usuario" se pinta ANTES que "Invitaciones"', async () => {
     render(<DashboardScreen admin={fakeAdmin()} />);
 
-    const fila = await screen.findByRole('row', { name: /invitado@example.com/i });
-    expect(within(fila).getByText('invitado@example.com')).toBeInTheDocument();
-    expect(within(fila).getByText('Invitado')).toBeInTheDocument();
-    expect(within(fila).getByText('ana@example.com')).toBeInTheDocument();
-    // La fecha se pinta en UTC, tal cual la manda el servidor: reinterpretarla
-    // en la zona del navegador ensenaria un dia antes al oeste de Greenwich.
-    expect(within(fila).getByText('08/09/2026')).toBeInTheDocument();
-    expect(within(fila).getByText('7')).toBeInTheDocument();
-    expect(within(fila).getByText('Activa')).toBeInTheDocument();
+    const headings = (await screen.findAllByRole('heading', { level: 2 })).map(
+      (heading) => heading.textContent,
+    );
+    expect(headings).toEqual(['Nuevo usuario', 'Invitaciones']);
   });
 
-  it('la tabla tiene encabezados de verdad, no una rejilla de divs', async () => {
+  it('"Nuevo usuario" dice que su acceso no caduca, sin nada mas', async () => {
     render(<DashboardScreen admin={fakeAdmin()} />);
 
-    await screen.findByRole('table');
-    expect(screen.getByRole('columnheader', { name: /correo/i })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: /días/i })).toBeInTheDocument();
+    const tarjeta = within(await screen.findByRole('region', { name: /nuevo usuario/i }));
+    expect(tarjeta.getByText('Su acceso no caduca.')).toBeInTheDocument();
   });
 
-  it('sin invitaciones lo dice, en vez de dejar una tabla muda', async () => {
-    const admin = fakeAdmin({ listInvitations: vi.fn(async () => []) });
+  it('"Invitaciones" conserva su subtitulo de siempre', async () => {
+    render(<DashboardScreen admin={fakeAdmin()} />);
 
-    render(<DashboardScreen admin={admin} />);
-
-    expect(await screen.findByText(/todavía no hay invitaciones/i)).toBeInTheDocument();
+    const tarjeta = within(await screen.findByRole('region', { name: /^invitaciones$/i }));
+    expect(
+      tarjeta.getByText(/acceso temporal para alguien de fuera: caduca solo y se puede revocar/i),
+    ).toBeInTheDocument();
   });
-});
 
-describe('DashboardScreen: revocar', () => {
-  it('revoca por id y vuelve a leer la lista', async () => {
-    const user = userEvent.setup();
+  it('ya no pinta la tabla de invitaciones ni pide la lista al puerto', async () => {
     const admin = fakeAdmin();
     render(<DashboardScreen admin={admin} />);
-    const fila = await screen.findByRole('row', { name: /invitado@example.com/i });
 
-    await user.click(within(fila).getByRole('button', { name: /revocar/i }));
-
-    expect(admin.revoke).toHaveBeenCalledWith('inv-1');
-    // Releer en vez de tachar la fila en local: el servidor es el dueno del
-    // estado y puede haber cambiado mas cosas que esta.
-    await waitFor(() => expect(admin.listInvitations).toHaveBeenCalledTimes(2));
-  });
-
-  it('una invitacion ya revocada no ofrece revocar otra vez', async () => {
-    const admin = fakeAdmin({ listInvitations: vi.fn(async () => [REVOCADO]) });
-
-    render(<DashboardScreen admin={admin} />);
-
-    const fila = await screen.findByRole('row', { name: /antiguo@example.com/i });
-    expect(within(fila).queryByRole('button', { name: /revocar/i })).not.toBeInTheDocument();
-  });
-
-  it('si el servidor rechaza la revocacion, se cuenta', async () => {
-    const user = userEvent.setup();
-    const admin = fakeAdmin({
-      revoke: vi.fn(async () => {
-        throw new AdminError('forbidden');
-      }),
-    });
-    render(<DashboardScreen admin={admin} />);
-    const fila = await screen.findByRole('row', { name: /invitado@example.com/i });
-
-    await user.click(within(fila).getByRole('button', { name: /revocar/i }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(/permiso/i);
+    await screen.findByRole('region', { name: /^invitaciones$/i });
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(admin.listInvitations).not.toHaveBeenCalled();
   });
 });
 
 describe('DashboardScreen: invitar', () => {
-  it('manda correo y dias al puerto y refresca la lista', async () => {
+  it('manda correo y dias al puerto', async () => {
     const user = userEvent.setup();
     const admin = fakeAdmin();
     render(<DashboardScreen admin={admin} />);
-    await screen.findByRole('table');
+    await screen.findByRole('region', { name: /^invitaciones$/i });
 
     await invitar(user, 'nuevo@example.com', '30');
 
     expect(admin.createInvitation).toHaveBeenCalledWith('nuevo@example.com', 30);
-    await waitFor(() => expect(admin.listInvitations).toHaveBeenCalledTimes(2));
   });
 
   it('el campo de dias declara el rango 1..90 al navegador', async () => {
@@ -243,7 +186,7 @@ describe('DashboardScreen: invitar', () => {
     const user = userEvent.setup();
     const admin = fakeAdmin();
     render(<DashboardScreen admin={admin} />);
-    await screen.findByRole('table');
+    await screen.findByRole('region', { name: /^invitaciones$/i });
 
     await invitar(user, 'nuevo@example.com', '91');
 
@@ -255,8 +198,8 @@ describe('DashboardScreen: invitar', () => {
     const user = userEvent.setup();
     const admin = fakeAdmin();
     render(<DashboardScreen admin={admin} />);
-    await screen.findByRole('table');
-    const form = within(tarjeta(/nueva invitación/i));
+    await screen.findByRole('region', { name: /^invitaciones$/i });
+    const form = within(tarjeta(/^invitaciones$/i));
     await user.type(form.getByLabelText(/correo/i), 'nuevo@example.com');
     const dias = form.getByLabelText(/días/i);
     await user.clear(dias);
@@ -266,7 +209,7 @@ describe('DashboardScreen: invitar', () => {
     // quitando el atributo desde las herramientas del navegador: la guarda de
     // JavaScript existe para ese caso, y el servidor para cuando tambien se
     // salta esta.
-    fireEvent.submit(tarjeta(/nueva invitación/i).querySelector('form') as HTMLFormElement);
+    fireEvent.submit(tarjeta(/^invitaciones$/i).querySelector('form') as HTMLFormElement);
 
     expect(admin.createInvitation).not.toHaveBeenCalled();
     expect(await screen.findByRole('alert')).toHaveTextContent(/1 y 90/);
@@ -280,7 +223,7 @@ describe('DashboardScreen: invitar', () => {
       }),
     });
     render(<DashboardScreen admin={admin} />);
-    await screen.findByRole('table');
+    await screen.findByRole('region', { name: /^invitaciones$/i });
 
     await invitar(user, 'nuevo@example.com', '30');
 
@@ -295,7 +238,7 @@ describe('DashboardScreen: invitar', () => {
       }),
     });
     render(<DashboardScreen admin={admin} />);
-    await screen.findByRole('table');
+    await screen.findByRole('region', { name: /^invitaciones$/i });
 
     await invitar(user, 'repetido@example.com', '30');
 
@@ -310,7 +253,7 @@ describe('DashboardScreen: invitar', () => {
       }),
     });
     render(<DashboardScreen admin={admin} />);
-    await screen.findByRole('table');
+    await screen.findByRole('region', { name: /^invitaciones$/i });
 
     await invitar(user, 'nuevo@example.com', '30');
 
@@ -322,7 +265,7 @@ describe('DashboardScreen: account created, the password is emailed (#94)', () =
   it('confirms the email went out and never shows a password', async () => {
     const user = userEvent.setup();
     render(<DashboardScreen admin={fakeAdmin()} />);
-    await screen.findByRole('table');
+    await screen.findByRole('region', { name: /^invitaciones$/i });
 
     await invitar(user, 'nuevo@example.com', '30');
 
@@ -348,7 +291,7 @@ describe('DashboardScreen: account created, the password is emailed (#94)', () =
       })),
     });
     render(<DashboardScreen admin={admin} />);
-    await screen.findByRole('table');
+    await screen.findByRole('region', { name: /^invitaciones$/i });
     await invitar(user, 'nuevo@example.com', '30');
 
     const panel = within(await screen.findByRole('region', { name: /cuenta creada/i }));
@@ -375,7 +318,7 @@ describe('DashboardScreen: account created, the password is emailed (#94)', () =
       }),
     });
     render(<DashboardScreen admin={admin} />);
-    await screen.findByRole('table');
+    await screen.findByRole('region', { name: /^invitaciones$/i });
     await darDeAlta(user, 'nueva@example.com');
 
     const panel = within(await screen.findByRole('region', { name: /cuenta creada/i }));
@@ -388,55 +331,13 @@ describe('DashboardScreen: account created, the password is emailed (#94)', () =
   it('dismissing it removes the panel', async () => {
     const user = userEvent.setup();
     render(<DashboardScreen admin={fakeAdmin()} />);
-    await screen.findByRole('table');
+    await screen.findByRole('region', { name: /^invitaciones$/i });
     await invitar(user, 'nuevo@example.com', '30');
     await screen.findByRole('region', { name: /cuenta creada/i });
 
     await user.click(screen.getByRole('button', { name: /entendido/i }));
 
     expect(screen.queryByRole('region', { name: /cuenta creada/i })).not.toBeInTheDocument();
-  });
-});
-
-describe('DashboardScreen: re-send the password email from the table (#94)', () => {
-  it('re-sends by id for an active invitation and confirms it', async () => {
-    const user = userEvent.setup();
-    const admin = fakeAdmin();
-    render(<DashboardScreen admin={admin} />);
-    const fila = await screen.findByRole('row', { name: /invitado@example.com/i });
-
-    await user.click(within(fila).getByRole('button', { name: /reenviar correo/i }));
-
-    expect(admin.sendPasswordReset).toHaveBeenCalledWith('inv-1');
-    expect(await screen.findByRole('status')).toHaveTextContent(
-      /correo reenviado a invitado@example.com/i,
-    );
-  });
-
-  it('a revoked invitation does not offer it', async () => {
-    render(<DashboardScreen admin={fakeAdmin({ listInvitations: vi.fn(async () => [REVOCADO]) })} />);
-
-    const fila = await screen.findByRole('row', { name: /antiguo@example.com/i });
-    expect(within(fila).queryByRole('button', { name: /reenviar/i })).not.toBeInTheDocument();
-  });
-
-  it('says so when the server could not send it', async () => {
-    const user = userEvent.setup();
-    const admin = fakeAdmin({
-      sendPasswordReset: vi.fn(async (id: string) => ({
-        id,
-        email: 'invitado@example.com',
-        emailSent: false,
-      })),
-    });
-    render(<DashboardScreen admin={admin} />);
-    const fila = await screen.findByRole('row', { name: /invitado@example.com/i });
-
-    await user.click(within(fila).getByRole('button', { name: /reenviar correo/i }));
-
-    expect(
-      await within(tarjeta(/^invitaciones$/i)).findByRole('alert'),
-    ).toHaveTextContent(/no se pudo enviar el correo/i);
   });
 });
 
@@ -447,7 +348,7 @@ describe('DashboardScreen: dar de alta a alguien de casa', () => {
     const user = userEvent.setup();
     const admin = fakeAdmin();
     render(<DashboardScreen admin={admin} />);
-    await screen.findByRole('table');
+    await screen.findByRole('region', { name: /^invitaciones$/i });
 
     await darDeAlta(user, '  nueva@example.com  ');
 
@@ -458,7 +359,7 @@ describe('DashboardScreen: dar de alta a alguien de casa', () => {
     const user = userEvent.setup();
     const admin = fakeAdmin({ session: vi.fn(async () => SUPER) });
     render(<DashboardScreen admin={admin} />);
-    await screen.findByRole('table');
+    await screen.findByRole('region', { name: /^invitaciones$/i });
 
     await darDeAlta(user, 'jefa@example.com', /administrador/i);
 
@@ -471,23 +372,11 @@ describe('DashboardScreen: dar de alta a alguien de casa', () => {
     // servidor, que responde 403. Esto solo evita ensenar una opcion que a esta
     // persona le va a dar error siempre.
     render(<DashboardScreen admin={fakeAdmin()} />);
-    await screen.findByRole('table');
+    await screen.findByRole('region', { name: /^invitaciones$/i });
 
     const form = within(tarjeta(/nuevo usuario/i));
     expect(form.getByRole('option', { name: /empleado/i })).toBeInTheDocument();
     expect(form.queryByRole('option', { name: /administrador/i })).not.toBeInTheDocument();
-  });
-
-  it('NO relee la lista de invitaciones: quien entra por aqui no sale en ella', async () => {
-    const user = userEvent.setup();
-    const admin = fakeAdmin();
-    render(<DashboardScreen admin={admin} />);
-    await screen.findByRole('table');
-
-    await darDeAlta(user, 'nueva@example.com');
-
-    await screen.findByRole('region', { name: /cuenta creada/i });
-    expect(admin.listInvitations).toHaveBeenCalledTimes(1);
   });
 
   it('un fallo al dar de alta no pinta el error dentro del formulario de invitacion', async () => {
@@ -500,12 +389,12 @@ describe('DashboardScreen: dar de alta a alguien de casa', () => {
       }),
     });
     render(<DashboardScreen admin={admin} />);
-    await screen.findByRole('table');
+    await screen.findByRole('region', { name: /^invitaciones$/i });
 
     await darDeAlta(user, 'repetida@example.com');
 
     expect(await within(tarjeta(/nuevo usuario/i)).findByRole('alert')).toHaveTextContent(/ya/i);
-    expect(within(tarjeta(/nueva invitación/i)).queryByRole('alert')).not.toBeInTheDocument();
+    expect(within(tarjeta(/^invitaciones$/i)).queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('tras un fallo los campos se conservan, para corregir en vez de reescribir', async () => {
@@ -516,7 +405,7 @@ describe('DashboardScreen: dar de alta a alguien de casa', () => {
       }),
     });
     render(<DashboardScreen admin={admin} />);
-    await screen.findByRole('table');
+    await screen.findByRole('region', { name: /^invitaciones$/i });
 
     await darDeAlta(user, 'nueva@example.com');
 
@@ -533,11 +422,11 @@ describe('DashboardScreen: dar de alta a alguien de casa', () => {
       }),
     });
     render(<DashboardScreen admin={admin} />);
-    await screen.findByRole('table');
+    await screen.findByRole('region', { name: /^invitaciones$/i });
 
     await invitar(user, 'repetido@example.com', '30');
 
-    expect(await within(tarjeta(/nueva invitación/i)).findByRole('alert')).toBeInTheDocument();
+    expect(await within(tarjeta(/^invitaciones$/i)).findByRole('alert')).toBeInTheDocument();
     expect(within(tarjeta(/nuevo usuario/i)).queryByRole('alert')).not.toBeInTheDocument();
   });
 
@@ -546,7 +435,7 @@ describe('DashboardScreen: dar de alta a alguien de casa', () => {
     // saber cual de las dos altas hizo.
     const user = userEvent.setup();
     render(<DashboardScreen admin={fakeAdmin()} />);
-    await screen.findByRole('table');
+    await screen.findByRole('region', { name: /^invitaciones$/i });
 
     await darDeAlta(user, 'nueva@example.com');
 
@@ -564,7 +453,7 @@ describe('DashboardScreen: dar de alta a alguien de casa', () => {
     // es.
     const user = userEvent.setup();
     render(<DashboardScreen admin={fakeAdmin()} />);
-    await screen.findByRole('table');
+    await screen.findByRole('region', { name: /^invitaciones$/i });
 
     await invitar(user, 'nuevo@example.com', '30');
 
