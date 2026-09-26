@@ -4,7 +4,7 @@
   min-width: 190px;
   background: #111827;
   border: 1px solid #374151;
-  border-radius: 12px;
+  border-radius: var(--radius-panel);
   overflow: hidden;
   box-shadow: 0 10px 40px #000c;
 }

@@ -12,7 +12,7 @@
   background: #1f2937;
   color: #e5e7eb;
   border: 1px solid #374151;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   padding: 6px 10px;
   font: inherit;
   font-size: 13px;
@@ -70,7 +70,7 @@
   background: #1f2937;
   color: #e5e7eb;
   border: 1px solid #374151;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   padding: 4px 8px;
   font: inherit;
   font-size: 12px;
@@ -102,7 +102,7 @@
   background: #1f2937;
   color: #e5e7eb;
   border: 1px solid #374151;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   padding: 4px 8px;
   font: inherit;
   font-size: 12px;

@@ -156,6 +156,7 @@ Infra: locally `infra/livekit/` runs LiveKit + Egress + Redis, and the root `doc
 - UI copy is Spanish. Recent code comments, commit messages and docs are English; match the surrounding file when editing old Spanish comments.
 - Comments explain why (decisions, issue numbers like `#24`), not what.
 - Dependencies are pinned deliberately (Phaser 3, Colyseus 0.16 line, `@colyseus/core` 0.16.24 override, digest-pinned Docker images). Read `server/README.md` before bumping Colyseus.
+- Border-radius follows a 3-tier scale defined as CSS custom properties in `src/index.css`: `--radius-panel` (12px, floating panel/card containers), `--radius-control` (8px, buttons/inputs/selects/tiles/list rows), `--radius-tag` (6px, small badges/labels overlaid on content). Use the token matching the element's role, never a literal px value, except `border-radius: 50%` on circles (dots, avatars), which is not part of this scale. The Phaser minimap stays square on purpose: it's a canvas camera viewport, not a DOM box, so no CSS radius applies to it.
 
 Testing:
 - Strict TDD is expected: write the failing test first, then the code. Every behavior change ships with tests.
