@@ -7,7 +7,7 @@ import styles from './DashboardScreen.module.css';
 
 /**
  * Users panel (#93): everyone in the directory, not only invitations, and the
- * "Quitar acceso" action. Same container shape as `SpacesPanel`: the only one
+ * "Quitar acceso" action. Same container shape as `AssetsPanel`: the only one
  * that calls the port and holds state; the table gets plain props (D3).
  *
  * The button shows only where the server said `removable`, which is

@@ -6,12 +6,6 @@ import type { AdminPort } from './adminPort';
 import { createAssetAdminClient } from './assetAdminClient';
 import type { AssetAdminPort } from './assetAdminPort';
 import { AssetsPanel } from './AssetsPanel';
-import { createDeskAdminClient } from './deskAdminClient';
-import type { DeskAdminPort } from './deskAdminPort';
-import { DesksPanel } from './DesksPanel';
-import { createSpacesAdminClient } from './spacesAdminClient';
-import type { SpacesAdminPort } from './spacesAdminPort';
-import { SpacesPanel } from './SpacesPanel';
 import { createUsersAdminClient } from './usersAdminClient';
 import type { UsersAdminPort } from './usersAdminPort';
 import { UsersPanel } from './UsersPanel';
@@ -37,16 +31,20 @@ export interface DashboardRouteProps {
  * aqui evita el envoltorio `.then(m => ({ default: m.X }))` en `App`.
  */
 /**
- * Los cuatro puertos del panel, construidos de una vez. Van juntos porque
+ * Los tres puertos del panel, construidos de una vez. Van juntos porque
  * dependen de lo mismo -- el endpoint de la oficina y la sesion -- y porque
  * ninguno se puede construir si el otro no: o hay servidor y sesion para los
- * cuatro, o no hay panel.
+ * tres, o no hay panel.
+ *
+ * Escritorios y espacios ya no tienen puerto propio aqui (#107): los editaba
+ * `DesksPanel`/`SpacesPanel` por coordenadas escritas a mano, y quedaron
+ * duplicados con la barra lateral de la oficina (#74), que edita lo mismo
+ * viendo el resultado en el mapa. `deskAdminClient.ts`/`spacesAdminClient.ts`
+ * y sus puertos siguen vivos: `OfficeShell` los sigue usando para esa barra.
  */
 interface DashboardPorts {
   admin: AdminPort;
-  desks: DeskAdminPort;
   assets: AssetAdminPort;
-  spaces: SpacesAdminPort;
   /** Everyone in the directory and removing access (#93). */
   users: UsersAdminPort;
 }
@@ -66,8 +64,9 @@ export default function DashboardRoute({ session }: DashboardRouteProps) {
     });
     const adminBaseUrl = resolveAdminBaseUrl({ officeEndpoint });
     // Las dos bases salen del MISMO endpoint y solo se diferencian en el
-    // prefijo: las invitaciones viven enteras bajo `/admin`, pero la unica
-    // lectura de escritorios (`GET /desks`) cuelga de la raiz.
+    // prefijo: las invitaciones viven bajo `adminBaseUrl`, que ya lo incluye,
+    // mientras que catalogo y usuarios cuelgan de la raiz y escriben `/admin`
+    // entero en cada camino (ver `assetAdminClient.ts`/`usersAdminClient.ts`).
     const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint });
     if (adminBaseUrl === null || apiBaseUrl === null) return null;
 
@@ -78,11 +77,7 @@ export default function DashboardRoute({ session }: DashboardRouteProps) {
 
     return {
       admin: createAdminClient({ baseUrl: adminBaseUrl, getIdToken }),
-      desks: createDeskAdminClient({ baseUrl: apiBaseUrl, getIdToken }),
       assets: createAssetAdminClient({ baseUrl: apiBaseUrl, getIdToken }),
-      // Misma raiz que `desks`: `GET /spaces` tampoco cuelga de `/admin`
-      // (ver la cabecera de `spacesAdminClient.ts`).
-      spaces: createSpacesAdminClient({ baseUrl: apiBaseUrl, getIdToken }),
       users: createUsersAdminClient({ baseUrl: apiBaseUrl, getIdToken }),
     };
   });
@@ -129,8 +124,6 @@ export default function DashboardRoute({ session }: DashboardRouteProps) {
       {/* First of the extra panels: who is in the office is what an admin
           looks for right after the invitations (#93). */}
       <UsersPanel users={ports.users} />
-      <DesksPanel desks={ports.desks} />
-      <SpacesPanel spaces={ports.spaces} />
       <AssetsPanel assets={ports.assets} />
     </DashboardScreen>
   );

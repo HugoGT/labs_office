@@ -139,9 +139,9 @@ export type AdminErrorCode =
   | 'space-name-taken'
   /**
    * El espacio pedido es en realidad el cubiculo de un escritorio, no una
-   * sala: se administra desde `DesksPanel`, no desde `SpacesPanel`. Mismo
-   * codigo que ya usa `pgSpaces.updateSpace`/`deleteSpace` en el servidor
-   * (#10 + #12, tarea 1.4) para el intento directo por la API.
+   * sala: se administra como escritorio, no como espacio (barra lateral de la
+   * oficina, #74). Mismo codigo que ya usa `pgSpaces.updateSpace`/`deleteSpace`
+   * en el servidor (#10 + #12, tarea 1.4) para el intento directo por la API.
    */
   | 'space-owned-by-desk'
   /**

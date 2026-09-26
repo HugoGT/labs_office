@@ -18,6 +18,7 @@ import {
 import { deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
+import { isEditableElementFocused } from './inputFocusGuard';
 import { LayoutEditLayer } from './LayoutEditLayer';
 import { placeFurniture, placeNature, placeZoneLabels, renderGround } from './mapBuilder';
 import {
@@ -145,6 +146,8 @@ export class OfficeScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WasdKeys;
   private mmMarker?: Phaser.GameObjects.Arc;
+  /** Lo crea `setupCameras`; `CameraPanLayer` lo necesita para el clic de navegacion (#98). */
+  private minimapCamera?: Phaser.Cameras.Scene2D.Camera;
   /** Clave de dedupe de "voice" (D3): incluye espacio y `selfSessionId`, no solo los pares. */
   private lastVoiceKey = '';
   private currentSpaceId: string | null = null;
@@ -294,6 +297,8 @@ export class OfficeScene extends Phaser.Scene {
       camera: this.cameras.main,
       target: this.player,
       lerp: FOLLOW_LERP,
+      worldBounds: { x: 0, y: 0, width: WORLD_W, height: WORLD_H },
+      minimap: this.minimapCamera,
       isSuspended: () => this.layoutEditing,
     });
 
@@ -707,6 +712,9 @@ export class OfficeScene extends Phaser.Scene {
       // `pointerdown` global), no una oferta de coger/soltar. Se retorna sin
       // `stopPropagation` para no tragarse el clic que el editor necesita.
       if (this.layoutEditing) return;
+      // #98: por el minimapa el clic es navegacion (`CameraPanLayer`), no
+      // una oferta de coger/soltar un escritorio que ahi mide unos pixeles.
+      if (pointer.camera && pointer.camera !== this.cameras.main) return;
       // Mismo `stopPropagation` que el clic de un peer: sin el, el
       // `pointerdown` de la escena cerraria el menu contextual a la vez.
       pointer.event.stopPropagation();
@@ -835,6 +843,7 @@ export class OfficeScene extends Phaser.Scene {
     minimap.setZoom(Math.min(MINIMAP_WIDTH / WORLD_W, MINIMAP_HEIGHT / WORLD_H));
     minimap.centerOn(WORLD_W / 2, WORLD_H / 2);
     minimap.setBackgroundColor(0x0d1117);
+    this.minimapCamera = minimap;
 
     this.mmMarker = this.add.circle(0, 0, 42, 0xffffff, 0.45).setDepth(MINIMAP_MARKER_DEPTH);
     cam.ignore(this.mmMarker);
@@ -971,10 +980,15 @@ export class OfficeScene extends Phaser.Scene {
   update(_time: number, delta: number): void {
     let vx = 0;
     let vy = 0;
-    if (this.cursors.left.isDown || this.wasd.A.isDown) vx = -1;
-    else if (this.cursors.right.isDown || this.wasd.D.isDown) vx = 1;
-    if (this.cursors.up.isDown || this.wasd.W.isDown) vy = -1;
-    else if (this.cursors.down.isDown || this.wasd.S.isDown) vy = 1;
+    // #104: WASD binds on `window` (Phaser's default keyboard target), so it
+    // fires even while a side-panel text field has focus. While that's the
+    // case, WASD is left out of movement so the letters get typed instead;
+    // the arrow keys are unaffected on purpose (out of scope for this bug).
+    const wasdActive = !isEditableElementFocused();
+    if (this.cursors.left.isDown || (wasdActive && this.wasd.A.isDown)) vx = -1;
+    else if (this.cursors.right.isDown || (wasdActive && this.wasd.D.isDown)) vx = 1;
+    if (this.cursors.up.isDown || (wasdActive && this.wasd.W.isDown)) vy = -1;
+    else if (this.cursors.down.isDown || (wasdActive && this.wasd.S.isDown)) vy = 1;
 
     const body = this.player.body as Phaser.Physics.Arcade.Body;
 

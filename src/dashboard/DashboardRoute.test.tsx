@@ -5,10 +5,6 @@ import { createAdminClient } from './adminClient';
 import type { AdminPort } from './adminPort';
 import { createAssetAdminClient } from './assetAdminClient';
 import type { AssetAdminPort } from './assetAdminPort';
-import { createDeskAdminClient } from './deskAdminClient';
-import type { DeskAdminPort } from './deskAdminPort';
-import { createSpacesAdminClient } from './spacesAdminClient';
-import type { SpacesAdminPort } from './spacesAdminPort';
 import { createUsersAdminClient } from './usersAdminClient';
 import type { UsersAdminPort } from './usersAdminPort';
 import DashboardRoute from './DashboardRoute';
@@ -21,22 +17,12 @@ vi.mock('./adminClient', async (importOriginal) => ({
   createAdminClient: vi.fn(),
 }));
 
-// Los adaptadores de escritorios y catalogo se mockean igual y por lo mismo:
-// aqui solo importa con que se construyen. Lo que hacen con esa base ya lo
-// prueban `deskAdminClient.test.ts` y `assetAdminClient.test.ts`.
-vi.mock('./deskAdminClient', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('./deskAdminClient')>()),
-  createDeskAdminClient: vi.fn(),
-}));
-
+// El adaptador de catalogo se mockea igual y por lo mismo: aqui solo importa
+// con que se construye. Lo que hace con esa base ya lo prueba
+// `assetAdminClient.test.ts`.
 vi.mock('./assetAdminClient', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./assetAdminClient')>()),
   createAssetAdminClient: vi.fn(),
-}));
-
-vi.mock('./spacesAdminClient', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('./spacesAdminClient')>()),
-  createSpacesAdminClient: vi.fn(),
 }));
 
 // Users panel (#93): mocked for the same reason as the other adapters.
@@ -56,9 +42,7 @@ beforeEach(() => {
 });
 
 const createAdminClientMock = vi.mocked(createAdminClient);
-const createDeskAdminClientMock = vi.mocked(createDeskAdminClient);
 const createAssetAdminClientMock = vi.mocked(createAssetAdminClient);
-const createSpacesAdminClientMock = vi.mocked(createSpacesAdminClient);
 
 function fakePort(): AdminPort {
   return {
@@ -76,15 +60,6 @@ function fakePort(): AdminPort {
   };
 }
 
-function fakeDeskPort(): DeskAdminPort {
-  return {
-    listDesks: vi.fn(async () => []),
-    createDesk: vi.fn(),
-    updateDesk: vi.fn(),
-    deleteDesk: vi.fn(async () => undefined),
-  };
-}
-
 function fakeAssetPort(): AssetAdminPort {
   return {
     listAssets: vi.fn(async () => []),
@@ -94,26 +69,15 @@ function fakeAssetPort(): AssetAdminPort {
   };
 }
 
-function fakeSpacesPort(): SpacesAdminPort {
-  return {
-    listSpaces: vi.fn(async () => []),
-    createSpace: vi.fn(),
-    updateSpace: vi.fn(),
-    deleteSpace: vi.fn(async () => undefined),
-  };
-}
-
 function fakeSession(): OfficeSession {
   return { displayName: 'Ana', getIdToken: vi.fn(async () => 'id-token') };
 }
 
 beforeEach(() => {
-  // Los dos paneles se montan siempre que hay sesion y servidor, asi que sin
-  // un puerto de vuelta cualquier prueba de esta ruta reventaria dentro de
-  // ellos por algo que no es lo que prueba.
-  createDeskAdminClientMock.mockReturnValue(fakeDeskPort());
+  // El panel de catalogo se monta siempre que hay sesion y servidor, asi que
+  // sin un puerto de vuelta cualquier prueba de esta ruta reventaria dentro
+  // de el por algo que no es lo que prueba.
   createAssetAdminClientMock.mockReturnValue(fakeAssetPort());
-  createSpacesAdminClientMock.mockReturnValue(fakeSpacesPort());
 });
 
 afterEach(() => {
@@ -181,69 +145,71 @@ describe('DashboardRoute', () => {
   });
 });
 
-describe('DashboardRoute: los paneles de escritorios, espacios y catalogo', () => {
-  it('construye sus adaptadores con la RAIZ, no con /admin', () => {
+describe('DashboardRoute: el panel de catalogo', () => {
+  it('construye su adaptador con la RAIZ, no con /admin', () => {
     createAdminClientMock.mockReturnValue(fakePort());
 
     render(<DashboardRoute session={fakeSession()} />);
 
-    // `GET /desks` y `GET /spaces` no cuelgan de `/admin`, asi que estos tres
-    // adaptadores piden la raiz y escriben el prefijo entero en cada camino.
-    expect(createDeskAdminClientMock.mock.calls[0][0].baseUrl).toBe('http://localhost:2567');
+    // `GET /admin/assets` cuelga de la raiz, escribiendo el prefijo entero en
+    // cada camino, y no de `adminBaseUrl` (que ya lo incluye).
     expect(createAssetAdminClientMock.mock.calls[0][0].baseUrl).toBe('http://localhost:2567');
-    expect(createSpacesAdminClientMock.mock.calls[0][0].baseUrl).toBe('http://localhost:2567');
   });
 
-  it('los cuatro adaptadores piden el token a la sesion, no a una copia', async () => {
+  it('pide el token a la sesion, no a una copia', async () => {
     const session = fakeSession();
     createAdminClientMock.mockReturnValue(fakePort());
 
     render(<DashboardRoute session={session} />);
     await createAdminClientMock.mock.calls[0][0].getIdToken();
-    await createDeskAdminClientMock.mock.calls[0][0].getIdToken();
     await createAssetAdminClientMock.mock.calls[0][0].getIdToken();
-    await createSpacesAdminClientMock.mock.calls[0][0].getIdToken();
 
     // El ID token caduca cada hora: una copia dejaria de valer a mitad de una
     // sesion del panel sin que nada avisase.
-    expect(session.getIdToken).toHaveBeenCalledTimes(4);
+    expect(session.getIdToken).toHaveBeenCalledTimes(2);
   });
 
-  it('no los reconstruye en cada render', () => {
+  it('no lo reconstruye en cada render', () => {
     createAdminClientMock.mockReturnValue(fakePort());
     const session = fakeSession();
 
     const { rerender } = render(<DashboardRoute session={session} />);
     rerender(<DashboardRoute session={session} />);
 
-    // Un puerto nuevo por render volveria a disparar la carga de cada lista en
-    // bucle: es la dependencia del efecto de cada panel.
-    expect(createDeskAdminClientMock).toHaveBeenCalledTimes(1);
+    // Un puerto nuevo por render volveria a disparar la carga de la lista en
+    // bucle: es la dependencia del efecto del panel.
     expect(createAssetAdminClientMock).toHaveBeenCalledTimes(1);
-    expect(createSpacesAdminClientMock).toHaveBeenCalledTimes(1);
   });
 
-  it('sin servidor de oficina no construye ninguno', async () => {
+  it('sin servidor de oficina no lo construye', async () => {
     vi.stubEnv('VITE_COLYSEUS_URL', '');
 
     render(<DashboardRoute session={fakeSession()} />);
 
     await screen.findByText(/no hay servidor/i);
-    expect(createDeskAdminClientMock).not.toHaveBeenCalled();
     expect(createAssetAdminClientMock).not.toHaveBeenCalled();
-    expect(createSpacesAdminClientMock).not.toHaveBeenCalled();
   });
 
-  it('monta los tres paneles dentro del panel de administracion', async () => {
+  it('monta el panel de catalogo dentro del panel de administracion', async () => {
     createAdminClientMock.mockReturnValue(fakePort());
 
     render(<DashboardRoute session={fakeSession()} />);
 
-    // Cada uno pide su propia lista al montarse: son sus propios contenedores
-    // y `DashboardScreen` no sabe de que hablan.
-    expect(await screen.findByRole('region', { name: /escritorios/i })).toBeInTheDocument();
-    expect(await screen.findByRole('region', { name: /espacios/i })).toBeInTheDocument();
     expect(await screen.findByRole('region', { name: /catálogo/i })).toBeInTheDocument();
+  });
+});
+
+describe('DashboardRoute: paneles legacy de escritorios y espacios (#107)', () => {
+  it('ya no monta las secciones de Escritorios ni Espacios', async () => {
+    createAdminClientMock.mockReturnValue(fakePort());
+
+    render(<DashboardRoute session={fakeSession()} />);
+
+    // Sustituidos por la barra lateral de la oficina (#74), que edita lo mismo
+    // sobre el mapa en vez de por coordenadas escritas a mano.
+    expect(await screen.findByRole('region', { name: /catálogo/i })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: /escritorios/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: /espacios/i })).not.toBeInTheDocument();
   });
 });
 

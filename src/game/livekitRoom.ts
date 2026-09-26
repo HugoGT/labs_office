@@ -114,6 +114,13 @@ export interface ConnectLivekitRoomOptions {
   onLocalScreenShareChanged?: (track: AttachableTrack | null) => void;
   /** Identity holding the single share slot of this room, `null` when nobody shares (#20). */
   onActiveScreenSharerChanged?: (identity: string | null) => void;
+  /**
+   * The room is gone for good and this connection is dead (#84): LiveKit gave
+   * up reconnecting, or the server removed us. Never fired by our own
+   * `disconnect()`. Without it a dead room keeps every button enabled, the
+   * share picker opens and nothing is published, and no camera comes back.
+   */
+  onDisconnected?: () => void;
 }
 
 function publicationsOf(participant: Participant, source: Track.Source): TrackPublication[] {
@@ -153,12 +160,15 @@ export async function connectLivekitRoom({
   onScreenShareTrackUnsubscribed,
   onLocalScreenShareChanged,
   onActiveScreenSharerChanged,
+  onDisconnected,
 }: ConnectLivekitRoomOptions): Promise<LivekitRoomConnection> {
   const room = createRoom();
   const sink = createRemoteAudioSink(audioContainer);
   let desiredAudio: readonly string[] = [];
   let desiredVideo: readonly string[] = [];
   let activeScreenSharer: string | null = null;
+  /** Set by our own `disconnect()`, which also makes the room emit `Disconnected`. */
+  let closing = false;
 
   /**
    * Reconcilia UN kind a la vez contra su propio conjunto deseado. Cada kind
@@ -316,6 +326,13 @@ export async function connectLivekitRoom({
   });
 
   await room.connect(url, token, { autoSubscribe: false });
+  // Only fired once LiveKit's own resume/reconnect attempts are exhausted
+  // (#84): a mere blip is `Reconnecting`/`Reconnected` and needs nothing
+  // here. Listened to after `connect()`, whose own failure the caller gets
+  // as a rejection instead.
+  room.on(RoomEvent.Disconnected, () => {
+    if (!closing) onDisconnected?.();
+  });
 
   // El estado inicial no llega por evento: sin esto, un navegador que ya nace
   // bloqueado no se reporta hasta el primer cambio, que puede no ocurrir nunca.
@@ -386,6 +403,7 @@ export async function connectLivekitRoom({
       }
     },
     async disconnect() {
+      closing = true;
       sink.clear();
       await room.disconnect();
     },

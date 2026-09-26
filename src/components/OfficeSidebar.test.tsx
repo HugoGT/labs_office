@@ -221,4 +221,30 @@ describe('OfficeSidebar: seccion de administracion de escritorios (#74, PR3c + P
 
     expect(await screen.findByRole('button', { name: /Editar salas/ })).toBeInTheDocument();
   });
+
+  it('muestra "Personas conectadas" (con su buscador) antes del editor de escritorios/salas (#106)', async () => {
+    const user = userEvent.setup();
+    renderSidebar({
+      role: 'admin',
+      bridge: createOfficeBridge(),
+      desks: fakeDesks(),
+      spaces: fakeSpaces(),
+      refreshDesks: vi.fn(),
+      refreshSpaces: vi.fn(),
+    });
+
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    const search = screen.getByRole('searchbox');
+    const list = screen.getByRole('list');
+    const deskEditorButton = await screen.findByRole('button', { name: /Editar escritorios/ });
+    const spaceEditorButton = screen.getByRole('button', { name: /Editar salas/ });
+
+    // DOCUMENT_POSITION_FOLLOWING: el nodo de la derecha viene DESPUES del de
+    // la izquierda en el DOM (#106: la gente conectada es el contenido
+    // principal, la edicion de admin queda al final del panel).
+    expect(search.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(list.compareDocumentPosition(deskEditorButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(deskEditorButton.compareDocumentPosition(spaceEditorButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });
