@@ -158,6 +158,23 @@ describe('DeskEditorSection (#74, PR3c)', () => {
     expect(screen.getByLabelText(/Etiqueta del nuevo escritorio/)).toHaveValue('Mesa 9');
   });
 
+  it('#105: la etiqueta y su input viven en su propio contenedor, no sueltos en el form', async () => {
+    const bridge = createOfficeBridge();
+    render(<DeskEditorSection bridge={bridge} desks={fakeDesks()} spaces={fakeSpaces()} refreshDesks={vi.fn()} refreshSpaces={vi.fn()} />);
+    await userEvent.click(screen.getByRole('button', { name: /Editar escritorios/ }));
+    await screen.findByText('Mesa 4');
+
+    const form = screen.getByRole('button', { name: /Colocar nuevo escritorio/ }).closest('form');
+    expect(form).not.toBeNull();
+
+    const label = screen.getByText(/^Etiqueta del nuevo escritorio$/);
+    const input = screen.getByLabelText(/Etiqueta del nuevo escritorio/);
+    // El label y su input comparten un contenedor propio, distinto del <form>
+    // -- antes de #105 eran hermanos sueltos directos de `.form`.
+    expect(label.parentElement).toBe(input.parentElement);
+    expect(label.parentElement).not.toBe(form);
+  });
+
   it('forceExit saca del modo edicion aunque estuviese activo', async () => {
     const onEditingChange = vi.fn();
     const bridge = createOfficeBridge();

@@ -209,6 +209,30 @@ describe('SpaceEditorSection (#74, PR4)', () => {
     ).toBeInTheDocument();
   });
 
+  it('#105: cada etiqueta y su input viven en su propio contenedor, no sueltos en el form', async () => {
+    renderSection();
+    await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
+    await screen.findByText('Sala grande');
+
+    const form = screen.getByRole('button', { name: /Colocar nueva sala/ }).closest('form');
+    expect(form).not.toBeNull();
+
+    const pairs: Array<[RegExp, RegExp]> = [
+      [/^Nombre de la nueva sala$/, /Nombre de la nueva sala/],
+      [/^Ancho$/, /^Ancho$/],
+      [/^Alto$/, /^Alto$/],
+      [/^Aforo$/, /Aforo/],
+    ];
+    for (const [labelText, labelFor] of pairs) {
+      const label = screen.getByText(labelText);
+      const input = screen.getByLabelText(labelFor);
+      // El label y su input comparten un contenedor propio, distinto del <form>
+      // -- antes de #105 eran hermanos sueltos directos de `.form`.
+      expect(label.parentElement).toBe(input.parentElement);
+      expect(label.parentElement).not.toBe(form);
+    }
+  });
+
   it('forceExit saca del modo edicion aunque estuviese activo', async () => {
     const onEditingChange = vi.fn();
     const { bridge, spaces, desks, refreshDesks, refreshSpaces, rerender } = renderSection({ onEditingChange });

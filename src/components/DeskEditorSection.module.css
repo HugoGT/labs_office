@@ -84,11 +84,20 @@
 
 .form {
   display: flex;
-  gap: 4px;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* #105: la etiqueta y su input apilados en su propia fila -- antes eran
+   hermanos sueltos de `.form` y competian por el mismo ancho de fila. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .input {
-  flex: 1;
+  width: 100%;
   min-width: 0;
   background: #1f2937;
   color: #e5e7eb;
@@ -100,6 +109,7 @@
 }
 
 .hint {
+  display: block;
   font-size: 12px;
   color: #9ca3af;
 }
