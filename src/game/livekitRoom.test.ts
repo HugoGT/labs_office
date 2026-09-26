@@ -658,3 +658,40 @@ describe('one sharer per space (#20): takeover and the start race', () => {
     expect(onActiveScreenSharerChanged).toHaveBeenCalledWith('p1');
   });
 });
+
+describe('connectLivekitRoom: a room lost for good is reported (#84)', () => {
+  it('reports a disconnect nobody asked for, such as LiveKit giving up on reconnecting', async () => {
+    const room = fakeRoom();
+    const onDisconnected = vi.fn();
+
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onDisconnected,
+    });
+    room.emit(RoomEvent.Disconnected);
+
+    expect(onDisconnected).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays quiet when the disconnect is our own', async () => {
+    const room = fakeRoom();
+    // The real `Room` emits `Disconnected` from its own `disconnect()` as well.
+    room.disconnect = vi.fn(async () => {
+      room.emit(RoomEvent.Disconnected);
+      return undefined;
+    });
+    const onDisconnected = vi.fn();
+
+    const connection = await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onDisconnected,
+    });
+    await connection.disconnect();
+
+    expect(onDisconnected).not.toHaveBeenCalled();
+  });
+});

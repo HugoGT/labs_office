@@ -200,6 +200,12 @@ export function useProximityAudio(
       // sesion nueva que ya escribio la suya mientras este disconnect todavia
       // estaba en vuelo se veria borrada por este reset tardio.
       desiredRef.current = null;
+      clearRoomState();
+      if (connection) await connection.disconnect();
+    }
+
+    /** Everything a room reported dies with it: `teardown` and a room lost for good (#84). */
+    function clearRoomState(): void {
       setAudioAvailable(false);
       setAudioBlocked(false);
       // Ninguna pista, hablante o camara sobrevive a la sala que las reporto:
@@ -213,7 +219,6 @@ export function useProximityAudio(
       setSpeakers((current) => (current.size === 0 ? current : new Set()));
       setLocalVideoTrack(null);
       resetScreenShare();
-      if (connection) await connection.disconnect();
     }
 
     /**
@@ -285,6 +290,17 @@ export function useProximityAudio(
               ? null
               : { sessionId, name: namesRef.current.get(sessionId) ?? UNKNOWN_SHARER_NAME },
           );
+        },
+        onDisconnected: () => {
+          // LiveKit gave up on this room (#84). Nothing else would notice:
+          // the target did not change, so every later `voice` only forwards
+          // to a dead room -- no camera comes back and a share publishes
+          // nothing. Most visible after "No molestar", where nothing is
+          // published or subscribed while the room dies.
+          const target = targetRef.current;
+          if (!isCurrent() || target === null) return;
+          clearRoomState();
+          handleReconnect(target, { retryOnFailure: true });
         },
       };
     }
@@ -368,7 +384,16 @@ export function useProximityAudio(
       }, SLOW_RETRY_MS);
     }
 
-    function handleReconnect(target: VoiceTarget): void {
+    /**
+     * `retryOnFailure` is for rebuilding a room lost for good (#84): the
+     * network may still be down, and nothing else would try again while the
+     * target stays the same. A first connection that fails still degrades
+     * without retrying on its own.
+     */
+    function handleReconnect(
+      target: VoiceTarget,
+      { retryOnFailure = false }: { retryOnFailure?: boolean } = {},
+    ): void {
       clearSlowRetry();
       // Generacion propia de ESTE intento (hallazgo #1): `target` compara por
       // VALOR y un flap A->B->A2 deja a A2 con el mismo (sessionId,spaceId)
@@ -395,6 +420,7 @@ export function useProximityAudio(
         if (acquired === null) {
           // Degrada a sin audio, nunca lanza, nunca reintenta solo (ver el catch de mas abajo).
           setAudioAvailable(false);
+          if (retryOnFailure) scheduleRebuild(target, generation);
           return;
         }
 
@@ -422,9 +448,20 @@ export function useProximityAudio(
           // Se pidio el espacio pero se conecto al corredor (reintentos rapidos agotados, D5): sigue intentando cada 5s.
           if (acquired.corridor) scheduleSlowRetry(target, generation, 0);
         } catch {
-          if (generationRef.current === generation) setAudioAvailable(false);
+          if (generationRef.current !== generation) return;
+          setAudioAvailable(false);
+          if (retryOnFailure) scheduleRebuild(target, generation);
         }
       })();
+    }
+
+    /** Next attempt at rebuilding a lost room, unless another attempt superseded this one. */
+    function scheduleRebuild(target: VoiceTarget, generation: number): void {
+      slowRetryTimerRef.current = setTimeout(() => {
+        slowRetryTimerRef.current = null;
+        if (cancelled || generationRef.current !== generation) return;
+        handleReconnect(target, { retryOnFailure: true });
+      }, SLOW_RETRY_MS);
     }
 
     const unsubscribe = bridge.on('voice', (payload) => {
