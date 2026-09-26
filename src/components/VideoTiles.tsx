@@ -73,19 +73,30 @@ export function VideoTiles({
     };
   }, [bridge]);
 
+  /**
+   * La barra entera -- self-tile incluido -- solo existe con compania
+   * audible real: a solas no hay con quien hablar por video, y una camara
+   * propia flotando sin nadie enfrente no informa nada. Distinto del gate de
+   * SALA que el self-tile nunca pasa (D8): esto es presencia de pares, no
+   * pertenencia a una sala.
+   */
+  const hasCompany = voice.peers.length > 0;
+
   const entries: TileEntry[] = [];
-  if (voice.selfSessionId !== null) {
-    // El self-tile NUNCA pasa por el gate de sala (D8, decision G): la propia
-    // camara no cuesta downlink alguno.
-    entries.push({ sessionId: voice.selfSessionId, name: voice.selfName, track: localVideoTrack });
-  }
-  for (const peer of voice.peers) {
-    entries.push({
-      sessionId: peer.sessionId,
-      name: peer.name,
-      // No room gate (#75): the subscription already follows proximity.
-      track: videoTracks.get(peer.sessionId) ?? null,
-    });
+  if (hasCompany) {
+    if (voice.selfSessionId !== null) {
+      // El self-tile NUNCA pasa por el gate de sala (D8, decision G): la propia
+      // camara no cuesta downlink alguno.
+      entries.push({ sessionId: voice.selfSessionId, name: voice.selfName, track: localVideoTrack });
+    }
+    for (const peer of voice.peers) {
+      entries.push({
+        sessionId: peer.sessionId,
+        name: peer.name,
+        // No room gate (#75): the subscription already follows proximity.
+        track: videoTracks.get(peer.sessionId) ?? null,
+      });
+    }
   }
 
   const stage = selectScreenShareStage({
@@ -128,19 +139,21 @@ export function VideoTiles({
           />
         </div>
       )}
-      <div className={styles.bar} data-layout={stage ? 'column' : 'row'} data-testid="video-tile-bar">
-        {entries.map((entry) => (
-          <div key={entry.sessionId} className={styles.tile} data-session-id={entry.sessionId}>
-            <VideoTile
-              sessionId={entry.sessionId}
-              name={entry.name}
-              portraits={portraits}
-              track={entry.track}
-              speaking={speakers.has(entry.sessionId)}
-            />
-          </div>
-        ))}
-      </div>
+      {entries.length > 0 && (
+        <div className={styles.bar} data-layout={stage ? 'column' : 'row'} data-testid="video-tile-bar">
+          {entries.map((entry) => (
+            <div key={entry.sessionId} className={styles.tile} data-session-id={entry.sessionId}>
+              <VideoTile
+                sessionId={entry.sessionId}
+                name={entry.name}
+                portraits={portraits}
+                track={entry.track}
+                speaking={speakers.has(entry.sessionId)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }

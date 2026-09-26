@@ -78,21 +78,49 @@ describe('VideoTiles: fila fija arriba al centro', () => {
       bridge.emit('voice', {
         selfSessionId: 'yo',
         selfName: 'HugoGT',
-        peers: [{ sessionId: 'par-1', name: 'Ana' }],
+        peers: [
+          { sessionId: 'par-1', name: 'Ana' },
+          { sessionId: 'par-2', name: 'Beto' },
+        ],
         spaceId: 'sala-de-juntas-stub',
       });
     });
     const selfNode = document.querySelector('[data-session-id="yo"]');
+    expect(tileIds()).toEqual(['yo', 'par-1', 'par-2']);
+
+    act(() => {
+      bridge.emit('voice', {
+        selfSessionId: 'yo',
+        selfName: 'HugoGT',
+        peers: [{ sessionId: 'par-1', name: 'Ana' }],
+        spaceId: 'sala-de-juntas-stub',
+      });
+    });
+
+    expect(tileIds()).toEqual(['yo', 'par-1']);
+    // El tile propio es el MISMO nodo: que un par entre o salga nunca puede
+    // remontar el tile de al lado, o se llevaria su `<video>` por delante.
+    expect(document.querySelector('[data-session-id="yo"]')).toBe(selfNode);
+  });
+
+  it('el ultimo par saliendo se lleva la barra entera, self-tile incluido', () => {
+    const { bridge } = renderTiles();
+
+    act(() => {
+      bridge.emit('voice', {
+        selfSessionId: 'yo',
+        selfName: 'HugoGT',
+        peers: [{ sessionId: 'par-1', name: 'Ana' }],
+        spaceId: 'sala-de-juntas-stub',
+      });
+    });
     expect(tileIds()).toEqual(['yo', 'par-1']);
 
     act(() => {
       bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers: [], spaceId: null });
     });
 
-    expect(tileIds()).toEqual(['yo']);
-    // El tile propio es el MISMO nodo: que un par entre o salga nunca puede
-    // remontar el tile de al lado, o se llevaria su `<video>` por delante.
-    expect(document.querySelector('[data-session-id="yo"]')).toBe(selfNode);
+    expect(screen.queryByTestId('video-tile-bar')).not.toBeInTheDocument();
   });
 
   it('la posicion no depende de ningun bucle de cuadro: sin rAF los tiles se ven igual', () => {
@@ -119,35 +147,49 @@ describe('VideoTiles: fila fija arriba al centro', () => {
 });
 
 /**
- * Self-tile SIN gate (issue #17, D8): la camara propia se ve en todas partes,
- * incluso en el piso abierto sin ningun par audible -- distinto de la regla
- * de video de PARES, que si depende de compartir sala.
+ * Self-tile gated por compania audible: la barra entera -- propio tile
+ * incluido -- solo existe cuando `voice.peers` no esta vacio. A solas en el
+ * piso abierto no hay nadie con quien hablar por video, asi que no hay nada
+ * que mostrar arriba, aunque la camara local este encendida.
  */
-describe('VideoTiles: self-tile ungated (issue #17, D8)', () => {
-  it('el self-tile existe solo, sin pares audibles ni sala', () => {
+describe('VideoTiles: self-tile gated por companero audible', () => {
+  it('sin pares audibles, no existe ningun tile (ni siquiera el propio)', () => {
     const { bridge } = renderTiles();
 
     act(() => {
       bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers: [], spaceId: null });
     });
 
-    // Sin el evento "portraits" (no emitido en este test), el contenido cae
-    // al placeholder -- lo que importa aqui es que el tile EXISTE y muestra
-    // el nombre propio, no la fidelidad del retrato (ya cubierta en VideoTile.test.tsx).
-    expect(document.querySelector('[data-session-id="yo"]')).not.toBeNull();
-    expect(screen.queryAllByTestId('tile-name')).toHaveLength(1);
-    expect(screen.getByTestId('tile-name')).toHaveTextContent('HugoGT');
+    expect(document.querySelector('[data-session-id="yo"]')).toBeNull();
+    expect(screen.queryAllByTestId('tile-name')).toHaveLength(0);
+    expect(screen.queryByTestId('video-tile-bar')).not.toBeInTheDocument();
   });
 
-  it('con camara local encendida, el self-tile muestra video real aunque no haya sala', () => {
+  it('con camara local encendida pero sin pares, tampoco aparece el self-tile', () => {
     const { bridge } = renderTiles({ localVideoTrack: fakeVideoTrack() });
 
     act(() => {
       bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers: [], spaceId: null });
     });
 
-    expect(document.querySelectorAll('video')).toHaveLength(1);
-    expect(screen.queryByAltText('Retrato de yo')).not.toBeInTheDocument();
+    expect(document.querySelectorAll('video')).toHaveLength(0);
+    expect(screen.queryByTestId('video-tile-bar')).not.toBeInTheDocument();
+  });
+
+  it('en cuanto aparece un par audible, el self-tile se monta junto al del par', () => {
+    const { bridge } = renderTiles();
+
+    act(() => {
+      bridge.emit('voice', {
+        selfSessionId: 'yo',
+        selfName: 'HugoGT',
+        peers: [{ sessionId: 'par-1', name: 'Ana' }],
+        spaceId: null,
+      });
+    });
+
+    expect(tileIds()).toEqual(['yo', 'par-1']);
+    expect(screen.queryAllByTestId('tile-name')).toHaveLength(2);
   });
 
   it('sin selfSessionId (aun sin sesion) no existe ningun self-tile', () => {

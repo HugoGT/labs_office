@@ -43,7 +43,9 @@
 .stage {
   position: fixed;
   top: 12px;
-  left: 200px;
+  /* 12px (bar left) + 264px (tile width) + 12px gap: keeps pace with `.tile`
+     below so an enlarged column never overlaps the stage next to it. */
+  left: 288px;
   right: 12px;
   bottom: 137px;
   pointer-events: none;
@@ -53,12 +55,13 @@
 /*
  * Tamaño FIJO, identico para todos: el tile no crece ni encoge con su
  * contenido (video, retrato o placeholder), asi que cambiar de contenido
- * nunca mueve a los vecinos de la fila.
+ * nunca mueve a los vecinos de la fila. 1.5x el tamaño original (176x99),
+ * mismo 16:9 para que el video con `object-fit: cover` no se recorte distinto.
  */
 .tile {
   flex: none;
-  width: 176px;
-  height: 99px;
+  width: 264px;
+  height: 148.5px;
 }
 
 .content {
