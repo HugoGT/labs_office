@@ -102,6 +102,15 @@
   font-weight: 600;
 }
 
+/* Mismo punto sobrio que `BottomBar.module.css` `.meDot` (#116): color por
+   `statusCssColor`, nunca el emoji del selector de estados. */
+.personDot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
 .close {
   display: none;
   pointer-events: auto;

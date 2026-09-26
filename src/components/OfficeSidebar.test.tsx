@@ -2,10 +2,12 @@ import { render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
+import type { AssetAdminPort } from '../dashboard/assetAdminPort';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { AdminSpace, SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import { SIDEBAR_TOP } from '../game/hudLayout';
 import { createOfficeBridge } from '../game/officeBridge';
+import { statusCssColor } from '../game/presence';
 import type { RosterPeer } from '../game/roster';
 import { OfficeSidebar } from './OfficeSidebar';
 
@@ -64,6 +66,21 @@ describe('OfficeSidebar (#74)', () => {
     expect(items[2]).toMatch(/Beto/);
   });
 
+  it('marca el estado con el mismo punto sober de color que usa la barra inferior, no con un emoji', async () => {
+    const user = userEvent.setup();
+    renderSidebar({ peers: [{ sessionId: 'a', name: 'Ana', status: 'y' }, BETO] });
+
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    const items = screen.getAllByRole('listitem');
+    const anaItem = items.find((item) => item.textContent?.includes('Ana'));
+    expect(anaItem).not.toBeUndefined();
+    // Nada de 🟢/🟡/🔴: el mismo lenguaje visual sobrio que `BottomBar.meDot`.
+    expect(anaItem?.textContent).not.toMatch(/[\u{1F534}\u{1F7E1}\u{1F7E2}]/u);
+    const dot = anaItem?.querySelector('span[style]');
+    expect(dot).toHaveStyle({ background: statusCssColor('y') });
+  });
+
   it('el buscador filtra las entradas visibles', async () => {
     const user = userEvent.setup();
     renderSidebar();
@@ -119,7 +136,7 @@ describe('OfficeSidebar (#74)', () => {
   });
 });
 
-describe('OfficeSidebar: seccion de administracion de escritorios (#74, PR3c + PR4)', () => {
+describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/salas y el catalogo)', () => {
   const MESA: AdminDesk = { id: 'id-mesa', label: 'Mesa 4', x: 10, y: 10, w: 3, h: 3, occupant: null };
   const SALA: AdminSpace = { id: 'id-sala', name: 'Sala grande', x: 0, y: 0, w: 4, h: 4, capacity: null, kind: 'room' };
 
@@ -141,110 +158,149 @@ describe('OfficeSidebar: seccion de administracion de escritorios (#74, PR3c + P
     } as unknown as SpacesAdminPort;
   }
 
-  it('sin rol de administracion, expandida, no ofrece nada de edicion', async () => {
+  function fakeAssets(): AssetAdminPort {
+    return {
+      listAssets: vi.fn(async () => []),
+      createAsset: vi.fn(),
+      archiveAsset: vi.fn(),
+      updateAsset: vi.fn(),
+    };
+  }
+
+  function adminProps() {
+    return {
+      role: 'admin' as const,
+      bridge: createOfficeBridge(),
+      desks: fakeDesks(),
+      spaces: fakeSpaces(),
+      refreshDesks: vi.fn(),
+      refreshSpaces: vi.fn(),
+    };
+  }
+
+  it('esta colapsado por defecto', () => {
+    renderSidebar();
+
+    expect(screen.getByRole('button', { name: /Personalizar/ })).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('sin rol de administracion, activarlo va DIRECTO a "Mi espacio", sin menu intermedio', async () => {
     const user = userEvent.setup();
     renderSidebar({ role: 'employee' });
 
-    await user.click(screen.getByRole('button', { name: /Personas/ }));
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
 
+    expect(screen.getByRole('heading', { name: 'Mi espacio' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Editar escritorios/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Editar salas/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: /Catálogo/ })).not.toBeInTheDocument();
   });
 
-  it('sin saber el rol todavia (null), no ofrece nada de edicion', async () => {
+  it('sin saber el rol todavia (null), tambien va directo a "Mi espacio"', async () => {
     const user = userEvent.setup();
     renderSidebar({ role: null });
 
-    await user.click(screen.getByRole('button', { name: /Personas/ }));
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
 
-    expect(screen.queryByRole('button', { name: /Editar escritorios/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Mi espacio' })).toBeInTheDocument();
   });
 
-  it('con rol admin, expandida, ofrece la seccion de escritorios (cargada de forma diferida)', async () => {
+  it('con rol admin, ofrece la edicion de escritorios (cargada de forma diferida)', async () => {
     const user = userEvent.setup();
-    renderSidebar({
-      role: 'admin',
-      bridge: createOfficeBridge(),
-      desks: fakeDesks(),
-      spaces: fakeSpaces(),
-      refreshDesks: vi.fn(),
-      refreshSpaces: vi.fn(),
-    });
+    renderSidebar(adminProps());
 
-    await user.click(screen.getByRole('button', { name: /Personas/ }));
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
 
     expect(await screen.findByRole('button', { name: /Editar escritorios/ })).toBeInTheDocument();
   });
 
-  it('con rol superadmin, expandida, ofrece la seccion de escritorios', async () => {
+  it('con rol superadmin, ofrece la edicion de escritorios', async () => {
     const user = userEvent.setup();
-    renderSidebar({
-      role: 'superadmin',
-      bridge: createOfficeBridge(),
-      desks: fakeDesks(),
-      spaces: fakeSpaces(),
-      refreshDesks: vi.fn(),
-      refreshSpaces: vi.fn(),
-    });
+    renderSidebar({ ...adminProps(), role: 'superadmin' });
 
-    await user.click(screen.getByRole('button', { name: /Personas/ }));
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
 
     expect(await screen.findByRole('button', { name: /Editar escritorios/ })).toBeInTheDocument();
   });
 
-  it('con rol admin y el resto de props, pero sin spaces, no ofrece nada de edicion (#74, PR4 addition)', async () => {
+  it('con rol admin y el resto de props, pero sin spaces, no ofrece edicion de layout (#74, PR4 addition)', async () => {
     const user = userEvent.setup();
-    renderSidebar({
-      role: 'admin',
-      bridge: createOfficeBridge(),
-      desks: fakeDesks(),
-      refreshDesks: vi.fn(),
-      refreshSpaces: vi.fn(),
-    });
+    const { spaces: _spaces, ...rest } = adminProps();
+    renderSidebar(rest);
 
-    await user.click(screen.getByRole('button', { name: /Personas/ }));
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
 
     expect(screen.queryByRole('button', { name: /Editar escritorios/ })).not.toBeInTheDocument();
   });
 
-  it('con rol admin y spaces, ofrece TAMBIEN la seccion de salas', async () => {
+  it('con rol admin y spaces, ofrece TAMBIEN la edicion de salas', async () => {
     const user = userEvent.setup();
-    renderSidebar({
-      role: 'admin',
-      bridge: createOfficeBridge(),
-      desks: fakeDesks(),
-      spaces: fakeSpaces(),
-      refreshDesks: vi.fn(),
-      refreshSpaces: vi.fn(),
-    });
+    renderSidebar(adminProps());
 
-    await user.click(screen.getByRole('button', { name: /Personas/ }));
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
 
     expect(await screen.findByRole('button', { name: /Editar salas/ })).toBeInTheDocument();
   });
 
-  it('muestra "Personas conectadas" (con su buscador) antes del editor de escritorios/salas (#106)', async () => {
+  it('con rol admin y puerto de catalogo, ofrece TAMBIEN "Catálogo de decoración"', async () => {
     const user = userEvent.setup();
-    renderSidebar({
-      role: 'admin',
-      bridge: createOfficeBridge(),
-      desks: fakeDesks(),
-      spaces: fakeSpaces(),
-      refreshDesks: vi.fn(),
-      refreshSpaces: vi.fn(),
-    });
+    renderSidebar({ ...adminProps(), assets: fakeAssets() });
+
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+
+    expect(await screen.findByRole('region', { name: /Catálogo de decoración/ })).toBeInTheDocument();
+  });
+
+  it('con rol admin pero sin puerto de catalogo, no ofrece "Catálogo de decoración"', async () => {
+    const user = userEvent.setup();
+    renderSidebar(adminProps());
+
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+
+    await screen.findByRole('button', { name: /Editar escritorios/ });
+    expect(screen.queryByRole('region', { name: /Catálogo/ })).not.toBeInTheDocument();
+  });
+
+  it('con rol admin, tambien ofrece "Mi espacio" junto al resto', async () => {
+    const user = userEvent.setup();
+    renderSidebar(adminProps());
+
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+
+    expect(screen.getByRole('heading', { name: 'Mi espacio' })).toBeInTheDocument();
+  });
+
+  it('activarlo y volver a activarlo lo colapsa', async () => {
+    const user = userEvent.setup();
+    renderSidebar({ role: 'employee' });
+    const toggle = screen.getByRole('button', { name: /Personalizar/ });
+
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('heading', { name: 'Mi espacio' })).not.toBeInTheDocument();
+  });
+
+  it('forceCollapsed en true tambien lo colapsa aunque estuviese expandido', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<OfficeSidebar self={SELF} peers={[ANA]} role="employee" />);
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+    expect(screen.getByRole('button', { name: /Personalizar/ })).toHaveAttribute('aria-expanded', 'true');
+
+    rerender(<OfficeSidebar self={SELF} peers={[ANA]} role="employee" forceCollapsed />);
+
+    expect(screen.getByRole('button', { name: /Personalizar/ })).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('la edicion de escritorios/salas ya NO vive bajo "Personas conectadas" (migrada a "Personalizar")', async () => {
+    const user = userEvent.setup();
+    renderSidebar(adminProps());
 
     await user.click(screen.getByRole('button', { name: /Personas/ }));
 
-    const search = screen.getByRole('searchbox');
-    const list = screen.getByRole('list');
-    const deskEditorButton = await screen.findByRole('button', { name: /Editar escritorios/ });
-    const spaceEditorButton = screen.getByRole('button', { name: /Editar salas/ });
-
-    // DOCUMENT_POSITION_FOLLOWING: el nodo de la derecha viene DESPUES del de
-    // la izquierda en el DOM (#106: la gente conectada es el contenido
-    // principal, la edicion de admin queda al final del panel).
-    expect(search.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(list.compareDocumentPosition(deskEditorButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(deskEditorButton.compareDocumentPosition(spaceEditorButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Editar escritorios/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Editar salas/ })).not.toBeInTheDocument();
   });
 });

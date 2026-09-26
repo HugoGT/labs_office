@@ -1,5 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { OfficeSession } from '../auth/authPort';
+import { createAssetAdminClient } from '../dashboard/assetAdminClient';
+import type { AssetAdminPort } from '../dashboard/assetAdminPort';
 import { createDeskAdminClient } from '../dashboard/deskAdminClient';
 import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import { resolveOfficeApiBaseUrl } from '../dashboard/officeApiBaseUrl';
@@ -136,6 +138,17 @@ export function OfficeShell({
     const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
     if (apiBaseUrl === null) return null;
     return createSpacesAdminClient({ baseUrl: apiBaseUrl, getIdToken: () => session?.getIdToken() ?? Promise.resolve(null) });
+  });
+  /**
+   * Puerto del catalogo de decoracion, migrado desde `DashboardRoute.tsx` a
+   * "Personalizar" (sidebar). Mismo patron y mismo motivo que
+   * `deskAdminPort`/`spacesAdminPort`: construido UNA vez, o `AssetsPanel`
+   * reiniciaria su lectura en bucle en cada render.
+   */
+  const [assetsAdminPort] = useState<AssetAdminPort | null>(() => {
+    const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
+    if (apiBaseUrl === null) return null;
+    return createAssetAdminClient({ baseUrl: apiBaseUrl, getIdToken: () => session?.getIdToken() ?? Promise.resolve(null) });
   });
   /**
    * Exclusividad entre el modo edicion de layout y `DeskDecorEditor` (#74,
@@ -699,6 +712,7 @@ export function OfficeShell({
         bridge={bridge}
         desks={deskAdminPort}
         spaces={spacesAdminPort}
+        assets={assetsAdminPort}
         refreshDesks={refreshDesks}
         refreshSpaces={refreshSpaces}
         onLayoutEditingChange={setLayoutEditing}
