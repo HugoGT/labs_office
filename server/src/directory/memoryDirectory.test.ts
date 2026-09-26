@@ -370,6 +370,95 @@ describe('memoryDirectory: invitaciones', () => {
   });
 });
 
+describe('memoryDirectory: findByEmail', () => {
+  async function withInvitado() {
+    const directory = createMemoryDirectory({ bootstrapSuperadminEmail: 'hugo@example.com' });
+    const admin = (await directory.resolveOnLogin(HUGO))!;
+    const guest = await directory.createInvitation({
+      email: 'Externo@Example.com',
+      days: 7,
+      invitedById: admin.id,
+      uid: 'uid-externo',
+    });
+    return { directory, admin, guest };
+  }
+
+  it('encuentra la fila por su email, sin importar la caja con la que se guardo', async () => {
+    const { directory } = await withInvitado();
+
+    // `email` ya llega normalizado (`normalizeEmail`), igual que a
+    // `findByUid`/`findById` con su propia clave: el adaptador no repite la
+    // normalizacion.
+    expect((await directory.findByEmail('externo@example.com'))?.uid).toBe('uid-externo');
+  });
+
+  it('devuelve null si nadie usa ese correo', async () => {
+    const { directory } = await withInvitado();
+
+    expect(await directory.findByEmail('nadie@example.com')).toBeNull();
+  });
+});
+
+describe('memoryDirectory: renewInvitation', () => {
+  async function withGuest(options: { now?: () => Date } = {}) {
+    const directory = createMemoryDirectory({
+      bootstrapSuperadminEmail: 'hugo@example.com',
+      now: options.now,
+    });
+    const admin = (await directory.resolveOnLogin(HUGO))!;
+    const guest = await directory.createInvitation({
+      email: 'externo@example.com',
+      days: 90,
+      invitedById: admin.id,
+      uid: 'uid-externo',
+    });
+    return { directory, admin, guest };
+  }
+
+  it('reemplaza expiresAt por el nuevo `days` a partir de AHORA, sin sumar', async () => {
+    const now = new Date('2026-09-17T12:00:00.000Z');
+    const { directory, guest } = await withGuest({ now: () => now });
+    expect(guest.expiresAt).toEqual(new Date('2026-12-16T12:00:00.000Z'));
+
+    const renewed = await directory.renewInvitation(guest.id, 7);
+
+    // 7 dias desde AHORA, no 90 + 7: reenviar la invitacion no acumula, la
+    // fecha vieja se olvida por completo.
+    expect(renewed?.expiresAt).toEqual(new Date('2026-09-24T12:00:00.000Z'));
+  });
+
+  it('no toca id, uid, invitedBy ni createdAt: solo expiresAt cambia', async () => {
+    const { directory, admin, guest } = await withGuest();
+
+    const renewed = await directory.renewInvitation(guest.id, 30);
+
+    expect(renewed).toMatchObject({
+      id: guest.id,
+      uid: guest.uid,
+      invitedBy: admin.id,
+      createdAt: guest.createdAt,
+    });
+  });
+
+  it('devuelve null para un id que no existe', async () => {
+    const { directory } = await withGuest();
+
+    expect(
+      await directory.renewInvitation('00000000-0000-4000-8000-000000000000', 7),
+    ).toBeNull();
+  });
+
+  it('rechaza una duracion fuera de 1..90, la misma regla que al crear', async () => {
+    const { directory, guest } = await withGuest();
+
+    await expect(directory.renewInvitation(guest.id, 91)).rejects.toBeInstanceOf(
+      InvalidInvitationError,
+    );
+    // Y no deja la fila a medio cambiar.
+    expect((await directory.findById(guest.id))?.expiresAt).toEqual(guest.expiresAt);
+  });
+});
+
 describe('memoryDirectory: revocacion', () => {
   async function withGuest() {
     const directory = createMemoryDirectory({ bootstrapSuperadminEmail: 'hugo@example.com' });

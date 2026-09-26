@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { describeAdminError } from './adminErrors';
 import {
   AdminError,
   type AdminPort,
   type AdminSession,
   type AssignableRole,
-  type Invitation,
   type PasswordResetResult,
   type Role,
 } from './adminPort';
@@ -22,9 +21,6 @@ const ROLE_LABELS: Readonly<Record<Role, string>> = {
   employee: 'Empleado',
   guest: 'Invitado',
 };
-
-/** Ausencia de dato, no cero: una invitacion sin fecha no vence "el 0". */
-const EMPTY_CELL = '—';
 
 function administra(role: Role): boolean {
   return role === 'admin' || role === 'superadmin';
@@ -281,88 +277,6 @@ export function AccountCreated({ created, onResend, resending, error, onDismiss 
   );
 }
 
-export interface InvitationsTableProps {
-  invitations: Invitation[];
-  onRevoke: (id: string) => void;
-  /** Id de la invitacion con una revocacion en vuelo, o `null`. */
-  revokingId: string | null;
-  /** Re-sends the set-your-password email (#94). */
-  onResend: (id: string) => void;
-  /** Id with a re-send in flight, or `null`. */
-  resendingId: string | null;
-}
-
-/** Tabla de invitaciones. Presentacional: props planas y un aviso hacia arriba. */
-export function InvitationsTable({
-  invitations,
-  onRevoke,
-  revokingId,
-  onResend,
-  resendingId,
-}: InvitationsTableProps) {
-  if (invitations.length === 0) {
-    // Una tabla con encabezados y sin filas se lee como un fallo de carga.
-    return <p className={styles.empty}>Todavía no hay invitaciones.</p>;
-  }
-
-  return (
-    <div className={styles.tableWrapper}>
-      <table className={styles.table}>
-        <thead>
-          <tr>
-            <th scope="col">Correo</th>
-            <th scope="col">Rol</th>
-            <th scope="col">Invitó</th>
-            <th scope="col">Vence</th>
-            <th scope="col">Días restantes</th>
-            <th scope="col">Estado</th>
-            <th scope="col">Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          {invitations.map((invitation) => (
-            <tr
-              key={invitation.id}
-              className={invitation.status === 'revoked' ? styles.revoked : undefined}
-            >
-              <th scope="row">{invitation.email}</th>
-              <td>{ROLE_LABELS[invitation.role]}</td>
-              {/* Auditoria (#24, punto 7). Las altas anteriores al panel no
-                  tienen a quien atribuirse y eso se ensena, no se inventa. */}
-              <td>{invitation.invitedByEmail ?? EMPTY_CELL}</td>
-              <td>{formatUtcDate(invitation.expiresAt)}</td>
-              <td>{invitation.daysLeft ?? EMPTY_CELL}</td>
-              <td>{invitation.status === 'active' ? 'Activa' : 'Revocada'}</td>
-              <td>
-                {invitation.status === 'active' && (
-                  <div className={styles.actions}>
-                    <button
-                      className={styles.resend}
-                      type="button"
-                      disabled={resendingId !== null}
-                      onClick={() => onResend(invitation.id)}
-                    >
-                      Reenviar correo
-                    </button>
-                    <button
-                      className={styles.revoke}
-                      type="button"
-                      disabled={revokingId !== null}
-                      onClick={() => onRevoke(invitation.id)}
-                    >
-                      Revocar
-                    </button>
-                  </div>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 export interface DashboardScreenProps {
   /** Puerto ya construido (`DashboardRoute`); esta pantalla no sabe de HTTP. */
   admin: AdminPort;
@@ -396,7 +310,6 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
   const [session, setSession] = useState<AdminSession | null>(null);
   const [phase, setPhase] = useState<Phase>('loading');
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
   /**
    * La cuenta recien creada, venga del alta que venga: el panel es el mismo y
    * solo cambia si hay caducidad que anunciar. `expiresAt: null` significa "no
@@ -408,11 +321,6 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
   >(null);
   const [resendingCreated, setResendingCreated] = useState(false);
   const [createdError, setCreatedError] = useState<string | null>(null);
-  /** Re-send from the invitations table (#94): in-flight id and its outcome. */
-  const [resendingId, setResendingId] = useState<string | null>(null);
-  const [resendNotice, setResendNotice] = useState<
-    { ok: true; email: string } | { ok: false; message: string } | null
-  >(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   // Estado propio para el alta de usuario, separado del de invitar a proposito:
@@ -420,17 +328,6 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
   // formulario de invitacion, diciendo que fallo algo que ni se intento.
   const [userError, setUserError] = useState<string | null>(null);
   const [creatingUser, setCreatingUser] = useState(false);
-  const [revokingId, setRevokingId] = useState<string | null>(null);
-
-  /**
-   * Tras cada cambio se relee la lista entera en vez de parchearla en local:
-   * el servidor es el dueno del estado y una revocacion puede arrastrar mas
-   * cosas (un vencimiento que paso mientras tanto, otra persona trabajando en
-   * el mismo panel) que este cliente no puede adivinar.
-   */
-  const refresh = useCallback(async () => {
-    setInvitations(await admin.listInvitations());
-  }, [admin]);
 
   useEffect(() => {
     let cancelled = false;
@@ -445,8 +342,6 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
           setPhase('denied');
           return;
         }
-        await refresh();
-        if (cancelled) return;
         setPhase('ready');
       } catch (error) {
         if (cancelled) return;
@@ -465,7 +360,7 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
     return () => {
       cancelled = true;
     };
-  }, [admin, refresh]);
+  }, [admin]);
 
   async function handleCreate(email: string, days: number): Promise<boolean> {
     setActionError(null);
@@ -483,7 +378,6 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
       const invitation = await admin.createInvitation(email, days);
       setCreatedError(null);
       setCreated(invitation);
-      await refresh();
       return true;
     } catch (error) {
       setActionError(describeAdminError(error));
@@ -502,9 +396,6 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
       // por aqui es de casa y su acceso no vence.
       setCreatedError(null);
       setCreated({ id: user.id, email: user.email, emailSent: user.emailSent, expiresAt: null });
-      // Y NO se llama a `refresh()`: la fila nace sin `invited_by`, asi que el
-      // servidor no la devuelve en `listInvitations` y releer la lista solo
-      // gastaria un viaje para pintar exactamente lo mismo.
       return true;
     } catch (error) {
       setUserError(describeAdminError(error));
@@ -540,31 +431,6 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
       return;
     }
     setCreatedError(error ?? EMAIL_NOT_SENT);
-  }
-
-  async function handleResendFromTable(id: string): Promise<void> {
-    setResendNotice(null);
-    setResendingId(id);
-    const { result, error } = await resend(id);
-    setResendingId(null);
-    if (result?.emailSent) {
-      setResendNotice({ ok: true, email: result.email });
-      return;
-    }
-    setResendNotice({ ok: false, message: error ?? EMAIL_NOT_SENT });
-  }
-
-  async function handleRevoke(id: string): Promise<void> {
-    setActionError(null);
-    setRevokingId(id);
-    try {
-      await admin.revoke(id);
-      await refresh();
-    } catch (error) {
-      setActionError(describeAdminError(error));
-    } finally {
-      setRevokingId(null);
-    }
   }
 
   // Mismo criterio que `ready` en `AuthGate`: nada mientras no se sabe. Pintar
@@ -634,25 +500,14 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
 
         {/* Cada tarjeta lleva su encabezado y su `aria-labelledby`: con dos
             altas en la misma pantalla, un campo "Correo" suelto no dice a cual
-            de las dos pertenece, ni mirandolo ni oyendolo. */}
-        <section className={styles.card} aria-labelledby="nueva-invitacion">
-          <h2 className={styles.cardTitle} id="nueva-invitacion">
-            Nueva invitación
-          </h2>
-          <p className={styles.cardSubtitle}>
-            Acceso temporal para alguien de fuera: caduca solo y se puede revocar.
-          </p>
-          <InviteForm onSubmit={handleCreate} pending={creating} error={actionError} />
-        </section>
-
+            de las dos pertenece, ni mirandolo ni oyendolo. Alguien de casa va
+            PRIMERO: es el alta mas frecuente y la que no exige pensar en
+            dias. */}
         <section className={styles.card} aria-labelledby="nuevo-usuario">
           <h2 className={styles.cardTitle} id="nuevo-usuario">
             Nuevo usuario
           </h2>
-          <p className={styles.cardSubtitle}>
-            Alguien de la empresa: su acceso no caduca y no aparece en la lista de
-            invitaciones.
-          </p>
+          <p className={styles.cardSubtitle}>Su acceso no caduca.</p>
           <UserForm
             onSubmit={handleCreateUser}
             pending={creatingUser}
@@ -663,27 +518,14 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
           />
         </section>
 
-        <section className={styles.card} aria-labelledby="lista-invitaciones">
-          <h2 className={styles.cardTitle} id="lista-invitaciones">
+        <section className={styles.card} aria-labelledby="invitaciones">
+          <h2 className={styles.cardTitle} id="invitaciones">
             Invitaciones
           </h2>
-          <InvitationsTable
-            invitations={invitations}
-            onRevoke={(id) => void handleRevoke(id)}
-            revokingId={revokingId}
-            onResend={(id) => void handleResendFromTable(id)}
-            resendingId={resendingId}
-          />
-          {resendNotice?.ok === true && (
-            <p className={styles.subtitle} role="status">
-              Correo reenviado a {resendNotice.email}.
-            </p>
-          )}
-          {resendNotice?.ok === false && (
-            <div className={styles.error} role="alert">
-              {resendNotice.message}
-            </div>
-          )}
+          <p className={styles.cardSubtitle}>
+            Acceso temporal para alguien de fuera: caduca solo y se puede revocar.
+          </p>
+          <InviteForm onSubmit={handleCreate} pending={creating} error={actionError} />
         </section>
 
         {/* Los demas paneles de administracion, ya construidos por la raiz de

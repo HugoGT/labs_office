@@ -141,7 +141,7 @@ describe('DashboardRoute', () => {
 
     render(<DashboardRoute session={fakeSession()} />);
 
-    expect(await screen.findByText(/todavía no hay invitaciones/i)).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: /nuevo usuario/i })).toBeInTheDocument();
   });
 });
 

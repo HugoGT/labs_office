@@ -63,7 +63,7 @@ import type {
   UserDirectory,
 } from './directoryPort.ts';
 import { canonicalizeDisplayName, DisplayNameTakenError } from './displayNameRules.ts';
-import { normalizeEmail, normalizeInvitationInput } from './invitationRules.ts';
+import { assertValidInvitationDays, normalizeEmail, normalizeInvitationInput } from './invitationRules.ts';
 import { normalizeUserInput } from './userRules.ts';
 
 /**
@@ -173,6 +173,25 @@ const SET_DISPLAY_NAME_SQL = `
   RETURNING ${USER_COLUMNS}
 `;
 
+/**
+ * Renovacion de una invitacion: reemplaza `expires_at`, nunca lo suma al que
+ * ya tenia. Misma razon que `createInvitation` para calcularlo con el reloj de
+ * POSTGRES (`now() + make_interval`) y no con el de Node: los dos lados -- el
+ * panel y `decideAccess` -- tienen que ver la misma fecha.
+ *
+ * `invited_by IS NOT NULL` va en el WHERE, no en un `if` de TypeScript, mismo
+ * mecanismo que `revoke`: asi no hay ventana entre comprobar y actualizar, y
+ * no existe forma de llamar a esto que renueve a un empleado o a un admin. No
+ * es una transaccion ni escribe `audit_log`: a diferencia de invitar o
+ * revocar, renovar no es una decision nueva sobre quien entra a la oficina,
+ * es la misma invitacion con otra fecha.
+ */
+const RENEW_INVITATION_SQL = `
+  UPDATE users SET expires_at = now() + make_interval(days => $2::int)
+  WHERE id = $1 AND invited_by IS NOT NULL
+  RETURNING ${USER_COLUMNS}
+`;
+
 export interface PgDirectoryConfig {
   bootstrapSuperadminEmail: string | null;
 }
@@ -274,6 +293,13 @@ export function createPgDirectory(
       return findOne('id', id);
     },
 
+    findByEmail(email) {
+      // `email` llega ya normalizado (`normalizeEmail`) de quien llama, igual
+      // que a `findByUid`/`findById`; comparar por `lower(email)` es lo que se
+      // apoya en el indice unico `users_email_unique` de `schema.sql`.
+      return findOne('lower(email)', email);
+    },
+
     async listInvitations() {
       // LEFT JOIN y no INNER: si el administrador que firmo la invitacion ya no
       // estuviese, un INNER borraria la invitacion entera del panel. Mostrarla
@@ -321,6 +347,16 @@ export function createPgDirectory(
 
         return guest;
       });
+    },
+
+    async renewInvitation(id, days) {
+      // Validar ANTES de tocar el pool, mismo motivo que en `createInvitation`:
+      // un `days` invalido no tiene por que costar ni una consulta.
+      assertValidInvitationDays(days);
+
+      const updated = await pool.query(RENEW_INVITATION_SQL, [id, days]);
+      const row = updated.rows[0];
+      return row ? toDirectoryUser(row) : null;
     },
 
     async createUser(input: CreateUserInput) {
