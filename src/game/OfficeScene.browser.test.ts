@@ -117,11 +117,12 @@ function findPlayer(scene: Phaser.Scene): CharacterContainer {
 /** Codigos de tecla legacy (`keyCode`), que es lo que Phaser's Key matching usa internamente. */
 const KEY = { RIGHT: 39, LEFT: 37, DOWN: 40, D: 68 } as const;
 
-function dispatchKey(type: 'keydown' | 'keyup', keyCode: number): void {
-  const event = new KeyboardEvent(type, { bubbles: true } as KeyboardEventInit);
+function dispatchKey(type: 'keydown' | 'keyup', keyCode: number): KeyboardEvent {
+  const event = new KeyboardEvent(type, { bubbles: true, cancelable: true } as KeyboardEventInit);
   Object.defineProperty(event, 'keyCode', { get: () => keyCode });
   Object.defineProperty(event, 'which', { get: () => keyCode });
   window.dispatchEvent(event);
+  return event;
 }
 
 describe('OfficeScene: identidad y construccion (D2/D5)', () => {
@@ -221,6 +222,41 @@ describe('OfficeScene: input y movimiento del jugador (app.js:488-497)', () => {
       }
     } finally {
       input.remove();
+    }
+  });
+
+  it('#104: con el foco en un input de texto, WASD no le hace preventDefault al evento (la letra SI llega al campo)', async () => {
+    // Reproduccion del bug real reportado tras cerrar #104: el bloqueo del
+    // AVATAR (arriba) no prueba que la letra se pueda escribir. Phaser's
+    // `KeyboardManager` llama a `event.preventDefault()` para cualquier
+    // keyCode en captura (`addKeys('W,A,S,D')` captura por defecto) SIN mirar
+    // `document.activeElement`, asi que el navegador nunca inserta el
+    // caracter en el campo aunque el juego ya ignore el movimiento.
+    await bootOfficeScene();
+
+    const input = document.createElement('input');
+    document.body.append(input);
+    input.focus();
+    try {
+      const event = dispatchKey('keydown', KEY.D);
+      try {
+        expect(event.defaultPrevented).toBe(false);
+      } finally {
+        dispatchKey('keyup', KEY.D);
+      }
+    } finally {
+      input.remove();
+    }
+  });
+
+  it('sin foco en un input, WASD sigue haciendo preventDefault (el juego conserva la captura global)', async () => {
+    await bootOfficeScene();
+
+    const event = dispatchKey('keydown', KEY.D);
+    try {
+      expect(event.defaultPrevented).toBe(true);
+    } finally {
+      dispatchKey('keyup', KEY.D);
     }
   });
 });
