@@ -140,19 +140,21 @@ export function DeskEditorSection({
           </ul>
 
           <form className={styles.form} onSubmit={handleCreateSubmit}>
-            <label className={styles.hint} htmlFor="new-desk-label">
-              Etiqueta del nuevo escritorio
-            </label>
-            <input
-              id="new-desk-label"
-              className={styles.input}
-              type="text"
-              autoComplete="off"
-              required
-              disabled={busy}
-              value={label}
-              onChange={(event) => setLabel(event.target.value)}
-            />
+            <div className={styles.field}>
+              <label className={styles.hint} htmlFor="new-desk-label">
+                Etiqueta del nuevo escritorio
+              </label>
+              <input
+                id="new-desk-label"
+                className={styles.input}
+                type="text"
+                autoComplete="off"
+                required
+                disabled={busy}
+                value={label}
+                onChange={(event) => setLabel(event.target.value)}
+              />
+            </div>
             <button type="submit" className={styles.button} disabled={busy || label.trim() === ''}>
               Colocar nuevo escritorio
             </button>

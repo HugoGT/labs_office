@@ -159,63 +159,71 @@ export function SpaceEditorSection({
           </ul>
 
           <form className={styles.form} onSubmit={handleCreateSubmit}>
-            <label className={styles.hint} htmlFor="new-space-name">
-              Nombre de la nueva sala
-            </label>
-            <input
-              id="new-space-name"
-              className={styles.input}
-              type="text"
-              autoComplete="off"
-              required
-              disabled={busy}
-              value={form.name}
-              onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-            />
+            <div className={styles.field}>
+              <label className={styles.hint} htmlFor="new-space-name">
+                Nombre de la nueva sala
+              </label>
+              <input
+                id="new-space-name"
+                className={styles.input}
+                type="text"
+                autoComplete="off"
+                required
+                disabled={busy}
+                value={form.name}
+                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+              />
+            </div>
 
-            <label className={styles.hint} htmlFor="new-space-w">
-              Ancho
-            </label>
-            <input
-              id="new-space-w"
-              className={`${styles.input} ${styles.dimInput}`}
-              type="number"
-              min={MIN_SIZE}
-              step={1}
-              required
-              disabled={busy}
-              value={form.w}
-              onChange={(event) => setForm((current) => ({ ...current, w: event.target.value }))}
-            />
+            <div className={styles.field}>
+              <label className={styles.hint} htmlFor="new-space-w">
+                Ancho
+              </label>
+              <input
+                id="new-space-w"
+                className={`${styles.input} ${styles.dimInput}`}
+                type="number"
+                min={MIN_SIZE}
+                step={1}
+                required
+                disabled={busy}
+                value={form.w}
+                onChange={(event) => setForm((current) => ({ ...current, w: event.target.value }))}
+              />
+            </div>
 
-            <label className={styles.hint} htmlFor="new-space-h">
-              Alto
-            </label>
-            <input
-              id="new-space-h"
-              className={`${styles.input} ${styles.dimInput}`}
-              type="number"
-              min={MIN_SIZE}
-              step={1}
-              required
-              disabled={busy}
-              value={form.h}
-              onChange={(event) => setForm((current) => ({ ...current, h: event.target.value }))}
-            />
+            <div className={styles.field}>
+              <label className={styles.hint} htmlFor="new-space-h">
+                Alto
+              </label>
+              <input
+                id="new-space-h"
+                className={`${styles.input} ${styles.dimInput}`}
+                type="number"
+                min={MIN_SIZE}
+                step={1}
+                required
+                disabled={busy}
+                value={form.h}
+                onChange={(event) => setForm((current) => ({ ...current, h: event.target.value }))}
+              />
+            </div>
 
-            <label className={styles.hint} htmlFor="new-space-capacity">
-              Aforo
-            </label>
-            <input
-              id="new-space-capacity"
-              className={`${styles.input} ${styles.dimInput}`}
-              type="number"
-              min={MIN_SIZE}
-              step={1}
-              disabled={busy}
-              value={form.capacity}
-              onChange={(event) => setForm((current) => ({ ...current, capacity: event.target.value }))}
-            />
+            <div className={styles.field}>
+              <label className={styles.hint} htmlFor="new-space-capacity">
+                Aforo
+              </label>
+              <input
+                id="new-space-capacity"
+                className={`${styles.input} ${styles.dimInput}`}
+                type="number"
+                min={MIN_SIZE}
+                step={1}
+                disabled={busy}
+                value={form.capacity}
+                onChange={(event) => setForm((current) => ({ ...current, capacity: event.target.value }))}
+              />
+            </div>
 
             <button type="submit" className={styles.button} disabled={busy || !canCreate}>
               Colocar nueva sala
