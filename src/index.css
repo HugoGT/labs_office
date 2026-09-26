@@ -1,9 +1,10 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 /*
- * HUD right rail (#89, #90). The sidebar search input is the reference: the
- * toggle above it and the exit controls below it take its width and edges,
- * derived here once instead of repeated as magic numbers.
+ * HUD right rail (#89, #90). The sidebar toggle is the reference: the panel
+ * below it and the exit controls take its width and edges, derived here once
+ * instead of repeated as magic numbers. The search input inside the panel
+ * sits inset from that column on purpose, narrower than the panel itself.
  */
 :root {
   --hud-sidebar-right: 12px;

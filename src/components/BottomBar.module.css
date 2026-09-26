@@ -4,15 +4,17 @@
   /*
    * Centered with left/right + auto margins, not left: 50% + translate: that
    * capped the shrink-to-fit width at half the viewport, which is what pushed
-   * the content onto extra lines. The right edge keeps the exit controls'
-   * footprint clear, so the bar centers in the room left of them and never
-   * slides under them (#88); on very small screens they move above it instead
-   * (`--hud-bar-right` in index.css, #86).
+   * the content onto extra lines. left/right are symmetric so the bar sits at
+   * the screen's exact center; `max-width` (not `right`) keeps the exit
+   * controls' footprint clear on both sides at once, so centering only gives
+   * way to the overlap guard once the content is actually wide enough to
+   * reach it (`--hud-bar-right` in index.css, #86/#88).
    */
   left: 16px;
-  right: var(--hud-bar-right);
+  right: 16px;
   margin: 0 auto;
   width: fit-content;
+  max-width: calc(100vw - 2 * var(--hud-bar-right));
   z-index: 10;
   box-sizing: border-box;
   /* Narrow: identity and indicators share the top row, controls below. */
@@ -27,7 +29,7 @@
   row-gap: 8px;
   background: #111827f2;
   border: 1px solid #2b3444;
-  border-radius: 16px;
+  border-radius: 8px;
   padding: 10px 16px;
   color: #e5e7eb;
   box-shadow: 0 8px 30px #0009;
@@ -122,7 +124,7 @@
     no-repeat right 10px center;
   color: #e5e7eb;
   border: 1px solid #374151;
-  border-radius: 10px;
+  border-radius: 5px;
   /* 5px more on each side than before (#67): the label no longer looks clipped. */
   padding: 4px 30px 4px 11px;
   font: inherit;
@@ -155,7 +157,7 @@
   background: #1f2937;
   color: #e5e7eb;
   border: 1px solid #374151;
-  border-radius: 10px;
+  border-radius: 5px;
   padding: 8px 12px;
   font-size: 13px;
   cursor: pointer;
