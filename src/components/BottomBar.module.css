@@ -29,7 +29,7 @@
   row-gap: 8px;
   background: #111827f2;
   border: 1px solid #2b3444;
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   padding: 10px 16px;
   color: #e5e7eb;
   box-shadow: 0 8px 30px #0009;
@@ -124,7 +124,7 @@
     no-repeat right 10px center;
   color: #e5e7eb;
   border: 1px solid #374151;
-  border-radius: 5px;
+  border-radius: var(--radius-control);
   /* 5px more on each side than before (#67): the label no longer looks clipped. */
   padding: 4px 30px 4px 11px;
   font: inherit;
@@ -157,7 +157,7 @@
   background: #1f2937;
   color: #e5e7eb;
   border: 1px solid #374151;
-  border-radius: 5px;
+  border-radius: var(--radius-control);
   padding: 8px 12px;
   font-size: 13px;
   cursor: pointer;

@@ -23,6 +23,17 @@
   /* Both sit on the bottom row; the bar stops short of the exit controls. */
   --hud-bar-right: calc(var(--hud-rail-right) + var(--hud-exit-width) + 16px);
   --hud-exit-bottom: 16px;
+
+  /*
+   * Border-radius scale (3 tiers, keyed to a role, not a component): every
+   * DOM element with a border-radius picks the tier matching its role so a
+   * future retune changes one variable instead of N files. The Phaser
+   * minimap is intentionally excluded - it's a canvas viewport, not a DOM
+   * box, and stays square on purpose.
+   */
+  --radius-panel: 12px;   /* floating panel/card containers (bottom bar, sidebar, modals, toasts) */
+  --radius-control: 8px;  /* buttons, inputs, selects, tiles, list rows */
+  --radius-tag: 6px;      /* small badges/labels overlaid on content */
 }
 
 /*

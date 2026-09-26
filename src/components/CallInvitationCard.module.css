@@ -1,7 +1,7 @@
 .card {
   background: #111827f2;
   border: 1px solid #374151;
-  border-radius: 12px;
+  border-radius: var(--radius-panel);
   padding: 10px 14px;
   color: #e5e7eb;
   font-size: 13px;
@@ -38,7 +38,7 @@
 .accept,
 .dismiss {
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   padding: 6px 10px;
   font-size: 12px;
   cursor: pointer;

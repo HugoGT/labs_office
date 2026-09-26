@@ -70,7 +70,7 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: #1f2937;
   /*
    * El borde vive aqui, en el contenedor comun a video/retrato/placeholder
@@ -134,7 +134,7 @@
   font-size: 11px;
   line-height: 1.2;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-tag);
   background: #000000b3;
   color: #e5e7eb;
 }
