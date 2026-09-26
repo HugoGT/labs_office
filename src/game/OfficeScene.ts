@@ -18,6 +18,7 @@ import {
 import { deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH } from './hudLayout';
+import { isEditableElementFocused } from './inputFocusGuard';
 import { LayoutEditLayer } from './LayoutEditLayer';
 import { placeFurniture, placeNature, placeZoneLabels, renderGround } from './mapBuilder';
 import {
@@ -979,10 +980,15 @@ export class OfficeScene extends Phaser.Scene {
   update(_time: number, delta: number): void {
     let vx = 0;
     let vy = 0;
-    if (this.cursors.left.isDown || this.wasd.A.isDown) vx = -1;
-    else if (this.cursors.right.isDown || this.wasd.D.isDown) vx = 1;
-    if (this.cursors.up.isDown || this.wasd.W.isDown) vy = -1;
-    else if (this.cursors.down.isDown || this.wasd.S.isDown) vy = 1;
+    // #104: WASD binds on `window` (Phaser's default keyboard target), so it
+    // fires even while a side-panel text field has focus. While that's the
+    // case, WASD is left out of movement so the letters get typed instead;
+    // the arrow keys are unaffected on purpose (out of scope for this bug).
+    const wasdActive = !isEditableElementFocused();
+    if (this.cursors.left.isDown || (wasdActive && this.wasd.A.isDown)) vx = -1;
+    else if (this.cursors.right.isDown || (wasdActive && this.wasd.D.isDown)) vx = 1;
+    if (this.cursors.up.isDown || (wasdActive && this.wasd.W.isDown)) vy = -1;
+    else if (this.cursors.down.isDown || (wasdActive && this.wasd.S.isDown)) vy = 1;
 
     const body = this.player.body as Phaser.Physics.Arcade.Body;
 
