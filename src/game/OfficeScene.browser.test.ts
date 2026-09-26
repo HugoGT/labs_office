@@ -199,6 +199,30 @@ describe('OfficeScene: input y movimiento del jugador (app.js:488-497)', () => {
       dispatchKey('keyup', KEY.D);
     }
   });
+
+  it('#104: con el foco en un input de texto, WASD no mueve al jugador (queda para escribir)', async () => {
+    const { scene } = await bootOfficeScene();
+    const player = findPlayer(scene);
+    const startX = player.x;
+
+    const input = document.createElement('input');
+    document.body.append(input);
+    input.focus();
+    try {
+      dispatchKey('keydown', KEY.D);
+      try {
+        // No hay una condicion positiva que esperar (el punto es que NADA
+        // pase): se le da tiempo real al loop de Phaser para correr varios
+        // frames y luego se comprueba que el jugador no se movio ni una vez.
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        expect(player.x).toBe(startX);
+      } finally {
+        dispatchKey('keyup', KEY.D);
+      }
+    } finally {
+      input.remove();
+    }
+  });
 });
 
 describe('OfficeScene: colisiones (app.js: colisionador fusionado, D6)', () => {
