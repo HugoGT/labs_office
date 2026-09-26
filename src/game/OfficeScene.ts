@@ -145,6 +145,21 @@ export class OfficeScene extends Phaser.Scene {
   private player!: CharacterContainer;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WasdKeys;
+  /**
+   * Ultimo valor sincronizado de `isEditableElementFocused()` (#104
+   * follow-up): el cierre original de #104 solo comprobo que el AVATAR
+   * dejaba de moverse, nunca que la letra llegase al campo.
+   * `KeyboardManager.onKeyDown` (Phaser) llama a `event.preventDefault()`
+   * para cualquier keyCode en captura (W/A/S/D, mas UP/DOWN/LEFT/RIGHT/SPACE)
+   * SIN mirar el foco, asi que esas teclas seguian sin poderse escribir en
+   * ningun campo de texto de la pagina. `syncWasdCapture` alterna
+   * `enable/disableGlobalCapture()` solo en el flanco de cambio -- son
+   * llamadas globales (afectan a toda la escena), no algo para repetir cada
+   * frame.
+   */
+  private wasdCaptureSuspended = false;
+  /** Referencias estables para poder quitar los listeners en `SHUTDOWN`. */
+  private readonly handleFocusChange = (): void => this.syncWasdCapture();
   private mmMarker?: Phaser.GameObjects.Arc;
   /** Lo crea `setupCameras`; `CameraPanLayer` lo necesita para el clic de navegacion (#98). */
   private minimapCamera?: Phaser.Cameras.Scene2D.Camera;
@@ -387,6 +402,19 @@ export class OfficeScene extends Phaser.Scene {
         this.player.setPosition(tx * TILE + 16, ty * TILE + 16);
       });
     }
+
+    // Los listeners de `window` de `syncWasdCapture` se limpian en DESTROY, no
+    // en SHUTDOWN: `SceneManager.destroy()` (lo que corre `game.destroy()`,
+    // usado por ejemplo en el `afterEach` de los tests) llama a
+    // `Systems.destroy()` DIRECTAMENTE sobre cada escena y esta SOLO emite
+    // `Events.DESTROY` -- nunca pasa por `Systems.shutdown()`, asi que un
+    // `SHUTDOWN` aqui no se dispararia nunca y el listener en `window`
+    // (compartido por TODO el documento, no solo por esta escena) quedaria
+    // vivo apuntando a un juego ya destruido.
+    this.events.once(Phaser.Scenes.Events.DESTROY, () => {
+      window.removeEventListener('focusin', this.handleFocusChange);
+      window.removeEventListener('focusout', this.handleFocusChange);
+    });
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.alive = false;
@@ -853,12 +881,36 @@ export class OfficeScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * Alterna `KeyboardPlugin.enable/disableGlobalCapture()` (#104 follow-up)
+   * segun si un input/textarea/contenteditable tiene el foco. Se llama desde
+   * `focusin`/`focusout` en `window`, que disparan de forma SINCRONA en cuanto
+   * cambia `document.activeElement` -- a diferencia de comprobarlo en
+   * `update()`, que solo corre una vez por frame y llegaria tarde si la
+   * primera tecla se pulsa en el mismo instante en que se hace foco.
+   */
+  private syncWasdCapture(): void {
+    const editableFocused = isEditableElementFocused();
+    if (editableFocused === this.wasdCaptureSuspended) return;
+
+    const keyboard = this.input.keyboard as Phaser.Input.Keyboard.KeyboardPlugin;
+    if (editableFocused) keyboard.disableGlobalCapture();
+    else keyboard.enableGlobalCapture();
+    this.wasdCaptureSuspended = editableFocused;
+  }
+
   /** WASD + flechas; el menu contextual se cierra al hacer clic fuera de el (app.js:433-441). */
   private setupInput(): void {
     const keyboard = this.input.keyboard as Phaser.Input.Keyboard.KeyboardPlugin;
     this.cursors = keyboard.createCursorKeys();
     this.wasd = keyboard.addKeys('W,A,S,D') as WasdKeys;
     keyboard.addCapture('UP,DOWN,LEFT,RIGHT,SPACE');
+
+    // `focusin`/`focusout` (a diferencia de `focus`/`blur`) burbujean, asi que
+    // un solo listener en `window` ve cualquier campo de la pagina, sin
+    // importar donde lo monte React.
+    window.addEventListener('focusin', this.handleFocusChange);
+    window.addEventListener('focusout', this.handleFocusChange);
 
     this.input.on(
       'pointerdown',
