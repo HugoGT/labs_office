@@ -13,10 +13,10 @@
 
 import { randomUUID } from 'node:crypto';
 import { livekitRoomFor, recordingAvailableUntil } from '../../../src/game/officeProtocol.ts';
-import type { LiveSessionRegistry } from '../liveSessions.ts';
+import type { LiveSessionRegistry, SessionPosition } from '../liveSessions.ts';
 import { guardSessionRequest, sessionIsInSpace } from '../sessionGuard.ts';
 import { spaceIdAt } from '../spaces/spaceMembership.ts';
-import type { SpacesDirectory } from '../spaces/spacesPort.ts';
+import type { Space, SpacesDirectory } from '../spaces/spacesPort.ts';
 import type { IdTokenVerifier } from '../verifyIdToken.ts';
 import type { EgressPort } from './egressPort.ts';
 import {
@@ -26,6 +26,7 @@ import {
 } from './finishedRecordings.ts';
 import type { ActiveRecording, RecordingRegistry } from './recordingRegistry.ts';
 import type { RecordingStoragePort } from './recordingStorage.ts';
+import type { RecordingGeometry } from './recordingSpaceSnapshot.ts';
 
 /** How long a presigned URL lives (#58). */
 export const RECORDING_URL_TTL_SECONDS = 600;
@@ -40,6 +41,8 @@ export interface RecordingDeps {
   storage: RecordingStoragePort | null;
   auth?: IdTokenVerifier;
   spaces?: SpacesDirectory;
+  /** Current committed geometry, observed by the server's space/desk adapters. */
+  geometry?: RecordingGeometry;
   now?: () => number;
   /** Upload polling after a stop (#58); injectable so tests do not wait a minute. */
   readiness?: { intervalMs: number; timeoutMs: number };
@@ -82,20 +85,71 @@ async function presentIn(
   spaceId: string,
   sessions: LiveSessionRegistry,
   spaces: SpacesDirectory,
+  geometry?: RecordingGeometry,
 ): Promise<string[]> {
+  // Capture positions/identities at the boundary, not after a database await:
+  // someone entering after stop is not a participant in the finished file.
+  const present = sessions.ids().map((id) => ({
+    pos: sessions.positionOf(id), key: participantKeyOf(sessions, id),
+  }));
+  const atBoundary = geometry?.getSpace(spaceId);
   const known = await spaces.listSpaces();
-  return sessions.ids().filter((id) => {
-    const pos = sessions.positionOf(id);
-    return pos !== undefined && spaceIdAt(pos, known) === spaceId;
-  }).map((id) => participantKeyOf(sessions, id));
+  const membership = geometry ? (atBoundary ? [atBoundary] : []) : known;
+  return present.filter(({ pos }) => pos !== undefined && spaceIdAt(pos, membership) === spaceId)
+    .map(({ key }) => key);
+}
+
+function trackParticipants(spaceId: string, initial: Space, sessions: LiveSessionRegistry, geometry?: RecordingGeometry) {
+  const participants: string[] = [];
+  const seen = new Set<string>();
+  let current = geometry ? geometry.getSpace(spaceId) : initial;
+  function collect(id: string, pos: SessionPosition, uid: string | undefined): void {
+    const key = uid ?? id;
+    if (!seen.has(key) && current && spaceIdAt(pos, [current]) === spaceId) {
+      seen.add(key);
+      participants.push(key);
+    }
+  }
+  function collectPresent(): void {
+    for (const id of sessions.ids()) {
+      const pos = sessions.positionOf(id);
+      if (pos) collect(id, pos, sessions.uidOf(id));
+    }
+  }
+  collectPresent();
+  // Capture verified identity and position synchronously: no queries, tasks or
+  // position history grow with movement, and session-ID reuse cannot rewrite UID.
+  const offMove = sessions.onMove(collect);
+  const offGeometry = geometry?.subscribe(() => {
+    current = geometry.getSpace(spaceId);
+    collectPresent(); // Geometry can move over an otherwise stationary occupant.
+  });
+  let stopped = false;
+  return {
+    participants,
+    collectFinal(known: readonly Space[]) {
+      current = geometry ? geometry.getSpace(spaceId) : known.find((space) => space.id === spaceId);
+      collectPresent();
+    },
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      offMove();
+      offGeometry?.();
+    },
+  };
 }
 
 export async function handleStartRecording(body: unknown, deps: RecordingDeps): Promise<RecordingResult> {
   const auth = await authorize(body, deps);
   if (!auth.ok) return auth.result;
   const { sessionId, spaceId, egress, spaces } = auth;
+  const ownerUid = deps.sessions.uidOf(sessionId);
 
-  if (!(await sessionIsInSpace(sessionId, spaceId, deps.sessions, spaces))) return FORBIDDEN_SPACE;
+  const initial = await spaces.listSpaces();
+  const initialSpace = deps.geometry ? deps.geometry.getSpace(spaceId) : initial.find((space) => space.id === spaceId);
+  const initialPos = deps.sessions.positionOf(sessionId);
+  if (!initialSpace || !initialPos || spaceIdAt(initialPos, [initialSpace]) !== spaceId) return FORBIDDEN_SPACE;
 
   // The single-recording-per-room guarantee. `reserve` and not `get`: the
   // registry is only written once Egress answers, and a second start in that
@@ -109,20 +163,46 @@ export async function handleStartRecording(body: unknown, deps: RecordingDeps): 
   // know where the file lands to check it was uploaded and to sign a URL.
   const key = `recordings/${spaceId}/${startedAt}-${randomUUID().slice(0, 8)}.mp4`;
 
-  let egressId: string;
+  // The participation boundary is the validated, reserved start request, not
+  // the HTTP response. Egress may already be recording while its RPC or the
+  // final membership read is pending. Failed starts discard this collection.
+  const tracking = trackParticipants(spaceId, initialSpace, deps.sessions, deps.geometry);
+  let published = false;
+  let egressId: string | undefined;
   try {
     ({ egressId } = await egress.start(livekitRoomFor(spaceId), key));
+    const known = await spaces.listSpaces();
+    const currentSpace = deps.geometry ? deps.geometry.getSpace(spaceId) : known.find((space) => space.id === spaceId);
+    const pos = deps.sessions.positionOf(sessionId);
+    // The last await is above this check. Validate ownership and membership
+    // together, then collect participants and publish without yielding.
+    if (!deps.sessions.has(sessionId) || deps.sessions.uidOf(sessionId) !== ownerUid ||
+        !currentSpace || !pos || spaceIdAt(pos, [currentSpace]) !== spaceId) {
+      const stopped = await egress.stop(egressId).then(() => true, () => {
+        console.error('[recording] failed to stop an abandoned recording');
+        return false;
+      });
+      return stopped ? FORBIDDEN_SPACE : EGRESS_FAILED;
+    }
+    tracking.collectFinal(known);
+    const entry: ActiveRecording = { spaceId, egressId, startedBy: sessionId, startedAt, key, participants: tracking.participants };
+    entry.stopTracking = tracking.stop;
+    deps.recordings.set(entry);
+    published = true;
+    return { status: 200, body: { spaceId, startedBy: sessionId, startedAt } };
   } catch {
     // The raw error is never logged nor returned: it could carry credentials.
-    deps.recordings.unreserve(spaceId);
+    if (egressId !== undefined) {
+      await egress.stop(egressId).catch(() => {
+        console.error('[recording] failed to stop an abandoned recording');
+      });
+    }
     console.error('[recording] Egress failed to start a recording');
     return EGRESS_FAILED;
+  } finally {
+    if (!published) tracking.stop();
+    deps.recordings.unreserve(spaceId);
   }
-
-  const participants = new Set(await presentIn(spaceId, deps.sessions, spaces));
-  participants.add(participantKeyOf(deps.sessions, sessionId));
-  deps.recordings.set({ spaceId, egressId, startedBy: sessionId, startedAt, key, participants: [...participants] });
-  return { status: 200, body: { spaceId, startedBy: sessionId, startedAt } };
 }
 
 /**
@@ -138,6 +218,10 @@ export async function finishRecording(
   egress: EgressPort | null,
   deps: RecordingDeps,
 ): Promise<{ recordingId: string; stopped: boolean }> {
+  const atStop = deps.spaces ? presentIn(entry.spaceId, deps.sessions, deps.spaces, deps.geometry).catch(() => {
+    console.error('[recording] failed to resolve stop-boundary participants');
+    return [];
+  }) : Promise.resolve([]);
   deps.recordings.delete(entry.spaceId);
 
   let stopped = egress !== null;
@@ -148,10 +232,8 @@ export async function finishRecording(
     stopped = false;
   }
 
-  const participants = new Set(entry.participants);
-  if (deps.spaces) {
-    for (const key of await presentIn(entry.spaceId, deps.sessions, deps.spaces)) participants.add(key);
-  }
+  entry.stopTracking?.();
+  const participants = new Set([...entry.participants, ...await atStop]);
 
   const recording: FinishedRecording = {
     recordingId: randomUUID(),

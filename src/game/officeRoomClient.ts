@@ -139,6 +139,8 @@ export interface OfficeRoomHandlers {
   onRecordings?(active: Record<string, ActiveRecordingSnapshot>): void;
   /** A finished recording this session took part in is uploaded (#58). */
   onRecordingReady?(payload: RecordingReadyPayload): void;
+  /** Refetch occupancy/decor without changing the geometry version. */
+  onDesksChanged?(): void;
 }
 
 export interface ConnectOfficeRoomOptions {
@@ -329,6 +331,7 @@ export async function connectOfficeRoom({
     target.onMessage('recordingready', (payload: RecordingReadyPayload) => {
       handlers.onRecordingReady?.(payload);
     });
+    target.onMessage('deskschanged', () => handlers.onDesksChanged?.());
 
     // No dispara el reintento -- de eso se encarga `onLeave`, que es el unico
     // que sabe si la sala se murio -- pero tragarselo en silencio es

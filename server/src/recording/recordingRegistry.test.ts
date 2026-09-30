@@ -3,7 +3,7 @@
  * server so every occupant sees the same answer.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createRecordingRegistry, type ActiveRecording } from './recordingRegistry.ts';
 
 function recording(overrides: Partial<ActiveRecording> = {}): ActiveRecording {
@@ -19,6 +19,15 @@ function recording(overrides: Partial<ActiveRecording> = {}): ActiveRecording {
 }
 
 describe('createRecordingRegistry', () => {
+  it('stops participant tracking when an active recording is deleted', () => {
+    const registry = createRecordingRegistry();
+    const stopTracking = vi.fn(async () => {});
+    registry.set(recording({ stopTracking }));
+    registry.delete('sala');
+    registry.delete('sala');
+    expect(stopTracking).toHaveBeenCalledTimes(1);
+  });
+
   it('stores one recording per space and forgets it on delete', () => {
     const registry = createRecordingRegistry();
 

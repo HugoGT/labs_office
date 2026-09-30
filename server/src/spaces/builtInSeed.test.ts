@@ -20,6 +20,19 @@ import { hashSpaces } from './spaceRules.ts';
 import { BUILT_IN_SEED_SPACES, BUILT_IN_SEED_VERSION } from './builtInSeed.ts';
 
 describe('BUILT_IN_SEED_SPACES', () => {
+  it('preserves deleted defaults, replacements and pre-existing empty/populated deployments (SQL contract)', () => {
+    // Static migration proof, not a PostgreSQL execution: table existence must
+    // be captured BEFORE CREATE and guard the seed, never depend on row count.
+    const sql = readSchemaSql().replace(/--[^\n]*/g, '').toLowerCase();
+    const block = sql.match(/do \$spaces_initialization\$([\s\S]*?)\$spaces_initialization\$/)?.[1];
+    expect(block).toBeDefined();
+    expect(block).toContain("initialize_spaces boolean := to_regclass('spaces') is null");
+    expect(block!.indexOf('to_regclass')).toBeLessThan(block!.indexOf('create table'));
+    expect(block).toMatch(/if initialize_spaces then\s+insert into spaces \(id,[\s\S]*?end if/);
+    expect(block).not.toMatch(/not exists\s*\(select .* from spaces/);
+    expect(sql.match(/insert into spaces \(id,/g)).toHaveLength(1);
+  });
+
   it('tiene exactamente los dos espacios de siempre', () => {
     expect(BUILT_IN_SEED_SPACES).toHaveLength(2);
     expect(BUILT_IN_SEED_SPACES.map((space) => space.name)).toEqual([

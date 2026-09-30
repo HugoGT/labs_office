@@ -79,6 +79,28 @@ function body(overrides: Record<string, unknown> = {}): Record<string, unknown> 
 }
 
 describe('handleGetSpacesConfig', () => {
+  it('hashes the fetched mixed room/cubicle snapshot even when the store changes immediately afterwards', async () => {
+    const { deps, spaces } = harness();
+    const room = await spaces.createSpace({ name: 'Room', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    const desk = { ...room, id: 'cubicle', slug: 'desk-cubicle', name: 'Desk', x: 10, deskId: 'desk' };
+    const snapshot = [room, desk];
+    let current = snapshot;
+    const changingStore: SpacesDirectory = {
+      ...spaces,
+      async listSpaces() {
+        const fetched = current;
+        current = [{ ...room, x: 20 }];
+        return fetched;
+      },
+      async version() { return hashSpaces(current); },
+    };
+
+    const result = await handleGetSpacesConfig({ ...deps, spaces: changingStore });
+    expect(result.body.version).toBe(hashSpaces(snapshot));
+    expect((result.body.spaces as Record<string, unknown>[]).map((space) => space.kind)).toEqual(['room', 'desk']);
+    expect(result.body.version).not.toBe(await changingStore.version());
+  });
+
   it('no exige autenticacion: la sirve tambien sin cabecera', async () => {
     // Es deliberado y no un descuido. Hoy los rectangulos viajan DENTRO del
     // bundle del cliente (`BUILT_IN_SPACES`), asi que no hay nada que ocultar

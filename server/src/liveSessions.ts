@@ -29,6 +29,8 @@ export interface SessionPosition {
   y: number;
 }
 
+export type SessionMoveListener = (id: string, pos: SessionPosition, uid: string | undefined) => void;
+
 /** Valor interno por sesion: dueno opcional + posicion opcional, nunca dos mapas. */
 interface SessionEntry {
   uid?: string;
@@ -47,6 +49,8 @@ export interface LiveSessionRegistry {
    * registro (D4).
    */
   moveTo(id: string, x: number, y: number): void;
+  /** Accepted positions, including spawn; identity is captured at the transition. */
+  onMove(listener: SessionMoveListener): () => void;
   /** Ultima posicion conocida, o `undefined` si la sesion no existe o aun no se ha movido. */
   positionOf(id: string): SessionPosition | undefined;
   /** Every live session id; used to find who is inside a space (#58). */
@@ -60,6 +64,7 @@ export function createLiveSessionRegistry(): LiveSessionRegistry {
   // sesion ya cerrada. Cada entrada es su propio objeto para poder mutar la
   // posicion sin reconstruir el uid, que casi nunca cambia.
   const sessions = new Map<string, SessionEntry>();
+  const moveListeners = new Set<SessionMoveListener>();
 
   return {
     add(id, uid) {
@@ -78,6 +83,11 @@ export function createLiveSessionRegistry(): LiveSessionRegistry {
       const entry = sessions.get(id);
       if (!entry) return;
       entry.pos = { x, y };
+      for (const listener of moveListeners) listener(id, entry.pos, entry.uid);
+    },
+    onMove(listener) {
+      moveListeners.add(listener);
+      return () => { moveListeners.delete(listener); };
     },
     positionOf(id) {
       return sessions.get(id)?.pos;

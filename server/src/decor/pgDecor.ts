@@ -214,6 +214,7 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
         // Sin items no hay catalogo que consultar ni nada que insertar, pero
         // si hay que borrar: vaciar el escritorio es una peticion legitima.
         return inTransaction(async (client) => {
+          await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [userId]);
           await client.query('DELETE FROM user_desk_configs WHERE user_id = $1', [userId]);
           return [];
         });
@@ -228,6 +229,9 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
       const ids = [...new Set(items.map((item) => item.assetId))];
 
       return inTransaction(async (client) => {
+        // Lock the stable owner row: locking placements cannot serialize two
+        // replacements when the config is empty (READ COMMITTED).
+        await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [userId]);
         // El escritorio ACTUAL se lee dentro de la MISMA transaccion que luego
         // borra e inserta, y antes del DELETE. Fuera de ella, una escritura
         // concurrente decidiria si una pieza retirada cuenta como retenida:

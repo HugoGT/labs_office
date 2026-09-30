@@ -687,6 +687,23 @@ function stubVerifier(valid: Record<string, VerifiedIdentity>): IdTokenVerifier 
   };
 }
 
+describe('OfficeRoom: shared desk invalidation lifecycle', () => {
+  it('broadcasts committed invalidations and unsubscribes on disposal', () => {
+    const room = new OfficeRoom();
+    (room as unknown as { onMessage: unknown }).onMessage = () => () => {};
+    const broadcast = vi.spyOn(room, 'broadcast').mockImplementation(() => {});
+    const listeners = new Set<() => void>();
+    room.onCreate({ subscribeDesksChanges(listener) {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    } });
+    for (const listener of listeners) listener();
+    expect(broadcast).toHaveBeenCalledWith('deskschanged');
+    room.onDispose();
+    expect(listeners.size).toBe(0);
+  });
+});
+
 const ANA: VerifiedIdentity = { uid: 'uid-ana', email: 'ana@example.com', name: 'Ana Gomez' };
 
 /** Levanta un segundo servidor con auth activa, en su propio puerto efimero. */

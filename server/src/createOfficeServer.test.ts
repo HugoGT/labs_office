@@ -11,6 +11,7 @@
  */
 
 import { Client } from 'colyseus.js';
+import { connectOfficeRoom } from '../../src/game/officeRoomClient.ts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   LIVEKIT_ROOM_NAME,
@@ -1619,6 +1620,61 @@ describe('rutas de escritorios (#7, slice 5)', () => {
     return (await res.json()) as { id: string };
   }
 
+  it('converges a remote authenticated client after committed claim, decoration and release only', async () => {
+    const { server, desks, decor, url } = await desksServer();
+    const desk = await createDesk(url, { label: 'Shared desk', x: 4, y: 4 });
+    const asset = await decor.createAsset({ name: 'Plant', kind: 'plant', textureKey: 'plant-large', w: 1, h: 1, placeableOnDesk: true });
+    let notifications = 0;
+    let remote: { occupant: { displayName: string; items: unknown[] } | null }[] = [];
+    let reads = Promise.resolve();
+    const observer = await connectOfficeRoom({
+      endpoint: url.replace('http:', 'ws:'), name: 'Bruno', getIdToken: async () => 'valido-uid-bruno',
+      handlers: {
+        onAdd() {}, onChange() {}, onRemove() {},
+        onDesksChanged() {
+          notifications++;
+          reads = reads.then(async () => {
+            const response = await fetch(`${url}/desks`, { headers: BEARER_BRUNO });
+            remote = (await response.json() as { desks: typeof remote }).desks;
+          });
+        },
+      },
+    });
+    const owner = await new Client(url.replace('http:', 'ws:')).joinOrCreate(OFFICE_ROOM_NAME, { token: 'valido-uid-ana' });
+    openRooms.push(owner);
+    try {
+      expect((await fetch(`${url}/desks/${desk.id}/claim`, { method: 'POST', headers: BEARER_ANA })).status).toBe(200);
+      await vi.waitFor(() => expect(notifications).toBe(1));
+      await reads;
+      expect(remote[0].occupant).toMatchObject({ displayName: 'Ana', items: [] });
+      expect((await fetch(`${url}/me/desk`, { method: 'POST', headers: BEARER_ANA,
+        body: JSON.stringify({ items: [{ assetId: asset.id, slot: 0, rotation: 0 }] }) })).status).toBe(200);
+      await vi.waitFor(() => expect(notifications).toBe(2));
+      await reads;
+      expect(remote[0].occupant?.items).toHaveLength(1);
+      expect((await fetch(`${url}/me/desk/release`, { method: 'POST', headers: BEARER_ANA })).status).toBe(200);
+      await vi.waitFor(() => expect(notifications).toBe(3));
+      await reads;
+      expect(remote[0].occupant).toBeNull();
+
+      // Rejected requests and adapter failures (including rollback errors) do
+      // not announce changes. Only a successfully completed write may do so.
+      expect((await fetch(`${url}/desks/${desk.id}/claim`, { method: 'POST' })).status).toBe(401);
+      expect((await fetch(`${url}/me/desk`, { method: 'POST', headers: BEARER_ANA, body: '{}' })).status).toBe(400);
+      vi.spyOn(desks!, 'claimDesk').mockRejectedValue(new Error('transaction rolled back'));
+      vi.spyOn(desks!, 'releaseDesk').mockRejectedValue(new Error('transaction rolled back'));
+      vi.spyOn(decor, 'replaceDeskConfig').mockRejectedValue(new Error('transaction rolled back'));
+      for (const path of [`/desks/${desk.id}/claim`, '/me/desk/release', '/me/desk']) {
+        expect((await fetch(`${url}${path}`, { method: 'POST', headers: BEARER_ANA, body: '{"items":[]}' })).status).toBe(500);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(notifications).toBe(3);
+    } finally {
+      await observer.leave();
+      await server.shutdown();
+    }
+  });
+
   it('GET /desks exige credencial, a diferencia de GET /spaces', async () => {
     const { server, url } = await desksServer();
 
@@ -1911,12 +1967,15 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
   async function recordingServer(
     egress: EgressPort | null = fakeEgress(),
     storage: RecordingStoragePort | null = uploadedStorage,
+    source?: SpacesDirectory,
+    auth?: IdTokenVerifier,
   ) {
-    const spaces = createMemorySpaces();
+    const spaces = source ?? createMemorySpaces();
     // Tiles (10,10)-(13,13) -> pixels (320,320)-(416,416).
     const created = await spaces.createSpace({ name: 'Sala', x: 10, y: 10, w: 3, h: 3, capacity: null });
     const recServer = createOfficeServer({
       spaces,
+      auth,
       egress,
       storage,
       recordingReadiness: { intervalMs: 10, timeoutMs: 2000 },
@@ -1968,6 +2027,212 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
     expect(stopped.status).toBe(200);
     await waitFor(() => ana.state.recordings.get(spaceId) === undefined);
     await recServer.shutdown();
+  });
+
+  const recordingVerifier: IdTokenVerifier = {
+    async verify(token) {
+      return typeof token === 'string' ? { uid: token, email: `${token}@example.com`, name: token } : null;
+    },
+  };
+
+  it('200 authenticated WebSocket outside moves create zero geometry queries and cannot delay stop', async () => {
+    const spaces = createMemorySpaces();
+    const { recServer, spaceId, url, ws } = await recordingServer(fakeEgress(), uploadedStorage, spaces, recordingVerifier);
+    const owner = await new Client(ws).joinOrCreate(OFFICE_ROOM_NAME, { token: 'owner' });
+    const outsider = await new Client(ws).joinOrCreate(OFFICE_ROOM_NAME, { token: 'outsider' });
+    openRooms.push(owner, outsider);
+    const releases: (() => void)[] = [];
+    let stopping: Promise<Response> | undefined;
+    let restoreRead = () => {};
+    try {
+      owner.send('move', { x: 330, y: 330, facing: 'down' });
+      await waitFor(() => recServer.sessions.positionOf(owner.sessionId)?.x === 330);
+      const request = { sessionId: owner.sessionId, spaceId, token: 'owner' };
+      expect((await post(url, '/recordings/start', request)).status).toBe(200);
+      const known = await spaces.listSpaces();
+      const read = vi.spyOn(spaces, 'listSpaces').mockImplementation(() => new Promise((resolve) => {
+        releases.push(() => resolve(known));
+      }));
+      restoreRead = () => read.mockRestore();
+      for (let i = 0; i < 200; i++) outsider.send('move', { x: i, y: 0, facing: 'down' });
+      await waitFor(() => recServer.sessions.positionOf(outsider.sessionId)?.x === 199);
+      expect(read).not.toHaveBeenCalled();
+      stopping = post(url, '/recordings/stop', request);
+      await waitFor(() => recServer.recordings.list().length === 0);
+      releases.at(-1)!();
+      expect((await stopping).status).toBe(200);
+      expect(read).toHaveBeenCalledTimes(1);
+    } finally {
+      restoreRead();
+      for (const release of releases) release();
+      await stopping;
+      await recServer.shutdown();
+    }
+  });
+
+  it('grants ready and URL access to a verified WebSocket visitor during the final acquisition read', async () => {
+    const spaces = createMemorySpaces();
+    const { recServer, spaceId, url, ws } = await recordingServer(fakeEgress(), uploadedStorage, spaces, recordingVerifier);
+    const owner = await new Client(ws).joinOrCreate(OFFICE_ROOM_NAME, { token: 'owner' });
+    const visitor = await new Client(ws).joinOrCreate(OFFICE_ROOM_NAME, { token: 'visitor' });
+    openRooms.push(owner, visitor);
+    const ready: unknown[] = [];
+    let release!: () => void;
+    let pending: Promise<Response> | undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      owner.send('move', { x: 330, y: 330, facing: 'down' });
+      await waitFor(() => recServer.sessions.positionOf(owner.sessionId)?.x === 330);
+      visitor.onMessage('recordingready', (payload) => ready.push(payload));
+      const list = spaces.listSpaces.bind(spaces);
+      let reads = 0;
+      let finalRead = false;
+      spaces.listSpaces = async () => {
+        const known = await list();
+        if (++reads === 2) { finalRead = true; await gate; }
+        return known;
+      };
+      const request = { sessionId: owner.sessionId, spaceId, token: 'owner' };
+      pending = post(url, '/recordings/start', request);
+      await waitFor(() => finalRead);
+      visitor.send('move', { x: 330, y: 330, facing: 'down' });
+      await waitFor(() => recServer.sessions.positionOf(visitor.sessionId)?.x === 330);
+      visitor.send('move', { x: 0, y: 0, facing: 'down' });
+      await waitFor(() => recServer.sessions.positionOf(visitor.sessionId)?.x === 0);
+      release();
+      expect((await pending).status).toBe(200);
+      const stopped = await post(url, '/recordings/stop', request);
+      expect(stopped.status).toBe(200);
+      const { recordingId } = await stopped.json() as { recordingId: string };
+      // A ready notice must not rely on the visitor still occupying the room.
+      await vi.waitFor(async () => {
+        expect((await post(url, '/recordings/url', { sessionId: visitor.sessionId, recordingId, token: 'visitor' })).status).toBe(200);
+      });
+      await waitFor(() => ready.length === 1);
+    } finally {
+      release();
+      await pending;
+      await recServer.shutdown();
+    }
+  });
+
+  it.each(['room', 'desk'])('uses committed admin %s moves/deletions for participant access without movement queries', async (kind) => {
+    const spaces = createMemorySpaces();
+    const desks = createMemoryDesks({ spaces: spaces.deskSpaces });
+    const desk = kind === 'desk' ? await desks.createDesk({ label: 'Desk', x: 10, y: 10 }) : null;
+    const space = kind === 'room'
+      ? await spaces.createSpace({ name: 'Room', x: 10, y: 10, w: 3, h: 3, capacity: null })
+      : (await spaces.listSpaces())[0];
+    const directory = createMemoryDirectory({ seed: ['owner', 'old', 'middle', 'after-delete', 'admin'].map((uid): DirectoryUser => ({
+      id: `id-${uid}`, uid, email: `${uid}@example.com`, displayName: uid,
+      role: uid === 'admin' ? 'admin' : 'employee', status: 'active', expiresAt: null, invitedBy: null, createdAt: new Date(),
+    })) });
+    const recServer = createOfficeServer({ spaces, desks, directory, auth: recordingVerifier, egress: fakeEgress(),
+      storage: uploadedStorage, recordingReadiness: { intervalMs: 5, timeoutMs: 2000 } });
+    const port = await recServer.listen(0);
+    const url = `http://localhost:${port}`;
+    try {
+      const clients: Awaited<ReturnType<Client['joinOrCreate']>>[] = [];
+      for (const token of ['owner', 'old', 'middle', 'after-delete']) {
+        const client = await new Client(`ws://localhost:${port}`).joinOrCreate(OFFICE_ROOM_NAME, { token });
+        clients.push(client);
+        openRooms.push(client);
+      }
+      const [owner, old, middle, afterDelete] = clients;
+      const ownerReady: unknown[] = [];
+      owner.onMessage('recordingready', (notice) => ownerReady.push(notice));
+      owner.send('move', { x: 330, y: 330, facing: 'down' });
+      await waitFor(() => recServer.sessions.positionOf(owner.sessionId)?.x === 330);
+      const request = { sessionId: owner.sessionId, spaceId: space.id, token: 'owner' };
+      expect((await post(url, '/recordings/start', request)).status).toBe(200);
+      const read = vi.spyOn(spaces, 'listSpaces');
+      const path = kind === 'room' ? `/admin/spaces/${space.id}` : `/admin/desks/${desk!.id}`;
+      const headers = { Authorization: 'Bearer admin', 'Content-Type': 'application/json' };
+      expect((await fetch(`${url}${path}`, { method: 'POST', headers,
+        body: JSON.stringify(kind === 'room' ? { x: 20, y: 10, w: 3, h: 3 } : { x: 20, y: 10 }) })).status).toBe(200);
+      for (const [client, x] of [[old, 330], [middle, 650]] as const) {
+        client.send('move', { x, y: 330, facing: 'down' });
+        await waitFor(() => recServer.sessions.positionOf(client.sessionId)?.x === x);
+        client.send('move', { x: 0, y: 0, facing: 'down' });
+        await waitFor(() => recServer.sessions.positionOf(client.sessionId)?.x === 0);
+      }
+      expect((await fetch(`${url}${path}/delete`, { method: 'POST', headers })).status).toBe(200);
+      afterDelete.send('move', { x: 650, y: 330, facing: 'down' });
+      await waitFor(() => recServer.sessions.positionOf(afterDelete.sessionId)?.x === 650);
+      expect(read).not.toHaveBeenCalled();
+      const stopped = await post(url, '/recordings/stop', request);
+      expect(stopped.status).toBe(200);
+      const { recordingId } = await stopped.json() as { recordingId: string };
+      await waitFor(() => ownerReady.length === 1);
+      expect((await post(url, '/recordings/url', { sessionId: middle.sessionId, recordingId, token: 'middle' })).status).toBe(200);
+      expect((await post(url, '/recordings/url', { sessionId: old.sessionId, recordingId, token: 'old' })).status).toBe(403);
+      expect((await post(url, '/recordings/url', { sessionId: afterDelete.sessionId, recordingId, token: 'after-delete' })).status).toBe(403);
+    } finally {
+      await recServer.shutdown();
+    }
+  });
+
+  it.each(['departure', 'movement'])('never mirrors a pending recording abandoned by owner %s', async (change) => {
+    const egress = fakeEgress();
+    const start = egress.start.bind(egress);
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const acquired = new Promise<void>((resolve) => { entered = resolve; });
+    egress.start = async (...args) => { entered(); await gate; return start(...args); };
+    const { recServer, spaceId, url, ws } = await recordingServer(egress);
+    try {
+      const owner = await joinInside(ws, recServer, 'Owner');
+      const observer = await joinInside(ws, recServer, 'Observer');
+      const pending = post(url, '/recordings/start', { sessionId: owner.sessionId, spaceId });
+      await acquired;
+      if (change === 'departure') {
+        await owner.leave();
+        await waitFor(() => !recServer.sessions.has(owner.sessionId));
+      } else {
+        owner.send('move', { x: 0, y: 0, facing: 'down' });
+        await waitFor(() => recServer.sessions.positionOf(owner.sessionId)?.x === 0);
+      }
+      release();
+      expect((await pending).status).toBe(403);
+      expect(egress.stopped).toEqual(['EG_1']);
+      expect(recServer.recordings.list()).toEqual([]);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(observer.state.recordings.get(spaceId)).toBeUndefined();
+    } finally {
+      release();
+      await recServer.shutdown();
+    }
+  });
+
+  it('sends ready and grants URL access to a middle-only visitor who moved in and out', async () => {
+    const { recServer, spaceId, url, ws } = await recordingServer();
+    try {
+      const owner = await joinInside(ws, recServer, 'Owner');
+      const visitor = await new Client(ws).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { name: 'Visitor' });
+      const outsider = await new Client(ws).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { name: 'Outsider' });
+      openRooms.push(visitor, outsider);
+      const ready: unknown[] = [];
+      const ownerReady: unknown[] = [];
+      const deniedReady: unknown[] = [];
+      owner.onMessage('recordingready', (payload) => ownerReady.push(payload));
+      visitor.onMessage('recordingready', (payload) => ready.push(payload));
+      outsider.onMessage('recordingready', (payload) => deniedReady.push(payload));
+      await post(url, '/recordings/start', { sessionId: owner.sessionId, spaceId });
+      visitor.send('move', { x: 330, y: 330, facing: 'down' });
+      await waitFor(() => recServer.sessions.positionOf(visitor.sessionId)?.x === 330);
+      visitor.send('move', { x: 0, y: 0, facing: 'down' });
+      await waitFor(() => recServer.sessions.positionOf(visitor.sessionId)?.x === 0);
+      const stopped = await post(url, '/recordings/stop', { sessionId: owner.sessionId, spaceId });
+      const { recordingId } = await stopped.json() as { recordingId: string };
+      await waitFor(() => ownerReady.length === 1);
+      expect((await post(url, '/recordings/url', { sessionId: visitor.sessionId, recordingId })).status).toBe(200);
+      await waitFor(() => ready.length === 1);
+      expect((await post(url, '/recordings/url', { sessionId: outsider.sessionId, recordingId })).status).toBe(403);
+      expect(deniedReady).toEqual([]);
+    } finally {
+      await recServer.shutdown();
+    }
   });
 
   it('a late joiner sees a recording that was already running', async () => {

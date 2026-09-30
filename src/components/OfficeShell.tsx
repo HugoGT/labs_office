@@ -207,6 +207,18 @@ export function OfficeShell({
    * directorio, y todo lo demas sigue igual.
    */
   const { desks, claim, release, refresh: refreshDesks } = useDesks(endpoint, session);
+  useEffect(() => {
+    const offDesks = bridge.on('deskschanged', refreshDesks);
+    // A broadcast can be missed during an outage. Refetch on the connected
+    // edge (not every peer-presence update) to close that window too.
+    let connected = false;
+    const offPresence = bridge.on('presence', ({ state }) => {
+      const next = state === 'connected';
+      if (next && !connected) refreshDesks();
+      connected = next;
+    });
+    return () => { offDesks(); offPresence(); };
+  }, [bridge, refreshDesks]);
   /**
    * Convergencia tras el drift de un par (#74, PR3a): la escena ya acota
    * `spacesstale` a una vez por version distinta observada
