@@ -1152,6 +1152,17 @@ describe('OfficeScene: mensajes de llamada del servidor se relanzan al puente (i
     expect(events).toEqual([{ from: 'caller-1', name: 'Diego Soto' }]);
   });
 
+  it('forwards transport desk invalidation to the bridge without changing geometry', async () => {
+    const bridge = createOfficeBridge();
+    const changed = vi.fn();
+    bridge.on('deskschanged', changed);
+    const connector = fakeConnector();
+    await bootOfficeScene(bridge, { endpoint: 'ws://office', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    connector.handlers()!.onDesksChanged?.();
+    expect(changed).toHaveBeenCalledTimes(1);
+  });
+
   it('onCallerLeft del transporte se relanza como "callerleft"', async () => {
     const bridge = createOfficeBridge();
     const events: { from: string }[] = [];

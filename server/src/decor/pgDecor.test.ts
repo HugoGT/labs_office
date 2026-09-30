@@ -9,7 +9,7 @@
  * consultas intercambiadas, porque el pool de mentira contesta lo mismo.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AssetNameTakenError, InvalidAssetError, InvalidDeskConfigError } from './decorRules.ts';
 import { createPgDecor } from './pgDecor.ts';
 import type { DirectoryPool, DirectoryQueryResult } from '../directory/pgDirectory.ts';
@@ -391,6 +391,81 @@ describe('pgDecor: getDeskConfig', () => {
 });
 
 describe('pgDecor: replaceDeskConfig', () => {
+  it.each([{ second: [] }, { second: [{ assetId: ASSET_ROW.id, slot: 8, rotation: 0 as const }] }])(
+    'serializes overlapping full replacements, including clears (injected lock executor): $second',
+    async ({ second }) => {
+      // This executor models row-lock blocking; it is NOT a database test.
+      let nextClient = 0;
+      let released = 0;
+      let slots: number[] = [];
+      let tail = Promise.resolve();
+      let resumeDelete!: () => void;
+      const deleteGate = new Promise<void>((resolve) => { resumeDelete = resolve; });
+      const trace: { client: number; sql: string }[] = [];
+      const pool: DirectoryPool = {
+        async query() { throw new Error('transaction must use a pinned client'); },
+        async end() {},
+        async connect() {
+          const client = ++nextClient;
+          let unlock = () => {};
+          return {
+            release() { released++; },
+            async query(text: string, values: unknown[] = []) {
+              const sql = squash(text);
+              trace.push({ client, sql });
+              if (sql === 'select id from users where id = $1 for update') {
+                const previous = tail;
+                tail = new Promise<void>((resolve) => { unlock = resolve; });
+                await previous;
+              }
+              if (sql.startsWith('delete from user_desk_configs')) {
+                if (client === 1) await deleteGate;
+                slots = [];
+              }
+              if (sql.startsWith('insert into user_desk_configs')) slots.push(values[2] as number);
+              if (sql === 'commit' || sql === 'rollback') unlock();
+              if (sql.startsWith('select id, placeable_on_desk')) return { rows: [ASSET_ROW] };
+              if (sql.startsWith('select asset_id')) return { rows: slots.map(() => ({ asset_id: ASSET_ROW.id })) };
+              if (sql.includes('join assets')) return { rows: slots.map((slot) => ({ ...DESK_ROW, slot })) };
+              return { rows: [] };
+            },
+          };
+        },
+      };
+      const adapter = createPgDecor(pool);
+      const first = adapter.replaceDeskConfig(USER_ID, [{ assetId: ASSET_ROW.id, slot: 0, rotation: 0 }]);
+      await vi.waitFor(() => expect(trace.some((q) => q.client === 1 && q.sql.startsWith('delete'))).toBe(true));
+      const replacement = adapter.replaceDeskConfig(USER_ID, second);
+      await vi.waitFor(() => expect(trace.some((q) => q.client === 2)).toBe(true));
+      expect(trace.filter((q) => q.client === 2).map((q) => q.sql)).toEqual(['begin', 'select id from users where id = $1 for update']);
+      resumeDelete();
+      await Promise.all([first, replacement]);
+      expect(slots).toEqual(second.map((item) => item.slot));
+      expect(released).toBe(2);
+    },
+  );
+
+  it.each([{ items: [] }, { items: [{ assetId: ASSET_ROW.id, slot: 0, rotation: 0 as const }] }])(
+    'locks the owner before reading or replacing even an empty config: $items',
+    async ({ items }) => {
+      const pool = deskPool();
+      await createPgDecor(pool).replaceDeskConfig(USER_ID, items);
+      const texts = pool.queries.map((q) => squash(q.text));
+      expect(texts[1]).toBe('select id from users where id = $1 for update');
+      expect(pool.queries[1].values).toEqual([USER_ID]);
+      expect(texts.at(-1)).toBe('commit');
+      expect(pool.released).toBe(1);
+    },
+  );
+
+  it('rolls back and releases the connection when the owner lock fails', async () => {
+    const pool = deskPool((text) => squash(text).includes('for update')
+      ? new Error('lock failed') : { rows: [] });
+    await expect(createPgDecor(pool).replaceDeskConfig(USER_ID, [])).rejects.toThrow('lock failed');
+    expect(pool.queries.map((q) => squash(q.text)).at(-1)).toBe('rollback');
+    expect(pool.released).toBe(1);
+  });
+
   it('borra e inserta en UNA transaccion', async () => {
     const pool = deskPool();
 

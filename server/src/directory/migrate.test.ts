@@ -377,7 +377,7 @@ describe('schema.sql: cubiculos de escritorio son espacios (#10 + #12, S1a)', ()
     // tarea 1.2) es quien avisa de los que se quedan sin cubiculo.
     const backfillBlock = schema.slice(
       schema.indexOf('insert into spaces (desk_id'),
-      schema.indexOf('insert into spaces (id, slug, name, x, y, w, h) values'),
+      schema.indexOf(';', schema.indexOf('insert into spaces (desk_id')),
     );
     expect(backfillBlock).toContain('on conflict do nothing');
   });

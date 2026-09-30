@@ -236,6 +236,8 @@ export interface OfficeRoomOptions {
    * connected when one is uploaded, as a `recordingready` message.
    */
   finished?: FinishedRecordingStore;
+  /** Shared committed desk mutations; no occupant data travels in the notice. */
+  subscribeDesksChanges?: (listener: () => void) => () => void;
   /**
    * Live eviction (#93): the room registers here so an admin route can throw
    * a revoked account out right away. Absent, nobody can evict from outside.
@@ -281,6 +283,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private stopRecording?: (entry: ActiveRecording) => Promise<void>;
   private unsubscribeRecordings?: () => void;
   private unsubscribeReady?: () => void;
+  private unsubscribeDesksChanges?: () => void;
   private unregisterEviction?: () => void;
   /**
    * Sessions a newer join of the same account already released (#78). Their
@@ -306,6 +309,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     }
     this.stopRecording = options?.stopRecording;
     this.recordings = options?.recordings;
+    this.unsubscribeDesksChanges = options?.subscribeDesksChanges?.(() => this.broadcast('deskschanged'));
     // Late joiners get the mirror for free: it is plain synced state.
     for (const entry of this.recordings?.list() ?? []) {
       this.state.recordings.set(entry.spaceId, createRecordingState(entry));
@@ -416,6 +420,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   onDispose(): void {
     this.unsubscribeRecordings?.();
     this.unsubscribeReady?.();
+    this.unsubscribeDesksChanges?.();
     this.unregisterEviction?.();
   }
 

@@ -923,6 +923,37 @@ describe('OfficeShell: escritorios asignables (#7, slice 5)', () => {
     vi.mocked(releaseDesk).mockResolvedValue('released');
   });
 
+  it('refetches remote desk invalidations through the existing scene command and cleans up listeners', async () => {
+    const { unmount } = render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const seen: (readonly OfficeDesk[])[] = [];
+    bridge.onCommand('desks', ({ desks }) => seen.push(desks));
+    await vi.waitFor(() => expect(seen.at(-1)).toEqual([MESA]));
+    const updated = { ...MESA, label: 'Remote update' };
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([updated]);
+    act(() => bridge.emit('deskschanged', undefined));
+    await vi.waitFor(() => expect(seen.at(-1)).toEqual([updated]));
+    expect(fetchOfficeDesks).toHaveBeenCalledTimes(2);
+    expect(createGameMock).toHaveBeenCalledTimes(1);
+    unmount();
+    act(() => bridge.emit('deskschanged', undefined));
+    expect(fetchOfficeDesks).toHaveBeenCalledTimes(2);
+  });
+
+  it('refetches once on recovery so mutations missed while disconnected converge', async () => {
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(1));
+    const presence = (state: 'connected' | 'reconnecting') => ({ online: state === 'connected', peers: 0, state, canRetry: true });
+    act(() => bridge.emit('presence', presence('connected')));
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(2));
+    act(() => bridge.emit('presence', presence('connected')));
+    expect(fetchOfficeDesks).toHaveBeenCalledTimes(2);
+    act(() => bridge.emit('presence', presence('reconnecting')));
+    act(() => bridge.emit('presence', presence('connected')));
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(3));
+  });
+
   it('manda la lista resuelta a la escena por comando, no por prop', async () => {
     // Misma razon que `spacesconfig`: por prop entraria en las dependencias
     // del efecto de `GameCanvas` y recrearia Phaser entero en cada refresco,

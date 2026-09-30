@@ -19,6 +19,8 @@ export interface ActiveRecording {
   key: string;
   /** Who may watch it later (#58): `participantKeyOf` of everyone placed in the space. */
   participants: string[];
+  /** Ends the synchronous participation window and unsubscribes its listeners. */
+  stopTracking?: () => void;
 }
 
 export type RecordingListener = (spaceId: string, entry: ActiveRecording | undefined) => void;
@@ -60,7 +62,10 @@ export function createRecordingRegistry(): RecordingRegistry {
       notify(entry.spaceId, entry);
     },
     delete(spaceId) {
-      if (!active.delete(spaceId)) return;
+      const entry = active.get(spaceId);
+      if (!entry) return;
+      active.delete(spaceId);
+      void entry.stopTracking?.();
       notify(spaceId, undefined);
     },
     list() {

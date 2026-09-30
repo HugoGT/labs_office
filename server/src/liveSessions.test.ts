@@ -100,6 +100,18 @@ describe('createLiveSessionRegistry: dueno de la sesion (#8)', () => {
 });
 
 describe('createLiveSessionRegistry: posicion de la sesion (#10, #12, D4)', () => {
+  it('reports accepted positions with verified identity and unsubscribes cleanly', () => {
+    const registry = createLiveSessionRegistry();
+    registry.add('session', 'uid');
+    const seen: unknown[] = [];
+    const off = registry.onMove((id, pos, uid) => seen.push({ id, pos, uid }));
+    registry.moveTo('unknown', 1, 1);
+    registry.moveTo('session', 10, 20);
+    off();
+    registry.moveTo('session', 30, 40);
+    expect(seen).toEqual([{ id: 'session', pos: { x: 10, y: 20 }, uid: 'uid' }]);
+  });
+
   it('una sesion recien anadida no tiene posicion', () => {
     const registry = createLiveSessionRegistry();
 

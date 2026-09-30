@@ -119,6 +119,8 @@ export interface OfficeEventMap {
    * 4"), y buscarlo otra vez por id seria pedirle a React esa misma copia.
    */
   deskclick: { deskId: string; label: string; action: 'claim' | 'release' };
+  /** A committed occupancy/decor mutation; refetch the authenticated desk list. */
+  deskschanged: undefined;
   /**
    * Every active recording in the office, keyed by spaceId (#5). Server-owned
    * synced state, so every occupant gets the same map; always the whole map.

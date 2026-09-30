@@ -27,6 +27,7 @@ import {
   type RecordingDeps,
 } from './recordingRoutes.ts';
 import type { PresignOptions, RecordingStoragePort } from './recordingStorage.ts';
+import { createRecordingSpaceSnapshot } from './recordingSpaceSnapshot.ts';
 
 const verifier: IdTokenVerifier = {
   async verify(token: unknown) {
@@ -104,7 +105,8 @@ const OUTSIDE = [0, 0] as const;
 
 beforeEach(async () => {
   sessions = createLiveSessionRegistry();
-  spaces = createMemorySpaces();
+  const snapshot = createRecordingSpaceSnapshot(createMemorySpaces());
+  spaces = snapshot.spaces;
   recordings = createRecordingRegistry();
   egress = fakeEgress();
   finished = createFinishedRecordingStore();
@@ -114,6 +116,7 @@ beforeEach(async () => {
   deps = {
     sessions,
     spaces,
+    geometry: snapshot.geometry,
     recordings,
     egress,
     finished,
@@ -131,6 +134,143 @@ beforeEach(async () => {
 });
 
 describe('handleStartRecording', () => {
+  it.each(['Egress acquisition', 'final geometry read'])('retains a verified in-and-out visitor during %s', async (window) => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const list = spaces.listSpaces.bind(spaces);
+    let finalRead = false;
+    if (window === 'Egress acquisition') egress.gate = gate;
+    else {
+      let reads = 0;
+      spaces.listSpaces = async () => {
+        if (++reads === 2) { finalRead = true; await gate; }
+        return list();
+      };
+    }
+    sessions.add('owner', 'uid-owner');
+    sessions.moveTo('owner', ...INSIDE);
+    sessions.add('visitor', 'uid-original');
+    sessions.moveTo('visitor', ...OUTSIDE);
+    const start = vi.spyOn(egress, 'start');
+    const request = { sessionId: 'owner', spaceId, token: 'valid-uid-owner' };
+    const authDeps = { ...deps, auth: verifier };
+    const pending = handleStartRecording(request, authDeps);
+    try {
+      await vi.waitFor(() => expect(window === 'Egress acquisition' ? start.mock.calls.length > 0 : finalRead).toBe(true));
+      sessions.moveTo('visitor', ...INSIDE);
+      sessions.moveTo('visitor', ...OUTSIDE);
+      sessions.remove('visitor');
+      sessions.add('visitor', 'uid-replacement');
+      sessions.moveTo('visitor', ...OUTSIDE);
+      release();
+      expect((await pending).status).toBe(200);
+      const stopped = await handleStopRecording(request, authDeps);
+      const recordingId = stopped.body.recordingId as string;
+      storage.uploaded.add(finished.get(recordingId)!.key);
+      await vi.waitFor(() => expect(finished.get(recordingId)!.ready).toBe(true));
+      sessions.add('original-reloaded', 'uid-original');
+      expect((await handleRecordingUrl({ sessionId: 'original-reloaded', recordingId, token: 'valid-uid-original' }, authDeps)).status).toBe(200);
+      expect((await handleRecordingUrl({ sessionId: 'visitor', recordingId, token: 'valid-uid-replacement' }, authDeps)).status).toBe(403);
+    } finally {
+      release();
+      await pending;
+    }
+  });
+
+  it.each(['start failure', 'abandonment', 'lookup failure', 'compensation failure'])('cleans the early movement listener on %s', async (failure) => {
+    const onMove = sessions.onMove.bind(sessions);
+    let listeners = 0;
+    const geometry = deps.geometry!;
+    const subscribe = geometry.subscribe.bind(geometry);
+    let geometryListeners = 0;
+    vi.spyOn(geometry, 'subscribe').mockImplementation((listener) => {
+      geometryListeners++;
+      const off = subscribe(listener);
+      return () => { geometryListeners--; off(); };
+    });
+    vi.spyOn(sessions, 'onMove').mockImplementation((listener) => {
+      listeners++;
+      const off = onMove(listener);
+      return () => { listeners--; off(); };
+    });
+    let release!: () => void;
+    egress.gate = new Promise<void>((resolve) => { release = resolve; });
+    const start = vi.spyOn(egress, 'start');
+    const pending = handleStartRecording({ sessionId: 'ses-ana', spaceId }, deps);
+    try {
+      await vi.waitFor(() => expect(start).toHaveBeenCalled());
+      expect(listeners).toBe(1);
+      expect(geometryListeners).toBe(1);
+      if (failure === 'start failure') egress.failStart = true;
+      if (failure === 'abandonment' || failure === 'compensation failure') sessions.remove('ses-ana');
+      if (failure === 'compensation failure') egress.failStop = true;
+      if (failure === 'lookup failure') spaces.listSpaces = async () => { throw new Error('lookup failed'); };
+      release();
+      expect((await pending).status).toBe(failure === 'abandonment' ? 403 : 502);
+      expect(listeners).toBe(0);
+      expect(geometryListeners).toBe(0);
+      expect(recordings.list()).toEqual([]);
+      expect(recordings.reserve(spaceId)).toBe(true);
+    } finally {
+      release();
+      await pending;
+    }
+  });
+
+  it.each(['departure', 'movement', 'owner replacement'])('compensates a delayed start after %s without publishing it', async (change) => {
+    let open!: () => void;
+    egress.gate = new Promise((resolve) => { open = resolve; });
+    const start = vi.spyOn(egress, 'start');
+    const published = vi.fn();
+    recordings.subscribe(published);
+    const pending = handleStartRecording({ sessionId: 'ses-ana', spaceId }, deps);
+    await vi.waitFor(() => expect(start).toHaveBeenCalled());
+    if (change === 'departure') sessions.remove('ses-ana');
+    if (change === 'movement') sessions.moveTo('ses-ana', ...OUTSIDE);
+    if (change === 'owner replacement') {
+      sessions.add('ses-ana', 'another-uid');
+      sessions.moveTo('ses-ana', ...INSIDE);
+    }
+    open();
+    expect((await pending).status).toBe(403);
+    expect(egress.stopped).toEqual(['EG_1']);
+    expect(recordings.list()).toEqual([]);
+    expect(published).not.toHaveBeenCalled();
+    expect(recordings.reserve(spaceId)).toBe(true);
+  });
+
+  it('rechecks the owner after the final participant query, with no await before publication', async () => {
+    const list = spaces.listSpaces.bind(spaces);
+    let reads = 0;
+    spaces.listSpaces = async () => {
+      const known = await list();
+      if (++reads === 2) sessions.remove('ses-ana');
+      return known;
+    };
+    expect((await handleStartRecording({ sessionId: 'ses-ana', spaceId }, deps)).status).toBe(403);
+    expect(egress.stopped).toEqual(['EG_1']);
+    expect(recordings.list()).toEqual([]);
+  });
+
+  it.each(['participant lookup', 'compensation stop'])('frees the reservation when %s fails after acquisition', async (failure) => {
+    const list = spaces.listSpaces.bind(spaces);
+    let reads = 0;
+    const stop = vi.spyOn(egress, 'stop');
+    spaces.listSpaces = async () => {
+      if (++reads === 2) {
+        if (failure === 'participant lookup') throw new Error('database unavailable');
+        sessions.remove('ses-ana');
+        egress.failStop = true;
+      }
+      return list();
+    };
+    expect((await handleStartRecording({ sessionId: 'ses-ana', spaceId }, deps)).status).toBe(502);
+    expect(stop).toHaveBeenCalledWith('EG_1');
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(recordings.list()).toEqual([]);
+    expect(recordings.reserve(spaceId)).toBe(true);
+  });
+
   it('starts a room composite of the space LiveKit room and records who started it', async () => {
     const result = await handleStartRecording({ sessionId: 'ses-ana', spaceId }, deps);
 
@@ -253,6 +393,34 @@ describe('handleStopRecording', () => {
     await handleStartRecording({ sessionId: 'ses-ana', spaceId }, deps);
   });
 
+  it('200 outside moves create no membership queries or pending movement work', async () => {
+    const read = vi.spyOn(spaces, 'listSpaces');
+    for (let i = 0; i < 200; i++) sessions.moveTo('ses-fuera', i, 0);
+    expect(read).not.toHaveBeenCalled();
+    expect(recordings.get(spaceId)!.participants).not.toContain('ses-fuera');
+  });
+
+  it('stop never waits for movement-originated reads after its boundary read resolves', async () => {
+    const known = await spaces.listSpaces();
+    const releases: (() => void)[] = [];
+    vi.spyOn(spaces, 'listSpaces').mockImplementation(() => new Promise((resolve) => {
+      releases.push(() => resolve(known));
+    }));
+    for (let i = 0; i < 200; i++) sessions.moveTo('ses-fuera', i, 0);
+    let result: Awaited<ReturnType<typeof handleStopRecording>> | undefined;
+    const stopping = handleStopRecording({ sessionId: 'ses-ana', spaceId }, deps).then((value) => { result = value; });
+    try {
+      await vi.waitFor(() => expect(recordings.list()).toEqual([]));
+      releases.at(-1)!(); // The stop-boundary read, not movement reads.
+      await vi.waitFor(() => expect(result?.status).toBe(200));
+      expect(releases).toHaveLength(1);
+      expect(finished.get(result!.body.recordingId as string)!.participants).not.toContain('ses-fuera');
+    } finally {
+      for (const release of releases) release();
+      await stopping;
+    }
+  });
+
   it('any occupant of the space can stop it, not only the starter', async () => {
     const result = await handleStopRecording({ sessionId: 'ses-bruno', spaceId }, deps);
 
@@ -343,6 +511,93 @@ describe('handleStopRecording', () => {
 });
 
 describe('handleRecordingUrl (#58)', () => {
+  it('retains a middle-only verified participant across reload, but denies an outsider', async () => {
+    const authDeps = { ...deps, auth: verifier };
+    sessions.add('owner', 'uid-owner');
+    sessions.moveTo('owner', ...INSIDE);
+    await handleStartRecording({ sessionId: 'owner', spaceId, token: 'valid-uid-owner' }, authDeps);
+    sessions.add('visitor', 'uid-visitor');
+    sessions.moveTo('visitor', ...INSIDE);
+    sessions.moveTo('visitor', ...OUTSIDE);
+    sessions.remove('visitor');
+    sessions.add('reloaded', 'uid-visitor');
+    const stopped = await handleStopRecording({ sessionId: 'owner', spaceId, token: 'valid-uid-owner' }, authDeps);
+    const recordingId = stopped.body.recordingId as string;
+    storage.uploaded.add(finished.get(recordingId)!.key);
+    await vi.waitFor(() => expect(finished.get(recordingId)!.ready).toBe(true));
+    expect(finished.get(recordingId)!.participants).toContain('uid-visitor');
+    expect((await handleRecordingUrl({ sessionId: 'reloaded', recordingId, token: 'valid-uid-visitor' }, authDeps)).status).toBe(200);
+    sessions.add('outsider', 'uid-outsider');
+    expect((await handleRecordingUrl({ sessionId: 'outsider', recordingId, token: 'valid-uid-outsider' }, authDeps)).status).toBe(403);
+  });
+
+  it('preserves synchronous visits while the stop-boundary read is slow and excludes post-stop visitors', async () => {
+    await handleStartRecording({ sessionId: 'ses-ana', spaceId }, deps);
+    const list = spaces.listSpaces.bind(spaces);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    spaces.listSpaces = async () => { await gate; return list(); };
+    sessions.moveTo('ses-fuera', ...INSIDE);
+    sessions.moveTo('ses-fuera', ...OUTSIDE);
+    const stopped = handleStopRecording({ sessionId: 'ses-ana', spaceId }, deps);
+    await vi.waitFor(() => expect(recordings.list()).toEqual([]));
+    sessions.add('after-stop');
+    sessions.moveTo('after-stop', ...INSIDE);
+    release();
+    const result = await stopped;
+    const participants = finished.get(result.body.recordingId as string)!.participants;
+    expect(participants).toContain('ses-fuera');
+    expect(participants).not.toContain('after-stop');
+  });
+
+  it('files already verified participants if the stop-boundary lookup fails', async () => {
+    await handleStartRecording({ sessionId: 'ses-ana', spaceId }, deps);
+    spaces.listSpaces = async () => { throw new Error('database unavailable'); };
+    const result = await handleStopRecording({ sessionId: 'ses-ana', spaceId }, deps);
+    expect(result.status).toBe(200);
+    expect(finished.get(result.body.recordingId as string)!.participants.sort()).toEqual(['ses-ana', 'ses-bruno']);
+    expect(recordings.list()).toEqual([]);
+  });
+
+  it('does not grant a stationary outsider when geometry moves over them after stop', async () => {
+    sessions.moveTo('ses-fuera', 650, 330);
+    await handleStartRecording({ sessionId: 'ses-ana', spaceId }, deps);
+    const list = spaces.listSpaces.bind(spaces);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    spaces.listSpaces = async () => { await gate; return list(); };
+    const stopping = handleStopRecording({ sessionId: 'ses-ana', spaceId }, deps);
+    await vi.waitFor(() => expect(recordings.list()).toEqual([]));
+    await spaces.updateSpace(spaceId, { x: 20, y: 10, w: 3, h: 3 });
+    release();
+    const result = await stopping;
+    expect(finished.get(result.body.recordingId as string)!.participants).not.toContain('ses-fuera');
+  });
+
+  it('tracks moved geometry immediately and never grants visitors from its old footprint', async () => {
+    await handleStartRecording({ sessionId: 'ses-ana', spaceId }, deps);
+    await spaces.updateSpace(spaceId, { x: 20, y: 10, w: 3, h: 3 });
+    sessions.add('old-footprint', 'uid-outside');
+    sessions.moveTo('old-footprint', ...INSIDE);
+    sessions.moveTo('old-footprint', ...OUTSIDE);
+    sessions.add('new-footprint', 'uid-recorded');
+    sessions.moveTo('new-footprint', 650, 330);
+    sessions.moveTo('new-footprint', ...OUTSIDE);
+    const stopped = await handleStopRecording({ sessionId: 'ses-ana', spaceId }, deps);
+    const participants = finished.get(stopped.body.recordingId as string)!.participants;
+    expect(participants).toContain('uid-recorded');
+    expect(participants).not.toContain('uid-outside');
+  });
+
+  it('stops granting new participants as soon as the recorded geometry is deleted', async () => {
+    await handleStartRecording({ sessionId: 'ses-ana', spaceId }, deps);
+    await spaces.deleteSpace(spaceId);
+    sessions.add('deleted-footprint', 'uid-outside');
+    sessions.moveTo('deleted-footprint', ...INSIDE);
+    const stopped = await handleStopRecording({ sessionId: 'ses-ana', spaceId }, deps);
+    expect(finished.get(stopped.body.recordingId as string)!.participants).not.toContain('uid-outside');
+  });
+
   async function stoppedRecording(): Promise<string> {
     await handleStartRecording({ sessionId: 'ses-ana', spaceId }, deps);
     const stopped = await handleStopRecording({ sessionId: 'ses-ana', spaceId }, deps);

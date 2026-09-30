@@ -30,7 +30,7 @@ import {
   type AdminDeps,
   type AdminResult,
 } from '../admin/adminRoutes.ts';
-import { InvalidSpaceError, SpaceNameTakenError, SpaceOverlapError, SpaceOwnedByDeskError } from './spaceRules.ts';
+import { hashSpaces, InvalidSpaceError, SpaceNameTakenError, SpaceOverlapError, SpaceOwnedByDeskError } from './spaceRules.ts';
 import type { Space, SpacesDirectory, UpdateSpaceInput } from './spacesPort.ts';
 
 export interface SpacesDeps extends AdminDeps {
@@ -106,7 +106,8 @@ async function translating(run: () => Promise<AdminResult>): Promise<AdminResult
 export async function handleGetSpacesConfig(
   deps: Pick<SpacesDeps, 'spaces'>,
 ): Promise<AdminResult> {
-  const [spaces, version] = await Promise.all([deps.spaces.listSpaces(), deps.spaces.version()]);
+  const spaces = await deps.spaces.listSpaces();
+  const version = hashSpaces(spaces);
   return { status: 200, body: { spaces: spaces.map(toConfigBody), version } };
 }
 

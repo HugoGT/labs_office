@@ -80,6 +80,7 @@ import {
   type RecordingResult,
 } from './recording/recordingRoutes.ts';
 import { recordingStorageFromEnv, type RecordingStoragePort } from './recording/recordingStorage.ts';
+import { createRecordingSpaceSnapshot } from './recording/recordingSpaceSnapshot.ts';
 import { guardSessionRequest, sessionIsInSpace } from './sessionGuard.ts';
 import { createIdTokenVerifier, type IdTokenVerifier } from './verifyIdToken.ts';
 
@@ -452,6 +453,10 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   const sessions = createLiveSessionRegistry();
   const recordings = createRecordingRegistry();
   const finished = createFinishedRecordingStore();
+  const desksChangeListeners = new Set<() => void>();
+  const notifyDesksChanged = () => {
+    for (const listener of desksChangeListeners) listener();
+  };
   // Shared by the room (which registers) and the admin routes (which evict) (#93).
   const eviction = createSessionEvictionHub();
   // Read per call, like the LiveKit credentials of `/livekit/token`.
@@ -469,6 +474,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     storage,
     auth,
     spaces,
+    geometry: recordingSpaces?.geometry,
     readiness: overrides?.recordingReadiness,
   });
 
@@ -504,14 +510,17 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   const directory =
     overrides?.directory !== undefined ? (overrides.directory ?? undefined) : envRuntime?.directory;
 
-  const spaces =
+  const spacesSource =
     overrides?.spaces !== undefined ? (overrides.spaces ?? undefined) : envRuntime?.spaces;
+  const recordingSpaces = spacesSource ? createRecordingSpaceSnapshot(spacesSource) : undefined;
+  const spaces = recordingSpaces?.spaces;
 
   const decor =
     overrides?.decor !== undefined ? (overrides.decor ?? undefined) : envRuntime?.decor;
 
-  const desks =
+  const desksSource =
     overrides?.desks !== undefined ? (overrides.desks ?? undefined) : envRuntime?.desks;
+  const desks = desksSource && recordingSpaces ? recordingSpaces.observeDesks(desksSource) : desksSource;
 
   app.get('/health', (_req, res) => {
     // `auth` expone el modo EFECTIVO, no la variable de entorno: es la unica
@@ -705,7 +714,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
    * siendo una cuenta que esta oficina admite, y `/me/desk` ademas saca de esa
    * fila el `userId` cuyo escritorio se lee o se escribe.
    */
-  function decorRoute(run: (req: express.Request, deps: DecorDeps) => Promise<AdminResult>) {
+  function decorRoute(run: (req: express.Request, deps: DecorDeps) => Promise<AdminResult>, changesDesks = false) {
     return (req: express.Request, res: express.Response): void => {
       if (directory === undefined || decor === undefined) {
         res.status(503).json({ error: 'decor-not-configured' });
@@ -714,6 +723,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
 
       run(req, { directory, decor, auth, identityAdmin })
         .then((result) => {
+          if (changesDesks && result.status >= 200 && result.status < 300) notifyDesksChanged();
           res.status(result.status).json(result.body);
         })
         .catch(() => {
@@ -773,7 +783,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
 
   app.post(
     '/me/desk',
-    decorRoute((req, deps) => handleReplaceDeskConfig(req.header('Authorization'), req.body, deps)),
+    decorRoute((req, deps) => handleReplaceDeskConfig(req.header('Authorization'), req.body, deps), true),
   );
 
   /**
@@ -784,7 +794,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
    * quien llama sigue siendo una cuenta que esta oficina admite, y de esa fila
    * sale ademas el `userId` que se sienta o se levanta.
    */
-  function desksRoute(run: (req: express.Request, deps: DesksDeps) => Promise<AdminResult>) {
+  function desksRoute(run: (req: express.Request, deps: DesksDeps) => Promise<AdminResult>, changesDesks = false) {
     return (req: express.Request, res: express.Response): void => {
       if (directory === undefined || desks === undefined) {
         res.status(503).json({ error: 'desks-not-configured' });
@@ -793,6 +803,8 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
 
       run(req, { directory, desks, auth, identityAdmin })
         .then((result) => {
+          // Adapter promises resolve after COMMIT; failures never invalidate.
+          if (changesDesks && result.status >= 200 && result.status < 300) notifyDesksChanged();
           res.status(result.status).json(result.body);
         })
         .catch(() => {
@@ -841,12 +853,12 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   // levantar a otra persona. Ver la cabecera de `desksRoutes.ts`.
   app.post(
     '/desks/:id/claim',
-    desksRoute((req, deps) => handleClaimDesk(req.header('Authorization'), req.params.id, deps)),
+    desksRoute((req, deps) => handleClaimDesk(req.header('Authorization'), req.params.id, deps), true),
   );
 
   app.post(
     '/me/desk/release',
-    desksRoute((req, deps) => handleReleaseDesk(req.header('Authorization'), deps)),
+    desksRoute((req, deps) => handleReleaseDesk(req.header('Authorization'), deps), true),
   );
 
   app.post('/livekit/token', (req, res) => {
@@ -902,6 +914,10 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     recordings,
     finished,
     eviction,
+    subscribeDesksChanges: (listener: () => void) => {
+      desksChangeListeners.add(listener);
+      return () => { desksChangeListeners.delete(listener); };
+    },
     stopRecording: (entry: Parameters<typeof finishRecording>[0]) => {
       const deps = recordingDeps();
       return finishRecording(entry, deps.egress, deps).then(() => undefined);
