@@ -32,6 +32,11 @@ export interface DirectoryUser {
   expiresAt: Date | null;
   /** id del usuario que lo invito, o null para los que no vinieron por invitacion. */
   invitedBy: string | null;
+  /**
+   * Chosen character, an art pack id (art migration, step 3). Never null: a
+   * new or pre-migration account carries the pack default until it chooses.
+   */
+  avatarId: string;
   createdAt: Date;
 }
 
@@ -142,5 +147,13 @@ export interface UserDirectory {
    * un conflicto consigo misma (D4).
    */
   setDisplayName(id: string, name: string): Promise<DirectoryUser | null>;
+  /**
+   * Stores the chosen character (art migration, step 3). Whether the id is an
+   * active character of the catalog is `resolveCharacterChoice`, run by the
+   * caller that has the catalog; the adapter only rejects what is not a
+   * character id at all (`InvalidArtChoiceError`). Returns `null` if `id`
+   * does not exist.
+   */
+  setAvatar(id: string, avatarId: string): Promise<DirectoryUser | null>;
   close(): Promise<void>;
 }

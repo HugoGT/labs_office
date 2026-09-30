@@ -20,12 +20,16 @@
  *     cualquiera le borraria a esa persona la retirada que ya tenia.
  */
 
+import type { ArtPackManifest } from '../../../src/game/artContract.ts';
+import { artPieceFields, normalizeArtPack } from './artCatalogRules.ts';
 import type {
+  ArtCatalogPiece,
   Asset,
   CreateAssetInput,
   DecorCatalog,
   DeskItem,
   DeskItemInput,
+  ListArtPiecesOptions,
   ListAssetsOptions,
   UpdateAssetInput,
 } from './decorPort.ts';
@@ -68,6 +72,56 @@ const DESK_SELECT = `
   WHERE d.user_id = $1
   ORDER BY d.slot
 `;
+
+const ART_PIECE_COLUMNS =
+  'id, kind, name, material, colorable, default_color, author, license, files, spec, contract_version, retired_at, registered_at, updated_at';
+
+/**
+ * One upsert per piece. The kind is left out of the update on purpose: the id
+ * prefix fixes it, and a stored choice must never change kind under it. The
+ * `WHERE` skips a piece that is active and unchanged, so the registration that
+ * runs at every start rewrites nothing; `IS DISTINCT FROM` on jsonb compares
+ * values, not key order.
+ */
+const ART_PIECE_UPSERT = `
+  INSERT INTO art_pieces (id, kind, name, material, colorable, default_color, author, license, files, spec, contract_version)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11)
+  ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name, material = EXCLUDED.material, colorable = EXCLUDED.colorable,
+    default_color = EXCLUDED.default_color, author = EXCLUDED.author, license = EXCLUDED.license,
+    files = EXCLUDED.files, spec = EXCLUDED.spec, contract_version = EXCLUDED.contract_version,
+    retired_at = NULL, updated_at = now()
+  WHERE art_pieces.spec IS DISTINCT FROM EXCLUDED.spec
+     OR art_pieces.contract_version IS DISTINCT FROM EXCLUDED.contract_version
+     OR art_pieces.retired_at IS NOT NULL
+`;
+
+/** An UPDATE and never a DELETE: users, desks and spaces may still point at these ids. */
+const ART_PIECE_RETIRE = `
+  UPDATE art_pieces SET retired_at = now(), updated_at = now()
+  WHERE retired_at IS NULL AND NOT (id = ANY($1::text[]))
+  RETURNING id
+`;
+
+function toArtPiece(row: Record<string, unknown>): ArtCatalogPiece {
+  return {
+    id: row.id as string,
+    kind: row.kind as ArtCatalogPiece['kind'],
+    name: row.name as string,
+    material: (row.material as string | null) ?? null,
+    colorable: row.colorable === true,
+    defaultColor: (row.default_color as string | null) ?? null,
+    author: row.author as string,
+    license: row.license as string,
+    // `pg` already parses jsonb.
+    files: row.files as ArtCatalogPiece['files'],
+    spec: row.spec as ArtCatalogPiece['spec'],
+    contractVersion: row.contract_version as number,
+    retiredAt: (row.retired_at as Date | null) ?? null,
+    registeredAt: row.registered_at as Date,
+    updatedAt: row.updated_at as Date,
+  };
+}
 
 function toAsset(row: Record<string, unknown>): Asset {
   return {
@@ -280,6 +334,40 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
         const result = await client.query(DESK_SELECT, [userId]);
         return result.rows.map(toDeskItem);
       });
+    },
+
+    async registerArtPack(pack: ArtPackManifest) {
+      // Validated before asking for a connection, same as `createAsset`.
+      const valid = normalizeArtPack(pack);
+
+      return inTransaction(async (client) => {
+        for (const piece of valid.pieces) {
+          const fields = artPieceFields(piece);
+          await client.query(ART_PIECE_UPSERT, [
+            fields.id,
+            fields.kind,
+            fields.name,
+            fields.material,
+            fields.colorable,
+            fields.defaultColor,
+            fields.author,
+            fields.license,
+            // Stringified: `pg` would send a JS array as a Postgres array literal.
+            JSON.stringify(fields.files),
+            JSON.stringify(fields.spec),
+            valid.contractVersion,
+          ]);
+        }
+        const retired = await client.query(ART_PIECE_RETIRE, [valid.pieces.map((piece) => piece.id)]);
+        return { registered: valid.pieces.length, retired: retired.rows.map((row) => row.id as string) };
+      });
+    },
+
+    async listArtPieces(options: ListArtPiecesOptions = {}) {
+      // Composed in the text for the same reason as `listAssets`.
+      const where = options.includeRetired ? '' : 'WHERE retired_at IS NULL';
+      const result = await pool.query(`SELECT ${ART_PIECE_COLUMNS} FROM art_pieces ${where} ORDER BY kind, id`);
+      return result.rows.map(toArtPiece);
     },
   };
 }

@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest';
 import { DeskOverlapError, DeskSpaceOverlapError, DeskTakenError, InvalidDeskError } from './deskRules.ts';
 import { createPgDesks } from './pgDesks.ts';
+import { ART_PACK_DEFAULTS, InvalidArtChoiceError } from '../decor/artCatalogRules.ts';
 import type { DirectoryPool, DirectoryQueryResult } from '../directory/pgDirectory.ts';
 
 interface RecordedQuery {
@@ -76,6 +77,8 @@ const DESK_ROW = {
   x: 4,
   y: 6,
   occupant_id: null,
+  material_id: 'desk-wood',
+  color: null,
   created_at: new Date('2026-02-01T10:00:00.000Z'),
   updated_at: new Date('2026-02-01T10:00:00.000Z'),
 };
@@ -99,6 +102,8 @@ describe('pgDesks: listDesks', () => {
         x: 4,
         y: 6,
         occupantId: null,
+        materialId: 'desk-wood',
+        color: null,
         createdAt: DESK_ROW.created_at,
         updatedAt: DESK_ROW.updated_at,
       },
@@ -616,5 +621,78 @@ describe('pgDesks: listOfficeDesks', () => {
     await createPgDesks(pool).listOfficeDesks();
 
     expect(sqls(pool)[0]).toContain('order by d.x, d.y, d.id');
+  });
+});
+
+describe('pgDesks: appearance (art migration, step 3)', () => {
+  it('reads material_id and color with every desk', async () => {
+    const pool = fakePool(() => ({ rows: [{ ...DESK_ROW, material_id: 'desk-painted', color: '#ff8800' }], rowCount: 1 }));
+
+    const desk = await createPgDesks(pool).getDesk(DESK_ROW.id);
+
+    expect(sqls(pool)[0]).toContain('material_id, color');
+    expect(desk).toMatchObject({ materialId: 'desk-painted', color: '#ff8800' });
+  });
+
+  it('a row read before the columns existed comes out with the default material', async () => {
+    const { material_id: _material, color: _color, ...legacy } = DESK_ROW;
+    const pool = fakePool(() => ({ rows: [legacy], rowCount: 1 }));
+
+    expect(await createPgDesks(pool).getDesk(DESK_ROW.id)).toMatchObject({
+      materialId: ART_PACK_DEFAULTS.desk,
+      color: null,
+    });
+  });
+
+  it('without an appearance the INSERT leaves both columns to their schema defaults', async () => {
+    const pool = txPool();
+
+    await createPgDesks(pool).createDesk({ label: 'Mesa 1', x: 4, y: 6 });
+
+    const insert = squash(pool.queries.find((q) => squash(q.text).startsWith('insert into desks'))!.text);
+    expect(insert.slice(0, insert.indexOf('returning'))).not.toContain('material_id');
+  });
+
+  it('with an appearance the INSERT writes it, normalized, in the same transaction', async () => {
+    const pool = txPool();
+
+    await createPgDesks(pool).createDesk({
+      label: 'Mesa 1',
+      x: 4,
+      y: 6,
+      appearance: { materialId: 'desk-painted', color: '#FF8800' },
+    });
+
+    const insert = pool.queries.find((q) => squash(q.text).startsWith('insert into desks'))!;
+    expect(squash(insert.text)).toContain('insert into desks (label, x, y, material_id, color)');
+    expect(insert.values).toEqual(['Mesa 1', 4, 6, 'desk-painted', '#ff8800']);
+    expect(sqls(pool)[0]).toBe('begin');
+  });
+
+  it('rejects a malformed appearance before asking for a connection', async () => {
+    const pool = fakePool();
+
+    await expect(
+      createPgDesks(pool).createDesk({ label: 'Mesa 1', x: 4, y: 6, appearance: { materialId: '', color: null } }),
+    ).rejects.toBeInstanceOf(InvalidArtChoiceError);
+    expect(pool.queries).toHaveLength(0);
+  });
+
+  it('updateDesk never writes the appearance: it is chosen only at creation', async () => {
+    const pool = txPool();
+
+    await createPgDesks(pool).updateDesk(DESK_ROW.id, { label: 'Mesa 2', x: 5, y: 6 });
+
+    const update = squash(pool.queries.find((q) => squash(q.text).startsWith('update desks'))!.text);
+    expect(update.slice(0, update.indexOf('returning'))).not.toMatch(/material_id|color/);
+  });
+
+  it('the cubicle upsert never touches the floor of an existing cubicle', async () => {
+    const pool = txPool();
+
+    await createPgDesks(pool).updateDesk(DESK_ROW.id, { x: 5, y: 6 });
+
+    const upsert = squash(pool.queries.find((q) => squash(q.text).startsWith('insert into spaces'))!.text);
+    expect(upsert).not.toContain('floor_');
   });
 });

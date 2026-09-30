@@ -30,6 +30,7 @@
  * apuntar a ellos: quien los resuelve es el ocupante, no el escritorio.
  */
 
+import type { ArtAppearance } from '../decor/artCatalogRules.ts';
 import type { DeskItem } from '../decor/decorPort.ts';
 
 export interface Desk {
@@ -44,6 +45,13 @@ export interface Desk {
   y: number;
   /** `null` mientras este libre. Una persona ocupa como mucho uno (`desks_single_occupant`). */
   occupantId: string | null;
+  /**
+   * Material (an art pack desk id) and color (art migration, step 3). They
+   * belong to the desk, not to whoever sits there: decor follows the person,
+   * the furniture stays. `color` is null unless the material is colorable.
+   */
+  materialId: string;
+  color: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -76,6 +84,12 @@ export interface CreateDeskInput {
   label: string;
   x: number;
   y: number;
+  /**
+   * Already resolved against the catalog (`resolveDeskAppearance`); absent
+   * means the pack default. Only creation takes it: `UpdateDeskInput` has no
+   * appearance, so moving, renaming or claiming a desk keeps its own.
+   */
+  appearance?: ArtAppearance;
 }
 
 /**

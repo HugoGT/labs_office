@@ -65,6 +65,7 @@ import type {
 import { canonicalizeDisplayName, DisplayNameTakenError } from './displayNameRules.ts';
 import { assertValidInvitationDays, normalizeEmail, normalizeInvitationInput } from './invitationRules.ts';
 import { normalizeUserInput } from './userRules.ts';
+import { ART_PACK_DEFAULTS, normalizeStoredCharacterId } from '../decor/artCatalogRules.ts';
 
 /**
  * La forma minima de `pg` que usa este fichero. Declararla aqui (en vez de
@@ -99,7 +100,7 @@ function isUniqueViolation(error: unknown): boolean {
 
 /** Columnas de `users` en el orden y con el alias que espera `toDirectoryUser`. */
 const USER_COLUMNS =
-  'id, uid, email, display_name, role, status, expires_at, invited_by, created_at';
+  'id, uid, email, display_name, role, status, expires_at, invited_by, avatar_id, created_at';
 
 /**
  * Traduce la fila cruda de `pg` al tipo del puerto. `pg` ya devuelve `Date` para
@@ -118,6 +119,9 @@ function toDirectoryUser(row: Record<string, unknown>): DirectoryUser {
     status: row.status as AccountStatus,
     expiresAt: (row.expires_at as Date | null) ?? null,
     invitedBy: (row.invited_by as string | null) ?? null,
+    // The column is NOT NULL DEFAULT, but a row read before the migration ran
+    // must still come out with a character, same as `above_avatars` (#71).
+    avatarId: (row.avatar_id as string | null | undefined) ?? ART_PACK_DEFAULTS.character,
     createdAt: row.created_at as Date,
   };
 }
@@ -163,6 +167,13 @@ const BOOTSTRAP_SUPERADMIN_SQL = `
   WHERE $3::text IS NOT NULL AND lower($2) = lower($3)
     AND NOT EXISTS (SELECT 1 FROM users WHERE role = 'superadmin')
   ON CONFLICT (uid) DO UPDATE SET uid = EXCLUDED.uid
+  RETURNING ${USER_COLUMNS}
+`;
+
+/** The only UPDATE that writes `avatar_id` (art migration, step 3). */
+const SET_AVATAR_SQL = `
+  UPDATE users SET avatar_id = $2
+  WHERE id = $1
   RETURNING ${USER_COLUMNS}
 `;
 
@@ -481,6 +492,15 @@ export function createPgDirectory(
         }
         throw error;
       }
+    },
+
+    async setAvatar(id, avatarId) {
+      // Shape checked before asking for a connection; catalog membership is
+      // the caller's `resolveCharacterChoice` (see the port).
+      const checked = normalizeStoredCharacterId(avatarId);
+      const updated = await pool.query(SET_AVATAR_SQL, [id, checked]);
+      const row = updated.rows[0];
+      return row ? toDirectoryUser(row) : null;
     },
 
     close() {

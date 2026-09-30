@@ -14,6 +14,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { ART_PACK_DEFAULTS, InvalidArtChoiceError } from '../decor/artCatalogRules.ts';
 import { DisplayNameTakenError } from './displayNameRules.ts';
 import { InvalidInvitationError } from './invitationRules.ts';
 import { InvalidUserError } from './userRules.ts';
@@ -86,6 +87,7 @@ const USER_ROW = {
   status: 'active',
   expires_at: null,
   invited_by: null,
+  avatar_id: 'character-p01-burgundy-suit',
   created_at: new Date('2026-01-01T00:00:00.000Z'),
 };
 
@@ -127,6 +129,7 @@ describe('pgDirectory: resolveOnLogin', () => {
       status: 'active',
       expiresAt: null,
       invitedBy: null,
+      avatarId: 'character-p01-burgundy-suit',
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     });
   });
@@ -908,5 +911,46 @@ describe('pgDirectory: revokeUser (#93)', () => {
     expect(sqls).toContain('rollback');
     expect(sqls.some((sql) => sql.startsWith('insert into audit_log'))).toBe(false);
     expect(pool.released).toBe(1);
+  });
+});
+
+describe('pgDirectory: avatar (art migration, step 3)', () => {
+  it('reads avatar_id with every user', async () => {
+    const pool = fakePool(() => ({ rows: [{ ...USER_ROW, avatar_id: 'character-p02-beige-blazer' }], rowCount: 1 }));
+
+    const user = await directoryOver(pool).findById(USER_ROW.id);
+
+    expect(squash(pool.queries[0].text)).toContain('avatar_id');
+    expect(user?.avatarId).toBe('character-p02-beige-blazer');
+  });
+
+  it('a row read before the column existed comes out with the pack default', async () => {
+    const { avatar_id: _avatarId, ...legacy } = USER_ROW;
+    const pool = fakePool(() => ({ rows: [legacy], rowCount: 1 }));
+
+    expect((await directoryOver(pool).findById(USER_ROW.id))?.avatarId).toBe(ART_PACK_DEFAULTS.character);
+  });
+
+  it('setAvatar writes only avatar_id, scoped by id', async () => {
+    const pool = fakePool(() => ({ rows: [{ ...USER_ROW, avatar_id: 'character-p02-beige-blazer' }], rowCount: 1 }));
+
+    const user = await directoryOver(pool).setAvatar(USER_ROW.id, 'character-p02-beige-blazer');
+
+    expect(squash(pool.queries[0].text)).toContain('update users set avatar_id = $2 where id = $1');
+    expect(pool.queries[0].values).toEqual([USER_ROW.id, 'character-p02-beige-blazer']);
+    expect(user?.avatarId).toBe('character-p02-beige-blazer');
+  });
+
+  it('setAvatar rejects something that is not a character id without a query', async () => {
+    const pool = fakePool();
+
+    await expect(directoryOver(pool).setAvatar(USER_ROW.id, '')).rejects.toBeInstanceOf(InvalidArtChoiceError);
+    expect(pool.queries).toEqual([]);
+  });
+
+  it('setAvatar on an id that does not exist returns null', async () => {
+    const pool = fakePool(() => NO_ROW);
+
+    expect(await directoryOver(pool).setAvatar(USER_ROW.id, 'character-p02-beige-blazer')).toBeNull();
   });
 });

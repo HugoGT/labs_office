@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import { DeskSpaceOverlapError } from '../desks/deskRules.ts';
 import { createMemorySpaces } from './memorySpaces.ts';
+import { ART_PACK_DEFAULTS, InvalidArtChoiceError } from '../decor/artCatalogRules.ts';
 import {
   InvalidSpaceError,
   SpaceNameTakenError,
@@ -295,5 +296,63 @@ describe('createMemorySpaces: deskSpaces (#10 + #12, tarea 2.5)', () => {
     const spaces = createMemorySpaces();
 
     expect(() => spaces.deskSpaces.removeDeskSpace('no-existe')).not.toThrow();
+  });
+});
+
+describe('createMemorySpaces: floor (art migration, step 3)', () => {
+  it('seeded spaces get the default floor, like the schema backfill', async () => {
+    const spaces = createMemorySpaces({ seed: BUILT_IN_SEED_SPACES });
+
+    for (const space of await spaces.listSpaces()) {
+      expect(space).toMatchObject({ floorMaterialId: ART_PACK_DEFAULTS.floor, floorColor: null });
+    }
+  });
+
+  it('a room created without a floor gets the default one', async () => {
+    const created = await createMemorySpaces().createSpace({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: null });
+
+    expect(created).toMatchObject({ floorMaterialId: ART_PACK_DEFAULTS.floor, floorColor: null });
+  });
+
+  it('stores the floor chosen at creation and keeps it through an update', async () => {
+    const spaces = createMemorySpaces();
+    const created = await spaces.createSpace({
+      name: 'Sala',
+      x: 1,
+      y: 1,
+      w: 4,
+      h: 4,
+      capacity: null,
+      floor: { materialId: 'floor-plain', color: '#AABBCC' },
+    });
+
+    await spaces.updateSpace(created.id, { name: 'Sala Grande', x: 2, y: 2, w: 4, h: 4 });
+
+    expect(await spaces.getSpace(created.id)).toMatchObject({ floorMaterialId: 'floor-plain', floorColor: '#aabbcc' });
+  });
+
+  it('rejects a malformed floor and stores nothing', async () => {
+    const spaces = createMemorySpaces();
+
+    await expect(
+      spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: null, floor: { materialId: '', color: null } }),
+    ).rejects.toBeInstanceOf(InvalidArtChoiceError);
+    expect(await spaces.listSpaces()).toEqual([]);
+  });
+
+  it('a desk cubicle gets the default floor and keeps it when the desk moves', async () => {
+    const spaces = createMemorySpaces();
+
+    spaces.deskSpaces.upsertDeskSpace({ id: 'desk-1', label: 'Mesa 1', x: 0, y: 0 });
+    spaces.deskSpaces.upsertDeskSpace({ id: 'desk-1', label: 'Mesa 1', x: 10, y: 10 });
+
+    const [cubicle] = await spaces.listSpaces();
+    expect(cubicle).toMatchObject({ deskId: 'desk-1', x: 10, floorMaterialId: ART_PACK_DEFAULTS.floor, floorColor: null });
+  });
+
+  it('the floor does not change the spaces version: the hash covers geometry and names only', async () => {
+    const spaces = createMemorySpaces({ seed: BUILT_IN_SEED_SPACES });
+
+    expect(await spaces.version()).toBe(BUILT_IN_SEED_VERSION);
   });
 });

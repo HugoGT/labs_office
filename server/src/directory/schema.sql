@@ -310,3 +310,51 @@ WHERE display_name IS NOT NULL
 CREATE UNIQUE INDEX IF NOT EXISTS users_display_name_unique ON users (
   lower(btrim(regexp_replace(display_name, '[[:space:]]+', ' ', 'g')))
 ) WHERE display_name IS NOT NULL;
+
+-- Art pack catalog (art migration, step 3). One row per manifest piece, keyed
+-- by its stable id (`<kind>-<name>`), filled by `registerArtPack` after this
+-- script runs (see `directory/fromEnv.ts`). `spec` is the whole manifest entry
+-- so kind-specific data (anchors, facings) needs no column of its own; the
+-- columns next to it are the ones the choice rules read.
+--
+-- A piece missing from a newer pack gets `retired_at` and is never deleted:
+-- users, desks and spaces that chose it keep resolving it. No foreign key from
+-- those choices for the same reason `avatar_id` below cannot have one: the
+-- backfill writes ids that only exist here once the pack is registered.
+CREATE TABLE IF NOT EXISTS art_pieces (
+  id text PRIMARY KEY,
+  kind text NOT NULL CHECK (kind IN ('character', 'chair', 'desk', 'floor', 'wall')),
+  name text NOT NULL,
+  -- NULL for characters; desks, floors, chairs and walls have one.
+  material text,
+  colorable boolean NOT NULL DEFAULT false,
+  default_color text CHECK (default_color IS NULL OR default_color ~ '^#[0-9a-f]{6}$'),
+  author text NOT NULL,
+  license text NOT NULL,
+  files jsonb NOT NULL,
+  spec jsonb NOT NULL,
+  contract_version integer NOT NULL,
+  retired_at timestamptz,
+  registered_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Persisted choices. Each DEFAULT is the pack default (`ART_PACK_DEFAULTS`,
+-- checked against the manifest by artCatalogRules.test.ts) and is what
+-- backfills the rows that already exist. The color of a non-colorable
+-- material is NULL, and both defaults are non-colorable, so the color columns
+-- need no default. Which colors a material admits depends on the catalog, so
+-- the CHECK only bounds the format; the rules own the rest.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_id text NOT NULL DEFAULT 'character-p01-burgundy-suit';
+
+ALTER TABLE desks ADD COLUMN IF NOT EXISTS material_id text NOT NULL DEFAULT 'desk-wood';
+ALTER TABLE desks ADD COLUMN IF NOT EXISTS color text;
+ALTER TABLE desks DROP CONSTRAINT IF EXISTS desks_color_check;
+ALTER TABLE desks ADD CONSTRAINT desks_color_check CHECK (color IS NULL OR color ~ '^#[0-9a-f]{6}$');
+
+-- On `spaces` and not on `desks`: a desk's cubicle is a space, so its floor
+-- lives with every other floor.
+ALTER TABLE spaces ADD COLUMN IF NOT EXISTS floor_material_id text NOT NULL DEFAULT 'floor-wood';
+ALTER TABLE spaces ADD COLUMN IF NOT EXISTS floor_color text;
+ALTER TABLE spaces DROP CONSTRAINT IF EXISTS spaces_floor_color_check;
+ALTER TABLE spaces ADD CONSTRAINT spaces_floor_color_check CHECK (floor_color IS NULL OR floor_color ~ '^#[0-9a-f]{6}$');

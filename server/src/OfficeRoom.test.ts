@@ -896,6 +896,7 @@ function seededUser(overrides: Partial<DirectoryUser>): DirectoryUser {
     status: 'active',
     expiresAt: null,
     invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
   };

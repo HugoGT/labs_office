@@ -12,6 +12,10 @@
  * adaptador, que es justo donde `pgSpaces.replaceLayout` demuestra que le toca
  * vivir.
  *
+ * The art pack catalog (art migration, step 3) joins them here as a third
+ * entity for the same reason: it is the catalog the decor will draw from, and
+ * a second port would need the same pool and the same retire-not-delete rule.
+ *
  * ## Retirar del catalogo NO es borrar (D1b)
  *
  * `archivedAt` no es un borrado suave por comodidad. Es la afirmacion de que
@@ -24,6 +28,8 @@
  *   - `getDeskConfig()` -- lectura de COLOCACION -- no filtra nada, para que
  *     una pieza retirada siga resolviendo su `textureKey` y se siga pintando.
  */
+
+import type { ArtPackManifest, ArtPiece, ArtPieceFile, ArtPieceKind } from '../../../src/game/artContract.ts';
 
 export type AssetKind = 'furniture' | 'decor' | 'plant';
 
@@ -109,6 +115,46 @@ export interface ListAssetsOptions {
   includeArchived?: boolean;
 }
 
+/**
+ * One piece of the art pack as the catalog stores it (art migration, step 3).
+ * The id is the manifest's and never changes meaning: users, desks and spaces
+ * store it as their choice. `spec` is the whole manifest entry; the fields
+ * next to it are the ones the choice rules (`artCatalogRules.ts`) read.
+ *
+ * Same asymmetry as `archivedAt` on assets: `retiredAt` says the piece cannot
+ * be chosen again, not that the rows that chose it stop resolving it.
+ */
+export interface ArtCatalogPiece {
+  id: string;
+  kind: ArtPieceKind;
+  name: string;
+  /** `null` for characters, the only kind without one. */
+  material: string | null;
+  colorable: boolean;
+  defaultColor: string | null;
+  author: string;
+  license: string;
+  files: readonly ArtPieceFile[];
+  spec: ArtPiece;
+  contractVersion: number;
+  /** Set when a registered pack stopped shipping it; cleared if one ships it again. */
+  retiredAt: Date | null;
+  registeredAt: Date;
+  updatedAt: Date;
+}
+
+export interface ListArtPiecesOptions {
+  /** Includes retired pieces. Off by default: the normal read is "what can be chosen today". */
+  includeRetired?: boolean;
+}
+
+export interface ArtPackRegistration {
+  /** Pieces of the pack, all of them now active. */
+  registered: number;
+  /** Ids this registration retired; already retired pieces are not repeated. */
+  retired: string[];
+}
+
 export interface DecorCatalog {
   /** Orden deterministico (kind, slug, id). Filtra los archivados salvo que se pida lo contrario. */
   listAssets(options?: ListAssetsOptions): Promise<Asset[]>;
@@ -121,4 +167,13 @@ export interface DecorCatalog {
   getDeskConfig(userId: string): Promise<DeskItem[]>;
   /** Borra la configuracion existente e inserta la nueva en UNA transaccion. */
   replaceDeskConfig(userId: string, items: readonly DeskItemInput[]): Promise<DeskItem[]>;
+  /**
+   * Registers the art pack: upserts each piece by id and retires the active
+   * ones it no longer ships, atomically. Never deletes, so every stored
+   * choice keeps resolving. Idempotent: the same pack twice changes nothing.
+   * Throws `InvalidArtPackError` before touching anything.
+   */
+  registerArtPack(pack: ArtPackManifest): Promise<ArtPackRegistration>;
+  /** Deterministic order (kind, id). Leaves out retired pieces unless asked. */
+  listArtPieces(options?: ListArtPiecesOptions): Promise<ArtCatalogPiece[]>;
 }

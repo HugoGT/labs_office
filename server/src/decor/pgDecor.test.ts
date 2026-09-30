@@ -9,7 +9,10 @@
  * consultas intercambiadas, porque el pool de mentira contesta lo mismo.
  */
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
+import type { ArtPackManifest } from '../../../src/game/artContract.ts';
+import { InvalidArtPackError } from './artCatalogRules.ts';
 import { AssetNameTakenError, InvalidAssetError, InvalidDeskConfigError } from './decorRules.ts';
 import { createPgDecor } from './pgDecor.ts';
 import type { DirectoryPool, DirectoryQueryResult } from '../directory/pgDirectory.ts';
@@ -655,5 +658,155 @@ describe('pgDecor: replaceDeskConfig', () => {
     expect(texts.indexOf('commit')).toBeGreaterThan(
       texts.findIndex((t) => t.includes('join assets')),
     );
+  });
+});
+
+describe('createPgDecor: art pack catalog (art migration, step 3)', () => {
+  const PACK: ArtPackManifest = JSON.parse(
+    readFileSync(new URL('../../../public/assets/pack/manifest.json', import.meta.url), 'utf8'),
+  );
+  const PAINTED = PACK.pieces.find((piece) => piece.id === 'desk-painted')!;
+  const PIECE_ROW = {
+    id: PAINTED.id,
+    kind: 'desk',
+    name: PAINTED.name,
+    material: 'painted',
+    colorable: true,
+    default_color: '#4f9a8a',
+    author: PAINTED.author,
+    license: PAINTED.license,
+    files: PAINTED.files,
+    spec: PAINTED,
+    contract_version: 1,
+    retired_at: null,
+    registered_at: new Date('2026-01-01T00:00:00.000Z'),
+    updated_at: new Date('2026-01-02T00:00:00.000Z'),
+  };
+
+  it('listArtPieces reads only active pieces by default, in (kind, id) order, and maps the row', async () => {
+    const pool = fakePool(() => ({ rows: [PIECE_ROW], rowCount: 1 }));
+
+    const pieces = await createPgDecor(pool).listArtPieces();
+
+    expect(squash(pool.queries[0].text)).toContain('from art_pieces where retired_at is null order by kind, id');
+    expect(pieces).toEqual([
+      {
+        id: PAINTED.id,
+        kind: 'desk',
+        name: PAINTED.name,
+        material: 'painted',
+        colorable: true,
+        defaultColor: '#4f9a8a',
+        author: PAINTED.author,
+        license: PAINTED.license,
+        files: PAINTED.files,
+        spec: PAINTED,
+        contractVersion: 1,
+        retiredAt: null,
+        registeredAt: PIECE_ROW.registered_at,
+        updatedAt: PIECE_ROW.updated_at,
+      },
+    ]);
+  });
+
+  it('listArtPieces({ includeRetired: true }) drops the filter', async () => {
+    const pool = fakePool();
+
+    await createPgDecor(pool).listArtPieces({ includeRetired: true });
+
+    expect(squash(pool.queries[0].text)).not.toContain('retired_at is null');
+  });
+
+  function registrationPool(retired: readonly string[] = []): FakePool {
+    return fakePool((text) =>
+      /update art_pieces set retired_at/i.test(text)
+        ? { rows: retired.map((id) => ({ id })), rowCount: retired.length }
+        : { rows: [], rowCount: 0 },
+    );
+  }
+
+  it('upserts every piece by its id inside one transaction and never deletes', async () => {
+    const pool = registrationPool();
+
+    await createPgDecor(pool).registerArtPack(PACK);
+
+    const texts = pool.queries.map((query) => squash(query.text));
+    expect(texts[0]).toBe('begin');
+    expect(texts.at(-1)).toBe('commit');
+    const upserts = pool.queries.filter((query) => /insert into art_pieces/i.test(query.text));
+    expect(upserts).toHaveLength(PACK.pieces.length);
+    expect(upserts.map((query) => query.values[0])).toEqual(PACK.pieces.map((piece) => piece.id));
+    expect(squash(upserts[0].text)).toContain('on conflict (id) do update set');
+    // Shipping a piece again un-retires it.
+    expect(squash(upserts[0].text)).toContain('retired_at = null');
+    // The kind is never rewritten: the id prefix already fixes it.
+    expect(squash(upserts[0].text)).not.toMatch(/kind = excluded\.kind/);
+    expect(texts.some((text) => text.includes('delete'))).toBe(false);
+    expect(pool.released).toBe(1);
+  });
+
+  it('does not rewrite a piece that did not change, so registering at every start is a no-op', async () => {
+    const pool = registrationPool();
+
+    await createPgDecor(pool).registerArtPack(PACK);
+
+    const upsert = squash(pool.queries.find((query) => /insert into art_pieces/i.test(query.text))!.text);
+    expect(upsert).toContain('where art_pieces.spec is distinct from excluded.spec');
+    expect(upsert).toContain('or art_pieces.retired_at is not null');
+  });
+
+  it('sends files and spec as JSON text, not as a Postgres array', async () => {
+    // `pg` turns a JS array parameter into an array literal; `files` is an
+    // array, so it has to travel stringified and cast to jsonb.
+    const pool = registrationPool();
+
+    await createPgDecor(pool).registerArtPack(PACK);
+
+    const upsert = pool.queries.find((query) => query.values[0] === 'desk-painted')!;
+    expect(squash(upsert.text)).toContain('::jsonb');
+    expect(upsert.values).toEqual([
+      'desk-painted',
+      'desk',
+      PAINTED.name,
+      'painted',
+      true,
+      '#4f9a8a',
+      PAINTED.author,
+      PAINTED.license,
+      JSON.stringify(PAINTED.files),
+      JSON.stringify(PAINTED),
+      PACK.contractVersion,
+    ]);
+    const mateo = pool.queries.find((query) => query.values[0] === 'character-p01-burgundy-suit')!;
+    expect(mateo.values.slice(3, 6)).toEqual([null, false, null]);
+  });
+
+  it('retires, with one UPDATE, every active piece the pack no longer ships', async () => {
+    const pool = registrationPool(['desk-old']);
+
+    const result = await createPgDecor(pool).registerArtPack(PACK);
+
+    const retire = pool.queries.find((query) => /update art_pieces set retired_at/i.test(query.text))!;
+    expect(squash(retire.text)).toContain('where retired_at is null and not (id = any($1::text[]))');
+    expect(retire.values).toEqual([PACK.pieces.map((piece) => piece.id)]);
+    expect(result).toEqual({ registered: PACK.pieces.length, retired: ['desk-old'] });
+  });
+
+  it('rejects an invalid pack before asking for a connection', async () => {
+    const pool = registrationPool();
+
+    await expect(createPgDecor(pool).registerArtPack({ ...PACK, contractVersion: 99 })).rejects.toBeInstanceOf(
+      InvalidArtPackError,
+    );
+    expect(pool.queries).toEqual([]);
+  });
+
+  it('rolls back the whole registration if one statement fails', async () => {
+    const pool = fakePool((text) => (/update art_pieces/i.test(text) ? new Error('boom') : { rows: [], rowCount: 0 }));
+
+    await expect(createPgDecor(pool).registerArtPack(PACK)).rejects.toThrow('boom');
+
+    expect(squash(pool.queries.at(-1)!.text)).toBe('rollback');
+    expect(pool.released).toBe(1);
   });
 });

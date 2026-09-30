@@ -38,6 +38,7 @@ import {
   normalizeCreateDeskInput,
   normalizeUpdateDeskInput,
 } from './deskRules.ts';
+import { ART_PACK_DEFAULTS, normalizeStoredAppearance } from '../decor/artCatalogRules.ts';
 import type { DeskItem } from '../decor/decorPort.ts';
 import type { DirectoryPool, DirectoryQueryable } from '../directory/pgDirectory.ts';
 
@@ -49,7 +50,7 @@ function isExclusionViolation(error: unknown): boolean {
 }
 
 /** Sin `w` ni `h`: no existen como columnas, el escritorio es 3x3 siempre. */
-const DESK_COLUMNS = 'id, label, x, y, occupant_id, created_at, updated_at';
+const DESK_COLUMNS = 'id, label, x, y, occupant_id, material_id, color, created_at, updated_at';
 
 /**
  * La lectura de la oficina entera. El JOIN es LEFT y no INNER a proposito: un
@@ -57,7 +58,7 @@ const DESK_COLUMNS = 'id, label, x, y, occupant_id, created_at, updated_at';
  * mirando para elegir sitio.
  */
 const OFFICE_SELECT = `
-  SELECT d.id, d.label, d.x, d.y, d.occupant_id, d.created_at, d.updated_at, u.display_name
+  SELECT d.id, d.label, d.x, d.y, d.occupant_id, d.material_id, d.color, d.created_at, d.updated_at, u.display_name
   FROM desks d
   LEFT JOIN users u ON u.id = d.occupant_id
   ORDER BY d.x, d.y, d.id
@@ -85,6 +86,10 @@ function toDesk(row: Record<string, unknown>): Desk {
     x: row.x as number,
     y: row.y as number,
     occupantId: (row.occupant_id as string | null) ?? null,
+    // NOT NULL DEFAULT in the schema; the fallback is for a row read before
+    // the migration ran, same as `above_avatars` (#71).
+    materialId: (row.material_id as string | null | undefined) ?? ART_PACK_DEFAULTS.desk,
+    color: (row.color as string | null | undefined) ?? null,
     createdAt: row.created_at as Date,
     updatedAt: row.updated_at as Date,
   };
@@ -222,6 +227,17 @@ export function createPgDesks(pool: DirectoryPool): DeskDirectory {
       // Validar ANTES de pedir conexion, misma razon que `pgSpaces.createSpace`:
       // una posicion mal escrita no debe costar una consulta.
       const normalized = normalizeCreateDeskInput(input);
+      const appearance =
+        input.appearance === undefined ? undefined : normalizeStoredAppearance(input.appearance, ART_PACK_DEFAULTS.desk);
+      const values: unknown[] = [normalized.label, normalized.x, normalized.y];
+      // Without an appearance the columns are left to their schema DEFAULT,
+      // the same value `ART_PACK_DEFAULTS` gives `memoryDesks`.
+      let columns = 'label, x, y';
+      if (appearance) {
+        columns += ', material_id, color';
+        values.push(appearance.materialId, appearance.color);
+      }
+      const placeholders = values.map((_, index) => `$${index + 1}`).join(', ');
 
       // Dentro de una transaccion (D1): el escritorio y su cubiculo se
       // escriben juntos o ninguno de los dos queda en pie (tarea 2.1, 2.2).
@@ -230,11 +246,11 @@ export function createPgDesks(pool: DirectoryPool): DeskDirectory {
         try {
           const result = await client.query(
             `
-              INSERT INTO desks (label, x, y)
-              VALUES ($1, $2, $3)
+              INSERT INTO desks (${columns})
+              VALUES (${placeholders})
               RETURNING ${DESK_COLUMNS}
             `,
-            [normalized.label, normalized.x, normalized.y],
+            values,
           );
           // `occupant_id` no se inserta: el DEFAULT es NULL y un escritorio
           // nace libre. Quien se sienta lo decide esa persona, no quien lo crea.

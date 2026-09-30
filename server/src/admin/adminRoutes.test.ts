@@ -43,6 +43,7 @@ function user(overrides: Partial<DirectoryUser> & Pick<DirectoryUser, 'id' | 'ui
     status: 'active',
     expiresAt: null,
     invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
     createdAt: at(-30 * DAY),
     ...overrides,
   };

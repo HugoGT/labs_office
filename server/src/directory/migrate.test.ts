@@ -540,3 +540,46 @@ describe('schema.sql: assets drawn above avatars (#71)', () => {
     );
   });
 });
+
+describe('schema.sql: art pack catalog and appearance (art migration, step 3)', () => {
+  const squashed = squash(schema);
+
+  it('creates the catalog keyed by the stable manifest id, with a retirement mark and no delete path', () => {
+    expect(squashed).toContain('create table if not exists art_pieces ( id text primary key');
+    expect(squashed).toContain("kind text not null check (kind in ('character', 'chair', 'desk', 'floor', 'wall'))");
+    expect(squashed).toContain('files jsonb not null');
+    expect(squashed).toContain('spec jsonb not null');
+    expect(squashed).toContain('retired_at timestamptz');
+  });
+
+  it('adds every choice with its own idempotent ALTER, backfilling existing rows with the pack defaults', () => {
+    // `CREATE TABLE IF NOT EXISTS` never touches a live table, so each column
+    // arrives through ADD COLUMN IF NOT EXISTS; NOT NULL DEFAULT is what fills
+    // the rows that already exist (the values are checked against the
+    // manifest in artCatalogRules.test.ts).
+    expect(squashed).toContain("alter table users add column if not exists avatar_id text not null default 'character-p01-burgundy-suit'");
+    expect(squashed).toContain("alter table desks add column if not exists material_id text not null default 'desk-wood'");
+    expect(squashed).toContain('alter table desks add column if not exists color text');
+    expect(squashed).toContain("alter table spaces add column if not exists floor_material_id text not null default 'floor-wood'");
+    expect(squashed).toContain('alter table spaces add column if not exists floor_color text');
+  });
+
+  it('bounds stored colors to lowercase #rrggbb, refreshing the CHECK on a live database', () => {
+    for (const [table, column] of [
+      ['desks', 'color'],
+      ['spaces', 'floor_color'],
+    ] as const) {
+      expect(squashed).toContain(`alter table ${table} drop constraint if exists ${table}_${column}_check`);
+      expect(squashed).toContain(
+        `alter table ${table} add constraint ${table}_${column}_check check (${column} is null or ${column} ~ '^#[0-9a-f]{6}$')`,
+      );
+    }
+  });
+
+  it('does not tie choices to the catalog with a foreign key: the catalog is seeded after the schema', () => {
+    // Backfilled rows point at pieces that only exist once `registerArtPack`
+    // runs, after this script; retirement never deletes, so nothing dangles.
+    expect(squashed).not.toMatch(/avatar_id text[^,;]*references/);
+    expect(squashed).not.toMatch(/material_id text[^,;]*references/);
+  });
+});

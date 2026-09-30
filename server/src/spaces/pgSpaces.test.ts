@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { InvalidSpaceError, SpaceNameTakenError, SpaceOverlapError, SpaceOwnedByDeskError } from './spaceRules.ts';
 import { createPgSpaces } from './pgSpaces.ts';
+import { ART_PACK_DEFAULTS, InvalidArtChoiceError } from '../decor/artCatalogRules.ts';
 import type { DirectoryPool, DirectoryQueryResult } from '../directory/pgDirectory.ts';
 
 interface RecordedQuery {
@@ -79,6 +80,8 @@ const SPACE_ROW = {
   h: 14,
   capacity: null,
   desk_id: null,
+  floor_material_id: 'floor-wood',
+  floor_color: null,
   created_at: new Date('2026-01-01T00:00:00.000Z'),
   updated_at: new Date('2026-01-01T00:00:00.000Z'),
 };
@@ -111,6 +114,8 @@ describe('pgSpaces: listSpaces', () => {
         h: 14,
         capacity: null,
         deskId: null,
+        floorMaterialId: 'floor-wood',
+        floorColor: null,
         createdAt: SPACE_ROW.created_at,
         updatedAt: SPACE_ROW.updated_at,
       },
@@ -490,5 +495,84 @@ describe('pgSpaces: version', () => {
         },
       ]),
     );
+  });
+});
+
+describe('pgSpaces: floor (art migration, step 3)', () => {
+  it('reads floor_material_id and floor_color with every space', async () => {
+    const pool = fakePool(() => ({
+      rows: [{ ...SPACE_ROW, floor_material_id: 'floor-plain', floor_color: '#aabbcc' }],
+      rowCount: 1,
+    }));
+
+    const space = await createPgSpaces(pool).getSpace(SPACE_ROW.id);
+
+    expect(squash(pool.queries[0].text)).toContain('floor_material_id, floor_color');
+    expect(space).toMatchObject({ floorMaterialId: 'floor-plain', floorColor: '#aabbcc' });
+  });
+
+  it('a row read before the columns existed comes out with the default floor', async () => {
+    const { floor_material_id: _material, floor_color: _color, ...legacy } = SPACE_ROW;
+    const pool = fakePool(() => ({ rows: [legacy], rowCount: 1 }));
+
+    expect(await createPgSpaces(pool).getSpace(SPACE_ROW.id)).toMatchObject({
+      floorMaterialId: ART_PACK_DEFAULTS.floor,
+      floorColor: null,
+    });
+  });
+
+  it('with a floor the INSERT writes it, normalized', async () => {
+    const pool = fakePool(() => ({ rows: [SPACE_ROW], rowCount: 1 }));
+
+    await createPgSpaces(pool).createSpace({
+      name: 'Sala de Juntas',
+      x: 50,
+      y: 2,
+      w: 13,
+      h: 14,
+      capacity: null,
+      floor: { materialId: 'floor-plain', color: '#AABBCC' },
+    });
+
+    expect(squash(pool.queries[0].text)).toContain(
+      'insert into spaces (slug, name, x, y, w, h, capacity, floor_material_id, floor_color)',
+    );
+    expect(pool.queries[0].values).toEqual([
+      'sala-de-juntas',
+      'Sala de Juntas',
+      50,
+      2,
+      13,
+      14,
+      null,
+      'floor-plain',
+      '#aabbcc',
+    ]);
+  });
+
+  it('rejects a malformed floor before touching the pool', async () => {
+    const pool = fakePool();
+
+    await expect(
+      createPgSpaces(pool).createSpace({
+        name: 'Sala',
+        x: 0,
+        y: 0,
+        w: 4,
+        h: 4,
+        capacity: null,
+        floor: { materialId: 'floor-plain', color: 'gris' },
+      }),
+    ).rejects.toBeInstanceOf(InvalidArtChoiceError);
+    expect(pool.queries).toHaveLength(0);
+  });
+
+  it('updateSpace never writes the floor: it is chosen only at creation', async () => {
+    const pool = fakePool(() => ({ rows: [SPACE_ROW], rowCount: 1 }));
+
+    await createPgSpaces(pool).updateSpace(SPACE_ROW.id, { name: 'Otra Sala' });
+
+    const update = pool.queries.map((query) => squash(query.text)).find((sql) => sql.startsWith('update spaces'))!;
+    expect(update.slice(0, update.indexOf('returning'))).not.toContain('floor_');
   });
 });

@@ -10,7 +10,10 @@
  * test que pasa contra memoria y falla contra Postgres es peor que ningun test.
  */
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import type { ArtPackManifest } from '../../../src/game/artContract.ts';
+import { InvalidArtPackError } from './artCatalogRules.ts';
 import type { Asset } from './decorPort.ts';
 import { AssetNameTakenError, InvalidAssetError, InvalidDeskConfigError } from './decorRules.ts';
 import { createMemoryDecor } from './memoryDecor.ts';
@@ -419,5 +422,129 @@ describe('createMemoryDecor: replaceDeskConfig', () => {
     await expect(
       catalog.replaceDeskConfig('otra-persona', [{ assetId: PLANTA.id, slot: 0, rotation: 0 }]),
     ).rejects.toThrow(InvalidDeskConfigError);
+  });
+});
+
+describe('createMemoryDecor: art pack catalog (art migration, step 3)', () => {
+  const PACK: ArtPackManifest = JSON.parse(
+    readFileSync(new URL('../../../public/assets/pack/manifest.json', import.meta.url), 'utf8'),
+  );
+  const LATER = new Date('2026-02-01T00:00:00.000Z');
+
+  function withoutPiece(id: string): ArtPackManifest {
+    return { ...PACK, pieces: PACK.pieces.filter((piece) => piece.id !== id) };
+  }
+
+  it('starts with an empty catalog', async () => {
+    expect(await createMemoryDecor().listArtPieces()).toEqual([]);
+  });
+
+  it('registers every piece under its manifest id, with its metadata and files', async () => {
+    const catalog = decor();
+    const result = await catalog.registerArtPack(PACK);
+
+    expect(result).toEqual({ registered: PACK.pieces.length, retired: [] });
+    const pieces = await catalog.listArtPieces();
+    expect(pieces.map((piece) => piece.id).sort()).toEqual(PACK.pieces.map((piece) => piece.id).sort());
+    expect(pieces.find((piece) => piece.id === 'desk-painted')).toMatchObject({
+      kind: 'desk',
+      name: PACK.pieces.find((piece) => piece.id === 'desk-painted')!.name,
+      material: 'painted',
+      colorable: true,
+      defaultColor: '#4f9a8a',
+      contractVersion: PACK.contractVersion,
+      retiredAt: null,
+      registeredAt: NOW,
+    });
+    const mateo = pieces.find((piece) => piece.id === 'character-p01-burgundy-suit')!;
+    expect(mateo).toMatchObject({ kind: 'character', material: null, colorable: false, defaultColor: null });
+    expect(mateo.files).toEqual(PACK.pieces.find((piece) => piece.id === mateo.id)!.files);
+    expect(mateo.spec).toEqual(PACK.pieces.find((piece) => piece.id === mateo.id));
+  });
+
+  it('lists in a deterministic (kind, id) order, same as pgDecor', async () => {
+    const catalog = decor();
+    await catalog.registerArtPack(PACK);
+    const ids = (await catalog.listArtPieces()).map((piece) => `${piece.kind}/${piece.id}`);
+    expect(ids).toEqual([...ids].sort());
+  });
+
+  it('registering the same pack twice changes nothing', async () => {
+    let clock = NOW;
+    const catalog = createMemoryDecor({ now: () => clock });
+    await catalog.registerArtPack(PACK);
+    const first = await catalog.listArtPieces();
+
+    clock = LATER;
+    expect(await catalog.registerArtPack(PACK)).toEqual({ registered: PACK.pieces.length, retired: [] });
+    expect(await catalog.listArtPieces()).toEqual(first);
+  });
+
+  it('retires a piece that a newer pack no longer ships, instead of deleting it', async () => {
+    let clock = NOW;
+    const catalog = createMemoryDecor({ now: () => clock });
+    await catalog.registerArtPack(PACK);
+
+    clock = LATER;
+    const result = await catalog.registerArtPack(withoutPiece('desk-glass'));
+
+    expect(result).toEqual({ registered: PACK.pieces.length - 1, retired: ['desk-glass'] });
+    expect((await catalog.listArtPieces()).some((piece) => piece.id === 'desk-glass')).toBe(false);
+    const all = await catalog.listArtPieces({ includeRetired: true });
+    expect(all.find((piece) => piece.id === 'desk-glass')).toMatchObject({ retiredAt: LATER, registeredAt: NOW });
+  });
+
+  it('does not retire an already retired piece again', async () => {
+    let clock = NOW;
+    const catalog = createMemoryDecor({ now: () => clock });
+    await catalog.registerArtPack(PACK);
+    clock = LATER;
+    await catalog.registerArtPack(withoutPiece('desk-glass'));
+
+    clock = new Date('2026-03-01T00:00:00.000Z');
+    expect(await catalog.registerArtPack(withoutPiece('desk-glass'))).toEqual({
+      registered: PACK.pieces.length - 1,
+      retired: [],
+    });
+    const glass = (await catalog.listArtPieces({ includeRetired: true })).find((piece) => piece.id === 'desk-glass');
+    expect(glass?.retiredAt).toEqual(LATER);
+  });
+
+  it('brings a retired piece back when a pack ships it again', async () => {
+    const catalog = decor();
+    await catalog.registerArtPack(PACK);
+    await catalog.registerArtPack(withoutPiece('desk-glass'));
+
+    await catalog.registerArtPack(PACK);
+
+    expect((await catalog.listArtPieces()).find((piece) => piece.id === 'desk-glass')?.retiredAt).toBeNull();
+  });
+
+  it('updates the metadata of a piece in place, keeping its identity', async () => {
+    let clock = NOW;
+    const catalog = createMemoryDecor({ now: () => clock });
+    await catalog.registerArtPack(PACK);
+
+    clock = LATER;
+    await catalog.registerArtPack({
+      ...PACK,
+      pieces: PACK.pieces.map((piece) => (piece.id === 'desk-wood' ? { ...piece, name: 'Roble' } : piece)),
+    });
+
+    expect((await catalog.listArtPieces()).find((piece) => piece.id === 'desk-wood')).toMatchObject({
+      name: 'Roble',
+      registeredAt: NOW,
+      updatedAt: LATER,
+    });
+  });
+
+  it('rejects an invalid pack without touching the catalog', async () => {
+    const catalog = decor();
+    await catalog.registerArtPack(PACK);
+    const before = await catalog.listArtPieces({ includeRetired: true });
+
+    await expect(catalog.registerArtPack({ ...PACK, pieces: [] })).rejects.toBeInstanceOf(InvalidArtPackError);
+
+    expect(await catalog.listArtPieces({ includeRetired: true })).toEqual(before);
   });
 });

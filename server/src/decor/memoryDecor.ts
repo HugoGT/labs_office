@@ -27,12 +27,16 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import type { ArtPackManifest } from '../../../src/game/artContract.ts';
+import { artPieceFields, normalizeArtPack } from './artCatalogRules.ts';
 import type {
+  ArtCatalogPiece,
   Asset,
   CreateAssetInput,
   DecorCatalog,
   DeskItem,
   DeskItemInput,
+  ListArtPiecesOptions,
   ListAssetsOptions,
   UpdateAssetInput,
 } from './decorPort.ts';
@@ -63,6 +67,9 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): DecorCatalo
   for (const seeded of options.seed ?? []) {
     assets.set(seeded.id, { ...seeded });
   }
+
+  /** Art pack pieces by manifest id. Never shrinks: retiring only sets `retiredAt`. */
+  const artPieces = new Map<string, ArtCatalogPiece>();
 
   /** Mismo orden que `pgDecor`: (kind, slug, id). */
   function sorted(list: readonly Asset[]): Asset[] {
@@ -180,6 +187,53 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): DecorCatalo
         normalized.map((item) => ({ id: newId(), ...item, createdAt: at })),
       );
       return resolve(userId);
+    },
+
+    async registerArtPack(pack: ArtPackManifest) {
+      // Validated before any write, like the ROLLBACK of `pgDecor`: an
+      // invalid pack leaves the catalog as it was.
+      const valid = normalizeArtPack(pack);
+      const at = now();
+      const shipped = new Set<string>();
+
+      for (const piece of valid.pieces) {
+        shipped.add(piece.id);
+        const fields = artPieceFields(piece);
+        const current = artPieces.get(piece.id);
+        // Same condition as the `WHERE` of the pg upsert: an unchanged, active
+        // piece is left alone, so registering at every start is a no-op.
+        const unchanged =
+          current !== undefined &&
+          current.retiredAt === null &&
+          current.contractVersion === valid.contractVersion &&
+          JSON.stringify(current.spec) === JSON.stringify(fields.spec);
+        if (unchanged) continue;
+        artPieces.set(piece.id, {
+          ...fields,
+          // The kind is kept from the first registration, like pg: the id prefix fixes it.
+          kind: current?.kind ?? fields.kind,
+          contractVersion: valid.contractVersion,
+          retiredAt: null,
+          registeredAt: current?.registeredAt ?? at,
+          updatedAt: at,
+        });
+      }
+
+      const retired: string[] = [];
+      for (const piece of artPieces.values()) {
+        if (piece.retiredAt !== null || shipped.has(piece.id)) continue;
+        artPieces.set(piece.id, { ...piece, retiredAt: at, updatedAt: at });
+        retired.push(piece.id);
+      }
+
+      return { registered: valid.pieces.length, retired };
+    },
+
+    async listArtPieces(options: ListArtPiecesOptions = {}) {
+      const all = [...artPieces.values()];
+      return (options.includeRetired ? all : all.filter((piece) => piece.retiredAt === null)).sort(
+        (a, b) => a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id),
+      );
     },
   };
 }

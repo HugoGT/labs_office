@@ -10,6 +10,8 @@
  * demuestra que le corresponde al adaptador.
  */
 
+import type { ArtAppearance } from '../decor/artCatalogRules.ts';
+
 export interface Space {
   id: string;
   slug: string;
@@ -27,6 +29,14 @@ export interface Space {
    * (S1b) lo escribe, como efecto secundario del CRUD de escritorios.
    */
   deskId: string | null;
+  /**
+   * Floor material (an art pack floor id) and color (art migration, step 3).
+   * A desk cubicle is a space, so its floor lives here too. `floorColor` is
+   * null unless the material is colorable. Not part of `version()`: the hash
+   * tracks geometry and names, and the floor is only chosen at creation.
+   */
+  floorMaterialId: string;
+  floorColor: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -52,6 +62,11 @@ export interface CreateSpaceInput {
   w: number;
   h: number;
   capacity: number | null;
+  /**
+   * Already resolved against the catalog (`resolveFloorAppearance`); absent
+   * means the pack default. `UpdateSpaceInput` has none on purpose.
+   */
+  floor?: ArtAppearance;
 }
 
 /**

@@ -937,6 +937,7 @@ describe('rutas de espacios (#7, slice 3)', () => {
     status: 'active',
     expiresAt: null,
     invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
     createdAt: new Date('2025-12-01T00:00:00.000Z'),
   };
 
@@ -1076,6 +1077,7 @@ describe('rutas de decoracion (#7, slice 4)', () => {
     status: 'active',
     expiresAt: null,
     invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
     createdAt: new Date('2025-12-01T00:00:00.000Z'),
   };
 
@@ -1432,6 +1434,7 @@ describe('rutas de nombre visible (#100)', () => {
     status: 'active',
     expiresAt: null,
     invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
     createdAt: new Date('2025-12-01T00:00:00.000Z'),
   };
 
@@ -1559,6 +1562,7 @@ describe('rutas de escritorios (#7, slice 5)', () => {
     status: 'active',
     expiresAt: null,
     invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
     createdAt: new Date('2025-12-01T00:00:00.000Z'),
   };
 
@@ -2125,7 +2129,8 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
       : (await spaces.listSpaces())[0];
     const directory = createMemoryDirectory({ seed: ['owner', 'old', 'middle', 'after-delete', 'admin'].map((uid): DirectoryUser => ({
       id: `id-${uid}`, uid, email: `${uid}@example.com`, displayName: uid,
-      role: uid === 'admin' ? 'admin' : 'employee', status: 'active', expiresAt: null, invitedBy: null, createdAt: new Date(),
+      role: uid === 'admin' ? 'admin' : 'employee', status: 'active', expiresAt: null, invitedBy: null,
+      avatarId: 'character-p01-burgundy-suit', createdAt: new Date(),
     })) });
     const recServer = createOfficeServer({ spaces, desks, directory, auth: recordingVerifier, egress: fakeEgress(),
       storage: uploadedStorage, recordingReadiness: { intervalMs: 5, timeoutMs: 2000 } });
@@ -2351,6 +2356,7 @@ describe('users routes (#93): revoking over HTTP evicts the live session', () =>
     status: 'active',
     expiresAt: null,
     invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
     createdAt: new Date('2025-12-01T00:00:00.000Z'),
   };
   const STAFF_USER: DirectoryUser = {
