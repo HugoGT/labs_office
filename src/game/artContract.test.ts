@@ -90,8 +90,8 @@ describe('art contract constants', () => {
 
   it('keeps PNG size apart from the logical footprint', () => {
     expect(CHARACTER_WALK.footprint).toEqual({ w: 1, h: 1 });
-    // A chair cell is 36px, bigger than a tile, but it still occupies one tile.
-    expect(ART_IMAGE_SPECS.chair.frame).toEqual({ width: 36, height: 36 });
+    // A chair cell is 36x38, bigger than a tile, but it still occupies one tile.
+    expect(ART_IMAGE_SPECS.chair.frame).toEqual({ width: 36, height: 38 });
     expect(ART_IMAGE_SPECS.chair.footprint).toEqual({ w: 1, h: 1 });
     expect(ART_IMAGE_SPECS.desk.frame).toEqual({ width: 64, height: 64 });
     expect(ART_IMAGE_SPECS.desk.footprintByFacing).toEqual({
@@ -244,7 +244,7 @@ describe('validateArtImage', () => {
   it('rejects a baked-in background: sprite frame corners must be transparent', () => {
     const chair = validImage('chair');
     // Bottom-right corner of the second frame of the first row.
-    setPixel(chair, 36 * 2 - 1, 35, [201, 167, 124, 255]);
+    setPixel(chair, 36 * 2 - 1, 37, [201, 167, 124, 255]);
     const violations = validateArtImage('chair', chair);
     expect(violations.map((v) => v.code)).toEqual(['background-present']);
     expect(violations[0]!.message).toMatch(/frame 1/);

@@ -20,7 +20,7 @@ The executable source of truth is `src/game/artContract.ts` (`ART_CONTRACT_VERSI
 |---|---|---|---|---|---|---|
 | `character-walk` | 32x52 | 11 x 8 | 352x416 | columns 0-9 steps, 10 idle; rows `S, SE, E, NE, N, NW, W, SW` | feet (16, 47) | 1x1 (feet tile) |
 | `character-seated` | 44x58 | 8 x 4 | 352x232 | columns 0-5 sit-down, 6-7 seated idle; rows `up, down, left, right` | pelvis on seat (22, 42) | the chair's |
-| `chair` | 36x36 | 4 x 2 | 144x72 | columns `up, down, left, right`; row 0 `back`, row 1 `front` | seat (18, 22), ground (18, 31) | 1x1 |
+| `chair` | 36x38 | 4 x 2 | 144x76 | columns `up, down, left, right`; row 0 `back`, row 1 `front` | seat (18, 22), ground (18, 31) | 1x1 |
 | `desk` | 64x64 | 4 x 1 | 256x64 | columns `up, down, left, right` | floor under the middle (32, 40) | 2x1 up/down, 1x2 left/right |
 | `floor` | 32x32 | 3 x 3 | 96x96 | frame `row * 3 + col` is motif sub-tile (col, row) | top-left | 1x1 per frame |
 | `wall` | 16x16 | 17 x 1 | 272x16 | 0 horizontal body, 1 vertical body, `1 + mask` joint | top-left | segment on a grid edge |
@@ -51,7 +51,7 @@ Issue #121 set a first contract before the pack existed. The pack does not fit i
 |---|---|---|---|
 | Character frame | 32x64, 4 directions, 4 steps, one seated row (128x320) | 32x52 walk with 8 directions, 10 steps and idle; separate 44x58 seated sheet with 6+2 frames | The pack's characters are drawn at this size and cadence. The seated pose needs a wider cell. |
 | Facing order | down, left, right, up | Pack order up, down, left, right, mapped explicitly | This matches the generated sheets. The mapping helpers remove the ambiguity. |
-| Chair | 32x32 cells, row 0 base, row 1 backrest | 36x36 cells (the art's seat block), row 0 back, row 1 front, fixed seat anchor | Chairs are up to 22x36. Layers are split by draw order, not by part. |
+| Chair | 32x32 cells, row 0 base, row 1 backrest | 36x38 cells, row 0 back, row 1 front, fixed seat anchor | Chairs are up to 22x36, and aligned on one seat pixel they span 37 rows. Layers are split by draw order, not by part. |
 | Desk | `w*32 x h*32` plus 32px overhang, anchored bottom-left | Fixed 64x64 cell per facing, anchored under the middle, with a footprint separate from the PNG | Desks come in 4 orientations of different shapes (54x31, 27x48). |
 | Alpha | Binary (0 or 255) | Partial allowed; floors opaque | Shadows and glass are intentionally translucent. |
 | Colors | 64 per piece | 128 per file | Measured characters reach about 75. |

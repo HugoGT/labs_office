@@ -18,6 +18,7 @@
     "test:coverage": "vitest run --coverage",
     "server": "node server/src/main.ts",
     "test:server": "vitest run --project=server",
+    "art:export": "node tools/art/export.ts",
     "test:harness": "node --test e2e/preview-url.test.mjs e2e/livekit-health-url.test.mjs",
     "test:mux": "node --test --test-timeout=600000 infra/gcp/test/mux/mux.test.mjs",
     "test:e2e": "node --test e2e/bundle-hook-absent.e2e.test.mjs e2e/two-client-proximity.e2e.test.mjs e2e/two-client-audio.e2e.test.mjs",

@@ -25,11 +25,13 @@ server/src/             Node server, run directly by Node type stripping (no bui
   admin/ decor/ desks/ directory/ recording/ spaces/   feature modules (ports and adapters)
   directory/schema.sql  Postgres schema, applied idempotently on every start
 e2e/                    real-process E2E harness (node:test + Playwright)
+tools/art/              art pack exporter: pure generators (domain/), sheets, manifest, previews
+docs/art/               art contract (contract.md) and generated review previews (preview/)
 docker-compose.yml      full local stack (include of infra/livekit + postgres + server + web images)
 infra/livekit/          local LiveKit + Egress + Redis docker compose stack
 infra/gcp/              deployed `test` environment: Terraform, VM compose, Caddy, office-deploy
 prototype/              pre-port standalone prototype, reference only (not built, not run)
-public/assets/          static art (Kenney tileset)
+public/assets/          static art (Kenney tileset); pack/ is the generated art pack, never hand-edited
 .github/workflows/      ci.yml (verify) and deploy-test.yml (deploy after green CI on main)
 ```
 
@@ -67,6 +69,7 @@ All from the repo root. Every script below exists in `package.json`.
 | `pnpm test:e2e` | Two-client E2E against real server + `vite preview` (needs `dist-e2e/`) |
 | `pnpm test:e2e:audio` | Two-client audio and "No molestar" E2E; needs a real LiveKit and `VITE_LIVEKIT_E2E=1` (the screen share scenario also needs `DATABASE_URL`) |
 | `pnpm e2e` | `test:harness` + `build` + `build:e2e` + `test:e2e` |
+| `pnpm art:export` | Regenerate the art pack (`public/assets/pack/`, 1x PNGs + `manifest.json`) and its upscaled previews (`docs/art/preview/`). Commit both; `tools/art/pack.test.ts` fails while they drift |
 | `pnpm test:mux` | Local Docker harness for the Caddy TURN/TLS multiplexer. Never runs in CI |
 
 There is no lint or format script and no ESLint/Prettier/Biome config. `pnpm typecheck` (strict, `noUnusedLocals`, `noUnusedParameters`, `verbatimModuleSyntax`) is the static gate. Do not add a linter unless asked.
@@ -149,7 +152,7 @@ Infra: locally `infra/livekit/` runs LiveKit + Egress + Redis, and the root `doc
 
 ## Coding conventions
 
-- TypeScript strict everywhere. Server files import with explicit `.ts` extensions (Node type stripping + ESM); client files import without extensions.
+- TypeScript strict everywhere. Server and `tools/` files import with explicit `.ts` extensions (Node type stripping + ESM); client files import without extensions.
 - `@colyseus/schema` classes must not use class fields: declare fields via a merged `interface` and create instances through factories (see `server/src/schema.ts`, `server/README.md`). Class fields silently break serialization.
 - Naming: React components and Phaser scenes in PascalCase files (`OfficeShell.tsx`, `OfficeScene.ts`); modules in camelCase (`livekitRoom.ts`); hooks `useX.ts` in `src/hooks/`; ports `*Port.ts`; adapters `memory*` / `pg*`; route modules `*Routes.ts`.
 - Named exports are the norm; `App` and `DashboardRoute` are default exports because of `React.lazy`.
@@ -161,7 +164,7 @@ Infra: locally `infra/livekit/` runs LiveKit + Egress + Redis, and the root `doc
 Testing:
 - Strict TDD is expected: write the failing test first, then the code. Every behavior change ships with tests.
 - Tests are co-located next to the source: `foo.ts` + `foo.test.ts`.
-- Suffix picks the Vitest project: `*.test.ts(x)` runs under jsdom (`unit`); `*.browser.test.ts(x)` runs in real Chromium (anything that imports Phaser, which cannot load under jsdom); `server/**/*.test.ts` and `src/**/*.node.test.ts` run under Node (`server`).
+- Suffix picks the Vitest project: `*.test.ts(x)` runs under jsdom (`unit`); `*.browser.test.ts(x)` runs in real Chromium (anything that imports Phaser, which cannot load under jsdom); `server/**/*.test.ts`, `src/**/*.node.test.ts` and `tools/**/*.test.ts` run under Node (`server`).
 - No infrastructure in unit/server tests: Postgres adapters are tested against an injected query executor; routes are tested as pure functions; Colyseus tests start a real server on an ephemeral port.
 - LiveKit-dependent tests use `describe.skipIf(!import.meta.env.VITE_LIVEKIT_E2E)`.
 - E2E (`e2e/*.e2e.test.mjs`) uses real processes only: server on fixed port 2599, `vite preview` of `dist-e2e/`, and Playwright contexts. The test hook is compiled in only for `--mode e2e` via the `__OFFICE_E2E__` define; `e2e/bundle-hook-absent.e2e.test.mjs` asserts it is absent from `dist/`.

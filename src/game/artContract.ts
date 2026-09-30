@@ -179,12 +179,14 @@ export const CHARACTER_SEATED: CharacterSeatedSpec = {
 };
 
 /**
- * 36px cells: the art's SEAT_BLOCK, the box every chair fits in. The seat sits
- * at the same pixel of every cell, and the ground point SEAT_HEIGHT (9) below.
+ * The seat sits at the same pixel of every cell, and the ground point
+ * SEAT_HEIGHT (9) below. Each chair fits the art's 36px SEAT_BLOCK, but once
+ * they share that seat pixel they span 37 rows (up to 22 above the seat, 15
+ * from it down), so the cell is 38 tall rather than 36.
  */
 export const CHAIR: ChairSpec = {
   kind: 'chair',
-  frame: { width: 36, height: 36 },
+  frame: { width: 36, height: 38 },
   columns: PACK_FACINGS.length,
   rows: CHAIR_LAYERS.length,
   columnOrder: PACK_FACINGS,
@@ -385,6 +387,97 @@ export function wallFrameIndex(piece: WallPiece): number {
   if (piece.piece === 'body') return piece.axis === 'horizontal' ? 0 : 1;
   if (!Number.isInteger(piece.mask) || piece.mask < 1 || piece.mask > 15) throw new Error(`Invalid wall joint mask ${piece.mask}`);
   return 1 + piece.mask;
+}
+
+// --- Pack manifest -----------------------------------------------------------------------------
+
+/** `format` of `public/assets/pack/manifest.json`. */
+export const ART_PACK_FORMAT = 'oficina-art-pack';
+
+export const ART_PIECE_KINDS = ['character', 'chair', 'desk', 'floor', 'wall'] as const;
+export type ArtPieceKind = (typeof ART_PIECE_KINDS)[number];
+
+/** One PNG of a piece. Paths are relative to the manifest; `sha256` is of the file bytes. */
+export interface ArtPieceFile {
+  readonly role: string;
+  readonly path: string;
+  readonly imageKind: ArtImageKind;
+  readonly width: number;
+  readonly height: number;
+  readonly sha256: string;
+}
+
+interface ArtPieceBase {
+  /** Stable identity, `<kind>-<name>`. Persisted choices point here, so it never changes meaning. */
+  readonly id: string;
+  readonly kind: ArtPieceKind;
+  /** Shown in the UI (Spanish copy). */
+  readonly name: string;
+  readonly author: string;
+  readonly license: string;
+  readonly files: readonly ArtPieceFile[];
+}
+
+export interface ArtCharacterPiece extends ArtPieceBase {
+  readonly kind: 'character';
+  readonly anchors: { readonly walk: Point; readonly seated: Point };
+  readonly footprint: Footprint;
+}
+
+export interface ArtChairPiece extends ArtPieceBase {
+  readonly kind: 'chair';
+  readonly material: string;
+  readonly facings: readonly ArtFacing[];
+  readonly layers: readonly ChairLayer[];
+  readonly anchors: { readonly seat: Point; readonly ground: Point };
+  readonly footprint: Footprint;
+}
+
+/** Per facing, as offsets from the desk anchor: its depth point and where a matching chair's ground goes. */
+export interface ArtDeskFacing {
+  readonly footprint: Footprint;
+  readonly ground: Point;
+  readonly chairGround: Point;
+}
+
+export interface ArtDeskPiece extends ArtPieceBase {
+  readonly kind: 'desk';
+  readonly material: string;
+  /** A colorable piece is exported in `defaultColor`; other colors are generated from the same model. */
+  readonly colorable: boolean;
+  readonly defaultColor: string | null;
+  readonly anchor: Point;
+  readonly facings: Readonly<Record<ArtFacing, ArtDeskFacing>>;
+}
+
+export interface ArtFloorPiece extends ArtPieceBase {
+  readonly kind: 'floor';
+  readonly material: string;
+  readonly colorable: boolean;
+  readonly defaultColor: string | null;
+  readonly motifTiles: number;
+}
+
+export interface ArtWallPiece extends ArtPieceBase {
+  readonly kind: 'wall';
+  readonly material: string;
+  readonly segmentLength: number;
+  readonly thickness: number;
+  readonly translucent: boolean;
+}
+
+export type ArtPiece = ArtCharacterPiece | ArtChairPiece | ArtDeskPiece | ArtFloorPiece | ArtWallPiece;
+
+export interface ArtPackManifest {
+  readonly format: typeof ART_PACK_FORMAT;
+  readonly contractVersion: number;
+  readonly fileFormat: typeof ART_FILE_FORMAT;
+  readonly tile: number;
+  readonly author: string;
+  readonly license: string;
+  /** Initial choices for rows that have none yet: a new user, a desk or a space. */
+  readonly defaults: { readonly character: string; readonly desk: string; readonly floor: string };
+  readonly pieces: readonly ArtPiece[];
 }
 
 // --- Validation --------------------------------------------------------------------------------
