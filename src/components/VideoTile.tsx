@@ -55,6 +55,9 @@ export function VideoTile({ sessionId, name, portraits, track, speaking, fit = '
 
     const element = track.attach();
     element.autoplay = true;
+    // Audio belongs to remoteAudioSink, never to a camera preview or share tile.
+    element.muted = true;
+    if (element instanceof HTMLVideoElement) element.playsInline = true;
     element.className = fit === 'contain' ? styles.screenVideo : styles.video;
     host.appendChild(element);
 

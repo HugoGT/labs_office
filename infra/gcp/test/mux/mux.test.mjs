@@ -161,3 +161,37 @@ test('assertion 6: http://app.* redirects to https://app.* with no :8443 suffix 
   assert.equal(result.status, 308);
   assert.equal(result.location, 'https://app.local.test/');
 });
+
+for (const [connection, upgrade] of [
+  ['Upgrade', 'websocket'],
+  ['upgrade', 'websocket'],
+  ['keep-alive, upgrade', 'websocket'],
+  ['uPgRaDe', 'WebSocket'],
+]) {
+  test(`Colyseus WebSocket handshake routes case-insensitive tokens: ${connection} / ${upgrade}`, () => {
+    const result = runProbe([
+      '--mode', 'tls-http', '--host', 'caddy', '--port', '443',
+      '--servername', 'app.local.test', '--path', '/process/room?sessionId=test',
+      '--connection', connection, '--upgrade', upgrade,
+    ]);
+    assert.ok(result.ok, JSON.stringify(result));
+    assert.equal(result.status, 101, JSON.stringify(result));
+    assert.equal(result.stub, 'colyseus', JSON.stringify(result));
+  });
+}
+
+for (const [connection, upgrade] of [
+  ['notUpgrade', 'websocket'],
+  ['close', 'websocket'],
+  ['upgrade', 'h2c'],
+]) {
+  test(`non-WebSocket headers never select Colyseus: ${connection} / ${upgrade}`, () => {
+    const result = runProbe([
+      '--mode', 'tls-http', '--host', 'caddy', '--port', '443',
+      '--servername', 'app.local.test', '--path', '/assets/index-test.js',
+      '--connection', connection, '--upgrade', upgrade,
+    ]);
+    assert.ok(result.ok, JSON.stringify(result));
+    assert.equal(result.stub ?? result.body.stub, 'web', JSON.stringify(result));
+  });
+}

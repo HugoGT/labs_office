@@ -1,6 +1,6 @@
 import { act, render, screen } from '@testing-library/react';
 import type { ComponentProps } from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { AttachableTrack } from '../game/attachableTrack';
 import { createOfficeBridge } from '../game/officeBridge';
 import { VideoTiles } from './VideoTiles';
@@ -146,14 +146,8 @@ describe('VideoTiles: fila fija arriba al centro', () => {
   });
 });
 
-/**
- * Self-tile gated por compania audible: la barra entera -- propio tile
- * incluido -- solo existe cuando `voice.peers` no esta vacio. A solas en el
- * piso abierto no hay nadie con quien hablar por video, asi que no hay nada
- * que mostrar arriba, aunque la camara local este encendida.
- */
-describe('VideoTiles: self-tile gated por companero audible', () => {
-  it('sin pares audibles, no existe ningun tile (ni siquiera el propio)', () => {
+describe('VideoTiles: local camera preview without audible peers', () => {
+  it('without a local camera or audible peers, no self portrait or bar is added', () => {
     const { bridge } = renderTiles();
 
     act(() => {
@@ -165,15 +159,67 @@ describe('VideoTiles: self-tile gated por companero audible', () => {
     expect(screen.queryByTestId('video-tile-bar')).not.toBeInTheDocument();
   });
 
-  it('con camara local encendida pero sin pares, tampoco aparece el self-tile', () => {
-    const { bridge } = renderTiles({ localVideoTrack: fakeVideoTrack() });
+  it.each([null, 'sala-de-juntas-stub'])('shows the local camera alone in space %s', (spaceId) => {
+    const track = fakeVideoTrack();
+    const attach = vi.spyOn(track, 'attach');
+    const detach = vi.spyOn(track, 'detach');
+    const { bridge, rerender } = renderTiles({ localVideoTrack: track });
 
     act(() => {
-      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers: [], spaceId: null });
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers: [], spaceId });
     });
 
+    expect(tileIds()).toEqual(['yo']);
+    expect(screen.getByTestId('video-tile-bar')).toHaveAttribute('data-layout', 'row');
+    expect(screen.getByTestId('tile-name')).toHaveTextContent('HugoGT');
+    const video = document.querySelector('video');
+    expect(video).toBeInTheDocument();
+    expect(attach).toHaveBeenCalledTimes(1);
+
+    rerender({ localVideoTrack: null });
+
+    expect(detach).toHaveBeenCalledTimes(1);
+    expect(video).not.toBeInTheDocument();
     expect(document.querySelectorAll('video')).toHaveLength(0);
     expect(screen.queryByTestId('video-tile-bar')).not.toBeInTheDocument();
+  });
+
+  it('plays the local preview muted and inline with no audio element', () => {
+    const { bridge } = renderTiles({ localVideoTrack: fakeVideoTrack() });
+    act(() => bridge.emit('voice', {
+      selfSessionId: 'yo', selfName: 'HugoGT',
+      peers: [{ sessionId: 'ana', name: 'Ana' }], spaceId: null,
+    }));
+
+    const video = document.querySelector('video')!;
+    expect(video.autoplay).toBe(true);
+    expect(video.muted).toBe(true);
+    expect(video.playsInline).toBe(true);
+    expect(document.querySelector('audio')).toBeNull();
+  });
+
+  it('keeps the same self tile and video attached when the last audible peer leaves', () => {
+    const track = fakeVideoTrack();
+    const attach = vi.spyOn(track, 'attach');
+    const detach = vi.spyOn(track, 'detach');
+    const { bridge } = renderTiles({ localVideoTrack: track });
+    act(() => bridge.emit('voice', {
+      selfSessionId: 'yo', selfName: 'HugoGT',
+      peers: [{ sessionId: 'ana', name: 'Ana' }], spaceId: null,
+    }));
+    const selfNode = document.querySelector('[data-session-id="yo"]');
+    const video = selfNode!.querySelector('video');
+
+    act(() => bridge.emit('voice', {
+      selfSessionId: 'yo', selfName: 'HugoGT', peers: [], spaceId: null,
+    }));
+
+    expect(tileIds()).toEqual(['yo']);
+    expect(document.querySelector('[data-session-id="yo"]')).toBe(selfNode);
+    expect(selfNode!.querySelector('video')).toBe(video);
+    expect(video).toBeInTheDocument();
+    expect(attach).toHaveBeenCalledTimes(1);
+    expect(detach).not.toHaveBeenCalled();
   });
 
   it('en cuanto aparece un par audible, el self-tile se monta junto al del par', () => {
@@ -192,8 +238,8 @@ describe('VideoTiles: self-tile gated por companero audible', () => {
     expect(screen.queryAllByTestId('tile-name')).toHaveLength(2);
   });
 
-  it('sin selfSessionId (aun sin sesion) no existe ningun self-tile', () => {
-    renderTiles();
+  it('without selfSessionId, even a local track does not create a pre-session preview', () => {
+    renderTiles({ localVideoTrack: fakeVideoTrack() });
 
     expect(screen.queryAllByTestId('tile-name')).toHaveLength(0);
   });
@@ -204,6 +250,22 @@ describe('VideoTiles: self-tile gated por companero audible', () => {
  * (D8), which left only audio outside the spaces.
  */
 describe('VideoTiles: peer video in the corridor and in spaces (#75)', () => {
+  it.each([false, true])('never attaches a non-audible remote camera (audible company: %s)', (hasCompany) => {
+    const excludedTrack = fakeVideoTrack();
+    const attach = vi.spyOn(excludedTrack, 'attach');
+    const { bridge } = renderTiles({
+      localVideoTrack: fakeVideoTrack(),
+      videoTracks: new Map([['excluded', excludedTrack]]),
+    });
+    act(() => bridge.emit('voice', {
+      selfSessionId: 'yo', selfName: 'HugoGT',
+      peers: hasCompany ? [{ sessionId: 'ana', name: 'Ana' }] : [], spaceId: null,
+    }));
+
+    expect(document.querySelector('[data-session-id="excluded"]')).toBeNull();
+    expect(attach).not.toHaveBeenCalled();
+  });
+
   it('en el piso abierto (room null), el par muestra su video suscrito', () => {
     const peerTrack = fakeVideoTrack();
     const { bridge } = renderTiles({ videoTracks: new Map([['par-1', peerTrack]]) });
@@ -251,6 +313,57 @@ describe('VideoTiles: screen share stage (#20)', () => {
     peers: [{ sessionId: 'ana', name: 'Ana' }],
     spaceId: 'sala-de-juntas-stub',
   };
+
+  it('keeps the solo camera alongside its own share without remounting, then tears each down independently', () => {
+    const camera = fakeVideoTrack();
+    const share = fakeVideoTrack();
+    const attachCamera = vi.spyOn(camera, 'attach');
+    const detachCamera = vi.spyOn(camera, 'detach');
+    const detachShare = vi.spyOn(share, 'detach');
+    const { bridge, rerender } = renderTiles({ localVideoTrack: camera });
+    act(() => bridge.emit('voice', { ...IN_SPACE, peers: [] }));
+    const bar = screen.getByTestId('video-tile-bar');
+    const selfNode = bar.querySelector('[data-session-id="yo"]');
+    const video = selfNode!.querySelector('video');
+
+    rerender({ localScreenShareTrack: share, activeScreenSharer: 'yo' });
+    const stage = screen.getByTestId('screen-share-stage');
+    expect(stage).toHaveAttribute('data-session-id', 'yo');
+    expect(stage).toHaveTextContent('Tu pantalla');
+    expect(stage.querySelector('video')).toBeInTheDocument();
+    expect(bar).toHaveAttribute('data-layout', 'column');
+    expect(bar.querySelector('[data-session-id="yo"]')).toBe(selfNode);
+    expect(selfNode!.querySelector('video')).toBe(video);
+    expect(attachCamera).toHaveBeenCalledTimes(1);
+
+    rerender({ activeScreenSharer: null });
+    expect(screen.queryByTestId('screen-share-stage')).not.toBeInTheDocument();
+    expect(detachShare).toHaveBeenCalledTimes(1);
+    expect(bar).toHaveAttribute('data-layout', 'row');
+    expect(selfNode!.querySelector('video')).toBe(video);
+    expect(detachCamera).not.toHaveBeenCalled();
+
+    rerender({ localScreenShareTrack: share, activeScreenSharer: 'yo', localVideoTrack: null });
+    expect(detachCamera).toHaveBeenCalledTimes(1);
+    expect(video).not.toBeInTheDocument();
+    expect(screen.queryByTestId('video-tile-bar')).not.toBeInTheDocument();
+    expect(screen.getByTestId('screen-share-stage').querySelectorAll('video')).toHaveLength(1);
+  });
+
+  it('a local camera preview does not expose remote screen shares in the corridor', () => {
+    const share = fakeVideoTrack();
+    const attachShare = vi.spyOn(share, 'attach');
+    const { bridge } = renderTiles({
+      localVideoTrack: fakeVideoTrack(),
+      screenShareTracks: new Map([['ana', share]]),
+      activeScreenSharer: 'ana',
+    });
+    act(() => bridge.emit('voice', { ...IN_SPACE, spaceId: null }));
+
+    expect(screen.queryByTestId('screen-share-stage')).not.toBeInTheDocument();
+    expect(attachShare).not.toHaveBeenCalled();
+    expect(screen.getByTestId('video-tile-bar')).toHaveAttribute('data-layout', 'row');
+  });
 
   it('nobody sharing: no stage, the tiles keep their row', () => {
     const { bridge } = renderTiles();

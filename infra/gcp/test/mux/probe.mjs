@@ -63,10 +63,11 @@ function tlsHandshake({ host, port, servername }) {
 
 /** Assertions 1-3: an HTTP request sent over an already-established TLS
  * connection, expecting the JSON body an http-stub.mjs backend answers with. */
-async function probeTlsHttp({ host, port, servername, path }) {
+async function probeTlsHttp({ host, port, servername, path, connection = 'close', upgrade }) {
   const socket = await tlsHandshake({ host, port, servername });
   return new Promise((resolve, reject) => {
     let raw = '';
+    let settled = false;
     const timer = setTimeout(() => {
       socket.destroy();
       reject(new Error(`No response within ${RESPONSE_TIMEOUT_MS}ms`));
@@ -74,12 +75,28 @@ async function probeTlsHttp({ host, port, servername, path }) {
 
     socket.on('data', (chunk) => {
       raw += chunk.toString('utf8');
+      const boundary = raw.indexOf('\r\n\r\n');
+      if (boundary < 0) return;
+      const head = raw.slice(0, boundary);
+      const length = head.match(/\r\ncontent-length:\s*(\d+)/i)?.[1];
+      // Upgrades and keep-alive HTTP responses do not have to close the socket.
+      if (head.startsWith('HTTP/1.1 101 ') ||
+          (length !== undefined && Buffer.byteLength(raw.slice(boundary + 4)) >= Number(length))) {
+        finish();
+      }
     });
-    socket.on('end', () => {
+    socket.on('end', finish);
+    function finish() {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       const [head, ...bodyParts] = raw.split('\r\n\r\n');
       const statusLine = head.split('\r\n')[0] ?? '';
       const status = Number(statusLine.split(' ')[1]) || null;
+      const headers = Object.fromEntries(head.split('\r\n').slice(1).map((line) => {
+        const colon = line.indexOf(':');
+        return [line.slice(0, colon).toLowerCase(), line.slice(colon + 1).trim()];
+      }));
       const body = bodyParts.join('\r\n\r\n').trim();
       let parsedBody = null;
       try {
@@ -87,15 +104,20 @@ async function probeTlsHttp({ host, port, servername, path }) {
       } catch {
         // Non-JSON body (e.g. a 404 from the turn.* site block) is reported raw.
       }
-      resolve({ status, body: parsedBody ?? body });
-    });
+      resolve({ status, body: parsedBody ?? body, stub: headers['x-stub-name'] ?? null });
+      socket.destroy();
+    }
     socket.on('error', (error) => {
       clearTimeout(timer);
       reject(error);
     });
 
     socket.write(
-      `GET ${path} HTTP/1.1\r\nHost: ${servername}\r\nConnection: close\r\n\r\n`,
+      `GET ${path} HTTP/1.1\r\nHost: ${servername}\r\nConnection: ${connection}\r\n` +
+      (upgrade
+        ? `Upgrade: ${upgrade}\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n`
+        : '') +
+      '\r\n',
     );
   });
 }

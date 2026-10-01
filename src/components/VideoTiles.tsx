@@ -73,30 +73,20 @@ export function VideoTiles({
     };
   }, [bridge]);
 
-  /**
-   * La barra entera -- self-tile incluido -- solo existe con compania
-   * audible real: a solas no hay con quien hablar por video, y una camara
-   * propia flotando sin nadie enfrente no informa nada. Distinto del gate de
-   * SALA que el self-tile nunca pasa (D8): esto es presencia de pares, no
-   * pertenencia a una sala.
-   */
   const hasCompany = voice.peers.length > 0;
 
   const entries: TileEntry[] = [];
-  if (hasCompany) {
-    if (voice.selfSessionId !== null) {
-      // El self-tile NUNCA pasa por el gate de sala (D8, decision G): la propia
-      // camara no cuesta downlink alguno.
-      entries.push({ sessionId: voice.selfSessionId, name: voice.selfName, track: localVideoTrack });
-    }
-    for (const peer of voice.peers) {
-      entries.push({
-        sessionId: peer.sessionId,
-        name: peer.name,
-        // No room gate (#75): the subscription already follows proximity.
-        track: videoTracks.get(peer.sessionId) ?? null,
-      });
-    }
+  // Preview an active local camera even alone; keep the camera-off portrait company-only.
+  if (voice.selfSessionId !== null && (hasCompany || localVideoTrack !== null)) {
+    entries.push({ sessionId: voice.selfSessionId, name: voice.selfName, track: localVideoTrack });
+  }
+  for (const peer of voice.peers) {
+    entries.push({
+      sessionId: peer.sessionId,
+      name: peer.name,
+      // No room gate (#75): the subscription already follows proximity.
+      track: videoTracks.get(peer.sessionId) ?? null,
+    });
   }
 
   const stage = selectScreenShareStage({
