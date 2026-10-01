@@ -26,6 +26,7 @@ function fakeAdmin(overrides: Partial<AdminPort> = {}): AdminPort {
       email: 'nueva@example.com',
       role: 'employee' as const,
       emailSent: true,
+      outcome: 'created' as const,
     })),
     revoke: vi.fn(async () => undefined),
     sendPasswordReset: vi.fn(async (id: string) => ({
@@ -312,6 +313,7 @@ describe('DashboardScreen: account created, the password is emailed (#94)', () =
         email: 'nueva@example.com',
         role: 'employee' as const,
         emailSent: false,
+        outcome: 'created' as const,
       })),
       sendPasswordReset: vi.fn(async () => {
         throw new AdminError('identity-admin-not-configured');
@@ -502,5 +504,98 @@ describe('DashboardScreen: los paneles que cuelgan debajo', () => {
     // pintarian siete errores a quien no tiene nada que hacer aqui.
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.queryByText('Panel de escritorios')).not.toBeInTheDocument();
+  });
+});
+
+describe('DashboardScreen: an email that already has an account (#125)', () => {
+  it('a guest turned into staff says so instead of "cuenta creada"', async () => {
+    const user = userEvent.setup();
+    const admin = fakeAdmin({
+      createUser: vi.fn(async () => ({
+        id: 'inv-1',
+        email: 'invitada@example.com',
+        role: 'employee' as const,
+        emailSent: true,
+        outcome: 'converted' as const,
+      })),
+    });
+    render(<DashboardScreen admin={admin} />);
+    await screen.findByRole('region', { name: /nuevo usuario/i });
+
+    await darDeAlta(user, 'invitada@example.com');
+
+    const panel = within(
+      await screen.findByRole('region', { name: /invitada@example.com ahora es empleado/i }),
+    );
+    expect(panel.getByText(/enviamos un correo a invitada@example.com/i)).toBeInTheDocument();
+    expect(panel.getByText(/el acceso no caduca/i)).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: /cuenta creada/i })).not.toBeInTheDocument();
+  });
+
+  it('creating someone who already has that role is a notice, not an error', async () => {
+    const user = userEvent.setup();
+    const admin = fakeAdmin({
+      createUser: vi.fn(async () => ({
+        id: 'user-1',
+        email: 'nadia@example.com',
+        role: 'employee' as const,
+        outcome: 'unchanged' as const,
+      })),
+    });
+    render(<DashboardScreen admin={admin} />);
+    await screen.findByRole('region', { name: /nuevo usuario/i });
+
+    await darDeAlta(user, 'nadia@example.com');
+
+    const card = within(tarjeta(/nuevo usuario/i));
+    expect(await card.findByRole('status')).toHaveTextContent('nadia@example.com ya es Empleado.');
+    expect(card.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: /cuenta creada/i })).not.toBeInTheDocument();
+  });
+
+  it('inviting someone who is already staff is a notice, not an error', async () => {
+    const user = userEvent.setup();
+    const admin = fakeAdmin({
+      createInvitation: vi.fn(async () => ({
+        id: 'user-1',
+        email: 'nadia@example.com',
+        role: 'admin' as const,
+        outcome: 'unchanged' as const,
+      })),
+    });
+    render(<DashboardScreen admin={admin} />);
+    await screen.findByRole('region', { name: /^invitaciones$/i });
+
+    await invitar(user, 'nadia@example.com', '7');
+
+    const card = within(tarjeta(/^invitaciones$/i));
+    expect(await card.findByRole('status')).toHaveTextContent(
+      'nadia@example.com ya es Administrador: no hace falta invitarlo.',
+    );
+    expect(card.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: /cuenta creada/i })).not.toBeInTheDocument();
+  });
+
+  it('the notice goes away with the next submission', async () => {
+    const user = userEvent.setup();
+    const createUser = vi
+      .fn<AdminPort['createUser']>()
+      .mockResolvedValueOnce({ id: 'u', email: 'nadia@example.com', role: 'employee', outcome: 'unchanged' })
+      .mockResolvedValueOnce({
+        id: 'n',
+        email: 'nueva@example.com',
+        role: 'employee',
+        emailSent: true,
+        outcome: 'created',
+      });
+    render(<DashboardScreen admin={fakeAdmin({ createUser })} />);
+    await screen.findByRole('region', { name: /nuevo usuario/i });
+
+    await darDeAlta(user, 'nadia@example.com');
+    await within(tarjeta(/nuevo usuario/i)).findByRole('status');
+    await darDeAlta(user, 'nueva@example.com');
+
+    await screen.findByRole('region', { name: /cuenta creada/i });
+    expect(within(tarjeta(/nuevo usuario/i)).queryByRole('status')).not.toBeInTheDocument();
   });
 });

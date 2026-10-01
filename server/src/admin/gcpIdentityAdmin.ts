@@ -78,7 +78,11 @@
  */
 
 import { importPKCS8, SignJWT } from 'jose';
-import { IdentityAdminError, type IdentityAdmin } from './identityAdminPort.ts';
+import {
+  IdentityAdminError,
+  type IdentityAdmin,
+  type IdentityAdminErrorCode,
+} from './identityAdminPort.ts';
 
 /** Solo los campos que se usan. La clave de GCP trae bastantes mas. */
 export interface ServiceAccountKey {
@@ -320,15 +324,17 @@ export interface GcpIdentityAdminOptions {
  * Traduce el cuerpo de error de Identity Toolkit al codigo del puerto. Google
  * responde `{ error: { code, message, status } }` y el `message` es el codigo
  * simbolico, a veces con detalles pegados detras (`WEAK_PASSWORD : Password
- * should be...`). Solo se reconoce `EMAIL_EXISTS`; todo lo demas es
+ * should be...`). Solo se reconocen `EMAIL_EXISTS` y `USER_NOT_FOUND` (#125,
+ * a re-enable of an account deleted by hand); todo lo demas es
  * `unavailable` a proposito, porque inventarle un significado a un error que no
  * se conoce es como acaba un 500 disfrazado de 409.
  */
-function codeForIdentityError(body: unknown): 'email-exists' | 'unavailable' {
+function codeForIdentityError(body: unknown): IdentityAdminErrorCode {
   const message = (body as { error?: { message?: unknown } } | null)?.error?.message;
-  return typeof message === 'string' && message.startsWith('EMAIL_EXISTS')
-    ? 'email-exists'
-    : 'unavailable';
+  if (typeof message !== 'string') return 'unavailable';
+  if (message.startsWith('EMAIL_EXISTS')) return 'email-exists';
+  if (message.startsWith('USER_NOT_FOUND')) return 'user-not-found';
+  return 'unavailable';
 }
 
 export function createGcpIdentityAdmin({
@@ -414,6 +420,10 @@ export function createGcpIdentityAdmin({
 
     async disableAccount(uid) {
       await call('accounts:update', { localId: uid, disableUser: true });
+    },
+
+    async enableAccount(uid) {
+      await call('accounts:update', { localId: uid, disableUser: false });
     },
 
     async sendPasswordReset(email) {

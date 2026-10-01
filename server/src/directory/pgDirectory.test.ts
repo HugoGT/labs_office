@@ -990,3 +990,83 @@ describe('pgDirectory: avatar (art migration, step 3)', () => {
     expect(await directoryOver(pool).setAvatar(USER_ROW.id, 'character-p02-beige-blazer')).toBeNull();
   });
 });
+
+describe('pgDirectory: convertToStaff (#125)', () => {
+  const GUEST_ROW = {
+    ...USER_ROW,
+    role: 'guest',
+    status: 'revoked',
+    expires_at: new Date('2026-01-02T00:00:00.000Z'),
+    invited_by: SUPERADMIN_ROW.id,
+  };
+  const CONVERTED_ROW = { ...GUEST_ROW, role: 'employee', status: 'active', expires_at: null, invited_by: null };
+
+  function poolAnswering(update: Record<string, unknown>[]) {
+    return fakePool((text) =>
+      squash(text).startsWith('update users') ? { rows: update, rowCount: update.length } : NO_ROW,
+    );
+  }
+
+  it('converts and audits in the same transaction', async () => {
+    const pool = poolAnswering([CONVERTED_ROW]);
+
+    const converted = await directoryOver(pool).convertToStaff(USER_ROW.id, {
+      role: 'employee',
+      uid: 'uid-ana',
+      actorId: SUPERADMIN_ROW.id,
+    });
+
+    const sqls = pool.queries.map((query) => squash(query.text));
+    expect(sqls[0]).toBe('begin');
+    expect(sqls[1]).toContain('update users');
+    expect(sqls[2]).toContain('insert into audit_log');
+    expect(pool.queries[2].values).toEqual([SUPERADMIN_ROW.id, 'convert-user', USER_ROW.id]);
+    expect(sqls[3]).toBe('commit');
+    expect(converted).toMatchObject({ id: USER_ROW.id, role: 'employee', expiresAt: null, invitedBy: null });
+  });
+
+  it('writes the whole staff shape in the statement and refuses the superadmin in its WHERE', async () => {
+    const pool = poolAnswering([CONVERTED_ROW]);
+
+    await directoryOver(pool).convertToStaff(USER_ROW.id, {
+      role: 'admin',
+      uid: 'uid-nueva',
+      actorId: SUPERADMIN_ROW.id,
+    });
+
+    const update = squash(pool.queries[1].text);
+    expect(update).toContain("status = 'active'");
+    expect(update).toContain('expires_at = null');
+    expect(update).toContain('invited_by = null');
+    expect(update).toContain("role <> 'superadmin'");
+    expect(pool.queries[1].values).toEqual([USER_ROW.id, 'admin', 'uid-nueva']);
+  });
+
+  it('an unknown id or the superadmin changes nothing, audits nothing and returns null', async () => {
+    const pool = poolAnswering([]);
+
+    const converted = await directoryOver(pool).convertToStaff(SUPERADMIN_ROW.id, {
+      role: 'employee',
+      uid: 'uid-hugo',
+      actorId: SUPERADMIN_ROW.id,
+    });
+
+    const sqls = pool.queries.map((query) => squash(query.text));
+    expect(converted).toBeNull();
+    expect(sqls).not.toContain(expect.stringContaining('audit_log'));
+    expect(sqls.at(-1)).toBe('rollback');
+  });
+
+  it('validates the role before asking the pool for a connection', async () => {
+    const pool = poolAnswering([CONVERTED_ROW]);
+
+    await expect(
+      directoryOver(pool).convertToStaff(USER_ROW.id, {
+        role: 'guest' as never,
+        uid: 'uid-ana',
+        actorId: SUPERADMIN_ROW.id,
+      }),
+    ).rejects.toThrow();
+    expect(pool.queries).toEqual([]);
+  });
+});

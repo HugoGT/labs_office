@@ -23,6 +23,13 @@ export interface IdentityAdmin {
   /** Desactiva la cuenta para que deje de poder renovar su token. */
   disableAccount(uid: string): Promise<void>;
   /**
+   * Re-enables an account (#125): turning a revoked or expired guest into
+   * staff reuses its account instead of creating a second one. Rejects with
+   * `user-not-found` when the account was deleted by hand in GCP, so the
+   * route can create it again.
+   */
+  enableAccount(uid: string): Promise<void>;
+  /**
    * Asks Identity Platform to email the account a password-reset link (#94).
    * This is how a new account gets its password: the one used to create it is
    * random and thrown away, so nobody but the owner ever knows the real one.
@@ -32,7 +39,7 @@ export interface IdentityAdmin {
 }
 
 /**
- * Dos codigos y no el error crudo de Google. La ruta tiene que distinguir "ese
+ * Codigos y no el error crudo de Google. La ruta tiene que distinguir "ese
  * correo ya tiene cuenta" (409, culpa del administrador, se arregla escribiendo
  * otro) de "Identity Platform no responde" (503, no es culpa de nadie y se
  * reintenta), y hacerlo por el TEXTO del mensaje de Google es una atadura a una
@@ -44,6 +51,8 @@ export interface IdentityAdmin {
  * para el operador, que los ve en el log, pero la misma respuesta para quien
  * llama, que no puede hacer nada distinto con ninguno de ellos.
  */
+export type IdentityAdminErrorCode = 'email-exists' | 'user-not-found' | 'unavailable';
+
 export class IdentityAdminError extends Error {
   // El campo se declara y se asigna a mano en vez de usar una propiedad de
   // parametro (`constructor(readonly code: ...)`): el servidor corre los `.ts`
@@ -51,9 +60,9 @@ export class IdentityAdminError extends Error {
   // esa forma le hace reventar al cargar el modulo
   // (ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX). Es un fallo de arranque, no de tipos:
   // `tsc` la acepta sin quejarse y el contenedor se queda reiniciandose.
-  readonly code: 'email-exists' | 'unavailable';
+  readonly code: IdentityAdminErrorCode;
 
-  constructor(code: 'email-exists' | 'unavailable') {
+  constructor(code: IdentityAdminErrorCode) {
     super(`Fallo de Identity Platform (${code})`);
     this.code = code;
     // Sin esto, `error.name` seria 'Error' en cualquier traza y en cualquier

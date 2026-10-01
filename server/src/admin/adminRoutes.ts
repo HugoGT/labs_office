@@ -116,6 +116,7 @@ const IDENTITY_UNAVAILABLE: AdminResult = {
   body: { error: 'identity-admin-not-configured' },
 };
 const INTERNAL: AdminResult = { status: 500, body: { error: 'internal' } };
+const CONFLICT: AdminResult = { status: 409, body: { error: 'conflict' } };
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -414,10 +415,7 @@ export async function handleCreateInvitation(
   //
   // Una invitacion REVOCADA con ese correo, o un correo de alguien de casa
   // (`invitedBy` nulo, de `createUser`), caen fuera de esta rama a proposito:
-  // revivir una invitacion revocada o "invitar" a un empleado ya de la casa
-  // es otra decision, no tomada aqui, y las dos siguen su camino de siempre
-  // -- que termina en el mismo 409 de hoy en cuanto Identity Platform dice
-  // que esa cuenta ya existe.
+  // see the two guards right after it (#125).
   const existing = await deps.directory.findByEmail(email);
   if (existing !== null && existing.invitedBy !== null && existing.status === 'active') {
     const renewed = await deps.directory.renewInvitation(existing.id, days as number);
@@ -440,6 +438,18 @@ export async function handleCreateInvitation(
     };
   }
 
+  // #125: inviting someone who is already staff is not an error and never
+  // downgrades them to a guest; the panel only says what they already are.
+  if (existing !== null && existing.status === 'active' && existing.role !== 'guest') {
+    return unchangedAccount(existing);
+  }
+
+  // Any other row (a revoked guest or revoked staff) answers 409 HERE, before
+  // asking Identity Platform for an account: creating first is how #125 piled
+  // up orphan accounts, since the insert then hit the unique email. Giving
+  // such a row access back is "Crear usuario", which converts it.
+  if (existing !== null) return CONFLICT;
+
   let uid: string;
   try {
     // The password is generated inline and dropped: it only exists for the
@@ -449,7 +459,7 @@ export async function handleCreateInvitation(
     uid = await identityAdmin.createAccount(email, generatePassword());
   } catch (error) {
     if (error instanceof IdentityAdminError && error.code === 'email-exists') {
-      return { status: 409, body: { error: 'conflict' } };
+      return CONFLICT;
     }
     // Todo lo demas -- Google caido, permisos IAM, cuota, red -- es lo mismo
     // para quien llama: no se pudo, reintentalo. El detalle va al log.
@@ -586,13 +596,20 @@ export async function handleCreateUser(
   const identityAdmin = deps.identityAdmin;
   if (!identityAdmin) return IDENTITY_UNAVAILABLE;
 
+  // #125: an email the directory already has is never created again (the
+  // insert would hit the unique email and leave an orphan account behind).
+  const existing = await deps.directory.findByEmail(email);
+  if (existing !== null) {
+    return convertExistingUser(existing, role, authorized.user, identityAdmin, deps);
+  }
+
   let uid: string;
   try {
     // Same throwaway password as the invitation flow: see the comment there.
     uid = await identityAdmin.createAccount(email, generatePassword());
   } catch (error) {
     if (error instanceof IdentityAdminError && error.code === 'email-exists') {
-      return { status: 409, body: { error: 'conflict' } };
+      return CONFLICT;
     }
     logger(deps)(`no se pudo crear la cuenta de ${email} en Identity Platform`);
     return IDENTITY_UNAVAILABLE;
@@ -634,6 +651,114 @@ export async function handleCreateUser(
       email: created.email,
       role: created.role,
       emailSent,
+      outcome: 'created',
+    },
+  };
+}
+
+/** #125: the email already has exactly what was asked for; nothing changes. */
+function unchangedAccount(user: DirectoryUser): AdminResult {
+  return {
+    status: 200,
+    body: { id: user.id, email: user.email, role: user.role, outcome: 'unchanged' },
+  };
+}
+
+/**
+ * "Crear usuario" on an email the directory already has (#125): a guest
+ * (active, expired or revoked) or revoked staff becomes staff in the SAME row,
+ * and active staff with the same role is a no-op.
+ *
+ * Order, each step failing before the next leaves something half done:
+ *
+ *   1. same role, active staff -> 200 unchanged, nothing touched;
+ *   2. `canRemove`: changing someone's access is taking the old one away, so
+ *      nobody changes the superadmin, themself, or someone they do not
+ *      outrank (403);
+ *   3. re-enable the row's Identity Platform account. Deleted by hand in GCP
+ *      (or a row without uid): create it again, the only case where an
+ *      account is created, and compensated below like the orphan of
+ *      `handleCreateUser`;
+ *   4. convert the row (`convertToStaff`, with its audit entry);
+ *   5. send the password-reset email.
+ *
+ * A failed save after re-enabling (not creating) does NOT disable the
+ * account: it is the row's own, and disabling it would lock out an active
+ * guest. The row still decides access, so a revoked or expired row stays out.
+ */
+async function convertExistingUser(
+  existing: DirectoryUser,
+  role: AssignableRole,
+  actor: DirectoryUser,
+  identityAdmin: IdentityAdmin,
+  deps: AdminDeps,
+): Promise<AdminResult> {
+  if (existing.status === 'active' && existing.invitedBy === null && existing.role === role) {
+    return unchangedAccount(existing);
+  }
+
+  if (!canRemove(actor, existing)) return FORBIDDEN;
+
+  let uid = existing.uid;
+  if (uid !== null) {
+    try {
+      await identityAdmin.enableAccount(uid);
+    } catch (error) {
+      if (!(error instanceof IdentityAdminError && error.code === 'user-not-found')) {
+        logger(deps)(`could not re-enable uid=${uid} (${existing.email}) in Identity Platform`);
+        return IDENTITY_UNAVAILABLE;
+      }
+      logger(deps)(`uid=${uid} (${existing.email}) no longer exists in Identity Platform; creating it again`);
+      uid = null;
+    }
+  }
+
+  let createdUid: string | null = null;
+  if (uid === null) {
+    try {
+      createdUid = await identityAdmin.createAccount(existing.email, generatePassword());
+    } catch (error) {
+      if (error instanceof IdentityAdminError && error.code === 'email-exists') return CONFLICT;
+      logger(deps)(`no se pudo crear la cuenta de ${existing.email} en Identity Platform`);
+      return IDENTITY_UNAVAILABLE;
+    }
+    uid = createdUid;
+  }
+
+  let converted: DirectoryUser | null;
+  try {
+    converted = await deps.directory.convertToStaff(existing.id, { role, uid, actorId: actor.id });
+  } catch {
+    converted = null;
+  }
+
+  if (converted === null) {
+    logger(deps)(`could not convert ${existing.email} (id=${existing.id}) to ${role}`);
+    if (createdUid !== null) {
+      // Same orphan and same compensation as `handleCreateUser`.
+      try {
+        await identityAdmin.disableAccount(createdUid);
+        logger(deps)(`cuenta huerfana uid=${createdUid} desactivada por compensacion`);
+      } catch {
+        logger(deps)(
+          `FALLO LA COMPENSACION: la cuenta uid=${createdUid} (${existing.email}) sigue activa en ` +
+            `Identity Platform y no tiene fila en el directorio; hay que desactivarla a mano en GCP`,
+        );
+      }
+    }
+    return INTERNAL;
+  }
+
+  const emailSent = await sendResetEmail(identityAdmin, { email: converted.email, uid }, deps);
+
+  return {
+    status: 200,
+    body: {
+      id: converted.id,
+      email: converted.email,
+      role: converted.role,
+      emailSent,
+      outcome: 'converted',
     },
   };
 }

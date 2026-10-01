@@ -13,6 +13,7 @@ import {
   type AssignableRole,
   type CreatedInvitation,
   type CreatedUser,
+  type UnchangedAccount,
   type Invitation,
   type PasswordResetResult,
 } from './adminPort';
@@ -129,14 +130,14 @@ export function createAdminClient(
       return invitations;
     },
 
-    createInvitation(email: string, days: number): Promise<CreatedInvitation> {
-      return request<CreatedInvitation>('/invitations', jsonBody({ email, days }));
+    createInvitation(email: string, days: number): Promise<CreatedInvitation | UnchangedAccount> {
+      return request<CreatedInvitation | UnchangedAccount>('/invitations', jsonBody({ email, days }));
     },
 
-    createUser(email: string, role: AssignableRole): Promise<CreatedUser> {
+    createUser(email: string, role: AssignableRole): Promise<CreatedUser | UnchangedAccount> {
       // Ruta propia y no `/invitations`: lo que se crea aqui no es una
       // invitacion, no lleva caducidad y no vuelve en esa lista.
-      return request<CreatedUser>('/users', jsonBody({ email, role }));
+      return request<CreatedUser | UnchangedAccount>('/users', jsonBody({ email, role }));
     },
 
     async revoke(id: string): Promise<void> {

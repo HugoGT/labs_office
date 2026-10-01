@@ -7,6 +7,7 @@ import {
   type AssignableRole,
   type PasswordResetResult,
   type Role,
+  type UnchangedAccount,
 } from './adminPort';
 import styles from './DashboardScreen.module.css';
 
@@ -43,12 +44,33 @@ export function formatUtcDate(iso: string | null): string {
   return `${day}/${month}/${date.getUTCFullYear()}`;
 }
 
+/**
+ * `role="status"` and not `alert` (#125): nothing failed, the email simply
+ * already has that access, so it is announced without interrupting.
+ */
+function FormNotice({ notice }: { notice: string | null }) {
+  if (notice === null) return null;
+  return (
+    <div className={styles.info} role="status">
+      {notice}
+    </div>
+  );
+}
+
+/** What either form says when the email already has that access (#125). */
+export function describeUnchangedAccount(account: UnchangedAccount, invitation: boolean): string {
+  const already = `${account.email} ya es ${ROLE_LABELS[account.role]}`;
+  return invitation ? `${already}: no hace falta invitarlo.` : `${already}.`;
+}
+
 export interface InviteFormProps {
   /** Devuelve `true` si la invitacion se creo; solo entonces se limpia. */
   onSubmit: (email: string, days: number) => Promise<boolean>;
   pending: boolean;
   /** Ya traducido a texto (`describeAdminError`), nunca el error crudo. */
   error: string | null;
+  /** Informative, not an error: the email already has that access (#125). */
+  notice?: string | null;
 }
 
 /**
@@ -56,7 +78,7 @@ export interface InviteFormProps {
  * avisa hacia arriba. Es un `<form>` de verdad, como `LoginScreen`, para que
  * Enter envie y el navegador valide los campos obligatorios.
  */
-export function InviteForm({ onSubmit, pending, error }: InviteFormProps) {
+export function InviteForm({ onSubmit, pending, error, notice = null }: InviteFormProps) {
   const [email, setEmail] = useState('');
   const [days, setDays] = useState(DEFAULT_DAYS);
 
@@ -120,6 +142,7 @@ export function InviteForm({ onSubmit, pending, error }: InviteFormProps) {
           {error}
         </div>
       )}
+      <FormNotice notice={notice} />
     </form>
   );
 }
@@ -130,6 +153,8 @@ export interface UserFormProps {
   pending: boolean;
   /** Ya traducido a texto (`describeAdminError`), nunca el error crudo. */
   error: string | null;
+  /** Informative, not an error: the email already has that access (#125). */
+  notice?: string | null;
   /**
    * Si se ofrece el rol de administrador. Es un booleano plano y no la sesion
    * entera: este componente no tiene por que saber que existe un rol de quien
@@ -150,7 +175,7 @@ export interface UserFormProps {
  * a un admin que intente crear otro admin. Esto solo evita ofrecer una opcion
  * que a esa persona le va a fallar siempre.
  */
-export function UserForm({ onSubmit, pending, error, canCreateAdmins }: UserFormProps) {
+export function UserForm({ onSubmit, pending, error, notice = null, canCreateAdmins }: UserFormProps) {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<AssignableRole>('employee');
 
@@ -210,6 +235,7 @@ export function UserForm({ onSubmit, pending, error, canCreateAdmins }: UserForm
           {error}
         </div>
       )}
+      <FormNotice notice={notice} />
     </form>
   );
 }
@@ -223,7 +249,7 @@ export interface AccountCreatedProps {
    * cuenta y solo se diferencian en si hay fecha de vencimiento, asi que pedir
    * lo minimo que hace falta para pintarla evita un segundo panel identico.
    */
-  created: { email: string; expiresAt: string | null; emailSent: boolean };
+  created: { email: string; expiresAt: string | null; emailSent: boolean; convertedTo?: Role };
   onResend: () => void;
   /** `true` while a re-send is in flight. */
   resending: boolean;
@@ -242,7 +268,10 @@ export function AccountCreated({ created, onResend, resending, error, onDismiss 
   return (
     <section className={styles.secret} aria-labelledby="cuenta-creada" aria-live="polite">
       <h2 className={styles.secretTitle} id="cuenta-creada">
-        Cuenta creada para {created.email}
+        {/* #125: an existing row was converted, so no account was created. */}
+        {created.convertedTo === undefined
+          ? `Cuenta creada para ${created.email}`
+          : `${created.email} ahora es ${ROLE_LABELS[created.convertedTo]}`}
       </h2>
       {created.emailSent ? (
         <p className={styles.secretWarning}>
@@ -328,6 +357,8 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
   // formulario de invitacion, diciendo que fallo algo que ni se intento.
   const [userError, setUserError] = useState<string | null>(null);
   const [creatingUser, setCreatingUser] = useState(false);
+  const [inviteNotice, setInviteNotice] = useState<string | null>(null);
+  const [userNotice, setUserNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -373,9 +404,14 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
       return false;
     }
 
+    setInviteNotice(null);
     setCreating(true);
     try {
       const invitation = await admin.createInvitation(email, days);
+      if ('outcome' in invitation) {
+        setInviteNotice(describeUnchangedAccount(invitation, true));
+        return true;
+      }
       setCreatedError(null);
       setCreated(invitation);
       return true;
@@ -389,13 +425,24 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
 
   async function handleCreateUser(email: string, role: AssignableRole): Promise<boolean> {
     setUserError(null);
+    setUserNotice(null);
     setCreatingUser(true);
     try {
       const user = await admin.createUser(email, role);
+      if (user.outcome === 'unchanged') {
+        setUserNotice(describeUnchangedAccount(user, false));
+        return true;
+      }
       // `expiresAt: null` no es un hueco por rellenar: es el dato. Quien entra
       // por aqui es de casa y su acceso no vence.
       setCreatedError(null);
-      setCreated({ id: user.id, email: user.email, emailSent: user.emailSent, expiresAt: null });
+      setCreated({
+        id: user.id,
+        email: user.email,
+        emailSent: user.emailSent,
+        expiresAt: null,
+        convertedTo: user.outcome === 'converted' ? user.role : undefined,
+      });
       return true;
     } catch (error) {
       setUserError(describeAdminError(error));
@@ -512,6 +559,7 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
             onSubmit={handleCreateUser}
             pending={creatingUser}
             error={userError}
+            notice={userNotice}
             // El rol de quien mira lo dice el SERVIDOR (`session()`), no el ID
             // token del navegador, que es manipulable.
             canCreateAdmins={session.role === 'superadmin'}
@@ -525,7 +573,12 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
           <p className={styles.cardSubtitle}>
             Acceso temporal para alguien de fuera: caduca solo y se puede revocar.
           </p>
-          <InviteForm onSubmit={handleCreate} pending={creating} error={actionError} />
+          <InviteForm
+            onSubmit={handleCreate}
+            pending={creating}
+            error={actionError}
+            notice={inviteNotice}
+          />
         </section>
 
         {/* Los demas paneles de administracion, ya construidos por la raiz de

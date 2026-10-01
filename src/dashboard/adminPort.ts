@@ -69,6 +69,22 @@ export interface CreatedUser {
   email: string;
   role: AssignableRole;
   emailSent: boolean;
+  /**
+   * `converted` (#125): the email already had a row (a guest, or revoked
+   * staff) and that same row became staff, reusing its account.
+   */
+  outcome: 'created' | 'converted';
+}
+
+/**
+ * Either form on an email that already has exactly that access (#125): the
+ * server changed nothing and the panel only says what the person already is.
+ */
+export interface UnchangedAccount {
+  id: string;
+  email: string;
+  role: Role;
+  outcome: 'unchanged';
 }
 
 /** Result of re-sending the password email (#94). */
@@ -84,13 +100,13 @@ export interface AdminPort {
   session(): Promise<AdminSession>;
   listInvitations(): Promise<Invitation[]>;
   /** `days` entre 1 y 90 (#24); el servidor vuelve a validarlo. */
-  createInvitation(email: string, days: number): Promise<CreatedInvitation>;
+  createInvitation(email: string, days: number): Promise<CreatedInvitation | UnchangedAccount>;
   /**
    * Alta de alguien de casa: sin caducidad. Solo un superadmin puede pedir
    * `'admin'`; el servidor responde 403 a cualquier otro, y esconder la opcion
    * en la pantalla no es la guarda.
    */
-  createUser(email: string, role: AssignableRole): Promise<CreatedUser>;
+  createUser(email: string, role: AssignableRole): Promise<CreatedUser | UnchangedAccount>;
   revoke(id: string): Promise<void>;
   /**
    * Re-sends the set-your-password email to the account with this directory

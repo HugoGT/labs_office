@@ -961,3 +961,94 @@ describe('memoryDirectory: avatar (art migration, step 3)', () => {
     expect(await createMemoryDirectory().setAvatar(ID, 'character-p02-beige-blazer')).toBeNull();
   });
 });
+
+describe('memoryDirectory: convertToStaff (#125)', () => {
+  const SUPERADMIN = provisioned({
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000009',
+    uid: 'uid-hugo',
+    email: 'hugo@example.com',
+    role: 'superadmin',
+  });
+
+  function withGuest(overrides: Partial<DirectoryUser> = {}) {
+    const guest = provisioned({
+      role: 'guest',
+      status: 'revoked',
+      expiresAt: new Date('2026-01-02T00:00:00.000Z'),
+      invitedBy: SUPERADMIN.id,
+      ...overrides,
+    });
+    const directory = createMemoryDirectory({ seed: [SUPERADMIN, guest] });
+    return { directory, guest };
+  }
+
+  it('turns the same row into staff: role, no expiry, no inviter, active, same id', async () => {
+    const { directory, guest } = withGuest();
+
+    const converted = await directory.convertToStaff(guest.id, {
+      role: 'employee',
+      uid: guest.uid!,
+      actorId: SUPERADMIN.id,
+    });
+
+    expect(converted).toMatchObject({
+      id: guest.id,
+      email: guest.email,
+      role: 'employee',
+      status: 'active',
+      expiresAt: null,
+      invitedBy: null,
+      createdAt: guest.createdAt,
+    });
+    expect(await directory.findById(guest.id)).toEqual(converted);
+  });
+
+  it('stores the uid it is given, for an account created again in Identity Platform', async () => {
+    const { directory, guest } = withGuest();
+
+    const converted = await directory.convertToStaff(guest.id, {
+      role: 'admin',
+      uid: 'uid-nueva',
+      actorId: SUPERADMIN.id,
+    });
+
+    expect(converted?.uid).toBe('uid-nueva');
+    expect(await directory.findByUid('uid-nueva')).toMatchObject({ id: guest.id, role: 'admin' });
+  });
+
+  it('writes its own audit action', async () => {
+    const { directory, guest } = withGuest();
+
+    await directory.convertToStaff(guest.id, { role: 'employee', uid: guest.uid!, actorId: SUPERADMIN.id });
+
+    expect(directory.auditLog()).toEqual([
+      { actorId: SUPERADMIN.id, action: 'convert-user', subjectId: guest.id },
+    ]);
+  });
+
+  it('never touches the superadmin and returns null for an unknown id', async () => {
+    const { directory } = withGuest();
+
+    expect(
+      await directory.convertToStaff(SUPERADMIN.id, { role: 'employee', uid: 'uid-hugo', actorId: SUPERADMIN.id }),
+    ).toBeNull();
+    expect(
+      await directory.convertToStaff('no-existe', { role: 'employee', uid: 'x', actorId: SUPERADMIN.id }),
+    ).toBeNull();
+    expect((await directory.findById(SUPERADMIN.id))?.role).toBe('superadmin');
+    expect(directory.auditLog()).toEqual([]);
+  });
+
+  it('refuses a role the panel does not hand out', async () => {
+    const { directory, guest } = withGuest();
+
+    await expect(
+      directory.convertToStaff(guest.id, {
+        role: 'superadmin' as never,
+        uid: guest.uid!,
+        actorId: SUPERADMIN.id,
+      }),
+    ).rejects.toThrow();
+    expect((await directory.findById(guest.id))?.role).toBe('guest');
+  });
+});

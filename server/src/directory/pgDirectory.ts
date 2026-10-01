@@ -64,7 +64,7 @@ import type {
 } from './directoryPort.ts';
 import { canonicalizeDisplayName, DisplayNameTakenError } from './displayNameRules.ts';
 import { assertValidInvitationDays, normalizeEmail, normalizeInvitationInput } from './invitationRules.ts';
-import { normalizeUserInput } from './userRules.ts';
+import { assertAssignableRole, normalizeUserInput } from './userRules.ts';
 import { ART_PACK_DEFAULTS, normalizeStoredCharacterId } from '../decor/artCatalogRules.ts';
 
 /**
@@ -406,6 +406,36 @@ export function createPgDirectory(
         );
 
         return created;
+      });
+    },
+
+    async convertToStaff(id, { role, uid, actorId }) {
+      // Validate before asking for a connection, like `createUser`.
+      assertAssignableRole(role);
+
+      return inTransaction(async (client) => {
+        // The staff shape is written in the statement, as in `createUser`;
+        // only the role and the uid are values. The superadmin guard lives in
+        // the WHERE, like `revokeUser`: no window between checking and
+        // updating.
+        const updated = await client.query(
+          `
+            UPDATE users
+            SET role = $2, uid = $3, status = 'active', expires_at = NULL, invited_by = NULL
+            WHERE id = $1 AND role <> 'superadmin'
+            RETURNING ${USER_COLUMNS}
+          `,
+          [id, role, uid],
+        );
+        const row = updated.rows[0];
+        if (!row) return null;
+
+        await client.query(
+          'INSERT INTO audit_log (actor_id, action, subject_id) VALUES ($1, $2, $3)',
+          [actorId, 'convert-user', id],
+        );
+
+        return toDirectoryUser(row);
       });
     },
 

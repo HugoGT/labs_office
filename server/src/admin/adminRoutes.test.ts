@@ -98,6 +98,8 @@ interface Harness {
   logged: string[];
   created: { email: string; password: string }[];
   disabled: string[];
+  /** Uids re-enabled when an existing account is converted (#125), in order. */
+  enabled: string[];
   /** Emails a password-reset link was requested for (#94), in order. */
   resets: string[];
 }
@@ -109,6 +111,7 @@ function harness(
     auth?: IdTokenVerifier;
     createAccount?: (email: string, password: string) => Promise<string>;
     disableAccount?: (uid: string) => Promise<void>;
+    enableAccount?: (uid: string) => Promise<void>;
     sendPasswordReset?: (email: string) => Promise<void>;
   } = {},
 ): Harness {
@@ -119,6 +122,7 @@ function harness(
   const logged: string[] = [];
   const created: { email: string; password: string }[] = [];
   const disabled: string[] = [];
+  const enabled: string[] = [];
   const resets: string[] = [];
 
   const identityAdmin: IdentityAdmin = {
@@ -130,6 +134,10 @@ function harness(
     async disableAccount(uid) {
       disabled.push(uid);
       if (options.disableAccount) await options.disableAccount(uid);
+    },
+    async enableAccount(uid) {
+      enabled.push(uid);
+      if (options.enableAccount) await options.enableAccount(uid);
     },
     async sendPasswordReset(email) {
       resets.push(email);
@@ -143,6 +151,7 @@ function harness(
     logged,
     created,
     disabled,
+    enabled,
     resets,
     deps: {
       directory,
@@ -930,54 +939,6 @@ describe('POST /admin/invitations: reenviar es renovar', () => {
     expect(h.resets).toEqual(['externo@example.com', 'externo@example.com']);
   });
 
-  it('una invitacion revocada con ese correo sigue respondiendo 409: revivirla no esta en este cambio', async () => {
-    const revocada = user({
-      id: 'id-revocada-otra',
-      uid: 'uid-revocada-otra',
-      email: 'revocada@example.com',
-      role: 'guest',
-      status: 'revoked',
-      invitedBy: ADMIN.id,
-    });
-    const h = harness({
-      seed: [ADMIN, revocada],
-      createAccount: async () => {
-        throw new IdentityAdminError('email-exists');
-      },
-    });
-
-    const result = await handleCreateInvitation(
-      bearer(TOKEN_ADMIN),
-      { email: 'revocada@example.com', days: 7 },
-      h.deps,
-    );
-
-    expect(result).toEqual({ status: 409, body: { error: 'conflict' } });
-    // A diferencia del reenvio activo, aqui SI se intento crear la cuenta: es
-    // el mismo camino de siempre, sin el atajo del reenvio.
-    expect(h.created).toHaveLength(1);
-  });
-
-  it('el correo de alguien de casa (alta permanente) sigue respondiendo 409', async () => {
-    const h = harness({
-      // El seed por defecto ya trae a EMPLEADO (invitedBy null, alta con
-      // `createUser`); aqui solo hace falta que la cuenta ya exista en
-      // Identity Platform, como en la realidad.
-      createAccount: async () => {
-        throw new IdentityAdminError('email-exists');
-      },
-    });
-
-    const result = await handleCreateInvitation(
-      bearer(TOKEN_ADMIN),
-      { email: EMPLEADO.email, days: 7 },
-      h.deps,
-    );
-
-    expect(result).toEqual({ status: 409, body: { error: 'conflict' } });
-    expect(h.created).toHaveLength(1);
-  });
-
   it('un correo de verdad nuevo sigue creando la cuenta en Identity Platform, sin cambios', async () => {
     const h = harness();
 
@@ -1243,6 +1204,7 @@ describe('POST /admin/users', () => {
       email: 'nueva@example.com',
       role: 'employee',
       emailSent: true,
+      outcome: 'created',
     });
   });
 
@@ -1813,4 +1775,300 @@ describe('users: list everyone and remove access (#93)', () => {
       expect((await handleRevokeUser(bearer(TOKEN_ADMIN), STAFF.id, h.deps)).status).toBe(200);
     });
   });
+});
+
+describe('POST /admin/users: an email that already has a row (#125)', () => {
+  const INVITADO_VENCIDO = user({
+    id: 'id-inv-vencido',
+    uid: 'uid-inv-vencido',
+    role: 'guest',
+    expiresAt: at(-DAY),
+    invitedBy: ADMIN.id,
+  });
+  const INVITADO_REVOCADO = user({
+    id: 'id-inv-revocado',
+    uid: 'uid-inv-revocado',
+    role: 'guest',
+    status: 'revoked',
+    expiresAt: at(DAY),
+    invitedBy: ADMIN.id,
+  });
+  const INVITADO_ACTIVO = user({
+    id: 'id-inv-activo',
+    uid: 'uid-inv-activo',
+    role: 'guest',
+    expiresAt: at(DAY),
+    invitedBy: ADMIN.id,
+  });
+  const EMPLEADO_REVOCADO = user({ id: 'id-emp-revocado', uid: 'uid-emp-revocado', status: 'revoked' });
+  const OTRO_ADMIN = user({ id: 'id-otro-admin', uid: 'uid-otro-admin', role: 'admin' });
+  const SIN_UID = user({ id: 'id-sin-uid', uid: null, role: 'guest', invitedBy: ADMIN.id, expiresAt: at(-DAY) });
+
+  function crear(
+    email: string,
+    role: string,
+    options: Parameters<typeof harness>[0] = {},
+    token = TOKEN_ADMIN,
+  ) {
+    const h = harness({
+      seed: [
+        ADMIN,
+        SUPERADMIN,
+        EMPLEADO,
+        INVITADO_VENCIDO,
+        INVITADO_REVOCADO,
+        INVITADO_ACTIVO,
+        EMPLEADO_REVOCADO,
+        OTRO_ADMIN,
+        SIN_UID,
+      ],
+      ...options,
+    });
+    return { h, result: handleCreateUser(bearer(token), { email, role }, h.deps) };
+  }
+
+  describe('a guest becomes staff in the same row', () => {
+    for (const invitado of [INVITADO_VENCIDO, INVITADO_REVOCADO, INVITADO_ACTIVO]) {
+      it(`${invitado.id}: 200 converted, no expiry, no inviter, active, same id and uid`, async () => {
+        const { h, result } = crear(invitado.email, 'employee');
+
+        expect(await result).toEqual({
+          status: 200,
+          body: {
+            id: invitado.id,
+            email: invitado.email,
+            role: 'employee',
+            emailSent: true,
+            outcome: 'converted',
+          },
+        });
+        expect(await h.directory.findById(invitado.id)).toMatchObject({
+          uid: invitado.uid,
+          role: 'employee',
+          status: 'active',
+          expiresAt: null,
+          invitedBy: null,
+        });
+      });
+    }
+
+    it('reuses the Identity Platform account: re-enables it and never creates another', async () => {
+      const { h, result } = crear(INVITADO_REVOCADO.email, 'employee');
+      await result;
+
+      expect(h.enabled).toEqual([INVITADO_REVOCADO.uid]);
+      expect(h.created).toEqual([]);
+      expect(h.disabled).toEqual([]);
+    });
+
+    it('emails the password link and leaves its own audit entry', async () => {
+      const { h, result } = crear(INVITADO_VENCIDO.email, 'employee');
+      await result;
+
+      expect(h.resets).toEqual([INVITADO_VENCIDO.email]);
+      expect(h.directory.auditLog()).toEqual([
+        { actorId: ADMIN.id, action: 'convert-user', subjectId: INVITADO_VENCIDO.id },
+      ]);
+    });
+
+    it('a converted guest leaves the invitations list', async () => {
+      const { h, result } = crear(INVITADO_ACTIVO.email, 'employee');
+      await result;
+
+      const lista = await handleListInvitations(bearer(TOKEN_ADMIN), h.deps);
+
+      expect(JSON.stringify(lista.body)).not.toContain(INVITADO_ACTIVO.email);
+    });
+
+    it('matches the email case- and space-insensitively, like a new account', async () => {
+      const { h, result } = crear(`  ${INVITADO_VENCIDO.email.toUpperCase()} `, 'employee');
+
+      expect((await result).status).toBe(200);
+      expect((await h.directory.findById(INVITADO_VENCIDO.id))?.role).toBe('employee');
+    });
+  });
+
+  it('the same role, active and staff: 200 unchanged and nothing is touched', async () => {
+    const { h, result } = crear(EMPLEADO.email, 'employee');
+
+    expect(await result).toEqual({
+      status: 200,
+      body: { id: EMPLEADO.id, email: EMPLEADO.email, role: 'employee', outcome: 'unchanged' },
+    });
+    expect(h.created).toEqual([]);
+    expect(h.enabled).toEqual([]);
+    expect(h.resets).toEqual([]);
+    expect(h.directory.auditLog()).toEqual([]);
+  });
+
+  it('a revoked employee gets access back in the same row', async () => {
+    const { h, result } = crear(EMPLEADO_REVOCADO.email, 'employee');
+
+    expect((await result).body).toMatchObject({ id: EMPLEADO_REVOCADO.id, outcome: 'converted' });
+    expect((await h.directory.findById(EMPLEADO_REVOCADO.id))?.status).toBe('active');
+    expect(h.enabled).toEqual([EMPLEADO_REVOCADO.uid]);
+  });
+
+  it('the superadmin promotes an employee to admin', async () => {
+    const { h, result } = crear(EMPLEADO.email, 'admin', {}, TOKEN_SUPER);
+
+    expect((await result).body).toMatchObject({ role: 'admin', outcome: 'converted' });
+    expect((await h.directory.findById(EMPLEADO.id))?.role).toBe('admin');
+  });
+
+  describe('who may change whom (canRemove)', () => {
+    for (const [nombre, email, token] of [
+      ['nobody changes the superadmin', SUPERADMIN.email, TOKEN_ADMIN],
+      ['the superadmin does not change itself', SUPERADMIN.email, TOKEN_SUPER],
+      ['an admin does not demote another admin', OTRO_ADMIN.email, TOKEN_ADMIN],
+      ['an admin does not demote themself', ADMIN.email, TOKEN_ADMIN],
+    ] as const) {
+      it(`${nombre}: 403 before touching Identity Platform or the row`, async () => {
+        const { h, result } = crear(email, 'employee', {}, token);
+
+        expect(await result).toEqual({ status: 403, body: { error: 'forbidden' } });
+        expect(h.enabled).toEqual([]);
+        expect(h.created).toEqual([]);
+        expect(h.directory.auditLog()).toEqual([]);
+      });
+    }
+  });
+
+  describe('when the Identity Platform account is gone', () => {
+    const borrada = {
+      enableAccount: async () => {
+        throw new IdentityAdminError('user-not-found');
+      },
+    };
+
+    it('creates it again and stores the new uid in the same row', async () => {
+      const { h, result } = crear(INVITADO_REVOCADO.email, 'employee', borrada);
+
+      expect((await result).body).toMatchObject({ id: INVITADO_REVOCADO.id, outcome: 'converted' });
+      expect(h.created.map((c) => c.email)).toEqual([INVITADO_REVOCADO.email]);
+      expect((await h.directory.findById(INVITADO_REVOCADO.id))?.uid).toBe('uid-nuevo-1');
+    });
+
+    it('a row that never had a uid gets an account the same way', async () => {
+      const { h, result } = crear(SIN_UID.email, 'employee');
+
+      expect((await result).status).toBe(200);
+      expect(h.enabled).toEqual([]);
+      expect((await h.directory.findById(SIN_UID.id))?.uid).toBe('uid-nuevo-1');
+    });
+
+    it('409 if that email belongs to another Identity Platform account, row untouched', async () => {
+      const { h, result } = crear(INVITADO_REVOCADO.email, 'employee', {
+        ...borrada,
+        createAccount: async () => {
+          throw new IdentityAdminError('email-exists');
+        },
+      });
+
+      expect(await result).toEqual({ status: 409, body: { error: 'conflict' } });
+      expect((await h.directory.findById(INVITADO_REVOCADO.id))?.role).toBe('guest');
+    });
+
+    it('a failed save disables the account it just created and answers 500', async () => {
+      const h = harness({ ...borrada, seed: [ADMIN, INVITADO_REVOCADO] });
+      vi.spyOn(h.directory, 'convertToStaff').mockRejectedValue(new Error('la base de datos'));
+
+      const result = await handleCreateUser(
+        bearer(TOKEN_ADMIN),
+        { email: INVITADO_REVOCADO.email, role: 'employee' },
+        h.deps,
+      );
+
+      expect(result).toEqual({ status: 500, body: { error: 'internal' } });
+      expect(h.disabled).toEqual(['uid-nuevo-1']);
+      expect(h.resets).toEqual([]);
+    });
+  });
+
+  it('503 when the account cannot be re-enabled, and the row stays as it was', async () => {
+    const { h, result } = crear(INVITADO_REVOCADO.email, 'employee', {
+      enableAccount: async () => {
+        throw new IdentityAdminError('unavailable');
+      },
+    });
+
+    expect(await result).toEqual({ status: 503, body: { error: 'identity-admin-not-configured' } });
+    expect(await h.directory.findById(INVITADO_REVOCADO.id)).toEqual(INVITADO_REVOCADO);
+  });
+
+  it('a failed save after re-enabling answers 500 and leaves the account alone', async () => {
+    // The account is the row's own: disabling it would lock out an active
+    // guest. The row still decides access, so nothing new gets in.
+    const h = harness({ seed: [ADMIN, INVITADO_ACTIVO] });
+    vi.spyOn(h.directory, 'convertToStaff').mockRejectedValue(new Error('la base de datos'));
+
+    const result = await handleCreateUser(
+      bearer(TOKEN_ADMIN),
+      { email: INVITADO_ACTIVO.email, role: 'employee' },
+      h.deps,
+    );
+
+    expect(result).toEqual({ status: 500, body: { error: 'internal' } });
+    expect(h.disabled).toEqual([]);
+    expect(h.resets).toEqual([]);
+  });
+
+  it('when the email fails the conversion stays and answers emailSent: false', async () => {
+    const { h, result } = crear(INVITADO_VENCIDO.email, 'employee', {
+      sendPasswordReset: async () => {
+        throw new IdentityAdminError('unavailable');
+      },
+    });
+
+    expect((await result).body).toMatchObject({ emailSent: false, outcome: 'converted' });
+    expect((await h.directory.findById(INVITADO_VENCIDO.id))?.role).toBe('employee');
+  });
+});
+
+describe('POST /admin/invitations: an email that already has a row (#125)', () => {
+  const INVITADO_REVOCADO = user({
+    id: 'id-inv-revocado',
+    uid: 'uid-inv-revocado',
+    role: 'guest',
+    status: 'revoked',
+    invitedBy: ADMIN.id,
+  });
+  const EMPLEADO_REVOCADO = user({ id: 'id-emp-revocado', uid: 'uid-emp-revocado', status: 'revoked' });
+
+  function invitar(email: string) {
+    const h = harness({ seed: [ADMIN, SUPERADMIN, EMPLEADO, INVITADO_REVOCADO, EMPLEADO_REVOCADO] });
+    return { h, result: handleCreateInvitation(bearer(TOKEN_ADMIN), { email, days: 7 }, h.deps) };
+  }
+
+  for (const [nombre, cuenta] of [
+    ['an employee', EMPLEADO],
+    ['the superadmin', SUPERADMIN],
+  ] as const) {
+    it(`${nombre}: 200 unchanged, never downgraded to a guest`, async () => {
+      const { h, result } = invitar(cuenta.email);
+
+      expect(await result).toEqual({
+        status: 200,
+        body: { id: cuenta.id, email: cuenta.email, role: cuenta.role, outcome: 'unchanged' },
+      });
+      expect(await h.directory.findById(cuenta.id)).toEqual(cuenta);
+      expect(h.created).toEqual([]);
+      expect(h.resets).toEqual([]);
+    });
+  }
+
+  for (const [nombre, cuenta] of [
+    ['a revoked guest', INVITADO_REVOCADO],
+    ['a revoked employee', EMPLEADO_REVOCADO],
+  ] as const) {
+    it(`${nombre}: 409 before creating any Identity Platform account`, async () => {
+      // Creating first is how the orphan accounts of #125 piled up: the
+      // insert hit the unique email and every retry met EMAIL_EXISTS.
+      const { h, result } = invitar(cuenta.email);
+
+      expect(await result).toEqual({ status: 409, body: { error: 'conflict' } });
+      expect(h.created).toEqual([]);
+      expect(h.disabled).toEqual([]);
+    });
+  }
 });
