@@ -11,7 +11,12 @@ import { createRng, type Rng } from './random.ts';
 
 export const TILE_SIZE = CHARACTER_HEIGHT * 2;
 
-export const TERRAINS = ['wood', 'grass', 'water', 'plain'] as const;
+/**
+ * Every floor motif of the pack. The first four came with the art project; dirt, sand,
+ * cobblestone, tile and carpet complete the eight terrain materials of #123 (`plain` is the
+ * colorable room floor and no terrain).
+ */
+export const TERRAINS = ['wood', 'grass', 'water', 'plain', 'dirt', 'sand', 'cobblestone', 'tile', 'carpet'] as const;
 export type Terrain = (typeof TERRAINS)[number];
 
 export const DEFAULT_PLAIN_COLOR = '#b9c3cc';
@@ -181,8 +186,176 @@ export function plainTile(hex = DEFAULT_PLAIN_COLOR, seed = 5): PixelBuffer {
   return tile;
 }
 
+const DIRT = makeRamp('#8a6142');
+const PEBBLE = makeRamp('#a39484');
+
+/** Packed earth: soft lighter and darker patches, small pebbles lit from the upper left, a few dark grains. */
+export function dirtTile(seed = 13): PixelBuffer {
+  const rng = createRng(seed);
+  const tile = solidTile(DIRT.base);
+  const darkPatch = mixRgba(DIRT.base, DIRT.shadow, 0.4);
+  const lightPatch = mixRgba(DIRT.base, DIRT.light, 0.25);
+  const cell = TILE_SIZE / 3;
+  for (let i = 0; i < 9; i += 1) {
+    const cx = (i % 3) * cell + randomInt(rng, cell);
+    const cy = Math.floor(i / 3) * cell + randomInt(rng, cell);
+    softPatch(tile, rng, cx, cy, 7 + randomInt(rng, 6), i % 2 ? darkPatch : lightPatch);
+  }
+  for (let i = 0; i < 18; i += 1) {
+    const x = randomInt(rng, TILE_SIZE);
+    const y = randomInt(rng, TILE_SIZE);
+    const wide = rng() < 0.5;
+    paint(tile, x, y, PEBBLE.base);
+    if (wide) paint(tile, x + 1, y, PEBBLE.base);
+    paint(tile, x, y - 1, PEBBLE.light);
+    paint(tile, wide ? x + 1 : x, y + 1, DIRT.shadow);
+  }
+  for (let i = 0; i < 26; i += 1) {
+    const x = randomInt(rng, TILE_SIZE);
+    const y = randomInt(rng, TILE_SIZE);
+    paint(tile, x, y, darkPatch);
+    paint(tile, x + 1, y, darkPatch);
+  }
+  return tile;
+}
+
+const SAND = makeRamp('#e2c48e');
+
+/** Calm sand: faint wind ripples in whole periods (seamless), a few shell flecks and dark grains. */
+export function sandTile(seed = 17): PixelBuffer {
+  const rng = createRng(seed);
+  const tile = solidTile(SAND.base);
+  const ripple = mixRgba(SAND.base, SAND.light, 0.3);
+  const trough = mixRgba(SAND.base, SAND.shadow, 0.22);
+  const phase = rng() * Math.PI * 2;
+  const t = (2 * Math.PI) / TILE_SIZE;
+  for (let y = 0; y < TILE_SIZE; y += 1) {
+    for (let x = 0; x < TILE_SIZE; x += 1) {
+      const value = Math.sin(4 * t * y + 0.9 * Math.sin(t * x + phase) + 0.5 * Math.sin(2 * t * x));
+      if (value > 0.9 || (value > 0.78 && (x + y) % 2 === 0)) tile.setPixel(x, y, ripple);
+      else if (value < -0.93) tile.setPixel(x, y, trough);
+    }
+  }
+  for (let i = 0; i < 7; i += 1) {
+    const x = randomInt(rng, TILE_SIZE);
+    const y = randomInt(rng, TILE_SIZE);
+    paint(tile, x, y, SAND.light);
+    paint(tile, x + 1, y + 1, trough);
+  }
+  return tile;
+}
+
+const COBBLE = makeRamp('#8f8b85');
+const COBBLE_CELLS = 6;
+
+/**
+ * Rounded stones on a jittered grid that wraps, so the motif tiles. Each stone takes one of three
+ * close grays, a lit upper-left rim and a shaded lower-right one; mortar shows between them.
+ */
+export function cobblestoneTile(seed = 19): PixelBuffer {
+  const rng = createRng(seed);
+  const tile = solidTile(COBBLE.base);
+  const cell = TILE_SIZE / COBBLE_CELLS;
+  const centers = Array.from({ length: COBBLE_CELLS * COBBLE_CELLS }, (_, i) => ({
+    x: (i % COBBLE_CELLS) * cell + cell / 2 + (rng() - 0.5) * cell * 0.5,
+    y: Math.floor(i / COBBLE_CELLS) * cell + cell / 2 + (rng() - 0.5) * cell * 0.5,
+    tone: [COBBLE.base, mixRgba(COBBLE.base, COBBLE.light, 0.18), mixRgba(COBBLE.base, COBBLE.shadow, 0.15)][randomInt(rng, 3)] as Rgba,
+  }));
+  const mortar = mixRgba(COBBLE.base, COBBLE.shadow, 0.75);
+  const rim = mixRgba(COBBLE.base, COBBLE.light, 0.45);
+  const shade = mixRgba(COBBLE.base, COBBLE.shadow, 0.45);
+  const wrapped = (d: number): number => d - Math.round(d / TILE_SIZE) * TILE_SIZE;
+  for (let y = 0; y < TILE_SIZE; y += 1) {
+    for (let x = 0; x < TILE_SIZE; x += 1) {
+      let best = { d: Infinity, dx: 0, dy: 0, tone: COBBLE.base };
+      let second = Infinity;
+      for (const center of centers) {
+        const dx = wrapped(x + 0.5 - center.x);
+        const dy = wrapped(y + 0.5 - center.y);
+        const d = Math.hypot(dx, dy);
+        if (d < best.d) {
+          second = best.d;
+          best = { d, dx, dy, tone: center.tone };
+        } else if (d < second) second = d;
+      }
+      const gap = second - best.d;
+      let color = best.tone;
+      if (gap < 1.6) color = mortar;
+      else if (gap < 3.2 && best.dx + best.dy < 0) color = rim;
+      else if (gap < 3.2 && best.dx + best.dy > 2) color = shade;
+      tile.setPixel(x, y, color);
+    }
+  }
+  return tile;
+}
+
+const CERAMIC = makeRamp('#d8d2c4');
+const CERAMIC_SIZE = 16;
+
+/** Light ceramic floor tiles: 16px squares in a faint checker, grout lines and a lit top edge. */
+export function tileFloorTile(seed = 23): PixelBuffer {
+  const rng = createRng(seed);
+  const tile = solidTile(CERAMIC.base);
+  const alternate = mixRgba(CERAMIC.base, CERAMIC.shadow, 0.12);
+  const grout = mixRgba(CERAMIC.base, CERAMIC.shadow, 0.55);
+  const edge = mixRgba(CERAMIC.base, CERAMIC.light, 0.6);
+  for (let y = 0; y < TILE_SIZE; y += 1) {
+    for (let x = 0; x < TILE_SIZE; x += 1) {
+      const across = x % CERAMIC_SIZE;
+      const down = y % CERAMIC_SIZE;
+      const odd = (Math.floor(x / CERAMIC_SIZE) + Math.floor(y / CERAMIC_SIZE)) % 2 === 1;
+      let color = odd ? alternate : CERAMIC.base;
+      if (across === 0 || down === 0) color = grout;
+      else if (down === 1 || across === 1) color = edge;
+      tile.setPixel(x, y, color);
+    }
+  }
+  const speck = mixRgba(CERAMIC.base, CERAMIC.shadow, 0.3);
+  for (let i = 0; i < 14; i += 1) {
+    const x = randomInt(rng, TILE_SIZE);
+    const y = randomInt(rng, TILE_SIZE);
+    if (x % CERAMIC_SIZE > 2 && y % CERAMIC_SIZE > 2) tile.setPixel(x, y, speck);
+  }
+  return tile;
+}
+
+const CARPET = makeRamp('#5a6f86');
+const CARPET_SQUARE = TILE_SIZE / 2;
+
+/**
+ * Office carpet tiles: four 48px squares whose woven pile alternates direction, so the floor
+ * reads as laid tiles, with a few soft worn patches. Low contrast on purpose.
+ */
+export function carpetTile(seed = 29): PixelBuffer {
+  const rng = createRng(seed);
+  const tile = solidTile(CARPET.base);
+  const weave = mixRgba(CARPET.base, CARPET.shadow, 0.28);
+  const seam = mixRgba(CARPET.base, CARPET.shadow, 0.45);
+  for (let y = 0; y < TILE_SIZE; y += 1) {
+    for (let x = 0; x < TILE_SIZE; x += 1) {
+      const horizontal = (Math.floor(x / CARPET_SQUARE) + Math.floor(y / CARPET_SQUARE)) % 2 === 0;
+      const line = horizontal ? y % 3 === 0 && (x + y) % 4 !== 0 : x % 3 === 0 && (x - y) % 4 !== 0;
+      if (x % CARPET_SQUARE === 0 || y % CARPET_SQUARE === 0) tile.setPixel(x, y, seam);
+      else if (line) tile.setPixel(x, y, weave);
+    }
+  }
+  const worn = mixRgba(CARPET.base, CARPET.light, 0.12);
+  for (let i = 0; i < 3; i += 1) softPatch(tile, rng, randomInt(rng, TILE_SIZE), randomInt(rng, TILE_SIZE), 6 + randomInt(rng, 4), worn);
+  return tile;
+}
+
 export function terrainTile(terrain: Terrain, plainColor = DEFAULT_PLAIN_COLOR): PixelBuffer {
   switch (terrain) {
+    case 'dirt':
+      return dirtTile();
+    case 'sand':
+      return sandTile();
+    case 'cobblestone':
+      return cobblestoneTile();
+    case 'tile':
+      return tileFloorTile();
+    case 'carpet':
+      return carpetTile();
     case 'wood':
       return woodTile();
     case 'grass':

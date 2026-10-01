@@ -189,7 +189,7 @@ export function artPieceFields(piece: ArtPiece): ArtPieceFields {
     id: piece.id,
     kind: piece.kind,
     name: piece.name,
-    material: piece.kind === 'character' ? null : piece.material,
+    material: 'material' in piece ? piece.material : null,
     colorable: tinted?.colorable ?? false,
     defaultColor: tinted?.defaultColor ?? null,
     author: piece.author,

@@ -15,7 +15,9 @@ import {
   ART_PACK_FORMAT,
   ART_PIECE_KINDS,
   ART_TILE,
+  BRIDGE_ORIENTATIONS,
   PACK_FACINGS,
+  TERRAIN_MATERIALS,
   sheetSize,
   type ArtImageKind,
   type ArtPackManifest,
@@ -88,6 +90,24 @@ function isPackPath(value: unknown): value is string {
   return value.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..');
 }
 
+const PROP_LAYERS: readonly unknown[] = ['ground', 'sorted'];
+const PROP_COLLISIONS: readonly unknown[] = ['solid', 'deck'];
+
+/** Placement every map prop needs: where it stands, what it covers, how it sorts and blocks. */
+function isPlacedProp(piece: Record<string, unknown>): boolean {
+  return isFootprint(piece.footprint) && isPoint(piece.anchor) && PROP_LAYERS.includes(piece.layer) && PROP_COLLISIONS.includes(piece.collision);
+}
+
+function isTilesetMaterial(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    (TERRAIN_MATERIALS as readonly unknown[]).includes(value.material) &&
+    isNonEmptyString(value.floor) &&
+    typeof value.walkable === 'boolean' &&
+    Number.isInteger(value.firstTile)
+  );
+}
+
 function isPieceFile(value: unknown): value is ArtPieceFile {
   if (!isRecord(value) || !isNonEmptyString(value.role) || !isPackPath(value.path)) return false;
   if (!ART_IMAGE_KINDS.includes(value.imageKind as ArtImageKind)) return false;
@@ -120,6 +140,18 @@ function hasDrawingFields(piece: Record<string, unknown>, kind: ArtPieceKind): b
       return isColorModel(piece);
     case 'wall':
       return Number.isFinite(piece.segmentLength) && Number.isFinite(piece.thickness);
+    case 'tileset':
+      return piece.tileSize === ART_TILE && Array.isArray(piece.materials) && piece.materials.length > 0 && piece.materials.every(isTilesetMaterial);
+    case 'tree':
+    case 'plant':
+    case 'table':
+      return isPlacedProp(piece);
+    case 'hedge':
+      return isPlacedProp(piece) && Number.isFinite(piece.height);
+    case 'bridge': {
+      const deck = piece.deck;
+      return isPlacedProp(piece) && isRecord(deck) && BRIDGE_ORIENTATIONS.every((orientation) => isRecord(deck[orientation]) && isFootprint(deck[orientation]));
+    }
   }
 }
 

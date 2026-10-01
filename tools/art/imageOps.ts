@@ -19,9 +19,12 @@ export function onBackdrop(image: PixelBuffer): PixelBuffer {
   return out;
 }
 
+/** Copies a region out of `image`; pixels outside it stay transparent. Walks only the region, so cutting tiles out of a large tileset stays cheap. */
 export function crop(image: PixelBuffer, x: number, y: number, width: number, height: number): PixelBuffer {
   const out = new PixelBuffer(width, height);
-  out.blit(image, -x, -y);
+  for (let row = 0; row < height; row += 1) {
+    for (let col = 0; col < width; col += 1) out.setPixel(col, row, image.getPixel(x + col, y + row));
+  }
   return out;
 }
 

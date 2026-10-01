@@ -12,14 +12,27 @@ import {
   ART_FILE_FORMAT,
   ART_PACK_FORMAT,
   ART_TILE,
+  BRIDGE,
+  BRIDGE_ORIENTATIONS,
   CHAIR,
   CHAIR_LAYERS,
   CHARACTER_SEATED,
   CHARACTER_WALK,
   DESK,
   FLOOR,
+  HEDGE,
   PACK_FACINGS,
+  PLANT,
+  TABLE,
+  TERRAIN_DECALS,
+  TERRAIN_MATERIALS,
+  TERRAIN_TILESET,
+  TERRAIN_WALKABLE,
+  TREE,
   WALL,
+  terrainDecalIndex,
+  terrainFloorPieceId,
+  terrainTileIndex,
   type ArtImageKind,
   type ArtPackManifest,
   type ArtPiece,
@@ -27,7 +40,8 @@ import {
 } from '../../src/game/artContract.ts';
 import type { ChairMaterial } from './domain/chairs.ts';
 import type { PixelBuffer } from './domain/pixelBuffer.ts';
-import { DEFAULT_TABLE_COLOR, type TableMaterial } from './domain/tables.ts';
+import type { PlantKind, TreeKind } from './domain/props.ts';
+import { DEFAULT_TABLE_COLOR, ROOM_TABLE_FOOTPRINTS, type RoomTable, type TableMaterial } from './domain/tables.ts';
 import { DEFAULT_PLAIN_COLOR, type Terrain } from './domain/tiles.ts';
 import type { WallMaterial } from './domain/wallMap.ts';
 import { encodePng } from './png.ts';
@@ -55,8 +69,27 @@ const DESK_NAMES: Readonly<Record<TableMaterial, string>> = {
   wood: 'Escritorio de madera',
   painted: 'Escritorio pintado',
 };
-const FLOOR_NAMES: Readonly<Record<Terrain, string>> = { wood: 'Madera', grass: 'Césped', water: 'Agua', plain: 'Liso' };
+const FLOOR_NAMES: Readonly<Record<Terrain, string>> = {
+  wood: 'Madera',
+  grass: 'Césped',
+  water: 'Agua',
+  plain: 'Liso',
+  dirt: 'Tierra',
+  sand: 'Arena',
+  cobblestone: 'Empedrado',
+  tile: 'Baldosa',
+  carpet: 'Moqueta',
+};
 const WALL_NAMES: Readonly<Record<WallMaterial, string>> = { brick: 'Ladrillo', stone: 'Piedra', plaster: 'Yeso', glass: 'Vidrio' };
+
+const TREE_NAMES: Readonly<Record<TreeKind, string>> = { oak: 'Roble', maple: 'Arce' };
+const PLANT_NAMES: Readonly<Record<PlantKind, string>> = { ficus: 'Ficus' };
+const TABLES: Readonly<Record<RoomTable, { readonly name: string; readonly material: string }>> = {
+  meeting: { name: 'Mesa de reuniones', material: 'walnut' },
+  cafeteria: { name: 'Mesa de cafetería', material: 'beech' },
+};
+/** The whole 3x3 deck is walkable in both orientations; the rails are thin enough to step along. */
+const FULL_DECK = { x: 0, y: 0, w: BRIDGE.footprint.w, h: BRIDGE.footprint.h } as const;
 
 const DEFAULTS = { character: 'character-p01-burgundy-suit', desk: 'desk-wood', floor: 'floor-wood' } as const;
 
@@ -145,6 +178,93 @@ export function renderPackFiles(): Map<string, Uint8Array> {
         thickness: WALL.thickness,
         translucent: material === 'glass',
         files: [png(`wall/${material}.png`, 'sheet', 'wall', image)],
+      }),
+    ),
+    {
+      id: 'tileset-terrain',
+      kind: 'tileset',
+      name: 'Terreno',
+      ...common,
+      tileSize: ART_TILE,
+      columns: TERRAIN_TILESET.columns,
+      masks: TERRAIN_TILESET.masks,
+      phases: TERRAIN_TILESET.phases,
+      materials: TERRAIN_MATERIALS.map((material) => ({
+        material,
+        floor: terrainFloorPieceId(material),
+        walkable: TERRAIN_WALKABLE[material],
+        firstTile: terrainTileIndex(material, 1, 0) - 1,
+      })),
+      decals: TERRAIN_DECALS.map((decal) => ({ decal, tile: terrainDecalIndex(decal) })),
+      files: [png('tileset/terrain.png', 'sheet', 'terrain-tileset', sheets.tileset)],
+    },
+    ...sheets.trees.map(
+      ({ kind, image }): ArtPiece => ({
+        id: `tree-${kind}`,
+        kind: 'tree',
+        name: TREE_NAMES[kind],
+        ...common,
+        material: kind,
+        footprint: TREE.footprint,
+        anchor: TREE.anchor,
+        layer: TREE.layer,
+        collision: TREE.collision,
+        files: [png(`tree/${kind}.png`, 'sheet', 'tree', image)],
+      }),
+    ),
+    ...sheets.plants.map(
+      ({ kind, image }): ArtPiece => ({
+        id: `plant-${kind}`,
+        kind: 'plant',
+        name: PLANT_NAMES[kind],
+        ...common,
+        material: kind,
+        footprint: PLANT.footprint,
+        anchor: PLANT.anchor,
+        layer: PLANT.layer,
+        collision: PLANT.collision,
+        files: [png(`plant/${kind}.png`, 'sheet', 'plant', image)],
+      }),
+    ),
+    {
+      id: 'bridge-wood',
+      kind: 'bridge',
+      name: 'Puente de madera',
+      ...common,
+      material: 'wood',
+      footprint: BRIDGE.footprint,
+      anchor: BRIDGE.anchor,
+      layer: BRIDGE.layer,
+      collision: BRIDGE.collision,
+      orientations: BRIDGE_ORIENTATIONS,
+      deck: { 'north-south': FULL_DECK, 'east-west': FULL_DECK },
+      files: [png('bridge/wood.png', 'sheet', 'bridge', sheets.bridge)],
+    },
+    {
+      id: 'hedge-boxwood',
+      kind: 'hedge',
+      name: 'Seto',
+      ...common,
+      material: 'boxwood',
+      footprint: HEDGE.footprint,
+      anchor: HEDGE.anchor,
+      layer: HEDGE.layer,
+      collision: HEDGE.collision,
+      height: HEDGE.height,
+      files: [png('hedge/boxwood.png', 'sheet', 'hedge', sheets.hedge)],
+    },
+    ...sheets.tables.map(
+      ({ kind, image }): ArtPiece => ({
+        id: `table-${kind}`,
+        kind: 'table',
+        name: TABLES[kind].name,
+        ...common,
+        material: TABLES[kind].material,
+        footprint: ROOM_TABLE_FOOTPRINTS[kind],
+        anchor: TABLE.anchor,
+        layer: TABLE.layer,
+        collision: TABLE.collision,
+        files: [png(`table/${kind}.png`, 'sheet', 'table', image)],
       }),
     ),
   ];

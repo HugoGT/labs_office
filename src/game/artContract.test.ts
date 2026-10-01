@@ -3,22 +3,47 @@ import {
   ART_CONTRACT_VERSION,
   ART_IMAGE_KINDS,
   ART_IMAGE_SPECS,
+  ART_PIECE_KINDS,
   ART_TILE,
+  BRIDGE,
+  BRIDGE_ORIENTATIONS,
   CHAIR_LAYERS,
   CHARACTER_SEATED,
   CHARACTER_WALK,
   FLOOR,
   FLOOR_MOTIF_SIZE,
+  HEDGE,
   MAX_COLORS_PER_IMAGE,
   PACK_FACINGS,
+  PLANT,
+  TABLE,
+  TERRAIN_DECALS,
+  TERRAIN_LAYER_COUNT,
+  TERRAIN_LAYER_ORIGIN,
+  TERRAIN_MATERIALS,
+  TERRAIN_TILESET,
+  TERRAIN_WALKABLE,
+  TREE,
   WALK_DIRECTIONS,
   WALL,
   assembleFloorMotif,
+  bridgeFrameIndex,
   countColors,
   floorFrameAt,
+  hedgeFrameIndex,
+  propPlacement,
   seatedRowForFacing,
   sheetSize,
   splitFloorMotif,
+  terrainCellCorners,
+  terrainCellLayers,
+  terrainCornerMask,
+  terrainDecalIndex,
+  terrainFloorPieceId,
+  terrainLayerData,
+  terrainPhaseAt,
+  terrainPhaseOrigin,
+  terrainTileIndex,
   validateArtImage,
   walkRowForFacing,
   wallBodyRect,
@@ -26,6 +51,7 @@ import {
   wallJointRect,
   type ArtImageKind,
   type RgbaImage,
+  type TerrainMaterial,
 } from './artContract';
 import { FACINGS } from './officeProtocol';
 import { TILE } from './mapData';
@@ -65,7 +91,9 @@ function numberedMotif(): RgbaImage {
 
 describe('art contract constants', () => {
   it('is versioned and keeps the 32px logical tile of the office', () => {
-    expect(ART_CONTRACT_VERSION).toBe(1);
+    // Version 2 added terrain tilesets and map props: a version 1 reader
+    // (the server's catalog) rejects their kinds, so the bump is required.
+    expect(ART_CONTRACT_VERSION).toBe(2);
     // The contract has no imports (the server loads it with type stripping), so
     // it restates the tile instead of importing it; this keeps them equal.
     expect(ART_TILE).toBe(TILE);
@@ -248,5 +276,172 @@ describe('validateArtImage', () => {
     const violations = validateArtImage('chair', chair);
     expect(violations.map((v) => v.code)).toEqual(['background-present']);
     expect(violations[0]!.message).toMatch(/frame 1/);
+  });
+});
+
+describe('terrain materials (#123)', () => {
+  it('lists the eight block types in drawing priority, water lowest and carpet highest', () => {
+    expect(TERRAIN_MATERIALS).toEqual(['water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet']);
+  });
+
+  it('makes only water impassable', () => {
+    for (const material of TERRAIN_MATERIALS) expect(TERRAIN_WALKABLE[material], material).toBe(material !== 'water');
+  });
+
+  it('draws each material with the floor piece of the same name', () => {
+    expect(terrainFloorPieceId('cobblestone')).toBe('floor-cobblestone');
+    expect(terrainFloorPieceId('tile')).toBe('floor-tile');
+  });
+});
+
+describe('terrain corner masks', () => {
+  it('numbers corners in reading order: NW 1, NE 2, SW 4, SE 8', () => {
+    expect(terrainCornerMask({ nw: true, ne: false, sw: false, se: false })).toBe(1);
+    expect(terrainCornerMask({ nw: false, ne: true, sw: false, se: false })).toBe(2);
+    expect(terrainCornerMask({ nw: false, ne: false, sw: true, se: false })).toBe(4);
+    expect(terrainCornerMask({ nw: false, ne: false, sw: false, se: true })).toBe(8);
+    expect(terrainCornerMask({ nw: true, ne: true, sw: true, se: true })).toBe(15);
+  });
+});
+
+describe('terrain dual grid', () => {
+  const grid = (rows: readonly string[]): ((tx: number, ty: number) => TerrainMaterial) => {
+    const key: Record<string, TerrainMaterial> = { W: 'water', G: 'grass', D: 'dirt', S: 'sand', C: 'cobblestone', O: 'wood', T: 'tile', K: 'carpet' };
+    return (tx, ty) => key[rows[ty]![tx]!]!;
+  };
+
+  it('offsets the display grid half a tile, so each cell corner is the center of a map tile', () => {
+    expect(TERRAIN_LAYER_ORIGIN).toBe(-ART_TILE / 2);
+    const at = grid(['GW', 'DS']);
+    expect(terrainCellCorners(at, 2, 2, 1, 1)).toEqual({ nw: 'grass', ne: 'water', sw: 'dirt', se: 'sand' });
+  });
+
+  it('clamps corners outside the map to the nearest map tile', () => {
+    const at = grid(['GW', 'DS']);
+    expect(terrainCellCorners(at, 2, 2, 0, 0)).toEqual({ nw: 'grass', ne: 'grass', sw: 'grass', se: 'grass' });
+    expect(terrainCellCorners(at, 2, 2, 2, 2)).toEqual({ nw: 'sand', ne: 'sand', sw: 'sand', se: 'sand' });
+    expect(terrainCellCorners(at, 2, 2, 2, 0)).toEqual({ nw: 'water', ne: 'water', sw: 'water', se: 'water' });
+  });
+
+  it('draws one full tile when the four corners agree', () => {
+    expect(terrainCellLayers({ nw: 'grass', ne: 'grass', sw: 'grass', se: 'grass' })).toEqual([{ material: 'grass', mask: 15 }]);
+  });
+
+  it('lays the lowest material full and each higher one over the corners at or above it', () => {
+    expect(terrainCellLayers({ nw: 'sand', ne: 'water', sw: 'water', se: 'water' })).toEqual([
+      { material: 'water', mask: 15 },
+      { material: 'sand', mask: 1 },
+    ]);
+    // Nested: grass covers the corners where dirt and carpet are too, so each
+    // edge blends over the material just below it instead of over water.
+    expect(terrainCellLayers({ nw: 'carpet', ne: 'dirt', sw: 'grass', se: 'water' })).toEqual([
+      { material: 'water', mask: 15 },
+      { material: 'grass', mask: 1 | 2 | 4 },
+      { material: 'dirt', mask: 1 | 2 },
+      { material: 'carpet', mask: 1 },
+    ]);
+  });
+
+  it('never needs more than four layers', () => {
+    expect(TERRAIN_LAYER_COUNT).toBe(4);
+  });
+
+  it('picks the motif phase from the cell so the terrain lines up with floorFrameAt', () => {
+    // Cell (1, 1) starts at world pixel (16, 16): motif pixel (16, 16).
+    expect(terrainPhaseOrigin(terrainPhaseAt(1, 1))).toEqual({ x: 16, y: 16 });
+    // Cell (0, 0) starts at world pixel (-16, -16), which wraps to (80, 80).
+    expect(terrainPhaseOrigin(terrainPhaseAt(0, 0))).toEqual({ x: 80, y: 80 });
+    for (let cx = -4; cx < 8; cx += 1) {
+      const origin = terrainPhaseOrigin(terrainPhaseAt(cx, 2));
+      expect(origin.x, `cell ${cx}`).toBe((((cx * ART_TILE + TERRAIN_LAYER_ORIGIN) % FLOOR_MOTIF_SIZE) + FLOOR_MOTIF_SIZE) % FLOOR_MOTIF_SIZE);
+    }
+  });
+
+  it('indexes the tileset by material band, phase row and mask column, then the decal row', () => {
+    expect(TERRAIN_TILESET.columns).toBe(16);
+    expect(TERRAIN_TILESET.rows).toBe(TERRAIN_MATERIALS.length * 9 + 1);
+    expect(terrainTileIndex('water', 15, 0)).toBe(15);
+    expect(terrainTileIndex('grass', 1, 0)).toBe(9 * 16 + 1);
+    expect(terrainTileIndex('carpet', 15, 8)).toBe((7 * 9 + 8) * 16 + 15);
+    expect(terrainDecalIndex(TERRAIN_DECALS[0]!)).toBe(TERRAIN_MATERIALS.length * 9 * 16);
+    expect(TERRAIN_DECALS.length).toBeLessThanOrEqual(16);
+    expect(() => terrainTileIndex('grass', 0, 0)).toThrow(/mask/);
+    expect(() => terrainTileIndex('grass', 3, 9)).toThrow(/phase/);
+  });
+
+  it('builds the tile data of every layer for a map, -1 where a layer has nothing', () => {
+    const at = grid(['GGW', 'GGW']);
+    const layers = terrainLayerData(3, 2, at);
+    expect(layers).toHaveLength(TERRAIN_LAYER_COUNT);
+    for (const layer of layers) {
+      expect(layer).toHaveLength(3);
+      for (const row of layer) expect(row).toHaveLength(4);
+    }
+    // Cell (2, 1): corners grass, water, grass, water: water full, grass on the west corners.
+    expect(layers[0]![1]![2]).toBe(terrainTileIndex('water', 15, terrainPhaseAt(2, 1)));
+    expect(layers[1]![1]![2]).toBe(terrainTileIndex('grass', 1 | 4, terrainPhaseAt(2, 1)));
+    expect(layers[2]![1]![2]).toBe(-1);
+    // Cell (0, 0) is all grass: one layer.
+    expect(layers[0]![0]![0]).toBe(terrainTileIndex('grass', 15, terrainPhaseAt(0, 0)));
+    expect(layers[1]![0]![0]).toBe(-1);
+  });
+});
+
+describe('map props', () => {
+  it('registers a piece kind for the tileset and each prop, with a fixed frame per image kind', () => {
+    expect(ART_PIECE_KINDS).toEqual(['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table']);
+    expect(TREE.frame).toEqual({ width: 64, height: 96 });
+    expect(PLANT.frame).toEqual({ width: 32, height: 48 });
+    expect(sheetSize(BRIDGE)).toEqual({ width: 256, height: 128 });
+    expect(sheetSize(HEDGE)).toEqual({ width: 512, height: 48 });
+    expect(TABLE.frame).toEqual({ width: 256, height: 192 });
+    expect(sheetSize(TERRAIN_TILESET)).toEqual({ width: 512, height: 73 * 32 });
+  });
+
+  it('anchors every prop on the floor at the bottom middle of its footprint, which is also its depth', () => {
+    expect(TREE.anchor).toEqual({ x: 32, y: 90 });
+    expect(TREE.footprint).toEqual({ w: 1, h: 1 });
+    // A 3x3 bridge centered in its 128px cell.
+    expect(BRIDGE.footprint).toEqual({ w: 3, h: 3 });
+    expect(BRIDGE.anchor).toEqual({ x: 64, y: 112 });
+    const placed = propPlacement({ anchor: TREE.anchor, footprint: { w: 1, h: 1 } }, 10, 4);
+    expect(placed).toEqual({ x: 10 * 32 + 16 - 32, y: 5 * 32 - 90, depthY: 5 * 32 });
+    const table = propPlacement({ anchor: TABLE.anchor, footprint: { w: 7, h: 5 } }, 53, 6);
+    expect(table).toEqual({ x: 53 * 32 + 112 - 128, y: 11 * 32 - 180, depthY: 11 * 32 });
+  });
+
+  it('draws bridges on the ground and lets people walk their deck; everything else is solid and depth sorted', () => {
+    expect([BRIDGE.layer, BRIDGE.collision]).toEqual(['ground', 'deck']);
+    for (const spec of [TREE, PLANT, HEDGE, TABLE]) expect([spec.layer, spec.collision], spec.kind).toEqual(['sorted', 'solid']);
+  });
+
+  it('numbers bridge frames by orientation and hedge frames by connection mask', () => {
+    expect(BRIDGE_ORIENTATIONS).toEqual(['north-south', 'east-west']);
+    expect(bridgeFrameIndex('east-west')).toBe(1);
+    expect(hedgeFrameIndex(0)).toBe(0);
+    expect(hedgeFrameIndex(1 | 4)).toBe(5);
+    expect(HEDGE.columns).toBe(16);
+    expect(() => hedgeFrameIndex(16)).toThrow(/mask/);
+  });
+
+  it('fits the largest table footprint in its frame', () => {
+    expect(TABLE.maxFootprint).toEqual({ w: 7, h: 5 });
+    expect(TABLE.maxFootprint.w * ART_TILE).toBeLessThan(TABLE.frame.width);
+    expect(TABLE.anchor.y - TABLE.maxFootprint.h * ART_TILE).toBeGreaterThan(16);
+  });
+});
+
+describe('tileset color bands', () => {
+  it('counts the color cap per material band, not over the whole tileset', () => {
+    const image = validImage('terrain-tileset');
+    const bandHeight = TERRAIN_TILESET.colorBandRows! * 32;
+    // 100 colors in each of two bands: 200 in the file, under the cap in each band.
+    for (let i = 0; i < 100; i += 1) {
+      setPixel(image, i, 3, [i, 1, 0, 255]);
+      setPixel(image, i, bandHeight + 3, [i, 2, 0, 255]);
+    }
+    expect(validateArtImage('terrain-tileset', image)).toEqual([]);
+    for (let i = 100; i <= MAX_COLORS_PER_IMAGE; i += 1) setPixel(image, i, 4, [i, 1, 0, 255]);
+    expect(validateArtImage('terrain-tileset', image).map((v) => v.code)).toEqual(['too-many-colors']);
   });
 });

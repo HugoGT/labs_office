@@ -462,6 +462,16 @@ describe('createMemoryDecor: art pack catalog (art migration, step 3)', () => {
     expect(mateo.spec).toEqual(PACK.pieces.find((piece) => piece.id === mateo.id));
   });
 
+  it('seeds the new terrain materials, the tileset and the map props from the pack with no code change', async () => {
+    const catalog = decor();
+    await catalog.registerArtPack(PACK);
+    const pieces = await catalog.listArtPieces();
+    const ids = pieces.map((piece) => piece.id);
+    for (const id of ['floor-dirt', 'floor-sand', 'floor-cobblestone', 'floor-tile', 'floor-carpet', 'tileset-terrain']) expect(ids).toContain(id);
+    for (const kind of ['tree', 'plant', 'bridge', 'hedge', 'table']) expect(pieces.some((piece) => piece.kind === kind), kind).toBe(true);
+    expect(pieces.find((piece) => piece.id === 'bridge-wood')).toMatchObject({ kind: 'bridge', material: 'wood', contractVersion: PACK.contractVersion });
+  });
+
   it('lists in a deterministic (kind, id) order, same as pgDecor', async () => {
     const catalog = decor();
     await catalog.registerArtPack(PACK);

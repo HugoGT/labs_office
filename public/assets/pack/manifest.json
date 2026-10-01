@@ -1,6 +1,6 @@
 {
   "format": "oficina-art-pack",
-  "contractVersion": 1,
+  "contractVersion": 2,
   "fileFormat": "png-rgba8",
   "tile": 32,
   "author": "HugoGT",
@@ -1294,6 +1294,111 @@
       ]
     },
     {
+      "id": "floor-dirt",
+      "kind": "floor",
+      "name": "Tierra",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "dirt",
+      "colorable": false,
+      "defaultColor": null,
+      "motifTiles": 3,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "floor/dirt.png",
+          "imageKind": "floor",
+          "width": 96,
+          "height": 96,
+          "sha256": "49ffab102ab2aaef5125b3a688b13b70a41ae980256ffc844b483c06c4c13ad9"
+        }
+      ]
+    },
+    {
+      "id": "floor-sand",
+      "kind": "floor",
+      "name": "Arena",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "sand",
+      "colorable": false,
+      "defaultColor": null,
+      "motifTiles": 3,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "floor/sand.png",
+          "imageKind": "floor",
+          "width": 96,
+          "height": 96,
+          "sha256": "37d6d3c143da757d0d1cc821e316f4a2516f472a4bb9dddad2bee2da46e8e635"
+        }
+      ]
+    },
+    {
+      "id": "floor-cobblestone",
+      "kind": "floor",
+      "name": "Empedrado",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "cobblestone",
+      "colorable": false,
+      "defaultColor": null,
+      "motifTiles": 3,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "floor/cobblestone.png",
+          "imageKind": "floor",
+          "width": 96,
+          "height": 96,
+          "sha256": "72226fe7d0d11fc04d4ab242d70b0172622128a1229aa0a148083bd424ca4a8c"
+        }
+      ]
+    },
+    {
+      "id": "floor-tile",
+      "kind": "floor",
+      "name": "Baldosa",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "tile",
+      "colorable": false,
+      "defaultColor": null,
+      "motifTiles": 3,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "floor/tile.png",
+          "imageKind": "floor",
+          "width": 96,
+          "height": 96,
+          "sha256": "19d0ee29d5563e1577b6bee03748b7e1fc741e72109568df7ed8157cac3f993a"
+        }
+      ]
+    },
+    {
+      "id": "floor-carpet",
+      "kind": "floor",
+      "name": "Moqueta",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "carpet",
+      "colorable": false,
+      "defaultColor": null,
+      "motifTiles": 3,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "floor/carpet.png",
+          "imageKind": "floor",
+          "width": 96,
+          "height": 96,
+          "sha256": "aad0efe1d7e17d63557c04ad35c27cee8680dccf9225f6c7212f4bf32ae05dc7"
+        }
+      ]
+    },
+    {
       "id": "wall-brick",
       "kind": "wall",
       "name": "Ladrillo",
@@ -1374,6 +1479,326 @@
           "width": 272,
           "height": 16,
           "sha256": "a01988983d5413efddb608fb6ed3634736c1a869b8b021ac6137c1abb8ca6623"
+        }
+      ]
+    },
+    {
+      "id": "tileset-terrain",
+      "kind": "tileset",
+      "name": "Terreno",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "tileSize": 32,
+      "columns": 16,
+      "masks": 16,
+      "phases": 9,
+      "materials": [
+        {
+          "material": "water",
+          "floor": "floor-water",
+          "walkable": false,
+          "firstTile": 0
+        },
+        {
+          "material": "grass",
+          "floor": "floor-grass",
+          "walkable": true,
+          "firstTile": 144
+        },
+        {
+          "material": "dirt",
+          "floor": "floor-dirt",
+          "walkable": true,
+          "firstTile": 288
+        },
+        {
+          "material": "sand",
+          "floor": "floor-sand",
+          "walkable": true,
+          "firstTile": 432
+        },
+        {
+          "material": "cobblestone",
+          "floor": "floor-cobblestone",
+          "walkable": true,
+          "firstTile": 576
+        },
+        {
+          "material": "wood",
+          "floor": "floor-wood",
+          "walkable": true,
+          "firstTile": 720
+        },
+        {
+          "material": "tile",
+          "floor": "floor-tile",
+          "walkable": true,
+          "firstTile": 864
+        },
+        {
+          "material": "carpet",
+          "floor": "floor-carpet",
+          "walkable": true,
+          "firstTile": 1008
+        }
+      ],
+      "decals": [
+        {
+          "decal": "flowers-white",
+          "tile": 1152
+        },
+        {
+          "decal": "flowers-yellow",
+          "tile": 1153
+        },
+        {
+          "decal": "flowers-blue",
+          "tile": 1154
+        },
+        {
+          "decal": "clover",
+          "tile": 1155
+        },
+        {
+          "decal": "pebbles",
+          "tile": 1156
+        },
+        {
+          "decal": "mushrooms",
+          "tile": 1157
+        },
+        {
+          "decal": "leaves",
+          "tile": 1158
+        },
+        {
+          "decal": "lily-pad",
+          "tile": 1159
+        }
+      ],
+      "files": [
+        {
+          "role": "sheet",
+          "path": "tileset/terrain.png",
+          "imageKind": "terrain-tileset",
+          "width": 512,
+          "height": 2336,
+          "sha256": "4508238ef013ea0e64cd291e6dde914fc40dab9529deea742ea213cba9bac270"
+        }
+      ]
+    },
+    {
+      "id": "tree-oak",
+      "kind": "tree",
+      "name": "Roble",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "oak",
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "anchor": {
+        "x": 32,
+        "y": 90
+      },
+      "layer": "sorted",
+      "collision": "solid",
+      "files": [
+        {
+          "role": "sheet",
+          "path": "tree/oak.png",
+          "imageKind": "tree",
+          "width": 64,
+          "height": 96,
+          "sha256": "32d70be731b0b5aa110cf1d4816dfa651c5f20430011dc28fd8e8a0623a634f6"
+        }
+      ]
+    },
+    {
+      "id": "tree-maple",
+      "kind": "tree",
+      "name": "Arce",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "maple",
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "anchor": {
+        "x": 32,
+        "y": 90
+      },
+      "layer": "sorted",
+      "collision": "solid",
+      "files": [
+        {
+          "role": "sheet",
+          "path": "tree/maple.png",
+          "imageKind": "tree",
+          "width": 64,
+          "height": 96,
+          "sha256": "51f072845a8d0964845e4338980d09bbceecb18576c97c7ffdb6ee7df661f5e5"
+        }
+      ]
+    },
+    {
+      "id": "plant-ficus",
+      "kind": "plant",
+      "name": "Ficus",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "ficus",
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "anchor": {
+        "x": 16,
+        "y": 46
+      },
+      "layer": "sorted",
+      "collision": "solid",
+      "files": [
+        {
+          "role": "sheet",
+          "path": "plant/ficus.png",
+          "imageKind": "plant",
+          "width": 32,
+          "height": 48,
+          "sha256": "b1b1dc261525fe15d685bcd51a53d6e040a44c1337a927a27b25af5c8ddce8df"
+        }
+      ]
+    },
+    {
+      "id": "bridge-wood",
+      "kind": "bridge",
+      "name": "Puente de madera",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "wood",
+      "footprint": {
+        "w": 3,
+        "h": 3
+      },
+      "anchor": {
+        "x": 64,
+        "y": 112
+      },
+      "layer": "ground",
+      "collision": "deck",
+      "orientations": [
+        "north-south",
+        "east-west"
+      ],
+      "deck": {
+        "north-south": {
+          "x": 0,
+          "y": 0,
+          "w": 3,
+          "h": 3
+        },
+        "east-west": {
+          "x": 0,
+          "y": 0,
+          "w": 3,
+          "h": 3
+        }
+      },
+      "files": [
+        {
+          "role": "sheet",
+          "path": "bridge/wood.png",
+          "imageKind": "bridge",
+          "width": 256,
+          "height": 128,
+          "sha256": "29437e3fb8f2e81218195c7a0395694533bc5cc146ad714bc5459ca4f70852d6"
+        }
+      ]
+    },
+    {
+      "id": "hedge-boxwood",
+      "kind": "hedge",
+      "name": "Seto",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "boxwood",
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "anchor": {
+        "x": 16,
+        "y": 48
+      },
+      "layer": "sorted",
+      "collision": "solid",
+      "height": 16,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "hedge/boxwood.png",
+          "imageKind": "hedge",
+          "width": 512,
+          "height": 48,
+          "sha256": "03417bdef7c3fab946a47bb86ca5b190984ca613c29e86c6295983a4d60ff5c6"
+        }
+      ]
+    },
+    {
+      "id": "table-meeting",
+      "kind": "table",
+      "name": "Mesa de reuniones",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "walnut",
+      "footprint": {
+        "w": 7,
+        "h": 5
+      },
+      "anchor": {
+        "x": 128,
+        "y": 180
+      },
+      "layer": "sorted",
+      "collision": "solid",
+      "files": [
+        {
+          "role": "sheet",
+          "path": "table/meeting.png",
+          "imageKind": "table",
+          "width": 256,
+          "height": 192,
+          "sha256": "38b666176614092ad6af257b69a83198270331e977ffd3c25e32d5e29e5d7bec"
+        }
+      ]
+    },
+    {
+      "id": "table-cafeteria",
+      "kind": "table",
+      "name": "Mesa de cafetería",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "beech",
+      "footprint": {
+        "w": 5,
+        "h": 3
+      },
+      "anchor": {
+        "x": 128,
+        "y": 180
+      },
+      "layer": "sorted",
+      "collision": "solid",
+      "files": [
+        {
+          "role": "sheet",
+          "path": "table/cafeteria.png",
+          "imageKind": "table",
+          "width": 256,
+          "height": 192,
+          "sha256": "671418ba7cea35d57c4efd96d86f77b580333417dfb7e356b647211dff192ef5"
         }
       ]
     }

@@ -169,10 +169,13 @@ class Canvas {
   }
 }
 
+/** Big enough for a desk or a chair; room tables pass a larger one. */
 const CANVAS_SIZE = 128;
+/** Pixel keys only need to be unique, so they cover any canvas a piece can ask for. */
+const KEY_SPAN = 1024;
 
 function key(x: number, y: number): number {
-  return (y + CANVAS_SIZE) * CANVAS_SIZE * 4 + x + CANVAS_SIZE;
+  return (y + KEY_SPAN) * KEY_SPAN * 4 + x + KEY_SPAN;
 }
 
 function toned(color: Rgba, alpha: number | undefined): Rgba {
@@ -294,10 +297,10 @@ function cropped(image: PixelBuffer, rect: { x: number; y: number; width: number
 }
 
 /** Draws a model for one facing, both layers cropped to the same tight box. */
-export function renderFurniture(model: FurnitureModel, facing: Facing): RenderedFurniture {
+export function renderFurniture(model: FurnitureModel, facing: Facing, canvasSize = CANVAS_SIZE): RenderedFurniture {
   const o = ORIENTATION[facing];
-  const back = new Canvas(CANVAS_SIZE);
-  const front = new Canvas(CANVAS_SIZE);
+  const back = new Canvas(canvasSize);
+  const front = new Canvas(canvasSize);
   paintShadow(back, model, facing);
   for (const part of model.parts) paintPart((part.layer?.(facing) ?? 'back') === 'front' ? front : back, part, o);
   const rect = bounds([back.image, front.image]);

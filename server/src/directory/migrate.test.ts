@@ -546,7 +546,11 @@ describe('schema.sql: art pack catalog and appearance (art migration, step 3)', 
 
   it('creates the catalog keyed by the stable manifest id, with a retirement mark and no delete path', () => {
     expect(squashed).toContain('create table if not exists art_pieces ( id text primary key');
-    expect(squashed).toContain("kind text not null check (kind in ('character', 'chair', 'desk', 'floor', 'wall'))");
+    const kinds = "'character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table'";
+    expect(squashed).toContain(`kind text not null check (kind in (${kinds}))`);
+    // A live table keeps its old CHECK, so the kinds of art contract 2 replace it.
+    expect(squashed).toContain('alter table art_pieces drop constraint if exists art_pieces_kind_check');
+    expect(squashed).toContain(`alter table art_pieces add constraint art_pieces_kind_check check (kind in (${kinds}))`);
     expect(squashed).toContain('files jsonb not null');
     expect(squashed).toContain('spec jsonb not null');
     expect(squashed).toContain('retired_at timestamptz');

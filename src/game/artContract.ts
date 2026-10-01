@@ -13,8 +13,13 @@
  * point). A 3x3 desk station does not imply a 96x96 PNG.
  */
 
-/** Bump when any number below changes meaning; the manifest records it. */
-export const ART_CONTRACT_VERSION = 1;
+/**
+ * Bump when any number below changes meaning; the manifest records it.
+ * Version 2 added the terrain tileset and the map props (trees, plants,
+ * bridges, hedges, room tables): their kinds are unknown to a version 1
+ * reader, whose catalog would reject the pack.
+ */
+export const ART_CONTRACT_VERSION = 2;
 
 /** Every file is a non-interlaced 8-bit RGBA PNG. */
 export const ART_FILE_FORMAT = 'png-rgba8';
@@ -73,7 +78,20 @@ export const FACING_WALK_DIRECTION: Readonly<Record<ArtFacing, WalkDirection>> =
 export const CHAIR_LAYERS = ['back', 'front'] as const;
 export type ChairLayer = (typeof CHAIR_LAYERS)[number];
 
-export const ART_IMAGE_KINDS = ['character-walk', 'character-seated', 'chair', 'desk', 'floor', 'wall'] as const;
+export const ART_IMAGE_KINDS = [
+  'character-walk',
+  'character-seated',
+  'chair',
+  'desk',
+  'floor',
+  'wall',
+  'terrain-tileset',
+  'tree',
+  'plant',
+  'bridge',
+  'hedge',
+  'table',
+] as const;
 export type ArtImageKind = (typeof ART_IMAGE_KINDS)[number];
 
 interface ImageSpecBase {
@@ -89,6 +107,12 @@ interface ImageSpecBase {
    */
   readonly transparentCorners: boolean;
   readonly maxColors: number;
+  /**
+   * When set, `maxColors` applies to each band of this many frame rows instead
+   * of the whole file: a sheet that gathers several materials (the terrain
+   * tileset) is held to the per-material budget of a single sheet.
+   */
+  readonly colorBandRows?: number;
 }
 
 export interface CharacterWalkSpec extends ImageSpecBase {
@@ -147,7 +171,73 @@ export interface WallSpec extends ImageSpecBase {
   readonly bodyLength: number;
 }
 
-export type ArtImageSpec = CharacterWalkSpec | CharacterSeatedSpec | ChairSpec | DeskSpec | FloorSpec | WallSpec;
+/** `ground`: drawn over the terrain and under everything else. `sorted`: depth sorted by its anchor. */
+export type PropLayer = 'ground' | 'sorted';
+/** `solid`: the footprint blocks movement. `deck`: the footprint is walkable whatever the terrain under it. */
+export type PropCollision = 'solid' | 'deck';
+
+/**
+ * Map props: one fixed frame per image kind. The anchor is the floor pixel at
+ * the bottom middle of the footprint, and its y is the depth the prop sorts
+ * by, like the feet of a character.
+ */
+interface PropSpecBase extends ImageSpecBase {
+  readonly anchor: Point;
+  readonly layer: PropLayer;
+  readonly collision: PropCollision;
+}
+
+export interface TreeSpec extends PropSpecBase {
+  readonly kind: 'tree';
+  readonly footprint: Footprint;
+}
+
+export interface PlantSpec extends PropSpecBase {
+  readonly kind: 'plant';
+  readonly footprint: Footprint;
+}
+
+export const BRIDGE_ORIENTATIONS = ['north-south', 'east-west'] as const;
+export type BridgeOrientation = (typeof BRIDGE_ORIENTATIONS)[number];
+
+export interface BridgeSpec extends PropSpecBase {
+  readonly kind: 'bridge';
+  readonly columnOrder: readonly BridgeOrientation[];
+  readonly footprint: Footprint;
+}
+
+export interface HedgeSpec extends PropSpecBase {
+  readonly kind: 'hedge';
+  readonly footprint: Footprint;
+  /** Screen pixels the top of the hedge rises over its footprint. */
+  readonly height: number;
+}
+
+/** Room tables differ in size: each piece states its footprint, up to `maxFootprint`. */
+export interface TableSpec extends PropSpecBase {
+  readonly kind: 'table';
+  readonly maxFootprint: Footprint;
+}
+
+export interface TerrainTilesetSpec extends ImageSpecBase {
+  readonly kind: 'terrain-tileset';
+  readonly masks: number;
+  readonly phases: number;
+}
+
+export type ArtImageSpec =
+  | CharacterWalkSpec
+  | CharacterSeatedSpec
+  | ChairSpec
+  | DeskSpec
+  | FloorSpec
+  | WallSpec
+  | TerrainTilesetSpec
+  | TreeSpec
+  | PlantSpec
+  | BridgeSpec
+  | HedgeSpec
+  | TableSpec;
 
 export const CHARACTER_WALK: CharacterWalkSpec = {
   kind: 'character-walk',
@@ -255,6 +345,271 @@ export const WALL: WallSpec = {
   maxColors: MAX_COLORS_PER_IMAGE,
 };
 
+// --- Terrain (#123) ------------------------------------------------------------------------------
+
+/**
+ * The block types of the terrain, in drawing priority: where two meet, the
+ * later one is drawn over the earlier one's edge. Water is the lowest, so every
+ * shore is the land's edge over the water, and carpet the highest.
+ */
+export const TERRAIN_MATERIALS = ['water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet'] as const;
+export type TerrainMaterial = (typeof TERRAIN_MATERIALS)[number];
+
+/** Water is solid for the client and the server alike; every other material is walkable. */
+export const TERRAIN_WALKABLE: Readonly<Record<TerrainMaterial, boolean>> = {
+  water: false,
+  grass: true,
+  dirt: true,
+  sand: true,
+  cobblestone: true,
+  wood: true,
+  tile: true,
+  carpet: true,
+};
+
+/** Each terrain material is the floor piece of the same name, cut on the dual grid. */
+export function terrainFloorPieceId(material: TerrainMaterial): string {
+  return `floor-${material}`;
+}
+
+/** Corner mask bits of a dual-grid cell, in reading order. */
+export const TERRAIN_CORNER_BITS = { nw: 1, ne: 2, sw: 4, se: 8 } as const;
+export const TERRAIN_MASKS = 16;
+/** One tileset row per motif tile: the terrain keeps the floor motif's 96px repeat. */
+export const TERRAIN_PHASES = MOTIF_TILES * MOTIF_TILES;
+
+/** Small transparent details for a decal layer over the terrain (flowers, pebbles, lily pads). */
+export const TERRAIN_DECALS = [
+  'flowers-white',
+  'flowers-yellow',
+  'flowers-blue',
+  'clover',
+  'pebbles',
+  'mushrooms',
+  'leaves',
+  'lily-pad',
+] as const;
+export type TerrainDecal = (typeof TERRAIN_DECALS)[number];
+
+/**
+ * One shared tileset for every terrain layer: a band of TERRAIN_PHASES rows per
+ * material (TERRAIN_MATERIALS order), each row the 16 corner masks of one motif
+ * phase, then one row of decals. Mask 0 is an empty tile so the index stays
+ * arithmetic. Colors are capped per material band.
+ */
+export const TERRAIN_TILESET: TerrainTilesetSpec = {
+  kind: 'terrain-tileset',
+  frame: { width: ART_TILE, height: ART_TILE },
+  columns: TERRAIN_MASKS,
+  rows: TERRAIN_MATERIALS.length * TERRAIN_PHASES + 1,
+  masks: TERRAIN_MASKS,
+  phases: TERRAIN_PHASES,
+  // Edge tiles are partly transparent and carry a translucent contact shadow.
+  alpha: 'partial',
+  transparentCorners: false,
+  maxColors: MAX_COLORS_PER_IMAGE,
+  colorBandRows: TERRAIN_PHASES,
+};
+
+/** Terrain layers a map needs: a cell has four corners, so at most four materials. */
+export const TERRAIN_LAYER_COUNT = 4;
+/**
+ * World position of display cell (0, 0). The display grid sits half a tile up
+ * and left of the map grid, so the corners of display cell (cx, cy) are the
+ * centers of map tiles (cx - 1, cy - 1) to (cx, cy): a (w + 1) x (h + 1) layer
+ * covers a w x h map.
+ */
+export const TERRAIN_LAYER_ORIGIN = -ART_TILE / 2;
+
+export interface TerrainCorners {
+  readonly nw: TerrainMaterial;
+  readonly ne: TerrainMaterial;
+  readonly sw: TerrainMaterial;
+  readonly se: TerrainMaterial;
+}
+
+export interface TerrainLayerTile {
+  readonly material: TerrainMaterial;
+  readonly mask: number;
+}
+
+export function terrainCornerMask(corners: Readonly<Record<keyof TerrainCorners, boolean>>): number {
+  return (
+    (corners.nw ? TERRAIN_CORNER_BITS.nw : 0) |
+    (corners.ne ? TERRAIN_CORNER_BITS.ne : 0) |
+    (corners.sw ? TERRAIN_CORNER_BITS.sw : 0) |
+    (corners.se ? TERRAIN_CORNER_BITS.se : 0)
+  );
+}
+
+/** Motif phase of display cell (cx, cy): it starts at world pixel (32 cx - 16, 32 cy - 16). */
+export function terrainPhaseAt(cx: number, cy: number): number {
+  return mod(cy - 1, MOTIF_TILES) * MOTIF_TILES + mod(cx - 1, MOTIF_TILES);
+}
+
+/** Motif pixel at the top-left of every tile of a phase (it wraps around the 96px motif). */
+export function terrainPhaseOrigin(phase: number): Point {
+  const half = ART_TILE / 2;
+  return { x: half + (phase % MOTIF_TILES) * ART_TILE, y: half + Math.floor(phase / MOTIF_TILES) * ART_TILE };
+}
+
+export function terrainTileIndex(material: TerrainMaterial, mask: number, phase: number): number {
+  if (!Number.isInteger(mask) || mask < 1 || mask >= TERRAIN_MASKS) throw new Error(`Invalid terrain mask ${mask}`);
+  if (!Number.isInteger(phase) || phase < 0 || phase >= TERRAIN_PHASES) throw new Error(`Invalid terrain phase ${phase}`);
+  return (TERRAIN_MATERIALS.indexOf(material) * TERRAIN_PHASES + phase) * TERRAIN_MASKS + mask;
+}
+
+export function terrainDecalIndex(decal: TerrainDecal): number {
+  return TERRAIN_MATERIALS.length * TERRAIN_PHASES * TERRAIN_MASKS + TERRAIN_DECALS.indexOf(decal);
+}
+
+/**
+ * The tiles of one display cell, bottom layer first: its lowest material
+ * full, then each higher material over the corners at or above it. Nesting
+ * the masks means every edge blends over the material just below it.
+ */
+export function terrainCellLayers(corners: TerrainCorners): TerrainLayerTile[] {
+  const rank = (material: TerrainMaterial): number => TERRAIN_MATERIALS.indexOf(material);
+  const present = [...new Set([corners.nw, corners.ne, corners.sw, corners.se])].sort((a, b) => rank(a) - rank(b));
+  return present.map((material) => ({
+    material,
+    mask: terrainCornerMask({
+      nw: rank(corners.nw) >= rank(material),
+      ne: rank(corners.ne) >= rank(material),
+      sw: rank(corners.sw) >= rank(material),
+      se: rank(corners.se) >= rank(material),
+    }),
+  }));
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+/** Corners of display cell (cx, cy) on a width x height map; outside the map, the nearest tile. */
+export function terrainCellCorners(
+  terrainAt: (tx: number, ty: number) => TerrainMaterial,
+  width: number,
+  height: number,
+  cx: number,
+  cy: number,
+): TerrainCorners {
+  const at = (tx: number, ty: number): TerrainMaterial => terrainAt(clamp(tx, 0, width - 1), clamp(ty, 0, height - 1));
+  return { nw: at(cx - 1, cy - 1), ne: at(cx, cy - 1), sw: at(cx - 1, cy), se: at(cx, cy) };
+}
+
+/**
+ * Tile data of the TERRAIN_LAYER_COUNT layers of a map, `[layer][cy][cx]`,
+ * `-1` where a layer draws nothing (Phaser's empty tile). Each layer is
+ * (width + 1) x (height + 1) cells placed at TERRAIN_LAYER_ORIGIN.
+ */
+export function terrainLayerData(width: number, height: number, terrainAt: (tx: number, ty: number) => TerrainMaterial): number[][][] {
+  const layers = Array.from({ length: TERRAIN_LAYER_COUNT }, () =>
+    Array.from({ length: height + 1 }, () => new Array<number>(width + 1).fill(-1)),
+  );
+  for (let cy = 0; cy <= height; cy += 1) {
+    for (let cx = 0; cx <= width; cx += 1) {
+      const phase = terrainPhaseAt(cx, cy);
+      terrainCellLayers(terrainCellCorners(terrainAt, width, height, cx, cy)).forEach((tile, layer) => {
+        layers[layer]![cy]![cx] = terrainTileIndex(tile.material, tile.mask, phase);
+      });
+    }
+  }
+  return layers;
+}
+
+// --- Map props ---------------------------------------------------------------------------------
+
+const PROP_BASE = { columns: 1, rows: 1, alpha: 'partial', transparentCorners: true, maxColors: MAX_COLORS_PER_IMAGE } as const;
+
+/** A tree stands on one tile; its crown spills over the tiles around and above it. */
+export const TREE: TreeSpec = {
+  ...PROP_BASE,
+  kind: 'tree',
+  frame: { width: 64, height: 96 },
+  anchor: { x: 32, y: 90 },
+  footprint: { w: 1, h: 1 },
+  layer: 'sorted',
+  collision: 'solid',
+};
+
+export const PLANT: PlantSpec = {
+  ...PROP_BASE,
+  kind: 'plant',
+  frame: { width: 32, height: 48 },
+  anchor: { x: 16, y: 46 },
+  footprint: { w: 1, h: 1 },
+  layer: 'sorted',
+  collision: 'solid',
+};
+
+/** A 3x3 deck centered in a 128px cell, with abutments reaching 16px onto each bank. */
+export const BRIDGE: BridgeSpec = {
+  ...PROP_BASE,
+  kind: 'bridge',
+  frame: { width: 128, height: 128 },
+  columns: BRIDGE_ORIENTATIONS.length,
+  columnOrder: BRIDGE_ORIENTATIONS,
+  anchor: { x: 64, y: 112 },
+  footprint: { w: 3, h: 3 },
+  layer: 'ground',
+  collision: 'deck',
+};
+
+const HEDGE_HEIGHT = 16;
+
+/**
+ * One tile of hedge per frame, frame = connection mask to hedge neighbors
+ * (north 1, east 2, south 4, west 8, like wall joints; 0 is a lone bush). A
+ * connected hedge fills its frame to the edge, so no corner rule.
+ */
+export const HEDGE: HedgeSpec = {
+  ...PROP_BASE,
+  kind: 'hedge',
+  frame: { width: ART_TILE, height: ART_TILE + HEDGE_HEIGHT },
+  columns: 16,
+  anchor: { x: ART_TILE / 2, y: ART_TILE + HEDGE_HEIGHT },
+  footprint: { w: 1, h: 1 },
+  height: HEDGE_HEIGHT,
+  layer: 'sorted',
+  collision: 'solid',
+  transparentCorners: false,
+};
+
+/** Meeting and cafeteria tables: one frame fits the largest, the 7x5 meeting table. */
+export const TABLE: TableSpec = {
+  ...PROP_BASE,
+  kind: 'table',
+  frame: { width: 256, height: 192 },
+  anchor: { x: 128, y: 180 },
+  maxFootprint: { w: 7, h: 5 },
+  layer: 'sorted',
+  collision: 'solid',
+};
+
+export function bridgeFrameIndex(orientation: BridgeOrientation): number {
+  return BRIDGE_ORIENTATIONS.indexOf(orientation);
+}
+
+export function hedgeFrameIndex(mask: number): number {
+  if (!Number.isInteger(mask) || mask < 0 || mask > 15) throw new Error(`Invalid hedge mask ${mask}`);
+  return mask;
+}
+
+/**
+ * Where to draw a prop whose footprint's top-left tile is (tx, ty): the frame's
+ * top-left in world pixels and the depth it sorts by.
+ */
+export function propPlacement(
+  piece: { readonly anchor: Point; readonly footprint: Footprint },
+  tx: number,
+  ty: number,
+): { readonly x: number; readonly y: number; readonly depthY: number } {
+  const groundX = tx * ART_TILE + (piece.footprint.w * ART_TILE) / 2;
+  const groundY = (ty + piece.footprint.h) * ART_TILE;
+  return { x: groundX - piece.anchor.x, y: groundY - piece.anchor.y, depthY: groundY };
+}
+
 export const ART_IMAGE_SPECS: Readonly<{
   'character-walk': CharacterWalkSpec;
   'character-seated': CharacterSeatedSpec;
@@ -262,6 +617,12 @@ export const ART_IMAGE_SPECS: Readonly<{
   desk: DeskSpec;
   floor: FloorSpec;
   wall: WallSpec;
+  'terrain-tileset': TerrainTilesetSpec;
+  tree: TreeSpec;
+  plant: PlantSpec;
+  bridge: BridgeSpec;
+  hedge: HedgeSpec;
+  table: TableSpec;
 }> = {
   'character-walk': CHARACTER_WALK,
   'character-seated': CHARACTER_SEATED,
@@ -269,6 +630,12 @@ export const ART_IMAGE_SPECS: Readonly<{
   desk: DESK,
   floor: FLOOR,
   wall: WALL,
+  'terrain-tileset': TERRAIN_TILESET,
+  tree: TREE,
+  plant: PLANT,
+  bridge: BRIDGE,
+  hedge: HEDGE,
+  table: TABLE,
 };
 
 export function sheetSize(spec: Pick<ImageSpecBase, 'frame' | 'columns' | 'rows'>): Size {
@@ -394,7 +761,7 @@ export function wallFrameIndex(piece: WallPiece): number {
 /** `format` of `public/assets/pack/manifest.json`. */
 export const ART_PACK_FORMAT = 'oficina-art-pack';
 
-export const ART_PIECE_KINDS = ['character', 'chair', 'desk', 'floor', 'wall'] as const;
+export const ART_PIECE_KINDS = ['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table'] as const;
 export type ArtPieceKind = (typeof ART_PIECE_KINDS)[number];
 
 /** One PNG of a piece. Paths are relative to the manifest; `sha256` is of the file bytes. */
@@ -466,7 +833,69 @@ export interface ArtWallPiece extends ArtPieceBase {
   readonly translucent: boolean;
 }
 
-export type ArtPiece = ArtCharacterPiece | ArtChairPiece | ArtDeskPiece | ArtFloorPiece | ArtWallPiece;
+/** One terrain material of the tileset: where its band starts and the floor piece it is cut from. */
+export interface ArtTilesetMaterial {
+  readonly material: TerrainMaterial;
+  readonly floor: string;
+  readonly walkable: boolean;
+  /** Index of its (phase 0, mask 0) tile; `terrainTileIndex` gives the rest. */
+  readonly firstTile: number;
+}
+
+export interface ArtTilesetPiece extends ArtPieceBase {
+  readonly kind: 'tileset';
+  readonly tileSize: number;
+  readonly columns: number;
+  readonly masks: number;
+  readonly phases: number;
+  readonly materials: readonly ArtTilesetMaterial[];
+  readonly decals: readonly { readonly decal: TerrainDecal; readonly tile: number }[];
+}
+
+/** Map props share placement: footprint, anchor (bottom middle of the footprint), layer and collision. */
+interface ArtPropPieceBase extends ArtPieceBase {
+  readonly material: string;
+  readonly footprint: Footprint;
+  readonly anchor: Point;
+  readonly layer: PropLayer;
+  readonly collision: PropCollision;
+}
+
+export interface ArtTreePiece extends ArtPropPieceBase {
+  readonly kind: 'tree';
+}
+
+export interface ArtPlantPiece extends ArtPropPieceBase {
+  readonly kind: 'plant';
+}
+
+export interface ArtTablePiece extends ArtPropPieceBase {
+  readonly kind: 'table';
+}
+
+export interface ArtHedgePiece extends ArtPropPieceBase {
+  readonly kind: 'hedge';
+  readonly height: number;
+}
+
+/** Tile rectangle relative to the top-left tile of a footprint. */
+export interface TileRect {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+}
+
+export interface ArtBridgePiece extends ArtPropPieceBase {
+  readonly kind: 'bridge';
+  readonly orientations: readonly BridgeOrientation[];
+  /** The walkable tiles per orientation, over water too. The rest of the footprint is solid. */
+  readonly deck: Readonly<Record<BridgeOrientation, TileRect>>;
+}
+
+export type ArtPropPiece = ArtTreePiece | ArtPlantPiece | ArtTablePiece | ArtHedgePiece | ArtBridgePiece;
+
+export type ArtPiece = ArtCharacterPiece | ArtChairPiece | ArtDeskPiece | ArtFloorPiece | ArtWallPiece | ArtTilesetPiece | ArtPropPiece;
 
 export interface ArtPackManifest {
   readonly format: typeof ART_PACK_FORMAT;
@@ -522,9 +951,14 @@ export function validateArtImage(kind: ArtImageKind, image: RgbaImage): ArtViola
     ];
   }
   const violations: ArtViolation[] = [];
-  const colors = countColors(image);
-  if (colors > spec.maxColors) {
-    violations.push({ code: 'too-many-colors', message: `${kind} allows ${spec.maxColors} colors, got ${colors}` });
+  const bandHeight = (spec.colorBandRows ?? spec.rows) * spec.frame.height;
+  for (let top = 0; top < image.height; top += bandHeight) {
+    const colors = countColors(cropImage(image, 0, top, image.width, Math.min(bandHeight, image.height - top)));
+    if (colors > spec.maxColors) {
+      const where = spec.colorBandRows === undefined ? '' : ` in the band at row ${top}`;
+      violations.push({ code: 'too-many-colors', message: `${kind} allows ${spec.maxColors} colors, got ${colors}${where}` });
+      break;
+    }
   }
   if (spec.alpha === 'opaque') {
     for (let i = 3; i < image.data.length; i += 4) {

@@ -4,7 +4,21 @@ import { CHARACTER_HEIGHT, FRAME_HEIGHT } from './camera.ts';
 import { CHARACTERS } from './characters.ts';
 import { hexToRgba } from './color.ts';
 import { buildCharacterSprites } from './spriteSheet.ts';
-import { grassTile, plainTile, terrainTile, TERRAINS, TILE_SIZE, waterTile, woodTile } from './tiles.ts';
+import { TERRAIN_MATERIALS, countColors } from '../../../src/game/artContract.ts';
+import {
+  carpetTile,
+  cobblestoneTile,
+  dirtTile,
+  grassTile,
+  plainTile,
+  sandTile,
+  terrainTile,
+  TERRAINS,
+  tileFloorTile,
+  TILE_SIZE,
+  waterTile,
+  woodTile,
+} from './tiles.ts';
 
 function opaqueRows(image: { width: number; height: number; alphaAt(x: number, y: number): number }): number[] {
   const rows: number[] = [];
@@ -95,4 +109,68 @@ test('water stays smooth: no detail is darker than the base water color', () => 
   const base = [...counts].sort((a, b) => b[1] - a[1])[0]![0];
   const darkest = Math.min(...counts.keys());
   assert.ok(darkest >= base - 1, `darkest ${darkest} vs base ${base}`);
+});
+
+function average(tile: ReturnType<typeof woodTile>): { r: number; g: number; b: number; luma: number; spread: number } {
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  const lumas: number[] = [];
+  for (let i = 0; i < tile.data.length; i += 4) {
+    r += tile.data[i] ?? 0;
+    g += tile.data[i + 1] ?? 0;
+    b += tile.data[i + 2] ?? 0;
+    lumas.push((tile.data[i] ?? 0) * 0.3 + (tile.data[i + 1] ?? 0) * 0.59 + (tile.data[i + 2] ?? 0) * 0.11);
+  }
+  const n = tile.data.length / 4;
+  const luma = lumas.reduce((sum, value) => sum + value, 0) / n;
+  const spread = Math.sqrt(lumas.reduce((sum, value) => sum + (value - luma) ** 2, 0) / n);
+  return { r: r / n, g: g / n, b: b / n, luma, spread };
+}
+
+test('every terrain material of #123 has a floor motif, plus the colorable plain floor', () => {
+  for (const material of TERRAIN_MATERIALS) assert.ok((TERRAINS as readonly string[]).includes(material), material);
+  assert.deepEqual([...TERRAINS], ['wood', 'grass', 'water', 'plain', 'dirt', 'sand', 'cobblestone', 'tile', 'carpet']);
+});
+
+test('the new materials read as themselves', () => {
+  const dirt = average(dirtTile());
+  const sand = average(sandTile());
+  const cobble = average(cobblestoneTile());
+  const tile = average(tileFloorTile());
+  const carpet = average(carpetTile());
+  assert.ok(dirt.r > dirt.g && dirt.g > dirt.b, 'dirt is brown');
+  assert.ok(sand.r > sand.g && sand.g > sand.b && sand.luma > dirt.luma + 40, 'sand is a light warm tone, lighter than dirt');
+  assert.ok(Math.max(cobble.r, cobble.g, cobble.b) - Math.min(cobble.r, cobble.g, cobble.b) < 30, 'cobblestone is a muted gray');
+  assert.ok(tile.luma > 150, 'floor tiles are light ceramic');
+  assert.ok(carpet.luma < tile.luma, 'carpet is darker than ceramic tile');
+});
+
+test('sand and cobblestone stay calm so characters read over them', () => {
+  // The first iteration of #123 found both too busy at this scale.
+  assert.ok(average(sandTile()).spread < 10, `sand spread ${average(sandTile()).spread}`);
+  assert.ok(average(cobblestoneTile()).spread < 22, `cobblestone spread ${average(cobblestoneTile()).spread}`);
+});
+
+test('the motifs keep few colors, leaving room for edge shading in the tileset band', () => {
+  for (const terrain of TERRAINS) assert.ok(countColors(terrainTile(terrain)) <= 40, `${terrain} has ${countColors(terrainTile(terrain))}`);
+});
+
+test('the motifs are seamless: wrapped edges continue the same pattern', () => {
+  // A seam shows as a column or row that differs from both neighbors far more than the motif's own rows do.
+  for (const terrain of ['dirt', 'sand', 'cobblestone', 'tile', 'carpet'] as const) {
+    const motif = terrainTile(terrain);
+    const differences = (ax: number, bx: number): number => {
+      let count = 0;
+      for (let y = 0; y < TILE_SIZE; y += 1) {
+        const a = motif.getPixel(ax, y);
+        const b = motif.getPixel(bx, y);
+        if (a.r !== b.r || a.g !== b.g || a.b !== b.b) count += 1;
+      }
+      return count;
+    };
+    let worstInside = 0;
+    for (let x = 0; x < TILE_SIZE - 1; x += 1) worstInside = Math.max(worstInside, differences(x, x + 1));
+    assert.ok(differences(TILE_SIZE - 1, 0) <= worstInside, `${terrain} has a seam at its wrap`);
+  }
 });

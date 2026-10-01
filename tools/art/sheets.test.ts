@@ -1,16 +1,31 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ART_TILE,
+  BRIDGE,
+  BRIDGE_ORIENTATIONS,
   CHAIR,
   CHARACTER_SEATED,
   CHARACTER_WALK,
   DESK,
+  FLOOR,
   FLOOR_MOTIF_SIZE,
+  HEDGE,
   PACK_FACINGS,
+  TERRAIN_DECALS,
+  TERRAIN_MATERIALS,
+  TERRAIN_PHASES,
+  TERRAIN_TILESET,
   WALK_DIRECTIONS,
   WALL,
+  bridgeFrameIndex,
   facingColumn,
+  floorFrameAt,
+  hedgeFrameIndex,
+  terrainDecalIndex,
+  terrainTileIndex,
   validateArtImage,
   wallFrameIndex,
+  type TerrainMaterial,
 } from '../../src/game/artContract.ts';
 import { ANCHOR_X, ANCHOR_Y, FRAME_HEIGHT, FRAME_WIDTH } from './domain/camera.ts';
 import { chairSprite, CHAIR_MATERIALS } from './domain/chairs.ts';
@@ -27,7 +42,25 @@ import { groupWallGeometry, resolveWallGeometry } from './domain/wallGeometry.ts
 import { WALL_MATERIALS, WallMap } from './domain/wallMap.ts';
 import { composeWalls } from './domain/wallRenderer.ts';
 import { crop } from './imageOps.ts';
-import { chairSheet, characterSeatedSheet, characterWalkSheet, deskSheet, floorSheet, wallLayer, wallSheet } from './sheets.ts';
+import { bridgeSprite, hedgeSprite, PLANT_KINDS, plantSprite, TREE_KINDS, treeSprite } from './domain/props.ts';
+import { ROOM_TABLES, roomTableSprite } from './domain/tables.ts';
+import { decalTile, terrainEdgeTile } from './domain/terrainTiles.ts';
+import {
+  bridgeSheet,
+  chairSheet,
+  characterSeatedSheet,
+  characterWalkSheet,
+  deskSheet,
+  floorSheet,
+  hedgeSheet,
+  plantSheet,
+  tableSheet,
+  terrainLayerImage,
+  terrainTilesetSheet,
+  treeSheet,
+  wallLayer,
+  wallSheet,
+} from './sheets.ts';
 
 function pixels(image: PixelBuffer): number[] {
   return Array.from(image.data);
@@ -141,6 +174,87 @@ describe('wall sheet', () => {
       const drawn = wallLayer(sheet, group!);
       expect([drawn.left, drawn.top], material).toEqual([expected.left, expected.top]);
       expect(pixels(drawn.image), material).toEqual(pixels(expected.image));
+    }
+  });
+});
+
+function tileOf(sheet: PixelBuffer, index: number, columns: number, width: number, height: number): PixelBuffer {
+  return crop(sheet, (index % columns) * width, Math.floor(index / columns) * height, width, height);
+}
+
+describe('terrain tileset sheet', () => {
+  const sheet = terrainTilesetSheet();
+
+  it('validates against the contract, color cap counted per material band', () => {
+    expect(validateArtImage('terrain-tileset', sheet)).toEqual([]);
+  });
+
+  it('holds each edge tile at its contract index, mask 0 empty, then the decals', () => {
+    const tile = (index: number): PixelBuffer => tileOf(sheet, index, TERRAIN_TILESET.columns, ART_TILE, ART_TILE);
+    for (const material of TERRAIN_MATERIALS) {
+      for (let phase = 0; phase < TERRAIN_PHASES; phase += 1) {
+        expect(tile(terrainTileIndex(material, 15, phase) - 15).countOpaque(), `${material} ${phase} mask 0`).toBe(0);
+        for (const mask of [1, 6, 9, 15]) {
+          expect(pixels(tile(terrainTileIndex(material, mask, phase))), `${material} ${mask} ${phase}`).toEqual(pixels(terrainEdgeTile(material, mask, phase)));
+        }
+      }
+    }
+    for (const decal of TERRAIN_DECALS) expect(pixels(tile(terrainDecalIndex(decal))), decal).toEqual(pixels(decalTile(decal)));
+    for (let column = TERRAIN_DECALS.length; column < TERRAIN_TILESET.columns; column += 1) {
+      expect(tile(terrainDecalIndex(TERRAIN_DECALS[0]!) + column).countOpaque()).toBe(0);
+    }
+  });
+
+  it('lays a uniform map out exactly like the floor of the same material, aligned to the world', () => {
+    for (const material of ['grass', 'cobblestone', 'carpet'] as const) {
+      const image = terrainLayerImage(sheet, 5, 4, () => material);
+      const floor = floorSheet(material);
+      for (let ty = 0; ty < 4; ty += 1) {
+        for (let tx = 0; tx < 5; tx += 1) {
+          const frame = floorFrameAt(tx, ty);
+          const expected = tileOf(floor, frame, FLOOR.columns, ART_TILE, ART_TILE);
+          expect(pixels(crop(image, tx * ART_TILE, ty * ART_TILE, ART_TILE, ART_TILE)), `${material} (${tx}, ${ty})`).toEqual(pixels(expected));
+        }
+      }
+    }
+  });
+
+  it('keeps the map opaque where materials meet: no gaps between layers', () => {
+    const rows = ['WWGGD', 'WSGDD', 'GGCOO', 'KTCOO'];
+    const key: Record<string, TerrainMaterial> = { W: 'water', G: 'grass', D: 'dirt', S: 'sand', C: 'cobblestone', O: 'wood', T: 'tile', K: 'carpet' };
+    const image = terrainLayerImage(sheet, 5, 4, (tx, ty) => key[rows[ty]![tx]!]!);
+    expect(image.countOpaque()).toBe(image.width * image.height);
+  });
+});
+
+describe('prop sheets', () => {
+  it('are the generator drawings in contract frames', () => {
+    for (const kind of TREE_KINDS) {
+      expect(validateArtImage('tree', treeSheet(kind)), kind).toEqual([]);
+      expect(pixels(treeSheet(kind))).toEqual(pixels(treeSprite(kind)));
+    }
+    for (const kind of PLANT_KINDS) {
+      expect(validateArtImage('plant', plantSheet(kind)), kind).toEqual([]);
+      expect(pixels(plantSheet(kind))).toEqual(pixels(plantSprite(kind)));
+    }
+    for (const kind of ROOM_TABLES) {
+      expect(validateArtImage('table', tableSheet(kind)), kind).toEqual([]);
+      expect(pixels(tableSheet(kind))).toEqual(pixels(roomTableSprite(kind)));
+    }
+  });
+
+  it('put each bridge orientation and each hedge mask in its frame', () => {
+    const bridges = bridgeSheet();
+    expect(validateArtImage('bridge', bridges)).toEqual([]);
+    for (const orientation of BRIDGE_ORIENTATIONS) {
+      const frame = tileOf(bridges, bridgeFrameIndex(orientation), BRIDGE.columns, BRIDGE.frame.width, BRIDGE.frame.height);
+      expect(pixels(frame), orientation).toEqual(pixels(bridgeSprite(orientation)));
+    }
+    const hedges = hedgeSheet();
+    expect(validateArtImage('hedge', hedges)).toEqual([]);
+    for (let mask = 0; mask < 16; mask += 1) {
+      const frame = tileOf(hedges, hedgeFrameIndex(mask), HEDGE.columns, HEDGE.frame.width, HEDGE.frame.height);
+      expect(pixels(frame), `mask ${mask}`).toEqual(pixels(hedgeSprite(mask)));
     }
   });
 });

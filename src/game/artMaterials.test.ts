@@ -21,7 +21,17 @@ function catalog(): MaterialCatalog {
 describe('materialCatalogFrom', () => {
   it('offers every desk and floor material of the pack, in pack order, with its Spanish name', () => {
     expect(catalog().desk.map((option) => option.id)).toEqual(['desk-glass', 'desk-metal', 'desk-wood', 'desk-painted']);
-    expect(catalog().floor.map((option) => option.id)).toEqual(['floor-wood', 'floor-grass', 'floor-water', 'floor-plain']);
+    expect(catalog().floor.map((option) => option.id)).toEqual([
+      'floor-wood',
+      'floor-grass',
+      'floor-water',
+      'floor-plain',
+      'floor-dirt',
+      'floor-sand',
+      'floor-cobblestone',
+      'floor-tile',
+      'floor-carpet',
+    ]);
     expect(catalog().desk.find((option) => option.id === 'desk-painted')?.name).toBe('Escritorio pintado');
   });
 

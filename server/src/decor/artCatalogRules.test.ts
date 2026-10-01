@@ -8,10 +8,11 @@
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import type { ArtPackManifest } from '../../../src/game/artContract.ts';
+import { ART_CONTRACT_VERSION, ART_PIECE_KINDS, type ArtPackManifest } from '../../../src/game/artContract.ts';
 import { readSchemaSql } from '../directory/migrate.ts';
 import {
   ART_PACK_DEFAULTS,
+  artPieceFields,
   InvalidArtChoiceError,
   InvalidArtPackError,
   normalizeArtColor,
@@ -75,6 +76,28 @@ describe('ART_PACK_DEFAULTS', () => {
   });
 });
 
+describe('art_pieces kinds in schema.sql', () => {
+  it('allows exactly the contract piece kinds, on new tables and on ones created before', () => {
+    // CREATE TABLE IF NOT EXISTS keeps an old CHECK, so the constraint is also
+    // dropped and added again: version 2 added the tileset and the map props.
+    const schema = readSchemaSql().replace(/\s+/g, ' ');
+    const kinds = ART_PIECE_KINDS.map((kind) => `'${kind}'`).join(', ');
+    expect(schema).toContain(`kind text NOT NULL CHECK (kind IN (${kinds}))`);
+    expect(schema).toContain('ALTER TABLE art_pieces DROP CONSTRAINT IF EXISTS art_pieces_kind_check;');
+    expect(schema).toContain(`ALTER TABLE art_pieces ADD CONSTRAINT art_pieces_kind_check CHECK (kind IN (${kinds}));`);
+  });
+});
+
+describe('artPieceFields', () => {
+  it('keeps the material of every piece that has one: props yes, characters and the tileset no', () => {
+    const fields = (id: string) => artPieceFields(MANIFEST.pieces.find((piece) => piece.id === id)!);
+    expect(fields('tree-oak')).toMatchObject({ kind: 'tree', material: 'oak', colorable: false, defaultColor: null });
+    expect(fields('table-meeting')).toMatchObject({ kind: 'table', material: 'walnut' });
+    expect(fields('tileset-terrain')).toMatchObject({ kind: 'tileset', material: null, colorable: false });
+    expect(fields('character-p01-burgundy-suit').material).toBeNull();
+  });
+});
+
 describe('normalizeArtPack', () => {
   it('accepts the exported manifest as is', () => {
     expect(normalizeArtPack(MANIFEST)).toEqual(MANIFEST);
@@ -83,7 +106,7 @@ describe('normalizeArtPack', () => {
   it('rejects something that is not a pack of this format and contract', () => {
     expect(() => normalizeArtPack(null)).toThrow(InvalidArtPackError);
     expect(() => normalizeArtPack({ ...clone(), format: 'other' })).toThrow(InvalidArtPackError);
-    expect(() => normalizeArtPack({ ...clone(), contractVersion: 2 })).toThrow(InvalidArtPackError);
+    expect(() => normalizeArtPack({ ...clone(), contractVersion: ART_CONTRACT_VERSION + 1 })).toThrow(InvalidArtPackError);
     expect(() => normalizeArtPack({ ...clone(), pieces: 'none' })).toThrow(InvalidArtPackError);
   });
 

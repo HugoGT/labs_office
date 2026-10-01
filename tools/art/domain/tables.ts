@@ -10,7 +10,8 @@
  * end with the panel's edge on one side and the drawer pull on the other (left and right).
  */
 import { makeRamp, mixRgba, type Ramp } from './color.ts';
-import { floorPoint, floorSpans, renderFurniture, type Box, type FurnitureModel, type Span, type SurfacePoint } from './furnitureModel.ts';
+import { ART_TILE, TABLE, type Footprint } from '../../../src/game/artContract.ts';
+import { DEPTH_SCALE, floorPoint, floorSpans, renderFurniture, type Box, type FurnitureModel, type Span, type SurfacePoint } from './furnitureModel.ts';
 import { PixelBuffer, rgba, type Rgba } from './pixelBuffer.ts';
 import type { Facing, SeatPoint } from './seating.ts';
 
@@ -168,4 +169,74 @@ export function tableSprite(material: TableMaterial, facing: Facing, color = DEF
   if (material === 'painted' && cache.size > 64) cache.clear();
   cache.set(id, sprite);
   return sprite;
+}
+
+// --- Room tables -------------------------------------------------------------------------------
+
+/** The two shared tables of the map: the meeting room's and the cafeteria's. */
+export const ROOM_TABLES = ['meeting', 'cafeteria'] as const;
+export type RoomTable = (typeof ROOM_TABLES)[number];
+
+/** The tiles each table covers on the map (`placeFurniture` in mapBuilder.ts). */
+export const ROOM_TABLE_FOOTPRINTS: Readonly<Record<RoomTable, Footprint>> = {
+  meeting: { w: 7, h: 5 },
+  cafeteria: { w: 5, h: 3 },
+};
+
+const BEECH = makeRamp('#c8a06a');
+
+/** Wood grain along the length of a long top, in broken lines. */
+function longGrain(shadow: Rgba): (point: SurfacePoint, color: Rgba) => Rgba {
+  return (point, color) => {
+    if (point.face !== 'top') return color;
+    const line = point.row % 5 === 2;
+    const broken = Math.floor((point.col + point.row * 7) / 9) % 4 === 0;
+    return line && !broken ? mixRgba(color, shadow, 0.35) : color;
+  };
+}
+
+/**
+ * A table seated on every side: a thick top over an apron ring and legs at the corners (and in
+ * the middle of a long side), built from the same boxes as the desks. Seen from the front, so its
+ * floor rows are the footprint's height in tiles.
+ */
+function roomTableModel(kind: RoomTable): FurnitureModel {
+  const { w, h } = ROOM_TABLE_FOOTPRINTS[kind];
+  const wood = kind === 'meeting' ? WALNUT : BEECH;
+  const halfWidth = (w * ART_TILE) / 2;
+  const halfDepth = (h * ART_TILE) / 2 / DEPTH_SCALE;
+  const top: Box = {
+    u: [-halfDepth, halfDepth],
+    v: [-halfWidth, halfWidth],
+    y: [TOP_UNDER, TABLE_HEIGHT],
+    ramp: wood,
+    top: 'base',
+    side: 'shadow',
+    shade: longGrain(wood.shadow),
+  };
+  const apronU: Span = [halfDepth - 6, halfDepth - 4];
+  const apron: Box[] = [
+    { u: apronU, v: [-halfWidth + 4, halfWidth - 4], y: [TOP_UNDER - 3, TOP_UNDER], ramp: wood, top: 'shadow', side: 'shadow' },
+    { u: [-apronU[1], -apronU[0]], v: [-halfWidth + 4, halfWidth - 4], y: [TOP_UNDER - 3, TOP_UNDER], ramp: wood, top: 'shadow', side: 'shadow' },
+  ];
+  const legU: Span = [halfDepth - 7, halfDepth - 3];
+  const legVs: Span[] = [[halfWidth - 6, halfWidth - 2], [-(halfWidth - 2), -(halfWidth - 6)]];
+  if (w >= 6) legVs.push([-2, 2]);
+  const legs = legVs.flatMap((v): Box[] => [
+    { u: legU, v, y: [0, TOP_UNDER], ramp: wood, top: 'base', side: 'shadow' },
+    { u: [-legU[1], -legU[0]], v, y: [0, TOP_UNDER], ramp: wood, top: 'base', side: 'shadow' },
+  ]);
+  return {
+    shadow: { u: [-halfDepth + 2, halfDepth - 2], v: [-halfWidth + 2, halfWidth - 2], shape: 'rect' },
+    parts: [{ boxes: legs }, { boxes: apron }, { boxes: [top] }],
+  };
+}
+
+/** A room table in the TABLE frame, the floor under the middle of its footprint's south edge on TABLE.anchor. */
+export function roomTableSprite(kind: RoomTable): PixelBuffer {
+  const { back, origin } = renderFurniture(roomTableModel(kind), 'down', 320);
+  const frame = new PixelBuffer(TABLE.frame.width, TABLE.frame.height);
+  const halfRows = (ROOM_TABLE_FOOTPRINTS[kind].h * ART_TILE) / 2;
+  frame.blit(back, TABLE.anchor.x - origin.x, TABLE.anchor.y - halfRows - origin.y);
+  return frame;
 }

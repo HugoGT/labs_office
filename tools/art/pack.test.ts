@@ -6,20 +6,34 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   ART_CONTRACT_VERSION,
   ART_PACK_FORMAT,
+  BRIDGE,
   CHAIR,
   CHARACTER_SEATED,
   CHARACTER_WALK,
   DESK,
+  HEDGE,
   PACK_FACINGS,
+  PLANT,
+  TABLE,
+  TERRAIN_DECALS,
+  TERRAIN_MATERIALS,
+  TERRAIN_WALKABLE,
+  TREE,
   assembleFloorMotif,
+  terrainDecalIndex,
+  terrainFloorPieceId,
+  terrainTileIndex,
   splitFloorMotif,
   validateArtImage,
   type ArtChairPiece,
   type ArtDeskPiece,
   type ArtFloorPiece,
   type ArtPackManifest,
+  type ArtPropPiece,
+  type ArtTilesetPiece,
   type RgbaImage,
 } from '../../src/game/artContract.ts';
+import { ROOM_TABLE_FOOTPRINTS } from './domain/tables.ts';
 import { BASE_CHARACTERS } from './domain/characters.ts';
 import { terrainTile } from './domain/tiles.ts';
 import { PACK_DIR, PREVIEW_DIR, renderPackFiles, writePackFiles } from './pack.ts';
@@ -114,9 +128,10 @@ describe('art pack manifest', () => {
     }
   });
 
-  it('registers the 18 characters and 4 materials of each furniture, floor and wall kind', () => {
+  it('registers the characters, furniture, floors, walls, the terrain tileset and the map props', () => {
     const count = (kind: string): number => manifest.pieces.filter((piece) => piece.kind === kind).length;
-    expect([count('character'), count('chair'), count('desk'), count('floor'), count('wall')]).toEqual([18, 4, 4, 4, 4]);
+    const kinds = ['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table'];
+    expect(kinds.map(count)).toEqual([18, 4, 4, 9, 4, 1, 2, 1, 1, 1, 2]);
   });
 
   it('uses stable ids derived from the generators, unique and prefixed by kind', () => {
@@ -124,7 +139,27 @@ describe('art pack manifest', () => {
     expect(new Set(ids).size).toBe(ids.length);
     for (const piece of manifest.pieces) expect(piece.id).toMatch(new RegExp(`^${piece.kind}-[a-z0-9]+(-[a-z0-9]+)*$`));
     expect(ids.filter((id) => id.startsWith('character-'))).toEqual(BASE_CHARACTERS.map((c) => `character-${c.id}`));
-    expect(ids).toEqual(expect.arrayContaining(['chair-wood', 'desk-painted', 'floor-plain', 'wall-glass']));
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        'chair-wood',
+        'desk-painted',
+        'floor-plain',
+        'wall-glass',
+        'floor-dirt',
+        'floor-sand',
+        'floor-cobblestone',
+        'floor-tile',
+        'floor-carpet',
+        'tileset-terrain',
+        'tree-oak',
+        'tree-maple',
+        'plant-ficus',
+        'bridge-wood',
+        'hedge-boxwood',
+        'table-meeting',
+        'table-cafeteria',
+      ]),
+    );
   });
 
   it('names defaults that exist in the pack', () => {
@@ -158,6 +193,41 @@ describe('art pack manifest', () => {
         expect(piece.anchor).toEqual(DESK.anchor);
         for (const facing of PACK_FACINGS) expect(piece.facings[facing].footprint).toEqual(DESK.footprintByFacing[facing]);
       }
+    }
+  });
+
+  it('describes the terrain tileset: each material band, its floor and walkability, and the decals', () => {
+    const tileset = manifest.pieces.find((piece): piece is ArtTilesetPiece => piece.kind === 'tileset')!;
+    expect([tileset.tileSize, tileset.columns, tileset.masks, tileset.phases]).toEqual([32, 16, 16, 9]);
+    expect(tileset.materials.map((entry) => entry.material)).toEqual([...TERRAIN_MATERIALS]);
+    const ids = new Set(manifest.pieces.map((piece) => piece.id));
+    for (const entry of tileset.materials) {
+      expect(entry.floor).toBe(terrainFloorPieceId(entry.material));
+      expect(ids.has(entry.floor), entry.floor).toBe(true);
+      expect(entry.walkable).toBe(TERRAIN_WALKABLE[entry.material]);
+      expect(entry.firstTile + 15).toBe(terrainTileIndex(entry.material, 15, 0));
+    }
+    expect(tileset.decals).toEqual(TERRAIN_DECALS.map((decal) => ({ decal, tile: terrainDecalIndex(decal) })));
+    expect(tileset.files.map((file) => [file.role, file.imageKind])).toEqual([['sheet', 'terrain-tileset']]);
+  });
+
+  it('places every map prop by the contract: footprint, anchor, layer and collision', () => {
+    const props = manifest.pieces.filter((piece): piece is ArtPropPiece => ['tree', 'plant', 'bridge', 'hedge', 'table'].includes(piece.kind));
+    expect(props).toHaveLength(7);
+    const specs = { tree: TREE, plant: PLANT, bridge: BRIDGE, hedge: HEDGE, table: TABLE } as const;
+    for (const piece of props) {
+      const spec = specs[piece.kind];
+      expect(piece.anchor, piece.id).toEqual(spec.anchor);
+      expect([piece.layer, piece.collision], piece.id).toEqual([spec.layer, spec.collision]);
+      expect(piece.files.map((file) => file.imageKind), piece.id).toEqual([piece.kind]);
+      const footprint = piece.kind === 'table' ? ROOM_TABLE_FOOTPRINTS[piece.material === 'walnut' ? 'meeting' : 'cafeteria'] : specs[piece.kind].footprint;
+      expect(piece.footprint, piece.id).toEqual(footprint);
+      if (piece.kind === 'bridge') {
+        expect(piece.orientations).toEqual(['north-south', 'east-west']);
+        // The whole deck is walkable, over water too.
+        expect(piece.deck).toEqual({ 'north-south': { x: 0, y: 0, w: 3, h: 3 }, 'east-west': { x: 0, y: 0, w: 3, h: 3 } });
+      }
+      if (piece.kind === 'hedge') expect(piece.height).toBe(HEDGE.height);
     }
   });
 

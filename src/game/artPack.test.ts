@@ -56,6 +56,27 @@ describe('parseArtPackManifest', () => {
 
     expect(parsed?.pieces.map((piece) => piece.id)).toEqual(['desk-wood']);
   });
+
+  it('reads the terrain tileset and the map props, and drops one that lacks its placement', () => {
+    const manifest = pack();
+    const kinds = new Set(manifest.pieces.map((piece) => piece.kind));
+    for (const kind of ['tileset', 'tree', 'plant', 'bridge', 'hedge', 'table'] as const) expect(kinds.has(kind), kind).toBe(true);
+    const [oak] = manifest.pieces.filter((piece) => piece.id === 'tree-oak');
+    const [tileset] = manifest.pieces.filter((piece) => piece.id === 'tileset-terrain');
+    const [bridge] = manifest.pieces.filter((piece) => piece.id === 'bridge-wood');
+    const broken = [
+      { ...oak, id: 'tree-no-footprint', footprint: undefined },
+      { ...oak, id: 'tree-flying', layer: 'sky' },
+      { ...oak, id: 'tree-ghost', collision: 'none' },
+      { ...tileset, id: 'tileset-no-materials', materials: undefined },
+      { ...tileset, id: 'tileset-unknown', materials: [{ material: 'lava', floor: 'floor-lava', walkable: true, firstTile: 0 }] },
+      { ...bridge, id: 'bridge-no-deck', deck: undefined },
+    ];
+
+    const parsed = parseArtPackManifest(withPieces([oak, tileset, bridge, ...broken]));
+
+    expect(parsed?.pieces.map((piece) => piece.id)).toEqual(['tree-oak', 'tileset-terrain', 'bridge-wood']);
+  });
 });
 
 describe('load requests', () => {
@@ -94,7 +115,8 @@ describe('load requests', () => {
     const kinds = new Set(requests.map((request) => request.key.split(':')[1]?.split('-')[0]));
 
     expect(kinds).toEqual(new Set(['floor', 'desk', 'chair']));
-    expect(requests).toHaveLength(12);
+    // Nine floors, four desks and four chairs; the tileset and props load when 8b draws them.
+    expect(requests).toHaveLength(17);
     expect(requests).toContainEqual({
       key: artSheetKey('floor-grass', 'sheet'),
       url: 'assets/pack/floor/grass.png',
