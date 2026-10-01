@@ -37,6 +37,12 @@ export interface DirectoryUser {
    * new or pre-migration account carries the pack default until it chooses.
    */
   avatarId: string;
+  /**
+   * When the user last chose a character (art migration, step 5); `null`
+   * until the first choice. Rows from before the selector existed stay `null`,
+   * which is what sends existing accounts through it once.
+   */
+  avatarChosenAt: Date | null;
   createdAt: Date;
 }
 
@@ -151,8 +157,9 @@ export interface UserDirectory {
    * Stores the chosen character (art migration, step 3). Whether the id is an
    * active character of the catalog is `resolveCharacterChoice`, run by the
    * caller that has the catalog; the adapter only rejects what is not a
-   * character id at all (`InvalidArtChoiceError`). Returns `null` if `id`
-   * does not exist.
+   * character id at all (`InvalidArtChoiceError`). Also stamps
+   * `avatarChosenAt`: storing a character is choosing it. Returns `null` if
+   * `id` does not exist.
    */
   setAvatar(id: string, avatarId: string): Promise<DirectoryUser | null>;
   close(): Promise<void>;

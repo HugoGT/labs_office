@@ -39,6 +39,11 @@ export interface RemoteAvatarContainer extends CharacterContainer {
    * `proximityTick` la lee para el predicado mutuo de `audiblePeers`.
    */
   spacesVersion: string;
+  /**
+   * Persisted character of this peer (art migration, step 5). Kept on the
+   * container for step 6, which draws it; the body is still procedural.
+   */
+  avatarId: string | null;
 }
 
 /**
@@ -83,6 +88,7 @@ export function createPhaserAvatarSink(
       container.setPosition(snapshot.x, snapshot.y);
       container.setDepth(avatarDepth(snapshot.y));
       container.spacesVersion = snapshot.spacesVersion;
+      container.avatarId = snapshot.avatarId;
 
       // #59: cuerpo de colision, solo si el llamador nos dio donde unirse.
       // `Group.add` registra su propio listener de DESTROY (Group.js:615),
@@ -128,6 +134,7 @@ export function createPhaserAvatarSink(
       // dejaria a alguien pintado "En linea" mientras esta en "No molestar".
       setCharacterStatus(avatar, statusOf(snapshot.status));
       avatar.spacesVersion = snapshot.spacesVersion;
+      avatar.avatarId = snapshot.avatarId;
       avatar.glideTween?.stop();
       // Se interpola en vez de saltar: el servidor publica ~10 veces por
       // segundo, asi que un `setPosition` directo haria que los demas se

@@ -576,6 +576,13 @@ describe('schema.sql: art pack catalog and appearance (art migration, step 3)', 
     }
   });
 
+  it('marks whether a user chose a character, NULL for every row that existed before (step 5)', () => {
+    // No DEFAULT on purpose: existing accounts must go through the selector on
+    // their first access after this migration, so their marker stays NULL.
+    expect(squashed).toContain('alter table users add column if not exists avatar_chosen_at timestamptz;');
+    expect(squashed).not.toMatch(/avatar_chosen_at timestamptz[^;]*default/);
+  });
+
   it('does not tie choices to the catalog with a foreign key: the catalog is seeded after the schema', () => {
     // Backfilled rows point at pieces that only exist once `registerArtPack`
     // runs, after this script; retirement never deletes, so nothing dangles.

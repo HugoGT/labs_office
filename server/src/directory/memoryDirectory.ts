@@ -61,9 +61,10 @@ export interface MemoryDirectoryOptions {
   /**
    * Filas ya hechas, para montar casos (un invitado caducado, uno revocado).
    * Without `avatarId` a row gets the pack default, like the backfill of a
-   * row that existed before the column.
+   * row that existed before the column; without `avatarChosenAt` it has not
+   * chosen yet, like every row from before step 5.
    */
-  seed?: (Omit<DirectoryUser, 'avatarId'> & { avatarId?: string })[];
+  seed?: (Omit<DirectoryUser, 'avatarId' | 'avatarChosenAt'> & { avatarId?: string; avatarChosenAt?: Date | null })[];
 }
 
 /**
@@ -91,7 +92,11 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
   let counter = 0;
 
   for (const seeded of options.seed ?? []) {
-    rows.push({ ...seeded, avatarId: seeded.avatarId ?? ART_PACK_DEFAULTS.character });
+    rows.push({
+      ...seeded,
+      avatarId: seeded.avatarId ?? ART_PACK_DEFAULTS.character,
+      avatarChosenAt: seeded.avatarChosenAt ?? null,
+    });
     counter++;
   }
 
@@ -123,7 +128,13 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
   }): DirectoryUser {
     counter++;
     // The pack default, like the column DEFAULT every pg INSERT relies on.
-    const row: DirectoryUser = { id: fakeUuid(counter), createdAt: now(), avatarId: ART_PACK_DEFAULTS.character, ...fields };
+    const row: DirectoryUser = {
+      id: fakeUuid(counter),
+      createdAt: now(),
+      avatarId: ART_PACK_DEFAULTS.character,
+      avatarChosenAt: null,
+      ...fields,
+    };
     rows.push(row);
     return row;
   }
@@ -324,6 +335,7 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
       const row = byId(id);
       if (!row) return null;
       row.avatarId = checked;
+      row.avatarChosenAt = now();
       return snapshot(row);
     },
 

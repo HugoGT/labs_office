@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { AuthPort, AuthUser, OfficeSession } from '../auth/authPort';
+import type { CharacterPort, ReadCharacterResult } from '../auth/characterPort';
 import type { ClaimDisplayNameResult, DisplayNamePort } from '../auth/displayNamePort';
 import { AuthGate } from './AuthGate';
 
@@ -507,6 +508,161 @@ describe('AuthGate: nombre visible auto-elegido en login (#100)', () => {
     await act(async () => emit(null));
 
     expect(screen.getByLabelText(/correo/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('office')).not.toBeInTheDocument();
+  });
+});
+
+/** Art migration, step 5: double of `CharacterPort` with two characters. */
+function fakeCharacterPort(read: ReadCharacterResult, overrides: Partial<CharacterPort> = {}): CharacterPort {
+  return {
+    read: vi.fn(async () => read),
+    save: vi.fn(async (avatarId: string) => ({ outcome: 'ok' as const, avatarId })),
+    catalog: vi.fn(async () => ({
+      defaultId: 'character-p01-burgundy-suit',
+      options: [
+        { id: 'character-p01-burgundy-suit', name: 'Mateo', walkUrl: 'w1.png', seatedUrl: 's1.png' },
+        { id: 'character-p02-beige-blazer', name: 'Lucia', walkUrl: 'w2.png', seatedUrl: 's2.png' },
+      ],
+    })),
+    ...overrides,
+  };
+}
+
+const NEVER_CHOSE: ReadCharacterResult = { outcome: 'ok', avatarId: 'character-p01-burgundy-suit', chosen: false };
+const CHOSE_LUCIA: ReadCharacterResult = { outcome: 'ok', avatarId: 'character-p02-beige-blazer', chosen: true };
+
+describe('AuthGate: character chosen at the entrance (art migration, step 5)', () => {
+  it('after signing in, someone who never chose sees the selector and not the office', async () => {
+    const user = userEvent.setup();
+    const office = officeSpy();
+    const { port, emit } = fakePort();
+    render(
+      <AuthGate auth={port} displayName={fakeDisplayNamePort()} character={fakeCharacterPort(NEVER_CHOSE)}>
+        {office.render}
+      </AuthGate>,
+    );
+    emit(null);
+
+    await submitLogin(user);
+    await act(async () => emit(ANA));
+
+    expect(await screen.findByRole('radiogroup', { name: /elige tu personaje/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('office')).not.toBeInTheDocument();
+    expect(office.sessions).toEqual([]);
+  });
+
+  it('saving the choice opens the office with the claimed name', async () => {
+    const user = userEvent.setup();
+    const { port, emit } = fakePort();
+    const character = fakeCharacterPort(NEVER_CHOSE);
+    render(
+      <AuthGate auth={port} displayName={fakeDisplayNamePort()} character={character}>
+        {officeSpy().render}
+      </AuthGate>,
+    );
+    emit(null);
+    await submitLogin(user);
+    await act(async () => emit(ANA));
+
+    await user.click(await screen.findByRole('radio', { name: 'Lucia' }));
+    await user.click(screen.getByRole('button', { name: /entrar a la oficina/i }));
+
+    expect(character.save).toHaveBeenCalledWith('character-p02-beige-blazer');
+    expect(await screen.findByTestId('office')).toHaveTextContent('Ana Lopez');
+    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+  });
+
+  it('on a later sign-in the saved character is preselected', async () => {
+    const user = userEvent.setup();
+    const { port, emit } = fakePort();
+    render(
+      <AuthGate auth={port} displayName={fakeDisplayNamePort()} character={fakeCharacterPort(CHOSE_LUCIA)}>
+        {officeSpy().render}
+      </AuthGate>,
+    );
+    emit(null);
+    await submitLogin(user);
+    await act(async () => emit(ANA));
+
+    expect(await screen.findByRole('radio', { name: 'Lucia' })).toBeChecked();
+  });
+
+  it('a restored session that already chose enters without the selector', async () => {
+    const { port, emit } = fakePort();
+    const character = fakeCharacterPort(CHOSE_LUCIA);
+    render(
+      <AuthGate auth={port} displayName={fakeDisplayNamePort()} character={character}>
+        {officeSpy().render}
+      </AuthGate>,
+    );
+
+    await act(async () => emit(ANA));
+
+    expect(await screen.findByTestId('office')).toBeInTheDocument();
+    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+    expect(character.save).not.toHaveBeenCalled();
+  });
+
+  it('a restored session that never chose (an account from before the migration) is asked', async () => {
+    const { port, emit } = fakePort();
+    render(
+      <AuthGate auth={port} displayName={fakeDisplayNamePort()} character={fakeCharacterPort(NEVER_CHOSE)}>
+        {officeSpy().render}
+      </AuthGate>,
+    );
+
+    await act(async () => emit(ANA));
+
+    expect(await screen.findByRole('radiogroup', { name: /elige tu personaje/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('office')).not.toBeInTheDocument();
+  });
+
+  it('without a directory (503) the office opens with the default character', async () => {
+    const { port, emit } = fakePort();
+    render(
+      <AuthGate
+        auth={port}
+        displayName={fakeDisplayNamePort()}
+        character={fakeCharacterPort({ outcome: 'unavailable' })}
+      >
+        {officeSpy().render}
+      </AuthGate>,
+    );
+
+    await act(async () => emit(ANA));
+
+    expect(await screen.findByTestId('office')).toBeInTheDocument();
+  });
+
+  it('without a character port (the /dashboard route) nothing stands in the way', async () => {
+    const { port, emit } = fakePort();
+    render(
+      <AuthGate auth={port} displayName={fakeDisplayNamePort()} character={null}>
+        {officeSpy().render}
+      </AuthGate>,
+    );
+
+    await act(async () => emit(ANA));
+
+    expect(await screen.findByTestId('office')).toBeInTheDocument();
+  });
+
+  it('a rejected save keeps the selector with a readable error', async () => {
+    const user = userEvent.setup();
+    const { port, emit } = fakePort();
+    const character = fakeCharacterPort(NEVER_CHOSE, {
+      save: vi.fn(async () => ({ outcome: 'invalid' as const, reason: 'retired-piece' as const })),
+    });
+    render(
+      <AuthGate auth={port} displayName={fakeDisplayNamePort()} character={character}>
+        {officeSpy().render}
+      </AuthGate>,
+    );
+    await act(async () => emit(ANA));
+
+    await user.click(await screen.findByRole('button', { name: /entrar a la oficina/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Ese personaje ya no está disponible. Elige otro.');
     expect(screen.queryByTestId('office')).not.toBeInTheDocument();
   });
 });

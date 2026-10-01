@@ -88,6 +88,7 @@ const USER_ROW = {
   expires_at: null,
   invited_by: null,
   avatar_id: 'character-p01-burgundy-suit',
+  avatar_chosen_at: null,
   created_at: new Date('2026-01-01T00:00:00.000Z'),
 };
 
@@ -130,6 +131,7 @@ describe('pgDirectory: resolveOnLogin', () => {
       expiresAt: null,
       invitedBy: null,
       avatarId: 'character-p01-burgundy-suit',
+      avatarChosenAt: null,
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     });
   });
@@ -931,14 +933,31 @@ describe('pgDirectory: avatar (art migration, step 3)', () => {
     expect((await directoryOver(pool).findById(USER_ROW.id))?.avatarId).toBe(ART_PACK_DEFAULTS.character);
   });
 
-  it('setAvatar writes only avatar_id, scoped by id', async () => {
+  it('setAvatar writes only avatar_id and its chosen mark, scoped by id', async () => {
     const pool = fakePool(() => ({ rows: [{ ...USER_ROW, avatar_id: 'character-p02-beige-blazer' }], rowCount: 1 }));
 
     const user = await directoryOver(pool).setAvatar(USER_ROW.id, 'character-p02-beige-blazer');
 
-    expect(squash(pool.queries[0].text)).toContain('update users set avatar_id = $2 where id = $1');
+    expect(squash(pool.queries[0].text)).toContain('update users set avatar_id = $2, avatar_chosen_at = now() where id = $1');
     expect(pool.queries[0].values).toEqual([USER_ROW.id, 'character-p02-beige-blazer']);
     expect(user?.avatarId).toBe('character-p02-beige-blazer');
+  });
+
+  it('reads avatar_chosen_at with every user (step 5)', async () => {
+    const chosenAt = new Date('2026-09-30T10:00:00.000Z');
+    const pool = fakePool(() => ({ rows: [{ ...USER_ROW, avatar_chosen_at: chosenAt }], rowCount: 1 }));
+
+    const user = await directoryOver(pool).findById(USER_ROW.id);
+
+    expect(squash(pool.queries[0].text)).toContain('avatar_chosen_at');
+    expect(user?.avatarChosenAt).toEqual(chosenAt);
+  });
+
+  it('a row read before the chosen mark existed has not chosen yet', async () => {
+    const { avatar_chosen_at: _chosenAt, ...legacy } = USER_ROW;
+    const pool = fakePool(() => ({ rows: [legacy], rowCount: 1 }));
+
+    expect((await directoryOver(pool).findById(USER_ROW.id))?.avatarChosenAt).toBeNull();
   });
 
   it('setAvatar rejects something that is not a character id without a query', async () => {

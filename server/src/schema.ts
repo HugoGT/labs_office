@@ -21,6 +21,11 @@ export interface PlayerSeed {
   facing: string;
   /** Version de config de espacios con la que este jugador deriva su sala (#7, D4). */
   spacesVersion: string;
+  /**
+   * Character the account chose, an art pack id (art migration, step 5).
+   * Always the persisted one: `OfficeRoom` never takes it from the client.
+   */
+  avatarId: string;
 }
 
 export interface PlayerState extends PlayerSeed {}
@@ -34,6 +39,7 @@ defineTypes(PlayerState, {
   status: 'string',
   facing: 'string',
   spacesVersion: 'string',
+  avatarId: 'string',
 });
 
 /**
@@ -49,6 +55,7 @@ export function createPlayerState(seed: PlayerSeed): PlayerState {
   player.status = seed.status;
   player.facing = seed.facing;
   player.spacesVersion = seed.spacesVersion;
+  player.avatarId = seed.avatarId;
   return player;
 }
 

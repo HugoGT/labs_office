@@ -346,6 +346,10 @@ CREATE TABLE IF NOT EXISTS art_pieces (
 -- need no default. Which colors a material admits depends on the catalog, so
 -- the CHECK only bounds the format; the rules own the rest.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_id text NOT NULL DEFAULT 'character-p01-burgundy-suit';
+-- When the user chose that character (step 5). No DEFAULT on purpose: every
+-- row that existed before this column stays NULL, which is what sends existing
+-- accounts through the character selector on their first access after it.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_chosen_at timestamptz;
 
 ALTER TABLE desks ADD COLUMN IF NOT EXISTS material_id text NOT NULL DEFAULT 'desk-wood';
 ALTER TABLE desks ADD COLUMN IF NOT EXISTS color text;

@@ -43,6 +43,7 @@ import {
   recordingAvailableUntil,
 } from '../../src/game/officeProtocol.ts';
 import { createCallInvitationRegistry, type CallInvitationRegistry } from './callInvitations.ts';
+import { ART_PACK_DEFAULTS } from './decor/artCatalogRules.ts';
 import { decideAccess, type AccessDecision } from './directory/accessDecision.ts';
 import type { UserDirectory } from './directory/directoryPort.ts';
 import type { LiveSessionRegistry } from './liveSessions.ts';
@@ -257,7 +258,7 @@ export type DirectoryDenialLogger = (decision: AccessDecision, uid: string) => v
  * ocurrio de verdad al implementarlo, y solo salto porque los tests del camino
  * abierto siguen exigiendo `options.name`.
  */
-type OfficeAuthData = (VerifiedIdentity & { directoryName: string | null }) | true;
+type OfficeAuthData = (VerifiedIdentity & { directoryName: string | null; avatarId: string | null }) | true;
 
 /** Account behind a client, or `undefined` in the open office (#78). */
 function accountOf(client: Client<unknown, OfficeAuthData>): string | undefined {
@@ -470,6 +471,10 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     // `resolveOnLogin` ya trajo. `null` cubre tanto "sin directorio" como
     // "todavia no eligio nombre" -- las dos caen al mismo `deriveIdentityName`.
     let directoryName: string | null = null;
+    // Art migration, step 5: the persisted character rides along for the same
+    // reason. `null` means "no directory", which `onJoin` turns into the pack
+    // default.
+    let avatarId: string | null = null;
 
     if (this.directory) {
       // La hora se toma aqui y se pasa a `decideAccess`, que es pura: asi la
@@ -484,9 +489,10 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       // `decision === 'allow'` solo puede darse con `user` no nulo (ver
       // `decideAccess`): el primer caso que cubre es justamente `null`.
       directoryName = user!.displayName;
+      avatarId = user!.avatarId;
     }
 
-    return { ...identity, directoryName };
+    return { ...identity, directoryName, avatarId };
   }
 
   onJoin(
@@ -525,6 +531,10 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
         // audiblePeers() lo silenciaria contra todo el mundo (una version
         // vacia no coincide con ninguna otra).
         spacesVersion: sanitizeSpacesVersion(options?.spacesVersion),
+        // Never from `options`: what others see must be what the account
+        // saved through `/me/avatar`. Without a directory (or without auth)
+        // nothing was saved, so everyone is the pack default.
+        avatarId: identity?.avatarId ?? ART_PACK_DEFAULTS.character,
       }),
     );
 

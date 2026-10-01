@@ -42,6 +42,7 @@ function userRow(over: Partial<DirectoryUser> & Pick<DirectoryUser, 'id' | 'emai
     expiresAt: null,
     invitedBy: null,
     avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     ...over,
   };

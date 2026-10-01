@@ -98,6 +98,7 @@ function snapshot(overrides: Partial<RemotePlayerSnapshot> = {}): RemotePlayerSn
     status: 'g',
     facing: 'down',
     spacesVersion: 'v1',
+    avatarId: null,
     ...overrides,
   };
 }
@@ -187,6 +188,21 @@ describe('createPhaserAvatarSink', () => {
 });
 
 describe('createPhaserAvatarSink: datos que llegan por red', () => {
+  it('keeps the persisted character of the peer and follows its changes (art migration, step 5)', async () => {
+    const result = await withScene((scene) => {
+      const sink = createPhaserAvatarSink(scene, createOfficeBridge());
+      const avatar = sink.create(snapshot({ avatarId: 'character-p07-green-suit' }));
+      const created = { avatarId: avatar.avatarId, texture: avatar.baseTexture };
+      sink.update(avatar, snapshot({ avatarId: 'character-p12-mint-blazer' }));
+      return { created, updated: avatar.avatarId, texture: avatar.baseTexture };
+    });
+
+    expect(result.created.avatarId).toBe('character-p07-green-suit');
+    expect(result.updated).toBe('character-p12-mint-blazer');
+    // Still procedural until step 6 draws the pack sheet.
+    expect(result.texture).toBe(result.created.texture);
+  });
+
   it('aplica la orientacion recibida al sprite del avatar', async () => {
     const facing = await withScene((scene) => {
       const sink = createPhaserAvatarSink(scene, createOfficeBridge());

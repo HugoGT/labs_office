@@ -19,6 +19,7 @@ import {
   DEFAULT_STATUS,
   MOVE_INTERVAL_MS,
   OFFICE_ROOM_NAME,
+  characterIdOf,
   type Facing,
   type PresenceStatus,
   type RecordingReadyPayload,
@@ -40,6 +41,8 @@ interface RemotePlayer {
   facing: string;
   /** Version de config de espacios con la que este par deriva su sala (#7, D4). */
   spacesVersion: string;
+  /** Absent from an older server; `characterIdOf` reads that as no character. */
+  avatarId?: unknown;
 }
 
 /** Active recording of a space, as synced (#5). Keyed by spaceId. */
@@ -120,6 +123,13 @@ export interface OfficeRoomHandlers {
    * todos sus consumidores.
    */
   onConnectionState?(state: OfficeConnectionState): void;
+  /**
+   * The own player's character as the server replicates it (art migration,
+   * step 5), on join and on every later change. The local avatar is drawn
+   * from this and never from anything the client chose locally: it is what
+   * every peer sees too. Optional for the same reason as the ones above.
+   */
+  onLocalAvatar?(avatarId: string | null): void;
   /**
    * Se acaba de reconectar: olvida TODO lo que sabias de los pares, viene un
    * replay completo (issue #52).
@@ -227,6 +237,7 @@ function toSnapshot(sessionId: string, player: RemotePlayer): RemotePlayerSnapsh
     status: player.status,
     facing: player.facing,
     spacesVersion: player.spacesVersion,
+    avatarId: characterIdOf(player.avatarId),
   };
 }
 
@@ -283,10 +294,22 @@ export async function connectOfficeRoom({
     };
 
     $(target.state).players.onAdd((player, sessionId) => {
-      handlers.onAdd(toSnapshot(sessionId, player));
+      // The own player is told apart here, where `target.sessionId` is
+      // certain, rather than by the scene, which only learns it once
+      // `connectOfficeRoom` resolves.
+      const own = sessionId === target.sessionId;
+      const snapshot = toSnapshot(sessionId, player);
+      handlers.onAdd(snapshot);
+      if (own) handlers.onLocalAvatar?.(snapshot.avatarId);
+      let lastAvatarId = snapshot.avatarId;
       // La suscripcion por jugador se registra dentro del alta: `onChange` a
       // nivel de mapa solo avisa de altas y bajas, no de campos que mutan.
-      $(player).onChange(() => handlers.onChange(toSnapshot(sessionId, player)));
+      $(player).onChange(() => {
+        const changed = toSnapshot(sessionId, player);
+        handlers.onChange(changed);
+        if (own && changed.avatarId !== lastAvatarId) handlers.onLocalAvatar?.(changed.avatarId);
+        lastAvatarId = changed.avatarId;
+      });
     });
 
     $(target.state).players.onRemove((_player, sessionId) => {

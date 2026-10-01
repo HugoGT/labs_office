@@ -33,6 +33,7 @@ function provisioned(overrides: Partial<DirectoryUser> = {}): DirectoryUser {
     expiresAt: null,
     invitedBy: null,
     avatarId: ART_PACK_DEFAULTS.character,
+    avatarChosenAt: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
   };
@@ -886,6 +887,31 @@ describe('memoryDirectory: avatar (art migration, step 3)', () => {
 
     expect(user?.avatarId).toBe('character-p02-beige-blazer');
     expect((await directory.findById(ID))?.avatarId).toBe('character-p02-beige-blazer');
+  });
+
+  it('a seeded row without the chosen mark has not chosen, like a row from before step 5', async () => {
+    const { avatarChosenAt: _chosenAt, ...legacy } = provisioned({ id: ID });
+    const directory = createMemoryDirectory({ seed: [legacy] });
+
+    expect((await directory.findById(ID))?.avatarChosenAt).toBeNull();
+  });
+
+  it('a new account has not chosen a character yet', async () => {
+    const directory = createMemoryDirectory({ seed: [provisioned({ id: ID })] });
+
+    const created = await directory.createUser({ email: 'bea@example.com', role: 'employee', uid: 'uid-bea', createdById: ID });
+
+    expect(created.avatarChosenAt).toBeNull();
+  });
+
+  it('setAvatar marks the choice as made, at the injected clock', async () => {
+    const at = new Date('2026-09-30T10:00:00.000Z');
+    const directory = createMemoryDirectory({ now: () => at, seed: [provisioned({ id: ID })] });
+
+    const user = await directory.setAvatar(ID, 'character-p02-beige-blazer');
+
+    expect(user?.avatarChosenAt).toEqual(at);
+    expect((await directory.findById(ID))?.avatarChosenAt).toEqual(at);
   });
 
   it('setAvatar leaves the display name alone, and the display name leaves the avatar alone', async () => {

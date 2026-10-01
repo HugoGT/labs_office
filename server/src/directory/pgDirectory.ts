@@ -100,7 +100,7 @@ function isUniqueViolation(error: unknown): boolean {
 
 /** Columnas de `users` en el orden y con el alias que espera `toDirectoryUser`. */
 const USER_COLUMNS =
-  'id, uid, email, display_name, role, status, expires_at, invited_by, avatar_id, created_at';
+  'id, uid, email, display_name, role, status, expires_at, invited_by, avatar_id, avatar_chosen_at, created_at';
 
 /**
  * Traduce la fila cruda de `pg` al tipo del puerto. `pg` ya devuelve `Date` para
@@ -122,6 +122,7 @@ function toDirectoryUser(row: Record<string, unknown>): DirectoryUser {
     // The column is NOT NULL DEFAULT, but a row read before the migration ran
     // must still come out with a character, same as `above_avatars` (#71).
     avatarId: (row.avatar_id as string | null | undefined) ?? ART_PACK_DEFAULTS.character,
+    avatarChosenAt: (row.avatar_chosen_at as Date | null | undefined) ?? null,
     createdAt: row.created_at as Date,
   };
 }
@@ -170,9 +171,9 @@ const BOOTSTRAP_SUPERADMIN_SQL = `
   RETURNING ${USER_COLUMNS}
 `;
 
-/** The only UPDATE that writes `avatar_id` (art migration, step 3). */
+/** The only UPDATE that writes `avatar_id` (art migration, step 3) and its chosen mark (step 5). */
 const SET_AVATAR_SQL = `
-  UPDATE users SET avatar_id = $2
+  UPDATE users SET avatar_id = $2, avatar_chosen_at = now()
   WHERE id = $1
   RETURNING ${USER_COLUMNS}
 `;

@@ -23,6 +23,7 @@ function user(overrides: Partial<DirectoryUser> = {}): DirectoryUser {
     expiresAt: null,
     invitedBy: null,
     avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
   };

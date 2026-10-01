@@ -35,6 +35,7 @@ function user(id: string, displayName: string | null): DirectoryUser {
     expiresAt: null,
     invitedBy: null,
     avatarId: ART_PACK_DEFAULTS.character,
+    avatarChosenAt: null,
     createdAt: NOW,
   };
 }

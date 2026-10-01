@@ -226,6 +226,12 @@ http://{$APP_HOST}, http://{$LK_HOST}, http://{$TURN_HOST} {
 		reverse_proxy colyseus:2567
 	}
 
+	# Personaje elegido al entrar a la oficina (arte, paso 5): GET y POST
+	# sobre la misma ruta exacta, igual que /me/display-name.
+	handle /me/avatar {
+		reverse_proxy colyseus:2567
+	}
+
 	# Grabacion (issue #5, #58): start/stop/url.
 	handle /recordings/* {
 		reverse_proxy colyseus:2567

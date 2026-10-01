@@ -8,6 +8,7 @@
 import { matchMaker } from '@colyseus/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createOfficeServer, type OfficeServer } from '../../server/src/createOfficeServer.ts';
+import { createMemoryDirectory } from '../../server/src/directory/memoryDirectory.ts';
 import { OFFICE_ROOM_NAME } from './officeProtocol';
 import {
   connectOfficeRoom,
@@ -571,5 +572,77 @@ describe('connectOfficeRoom: replaced by another tab of the same account (#78)',
     await waitFor(() => session.states.includes('revoked'));
     await new Promise((resolve) => setTimeout(resolve, 1000));
     expect(session.states).toEqual(['revoked']);
+  });
+});
+
+describe('connectOfficeRoom: chosen character (art migration, step 5)', () => {
+  const USERS = [
+    { uid: 'uid-ana', id: '11111111-1111-4111-8111-111111111111', avatarId: 'character-p07-green-suit' },
+    { uid: 'uid-beto', id: '22222222-2222-4222-8222-222222222222', avatarId: 'character-p12-mint-blazer' },
+  ];
+  let characterServer: OfficeServer;
+  let characterEndpoint: string;
+
+  beforeEach(async () => {
+    characterServer = createOfficeServer({
+      auth: {
+        async verify(token: unknown) {
+          const user = USERS.find((candidate) => token === `token-${candidate.uid}`);
+          return user ? { uid: user.uid, email: `${user.uid}@example.com`, name: user.uid } : null;
+        },
+      },
+      directory: createMemoryDirectory({
+        seed: USERS.map((user) => ({
+          id: user.id,
+          uid: user.uid,
+          email: `${user.uid}@example.com`,
+          displayName: null,
+          role: 'employee' as const,
+          status: 'active' as const,
+          expiresAt: null,
+          invitedBy: null,
+          avatarId: user.avatarId,
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        })),
+      }),
+    });
+    characterEndpoint = `ws://localhost:${await characterServer.listen(0)}`;
+  });
+
+  afterEach(async () => {
+    await Promise.all(connections.splice(0).map((c) => c.leave().catch(() => {})));
+    await characterServer.shutdown();
+  });
+
+  async function connectAs(uid: string, handlers: Parameters<typeof connectOfficeRoom>[0]['handlers']) {
+    const connection = await connectOfficeRoom({
+      endpoint: characterEndpoint,
+      name: uid,
+      handlers,
+      getIdToken: async () => `token-${uid}`,
+    });
+    connections.push(connection);
+    return connection;
+  }
+
+  it('a peer snapshot carries the character that peer persisted', async () => {
+    const ana = recorder();
+    await connectAs('uid-ana', ana.handlers);
+    const beto = await connectAs('uid-beto', recorder().handlers);
+
+    await waitFor(() => ana.added.some((snapshot) => snapshot.sessionId === beto.sessionId));
+
+    expect(ana.added.find((snapshot) => snapshot.sessionId === beto.sessionId)?.avatarId).toBe(
+      'character-p12-mint-blazer',
+    );
+  });
+
+  it('reports the own persisted character through onLocalAvatar', async () => {
+    const local: (string | null)[] = [];
+    await connectAs('uid-ana', { ...recorder().handlers, onLocalAvatar: (avatarId) => local.push(avatarId) });
+
+    await waitFor(() => local.length > 0);
+
+    expect(local).toEqual(['character-p07-green-suit']);
   });
 });

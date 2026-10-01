@@ -1,0 +1,143 @@
+/**
+ * HTTP adapter of `GET|POST /me/avatar` and of the pack catalog the selector
+ * offers (art migration, step 5). `fetch` is injected, as in
+ * `displayNameClient.ts`, to test the whole contract without Vite or a server.
+ *
+ * Nothing here throws: the entrance is waiting for a concrete answer, and the
+ * closed outcomes of `characterPort.ts` say every case. A network failure, a
+ * 401 or anything unexpected is `failed`.
+ *
+ * ## The catalog is the manifest the office loads
+ *
+ * The selector reads `assets/pack/manifest.json`, the same file
+ * `ArtPackLoader` reads once inside the office, through the same pure parser
+ * (`parseArtPackManifest`). That keeps "what you pick" and "what the office
+ * draws" one list. The server still checks every choice against its own
+ * registered catalog, so a stale manifest can only offer a piece the server
+ * then refuses with a readable reason.
+ */
+
+import { findPiece, parseArtPackManifest } from '../game/artPack';
+import type {
+  CharacterCatalog,
+  CharacterOption,
+  CharacterPort,
+  InvalidCharacterReason,
+  ReadCharacterResult,
+  SaveCharacterResult,
+} from './characterPort';
+
+/** Same default as `displayNameClient.ts`: a hung server cannot leave the entrance unresolved. */
+const DEFAULT_TIMEOUT_MS = 3000;
+
+export interface CharacterClientOptions {
+  /** Already derived with `deriveDisplayNameBaseUrl`, without a trailing slash. */
+  baseUrl: string;
+  /** Called on EVERY request and never stored: the ID token expires every hour. */
+  getIdToken: () => Promise<string | null>;
+  /** Manifest of the pack, relative to the page like the office's. */
+  manifestUrl: string;
+  timeoutMs?: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function manifestFolder(manifestUrl: string): string {
+  return manifestUrl.slice(0, manifestUrl.lastIndexOf('/') + 1);
+}
+
+/** The pack characters that carry both sheets the previews need, in pack order. */
+function characterOptions(raw: unknown, manifestUrl: string): CharacterCatalog | null {
+  const manifest = parseArtPackManifest(raw);
+  if (manifest === null) return null;
+  const folder = manifestFolder(manifestUrl);
+  const options = manifest.pieces.flatMap((piece): CharacterOption[] => {
+    if (piece.kind !== 'character') return [];
+    const walk = piece.files.find((file) => file.role === 'walk' && file.imageKind === 'character-walk');
+    const seated = piece.files.find((file) => file.role === 'seated' && file.imageKind === 'character-seated');
+    if (walk === undefined || seated === undefined) return [];
+    return [{ id: piece.id, name: piece.name, walkUrl: `${folder}${walk.path}`, seatedUrl: `${folder}${seated.path}` }];
+  });
+  if (options.length === 0) return null;
+  const fallback = findPiece(manifest, manifest.defaults.character)?.id;
+  const defaultId = options.some((option) => option.id === fallback) ? (fallback as string) : options[0].id;
+  return { options, defaultId };
+}
+
+function invalidReason(body: unknown): InvalidCharacterReason {
+  return isRecord(body) && body.reason === 'retired-piece' ? 'retired-piece' : 'unknown-piece';
+}
+
+export function createCharacterClient(
+  { baseUrl, getIdToken, manifestUrl, timeoutMs = DEFAULT_TIMEOUT_MS }: CharacterClientOptions,
+  fetchImpl: typeof fetch = fetch,
+): CharacterPort {
+  /** `null` when it never happened: no token, network down or timeout. */
+  async function request(url: string, init: RequestInit, withToken: boolean): Promise<Response | null> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const headers: Record<string, string> = {};
+      if (withToken) {
+        const token = await getIdToken();
+        if (token === null) return null;
+        headers.Authorization = `Bearer ${token}`;
+      }
+      if (init.body !== undefined) headers['Content-Type'] = 'application/json';
+      return await fetchImpl(url, {
+        ...init,
+        ...(Object.keys(headers).length > 0 ? { headers } : {}),
+        signal: controller.signal,
+      });
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function json(response: Response): Promise<unknown> {
+    try {
+      return await response.json();
+    } catch {
+      return undefined;
+    }
+  }
+
+  return {
+    async read(): Promise<ReadCharacterResult> {
+      const response = await request(`${baseUrl}/me/avatar`, { method: 'GET' }, true);
+      if (response === null) return { outcome: 'failed' };
+      if (response.status === 503) return { outcome: 'unavailable' };
+      if (!response.ok) return { outcome: 'failed' };
+      const body = await json(response);
+      if (!isRecord(body) || typeof body.avatarId !== 'string' || typeof body.chosen !== 'boolean') {
+        return { outcome: 'failed' };
+      }
+      return { outcome: 'ok', avatarId: body.avatarId, chosen: body.chosen };
+    },
+
+    async save(avatarId): Promise<SaveCharacterResult> {
+      const response = await request(
+        `${baseUrl}/me/avatar`,
+        { method: 'POST', body: JSON.stringify({ avatarId }) },
+        true,
+      );
+      if (response === null) return { outcome: 'failed' };
+      if (response.status === 400) return { outcome: 'invalid', reason: invalidReason(await json(response)) };
+      if (response.status === 503) return { outcome: 'unavailable' };
+      if (!response.ok) return { outcome: 'failed' };
+      const body = await json(response);
+      if (!isRecord(body) || typeof body.avatarId !== 'string') return { outcome: 'failed' };
+      return { outcome: 'ok', avatarId: body.avatarId };
+    },
+
+    async catalog(): Promise<CharacterCatalog | null> {
+      const response = await request(manifestUrl, { method: 'GET' }, false);
+      if (response === null || !response.ok) return null;
+      return characterOptions(await json(response), manifestUrl);
+    },
+  };
+}

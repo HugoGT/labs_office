@@ -262,6 +262,17 @@ export class OfficeScene extends Phaser.Scene {
   /** Created in `preload()`, where `this.load` first exists. */
   private art!: ArtPackLoader;
   private readonly pendingRedraws = new Set<() => void>();
+  /**
+   * Own character as the server replicates it (art migration, step 5); `null`
+   * until the room says, and for an older server. Step 6 draws it; the body
+   * is still the procedural `avP` texture.
+   */
+  private localAvatarId: string | null = null;
+
+  /** Read by step 6 to draw the local avatar, and by tests. */
+  get playerAvatarId(): string | null {
+    return this.localAvatarId;
+  }
   private readonly redrawDesks = (): void => this.applyDesks(this.desks);
   private readonly redrawFloors = (): void => this.drawSpaceFloors(this.floorSpaces);
   /**
@@ -521,6 +532,9 @@ export class OfficeScene extends Phaser.Scene {
         getIdToken,
         handlers: {
           onAdd: (snapshot) => {
+            // Only on add: `onChange` fires on every move, and the persisted
+            // character does not change during a session.
+            this.requestCharacter(snapshot.avatarId);
             this.remotes?.upsert(snapshot);
             this.roster?.upsert(rosterPeerOf(snapshot));
             this.checkSpacesVersionDrift(snapshot.spacesVersion);
@@ -546,6 +560,10 @@ export class OfficeScene extends Phaser.Scene {
           onRecordingReady: (payload) => this.bridge.emit('recordingready', payload),
           onDesksChanged: () => this.bridge.emit('deskschanged', undefined),
           onConnectionState: (state) => this.emitPresence(state),
+          onLocalAvatar: (avatarId) => {
+            this.localAvatarId = avatarId;
+            this.requestCharacter(avatarId);
+          },
           onResync: () => this.resyncAfterReconnect(),
         },
       });
@@ -584,6 +602,17 @@ export class OfficeScene extends Phaser.Scene {
       this.emitPresence('offline');
       this.emitVoice(null, [], this.currentSpaceId);
     }
+  }
+
+  /**
+   * Starts loading a character's sheets as soon as its id is known (art
+   * migration, step 5), so step 6 can draw it without a pop. Nothing redraws
+   * yet: avatars stay procedural until then, which is also the fallback while
+   * a sheet loads or if it fails.
+   */
+  private requestCharacter(avatarId: string | null): void {
+    if (avatarId === null || !this.alive) return;
+    this.art.request(avatarId, () => {});
   }
 
   /**

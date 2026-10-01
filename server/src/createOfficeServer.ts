@@ -33,6 +33,7 @@ import { identityAdminFromEnv } from './admin/gcpIdentityAdmin.ts';
 import type { IdentityAdmin } from './admin/identityAdminPort.ts';
 import type { DecorCatalog } from './decor/decorPort.ts';
 import { handleGetDisplayName, handleSetDisplayName } from './directory/displayNameRoutes.ts';
+import { handleGetAvatar, handleSetAvatar } from './directory/avatarRoutes.ts';
 import {
   handleArchiveAsset,
   handleCreateAsset,
@@ -784,6 +785,20 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   app.post(
     '/me/desk',
     decorRoute((req, deps) => handleReplaceDeskConfig(req.header('Authorization'), req.body, deps), true),
+  );
+
+  // The character chosen at the office entrance (art migration, step 5). It
+  // hangs from `decorRoute` and not `admin`: the choice is checked against the
+  // art catalog, so a server without one answers 503 and the SPA lets people
+  // in with the pack default instead of blocking the entrance.
+  app.get(
+    '/me/avatar',
+    decorRoute((req, deps) => handleGetAvatar(req.header('Authorization'), deps)),
+  );
+
+  app.post(
+    '/me/avatar',
+    decorRoute((req, deps) => handleSetAvatar(req.header('Authorization'), req.body, deps)),
   );
 
   /**

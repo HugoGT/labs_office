@@ -562,6 +562,7 @@ function remoteSnapshot(overrides: Record<string, unknown> = {}) {
     status: 'g',
     facing: 'down',
     spacesVersion: BUILT_IN_SPACES_VERSION,
+    avatarId: null,
     ...overrides,
   } as Parameters<OfficeRoomHandlers['onAdd']>[0];
 }
@@ -2482,5 +2483,38 @@ describe('OfficeScene: integracion camera pan y colision de peers (#53, #59)', (
     expect(mainCam.scrollX).toBe(pannedScrollX);
 
     scene.input.emit('pointerup', screenPointer(70, 50, mainCam));
+  });
+});
+
+describe('OfficeScene: persisted character ids (art migration, step 5)', () => {
+  it('loads the sheets of the own character the server replicates, keeping the procedural body', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(createOfficeBridge(), { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const player = findPlayer(scene);
+    const texture = player.baseTexture;
+
+    connector.handlers()!.onLocalAvatar?.('character-p07-green-suit');
+
+    await vi.waitFor(() => {
+      expect(scene.textures.exists(artSheetKey('character-p07-green-suit', 'walk'))).toBe(true);
+      expect(scene.textures.exists(artSheetKey('character-p07-green-suit', 'seated'))).toBe(true);
+    }, LOOP_WAIT);
+    expect((scene as OfficeScene).playerAvatarId).toBe('character-p07-green-suit');
+    expect(player.baseTexture).toBe(texture);
+  });
+
+  it('a peer avatar carries its persisted character and its sheets get loaded', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(createOfficeBridge(), { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', avatarId: 'character-p12-mint-blazer' }));
+
+    await vi.waitFor(() => {
+      expect(scene.textures.exists(artSheetKey('character-p12-mint-blazer', 'walk'))).toBe(true);
+    }, LOOP_WAIT);
+    const [peer] = findRemoteAvatars(scene) as (CharacterContainer & { avatarId?: string | null })[];
+    expect(peer.avatarId).toBe('character-p12-mint-blazer');
   });
 });

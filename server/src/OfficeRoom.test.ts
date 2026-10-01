@@ -26,6 +26,7 @@ import {
 } from './OfficeRoom.ts';
 import type { DirectoryUser, UserDirectory } from './directory/directoryPort.ts';
 import { createMemoryDirectory } from './directory/memoryDirectory.ts';
+import { ART_PACK_DEFAULTS } from './decor/artCatalogRules.ts';
 import type { OfficeState } from './schema.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 
@@ -897,6 +898,7 @@ function seededUser(overrides: Partial<DirectoryUser>): DirectoryUser {
     expiresAt: null,
     invitedBy: null,
     avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
   };
@@ -1161,6 +1163,102 @@ describe('OfficeRoom: el motivo del rechazo se registra en el servidor (#24)', (
     await expect(
       room.onAuth({} as ServerClient, { token: 'token-de-ana' }, {} as never),
     ).resolves.toMatchObject({ uid: 'uid-ana', directoryName: null });
+  });
+});
+
+/**
+ * The chosen character travels in the room state (art migration, step 5). The
+ * id replicated is always the persisted one: `onAuth` reads it from the
+ * directory row it already resolves, and anything the client sends is
+ * ignored, or anyone could dress up as someone else's character.
+ */
+describe('OfficeRoom: persisted character in the room state (art migration, step 5)', () => {
+  const BETO: VerifiedIdentity = { uid: 'uid-beto', email: 'beto@example.com', name: 'Beto Ruiz' };
+  let characterServer: OfficeServer | undefined;
+
+  async function start(options: { auth?: boolean; directory?: UserDirectory }) {
+    characterServer = createOfficeServer({
+      ...(options.auth === false ? {} : { auth: stubVerifier({ 'token-de-ana': ANA, 'token-de-beto': BETO }) }),
+      ...(options.directory ? { directory: options.directory } : { directory: null }),
+    });
+    return `ws://localhost:${await characterServer.listen(0)}`;
+  }
+
+  async function joinAt(endpoint: string, options: Record<string, unknown>) {
+    const room = await new Client(endpoint).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, options);
+    openRooms.push(room);
+    return room;
+  }
+
+  afterEach(async () => {
+    await characterServer?.shutdown();
+    characterServer = undefined;
+  });
+
+  it('onAuth carries the persisted character next to the identity', async () => {
+    const room = new OfficeRoom();
+    (room as unknown as { onMessage: unknown }).onMessage = () => () => {};
+    room.onCreate({
+      auth: stubVerifier({ 'token-de-ana': ANA }),
+      directory: createMemoryDirectory({ seed: [seededUser({ avatarId: 'character-p07-green-suit' })] }),
+    });
+
+    await expect(
+      room.onAuth({} as ServerClient, { token: 'token-de-ana' }, {} as never),
+    ).resolves.toMatchObject({ uid: 'uid-ana', avatarId: 'character-p07-green-suit' });
+  });
+
+  it('a second client sees the first client persisted character, not what it sent', async () => {
+    const directory = createMemoryDirectory({
+      seed: [
+        seededUser({ avatarId: 'character-p07-green-suit' }),
+        seededUser({
+          id: '22222222-2222-4222-8222-222222222222',
+          uid: 'uid-beto',
+          email: 'beto@example.com',
+          displayName: 'Beto',
+          avatarId: 'character-p12-mint-blazer',
+        }),
+      ],
+    });
+    const endpoint = await start({ directory });
+
+    const ana = await joinAt(endpoint, { token: 'token-de-ana', avatarId: 'character-p01-burgundy-suit' });
+    const beto = await joinAt(endpoint, { token: 'token-de-beto' });
+    await waitFor(() => beto.state.players.size === 2 && ana.state.players.size === 2);
+
+    expect(beto.state.players.get(ana.sessionId)?.avatarId).toBe('character-p07-green-suit');
+    expect(ana.state.players.get(beto.sessionId)?.avatarId).toBe('character-p12-mint-blazer');
+    expect(ana.state.players.get(ana.sessionId)?.avatarId).toBe('character-p07-green-suit');
+  });
+
+  it('a character saved after a session ends is the one the next join replicates', async () => {
+    const directory = createMemoryDirectory({ seed: [seededUser({})] });
+    const endpoint = await start({ directory });
+
+    await directory.setAvatar('11111111-1111-4111-8111-111111111111', 'character-p09-mint-shirt');
+    const room = await joinAt(endpoint, { token: 'token-de-ana' });
+    await waitFor(() => room.state.players.size === 1);
+
+    expect(room.state.players.get(room.sessionId)?.avatarId).toBe('character-p09-mint-shirt');
+  });
+
+  it('without a directory every player is the pack default character', async () => {
+    const endpoint = await start({});
+
+    const room = await joinAt(endpoint, { token: 'token-de-ana', avatarId: 'character-p07-green-suit' });
+    await waitFor(() => room.state.players.size === 1);
+
+    expect(room.state.players.get(room.sessionId)?.avatarId).toBe(ART_PACK_DEFAULTS.character);
+  });
+
+  it('without auth the client-sent character is ignored too', async () => {
+    const endpoint = await start({ auth: false });
+
+    const room = await joinAt(endpoint, { name: 'Ana', avatarId: 'character-p07-green-suit' });
+    await waitFor(() => room.state.players.size === 1);
+
+    expect(room.state.players.get(room.sessionId)?.avatarId).toBe(ART_PACK_DEFAULTS.character);
   });
 });
 

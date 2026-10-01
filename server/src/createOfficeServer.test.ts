@@ -28,6 +28,7 @@ import type { DirectoryUser, UserDirectory } from './directory/directoryPort.ts'
 import { createMemoryDirectory } from './directory/memoryDirectory.ts';
 import { createMemoryDecor } from './decor/memoryDecor.ts';
 import type { DecorCatalog } from './decor/decorPort.ts';
+import { readArtPackManifest } from './decor/artPackFile.ts';
 import { createMemoryDesks } from './desks/memoryDesks.ts';
 import type { DeskDirectory } from './desks/desksPort.ts';
 import { createMemorySpaces } from './spaces/memorySpaces.ts';
@@ -938,6 +939,7 @@ describe('rutas de espacios (#7, slice 3)', () => {
     expiresAt: null,
     invitedBy: null,
     avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
     createdAt: new Date('2025-12-01T00:00:00.000Z'),
   };
 
@@ -1078,6 +1080,7 @@ describe('rutas de decoracion (#7, slice 4)', () => {
     expiresAt: null,
     invitedBy: null,
     avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
     createdAt: new Date('2025-12-01T00:00:00.000Z'),
   };
 
@@ -1435,6 +1438,7 @@ describe('rutas de nombre visible (#100)', () => {
     expiresAt: null,
     invitedBy: null,
     avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
     createdAt: new Date('2025-12-01T00:00:00.000Z'),
   };
 
@@ -1537,6 +1541,106 @@ describe('rutas de nombre visible (#100)', () => {
 });
 
 /**
+ * Wiring of `/me/avatar` (art migration, step 5). It hangs from `decorRoute`
+ * because the choice is checked against the art catalog, so without a
+ * directory or a catalog it answers 503, never 404. The rules themselves are
+ * in `avatarRoutes.test.ts`.
+ */
+describe('character routes (art migration, step 5)', () => {
+  const ANA_AVATAR: DirectoryUser = {
+    id: 'id-ana',
+    uid: 'uid-ana',
+    email: 'ana@example.com',
+    displayName: null,
+    role: 'employee',
+    status: 'active',
+    expiresAt: null,
+    invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
+    createdAt: new Date('2025-12-01T00:00:00.000Z'),
+  };
+
+  const avatarVerifier: IdTokenVerifier = {
+    async verify(token: unknown) {
+      return token === 'valido-uid-ana' ? { uid: 'uid-ana', email: 'ana@example.com', name: null } : null;
+    },
+  };
+
+  const BEARER_ANA = { Authorization: 'Bearer valido-uid-ana', 'Content-Type': 'application/json' };
+
+  async function avatarServer(overrides: { decor?: DecorCatalog | null } = {}) {
+    let decor = overrides.decor;
+    if (decor === undefined) {
+      decor = createMemoryDecor();
+      await decor.registerArtPack(
+        readArtPackManifest(new URL('../../public/assets/pack/manifest.json', import.meta.url)),
+      );
+    }
+    const server = createOfficeServer({
+      auth: avatarVerifier,
+      directory: createMemoryDirectory({ seed: [ANA_AVATAR] }),
+      decor,
+      identityAdmin: null,
+    });
+    const port = await server.listen(0);
+    return { server, url: `http://localhost:${port}` };
+  }
+
+  it('GET /me/avatar without credentials answers 401', async () => {
+    const { server, url } = await avatarServer();
+
+    expect((await fetch(`${url}/me/avatar`)).status).toBe(401);
+    await server.shutdown();
+  });
+
+  it('POST /me/avatar stores the choice and GET returns it afterwards, chosen', async () => {
+    const { server, url } = await avatarServer();
+
+    const before = await fetch(`${url}/me/avatar`, { headers: BEARER_ANA });
+    expect(await before.json()).toEqual({ avatarId: 'character-p01-burgundy-suit', chosen: false });
+
+    const posted = await fetch(`${url}/me/avatar`, {
+      method: 'POST',
+      headers: BEARER_ANA,
+      body: JSON.stringify({ avatarId: 'character-p05-charcoal-suit' }),
+    });
+    expect(posted.status).toBe(200);
+
+    const after = await fetch(`${url}/me/avatar`, { headers: BEARER_ANA });
+    expect(await after.json()).toEqual({ avatarId: 'character-p05-charcoal-suit', chosen: true });
+    await server.shutdown();
+  });
+
+  it('an unknown character answers 400 with its reason end to end', async () => {
+    const { server, url } = await avatarServer();
+
+    const res = await fetch(`${url}/me/avatar`, {
+      method: 'POST',
+      headers: BEARER_ANA,
+      body: JSON.stringify({ avatarId: 'character-p99-nobody' }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid-character', reason: 'unknown-piece' });
+    await server.shutdown();
+  });
+
+  it('without a catalog, GET and POST answer 503 and not 404', async () => {
+    const { server, url } = await avatarServer({ decor: null });
+
+    expect((await fetch(`${url}/me/avatar`, { headers: BEARER_ANA })).status).toBe(503);
+    const posted = await fetch(`${url}/me/avatar`, {
+      method: 'POST',
+      headers: BEARER_ANA,
+      body: JSON.stringify({ avatarId: 'character-p05-charcoal-suit' }),
+    });
+    expect(posted.status).toBe(503);
+    await server.shutdown();
+  });
+});
+
+/**
  * El cableado de las rutas de escritorios (#7, slice 5). Lo que se prueba aqui
  * es la TRADUCCION -- que cada ruta existe, en su verbo, y que el estado "sin
  * almacen" responde 503 y no 404 -- no las reglas, que ya cubre
@@ -1563,6 +1667,7 @@ describe('rutas de escritorios (#7, slice 5)', () => {
     expiresAt: null,
     invitedBy: null,
     avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
     createdAt: new Date('2025-12-01T00:00:00.000Z'),
   };
 
@@ -2130,7 +2235,7 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
     const directory = createMemoryDirectory({ seed: ['owner', 'old', 'middle', 'after-delete', 'admin'].map((uid): DirectoryUser => ({
       id: `id-${uid}`, uid, email: `${uid}@example.com`, displayName: uid,
       role: uid === 'admin' ? 'admin' : 'employee', status: 'active', expiresAt: null, invitedBy: null,
-      avatarId: 'character-p01-burgundy-suit', createdAt: new Date(),
+      avatarId: 'character-p01-burgundy-suit', avatarChosenAt: null, createdAt: new Date(),
     })) });
     const recServer = createOfficeServer({ spaces, desks, directory, auth: recordingVerifier, egress: fakeEgress(),
       storage: uploadedStorage, recordingReadiness: { intervalMs: 5, timeoutMs: 2000 } });
@@ -2357,6 +2462,7 @@ describe('users routes (#93): revoking over HTTP evicts the live session', () =>
     expiresAt: null,
     invitedBy: null,
     avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
     createdAt: new Date('2025-12-01T00:00:00.000Z'),
   };
   const STAFF_USER: DirectoryUser = {
