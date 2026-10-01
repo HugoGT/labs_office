@@ -143,3 +143,52 @@ describe('createCharacterClient: catalog', () => {
     await expect(client(fetchImpl).catalog()).resolves.toBeNull();
   });
 });
+
+describe('createCharacterClient: uploaded characters (#121)', () => {
+  const UPLOADS_URL = 'http://server/assets/files/manifest.json';
+  const [mateo] = MANIFEST.pieces;
+  const UPLOADED = {
+    ...mateo,
+    id: 'character-upload-0123456789abcdef',
+    name: 'Lucía',
+    files: mateo.files.map((file: { role: string }) => ({ ...file, path: `${file.role === 'walk' ? 'a' : 'b'}.png` })),
+  };
+  const UPLOADS = { ...MANIFEST, pieces: [UPLOADED] };
+
+  function byUrl(responses: Record<string, Response | Error>) {
+    return vi.fn(async (url: string) => {
+      const response = responses[url];
+      if (response === undefined || response instanceof Error) throw response ?? new Error(`unexpected ${url}`);
+      return response;
+    }) as unknown as typeof fetch;
+  }
+
+  function uploadsClient(fetchImpl: typeof fetch) {
+    return createCharacterClient(
+      { baseUrl: 'http://server', getIdToken: TOKEN, manifestUrl: 'assets/pack/manifest.json', uploadsManifestUrl: UPLOADS_URL },
+      fetchImpl,
+    );
+  }
+
+  it('offers the uploads after the pack, their sheets served next to the uploads manifest', async () => {
+    const catalog = await uploadsClient(
+      byUrl({ 'assets/pack/manifest.json': fakeResponse(MANIFEST), [UPLOADS_URL]: fakeResponse(UPLOADS) }),
+    ).catalog();
+
+    expect(catalog?.options).toHaveLength(19);
+    expect(catalog?.options.at(-1)).toEqual({
+      id: UPLOADED.id,
+      name: 'Lucía',
+      walkUrl: 'http://server/assets/files/a.png',
+      seatedUrl: 'http://server/assets/files/b.png',
+    });
+    expect(catalog?.defaultId).toBe('character-p01-burgundy-suit');
+  });
+
+  it('without the uploads (no catalog on the server, or offline) it is the pack alone', async () => {
+    for (const uploads of [fakeResponse({ error: 'decor-not-configured' }, 503), new Error('offline')]) {
+      const catalog = await uploadsClient(byUrl({ 'assets/pack/manifest.json': fakeResponse(MANIFEST), [UPLOADS_URL]: uploads })).catalog();
+      expect(catalog?.options).toHaveLength(18);
+    }
+  });
+});

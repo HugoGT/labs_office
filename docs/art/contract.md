@@ -101,6 +101,17 @@ Issue #121 set a first contract before the pack existed. The pack does not fit i
 
 These points of #121 still hold: 1:1 pixel density on the 32px tile, PNG only (no SVG, GIF, WebP or JPG), and a manifest with `id`, `kind`, `footprint`, `author` and `license` for each piece. Upload limits, such as the 128 KB size, belong to the upload work and are not changed here.
 
+## Uploads (#121)
+
+An Admin can upload pieces from `/dashboard` (`POST /admin/assets/upload`). The server holds each file to this same contract with `validateArtImage`, plus the upload limits:
+
+- At most 128 KB per file (`MAX_UPLOAD_FILE_BYTES`, `server/src/assets/assetImageRules.ts`).
+- Any 8-bit, non-interlaced PNG (gray, RGB, indexed or RGBA, `tRNS` honored). The server re-encodes the decoded pixels and stores only that, as `png-rgba8`: no chunk, metadata or trailing data of the original survives.
+- Kinds: `character` (walk and seated sheets), `desk` (facing geometry from the body or, by default, the pack default desk's), `floor` and `plant`. Anchors and footprints are the contract's. Map pieces (walls, tileset, bridges, hedges, tables) still come only from the pack.
+- Ids are `<kind>-upload-<16 hex>`, derived from the file hashes. A pack may not use that prefix, so uploads and pack pieces never collide.
+
+Refusals use the codes of the table above plus `too-large`, `not-png`, `invalid-png`, `unsupported-png`, `invalid-metadata` and `missing-file`, each with the file role or field it is about.
+
 ## Version history
 
 - **2**: added the terrain tileset, the five missing terrain floors (dirt, sand, cobblestone, tile, carpet) and the map props. Readers of version 1 reject the new piece kinds, so the server catalog and the office only accept version 2 packs; the `art_pieces` kind CHECK is replaced on existing databases.

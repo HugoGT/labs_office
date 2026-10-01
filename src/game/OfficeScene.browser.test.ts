@@ -1771,6 +1771,22 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
     }, LOOP_WAIT);
   });
 
+  it('draws pieces of the uploads catalog too (#121)', async () => {
+    const bridge = createOfficeBridge();
+    // The pack manifest stands in for the server's uploads manifest: same format.
+    const { scene } = await bootOfficeScene(bridge, {
+      artManifestUrl: 'assets/pack/missing-manifest.json',
+      artUploadsUrl: 'assets/pack/manifest.json',
+    });
+
+    bridge.emitCommand('desks', { desks: [servedDesk({ appearance: { materialId: 'desk-glass', color: null } })] });
+
+    await vi.waitFor(() => {
+      const drawn = furniture(scene, 'id-mesa') as Phaser.GameObjects.Image | null;
+      expect(drawn?.texture.key).toBe(artSheetKey('desk-glass', 'sheet'));
+    }, LOOP_WAIT);
+  });
+
   it('without the art pack a desk is a visible placeholder, not a crash', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge, { artManifestUrl: null });
@@ -1801,6 +1817,25 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
     expect(decor).not.toBeNull();
     expect(decor.x).toBe(10 * TILE + 2.5 * TILE);
     expect(decor.y).toBe(12 * TILE + 2.5 * TILE);
+  });
+
+  it('decor that points at an art texture (an uploaded plant, #121) loads that piece on demand and redraws with it', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    // Any sheet the map has not loaded stands in for an upload that arrived
+    // after the page did; a character sheet is one nobody draws at boot.
+    const textureKey = artSheetKey('character-p02-beige-blazer', 'walk');
+
+    bridge.emitCommand('desks', {
+      desks: [servedDesk({ occupant: occupant('Ana Torres', [{ id: 'id-planta', slot: 4, rotation: 0, textureKey, aboveAvatars: false }]) })],
+    });
+
+    expect(scene.children.getByName('desk-item:id-planta')?.type).toBe('Rectangle');
+    await vi.waitFor(() => {
+      const drawn = scene.children.getByName('desk-item:id-planta') as Phaser.GameObjects.Image | null;
+      expect(drawn?.type).toBe('Image');
+      expect(drawn?.texture.key).toBe(textureKey);
+    }, LOOP_WAIT);
   });
 
   it('una pieza con un slot que no existe se salta sin llevarse el escritorio por delante', async () => {

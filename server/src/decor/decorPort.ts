@@ -41,7 +41,11 @@ export interface Asset {
   slug: string;
   name: string;
   kind: AssetKind;
-  /** Clave del sprite que el bundle del cliente YA trae. El catalogo es curado: aqui no se sube ninguna imagen. */
+  /**
+   * Clave del sprite que el bundle del cliente YA trae, o la de una pieza de
+   * arte (`art:<id>:<role>`, `artSheetKey`), que la escena carga bajo demanda:
+   * es lo que pone la subida de una planta (#121). Esta ruta no sube imagenes.
+   */
   textureKey: string;
   /** Tamano en TILES, no en pixeles. Misma unidad que `Space`. */
   w: number;
@@ -124,6 +128,9 @@ export interface ListAssetsOptions {
  * Same asymmetry as `archivedAt` on assets: `retiredAt` says the piece cannot
  * be chosen again, not that the rows that chose it stop resolving it.
  */
+/** Where a catalog piece comes from (#121): the registered pack or an Admin upload. */
+export type ArtPieceSource = 'pack' | 'upload';
+
 export interface ArtCatalogPiece {
   id: string;
   kind: ArtPieceKind;
@@ -141,6 +148,26 @@ export interface ArtCatalogPiece {
   retiredAt: Date | null;
   registeredAt: Date;
   updatedAt: Date;
+  /** A pack registration only retires `pack` pieces: an upload is not the pack's to retire. */
+  source: ArtPieceSource;
+  /** Directory id of the Admin who uploaded it; `null` for pack pieces. */
+  uploadedBy: string | null;
+}
+
+export interface UploadedArtPieceInput {
+  /** The manifest entry `prepareAssetUpload` built, its files already stored. */
+  piece: ArtPiece;
+  uploadedBy: string;
+  /**
+   * The desk decor asset that draws it (a plant), created in the same
+   * transaction: either both exist afterwards or neither does.
+   */
+  decorAsset?: CreateAssetInput;
+}
+
+export interface UploadedArtPiece {
+  piece: ArtCatalogPiece;
+  asset: Asset | null;
 }
 
 export interface ListArtPiecesOptions {
@@ -176,4 +203,12 @@ export interface DecorCatalog {
   registerArtPack(pack: ArtPackManifest): Promise<ArtPackRegistration>;
   /** Deterministic order (kind, id). Leaves out retired pieces unless asked. */
   listArtPieces(options?: ListArtPiecesOptions): Promise<ArtCatalogPiece[]>;
+  /**
+   * Adds one Admin upload (#121), active at once, with its optional decor
+   * asset. Never overwrites: an id already in the catalog, retired or not,
+   * throws `ArtPieceExistsError`, and a taken decor name throws
+   * `AssetNameTakenError` with nothing written. Throws `InvalidArtPackError`
+   * for an id outside the upload id space.
+   */
+  registerUploadedArtPiece(input: UploadedArtPieceInput): Promise<UploadedArtPiece>;
 }

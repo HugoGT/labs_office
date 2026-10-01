@@ -175,11 +175,39 @@ export type AdminErrorCode =
   | 'terrain-under-player'
   /** No `DATABASE_URL`: the terrain is the committed layout's and cannot be edited. */
   | 'terrain-not-configured'
+  /**
+   * An art upload refused by the server (#121), one code per fix: another
+   * file format, another size, fewer colors, no background, a smaller file,
+   * or a field of the form. `AdminError.field` names the file or field.
+   */
+  | 'not-png'
+  | 'invalid-png'
+  | 'unsupported-png'
+  | 'invalid-dimensions'
+  | 'too-many-colors'
+  | 'not-opaque'
+  | 'background-present'
+  | 'too-large'
+  | 'invalid-metadata'
+  | 'missing-file'
+  /** No asset bucket (`ASSET_GCS_BUCKET`) or no catalog: uploads are off, the pack still works. */
+  | 'asset-upload-not-configured'
+  /** The same pixels are already a piece of the catalog. */
+  | 'asset-already-uploaded'
+  /** An uploaded plant's desk decor asset would take a name another asset has. */
+  | 'asset-name-taken'
   | 'network'
   | 'unknown';
 
 export class AdminError extends Error {
-  constructor(public readonly code: AdminErrorCode) {
+  /**
+   * @param field The file role or form field the server named (#121 uploads),
+   *   `null` when the refusal is about the request as a whole.
+   */
+  constructor(
+    public readonly code: AdminErrorCode,
+    public readonly field: string | null = null,
+  ) {
     super(`Fallo de administracion (${code})`);
     // Sin esto, `error.name` seria 'Error' en cualquier traza y en cualquier
     // log, que es justo donde hace falta reconocerlo.

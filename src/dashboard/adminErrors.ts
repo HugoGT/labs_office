@@ -74,6 +74,21 @@ const MESSAGES: Readonly<Record<AdminErrorCode, string>> = {
     'El agua taparía una sala, un escritorio, una silla o la entrada de la oficina. Elige otro bloque o material.',
   'terrain-under-player': 'Hay alguien de pie en ese bloque: el agua podrá ir cuando se aparte.',
   'terrain-not-configured': 'La edición del terreno no está configurada en este servidor.',
+  // Art upload (#121). Each says what to change in the file, because the
+  // form is still on screen with it; the panel adds which file it was.
+  'not-png': 'El archivo no es un PNG.',
+  'invalid-png': 'El PNG está dañado o incompleto y no se puede leer.',
+  'unsupported-png': 'El PNG tiene que ser de 8 bits por canal y sin entrelazado. Vuelve a exportarlo así.',
+  'invalid-dimensions': 'La imagen no mide exactamente lo que pide ese tipo de pieza.',
+  'too-many-colors': 'La imagen tiene más de 128 colores distintos. Reduce la paleta.',
+  'not-opaque': 'Un suelo no puede tener píxeles transparentes ni translúcidos.',
+  'background-present': 'Las cuatro esquinas de cada cuadro tienen que ser transparentes. Quita el fondo.',
+  'too-large': 'El archivo pesa más de 128 KB.',
+  'invalid-metadata': 'Falta un dato de la pieza o no tiene el formato correcto.',
+  'missing-file': 'Falta uno de los archivos que pide ese tipo de pieza.',
+  'asset-upload-not-configured': 'La subida de arte no está configurada en este servidor.',
+  'asset-already-uploaded': 'Esa imagen ya se subió: la pieza ya está en el catálogo.',
+  'asset-name-taken': 'Ya hay una pieza de decoración con ese nombre. Elige otro.',
   network: 'No se pudo contactar con el servidor.',
   unknown: GENERIC_MESSAGE,
 };

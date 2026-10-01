@@ -27,8 +27,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { ArtPackManifest } from '../../../src/game/artContract.ts';
-import { artPieceFields, normalizeArtPack } from './artCatalogRules.ts';
+import { ART_CONTRACT_VERSION, type ArtPackManifest } from '../../../src/game/artContract.ts';
+import { ArtPieceExistsError, artPieceFields, assertUploadedArtPiece, normalizeArtPack } from './artCatalogRules.ts';
 import type {
   ArtCatalogPiece,
   Asset,
@@ -39,6 +39,7 @@ import type {
   ListArtPiecesOptions,
   ListAssetsOptions,
   UpdateAssetInput,
+  UploadedArtPieceInput,
 } from './decorPort.ts';
 import {
   AssetNameTakenError,
@@ -68,7 +69,7 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): DecorCatalo
     assets.set(seeded.id, { ...seeded });
   }
 
-  /** Art pack pieces by manifest id. Never shrinks: retiring only sets `retiredAt`. */
+  /** Art pieces (pack and uploads) by id. Never shrinks: retiring only sets `retiredAt`. */
   const artPieces = new Map<string, ArtCatalogPiece>();
 
   /** Mismo orden que `pgDecor`: (kind, slug, id). */
@@ -102,6 +103,39 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): DecorCatalo
       .sort((a, b) => a.slot - b.slot);
   }
 
+  /**
+   * Validates a new asset and builds its row without writing it, so an upload
+   * can check its decor asset before touching either map (the ROLLBACK of
+   * `pgDecor.registerUploadedArtPiece`).
+   */
+  function prepareAsset(input: CreateAssetInput): Asset {
+    const normalized = normalizeCreateAssetInput(input);
+
+    // El equivalente de `assets_slug_unique`, sobre `lower(slug)`. Se
+    // reproduce por la misma razon que la regla de archivados de D1b: las
+    // rutas se prueban contra ESTE adaptador, asi que un alta que aqui
+    // pasase y en Postgres diese 500 dejaria la suite certificando un
+    // comportamiento que produccion no tiene.
+    //
+    // Recorre el catalogo ENTERO y no solo lo vivo: el indice de
+    // `schema.sql` no es parcial, asi que una pieza retirada sigue ocupando
+    // su slug. Filtrar por `archivedAt` aqui daria por buena un alta que la
+    // base de datos rechaza.
+    //
+    // Solo el slug y no tambien el nombre, al reves que `memorySpaces`:
+    // `assets` tiene UN indice y no dos. Anadir aqui una comprobacion de
+    // nombre rechazaria altas que Postgres acepta, que es el mismo desfase
+    // en la otra direccion.
+    const slug = normalized.slug.toLowerCase();
+    for (const existing of assets.values()) {
+      if (existing.slug.toLowerCase() === slug) {
+        throw new AssetNameTakenError('ya existe un asset con ese nombre');
+      }
+    }
+
+    return { id: newId(), ...normalized, archivedAt: null, createdAt: now() };
+  }
+
   return {
     async listAssets(options: ListAssetsOptions = {}) {
       const all = [...assets.values()];
@@ -109,31 +143,7 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): DecorCatalo
     },
 
     async createAsset(input: CreateAssetInput) {
-      const normalized = normalizeCreateAssetInput(input);
-
-      // El equivalente de `assets_slug_unique`, sobre `lower(slug)`. Se
-      // reproduce por la misma razon que la regla de archivados de D1b: las
-      // rutas se prueban contra ESTE adaptador, asi que un alta que aqui
-      // pasase y en Postgres diese 500 dejaria la suite certificando un
-      // comportamiento que produccion no tiene.
-      //
-      // Recorre el catalogo ENTERO y no solo lo vivo: el indice de
-      // `schema.sql` no es parcial, asi que una pieza retirada sigue ocupando
-      // su slug. Filtrar por `archivedAt` aqui daria por buena un alta que la
-      // base de datos rechaza.
-      //
-      // Solo el slug y no tambien el nombre, al reves que `memorySpaces`:
-      // `assets` tiene UN indice y no dos. Anadir aqui una comprobacion de
-      // nombre rechazaria altas que Postgres acepta, que es el mismo desfase
-      // en la otra direccion.
-      const slug = normalized.slug.toLowerCase();
-      for (const existing of assets.values()) {
-        if (existing.slug.toLowerCase() === slug) {
-          throw new AssetNameTakenError('ya existe un asset con ese nombre');
-        }
-      }
-
-      const asset: Asset = { id: newId(), ...normalized, archivedAt: null, createdAt: now() };
+      const asset = prepareAsset(input);
       assets.set(asset.id, asset);
       return asset;
     },
@@ -216,12 +226,15 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): DecorCatalo
           retiredAt: null,
           registeredAt: current?.registeredAt ?? at,
           updatedAt: at,
+          source: 'pack',
+          uploadedBy: null,
         });
       }
 
       const retired: string[] = [];
       for (const piece of artPieces.values()) {
-        if (piece.retiredAt !== null || shipped.has(piece.id)) continue;
+        // Uploads are not the pack's to retire (#121): same `source = 'pack'` as pg.
+        if (piece.source !== 'pack' || piece.retiredAt !== null || shipped.has(piece.id)) continue;
         artPieces.set(piece.id, { ...piece, retiredAt: at, updatedAt: at });
         retired.push(piece.id);
       }
@@ -234,6 +247,26 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): DecorCatalo
       return (options.includeRetired ? all : all.filter((piece) => piece.retiredAt === null)).sort(
         (a, b) => a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id),
       );
+    },
+
+    async registerUploadedArtPiece({ piece, uploadedBy, decorAsset }: UploadedArtPieceInput) {
+      assertUploadedArtPiece(piece);
+      // Everything that can fail runs before either map is written.
+      if (artPieces.has(piece.id)) throw new ArtPieceExistsError(piece.id);
+      const asset = decorAsset === undefined ? null : prepareAsset(decorAsset);
+      const at = now();
+      const stored: ArtCatalogPiece = {
+        ...artPieceFields(piece),
+        contractVersion: ART_CONTRACT_VERSION,
+        retiredAt: null,
+        registeredAt: at,
+        updatedAt: at,
+        source: 'upload',
+        uploadedBy,
+      };
+      artPieces.set(piece.id, stored);
+      if (asset !== null) assets.set(asset.id, asset);
+      return { piece: stored, asset };
     },
   };
 }

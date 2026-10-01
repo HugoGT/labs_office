@@ -18,6 +18,7 @@ import {
   BRIDGE_ORIENTATIONS,
   PACK_FACINGS,
   TERRAIN_MATERIALS,
+  artSheetKey,
   sheetSize,
   type ArtImageKind,
   type ArtPackManifest,
@@ -38,6 +39,62 @@ export interface ArtAppearance {
   readonly color: string | null;
 }
 
+/**
+ * Where the office server lists the pieces an Admin uploaded (#121), in the
+ * pack's manifest format with file paths relative to it. Not under the SPA
+ * like the pack: the server serves both the list and the files, so it hangs
+ * from the same origin as every other office API call. `null` without a
+ * server, where nothing can have been uploaded.
+ */
+export const ART_UPLOADS_MANIFEST_PATH = '/assets/files/manifest.json';
+
+export function artUploadsManifestUrl(officeEndpoint: string | null | undefined): string | null {
+  if (officeEndpoint === null || officeEndpoint === undefined) return null;
+  const base = officeEndpoint.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://').replace(/\/$/, '');
+  return `${base}${ART_UPLOADS_MANIFEST_PATH}`;
+}
+
+/** The piece and role of a key `artSheetKey` made, or `null` for any other texture key. */
+export function parseArtSheetKey(key: string): { pieceId: string; role: string } | null {
+  const match = /^art:([^:@]+):([^:@]+)$/.exec(key);
+  return match === null ? null : { pieceId: match[1] as string, role: match[2] as string };
+}
+
+/** One manifest the office reads and the URL its file paths are relative to. */
+export interface ArtManifestSource {
+  readonly manifest: ArtPackManifest | null;
+  readonly url: string;
+}
+
+/** Every piece the office can draw, from every source, and where each one loads from. */
+export interface ArtCatalog {
+  readonly manifest: ArtPackManifest;
+  /** URL of the manifest the piece came from, for `pieceLoadRequests`. */
+  sourceOf(pieceId: string): string | undefined;
+}
+
+/**
+ * Joins the pack and the uploads into one catalog. Sources are read in order
+ * and the first one to list an id keeps it: the pack goes first, so an upload
+ * can never replace a pack piece (the server reserves upload ids anyway). The
+ * defaults come from the first readable source. `null` when none is readable.
+ */
+export function combineArtManifests(sources: readonly ArtManifestSource[]): ArtCatalog | null {
+  const readable = sources.filter((source): source is { manifest: ArtPackManifest; url: string } => source.manifest !== null);
+  const first = readable[0];
+  if (first === undefined) return null;
+  const origin = new Map<string, string>();
+  const pieces: ArtPiece[] = [];
+  for (const { manifest, url } of readable) {
+    for (const piece of manifest.pieces) {
+      if (origin.has(piece.id)) continue;
+      origin.set(piece.id, url);
+      pieces.push(piece);
+    }
+  }
+  return { manifest: { ...first.manifest, pieces }, sourceOf: (pieceId) => origin.get(pieceId) };
+}
+
 /** One spritesheet for Phaser's loader. */
 export interface ArtLoadRequest {
   readonly key: string;
@@ -56,9 +113,7 @@ export const BOOT_PIECE_KINDS: readonly ArtPieceKind[] = ['floor', 'desk', 'chai
 
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/;
 
-export function artSheetKey(pieceId: string, role: string): string {
-  return `art:${pieceId}:${role}`;
-}
+export { artSheetKey };
 
 /** One texture per material and color, shared by every placement that uses it. */
 export function recoloredSheetKey(pieceId: string, role: string, color: string): string {

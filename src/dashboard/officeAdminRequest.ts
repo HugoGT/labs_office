@@ -65,57 +65,80 @@ const APPEARANCE_REASONS: Readonly<Record<string, AdminErrorCode>> = {
   'invalid-color': 'appearance-invalid-color',
 };
 
+/** The 400s of an art upload (#121), passed through with the file or field the body names. */
+const UPLOAD_REFUSALS: ReadonlySet<string> = new Set<AdminErrorCode>([
+  'not-png',
+  'invalid-png',
+  'unsupported-png',
+  'invalid-dimensions',
+  'too-many-colors',
+  'not-opaque',
+  'background-present',
+  'too-large',
+  'invalid-metadata',
+  'missing-file',
+]);
+
 /**
- * A 400 is `invalid-request` unless its body names an appearance refusal:
- * those are fixed by picking another material or color, not by retyping the
- * coordinates. An unreadable body or an unknown reason keeps the generic code.
+ * A 400 is `invalid-request` unless its body names an appearance or upload
+ * refusal: those are fixed by picking another material or color, or another
+ * file, not by retyping the coordinates. An unreadable body or an unknown
+ * reason keeps the generic code.
  */
-async function codeForInvalidRequest(response: Response): Promise<AdminErrorCode> {
+async function errorForInvalidRequest(response: Response): Promise<AdminError> {
   let body: unknown;
   try {
     body = await response.json();
   } catch {
-    return 'invalid-request';
+    return new AdminError('invalid-request');
   }
-  if (typeof body !== 'object' || body === null) return 'invalid-request';
-  const { error, reason } = body as Record<string, unknown>;
-  if (error === 'appearance-immutable') return 'appearance-immutable';
+  if (typeof body !== 'object' || body === null) return new AdminError('invalid-request');
+  const { error, reason, field } = body as Record<string, unknown>;
+  if (error === 'appearance-immutable') return new AdminError('appearance-immutable');
   if (error === 'invalid-appearance' && typeof reason === 'string') {
-    return APPEARANCE_REASONS[reason] ?? 'invalid-request';
+    return new AdminError(APPEARANCE_REASONS[reason] ?? 'invalid-request');
   }
-  return 'invalid-request';
+  if (typeof error === 'string' && UPLOAD_REFUSALS.has(error)) {
+    return new AdminError(error as AdminErrorCode, typeof field === 'string' ? field : null);
+  }
+  return new AdminError('invalid-request');
 }
 
-async function codeForStatus(
+async function errorForStatus(
   response: Response,
   { notConfigured, conflicts }: OfficeAdminRequestOptions,
-): Promise<AdminErrorCode> {
+): Promise<AdminError> {
   switch (response.status) {
     case 400:
-      return codeForInvalidRequest(response);
+      return errorForInvalidRequest(response);
     case 401:
-      return 'unauthorized';
+      return new AdminError('unauthorized');
     case 403:
-      return 'forbidden';
+      return new AdminError('forbidden');
     case 404:
-      return 'not-found';
+      return new AdminError('not-found');
     case 409: {
       let body: unknown;
       try {
         body = await response.json();
       } catch {
-        return conflicts[0];
+        return new AdminError(conflicts[0]);
       }
       const error =
         typeof body === 'object' && body !== null ? (body as Record<string, unknown>).error : undefined;
-      return typeof error === 'string' && (conflicts as readonly string[]).includes(error)
-        ? (error as AdminErrorCode)
-        : conflicts[0];
+      return new AdminError(
+        typeof error === 'string' && (conflicts as readonly string[]).includes(error)
+          ? (error as AdminErrorCode)
+          : conflicts[0],
+      );
     }
+    // Only the upload route accepts a body big enough to hit the limit (#121).
+    case 413:
+      return new AdminError('too-large');
     case 503:
-      return notConfigured;
+      return new AdminError(notConfigured);
     default:
-      return 'unknown';
+      return new AdminError('unknown');
   }
 }
 
@@ -148,7 +171,7 @@ export function createOfficeAdminRequest(
       throw new AdminError('network');
     }
 
-    if (!response.ok) throw new AdminError(await codeForStatus(response, options));
+    if (!response.ok) throw await errorForStatus(response, options);
 
     try {
       return (await response.json()) as T;

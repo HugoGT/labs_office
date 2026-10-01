@@ -935,6 +935,28 @@ sudo docker compose --project-directory /opt/office logs --tail 100 colyseus | g
 gcloud storage ls -l "gs://$(terraform output -raw recording_bucket)/recordings/"
 ```
 
+## Uploaded art (issue #121)
+
+An Admin uploads PNGs from `/dashboard` (`POST /admin/assets/upload`). The
+server validates each file against the art contract (`docs/art/contract.md`),
+re-encodes it and stores only the re-encoded bytes, content-addressed, as
+`assets/<sha256>.png`. The server serves them itself, with immutable caching,
+from `GET /assets/files/<sha256>.png`, next to the uploads manifest
+`GET /assets/files/manifest.json`; nothing in the bucket is public or signed.
+
+| Piece | Where |
+|---|---|
+| Bucket `<project>-labs-office-<env>-assets` | `google_storage_bucket.assets`, `terraform/main.tf`. Region of the VM, uniform bucket-level access, public access prevention enforced, no lifecycle rule (catalog rows point at these objects forever) |
+| Writes (create only, by precondition) | `roles/storage.objectCreator` on the bucket for the VM service account |
+| Reads (serving) | `roles/storage.objectViewer` on the bucket for the VM service account |
+| Bucket name to the server | metadata `office-asset-bucket` -> `office-deploy` -> `ASSET_GCS_BUCKET` in `/opt/office/.env` |
+| Route through Caddy | `handle /assets/files/*` in `Caddyfile`, never `/assets/*` (the Vite bundles live there) |
+
+Without the bucket (a VM from before this change, or `ASSET_GCS_BUCKET`
+empty), uploads and file reads answer 503 `asset-upload-not-configured` and the
+office keeps drawing the default pack. Rolling it out is a `terraform apply`
+(the bucket, its two bindings and the metadata key) followed by a deploy.
+
 ## Caveats conocidos
 
 ### sslip.io comparte el límite de emisión de Let's Encrypt

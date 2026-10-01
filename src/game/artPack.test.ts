@@ -3,8 +3,11 @@ import { ART_CONTRACT_VERSION, type ArtPackManifest } from './artContract';
 import {
   ART_PACK_MANIFEST_URL,
   artSheetKey,
+  artUploadsManifestUrl,
   bootLoadRequests,
+  combineArtManifests,
   findPiece,
+  parseArtSheetKey,
   parseArtAppearance,
   parseArtPackManifest,
   pieceLoadRequests,
@@ -164,5 +167,55 @@ describe('parseArtAppearance', () => {
     expect(parseArtAppearance(42, null)).toBeNull();
     // A color that is not #rrggbb is dropped, not the material.
     expect(parseArtAppearance('desk-painted', 'teal')).toEqual({ materialId: 'desk-painted', color: null });
+  });
+});
+
+describe('uploaded art (#121)', () => {
+  const UPLOADS_URL = 'http://localhost:2567/assets/files/manifest.json';
+  const ficus = () => pack().pieces.find((piece) => piece.id === 'plant-ficus')!;
+  const uploaded = () => ({ ...ficus(), id: 'plant-upload-0123456789abcdef', files: ficus().files.map((file) => ({ ...file, path: `${'a'.repeat(64)}.png` })) });
+  const uploads = (): ArtPackManifest => ({ ...pack(), pieces: [uploaded()] });
+
+  it('reads the uploads manifest from the office server, next to its files', () => {
+    expect(artUploadsManifestUrl('ws://localhost:2567')).toBe(UPLOADS_URL);
+    expect(artUploadsManifestUrl('wss://app.example.com')).toBe('https://app.example.com/assets/files/manifest.json');
+    // Without a server there is nothing uploaded to read.
+    expect(artUploadsManifestUrl(null)).toBeNull();
+    expect(artUploadsManifestUrl(undefined)).toBeNull();
+  });
+
+  it('joins the pack and the uploads into one catalog, each piece loading from its own folder', () => {
+    const catalog = combineArtManifests([
+      { manifest: pack(), url: ART_PACK_MANIFEST_URL },
+      { manifest: uploads(), url: UPLOADS_URL },
+    ]);
+
+    expect(catalog?.manifest.pieces).toHaveLength(pack().pieces.length + 1);
+    expect(catalog?.manifest.defaults).toEqual(pack().defaults);
+    expect(catalog?.sourceOf('plant-ficus')).toBe(ART_PACK_MANIFEST_URL);
+    expect(catalog?.sourceOf('plant-upload-0123456789abcdef')).toBe(UPLOADS_URL);
+    expect(pieceLoadRequests(uploaded(), UPLOADS_URL)[0]?.url).toBe(`http://localhost:2567/assets/files/${'a'.repeat(64)}.png`);
+  });
+
+  it('keeps the pack piece when an upload repeats its id, and works with either source missing', () => {
+    const clash = { ...uploads(), pieces: [{ ...ficus(), name: 'Impostor' }] };
+    const catalog = combineArtManifests([
+      { manifest: pack(), url: ART_PACK_MANIFEST_URL },
+      { manifest: clash, url: UPLOADS_URL },
+    ]);
+    expect(findPiece(catalog!.manifest, 'plant-ficus')?.name).toBe(ficus().name);
+    expect(catalog?.sourceOf('plant-ficus')).toBe(ART_PACK_MANIFEST_URL);
+
+    expect(combineArtManifests([{ manifest: null, url: ART_PACK_MANIFEST_URL }, { manifest: uploads(), url: UPLOADS_URL }])?.manifest.pieces).toHaveLength(1);
+    expect(combineArtManifests([{ manifest: pack(), url: ART_PACK_MANIFEST_URL }, { manifest: null, url: UPLOADS_URL }])?.manifest.pieces).toHaveLength(
+      pack().pieces.length,
+    );
+    expect(combineArtManifests([{ manifest: null, url: ART_PACK_MANIFEST_URL }])).toBeNull();
+  });
+
+  it('reads an art texture key back into its piece and role, for decor that points at one', () => {
+    expect(parseArtSheetKey(artSheetKey('plant-upload-0123456789abcdef', 'sheet'))).toEqual({ pieceId: 'plant-upload-0123456789abcdef', role: 'sheet' });
+    expect(parseArtSheetKey('plant-large')).toBeNull();
+    expect(parseArtSheetKey('art:only-one-part')).toBeNull();
   });
 });

@@ -58,6 +58,25 @@ export class InvalidArtPackError extends Error {
   }
 }
 
+/** An upload whose id the catalog already has (#121): the same pixels were uploaded before. */
+export class ArtPieceExistsError extends Error {
+  constructor(id: string) {
+    super(`art piece ${id} is already in the catalog`);
+    this.name = 'ArtPieceExistsError';
+  }
+}
+
+/**
+ * The adapters' guard on an upload: it must live in the upload id space of
+ * its own kind, the mirror of the rule `normalizeArtPack` applies to packs.
+ */
+export function assertUploadedArtPiece(piece: ArtPiece): void {
+  if (!(ART_PIECE_KINDS as readonly unknown[]).includes(piece.kind) || !piece.id.startsWith(uploadedPieceIdPrefix(piece.kind))) {
+    throw new InvalidArtPackError(`uploaded art piece ${piece.id} is outside the upload id space of its kind`);
+  }
+  if (!Array.isArray(piece.files) || piece.files.length === 0) throw new InvalidArtPackError(`uploaded art piece ${piece.id} has no files`);
+}
+
 export type ArtChoiceErrorCode = 'unknown-piece' | 'retired-piece' | 'color-not-allowed' | 'invalid-color';
 
 /**
@@ -96,6 +115,15 @@ export interface ArtAppearanceInput {
 }
 
 const COLOR = /^#[0-9a-f]{6}$/i;
+
+/**
+ * Ids under `<kind>-upload-` belong to Admin uploads (#121), never to a pack:
+ * `normalizeArtPack` refuses them, so registering a pack can neither
+ * overwrite an upload nor retire it by accident.
+ */
+export function uploadedPieceIdPrefix(kind: string): string {
+  return `${kind}-upload-`;
+}
 
 export function normalizeArtColor(raw: unknown): string {
   if (typeof raw !== 'string' || !COLOR.test(raw)) {
@@ -137,6 +165,7 @@ export function normalizeArtPack(raw: unknown): ArtPackManifest {
     // The prefix is what keeps an identity from changing kind between packs:
     // a stored `desk-wood` can never come back as a floor.
     if (!id.startsWith(`${kind as string}-`)) throw new InvalidArtPackError(`art piece ${id} does not start with its kind`);
+    if (id.startsWith(uploadedPieceIdPrefix(kind as string))) throw new InvalidArtPackError(`art piece ${id} uses the id space reserved for uploads`);
     if (kinds.has(id)) throw new InvalidArtPackError(`duplicate art piece id ${id}`);
     if (!nonEmptyString(piece.name) || !nonEmptyString(piece.author) || !nonEmptyString(piece.license)) {
       throw new InvalidArtPackError(`art piece ${id} needs a name, an author and a license`);

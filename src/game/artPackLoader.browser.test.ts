@@ -145,4 +145,38 @@ describe('ArtPackLoader', () => {
     expect(art.manifest).toBeNull();
     expect(art.request('floor-grass', () => {})).toBe('failed');
   });
+
+  describe('uploaded pieces (#121)', () => {
+    // The uploads manifest lives on the office server in production. Here the
+    // pack's own manifest stands in for it: same format, files next to it.
+    const STAND_IN = 'assets/pack/manifest.json';
+
+    it('boots from the uploads catalog too, each piece loading from that catalog folder', async () => {
+      const { art } = await boot({ manifestUrl: 'assets/pack/missing-manifest.json', uploadsUrl: STAND_IN });
+
+      expect(art.manifest?.pieces.length).toBeGreaterThan(0);
+      // Boot kinds of the uploads load before create(), like the pack's.
+      expect(art.sheet('desk-wood', 'sheet')).not.toBeNull();
+      await settle(art, 'character-p02-beige-blazer');
+      expect(art.status('character-p02-beige-blazer')).toBe('ready');
+    });
+
+    it('re-reads the uploads catalog for an id uploaded after the page loaded', async () => {
+      const { art } = await boot({ manifestUrl: 'assets/pack/missing-manifest.json', uploadsUrl: STAND_IN });
+      art.adoptManifest(withoutPiece(art.manifest as ArtPackManifest, 'character-p03-forest-suit'), 'uploads');
+      expect(art.manifest?.pieces.some((piece) => piece.id === 'character-p03-forest-suit')).toBe(false);
+
+      await settle(art, 'character-p03-forest-suit');
+
+      expect(art.status('character-p03-forest-suit')).toBe('ready');
+    });
+
+    it('an unreachable uploads catalog leaves the pack working', async () => {
+      const { art } = await boot({ uploadsUrl: 'http://127.0.0.1:9/assets/files/manifest.json' });
+
+      expect(art.sheet('floor-grass', 'sheet')).not.toBeNull();
+      await settle(art, 'character-p02-beige-blazer');
+      expect(art.status('character-p02-beige-blazer')).toBe('ready');
+    });
+  });
 });

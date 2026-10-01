@@ -29,6 +29,11 @@ import { createMemoryDirectory } from './directory/memoryDirectory.ts';
 import { createMemoryDecor } from './decor/memoryDecor.ts';
 import type { DecorCatalog } from './decor/decorPort.ts';
 import { readArtPackManifest } from './decor/artPackFile.ts';
+import type { AssetStoragePort } from './assets/assetStoragePort.ts';
+import { createMemoryAssetStorage } from './assets/memoryAssetStorage.ts';
+import { encodePng } from './assets/pngCodec.ts';
+import { ART_IMAGE_SPECS, sheetSize } from '../../src/game/artContract.ts';
+import { createHash } from 'node:crypto';
 import { createMemoryDesks } from './desks/memoryDesks.ts';
 import type { DeskDirectory } from './desks/desksPort.ts';
 import { createMemorySpaces } from './spaces/memorySpaces.ts';
@@ -1418,6 +1423,111 @@ describe('rutas de decoracion (#7, slice 4)', () => {
 
     expect(respuestas.map((res) => res.status)).toEqual([503, 503, 503, 503, 503]);
     expect(await respuestas[0].json()).toEqual({ error: 'decor-not-configured' });
+    await server.shutdown();
+  });
+});
+
+describe('art upload routes (#121)', () => {
+  const ADMIN_UPLOAD: DirectoryUser = {
+    id: 'id-admin',
+    uid: 'uid-admin',
+    email: 'admin@example.com',
+    displayName: 'Admin',
+    role: 'admin',
+    status: 'active',
+    expiresAt: null,
+    invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
+    createdAt: new Date('2025-12-01T00:00:00.000Z'),
+  };
+  const uploadVerifier: IdTokenVerifier = {
+    async verify(token: unknown) {
+      return token === 'valido-uid-admin' ? { uid: 'uid-admin', email: 'admin@example.com', name: 'Admin' } : null;
+    },
+  };
+  const BEARER = { Authorization: 'Bearer valido-uid-admin', 'Content-Type': 'application/json' };
+
+  /** A walk or seated sheet with one opaque pixel per frame: valid, and tiny once encoded. */
+  function characterSheet(kind: 'character-walk' | 'character-seated'): string {
+    const spec = ART_IMAGE_SPECS[kind];
+    const { width, height } = sheetSize(spec);
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let y = spec.frame.height >> 1; y < height; y += spec.frame.height) {
+      for (let x = spec.frame.width >> 1; x < width; x += spec.frame.width) data.set([30, 90, 160, 255], (y * width + x) * 4);
+    }
+    return encodePng({ width, height, data }).toString('base64');
+  }
+
+  const CHARACTER = {
+    kind: 'character',
+    name: 'Lucía',
+    author: 'Equipo de arte',
+    license: 'proprietary-internal',
+    files: { walk: characterSheet('character-walk'), seated: characterSheet('character-seated') },
+  };
+
+  async function uploadServer(assetStorage: AssetStoragePort | null = createMemoryAssetStorage()) {
+    const decor = createMemoryDecor();
+    await decor.registerArtPack(readArtPackManifest(new URL('../../public/assets/pack/manifest.json', import.meta.url)));
+    const server = createOfficeServer({
+      auth: uploadVerifier,
+      directory: createMemoryDirectory({ seed: [ADMIN_UPLOAD] }),
+      decor,
+      identityAdmin: null,
+      assetStorage,
+    });
+    const port = await server.listen(0);
+    return { server, url: `http://localhost:${port}` };
+  }
+
+  it('an uploaded character reaches the uploads manifest and its files are served immutable', async () => {
+    const { server, url } = await uploadServer();
+
+    const created = await fetch(`${url}/admin/assets/upload`, { method: 'POST', headers: BEARER, body: JSON.stringify(CHARACTER) });
+    expect(created.status).toBe(201);
+    const { piece } = (await created.json()) as { piece: { id: string; files: { path: string; sha256: string }[] } };
+    expect(piece.id).toMatch(/^character-upload-/);
+
+    const manifest = await fetch(`${url}/assets/files/manifest.json`);
+    expect(manifest.status).toBe(200);
+    expect(manifest.headers.get('cache-control')).toBe('no-cache');
+    expect(((await manifest.json()) as { pieces: { id: string }[] }).pieces.map((entry) => entry.id)).toEqual([piece.id]);
+
+    const file = await fetch(`${url}/assets/files/${piece.files[0]!.path}`);
+    expect(file.status).toBe(200);
+    expect(file.headers.get('content-type')).toBe('image/png');
+    expect(file.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    const bytes = Buffer.from(await file.arrayBuffer());
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(piece.files[0]!.sha256);
+    // Cross-origin like every other route: the office loads it from another port locally.
+    expect(file.headers.get('access-control-allow-origin')).toBe('*');
+
+    expect((await fetch(`${url}/assets/files/${'0'.repeat(64)}.png`)).status).toBe(404);
+    await server.shutdown();
+  });
+
+  it('is not taken by POST /admin/assets/:id, and refuses a body over the upload limit with too-large', async () => {
+    const { server, url } = await uploadServer();
+
+    const huge = { ...CHARACTER, files: { walk: 'A'.repeat(2 * 1024 * 1024), seated: '' } };
+    const res = await fetch(`${url}/admin/assets/upload`, { method: 'POST', headers: BEARER, body: JSON.stringify(huge) });
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'too-large' });
+    await server.shutdown();
+  });
+
+  it('without a bucket uploads and files answer 503 asset-upload-not-configured, the manifest still answers', async () => {
+    const { server, url } = await uploadServer(null);
+
+    const upload = await fetch(`${url}/admin/assets/upload`, { method: 'POST', headers: BEARER, body: JSON.stringify(CHARACTER) });
+    expect(upload.status).toBe(503);
+    expect(await upload.json()).toEqual({ error: 'asset-upload-not-configured' });
+    const file = await fetch(`${url}/assets/files/${'0'.repeat(64)}.png`);
+    expect(file.status).toBe(503);
+    const manifest = await fetch(`${url}/assets/files/manifest.json`);
+    expect(((await manifest.json()) as { pieces: unknown[] }).pieces).toEqual([]);
     await server.shutdown();
   });
 });

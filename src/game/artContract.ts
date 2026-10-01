@@ -758,6 +758,15 @@ export function wallFrameIndex(piece: WallPiece): number {
 
 // --- Pack manifest -----------------------------------------------------------------------------
 
+/**
+ * Texture key of one file of a piece, as the office loads it. Here and not in
+ * `artPack.ts` because the server names it too: the desk decor asset of an
+ * uploaded plant points at it as its `textureKey` (#121).
+ */
+export function artSheetKey(pieceId: string, role: string): string {
+  return `art:${pieceId}:${role}`;
+}
+
 /** `format` of `public/assets/pack/manifest.json`. */
 export const ART_PACK_FORMAT = 'oficina-art-pack';
 

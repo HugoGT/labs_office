@@ -2,8 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseOfficeLayout, terrainSnapshot, isTileWalkable } from '../../src/game/officeLayout.ts';
 import { parseBaseMapSeats } from '../../src/game/seating.ts';
-import { decodePng } from '../art/pngDecode.ts';
-import { encodePng } from '../art/png.ts';
+import { decodePng, encodePng } from '../../server/src/assets/pngCodec.ts';
 import { LAYOUT_PALETTE, buildInitialLayout, renderLayoutPalette, serializeLayout } from './initialLayout.ts';
 
 const PACK_ROOT = new URL('../../public/assets/pack/', import.meta.url);

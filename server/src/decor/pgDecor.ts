@@ -20,8 +20,8 @@
  *     cualquiera le borraria a esa persona la retirada que ya tenia.
  */
 
-import type { ArtPackManifest } from '../../../src/game/artContract.ts';
-import { artPieceFields, normalizeArtPack } from './artCatalogRules.ts';
+import { ART_CONTRACT_VERSION, type ArtPackManifest } from '../../../src/game/artContract.ts';
+import { ArtPieceExistsError, artPieceFields, assertUploadedArtPiece, normalizeArtPack } from './artCatalogRules.ts';
 import type {
   ArtCatalogPiece,
   Asset,
@@ -32,6 +32,7 @@ import type {
   ListArtPiecesOptions,
   ListAssetsOptions,
   UpdateAssetInput,
+  UploadedArtPieceInput,
 } from './decorPort.ts';
 import {
   AssetNameTakenError,
@@ -39,6 +40,7 @@ import {
   normalizeCreateAssetInput,
   normalizeDeskConfig,
   normalizeUpdateAssetInput,
+  type NormalizedCreateAssetInput,
 } from './decorRules.ts';
 import type { DirectoryPool, DirectoryQueryable } from '../directory/pgDirectory.ts';
 
@@ -74,7 +76,7 @@ const DESK_SELECT = `
 `;
 
 const ART_PIECE_COLUMNS =
-  'id, kind, name, material, colorable, default_color, author, license, files, spec, contract_version, retired_at, registered_at, updated_at';
+  'id, kind, name, material, colorable, default_color, author, license, files, spec, contract_version, retired_at, registered_at, updated_at, source, uploaded_by';
 
 /**
  * One upsert per piece. The kind is left out of the update on purpose: the id
@@ -96,11 +98,32 @@ const ART_PIECE_UPSERT = `
      OR art_pieces.retired_at IS NOT NULL
 `;
 
-/** An UPDATE and never a DELETE: users, desks and spaces may still point at these ids. */
+/**
+ * An UPDATE and never a DELETE: users, desks and spaces may still point at
+ * these ids. Only pack pieces: an Admin upload (#121) is not in any pack, and
+ * retiring it here would undo it at the next start.
+ */
 const ART_PIECE_RETIRE = `
   UPDATE art_pieces SET retired_at = now(), updated_at = now()
-  WHERE retired_at IS NULL AND NOT (id = ANY($1::text[]))
+  WHERE retired_at IS NULL AND NOT (id = ANY($1::text[])) AND source = 'pack'
   RETURNING id
+`;
+
+/**
+ * An upload is inserted or refused, never merged: `DO NOTHING` plus an empty
+ * RETURNING is how an id already in the catalog shows up, retired included.
+ */
+const UPLOADED_ART_PIECE_INSERT = `
+  INSERT INTO art_pieces (id, kind, name, material, colorable, default_color, author, license, files, spec, contract_version, source, uploaded_by)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, 'upload', $12)
+  ON CONFLICT (id) DO NOTHING
+  RETURNING ${ART_PIECE_COLUMNS}
+`;
+
+const ASSET_INSERT = `
+  INSERT INTO assets (slug, name, kind, texture_key, w, h, placeable_on_desk, above_avatars)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+  RETURNING ${ASSET_COLUMNS}
 `;
 
 function toArtPiece(row: Record<string, unknown>): ArtCatalogPiece {
@@ -120,6 +143,9 @@ function toArtPiece(row: Record<string, unknown>): ArtCatalogPiece {
     retiredAt: (row.retired_at as Date | null) ?? null,
     registeredAt: row.registered_at as Date,
     updatedAt: row.updated_at as Date,
+    // A row read before the column existed is a pack piece, its DEFAULT.
+    source: row.source === 'upload' ? 'upload' : 'pack',
+    uploadedBy: (row.uploaded_by as string | null | undefined) ?? null,
   };
 }
 
@@ -178,6 +204,38 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
     }
   }
 
+  /**
+   * One INSERT of a validated asset, on the pool or inside a transaction.
+   *
+   * `assets_slug_unique` es la garantia real; esto solo traduce su fallo a un
+   * error de dominio en vez de un 500 pelado, misma logica que ya documenta la
+   * cabecera de `decorRules.ts` para los CHECK. Se mira SOLO ese codigo y todo
+   * lo demas se relanza: tragarse un fallo desconocido como 409 le diria al
+   * administrador que se equivoco el cuando el que se rompio fue el servidor,
+   * que es el mismo pecado que evita el `translating` de la ruta, en la otra
+   * direccion.
+   */
+  async function insertAsset(client: DirectoryQueryable, normalized: NormalizedCreateAssetInput): Promise<Asset> {
+    try {
+      const result = await client.query(ASSET_INSERT, [
+        normalized.slug,
+        normalized.name,
+        normalized.kind,
+        normalized.textureKey,
+        normalized.w,
+        normalized.h,
+        normalized.placeableOnDesk,
+        normalized.aboveAvatars,
+      ]);
+      return toAsset(result.rows[0]);
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new AssetNameTakenError('ya existe un asset con ese nombre');
+      }
+      throw error;
+    }
+  }
+
   return {
     async listAssets(options: ListAssetsOptions = {}) {
       // El filtro se compone en el TEXTO y no como un parametro: un
@@ -194,41 +252,7 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
     async createAsset(input: CreateAssetInput) {
       // Validar ANTES de pedir conexion, misma razon que `pgSpaces.createSpace`:
       // un asset mal escrito no debe costar una consulta.
-      const normalized = normalizeCreateAssetInput(input);
-
-      try {
-        const result = await pool.query(
-          `
-            INSERT INTO assets (slug, name, kind, texture_key, w, h, placeable_on_desk, above_avatars)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING ${ASSET_COLUMNS}
-          `,
-          [
-            normalized.slug,
-            normalized.name,
-            normalized.kind,
-            normalized.textureKey,
-            normalized.w,
-            normalized.h,
-            normalized.placeableOnDesk,
-            normalized.aboveAvatars,
-          ],
-        );
-        return toAsset(result.rows[0]);
-      } catch (error) {
-        // `assets_slug_unique` es la garantia real; esto solo traduce su fallo
-        // a un error de dominio en vez de un 500 pelado, misma logica que ya
-        // documenta la cabecera de `decorRules.ts` para los CHECK.
-        //
-        // Se mira SOLO ese codigo y todo lo demas se relanza: tragarse un fallo
-        // desconocido como 409 le diria al administrador que se equivoco el
-        // cuando el que se rompio fue el servidor, que es el mismo pecado que
-        // evita el `translating` de la ruta, en la otra direccion.
-        if (isUniqueViolation(error)) {
-          throw new AssetNameTakenError('ya existe un asset con ese nombre');
-        }
-        throw error;
-      }
+      return insertAsset(pool, normalizeCreateAssetInput(input));
     },
 
     async archiveAsset(id: string) {
@@ -368,6 +392,35 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
       const where = options.includeRetired ? '' : 'WHERE retired_at IS NULL';
       const result = await pool.query(`SELECT ${ART_PIECE_COLUMNS} FROM art_pieces ${where} ORDER BY kind, id`);
       return result.rows.map(toArtPiece);
+    },
+
+    async registerUploadedArtPiece({ piece, uploadedBy, decorAsset }: UploadedArtPieceInput) {
+      // Both checked before asking for a connection, same as `createAsset`.
+      assertUploadedArtPiece(piece);
+      const asset = decorAsset === undefined ? undefined : normalizeCreateAssetInput(decorAsset);
+      const fields = artPieceFields(piece);
+
+      return inTransaction(async (client) => {
+        const inserted = await client.query(UPLOADED_ART_PIECE_INSERT, [
+          fields.id,
+          fields.kind,
+          fields.name,
+          fields.material,
+          fields.colorable,
+          fields.defaultColor,
+          fields.author,
+          fields.license,
+          JSON.stringify(fields.files),
+          JSON.stringify(fields.spec),
+          ART_CONTRACT_VERSION,
+          uploadedBy,
+        ]);
+        const row = inserted.rows[0];
+        if (row === undefined) throw new ArtPieceExistsError(piece.id);
+        // Same transaction: a taken decor name rolls the piece back too.
+        const created = asset === undefined ? null : await insertAsset(client, asset);
+        return { piece: toArtPiece(row), asset: created };
+      });
     },
   };
 }

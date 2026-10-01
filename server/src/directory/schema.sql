@@ -343,6 +343,17 @@ CREATE TABLE IF NOT EXISTS art_pieces (
 ALTER TABLE art_pieces DROP CONSTRAINT IF EXISTS art_pieces_kind_check;
 ALTER TABLE art_pieces ADD CONSTRAINT art_pieces_kind_check CHECK (kind IN ('character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table'));
 
+-- Admin uploads (#121) live in the same catalog, so every choice resolves
+-- them the same way. `source` is what keeps a pack registration from
+-- retiring them: it only retires `pack` rows. Their ids are reserved
+-- (`<kind>-upload-<hash>`, refused in a pack), so the upsert can never touch
+-- one either. Existing rows are pack pieces, hence the DEFAULT.
+ALTER TABLE art_pieces ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'pack';
+ALTER TABLE art_pieces DROP CONSTRAINT IF EXISTS art_pieces_source_check;
+ALTER TABLE art_pieces ADD CONSTRAINT art_pieces_source_check CHECK (source IN ('pack', 'upload'));
+-- Who uploaded it; NULL for pack pieces. Users are revoked, never deleted.
+ALTER TABLE art_pieces ADD COLUMN IF NOT EXISTS uploaded_by uuid REFERENCES users(id);
+
 -- Persisted choices. Each DEFAULT is the pack default (`ART_PACK_DEFAULTS`,
 -- checked against the manifest by artCatalogRules.test.ts) and is what
 -- backfills the rows that already exist. The color of a non-colorable

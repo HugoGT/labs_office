@@ -93,6 +93,11 @@ AUTH_PROJECT_ID="$(metadata office-auth-project-id || true)"
 # only turns /recordings/* into 503 recording-not-configured.
 RECORDING_GCS_BUCKET="$(metadata office-recording-bucket || true)"
 
+# Uploaded art bucket (issue #121). Same reasoning: a name from metadata, and
+# empty on a VM from before it, which only turns uploads into 503
+# asset-upload-not-configured while the default pack keeps working.
+ASSET_GCS_BUCKET="$(metadata office-asset-bucket || true)"
+
 # Precedencia del tag: argumento > variable de entorno > metadata > el que ya
 # esta desplegado. La ultima opcion es la que hace que un reinicio de la VM no
 # retroceda a una version vieja.
@@ -244,6 +249,8 @@ trap 'rm -f "${TMP_ENV}"' EXIT
   echo "IDENTITY_ADMIN_USE_METADATA=${IDENTITY_ADMIN_USE_METADATA}"
   # Not a secret either: the bucket name. Empty disables recording (503).
   echo "RECORDING_GCS_BUCKET=${RECORDING_GCS_BUCKET}"
+  # The uploaded art bucket. Empty disables uploads (503).
+  echo "ASSET_GCS_BUCKET=${ASSET_GCS_BUCKET}"
 } >"${TMP_ENV}"
 
 chown root:root "${TMP_ENV}"

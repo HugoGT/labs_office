@@ -6,7 +6,7 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { encodePng } from '../art/png.ts';
+import { encodePng } from '../../server/src/assets/pngCodec.ts';
 import { LAYOUT_PATH, PALETTE_PATH, buildInitialLayout, renderLayoutPalette, serializeLayout } from './initialLayout.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));

@@ -8,7 +8,22 @@
 
 import { useEffect, useState } from 'react';
 import { loadMaterialCatalog, type MaterialCatalog } from '../game/artMaterials';
-import { ART_PACK_MANIFEST_URL } from '../game/artPack';
+import { ART_PACK_MANIFEST_URL, artUploadsManifestUrl } from '../game/artPack';
+import { resolveOfficeEndpoint } from '../game/officeEndpoint';
+
+/**
+ * The office server's uploads manifest (#121), from the same endpoint the
+ * office connects to, so materials an Admin uploaded are offered too.
+ */
+function pageUploadsUrl(): string | null {
+  return artUploadsManifestUrl(
+    resolveOfficeEndpoint({
+      configured: import.meta.env.VITE_COLYSEUS_URL as string | undefined,
+      protocol: window.location.protocol,
+      hostname: window.location.hostname,
+    }),
+  );
+}
 
 export type LoadMaterials = () => Promise<MaterialCatalog | null>;
 
@@ -17,7 +32,7 @@ let pageCatalog: Promise<MaterialCatalog | null> | null = null;
 /** Shared by every form of the page; a failed read is forgotten so the next form tries again. */
 export const loadPageMaterials: LoadMaterials = () => {
   if (pageCatalog === null) {
-    const pending = loadMaterialCatalog({ manifestUrl: ART_PACK_MANIFEST_URL });
+    const pending = loadMaterialCatalog({ manifestUrl: ART_PACK_MANIFEST_URL, uploadsUrl: pageUploadsUrl() });
     pageCatalog = pending;
     void pending.then((catalog) => {
       if (catalog === null && pageCatalog === pending) pageCatalog = null;

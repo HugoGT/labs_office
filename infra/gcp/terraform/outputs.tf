@@ -73,6 +73,11 @@ output "secret_ids" {
   }
 }
 
+output "asset_bucket" {
+  description = "Uploaded art bucket (issue #121). The server stores re-encoded PNGs here as assets/<sha256>.png and serves them itself."
+  value       = google_storage_bucket.assets.name
+}
+
 output "recording_bucket" {
   description = "Recordings bucket (issues #5, #58). Egress uploads here; objects are deleted after var.recording_retention_days."
   value       = google_storage_bucket.recordings.name

@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import type { ArtFacing, ArtPiece, Point } from './artContract';
-import { findPiece, type ArtAppearance } from './artPack';
+import { artUploadsManifestUrl, findPiece, parseArtSheetKey, type ArtAppearance } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
 import {
   chairPlacement,
@@ -164,6 +164,11 @@ export interface OfficeSceneOptions {
    * SPA serves; `null` turns the pack off and the office draws its fallbacks.
    */
   artManifestUrl?: string | null;
+  /**
+   * Manifest of the Admin uploads (#121). Defaults to the office server's
+   * (`artUploadsManifestUrl(endpoint)`); `null` leaves the pack alone.
+   */
+  artUploadsUrl?: string | null;
 }
 
 /** A seat the scene can offer or draw a sitter on, resolved from its reference. */
@@ -416,7 +421,10 @@ export class OfficeScene extends Phaser.Scene {
    * the terrain tileset and every piece of the Tiled layout).
    */
   preload(): void {
-    this.art = new ArtPackLoader(this, { manifestUrl: this.options.artManifestUrl });
+    this.art = new ArtPackLoader(this, {
+      manifestUrl: this.options.artManifestUrl,
+      uploadsUrl: this.options.artUploadsUrl !== undefined ? this.options.artUploadsUrl : artUploadsManifestUrl(this.options.endpoint),
+    });
     this.art.preload();
   }
 
@@ -1288,6 +1296,13 @@ export class OfficeScene extends Phaser.Scene {
     const cx = box.x + box.w / 2;
     const cy = box.y + box.h / 2;
     const name = deskItemName(itemId);
+
+    // A key of the art pack or an upload (#121) is loaded on demand, like a
+    // desk material: the fallback below stays until it lands, then redraws.
+    const art = parseArtSheetKey(textureKey);
+    if (art !== null && !this.textures.exists(textureKey)) {
+      this.art.request(art.pieceId, () => this.scheduleRedraw(this.redrawDesks));
+    }
 
     if (!this.textures.exists(textureKey)) {
       return this.add

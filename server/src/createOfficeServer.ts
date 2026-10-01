@@ -33,6 +33,14 @@ import { handleListUsers, handleRevokeUser } from './admin/adminRoutes.ts';
 import { identityAdminFromEnv } from './admin/gcpIdentityAdmin.ts';
 import type { IdentityAdmin } from './admin/identityAdminPort.ts';
 import type { DecorCatalog } from './decor/decorPort.ts';
+import type { AssetStoragePort } from './assets/assetStoragePort.ts';
+import { assetStorageFromEnv } from './assets/gcsAssetStorage.ts';
+import {
+  handleGetAssetFile,
+  handleUploadAsset,
+  handleUploadedArtManifest,
+  type AssetUploadDeps,
+} from './assets/assetUploadRoutes.ts';
 import { handleGetDisplayName, handleSetDisplayName } from './directory/displayNameRoutes.ts';
 import { handleGetAvatar, handleSetAvatar } from './directory/avatarRoutes.ts';
 import {
@@ -117,6 +125,14 @@ import { createIdTokenVerifier, type IdTokenVerifier } from './verifyIdToken.ts'
  */
 const PING_INTERVAL_MS = 5_000;
 const PING_MAX_RETRIES = 4;
+
+/**
+ * The art upload route (#121) and its body limit: two files of at most 128 KB
+ * each travel as base64 (a third larger) plus a few hundred bytes of
+ * metadata, so 1 MB leaves room without letting a body grow unbounded.
+ */
+const ASSET_UPLOAD_PATH = '/admin/assets/upload';
+const ASSET_UPLOAD_BODY_LIMIT = '1mb';
 
 interface LivekitTokenResult {
   status: 200 | 400 | 401 | 403 | 503;
@@ -306,6 +322,8 @@ export interface OfficeServerOverrides {
   egress?: EgressPort | null;
   /** Same as `egress`, for the recordings bucket (#58). */
   storage?: RecordingStoragePort | null;
+  /** Same again, for the bucket of uploaded art files (#121). `null`: uploads answer 503. */
+  assetStorage?: AssetStoragePort | null;
   /** Shortens the upload polling after a stop (#58), for the same reason as the window below. */
   recordingReadiness?: { intervalMs: number; timeoutMs: number };
   /**
@@ -464,7 +482,17 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     }
     next();
   });
-  app.use(express.json());
+  // The art upload (#121) carries base64 PNGs, over the 100 KB default of
+  // `express.json()`. It gets its own, larger limit on its route only; every
+  // other route keeps the default.
+  const json = express.json();
+  app.use((req, res, next) => {
+    if (req.path === ASSET_UPLOAD_PATH) {
+      next();
+      return;
+    }
+    json(req, res, next);
+  });
 
   const sessions = createLiveSessionRegistry();
   const recordings = createRecordingRegistry();
@@ -482,6 +510,9 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   // client per request would go back to the metadata server every time.
   const storage: RecordingStoragePort | null =
     overrides?.storage !== undefined ? overrides.storage : recordingStorageFromEnv(process.env);
+  // Built once for the same reason as `storage`.
+  const assetStorage: AssetStoragePort | null =
+    overrides?.assetStorage !== undefined ? overrides.assetStorage : assetStorageFromEnv(process.env);
   const recordingDeps = (): RecordingDeps => ({
     sessions,
     recordings,
@@ -758,6 +789,87 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
         });
     };
   }
+
+  /**
+   * The art upload (#121). Same "no store -> 503, never 404" as the others,
+   * with one code for any missing piece (directory, catalog or bucket): to
+   * the panel they all mean "uploads are not configured here".
+   */
+  function assetUploadRoute(run: (req: express.Request, deps: AssetUploadDeps) => Promise<AdminResult>) {
+    return (req: express.Request, res: express.Response): void => {
+      if (directory === undefined || decor === undefined || assetStorage === null) {
+        res.status(503).json({ error: 'asset-upload-not-configured' });
+        return;
+      }
+
+      run(req, { directory, decor, storage: assetStorage, auth, identityAdmin })
+        .then((result) => {
+          res.status(result.status).json(result.body);
+        })
+        .catch(() => {
+          console.error('[assets] unhandled failure in the upload route');
+          res.status(500).json({ error: 'internal' });
+        });
+    };
+  }
+
+  // Registered before `/admin/assets/:id`, which would otherwise take
+  // `upload` for an asset id. The error handler answers the body parser's
+  // refusals as JSON, so the panel reads them like any other code.
+  app.post(
+    '/admin/assets/upload',
+    express.json({ limit: ASSET_UPLOAD_BODY_LIMIT }),
+    assetUploadRoute((req, deps) => handleUploadAsset(req.header('Authorization'), req.body, deps)),
+    (error: { type?: string }, _req: express.Request, res: express.Response, next: express.NextFunction): void => {
+      if (error?.type === 'entity.too.large') {
+        res.status(413).json({ error: 'too-large' });
+        return;
+      }
+      if (error?.type === 'entity.parse.failed') {
+        res.status(400).json({ error: 'invalid-request' });
+        return;
+      }
+      next(error);
+    },
+  );
+
+  // Uploaded art (#121): its manifest and its files, public like the pack in
+  // `public/assets/pack/`. Under `/assets/files/` and not `/assets/*`, which
+  // also holds the Vite bundles; Caddy has a handle for exactly this prefix.
+  // The manifest is read again during a session, so it is never cached.
+  app.get('/assets/files/manifest.json', (_req, res) => {
+    if (decor === undefined) {
+      res.status(503).json({ error: 'decor-not-configured' });
+      return;
+    }
+    handleUploadedArtManifest(decor)
+      .then((result) => {
+        res.status(result.status).set('Cache-Control', 'no-cache').json(result.body);
+      })
+      .catch(() => {
+        console.error('[assets] unhandled failure reading the uploads manifest');
+        res.status(500).json({ error: 'internal' });
+      });
+  });
+
+  app.get('/assets/files/:file', (req, res) => {
+    if (assetStorage === null) {
+      res.status(503).json({ error: 'asset-upload-not-configured' });
+      return;
+    }
+    handleGetAssetFile(req.params.file, assetStorage)
+      .then((result) => {
+        if (result.status !== 200) {
+          res.status(result.status).json(result.body);
+          return;
+        }
+        res.status(200).set(result.headers).send(Buffer.from(result.png));
+      })
+      .catch(() => {
+        console.error('[assets] unhandled failure serving an asset file');
+        res.status(500).json({ error: 'internal' });
+      });
+  });
 
   app.get(
     '/admin/assets',

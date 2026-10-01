@@ -12,7 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import type { ArtPackManifest } from '../../../src/game/artContract.ts';
-import { InvalidArtPackError } from './artCatalogRules.ts';
+import { ArtPieceExistsError, InvalidArtPackError } from './artCatalogRules.ts';
 import { AssetNameTakenError, InvalidAssetError, InvalidDeskConfigError } from './decorRules.ts';
 import { createPgDecor } from './pgDecor.ts';
 import type { DirectoryPool, DirectoryQueryResult } from '../directory/pgDirectory.ts';
@@ -705,6 +705,9 @@ describe('createPgDecor: art pack catalog (art migration, step 3)', () => {
         retiredAt: null,
         registeredAt: PIECE_ROW.registered_at,
         updatedAt: PIECE_ROW.updated_at,
+        // A row read before #121 has no source column yet: it is a pack piece.
+        source: 'pack',
+        uploadedBy: null,
       },
     ]);
   });
@@ -808,5 +811,116 @@ describe('createPgDecor: art pack catalog (art migration, step 3)', () => {
 
     expect(squash(pool.queries.at(-1)!.text)).toBe('rollback');
     expect(pool.released).toBe(1);
+  });
+});
+
+describe('createPgDecor: uploaded pieces (#121)', () => {
+  const PACK: ArtPackManifest = JSON.parse(
+    readFileSync(new URL('../../../public/assets/pack/manifest.json', import.meta.url), 'utf8'),
+  );
+  const FICUS = PACK.pieces.find((piece) => piece.id === 'plant-ficus')!;
+  const UPLOADED = { ...FICUS, id: 'plant-upload-0123456789abcdef', name: 'Helecho' };
+  const UPLOADER = '11111111-1111-4111-8111-111111111111';
+  const UPLOADED_ROW = {
+    id: UPLOADED.id,
+    kind: 'plant',
+    name: 'Helecho',
+    material: 'ficus',
+    colorable: false,
+    default_color: null,
+    author: UPLOADED.author,
+    license: UPLOADED.license,
+    files: UPLOADED.files,
+    spec: UPLOADED,
+    contract_version: 2,
+    retired_at: null,
+    registered_at: new Date('2026-01-01T00:00:00.000Z'),
+    updated_at: new Date('2026-01-01T00:00:00.000Z'),
+    source: 'upload',
+    uploaded_by: UPLOADER,
+  };
+  const DECOR = { name: 'Helecho', kind: 'plant' as const, textureKey: `art:${UPLOADED.id}:sheet`, w: 1, h: 1, placeableOnDesk: true };
+
+  it('a pack registration retires only pack pieces, never an upload', async () => {
+    const pool = fakePool();
+
+    await createPgDecor(pool).registerArtPack(PACK);
+
+    const retire = pool.queries.find((query) => /update art_pieces set retired_at/i.test(query.text))!;
+    expect(squash(retire.text)).toContain("and source = 'pack'");
+  });
+
+  it('inserts the upload as source upload without touching an existing id, inside one transaction', async () => {
+    const pool = fakePool((text) => (/insert into art_pieces/i.test(text) ? { rows: [UPLOADED_ROW], rowCount: 1 } : { rows: [], rowCount: 0 }));
+
+    const { piece, asset } = await createPgDecor(pool).registerUploadedArtPiece({ piece: UPLOADED, uploadedBy: UPLOADER });
+
+    const texts = pool.queries.map((query) => squash(query.text));
+    expect(texts[0]).toBe('begin');
+    expect(texts.at(-1)).toBe('commit');
+    const insert = pool.queries.find((query) => /insert into art_pieces/i.test(query.text))!;
+    expect(squash(insert.text)).toContain('on conflict (id) do nothing');
+    expect(insert.values).toEqual([
+      UPLOADED.id,
+      'plant',
+      'Helecho',
+      'ficus',
+      false,
+      null,
+      UPLOADED.author,
+      UPLOADED.license,
+      JSON.stringify(UPLOADED.files),
+      JSON.stringify(UPLOADED),
+      PACK.contractVersion,
+      UPLOADER,
+    ]);
+    expect(squash(insert.text)).toContain("'upload'");
+    expect(piece).toMatchObject({ id: UPLOADED.id, source: 'upload', uploadedBy: UPLOADER });
+    expect(asset).toBeNull();
+    expect(texts.some((text) => text.includes('insert into assets'))).toBe(false);
+  });
+
+  it('answers ArtPieceExistsError when the id is already taken, and rolls back', async () => {
+    const pool = fakePool();
+
+    await expect(createPgDecor(pool).registerUploadedArtPiece({ piece: UPLOADED, uploadedBy: UPLOADER })).rejects.toBeInstanceOf(
+      ArtPieceExistsError,
+    );
+    expect(squash(pool.queries.at(-1)!.text)).toBe('rollback');
+    expect(pool.released).toBe(1);
+  });
+
+  it('creates the decor asset in the same transaction, and a taken name undoes both', async () => {
+    const ok = fakePool((text) =>
+      /insert into art_pieces/i.test(text)
+        ? { rows: [UPLOADED_ROW], rowCount: 1 }
+        : /insert into assets/i.test(text)
+          ? { rows: [{ ...ASSET_ROW, name: 'Helecho', slug: 'helecho', texture_key: DECOR.textureKey }], rowCount: 1 }
+          : { rows: [], rowCount: 0 },
+    );
+    const { asset } = await createPgDecor(ok).registerUploadedArtPiece({ piece: UPLOADED, uploadedBy: UPLOADER, decorAsset: DECOR });
+    expect(asset).toMatchObject({ slug: 'helecho', textureKey: DECOR.textureKey });
+    const texts = ok.queries.map((query) => squash(query.text));
+    expect(texts.findIndex((text) => text.includes('insert into assets'))).toBeLessThan(texts.indexOf('commit'));
+
+    const taken = fakePool((text) =>
+      /insert into art_pieces/i.test(text)
+        ? { rows: [UPLOADED_ROW], rowCount: 1 }
+        : /insert into assets/i.test(text)
+          ? uniqueViolation('assets_slug_unique')
+          : { rows: [], rowCount: 0 },
+    );
+    await expect(
+      createPgDecor(taken).registerUploadedArtPiece({ piece: UPLOADED, uploadedBy: UPLOADER, decorAsset: DECOR }),
+    ).rejects.toBeInstanceOf(AssetNameTakenError);
+    expect(squash(taken.queries.at(-1)!.text)).toBe('rollback');
+  });
+
+  it('refuses an id outside the upload space before asking for a connection', async () => {
+    const pool = fakePool();
+    await expect(createPgDecor(pool).registerUploadedArtPiece({ piece: FICUS, uploadedBy: UPLOADER })).rejects.toBeInstanceOf(
+      InvalidArtPackError,
+    );
+    expect(pool.queries).toEqual([]);
   });
 });

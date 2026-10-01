@@ -15,6 +15,12 @@
  *   - Recolored: `sheet()` paints a colorable piece in another color once per
  *     material and color, and keeps that texture for every placement after.
  *
+ * Two catalogs feed it: the pack's manifest, served with the SPA, and the
+ * uploads manifest of the office server (#121), whose pieces load from the
+ * server's `/assets/files/`. They are joined into one (`combineArtManifests`)
+ * and each piece keeps the folder of the catalog it came from, so an Admin
+ * upload shows up in a session without a deploy.
+ *
  * Nothing here throws at the scene: a manifest or file that fails to load
  * leaves the piece `failed`, and callers keep their visible fallback.
  */
@@ -25,11 +31,13 @@ import {
   ART_PACK_MANIFEST_URL,
   artSheetKey,
   bootLoadRequests,
+  combineArtManifests,
   findPiece,
   parseArtPackManifest,
   pieceLoadRequests,
   recolorFor,
   recoloredSheetKey,
+  type ArtCatalog,
   type ArtLoadRequest,
 } from './artPack';
 import { paintRecoloredCanvas, type PaintableImage } from './artRecolorCanvas';
@@ -54,14 +62,24 @@ export interface ArtTextures {
 export interface ArtPackLoaderOptions {
   /** `null` turns the pack off: every piece is `failed` and the office draws its fallbacks. */
   manifestUrl?: string | null;
+  /** Manifest of the Admin uploads (`artUploadsManifestUrl`). Absent or `null`: the pack only. */
+  uploadsUrl?: string | null;
 }
 
-const MANIFEST_KEY = 'art-pack-manifest';
+/** The two catalogs, in the order they are joined: the pack keeps any id it lists. */
+export type ArtManifestSourceName = 'pack' | 'uploads';
+const SOURCES: readonly ArtManifestSourceName[] = ['pack', 'uploads'];
+
+const MANIFEST_KEYS: Readonly<Record<ArtManifestSourceName, string>> = {
+  pack: 'art-pack-manifest',
+  uploads: 'art-uploads-manifest',
+};
 
 export class ArtPackLoader implements ArtTextures {
   private readonly scene: Phaser.Scene;
-  private readonly manifestUrl: string | null;
-  private current: ArtPackManifest | null = null;
+  private readonly urls: Readonly<Record<ArtManifestSourceName, string | null>>;
+  private readonly sources: Record<ArtManifestSourceName, ArtPackManifest | null> = { pack: null, uploads: null };
+  private catalog: ArtCatalog | null = null;
   private readonly failed = new Set<string>();
   private readonly waiting = new Map<string, (() => void)[]>();
   /** Ids that already cost one catalog re-read, so an unknown id cannot re-read forever. */
@@ -71,41 +89,56 @@ export class ArtPackLoader implements ArtTextures {
 
   constructor(scene: Phaser.Scene, options: ArtPackLoaderOptions = {}) {
     this.scene = scene;
-    this.manifestUrl = options.manifestUrl === undefined ? ART_PACK_MANIFEST_URL : options.manifestUrl;
+    this.urls = {
+      pack: options.manifestUrl === undefined ? ART_PACK_MANIFEST_URL : options.manifestUrl,
+      uploads: options.uploadsUrl ?? null,
+    };
   }
 
   get manifest(): ArtPackManifest | null {
-    return this.current;
+    return this.catalog?.manifest ?? null;
+  }
+
+  private get enabled(): boolean {
+    return SOURCES.some((source) => this.urls[source] !== null);
   }
 
   /** Goes in the scene's `preload()`: files queued there finish before `create()`. */
   preload(): void {
-    if (this.manifestUrl === null) return;
+    if (!this.enabled) return;
     this.bind();
-    this.readManifest(MANIFEST_KEY, this.manifestUrl, (manifest) => {
-      if (manifest === null) return;
-      for (const request of bootLoadRequests(manifest, this.manifestUrl as string)) this.queue(request);
-    });
+    for (const source of SOURCES) {
+      const url = this.urls[source];
+      if (url === null) continue;
+      this.readManifest(MANIFEST_KEYS[source], url, (manifest) => {
+        if (manifest === null) return;
+        this.adoptManifest(manifest, source);
+        for (const request of bootLoadRequests(manifest, url)) this.queue(request);
+      });
+    }
   }
 
   /**
-   * Adopts a catalog read during the session. It replaces the previous one: a
-   * piece the pack no longer lists has no files left to load either, so its
-   * placements keep their fallback.
+   * Adopts a catalog read during the session. It replaces the previous one of
+   * that source: a piece the source no longer lists has no files left to load
+   * either, so its placements keep their fallback.
    */
-  adoptManifest(manifest: ArtPackManifest): void {
-    this.current = manifest;
+  adoptManifest(manifest: ArtPackManifest, source: ArtManifestSourceName = 'pack'): void {
+    this.sources[source] = manifest;
+    this.catalog = combineArtManifests(
+      SOURCES.map((name) => ({ manifest: this.sources[name], url: this.urls[name] ?? ART_PACK_MANIFEST_URL })),
+    );
   }
 
   status(pieceId: string): ArtPieceStatus {
     if (this.failed.has(pieceId)) return 'failed';
-    const piece = this.current === null ? undefined : findPiece(this.current, pieceId);
+    const piece = this.manifest === null ? undefined : findPiece(this.manifest, pieceId);
     if (piece !== undefined && this.isLoaded(piece)) return 'ready';
     return 'loading';
   }
 
   sheet(pieceId: string, role: string, color: string | null = null): string | null {
-    const piece = this.current === null ? undefined : findPiece(this.current, pieceId);
+    const piece = this.manifest === null ? undefined : findPiece(this.manifest, pieceId);
     if (piece === undefined || this.failed.has(pieceId)) return null;
     const key = artSheetKey(pieceId, role);
     if (!this.scene.textures.exists(key)) return null;
@@ -118,8 +151,8 @@ export class ArtPackLoader implements ArtTextures {
   }
 
   request(pieceId: string, onSettled: () => void): ArtPieceStatus {
-    if (this.manifestUrl === null || this.failed.has(pieceId)) return 'failed';
-    const piece = this.current === null ? undefined : findPiece(this.current, pieceId);
+    if (!this.enabled || this.failed.has(pieceId)) return 'failed';
+    const piece = this.manifest === null ? undefined : findPiece(this.manifest, pieceId);
     if (piece !== undefined && this.isLoaded(piece)) return 'ready';
 
     const listeners = this.waiting.get(pieceId);
@@ -135,13 +168,22 @@ export class ArtPackLoader implements ArtTextures {
     } else if (!this.reread.has(pieceId)) {
       this.reread.add(pieceId);
       this.rereadCount += 1;
-      // A fresh URL too: the browser's cache would hand back the catalog this page already has.
-      this.readManifest(`${MANIFEST_KEY}#${this.rereadCount}`, `${this.manifestUrl}?v=${Date.now()}-${this.rereadCount}`, () => {
-        const found = this.current === null ? undefined : findPiece(this.current, pieceId);
-        if (found === undefined) this.settle(pieceId, true);
-        else if (this.isLoaded(found)) this.settle(pieceId, false);
-        else this.loadPiece(found);
-      });
+      // Every catalog, since either may have grown; the piece is looked up once all have answered.
+      const pending = SOURCES.filter((source) => this.urls[source] !== null);
+      let remaining = pending.length;
+      for (const source of pending) {
+        const url = this.urls[source] as string;
+        // A fresh URL too: the browser's cache would hand back the catalog this page already has.
+        this.readManifest(`${MANIFEST_KEYS[source]}#${this.rereadCount}`, `${url}?v=${Date.now()}-${this.rereadCount}`, (manifest) => {
+          if (manifest !== null) this.adoptManifest(manifest, source);
+          remaining -= 1;
+          if (remaining > 0) return;
+          const found = this.manifest === null ? undefined : findPiece(this.manifest, pieceId);
+          if (found === undefined) this.settle(pieceId, true);
+          else if (this.isLoaded(found)) this.settle(pieceId, false);
+          else this.loadPiece(found);
+        });
+      }
       this.startLoader();
     } else {
       this.settle(pieceId, true);
@@ -154,7 +196,8 @@ export class ArtPackLoader implements ArtTextures {
   }
 
   private loadPiece(piece: ArtPiece): void {
-    for (const request of pieceLoadRequests(piece, this.manifestUrl as string)) this.queue(request);
+    const url = this.catalog?.sourceOf(piece.id) ?? this.urls.pack ?? ART_PACK_MANIFEST_URL;
+    for (const request of pieceLoadRequests(piece, url)) this.queue(request);
     this.startLoader();
   }
 
@@ -195,7 +238,6 @@ export class ArtPackLoader implements ArtTextures {
       } catch {
         manifest = null;
       }
-      if (manifest !== null) this.adoptManifest(manifest);
       done(manifest);
     };
     // A 404 or a network error never completes the file: the batch ending is the answer.
@@ -216,7 +258,7 @@ export class ArtPackLoader implements ArtTextures {
     // whatever is still waiting and not loaded has failed.
     this.scene.load.on('complete', () => {
       for (const pieceId of [...this.waiting.keys()]) {
-        const piece = this.current === null ? undefined : findPiece(this.current, pieceId);
+        const piece = this.manifest === null ? undefined : findPiece(this.manifest, pieceId);
         this.settle(pieceId, piece === undefined || !this.isLoaded(piece));
       }
     });
@@ -224,7 +266,7 @@ export class ArtPackLoader implements ArtTextures {
 
   private onFileSettled(key: string, failed: boolean): void {
     for (const pieceId of [...this.waiting.keys()]) {
-      const piece = this.current === null ? undefined : findPiece(this.current, pieceId);
+      const piece = this.manifest === null ? undefined : findPiece(this.manifest, pieceId);
       if (piece === undefined) continue;
       const keys = piece.files.map((file) => artSheetKey(piece.id, file.role));
       if (!keys.includes(key)) continue;

@@ -44,7 +44,7 @@ import type { PlantKind, TreeKind } from './domain/props.ts';
 import { DEFAULT_TABLE_COLOR, ROOM_TABLE_FOOTPRINTS, type RoomTable, type TableMaterial } from './domain/tables.ts';
 import { DEFAULT_PLAIN_COLOR, type Terrain } from './domain/tiles.ts';
 import type { WallMaterial } from './domain/wallMap.ts';
-import { encodePng } from './png.ts';
+import { encodePng } from '../../server/src/assets/pngCodec.ts';
 import { renderPreviews } from './preview.ts';
 import { buildPackSheets } from './sheets.ts';
 

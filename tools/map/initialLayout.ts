@@ -21,7 +21,7 @@ import {
   type TerrainMaterial,
 } from '../../src/game/artContract.ts';
 import { PixelBuffer } from '../art/domain/pixelBuffer.ts';
-import { decodePng } from '../art/pngDecode.ts';
+import { decodePng } from '../../server/src/assets/pngCodec.ts';
 
 export const LAYOUT_PATH = 'src/game/maps/office.json';
 export const PALETTE_PATH = 'src/game/maps/layout-palette.png';

@@ -68,7 +68,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * `archivedAt` SI viaja, porque es lo unico que distingue una pieza retirada
  * de una viva cuando el panel pide el historico.
  */
-function toAssetBody(asset: Asset): Record<string, unknown> {
+export function toAssetBody(asset: Asset): Record<string, unknown> {
   return {
     id: asset.id,
     slug: asset.slug,

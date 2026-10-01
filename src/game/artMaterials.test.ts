@@ -112,3 +112,29 @@ describe('loadMaterialCatalog', () => {
     expect(await loadMaterialCatalog({ manifestUrl: MANIFEST_URL, fetchImpl: offline as unknown as typeof fetch })).toBeNull();
   });
 });
+
+describe('uploaded materials (#121)', () => {
+  const UPLOADS_URL = 'http://server/assets/files/manifest.json';
+  const pack = PACK as { pieces: { id: string; files: { path: string }[] }[] };
+  const wood = pack.pieces.find((piece) => piece.id === 'desk-wood')!;
+  const UPLOADED = { ...wood, id: 'desk-upload-0123456789abcdef', name: 'Roble', files: wood.files.map((file) => ({ ...file, path: 'c.png' })) };
+  const UPLOADS = { ...(PACK as object), pieces: [UPLOADED] };
+
+  it('offers uploaded desks after the pack ones, their sheet next to the uploads manifest', () => {
+    const result = materialCatalogFrom(PACK, MANIFEST_URL, { raw: UPLOADS, url: UPLOADS_URL });
+
+    expect(result?.desk.map((option) => option.id).at(-1)).toBe(UPLOADED.id);
+    expect(result?.desk.at(-1)?.sheetUrl).toBe('http://server/assets/files/c.png');
+    expect(result?.defaults.desk).toBe('desk-wood');
+  });
+
+  it('reads both manifests, and a missing uploads manifest leaves the pack', async () => {
+    const both = vi.fn(async (url: string) => ({ ok: true, json: async () => (url === UPLOADS_URL ? UPLOADS : PACK) }) as Response);
+    expect((await loadMaterialCatalog({ manifestUrl: MANIFEST_URL, uploadsUrl: UPLOADS_URL, fetchImpl: both as unknown as typeof fetch }))?.desk).toHaveLength(5);
+
+    const noUploads = vi.fn(async (url: string) =>
+      url === UPLOADS_URL ? ({ ok: false, json: async () => ({}) } as Response) : ({ ok: true, json: async () => PACK } as Response),
+    );
+    expect((await loadMaterialCatalog({ manifestUrl: MANIFEST_URL, uploadsUrl: UPLOADS_URL, fetchImpl: noUploads as unknown as typeof fetch }))?.desk).toHaveLength(4);
+  });
+});

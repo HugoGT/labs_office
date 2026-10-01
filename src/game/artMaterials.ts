@@ -8,10 +8,13 @@
  * nothing retired is ever offered. The server still checks the choice against
  * its catalog (`resolveDeskAppearance`), so a stale manifest can at worst
  * offer something the creation then refuses with a readable reason.
+ *
+ * Materials an Admin uploaded (#121) come from the office server's uploads
+ * manifest and are offered after the pack's, each sheet next to its manifest.
  */
 
 import { ART_IMAGE_SPECS, facingColumn, type ArtDeskPiece, type ArtFloorPiece } from './artContract';
-import { parseArtPackManifest, type ArtAppearance } from './artPack';
+import { combineArtManifests, parseArtPackManifest, type ArtAppearance } from './artPack';
 
 /** The role of the one sheet a desk or floor piece ships, as `mapBuilder.ts` reads it. */
 const SHEET_ROLE = 'sheet';
@@ -59,16 +62,29 @@ function defaultOf(options: readonly MaterialOption[], wanted: string): string |
   return options[0]?.id ?? null;
 }
 
-/** The catalog of a raw manifest, or `null` when it cannot be read or offers no desk or no floor. */
-export function materialCatalogFrom(raw: unknown, manifestUrl: string): MaterialCatalog | null {
+/** A second manifest, read raw, and where its file paths are relative to. */
+export interface RawManifestSource {
+  readonly raw: unknown;
+  readonly url: string;
+}
+
+/**
+ * The catalog of a raw manifest (plus the uploads, when given), or `null`
+ * when the pack cannot be read or offers no desk or no floor.
+ */
+export function materialCatalogFrom(raw: unknown, manifestUrl: string, uploads?: RawManifestSource): MaterialCatalog | null {
   const manifest = parseArtPackManifest(raw);
   if (manifest === null) return null;
-  const folder = manifestFolder(manifestUrl);
+  const joined = combineArtManifests([
+    { manifest, url: manifestUrl },
+    { manifest: uploads === undefined ? null : parseArtPackManifest(uploads.raw), url: uploads?.url ?? manifestUrl },
+  ]);
+  if (joined === null) return null;
   const desk: MaterialOption[] = [];
   const floor: MaterialOption[] = [];
-  for (const piece of manifest.pieces) {
+  for (const piece of joined.manifest.pieces) {
     if (piece.kind !== 'desk' && piece.kind !== 'floor') continue;
-    const option = optionOf(piece, folder);
+    const option = optionOf(piece, manifestFolder(joined.sourceOf(piece.id) ?? manifestUrl));
     if (option !== null) (piece.kind === 'desk' ? desk : floor).push(option);
   }
   const deskDefault = defaultOf(desk, manifest.defaults.desk);
@@ -112,19 +128,31 @@ export function previewFrame(option: MaterialOption): PreviewFrame {
 
 export interface LoadMaterialCatalogOptions {
   manifestUrl: string;
+  /** Manifest of the Admin uploads (`artUploadsManifestUrl`); absent: the pack only. */
+  uploadsUrl?: string | null;
   fetchImpl?: typeof fetch;
+}
+
+/** The JSON at `url`, or `undefined` when it cannot be read: the caller decides what that means. */
+async function readJson(url: string, fetchImpl: typeof fetch): Promise<unknown> {
+  try {
+    const response = await fetchImpl(url);
+    return response.ok ? await response.json() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Never throws: without a readable manifest the forms create with the pack default. */
 export async function loadMaterialCatalog({
   manifestUrl,
+  uploadsUrl = null,
   fetchImpl = fetch,
 }: LoadMaterialCatalogOptions): Promise<MaterialCatalog | null> {
-  try {
-    const response = await fetchImpl(manifestUrl);
-    if (!response.ok) return null;
-    return materialCatalogFrom(await response.json(), manifestUrl);
-  } catch {
-    return null;
-  }
+  const [pack, uploads] = await Promise.all([
+    readJson(manifestUrl, fetchImpl),
+    uploadsUrl === null ? Promise.resolve(undefined) : readJson(uploadsUrl, fetchImpl),
+  ]);
+  if (pack === undefined) return null;
+  return materialCatalogFrom(pack, manifestUrl, uploadsUrl === null || uploads === undefined ? undefined : { raw: uploads, url: uploadsUrl });
 }

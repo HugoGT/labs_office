@@ -12,8 +12,8 @@
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import type { ArtPackManifest } from '../../../src/game/artContract.ts';
-import { InvalidArtPackError } from './artCatalogRules.ts';
+import type { ArtPackManifest, ArtPiece } from '../../../src/game/artContract.ts';
+import { ArtPieceExistsError, InvalidArtPackError } from './artCatalogRules.ts';
 import type { Asset } from './decorPort.ts';
 import { AssetNameTakenError, InvalidAssetError, InvalidDeskConfigError } from './decorRules.ts';
 import { createMemoryDecor } from './memoryDecor.ts';
@@ -556,5 +556,70 @@ describe('createMemoryDecor: art pack catalog (art migration, step 3)', () => {
     await expect(catalog.registerArtPack({ ...PACK, pieces: [] })).rejects.toBeInstanceOf(InvalidArtPackError);
 
     expect(await catalog.listArtPieces({ includeRetired: true })).toEqual(before);
+  });
+});
+
+describe('createMemoryDecor: uploaded pieces (#121)', () => {
+  const PACK: ArtPackManifest = JSON.parse(
+    readFileSync(new URL('../../../public/assets/pack/manifest.json', import.meta.url), 'utf8'),
+  );
+  const FICUS = PACK.pieces.find((piece) => piece.id === 'plant-ficus')!;
+  const UPLOADED: ArtPiece = { ...FICUS, id: 'plant-upload-0123456789abcdef', name: 'Helecho' };
+  const UPLOADER = 'id-admin';
+
+  it('adds an upload as an active piece, marked as an upload with its uploader', async () => {
+    const catalog = decor([]);
+    const { piece, asset } = await catalog.registerUploadedArtPiece({ piece: UPLOADED, uploadedBy: UPLOADER });
+
+    expect(asset).toBeNull();
+    expect(piece).toMatchObject({ id: UPLOADED.id, kind: 'plant', name: 'Helecho', source: 'upload', uploadedBy: UPLOADER, retiredAt: null, spec: UPLOADED });
+    expect((await catalog.listArtPieces()).map((entry) => entry.id)).toEqual([UPLOADED.id]);
+  });
+
+  it('marks pack pieces as such', async () => {
+    const catalog = decor([]);
+    await catalog.registerArtPack(PACK);
+    const [first] = await catalog.listArtPieces();
+    expect(first).toMatchObject({ source: 'pack', uploadedBy: null });
+  });
+
+  it('a pack registration never retires an upload: the pack only answers for its own pieces', async () => {
+    const catalog = decor([]);
+    await catalog.registerUploadedArtPiece({ piece: UPLOADED, uploadedBy: UPLOADER });
+
+    const result = await catalog.registerArtPack(PACK);
+
+    expect(result.retired).toEqual([]);
+    expect((await catalog.listArtPieces()).some((entry) => entry.id === UPLOADED.id)).toBe(true);
+  });
+
+  it('refuses the same id twice instead of overwriting it', async () => {
+    const catalog = decor([]);
+    await catalog.registerUploadedArtPiece({ piece: UPLOADED, uploadedBy: UPLOADER });
+
+    await expect(catalog.registerUploadedArtPiece({ piece: { ...UPLOADED, name: 'Otro' }, uploadedBy: UPLOADER })).rejects.toBeInstanceOf(
+      ArtPieceExistsError,
+    );
+    expect((await catalog.listArtPieces())[0]!.name).toBe('Helecho');
+  });
+
+  it('refuses an id outside the upload space', async () => {
+    await expect(decor([]).registerUploadedArtPiece({ piece: FICUS, uploadedBy: UPLOADER })).rejects.toBeInstanceOf(InvalidArtPackError);
+  });
+
+  it('with a decor asset, creates the asset that draws it on a desk, both or neither', async () => {
+    const catalog = decor([PLANTA]);
+    const decorAsset = { name: 'Helecho', kind: 'plant' as const, textureKey: `art:${UPLOADED.id}:sheet`, w: 1, h: 1, placeableOnDesk: true };
+
+    const { asset } = await catalog.registerUploadedArtPiece({ piece: UPLOADED, uploadedBy: UPLOADER, decorAsset });
+    expect(asset).toMatchObject({ name: 'Helecho', textureKey: `art:${UPLOADED.id}:sheet`, placeableOnDesk: true, archivedAt: null });
+    expect((await catalog.listAssets()).map((entry) => entry.slug)).toEqual(['helecho', 'planta']);
+
+    // A decor name already taken leaves the art catalog untouched too.
+    const other: ArtPiece = { ...UPLOADED, id: 'plant-upload-fedcba9876543210' };
+    await expect(
+      catalog.registerUploadedArtPiece({ piece: other, uploadedBy: UPLOADER, decorAsset: { ...decorAsset, name: 'Planta' } }),
+    ).rejects.toBeInstanceOf(AssetNameTakenError);
+    expect((await catalog.listArtPieces()).map((entry) => entry.id)).toEqual([UPLOADED.id]);
   });
 });

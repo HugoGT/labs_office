@@ -21,6 +21,7 @@ import {
   resolveCharacterChoice,
   resolveDeskAppearance,
   resolveFloorAppearance,
+  uploadedPieceIdPrefix,
   type ArtPieceRef,
 } from './artCatalogRules.ts';
 
@@ -124,6 +125,12 @@ describe('normalizeArtPack', () => {
     const unknownKind = clone();
     unknownKind.pieces[0].kind = 'lamp';
     expect(() => normalizeArtPack(unknownKind)).toThrow(InvalidArtPackError);
+  });
+
+  it('rejects a pack id in the space reserved for uploads (#121), so the two can never collide', () => {
+    const pack = clone();
+    pack.pieces[0].id = `${uploadedPieceIdPrefix(String(pack.pieces[0].kind))}0123456789abcdef`;
+    expect(() => normalizeArtPack(pack)).toThrow(/reserved/);
   });
 
   it('rejects a piece without files', () => {

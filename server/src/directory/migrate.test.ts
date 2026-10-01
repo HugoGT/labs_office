@@ -557,6 +557,13 @@ describe('schema.sql: art pack catalog and appearance (art migration, step 3)', 
     expect(squashed).toContain('retired_at timestamptz');
   });
 
+  it('marks where each piece comes from and who uploaded it (#121), idempotently', () => {
+    expect(squashed).toContain("alter table art_pieces add column if not exists source text not null default 'pack'");
+    expect(squashed).toContain('alter table art_pieces drop constraint if exists art_pieces_source_check');
+    expect(squashed).toContain("alter table art_pieces add constraint art_pieces_source_check check (source in ('pack', 'upload'))");
+    expect(squashed).toContain('alter table art_pieces add column if not exists uploaded_by uuid references users(id)');
+  });
+
   it('adds every choice with its own idempotent ALTER, backfilling existing rows with the pack defaults', () => {
     // `CREATE TABLE IF NOT EXISTS` never touches a live table, so each column
     // arrives through ADD COLUMN IF NOT EXISTS; NOT NULL DEFAULT is what fills

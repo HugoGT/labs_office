@@ -37,7 +37,7 @@ import { ROOM_TABLE_FOOTPRINTS } from './domain/tables.ts';
 import { BASE_CHARACTERS } from './domain/characters.ts';
 import { terrainTile } from './domain/tiles.ts';
 import { PACK_DIR, PREVIEW_DIR, renderPackFiles, writePackFiles } from './pack.ts';
-import { decodePng } from './pngDecode.ts';
+import { decodePng } from '../../server/src/assets/pngCodec.ts';
 
 const REPO_ROOT = new URL('../../', import.meta.url).pathname;
 

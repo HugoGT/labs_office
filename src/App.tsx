@@ -8,7 +8,7 @@ import { createFirebaseAuthAdapter } from './auth/firebaseAuthAdapter';
 import { createLastDisplayNameStore } from './auth/lastDisplayNameStore';
 import { AuthGate } from './components/AuthGate';
 import { LeftOfficeNotice, type LeftOfficeReason } from './components/LeftOfficeNotice';
-import { ART_PACK_MANIFEST_URL } from './game/artPack';
+import { ART_PACK_MANIFEST_URL, artUploadsManifestUrl } from './game/artPack';
 import { resolveOfficeEndpoint } from './game/officeEndpoint';
 import { resolveRoute } from './routing/route';
 
@@ -108,6 +108,8 @@ export default function App() {
       baseUrl: deriveDisplayNameBaseUrl(officeEndpoint),
       getIdToken: () => auth.getIdToken(),
       manifestUrl: ART_PACK_MANIFEST_URL,
+      // Characters an Admin uploaded (#121) join the pack's in the selector.
+      uploadsManifestUrl: artUploadsManifestUrl(officeEndpoint),
     });
   }, [route, officeEndpoint, auth]);
   /**

@@ -15,9 +15,13 @@
  * draws" one list. The server still checks every choice against its own
  * registered catalog, so a stale manifest can only offer a piece the server
  * then refuses with a readable reason.
+ *
+ * Characters an Admin uploaded (#121) come from the office server's uploads
+ * manifest, the second catalog the office loader reads, joined after the pack
+ * the same way (`combineArtManifests`). Without it the selector is the pack's.
  */
 
-import { findPiece, parseArtPackManifest } from '../game/artPack';
+import { combineArtManifests, findPiece, parseArtPackManifest, type ArtCatalog } from '../game/artPack';
 import type {
   CharacterCatalog,
   CharacterOption,
@@ -37,6 +41,8 @@ export interface CharacterClientOptions {
   getIdToken: () => Promise<string | null>;
   /** Manifest of the pack, relative to the page like the office's. */
   manifestUrl: string;
+  /** Manifest of the Admin uploads (`artUploadsManifestUrl`); absent: the pack only. */
+  uploadsManifestUrl?: string | null;
   timeoutMs?: number;
 }
 
@@ -48,16 +54,16 @@ function manifestFolder(manifestUrl: string): string {
   return manifestUrl.slice(0, manifestUrl.lastIndexOf('/') + 1);
 }
 
-/** The pack characters that carry both sheets the previews need, in pack order. */
-function characterOptions(raw: unknown, manifestUrl: string): CharacterCatalog | null {
-  const manifest = parseArtPackManifest(raw);
-  if (manifest === null) return null;
-  const folder = manifestFolder(manifestUrl);
+/** The characters that carry both sheets the previews need, pack first, each with its own folder. */
+function characterOptions(catalog: ArtCatalog): CharacterCatalog | null {
+  const { manifest } = catalog;
   const options = manifest.pieces.flatMap((piece): CharacterOption[] => {
     if (piece.kind !== 'character') return [];
     const walk = piece.files.find((file) => file.role === 'walk' && file.imageKind === 'character-walk');
     const seated = piece.files.find((file) => file.role === 'seated' && file.imageKind === 'character-seated');
-    if (walk === undefined || seated === undefined) return [];
+    const source = catalog.sourceOf(piece.id);
+    if (walk === undefined || seated === undefined || source === undefined) return [];
+    const folder = manifestFolder(source);
     return [{ id: piece.id, name: piece.name, walkUrl: `${folder}${walk.path}`, seatedUrl: `${folder}${seated.path}` }];
   });
   if (options.length === 0) return null;
@@ -71,7 +77,7 @@ function invalidReason(body: unknown): InvalidCharacterReason {
 }
 
 export function createCharacterClient(
-  { baseUrl, getIdToken, manifestUrl, timeoutMs = DEFAULT_TIMEOUT_MS }: CharacterClientOptions,
+  { baseUrl, getIdToken, manifestUrl, uploadsManifestUrl = null, timeoutMs = DEFAULT_TIMEOUT_MS }: CharacterClientOptions,
   fetchImpl: typeof fetch = fetch,
 ): CharacterPort {
   /** `null` when it never happened: no token, network down or timeout. */
@@ -135,9 +141,18 @@ export function createCharacterClient(
     },
 
     async catalog(): Promise<CharacterCatalog | null> {
-      const response = await request(manifestUrl, { method: 'GET' }, false);
-      if (response === null || !response.ok) return null;
-      return characterOptions(await json(response), manifestUrl);
+      /** A catalog that cannot be read counts as empty, never as a failure of the other. */
+      const read = async (url: string | null) => {
+        if (url === null) return { manifest: null, url: '' };
+        const response = await request(url, { method: 'GET' }, false);
+        const manifest = response === null || !response.ok ? null : parseArtPackManifest(await json(response));
+        return { manifest, url };
+      };
+      const [pack, uploads] = await Promise.all([read(manifestUrl), read(uploadsManifestUrl)]);
+      // Without the pack there is no default to fall back on: no selector at all.
+      if (pack.manifest === null) return null;
+      const catalog = combineArtManifests([pack, uploads]);
+      return catalog === null ? null : characterOptions(catalog);
     },
   };
 }
