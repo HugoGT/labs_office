@@ -11,16 +11,23 @@
  * esta. Lo que si gestiona -- desde la issue #52 -- son las caidas a mitad de
  * sesion: ahi no hay nadie a quien rechazarle nada, porque la promesa del join
  * se resolvio hace rato. Ver `reconnectPolicy.ts` y `handleLeave`.
+ *
+ * A join the server refuses (#129) rejects with `OfficeAccessDeniedError`,
+ * never the raw colyseus.js error: whoever calls tells a refused account from
+ * a missing server without learning how Colyseus reports either.
  */
 
 import { Client, getStateCallbacks, type Room } from 'colyseus.js';
 import { createMoveThrottle } from './moveThrottle';
 import { BASE_LAYOUT, decodeTerrainBlocks, type LayoutMaterial } from './officeLayout';
 import {
+  ACCESS_DENIED_CODE,
   DEFAULT_STATUS,
   MOVE_INTERVAL_MS,
   OFFICE_ROOM_NAME,
+  accessDeniedReasonOf,
   characterIdOf,
+  type AccessDeniedReason,
   type Facing,
   type PresenceStatus,
   type RecordingReadyPayload,
@@ -98,13 +105,41 @@ interface RecordingsCallbacks {
  * `revoked` (#93) is the same idea for an account whose access an admin took
  * away while it was inside: the office has to leave, and saying so beats
  * "Sin servidor".
+ *
+ * `denied` (#129) is the join itself refused (`OfficeAccessDeniedError`). This
+ * module never reports it through `onConnectionState`, since a refused join
+ * has no session to report on; the scene publishes it from the rejection.
  */
 export type OfficeConnectionState =
   | 'connected'
   | 'reconnecting'
   | 'offline'
   | 'replaced'
-  | 'revoked';
+  | 'revoked'
+  | 'denied';
+
+/**
+ * The server refused this account (#129), with the reason it gave. colyseus.js
+ * 0.16.22 rejects a join refused in `onAuth` with its own `ServerError`, which
+ * carries the server's `code` and `message` (`Client.consumeSeatReservation`
+ * turns the room's ERROR frame into one). A transport failure never carries
+ * `ACCESS_DENIED_CODE`, so it stays the plain error it was.
+ */
+export class OfficeAccessDeniedError extends Error {
+  readonly reason: AccessDeniedReason;
+
+  constructor(reason: AccessDeniedReason) {
+    super(`office access denied: ${reason}`);
+    this.name = 'OfficeAccessDeniedError';
+    this.reason = reason;
+  }
+}
+
+function asAccessDenied(error: unknown): unknown {
+  if (typeof error !== 'object' || error === null) return error;
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  return code === ACCESS_DENIED_CODE ? new OfficeAccessDeniedError(accessDeniedReasonOf(message)) : error;
+}
 
 export interface OfficeRoomHandlers {
   onAdd(snapshot: RemotePlayerSnapshot): void;
@@ -283,10 +318,11 @@ export async function connectOfficeRoom({
    * variable en cada llamada. Capturar la sala en una constante dejaria a la
    * sesion recuperada hablandole a un socket muerto sin que nada fallase.
    */
-  let room: Room<OfficeRoomState> = await client.joinOrCreate(
-    OFFICE_ROOM_NAME,
-    buildJoinOptions({ name, status, spacesVersion, token }),
-  );
+  let room: Room<OfficeRoomState> = await client
+    .joinOrCreate<OfficeRoomState>(OFFICE_ROOM_NAME, buildJoinOptions({ name, status, spacesVersion, token }))
+    .catch((error: unknown) => {
+      throw asAccessDenied(error);
+    });
 
   /** Reintentos ya fallidos; `reconnectPolicy` lo traduce a retardo o rendicion. */
   let attempt = 0;

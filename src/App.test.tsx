@@ -310,6 +310,32 @@ describe('App: access revoked (#93)', () => {
   });
 });
 
+describe('App: access denied at join (#129)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('a refused join signs out and the login says why', async () => {
+    vi.stubEnv('VITE_FIREBASE_API_KEY', 'AIza-publica');
+    vi.stubEnv('VITE_FIREBASE_PROJECT_ID', 'oficina-virtual');
+    const { port, emit } = fakePort();
+    createAdapterMock.mockReturnValue(port);
+    const { container } = render(<App />);
+    emit({ uid: 'uid-ana', email: 'ana@example.com', displayName: 'Ana' });
+    await waitForOffice(container);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('presence', { online: false, peers: 0, state: 'denied', reason: 'expired', canRetry: true }));
+
+    expect(port.signOut).toHaveBeenCalledTimes(1);
+    // The port reports the sign-out like any other: no user, so the login.
+    emit(null);
+    expect(container.querySelector('#office-shell')).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('Tu acceso caducó. Pide a un administrador que lo renueve.');
+    expect(screen.queryByText(/Sin servidor/)).not.toBeInTheDocument();
+  });
+});
+
 describe('App: enrutado (#24)', () => {
   afterEach(() => {
     window.history.pushState({}, '', '/');

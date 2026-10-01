@@ -15,6 +15,7 @@ import { TILE } from './mapData';
 import { OFFICE_ROOM_NAME } from './officeProtocol';
 import { BASE_MAP_SEATS, mapSeatId } from './seating';
 import {
+  OfficeAccessDeniedError,
   connectOfficeRoom,
   type OfficeConnection,
   type OfficeConnectionState,
@@ -577,6 +578,72 @@ describe('connectOfficeRoom: replaced by another tab of the same account (#78)',
     await waitFor(() => session.states.includes('revoked'));
     await new Promise((resolve) => setTimeout(resolve, 1000));
     expect(session.states).toEqual(['revoked']);
+  });
+});
+
+describe('connectOfficeRoom: a refused join is not a dead server (#129)', () => {
+  let deniedServer: OfficeServer;
+  let deniedEndpoint: string;
+
+  beforeEach(async () => {
+    deniedServer = createOfficeServer({
+      auth: {
+        async verify(token: unknown) {
+          return token === 'token-de-ana' ? { uid: 'uid-ana', email: 'ana@example.com', name: 'Ana' } : null;
+        },
+      },
+      directory: createMemoryDirectory({
+        seed: [
+          {
+            id: '11111111-1111-4111-8111-111111111111',
+            uid: 'uid-ana',
+            email: 'ana@example.com',
+            displayName: null,
+            role: 'guest' as const,
+            status: 'active' as const,
+            expiresAt: new Date('2020-01-01T00:00:00.000Z'),
+            invitedBy: null,
+            avatarId: 'character-p07-green-suit',
+            createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          },
+        ],
+      }),
+    });
+    deniedEndpoint = `ws://localhost:${await deniedServer.listen(0)}`;
+  });
+
+  afterEach(async () => {
+    await deniedServer.shutdown();
+  });
+
+  function joinWith(token: string, at = deniedEndpoint) {
+    return connectOfficeRoom({ endpoint: at, name: 'Ana', handlers: recorder().handlers, getIdToken: async () => token });
+  }
+
+  it('rejects with the reason the directory gave', async () => {
+    const error = await joinWith('token-de-ana').catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(OfficeAccessDeniedError);
+    expect((error as OfficeAccessDeniedError).reason).toBe('expired');
+  });
+
+  it('a token that does not verify is the generic refusal', async () => {
+    const error = await joinWith('token-forjado').catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(OfficeAccessDeniedError);
+    expect((error as OfficeAccessDeniedError).reason).toBe('unauthorized');
+  });
+
+  it('a server that is not there is a plain failure, not a refusal', async () => {
+    const port = Number(new URL(deniedEndpoint.replace('ws:', 'http:')).port);
+    await deniedServer.shutdown();
+    deniedServer = createOfficeServer();
+    await deniedServer.listen(0);
+
+    const error = await joinWith('token-de-ana', `ws://localhost:${port}`).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(OfficeAccessDeniedError);
   });
 });
 

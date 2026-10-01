@@ -15,7 +15,7 @@ import type { OfficeDesk } from './desksPort';
 import type { LayoutEditCommand } from './layoutEditor';
 import type { LayoutMaterial } from './officeLayout';
 import type { SpaceArea } from './mapData';
-import type { PresenceStatus, RecordingReadyPayload } from './officeProtocol';
+import type { AccessDeniedReason, PresenceStatus, RecordingReadyPayload } from './officeProtocol';
 import type { RosterPeer } from './roster';
 import type { TerrainEditCommand } from './terrainEditor';
 import type { ActiveRecordingSnapshot, OfficeConnectionState } from './officeRoomClient';
@@ -77,11 +77,15 @@ export interface OfficeEventMap {
    * (modo solitario: no hay nada que reintentar y ofrecer un boton seria
    * ofrecer uno muerto) de "no hay servidor porque se perdio". Lo decide la
    * escena, que es la unica que sabe si hay endpoint.
+   *
+   * `reason` comes only with `state: 'denied'` (#129): why the server refused
+   * the join, which the owner of the office turns into a login notice.
    */
   presence: {
     online: boolean;
     peers: number;
     state: OfficeConnectionState;
+    reason?: AccessDeniedReason;
     canRetry: boolean;
   };
   /**

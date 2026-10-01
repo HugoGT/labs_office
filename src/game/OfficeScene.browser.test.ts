@@ -31,10 +31,11 @@ import { createOfficeBridge, type OfficeEventMap } from './officeBridge';
 import { DEFAULT_NAME, DEFAULT_STATUS, type PresenceStatus } from './officeProtocol';
 import { STATUS_COLOR } from './presence';
 import { AVATAR_KEYS, PLAYER_TEXTURE } from './textures';
-import type {
-  ConnectOfficeRoomOptions,
-  OfficeConnection,
-  OfficeRoomHandlers,
+import {
+  OfficeAccessDeniedError,
+  type ConnectOfficeRoomOptions,
+  type OfficeConnection,
+  type OfficeRoomHandlers,
 } from './officeRoomClient';
 import { OFFICE_SCENE_KEY, OfficeScene, type OfficeSceneOptions } from './OfficeScene';
 
@@ -699,6 +700,32 @@ describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
       }),
     );
     expect(findPlayer(scene).nameText).toBe(DEFAULT_NAME);
+  });
+
+  it('a refused join is "denied" with its reason, never "offline" (#129)', async () => {
+    const bridge = createOfficeBridge();
+    const presence: OfficeEventMap['presence'][] = [];
+    bridge.on('presence', (p) => presence.push(p));
+
+    await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: async () => {
+        throw new OfficeAccessDeniedError('expired');
+      },
+    });
+
+    await vi.waitFor(() =>
+      expect(presence.at(-1)).toEqual({
+        online: false,
+        peers: 0,
+        state: 'denied',
+        reason: 'expired',
+        canRetry: true,
+      }),
+    );
+    // "Sin servidor" would send the person to retry against a server that is
+    // up and has already said no.
+    expect(presence.some((p) => p.state === 'offline' && p.canRetry)).toBe(false);
   });
 
   it('publica la posicion del jugador local en cada frame', async () => {

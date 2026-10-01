@@ -362,6 +362,26 @@ describe('BottomBar: reconexion (issue #52)', () => {
     expect(screen.queryByRole('button', { name: /Reintentar/ })).not.toBeInTheDocument();
   });
 
+  it('a refused join says access was denied, never "Sin servidor", and offers no retry (#129)', () => {
+    // Normally `App` signs out and shows the login first; this is what the bar
+    // says if it is still up. The server is there and already said no.
+    renderBar({ presence: { online: false, peers: 0, state: 'denied', reason: 'expired', canRetry: true } });
+
+    expect(screen.getByText('Acceso denegado')).toHaveAttribute(
+      'title',
+      expect.stringMatching(/rechazó tu acceso/),
+    );
+    expect(screen.queryByText('⚪ Sin servidor')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Reintentar/ })).not.toBeInTheDocument();
+  });
+
+  it('a network failure with a server to go back to is still "Sin servidor" with its retry (#129)', () => {
+    renderBar({ presence: OFFLINE_RETRYABLE });
+
+    expect(screen.getByText('⚪ Sin servidor')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Reintentar/ })).toBeInTheDocument();
+  });
+
   it('en modo solitario no ofrece reintentar: no hay nada a lo que volver', () => {
     renderBar({ presence: OFFLINE_SOLO });
 

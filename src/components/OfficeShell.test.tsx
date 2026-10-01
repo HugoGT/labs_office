@@ -1333,6 +1333,34 @@ describe('OfficeShell: access revoked (#93)', () => {
   });
 });
 
+describe('OfficeShell: access denied at join (#129)', () => {
+  it('a refused join hands its reason to whoever mounted the office', () => {
+    const onAccessDenied = vi.fn();
+    const onAccessRevoked = vi.fn();
+    render(<OfficeShell onAccessDenied={onAccessDenied} onAccessRevoked={onAccessRevoked} />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() =>
+      bridge.emit('presence', { online: false, peers: 0, state: 'denied', reason: 'not-provisioned', canRetry: true }),
+    );
+
+    expect(onAccessDenied).toHaveBeenCalledTimes(1);
+    expect(onAccessDenied).toHaveBeenCalledWith('not-provisioned');
+    expect(onAccessRevoked).not.toHaveBeenCalled();
+  });
+
+  it('a network failure is not a refusal', () => {
+    const onAccessDenied = vi.fn();
+    render(<OfficeShell onAccessDenied={onAccessDenied} />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('presence', { online: false, peers: 0, state: 'offline', canRetry: true }));
+
+    expect(onAccessDenied).not.toHaveBeenCalled();
+    expect(screen.getByText('⚪ Sin servidor')).toBeInTheDocument();
+  });
+});
+
 describe('OfficeShell: barra lateral de personas (#74)', () => {
   it('el roster que llega por el puente se ve al expandir la barra lateral', async () => {
     const user = userEvent.setup();

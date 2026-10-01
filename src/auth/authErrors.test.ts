@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { describeAuthError, describePasswordResetError } from './authErrors';
+import { ACCESS_DENIED_REASONS } from '../game/officeProtocol';
+import { describeAccessDenied, describeAuthError, describePasswordResetError } from './authErrors';
 
 /** Imita el `FirebaseError` del SDK: lo unico que se lee de el es `code`. */
 function firebaseError(code: string, message = 'Firebase: Error (auth/...).'): unknown {
@@ -116,5 +117,20 @@ describe('describePasswordResetError (#94)', () => {
     );
 
     expect(message).not.toMatch(/firebase|assertion/i);
+  });
+});
+
+describe('describeAccessDenied (#129)', () => {
+  it.each([
+    ['expired', 'Tu acceso caducó. Pide a un administrador que lo renueve.'],
+    ['revoked', 'Acceso retirado: un administrador retiró tu acceso a la oficina.'],
+    ['not-provisioned', 'Tu cuenta no está dada de alta en la oficina. Pide a un administrador que te invite.'],
+    ['unauthorized', 'No se pudo comprobar tu sesión. Vuelve a iniciar sesión.'],
+  ] as const)('tells why %s sent the person back to the login', (reason, text) => {
+    expect(describeAccessDenied(reason)).toBe(text);
+  });
+
+  it('has a notice for every reason the office can give', () => {
+    for (const reason of ACCESS_DENIED_REASONS) expect(describeAccessDenied(reason)).not.toBe('');
   });
 });

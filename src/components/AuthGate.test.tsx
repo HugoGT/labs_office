@@ -197,6 +197,36 @@ describe('AuthGate: autenticacion encendida', () => {
   });
 });
 
+describe('AuthGate: login notice (#129)', () => {
+  it('the login shows the notice it is handed', () => {
+    const { port, emit } = fakePort();
+    render(
+      <AuthGate auth={port} notice="Tu acceso caducó.">
+        {officeSpy().render}
+      </AuthGate>,
+    );
+    emit(null);
+
+    expect(screen.getByRole('status')).toHaveTextContent('Tu acceso caducó.');
+  });
+
+  it('trying to sign in again dismisses it', async () => {
+    const user = userEvent.setup();
+    const onDismissNotice = vi.fn();
+    const { port, emit } = fakePort();
+    render(
+      <AuthGate auth={port} notice="Tu acceso caducó." onDismissNotice={onDismissNotice}>
+        {officeSpy().render}
+      </AuthGate>,
+    );
+    emit(null);
+
+    await submitLogin(user);
+
+    expect(onDismissNotice).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('AuthGate: forgot password (#94)', () => {
   async function requestReset(port: AuthPort, emit: (user: AuthUser | null) => void, email: string) {
     const user = userEvent.setup();

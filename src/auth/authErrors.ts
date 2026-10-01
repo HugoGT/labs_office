@@ -8,6 +8,8 @@
  * ("Firebase: INTERNAL ASSERTION FAILED...") que no ayudan a nadie a entrar.
  */
 
+import type { AccessDeniedReason } from '../game/officeProtocol';
+
 /** Ultimo recurso: tambien cubre lo que no es un `Error` (un `throw` raro, un rechazo con string). */
 const GENERIC_MESSAGE = 'No se pudo iniciar sesión.';
 
@@ -76,4 +78,21 @@ export function describePasswordResetError(error: unknown): string | null {
   if (code === null) return RESET_GENERIC_MESSAGE;
   if (RESET_LOOKS_SENT.has(code)) return null;
   return RESET_MESSAGES[code] ?? RESET_GENERIC_MESSAGE;
+}
+
+/**
+ * Why the office sent the person back to the login (#129), from the reason the
+ * server gave when it refused the join. A `Record` and not a lookup with a
+ * fallback: a new reason (#128 adds `session-expired`) does not compile until
+ * it has its own notice.
+ */
+const ACCESS_DENIED_NOTICES: Readonly<Record<AccessDeniedReason, string>> = {
+  expired: 'Tu acceso caducó. Pide a un administrador que lo renueve.',
+  revoked: 'Acceso retirado: un administrador retiró tu acceso a la oficina.',
+  'not-provisioned': 'Tu cuenta no está dada de alta en la oficina. Pide a un administrador que te invite.',
+  unauthorized: 'No se pudo comprobar tu sesión. Vuelve a iniciar sesión.',
+};
+
+export function describeAccessDenied(reason: AccessDeniedReason): string {
+  return ACCESS_DENIED_NOTICES[reason];
 }

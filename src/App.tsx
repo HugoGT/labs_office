@@ -1,5 +1,6 @@
-import { lazy, Suspense, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 import { resolveAuthConfig } from './auth/authConfig';
+import { describeAccessDenied } from './auth/authErrors';
 import { createCharacterClient } from './auth/characterClient';
 import type { CharacterPort } from './auth/characterPort';
 import { createDisplayNameClient, deriveDisplayNameBaseUrl } from './auth/displayNameClient';
@@ -10,6 +11,7 @@ import { AuthGate } from './components/AuthGate';
 import { LeftOfficeNotice, type LeftOfficeReason } from './components/LeftOfficeNotice';
 import { ART_PACK_MANIFEST_URL, artUploadsManifestUrl } from './game/artPack';
 import { resolveOfficeEndpoint } from './game/officeEndpoint';
+import type { AccessDeniedReason } from './game/officeProtocol';
 import { resolveRoute } from './routing/route';
 
 /**
@@ -122,6 +124,24 @@ export default function App() {
    * path with its own wording; `null` means the office is mounted.
    */
   const [leftOffice, setLeftOffice] = useState<LeftOfficeReason | null>(null);
+  /**
+   * The server refused the join (#129): the account is out, so it signs out
+   * here and the login says why. Unlike `leftOffice`, coming back is a new
+   * sign-in, which is what dismisses the notice.
+   *
+   * A stable callback on purpose: `OfficeShell` hands the refusal up from an
+   * effect that depends on it, and a new one per render would sign out again.
+   * Without auth nothing can sign out, and the bar says "Acceso denegado".
+   */
+  const [accessDenied, setAccessDenied] = useState<AccessDeniedReason | null>(null);
+  const handleAccessDenied = useCallback(
+    (reason: AccessDeniedReason) => {
+      setAccessDenied(reason);
+      void auth?.signOut();
+    },
+    [auth],
+  );
+  const dismissAccessDenied = useCallback(() => setAccessDenied(null), []);
 
   return (
     <main style={{ position: 'relative', width: '100%', height: '100%' }}>
@@ -131,6 +151,8 @@ export default function App() {
         character={characterPort}
         initialName={initialName}
         onNameClaimed={lastDisplayName.write}
+        notice={accessDenied === null ? null : describeAccessDenied(accessDenied)}
+        onDismissNotice={dismissAccessDenied}
       >
         {(session) => (
           // Nada mientras llega el chunk, por el mismo motivo que `AuthGate`
@@ -147,6 +169,7 @@ export default function App() {
                 onLeaveOffice={() => setLeftOffice('left')}
                 onSessionReplaced={() => setLeftOffice('replaced')}
                 onAccessRevoked={() => setLeftOffice('revoked')}
+                onAccessDenied={handleAccessDenied}
               />
             )}
           </Suspense>

@@ -14,7 +14,7 @@ import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import { resolveLivekitConfig } from '../game/livekitEndpoint';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
-import { DEFAULT_NAME, DEFAULT_STATUS, type PresenceStatus } from '../game/officeProtocol';
+import { DEFAULT_NAME, DEFAULT_STATUS, type AccessDeniedReason, type PresenceStatus } from '../game/officeProtocol';
 import {
   RecordingError,
   getRecordingUrl,
@@ -72,6 +72,12 @@ export interface OfficeShellProps {
    * a session that is gone for good.
    */
   onAccessRevoked?: () => void;
+  /**
+   * The server refused the join itself (#129), with its reason. Its own
+   * callback and not `onAccessRevoked`: there was never a session here, and
+   * the owner signs out and shows the login with a notice for that reason.
+   */
+  onAccessDenied?: (reason: AccessDeniedReason) => void;
 }
 
 /**
@@ -91,6 +97,7 @@ export function OfficeShell({
   onLeaveOffice,
   onSessionReplaced,
   onAccessRevoked,
+  onAccessDenied,
 }: OfficeShellProps) {
   const [bridge] = useState(createOfficeBridge);
   const { room, spaceId, recordings, selfSessionId, menu, presence, closeMenu } = useOfficeBridge(bridge);
@@ -208,6 +215,11 @@ export function OfficeShell({
   useEffect(() => {
     if (presence.state === 'revoked') onAccessRevoked?.();
   }, [presence.state, onAccessRevoked]);
+
+  // #129: same again for a join the server refused, which says why.
+  useEffect(() => {
+    if (presence.state === 'denied') onAccessDenied?.(presence.reason ?? 'unauthorized');
+  }, [presence.state, presence.reason, onAccessDenied]);
 
   useEffect(() => {
     if (spacesConfig === null) return;
