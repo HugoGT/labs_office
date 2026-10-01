@@ -1,0 +1,75 @@
+/* Same visual vocabulary as DeskEditorSection.module.css: it lives inside the creation forms. */
+.fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 8px 8px;
+  border: 1px solid #2b3444;
+  border-radius: var(--radius-control);
+  min-width: 0;
+}
+
+.legend {
+  padding: 0 4px;
+  font-size: 12px;
+  color: #e5e7eb;
+}
+
+.controls {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.fields {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.select {
+  width: 100%;
+  min-width: 0;
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.color {
+  width: 48px;
+  height: 28px;
+  padding: 2px;
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+/* Pixel art: never smoothed. Its size is the frame's, set inline. */
+.preview {
+  flex: none;
+  image-rendering: pixelated;
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+}
+
+.hint {
+  display: block;
+  margin: 0;
+  font-size: 12px;
+  color: #9ca3af;
+}

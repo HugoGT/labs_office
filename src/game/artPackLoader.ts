@@ -20,7 +20,6 @@
  */
 
 import type Phaser from 'phaser';
-import { recolorPixels } from './artColor';
 import type { ArtPackManifest, ArtPiece } from './artContract';
 import {
   ART_PACK_MANIFEST_URL,
@@ -33,6 +32,7 @@ import {
   recoloredSheetKey,
   type ArtLoadRequest,
 } from './artPack';
+import { paintRecoloredCanvas, type PaintableImage } from './artRecolorCanvas';
 
 export type ArtPieceStatus = 'ready' | 'loading' | 'failed';
 
@@ -247,20 +247,9 @@ export class ArtPackLoader implements ArtTextures {
    */
   private paintRecolored(sourceKey: string, targetKey: string, from: string, to: string): boolean {
     const source = this.scene.textures.get(sourceKey);
-    const image = source.getSourceImage() as CanvasImageSource & { width: number; height: number };
-    const canvas = document.createElement('canvas');
-    canvas.width = image.width;
-    canvas.height = image.height;
-    const context = canvas.getContext('2d', { willReadFrequently: true });
-    if (context === null) return false;
-    try {
-      context.drawImage(image, 0, 0);
-      const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-      pixels.data.set(recolorPixels(pixels.data, from, to));
-      context.putImageData(pixels, 0, 0);
-    } catch {
-      return false;
-    }
+    const image = source.getSourceImage() as PaintableImage;
+    const canvas = paintRecoloredCanvas(image, from, to);
+    if (canvas === null) return false;
     const texture = this.scene.textures.addCanvas(targetKey, canvas);
     if (texture === null) return false;
     for (const name of source.getFrameNames()) {

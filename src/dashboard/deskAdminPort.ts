@@ -49,10 +49,22 @@ export interface AdminDesk {
   occupant: AdminDeskOccupant | null;
 }
 
+/**
+ * Material (an art pack desk id) and color, chosen only at creation (art
+ * migration, step 7). `color` is `null` for a material that keeps its own
+ * look; the server checks the pair against the catalog.
+ */
+export interface AdminAppearance {
+  materialId: string;
+  color: string | null;
+}
+
 export interface CreateDeskInput {
   label: string;
   x: number;
   y: number;
+  /** Absent: the pack default. There is no way to change it afterwards. */
+  appearance?: AdminAppearance;
 }
 
 /**
@@ -65,6 +77,7 @@ export interface CreateDeskInput {
  * servidor la rechaza con un 400.
  */
 export interface UpdateDeskInput {
+  // No appearance on purpose: the server refuses it with `appearance-immutable`.
   label?: string;
   x?: number;
   y?: number;

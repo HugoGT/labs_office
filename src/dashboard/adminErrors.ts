@@ -62,6 +62,13 @@ const MESSAGES: Readonly<Record<AdminErrorCode, string>> = {
   // Cuarta pieza del mismo despliegue sin `DATABASE_URL`: tampoco hay tabla de
   // espacios que administrar.
   'spaces-not-configured': 'Las salas no están configuradas en este servidor.',
+  // Art migration, step 7. Each says what to pick instead, because the form
+  // that sent it is still on screen with the choice that failed.
+  'appearance-unknown-piece': 'Ese material no está en el catálogo de arte. Elige otro.',
+  'appearance-retired-piece': 'Ese material ya no se puede elegir. Elige otro.',
+  'appearance-color-not-allowed': 'Ese material conserva su propio aspecto y no admite color.',
+  'appearance-invalid-color': 'El color no es válido: elige uno con la forma #rrggbb.',
+  'appearance-immutable': 'El material y el color se eligen al crear y no se pueden cambiar después.',
   network: 'No se pudo contactar con el servidor.',
   unknown: GENERIC_MESSAGE,
 };

@@ -155,6 +155,17 @@ export type AdminErrorCode =
   | 'decor-not-configured'
   /** Mismas tres piezas de arriba, cuarta superficie: sin `DATABASE_URL` tampoco hay tabla de espacios que administrar. */
   | 'spaces-not-configured'
+  /**
+   * A material or color the art catalog refuses at creation (art migration,
+   * step 7), one code per `InvalidArtChoiceError` reason because each is
+   * fixed differently: another material, another color, or none at all.
+   */
+  | 'appearance-unknown-piece'
+  | 'appearance-retired-piece'
+  | 'appearance-color-not-allowed'
+  | 'appearance-invalid-color'
+  /** An update that tried to change material or color, which are chosen only at creation. */
+  | 'appearance-immutable'
   | 'network'
   | 'unknown';
 

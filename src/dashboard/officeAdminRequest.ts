@@ -57,13 +57,42 @@ export interface OfficeAdminRequestOptions {
  * estado: la misma ruta puede dar mas de un motivo (issue #10, S2 3.5), y
  * solo el servidor sabe cual de los declarados en `conflicts` es este.
  */
+/** The 400s about appearance (art migration, step 7), keyed by the server's body. */
+const APPEARANCE_REASONS: Readonly<Record<string, AdminErrorCode>> = {
+  'unknown-piece': 'appearance-unknown-piece',
+  'retired-piece': 'appearance-retired-piece',
+  'color-not-allowed': 'appearance-color-not-allowed',
+  'invalid-color': 'appearance-invalid-color',
+};
+
+/**
+ * A 400 is `invalid-request` unless its body names an appearance refusal:
+ * those are fixed by picking another material or color, not by retyping the
+ * coordinates. An unreadable body or an unknown reason keeps the generic code.
+ */
+async function codeForInvalidRequest(response: Response): Promise<AdminErrorCode> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return 'invalid-request';
+  }
+  if (typeof body !== 'object' || body === null) return 'invalid-request';
+  const { error, reason } = body as Record<string, unknown>;
+  if (error === 'appearance-immutable') return 'appearance-immutable';
+  if (error === 'invalid-appearance' && typeof reason === 'string') {
+    return APPEARANCE_REASONS[reason] ?? 'invalid-request';
+  }
+  return 'invalid-request';
+}
+
 async function codeForStatus(
   response: Response,
   { notConfigured, conflicts }: OfficeAdminRequestOptions,
 ): Promise<AdminErrorCode> {
   switch (response.status) {
     case 400:
-      return 'invalid-request';
+      return codeForInvalidRequest(response);
     case 401:
       return 'unauthorized';
     case 403:

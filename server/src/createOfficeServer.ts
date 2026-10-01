@@ -666,7 +666,9 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
         return;
       }
 
-      run(req, { directory, spaces, auth, identityAdmin })
+      // `decor` only checks a chosen floor at creation (art migration, step
+      // 7); without it a room still gets the pack default.
+      run(req, { directory, spaces, auth, identityAdmin, decor })
         .then((result) => {
           res.status(result.status).json(result.body);
         })
@@ -816,7 +818,9 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
         return;
       }
 
-      run(req, { directory, desks, auth, identityAdmin })
+      // `decor` only checks a chosen material at creation (art migration,
+      // step 7); without it a desk still gets the pack default.
+      run(req, { directory, desks, auth, identityAdmin, decor })
         .then((result) => {
           // Adapter promises resolve after COMMIT; failures never invalidate.
           if (changesDesks && result.status >= 200 && result.status < 300) notifyDesksChanged();

@@ -17,6 +17,11 @@ const CODES: AdminErrorCode[] = [
   'desks-not-configured',
   'decor-not-configured',
   'spaces-not-configured',
+  'appearance-unknown-piece',
+  'appearance-retired-piece',
+  'appearance-color-not-allowed',
+  'appearance-invalid-color',
+  'appearance-immutable',
   'network',
   'unknown',
 ];
@@ -137,5 +142,10 @@ describe('describeAdminError', () => {
     expect(describeAdminError(new Error('boom'))).toBe(describeAdminError(null));
     expect(describeAdminError('boom')).toBe(describeAdminError(undefined));
     expect(describeAdminError(null)).toMatch(/\S/);
+  });
+
+  it('an appearance refused at creation says what to pick instead, not that the data was wrong (art step 7)', () => {
+    expect(describeAdminError(new AdminError('appearance-color-not-allowed'))).toMatch(/no admite color/);
+    expect(describeAdminError(new AdminError('appearance-immutable'))).toMatch(/al crear/);
   });
 });

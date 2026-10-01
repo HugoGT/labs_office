@@ -1,9 +1,12 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { AdminError } from '../dashboard/adminPort';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
+import exportedManifest from '../../public/assets/pack/manifest.json?raw';
+import { materialCatalogFrom } from '../game/artMaterials';
+import type { ArtPreviewCache } from '../game/artPreview';
 import { createOfficeBridge } from '../game/officeBridge';
 import { DeskEditorSection } from './DeskEditorSection';
 
@@ -205,5 +208,105 @@ describe('DeskEditorSection (#74, PR3c)', () => {
 
     expect(screen.queryByRole('button', { name: /Salir/ })).not.toBeInTheDocument();
     expect(onEditingChange).toHaveBeenLastCalledWith(false);
+  });
+});
+
+describe('DeskEditorSection: appearance chosen at creation (art step 7)', () => {
+  const catalog = materialCatalogFrom(JSON.parse(exportedManifest), 'assets/pack/manifest.json')!;
+  const noPreview: ArtPreviewCache = { sheet: async () => null };
+
+  async function enterWithCatalog(desks: DeskAdminPort, bridge = createOfficeBridge()) {
+    render(
+      <DeskEditorSection
+        bridge={bridge}
+        desks={desks}
+        spaces={fakeSpaces()}
+        refreshDesks={vi.fn()}
+        refreshSpaces={vi.fn()}
+        loadMaterials={async () => catalog}
+        preview={noPreview}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: /Editar escritorios/ }));
+    await screen.findByText('Mesa 4');
+    return bridge;
+  }
+
+  it('the creation form offers the catalog materials, starting on the pack default', async () => {
+    await enterWithCatalog(fakeDesks());
+
+    expect(await screen.findByLabelText('Material')).toHaveValue('desk-wood');
+    expect(screen.getByRole('group', { name: 'Aspecto del escritorio' })).toBeInTheDocument();
+  });
+
+  it('creating a painted desk sends its material and color', async () => {
+    const desks = fakeDesks();
+    const bridge = await enterWithCatalog(desks);
+
+    await userEvent.type(screen.getByLabelText(/Etiqueta del nuevo escritorio/), 'Mesa 9');
+    await userEvent.selectOptions(await screen.findByLabelText('Material'), 'desk-painted');
+    fireEvent.input(screen.getByLabelText('Color'), { target: { value: '#c0392b' } });
+    await userEvent.click(screen.getByRole('button', { name: /Colocar nuevo escritorio/ }));
+    act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
+
+    await waitFor(() =>
+      expect(desks.createDesk).toHaveBeenCalledWith({
+        label: 'Mesa 9',
+        x: 1,
+        y: 2,
+        appearance: { materialId: 'desk-painted', color: '#c0392b' },
+      }),
+    );
+  });
+
+  it('the appearance is not offered when moving an existing desk, which keeps its own', async () => {
+    const desks = fakeDesks();
+    const bridge = await enterWithCatalog(desks);
+
+    await userEvent.click(screen.getByRole('button', { name: /Seleccionar Mesa 4/ }));
+    expect(screen.queryByLabelText('Material')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /^Mover$/ }));
+    act(() => bridge.emit('layoutplace', { tx: 5, ty: 6, valid: true }));
+
+    await waitFor(() => expect(desks.updateDesk).toHaveBeenCalledWith('id-mesa', { x: 5, y: 6 }));
+  });
+
+  it('a refused appearance is told in words and keeps the form as it was', async () => {
+    const desks = fakeDesks({
+      createDesk: vi.fn(async () => Promise.reject(new AdminError('appearance-retired-piece'))),
+    });
+    const bridge = await enterWithCatalog(desks);
+
+    await userEvent.type(screen.getByLabelText(/Etiqueta del nuevo escritorio/), 'Mesa 9');
+    await userEvent.selectOptions(await screen.findByLabelText('Material'), 'desk-metal');
+    await userEvent.click(screen.getByRole('button', { name: /Colocar nuevo escritorio/ }));
+    act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
+
+    expect(await screen.findByText('Ese material ya no se puede elegir. Elige otro.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Material')).toHaveValue('desk-metal');
+  });
+
+  it('without a readable catalog the form still creates, with the pack default', async () => {
+    const desks = fakeDesks();
+    const bridge = createOfficeBridge();
+    render(
+      <DeskEditorSection
+        bridge={bridge}
+        desks={desks}
+        spaces={fakeSpaces()}
+        refreshDesks={vi.fn()}
+        refreshSpaces={vi.fn()}
+        loadMaterials={async () => null}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: /Editar escritorios/ }));
+    await screen.findByText('Mesa 4');
+
+    expect(screen.queryByLabelText('Material')).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText(/Etiqueta del nuevo escritorio/), 'Mesa 9');
+    await userEvent.click(screen.getByRole('button', { name: /Colocar nuevo escritorio/ }));
+    act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
+
+    await waitFor(() => expect(desks.createDesk).toHaveBeenCalledWith({ label: 'Mesa 9', x: 1, y: 2 }));
   });
 });

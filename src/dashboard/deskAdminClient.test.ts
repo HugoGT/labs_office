@@ -278,3 +278,51 @@ describe('createDeskAdminClient: como cuenta los fallos', () => {
     expect(await codeOf(client.listDesks())).toBe('unknown');
   });
 });
+
+describe('createDeskAdminClient: appearance chosen at creation (art step 7)', () => {
+  it('sends the chosen material and color with the new desk, under the names GET /desks serves', async () => {
+    const fetchImpl = fetchWith(201, SERVED_DESK);
+
+    await clientWith(fetchImpl).createDesk({
+      label: 'Mesa 4',
+      x: 6,
+      y: 9,
+      appearance: { materialId: 'desk-painted', color: '#c0392b' },
+    });
+
+    expect(sentBody(fetchImpl)).toEqual({ label: 'Mesa 4', x: 6, y: 9, materialId: 'desk-painted', color: '#c0392b' });
+  });
+
+  it('a material without a color sends no color, so the server keeps the material look', async () => {
+    const fetchImpl = fetchWith(201, SERVED_DESK);
+
+    await clientWith(fetchImpl).createDesk({ label: 'Mesa 4', x: 6, y: 9, appearance: { materialId: 'desk-glass', color: null } });
+
+    expect(sentBody(fetchImpl)).toEqual({ label: 'Mesa 4', x: 6, y: 9, materialId: 'desk-glass' });
+  });
+
+  it.each([
+    ['unknown-piece', 'appearance-unknown-piece'],
+    ['retired-piece', 'appearance-retired-piece'],
+    ['color-not-allowed', 'appearance-color-not-allowed'],
+    ['invalid-color', 'appearance-invalid-color'],
+  ] as const)('a refused %s choice is its own reason, not a generic invalid request', async (reason, code) => {
+    const client = clientWith(fetchWith(400, { error: 'invalid-appearance', reason }));
+
+    expect(await codeOf(client.createDesk({ label: 'Mesa 4', x: 6, y: 9 }))).toBe(code);
+  });
+
+  it('an update that touches the appearance is refused as appearance-immutable', async () => {
+    const client = clientWith(fetchWith(400, { error: 'appearance-immutable' }));
+
+    expect(await codeOf(client.updateDesk('desk-1', { label: 'Otra' }))).toBe('appearance-immutable');
+  });
+
+  it('a 400 with an unknown reason, or without a readable body, stays a generic invalid request', async () => {
+    expect(await codeOf(clientWith(fetchWith(400, { error: 'invalid-appearance', reason: 'other' })).listDesks())).toBe(
+      'invalid-request',
+    );
+    const unreadable = vi.fn(async () => ({ ok: false, status: 400, json: async () => { throw new SyntaxError('html'); } }) as unknown as Response);
+    expect(await codeOf(clientWith(unreadable).listDesks())).toBe('invalid-request');
+  });
+});
