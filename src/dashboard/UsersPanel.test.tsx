@@ -104,6 +104,52 @@ describe('UsersPanel (#93): the list', () => {
   });
 });
 
+describe('UsersPanel (#129): who lost access, or is about to', () => {
+  const EXPIRED: AdminUser = {
+    ...GUEST,
+    id: 'u-expired',
+    email: 'caducado@example.com',
+    expiresAt: '2026-01-10T00:00:00.000Z',
+    daysLeft: 0,
+  };
+  const LAST_DAY: AdminUser = { ...GUEST, id: 'u-last', email: 'ultimo@example.com', daysLeft: 1 };
+  const LATER: AdminUser = { ...GUEST, id: 'u-later', email: 'luego@example.com', daysLeft: 30 };
+  const REVOKED_EXPIRED: AdminUser = { ...EXPIRED, id: 'u-both', email: 'ambos@example.com', status: 'revoked' };
+
+  function renderWith(list: AdminUser[]) {
+    render(<UsersPanel users={fakeUsers({ listUsers: vi.fn(async () => list) })} />);
+  }
+
+  it('an active account past its expiry is marked expired, not active', async () => {
+    renderWith([EXPIRED]);
+    await screen.findByText('caducado@example.com');
+
+    // The server already says it: `daysLeft` 0 is the same `expiresAt <= now`
+    // the office refuses at the door.
+    expect(row('caducado@example.com').getByText('Caducado')).toBeInTheDocument();
+    expect(row('caducado@example.com').queryByText('Activo')).toBeNull();
+  });
+
+  it('an account expiring within a week says how soon', async () => {
+    renderWith([GUEST, LAST_DAY]);
+    await screen.findByText('externo@example.com');
+
+    expect(row('externo@example.com').getByText('Caduca en 5 días')).toBeInTheDocument();
+    expect(row('ultimo@example.com').getByText('Caduca en 1 día')).toBeInTheDocument();
+    expect(row('externo@example.com').getByText('Activo')).toBeInTheDocument();
+  });
+
+  it('nothing to mark for a distant expiry, no expiry, or an account already revoked', async () => {
+    renderWith([LATER, ANA, REVOKED_EXPIRED]);
+    await screen.findByText('luego@example.com');
+
+    for (const email of ['luego@example.com', 'ana@example.com', 'ambos@example.com']) {
+      expect(row(email).queryByText(/^Caduc/)).toBeNull();
+    }
+    expect(row('ambos@example.com').getByText('Sin acceso')).toBeInTheDocument();
+  });
+});
+
 describe('UsersPanel (#93): removing access', () => {
   it('asks for confirmation first', async () => {
     const user = userEvent.setup();

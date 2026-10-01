@@ -24,6 +24,26 @@ const ROLE_LABELS: Readonly<Record<Role, string>> = {
 
 const EMPTY_CELL = '-';
 
+/** How far ahead an expiry earns a warning (#129): a week to renew it. */
+export const EXPIRING_SOON_DAYS = 7;
+
+/**
+ * Whether an account lost its access by date, or is about to (#129). Read off
+ * the server's `daysLeft`, never the browser clock: it is 0 exactly when
+ * `expiresAt <= now`, the rule the office applies at the door. A revoked
+ * account is already "Sin acceso", so its dates no longer matter.
+ */
+export function expiryMark(user: Pick<AdminUser, 'status' | 'daysLeft'>): 'expired' | 'soon' | null {
+  if (user.status !== 'active' || user.daysLeft === null) return null;
+  if (user.daysLeft === 0) return 'expired';
+  return user.daysLeft <= EXPIRING_SOON_DAYS ? 'soon' : null;
+}
+
+function statusLabel(user: AdminUser): string {
+  if (user.status !== 'active') return 'Sin acceso';
+  return expiryMark(user) === 'expired' ? 'Caducado' : 'Activo';
+}
+
 export interface UsersTableProps {
   users: AdminUser[];
   confirmingId: string | null;
@@ -60,44 +80,60 @@ export function UsersTable({
           </tr>
         </thead>
         <tbody>
-          {users.map((user) => (
-            <tr key={user.id} className={user.status === 'revoked' ? styles.revoked : undefined}>
-              <th scope="row">{user.email}</th>
-              <td>{user.displayName ?? EMPTY_CELL}</td>
-              <td>{ROLE_LABELS[user.role]}</td>
-              <td>{user.status === 'active' ? 'Activo' : 'Sin acceso'}</td>
-              <td>{formatUtcDate(user.expiresAt)}</td>
-              <td>
-                {!user.removable ? null : confirmingId === user.id ? (
-                  <>
-                    <span className={styles.confirmNote}>
-                      Saldrá de la oficina ahora y no podrá volver a entrar.
-                    </span>{' '}
+          {users.map((user) => {
+            const mark = expiryMark(user);
+            return (
+              <tr
+                key={user.id}
+                className={user.status === 'revoked' || mark === 'expired' ? styles.revoked : undefined}
+              >
+                <th scope="row">{user.email}</th>
+                <td>{user.displayName ?? EMPTY_CELL}</td>
+                <td>{ROLE_LABELS[user.role]}</td>
+                <td>{statusLabel(user)}</td>
+                <td>
+                  {formatUtcDate(user.expiresAt)}
+                  {mark === 'soon' && (
+                    <>
+                      {' '}
+                      <span className={styles.expiring}>
+                        {user.daysLeft === 1 ? 'Caduca en 1 día' : `Caduca en ${user.daysLeft} días`}
+                      </span>
+                    </>
+                  )}
+                </td>
+                <td>
+                  {!user.removable ? null : confirmingId === user.id ? (
+                    <>
+                      <span className={styles.confirmNote}>
+                        Saldrá de la oficina ahora y no podrá volver a entrar.
+                      </span>{' '}
+                      <button
+                        className={styles.revoke}
+                        type="button"
+                        disabled={busyId !== null}
+                        onClick={() => onRevoke(user.id)}
+                      >
+                        Sí, quitar acceso
+                      </button>
+                      <button className={styles.ghost} type="button" onClick={onCancelRevoke}>
+                        Cancelar
+                      </button>
+                    </>
+                  ) : (
                     <button
                       className={styles.revoke}
                       type="button"
                       disabled={busyId !== null}
-                      onClick={() => onRevoke(user.id)}
+                      onClick={() => onAskRevoke(user.id)}
                     >
-                      Sí, quitar acceso
+                      Quitar acceso
                     </button>
-                    <button className={styles.ghost} type="button" onClick={onCancelRevoke}>
-                      Cancelar
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    className={styles.revoke}
-                    type="button"
-                    disabled={busyId !== null}
-                    onClick={() => onAskRevoke(user.id)}
-                  >
-                    Quitar acceso
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
