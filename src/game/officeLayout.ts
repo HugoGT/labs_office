@@ -404,6 +404,70 @@ export function isPositionWalkable(snapshot: TerrainSnapshot, x: number, y: numb
   );
 }
 
+// --- Block edits (#123 phase 2) ----------------------------------------------------------------
+
+export function isLayoutMaterial(value: unknown): value is LayoutMaterial {
+  return typeof value === 'string' && isMaterial(value);
+}
+
+export function blockCount(layout: Pick<OfficeLayout, 'width' | 'height'>): number {
+  return (layout.width / BLOCK_TILES) * (layout.height / BLOCK_TILES);
+}
+
+/** A copy of `blocks` with block `index` set to `material`; an index off the map throws. */
+export function withBlock(blocks: readonly LayoutMaterial[], index: number, material: LayoutMaterial): LayoutMaterial[] {
+  if (!Number.isInteger(index) || index < 0 || index >= blocks.length) {
+    throw new InvalidOfficeLayoutError(`block ${index} is not on the map`);
+  }
+  const next = [...blocks];
+  next[index] = material;
+  return next;
+}
+
+/**
+ * The wire form of the blocks, a replicated string of the room state: the
+ * whole list is a few hundred bytes, so an edit resends it instead of a delta.
+ */
+export function encodeTerrainBlocks(blocks: readonly LayoutMaterial[]): string {
+  return blocks.join(',');
+}
+
+/** The blocks of a wire string, or `null` unless it holds exactly `count` known materials. */
+export function decodeTerrainBlocks(raw: unknown, count: number): LayoutMaterial[] | null {
+  if (typeof raw !== 'string' || raw === '') return null;
+  const parts = raw.split(',');
+  if (parts.length !== count || !parts.every(isMaterial)) return null;
+  return parts as LayoutMaterial[];
+}
+
+/** The tiles of block `index`, top-left first. */
+export function blockTileRect(width: number, index: number): { tx: number; ty: number; w: number; h: number } {
+  const columns = width / BLOCK_TILES;
+  return { tx: (index % columns) * BLOCK_TILES, ty: Math.floor(index / columns) * BLOCK_TILES, w: BLOCK_TILES, h: BLOCK_TILES };
+}
+
+/** The block under a world pixel, or `null` off the map. */
+export function blockAtWorldPoint(layout: Pick<OfficeLayout, 'width' | 'height'>, x: number, y: number): number | null {
+  const tx = Math.floor(x / LAYOUT_TILE);
+  const ty = Math.floor(y / LAYOUT_TILE);
+  if (!Number.isFinite(tx) || !Number.isFinite(ty) || tx < 0 || ty < 0 || tx >= layout.width || ty >= layout.height) return null;
+  return blockIndexAt(layout.width, tx, ty);
+}
+
+/**
+ * Tiles (row-major indexes) that are water in `after` and were not in
+ * `before`. Block borders wobble, so a block's water reaches up to
+ * `BORDER_JITTER_TILES` into its neighbors: only this list says what an edit
+ * really floods.
+ */
+export function newlyWateredTiles(before: TerrainSnapshot, after: TerrainSnapshot): number[] {
+  const tiles: number[] = [];
+  after.materials.forEach((material, index) => {
+    if (material === 'water' && before.materials[index] !== 'water') tiles.push(index);
+  });
+  return tiles;
+}
+
 // --- The office --------------------------------------------------------------------------------
 
 /** The committed layout. A broken file fails here, at load, on both sides alike. */

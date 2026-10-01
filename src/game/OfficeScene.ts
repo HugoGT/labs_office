@@ -55,7 +55,16 @@ import {
   type SpaceArea,
 } from './mapData';
 import type { OfficeBridge } from './officeBridge';
-import { BASE_LAYOUT, BASE_TERRAIN } from './officeLayout';
+import {
+  BASE_LAYOUT,
+  BASE_TERRAIN,
+  encodeTerrainBlocks,
+  terrainSnapshot,
+  withBlock,
+  type LayoutMaterial,
+} from './officeLayout';
+import type { TerrainEditCommand } from './terrainEditor';
+import { TerrainEditLayer } from './TerrainEditLayer';
 import {
   DEFAULT_FACING,
   DEFAULT_NAME,
@@ -209,6 +218,14 @@ export class OfficeScene extends Phaser.Scene {
   private grid!: TerrainGrid;
   /** The terrain layers, redrawn in place when the terrain changes (#123 phase 2). */
   private terrainTilemap?: TerrainTilemap;
+  /** The blocks the room replicated last (#123 phase 2); colliders and `grid` follow them. */
+  private terrainBlocks: readonly LayoutMaterial[] = BASE_LAYOUT.blocks;
+  /** The terrain editor's local preview, painted over `terrainBlocks` and never collided with. */
+  private terrainPreview: TerrainEditCommand['preview'] = null;
+  /** The static bodies of the terrain grid and their collider, replaced whole on each edit. */
+  private terrainColliders?: { rects: Phaser.GameObjects.Rectangle[]; collider: Phaser.Physics.Arcade.Collider };
+  private terrainEditLayer?: TerrainEditLayer;
+  private unsubscribeTerrainEdit?: () => void;
   private player!: CharacterContainer;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WasdKeys;
@@ -304,6 +321,12 @@ export class OfficeScene extends Phaser.Scene {
    * `layoutEditLayer` por su cuenta desde el mismo comando `layoutedit`.
    */
   private layoutEditing = false;
+  /**
+   * Which editor holds the map (#123 phase 2): either one suspends desk
+   * clicks, menus and camera pan through `layoutEditing`, which is their OR.
+   */
+  private layoutCommandActive = false;
+  private terrainEditing = false;
   /**
    * Todo lo dibujado del ultimo comando `desks` (#7, slice 5): zonas,
    * etiquetas y decoracion. Se guarda entero porque cada lista nueva sustituye
@@ -476,7 +499,22 @@ export class OfficeScene extends Phaser.Scene {
     // gatear `drawDesk`.
     this.layoutEditLayer = new LayoutEditLayer(this, this.bridge);
     this.unsubscribeLayoutEdit = this.bridge.onCommand('layoutedit', (command) => {
-      this.layoutEditing = command !== null;
+      this.layoutCommandActive = command !== null;
+      this.layoutEditing = this.layoutCommandActive || this.terrainEditing;
+    });
+
+    // #123 phase 2. The layer outlines and picks blocks; the scene paints the
+    // preview, and hands the editor the live blocks when it opens.
+    this.terrainEditLayer = new TerrainEditLayer(this, this.bridge, BASE_LAYOUT);
+    this.unsubscribeTerrainEdit = this.bridge.onCommand('terrainedit', (command) => {
+      const opening = command !== null && !this.terrainEditing;
+      this.terrainEditing = command !== null;
+      this.layoutEditing = this.layoutCommandActive || this.terrainEditing;
+      const preview = command?.preview ?? null;
+      const repaint = encodePreview(preview) !== encodePreview(this.terrainPreview);
+      this.terrainPreview = preview;
+      if (repaint) this.paintTerrain();
+      if (opening) this.bridge.emit('terrain', { blocks: this.terrainBlocks });
     });
 
     // #52: reintento manual, el ultimo recurso cuando la escalera automatica
@@ -551,6 +589,8 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeReconnect?.();
       this.unsubscribeLayoutEdit?.();
       this.layoutEditLayer?.destroy();
+      this.unsubscribeTerrainEdit?.();
+      this.terrainEditLayer?.destroy();
       this.cameraPanLayer?.destroy();
       this.remotes?.clear();
       this.roster?.clear();
@@ -633,6 +673,7 @@ export class OfficeScene extends Phaser.Scene {
           onRecordings: (active) => this.bridge.emit('recordings', { active }),
           onRecordingReady: (payload) => this.bridge.emit('recordingready', payload),
           onDesksChanged: () => this.bridge.emit('deskschanged', undefined),
+          onTerrain: (blocks) => this.applyTerrain(blocks),
           onConnectionState: (state) => this.emitPresence(state),
           onLocalAvatar: (avatarId) => this.adoptLocalAvatar(avatarId),
           onLocalSeat: (seat) => this.onLocalSeat(seat),
@@ -1316,6 +1357,18 @@ export class OfficeScene extends Phaser.Scene {
    * les da cuerpo en `create()`.
    */
   private buildColliders(grid: TerrainGrid): void {
+    this.buildTerrainColliders(grid);
+
+    this.peerGroup = this.add.group();
+    this.physics.add.collider(this.player, this.peerGroup);
+  }
+
+  /** The static bodies of `grid`, replacing the previous ones (#123 phase 2: blocks change live). */
+  private buildTerrainColliders(grid: TerrainGrid): void {
+    if (this.terrainColliders) {
+      this.physics.world.removeCollider(this.terrainColliders.collider);
+      for (const rect of this.terrainColliders.rects) rect.destroy();
+    }
     const rects = mergeColliderRects(grid.solid).map((r) => {
       const w = r.w * TILE;
       const h = r.h * TILE;
@@ -1323,10 +1376,31 @@ export class OfficeScene extends Phaser.Scene {
       this.physics.add.existing(rect, true);
       return rect;
     });
-    this.physics.add.collider(this.player, rects);
+    this.terrainColliders = { rects, collider: this.physics.add.collider(this.player, rects) };
+  }
 
-    this.peerGroup = this.add.group();
-    this.physics.add.collider(this.player, this.peerGroup);
+  /**
+   * New blocks from the room (#123 phase 2): the walkability grid, the
+   * colliders and the tilemap follow them at once, so what the player bumps
+   * into is what the room enforces. The first sync usually repeats the
+   * committed blocks, which changes nothing.
+   */
+  private applyTerrain(blocks: readonly LayoutMaterial[]): void {
+    if (!this.alive) return;
+    if (encodeTerrainBlocks(blocks) !== encodeTerrainBlocks(this.terrainBlocks)) {
+      this.terrainBlocks = blocks;
+      this.grid = buildTerrainGrid(terrainSnapshot(BASE_LAYOUT, blocks), BASE_LAYOUT);
+      this.buildTerrainColliders(this.grid);
+      this.paintTerrain();
+    }
+    this.bridge.emit('terrain', { blocks });
+  }
+
+  /** Redraws the tilemap from the live blocks, with the editor's preview over them. */
+  private paintTerrain(): void {
+    const preview = this.terrainPreview;
+    const shown = preview === null ? this.terrainBlocks : withBlock(this.terrainBlocks, preview.index, preview.material);
+    this.terrainTilemap?.refresh(terrainSnapshot(BASE_LAYOUT, shown));
   }
 
   /** Camara principal siguiendo al jugador + minimapa en la esquina superior derecha (app.js:410-431). */
@@ -1599,4 +1673,8 @@ export class OfficeScene extends Phaser.Scene {
 
     this.mmMarker?.setPosition(this.player.x, this.player.y);
   }
+}
+
+function encodePreview(preview: TerrainEditCommand['preview']): string {
+  return preview === null ? '' : `${preview.index}:${preview.material}`;
 }

@@ -197,3 +197,59 @@ describe('OfficeLayoutEditor (#74, PR4 correction): exclusividad escritorios<->s
     expect(screen.getByRole('button', { name: /Editar escritorios/ })).toBeInTheDocument();
   });
 });
+
+/**
+ * The terrain editor (#123 phase 2) is a third section on the same map: at
+ * most one of the three holds it, and it only mounts with its port.
+ */
+describe('OfficeLayoutEditor: terrain section', () => {
+  function renderWithTerrain(onEditingChange = vi.fn()) {
+    const bridge = createOfficeBridge();
+    const terrainCommands: unknown[] = [];
+    bridge.onCommand('terrainedit', (command) => terrainCommands.push(command));
+    render(
+      <OfficeLayoutEditor
+        bridge={bridge}
+        desks={fakeDesks()}
+        spaces={fakeSpaces()}
+        terrain={{ setBlock: vi.fn(async () => undefined) }}
+        refreshDesks={vi.fn()}
+        refreshSpaces={vi.fn()}
+        onEditingChange={onEditingChange}
+      />,
+    );
+    return { bridge, terrainCommands, onEditingChange };
+  }
+
+  it('is not offered without a terrain port', () => {
+    renderEditor();
+
+    expect(screen.queryByRole('button', { name: 'Editar terreno' })).not.toBeInTheDocument();
+  });
+
+  it('opening it reports editing and closes the desk editor, and the other way round', async () => {
+    const { terrainCommands, onEditingChange } = renderWithTerrain();
+
+    await userEvent.click(screen.getByRole('button', { name: /Editar escritorios/ }));
+    await screen.findByText('Mesa 4');
+    await userEvent.click(screen.getByRole('button', { name: 'Editar terreno' }));
+
+    expect(onEditingChange).toHaveBeenLastCalledWith(true);
+    expect(screen.getAllByRole('button', { name: /Salir/ })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: /Editar escritorios/ })).toBeInTheDocument();
+    expect(terrainCommands.at(-1)).toEqual({ selected: null, preview: null });
+
+    await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
+    expect(terrainCommands.at(-1)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Editar terreno' })).toBeInTheDocument();
+  });
+
+  it('leaving it reports editing=false', async () => {
+    const { onEditingChange } = renderWithTerrain();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Editar terreno' }));
+    await userEvent.click(screen.getByRole('button', { name: /Salir/ }));
+
+    expect(onEditingChange).toHaveBeenLastCalledWith(false);
+  });
+});

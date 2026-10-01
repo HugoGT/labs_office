@@ -242,6 +242,25 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     expect(await screen.findByRole('button', { name: /Editar salas/ })).toBeInTheDocument();
   });
 
+  it('con rol admin y puerto de terreno, ofrece TAMBIEN la edicion del terreno (#123 phase 2)', async () => {
+    const user = userEvent.setup();
+    renderSidebar({ ...adminProps(), terrain: { setBlock: vi.fn(async () => undefined) } });
+
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+
+    expect(await screen.findByRole('button', { name: 'Editar terreno' })).toBeInTheDocument();
+  });
+
+  it('con rol admin pero sin puerto de terreno, no ofrece la edicion del terreno', async () => {
+    const user = userEvent.setup();
+    renderSidebar(adminProps());
+
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+
+    await screen.findByRole('button', { name: /Editar escritorios/ });
+    expect(screen.queryByRole('button', { name: 'Editar terreno' })).not.toBeInTheDocument();
+  });
+
   it('con rol admin y puerto de catalogo, ofrece TAMBIEN "Catálogo de decoración"', async () => {
     const user = userEvent.setup();
     renderSidebar({ ...adminProps(), assets: fakeAssets() });

@@ -33,6 +33,8 @@ import { createMemoryDesks } from './desks/memoryDesks.ts';
 import type { DeskDirectory } from './desks/desksPort.ts';
 import { createMemorySpaces } from './spaces/memorySpaces.ts';
 import type { SpacesDirectory } from './spaces/spacesPort.ts';
+import { createMemoryTerrain } from './terrain/memoryTerrain.ts';
+import type { TerrainStore } from './terrain/terrainPort.ts';
 import { OFFICE_ROOM_NAME, RECONNECTION_WINDOW_SECONDS } from './OfficeRoom.ts';
 import type { EgressPort } from './recording/egressPort.ts';
 import type { RecordingStoragePort } from './recording/recordingStorage.ts';
@@ -2530,5 +2532,115 @@ describe('users routes (#93): revoking over HTTP evicts the live session', () =>
     } finally {
       await usersServer.shutdown();
     }
+  });
+});
+
+/**
+ * Terrain editing over HTTP (#123 phase 2). The rules are tested in
+ * `terrain/`; what only a real server proves is the wiring: the 503 without a
+ * store, the protections read from the live room and the spaces store, and
+ * the accepted edit reaching the room state.
+ */
+describe('terrain routes (#123 phase 2)', () => {
+  const ADMIN_TERRAIN: DirectoryUser = {
+    id: '00000000-0000-4000-8000-0000000000b1',
+    uid: 'uid-admin',
+    email: 'admin@example.com',
+    displayName: 'Admin',
+    role: 'admin',
+    status: 'active',
+    expiresAt: null,
+    invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
+    createdAt: new Date('2025-12-01T00:00:00.000Z'),
+  };
+  const terrainVerifier: IdTokenVerifier = {
+    async verify(token: unknown) {
+      if (token !== 'valido-uid-admin') return null;
+      return { uid: 'uid-admin', email: 'admin@example.com', name: 'Admin' };
+    },
+  };
+  const BEARER = { Authorization: 'Bearer valido-uid-admin', 'Content-Type': 'application/json' };
+  const LAWN = 35;
+  const onTile = (tx: number, ty: number) => ({ x: tx * 32 + 32, y: ty * 32 + 25, facing: 'down' });
+
+  async function waitFor(predicate: () => boolean, timeoutMs = 4000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      try {
+        if (predicate()) return;
+      } catch {
+        // The state may not have arrived yet.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error('condition not met before the timeout');
+  }
+
+  async function terrainServer(overrides: { terrain?: TerrainStore | null; spaces?: SpacesDirectory } = {}) {
+    const terrain = overrides.terrain === undefined ? createMemoryTerrain() : overrides.terrain;
+    const server = createOfficeServer({
+      auth: terrainVerifier,
+      directory: createMemoryDirectory({ seed: [ADMIN_TERRAIN] }),
+      spaces: overrides.spaces ?? createMemorySpaces(),
+      terrain,
+      identityAdmin: null,
+    });
+    const port = await server.listen(0);
+    return { server, url: `http://localhost:${port}`, wsUrl: `ws://localhost:${port}` };
+  }
+
+  function setBlock(url: string, index: number, material: string) {
+    return fetch(`${url}/admin/terrain/blocks/${index}`, { method: 'POST', headers: BEARER, body: JSON.stringify({ material }) });
+  }
+
+  it('answers 503 without a terrain store or without a directory, never 404', async () => {
+    const { server, url } = await terrainServer({ terrain: null });
+    const res = await setBlock(url, LAWN, 'sand');
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'terrain-not-configured' });
+    await server.shutdown();
+
+    const bare = createOfficeServer({ auth: terrainVerifier, directory: null, terrain: createMemoryTerrain() });
+    const port = await bare.listen(0);
+    expect((await setBlock(`http://localhost:${port}`, LAWN, 'sand')).status).toBe(503);
+    await bare.shutdown();
+  });
+
+  it('loads the persisted blocks at listen, so the first move is already checked against them', async () => {
+    const { server } = await terrainServer({ terrain: createMemoryTerrain([[LAWN, 'water']]) });
+
+    expect(server.terrain.blocks()[LAWN]).toBe('water');
+    await server.shutdown();
+  });
+
+  it('refuses water under someone in the room or under a space, and applies it once nothing is there', async () => {
+    const spaces = createMemorySpaces();
+    const { server, url, wsUrl } = await terrainServer({ spaces });
+    const room = await new Client(wsUrl).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token: 'valido-uid-admin' });
+    openRooms.push(room);
+    const lawn = onTile(67, 22);
+    room.send('move', lawn);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === lawn.x);
+
+    const underPlayer = await setBlock(url, LAWN, 'water');
+    expect(underPlayer.status).toBe(409);
+    expect(await underPlayer.json()).toEqual({ error: 'terrain-under-player' });
+
+    const away = onTile(20, 23);
+    room.send('move', away);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === away.x);
+    const sala = await spaces.createSpace({ name: 'Sala del prado', x: 66, y: 21, w: 3, h: 3, capacity: null });
+    const underSpace = await setBlock(url, LAWN, 'water');
+    expect(underSpace.status).toBe(409);
+    expect(await underSpace.json()).toEqual({ error: 'terrain-under-placement' });
+
+    await spaces.deleteSpace(sala.id);
+    const accepted = await setBlock(url, LAWN, 'water');
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toEqual({ index: LAWN, material: 'water' });
+    await waitFor(() => room.state.terrainBlocks.split(',')[LAWN] === 'water');
+    await server.shutdown();
   });
 });

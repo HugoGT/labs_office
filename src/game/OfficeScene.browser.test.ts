@@ -11,7 +11,7 @@ import {
   ZONE_LABELS,
 } from './mapData';
 import { TERRAIN_LAYER_COUNT } from './artContract';
-import { BASE_LAYOUT } from './officeLayout';
+import { BASE_LAYOUT, withBlock } from './officeLayout';
 import {
   DESK_ZONE_DEPTH,
   MINIMAP_MARKER_DEPTH,
@@ -2770,3 +2770,111 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
     await vi.waitFor(() => expect(portraits.at(-1)?.bySession['mi-sesion']).toMatch(/^data:image\/png/), LOOP_WAIT);
   });
 });
+
+/**
+ * Edited terrain (#123 phase 2): the room replicates the blocks and the scene
+ * follows them live, tilemap and colliders alike; the editor's preview only
+ * repaints.
+ */
+describe('OfficeScene: edited terrain', () => {
+  const LAWN = 35;
+  /** The middle of the lawn block: its own material whatever the borders do. */
+  const lawn = { x: 67 * TILE + 16, y: 22 * TILE + 16 };
+  /** Dual-grid cell whose four corners are tiles inside the lawn block. */
+  const lawnCell = { cx: 67, cy: 22 };
+
+  function terrainTilesAt(scene: Phaser.Scene, cx: number, cy: number): (number | undefined)[] {
+    return scene.children.list
+      .filter((child): child is Phaser.Tilemaps.TilemapLayer => child.type === 'TilemapLayer')
+      .filter((layer) => layer.layer.name.startsWith('terrain'))
+      .map((layer) => layer.getTileAt(cx, cy, true)?.index);
+  }
+
+  function solidAt(scene: Phaser.Scene, x: number, y: number): boolean {
+    return scene.physics.world.staticBodies.getArray().some((body) => body.hitTest(x, y));
+  }
+
+  async function bootConnected() {
+    const connector = fakeConnector();
+    const booted = await bootOfficeScene(createOfficeBridge(), { endpoint: 'ws://test', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    return { ...booted, handlers: connector.handlers()! };
+  }
+
+  it('redraws the terrain and rebuilds the colliders from the blocks the room sends, and tells React', async () => {
+    const { scene, bridge, handlers } = await bootConnected();
+    const seen: OfficeEventMap['terrain'][] = [];
+    bridge.on('terrain', (payload) => seen.push(payload));
+    const grass = terrainTilesAt(scene, lawnCell.cx, lawnCell.cy);
+    expect(solidAt(scene, lawn.x, lawn.y)).toBe(false);
+
+    const watered = withBlock(BASE_LAYOUT.blocks, LAWN, 'water');
+    handlers.onTerrain!(watered);
+
+    expect(solidAt(scene, lawn.x, lawn.y)).toBe(true);
+    expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).not.toEqual(grass);
+    expect(seen).toEqual([{ blocks: watered }]);
+
+    handlers.onTerrain!(BASE_LAYOUT.blocks);
+    // Arcade drops a destroyed static body on its next step.
+    await vi.waitFor(() => expect(solidAt(scene, lawn.x, lawn.y)).toBe(false), LOOP_WAIT);
+    expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).toEqual(grass);
+    // The base map's own solids survive every rebuild.
+    expect(solidAt(scene, 20 * TILE + 16, 20 * TILE + 16)).toBe(true);
+  });
+
+  it('paints a preview for the editor without changing collisions, and drops it when the editor closes', async () => {
+    const { scene, bridge } = await bootConnected();
+    const grass = terrainTilesAt(scene, lawnCell.cx, lawnCell.cy);
+
+    bridge.emitCommand('terrainedit', { selected: LAWN, preview: { index: LAWN, material: 'water' } });
+
+    expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).not.toEqual(grass);
+    expect(solidAt(scene, lawn.x, lawn.y)).toBe(false);
+
+    bridge.emitCommand('terrainedit', { selected: LAWN, preview: null });
+    expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).toEqual(grass);
+    bridge.emitCommand('terrainedit', { selected: LAWN, preview: { index: LAWN, material: 'sand' } });
+    bridge.emitCommand('terrainedit', null);
+    expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).toEqual(grass);
+  });
+
+  it('keeps a preview over an edit that arrives meanwhile, then shows the edit', async () => {
+    const { scene, bridge, handlers } = await bootConnected();
+    bridge.emitCommand('terrainedit', { selected: LAWN, preview: { index: LAWN, material: 'sand' } });
+    const sand = terrainTilesAt(scene, lawnCell.cx, lawnCell.cy);
+
+    handlers.onTerrain!(withBlock(BASE_LAYOUT.blocks, LAWN, 'water'));
+    expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).toEqual(sand);
+    expect(solidAt(scene, lawn.x, lawn.y)).toBe(true);
+
+    bridge.emitCommand('terrainedit', null);
+    expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).not.toEqual(sand);
+  });
+
+  it('tells the editor the current blocks when it opens', async () => {
+    const { bridge, handlers } = await bootConnected();
+    const watered = withBlock(BASE_LAYOUT.blocks, LAWN, 'water');
+    handlers.onTerrain!(watered);
+    const seen: OfficeEventMap['terrain'][] = [];
+    bridge.on('terrain', (payload) => seen.push(payload));
+
+    bridge.emitCommand('terrainedit', { selected: null, preview: null });
+    bridge.emitCommand('terrainedit', { selected: 3, preview: null });
+
+    expect(seen).toEqual([{ blocks: watered }]);
+  });
+
+  it('a click on the map picks a block instead of closing menus while the editor is open', async () => {
+    const { scene, bridge } = await bootConnected();
+    const events: string[] = [];
+    bridge.on('closemenu', () => events.push('closemenu'));
+    bridge.on('terrainpick', ({ index }) => events.push(`pick:${index}`));
+
+    bridge.emitCommand('terrainedit', { selected: null, preview: null });
+    scene.input.emit('pointerdown', { worldX: lawn.x, worldY: lawn.y, event: { stopPropagation() {} } }, []);
+
+    expect(events).toEqual([`pick:${LAWN}`]);
+  });
+});
+

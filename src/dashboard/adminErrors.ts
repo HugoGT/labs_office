@@ -69,6 +69,11 @@ const MESSAGES: Readonly<Record<AdminErrorCode, string>> = {
   'appearance-color-not-allowed': 'Ese material conserva su propio aspecto y no admite color.',
   'appearance-invalid-color': 'El color no es válido: elige uno con la forma #rrggbb.',
   'appearance-immutable': 'El material y el color se eligen al crear y no se pueden cambiar después.',
+  // Terrain editor (#123 phase 2). One says pick another block, the other wait.
+  'terrain-under-placement':
+    'El agua taparía una sala, un escritorio, una silla o la entrada de la oficina. Elige otro bloque o material.',
+  'terrain-under-player': 'Hay alguien de pie en ese bloque: el agua podrá ir cuando se aparte.',
+  'terrain-not-configured': 'La edición del terreno no está configurada en este servidor.',
   network: 'No se pudo contactar con el servidor.',
   unknown: GENERIC_MESSAGE,
 };

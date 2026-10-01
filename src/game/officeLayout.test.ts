@@ -9,6 +9,14 @@ import {
   BASE_TERRAIN,
   BLOCK_TILES,
   BORDER_JITTER_TILES,
+  blockAtWorldPoint,
+  blockCount,
+  blockTileRect,
+  decodeTerrainBlocks,
+  encodeTerrainBlocks,
+  isLayoutMaterial,
+  newlyWateredTiles,
+  withBlock,
   InvalidOfficeLayoutError,
   LAYOUT_DECALS,
   LAYOUT_MATERIALS,
@@ -453,5 +461,67 @@ describe('the committed layout (maps/office.json)', () => {
     // The middle of the lake blocks: 9x9 tiles stay their block's material that far from a border.
     expect(terrainMaterialAt(BASE_TERRAIN, 94, 62)).toBe('water');
     expect(isTileWalkable(BASE_TERRAIN, 94, 62)).toBe(false);
+  });
+});
+
+/**
+ * Block edits (#123 phase 2): the server persists one material per block and
+ * replicates the whole list, so both sides need the same helpers to apply an
+ * edit, carry it on the wire and find the tiles it floods.
+ */
+describe('terrain block edits', () => {
+  const COUNT = (BASE_LAYOUT.width / BLOCK_TILES) * (BASE_LAYOUT.height / BLOCK_TILES);
+
+  it('counts the blocks of a layout and replaces exactly one of them', () => {
+    expect(blockCount(BASE_LAYOUT)).toBe(140);
+    const next = withBlock(BASE_LAYOUT.blocks, 35, 'water');
+
+    expect(next[35]).toBe('water');
+    expect(next.filter((material, index) => material !== BASE_LAYOUT.blocks[index])).toEqual(['water']);
+    expect(BASE_LAYOUT.blocks[35]).toBe('grass');
+    expect(() => withBlock(BASE_LAYOUT.blocks, COUNT, 'sand')).toThrow(InvalidOfficeLayoutError);
+    expect(() => withBlock(BASE_LAYOUT.blocks, -1, 'sand')).toThrow(InvalidOfficeLayoutError);
+    expect(() => withBlock(BASE_LAYOUT.blocks, 1.5, 'sand')).toThrow(InvalidOfficeLayoutError);
+  });
+
+  it('round-trips the block list through its wire form, and refuses anything else', () => {
+    const blocks = withBlock(BASE_LAYOUT.blocks, 0, 'carpet');
+
+    expect(decodeTerrainBlocks(encodeTerrainBlocks(blocks), COUNT)).toEqual(blocks);
+    expect(decodeTerrainBlocks(encodeTerrainBlocks(blocks), COUNT - 1)).toBeNull();
+    expect(decodeTerrainBlocks(encodeTerrainBlocks(blocks).replace('carpet', 'lava'), COUNT)).toBeNull();
+    expect(decodeTerrainBlocks('', COUNT)).toBeNull();
+    expect(decodeTerrainBlocks(42, COUNT)).toBeNull();
+  });
+
+  it('tells a material name from anything else', () => {
+    for (const material of LAYOUT_MATERIALS) expect(isLayoutMaterial(material)).toBe(true);
+    expect(isLayoutMaterial('lava')).toBe(false);
+    expect(isLayoutMaterial(undefined)).toBe(false);
+  });
+
+  it('finds the 9x9 tiles of a block and the block under a world point', () => {
+    expect(blockTileRect(BASE_LAYOUT.width, 0)).toEqual({ tx: 0, ty: 0, w: 9, h: 9 });
+    expect(blockTileRect(BASE_LAYOUT.width, 15)).toEqual({ tx: 9, ty: 9, w: 9, h: 9 });
+    expect(blockAtWorldPoint(BASE_LAYOUT, 9 * 32 + 1, 9 * 32 + 1)).toBe(15);
+    expect(blockAtWorldPoint(BASE_LAYOUT, BASE_LAYOUT.width * 32 - 1, BASE_LAYOUT.height * 32 - 1)).toBe(139);
+    expect(blockAtWorldPoint(BASE_LAYOUT, -1, 10)).toBeNull();
+    expect(blockAtWorldPoint(BASE_LAYOUT, 10, BASE_LAYOUT.height * 32)).toBeNull();
+  });
+
+  it('lists the tiles an edit turns into water, borders that wobble into the neighbors included', () => {
+    const watered = newlyWateredTiles(BASE_TERRAIN, terrainSnapshot(BASE_LAYOUT, withBlock(BASE_LAYOUT.blocks, 35, 'water')));
+    const inside = (index: number) => {
+      const tx = index % BASE_LAYOUT.width;
+      const ty = Math.floor(index / BASE_LAYOUT.width);
+      return tx >= 63 && tx < 72 && ty >= 18 && ty < 27;
+    };
+
+    // The middle of the block is always its own material.
+    expect(watered).toContain(22 * BASE_LAYOUT.width + 67);
+    expect(watered.some((index) => !inside(index))).toBe(true);
+    expect(watered.every((index) => BASE_TERRAIN.materials[index] !== 'water')).toBe(true);
+    // Drying the lake floods nothing.
+    expect(newlyWateredTiles(BASE_TERRAIN, terrainSnapshot(BASE_LAYOUT, withBlock(BASE_LAYOUT.blocks, 94, 'grass')))).toEqual([]);
   });
 });

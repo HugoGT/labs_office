@@ -11,6 +11,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { LAYOUT_MATERIALS } from '../../../src/game/officeLayout.ts';
 import { migrate, readSchemaSql, reportDesksWithoutSpace } from './migrate.ts';
 
 /** Comparar SQL con saltos de linea y sangria es comparar formato, no contrato. */
@@ -592,5 +593,24 @@ describe('schema.sql: art pack catalog and appearance (art migration, step 3)', 
     // runs, after this script; retirement never deletes, so nothing dangles.
     expect(squashed).not.toMatch(/avatar_id text[^,;]*references/);
     expect(squashed).not.toMatch(/material_id text[^,;]*references/);
+  });
+});
+
+describe('schema.sql: persisted terrain blocks (#123 phase 2)', () => {
+  const squashed = squash(schema);
+  const materials = LAYOUT_MATERIALS.map((material) => `'${material}'`).join(', ');
+
+  it('stores one row per edited block, with its material, who set it and when', () => {
+    expect(squashed).toContain('create table if not exists terrain_blocks ( block_index integer primary key check (block_index >= 0)');
+    expect(squashed).toContain('updated_by uuid references users(id)');
+    expect(squashed).toContain('updated_at timestamptz not null default now()');
+  });
+
+  it('bounds the material to the shared layout materials, refreshing the CHECK on a live database', () => {
+    expect(squashed).toContain(`material text not null check (material in (${materials}))`);
+    expect(squashed).toContain('alter table terrain_blocks drop constraint if exists terrain_blocks_material_check');
+    expect(squashed).toContain(
+      `alter table terrain_blocks add constraint terrain_blocks_material_check check (material in (${materials}))`,
+    );
   });
 });

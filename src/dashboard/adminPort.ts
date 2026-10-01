@@ -166,6 +166,15 @@ export type AdminErrorCode =
   | 'appearance-invalid-color'
   /** An update that tried to change material or color, which are chosen only at creation. */
   | 'appearance-immutable'
+  /**
+   * Water refused by the terrain editor (#123 phase 2): under something that
+   * stays (a room, a desk, a chair, the entrance: pick another block) or
+   * under someone (wait until they walk away). Two codes for two fixes.
+   */
+  | 'terrain-under-placement'
+  | 'terrain-under-player'
+  /** No `DATABASE_URL`: the terrain is the committed layout's and cannot be edited. */
+  | 'terrain-not-configured'
   | 'network'
   | 'unknown';
 

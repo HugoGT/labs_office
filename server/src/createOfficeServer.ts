@@ -17,6 +17,7 @@ import { WebSocketTransport } from '@colyseus/ws-transport';
 import express from 'express';
 import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { BASE_LAYOUT } from '../../src/game/officeLayout.ts';
 import { livekitRoomFor } from '../../src/game/officeProtocol.ts';
 import {
   handleAdminSession,
@@ -44,6 +45,7 @@ import {
   handleUpdateAsset,
   type DecorDeps,
 } from './decor/decorRoutes.ts';
+import { DESK_SIDE } from './desks/deskRules.ts';
 import type { DeskDirectory } from './desks/desksPort.ts';
 import {
   handleClaimDesk,
@@ -83,6 +85,10 @@ import {
 import { recordingStorageFromEnv, type RecordingStoragePort } from './recording/recordingStorage.ts';
 import { createRecordingSpaceSnapshot } from './recording/recordingSpaceSnapshot.ts';
 import { guardSessionRequest, sessionIsInSpace } from './sessionGuard.ts';
+import type { TerrainStore } from './terrain/terrainPort.ts';
+import { handleSetTerrainBlock, type TerrainDeps } from './terrain/terrainRoutes.ts';
+import type { TerrainProtections } from './terrain/terrainRules.ts';
+import { createTerrainRuntime, type TerrainRuntime } from './terrain/terrainRuntime.ts';
 import { createIdTokenVerifier, type IdTokenVerifier } from './verifyIdToken.ts';
 
 /**
@@ -208,6 +214,8 @@ export interface OfficeServer {
   recordings: RecordingRegistry;
   /** Live eviction of a revoked account (#93); exposed for tests, like `sessions`. */
   eviction: SessionEvictor;
+  /** The live terrain blocks and snapshot (#123 phase 2); exposed for tests, like `sessions`. */
+  terrain: TerrainRuntime;
   /**
    * Directorio de usuarios (#24), o `undefined` si esta desactivado. Expuesto
    * para las rutas de administracion y para los tests, igual que `sessions`.
@@ -283,6 +291,13 @@ export interface OfficeServerOverrides {
    * se sienta donde no deberia obligar a sembrar rectangulos ni assets.
    */
   desks?: DeskDirectory | null;
+  /**
+   * Replaces the persisted terrain blocks that would come from `process.env`
+   * (#123 phase 2). `null` forces "no store": the terrain is the committed
+   * layout's and editing answers 503, as in a deployment without
+   * `DATABASE_URL`. Its own override for the same reason as the ones above.
+   */
+  terrain?: TerrainStore | null;
   /**
    * Replaces the Egress adapter that would come from `process.env` (#5).
    * `null` forces "not configured". Same reason as the overrides above: the
@@ -522,6 +537,14 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   const desksSource =
     overrides?.desks !== undefined ? (overrides.desks ?? undefined) : envRuntime?.desks;
   const desks = desksSource && recordingSpaces ? recordingSpaces.observeDesks(desksSource) : desksSource;
+
+  // Built from the committed layout now and from the persisted blocks in
+  // `listen`, after the schema exists (#123 phase 2). The room reads its
+  // snapshot on every move; the store is only touched at load and per edit.
+  const terrain = createTerrainRuntime({
+    layout: BASE_LAYOUT,
+    store: overrides?.terrain !== undefined ? (overrides.terrain ?? undefined) : envRuntime?.terrain,
+  });
 
   app.get('/health', (_req, res) => {
     // `auth` expone el modo EFECTIVO, no la variable de entorno: es la unica
@@ -880,6 +903,55 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     desksRoute((req, deps) => handleReleaseDesk(req.header('Authorization'), deps), true),
   );
 
+  /**
+   * What water must not land on, read when an edit floods a tile (#123 phase
+   * 2): every space (rooms and desk cubicles, whose decor stays inside them),
+   * every desk and every session the room holds, those waiting to reconnect
+   * included, at the position the room last accepted.
+   */
+  async function terrainProtections(): Promise<TerrainProtections> {
+    const [rooms, assignable] = await Promise.all([spaces?.listSpaces() ?? [], desks?.listDesks() ?? []]);
+    return {
+      placements: [
+        ...rooms.map(({ x, y, w, h }) => ({ x, y, w, h })),
+        ...assignable.map(({ x, y }) => ({ x, y, w: DESK_SIDE, h: DESK_SIDE })),
+      ],
+      players: sessions.ids().flatMap((id) => {
+        const position = sessions.positionOf(id);
+        return position === undefined ? [] : [position];
+      }),
+    };
+  }
+
+  /** Same adapter and same "no store -> 503, never 404" as `spacesRoute`. */
+  function terrainRoute(run: (req: express.Request, deps: TerrainDeps) => Promise<AdminResult>) {
+    return (req: express.Request, res: express.Response): void => {
+      if (directory === undefined || !terrain.editable) {
+        res.status(503).json({ error: 'terrain-not-configured' });
+        return;
+      }
+
+      run(req, { directory, auth, identityAdmin, terrain, protections: terrainProtections })
+        .then((result) => {
+          res.status(result.status).json(result.body);
+        })
+        .catch(() => {
+          console.error('[terrain] unhandled failure in a terrain route');
+          res.status(500).json({ error: 'internal' });
+        });
+    };
+  }
+
+  // One block per request, POST for the same CORS reason as the other admin
+  // writes. Under `/admin/*`, so Caddy already proxies it. Clients see the
+  // result through the room state, not through this response.
+  app.post(
+    '/admin/terrain/blocks/:index',
+    terrainRoute((req, deps) =>
+      handleSetTerrainBlock(req.header('Authorization'), req.params.index, req.body, deps),
+    ),
+  );
+
   app.post('/livekit/token', (req, res) => {
     handleLivekitToken(req.body, sessions, auth, spaces)
       .then((result) => {
@@ -934,6 +1006,8 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     finished,
     eviction,
     desks,
+    terrain: () => terrain.snapshot(),
+    subscribeTerrainChanges: terrain.subscribe,
     subscribeDesksChanges: (listener: () => void) => {
       desksChangeListeners.add(listener);
       return () => { desksChangeListeners.delete(listener); };
@@ -952,6 +1026,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     sessions,
     recordings,
     eviction,
+    terrain,
     directory,
     port() {
       const address = httpServer.address() as AddressInfo | null;
@@ -969,6 +1044,9 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
       // configuracion, sin directorio", y esto es "con configuracion que no se
       // puede cumplir". Lo segundo no es un modo degradado, es una averia.
       await envRuntime?.migrate();
+      // Before accepting moves: a room created first would check them against
+      // the committed blocks instead of the persisted ones.
+      await terrain.load();
       await gameServer.listen(port);
       return this.port();
     },

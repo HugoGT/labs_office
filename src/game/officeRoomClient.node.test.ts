@@ -9,6 +9,8 @@ import { matchMaker } from '@colyseus/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createOfficeServer, type OfficeServer } from '../../server/src/createOfficeServer.ts';
 import { createMemoryDirectory } from '../../server/src/directory/memoryDirectory.ts';
+import { createMemoryTerrain } from '../../server/src/terrain/memoryTerrain.ts';
+import { BASE_LAYOUT, type LayoutMaterial } from './officeLayout';
 import { TILE } from './mapData';
 import { OFFICE_ROOM_NAME } from './officeProtocol';
 import { BASE_MAP_SEATS, mapSeatId } from './seating';
@@ -680,5 +682,21 @@ describe('connectOfficeRoom: seats (art migration, step 6)', () => {
     await waitFor(() => watcher.added.some((s) => s.sessionId === other.sessionId));
 
     expect(watcher.added.find((s) => s.sessionId === other.sessionId)?.seat).toBeNull();
+  });
+
+  it('reports the terrain blocks on the first sync and every edit after it (#123 phase 2)', async () => {
+    await server.shutdown();
+    server = createOfficeServer({ terrain: createMemoryTerrain([[35, 'water']]) });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+    const seen: (readonly LayoutMaterial[])[] = [];
+    await connect('Ana', { ...recorder().handlers, onTerrain: (blocks) => seen.push(blocks) });
+
+    await waitFor(() => seen.length > 0);
+    expect(seen[0]).toHaveLength(BASE_LAYOUT.blocks.length);
+    expect(seen[0]![35]).toBe('water');
+
+    await server.terrain.setBlock({ index: 94, material: 'grass', actorId: null }, async () => ({ placements: [], players: [] }));
+    await waitFor(() => seen.at(-1)?.[94] === 'grass');
+    expect(seen.at(-1)![35]).toBe('water');
   });
 });

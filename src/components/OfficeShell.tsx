@@ -7,6 +7,8 @@ import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import { resolveOfficeApiBaseUrl } from '../dashboard/officeApiBaseUrl';
 import { createSpacesAdminClient } from '../dashboard/spacesAdminClient';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
+import { createTerrainAdminClient } from '../dashboard/terrainAdminClient';
+import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import { resolveLivekitConfig } from '../game/livekitEndpoint';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
@@ -138,6 +140,12 @@ export function OfficeShell({
     const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
     if (apiBaseUrl === null) return null;
     return createSpacesAdminClient({ baseUrl: apiBaseUrl, getIdToken: () => session?.getIdToken() ?? Promise.resolve(null) });
+  });
+  /** Terrain blocks (#123 phase 2): same pattern and reason as `spacesAdminPort`. */
+  const [terrainAdminPort] = useState<TerrainAdminPort | null>(() => {
+    const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
+    if (apiBaseUrl === null) return null;
+    return createTerrainAdminClient({ baseUrl: apiBaseUrl, getIdToken: () => session?.getIdToken() ?? Promise.resolve(null) });
   });
   /**
    * Puerto del catalogo de decoracion, migrado desde `DashboardRoute.tsx` a
@@ -724,6 +732,7 @@ export function OfficeShell({
         bridge={bridge}
         desks={deskAdminPort}
         spaces={spacesAdminPort}
+        terrain={terrainAdminPort}
         assets={assetsAdminPort}
         refreshDesks={refreshDesks}
         refreshSpaces={refreshSpaces}

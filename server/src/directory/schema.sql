@@ -366,3 +366,19 @@ ALTER TABLE spaces ADD COLUMN IF NOT EXISTS floor_material_id text NOT NULL DEFA
 ALTER TABLE spaces ADD COLUMN IF NOT EXISTS floor_color text;
 ALTER TABLE spaces DROP CONSTRAINT IF EXISTS spaces_floor_color_check;
 ALTER TABLE spaces ADD CONSTRAINT spaces_floor_color_check CHECK (floor_color IS NULL OR floor_color ~ '^#[0-9a-f]{6}$');
+
+-- Terrain blocks (#123 phase 2). One row per 9x9 block an admin edited; a
+-- block without a row keeps the material of the committed Tiled layout
+-- (`src/game/maps/office.json`), so a new layout file still reaches every
+-- block nobody touched. No upper bound on the index: the map size lives in
+-- the layout, and the server ignores rows past its last block. The materials
+-- are `LAYOUT_MATERIALS` (`src/game/officeLayout.ts`, pinned by
+-- migrate.test.ts), refreshed below like `art_pieces_kind_check`.
+CREATE TABLE IF NOT EXISTS terrain_blocks (
+  block_index integer PRIMARY KEY CHECK (block_index >= 0),
+  material text NOT NULL CHECK (material IN ('water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet')),
+  updated_by uuid REFERENCES users(id),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE terrain_blocks DROP CONSTRAINT IF EXISTS terrain_blocks_material_check;
+ALTER TABLE terrain_blocks ADD CONSTRAINT terrain_blocks_material_check CHECK (material IN ('water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet'));

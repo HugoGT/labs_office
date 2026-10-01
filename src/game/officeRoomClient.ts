@@ -15,6 +15,7 @@
 
 import { Client, getStateCallbacks, type Room } from 'colyseus.js';
 import { createMoveThrottle } from './moveThrottle';
+import { BASE_LAYOUT, decodeTerrainBlocks, type LayoutMaterial } from './officeLayout';
 import {
   DEFAULT_STATUS,
   MOVE_INTERVAL_MS,
@@ -59,6 +60,7 @@ interface OfficeRoomState {
     get(sessionId: string): RemotePlayer | undefined;
   };
   recordings: unknown;
+  terrainBlocks: string;
 }
 
 /**
@@ -160,6 +162,8 @@ export interface OfficeRoomHandlers {
   onRecordingReady?(payload: RecordingReadyPayload): void;
   /** Refetch occupancy/decor without changing the geometry version. */
   onDesksChanged?(): void;
+  /** The whole terrain block list (#123 phase 2): on the first sync and after every accepted edit. */
+  onTerrain?(blocks: readonly LayoutMaterial[]): void;
 }
 
 export interface ConnectOfficeRoomOptions {
@@ -305,7 +309,11 @@ export async function connectOfficeRoom({
    */
   function registerRoom(target: Room<OfficeRoomState>): void {
     const $ = getStateCallbacks(target) as unknown as {
-      (state: OfficeRoomState): { players: PlayersCallbacks; recordings: RecordingsCallbacks };
+      (state: OfficeRoomState): {
+        players: PlayersCallbacks;
+        recordings: RecordingsCallbacks;
+        listen(property: 'terrainBlocks', handler: (value: string) => void): () => void;
+      };
       (player: RemotePlayer): PlayerCallbacks;
     };
 
@@ -357,6 +365,15 @@ export async function connectOfficeRoom({
     target.onStateChange.once(() => {
       synced = true;
       reportRecordings();
+    });
+
+    // Terrain blocks (#123 phase 2): replicated whole, so the first sync of a
+    // join or a reconnect already brings the current terrain. A value that
+    // does not decode (an older server sends none) is not reported, and the
+    // scene keeps what it has.
+    $(target.state).listen('terrainBlocks', (value) => {
+      const blocks = decodeTerrainBlocks(value, BASE_LAYOUT.blocks.length);
+      if (blocks !== null) handlers.onTerrain?.(blocks);
     });
 
     // Mensajes sueltos del servidor (issue #2), no estado sincronizado: no hay

@@ -22,6 +22,9 @@ const CODES: AdminErrorCode[] = [
   'appearance-color-not-allowed',
   'appearance-invalid-color',
   'appearance-immutable',
+  'terrain-under-placement',
+  'terrain-under-player',
+  'terrain-not-configured',
   'network',
   'unknown',
 ];
@@ -149,3 +152,13 @@ describe('describeAdminError', () => {
     expect(describeAdminError(new AdminError('appearance-immutable'))).toMatch(/al crear/);
   });
 });
+
+describe('describeAdminError: terrain edits (#123 phase 2)', () => {
+  it('says why water was refused, so the admin knows whether to pick another block or wait', () => {
+    expect(describeAdminError(new AdminError('terrain-under-placement'))).toMatch(/agua/);
+    expect(describeAdminError(new AdminError('terrain-under-placement'))).toMatch(/otro bloque/);
+    expect(describeAdminError(new AdminError('terrain-under-player'))).toMatch(/alguien/);
+    expect(describeAdminError(new AdminError('terrain-not-configured'))).toMatch(/terreno/);
+  });
+});
+

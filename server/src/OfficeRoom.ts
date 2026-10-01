@@ -42,7 +42,13 @@ import {
   isPresenceStatus,
   recordingAvailableUntil,
 } from '../../src/game/officeProtocol.ts';
-import { BASE_TERRAIN, isPositionWalkable, type TerrainSnapshot } from '../../src/game/officeLayout.ts';
+import {
+  BASE_TERRAIN,
+  encodeTerrainBlocks,
+  isPositionWalkable,
+  type LayoutMaterial,
+  type TerrainSnapshot,
+} from '../../src/game/officeLayout.ts';
 import {
   BASE_MAP_SEATS,
   DESK_SEAT_FACING,
@@ -205,6 +211,12 @@ export interface OfficeRoomOptions {
    */
   terrain?: () => TerrainSnapshot;
   /**
+   * Accepted terrain edits (#123 phase 2), with the whole new block list,
+   * which the room replicates as `state.terrainBlocks`. `terrain` above must
+   * already answer with the new snapshot when this fires.
+   */
+  subscribeTerrainChanges?: (listener: (blocks: readonly LayoutMaterial[]) => void) => () => void;
+  /**
    * Registro de sesiones vivas para LiveKit (D4), inyectado por
    * `createOfficeServer.ts` via `gameServer.define(name, Room, { sessions })`.
    * `OfficeRoom` no crea su propio registro: si lo hiciera como singleton de
@@ -321,6 +333,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private unsubscribeRecordings?: () => void;
   private unsubscribeReady?: () => void;
   private unsubscribeDesksChanges?: () => void;
+  private unsubscribeTerrainChanges?: () => void;
   private unregisterEviction?: () => void;
   /**
    * Sessions a newer join of the same account already released (#78). Their
@@ -347,6 +360,10 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   onCreate(options?: OfficeRoomOptions): void {
     this.state = new OfficeState();
     if (options?.terrain) this.terrain = options.terrain;
+    this.state.terrainBlocks = encodeTerrainBlocks(this.terrain().blocks);
+    this.unsubscribeTerrainChanges = options?.subscribeTerrainChanges?.((blocks) => {
+      this.state.terrainBlocks = encodeTerrainBlocks(blocks);
+    });
     this.sessions = options?.sessions;
     this.auth = options?.auth;
     this.directory = options?.directory;
@@ -493,6 +510,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     this.unsubscribeRecordings?.();
     this.unsubscribeReady?.();
     this.unsubscribeDesksChanges?.();
+    this.unsubscribeTerrainChanges?.();
     this.unregisterEviction?.();
   }
 

@@ -3,6 +3,7 @@ import type { Role } from '../dashboard/adminPort';
 import type { AssetAdminPort } from '../dashboard/assetAdminPort';
 import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
+import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import { SIDEBAR_TOP } from '../game/hudLayout';
 import type { OfficeBridge } from '../game/officeBridge';
 import { statusCssColor } from '../game/presence';
@@ -55,6 +56,8 @@ export interface OfficeSidebarProps {
   desks?: DeskAdminPort | null;
   /** Salas admin (#74, PR4): sin esto tampoco se monta nada de edicion, aunque `desks` este presente -- ambas secciones comparten la misma frontera lazy. */
   spaces?: SpacesAdminPort | null;
+  /** Terrain blocks (#123 phase 2): optional inside the layout editor, which mounts without it. */
+  terrain?: TerrainAdminPort | null;
   refreshDesks?: () => void;
   refreshSpaces?: () => void;
   /** Reenviado tal cual a `OfficeLayoutEditor` (#74, PR3c: exclusividad con `DeskDecorEditor`). */
@@ -86,6 +89,7 @@ export function OfficeSidebar({
   bridge,
   desks,
   spaces,
+  terrain,
   refreshDesks,
   refreshSpaces,
   onLayoutEditingChange,
@@ -160,6 +164,7 @@ export function OfficeSidebar({
                 bridge={bridge}
                 desks={desks}
                 spaces={spaces}
+                terrain={terrain}
                 refreshDesks={refreshDesks}
                 refreshSpaces={refreshSpaces}
                 onEditingChange={onLayoutEditingChange}

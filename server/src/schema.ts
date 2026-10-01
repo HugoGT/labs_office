@@ -91,6 +91,12 @@ export function createRecordingState(seed: { startedBy: string; startedAt: numbe
 export interface OfficeState {
   players: MapSchema<PlayerState>;
   recordings: MapSchema<RecordingState>;
+  /**
+   * The live terrain blocks (#123 phase 2), in the wire form of
+   * `encodeTerrainBlocks`. The whole list, a few hundred bytes, so a joiner
+   * or a reconnected client gets the current terrain with the first sync.
+   */
+  terrainBlocks: string;
 }
 
 export class OfficeState extends Schema {
@@ -98,7 +104,8 @@ export class OfficeState extends Schema {
     super();
     this.players = new MapSchema<PlayerState>();
     this.recordings = new MapSchema<RecordingState>();
+    this.terrainBlocks = '';
   }
 }
 
-defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState } });
+defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState }, terrainBlocks: 'string' });

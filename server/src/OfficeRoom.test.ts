@@ -16,6 +16,7 @@ import {
   SESSION_REVOKED_CLOSE_CODE,
 } from '../../src/game/officeProtocol.ts';
 import { BASE_MAP_SEATS, DESK_SEAT_FACING, deskSeatId, mapSeatId } from '../../src/game/seating.ts';
+import { BASE_LAYOUT, decodeTerrainBlocks } from '../../src/game/officeLayout.ts';
 import { createOfficeServer, type OfficeServer } from './createOfficeServer.ts';
 import { createMemoryDesks } from './desks/memoryDesks.ts';
 import {
@@ -31,6 +32,7 @@ import type { DirectoryUser, UserDirectory } from './directory/directoryPort.ts'
 import { createMemoryDirectory } from './directory/memoryDirectory.ts';
 import { ART_PACK_DEFAULTS } from './decor/artCatalogRules.ts';
 import type { OfficeState } from './schema.ts';
+import { createMemoryTerrain } from './terrain/memoryTerrain.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 
 let server: OfficeServer;
@@ -253,6 +255,74 @@ describe('OfficeRoom: walkable terrain', () => {
     room.send('move', { ...onChair, y: onChair.y - 1 });
     await settle(room);
     expect(room.state.players.get(room.sessionId)?.y).toBe(onChair.y);
+  });
+});
+
+/**
+ * Persisted terrain blocks (#123 phase 2): the room replicates the live blocks
+ * and checks moves against the snapshot the server rebuilt on the last edit,
+ * never against the database.
+ */
+describe('OfficeRoom: edited terrain', () => {
+  const LAWN = 35;
+  const LAKE = 94;
+  const onTile = (tx: number, ty: number) => ({ x: tx * TILE + 32, y: ty * TILE + 25, facing: 'down' });
+  const nobody = async () => ({ placements: [], players: [] });
+  const blocksOf = (room: Awaited<ReturnType<typeof join>>) =>
+    decodeTerrainBlocks(room.state.terrainBlocks, BASE_LAYOUT.blocks.length);
+
+  async function settle(room: Awaited<ReturnType<typeof join>>) {
+    room.send('status', { status: 'y' });
+    await waitFor(() => room.state.players.get(room.sessionId)?.status === 'y');
+  }
+
+  beforeEach(async () => {
+    await server.shutdown();
+    server = createOfficeServer({ terrain: createMemoryTerrain([[LAWN, 'water']]) });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+  });
+
+  it('replicates the persisted blocks to whoever joins', async () => {
+    const room = await join('Ana');
+
+    await waitFor(() => blocksOf(room)?.[LAWN] === 'water');
+    expect(blocksOf(room)?.[LAKE]).toBe('water');
+  });
+
+  it('shows an edit to a client already inside, and to one joining after it', async () => {
+    const ana = await join('Ana');
+    const beto = await join('Beto');
+    await waitFor(() => blocksOf(beto) !== null);
+
+    await server.terrain.setBlock({ index: LAKE, material: 'grass', actorId: null }, nobody);
+
+    await waitFor(() => blocksOf(beto)?.[LAKE] === 'grass');
+    await waitFor(() => blocksOf(ana)?.[LAKE] === 'grass');
+    const late = await join('Carla');
+    await waitFor(() => blocksOf(late)?.[LAKE] === 'grass');
+  });
+
+  it('drops a move onto newly watered tiles and accepts one onto newly dried tiles', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+    await server.terrain.setBlock({ index: LAWN, material: 'grass', actorId: null }, nobody);
+    const lawn = onTile(67, 22);
+    room.send('move', lawn);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === lawn.x);
+    const ashore = onTile(20, 23);
+    room.send('move', ashore);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === ashore.x);
+
+    await server.terrain.setBlock({ index: LAWN, material: 'water', actorId: null }, nobody);
+    room.send('move', lawn);
+    await settle(room);
+    expect(room.state.players.get(room.sessionId)?.x).toBe(ashore.x);
+
+    await server.terrain.setBlock({ index: LAKE, material: 'grass', actorId: null }, nobody);
+    const dried = onTile(94, 58);
+    room.send('move', dried);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === dried.x);
+    expect(server.sessions.positionOf(room.sessionId)).toEqual({ x: dried.x, y: dried.y });
   });
 });
 

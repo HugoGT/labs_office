@@ -24,6 +24,8 @@ import { createPgDesks } from '../desks/pgDesks.ts';
 import type { DeskDirectory } from '../desks/desksPort.ts';
 import { createPgSpaces } from '../spaces/pgSpaces.ts';
 import type { SpacesDirectory } from '../spaces/spacesPort.ts';
+import { createPgTerrain } from '../terrain/pgTerrain.ts';
+import type { TerrainStore } from '../terrain/terrainPort.ts';
 
 /**
  * The pack the SPA serves, so the catalog registers exactly the files the
@@ -68,6 +70,11 @@ export interface DirectoryRuntime {
    */
   desks: DeskDirectory;
   /**
+   * Persisted terrain blocks (#123 phase 2), on the same pool for the same
+   * reason as the others. `terrain_blocks` is in the same `schema.sql`.
+   */
+  terrain: TerrainStore;
+  /**
    * Aplica el esquema. Idempotente: corre en cada arranque. Ver `migrate.ts`.
    *
    * Tambien avisa, DESPUES de aplicar el esquema, de los escritorios que el
@@ -100,6 +107,7 @@ export function directoryFromEnv(
     spaces: createPgSpaces(pool),
     decor,
     desks: createPgDesks(pool),
+    terrain: createPgTerrain(pool),
     migrate: async () => {
       await migrate(pool);
       await reportDesksWithoutSpace(pool);
