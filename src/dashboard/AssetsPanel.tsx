@@ -274,7 +274,10 @@ export function AssetsTable({
         <tbody>
           {assets.map((asset) => (
             <tr key={asset.id}>
-              <th scope="row">{asset.name}</th>
+              <th scope="row">
+                {asset.name}
+                {asset.author !== undefined && <span className={styles.label}> de {asset.author}</span>}
+              </th>
               <td>{KIND_LABELS[asset.kind]}</td>
               {/* Tal cual: es lo unico que ata la fila con un sprite que el
                   bundle del cliente puede dibujar. */}

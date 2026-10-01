@@ -914,6 +914,33 @@ describe('memoryDirectory: avatar (art migration, step 3)', () => {
     expect((await directory.findById(ID))?.avatarChosenAt).toEqual(at);
   });
 
+  it('reassignAvatar moves everyone wearing a retired character to another, and nobody else (#122)', async () => {
+    const BEA = '00000000-0000-4000-8000-0000000000b2';
+    const CARLA = '00000000-0000-4000-8000-0000000000c3';
+    const directory = createMemoryDirectory({
+      seed: [
+        provisioned({ id: ID, avatarId: 'character-upload-0123456789abcdef' }),
+        provisioned({ id: BEA, uid: 'uid-bea', email: 'bea@example.com', avatarId: 'character-upload-0123456789abcdef' }),
+        provisioned({ id: CARLA, uid: 'uid-carla', email: 'carla@example.com', avatarId: 'character-p02-beige-blazer' }),
+      ],
+    });
+
+    const moved = await directory.reassignAvatar('character-upload-0123456789abcdef', ART_PACK_DEFAULTS.character);
+
+    expect(moved).toBe(2);
+    expect((await directory.findById(ID))?.avatarId).toBe(ART_PACK_DEFAULTS.character);
+    expect((await directory.findById(BEA))?.avatarId).toBe(ART_PACK_DEFAULTS.character);
+    expect((await directory.findById(CARLA))?.avatarId).toBe('character-p02-beige-blazer');
+    // Nobody is left on it, so running it again moves nobody.
+    expect(await directory.reassignAvatar('character-upload-0123456789abcdef', ART_PACK_DEFAULTS.character)).toBe(0);
+  });
+
+  it('reassignAvatar refuses a target that is not a character id', async () => {
+    const directory = createMemoryDirectory({ seed: [provisioned({ id: ID })] });
+
+    await expect(directory.reassignAvatar('character-upload-0123456789abcdef', '')).rejects.toBeInstanceOf(InvalidArtChoiceError);
+  });
+
   it('setAvatar leaves the display name alone, and the display name leaves the avatar alone', async () => {
     const directory = createMemoryDirectory({ seed: [provisioned({ id: ID, displayName: 'Ana' })] });
 

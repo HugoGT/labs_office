@@ -135,6 +135,13 @@
   font-weight: 600;
 }
 
+/* Credit of a contributed character (#122). */
+.credit {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
 .poses {
   display: flex;
   gap: 12px;

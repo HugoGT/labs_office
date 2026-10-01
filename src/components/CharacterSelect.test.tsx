@@ -97,4 +97,15 @@ describe('CharacterSelect (art migration, step 5)', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('Ese personaje ya no está disponible. Elige otro.');
   });
+
+  it('credits the author of a contributed character, and nothing for a pack one (#122)', async () => {
+    const user = userEvent.setup();
+    const contributed = { id: 'character-upload-0123456789abcdef', name: 'Rosa', walkUrl: 'u/a.png', seatedUrl: 'u/b.png', author: 'Ana' };
+    render(<CharacterSelect options={[...OPTIONS, contributed]} initialId="character-p02-beige-blazer" pending={false} error={null} onSubmit={vi.fn()} />);
+
+    expect(screen.queryByText(/Autoría/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'Rosa' }));
+
+    expect(screen.getByText('Autoría: Ana')).toBeInTheDocument();
+  });
 });

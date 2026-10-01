@@ -9,6 +9,9 @@ import { UsersPanel } from './UsersPanel';
 import { ArtUploadPanel } from './ArtUploadPanel';
 import { createArtUploadClient } from './artUploadClient';
 import type { ArtUploadPort } from './artUploadPort';
+import { ArtReviewPanel } from './ArtReviewPanel';
+import { createArtReviewClient } from './artReviewClient';
+import type { ArtReviewPort } from './artReviewPort';
 import { DashboardScreen } from './DashboardScreen';
 import styles from './DashboardScreen.module.css';
 import { resolveOfficeApiBaseUrl } from './officeApiBaseUrl';
@@ -53,6 +56,8 @@ interface DashboardPorts {
   users: UsersAdminPort;
   /** Uploading art to the catalog (#121). */
   uploads: ArtUploadPort;
+  /** Reviewing what people contribute (#122). */
+  reviews: ArtReviewPort;
 }
 
 export default function DashboardRoute({ session }: DashboardRouteProps) {
@@ -85,6 +90,7 @@ export default function DashboardRoute({ session }: DashboardRouteProps) {
       admin: createAdminClient({ baseUrl: adminBaseUrl, getIdToken }),
       users: createUsersAdminClient({ baseUrl: apiBaseUrl, getIdToken }),
       uploads: createArtUploadClient({ baseUrl: apiBaseUrl, getIdToken }),
+      reviews: createArtReviewClient({ baseUrl: apiBaseUrl, getIdToken }),
     };
   });
 
@@ -130,6 +136,7 @@ export default function DashboardRoute({ session }: DashboardRouteProps) {
       {/* First of the extra panels: who is in the office is what an admin
           looks for right after the invitations (#93). */}
       <UsersPanel users={ports.users} />
+      <ArtReviewPanel reviews={ports.reviews} />
       <ArtUploadPanel uploads={ports.uploads} />
     </DashboardScreen>
   );

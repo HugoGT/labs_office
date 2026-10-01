@@ -1,6 +1,8 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { OfficeSession } from '../auth/authPort';
 import { createAssetAdminClient } from '../dashboard/assetAdminClient';
+import { createArtContributionClient } from '../dashboard/artContributionClient';
+import type { ArtContributionPort } from '../dashboard/artContributionPort';
 import type { AssetAdminPort } from '../dashboard/assetAdminPort';
 import { createDeskAdminClient } from '../dashboard/deskAdminClient';
 import type { DeskAdminPort } from '../dashboard/deskAdminPort';
@@ -157,6 +159,16 @@ export function OfficeShell({
     const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
     if (apiBaseUrl === null) return null;
     return createAssetAdminClient({ baseUrl: apiBaseUrl, getIdToken: () => session?.getIdToken() ?? Promise.resolve(null) });
+  });
+  /**
+   * Art contributions (#122): same pattern as `assetsAdminPort`, for anyone
+   * signed in. Without a session there is nobody to credit or limit.
+   */
+  const [contributionsPort] = useState<ArtContributionPort | null>(() => {
+    const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
+    if (apiBaseUrl === null || !session) return null;
+    const signedIn = session;
+    return createArtContributionClient({ baseUrl: apiBaseUrl, getIdToken: () => signedIn.getIdToken() });
   });
   /**
    * Exclusividad entre el modo edicion de layout y `DeskDecorEditor` (#74,
@@ -734,6 +746,7 @@ export function OfficeShell({
         spaces={spacesAdminPort}
         terrain={terrainAdminPort}
         assets={assetsAdminPort}
+        contributions={contributionsPort}
         refreshDesks={refreshDesks}
         refreshSpaces={refreshSpaces}
         onLayoutEditingChange={setLayoutEditing}

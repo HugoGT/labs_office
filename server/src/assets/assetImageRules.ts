@@ -23,6 +23,8 @@ export type AssetUploadErrorCode =
   | ArtViolationCode
   /** A metadata field is missing or has the wrong shape; `field` names it. */
   | 'invalid-metadata'
+  /** A contribution (#122) without the rights statement accepted. */
+  | 'rights-not-accepted'
   /** The kind needs a file under this role and the body has none. */
   | 'missing-file';
 

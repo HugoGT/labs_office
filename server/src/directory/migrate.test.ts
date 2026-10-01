@@ -132,7 +132,7 @@ describe('schema.sql: lo que no puede faltar', () => {
   it('la auditoria guarda actor, accion y sujeto (PRD 10, punto 7 del issue)', () => {
     expect(schema).toContain('actor_id uuid references users(id)');
     expect(schema).toContain('subject_id uuid references users(id)');
-    expect(schema).toContain("check (action in ('invite', 'revoke', 'create-user', 'revoke-user'))");
+    expect(schema).toContain("check (action in ('invite', 'revoke', 'create-user', 'revoke-user', 'upload-art', 'submit-art', 'approve-art', 'reject-art', 'retire-art'))");
   });
 
   it('refresca el CHECK de la auditoria en un despliegue que ya tenia la tabla', () => {
@@ -145,7 +145,7 @@ describe('schema.sql: lo que no puede faltar', () => {
     // fichero exige de todo lo que contiene.
     expect(schema).toContain('alter table audit_log drop constraint if exists audit_log_action_check');
     expect(schema).toContain(
-      "alter table audit_log add constraint audit_log_action_check check (action in ('invite', 'revoke', 'create-user', 'revoke-user'))",
+      "alter table audit_log add constraint audit_log_action_check check (action in ('invite', 'revoke', 'create-user', 'revoke-user', 'upload-art', 'submit-art', 'approve-art', 'reject-art', 'retire-art'))",
     );
   });
 
@@ -600,6 +600,41 @@ describe('schema.sql: art pack catalog and appearance (art migration, step 3)', 
     // runs, after this script; retirement never deletes, so nothing dangles.
     expect(squashed).not.toMatch(/avatar_id text[^,;]*references/);
     expect(squashed).not.toMatch(/material_id text[^,;]*references/);
+  });
+});
+
+describe('schema.sql: art contributions and review (#122)', () => {
+  const squashed = squash(schema);
+
+  it('adds the review state, approved by default so pack pieces and Admin uploads stay in the catalog', () => {
+    expect(squashed).toContain("alter table art_pieces add column if not exists status text not null default 'approved'");
+    expect(squashed).toContain('alter table art_pieces drop constraint if exists art_pieces_status_check');
+    expect(squashed).toContain("alter table art_pieces add constraint art_pieces_status_check check (status in ('pending', 'approved', 'rejected'))");
+  });
+
+  it('stores who reviewed, when, why, and when the rights statement was accepted', () => {
+    expect(squashed).toContain('alter table art_pieces add column if not exists reviewed_by uuid references users(id)');
+    expect(squashed).toContain('alter table art_pieces add column if not exists reviewed_at timestamptz');
+    expect(squashed).toContain('alter table art_pieces add column if not exists review_note text');
+    expect(squashed).toContain('alter table art_pieces add column if not exists license_accepted_at timestamptz');
+  });
+
+  it('a contribution always carries its rights acceptance, a rejection always its reason', () => {
+    expect(squashed).toContain('alter table art_pieces drop constraint if exists art_pieces_review_note_check');
+    expect(squashed).toContain(
+      "alter table art_pieces add constraint art_pieces_review_note_check check ((status = 'rejected') = (review_note is not null))",
+    );
+    expect(squashed).toContain('alter table art_pieces drop constraint if exists art_pieces_pending_license_check');
+    expect(squashed).toContain(
+      "alter table art_pieces add constraint art_pieces_pending_license_check check (status <> 'pending' or license_accepted_at is not null)",
+    );
+  });
+
+  it('audits art transitions against the piece, and indexes the hourly count', () => {
+    expect(squashed).toContain('alter table audit_log add column if not exists piece_id text references art_pieces(id)');
+    expect(squashed).toContain('create index if not exists audit_log_actor_action on audit_log (actor_id, action, created_at)');
+    // After the table it references exists: the script runs top to bottom.
+    expect(squashed.indexOf('add column if not exists piece_id')).toBeGreaterThan(squashed.indexOf('create table if not exists art_pieces'));
   });
 });
 

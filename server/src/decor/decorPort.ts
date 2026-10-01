@@ -30,6 +30,7 @@
  */
 
 import type { ArtPackManifest, ArtPiece, ArtPieceFile, ArtPieceKind } from '../../../src/game/artContract.ts';
+import type { ArtAuditAction, ArtPieceStatus, ContributionUsage, ReviewDecision } from './artReviewRules.ts';
 
 export type AssetKind = 'furniture' | 'decor' | 'plant';
 
@@ -150,8 +151,66 @@ export interface ArtCatalogPiece {
   updatedAt: Date;
   /** A pack registration only retires `pack` pieces: an upload is not the pack's to retire. */
   source: ArtPieceSource;
-  /** Directory id of the Admin who uploaded it; `null` for pack pieces. */
+  /** Directory id of whoever uploaded it (an Admin or a contributor); `null` for pack pieces. */
   uploadedBy: string | null;
+  /**
+   * Review state (#122). Pack pieces and Admin uploads are `approved` from
+   * the start; a contribution is `pending` until a reviewer decides. Only
+   * approved pieces are part of the catalog (`listArtPieces`).
+   */
+  status: ArtPieceStatus;
+  reviewedBy: string | null;
+  reviewedAt: Date | null;
+  /** The reason of a rejection, shown to the uploader; `null` otherwise. */
+  reviewNote: string | null;
+  /** When the contributor accepted the rights statement; `null` for pack pieces and Admin uploads. */
+  licenseAcceptedAt: Date | null;
+}
+
+/** One contribution (#122): the piece `prepareAssetUpload` built, its files already stored. */
+export interface ArtContributionInput {
+  piece: ArtPiece;
+  submittedBy: string;
+  /**
+   * The desk decor asset its approval will create (a plant). Nothing is
+   * created now: it is only checked, so a taken name is refused at upload
+   * instead of at review.
+   */
+  decorAsset?: CreateAssetInput;
+}
+
+export interface ListUploadedArtOptions {
+  uploadedBy?: string;
+  status?: ArtPieceStatus;
+}
+
+export interface ArtReviewInput {
+  id: string;
+  reviewerId: string;
+  decision: ReviewDecision;
+  /** The reason of a rejection, already normalized (`normalizeReviewNote`); `null` for an approval. */
+  note: string | null;
+  /** The desk decor asset an approved plant needs, created in the same transaction. */
+  decorAsset?: CreateAssetInput;
+}
+
+export interface ArtRetirementInput {
+  id: string;
+  actorId: string;
+}
+
+export interface ArtRetirement {
+  piece: ArtCatalogPiece;
+  /** `false` when it was already retired: nothing was written or audited. */
+  changed: boolean;
+}
+
+/** One art entry of the audit trail, as the memory adapter exposes it to tests. */
+export interface ArtAuditEntry {
+  actorId: string;
+  action: ArtAuditAction;
+  pieceId: string;
+  at: Date;
 }
 
 export interface UploadedArtPieceInput {
@@ -171,7 +230,11 @@ export interface UploadedArtPiece {
 }
 
 export interface ListArtPiecesOptions {
-  /** Includes retired pieces. Off by default: the normal read is "what can be chosen today". */
+  /**
+   * Includes retired pieces. Off by default: the normal read is "what can be
+   * chosen today". Never includes pending or rejected contributions (#122):
+   * those are not part of the catalog at all.
+   */
   includeRetired?: boolean;
 }
 
@@ -208,7 +271,42 @@ export interface DecorCatalog {
    * asset. Never overwrites: an id already in the catalog, retired or not,
    * throws `ArtPieceExistsError`, and a taken decor name throws
    * `AssetNameTakenError` with nothing written. Throws `InvalidArtPackError`
-   * for an id outside the upload id space.
+   * for an id outside the upload id space. Audited as `upload-art`.
    */
   registerUploadedArtPiece(input: UploadedArtPieceInput): Promise<UploadedArtPiece>;
+  /**
+   * What a user has in flight (#122), for the route's early refusal before it
+   * stores any file. Not binding: `submitArtContribution` counts again under
+   * the lock.
+   */
+  artContributionUsage(userId: string): Promise<ContributionUsage>;
+  /**
+   * Adds one contribution as `pending`, stamping `licenseAcceptedAt`, with a
+   * `submit-art` audit entry. The limits (`assertContributionQuota`) are
+   * checked and the row written atomically per user, so parallel uploads
+   * cannot exceed them. Throws `ContributionLimitError`, `ArtPieceExistsError`
+   * (the same pixels are in the catalog already, whatever their status) or
+   * `AssetNameTakenError` (a plant whose decor name is taken).
+   */
+  submitArtContribution(input: ArtContributionInput): Promise<ArtCatalogPiece>;
+  /** Uploads only (never pack pieces), whatever their status, oldest first. */
+  listUploadedArtPieces(options?: ListUploadedArtOptions): Promise<ArtCatalogPiece[]>;
+  findUploadedArtPiece(id: string): Promise<ArtCatalogPiece | null>;
+  /** Uploads whose files include `sha256`, whatever their status: who may see that file. */
+  findArtPiecesWithFile(sha256: string): Promise<ArtCatalogPiece[]>;
+  /**
+   * Approves or rejects a pending contribution, with its audit entry and, for
+   * an approved plant, its decor asset, atomically. `null` if no upload has
+   * that id. Throws `InvalidArtTransitionError` if it is not pending and
+   * `AssetNameTakenError` if the decor name was taken meanwhile.
+   */
+  reviewArtContribution(input: ArtReviewInput): Promise<UploadedArtPiece | null>;
+  /**
+   * Withdraws an approved upload: `retiredAt`, the decor asset of a plant
+   * archived (placed ones keep drawing, D1b) and a `retire-art` entry,
+   * atomically. Users wearing a character are the directory's
+   * (`reassignAvatar`). Retiring twice changes nothing. `null` if no upload
+   * has that id; throws `InvalidArtTransitionError` if it was never approved.
+   */
+  retireUploadedArtPiece(input: ArtRetirementInput): Promise<ArtRetirement | null>;
 }

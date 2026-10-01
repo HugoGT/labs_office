@@ -39,8 +39,20 @@ import {
   handleGetAssetFile,
   handleUploadAsset,
   handleUploadedArtManifest,
+  type AssetFileResult,
   type AssetUploadDeps,
 } from './assets/assetUploadRoutes.ts';
+import {
+  handleApproveContribution,
+  handleGetPrivateArtFile,
+  handleListMyContributions,
+  handleListReviewQueue,
+  handleRejectContribution,
+  handleRetireArtPiece,
+  handleSubmitContribution,
+  type ArtContributionDeps,
+} from './assets/artContributionRoutes.ts';
+import { createCharacterRetirementHub, type CharacterRetirement } from './characterRetirement.ts';
 import { handleGetDisplayName, handleSetDisplayName } from './directory/displayNameRoutes.ts';
 import { handleGetAvatar, handleSetAvatar } from './directory/avatarRoutes.ts';
 import {
@@ -132,6 +144,8 @@ const PING_MAX_RETRIES = 4;
  * metadata, so 1 MB leaves room without letting a body grow unbounded.
  */
 const ASSET_UPLOAD_PATH = '/admin/assets/upload';
+/** A contribution (#122) carries the same files as an upload, so it gets the same limit. */
+const ART_CONTRIBUTION_PATH = '/me/art/contributions';
 const ASSET_UPLOAD_BODY_LIMIT = '1mb';
 
 interface LivekitTokenResult {
@@ -230,6 +244,8 @@ export interface OfficeServer {
   recordings: RecordingRegistry;
   /** Live eviction of a revoked account (#93); exposed for tests, like `sessions`. */
   eviction: SessionEvictor;
+  /** Live reset of a retired character (#122); exposed for tests, like `eviction`. */
+  characters: CharacterRetirement;
   /** The live terrain blocks and snapshot (#123 phase 2); exposed for tests, like `sessions`. */
   terrain: TerrainRuntime;
   /**
@@ -487,7 +503,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   // other route keeps the default.
   const json = express.json();
   app.use((req, res, next) => {
-    if (req.path === ASSET_UPLOAD_PATH) {
+    if (req.path === ASSET_UPLOAD_PATH || (req.path === ART_CONTRIBUTION_PATH && req.method === 'POST')) {
       next();
       return;
     }
@@ -503,6 +519,8 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   };
   // Shared by the room (which registers) and the admin routes (which evict) (#93).
   const eviction = createSessionEvictionHub();
+  // Shared by the room (which registers) and the retire route (which resets) (#122).
+  const characters = createCharacterRetirementHub();
   // Read per call, like the LiveKit credentials of `/livekit/token`.
   const egressFor = (): EgressPort | null =>
     overrides?.egress !== undefined ? overrides.egress : egressFromEnv(process.env);
@@ -813,24 +831,108 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     };
   }
 
+  /**
+   * Answers the large body parser's refusals as JSON, so the panel reads them
+   * like any other code. Shared by the Admin upload and the contribution.
+   */
+  function uploadBodyErrors(error: { type?: string }, _req: express.Request, res: express.Response, next: express.NextFunction): void {
+    if (error?.type === 'entity.too.large') {
+      res.status(413).json({ error: 'too-large' });
+      return;
+    }
+    if (error?.type === 'entity.parse.failed') {
+      res.status(400).json({ error: 'invalid-request' });
+      return;
+    }
+    next(error);
+  }
+
   // Registered before `/admin/assets/:id`, which would otherwise take
-  // `upload` for an asset id. The error handler answers the body parser's
-  // refusals as JSON, so the panel reads them like any other code.
+  // `upload` for an asset id.
   app.post(
     '/admin/assets/upload',
     express.json({ limit: ASSET_UPLOAD_BODY_LIMIT }),
     assetUploadRoute((req, deps) => handleUploadAsset(req.header('Authorization'), req.body, deps)),
-    (error: { type?: string }, _req: express.Request, res: express.Response, next: express.NextFunction): void => {
-      if (error?.type === 'entity.too.large') {
-        res.status(413).json({ error: 'too-large' });
+    uploadBodyErrors,
+  );
+
+  /**
+   * Contributions and their review (#122). Same "no store -> 503" and the
+   * same code as the Admin upload: without a directory, a catalog or a bucket
+   * there is nothing to contribute to.
+   */
+  function contributionRoute(run: (req: express.Request, deps: ArtContributionDeps) => Promise<AdminResult>) {
+    return (req: express.Request, res: express.Response): void => {
+      if (directory === undefined || decor === undefined || assetStorage === null) {
+        res.status(503).json({ error: 'asset-upload-not-configured' });
         return;
       }
-      if (error?.type === 'entity.parse.failed') {
-        res.status(400).json({ error: 'invalid-request' });
-        return;
-      }
-      next(error);
-    },
+
+      run(req, { directory, decor, storage: assetStorage, auth, identityAdmin, characters })
+        .then((result) => {
+          res.status(result.status).json(result.body);
+        })
+        .catch(() => {
+          console.error('[assets] unhandled failure in a contribution route');
+          res.status(500).json({ error: 'internal' });
+        });
+    };
+  }
+
+  /** Sends a PNG result or its JSON refusal. */
+  function sendArtFile(res: express.Response, result: AssetFileResult | AdminResult): void {
+    if ('png' in result) {
+      res.status(200).set(result.headers).send(Buffer.from(result.png));
+      return;
+    }
+    res.status(result.status).json(result.body);
+  }
+
+  app.post(
+    ART_CONTRIBUTION_PATH,
+    express.json({ limit: ASSET_UPLOAD_BODY_LIMIT }),
+    contributionRoute((req, deps) => handleSubmitContribution(req.header('Authorization'), req.body, deps)),
+    uploadBodyErrors,
+  );
+
+  app.get(
+    '/me/art/contributions',
+    contributionRoute((req, deps) => handleListMyContributions(req.header('Authorization'), deps)),
+  );
+
+  // The private preview of a contribution: its uploader and the reviewers
+  // read it here, never through the public `/assets/files/`.
+  app.get('/me/art/files/:file', (req, res) => {
+    if (directory === undefined || decor === undefined || assetStorage === null) {
+      res.status(503).json({ error: 'asset-upload-not-configured' });
+      return;
+    }
+    handleGetPrivateArtFile(req.header('Authorization'), req.params.file, { directory, decor, storage: assetStorage, auth, identityAdmin })
+      .then((result) => sendArtFile(res, result))
+      .catch(() => {
+        console.error('[assets] unhandled failure serving a private art file');
+        res.status(500).json({ error: 'internal' });
+      });
+  });
+
+  app.get(
+    '/admin/art/contributions',
+    contributionRoute((req, deps) => handleListReviewQueue(req.header('Authorization'), req.query.status, deps)),
+  );
+
+  app.post(
+    '/admin/art/contributions/:id/approve',
+    contributionRoute((req, deps) => handleApproveContribution(req.header('Authorization'), req.params.id, deps)),
+  );
+
+  app.post(
+    '/admin/art/contributions/:id/reject',
+    contributionRoute((req, deps) => handleRejectContribution(req.header('Authorization'), req.params.id, req.body, deps)),
+  );
+
+  app.post(
+    '/admin/art/pieces/:id/retire',
+    contributionRoute((req, deps) => handleRetireArtPiece(req.header('Authorization'), req.params.id, deps)),
   );
 
   // Uploaded art (#121): its manifest and its files, public like the pack in
@@ -853,18 +955,13 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   });
 
   app.get('/assets/files/:file', (req, res) => {
-    if (assetStorage === null) {
+    // Without a catalog nothing was approved, so no file can be public.
+    if (assetStorage === null || decor === undefined) {
       res.status(503).json({ error: 'asset-upload-not-configured' });
       return;
     }
-    handleGetAssetFile(req.params.file, assetStorage)
-      .then((result) => {
-        if (result.status !== 200) {
-          res.status(result.status).json(result.body);
-          return;
-        }
-        res.status(200).set(result.headers).send(Buffer.from(result.png));
-      })
+    handleGetAssetFile(req.params.file, { storage: assetStorage, decor })
+      .then((result) => sendArtFile(res, result))
       .catch(() => {
         console.error('[assets] unhandled failure serving an asset file');
         res.status(500).json({ error: 'internal' });
@@ -1117,6 +1214,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     recordings,
     finished,
     eviction,
+    characters,
     desks,
     terrain: () => terrain.snapshot(),
     subscribeTerrainChanges: terrain.subscribe,
@@ -1138,6 +1236,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     sessions,
     recordings,
     eviction,
+    characters,
     terrain,
     directory,
     port() {

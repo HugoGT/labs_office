@@ -196,7 +196,12 @@ Reutilizar el contrato y cargador anteriores:
 
 En despliegue, añadir la ruta específica `/assets/files/*` en `infra/gcp/Caddyfile`: `/assets/*` también contiene los bundles de Vite.
 
-Antes de activar contribuciones deben quedar definidos el texto de cesión de derechos y la cuota horaria.
+Decisiones para activar contribuciones (2026-10-01):
+
+- Cesión de derechos: casilla obligatoria con el texto "Confirmo que este arte no infringe derechos de autor y que la oficina puede usarlo libremente."
+- Cuota horaria: 10 subidas por usuario por hora, contando también las rechazadas.
+
+Implementado (9b): las contribuciones viven en `art_pieces` (`status`, `reviewed_by`, `reviewed_at`, `review_note`, `license_accepted_at`; `uploaded_by` es quien la envió) y la auditoría en `audit_log.piece_id`. Las reglas puras están en `server/src/decor/artReviewRules.ts`; las rutas, en `server/src/assets/artContributionRoutes.ts` (`/me/art/*` y `/admin/art/*`). Los archivos pendientes solo se sirven por `GET /me/art/files/<sha256>.png` a quien subió la pieza y a los revisores; la ruta pública solo sirve archivos de piezas aprobadas. Detalle en `AGENTS.md`, punto 18 de la arquitectura.
 
 ## 10. Verificar y desplegar por entregas
 
@@ -222,5 +227,5 @@ La validación final incluye regeneración del pack, revisión visual de los 18 
 - [ ] Los pisos y escritorios conservan el material/color elegido al crearlos.
 - [ ] El layout Tiled y el arte definitivo cumplen el alcance de #4.
 - [ ] El mapa por bloques y su editor persistente cumplen ambas fases de #123.
-- [ ] Las contribuciones y la moderación cumplen los criterios de #122.
+- [x] Las contribuciones y la moderación cumplen los criterios de #122.
 - [ ] La validación visual, las pruebas y las regresiones pasan antes del despliegue.

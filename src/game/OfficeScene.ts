@@ -652,8 +652,9 @@ export class OfficeScene extends Phaser.Scene {
         getIdToken,
         handlers: {
           onAdd: (snapshot) => {
-            // Only on add: `onChange` fires on every move, and the persisted
-            // character does not change during a session.
+            // On add, and on a change only when the character itself changed:
+            // `onChange` fires on every move, and a character changes during
+            // a session only when it is retired (#122).
             this.requestCharacter(snapshot.avatarId);
             this.remotes?.upsert(snapshot);
             this.roster?.upsert(rosterPeerOf(snapshot));
@@ -662,6 +663,8 @@ export class OfficeScene extends Phaser.Scene {
             this.emitCharacterPortraits();
           },
           onChange: (snapshot) => {
+            const previous = this.remotes?.get(snapshot.sessionId)?.avatarId;
+            if (previous !== undefined && previous !== snapshot.avatarId) this.requestCharacter(snapshot.avatarId);
             this.remotes?.upsert(snapshot);
             this.roster?.upsert(rosterPeerOf(snapshot));
             this.checkSpacesVersionDrift(snapshot.spacesVersion);

@@ -240,6 +240,13 @@ http://{$APP_HOST}, http://{$LK_HOST}, http://{$TURN_HOST} {
 		reverse_proxy colyseus:2567
 	}
 
+	# Contribuciones de arte (#122): subir y listar las propias, y la vista
+	# previa privada de sus archivos. Prefijo propio: /me/avatar y /me/desk
+	# son rutas exactas y no lo cubren.
+	handle /me/art/* {
+		reverse_proxy colyseus:2567
+	}
+
 	# Grabacion (issue #5, #58): start/stop/url.
 	handle /recordings/* {
 		reverse_proxy colyseus:2567

@@ -30,6 +30,7 @@
 
 import { createHash } from 'node:crypto';
 import {
+  artSheetKey,
   CHARACTER_SEATED,
   CHARACTER_WALK,
   DESK,
@@ -43,6 +44,8 @@ import {
   type Point,
 } from '../../../src/game/artContract.ts';
 import { uploadedPieceIdPrefix } from '../decor/artCatalogRules.ts';
+import { CONTRIBUTION_LICENSE, isContributionKind } from '../decor/artReviewRules.ts';
+import type { CreateAssetInput } from '../decor/decorPort.ts';
 import { AssetUploadError, MAX_UPLOAD_FILE_BYTES, prepareAssetImage, type PreparedAssetImage } from './assetImageRules.ts';
 
 export const UPLOAD_FILE_ROLES = {
@@ -207,4 +210,29 @@ export function prepareAssetUpload(body: unknown, options: PrepareUploadOptions 
   const id = pieceId(uploadKind, pieceFiles);
   const piece = { id, kind: uploadKind, ...credits, ...extra, files: pieceFiles } as unknown as ArtPiece;
   return { piece, files };
+}
+
+/**
+ * A contribution (#122): the same body, checks and piece as an Admin upload,
+ * minus what only an Admin decides. Only characters and decor plants, and
+ * only with `rightsAccepted: true`, the checkbox of the form; the license is
+ * that grant (`CONTRIBUTION_LICENSE`), whatever the body says. Both checks run
+ * before any file is decoded.
+ */
+export function prepareContribution(body: unknown): PreparedUpload {
+  if (!isRecord(body)) throw invalid(null, 'the upload is not an object');
+  if (body.rightsAccepted !== true) {
+    throw new AssetUploadError('rights-not-accepted', 'rightsAccepted', 'the rights statement must be accepted');
+  }
+  if (!isContributionKind(body.kind)) throw invalid('kind', 'only characters and decor plants can be contributed');
+  return prepareAssetUpload({ ...body, license: CONTRIBUTION_LICENSE });
+}
+
+/**
+ * The desk decor asset that draws an uploaded plant, so the existing decor
+ * flow (`/me/desk`) can place it with no change. Any other kind has none.
+ */
+export function decorAssetForPiece(piece: ArtPiece): CreateAssetInput | undefined {
+  if (piece.kind !== 'plant') return undefined;
+  return { name: piece.name, kind: 'plant', textureKey: artSheetKey(piece.id, 'sheet'), w: piece.footprint.w, h: piece.footprint.h, placeableOnDesk: true };
 }

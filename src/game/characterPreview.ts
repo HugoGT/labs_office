@@ -6,7 +6,7 @@
  * cell the office will draw.
  */
 
-import { CHARACTER_SEATED, CHARACTER_WALK, seatedRowForFacing, sheetSize, walkRowForFacing } from './artContract';
+import { CHARACTER_SEATED, CHARACTER_WALK, seatedRowForFacing, sheetSize, walkRowForFacing, type ArtFacing } from './artContract';
 
 export type CharacterPose = 'idle' | 'walk' | 'seated';
 
@@ -24,8 +24,8 @@ export interface CharacterPreviewFrame {
   readonly steps: number;
 }
 
-/** Previews face the viewer, like the office's default facing. */
-const PREVIEW_FACING = 'down';
+/** Previews face the viewer, like the office's default facing, unless told otherwise. */
+const PREVIEW_FACING: ArtFacing = 'down';
 
 /**
  * `scale` must be an integer for crisp pixel art: the sheets are drawn 1:1 and
@@ -35,12 +35,13 @@ export function characterPreviewFrame(
   sheets: { readonly walkUrl: string; readonly seatedUrl: string },
   pose: CharacterPose,
   scale: number,
+  facing: ArtFacing = PREVIEW_FACING,
 ): CharacterPreviewFrame {
   const spec = pose === 'seated' ? CHARACTER_SEATED : CHARACTER_WALK;
   const sheet = sheetSize(spec);
   const column =
     pose === 'seated' ? CHARACTER_SEATED.idleColumns[0] : pose === 'idle' ? CHARACTER_WALK.idleColumn : 0;
-  const row = pose === 'seated' ? seatedRowForFacing(PREVIEW_FACING) : walkRowForFacing(PREVIEW_FACING);
+  const row = pose === 'seated' ? seatedRowForFacing(facing) : walkRowForFacing(facing);
   return {
     url: pose === 'seated' ? sheets.seatedUrl : sheets.walkUrl,
     width: spec.frame.width * scale,

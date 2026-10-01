@@ -62,6 +62,8 @@ export interface CatalogAsset {
    * solo llega con valor en la respuesta de `archiveAsset`.
    */
   archivedAt: string | null;
+  /** Credit of an uploaded or contributed piece (#122); absent for the rest. */
+  author?: string;
 }
 
 /** Lo que el servidor lee al dar de alta. Ni `slug` ni `archivedAt`: los decide el. */

@@ -58,7 +58,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_single_superadmin ON users ((role))
 CREATE TABLE IF NOT EXISTS audit_log (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   actor_id uuid REFERENCES users(id),
-  action text NOT NULL CHECK (action IN ('invite', 'revoke', 'create-user', 'revoke-user')),
+  action text NOT NULL CHECK (action IN ('invite', 'revoke', 'create-user', 'revoke-user', 'upload-art', 'submit-art', 'approve-art', 'reject-art', 'retire-art')),
   subject_id uuid REFERENCES users(id),
   created_at timestamptz NOT NULL DEFAULT now()
 );
@@ -75,9 +75,11 @@ CREATE TABLE IF NOT EXISTS audit_log (
 -- en una base nueva y en una vieja, que es lo unico que este fichero promete.
 -- 'revoke-user' (#93) is its own action and not 'revoke': taking access away
 -- from staff is a different decision from withdrawing an invitation, and the
--- trail has to tell them apart.
+-- trail has to tell them apart. The '*-art' actions (#122) record the art
+-- catalog: an Admin upload, a contribution, its review and its withdrawal;
+-- their subject is a piece (`piece_id`, added after `art_pieces` below).
 ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_action_check;
-ALTER TABLE audit_log ADD CONSTRAINT audit_log_action_check CHECK (action IN ('invite', 'revoke', 'create-user', 'revoke-user'));
+ALTER TABLE audit_log ADD CONSTRAINT audit_log_action_check CHECK (action IN ('invite', 'revoke', 'create-user', 'revoke-user', 'upload-art', 'submit-art', 'approve-art', 'reject-art', 'retire-art'));
 
 -- El panel consulta el rastro por sujeto ("quien invito a esta persona"), no
 -- recorriendo la tabla entera.
@@ -353,6 +355,33 @@ ALTER TABLE art_pieces DROP CONSTRAINT IF EXISTS art_pieces_source_check;
 ALTER TABLE art_pieces ADD CONSTRAINT art_pieces_source_check CHECK (source IN ('pack', 'upload'));
 -- Who uploaded it; NULL for pack pieces. Users are revoked, never deleted.
 ALTER TABLE art_pieces ADD COLUMN IF NOT EXISTS uploaded_by uuid REFERENCES users(id);
+
+-- Contributions and their review (#122). Any signed-in user can contribute a
+-- character or a decor plant; it waits as 'pending' until an admin approves
+-- or rejects it, and only approved rows are the catalog. The DEFAULT is
+-- 'approved' because every row that existed before (pack pieces and Admin
+-- uploads) was already in the catalog. `uploaded_by` above is who submitted.
+ALTER TABLE art_pieces ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'approved';
+ALTER TABLE art_pieces DROP CONSTRAINT IF EXISTS art_pieces_status_check;
+ALTER TABLE art_pieces ADD CONSTRAINT art_pieces_status_check CHECK (status IN ('pending', 'approved', 'rejected'));
+ALTER TABLE art_pieces ADD COLUMN IF NOT EXISTS reviewed_by uuid REFERENCES users(id);
+ALTER TABLE art_pieces ADD COLUMN IF NOT EXISTS reviewed_at timestamptz;
+-- The reason of a rejection, which the uploader reads; only a rejection has one.
+ALTER TABLE art_pieces ADD COLUMN IF NOT EXISTS review_note text;
+ALTER TABLE art_pieces DROP CONSTRAINT IF EXISTS art_pieces_review_note_check;
+ALTER TABLE art_pieces ADD CONSTRAINT art_pieces_review_note_check CHECK ((status = 'rejected') = (review_note IS NOT NULL));
+-- When the contributor accepted the rights statement of the upload form.
+-- Without it there is no contribution, so a pending row always has one.
+ALTER TABLE art_pieces ADD COLUMN IF NOT EXISTS license_accepted_at timestamptz;
+ALTER TABLE art_pieces DROP CONSTRAINT IF EXISTS art_pieces_pending_license_check;
+ALTER TABLE art_pieces ADD CONSTRAINT art_pieces_pending_license_check CHECK (status <> 'pending' OR license_accepted_at IS NOT NULL);
+
+-- The subject of an art audit entry is a piece, not a user. Pieces are
+-- retired, never deleted, so the reference never dangles.
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS piece_id text REFERENCES art_pieces(id);
+-- The hourly contribution quota counts a user's 'submit-art' entries of the
+-- last hour under a lock; this keeps that count off a full scan.
+CREATE INDEX IF NOT EXISTS audit_log_actor_action ON audit_log (actor_id, action, created_at);
 
 -- Persisted choices. Each DEFAULT is the pack default (`ART_PACK_DEFAULTS`,
 -- checked against the manifest by artCatalogRules.test.ts) and is what

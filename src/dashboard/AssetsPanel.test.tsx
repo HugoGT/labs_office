@@ -96,6 +96,12 @@ describe('AssetsPanel: lo que se ve', () => {
     expect(fila('Lámpara').getByText('Decoración')).toBeInTheDocument();
   });
 
+  it('credits the author of an uploaded piece (#122)', async () => {
+    render(<AssetsPanel assets={fakeAssets({ listAssets: vi.fn(async () => [{ ...PLANTA, author: 'Ana' }, LAMPARA]) })} />);
+
+    expect(await screen.findByText('de Ana')).toBeInTheDocument();
+  });
+
   it('dice cual se puede colocar en un escritorio y cual no', async () => {
     render(<AssetsPanel assets={fakeAssets()} />);
 

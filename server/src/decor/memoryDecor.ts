@@ -27,10 +27,22 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { ART_CONTRACT_VERSION, type ArtPackManifest } from '../../../src/game/artContract.ts';
+import { ART_CONTRACT_VERSION, artSheetKey, type ArtPackManifest } from '../../../src/game/artContract.ts';
 import { ArtPieceExistsError, artPieceFields, assertUploadedArtPiece, normalizeArtPack } from './artCatalogRules.ts';
+import {
+  CONTRIBUTION_QUOTA_WINDOW_MS,
+  assertContributionQuota,
+  retireTransition,
+  reviewTransition,
+  type ArtAuditAction,
+  type ContributionUsage,
+} from './artReviewRules.ts';
 import type {
+  ArtAuditEntry,
   ArtCatalogPiece,
+  ArtContributionInput,
+  ArtRetirementInput,
+  ArtReviewInput,
   Asset,
   CreateAssetInput,
   DecorCatalog,
@@ -38,6 +50,7 @@ import type {
   DeskItemInput,
   ListArtPiecesOptions,
   ListAssetsOptions,
+  ListUploadedArtOptions,
   UpdateAssetInput,
   UploadedArtPieceInput,
 } from './decorPort.ts';
@@ -57,7 +70,21 @@ export interface MemoryDecorOptions {
   newId?: () => string;
 }
 
-export function createMemoryDecor(options: MemoryDecorOptions = {}): DecorCatalog {
+/** The adapter plus what only tests read: the art audit trail, which the port does not expose. */
+export interface MemoryDecor extends DecorCatalog {
+  artAuditLog(): ArtAuditEntry[];
+}
+
+/** Review fields of a piece that is approved from the start: the pack's and an Admin upload's. */
+const APPROVED_FROM_THE_START = {
+  status: 'approved',
+  reviewedBy: null,
+  reviewedAt: null,
+  reviewNote: null,
+  licenseAcceptedAt: null,
+} as const;
+
+export function createMemoryDecor(options: MemoryDecorOptions = {}): MemoryDecor {
   const now = options.now ?? (() => new Date());
   const newId = options.newId ?? (() => randomUUID());
 
@@ -71,6 +98,31 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): DecorCatalo
 
   /** Art pieces (pack and uploads) by id. Never shrinks: retiring only sets `retiredAt`. */
   const artPieces = new Map<string, ArtCatalogPiece>();
+  /** The `audit_log` rows of art transitions, in order. */
+  const audit: ArtAuditEntry[] = [];
+
+  function record(actorId: string, action: ArtAuditAction, pieceId: string, at: Date): void {
+    audit.push({ actorId, action, pieceId, at });
+  }
+
+  /** Same counts as the pg query: pending rows, and `submit-art` entries inside the window. */
+  function usageOf(userId: string, at: Date): ContributionUsage {
+    const since = at.getTime() - CONTRIBUTION_QUOTA_WINDOW_MS;
+    let pending = 0;
+    for (const piece of artPieces.values()) if (piece.uploadedBy === userId && piece.status === 'pending') pending += 1;
+    const lastHour = audit.filter((entry) => entry.actorId === userId && entry.action === 'submit-art' && entry.at.getTime() > since).length;
+    return { pending, lastHour };
+  }
+
+  /** An upload by id, whatever its status; pack pieces are not reviewed or retired by hand. */
+  function uploadedPiece(id: string): ArtCatalogPiece | null {
+    const piece = artPieces.get(id);
+    return piece === undefined || piece.source !== 'upload' ? null : piece;
+  }
+
+  function byRegistration(list: readonly ArtCatalogPiece[]): ArtCatalogPiece[] {
+    return [...list].sort((a, b) => a.registeredAt.getTime() - b.registeredAt.getTime() || a.id.localeCompare(b.id));
+  }
 
   /** Mismo orden que `pgDecor`: (kind, slug, id). */
   function sorted(list: readonly Asset[]): Asset[] {
@@ -228,6 +280,7 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): DecorCatalo
           updatedAt: at,
           source: 'pack',
           uploadedBy: null,
+          ...APPROVED_FROM_THE_START,
         });
       }
 
@@ -243,7 +296,9 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): DecorCatalo
     },
 
     async listArtPieces(options: ListArtPiecesOptions = {}) {
-      const all = [...artPieces.values()];
+      // Only approved pieces are the catalog (#122): a contribution under
+      // review is not choosable, retired or not.
+      const all = [...artPieces.values()].filter((piece) => piece.status === 'approved');
       return (options.includeRetired ? all : all.filter((piece) => piece.retiredAt === null)).sort(
         (a, b) => a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id),
       );
@@ -263,10 +318,106 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): DecorCatalo
         updatedAt: at,
         source: 'upload',
         uploadedBy,
+        ...APPROVED_FROM_THE_START,
       };
       artPieces.set(piece.id, stored);
       if (asset !== null) assets.set(asset.id, asset);
+      record(uploadedBy, 'upload-art', piece.id, at);
       return { piece: stored, asset };
+    },
+
+    async artContributionUsage(userId: string) {
+      return usageOf(userId, now());
+    },
+
+    async submitArtContribution({ piece, submittedBy, decorAsset }: ArtContributionInput) {
+      // No `await` from the count to the write: on this single thread that is
+      // what the per-user lock of pg is, so parallel calls cannot both take
+      // the last slot.
+      assertUploadedArtPiece(piece);
+      const at = now();
+      assertContributionQuota(usageOf(submittedBy, at));
+      if (artPieces.has(piece.id)) throw new ArtPieceExistsError(piece.id);
+      // Only checked: the asset itself is created by the approval.
+      if (decorAsset !== undefined) prepareAsset(decorAsset);
+      const stored: ArtCatalogPiece = {
+        ...artPieceFields(piece),
+        contractVersion: ART_CONTRACT_VERSION,
+        retiredAt: null,
+        registeredAt: at,
+        updatedAt: at,
+        source: 'upload',
+        uploadedBy: submittedBy,
+        status: 'pending',
+        reviewedBy: null,
+        reviewedAt: null,
+        reviewNote: null,
+        licenseAcceptedAt: at,
+      };
+      artPieces.set(piece.id, stored);
+      record(submittedBy, 'submit-art', piece.id, at);
+      return stored;
+    },
+
+    async listUploadedArtPieces(options: ListUploadedArtOptions = {}) {
+      return byRegistration(
+        [...artPieces.values()].filter(
+          (piece) =>
+            piece.source === 'upload' &&
+            (options.uploadedBy === undefined || piece.uploadedBy === options.uploadedBy) &&
+            (options.status === undefined || piece.status === options.status),
+        ),
+      );
+    },
+
+    async findUploadedArtPiece(id: string) {
+      return uploadedPiece(id);
+    },
+
+    async findArtPiecesWithFile(sha256: string) {
+      return byRegistration(
+        [...artPieces.values()].filter((piece) => piece.source === 'upload' && piece.files.some((file) => file.sha256 === sha256)),
+      );
+    },
+
+    async reviewArtContribution({ id, reviewerId, decision, note, decorAsset }: ArtReviewInput) {
+      const current = uploadedPiece(id);
+      if (current === null) return null;
+      const status = reviewTransition(current.status, decision);
+      const asset = status === 'approved' && decorAsset !== undefined ? prepareAsset(decorAsset) : null;
+      const at = now();
+      const reviewed: ArtCatalogPiece = {
+        ...current,
+        status,
+        reviewedBy: reviewerId,
+        reviewedAt: at,
+        reviewNote: status === 'rejected' ? note : null,
+        updatedAt: at,
+      };
+      artPieces.set(id, reviewed);
+      if (asset !== null) assets.set(asset.id, asset);
+      record(reviewerId, status === 'approved' ? 'approve-art' : 'reject-art', id, at);
+      return { piece: reviewed, asset };
+    },
+
+    async retireUploadedArtPiece({ id, actorId }: ArtRetirementInput) {
+      const current = uploadedPiece(id);
+      if (current === null) return null;
+      if (retireTransition(current) === 'already-retired') return { piece: current, changed: false };
+      const at = now();
+      const retired: ArtCatalogPiece = { ...current, retiredAt: at, updatedAt: at };
+      artPieces.set(id, retired);
+      // Same UPDATE as pg: the decor asset drawing it stops being offered.
+      const textureKey = artSheetKey(id, 'sheet');
+      for (const entry of assets.values()) {
+        if (entry.textureKey === textureKey && entry.archivedAt === null) assets.set(entry.id, { ...entry, archivedAt: at });
+      }
+      record(actorId, 'retire-art', id, at);
+      return { piece: retired, changed: true };
+    },
+
+    artAuditLog() {
+      return audit.map((entry) => ({ ...entry }));
     },
   };
 }

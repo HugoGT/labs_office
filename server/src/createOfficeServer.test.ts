@@ -1533,6 +1533,148 @@ describe('art upload routes (#121)', () => {
 });
 
 /**
+ * Contributions over HTTP (#122). The rules live in
+ * `assets/artContributionRoutes.test.ts`; what only a real server proves is
+ * the wiring: the large body parser on the contribution route, the private
+ * preview next to the public file route, the 503 without a bucket, and a
+ * retired character reaching the live room.
+ */
+describe('art contribution routes (#122)', () => {
+  const base: DirectoryUser = {
+    id: '00000000-0000-4000-8000-0000000000a1',
+    uid: 'uid-admin',
+    email: 'admin@example.com',
+    displayName: 'Admin',
+    role: 'admin',
+    status: 'active',
+    expiresAt: null,
+    invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
+    createdAt: new Date('2025-12-01T00:00:00.000Z'),
+  };
+  const ADMIN_USER = base;
+  const ANA_USER: DirectoryUser = { ...base, id: '00000000-0000-4000-8000-0000000000e1', uid: 'uid-ana', email: 'ana@example.com', displayName: 'Ana', role: 'employee' };
+  const BETO_USER: DirectoryUser = { ...base, id: '00000000-0000-4000-8000-0000000000e2', uid: 'uid-beto', email: 'beto@example.com', displayName: 'Beto', role: 'employee' };
+  const identities: Record<string, VerifiedIdentity> = {
+    'token-admin': { uid: 'uid-admin', email: 'admin@example.com', name: 'Admin' },
+    'token-ana': { uid: 'uid-ana', email: 'ana@example.com', name: 'Ana' },
+    'token-beto': { uid: 'uid-beto', email: 'beto@example.com', name: 'Beto' },
+  };
+  const verifier: IdTokenVerifier = {
+    async verify(token: unknown) {
+      return typeof token === 'string' ? (identities[token] ?? null) : null;
+    },
+  };
+  const as = (token: string) => ({ Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' });
+
+  function characterSheet(kind: 'character-walk' | 'character-seated'): string {
+    const spec = ART_IMAGE_SPECS[kind];
+    const { width, height } = sheetSize(spec);
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let y = spec.frame.height >> 1; y < height; y += spec.frame.height) {
+      for (let x = spec.frame.width >> 1; x < width; x += spec.frame.width) data.set([200, 90, 60, 255], (y * width + x) * 4);
+    }
+    return encodePng({ width, height, data }).toString('base64');
+  }
+
+  const CONTRIBUTION = {
+    kind: 'character',
+    name: 'Lucía',
+    author: 'Ana',
+    rightsAccepted: true,
+    files: { walk: characterSheet('character-walk'), seated: characterSheet('character-seated') },
+  };
+
+  async function contributionServer(assetStorage: AssetStoragePort | null = createMemoryAssetStorage()) {
+    const decor = createMemoryDecor();
+    await decor.registerArtPack(readArtPackManifest(new URL('../../public/assets/pack/manifest.json', import.meta.url)));
+    const created = createOfficeServer({
+      auth: verifier,
+      directory: createMemoryDirectory({ seed: [ADMIN_USER, ANA_USER, BETO_USER] }),
+      decor,
+      identityAdmin: null,
+      assetStorage,
+    });
+    const port = await created.listen(0);
+    return { server: created, url: `http://localhost:${port}`, ws: `ws://localhost:${port}` };
+  }
+
+  it('a contribution is pending and private until approved, then public; retiring it resets its wearer live', async () => {
+    const { server: contributions, url, ws } = await contributionServer();
+    try {
+      const submitted = await fetch(`${url}/me/art/contributions`, { method: 'POST', headers: as('token-ana'), body: JSON.stringify(CONTRIBUTION) });
+      expect(submitted.status).toBe(201);
+      const { contribution } = (await submitted.json()) as { contribution: { id: string; status: string; piece: { files: { path: string }[] } } };
+      expect(contribution.status).toBe('pending');
+      const file = contribution.piece.files[0]!.path;
+
+      expect((await fetch(`${url}/assets/files/${file}`)).status).toBe(404);
+      expect((await fetch(`${url}/me/art/files/${file}`, { headers: as('token-beto') })).status).toBe(404);
+      const preview = await fetch(`${url}/me/art/files/${file}`, { headers: as('token-ana') });
+      expect(preview.status).toBe(200);
+      expect(preview.headers.get('cache-control')).toBe('private, no-store');
+      expect(((await (await fetch(`${url}/assets/files/manifest.json`)).json()) as { pieces: unknown[] }).pieces).toEqual([]);
+
+      const queue = await fetch(`${url}/admin/art/contributions?status=pending`, { headers: as('token-admin') });
+      expect(((await queue.json()) as { contributions: { id: string }[] }).contributions.map((entry) => entry.id)).toEqual([contribution.id]);
+      expect((await fetch(`${url}/admin/art/contributions/${contribution.id}/approve`, { method: 'POST', headers: as('token-admin') })).status).toBe(200);
+      expect((await fetch(`${url}/assets/files/${file}`)).status).toBe(200);
+
+      expect((await fetch(`${url}/me/avatar`, { method: 'POST', headers: as('token-beto'), body: JSON.stringify({ avatarId: contribution.id }) })).status).toBe(200);
+      const beto = await new Client(ws).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token: 'token-beto' });
+      openRooms.push(beto);
+      await waitUntil(() => beto.state.players?.get(beto.sessionId)?.avatarId === contribution.id);
+
+      const retired = await fetch(`${url}/admin/art/pieces/${contribution.id}/retire`, { method: 'POST', headers: as('token-admin') });
+      expect(retired.status).toBe(200);
+      await waitUntil(() => beto.state.players?.get(beto.sessionId)?.avatarId === 'character-p01-burgundy-suit');
+      expect(contributions.sessions.has(beto.sessionId)).toBe(true);
+    } finally {
+      await contributions.shutdown();
+    }
+  });
+
+  it('the contribution route takes upload-sized bodies, and refuses larger ones with too-large', async () => {
+    const { server: contributions, url } = await contributionServer();
+    try {
+      const huge = { ...CONTRIBUTION, files: { walk: 'A'.repeat(2 * 1024 * 1024), seated: '' } };
+      const res = await fetch(`${url}/me/art/contributions`, { method: 'POST', headers: as('token-ana'), body: JSON.stringify(huge) });
+      expect(res.status).toBe(413);
+      expect(await res.json()).toEqual({ error: 'too-large' });
+    } finally {
+      await contributions.shutdown();
+    }
+  });
+
+  it('without a bucket every contribution route answers 503 asset-upload-not-configured', async () => {
+    const { server: contributions, url } = await contributionServer(null);
+    try {
+      for (const [path, method] of [
+        ['/me/art/contributions', 'POST'],
+        ['/me/art/contributions', 'GET'],
+        [`/me/art/files/${'0'.repeat(64)}.png`, 'GET'],
+        ['/admin/art/contributions', 'GET'],
+        ['/admin/art/pieces/character-upload-0123456789abcdef/retire', 'POST'],
+      ] as const) {
+        const res = await fetch(`${url}${path}`, { method, headers: as('token-ana'), ...(method === 'POST' ? { body: '{}' } : {}) });
+        expect([path, res.status, await res.json()]).toEqual([path, 503, { error: 'asset-upload-not-configured' }]);
+      }
+    } finally {
+      await contributions.shutdown();
+    }
+  });
+});
+
+async function waitUntil(condition: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error('condition not met in time');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+/**
  * El cableado de `/me/display-name` (#100). Reusa el mismo `admin()` de
  * `/admin/session`: la unica guarda de configuracion es "sin directorio, 503",
  * no un almacen propio, asi que no hace falta un wiring dedicado como el de

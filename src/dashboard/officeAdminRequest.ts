@@ -77,7 +77,23 @@ const UPLOAD_REFUSALS: ReadonlySet<string> = new Set<AdminErrorCode>([
   'too-large',
   'invalid-metadata',
   'missing-file',
+  // A contribution without the rights statement, and a rejection without its reason (#122).
+  'rights-not-accepted',
+  'invalid-review-note',
 ]);
+
+/** The 429s of a contribution (#122): which limit it hit is in the body. */
+const RATE_LIMITS: ReadonlySet<string> = new Set<AdminErrorCode>(['too-many-pending', 'hourly-limit']);
+
+async function errorForRateLimit(response: Response): Promise<AdminError> {
+  try {
+    const body = (await response.json()) as Record<string, unknown> | null;
+    const error = body?.error;
+    return new AdminError(typeof error === 'string' && RATE_LIMITS.has(error) ? (error as AdminErrorCode) : 'unknown');
+  } catch {
+    return new AdminError('unknown');
+  }
+}
 
 /**
  * A 400 is `invalid-request` unless its body names an appearance or upload
@@ -132,9 +148,11 @@ async function errorForStatus(
           : conflicts[0],
       );
     }
-    // Only the upload route accepts a body big enough to hit the limit (#121).
+    // Only the upload routes accept a body big enough to hit the limit (#121).
     case 413:
       return new AdminError('too-large');
+    case 429:
+      return errorForRateLimit(response);
     case 503:
       return new AdminError(notConfigured);
     default:
@@ -144,6 +162,38 @@ async function errorForStatus(
 
 export interface OfficeAdminRequest {
   <T>(path: string, init?: RequestInit): Promise<T>;
+}
+
+/** A PNG read as bytes, as a data URL an `<img>` or a CSS sprite can show. */
+function pngDataUrl(bytes: Uint8Array): string {
+  let binary = '';
+  // Chunked: `String.fromCharCode(...bytes)` overflows the stack on a large sheet.
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return `data:image/png;base64,${btoa(binary)}`;
+}
+
+/**
+ * An authenticated GET of an image (#122): the preview of a contribution
+ * needs the ID token, which an `<img src>` cannot send, so it is fetched and
+ * handed over as a data URL. Same token rule and same error codes as
+ * `createOfficeAdminRequest`.
+ */
+export function createOfficeFileRequest(
+  options: OfficeAdminRequestOptions,
+  fetchImpl: typeof fetch = fetch,
+): (path: string) => Promise<string> {
+  return async (path: string) => {
+    const token = await options.getIdToken();
+    if (token === null) throw new AdminError('unauthorized');
+    let response: Response;
+    try {
+      response = await fetchImpl(`${options.baseUrl}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+    } catch {
+      throw new AdminError('network');
+    }
+    if (!response.ok) throw await errorForStatus(response, options);
+    return pngDataUrl(new Uint8Array(await response.arrayBuffer()));
+  };
 }
 
 export function createOfficeAdminRequest(

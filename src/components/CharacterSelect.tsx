@@ -104,6 +104,7 @@ export function CharacterSelect({ options, initialId, pending, error, onSubmit }
           {selected !== undefined && (
             <section className={styles.preview} aria-label={`Vista previa de ${selected.name}`}>
               <h2 className={styles.previewName}>{selected.name}</h2>
+              {selected.author != null && <p className={styles.credit}>Autoría: {selected.author}</p>}
               <div className={styles.poses}>
                 {POSES.map(({ pose, caption, label }) => (
                   <figure key={pose} className={styles.pose}>

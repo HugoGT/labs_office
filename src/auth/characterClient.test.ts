@@ -121,6 +121,8 @@ describe('createCharacterClient: catalog', () => {
       name: 'Mateo',
       walkUrl: 'assets/pack/character/p01-burgundy-suit-walk.png',
       seatedUrl: 'assets/pack/character/p01-burgundy-suit-seated.png',
+      // Pack characters carry no credit line: only contributed pieces do (#122).
+      author: null,
     });
     // The manifest is static: no credential travels with it.
     expect(fetchImpl).toHaveBeenCalledWith('assets/pack/manifest.json', expect.not.objectContaining({ headers: expect.anything() }));
@@ -151,6 +153,7 @@ describe('createCharacterClient: uploaded characters (#121)', () => {
     ...mateo,
     id: 'character-upload-0123456789abcdef',
     name: 'Lucía',
+    author: 'Ana',
     files: mateo.files.map((file: { role: string }) => ({ ...file, path: `${file.role === 'walk' ? 'a' : 'b'}.png` })),
   };
   const UPLOADS = { ...MANIFEST, pieces: [UPLOADED] };
@@ -181,6 +184,7 @@ describe('createCharacterClient: uploaded characters (#121)', () => {
       name: 'Lucía',
       walkUrl: 'http://server/assets/files/a.png',
       seatedUrl: 'http://server/assets/files/b.png',
+      author: 'Ana',
     });
     expect(catalog?.defaultId).toBe('character-p01-burgundy-suit');
   });

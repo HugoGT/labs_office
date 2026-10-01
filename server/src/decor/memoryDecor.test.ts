@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { ArtPackManifest, ArtPiece } from '../../../src/game/artContract.ts';
 import { ArtPieceExistsError, InvalidArtPackError } from './artCatalogRules.ts';
+import { InvalidArtTransitionError } from './artReviewRules.ts';
 import type { Asset } from './decorPort.ts';
 import { AssetNameTakenError, InvalidAssetError, InvalidDeskConfigError } from './decorRules.ts';
 import { createMemoryDecor } from './memoryDecor.ts';
@@ -621,5 +622,194 @@ describe('createMemoryDecor: uploaded pieces (#121)', () => {
       catalog.registerUploadedArtPiece({ piece: other, uploadedBy: UPLOADER, decorAsset: { ...decorAsset, name: 'Planta' } }),
     ).rejects.toBeInstanceOf(AssetNameTakenError);
     expect((await catalog.listArtPieces()).map((entry) => entry.id)).toEqual([UPLOADED.id]);
+  });
+});
+
+describe('createMemoryDecor: contributions and review (#122)', () => {
+  const PACK: ArtPackManifest = JSON.parse(
+    readFileSync(new URL('../../../public/assets/pack/manifest.json', import.meta.url), 'utf8'),
+  );
+  const FICUS = PACK.pieces.find((piece) => piece.id === 'plant-ficus')!;
+  const CHARACTER = PACK.pieces.find((piece) => piece.kind === 'character')!;
+  const ANA = 'id-ana';
+  const BETO = 'id-beto';
+  const REVIEWER = 'id-admin';
+
+  function contributed(n: number, kind: 'plant' | 'character' = 'plant'): ArtPiece {
+    const base = kind === 'plant' ? FICUS : CHARACTER;
+    return { ...base, id: `${kind}-upload-${n.toString(16).padStart(16, '0')}`, name: `Pieza ${n}`, license: 'office-contribution' } as ArtPiece;
+  }
+
+  /** A clock the test moves, for the hourly window. */
+  function clocked(start = NOW) {
+    let at = start.getTime();
+    const catalog = createMemoryDecor({ seed: [PLANTA], now: () => new Date(at) });
+    return { catalog, advance: (ms: number) => (at += ms) };
+  }
+
+  it('a contribution is pending, stamped with its rights acceptance and uploader, and out of every public read', async () => {
+    const { catalog } = clocked();
+    const piece = await catalog.submitArtContribution({ piece: contributed(1), submittedBy: ANA });
+
+    expect(piece).toMatchObject({ status: 'pending', uploadedBy: ANA, source: 'upload', licenseAcceptedAt: NOW, reviewedBy: null, reviewNote: null });
+    expect(await catalog.listArtPieces()).toEqual([]);
+    expect(await catalog.listArtPieces({ includeRetired: true })).toEqual([]);
+    expect((await catalog.listUploadedArtPieces({ uploadedBy: ANA })).map((entry) => entry.id)).toEqual([piece.id]);
+    expect(await catalog.listUploadedArtPieces({ uploadedBy: BETO })).toEqual([]);
+    expect((await catalog.listUploadedArtPieces({ status: 'pending' })).map((entry) => entry.id)).toEqual([piece.id]);
+    expect((await catalog.findArtPiecesWithFile(piece.files[0]!.sha256)).map((entry) => entry.id)).toEqual([piece.id]);
+  });
+
+  it('refuses the sixth pending piece of a user, and not the first of another', async () => {
+    const { catalog } = clocked();
+    for (let n = 1; n <= 5; n += 1) await catalog.submitArtContribution({ piece: contributed(n), submittedBy: ANA });
+
+    await expect(catalog.submitArtContribution({ piece: contributed(6), submittedBy: ANA })).rejects.toMatchObject({ code: 'too-many-pending' });
+    await expect(catalog.submitArtContribution({ piece: contributed(7), submittedBy: BETO })).resolves.toMatchObject({ status: 'pending' });
+    expect(await catalog.artContributionUsage(ANA)).toEqual({ pending: 5, lastHour: 5 });
+  });
+
+  it('a rejection frees a pending slot but still counts for the hour', async () => {
+    const { catalog } = clocked();
+    for (let n = 1; n <= 5; n += 1) await catalog.submitArtContribution({ piece: contributed(n), submittedBy: ANA });
+    for (let n = 1; n <= 5; n += 1) {
+      await catalog.reviewArtContribution({ id: contributed(n).id, reviewerId: REVIEWER, decision: 'reject', note: 'no' });
+    }
+    for (let n = 6; n <= 10; n += 1) await catalog.submitArtContribution({ piece: contributed(n), submittedBy: ANA });
+    await catalog.reviewArtContribution({ id: contributed(6).id, reviewerId: REVIEWER, decision: 'reject', note: 'no' });
+
+    // Four pending, ten in the hour: the eleventh is refused by the hourly cap.
+    await expect(catalog.submitArtContribution({ piece: contributed(11), submittedBy: ANA })).rejects.toMatchObject({ code: 'hourly-limit' });
+    expect(await catalog.artContributionUsage(ANA)).toEqual({ pending: 4, lastHour: 10 });
+  });
+
+  it('the hourly window slides: an hour later the quota is back', async () => {
+    const { catalog, advance } = clocked();
+    for (let n = 1; n <= 10; n += 1) {
+      await catalog.submitArtContribution({ piece: contributed(n), submittedBy: ANA });
+      await catalog.reviewArtContribution({ id: contributed(n).id, reviewerId: REVIEWER, decision: 'reject', note: 'no' });
+    }
+    await expect(catalog.submitArtContribution({ piece: contributed(11), submittedBy: ANA })).rejects.toMatchObject({ code: 'hourly-limit' });
+
+    advance(60 * 60 * 1000 + 1);
+    await expect(catalog.submitArtContribution({ piece: contributed(11), submittedBy: ANA })).resolves.toMatchObject({ status: 'pending' });
+  });
+
+  it('parallel submissions never take more than the free slots', async () => {
+    const { catalog } = clocked();
+    for (let n = 1; n <= 3; n += 1) await catalog.submitArtContribution({ piece: contributed(n), submittedBy: ANA });
+
+    const results = await Promise.allSettled(
+      [4, 5, 6, 7].map((n) => catalog.submitArtContribution({ piece: contributed(n), submittedBy: ANA })),
+    );
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(2);
+    expect((await catalog.artContributionUsage(ANA)).pending).toBe(5);
+  });
+
+  it('refuses pixels already in the catalog and a plant whose decor name is taken, writing nothing', async () => {
+    const { catalog } = clocked();
+    await catalog.submitArtContribution({ piece: contributed(1), submittedBy: ANA });
+    await expect(catalog.submitArtContribution({ piece: contributed(1), submittedBy: BETO })).rejects.toBeInstanceOf(ArtPieceExistsError);
+
+    const decorAsset = { name: 'Planta', kind: 'plant' as const, textureKey: `art:${contributed(2).id}:sheet`, w: 1, h: 1, placeableOnDesk: true };
+    await expect(catalog.submitArtContribution({ piece: contributed(2), submittedBy: ANA, decorAsset })).rejects.toBeInstanceOf(AssetNameTakenError);
+    expect(await catalog.artContributionUsage(ANA)).toEqual({ pending: 1, lastHour: 1 });
+  });
+
+  it('approving a plant makes it public and creates its desk decor asset in the same step', async () => {
+    const { catalog } = clocked();
+    const piece = contributed(1);
+    await catalog.submitArtContribution({ piece, submittedBy: ANA });
+    const decorAsset = { name: 'Helecho', kind: 'plant' as const, textureKey: `art:${piece.id}:sheet`, w: 1, h: 1, placeableOnDesk: true };
+
+    const reviewed = await catalog.reviewArtContribution({ id: piece.id, reviewerId: REVIEWER, decision: 'approve', note: null, decorAsset });
+
+    expect(reviewed?.piece).toMatchObject({ status: 'approved', reviewedBy: REVIEWER, reviewedAt: NOW, reviewNote: null });
+    expect(reviewed?.asset).toMatchObject({ name: 'Helecho', textureKey: `art:${piece.id}:sheet` });
+    expect((await catalog.listArtPieces()).map((entry) => entry.id)).toEqual([piece.id]);
+    expect((await catalog.listAssets()).map((entry) => entry.name)).toEqual(['Helecho', 'Planta']);
+  });
+
+  it('a rejection keeps the reason for the uploader and the piece out of the catalog', async () => {
+    const { catalog } = clocked();
+    const piece = contributed(1, 'character');
+    await catalog.submitArtContribution({ piece, submittedBy: ANA });
+
+    const reviewed = await catalog.reviewArtContribution({ id: piece.id, reviewerId: REVIEWER, decision: 'reject', note: 'Tiene fondo' });
+
+    expect(reviewed?.piece).toMatchObject({ status: 'rejected', reviewNote: 'Tiene fondo', reviewedBy: REVIEWER });
+    expect(reviewed?.asset).toBeNull();
+    expect(await catalog.listArtPieces()).toEqual([]);
+    expect((await catalog.listUploadedArtPieces({ uploadedBy: ANA }))[0]).toMatchObject({ status: 'rejected', reviewNote: 'Tiene fondo' });
+  });
+
+  it('a decision is final, and an unknown id is null', async () => {
+    const { catalog } = clocked();
+    const piece = contributed(1);
+    await catalog.submitArtContribution({ piece, submittedBy: ANA });
+    await catalog.reviewArtContribution({ id: piece.id, reviewerId: REVIEWER, decision: 'reject', note: 'no' });
+
+    await expect(catalog.reviewArtContribution({ id: piece.id, reviewerId: REVIEWER, decision: 'approve', note: null })).rejects.toBeInstanceOf(
+      InvalidArtTransitionError,
+    );
+    expect(await catalog.reviewArtContribution({ id: contributed(9).id, reviewerId: REVIEWER, decision: 'approve', note: null })).toBeNull();
+  });
+
+  it('retiring an approved plant stops offering its decor asset and keeps it drawable', async () => {
+    const { catalog } = clocked();
+    const piece = contributed(1);
+    await catalog.submitArtContribution({ piece, submittedBy: ANA });
+    const decorAsset = { name: 'Helecho', kind: 'plant' as const, textureKey: `art:${piece.id}:sheet`, w: 1, h: 1, placeableOnDesk: true };
+    await catalog.reviewArtContribution({ id: piece.id, reviewerId: REVIEWER, decision: 'approve', note: null, decorAsset });
+
+    const retired = await catalog.retireUploadedArtPiece({ id: piece.id, actorId: REVIEWER });
+
+    expect(retired).toMatchObject({ changed: true, piece: { retiredAt: NOW, status: 'approved' } });
+    expect(await catalog.listArtPieces()).toEqual([]);
+    expect((await catalog.listArtPieces({ includeRetired: true })).map((entry) => entry.id)).toEqual([piece.id]);
+    expect((await catalog.listAssets()).map((entry) => entry.name)).toEqual(['Planta']);
+    expect((await catalog.listAssets({ includeArchived: true })).find((entry) => entry.name === 'Helecho')?.archivedAt).toEqual(NOW);
+
+    // Twice is harmless and changes nothing.
+    expect(await catalog.retireUploadedArtPiece({ id: piece.id, actorId: REVIEWER })).toMatchObject({ changed: false });
+  });
+
+  it('refuses to retire what was never approved', async () => {
+    const { catalog } = clocked();
+    await catalog.submitArtContribution({ piece: contributed(1), submittedBy: ANA });
+    await expect(catalog.retireUploadedArtPiece({ id: contributed(1).id, actorId: REVIEWER })).rejects.toBeInstanceOf(InvalidArtTransitionError);
+    expect(await catalog.retireUploadedArtPiece({ id: 'plant-upload-ffffffffffffffff', actorId: REVIEWER })).toBeNull();
+  });
+
+  it('audits every transition, the Admin upload included, and only real changes', async () => {
+    const { catalog } = clocked();
+    await catalog.registerUploadedArtPiece({ piece: contributed(1), uploadedBy: REVIEWER });
+    await catalog.submitArtContribution({ piece: contributed(2), submittedBy: ANA });
+    await catalog.submitArtContribution({ piece: contributed(3, 'character'), submittedBy: ANA });
+    await catalog.reviewArtContribution({ id: contributed(2).id, reviewerId: REVIEWER, decision: 'reject', note: 'no' });
+    await catalog.reviewArtContribution({ id: contributed(3, 'character').id, reviewerId: REVIEWER, decision: 'approve', note: null });
+    await catalog.retireUploadedArtPiece({ id: contributed(3, 'character').id, actorId: REVIEWER });
+    await catalog.retireUploadedArtPiece({ id: contributed(3, 'character').id, actorId: REVIEWER });
+
+    expect(catalog.artAuditLog().map(({ actorId, action, pieceId }) => [actorId, action, pieceId])).toEqual([
+      [REVIEWER, 'upload-art', contributed(1).id],
+      [ANA, 'submit-art', contributed(2).id],
+      [ANA, 'submit-art', contributed(3, 'character').id],
+      [REVIEWER, 'reject-art', contributed(2).id],
+      [REVIEWER, 'approve-art', contributed(3, 'character').id],
+      [REVIEWER, 'retire-art', contributed(3, 'character').id],
+    ]);
+  });
+
+  it('pack pieces and Admin uploads are approved from the start', async () => {
+    const { catalog } = clocked();
+    await catalog.registerArtPack(PACK);
+    const { piece } = await catalog.registerUploadedArtPiece({ piece: contributed(1), uploadedBy: REVIEWER });
+
+    expect(piece.status).toBe('approved');
+    expect((await catalog.listArtPieces()).every((entry) => entry.status === 'approved')).toBe(true);
+    // The upload list is uploads only, whatever their status.
+    expect((await catalog.listUploadedArtPieces()).map((entry) => entry.id)).toEqual([piece.id]);
   });
 });

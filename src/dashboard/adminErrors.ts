@@ -89,6 +89,15 @@ const MESSAGES: Readonly<Record<AdminErrorCode, string>> = {
   'asset-upload-not-configured': 'La subida de arte no está configurada en este servidor.',
   'asset-already-uploaded': 'Esa imagen ya se subió: la pieza ya está en el catálogo.',
   'asset-name-taken': 'Ya hay una pieza de decoración con ese nombre. Elige otro.',
+  // Art contributions (#122). The limits say what to wait for, since
+  // retrying right away would only meet the same refusal.
+  'rights-not-accepted': 'Tienes que confirmar la cesión de derechos para subir la pieza.',
+  'too-many-pending': 'Ya tienes 5 piezas pendientes de revisión. Espera a que se revisen antes de subir otra.',
+  'hourly-limit': 'Ya subiste 10 piezas en la última hora. Vuelve a intentarlo más tarde.',
+  'already-reviewed': 'Otra persona ya revisó esta pieza. Recarga la lista.',
+  'invalid-review-note': 'Escribe el motivo del rechazo: quien subió la pieza lo verá.',
+  'not-retirable': 'Solo se pueden retirar personajes y plantas de decoración.',
+  'not-approved': 'Solo se puede retirar una pieza aprobada.',
   network: 'No se pudo contactar con el servidor.',
   unknown: GENERIC_MESSAGE,
 };

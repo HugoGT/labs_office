@@ -504,6 +504,12 @@ export function createPgDirectory(
       return row ? toDirectoryUser(row) : null;
     },
 
+    async reassignAvatar(fromId, toId) {
+      const checked = normalizeStoredCharacterId(toId);
+      const updated = await pool.query('UPDATE users SET avatar_id = $2 WHERE avatar_id = $1', [fromId, checked]);
+      return updated.rowCount ?? 0;
+    },
+
     close() {
       // Sin esto, `shutdown()` deja conexiones vivas y el proceso de vitest no
       // termina despues de un test que levanta y apaga el servidor.

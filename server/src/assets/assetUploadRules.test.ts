@@ -13,7 +13,8 @@ import {
 import { parseArtPackManifest } from '../../../src/game/artPack.ts';
 import { ART_PACK_DEFAULTS } from '../decor/artCatalogRules.ts';
 import { AssetUploadError, MAX_UPLOAD_FILE_BYTES } from './assetImageRules.ts';
-import { UPLOAD_FILE_ROLES, isUploadedPieceId, prepareAssetUpload } from './assetUploadRules.ts';
+import { CONTRIBUTION_LICENSE } from '../decor/artReviewRules.ts';
+import { UPLOAD_FILE_ROLES, decorAssetForPiece, isUploadedPieceId, prepareAssetUpload, prepareContribution } from './assetUploadRules.ts';
 import { encodePng } from './pngCodec.ts';
 
 function sheet(kind: ArtImageKind, rgb: readonly [number, number, number] = [200, 40, 40]): string {
@@ -147,5 +148,66 @@ describe('prepareAssetUpload', () => {
   it('refuses an oversized file from its encoded length, before decoding it', () => {
     const huge = 'A'.repeat(Math.ceil((MAX_UPLOAD_FILE_BYTES * 4) / 3) + 8);
     expect(codeAndField(() => prepareAssetUpload(character({ files: { walk: huge, seated: sheet('character-seated') } })))).toEqual(['too-large', 'walk']);
+  });
+});
+
+describe('prepareContribution (#122)', () => {
+  const character = {
+    kind: 'character',
+    name: 'Lucía',
+    author: 'Ana',
+    rightsAccepted: true,
+    files: { walk: sheet('character-walk'), seated: sheet('character-seated') },
+  };
+
+  it('builds the same piece an Admin upload would, with the contribution license whatever the body says', () => {
+    const { piece } = prepareContribution({ ...character, license: 'CC0' });
+
+    expect(piece).toMatchObject({ kind: 'character', name: 'Lucía', author: 'Ana', license: CONTRIBUTION_LICENSE });
+    expect(isUploadedPieceId(piece.id)).toBe(true);
+  });
+
+  it.each([undefined, false, 'true', 1])('refuses rightsAccepted %j: without the rights statement there is no upload', (rightsAccepted) => {
+    expect(() => prepareContribution({ ...character, rightsAccepted })).toThrow(
+      expect.objectContaining({ code: 'rights-not-accepted', field: 'rightsAccepted' }),
+    );
+  });
+
+  it('checks the rights before decoding any file', () => {
+    expect(() => prepareContribution({ ...character, rightsAccepted: false, files: { walk: 'not base64!' } })).toThrow(
+      expect.objectContaining({ code: 'rights-not-accepted' }),
+    );
+  });
+
+  it.each(['desk', 'floor'])('refuses a %s: only characters and decor plants are contributed', (kind) => {
+    expect(() => prepareContribution({ ...character, kind })).toThrow(expect.objectContaining({ code: 'invalid-metadata', field: 'kind' }));
+  });
+
+  it('takes a decor plant', () => {
+    const { piece } = prepareContribution({ kind: 'plant', name: 'Helecho', author: 'Ana', material: 'helecho', rightsAccepted: true, files: { sheet: sheet('plant') } });
+    expect(piece.kind).toBe('plant');
+  });
+});
+
+describe('decorAssetForPiece', () => {
+  it('a plant is desk decor drawing its own sheet; any other kind has no decor asset', () => {
+    const { piece: plant } = prepareAssetUpload({ kind: 'plant', name: 'Helecho', author: 'A', license: 'L', material: 'helecho', files: { sheet: sheet('plant') } });
+    const { piece: person } = prepareAssetUpload({
+      kind: 'character',
+      name: 'Lucía',
+      author: 'A',
+      license: 'L',
+      files: { walk: sheet('character-walk'), seated: sheet('character-seated') },
+    });
+
+    expect(decorAssetForPiece(plant)).toEqual({
+      name: 'Helecho',
+      kind: 'plant',
+      textureKey: `art:${plant.id}:sheet`,
+      w: PLANT.footprint.w,
+      h: PLANT.footprint.h,
+      placeableOnDesk: true,
+    });
+    expect(decorAssetForPiece(person)).toBeUndefined();
   });
 });

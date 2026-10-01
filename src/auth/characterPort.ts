@@ -17,6 +17,8 @@ export interface CharacterOption {
   readonly name: string;
   readonly walkUrl: string;
   readonly seatedUrl: string;
+  /** Credit of a contributed or uploaded character (#122); absent or `null` for the pack's. */
+  readonly author?: string | null;
 }
 
 export interface CharacterCatalog {

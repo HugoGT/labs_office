@@ -339,6 +339,17 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
       return snapshot(row);
     },
 
+    async reassignAvatar(fromId, toId) {
+      const checked = normalizeStoredCharacterId(toId);
+      let moved = 0;
+      for (const row of rows) {
+        if (row.avatarId !== fromId) continue;
+        row.avatarId = checked;
+        moved += 1;
+      }
+      return moved;
+    },
+
     async close() {
       // Nada que cerrar. Existe porque el puerto lo exige y porque el llamante
       // no tiene por que saber que adaptador le toco.

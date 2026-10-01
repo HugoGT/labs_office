@@ -65,6 +65,7 @@ import { decideAccess, type AccessDecision } from './directory/accessDecision.ts
 import type { UserDirectory } from './directory/directoryPort.ts';
 import type { LiveSessionRegistry } from './liveSessions.ts';
 import type { SessionEvictionHub } from './sessionEviction.ts';
+import type { CharacterRetirementHub } from './characterRetirement.ts';
 import { participantKeyOf, type FinishedRecordingStore } from './recording/finishedRecordings.ts';
 import type { ActiveRecording, RecordingRegistry } from './recording/recordingRegistry.ts';
 import { OfficeState, createPlayerState, createRecordingState } from './schema.ts';
@@ -280,6 +281,11 @@ export interface OfficeRoomOptions {
    */
   eviction?: SessionEvictionHub;
   /**
+   * Live reset of a retired character (#122): the room registers here so the
+   * retire route can put every player wearing it on the pack default.
+   */
+  characters?: CharacterRetirementHub;
+  /**
    * Assignable desks (art migration, step 6), to check a desk seat: that the
    * desk exists, where it is and who owns it. Absent (no `DATABASE_URL`)
    * there are no desks, so only the base map chairs can be sat on.
@@ -335,6 +341,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private unsubscribeDesksChanges?: () => void;
   private unsubscribeTerrainChanges?: () => void;
   private unregisterEviction?: () => void;
+  private unregisterCharacters?: () => void;
   /**
    * Sessions a newer join of the same account already released (#78). Their
    * own `onLeave` arrives later, as a plain non-consented close, and must
@@ -390,6 +397,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     // `availableUntil` is when the bucket lifecycle deletes it (#5), for the
     // "Disponible hasta" of the notice.
     this.unregisterEviction = options?.eviction?.register((uid) => this.evictAccount(uid));
+    this.unregisterCharacters = options?.characters?.register((pieceId, fallbackId) => this.retireCharacter(pieceId, fallbackId));
     this.unsubscribeReady = options?.finished?.onReady(({ recordingId, spaceId, participants, stoppedAt }) => {
       const notice = { recordingId, spaceId, availableUntil: recordingAvailableUntil(stoppedAt) };
       for (const client of this.clients) {
@@ -512,6 +520,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     this.unsubscribeDesksChanges?.();
     this.unsubscribeTerrainChanges?.();
     this.unregisterEviction?.();
+    this.unregisterCharacters?.();
   }
 
   /** Unico punto de salida hacia un sessionId concreto; `undefined` si ya no esta conectado. */
@@ -709,6 +718,18 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
    */
   private evictAccount(uid: string): void {
     this.closeSessionsOf(uid, SESSION_REVOKED_CLOSE_CODE, 'session-revoked');
+  }
+
+  /**
+   * A retired character (#122): whoever wears it, connected or inside a
+   * reconnection window, wears `fallbackId` now. Only the replicated field
+   * changes; every client already redraws an avatar whose character changes,
+   * so nobody's session is touched.
+   */
+  private retireCharacter(pieceId: string, fallbackId: string): void {
+    for (const player of this.state.players.values()) {
+      if (player.avatarId === pieceId) player.avatarId = fallbackId;
+    }
   }
 
   /**

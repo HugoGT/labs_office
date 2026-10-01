@@ -162,5 +162,13 @@ export interface UserDirectory {
    * `id` does not exist.
    */
   setAvatar(id: string, avatarId: string): Promise<DirectoryUser | null>;
+  /**
+   * Moves every account wearing `fromId` to `toId` (#122): a retired
+   * character sends its users back to the pack default. `avatarChosenAt` is
+   * kept, since they did choose; their next sign-in offers the selector with
+   * the default preselected. Returns how many accounts moved. Throws
+   * `InvalidArtChoiceError` if `toId` is not a character id.
+   */
+  reassignAvatar(fromId: string, toId: string): Promise<number>;
   close(): Promise<void>;
 }

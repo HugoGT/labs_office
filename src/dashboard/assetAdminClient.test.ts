@@ -81,6 +81,15 @@ describe('createAssetAdminClient: contrato del servidor', () => {
     expect(await clientWith(fetchImpl).listAssets()).toEqual([SERVED_ASSET]);
   });
 
+  it('keeps the credit of an uploaded piece (#122)', async () => {
+    const row = { id: 'a', slug: 'helecho', name: 'Helecho', kind: 'plant', textureKey: 'art:plant-upload-0123456789abcdef:sheet', w: 1, h: 1, placeableOnDesk: true, aboveAvatars: false, archivedAt: null, author: 'Ana' };
+    const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ assets: [row] }) }) as Response);
+
+    const [asset] = await createAssetAdminClient({ baseUrl: 'http://x', getIdToken: async () => 't' }, fetchImpl as unknown as typeof fetch).listAssets();
+
+    expect(asset?.author).toBe('Ana');
+  });
+
   it('crea con POST /admin/assets y solo con lo que el servidor lee', async () => {
     const fetchImpl = fetchWith(201, SERVED_ASSET);
 

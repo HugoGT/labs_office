@@ -9,7 +9,8 @@
  *     manifest): the active uploads, as a manifest the office, the character
  *     selector and the material forms parse with the pack parser. Their file
  *     paths are relative to it, so the same `/assets/files/` prefix serves both.
- *   - `GET /assets/files/<sha256>.png` (public): one stored file, immutable.
+ *   - `GET /assets/files/<sha256>.png` (public): one stored file of an
+ *     approved piece, immutable.
  *
  * Order of an upload: credential, then the body, then storage, then the
  * catalog. Files go first so a registered piece never points at a missing
@@ -22,17 +23,17 @@ import {
   ART_FILE_FORMAT,
   ART_PACK_FORMAT,
   ART_TILE,
-  artSheetKey,
   type ArtDeskPiece,
 } from '../../../src/game/artContract.ts';
 import { authorize, type AdminDeps, type AdminResult } from '../admin/adminRoutes.ts';
 import { ART_PACK_DEFAULTS, ArtPieceExistsError } from '../decor/artCatalogRules.ts';
-import type { CreateAssetInput, DecorCatalog } from '../decor/decorPort.ts';
+import { isPublicArtFile } from '../decor/artReviewRules.ts';
+import type { DecorCatalog } from '../decor/decorPort.ts';
 import { toAssetBody } from '../decor/decorRoutes.ts';
 import { AssetNameTakenError, InvalidAssetError } from '../decor/decorRules.ts';
 import { AssetUploadError } from './assetImageRules.ts';
 import { isAssetHash, type AssetStoragePort } from './assetStoragePort.ts';
-import { prepareAssetUpload } from './assetUploadRules.ts';
+import { decorAssetForPiece, prepareAssetUpload } from './assetUploadRules.ts';
 
 export interface AssetUploadDeps extends AdminDeps {
   decor: DecorCatalog;
@@ -76,12 +77,8 @@ export async function handleUploadAsset(authorization: unknown, body: unknown, d
     const { piece, files } = prepareAssetUpload(body, { defaultDeskFacings: facings });
     for (const file of files) await deps.storage.put(file.sha256, file.png);
 
-    // A plant is desk decor: its catalog asset draws the uploaded sheet, so
-    // the existing decor flow (`/me/desk`) can place it with no change.
-    const decorAsset: CreateAssetInput | undefined =
-      piece.kind === 'plant'
-        ? { name: piece.name, kind: 'plant', textureKey: artSheetKey(piece.id, 'sheet'), w: piece.footprint.w, h: piece.footprint.h, placeableOnDesk: true }
-        : undefined;
+    // A plant is desk decor: its catalog asset draws the uploaded sheet.
+    const decorAsset = decorAssetForPiece(piece);
     const registered = await deps.decor.registerUploadedArtPiece({ piece, uploadedBy: authorized.user.id, decorAsset });
     return {
       status: 201,
@@ -98,11 +95,17 @@ export async function handleUploadAsset(authorization: unknown, body: unknown, d
 }
 
 /**
- * The uploads as a manifest of their own, next to their files. Only active
- * ones: like the pack's manifest, it is what can be chosen and loaded today.
+ * The uploads as a manifest of their own, next to their files. Approved ones
+ * only (`listArtPieces`): a contribution under review is nobody's to load
+ * (#122). Active ones, like the pack's manifest, plus retired plants: a
+ * withdrawn plant stops being offered through the decor catalog, but whoever
+ * placed it keeps seeing it (D1b), so the office must still find its sheet.
+ * A retired character is left out: nobody wears it any more.
  */
 export async function handleUploadedArtManifest(decor: DecorCatalog): Promise<AdminResult> {
-  const pieces = await decor.listArtPieces();
+  const pieces = (await decor.listArtPieces({ includeRetired: true })).filter(
+    (piece) => piece.retiredAt === null || piece.kind === 'plant',
+  );
   return {
     status: 200,
     body: {
@@ -119,12 +122,21 @@ export async function handleUploadedArtManifest(decor: DecorCatalog): Promise<Ad
   };
 }
 
-/** `file` is the last path segment: `<sha256>.png` and nothing else reaches storage. */
-export async function handleGetAssetFile(file: unknown, storage: AssetStoragePort): Promise<AssetFileResult> {
+/**
+ * `file` is the last path segment: `<sha256>.png` and nothing else reaches
+ * storage. Only a file an approved piece carries is public (#122): a pending
+ * or rejected contribution's file is the same 404 as a missing one, and its
+ * uploader and the reviewers read it through `/me/art/files/` instead.
+ */
+export async function handleGetAssetFile(
+  file: unknown,
+  deps: { storage: AssetStoragePort; decor: Pick<DecorCatalog, 'findArtPiecesWithFile'> },
+): Promise<AssetFileResult> {
   if (typeof file !== 'string' || !file.endsWith('.png')) return NOT_FOUND;
   const sha256 = file.slice(0, -'.png'.length);
   if (!isAssetHash(sha256)) return NOT_FOUND;
-  const png = await storage.get(sha256);
+  if (!isPublicArtFile(await deps.decor.findArtPiecesWithFile(sha256))) return NOT_FOUND;
+  const png = await deps.storage.get(sha256);
   if (png === null) return NOT_FOUND;
   return { status: 200, headers: ASSET_FILE_HEADERS, png };
 }

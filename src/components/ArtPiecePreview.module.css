@@ -1,0 +1,61 @@
+/* Preview of an art piece under review (#122): the poses side by side, on a
+   checkerboard so transparency and a leftover background read at a glance. */
+.preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+}
+
+.pose {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 4px;
+  border-radius: var(--radius-control);
+  background-color: #1f2937;
+  background-image:
+    linear-gradient(45deg, #374151 25%, transparent 25%),
+    linear-gradient(-45deg, #374151 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #374151 75%),
+    linear-gradient(-45deg, transparent 75%, #374151 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+.caption {
+  font-size: 11px;
+  color: #e5e7eb;
+}
+
+.sprite {
+  display: block;
+  flex: none;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+
+/* Same step animation as the character selector (`CharacterSelect.module.css`). */
+.walking {
+  animation: walk 1s steps(var(--sprite-steps)) infinite;
+}
+
+@keyframes walk {
+  to {
+    background-position-x: var(--sprite-travel);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .walking {
+    animation: none;
+  }
+}
+
+.sheet {
+  display: block;
+  max-width: 100%;
+  image-rendering: pixelated;
+}

@@ -967,6 +967,23 @@ describe('pgDirectory: avatar (art migration, step 3)', () => {
     expect(pool.queries).toEqual([]);
   });
 
+  it('reassignAvatar moves every wearer in one UPDATE and counts them (#122)', async () => {
+    const pool = fakePool(() => ({ rows: [], rowCount: 3 }));
+
+    const moved = await directoryOver(pool).reassignAvatar('character-upload-0123456789abcdef', 'character-p01-burgundy-suit');
+
+    expect(squash(pool.queries[0].text)).toBe('update users set avatar_id = $2 where avatar_id = $1');
+    expect(pool.queries[0].values).toEqual(['character-upload-0123456789abcdef', 'character-p01-burgundy-suit']);
+    expect(moved).toBe(3);
+  });
+
+  it('reassignAvatar rejects a target that is not a character id without a query', async () => {
+    const pool = fakePool();
+
+    await expect(directoryOver(pool).reassignAvatar('character-upload-0123456789abcdef', 'desk-wood')).rejects.toBeInstanceOf(InvalidArtChoiceError);
+    expect(pool.queries).toEqual([]);
+  });
+
   it('setAvatar on an id that does not exist returns null', async () => {
     const pool = fakePool(() => NO_ROW);
 

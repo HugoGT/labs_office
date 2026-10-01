@@ -1419,6 +1419,37 @@ describe('OfficeRoom: persisted character in the room state (art migration, step
     expect(room.state.players.get(room.sessionId)?.avatarId).toBe('character-p09-mint-shirt');
   });
 
+  it('retiring a character puts its live wearers on the fallback without closing their session (#122)', async () => {
+    const directory = createMemoryDirectory({
+      seed: [
+        seededUser({ avatarId: 'character-upload-0123456789abcdef' }),
+        seededUser({
+          id: '22222222-2222-4222-8222-222222222222',
+          uid: 'uid-beto',
+          email: 'beto@example.com',
+          displayName: 'Beto',
+          avatarId: 'character-p12-mint-blazer',
+        }),
+      ],
+    });
+    const endpoint = await start({ directory });
+    const ana = await joinAt(endpoint, { token: 'token-de-ana' });
+    const beto = await joinAt(endpoint, { token: 'token-de-beto' });
+    await waitFor(() => beto.state.players.size === 2 && ana.state.players.size === 2);
+    let anaLeft = false;
+    ana.onLeave(() => {
+      anaLeft = true;
+    });
+
+    characterServer!.characters.retireCharacter('character-upload-0123456789abcdef', ART_PACK_DEFAULTS.character);
+
+    await waitFor(() => beto.state.players.get(ana.sessionId)?.avatarId === ART_PACK_DEFAULTS.character, 1000);
+    await waitFor(() => ana.state.players.get(ana.sessionId)?.avatarId === ART_PACK_DEFAULTS.character, 1000);
+    expect(ana.state.players.get(beto.sessionId)?.avatarId).toBe('character-p12-mint-blazer');
+    expect(anaLeft).toBe(false);
+    expect(characterServer!.sessions.has(ana.sessionId)).toBe(true);
+  });
+
   it('without a directory every player is the pack default character', async () => {
     const endpoint = await start({});
 

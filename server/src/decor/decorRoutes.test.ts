@@ -14,7 +14,9 @@
  *      sondea que su cuerpo iba bien.
  */
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import type { ArtPackManifest } from '../../../src/game/artContract.ts';
 import type { DirectoryUser } from '../directory/directoryPort.ts';
 import { createMemoryDirectory } from '../directory/memoryDirectory.ts';
 import type { IdTokenVerifier } from '../verifyIdToken.ts';
@@ -170,7 +172,25 @@ describe('handleListAssets', () => {
       placeableOnDesk: true,
       aboveAvatars: false,
       archivedAt: null,
+      author: null,
     });
+  });
+
+  it('credits the author of an uploaded plant (#122), in both catalogs', async () => {
+    const { deps, decor } = harness([]);
+    const ficus = (JSON.parse(readFileSync(new URL('../../../public/assets/pack/manifest.json', import.meta.url), 'utf8')) as ArtPackManifest).pieces.find(
+      (piece) => piece.id === 'plant-ficus',
+    )!;
+    const piece = { ...ficus, id: 'plant-upload-0123456789abcdef', name: 'Helecho', author: 'Ana' };
+    await decor.registerUploadedArtPiece({
+      piece,
+      uploadedBy: 'id-admin',
+      decorAsset: { name: 'Helecho', kind: 'plant', textureKey: `art:${piece.id}:sheet`, w: 1, h: 1, placeableOnDesk: true },
+    });
+
+    for (const result of [await handleListAssets(BEARER_ADMIN, deps), await handleListOfficeAssets(BEARER_ADMIN, deps)]) {
+      expect(result.body.assets).toEqual([expect.objectContaining({ name: 'Helecho', author: 'Ana' })]);
+    }
   });
 });
 

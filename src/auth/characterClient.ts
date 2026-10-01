@@ -54,8 +54,12 @@ function manifestFolder(manifestUrl: string): string {
   return manifestUrl.slice(0, manifestUrl.lastIndexOf('/') + 1);
 }
 
-/** The characters that carry both sheets the previews need, pack first, each with its own folder. */
-function characterOptions(catalog: ArtCatalog): CharacterCatalog | null {
+/**
+ * The characters that carry both sheets the previews need, pack first, each
+ * with its own folder. A piece from the uploads manifest carries its author,
+ * which the selector credits (#122).
+ */
+function characterOptions(catalog: ArtCatalog, uploadsUrl: string | null): CharacterCatalog | null {
   const { manifest } = catalog;
   const options = manifest.pieces.flatMap((piece): CharacterOption[] => {
     if (piece.kind !== 'character') return [];
@@ -64,7 +68,8 @@ function characterOptions(catalog: ArtCatalog): CharacterCatalog | null {
     const source = catalog.sourceOf(piece.id);
     if (walk === undefined || seated === undefined || source === undefined) return [];
     const folder = manifestFolder(source);
-    return [{ id: piece.id, name: piece.name, walkUrl: `${folder}${walk.path}`, seatedUrl: `${folder}${seated.path}` }];
+    const author = uploadsUrl !== null && source === uploadsUrl ? piece.author : null;
+    return [{ id: piece.id, name: piece.name, walkUrl: `${folder}${walk.path}`, seatedUrl: `${folder}${seated.path}`, author }];
   });
   if (options.length === 0) return null;
   const fallback = findPiece(manifest, manifest.defaults.character)?.id;
@@ -152,7 +157,7 @@ export function createCharacterClient(
       // Without the pack there is no default to fall back on: no selector at all.
       if (pack.manifest === null) return null;
       const catalog = combineArtManifests([pack, uploads]);
-      return catalog === null ? null : characterOptions(catalog);
+      return catalog === null ? null : characterOptions(catalog, uploadsManifestUrl);
     },
   };
 }

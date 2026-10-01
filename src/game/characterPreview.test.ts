@@ -44,3 +44,13 @@ describe('characterPreviewFrame (art migration, step 5)', () => {
     });
   });
 });
+
+describe('characterPreviewFrame with a facing (#122 review queue)', () => {
+  it.each(['up', 'down', 'left', 'right'] as const)('walks facing %s on the row of that facing', (facing) => {
+    expect(characterPreviewFrame(SHEETS, 'walk', 2, facing).y).toBe(-walkRowForFacing(facing) * CHARACTER_WALK.frame.height * 2);
+  });
+
+  it('sits facing the given side too', () => {
+    expect(characterPreviewFrame(SHEETS, 'seated', 1, 'left').y).toBe(-seatedRowForFacing('left') * CHARACTER_SEATED.frame.height);
+  });
+});

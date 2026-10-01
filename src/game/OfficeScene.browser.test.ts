@@ -2607,6 +2607,20 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
     expect(findPlayer(offline.scene).sprite.texture.key).toBe(`${PLAYER_TEXTURE}-down`);
   });
 
+  it('a peer whose character is retired mid-session is redrawn with the new one (#122)', async () => {
+    const { connector, scene } = await connected();
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', avatarId: 'character-p05-charcoal-suit' }));
+    await vi.waitFor(() => {
+      expect(findRemoteAvatars(scene)[0].sprite.texture.key).toBe(artSheetKey('character-p05-charcoal-suit', 'walk'));
+    }, LOOP_WAIT);
+
+    connector.handlers()!.onChange(remoteSnapshot({ sessionId: 'par-1', avatarId: 'character-p09-mint-shirt' }));
+
+    await vi.waitFor(() => {
+      expect(findRemoteAvatars(scene)[0].sprite.texture.key).toBe(artSheetKey('character-p09-mint-shirt', 'walk'));
+    }, LOOP_WAIT);
+  });
+
   it('a player without a replicated character is the pack default', async () => {
     const { scene } = await bootOfficeScene(createOfficeBridge(), { endpoint: null });
     const player = findPlayer(scene);

@@ -190,17 +190,16 @@ describe('handleUploadedArtManifest', () => {
 });
 
 describe('handleGetAssetFile', () => {
-  it('serves a stored file as an immutable PNG', async () => {
-    const storage = createMemoryAssetStorage();
-    const png = sheet('plant');
-    const sha = 'c'.repeat(64);
-    await storage.put(sha, png);
+  it('serves the file of an approved upload as an immutable PNG', async () => {
+    const d = await deps();
+    const uploaded = await handleUploadAsset(BEARER_ADMIN, plantBody(), d);
+    const sha = (uploaded.body.piece as { files: { sha256: string }[] }).files[0]!.sha256;
 
-    const result = await handleGetAssetFile(`${sha}.png`, storage);
+    const result = await handleGetAssetFile(`${sha}.png`, d);
 
     expect(result.status).toBe(200);
     if (result.status !== 200) return;
-    expect(Buffer.from(result.png).equals(png)).toBe(true);
+    expect(Buffer.from(result.png).equals(sheet('plant'))).toBe(true);
     expect(result.headers).toMatchObject({
       'Content-Type': 'image/png',
       'Cache-Control': 'public, max-age=31536000, immutable',
@@ -208,11 +207,19 @@ describe('handleGetAssetFile', () => {
     });
   });
 
+  it('answers 404 for a stored file no approved piece carries (#122): a pending one is not public', async () => {
+    const d = await deps();
+    const sha = 'c'.repeat(64);
+    await d.storage.put(sha, sheet('plant'));
+
+    expect((await handleGetAssetFile(`${sha}.png`, d)).status).toBe(404);
+  });
+
   it('answers 404 for an unknown hash or a name that is not one', async () => {
-    const storage = createMemoryAssetStorage();
-    expect((await handleGetAssetFile(`${'d'.repeat(64)}.png`, storage)).status).toBe(404);
+    const d = await deps();
+    expect((await handleGetAssetFile(`${'d'.repeat(64)}.png`, d)).status).toBe(404);
     for (const name of ['manifest.png', `${'d'.repeat(64)}.gif`, '../x.png', undefined]) {
-      expect((await handleGetAssetFile(name, storage)).status).toBe(404);
+      expect((await handleGetAssetFile(name, d)).status).toBe(404);
     }
   });
 });

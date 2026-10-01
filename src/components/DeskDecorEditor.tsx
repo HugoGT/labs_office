@@ -365,6 +365,7 @@ export function DeskDecorEditor({
               >
                 {asset.name}
               </button>
+              {asset.author !== undefined && <span className={styles.credit}>de {asset.author}</span>}
             </li>
           ))}
         </ul>
