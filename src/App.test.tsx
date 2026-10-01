@@ -63,9 +63,16 @@ afterEach(() => {
  * Phaser), asi que no esta montada al volver de `render`. Esperar a que
  * aparezca es lo que antes era inmediato; lo que se comprueba despues no
  * cambia.
+ *
+ * It also waits for `createGame`: `GameCanvas` calls it from an effect, which
+ * under a loaded `test:all` can still be pending once the shell is in the
+ * DOM, and the tests read the bridge from its first call right after this.
  */
 async function waitForOffice(container: HTMLElement): Promise<void> {
-  await waitFor(() => expect(container.querySelector('#office-shell')).not.toBeNull());
+  await waitFor(() => {
+    expect(container.querySelector('#office-shell')).not.toBeNull();
+    expect(createGameMock).toHaveBeenCalled();
+  });
 }
 
 describe('App', () => {
