@@ -336,6 +336,69 @@ describe('App: access denied at join (#129)', () => {
   });
 });
 
+describe('App: session older than its maximum age (#128)', () => {
+  const EXPIRED = 'Tu sesión caducó. Vuelve a iniciar sesión.';
+
+  beforeEach(() => {
+    vi.stubEnv('VITE_FIREBASE_API_KEY', 'AIza-publica');
+    vi.stubEnv('VITE_FIREBASE_PROJECT_ID', 'oficina-virtual');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    window.history.pushState({}, '', '/');
+  });
+
+  function serverSaysSessionExpired() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ error: 'unauthorized', reason: 'session-expired' }, { status: 401 })),
+    );
+  }
+
+  it('a refused join signs out and the login asks for email and password again', async () => {
+    const { port, emit } = fakePort();
+    createAdapterMock.mockReturnValue(port);
+    const { container } = render(<App />);
+    emit({ uid: 'uid-ana', email: 'ana@example.com', displayName: 'Ana' });
+    await waitForOffice(container);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('presence', { online: false, peers: 0, state: 'denied', reason: 'session-expired', canRetry: false }));
+
+    expect(port.signOut).toHaveBeenCalledTimes(1);
+    emit(null);
+    expect(screen.getByRole('status')).toHaveTextContent(EXPIRED);
+  });
+
+  it('the entrance signs out when the server says so over HTTP', async () => {
+    // A restored session reads its name and character before the office
+    // mounts; those reads are where the server first says the session is old.
+    serverSaysSessionExpired();
+    const { port, emit } = fakePort();
+    createAdapterMock.mockReturnValue(port);
+    render(<App />);
+    emit({ uid: 'uid-ana', email: 'ana@example.com', displayName: 'Ana' });
+
+    await waitFor(() => expect(port.signOut).toHaveBeenCalled());
+    emit(null);
+    expect(screen.getByRole('status')).toHaveTextContent(EXPIRED);
+  });
+
+  it('the dashboard signs out instead of staying on an error it cannot leave', async () => {
+    serverSaysSessionExpired();
+    window.history.pushState({}, '', '/dashboard');
+    const { port, emit } = fakePort();
+    createAdapterMock.mockReturnValue(port);
+    render(<App />);
+    emit({ uid: 'uid-ana', email: 'ana@example.com', displayName: 'Ana' });
+
+    await waitFor(() => expect(port.signOut).toHaveBeenCalledTimes(1));
+    emit(null);
+    expect(screen.getByRole('status')).toHaveTextContent(EXPIRED);
+  });
+});
+
 describe('App: enrutado (#24)', () => {
   afterEach(() => {
     window.history.pushState({}, '', '/');

@@ -19,6 +19,11 @@ import { resolveOfficeApiBaseUrl } from './officeApiBaseUrl';
 export interface DashboardRouteProps {
   /** Sesion de `AuthGate`; `null` con la autenticacion apagada. */
   session: OfficeSession | null;
+  /**
+   * The `fetch` every panel client uses; `App` hands in one that signs out on
+   * a session too old for the server (#128). Absent: the global one.
+   */
+  fetchImpl?: typeof fetch;
 }
 
 /**
@@ -60,7 +65,7 @@ interface DashboardPorts {
   reviews: ArtReviewPort;
 }
 
-export default function DashboardRoute({ session }: DashboardRouteProps) {
+export default function DashboardRoute({ session, fetchImpl }: DashboardRouteProps) {
   // Se resuelven una sola vez, en el mismo espiritu que `endpoint` en
   // `OfficeShell`: un puerto nuevo por render volveria a disparar la carga de
   // la sesion y de cada lista en bucle, porque es la dependencia del efecto de
@@ -87,10 +92,10 @@ export default function DashboardRoute({ session }: DashboardRouteProps) {
     const getIdToken = () => session.getIdToken();
 
     return {
-      admin: createAdminClient({ baseUrl: adminBaseUrl, getIdToken }),
-      users: createUsersAdminClient({ baseUrl: apiBaseUrl, getIdToken }),
-      uploads: createArtUploadClient({ baseUrl: apiBaseUrl, getIdToken }),
-      reviews: createArtReviewClient({ baseUrl: apiBaseUrl, getIdToken }),
+      admin: createAdminClient({ baseUrl: adminBaseUrl, getIdToken }, fetchImpl),
+      users: createUsersAdminClient({ baseUrl: apiBaseUrl, getIdToken }, fetchImpl),
+      uploads: createArtUploadClient({ baseUrl: apiBaseUrl, getIdToken }, fetchImpl),
+      reviews: createArtReviewClient({ baseUrl: apiBaseUrl, getIdToken }, fetchImpl),
     };
   });
 
