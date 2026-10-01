@@ -147,6 +147,10 @@ services:
       # of the office works as before. Not a secret: a bucket name. The
       # credentials are the VM service account, through the metadata server.
       RECORDING_GCS_BUCKET: "${RECORDING_GCS_BUCKET:-}"
+      # Uploaded art (issue #121). Empty: uploads answer 503
+      # asset-upload-not-configured and the default pack keeps working. Same
+      # credentials as above, the VM service account.
+      ASSET_GCS_BUCKET: "${ASSET_GCS_BUCKET:-}"
     volumes:
       # The CA is public (it proves the server, it grants nothing), hence a
       # plain read-only bind mount and not a secret.

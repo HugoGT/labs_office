@@ -86,7 +86,13 @@ function toDeskAsset(raw: unknown): DeskDecorAsset | 'not-placeable' | null {
   if (typeof row.placeableOnDesk !== 'boolean') return null;
 
   if (!row.placeableOnDesk) return 'not-placeable';
-  return { id: row.id, name: row.name, kind: row.kind, textureKey: row.textureKey };
+  return {
+    id: row.id,
+    name: row.name,
+    kind: row.kind,
+    textureKey: row.textureKey,
+    ...(isNonEmptyString(row.author) ? { author: row.author } : {}),
+  };
 }
 
 /**

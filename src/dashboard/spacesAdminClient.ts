@@ -131,6 +131,13 @@ export function createSpacesAdminClient(
             w: input.w,
             h: input.h,
             capacity: input.capacity ?? null,
+            // Same rule as the desk appearance in `deskAdminClient.ts`.
+            ...(input.floor === undefined
+              ? {}
+              : {
+                  floorMaterialId: input.floor.materialId,
+                  ...(input.floor.color === null ? {} : { floorColor: input.floor.color }),
+                }),
           }),
         ),
       );

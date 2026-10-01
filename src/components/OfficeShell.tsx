@@ -1,12 +1,16 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { OfficeSession } from '../auth/authPort';
 import { createAssetAdminClient } from '../dashboard/assetAdminClient';
+import { createArtContributionClient } from '../dashboard/artContributionClient';
+import type { ArtContributionPort } from '../dashboard/artContributionPort';
 import type { AssetAdminPort } from '../dashboard/assetAdminPort';
 import { createDeskAdminClient } from '../dashboard/deskAdminClient';
 import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import { resolveOfficeApiBaseUrl } from '../dashboard/officeApiBaseUrl';
 import { createSpacesAdminClient } from '../dashboard/spacesAdminClient';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
+import { createTerrainAdminClient } from '../dashboard/terrainAdminClient';
+import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import { resolveLivekitConfig } from '../game/livekitEndpoint';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
@@ -139,6 +143,12 @@ export function OfficeShell({
     if (apiBaseUrl === null) return null;
     return createSpacesAdminClient({ baseUrl: apiBaseUrl, getIdToken: () => session?.getIdToken() ?? Promise.resolve(null) });
   });
+  /** Terrain blocks (#123 phase 2): same pattern and reason as `spacesAdminPort`. */
+  const [terrainAdminPort] = useState<TerrainAdminPort | null>(() => {
+    const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
+    if (apiBaseUrl === null) return null;
+    return createTerrainAdminClient({ baseUrl: apiBaseUrl, getIdToken: () => session?.getIdToken() ?? Promise.resolve(null) });
+  });
   /**
    * Puerto del catalogo de decoracion, migrado desde `DashboardRoute.tsx` a
    * "Personalizar" (sidebar). Mismo patron y mismo motivo que
@@ -149,6 +159,16 @@ export function OfficeShell({
     const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
     if (apiBaseUrl === null) return null;
     return createAssetAdminClient({ baseUrl: apiBaseUrl, getIdToken: () => session?.getIdToken() ?? Promise.resolve(null) });
+  });
+  /**
+   * Art contributions (#122): same pattern as `assetsAdminPort`, for anyone
+   * signed in. Without a session there is nobody to credit or limit.
+   */
+  const [contributionsPort] = useState<ArtContributionPort | null>(() => {
+    const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
+    if (apiBaseUrl === null || !session) return null;
+    const signedIn = session;
+    return createArtContributionClient({ baseUrl: apiBaseUrl, getIdToken: () => signedIn.getIdToken() });
   });
   /**
    * Exclusividad entre el modo edicion de layout y `DeskDecorEditor` (#74,
@@ -724,7 +744,9 @@ export function OfficeShell({
         bridge={bridge}
         desks={deskAdminPort}
         spaces={spacesAdminPort}
+        terrain={terrainAdminPort}
         assets={assetsAdminPort}
+        contributions={contributionsPort}
         refreshDesks={refreshDesks}
         refreshSpaces={refreshSpaces}
         onLayoutEditingChange={setLayoutEditing}

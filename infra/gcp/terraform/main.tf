@@ -386,6 +386,50 @@ resource "google_storage_bucket_iam_member" "vm_recordings_viewer" {
   member = "serviceAccount:${google_service_account.vm.email}"
 }
 
+# ---------------------------------------------------------------------------
+# Uploaded art (issue #121)
+# ---------------------------------------------------------------------------
+
+# PNGs uploaded from /dashboard, stored re-encoded under their content hash
+# (`assets/<sha256>.png`) and served by the server itself from
+# `/assets/files/*`, so nothing here is public and nothing is signed. Its own
+# bucket and not the recordings one: those objects expire after
+# `recording_retention_days`, and an uploaded piece must outlive every desk,
+# space and user that chose it.
+resource "google_storage_bucket" "assets" {
+  name          = "${var.project_id}-${local.name}-assets"
+  location      = upper(var.region)
+  storage_class = "STANDARD"
+  labels        = local.labels
+
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+
+  # Objects are immutable by name; versioning would only keep copies of
+  # bytes that never change.
+  versioning {
+    enabled = false
+  }
+
+  # Catalog rows point at these objects forever: destroying the bucket must
+  # be a deliberate `gcloud storage rm`, never a side effect of a destroy.
+  force_destroy = false
+}
+
+# Create (uploads, create-only by precondition) plus read (serving). No delete
+# and no overwrite: an object under a hash already holds those bytes.
+resource "google_storage_bucket_iam_member" "vm_assets_creator" {
+  bucket = google_storage_bucket.assets.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.vm.email}"
+}
+
+resource "google_storage_bucket_iam_member" "vm_assets_viewer" {
+  bucket = google_storage_bucket.assets.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.vm.email}"
+}
+
 # V4 signed URLs from a GCE VM. The metadata server hands out access tokens but
 # no private key, so `@google-cloud/storage` signs through the IAM Credentials
 # `signBlob` API, which requires iam.serviceAccounts.signBlob on the signing
@@ -525,6 +569,10 @@ resource "google_compute_instance" "office" {
     # Recordings bucket (issues #5, #58). Not a secret: the VM service account
     # is what grants access. office-deploy writes it as RECORDING_GCS_BUCKET.
     office-recording-bucket = google_storage_bucket.recordings.name
+
+    # Uploaded art bucket (issue #121), same criterion: a name, not a secret.
+    # office-deploy writes it as ASSET_GCS_BUCKET.
+    office-asset-bucket = google_storage_bucket.assets.name
 
     # Vacio en el primer apply: todavia no hay imagenes publicadas. El script de
     # arranque escribe la configuracion y se detiene sin levantar nada hasta que

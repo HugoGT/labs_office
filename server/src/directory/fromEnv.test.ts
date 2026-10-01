@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { directoryFromEnv } from './fromEnv.ts';
 import { readSchemaSql } from './migrate.ts';
+import { readArtPackManifest } from '../decor/artPackFile.ts';
 import type { DirectoryPool } from './pgDirectory.ts';
 
 interface FakePool extends DirectoryPool {
@@ -184,7 +185,21 @@ describe('directoryFromEnv, decoracion (#7, slice 4)', () => {
   it('no trae migracion propia: las tablas ya estan en el mismo schema.sql', () => {
     const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, fakePool);
 
-    expect(Object.keys(runtime!)).toEqual(['directory', 'spaces', 'decor', 'desks', 'migrate']);
+    expect(Object.keys(runtime!)).toEqual(['directory', 'spaces', 'decor', 'desks', 'terrain', 'migrate']);
+  });
+
+  it('reads the terrain blocks (#123 phase 2) from the same pool', async () => {
+    let built = 0;
+    const pool = fakePool();
+    const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, () => {
+      built++;
+      return pool;
+    });
+
+    await runtime!.terrain.loadBlocks();
+
+    expect(built).toBe(1);
+    expect(pool.queries.at(-1)?.text).toContain('FROM terrain_blocks');
   });
 });
 
@@ -217,5 +232,63 @@ describe('directoryFromEnv, escritorios (#7, slice 5)', () => {
     // Es el estado real de cualquier despliegue sin base de datos, y lo que
     // convierte las rutas en 503. Ver `createOfficeServer`.
     expect(directoryFromEnv({}, fakePool)).toBeUndefined();
+  });
+});
+
+describe('directoryFromEnv, art pack catalog (art migration, step 3)', () => {
+  const PACK = readArtPackManifest(new URL('../../../public/assets/pack/manifest.json', import.meta.url));
+
+  it('migrate() registers the pack AFTER the schema, through the same pool', async () => {
+    const pool = fakePool();
+    const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, () => pool, () => PACK);
+
+    await runtime!.migrate();
+
+    // The catalog table only exists once the schema ran.
+    const firstUpsert = pool.queries.findIndex((query) => /insert into art_pieces/i.test(query.text));
+    expect(firstUpsert).toBeGreaterThan(1);
+    expect(pool.queries[firstUpsert].values[0]).toBe(PACK.pieces[0].id);
+  });
+
+  it('reads the manifest at migrate() time, not when the runtime is built', async () => {
+    let reads = 0;
+    const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, fakePool, () => {
+      reads++;
+      return PACK;
+    });
+    expect(reads).toBe(0);
+
+    await runtime!.migrate();
+
+    expect(reads).toBe(1);
+  });
+
+  it('a manifest that cannot be read fails the start, like a schema that cannot be applied', async () => {
+    const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, fakePool, () => {
+      throw new Error('ENOENT: manifest.json');
+    });
+
+    await expect(runtime!.migrate()).rejects.toThrow('ENOENT');
+  });
+
+  it('by default reads the committed manifest', async () => {
+    const pool = fakePool();
+    const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, () => pool);
+
+    await runtime!.migrate();
+
+    const upserts = pool.queries.filter((query) => /insert into art_pieces/i.test(query.text));
+    expect(upserts.map((query) => query.values[0])).toEqual(PACK.pieces.map((piece) => piece.id));
+  });
+
+  it('without DATABASE_URL there is no catalog and nothing reads the manifest', () => {
+    let reads = 0;
+    expect(
+      directoryFromEnv({}, fakePool, () => {
+        reads++;
+        return PACK;
+      }),
+    ).toBeUndefined();
+    expect(reads).toBe(0);
   });
 });

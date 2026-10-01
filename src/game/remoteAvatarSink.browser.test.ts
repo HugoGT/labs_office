@@ -1,7 +1,11 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
-import { spawnPlayer } from './characters';
+import { walkFrame } from './characterAnimation';
+import { spawnPlayer, type CharacterSheets } from './characters';
+import { feetOf } from './avatarGeometry';
+import { avatarDepth } from './depthLayers';
+import { mapSeatId } from './seating';
 import { createOfficeBridge } from './officeBridge';
 import { MOVE_INTERVAL_MS } from './officeProtocol';
 import { STATUS_COLOR } from './presence';
@@ -98,6 +102,8 @@ function snapshot(overrides: Partial<RemotePlayerSnapshot> = {}): RemotePlayerSn
     status: 'g',
     facing: 'down',
     spacesVersion: 'v1',
+    avatarId: null,
+    seat: null,
     ...overrides,
   };
 }
@@ -187,6 +193,21 @@ describe('createPhaserAvatarSink', () => {
 });
 
 describe('createPhaserAvatarSink: datos que llegan por red', () => {
+  it('keeps the persisted character of the peer and follows its changes (art migration, step 5)', async () => {
+    const result = await withScene((scene) => {
+      const sink = createPhaserAvatarSink(scene, createOfficeBridge());
+      const avatar = sink.create(snapshot({ avatarId: 'character-p07-green-suit' }));
+      const created = { avatarId: avatar.avatarId, texture: avatar.baseTexture };
+      sink.update(avatar, snapshot({ avatarId: 'character-p12-mint-blazer' }));
+      return { created, updated: avatar.avatarId, texture: avatar.baseTexture };
+    });
+
+    expect(result.created.avatarId).toBe('character-p07-green-suit');
+    expect(result.updated).toBe('character-p12-mint-blazer');
+    // Still procedural until step 6 draws the pack sheet.
+    expect(result.texture).toBe(result.created.texture);
+  });
+
   it('aplica la orientacion recibida al sprite del avatar', async () => {
     const facing = await withScene((scene) => {
       const sink = createPhaserAvatarSink(scene, createOfficeBridge());
@@ -478,5 +499,68 @@ describe('createPhaserAvatarSink: el jugador no atraviesa a un peer con cuerpo (
     await vi.waitFor(() => {
       expect(player.x).toBeGreaterThan(peerX + 20);
     }, PHYSICS_WAIT);
+  });
+});
+
+describe('createPhaserAvatarSink: pack characters and seats (art migration, step 6)', () => {
+  function fakeSheets(scene: Phaser.Scene, key: string): CharacterSheets {
+    // Canvas textures with the contract grid stand in for loaded sheets.
+    for (const [suffix, width, height, columns, rows] of [
+      ['walk', 32, 52, 11, 8],
+      ['seated', 44, 58, 8, 4],
+    ] as const) {
+      const texture = scene.textures.createCanvas(`${key}-${suffix}`, width * columns, height * rows)!;
+      for (let i = 0; i < columns * rows; i++) {
+        texture.add(i, 0, (i % columns) * width, Math.floor(i / columns) * height, width, height);
+      }
+    }
+    return { walk: `${key}-walk`, seated: `${key}-seated` };
+  }
+
+  it('draws a peer from the sheets of its character, and switches when the character changes', async () => {
+    const result = await withScene((scene) => {
+      const sheets: Record<string, CharacterSheets> = {
+        'character-p07-green-suit': fakeSheets(scene, 'green'),
+        'character-p12-mint-blazer': fakeSheets(scene, 'mint'),
+      };
+      const sink = createPhaserAvatarSink(scene, createOfficeBridge(), undefined, (id) => (id === null ? null : (sheets[id] ?? null)));
+      const avatar = sink.create(snapshot({ avatarId: 'character-p07-green-suit', facing: 'left' }));
+      const created = { key: avatar.sprite.texture.key, frame: Number(avatar.sprite.frame.name) };
+      sink.update(avatar, snapshot({ avatarId: 'character-p12-mint-blazer', facing: 'left' }));
+      return { created, updated: avatar.sprite.texture.key };
+    });
+
+    expect(result.created).toEqual({ key: 'green-walk', frame: walkFrame('W', 'idle') });
+    expect(result.updated).toBe('mint-walk');
+  });
+
+  it('keeps the procedural body when the character has no loaded sheets', async () => {
+    const key = await withScene((scene) => {
+      const sink = createPhaserAvatarSink(scene, createOfficeBridge(), undefined, () => null);
+      return sink.create(snapshot({ avatarId: 'character-p07-green-suit' })).sprite.texture.key;
+    });
+
+    expect(key).toMatch(/^av\d/);
+  });
+
+  it('a replicated seat seats the peer facing the way the server says; null stands it up', async () => {
+    const result = await withScene((scene) => {
+      const sink = createPhaserAvatarSink(scene, createOfficeBridge());
+      const avatar = sink.create(snapshot({ seat: mapSeatId(0), facing: 'down' }));
+      const seated = { seat: avatar.seat, facing: avatar.seatFacing };
+      sink.update(avatar, snapshot({ seat: null, facing: 'down' }));
+      return { seated, standing: { seat: avatar.seat, facing: avatar.seatFacing } };
+    });
+
+    expect(result.seated).toEqual({ seat: mapSeatId(0), facing: 'down' });
+    expect(result.standing).toEqual({ seat: null, facing: null });
+  });
+
+  it('is born sorted by its feet in the avatar band', async () => {
+    const depth = await withScene((scene) =>
+      createPhaserAvatarSink(scene, createOfficeBridge()).create(snapshot({ x: 40, y: 300 })).depth,
+    );
+
+    expect(depth).toBe(avatarDepth(feetOf({ x: 40, y: 300 }).y));
   });
 });

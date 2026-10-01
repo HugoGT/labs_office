@@ -20,14 +20,32 @@
  *     cualquiera le borraria a esa persona la retirada que ya tenia.
  */
 
+import { ART_CONTRACT_VERSION, artSheetKey, type ArtPackManifest, type ArtPiece } from '../../../src/game/artContract.ts';
+import { ArtPieceExistsError, artPieceFields, assertUploadedArtPiece, normalizeArtPack } from './artCatalogRules.ts';
+import {
+  CONTRIBUTION_QUOTA_WINDOW_MS,
+  assertContributionQuota,
+  retireTransition,
+  reviewTransition,
+  type ArtAuditAction,
+  type ArtPieceStatus,
+  type ContributionUsage,
+} from './artReviewRules.ts';
 import type {
+  ArtCatalogPiece,
+  ArtContributionInput,
+  ArtRetirementInput,
+  ArtReviewInput,
   Asset,
   CreateAssetInput,
   DecorCatalog,
   DeskItem,
   DeskItemInput,
+  ListArtPiecesOptions,
   ListAssetsOptions,
+  ListUploadedArtOptions,
   UpdateAssetInput,
+  UploadedArtPieceInput,
 } from './decorPort.ts';
 import {
   AssetNameTakenError,
@@ -35,6 +53,7 @@ import {
   normalizeCreateAssetInput,
   normalizeDeskConfig,
   normalizeUpdateAssetInput,
+  type NormalizedCreateAssetInput,
 } from './decorRules.ts';
 import type { DirectoryPool, DirectoryQueryable } from '../directory/pgDirectory.ts';
 
@@ -68,6 +87,151 @@ const DESK_SELECT = `
   WHERE d.user_id = $1
   ORDER BY d.slot
 `;
+
+const ART_PIECE_COLUMNS =
+  'id, kind, name, material, colorable, default_color, author, license, files, spec, contract_version, retired_at, registered_at, updated_at, source, uploaded_by, status, reviewed_by, reviewed_at, review_note, license_accepted_at';
+
+/**
+ * One upsert per piece. The kind is left out of the update on purpose: the id
+ * prefix fixes it, and a stored choice must never change kind under it. The
+ * `WHERE` skips a piece that is active and unchanged, so the registration that
+ * runs at every start rewrites nothing; `IS DISTINCT FROM` on jsonb compares
+ * values, not key order.
+ */
+const ART_PIECE_UPSERT = `
+  INSERT INTO art_pieces (id, kind, name, material, colorable, default_color, author, license, files, spec, contract_version)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11)
+  ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name, material = EXCLUDED.material, colorable = EXCLUDED.colorable,
+    default_color = EXCLUDED.default_color, author = EXCLUDED.author, license = EXCLUDED.license,
+    files = EXCLUDED.files, spec = EXCLUDED.spec, contract_version = EXCLUDED.contract_version,
+    retired_at = NULL, updated_at = now()
+  WHERE art_pieces.spec IS DISTINCT FROM EXCLUDED.spec
+     OR art_pieces.contract_version IS DISTINCT FROM EXCLUDED.contract_version
+     OR art_pieces.retired_at IS NOT NULL
+`;
+
+/**
+ * An UPDATE and never a DELETE: users, desks and spaces may still point at
+ * these ids. Only pack pieces: an Admin upload (#121) is not in any pack, and
+ * retiring it here would undo it at the next start.
+ */
+const ART_PIECE_RETIRE = `
+  UPDATE art_pieces SET retired_at = now(), updated_at = now()
+  WHERE retired_at IS NULL AND NOT (id = ANY($1::text[])) AND source = 'pack'
+  RETURNING id
+`;
+
+/**
+ * An upload is inserted or refused, never merged: `DO NOTHING` plus an empty
+ * RETURNING is how an id already in the catalog shows up, retired included.
+ */
+const UPLOADED_ART_PIECE_INSERT = `
+  INSERT INTO art_pieces (id, kind, name, material, colorable, default_color, author, license, files, spec, contract_version, source, uploaded_by)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, 'upload', $12)
+  ON CONFLICT (id) DO NOTHING
+  RETURNING ${ART_PIECE_COLUMNS}
+`;
+
+/**
+ * A contribution (#122): the same insert-or-refuse as an Admin upload, but
+ * `pending` and stamped with the moment its rights statement was accepted.
+ */
+const CONTRIBUTION_INSERT = `
+  INSERT INTO art_pieces (id, kind, name, material, colorable, default_color, author, license, files, spec, contract_version, source, uploaded_by, status, license_accepted_at)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, 'upload', $12, 'pending', now())
+  ON CONFLICT (id) DO NOTHING
+  RETURNING ${ART_PIECE_COLUMNS}
+`;
+
+/**
+ * What a user has in flight: pending pieces, and accepted submissions of the
+ * last window read from the audit trail, so a rejected or retired piece still
+ * counts for the hour. Run under the user's row lock when it is binding.
+ */
+const CONTRIBUTION_USAGE = `
+  SELECT
+    (SELECT count(*) FROM art_pieces WHERE uploaded_by = $1 AND status = 'pending')::int AS pending,
+    (SELECT count(*) FROM audit_log
+      WHERE actor_id = $1 AND action = 'submit-art' AND created_at > now() - make_interval(secs => $2))::int AS last_hour
+`;
+
+const ART_AUDIT_INSERT = 'INSERT INTO audit_log (actor_id, action, piece_id) VALUES ($1, $2, $3)';
+
+const UPLOADED_ART_PIECE_LOCK = `SELECT ${ART_PIECE_COLUMNS} FROM art_pieces WHERE id = $1 AND source = 'upload' FOR UPDATE`;
+
+const ART_REVIEW_UPDATE = `
+  UPDATE art_pieces SET status = $2, reviewed_by = $3, review_note = $4, reviewed_at = now(), updated_at = now()
+  WHERE id = $1
+  RETURNING ${ART_PIECE_COLUMNS}
+`;
+
+const UPLOADED_ART_PIECE_RETIRE = `
+  UPDATE art_pieces SET retired_at = now(), updated_at = now()
+  WHERE id = $1
+  RETURNING ${ART_PIECE_COLUMNS}
+`;
+
+/** Archived, never deleted: whoever placed the plant keeps seeing it (D1b). */
+const DECOR_ASSET_ARCHIVE_BY_TEXTURE = 'UPDATE assets SET archived_at = now() WHERE texture_key = $1 AND archived_at IS NULL';
+
+const ASSET_INSERT = `
+  INSERT INTO assets (slug, name, kind, texture_key, w, h, placeable_on_desk, above_avatars)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+  RETURNING ${ASSET_COLUMNS}
+`;
+
+function toArtPiece(row: Record<string, unknown>): ArtCatalogPiece {
+  return {
+    id: row.id as string,
+    kind: row.kind as ArtCatalogPiece['kind'],
+    name: row.name as string,
+    material: (row.material as string | null) ?? null,
+    colorable: row.colorable === true,
+    defaultColor: (row.default_color as string | null) ?? null,
+    author: row.author as string,
+    license: row.license as string,
+    // `pg` already parses jsonb.
+    files: row.files as ArtCatalogPiece['files'],
+    spec: row.spec as ArtCatalogPiece['spec'],
+    contractVersion: row.contract_version as number,
+    retiredAt: (row.retired_at as Date | null) ?? null,
+    registeredAt: row.registered_at as Date,
+    updatedAt: row.updated_at as Date,
+    // A row read before the column existed is a pack piece, its DEFAULT.
+    source: row.source === 'upload' ? 'upload' : 'pack',
+    uploadedBy: (row.uploaded_by as string | null | undefined) ?? null,
+    // Same for the review columns (#122): the DEFAULT is approved.
+    status: (row.status as ArtPieceStatus | undefined) ?? 'approved',
+    reviewedBy: (row.reviewed_by as string | null | undefined) ?? null,
+    reviewedAt: (row.reviewed_at as Date | null | undefined) ?? null,
+    reviewNote: (row.review_note as string | null | undefined) ?? null,
+    licenseAcceptedAt: (row.license_accepted_at as Date | null | undefined) ?? null,
+  };
+}
+
+/** The values of `UPLOADED_ART_PIECE_INSERT` and `CONTRIBUTION_INSERT`, in order. */
+function uploadValues(piece: ArtPiece, uploadedBy: string): unknown[] {
+  const fields = artPieceFields(piece);
+  return [
+    fields.id,
+    fields.kind,
+    fields.name,
+    fields.material,
+    fields.colorable,
+    fields.defaultColor,
+    fields.author,
+    fields.license,
+    JSON.stringify(fields.files),
+    JSON.stringify(fields.spec),
+    ART_CONTRACT_VERSION,
+    uploadedBy,
+  ];
+}
+
+function toUsage(row: Record<string, unknown> | undefined): ContributionUsage {
+  return { pending: Number(row?.pending ?? 0), lastHour: Number(row?.last_hour ?? 0) };
+}
 
 function toAsset(row: Record<string, unknown>): Asset {
   return {
@@ -124,6 +288,43 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
     }
   }
 
+  /**
+   * One INSERT of a validated asset, on the pool or inside a transaction.
+   *
+   * `assets_slug_unique` es la garantia real; esto solo traduce su fallo a un
+   * error de dominio en vez de un 500 pelado, misma logica que ya documenta la
+   * cabecera de `decorRules.ts` para los CHECK. Se mira SOLO ese codigo y todo
+   * lo demas se relanza: tragarse un fallo desconocido como 409 le diria al
+   * administrador que se equivoco el cuando el que se rompio fue el servidor,
+   * que es el mismo pecado que evita el `translating` de la ruta, en la otra
+   * direccion.
+   */
+  /** One audit entry of the art catalog, inside the transaction of the change it records. */
+  async function audit(client: DirectoryQueryable, actorId: string, action: ArtAuditAction, pieceId: string): Promise<void> {
+    await client.query(ART_AUDIT_INSERT, [actorId, action, pieceId]);
+  }
+
+  async function insertAsset(client: DirectoryQueryable, normalized: NormalizedCreateAssetInput): Promise<Asset> {
+    try {
+      const result = await client.query(ASSET_INSERT, [
+        normalized.slug,
+        normalized.name,
+        normalized.kind,
+        normalized.textureKey,
+        normalized.w,
+        normalized.h,
+        normalized.placeableOnDesk,
+        normalized.aboveAvatars,
+      ]);
+      return toAsset(result.rows[0]);
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new AssetNameTakenError('ya existe un asset con ese nombre');
+      }
+      throw error;
+    }
+  }
+
   return {
     async listAssets(options: ListAssetsOptions = {}) {
       // El filtro se compone en el TEXTO y no como un parametro: un
@@ -140,41 +341,7 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
     async createAsset(input: CreateAssetInput) {
       // Validar ANTES de pedir conexion, misma razon que `pgSpaces.createSpace`:
       // un asset mal escrito no debe costar una consulta.
-      const normalized = normalizeCreateAssetInput(input);
-
-      try {
-        const result = await pool.query(
-          `
-            INSERT INTO assets (slug, name, kind, texture_key, w, h, placeable_on_desk, above_avatars)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING ${ASSET_COLUMNS}
-          `,
-          [
-            normalized.slug,
-            normalized.name,
-            normalized.kind,
-            normalized.textureKey,
-            normalized.w,
-            normalized.h,
-            normalized.placeableOnDesk,
-            normalized.aboveAvatars,
-          ],
-        );
-        return toAsset(result.rows[0]);
-      } catch (error) {
-        // `assets_slug_unique` es la garantia real; esto solo traduce su fallo
-        // a un error de dominio en vez de un 500 pelado, misma logica que ya
-        // documenta la cabecera de `decorRules.ts` para los CHECK.
-        //
-        // Se mira SOLO ese codigo y todo lo demas se relanza: tragarse un fallo
-        // desconocido como 409 le diria al administrador que se equivoco el
-        // cuando el que se rompio fue el servidor, que es el mismo pecado que
-        // evita el `translating` de la ruta, en la otra direccion.
-        if (isUniqueViolation(error)) {
-          throw new AssetNameTakenError('ya existe un asset con ese nombre');
-        }
-        throw error;
-      }
+      return insertAsset(pool, normalizeCreateAssetInput(input));
     },
 
     async archiveAsset(id: string) {
@@ -279,6 +446,143 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
         // volveria a meter el filtro del catalogo por la puerta de atras.
         const result = await client.query(DESK_SELECT, [userId]);
         return result.rows.map(toDeskItem);
+      });
+    },
+
+    async registerArtPack(pack: ArtPackManifest) {
+      // Validated before asking for a connection, same as `createAsset`.
+      const valid = normalizeArtPack(pack);
+
+      return inTransaction(async (client) => {
+        for (const piece of valid.pieces) {
+          const fields = artPieceFields(piece);
+          await client.query(ART_PIECE_UPSERT, [
+            fields.id,
+            fields.kind,
+            fields.name,
+            fields.material,
+            fields.colorable,
+            fields.defaultColor,
+            fields.author,
+            fields.license,
+            // Stringified: `pg` would send a JS array as a Postgres array literal.
+            JSON.stringify(fields.files),
+            JSON.stringify(fields.spec),
+            valid.contractVersion,
+          ]);
+        }
+        const retired = await client.query(ART_PIECE_RETIRE, [valid.pieces.map((piece) => piece.id)]);
+        return { registered: valid.pieces.length, retired: retired.rows.map((row) => row.id as string) };
+      });
+    },
+
+    async listArtPieces(options: ListArtPiecesOptions = {}) {
+      // Composed in the text for the same reason as `listAssets`. Approved
+      // only, always: a contribution under review is not part of the catalog.
+      const where = options.includeRetired ? "WHERE status = 'approved'" : "WHERE status = 'approved' AND retired_at IS NULL";
+      const result = await pool.query(`SELECT ${ART_PIECE_COLUMNS} FROM art_pieces ${where} ORDER BY kind, id`);
+      return result.rows.map(toArtPiece);
+    },
+
+    async registerUploadedArtPiece({ piece, uploadedBy, decorAsset }: UploadedArtPieceInput) {
+      // Both checked before asking for a connection, same as `createAsset`.
+      assertUploadedArtPiece(piece);
+      const asset = decorAsset === undefined ? undefined : normalizeCreateAssetInput(decorAsset);
+
+      return inTransaction(async (client) => {
+        const inserted = await client.query(UPLOADED_ART_PIECE_INSERT, uploadValues(piece, uploadedBy));
+        const row = inserted.rows[0];
+        if (row === undefined) throw new ArtPieceExistsError(piece.id);
+        // Same transaction: a taken decor name rolls the piece back too.
+        const created = asset === undefined ? null : await insertAsset(client, asset);
+        await audit(client, uploadedBy, 'upload-art', piece.id);
+        return { piece: toArtPiece(row), asset: created };
+      });
+    },
+
+    async artContributionUsage(userId: string) {
+      const result = await pool.query(CONTRIBUTION_USAGE, [userId, CONTRIBUTION_QUOTA_WINDOW_MS / 1000]);
+      return toUsage(result.rows[0]);
+    },
+
+    async submitArtContribution({ piece, submittedBy, decorAsset }: ArtContributionInput) {
+      assertUploadedArtPiece(piece);
+      const asset = decorAsset === undefined ? undefined : normalizeCreateAssetInput(decorAsset);
+
+      return inTransaction(async (client) => {
+        // The user row is the lock every submission of that user queues on
+        // (READ COMMITTED): two parallel uploads count one after the other,
+        // so they cannot both take the last pending slot or the last of the
+        // hour. Same stable-row lock as `replaceDeskConfig`.
+        await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [submittedBy]);
+        const counted = await client.query(CONTRIBUTION_USAGE, [submittedBy, CONTRIBUTION_QUOTA_WINDOW_MS / 1000]);
+        assertContributionQuota(toUsage(counted.rows[0]));
+        if (asset !== undefined) {
+          // Only checked: the asset itself is created by the approval.
+          const taken = await client.query('SELECT id FROM assets WHERE lower(slug) = lower($1)', [asset.slug]);
+          if (taken.rows.length > 0) throw new AssetNameTakenError('ya existe un asset con ese nombre');
+        }
+        const inserted = await client.query(CONTRIBUTION_INSERT, uploadValues(piece, submittedBy));
+        const row = inserted.rows[0];
+        if (row === undefined) throw new ArtPieceExistsError(piece.id);
+        await audit(client, submittedBy, 'submit-art', piece.id);
+        return toArtPiece(row);
+      });
+    },
+
+    async listUploadedArtPieces(options: ListUploadedArtOptions = {}) {
+      const result = await pool.query(
+        `SELECT ${ART_PIECE_COLUMNS} FROM art_pieces
+         WHERE source = 'upload' AND ($1::uuid IS NULL OR uploaded_by = $1) AND ($2::text IS NULL OR status = $2)
+         ORDER BY registered_at, id`,
+        [options.uploadedBy ?? null, options.status ?? null],
+      );
+      return result.rows.map(toArtPiece);
+    },
+
+    async findUploadedArtPiece(id: string) {
+      const result = await pool.query(`SELECT ${ART_PIECE_COLUMNS} FROM art_pieces WHERE id = $1 AND source = 'upload'`, [id]);
+      const row = result.rows[0];
+      return row ? toArtPiece(row) : null;
+    },
+
+    async findArtPiecesWithFile(sha256: string) {
+      // jsonb containment: some element of `files` has this `sha256`.
+      const result = await pool.query(
+        `SELECT ${ART_PIECE_COLUMNS} FROM art_pieces WHERE source = 'upload' AND files @> $1::jsonb ORDER BY registered_at, id`,
+        [JSON.stringify([{ sha256 }])],
+      );
+      return result.rows.map(toArtPiece);
+    },
+
+    async reviewArtContribution({ id, reviewerId, decision, note, decorAsset }: ArtReviewInput) {
+      const asset = decorAsset === undefined ? undefined : normalizeCreateAssetInput(decorAsset);
+
+      return inTransaction(async (client) => {
+        // The row lock makes two reviewers deciding at once queue: the second
+        // one reads the first decision and is refused by the transition rule.
+        const locked = await client.query(UPLOADED_ART_PIECE_LOCK, [id]);
+        const current = locked.rows[0];
+        if (current === undefined) return null;
+        const status = reviewTransition(toArtPiece(current).status, decision);
+        const updated = await client.query(ART_REVIEW_UPDATE, [id, status, reviewerId, status === 'rejected' ? note : null]);
+        const created = status === 'approved' && asset !== undefined ? await insertAsset(client, asset) : null;
+        await audit(client, reviewerId, status === 'approved' ? 'approve-art' : 'reject-art', id);
+        return { piece: toArtPiece(updated.rows[0]), asset: created };
+      });
+    },
+
+    async retireUploadedArtPiece({ id, actorId }: ArtRetirementInput) {
+      return inTransaction(async (client) => {
+        const locked = await client.query(UPLOADED_ART_PIECE_LOCK, [id]);
+        const current = locked.rows[0];
+        if (current === undefined) return null;
+        const piece = toArtPiece(current);
+        if (retireTransition(piece) === 'already-retired') return { piece, changed: false };
+        const retired = await client.query(UPLOADED_ART_PIECE_RETIRE, [id]);
+        await client.query(DECOR_ASSET_ARCHIVE_BY_TEXTURE, [artSheetKey(id, 'sheet')]);
+        await audit(client, actorId, 'retire-art', id);
+        return { piece: toArtPiece(retired.rows[0]), changed: true };
       });
     },
   };

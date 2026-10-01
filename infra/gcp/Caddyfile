@@ -199,6 +199,14 @@ http://{$APP_HOST}, http://{$LK_HOST}, http://{$TURN_HOST} {
 		reverse_proxy colyseus:2567
 	}
 
+	# Arte subido desde /dashboard (issue #121): el manifiesto de subidas y
+	# cada PNG por su hash. Prefijo propio y NUNCA `/assets/*`, por lo mismo
+	# que arriba: los bundles de Vite viven bajo /assets/ y son del contenedor
+	# `web`. El servidor ya responde con su propia cabecera de cache inmutable.
+	handle /assets/files/* {
+		reverse_proxy colyseus:2567
+	}
+
 	# Escritorios asignables (issue #7, slice 5): listado y coger/dejar sitio.
 	# `/desks` y `/desks/*` (que cubre `/desks/:id/claim`) van por separado
 	# porque el comodin de un solo segmento no casa la ruta exacta.
@@ -225,6 +233,19 @@ http://{$APP_HOST}, http://{$LK_HOST}, http://{$TURN_HOST} {
 	# Nombre visible auto-elegido en login (issue #100): GET y POST sobre la
 	# misma ruta exacta, igual que /me/desk en solitario.
 	handle /me/display-name {
+		reverse_proxy colyseus:2567
+	}
+
+	# Personaje elegido al entrar a la oficina (arte, paso 5): GET y POST
+	# sobre la misma ruta exacta, igual que /me/display-name.
+	handle /me/avatar {
+		reverse_proxy colyseus:2567
+	}
+
+	# Contribuciones de arte (#122): subir y listar las propias, y la vista
+	# previa privada de sus archivos. Prefijo propio: /me/avatar y /me/desk
+	# son rutas exactas y no lo cubren.
+	handle /me/art/* {
 		reverse_proxy colyseus:2567
 	}
 

@@ -113,6 +113,19 @@ export function isPresenceStatus(raw: unknown): raw is PresenceStatus {
   return typeof raw === 'string' && (PRESENCE_STATUSES as readonly string[]).includes(raw);
 }
 
+/**
+ * A player's character as read from the wire (art migration, step 5): an art
+ * pack character id, or `null` for anything else (an older server sends none).
+ * Only the shape is checked here; the server already stored a catalog-checked
+ * id, and `null` makes the office draw the pack default rather than ask the
+ * loader for a path it should never request.
+ */
+const CHARACTER_ID = /^character-[a-z0-9-]{1,64}$/;
+
+export function characterIdOf(raw: unknown): string | null {
+  return typeof raw === 'string' && CHARACTER_ID.test(raw) ? raw : null;
+}
+
 /** Tope de nombre visible. Recortar es preferible a rechazar: no expulsa a nadie. */
 export const MAX_NAME_LENGTH = 24;
 export const DEFAULT_NAME = 'Invitado';

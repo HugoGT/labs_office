@@ -17,6 +17,27 @@ const CODES: AdminErrorCode[] = [
   'desks-not-configured',
   'decor-not-configured',
   'spaces-not-configured',
+  'appearance-unknown-piece',
+  'appearance-retired-piece',
+  'appearance-color-not-allowed',
+  'appearance-invalid-color',
+  'appearance-immutable',
+  'terrain-under-placement',
+  'terrain-under-player',
+  'terrain-not-configured',
+  'not-png',
+  'invalid-png',
+  'unsupported-png',
+  'invalid-dimensions',
+  'too-many-colors',
+  'not-opaque',
+  'background-present',
+  'too-large',
+  'invalid-metadata',
+  'missing-file',
+  'asset-upload-not-configured',
+  'asset-already-uploaded',
+  'asset-name-taken',
   'network',
   'unknown',
 ];
@@ -138,4 +159,19 @@ describe('describeAdminError', () => {
     expect(describeAdminError('boom')).toBe(describeAdminError(undefined));
     expect(describeAdminError(null)).toMatch(/\S/);
   });
+
+  it('an appearance refused at creation says what to pick instead, not that the data was wrong (art step 7)', () => {
+    expect(describeAdminError(new AdminError('appearance-color-not-allowed'))).toMatch(/no admite color/);
+    expect(describeAdminError(new AdminError('appearance-immutable'))).toMatch(/al crear/);
+  });
 });
+
+describe('describeAdminError: terrain edits (#123 phase 2)', () => {
+  it('says why water was refused, so the admin knows whether to pick another block or wait', () => {
+    expect(describeAdminError(new AdminError('terrain-under-placement'))).toMatch(/agua/);
+    expect(describeAdminError(new AdminError('terrain-under-placement'))).toMatch(/otro bloque/);
+    expect(describeAdminError(new AdminError('terrain-under-player'))).toMatch(/alguien/);
+    expect(describeAdminError(new AdminError('terrain-not-configured'))).toMatch(/terreno/);
+  });
+});
+

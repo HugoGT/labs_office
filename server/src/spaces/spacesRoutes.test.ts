@@ -11,6 +11,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { readArtPackManifest } from '../decor/artPackFile.ts';
+import { createMemoryDecor } from '../decor/memoryDecor.ts';
 import type { DirectoryUser } from '../directory/directoryPort.ts';
 import { createMemoryDirectory } from '../directory/memoryDirectory.ts';
 import type { IdTokenVerifier } from '../verifyIdToken.ts';
@@ -35,6 +37,8 @@ function user(overrides: Partial<DirectoryUser> & Pick<DirectoryUser, 'id' | 'ui
     status: 'active',
     expiresAt: null,
     invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
     createdAt: new Date('2025-12-01T00:00:00.000Z'),
     ...overrides,
   };
@@ -101,6 +105,19 @@ describe('handleGetSpacesConfig', () => {
     expect(result.body.version).not.toBe(await changingStore.version());
   });
 
+  it('serves the floor of each space, which the version hash leaves out (art step 4)', async () => {
+    const { deps, spaces } = harness();
+    await spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: null, floor: { materialId: 'floor-plain', color: '#2c3e50' } });
+    const versionBefore = await spaces.version();
+
+    const result = await handleGetSpacesConfig(deps);
+
+    expect(result.body.spaces).toEqual([
+      expect.objectContaining({ name: 'Sala', floorMaterialId: 'floor-plain', floorColor: '#2c3e50' }),
+    ]);
+    expect(result.body.version).toBe(versionBefore);
+  });
+
   it('no exige autenticacion: la sirve tambien sin cabecera', async () => {
     // Es deliberado y no un descuido. Hoy los rectangulos viajan DENTRO del
     // bundle del cliente (`BUILT_IN_SPACES`), asi que no hay nada que ocultar
@@ -132,7 +149,7 @@ describe('handleGetSpacesConfig', () => {
     expect(result.body.version).toBe(hashSpaces([]));
   });
 
-  it('publica solo los campos que entran en el hash, mas kind, nunca las marcas de tiempo', async () => {
+  it('publica solo los campos que entran en el hash, mas kind y el suelo, nunca las marcas de tiempo', async () => {
     // `createdAt`/`updatedAt` no afectan a la pertenencia, asi que no los
     // necesita nadie del lado del cliente. Y si viajasen, invitarian a que
     // alguien los metiese en su propio calculo de version y divergiese del
@@ -143,8 +160,12 @@ describe('handleGetSpacesConfig', () => {
 
     const result = await handleGetSpacesConfig(deps);
 
+    // `floorMaterialId`/`floorColor` (art step 4) travel for drawing only,
+    // outside the hash like `kind`.
     expect(Object.keys((result.body.spaces as Record<string, unknown>[])[0]).sort()).toEqual([
       'capacity',
+      'floorColor',
+      'floorMaterialId',
       'h',
       'id',
       'kind',
@@ -180,6 +201,8 @@ describe('handleGetSpacesConfig', () => {
       h: 3,
       capacity: null,
       deskId: 'id-mesa-1',
+      floorMaterialId: 'floor-wood',
+      floorColor: null,
       createdAt: NOW,
       updatedAt: NOW,
     };
@@ -508,5 +531,119 @@ describe('handleDeleteSpace', () => {
     });
 
     expect(result).toEqual({ status: 409, body: { error: 'space-owned-by-desk' } });
+  });
+});
+
+/** The floor is chosen when a room is created and never again (art migration, step 7). */
+describe('space floor, chosen only at creation (art step 7)', () => {
+  const PACK = readArtPackManifest(new URL('../../../public/assets/pack/manifest.json', import.meta.url));
+
+  async function withCatalog() {
+    const base = harness();
+    const decor = createMemoryDecor({ now: () => NOW });
+    await decor.registerArtPack(PACK);
+    return { ...base, decor, deps: { ...base.deps, decor } };
+  }
+
+  it('stores the chosen floor material and color with the room, color normalized', async () => {
+    const { deps, spaces } = await withCatalog();
+
+    const result = await handleCreateSpace(BEARER_ADMIN, body({ floorMaterialId: 'floor-plain', floorColor: '#2C3E50' }), deps);
+
+    expect(result.status).toBe(201);
+    expect(result.body).toEqual(expect.objectContaining({ floorMaterialId: 'floor-plain', floorColor: '#2c3e50' }));
+    expect(await spaces.listSpaces()).toEqual([
+      expect.objectContaining({ floorMaterialId: 'floor-plain', floorColor: '#2c3e50' }),
+    ]);
+  });
+
+  it('the colorable floor without a color takes its default color', async () => {
+    const { deps } = await withCatalog();
+
+    const result = await handleCreateSpace(BEARER_ADMIN, body({ floorMaterialId: 'floor-plain' }), deps);
+
+    expect(result.body).toEqual(expect.objectContaining({ floorMaterialId: 'floor-plain', floorColor: '#b9c3cc' }));
+  });
+
+  it('a non-colorable floor keeps its own look, stored without a color', async () => {
+    const { deps } = await withCatalog();
+
+    const result = await handleCreateSpace(BEARER_ADMIN, body({ floorMaterialId: 'floor-grass' }), deps);
+
+    expect(result.body).toEqual(expect.objectContaining({ floorMaterialId: 'floor-grass', floorColor: null }));
+  });
+
+  it('without a floor the room takes the pack default', async () => {
+    const { deps } = await withCatalog();
+
+    const result = await handleCreateSpace(BEARER_ADMIN, body(), deps);
+
+    expect(result.body).toEqual(expect.objectContaining({ floorMaterialId: 'floor-wood', floorColor: null }));
+  });
+
+  it.each([
+    ['unknown-piece', { floorMaterialId: 'floor-lava' }],
+    ['unknown-piece', { floorMaterialId: 'desk-painted' }],
+    ['color-not-allowed', { floorMaterialId: 'floor-water', floorColor: '#2c3e50' }],
+    ['invalid-color', { floorMaterialId: 'floor-plain', floorColor: '#abc' }],
+  ])('rejects a floor the catalog does not allow with 400 invalid-appearance %s and creates nothing', async (reason, floor) => {
+    const { deps, spaces } = await withCatalog();
+
+    const result = await handleCreateSpace(BEARER_ADMIN, body(floor), deps);
+
+    expect(result).toEqual({ status: 400, body: { error: 'invalid-appearance', reason } });
+    expect(await spaces.listSpaces()).toEqual([]);
+  });
+
+  it('a retired floor cannot be chosen again', async () => {
+    const { deps, decor } = await withCatalog();
+    await decor.registerArtPack({ ...PACK, pieces: PACK.pieces.filter((piece) => piece.id !== 'floor-water') });
+
+    const result = await handleCreateSpace(BEARER_ADMIN, body({ floorMaterialId: 'floor-water' }), deps);
+
+    expect(result).toEqual({ status: 400, body: { error: 'invalid-appearance', reason: 'retired-piece' } });
+  });
+
+  it('the role guard still runs before the floor is read', async () => {
+    const { deps } = await withCatalog();
+
+    expect((await handleCreateSpace(BEARER_EMPLEADO, body({ floorMaterialId: 'floor-lava' }), deps)).status).toBe(403);
+  });
+
+  it.each([
+    [{ floorMaterialId: 'floor-grass' }],
+    [{ floorColor: '#000000' }],
+    [{ name: 'Otra', floorMaterialId: 'floor-plain', floorColor: '#2c3e50' }],
+  ])('an update that mentions the floor answers 400 appearance-immutable and changes nothing', async (patch) => {
+    const { deps, spaces } = await withCatalog();
+    const created = await spaces.createSpace({
+      name: 'Sala',
+      x: 1,
+      y: 1,
+      w: 4,
+      h: 4,
+      capacity: null,
+      floor: { materialId: 'floor-plain', color: '#2c3e50' },
+    });
+
+    const result = await handleUpdateSpace(BEARER_ADMIN, created.id, patch, deps);
+
+    expect(result).toEqual({ status: 400, body: { error: 'appearance-immutable' } });
+    expect(await spaces.listSpaces()).toEqual([
+      expect.objectContaining({ name: 'Sala', floorMaterialId: 'floor-plain', floorColor: '#2c3e50' }),
+    ]);
+  });
+
+  it('moving and renaming a room keep its floor', async () => {
+    const { deps } = await withCatalog();
+    const created = await handleCreateSpace(BEARER_ADMIN, body({ floorMaterialId: 'floor-plain', floorColor: '#2c3e50' }), deps);
+    const id = created.body.id as string;
+
+    expect((await handleUpdateSpace(BEARER_ADMIN, id, { x: 10, y: 10, w: 4, h: 4 }, deps)).status).toBe(200);
+    const renamed = await handleUpdateSpace(BEARER_ADMIN, id, { name: 'Sala movida' }, deps);
+
+    expect(renamed.body).toEqual(
+      expect.objectContaining({ name: 'Sala movida', x: 10, y: 10, floorMaterialId: 'floor-plain', floorColor: '#2c3e50' }),
+    );
   });
 });

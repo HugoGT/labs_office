@@ -1,8 +1,10 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import type { Role } from '../dashboard/adminPort';
+import type { ArtContributionPort } from '../dashboard/artContributionPort';
 import type { AssetAdminPort } from '../dashboard/assetAdminPort';
 import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
+import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import { SIDEBAR_TOP } from '../game/hudLayout';
 import type { OfficeBridge } from '../game/officeBridge';
 import { statusCssColor } from '../game/presence';
@@ -27,6 +29,11 @@ const OfficeLayoutEditorLazy = lazy(() => import('./OfficeLayoutEditor'));
  */
 const AssetsPanelLazy = lazy(() =>
   import('../dashboard/AssetsPanel').then((assetsModule) => ({ default: assetsModule.AssetsPanel })),
+);
+
+/** Art contributions (#122): lazy for the same reason, nobody pays for it until "Personalizar" opens. */
+const ArtContributionSectionLazy = lazy(() =>
+  import('./ArtContributionSection').then((sectionModule) => ({ default: sectionModule.ArtContributionSection })),
 );
 
 export interface OfficeSidebarProps {
@@ -55,6 +62,8 @@ export interface OfficeSidebarProps {
   desks?: DeskAdminPort | null;
   /** Salas admin (#74, PR4): sin esto tampoco se monta nada de edicion, aunque `desks` este presente -- ambas secciones comparten la misma frontera lazy. */
   spaces?: SpacesAdminPort | null;
+  /** Terrain blocks (#123 phase 2): optional inside the layout editor, which mounts without it. */
+  terrain?: TerrainAdminPort | null;
   refreshDesks?: () => void;
   refreshSpaces?: () => void;
   /** Reenviado tal cual a `OfficeLayoutEditor` (#74, PR3c: exclusividad con `DeskDecorEditor`). */
@@ -67,6 +76,12 @@ export interface OfficeSidebarProps {
    * rol si administre.
    */
   assets?: AssetAdminPort | null;
+  /**
+   * Contributing art (#122), for anyone signed in, admin or not.
+   * `undefined`/`null` (no server, or the open office without a session)
+   * leaves the section out.
+   */
+  contributions?: ArtContributionPort | null;
 }
 
 /**
@@ -86,11 +101,13 @@ export function OfficeSidebar({
   bridge,
   desks,
   spaces,
+  terrain,
   refreshDesks,
   refreshSpaces,
   onLayoutEditingChange,
   forceExitLayoutEditing,
   assets,
+  contributions,
 }: OfficeSidebarProps) {
   const [expanded, setExpanded] = useState(false);
   const [query, setQuery] = useState('');
@@ -160,6 +177,7 @@ export function OfficeSidebar({
                 bridge={bridge}
                 desks={desks}
                 spaces={spaces}
+                terrain={terrain}
                 refreshDesks={refreshDesks}
                 refreshSpaces={refreshSpaces}
                 onEditingChange={onLayoutEditingChange}
@@ -175,6 +193,11 @@ export function OfficeSidebar({
             </Suspense>
           )}
           <MiEspacioPanel />
+          {contributions !== undefined && contributions !== null && (
+            <Suspense fallback={null}>
+              <ArtContributionSectionLazy contributions={contributions} />
+            </Suspense>
+          )}
         </div>
       )}
       <button

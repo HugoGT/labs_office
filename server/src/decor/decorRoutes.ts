@@ -41,6 +41,7 @@ import {
   type AdminDeps,
   type AdminResult,
 } from '../admin/adminRoutes.ts';
+import { artSheetKey } from '../../../src/game/artContract.ts';
 import type { Asset, DecorCatalog, DeskItem, DeskItemInput } from './decorPort.ts';
 import { AssetNameTakenError, InvalidAssetError, InvalidDeskConfigError } from './decorRules.ts';
 
@@ -68,7 +69,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * `archivedAt` SI viaja, porque es lo unico que distingue una pieza retirada
  * de una viva cuando el panel pide el historico.
  */
-function toAssetBody(asset: Asset): Record<string, unknown> {
+export function toAssetBody(asset: Asset, author: string | null = null): Record<string, unknown> {
   return {
     id: asset.id,
     slug: asset.slug,
@@ -80,7 +81,24 @@ function toAssetBody(asset: Asset): Record<string, unknown> {
     placeableOnDesk: asset.placeableOnDesk,
     aboveAvatars: asset.aboveAvatars,
     archivedAt: asset.archivedAt === null ? null : asset.archivedAt.toISOString(),
+    // Credit of an uploaded piece (#122); `null` for everything else.
+    author,
   };
+}
+
+/**
+ * The author behind each decor asset that draws an uploaded plant, keyed by
+ * its texture (`art:<id>:sheet`), so the catalog credits contributed pieces
+ * without a column of its own: the art piece already stores who made it.
+ */
+async function uploadAuthors(decor: DecorCatalog): Promise<Map<string, string>> {
+  const pieces = await decor.listArtPieces({ includeRetired: true });
+  return new Map(pieces.filter((piece) => piece.source === 'upload').map((piece) => [artSheetKey(piece.id, 'sheet'), piece.author]));
+}
+
+async function catalogBody(decor: DecorCatalog): Promise<Record<string, unknown>> {
+  const [assets, authors] = await Promise.all([decor.listAssets(), uploadAuthors(decor)]);
+  return { assets: assets.map((asset) => toAssetBody(asset, authors.get(asset.textureKey) ?? null)) };
 }
 
 /** Lo justo para pintar la pieza. `createdAt` no dice nada al cliente y no viaja. */
@@ -126,8 +144,7 @@ export async function handleListAssets(
   // (D1b). Ofrecer las retiradas en la misma lista que las vivas haria que el
   // panel tuviese que filtrarlas otra vez, y ese es justo el filtro que un dia
   // se olvida.
-  const assets = await deps.decor.listAssets();
-  return { status: 200, body: { assets: assets.map(toAssetBody) } };
+  return { status: 200, body: await catalogBody(deps.decor) };
 }
 
 /**
@@ -151,8 +168,7 @@ export async function handleListOfficeAssets(
   const authenticated = await authenticate(authorization, deps);
   if (!authenticated.ok) return authenticated.result;
 
-  const assets = await deps.decor.listAssets();
-  return { status: 200, body: { assets: assets.map(toAssetBody) } };
+  return { status: 200, body: await catalogBody(deps.decor) };
 }
 
 export async function handleCreateAsset(

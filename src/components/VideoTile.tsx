@@ -14,6 +14,12 @@ export interface VideoTileProps {
    */
   portraits: Record<string, string> | null;
   /**
+   * Pack portrait by session (art migration, step 6), from the
+   * "characterportraits" event. Wins over `portraits` when the session has
+   * one; absent or missing the session, the procedural portrait shows.
+   */
+  characterPortraits?: Record<string, string> | null;
+  /**
    * Pista de video ya suscrita/adjuntable, o `null` si no hay camara que
    * mostrar (issue #17, D3). La TILE es la unica dueña de adjuntar/desvincular
    * este `<video>` -- `livekitRoom.ts` solo la reporta hacia afuera, nunca la
@@ -39,13 +45,26 @@ export const PORTRAIT_SOURCE_WIDTH = 16;
 export const PORTRAIT_SOURCE_HEIGHT = 20;
 export const PORTRAIT_SCALE = 3;
 
+/** A pack portrait is the whole 32x52 idle frame, at a smaller integer scale to fit the tile. */
+export const CHARACTER_PORTRAIT_WIDTH = 32;
+export const CHARACTER_PORTRAIT_HEIGHT = 52;
+export const CHARACTER_PORTRAIT_SCALE = 2;
+
 /**
  * Contenido de un tile de conversacion (issue #17, PR3b): video real cuando
  * hay una pista adjuntable, retrato fiel en caso contrario -- el mismo mapa
  * de bits que ya pinta el avatar en el canvas (D1). Nombre y borde de habla
  * se muestran en ambos estados, sin salto de layout entre ellos.
  */
-export function VideoTile({ sessionId, name, portraits, track, speaking, fit = 'cover' }: VideoTileProps) {
+export function VideoTile({
+  sessionId,
+  name,
+  portraits,
+  characterPortraits,
+  track,
+  speaking,
+  fit = 'cover',
+}: VideoTileProps) {
   const videoHostRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -70,7 +89,10 @@ export function VideoTile({ sessionId, name, portraits, track, speaking, fit = '
     };
   }, [track, fit]);
 
-  const dataUrl = portraits?.[avatarKeyFor(sessionId)];
+  const pack = characterPortraits?.[sessionId];
+  const dataUrl = pack ?? portraits?.[avatarKeyFor(sessionId)];
+  const width = pack ? CHARACTER_PORTRAIT_WIDTH * CHARACTER_PORTRAIT_SCALE : PORTRAIT_SOURCE_WIDTH * PORTRAIT_SCALE;
+  const height = pack ? CHARACTER_PORTRAIT_HEIGHT * CHARACTER_PORTRAIT_SCALE : PORTRAIT_SOURCE_HEIGHT * PORTRAIT_SCALE;
 
   return (
     <div className={styles.content} data-speaking={speaking}>
@@ -81,8 +103,8 @@ export function VideoTile({ sessionId, name, portraits, track, speaking, fit = '
           className={styles.portrait}
           src={dataUrl}
           alt={`Retrato de ${sessionId}`}
-          width={PORTRAIT_SOURCE_WIDTH * PORTRAIT_SCALE}
-          height={PORTRAIT_SOURCE_HEIGHT * PORTRAIT_SCALE}
+          width={width}
+          height={height}
         />
       ) : (
         <div className={styles.placeholder} aria-hidden="true" />

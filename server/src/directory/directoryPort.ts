@@ -32,6 +32,17 @@ export interface DirectoryUser {
   expiresAt: Date | null;
   /** id del usuario que lo invito, o null para los que no vinieron por invitacion. */
   invitedBy: string | null;
+  /**
+   * Chosen character, an art pack id (art migration, step 3). Never null: a
+   * new or pre-migration account carries the pack default until it chooses.
+   */
+  avatarId: string;
+  /**
+   * When the user last chose a character (art migration, step 5); `null`
+   * until the first choice. Rows from before the selector existed stay `null`,
+   * which is what sends existing accounts through it once.
+   */
+  avatarChosenAt: Date | null;
   createdAt: Date;
 }
 
@@ -142,5 +153,22 @@ export interface UserDirectory {
    * un conflicto consigo misma (D4).
    */
   setDisplayName(id: string, name: string): Promise<DirectoryUser | null>;
+  /**
+   * Stores the chosen character (art migration, step 3). Whether the id is an
+   * active character of the catalog is `resolveCharacterChoice`, run by the
+   * caller that has the catalog; the adapter only rejects what is not a
+   * character id at all (`InvalidArtChoiceError`). Also stamps
+   * `avatarChosenAt`: storing a character is choosing it. Returns `null` if
+   * `id` does not exist.
+   */
+  setAvatar(id: string, avatarId: string): Promise<DirectoryUser | null>;
+  /**
+   * Moves every account wearing `fromId` to `toId` (#122): a retired
+   * character sends its users back to the pack default. `avatarChosenAt` is
+   * kept, since they did choose; their next sign-in offers the selector with
+   * the default preselected. Returns how many accounts moved. Throws
+   * `InvalidArtChoiceError` if `toId` is not a character id.
+   */
+  reassignAvatar(fromId: string, toId: string): Promise<number>;
   close(): Promise<void>;
 }

@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { AuthPort, OfficeSession } from '../auth/authPort';
+import type { CharacterPort } from '../auth/characterPort';
 import type { DisplayNamePort } from '../auth/displayNamePort';
 import { useAuth } from '../hooks/useAuth';
+import { useCharacterChoice } from '../hooks/useCharacterChoice';
 import { useDisplayName } from '../hooks/useDisplayName';
 import { usePasswordReset } from '../hooks/usePasswordReset';
+import { CharacterSelect } from './CharacterSelect';
 import { LoginScreen } from './LoginScreen';
 
 export type { OfficeSession };
@@ -19,6 +22,12 @@ export interface AuthGateProps {
    * 503. Ya resuelto por `App.tsx`, igual que `auth`.
    */
   displayName?: DisplayNamePort | null;
+  /**
+   * Character step of the office entrance (art migration, step 5), after the
+   * name. `null`/absent skips it: no server, or the `/dashboard` route, whose
+   * administrative access must never wait on choosing a look.
+   */
+  character?: CharacterPort | null;
   /** Prellena "Nombre" con el ultimo elegido con exito en este dispositivo (D8). */
   initialName?: string;
   /** Se llama con el nombre YA canonicalizado tras un reclamo con exito, para que `App.tsx` lo recuerde (D8). */
@@ -48,6 +57,7 @@ export interface AuthGateProps {
 export function AuthGate({
   auth,
   displayName: displayNamePort = null,
+  character: characterPort = null,
   initialName,
   onNameClaimed,
   children,
@@ -68,6 +78,25 @@ export function AuthGate({
   useEffect(() => {
     if (user === null) everShowedLoginRef.current = true;
   }, [user]);
+
+  /**
+   * Art migration, step 5: `true` once the login form was actually on screen
+   * (`ready` with no user), which is what tells a fresh sign-in from a
+   * restored session (page refresh). Not `everShowedLoginRef`: that one also
+   * turns on in the `!ready` gap, where `user` is still `null` but nothing was
+   * shown. Only a fresh sign-in is asked again once a character was chosen.
+   */
+  const signedInHereRef = useRef(false);
+  useEffect(() => {
+    if (ready && user === null) signedInHereRef.current = true;
+  }, [ready, user]);
+
+  const character = useCharacterChoice(
+    characterPort,
+    user,
+    user !== null && flow.phase === 'resolved',
+    signedInHereRef.current,
+  );
 
   const handleSubmit = useCallback(
     async (name: string, email: string, password: string): Promise<void> => {
@@ -101,7 +130,22 @@ export function AuthGate({
   if (!ready) return null;
 
   if (user !== null && flow.phase === 'resolved') {
-    return <>{children(session)}</>;
+    // Same single-branch rule as the name (D2): the office only mounts once
+    // the character step is resolved too, so it never flashes before it.
+    if (character.flow.phase === 'resolved') return <>{children(session)}</>;
+    if (character.flow.phase === 'choosing') {
+      return (
+        <CharacterSelect
+          options={character.flow.options}
+          initialId={character.flow.initialId}
+          pending={character.saving}
+          error={character.error}
+          onSubmit={(avatarId) => void character.choose(avatarId)}
+        />
+      );
+    }
+    // Reading the saved choice: the same quiet gap as `!ready`.
+    return null;
   }
 
   if (user !== null && !everShowedLoginRef.current) {

@@ -17,6 +17,7 @@ import { WebSocketTransport } from '@colyseus/ws-transport';
 import express from 'express';
 import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { BASE_LAYOUT } from '../../src/game/officeLayout.ts';
 import { livekitRoomFor } from '../../src/game/officeProtocol.ts';
 import {
   handleAdminSession,
@@ -32,7 +33,28 @@ import { handleListUsers, handleRevokeUser } from './admin/adminRoutes.ts';
 import { identityAdminFromEnv } from './admin/gcpIdentityAdmin.ts';
 import type { IdentityAdmin } from './admin/identityAdminPort.ts';
 import type { DecorCatalog } from './decor/decorPort.ts';
+import type { AssetStoragePort } from './assets/assetStoragePort.ts';
+import { assetStorageFromEnv } from './assets/gcsAssetStorage.ts';
+import {
+  handleGetAssetFile,
+  handleUploadAsset,
+  handleUploadedArtManifest,
+  type AssetFileResult,
+  type AssetUploadDeps,
+} from './assets/assetUploadRoutes.ts';
+import {
+  handleApproveContribution,
+  handleGetPrivateArtFile,
+  handleListMyContributions,
+  handleListReviewQueue,
+  handleRejectContribution,
+  handleRetireArtPiece,
+  handleSubmitContribution,
+  type ArtContributionDeps,
+} from './assets/artContributionRoutes.ts';
+import { createCharacterRetirementHub, type CharacterRetirement } from './characterRetirement.ts';
 import { handleGetDisplayName, handleSetDisplayName } from './directory/displayNameRoutes.ts';
+import { handleGetAvatar, handleSetAvatar } from './directory/avatarRoutes.ts';
 import {
   handleArchiveAsset,
   handleCreateAsset,
@@ -43,6 +65,7 @@ import {
   handleUpdateAsset,
   type DecorDeps,
 } from './decor/decorRoutes.ts';
+import { DESK_SIDE } from './desks/deskRules.ts';
 import type { DeskDirectory } from './desks/desksPort.ts';
 import {
   handleClaimDesk,
@@ -82,6 +105,10 @@ import {
 import { recordingStorageFromEnv, type RecordingStoragePort } from './recording/recordingStorage.ts';
 import { createRecordingSpaceSnapshot } from './recording/recordingSpaceSnapshot.ts';
 import { guardSessionRequest, sessionIsInSpace } from './sessionGuard.ts';
+import type { TerrainStore } from './terrain/terrainPort.ts';
+import { handleSetTerrainBlock, type TerrainDeps } from './terrain/terrainRoutes.ts';
+import type { TerrainProtections } from './terrain/terrainRules.ts';
+import { createTerrainRuntime, type TerrainRuntime } from './terrain/terrainRuntime.ts';
 import { createIdTokenVerifier, type IdTokenVerifier } from './verifyIdToken.ts';
 
 /**
@@ -110,6 +137,16 @@ import { createIdTokenVerifier, type IdTokenVerifier } from './verifyIdToken.ts'
  */
 const PING_INTERVAL_MS = 5_000;
 const PING_MAX_RETRIES = 4;
+
+/**
+ * The art upload route (#121) and its body limit: two files of at most 128 KB
+ * each travel as base64 (a third larger) plus a few hundred bytes of
+ * metadata, so 1 MB leaves room without letting a body grow unbounded.
+ */
+const ASSET_UPLOAD_PATH = '/admin/assets/upload';
+/** A contribution (#122) carries the same files as an upload, so it gets the same limit. */
+const ART_CONTRIBUTION_PATH = '/me/art/contributions';
+const ASSET_UPLOAD_BODY_LIMIT = '1mb';
 
 interface LivekitTokenResult {
   status: 200 | 400 | 401 | 403 | 503;
@@ -207,6 +244,10 @@ export interface OfficeServer {
   recordings: RecordingRegistry;
   /** Live eviction of a revoked account (#93); exposed for tests, like `sessions`. */
   eviction: SessionEvictor;
+  /** Live reset of a retired character (#122); exposed for tests, like `eviction`. */
+  characters: CharacterRetirement;
+  /** The live terrain blocks and snapshot (#123 phase 2); exposed for tests, like `sessions`. */
+  terrain: TerrainRuntime;
   /**
    * Directorio de usuarios (#24), o `undefined` si esta desactivado. Expuesto
    * para las rutas de administracion y para los tests, igual que `sessions`.
@@ -283,6 +324,13 @@ export interface OfficeServerOverrides {
    */
   desks?: DeskDirectory | null;
   /**
+   * Replaces the persisted terrain blocks that would come from `process.env`
+   * (#123 phase 2). `null` forces "no store": the terrain is the committed
+   * layout's and editing answers 503, as in a deployment without
+   * `DATABASE_URL`. Its own override for the same reason as the ones above.
+   */
+  terrain?: TerrainStore | null;
+  /**
    * Replaces the Egress adapter that would come from `process.env` (#5).
    * `null` forces "not configured". Same reason as the overrides above: the
    * suite must not need a LiveKit stack to exercise the recording routes.
@@ -290,6 +338,8 @@ export interface OfficeServerOverrides {
   egress?: EgressPort | null;
   /** Same as `egress`, for the recordings bucket (#58). */
   storage?: RecordingStoragePort | null;
+  /** Same again, for the bucket of uploaded art files (#121). `null`: uploads answer 503. */
+  assetStorage?: AssetStoragePort | null;
   /** Shortens the upload polling after a stop (#58), for the same reason as the window below. */
   recordingReadiness?: { intervalMs: number; timeoutMs: number };
   /**
@@ -448,7 +498,17 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     }
     next();
   });
-  app.use(express.json());
+  // The art upload (#121) carries base64 PNGs, over the 100 KB default of
+  // `express.json()`. It gets its own, larger limit on its route only; every
+  // other route keeps the default.
+  const json = express.json();
+  app.use((req, res, next) => {
+    if (req.path === ASSET_UPLOAD_PATH || (req.path === ART_CONTRIBUTION_PATH && req.method === 'POST')) {
+      next();
+      return;
+    }
+    json(req, res, next);
+  });
 
   const sessions = createLiveSessionRegistry();
   const recordings = createRecordingRegistry();
@@ -459,6 +519,8 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   };
   // Shared by the room (which registers) and the admin routes (which evict) (#93).
   const eviction = createSessionEvictionHub();
+  // Shared by the room (which registers) and the retire route (which resets) (#122).
+  const characters = createCharacterRetirementHub();
   // Read per call, like the LiveKit credentials of `/livekit/token`.
   const egressFor = (): EgressPort | null =>
     overrides?.egress !== undefined ? overrides.egress : egressFromEnv(process.env);
@@ -466,6 +528,9 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   // client per request would go back to the metadata server every time.
   const storage: RecordingStoragePort | null =
     overrides?.storage !== undefined ? overrides.storage : recordingStorageFromEnv(process.env);
+  // Built once for the same reason as `storage`.
+  const assetStorage: AssetStoragePort | null =
+    overrides?.assetStorage !== undefined ? overrides.assetStorage : assetStorageFromEnv(process.env);
   const recordingDeps = (): RecordingDeps => ({
     sessions,
     recordings,
@@ -521,6 +586,14 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   const desksSource =
     overrides?.desks !== undefined ? (overrides.desks ?? undefined) : envRuntime?.desks;
   const desks = desksSource && recordingSpaces ? recordingSpaces.observeDesks(desksSource) : desksSource;
+
+  // Built from the committed layout now and from the persisted blocks in
+  // `listen`, after the schema exists (#123 phase 2). The room reads its
+  // snapshot on every move; the store is only touched at load and per edit.
+  const terrain = createTerrainRuntime({
+    layout: BASE_LAYOUT,
+    store: overrides?.terrain !== undefined ? (overrides.terrain ?? undefined) : envRuntime?.terrain,
+  });
 
   app.get('/health', (_req, res) => {
     // `auth` expone el modo EFECTIVO, no la variable de entorno: es la unica
@@ -665,7 +738,9 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
         return;
       }
 
-      run(req, { directory, spaces, auth, identityAdmin })
+      // `decor` only checks a chosen floor at creation (art migration, step
+      // 7); without it a room still gets the pack default.
+      run(req, { directory, spaces, auth, identityAdmin, decor })
         .then((result) => {
           res.status(result.status).json(result.body);
         })
@@ -733,6 +808,166 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     };
   }
 
+  /**
+   * The art upload (#121). Same "no store -> 503, never 404" as the others,
+   * with one code for any missing piece (directory, catalog or bucket): to
+   * the panel they all mean "uploads are not configured here".
+   */
+  function assetUploadRoute(run: (req: express.Request, deps: AssetUploadDeps) => Promise<AdminResult>) {
+    return (req: express.Request, res: express.Response): void => {
+      if (directory === undefined || decor === undefined || assetStorage === null) {
+        res.status(503).json({ error: 'asset-upload-not-configured' });
+        return;
+      }
+
+      run(req, { directory, decor, storage: assetStorage, auth, identityAdmin })
+        .then((result) => {
+          res.status(result.status).json(result.body);
+        })
+        .catch(() => {
+          console.error('[assets] unhandled failure in the upload route');
+          res.status(500).json({ error: 'internal' });
+        });
+    };
+  }
+
+  /**
+   * Answers the large body parser's refusals as JSON, so the panel reads them
+   * like any other code. Shared by the Admin upload and the contribution.
+   */
+  function uploadBodyErrors(error: { type?: string }, _req: express.Request, res: express.Response, next: express.NextFunction): void {
+    if (error?.type === 'entity.too.large') {
+      res.status(413).json({ error: 'too-large' });
+      return;
+    }
+    if (error?.type === 'entity.parse.failed') {
+      res.status(400).json({ error: 'invalid-request' });
+      return;
+    }
+    next(error);
+  }
+
+  // Registered before `/admin/assets/:id`, which would otherwise take
+  // `upload` for an asset id.
+  app.post(
+    '/admin/assets/upload',
+    express.json({ limit: ASSET_UPLOAD_BODY_LIMIT }),
+    assetUploadRoute((req, deps) => handleUploadAsset(req.header('Authorization'), req.body, deps)),
+    uploadBodyErrors,
+  );
+
+  /**
+   * Contributions and their review (#122). Same "no store -> 503" and the
+   * same code as the Admin upload: without a directory, a catalog or a bucket
+   * there is nothing to contribute to.
+   */
+  function contributionRoute(run: (req: express.Request, deps: ArtContributionDeps) => Promise<AdminResult>) {
+    return (req: express.Request, res: express.Response): void => {
+      if (directory === undefined || decor === undefined || assetStorage === null) {
+        res.status(503).json({ error: 'asset-upload-not-configured' });
+        return;
+      }
+
+      run(req, { directory, decor, storage: assetStorage, auth, identityAdmin, characters })
+        .then((result) => {
+          res.status(result.status).json(result.body);
+        })
+        .catch(() => {
+          console.error('[assets] unhandled failure in a contribution route');
+          res.status(500).json({ error: 'internal' });
+        });
+    };
+  }
+
+  /** Sends a PNG result or its JSON refusal. */
+  function sendArtFile(res: express.Response, result: AssetFileResult | AdminResult): void {
+    if ('png' in result) {
+      res.status(200).set(result.headers).send(Buffer.from(result.png));
+      return;
+    }
+    res.status(result.status).json(result.body);
+  }
+
+  app.post(
+    ART_CONTRIBUTION_PATH,
+    express.json({ limit: ASSET_UPLOAD_BODY_LIMIT }),
+    contributionRoute((req, deps) => handleSubmitContribution(req.header('Authorization'), req.body, deps)),
+    uploadBodyErrors,
+  );
+
+  app.get(
+    '/me/art/contributions',
+    contributionRoute((req, deps) => handleListMyContributions(req.header('Authorization'), deps)),
+  );
+
+  // The private preview of a contribution: its uploader and the reviewers
+  // read it here, never through the public `/assets/files/`.
+  app.get('/me/art/files/:file', (req, res) => {
+    if (directory === undefined || decor === undefined || assetStorage === null) {
+      res.status(503).json({ error: 'asset-upload-not-configured' });
+      return;
+    }
+    handleGetPrivateArtFile(req.header('Authorization'), req.params.file, { directory, decor, storage: assetStorage, auth, identityAdmin })
+      .then((result) => sendArtFile(res, result))
+      .catch(() => {
+        console.error('[assets] unhandled failure serving a private art file');
+        res.status(500).json({ error: 'internal' });
+      });
+  });
+
+  app.get(
+    '/admin/art/contributions',
+    contributionRoute((req, deps) => handleListReviewQueue(req.header('Authorization'), req.query.status, deps)),
+  );
+
+  app.post(
+    '/admin/art/contributions/:id/approve',
+    contributionRoute((req, deps) => handleApproveContribution(req.header('Authorization'), req.params.id, deps)),
+  );
+
+  app.post(
+    '/admin/art/contributions/:id/reject',
+    contributionRoute((req, deps) => handleRejectContribution(req.header('Authorization'), req.params.id, req.body, deps)),
+  );
+
+  app.post(
+    '/admin/art/pieces/:id/retire',
+    contributionRoute((req, deps) => handleRetireArtPiece(req.header('Authorization'), req.params.id, deps)),
+  );
+
+  // Uploaded art (#121): its manifest and its files, public like the pack in
+  // `public/assets/pack/`. Under `/assets/files/` and not `/assets/*`, which
+  // also holds the Vite bundles; Caddy has a handle for exactly this prefix.
+  // The manifest is read again during a session, so it is never cached.
+  app.get('/assets/files/manifest.json', (_req, res) => {
+    if (decor === undefined) {
+      res.status(503).json({ error: 'decor-not-configured' });
+      return;
+    }
+    handleUploadedArtManifest(decor)
+      .then((result) => {
+        res.status(result.status).set('Cache-Control', 'no-cache').json(result.body);
+      })
+      .catch(() => {
+        console.error('[assets] unhandled failure reading the uploads manifest');
+        res.status(500).json({ error: 'internal' });
+      });
+  });
+
+  app.get('/assets/files/:file', (req, res) => {
+    // Without a catalog nothing was approved, so no file can be public.
+    if (assetStorage === null || decor === undefined) {
+      res.status(503).json({ error: 'asset-upload-not-configured' });
+      return;
+    }
+    handleGetAssetFile(req.params.file, { storage: assetStorage, decor })
+      .then((result) => sendArtFile(res, result))
+      .catch(() => {
+        console.error('[assets] unhandled failure serving an asset file');
+        res.status(500).json({ error: 'internal' });
+      });
+  });
+
   app.get(
     '/admin/assets',
     decorRoute((req, deps) => handleListAssets(req.header('Authorization'), deps)),
@@ -786,6 +1021,20 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     decorRoute((req, deps) => handleReplaceDeskConfig(req.header('Authorization'), req.body, deps), true),
   );
 
+  // The character chosen at the office entrance (art migration, step 5). It
+  // hangs from `decorRoute` and not `admin`: the choice is checked against the
+  // art catalog, so a server without one answers 503 and the SPA lets people
+  // in with the pack default instead of blocking the entrance.
+  app.get(
+    '/me/avatar',
+    decorRoute((req, deps) => handleGetAvatar(req.header('Authorization'), deps)),
+  );
+
+  app.post(
+    '/me/avatar',
+    decorRoute((req, deps) => handleSetAvatar(req.header('Authorization'), req.body, deps)),
+  );
+
   /**
    * Mismo adaptador que `spacesRoute(...)`/`decorRoute(...)`, con los
    * escritorios en las dependencias y la misma guarda de "sin almacen -> 503,
@@ -801,7 +1050,9 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
         return;
       }
 
-      run(req, { directory, desks, auth, identityAdmin })
+      // `decor` only checks a chosen material at creation (art migration,
+      // step 7); without it a desk still gets the pack default.
+      run(req, { directory, desks, auth, identityAdmin, decor })
         .then((result) => {
           // Adapter promises resolve after COMMIT; failures never invalidate.
           if (changesDesks && result.status >= 200 && result.status < 300) notifyDesksChanged();
@@ -861,6 +1112,55 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     desksRoute((req, deps) => handleReleaseDesk(req.header('Authorization'), deps), true),
   );
 
+  /**
+   * What water must not land on, read when an edit floods a tile (#123 phase
+   * 2): every space (rooms and desk cubicles, whose decor stays inside them),
+   * every desk and every session the room holds, those waiting to reconnect
+   * included, at the position the room last accepted.
+   */
+  async function terrainProtections(): Promise<TerrainProtections> {
+    const [rooms, assignable] = await Promise.all([spaces?.listSpaces() ?? [], desks?.listDesks() ?? []]);
+    return {
+      placements: [
+        ...rooms.map(({ x, y, w, h }) => ({ x, y, w, h })),
+        ...assignable.map(({ x, y }) => ({ x, y, w: DESK_SIDE, h: DESK_SIDE })),
+      ],
+      players: sessions.ids().flatMap((id) => {
+        const position = sessions.positionOf(id);
+        return position === undefined ? [] : [position];
+      }),
+    };
+  }
+
+  /** Same adapter and same "no store -> 503, never 404" as `spacesRoute`. */
+  function terrainRoute(run: (req: express.Request, deps: TerrainDeps) => Promise<AdminResult>) {
+    return (req: express.Request, res: express.Response): void => {
+      if (directory === undefined || !terrain.editable) {
+        res.status(503).json({ error: 'terrain-not-configured' });
+        return;
+      }
+
+      run(req, { directory, auth, identityAdmin, terrain, protections: terrainProtections })
+        .then((result) => {
+          res.status(result.status).json(result.body);
+        })
+        .catch(() => {
+          console.error('[terrain] unhandled failure in a terrain route');
+          res.status(500).json({ error: 'internal' });
+        });
+    };
+  }
+
+  // One block per request, POST for the same CORS reason as the other admin
+  // writes. Under `/admin/*`, so Caddy already proxies it. Clients see the
+  // result through the room state, not through this response.
+  app.post(
+    '/admin/terrain/blocks/:index',
+    terrainRoute((req, deps) =>
+      handleSetTerrainBlock(req.header('Authorization'), req.params.index, req.body, deps),
+    ),
+  );
+
   app.post('/livekit/token', (req, res) => {
     handleLivekitToken(req.body, sessions, auth, spaces)
       .then((result) => {
@@ -914,6 +1214,10 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     recordings,
     finished,
     eviction,
+    characters,
+    desks,
+    terrain: () => terrain.snapshot(),
+    subscribeTerrainChanges: terrain.subscribe,
     subscribeDesksChanges: (listener: () => void) => {
       desksChangeListeners.add(listener);
       return () => { desksChangeListeners.delete(listener); };
@@ -932,6 +1236,8 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     sessions,
     recordings,
     eviction,
+    characters,
+    terrain,
     directory,
     port() {
       const address = httpServer.address() as AddressInfo | null;
@@ -949,6 +1255,9 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
       // configuracion, sin directorio", y esto es "con configuracion que no se
       // puede cumplir". Lo segundo no es un modo degradado, es una averia.
       await envRuntime?.migrate();
+      // Before accepting moves: a room created first would check them against
+      // the committed blocks instead of the persisted ones.
+      await terrain.load();
       await gameServer.listen(port);
       return this.port();
     },

@@ -1,0 +1,1806 @@
+{
+  "format": "oficina-art-pack",
+  "contractVersion": 2,
+  "fileFormat": "png-rgba8",
+  "tile": 32,
+  "author": "HugoGT",
+  "license": "proprietary-internal",
+  "defaults": {
+    "character": "character-p01-burgundy-suit",
+    "desk": "desk-wood",
+    "floor": "floor-wood"
+  },
+  "pieces": [
+    {
+      "id": "character-p01-burgundy-suit",
+      "kind": "character",
+      "name": "Mateo",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "anchors": {
+        "walk": {
+          "x": 16,
+          "y": 47
+        },
+        "seated": {
+          "x": 22,
+          "y": 42
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "walk",
+          "path": "character/p01-burgundy-suit-walk.png",
+          "imageKind": "character-walk",
+          "width": 352,
+          "height": 416,
+          "sha256": "b0042fee71c26542a745a89844a0a55342c3781440ec4aea52c3b0c3cafe2d82"
+        },
+        {
+          "role": "seated",
+          "path": "character/p01-burgundy-suit-seated.png",
+          "imageKind": "character-seated",
+          "width": 352,
+          "height": 232,
+          "sha256": "05a68f1f6a7eb867f5d295e70bd1e98acd245a4df4a6937bd68b7bd06e015d33"
+        }
+      ]
+    },
+    {
+      "id": "character-p02-beige-blazer",
+      "kind": "character",
+      "name": "Lucia",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "anchors": {
+        "walk": {
+          "x": 16,
+          "y": 47
+        },
+        "seated": {
+          "x": 22,
+          "y": 42
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "walk",
+          "path": "character/p02-beige-blazer-walk.png",
+          "imageKind": "character-walk",
+          "width": 352,
+          "height": 416,
+          "sha256": "c9f057c249fedc5672ca4ec1ea741320597e065f6f45bef6231da2a2e6d012d1"
+        },
+        {
+          "role": "seated",
+          "path": "character/p02-beige-blazer-seated.png",
+          "imageKind": "character-seated",
+          "width": 352,
+          "height": 232,
+          "sha256": "a26a4549077303aef301beafeed2412c932cc9602dd17a2e58aed0fb118af865"
+        }
+      ]
+    },
+    {
+      "id": "character-p03-forest-suit",
+      "kind": "character",
+      "name": "Diego",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "anchors": {
+        "walk": {
+          "x": 16,
+          "y": 47
+        },
+        "seated": {
+          "x": 22,
+          "y": 42
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "walk",
+          "path": "character/p03-forest-suit-walk.png",
+          "imageKind": "character-walk",
+          "width": 352,
+          "height": 416,
+          "sha256": "38fba18792cbd4c44a3a96e2167e47d762ed82533702ee8ad897625238ccb3e7"
+        },
+        {
+          "role": "seated",
+          "path": "character/p03-forest-suit-seated.png",
+          "imageKind": "character-seated",
+          "width": 352,
+          "height": 232,
+          "sha256": "d205c803d631184cf15ddf4788f3aa1f4a2a6f629a16697dc238392c61f14379"
+        }
+      ]
+    },
+    {
+      "id": "character-p04-coral-skirt",
+      "kind": "character",
+      "name": "Valeria",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "anchors": {
+        "walk": {
+          "x": 16,
+          "y": 47
+        },
+        "seated": {
+          "x": 22,
+          "y": 42
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "walk",
+          "path": "character/p04-coral-skirt-walk.png",
+          "imageKind": "character-walk",
+          "width": 352,
+          "height": 416,
+          "sha256": "b75c56964768aa7ece1b280f953069d2e619d7fe4cf1bf5cef783002d84bac0a"
+        },
+        {
+          "role": "seated",
+          "path": "character/p04-coral-skirt-seated.png",
+          "imageKind": "character-seated",
+          "width": 352,
+          "height": 232,
+          "sha256": "0b6d1352cfa435fcc087d1bcf723965bb06d68d8df21e35514f5fb2baef874cc"
+        }
+      ]
+    },
+    {
+      "id": "character-p05-charcoal-suit",
+      "kind": "character",
+      "name": "Andre",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "anchors": {
+        "walk": {
+          "x": 16,
+          "y": 47
+        },
+        "seated": {
+          "x": 22,
+          "y": 42
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "walk",
+          "path": "character/p05-charcoal-suit-walk.png",
+          "imageKind": "character-walk",
+          "width": 352,
+          "height": 416,
+          "sha256": "c2ae6117da9b3ae32c18914879a8cd77bcce2e9efc56c923635199d6c66ec727"
+        },
+        {
+          "role": "seated",
+          "path": "character/p05-charcoal-suit-seated.png",
+          "imageKind": "character-seated",
+          "width": 352,
+          "height": 232,
+          "sha256": "9094603c778c25bbd124908bb67b65dc1fb365e05f48d7f11abf6fab4e79cd34"
+        }
+      ]
+    },
+    {
+      "id": "character-p06-lavender-blouse",
+      "kind": "character",
+      "name": "Imani",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "anchors": {
+        "walk": {
+          "x": 16,
+          "y": 47
+        },
+        "seated": {
+          "x": 22,
+          "y": 42
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "walk",
+          "path": "character/p06-lavender-blouse-walk.png",
+          "imageKind": "character-walk",
+          "width": 352,
+          "height": 416,
+          "sha256": "cb38b27447264d8ef0d19a89a0cb022410d029f42cec933e8f21bac5c1812669"
+        },
+        {
+          "role": "seated",
+          "path": "character/p06-lavender-blouse-seated.png",
+          "imageKind": "character-seated",
+          "width": 352,
+          "height": 232,
+          "sha256": "8bbdffb906a18366683814acd6c7f4669ce53d0fd5f987bb322cd56046e0befa"
+        }
+      ]
+    },
+    {
+      "id": "character-p07-green-suit",
+      "kind": "character",
+      "name": "Tomas",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "anchors": {
+        "walk": {
+          "x": 16,
+          "y": 47
+        },
+        "seated": {
+          "x": 22,
+          "y": 42
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "walk",
+          "path": "character/p07-green-suit-walk.png",
+          "imageKind": "character-walk",
+          "width": 352,
+          "height": 416,
+          "sha256": "9891e98cf5db3277fb57766a13620b34eb7893c7b299ae5dcc9460d9f8ccf428"
+        },
+        {
+          "role": "seated",
+          "path": "character/p07-green-suit-seated.png",
+          "imageKind": "character-seated",
+          "width": 352,
+          "height": 232,
+          "sha256": "b9b77561bf050627cb3c35021b2af25be27b455fd3e66dd60aaf98eedf704c1c"
+        }
+      ]
+    },
+    {
+      "id": "character-p08-purple-suit",
+      "kind": "character",
+      "name": "Bruno",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "anchors": {
+        "walk": {
+          "x": 16,
+          "y": 47
+        },
+        "seated": {
+          "x": 22,
+          "y": 42
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "walk",
+          "path": "character/p08-purple-suit-walk.png",
+          "imageKind": "character-walk",
+          "width": 352,
+          "height": 416,
+          "sha256": "097cb4f3b12b3e3dec8b8836dad1c99d3b6682a3858dbb5f0b3d080431c5508b"
+        },
+        {
+          "role": "seated",
+          "path": "character/p08-purple-suit-seated.png",
+          "imageKind": "character-seated",
+          "width": 352,
+          "height": 232,
+          "sha256": "40952f4ac8abe1b46a6c8f6d63a4b15df58dbbb06518af6bd84670d4eae0a7f0"
+        }
+      ]
+    },
+    {
+      "id": "character-p09-mint-shirt",
+      "kind": "character",
+      "name": "Nico",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "anchors": {
+        "walk": {
+          "x": 16,
+          "y": 47
+        },
+        "seated": {
+          "x": 22,
+          "y": 42
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "walk",
+          "path": "character/p09-mint-shirt-walk.png",
+          "imageKind": "character-walk",
+          "width": 352,
+          "height": 416,
+          "sha256": "d16a177ba313fdb82beaa3a1836d3d2d22d5c9aae842def43519b9c8a6ed0e0d"
+        },
+        {
+          "role": "seated",
+          "path": "character/p09-mint-shirt-seated.png",
+          "imageKind": "character-seated",
+          "width": 352,
+          "height": 232,
+          "sha256": "443f26ef45c8dee115474794be79fcd7d427eefdd92a41f37c8eef2accce80e9"
+        }
+      ]
+    },
+    {
+      "id": "character-p10-orange-blazer",
+      "kind": "character",
+      "name": "Sofia",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "anchors": {
+        "walk": {
+          "x": 16,
+          "y": 47
+        },
+        "seated": {
+          "x": 22,
+          "y": 42
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "walk",
+          "path": "character/p10-orange-blazer-walk.png",
+          "imageKind": "character-walk",
+          "width": 352,
+          "height": 416,
+          "sha256": "50ea31d637ec2dcd28e7f79468381efa85c7f7bf0729ed8c95526715ab5fcf37"
+        },
+        {
+          "role": "seated",
+          "path": "character/p10-orange-blazer-seated.png",
+          "imageKind": "character-seated",
+          "width": 352,
+          "height": 232,
+          "sha256": "4ade932e5cea3cdb270257bea6f891b3c3a7616f5a4fa3249aeddfda6b030599"
+        }
+      ]
+    },
+    {
+      "id": "character-p11-white-blouse",
+      "kind": "character",
+      "name": "Elena",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "anchors": {
+        "walk": {
+          "x": 16,
+          "y": 47
+        },
+        "seated": {
+          "x": 22,
+          "y": 42
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "walk",
+          "path": "character/p11-white-blouse-walk.png",
+          "imageKind": "character-walk",
+          "width": 352,
+          "height": 416,
+          "sha256": "82d96d309edc49555b8cbaf0b48e4c89aec30eaa2e7ccbcbd04a1ff5f1d5fd71"
+        },
+        {
+          "role": "seated",
+          "path": "character/p11-white-blouse-seated.png",
+          "imageKind": "character-seated",
+          "width": 352,
+          "height": 232,
+          "sha256": "0d49fd5e377fc72595eae26428b2180c0da5a05b0d72db7460b28ca2ffd871f1"
+        }
+      ]
+    },
+    {
+      "id": "character-p12-mint-blazer",
+      "kind": "character",
+      "name": "Camila",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "anchors": {
+        "walk": {
+          "x": 16,
+          "y": 47
+        },
+        "seated": {
+          "x": 22,
+          "y": 42
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "walk",
+          "path": "character/p12-mint-blazer-walk.png",
+          "imageKind": "character-walk",
+          "width": 352,
+          "height": 416,
+          "sha256": "a4de29b4861a1fb4370eb7ea2e5485d276f380f063adac06cc9b520debc5fe43"
+        },
+        {
+          "role": "seated",
+          "path": "character/p12-mint-blazer-seated.png",
+          "imageKind": "character-seated",
+          "width": 352,
+          "height": 232,
+          "sha256": "fc1b5fae8b86ac1bee0a05aaf73c67091409e25f83b8ad1f71cff5e5a94ecb5b"
+        }
+      ]
+    },
+    {
+      "id": "character-p13-red-suit",
+      "kind": "character",
+      "name": "Rafael",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "anchors": {
+        "walk": {
+          "x": 16,
+          "y": 47
+        },
+        "seated": {
+          "x": 22,
+          "y": 42
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "walk",
+          "path": "character/p13-red-suit-walk.png",
+          "imageKind": "character-walk",
+          "width": 352,
+          "height": 416,
+          "sha256": "f82d0eaaad7a3bcb73f9850410b4e61c8feb6754aaf0bd7c2912bcdd7944ce14"
+        },
+        {
+          "role": "seated",
+          "path": "character/p13-red-suit-seated.png",
+          "imageKind": "character-seated",
+          "width": 352,
+          "height": 232,
+          "sha256": "5479239a22fe238df8ccb335388a0cedcc5e2a8cd05568faea5f1d19abc41bc9"
+        }
+      ]
+    },
+    {
+      "id": "character-p14-blue-suit",
+      "kind": "character",
+      "name": "Kenji",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "anchors": {
+        "walk": {
+          "x": 16,
+          "y": 47
+        },
+        "seated": {
+          "x": 22,
+          "y": 42
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "walk",
+          "path": "character/p14-blue-suit-walk.png",
+          "imageKind": "character-walk",
+          "width": 352,
+          "height": 416,
+          "sha256": "ef752f066b2a4866d49cecb39a857e72a5844a692293c7d03b22b65513566e84"
+        },
+        {
+          "role": "seated",
+          "path": "character/p14-blue-suit-seated.png",
+          "imageKind": "character-seated",
+          "width": 352,
+          "height": 232,
+          "sha256": "170464ab027cbd66f0402d1fd55fa25c7d6f7487752f207369d03b57601f76bd"
+        }
+      ]
+    },
+    {
+      "id": "character-p15-yellow-shirt",
+      "kind": "character",
+      "name": "Pablo",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "anchors": {
+        "walk": {
+          "x": 16,
+          "y": 47
+        },
+        "seated": {
+          "x": 22,
+          "y": 42
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "walk",
+          "path": "character/p15-yellow-shirt-walk.png",
+          "imageKind": "character-walk",
+          "width": 352,
+          "height": 416,
+          "sha256": "b87835820be1aa9d8162f422f627cbe77b8ecda6558b85f0e2d334369e2d74c4"
+        },
+        {
+          "role": "seated",
+          "path": "character/p15-yellow-shirt-seated.png",
+          "imageKind": "character-seated",
+          "width": 352,
+          "height": 232,
+          "sha256": "13102f22aae0f00b9a9a72ce6b2228f01e5d5fd18d3afb89ee77ecdd47630799"
+        }
+      ]
+    },
+    {
+      "id": "character-p16-pink-ponytail",
+      "kind": "character",
+      "name": "Daniela",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "anchors": {
+        "walk": {
+          "x": 16,
+          "y": 47
+        },
+        "seated": {
+          "x": 22,
+          "y": 42
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "walk",
+          "path": "character/p16-pink-ponytail-walk.png",
+          "imageKind": "character-walk",
+          "width": 352,
+          "height": 416,
+          "sha256": "d7485a475f34aa8f050696507b36b1ec5a5bf115bddcecff3be3836467d8210b"
+        },
+        {
+          "role": "seated",
+          "path": "character/p16-pink-ponytail-seated.png",
+          "imageKind": "character-seated",
+          "width": 352,
+          "height": 232,
+          "sha256": "a721900f68ece915023547bd5ef21cccb4cf89e0237c8aebfce0cf0cb200723b"
+        }
+      ]
+    },
+    {
+      "id": "character-p17-blue-wide-pants",
+      "kind": "character",
+      "name": "Aiko",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "anchors": {
+        "walk": {
+          "x": 16,
+          "y": 47
+        },
+        "seated": {
+          "x": 22,
+          "y": 42
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "walk",
+          "path": "character/p17-blue-wide-pants-walk.png",
+          "imageKind": "character-walk",
+          "width": 352,
+          "height": 416,
+          "sha256": "13c9ff3b3c20cb976a2491f7245627e7bbf004b320099ebe8b5dcc4bb200642d"
+        },
+        {
+          "role": "seated",
+          "path": "character/p17-blue-wide-pants-seated.png",
+          "imageKind": "character-seated",
+          "width": 352,
+          "height": 232,
+          "sha256": "3d2e3cfb5b55b5993ac514cbb849c08ec18bff27fad01a57f458cc1ef2e6d624"
+        }
+      ]
+    },
+    {
+      "id": "character-p18-yellow-coat",
+      "kind": "character",
+      "name": "Martina",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "anchors": {
+        "walk": {
+          "x": 16,
+          "y": 47
+        },
+        "seated": {
+          "x": 22,
+          "y": 42
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "walk",
+          "path": "character/p18-yellow-coat-walk.png",
+          "imageKind": "character-walk",
+          "width": 352,
+          "height": 416,
+          "sha256": "8274a8665f832491f4be3f9869ccdd1fceaa7c61efb57dd6bea648e40e5d93d6"
+        },
+        {
+          "role": "seated",
+          "path": "character/p18-yellow-coat-seated.png",
+          "imageKind": "character-seated",
+          "width": 352,
+          "height": 232,
+          "sha256": "f39725f3515226eda13a97ec90a81adb0d5760f1f7b2f3fdd8fe7e775105afda"
+        }
+      ]
+    },
+    {
+      "id": "chair-wood",
+      "kind": "chair",
+      "name": "Silla de madera",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "wood",
+      "facings": [
+        "up",
+        "down",
+        "left",
+        "right"
+      ],
+      "layers": [
+        "back",
+        "front"
+      ],
+      "anchors": {
+        "seat": {
+          "x": 18,
+          "y": 22
+        },
+        "ground": {
+          "x": 18,
+          "y": 31
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "sheet",
+          "path": "chair/wood.png",
+          "imageKind": "chair",
+          "width": 144,
+          "height": 76,
+          "sha256": "a3f0c5fd96b736e1d380ec5b3dbcce01f85932088fe53441b631e8fc277f96a4"
+        }
+      ]
+    },
+    {
+      "id": "chair-metal",
+      "kind": "chair",
+      "name": "Silla de metal",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "metal",
+      "facings": [
+        "up",
+        "down",
+        "left",
+        "right"
+      ],
+      "layers": [
+        "back",
+        "front"
+      ],
+      "anchors": {
+        "seat": {
+          "x": 18,
+          "y": 22
+        },
+        "ground": {
+          "x": 18,
+          "y": 31
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "sheet",
+          "path": "chair/metal.png",
+          "imageKind": "chair",
+          "width": 144,
+          "height": 76,
+          "sha256": "3ff69d74bf7c6dd698f528a135f09df829053cd4de1fc496f10b00d13927919e"
+        }
+      ]
+    },
+    {
+      "id": "chair-leather",
+      "kind": "chair",
+      "name": "Silla de cuero",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "leather",
+      "facings": [
+        "up",
+        "down",
+        "left",
+        "right"
+      ],
+      "layers": [
+        "back",
+        "front"
+      ],
+      "anchors": {
+        "seat": {
+          "x": 18,
+          "y": 22
+        },
+        "ground": {
+          "x": 18,
+          "y": 31
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "sheet",
+          "path": "chair/leather.png",
+          "imageKind": "chair",
+          "width": 144,
+          "height": 76,
+          "sha256": "a26d2ab4744fbf36b00224cabb0cb677135384b4bbb1c2f9317aa4ffa5037c37"
+        }
+      ]
+    },
+    {
+      "id": "chair-gamer",
+      "kind": "chair",
+      "name": "Silla gamer",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "gamer",
+      "facings": [
+        "up",
+        "down",
+        "left",
+        "right"
+      ],
+      "layers": [
+        "back",
+        "front"
+      ],
+      "anchors": {
+        "seat": {
+          "x": 18,
+          "y": 22
+        },
+        "ground": {
+          "x": 18,
+          "y": 31
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "sheet",
+          "path": "chair/gamer.png",
+          "imageKind": "chair",
+          "width": 144,
+          "height": 76,
+          "sha256": "81214a7acb15a639246e3aaa7dfcada15293d069584eb3b3b82bb8259a3a65bc"
+        }
+      ]
+    },
+    {
+      "id": "desk-glass",
+      "kind": "desk",
+      "name": "Escritorio de vidrio",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "glass",
+      "colorable": false,
+      "defaultColor": null,
+      "anchor": {
+        "x": 32,
+        "y": 40
+      },
+      "facings": {
+        "up": {
+          "footprint": {
+            "w": 2,
+            "h": 1
+          },
+          "ground": {
+            "x": 0,
+            "y": 6
+          },
+          "chairGround": {
+            "x": 0,
+            "y": 10
+          }
+        },
+        "down": {
+          "footprint": {
+            "w": 2,
+            "h": 1
+          },
+          "ground": {
+            "x": 0,
+            "y": 6
+          },
+          "chairGround": {
+            "x": 0,
+            "y": -10
+          }
+        },
+        "left": {
+          "footprint": {
+            "w": 1,
+            "h": 2
+          },
+          "ground": {
+            "x": 0,
+            "y": 15
+          },
+          "chairGround": {
+            "x": 21,
+            "y": 0
+          }
+        },
+        "right": {
+          "footprint": {
+            "w": 1,
+            "h": 2
+          },
+          "ground": {
+            "x": 0,
+            "y": 15
+          },
+          "chairGround": {
+            "x": -21,
+            "y": 0
+          }
+        }
+      },
+      "files": [
+        {
+          "role": "sheet",
+          "path": "desk/glass.png",
+          "imageKind": "desk",
+          "width": 256,
+          "height": 64,
+          "sha256": "087368bf796d015a7d10ac1c5070f2cb46806f586f2655719e5c10c8a5dfaa67"
+        }
+      ]
+    },
+    {
+      "id": "desk-metal",
+      "kind": "desk",
+      "name": "Escritorio de metal",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "metal",
+      "colorable": false,
+      "defaultColor": null,
+      "anchor": {
+        "x": 32,
+        "y": 40
+      },
+      "facings": {
+        "up": {
+          "footprint": {
+            "w": 2,
+            "h": 1
+          },
+          "ground": {
+            "x": 0,
+            "y": 6
+          },
+          "chairGround": {
+            "x": 0,
+            "y": 10
+          }
+        },
+        "down": {
+          "footprint": {
+            "w": 2,
+            "h": 1
+          },
+          "ground": {
+            "x": 0,
+            "y": 6
+          },
+          "chairGround": {
+            "x": 0,
+            "y": -10
+          }
+        },
+        "left": {
+          "footprint": {
+            "w": 1,
+            "h": 2
+          },
+          "ground": {
+            "x": 0,
+            "y": 15
+          },
+          "chairGround": {
+            "x": 21,
+            "y": 0
+          }
+        },
+        "right": {
+          "footprint": {
+            "w": 1,
+            "h": 2
+          },
+          "ground": {
+            "x": 0,
+            "y": 15
+          },
+          "chairGround": {
+            "x": -21,
+            "y": 0
+          }
+        }
+      },
+      "files": [
+        {
+          "role": "sheet",
+          "path": "desk/metal.png",
+          "imageKind": "desk",
+          "width": 256,
+          "height": 64,
+          "sha256": "b76ef86025e699f4be043eaffebc400e1bbb672470d1cda643b56e96d2bae888"
+        }
+      ]
+    },
+    {
+      "id": "desk-wood",
+      "kind": "desk",
+      "name": "Escritorio de madera",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "wood",
+      "colorable": false,
+      "defaultColor": null,
+      "anchor": {
+        "x": 32,
+        "y": 40
+      },
+      "facings": {
+        "up": {
+          "footprint": {
+            "w": 2,
+            "h": 1
+          },
+          "ground": {
+            "x": 0,
+            "y": 6
+          },
+          "chairGround": {
+            "x": 0,
+            "y": 10
+          }
+        },
+        "down": {
+          "footprint": {
+            "w": 2,
+            "h": 1
+          },
+          "ground": {
+            "x": 0,
+            "y": 6
+          },
+          "chairGround": {
+            "x": 0,
+            "y": -10
+          }
+        },
+        "left": {
+          "footprint": {
+            "w": 1,
+            "h": 2
+          },
+          "ground": {
+            "x": 0,
+            "y": 15
+          },
+          "chairGround": {
+            "x": 21,
+            "y": 0
+          }
+        },
+        "right": {
+          "footprint": {
+            "w": 1,
+            "h": 2
+          },
+          "ground": {
+            "x": 0,
+            "y": 15
+          },
+          "chairGround": {
+            "x": -21,
+            "y": 0
+          }
+        }
+      },
+      "files": [
+        {
+          "role": "sheet",
+          "path": "desk/wood.png",
+          "imageKind": "desk",
+          "width": 256,
+          "height": 64,
+          "sha256": "b28849892418a1cbdfcf9fd585c46ba0b0888cc8ddfe2283fc598388811b6682"
+        }
+      ]
+    },
+    {
+      "id": "desk-painted",
+      "kind": "desk",
+      "name": "Escritorio pintado",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "painted",
+      "colorable": true,
+      "defaultColor": "#4f9a8a",
+      "anchor": {
+        "x": 32,
+        "y": 40
+      },
+      "facings": {
+        "up": {
+          "footprint": {
+            "w": 2,
+            "h": 1
+          },
+          "ground": {
+            "x": 0,
+            "y": 6
+          },
+          "chairGround": {
+            "x": 0,
+            "y": 10
+          }
+        },
+        "down": {
+          "footprint": {
+            "w": 2,
+            "h": 1
+          },
+          "ground": {
+            "x": 0,
+            "y": 6
+          },
+          "chairGround": {
+            "x": 0,
+            "y": -10
+          }
+        },
+        "left": {
+          "footprint": {
+            "w": 1,
+            "h": 2
+          },
+          "ground": {
+            "x": 0,
+            "y": 15
+          },
+          "chairGround": {
+            "x": 21,
+            "y": 0
+          }
+        },
+        "right": {
+          "footprint": {
+            "w": 1,
+            "h": 2
+          },
+          "ground": {
+            "x": 0,
+            "y": 15
+          },
+          "chairGround": {
+            "x": -21,
+            "y": 0
+          }
+        }
+      },
+      "files": [
+        {
+          "role": "sheet",
+          "path": "desk/painted.png",
+          "imageKind": "desk",
+          "width": 256,
+          "height": 64,
+          "sha256": "38c9a6d4f0765f88798f84a0c37282cd0e6f940dcd41c05241a27cd83ebfaf28"
+        }
+      ]
+    },
+    {
+      "id": "floor-wood",
+      "kind": "floor",
+      "name": "Madera",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "wood",
+      "colorable": false,
+      "defaultColor": null,
+      "motifTiles": 3,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "floor/wood.png",
+          "imageKind": "floor",
+          "width": 96,
+          "height": 96,
+          "sha256": "b0f0f19da5a9034f0003031ecd3fd806acb7f514a3cd56066f3665a9e0093d53"
+        }
+      ]
+    },
+    {
+      "id": "floor-grass",
+      "kind": "floor",
+      "name": "Césped",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "grass",
+      "colorable": false,
+      "defaultColor": null,
+      "motifTiles": 3,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "floor/grass.png",
+          "imageKind": "floor",
+          "width": 96,
+          "height": 96,
+          "sha256": "43249bcd58560ff9c0e1a65d127bb9485203c6dd7b89d685acf1fdb58e3fe2ba"
+        }
+      ]
+    },
+    {
+      "id": "floor-water",
+      "kind": "floor",
+      "name": "Agua",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "water",
+      "colorable": false,
+      "defaultColor": null,
+      "motifTiles": 3,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "floor/water.png",
+          "imageKind": "floor",
+          "width": 96,
+          "height": 96,
+          "sha256": "1281ac36feb8bb64c61a74300d568114c699a0bf094f325adaa6248b04716c4f"
+        }
+      ]
+    },
+    {
+      "id": "floor-plain",
+      "kind": "floor",
+      "name": "Liso",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "plain",
+      "colorable": true,
+      "defaultColor": "#b9c3cc",
+      "motifTiles": 3,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "floor/plain.png",
+          "imageKind": "floor",
+          "width": 96,
+          "height": 96,
+          "sha256": "eb2f9f97beb4dc42994b7d127e7d916e83670d9da8d7349c9d30a280319b13cf"
+        }
+      ]
+    },
+    {
+      "id": "floor-dirt",
+      "kind": "floor",
+      "name": "Tierra",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "dirt",
+      "colorable": false,
+      "defaultColor": null,
+      "motifTiles": 3,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "floor/dirt.png",
+          "imageKind": "floor",
+          "width": 96,
+          "height": 96,
+          "sha256": "49ffab102ab2aaef5125b3a688b13b70a41ae980256ffc844b483c06c4c13ad9"
+        }
+      ]
+    },
+    {
+      "id": "floor-sand",
+      "kind": "floor",
+      "name": "Arena",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "sand",
+      "colorable": false,
+      "defaultColor": null,
+      "motifTiles": 3,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "floor/sand.png",
+          "imageKind": "floor",
+          "width": 96,
+          "height": 96,
+          "sha256": "37d6d3c143da757d0d1cc821e316f4a2516f472a4bb9dddad2bee2da46e8e635"
+        }
+      ]
+    },
+    {
+      "id": "floor-cobblestone",
+      "kind": "floor",
+      "name": "Empedrado",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "cobblestone",
+      "colorable": false,
+      "defaultColor": null,
+      "motifTiles": 3,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "floor/cobblestone.png",
+          "imageKind": "floor",
+          "width": 96,
+          "height": 96,
+          "sha256": "72226fe7d0d11fc04d4ab242d70b0172622128a1229aa0a148083bd424ca4a8c"
+        }
+      ]
+    },
+    {
+      "id": "floor-tile",
+      "kind": "floor",
+      "name": "Baldosa",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "tile",
+      "colorable": false,
+      "defaultColor": null,
+      "motifTiles": 3,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "floor/tile.png",
+          "imageKind": "floor",
+          "width": 96,
+          "height": 96,
+          "sha256": "19d0ee29d5563e1577b6bee03748b7e1fc741e72109568df7ed8157cac3f993a"
+        }
+      ]
+    },
+    {
+      "id": "floor-carpet",
+      "kind": "floor",
+      "name": "Moqueta",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "carpet",
+      "colorable": false,
+      "defaultColor": null,
+      "motifTiles": 3,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "floor/carpet.png",
+          "imageKind": "floor",
+          "width": 96,
+          "height": 96,
+          "sha256": "aad0efe1d7e17d63557c04ad35c27cee8680dccf9225f6c7212f4bf32ae05dc7"
+        }
+      ]
+    },
+    {
+      "id": "wall-brick",
+      "kind": "wall",
+      "name": "Ladrillo",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "brick",
+      "segmentLength": 32,
+      "thickness": 16,
+      "translucent": false,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "wall/brick.png",
+          "imageKind": "wall",
+          "width": 272,
+          "height": 16,
+          "sha256": "aa1800494e0bdc8b1563d067bdeebb643a33313bddc962fc3ff7a68d29687737"
+        }
+      ]
+    },
+    {
+      "id": "wall-stone",
+      "kind": "wall",
+      "name": "Piedra",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "stone",
+      "segmentLength": 32,
+      "thickness": 16,
+      "translucent": false,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "wall/stone.png",
+          "imageKind": "wall",
+          "width": 272,
+          "height": 16,
+          "sha256": "58ea77706dfa7376d00665e17067ae22ccc8c5ec68d38033065b6eacd54fc3e9"
+        }
+      ]
+    },
+    {
+      "id": "wall-plaster",
+      "kind": "wall",
+      "name": "Yeso",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "plaster",
+      "segmentLength": 32,
+      "thickness": 16,
+      "translucent": false,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "wall/plaster.png",
+          "imageKind": "wall",
+          "width": 272,
+          "height": 16,
+          "sha256": "8f1d2d60684255dc0c17444de3e581172ed49c782a83fef58201e70efca38a76"
+        }
+      ]
+    },
+    {
+      "id": "wall-glass",
+      "kind": "wall",
+      "name": "Vidrio",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "glass",
+      "segmentLength": 32,
+      "thickness": 16,
+      "translucent": true,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "wall/glass.png",
+          "imageKind": "wall",
+          "width": 272,
+          "height": 16,
+          "sha256": "a01988983d5413efddb608fb6ed3634736c1a869b8b021ac6137c1abb8ca6623"
+        }
+      ]
+    },
+    {
+      "id": "tileset-terrain",
+      "kind": "tileset",
+      "name": "Terreno",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "tileSize": 32,
+      "columns": 16,
+      "masks": 16,
+      "phases": 9,
+      "materials": [
+        {
+          "material": "water",
+          "floor": "floor-water",
+          "walkable": false,
+          "firstTile": 0
+        },
+        {
+          "material": "grass",
+          "floor": "floor-grass",
+          "walkable": true,
+          "firstTile": 144
+        },
+        {
+          "material": "dirt",
+          "floor": "floor-dirt",
+          "walkable": true,
+          "firstTile": 288
+        },
+        {
+          "material": "sand",
+          "floor": "floor-sand",
+          "walkable": true,
+          "firstTile": 432
+        },
+        {
+          "material": "cobblestone",
+          "floor": "floor-cobblestone",
+          "walkable": true,
+          "firstTile": 576
+        },
+        {
+          "material": "wood",
+          "floor": "floor-wood",
+          "walkable": true,
+          "firstTile": 720
+        },
+        {
+          "material": "tile",
+          "floor": "floor-tile",
+          "walkable": true,
+          "firstTile": 864
+        },
+        {
+          "material": "carpet",
+          "floor": "floor-carpet",
+          "walkable": true,
+          "firstTile": 1008
+        }
+      ],
+      "decals": [
+        {
+          "decal": "flowers-white",
+          "tile": 1152
+        },
+        {
+          "decal": "flowers-yellow",
+          "tile": 1153
+        },
+        {
+          "decal": "flowers-blue",
+          "tile": 1154
+        },
+        {
+          "decal": "clover",
+          "tile": 1155
+        },
+        {
+          "decal": "pebbles",
+          "tile": 1156
+        },
+        {
+          "decal": "mushrooms",
+          "tile": 1157
+        },
+        {
+          "decal": "leaves",
+          "tile": 1158
+        },
+        {
+          "decal": "lily-pad",
+          "tile": 1159
+        }
+      ],
+      "files": [
+        {
+          "role": "sheet",
+          "path": "tileset/terrain.png",
+          "imageKind": "terrain-tileset",
+          "width": 512,
+          "height": 2336,
+          "sha256": "4508238ef013ea0e64cd291e6dde914fc40dab9529deea742ea213cba9bac270"
+        }
+      ]
+    },
+    {
+      "id": "tree-oak",
+      "kind": "tree",
+      "name": "Roble",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "oak",
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "anchor": {
+        "x": 32,
+        "y": 90
+      },
+      "layer": "sorted",
+      "collision": "solid",
+      "files": [
+        {
+          "role": "sheet",
+          "path": "tree/oak.png",
+          "imageKind": "tree",
+          "width": 64,
+          "height": 96,
+          "sha256": "32d70be731b0b5aa110cf1d4816dfa651c5f20430011dc28fd8e8a0623a634f6"
+        }
+      ]
+    },
+    {
+      "id": "tree-maple",
+      "kind": "tree",
+      "name": "Arce",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "maple",
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "anchor": {
+        "x": 32,
+        "y": 90
+      },
+      "layer": "sorted",
+      "collision": "solid",
+      "files": [
+        {
+          "role": "sheet",
+          "path": "tree/maple.png",
+          "imageKind": "tree",
+          "width": 64,
+          "height": 96,
+          "sha256": "51f072845a8d0964845e4338980d09bbceecb18576c97c7ffdb6ee7df661f5e5"
+        }
+      ]
+    },
+    {
+      "id": "plant-ficus",
+      "kind": "plant",
+      "name": "Ficus",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "ficus",
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "anchor": {
+        "x": 16,
+        "y": 46
+      },
+      "layer": "sorted",
+      "collision": "solid",
+      "files": [
+        {
+          "role": "sheet",
+          "path": "plant/ficus.png",
+          "imageKind": "plant",
+          "width": 32,
+          "height": 48,
+          "sha256": "b1b1dc261525fe15d685bcd51a53d6e040a44c1337a927a27b25af5c8ddce8df"
+        }
+      ]
+    },
+    {
+      "id": "bridge-wood",
+      "kind": "bridge",
+      "name": "Puente de madera",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "wood",
+      "footprint": {
+        "w": 3,
+        "h": 3
+      },
+      "anchor": {
+        "x": 64,
+        "y": 112
+      },
+      "layer": "ground",
+      "collision": "deck",
+      "orientations": [
+        "north-south",
+        "east-west"
+      ],
+      "deck": {
+        "north-south": {
+          "x": 0,
+          "y": 0,
+          "w": 3,
+          "h": 3
+        },
+        "east-west": {
+          "x": 0,
+          "y": 0,
+          "w": 3,
+          "h": 3
+        }
+      },
+      "files": [
+        {
+          "role": "sheet",
+          "path": "bridge/wood.png",
+          "imageKind": "bridge",
+          "width": 256,
+          "height": 128,
+          "sha256": "29437e3fb8f2e81218195c7a0395694533bc5cc146ad714bc5459ca4f70852d6"
+        }
+      ]
+    },
+    {
+      "id": "hedge-boxwood",
+      "kind": "hedge",
+      "name": "Seto",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "boxwood",
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "anchor": {
+        "x": 16,
+        "y": 48
+      },
+      "layer": "sorted",
+      "collision": "solid",
+      "height": 16,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "hedge/boxwood.png",
+          "imageKind": "hedge",
+          "width": 512,
+          "height": 48,
+          "sha256": "03417bdef7c3fab946a47bb86ca5b190984ca613c29e86c6295983a4d60ff5c6"
+        }
+      ]
+    },
+    {
+      "id": "table-meeting",
+      "kind": "table",
+      "name": "Mesa de reuniones",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "walnut",
+      "footprint": {
+        "w": 7,
+        "h": 5
+      },
+      "anchor": {
+        "x": 128,
+        "y": 180
+      },
+      "layer": "sorted",
+      "collision": "solid",
+      "files": [
+        {
+          "role": "sheet",
+          "path": "table/meeting.png",
+          "imageKind": "table",
+          "width": 256,
+          "height": 192,
+          "sha256": "38b666176614092ad6af257b69a83198270331e977ffd3c25e32d5e29e5d7bec"
+        }
+      ]
+    },
+    {
+      "id": "table-cafeteria",
+      "kind": "table",
+      "name": "Mesa de cafetería",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "beech",
+      "footprint": {
+        "w": 5,
+        "h": 3
+      },
+      "anchor": {
+        "x": 128,
+        "y": 180
+      },
+      "layer": "sorted",
+      "collision": "solid",
+      "files": [
+        {
+          "role": "sheet",
+          "path": "table/cafeteria.png",
+          "imageKind": "table",
+          "width": 256,
+          "height": 192,
+          "sha256": "671418ba7cea35d57c4efd96d86f77b580333417dfb7e356b647211dff192ef5"
+        }
+      ]
+    }
+  ]
+}

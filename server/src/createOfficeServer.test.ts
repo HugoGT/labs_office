@@ -28,10 +28,18 @@ import type { DirectoryUser, UserDirectory } from './directory/directoryPort.ts'
 import { createMemoryDirectory } from './directory/memoryDirectory.ts';
 import { createMemoryDecor } from './decor/memoryDecor.ts';
 import type { DecorCatalog } from './decor/decorPort.ts';
+import { readArtPackManifest } from './decor/artPackFile.ts';
+import type { AssetStoragePort } from './assets/assetStoragePort.ts';
+import { createMemoryAssetStorage } from './assets/memoryAssetStorage.ts';
+import { encodePng } from './assets/pngCodec.ts';
+import { ART_IMAGE_SPECS, sheetSize } from '../../src/game/artContract.ts';
+import { createHash } from 'node:crypto';
 import { createMemoryDesks } from './desks/memoryDesks.ts';
 import type { DeskDirectory } from './desks/desksPort.ts';
 import { createMemorySpaces } from './spaces/memorySpaces.ts';
 import type { SpacesDirectory } from './spaces/spacesPort.ts';
+import { createMemoryTerrain } from './terrain/memoryTerrain.ts';
+import type { TerrainStore } from './terrain/terrainPort.ts';
 import { OFFICE_ROOM_NAME, RECONNECTION_WINDOW_SECONDS } from './OfficeRoom.ts';
 import type { EgressPort } from './recording/egressPort.ts';
 import type { RecordingStoragePort } from './recording/recordingStorage.ts';
@@ -937,6 +945,8 @@ describe('rutas de espacios (#7, slice 3)', () => {
     status: 'active',
     expiresAt: null,
     invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
     createdAt: new Date('2025-12-01T00:00:00.000Z'),
   };
 
@@ -1076,6 +1086,8 @@ describe('rutas de decoracion (#7, slice 4)', () => {
     status: 'active',
     expiresAt: null,
     invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
     createdAt: new Date('2025-12-01T00:00:00.000Z'),
   };
 
@@ -1415,6 +1427,253 @@ describe('rutas de decoracion (#7, slice 4)', () => {
   });
 });
 
+describe('art upload routes (#121)', () => {
+  const ADMIN_UPLOAD: DirectoryUser = {
+    id: 'id-admin',
+    uid: 'uid-admin',
+    email: 'admin@example.com',
+    displayName: 'Admin',
+    role: 'admin',
+    status: 'active',
+    expiresAt: null,
+    invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
+    createdAt: new Date('2025-12-01T00:00:00.000Z'),
+  };
+  const uploadVerifier: IdTokenVerifier = {
+    async verify(token: unknown) {
+      return token === 'valido-uid-admin' ? { uid: 'uid-admin', email: 'admin@example.com', name: 'Admin' } : null;
+    },
+  };
+  const BEARER = { Authorization: 'Bearer valido-uid-admin', 'Content-Type': 'application/json' };
+
+  /** A walk or seated sheet with one opaque pixel per frame: valid, and tiny once encoded. */
+  function characterSheet(kind: 'character-walk' | 'character-seated'): string {
+    const spec = ART_IMAGE_SPECS[kind];
+    const { width, height } = sheetSize(spec);
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let y = spec.frame.height >> 1; y < height; y += spec.frame.height) {
+      for (let x = spec.frame.width >> 1; x < width; x += spec.frame.width) data.set([30, 90, 160, 255], (y * width + x) * 4);
+    }
+    return encodePng({ width, height, data }).toString('base64');
+  }
+
+  const CHARACTER = {
+    kind: 'character',
+    name: 'Lucía',
+    author: 'Equipo de arte',
+    license: 'proprietary-internal',
+    files: { walk: characterSheet('character-walk'), seated: characterSheet('character-seated') },
+  };
+
+  async function uploadServer(assetStorage: AssetStoragePort | null = createMemoryAssetStorage()) {
+    const decor = createMemoryDecor();
+    await decor.registerArtPack(readArtPackManifest(new URL('../../public/assets/pack/manifest.json', import.meta.url)));
+    const server = createOfficeServer({
+      auth: uploadVerifier,
+      directory: createMemoryDirectory({ seed: [ADMIN_UPLOAD] }),
+      decor,
+      identityAdmin: null,
+      assetStorage,
+    });
+    const port = await server.listen(0);
+    return { server, url: `http://localhost:${port}` };
+  }
+
+  it('an uploaded character reaches the uploads manifest and its files are served immutable', async () => {
+    const { server, url } = await uploadServer();
+
+    const created = await fetch(`${url}/admin/assets/upload`, { method: 'POST', headers: BEARER, body: JSON.stringify(CHARACTER) });
+    expect(created.status).toBe(201);
+    const { piece } = (await created.json()) as { piece: { id: string; files: { path: string; sha256: string }[] } };
+    expect(piece.id).toMatch(/^character-upload-/);
+
+    const manifest = await fetch(`${url}/assets/files/manifest.json`);
+    expect(manifest.status).toBe(200);
+    expect(manifest.headers.get('cache-control')).toBe('no-cache');
+    expect(((await manifest.json()) as { pieces: { id: string }[] }).pieces.map((entry) => entry.id)).toEqual([piece.id]);
+
+    const file = await fetch(`${url}/assets/files/${piece.files[0]!.path}`);
+    expect(file.status).toBe(200);
+    expect(file.headers.get('content-type')).toBe('image/png');
+    expect(file.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    const bytes = Buffer.from(await file.arrayBuffer());
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(piece.files[0]!.sha256);
+    // Cross-origin like every other route: the office loads it from another port locally.
+    expect(file.headers.get('access-control-allow-origin')).toBe('*');
+
+    expect((await fetch(`${url}/assets/files/${'0'.repeat(64)}.png`)).status).toBe(404);
+    await server.shutdown();
+  });
+
+  it('is not taken by POST /admin/assets/:id, and refuses a body over the upload limit with too-large', async () => {
+    const { server, url } = await uploadServer();
+
+    const huge = { ...CHARACTER, files: { walk: 'A'.repeat(2 * 1024 * 1024), seated: '' } };
+    const res = await fetch(`${url}/admin/assets/upload`, { method: 'POST', headers: BEARER, body: JSON.stringify(huge) });
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'too-large' });
+    await server.shutdown();
+  });
+
+  it('without a bucket uploads and files answer 503 asset-upload-not-configured, the manifest still answers', async () => {
+    const { server, url } = await uploadServer(null);
+
+    const upload = await fetch(`${url}/admin/assets/upload`, { method: 'POST', headers: BEARER, body: JSON.stringify(CHARACTER) });
+    expect(upload.status).toBe(503);
+    expect(await upload.json()).toEqual({ error: 'asset-upload-not-configured' });
+    const file = await fetch(`${url}/assets/files/${'0'.repeat(64)}.png`);
+    expect(file.status).toBe(503);
+    const manifest = await fetch(`${url}/assets/files/manifest.json`);
+    expect(((await manifest.json()) as { pieces: unknown[] }).pieces).toEqual([]);
+    await server.shutdown();
+  });
+});
+
+/**
+ * Contributions over HTTP (#122). The rules live in
+ * `assets/artContributionRoutes.test.ts`; what only a real server proves is
+ * the wiring: the large body parser on the contribution route, the private
+ * preview next to the public file route, the 503 without a bucket, and a
+ * retired character reaching the live room.
+ */
+describe('art contribution routes (#122)', () => {
+  const base: DirectoryUser = {
+    id: '00000000-0000-4000-8000-0000000000a1',
+    uid: 'uid-admin',
+    email: 'admin@example.com',
+    displayName: 'Admin',
+    role: 'admin',
+    status: 'active',
+    expiresAt: null,
+    invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
+    createdAt: new Date('2025-12-01T00:00:00.000Z'),
+  };
+  const ADMIN_USER = base;
+  const ANA_USER: DirectoryUser = { ...base, id: '00000000-0000-4000-8000-0000000000e1', uid: 'uid-ana', email: 'ana@example.com', displayName: 'Ana', role: 'employee' };
+  const BETO_USER: DirectoryUser = { ...base, id: '00000000-0000-4000-8000-0000000000e2', uid: 'uid-beto', email: 'beto@example.com', displayName: 'Beto', role: 'employee' };
+  const identities: Record<string, VerifiedIdentity> = {
+    'token-admin': { uid: 'uid-admin', email: 'admin@example.com', name: 'Admin' },
+    'token-ana': { uid: 'uid-ana', email: 'ana@example.com', name: 'Ana' },
+    'token-beto': { uid: 'uid-beto', email: 'beto@example.com', name: 'Beto' },
+  };
+  const verifier: IdTokenVerifier = {
+    async verify(token: unknown) {
+      return typeof token === 'string' ? (identities[token] ?? null) : null;
+    },
+  };
+  const as = (token: string) => ({ Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' });
+
+  function characterSheet(kind: 'character-walk' | 'character-seated'): string {
+    const spec = ART_IMAGE_SPECS[kind];
+    const { width, height } = sheetSize(spec);
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let y = spec.frame.height >> 1; y < height; y += spec.frame.height) {
+      for (let x = spec.frame.width >> 1; x < width; x += spec.frame.width) data.set([200, 90, 60, 255], (y * width + x) * 4);
+    }
+    return encodePng({ width, height, data }).toString('base64');
+  }
+
+  const CONTRIBUTION = {
+    kind: 'character',
+    name: 'Lucía',
+    author: 'Ana',
+    rightsAccepted: true,
+    files: { walk: characterSheet('character-walk'), seated: characterSheet('character-seated') },
+  };
+
+  async function contributionServer(assetStorage: AssetStoragePort | null = createMemoryAssetStorage()) {
+    const decor = createMemoryDecor();
+    await decor.registerArtPack(readArtPackManifest(new URL('../../public/assets/pack/manifest.json', import.meta.url)));
+    const created = createOfficeServer({
+      auth: verifier,
+      directory: createMemoryDirectory({ seed: [ADMIN_USER, ANA_USER, BETO_USER] }),
+      decor,
+      identityAdmin: null,
+      assetStorage,
+    });
+    const port = await created.listen(0);
+    return { server: created, url: `http://localhost:${port}`, ws: `ws://localhost:${port}` };
+  }
+
+  it('a contribution is pending and private until approved, then public; retiring it resets its wearer live', async () => {
+    const { server: contributions, url, ws } = await contributionServer();
+    try {
+      const submitted = await fetch(`${url}/me/art/contributions`, { method: 'POST', headers: as('token-ana'), body: JSON.stringify(CONTRIBUTION) });
+      expect(submitted.status).toBe(201);
+      const { contribution } = (await submitted.json()) as { contribution: { id: string; status: string; piece: { files: { path: string }[] } } };
+      expect(contribution.status).toBe('pending');
+      const file = contribution.piece.files[0]!.path;
+
+      expect((await fetch(`${url}/assets/files/${file}`)).status).toBe(404);
+      expect((await fetch(`${url}/me/art/files/${file}`, { headers: as('token-beto') })).status).toBe(404);
+      const preview = await fetch(`${url}/me/art/files/${file}`, { headers: as('token-ana') });
+      expect(preview.status).toBe(200);
+      expect(preview.headers.get('cache-control')).toBe('private, no-store');
+      expect(((await (await fetch(`${url}/assets/files/manifest.json`)).json()) as { pieces: unknown[] }).pieces).toEqual([]);
+
+      const queue = await fetch(`${url}/admin/art/contributions?status=pending`, { headers: as('token-admin') });
+      expect(((await queue.json()) as { contributions: { id: string }[] }).contributions.map((entry) => entry.id)).toEqual([contribution.id]);
+      expect((await fetch(`${url}/admin/art/contributions/${contribution.id}/approve`, { method: 'POST', headers: as('token-admin') })).status).toBe(200);
+      expect((await fetch(`${url}/assets/files/${file}`)).status).toBe(200);
+
+      expect((await fetch(`${url}/me/avatar`, { method: 'POST', headers: as('token-beto'), body: JSON.stringify({ avatarId: contribution.id }) })).status).toBe(200);
+      const beto = await new Client(ws).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token: 'token-beto' });
+      openRooms.push(beto);
+      await waitUntil(() => beto.state.players?.get(beto.sessionId)?.avatarId === contribution.id);
+
+      const retired = await fetch(`${url}/admin/art/pieces/${contribution.id}/retire`, { method: 'POST', headers: as('token-admin') });
+      expect(retired.status).toBe(200);
+      await waitUntil(() => beto.state.players?.get(beto.sessionId)?.avatarId === 'character-p01-burgundy-suit');
+      expect(contributions.sessions.has(beto.sessionId)).toBe(true);
+    } finally {
+      await contributions.shutdown();
+    }
+  });
+
+  it('the contribution route takes upload-sized bodies, and refuses larger ones with too-large', async () => {
+    const { server: contributions, url } = await contributionServer();
+    try {
+      const huge = { ...CONTRIBUTION, files: { walk: 'A'.repeat(2 * 1024 * 1024), seated: '' } };
+      const res = await fetch(`${url}/me/art/contributions`, { method: 'POST', headers: as('token-ana'), body: JSON.stringify(huge) });
+      expect(res.status).toBe(413);
+      expect(await res.json()).toEqual({ error: 'too-large' });
+    } finally {
+      await contributions.shutdown();
+    }
+  });
+
+  it('without a bucket every contribution route answers 503 asset-upload-not-configured', async () => {
+    const { server: contributions, url } = await contributionServer(null);
+    try {
+      for (const [path, method] of [
+        ['/me/art/contributions', 'POST'],
+        ['/me/art/contributions', 'GET'],
+        [`/me/art/files/${'0'.repeat(64)}.png`, 'GET'],
+        ['/admin/art/contributions', 'GET'],
+        ['/admin/art/pieces/character-upload-0123456789abcdef/retire', 'POST'],
+      ] as const) {
+        const res = await fetch(`${url}${path}`, { method, headers: as('token-ana'), ...(method === 'POST' ? { body: '{}' } : {}) });
+        expect([path, res.status, await res.json()]).toEqual([path, 503, { error: 'asset-upload-not-configured' }]);
+      }
+    } finally {
+      await contributions.shutdown();
+    }
+  });
+});
+
+async function waitUntil(condition: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error('condition not met in time');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 /**
  * El cableado de `/me/display-name` (#100). Reusa el mismo `admin()` de
  * `/admin/session`: la unica guarda de configuracion es "sin directorio, 503",
@@ -1432,6 +1691,8 @@ describe('rutas de nombre visible (#100)', () => {
     status: 'active',
     expiresAt: null,
     invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
     createdAt: new Date('2025-12-01T00:00:00.000Z'),
   };
 
@@ -1534,6 +1795,106 @@ describe('rutas de nombre visible (#100)', () => {
 });
 
 /**
+ * Wiring of `/me/avatar` (art migration, step 5). It hangs from `decorRoute`
+ * because the choice is checked against the art catalog, so without a
+ * directory or a catalog it answers 503, never 404. The rules themselves are
+ * in `avatarRoutes.test.ts`.
+ */
+describe('character routes (art migration, step 5)', () => {
+  const ANA_AVATAR: DirectoryUser = {
+    id: 'id-ana',
+    uid: 'uid-ana',
+    email: 'ana@example.com',
+    displayName: null,
+    role: 'employee',
+    status: 'active',
+    expiresAt: null,
+    invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
+    createdAt: new Date('2025-12-01T00:00:00.000Z'),
+  };
+
+  const avatarVerifier: IdTokenVerifier = {
+    async verify(token: unknown) {
+      return token === 'valido-uid-ana' ? { uid: 'uid-ana', email: 'ana@example.com', name: null } : null;
+    },
+  };
+
+  const BEARER_ANA = { Authorization: 'Bearer valido-uid-ana', 'Content-Type': 'application/json' };
+
+  async function avatarServer(overrides: { decor?: DecorCatalog | null } = {}) {
+    let decor = overrides.decor;
+    if (decor === undefined) {
+      decor = createMemoryDecor();
+      await decor.registerArtPack(
+        readArtPackManifest(new URL('../../public/assets/pack/manifest.json', import.meta.url)),
+      );
+    }
+    const server = createOfficeServer({
+      auth: avatarVerifier,
+      directory: createMemoryDirectory({ seed: [ANA_AVATAR] }),
+      decor,
+      identityAdmin: null,
+    });
+    const port = await server.listen(0);
+    return { server, url: `http://localhost:${port}` };
+  }
+
+  it('GET /me/avatar without credentials answers 401', async () => {
+    const { server, url } = await avatarServer();
+
+    expect((await fetch(`${url}/me/avatar`)).status).toBe(401);
+    await server.shutdown();
+  });
+
+  it('POST /me/avatar stores the choice and GET returns it afterwards, chosen', async () => {
+    const { server, url } = await avatarServer();
+
+    const before = await fetch(`${url}/me/avatar`, { headers: BEARER_ANA });
+    expect(await before.json()).toEqual({ avatarId: 'character-p01-burgundy-suit', chosen: false });
+
+    const posted = await fetch(`${url}/me/avatar`, {
+      method: 'POST',
+      headers: BEARER_ANA,
+      body: JSON.stringify({ avatarId: 'character-p05-charcoal-suit' }),
+    });
+    expect(posted.status).toBe(200);
+
+    const after = await fetch(`${url}/me/avatar`, { headers: BEARER_ANA });
+    expect(await after.json()).toEqual({ avatarId: 'character-p05-charcoal-suit', chosen: true });
+    await server.shutdown();
+  });
+
+  it('an unknown character answers 400 with its reason end to end', async () => {
+    const { server, url } = await avatarServer();
+
+    const res = await fetch(`${url}/me/avatar`, {
+      method: 'POST',
+      headers: BEARER_ANA,
+      body: JSON.stringify({ avatarId: 'character-p99-nobody' }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid-character', reason: 'unknown-piece' });
+    await server.shutdown();
+  });
+
+  it('without a catalog, GET and POST answer 503 and not 404', async () => {
+    const { server, url } = await avatarServer({ decor: null });
+
+    expect((await fetch(`${url}/me/avatar`, { headers: BEARER_ANA })).status).toBe(503);
+    const posted = await fetch(`${url}/me/avatar`, {
+      method: 'POST',
+      headers: BEARER_ANA,
+      body: JSON.stringify({ avatarId: 'character-p05-charcoal-suit' }),
+    });
+    expect(posted.status).toBe(503);
+    await server.shutdown();
+  });
+});
+
+/**
  * El cableado de las rutas de escritorios (#7, slice 5). Lo que se prueba aqui
  * es la TRADUCCION -- que cada ruta existe, en su verbo, y que el estado "sin
  * almacen" responde 503 y no 404 -- no las reglas, que ya cubre
@@ -1559,6 +1920,8 @@ describe('rutas de escritorios (#7, slice 5)', () => {
     status: 'active',
     expiresAt: null,
     invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
     createdAt: new Date('2025-12-01T00:00:00.000Z'),
   };
 
@@ -1991,6 +2354,12 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
     return room;
   }
 
+  /**
+   * Open lawn far from the test spaces. Not (0, 0): the world's border is a
+   * hedge the room refuses moves into (art step 8).
+   */
+  const OUTSIDE = { x: 600, y: 912, facing: 'down' };
+
   function post(url: string, path: string, body: unknown) {
     return fetch(`${url}${path}`, {
       method: 'POST',
@@ -2054,8 +2423,8 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
         releases.push(() => resolve(known));
       }));
       restoreRead = () => read.mockRestore();
-      for (let i = 0; i < 200; i++) outsider.send('move', { x: i, y: 0, facing: 'down' });
-      await waitFor(() => recServer.sessions.positionOf(outsider.sessionId)?.x === 199);
+      for (let i = 0; i < 200; i++) outsider.send('move', { x: OUTSIDE.x + i, y: OUTSIDE.y, facing: 'down' });
+      await waitFor(() => recServer.sessions.positionOf(outsider.sessionId)?.x === OUTSIDE.x + 199);
       expect(read).not.toHaveBeenCalled();
       stopping = post(url, '/recordings/stop', request);
       await waitFor(() => recServer.recordings.list().length === 0);
@@ -2097,8 +2466,8 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
       await waitFor(() => finalRead);
       visitor.send('move', { x: 330, y: 330, facing: 'down' });
       await waitFor(() => recServer.sessions.positionOf(visitor.sessionId)?.x === 330);
-      visitor.send('move', { x: 0, y: 0, facing: 'down' });
-      await waitFor(() => recServer.sessions.positionOf(visitor.sessionId)?.x === 0);
+      visitor.send('move', OUTSIDE);
+      await waitFor(() => recServer.sessions.positionOf(visitor.sessionId)?.x === OUTSIDE.x);
       release();
       expect((await pending).status).toBe(200);
       const stopped = await post(url, '/recordings/stop', request);
@@ -2125,7 +2494,8 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
       : (await spaces.listSpaces())[0];
     const directory = createMemoryDirectory({ seed: ['owner', 'old', 'middle', 'after-delete', 'admin'].map((uid): DirectoryUser => ({
       id: `id-${uid}`, uid, email: `${uid}@example.com`, displayName: uid,
-      role: uid === 'admin' ? 'admin' : 'employee', status: 'active', expiresAt: null, invitedBy: null, createdAt: new Date(),
+      role: uid === 'admin' ? 'admin' : 'employee', status: 'active', expiresAt: null, invitedBy: null,
+      avatarId: 'character-p01-burgundy-suit', avatarChosenAt: null, createdAt: new Date(),
     })) });
     const recServer = createOfficeServer({ spaces, desks, directory, auth: recordingVerifier, egress: fakeEgress(),
       storage: uploadedStorage, recordingReadiness: { intervalMs: 5, timeoutMs: 2000 } });
@@ -2153,8 +2523,8 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
       for (const [client, x] of [[old, 330], [middle, 650]] as const) {
         client.send('move', { x, y: 330, facing: 'down' });
         await waitFor(() => recServer.sessions.positionOf(client.sessionId)?.x === x);
-        client.send('move', { x: 0, y: 0, facing: 'down' });
-        await waitFor(() => recServer.sessions.positionOf(client.sessionId)?.x === 0);
+        client.send('move', OUTSIDE);
+        await waitFor(() => recServer.sessions.positionOf(client.sessionId)?.x === OUTSIDE.x);
       }
       expect((await fetch(`${url}${path}/delete`, { method: 'POST', headers })).status).toBe(200);
       afterDelete.send('move', { x: 650, y: 330, facing: 'down' });
@@ -2190,8 +2560,8 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
         await owner.leave();
         await waitFor(() => !recServer.sessions.has(owner.sessionId));
       } else {
-        owner.send('move', { x: 0, y: 0, facing: 'down' });
-        await waitFor(() => recServer.sessions.positionOf(owner.sessionId)?.x === 0);
+        owner.send('move', OUTSIDE);
+        await waitFor(() => recServer.sessions.positionOf(owner.sessionId)?.x === OUTSIDE.x);
       }
       release();
       expect((await pending).status).toBe(403);
@@ -2221,8 +2591,8 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
       await post(url, '/recordings/start', { sessionId: owner.sessionId, spaceId });
       visitor.send('move', { x: 330, y: 330, facing: 'down' });
       await waitFor(() => recServer.sessions.positionOf(visitor.sessionId)?.x === 330);
-      visitor.send('move', { x: 0, y: 0, facing: 'down' });
-      await waitFor(() => recServer.sessions.positionOf(visitor.sessionId)?.x === 0);
+      visitor.send('move', OUTSIDE);
+      await waitFor(() => recServer.sessions.positionOf(visitor.sessionId)?.x === OUTSIDE.x);
       const stopped = await post(url, '/recordings/stop', { sessionId: owner.sessionId, spaceId });
       const { recordingId } = await stopped.json() as { recordingId: string };
       await waitFor(() => ownerReady.length === 1);
@@ -2351,6 +2721,8 @@ describe('users routes (#93): revoking over HTTP evicts the live session', () =>
     status: 'active',
     expiresAt: null,
     invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
     createdAt: new Date('2025-12-01T00:00:00.000Z'),
   };
   const STAFF_USER: DirectoryUser = {
@@ -2412,5 +2784,115 @@ describe('users routes (#93): revoking over HTTP evicts the live session', () =>
     } finally {
       await usersServer.shutdown();
     }
+  });
+});
+
+/**
+ * Terrain editing over HTTP (#123 phase 2). The rules are tested in
+ * `terrain/`; what only a real server proves is the wiring: the 503 without a
+ * store, the protections read from the live room and the spaces store, and
+ * the accepted edit reaching the room state.
+ */
+describe('terrain routes (#123 phase 2)', () => {
+  const ADMIN_TERRAIN: DirectoryUser = {
+    id: '00000000-0000-4000-8000-0000000000b1',
+    uid: 'uid-admin',
+    email: 'admin@example.com',
+    displayName: 'Admin',
+    role: 'admin',
+    status: 'active',
+    expiresAt: null,
+    invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
+    createdAt: new Date('2025-12-01T00:00:00.000Z'),
+  };
+  const terrainVerifier: IdTokenVerifier = {
+    async verify(token: unknown) {
+      if (token !== 'valido-uid-admin') return null;
+      return { uid: 'uid-admin', email: 'admin@example.com', name: 'Admin' };
+    },
+  };
+  const BEARER = { Authorization: 'Bearer valido-uid-admin', 'Content-Type': 'application/json' };
+  const LAWN = 35;
+  const onTile = (tx: number, ty: number) => ({ x: tx * 32 + 32, y: ty * 32 + 25, facing: 'down' });
+
+  async function waitFor(predicate: () => boolean, timeoutMs = 4000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      try {
+        if (predicate()) return;
+      } catch {
+        // The state may not have arrived yet.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error('condition not met before the timeout');
+  }
+
+  async function terrainServer(overrides: { terrain?: TerrainStore | null; spaces?: SpacesDirectory } = {}) {
+    const terrain = overrides.terrain === undefined ? createMemoryTerrain() : overrides.terrain;
+    const server = createOfficeServer({
+      auth: terrainVerifier,
+      directory: createMemoryDirectory({ seed: [ADMIN_TERRAIN] }),
+      spaces: overrides.spaces ?? createMemorySpaces(),
+      terrain,
+      identityAdmin: null,
+    });
+    const port = await server.listen(0);
+    return { server, url: `http://localhost:${port}`, wsUrl: `ws://localhost:${port}` };
+  }
+
+  function setBlock(url: string, index: number, material: string) {
+    return fetch(`${url}/admin/terrain/blocks/${index}`, { method: 'POST', headers: BEARER, body: JSON.stringify({ material }) });
+  }
+
+  it('answers 503 without a terrain store or without a directory, never 404', async () => {
+    const { server, url } = await terrainServer({ terrain: null });
+    const res = await setBlock(url, LAWN, 'sand');
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'terrain-not-configured' });
+    await server.shutdown();
+
+    const bare = createOfficeServer({ auth: terrainVerifier, directory: null, terrain: createMemoryTerrain() });
+    const port = await bare.listen(0);
+    expect((await setBlock(`http://localhost:${port}`, LAWN, 'sand')).status).toBe(503);
+    await bare.shutdown();
+  });
+
+  it('loads the persisted blocks at listen, so the first move is already checked against them', async () => {
+    const { server } = await terrainServer({ terrain: createMemoryTerrain([[LAWN, 'water']]) });
+
+    expect(server.terrain.blocks()[LAWN]).toBe('water');
+    await server.shutdown();
+  });
+
+  it('refuses water under someone in the room or under a space, and applies it once nothing is there', async () => {
+    const spaces = createMemorySpaces();
+    const { server, url, wsUrl } = await terrainServer({ spaces });
+    const room = await new Client(wsUrl).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token: 'valido-uid-admin' });
+    openRooms.push(room);
+    const lawn = onTile(67, 22);
+    room.send('move', lawn);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === lawn.x);
+
+    const underPlayer = await setBlock(url, LAWN, 'water');
+    expect(underPlayer.status).toBe(409);
+    expect(await underPlayer.json()).toEqual({ error: 'terrain-under-player' });
+
+    const away = onTile(20, 23);
+    room.send('move', away);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === away.x);
+    const sala = await spaces.createSpace({ name: 'Sala del prado', x: 66, y: 21, w: 3, h: 3, capacity: null });
+    const underSpace = await setBlock(url, LAWN, 'water');
+    expect(underSpace.status).toBe(409);
+    expect(await underSpace.json()).toEqual({ error: 'terrain-under-placement' });
+
+    await spaces.deleteSpace(sala.id);
+    const accepted = await setBlock(url, LAWN, 'water');
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toEqual({ index: LAWN, material: 'water' });
+    await waitFor(() => room.state.terrainBlocks.split(',')[LAWN] === 'water');
+    await server.shutdown();
   });
 });

@@ -11,6 +11,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { LAYOUT_MATERIALS } from '../../../src/game/officeLayout.ts';
 import { migrate, readSchemaSql, reportDesksWithoutSpace } from './migrate.ts';
 
 /** Comparar SQL con saltos de linea y sangria es comparar formato, no contrato. */
@@ -131,7 +132,7 @@ describe('schema.sql: lo que no puede faltar', () => {
   it('la auditoria guarda actor, accion y sujeto (PRD 10, punto 7 del issue)', () => {
     expect(schema).toContain('actor_id uuid references users(id)');
     expect(schema).toContain('subject_id uuid references users(id)');
-    expect(schema).toContain("check (action in ('invite', 'revoke', 'create-user', 'revoke-user'))");
+    expect(schema).toContain("check (action in ('invite', 'revoke', 'create-user', 'revoke-user', 'upload-art', 'submit-art', 'approve-art', 'reject-art', 'retire-art'))");
   });
 
   it('refresca el CHECK de la auditoria en un despliegue que ya tenia la tabla', () => {
@@ -144,7 +145,7 @@ describe('schema.sql: lo que no puede faltar', () => {
     // fichero exige de todo lo que contiene.
     expect(schema).toContain('alter table audit_log drop constraint if exists audit_log_action_check');
     expect(schema).toContain(
-      "alter table audit_log add constraint audit_log_action_check check (action in ('invite', 'revoke', 'create-user', 'revoke-user'))",
+      "alter table audit_log add constraint audit_log_action_check check (action in ('invite', 'revoke', 'create-user', 'revoke-user', 'upload-art', 'submit-art', 'approve-art', 'reject-art', 'retire-art'))",
     );
   });
 
@@ -537,6 +538,121 @@ describe('schema.sql: assets drawn above avatars (#71)', () => {
     // special by migrating.
     expect(schema).toContain(
       'alter table assets add column if not exists above_avatars boolean not null default false',
+    );
+  });
+});
+
+describe('schema.sql: art pack catalog and appearance (art migration, step 3)', () => {
+  const squashed = squash(schema);
+
+  it('creates the catalog keyed by the stable manifest id, with a retirement mark and no delete path', () => {
+    expect(squashed).toContain('create table if not exists art_pieces ( id text primary key');
+    const kinds = "'character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table'";
+    expect(squashed).toContain(`kind text not null check (kind in (${kinds}))`);
+    // A live table keeps its old CHECK, so the kinds of art contract 2 replace it.
+    expect(squashed).toContain('alter table art_pieces drop constraint if exists art_pieces_kind_check');
+    expect(squashed).toContain(`alter table art_pieces add constraint art_pieces_kind_check check (kind in (${kinds}))`);
+    expect(squashed).toContain('files jsonb not null');
+    expect(squashed).toContain('spec jsonb not null');
+    expect(squashed).toContain('retired_at timestamptz');
+  });
+
+  it('marks where each piece comes from and who uploaded it (#121), idempotently', () => {
+    expect(squashed).toContain("alter table art_pieces add column if not exists source text not null default 'pack'");
+    expect(squashed).toContain('alter table art_pieces drop constraint if exists art_pieces_source_check');
+    expect(squashed).toContain("alter table art_pieces add constraint art_pieces_source_check check (source in ('pack', 'upload'))");
+    expect(squashed).toContain('alter table art_pieces add column if not exists uploaded_by uuid references users(id)');
+  });
+
+  it('adds every choice with its own idempotent ALTER, backfilling existing rows with the pack defaults', () => {
+    // `CREATE TABLE IF NOT EXISTS` never touches a live table, so each column
+    // arrives through ADD COLUMN IF NOT EXISTS; NOT NULL DEFAULT is what fills
+    // the rows that already exist (the values are checked against the
+    // manifest in artCatalogRules.test.ts).
+    expect(squashed).toContain("alter table users add column if not exists avatar_id text not null default 'character-p01-burgundy-suit'");
+    expect(squashed).toContain("alter table desks add column if not exists material_id text not null default 'desk-wood'");
+    expect(squashed).toContain('alter table desks add column if not exists color text');
+    expect(squashed).toContain("alter table spaces add column if not exists floor_material_id text not null default 'floor-wood'");
+    expect(squashed).toContain('alter table spaces add column if not exists floor_color text');
+  });
+
+  it('bounds stored colors to lowercase #rrggbb, refreshing the CHECK on a live database', () => {
+    for (const [table, column] of [
+      ['desks', 'color'],
+      ['spaces', 'floor_color'],
+    ] as const) {
+      expect(squashed).toContain(`alter table ${table} drop constraint if exists ${table}_${column}_check`);
+      expect(squashed).toContain(
+        `alter table ${table} add constraint ${table}_${column}_check check (${column} is null or ${column} ~ '^#[0-9a-f]{6}$')`,
+      );
+    }
+  });
+
+  it('marks whether a user chose a character, NULL for every row that existed before (step 5)', () => {
+    // No DEFAULT on purpose: existing accounts must go through the selector on
+    // their first access after this migration, so their marker stays NULL.
+    expect(squashed).toContain('alter table users add column if not exists avatar_chosen_at timestamptz;');
+    expect(squashed).not.toMatch(/avatar_chosen_at timestamptz[^;]*default/);
+  });
+
+  it('does not tie choices to the catalog with a foreign key: the catalog is seeded after the schema', () => {
+    // Backfilled rows point at pieces that only exist once `registerArtPack`
+    // runs, after this script; retirement never deletes, so nothing dangles.
+    expect(squashed).not.toMatch(/avatar_id text[^,;]*references/);
+    expect(squashed).not.toMatch(/material_id text[^,;]*references/);
+  });
+});
+
+describe('schema.sql: art contributions and review (#122)', () => {
+  const squashed = squash(schema);
+
+  it('adds the review state, approved by default so pack pieces and Admin uploads stay in the catalog', () => {
+    expect(squashed).toContain("alter table art_pieces add column if not exists status text not null default 'approved'");
+    expect(squashed).toContain('alter table art_pieces drop constraint if exists art_pieces_status_check');
+    expect(squashed).toContain("alter table art_pieces add constraint art_pieces_status_check check (status in ('pending', 'approved', 'rejected'))");
+  });
+
+  it('stores who reviewed, when, why, and when the rights statement was accepted', () => {
+    expect(squashed).toContain('alter table art_pieces add column if not exists reviewed_by uuid references users(id)');
+    expect(squashed).toContain('alter table art_pieces add column if not exists reviewed_at timestamptz');
+    expect(squashed).toContain('alter table art_pieces add column if not exists review_note text');
+    expect(squashed).toContain('alter table art_pieces add column if not exists license_accepted_at timestamptz');
+  });
+
+  it('a contribution always carries its rights acceptance, a rejection always its reason', () => {
+    expect(squashed).toContain('alter table art_pieces drop constraint if exists art_pieces_review_note_check');
+    expect(squashed).toContain(
+      "alter table art_pieces add constraint art_pieces_review_note_check check ((status = 'rejected') = (review_note is not null))",
+    );
+    expect(squashed).toContain('alter table art_pieces drop constraint if exists art_pieces_pending_license_check');
+    expect(squashed).toContain(
+      "alter table art_pieces add constraint art_pieces_pending_license_check check (status <> 'pending' or license_accepted_at is not null)",
+    );
+  });
+
+  it('audits art transitions against the piece, and indexes the hourly count', () => {
+    expect(squashed).toContain('alter table audit_log add column if not exists piece_id text references art_pieces(id)');
+    expect(squashed).toContain('create index if not exists audit_log_actor_action on audit_log (actor_id, action, created_at)');
+    // After the table it references exists: the script runs top to bottom.
+    expect(squashed.indexOf('add column if not exists piece_id')).toBeGreaterThan(squashed.indexOf('create table if not exists art_pieces'));
+  });
+});
+
+describe('schema.sql: persisted terrain blocks (#123 phase 2)', () => {
+  const squashed = squash(schema);
+  const materials = LAYOUT_MATERIALS.map((material) => `'${material}'`).join(', ');
+
+  it('stores one row per edited block, with its material, who set it and when', () => {
+    expect(squashed).toContain('create table if not exists terrain_blocks ( block_index integer primary key check (block_index >= 0)');
+    expect(squashed).toContain('updated_by uuid references users(id)');
+    expect(squashed).toContain('updated_at timestamptz not null default now()');
+  });
+
+  it('bounds the material to the shared layout materials, refreshing the CHECK on a live database', () => {
+    expect(squashed).toContain(`material text not null check (material in (${materials}))`);
+    expect(squashed).toContain('alter table terrain_blocks drop constraint if exists terrain_blocks_material_check');
+    expect(squashed).toContain(
+      `alter table terrain_blocks add constraint terrain_blocks_material_check check (material in (${materials}))`,
     );
   });
 });

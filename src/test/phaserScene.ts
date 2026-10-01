@@ -3,7 +3,7 @@ import { expect, vi } from 'vitest';
 
 /**
  * Boot budget for a Phaser scene in the `browser` project (#68). While its
- * preload fetches the Kenney sheets from the Vite server a scene sits in
+ * preload fetches the art pack from the Vite server a scene sits in
  * LOADING (status 3), and under a full `test:all` run, or on the CI runner,
  * that alone outlasts `vi.waitFor`'s 1s default. Matches the `LOOP_WAIT`
  * margin the scene tests already use; the browser project's `testTimeout`

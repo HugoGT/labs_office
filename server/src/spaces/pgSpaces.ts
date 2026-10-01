@@ -24,6 +24,7 @@ import {
   normalizeUpdateSpaceInput,
   type CanonicalSpace,
 } from './spaceRules.ts';
+import { ART_PACK_DEFAULTS, normalizeStoredAppearance } from '../decor/artCatalogRules.ts';
 import type { DirectoryPool, DirectoryQueryable } from '../directory/pgDirectory.ts';
 
 /** Codigo de `exclusion_violation` de Postgres: lo que salta `spaces_no_overlap`. */
@@ -60,7 +61,8 @@ function translatePgError(error: unknown): never {
   throw error;
 }
 
-const SPACE_COLUMNS = 'id, slug, name, x, y, w, h, capacity, desk_id, created_at, updated_at';
+const SPACE_COLUMNS =
+  'id, slug, name, x, y, w, h, capacity, desk_id, floor_material_id, floor_color, created_at, updated_at';
 
 function toSpace(row: Record<string, unknown>): Space {
   return {
@@ -73,6 +75,10 @@ function toSpace(row: Record<string, unknown>): Space {
     h: row.h as number,
     capacity: (row.capacity as number | null) ?? null,
     deskId: (row.desk_id as string | null) ?? null,
+    // NOT NULL DEFAULT in the schema; the fallback is for a row read before
+    // the migration ran, same as `above_avatars` (#71).
+    floorMaterialId: (row.floor_material_id as string | null | undefined) ?? ART_PACK_DEFAULTS.floor,
+    floorColor: (row.floor_color as string | null | undefined) ?? null,
     createdAt: row.created_at as Date,
     updatedAt: row.updated_at as Date,
   };
@@ -144,15 +150,33 @@ export function createPgSpaces(pool: DirectoryPool): SpacesDirectory {
       // `invitationRules`/`userRules`: un rectangulo mal escrito no debe
       // costar una consulta.
       const normalized = normalizeCreateSpaceInput(input);
+      const floor = input.floor === undefined ? undefined : normalizeStoredAppearance(input.floor, ART_PACK_DEFAULTS.floor);
+      const values: unknown[] = [
+        normalized.slug,
+        normalized.name,
+        normalized.x,
+        normalized.y,
+        normalized.w,
+        normalized.h,
+        normalized.capacity,
+      ];
+      // Without a floor the columns are left to their schema DEFAULT, the
+      // same value `ART_PACK_DEFAULTS` gives `memorySpaces`.
+      let columns = 'slug, name, x, y, w, h, capacity';
+      if (floor) {
+        columns += ', floor_material_id, floor_color';
+        values.push(floor.materialId, floor.color);
+      }
+      const placeholders = values.map((_, index) => `$${index + 1}`).join(', ');
 
       try {
         const result = await pool.query(
           `
-            INSERT INTO spaces (slug, name, x, y, w, h, capacity)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO spaces (${columns})
+            VALUES (${placeholders})
             RETURNING ${SPACE_COLUMNS}
           `,
-          [normalized.slug, normalized.name, normalized.x, normalized.y, normalized.w, normalized.h, normalized.capacity],
+          values,
         );
         return toSpace(result.rows[0]);
       } catch (error) {

@@ -41,6 +41,7 @@ import {
   normalizeInvitationInput,
 } from './invitationRules.ts';
 import { normalizeUserInput } from './userRules.ts';
+import { ART_PACK_DEFAULTS, normalizeStoredCharacterId } from '../decor/artCatalogRules.ts';
 
 export interface AuditEntry {
   actorId: string;
@@ -57,8 +58,13 @@ export interface MemoryDirectoryOptions {
   bootstrapSuperadminEmail?: string | null;
   /** Reloj inyectado: sin el, las pruebas de caducidad dependerian de la hora. */
   now?: () => Date;
-  /** Filas ya hechas, para montar casos (un invitado caducado, uno revocado). */
-  seed?: DirectoryUser[];
+  /**
+   * Filas ya hechas, para montar casos (un invitado caducado, uno revocado).
+   * Without `avatarId` a row gets the pack default, like the backfill of a
+   * row that existed before the column; without `avatarChosenAt` it has not
+   * chosen yet, like every row from before step 5.
+   */
+  seed?: (Omit<DirectoryUser, 'avatarId' | 'avatarChosenAt'> & { avatarId?: string; avatarChosenAt?: Date | null })[];
 }
 
 /**
@@ -86,7 +92,11 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
   let counter = 0;
 
   for (const seeded of options.seed ?? []) {
-    rows.push({ ...seeded });
+    rows.push({
+      ...seeded,
+      avatarId: seeded.avatarId ?? ART_PACK_DEFAULTS.character,
+      avatarChosenAt: seeded.avatarChosenAt ?? null,
+    });
     counter++;
   }
 
@@ -117,7 +127,14 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
     invitedBy: string | null;
   }): DirectoryUser {
     counter++;
-    const row: DirectoryUser = { id: fakeUuid(counter), createdAt: now(), ...fields };
+    // The pack default, like the column DEFAULT every pg INSERT relies on.
+    const row: DirectoryUser = {
+      id: fakeUuid(counter),
+      createdAt: now(),
+      avatarId: ART_PACK_DEFAULTS.character,
+      avatarChosenAt: null,
+      ...fields,
+    };
     rows.push(row);
     return row;
   }
@@ -310,6 +327,27 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
 
       row.displayName = canonical;
       return snapshot(row);
+    },
+
+    async setAvatar(id, avatarId) {
+      // Same order as pg: the shape is checked before the row is looked up.
+      const checked = normalizeStoredCharacterId(avatarId);
+      const row = byId(id);
+      if (!row) return null;
+      row.avatarId = checked;
+      row.avatarChosenAt = now();
+      return snapshot(row);
+    },
+
+    async reassignAvatar(fromId, toId) {
+      const checked = normalizeStoredCharacterId(toId);
+      let moved = 0;
+      for (const row of rows) {
+        if (row.avatarId !== fromId) continue;
+        row.avatarId = checked;
+        moved += 1;
+      }
+      return moved;
     },
 
     async close() {

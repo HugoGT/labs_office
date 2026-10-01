@@ -13,9 +13,11 @@
 
 import type { OfficeDesk } from './desksPort';
 import type { LayoutEditCommand } from './layoutEditor';
+import type { LayoutMaterial } from './officeLayout';
 import type { SpaceArea } from './mapData';
 import type { PresenceStatus, RecordingReadyPayload } from './officeProtocol';
 import type { RosterPeer } from './roster';
+import type { TerrainEditCommand } from './terrainEditor';
 import type { ActiveRecordingSnapshot, OfficeConnectionState } from './officeRoomClient';
 
 export interface OfficeEventMap {
@@ -106,6 +108,13 @@ export interface OfficeEventMap {
    */
   portraits: { byKey: Record<string, string> };
   /**
+   * Portrait of each session drawn from its pack character (art migration,
+   * step 6): the idle frame facing the viewer, as a data URL. Re-emitted
+   * whole whenever a character's sheet loads or a peer comes or goes; a
+   * session missing here keeps its procedural `portraits` entry.
+   */
+  characterportraits: { bySession: Record<string, string> };
+  /**
    * Alguien hizo clic en un escritorio asignable sobre el que SI hay algo que
    * hacer (#7, slice 5). Un escritorio ajeno no emite nada: no se ofrece.
    *
@@ -163,6 +172,14 @@ export interface OfficeEventMap {
    * React decide que hacer con eso, incluido pedirselo al servidor.
    */
   layoutplace: { tx: number; ty: number; valid: boolean };
+  /**
+   * The live terrain blocks (#123 phase 2), as the room replicates them:
+   * after every accepted edit, and again when the terrain editor opens, so
+   * it starts from what the map shows without a fetch of its own.
+   */
+  terrain: { blocks: readonly LayoutMaterial[] };
+  /** The terrain editor is open and someone clicked a block on the map (#123 phase 2). */
+  terrainpick: { index: number };
 }
 
 export interface OfficeCommandMap {
@@ -189,6 +206,11 @@ export interface OfficeCommandMap {
    * ver su propio anillo encenderse en el canvas.
    */
   speakers: { sessionIds: string[] };
+  /**
+   * Sit on the free seat in reach, or stand up when seated (art migration,
+   * step 6). Same as pressing E in the canvas; the room has the last word.
+   */
+  toggleSeat: undefined;
   /**
    * Los 3 comandos de llamada (issue #2, D3) viajan solo por `emitCommand`,
    * como `setStatus`: ningun metodo de conveniencia (`bridge.callPeer()` no
@@ -254,6 +276,12 @@ export interface OfficeCommandMap {
    * opcion de construccion.
    */
   layoutedit: LayoutEditCommand | null;
+  /**
+   * The terrain editor (#123 phase 2): the block outlined and the local
+   * preview, or `null` when it closes. Drawn by `TerrainEditLayer`; the
+   * preview is painted by the scene, which owns the tilemap.
+   */
+  terrainedit: TerrainEditCommand | null;
 }
 
 export interface OfficeBridge {

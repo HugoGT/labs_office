@@ -62,6 +62,42 @@ const MESSAGES: Readonly<Record<AdminErrorCode, string>> = {
   // Cuarta pieza del mismo despliegue sin `DATABASE_URL`: tampoco hay tabla de
   // espacios que administrar.
   'spaces-not-configured': 'Las salas no están configuradas en este servidor.',
+  // Art migration, step 7. Each says what to pick instead, because the form
+  // that sent it is still on screen with the choice that failed.
+  'appearance-unknown-piece': 'Ese material no está en el catálogo de arte. Elige otro.',
+  'appearance-retired-piece': 'Ese material ya no se puede elegir. Elige otro.',
+  'appearance-color-not-allowed': 'Ese material conserva su propio aspecto y no admite color.',
+  'appearance-invalid-color': 'El color no es válido: elige uno con la forma #rrggbb.',
+  'appearance-immutable': 'El material y el color se eligen al crear y no se pueden cambiar después.',
+  // Terrain editor (#123 phase 2). One says pick another block, the other wait.
+  'terrain-under-placement':
+    'El agua taparía una sala, un escritorio, una silla o la entrada de la oficina. Elige otro bloque o material.',
+  'terrain-under-player': 'Hay alguien de pie en ese bloque: el agua podrá ir cuando se aparte.',
+  'terrain-not-configured': 'La edición del terreno no está configurada en este servidor.',
+  // Art upload (#121). Each says what to change in the file, because the
+  // form is still on screen with it; the panel adds which file it was.
+  'not-png': 'El archivo no es un PNG.',
+  'invalid-png': 'El PNG está dañado o incompleto y no se puede leer.',
+  'unsupported-png': 'El PNG tiene que ser de 8 bits por canal y sin entrelazado. Vuelve a exportarlo así.',
+  'invalid-dimensions': 'La imagen no mide exactamente lo que pide ese tipo de pieza.',
+  'too-many-colors': 'La imagen tiene más de 128 colores distintos. Reduce la paleta.',
+  'not-opaque': 'Un suelo no puede tener píxeles transparentes ni translúcidos.',
+  'background-present': 'Las cuatro esquinas de cada cuadro tienen que ser transparentes. Quita el fondo.',
+  'too-large': 'El archivo pesa más de 128 KB.',
+  'invalid-metadata': 'Falta un dato de la pieza o no tiene el formato correcto.',
+  'missing-file': 'Falta uno de los archivos que pide ese tipo de pieza.',
+  'asset-upload-not-configured': 'La subida de arte no está configurada en este servidor.',
+  'asset-already-uploaded': 'Esa imagen ya se subió: la pieza ya está en el catálogo.',
+  'asset-name-taken': 'Ya hay una pieza de decoración con ese nombre. Elige otro.',
+  // Art contributions (#122). The limits say what to wait for, since
+  // retrying right away would only meet the same refusal.
+  'rights-not-accepted': 'Tienes que confirmar la cesión de derechos para subir la pieza.',
+  'too-many-pending': 'Ya tienes 5 piezas pendientes de revisión. Espera a que se revisen antes de subir otra.',
+  'hourly-limit': 'Ya subiste 10 piezas en la última hora. Vuelve a intentarlo más tarde.',
+  'already-reviewed': 'Otra persona ya revisó esta pieza. Recarga la lista.',
+  'invalid-review-note': 'Escribe el motivo del rechazo: quien subió la pieza lo verá.',
+  'not-retirable': 'Solo se pueden retirar personajes y plantas de decoración.',
+  'not-approved': 'Solo se puede retirar una pieza aprobada.',
   network: 'No se pudo contactar con el servidor.',
   unknown: GENERIC_MESSAGE,
 };

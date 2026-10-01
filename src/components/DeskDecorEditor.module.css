@@ -114,6 +114,13 @@
   cursor: grabbing;
 }
 
+/* Credit of a contributed piece (#122), under its button. */
+.credit {
+  display: block;
+  font-size: 11px;
+  color: #9ca3af;
+}
+
 .piece {
   background: #1f2937;
   border: 1px solid #374151;

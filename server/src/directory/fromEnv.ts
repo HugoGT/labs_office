@@ -16,12 +16,23 @@ import type { UserDirectory } from './directoryPort.ts';
 import { migrate, reportDesksWithoutSpace } from './migrate.ts';
 import { createPgDirectory, type DirectoryPool } from './pgDirectory.ts';
 import { createDirectoryPool } from './pool.ts';
+import type { ArtPackManifest } from '../../../src/game/artContract.ts';
+import { readArtPackManifest } from '../decor/artPackFile.ts';
 import { createPgDecor } from '../decor/pgDecor.ts';
 import type { DecorCatalog } from '../decor/decorPort.ts';
 import { createPgDesks } from '../desks/pgDesks.ts';
 import type { DeskDirectory } from '../desks/desksPort.ts';
 import { createPgSpaces } from '../spaces/pgSpaces.ts';
 import type { SpacesDirectory } from '../spaces/spacesPort.ts';
+import { createPgTerrain } from '../terrain/pgTerrain.ts';
+import type { TerrainStore } from '../terrain/terrainPort.ts';
+
+/**
+ * The pack the SPA serves, so the catalog registers exactly the files the
+ * browser loads. Resolved here and nowhere else; the server image copies this
+ * one file (`infra/gcp/docker/colyseus.Dockerfile`).
+ */
+const ART_PACK_MANIFEST = new URL('../../../public/assets/pack/manifest.json', import.meta.url);
 
 export interface DirectoryRuntime {
   directory: UserDirectory;
@@ -59,11 +70,20 @@ export interface DirectoryRuntime {
    */
   desks: DeskDirectory;
   /**
+   * Persisted terrain blocks (#123 phase 2), on the same pool for the same
+   * reason as the others. `terrain_blocks` is in the same `schema.sql`.
+   */
+  terrain: TerrainStore;
+  /**
    * Aplica el esquema. Idempotente: corre en cada arranque. Ver `migrate.ts`.
    *
    * Tambien avisa, DESPUES de aplicar el esquema, de los escritorios que el
    * backfill de cubiculos (#10 + #12) dejo sin espacio emparejado -- ver
    * `reportDesksWithoutSpace`.
+   *
+   * Last, it registers the art pack in the catalog (art migration, step 3):
+   * after the schema, which creates `art_pieces`, and at every start, so a
+   * deploy with a new pack updates the catalog and retires what it dropped.
    */
   migrate(): Promise<void>;
 }
@@ -71,6 +91,7 @@ export interface DirectoryRuntime {
 export function directoryFromEnv(
   env: { DATABASE_URL?: string; BOOTSTRAP_SUPERADMIN_EMAIL?: string; DATABASE_SSL_CA_FILE?: string },
   makePool: typeof createDirectoryPool = createDirectoryPool,
+  loadArtPack: () => ArtPackManifest = () => readArtPackManifest(ART_PACK_MANIFEST),
 ): DirectoryRuntime | undefined {
   const config = resolveDirectoryConfig(env);
   // Sin config no se construye ni el pool: un pool sin destino seria un objeto
@@ -79,14 +100,18 @@ export function directoryFromEnv(
 
   const pool: DirectoryPool = makePool(config);
 
+  const decor = createPgDecor(pool);
+
   return {
     directory: createPgDirectory(pool, config),
     spaces: createPgSpaces(pool),
-    decor: createPgDecor(pool),
+    decor,
     desks: createPgDesks(pool),
+    terrain: createPgTerrain(pool),
     migrate: async () => {
       await migrate(pool);
       await reportDesksWithoutSpace(pool);
+      await decor.registerArtPack(loadArtPack());
     },
   };
 }

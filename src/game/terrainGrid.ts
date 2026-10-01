@@ -1,120 +1,51 @@
 /**
- * Rejilla logica del mapa (suelo + colisiones), portada de `buildGrid`
- * (`prototype/js/app.js:215-253`). Sin dependencias de Phaser.
+ * Rejilla logica del mapa (suelo + colisiones) que usa el cliente: la
+ * colision de Arcade, la auto-caminata y el teletransporte de e2e. Sin
+ * dependencias de Phaser.
+ *
+ * Art migration, step 8: the grid is no longer built here. It is a 2D view of
+ * a `TerrainSnapshot` of the Tiled layout (`officeLayout.ts`), so the client
+ * blocks exactly the tiles the server refuses in a `move`.
  */
 
-import { BUILT_IN_SPACES, GROUND, MAP_H, MAP_W, TILE, type GroundCode, type Room } from './mapData';
+import { BASE_LAYOUT, BASE_TERRAIN, type LayoutMaterial, type OfficeLayout, type TerrainSnapshot } from './officeLayout';
 
 export interface TerrainGrid {
-  ground: GroundCode[][];
+  /** Effective terrain material of each tile, `[ty][tx]`. */
+  terrain: LayoutMaterial[][];
+  /** Walls and hedges: tiles a space's floor never covers. */
+  walled: boolean[][];
+  /** Not walkable under the shared rule (`terrainSnapshot`). */
   solid: boolean[][];
 }
 
 /**
- * Marca solido un rectangulo de tiles. En el prototipo era `this.setSolid`,
- * asignado dentro de `buildGrid` (`app.js:224`) y usado luego por la
- * colocacion de mobiliario/arboles antes de fusionar colisiones. Aqui se
- * expone como parametro explicito: la coupling temporal deja de ser oculta.
+ * The grid of a terrain snapshot. Persisted blocks (#123 phase 2) pass their
+ * own snapshot; the layout supplies the walls and hedges, which blocks never
+ * change.
  */
-export function markSolid(
-  solid: boolean[][],
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-): void {
-  for (let j = y; j < y + h; j++) {
-    for (let i = x; i < x + w; i++) {
-      solid[j][i] = true;
-    }
+export function buildTerrainGrid(terrain: TerrainSnapshot = BASE_TERRAIN, layout: OfficeLayout = BASE_LAYOUT): TerrainGrid {
+  const grid: TerrainGrid = { terrain: [], walled: [], solid: [] };
+  for (let ty = 0; ty < terrain.height; ty++) {
+    const row = ty * terrain.width;
+    grid.terrain.push(terrain.materials.slice(row, row + terrain.width));
+    grid.solid.push(terrain.walkable.slice(row, row + terrain.width).map((walkable) => !walkable));
+    grid.walled.push(
+      Array.from({ length: terrain.width }, (_, tx) => layout.walls[row + tx] !== null || layout.hedges[row + tx] !== null),
+    );
   }
-}
-
-function set(grid: TerrainGrid, x: number, y: number, code: GroundCode, isSolid = false): void {
-  grid.ground[y][x] = code;
-  grid.solid[y][x] = isSolid;
-}
-
-/**
- * `spaces` tiene valor por defecto `BUILT_IN_SPACES` (D3): esta funcion sigue
- * dibujando SOLO el mapa base -- muros, puertas, suelo -- nunca la config
- * servida (slice 3). El parametro existe para que un futuro llamador con
- * espacios propios (tests) no tenga que reimportar la constante, pero ninguna
- * llamada existente sin argumento cambia de comportamiento.
- */
-export function buildTerrainGrid(spaces: readonly Room[] = BUILT_IN_SPACES): TerrainGrid {
-  const ground: GroundCode[][] = [];
-  const solid: boolean[][] = [];
-  for (let y = 0; y < MAP_H; y++) {
-    ground[y] = new Array(MAP_W).fill(GROUND.G) as GroundCode[];
-    solid[y] = new Array(MAP_W).fill(false) as boolean[];
-  }
-  const grid: TerrainGrid = { ground, solid };
-
-  // Borde de seto (oscuro, solido).
-  for (let y = 0; y < MAP_H; y++) {
-    for (let x = 0; x < MAP_W; x++) {
-      if (x === 0 || y === 0 || x === MAP_W - 1 || y === MAP_H - 1) {
-        set(grid, x, y, GROUND.GD, true);
-      }
-    }
-  }
-
-  // Pasillo que conecta el cesped con las salas.
-  for (let y = 1; y < MAP_H - 1; y++) {
-    set(grid, 48, y, GROUND.CORR);
-    set(grid, 49, y, GROUND.CORR);
-  }
-
-  // Rio con dos puentes.
-  for (let y = 19; y <= 21; y++) {
-    for (let x = 1; x <= 47; x++) {
-      const onBridge = (x >= 13 && x <= 15) || (x >= 32 && x <= 34);
-      set(grid, x, y, onBridge ? GROUND.BRIDGE : GROUND.WATER, !onBridge);
-    }
-  }
-
-  // Salas a la derecha (paredes con puerta al pasillo).
-  spaces.forEach((room) => {
-    const x0 = room.x / TILE;
-    const y0 = room.y / TILE;
-    const x1 = x0 + room.w / TILE - 1;
-    const y1 = y0 + room.h / TILE - 1;
-    const doorY = room.doorTiles;
-    const floorCode = room.floorStyle;
-
-    for (let y = y0; y <= y1; y++) {
-      for (let x = x0; x <= x1; x++) {
-        const isWall = x === x0 || x === x1 || y === y0 || y === y1;
-        if (isWall && x === x0 && doorY.includes(y)) {
-          set(grid, x, y, floorCode, false);
-        } else if (isWall) {
-          set(grid, x, y, GROUND.WALL, true);
-        } else {
-          set(grid, x, y, floorCode, false);
-        }
-      }
-    }
-  });
-
-  // Jardin trasero de las salas.
-  for (let y = 33; y <= 42; y++) {
-    for (let x = 50; x <= 62; x++) {
-      set(grid, x, y, GROUND.GD, false);
-    }
-  }
-
   return grid;
 }
 
 /**
  * Une los dos predicados de bloqueo que el prototipo duplicaba (wander en
- * `app.js:378`, teletransporte en `app.js:480`): solido o agua, dentro del
- * rango interior `1..MAP-2`.
+ * `app.js:378`, teletransporte en `app.js:480`). The world's border is a
+ * solid hedge, and anything outside the map is blocked too.
  */
 export function isBlocked(grid: TerrainGrid, tx: number, ty: number): boolean {
-  if (tx < 1 || ty < 1 || tx > MAP_W - 2 || ty > MAP_H - 2) return true;
-  return grid.solid[ty][tx] || grid.ground[ty][tx] === GROUND.WATER;
+  const row = grid.solid[ty];
+  if (row === undefined || tx < 0 || tx >= row.length) return true;
+  return row[tx]!;
 }
 
 /**

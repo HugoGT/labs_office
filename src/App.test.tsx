@@ -367,3 +367,43 @@ describe('App: enrutado (#24)', () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe('App: character step only in front of the office (art migration, step 5)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    window.history.pushState({}, '', '/');
+  });
+
+  function requestedUrls(): string[] {
+    return vi.mocked(fetch).mock.calls.map(([url]) => String(url));
+  }
+
+  it('signing into the office asks the server for the saved character', async () => {
+    vi.stubEnv('VITE_FIREBASE_API_KEY', 'AIza-publica');
+    vi.stubEnv('VITE_FIREBASE_PROJECT_ID', 'oficina-virtual');
+    const { port, emit } = fakePort();
+    createAdapterMock.mockReturnValue(port);
+    render(<App />);
+
+    emit({ uid: 'uid-ana', email: 'ana@example.com', displayName: 'Ana' });
+
+    // The stubbed 503 is "no directory": the office still opens.
+    await waitFor(() => expect(createGameMock).toHaveBeenCalledTimes(1));
+    expect(requestedUrls().some((url) => url.endsWith('/me/avatar'))).toBe(true);
+  });
+
+  it('/dashboard never asks for a character: administrative access does not wait on it', async () => {
+    vi.stubEnv('VITE_FIREBASE_API_KEY', 'AIza-publica');
+    vi.stubEnv('VITE_FIREBASE_PROJECT_ID', 'oficina-virtual');
+    window.history.pushState({}, '', '/dashboard');
+    const { port, emit } = fakePort();
+    createAdapterMock.mockReturnValue(port);
+    render(<App />);
+
+    emit({ uid: 'uid-ana', email: 'ana@example.com', displayName: 'Ana' });
+
+    await waitFor(() => expect(requestedUrls().some((url) => url.includes('/admin/'))).toBe(true));
+    expect(requestedUrls().some((url) => url.endsWith('/me/avatar'))).toBe(false);
+    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+  });
+});

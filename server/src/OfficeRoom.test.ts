@@ -9,12 +9,16 @@
 import type { Client as ServerClient } from '@colyseus/core';
 import { Client } from 'colyseus.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from '../../src/game/mapData.ts';
+import { BUILT_IN_SPACES, PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from '../../src/game/mapData.ts';
+import { detectSpace } from '../../src/game/proximity.ts';
 import {
   SESSION_REPLACED_CLOSE_CODE,
   SESSION_REVOKED_CLOSE_CODE,
 } from '../../src/game/officeProtocol.ts';
+import { BASE_MAP_SEATS, DESK_SEAT_FACING, deskSeatId, mapSeatId } from '../../src/game/seating.ts';
+import { BASE_LAYOUT, decodeTerrainBlocks } from '../../src/game/officeLayout.ts';
 import { createOfficeServer, type OfficeServer } from './createOfficeServer.ts';
+import { createMemoryDesks } from './desks/memoryDesks.ts';
 import {
   DEFAULT_NAME,
   deriveIdentityName,
@@ -26,7 +30,9 @@ import {
 } from './OfficeRoom.ts';
 import type { DirectoryUser, UserDirectory } from './directory/directoryPort.ts';
 import { createMemoryDirectory } from './directory/memoryDirectory.ts';
+import { ART_PACK_DEFAULTS } from './decor/artCatalogRules.ts';
 import type { OfficeState } from './schema.ts';
+import { createMemoryTerrain } from './terrain/memoryTerrain.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 
 let server: OfficeServer;
@@ -153,6 +159,173 @@ describe('OfficeRoom: movimiento', () => {
   });
 });
 
+/**
+ * Walkability (art migration, step 8, #123): the room refuses a move whose
+ * body center lands on a tile the shared rule of `officeLayout.ts` blocks,
+ * the same tiles the client's physics never lets the avatar into.
+ */
+describe('OfficeRoom: walkable terrain', () => {
+  /** A network position whose body center (x - 16, y - 9) is the middle of tile (tx, ty). */
+  const onTile = (tx: number, ty: number) => ({ x: tx * TILE + 32, y: ty * TILE + 25, facing: 'down' });
+
+  /** A status sent after the moves: once it lands, the moves before it were handled. */
+  async function settle(room: Awaited<ReturnType<typeof join>>) {
+    room.send('status', { status: 'y' });
+    await waitFor(() => room.state.players.get(room.sessionId)?.status === 'y');
+  }
+
+  it('drops a move into the river or the lake, and keeps the last position', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+    const ashore = onTile(20, 23);
+    room.send('move', ashore);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === ashore.x);
+
+    room.send('move', onTile(20, 20));
+    room.send('move', onTile(94, 62));
+    await settle(room);
+
+    expect(room.state.players.get(room.sessionId)?.y).toBe(ashore.y);
+    expect(server.sessions.positionOf(room.sessionId)).toEqual({ x: ashore.x, y: ashore.y });
+  });
+
+  it('lets a move onto a bridge over the same river through', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+    const deck = onTile(14, 20);
+
+    room.send('move', deck);
+
+    await waitFor(() => room.state.players.get(room.sessionId)?.y === deck.y);
+  });
+
+  it('drops a move into a wall, a table or a tree', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+    const start = room.state.players.get(room.sessionId)?.x;
+
+    room.send('move', onTile(50, 4));
+    room.send('move', onTile(55, 8));
+    room.send('move', onTile(2, 2));
+    await settle(room);
+
+    expect(room.state.players.get(room.sessionId)?.x).toBe(start);
+  });
+
+  it('accepts and tracks every spot people stood on before the layout, so membership and voice rooms stay', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+    // Tile centers, as the e2e teleport puts them: Cafeteria, its door, the
+    // Sala de Juntas, the corridor and the spawn on the open lawn.
+    const spots = [
+      { tx: 58, ty: 20, space: 'Cafetería' },
+      { tx: 59, ty: 21, space: 'Cafetería' },
+      { tx: 50, ty: 24, space: 'Cafetería' },
+      { tx: 55, ty: 4, space: 'Sala de Juntas' },
+      { tx: 48, ty: 30, space: null },
+      { tx: PLAYER_SPAWN_TX, ty: PLAYER_SPAWN_TY, space: null },
+    ];
+
+    for (const spot of spots) {
+      const position = { x: spot.tx * TILE + 16, y: spot.ty * TILE + 16 };
+      room.send('move', { ...position, facing: 'down' });
+      await waitFor(() => room.state.players.get(room.sessionId)?.x === position.x && room.state.players.get(room.sessionId)?.y === position.y);
+      expect(server.sessions.positionOf(room.sessionId)).toEqual(position);
+      expect(detectSpace(position, BUILT_IN_SPACES)?.name ?? null).toBe(spot.space);
+    }
+  });
+
+  it('a sitter snapped onto a chair by its table is kept there, and only while seated', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+    const index = BASE_MAP_SEATS.findIndex((seat) => seat.facing === 'up' && seat.tx === 53 && seat.ty === 11);
+    const beside = onTile(53, 12);
+    room.send('move', beside);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === beside.x);
+    room.send('sit', { seat: mapSeatId(index) });
+    await waitFor(() => room.state.players.get(room.sessionId)?.seat === mapSeatId(index));
+
+    // Feet on the chair ground, as the client puts them: the body center falls on the table.
+    const onChair = { x: (53 + 0.5) * TILE, y: (11 + 0.5) * TILE - 18, facing: 'up' };
+    room.send('move', onChair);
+    await waitFor(() => room.state.players.get(room.sessionId)?.y === onChair.y);
+
+    room.send('stand', {});
+    await waitFor(() => room.state.players.get(room.sessionId)?.seat === '');
+    room.send('move', { ...onChair, y: onChair.y - 1 });
+    await settle(room);
+    expect(room.state.players.get(room.sessionId)?.y).toBe(onChair.y);
+  });
+});
+
+/**
+ * Persisted terrain blocks (#123 phase 2): the room replicates the live blocks
+ * and checks moves against the snapshot the server rebuilt on the last edit,
+ * never against the database.
+ */
+describe('OfficeRoom: edited terrain', () => {
+  const LAWN = 35;
+  const LAKE = 94;
+  const onTile = (tx: number, ty: number) => ({ x: tx * TILE + 32, y: ty * TILE + 25, facing: 'down' });
+  const nobody = async () => ({ placements: [], players: [] });
+  const blocksOf = (room: Awaited<ReturnType<typeof join>>) =>
+    decodeTerrainBlocks(room.state.terrainBlocks, BASE_LAYOUT.blocks.length);
+
+  async function settle(room: Awaited<ReturnType<typeof join>>) {
+    room.send('status', { status: 'y' });
+    await waitFor(() => room.state.players.get(room.sessionId)?.status === 'y');
+  }
+
+  beforeEach(async () => {
+    await server.shutdown();
+    server = createOfficeServer({ terrain: createMemoryTerrain([[LAWN, 'water']]) });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+  });
+
+  it('replicates the persisted blocks to whoever joins', async () => {
+    const room = await join('Ana');
+
+    await waitFor(() => blocksOf(room)?.[LAWN] === 'water');
+    expect(blocksOf(room)?.[LAKE]).toBe('water');
+  });
+
+  it('shows an edit to a client already inside, and to one joining after it', async () => {
+    const ana = await join('Ana');
+    const beto = await join('Beto');
+    await waitFor(() => blocksOf(beto) !== null);
+
+    await server.terrain.setBlock({ index: LAKE, material: 'grass', actorId: null }, nobody);
+
+    await waitFor(() => blocksOf(beto)?.[LAKE] === 'grass');
+    await waitFor(() => blocksOf(ana)?.[LAKE] === 'grass');
+    const late = await join('Carla');
+    await waitFor(() => blocksOf(late)?.[LAKE] === 'grass');
+  });
+
+  it('drops a move onto newly watered tiles and accepts one onto newly dried tiles', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+    await server.terrain.setBlock({ index: LAWN, material: 'grass', actorId: null }, nobody);
+    const lawn = onTile(67, 22);
+    room.send('move', lawn);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === lawn.x);
+    const ashore = onTile(20, 23);
+    room.send('move', ashore);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === ashore.x);
+
+    await server.terrain.setBlock({ index: LAWN, material: 'water', actorId: null }, nobody);
+    room.send('move', lawn);
+    await settle(room);
+    expect(room.state.players.get(room.sessionId)?.x).toBe(ashore.x);
+
+    await server.terrain.setBlock({ index: LAKE, material: 'grass', actorId: null }, nobody);
+    const dried = onTile(94, 58);
+    room.send('move', dried);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === dried.x);
+    expect(server.sessions.positionOf(room.sessionId)).toEqual({ x: dried.x, y: dried.y });
+  });
+});
+
 describe('OfficeRoom: posicion trackeada en el registro de sesiones (#10, #12)', () => {
   it('onJoin registra la posicion de spawn en el registro, no solo en el estado', async () => {
     const room = await join('Ana');
@@ -172,14 +345,16 @@ describe('OfficeRoom: posicion trackeada en el registro de sesiones (#10, #12)',
     expect(server.sessions.positionOf(room.sessionId)).toEqual({ x: 300, y: 400 });
   });
 
-  it('un move fuera de los limites del mundo trackea la posicion YA recortada, no la cruda', async () => {
+  it('un move fuera de los limites del mundo no toca la posicion trackeada: recortado, cae en el seto del borde', async () => {
     const room = await join('Ana');
     await waitFor(() => room.state.players.size === 1);
+    const before = server.sessions.positionOf(room.sessionId);
 
     room.send('move', { x: 999999, y: -999999, facing: 'down' });
+    room.send('status', { status: 'y' });
 
-    await waitFor(() => room.state.players.get(room.sessionId)?.x === WORLD_W);
-    expect(server.sessions.positionOf(room.sessionId)).toEqual({ x: WORLD_W, y: 0 });
+    await waitFor(() => room.state.players.get(room.sessionId)?.status === 'y');
+    expect(server.sessions.positionOf(room.sessionId)).toEqual(before);
   });
 
   it('un move invalido (ignorado por el estado) tampoco toca la posicion trackeada', async () => {
@@ -195,16 +370,18 @@ describe('OfficeRoom: posicion trackeada en el registro de sesiones (#10, #12)',
 });
 
 describe('OfficeRoom: el cliente no es de fiar', () => {
-  it('recorta una posicion fuera de los limites del mundo en vez de aceptarla', async () => {
+  it('nunca acepta una posicion fuera de los limites del mundo', async () => {
     const room = await join('Ana');
     await waitFor(() => room.state.players.size === 1);
+    const start = { x: room.state.players.get(room.sessionId)?.x, y: room.state.players.get(room.sessionId)?.y };
 
     room.send('move', { x: 999999, y: -999999, facing: 'down' });
+    room.send('move', { x: -5, y: WORLD_H + 40, facing: 'down' });
+    room.send('status', { status: 'y' });
 
-    await waitFor(() => room.state.players.get(room.sessionId)?.x === WORLD_W);
-    expect(room.state.players.get(room.sessionId)?.y).toBe(0);
+    await waitFor(() => room.state.players.get(room.sessionId)?.status === 'y');
+    expect({ x: room.state.players.get(room.sessionId)?.x, y: room.state.players.get(room.sessionId)?.y }).toEqual(start);
     expect(WORLD_W).toBeLessThan(999999);
-    expect(WORLD_H).toBeGreaterThan(0);
   });
 
   it('ignora un move con coordenadas no numericas en vez de escribir NaN', async () => {
@@ -235,9 +412,9 @@ describe('OfficeRoom: el cliente no es de fiar', () => {
     const room = await join('Ana');
     await waitFor(() => room.state.players.size === 1);
 
-    room.send('move', { x: 100, y: 100, facing: 'diagonal-inventada' });
+    room.send('move', { x: 320, y: 400, facing: 'diagonal-inventada' });
 
-    await waitFor(() => room.state.players.get(room.sessionId)?.x === 100);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === 320);
     expect(room.state.players.get(room.sessionId)?.facing).toBe('down');
   });
 
@@ -896,6 +1073,8 @@ function seededUser(overrides: Partial<DirectoryUser>): DirectoryUser {
     status: 'active',
     expiresAt: null,
     invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
   };
@@ -1160,6 +1339,133 @@ describe('OfficeRoom: el motivo del rechazo se registra en el servidor (#24)', (
     await expect(
       room.onAuth({} as ServerClient, { token: 'token-de-ana' }, {} as never),
     ).resolves.toMatchObject({ uid: 'uid-ana', directoryName: null });
+  });
+});
+
+/**
+ * The chosen character travels in the room state (art migration, step 5). The
+ * id replicated is always the persisted one: `onAuth` reads it from the
+ * directory row it already resolves, and anything the client sends is
+ * ignored, or anyone could dress up as someone else's character.
+ */
+describe('OfficeRoom: persisted character in the room state (art migration, step 5)', () => {
+  const BETO: VerifiedIdentity = { uid: 'uid-beto', email: 'beto@example.com', name: 'Beto Ruiz' };
+  let characterServer: OfficeServer | undefined;
+
+  async function start(options: { auth?: boolean; directory?: UserDirectory }) {
+    characterServer = createOfficeServer({
+      ...(options.auth === false ? {} : { auth: stubVerifier({ 'token-de-ana': ANA, 'token-de-beto': BETO }) }),
+      ...(options.directory ? { directory: options.directory } : { directory: null }),
+    });
+    return `ws://localhost:${await characterServer.listen(0)}`;
+  }
+
+  async function joinAt(endpoint: string, options: Record<string, unknown>) {
+    const room = await new Client(endpoint).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, options);
+    openRooms.push(room);
+    return room;
+  }
+
+  afterEach(async () => {
+    await characterServer?.shutdown();
+    characterServer = undefined;
+  });
+
+  it('onAuth carries the persisted character next to the identity', async () => {
+    const room = new OfficeRoom();
+    (room as unknown as { onMessage: unknown }).onMessage = () => () => {};
+    room.onCreate({
+      auth: stubVerifier({ 'token-de-ana': ANA }),
+      directory: createMemoryDirectory({ seed: [seededUser({ avatarId: 'character-p07-green-suit' })] }),
+    });
+
+    await expect(
+      room.onAuth({} as ServerClient, { token: 'token-de-ana' }, {} as never),
+    ).resolves.toMatchObject({ uid: 'uid-ana', avatarId: 'character-p07-green-suit' });
+  });
+
+  it('a second client sees the first client persisted character, not what it sent', async () => {
+    const directory = createMemoryDirectory({
+      seed: [
+        seededUser({ avatarId: 'character-p07-green-suit' }),
+        seededUser({
+          id: '22222222-2222-4222-8222-222222222222',
+          uid: 'uid-beto',
+          email: 'beto@example.com',
+          displayName: 'Beto',
+          avatarId: 'character-p12-mint-blazer',
+        }),
+      ],
+    });
+    const endpoint = await start({ directory });
+
+    const ana = await joinAt(endpoint, { token: 'token-de-ana', avatarId: 'character-p01-burgundy-suit' });
+    const beto = await joinAt(endpoint, { token: 'token-de-beto' });
+    await waitFor(() => beto.state.players.size === 2 && ana.state.players.size === 2);
+
+    expect(beto.state.players.get(ana.sessionId)?.avatarId).toBe('character-p07-green-suit');
+    expect(ana.state.players.get(beto.sessionId)?.avatarId).toBe('character-p12-mint-blazer');
+    expect(ana.state.players.get(ana.sessionId)?.avatarId).toBe('character-p07-green-suit');
+  });
+
+  it('a character saved after a session ends is the one the next join replicates', async () => {
+    const directory = createMemoryDirectory({ seed: [seededUser({})] });
+    const endpoint = await start({ directory });
+
+    await directory.setAvatar('11111111-1111-4111-8111-111111111111', 'character-p09-mint-shirt');
+    const room = await joinAt(endpoint, { token: 'token-de-ana' });
+    await waitFor(() => room.state.players.size === 1);
+
+    expect(room.state.players.get(room.sessionId)?.avatarId).toBe('character-p09-mint-shirt');
+  });
+
+  it('retiring a character puts its live wearers on the fallback without closing their session (#122)', async () => {
+    const directory = createMemoryDirectory({
+      seed: [
+        seededUser({ avatarId: 'character-upload-0123456789abcdef' }),
+        seededUser({
+          id: '22222222-2222-4222-8222-222222222222',
+          uid: 'uid-beto',
+          email: 'beto@example.com',
+          displayName: 'Beto',
+          avatarId: 'character-p12-mint-blazer',
+        }),
+      ],
+    });
+    const endpoint = await start({ directory });
+    const ana = await joinAt(endpoint, { token: 'token-de-ana' });
+    const beto = await joinAt(endpoint, { token: 'token-de-beto' });
+    await waitFor(() => beto.state.players.size === 2 && ana.state.players.size === 2);
+    let anaLeft = false;
+    ana.onLeave(() => {
+      anaLeft = true;
+    });
+
+    characterServer!.characters.retireCharacter('character-upload-0123456789abcdef', ART_PACK_DEFAULTS.character);
+
+    await waitFor(() => beto.state.players.get(ana.sessionId)?.avatarId === ART_PACK_DEFAULTS.character, 1000);
+    await waitFor(() => ana.state.players.get(ana.sessionId)?.avatarId === ART_PACK_DEFAULTS.character, 1000);
+    expect(ana.state.players.get(beto.sessionId)?.avatarId).toBe('character-p12-mint-blazer');
+    expect(anaLeft).toBe(false);
+    expect(characterServer!.sessions.has(ana.sessionId)).toBe(true);
+  });
+
+  it('without a directory every player is the pack default character', async () => {
+    const endpoint = await start({});
+
+    const room = await joinAt(endpoint, { token: 'token-de-ana', avatarId: 'character-p07-green-suit' });
+    await waitFor(() => room.state.players.size === 1);
+
+    expect(room.state.players.get(room.sessionId)?.avatarId).toBe(ART_PACK_DEFAULTS.character);
+  });
+
+  it('without auth the client-sent character is ignored too', async () => {
+    const endpoint = await start({ auth: false });
+
+    const room = await joinAt(endpoint, { name: 'Ana', avatarId: 'character-p07-green-suit' });
+    await waitFor(() => room.state.players.size === 1);
+
+    expect(room.state.players.get(room.sessionId)?.avatarId).toBe(ART_PACK_DEFAULTS.character);
   });
 });
 
@@ -1510,5 +1816,257 @@ describe('OfficeRoom: one session per account without auth (#78)', () => {
 
     expect(firstLeft).toBe(false);
     expect(server.sessions.size()).toBe(2);
+  });
+});
+
+/**
+ * Sitting (art migration, step 6). Having a desk and sitting are different
+ * things: a seat is something a client asks for, the room checks it (the seat
+ * exists, the player is next to it, nobody else is on it, and for a claimed
+ * desk only its owner) and replicates it; moving away stands the player up.
+ */
+describe('OfficeRoom: seats', () => {
+  const CHAIR = BASE_MAP_SEATS[0];
+  const besideChair = { x: CHAIR.tx * TILE + 16, y: (CHAIR.ty - 1) * TILE + 16, facing: 'down' };
+
+  async function moveNextToChair(room: Awaited<ReturnType<typeof join>>) {
+    room.send('move', besideChair);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === besideChair.x);
+  }
+
+  it('a player next to a chair sits on it, and the others see the seat and its facing', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    await moveNextToChair(a);
+
+    a.send('sit', { seat: mapSeatId(0) });
+
+    await waitFor(() => b.state.players.get(a.sessionId)?.seat === mapSeatId(0));
+    expect(b.state.players.get(a.sessionId)?.facing).toBe(CHAIR.facing);
+  });
+
+  it('everyone joins standing', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+    expect(room.state.players.get(room.sessionId)?.seat).toBe('');
+  });
+
+  it('ignores a seat out of reach, a malformed one and a chair that does not exist', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+
+    // From the spawn, far from every chair.
+    room.send('sit', { seat: mapSeatId(0) });
+    await moveNextToChair(room);
+    room.send('sit', { seat: 'map-999' });
+    room.send('sit', { seat: 42 });
+    room.send('sit', null);
+    room.send('status', { status: 'y' });
+
+    // The status sent last proves the sits before it were already handled.
+    await waitFor(() => room.state.players.get(room.sessionId)?.status === 'y');
+    expect(room.state.players.get(room.sessionId)?.seat).toBe('');
+  });
+
+  it('a seat holds one person: a second one asking for it stays standing', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    await moveNextToChair(a);
+    await moveNextToChair(b);
+
+    a.send('sit', { seat: mapSeatId(0) });
+    await waitFor(() => b.state.players.get(a.sessionId)?.seat === mapSeatId(0));
+    b.send('sit', { seat: mapSeatId(0) });
+    b.send('status', { status: 'y' });
+
+    await waitFor(() => a.state.players.get(b.sessionId)?.status === 'y');
+    expect(a.state.players.get(b.sessionId)?.seat).toBe('');
+  });
+
+  it('stand clears the seat', async () => {
+    const room = await join('Ana');
+    await moveNextToChair(room);
+    room.send('sit', { seat: mapSeatId(0) });
+    await waitFor(() => room.state.players.get(room.sessionId)?.seat === mapSeatId(0));
+
+    room.send('stand', {});
+
+    await waitFor(() => room.state.players.get(room.sessionId)?.seat === '');
+  });
+
+  it('moving within reach keeps the seat and its facing; moving away stands up', async () => {
+    const room = await join('Ana');
+    await moveNextToChair(room);
+    room.send('sit', { seat: mapSeatId(0) });
+    await waitFor(() => room.state.players.get(room.sessionId)?.seat === mapSeatId(0));
+
+    // The client snaps onto the chair after the server confirms: a move that
+    // stays next to the seat must not throw the sitter out of it.
+    room.send('move', { x: CHAIR.tx * TILE + 16, y: CHAIR.ty * TILE - 2, facing: 'left' });
+    await waitFor(() => room.state.players.get(room.sessionId)?.y === CHAIR.ty * TILE - 2);
+    expect(room.state.players.get(room.sessionId)?.seat).toBe(mapSeatId(0));
+    expect(room.state.players.get(room.sessionId)?.facing).toBe(CHAIR.facing);
+
+    room.send('move', { x: PLAYER_SPAWN_TX * TILE, y: PLAYER_SPAWN_TY * TILE, facing: 'left' });
+    await waitFor(() => room.state.players.get(room.sessionId)?.seat === '');
+    expect(room.state.players.get(room.sessionId)?.facing).toBe('left');
+  });
+
+  it('a seat is free again once its sitter leaves', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    await moveNextToChair(a);
+    await moveNextToChair(b);
+    a.send('sit', { seat: mapSeatId(0) });
+    await waitFor(() => b.state.players.get(a.sessionId)?.seat === mapSeatId(0));
+
+    await a.leave();
+    await waitFor(() => b.state.players.size === 1);
+    b.send('sit', { seat: mapSeatId(0) });
+
+    await waitFor(() => b.state.players.get(b.sessionId)?.seat === mapSeatId(0));
+  });
+
+  it('sitting does not move the position the room tracks for LiveKit', async () => {
+    const room = await join('Ana');
+    await moveNextToChair(room);
+    room.send('sit', { seat: mapSeatId(0) });
+    await waitFor(() => room.state.players.get(room.sessionId)?.seat === mapSeatId(0));
+
+    expect(server.sessions.positionOf(room.sessionId)).toEqual({ x: besideChair.x, y: besideChair.y });
+  });
+
+  it('without a desk store a desk seat is never granted', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+    room.send('sit', { seat: deskSeatId('id-mesa') });
+    room.send('status', { status: 'y' });
+
+    await waitFor(() => room.state.players.get(room.sessionId)?.status === 'y');
+    expect(room.state.players.get(room.sessionId)?.seat).toBe('');
+  });
+});
+
+describe('OfficeRoom: desk seats', () => {
+  const BETO: VerifiedIdentity = { uid: 'uid-beto', email: 'beto@example.com', name: 'Beto Ruiz' };
+  const ANA_ID = '11111111-1111-4111-8111-111111111111';
+  const BETO_ID = '22222222-2222-4222-8222-222222222222';
+  // On the open lawn: the river (rows 19-21) refuses the moves that reach a desk there.
+  const DESK = { x: 10, y: 25 };
+  let deskServer: OfficeServer | undefined;
+  let deskPort = 0;
+
+  async function start(occupantId: string | null) {
+    const directory = createMemoryDirectory({
+      seed: [
+        seededUser({}),
+        seededUser({ id: BETO_ID, uid: 'uid-beto', email: 'beto@example.com', displayName: 'Beto' }),
+      ],
+    });
+    const now = new Date('2026-01-01T00:00:00.000Z');
+    const desks = createMemoryDesks({
+      seed: [
+        { id: 'mesa-ana', label: 'Mesa 1', ...DESK, occupantId, createdAt: now, updatedAt: now },
+        { id: 'mesa-lejos', label: 'Mesa 2', x: 30, y: 20, occupantId: null, createdAt: now, updatedAt: now },
+      ],
+    });
+    deskServer = createOfficeServer({
+      auth: stubVerifier({ 'token-de-ana': ANA, 'token-de-beto': BETO }),
+      directory,
+      desks,
+    });
+    deskPort = await deskServer.listen(0);
+    return `ws://localhost:${deskPort}`;
+  }
+
+  async function joinNearDesk(endpoint: string, token: string) {
+    const room = await new Client(endpoint).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token });
+    openRooms.push(room);
+    const x = (DESK.x + 1) * TILE + 16;
+    const y = (DESK.y + 1) * TILE;
+    room.send('move', { x, y, facing: 'down' });
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === x);
+    return room;
+  }
+
+  afterEach(async () => {
+    await deskServer?.shutdown();
+    deskServer = undefined;
+  });
+
+  it('only its owner sits at a claimed desk', async () => {
+    const endpoint = await start(ANA_ID);
+    const ana = await joinNearDesk(endpoint, 'token-de-ana');
+    const beto = await joinNearDesk(endpoint, 'token-de-beto');
+
+    beto.send('sit', { seat: deskSeatId('mesa-ana') });
+    beto.send('status', { status: 'y' });
+    await waitFor(() => beto.state.players.get(beto.sessionId)?.status === 'y');
+    expect(beto.state.players.get(beto.sessionId)?.seat).toBe('');
+
+    ana.send('sit', { seat: deskSeatId('mesa-ana') });
+    await waitFor(() => beto.state.players.get(ana.sessionId)?.seat === deskSeatId('mesa-ana'));
+    expect(beto.state.players.get(ana.sessionId)?.facing).toBe(DESK_SEAT_FACING);
+  });
+
+  it('anyone sits at a free desk, and sitting does not claim it', async () => {
+    const endpoint = await start(null);
+    const beto = await joinNearDesk(endpoint, 'token-de-beto');
+
+    beto.send('sit', { seat: deskSeatId('mesa-ana') });
+
+    await waitFor(() => beto.state.players.get(beto.sessionId)?.seat === deskSeatId('mesa-ana'));
+    const listed = await fetch(`http://localhost:${deskPort}/desks`, { headers: { Authorization: 'Bearer token-de-beto' } });
+    const body = (await listed.json()) as { desks: { id: string; occupant: unknown }[] };
+    expect(body.desks.find((desk) => desk.id === 'mesa-ana')?.occupant).toBeNull();
+  });
+
+  it('ignores a desk out of reach and a desk that does not exist', async () => {
+    const endpoint = await start(null);
+    const beto = await joinNearDesk(endpoint, 'token-de-beto');
+
+    beto.send('sit', { seat: deskSeatId('mesa-lejos') });
+    beto.send('sit', { seat: deskSeatId('no-existe') });
+    beto.send('status', { status: 'y' });
+
+    await waitFor(() => beto.state.players.get(beto.sessionId)?.status === 'y');
+    // Desk seats are checked against the store asynchronously; give them time.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(beto.state.players.get(beto.sessionId)?.seat).toBe('');
+  });
+
+  it('when someone else claims the desk, its non-owner sitter stands up', async () => {
+    const endpoint = await start(null);
+    const beto = await joinNearDesk(endpoint, 'token-de-beto');
+    beto.send('sit', { seat: deskSeatId('mesa-ana') });
+    await waitFor(() => beto.state.players.get(beto.sessionId)?.seat === deskSeatId('mesa-ana'));
+
+    const claimed = await fetch(`http://localhost:${deskPort}/desks/mesa-ana/claim`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer token-de-ana' },
+    });
+    expect(claimed.status).toBe(200);
+
+    await waitFor(() => beto.state.players.get(beto.sessionId)?.seat === '');
+  });
+
+  it('the owner keeps sitting when they claim the desk they sit at', async () => {
+    const endpoint = await start(null);
+    const ana = await joinNearDesk(endpoint, 'token-de-ana');
+    ana.send('sit', { seat: deskSeatId('mesa-ana') });
+    await waitFor(() => ana.state.players.get(ana.sessionId)?.seat === deskSeatId('mesa-ana'));
+
+    await fetch(`http://localhost:${deskPort}/desks/mesa-ana/claim`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer token-de-ana' },
+    });
+    ana.send('status', { status: 'y' });
+    await waitFor(() => ana.state.players.get(ana.sessionId)?.status === 'y');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(ana.state.players.get(ana.sessionId)?.seat).toBe(deskSeatId('mesa-ana'));
   });
 });

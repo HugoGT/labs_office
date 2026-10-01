@@ -1,159 +1,262 @@
 /**
- * Colocacion de suelo, mobiliario, naturaleza y etiquetas de zona, portada de
- * `renderGround`/`placeFurniture`/`placeNature`/`placeZoneLabels`
- * (`prototype/js/app.js:255-322`). Depende de Phaser en tiempo de ejecucion
- * (`scene.add.image`/`scene.add.text`): se prueba en la capa navegador.
+ * Draws the static office from the Tiled layout (art migration, step 8, #4):
+ * the terrain as tilemap layers of the shared `tileset-terrain`, and walls,
+ * hedges, props and the base chairs from the art pack at native size, placed
+ * by their anchors. Depende de Phaser en tiempo de ejecucion: se prueba en la
+ * capa navegador; the numbers come from the pure `terrainRender.ts` and
+ * `artPlacement.ts`.
  *
- * Los materiales ya no son texturas generadas por codigo sino frames de las
- * hojas Kenney (CC0, ver `assets.ts`). El mobiliario que ocupa varias tiles se
- * dibuja con `tileSprite`, que REPITE el tile de 16px, en vez de estirar uno
- * solo: estirar un escritorio a 7 tiles de ancho lo deja borroso.
+ * When the pack is missing every piece keeps a visible fallback: the terrain
+ * in one flat color per material, and a grey placeholder on each footprint.
  */
 
 import type Phaser from 'phaser';
 import {
-  ASSET_SCALE,
-  GROUND_FRAMES,
-  INDOOR,
-  INDOOR_SHEET,
-  TERRAIN,
-  TERRAIN_SHEET,
-} from './assets';
-import { DESK_ROWS, GROUND, MAP_H, MAP_W, TILE, TREES, ZONE_LABELS } from './mapData';
-import { worldAssetDepth } from './depthLayers';
-import { markSolid, type TerrainGrid } from './terrainGrid';
+  TERRAIN_LAYER_COUNT,
+  TERRAIN_LAYER_ORIGIN,
+  floorFrameAt,
+  propPlacement,
+  type ArtChairPiece,
+  type ArtDeskPiece,
+  type ArtPiece,
+  type ArtPropPiece,
+  type Point,
+} from './artContract';
+import { findPiece } from './artPack';
+import type { ArtTextures } from './artPackLoader';
+import { chairPlacement, deskPlacement, footprintAnchor, type SpritePlacement } from './artPlacement';
+import { chairLayerDepth, worldAssetDepth } from './depthLayers';
+import { TILE, ZONE_LABELS } from './mapData';
+import { LAYOUT_MATERIALS, type LayoutProp, type OfficeLayout, type TerrainSnapshot } from './officeLayout';
+import type { MapSeat } from './seating';
+import { decalTileData, fallbackTerrainData, hedgeSprites, propFrame, terrainTileData, wallSprites } from './terrainRender';
 
-/** Coloca un tile suelto de una hoja, alineado a la rejilla del mundo. */
-function putTile(
+/**
+ * Chair of the base map's rooms. The manifest names no default chair (step 3
+ * persists none), so the map picks one.
+ */
+export const BASE_MAP_CHAIR = 'chair-wood';
+
+/** Terrain layers at the very bottom, decals over them, then bridges lying on the ground. */
+const TERRAIN_DEPTH = 0;
+const DECAL_DEPTH = 0.3;
+const GROUND_PROP_DEPTH = 0.5;
+
+/** Generated when the pack is missing: one flat 32px tile per terrain material, in `LAYOUT_MATERIALS` order. */
+export const FALLBACK_TERRAIN_KEY = 'terrain-fallback';
+const FALLBACK_TERRAIN_COLORS: Readonly<Record<(typeof LAYOUT_MATERIALS)[number], number>> = {
+  water: 0x3f78c4,
+  grass: 0x5d9b4c,
+  dirt: 0x8d6a47,
+  sand: 0xd9c48c,
+  cobblestone: 0x8c9096,
+  wood: 0xa4723f,
+  tile: 0xc5c9cf,
+  carpet: 0x7b4f8c,
+};
+const PLACEHOLDER_COLOR = 0x6b7280;
+const HEDGE_PLACEHOLDER_COLOR = 0x2f5d34;
+const PLACEHOLDER_ALPHA = 0.85;
+
+/**
+ * Both layers of a chair on its ground point, back then front (step 6): a
+ * sitter goes between them (`seatedAvatarDepth`).
+ */
+export function putChair(
   scene: Phaser.Scene,
-  sheet: string,
-  frame: number,
+  key: string,
+  placement: { back: SpritePlacement; front: SpritePlacement },
+): Phaser.GameObjects.Image[] {
+  return [
+    putArtSprite(scene, key, placement.back, chairLayerDepth(placement.back.depthY, 'back')),
+    putArtSprite(scene, key, placement.front, chairLayerDepth(placement.front.depthY, 'front')),
+  ];
+}
+
+/** Draws one frame of a pack sheet at a placement, 1:1. */
+export function putArtSprite(
+  scene: Phaser.Scene,
+  key: string,
+  placement: Pick<SpritePlacement, 'x' | 'y' | 'frame'>,
+  depth: number,
+): Phaser.GameObjects.Image {
+  return scene.add.image(placement.x, placement.y, key, placement.frame).setOrigin(0).setDepth(depth);
+}
+
+/** A tile of a pack floor: frame `floorFrameAt` so the 96px motif repeats whole. */
+export function putFloorTile(
+  scene: Phaser.Scene,
+  key: string,
   tx: number,
   ty: number,
   depth: number,
 ): Phaser.GameObjects.Image {
-  return scene.add
-    .image(tx * TILE, ty * TILE, sheet, frame)
-    .setOrigin(0)
-    .setScale(ASSET_SCALE)
-    .setDepth(depth);
+  return scene.add.image(tx * TILE, ty * TILE, key, floorFrameAt(tx, ty)).setOrigin(0).setDepth(depth);
 }
 
-/**
- * Cubre un rectangulo de tiles repitiendo un frame. `tileScale` va a
- * `ASSET_SCALE` para que el patron se repita cada 32px del mundo y no cada 16.
- */
-function putTiledArea(
-  scene: Phaser.Scene,
-  sheet: string,
-  frame: number,
-  tx: number,
-  ty: number,
-  tilesWide: number,
-  tilesHigh: number,
-  depth: number,
-): Phaser.GameObjects.TileSprite {
-  const sprite = scene.add
-    .tileSprite(tx * TILE, ty * TILE, tilesWide * TILE, tilesHigh * TILE, sheet, frame)
-    .setOrigin(0)
-    .setDepth(depth);
-  sprite.tileScaleX = ASSET_SCALE;
-  sprite.tileScaleY = ASSET_SCALE;
-  return sprite;
+/** A loaded pack sheet for the piece `id` when it is of the expected kind, else `null` (fallback). */
+function packSheet<P extends ArtPiece>(
+  art: ArtTextures | undefined,
+  id: string,
+  isKind: (piece: ArtPiece) => piece is P,
+): { piece: P; key: string } | null {
+  if (art === undefined || art.manifest === null) return null;
+  const piece = findPiece(art.manifest, id);
+  if (piece === undefined || !isKind(piece)) return null;
+  const key = art.sheet(piece.id, 'sheet');
+  return key === null ? null : { piece, key };
 }
 
-/** Pinta el suelo tile por tile; el cesped llano alterna por fila (app.js:255-262). */
-export function renderGround(scene: Phaser.Scene, grid: TerrainGrid): void {
-  for (let y = 0; y < MAP_H; y++) {
-    for (let x = 0; x < MAP_W; x++) {
-      const code = grid.ground[y][x];
-      const frame =
-        code === GROUND.G
-          ? y % 2 === 0
-            ? TERRAIN.grass
-            : TERRAIN.grassAlt
-          : GROUND_FRAMES[code];
-      putTile(scene, TERRAIN_SHEET, frame, x, y, 0);
-    }
-  }
+const isDesk = (piece: ArtPiece): piece is ArtDeskPiece => piece.kind === 'desk';
+const isChair = (piece: ArtPiece): piece is ArtChairPiece => piece.kind === 'chair';
+const isProp = (piece: ArtPiece): piece is ArtPropPiece =>
+  piece.kind === 'tree' || piece.kind === 'plant' || piece.kind === 'bridge' || piece.kind === 'hedge' || piece.kind === 'table';
+const isAny = (_piece: ArtPiece): _piece is ArtPiece => true;
+
+function placeholder(scene: Phaser.Scene, x: number, y: number, w: number, h: number, color: number, depth: number): Phaser.GameObjects.Rectangle {
+  return scene.add.rectangle(x + w / 2, y + h / 2, w, h, color, PLACEHOLDER_ALPHA).setDepth(depth);
 }
 
-/**
- * Coloca escritorios, mesas, sillas y plantas (app.js:264-297). Marca solidas
- * las tiles de escritorios y mesas vía `markSolid` *antes* de que
- * `OfficeScene` fusione colisiones (D6) — las sillas y plantas son
- * decorativas y nunca se marcan solidas, igual que en el prototipo.
- */
-export function placeFurniture(scene: Phaser.Scene, grid: TerrainGrid): void {
-  for (const [x, y, n] of DESK_ROWS) {
-    for (let i = 0; i < n; i++) {
-      const tx = x + i * 2;
-      // Alterna los dos frentes de escritorio del pack para que una fila de
-      // seis no se vea como el mismo mueble clonado.
-      const frame = i % 2 === 0 ? INDOOR.desk : INDOOR.deskAlt;
-      putTiledArea(scene, INDOOR_SHEET, frame, tx, y, 2, 1, worldAssetDepth((y + 1) * TILE));
-      markSolid(grid.solid, tx, y, 2, 1);
-    }
-  }
+// --- Terrain -----------------------------------------------------------------------------------
 
-  // Sala de Juntas: mesa larga + sillas alrededor.
-  putTiledArea(scene, INDOOR_SHEET, INDOOR.tableTop, 53, 6, 7, 5, worldAssetDepth(11 * TILE));
-  markSolid(grid.solid, 53, 6, 7, 5);
-  for (let i = 0; i < 7; i++) {
-    putTile(scene, INDOOR_SHEET, INDOOR.chairBack, 53 + i, 5, worldAssetDepth(6 * TILE));
-    putTile(scene, INDOOR_SHEET, INDOOR.chair, 53 + i, 11, worldAssetDepth(12 * TILE));
-  }
-  for (let j = 0; j < 5; j++) {
-    putTile(scene, INDOOR_SHEET, INDOOR.chairWhite, 52, 6 + j, worldAssetDepth((7 + j) * TILE));
-    putTile(scene, INDOOR_SHEET, INDOOR.chairWhite, 60, 6 + j, worldAssetDepth((7 + j) * TILE));
-  }
-
-  // Cafeteria: mesa de madera + asientos + plantas en las esquinas.
-  putTiledArea(scene, INDOOR_SHEET, INDOOR.tableTop, 53, 23, 5, 3, worldAssetDepth(26 * TILE));
-  markSolid(grid.solid, 53, 23, 5, 3);
-  for (let i = 0; i < 5; i++) {
-    putTile(scene, INDOOR_SHEET, INDOOR.chairBack, 53 + i, 22, worldAssetDepth(23 * TILE));
-    putTile(scene, INDOOR_SHEET, INDOOR.chair, 53 + i, 26, worldAssetDepth(27 * TILE));
-  }
-  const plants: readonly (readonly [number, number])[] = [
-    [51, 19],
-    [61, 19],
-    [51, 30],
-    [61, 30],
-  ];
-  for (const [px, py] of plants) {
-    putTile(scene, INDOOR_SHEET, INDOOR.plant, px, py, worldAssetDepth((py + 1) * TILE));
-    markSolid(grid.solid, px, py, 1, 1);
-  }
+/** The terrain tilemap of the scene, kept so a block edit can redraw it in place. */
+export interface TerrainTilemap {
+  readonly layers: readonly Phaser.Tilemaps.TilemapLayer[];
+  /** The decal layer, `null` in the flat fallback. */
+  readonly decals: Phaser.Tilemaps.TilemapLayer | null;
+  /** Rewrites every tile from `terrain`, reusing the same layers (#123 phase 2). */
+  refresh(terrain: TerrainSnapshot): void;
 }
 
-/**
- * Coloca arboles (app.js:299-305, marcan su tile solida) y esparce parcelas de
- * flores de forma deterministica evitando tiles solidas o que no sean cesped
- * llano (app.js:306-312).
- *
- * Las flores del pack son tiles de suelo completos, no calcomanias con
- * transparencia: se pintan encima del cesped, no junto a el.
- */
-export function placeNature(scene: Phaser.Scene, grid: TerrainGrid): void {
-  TREES.forEach(([x, y], i) => {
-    const frame = i % 4 === 3 ? TERRAIN.treeOrange : TERRAIN.treeGreen;
-    scene.add
-      .image((x + 0.5) * TILE, (y + 1) * TILE, TERRAIN_SHEET, frame)
-      .setOrigin(0.5, 1)
-      // Los arboles van a 1.5x el tile: a escala 1:1 con el suelo se perderian
-      // entre el cesped en vez de leerse como volumen.
-      .setScale(ASSET_SCALE * 1.5)
-      .setDepth(worldAssetDepth((y + 1) * TILE));
-    markSolid(grid.solid, x, y, 1, 1);
+function putRows(layer: Phaser.Tilemaps.TilemapLayer, rows: readonly (readonly number[])[]): void {
+  layer.putTilesAt(rows as number[][], 0, 0, false);
+}
+
+function fallbackTileset(scene: Phaser.Scene): void {
+  if (scene.textures.exists(FALLBACK_TERRAIN_KEY)) return;
+  const g = scene.make.graphics({ x: 0, y: 0 }, false);
+  LAYOUT_MATERIALS.forEach((material, index) => {
+    g.fillStyle(FALLBACK_TERRAIN_COLORS[material]).fillRect(index * TILE, 0, TILE, TILE);
   });
+  g.generateTexture(FALLBACK_TERRAIN_KEY, TILE * LAYOUT_MATERIALS.length, TILE);
+  g.destroy();
+}
 
-  const flowerFrames = [TERRAIN.flowersOrange, TERRAIN.flowersWhite, TERRAIN.flowersBlue];
-  for (let i = 0; i < 90; i++) {
-    const x = 1 + ((i * 13 + 5) % 46);
-    const y = 1 + ((i * 29 + 11) % 41);
-    if (grid.solid[y][x] || grid.ground[y][x] !== GROUND.G) continue;
-    putTile(scene, TERRAIN_SHEET, flowerFrames[i % flowerFrames.length], x, y, 1);
+/**
+ * The terrain of the whole map in `TERRAIN_LAYER_COUNT` dual-grid layers plus
+ * one of decals, all from the one shared tileset: the number of game objects
+ * stays the same whatever the size of the map (#123).
+ */
+export function renderTerrain(scene: Phaser.Scene, terrain: TerrainSnapshot, layout: OfficeLayout, art?: ArtTextures): TerrainTilemap {
+  const { width, height } = terrain;
+  const key = art?.sheet('tileset-terrain', 'sheet') ?? null;
+
+  if (key === null) {
+    fallbackTileset(scene);
+    const map = scene.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width, height });
+    const tileset = map.addTilesetImage('terrain-fallback', FALLBACK_TERRAIN_KEY, TILE, TILE, 0, 0);
+    const layer = tileset === null ? null : map.createBlankLayer('terrain', tileset, 0, 0, width, height);
+    if (layer === null) return { layers: [], decals: null, refresh: () => {} };
+    layer.setDepth(TERRAIN_DEPTH);
+    putRows(layer, fallbackTerrainData(terrain));
+    return { layers: [layer], decals: null, refresh: (next) => putRows(layer, fallbackTerrainData(next)) };
+  }
+
+  const map = scene.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: width + 1, height: height + 1 });
+  const tileset = map.addTilesetImage('terrain', key, TILE, TILE, 0, 0);
+  if (tileset === null) return { layers: [], decals: null, refresh: () => {} };
+  const layers: Phaser.Tilemaps.TilemapLayer[] = [];
+  for (let index = 0; index < TERRAIN_LAYER_COUNT; index += 1) {
+    const layer = map.createBlankLayer(`terrain-${index}`, tileset, TERRAIN_LAYER_ORIGIN, TERRAIN_LAYER_ORIGIN, width + 1, height + 1);
+    if (layer !== null) layers.push(layer.setDepth(TERRAIN_DEPTH + index * 0.01));
+  }
+  const decals = map.createBlankLayer('decals', tileset, 0, 0, width, height)?.setDepth(DECAL_DEPTH) ?? null;
+  const draw = (next: TerrainSnapshot): void => {
+    terrainTileData(next).forEach((rows, index) => {
+      const layer = layers[index];
+      if (layer !== undefined) putRows(layer, rows);
+    });
+    if (decals !== null) putRows(decals, decalTileData(layout, next));
+  };
+  draw(terrain);
+  return { layers, decals, refresh: draw };
+}
+
+// --- Layout pieces -----------------------------------------------------------------------------
+
+function placeWalls(scene: Phaser.Scene, layout: OfficeLayout, art?: ArtTextures): void {
+  const sprites = wallSprites(layout);
+  for (const sprite of sprites) {
+    const sheet = packSheet(art, sprite.piece, isAny);
+    if (sheet !== null) putArtSprite(scene, sheet.key, sprite, worldAssetDepth(sprite.depthY));
+  }
+  layout.walls.forEach((wall, index) => {
+    if (wall === null || packSheet(art, wall, isAny) !== null) return;
+    const tx = index % layout.width;
+    const ty = Math.floor(index / layout.width);
+    placeholder(scene, tx * TILE, ty * TILE, TILE, TILE, PLACEHOLDER_COLOR, worldAssetDepth((ty + 1) * TILE));
+  });
+}
+
+function placeHedges(scene: Phaser.Scene, layout: OfficeLayout, art?: ArtTextures): void {
+  for (const hedge of hedgeSprites(layout)) {
+    const sheet = packSheet(art, hedge.piece, isProp);
+    if (sheet === null) {
+      placeholder(scene, hedge.tx * TILE, hedge.ty * TILE, TILE, TILE, HEDGE_PLACEHOLDER_COLOR, worldAssetDepth((hedge.ty + 1) * TILE));
+      continue;
+    }
+    const placement = propPlacement(sheet.piece, hedge.tx, hedge.ty);
+    putArtSprite(scene, sheet.key, { ...placement, frame: hedge.frame }, worldAssetDepth(placement.depthY));
+  }
+}
+
+function placeProp(scene: Phaser.Scene, prop: LayoutProp, art?: ArtTextures): void {
+  const rect = { x: prop.tx * TILE, y: prop.ty * TILE, w: prop.w * TILE, h: prop.h * TILE };
+  if (prop.kind === 'desk') {
+    const desk = packSheet(art, prop.piece, isDesk);
+    if (desk !== null) {
+      // Drawn whole at its own size in the middle of the footprint, never stretched to it.
+      const placement = deskPlacement(desk.piece, prop.facing ?? 'down', footprintAnchor(rect));
+      putArtSprite(scene, desk.key, placement, worldAssetDepth(placement.depthY));
+      return;
+    }
+  } else {
+    const sheet = packSheet(art, prop.piece, isProp);
+    if (sheet !== null) {
+      const placement = propPlacement(sheet.piece, prop.tx, prop.ty);
+      const depth = sheet.piece.layer === 'ground' ? GROUND_PROP_DEPTH : worldAssetDepth(placement.depthY);
+      putArtSprite(scene, sheet.key, { ...placement, frame: propFrame(prop) }, depth);
+      return;
+    }
+  }
+  const depth = prop.collision === 'deck' ? GROUND_PROP_DEPTH : worldAssetDepth(rect.y + rect.h);
+  placeholder(scene, rect.x, rect.y, rect.w, rect.h, PLACEHOLDER_COLOR, depth);
+}
+
+/**
+ * Walls, hedges and props of the layout. Collision is not decided here: the
+ * scene builds its colliders from the shared walkability rule
+ * (`terrainSnapshot`), which the server enforces too.
+ */
+export function placeLayout(scene: Phaser.Scene, layout: OfficeLayout, art?: ArtTextures): void {
+  placeWalls(scene, layout, art);
+  placeHedges(scene, layout, art);
+  for (const prop of layout.props) placeProp(scene, prop, art);
+}
+
+/**
+ * The base chairs (`BASE_MAP_SEATS`, shared with the room, which seats people
+ * on them). Never solid: people walk between chairs and sit on them.
+ */
+export function placeSeats(scene: Phaser.Scene, seats: readonly MapSeat[], art?: ArtTextures): void {
+  const chair = packSheet(art, BASE_MAP_CHAIR, isChair);
+  for (const { tx, ty, facing } of seats) {
+    if (chair === null) {
+      placeholder(scene, tx * TILE + 8, ty * TILE + 8, TILE - 16, TILE - 16, PLACEHOLDER_COLOR, worldAssetDepth((ty + 1) * TILE));
+      continue;
+    }
+    const ground: Point = { x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE };
+    putChair(scene, chair.key, chairPlacement(chair.piece, facing, ground));
   }
 }
 

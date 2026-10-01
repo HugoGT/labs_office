@@ -43,6 +43,8 @@ export interface DeskDecorAsset {
   kind: DeskAssetKind;
   /** Clave del sprite que el bundle ya trae. El catalogo es curado. */
   textureKey: string;
+  /** Credit of an uploaded or contributed piece (#122); absent for the rest. */
+  author?: string;
 }
 
 /**

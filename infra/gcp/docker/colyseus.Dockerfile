@@ -44,10 +44,16 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 
-# Las dos mitades del servidor. server/src importa dos modulos compartidos de
-# src/game (officeProtocol.ts y mapData.ts), que no tienen dependencias propias.
+# Las dos mitades del servidor. server/src importa modulos compartidos de
+# src/game (officeProtocol.ts, mapData.ts, seating.ts, officeLayout.ts...), sin
+# dependencias propias. src/game/maps/office.json, the Tiled layout every
+# `move` is checked against, comes with this same copy.
 COPY server/src ./server/src
 COPY src/game ./src/game
+
+# The art pack manifest, which the server registers in the catalog at start
+# (server/src/directory/fromEnv.ts). Only the JSON: the web image serves the PNGs.
+COPY public/assets/pack/manifest.json ./public/assets/pack/manifest.json
 
 # La imagen base ya trae el usuario `node` (uid 1000). El servidor no escribe en
 # disco ni abre puertos privilegiados, asi que no hay ninguna razon para que

@@ -92,9 +92,11 @@ export default defineConfig(({ mode }) => {
             // Node. Incluye el envoltorio de cliente de `src/`, porque su unico
             // riesgo serio es el protocolo por cable y ese solo se prueba
             // hablando con un servidor de verdad.
+            // `tools/**` (the art pack exporter) runs here too: it is Node
+            // code that writes PNGs with node:zlib, with no DOM involved.
             name: { label: 'server', color: 'yellow' },
             environment: 'node',
-            include: ['server/**/*.test.ts', 'src/**/*.node.test.ts'],
+            include: ['server/**/*.test.ts', 'src/**/*.node.test.ts', 'tools/**/*.test.ts'],
           },
         },
         {

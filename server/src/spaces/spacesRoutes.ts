@@ -30,11 +30,24 @@ import {
   type AdminDeps,
   type AdminResult,
 } from '../admin/adminRoutes.ts';
+import {
+  APPEARANCE_IMMUTABLE,
+  FLOOR_APPEARANCE_FIELDS,
+  mentionsAppearance,
+  refusingInvalidAppearance,
+  resolveBodyAppearance,
+  type ArtCatalogReader,
+} from '../decor/artAppearanceBody.ts';
 import { hashSpaces, InvalidSpaceError, SpaceNameTakenError, SpaceOverlapError, SpaceOwnedByDeskError } from './spaceRules.ts';
 import type { Space, SpacesDirectory, UpdateSpaceInput } from './spacesPort.ts';
 
 export interface SpacesDeps extends AdminDeps {
   spaces: SpacesDirectory;
+  /**
+   * The art catalog a creation checks its floor against (art migration, step
+   * 7). Optional: a body without a floor needs none.
+   */
+  decor?: ArtCatalogReader;
 }
 
 const CONFLICT: AdminResult = { status: 409, body: { error: 'space-overlap' } };
@@ -67,9 +80,14 @@ const OWNED_BY_DESK: AdminResult = { status: 409, body: { error: 'space-owned-by
  * derivado de `deskId`, no un dato propio que pudiese divergir entre el
  * cliente y el servidor.
  */
+/**
+ * `floorMaterialId`/`floorColor` travel for drawing (art migration, step 4) and
+ * stay out of the hash for the same reason as `kind`: they do not decide who
+ * hears whom, and a floor is chosen once, at creation (step 7).
+ */
 function toConfigBody(space: Space): Record<string, unknown> {
-  const { id, slug, name, x, y, w, h, capacity, deskId } = space;
-  return { id, slug, name, x, y, w, h, capacity, kind: deskId === null ? 'room' : 'desk' };
+  const { id, slug, name, x, y, w, h, capacity, deskId, floorMaterialId, floorColor } = space;
+  return { id, slug, name, x, y, w, h, capacity, kind: deskId === null ? 'room' : 'desk', floorMaterialId, floorColor };
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -127,20 +145,24 @@ export async function handleCreateSpace(
   // caen aqui: el id es la clave de pertenencia (rebanada 2) y el slug se
   // DERIVA del nombre, asi que dejar que el cuerpo los fije seria dejar que
   // quien llama eligiese a que espacio pertenece la gente.
-  return translating(async () => {
-    const created = await deps.spaces.createSpace({
-      name: body.name as string,
-      x: body.x as number,
-      y: body.y as number,
-      w: body.w as number,
-      h: body.h as number,
-      // Ausente es "sin limite". Aqui no hay que distinguirlo de `null`, a
-      // diferencia de `handleUpdateSpace`: un espacio que nace no tiene aforo
-      // previo que conservar.
-      capacity: (body.capacity as number | null | undefined) ?? null,
-    });
-    return { status: 201, body: toConfigBody(created) };
-  });
+  return refusingInvalidAppearance(() =>
+    translating(async () => {
+      const floor = await resolveBodyAppearance(body, FLOOR_APPEARANCE_FIELDS, 'floor', deps.decor);
+      const created = await deps.spaces.createSpace({
+        name: body.name as string,
+        x: body.x as number,
+        y: body.y as number,
+        w: body.w as number,
+        h: body.h as number,
+        // Ausente es "sin limite". Aqui no hay que distinguirlo de `null`, a
+        // diferencia de `handleUpdateSpace`: un espacio que nace no tiene aforo
+        // previo que conservar.
+        capacity: (body.capacity as number | null | undefined) ?? null,
+        ...(floor === undefined ? {} : { floor }),
+      });
+      return { status: 201, body: toConfigBody(created) };
+    }),
+  );
 }
 
 export async function handleUpdateSpace(
@@ -153,6 +175,10 @@ export async function handleUpdateSpace(
   if (!authorized.ok) return authorized.result;
 
   if (typeof id !== 'string' || !isPlainObject(body)) return INVALID_REQUEST;
+
+  // The floor is chosen at creation only (art migration, step 7), and refused
+  // before any key is copied, same as `handleUpdateDesk`.
+  if (mentionsAppearance(body, FLOOR_APPEARANCE_FIELDS)) return APPEARANCE_IMMUTABLE;
 
   // Se copian solo las claves PRESENTES: `UpdateSpaceInput` distingue "no lo
   // toques" (ausente) de "quitale el limite" (`null` presente), y colapsarlas

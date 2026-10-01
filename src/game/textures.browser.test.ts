@@ -68,7 +68,7 @@ describe('createOfficeTextures', () => {
     expect(exists.filter((e) => !e.present)).toEqual([]);
   });
 
-  it('ya no genera texturas de mapa: eso lo cubren las hojas Kenney', async () => {
+  it('ya no genera texturas de mapa: eso lo dibuja el art pack', async () => {
     const leftovers = await withScene((scene) => {
       createOfficeTextures(scene);
       // Claves del generador procedural anterior. Si alguna reaparece, hay dos

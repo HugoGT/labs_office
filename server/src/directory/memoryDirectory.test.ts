@@ -11,6 +11,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { ART_PACK_DEFAULTS, InvalidArtChoiceError } from '../decor/artCatalogRules.ts';
 import type { DirectoryUser } from './directoryPort.ts';
 import { DisplayNameTakenError } from './displayNameRules.ts';
 import { InvalidInvitationError } from './invitationRules.ts';
@@ -31,6 +32,8 @@ function provisioned(overrides: Partial<DirectoryUser> = {}): DirectoryUser {
     status: 'active',
     expiresAt: null,
     invitedBy: null,
+    avatarId: ART_PACK_DEFAULTS.character,
+    avatarChosenAt: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
   };
@@ -851,5 +854,110 @@ describe('memoryDirectory: revokeUser (#93)', () => {
 
     expect(second?.status).toBe('revoked');
     expect(directory.auditLog()).toHaveLength(1);
+  });
+});
+
+describe('memoryDirectory: avatar (art migration, step 3)', () => {
+  const ID = 'aaaaaaaa-aaaa-4aaa-8aaa-000000000001';
+
+  it('a seeded row without an avatar gets the pack default, like the schema backfill', async () => {
+    const { avatarId: _avatarId, ...legacy } = provisioned({ id: ID });
+    const directory = createMemoryDirectory({ seed: [legacy] });
+
+    expect((await directory.findById(ID))?.avatarId).toBe(ART_PACK_DEFAULTS.character);
+  });
+
+  it('every new account starts with the pack default', async () => {
+    const directory = createMemoryDirectory({ seed: [provisioned({ id: ID })] });
+
+    const created = await directory.createUser({
+      email: 'bea@example.com',
+      role: 'employee',
+      uid: 'uid-bea',
+      createdById: ID,
+    });
+
+    expect(created.avatarId).toBe(ART_PACK_DEFAULTS.character);
+  });
+
+  it('setAvatar stores the choice and it survives later reads', async () => {
+    const directory = createMemoryDirectory({ seed: [provisioned({ id: ID })] });
+
+    const user = await directory.setAvatar(ID, 'character-p02-beige-blazer');
+
+    expect(user?.avatarId).toBe('character-p02-beige-blazer');
+    expect((await directory.findById(ID))?.avatarId).toBe('character-p02-beige-blazer');
+  });
+
+  it('a seeded row without the chosen mark has not chosen, like a row from before step 5', async () => {
+    const { avatarChosenAt: _chosenAt, ...legacy } = provisioned({ id: ID });
+    const directory = createMemoryDirectory({ seed: [legacy] });
+
+    expect((await directory.findById(ID))?.avatarChosenAt).toBeNull();
+  });
+
+  it('a new account has not chosen a character yet', async () => {
+    const directory = createMemoryDirectory({ seed: [provisioned({ id: ID })] });
+
+    const created = await directory.createUser({ email: 'bea@example.com', role: 'employee', uid: 'uid-bea', createdById: ID });
+
+    expect(created.avatarChosenAt).toBeNull();
+  });
+
+  it('setAvatar marks the choice as made, at the injected clock', async () => {
+    const at = new Date('2026-09-30T10:00:00.000Z');
+    const directory = createMemoryDirectory({ now: () => at, seed: [provisioned({ id: ID })] });
+
+    const user = await directory.setAvatar(ID, 'character-p02-beige-blazer');
+
+    expect(user?.avatarChosenAt).toEqual(at);
+    expect((await directory.findById(ID))?.avatarChosenAt).toEqual(at);
+  });
+
+  it('reassignAvatar moves everyone wearing a retired character to another, and nobody else (#122)', async () => {
+    const BEA = '00000000-0000-4000-8000-0000000000b2';
+    const CARLA = '00000000-0000-4000-8000-0000000000c3';
+    const directory = createMemoryDirectory({
+      seed: [
+        provisioned({ id: ID, avatarId: 'character-upload-0123456789abcdef' }),
+        provisioned({ id: BEA, uid: 'uid-bea', email: 'bea@example.com', avatarId: 'character-upload-0123456789abcdef' }),
+        provisioned({ id: CARLA, uid: 'uid-carla', email: 'carla@example.com', avatarId: 'character-p02-beige-blazer' }),
+      ],
+    });
+
+    const moved = await directory.reassignAvatar('character-upload-0123456789abcdef', ART_PACK_DEFAULTS.character);
+
+    expect(moved).toBe(2);
+    expect((await directory.findById(ID))?.avatarId).toBe(ART_PACK_DEFAULTS.character);
+    expect((await directory.findById(BEA))?.avatarId).toBe(ART_PACK_DEFAULTS.character);
+    expect((await directory.findById(CARLA))?.avatarId).toBe('character-p02-beige-blazer');
+    // Nobody is left on it, so running it again moves nobody.
+    expect(await directory.reassignAvatar('character-upload-0123456789abcdef', ART_PACK_DEFAULTS.character)).toBe(0);
+  });
+
+  it('reassignAvatar refuses a target that is not a character id', async () => {
+    const directory = createMemoryDirectory({ seed: [provisioned({ id: ID })] });
+
+    await expect(directory.reassignAvatar('character-upload-0123456789abcdef', '')).rejects.toBeInstanceOf(InvalidArtChoiceError);
+  });
+
+  it('setAvatar leaves the display name alone, and the display name leaves the avatar alone', async () => {
+    const directory = createMemoryDirectory({ seed: [provisioned({ id: ID, displayName: 'Ana' })] });
+
+    await directory.setAvatar(ID, 'character-p02-beige-blazer');
+    const user = await directory.setDisplayName(ID, 'Ana Lopez');
+
+    expect(user).toMatchObject({ displayName: 'Ana Lopez', avatarId: 'character-p02-beige-blazer' });
+  });
+
+  it('setAvatar rejects something that is not a character id, before touching the row', async () => {
+    const directory = createMemoryDirectory({ seed: [provisioned({ id: ID })] });
+
+    await expect(directory.setAvatar(ID, 'desk-wood')).rejects.toBeInstanceOf(InvalidArtChoiceError);
+    expect((await directory.findById(ID))?.avatarId).toBe(ART_PACK_DEFAULTS.character);
+  });
+
+  it('setAvatar on an id that does not exist returns null', async () => {
+    expect(await createMemoryDirectory().setAvatar(ID, 'character-p02-beige-blazer')).toBeNull();
   });
 });

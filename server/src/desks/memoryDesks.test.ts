@@ -14,6 +14,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { ART_PACK_DEFAULTS, InvalidArtChoiceError } from '../decor/artCatalogRules.ts';
 import { createMemoryDecor } from '../decor/memoryDecor.ts';
 import type { Asset } from '../decor/decorPort.ts';
 import { createMemoryDirectory } from '../directory/memoryDirectory.ts';
@@ -33,6 +34,8 @@ function user(id: string, displayName: string | null): DirectoryUser {
     status: 'active',
     expiresAt: null,
     invitedBy: null,
+    avatarId: ART_PACK_DEFAULTS.character,
+    avatarChosenAt: null,
     createdAt: NOW,
   };
 }
@@ -74,6 +77,8 @@ describe('memoryDesks: createDesk', () => {
       x: 4,
       y: 4,
       occupantId: null,
+      materialId: ART_PACK_DEFAULTS.desk,
+      color: null,
       createdAt: NOW,
       updatedAt: NOW,
     });
@@ -376,5 +381,60 @@ describe('memoryDesks: listOfficeDesks', () => {
       'Cerca',
       'Lejos',
     ]);
+  });
+});
+
+describe('createMemoryDesks: appearance (art migration, step 3)', () => {
+  it('a desk created without an appearance gets the default material and no color', async () => {
+    const desk = await desks().createDesk({ label: 'Mesa 1', x: 0, y: 0 });
+
+    expect(desk).toMatchObject({ materialId: ART_PACK_DEFAULTS.desk, color: null });
+  });
+
+  it('a seeded desk without an appearance gets the same default, like the schema backfill', async () => {
+    const directory = createMemoryDesks({
+      seed: [{ id: 'desk-1', label: 'Mesa 1', x: 0, y: 0, occupantId: null, createdAt: NOW, updatedAt: NOW }],
+    });
+
+    expect(await directory.getDesk('desk-1')).toMatchObject({ materialId: ART_PACK_DEFAULTS.desk, color: null });
+  });
+
+  it('stores the appearance chosen at creation, with the color normalized', async () => {
+    const directory = desks();
+
+    const desk = await directory.createDesk({
+      label: 'Mesa 1',
+      x: 0,
+      y: 0,
+      appearance: { materialId: 'desk-painted', color: '#FF8800' },
+    });
+
+    expect(desk).toMatchObject({ materialId: 'desk-painted', color: '#ff8800' });
+    expect(await directory.getDesk(desk.id)).toMatchObject({ materialId: 'desk-painted', color: '#ff8800' });
+  });
+
+  it('moving, renaming, claiming and releasing keep the appearance', async () => {
+    const directory = desks();
+    const desk = await directory.createDesk({
+      label: 'Mesa 1',
+      x: 0,
+      y: 0,
+      appearance: { materialId: 'desk-painted', color: '#ff8800' },
+    });
+
+    await directory.updateDesk(desk.id, { label: 'Mesa 2', x: 10, y: 0 });
+    await directory.claimDesk(desk.id, ANA.id);
+    await directory.releaseDesk(ANA.id);
+
+    expect(await directory.getDesk(desk.id)).toMatchObject({ materialId: 'desk-painted', color: '#ff8800' });
+  });
+
+  it('rejects a malformed appearance and stores nothing', async () => {
+    const directory = desks();
+
+    await expect(
+      directory.createDesk({ label: 'Mesa 1', x: 0, y: 0, appearance: { materialId: 'desk-painted', color: 'red' } }),
+    ).rejects.toBeInstanceOf(InvalidArtChoiceError);
+    expect(await directory.listDesks()).toEqual([]);
   });
 });

@@ -58,7 +58,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_single_superadmin ON users ((role))
 CREATE TABLE IF NOT EXISTS audit_log (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   actor_id uuid REFERENCES users(id),
-  action text NOT NULL CHECK (action IN ('invite', 'revoke', 'create-user', 'revoke-user')),
+  action text NOT NULL CHECK (action IN ('invite', 'revoke', 'create-user', 'revoke-user', 'upload-art', 'submit-art', 'approve-art', 'reject-art', 'retire-art')),
   subject_id uuid REFERENCES users(id),
   created_at timestamptz NOT NULL DEFAULT now()
 );
@@ -75,9 +75,11 @@ CREATE TABLE IF NOT EXISTS audit_log (
 -- en una base nueva y en una vieja, que es lo unico que este fichero promete.
 -- 'revoke-user' (#93) is its own action and not 'revoke': taking access away
 -- from staff is a different decision from withdrawing an invitation, and the
--- trail has to tell them apart.
+-- trail has to tell them apart. The '*-art' actions (#122) record the art
+-- catalog: an Admin upload, a contribution, its review and its withdrawal;
+-- their subject is a piece (`piece_id`, added after `art_pieces` below).
 ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_action_check;
-ALTER TABLE audit_log ADD CONSTRAINT audit_log_action_check CHECK (action IN ('invite', 'revoke', 'create-user', 'revoke-user'));
+ALTER TABLE audit_log ADD CONSTRAINT audit_log_action_check CHECK (action IN ('invite', 'revoke', 'create-user', 'revoke-user', 'upload-art', 'submit-art', 'approve-art', 'reject-art', 'retire-art'));
 
 -- El panel consulta el rastro por sujeto ("quien invito a esta persona"), no
 -- recorriendo la tabla entera.
@@ -310,3 +312,113 @@ WHERE display_name IS NOT NULL
 CREATE UNIQUE INDEX IF NOT EXISTS users_display_name_unique ON users (
   lower(btrim(regexp_replace(display_name, '[[:space:]]+', ' ', 'g')))
 ) WHERE display_name IS NOT NULL;
+
+-- Art pack catalog (art migration, step 3). One row per manifest piece, keyed
+-- by its stable id (`<kind>-<name>`), filled by `registerArtPack` after this
+-- script runs (see `directory/fromEnv.ts`). `spec` is the whole manifest entry
+-- so kind-specific data (anchors, facings) needs no column of its own; the
+-- columns next to it are the ones the choice rules read.
+--
+-- A piece missing from a newer pack gets `retired_at` and is never deleted:
+-- users, desks and spaces that chose it keep resolving it. No foreign key from
+-- those choices for the same reason `avatar_id` below cannot have one: the
+-- backfill writes ids that only exist here once the pack is registered.
+CREATE TABLE IF NOT EXISTS art_pieces (
+  id text PRIMARY KEY,
+  kind text NOT NULL CHECK (kind IN ('character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table')),
+  name text NOT NULL,
+  -- NULL for characters and the terrain tileset; every other kind has one.
+  material text,
+  colorable boolean NOT NULL DEFAULT false,
+  default_color text CHECK (default_color IS NULL OR default_color ~ '^#[0-9a-f]{6}$'),
+  author text NOT NULL,
+  license text NOT NULL,
+  files jsonb NOT NULL,
+  spec jsonb NOT NULL,
+  contract_version integer NOT NULL,
+  retired_at timestamptz,
+  registered_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+-- Art contract 2 added the terrain tileset and the map props. CREATE TABLE IF
+-- NOT EXISTS keeps the CHECK of a table created before, so it is replaced.
+ALTER TABLE art_pieces DROP CONSTRAINT IF EXISTS art_pieces_kind_check;
+ALTER TABLE art_pieces ADD CONSTRAINT art_pieces_kind_check CHECK (kind IN ('character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table'));
+
+-- Admin uploads (#121) live in the same catalog, so every choice resolves
+-- them the same way. `source` is what keeps a pack registration from
+-- retiring them: it only retires `pack` rows. Their ids are reserved
+-- (`<kind>-upload-<hash>`, refused in a pack), so the upsert can never touch
+-- one either. Existing rows are pack pieces, hence the DEFAULT.
+ALTER TABLE art_pieces ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'pack';
+ALTER TABLE art_pieces DROP CONSTRAINT IF EXISTS art_pieces_source_check;
+ALTER TABLE art_pieces ADD CONSTRAINT art_pieces_source_check CHECK (source IN ('pack', 'upload'));
+-- Who uploaded it; NULL for pack pieces. Users are revoked, never deleted.
+ALTER TABLE art_pieces ADD COLUMN IF NOT EXISTS uploaded_by uuid REFERENCES users(id);
+
+-- Contributions and their review (#122). Any signed-in user can contribute a
+-- character or a decor plant; it waits as 'pending' until an admin approves
+-- or rejects it, and only approved rows are the catalog. The DEFAULT is
+-- 'approved' because every row that existed before (pack pieces and Admin
+-- uploads) was already in the catalog. `uploaded_by` above is who submitted.
+ALTER TABLE art_pieces ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'approved';
+ALTER TABLE art_pieces DROP CONSTRAINT IF EXISTS art_pieces_status_check;
+ALTER TABLE art_pieces ADD CONSTRAINT art_pieces_status_check CHECK (status IN ('pending', 'approved', 'rejected'));
+ALTER TABLE art_pieces ADD COLUMN IF NOT EXISTS reviewed_by uuid REFERENCES users(id);
+ALTER TABLE art_pieces ADD COLUMN IF NOT EXISTS reviewed_at timestamptz;
+-- The reason of a rejection, which the uploader reads; only a rejection has one.
+ALTER TABLE art_pieces ADD COLUMN IF NOT EXISTS review_note text;
+ALTER TABLE art_pieces DROP CONSTRAINT IF EXISTS art_pieces_review_note_check;
+ALTER TABLE art_pieces ADD CONSTRAINT art_pieces_review_note_check CHECK ((status = 'rejected') = (review_note IS NOT NULL));
+-- When the contributor accepted the rights statement of the upload form.
+-- Without it there is no contribution, so a pending row always has one.
+ALTER TABLE art_pieces ADD COLUMN IF NOT EXISTS license_accepted_at timestamptz;
+ALTER TABLE art_pieces DROP CONSTRAINT IF EXISTS art_pieces_pending_license_check;
+ALTER TABLE art_pieces ADD CONSTRAINT art_pieces_pending_license_check CHECK (status <> 'pending' OR license_accepted_at IS NOT NULL);
+
+-- The subject of an art audit entry is a piece, not a user. Pieces are
+-- retired, never deleted, so the reference never dangles.
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS piece_id text REFERENCES art_pieces(id);
+-- The hourly contribution quota counts a user's 'submit-art' entries of the
+-- last hour under a lock; this keeps that count off a full scan.
+CREATE INDEX IF NOT EXISTS audit_log_actor_action ON audit_log (actor_id, action, created_at);
+
+-- Persisted choices. Each DEFAULT is the pack default (`ART_PACK_DEFAULTS`,
+-- checked against the manifest by artCatalogRules.test.ts) and is what
+-- backfills the rows that already exist. The color of a non-colorable
+-- material is NULL, and both defaults are non-colorable, so the color columns
+-- need no default. Which colors a material admits depends on the catalog, so
+-- the CHECK only bounds the format; the rules own the rest.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_id text NOT NULL DEFAULT 'character-p01-burgundy-suit';
+-- When the user chose that character (step 5). No DEFAULT on purpose: every
+-- row that existed before this column stays NULL, which is what sends existing
+-- accounts through the character selector on their first access after it.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_chosen_at timestamptz;
+
+ALTER TABLE desks ADD COLUMN IF NOT EXISTS material_id text NOT NULL DEFAULT 'desk-wood';
+ALTER TABLE desks ADD COLUMN IF NOT EXISTS color text;
+ALTER TABLE desks DROP CONSTRAINT IF EXISTS desks_color_check;
+ALTER TABLE desks ADD CONSTRAINT desks_color_check CHECK (color IS NULL OR color ~ '^#[0-9a-f]{6}$');
+
+-- On `spaces` and not on `desks`: a desk's cubicle is a space, so its floor
+-- lives with every other floor.
+ALTER TABLE spaces ADD COLUMN IF NOT EXISTS floor_material_id text NOT NULL DEFAULT 'floor-wood';
+ALTER TABLE spaces ADD COLUMN IF NOT EXISTS floor_color text;
+ALTER TABLE spaces DROP CONSTRAINT IF EXISTS spaces_floor_color_check;
+ALTER TABLE spaces ADD CONSTRAINT spaces_floor_color_check CHECK (floor_color IS NULL OR floor_color ~ '^#[0-9a-f]{6}$');
+
+-- Terrain blocks (#123 phase 2). One row per 9x9 block an admin edited; a
+-- block without a row keeps the material of the committed Tiled layout
+-- (`src/game/maps/office.json`), so a new layout file still reaches every
+-- block nobody touched. No upper bound on the index: the map size lives in
+-- the layout, and the server ignores rows past its last block. The materials
+-- are `LAYOUT_MATERIALS` (`src/game/officeLayout.ts`, pinned by
+-- migrate.test.ts), refreshed below like `art_pieces_kind_check`.
+CREATE TABLE IF NOT EXISTS terrain_blocks (
+  block_index integer PRIMARY KEY CHECK (block_index >= 0),
+  material text NOT NULL CHECK (material IN ('water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet')),
+  updated_by uuid REFERENCES users(id),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE terrain_blocks DROP CONSTRAINT IF EXISTS terrain_blocks_material_check;
+ALTER TABLE terrain_blocks ADD CONSTRAINT terrain_blocks_material_check CHECK (material IN ('water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet'));

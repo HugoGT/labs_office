@@ -5,9 +5,9 @@ import styles from './MiEspacioPanel.module.css';
  * Disponible tanto para quien administra como para quien no: aqui no hay
  * ninguna guarda de rol, esa decision es de quien monta este componente.
  *
- * Sin funcionalidad real todavia -- subir pixel art, personalizar el propio
- * escritorio o el personaje llegan despues (#116). Este componente existe
- * solo para que "Personalizar" tenga un destino real y no un enlace muerto.
+ * Sin funcionalidad real todavia -- personalizar el propio escritorio o el
+ * personaje llegan despues (#116); subir pixel art ya tiene su seccion
+ * propia debajo, "Aportar arte" (#122).
  */
 export function MiEspacioPanel() {
   return (
@@ -16,8 +16,7 @@ export function MiEspacioPanel() {
         Mi espacio
       </h3>
       <p className={styles.body}>
-        Próximamente: aquí podrás personalizar tu escritorio, tu personaje y subir tu propio
-        pixel art.
+        Próximamente: aquí podrás personalizar tu escritorio y tu personaje.
       </p>
     </section>
   );

@@ -21,6 +21,17 @@ export interface PlayerSeed {
   facing: string;
   /** Version de config de espacios con la que este jugador deriva su sala (#7, D4). */
   spacesVersion: string;
+  /**
+   * Character the account chose, an art pack id (art migration, step 5).
+   * Always the persisted one: `OfficeRoom` never takes it from the client.
+   */
+  avatarId: string;
+  /**
+   * Seat the player is sitting on (art migration, step 6): a `seating.ts`
+   * reference, or '' standing. Only `OfficeRoom` writes it, after checking
+   * the seat; having a desk assigned does not set it.
+   */
+  seat: string;
 }
 
 export interface PlayerState extends PlayerSeed {}
@@ -34,6 +45,8 @@ defineTypes(PlayerState, {
   status: 'string',
   facing: 'string',
   spacesVersion: 'string',
+  avatarId: 'string',
+  seat: 'string',
 });
 
 /**
@@ -49,6 +62,8 @@ export function createPlayerState(seed: PlayerSeed): PlayerState {
   player.status = seed.status;
   player.facing = seed.facing;
   player.spacesVersion = seed.spacesVersion;
+  player.avatarId = seed.avatarId;
+  player.seat = seed.seat;
   return player;
 }
 
@@ -76,6 +91,12 @@ export function createRecordingState(seed: { startedBy: string; startedAt: numbe
 export interface OfficeState {
   players: MapSchema<PlayerState>;
   recordings: MapSchema<RecordingState>;
+  /**
+   * The live terrain blocks (#123 phase 2), in the wire form of
+   * `encodeTerrainBlocks`. The whole list, a few hundred bytes, so a joiner
+   * or a reconnected client gets the current terrain with the first sync.
+   */
+  terrainBlocks: string;
 }
 
 export class OfficeState extends Schema {
@@ -83,7 +104,8 @@ export class OfficeState extends Schema {
     super();
     this.players = new MapSchema<PlayerState>();
     this.recordings = new MapSchema<RecordingState>();
+    this.terrainBlocks = '';
   }
 }
 
-defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState } });
+defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState }, terrainBlocks: 'string' });

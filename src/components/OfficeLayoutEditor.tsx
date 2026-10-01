@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
+import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import type { OfficeBridge } from '../game/officeBridge';
 import { DeskEditorSection } from './DeskEditorSection';
 import { SpaceEditorSection } from './SpaceEditorSection';
+import { TerrainEditorSection } from './TerrainEditorSection';
 
 /**
  * Contenedor del editor de layout en el sidebar (#74, PR3c + PR4). Es la
@@ -40,18 +42,24 @@ export interface OfficeLayoutEditorProps {
   bridge: OfficeBridge;
   desks: DeskAdminPort;
   spaces: SpacesAdminPort;
+  /**
+   * The terrain editor (#123 phase 2), a third section under the same
+   * exclusivity: it holds the same map clicks. Absent or `null`, not offered.
+   */
+  terrain?: TerrainAdminPort | null;
   refreshDesks: () => void;
   refreshSpaces: () => void;
   onEditingChange?: (editing: boolean) => void;
   forceExit?: boolean;
 }
 
-type LayoutEditorSection = 'desk' | 'room';
+type LayoutEditorSection = 'desk' | 'room' | 'terrain';
 
 export default function OfficeLayoutEditor({
   bridge,
   desks,
   spaces,
+  terrain,
   refreshDesks,
   refreshSpaces,
   onEditingChange,
@@ -62,6 +70,7 @@ export default function OfficeLayoutEditor({
   // "cualquiera de las dos lo esta", no solo escritorios.
   const [deskEditing, setDeskEditing] = useState(false);
   const [spaceEditing, setSpaceEditing] = useState(false);
+  const [terrainEditing, setTerrainEditing] = useState(false);
   // Cual seccion, si alguna, tiene derecho al overlay compartido ahora mismo
   // -- ver la nota de cabecera "Exclusividad escritorios<->salas".
   const [activeSection, setActiveSection] = useState<LayoutEditorSection | null>(null);
@@ -69,17 +78,25 @@ export default function OfficeLayoutEditor({
   const handleDeskEditingChange = useCallback(
     (editing: boolean) => {
       setDeskEditing(editing);
-      onEditingChange?.(editing || spaceEditing);
+      onEditingChange?.(editing || spaceEditing || terrainEditing);
     },
-    [onEditingChange, spaceEditing],
+    [onEditingChange, spaceEditing, terrainEditing],
   );
 
   const handleSpaceEditingChange = useCallback(
     (editing: boolean) => {
       setSpaceEditing(editing);
-      onEditingChange?.(editing || deskEditing);
+      onEditingChange?.(editing || deskEditing || terrainEditing);
     },
-    [onEditingChange, deskEditing],
+    [onEditingChange, deskEditing, terrainEditing],
+  );
+
+  const handleTerrainEditingChange = useCallback(
+    (editing: boolean) => {
+      setTerrainEditing(editing);
+      onEditingChange?.(editing || deskEditing || spaceEditing);
+    },
+    [onEditingChange, deskEditing, spaceEditing],
   );
 
   // Cada seccion pide "activarme" ANTES de dispararse a si misma un `enter`
@@ -100,6 +117,12 @@ export default function OfficeLayoutEditor({
   useEffect(() => {
     if (activeSection === 'room' && !spaceEditing) setActiveSection(null);
   }, [activeSection, spaceEditing]);
+  useEffect(() => {
+    if (activeSection === 'terrain' && !terrainEditing) setActiveSection(null);
+  }, [activeSection, terrainEditing]);
+
+  /** Another section holds the map: this one has to leave. */
+  const othersActive = (section: LayoutEditorSection): boolean => activeSection !== null && activeSection !== section;
 
   return (
     <>
@@ -110,7 +133,7 @@ export default function OfficeLayoutEditor({
         refreshDesks={refreshDesks}
         refreshSpaces={refreshSpaces}
         onEditingChange={handleDeskEditingChange}
-        forceExit={(forceExit ?? false) || activeSection === 'room'}
+        forceExit={(forceExit ?? false) || othersActive('desk')}
         onRequestActive={() => requestActive('desk')}
       />
       <SpaceEditorSection
@@ -120,9 +143,18 @@ export default function OfficeLayoutEditor({
         refreshDesks={refreshDesks}
         refreshSpaces={refreshSpaces}
         onEditingChange={handleSpaceEditingChange}
-        forceExit={(forceExit ?? false) || activeSection === 'desk'}
+        forceExit={(forceExit ?? false) || othersActive('room')}
         onRequestActive={() => requestActive('room')}
       />
+      {terrain !== undefined && terrain !== null && (
+        <TerrainEditorSection
+          bridge={bridge}
+          terrain={terrain}
+          onEditingChange={handleTerrainEditingChange}
+          forceExit={(forceExit ?? false) || othersActive('terrain')}
+          onRequestActive={() => requestActive('terrain')}
+        />
+      )}
     </>
   );
 }

@@ -14,6 +14,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { readArtPackManifest } from '../decor/artPackFile.ts';
 import { createMemoryDecor } from '../decor/memoryDecor.ts';
 import type { DirectoryUser } from '../directory/directoryPort.ts';
 import { createMemoryDirectory } from '../directory/memoryDirectory.ts';
@@ -41,6 +42,8 @@ function user(overrides: Partial<DirectoryUser> & Pick<DirectoryUser, 'id' | 'ui
     status: 'active',
     expiresAt: null,
     invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
     createdAt: new Date('2025-12-01T00:00:00.000Z'),
     ...overrides,
   };
@@ -224,6 +227,19 @@ describe('handleListDesks', () => {
     expect(result.body.desks).toEqual([
       expect.objectContaining({ id: deAna.id, mine: false }),
       expect.objectContaining({ id: deBruno.id, mine: true }),
+    ]);
+  });
+
+  it('serves the appearance of each desk so the office draws its material and color (art step 4)', async () => {
+    const { deps, desks } = harness();
+    await desks.createDesk({ label: 'Mesa 1', x: 0, y: 0, appearance: { materialId: 'desk-painted', color: '#c0392b' } });
+    await desks.createDesk({ label: 'Mesa 2', x: 4, y: 0 });
+
+    const result = await handleListDesks(BEARER_ANA, deps);
+
+    expect(result.body.desks).toEqual([
+      expect.objectContaining({ label: 'Mesa 1', materialId: 'desk-painted', color: '#c0392b' }),
+      expect.objectContaining({ label: 'Mesa 2', materialId: 'desk-wood', color: null }),
     ]);
   });
 
@@ -710,5 +726,155 @@ describe('handleReleaseDesk', () => {
 
     expect((await desks.getDesk(deBruno.id))?.occupantId).toBe(BRUNO.id);
     expect((await desks.getDesk(deAna.id))?.occupantId).toBeNull();
+  });
+});
+
+/**
+ * Material and color are chosen when a desk is created and never again (art
+ * migration, step 7). The catalog check runs in the route, before the port,
+ * against the registered pack.
+ */
+describe('desk appearance, chosen only at creation (art step 7)', () => {
+  const PACK = readArtPackManifest(new URL('../../../public/assets/pack/manifest.json', import.meta.url));
+
+  /** Same wiring as `harness`, with the pack registered in the catalog the desks read decor from. */
+  async function withCatalog() {
+    const directory = createMemoryDirectory({ now: () => NOW, seed: [ADMIN, ANA, BRUNO, CADUCADO] });
+    const decor = createMemoryDecor({ now: () => NOW });
+    await decor.registerArtPack(PACK);
+    const spaces = createMemorySpaces({ now: () => NOW });
+    const desks = createMemoryDesks({ now: () => NOW, directory, decor, spaces: spaces.deskSpaces });
+    const deps: DesksDeps = { directory, desks, decor, auth: verifier, now: () => NOW, log: () => {} };
+    return { deps, desks, decor };
+  }
+
+  it('stores the chosen material and color with the desk, color normalized', async () => {
+    const { deps, desks } = await withCatalog();
+
+    const result = await handleCreateDesk(
+      BEARER_ADMIN,
+      { label: 'Mesa 1', x: 0, y: 0, materialId: 'desk-painted', color: '#C0392B' },
+      deps,
+    );
+
+    expect(result.status).toBe(201);
+    expect(result.body).toEqual(expect.objectContaining({ materialId: 'desk-painted', color: '#c0392b' }));
+    const stored = await desks.getDesk(result.body.id as string);
+    expect(stored).toEqual(expect.objectContaining({ materialId: 'desk-painted', color: '#c0392b' }));
+  });
+
+  it('a colorable material without a color takes its default color', async () => {
+    const { deps } = await withCatalog();
+
+    const result = await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa 1', x: 0, y: 0, materialId: 'desk-painted' }, deps);
+
+    expect(result.body).toEqual(expect.objectContaining({ materialId: 'desk-painted', color: '#4f9a8a' }));
+  });
+
+  it('a non-colorable material keeps its own look, stored without a color', async () => {
+    const { deps } = await withCatalog();
+
+    const result = await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa 1', x: 0, y: 0, materialId: 'desk-metal' }, deps);
+
+    expect(result.body).toEqual(expect.objectContaining({ materialId: 'desk-metal', color: null }));
+  });
+
+  it('without an appearance the desk takes the pack default', async () => {
+    const { deps } = await withCatalog();
+
+    const result = await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa 1', x: 0, y: 0 }, deps);
+
+    expect(result.body).toEqual(expect.objectContaining({ materialId: 'desk-wood', color: null }));
+  });
+
+  it.each([
+    ['unknown-piece', { materialId: 'desk-marble' }],
+    ['unknown-piece', { materialId: 'floor-plain' }],
+    ['color-not-allowed', { materialId: 'desk-wood', color: '#c0392b' }],
+    ['invalid-color', { materialId: 'desk-painted', color: 'red' }],
+  ])('rejects a choice the catalog does not allow with 400 invalid-appearance %s and creates nothing', async (reason, appearance) => {
+    const { deps, desks } = await withCatalog();
+
+    const result = await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa 1', x: 0, y: 0, ...appearance }, deps);
+
+    expect(result).toEqual({ status: 400, body: { error: 'invalid-appearance', reason } });
+    expect(await desks.listDesks()).toEqual([]);
+  });
+
+  it('a retired material cannot be chosen again', async () => {
+    const { deps, desks, decor } = await withCatalog();
+    await decor.registerArtPack({ ...PACK, pieces: PACK.pieces.filter((piece) => piece.id !== 'desk-metal') });
+
+    const result = await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa 1', x: 0, y: 0, materialId: 'desk-metal' }, deps);
+
+    expect(result).toEqual({ status: 400, body: { error: 'invalid-appearance', reason: 'retired-piece' } });
+    expect(await desks.listDesks()).toEqual([]);
+  });
+
+  it('without a catalog an explicit choice cannot be checked, so it is refused', async () => {
+    const { deps } = harness();
+
+    const result = await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa 1', x: 0, y: 0, materialId: 'desk-painted' }, deps);
+
+    expect(result).toEqual({ status: 400, body: { error: 'invalid-appearance', reason: 'unknown-piece' } });
+  });
+
+  it('the role guard still runs before the appearance is read', async () => {
+    const { deps } = await withCatalog();
+
+    const result = await handleCreateDesk(BEARER_ANA, { label: 'Mesa 1', x: 0, y: 0, materialId: 'desk-marble' }, deps);
+
+    expect(result.status).toBe(403);
+  });
+
+  it.each([
+    [{ materialId: 'desk-glass' }],
+    [{ color: '#000000' }],
+    [{ label: 'Mesa movida', materialId: 'desk-painted', color: '#c0392b' }],
+  ])('an update that mentions the appearance answers 400 appearance-immutable and changes nothing', async (patch) => {
+    const { deps, desks } = await withCatalog();
+    const created = await desks.createDesk({ label: 'Mesa 1', x: 0, y: 0, appearance: { materialId: 'desk-painted', color: '#c0392b' } });
+
+    const result = await handleUpdateDesk(BEARER_ADMIN, created.id, patch, deps);
+
+    expect(result).toEqual({ status: 400, body: { error: 'appearance-immutable' } });
+    expect(await desks.getDesk(created.id)).toEqual(
+      expect.objectContaining({ label: 'Mesa 1', materialId: 'desk-painted', color: '#c0392b' }),
+    );
+  });
+
+  it('moving, renaming, claiming and releasing keep the appearance; the decor follows the person', async () => {
+    const { deps, desks, decor } = await withCatalog();
+    const painted = await handleCreateDesk(
+      BEARER_ADMIN,
+      { label: 'Mesa 1', x: 0, y: 0, materialId: 'desk-painted', color: '#c0392b' },
+      deps,
+    );
+    const glass = await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa 2', x: 8, y: 0, materialId: 'desk-glass' }, deps);
+    const paintedId = painted.body.id as string;
+    const glassId = glass.body.id as string;
+    const plant = await decor.createAsset({ name: 'Planta', kind: 'plant', textureKey: 'plant-large', w: 1, h: 1, placeableOnDesk: true });
+    await decor.replaceDeskConfig(ANA.id, [{ assetId: plant.id, slot: 0, rotation: 0 }]);
+
+    expect((await handleUpdateDesk(BEARER_ADMIN, paintedId, { x: 4, y: 4 }, deps)).status).toBe(200);
+    expect((await handleUpdateDesk(BEARER_ADMIN, paintedId, { label: 'Mesa roja' }, deps)).status).toBe(200);
+    expect((await handleClaimDesk(BEARER_ANA, paintedId, deps)).status).toBe(200);
+    // Ana moving to another desk takes her decor along, never the furniture color.
+    expect((await handleClaimDesk(BEARER_ANA, glassId, deps)).status).toBe(200);
+
+    const seated = await handleListDesks(BEARER_BRUNO, deps);
+    expect(seated.body.desks).toEqual([
+      expect.objectContaining({ id: paintedId, label: 'Mesa roja', x: 4, y: 4, materialId: 'desk-painted', color: '#c0392b', occupant: null }),
+      expect.objectContaining({
+        id: glassId,
+        materialId: 'desk-glass',
+        color: null,
+        occupant: expect.objectContaining({ id: ANA.id, items: [expect.objectContaining({ assetId: plant.id })] }),
+      }),
+    ]);
+
+    expect((await handleReleaseDesk(BEARER_ANA, deps)).status).toBe(200);
+    expect(await desks.getDesk(paintedId)).toEqual(expect.objectContaining({ materialId: 'desk-painted', color: '#c0392b' }));
+    expect(await desks.getDesk(glassId)).toEqual(expect.objectContaining({ materialId: 'desk-glass', color: null, occupantId: null }));
   });
 });

@@ -1,26 +1,50 @@
 import Phaser from 'phaser';
-import { preloadOfficeAssets } from './assets';
+import type { ArtFacing, ArtPiece, Point } from './artContract';
+import { artUploadsManifestUrl, findPiece, parseArtSheetKey, type ArtAppearance } from './artPack';
+import { ArtPackLoader } from './artPackLoader';
+import {
+  chairPlacement,
+  DEFAULT_DESK_FACING,
+  deskAreaAnchor,
+  deskPlacement,
+  spaceFloorTiles,
+} from './artPlacement';
+import { feetOf, positionForFeet } from './avatarGeometry';
 import { beginAutoWalk, stepAutoWalk, type AutoWalkState } from './autoWalk';
 import { CameraPanLayer } from './CameraPanLayer';
+import { walkFrame } from './characterAnimation';
 import {
+  animateCharacter,
   setCharacterFacing,
+  setCharacterSheets,
   setCharacterStatus,
   spawnPlayer,
   type CharacterContainer,
+  type CharacterSheets,
 } from './characters';
 import { mergeColliderRects } from './colliderMerge';
 import {
-  avatarDepth,
+  DESK_ZONE_DEPTH,
   MINIMAP_MARKER_DEPTH,
   specialAssetDepth,
   worldAssetDepth,
 } from './depthLayers';
-import { deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
+import { deskFurnitureName, deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
 import { isEditableElementFocused } from './inputFocusGuard';
 import { LayoutEditLayer } from './LayoutEditLayer';
-import { placeFurniture, placeNature, placeZoneLabels, renderGround } from './mapBuilder';
+import {
+  BASE_MAP_CHAIR,
+  placeLayout,
+  placeSeats,
+  placeZoneLabels,
+  putArtSprite,
+  putChair,
+  putFloorTile,
+  renderTerrain,
+  type TerrainTilemap,
+} from './mapBuilder';
 import {
   BUILT_IN_SPACES,
   BUILT_IN_SPACES_VERSION,
@@ -31,6 +55,16 @@ import {
   type SpaceArea,
 } from './mapData';
 import type { OfficeBridge } from './officeBridge';
+import {
+  BASE_LAYOUT,
+  BASE_TERRAIN,
+  encodeTerrainBlocks,
+  terrainSnapshot,
+  withBlock,
+  type LayoutMaterial,
+} from './officeLayout';
+import type { TerrainEditCommand } from './terrainEditor';
+import { TerrainEditLayer } from './TerrainEditLayer';
 import {
   DEFAULT_FACING,
   DEFAULT_NAME,
@@ -52,6 +86,16 @@ import { detectSpace, nearbyKey } from './proximity';
 import { createRosterTracker, type RosterPeer, type RosterTracker } from './roster';
 import { createStaleSpacesVersionTracker } from './spacesConfig';
 import { audiblePeers, type AudioPeer } from './proximityAudio';
+import {
+  BASE_MAP_SEATS,
+  deskSeatId,
+  deskSeatTiles,
+  inSeatReach,
+  mapSeatId,
+  mapSeatTiles,
+  parseSeatRef,
+  type SeatTiles,
+} from './seating';
 import {
   buildTerrainGrid,
   isBlocked,
@@ -84,6 +128,15 @@ const DESK_COLOR = {
 } as const;
 const DESK_FILL_ALPHA = 0.22;
 const DESK_STROKE_WIDTH = 2;
+/**
+ * Served space floors go over the base ground (0) and the legacy flower tiles
+ * (1), under the zone labels (2) and every world asset, which starts at its
+ * own bottom edge in pixels.
+ */
+const SPACE_FLOOR_DEPTH = 1.5;
+/** A piece that cannot be drawn yet (or ever) still shows where it goes. */
+const ART_FALLBACK_COLOR = 0x6b7280;
+const ART_FALLBACK_ALPHA = 0.6;
 
 /**
  * Como se conecta la escena al servidor. `connect` se inyecta para poder
@@ -106,7 +159,33 @@ export interface OfficeSceneOptions {
    */
   getIdToken?: () => Promise<string | null>;
   connect?: (options: ConnectOfficeRoomOptions) => Promise<OfficeConnection>;
+  /**
+   * Manifest of the art pack (art migration, step 4). Defaults to the one the
+   * SPA serves; `null` turns the pack off and the office draws its fallbacks.
+   */
+  artManifestUrl?: string | null;
+  /**
+   * Manifest of the Admin uploads (#121). Defaults to the office server's
+   * (`artUploadsManifestUrl(endpoint)`); `null` leaves the pack alone.
+   */
+  artUploadsUrl?: string | null;
 }
+
+/** A seat the scene can offer or draw a sitter on, resolved from its reference. */
+interface ResolvedSeat {
+  readonly id: string;
+  /** Where the sitter's feet go: the chair ground point. */
+  readonly ground: Point;
+  readonly facing: ArtFacing;
+  readonly reach: SeatTiles;
+}
+
+/** How long a sit request waits for the room before it is forgotten. */
+const SEAT_ANSWER_MS = 2000;
+
+/** Hint over the seat in reach (Spanish UI copy). */
+const SIT_HINT = 'E · Sentarse';
+const STAND_HINT = 'E · Levantarse';
 
 interface WasdKeys {
   W: Phaser.Input.Keyboard.Key;
@@ -142,9 +221,33 @@ function rosterPeerOf(snapshot: { sessionId: string; name: string; status: strin
 export class OfficeScene extends Phaser.Scene {
   private readonly bridge: OfficeBridge;
   private grid!: TerrainGrid;
+  /** The terrain layers, redrawn in place when the terrain changes (#123 phase 2). */
+  private terrainTilemap?: TerrainTilemap;
+  /** The blocks the room replicated last (#123 phase 2); colliders and `grid` follow them. */
+  private terrainBlocks: readonly LayoutMaterial[] = BASE_LAYOUT.blocks;
+  /** The terrain editor's local preview, painted over `terrainBlocks` and never collided with. */
+  private terrainPreview: TerrainEditCommand['preview'] = null;
+  /** The static bodies of the terrain grid and their collider, replaced whole on each edit. */
+  private terrainColliders?: { rects: Phaser.GameObjects.Rectangle[]; collider: Phaser.Physics.Arcade.Collider };
+  private terrainEditLayer?: TerrainEditLayer;
+  private unsubscribeTerrainEdit?: () => void;
   private player!: CharacterContainer;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WasdKeys;
+  /** Sit or stand (step 6). Not captured: E has no browser default to block. */
+  private sitKey?: Phaser.Input.Keyboard.Key;
+  /**
+   * The seat the room confirmed for the local player, or `null` standing
+   * (step 6). Only `onLocalSeat` sets it: a request alone never seats anyone.
+   */
+  private seat: ResolvedSeat | null = null;
+  /** Seat asked for and not answered yet; moving forgets it. */
+  private pendingSeat: string | null = null;
+  /** Created the first time a seat comes in reach, so a scene far from any chair adds no text. */
+  private seatHint?: Phaser.GameObjects.Text;
+  /** Last `characterportraits` payload, so an unchanged set is not re-sent. */
+  private lastPortraitsKey = '';
+  private readonly portraitCache = new Map<string, string>();
   /**
    * Ultimo valor sincronizado de `isEditableElementFocused()` (#104
    * follow-up): el cierre original de #104 solo comprobo que el AVATAR
@@ -187,6 +290,7 @@ export class OfficeScene extends Phaser.Scene {
   private unsubscribeCallPeer?: () => void;
   private unsubscribeRespondCall?: () => void;
   private unsubscribeWalkToPeer?: () => void;
+  private unsubscribeToggleSeat?: () => void;
   private unsubscribeSpacesConfig?: () => void;
   private unsubscribeDesks?: () => void;
   private unsubscribeReconnect?: () => void;
@@ -223,12 +327,45 @@ export class OfficeScene extends Phaser.Scene {
    */
   private layoutEditing = false;
   /**
+   * Which editor holds the map (#123 phase 2): either one suspends desk
+   * clicks, menus and camera pan through `layoutEditing`, which is their OR.
+   */
+  private layoutCommandActive = false;
+  private terrainEditing = false;
+  /**
    * Todo lo dibujado del ultimo comando `desks` (#7, slice 5): zonas,
    * etiquetas y decoracion. Se guarda entero porque cada lista nueva sustituye
    * a la anterior y hay que poder retirar la vieja de una vez -- dibujar
    * encima dejaria pintado como ocupado un sitio que alguien acaba de soltar.
    */
   private deskObjects: Phaser.GameObjects.GameObject[] = [];
+  /** Last `desks` list, redrawn whole when a piece it needs finishes loading. */
+  private desks: readonly OfficeDesk[] = [];
+  /** Floors of the served spaces (art step 4), replaced whole like `deskObjects`. */
+  private floorObjects: Phaser.GameObjects.GameObject[] = [];
+  private floorSpaces: readonly SpaceArea[] = [];
+  /** Created in `preload()`, where `this.load` first exists. */
+  private art!: ArtPackLoader;
+  private readonly pendingRedraws = new Set<() => void>();
+  /**
+   * Own character as the server replicates it (art migration, step 5); `null`
+   * until the room says, and for an older server, which draws the pack
+   * default (step 6).
+   */
+  private localAvatarId: string | null = null;
+  /**
+   * Whether the own character is known (step 6): the room said, or there is
+   * no room. Until then the local player stays procedural rather than show
+   * the pack default and then turn into someone else.
+   */
+  private localAvatarKnown = false;
+
+  /** Read by tests. */
+  get playerAvatarId(): string | null {
+    return this.localAvatarId;
+  }
+  private readonly redrawDesks = (): void => this.applyDesks(this.desks);
+  private readonly redrawFloors = (): void => this.drawSpaceFloors(this.floorSpaces);
   /**
    * Objetivo de auto-caminata en curso (issue #2, D9/D10). `undefined` cuando
    * nadie esta siendo perseguido: `update()` solo dirige al reductor mientras
@@ -278,9 +415,17 @@ export class OfficeScene extends Phaser.Scene {
     this.options = options;
   }
 
-  /** Las hojas Kenney tienen que estar cargadas antes de que `create()` dibuje. */
+  /**
+   * Las hojas tienen que estar cargadas antes de que `create()` dibuje: el
+   * manifiesto del art pack y todo lo que el mapa pinta de el (art step 8:
+   * the terrain tileset and every piece of the Tiled layout).
+   */
   preload(): void {
-    preloadOfficeAssets(this);
+    this.art = new ArtPackLoader(this, {
+      manifestUrl: this.options.artManifestUrl,
+      uploadsUrl: this.options.artUploadsUrl !== undefined ? this.options.artUploadsUrl : artUploadsManifestUrl(this.options.endpoint),
+    });
+    this.art.preload();
   }
 
   create(): void {
@@ -290,11 +435,13 @@ export class OfficeScene extends Phaser.Scene {
     // de forma invisible (issue #17, D1).
     this.bridge.emit('portraits', { byKey: this.exportPortraits() });
 
-    const grid: TerrainGrid = buildTerrainGrid();
+    // The static office is the Tiled layout (art step 8); collisions come from
+    // the same walkability rule the room enforces on every `move`.
+    const grid: TerrainGrid = buildTerrainGrid(BASE_TERRAIN, BASE_LAYOUT);
     this.grid = grid;
-    renderGround(this, grid);
-    placeFurniture(this, grid);
-    placeNature(this, grid);
+    this.terrainTilemap = renderTerrain(this, BASE_TERRAIN, BASE_LAYOUT, this.art);
+    placeLayout(this, BASE_LAYOUT, this.art);
+    placeSeats(this, BASE_MAP_SEATS, this.art);
     placeZoneLabels(this);
 
     // El nombre de la sesion manda sobre la pildora del avatar local (#6).
@@ -304,6 +451,9 @@ export class OfficeScene extends Phaser.Scene {
 
     this.buildColliders(grid);
     this.setupCameras();
+    // Decals are a few pixels each: at minimap scale they are noise, and a
+    // layer less to draw on every frame.
+    if (this.terrainTilemap.decals !== null) this.minimapCamera?.ignore(this.terrainTilemap.decals);
     this.setupInput();
     // #53: despues de `setupInput` (comparte `this.input`, mismo momento en
     // que `layoutEditLayer` se crea mas abajo).
@@ -339,6 +489,7 @@ export class OfficeScene extends Phaser.Scene {
     this.unsubscribeWalkToPeer = this.bridge.onCommand('walkToPeer', ({ sessionId }) => {
       this.walkToPeer(sessionId);
     });
+    this.unsubscribeToggleSeat = this.bridge.onCommand('toggleSeat', () => this.toggleSeat());
 
     // #7, slice 3. Llega una sola vez por sesion, poco despues de arrancar.
     this.unsubscribeSpacesConfig = this.bridge.onCommand('spacesconfig', ({ spaces, version }) => {
@@ -356,7 +507,22 @@ export class OfficeScene extends Phaser.Scene {
     // gatear `drawDesk`.
     this.layoutEditLayer = new LayoutEditLayer(this, this.bridge);
     this.unsubscribeLayoutEdit = this.bridge.onCommand('layoutedit', (command) => {
-      this.layoutEditing = command !== null;
+      this.layoutCommandActive = command !== null;
+      this.layoutEditing = this.layoutCommandActive || this.terrainEditing;
+    });
+
+    // #123 phase 2. The layer outlines and picks blocks; the scene paints the
+    // preview, and hands the editor the live blocks when it opens.
+    this.terrainEditLayer = new TerrainEditLayer(this, this.bridge, BASE_LAYOUT);
+    this.unsubscribeTerrainEdit = this.bridge.onCommand('terrainedit', (command) => {
+      const opening = command !== null && !this.terrainEditing;
+      this.terrainEditing = command !== null;
+      this.layoutEditing = this.layoutCommandActive || this.terrainEditing;
+      const preview = command?.preview ?? null;
+      const repaint = encodePreview(preview) !== encodePreview(this.terrainPreview);
+      this.terrainPreview = preview;
+      if (repaint) this.paintTerrain();
+      if (opening) this.bridge.emit('terrain', { blocks: this.terrainBlocks });
     });
 
     // #52: reintento manual, el ultimo recurso cuando la escalera automatica
@@ -399,6 +565,7 @@ export class OfficeScene extends Phaser.Scene {
     if (__OFFICE_E2E__) {
       this.unsubscribeTeleportToTile = this.bridge.onCommand('teleportToTile', ({ tx, ty }) => {
         if (isBlocked(this.grid, tx, ty)) return;
+        this.standUp();
         this.player.setPosition(tx * TILE + 16, ty * TILE + 16);
       });
     }
@@ -424,11 +591,14 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeCallPeer?.();
       this.unsubscribeRespondCall?.();
       this.unsubscribeWalkToPeer?.();
+      this.unsubscribeToggleSeat?.();
       this.unsubscribeSpacesConfig?.();
       this.unsubscribeDesks?.();
       this.unsubscribeReconnect?.();
       this.unsubscribeLayoutEdit?.();
       this.layoutEditLayer?.destroy();
+      this.unsubscribeTerrainEdit?.();
+      this.terrainEditLayer?.destroy();
       this.cameraPanLayer?.destroy();
       this.remotes?.clear();
       this.roster?.clear();
@@ -460,6 +630,8 @@ export class OfficeScene extends Phaser.Scene {
     } = this.options;
 
     if (endpoint === null || endpoint === undefined) {
+      // Alone, nobody will name a character: the pack default it is.
+      this.adoptLocalAvatar(null);
       this.emitPresence('offline');
       // Sin sesion Colyseus nunca se intenta LiveKit (matriz de degradacion, PRD 6.3).
       this.emitVoice(null, [], this.currentSpaceId);
@@ -480,12 +652,19 @@ export class OfficeScene extends Phaser.Scene {
         getIdToken,
         handlers: {
           onAdd: (snapshot) => {
+            // On add, and on a change only when the character itself changed:
+            // `onChange` fires on every move, and a character changes during
+            // a session only when it is retired (#122).
+            this.requestCharacter(snapshot.avatarId);
             this.remotes?.upsert(snapshot);
             this.roster?.upsert(rosterPeerOf(snapshot));
             this.checkSpacesVersionDrift(snapshot.spacesVersion);
             this.emitPresence();
+            this.emitCharacterPortraits();
           },
           onChange: (snapshot) => {
+            const previous = this.remotes?.get(snapshot.sessionId)?.avatarId;
+            if (previous !== undefined && previous !== snapshot.avatarId) this.requestCharacter(snapshot.avatarId);
             this.remotes?.upsert(snapshot);
             this.roster?.upsert(rosterPeerOf(snapshot));
             this.checkSpacesVersionDrift(snapshot.spacesVersion);
@@ -494,6 +673,7 @@ export class OfficeScene extends Phaser.Scene {
             this.remotes?.remove(sessionId);
             this.roster?.remove(sessionId);
             this.emitPresence();
+            this.emitCharacterPortraits();
           },
           // Issue #2: mensajes sueltos del servidor, no estado sincronizado
           // (D4) -- se relanzan tal cual al puente, mismo patron que el resto
@@ -504,7 +684,10 @@ export class OfficeScene extends Phaser.Scene {
           onRecordings: (active) => this.bridge.emit('recordings', { active }),
           onRecordingReady: (payload) => this.bridge.emit('recordingready', payload),
           onDesksChanged: () => this.bridge.emit('deskschanged', undefined),
+          onTerrain: (blocks) => this.applyTerrain(blocks),
           onConnectionState: (state) => this.emitPresence(state),
+          onLocalAvatar: (avatarId) => this.adoptLocalAvatar(avatarId),
+          onLocalSeat: (seat) => this.onLocalSeat(seat),
           onResync: () => this.resyncAfterReconnect(),
         },
       });
@@ -529,20 +712,253 @@ export class OfficeScene extends Phaser.Scene {
       // `peerGroup`, el mismo de siempre, para que cada peer nazca con
       // cuerpo de colision.
       this.remotes = createRemoteAvatarRegistry(
-        createPhaserAvatarSink(this, this.bridge, this.peerGroup),
+        createPhaserAvatarSink(this, this.bridge, this.peerGroup, (avatarId) => this.characterSheets(avatarId)),
         { ignoreSessionId: connection.sessionId },
       );
       this.roster = createRosterTracker((peers) => this.bridge.emit('roster', { peers }), {
         ignoreSessionId: connection.sessionId,
       });
       this.emitPresence('connected');
+      this.emitCharacterPortraits();
       // Sesion viva, todavia sin pares conocidos (el primer tic los completa).
       this.emitVoice(connection.sessionId, [], this.currentSpaceId);
     } catch {
       if (!this.alive) return;
+      if (!this.localAvatarKnown) this.adoptLocalAvatar(null);
       this.emitPresence('offline');
       this.emitVoice(null, [], this.currentSpaceId);
     }
+  }
+
+  /**
+   * The own character, as the room replicates it or the pack default alone.
+   * Redrawn at once: a character whose sheets are still loading shows the
+   * procedural body until they land, never the previous character.
+   */
+  private adoptLocalAvatar(avatarId: string | null): void {
+    this.localAvatarId = avatarId;
+    this.localAvatarKnown = true;
+    this.requestCharacter(avatarId);
+    this.redrawCharacters();
+  }
+
+  /**
+   * Starts loading a character's sheets as soon as its id is known (art
+   * migration, step 5), and redraws every avatar once they settle (step 6).
+   * Until then, and for good if they fail, the avatar keeps its procedural
+   * body. `null` (no character replicated) is the pack default.
+   */
+  private requestCharacter(avatarId: string | null): void {
+    const id = avatarId ?? this.art.manifest?.defaults.character;
+    if (id === undefined || !this.alive) return;
+    if (this.art.request(id, () => this.scheduleRedraw(this.redrawCharacters)) === 'ready') this.redrawCharacters();
+  }
+
+  /** Loaded sheets of a character (`null` is the pack default), or `null` to stay procedural. */
+  private characterSheets(avatarId: string | null): CharacterSheets | null {
+    const id = avatarId ?? this.art.manifest?.defaults.character;
+    if (id === undefined) return null;
+    const walk = this.art.sheet(id, 'walk');
+    const seated = this.art.sheet(id, 'seated');
+    return walk === null || seated === null ? null : { walk, seated };
+  }
+
+  private readonly redrawCharacters = (): void => {
+    setCharacterSheets(this.player, this.localAvatarKnown ? this.characterSheets(this.localAvatarId) : null);
+    for (const sessionId of this.remotes?.sessionIds() ?? []) {
+      const avatar = this.remotes?.get(sessionId);
+      if (avatar) setCharacterSheets(avatar, this.characterSheets(avatar.avatarId));
+    }
+    this.emitCharacterPortraits();
+  };
+
+  /**
+   * Pack portrait of every session whose character is loaded (step 6), for
+   * the video tiles: the idle frame facing the viewer, exported once per
+   * character and only re-sent when the set changes.
+   */
+  private emitCharacterPortraits(): void {
+    const bySession: Record<string, string> = {};
+    const keys: string[] = [];
+    const add = (sessionId: string | undefined, avatarId: string | null): void => {
+      const sheets = this.characterSheets(avatarId);
+      if (sessionId === undefined || sheets === null) return;
+      keys.push(`${sessionId}:${sheets.walk}`);
+      let portrait = this.portraitCache.get(sheets.walk);
+      if (portrait === undefined) {
+        portrait = this.textures.getBase64(sheets.walk, walkFrame('S', 'idle'));
+        this.portraitCache.set(sheets.walk, portrait);
+      }
+      bySession[sessionId] = portrait;
+    };
+    if (this.localAvatarKnown) add(this.connection?.sessionId, this.localAvatarId);
+    for (const sessionId of this.remotes?.sessionIds() ?? []) {
+      add(sessionId, this.remotes?.get(sessionId)?.avatarId ?? null);
+    }
+    const key = keys.sort().join('|');
+    if (key === this.lastPortraitsKey) return;
+    this.lastPortraitsKey = key;
+    this.bridge.emit('characterportraits', { bySession });
+  }
+
+  /**
+   * A seat by reference (step 6): a base map chair, or the chair of a desk in
+   * the last `desks` list. `null` when this client cannot place it.
+   */
+  private resolveSeat(id: string): ResolvedSeat | null {
+    const ref = parseSeatRef(id);
+    if (ref === null) return null;
+    if (ref.kind === 'map') {
+      const seat = BASE_MAP_SEATS[ref.index];
+      return { id, ground: { x: (seat.tx + 0.5) * TILE, y: (seat.ty + 0.5) * TILE }, facing: seat.facing, reach: mapSeatTiles(seat) };
+    }
+    const desk = this.desks.find((candidate) => candidate.id === ref.deskId);
+    return desk === undefined ? null : this.deskSeat(desk);
+  }
+
+  private deskSeat(desk: OfficeDesk): ResolvedSeat {
+    const anchor = deskAreaAnchor(desk);
+    const materialId = desk.appearance?.materialId ?? this.art.manifest?.defaults.desk;
+    const piece = materialId === undefined || this.art.manifest === null ? undefined : findPiece(this.art.manifest, materialId);
+    // The desk art says where its chair goes; without the catalog the middle
+    // of the area is as close as this client can tell.
+    const offset = piece?.kind === 'desk' ? piece.facings[DEFAULT_DESK_FACING].chairGround : { x: 0, y: 0 };
+    return {
+      id: deskSeatId(desk.id),
+      ground: { x: anchor.x + offset.x, y: anchor.y + offset.y },
+      facing: DEFAULT_DESK_FACING,
+      reach: deskSeatTiles({ x: desk.x / TILE, y: desk.y / TILE }),
+    };
+  }
+
+  /**
+   * The free seat in reach closest to the feet, if any. A seat is free when
+   * no peer sits on it and, at a desk, when the desk is unclaimed or claimed
+   * by this player: the same rules the room applies, so the scene does not
+   * offer what the room would refuse.
+   */
+  private seatInReach(): ResolvedSeat | null {
+    const taken = new Set<string>();
+    for (const sessionId of this.remotes?.sessionIds() ?? []) {
+      const seat = this.remotes?.get(sessionId)?.seat;
+      if (seat) taken.add(seat);
+    }
+    const candidates: ResolvedSeat[] = [];
+    BASE_MAP_SEATS.forEach((_, index) => {
+      const seat = this.resolveSeat(mapSeatId(index));
+      if (seat) candidates.push(seat);
+    });
+    for (const desk of this.desks) {
+      if (desk.occupant === null || desk.mine) candidates.push(this.deskSeat(desk));
+    }
+    const feet = feetOf(this.player);
+    let best: ResolvedSeat | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const seat of candidates) {
+      if (taken.has(seat.id) || !inSeatReach(this.player, seat.reach)) continue;
+      const distance = Math.hypot(seat.ground.x - feet.x, seat.ground.y - feet.y);
+      if (distance < bestDistance) {
+        best = seat;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
+
+  /** E, or the `toggleSeat` command: stand when seated, else ask for the seat in reach. */
+  private toggleSeat(): void {
+    if (this.seat !== null || this.pendingSeat !== null) {
+      this.standUp();
+      return;
+    }
+    const seat = this.seatInReach();
+    if (seat === null) return;
+    this.pendingSeat = seat.id;
+    // Offline nobody else can see or contest the seat, so it is taken here.
+    if (!this.connection) {
+      this.onLocalSeat(seat.id);
+      return;
+    }
+    this.connection.sendSit(seat.id);
+    // The room refuses without a word; after a while the request is
+    // forgotten, so the next E asks again instead of standing up.
+    this.time.delayedCall(SEAT_ANSWER_MS, () => {
+      if (this.pendingSeat === seat.id) this.pendingSeat = null;
+    });
+  }
+
+  /**
+   * The room's answer about the own seat. A seat that was asked for puts the
+   * player on it: feet on the chair ground, still, facing the seat, and out
+   * of the collider so the table next to the chair cannot shove the sitter
+   * off it. One nobody asked for (the request was abandoned by walking away)
+   * is given back.
+   */
+  private onLocalSeat(seatId: string | null): void {
+    if (seatId === null) {
+      this.pendingSeat = null;
+      this.leaveSeat();
+      return;
+    }
+    if (this.seat?.id === seatId) return;
+    const seat = this.pendingSeat === seatId ? this.resolveSeat(seatId) : null;
+    this.pendingSeat = null;
+    if (seat === null) {
+      this.connection?.sendStand();
+      return;
+    }
+    this.autoWalk = undefined;
+    const body = this.player.body as Phaser.Physics.Arcade.Body;
+    body.setVelocity(0, 0);
+    body.checkCollision.none = true;
+    const stand = positionForFeet(seat.ground);
+    this.player.setPosition(stand.x, stand.y);
+    this.facing = seat.facing;
+    setCharacterFacing(this.player, seat.facing);
+    this.player.seatFacing = seat.facing;
+    this.seat = seat;
+    this.connection?.sendMove(stand.x, stand.y, seat.facing);
+  }
+
+  /** Stands the local player up and tells the room (E again, walking, a teleport). */
+  private standUp(): void {
+    if (this.seat === null && this.pendingSeat === null) return;
+    this.pendingSeat = null;
+    this.leaveSeat();
+    this.connection?.sendStand();
+  }
+
+  private leaveSeat(): void {
+    if (this.seat === null) return;
+    this.seat = null;
+    this.player.seatFacing = null;
+    (this.player.body as Phaser.Physics.Arcade.Body).checkCollision.none = false;
+  }
+
+  /** Keeps the E hint over the seat in reach, or over the own seat while seated. */
+  private updateSeatHint(): void {
+    const seat = this.seat ?? (this.pendingSeat === null ? this.seatInReach() : null);
+    if (seat === null) {
+      this.seatHint?.setVisible(false);
+      return;
+    }
+    if (this.seatHint === undefined) {
+      this.seatHint = this.add
+        .text(0, 0, SIT_HINT, {
+          fontFamily: 'Cantarell, Noto Sans, DejaVu Sans, Segoe UI, sans-serif',
+          fontSize: '11px',
+          color: '#f9fafb',
+          backgroundColor: '#111827cc',
+          padding: { x: 6, y: 3 },
+        })
+        .setOrigin(0.5, 1)
+        .setDepth(MINIMAP_MARKER_DEPTH - 1);
+      this.minimapCamera?.ignore(this.seatHint);
+    }
+    this.seatHint
+      .setText(this.seat === null ? SIT_HINT : STAND_HINT)
+      .setPosition(seat.ground.x, seat.ground.y - 64)
+      .setVisible(true);
   }
 
   /**
@@ -632,6 +1048,10 @@ export class OfficeScene extends Phaser.Scene {
    * deja al jugador donde estaba no emite nada -- que es lo correcto.
    */
   private applySpacesConfig(spaces: readonly SpaceArea[], version: string): void {
+    // Before the version check: floors are outside the hash, so a served config
+    // equal to the built-in one still brings the floors to draw.
+    this.drawSpaceFloors(spaces);
+
     // Misma version = misma config. Es el caso normal de un despliegue sin
     // editar, donde lo servido coincide con lo incorporado; reenviarlo al
     // servidor seria un mensaje por sesion que no dice nada nuevo.
@@ -675,8 +1095,109 @@ export class OfficeScene extends Phaser.Scene {
    * `NO_DESKS` y la oficina se dibuja exactamente como antes de esta slice.
    */
   private applyDesks(desks: readonly OfficeDesk[]): void {
+    this.desks = desks;
     for (const object of this.deskObjects.splice(0)) object.destroy();
     for (const desk of desks) this.drawDesk(desk);
+  }
+
+  /**
+   * Loaded sheet of an appearance, or `null`. When the piece is not loaded yet
+   * it asks the loader for it and redraws once it settles; a piece of the
+   * wrong kind (a desk id as a floor) never draws.
+   */
+  private artSheet(appearance: ArtAppearance, kind: 'desk' | 'floor' | 'chair', redraw: () => void): { key: string; piece: ArtPiece } | null {
+    const known = (): ArtPiece | undefined =>
+      this.art.manifest === null ? undefined : findPiece(this.art.manifest, appearance.materialId);
+    const ready = (): { key: string; piece: ArtPiece } | null => {
+      const piece = known();
+      if (piece === undefined || piece.kind !== kind) return null;
+      const key = this.art.sheet(piece.id, 'sheet', appearance.color);
+      return key === null ? null : { key, piece };
+    };
+    const now = ready();
+    if (now !== null) return now;
+    const piece = known();
+    if (piece !== undefined && piece.kind !== kind) return null;
+    return this.art.request(appearance.materialId, () => this.scheduleRedraw(redraw)) === 'ready' ? ready() : null;
+  }
+
+  /**
+   * Every placement waiting on a piece asks for the same redraw when it lands;
+   * one pass per batch is enough, and none after the scene is gone.
+   */
+  private scheduleRedraw(redraw: () => void): void {
+    if (this.pendingRedraws.has(redraw)) return;
+    this.pendingRedraws.add(redraw);
+    queueMicrotask(() => {
+      this.pendingRedraws.delete(redraw);
+      if (this.alive) redraw();
+    });
+  }
+
+  /**
+   * Floors of the served spaces (art migration, step 4), a desk's cubicle
+   * included, in their persisted material and color. Built-in rooms without a
+   * served floor keep the terrain of the layout under them.
+   * A floor that cannot load shows a neutral veil over the space, so a room
+   * with a broken floor still reads as a room.
+   */
+  private drawSpaceFloors(spaces: readonly SpaceArea[]): void {
+    this.floorSpaces = spaces;
+    for (const object of this.floorObjects.splice(0)) object.destroy();
+    for (const space of spaces) {
+      if (space.floor === undefined) continue;
+      const sheet = this.artSheet(space.floor, 'floor', this.redrawFloors);
+      if (sheet === null) {
+        this.floorObjects.push(
+          this.add
+            .rectangle(space.x + space.w / 2, space.y + space.h / 2, space.w, space.h, ART_FALLBACK_COLOR, DESK_FILL_ALPHA)
+            .setDepth(SPACE_FLOOR_DEPTH),
+        );
+        continue;
+      }
+      for (const { tx, ty } of spaceFloorTiles(space, this.grid)) {
+        this.floorObjects.push(putFloorTile(this, sheet.key, tx, ty, SPACE_FLOOR_DEPTH));
+      }
+    }
+  }
+
+  /**
+   * The desk furniture in the middle of the area: its persisted material and
+   * color, at native size and in the exported facing, never stretched to the
+   * 3x3 area. Without an appearance (an older server) it is the pack default.
+   *
+   * Same depth as the zone and drawn after it, so the status tint stays a floor
+   * marker under the desk instead of a veil over it; decor goes on top.
+   */
+  private drawDeskFurniture(desk: OfficeDesk, depth: number): void {
+    const name = deskFurnitureName(desk.id);
+    const anchor = deskAreaAnchor(desk);
+    const materialId = desk.appearance?.materialId ?? this.art.manifest?.defaults.desk;
+    const sheet =
+      materialId === undefined
+        ? null
+        : this.artSheet({ materialId, color: desk.appearance?.color ?? null }, 'desk', this.redrawDesks);
+
+    if (sheet === null || sheet.piece.kind !== 'desk') {
+      // Same visible fallback as a decor piece without texture: the desk is
+      // there even when its art is not, sized like the 2x1 footprint.
+      this.deskObjects.push(
+        this.add
+          .rectangle(anchor.x, anchor.y, 2 * TILE, TILE, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
+          .setDepth(depth)
+          .setName(name),
+      );
+      return;
+    }
+    const placement = deskPlacement(sheet.piece, DEFAULT_DESK_FACING, anchor);
+    this.deskObjects.push(putArtSprite(this, sheet.key, placement, depth).setName(name));
+
+    // Its chair (step 6), where the room seats people at this desk. Sorted
+    // by its own ground, under the desk, so the desk covers the sitter's legs.
+    const chair = this.artSheet({ materialId: BASE_MAP_CHAIR, color: null }, 'chair', this.redrawDesks);
+    if (chair !== null && chair.piece.kind === 'chair') {
+      this.deskObjects.push(...putChair(this, chair.key, chairPlacement(chair.piece, DEFAULT_DESK_FACING, placement.chairGround)));
+    }
   }
 
   /**
@@ -684,7 +1205,7 @@ export class OfficeScene extends Phaser.Scene {
    * quien lo ocupe.
    *
    * The depth is the BOTTOM edge of the area in the world band, same
-   * convention as `placeFurniture` (`(y + h) * TILE`), so the desk y-sorts
+   * convention as `placeLayout` (`(y + h) * TILE`), so the desk y-sorts
    * against the furniture around it. Avatars live in their own band above it
    * (#70, `depthLayers.ts`), so whoever walks over the desk is never hidden.
    */
@@ -700,10 +1221,12 @@ export class OfficeScene extends Phaser.Scene {
     const bottom = desk.y + desk.h;
     const depth = worldAssetDepth(bottom);
 
+    // A floor marker (step 6): at the furniture's depth it would veil
+    // whoever sits at the desk.
     const zone = this.add
       .rectangle(desk.x + desk.w / 2, desk.y + desk.h / 2, desk.w, desk.h, color, DESK_FILL_ALPHA)
       .setStrokeStyle(DESK_STROKE_WIDTH, color)
-      .setDepth(depth)
+      .setDepth(DESK_ZONE_DEPTH)
       .setName(deskZoneName(desk.id));
     this.deskObjects.push(zone);
 
@@ -715,6 +1238,8 @@ export class OfficeScene extends Phaser.Scene {
       })
       .setDepth(depth);
     this.deskObjects.push(label);
+
+    this.drawDeskFurniture(desk, depth);
 
     for (const item of desk.occupant?.items ?? []) {
       // `null` = ese slot no es una de las nueve cajas. Se salta la pieza y no
@@ -774,6 +1299,13 @@ export class OfficeScene extends Phaser.Scene {
     const cx = box.x + box.w / 2;
     const cy = box.y + box.h / 2;
     const name = deskItemName(itemId);
+
+    // A key of the art pack or an upload (#121) is loaded on demand, like a
+    // desk material: the fallback below stays until it lands, then redraws.
+    const art = parseArtSheetKey(textureKey);
+    if (art !== null && !this.textures.exists(textureKey)) {
+      this.art.request(art.pieceId, () => this.scheduleRedraw(this.redrawDesks));
+    }
 
     if (!this.textures.exists(textureKey)) {
       return this.add
@@ -843,6 +1375,18 @@ export class OfficeScene extends Phaser.Scene {
    * les da cuerpo en `create()`.
    */
   private buildColliders(grid: TerrainGrid): void {
+    this.buildTerrainColliders(grid);
+
+    this.peerGroup = this.add.group();
+    this.physics.add.collider(this.player, this.peerGroup);
+  }
+
+  /** The static bodies of `grid`, replacing the previous ones (#123 phase 2: blocks change live). */
+  private buildTerrainColliders(grid: TerrainGrid): void {
+    if (this.terrainColliders) {
+      this.physics.world.removeCollider(this.terrainColliders.collider);
+      for (const rect of this.terrainColliders.rects) rect.destroy();
+    }
     const rects = mergeColliderRects(grid.solid).map((r) => {
       const w = r.w * TILE;
       const h = r.h * TILE;
@@ -850,10 +1394,31 @@ export class OfficeScene extends Phaser.Scene {
       this.physics.add.existing(rect, true);
       return rect;
     });
-    this.physics.add.collider(this.player, rects);
+    this.terrainColliders = { rects, collider: this.physics.add.collider(this.player, rects) };
+  }
 
-    this.peerGroup = this.add.group();
-    this.physics.add.collider(this.player, this.peerGroup);
+  /**
+   * New blocks from the room (#123 phase 2): the walkability grid, the
+   * colliders and the tilemap follow them at once, so what the player bumps
+   * into is what the room enforces. The first sync usually repeats the
+   * committed blocks, which changes nothing.
+   */
+  private applyTerrain(blocks: readonly LayoutMaterial[]): void {
+    if (!this.alive) return;
+    if (encodeTerrainBlocks(blocks) !== encodeTerrainBlocks(this.terrainBlocks)) {
+      this.terrainBlocks = blocks;
+      this.grid = buildTerrainGrid(terrainSnapshot(BASE_LAYOUT, blocks), BASE_LAYOUT);
+      this.buildTerrainColliders(this.grid);
+      this.paintTerrain();
+    }
+    this.bridge.emit('terrain', { blocks });
+  }
+
+  /** Redraws the tilemap from the live blocks, with the editor's preview over them. */
+  private paintTerrain(): void {
+    const preview = this.terrainPreview;
+    const shown = preview === null ? this.terrainBlocks : withBlock(this.terrainBlocks, preview.index, preview.material);
+    this.terrainTilemap?.refresh(terrainSnapshot(BASE_LAYOUT, shown));
   }
 
   /** Camara principal siguiendo al jugador + minimapa en la esquina superior derecha (app.js:410-431). */
@@ -906,6 +1471,7 @@ export class OfficeScene extends Phaser.Scene {
     this.cursors = keyboard.createCursorKeys();
     this.wasd = keyboard.addKeys('W,A,S,D') as WasdKeys;
     keyboard.addCapture('UP,DOWN,LEFT,RIGHT,SPACE');
+    this.sitKey = keyboard.addKey('E', false);
 
     // `focusin`/`focusout` (a diferencia de `focus`/`blur`) burbujean, asi que
     // un solo listener en `window` ve cualquier campo de la pagina, sin
@@ -1023,6 +1589,7 @@ export class OfficeScene extends Phaser.Scene {
 
     const destination = pickApproachTile(this.grid, walkerTile, peerTile, peerSpaceTiles);
     if (!destination) return;
+    this.standUp();
 
     this.autoWalk = beginAutoWalk(
       { x: destination.tx * TILE + 16, y: destination.ty * TILE + 16 },
@@ -1042,6 +1609,10 @@ export class OfficeScene extends Phaser.Scene {
     else if (this.cursors.right.isDown || (wasdActive && this.wasd.D.isDown)) vx = 1;
     if (this.cursors.up.isDown || (wasdActive && this.wasd.W.isDown)) vy = -1;
     else if (this.cursors.down.isDown || (wasdActive && this.wasd.S.isDown)) vy = 1;
+
+    // Step 6: E sits or stands, and walking stands up first.
+    if (this.sitKey !== undefined && wasdActive && Phaser.Input.Keyboard.JustDown(this.sitKey)) this.toggleSeat();
+    if (vx !== 0 || vy !== 0) this.standUp();
 
     const body = this.player.body as Phaser.Physics.Arcade.Body;
 
@@ -1095,13 +1666,24 @@ export class OfficeScene extends Phaser.Scene {
       this.facing = facingFrom(vx, vy, this.facing);
     }
 
-    this.player.setDepth(avatarDepth(this.player.y));
+    // The walk comes from movement and never travels (step 6): the local
+    // player from its velocity this frame, each peer from how far its tween
+    // moved it. Animating also re-sorts each one by its feet.
     setCharacterFacing(this.player, this.facing);
+    animateCharacter(this.player, {
+      dx: (body.velocity.x * delta) / 1000,
+      dy: (body.velocity.y * delta) / 1000,
+      dtMs: delta,
+    });
 
     for (const sessionId of this.remotes?.sessionIds() ?? []) {
       const avatar = this.remotes?.get(sessionId);
-      if (avatar) avatar.setDepth(avatarDepth(avatar.y));
+      if (!avatar) continue;
+      animateCharacter(avatar, { dx: avatar.x - avatar.lastX, dy: avatar.y - avatar.lastY, dtMs: delta });
+      avatar.lastX = avatar.x;
+      avatar.lastY = avatar.y;
     }
+    this.updateSeatHint();
 
     // Se publica cada frame a proposito: el agrupado de `createMoveThrottle`
     // decide que sale por el cable y que se descarta por no haber cambiado.
@@ -1109,4 +1691,8 @@ export class OfficeScene extends Phaser.Scene {
 
     this.mmMarker?.setPosition(this.player.x, this.player.y);
   }
+}
+
+function encodePreview(preview: TerrainEditCommand['preview']): string {
+  return preview === null ? '' : `${preview.index}:${preview.material}`;
 }

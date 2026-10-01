@@ -9,7 +9,11 @@
  * consultas intercambiadas, porque el pool de mentira contesta lo mismo.
  */
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
+import type { ArtPackManifest } from '../../../src/game/artContract.ts';
+import { ArtPieceExistsError, InvalidArtPackError } from './artCatalogRules.ts';
+import { InvalidArtTransitionError } from './artReviewRules.ts';
 import { AssetNameTakenError, InvalidAssetError, InvalidDeskConfigError } from './decorRules.ts';
 import { createPgDecor } from './pgDecor.ts';
 import type { DirectoryPool, DirectoryQueryResult } from '../directory/pgDirectory.ts';
@@ -655,5 +659,505 @@ describe('pgDecor: replaceDeskConfig', () => {
     expect(texts.indexOf('commit')).toBeGreaterThan(
       texts.findIndex((t) => t.includes('join assets')),
     );
+  });
+});
+
+describe('createPgDecor: art pack catalog (art migration, step 3)', () => {
+  const PACK: ArtPackManifest = JSON.parse(
+    readFileSync(new URL('../../../public/assets/pack/manifest.json', import.meta.url), 'utf8'),
+  );
+  const PAINTED = PACK.pieces.find((piece) => piece.id === 'desk-painted')!;
+  const PIECE_ROW = {
+    id: PAINTED.id,
+    kind: 'desk',
+    name: PAINTED.name,
+    material: 'painted',
+    colorable: true,
+    default_color: '#4f9a8a',
+    author: PAINTED.author,
+    license: PAINTED.license,
+    files: PAINTED.files,
+    spec: PAINTED,
+    contract_version: 1,
+    retired_at: null,
+    registered_at: new Date('2026-01-01T00:00:00.000Z'),
+    updated_at: new Date('2026-01-02T00:00:00.000Z'),
+  };
+
+  it('listArtPieces reads only active approved pieces by default, in (kind, id) order, and maps the row', async () => {
+    const pool = fakePool(() => ({ rows: [PIECE_ROW], rowCount: 1 }));
+
+    const pieces = await createPgDecor(pool).listArtPieces();
+
+    expect(squash(pool.queries[0].text)).toContain("from art_pieces where status = 'approved' and retired_at is null order by kind, id");
+    expect(pieces).toEqual([
+      {
+        id: PAINTED.id,
+        kind: 'desk',
+        name: PAINTED.name,
+        material: 'painted',
+        colorable: true,
+        defaultColor: '#4f9a8a',
+        author: PAINTED.author,
+        license: PAINTED.license,
+        files: PAINTED.files,
+        spec: PAINTED,
+        contractVersion: 1,
+        retiredAt: null,
+        registeredAt: PIECE_ROW.registered_at,
+        updatedAt: PIECE_ROW.updated_at,
+        // A row read before #121 has no source column yet: it is a pack piece.
+        source: 'pack',
+        uploadedBy: null,
+        // Nor review columns before #122: approved from the start, like its DEFAULT.
+        status: 'approved',
+        reviewedBy: null,
+        reviewedAt: null,
+        reviewNote: null,
+        licenseAcceptedAt: null,
+      },
+    ]);
+  });
+
+  it('listArtPieces({ includeRetired: true }) drops the retired filter, never the approved one (#122)', async () => {
+    const pool = fakePool();
+
+    await createPgDecor(pool).listArtPieces({ includeRetired: true });
+
+    expect(squash(pool.queries[0].text)).not.toContain('retired_at is null');
+    expect(squash(pool.queries[0].text)).toContain("where status = 'approved'");
+  });
+
+  function registrationPool(retired: readonly string[] = []): FakePool {
+    return fakePool((text) =>
+      /update art_pieces set retired_at/i.test(text)
+        ? { rows: retired.map((id) => ({ id })), rowCount: retired.length }
+        : { rows: [], rowCount: 0 },
+    );
+  }
+
+  it('upserts every piece by its id inside one transaction and never deletes', async () => {
+    const pool = registrationPool();
+
+    await createPgDecor(pool).registerArtPack(PACK);
+
+    const texts = pool.queries.map((query) => squash(query.text));
+    expect(texts[0]).toBe('begin');
+    expect(texts.at(-1)).toBe('commit');
+    const upserts = pool.queries.filter((query) => /insert into art_pieces/i.test(query.text));
+    expect(upserts).toHaveLength(PACK.pieces.length);
+    expect(upserts.map((query) => query.values[0])).toEqual(PACK.pieces.map((piece) => piece.id));
+    expect(squash(upserts[0].text)).toContain('on conflict (id) do update set');
+    // Shipping a piece again un-retires it.
+    expect(squash(upserts[0].text)).toContain('retired_at = null');
+    // The kind is never rewritten: the id prefix already fixes it.
+    expect(squash(upserts[0].text)).not.toMatch(/kind = excluded\.kind/);
+    expect(texts.some((text) => text.includes('delete'))).toBe(false);
+    expect(pool.released).toBe(1);
+  });
+
+  it('does not rewrite a piece that did not change, so registering at every start is a no-op', async () => {
+    const pool = registrationPool();
+
+    await createPgDecor(pool).registerArtPack(PACK);
+
+    const upsert = squash(pool.queries.find((query) => /insert into art_pieces/i.test(query.text))!.text);
+    expect(upsert).toContain('where art_pieces.spec is distinct from excluded.spec');
+    expect(upsert).toContain('or art_pieces.retired_at is not null');
+  });
+
+  it('sends files and spec as JSON text, not as a Postgres array', async () => {
+    // `pg` turns a JS array parameter into an array literal; `files` is an
+    // array, so it has to travel stringified and cast to jsonb.
+    const pool = registrationPool();
+
+    await createPgDecor(pool).registerArtPack(PACK);
+
+    const upsert = pool.queries.find((query) => query.values[0] === 'desk-painted')!;
+    expect(squash(upsert.text)).toContain('::jsonb');
+    expect(upsert.values).toEqual([
+      'desk-painted',
+      'desk',
+      PAINTED.name,
+      'painted',
+      true,
+      '#4f9a8a',
+      PAINTED.author,
+      PAINTED.license,
+      JSON.stringify(PAINTED.files),
+      JSON.stringify(PAINTED),
+      PACK.contractVersion,
+    ]);
+    const mateo = pool.queries.find((query) => query.values[0] === 'character-p01-burgundy-suit')!;
+    expect(mateo.values.slice(3, 6)).toEqual([null, false, null]);
+  });
+
+  it('retires, with one UPDATE, every active piece the pack no longer ships', async () => {
+    const pool = registrationPool(['desk-old']);
+
+    const result = await createPgDecor(pool).registerArtPack(PACK);
+
+    const retire = pool.queries.find((query) => /update art_pieces set retired_at/i.test(query.text))!;
+    expect(squash(retire.text)).toContain('where retired_at is null and not (id = any($1::text[]))');
+    expect(retire.values).toEqual([PACK.pieces.map((piece) => piece.id)]);
+    expect(result).toEqual({ registered: PACK.pieces.length, retired: ['desk-old'] });
+  });
+
+  it('rejects an invalid pack before asking for a connection', async () => {
+    const pool = registrationPool();
+
+    await expect(createPgDecor(pool).registerArtPack({ ...PACK, contractVersion: 99 })).rejects.toBeInstanceOf(
+      InvalidArtPackError,
+    );
+    expect(pool.queries).toEqual([]);
+  });
+
+  it('rolls back the whole registration if one statement fails', async () => {
+    const pool = fakePool((text) => (/update art_pieces/i.test(text) ? new Error('boom') : { rows: [], rowCount: 0 }));
+
+    await expect(createPgDecor(pool).registerArtPack(PACK)).rejects.toThrow('boom');
+
+    expect(squash(pool.queries.at(-1)!.text)).toBe('rollback');
+    expect(pool.released).toBe(1);
+  });
+});
+
+describe('createPgDecor: uploaded pieces (#121)', () => {
+  const PACK: ArtPackManifest = JSON.parse(
+    readFileSync(new URL('../../../public/assets/pack/manifest.json', import.meta.url), 'utf8'),
+  );
+  const FICUS = PACK.pieces.find((piece) => piece.id === 'plant-ficus')!;
+  const UPLOADED = { ...FICUS, id: 'plant-upload-0123456789abcdef', name: 'Helecho' };
+  const UPLOADER = '11111111-1111-4111-8111-111111111111';
+  const UPLOADED_ROW = {
+    id: UPLOADED.id,
+    kind: 'plant',
+    name: 'Helecho',
+    material: 'ficus',
+    colorable: false,
+    default_color: null,
+    author: UPLOADED.author,
+    license: UPLOADED.license,
+    files: UPLOADED.files,
+    spec: UPLOADED,
+    contract_version: 2,
+    retired_at: null,
+    registered_at: new Date('2026-01-01T00:00:00.000Z'),
+    updated_at: new Date('2026-01-01T00:00:00.000Z'),
+    source: 'upload',
+    uploaded_by: UPLOADER,
+  };
+  const DECOR = { name: 'Helecho', kind: 'plant' as const, textureKey: `art:${UPLOADED.id}:sheet`, w: 1, h: 1, placeableOnDesk: true };
+
+  it('a pack registration retires only pack pieces, never an upload', async () => {
+    const pool = fakePool();
+
+    await createPgDecor(pool).registerArtPack(PACK);
+
+    const retire = pool.queries.find((query) => /update art_pieces set retired_at/i.test(query.text))!;
+    expect(squash(retire.text)).toContain("and source = 'pack'");
+  });
+
+  it('inserts the upload as source upload without touching an existing id, inside one transaction', async () => {
+    const pool = fakePool((text) => (/insert into art_pieces/i.test(text) ? { rows: [UPLOADED_ROW], rowCount: 1 } : { rows: [], rowCount: 0 }));
+
+    const { piece, asset } = await createPgDecor(pool).registerUploadedArtPiece({ piece: UPLOADED, uploadedBy: UPLOADER });
+
+    const texts = pool.queries.map((query) => squash(query.text));
+    expect(texts[0]).toBe('begin');
+    expect(texts.at(-1)).toBe('commit');
+    const insert = pool.queries.find((query) => /insert into art_pieces/i.test(query.text))!;
+    expect(squash(insert.text)).toContain('on conflict (id) do nothing');
+    expect(insert.values).toEqual([
+      UPLOADED.id,
+      'plant',
+      'Helecho',
+      'ficus',
+      false,
+      null,
+      UPLOADED.author,
+      UPLOADED.license,
+      JSON.stringify(UPLOADED.files),
+      JSON.stringify(UPLOADED),
+      PACK.contractVersion,
+      UPLOADER,
+    ]);
+    expect(squash(insert.text)).toContain("'upload'");
+    expect(piece).toMatchObject({ id: UPLOADED.id, source: 'upload', uploadedBy: UPLOADER });
+    expect(asset).toBeNull();
+    expect(texts.some((text) => text.includes('insert into assets'))).toBe(false);
+  });
+
+  it('answers ArtPieceExistsError when the id is already taken, and rolls back', async () => {
+    const pool = fakePool();
+
+    await expect(createPgDecor(pool).registerUploadedArtPiece({ piece: UPLOADED, uploadedBy: UPLOADER })).rejects.toBeInstanceOf(
+      ArtPieceExistsError,
+    );
+    expect(squash(pool.queries.at(-1)!.text)).toBe('rollback');
+    expect(pool.released).toBe(1);
+  });
+
+  it('creates the decor asset in the same transaction, and a taken name undoes both', async () => {
+    const ok = fakePool((text) =>
+      /insert into art_pieces/i.test(text)
+        ? { rows: [UPLOADED_ROW], rowCount: 1 }
+        : /insert into assets/i.test(text)
+          ? { rows: [{ ...ASSET_ROW, name: 'Helecho', slug: 'helecho', texture_key: DECOR.textureKey }], rowCount: 1 }
+          : { rows: [], rowCount: 0 },
+    );
+    const { asset } = await createPgDecor(ok).registerUploadedArtPiece({ piece: UPLOADED, uploadedBy: UPLOADER, decorAsset: DECOR });
+    expect(asset).toMatchObject({ slug: 'helecho', textureKey: DECOR.textureKey });
+    const texts = ok.queries.map((query) => squash(query.text));
+    expect(texts.findIndex((text) => text.includes('insert into assets'))).toBeLessThan(texts.indexOf('commit'));
+
+    const taken = fakePool((text) =>
+      /insert into art_pieces/i.test(text)
+        ? { rows: [UPLOADED_ROW], rowCount: 1 }
+        : /insert into assets/i.test(text)
+          ? uniqueViolation('assets_slug_unique')
+          : { rows: [], rowCount: 0 },
+    );
+    await expect(
+      createPgDecor(taken).registerUploadedArtPiece({ piece: UPLOADED, uploadedBy: UPLOADER, decorAsset: DECOR }),
+    ).rejects.toBeInstanceOf(AssetNameTakenError);
+    expect(squash(taken.queries.at(-1)!.text)).toBe('rollback');
+  });
+
+  it('refuses an id outside the upload space before asking for a connection', async () => {
+    const pool = fakePool();
+    await expect(createPgDecor(pool).registerUploadedArtPiece({ piece: FICUS, uploadedBy: UPLOADER })).rejects.toBeInstanceOf(
+      InvalidArtPackError,
+    );
+    expect(pool.queries).toEqual([]);
+  });
+});
+
+describe('createPgDecor: contributions and review (#122)', () => {
+  const PACK: ArtPackManifest = JSON.parse(
+    readFileSync(new URL('../../../public/assets/pack/manifest.json', import.meta.url), 'utf8'),
+  );
+  const FICUS = PACK.pieces.find((piece) => piece.id === 'plant-ficus')!;
+  const PIECE = { ...FICUS, id: 'plant-upload-0123456789abcdef', name: 'Helecho', license: 'office-contribution' };
+  const ANA = '11111111-1111-4111-8111-111111111111';
+  const REVIEWER = '22222222-2222-4222-8222-222222222222';
+  const ROW = {
+    id: PIECE.id,
+    kind: 'plant',
+    name: 'Helecho',
+    material: 'ficus',
+    colorable: false,
+    default_color: null,
+    author: PIECE.author,
+    license: PIECE.license,
+    files: PIECE.files,
+    spec: PIECE,
+    contract_version: 2,
+    retired_at: null,
+    registered_at: new Date('2026-01-01T00:00:00.000Z'),
+    updated_at: new Date('2026-01-01T00:00:00.000Z'),
+    source: 'upload',
+    uploaded_by: ANA,
+    status: 'pending',
+    reviewed_by: null,
+    reviewed_at: null,
+    review_note: null,
+    license_accepted_at: new Date('2026-01-01T00:00:00.000Z'),
+  };
+  const DECOR = { name: 'Helecho', kind: 'plant' as const, textureKey: `art:${PIECE.id}:sheet`, w: 1, h: 1, placeableOnDesk: true };
+
+  function usage(pending: number, lastHour: number) {
+    return { rows: [{ pending, last_hour: lastHour }], rowCount: 1 };
+  }
+
+  function submitPool(counts = usage(0, 0), extra: Responder = () => ({ rows: [], rowCount: 0 })): FakePool {
+    return fakePool((text, values) => {
+      if (/as pending/i.test(text)) return counts;
+      if (/insert into art_pieces/i.test(text)) return { rows: [ROW], rowCount: 1 };
+      return extra(text, values);
+    });
+  }
+
+  it('locks the user row, counts and inserts inside one transaction, in that order', async () => {
+    const pool = submitPool();
+
+    const piece = await createPgDecor(pool).submitArtContribution({ piece: PIECE, submittedBy: ANA });
+
+    const texts = pool.queries.map((query) => squash(query.text));
+    const lock = texts.findIndex((text) => text === 'select id from users where id = $1 for update');
+    const count = texts.findIndex((text) => text.includes('as pending'));
+    const insert = texts.findIndex((text) => text.includes('insert into art_pieces'));
+    const audit = texts.findIndex((text) => text.includes('insert into audit_log'));
+    expect(texts[0]).toBe('begin');
+    expect([lock, count, insert, audit].every((index, i, all) => index > 0 && (i === 0 || index > all[i - 1]!))).toBe(true);
+    expect(texts.at(-1)).toBe('commit');
+    expect(pool.queries[lock]!.values).toEqual([ANA]);
+    expect(piece).toMatchObject({ status: 'pending', uploadedBy: ANA, licenseAcceptedAt: ROW.license_accepted_at });
+  });
+
+  it('counts pending rows of the user and its submit-art entries of the last hour', async () => {
+    const pool = submitPool();
+
+    await createPgDecor(pool).submitArtContribution({ piece: PIECE, submittedBy: ANA });
+
+    const count = pool.queries.find((query) => /as pending/i.test(query.text))!;
+    expect(squash(count.text)).toContain("uploaded_by = $1 and status = 'pending'");
+    expect(squash(count.text)).toContain("actor_id = $1 and action = 'submit-art' and created_at > now() - make_interval(secs => $2)");
+    expect(count.values).toEqual([ANA, 3600]);
+  });
+
+  it('inserts pending with the rights stamp and audits submit-art against the piece', async () => {
+    const pool = submitPool();
+
+    await createPgDecor(pool).submitArtContribution({ piece: PIECE, submittedBy: ANA });
+
+    const insert = pool.queries.find((query) => /insert into art_pieces/i.test(query.text))!;
+    expect(squash(insert.text)).toContain("'upload', $12, 'pending', now()");
+    expect(squash(insert.text)).toContain('on conflict (id) do nothing');
+    const audit = pool.queries.find((query) => /insert into audit_log/i.test(query.text))!;
+    expect(squash(audit.text)).toBe('insert into audit_log (actor_id, action, piece_id) values ($1, $2, $3)');
+    expect(audit.values).toEqual([ANA, 'submit-art', PIECE.id]);
+  });
+
+  it.each([
+    [usage(5, 5), 'too-many-pending'],
+    [usage(1, 10), 'hourly-limit'],
+  ])('refuses over the limits and rolls back without inserting (%j)', async (counts, code) => {
+    const pool = submitPool(counts);
+
+    await expect(createPgDecor(pool).submitArtContribution({ piece: PIECE, submittedBy: ANA })).rejects.toMatchObject({ code });
+
+    expect(pool.queries.some((query) => /insert into/i.test(query.text))).toBe(false);
+    expect(squash(pool.queries.at(-1)!.text)).toBe('rollback');
+  });
+
+  it('refuses the same pixels already in the catalog, and a plant whose decor name is taken', async () => {
+    const existing = fakePool((text) => (/as pending/i.test(text) ? usage(0, 0) : { rows: [], rowCount: 0 }));
+    await expect(createPgDecor(existing).submitArtContribution({ piece: PIECE, submittedBy: ANA })).rejects.toBeInstanceOf(ArtPieceExistsError);
+    expect(squash(existing.queries.at(-1)!.text)).toBe('rollback');
+
+    const taken = submitPool(usage(0, 0), (text) => (/from assets where lower\(slug\)/i.test(text) ? { rows: [{ id: 'x' }], rowCount: 1 } : { rows: [], rowCount: 0 }));
+    await expect(createPgDecor(taken).submitArtContribution({ piece: PIECE, submittedBy: ANA, decorAsset: DECOR })).rejects.toBeInstanceOf(
+      AssetNameTakenError,
+    );
+    expect(taken.queries.some((query) => /insert into art_pieces/i.test(query.text))).toBe(false);
+  });
+
+  it('artContributionUsage runs the same count outside any transaction', async () => {
+    const pool = fakePool(() => usage(2, 7));
+
+    expect(await createPgDecor(pool).artContributionUsage(ANA)).toEqual({ pending: 2, lastHour: 7 });
+    expect(pool.queries).toHaveLength(1);
+  });
+
+  it('lists uploads only, filtered by uploader and status, oldest first', async () => {
+    const pool = fakePool(() => ({ rows: [ROW], rowCount: 1 }));
+
+    const pieces = await createPgDecor(pool).listUploadedArtPieces({ uploadedBy: ANA, status: 'pending' });
+
+    expect(squash(pool.queries[0]!.text)).toContain(
+      "from art_pieces where source = 'upload' and ($1::uuid is null or uploaded_by = $1) and ($2::text is null or status = $2) order by registered_at, id",
+    );
+    expect(pool.queries[0]!.values).toEqual([ANA, 'pending']);
+    expect(pieces[0]).toMatchObject({ id: PIECE.id, status: 'pending' });
+  });
+
+  it('finds the uploads carrying a file by jsonb containment', async () => {
+    const pool = fakePool(() => ({ rows: [ROW], rowCount: 1 }));
+    const sha = PIECE.files[0]!.sha256;
+
+    await createPgDecor(pool).findArtPiecesWithFile(sha);
+
+    expect(squash(pool.queries[0]!.text)).toContain("where source = 'upload' and files @> $1::jsonb");
+    expect(pool.queries[0]!.values).toEqual([JSON.stringify([{ sha256: sha }])]);
+  });
+
+  function reviewPool(status: string, extra: Responder = () => ({ rows: [], rowCount: 0 })): FakePool {
+    return fakePool((text, values) => {
+      if (/for update/i.test(text) && /from art_pieces/i.test(text)) return { rows: [{ ...ROW, status }], rowCount: 1 };
+      if (/update art_pieces set status/i.test(text)) {
+        return { rows: [{ ...ROW, status: values[1], reviewed_by: values[2], review_note: values[3], reviewed_at: new Date() }], rowCount: 1 };
+      }
+      return extra(text, values);
+    });
+  }
+
+  it('approves under a row lock, creates the decor asset and audits, atomically', async () => {
+    const pool = reviewPool('pending', (text) =>
+      /insert into assets/i.test(text) ? { rows: [{ ...ASSET_ROW, name: 'Helecho', slug: 'helecho', texture_key: DECOR.textureKey }], rowCount: 1 } : { rows: [], rowCount: 0 },
+    );
+
+    const reviewed = await createPgDecor(pool).reviewArtContribution({ id: PIECE.id, reviewerId: REVIEWER, decision: 'approve', note: null, decorAsset: DECOR });
+
+    const texts = pool.queries.map((query) => squash(query.text));
+    expect(texts[0]).toBe('begin');
+    expect(texts[1]).toContain("from art_pieces where id = $1 and source = 'upload' for update");
+    expect(pool.queries.find((query) => /update art_pieces set status/i.test(query.text))!.values).toEqual([PIECE.id, 'approved', REVIEWER, null]);
+    expect(texts.some((text) => text.includes('insert into assets'))).toBe(true);
+    expect(pool.queries.find((query) => /insert into audit_log/i.test(query.text))!.values).toEqual([REVIEWER, 'approve-art', PIECE.id]);
+    expect(texts.at(-1)).toBe('commit');
+    expect(reviewed?.piece.status).toBe('approved');
+    expect(reviewed?.asset).toMatchObject({ slug: 'helecho' });
+  });
+
+  it('rejects with its reason and no decor asset', async () => {
+    const pool = reviewPool('pending');
+
+    const reviewed = await createPgDecor(pool).reviewArtContribution({ id: PIECE.id, reviewerId: REVIEWER, decision: 'reject', note: 'Tiene fondo', decorAsset: DECOR });
+
+    expect(pool.queries.find((query) => /update art_pieces set status/i.test(query.text))!.values).toEqual([PIECE.id, 'rejected', REVIEWER, 'Tiene fondo']);
+    expect(pool.queries.some((query) => /insert into assets/i.test(query.text))).toBe(false);
+    expect(pool.queries.find((query) => /insert into audit_log/i.test(query.text))!.values).toEqual([REVIEWER, 'reject-art', PIECE.id]);
+    expect(reviewed).toMatchObject({ piece: { status: 'rejected', reviewNote: 'Tiene fondo' }, asset: null });
+  });
+
+  it('refuses to review twice and answers null for an unknown id, rolling back both', async () => {
+    const done = reviewPool('approved');
+    await expect(createPgDecor(done).reviewArtContribution({ id: PIECE.id, reviewerId: REVIEWER, decision: 'reject', note: 'x' })).rejects.toBeInstanceOf(
+      InvalidArtTransitionError,
+    );
+    expect(squash(done.queries.at(-1)!.text)).toBe('rollback');
+
+    const missing = fakePool();
+    expect(await createPgDecor(missing).reviewArtContribution({ id: PIECE.id, reviewerId: REVIEWER, decision: 'approve', note: null })).toBeNull();
+    expect(missing.queries.some((query) => /^\s*update/i.test(query.text))).toBe(false);
+  });
+
+  it('retires under a row lock, archives the decor asset drawing it and audits', async () => {
+    const pool = fakePool((text) => {
+      if (/for update/i.test(text) && /from art_pieces/i.test(text)) return { rows: [{ ...ROW, status: 'approved' }], rowCount: 1 };
+      if (/update art_pieces set retired_at/i.test(text)) return { rows: [{ ...ROW, status: 'approved', retired_at: new Date() }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    });
+
+    const result = await createPgDecor(pool).retireUploadedArtPiece({ id: PIECE.id, actorId: REVIEWER });
+
+    const archive = pool.queries.find((query) => /update assets set archived_at/i.test(query.text))!;
+    expect(squash(archive.text)).toContain('where texture_key = $1 and archived_at is null');
+    expect(archive.values).toEqual([`art:${PIECE.id}:sheet`]);
+    expect(pool.queries.find((query) => /insert into audit_log/i.test(query.text))!.values).toEqual([REVIEWER, 'retire-art', PIECE.id]);
+    expect(result?.changed).toBe(true);
+    expect(squash(pool.queries.at(-1)!.text)).toBe('commit');
+  });
+
+  it('retiring an already retired piece writes nothing', async () => {
+    const pool = fakePool((text) =>
+      /for update/i.test(text) ? { rows: [{ ...ROW, status: 'approved', retired_at: new Date() }], rowCount: 1 } : { rows: [], rowCount: 0 },
+    );
+
+    const result = await createPgDecor(pool).retireUploadedArtPiece({ id: PIECE.id, actorId: REVIEWER });
+
+    expect(result?.changed).toBe(false);
+    expect(pool.queries.some((query) => /^\s*(update|insert)/i.test(query.text))).toBe(false);
+  });
+
+  it('the Admin upload of #121 is audited as upload-art in its transaction', async () => {
+    const pool = fakePool((text) => (/insert into art_pieces/i.test(text) ? { rows: [{ ...ROW, status: 'approved' }], rowCount: 1 } : { rows: [], rowCount: 0 }));
+
+    await createPgDecor(pool).registerUploadedArtPiece({ piece: PIECE, uploadedBy: REVIEWER });
+
+    const texts = pool.queries.map((query) => squash(query.text));
+    expect(pool.queries.find((query) => /insert into audit_log/i.test(query.text))!.values).toEqual([REVIEWER, 'upload-art', PIECE.id]);
+    expect(texts.findIndex((text) => text.includes('insert into audit_log'))).toBeLessThan(texts.indexOf('commit'));
   });
 });

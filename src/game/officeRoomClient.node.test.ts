@@ -8,7 +8,12 @@
 import { matchMaker } from '@colyseus/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createOfficeServer, type OfficeServer } from '../../server/src/createOfficeServer.ts';
+import { createMemoryDirectory } from '../../server/src/directory/memoryDirectory.ts';
+import { createMemoryTerrain } from '../../server/src/terrain/memoryTerrain.ts';
+import { BASE_LAYOUT, type LayoutMaterial } from './officeLayout';
+import { TILE } from './mapData';
 import { OFFICE_ROOM_NAME } from './officeProtocol';
+import { BASE_MAP_SEATS, mapSeatId } from './seating';
 import {
   connectOfficeRoom,
   type OfficeConnection,
@@ -154,9 +159,10 @@ describe('connectOfficeRoom', () => {
     await waitFor(() => watcher.added.some((s) => s.sessionId === b.sessionId));
     const before = watcher.changed.length;
 
-    for (let i = 1; i <= 60; i++) b.sendMove(100 + i, 200, 'right');
+    // Open lawn: the room refuses moves onto the desks and trees near the corner (art step 8).
+    for (let i = 1; i <= 60; i++) b.sendMove(300 + i, 400, 'right');
 
-    await waitFor(() => watcher.changed.some((s) => s.x === 160));
+    await waitFor(() => watcher.changed.some((s) => s.x === 360));
     // 60 llamadas seguidas (un segundo de frames) no pueden ser 60 mensajes.
     expect(watcher.changed.length - before).toBeLessThan(10);
   });
@@ -571,5 +577,126 @@ describe('connectOfficeRoom: replaced by another tab of the same account (#78)',
     await waitFor(() => session.states.includes('revoked'));
     await new Promise((resolve) => setTimeout(resolve, 1000));
     expect(session.states).toEqual(['revoked']);
+  });
+});
+
+describe('connectOfficeRoom: chosen character (art migration, step 5)', () => {
+  const USERS = [
+    { uid: 'uid-ana', id: '11111111-1111-4111-8111-111111111111', avatarId: 'character-p07-green-suit' },
+    { uid: 'uid-beto', id: '22222222-2222-4222-8222-222222222222', avatarId: 'character-p12-mint-blazer' },
+  ];
+  let characterServer: OfficeServer;
+  let characterEndpoint: string;
+
+  beforeEach(async () => {
+    characterServer = createOfficeServer({
+      auth: {
+        async verify(token: unknown) {
+          const user = USERS.find((candidate) => token === `token-${candidate.uid}`);
+          return user ? { uid: user.uid, email: `${user.uid}@example.com`, name: user.uid } : null;
+        },
+      },
+      directory: createMemoryDirectory({
+        seed: USERS.map((user) => ({
+          id: user.id,
+          uid: user.uid,
+          email: `${user.uid}@example.com`,
+          displayName: null,
+          role: 'employee' as const,
+          status: 'active' as const,
+          expiresAt: null,
+          invitedBy: null,
+          avatarId: user.avatarId,
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        })),
+      }),
+    });
+    characterEndpoint = `ws://localhost:${await characterServer.listen(0)}`;
+  });
+
+  afterEach(async () => {
+    await Promise.all(connections.splice(0).map((c) => c.leave().catch(() => {})));
+    await characterServer.shutdown();
+  });
+
+  async function connectAs(uid: string, handlers: Parameters<typeof connectOfficeRoom>[0]['handlers']) {
+    const connection = await connectOfficeRoom({
+      endpoint: characterEndpoint,
+      name: uid,
+      handlers,
+      getIdToken: async () => `token-${uid}`,
+    });
+    connections.push(connection);
+    return connection;
+  }
+
+  it('a peer snapshot carries the character that peer persisted', async () => {
+    const ana = recorder();
+    await connectAs('uid-ana', ana.handlers);
+    const beto = await connectAs('uid-beto', recorder().handlers);
+
+    await waitFor(() => ana.added.some((snapshot) => snapshot.sessionId === beto.sessionId));
+
+    expect(ana.added.find((snapshot) => snapshot.sessionId === beto.sessionId)?.avatarId).toBe(
+      'character-p12-mint-blazer',
+    );
+  });
+
+  it('reports the own persisted character through onLocalAvatar', async () => {
+    const local: (string | null)[] = [];
+    await connectAs('uid-ana', { ...recorder().handlers, onLocalAvatar: (avatarId) => local.push(avatarId) });
+
+    await waitFor(() => local.length > 0);
+
+    expect(local).toEqual(['character-p07-green-suit']);
+  });
+});
+
+describe('connectOfficeRoom: seats (art migration, step 6)', () => {
+  const CHAIR = BASE_MAP_SEATS[0];
+  const NEXT_TO_CHAIR = { x: CHAIR.tx * TILE + 16, y: (CHAIR.ty - 1) * TILE + 16 };
+
+  it('sendSit asks for a seat; peers see it in their snapshots and the sitter through onLocalSeat', async () => {
+    const watcher = recorder();
+    await connect('Ana', watcher.handlers);
+    const local: (string | null)[] = [];
+    const sitter = await connect('Beto', { ...recorder().handlers, onLocalSeat: (seat) => local.push(seat) });
+
+    sitter.sendMove(NEXT_TO_CHAIR.x, NEXT_TO_CHAIR.y, 'down');
+    await waitFor(() => watcher.changed.some((s) => s.sessionId === sitter.sessionId && s.x === NEXT_TO_CHAIR.x));
+    sitter.sendSit(mapSeatId(0));
+
+    await waitFor(() => watcher.changed.some((s) => s.sessionId === sitter.sessionId && s.seat === mapSeatId(0)));
+    await waitFor(() => local.includes(mapSeatId(0)));
+
+    sitter.sendStand();
+    await waitFor(() => local.at(-1) === null);
+    expect(watcher.changed.at(-1)?.seat).toBeNull();
+  });
+
+  it('a snapshot of someone standing has no seat', async () => {
+    const watcher = recorder();
+    await connect('Ana', watcher.handlers);
+    const other = await connect('Beto', recorder().handlers);
+
+    await waitFor(() => watcher.added.some((s) => s.sessionId === other.sessionId));
+
+    expect(watcher.added.find((s) => s.sessionId === other.sessionId)?.seat).toBeNull();
+  });
+
+  it('reports the terrain blocks on the first sync and every edit after it (#123 phase 2)', async () => {
+    await server.shutdown();
+    server = createOfficeServer({ terrain: createMemoryTerrain([[35, 'water']]) });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+    const seen: (readonly LayoutMaterial[])[] = [];
+    await connect('Ana', { ...recorder().handlers, onTerrain: (blocks) => seen.push(blocks) });
+
+    await waitFor(() => seen.length > 0);
+    expect(seen[0]).toHaveLength(BASE_LAYOUT.blocks.length);
+    expect(seen[0]![35]).toBe('water');
+
+    await server.terrain.setBlock({ index: 94, material: 'grass', actorId: null }, async () => ({ placements: [], players: [] }));
+    await waitFor(() => seen.at(-1)?.[94] === 'grass');
+    expect(seen.at(-1)![35]).toBe('water');
   });
 });

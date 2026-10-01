@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
+import type { ArtContributionPort } from '../dashboard/artContributionPort';
 import type { AssetAdminPort } from '../dashboard/assetAdminPort';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { AdminSpace, SpacesAdminPort } from '../dashboard/spacesAdminPort';
@@ -242,6 +243,25 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     expect(await screen.findByRole('button', { name: /Editar salas/ })).toBeInTheDocument();
   });
 
+  it('con rol admin y puerto de terreno, ofrece TAMBIEN la edicion del terreno (#123 phase 2)', async () => {
+    const user = userEvent.setup();
+    renderSidebar({ ...adminProps(), terrain: { setBlock: vi.fn(async () => undefined) } });
+
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+
+    expect(await screen.findByRole('button', { name: 'Editar terreno' })).toBeInTheDocument();
+  });
+
+  it('con rol admin pero sin puerto de terreno, no ofrece la edicion del terreno', async () => {
+    const user = userEvent.setup();
+    renderSidebar(adminProps());
+
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+
+    await screen.findByRole('button', { name: /Editar escritorios/ });
+    expect(screen.queryByRole('button', { name: 'Editar terreno' })).not.toBeInTheDocument();
+  });
+
   it('con rol admin y puerto de catalogo, ofrece TAMBIEN "Catálogo de decoración"', async () => {
     const user = userEvent.setup();
     renderSidebar({ ...adminProps(), assets: fakeAssets() });
@@ -302,5 +322,33 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
 
     expect(screen.queryByRole('button', { name: /Editar escritorios/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Editar salas/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('OfficeSidebar: contributing art (#122)', () => {
+  function fakeContributions(): ArtContributionPort {
+    return {
+      submit: vi.fn(),
+      listMine: vi.fn(async () => ({ contributions: [], usage: { pending: 0, lastHour: 0, maxPending: 5, maxPerHour: 10 } })),
+      fileDataUrl: vi.fn(),
+    };
+  }
+
+  it('anyone signed in can contribute from "Personalizar", with no admin role', async () => {
+    const user = userEvent.setup();
+    renderSidebar({ role: 'employee', contributions: fakeContributions() });
+
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+
+    expect(await screen.findByRole('heading', { name: 'Aportar arte' })).toBeInTheDocument();
+  });
+
+  it('without a contributions port (no server, or no session) there is nothing to contribute to', async () => {
+    const user = userEvent.setup();
+    renderSidebar({ role: 'employee' });
+
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+
+    expect(screen.queryByRole('heading', { name: 'Aportar arte' })).not.toBeInTheDocument();
   });
 });

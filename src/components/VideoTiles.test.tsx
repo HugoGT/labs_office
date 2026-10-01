@@ -432,3 +432,21 @@ describe('VideoTiles: screen share stage (#20)', () => {
     expect(screen.getByTestId('video-tile-bar')).toHaveAttribute('data-layout', 'row');
   });
 });
+
+describe('VideoTiles: pack character portraits (art migration, step 6)', () => {
+  it('shows the portrait of each session character as it arrives', () => {
+    const { bridge } = renderTiles();
+
+    act(() => {
+      bridge.emit('voice', {
+        selfSessionId: 'yo',
+        selfName: 'HugoGT',
+        peers: [{ sessionId: 'par-1', name: 'Ana' }],
+        spaceId: null,
+      });
+      bridge.emit('characterportraits', { bySession: { 'par-1': 'data:image/png;base64,PACK' } });
+    });
+
+    expect(screen.getByAltText('Retrato de par-1')).toHaveAttribute('src', 'data:image/png;base64,PACK');
+  });
+});

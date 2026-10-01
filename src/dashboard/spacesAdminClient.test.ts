@@ -320,3 +320,43 @@ describe('createSpacesAdminClient: como cuenta los fallos', () => {
     expect(await codeOf(client.listSpaces())).toBe('unknown');
   });
 });
+
+describe('createSpacesAdminClient: floor chosen at creation (art step 7)', () => {
+  it('sends the chosen floor with the new room, under the names GET /spaces serves', async () => {
+    const fetchImpl = fetchWith(201, SERVED_ROOM);
+
+    await clientWith(fetchImpl).createSpace({
+      name: 'Sala',
+      x: 10,
+      y: 4,
+      w: 6,
+      h: 5,
+      floor: { materialId: 'floor-plain', color: '#2c3e50' },
+    });
+
+    expect(sentBody(fetchImpl)).toEqual({
+      name: 'Sala',
+      x: 10,
+      y: 4,
+      w: 6,
+      h: 5,
+      capacity: null,
+      floorMaterialId: 'floor-plain',
+      floorColor: '#2c3e50',
+    });
+  });
+
+  it('a floor without a color sends no color', async () => {
+    const fetchImpl = fetchWith(201, SERVED_ROOM);
+
+    await clientWith(fetchImpl).createSpace({ name: 'Sala', x: 10, y: 4, w: 6, h: 5, floor: { materialId: 'floor-grass', color: null } });
+
+    expect(sentBody(fetchImpl)).toEqual({ name: 'Sala', x: 10, y: 4, w: 6, h: 5, capacity: null, floorMaterialId: 'floor-grass' });
+  });
+
+  it('a refused floor is told by its reason', async () => {
+    const client = clientWith(fetchWith(400, { error: 'invalid-appearance', reason: 'color-not-allowed' }));
+
+    expect(await codeOf(client.createSpace({ name: 'Sala', x: 10, y: 4, w: 6, h: 5 }))).toBe('appearance-color-not-allowed');
+  });
+});

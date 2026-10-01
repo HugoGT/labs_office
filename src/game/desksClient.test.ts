@@ -108,6 +108,29 @@ describe('fetchOfficeDesks', () => {
     });
   });
 
+  it('carries the material and color of the desk, lowercased, for the art pack (step 4)', async () => {
+    const desks = await fetchOfficeDesks({
+      baseUrl: 'http://x',
+      getIdToken: TOKEN,
+      fetchImpl: respondWith({ desks: [servedDesk({ materialId: 'desk-painted', color: '#C0392B' })] }),
+    });
+
+    expect(desks[0]?.appearance).toEqual({ materialId: 'desk-painted', color: '#c0392b' });
+  });
+
+  it('a desk without appearance still draws: it gets the pack default instead of dropping the list', async () => {
+    // An older server sends no material; the list is still the list of desks.
+    const desks = await fetchOfficeDesks({
+      baseUrl: 'http://x',
+      getIdToken: TOKEN,
+      fetchImpl: respondWith({ desks: [servedDesk(), servedDesk({ id: 'otra', materialId: 42 })] }),
+    });
+
+    expect(desks).toHaveLength(2);
+    expect(desks[0]?.appearance).toBeUndefined();
+    expect(desks[1]?.appearance).toBeUndefined();
+  });
+
   it('resuelve al ocupante con su decoracion, que le sigue de escritorio en escritorio', async () => {
     const desks = await fetchOfficeDesks({
       baseUrl: 'http://x',

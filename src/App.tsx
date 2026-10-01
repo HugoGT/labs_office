@@ -1,11 +1,14 @@
 import { lazy, Suspense, useMemo, useState } from 'react';
 import { resolveAuthConfig } from './auth/authConfig';
+import { createCharacterClient } from './auth/characterClient';
+import type { CharacterPort } from './auth/characterPort';
 import { createDisplayNameClient, deriveDisplayNameBaseUrl } from './auth/displayNameClient';
 import type { DisplayNamePort } from './auth/displayNamePort';
 import { createFirebaseAuthAdapter } from './auth/firebaseAuthAdapter';
 import { createLastDisplayNameStore } from './auth/lastDisplayNameStore';
 import { AuthGate } from './components/AuthGate';
 import { LeftOfficeNotice, type LeftOfficeReason } from './components/LeftOfficeNotice';
+import { ART_PACK_MANIFEST_URL, artUploadsManifestUrl } from './game/artPack';
 import { resolveOfficeEndpoint } from './game/officeEndpoint';
 import { resolveRoute } from './routing/route';
 
@@ -95,6 +98,21 @@ export default function App() {
    */
   const [route] = useState(() => resolveRoute(window.location.pathname));
   /**
+   * Character chosen at the office entrance (art migration, step 5). Same
+   * conditions as `displayNamePort`, plus the route: `/dashboard` gets `null`
+   * so administrative access never waits on the selector.
+   */
+  const characterPort = useMemo<CharacterPort | null>(() => {
+    if (route !== 'office' || officeEndpoint === null || auth === null) return null;
+    return createCharacterClient({
+      baseUrl: deriveDisplayNameBaseUrl(officeEndpoint),
+      getIdToken: () => auth.getIdToken(),
+      manifestUrl: ART_PACK_MANIFEST_URL,
+      // Characters an Admin uploaded (#121) join the pack's in the selector.
+      uploadsManifestUrl: artUploadsManifestUrl(officeEndpoint),
+    });
+  }, [route, officeEndpoint, auth]);
+  /**
    * Leaving the office (#66) unmounts it rather than hiding it: tearing the
    * shell down is what leaves the Colyseus and LiveKit rooms, so nobody keeps
    * seeing or hearing someone who believes they left. It lives here, above
@@ -110,6 +128,7 @@ export default function App() {
       <AuthGate
         auth={auth}
         displayName={displayNamePort}
+        character={characterPort}
         initialName={initialName}
         onNameClaimed={lastDisplayName.write}
       >

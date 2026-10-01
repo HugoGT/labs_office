@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
+import { defaultChoice } from '../game/artMaterials';
+import type { ArtAppearance } from '../game/artPack';
+import type { ArtPreviewCache } from '../game/artPreview';
 import type { OfficeBridge } from '../game/officeBridge';
 import { useLayoutEditor } from '../hooks/useLayoutEditor';
+import { useMaterialCatalog, type LoadMaterials } from '../hooks/useMaterialCatalog';
+import { ArtMaterialPicker } from './ArtMaterialPicker';
 import styles from './DeskEditorSection.module.css';
 
 /**
@@ -37,6 +42,10 @@ export interface DeskEditorSectionProps {
    * quede resuelto del todo antes de que este `enter()` se dispare.
    */
   onRequestActive?: () => void;
+  /** Where the material list comes from (art step 7); the page's pack manifest by default. */
+  loadMaterials?: LoadMaterials;
+  /** The preview generator; the page-wide cache by default. */
+  preview?: ArtPreviewCache;
 }
 
 export function DeskEditorSection({
@@ -48,9 +57,14 @@ export function DeskEditorSection({
   onEditingChange,
   forceExit = false,
   onRequestActive,
+  loadMaterials,
+  preview,
 }: DeskEditorSectionProps) {
   const editor = useLayoutEditor({ bridge, desks, spaces, refreshDesks, refreshSpaces });
   const [label, setLabel] = useState('');
+  const catalog = useMaterialCatalog(loadMaterials);
+  /** `null` until the person picks something: the form then shows the pack default. */
+  const [appearance, setAppearance] = useState<ArtAppearance | null>(null);
   const wasCreatingRef = useRef(false);
 
   const active = editor.state.tag !== 'off';
@@ -80,7 +94,10 @@ export function DeskEditorSection({
     // escribirla tras un `desk-overlap`.
     if (editor.state.tag === 'idle' && wasCreatingRef.current) {
       wasCreatingRef.current = false;
-      if (editor.error === null) setLabel('');
+      if (editor.error === null) {
+        setLabel('');
+        setAppearance(null);
+      }
     }
   }, [editor.state, editor.error]);
 
@@ -104,12 +121,14 @@ export function DeskEditorSection({
     state.tag === 'selected' ? editor.desks.find((desk) => desk.id === state.id) ?? null : null;
   const placing = state.tag === 'placing';
   const busy = editor.state.tag === 'saving' || editor.pending;
+  // Without a readable catalog nothing is offered, and the server stores the pack default.
+  const chosen = appearance ?? (catalog === null ? null : defaultChoice(catalog, 'desk'));
 
   function handleCreateSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     const trimmed = label.trim();
     if (trimmed === '' || busy) return;
-    editor.startCreate(trimmed);
+    editor.startCreate(trimmed, chosen ?? undefined);
   }
 
   return (
@@ -155,6 +174,17 @@ export function DeskEditorSection({
                 onChange={(event) => setLabel(event.target.value)}
               />
             </div>
+            {catalog !== null && chosen !== null && (
+              <ArtMaterialPicker
+                id="new-desk"
+                legend="Aspecto del escritorio"
+                options={catalog.desk}
+                value={chosen}
+                onChange={setAppearance}
+                disabled={busy}
+                preview={preview}
+              />
+            )}
             <button type="submit" className={styles.button} disabled={busy || label.trim() === ''}>
               Colocar nuevo escritorio
             </button>

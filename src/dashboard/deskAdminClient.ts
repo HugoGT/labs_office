@@ -139,8 +139,18 @@ export function createDeskAdminClient(
     async createDesk(input: CreateDeskInput): Promise<AdminDesk> {
       // Se manda solo lo que el servidor lee. Ni `id` ni `occupantId`: el id lo
       // genera la base de datos y quien se sienta lo decide esa persona.
+      // The appearance travels under the names `GET /desks` serves. A null
+      // color is left out rather than sent: the server reads "no color" as
+      // the material's own look or its default color, which is what it means.
+      const appearance =
+        input.appearance === undefined
+          ? {}
+          : {
+              materialId: input.appearance.materialId,
+              ...(input.appearance.color === null ? {} : { color: input.appearance.color }),
+            };
       return parseAdminDesk(
-        await request('/admin/desks', jsonBody({ label: input.label, x: input.x, y: input.y })),
+        await request('/admin/desks', jsonBody({ label: input.label, x: input.x, y: input.y, ...appearance })),
       );
     },
 

@@ -77,6 +77,7 @@ function toCatalogAsset(raw: unknown): CatalogAsset | null {
     placeableOnDesk: row.placeableOnDesk,
     aboveAvatars: row.aboveAvatars ?? false,
     archivedAt: row.archivedAt,
+    ...(isNonEmptyString(row.author) ? { author: row.author } : {}),
   };
 }
 

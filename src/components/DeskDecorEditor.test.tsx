@@ -290,6 +290,15 @@ function drag(source: HTMLElement, target: HTMLElement): void {
   fireEvent.dragEnd(source);
 }
 
+describe('DeskDecorEditor: credits (#122)', () => {
+  it('names the author of a contributed piece next to it', () => {
+    editor({ catalog: [{ ...PLANTA, author: 'Ana' }, LAMPARA] });
+
+    expect(screen.getByText('de Ana')).toBeInTheDocument();
+    expect(screen.queryAllByText(/^de /)).toHaveLength(1);
+  });
+});
+
 describe('DeskDecorEditor: arrastrar y soltar', () => {
   it('arrastrar una pieza del catálogo hasta una caja la coloca ahí', async () => {
     const { onSave } = editor();

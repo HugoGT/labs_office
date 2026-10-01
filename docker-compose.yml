@@ -82,9 +82,12 @@ services:
       ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
       OFFICE_RECONNECTION_WINDOW_SECONDS: ${OFFICE_RECONNECTION_WINDOW_SECONDS:-}
       RECORDING_GCS_BUCKET: ${RECORDING_GCS_BUCKET:-}
+      # Uploaded art (#121). Empty keeps uploads off (503); the files are served
+      # by this server on :2567, which the SPA already talks to directly.
+      ASSET_GCS_BUCKET: ${ASSET_GCS_BUCKET:-}
       # Signed recording URLs need ADC that can sign: the same file Egress
       # mounts (GCS_CREDENTIALS_FILE, infra/livekit/README.md). Only read when
-      # RECORDING_GCS_BUCKET is set.
+      # RECORDING_GCS_BUCKET (or ASSET_GCS_BUCKET) is set.
       GOOGLE_APPLICATION_CREDENTIALS: /etc/gcp/adc.json
     volumes:
       - ${GCS_CREDENTIALS_FILE:-/dev/null}:/etc/gcp/adc.json:ro

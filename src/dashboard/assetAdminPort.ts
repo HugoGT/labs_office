@@ -5,10 +5,10 @@
  *
  * ## El catalogo es CURADO: aqui no se sube ninguna imagen
  *
- * Dar de alta una pieza es registrar un `textureKey` que el bundle del cliente
- * YA trae. No hay carga de ficheros en ninguna parte de esta superficie, y no
- * porque falte cablearla: el servidor no tiene ruta que la reciba, y un
- * formulario de subida seria una promesa que nadie puede cumplir.
+ * Dar de alta una pieza es registrar un `textureKey` que el cliente ya sabe
+ * pintar: un sprite del bundle o una pieza de arte (`art:<id>:<role>`). Las
+ * imagenes se suben por otra superficie, `/dashboard` (`artUploadPort.ts`,
+ * #121), que valida cada PNG y da de alta sola la decoracion de una planta.
  *
  * ## Retirar NO es borrar (D1b)
  *
@@ -62,6 +62,8 @@ export interface CatalogAsset {
    * solo llega con valor en la respuesta de `archiveAsset`.
    */
   archivedAt: string | null;
+  /** Credit of an uploaded or contributed piece (#122); absent for the rest. */
+  author?: string;
 }
 
 /** Lo que el servidor lee al dar de alta. Ni `slug` ni `archivedAt`: los decide el. */

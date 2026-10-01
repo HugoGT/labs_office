@@ -92,6 +92,14 @@ describe('fetchDeskCatalog', () => {
     ]);
   });
 
+  it('keeps the credit of an uploaded piece (#122)', async () => {
+    const fetchImpl = respondWith({ assets: [servedAsset({ author: 'Ana' }), servedAsset({ id: 'id-otra', author: null })] });
+
+    const catalog = await fetchDeskCatalog({ baseUrl: 'http://x', getIdToken: TOKEN, fetchImpl });
+
+    expect(catalog.map((asset) => asset.author)).toEqual(['Ana', undefined]);
+  });
+
   it('deja fuera lo que no admite escritorio', async () => {
     // El servidor lo rechaza con un 400 (`assertPlaceableOnDesk`). Ofrecerlo
     // en el selector seria ofrecer un error.

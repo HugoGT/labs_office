@@ -7,6 +7,7 @@ import {
   LIVEKIT_ROOM_NAME,
   PRESENCE_STATUSES,
   RECORDING_RETENTION_DAYS,
+  characterIdOf,
   facingFrom,
   isPresenceStatus,
   livekitRoomFor,
@@ -101,4 +102,17 @@ describe('recording retention (#5, #58)', () => {
 
     expect(recordingAvailableUntil(stoppedAt)).toBe(Date.UTC(2026, 9, 23, 10, 0, 0));
   });
+});
+
+describe('characterIdOf (art migration, step 5)', () => {
+  it('passes a pack character id through', () => {
+    expect(characterIdOf('character-p07-green-suit')).toBe('character-p07-green-suit');
+  });
+
+  it.each([[undefined], [null], [7], [''], ['desk-wood'], ['character-'], ['character-../x'], ['character-P07'], [`character-${'a'.repeat(80)}`]])(
+    'reads %j as no character, so the office draws the pack default',
+    (raw) => {
+      expect(characterIdOf(raw)).toBeNull();
+    },
+  );
 });

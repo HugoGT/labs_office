@@ -23,6 +23,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { ART_PACK_DEFAULTS, normalizeStoredAppearance } from '../decor/artCatalogRules.ts';
 import { DESK_SIDE, DeskSpaceOverlapError } from '../desks/deskRules.ts';
 import type { MemoryDeskSpaces } from '../desks/memoryDesks.ts';
 import type {
@@ -44,6 +45,8 @@ import {
   type CanonicalSpace,
   type SpaceBounds,
 } from './spaceRules.ts';
+
+const DEFAULT_FLOOR = { floorMaterialId: ART_PACK_DEFAULTS.floor, floorColor: null } as const;
 
 export interface MemorySpacesOptions {
   /** Espacios de partida, en la forma canonica de `builtInSeed.ts`. */
@@ -67,7 +70,8 @@ export function createMemorySpaces(
     const at = now();
     // Los espacios de partida son siempre salas: este adaptador todavia no
     // sabe crear cubiculos de escritorio (llega en S1b, tarea 2.5).
-    spaces.set(seeded.id, { ...seeded, deskId: null, createdAt: at, updatedAt: at });
+    // The default floor, like the schema backfill of rows that predate it.
+    spaces.set(seeded.id, { ...seeded, deskId: null, ...DEFAULT_FLOOR, createdAt: at, updatedAt: at });
   }
 
   function canonical(): CanonicalSpace[] {
@@ -176,6 +180,9 @@ export function createMemorySpaces(
         ...bounds,
         capacity: null,
         deskId: desk.id,
+        // The column DEFAULT the pg cubicle upsert relies on; a later upsert
+        // moves or renames the cubicle and never touches its floor.
+        ...DEFAULT_FLOOR,
         createdAt: at,
         updatedAt: at,
       };
@@ -206,6 +213,7 @@ export function createMemorySpaces(
 
     async createSpace(input: CreateSpaceInput) {
       const normalized = normalizeCreateSpaceInput(input);
+      const floor = normalizeStoredAppearance(input.floor, ART_PACK_DEFAULTS.floor);
       assertNameFree(normalized);
       assertNoOverlap(normalized);
 
@@ -213,7 +221,15 @@ export function createMemorySpaces(
       // `createSpace` solo crea salas (deskId: null): un cubiculo de
       // escritorio nunca nace por esta ruta, solo como efecto secundario del
       // CRUD de escritorios (`pgDesks`, S1b).
-      const space: Space = { id: newId(), ...normalized, deskId: null, createdAt: at, updatedAt: at };
+      const space: Space = {
+        id: newId(),
+        ...normalized,
+        deskId: null,
+        floorMaterialId: floor.materialId,
+        floorColor: floor.color,
+        createdAt: at,
+        updatedAt: at,
+      };
       spaces.set(space.id, space);
       return space;
     },

@@ -59,11 +59,24 @@ import {
   type AdminDeps,
   type AdminResult,
 } from '../admin/adminRoutes.ts';
+import {
+  APPEARANCE_IMMUTABLE,
+  DESK_APPEARANCE_FIELDS,
+  mentionsAppearance,
+  refusingInvalidAppearance,
+  resolveBodyAppearance,
+  type ArtCatalogReader,
+} from '../decor/artAppearanceBody.ts';
 import { DESK_SIDE, DeskOverlapError, DeskSpaceOverlapError, DeskTakenError, InvalidDeskError } from './deskRules.ts';
 import type { Desk, DeskDirectory, OfficeDesk, UpdateDeskInput } from './desksPort.ts';
 
 export interface DesksDeps extends AdminDeps {
   desks: DeskDirectory;
+  /**
+   * The art catalog a creation checks its material and color against (art
+   * migration, step 7). Optional: a body without an appearance needs none.
+   */
+  decor?: ArtCatalogReader;
 }
 
 /**
@@ -120,6 +133,10 @@ function toDeskBody(desk: OfficeDesk, viewerId: string | null): Record<string, u
     w: DESK_SIDE,
     h: DESK_SIDE,
     occupant: desk.occupant,
+    // The office draws the desk with them (art migration, step 4). Only
+    // creation writes them (step 7); an update that tries is refused.
+    materialId: desk.materialId,
+    color: desk.color,
     // Los dos a `null` NO son una coincidencia: un escritorio libre no es de
     // nadie, y sin la primera mitad todos lo serian de quien preguntase.
     mine: desk.occupantId !== null && desk.occupantId === viewerId,
@@ -194,14 +211,18 @@ export async function handleCreateDesk(
   // mano se caen aqui: el id lo genera la base de datos, y quien se sienta lo
   // decide esa persona con `claimDesk`. Dejar que el cuerpo lo fijase seria
   // dejar que quien administra repartiese sitios.
-  return translating(async () => {
-    const created = await deps.desks.createDesk({
-      label: body.label as string,
-      x: body.x as number,
-      y: body.y as number,
-    });
-    return { status: 201, body: toAdminDeskBody(created) };
-  });
+  return refusingInvalidAppearance(() =>
+    translating(async () => {
+      const appearance = await resolveBodyAppearance(body, DESK_APPEARANCE_FIELDS, 'desk', deps.decor);
+      const created = await deps.desks.createDesk({
+        label: body.label as string,
+        x: body.x as number,
+        y: body.y as number,
+        ...(appearance === undefined ? {} : { appearance }),
+      });
+      return { status: 201, body: toAdminDeskBody(created) };
+    }),
+  );
 }
 
 export async function handleUpdateDesk(
@@ -214,6 +235,11 @@ export async function handleUpdateDesk(
   if (!authorized.ok) return authorized.result;
 
   if (typeof id !== 'string' || !isPlainObject(body)) return INVALID_REQUEST;
+
+  // Material and color are chosen at creation only (art migration, step 7).
+  // Refused before any key is copied, so a body that also renames or moves
+  // changes nothing rather than half of what it asked.
+  if (mentionsAppearance(body, DESK_APPEARANCE_FIELDS)) return APPEARANCE_IMMUTABLE;
 
   // Se copian solo las claves PRESENTES: renombrar sin mover y mover sin
   // renombrar son dos peticiones distintas. `occupantId` no esta entre ellas

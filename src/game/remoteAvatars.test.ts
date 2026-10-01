@@ -20,6 +20,8 @@ function snapshot(overrides: Partial<RemotePlayerSnapshot> = {}): RemotePlayerSn
     status: 'g',
     facing: 'down',
     spacesVersion: 'v1',
+    avatarId: null,
+    seat: null,
     ...overrides,
   };
 }

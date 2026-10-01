@@ -24,6 +24,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { ART_PACK_DEFAULTS, normalizeStoredAppearance } from '../decor/artCatalogRules.ts';
 import type { DecorCatalog } from '../decor/decorPort.ts';
 import type { UserDirectory } from '../directory/directoryPort.ts';
 import type {
@@ -68,8 +69,8 @@ export interface MemoryDeskSpaces {
 }
 
 export interface MemoryDesksOptions {
-  /** Escritorios de partida. */
-  seed?: readonly Desk[];
+  /** Escritorios de partida. Without an appearance, the default one, like the schema backfill. */
+  seed?: readonly (Omit<Desk, 'materialId' | 'color'> & Partial<Pick<Desk, 'materialId' | 'color'>>)[];
   /** Reloj inyectado: sin el, `createdAt` dependeria de la hora de la maquina. */
   now?: () => Date;
   /** Generador de ids inyectable, para que un test pueda fijarlos. */
@@ -102,7 +103,7 @@ export function createMemoryDesks(options: MemoryDesksOptions = {}): DeskDirecto
 
   const desks = new Map<string, Desk>();
   for (const seeded of options.seed ?? []) {
-    desks.set(seeded.id, { ...seeded });
+    desks.set(seeded.id, { materialId: ART_PACK_DEFAULTS.desk, color: null, ...seeded });
   }
 
   /**
@@ -166,12 +167,21 @@ export function createMemoryDesks(options: MemoryDesksOptions = {}): DeskDirecto
 
     async createDesk(input: CreateDeskInput) {
       const normalized = normalizeCreateDeskInput(input);
+      const { materialId, color } = normalizeStoredAppearance(input.appearance, ART_PACK_DEFAULTS.desk);
       assertNoOverlap(normalized);
 
       const at = now();
       // `occupantId: null` explicito: un escritorio NACE libre. Quien se
       // sienta lo decide esa persona con `claimDesk`, no quien lo crea.
-      const desk: Desk = { id: newId(), ...normalized, occupantId: null, createdAt: at, updatedAt: at };
+      const desk: Desk = {
+        id: newId(),
+        ...normalized,
+        occupantId: null,
+        materialId,
+        color,
+        createdAt: at,
+        updatedAt: at,
+      };
       // El cubiculo se valida ANTES de guardar el escritorio (#10 + #12, tarea
       // 2.1/2.2): si choca con una sala, ni el uno ni el otro quedan en pie.
       // Mismo orden observable que la transaccion de `pgDesks.createDesk`.

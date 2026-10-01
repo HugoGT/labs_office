@@ -16,6 +16,17 @@ export interface RemotePlayerSnapshot {
   facing: string;
   /** Version de config de espacios con la que este par deriva su sala (#7, D4). */
   spacesVersion: string;
+  /**
+   * Persisted character of this peer (art migration, step 5), already checked
+   * by `characterIdOf`; `null` draws the pack default.
+   */
+  avatarId: string | null;
+  /**
+   * Seat the server has this peer on (art migration, step 6), already
+   * checked by `seatIdOf`; `null` standing. While seated, `facing` is the
+   * seat's.
+   */
+  seat: string | null;
 }
 
 export interface RemoteAvatarSink<TAvatar> {

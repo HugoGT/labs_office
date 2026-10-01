@@ -46,7 +46,7 @@
 
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { describeAdminError } from '../dashboard/adminErrors';
-import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
+import type { AdminAppearance, AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { AdminSpace, SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import {
   OFF_STATE,
@@ -80,8 +80,12 @@ export interface UseLayoutEditorResult {
   pending: boolean;
   enter: () => void;
   exit: () => void;
-  /** Pide crear uno nuevo con esta etiqueta; el ghost de colocacion sigue a continuacion. */
-  startCreate: (label: string) => void;
+  /**
+   * Pide crear uno nuevo con esta etiqueta; el ghost de colocacion sigue a
+   * continuacion. `appearance` is chosen here and only here (art step 7);
+   * absent, the server stores the pack default.
+   */
+  startCreate: (label: string, appearance?: AdminAppearance) => void;
   startMove: () => void;
   cancelPlacing: () => void;
   /** Selecciona un escritorio existente por id, igual que un `layoutpick` del mapa (misma accion del reductor). */
@@ -118,6 +122,8 @@ export function useLayoutEditor({
   const [pending, setPending] = useState(false);
   /** La etiqueta pedida para el proximo `createDesk`, guardada fuera del reductor: no tiene sitio propio en `EditorState`. */
   const pendingLabelRef = useRef<string | null>(null);
+  /** Same reason as `pendingLabelRef`: the appearance asked for the next `createDesk`. */
+  const pendingAppearanceRef = useRef<AdminAppearance | undefined>(undefined);
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -155,6 +161,7 @@ export function useLayoutEditor({
 
         const moveId = current.mode === 'move' ? current.id : null;
         const label = pendingLabelRef.current ?? '';
+        const appearance = pendingAppearanceRef.current;
 
         dispatch({ type: 'confirmPlacement' });
         setError(null);
@@ -165,9 +172,10 @@ export function useLayoutEditor({
             if (moveId !== null) {
               await desks.updateDesk(moveId, { x: tx, y: ty });
             } else {
-              await desks.createDesk({ label, x: tx, y: ty });
+              await desks.createDesk({ label, x: tx, y: ty, ...(appearance === undefined ? {} : { appearance }) });
             }
             pendingLabelRef.current = null;
+            pendingAppearanceRef.current = undefined;
             dispatch({ type: 'saveSucceeded' });
             refreshDesks();
             refreshSpaces();
@@ -195,12 +203,14 @@ export function useLayoutEditor({
 
   const exit = useCallback(() => {
     pendingLabelRef.current = null;
+    pendingAppearanceRef.current = undefined;
     setError(null);
     dispatch({ type: 'exit' });
   }, []);
 
-  const startCreate = useCallback((label: string) => {
+  const startCreate = useCallback((label: string, appearance?: AdminAppearance) => {
     pendingLabelRef.current = label;
+    pendingAppearanceRef.current = appearance;
     setError(null);
     dispatch({ type: 'startCreate' });
   }, []);
@@ -212,6 +222,7 @@ export function useLayoutEditor({
 
   const cancelPlacing = useCallback(() => {
     pendingLabelRef.current = null;
+    pendingAppearanceRef.current = undefined;
     dispatch({ type: 'cancelPlacing' });
   }, []);
 

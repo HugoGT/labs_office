@@ -155,11 +155,73 @@ export type AdminErrorCode =
   | 'decor-not-configured'
   /** Mismas tres piezas de arriba, cuarta superficie: sin `DATABASE_URL` tampoco hay tabla de espacios que administrar. */
   | 'spaces-not-configured'
+  /**
+   * A material or color the art catalog refuses at creation (art migration,
+   * step 7), one code per `InvalidArtChoiceError` reason because each is
+   * fixed differently: another material, another color, or none at all.
+   */
+  | 'appearance-unknown-piece'
+  | 'appearance-retired-piece'
+  | 'appearance-color-not-allowed'
+  | 'appearance-invalid-color'
+  /** An update that tried to change material or color, which are chosen only at creation. */
+  | 'appearance-immutable'
+  /**
+   * Water refused by the terrain editor (#123 phase 2): under something that
+   * stays (a room, a desk, a chair, the entrance: pick another block) or
+   * under someone (wait until they walk away). Two codes for two fixes.
+   */
+  | 'terrain-under-placement'
+  | 'terrain-under-player'
+  /** No `DATABASE_URL`: the terrain is the committed layout's and cannot be edited. */
+  | 'terrain-not-configured'
+  /**
+   * An art upload refused by the server (#121), one code per fix: another
+   * file format, another size, fewer colors, no background, a smaller file,
+   * or a field of the form. `AdminError.field` names the file or field.
+   */
+  | 'not-png'
+  | 'invalid-png'
+  | 'unsupported-png'
+  | 'invalid-dimensions'
+  | 'too-many-colors'
+  | 'not-opaque'
+  | 'background-present'
+  | 'too-large'
+  | 'invalid-metadata'
+  | 'missing-file'
+  /** No asset bucket (`ASSET_GCS_BUCKET`) or no catalog: uploads are off, the pack still works. */
+  | 'asset-upload-not-configured'
+  /** The same pixels are already a piece of the catalog. */
+  | 'asset-already-uploaded'
+  /** An uploaded plant's desk decor asset would take a name another asset has. */
+  | 'asset-name-taken'
+  /**
+   * Art contributions (#122): the rights statement left unchecked, the two
+   * limits (wait for a review, or wait for the hour), a decision another
+   * reviewer already took, a rejection without its reason, and a withdrawal
+   * of something that cannot be withdrawn (a desk or floor, or a piece that
+   * was never approved).
+   */
+  | 'rights-not-accepted'
+  | 'too-many-pending'
+  | 'hourly-limit'
+  | 'already-reviewed'
+  | 'invalid-review-note'
+  | 'not-retirable'
+  | 'not-approved'
   | 'network'
   | 'unknown';
 
 export class AdminError extends Error {
-  constructor(public readonly code: AdminErrorCode) {
+  /**
+   * @param field The file role or form field the server named (#121 uploads),
+   *   `null` when the refusal is about the request as a whole.
+   */
+  constructor(
+    public readonly code: AdminErrorCode,
+    public readonly field: string | null = null,
+  ) {
     super(`Fallo de administracion (${code})`);
     // Sin esto, `error.name` seria 'Error' en cualquier traza y en cualquier
     // log, que es justo donde hace falta reconocerlo.

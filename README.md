@@ -24,7 +24,8 @@ Browser (React 19 + Phaser 3 SPA, Vite)
   |-- WebSocket ------------> Node server (server/src)
   |                             Colyseus OfficeRoom: positions, status, calls, recording state
   |-- HTTP /livekit/token --->  Express API: /health, /livekit/token, /spaces, /desks,
-  |   /recordings/*, /admin/*   /me/desk, /me/display-name, /assets, /recordings/*, /admin/*
+  |   /recordings/*, /admin/*   /me/desk, /me/display-name, /me/avatar, /assets,
+  |                             /recordings/*, /admin/*
   |                             |-- Postgres (users, invitations, spaces, desks, decor)
   |                             |-- LiveKit server API + Egress (start/stop recordings)
   |                             '-- Google Cloud Storage (signed URLs)
@@ -211,7 +212,7 @@ Known limitations:
 - **No automatic database backups.** Postgres runs on the VM; backups are manual `pg_dump` runs (see `infra/gcp/README.md`).
 - **No custom domain.** sslip.io shares Let's Encrypt rate limits with everyone; Caddy falls back to ZeroSSL.
 - **Accounts are created by an admin**, not by self sign-up. Creating invited accounts from the dashboard needs identity admin credentials, otherwise it answers 503.
-- **Not yet built** (open issues): screen sharing (#20), PWA install and push (#13), Google Calendar room booking (#14), camera pan by dragging (#53), own Tiled map and final art (#4), phase 2 catalog and analytics (#15).
+- **Not yet built** (open issues): screen sharing (#20), PWA install and push (#13), Google Calendar room booking (#14), camera pan by dragging (#53), phase 2 catalog and analytics (#15).
 - **Open bugs**: avatars can walk through each other during auto-walk (#59); a colleague can disappear until both clients reload (#52).
 
 `prototype/` holds the original standalone prototype the app was ported from. It is reference only and is not built or served; open `prototype/index.html` directly in a browser to see it.

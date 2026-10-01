@@ -1,18 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { BUILT_IN_SPACES, GROUND, MAP_H, MAP_W, PROX_RADIUS, TILE } from './mapData';
+import { ART_TILE } from './artContract';
+import { BLOCK_TILES, BASE_LAYOUT, LAYOUT_TILE } from './officeLayout';
+import { BUILT_IN_SPACES, MAP_H, MAP_W, PROX_RADIUS, TILE, WORLD_H, WORLD_W } from './mapData';
 
 describe('mapData', () => {
-  it('define las dimensiones y el radio de proximidad del prototipo (app.js:6-8)', () => {
+  it('keeps the tile and the proximity radius of the prototype (app.js:6-8)', () => {
     expect(TILE).toBe(32);
-    expect(MAP_W).toBe(64);
-    expect(MAP_H).toBe(44);
     expect(PROX_RADIUS).toBe(170);
   });
 
-  it('los codigos de suelo son consecutivos desde 0, para indexar GROUND_FRAMES', () => {
-    // El mapeo a material vive ahora en `assets.ts` (frames de la hoja Kenney)
-    // y se indexa por estos codigos; que sean 0..n-1 es lo que lo hace valido.
-    expect(Object.values(GROUND).sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  it('is the 126x90 world of the Tiled layout, 14x10 blocks of 9x9 tiles (#123)', () => {
+    expect(MAP_W).toBe(126);
+    expect(MAP_H).toBe(90);
+    expect(WORLD_W).toBe(4032);
+    expect(WORLD_H).toBe(2880);
+    expect([MAP_W, MAP_H]).toEqual([BASE_LAYOUT.width, BASE_LAYOUT.height]);
+    expect([MAP_W / BLOCK_TILES, MAP_H / BLOCK_TILES]).toEqual([14, 10]);
+    expect(LAYOUT_TILE).toBe(TILE);
+    expect(ART_TILE).toBe(TILE);
   });
 
   it('ubica la Sala de Juntas en tile (50,2) de 13x14 (app.js:56-59)', () => {

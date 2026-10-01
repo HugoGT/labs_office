@@ -24,6 +24,7 @@
  * nada avisase.
  */
 
+import { parseArtAppearance } from './artPack';
 import {
   NO_DESKS,
   type DeskClaimOutcome,
@@ -126,6 +127,10 @@ function toOfficeDesk(raw: unknown): OfficeDesk | null {
   const occupant = row.occupant === null ? null : toOccupant(row.occupant);
   if (row.occupant !== null && occupant === null) return null;
 
+  // A missing or malformed appearance only costs the desk its material: it is
+  // drawn as the pack default, and the list keeps every desk that can be claimed.
+  const appearance = parseArtAppearance(row.materialId, row.color);
+
   return {
     id: row.id,
     label: row.label,
@@ -135,6 +140,7 @@ function toOfficeDesk(raw: unknown): OfficeDesk | null {
     h: row.h * TILE,
     occupant,
     mine: row.mine,
+    ...(appearance === null ? {} : { appearance }),
   };
 }
 
