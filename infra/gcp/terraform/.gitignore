@@ -5,3 +5,6 @@
 terraform.tfvars
 crash.log
 crash.*.log
+# Saved plans (`terraform plan -out`) hold resource values in readable form and go stale
+*.tfplan
+tfplan
