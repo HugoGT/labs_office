@@ -71,7 +71,7 @@ import type { CharacterRetirementHub } from './characterRetirement.ts';
 import { participantKeyOf, type FinishedRecordingStore } from './recording/finishedRecordings.ts';
 import type { ActiveRecording, RecordingRegistry } from './recording/recordingRegistry.ts';
 import { OfficeState, createPlayerState, createRecordingState } from './schema.ts';
-import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
+import { SESSION_EXPIRED, type IdTokenVerifier, type VerifiedIdentity } from './verifyIdToken.ts';
 
 export { DEFAULT_NAME, MAX_NAME_LENGTH, OFFICE_ROOM_NAME };
 
@@ -546,7 +546,8 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
    * `verifyIdToken.verify` devuelve `null` y no un motivo.
    *
    * The directory refusals (#24) use the same 401 but say why in the message
-   * (#129): `expired`, `revoked` or `not-provisioned` (`ACCESS_DENIED_REASONS`).
+   * (#129): `expired`, `revoked` or `not-provisioned` (`ACCESS_DENIED_REASONS`),
+   * and so does a session too old to trust (#128, `session-expired`).
    * They only reach someone whose token verified, who already proved who they
    * are; a mute refusal left the client nothing to show but "Sin servidor".
    * The server LOG still records it too, with the uid: "todo el mundo cae en
@@ -563,6 +564,11 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     const token = (options as { token?: unknown } | null | undefined)?.token;
     const identity = await this.auth.verify(token);
     if (identity === null) throw new ServerError(ACCESS_DENIED_CODE, 'unauthorized' satisfies AccessDeniedReason);
+    // #128: a login older than `MAX_SESSION_AGE_DAYS`. The client signs out on
+    // it and asks for email and password again; the directory is not asked.
+    if (identity === SESSION_EXPIRED) {
+      throw new ServerError(ACCESS_DENIED_CODE, SESSION_EXPIRED satisfies AccessDeniedReason);
+    }
 
     // #100, D5: el nombre visible ya elegido en el directorio viaja junto a la
     // identidad, para que `onJoin` no tenga que volver a consultar la fila que

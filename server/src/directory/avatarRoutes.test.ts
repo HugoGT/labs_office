@@ -11,7 +11,7 @@ import type { ArtPackManifest } from '../../../src/game/artContract.ts';
 import { ART_PACK_DEFAULTS } from '../decor/artCatalogRules.ts';
 import { readArtPackManifest } from '../decor/artPackFile.ts';
 import { createMemoryDecor } from '../decor/memoryDecor.ts';
-import type { IdTokenVerifier } from '../verifyIdToken.ts';
+import { SESSION_EXPIRED, type IdTokenVerifier } from '../verifyIdToken.ts';
 import { handleGetAvatar, handleSetAvatar, type AvatarDeps } from './avatarRoutes.ts';
 import type { DirectoryUser } from './directoryPort.ts';
 import { createMemoryDirectory } from './memoryDirectory.ts';
@@ -44,6 +44,7 @@ const BEA = user({
 
 const verifier: IdTokenVerifier = {
   async verify(token: unknown) {
+    if (token === 'sesion-de-hace-meses') return SESSION_EXPIRED;
     const uid = typeof token === 'string' ? token.replace(/^valido-/, '') : null;
     if (uid === null || uid === token) return null;
     return { uid, email: `${uid}@example.com`, name: null };
@@ -65,6 +66,13 @@ async function harness(): Promise<AvatarDeps> {
 describe('handleGetAvatar', () => {
   it('without credentials answers 401', async () => {
     expect((await handleGetAvatar(undefined, await harness())).status).toBe(401);
+  });
+
+  it('a login older than the maximum session age answers 401 session-expired (#128)', async () => {
+    expect(await handleGetAvatar('Bearer sesion-de-hace-meses', await harness())).toEqual({
+      status: 401,
+      body: { error: 'unauthorized', reason: 'session-expired' },
+    });
   });
 
   it('a user who never chose gets the stored default and chosen false', async () => {

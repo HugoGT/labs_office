@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createOfficeServer, type OfficeServer } from '../../server/src/createOfficeServer.ts';
 import { createMemoryDirectory } from '../../server/src/directory/memoryDirectory.ts';
 import { createMemoryTerrain } from '../../server/src/terrain/memoryTerrain.ts';
+import { SESSION_EXPIRED } from '../../server/src/verifyIdToken.ts';
 import { BASE_LAYOUT, type LayoutMaterial } from './officeLayout';
 import { TILE } from './mapData';
 import { OFFICE_ROOM_NAME } from './officeProtocol';
@@ -589,6 +590,7 @@ describe('connectOfficeRoom: a refused join is not a dead server (#129)', () => 
     deniedServer = createOfficeServer({
       auth: {
         async verify(token: unknown) {
+          if (token === 'token-de-hace-meses') return SESSION_EXPIRED;
           return token === 'token-de-ana' ? { uid: 'uid-ana', email: 'ana@example.com', name: 'Ana' } : null;
         },
       },
@@ -632,6 +634,13 @@ describe('connectOfficeRoom: a refused join is not a dead server (#129)', () => 
 
     expect(error).toBeInstanceOf(OfficeAccessDeniedError);
     expect((error as OfficeAccessDeniedError).reason).toBe('unauthorized');
+  });
+
+  it('a login older than the maximum session age is refused as session-expired (#128)', async () => {
+    const error = await joinWith('token-de-hace-meses').catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(OfficeAccessDeniedError);
+    expect((error as OfficeAccessDeniedError).reason).toBe('session-expired');
   });
 
   it('a server that is not there is a plain failure, not a refusal', async () => {

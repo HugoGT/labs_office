@@ -74,7 +74,7 @@ import {
   normalizeEmail,
 } from '../directory/invitationRules.ts';
 import { assertAssignableRole, InvalidUserError } from '../directory/userRules.ts';
-import type { IdTokenVerifier } from '../verifyIdToken.ts';
+import { SESSION_EXPIRED, SESSION_EXPIRED_BODY, type IdTokenVerifier } from '../verifyIdToken.ts';
 import type { SessionEvictor } from '../sessionEviction.ts';
 import { generatePassword } from './generatePassword.ts';
 import { IdentityAdminError, type IdentityAdmin } from './identityAdminPort.ts';
@@ -107,6 +107,7 @@ export interface AdminDeps {
 
 const UNAUTHORIZED: AdminResult = { status: 401, body: { error: 'unauthorized' } };
 const FORBIDDEN: AdminResult = { status: 403, body: { error: 'forbidden' } };
+const SESSION_TOO_OLD: AdminResult = { status: 401, body: { ...SESSION_EXPIRED_BODY } };
 /** Compartidos con `spacesRoutes.ts`: dos superficies de administracion no pueden contestar cuerpos distintos al mismo fallo. */
 export const INVALID_REQUEST: AdminResult = { status: 400, body: { error: 'invalid-request' } };
 export const NOT_FOUND: AdminResult = { status: 404, body: { error: 'not-found' } };
@@ -175,6 +176,10 @@ export async function authenticate(
 
   const identity = await deps.auth.verify(token);
   if (identity === null) return { ok: false, result: UNAUTHORIZED };
+  // #128: the one 401 that says why. Only a validly signed token gets here, and
+  // without the reason the client would retry the same token instead of
+  // asking for email and password again.
+  if (identity === SESSION_EXPIRED) return { ok: false, result: SESSION_TOO_OLD };
 
   const user = await deps.directory.findByUid(identity.uid);
   const decision: AccessDecision = decideAccess(user, clock(deps));

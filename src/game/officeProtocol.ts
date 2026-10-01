@@ -95,12 +95,21 @@ export const ACCESS_DENIED_CODE = 401;
  * `unauthorized` is the token itself not verifying, and it stays mute: there
  * is no valid signature behind it to tell anything to. The rest are the
  * directory's (`decideAccess`), told only to someone who already proved who
- * they are with a validly signed token.
+ * they are with a validly signed token. `session-expired` (#128) is the
+ * token's too, but only for a valid signature on a login older than the
+ * server's maximum session age: the remedy is to sign in again, not an admin.
+ * The HTTP routes say it as `{ error: 'unauthorized', reason }`.
  *
- * A list and not only a union so a new reason (#128 adds `session-expired`) is
- * one entry here plus its login notice, which the compiler then asks for.
+ * A list and not only a union so a new reason is one entry here plus its
+ * login notice, which the compiler then asks for.
  */
-export const ACCESS_DENIED_REASONS = ['unauthorized', 'expired', 'revoked', 'not-provisioned'] as const;
+export const ACCESS_DENIED_REASONS = [
+  'unauthorized',
+  'expired',
+  'revoked',
+  'not-provisioned',
+  'session-expired',
+] as const;
 
 export type AccessDeniedReason = (typeof ACCESS_DENIED_REASONS)[number];
 

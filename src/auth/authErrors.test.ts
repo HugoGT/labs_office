@@ -126,6 +126,7 @@ describe('describeAccessDenied (#129)', () => {
     ['revoked', 'Acceso retirado: un administrador retiró tu acceso a la oficina.'],
     ['not-provisioned', 'Tu cuenta no está dada de alta en la oficina. Pide a un administrador que te invite.'],
     ['unauthorized', 'No se pudo comprobar tu sesión. Vuelve a iniciar sesión.'],
+    ['session-expired', 'Tu sesión caducó. Vuelve a iniciar sesión.'],
   ] as const)('tells why %s sent the person back to the login', (reason, text) => {
     expect(describeAccessDenied(reason)).toBe(text);
   });

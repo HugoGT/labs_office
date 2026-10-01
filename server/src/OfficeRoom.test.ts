@@ -33,7 +33,12 @@ import { createMemoryDirectory } from './directory/memoryDirectory.ts';
 import { ART_PACK_DEFAULTS } from './decor/artCatalogRules.ts';
 import type { OfficeState } from './schema.ts';
 import { createMemoryTerrain } from './terrain/memoryTerrain.ts';
-import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
+import {
+  SESSION_EXPIRED,
+  type IdTokenVerifier,
+  type SessionExpired,
+  type VerifiedIdentity,
+} from './verifyIdToken.ts';
 
 let server: OfficeServer;
 let endpoint: string;
@@ -856,7 +861,7 @@ describe('OfficeRoom: invitaciones de llamada (issue #2)', () => {
  * y que el uid acaba en el registro -- y para eso un doble es mas honesto que
  * montar un JWKS.
  */
-function stubVerifier(valid: Record<string, VerifiedIdentity>): IdTokenVerifier {
+function stubVerifier(valid: Record<string, VerifiedIdentity | SessionExpired>): IdTokenVerifier {
   return {
     async verify(token: unknown) {
       return typeof token === 'string' ? (valid[token] ?? null) : null;
@@ -963,7 +968,9 @@ describe('OfficeRoom: onAuth con verificador (#8)', () => {
   let authEndpoint: string;
 
   beforeEach(async () => {
-    const started = await startAuthenticatedServer(stubVerifier({ 'token-de-ana': ANA }));
+    const started = await startAuthenticatedServer(
+      stubVerifier({ 'token-de-ana': ANA, 'token-de-hace-meses': SESSION_EXPIRED }),
+    );
     authServer = started.authServer;
     authEndpoint = started.endpoint;
   });
@@ -998,6 +1005,14 @@ describe('OfficeRoom: onAuth con verificador (#8)', () => {
 
   it('un token invalido no entra: 401 unauthorized', async () => {
     await expect(joinAuth({ token: 'token-forjado' })).rejects.toMatchObject({ code: 401 });
+  });
+
+  it('a session older than its maximum age does not enter: 401 session-expired (#128)', async () => {
+    await expect(joinAuth({ token: 'token-de-hace-meses' })).rejects.toMatchObject({
+      code: 401,
+      message: 'session-expired',
+    });
+    expect(authServer.sessions.size()).toBe(0);
   });
 
   it('entrar sin token tampoco cuela cuando la auth esta activa', async () => {

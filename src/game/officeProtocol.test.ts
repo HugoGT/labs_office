@@ -135,6 +135,10 @@ describe('accessDeniedReasonOf (#129)', () => {
     );
   });
 
+  it('knows that a session older than its maximum age is refused (#128)', () => {
+    expect(ACCESS_DENIED_REASONS).toContain('session-expired');
+  });
+
   it.each([[undefined], [null], [401], [''], ['onAuth failed'], ['EXPIRED']])(
     'reads %j as the generic refusal, never as a reason it does not know',
     (raw) => {

@@ -13,7 +13,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { DirectoryUser } from '../directory/directoryPort.ts';
 import { createMemoryDirectory, type MemoryDirectory } from '../directory/memoryDirectory.ts';
-import type { IdTokenVerifier } from '../verifyIdToken.ts';
+import { SESSION_EXPIRED, type IdTokenVerifier } from '../verifyIdToken.ts';
 import {
   handleAdminSession,
   handleCreateInvitation,
@@ -71,6 +71,7 @@ const REVOCADO = user({
 /** Doble indexado por token; las firmas de verdad ya las prueba `verifyIdToken.test.ts`. */
 const verifier: IdTokenVerifier = {
   async verify(token: unknown) {
+    if (token === TOKEN_SESION_CADUCADA) return SESSION_EXPIRED;
     const uid = typeof token === 'string' ? token.replace(/^valido-/, '') : null;
     if (uid === null || uid === token) return null;
     return { uid, email: `${uid}@example.com`, name: null };
@@ -83,6 +84,8 @@ const TOKEN_EMPLEADO = 'valido-uid-empleado';
 const TOKEN_CADUCADO = 'valido-uid-caducado';
 const TOKEN_REVOCADO = 'valido-uid-revocado';
 const TOKEN_FANTASMA = 'valido-uid-que-no-esta-en-el-directorio';
+/** An admin's token whose login is older than `MAX_SESSION_AGE_DAYS` (#128). */
+const TOKEN_SESION_CADUCADA = 'sesion-de-hace-meses';
 
 function bearer(token: string): string {
   return `Bearer ${token}`;
@@ -206,6 +209,16 @@ describe('autenticacion, comun a todas las rutas', () => {
         expect(await llamar(bearer('token-forjado'), deps)).toEqual({
           status: 401,
           body: { error: 'unauthorized' },
+        });
+      });
+
+      it('401 session-expired when the login is older than the maximum session age (#128)', async () => {
+        // The only 401 with a reason: the token is validly signed, and the
+        // client needs it to sign out instead of retrying the same token.
+        const { deps } = harness();
+        expect(await llamar(bearer(TOKEN_SESION_CADUCADA), deps)).toEqual({
+          status: 401,
+          body: { error: 'unauthorized', reason: 'session-expired' },
         });
       });
 

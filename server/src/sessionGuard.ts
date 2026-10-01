@@ -8,11 +8,11 @@
 import type { LiveSessionRegistry } from './liveSessions.ts';
 import { spaceIdAt } from './spaces/spaceMembership.ts';
 import type { SpacesDirectory } from './spaces/spacesPort.ts';
-import type { IdTokenVerifier } from './verifyIdToken.ts';
+import { SESSION_EXPIRED, SESSION_EXPIRED_BODY, type IdTokenVerifier } from './verifyIdToken.ts';
 
 export type SessionGuardResult =
   | { ok: true; sessionId: string; spaceId: string | null }
-  | { ok: false; status: 400 | 401 | 403; body: { error: string } };
+  | { ok: false; status: 400 | 401 | 403; body: { error: string; reason?: string } };
 
 /**
  * Body validation, ID token and session ownership, in that order. The space,
@@ -48,6 +48,11 @@ export async function guardSessionRequest(
   const identity = auth ? await auth.verify((body as { token?: unknown }).token) : null;
   if (auth && identity === null) {
     return { ok: false, status: 401, body: { error: 'unauthorized' } };
+  }
+  // #128: same 401, plus the reason, so the client signs out instead of
+  // retrying a token whose login is too old (see `SESSION_EXPIRED_BODY`).
+  if (identity === SESSION_EXPIRED) {
+    return { ok: false, status: 401, body: { ...SESSION_EXPIRED_BODY } };
   }
 
   if (!sessions.has(sessionId)) {
