@@ -212,6 +212,7 @@ Only a `test` environment exists (`infra/gcp/README.md` is the full runbook).
 - A new server route needs its own `handle` in `infra/gcp/Caddyfile`, before the final catch-all `handle`. Otherwise it returns `index.html` with 200 (browser shows `Unexpected token '<'`, server logs nothing).
 - Uploaded art is served under `handle /assets/files/*`, never `/assets/*`: the Vite bundles live under `/assets/` and belong to the `web` container.
 - `POST /admin/assets/upload` and `POST /me/art/contributions` skip the global `express.json()` (100 KB limit) for their own 1 MB parser; the upload is registered before `POST /admin/assets/:id`, which would otherwise take `upload` as an asset id.
+- `web-nginx.conf` caches `/assets/` as `immutable` because Vite hashes those names; the art pack (`/assets/pack/`) keeps stable names, so its own `location` revalidates with `no-cache`. A new static folder with stable names under `/assets/` needs the same (`src/game/artPackCaching.node.test.ts`).
 - Contribution files are private until approved: never serve one through a public or cacheable route. `GET /me/art/files/*` (its own Caddy `handle /me/art/*`) is the only way to a pending file.
 - `office-deploy` on disk is only rewritten at VM boot; the workflow refreshes it from metadata before running. Keep that step if you touch the workflow.
 - `pnpm server` does not load `.env`; export variables or use `node --env-file=.env server/src/main.ts`.
