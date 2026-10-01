@@ -217,15 +217,26 @@ Cada etapa lleva sus pruebas de comportamiento. Las evidencias de cierre serían
 
 La validación final incluye regeneración del pack, revisión visual de los 18 personajes, pruebas unitarias/servidor/navegador, E2E de dos clientes y regresiones de audio y pertenencia a espacios. El despliegue debe introducir primero un backend compatible y después el cliente nuevo.
 
+Verificado (10, 2026-10-01) sobre `feat/art-implementation`:
+
+- `pnpm typecheck`, `test:all` (3752 pruebas), `test:harness`, `build`, `build:e2e` y `test:e2e` de dos clientes pasan; `test:e2e:audio` pasa contra un LiveKit real como en CI (el caso de compartir pantalla se salta sin `DATABASE_URL`, igual que en CI).
+- `pnpm art:export` regenera el pack byte a byte (sin diferencias en git). Revisión visual de `docs/art/preview/`: los 18 personajes con sus 8 direcciones de marcha y 4 poses sentadas, y los 28 pares de transición de terreno.
+- Evidencias por alcance: #4 en `officeLayout.test.ts` y `OfficeScene.browser.test.ts`; #123 en `terrainRender.test.ts`, `terrainGrid.test.ts`, `terrainRuntime.test.ts` y `OfficeRoom.test.ts` (agua bloqueada en servidor y cliente, edición vista por un cliente dentro y otro que entra después); #122 en `artContributionRoutes.test.ts` y `createOfficeServer.test.ts`; login en `useCharacterChoice.test.ts`, `AuthGate.test.tsx` y `OfficeRoom.test.ts` (un segundo cliente ve el personaje persistido); colores en `artAppearancePersistence.node.test.ts` (tras reinicio) y `desksRoutes.test.ts`/`spacesRoutes.test.ts` (mover, renombrar, reclamar y liberar).
+- Caché: el pack usa nombres estables bajo `/assets/`, que nginx marcaba `immutable` por un año para los bundles de Vite. `location /assets/pack/` ahora revalida (`no-cache`, 304 por ETag) y `src/game/artPackCaching.node.test.ts` lo vigila.
+
+Orden de despliegue. CI despliega las imágenes `colyseus` y `web` al fusionar, antes de cualquier `terraform apply`; es seguro porque el cliente nuevo degrada sin el backend completo: `/me/avatar` sin ruta en Caddy (HTML 200) o con 503 deja entrar con el personaje por defecto, un manifiesto de subidas ilegible se ignora y, sin `ASSET_GCS_BUCKET`, las subidas y contribuciones responden 503. El esquema se aplica de forma idempotente al arrancar y conserva las filas existentes. Después, un humano ejecuta `terraform apply` (bucket de assets, sus dos permisos, metadata `office-asset-bucket` y el Caddyfile con `/me/avatar`, `/me/art/*` y `/assets/files/*`) y relanza `gh workflow run deploy-test.yml` para que `office-deploy` escriba `ASSET_GCS_BUCKET` y recargue Caddy.
+
+Huecos conocidos, sin bloquear: ninguna E2E encadena elegir personaje y verlo en otro cliente (lo cubren pruebas separadas de hook, rutas y sala), y los adaptadores Postgres se prueban con un ejecutor inyectado, no contra una base real.
+
 ### Checklist de finalización
 
-- [ ] El contrato versionado corresponde al pack real y está reconciliado con #121.
-- [ ] Los exportadores generan el pack de forma determinista y a escala nativa.
-- [ ] El catálogo y las migraciones conservan identidades y datos existentes.
-- [ ] El login permite elegir personaje para cuentas existentes y persiste la selección.
-- [ ] Los avatares locales y remotos muestran animaciones y poses coherentes.
-- [ ] Los pisos y escritorios conservan el material/color elegido al crearlos.
-- [ ] El layout Tiled y el arte definitivo cumplen el alcance de #4.
-- [ ] El mapa por bloques y su editor persistente cumplen ambas fases de #123.
+- [x] El contrato versionado corresponde al pack real y está reconciliado con #121.
+- [x] Los exportadores generan el pack de forma determinista y a escala nativa.
+- [x] El catálogo y las migraciones conservan identidades y datos existentes.
+- [x] El login permite elegir personaje para cuentas existentes y persiste la selección.
+- [x] Los avatares locales y remotos muestran animaciones y poses coherentes.
+- [x] Los pisos y escritorios conservan el material/color elegido al crearlos.
+- [x] El layout Tiled y el arte definitivo cumplen el alcance de #4.
+- [x] El mapa por bloques y su editor persistente cumplen ambas fases de #123.
 - [x] Las contribuciones y la moderación cumplen los criterios de #122.
-- [ ] La validación visual, las pruebas y las regresiones pasan antes del despliegue.
+- [x] La validación visual, las pruebas y las regresiones pasan antes del despliegue.
