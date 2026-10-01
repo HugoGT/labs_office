@@ -67,9 +67,14 @@ const OWNED_BY_DESK: AdminResult = { status: 409, body: { error: 'space-owned-by
  * derivado de `deskId`, no un dato propio que pudiese divergir entre el
  * cliente y el servidor.
  */
+/**
+ * `floorMaterialId`/`floorColor` travel for drawing (art migration, step 4) and
+ * stay out of the hash for the same reason as `kind`: they do not decide who
+ * hears whom, and a floor is chosen once, at creation.
+ */
 function toConfigBody(space: Space): Record<string, unknown> {
-  const { id, slug, name, x, y, w, h, capacity, deskId } = space;
-  return { id, slug, name, x, y, w, h, capacity, kind: deskId === null ? 'room' : 'desk' };
+  const { id, slug, name, x, y, w, h, capacity, deskId, floorMaterialId, floorColor } = space;
+  return { id, slug, name, x, y, w, h, capacity, kind: deskId === null ? 'room' : 'desk', floorMaterialId, floorColor };
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

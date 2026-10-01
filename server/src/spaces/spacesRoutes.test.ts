@@ -102,6 +102,19 @@ describe('handleGetSpacesConfig', () => {
     expect(result.body.version).not.toBe(await changingStore.version());
   });
 
+  it('serves the floor of each space, which the version hash leaves out (art step 4)', async () => {
+    const { deps, spaces } = harness();
+    await spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: null, floor: { materialId: 'floor-plain', color: '#2c3e50' } });
+    const versionBefore = await spaces.version();
+
+    const result = await handleGetSpacesConfig(deps);
+
+    expect(result.body.spaces).toEqual([
+      expect.objectContaining({ name: 'Sala', floorMaterialId: 'floor-plain', floorColor: '#2c3e50' }),
+    ]);
+    expect(result.body.version).toBe(versionBefore);
+  });
+
   it('no exige autenticacion: la sirve tambien sin cabecera', async () => {
     // Es deliberado y no un descuido. Hoy los rectangulos viajan DENTRO del
     // bundle del cliente (`BUILT_IN_SPACES`), asi que no hay nada que ocultar
@@ -133,7 +146,7 @@ describe('handleGetSpacesConfig', () => {
     expect(result.body.version).toBe(hashSpaces([]));
   });
 
-  it('publica solo los campos que entran en el hash, mas kind, nunca las marcas de tiempo', async () => {
+  it('publica solo los campos que entran en el hash, mas kind y el suelo, nunca las marcas de tiempo', async () => {
     // `createdAt`/`updatedAt` no afectan a la pertenencia, asi que no los
     // necesita nadie del lado del cliente. Y si viajasen, invitarian a que
     // alguien los metiese en su propio calculo de version y divergiese del
@@ -144,8 +157,12 @@ describe('handleGetSpacesConfig', () => {
 
     const result = await handleGetSpacesConfig(deps);
 
+    // `floorMaterialId`/`floorColor` (art step 4) travel for drawing only,
+    // outside the hash like `kind`.
     expect(Object.keys((result.body.spaces as Record<string, unknown>[])[0]).sort()).toEqual([
       'capacity',
+      'floorColor',
+      'floorMaterialId',
       'h',
       'id',
       'kind',

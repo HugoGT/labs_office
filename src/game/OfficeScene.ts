@@ -1,4 +1,8 @@
 import Phaser from 'phaser';
+import type { ArtPiece } from './artContract';
+import { findPiece, type ArtAppearance } from './artPack';
+import { ArtPackLoader } from './artPackLoader';
+import { DEFAULT_DESK_FACING, deskAreaAnchor, deskPlacement, spaceFloorTiles } from './artPlacement';
 import { preloadOfficeAssets } from './assets';
 import { beginAutoWalk, stepAutoWalk, type AutoWalkState } from './autoWalk';
 import { CameraPanLayer } from './CameraPanLayer';
@@ -15,12 +19,19 @@ import {
   specialAssetDepth,
   worldAssetDepth,
 } from './depthLayers';
-import { deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
+import { deskFurnitureName, deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
 import { isEditableElementFocused } from './inputFocusGuard';
 import { LayoutEditLayer } from './LayoutEditLayer';
-import { placeFurniture, placeNature, placeZoneLabels, renderGround } from './mapBuilder';
+import {
+  placeFurniture,
+  placeNature,
+  placeZoneLabels,
+  putArtSprite,
+  putFloorTile,
+  renderGround,
+} from './mapBuilder';
 import {
   BUILT_IN_SPACES,
   BUILT_IN_SPACES_VERSION,
@@ -84,6 +95,15 @@ const DESK_COLOR = {
 } as const;
 const DESK_FILL_ALPHA = 0.22;
 const DESK_STROKE_WIDTH = 2;
+/**
+ * Served space floors go over the base ground (0) and the legacy flower tiles
+ * (1), under the zone labels (2) and every world asset, which starts at its
+ * own bottom edge in pixels.
+ */
+const SPACE_FLOOR_DEPTH = 1.5;
+/** A piece that cannot be drawn yet (or ever) still shows where it goes. */
+const ART_FALLBACK_COLOR = 0x6b7280;
+const ART_FALLBACK_ALPHA = 0.6;
 
 /**
  * Como se conecta la escena al servidor. `connect` se inyecta para poder
@@ -106,6 +126,11 @@ export interface OfficeSceneOptions {
    */
   getIdToken?: () => Promise<string | null>;
   connect?: (options: ConnectOfficeRoomOptions) => Promise<OfficeConnection>;
+  /**
+   * Manifest of the art pack (art migration, step 4). Defaults to the one the
+   * SPA serves; `null` turns the pack off and the office draws its fallbacks.
+   */
+  artManifestUrl?: string | null;
 }
 
 interface WasdKeys {
@@ -229,6 +254,16 @@ export class OfficeScene extends Phaser.Scene {
    * encima dejaria pintado como ocupado un sitio que alguien acaba de soltar.
    */
   private deskObjects: Phaser.GameObjects.GameObject[] = [];
+  /** Last `desks` list, redrawn whole when a piece it needs finishes loading. */
+  private desks: readonly OfficeDesk[] = [];
+  /** Floors of the served spaces (art step 4), replaced whole like `deskObjects`. */
+  private floorObjects: Phaser.GameObjects.GameObject[] = [];
+  private floorSpaces: readonly SpaceArea[] = [];
+  /** Created in `preload()`, where `this.load` first exists. */
+  private art!: ArtPackLoader;
+  private readonly pendingRedraws = new Set<() => void>();
+  private readonly redrawDesks = (): void => this.applyDesks(this.desks);
+  private readonly redrawFloors = (): void => this.drawSpaceFloors(this.floorSpaces);
   /**
    * Objetivo de auto-caminata en curso (issue #2, D9/D10). `undefined` cuando
    * nadie esta siendo perseguido: `update()` solo dirige al reductor mientras
@@ -278,9 +313,15 @@ export class OfficeScene extends Phaser.Scene {
     this.options = options;
   }
 
-  /** Las hojas Kenney tienen que estar cargadas antes de que `create()` dibuje. */
+  /**
+   * Las hojas tienen que estar cargadas antes de que `create()` dibuje: el
+   * manifiesto del art pack y lo que el mapa pinta de el, y las hojas Kenney,
+   * que siguen para lo que el pack no trae todavia y como fallback.
+   */
   preload(): void {
     preloadOfficeAssets(this);
+    this.art = new ArtPackLoader(this, { manifestUrl: this.options.artManifestUrl });
+    this.art.preload();
   }
 
   create(): void {
@@ -292,9 +333,9 @@ export class OfficeScene extends Phaser.Scene {
 
     const grid: TerrainGrid = buildTerrainGrid();
     this.grid = grid;
-    renderGround(this, grid);
-    placeFurniture(this, grid);
-    placeNature(this, grid);
+    renderGround(this, grid, this.art);
+    placeFurniture(this, grid, this.art);
+    placeNature(this, grid, this.art);
     placeZoneLabels(this);
 
     // El nombre de la sesion manda sobre la pildora del avatar local (#6).
@@ -632,6 +673,10 @@ export class OfficeScene extends Phaser.Scene {
    * deja al jugador donde estaba no emite nada -- que es lo correcto.
    */
   private applySpacesConfig(spaces: readonly SpaceArea[], version: string): void {
+    // Before the version check: floors are outside the hash, so a served config
+    // equal to the built-in one still brings the floors to draw.
+    this.drawSpaceFloors(spaces);
+
     // Misma version = misma config. Es el caso normal de un despliegue sin
     // editar, donde lo servido coincide con lo incorporado; reenviarlo al
     // servidor seria un mensaje por sesion que no dice nada nuevo.
@@ -675,8 +720,102 @@ export class OfficeScene extends Phaser.Scene {
    * `NO_DESKS` y la oficina se dibuja exactamente como antes de esta slice.
    */
   private applyDesks(desks: readonly OfficeDesk[]): void {
+    this.desks = desks;
     for (const object of this.deskObjects.splice(0)) object.destroy();
     for (const desk of desks) this.drawDesk(desk);
+  }
+
+  /**
+   * Loaded sheet of an appearance, or `null`. When the piece is not loaded yet
+   * it asks the loader for it and redraws once it settles; a piece of the
+   * wrong kind (a desk id as a floor) never draws.
+   */
+  private artSheet(appearance: ArtAppearance, kind: 'desk' | 'floor', redraw: () => void): { key: string; piece: ArtPiece } | null {
+    const known = (): ArtPiece | undefined =>
+      this.art.manifest === null ? undefined : findPiece(this.art.manifest, appearance.materialId);
+    const ready = (): { key: string; piece: ArtPiece } | null => {
+      const piece = known();
+      if (piece === undefined || piece.kind !== kind) return null;
+      const key = this.art.sheet(piece.id, 'sheet', appearance.color);
+      return key === null ? null : { key, piece };
+    };
+    const now = ready();
+    if (now !== null) return now;
+    const piece = known();
+    if (piece !== undefined && piece.kind !== kind) return null;
+    return this.art.request(appearance.materialId, () => this.scheduleRedraw(redraw)) === 'ready' ? ready() : null;
+  }
+
+  /**
+   * Every placement waiting on a piece asks for the same redraw when it lands;
+   * one pass per batch is enough, and none after the scene is gone.
+   */
+  private scheduleRedraw(redraw: () => void): void {
+    if (this.pendingRedraws.has(redraw)) return;
+    this.pendingRedraws.add(redraw);
+    queueMicrotask(() => {
+      this.pendingRedraws.delete(redraw);
+      if (this.alive) redraw();
+    });
+  }
+
+  /**
+   * Floors of the served spaces (art migration, step 4), a desk's cubicle
+   * included, in their persisted material and color. Built-in rooms without a
+   * served floor keep the one `renderGround` painted from their `floorStyle`.
+   * A floor that cannot load shows a neutral veil over the space, so a room
+   * with a broken floor still reads as a room.
+   */
+  private drawSpaceFloors(spaces: readonly SpaceArea[]): void {
+    this.floorSpaces = spaces;
+    for (const object of this.floorObjects.splice(0)) object.destroy();
+    for (const space of spaces) {
+      if (space.floor === undefined) continue;
+      const sheet = this.artSheet(space.floor, 'floor', this.redrawFloors);
+      if (sheet === null) {
+        this.floorObjects.push(
+          this.add
+            .rectangle(space.x + space.w / 2, space.y + space.h / 2, space.w, space.h, ART_FALLBACK_COLOR, DESK_FILL_ALPHA)
+            .setDepth(SPACE_FLOOR_DEPTH),
+        );
+        continue;
+      }
+      for (const { tx, ty } of spaceFloorTiles(space, this.grid)) {
+        this.floorObjects.push(putFloorTile(this, sheet.key, tx, ty, SPACE_FLOOR_DEPTH));
+      }
+    }
+  }
+
+  /**
+   * The desk furniture in the middle of the area: its persisted material and
+   * color, at native size and in the exported facing, never stretched to the
+   * 3x3 area. Without an appearance (an older server) it is the pack default.
+   *
+   * Same depth as the zone and drawn after it, so the status tint stays a floor
+   * marker under the desk instead of a veil over it; decor goes on top.
+   */
+  private drawDeskFurniture(desk: OfficeDesk, depth: number): void {
+    const name = deskFurnitureName(desk.id);
+    const anchor = deskAreaAnchor(desk);
+    const materialId = desk.appearance?.materialId ?? this.art.manifest?.defaults.desk;
+    const sheet =
+      materialId === undefined
+        ? null
+        : this.artSheet({ materialId, color: desk.appearance?.color ?? null }, 'desk', this.redrawDesks);
+
+    if (sheet === null || sheet.piece.kind !== 'desk') {
+      // Same visible fallback as a decor piece without texture: the desk is
+      // there even when its art is not, sized like the 2x1 footprint.
+      this.deskObjects.push(
+        this.add
+          .rectangle(anchor.x, anchor.y, 2 * TILE, TILE, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
+          .setDepth(depth)
+          .setName(name),
+      );
+      return;
+    }
+    const placement = deskPlacement(sheet.piece, DEFAULT_DESK_FACING, anchor);
+    this.deskObjects.push(putArtSprite(this, sheet.key, placement, depth).setName(name));
   }
 
   /**
@@ -715,6 +854,8 @@ export class OfficeScene extends Phaser.Scene {
       })
       .setDepth(depth);
     this.deskObjects.push(label);
+
+    this.drawDeskFurniture(desk, depth);
 
     for (const item of desk.occupant?.items ?? []) {
       // `null` = ese slot no es una de las nueve cajas. Se salta la pieza y no

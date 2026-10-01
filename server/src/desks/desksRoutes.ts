@@ -120,6 +120,10 @@ function toDeskBody(desk: OfficeDesk, viewerId: string | null): Record<string, u
     w: DESK_SIDE,
     h: DESK_SIDE,
     occupant: desk.occupant,
+    // Read only (art migration, step 4): the office draws the desk with them.
+    // No write route reads them back; they are chosen once, at creation.
+    materialId: desk.materialId,
+    color: desk.color,
     // Los dos a `null` NO son una coincidencia: un escritorio libre no es de
     // nadie, y sin la primera mitad todos lo serian de quien preguntase.
     mine: desk.occupantId !== null && desk.occupantId === viewerId,

@@ -228,6 +228,33 @@ describe('handleListDesks', () => {
     ]);
   });
 
+  it('serves the appearance of each desk so the office draws its material and color (art step 4)', async () => {
+    const { deps, desks } = harness();
+    await desks.createDesk({ label: 'Mesa 1', x: 0, y: 0, appearance: { materialId: 'desk-painted', color: '#c0392b' } });
+    await desks.createDesk({ label: 'Mesa 2', x: 4, y: 0 });
+
+    const result = await handleListDesks(BEARER_ANA, deps);
+
+    expect(result.body.desks).toEqual([
+      expect.objectContaining({ label: 'Mesa 1', materialId: 'desk-painted', color: '#c0392b' }),
+      expect.objectContaining({ label: 'Mesa 2', materialId: 'desk-wood', color: null }),
+    ]);
+  });
+
+  it('an update keeps the appearance: the body cannot change material or color', async () => {
+    const { deps, desks } = harness();
+    const created = await desks.createDesk({ label: 'Mesa 1', x: 0, y: 0, appearance: { materialId: 'desk-painted', color: '#c0392b' } });
+
+    const result = await handleUpdateDesk(
+      BEARER_ADMIN,
+      created.id,
+      { label: 'Mesa movida', materialId: 'desk-glass', color: '#000000' },
+      deps,
+    );
+
+    expect(result.body).toEqual(expect.objectContaining({ label: 'Mesa movida', materialId: 'desk-painted', color: '#c0392b' }));
+  });
+
   it('un escritorio libre nunca es de nadie', async () => {
     // `mine` sale de `occupant_id`, no de la ausencia de ocupante: sin esta
     // prueba, un `occupantId === viewerId` con los dos a null marcaria como

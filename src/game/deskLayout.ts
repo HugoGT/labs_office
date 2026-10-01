@@ -37,6 +37,11 @@ export function deskItemName(itemId: string): string {
   return `desk-item:${itemId}`;
 }
 
+/** The desk furniture drawn inside the area (art migration, step 4), or its fallback. */
+export function deskFurnitureName(deskId: string): string {
+  return `desk-furniture:${deskId}`;
+}
+
 /** Rectangulo en PIXELES del mundo, que es en lo que trabaja la escena. */
 export interface DeskRect {
   x: number;

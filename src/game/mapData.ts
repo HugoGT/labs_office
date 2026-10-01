@@ -115,6 +115,13 @@ export interface SpaceArea {
   w: number;
   h: number;
   name: string;
+  /**
+   * Floor material and color served by `GET /spaces` (art migration, step 4),
+   * an `ArtAppearance` spelled out to keep this file import-free. Drawing only:
+   * membership never reads it. Absent in the built-in fallback, whose rooms
+   * paint their `floorStyle` instead.
+   */
+  floor?: { readonly materialId: string; readonly color: string | null };
 }
 
 /** Un `SpaceArea` que ADEMAS sabe dibujarse: solo los incorporados (D3). */

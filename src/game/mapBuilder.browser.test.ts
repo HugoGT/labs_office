@@ -1,7 +1,11 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
-import { TERRAIN, TERRAIN_SHEET, preloadOfficeAssets } from './assets';
+import { floorFrameAt } from './artContract';
+import { artSheetKey } from './artPack';
+import { ArtPackLoader } from './artPackLoader';
+import { chairPlacement, DEFAULT_DESK_FACING, footprintAnchor } from './artPlacement';
+import { INDOOR_SHEET, TERRAIN, TERRAIN_SHEET, preloadOfficeAssets } from './assets';
 import { DESK_ROWS, MAP_H, MAP_W, TILE, TREES, ZONE_LABELS } from './mapData';
 import { placeFurniture, placeNature, placeZoneLabels, renderGround } from './mapBuilder';
 import { buildTerrainGrid } from './terrainGrid';
@@ -20,7 +24,19 @@ afterEach(() => {
   for (const host of hosts.splice(0)) host.remove();
 });
 
+/**
+ * Without a pack every call below draws the legacy Kenney sheets, which is the
+ * fallback when the manifest is missing. `withArtScene` adds the real pack.
+ */
 async function withScene<T>(run: (scene: Phaser.Scene) => T): Promise<T> {
+  return withSceneAndArt((scene) => run(scene), false);
+}
+
+async function withArtScene<T>(run: (scene: Phaser.Scene, art: ArtPackLoader) => T): Promise<T> {
+  return withSceneAndArt(run, true);
+}
+
+async function withSceneAndArt<T>(run: (scene: Phaser.Scene, art: ArtPackLoader) => T, withPack: boolean): Promise<T> {
   const host = document.createElement('div');
   host.style.width = '320px';
   host.style.height = '240px';
@@ -34,12 +50,15 @@ async function withScene<T>(run: (scene: Phaser.Scene) => T): Promise<T> {
     }
     // Las hojas Kenney son ficheros: hay que cargarlas antes de `create()`, o
     // cada `add.image` pediria una textura que aun no existe.
+    private art!: ArtPackLoader;
     preload(): void {
       preloadOfficeAssets(this);
+      this.art = new ArtPackLoader(this, { manifestUrl: withPack ? undefined : null });
+      this.art.preload();
     }
     create(): void {
       createOfficeTextures(this);
-      result = run(this);
+      result = run(this, this.art);
     }
   }
 
@@ -263,5 +282,106 @@ describe('placeZoneLabels', () => {
         ZONE_LABELS.map((z) => ({ x: z.x * TILE, y: z.y * TILE, text: z.t })),
       ),
     );
+  });
+});
+
+describe('with the art pack', () => {
+  it('paints grass, water and room floors from the pack motif, and keeps Kenney where the pack has no floor', async () => {
+    const list = await withArtScene((scene, art) => {
+      renderGround(scene, buildTerrainGrid(), art);
+      return images(scene).map((img) => ({ x: img.x, y: img.y, key: img.texture.key, frame: frameOf(img), scale: img.scaleX }));
+    });
+    const at = (tx: number, ty: number) => list.find((i) => i.x === tx * TILE && i.y === ty * TILE);
+
+    expect(list).toHaveLength(MAP_W * MAP_H);
+    // The motif repeats every three tiles instead of one tile repeating.
+    expect(at(5, 4)).toEqual({ x: 5 * TILE, y: 4 * TILE, key: artSheetKey('floor-grass', 'sheet'), frame: floorFrameAt(5, 4), scale: 1 });
+    expect(at(6, 4)?.frame).toBe(floorFrameAt(6, 4));
+    expect(at(1, 19)?.key).toBe(artSheetKey('floor-water', 'sheet'));
+    // Cafeteria interior is wood; the Sala de Juntas one the plain floor.
+    expect(at(52, 20)?.key).toBe(artSheetKey('floor-wood', 'sheet'));
+    expect(at(52, 4)?.key).toBe(artSheetKey('floor-plain', 'sheet'));
+    // No pack piece yet for the hedge or the bridge: they keep their Kenney frame.
+    expect(at(0, 0)).toMatchObject({ key: TERRAIN_SHEET, frame: TERRAIN.grassDark, scale: 2 });
+    expect(at(13, 19)).toMatchObject({ key: TERRAIN_SHEET, frame: TERRAIN.bridge });
+  });
+
+  it('draws the base desks at native size from the exported facing, not stretched over their tiles', async () => {
+    const { desks, solid } = await withArtScene((scene, art) => {
+      const grid = buildTerrainGrid();
+      placeFurniture(scene, grid, art);
+      return {
+        desks: images(scene)
+          .filter((img) => img.texture.key === artSheetKey('desk-wood', 'sheet'))
+          .map((img) => ({ x: img.x, y: img.y, frame: frameOf(img), w: img.displayWidth, h: img.displayHeight })),
+        solid: grid.solid,
+      };
+    });
+
+    const expected = DESK_ROWS.flatMap(([x, y, n]) =>
+      Array.from({ length: n }, (_, i) => {
+        const anchor = footprintAnchor({ x: (x + i * 2) * TILE, y: y * TILE, w: 2 * TILE, h: TILE });
+        return { x: anchor.x - 32, y: anchor.y - 40, frame: 1, w: 64, h: 64 };
+      }),
+    );
+    expect(desks).toHaveLength(expected.length);
+    expect(desks).toEqual(expect.arrayContaining(expected));
+    expect(DEFAULT_DESK_FACING).toBe('down');
+    // Collision still follows the 2x1 footprint, not the PNG.
+    const [dx, dy] = DESK_ROWS[0];
+    expect(solid[dy][dx]).toBe(true);
+    expect(solid[dy][dx + 1]).toBe(true);
+  });
+
+  it('draws each room chair from the pack in both layers, facing the table', async () => {
+    const chairs = await withArtScene((scene, art) => {
+      placeFurniture(scene, buildTerrainGrid(), art);
+      return images(scene)
+        .filter((img) => img.texture.key === artSheetKey('chair-wood', 'sheet'))
+        .map((img) => ({ x: img.x, y: img.y, frame: frameOf(img) }));
+    });
+
+    // 7 + 7 + 5 + 5 around the meeting table, 5 + 5 at the cafeteria; two layers each.
+    expect(chairs).toHaveLength(34 * 2);
+    // Row y=5 sits above the meeting table: the sitter looks down at it.
+    const piece = { anchors: { seat: { x: 18, y: 22 }, ground: { x: 18, y: 31 } } } as Parameters<typeof chairPlacement>[0];
+    const { back, front } = chairPlacement(piece, 'down', { x: 53.5 * TILE, y: 5.5 * TILE });
+    expect(chairs).toContainEqual({ x: back.x, y: back.y, frame: back.frame });
+    expect(chairs).toContainEqual({ x: front.x, y: front.y, frame: front.frame });
+    // The left column faces right, toward the table.
+    const left = chairPlacement(piece, 'right', { x: 52.5 * TILE, y: 6.5 * TILE });
+    expect(chairs).toContainEqual({ x: left.back.x, y: left.back.y, frame: left.back.frame });
+  });
+
+  it('keeps the tables and plants the pack has no piece for yet', async () => {
+    const legacy = await withArtScene((scene, art) => {
+      placeFurniture(scene, buildTerrainGrid(), art);
+      return {
+        tables: tileSprites(scene).map((sprite) => ({ w: sprite.width, h: sprite.height })),
+        plants: images(scene).filter((img) => img.texture.key === INDOOR_SHEET).length,
+      };
+    });
+
+    expect(legacy.tables).toEqual([
+      { w: 7 * TILE, h: 5 * TILE },
+      { w: 5 * TILE, h: 3 * TILE },
+    ]);
+    expect(legacy.plants).toBe(4);
+  });
+
+  it('leaves out the Kenney flower tiles, which carry their own grass: the pack grass has flowers', async () => {
+    const flowerFrames = [TERRAIN.flowersOrange, TERRAIN.flowersWhite, TERRAIN.flowersBlue];
+    const result = await withArtScene((scene, art) => {
+      const grid = buildTerrainGrid();
+      placeNature(scene, grid, art);
+      const kenney = images(scene).filter((img) => img.texture.key === TERRAIN_SHEET);
+      return {
+        flowers: kenney.filter((img) => flowerFrames.includes(frameOf(img) as never)).length,
+        trees: kenney.filter((img) => frameOf(img) === TERRAIN.treeGreen || frameOf(img) === TERRAIN.treeOrange).length,
+      };
+    });
+
+    expect(result.flowers).toBe(0);
+    expect(result.trees).toBe(TREES.length);
   });
 });

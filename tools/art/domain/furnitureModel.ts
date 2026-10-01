@@ -11,15 +11,18 @@
  * placed just behind it: parts drawn over one another get a contour line, and the silhouette gets
  * exactly one outline pixel. Light comes from the upper left, like the characters and the floor.
  */
-import { hexToRgba, mixRgba, type Ramp, type Tone } from './color.ts';
+import { OUTLINE_INK, OUTLINE_INK_MIX } from '../../../src/game/artColor.ts';
+import { mixRgba, type Ramp, type Tone } from './color.ts';
 import { PixelBuffer, rgba, type Rgba } from './pixelBuffer.ts';
 import type { Facing, SeatPoint } from './seating.ts';
 
 /** Floor depth (north-south) drawn this much shorter than width. */
 export const DEPTH_SCALE = 0.6;
 
-/** Same ink and contact shadow as the characters (spriteRenderer.ts). */
-const OUTLINE_INK = hexToRgba('#140c1c');
+/**
+ * Same ink and contact shadow as the characters (spriteRenderer.ts). The ink
+ * and its mix amounts are shared with the office's runtime recolor.
+ */
 const SHADOW_COLOR = rgba(46, 26, 20, 78);
 
 export type Span = readonly [number, number];
@@ -240,7 +243,7 @@ function paintPart(canvas: Canvas, part: Part, o: Orientation): void {
       if (current && current.depth >= depth) continue;
       const { r, g, b, a } = pixel.color;
       // Glass is mostly the floor behind it, so its rim takes more ink to read as dark.
-      outline.set(k, { x, y, depth, color: mixRgba(rgba(r, g, b), OUTLINE_INK, a === 255 ? 0.78 : 0.88) });
+      outline.set(k, { x, y, depth, color: mixRgba(rgba(r, g, b), OUTLINE_INK, a === 255 ? OUTLINE_INK_MIX.opaque : OUTLINE_INK_MIX.translucent) });
     }
   }
   for (const pixel of pixels.values()) canvas.put(pixel.x, pixel.y, pixel);

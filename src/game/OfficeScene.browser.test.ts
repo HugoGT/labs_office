@@ -16,7 +16,11 @@ import {
 } from './mapData';
 import { TERRAIN_SHEET } from './assets';
 import { MINIMAP_MARKER_DEPTH } from './depthLayers';
-import { deskZoneName } from './deskLayout';
+import { deskFurnitureName, deskZoneName } from './deskLayout';
+import { artSheetKey, recoloredSheetKey } from './artPack';
+import { deskAreaAnchor, deskPlacement, spaceFloorTiles } from './artPlacement';
+import type { ArtDeskPiece } from './artContract';
+import { buildTerrainGrid } from './terrainGrid';
 import type { DeskDecorItem, DeskOccupant, OfficeDesk } from './desksPort';
 import { createOfficeBridge, type OfficeEventMap } from './officeBridge';
 import { DEFAULT_NAME, DEFAULT_STATUS, type PresenceStatus } from './officeProtocol';
@@ -150,15 +154,28 @@ describe('OfficeScene dentro de un Phaser.Game real: mapa y jugador', () => {
     );
 
     const tiled = scene.children.list.filter((c) => c.type === 'TileSprite');
-    const terrainImages = images.filter((img) => img.texture.key === TERRAIN_SHEET);
+    const groundImages = images.filter(
+      (img) => img.texture.key === TERRAIN_SHEET || img.texture.key.startsWith('art:floor-'),
+    );
     const deskCount = DESK_ROWS.reduce((sum, [, , n]) => sum + n, 0);
+    const packDesks = images.filter((img) => img.texture.key === artSheetKey('desk-wood', 'sheet'));
 
-    // Suelo (una imagen por tile) + arboles, todos de la hoja de terreno.
-    expect(terrainImages.length).toBeGreaterThanOrEqual(MAP_W * MAP_H + TREES.length);
-    // Escritorios y las dos mesas de sala se dibujan con tileSprite, que repite
-    // el tile de 16px en vez de estirar uno solo.
-    expect(tiled).toHaveLength(deskCount + 2);
+    // Suelo (una imagen por tile, del pack o Kenney) + arboles.
+    expect(groundImages.length).toBeGreaterThanOrEqual(MAP_W * MAP_H + TREES.length);
+    // Art step 4: base desks come from the pack; only the two room tables,
+    // which the pack has no piece for, stay Kenney tileSprites.
+    expect(packDesks).toHaveLength(deskCount);
+    expect(tiled).toHaveLength(2);
     expect(texts).toHaveLength(ZONE_LABELS.length);
+  });
+
+  it('without the art pack it still draws the whole map from the legacy sheets', async () => {
+    const { scene } = await bootOfficeScene(createOfficeBridge(), { artManifestUrl: 'assets/pack/missing.json' });
+
+    const images = scene.children.list.filter((c): c is Phaser.GameObjects.Image => c.type === 'Image');
+    const deskCount = DESK_ROWS.reduce((sum, [, , n]) => sum + n, 0);
+    expect(images.filter((img) => img.texture.key === TERRAIN_SHEET).length).toBeGreaterThanOrEqual(MAP_W * MAP_H + TREES.length);
+    expect(scene.children.list.filter((c) => c.type === 'TileSprite')).toHaveLength(deskCount + 2);
   });
 
   it('crea al jugador local y a nadie mas: la oficina arranca vacia de companeros', async () => {
@@ -1537,6 +1554,50 @@ describe('OfficeScene: config de espacios servida (#7, slice 3)', () => {
     expect(connector.sentSpacesVersions).toEqual([]);
   });
 
+  it('paints each served space with its persisted floor, recolored and over the walkable tiles only (art step 4)', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const floorKey = recoloredSheetKey('floor-plain', 'sheet', '#2c3e50');
+
+    bridge.emitCommand('spacesconfig', {
+      spaces: [{ ...SERVIDO, floor: { materialId: 'floor-plain', color: '#2c3e50' } }, { ...SERVIDO, id: 'sin-suelo', x: 0 }],
+      version: 'version-servida',
+    });
+
+    const floors = scene.children.list.filter(
+      (c): c is Phaser.GameObjects.Image => c.type === 'Image' && (c as Phaser.GameObjects.Image).texture.key === floorKey,
+    );
+    expect(floors).toHaveLength(spaceFloorTiles(SERVIDO, buildTerrainGrid()).length);
+    expect(floors[0]?.depth).toBe(1.5);
+  });
+
+  it('a config equal to the built-in one still brings its floors, and a new one replaces them', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const grassRooms = BUILT_IN_SPACES.map((room) => ({ ...room, floor: { materialId: 'floor-grass', color: null } }));
+    const count = (): number =>
+      scene.children.list.filter((c) => c.type === 'Image' && (c as Phaser.GameObjects.Image).depth === 1.5).length;
+
+    bridge.emitCommand('spacesconfig', { spaces: grassRooms, version: BUILT_IN_SPACES_VERSION });
+    expect(count()).toBeGreaterThan(0);
+
+    bridge.emitCommand('spacesconfig', { spaces: [], version: 'version-vacia' });
+    expect(count()).toBe(0);
+  });
+
+  it('a space floor that cannot load leaves a visible veil instead of nothing', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge, { artManifestUrl: null });
+
+    bridge.emitCommand('spacesconfig', {
+      spaces: [{ ...SERVIDO, floor: { materialId: 'floor-wood', color: null } }],
+      version: 'version-servida',
+    });
+
+    const veils = scene.children.list.filter((c) => c.type === 'Rectangle' && (c as Phaser.GameObjects.Rectangle).depth === 1.5);
+    expect(veils).toHaveLength(1);
+  });
+
   it('una lista servida vacia deja al jugador en piso abierto', async () => {
     // Un despliegue con la tabla vacia es legitimo. La escena no puede
     // degradar a los incorporados: derivaria pertenencia de rectangulos que el
@@ -1630,8 +1691,82 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
 
     bridge.emitCommand('desks', { desks: [servedDesk()] });
 
-    const tiled = scene.children.list.filter((c) => c.type === 'TileSprite');
-    expect(tiled).toHaveLength(deskCount + 2);
+    const baseDesks = scene.children.list.filter(
+      (c): c is Phaser.GameObjects.Image =>
+        c.type === 'Image' &&
+        (c as Phaser.GameObjects.Image).texture.key === artSheetKey('desk-wood', 'sheet') &&
+        !c.name.startsWith('desk-furniture:'),
+    );
+    expect(baseDesks).toHaveLength(deskCount);
+  });
+
+  function furniture(scene: Phaser.Scene, deskId: string): Phaser.GameObjects.Image | Phaser.GameObjects.Rectangle | null {
+    return scene.children.getByName(deskFurnitureName(deskId)) as Phaser.GameObjects.Image | null;
+  }
+
+  it('draws the desk in its persisted material and color, at native size in the middle of the area (art step 4)', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+
+    bridge.emitCommand('desks', { desks: [servedDesk({ appearance: { materialId: 'desk-painted', color: '#c0392b' } })] });
+
+    const image = furniture(scene, 'id-mesa') as Phaser.GameObjects.Image;
+    expect(image.type).toBe('Image');
+    expect(image.texture.key).toBe(recoloredSheetKey('desk-painted', 'sheet', '#c0392b'));
+    const anchor = deskAreaAnchor({ x: 10 * TILE, y: 12 * TILE, w: 3 * TILE, h: 3 * TILE });
+    const piece = { anchor: { x: 32, y: 40 }, facings: { down: { ground: { x: 0, y: 6 }, chairGround: { x: 0, y: -10 } } } };
+    const placement = deskPlacement(piece as unknown as ArtDeskPiece, 'down', anchor);
+    expect({ x: image.x, y: image.y, frame: Number(image.frame.name) }).toEqual({ x: placement.x, y: placement.y, frame: 1 });
+    // 64px, the PNG cell: not stretched to the 96px area.
+    expect(image.displayWidth).toBe(64);
+    expect(image.displayHeight).toBe(64);
+  });
+
+  it('a desk without appearance draws the pack default desk', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+
+    bridge.emitCommand('desks', { desks: [servedDesk()] });
+
+    expect((furniture(scene, 'id-mesa') as Phaser.GameObjects.Image).texture.key).toBe(artSheetKey('desk-wood', 'sheet'));
+  });
+
+  it('a desk whose material cannot load keeps a visible placeholder', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+
+    bridge.emitCommand('desks', { desks: [servedDesk({ appearance: { materialId: 'desk-retirado', color: null } })] });
+
+    expect(furniture(scene, 'id-mesa')?.type).toBe('Rectangle');
+    // After the catalog re-read finds nothing, it stays a placeholder, still drawn.
+    await advanceGameClock(scene, 600);
+    expect(furniture(scene, 'id-mesa')?.type).toBe('Rectangle');
+  });
+
+  it('redraws a desk once its texture finishes loading during the session', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    // As if this material had not been loaded at boot.
+    scene.textures.remove(artSheetKey('desk-glass', 'sheet'));
+
+    bridge.emitCommand('desks', { desks: [servedDesk({ appearance: { materialId: 'desk-glass', color: null } })] });
+
+    expect(furniture(scene, 'id-mesa')?.type).toBe('Rectangle');
+    await vi.waitFor(() => {
+      const drawn = furniture(scene, 'id-mesa') as Phaser.GameObjects.Image | null;
+      expect(drawn?.type).toBe('Image');
+      expect(drawn?.texture.key).toBe(artSheetKey('desk-glass', 'sheet'));
+    }, LOOP_WAIT);
+  });
+
+  it('without the art pack a desk is a visible placeholder, not a crash', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge, { artManifestUrl: null });
+
+    bridge.emitCommand('desks', { desks: [servedDesk()] });
+
+    expect(findZone(scene, 'id-mesa')).not.toBeNull();
+    expect(furniture(scene, 'id-mesa')?.type).toBe('Rectangle');
   });
 
   it('pinta la decoracion del ocupante dentro de su caja, no en cualquier sitio', async () => {
