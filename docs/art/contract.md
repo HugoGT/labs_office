@@ -27,7 +27,7 @@ The executable source of truth is `src/game/artContract.ts` (`ART_CONTRACT_VERSI
 
 The office's facing order (`FACINGS` in `officeProtocol.ts`: `down, up, left, right`) differs from the pack order (`up, down, left, right`). To pick a row or column, use `walkRowForFacing` and `seatedRowForFacing`/`facingColumn`, never a raw index. A facing is the direction a seated character looks.
 
-- **Seating**: draw a sitter at `chair seat - (22, 42)`. Draw in this order: chair `back`, then the character, then chair `front`. The ground point sorts the chair and its sitter against other characters by depth.
+- **Seating**: draw a sitter at `chair seat - (22, 42)`. Draw in this order: chair `back`, then the character, then chair `front`. The ground point y-sorts the chair and its sitter against the furniture around them, so a desk in front covers the sitter's legs; walking characters stay above both (`depthLayers.ts`).
 - **Desks**: the manifest gives, per facing, the depth point and where the ground point of a matching chair goes. Both are offsets from the desk anchor.
 - **Floors**: each floor is a 96x96 seamless motif split into nine 32x32 tiles (`splitFloorMotif`). World tile (tx, ty) draws frame `floorFrameAt(tx, ty)`, so the full motif repeats every 3 tiles instead of one tile of it.
 - **Walls**: walls sit on the edges of the 32px grid. Each is 16px thick and centered on its line. Every vertex that has a wall gets a 16x16 joint, shaped by its connection mask (north 1, east 2, south 4, west 8). Between two joints sits a 16px body (`wallJointRect`, `wallBodyRect`). The art was drawn for a 96px grid. The exporter regenerates it at 32px.

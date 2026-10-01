@@ -41,7 +41,8 @@ import {
   TERRAIN_SHEET,
 } from './assets';
 import { DESK_ROWS, GROUND, MAP_H, MAP_W, TILE, TREES, ZONE_LABELS } from './mapData';
-import { worldAssetDepth } from './depthLayers';
+import { chairLayerDepth, worldAssetDepth } from './depthLayers';
+import { BASE_MAP_SEATS } from './seating';
 import { markSolid, type TerrainGrid } from './terrainGrid';
 
 /**
@@ -50,6 +51,29 @@ import { markSolid, type TerrainGrid } from './terrainGrid';
  * will.
  */
 export const BASE_MAP_CHAIR = 'chair-wood';
+
+/** Kenney frame of a chair for each facing, as the map drew them before the pack. */
+const KENNEY_CHAIR_FRAME: Readonly<Record<ArtFacing, number>> = {
+  down: INDOOR.chairBack,
+  up: INDOOR.chair,
+  left: INDOOR.chairWhite,
+  right: INDOOR.chairWhite,
+};
+
+/**
+ * Both layers of a chair on its ground point, back then front (step 6): a
+ * sitter goes between them (`seatedAvatarDepth`).
+ */
+export function putChair(
+  scene: Phaser.Scene,
+  key: string,
+  placement: { back: SpritePlacement; front: SpritePlacement },
+): Phaser.GameObjects.Image[] {
+  return [
+    putArtSprite(scene, key, placement.back, chairLayerDepth(placement.back.depthY, 'back')),
+    putArtSprite(scene, key, placement.front, chairLayerDepth(placement.front.depthY, 'front')),
+  ];
+}
 
 /** Draws one frame of a pack sheet at a placement, 1:1. */
 export function putArtSprite(
@@ -181,41 +205,25 @@ export function placeFurniture(scene: Phaser.Scene, grid: TerrainGrid, art?: Art
   }
 
   const chair = packSheet(art, BASE_MAP_CHAIR, isChair);
-  /**
-   * One seat on tile (tx, ty). `facing` is where the sitter looks, toward the
-   * table; the Kenney fallback frame is the one the map always used there.
-   */
-  const seat = (tx: number, ty: number, facing: ArtFacing, kenneyFrame: number): void => {
+  // The chairs are `BASE_MAP_SEATS` (shared with the room, which seats people
+  // on them); the Kenney fallback frame is the one the map always used for
+  // each facing.
+  for (const { tx, ty, facing } of BASE_MAP_SEATS) {
     if (chair === null) {
-      putTile(scene, INDOOR_SHEET, kenneyFrame, tx, ty, worldAssetDepth((ty + 1) * TILE));
-      return;
+      putTile(scene, INDOOR_SHEET, KENNEY_CHAIR_FRAME[facing], tx, ty, worldAssetDepth((ty + 1) * TILE));
+      continue;
     }
     const ground: Point = { x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE };
-    const { back, front } = chairPlacement(chair.piece, facing, ground);
-    // Front over back at the same y-sort point; step 6 slots the sitter between them.
-    putArtSprite(scene, chair.key, back, worldAssetDepth(back.depthY));
-    putArtSprite(scene, chair.key, front, worldAssetDepth(front.depthY) + 0.5);
-  };
+    putChair(scene, chair.key, chairPlacement(chair.piece, facing, ground));
+  }
 
-  // Sala de Juntas: mesa larga + sillas alrededor.
+  // Sala de Juntas: mesa larga, con sus sillas ya puestas arriba.
   putTiledArea(scene, INDOOR_SHEET, INDOOR.tableTop, 53, 6, 7, 5, worldAssetDepth(11 * TILE));
   markSolid(grid.solid, 53, 6, 7, 5);
-  for (let i = 0; i < 7; i++) {
-    seat(53 + i, 5, 'down', INDOOR.chairBack);
-    seat(53 + i, 11, 'up', INDOOR.chair);
-  }
-  for (let j = 0; j < 5; j++) {
-    seat(52, 6 + j, 'right', INDOOR.chairWhite);
-    seat(60, 6 + j, 'left', INDOOR.chairWhite);
-  }
 
   // Cafeteria: mesa de madera + asientos + plantas en las esquinas.
   putTiledArea(scene, INDOOR_SHEET, INDOOR.tableTop, 53, 23, 5, 3, worldAssetDepth(26 * TILE));
   markSolid(grid.solid, 53, 23, 5, 3);
-  for (let i = 0; i < 5; i++) {
-    seat(53 + i, 22, 'down', INDOOR.chairBack);
-    seat(53 + i, 26, 'up', INDOOR.chair);
-  }
   const plants: readonly (readonly [number, number])[] = [
     [51, 19],
     [61, 19],

@@ -19,14 +19,16 @@ import {
   type Point,
 } from './artContract';
 import { GROUND, MAP_H, MAP_W, TILE, type GroundCode } from './mapData';
+import { DESK_SEAT_FACING } from './seating';
 import type { TerrainGrid } from './terrainGrid';
 
 /**
  * Facing of every desk until desks store one: the sitter looks down, toward
  * the viewer, so their face shows and the desk sits in front of them. Desks
- * have no persisted facing (step 3 stores material and color only).
+ * have no persisted facing (step 3 stores material and color only); the room
+ * seats people at a desk facing the same way (`DESK_SEAT_FACING`).
  */
-export const DEFAULT_DESK_FACING: ArtFacing = 'down';
+export const DEFAULT_DESK_FACING: ArtFacing = DESK_SEAT_FACING;
 
 /** A frame of a spritesheet placed in the world: top-left corner, size, frame index and y-sort point. */
 export interface SpritePlacement {

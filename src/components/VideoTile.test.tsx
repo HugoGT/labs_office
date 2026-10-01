@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 import type { AttachableTrack } from '../game/attachableTrack';
 import { avatarKeyFor } from '../game/remoteAvatars';
 import {
+  CHARACTER_PORTRAIT_HEIGHT,
+  CHARACTER_PORTRAIT_SCALE,
+  CHARACTER_PORTRAIT_WIDTH,
   PORTRAIT_SCALE,
   PORTRAIT_SOURCE_HEIGHT,
   PORTRAIT_SOURCE_WIDTH,
@@ -239,5 +242,44 @@ describe('VideoTile: el retrato tiene tamaño fijo, sin re-size (issue #17, D1)'
     const img = screen.getByAltText(`Retrato de ${sessionId}`);
     expect(img).toHaveAttribute('width', String(PORTRAIT_SOURCE_WIDTH * PORTRAIT_SCALE));
     expect(img).toHaveAttribute('height', String(PORTRAIT_SOURCE_HEIGHT * PORTRAIT_SCALE));
+  });
+});
+
+describe('VideoTile: pack character portrait (art migration, step 6)', () => {
+  it('prefers the portrait of the session character, at its own size', () => {
+    const sessionId = 'par-1';
+    render(
+      <VideoTile
+        sessionId={sessionId}
+        name="Par Uno"
+        portraits={{ [avatarKeyFor(sessionId)]: 'data:image/png;base64,PROC' }}
+        characterPortraits={{ [sessionId]: 'data:image/png;base64,PACK' }}
+        track={null}
+        speaking={false}
+      />,
+    );
+
+    const img = screen.getByAltText(`Retrato de ${sessionId}`);
+    expect(img).toHaveAttribute('src', 'data:image/png;base64,PACK');
+    expect(img).toHaveAttribute('width', String(CHARACTER_PORTRAIT_WIDTH * CHARACTER_PORTRAIT_SCALE));
+    expect(img).toHaveAttribute('height', String(CHARACTER_PORTRAIT_HEIGHT * CHARACTER_PORTRAIT_SCALE));
+  });
+
+  it('falls back to the procedural portrait for a session without one', () => {
+    const sessionId = 'par-2';
+    render(
+      <VideoTile
+        sessionId={sessionId}
+        name="Par Dos"
+        portraits={{ [avatarKeyFor(sessionId)]: 'data:image/png;base64,PROC' }}
+        characterPortraits={{ otra: 'data:image/png;base64,PACK' }}
+        track={null}
+        speaking={false}
+      />,
+    );
+
+    const img = screen.getByAltText(`Retrato de ${sessionId}`);
+    expect(img).toHaveAttribute('src', 'data:image/png;base64,PROC');
+    expect(img).toHaveAttribute('width', String(PORTRAIT_SOURCE_WIDTH * PORTRAIT_SCALE));
   });
 });

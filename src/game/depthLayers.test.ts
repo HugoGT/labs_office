@@ -5,11 +5,14 @@ import {
   LAYOUT_GHOST_DEPTH,
   MINIMAP_MARKER_DEPTH,
   SPECIAL_BAND_BASE,
+  DESK_ZONE_DEPTH,
   avatarDepth,
+  chairLayerDepth,
+  seatedAvatarDepth,
   specialAssetDepth,
   worldAssetDepth,
 } from './depthLayers';
-import { WORLD_H } from './mapData';
+import { TILE, WORLD_H } from './mapData';
 
 describe('depthLayers: render bands (#70, #71)', () => {
   it('each band is wide enough for the whole map height, so no band overflows into the next', () => {
@@ -42,5 +45,31 @@ describe('depthLayers: render bands (#70, #71)', () => {
   it('HUD overlays stay above every world band, special assets included', () => {
     expect(MINIMAP_MARKER_DEPTH).toBeGreaterThan(specialAssetDepth(WORLD_H));
     expect(LAYOUT_GHOST_DEPTH).toBeGreaterThan(specialAssetDepth(WORLD_H));
+  });
+});
+
+describe('depthLayers: chairs and sitters (art migration, step 6)', () => {
+  it('a sitter goes between the back and the front layer of its chair', () => {
+    const ground = 400;
+    expect(chairLayerDepth(ground, 'back')).toBeLessThan(seatedAvatarDepth(ground));
+    expect(seatedAvatarDepth(ground)).toBeLessThan(chairLayerDepth(ground, 'front'));
+  });
+
+  it('a sitter y-sorts with the world by its feet, so a table or desk in front of it covers its legs', () => {
+    // A desk facing down has its sitter 10px north of its middle and its own
+    // depth point 6px south of it.
+    expect(seatedAvatarDepth(390)).toBeLessThan(worldAssetDepth(406));
+    expect(seatedAvatarDepth(406)).toBeGreaterThan(worldAssetDepth(390));
+    expect(chairLayerDepth(400, 'front')).toBeLessThan(worldAssetDepth(401));
+  });
+
+  it('walking avatars stay above every seated one (#70)', () => {
+    expect(seatedAvatarDepth(WORLD_H)).toBeLessThan(avatarDepth(0));
+  });
+
+  it('desk zones are floor markers, under the chair and sitter of any desk', () => {
+    // The highest a desk chair can be is its area's top row, one tile in.
+    expect(DESK_ZONE_DEPTH).toBeLessThan(chairLayerDepth(TILE, 'back'));
+    expect(DESK_ZONE_DEPTH).toBeLessThan(seatedAvatarDepth(TILE));
   });
 });

@@ -929,6 +929,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     recordings,
     finished,
     eviction,
+    desks,
     subscribeDesksChanges: (listener: () => void) => {
       desksChangeListeners.add(listener);
       return () => { desksChangeListeners.delete(listener); };

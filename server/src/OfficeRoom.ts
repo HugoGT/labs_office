@@ -42,8 +42,18 @@ import {
   isPresenceStatus,
   recordingAvailableUntil,
 } from '../../src/game/officeProtocol.ts';
+import {
+  BASE_MAP_SEATS,
+  DESK_SEAT_FACING,
+  deskSeatTiles,
+  inSeatReach,
+  mapSeatTiles,
+  parseSeatRef,
+  type SeatTiles,
+} from '../../src/game/seating.ts';
 import { createCallInvitationRegistry, type CallInvitationRegistry } from './callInvitations.ts';
 import { ART_PACK_DEFAULTS } from './decor/artCatalogRules.ts';
+import type { DeskDirectory } from './desks/desksPort.ts';
 import { decideAccess, type AccessDecision } from './directory/accessDecision.ts';
 import type { UserDirectory } from './directory/directoryPort.ts';
 import type { LiveSessionRegistry } from './liveSessions.ts';
@@ -117,6 +127,11 @@ export interface SpacesVersionMessage {
  * Sin id de invitacion (D5): una tarjeta se identifica en el cable por el
  * `sessionId` de quien llama, asi que no hace falta generar ni transportar uno.
  */
+/** A request to sit (art migration, step 6): a `seating.ts` reference. */
+export interface SitMessage {
+  seat: string;
+}
+
 export interface CallMessage {
   to: string;
 }
@@ -244,6 +259,12 @@ export interface OfficeRoomOptions {
    * a revoked account out right away. Absent, nobody can evict from outside.
    */
   eviction?: SessionEvictionHub;
+  /**
+   * Assignable desks (art migration, step 6), to check a desk seat: that the
+   * desk exists, where it is and who owns it. Absent (no `DATABASE_URL`)
+   * there are no desks, so only the base map chairs can be sat on.
+   */
+  desks?: Pick<DeskDirectory, 'getDesk' | 'listDesks'>;
 }
 
 /** Registro del motivo por el que el directorio cerro la puerta. */
@@ -258,11 +279,18 @@ export type DirectoryDenialLogger = (decision: AccessDecision, uid: string) => v
  * ocurrio de verdad al implementarlo, y solo salto porque los tests del camino
  * abierto siguen exigiendo `options.name`.
  */
-type OfficeAuthData = (VerifiedIdentity & { directoryName: string | null; avatarId: string | null }) | true;
+type OfficeAuthData =
+  | (VerifiedIdentity & { directoryName: string | null; avatarId: string | null; directoryUserId: string | null })
+  | true;
 
 /** Account behind a client, or `undefined` in the open office (#78). */
 function accountOf(client: Client<unknown, OfficeAuthData>): string | undefined {
   return client.auth === true ? undefined : client.auth?.uid;
+}
+
+/** A claimed desk seats only its owner; a free one seats anyone (step 6). */
+function mayUseDesk(userId: string | null, occupantId: string | null): boolean {
+  return occupantId === null || (userId !== null && userId === occupantId);
 }
 
 export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthData> {
@@ -298,6 +326,14 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
    * same account can find them and cancel the seat.
    */
   private pendingReconnections = new Map<string, { uid: string; seat: Deferred<Client> }>();
+  private desks?: Pick<DeskDirectory, 'getDesk' | 'listDesks'>;
+  /**
+   * Each sitter's seat reach and directory id, by session (step 6). Kept
+   * because a desk seat's area comes from the store, and a `move` has to know
+   * it without asking the store on every step; the id survives a
+   * reconnection window, when the client is not in `this.clients`.
+   */
+  private seated = new Map<string, { reach: SeatTiles; userId: string | null }>();
 
   onCreate(options?: OfficeRoomOptions): void {
     this.state = new OfficeState();
@@ -310,7 +346,11 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     }
     this.stopRecording = options?.stopRecording;
     this.recordings = options?.recordings;
-    this.unsubscribeDesksChanges = options?.subscribeDesksChanges?.(() => this.broadcast('deskschanged'));
+    this.desks = options?.desks;
+    this.unsubscribeDesksChanges = options?.subscribeDesksChanges?.(() => {
+      this.broadcast('deskschanged');
+      void this.recheckDeskSeats();
+    });
     // Late joiners get the mirror for free: it is plain synced state.
     for (const entry of this.recordings?.list() ?? []) {
       this.state.recordings.set(entry.spaceId, createRecordingState(entry));
@@ -343,7 +383,13 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
 
       player.x = x;
       player.y = y;
-      player.facing = sanitizeFacing(message?.facing);
+      // Moving away from a seat stands up (step 6). A move that stays within
+      // reach keeps it: the client snaps onto the chair after the room says
+      // yes, and a move sent just before the sit is not a request to leave.
+      // Seated, the facing is the seat's, whatever the client says.
+      const reach = this.seated.get(client.sessionId)?.reach;
+      if (reach !== undefined && !inSeatReach({ x, y }, reach)) this.standUp(client.sessionId);
+      if (player.seat === '') player.facing = sanitizeFacing(message?.facing);
 
       // Posicion YA recortada (#10, #12): `POST /livekit/token` compara esto
       // contra un `spaceId`, y confiar en la cruda dejaria a un cliente
@@ -373,6 +419,16 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       if (!player) return;
 
       player.spacesVersion = sanitizeSpacesVersion(message?.version);
+    });
+
+    // Sitting (step 6) is a request like any other: an unknown seat, one out
+    // of reach, an occupied one or someone else's desk is dropped whole.
+    this.onMessage('sit', (client: Client<unknown, OfficeAuthData>, message: SitMessage) => {
+      void this.sit(client, message?.seat);
+    });
+
+    this.onMessage('stand', (client: Client) => {
+      this.standUp(client.sessionId);
     });
 
     // El cliente no es de fiar tampoco aqui: `to`/`from` se comprueban como
@@ -475,6 +531,8 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     // reason. `null` means "no directory", which `onJoin` turns into the pack
     // default.
     let avatarId: string | null = null;
+    // Desk owners are directory ids, not uids (step 6, desk seats).
+    let directoryUserId: string | null = null;
 
     if (this.directory) {
       // La hora se toma aqui y se pasa a `decideAccess`, que es pura: asi la
@@ -490,9 +548,10 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       // `decideAccess`): el primer caso que cubre es justamente `null`.
       directoryName = user!.displayName;
       avatarId = user!.avatarId;
+      directoryUserId = user!.id;
     }
 
-    return { ...identity, directoryName, avatarId };
+    return { ...identity, directoryName, avatarId, directoryUserId };
   }
 
   onJoin(
@@ -535,6 +594,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
         // saved through `/me/avatar`. Without a directory (or without auth)
         // nothing was saved, so everyone is the pack default.
         avatarId: identity?.avatarId ?? ART_PACK_DEFAULTS.character,
+        seat: '',
       }),
     );
 
@@ -651,6 +711,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
    */
   private releaseSession(sessionId: string): void {
     this.state.players.delete(sessionId);
+    this.seated.delete(sessionId);
     this.sessions?.remove(sessionId);
     this.stopRecordingsOf(sessionId);
 
@@ -663,6 +724,93 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     for (const entry of this.invitations.removeAllFor(sessionId)) {
       if (entry.from === sessionId) {
         this.sendTo(entry.to, 'callerleft', { from: entry.from });
+      }
+    }
+  }
+
+  /**
+   * Seats `client` on `raw` if the room agrees (step 6). A base map chair is
+   * checked right away; a desk seat asks the store, so everything is checked
+   * again after that wait: the player may have moved, left or lost the seat
+   * to someone faster in between.
+   *
+   * Desk rule: a claimed desk only seats its owner; a free one seats anyone,
+   * and sitting never claims it. `recheckDeskSeats` keeps that true when the
+   * desk changes hands while someone sits at it.
+   */
+  private async sit(client: Client<unknown, OfficeAuthData>, raw: unknown): Promise<void> {
+    const ref = parseSeatRef(raw);
+    if (ref === null) return;
+    const seatId = raw as string;
+    const player = this.state.players.get(client.sessionId);
+    if (!player || player.seat === seatId) return;
+    const userId = client.auth === true ? null : (client.auth?.directoryUserId ?? null);
+
+    if (ref.kind === 'map') {
+      const seat = BASE_MAP_SEATS[ref.index];
+      this.takeSeat(client.sessionId, seatId, { reach: mapSeatTiles(seat), userId }, seat.facing);
+      return;
+    }
+
+    if (!this.desks) return;
+    let desk: Awaited<ReturnType<DeskDirectory['getDesk']>>;
+    try {
+      desk = await this.desks.getDesk(ref.deskId);
+    } catch {
+      return;
+    }
+    if (desk === null || !mayUseDesk(userId, desk.occupantId)) return;
+    this.takeSeat(client.sessionId, seatId, { reach: deskSeatTiles(desk), userId }, DESK_SEAT_FACING);
+  }
+
+  private takeSeat(
+    sessionId: string,
+    seatId: string,
+    seat: { reach: SeatTiles; userId: string | null },
+    facing: string,
+  ): void {
+    const player = this.state.players.get(sessionId);
+    if (!player || !inSeatReach(player, seat.reach)) return;
+    for (const [otherId, other] of this.state.players) {
+      if (otherId !== sessionId && other.seat === seatId) return;
+    }
+    player.seat = seatId;
+    player.facing = facing;
+    this.seated.set(sessionId, seat);
+  }
+
+  private standUp(sessionId: string): void {
+    this.seated.delete(sessionId);
+    const player = this.state.players.get(sessionId);
+    if (player && player.seat !== '') player.seat = '';
+  }
+
+  /**
+   * A desk changed (claimed, released, moved or deleted): whoever sits at one
+   * it no longer allows, or no longer reaches, stands up.
+   */
+  private async recheckDeskSeats(): Promise<void> {
+    if (!this.desks) return;
+    const deskSitters = [...this.seated].filter(
+      ([sessionId]) => parseSeatRef(this.state.players.get(sessionId)?.seat)?.kind === 'desk',
+    );
+    if (deskSitters.length === 0) return;
+    let desks: Awaited<ReturnType<DeskDirectory['listDesks']>>;
+    try {
+      desks = await this.desks.listDesks();
+    } catch {
+      return;
+    }
+    const byId = new Map(desks.map((desk) => [desk.id, desk]));
+    for (const [sessionId, seat] of deskSitters) {
+      const player = this.state.players.get(sessionId);
+      const ref = parseSeatRef(player?.seat);
+      if (!player || ref?.kind !== 'desk' || this.seated.get(sessionId) !== seat) continue;
+      const desk = byId.get(ref.deskId);
+      if (desk === undefined || !mayUseDesk(seat.userId, desk.occupantId) || !inSeatReach(player, deskSeatTiles(desk))) {
+        this.standUp(sessionId);
+      } else {
+        this.seated.set(sessionId, { ...seat, reach: deskSeatTiles(desk) });
       }
     }
   }

@@ -1,12 +1,30 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
-import { enablePeerBody, makeCharacter, setCharacterStatus, spawnPlayer } from './characters';
-import { avatarDepth, worldAssetDepth } from './depthLayers';
+import { CHAIR, CHARACTER_SEATED, CHARACTER_WALK } from './artContract';
+import { chairPlacement } from './artPlacement';
+import {
+  AVATAR_CONTAINER_SIZE,
+  feetOf,
+  physicalBodyRect,
+  positionForFeet,
+  seatedSpriteBox,
+} from './avatarGeometry';
+import { seatedFrame, walkFrame } from './characterAnimation';
+import {
+  animateCharacter,
+  enableCharacterClicks,
+  enablePeerBody,
+  makeCharacter,
+  setCharacterSheets,
+  setCharacterStatus,
+  spawnPlayer,
+} from './characters';
+import { avatarDepth, chairLayerDepth, worldAssetDepth } from './depthLayers';
 import { TILE, WORLD_H } from './mapData';
 import { DEFAULT_NAME, DEFAULT_STATUS } from './officeProtocol';
 import { STATUS_COLOR } from './presence';
-import { createOfficeTextures } from './textures';
+import { avatarTextureKey, createOfficeTextures } from './textures';
 
 /**
  * Capa navegador: contenedores/sprites/fisica arcade necesitan Phaser real
@@ -136,7 +154,7 @@ describe('makeCharacter: render band (#70)', () => {
       bottom: makeCharacter(scene, 'Abajo', 5, 40, 'av2', DEFAULT_STATUS).depth,
     }));
 
-    expect(depths.top).toBe(avatarDepth(1 * TILE + 16));
+    expect(depths.top).toBe(avatarDepth(feetOf({ x: 0, y: 1 * TILE + 16 }).y));
     expect(depths.top).toBeGreaterThan(worldAssetDepth(WORLD_H));
     expect(depths.bottom).toBeGreaterThan(depths.top);
   });
@@ -184,5 +202,198 @@ describe('enablePeerBody', () => {
     });
 
     expect(peerGeometry).toEqual(playerGeometry);
+  });
+});
+
+/**
+ * Art migration, step 6: the pack sprite is drawn around the network
+ * position, never the other way round. These compare the shared numbers of
+ * `avatarGeometry.ts` with what real Phaser does, so a visual change cannot
+ * quietly move collisions, clicks or what proximity reads.
+ */
+const WALK_SHEET = 'test-walk';
+const SEATED_SHEET = 'test-seated';
+const SHEETS = { walk: WALK_SHEET, seated: SEATED_SHEET };
+const SEAT_ABOVE_GROUND = { x: CHAIR.anchor.x - CHAIR.ground.x, y: CHAIR.anchor.y - CHAIR.ground.y };
+
+async function bootWithSheets(): Promise<Phaser.Scene> {
+  const host = document.createElement('div');
+  document.body.append(host);
+  hosts.push(host);
+  class SheetScene extends Phaser.Scene {
+    constructor() {
+      super('sheets');
+    }
+    preload(): void {
+      this.load.spritesheet(WALK_SHEET, 'assets/pack/character/p01-burgundy-suit-walk.png', {
+        frameWidth: CHARACTER_WALK.frame.width,
+        frameHeight: CHARACTER_WALK.frame.height,
+      });
+      this.load.spritesheet(SEATED_SHEET, 'assets/pack/character/p01-burgundy-suit-seated.png', {
+        frameWidth: CHARACTER_SEATED.frame.width,
+        frameHeight: CHARACTER_SEATED.frame.height,
+      });
+    }
+    create(): void {
+      createOfficeTextures(this);
+    }
+  }
+  const game = new Phaser.Game({
+    type: Phaser.AUTO,
+    parent: host,
+    width: 320,
+    height: 240,
+    physics: { default: 'arcade' },
+    scene: [SheetScene],
+  });
+  games.push(game);
+  await waitForSceneRunning(game, 'sheets');
+  return game.scene.getScene('sheets') as Phaser.Scene;
+}
+
+/** Lets Arcade run its own `preUpdate`, which is where a body follows its container. */
+async function nextFrames(scene: Phaser.Scene, frames = 3): Promise<void> {
+  const target = scene.game.getFrame() + frames;
+  await vi.waitFor(() => expect(scene.game.getFrame()).toBeGreaterThanOrEqual(target), { timeout: 5000, interval: 16 });
+}
+
+function bodyRect(container: Phaser.GameObjects.Container) {
+  const body = container.body as Phaser.Physics.Arcade.Body;
+  return { x: body.x, y: body.y, width: body.width, height: body.height };
+}
+
+describe('avatar geometry against real Phaser (art migration, step 6)', () => {
+  it('the Arcade body of the local player and of a peer is where avatarGeometry says, sheets or not', async () => {
+    const scene = await bootWithSheets();
+    const player = spawnPlayer(scene, 'Yo');
+    const peer = makeCharacter(scene, 'Ana', 0, 0, 'av1', 'g');
+    peer.setPosition(300, 420);
+    enablePeerBody(scene, peer);
+    await nextFrames(scene);
+    const before = { player: bodyRect(player), peer: bodyRect(peer) };
+
+    setCharacterSheets(player, SHEETS);
+    setCharacterSheets(peer, SHEETS);
+    animateCharacter(player, { dx: 0, dy: 0, dtMs: 16 });
+    await nextFrames(scene);
+
+    expect(before.player).toEqual(physicalBodyRect(player));
+    expect(before.peer).toEqual(physicalBodyRect(peer));
+    expect(bodyRect(player)).toEqual(before.player);
+    expect(bodyRect(peer)).toEqual(before.peer);
+    // The shared geometry pins the historic numbers, so this guards both ways.
+    expect(player.width).toBe(AVATAR_CONTAINER_SIZE.width);
+    expect(player.height).toBe(AVATAR_CONTAINER_SIZE.height);
+  });
+
+  it('draws the walk frame with its anchor on the feet, and leaves the position alone', async () => {
+    const scene = await bootWithSheets();
+    const character = makeCharacter(scene, 'Ana', 10, 10, 'av1', 'g');
+    const position = { x: character.x, y: character.y };
+
+    setCharacterSheets(character, SHEETS);
+    animateCharacter(character, { dx: 0, dy: 0, dtMs: 16 });
+
+    const bounds = character.sprite.getBounds();
+    expect({ x: bounds.x + CHARACTER_WALK.anchor.x, y: bounds.y + CHARACTER_WALK.anchor.y }).toEqual(feetOf(position));
+    expect({ width: bounds.width, height: bounds.height }).toEqual(CHARACTER_WALK.frame);
+    expect(character.sprite.texture.key).toBe(WALK_SHEET);
+    expect(Number(character.sprite.frame.name)).toBe(walkFrame('S', 'idle'));
+    expect({ x: character.x, y: character.y }).toEqual(position);
+  });
+
+  it('walks in the direction of movement and goes idle when it stops', async () => {
+    const scene = await bootWithSheets();
+    const character = makeCharacter(scene, 'Ana', 10, 10, 'av1', 'g');
+    setCharacterSheets(character, SHEETS);
+
+    animateCharacter(character, { dx: -2, dy: 2, dtMs: 16 });
+    expect(Number(character.sprite.frame.name)).toBe(walkFrame('SW', 0));
+    animateCharacter(character, { dx: 0, dy: 0, dtMs: 1000 });
+    expect(Number(character.sprite.frame.name)).toBe(walkFrame('SW', 'idle'));
+  });
+
+  it('a sitter on a chair has its seated anchor on the chair seat, between the chair layers', async () => {
+    const scene = await bootWithSheets();
+    const ground = { x: 400, y: 300 };
+    const chair = chairPlacement(
+      { anchors: { seat: CHAIR.anchor, ground: CHAIR.ground } } as Parameters<typeof chairPlacement>[0],
+      'left',
+      ground,
+    );
+    const chairSeat = { x: chair.back.x + CHAIR.anchor.x, y: chair.back.y + CHAIR.anchor.y };
+    const character = makeCharacter(scene, 'Ana', 0, 0, 'av1', 'g');
+    const stand = positionForFeet(ground);
+    character.setPosition(stand.x, stand.y);
+    setCharacterSheets(character, SHEETS);
+
+    character.seatFacing = 'left';
+    animateCharacter(character, { dx: 0, dy: 0, dtMs: 16 });
+
+    const bounds = character.sprite.getBounds();
+    expect({ x: bounds.x + CHARACTER_SEATED.anchor.x, y: bounds.y + CHARACTER_SEATED.anchor.y }).toEqual(chairSeat);
+    expect(seatedSpriteBox(CHARACTER_SEATED, SEAT_ABOVE_GROUND).width).toBe(bounds.width);
+    expect(character.sprite.texture.key).toBe(SEATED_SHEET);
+    expect(Number(character.sprite.frame.name)).toBe(seatedFrame('left', 0));
+    expect(character.depth).toBeGreaterThan(chairLayerDepth(ground.y, 'back'));
+    expect(character.depth).toBeLessThan(chairLayerDepth(ground.y, 'front'));
+  });
+
+  it('a standing avatar sorts in the avatar band by its feet', async () => {
+    const scene = await bootWithSheets();
+    const character = makeCharacter(scene, 'Ana', 10, 10, 'av1', 'g');
+
+    animateCharacter(character, { dx: 0, dy: 0, dtMs: 16 });
+
+    expect(character.depth).toBe(avatarDepth(feetOf(character).y));
+  });
+
+  it('keeps the procedural avatar while there are no sheets, and goes back to it if they are dropped', async () => {
+    const scene = await bootWithSheets();
+    const character = makeCharacter(scene, 'Ana', 10, 10, 'av1', 'g');
+    animateCharacter(character, { dx: 0, dy: 0, dtMs: 16 });
+    expect(character.sprite.texture.key).toBe(avatarTextureKey('av1', 'down'));
+
+    setCharacterSheets(character, SHEETS);
+    setCharacterSheets(character, null);
+
+    expect(character.sprite.texture.key).toBe(avatarTextureKey('av1', 'down'));
+    expect(character.sprite.scale).toBe(2);
+  });
+
+  it('the name pill clears the head, standing and seated', async () => {
+    const scene = await bootWithSheets();
+    const character = makeCharacter(scene, 'Ana', 10, 10, 'av1', 'g');
+    setCharacterSheets(character, SHEETS);
+    const pillBottom = () => character.statusDot.y + 9;
+
+    animateCharacter(character, { dx: 0, dy: 0, dtMs: 16 });
+    expect(pillBottom()).toBeLessThanOrEqual(character.sprite.y);
+    character.seatFacing = 'down';
+    animateCharacter(character, { dx: 0, dy: 0, dtMs: 16 });
+    expect(pillBottom()).toBeLessThanOrEqual(character.sprite.y);
+  });
+
+  it('a click on the drawn body hits the peer, wherever the sprite is', async () => {
+    const scene = await bootWithSheets();
+    const character = makeCharacter(scene, 'Ana', 0, 0, 'av1', 'g');
+    character.setPosition(160, 120);
+    enableCharacterClicks(character);
+    setCharacterSheets(character, SHEETS);
+    const hits = (worldX: number, worldY: number) =>
+      scene.input.manager.pointWithinHitArea(character, worldX - character.x, worldY - character.y);
+
+    animateCharacter(character, { dx: 0, dy: 0, dtMs: 16 });
+    const walk = character.sprite.getBounds();
+    expect(hits(walk.centerX, walk.centerY)).toBe(true);
+    expect(hits(walk.x + 1, walk.y + 1)).toBe(true);
+    expect(hits(walk.right + 2, walk.centerY)).toBe(false);
+    expect(hits(walk.centerX, walk.bottom + 2)).toBe(false);
+
+    character.seatFacing = 'right';
+    animateCharacter(character, { dx: 0, dy: 0, dtMs: 16 });
+    const seated = character.sprite.getBounds();
+    expect(hits(seated.right - 1, seated.centerY)).toBe(true);
+    expect(hits(seated.right + 2, seated.centerY)).toBe(false);
   });
 });

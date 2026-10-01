@@ -26,6 +26,12 @@ export interface PlayerSeed {
    * Always the persisted one: `OfficeRoom` never takes it from the client.
    */
   avatarId: string;
+  /**
+   * Seat the player is sitting on (art migration, step 6): a `seating.ts`
+   * reference, or '' standing. Only `OfficeRoom` writes it, after checking
+   * the seat; having a desk assigned does not set it.
+   */
+  seat: string;
 }
 
 export interface PlayerState extends PlayerSeed {}
@@ -40,6 +46,7 @@ defineTypes(PlayerState, {
   facing: 'string',
   spacesVersion: 'string',
   avatarId: 'string',
+  seat: 'string',
 });
 
 /**
@@ -56,6 +63,7 @@ export function createPlayerState(seed: PlayerSeed): PlayerState {
   player.facing = seed.facing;
   player.spacesVersion = seed.spacesVersion;
   player.avatarId = seed.avatarId;
+  player.seat = seed.seat;
   return player;
 }
 

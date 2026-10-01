@@ -27,6 +27,7 @@ import {
 import { onPageHide } from './pageLifecycle';
 import { decideReconnect } from './reconnectPolicy';
 import type { RemotePlayerSnapshot } from './remoteAvatars';
+import { seatIdOf } from './seating';
 
 /**
  * Forma del jugador tal y como llega por el cable. El cliente no declara el
@@ -43,6 +44,8 @@ interface RemotePlayer {
   spacesVersion: string;
   /** Absent from an older server; `characterIdOf` reads that as no character. */
   avatarId?: unknown;
+  /** '' standing, absent from an older server; `seatIdOf` reads both as no seat. */
+  seat?: unknown;
 }
 
 /** Active recording of a space, as synced (#5). Keyed by spaceId. */
@@ -130,6 +133,12 @@ export interface OfficeRoomHandlers {
    * every peer sees too. Optional for the same reason as the ones above.
    */
   onLocalAvatar?(avatarId: string | null): void;
+  /**
+   * The own seat as the server replicates it (art migration, step 6): the
+   * answer to `sendSit`, and `null` once standing, whoever stood the player
+   * up. Sitting is drawn from this, never from the request alone.
+   */
+  onLocalSeat?(seat: string | null): void;
   /**
    * Se acaba de reconectar: olvida TODO lo que sabias de los pares, viene un
    * replay completo (issue #52).
@@ -225,6 +234,12 @@ export interface OfficeConnection {
   sendCall(to: string): void;
   /** Responde a quien nos llamo: aceptar o pasar viajan por el mismo mensaje (D3, cableado del servidor). */
   sendCallRespond(from: string, accept: boolean): void;
+  /**
+   * Asks to sit on a seat (art migration, step 6). The room may say no
+   * without a word; the answer is the replicated seat (`onLocalSeat`).
+   */
+  sendSit(seat: string): void;
+  sendStand(): void;
   leave(): Promise<void>;
 }
 
@@ -238,6 +253,7 @@ function toSnapshot(sessionId: string, player: RemotePlayer): RemotePlayerSnapsh
     facing: player.facing,
     spacesVersion: player.spacesVersion,
     avatarId: characterIdOf(player.avatarId),
+    seat: seatIdOf(player.seat),
   };
 }
 
@@ -301,14 +317,18 @@ export async function connectOfficeRoom({
       const snapshot = toSnapshot(sessionId, player);
       handlers.onAdd(snapshot);
       if (own) handlers.onLocalAvatar?.(snapshot.avatarId);
+      if (own) handlers.onLocalSeat?.(snapshot.seat);
       let lastAvatarId = snapshot.avatarId;
+      let lastSeat = snapshot.seat;
       // La suscripcion por jugador se registra dentro del alta: `onChange` a
       // nivel de mapa solo avisa de altas y bajas, no de campos que mutan.
       $(player).onChange(() => {
         const changed = toSnapshot(sessionId, player);
         handlers.onChange(changed);
         if (own && changed.avatarId !== lastAvatarId) handlers.onLocalAvatar?.(changed.avatarId);
+        if (own && changed.seat !== lastSeat) handlers.onLocalSeat?.(changed.seat);
         lastAvatarId = changed.avatarId;
+        lastSeat = changed.seat;
       });
     });
 
@@ -505,6 +525,12 @@ export async function connectOfficeRoom({
     },
     sendCallRespond(from, accept) {
       room.send('callrespond', { from, accept });
+    },
+    sendSit(seat) {
+      room.send('sit', { seat });
+    },
+    sendStand() {
+      room.send('stand', {});
     },
     async leave() {
       // El orden importa: marcar primero es lo que hace que el `onLeave` que

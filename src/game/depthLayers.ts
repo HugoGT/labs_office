@@ -53,6 +53,33 @@ export function avatarDepth(y: number): number {
   return AVATAR_BAND_BASE + clampY(y);
 }
 
+/**
+ * A seated avatar leaves the avatar band and y-sorts with the furniture by
+ * its feet, which stand on the chair ground (art migration, step 6): the desk
+ * or table in front of it then covers its legs, as the pack art expects.
+ * Walking avatars stay in their band above it, so the #70 rule holds for
+ * whoever moves.
+ *
+ * Inside the world band the chair's two layers wrap it: back, sitter, front,
+ * all on the same ground point.
+ */
+const CHAIR_FRONT_BIAS = 0.5;
+const SEATED_BIAS = 0.25;
+
+export function chairLayerDepth(groundY: number, layer: 'back' | 'front'): number {
+  return worldAssetDepth(groundY) + (layer === 'front' ? CHAIR_FRONT_BIAS : 0);
+}
+
+export function seatedAvatarDepth(groundY: number): number {
+  return worldAssetDepth(groundY) + SEATED_BIAS;
+}
+
+/**
+ * Status tint of an assignable desk: a floor marker over the space floors
+ * (1.5) and under the zone labels (2), so it never veils the desk's sitter.
+ */
+export const DESK_ZONE_DEPTH = 1.75;
+
 /** Depth of a special (`aboveAvatars`) asset whose bottom edge is at `bottomY` (world px). */
 export function specialAssetDepth(bottomY: number): number {
   return SPECIAL_BAND_BASE + clampY(bottomY);

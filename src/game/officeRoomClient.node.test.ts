@@ -9,7 +9,9 @@ import { matchMaker } from '@colyseus/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createOfficeServer, type OfficeServer } from '../../server/src/createOfficeServer.ts';
 import { createMemoryDirectory } from '../../server/src/directory/memoryDirectory.ts';
+import { TILE } from './mapData';
 import { OFFICE_ROOM_NAME } from './officeProtocol';
+import { BASE_MAP_SEATS, mapSeatId } from './seating';
 import {
   connectOfficeRoom,
   type OfficeConnection,
@@ -644,5 +646,38 @@ describe('connectOfficeRoom: chosen character (art migration, step 5)', () => {
     await waitFor(() => local.length > 0);
 
     expect(local).toEqual(['character-p07-green-suit']);
+  });
+});
+
+describe('connectOfficeRoom: seats (art migration, step 6)', () => {
+  const CHAIR = BASE_MAP_SEATS[0];
+  const NEXT_TO_CHAIR = { x: CHAIR.tx * TILE + 16, y: (CHAIR.ty - 1) * TILE + 16 };
+
+  it('sendSit asks for a seat; peers see it in their snapshots and the sitter through onLocalSeat', async () => {
+    const watcher = recorder();
+    await connect('Ana', watcher.handlers);
+    const local: (string | null)[] = [];
+    const sitter = await connect('Beto', { ...recorder().handlers, onLocalSeat: (seat) => local.push(seat) });
+
+    sitter.sendMove(NEXT_TO_CHAIR.x, NEXT_TO_CHAIR.y, 'down');
+    await waitFor(() => watcher.changed.some((s) => s.sessionId === sitter.sessionId && s.x === NEXT_TO_CHAIR.x));
+    sitter.sendSit(mapSeatId(0));
+
+    await waitFor(() => watcher.changed.some((s) => s.sessionId === sitter.sessionId && s.seat === mapSeatId(0)));
+    await waitFor(() => local.includes(mapSeatId(0)));
+
+    sitter.sendStand();
+    await waitFor(() => local.at(-1) === null);
+    expect(watcher.changed.at(-1)?.seat).toBeNull();
+  });
+
+  it('a snapshot of someone standing has no seat', async () => {
+    const watcher = recorder();
+    await connect('Ana', watcher.handlers);
+    const other = await connect('Beto', recorder().handlers);
+
+    await waitFor(() => watcher.added.some((s) => s.sessionId === other.sessionId));
+
+    expect(watcher.added.find((s) => s.sessionId === other.sessionId)?.seat).toBeNull();
   });
 });

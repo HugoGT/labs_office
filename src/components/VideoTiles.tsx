@@ -60,16 +60,22 @@ export function VideoTiles({
 }: VideoTilesProps) {
   const [voice, setVoice] = useState<OfficeEventMap['voice']>(INITIAL_VOICE);
   const [portraits, setPortraits] = useState<Record<string, string> | null>(null);
+  const [characterPortraits, setCharacterPortraits] = useState<Record<string, string> | null>(null);
 
   useEffect(() => {
     const unsubscribeVoice = bridge.on('voice', setVoice);
     // Un solo emisor durante toda la sesion (D1): no hace falta desuscribirse
     // para volver a escuchar, solo quedarse con el ultimo valor recibido.
     const unsubscribePortraits = bridge.on('portraits', (payload) => setPortraits(payload.byKey));
+    // Unlike the procedural set, this one changes as sheets load and peers come and go (step 6).
+    const unsubscribeCharacterPortraits = bridge.on('characterportraits', (payload) =>
+      setCharacterPortraits(payload.bySession),
+    );
 
     return () => {
       unsubscribeVoice();
       unsubscribePortraits();
+      unsubscribeCharacterPortraits();
     };
   }, [bridge]);
 
@@ -133,6 +139,7 @@ export function VideoTiles({
             sessionId={stage.sessionId}
             name={stageLabel}
             portraits={portraits}
+            characterPortraits={characterPortraits}
             track={stage.track}
             speaking={false}
             fit="contain"
@@ -147,6 +154,7 @@ export function VideoTiles({
                 sessionId={entry.sessionId}
                 name={entry.name}
                 portraits={portraits}
+                characterPortraits={characterPortraits}
                 track={entry.track}
                 speaking={speakers.has(entry.sessionId)}
               />

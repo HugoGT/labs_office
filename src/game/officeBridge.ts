@@ -106,6 +106,13 @@ export interface OfficeEventMap {
    */
   portraits: { byKey: Record<string, string> };
   /**
+   * Portrait of each session drawn from its pack character (art migration,
+   * step 6): the idle frame facing the viewer, as a data URL. Re-emitted
+   * whole whenever a character's sheet loads or a peer comes or goes; a
+   * session missing here keeps its procedural `portraits` entry.
+   */
+  characterportraits: { bySession: Record<string, string> };
+  /**
    * Alguien hizo clic en un escritorio asignable sobre el que SI hay algo que
    * hacer (#7, slice 5). Un escritorio ajeno no emite nada: no se ofrece.
    *
@@ -189,6 +196,11 @@ export interface OfficeCommandMap {
    * ver su propio anillo encenderse en el canvas.
    */
   speakers: { sessionIds: string[] };
+  /**
+   * Sit on the free seat in reach, or stand up when seated (art migration,
+   * step 6). Same as pressing E in the canvas; the room has the last word.
+   */
+  toggleSeat: undefined;
   /**
    * Los 3 comandos de llamada (issue #2, D3) viajan solo por `emitCommand`,
    * como `setStatus`: ningun metodo de conveniencia (`bridge.callPeer()` no

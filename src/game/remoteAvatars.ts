@@ -21,6 +21,12 @@ export interface RemotePlayerSnapshot {
    * by `characterIdOf`; `null` draws the pack default.
    */
   avatarId: string | null;
+  /**
+   * Seat the server has this peer on (art migration, step 6), already
+   * checked by `seatIdOf`; `null` standing. While seated, `facing` is the
+   * seat's.
+   */
+  seat: string | null;
 }
 
 export interface RemoteAvatarSink<TAvatar> {

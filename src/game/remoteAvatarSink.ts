@@ -5,18 +5,20 @@
  * `remoteAvatars.ts`, en jsdom.
  */
 
-// Import de VALOR, no de tipo (a diferencia de antes de la unit 8): hace
-// falta `Phaser.Geom.Rectangle`/`.Contains` en tiempo de ejecucion para el
-// area de contacto del clic del menu contextual.
-import Phaser from 'phaser';
+import type Phaser from 'phaser';
+import { FACING_WALK_DIRECTION } from './artContract';
+import { initialAnimation } from './characterAnimation';
 import {
+  animateCharacter,
+  enableCharacterClicks,
   enablePeerBody,
   makeCharacter,
   setCharacterFacing,
+  setCharacterSheets,
   setCharacterStatus,
   type CharacterContainer,
+  type CharacterSheets,
 } from './characters';
-import { avatarDepth } from './depthLayers';
 import type { OfficeBridge } from './officeBridge';
 import {
   DEFAULT_FACING,
@@ -39,11 +41,16 @@ export interface RemoteAvatarContainer extends CharacterContainer {
    * `proximityTick` la lee para el predicado mutuo de `audiblePeers`.
    */
   spacesVersion: string;
-  /**
-   * Persisted character of this peer (art migration, step 5). Kept on the
-   * container for step 6, which draws it; the body is still procedural.
-   */
+  /** Persisted character of this peer (art migration, step 5), drawn from its sheets. */
   avatarId: string | null;
+  /**
+   * Seat the server has this peer on (step 6), or `null`. The scene reads it
+   * so it never offers someone else's seat.
+   */
+  seat: string | null;
+  /** Position at the last animation frame: a peer's walk comes from how far its tween moved it. */
+  lastX: number;
+  lastY: number;
 }
 
 /**
@@ -72,7 +79,16 @@ export function createPhaserAvatarSink(
   // grupo, cada peer nace con un cuerpo Arcade inmovible y se une a el; sin
   // el, comportamiento de hoy -- ningun peer bloquea al jugador.
   peerBodies?: Phaser.GameObjects.Group,
+  // Art migration, step 6: loaded sheets of a character, or `null` to keep
+  // the procedural body. Optional for the same reason as `peerBodies`.
+  characterSheets: (avatarId: string | null) => CharacterSheets | null = () => null,
 ): RemoteAvatarSink<RemoteAvatarContainer> {
+  /** Seat facing from the snapshot: while seated, the replicated facing is the seat's. */
+  const seatOf = (avatar: RemoteAvatarContainer, snapshot: RemotePlayerSnapshot): void => {
+    avatar.seat = snapshot.seat;
+    avatar.seatFacing = snapshot.seat === null ? null : facingOf(snapshot.facing);
+  };
+
   return {
     create(snapshot: RemotePlayerSnapshot) {
       // Se construye en (0,0) y se coloca despues porque `makeCharacter` toma
@@ -86,9 +102,16 @@ export function createPhaserAvatarSink(
         statusOf(snapshot.status),
       ) as RemoteAvatarContainer;
       container.setPosition(snapshot.x, snapshot.y);
-      container.setDepth(avatarDepth(snapshot.y));
+      container.lastX = snapshot.x;
+      container.lastY = snapshot.y;
       container.spacesVersion = snapshot.spacesVersion;
       container.avatarId = snapshot.avatarId;
+      setCharacterFacing(container, facingOf(snapshot.facing));
+      container.animation = initialAnimation(FACING_WALK_DIRECTION[container.facing]);
+      seatOf(container, snapshot);
+      setCharacterSheets(container, characterSheets(snapshot.avatarId));
+      // Sorted (and posed) right away, before any `update()` of the scene.
+      animateCharacter(container, { dx: 0, dy: 0, dtMs: 0 });
 
       // #59: cuerpo de colision, solo si el llamador nos dio donde unirse.
       // `Group.add` registra su propio listener de DESTROY (Group.js:615),
@@ -105,10 +128,8 @@ export function createPhaserAvatarSink(
       // creacion -- un peer muta via `update()` mientras vive, y cerrar sobre
       // el snapshot ofreceria "Llamar" sobre alguien que acaba de pasar a
       // "No molestar".
-      container.setInteractive(
-        new Phaser.Geom.Rectangle(-16, -22, 32, 44),
-        Phaser.Geom.Rectangle.Contains,
-      );
+      // The clickable area follows the drawn body, walking or seated (step 6).
+      enableCharacterClicks(container);
       container.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
         // #98: por el minimapa el clic es navegacion (`CameraPanLayer`), no
         // un menu sobre un avatar que ahi mide unos pixeles.
@@ -134,7 +155,9 @@ export function createPhaserAvatarSink(
       // dejaria a alguien pintado "En linea" mientras esta en "No molestar".
       setCharacterStatus(avatar, statusOf(snapshot.status));
       avatar.spacesVersion = snapshot.spacesVersion;
+      if (avatar.avatarId !== snapshot.avatarId) setCharacterSheets(avatar, characterSheets(snapshot.avatarId));
       avatar.avatarId = snapshot.avatarId;
+      seatOf(avatar, snapshot);
       avatar.glideTween?.stop();
       // Se interpola en vez de saltar: el servidor publica ~10 veces por
       // segundo, asi que un `setPosition` directo haria que los demas se

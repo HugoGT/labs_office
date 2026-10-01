@@ -15,7 +15,15 @@ import {
   ZONE_LABELS,
 } from './mapData';
 import { TERRAIN_SHEET } from './assets';
-import { MINIMAP_MARKER_DEPTH } from './depthLayers';
+import {
+  DESK_ZONE_DEPTH,
+  MINIMAP_MARKER_DEPTH,
+  avatarDepth,
+  chairLayerDepth,
+  worldAssetDepth,
+} from './depthLayers';
+import { feetOf } from './avatarGeometry';
+import { BASE_MAP_SEATS, deskSeatId, mapSeatId } from './seating';
 import { deskFurnitureName, deskZoneName } from './deskLayout';
 import { artSheetKey, recoloredSheetKey } from './artPack';
 import { deskAreaAnchor, deskPlacement, spaceFloorTiles } from './artPlacement';
@@ -508,6 +516,8 @@ function fakeConnector(sessionId = 'yo') {
   const calls: string[] = [];
   const respondedCalls: { from: string; accept: boolean }[] = [];
   const sentSpacesVersions: string[] = [];
+  const sits: string[] = [];
+  let stands = 0;
   let captured: OfficeRoomHandlers | undefined;
   let joinedWith: PresenceStatus | undefined;
   let joinedName: string | undefined;
@@ -525,6 +535,10 @@ function fakeConnector(sessionId = 'yo') {
     sendSpacesVersion: (version) => sentSpacesVersions.push(version),
     sendCall: (to) => calls.push(to),
     sendCallRespond: (from, accept) => respondedCalls.push({ from, accept }),
+    sendSit: (seat) => sits.push(seat),
+    sendStand: () => {
+      stands++;
+    },
     leave: async () => {
       left = true;
     },
@@ -536,6 +550,8 @@ function fakeConnector(sessionId = 'yo') {
     calls,
     respondedCalls,
     sentSpacesVersions,
+    sits,
+    stands: () => stands,
     handlers: () => captured,
     joinedWith: () => joinedWith,
     joinedName: () => joinedName,
@@ -563,6 +579,7 @@ function remoteSnapshot(overrides: Record<string, unknown> = {}) {
     facing: 'down',
     spacesVersion: BUILT_IN_SPACES_VERSION,
     avatarId: null,
+    seat: null,
     ...overrides,
   } as Parameters<OfficeRoomHandlers['onAdd']>[0];
 }
@@ -973,6 +990,8 @@ describe('OfficeScene: comando setStatus via el puente (#1)', () => {
       sendSpacesVersion: () => {},
       sendCall: () => {},
       sendCallRespond: () => {},
+      sendSit: () => {},
+      sendStand: () => {},
       leave: async () => {},
     };
 
@@ -1870,12 +1889,15 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
     // `placeFurniture` uses `(y + h) * TILE` for every piece, so the desk
     // y-sorts against the furniture around it inside the world band. Avatars
     // no longer depend on this: they live in their own band above it (#70).
+    // The zone itself is a floor marker since step 6, so it never veils the
+    // desk's sitter.
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
 
     bridge.emitCommand('desks', { desks: [servedDesk()] });
 
-    expect(findZone(scene, 'id-mesa')!.depth).toBe(12 * TILE + 3 * TILE);
+    expect(furniture(scene, 'id-mesa')!.depth).toBe(12 * TILE + 3 * TILE);
+    expect(findZone(scene, 'id-mesa')!.depth).toBe(DESK_ZONE_DEPTH);
   });
 
   it('clicar un escritorio libre pide cogerlo', async () => {
@@ -2516,5 +2538,243 @@ describe('OfficeScene: persisted character ids (art migration, step 5)', () => {
     }, LOOP_WAIT);
     const [peer] = findRemoteAvatars(scene) as (CharacterContainer & { avatarId?: string | null })[];
     expect(peer.avatarId).toBe('character-p12-mint-blazer');
+  });
+});
+
+describe('OfficeScene: pack characters, walking and seats (art migration, step 6)', () => {
+  const CHAIR_INDEX = 0;
+  const CHAIR = BASE_MAP_SEATS[CHAIR_INDEX];
+  const CHAIR_GROUND = { x: (CHAIR.tx + 0.5) * TILE, y: (CHAIR.ty + 0.5) * TILE };
+
+  async function connected(sessionId = 'mi-sesion', bridge = createOfficeBridge()) {
+    const connector = fakeConnector(sessionId);
+    const { scene } = await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    return { connector, scene, bridge, player: findPlayer(scene) };
+  }
+
+  /** Next to the first meeting room chair, on the tile north of it. */
+  function nextToChair(player: CharacterContainer): void {
+    player.setPosition(CHAIR.tx * TILE + 16, (CHAIR.ty - 1) * TILE + 16);
+  }
+
+  it('draws the local player from the character the server replicates, once its sheets load', async () => {
+    const { connector, player } = await connected();
+
+    connector.handlers()!.onLocalAvatar?.('character-p03-forest-suit');
+
+    await vi.waitFor(() => {
+      expect(player.sprite.texture.key).toBe(artSheetKey('character-p03-forest-suit', 'walk'));
+    }, LOOP_WAIT);
+  });
+
+  it('draws a peer from its character, and keeps it procedural without the pack', async () => {
+    const { connector, scene } = await connected();
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', avatarId: 'character-p05-charcoal-suit' }));
+
+    await vi.waitFor(() => {
+      expect(findRemoteAvatars(scene)[0].sprite.texture.key).toBe(artSheetKey('character-p05-charcoal-suit', 'walk'));
+    }, LOOP_WAIT);
+
+    const offline = await bootOfficeScene(createOfficeBridge(), { artManifestUrl: null });
+    expect(findPlayer(offline.scene).sprite.texture.key).toBe(`${PLAYER_TEXTURE}-down`);
+  });
+
+  it('a player without a replicated character is the pack default', async () => {
+    const { scene } = await bootOfficeScene(createOfficeBridge(), { endpoint: null });
+    const player = findPlayer(scene);
+
+    await vi.waitFor(() => {
+      expect(player.sprite.texture.key).toBe(artSheetKey('character-p01-burgundy-suit', 'walk'));
+    }, LOOP_WAIT);
+  });
+
+  it('drawing the pack sprite does not move what the network, proximity and spaces read', async () => {
+    const { connector, scene, player } = await connected();
+    const rooms: OfficeEventMap['room'][] = [];
+    (scene as unknown as { bridge: ReturnType<typeof createOfficeBridge> }).bridge.on('room', (room) => rooms.push(room));
+    const meeting = BUILT_IN_SPACES[0];
+    player.setPosition(meeting.x + 2 * TILE + 16, meeting.y + 2 * TILE + 16);
+    const position = { x: player.x, y: player.y };
+
+    connector.handlers()!.onLocalAvatar?.('character-p03-forest-suit');
+    await vi.waitFor(() => {
+      expect(player.sprite.texture.key).toBe(artSheetKey('character-p03-forest-suit', 'walk'));
+      expect(rooms.at(-1)?.name).toBe(meeting.name);
+    }, LOOP_WAIT);
+
+    expect({ x: player.x, y: player.y }).toEqual(position);
+    expect(connector.sent.at(-1)).toMatchObject(position);
+  });
+
+  it('E next to a free chair asks the room to sit; only the confirmation seats the player on it', async () => {
+    const { connector, scene, player } = await connected();
+    nextToChair(player);
+    await advanceGameClock(scene, 50);
+
+    (scene as unknown as { bridge: ReturnType<typeof createOfficeBridge> }).bridge.emitCommand('toggleSeat', undefined);
+    expect(connector.sits).toEqual([mapSeatId(CHAIR_INDEX)]);
+    await advanceGameClock(scene, 100);
+    expect(player.seatFacing).toBeNull();
+
+    connector.handlers()!.onLocalSeat?.(mapSeatId(CHAIR_INDEX));
+
+    expect(feetOf(player)).toEqual(CHAIR_GROUND);
+    expect(player.seatFacing).toBe(CHAIR.facing);
+    await vi.waitFor(() => {
+      expect(player.depth).toBeGreaterThan(chairLayerDepth(CHAIR_GROUND.y, 'back'));
+      expect(player.depth).toBeLessThan(chairLayerDepth(CHAIR_GROUND.y, 'front'));
+      expect(connector.sent.at(-1)).toMatchObject({ x: player.x, y: player.y, facing: CHAIR.facing });
+    }, LOOP_WAIT);
+  });
+
+  it('pressing E again stands up; walking stands up too', async () => {
+    const { connector, scene, player } = await connected();
+    const bridge = (scene as unknown as { bridge: ReturnType<typeof createOfficeBridge> }).bridge;
+    nextToChair(player);
+    bridge.emitCommand('toggleSeat', undefined);
+    connector.handlers()!.onLocalSeat?.(mapSeatId(CHAIR_INDEX));
+
+    bridge.emitCommand('toggleSeat', undefined);
+    expect(connector.stands()).toBe(1);
+    expect(player.seatFacing).toBeNull();
+
+    bridge.emitCommand('toggleSeat', undefined);
+    connector.handlers()!.onLocalSeat?.(mapSeatId(CHAIR_INDEX));
+    dispatchKey('keydown', KEY.LEFT);
+    try {
+      await vi.waitFor(() => expect(connector.stands()).toBe(2), LOOP_WAIT);
+    } finally {
+      dispatchKey('keyup', KEY.LEFT);
+    }
+    expect(player.seatFacing).toBeNull();
+    await vi.waitFor(() => expect(player.depth).toBe(avatarDepth(feetOf(player).y)), LOOP_WAIT);
+  });
+
+  it('the room standing the player up (for example after a move away) shows it standing', async () => {
+    const { connector, player } = await connected();
+    nextToChair(player);
+    (player.scene as unknown as { bridge: ReturnType<typeof createOfficeBridge> }).bridge.emitCommand('toggleSeat', undefined);
+    connector.handlers()!.onLocalSeat?.(mapSeatId(CHAIR_INDEX));
+
+    connector.handlers()!.onLocalSeat?.(null);
+
+    expect(player.seatFacing).toBeNull();
+  });
+
+  it('a seat confirmation nobody asked for is answered by standing up', async () => {
+    const { connector } = await connected();
+
+    connector.handlers()!.onLocalSeat?.(mapSeatId(CHAIR_INDEX));
+
+    expect(connector.stands()).toBe(1);
+  });
+
+  it('never offers a seat out of reach or one a peer sits on', async () => {
+    const { connector, scene, player } = await connected();
+    const bridge = (scene as unknown as { bridge: ReturnType<typeof createOfficeBridge> }).bridge;
+
+    bridge.emitCommand('toggleSeat', undefined);
+    expect(connector.sits).toEqual([]);
+
+    connector.handlers()!.onAdd(
+      remoteSnapshot({ sessionId: 'par-1', x: CHAIR.tx * TILE + 16, y: CHAIR.ty * TILE - 2, seat: mapSeatId(CHAIR_INDEX), facing: CHAIR.facing }),
+    );
+    nextToChair(player);
+    bridge.emitCommand('toggleSeat', undefined);
+    expect(connector.sits).not.toContain(mapSeatId(CHAIR_INDEX));
+  });
+
+  it('shows a seated peer between the layers of its chair, facing the way the room says', async () => {
+    const { connector, scene } = await connected();
+    connector.handlers()!.onAdd(
+      remoteSnapshot({ sessionId: 'par-1', x: CHAIR_GROUND.x, y: CHAIR_GROUND.y - 18, seat: mapSeatId(CHAIR_INDEX), facing: CHAIR.facing }),
+    );
+    const peer = findRemoteAvatars(scene)[0];
+
+    expect(peer.seatFacing).toBe(CHAIR.facing);
+    await vi.waitFor(() => {
+      expect(peer.depth).toBeGreaterThan(worldAssetDepth(CHAIR_GROUND.y));
+      expect(peer.depth).toBeLessThan(chairLayerDepth(CHAIR_GROUND.y, 'front'));
+    }, LOOP_WAIT);
+  });
+
+  it('a peer walks in the direction its position moves', async () => {
+    const { connector, scene } = await connected();
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', avatarId: 'character-p05-charcoal-suit', x: 500, y: 600 }));
+    const peer = findRemoteAvatars(scene)[0];
+    await vi.waitFor(() => {
+      expect(peer.sprite.texture.key).toBe(artSheetKey('character-p05-charcoal-suit', 'walk'));
+    }, LOOP_WAIT);
+
+    connector.handlers()!.onChange(
+      remoteSnapshot({ sessionId: 'par-1', avatarId: 'character-p05-charcoal-suit', x: 500, y: 520, facing: 'up' }),
+    );
+
+    await vi.waitFor(() => expect(peer.animation.direction).toBe('N'), LOOP_WAIT);
+    expect(peer.animation.walkMs).toBeGreaterThan(0);
+  });
+
+  it('sits at an assignable desk it may use, on a chair drawn at the desk', async () => {
+    const { connector, scene, player } = await connected();
+    const bridge = (scene as unknown as { bridge: ReturnType<typeof createOfficeBridge> }).bridge;
+    const desk: OfficeDesk = {
+      id: 'id-mesa-libre',
+      label: 'Mesa 1',
+      x: 10 * TILE,
+      y: 30 * TILE,
+      w: 3 * TILE,
+      h: 3 * TILE,
+      occupant: null,
+      mine: false,
+    };
+    bridge.emitCommand('desks', { desks: [desk] });
+    const chairs = () =>
+      scene.children.list.filter(
+        (c) => c.type === 'Image' && (c as Phaser.GameObjects.Image).texture.key === artSheetKey('chair-wood', 'sheet'),
+      ).length;
+    const baseChairs = BASE_MAP_SEATS.length * 2;
+    await vi.waitFor(() => expect(chairs()).toBe(baseChairs + 2), LOOP_WAIT);
+
+    player.setPosition(desk.x + desk.w / 2, desk.y + desk.h / 2);
+    bridge.emitCommand('toggleSeat', undefined);
+    expect(connector.sits).toEqual([deskSeatId(desk.id)]);
+
+    connector.handlers()!.onLocalSeat?.(deskSeatId(desk.id));
+    const furnitureImage = scene.children.getByName(deskFurnitureName(desk.id)) as Phaser.GameObjects.Image;
+    expect(feetOf(player).y).toBeLessThan(furnitureImage.depth);
+    expect(player.seatFacing).toBe('down');
+  });
+
+  it('never offers a desk someone else claimed', async () => {
+    const { connector, scene, player } = await connected();
+    const bridge = (scene as unknown as { bridge: ReturnType<typeof createOfficeBridge> }).bridge;
+    const desk: OfficeDesk = {
+      id: 'id-mesa-ajena',
+      label: 'Mesa 2',
+      x: 10 * TILE,
+      y: 30 * TILE,
+      w: 3 * TILE,
+      h: 3 * TILE,
+      occupant: { id: 'id-otra', displayName: 'Otra', items: [] },
+      mine: false,
+    };
+    bridge.emitCommand('desks', { desks: [desk] });
+
+    player.setPosition(desk.x + desk.w / 2, desk.y + desk.h / 2);
+    bridge.emitCommand('toggleSeat', undefined);
+
+    expect(connector.sits).toEqual([]);
+  });
+
+  it('publishes the pack portrait of the own session for the video tiles', async () => {
+    const bridge = createOfficeBridge();
+    const portraits: OfficeEventMap['characterportraits'][] = [];
+    bridge.on('characterportraits', (payload) => portraits.push(payload));
+    const { connector } = await connected('mi-sesion', bridge);
+
+    connector.handlers()!.onLocalAvatar?.('character-p03-forest-suit');
+
+    await vi.waitFor(() => expect(portraits.at(-1)?.bySession['mi-sesion']).toMatch(/^data:image\/png/), LOOP_WAIT);
   });
 });
