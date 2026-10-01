@@ -44,8 +44,10 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 
-# Las dos mitades del servidor. server/src importa dos modulos compartidos de
-# src/game (officeProtocol.ts y mapData.ts), que no tienen dependencias propias.
+# Las dos mitades del servidor. server/src importa modulos compartidos de
+# src/game (officeProtocol.ts, mapData.ts, seating.ts, officeLayout.ts...), sin
+# dependencias propias. src/game/maps/office.json, the Tiled layout every
+# `move` is checked against, comes with this same copy.
 COPY server/src ./server/src
 COPY src/game ./src/game
 

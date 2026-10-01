@@ -5,16 +5,13 @@ import type { CharacterContainer } from './characters';
 import {
   BUILT_IN_SPACES,
   BUILT_IN_SPACES_VERSION,
-  DESK_ROWS,
-  MAP_H,
-  MAP_W,
   PLAYER_SPAWN_TX,
   PLAYER_SPAWN_TY,
   TILE,
-  TREES,
   ZONE_LABELS,
 } from './mapData';
-import { TERRAIN_SHEET } from './assets';
+import { TERRAIN_LAYER_COUNT } from './artContract';
+import { BASE_LAYOUT } from './officeLayout';
 import {
   DESK_ZONE_DEPTH,
   MINIMAP_MARKER_DEPTH,
@@ -151,7 +148,7 @@ describe('OfficeScene: identidad y construccion (D2/D5)', () => {
 });
 
 describe('OfficeScene dentro de un Phaser.Game real: mapa y jugador', () => {
-  it('pinta el suelo completo, mobiliario, arboles y etiquetas de zona en create()', async () => {
+  it('draws the Tiled layout in create(): terrain tilemap, walls, props and zone labels from the pack', async () => {
     const { scene } = await bootOfficeScene();
 
     const images = scene.children.list.filter(
@@ -160,30 +157,25 @@ describe('OfficeScene dentro de un Phaser.Game real: mapa y jugador', () => {
     const texts = scene.children.list.filter(
       (c): c is Phaser.GameObjects.Text => c.type === 'Text',
     );
+    const ofPiece = (kind: string) => BASE_LAYOUT.props.filter((prop) => prop.kind === kind).length;
 
-    const tiled = scene.children.list.filter((c) => c.type === 'TileSprite');
-    const groundImages = images.filter(
-      (img) => img.texture.key === TERRAIN_SHEET || img.texture.key.startsWith('art:floor-'),
-    );
-    const deskCount = DESK_ROWS.reduce((sum, [, , n]) => sum + n, 0);
-    const packDesks = images.filter((img) => img.texture.key === artSheetKey('desk-wood', 'sheet'));
-
-    // Suelo (una imagen por tile, del pack o Kenney) + arboles.
-    expect(groundImages.length).toBeGreaterThanOrEqual(MAP_W * MAP_H + TREES.length);
-    // Art step 4: base desks come from the pack; only the two room tables,
-    // which the pack has no piece for, stay Kenney tileSprites.
-    expect(packDesks).toHaveLength(deskCount);
-    expect(tiled).toHaveLength(2);
+    // Art step 8: the floor is tilemap layers, not one image per tile.
+    expect(scene.children.list.filter((c) => c.type === 'TilemapLayer')).toHaveLength(TERRAIN_LAYER_COUNT + 1);
+    expect(images.filter((img) => img.texture.key === artSheetKey('desk-wood', 'sheet'))).toHaveLength(ofPiece('desk'));
+    expect(images.filter((img) => img.texture.key.startsWith('art:tree-'))).toHaveLength(ofPiece('tree'));
+    expect(images.filter((img) => img.texture.key.startsWith('art:table-'))).toHaveLength(ofPiece('table'));
+    expect(images.filter((img) => img.texture.key.startsWith('art:wall-')).length).toBeGreaterThan(0);
+    // The Kenney placeholder art is gone from the map.
+    expect(scene.children.list.filter((c) => c.type === 'TileSprite')).toHaveLength(0);
     expect(texts).toHaveLength(ZONE_LABELS.length);
   });
 
-  it('without the art pack it still draws the whole map from the legacy sheets', async () => {
+  it('without the art pack it still draws the whole map, from its fallbacks', async () => {
     const { scene } = await bootOfficeScene(createOfficeBridge(), { artManifestUrl: 'assets/pack/missing.json' });
 
-    const images = scene.children.list.filter((c): c is Phaser.GameObjects.Image => c.type === 'Image');
-    const deskCount = DESK_ROWS.reduce((sum, [, , n]) => sum + n, 0);
-    expect(images.filter((img) => img.texture.key === TERRAIN_SHEET).length).toBeGreaterThanOrEqual(MAP_W * MAP_H + TREES.length);
-    expect(scene.children.list.filter((c) => c.type === 'TileSprite')).toHaveLength(deskCount + 2);
+    expect(scene.children.list.filter((c) => c.type === 'TilemapLayer')).toHaveLength(1);
+    const placeholders = scene.children.list.filter((c) => c.type === 'Rectangle').length;
+    expect(placeholders).toBeGreaterThanOrEqual(BASE_LAYOUT.props.length);
   });
 
   it('crea al jugador local y a nadie mas: la oficina arranca vacia de companeros', async () => {
@@ -1703,11 +1695,11 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
   });
 
   it('no toca los 39 escritorios del mapa base: son mobiliario, no sitios que se cojan', async () => {
-    // `DESK_ROWS` son 2x1 y van pegados de dos en dos. Un escritorio asignable
-    // se dibuja ENCIMA, como un `SpaceArea` es algo aparte de un `Room`.
+    // The base desks are 2x1 props of the layout. Un escritorio asignable se
+    // dibuja ENCIMA: es config servida, no parte del mapa base.
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
-    const deskCount = DESK_ROWS.reduce((sum, [, , n]) => sum + n, 0);
+    const deskCount = BASE_LAYOUT.props.filter((prop) => prop.kind === 'desk').length;
 
     bridge.emitCommand('desks', { desks: [servedDesk()] });
 

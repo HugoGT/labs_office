@@ -26,7 +26,7 @@ import {
   type ArtPieceKind,
 } from './artContract';
 
-/** Served next to the SPA from `public/`, relative like the legacy Kenney sheets. */
+/** Served next to the SPA from `public/`, relative to the page. */
 export const ART_PACK_MANIFEST_URL = 'assets/pack/manifest.json';
 
 /**
@@ -48,10 +48,11 @@ export interface ArtLoadRequest {
 
 /**
  * Kinds the map draws as soon as the office opens. They load in `preload`, so
- * the first frame shows the pack and not the fallback. Characters and walls
- * are not drawn from the pack yet (steps 6 and 8) and load on demand.
+ * the first frame shows the pack and not the fallback: the terrain tileset
+ * and every piece of the Tiled layout (art step 8). Characters load on
+ * demand, once somebody wears them.
  */
-export const BOOT_PIECE_KINDS: readonly ArtPieceKind[] = ['floor', 'desk', 'chair'];
+export const BOOT_PIECE_KINDS: readonly ArtPieceKind[] = ['floor', 'desk', 'chair', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table'];
 
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/;
 

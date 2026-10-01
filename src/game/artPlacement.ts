@@ -18,7 +18,7 @@ import {
   type ArtFacing,
   type Point,
 } from './artContract';
-import { GROUND, MAP_H, MAP_W, TILE, type GroundCode } from './mapData';
+import { MAP_H, MAP_W, TILE } from './mapData';
 import { DESK_SEAT_FACING } from './seating';
 import type { TerrainGrid } from './terrainGrid';
 
@@ -88,29 +88,10 @@ export function chairPlacement(piece: ArtChairPiece, facing: ArtFacing, ground: 
 }
 
 /**
- * Pack floor that paints each ground code of the base map, or `null` where the
- * pack has none yet (hedge, bridge, tile walls): those keep the legacy Kenney
- * frame until the map migration (step 8).
- */
-const GROUND_FLOORS: Readonly<Record<GroundCode, string | null>> = {
-  [GROUND.G]: 'floor-grass',
-  [GROUND.GD]: null,
-  [GROUND.WATER]: 'floor-water',
-  [GROUND.BRIDGE]: null,
-  [GROUND.FLOOR]: 'floor-plain',
-  [GROUND.WOODF]: 'floor-wood',
-  [GROUND.WALL]: null,
-  [GROUND.CORR]: 'floor-plain',
-};
-
-export function groundFloorPiece(code: GroundCode): string | null {
-  return GROUND_FLOORS[code];
-}
-
-/**
  * Tiles of a space that take its floor: its rectangle clipped to the map, less
- * walls and water. Water stays visible because it blocks the way; painting a
- * floor over it would show a walkable room where nobody can walk.
+ * walls, hedges and water. Water stays visible because it blocks the way;
+ * painting a floor over it would show a walkable room where nobody can walk.
+ * A bridge deck over water is walkable, so it takes the floor.
  */
 export function spaceFloorTiles(space: PixelRect, grid: TerrainGrid): { tx: number; ty: number }[] {
   const x0 = Math.max(0, Math.floor(space.x / TILE));
@@ -120,8 +101,7 @@ export function spaceFloorTiles(space: PixelRect, grid: TerrainGrid): { tx: numb
   const tiles: { tx: number; ty: number }[] = [];
   for (let ty = y0; ty < y1; ty++) {
     for (let tx = x0; tx < x1; tx++) {
-      const code = grid.ground[ty][tx];
-      if (code === GROUND.WALL || code === GROUND.WATER) continue;
+      if (grid.walled[ty][tx] || (grid.terrain[ty][tx] === 'water' && grid.solid[ty][tx])) continue;
       tiles.push({ tx, ty });
     }
   }

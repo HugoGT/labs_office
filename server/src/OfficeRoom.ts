@@ -42,6 +42,7 @@ import {
   isPresenceStatus,
   recordingAvailableUntil,
 } from '../../src/game/officeProtocol.ts';
+import { BASE_TERRAIN, isPositionWalkable, type TerrainSnapshot } from '../../src/game/officeLayout.ts';
 import {
   BASE_MAP_SEATS,
   DESK_SEAT_FACING,
@@ -197,6 +198,13 @@ export function deriveIdentityName(identity: VerifiedIdentity, fallback: string)
 
 export interface OfficeRoomOptions {
   /**
+   * The terrain every `move` is checked against (art migration, step 8),
+   * read on each move so it can change while the room lives. Absent is the
+   * committed layout's (`BASE_TERRAIN`); persisted blocks (#123 phase 2)
+   * hand in their own snapshot here.
+   */
+  terrain?: () => TerrainSnapshot;
+  /**
    * Registro de sesiones vivas para LiveKit (D4), inyectado por
    * `createOfficeServer.ts` via `gameServer.define(name, Room, { sessions })`.
    * `OfficeRoom` no crea su propio registro: si lo hiciera como singleton de
@@ -334,9 +342,11 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
    * reconnection window, when the client is not in `this.clients`.
    */
   private seated = new Map<string, { reach: SeatTiles; userId: string | null }>();
+  private terrain: () => TerrainSnapshot = () => BASE_TERRAIN;
 
   onCreate(options?: OfficeRoomOptions): void {
     this.state = new OfficeState();
+    if (options?.terrain) this.terrain = options.terrain;
     this.sessions = options?.sessions;
     this.auth = options?.auth;
     this.directory = options?.directory;
@@ -380,15 +390,20 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       // Un `move` invalido se ignora entero: aplicar solo el eje valido dejaria
       // al avatar en una posicion que el cliente nunca pidio.
       if (x === null || y === null) return;
-
-      player.x = x;
-      player.y = y;
       // Moving away from a seat stands up (step 6). A move that stays within
       // reach keeps it: the client snaps onto the chair after the room says
       // yes, and a move sent just before the sit is not a request to leave.
       // Seated, the facing is the seat's, whatever the client says.
       const reach = this.seated.get(client.sessionId)?.reach;
-      if (reach !== undefined && !inSeatReach({ x, y }, reach)) this.standUp(client.sessionId);
+      const withinSeat = reach !== undefined && inSeatReach({ x, y }, reach);
+      // The same rule the client collides with (step 8): water, walls, hedges
+      // and solid props block. A sitter is exempt within its seat's reach:
+      // feet on the chair put the body over the table, out of the collider.
+      if (!withinSeat && !isPositionWalkable(this.terrain(), x, y)) return;
+
+      player.x = x;
+      player.y = y;
+      if (reach !== undefined && !withinSeat) this.standUp(client.sessionId);
       if (player.seat === '') player.facing = sanitizeFacing(message?.facing);
 
       // Posicion YA recortada (#10, #12): `POST /livekit/token` compara esto

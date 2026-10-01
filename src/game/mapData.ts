@@ -8,8 +8,13 @@
  */
 
 export const TILE = 32;
-export const MAP_W = 64;
-export const MAP_H = 44;
+/**
+ * The world of the Tiled layout (`maps/office.json`, #123): 14x10 blocks of
+ * 9x9 tiles. Restated here to keep this file import-free; `mapData.test.ts`
+ * pins it to the layout.
+ */
+export const MAP_W = 126;
+export const MAP_H = 90;
 export const WORLD_W = MAP_W * TILE;
 export const WORLD_H = MAP_H * TILE;
 export const PROX_RADIUS = 170;
@@ -21,60 +26,6 @@ export const PROX_RADIUS = 170;
  */
 export const PLAYER_SPAWN_TX = 22;
 export const PLAYER_SPAWN_TY = 28;
-
-/** Codigos de suelo (app.js:11). */
-export const GROUND = {
-  G: 0,
-  GD: 1,
-  WATER: 2,
-  BRIDGE: 3,
-  FLOOR: 4,
-  WOODF: 5,
-  WALL: 6,
-  CORR: 7,
-} as const;
-
-export type GroundCode = (typeof GROUND)[keyof typeof GROUND];
-
-/** Filas de escritorios: [tileX, tileY, cantidad] (app.js:16-21). Cada escritorio ocupa 2x1 tiles. */
-export const DESK_ROWS: readonly (readonly [number, number, number])[] = [
-  [3, 5, 3],
-  [13, 4, 2],
-  [20, 4, 3],
-  [27, 4, 2],
-  [3, 14, 3],
-  [12, 15, 3],
-  [25, 15, 3],
-  [33, 14, 3],
-  [4, 24, 2],
-  [16, 24, 3],
-  [27, 24, 3],
-  [4, 36, 3],
-  [16, 36, 3],
-  [28, 36, 3],
-];
-
-export const TREES: readonly (readonly [number, number])[] = [
-  [2, 2],
-  [9, 2],
-  [18, 2],
-  [30, 2],
-  [40, 2],
-  [46, 4],
-  [2, 9],
-  [46, 12],
-  [2, 26],
-  [46, 26],
-  [2, 34],
-  [44, 34],
-  [12, 41],
-  [24, 41],
-  [36, 41],
-  [44, 41],
-  [52, 34],
-  [56, 36],
-  [60, 34],
-];
 
 export interface ZoneLabel {
   t: string;
@@ -90,23 +41,15 @@ export const ZONE_LABELS: readonly ZoneLabel[] = [
 ];
 
 /**
- * Salas/espacios (app.js:56-59). Coordenadas y tamano en pixeles, como el
- * prototipo original. `id` es la clave de pertenencia estable (#7, D2): el
- * nombre puede cambiar sin afectar quien esta dentro. `doorTiles`/
- * `floorStyle` son puramente de dibujo del mapa base (D3) -- `terrainGrid.ts`
- * los usa para trazar la puerta y el suelo de cada sala; un espacio servido
- * desde config (slice 3) no los trae porque no redibuja paredes.
- */
-/**
  * Lo minimo para decidir PERTENENCIA: identidad y rectangulo, en pixeles. Es
  * lo que consumen `detectSpace` y `OfficeScene`, y es exactamente lo que sabe
- * un espacio servido desde `GET /spaces` (slice 3) -- la tabla `spaces` no
- * tiene columnas de dibujo, asi que un espacio creado por un Admin no puede
- * traerlas.
+ * un espacio servido desde `GET /spaces` (slice 3). `id` es la clave de
+ * pertenencia estable (#7, D2): el nombre puede cambiar sin afectar quien
+ * esta dentro.
  *
- * Existe separado de `Room` para que esa carencia sea un hecho del sistema de
- * tipos y no un campo inventado. Un `doorTiles` de relleno en una config
- * servida trazaria una puerta donde no hay ninguna.
+ * Nothing here draws a room: walls, doors and floors of the built-in rooms
+ * live in the Tiled layout (`maps/office.json`, art step 8), at these same
+ * rectangles.
  */
 export interface SpaceArea {
   id: string;
@@ -119,17 +62,9 @@ export interface SpaceArea {
    * Floor material and color served by `GET /spaces` (art migration, step 4),
    * an `ArtAppearance` spelled out to keep this file import-free. Drawing only:
    * membership never reads it. Absent in the built-in fallback, whose rooms
-   * paint their `floorStyle` instead.
+   * show the floor of the layout instead.
    */
   floor?: { readonly materialId: string; readonly color: string | null };
-}
-
-/** Un `SpaceArea` que ADEMAS sabe dibujarse: solo los incorporados (D3). */
-export interface Room extends SpaceArea {
-  /** Filas de la pared izquierda que son puerta, no muro (`terrainGrid.ts`). */
-  doorTiles: readonly [number, number];
-  /** Codigo de suelo interior de esta sala (`terrainGrid.ts`). */
-  floorStyle: GroundCode;
 }
 
 /**
@@ -140,7 +75,7 @@ export interface Room extends SpaceArea {
  * imports (ver cabecera) -- los valores se copian a mano y la igualdad se fija
  * con una prueba (`server/src/spaces/builtInSeed.test.ts`).
  */
-export const BUILT_IN_SPACES: readonly Room[] = [
+export const BUILT_IN_SPACES: readonly SpaceArea[] = [
   {
     id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
     x: 50 * TILE,
@@ -148,8 +83,6 @@ export const BUILT_IN_SPACES: readonly Room[] = [
     w: 13 * TILE,
     h: 14 * TILE,
     name: 'Sala de Juntas',
-    doorTiles: [8, 9],
-    floorStyle: GROUND.FLOOR,
   },
   {
     id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
@@ -158,8 +91,6 @@ export const BUILT_IN_SPACES: readonly Room[] = [
     w: 13 * TILE,
     h: 14 * TILE,
     name: 'Cafetería',
-    doorTiles: [24, 25],
-    floorStyle: GROUND.WOODF,
   },
 ];
 

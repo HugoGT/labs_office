@@ -157,9 +157,10 @@ describe('connectOfficeRoom', () => {
     await waitFor(() => watcher.added.some((s) => s.sessionId === b.sessionId));
     const before = watcher.changed.length;
 
-    for (let i = 1; i <= 60; i++) b.sendMove(100 + i, 200, 'right');
+    // Open lawn: the room refuses moves onto the desks and trees near the corner (art step 8).
+    for (let i = 1; i <= 60; i++) b.sendMove(300 + i, 400, 'right');
 
-    await waitFor(() => watcher.changed.some((s) => s.x === 160));
+    await waitFor(() => watcher.changed.some((s) => s.x === 360));
     // 60 llamadas seguidas (un segundo de frames) no pueden ser 60 mensajes.
     expect(watcher.changed.length - before).toBeLessThan(10);
   });

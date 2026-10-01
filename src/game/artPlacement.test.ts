@@ -5,10 +5,9 @@ import {
   deskAreaAnchor,
   deskPlacement,
   footprintAnchor,
-  groundFloorPiece,
   spaceFloorTiles,
 } from './artPlacement';
-import { GROUND, TILE } from './mapData';
+import { TILE } from './mapData';
 import { buildTerrainGrid } from './terrainGrid';
 
 const DESK_PIECE: ArtDeskPiece = {
@@ -94,21 +93,8 @@ describe('chairPlacement', () => {
   });
 });
 
-describe('groundFloorPiece', () => {
-  it('maps the ground codes the pack can paint and leaves the rest to the legacy sheet', () => {
-    expect(groundFloorPiece(GROUND.G)).toBe('floor-grass');
-    expect(groundFloorPiece(GROUND.WATER)).toBe('floor-water');
-    expect(groundFloorPiece(GROUND.WOODF)).toBe('floor-wood');
-    expect(groundFloorPiece(GROUND.FLOOR)).toBe('floor-plain');
-    expect(groundFloorPiece(GROUND.CORR)).toBe('floor-plain');
-    expect(groundFloorPiece(GROUND.GD)).toBeNull();
-    expect(groundFloorPiece(GROUND.BRIDGE)).toBeNull();
-    expect(groundFloorPiece(GROUND.WALL)).toBeNull();
-  });
-});
-
 describe('spaceFloorTiles', () => {
-  it('covers the tiles of a space except its walls', () => {
+  it('covers the tiles of a space except its walls and hedges', () => {
     const grid = buildTerrainGrid();
     // Built-in Sala de Juntas: 13x14 tiles at (50,2), walled with a two-tile door.
     const tiles = spaceFloorTiles({ x: 50 * TILE, y: 2 * TILE, w: 13 * TILE, h: 14 * TILE }, grid);
@@ -123,15 +109,17 @@ describe('spaceFloorTiles', () => {
     const grid = buildTerrainGrid();
     const tiles = spaceFloorTiles({ x: 12 * TILE, y: 18 * TILE, w: 5 * TILE, h: 5 * TILE }, grid);
 
-    expect(tiles.some(({ tx, ty }) => grid.ground[ty][tx] === GROUND.WATER)).toBe(false);
-    // The bridge planks at x 13..15 are walkable, so they do get the floor.
+    expect(tiles.some(({ tx, ty }) => grid.terrain[ty][tx] === 'water' && grid.solid[ty][tx])).toBe(false);
+    // The bridge deck at x 13..15 is walkable over the water, so it does get the floor.
     expect(tiles).toContainEqual({ tx: 13, ty: 19 });
+    expect(tiles).not.toContainEqual({ tx: 12, ty: 19 });
   });
 
   it('clips a space that reaches past the map', () => {
     const grid = buildTerrainGrid();
-    const tiles = spaceFloorTiles({ x: -TILE, y: -TILE, w: 2 * TILE, h: 2 * TILE }, grid);
+    const tiles = spaceFloorTiles({ x: -TILE, y: -TILE, w: 3 * TILE, h: 3 * TILE }, grid);
 
-    expect(tiles).toEqual([{ tx: 0, ty: 0 }]);
+    // Row and column 0 are the hedge of the world's border.
+    expect(tiles).toEqual([{ tx: 1, ty: 1 }]);
   });
 });

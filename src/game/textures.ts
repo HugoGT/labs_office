@@ -4,12 +4,10 @@
  * (`Graphics#generateTexture` necesita un contexto real): se prueba en la capa
  * navegador.
  *
- * Todo lo que era mapa (suelo, mobiliario, naturaleza) salio de aqui y ahora
- * son frames de las hojas Kenney, ver `assets.ts`. Los avatares se quedan
- * procedurales por una razon concreta: ningun pack CC0 de Kenney trae personas
- * de cuerpo entero en vista 3/4 -- los de `roguelike-characters` son bustos
- * frontales -- y la alternativa con animacion real (LPC) es CC-BY-SA, licencia
- * virica que no encaja en un producto comercial.
+ * Todo lo que era mapa (suelo, mobiliario, naturaleza) salio de aqui: it is
+ * the art pack drawn from the Tiled layout now (`mapBuilder.ts`). These
+ * procedural avatars stay as the fallback while a pack character loads or
+ * when the pack is missing.
  *
  * Cada avatar se genera en cuatro orientaciones. Sin ellas, un personaje que
  * anda hacia la izquierda sigue mirando de frente, que es justo lo que delata

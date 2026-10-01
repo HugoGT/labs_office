@@ -4,9 +4,12 @@
  * which decides who actually sits: having a desk assigned and sitting at it
  * are different things, and only the second one is a seat.
  *
- * No imports, like `mapData.ts` and `artContract.ts`: the server loads it
- * with Node type stripping, so `TILE` and the facing names are restated.
+ * No imports but the Tiled layout, like `mapData.ts` and `officeLayout.ts`:
+ * the server loads it with Node type stripping, so `TILE` and the facing
+ * names are restated. A JSON import needs no `.ts` extension.
  */
+
+import officeMap from './maps/office.json' with { type: 'json' };
 
 /** Same as `TILE` in mapData.ts (pinned by `seating.test.ts`). */
 export const SEATING_TILE = 32;
@@ -20,29 +23,57 @@ export interface MapSeat {
   readonly facing: SeatFacing;
 }
 
+const SEAT_FACINGS: readonly SeatFacing[] = ['up', 'down', 'left', 'right'];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function propertyOf(object: Record<string, unknown>, name: string): unknown {
+  if (!Array.isArray(object.properties)) return undefined;
+  const property = object.properties.find((candidate) => isRecord(candidate) && candidate.name === name);
+  return isRecord(property) ? property.value : undefined;
+}
+
 /**
- * Chairs of the base map, around the meeting room and cafeteria tables. Their
- * index is their identity on the wire (`map-<index>`), so new chairs go at the
- * end. `mapBuilder.ts` draws exactly these.
+ * The chairs of the `seats` object layer of a Tiled layout (`officeLayout.ts`
+ * reads the rest of it): one tile-sized object per chair, with a `facing` and
+ * a `seat` index. The index, not the object order, is the chair's identity on
+ * the wire (`map-<index>`), so indices must run 0..n-1 with no gap: a new
+ * chair takes the next one, and an index is never reused for another chair.
  */
-export const BASE_MAP_SEATS: readonly MapSeat[] = (() => {
+export function parseBaseMapSeats(raw: unknown): MapSeat[] {
+  const layers = isRecord(raw) && Array.isArray(raw.layers) ? raw.layers : [];
+  const layer = layers.find((candidate) => isRecord(candidate) && candidate.name === 'seats' && candidate.type === 'objectgroup');
+  if (!isRecord(layer) || !Array.isArray(layer.objects)) throw new Error('Invalid office layout: no seats object layer');
+  const byIndex = new Map<number, MapSeat>();
+  for (const object of layer.objects) {
+    if (!isRecord(object)) throw new Error('Invalid office layout: a seat is not an object');
+    const index = propertyOf(object, 'seat');
+    const facing = propertyOf(object, 'facing');
+    const tx = typeof object.x === 'number' ? object.x / SEATING_TILE : Number.NaN;
+    const ty = typeof object.y === 'number' ? object.y / SEATING_TILE : Number.NaN;
+    if (!Number.isInteger(index) || (index as number) < 0) throw new Error(`Invalid office layout: seat object ${String(object.id)} has no seat index`);
+    if (byIndex.has(index as number)) throw new Error(`Invalid office layout: seat ${String(index)} is used twice`);
+    if (!Number.isInteger(tx) || !Number.isInteger(ty)) throw new Error(`Invalid office layout: seat ${String(index)} is not on the 32px grid`);
+    if (!SEAT_FACINGS.includes(facing as SeatFacing)) throw new Error(`Invalid office layout: seat ${String(index)} has facing ${String(facing)}`);
+    byIndex.set(index as number, { tx, ty, facing: facing as SeatFacing });
+  }
   const seats: MapSeat[] = [];
-  // Sala de Juntas: both long sides of the table, then both ends.
-  for (let i = 0; i < 7; i++) {
-    seats.push({ tx: 53 + i, ty: 5, facing: 'down' });
-    seats.push({ tx: 53 + i, ty: 11, facing: 'up' });
-  }
-  for (let j = 0; j < 5; j++) {
-    seats.push({ tx: 52, ty: 6 + j, facing: 'right' });
-    seats.push({ tx: 60, ty: 6 + j, facing: 'left' });
-  }
-  // Cafeteria: both long sides of its table.
-  for (let i = 0; i < 5; i++) {
-    seats.push({ tx: 53 + i, ty: 22, facing: 'down' });
-    seats.push({ tx: 53 + i, ty: 26, facing: 'up' });
+  for (let index = 0; index < byIndex.size; index += 1) {
+    const seat = byIndex.get(index);
+    if (seat === undefined) throw new Error(`Invalid office layout: seat ${index} is missing; seat indices run 0..n-1`);
+    seats.push(seat);
   }
   return seats;
-})();
+}
+
+/**
+ * Chairs of the base map, around the meeting room and cafeteria tables, from
+ * the Tiled layout. Their index is their identity on the wire (`map-<index>`),
+ * so new chairs take the next index. `mapBuilder.ts` draws exactly these.
+ */
+export const BASE_MAP_SEATS: readonly MapSeat[] = parseBaseMapSeats(officeMap);
 
 /**
  * A desk seat looks the way every desk faces until desks store a facing

@@ -9,8 +9,10 @@ import {
   inSeatReach,
   mapSeatId,
   mapSeatTiles,
+  parseBaseMapSeats,
   parseSeatRef,
   seatIdOf,
+  type MapSeat,
 } from './seating';
 
 describe('seating: seat references', () => {
@@ -56,6 +58,65 @@ describe('seating: base map chairs', () => {
   it('never repeats a tile', () => {
     const tiles = new Set(BASE_MAP_SEATS.map((seat) => `${seat.tx},${seat.ty}`));
     expect(tiles.size).toBe(BASE_MAP_SEATS.length);
+  });
+
+  it('keeps every chair at the index it had when the map was code: the index is its id on the wire', () => {
+    // The loops `BASE_MAP_SEATS` was built with before the Tiled layout (art step 8).
+    const before: MapSeat[] = [];
+    for (let i = 0; i < 7; i++) {
+      before.push({ tx: 53 + i, ty: 5, facing: 'down' });
+      before.push({ tx: 53 + i, ty: 11, facing: 'up' });
+    }
+    for (let j = 0; j < 5; j++) {
+      before.push({ tx: 52, ty: 6 + j, facing: 'right' });
+      before.push({ tx: 60, ty: 6 + j, facing: 'left' });
+    }
+    for (let i = 0; i < 5; i++) {
+      before.push({ tx: 53 + i, ty: 22, facing: 'down' });
+      before.push({ tx: 53 + i, ty: 26, facing: 'up' });
+    }
+
+    expect(BASE_MAP_SEATS.slice(0, before.length)).toEqual(before);
+  });
+});
+
+describe('seating: the seats layer of the Tiled layout', () => {
+  const seatObject = (seat: number, tx: number, ty: number, facing = 'down', extra: Record<string, unknown> = {}) => ({
+    id: 100 + seat,
+    name: '',
+    type: 'seat',
+    x: tx * 32,
+    y: ty * 32,
+    width: 32,
+    height: 32,
+    rotation: 0,
+    visible: true,
+    properties: [
+      { name: 'facing', type: 'string', value: facing },
+      { name: 'seat', type: 'int', value: seat },
+    ],
+    ...extra,
+  });
+  const mapWith = (objects: unknown[]) => ({ layers: [{ type: 'objectgroup', name: 'seats', objects }] });
+
+  it('orders the chairs by their seat property, not by where Tiled keeps the objects', () => {
+    const seats = parseBaseMapSeats(mapWith([seatObject(1, 4, 5, 'up'), seatObject(0, 2, 3, 'left')]));
+
+    expect(seats).toEqual([
+      { tx: 2, ty: 3, facing: 'left' },
+      { tx: 4, ty: 5, facing: 'up' },
+    ]);
+  });
+
+  it('rejects a gap or a repeated index, which would rename chairs on the wire', () => {
+    expect(() => parseBaseMapSeats(mapWith([seatObject(0, 1, 1), seatObject(2, 2, 2)]))).toThrow(/seat 1/);
+    expect(() => parseBaseMapSeats(mapWith([seatObject(0, 1, 1), seatObject(0, 2, 2)]))).toThrow(/seat 0/);
+  });
+
+  it('rejects chairs off the grid, with an unknown facing, or a map without seats', () => {
+    expect(() => parseBaseMapSeats(mapWith([seatObject(0, 1, 1, 'down', { x: 40 })]))).toThrow(/grid/);
+    expect(() => parseBaseMapSeats(mapWith([seatObject(0, 1, 1, 'sideways')]))).toThrow(/facing/);
+    expect(() => parseBaseMapSeats({ layers: [] })).toThrow(/seats/);
   });
 });
 

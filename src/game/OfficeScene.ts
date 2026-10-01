@@ -10,7 +10,6 @@ import {
   spaceFloorTiles,
 } from './artPlacement';
 import { feetOf, positionForFeet } from './avatarGeometry';
-import { preloadOfficeAssets } from './assets';
 import { beginAutoWalk, stepAutoWalk, type AutoWalkState } from './autoWalk';
 import { CameraPanLayer } from './CameraPanLayer';
 import { walkFrame } from './characterAnimation';
@@ -37,13 +36,14 @@ import { isEditableElementFocused } from './inputFocusGuard';
 import { LayoutEditLayer } from './LayoutEditLayer';
 import {
   BASE_MAP_CHAIR,
-  placeFurniture,
-  placeNature,
+  placeLayout,
+  placeSeats,
   placeZoneLabels,
   putArtSprite,
   putChair,
   putFloorTile,
-  renderGround,
+  renderTerrain,
+  type TerrainTilemap,
 } from './mapBuilder';
 import {
   BUILT_IN_SPACES,
@@ -55,6 +55,7 @@ import {
   type SpaceArea,
 } from './mapData';
 import type { OfficeBridge } from './officeBridge';
+import { BASE_LAYOUT, BASE_TERRAIN } from './officeLayout';
 import {
   DEFAULT_FACING,
   DEFAULT_NAME,
@@ -206,6 +207,8 @@ function rosterPeerOf(snapshot: { sessionId: string; name: string; status: strin
 export class OfficeScene extends Phaser.Scene {
   private readonly bridge: OfficeBridge;
   private grid!: TerrainGrid;
+  /** The terrain layers, redrawn in place when the terrain changes (#123 phase 2). */
+  private terrainTilemap?: TerrainTilemap;
   private player!: CharacterContainer;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WasdKeys;
@@ -386,11 +389,10 @@ export class OfficeScene extends Phaser.Scene {
 
   /**
    * Las hojas tienen que estar cargadas antes de que `create()` dibuje: el
-   * manifiesto del art pack y lo que el mapa pinta de el, y las hojas Kenney,
-   * que siguen para lo que el pack no trae todavia y como fallback.
+   * manifiesto del art pack y todo lo que el mapa pinta de el (art step 8:
+   * the terrain tileset and every piece of the Tiled layout).
    */
   preload(): void {
-    preloadOfficeAssets(this);
     this.art = new ArtPackLoader(this, { manifestUrl: this.options.artManifestUrl });
     this.art.preload();
   }
@@ -402,11 +404,13 @@ export class OfficeScene extends Phaser.Scene {
     // de forma invisible (issue #17, D1).
     this.bridge.emit('portraits', { byKey: this.exportPortraits() });
 
-    const grid: TerrainGrid = buildTerrainGrid();
+    // The static office is the Tiled layout (art step 8); collisions come from
+    // the same walkability rule the room enforces on every `move`.
+    const grid: TerrainGrid = buildTerrainGrid(BASE_TERRAIN, BASE_LAYOUT);
     this.grid = grid;
-    renderGround(this, grid, this.art);
-    placeFurniture(this, grid, this.art);
-    placeNature(this, grid, this.art);
+    this.terrainTilemap = renderTerrain(this, BASE_TERRAIN, BASE_LAYOUT, this.art);
+    placeLayout(this, BASE_LAYOUT, this.art);
+    placeSeats(this, BASE_MAP_SEATS, this.art);
     placeZoneLabels(this);
 
     // El nombre de la sesion manda sobre la pildora del avatar local (#6).
@@ -416,6 +420,9 @@ export class OfficeScene extends Phaser.Scene {
 
     this.buildColliders(grid);
     this.setupCameras();
+    // Decals are a few pixels each: at minimap scale they are noise, and a
+    // layer less to draw on every frame.
+    if (this.terrainTilemap.decals !== null) this.minimapCamera?.ignore(this.terrainTilemap.decals);
     this.setupInput();
     // #53: despues de `setupInput` (comparte `this.input`, mismo momento en
     // que `layoutEditLayer` se crea mas abajo).
@@ -1078,7 +1085,7 @@ export class OfficeScene extends Phaser.Scene {
   /**
    * Floors of the served spaces (art migration, step 4), a desk's cubicle
    * included, in their persisted material and color. Built-in rooms without a
-   * served floor keep the one `renderGround` painted from their `floorStyle`.
+   * served floor keep the terrain of the layout under them.
    * A floor that cannot load shows a neutral veil over the space, so a room
    * with a broken floor still reads as a room.
    */
@@ -1146,7 +1153,7 @@ export class OfficeScene extends Phaser.Scene {
    * quien lo ocupe.
    *
    * The depth is the BOTTOM edge of the area in the world band, same
-   * convention as `placeFurniture` (`(y + h) * TILE`), so the desk y-sorts
+   * convention as `placeLayout` (`(y + h) * TILE`), so the desk y-sorts
    * against the furniture around it. Avatars live in their own band above it
    * (#70, `depthLayers.ts`), so whoever walks over the desk is never hidden.
    */

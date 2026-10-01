@@ -177,7 +177,7 @@ export function tableSprite(material: TableMaterial, facing: Facing, color = DEF
 export const ROOM_TABLES = ['meeting', 'cafeteria'] as const;
 export type RoomTable = (typeof ROOM_TABLES)[number];
 
-/** The tiles each table covers on the map (`placeFurniture` in mapBuilder.ts). */
+/** The tiles each table covers on the map (its `props` object in src/game/maps/office.json). */
 export const ROOM_TABLE_FOOTPRINTS: Readonly<Record<RoomTable, Footprint>> = {
   meeting: { w: 7, h: 5 },
   cafeteria: { w: 5, h: 3 },

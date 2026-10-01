@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { BUILT_IN_SPACES, GROUND, MAP_H, MAP_W, TILE } from './mapData';
+import { BUILT_IN_SPACES, MAP_H, MAP_W, TILE } from './mapData';
+import { BASE_TERRAIN, isTileWalkable } from './officeLayout';
+import { BASE_MAP_SEATS } from './seating';
 import { audiblePeers, type AudibleInput, type AudioPeer } from './proximityAudio';
 import {
   ADJACENT_OFFSETS,
@@ -7,65 +9,55 @@ import {
   findFreeAdjacentTile,
   findWalkDestination,
   isBlocked,
-  markSolid,
   pickApproachTile,
   type TileRect,
 } from './terrainGrid';
 
+/**
+ * The base map as it was built in code before the Tiled layout (art step 8):
+ * these coordinates are what spaces, desks and seats were placed against, so
+ * the layout keeps every one of them.
+ */
 describe('buildTerrainGrid', () => {
-  it('tiene las dimensiones declaradas y todo el borde exterior es seto solido (app.js:217-231)', () => {
+  it('covers the 126x90 world and fences it with a solid hedge', () => {
     const grid = buildTerrainGrid();
 
-    expect(grid.ground).toHaveLength(MAP_H);
-    expect(grid.ground[0]).toHaveLength(MAP_W);
-
+    expect(grid.solid).toHaveLength(MAP_H);
+    expect(grid.solid[0]).toHaveLength(MAP_W);
+    expect(MAP_W).toBe(126);
+    expect(MAP_H).toBe(90);
     for (let x = 0; x < MAP_W; x++) {
-      expect(grid.ground[0][x]).toBe(GROUND.GD);
-      expect(grid.solid[0][x]).toBe(true);
-      expect(grid.ground[MAP_H - 1][x]).toBe(GROUND.GD);
-      expect(grid.solid[MAP_H - 1][x]).toBe(true);
+      for (const y of [0, MAP_H - 1]) {
+        expect(grid.walled[y][x]).toBe(true);
+        expect(grid.solid[y][x]).toBe(true);
+      }
     }
     for (let y = 0; y < MAP_H; y++) {
-      expect(grid.ground[y][0]).toBe(GROUND.GD);
-      expect(grid.solid[y][0]).toBe(true);
-      expect(grid.ground[y][MAP_W - 1]).toBe(GROUND.GD);
-      expect(grid.solid[y][MAP_W - 1]).toBe(true);
+      for (const x of [0, MAP_W - 1]) {
+        expect(grid.walled[y][x]).toBe(true);
+        expect(grid.solid[y][x]).toBe(true);
+      }
     }
   });
 
-  it('el rio deja pasar exactamente dos puentes de 3 tiles por fila (app.js:235-237)', () => {
+  it('lets the river through only at its two 3-tile bridges, water on both sides (app.js:235-237)', () => {
     const grid = buildTerrainGrid();
 
     for (const y of [19, 20, 21]) {
-      const bridgeSpans: number[][] = [];
-      let current: number[] = [];
+      const open: number[] = [];
       for (let x = 1; x <= 47; x++) {
-        const isBridgeTile = grid.ground[y][x] === GROUND.BRIDGE;
-        if (isBridgeTile) {
-          expect(grid.solid[y][x]).toBe(false);
-          current.push(x);
-        } else {
-          expect(grid.ground[y][x]).toBe(GROUND.WATER);
-          expect(grid.solid[y][x]).toBe(true);
-          if (current.length > 0) {
-            bridgeSpans.push(current);
-            current = [];
-          }
-        }
+        expect(grid.terrain[y][x]).toBe('water');
+        if (!grid.solid[y][x]) open.push(x);
       }
-      if (current.length > 0) bridgeSpans.push(current);
-
-      expect(bridgeSpans).toHaveLength(2);
-      expect(bridgeSpans[0]).toEqual([13, 14, 15]);
-      expect(bridgeSpans[1]).toEqual([32, 33, 34]);
+      expect(open).toEqual([13, 14, 15, 32, 33, 34]);
     }
   });
 
-  it('cada sala tiene su puerta de dos tiles solo en la pared izquierda (app.js:240-249)', () => {
+  it('gives each room its two-tile door on the left wall only, onto the corridor (app.js:240-249)', () => {
     const grid = buildTerrainGrid();
     const doorPlan = [
-      { doorY: [8, 9], floorCode: GROUND.FLOOR },
-      { doorY: [24, 25], floorCode: GROUND.WOODF },
+      { doorY: [8, 9], floor: 'carpet' },
+      { doorY: [24, 25], floor: 'wood' },
     ];
 
     BUILT_IN_SPACES.forEach((room, ri) => {
@@ -73,67 +65,75 @@ describe('buildTerrainGrid', () => {
       const y0 = room.y / TILE;
       const x1 = x0 + room.w / TILE - 1;
       const y1 = y0 + room.h / TILE - 1;
-      const { doorY, floorCode } = doorPlan[ri];
+      const { doorY, floor } = doorPlan[ri];
 
       for (let y = y0; y <= y1; y++) {
         for (let x = x0; x <= x1; x++) {
           const isWall = x === x0 || x === x1 || y === y0 || y === y1;
+          expect(grid.terrain[y][x]).toBe(floor);
           if (!isWall) continue;
-
           const isDoor = x === x0 && doorY.includes(y);
-          if (isDoor) {
-            expect(grid.ground[y][x]).toBe(floorCode);
-            expect(grid.solid[y][x]).toBe(false);
-          } else {
-            expect(grid.ground[y][x]).toBe(GROUND.WALL);
-            expect(grid.solid[y][x]).toBe(true);
-          }
+          expect(grid.walled[y][x]).toBe(!isDoor);
+          expect(grid.solid[y][x]).toBe(!isDoor);
         }
       }
 
       for (const y of doorY) {
-        expect(grid.ground[y][48]).toBe(GROUND.CORR);
-        expect(grid.ground[y][49]).toBe(GROUND.CORR);
         expect(grid.solid[y][48]).toBe(false);
         expect(grid.solid[y][49]).toBe(false);
       }
     });
   });
 
-  it('el pasillo entre el cesped y las salas es transitable (app.js:233)', () => {
+  it('keeps the corridor between the lawn and the rooms walkable, and runs it on south (app.js:233)', () => {
     const grid = buildTerrainGrid();
 
-    for (let y = 1; y < MAP_H - 1; y++) {
-      expect(grid.ground[y][48]).toBe(GROUND.CORR);
-      expect(grid.ground[y][49]).toBe(GROUND.CORR);
+    for (let y = 1; y < 63; y++) {
+      expect(grid.terrain[y][48]).toBe(y <= 42 ? 'tile' : 'cobblestone');
       expect(grid.solid[y][48]).toBe(false);
       expect(grid.solid[y][49]).toBe(false);
     }
   });
 
-  it('el jardin trasero de las salas es transitable (app.js:251-252)', () => {
+  it('keeps the garden behind the rooms walkable grass, closed by the hedge of the old border (app.js:251-252)', () => {
     const grid = buildTerrainGrid();
+    const trees = new Set(['52,34', '56,36', '60,34']);
 
     for (let y = 33; y <= 42; y++) {
       for (let x = 50; x <= 62; x++) {
-        expect(grid.ground[y][x]).toBe(GROUND.GD);
-        expect(grid.solid[y][x]).toBe(false);
+        expect(grid.terrain[y][x]).toBe('grass');
+        expect(grid.solid[y][x]).toBe(trees.has(`${x},${y}`));
       }
+      expect(grid.walled[y][63]).toBe(true);
     }
+    for (let x = 50; x <= 63; x++) expect(grid.walled[43][x]).toBe(true);
   });
-});
 
-describe('markSolid', () => {
-  it('marca solido un rectangulo explicito (app.js:224-226, expuesto en vez de oculto)', () => {
-    const solid = Array.from({ length: 5 }, () => Array<boolean>(5).fill(false));
+  it('opens the rest of the old border onto the new area', () => {
+    const grid = buildTerrainGrid();
 
-    markSolid(solid, 1, 1, 2, 3);
+    expect(grid.solid[10][63]).toBe(false);
+    expect(grid.solid[43][20]).toBe(false);
+    expect(grid.solid[43][48]).toBe(false);
+  });
 
-    expect(solid[1][1]).toBe(true);
-    expect(solid[2][2]).toBe(true);
-    expect(solid[3][1]).toBe(true);
-    expect(solid[0][0]).toBe(false);
-    expect(solid[4][4]).toBe(false);
+  it('blocks the base desks, tables, plants and trees, but not the chairs (app.js:264-305)', () => {
+    const grid = buildTerrainGrid();
+    const solidTiles = [
+      [3, 5],
+      [8, 5],
+      [33, 36],
+      [53, 6],
+      [59, 10],
+      [57, 25],
+      [51, 19],
+      [61, 30],
+      [2, 2],
+      [44, 41],
+    ];
+
+    for (const [x, y] of solidTiles) expect(grid.solid[y][x], `(${x}, ${y})`).toBe(true);
+    for (const seat of BASE_MAP_SEATS) expect(grid.solid[seat.ty][seat.tx]).toBe(false);
   });
 });
 
@@ -141,19 +141,33 @@ describe('isBlocked', () => {
   it('bloquea tiles solidos o de agua dentro de los limites (app.js:378,480)', () => {
     const grid = buildTerrainGrid();
 
-    // (14,19) esta en el rio, fuera de los dos puentes -> bloqueado.
+    // (20,19) esta en el rio, fuera de los dos puentes -> bloqueado.
     expect(isBlocked(grid, 20, 19)).toBe(true);
     // (13,19) es puente -> libre.
     expect(isBlocked(grid, 13, 19)).toBe(false);
   });
 
-  it('bloquea cualquier tile fuera del rango 1..MAP-2 aunque no sea solido (app.js:377,480)', () => {
+  it('bloquea el borde del mundo y todo lo que queda fuera de el (app.js:377,480)', () => {
     const grid = buildTerrainGrid();
 
     expect(isBlocked(grid, 0, 20)).toBe(true);
     expect(isBlocked(grid, MAP_W - 1, 20)).toBe(true);
     expect(isBlocked(grid, 20, 0)).toBe(true);
     expect(isBlocked(grid, 20, MAP_H - 1)).toBe(true);
+    expect(isBlocked(grid, -1, 20)).toBe(true);
+    expect(isBlocked(grid, 20, MAP_H)).toBe(true);
+  });
+
+  it('agrees tile by tile with the shared rule the server enforces', () => {
+    const grid = buildTerrainGrid();
+
+    for (let ty = 0; ty < MAP_H; ty++) {
+      for (let tx = 0; tx < MAP_W; tx++) {
+        if (isBlocked(grid, tx, ty) === isTileWalkable(BASE_TERRAIN, tx, ty)) {
+          throw new Error(`tile (${tx}, ${ty}) disagrees with isTileWalkable`);
+        }
+      }
+    }
   });
 });
 

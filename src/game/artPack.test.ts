@@ -110,13 +110,20 @@ describe('load requests', () => {
     ]);
   });
 
-  it('loads before the office starts only what the map draws at once: floors, desks and chairs', () => {
+  it('loads before the office starts what the map draws at once: everything but the characters', () => {
     const requests = bootLoadRequests(pack(), ART_PACK_MANIFEST_URL);
     const kinds = new Set(requests.map((request) => request.key.split(':')[1]?.split('-')[0]));
 
-    expect(kinds).toEqual(new Set(['floor', 'desk', 'chair']));
-    // Nine floors, four desks and four chairs; the tileset and props load when 8b draws them.
-    expect(requests).toHaveLength(17);
+    expect(kinds).toEqual(new Set(['floor', 'desk', 'chair', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table']));
+    // Nine floors, four desks, four chairs and four walls, the terrain tileset,
+    // two trees, a plant, a bridge, a hedge and two tables (art step 8).
+    expect(requests).toHaveLength(29);
+    expect(requests).toContainEqual({
+      key: artSheetKey('tileset-terrain', 'sheet'),
+      url: 'assets/pack/tileset/terrain.png',
+      frameWidth: 32,
+      frameHeight: 32,
+    });
     expect(requests).toContainEqual({
       key: artSheetKey('floor-grass', 'sheet'),
       url: 'assets/pack/floor/grass.png',

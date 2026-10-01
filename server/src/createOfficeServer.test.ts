@@ -2100,6 +2100,12 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
     return room;
   }
 
+  /**
+   * Open lawn far from the test spaces. Not (0, 0): the world's border is a
+   * hedge the room refuses moves into (art step 8).
+   */
+  const OUTSIDE = { x: 600, y: 912, facing: 'down' };
+
   function post(url: string, path: string, body: unknown) {
     return fetch(`${url}${path}`, {
       method: 'POST',
@@ -2163,8 +2169,8 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
         releases.push(() => resolve(known));
       }));
       restoreRead = () => read.mockRestore();
-      for (let i = 0; i < 200; i++) outsider.send('move', { x: i, y: 0, facing: 'down' });
-      await waitFor(() => recServer.sessions.positionOf(outsider.sessionId)?.x === 199);
+      for (let i = 0; i < 200; i++) outsider.send('move', { x: OUTSIDE.x + i, y: OUTSIDE.y, facing: 'down' });
+      await waitFor(() => recServer.sessions.positionOf(outsider.sessionId)?.x === OUTSIDE.x + 199);
       expect(read).not.toHaveBeenCalled();
       stopping = post(url, '/recordings/stop', request);
       await waitFor(() => recServer.recordings.list().length === 0);
@@ -2206,8 +2212,8 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
       await waitFor(() => finalRead);
       visitor.send('move', { x: 330, y: 330, facing: 'down' });
       await waitFor(() => recServer.sessions.positionOf(visitor.sessionId)?.x === 330);
-      visitor.send('move', { x: 0, y: 0, facing: 'down' });
-      await waitFor(() => recServer.sessions.positionOf(visitor.sessionId)?.x === 0);
+      visitor.send('move', OUTSIDE);
+      await waitFor(() => recServer.sessions.positionOf(visitor.sessionId)?.x === OUTSIDE.x);
       release();
       expect((await pending).status).toBe(200);
       const stopped = await post(url, '/recordings/stop', request);
@@ -2263,8 +2269,8 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
       for (const [client, x] of [[old, 330], [middle, 650]] as const) {
         client.send('move', { x, y: 330, facing: 'down' });
         await waitFor(() => recServer.sessions.positionOf(client.sessionId)?.x === x);
-        client.send('move', { x: 0, y: 0, facing: 'down' });
-        await waitFor(() => recServer.sessions.positionOf(client.sessionId)?.x === 0);
+        client.send('move', OUTSIDE);
+        await waitFor(() => recServer.sessions.positionOf(client.sessionId)?.x === OUTSIDE.x);
       }
       expect((await fetch(`${url}${path}/delete`, { method: 'POST', headers })).status).toBe(200);
       afterDelete.send('move', { x: 650, y: 330, facing: 'down' });
@@ -2300,8 +2306,8 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
         await owner.leave();
         await waitFor(() => !recServer.sessions.has(owner.sessionId));
       } else {
-        owner.send('move', { x: 0, y: 0, facing: 'down' });
-        await waitFor(() => recServer.sessions.positionOf(owner.sessionId)?.x === 0);
+        owner.send('move', OUTSIDE);
+        await waitFor(() => recServer.sessions.positionOf(owner.sessionId)?.x === OUTSIDE.x);
       }
       release();
       expect((await pending).status).toBe(403);
@@ -2331,8 +2337,8 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
       await post(url, '/recordings/start', { sessionId: owner.sessionId, spaceId });
       visitor.send('move', { x: 330, y: 330, facing: 'down' });
       await waitFor(() => recServer.sessions.positionOf(visitor.sessionId)?.x === 330);
-      visitor.send('move', { x: 0, y: 0, facing: 'down' });
-      await waitFor(() => recServer.sessions.positionOf(visitor.sessionId)?.x === 0);
+      visitor.send('move', OUTSIDE);
+      await waitFor(() => recServer.sessions.positionOf(visitor.sessionId)?.x === OUTSIDE.x);
       const stopped = await post(url, '/recordings/stop', { sessionId: owner.sessionId, spaceId });
       const { recordingId } = await stopped.json() as { recordingId: string };
       await waitFor(() => ownerReady.length === 1);
