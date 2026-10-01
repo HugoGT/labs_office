@@ -141,8 +141,10 @@ http://{$APP_HOST}, http://{$LK_HOST}, http://{$TURN_HOST} {
 	# todo lo demas se resuelve por ruta mas abajo. Es exacto, no una
 	# aproximacion: los ficheros estaticos nunca llevan estas cabeceras.
 	@websocket {
-		header Connection *Upgrade*
-		header Upgrade websocket
+		# Protocol tokens are case-insensitive; lowercase browser handshakes
+		# must not fall through to the SPA (#126). Match a complete list token.
+		header_regexp Connection (?i)(^|,)[[:space:]]*upgrade[[:space:]]*(,|$)
+		header_regexp Upgrade (?i)^websocket$
 	}
 	handle @websocket {
 		reverse_proxy colyseus:2567
