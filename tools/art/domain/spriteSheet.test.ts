@@ -100,4 +100,5 @@ test('walk and idle frames of the base characters are byte-identical to the lock
     const hash = createHash('sha256').update(walk.data).update(idle.data).digest('hex').slice(0, 16);
     assert.equal(hash, WALK_IDLE_HASHES[character.id], character.id);
   }
-});
+  // Renders every base character: ~2s alone, past the 5s default on a loaded CI runner.
+}, 60_000);

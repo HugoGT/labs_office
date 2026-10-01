@@ -39,7 +39,8 @@ test('CHARACTER_HEIGHT matches the tallest standing sprite', () => {
     return Math.max(...rows) - Math.min(...rows) + 1;
   });
   assert.equal(Math.max(...heights), CHARACTER_HEIGHT);
-});
+  // Renders every character: ~2s alone, past the 5s default on a loaded CI runner.
+}, 60_000);
 
 test('tiles are square and twice as tall as a character', () => {
   assert.equal(TILE_SIZE, CHARACTER_HEIGHT * 2);
