@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ACCESS_DENIED_CODE,
+  ACCESS_DENIED_REASONS,
   DEFAULT_FACING,
   DEFAULT_STATUS,
   DO_NOT_DISTURB,
@@ -7,6 +9,7 @@ import {
   LIVEKIT_ROOM_NAME,
   PRESENCE_STATUSES,
   RECORDING_RETENTION_DAYS,
+  accessDeniedReasonOf,
   characterIdOf,
   facingFrom,
   isPresenceStatus,
@@ -113,6 +116,29 @@ describe('characterIdOf (art migration, step 5)', () => {
     'reads %j as no character, so the office draws the pack default',
     (raw) => {
       expect(characterIdOf(raw)).toBeNull();
+    },
+  );
+});
+
+describe('accessDeniedReasonOf (#129)', () => {
+  it('rides on the HTTP status a join refusal already uses', () => {
+    expect(ACCESS_DENIED_CODE).toBe(401);
+  });
+
+  it.each(ACCESS_DENIED_REASONS.map((reason) => [reason]))('reads %j back as itself', (reason) => {
+    expect(accessDeniedReasonOf(reason)).toBe(reason);
+  });
+
+  it('knows why the directory closes the door', () => {
+    expect(ACCESS_DENIED_REASONS).toEqual(
+      expect.arrayContaining(['unauthorized', 'expired', 'revoked', 'not-provisioned']),
+    );
+  });
+
+  it.each([[undefined], [null], [401], [''], ['onAuth failed'], ['EXPIRED']])(
+    'reads %j as the generic refusal, never as a reason it does not know',
+    (raw) => {
+      expect(accessDeniedReasonOf(raw)).toBe('unauthorized');
     },
   );
 });

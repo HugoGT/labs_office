@@ -81,6 +81,38 @@ export const SESSION_REPLACED_CLOSE_CODE = 4100;
  */
 export const SESSION_REVOKED_CLOSE_CODE = 4101;
 
+/**
+ * Code of a refused join (#129): `OfficeRoom.onAuth` throws a `ServerError`
+ * with it, and colyseus.js 0.16 hands the client a `ServerError` carrying the
+ * same `code` and `message`. The client tells it apart from a transport
+ * failure by this code, so the office goes back to the login instead of
+ * claiming the server is down.
+ */
+export const ACCESS_DENIED_CODE = 401;
+
+/**
+ * Why the office refuses an account, sent as the `message` of that refusal.
+ * `unauthorized` is the token itself not verifying, and it stays mute: there
+ * is no valid signature behind it to tell anything to. The rest are the
+ * directory's (`decideAccess`), told only to someone who already proved who
+ * they are with a validly signed token.
+ *
+ * A list and not only a union so a new reason (#128 adds `session-expired`) is
+ * one entry here plus its login notice, which the compiler then asks for.
+ */
+export const ACCESS_DENIED_REASONS = ['unauthorized', 'expired', 'revoked', 'not-provisioned'] as const;
+
+export type AccessDeniedReason = (typeof ACCESS_DENIED_REASONS)[number];
+
+/**
+ * The reason a refusal carries. Anything unknown (an older server, a reason
+ * this client does not know yet) is the generic `unauthorized`: still a
+ * refusal, never a reason guessed from text.
+ */
+export function accessDeniedReasonOf(raw: unknown): AccessDeniedReason {
+  return ACCESS_DENIED_REASONS.find((reason) => reason === raw) ?? 'unauthorized';
+}
+
 /** Cada cuanto publica el jugador local su posicion (ver `createMoveThrottle`). */
 export const MOVE_INTERVAL_MS = 100;
 
