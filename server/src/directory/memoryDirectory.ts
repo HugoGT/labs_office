@@ -40,12 +40,12 @@ import {
   normalizeEmail,
   normalizeInvitationInput,
 } from './invitationRules.ts';
-import { normalizeUserInput } from './userRules.ts';
+import { assertAssignableRole, normalizeUserInput } from './userRules.ts';
 import { ART_PACK_DEFAULTS, normalizeStoredCharacterId } from '../decor/artCatalogRules.ts';
 
 export interface AuditEntry {
   actorId: string;
-  action: 'invite' | 'revoke' | 'create-user' | 'revoke-user';
+  action: 'invite' | 'revoke' | 'create-user' | 'revoke-user' | 'convert-user';
   subjectId: string;
 }
 
@@ -265,6 +265,20 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
       audit.push({ actorId: createdById, action: 'create-user', subjectId: created.id });
 
       return snapshot(created);
+    },
+
+    async convertToStaff(id, { role, uid, actorId }) {
+      // Validate before touching anything, like `createUser`.
+      assertAssignableRole(role);
+
+      const row = byId(id);
+      // Same second lock as the WHERE of `pgDirectory.convertToStaff`.
+      if (!row || row.role === 'superadmin') return null;
+
+      Object.assign(row, { role, uid, status: 'active', expiresAt: null, invitedBy: null });
+      audit.push({ actorId, action: 'convert-user', subjectId: row.id });
+
+      return snapshot(row);
     },
 
     async revoke(id, actorId) {

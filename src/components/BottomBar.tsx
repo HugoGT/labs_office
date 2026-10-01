@@ -63,6 +63,7 @@ const PRESENCE_TITLE = {
   offline: 'Sin servidor: la oficina corre en solitario',
   replaced: 'Abriste la oficina en otra pestaña o dispositivo',
   revoked: 'Un administrador retiró tu acceso a la oficina',
+  denied: 'La oficina rechazó tu acceso: vuelve a iniciar sesión',
 } as const;
 
 /**
@@ -212,6 +213,9 @@ export function BottomBar({
             ) : presence.state === 'revoked' ? (
               // #93: same as above, for an account an admin removed.
               <>Acceso retirado</>
+            ) : presence.state === 'denied' ? (
+              // #129: the join itself was refused; same reasoning again.
+              <>Acceso denegado</>
             ) : (
               <>⚪ Sin servidor</>
             )}

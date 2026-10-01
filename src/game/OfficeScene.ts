@@ -71,10 +71,12 @@ import {
   DEFAULT_STATUS,
   facingFrom,
   isPresenceStatus,
+  type AccessDeniedReason,
   type Facing,
   type PresenceStatus,
 } from './officeProtocol';
 import {
+  OfficeAccessDeniedError,
   connectOfficeRoom,
   type ConnectOfficeRoomOptions,
   type OfficeConnection,
@@ -402,6 +404,8 @@ export class OfficeScene extends Phaser.Scene {
    * reconexion volveria a anunciar "conectado".
    */
   private connectionState: OfficeConnectionState = 'offline';
+  /** Why the join was refused, while `connectionState` is `denied` (#129). */
+  private deniedReason?: AccessDeniedReason;
   /**
    * Hay un reintento manual en vuelo (#52). Protege el unico camino de este
    * archivo que puede reentrarse desde fuera: el comando `reconnect` lo dispara
@@ -722,10 +726,14 @@ export class OfficeScene extends Phaser.Scene {
       this.emitCharacterPortraits();
       // Sesion viva, todavia sin pares conocidos (el primer tic los completa).
       this.emitVoice(connection.sessionId, [], this.currentSpaceId);
-    } catch {
+    } catch (error) {
       if (!this.alive) return;
       if (!this.localAvatarKnown) this.adoptLocalAvatar(null);
-      this.emitPresence('offline');
+      // #129: a refused account is not a missing server. "Sin servidor" with
+      // its retry button would send the person against a server that is up
+      // and has already said no; `denied` hands the reason up instead.
+      if (error instanceof OfficeAccessDeniedError) this.emitPresence('denied', error.reason);
+      else this.emitPresence('offline');
       this.emitVoice(null, [], this.currentSpaceId);
     }
   }
@@ -1331,8 +1339,10 @@ export class OfficeScene extends Phaser.Scene {
    * en solitario por decision, no por averia, y no hay absolutamente nada que
    * un boton de reintento pudiera hacer ahi.
    */
-  private emitPresence(state: OfficeConnectionState = this.connectionState): void {
+  private emitPresence(state: OfficeConnectionState = this.connectionState, reason?: AccessDeniedReason): void {
     this.connectionState = state;
+    if (state !== 'denied') this.deniedReason = undefined;
+    else if (reason !== undefined) this.deniedReason = reason;
     const endpoint = this.options.endpoint;
     this.bridge.emit('presence', {
       // Se conserva con su significado exacto de siempre para que ensanchar el
@@ -1340,6 +1350,8 @@ export class OfficeScene extends Phaser.Scene {
       online: state === 'connected',
       peers: this.remotes?.sessionIds().length ?? 0,
       state,
+      // Only on `denied` (#129), so every other payload keeps its exact shape.
+      ...(state === 'denied' && { reason: this.deniedReason ?? 'unauthorized' }),
       canRetry: endpoint !== null && endpoint !== undefined,
     });
   }

@@ -409,6 +409,41 @@ describe('createGcpIdentityAdmin', () => {
     });
   });
 
+  // #125: turning a revoked or expired guest into staff reuses its account.
+  describe('enableAccount', () => {
+    it('re-enables the account by its localId', async () => {
+      const { admin: subject, calls } = admin([tokenOk, () => jsonResponse({ localId: 'uid-ana' })]);
+
+      await subject.enableAccount('uid-ana');
+
+      const update = calls[1];
+      expect(update.url).toBe(
+        'https://identitytoolkit.googleapis.com/v1/projects/oficina-de-prueba/accounts:update',
+      );
+      expect(bodyOf(update)).toEqual({ localId: 'uid-ana', disableUser: false });
+    });
+
+    it('USER_NOT_FOUND is `user-not-found`, so the route can create the account again', async () => {
+      // Someone deleted it by hand in the GCP console: the row is still there.
+      const { admin: subject } = admin([
+        tokenOk,
+        () => jsonResponse({ error: { code: 400, message: 'USER_NOT_FOUND' } }, 400),
+      ]);
+
+      await expect(subject.enableAccount('uid-ana')).rejects.toMatchObject({
+        code: 'user-not-found',
+      });
+    });
+
+    it('any other failure is `unavailable`', async () => {
+      const { admin: subject } = admin([tokenOk, () => jsonResponse({}, 500)]);
+
+      await expect(subject.enableAccount('uid-ana')).rejects.toMatchObject({
+        code: 'unavailable',
+      });
+    });
+  });
+
   // #94: the person sets their own password from the email; nobody else ever
   // learns it.
   describe('sendPasswordReset', () => {

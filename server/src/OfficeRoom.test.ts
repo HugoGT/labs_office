@@ -33,7 +33,12 @@ import { createMemoryDirectory } from './directory/memoryDirectory.ts';
 import { ART_PACK_DEFAULTS } from './decor/artCatalogRules.ts';
 import type { OfficeState } from './schema.ts';
 import { createMemoryTerrain } from './terrain/memoryTerrain.ts';
-import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
+import {
+  SESSION_EXPIRED,
+  type IdTokenVerifier,
+  type SessionExpired,
+  type VerifiedIdentity,
+} from './verifyIdToken.ts';
 
 let server: OfficeServer;
 let endpoint: string;
@@ -856,7 +861,7 @@ describe('OfficeRoom: invitaciones de llamada (issue #2)', () => {
  * y que el uid acaba en el registro -- y para eso un doble es mas honesto que
  * montar un JWKS.
  */
-function stubVerifier(valid: Record<string, VerifiedIdentity>): IdTokenVerifier {
+function stubVerifier(valid: Record<string, VerifiedIdentity | SessionExpired>): IdTokenVerifier {
   return {
     async verify(token: unknown) {
       return typeof token === 'string' ? (valid[token] ?? null) : null;
@@ -963,7 +968,9 @@ describe('OfficeRoom: onAuth con verificador (#8)', () => {
   let authEndpoint: string;
 
   beforeEach(async () => {
-    const started = await startAuthenticatedServer(stubVerifier({ 'token-de-ana': ANA }));
+    const started = await startAuthenticatedServer(
+      stubVerifier({ 'token-de-ana': ANA, 'token-de-hace-meses': SESSION_EXPIRED }),
+    );
     authServer = started.authServer;
     authEndpoint = started.endpoint;
   });
@@ -998,6 +1005,14 @@ describe('OfficeRoom: onAuth con verificador (#8)', () => {
 
   it('un token invalido no entra: 401 unauthorized', async () => {
     await expect(joinAuth({ token: 'token-forjado' })).rejects.toMatchObject({ code: 401 });
+  });
+
+  it('a session older than its maximum age does not enter: 401 session-expired (#128)', async () => {
+    await expect(joinAuth({ token: 'token-de-hace-meses' })).rejects.toMatchObject({
+      code: 401,
+      message: 'session-expired',
+    });
+    expect(authServer.sessions.size()).toBe(0);
   });
 
   it('entrar sin token tampoco cuela cuando la auth esta activa', async () => {
@@ -1161,7 +1176,7 @@ describe('OfficeRoom: onAuth con directorio (#24)', () => {
     const directory = createMemoryDirectory();
     await start(directory);
 
-    await expect(joinWithToken()).rejects.toMatchObject({ code: 401 });
+    await expect(joinWithToken()).rejects.toMatchObject({ code: 401, message: 'not-provisioned' });
     expect(await directory.findByUid('uid-ana')).toBeNull();
     expect(directoryServer.sessions.size()).toBe(0);
   });
@@ -1186,7 +1201,7 @@ describe('OfficeRoom: onAuth con directorio (#24)', () => {
       }),
     );
 
-    await expect(joinWithToken()).rejects.toMatchObject({ code: 401 });
+    await expect(joinWithToken()).rejects.toMatchObject({ code: 401, message: 'expired' });
   });
 
   it('un invitado con la caducidad en el futuro si entra', async () => {
@@ -1206,7 +1221,7 @@ describe('OfficeRoom: onAuth con directorio (#24)', () => {
   it('una cuenta revocada NO entra', async () => {
     await start(createMemoryDirectory({ seed: [seededUser({ status: 'revoked' })] }));
 
-    await expect(joinWithToken()).rejects.toMatchObject({ code: 401 });
+    await expect(joinWithToken()).rejects.toMatchObject({ code: 401, message: 'revoked' });
   });
 
   it('quien no esta en el directorio NO entra', async () => {
@@ -1225,19 +1240,19 @@ describe('OfficeRoom: onAuth con directorio (#24)', () => {
       new Client(`ws://localhost:${port}`).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, {
         token: 'token-sin-email',
       }),
-    ).rejects.toMatchObject({ code: 401 });
+    ).rejects.toMatchObject({ code: 401, message: 'not-provisioned' });
 
     await withDirectory.shutdown();
   });
 
-  it('el rechazo del directorio es el MISMO 401 mudo que el de un token forjado', async () => {
-    // A proposito: si "caducado" y "token invalido" se distinguiesen desde
-    // fuera, quien sondea sabria que esa cuenta existe y que existio un acceso
-    // legitimo. El motivo va al log del servidor, que no lo lee nadie de fuera.
+  it('the directory refusal says why, while a forged token stays mute (#129)', async () => {
+    // Only a validly signed token learns the reason: whoever holds one already
+    // proved who they are, and without it the office could only say "Sin
+    // servidor". A forged token proves nothing, so it learns nothing.
     await start(createMemoryDirectory({ seed: [seededUser({ status: 'revoked' })] }));
 
-    await expect(joinWithToken()).rejects.toMatchObject({ code: 401 });
-    await expect(joinWithToken('token-forjado')).rejects.toMatchObject({ code: 401 });
+    await expect(joinWithToken()).rejects.toMatchObject({ code: 401, message: 'revoked' });
+    await expect(joinWithToken('token-forjado')).rejects.toMatchObject({ code: 401, message: 'unauthorized' });
   });
 
   it('un rechazo del directorio no deja rastro en el registro de sesiones', async () => {

@@ -32,6 +32,10 @@ export interface AuthGateProps {
   initialName?: string;
   /** Se llama con el nombre YA canonicalizado tras un reclamo con exito, para que `App.tsx` lo recuerde (D8). */
   onNameClaimed?: (name: string) => void;
+  /** Why the office sent the person back to the login (#129), already in words. */
+  notice?: string | null;
+  /** The person tried to sign in again, so the notice has done its job. */
+  onDismissNotice?: () => void;
   /** Recibe `null` cuando no hay autenticacion; la oficina se monta igual. */
   children: (session: OfficeSession | null) => ReactNode;
 }
@@ -60,6 +64,8 @@ export function AuthGate({
   character: characterPort = null,
   initialName,
   onNameClaimed,
+  notice = null,
+  onDismissNotice,
   children,
 }: AuthGateProps) {
   const { user, ready, pending, error, signIn } = useAuth(auth);
@@ -100,10 +106,11 @@ export function AuthGate({
 
   const handleSubmit = useCallback(
     async (name: string, email: string, password: string): Promise<void> => {
+      onDismissNotice?.();
       const result = await submit(() => signIn(email, password), name);
       if (result?.outcome === 'ok') onNameClaimed?.(result.displayName);
     },
-    [submit, signIn, onNameClaimed],
+    [submit, signIn, onNameClaimed, onDismissNotice],
   );
 
   /**
@@ -164,6 +171,7 @@ export function AuthGate({
       onSubmit={(name, email, password) => void handleSubmit(name, email, password)}
       pending={pending || claiming}
       error={claimError ?? error}
+      notice={notice}
       initialName={initialName}
       passwordReset={{
         onSend: (email) => void reset.sendReset(email),

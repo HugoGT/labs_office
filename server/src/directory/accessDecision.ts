@@ -11,10 +11,10 @@
  *
  * ## Por que devuelve un motivo y no un booleano
  *
- * Al cliente no se le dice nunca cual de los cuatro casos es: `OfficeRoom`
- * colapsa todo en el mismo 401 mudo, por la misma razon que
- * `verifyIdToken.verify` devuelve `null` y no una causa (un oraculo para ir
- * afinando el ataque). Pero el LOG del servidor si necesita la distincion:
+ * The HTTP routes (`adminRoutes.authenticate`) still collapse every case into
+ * the same mute 401. The office join tells the reason (#129): only to a
+ * validly signed token, and without it the client could only say "Sin
+ * servidor". El LOG del servidor necesita la distincion en todo caso:
  * "todo el mundo cae en not-provisioned" (las migraciones no corrieron, o el
  * bootstrap apunta al proyecto equivocado) y "un invitado caduco" son la misma
  * respuesta HTTP y dos incidencias completamente distintas a las tres de la

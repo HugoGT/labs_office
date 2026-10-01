@@ -73,6 +73,17 @@ export interface CreateUserInput {
   createdById: string;
 }
 
+export interface ConvertToStaffInput {
+  role: AssignableRole;
+  /**
+   * Identity Platform uid of the account: the row's own, re-enabled, or a new
+   * one when that account was deleted by hand.
+   */
+  uid: string;
+  /** id (no uid) of the admin making the change. */
+  actorId: string;
+}
+
 export interface InvitationRow extends DirectoryUser {
   /** Email de quien invito, resuelto por JOIN. null si no se puede resolver. */
   invitedByEmail: string | null;
@@ -125,6 +136,17 @@ export interface UserDirectory {
    * en un boton de expulsion del personal.
    */
   createUser(input: CreateUserInput): Promise<DirectoryUser>;
+  /**
+   * Turns an existing row into staff in place (#125): "Crear usuario" on an
+   * email the directory already has (a guest, expired or revoked, or revoked
+   * staff). Same id and createdAt; writes `role`, `uid`, `status = 'active'`
+   * and the two NULLs of `createUser`, plus a `convert-user` audit entry,
+   * atomically. WHO may change whom is `canRemove`, checked by the route; the
+   * superadmin is refused here too as the second lock. Returns null for an
+   * unknown id or the superadmin. Throws `InvalidUserError` for a role the
+   * panel does not hand out.
+   */
+  convertToStaff(id: string, input: ConvertToStaffInput): Promise<DirectoryUser | null>;
   /** Devuelve null si ese id no existe o no es una invitacion. */
   revoke(id: string, actorId: string): Promise<DirectoryUser | null>;
   /**

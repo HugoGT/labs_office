@@ -16,7 +16,7 @@ import { livekitRoomFor, recordingAvailableUntil } from '../../../src/game/offic
 import { createLiveSessionRegistry, type LiveSessionRegistry } from '../liveSessions.ts';
 import { createMemorySpaces } from '../spaces/memorySpaces.ts';
 import type { SpacesDirectory } from '../spaces/spacesPort.ts';
-import type { IdTokenVerifier } from '../verifyIdToken.ts';
+import { SESSION_EXPIRED, type IdTokenVerifier } from '../verifyIdToken.ts';
 import type { EgressPort } from './egressPort.ts';
 import { createFinishedRecordingStore, type FinishedRecordingStore } from './finishedRecordings.ts';
 import { createRecordingRegistry, type RecordingRegistry } from './recordingRegistry.ts';
@@ -31,6 +31,7 @@ import { createRecordingSpaceSnapshot } from './recordingSpaceSnapshot.ts';
 
 const verifier: IdTokenVerifier = {
   async verify(token: unknown) {
+    if (token === 'months-old-session') return SESSION_EXPIRED;
     const uid = typeof token === 'string' ? token.replace(/^valid-/, '') : null;
     if (uid === null || uid === token) return null;
     return { uid, email: null, name: null };
@@ -335,6 +336,9 @@ describe('handleStartRecording', () => {
       status: 401,
       body: { error: 'unauthorized' },
     });
+    expect(
+      await handleStartRecording({ sessionId: 'ses-owned', spaceId, token: 'months-old-session' }, authDeps),
+    ).toEqual({ status: 401, body: { error: 'unauthorized', reason: 'session-expired' } });
     expect(
       await handleStartRecording({ sessionId: 'ses-owned', spaceId, token: 'valid-uid-bruno' }, authDeps),
     ).toEqual({ status: 403, body: { error: 'forbidden-session' } });

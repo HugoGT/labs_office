@@ -11,6 +11,11 @@
  * `exp` en el futuro, `iat` en el pasado, `auth_time` en el pasado cuando
  * viene, y `sub` un texto no vacio que es el uid.
  *
+ * On top of that contract the office caps a session (#128): `auth_time` must be
+ * present and at most `MAX_SESSION_AGE_DAYS` old, or the answer is
+ * `SESSION_EXPIRED`. See `verify` below for why that one rejection does have a
+ * name.
+ *
  * Se usa `jose` y no `firebase-admin`: lo unico que necesita el servidor es
  * verificar una firma contra un JWKS publico. `firebase-admin` arrastraria gRPC
  * y credenciales de servicio que este proceso no tiene ni debe tener.
@@ -23,7 +28,8 @@
  *
  * ## Por que `verify` nunca dice por que AL CLIENTE
  *
- * Todo rechazo colapsa en `null` y la ruta responde siempre lo mismo: un
+ * Todo rechazo colapsa en `null` (except `SESSION_EXPIRED`, which only a
+ * validly signed token can earn) y la ruta responde siempre lo mismo: un
  * atacante que pudiese distinguir "caducado" de "firmado por otro proyecto" de
  * "firma invalida" tendria un oraculo para ir afinando el token forjado.
  *
@@ -47,6 +53,34 @@ import type { AuthConfig } from './authConfig.ts';
 export const FIREBASE_JWKS_URL =
   'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 
+/**
+ * Longest a browser session lives since the last email and password login
+ * (#128). Firebase keeps a session forever and refreshes its ID token on its
+ * own; the directory (`expires_at` NULL for employees and admins) is about
+ * whether the account may enter, not about how old this browser's login is,
+ * and stays as it is. Guests notice nothing: an invitation already lasts at
+ * most `MAX_INVITATION_DAYS`, the same 90.
+ */
+export const MAX_SESSION_AGE_DAYS = 90;
+
+const MAX_SESSION_AGE_SECONDS = MAX_SESSION_AGE_DAYS * 24 * 60 * 60;
+
+/**
+ * The one rejection `verify` names (#128): a validly signed token whose login
+ * is too old. The client has to tell it apart to sign out and ask for email
+ * and password again; a plain `null` would have it retry the same token.
+ */
+export const SESSION_EXPIRED = 'session-expired';
+
+export type SessionExpired = typeof SESSION_EXPIRED;
+
+/**
+ * How every HTTP route says it (#128): the same `error` as any other 401, so a
+ * client that only reads `error` behaves as before, plus the reason the
+ * entrance and the dashboard read to send the person back to the login.
+ */
+export const SESSION_EXPIRED_BODY = { error: 'unauthorized', reason: SESSION_EXPIRED } as const;
+
 export interface VerifiedIdentity {
   /** `sub` del token. Es el identificador estable del usuario en el proyecto. */
   uid: string;
@@ -55,7 +89,7 @@ export interface VerifiedIdentity {
 }
 
 export interface IdTokenVerifier {
-  verify(token: unknown): Promise<VerifiedIdentity | null>;
+  verify(token: unknown): Promise<VerifiedIdentity | SessionExpired | null>;
 }
 
 /** Devuelve el claim solo si es texto; un claim viene firmado, no validado. */
@@ -65,8 +99,9 @@ function asText(claim: unknown): string | null {
 
 /**
  * Comprueba que una marca de tiempo del token no este en el futuro. Ausente
- * cuenta como valida (`auth_time` es opcional); presente pero no numerica no,
- * porque entonces no se puede afirmar nada sobre ella.
+ * cuenta como valida aqui (`auth_time` es opcional en el contrato de Firebase,
+ * and its absence is the session age check's to refuse); presente pero no
+ * numerica no, porque entonces no se puede afirmar nada sobre ella.
  */
 function isNotInTheFuture(seconds: unknown, now: number, required: boolean): boolean {
   if (seconds === undefined) return !required;
@@ -116,6 +151,19 @@ export function createIdTokenVerifier(
 
         const uid = asText(payload.sub);
         if (uid === null) return null;
+
+        // Only now, with signature and claims checked, may a rejection have a
+        // name: whoever gets `session-expired` holds a token Google signed for
+        // this project, so it tells a forger nothing (see the header). A token
+        // without `auth_time` is refused the same way, failing closed: its age
+        // cannot be asserted, and the remedy, one more login, yields a token
+        // that carries the claim. Firebase keeps `auth_time` across ID token
+        // refreshes, which is what makes it the age of the login.
+        const authTime = payload.auth_time;
+        if (typeof authTime !== 'number' || now - authTime > MAX_SESSION_AGE_SECONDS) {
+          logFailure('SessionExpired');
+          return SESSION_EXPIRED;
+        }
 
         return { uid, email: asText(payload.email), name: asText(payload.name) };
       } catch (error) {

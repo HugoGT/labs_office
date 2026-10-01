@@ -107,6 +107,15 @@
   color: #fecaca;
 }
 
+.info {
+  background: #1e3a8a66;
+  border: 1px solid #1d4ed8;
+  border-radius: var(--radius-control);
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #bfdbfe;
+}
+
 .secret {
   background: #78350f55;
   border: 1px solid #d97706;
@@ -180,6 +189,18 @@
 
 .revoked {
   color: #9ca3af;
+}
+
+/* #129: an account about to lose its access, next to its expiry date. */
+.expiring {
+  display: inline-block;
+  background: #78350f66;
+  color: #fde68a;
+  border: 1px solid #b45309;
+  border-radius: var(--radius-tag);
+  padding: 1px 6px;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .revoke {

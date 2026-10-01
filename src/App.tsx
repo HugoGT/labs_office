@@ -1,15 +1,18 @@
-import { lazy, Suspense, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 import { resolveAuthConfig } from './auth/authConfig';
+import { describeAccessDenied } from './auth/authErrors';
 import { createCharacterClient } from './auth/characterClient';
 import type { CharacterPort } from './auth/characterPort';
 import { createDisplayNameClient, deriveDisplayNameBaseUrl } from './auth/displayNameClient';
 import type { DisplayNamePort } from './auth/displayNamePort';
 import { createFirebaseAuthAdapter } from './auth/firebaseAuthAdapter';
 import { createLastDisplayNameStore } from './auth/lastDisplayNameStore';
+import { withSessionExpiry } from './auth/sessionExpiry';
 import { AuthGate } from './components/AuthGate';
 import { LeftOfficeNotice, type LeftOfficeReason } from './components/LeftOfficeNotice';
 import { ART_PACK_MANIFEST_URL, artUploadsManifestUrl } from './game/artPack';
 import { resolveOfficeEndpoint } from './game/officeEndpoint';
+import type { AccessDeniedReason } from './game/officeProtocol';
 import { resolveRoute } from './routing/route';
 
 /**
@@ -72,6 +75,36 @@ export default function App() {
     }),
   );
   /**
+   * The server refused the join (#129): the account is out, so it signs out
+   * here and the login says why. Unlike `leftOffice`, coming back is a new
+   * sign-in, which is what dismisses the notice.
+   *
+   * A stable callback on purpose: `OfficeShell` hands the refusal up from an
+   * effect that depends on it, and a new one per render would sign out again.
+   * Without auth nothing can sign out, and the bar says "Acceso denegado".
+   *
+   * A login older than the server's maximum session age (#128) takes the same
+   * path, from the join or from any HTTP answer (`sessionFetch`).
+   */
+  const [accessDenied, setAccessDenied] = useState<AccessDeniedReason | null>(null);
+  const handleAccessDenied = useCallback(
+    (reason: AccessDeniedReason) => {
+      setAccessDenied(reason);
+      void auth?.signOut();
+    },
+    [auth],
+  );
+  const dismissAccessDenied = useCallback(() => setAccessDenied(null), []);
+  /**
+   * The `fetch` of every client that talks to the office server before or
+   * outside the office (the entrance and `/dashboard`): a 401 that says
+   * `session-expired` sends the person back to the login (#128).
+   */
+  const sessionFetch = useMemo(
+    () => withSessionExpiry(() => handleAccessDenied('session-expired')),
+    [handleAccessDenied],
+  );
+  /**
    * Cliente del nombre visible auto-elegido (#100). `null` sin servidor
    * (`officeEndpoint`) o sin autenticacion: sin `auth` no hay ID token que
    * mandar, y `AuthGate` nunca llega a mostrar el formulario en ese caso de
@@ -79,11 +112,14 @@ export default function App() {
    */
   const displayNamePort = useMemo<DisplayNamePort | null>(() => {
     if (officeEndpoint === null || auth === null) return null;
-    return createDisplayNameClient({
-      baseUrl: deriveDisplayNameBaseUrl(officeEndpoint),
-      getIdToken: () => auth.getIdToken(),
-    });
-  }, [officeEndpoint, auth]);
+    return createDisplayNameClient(
+      {
+        baseUrl: deriveDisplayNameBaseUrl(officeEndpoint),
+        getIdToken: () => auth.getIdToken(),
+      },
+      sessionFetch,
+    );
+  }, [officeEndpoint, auth, sessionFetch]);
   /**
    * Ultimo nombre elegido con exito en este dispositivo (#100, D8). Se lee UNA
    * vez para prellenar "Nombre"; `AuthGate` escribe en el mismo almacen a
@@ -104,14 +140,17 @@ export default function App() {
    */
   const characterPort = useMemo<CharacterPort | null>(() => {
     if (route !== 'office' || officeEndpoint === null || auth === null) return null;
-    return createCharacterClient({
-      baseUrl: deriveDisplayNameBaseUrl(officeEndpoint),
-      getIdToken: () => auth.getIdToken(),
-      manifestUrl: ART_PACK_MANIFEST_URL,
-      // Characters an Admin uploaded (#121) join the pack's in the selector.
-      uploadsManifestUrl: artUploadsManifestUrl(officeEndpoint),
-    });
-  }, [route, officeEndpoint, auth]);
+    return createCharacterClient(
+      {
+        baseUrl: deriveDisplayNameBaseUrl(officeEndpoint),
+        getIdToken: () => auth.getIdToken(),
+        manifestUrl: ART_PACK_MANIFEST_URL,
+        // Characters an Admin uploaded (#121) join the pack's in the selector.
+        uploadsManifestUrl: artUploadsManifestUrl(officeEndpoint),
+      },
+      sessionFetch,
+    );
+  }, [route, officeEndpoint, auth, sessionFetch]);
   /**
    * Leaving the office (#66) unmounts it rather than hiding it: tearing the
    * shell down is what leaves the Colyseus and LiveKit rooms, so nobody keeps
@@ -131,6 +170,8 @@ export default function App() {
         character={characterPort}
         initialName={initialName}
         onNameClaimed={lastDisplayName.write}
+        notice={accessDenied === null ? null : describeAccessDenied(accessDenied)}
+        onDismissNotice={dismissAccessDenied}
       >
         {(session) => (
           // Nada mientras llega el chunk, por el mismo motivo que `AuthGate`
@@ -138,7 +179,7 @@ export default function App() {
           // parpadea unos milisegundos molesta mas de lo que informa.
           <Suspense fallback={null}>
             {route === 'dashboard' ? (
-              <DashboardRoute session={session} />
+              <DashboardRoute session={session} fetchImpl={sessionFetch} />
             ) : leftOffice ? (
               <LeftOfficeNotice reason={leftOffice} onReenter={() => setLeftOffice(null)} />
             ) : (
@@ -147,6 +188,7 @@ export default function App() {
                 onLeaveOffice={() => setLeftOffice('left')}
                 onSessionReplaced={() => setLeftOffice('replaced')}
                 onAccessRevoked={() => setLeftOffice('revoked')}
+                onAccessDenied={handleAccessDenied}
               />
             )}
           </Suspense>

@@ -167,6 +167,21 @@ describe('LoginScreen', () => {
   });
 });
 
+describe('LoginScreen: why the office sent you back (#129)', () => {
+  it('shows the notice it is given, apart from the sign-in error', () => {
+    render(<LoginScreen onSubmit={vi.fn()} pending={false} error={null} notice="Tu acceso caducó." />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('Tu acceso caducó.');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('without a notice there is no status line', () => {
+    render(<LoginScreen onSubmit={vi.fn()} pending={false} error={null} />);
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+});
+
 describe('LoginScreen: forgot password (#94)', () => {
   function reset(overrides: Partial<PasswordResetProps> = {}): PasswordResetProps {
     return {

@@ -18,7 +18,12 @@ import {
   type JWTVerifyGetKey,
 } from 'jose';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { createIdTokenVerifier, FIREBASE_JWKS_URL } from './verifyIdToken.ts';
+import {
+  createIdTokenVerifier,
+  FIREBASE_JWKS_URL,
+  MAX_SESSION_AGE_DAYS,
+  SESSION_EXPIRED,
+} from './verifyIdToken.ts';
 
 const PROJECT_ID = 'oficina-virtual';
 const ISSUER = `https://securetoken.google.com/${PROJECT_ID}`;
@@ -121,10 +126,53 @@ describe('createIdTokenVerifier: token valido', () => {
     });
   });
 
-  it('acepta un token sin auth_time, que es opcional', async () => {
+});
+
+describe('createIdTokenVerifier: edad maxima de la sesion (#128)', () => {
+  const DAY = 24 * 60 * 60;
+
+  it('caps a session at 90 days since the last email and password login', () => {
+    expect(MAX_SESSION_AGE_DAYS).toBe(90);
+  });
+
+  it('answers session-expired when auth_time is older than 90 days', async () => {
+    // A fresh ID token (`iat`, `exp`) the SDK refreshed from a login of long
+    // ago: the signature is fine, the session is what is too old.
+    const token = await sign(claims({ auth_time: nowSeconds() - MAX_SESSION_AGE_DAYS * DAY - 60 }));
+
+    expect(await verifier().verify(token)).toBe(SESSION_EXPIRED);
+  });
+
+  it('accepts a session that is still inside the 90 days', async () => {
+    const token = await sign(claims({ auth_time: nowSeconds() - MAX_SESSION_AGE_DAYS * DAY + 60 }));
+
+    expect((await verifier().verify(token)) as { uid?: string }).toMatchObject({ uid: 'uid-de-ana' });
+  });
+
+  it('answers session-expired for a token without auth_time: its age cannot be asserted', async () => {
+    // Fail closed: the only cost is one more login, which yields a token with
+    // the claim.
     const token = await sign(claims({ auth_time: undefined }));
 
-    expect((await verifier().verify(token))?.uid).toBe('uid-de-ana');
+    expect(await verifier().verify(token)).toBe(SESSION_EXPIRED);
+  });
+
+  it('a token that does not verify stays mute even with an old auth_time', async () => {
+    // `session-expired` is only told after the signature checked out, so it is
+    // no oracle for someone forging tokens.
+    const old = nowSeconds() - MAX_SESSION_AGE_DAYS * DAY - 60;
+    const token = await sign(claims({ auth_time: old }), { key: intruderKeys.privateKey });
+
+    expect(await verifier().verify(token)).toBeNull();
+  });
+
+  it('logs the expired session for the operator, without the token', async () => {
+    const registrado: string[] = [];
+    const token = await sign(claims({ auth_time: undefined }));
+
+    await verifier((name) => registrado.push(name)).verify(token);
+
+    expect(registrado).toEqual(['SessionExpired']);
   });
 });
 

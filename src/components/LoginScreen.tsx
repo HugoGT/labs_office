@@ -25,6 +25,11 @@ export interface LoginScreenProps {
   passwordReset?: PasswordResetProps;
   /** Prellena "Nombre" con el ultimo elegido con exito en este dispositivo (D8). */
   initialName?: string;
+  /**
+   * Why the person is back here (#129), already in words
+   * (`describeAccessDenied`). Not `error`: nothing in this form failed.
+   */
+  notice?: string | null;
 }
 
 /**
@@ -64,6 +69,7 @@ export function LoginScreen({
   error,
   passwordReset,
   initialName,
+  notice = null,
 }: LoginScreenProps) {
   const [name, setName] = useState(initialName ?? '');
   const [email, setEmail] = useState('');
@@ -204,6 +210,12 @@ export function LoginScreen({
         {/* `role="alert"` y no un parrafo cualquiera: el fallo aparece lejos
             del foco (que sigue en el boton) y sin anunciarlo no existe para
             quien usa un lector de pantalla. */}
+        {notice !== null && (
+          <p className={styles.notice} role="status">
+            {notice}
+          </p>
+        )}
+
         {error !== null && (
           <div className={styles.error} role="alert">
             {error}

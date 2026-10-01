@@ -30,6 +30,7 @@ import {
   WORLD_W,
 } from '../../src/game/mapData.ts';
 import {
+  ACCESS_DENIED_CODE,
   DEFAULT_FACING,
   DEFAULT_NAME,
   DEFAULT_STATUS,
@@ -41,6 +42,7 @@ import {
   SESSION_REVOKED_CLOSE_CODE,
   isPresenceStatus,
   recordingAvailableUntil,
+  type AccessDeniedReason,
 } from '../../src/game/officeProtocol.ts';
 import {
   BASE_TERRAIN,
@@ -69,7 +71,7 @@ import type { CharacterRetirementHub } from './characterRetirement.ts';
 import { participantKeyOf, type FinishedRecordingStore } from './recording/finishedRecordings.ts';
 import type { ActiveRecording, RecordingRegistry } from './recording/recordingRegistry.ts';
 import { OfficeState, createPlayerState, createRecordingState } from './schema.ts';
-import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
+import { SESSION_EXPIRED, type IdTokenVerifier, type VerifiedIdentity } from './verifyIdToken.ts';
 
 export { DEFAULT_NAME, MAX_NAME_LENGTH, OFFICE_ROOM_NAME };
 
@@ -243,9 +245,8 @@ export interface OfficeRoomOptions {
   directory?: UserDirectory;
   /**
    * Inyectable para que los tests afirmen sobre lo que se registra, igual que
-   * `logFailure` en `verifyIdToken.ts` y por el mismo motivo: el motivo del
-   * rechazo no viaja al cliente, asi que la unica forma de probar que existe es
-   * capturarlo aqui.
+   * `logFailure` en `verifyIdToken.ts`. The client learns the reason too
+   * (#129), but not the uid, which is what the operator needs to find the row.
    */
   logDirectoryDenial?: DirectoryDenialLogger;
   /**
@@ -544,14 +545,14 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
    * "sin token" de "token caducado" de "token forjado", por la misma razon que
    * `verifyIdToken.verify` devuelve `null` y no un motivo.
    *
-   * Los cuatro rechazos del directorio (#24) colapsan en ESE MISMO 401, y no en
-   * uno propio, por lo mismo: distinguir "caducado" de "token invalido" le
-   * diria a quien sondea que esa cuenta existe y que hubo un acceso legitimo
-   * que caduco. Pero el LOG del servidor si lo distingue -- nadie de fuera lo
-   * lee, asi que callar ahi no defiende de nada y cuesta caro: "todo el mundo
-   * cae en not-provisioned" (las migraciones no corrieron, o el despliegue
-   * apunta a otra base de datos) y "un invitado caduco" son la misma respuesta
-   * HTTP y dos incidencias completamente distintas.
+   * The directory refusals (#24) use the same 401 but say why in the message
+   * (#129): `expired`, `revoked` or `not-provisioned` (`ACCESS_DENIED_REASONS`),
+   * and so does a session too old to trust (#128, `session-expired`).
+   * They only reach someone whose token verified, who already proved who they
+   * are; a mute refusal left the client nothing to show but "Sin servidor".
+   * The server LOG still records it too, with the uid: "todo el mundo cae en
+   * not-provisioned" (las migraciones no corrieron, o el despliegue apunta a
+   * otra base de datos) y "un invitado caduco" son dos incidencias distintas.
    */
   async onAuth(
     _client: Client<unknown, OfficeAuthData>,
@@ -562,7 +563,12 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
 
     const token = (options as { token?: unknown } | null | undefined)?.token;
     const identity = await this.auth.verify(token);
-    if (identity === null) throw new ServerError(401, 'unauthorized');
+    if (identity === null) throw new ServerError(ACCESS_DENIED_CODE, 'unauthorized' satisfies AccessDeniedReason);
+    // #128: a login older than `MAX_SESSION_AGE_DAYS`. The client signs out on
+    // it and asks for email and password again; the directory is not asked.
+    if (identity === SESSION_EXPIRED) {
+      throw new ServerError(ACCESS_DENIED_CODE, SESSION_EXPIRED satisfies AccessDeniedReason);
+    }
 
     // #100, D5: el nombre visible ya elegido en el directorio viaja junto a la
     // identidad, para que `onJoin` no tenga que volver a consultar la fila que
@@ -584,7 +590,10 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       const decision = decideAccess(user, new Date());
       if (decision !== 'allow') {
         this.logDirectoryDenial(decision, identity.uid);
-        throw new ServerError(401, 'unauthorized');
+        // Typed through the shared vocabulary, so a directory decision the
+        // client cannot read back fails to compile instead of reaching it.
+        const reason: AccessDeniedReason = decision;
+        throw new ServerError(ACCESS_DENIED_CODE, reason);
       }
       // `decision === 'allow'` solo puede darse con `user` no nulo (ver
       // `decideAccess`): el primer caso que cubre es justamente `null`.
