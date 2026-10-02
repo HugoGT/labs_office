@@ -3012,6 +3012,23 @@ describe('OfficeScene: piece collisions', () => {
     await vi.waitFor(() => expect(solidAt(scene, deskMiddle.x, deskMiddle.y)).toBe(false), LOOP_WAIT);
   });
 
+  it('a click on the map picks a piece instead of closing menus while the collision editor is open', async () => {
+    const { scene, bridge } = await bootConnected();
+    const events: string[] = [];
+    bridge.on('closemenu', () => events.push('closemenu'));
+    bridge.on('collisionpick', ({ pieceId }) => events.push(`pick:${pieceId}`));
+
+    bridge.emitCommand('collisionedit', { pieceId: null, draft: [], selectedRect: null, snap: 1 });
+    scene.input.emit('pointerdown', { worldX: treeTile.x, worldY: treeTile.y, isDown: true, event: { stopPropagation() {} } }, []);
+    scene.input.emit('pointerup', { worldX: treeTile.x, worldY: treeTile.y, isDown: false, event: { stopPropagation() {} } }, []);
+
+    expect(events).toEqual(['pick:tree-oak']);
+
+    bridge.emitCommand('collisionedit', null);
+    scene.input.emit('pointerdown', { worldX: treeTile.x, worldY: treeTile.y, isDown: true, event: { stopPropagation() {} } }, []);
+    expect(events).toEqual(['pick:tree-oak', 'closemenu']);
+  });
+
   it('keeps the tile helpers off a tile a rectangle touches', async () => {
     const { scene, handlers } = await bootConnected();
     const lawn = { tx: 67, ty: 22 };
