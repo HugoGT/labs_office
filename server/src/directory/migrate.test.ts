@@ -656,3 +656,13 @@ describe('schema.sql: persisted terrain blocks (#123 phase 2)', () => {
     );
   });
 });
+
+describe('schema.sql: collision areas per piece', () => {
+  const squashed = squash(schema);
+
+  it('stores one row per edited piece, its rectangles as a JSON list, who saved them and when', () => {
+    expect(squashed).toContain(
+      "create table if not exists piece_collisions ( piece_id text primary key, rects jsonb not null check (jsonb_typeof(rects) = 'array'), updated_by uuid references users(id), updated_at timestamptz not null default now() )",
+    );
+  });
+});
