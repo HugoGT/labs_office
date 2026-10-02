@@ -97,6 +97,12 @@ export interface OfficeState {
    * or a reconnected client gets the current terrain with the first sync.
    */
   terrainBlocks: string;
+  /**
+   * The saved collision areas per piece, in the wire form of
+   * `encodeCollisionTable`, replicated whole like `terrainBlocks`: every
+   * client places the same rectangles from it and its own desk list.
+   */
+  pieceCollisions: string;
 }
 
 export class OfficeState extends Schema {
@@ -105,7 +111,8 @@ export class OfficeState extends Schema {
     this.players = new MapSchema<PlayerState>();
     this.recordings = new MapSchema<RecordingState>();
     this.terrainBlocks = '';
+    this.pieceCollisions = '';
   }
 }
 
-defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState }, terrainBlocks: 'string' });
+defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState }, terrainBlocks: 'string', pieceCollisions: 'string' });
