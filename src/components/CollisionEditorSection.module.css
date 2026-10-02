@@ -1,0 +1,161 @@
+/* Same visual vocabulary as TerrainEditorSection.module.css: it lives inside the expanded panel. */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid #2b3444;
+  padding-top: 8px;
+}
+
+.enter {
+  align-self: flex-start;
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e5e7eb;
+}
+
+.exit {
+  background: transparent;
+  color: #9ca3af;
+  border: none;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #e5e7eb;
+  cursor: pointer;
+}
+
+.piece {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e5e7eb;
+  overflow-wrap: anywhere;
+}
+
+.rects {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rect {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  padding: 6px;
+}
+
+.selected {
+  border-color: #38bdf8;
+}
+
+.select {
+  align-self: flex-start;
+  background: transparent;
+  color: #e5e7eb;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Four short numbers on one line; two by two on a narrow panel. */
+.numbers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(56px, 1fr));
+  gap: 4px;
+}
+
+.number {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.button {
+  align-self: flex-start;
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.input {
+  width: 100%;
+  min-width: 0;
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.hint {
+  display: block;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.notice {
+  font-size: 12px;
+  color: #86efac;
+}
+
+.error {
+  font-size: 12px;
+  color: #fca5a5;
+}

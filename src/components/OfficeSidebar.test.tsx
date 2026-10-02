@@ -252,6 +252,15 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     expect(await screen.findByRole('button', { name: 'Editar terreno' })).toBeInTheDocument();
   });
 
+  it('con rol admin y puerto de colisiones, ofrece TAMBIEN la edicion de colisiones', async () => {
+    const user = userEvent.setup();
+    renderSidebar({ ...adminProps(), collisions: { saveRects: vi.fn(async () => undefined), reset: vi.fn(async () => undefined) } });
+
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+
+    expect(await screen.findByRole('button', { name: 'Editar colisiones' })).toBeInTheDocument();
+  });
+
   it('con rol admin pero sin puerto de terreno, no ofrece la edicion del terreno', async () => {
     const user = userEvent.setup();
     renderSidebar(adminProps());
