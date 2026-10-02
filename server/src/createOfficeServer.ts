@@ -18,6 +18,8 @@ import express from 'express';
 import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { BASE_LAYOUT } from '../../src/game/officeLayout.ts';
+import { BASE_CHAIR_PIECE } from '../../src/game/pieceCollisions.ts';
+import { BASE_MAP_SEATS } from '../../src/game/seating.ts';
 import { livekitRoomFor } from '../../src/game/officeProtocol.ts';
 import {
   handleAdminSession,
@@ -109,6 +111,10 @@ import type { TerrainStore } from './terrain/terrainPort.ts';
 import { handleSetTerrainBlock, type TerrainDeps } from './terrain/terrainRoutes.ts';
 import type { TerrainProtections } from './terrain/terrainRules.ts';
 import { createTerrainRuntime, type TerrainRuntime } from './terrain/terrainRuntime.ts';
+import type { CollisionStore } from './collisions/collisionPort.ts';
+import { handleResetPieceCollision, handleSetPieceCollision, type CollisionDeps } from './collisions/collisionRoutes.ts';
+import { deskCollisionPlacements } from './collisions/collisionRules.ts';
+import { createCollisionRuntime, type CollisionRuntime } from './collisions/collisionRuntime.ts';
 import { createIdTokenVerifier, type IdTokenVerifier } from './verifyIdToken.ts';
 
 /**
@@ -248,6 +254,8 @@ export interface OfficeServer {
   characters: CharacterRetirement;
   /** The live terrain blocks and snapshot (#123 phase 2); exposed for tests, like `sessions`. */
   terrain: TerrainRuntime;
+  /** The live collision areas per piece; exposed for tests, like `terrain`. */
+  collisions: CollisionRuntime;
   /**
    * Directorio de usuarios (#24), o `undefined` si esta desactivado. Expuesto
    * para las rutas de administracion y para los tests, igual que `sessions`.
@@ -330,6 +338,12 @@ export interface OfficeServerOverrides {
    * `DATABASE_URL`. Its own override for the same reason as the ones above.
    */
   terrain?: TerrainStore | null;
+  /**
+   * Replaces the saved collision areas that would come from `process.env`.
+   * `null` forces "no store": every piece keeps its default and editing
+   * answers 503. Its own override for the same reason as `terrain`.
+   */
+  collisions?: CollisionStore | null;
   /**
    * Replaces the Egress adapter that would come from `process.env` (#5).
    * `null` forces "not configured". Same reason as the overrides above: the
@@ -514,8 +528,18 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   const recordings = createRecordingRegistry();
   const finished = createFinishedRecordingStore();
   const desksChangeListeners = new Set<() => void>();
+  /**
+   * The served desks or their decor changed: the collision placements follow
+   * them. A failure keeps the previous placements, never the request.
+   */
+  function refreshCollisionPlacements(): void {
+    collisions.refreshPlacements().catch(() => {
+      console.error('[collisions] could not re-read the desks');
+    });
+  }
   const notifyDesksChanged = () => {
     for (const listener of desksChangeListeners) listener();
+    refreshCollisionPlacements();
   };
   // Shared by the room (which registers) and the admin routes (which evict) (#93).
   const eviction = createSessionEvictionHub();
@@ -593,6 +617,17 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   const terrain = createTerrainRuntime({
     layout: BASE_LAYOUT,
     store: overrides?.terrain !== undefined ? (overrides.terrain ?? undefined) : envRuntime?.terrain,
+  });
+
+  // Same split as the terrain: built from the static office now, from the
+  // saved pieces and the served desks in `listen`. The room reads its
+  // rectangles on every move; the stores are read at load, per edit and when
+  // a desk or its decor changes.
+  const collisions = createCollisionRuntime({
+    layout: BASE_LAYOUT,
+    seats: BASE_MAP_SEATS,
+    store: overrides?.collisions !== undefined ? (overrides.collisions ?? undefined) : envRuntime?.collisions,
+    listDesks: desks ? async () => deskCollisionPlacements(await desks.listOfficeDesks()) : undefined,
   });
 
   app.get('/health', (_req, res) => {
@@ -1056,6 +1091,8 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
         .then((result) => {
           // Adapter promises resolve after COMMIT; failures never invalidate.
           if (changesDesks && result.status >= 200 && result.status < 300) notifyDesksChanged();
+          // Creating, moving or deleting a desk moves its collision too.
+          else if (req.method === 'POST' && result.status >= 200 && result.status < 300) refreshCollisionPlacements();
           res.status(result.status).json(result.body);
         })
         .catch(() => {
@@ -1161,6 +1198,50 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     ),
   );
 
+  /** Whether the office knows a piece: the art catalog, the layout or the base chairs. */
+  const staticPieces = new Set([...BASE_LAYOUT.props.map((prop) => prop.piece), BASE_CHAIR_PIECE]);
+  async function pieceExists(pieceId: string): Promise<boolean> {
+    if (staticPieces.has(pieceId)) return true;
+    const pieces = (await decor?.listArtPieces({ includeRetired: true })) ?? [];
+    return pieces.some((piece) => piece.id === pieceId);
+  }
+
+  /** Same adapter and same "no store -> 503, never 404" as `terrainRoute`. */
+  function collisionRoute(run: (req: express.Request, deps: CollisionDeps) => Promise<AdminResult>) {
+    return (req: express.Request, res: express.Response): void => {
+      if (directory === undefined || !collisions.editable) {
+        res.status(503).json({ error: 'collisions-not-configured' });
+        return;
+      }
+
+      const players = () =>
+        sessions.ids().flatMap((id) => {
+          const position = sessions.positionOf(id);
+          return position === undefined ? [] : [position];
+        });
+      run(req, { directory, auth, identityAdmin, collisions, players, pieceExists })
+        .then((result) => {
+          res.status(result.status).json(result.body);
+        })
+        .catch(() => {
+          console.error('[collisions] unhandled failure in a collision route');
+          res.status(500).json({ error: 'internal' });
+        });
+    };
+  }
+
+  // One piece per request, POST for the same CORS reason as the other admin
+  // writes (a reset too, instead of DELETE). Under `/admin/*`, so Caddy
+  // already proxies them. Clients see the result through the room state.
+  app.post(
+    '/admin/collisions/:pieceId',
+    collisionRoute((req, deps) => handleSetPieceCollision(req.header('Authorization'), req.params.pieceId, req.body, deps)),
+  );
+  app.post(
+    '/admin/collisions/:pieceId/reset',
+    collisionRoute((req, deps) => handleResetPieceCollision(req.header('Authorization'), req.params.pieceId, deps)),
+  );
+
   app.post('/livekit/token', (req, res) => {
     handleLivekitToken(req.body, sessions, auth, spaces)
       .then((result) => {
@@ -1218,6 +1299,9 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     desks,
     terrain: () => terrain.snapshot(),
     subscribeTerrainChanges: terrain.subscribe,
+    collisions: () => collisions.rects(),
+    collisionTable: () => collisions.encoded(),
+    subscribeCollisionChanges: collisions.subscribe,
     subscribeDesksChanges: (listener: () => void) => {
       desksChangeListeners.add(listener);
       return () => { desksChangeListeners.delete(listener); };
@@ -1238,6 +1322,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     eviction,
     characters,
     terrain,
+    collisions,
     directory,
     port() {
       const address = httpServer.address() as AddressInfo | null;
@@ -1258,6 +1343,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
       // Before accepting moves: a room created first would check them against
       // the committed blocks instead of the persisted ones.
       await terrain.load();
+      await collisions.load();
       await gameServer.listen(port);
       return this.port();
     },

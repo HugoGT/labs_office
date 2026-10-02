@@ -191,6 +191,10 @@ export type AdminErrorCode =
   | 'terrain-under-player'
   /** No `DATABASE_URL`: the terrain is the committed layout's and cannot be edited. */
   | 'terrain-not-configured'
+  /** A collision rectangle refused because it would close over someone: wait until they step aside. */
+  | 'collision-under-player'
+  /** No `DATABASE_URL`: every piece keeps its default collision and none can be edited. */
+  | 'collisions-not-configured'
   /**
    * An art upload refused by the server (#121), one code per fix: another
    * file format, another size, fewer colors, no background, a smaller file,

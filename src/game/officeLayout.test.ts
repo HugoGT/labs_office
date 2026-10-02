@@ -340,7 +340,7 @@ describe('effective walkability', () => {
     expect(isTileWalkable(snapshot, 9, 4)).toBe(false);
   });
 
-  it('lets walls, hedges and solid props block whatever is under them, a bridge deck included', () => {
+  it('lets walls and hedges block whatever is under them, and leaves solid props to their collision rectangles', () => {
     const snapshot = terrainSnapshot(
       grassMap({
         ground: (_tx, ty) => (ty >= 3 && ty <= 5 ? 'water' : null),
@@ -363,9 +363,10 @@ describe('effective walkability', () => {
 
     expect(isTileWalkable(snapshot, 1, 1)).toBe(false);
     expect(isTileWalkable(snapshot, 2, 1)).toBe(false);
-    expect(isTileWalkable(snapshot, 12, 1)).toBe(false);
+    // The table and the plant on the deck collide through pieceCollisions.ts, not here.
+    expect(isTileWalkable(snapshot, 12, 1)).toBe(true);
     expect(isTileWalkable(snapshot, 15, 1)).toBe(true);
-    expect(isTileWalkable(snapshot, 7, 4)).toBe(false);
+    expect(isTileWalkable(snapshot, 7, 4)).toBe(true);
     expect(isTileWalkable(snapshot, 6, 4)).toBe(true);
   });
 
