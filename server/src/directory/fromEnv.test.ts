@@ -185,7 +185,7 @@ describe('directoryFromEnv, decoracion (#7, slice 4)', () => {
   it('no trae migracion propia: las tablas ya estan en el mismo schema.sql', () => {
     const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, fakePool);
 
-    expect(Object.keys(runtime!)).toEqual(['directory', 'spaces', 'decor', 'desks', 'terrain', 'migrate']);
+    expect(Object.keys(runtime!)).toEqual(['directory', 'spaces', 'decor', 'desks', 'terrain', 'collisions', 'migrate']);
   });
 
   it('reads the terrain blocks (#123 phase 2) from the same pool', async () => {
@@ -200,6 +200,20 @@ describe('directoryFromEnv, decoracion (#7, slice 4)', () => {
 
     expect(built).toBe(1);
     expect(pool.queries.at(-1)?.text).toContain('FROM terrain_blocks');
+  });
+
+  it('reads the piece collisions from the same pool', async () => {
+    let built = 0;
+    const pool = fakePool();
+    const runtime = directoryFromEnv({ DATABASE_URL: 'postgres://localhost/oficina' }, () => {
+      built++;
+      return pool;
+    });
+
+    await runtime!.collisions.loadCollisions();
+
+    expect(built).toBe(1);
+    expect(pool.queries.at(-1)?.text).toContain('FROM piece_collisions');
   });
 });
 

@@ -24,6 +24,8 @@ import { createPgDesks } from '../desks/pgDesks.ts';
 import type { DeskDirectory } from '../desks/desksPort.ts';
 import { createPgSpaces } from '../spaces/pgSpaces.ts';
 import type { SpacesDirectory } from '../spaces/spacesPort.ts';
+import type { CollisionStore } from '../collisions/collisionPort.ts';
+import { createPgCollisions } from '../collisions/pgCollisions.ts';
 import { createPgTerrain } from '../terrain/pgTerrain.ts';
 import type { TerrainStore } from '../terrain/terrainPort.ts';
 
@@ -74,6 +76,8 @@ export interface DirectoryRuntime {
    * reason as the others. `terrain_blocks` is in the same `schema.sql`.
    */
   terrain: TerrainStore;
+  /** Saved collision areas per piece, on the same pool; `piece_collisions` is in the same `schema.sql`. */
+  collisions: CollisionStore;
   /**
    * Aplica el esquema. Idempotente: corre en cada arranque. Ver `migrate.ts`.
    *
@@ -108,6 +112,7 @@ export function directoryFromEnv(
     decor,
     desks: createPgDesks(pool),
     terrain: createPgTerrain(pool),
+    collisions: createPgCollisions(pool),
     migrate: async () => {
       await migrate(pool);
       await reportDesksWithoutSpace(pool);
