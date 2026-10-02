@@ -19,6 +19,7 @@
     "server": "node server/src/main.ts",
     "test:server": "vitest run --project=server",
     "art:export": "node tools/art/export.ts",
+    "art:templates": "node tools/art/exportTemplates.ts",
     "map:init": "node tools/map/writeInitialLayout.ts",
     "test:harness": "node --test e2e/preview-url.test.mjs e2e/livekit-health-url.test.mjs",
     "test:mux": "node --test --test-timeout=600000 infra/gcp/test/mux/mux.test.mjs",
