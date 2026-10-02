@@ -13,6 +13,7 @@ The product reference is `PRD-Oficina-Virtual.md` (Spanish; architecture in sect
 - **Desks and decoration**: claim a desk, customize it from an asset catalog.
 - **Meeting recording**: record a space with LiveKit Egress to Google Cloud Storage, REC badge for everyone in the room, view or download through a short-lived signed URL, kept 30 days.
 - **Email + password sign-in** with GCP Identity Platform (Firebase Auth), verified server-side.
+- **Installable PWA**: web app manifest, icons and a service worker that precaches only the app shell, so Chrome and Edge offer to install the office as a desktop app over HTTPS. Push notifications are not built yet.
 - **Admin dashboard** at `/dashboard` (reached by URL, no link in the UI): invitations, users and roles, spaces, desks and assets, backed by Postgres.
 
 The UI copy is in Spanish.
@@ -212,7 +213,7 @@ Known limitations:
 - **No automatic database backups.** Postgres runs on the VM; backups are manual `pg_dump` runs (see `infra/gcp/README.md`).
 - **No custom domain.** sslip.io shares Let's Encrypt rate limits with everyone; Caddy falls back to ZeroSSL.
 - **Accounts are created by an admin**, not by self sign-up. Creating invited accounts from the dashboard needs identity admin credentials, otherwise it answers 503.
-- **Not yet built** (open issues): screen sharing (#20), PWA install and push (#13), Google Calendar room booking (#14), camera pan by dragging (#53), phase 2 catalog and analytics (#15).
+- **Not yet built** (open issues): screen sharing (#20), PWA push notifications and an in-app install button (#13), Google Calendar room booking (#14), camera pan by dragging (#53), phase 2 catalog and analytics (#15).
 - **Open bugs**: avatars can walk through each other during auto-walk (#59); a colleague can disappear until both clients reload (#52).
 
 `prototype/` holds the original standalone prototype the app was ported from. It is reference only and is not built or served; open `prototype/index.html` directly in a browser to see it.
