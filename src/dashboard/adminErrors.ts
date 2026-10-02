@@ -74,6 +74,9 @@ const MESSAGES: Readonly<Record<AdminErrorCode, string>> = {
     'El agua taparía una sala, un escritorio, una silla o la entrada de la oficina. Elige otro bloque o material.',
   'terrain-under-player': 'Hay alguien de pie en ese bloque: el agua podrá ir cuando se aparte.',
   'terrain-not-configured': 'La edición del terreno no está configurada en este servidor.',
+  // Collision editor: the only refusal passes once that person moves.
+  'collision-under-player': 'Hay alguien dentro de esa zona: la colisión podrá guardarse cuando se aparte.',
+  'collisions-not-configured': 'La edición de colisiones no está configurada en este servidor.',
   // Art upload (#121). Each says what to change in the file, because the
   // form is still on screen with it; the panel adds which file it was.
   'not-png': 'El archivo no es un PNG.',

@@ -25,6 +25,8 @@ const CODES: AdminErrorCode[] = [
   'terrain-under-placement',
   'terrain-under-player',
   'terrain-not-configured',
+  'collision-under-player',
+  'collisions-not-configured',
   'not-png',
   'invalid-png',
   'unsupported-png',
@@ -163,6 +165,13 @@ describe('describeAdminError', () => {
   it('an appearance refused at creation says what to pick instead, not that the data was wrong (art step 7)', () => {
     expect(describeAdminError(new AdminError('appearance-color-not-allowed'))).toMatch(/no admite color/);
     expect(describeAdminError(new AdminError('appearance-immutable'))).toMatch(/al crear/);
+  });
+});
+
+describe('describeAdminError: collision edits', () => {
+  it('says a collision waits for someone to step aside, and when the editor is not configured', () => {
+    expect(describeAdminError(new AdminError('collision-under-player'))).toMatch(/alguien/);
+    expect(describeAdminError(new AdminError('collisions-not-configured'))).toMatch(/colisiones/);
   });
 });
 
