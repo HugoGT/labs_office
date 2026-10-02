@@ -2954,3 +2954,73 @@ describe('OfficeScene: edited terrain', () => {
   });
 });
 
+
+/**
+ * Collision areas per piece: the scene collides the player with one static
+ * body per rectangle of the room's table and of the served desks, and the
+ * terrain tiles apart, so an edit moves exactly what it says.
+ */
+describe('OfficeScene: piece collisions', () => {
+  /** The middle of the first Tiled tree's tile, (2, 2): a tree-oak. */
+  const treeTile = { x: 2 * TILE + 16, y: 2 * TILE + 16 };
+  /** A served desk on the open lawn, and the middle of its area. */
+  const lawnDesk: OfficeDesk = {
+    id: 'id-mesa',
+    label: 'Mesa 9',
+    x: 21 * TILE,
+    y: 50 * TILE,
+    w: 3 * TILE,
+    h: 3 * TILE,
+    occupant: null,
+    mine: false,
+    appearance: { materialId: 'desk-oak', color: null },
+  };
+  const deskMiddle = { x: 22 * TILE + 16, y: 51 * TILE + 16 };
+
+  function solidAt(scene: Phaser.Scene, x: number, y: number): boolean {
+    return scene.physics.world.staticBodies.getArray().some((body) => body.hitTest(x, y));
+  }
+
+  async function bootConnected() {
+    const connector = fakeConnector();
+    const booted = await bootOfficeScene(createOfficeBridge(), { endpoint: 'ws://test', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    return { ...booted, handlers: connector.handlers()! };
+  }
+
+  it('blocks a layout prop by its default rectangle and frees it when the room says it is walk-through', async () => {
+    const { scene, handlers } = await bootConnected();
+    expect(solidAt(scene, treeTile.x, treeTile.y)).toBe(true);
+
+    handlers.onCollisions!(new Map([['tree-oak', []]]));
+
+    await vi.waitFor(() => expect(solidAt(scene, treeTile.x, treeTile.y)).toBe(false), LOOP_WAIT);
+    // The terrain colliders stay: the border hedge is still there.
+    expect(solidAt(scene, 20 * TILE + 16, 16)).toBe(true);
+  });
+
+  it('collides with a served desk once its piece has rectangles, wherever the desk list puts it', async () => {
+    const { scene, bridge, handlers } = await bootConnected();
+    bridge.emitCommand('desks', { desks: [lawnDesk] });
+    expect(solidAt(scene, deskMiddle.x, deskMiddle.y)).toBe(false);
+
+    handlers.onCollisions!(new Map([['desk-oak', [{ x: -20, y: -12, w: 40, h: 16 }]]]));
+    expect(solidAt(scene, deskMiddle.x, deskMiddle.y)).toBe(true);
+    expect(solidAt(scene, deskMiddle.x + 21, deskMiddle.y)).toBe(false);
+
+    bridge.emitCommand('desks', { desks: [] });
+    await vi.waitFor(() => expect(solidAt(scene, deskMiddle.x, deskMiddle.y)).toBe(false), LOOP_WAIT);
+  });
+
+  it('keeps the tile helpers off a tile a rectangle touches', async () => {
+    const { scene, handlers } = await bootConnected();
+    const lawn = { tx: 67, ty: 22 };
+    handlers.onCollisions!(new Map([['tree-oak', []]]));
+    expect((scene as unknown as { grid: { solid: boolean[][] } }).grid.solid[2]![2]).toBe(false);
+
+    handlers.onCollisions!(new Map([['tree-oak', [{ x: -2, y: -4, w: 4, h: 4 }]]]));
+
+    expect((scene as unknown as { grid: { solid: boolean[][] } }).grid.solid[2]![2]).toBe(true);
+    expect((scene as unknown as { grid: { solid: boolean[][] } }).grid.solid[lawn.ty]![lawn.tx]).toBe(false);
+  });
+});

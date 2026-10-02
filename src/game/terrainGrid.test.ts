@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { BUILT_IN_SPACES, MAP_H, MAP_W, TILE } from './mapData';
+import { BASE_COLLISION_RECTS } from './officeCollisions';
 import { BASE_TERRAIN, isTileWalkable } from './officeLayout';
+import { isPositionBlocked } from './pieceCollisions';
 import { BASE_MAP_SEATS } from './seating';
 import { audiblePeers, type AudibleInput, type AudioPeer } from './proximityAudio';
 import {
@@ -18,6 +20,28 @@ import {
  * these coordinates are what spaces, desks and seats were placed against, so
  * the layout keeps every one of them.
  */
+describe('buildTerrainGrid: collision rectangles', () => {
+  it('keeps the terrain tiles apart from the tiles a piece rectangle touches', () => {
+    const lawn = { tx: 67, ty: 22 };
+    const rect = { x: lawn.tx * TILE + 30, y: lawn.ty * TILE + 4, w: 8, h: 4 };
+    const grid = buildTerrainGrid(BASE_TERRAIN, undefined, [rect]);
+
+    // Arcade gets the terrain tiles and the rectangles apart; the tile helpers see both.
+    expect(grid.terrainSolid[lawn.ty][lawn.tx]).toBe(false);
+    expect(grid.solid[lawn.ty][lawn.tx]).toBe(true);
+    expect(grid.solid[lawn.ty][lawn.tx + 1]).toBe(true);
+    expect(grid.solid[lawn.ty + 1][lawn.tx]).toBe(false);
+    expect(isBlocked(grid, lawn.tx, lawn.ty)).toBe(true);
+  });
+
+  it('blocks the layout props through their default rectangles, as the tiles did', () => {
+    const grid = buildTerrainGrid();
+
+    expect(grid.terrainSolid[2][2]).toBe(false);
+    expect(grid.solid[2][2]).toBe(true);
+  });
+});
+
 describe('buildTerrainGrid', () => {
   it('covers the 126x90 world and fences it with a solid hedge', () => {
     const grid = buildTerrainGrid();
@@ -158,12 +182,15 @@ describe('isBlocked', () => {
     expect(isBlocked(grid, 20, MAP_H)).toBe(true);
   });
 
-  it('agrees tile by tile with the shared rule the server enforces', () => {
+  it('agrees tile by tile with the shared rule the server enforces while every piece keeps its default', () => {
     const grid = buildTerrainGrid();
 
     for (let ty = 0; ty < MAP_H; ty++) {
       for (let tx = 0; tx < MAP_W; tx++) {
-        if (isBlocked(grid, tx, ty) === isTileWalkable(BASE_TERRAIN, tx, ty)) {
+        // A body centered on the tile, as the room judges a move.
+        const position = { x: tx * TILE + 32, y: ty * TILE + 25 };
+        const walkable = isTileWalkable(BASE_TERRAIN, tx, ty) && !isPositionBlocked(BASE_COLLISION_RECTS, position.x, position.y);
+        if (isBlocked(grid, tx, ty) === walkable) {
           throw new Error(`tile (${tx}, ${ty}) disagrees with isTileWalkable`);
         }
       }
