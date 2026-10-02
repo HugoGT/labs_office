@@ -2,7 +2,12 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import './index.css';
+import { startInstallPromptCapture } from './pwa/installPromptStore';
 import { registerServiceWorker } from './pwa/registerServiceWorker';
+
+// Before React: Chromium fires `beforeinstallprompt` once, early, and the
+// office that offers installing mounts much later (#13).
+startInstallPromptCapture();
 
 const container = document.getElementById('root');
 if (!container) throw new Error('No se encontro el elemento #root');
