@@ -9,6 +9,9 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { encodePng } from '../../server/src/assets/pngCodec.ts';
+import { PWA_ICONS, type PwaIcon } from './pwaIcons.ts';
+
+export { PWA_ICONS };
 
 type Rgb = readonly [number, number, number];
 
@@ -42,21 +45,6 @@ const DRAWING = [
 
 /** Corner radius of the `any` tile, as a fraction of the icon size. */
 const CORNER_RADIUS = 0.1875;
-
-export interface PwaIcon {
-  /** Path in the repo, under Vite's `public/`. */
-  readonly file: string;
-  /** URL the manifest and `index.html` reference. */
-  readonly src: string;
-  readonly sizes: string;
-  readonly purpose: 'any' | 'maskable';
-}
-
-export const PWA_ICONS: readonly PwaIcon[] = [
-  { file: 'public/icons/icon-192.png', src: '/icons/icon-192.png', sizes: '192x192', purpose: 'any' },
-  { file: 'public/icons/icon-512.png', src: '/icons/icon-512.png', sizes: '512x512', purpose: 'any' },
-  { file: 'public/icons/icon-maskable-512.png', src: '/icons/icon-maskable-512.png', sizes: '512x512', purpose: 'maskable' },
-];
 
 /** Hard-edged rounded square, no antialiasing, so the bytes depend on nothing but the size. */
 function insideTile(x: number, y: number, size: number): boolean {

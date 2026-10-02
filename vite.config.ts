@@ -3,7 +3,9 @@ import react from '@vitejs/plugin-react';
 import { AccessToken } from 'livekit-server-sdk';
 import { readFileSync } from 'node:fs';
 import { loadEnv } from 'vite';
+import { VitePWA } from 'vite-plugin-pwa';
 import { defineConfig } from 'vitest/config';
+import { pwaOptions } from './tools/pwa/pwaOptions.ts';
 
 /**
  * Lee `infra/livekit/.env` para mintar tokens reales desde un comando de
@@ -30,7 +32,7 @@ function loadLivekitEnv(): Record<string, string> {
   }
 }
 
-// PRD 6.1: Vite + React + TypeScript. El plugin PWA se agrega en Fase 1 (PRD seccion 9).
+// PRD 6.1: Vite + React + TypeScript. PWA (PRD section 9, #13): `tools/pwa/pwaOptions.ts`.
 export default defineConfig(({ mode }) => {
   /**
    * D2: `VITE_E2E_HOOK` se lee aqui, en tiempo de config (Node), y no via
@@ -45,7 +47,7 @@ export default defineConfig(({ mode }) => {
   const officeE2eDefine = { __OFFICE_E2E__: JSON.stringify(env.VITE_E2E_HOOK === '1') };
 
   return {
-    plugins: [react()],
+    plugins: [react(), VitePWA(pwaOptions(mode))],
     server: { port: 5173, host: true },
     // Sin esto, la primera corrida de `pnpm test:browser` que toca
     // `livekitRoom.ts` re-optimiza dependencias a mitad de ejecucion y Vite
