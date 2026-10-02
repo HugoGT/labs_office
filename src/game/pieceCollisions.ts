@@ -253,6 +253,17 @@ export function seatInstances(
   }));
 }
 
+/** The chair of the base map's rooms (`BASE_MAP_CHAIR` of mapBuilder.ts, pinned by a test). */
+export const BASE_CHAIR_PIECE = 'chair-wood';
+
+/** The instances that never change while the server runs: the Tiled props and the base map chairs. */
+export function staticCollisionInstances(
+  props: readonly CollisionLayoutProp[],
+  seats: readonly { readonly tx: number; readonly ty: number; readonly facing: CollisionFacing }[],
+): CollisionInstance[] {
+  return [...layoutPropInstances(props), ...seatInstances(seats, BASE_CHAIR_PIECE)];
+}
+
 /** A served desk area in world pixels, with its material and the pieces of its decor. */
 export interface CollisionDesk {
   readonly x: number;

@@ -4,8 +4,11 @@ import { parseArtSheetKey } from './artPack';
 import { physicalBodyRect } from './avatarGeometry';
 import { deskSlotRect } from './deskLayout';
 import { TILE } from './mapData';
+import { BASE_MAP_CHAIR } from './mapBuilder';
 import { AVATAR_BODY_CENTER_OFFSET, BASE_LAYOUT, type LayoutProp } from './officeLayout';
+import { BASE_MAP_SEATS } from './seating';
 import {
+  BASE_CHAIR_PIECE,
   COLLISION_BODY_CENTER_OFFSET,
   COLLISION_COORD_LIMIT,
   COLLISION_TILE,
@@ -29,6 +32,7 @@ import {
   rotateRect,
   rotationForFacing,
   seatInstances,
+  staticCollisionInstances,
   toPieceRect,
   worldRectsOf,
   type CollisionInstance,
@@ -182,6 +186,15 @@ describe('pieceCollisions: instances', () => {
     expect(rect!.w).toBeCloseTo(16);
     expect(rect!.y + rect!.h).toBeCloseTo(box.y + (46 * 32) / 48);
     expect(rect!.h).toBeCloseTo(8);
+  });
+
+  it('gathers the static office: every solid prop of the layout and every base chair', () => {
+    const instances = staticCollisionInstances(BASE_LAYOUT.props, BASE_MAP_SEATS);
+    const solid = BASE_LAYOUT.props.filter((p) => p.collision === 'solid');
+
+    expect(BASE_CHAIR_PIECE).toBe(BASE_MAP_CHAIR);
+    expect(instances).toHaveLength(solid.length + BASE_MAP_SEATS.length);
+    expect(instances.filter((instance) => instance.piece === BASE_CHAIR_PIECE)).toHaveLength(BASE_MAP_SEATS.length);
   });
 
   it('skips a desk without a material', () => {
