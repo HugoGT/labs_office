@@ -74,7 +74,10 @@ export interface LayoutProp {
   readonly ty: number;
   readonly w: number;
   readonly h: number;
-  /** `deck`: the whole footprint is walkable over any terrain (bridges). `solid`: it blocks. */
+  /**
+   * `deck`: the whole footprint is walkable over any terrain (bridges).
+   * `solid`: it blocks, through its piece's collision rectangles (`pieceCollisions.ts`).
+   */
   readonly collision: 'solid' | 'deck';
   readonly orientation: LayoutBridgeOrientation | null;
   readonly facing: LayoutFacing | null;
@@ -345,9 +348,12 @@ export interface TerrainSnapshot {
  *
  *   1. Terrain: walkable unless water. A `ground` tile wins over its block.
  *   2. Deck props (bridges): their footprint is walkable, water included.
- *   3. Layout solids: walls, hedges and solid props block, a deck under them too.
+ *   3. Layout solids: walls and hedges block, a deck under them too.
  *
- * Outside the map nothing is walkable (`isTileWalkable`).
+ * Solid props (trees, plants, tables, desks) are not stamped here: they
+ * collide through their pieces' rectangles (`pieceCollisions.ts`), whose
+ * default is their whole footprint, so an untouched piece blocks the same
+ * tiles it always did. Outside the map nothing is walkable (`isTileWalkable`).
  */
 export function terrainSnapshot(layout: OfficeLayout, blocks: readonly LayoutMaterial[] = layout.blocks): TerrainSnapshot {
   const { width, height } = layout;
@@ -366,7 +372,6 @@ export function terrainSnapshot(layout: OfficeLayout, blocks: readonly LayoutMat
     }
   };
   for (const prop of layout.props) if (prop.collision === 'deck') cover(prop, true);
-  for (const prop of layout.props) if (prop.collision === 'solid') cover(prop, false);
   layout.walls.forEach((wall, index) => {
     if (wall !== null) walkable[index] = false;
   });
@@ -395,6 +400,7 @@ export function isTileWalkable(snapshot: TerrainSnapshot, tx: number, ty: number
  */
 export const AVATAR_BODY_CENTER_OFFSET = { x: -16, y: -9 } as const;
 
+/** The terrain half of a move check; the room also checks the pieces' rectangles (`isPositionBlocked`). */
 export function isPositionWalkable(snapshot: TerrainSnapshot, x: number, y: number): boolean {
   if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
   return isTileWalkable(
