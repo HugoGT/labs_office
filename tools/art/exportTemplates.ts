@@ -1,5 +1,5 @@
 /**
- * `pnpm art:templates`: regenerates the guide templates (docs/art/templates/). Commit the result;
+ * `pnpm art:templates`: regenerates the guide templates (docs/assets/templates/). Commit the result;
  * `templates.test.ts` fails while they drift.
  */
 import { fileURLToPath } from 'node:url';

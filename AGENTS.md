@@ -27,7 +27,8 @@ server/src/             Node server, run directly by Node type stripping (no bui
 e2e/                    real-process E2E harness (node:test + Playwright)
 tools/art/              art pack exporter: pure generators (domain/), sheets, manifest, previews
 tools/map/              initial Tiled layout generator and its editor palette (`pnpm map:init`)
-docs/art/               art contract (contract.md), generated review previews (preview/) and guide templates (templates/, templates.md)
+docs/art/               art contract (contract.md) and generated review previews (preview/)
+docs/assets/            guide templates for artists (templates/, templates.md)
 docker-compose.yml      full local stack (include of infra/livekit + postgres + server + web images)
 infra/livekit/          local LiveKit + Egress + Redis docker compose stack
 infra/gcp/              deployed `test` environment: Terraform, VM compose, Caddy, office-deploy
@@ -72,7 +73,7 @@ All from the repo root. Every script below exists in `package.json`.
 | `pnpm test:e2e:audio` | Two-client audio and "No molestar" E2E; needs a real LiveKit and `VITE_LIVEKIT_E2E=1` (the screen share scenario also needs `DATABASE_URL`) |
 | `pnpm e2e` | `test:harness` + `build` + `build:e2e` + `test:e2e` |
 | `pnpm art:export` | Regenerate the art pack (`public/assets/pack/`, 1x PNGs + `manifest.json`) and its upscaled previews (`docs/art/preview/`). Commit both; `tools/art/pack.test.ts` fails while they drift |
-| `pnpm art:templates` | Regenerate the guide templates for artists (`docs/art/templates/`, one PNG per kind at its contract sheet size). Commit them; `tools/art/templates.test.ts` fails while they drift |
+| `pnpm art:templates` | Regenerate the guide templates for artists (`docs/assets/templates/`, one PNG per kind at its contract sheet size). Commit them; `tools/art/templates.test.ts` fails while they drift |
 | `pnpm map:init` | Regenerates the initial Tiled layout and its palette from `tools/map/` (overwrites `src/game/maps/office.json`; `--palette-only` keeps it) |
 | `pnpm test:mux` | Local Docker harness for the Caddy TURN/TLS multiplexer. Never runs in CI |
 

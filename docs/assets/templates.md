@@ -1,6 +1,6 @@
 # Art templates
 
-Guide PNGs for drawing a piece that passes the upload checks. There is one template per kind, in `docs/art/templates/`. Each template is the exact sheet size that [the contract](contract.md) requires, so the frame grid you draw on is the grid the server checks.
+Guide PNGs for drawing a piece that passes the upload checks. There is one template per kind, in `docs/assets/templates/`. Each template is the exact sheet size that [the contract](../art/contract.md) requires, so the frame grid you draw on is the grid the server checks.
 
 | File | Upload role | Sheet | Frame | Grid (cols x rows) |
 |---|---|---|---|---|
@@ -43,7 +43,7 @@ The labels follow the contract's order. Draw each frame in the cell that has its
 
 ## Rules the template cannot show
 
-These checks apply to your exported file. See [the contract](contract.md) for the full list:
+These checks apply to your exported file. See [the contract](../art/contract.md) for the full list:
 
 - At most 128 distinct colors per file. Use flat pixel art, not gradients or smoothed upscales.
 - At most 128 KB per file.

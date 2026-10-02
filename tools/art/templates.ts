@@ -9,7 +9,7 @@ import { encodePng } from '../../server/src/assets/pngCodec.ts';
 import { TEMPLATE_IMAGE_KINDS, renderTemplate, type TemplateImageKind } from './domain/templates.ts';
 
 /** Next to the contract they illustrate; never under public/, they do not ship with the office. */
-export const TEMPLATE_DIR = 'docs/art/templates';
+export const TEMPLATE_DIR = 'docs/assets/templates';
 
 export function templatePath(kind: TemplateImageKind): string {
   return `${TEMPLATE_DIR}/${kind}.png`;
