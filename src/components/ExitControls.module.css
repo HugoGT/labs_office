@@ -52,3 +52,52 @@
     display: none;
   }
 }
+
+/*
+ * "Instalar app" (#13) makes three buttons. The labels of all three do not
+ * fit the rail at any width, so the row goes emoji only (names stay in
+ * `aria-label` and `title`), and index.css widens the narrow block through
+ * `--hud-exit-buttons`, published by the component.
+ */
+.controls[data-crowded] .btn {
+  padding: 0;
+}
+
+.controls[data-crowded] .label {
+  display: none;
+}
+
+/* Manual install steps (iOS and macOS Safari), above the row, right-aligned. */
+.panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: max-content;
+  max-width: min(280px, calc(100vw - 32px));
+  background: #111827f2;
+  color: #e5e7eb;
+  border: 1px solid #2b3444;
+  border-radius: var(--radius-panel);
+  padding: 12px 14px;
+  box-shadow: 0 8px 30px #0009;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.panel:focus {
+  outline: none;
+}
+
+.panel:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+.panelTitle {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.steps {
+  padding-left: 18px;
+}

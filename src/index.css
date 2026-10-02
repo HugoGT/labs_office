@@ -16,10 +16,11 @@
   --hud-rail-width: calc(var(--hud-sidebar-width) - 2 * var(--hud-rail-inset));
   /*
    * Footprint of the exit controls, which the bottom bar keeps clear so the
-   * two never overlap (#88): emoji only (two 36px buttons, 8px gap, 8px
+   * two never overlap (#88): emoji only (36px buttons, 8px gaps, 8px
    * padding, 1px border) until their labels fit, then the whole rail.
    */
-  --hud-exit-width: calc(2 * 36px + 8px + 2 * 8px + 2px);
+  --hud-exit-buttons: 2; /* 3 while "Instalar app" shows (#13), set by ExitControls */
+  --hud-exit-width: calc(var(--hud-exit-buttons) * 36px + (var(--hud-exit-buttons) - 1) * 8px + 2 * 8px + 2px);
   /* Both sit on the bottom row; the bar stops short of the exit controls. */
   --hud-bar-right: calc(var(--hud-rail-right) + var(--hud-exit-width) + 16px);
   --hud-exit-bottom: 16px;

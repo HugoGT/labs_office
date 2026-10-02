@@ -56,8 +56,10 @@ function expectSameColumn(element: Element, reference: Element) {
   expect(box(element).right).toBeCloseTo(box(reference).right, 0);
 }
 
-function renderExits() {
-  render(<ExitControls onSignOut={vi.fn()} onLeaveOffice={vi.fn()} />);
+function renderExits({ installable = false } = {}) {
+  render(
+    <ExitControls onSignOut={vi.fn()} onLeaveOffice={vi.fn()} install={installable ? { kind: 'ios' } : null} />,
+  );
   return screen.getByRole('button', { name: /Cerrar sesión/ }).parentElement!;
 }
 
@@ -211,6 +213,60 @@ describe('HUD layout: exit controls on narrow screens (#88)', () => {
 
       expect(overlaps(box(exits), box(bar)), `at ${width}px`).toBe(false);
       expect(box(bar).left, `at ${width}px`).toBeGreaterThanOrEqual(16);
+      cleanup();
+    }
+  });
+});
+
+describe('HUD layout: exit controls with "Instalar app" (#13)', () => {
+  const NAMES = ['Instalar app', 'Cerrar sesión', 'Salir'];
+
+  it('three buttons show only the emoji at every width, and none spills out', async () => {
+    for (const width of [VERY_SMALL, NARROW, 1439, WIDE, 1920]) {
+      await page.viewport(width, 800);
+      renderExits({ installable: true });
+
+      for (const name of NAMES) {
+        const button = screen.getByRole('button', { name });
+        expect(button.innerText.trim(), `${name} at ${width}px`).toMatch(/^\p{Extended_Pictographic}$/u);
+        expect(button.scrollWidth, `${name} at ${width}px`).toBeLessThanOrEqual(button.clientWidth);
+        // Same 36px emoji buttons as the two-button row, not squeezed into its width.
+        expect(box(button).width, `${name} at ${width}px`).toBeGreaterThanOrEqual(35.5);
+      }
+      cleanup();
+    }
+  });
+
+  it('at full width they still take the sidebar toggle column', async () => {
+    await page.viewport(WIDE, 800);
+    const exits = renderExits({ installable: true });
+    const { toggle } = await renderOpenSidebar();
+
+    expectSameColumn(exits, toggle);
+  });
+
+  it('never overlap the bottom bar, which keeps clear of the wider block', async () => {
+    for (const width of [360, 390, VERY_SMALL, 719, 720, 800, NARROW, 1024, 1199, 1200, 1280, 1439, WIDE, 1920]) {
+      await page.viewport(width, 800);
+      const exits = renderExits({ installable: true });
+      const { bar } = renderBar(WIDEST_BAR);
+
+      expect(overlaps(box(exits), box(bar)), `at ${width}px`).toBe(false);
+      expect(box(bar).left, `at ${width}px`).toBeGreaterThanOrEqual(16);
+      cleanup();
+    }
+  });
+
+  it('the steps panel opens above the row and stays on screen', async () => {
+    for (const width of [360, VERY_SMALL, NARROW, WIDE]) {
+      await page.viewport(width, 800);
+      const exits = renderExits({ installable: true });
+      await userEvent.click(screen.getByRole('button', { name: 'Instalar app' }));
+
+      const panel = box(screen.getByRole('dialog', { name: 'Instalar Oficina Virtual' }));
+      expect(panel.bottom, `at ${width}px`).toBeLessThanOrEqual(box(exits).top);
+      expect(panel.left, `at ${width}px`).toBeGreaterThanOrEqual(0);
+      expect(panel.right, `at ${width}px`).toBeLessThanOrEqual(width);
       cleanup();
     }
   });

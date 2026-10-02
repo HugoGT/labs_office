@@ -62,3 +62,6 @@ export function installMode(env: InstallEnvironment): InstallMode {
   if (/Macintosh/.test(env.userAgent) && version >= SAFARI_MAC_MIN_VERSION) return 'macos';
   return 'none';
 }
+
+/** What the office's "Instalar app" button does, or `null` when it is hidden. */
+export type InstallOffer = { readonly kind: 'prompt'; readonly onInstall: () => void } | { readonly kind: 'ios' | 'macos' };
