@@ -18,6 +18,8 @@ import type { SpaceArea } from './mapData';
 import type { AccessDeniedReason, PresenceStatus, RecordingReadyPayload } from './officeProtocol';
 import type { RosterPeer } from './roster';
 import type { TerrainEditCommand } from './terrainEditor';
+import type { CollisionEditCommand } from './collisionEditor';
+import type { CollisionRect } from './pieceCollisions';
 import type { ActiveRecordingSnapshot, OfficeConnectionState } from './officeRoomClient';
 
 export interface OfficeEventMap {
@@ -184,6 +186,14 @@ export interface OfficeEventMap {
   terrain: { blocks: readonly LayoutMaterial[] };
   /** The terrain editor is open and someone clicked a block on the map (#123 phase 2). */
   terrainpick: { index: number };
+  /**
+   * The collision editor is open and someone clicked a placed piece: its id,
+   * the rectangles it collides with now (saved, or its default turned into
+   * piece space) and its default, for "Restablecer".
+   */
+  collisionpick: { pieceId: string; rects: readonly CollisionRect[]; saved: boolean; defaults: readonly CollisionRect[] };
+  /** A rectangle was drawn, moved or resized on the map: the whole new draft, and the rectangle it touched. */
+  collisiondraft: { rects: readonly CollisionRect[]; selectedRect: number | null };
 }
 
 export interface OfficeCommandMap {
@@ -286,6 +296,14 @@ export interface OfficeCommandMap {
    * preview is painted by the scene, which owns the tilemap.
    */
   terrainedit: TerrainEditCommand | null;
+  /**
+   * The collision editor: the piece, its draft drawn over every instance and
+   * the rectangle with handles, or `null` when it closes. Drawn by
+   * `CollisionEditLayer`; the colliders change only when the room says so.
+   */
+  collisionedit: CollisionEditCommand | null;
+  /** Outlines every collision rectangle of the office, editing or not, to check them by eye. */
+  collisiondebug: { show: boolean };
 }
 
 export interface OfficeBridge {

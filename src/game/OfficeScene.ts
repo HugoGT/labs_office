@@ -74,6 +74,7 @@ import {
 } from './pieceCollisions';
 import type { TerrainEditCommand } from './terrainEditor';
 import { TerrainEditLayer } from './TerrainEditLayer';
+import { COLLISION_EDIT_GRAPHICS_NAME, CollisionEditLayer } from './CollisionEditLayer';
 import {
   DEFAULT_FACING,
   DEFAULT_NAME,
@@ -251,6 +252,8 @@ export class OfficeScene extends Phaser.Scene {
   private pieceColliders?: { rects: Phaser.GameObjects.Rectangle[]; collider: Phaser.Physics.Arcade.Collider };
   private terrainEditLayer?: TerrainEditLayer;
   private unsubscribeTerrainEdit?: () => void;
+  private collisionEditLayer?: CollisionEditLayer;
+  private unsubscribeCollisionEdit?: () => void;
   private player!: CharacterContainer;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WasdKeys;
@@ -352,6 +355,7 @@ export class OfficeScene extends Phaser.Scene {
    */
   private layoutCommandActive = false;
   private terrainEditing = false;
+  private collisionEditing = false;
   /**
    * Todo lo dibujado del ultimo comando `desks` (#7, slice 5): zonas,
    * etiquetas y decoracion. Se guarda entero porque cada lista nueva sustituye
@@ -530,7 +534,7 @@ export class OfficeScene extends Phaser.Scene {
     this.layoutEditLayer = new LayoutEditLayer(this, this.bridge);
     this.unsubscribeLayoutEdit = this.bridge.onCommand('layoutedit', (command) => {
       this.layoutCommandActive = command !== null;
-      this.layoutEditing = this.layoutCommandActive || this.terrainEditing;
+      this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing;
     });
 
     // #123 phase 2. The layer outlines and picks blocks; the scene paints the
@@ -539,12 +543,26 @@ export class OfficeScene extends Phaser.Scene {
     this.unsubscribeTerrainEdit = this.bridge.onCommand('terrainedit', (command) => {
       const opening = command !== null && !this.terrainEditing;
       this.terrainEditing = command !== null;
-      this.layoutEditing = this.layoutCommandActive || this.terrainEditing;
+      this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing;
       const preview = command?.preview ?? null;
       const repaint = encodePreview(preview) !== encodePreview(this.terrainPreview);
       this.terrainPreview = preview;
       if (repaint) this.paintTerrain();
       if (opening) this.bridge.emit('terrain', { blocks: this.terrainBlocks });
+    });
+
+    // The collision editor: the layer draws the draft and picks pieces from
+    // the live collisions; the scene only holds the map clicks for it.
+    this.collisionEditLayer = new CollisionEditLayer(this, this.bridge, {
+      instances: () => this.collisionInstances,
+      table: () => this.collisionTable,
+    });
+    // Outlines a few pixels wide are noise at minimap scale.
+    const collisionOutlines = this.children.getByName(COLLISION_EDIT_GRAPHICS_NAME);
+    if (collisionOutlines !== null) this.minimapCamera?.ignore(collisionOutlines);
+    this.unsubscribeCollisionEdit = this.bridge.onCommand('collisionedit', (command) => {
+      this.collisionEditing = command !== null;
+      this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing;
     });
 
     // #52: reintento manual, el ultimo recurso cuando la escalera automatica
@@ -621,6 +639,8 @@ export class OfficeScene extends Phaser.Scene {
       this.layoutEditLayer?.destroy();
       this.unsubscribeTerrainEdit?.();
       this.terrainEditLayer?.destroy();
+      this.unsubscribeCollisionEdit?.();
+      this.collisionEditLayer?.destroy();
       this.cameraPanLayer?.destroy();
       this.remotes?.clear();
       this.roster?.clear();
@@ -1460,6 +1480,7 @@ export class OfficeScene extends Phaser.Scene {
     this.collisionRects = collisionWorld(this.collisionInstances, this.collisionTable);
     this.grid = buildTerrainGrid(this.terrain, BASE_LAYOUT, this.collisionRects);
     this.buildPieceColliders();
+    this.collisionEditLayer?.refresh();
   }
 
   /** A new collision table from the room: on the first sync and after every accepted edit. */
