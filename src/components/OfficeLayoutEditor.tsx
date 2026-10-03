@@ -3,6 +3,8 @@ import { flushSync } from 'react-dom';
 import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
+import type { CollisionAdminPort } from '../dashboard/collisionAdminPort';
+import { CollisionEditorSection } from './CollisionEditorSection';
 import type { OfficeBridge } from '../game/officeBridge';
 import { DeskEditorSection } from './DeskEditorSection';
 import { SpaceEditorSection } from './SpaceEditorSection';
@@ -47,19 +49,22 @@ export interface OfficeLayoutEditorProps {
    * exclusivity: it holds the same map clicks. Absent or `null`, not offered.
    */
   terrain?: TerrainAdminPort | null;
+  /** The collision editor, a fourth section under the same exclusivity. Absent or `null`, not offered. */
+  collisions?: CollisionAdminPort | null;
   refreshDesks: () => void;
   refreshSpaces: () => void;
   onEditingChange?: (editing: boolean) => void;
   forceExit?: boolean;
 }
 
-type LayoutEditorSection = 'desk' | 'room' | 'terrain';
+type LayoutEditorSection = 'desk' | 'room' | 'terrain' | 'collision';
 
 export default function OfficeLayoutEditor({
   bridge,
   desks,
   spaces,
   terrain,
+  collisions,
   refreshDesks,
   refreshSpaces,
   onEditingChange,
@@ -71,6 +76,7 @@ export default function OfficeLayoutEditor({
   const [deskEditing, setDeskEditing] = useState(false);
   const [spaceEditing, setSpaceEditing] = useState(false);
   const [terrainEditing, setTerrainEditing] = useState(false);
+  const [collisionEditing, setCollisionEditing] = useState(false);
   // Cual seccion, si alguna, tiene derecho al overlay compartido ahora mismo
   // -- ver la nota de cabecera "Exclusividad escritorios<->salas".
   const [activeSection, setActiveSection] = useState<LayoutEditorSection | null>(null);
@@ -78,25 +84,33 @@ export default function OfficeLayoutEditor({
   const handleDeskEditingChange = useCallback(
     (editing: boolean) => {
       setDeskEditing(editing);
-      onEditingChange?.(editing || spaceEditing || terrainEditing);
+      onEditingChange?.(editing || spaceEditing || terrainEditing || collisionEditing);
     },
-    [onEditingChange, spaceEditing, terrainEditing],
+    [onEditingChange, spaceEditing, terrainEditing, collisionEditing],
   );
 
   const handleSpaceEditingChange = useCallback(
     (editing: boolean) => {
       setSpaceEditing(editing);
-      onEditingChange?.(editing || deskEditing || terrainEditing);
+      onEditingChange?.(editing || deskEditing || terrainEditing || collisionEditing);
     },
-    [onEditingChange, deskEditing, terrainEditing],
+    [onEditingChange, deskEditing, terrainEditing, collisionEditing],
   );
 
   const handleTerrainEditingChange = useCallback(
     (editing: boolean) => {
       setTerrainEditing(editing);
-      onEditingChange?.(editing || deskEditing || spaceEditing);
+      onEditingChange?.(editing || deskEditing || spaceEditing || collisionEditing);
     },
-    [onEditingChange, deskEditing, spaceEditing],
+    [onEditingChange, deskEditing, spaceEditing, collisionEditing],
+  );
+
+  const handleCollisionEditingChange = useCallback(
+    (editing: boolean) => {
+      setCollisionEditing(editing);
+      onEditingChange?.(editing || deskEditing || spaceEditing || terrainEditing);
+    },
+    [onEditingChange, deskEditing, spaceEditing, terrainEditing],
   );
 
   // Cada seccion pide "activarme" ANTES de dispararse a si misma un `enter`
@@ -120,6 +134,9 @@ export default function OfficeLayoutEditor({
   useEffect(() => {
     if (activeSection === 'terrain' && !terrainEditing) setActiveSection(null);
   }, [activeSection, terrainEditing]);
+  useEffect(() => {
+    if (activeSection === 'collision' && !collisionEditing) setActiveSection(null);
+  }, [activeSection, collisionEditing]);
 
   /** Another section holds the map: this one has to leave. */
   const othersActive = (section: LayoutEditorSection): boolean => activeSection !== null && activeSection !== section;
@@ -153,6 +170,15 @@ export default function OfficeLayoutEditor({
           onEditingChange={handleTerrainEditingChange}
           forceExit={(forceExit ?? false) || othersActive('terrain')}
           onRequestActive={() => requestActive('terrain')}
+        />
+      )}
+      {collisions !== undefined && collisions !== null && (
+        <CollisionEditorSection
+          bridge={bridge}
+          collisions={collisions}
+          onEditingChange={handleCollisionEditingChange}
+          forceExit={(forceExit ?? false) || othersActive('collision')}
+          onRequestActive={() => requestActive('collision')}
         />
       )}
     </>

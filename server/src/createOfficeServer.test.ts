@@ -40,6 +40,10 @@ import { createMemorySpaces } from './spaces/memorySpaces.ts';
 import type { SpacesDirectory } from './spaces/spacesPort.ts';
 import { createMemoryTerrain } from './terrain/memoryTerrain.ts';
 import type { TerrainStore } from './terrain/terrainPort.ts';
+import { createMemoryCollisions } from './collisions/memoryCollisions.ts';
+import type { CollisionStore } from './collisions/collisionPort.ts';
+import { decodeCollisionTable, isPositionBlocked } from '../../src/game/pieceCollisions.ts';
+import { BASE_LAYOUT } from '../../src/game/officeLayout.ts';
 import { OFFICE_ROOM_NAME, RECONNECTION_WINDOW_SECONDS } from './OfficeRoom.ts';
 import type { EgressPort } from './recording/egressPort.ts';
 import type { RecordingStoragePort } from './recording/recordingStorage.ts';
@@ -2893,6 +2897,134 @@ describe('terrain routes (#123 phase 2)', () => {
     expect(accepted.status).toBe(200);
     expect(await accepted.json()).toEqual({ index: LAWN, material: 'water' });
     await waitFor(() => room.state.terrainBlocks.split(',')[LAWN] === 'water');
+    await server.shutdown();
+  });
+});
+
+/**
+ * Collision editing over HTTP. The rules are tested in `collisions/`; what
+ * only a real server proves is the wiring: the 503 without a store, the
+ * players read from the live room, the catalog deciding which pieces exist,
+ * the desks feeding the placements, and the edit reaching the room state.
+ */
+describe('collision routes', () => {
+  const ADMIN_COLLISIONS: DirectoryUser = {
+    id: '00000000-0000-4000-8000-0000000000c1',
+    uid: 'uid-admin',
+    email: 'admin@example.com',
+    displayName: 'Admin',
+    role: 'admin',
+    status: 'active',
+    expiresAt: null,
+    invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
+    createdAt: new Date('2025-12-01T00:00:00.000Z'),
+  };
+  const verifier: IdTokenVerifier = {
+    async verify(token: unknown) {
+      if (token !== 'valido-uid-admin') return null;
+      return { uid: 'uid-admin', email: 'admin@example.com', name: 'Admin' };
+    },
+  };
+  const BEARER = { Authorization: 'Bearer valido-uid-admin', 'Content-Type': 'application/json' };
+  const tree = BASE_LAYOUT.props.find((prop) => prop.kind === 'tree')!;
+  const besideTree = { x: (tree.tx + 2) * 32 + 32, y: tree.ty * 32 + 25, facing: 'down' };
+
+  async function waitFor(predicate: () => boolean, timeoutMs = 4000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      try {
+        if (predicate()) return;
+      } catch {
+        // The state may not have arrived yet.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error('condition not met before the timeout');
+  }
+
+  async function collisionServer(overrides: { collisions?: CollisionStore | null; desks?: DeskDirectory } = {}) {
+    const server = createOfficeServer({
+      auth: verifier,
+      directory: createMemoryDirectory({ seed: [ADMIN_COLLISIONS] }),
+      collisions: overrides.collisions === undefined ? createMemoryCollisions() : overrides.collisions,
+      desks: overrides.desks ?? createMemoryDesks(),
+      identityAdmin: null,
+    });
+    const port = await server.listen(0);
+    return { server, url: `http://localhost:${port}`, wsUrl: `ws://localhost:${port}` };
+  }
+
+  function save(url: string, pieceId: string, rects: unknown) {
+    return fetch(`${url}/admin/collisions/${pieceId}`, { method: 'POST', headers: BEARER, body: JSON.stringify({ rects }) });
+  }
+
+  it('answers 503 without a collision store or without a directory, never 404', async () => {
+    const { server, url } = await collisionServer({ collisions: null });
+    const res = await save(url, tree.piece, []);
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'collisions-not-configured' });
+    const reset = await fetch(`${url}/admin/collisions/${tree.piece}/reset`, { method: 'POST', headers: BEARER });
+    expect(reset.status).toBe(503);
+    await server.shutdown();
+
+    const bare = createOfficeServer({ auth: verifier, directory: null, collisions: createMemoryCollisions() });
+    const port = await bare.listen(0);
+    expect((await save(`http://localhost:${port}`, tree.piece, [])).status).toBe(503);
+    await bare.shutdown();
+  });
+
+  it('loads the saved pieces at listen, so the first move is already checked against them', async () => {
+    const { server } = await collisionServer({ collisions: createMemoryCollisions([[tree.piece, []]]) });
+
+    expect(server.collisions.table().get(tree.piece)).toEqual([]);
+    await server.shutdown();
+  });
+
+  it('answers 404 to a piece the office does not know and 400 to bad rectangles', async () => {
+    const { server, url } = await collisionServer();
+
+    expect((await save(url, 'plant-nowhere', [])).status).toBe(404);
+    expect((await save(url, tree.piece, [{ x: 0, y: 0, w: 0, h: 1 }])).status).toBe(400);
+    await server.shutdown();
+  });
+
+  it('refuses a rectangle over someone in the room, applies it once they leave it, and resets it', async () => {
+    const { server, url, wsUrl } = await collisionServer();
+    const room = await new Client(wsUrl).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token: 'valido-uid-admin' });
+    openRooms.push(room);
+    room.send('move', besideTree);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === besideTree.x);
+
+    // From the tree's anchor (bottom middle of its tile) two tiles to the right.
+    const over = [{ x: 48, y: -32, w: 32, h: 32 }];
+    const underPlayer = await save(url, tree.piece, over);
+    expect(underPlayer.status).toBe(409);
+    expect(await underPlayer.json()).toEqual({ error: 'collision-under-player' });
+
+    const away = { ...besideTree, y: besideTree.y + 2 * 32 };
+    room.send('move', away);
+    await waitFor(() => room.state.players.get(room.sessionId)?.y === away.y);
+    const accepted = await save(url, tree.piece, over);
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toEqual({ pieceId: tree.piece, rects: over });
+    await waitFor(() => decodeCollisionTable(room.state.pieceCollisions)?.get(tree.piece)?.length === 1);
+
+    const reset = await fetch(`${url}/admin/collisions/${tree.piece}/reset`, { method: 'POST', headers: BEARER });
+    expect(reset.status).toBe(200);
+    await waitFor(() => decodeCollisionTable(room.state.pieceCollisions)?.has(tree.piece) === false);
+    await server.shutdown();
+  });
+
+  it('places a desk the admin creates, so its piece collides without a restart', async () => {
+    const desks = createMemoryDesks();
+    const { server, url } = await collisionServer({ desks, collisions: createMemoryCollisions([['desk-wood', [{ x: -8, y: -8, w: 16, h: 16 }]]]) });
+    const created = await fetch(`${url}/admin/desks`, { method: 'POST', headers: BEARER, body: JSON.stringify({ label: 'Mesa C', x: 21, y: 50 }) });
+    expect(created.status).toBe(201);
+
+    // The middle of the 3x3 area at tile (21, 50), as a body center.
+    await waitFor(() => isPositionBlocked(server.collisions.rects(), 22 * 32 + 16 + 16, 51 * 32 + 16 + 9));
     await server.shutdown();
   });
 });

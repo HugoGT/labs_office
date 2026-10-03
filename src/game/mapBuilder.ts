@@ -235,8 +235,9 @@ function placeProp(scene: Phaser.Scene, prop: LayoutProp, art?: ArtTextures): vo
 
 /**
  * Walls, hedges and props of the layout. Collision is not decided here: the
- * scene builds its colliders from the shared walkability rule
- * (`terrainSnapshot`), which the server enforces too.
+ * scene builds its colliders from the shared rules the server enforces too,
+ * the terrain tiles (`terrainSnapshot`) and the pieces' rectangles
+ * (`pieceCollisions.ts`).
  */
 export function placeLayout(scene: Phaser.Scene, layout: OfficeLayout, art?: ArtTextures): void {
   placeWalls(scene, layout, art);
@@ -246,7 +247,8 @@ export function placeLayout(scene: Phaser.Scene, layout: OfficeLayout, art?: Art
 
 /**
  * The base chairs (`BASE_MAP_SEATS`, shared with the room, which seats people
- * on them). Never solid: people walk between chairs and sit on them.
+ * on them). No collision by default: people walk between chairs and sit on
+ * them, unless an admin gives the chair piece rectangles.
  */
 export function placeSeats(scene: Phaser.Scene, seats: readonly MapSeat[], art?: ArtTextures): void {
   const chair = packSheet(art, BASE_MAP_CHAIR, isChair);

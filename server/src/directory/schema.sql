@@ -423,3 +423,17 @@ CREATE TABLE IF NOT EXISTS terrain_blocks (
 );
 ALTER TABLE terrain_blocks DROP CONSTRAINT IF EXISTS terrain_blocks_material_check;
 ALTER TABLE terrain_blocks ADD CONSTRAINT terrain_blocks_material_check CHECK (material IN ('water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet'));
+
+-- Collision areas per art piece (collision editor). One row per piece an
+-- admin edited: a JSON list of rectangles in art pixels from the piece's
+-- anchor (`src/game/pieceCollisions.ts` validates them on every write and
+-- every load). A piece without a row keeps its default: its footprint for a
+-- Tiled prop, nothing for desks, decor and chairs. No reference to
+-- `art_pieces`: layout pieces load before the pack registers, and a retired
+-- piece may still stand in the layout.
+CREATE TABLE IF NOT EXISTS piece_collisions (
+  piece_id text PRIMARY KEY,
+  rects jsonb NOT NULL CHECK (jsonb_typeof(rects) = 'array'),
+  updated_by uuid REFERENCES users(id),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);

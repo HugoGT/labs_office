@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createOfficeServer, type OfficeServer } from '../../server/src/createOfficeServer.ts';
 import { createMemoryDirectory } from '../../server/src/directory/memoryDirectory.ts';
 import { createMemoryTerrain } from '../../server/src/terrain/memoryTerrain.ts';
+import { createMemoryCollisions } from '../../server/src/collisions/memoryCollisions.ts';
+import type { CollisionTable } from './pieceCollisions';
 import { SESSION_EXPIRED } from '../../server/src/verifyIdToken.ts';
 import { BASE_LAYOUT, type LayoutMaterial } from './officeLayout';
 import { TILE } from './mapData';
@@ -774,5 +776,20 @@ describe('connectOfficeRoom: seats (art migration, step 6)', () => {
     await server.terrain.setBlock({ index: 94, material: 'grass', actorId: null }, async () => ({ placements: [], players: [] }));
     await waitFor(() => seen.at(-1)?.[94] === 'grass');
     expect(seen.at(-1)![35]).toBe('water');
+  });
+
+  it('reports the collision table on the first sync and every edit after it', async () => {
+    await server.shutdown();
+    server = createOfficeServer({ collisions: createMemoryCollisions([['tree-oak', []]]) });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+    const seen: CollisionTable[] = [];
+    await connect('Ana', { ...recorder().handlers, onCollisions: (table) => seen.push(table) });
+
+    await waitFor(() => seen.length > 0);
+    expect(seen[0]!.get('tree-oak')).toEqual([]);
+
+    await server.collisions.setRects({ pieceId: 'plant-ficus', rects: [{ x: -4, y: -8, w: 8, h: 8 }], actorId: null }, () => []);
+    await waitFor(() => seen.at(-1)?.has('plant-ficus') === true);
+    expect(seen.at(-1)!.get('tree-oak')).toEqual([]);
   });
 });

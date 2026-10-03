@@ -20,6 +20,7 @@
 import { Client, getStateCallbacks, type Room } from 'colyseus.js';
 import { createMoveThrottle } from './moveThrottle';
 import { BASE_LAYOUT, decodeTerrainBlocks, type LayoutMaterial } from './officeLayout';
+import { decodeCollisionTable, type CollisionTable } from './pieceCollisions';
 import {
   ACCESS_DENIED_CODE,
   DEFAULT_STATUS,
@@ -68,6 +69,7 @@ interface OfficeRoomState {
   };
   recordings: unknown;
   terrainBlocks: string;
+  pieceCollisions: string;
 }
 
 /**
@@ -199,6 +201,8 @@ export interface OfficeRoomHandlers {
   onDesksChanged?(): void;
   /** The whole terrain block list (#123 phase 2): on the first sync and after every accepted edit. */
   onTerrain?(blocks: readonly LayoutMaterial[]): void;
+  /** The saved collision table, replicated whole like the terrain: on the first sync and after every accepted edit. */
+  onCollisions?(table: CollisionTable): void;
 }
 
 export interface ConnectOfficeRoomOptions {
@@ -348,7 +352,7 @@ export async function connectOfficeRoom({
       (state: OfficeRoomState): {
         players: PlayersCallbacks;
         recordings: RecordingsCallbacks;
-        listen(property: 'terrainBlocks', handler: (value: string) => void): () => void;
+        listen(property: 'terrainBlocks' | 'pieceCollisions', handler: (value: string) => void): () => void;
       };
       (player: RemotePlayer): PlayerCallbacks;
     };
@@ -410,6 +414,12 @@ export async function connectOfficeRoom({
     $(target.state).listen('terrainBlocks', (value) => {
       const blocks = decodeTerrainBlocks(value, BASE_LAYOUT.blocks.length);
       if (blocks !== null) handlers.onTerrain?.(blocks);
+    });
+    // Collision areas per piece: same rule. An older server sends none, and
+    // the scene keeps every piece at its default.
+    $(target.state).listen('pieceCollisions', (value) => {
+      const table = decodeCollisionTable(value);
+      if (table !== null) handlers.onCollisions?.(table);
     });
 
     // Mensajes sueltos del servidor (issue #2), no estado sincronizado: no hay

@@ -62,9 +62,19 @@ import {
   terrainSnapshot,
   withBlock,
   type LayoutMaterial,
+  type TerrainSnapshot,
 } from './officeLayout';
+import { BASE_COLLISION_RECTS, STATIC_COLLISION_INSTANCES, officeCollisionInstances } from './officeCollisions';
+import {
+  collisionWorld,
+  encodeCollisionTable,
+  type CollisionInstance,
+  type CollisionRect,
+  type CollisionTable,
+} from './pieceCollisions';
 import type { TerrainEditCommand } from './terrainEditor';
 import { TerrainEditLayer } from './TerrainEditLayer';
+import { COLLISION_EDIT_GRAPHICS_NAME, CollisionEditLayer } from './CollisionEditLayer';
 import {
   DEFAULT_FACING,
   DEFAULT_NAME,
@@ -231,8 +241,19 @@ export class OfficeScene extends Phaser.Scene {
   private terrainPreview: TerrainEditCommand['preview'] = null;
   /** The static bodies of the terrain grid and their collider, replaced whole on each edit. */
   private terrainColliders?: { rects: Phaser.GameObjects.Rectangle[]; collider: Phaser.Physics.Arcade.Collider };
+  /** The terrain of `terrainBlocks`, kept to rebuild `grid` when the collisions change. */
+  private terrain: TerrainSnapshot = BASE_TERRAIN;
+  /** The saved collision table the room replicated last; a piece missing here keeps its default. */
+  private collisionTable: CollisionTable = new Map();
+  /** Every placed piece: the static office plus the served desks and their decor. */
+  private collisionInstances: readonly CollisionInstance[] = STATIC_COLLISION_INSTANCES;
+  private collisionRects: readonly CollisionRect[] = BASE_COLLISION_RECTS;
+  /** One static body per collision rectangle and their collider, replaced whole on each change. */
+  private pieceColliders?: { rects: Phaser.GameObjects.Rectangle[]; collider: Phaser.Physics.Arcade.Collider };
   private terrainEditLayer?: TerrainEditLayer;
   private unsubscribeTerrainEdit?: () => void;
+  private collisionEditLayer?: CollisionEditLayer;
+  private unsubscribeCollisionEdit?: () => void;
   private player!: CharacterContainer;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WasdKeys;
@@ -334,6 +355,7 @@ export class OfficeScene extends Phaser.Scene {
    */
   private layoutCommandActive = false;
   private terrainEditing = false;
+  private collisionEditing = false;
   /**
    * Todo lo dibujado del ultimo comando `desks` (#7, slice 5): zonas,
    * etiquetas y decoracion. Se guarda entero porque cada lista nueva sustituye
@@ -441,7 +463,7 @@ export class OfficeScene extends Phaser.Scene {
 
     // The static office is the Tiled layout (art step 8); collisions come from
     // the same walkability rule the room enforces on every `move`.
-    const grid: TerrainGrid = buildTerrainGrid(BASE_TERRAIN, BASE_LAYOUT);
+    const grid: TerrainGrid = buildTerrainGrid(BASE_TERRAIN, BASE_LAYOUT, this.collisionRects);
     this.grid = grid;
     this.terrainTilemap = renderTerrain(this, BASE_TERRAIN, BASE_LAYOUT, this.art);
     placeLayout(this, BASE_LAYOUT, this.art);
@@ -512,7 +534,7 @@ export class OfficeScene extends Phaser.Scene {
     this.layoutEditLayer = new LayoutEditLayer(this, this.bridge);
     this.unsubscribeLayoutEdit = this.bridge.onCommand('layoutedit', (command) => {
       this.layoutCommandActive = command !== null;
-      this.layoutEditing = this.layoutCommandActive || this.terrainEditing;
+      this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing;
     });
 
     // #123 phase 2. The layer outlines and picks blocks; the scene paints the
@@ -521,12 +543,26 @@ export class OfficeScene extends Phaser.Scene {
     this.unsubscribeTerrainEdit = this.bridge.onCommand('terrainedit', (command) => {
       const opening = command !== null && !this.terrainEditing;
       this.terrainEditing = command !== null;
-      this.layoutEditing = this.layoutCommandActive || this.terrainEditing;
+      this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing;
       const preview = command?.preview ?? null;
       const repaint = encodePreview(preview) !== encodePreview(this.terrainPreview);
       this.terrainPreview = preview;
       if (repaint) this.paintTerrain();
       if (opening) this.bridge.emit('terrain', { blocks: this.terrainBlocks });
+    });
+
+    // The collision editor: the layer draws the draft and picks pieces from
+    // the live collisions; the scene only holds the map clicks for it.
+    this.collisionEditLayer = new CollisionEditLayer(this, this.bridge, {
+      instances: () => this.collisionInstances,
+      table: () => this.collisionTable,
+    });
+    // Outlines a few pixels wide are noise at minimap scale.
+    const collisionOutlines = this.children.getByName(COLLISION_EDIT_GRAPHICS_NAME);
+    if (collisionOutlines !== null) this.minimapCamera?.ignore(collisionOutlines);
+    this.unsubscribeCollisionEdit = this.bridge.onCommand('collisionedit', (command) => {
+      this.collisionEditing = command !== null;
+      this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing;
     });
 
     // #52: reintento manual, el ultimo recurso cuando la escalera automatica
@@ -603,6 +639,8 @@ export class OfficeScene extends Phaser.Scene {
       this.layoutEditLayer?.destroy();
       this.unsubscribeTerrainEdit?.();
       this.terrainEditLayer?.destroy();
+      this.unsubscribeCollisionEdit?.();
+      this.collisionEditLayer?.destroy();
       this.cameraPanLayer?.destroy();
       this.remotes?.clear();
       this.roster?.clear();
@@ -689,6 +727,7 @@ export class OfficeScene extends Phaser.Scene {
           onRecordingReady: (payload) => this.bridge.emit('recordingready', payload),
           onDesksChanged: () => this.bridge.emit('deskschanged', undefined),
           onTerrain: (blocks) => this.applyTerrain(blocks),
+          onCollisions: (table) => this.applyCollisions(table),
           onConnectionState: (state) => this.emitPresence(state),
           onLocalAvatar: (avatarId) => this.adoptLocalAvatar(avatarId),
           onLocalSeat: (seat) => this.onLocalSeat(seat),
@@ -1104,6 +1143,9 @@ export class OfficeScene extends Phaser.Scene {
    */
   private applyDesks(desks: readonly OfficeDesk[]): void {
     this.desks = desks;
+    // Desks and their decor collide by their pieces' rectangles, wherever the list puts them.
+    this.collisionInstances = officeCollisionInstances(desks);
+    this.refreshCollisions();
     for (const object of this.deskObjects.splice(0)) object.destroy();
     for (const desk of desks) this.drawDesk(desk);
   }
@@ -1388,6 +1430,7 @@ export class OfficeScene extends Phaser.Scene {
    */
   private buildColliders(grid: TerrainGrid): void {
     this.buildTerrainColliders(grid);
+    this.buildPieceColliders();
 
     this.peerGroup = this.add.group();
     this.physics.add.collider(this.player, this.peerGroup);
@@ -1399,7 +1442,7 @@ export class OfficeScene extends Phaser.Scene {
       this.physics.world.removeCollider(this.terrainColliders.collider);
       for (const rect of this.terrainColliders.rects) rect.destroy();
     }
-    const rects = mergeColliderRects(grid.solid).map((r) => {
+    const rects = mergeColliderRects(grid.terrainSolid).map((r) => {
       const w = r.w * TILE;
       const h = r.h * TILE;
       const rect = this.add.rectangle(r.x * TILE + w / 2, r.y * TILE + h / 2, w, h);
@@ -1407,6 +1450,45 @@ export class OfficeScene extends Phaser.Scene {
       return rect;
     });
     this.terrainColliders = { rects, collider: this.physics.add.collider(this.player, rects) };
+  }
+
+  /**
+   * One static body per collision rectangle of the pieces, replacing the
+   * previous ones. Not merged: there are a few hundred at most, and each one
+   * is exactly the rectangle the room checks the body center against.
+   */
+  private buildPieceColliders(): void {
+    if (this.pieceColliders) {
+      this.physics.world.removeCollider(this.pieceColliders.collider);
+      for (const rect of this.pieceColliders.rects) rect.destroy();
+    }
+    const rects = this.collisionRects.map((r) => {
+      const rect = this.add.rectangle(r.x + r.w / 2, r.y + r.h / 2, r.w, r.h);
+      this.physics.add.existing(rect, true);
+      return rect;
+    });
+    this.pieceColliders = { rects, collider: this.physics.add.collider(this.player, rects) };
+  }
+
+  /**
+   * The rectangles of every placed piece from the live table and desks: the
+   * static bodies and the tile helpers' grid follow at once, so what the
+   * player bumps into is what the room enforces.
+   */
+  private refreshCollisions(): void {
+    if (!this.alive || this.player === undefined) return;
+    this.collisionRects = collisionWorld(this.collisionInstances, this.collisionTable);
+    this.grid = buildTerrainGrid(this.terrain, BASE_LAYOUT, this.collisionRects);
+    this.buildPieceColliders();
+    this.collisionEditLayer?.refresh();
+  }
+
+  /** A new collision table from the room: on the first sync and after every accepted edit. */
+  private applyCollisions(table: CollisionTable): void {
+    if (!this.alive) return;
+    if (encodeCollisionTable(table) === encodeCollisionTable(this.collisionTable)) return;
+    this.collisionTable = table;
+    this.refreshCollisions();
   }
 
   /**
@@ -1419,7 +1501,8 @@ export class OfficeScene extends Phaser.Scene {
     if (!this.alive) return;
     if (encodeTerrainBlocks(blocks) !== encodeTerrainBlocks(this.terrainBlocks)) {
       this.terrainBlocks = blocks;
-      this.grid = buildTerrainGrid(terrainSnapshot(BASE_LAYOUT, blocks), BASE_LAYOUT);
+      this.terrain = terrainSnapshot(BASE_LAYOUT, blocks);
+      this.grid = buildTerrainGrid(this.terrain, BASE_LAYOUT, this.collisionRects);
       this.buildTerrainColliders(this.grid);
       this.paintTerrain();
     }

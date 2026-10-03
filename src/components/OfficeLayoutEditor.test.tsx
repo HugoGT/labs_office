@@ -253,3 +253,61 @@ describe('OfficeLayoutEditor: terrain section', () => {
     expect(onEditingChange).toHaveBeenLastCalledWith(false);
   });
 });
+
+/**
+ * The collision editor is a fourth section on the same map, under the same
+ * exclusivity, and it only mounts with its port.
+ */
+describe('OfficeLayoutEditor: collision section', () => {
+  function renderWithCollisions(onEditingChange = vi.fn()) {
+    const bridge = createOfficeBridge();
+    const collisionCommands: unknown[] = [];
+    const terrainCommands: unknown[] = [];
+    bridge.onCommand('collisionedit', (command) => collisionCommands.push(command));
+    bridge.onCommand('terrainedit', (command) => terrainCommands.push(command));
+    render(
+      <OfficeLayoutEditor
+        bridge={bridge}
+        desks={fakeDesks()}
+        spaces={fakeSpaces()}
+        terrain={{ setBlock: vi.fn(async () => undefined) }}
+        collisions={{ saveRects: vi.fn(async () => undefined), reset: vi.fn(async () => undefined) }}
+        refreshDesks={vi.fn()}
+        refreshSpaces={vi.fn()}
+        onEditingChange={onEditingChange}
+      />,
+    );
+    return { bridge, collisionCommands, terrainCommands, onEditingChange };
+  }
+
+  it('is not offered without a collision port', () => {
+    renderEditor();
+
+    expect(screen.queryByRole('button', { name: 'Editar colisiones' })).not.toBeInTheDocument();
+  });
+
+  it('opening it closes the terrain editor, and the other way round', async () => {
+    const { collisionCommands, terrainCommands, onEditingChange } = renderWithCollisions();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Editar terreno' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Editar colisiones' }));
+
+    expect(onEditingChange).toHaveBeenLastCalledWith(true);
+    expect(screen.getAllByRole('button', { name: /Salir/ })).toHaveLength(1);
+    expect(terrainCommands.at(-1)).toBeNull();
+    expect(collisionCommands.at(-1)).toEqual({ pieceId: null, draft: [], selectedRect: null, snap: 1 });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Editar terreno' }));
+    expect(collisionCommands.at(-1)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Editar colisiones' })).toBeInTheDocument();
+  });
+
+  it('leaving it reports editing=false', async () => {
+    const { onEditingChange } = renderWithCollisions();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Editar colisiones' }));
+    await userEvent.click(screen.getByRole('button', { name: /Salir/ }));
+
+    expect(onEditingChange).toHaveBeenLastCalledWith(false);
+  });
+});

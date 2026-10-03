@@ -5,6 +5,7 @@ import type { AssetAdminPort } from '../dashboard/assetAdminPort';
 import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
+import type { CollisionAdminPort } from '../dashboard/collisionAdminPort';
 import { SIDEBAR_TOP } from '../game/hudLayout';
 import type { OfficeBridge } from '../game/officeBridge';
 import { statusCssColor } from '../game/presence';
@@ -64,6 +65,8 @@ export interface OfficeSidebarProps {
   spaces?: SpacesAdminPort | null;
   /** Terrain blocks (#123 phase 2): optional inside the layout editor, which mounts without it. */
   terrain?: TerrainAdminPort | null;
+  /** Collision areas per piece: optional inside the layout editor, like `terrain`. */
+  collisions?: CollisionAdminPort | null;
   refreshDesks?: () => void;
   refreshSpaces?: () => void;
   /** Reenviado tal cual a `OfficeLayoutEditor` (#74, PR3c: exclusividad con `DeskDecorEditor`). */
@@ -102,6 +105,7 @@ export function OfficeSidebar({
   desks,
   spaces,
   terrain,
+  collisions,
   refreshDesks,
   refreshSpaces,
   onLayoutEditingChange,
@@ -178,6 +182,7 @@ export function OfficeSidebar({
                 desks={desks}
                 spaces={spaces}
                 terrain={terrain}
+                collisions={collisions}
                 refreshDesks={refreshDesks}
                 refreshSpaces={refreshSpaces}
                 onEditingChange={onLayoutEditingChange}

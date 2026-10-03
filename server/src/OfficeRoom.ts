@@ -45,12 +45,20 @@ import {
   type AccessDeniedReason,
 } from '../../src/game/officeProtocol.ts';
 import {
+  BASE_LAYOUT,
   BASE_TERRAIN,
   encodeTerrainBlocks,
   isPositionWalkable,
   type LayoutMaterial,
   type TerrainSnapshot,
 } from '../../src/game/officeLayout.ts';
+import {
+  collisionWorld,
+  encodeCollisionTable,
+  isPositionBlocked,
+  staticCollisionInstances,
+  type CollisionRect,
+} from '../../src/game/pieceCollisions.ts';
 import {
   BASE_MAP_SEATS,
   DESK_SEAT_FACING,
@@ -76,6 +84,9 @@ import { SESSION_EXPIRED, type IdTokenVerifier, type VerifiedIdentity } from './
 export { DEFAULT_NAME, MAX_NAME_LENGTH, OFFICE_ROOM_NAME };
 
 const FACING_SET = new Set<string>(FACINGS);
+
+/** The static office's collision rectangles with every piece at its default: what a room without a runtime checks. */
+const BASE_COLLISION_RECTS: readonly CollisionRect[] = collisionWorld(staticCollisionInstances(BASE_LAYOUT.props, BASE_MAP_SEATS), new Map());
 
 /**
  * Cuanto se guarda el asiento -- y con el, el avatar y la sesion de LiveKit --
@@ -220,6 +231,16 @@ export interface OfficeRoomOptions {
    */
   subscribeTerrainChanges?: (listener: (blocks: readonly LayoutMaterial[]) => void) => () => void;
   /**
+   * The collision rectangles every `move` is checked against, read on each
+   * move. Absent is the static office with every piece at its default (the
+   * footprint of each Tiled prop), exactly the tiles props blocked before.
+   */
+  collisions?: () => readonly CollisionRect[];
+  /** The saved collision table in its wire form, replicated as `state.pieceCollisions`. */
+  collisionTable?: () => string;
+  /** Accepted collision edits, with the new wire form; `collisions` already answers with them. */
+  subscribeCollisionChanges?: (listener: (encoded: string) => void) => () => void;
+  /**
    * Registro de sesiones vivas para LiveKit (D4), inyectado por
    * `createOfficeServer.ts` via `gameServer.define(name, Room, { sessions })`.
    * `OfficeRoom` no crea su propio registro: si lo hiciera como singleton de
@@ -341,6 +362,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private unsubscribeReady?: () => void;
   private unsubscribeDesksChanges?: () => void;
   private unsubscribeTerrainChanges?: () => void;
+  private unsubscribeCollisionChanges?: () => void;
   private unregisterEviction?: () => void;
   private unregisterCharacters?: () => void;
   /**
@@ -364,6 +386,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
    */
   private seated = new Map<string, { reach: SeatTiles; userId: string | null }>();
   private terrain: () => TerrainSnapshot = () => BASE_TERRAIN;
+  private collisions: () => readonly CollisionRect[] = () => BASE_COLLISION_RECTS;
 
   onCreate(options?: OfficeRoomOptions): void {
     this.state = new OfficeState();
@@ -371,6 +394,11 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     this.state.terrainBlocks = encodeTerrainBlocks(this.terrain().blocks);
     this.unsubscribeTerrainChanges = options?.subscribeTerrainChanges?.((blocks) => {
       this.state.terrainBlocks = encodeTerrainBlocks(blocks);
+    });
+    if (options?.collisions) this.collisions = options.collisions;
+    this.state.pieceCollisions = options?.collisionTable?.() ?? encodeCollisionTable(new Map());
+    this.unsubscribeCollisionChanges = options?.subscribeCollisionChanges?.((encoded) => {
+      this.state.pieceCollisions = encoded;
     });
     this.sessions = options?.sessions;
     this.auth = options?.auth;
@@ -422,10 +450,12 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       // Seated, the facing is the seat's, whatever the client says.
       const reach = this.seated.get(client.sessionId)?.reach;
       const withinSeat = reach !== undefined && inSeatReach({ x, y }, reach);
-      // The same rule the client collides with (step 8): water, walls, hedges
-      // and solid props block. A sitter is exempt within its seat's reach:
-      // feet on the chair put the body over the table, out of the collider.
-      if (!withinSeat && !isPositionWalkable(this.terrain(), x, y)) return;
+      // The same rule the client collides with (step 8): water, walls and
+      // hedges block by tile, and the collision rectangles of the pieces
+      // (props, desks, decor, chairs) by the body center. A sitter is exempt
+      // within its seat's reach: feet on the chair put the body over the
+      // table, out of the collider.
+      if (!withinSeat && (!isPositionWalkable(this.terrain(), x, y) || isPositionBlocked(this.collisions(), x, y))) return;
 
       player.x = x;
       player.y = y;
@@ -520,6 +550,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     this.unsubscribeReady?.();
     this.unsubscribeDesksChanges?.();
     this.unsubscribeTerrainChanges?.();
+    this.unsubscribeCollisionChanges?.();
     this.unregisterEviction?.();
     this.unregisterCharacters?.();
   }

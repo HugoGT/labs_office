@@ -11,6 +11,8 @@ import { createSpacesAdminClient } from '../dashboard/spacesAdminClient';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import { createTerrainAdminClient } from '../dashboard/terrainAdminClient';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
+import { createCollisionAdminClient } from '../dashboard/collisionAdminClient';
+import type { CollisionAdminPort } from '../dashboard/collisionAdminPort';
 import { resolveLivekitConfig } from '../game/livekitEndpoint';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
@@ -158,6 +160,12 @@ export function OfficeShell({
     const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
     if (apiBaseUrl === null) return null;
     return createTerrainAdminClient({ baseUrl: apiBaseUrl, getIdToken: () => session?.getIdToken() ?? Promise.resolve(null) });
+  });
+  /** Collision areas per piece: same pattern and reason as `terrainAdminPort`. */
+  const [collisionAdminPort] = useState<CollisionAdminPort | null>(() => {
+    const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
+    if (apiBaseUrl === null) return null;
+    return createCollisionAdminClient({ baseUrl: apiBaseUrl, getIdToken: () => session?.getIdToken() ?? Promise.resolve(null) });
   });
   /**
    * Puerto del catalogo de decoracion, migrado desde `DashboardRoute.tsx` a
@@ -760,6 +768,7 @@ export function OfficeShell({
         desks={deskAdminPort}
         spaces={spacesAdminPort}
         terrain={terrainAdminPort}
+        collisions={collisionAdminPort}
         assets={assetsAdminPort}
         contributions={contributionsPort}
         refreshDesks={refreshDesks}

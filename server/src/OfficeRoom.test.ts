@@ -33,6 +33,8 @@ import { createMemoryDirectory } from './directory/memoryDirectory.ts';
 import { ART_PACK_DEFAULTS } from './decor/artCatalogRules.ts';
 import type { OfficeState } from './schema.ts';
 import { createMemoryTerrain } from './terrain/memoryTerrain.ts';
+import { createMemoryCollisions } from './collisions/memoryCollisions.ts';
+import { decodeCollisionTable } from '../../src/game/pieceCollisions.ts';
 import {
   SESSION_EXPIRED,
   type IdTokenVerifier,
@@ -328,6 +330,59 @@ describe('OfficeRoom: edited terrain', () => {
     room.send('move', dried);
     await waitFor(() => room.state.players.get(room.sessionId)?.x === dried.x);
     expect(server.sessions.positionOf(room.sessionId)).toEqual({ x: dried.x, y: dried.y });
+  });
+});
+
+/**
+ * Collision areas per piece: the room replicates the saved table and checks
+ * moves against the rectangles the server rebuilt on the last edit or desk
+ * change, never against the database.
+ */
+describe('OfficeRoom: piece collisions', () => {
+  const onTile = (tx: number, ty: number) => ({ x: tx * TILE + 32, y: ty * TILE + 25, facing: 'down' });
+  const tableOf = (room: Awaited<ReturnType<typeof join>>) => decodeCollisionTable(room.state.pieceCollisions);
+  const DESK = ART_PACK_DEFAULTS.desk;
+
+  async function settle(room: Awaited<ReturnType<typeof join>>) {
+    room.send('status', { status: 'y' });
+    await waitFor(() => room.state.players.get(room.sessionId)?.status === 'y');
+  }
+
+  beforeEach(async () => {
+    await server.shutdown();
+    const at = new Date('2026-01-01T00:00:00.000Z');
+    const desks = createMemoryDesks({ seed: [{ id: 'desk-a', label: 'Mesa A', x: 21, y: 50, occupantId: null, createdAt: at, updatedAt: at }] });
+    server = createOfficeServer({ desks, collisions: createMemoryCollisions([['tree-oak', []]]) });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+  });
+
+  it('replicates the saved table to whoever joins, and an edit to whoever is inside', async () => {
+    const room = await join('Ana');
+    await waitFor(() => tableOf(room)?.get('tree-oak')?.length === 0);
+
+    await server.collisions.setRects({ pieceId: DESK, rects: [{ x: -20, y: -12, w: 40, h: 16 }], actorId: null }, () => []);
+
+    await waitFor(() => tableOf(room)?.get(DESK)?.[0]?.w === 40);
+    const late = await join('Beto');
+    await waitFor(() => tableOf(late)?.get(DESK)?.[0]?.w === 40);
+  });
+
+  it('drops a move into a served desk once its piece has rectangles', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+    const middle = onTile(22, 51);
+    room.send('move', middle);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === middle.x);
+    const aside = onTile(22, 49);
+    room.send('move', aside);
+    await waitFor(() => room.state.players.get(room.sessionId)?.y === aside.y);
+
+    await server.collisions.setRects({ pieceId: DESK, rects: [{ x: -20, y: -12, w: 40, h: 16 }], actorId: null }, () => []);
+    room.send('move', middle);
+    await settle(room);
+
+    expect(room.state.players.get(room.sessionId)?.y).toBe(aside.y);
+    expect(server.sessions.positionOf(room.sessionId)).toEqual({ x: aside.x, y: aside.y });
   });
 });
 
