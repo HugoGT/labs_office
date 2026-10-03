@@ -39,16 +39,22 @@ describe('PWA icons (#13)', () => {
     // W3C maskable safe zone: a centered circle with a radius of 40% of the icon.
     const safeRadius = image.width * 0.4;
     let drawn = 0;
+    let nonOpaque = 0;
+    let outsideSafeZone = 0;
+    // Check every pixel, but aggregate violations to avoid hundreds of thousands of matcher calls in CI.
     for (let y = 0; y < image.height; y += 1) {
       for (let x = 0; x < image.width; x += 1) {
         const at = (y * image.width + x) * 4;
-        const pixel = [...image.data.subarray(at, at + 4)];
-        expect(pixel[3]).toBe(255);
-        if (pixel.slice(0, 3).join() === ICON_BACKGROUND.join()) continue;
+        if (image.data[at + 3] !== 255) nonOpaque += 1;
+        if (image.data[at] === ICON_BACKGROUND[0]
+          && image.data[at + 1] === ICON_BACKGROUND[1]
+          && image.data[at + 2] === ICON_BACKGROUND[2]) continue;
         drawn += 1;
-        expect(Math.hypot(x + 0.5 - center, y + 0.5 - center)).toBeLessThan(safeRadius);
+        if (Math.hypot(x + 0.5 - center, y + 0.5 - center) >= safeRadius) outsideSafeZone += 1;
       }
     }
+    expect(nonOpaque).toBe(0);
+    expect(outsideSafeZone).toBe(0);
     expect(drawn).toBeGreaterThan(0);
   });
 });
