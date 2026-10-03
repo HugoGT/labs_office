@@ -7,8 +7,9 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "composite": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo"
   },
-  "include": ["vite.config.ts"]
+  "include": ["vite.config.ts", "tools/pwa/pwaOptions.ts", "tools/pwa/pwaIcons.ts"]
 }

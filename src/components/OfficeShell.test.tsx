@@ -1571,3 +1571,25 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
     expect(screen.getByRole('button', { name: /Salir/ })).toBeInTheDocument();
   });
 });
+
+// Last on purpose: the install prompt store is one per page (`window`), so an
+// event dispatched here would otherwise leak into the tests after it.
+describe('OfficeShell: instalar la app (#13)', () => {
+  it('sin beforeinstallprompt no ofrece instalar; con el evento, el boton abre el dialogo del navegador', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell />);
+    expect(screen.queryByRole('button', { name: 'Instalar app' })).not.toBeInTheDocument();
+
+    const event = Object.assign(new Event('beforeinstallprompt', { cancelable: true }), {
+      prompt: vi.fn(async () => {}),
+      userChoice: Promise.resolve({ outcome: 'accepted', platform: 'web' }),
+    });
+    act(() => {
+      window.dispatchEvent(event);
+    });
+    await user.click(screen.getByRole('button', { name: 'Instalar app' }));
+
+    expect(event.prompt).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(screen.queryByRole('button', { name: 'Instalar app' })).not.toBeInTheDocument());
+  });
+});

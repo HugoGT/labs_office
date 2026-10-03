@@ -30,6 +30,7 @@ import type { RosterPeer } from '../game/roster';
 import { useCallInvitations } from '../hooks/useCallInvitations';
 import { useDeskDecor } from '../hooks/useDeskDecor';
 import { useDesks } from '../hooks/useDesks';
+import { useInstallPrompt } from '../hooks/useInstallPrompt';
 import { useOfficeAdminRole } from '../hooks/useOfficeAdminRole';
 import { useOfficeBridge } from '../hooks/useOfficeBridge';
 import { useProximityAudio } from '../hooks/useProximityAudio';
@@ -113,6 +114,8 @@ export function OfficeShell({
   // + comandos), no en `useOfficeBridge`, que es deliberadamente un simple
   // suscriptor evento->estado.
   const { invitations, accept, dismiss } = useCallInvitations(bridge);
+  // "Instalar app" in the exit controls (#13): null while installed or not installable.
+  const installOffer = useInstallPrompt();
   // Se resuelve una sola vez: cambiarlo remontaria Phaser entero.
   const [endpoint] = useState(() =>
     resolveOfficeEndpoint({
@@ -806,6 +809,7 @@ export function OfficeShell({
       <ExitControls
         onSignOut={session?.signOut ? () => void signOut(session) : null}
         onLeaveOffice={onLeaveOffice ?? null}
+        install={installOffer}
       />
       <AudioUnblockPrompt blocked={audioBlocked} onUnblock={unblockAudio} />
       <Toast message={toastMessage} />
