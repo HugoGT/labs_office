@@ -32,14 +32,22 @@ export interface TerrainEditorSectionProps {
   onEditingChange?: (editing: boolean) => void;
   /** A rising edge closes the editor: another editor took the map. */
   forceExit?: boolean;
+  /** A chosen sidebar submenu opens directly; standalone consumers keep the entry button. */
+  initiallyActive?: boolean;
+  onExit?: () => void;
   /** Called before opening, so `OfficeLayoutEditor` can close the others first. */
   onRequestActive?: () => void;
 }
 
-export function TerrainEditorSection({ bridge, terrain, onEditingChange, forceExit = false, onRequestActive }: TerrainEditorSectionProps) {
+export function TerrainEditorSection({ bridge, terrain, onEditingChange, forceExit = false, onRequestActive, initiallyActive = false, onExit }: TerrainEditorSectionProps) {
   const editor = useTerrainEditor({ bridge, terrain });
   const [column, setColumn] = useState('');
   const [row, setRow] = useState('');
+
+  useEffect(() => {
+    if (initiallyActive) editor.enter();
+    // Initialization only: later forceExit must not reopen the editor.
+  }, []);
 
   useEffect(() => {
     onEditingChange?.(editor.active);
@@ -81,7 +89,7 @@ export function TerrainEditorSection({ bridge, terrain, onEditingChange, forceEx
     <div className={styles.section}>
       <div className={styles.header}>
         <h3 className={styles.title}>Terreno</h3>
-        <button type="button" className={styles.exit} onClick={editor.exit}>
+        <button type="button" className={styles.exit} onClick={() => { editor.exit(); onExit?.(); }}>
           Salir
         </button>
       </div>

@@ -11,9 +11,8 @@
  * clics sobre un peer/escritorio/pick o con el editor de layout activo --
  * el reductor no sabe nada de eso, solo arma o no arma.
  *
- * #98: un click en el minimapa lleva la camara a ese punto y la deja ahi
- * (`focused`) hasta que el jugador se mueve; un drag desde ahi es un pan
- * normal y, como todo pan, al soltar vuelve al jugador.
+ * #98, #146: minimap focus and a released map drag both stay `focused`
+ * until the player moves. Releasing a drag must not resume follow.
  */
 
 /** Umbral en pixeles de pantalla que separa un click de un drag. */
@@ -113,6 +112,6 @@ export function reduceCameraPan(
         };
       }
 
-      return { state: { kind: 'idle' }, effect: { kind: 'resumeFollow' } };
+      return { state: { kind: 'focused' }, effect: NONE };
   }
 }

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BottomBar } from './BottomBar';
 import { ExitControls } from './ExitControls';
 import { OfficeSidebar } from './OfficeSidebar';
+import { createOfficeBridge } from '../game/officeBridge';
 
 // Same cast as `livekitRoom.browser.test.ts`: the `vitest/browser` type
 // re-export does not resolve with a single provider installed, the runtime
@@ -138,6 +139,33 @@ describe('HUD layout: bottom bar (#87)', () => {
 });
 
 describe('HUD layout: sidebar toggle (#90)', () => {
+  it('personalization scrolls inside its card on short viewports without overlapping the people toggle (#147)', async () => {
+    for (const width of [720, WIDE, 390]) {
+      await page.viewport(width, 450);
+      render(<OfficeSidebar self={{ sessionId: 'yo', name: 'Hugo', status: 'g' }} peers={[]}
+        role="admin" bridge={createOfficeBridge()} refreshDesks={vi.fn()} refreshSpaces={vi.fn()}
+        desks={{ listDesks: vi.fn(), createDesk: vi.fn(), updateDesk: vi.fn(), deleteDesk: vi.fn() }}
+        spaces={{ listSpaces: vi.fn(), createSpace: vi.fn(), updateSpace: vi.fn(), deleteSpace: vi.fn() }}
+        assets={{ listAssets: vi.fn(async () => []), createAsset: vi.fn(), archiveAsset: vi.fn(), updateAsset: vi.fn() }}
+      />);
+      await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
+      await userEvent.click(screen.getByRole('button', { name: 'Catálogo de decoración' }));
+      await screen.findByRole('heading', { name: 'Catálogo de decoración' });
+      const panel = screen.getByRole('region', { name: 'Personalizar' });
+      expect(getComputedStyle(panel).overflowY).toBe('auto');
+      expect(getComputedStyle(panel).minHeight).toBe('0px');
+      expect(panel.scrollHeight).toBeGreaterThan(panel.clientHeight);
+      const people = screen.getByRole('button', { name: /Personas conectadas/ });
+      expect(box(panel).bottom).toBeLessThanOrEqual(box(people).top);
+      expect(box(people).height).toBe(32);
+      panel.scrollTop = panel.scrollHeight;
+      expect(panel.scrollTop).toBeGreaterThan(0);
+      await userEvent.click(screen.getByRole('button', { name: 'Salir' }));
+      expect(screen.getByRole('button', { name: 'Mi espacio' })).toBeInTheDocument();
+      cleanup();
+    }
+  });
+
   it('the search input sits inset within the panel, narrower than the toggle above it', async () => {
     await page.viewport(WIDE, 800);
     const { toggle, search } = await renderOpenSidebar();

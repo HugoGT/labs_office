@@ -35,6 +35,9 @@ export interface DeskEditorSectionProps {
   onEditingChange?: (editing: boolean) => void;
   /** Flanco a `true` fuerza salir del modo edicion, mismo patron que `OfficeSidebar.forceCollapsed`. */
   forceExit?: boolean;
+  /** A chosen sidebar submenu opens directly; standalone consumers keep the entry button. */
+  initiallyActive?: boolean;
+  onExit?: () => void;
   /**
    * Se llama ANTES de `editor.enter()` (#74, PR4 correction: exclusividad
    * con `SpaceEditorSection`). `OfficeLayoutEditor` lo usa para sacar a la
@@ -56,6 +59,8 @@ export function DeskEditorSection({
   refreshSpaces,
   onEditingChange,
   forceExit = false,
+  initiallyActive = false,
+  onExit,
   onRequestActive,
   loadMaterials,
   preview,
@@ -68,6 +73,11 @@ export function DeskEditorSection({
   const wasCreatingRef = useRef(false);
 
   const active = editor.state.tag !== 'off';
+
+  useEffect(() => {
+    if (initiallyActive) editor.enter();
+    // Initialization only: later forceExit must not reopen the editor.
+  }, []);
 
   useEffect(() => {
     onEditingChange?.(active);
@@ -135,7 +145,7 @@ export function DeskEditorSection({
     <div className={styles.section}>
       <div className={styles.header}>
         <h3 className={styles.title}>Escritorios</h3>
-        <button type="button" className={styles.exit} onClick={editor.exit}>
+        <button type="button" className={styles.exit} onClick={() => { editor.exit(); onExit?.(); }}>
           Salir
         </button>
       </div>

@@ -1479,7 +1479,9 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
     await openSidebar(user);
     await user.click(await screen.findByRole('button', { name: /Editar salas/ }));
 
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    // The menu entry now mounts the lazy editor; wait for its active submenu.
+    await screen.findByRole('heading', { name: 'Salas' });
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
   it('entrar en modo edicion cierra el editor de decoracion si estaba abierto', async () => {
@@ -1495,7 +1497,8 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
     await openSidebar(user);
     await user.click(await screen.findByRole('button', { name: /Editar escritorios/ }));
 
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await screen.findByRole('heading', { name: 'Escritorios' });
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
   /**
