@@ -80,6 +80,10 @@ describe('migrate', () => {
 });
 
 describe('schema.sql: lo que no puede faltar', () => {
+  it('adds nullable fractional last-position columns idempotently to existing users (#148)', () => {
+    expect(squash(schema)).toContain('alter table users add column if not exists last_x double precision');
+    expect(squash(schema)).toContain('alter table users add column if not exists last_y double precision');
+  });
   it('crea las tablas solo si no existen', () => {
     expect(schema).toContain('create table if not exists users');
     expect(schema).toContain('create table if not exists audit_log');

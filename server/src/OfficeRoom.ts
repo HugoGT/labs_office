@@ -72,7 +72,8 @@ import { createCallInvitationRegistry, type CallInvitationRegistry } from './cal
 import { ART_PACK_DEFAULTS } from './decor/artCatalogRules.ts';
 import type { DeskDirectory } from './desks/desksPort.ts';
 import { decideAccess, type AccessDecision } from './directory/accessDecision.ts';
-import type { UserDirectory } from './directory/directoryPort.ts';
+import type { LastPosition, UserDirectory } from './directory/directoryPort.ts';
+import { isPositionInMap } from './directory/positionRules.ts';
 import type { LiveSessionRegistry } from './liveSessions.ts';
 import type { SessionEvictionHub } from './sessionEviction.ts';
 import type { CharacterRetirementHub } from './characterRetirement.ts';
@@ -387,6 +388,9 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private seated = new Map<string, { reach: SeatTiles; userId: string | null }>();
   private terrain: () => TerrainSnapshot = () => BASE_TERRAIN;
   private collisions: () => readonly CollisionRect[] = () => BASE_COLLISION_RECTS;
+  // Bridges a definitive leave and a refresh while its write is in flight.
+  // Serializing per uid prevents an older slow write from undoing a newer leave.
+  private positionWrites = new Map<string, { position: LastPosition; done: Promise<void> }>();
 
   onCreate(options?: OfficeRoomOptions): void {
     this.state = new OfficeState();
@@ -636,10 +640,10 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     return { ...identity, directoryName, avatarId, directoryUserId };
   }
 
-  onJoin(
+  async onJoin(
     client: Client<unknown, OfficeAuthData>,
     options?: { name?: unknown; status?: unknown; spacesVersion?: unknown },
-  ): void {
+  ): Promise<void> {
     const [dx, dy] = SPAWN_RING[this.joinCount % SPAWN_RING.length];
     this.joinCount++;
 
@@ -649,9 +653,30 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     // camino de siempre. En ambos casos pasa por `sanitizeName`, que es quien
     // hace valer `MAX_NAME_LENGTH`.
     const identity = client.auth === true ? undefined : client.auth;
+    let position: LastPosition | null = null;
+    if (identity && this.directory) {
+      position = this.currentPositionOf(identity.uid, client);
+      // Live state is already newer than storage; never wait on a read that
+      // could outlive that session and return its stale pre-leave coordinate.
+      if (position === null) {
+        try {
+          position = await this.directory.getLastPosition(identity.uid);
+        } catch (error) {
+          console.warn('[office] last position read failed', error);
+        }
+        // #78 may have closed this still-joining socket while storage waited.
+        // Never resurrect its player or let it replace the newer tab.
+        if (!this.clients.includes(client)) return;
+        // Another join may have completed and moved during the storage await.
+        position = this.currentPositionOf(identity.uid, client) ?? position;
+      }
+      if (position && (!isPositionInMap(position)
+        || !isPositionWalkable(this.terrain(), position.x, position.y)
+        || isPositionBlocked(this.collisions(), position.x, position.y))) position = null;
+    }
     if (identity) this.replaceOtherSessionsOf(identity.uid, client);
-    const spawnX = (PLAYER_SPAWN_TX + dx) * TILE + TILE / 2;
-    const spawnY = (PLAYER_SPAWN_TY + dy) * TILE + TILE / 2;
+    const spawnX = position?.x ?? (PLAYER_SPAWN_TX + dx) * TILE + TILE / 2;
+    const spawnY = position?.y ?? (PLAYER_SPAWN_TY + dy) * TILE + TILE / 2;
 
     this.state.players.set(
       client.sessionId,
@@ -720,7 +745,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     if (this.replaced.delete(client.sessionId)) return;
 
     if (consented) {
-      this.releaseSession(client.sessionId);
+      await this.releaseSession(client.sessionId, accountOf(client));
       return;
     }
 
@@ -730,7 +755,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     try {
       await seat;
     } catch {
-      if (!this.replaced.delete(client.sessionId)) this.releaseSession(client.sessionId);
+      if (!this.replaced.delete(client.sessionId)) await this.releaseSession(client.sessionId, uid);
     } finally {
       this.pendingReconnections.delete(client.sessionId);
     }
@@ -781,7 +806,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     for (const other of this.clients) {
       if (other === except || accountOf(other) !== uid) continue;
       this.replaced.add(other.sessionId);
-      this.releaseSession(other.sessionId);
+      void this.releaseSession(other.sessionId, uid);
       other.leave(closeCode);
     }
 
@@ -789,7 +814,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       if (pending.uid !== uid) continue;
       this.pendingReconnections.delete(sessionId);
       this.replaced.add(sessionId);
-      this.releaseSession(sessionId);
+      void this.releaseSession(sessionId, uid);
       pending.seat.reject(new Error(reason));
     }
   }
@@ -803,7 +828,10 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
    * tiempo daria el peor resultado posible: alguien a quien se ve pero no se
    * oye, o al reves.
    */
-  private releaseSession(sessionId: string): void {
+  private releaseSession(sessionId: string, uid?: string): Promise<void> {
+    const player = this.state.players.get(sessionId);
+    const saved = player && uid !== undefined && this.directory
+      ? this.savePosition(uid, { x: player.x, y: player.y }) : Promise.resolve();
     this.state.players.delete(sessionId);
     this.seated.delete(sessionId);
     this.sessions?.remove(sessionId);
@@ -820,6 +848,35 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
         this.sendTo(entry.to, 'callerleft', { from: entry.from });
       }
     }
+    return saved;
+  }
+
+  private savePosition(uid: string, position: LastPosition): Promise<void> {
+    // A seated move can be exempt from terrain checks; storage still must
+    // never replace a good value with NaN or an off-map coordinate.
+    if (!isPositionInMap(position)) return Promise.resolve();
+    const previous = this.positionWrites.get(uid)?.done ?? Promise.resolve();
+    const done = previous.then(() => this.directory!.saveLastPosition(uid, position))
+      .catch((error: unknown) => { console.warn('[office] last position save failed', error); })
+      .finally(() => {
+        if (this.positionWrites.get(uid)?.done === done) this.positionWrites.delete(uid);
+      });
+    this.positionWrites.set(uid, { position, done });
+    return done;
+  }
+
+  private currentPositionOf(uid: string, newcomer: Client): LastPosition | null {
+    for (const other of this.clients) {
+      if (other === newcomer || accountOf(other) !== uid) continue;
+      const player = this.state.players.get(other.sessionId);
+      if (player) return { x: player.x, y: player.y };
+    }
+    for (const [sessionId, pending] of this.pendingReconnections) {
+      if (pending.uid !== uid) continue;
+      const player = this.state.players.get(sessionId);
+      if (player) return { x: player.x, y: player.y };
+    }
+    return this.positionWrites.get(uid)?.position ?? null;
   }
 
   /**

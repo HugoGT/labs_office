@@ -38,6 +38,10 @@ CREATE TABLE IF NOT EXISTS users (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- #148: no backfill to spawn. NULL means this uid has never saved a position.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_x double precision;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_y double precision;
+
 -- Dos cuentas con el mismo email serian dos personas para el sistema y una sola
 -- para la oficina. Sobre `lower(email)` para que `Ana@` y `ana@` choquen.
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users (lower(email));

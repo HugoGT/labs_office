@@ -66,6 +66,7 @@ import { canonicalizeDisplayName, DisplayNameTakenError } from './displayNameRul
 import { assertValidInvitationDays, normalizeEmail, normalizeInvitationInput } from './invitationRules.ts';
 import { assertAssignableRole, normalizeUserInput } from './userRules.ts';
 import { ART_PACK_DEFAULTS, normalizeStoredCharacterId } from '../decor/artCatalogRules.ts';
+import { assertLastPosition } from './positionRules.ts';
 
 /**
  * La forma minima de `pg` que usa este fichero. Declararla aqui (en vez de
@@ -299,6 +300,18 @@ export function createPgDirectory(
 
     findByUid(uid) {
       return findOne('uid', uid);
+    },
+
+    async getLastPosition(uid) {
+      const result = await pool.query('SELECT last_x, last_y FROM users WHERE uid = $1', [uid]);
+      const row = result.rows[0];
+      if (typeof row?.last_x !== 'number' || typeof row?.last_y !== 'number') return null;
+      return { x: row.last_x, y: row.last_y };
+    },
+
+    async saveLastPosition(uid, position) {
+      assertLastPosition(position);
+      await pool.query('UPDATE users SET last_x = $2, last_y = $3 WHERE uid = $1', [uid, position.x, position.y]);
     },
 
     findById(id) {
