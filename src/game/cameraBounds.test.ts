@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { centeredScroll, glideStep, navigationBounds, scrollRange } from './cameraBounds';
+import { centeredScroll, followBounds, glideStep, navigationBounds, scrollRange } from './cameraBounds';
 
 /**
  * Geometria pura de la camara principal (#53, #98), sin Phaser. Reproduce
@@ -65,5 +65,66 @@ describe('glideStep: el planeo por cuadro', () => {
 
   it('a menos de medio pixel aterriza exacto en el destino', () => {
     expect(glideStep(99.7, 100, 0.12)).toEqual({ value: 100, arrived: true });
+  });
+});
+
+describe('followBounds: bounds while the camera follows the player, zoom aware', () => {
+  const WORLD = { x: 0, y: 0, width: 4032, height: 2880 };
+
+  /** The one scroll Phaser's clamp allows on an axis whose display covers the world. */
+  function pinnedScroll(
+    bounds: { x: number; width: number },
+    viewSize: number,
+    zoom: number,
+  ): number {
+    const range = scrollRange(bounds.x, bounds.width, viewSize, zoom);
+    expect(range.min).toBe(range.max);
+    return range.min;
+  }
+
+  it('is the world itself while the visible area is smaller than it on both axes', () => {
+    expect(followBounds(WORLD, { width: 1280, height: 720 }, 1)).toEqual(WORLD);
+    expect(followBounds(WORLD, { width: 2560, height: 1440 }, 1)).toEqual(WORLD);
+  });
+
+  it('centers the world on x when only the width fits at 0.5 (2560x1440)', () => {
+    const view = { width: 2560, height: 1440 };
+    const bounds = followBounds(WORLD, view, 0.5);
+
+    expect(bounds).toEqual({ x: -544, y: 0, width: 5120, height: 2880 });
+    expect(pinnedScroll(bounds, view.width, 0.5)).toBe(centeredScroll(WORLD.width / 2, view.width));
+  });
+
+  it('centers the world on y only when just the height fits', () => {
+    const view = { width: 1000, height: 1500 };
+    const bounds = followBounds(WORLD, view, 0.5);
+
+    expect(bounds).toEqual({ x: 0, y: -60, width: 4032, height: 3000 });
+    expect(pinnedScroll({ x: bounds.y, width: bounds.height }, view.height, 0.5)).toBe(
+      centeredScroll(WORLD.height / 2, view.height),
+    );
+  });
+
+  it('centers the world on both axes when the whole world fits', () => {
+    const view = { width: 3000, height: 1800 };
+    const bounds = followBounds(WORLD, view, 0.5);
+
+    expect(bounds).toEqual({ x: -984, y: -360, width: 6000, height: 3600 });
+    expect(pinnedScroll(bounds, view.width, 0.5)).toBe(centeredScroll(WORLD.width / 2, view.width));
+  });
+
+  it('zooming in shrinks the visible area back below the world: the bounds are the world again', () => {
+    expect(followBounds(WORLD, { width: 2560, height: 1440 }, 2)).toEqual(WORLD);
+  });
+
+  it('keeps the world origin: an offset world is centered around its own middle', () => {
+    const offset = { x: 100, y: 50, width: 400, height: 300 };
+
+    expect(followBounds(offset, { width: 1000, height: 800 }, 1)).toEqual({
+      x: -200,
+      y: -200,
+      width: 1000,
+      height: 800,
+    });
   });
 });
