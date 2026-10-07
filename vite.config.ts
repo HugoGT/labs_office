@@ -127,6 +127,12 @@ export default defineConfig(({ mode }) => {
               }),
               instances: [{ browser: 'chromium' }],
               commands: {
+                async authoritativePositionServer(context, action: 'start' | 'state' | 'stop', sessionId = '') {
+                  const { authoritativePositionServer } = await context.project.import<{
+                    authoritativePositionServer(action: 'start' | 'state' | 'stop', sessionId: string): Promise<unknown>;
+                  }>(`${context.project.config.root}/server/src/authoritativePositionTestServer.ts`);
+                  return authoritativePositionServer(action, sessionId);
+                },
                 /**
                  * Mintea un token de LiveKit real desde Node (nunca desde el
                  * navegador: el secreto no debe llegar al bundle de la pagina

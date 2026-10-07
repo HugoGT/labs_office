@@ -178,6 +178,8 @@ export interface OfficeRoomHandlers {
    * up. Sitting is drawn from this, never from the request alone.
    */
   onLocalSeat?(seat: string | null): void;
+  /** Initial own authoritative state, once per joined/recovered room, never movement echoes (#148). */
+  onLocalPosition?(snapshot: RemotePlayerSnapshot): void;
   /**
    * Se acaba de reconectar: olvida TODO lo que sabias de los pares, viene un
    * replay completo (issue #52).
@@ -338,6 +340,7 @@ export async function connectOfficeRoom({
    * que ya no existe -- el mismo fallo que la guarda `alive` de `OfficeScene`.
    */
   let disposed = false;
+  let ownPositionReady = false;
 
   /**
    * Cablea una sala -- la del join o la de un reconnect -- con todo lo que este
@@ -347,7 +350,8 @@ export async function connectOfficeRoom({
    * sala nueva llega virgen y hay que repetir el cableado entero. Tener un solo
    * sitio donde se registra es lo que impide que join y reconnect se separen.
    */
-  function registerRoom(target: Room<OfficeRoomState>): void {
+  function registerRoom(target: Room<OfficeRoomState>, recovering = false): void {
+    let initialized = false;
     const $ = getStateCallbacks(target) as unknown as {
       (state: OfficeRoomState): {
         players: PlayersCallbacks;
@@ -358,12 +362,19 @@ export async function connectOfficeRoom({
     };
 
     $(target.state).players.onAdd((player, sessionId) => {
+      if (disposed || target !== room) return;
       // The own player is told apart here, where `target.sessionId` is
       // certain, rather than by the scene, which only learns it once
       // `connectOfficeRoom` resolves.
       const own = sessionId === target.sessionId;
       const snapshot = toSnapshot(sessionId, player);
       handlers.onAdd(snapshot);
+      if (own && !initialized) {
+        initialized = true;
+        handlers.onLocalPosition?.(snapshot);
+        ownPositionReady = true;
+        if (recovering) handlers.onConnectionState?.('connected');
+      }
       if (own) handlers.onLocalAvatar?.(snapshot.avatarId);
       if (own) handlers.onLocalSeat?.(snapshot.seat);
       let lastAvatarId = snapshot.avatarId;
@@ -371,6 +382,7 @@ export async function connectOfficeRoom({
       // La suscripcion por jugador se registra dentro del alta: `onChange` a
       // nivel de mapa solo avisa de altas y bajas, no de campos que mutan.
       $(player).onChange(() => {
+        if (disposed || target !== room) return;
         const changed = toSnapshot(sessionId, player);
         handlers.onChange(changed);
         if (own && changed.avatarId !== lastAvatarId) handlers.onLocalAvatar?.(changed.avatarId);
@@ -458,6 +470,8 @@ export async function connectOfficeRoom({
   /** Programa el siguiente escalon, o declara la sesion perdida si no queda. */
   function handleLeave(closeCode: number, reconnectionToken: string): void {
     if (disposed) return;
+    ownPositionReady = false;
+    throttle.dispose(); // Never flush a pre-disconnect move into a recovered room.
 
     // El codigo de cierre es la unica pista que queda de POR QUE se cayo, y se
     // pierde en el instante en que este manejador vuelve. La issue #52 explica
@@ -516,6 +530,7 @@ export async function connectOfficeRoom({
 
       room = recovered;
       attempt = 0;
+      throttle = newMoveThrottle();
       // El resync va ANTES de cablear la sala nueva, y el orden no es
       // cosmetico: `players.onAdd` de `@colyseus/schema` puede reproducir de
       // golpe lo que ya venga decodificado en el estado. Avisando primero,
@@ -523,9 +538,7 @@ export async function connectOfficeRoom({
       // vaciaria justo DESPUES de haber repoblado y el avatar del otro no
       // volveria a aparecer -- el sintoma de la issue, movido de sitio.
       handlers.onResync?.();
-      registerRoom(recovered);
-      // Y "conectado" va el ultimo, cuando ya hay por donde escuchar.
-      handlers.onConnectionState?.('connected');
+      registerRoom(recovered, true);
     } catch {
       if (disposed) return;
       // Un intento fallido gasta escalon, no la escalera: se sigue con el
@@ -536,12 +549,13 @@ export async function connectOfficeRoom({
     }
   }
 
-  registerRoom(room);
-
-  const throttle = createMoveThrottle({
+  const newMoveThrottle = () => createMoveThrottle({
     intervalMs: moveIntervalMs,
-    send: (move) => room.send('move', move),
+    send: (move) => { if (!disposed && ownPositionReady) room.send('move', move); },
   });
+  let throttle = newMoveThrottle();
+
+  registerRoom(room);
 
   /**
    * Cerrar la pestana es una salida PEDIDA, y hay que decirlo antes de irse.
@@ -573,7 +587,7 @@ export async function connectOfficeRoom({
     // devuelve el mismo valor.
     sessionId: room.sessionId,
     sendMove(x, y, facing) {
-      throttle.push({ x, y, facing });
+      if (!disposed && ownPositionReady) throttle.push({ x, y, facing });
     },
     // Sin agrupar, al contrario que `sendMove`: cambiar de estado es un gesto
     // humano y raro, y agrupar podria tragarse justo el que aisla a alguien.

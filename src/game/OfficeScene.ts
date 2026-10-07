@@ -95,7 +95,7 @@ import {
   type OfficeConnection,
   type OfficeConnectionState,
 } from './officeRoomClient';
-import { createRemoteAvatarRegistry, type RemoteAvatarRegistry } from './remoteAvatars';
+import { createRemoteAvatarRegistry, type RemoteAvatarRegistry, type RemotePlayerSnapshot } from './remoteAvatars';
 import { createPhaserAvatarSink, type RemoteAvatarContainer } from './remoteAvatarSink';
 import { detectSpace, nearbyKey } from './proximity';
 import { createRosterTracker, type RosterPeer, type RosterTracker } from './roster';
@@ -430,6 +430,9 @@ export class OfficeScene extends Phaser.Scene {
    */
   private readonly staleSpacesVersion = createStaleSpacesVersionTracker();
   private connection?: OfficeConnection;
+  /** JOIN_ROOM precedes ROOM_STATE: no input/publication until the own position arrives (#148). */
+  private localPositionReady = true;
+  private joinGeneration = 0;
   private facing: Facing = DEFAULT_FACING;
   /** Estado de presencia del jugador local; React es quien lo cambia (ver `setStatus`). */
   private status: PresenceStatus = DEFAULT_STATUS;
@@ -519,7 +522,7 @@ export class OfficeScene extends Phaser.Scene {
       lerp: FOLLOW_LERP,
       worldBounds: { x: 0, y: 0, width: WORLD_W, height: WORLD_H },
       minimap: this.minimapCamera,
-      isSuspended: () => this.layoutEditing,
+      isSuspended: () => this.layoutEditing || !this.localPositionReady,
     });
 
     this.unsubscribeSetStatus = this.bridge.onCommand('setStatus', ({ status }) => {
@@ -636,7 +639,7 @@ export class OfficeScene extends Phaser.Scene {
     // test necesita entrar a una sala concreta, no junto a nadie.
     if (__OFFICE_E2E__) {
       this.unsubscribeTeleportToTile = this.bridge.onCommand('teleportToTile', ({ tx, ty }) => {
-        if (isBlocked(this.grid, tx, ty)) return;
+        if (!this.localPositionReady || isBlocked(this.grid, tx, ty)) return;
         this.standUp();
         this.player.setPosition(tx * TILE + 16, ty * TILE + 16);
       });
@@ -696,6 +699,8 @@ export class OfficeScene extends Phaser.Scene {
    * que el servidor no este levantado, que en desarrollo es la mitad del rato.
    */
   private async connectToOffice(): Promise<void> {
+    const generation = ++this.joinGeneration;
+    const current = () => this.alive && generation === this.joinGeneration;
     const {
       endpoint,
       connect = connectOfficeRoom,
@@ -713,6 +718,8 @@ export class OfficeScene extends Phaser.Scene {
     }
 
     const joinedStatus = this.status;
+    this.localPositionReady = false;
+    this.resetWalking();
 
     try {
       const connection = await connect({
@@ -726,6 +733,7 @@ export class OfficeScene extends Phaser.Scene {
         getIdToken,
         handlers: {
           onAdd: (snapshot) => {
+            if (!current()) return;
             // On add, and on a change only when the character itself changed:
             // `onChange` fires on every move, and a character changes during
             // a session only when it is retired (#122).
@@ -737,6 +745,7 @@ export class OfficeScene extends Phaser.Scene {
             this.emitCharacterPortraits();
           },
           onChange: (snapshot) => {
+            if (!current()) return;
             const previous = this.remotes?.get(snapshot.sessionId)?.avatarId;
             if (previous !== undefined && previous !== snapshot.avatarId) this.requestCharacter(snapshot.avatarId);
             this.remotes?.upsert(snapshot);
@@ -744,6 +753,7 @@ export class OfficeScene extends Phaser.Scene {
             this.checkSpacesVersionDrift(snapshot.spacesVersion);
           },
           onRemove: (sessionId) => {
+            if (!current()) return;
             this.remotes?.remove(sessionId);
             this.roster?.remove(sessionId);
             this.emitPresence();
@@ -760,17 +770,25 @@ export class OfficeScene extends Phaser.Scene {
           onDesksChanged: () => this.bridge.emit('deskschanged', undefined),
           onTerrain: (blocks) => this.applyTerrain(blocks),
           onCollisions: (table) => this.applyCollisions(table),
-          onConnectionState: (state) => this.emitPresence(state),
-          onLocalAvatar: (avatarId) => this.adoptLocalAvatar(avatarId),
-          onLocalSeat: (seat) => this.onLocalSeat(seat),
-          onResync: () => this.resyncAfterReconnect(),
+          onConnectionState: (state) => {
+            if (!current()) return;
+            if (state !== 'connected') {
+              this.localPositionReady = state === 'offline';
+              this.resetWalking();
+            }
+            this.emitPresence(state);
+          },
+          onLocalPosition: (snapshot) => { if (current()) this.adoptLocalPosition(snapshot); },
+          onLocalAvatar: (avatarId) => { if (current()) this.adoptLocalAvatar(avatarId); },
+          onLocalSeat: (seat) => { if (current()) this.onLocalSeat(seat); },
+          onResync: () => { if (current()) this.resyncAfterReconnect(); },
         },
       });
 
       // La escena pudo apagarse mientras el `await` estaba en vuelo. Sin esta
       // guarda quedaria una conexion viva publicando la posicion de un jugador
       // ya destruido.
-      if (!this.alive) {
+      if (!current()) {
         void connection.leave();
         return;
       }
@@ -798,7 +816,8 @@ export class OfficeScene extends Phaser.Scene {
       // Sesion viva, todavia sin pares conocidos (el primer tic los completa).
       this.emitVoice(connection.sessionId, [], this.currentSpaceId);
     } catch (error) {
-      if (!this.alive) return;
+      if (!current()) return;
+      this.localPositionReady = !(error instanceof OfficeAccessDeniedError);
       if (!this.localAvatarKnown) this.adoptLocalAvatar(null);
       // #129: a refused account is not a missing server. "Sin servidor" with
       // its retry button would send the person against a server that is up
@@ -807,6 +826,28 @@ export class OfficeScene extends Phaser.Scene {
       else this.emitPresence('offline');
       this.emitVoice(null, [], this.currentSpaceId);
     }
+  }
+
+  private adoptLocalPosition(snapshot: RemotePlayerSnapshot): void {
+    if (this.localPositionReady) return;
+    this.resetWalking();
+    this.pendingSeat = null;
+    this.leaveSeat();
+    const body = this.player.body as Phaser.Physics.Arcade.Body;
+    body.reset(snapshot.x, snapshot.y);
+    // Body.reset() on a Container does not apply the Arcade offset.
+    body.updateFromGameObject();
+    body.prev.copy(body.position);
+    body.prevFrame.copy(body.position);
+    this.facing = facingFromSnapshot(snapshot.facing);
+    setCharacterFacing(this.player, this.facing);
+    this.seat = snapshot.seat === null ? null : this.resolveSeat(snapshot.seat);
+    this.player.seatFacing = this.seat?.facing ?? null;
+    body.checkCollision.none = this.seat !== null;
+    animateCharacter(this.player, { dx: 0, dy: 0, dtMs: 0 });
+    this.cameraPanLayer?.resetFollow();
+    this.mmMarker?.setPosition(snapshot.x, snapshot.y);
+    this.localPositionReady = true;
   }
 
   /**
@@ -946,6 +987,7 @@ export class OfficeScene extends Phaser.Scene {
 
   /** E, or the `toggleSeat` command: stand when seated, else ask for the seat in reach. */
   private toggleSeat(): void {
+    if (!this.localPositionReady) return;
     if (this.seat !== null || this.pendingSeat !== null) {
       this.standUp();
       return;
@@ -1064,6 +1106,8 @@ export class OfficeScene extends Phaser.Scene {
    * reemite aunque ese conjunto no haya cambiado ni un byte.
    */
   private resyncAfterReconnect(): void {
+    this.localPositionReady = false;
+    this.resetWalking();
     this.remotes?.clear();
     this.roster?.clear();
     this.lastVoiceKey = '';
@@ -1614,7 +1658,7 @@ export class OfficeScene extends Phaser.Scene {
         // de colocacion para `layoutEditLayer` (su propio listener global en
         // el mismo `this.input`), no una peticion de cerrar el menu
         // contextual -- que ademas no puede haber abierto mientras se edita.
-        if (this.layoutEditing) return;
+        if (this.layoutEditing || !this.localPositionReady) return;
         if (!currentlyOver || currentlyOver.length === 0) {
           this.bridge.emit('closemenu', undefined);
           if (pointer.button === 0 && pointer.camera === this.cameras.main) this.walkClick = pointer;
@@ -1629,7 +1673,7 @@ export class OfficeScene extends Phaser.Scene {
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
       const eligible = pointer === this.walkClick;
       this.walkClick = undefined;
-      if (!eligible || this.layoutEditing || over?.length || pointer.camera !== this.cameras.main ||
+      if (!eligible || this.layoutEditing || !this.localPositionReady || over?.length || pointer.camera !== this.cameras.main ||
         pointer.getDistance() > PAN_THRESHOLD_PX || !Number.isFinite(pointer.worldX) || !Number.isFinite(pointer.worldY)) return;
       if (isBlocked(this.grid, Math.floor(pointer.worldX / TILE), Math.floor(pointer.worldY / TILE))) return;
       this.standUp();
@@ -1715,6 +1759,7 @@ export class OfficeScene extends Phaser.Scene {
    * ese lado esta bloqueado o fuera del espacio.
    */
   private walkToPeer(sessionId: string): void {
+    if (!this.localPositionReady) return;
     const peer = this.remotes?.get(sessionId);
     if (!peer) return; // se desconecto antes de que esto corriera: no-op silencioso.
 
@@ -1752,7 +1797,7 @@ export class OfficeScene extends Phaser.Scene {
     else if (this.cursors.right.isDown || (wasdActive && this.wasd.D.isDown)) vx = 1;
     if (this.cursors.up.isDown || (wasdActive && this.wasd.W.isDown)) vy = -1;
     else if (this.cursors.down.isDown || (wasdActive && this.wasd.S.isDown)) vy = 1;
-    if (this.layoutEditing) { vx = 0; vy = 0; }
+    if (this.layoutEditing || !this.localPositionReady) { vx = 0; vy = 0; }
 
     // Step 6: E sits or stands, and walking stands up first.
     if (this.sitKey !== undefined && wasdActive && Phaser.Input.Keyboard.JustDown(this.sitKey)) this.toggleSeat();
@@ -1760,7 +1805,7 @@ export class OfficeScene extends Phaser.Scene {
 
     const from = { x: this.player.x, y: this.player.y };
     const gap = this.lastWalkFrame === undefined ? delta : time - this.lastWalkFrame;
-    const interrupted = this.layoutEditing || document.hidden || !Number.isFinite(delta) ||
+    const interrupted = this.layoutEditing || !this.localPositionReady || document.hidden || !Number.isFinite(delta) ||
       delta <= 0 || delta > MAX_WALK_FRAME_MS || !Number.isFinite(gap) || gap < 0 || gap > MAX_WALK_FRAME_MS;
     if (interrupted) this.resetWalking();
     this.lastWalkFrame = time;
@@ -1788,7 +1833,9 @@ export class OfficeScene extends Phaser.Scene {
       avatar.lastY = avatar.y;
     }
     this.updateSeatHint();
-    this.connection?.sendMove(this.player.x, this.player.y, this.facing);
+    if (this.localPositionReady && this.connectionState === 'connected') {
+      this.connection?.sendMove(this.player.x, this.player.y, this.facing);
+    }
     this.mmMarker?.setPosition(this.player.x, this.player.y);
   }
 
@@ -1867,4 +1914,8 @@ export class OfficeScene extends Phaser.Scene {
 
 function encodePreview(preview: TerrainEditCommand['preview']): string {
   return preview === null ? '' : `${preview.index}:${preview.material}`;
+}
+
+function facingFromSnapshot(facing: string): Facing {
+  return facing === 'up' || facing === 'down' || facing === 'left' || facing === 'right' ? facing : DEFAULT_FACING;
 }

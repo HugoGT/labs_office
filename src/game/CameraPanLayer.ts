@@ -144,6 +144,15 @@ export class CameraPanLayer {
     this.scene.events.off(Phaser.Scenes.Events.UPDATE, this.onUpdate);
   }
 
+  /** A new authoritative origin must not keep a pan/glide aimed at the old spawn (#148). */
+  resetFollow(): void {
+    this.state = { kind: 'idle' };
+    this.glide = null;
+    this.focusedFrom = null;
+    this.reattach();
+    this.camera.centerOn(this.target.x, this.target.y);
+  }
+
   private dispatch(event: Parameters<typeof reduceCameraPan>[1]): void {
     const { state, effect } = reduceCameraPan(this.state, event);
     this.state = state;

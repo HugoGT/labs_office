@@ -1,4 +1,6 @@
 import Phaser from 'phaser';
+import * as vitestBrowser from 'vitest/browser';
+import type { BrowserCommands } from 'vitest/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
 import type { CharacterContainer } from './characters';
@@ -19,7 +21,7 @@ import {
   chairLayerDepth,
   worldAssetDepth,
 } from './depthLayers';
-import { feetOf } from './avatarGeometry';
+import { feetOf, physicalBodyRect } from './avatarGeometry';
 import { BASE_MAP_SEATS, deskSeatId, mapSeatId } from './seating';
 import { deskFurnitureName, deskZoneName } from './deskLayout';
 import { artSheetKey, recoloredSheetKey } from './artPack';
@@ -33,6 +35,7 @@ import { STATUS_COLOR } from './presence';
 import { AVATAR_KEYS, PLAYER_TEXTURE } from './textures';
 import {
   OfficeAccessDeniedError,
+  connectOfficeRoom,
   type ConnectOfficeRoomOptions,
   type OfficeConnection,
   type OfficeRoomHandlers,
@@ -745,7 +748,7 @@ describe('OfficeScene: audio/video por proximidad (D3, issue #17)', () => {
  * protocolo real ya se prueba contra un servidor de verdad en la capa node
  * (`officeRoomClient.node.test.ts`); lo que se prueba aqui es el cableado.
  */
-function fakeConnector(sessionId = 'yo') {
+function fakeConnector(sessionId = 'yo', initialState = true) {
   const sent: { x: number; y: number; facing: string }[] = [];
   const statuses: PresenceStatus[] = [];
   // Issue #2, unit 12: ahora si se registran -- antes eran no-ops porque
@@ -801,6 +804,9 @@ function fakeConnector(sessionId = 'yo') {
       joinedWith = options.status;
       joinedName = options.name;
       joinedSpacesVersion = options.spacesVersion;
+      if (initialState) options.handlers.onLocalPosition?.(remoteSnapshot({
+        sessionId, x: PLAYER_SPAWN_TX * TILE + 16, y: PLAYER_SPAWN_TY * TILE + 16,
+      }));
       return connection;
     },
   };
@@ -831,6 +837,188 @@ function findRemoteAvatars(scene: Phaser.Scene): CharacterContainer[] {
       (c.body === null || (c.body as Phaser.Physics.Arcade.Body).moves === false),
   );
 }
+
+describe('OfficeScene: authoritative initial position (#148)', () => {
+  const restored = () => remoteSnapshot({ sessionId: 'yo', x: 300.5, y: 400.25, facing: 'left' });
+  async function boot() {
+    const connector = fakeConnector('yo', false);
+    const { scene, bridge } = await bootOfficeScene(createOfficeBridge(), {
+      endpoint: 'ws://fake', connect: connector.connect, artManifestUrl: null, artUploadsUrl: null,
+    });
+    scene.game.loop.stop();
+    const player = findPlayer(scene);
+    const body = player.body as Phaser.Physics.Arcade.Body;
+    const movement = scene as unknown as { cursors: Phaser.Types.Input.Keyboard.CursorKeys; autoWalk?: AutoWalkState };
+    let time = scene.time.now;
+    const frame = () => scene.game.step(time += 20, 20);
+    return { scene, bridge, connector, player, body, movement, frame };
+  }
+
+  it('waits for delayed own state, resets the real body and camera, then publishes from the restored point', async () => {
+    const { scene, bridge, connector, player, body, movement, frame } = await boot();
+    const spawn = { x: player.x, y: player.y };
+    movement.cursors.right.isDown = true;
+    bridge.emitCommand('toggleSeat', undefined);
+    frame();
+    expect({ x: player.x, y: player.y }).toEqual(spawn);
+    expect(connector.sent).toEqual([]);
+    movement.cursors.right.isDown = false;
+    connector.handlers()!.onAdd(remoteSnapshot()); // A peer is not initialization.
+    bridge.emitCommand('walkToPeer', { sessionId: 'remota-1' });
+    const pointer = { button: 0, camera: scene.cameras.main, x: 10, y: 10,
+      worldX: 300, worldY: 400, getDistance: () => 0 };
+    scene.input.emit('pointerdown', pointer, []);
+    scene.input.emit('pointerup', pointer, []);
+    expect(movement.autoWalk).toBeUndefined();
+    frame();
+    expect(connector.sent).toEqual([]);
+    connector.handlers()!.onLocalPosition?.(restored());
+    expect({ x: player.x, y: player.y }).toEqual({ x: 300.5, y: 400.25 });
+    expect({ x: body.x, y: body.y }).toEqual({ x: physicalBodyRect(player).x, y: physicalBodyRect(player).y });
+    expect(body.velocity.length()).toBe(0);
+    expect(player.facing).toBe('left');
+    expect(scene.cameras.main.scrollX).toBeCloseTo(player.x - scene.cameras.main.width / 2);
+    frame();
+    expect(connector.sent[0]).toEqual({ x: 300.5, y: 400.25, facing: 'left' });
+    movement.cursors.right.isDown = true;
+    frame();
+    expect(player.x).toBeGreaterThan(300.5);
+    expect(player.x).toBeLessThan(310);
+    const moved = player.x;
+    connector.handlers()!.onLocalPosition?.(restored());
+    connector.handlers()!.onChange(restored());
+    expect(player.x).toBe(moved);
+  });
+
+  it('reinitializes a manual join and ignores delayed callbacks from the previous join', async () => {
+    const { scene, bridge, connector, player, movement, frame } = await boot();
+    const old = connector.handlers()!;
+    old.onLocalPosition?.(restored());
+    movement.cursors.right.isDown = true;
+    frame();
+    scene.input.emit('pointerdown', { button: 0, camera: scene.cameras.cameras[1], x: 5, y: 5 }, []);
+    bridge.emitCommand('reconnect', undefined);
+    await vi.waitFor(() => expect(connector.connectCount()).toBe(2));
+    const before = connector.sent.length;
+    frame();
+    expect(connector.sent).toHaveLength(before);
+    old.onLocalPosition?.(remoteSnapshot({ x: 900, y: 900 }));
+    old.onConnectionState?.('offline');
+    connector.handlers()!.onLocalPosition?.(restored());
+    expect(player.x).toBe(300.5);
+    frame();
+    expect(player.x).toBeGreaterThan(300.5);
+    expect(scene.cameras.main.scrollX).toBeCloseTo(player.x - scene.cameras.main.width / 2, -1);
+  });
+
+  it('leaves an older in-flight join when a newer manual join wins', async () => {
+    const first = fakeConnector('old', false);
+    const next = fakeConnector('new', false);
+    let finishFirst!: () => void;
+    let joiningFirst = true;
+    const { scene, bridge } = await bootOfficeScene(createOfficeBridge(), {
+      endpoint: 'ws://fake', artManifestUrl: null, artUploadsUrl: null,
+      connect: (options) => {
+        if (!joiningFirst) return next.connect(options);
+        joiningFirst = false;
+        return first.connect(options).then((connection) => new Promise((resolve) => {
+          finishFirst = () => resolve(connection);
+        }));
+      },
+    });
+    scene.game.loop.stop();
+    bridge.emitCommand('reconnect', undefined);
+    await vi.waitFor(() => expect(next.handlers()).toBeDefined());
+    next.handlers()!.onLocalPosition?.(restored());
+    first.handlers()!.onLocalPosition?.(remoteSnapshot({ x: 900, y: 900 }));
+    finishFirst();
+    await vi.waitFor(() => expect(first.hasLeft()).toBe(true));
+    scene.game.step(scene.time.now + 20, 20);
+    expect(findPlayer(scene).x).toBe(300.5);
+    expect(first.sent).toEqual([]);
+    expect(next.sent[0]).toEqual({ x: 300.5, y: 400.25, facing: 'left' });
+  });
+
+  it('waits through automatic reconnect and restores a confirmed seat without an unsolicited stand', async () => {
+    const { connector, player, body, movement, frame } = await boot();
+    const handlers = connector.handlers()!;
+    handlers.onLocalPosition?.(restored());
+    handlers.onConnectionState?.('reconnecting');
+    movement.cursors.right.isDown = true;
+    const before = connector.sent.length;
+    frame();
+    expect(player.x).toBe(300.5);
+    expect(connector.sent).toHaveLength(before);
+    movement.cursors.right.isDown = false;
+    handlers.onResync?.();
+    handlers.onConnectionState?.('connected'); // JOIN_ROOM precedes ROOM_STATE.
+    frame();
+    expect(connector.sent).toHaveLength(before);
+    const seat = BASE_MAP_SEATS[0]!;
+    const position = { x: (seat.tx + 0.5) * TILE, y: (seat.ty + 0.5) * TILE - 18 };
+    handlers.onLocalPosition?.(remoteSnapshot({ ...position, seat: mapSeatId(0), facing: seat.facing }));
+    handlers.onLocalSeat?.(mapSeatId(0));
+    frame();
+    expect({ x: player.x, y: player.y }).toEqual(position);
+    expect(body.checkCollision.none).toBe(true);
+    expect(player.seatFacing).toBe(seat.facing);
+    expect(connector.stands()).toBe(0);
+    expect(connector.sent.at(-1)).toEqual({ ...position, facing: seat.facing });
+  });
+
+  it('keeps offline play available after an initial transport failure', async () => {
+    const { scene } = await bootOfficeScene(createOfficeBridge(), {
+      endpoint: 'ws://fake', artManifestUrl: null, artUploadsUrl: null,
+      connect: async () => { throw new Error('unavailable'); },
+    });
+    scene.game.loop.stop();
+    const player = findPlayer(scene);
+    const x = player.x;
+    (scene as unknown as { cursors: Phaser.Types.Input.Keyboard.CursorKeys }).cursors.right.isDown = true;
+    scene.game.step(scene.time.now + 20, 20);
+    expect(player.x).toBeGreaterThan(x);
+  });
+
+  it('adopts a restored position from a real Colyseus client before any scene move reaches the server', async () => {
+    const commands = (vitestBrowser as unknown as { commands: BrowserCommands }).commands;
+    const { endpoint } = await commands.authoritativePositionServer('start');
+    let connection: OfficeConnection | undefined;
+    let adopt: (() => void) | undefined;
+    try {
+      const { scene } = await bootOfficeScene(createOfficeBridge(), {
+        endpoint, getIdToken: async () => 'verified', artManifestUrl: null, artUploadsUrl: null,
+        connect: async (options) => {
+          connection = await connectOfficeRoom({ ...options, handlers: {
+            ...options.handlers,
+            onLocalPosition: (snapshot) => { adopt = () => options.handlers.onLocalPosition?.(snapshot); },
+          } });
+          return connection;
+        },
+      });
+      await vi.waitFor(() => expect(adopt).toBeDefined(), LOOP_WAIT);
+      scene.game.loop.stop();
+      const player = findPlayer(scene);
+      let time = scene.time.now;
+      scene.game.step(time += 20, 20);
+      expect((await commands.authoritativePositionServer('state', connection!.sessionId)).position)
+        .toEqual({ x: 300.5, y: 400.25 });
+      adopt!();
+      scene.game.step(time += 20, 20);
+      expect({ x: player.x, y: player.y }).toEqual({ x: 300.5, y: 400.25 });
+      expect((await commands.authoritativePositionServer('state', connection!.sessionId)).position)
+        .toEqual({ x: 300.5, y: 400.25 });
+      (scene as unknown as { cursors: Phaser.Types.Input.Keyboard.CursorKeys }).cursors.right.isDown = true;
+      scene.game.step(time += 20, 20);
+      await vi.waitFor(async () => expect((await commands.authoritativePositionServer('state', connection!.sessionId)).position?.x)
+        .toBeCloseTo(player.x), LOOP_WAIT);
+      expect(player.x).toBeGreaterThan(300.5);
+      expect(player.x).toBeLessThan(310);
+    } finally {
+      await connection?.leave();
+      await commands.authoritativePositionServer('stop');
+    }
+  });
+});
 
 describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
   it('sin endpoint corre en solitario y lo anuncia por el puente', async () => {
