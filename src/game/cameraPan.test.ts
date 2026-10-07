@@ -121,11 +121,18 @@ describe('reduceCameraPan: panning', () => {
     expect(effect).toEqual({ kind: 'scroll', dx: 14, dy: -10 });
   });
 
-  it('up mientras se panea vuelve a idle y pide reanudar el seguimiento', () => {
+  it('releasing a pan keeps the camera focused without resuming follow (#146)', () => {
     const { state, effect } = reduceCameraPan(panning, { kind: 'up' });
 
-    expect(state).toEqual(IDLE);
-    expect(effect).toEqual({ kind: 'resumeFollow' });
+    expect(state).toEqual({ kind: 'focused' });
+    expect(effect).toEqual({ kind: 'none' });
+
+    expect(reduceCameraPan(state, { kind: 'move', x: 999, y: 999 })).toEqual({ state, effect });
+    expect(reduceCameraPan(state, { kind: 'up' })).toEqual({ state, effect });
+    expect(reduceCameraPan(state, { kind: 'playerMoved' })).toEqual({
+      state: IDLE,
+      effect: { kind: 'resumeFollow' },
+    });
   });
 });
 
@@ -185,14 +192,14 @@ describe('reduceCameraPan: focused (camara desacoplada tras el minimapa)', () =>
     expect(up).toEqual({ state: FOCUSED, effect: { kind: 'none' } });
   });
 
-  it('un drag desde focused es un pan normal: al soltar vuelve al jugador (criterio de #53)', () => {
-    const armed: CameraPanState = { kind: 'armed', originX: 50, originY: 50, detached: true };
-    const move = reduceCameraPan(armed, { kind: 'move', x: 80, y: 50 });
+  it('a drag from an existing focus stays focused on release (#146)', () => {
+    const down = reduceCameraPan(FOCUSED, { kind: 'down', x: 50, y: 50, eligible: true });
+    const move = reduceCameraPan(down.state, { kind: 'move', x: 80, y: 50 });
     expect(move.effect).toEqual({ kind: 'beginPan', dx: 30, dy: 0 });
 
     expect(reduceCameraPan(move.state, { kind: 'up' })).toEqual({
-      state: IDLE,
-      effect: { kind: 'resumeFollow' },
+      state: FOCUSED,
+      effect: { kind: 'none' },
     });
   });
 

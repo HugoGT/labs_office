@@ -62,7 +62,7 @@ export class CameraPanLayer {
    */
   private glideScrollX = 0;
   private glideScrollY = 0;
-  /** Donde estaba el jugador al enfocar desde el minimapa: moverse de ahi devuelve la camara. */
+  /** Player position at minimap focus or drag release; movement resumes follow. */
   private focusedFrom: { x: number; y: number } | null = null;
 
   private readonly onPointerDown = (
@@ -99,7 +99,10 @@ export class CameraPanLayer {
   };
 
   private readonly onPointerUp = (): void => {
+    const wasPanning = this.state.kind === 'panning';
     this.dispatch({ kind: 'up' });
+    // #146: compare against release, not movement made during the drag.
+    if (wasPanning) this.focusedFrom = { x: this.target.x, y: this.target.y };
   };
 
   private readonly onUpdate = (): void => {

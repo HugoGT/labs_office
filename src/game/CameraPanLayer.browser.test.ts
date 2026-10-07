@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
 import { CameraPanLayer, type CameraPanLayerOptions } from './CameraPanLayer';
+import { navigationBounds } from './cameraBounds';
 
 /**
  * `CameraPanLayer` traduce input real de puntero a `reduceCameraPan` y aplica
@@ -45,6 +46,7 @@ async function bootHostScene(): Promise<HostScene> {
     parent: host,
     width: 320,
     height: 240,
+    input: { touch: true },
     scene: [new HostScene()],
   });
   games.push(game);
@@ -121,38 +123,82 @@ describe('CameraPanLayer: drag por encima del umbral desplaza la camara', () => 
   });
 });
 
-describe('CameraPanLayer: soltar reanuda el seguimiento sin saltar', () => {
-  it('el scroll justo tras soltar es el mismo que paneando, y luego converge de vuelta al target', async () => {
+describe('CameraPanLayer: releasing a drag keeps focus until the player moves (#146)', () => {
+  it.each(['pointerup', 'pointerupoutside'])('%s keeps the dragged scroll and resumes smoothly only after movement', async (release) => {
     const scene = await bootHostScene();
     const cam = scene.cameras.main;
-    new CameraPanLayer(layerOptions(scene));
-
-    scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, camera: cam }), []);
-    scene.input.emit('pointermove', fakePointer({ x: 300, y: 100, camera: cam }));
-    const scrollAtRelease = cam.scrollX;
-    scene.input.emit('pointerup', fakePointer({ x: 300, y: 100, camera: cam }));
-
-    // `startFollow` salta el scroll de golpe (Camera.js): el `setScroll`
-    // posterior debe devolverlo al mismo punto, no dejarlo en el del target.
-    expect(cam.scrollX).toBeCloseTo(scrollAtRelease);
-    // Y a partir de ahi el `preRender` de cada cuadro lo va acercando de
-    // vuelta -- el "glide" sin tween aparte.
-    await vi.waitFor(() => {
-      expect(cam.scrollX).not.toBeCloseTo(scrollAtRelease, 0);
-    }, LOOP_WAIT);
-  });
-
-  it('pointerupoutside termina el pan igual que pointerup', async () => {
-    const scene = await bootHostScene();
-    const cam = scene.cameras.main;
+    cam.startFollow(scene.target);
+    await nextFrame(scene);
     const startFollow = vi.spyOn(cam, 'startFollow');
     new CameraPanLayer(layerOptions(scene));
 
     scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, camera: cam }), []);
-    scene.input.emit('pointermove', fakePointer({ x: 130, y: 100, camera: cam }));
-    scene.input.emit('pointerupoutside', fakePointer({ x: 130, y: 100, camera: cam }));
+    scene.input.emit('pointermove', fakePointer({ x: 300, y: 100, camera: cam }));
+    await nextFrame(scene);
+    const scrollAtRelease = { x: cam.scrollX, y: cam.scrollY };
+    scene.input.emit(release, fakePointer({ x: 300, y: 100, camera: cam }));
+
+    // Hovering and a plain click must not reclaim the camera either.
+    scene.input.emit('pointermove', fakePointer({ x: 310, y: 110, camera: cam }));
+    scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, camera: cam }), []);
+    scene.input.emit('pointerup', fakePointer({ x: 100, y: 100, camera: cam }));
+    for (let frame = 0; frame < 5; frame++) await nextFrame(scene);
+    expect(cam.scrollX).toBeCloseTo(scrollAtRelease.x);
+    expect(cam.scrollY).toBeCloseTo(scrollAtRelease.y);
+    expect(startFollow).not.toHaveBeenCalled();
+    expect(cam.getBounds()).toMatchObject(navigationBounds(WORLD, cam, cam.zoom));
+
+    scene.target.x += 32;
+    expect(cam.scrollX).toBeCloseTo(scrollAtRelease.x);
+    await nextFrame(scene);
+    expect(cam.scrollX).toBeGreaterThan(scrollAtRelease.x);
+    expect(cam.midPoint.x).toBeLessThan(scene.target.x);
+    expect(startFollow).not.toHaveBeenCalled();
 
     await vi.waitFor(() => expect(startFollow).toHaveBeenCalledTimes(1), LOOP_WAIT);
+    expect(startFollow).toHaveBeenCalledWith(scene.target, true, 0.12, 0.12);
+    expect(cam.getBounds()).toMatchObject(WORLD);
+    expect(cam.midPoint.x).toBeCloseTo(scene.target.x, 0);
+  });
+
+  it('native touchcancel ends the gesture without reclaiming focus or allowing later hover to pan', async () => {
+    const scene = await bootHostScene();
+    const cam = scene.cameras.main;
+    const canvas = scene.game.canvas;
+    const rect = canvas.getBoundingClientRect();
+    new CameraPanLayer(layerOptions(scene));
+    const sendTouch = (type: string, x: number, y: number): void => {
+      const touch = new Touch({
+        identifier: 1,
+        target: canvas,
+        clientX: rect.left + x,
+        clientY: rect.top + y,
+        pageX: rect.left + x + window.scrollX,
+        pageY: rect.top + y + window.scrollY,
+      });
+      canvas.dispatchEvent(new TouchEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        changedTouches: [touch],
+        touches: type === 'touchcancel' ? [] : [touch],
+        targetTouches: type === 'touchcancel' ? [] : [touch],
+      }));
+    };
+
+    const originalScroll = cam.scrollX;
+    sendTouch('touchstart', 100, 100);
+    sendTouch('touchmove', 160, 130);
+    await nextFrame(scene);
+    const dragged = { x: cam.scrollX, y: cam.scrollY };
+    expect(dragged.x).not.toBeCloseTo(originalScroll);
+    sendTouch('touchcancel', 160, 130);
+    scene.input.emit('pointermove', fakePointer({ x: 180, y: 150, camera: cam }));
+    for (let frame = 0; frame < 5; frame++) await nextFrame(scene);
+    expect(cam.scrollX).toBeCloseTo(dragged.x);
+    expect(cam.scrollY).toBeCloseTo(dragged.y);
+
+    scene.target.x += 32;
+    await vi.waitFor(() => expect(cam.midPoint.x).toBeCloseTo(scene.target.x, 0), LOOP_WAIT);
   });
 });
 
@@ -242,7 +288,7 @@ describe('CameraPanLayer: la vista mas grande que el mundo sigue paneando (#53)'
     scene.input.emit('pointerup', fakePointer({ x: 160, y: 140, camera: cam }));
   });
 
-  it('al soltar planea de vuelta y, al llegar, repone los bounds del mundo y el seguimiento', async () => {
+  it('retains navigation bounds after release and restores world bounds only after player movement', async () => {
     const scene = await bootHostScene();
     const cam = scene.cameras.main;
     const startFollow = vi.spyOn(cam, 'startFollow');
@@ -252,6 +298,10 @@ describe('CameraPanLayer: la vista mas grande que el mundo sigue paneando (#53)'
     scene.input.emit('pointermove', fakePointer({ x: 300, y: 250, camera: cam }));
     scene.input.emit('pointerup', fakePointer({ x: 300, y: 250, camera: cam }));
 
+    await nextFrame(scene);
+    expect(cam.getBounds()).toMatchObject(navigationBounds(WORLD, cam, cam.zoom));
+    expect(startFollow).not.toHaveBeenCalled();
+    scene.target.y += 32;
     await vi.waitFor(() => expect(startFollow).toHaveBeenCalledTimes(1), LOOP_WAIT);
     const bounds = cam.getBounds();
     expect([bounds.x, bounds.y, bounds.width, bounds.height]).toEqual([
@@ -317,6 +367,31 @@ describe('CameraPanLayer: click en el minimapa (#98)', () => {
 
     await vi.waitFor(() => expect(startFollow).toHaveBeenCalledTimes(1), LOOP_WAIT);
     expect(cam.midPoint.x).toBeCloseTo(scene.target.x, 0);
+  });
+
+  it('a drag interrupts minimap glide and keeps its new focus until movement after release', async () => {
+    const scene = await bootHostScene();
+    const cam = scene.cameras.main;
+    const minimap = await addMinimap(scene);
+    const startFollow = vi.spyOn(cam, 'startFollow');
+    new CameraPanLayer(layerOptions(scene, { minimap }));
+
+    scene.input.emit('pointerdown', fakePointer({ x: 250, y: 50, camera: minimap }), []);
+    await nextFrame(scene);
+    scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, camera: cam }), []);
+    scene.input.emit('pointermove', fakePointer({ x: 120, y: 90, camera: cam }));
+    // Movement during the gesture must not use the stale minimap baseline.
+    scene.target.x += 16;
+    await nextFrame(scene);
+    const dragged = { x: cam.scrollX, y: cam.scrollY };
+    scene.input.emit('pointerup', fakePointer({ x: 120, y: 90, camera: cam }));
+    for (let frame = 0; frame < 5; frame++) await nextFrame(scene);
+    expect(cam.scrollX).toBeCloseTo(dragged.x);
+    expect(cam.scrollY).toBeCloseTo(dragged.y);
+    expect(startFollow).not.toHaveBeenCalled();
+
+    scene.target.y += 32;
+    await vi.waitFor(() => expect(startFollow).toHaveBeenCalledTimes(1), LOOP_WAIT);
   });
 
   it('boton derecho o editor de layout activo: el minimapa no mueve la camara', async () => {
