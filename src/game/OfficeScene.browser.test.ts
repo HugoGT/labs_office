@@ -10,6 +10,8 @@ import {
   PLAYER_SPAWN_TX,
   PLAYER_SPAWN_TY,
   TILE,
+  WORLD_H,
+  WORLD_W,
   ZONE_LABELS,
 } from './mapData';
 import { TERRAIN_LAYER_COUNT } from './artContract';
@@ -43,6 +45,8 @@ import {
 } from './officeRoomClient';
 import { OFFICE_SCENE_KEY, OfficeScene, type OfficeSceneOptions } from './OfficeScene';
 import { ARRIVE_EPSILON_PX, beginAutoWalk, type AutoWalkState } from './autoWalk';
+import { followBounds } from './cameraBounds';
+import { zoomView, type ZoomStore, type ZoomView } from './mapZoom';
 
 /**
  * `OfficeScene` orquesta fisica, camaras, tweens y timers desde el slice 7 en
@@ -3623,5 +3627,124 @@ describe('OfficeScene: piece collisions', () => {
 
     expect((scene as unknown as { grid: { solid: boolean[][] } }).grid.solid[2]![2]).toBe(true);
     expect((scene as unknown as { grid: { solid: boolean[][] } }).grid.solid[lawn.ty]![lawn.tx]).toBe(false);
+  });
+});
+
+describe('OfficeScene: map zoom (map-zoom)', () => {
+  const offline = { endpoint: null, artManifestUrl: null, artUploadsUrl: null } as const;
+  const WORLD = { x: 0, y: 0, width: WORLD_W, height: WORLD_H };
+  const memoryStore = (zoom: number) => ({ load: () => zoom, save: vi.fn() }) satisfies ZoomStore;
+
+  async function zoomScene(zoomStore?: ZoomStore) {
+    const bridge = createOfficeBridge();
+    const views: ZoomView[] = [];
+    bridge.on('zoomchanged', (view) => views.push(view));
+    const { scene } = await bootOfficeScene(bridge, { ...offline, zoomStore });
+    scene.game.loop.stop();
+    return { scene, bridge, views, cam: scene.cameras.main, minimap: scene.cameras.cameras[1] };
+  }
+
+  function frames(scene: Phaser.Scene, count = 60): void {
+    for (let frame = 0; frame < count; frame++) scene.game.step(scene.time.now + 16, 16);
+  }
+
+  /** A real mouse event on the canvas, at a point in canvas pixels. */
+  function mouse(scene: Phaser.Scene, type: string, x: number, y: number): void {
+    const rect = scene.game.canvas.getBoundingClientRect();
+    scene.game.canvas.dispatchEvent(new MouseEvent(type, {
+      clientX: rect.left + x, clientY: rect.top + y, button: 0, buttons: type === 'mouseup' ? 0 : 1,
+      bubbles: true, cancelable: true,
+    }));
+  }
+
+  it('starts at the stored zoom with follow bounds, announces it once and does not save it back', async () => {
+    const store = memoryStore(0.5);
+    const { scene, views, cam } = await zoomScene(store);
+    frames(scene, 2);
+
+    expect(cam.zoom).toBe(0.5);
+    expect(cam.getBounds()).toMatchObject(followBounds(WORLD, cam, 0.5));
+    expect(views).toEqual([zoomView(0.5)]);
+    expect(store.save).not.toHaveBeenCalled();
+  });
+
+  it('without a store the office starts at 100%', async () => {
+    const { scene, views, cam } = await zoomScene();
+    frames(scene, 2);
+
+    expect(cam.zoom).toBe(1);
+    expect(views).toEqual([zoomView(1)]);
+  });
+
+  it.each([
+    ['no edit tool', () => undefined],
+    ['the layout editor', (b: ReturnType<typeof createOfficeBridge>) => b.emitCommand('layoutedit', { pickable: [], selectedId: null, placing: null })],
+    ['the terrain editor', (b: ReturnType<typeof createOfficeBridge>) => b.emitCommand('terrainedit', { selected: null, preview: null })],
+    ['the collision editor', (b: ReturnType<typeof createOfficeBridge>) => b.emitCommand('collisionedit', { pieceId: null, draft: [], selectedRect: null, snap: 1 })],
+  ])('the zoom command eases the main camera only and saves the stop, with %s open', async (_name, open) => {
+    const store = memoryStore(1);
+    const { scene, bridge, cam, minimap } = await zoomScene(store);
+    open(bridge);
+    const minimapView = { zoom: minimap.zoom, x: minimap.scrollX, y: minimap.scrollY };
+
+    bridge.emitCommand('zoom', { action: 'in' });
+    frames(scene);
+
+    expect(cam.zoom).toBe(1.5);
+    expect(store.save).toHaveBeenCalledExactlyOnceWith(1.5);
+    expect({ zoom: minimap.zoom, x: minimap.scrollX, y: minimap.scrollY }).toEqual(minimapView);
+  });
+
+  it('a real ctrl+wheel over the map zooms it and is default-prevented, so the page does not zoom', async () => {
+    const { scene, views } = await zoomScene();
+    const rect = scene.game.canvas.getBoundingClientRect();
+    // Below the minimap, which covers the top of this small canvas.
+    const wheel = new WheelEvent('wheel', {
+      deltaY: -100, ctrlKey: true, clientX: rect.left + 50, clientY: rect.top + 200, bubbles: true, cancelable: true,
+    });
+
+    scene.game.canvas.dispatchEvent(wheel);
+
+    expect(wheel.defaultPrevented).toBe(true);
+    expect(views.at(-1)).toEqual(zoomView(1.5));
+  });
+
+  it.each([
+    { zoom: 0.5, tile: { tx: 26, ty: 32 } },
+    { zoom: 2, tile: { tx: 23, ty: 29 } },
+  ])('click-to-walk at $zoom targets the world tile under the pointer', async ({ zoom, tile }) => {
+    const { scene } = await zoomScene(memoryStore(zoom));
+    frames(scene, 3);
+    const player = findPlayer(scene);
+    const cam = scene.cameras.main;
+
+    // 64 canvas px right and down of the center, where the camera holds the player.
+    mouse(scene, 'mousemove', cam.width / 2 + 64, cam.height / 2 + 64);
+    mouse(scene, 'mousedown', cam.width / 2 + 64, cam.height / 2 + 64);
+    mouse(scene, 'mouseup', cam.width / 2 + 64, cam.height / 2 + 64);
+
+    const goal = (scene as unknown as { autoWalk?: AutoWalkState }).autoWalk?.goal;
+    expect(goal).toBeDefined();
+    expect(goal!.x).toBeCloseTo(player.x + 64 / zoom, -1);
+    expect(goal!.y).toBeCloseTo(player.y + 64 / zoom, -1);
+    expect({ tx: Math.floor(goal!.x / TILE), ty: Math.floor(goal!.y / TILE) }).toEqual(tile);
+  });
+
+  it.each(['SHUTDOWN', 'game.destroy'])('%s releases the zoom subscription', async (how) => {
+    const { scene, bridge, views } = await zoomScene();
+    bridge.emitCommand('zoom', { action: 'in' });
+    expect(views.at(-1)).toEqual(zoomView(1.5));
+
+    if (how === 'SHUTDOWN') {
+      scene.scene.stop();
+      frames(scene, 2);
+    } else {
+      scene.game.destroy(true);
+      scene.game.step(0, 0);
+      games.splice(games.indexOf(scene.game), 1);
+    }
+    bridge.emitCommand('zoom', { action: 'out' });
+
+    expect(views.at(-1)).toEqual(zoomView(1.5));
   });
 });

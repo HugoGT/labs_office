@@ -12,7 +12,10 @@ import {
 import { feetOf, positionForFeet } from './avatarGeometry';
 import { ARRIVE_EPSILON_PX, beginAutoWalk, stepAutoWalk, type AutoWalkState } from './autoWalk';
 import { CameraPanLayer } from './CameraPanLayer';
+import { CameraZoomLayer } from './CameraZoomLayer';
+import { followBounds } from './cameraBounds';
 import { PAN_THRESHOLD_PX } from './cameraPan';
+import { ZOOM_DEFAULT, type ZoomStore } from './mapZoom';
 import { advanceWalkingTime, MAX_WALK_FRAME_MS, walkingMultiplier } from './walkingSpeed';
 import { walkingSweepFraction } from './walkingCollision';
 import { walkFrame } from './characterAnimation';
@@ -188,6 +191,12 @@ export interface OfficeSceneOptions {
    * (`artUploadsManifestUrl(endpoint)`); `null` leaves the pack alone.
    */
   artUploadsUrl?: string | null;
+  /**
+   * Where the chosen map zoom is remembered (map-zoom). Absent means nothing
+   * is restored or saved and the office starts at 100%; `createGame` supplies
+   * the browser's.
+   */
+  zoomStore?: ZoomStore;
 }
 
 /** A seat the scene can offer or draw a sitter on, resolved from its reference. */
@@ -341,6 +350,8 @@ export class OfficeScene extends Phaser.Scene {
    * que hoy tampoco corta un auto-walk en curso.
    */
   private cameraPanLayer?: CameraPanLayer;
+  /** Map zoom (map-zoom); created before the pan layer, see `create()`. */
+  private cameraZoomLayer?: CameraZoomLayer;
   /**
    * Grupo de cuerpos de peers vivos (#59): se crea UNA vez en `buildColliders`
    * junto a un unico `collider(player, peerGroup)`, y cada `createPhaserAvatarSink`
@@ -546,11 +557,20 @@ export class OfficeScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.DESTROY, removeWalkListeners);
 
     this.buildColliders(grid);
-    this.setupCameras();
+    this.setupCameras(this.options.zoomStore?.load() ?? ZOOM_DEFAULT);
     // Decals are a few pixels each: at minimap scale they are noise, and a
     // layer less to draw on every frame.
     if (this.terrainTilemap.decals !== null) this.minimapCamera?.ignore(this.terrainTilemap.decals);
     this.setupInput();
+    // map-zoom: BEFORE the pan layer. Their UPDATE listeners run in creation
+    // order, and the pan layer's bounds of a frame must see that frame's zoom.
+    this.cameraZoomLayer = new CameraZoomLayer({
+      scene: this,
+      camera: this.cameras.main,
+      minimap: this.minimapCamera,
+      bridge: this.bridge,
+      store: this.options.zoomStore,
+    });
     // #53: despues de `setupInput` (comparte `this.input`, mismo momento en
     // que `layoutEditLayer` se crea mas abajo).
     this.cameraPanLayer = new CameraPanLayer({
@@ -694,6 +714,8 @@ export class OfficeScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.DESTROY, () => {
       window.removeEventListener('focusin', this.handleFocusChange);
       window.removeEventListener('focusout', this.handleFocusChange);
+      // `game.destroy()` never emits SHUTDOWN; the bridge outlives the game.
+      this.cameraZoomLayer?.destroy();
     });
 
     const cleanupOffice = (): void => {
@@ -715,6 +737,7 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeCollisionEdit?.();
       this.collisionEditLayer?.destroy();
       this.cameraPanLayer?.destroy();
+      this.cameraZoomLayer?.destroy();
       this.remotes?.clear();
       this.roster?.clear();
       void this.connection?.leave();
@@ -1638,9 +1661,13 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /** Camara principal siguiendo al jugador + minimapa en la esquina superior derecha (app.js:410-431). */
-  private setupCameras(): void {
+  private setupCameras(initialZoom: number): void {
     const cam = this.cameras.main;
-    cam.setBounds(0, 0, WORLD_W, WORLD_H);
+    // Zoom and zoom-aware bounds BEFORE `startFollow`, whose snap clamps with
+    // them: no glide on load. `CameraPanLayer` owns the bounds from then on.
+    cam.setZoom(initialZoom);
+    const bounds = followBounds({ x: 0, y: 0, width: WORLD_W, height: WORLD_H }, cam, initialZoom);
+    cam.setBounds(bounds.x, bounds.y, bounds.width, bounds.height);
     cam.startFollow(this.player, true, FOLLOW_LERP, FOLLOW_LERP);
     cam.setBackgroundColor('#0d1117');
 
