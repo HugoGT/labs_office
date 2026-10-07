@@ -6,6 +6,7 @@ import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import type { CollisionAdminPort } from '../dashboard/collisionAdminPort';
+import type { LayoutEditorSection } from './OfficeLayoutEditor';
 import { SIDEBAR_TOP } from '../game/hudLayout';
 import type { OfficeBridge } from '../game/officeBridge';
 import { statusCssColor } from '../game/presence';
@@ -36,6 +37,8 @@ const AssetsPanelLazy = lazy(() =>
 const ArtContributionSectionLazy = lazy(() =>
   import('./ArtContributionSection').then((sectionModule) => ({ default: sectionModule.ArtContributionSection })),
 );
+
+type PersonalizeSection = LayoutEditorSection | 'assets' | 'space' | 'art';
 
 export interface OfficeSidebarProps {
   /** Uno mismo, para anteponerlo (#74): el `roster` del puente ya lo excluye. */
@@ -113,19 +116,23 @@ export function OfficeSidebar({
   assets,
   contributions,
 }: OfficeSidebarProps) {
-  const [expanded, setExpanded] = useState(false);
+  const [openPanel, setOpenPanel] = useState<'personalize' | 'people' | null>(null);
   const [query, setQuery] = useState('');
-  // "Personalizar" (migracion de la edicion de layout + catalogo, mas "Mi
-  // espacio"): panel INDEPENDIENTE del roster, con su propio expandir/colapsar
-  // -- mismo patron, distinto estado, para que abrir uno nunca cierre el otro.
-  const [personalizing, setPersonalizing] = useState(false);
+  const [section, setSection] = useState<PersonalizeSection | null>(null);
 
   useEffect(() => {
     if (forceCollapsed) {
-      setExpanded(false);
-      setPersonalizing(false);
+      setOpenPanel(null);
+      setSection(null);
     }
   }, [forceCollapsed]);
+
+  useEffect(() => {
+    if (forceExitLayoutEditing) {
+      // A rising edge gives the map to another editor without trapping navigation.
+      setSection((current) => current === 'desk' || current === 'room' || current === 'terrain' || current === 'collision' ? null : current);
+    }
+  }, [forceExitLayoutEditing]);
 
   const visible = visibleRoster(self, peers, query);
   const canAdminister =
@@ -138,46 +145,79 @@ export function OfficeSidebar({
     refreshDesks !== undefined &&
     refreshSpaces !== undefined;
 
+  const entries: { section: PersonalizeSection; label: string }[] = [
+    ...(canAdminister ? [
+      { section: 'desk' as const, label: 'Editar escritorios' },
+      { section: 'room' as const, label: 'Editar salas' },
+      ...(terrain ? [{ section: 'terrain' as const, label: 'Editar terreno' }] : []),
+      ...(collisions ? [{ section: 'collision' as const, label: 'Editar colisiones' }] : []),
+      ...(assets ? [{ section: 'assets' as const, label: 'Catálogo de decoración' }] : []),
+    ] : []),
+    { section: 'space', label: 'Mi espacio' },
+    ...(contributions ? [{ section: 'art' as const, label: 'Aportar arte' }] : []),
+  ];
+  const available = section === null || entries.some((entry) => entry.section === section);
+  // Drop unavailable selections immediately, not just hide them until a port returns.
+  if (!available) setSection(null);
+  const currentSection = available ? section : null;
+  const layoutSection = currentSection === 'desk' || currentSection === 'room' || currentSection === 'terrain' || currentSection === 'collision'
+    ? currentSection : null;
+
+  function togglePanel(panel: 'personalize' | 'people'): void {
+    setSection(null);
+    setOpenPanel((current) => current === panel ? null : panel);
+  }
+
+  function closePanel(): void {
+    setOpenPanel(null);
+    setSection(null);
+  }
+
   return (
     <div
       role="complementary"
       aria-label="Personas"
-      className={expanded ? `${styles.sidebar} ${styles.expanded}` : styles.sidebar}
+      className={openPanel !== null ? `${styles.sidebar} ${styles.expanded}` : styles.sidebar}
       style={{
         position: 'fixed',
         top: SIDEBAR_TOP,
         zIndex: 15,
       }}
     >
-      {/*
-       * Entre el minimapa (renderizado por Phaser, arriba de este contenedor
-       * via `SIDEBAR_TOP`) y "Personas conectadas": quien administra elige
-       * entre escritorios/salas/catalogo/"Mi espacio"; quien no, no tiene
-       * nada que elegir y activarlo va derecho a "Mi espacio" -- un solo
-       * `personalizing` para ambos casos, la diferencia esta en el CONTENIDO.
-       */}
       <button
         type="button"
         className={styles.toggle}
-        aria-expanded={personalizing}
-        onClick={() => setPersonalizing((current) => !current)}
+        aria-expanded={openPanel === 'personalize'}
+        onClick={() => togglePanel('personalize')}
       >
         🎨 Personalizar
       </button>
-      {personalizing && (
-        <div className={styles.panel}>
+      {openPanel === 'personalize' && (
+        <div className={styles.panel} role="region" aria-label="Personalizar">
           <button
             type="button"
             className={styles.close}
             aria-label="Cerrar"
             title="Cerrar"
-            onClick={() => setPersonalizing(false)}
+            onClick={closePanel}
           >
             ×
           </button>
-          {canAdminister && (
+          {currentSection === null && entries.map((entry) => (
+            <button key={entry.section} type="button" className={styles.menuEntry} onClick={() => setSection(entry.section)}>
+              {entry.label}
+            </button>
+          ))}
+          {currentSection !== null && layoutSection === null && (
+            <button type="button" className={styles.back} onClick={() => setSection(null)}>
+              Salir
+            </button>
+          )}
+          {canAdminister && layoutSection !== null && (
             <Suspense fallback={null}>
               <OfficeLayoutEditorLazy
+                section={layoutSection}
+                onExit={() => setSection(null)}
                 bridge={bridge}
                 desks={desks}
                 spaces={spaces}
@@ -186,19 +226,16 @@ export function OfficeSidebar({
                 refreshDesks={refreshDesks}
                 refreshSpaces={refreshSpaces}
                 onEditingChange={onLayoutEditingChange}
-                forceExit={forceExitLayoutEditing}
               />
             </Suspense>
           )}
-          {/* `assets` narrowed inline (no variable de por medio) para que
-              TypeScript sepa, en este mismo bloque, que ya no es `null`/`undefined`. */}
-          {canAdminister && assets !== undefined && assets !== null && (
+          {currentSection === 'assets' && canAdminister && assets !== undefined && assets !== null && (
             <Suspense fallback={null}>
               <AssetsPanelLazy assets={assets} />
             </Suspense>
           )}
-          <MiEspacioPanel />
-          {contributions !== undefined && contributions !== null && (
+          {currentSection === 'space' && <MiEspacioPanel />}
+          {currentSection === 'art' && contributions !== undefined && contributions !== null && (
             <Suspense fallback={null}>
               <ArtContributionSectionLazy contributions={contributions} />
             </Suspense>
@@ -208,12 +245,12 @@ export function OfficeSidebar({
       <button
         type="button"
         className={styles.toggle}
-        aria-expanded={expanded}
-        onClick={() => setExpanded((current) => !current)}
+        aria-expanded={openPanel === 'people'}
+        onClick={() => togglePanel('people')}
       >
         👥 Personas conectadas ({peers.length + 1})
       </button>
-      {expanded && (
+      {openPanel === 'people' && (
         <div className={styles.panel}>
           {/* Only shown by CSS on very small screens, where the open sidebar
               covers the whole screen and the toggle alone is easy to miss (#86). */}
@@ -222,7 +259,7 @@ export function OfficeSidebar({
             className={styles.close}
             aria-label="Cerrar"
             title="Cerrar"
-            onClick={() => setExpanded(false)}
+            onClick={closePanel}
           >
             ×
           </button>

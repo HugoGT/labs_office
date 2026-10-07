@@ -20,6 +20,9 @@ export interface CollisionEditorSectionProps {
   onEditingChange?: (editing: boolean) => void;
   /** A rising edge closes the editor: another editor took the map. */
   forceExit?: boolean;
+  /** A chosen sidebar submenu opens directly; standalone consumers keep the entry button. */
+  initiallyActive?: boolean;
+  onExit?: () => void;
   /** Called before opening, so `OfficeLayoutEditor` can close the others first. */
   onRequestActive?: () => void;
 }
@@ -32,8 +35,13 @@ const FIELDS: readonly { field: RectField; label: string }[] = [
   { field: 'h', label: 'Alto' },
 ];
 
-export function CollisionEditorSection({ bridge, collisions, onEditingChange, forceExit = false, onRequestActive }: CollisionEditorSectionProps) {
+export function CollisionEditorSection({ bridge, collisions, onEditingChange, forceExit = false, onRequestActive, initiallyActive = false, onExit }: CollisionEditorSectionProps) {
   const editor = useCollisionEditor({ bridge, collisions });
+
+  useEffect(() => {
+    if (initiallyActive) editor.enter();
+    // Initialization only: later forceExit must not reopen the editor.
+  }, []);
 
   useEffect(() => {
     onEditingChange?.(editor.active);
@@ -75,7 +83,7 @@ export function CollisionEditorSection({ bridge, collisions, onEditingChange, fo
     <div className={styles.section}>
       <div className={styles.header}>
         <h3 className={styles.title}>Colisiones</h3>
-        <button type="button" className={styles.exit} onClick={editor.exit}>
+        <button type="button" className={styles.exit} onClick={() => { editor.exit(); onExit?.(); }}>
           Salir
         </button>
       </div>

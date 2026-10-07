@@ -11,6 +11,7 @@
   bottom: calc(16px + max(var(--hud-bar-height, 0px), var(--hud-exit-height, 0px)) + 8px);
   display: flex;
   flex-direction: column;
+  min-height: 0;
   align-items: flex-end;
   gap: 8px;
   pointer-events: none;
@@ -22,6 +23,7 @@
   align-self: stretch;
   margin: 0 var(--hud-rail-inset);
   height: 32px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -44,6 +46,7 @@
   pointer-events: auto;
   flex: 1;
   min-height: 0;
+  overflow-y: auto;
   /*
    * Same rail column as the toggle above and the exit controls below (#86):
    * before, this card kept the sidebar's full 280px/right:12px box, 11px
@@ -60,6 +63,32 @@
   border-radius: var(--radius-panel);
   padding: var(--hud-sidebar-padding);
   box-shadow: 0 8px 30px #0009;
+}
+
+.panel > * {
+  flex-shrink: 0;
+}
+
+.menuEntry,
+.back {
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  background: #1f2937;
+  color: #e5e7eb;
+  padding: 8px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.menuEntry:hover,
+.back:hover {
+  border-color: #4b5563;
+}
+
+.back {
+  align-self: flex-start;
 }
 
 .search {
