@@ -12,6 +12,7 @@ import {
 import { feetOf, positionForFeet } from './avatarGeometry';
 import { beginAutoWalk, isAutoWalkArrived, stepAutoWalk, type AutoWalkState } from './autoWalk';
 import { planWalk } from './pathfinding';
+import { registerClick, type ClickSample } from './doubleClick';
 import { CameraPanLayer } from './CameraPanLayer';
 import { CameraZoomLayer } from './CameraZoomLayer';
 import { followBounds } from './cameraBounds';
@@ -418,12 +419,19 @@ export class OfficeScene extends Phaser.Scene {
   private walkingMs = 0;
   private lastWalkFrame?: number;
   private walkClick?: Phaser.Input.Pointer;
+  /**
+   * First click of a possible double click (screen coordinates, game clock).
+   * A walk starts only when a second eligible click completes the pair; anything
+   * that interrupts walking also drops it, so a stale click never pairs later.
+   */
+  private clickPair: ClickSample | null = null;
 
   private readonly resetWalking = (): void => {
     this.walkingMs = 0;
     this.lastWalkFrame = undefined;
     this.autoWalk = undefined;
     this.walkClick = undefined;
+    this.clickPair = null;
     (this.player.body as Phaser.Physics.Arcade.Body).setVelocity(0, 0);
   };
 
@@ -1742,13 +1750,25 @@ export class OfficeScene extends Phaser.Scene {
       // Once it was a drag, returning to its origin must not turn it into a click.
       if (pointer === this.walkClick && pointer.getDistance() > PAN_THRESHOLD_PX) this.walkClick = undefined;
     });
-    this.input.on('pointerupoutside', () => { this.walkClick = undefined; });
-    this.input.on('pointerup', (pointer: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
-      const eligible = pointer === this.walkClick;
+    this.input.on('pointerupoutside', () => {
       this.walkClick = undefined;
-      if (!eligible || this.layoutEditing || !this.localPositionReady || over?.length || pointer.camera !== this.cameras.main ||
-        pointer.getDistance() > PAN_THRESHOLD_PX || !Number.isFinite(pointer.worldX) || !Number.isFinite(pointer.worldY)) return;
-      this.startWalk({ x: pointer.worldX, y: pointer.worldY });
+      this.clickPair = null;
+    });
+    this.input.on('pointerup', (pointer: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
+      const eligible = pointer === this.walkClick && !this.layoutEditing && this.localPositionReady && !over?.length &&
+        pointer.camera === this.cameras.main && pointer.getDistance() <= PAN_THRESHOLD_PX &&
+        Number.isFinite(pointer.worldX) && Number.isFinite(pointer.worldY) &&
+        Number.isFinite(pointer.x) && Number.isFinite(pointer.y);
+      this.walkClick = undefined;
+      // Any click that cannot walk also breaks a pending pair.
+      if (!eligible) {
+        this.clickPair = null;
+        return;
+      }
+      // Screen coordinates and the game clock: world points glide with the camera between the clicks.
+      const { fired, pending } = registerClick(this.clickPair, { time: this.time.now, x: pointer.x, y: pointer.y });
+      this.clickPair = pending;
+      if (fired) this.startWalk({ x: pointer.worldX, y: pointer.worldY });
     });
   }
 
