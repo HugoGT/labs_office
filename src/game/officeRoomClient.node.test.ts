@@ -5,8 +5,8 @@
  * decodificar de verdad.
  */
 
-import { matchMaker } from '@colyseus/core';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { matchMaker, Room as ServerRoom, type Client as ServerClient } from '@colyseus/core';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createOfficeServer, type OfficeServer } from '../../server/src/createOfficeServer.ts';
 import { createMemoryDirectory } from '../../server/src/directory/memoryDirectory.ts';
 import { createMemoryTerrain } from '../../server/src/terrain/memoryTerrain.ts';
@@ -49,6 +49,7 @@ afterEach(async () => {
     ),
   );
   await server.shutdown();
+  vi.restoreAllMocks();
 });
 
 function recorder() {
@@ -118,6 +119,43 @@ async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void
 }
 
 describe('connectOfficeRoom', () => {
+  it('reports the restored own position once, before later movement echoes (#148)', async () => {
+    await server.shutdown();
+    const directory = createMemoryDirectory({ bootstrapSuperadminEmail: 'ana@example.com' });
+    await directory.resolveOnLogin({ uid: 'ana', email: 'ana@example.com', name: null });
+    await directory.saveLastPosition('ana', { x: 300.5, y: 400.25 });
+    server = createOfficeServer({ directory, auth: { async verify() {
+      return { uid: 'ana', email: 'ana@example.com', name: null };
+    } } });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+    // Delay the actual ROOM_STATE frame, not JOIN_ROOM or the application callback.
+    const prototype = ServerRoom.prototype as unknown as { sendFullState(client: ServerClient): void };
+    const fullState = prototype.sendFullState;
+    let releaseState!: () => void;
+    vi.spyOn(prototype, 'sendFullState').mockImplementation(function (this: ServerRoom, client) {
+      this.setPatchRate(null);
+      releaseState = () => { fullState.call(this, client); this.setPatchRate(50); };
+    });
+    const local: RemotePlayerSnapshot[] = [];
+    const rec = recorder();
+    const connection = await connectOfficeRoom({ endpoint, name: 'Ana', getIdToken: async () => 'verified',
+      handlers: { ...rec.handlers, onLocalPosition: (snapshot) => local.push(snapshot) },
+    });
+    connections.push(connection);
+    await waitFor(() => releaseState !== undefined);
+    expect(local).toEqual([]);
+    connection.sendMove(720, 912, 'right');
+    connection.sendMove(730, 912, 'right');
+    releaseState();
+    await waitFor(() => local.length === 1);
+    expect(local[0]).toMatchObject({ sessionId: connection.sessionId, x: 300.5, y: 400.25, facing: 'down', seat: null });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(server.sessions.positionOf(connection.sessionId)).toEqual({ x: 300.5, y: 400.25 });
+    connection.sendMove(310, 400.25, 'right');
+    await waitFor(() => rec.changed.some((snapshot) => snapshot.x === 310));
+    expect(local).toHaveLength(1);
+  });
+
   it('devuelve la sesion propia y notifica el alta de los demas', async () => {
     const first = recorder();
     const a = await connect('Ana', first.handlers);
@@ -426,19 +464,30 @@ describe('connectOfficeRoom: reconexion tras una caida (issue #52)', () => {
     const watcher = recorder();
     await connect('Ana', watcher.handlers);
     const dropped = recorder();
-    const b = await connect('Beto', dropped.handlers);
+    const local: RemotePlayerSnapshot[] = [];
+    const b = await connectOfficeRoom({ endpoint, name: 'Beto', moveIntervalMs: 10_000,
+      handlers: { ...dropped.handlers, onLocalPosition: (snapshot) => local.push(snapshot) },
+    });
+    connections.push(b);
     await waitFor(() => watcher.added.some((s) => s.sessionId === b.sessionId));
+    await waitFor(() => local.length === 1);
+    b.sendMove(300, 400, 'left');
+    await waitFor(() => watcher.changed.some((s) => s.sessionId === b.sessionId && s.x === 300));
+    b.sendMove(310, 400, 'right'); // A throttled move must not survive the dead socket.
 
     await terminateSocketOf(b.sessionId);
     await waitFor(() => dropped.states.includes('connected'), 15000);
+    expect(local).toHaveLength(2);
+    expect(local[1]).toMatchObject({ x: 300, y: 400, facing: 'left' });
 
     // Sin volver a cablear el envoltorio contra la sala NUEVA, esto se enviaria
     // por un socket muerto y nadie se enteraria de nada.
-    b.sendMove(300, 400, 'left');
+    b.sendMove(320, 400, 'left');
 
     await waitFor(() =>
-      watcher.changed.some((s) => s.sessionId === b.sessionId && s.x === 300 && s.y === 400),
+      watcher.changed.some((s) => s.sessionId === b.sessionId && s.x === 320 && s.y === 400),
     );
+    expect(local).toHaveLength(2); // Later echoes do not reinitialize the moving avatar.
   }, 20000);
 
   it('tras reconectar, el replay completo vuelve a dar de alta a los presentes', async () => {
@@ -740,6 +789,7 @@ describe('connectOfficeRoom: seats (art migration, step 6)', () => {
     const local: (string | null)[] = [];
     const sitter = await connect('Beto', { ...recorder().handlers, onLocalSeat: (seat) => local.push(seat) });
 
+    await waitFor(() => local.length > 0); // JOIN_ROOM is not the initial own state.
     sitter.sendMove(NEXT_TO_CHAIR.x, NEXT_TO_CHAIR.y, 'down');
     await waitFor(() => watcher.changed.some((s) => s.sessionId === sitter.sessionId && s.x === NEXT_TO_CHAIR.x));
     sitter.sendSit(mapSeatId(0));
