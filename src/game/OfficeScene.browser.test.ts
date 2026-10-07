@@ -23,6 +23,7 @@ import { feetOf } from './avatarGeometry';
 import { BASE_MAP_SEATS, deskSeatId, mapSeatId } from './seating';
 import { deskFurnitureName, deskZoneName } from './deskLayout';
 import { artSheetKey, recoloredSheetKey } from './artPack';
+import { ArtPackLoader } from './artPackLoader';
 import { deskAreaAnchor, deskPlacement, spaceFloorTiles } from './artPlacement';
 import type { ArtDeskPiece } from './artContract';
 import { buildTerrainGrid } from './terrainGrid';
@@ -389,6 +390,121 @@ describe('OfficeScene: identidad y construccion (D2/D5)', () => {
     const bridge = createOfficeBridge();
 
     expect(() => new OfficeScene(bridge)).not.toThrow();
+  });
+});
+
+describe('office entry art readiness', () => {
+  it('waits for the replicated local character, not just a successful join', async () => {
+    const bridge = createOfficeBridge();
+    const entry = vi.fn();
+    bridge.on('entry', entry);
+    const connector = fakeConnector();
+    const { scene } = await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await advanceGameClock(scene, 50);
+    expect(entry).not.toHaveBeenCalled();
+    connector.handlers()!.onLocalAvatar?.('character-p02-beige-blazer');
+    expect(entry).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(entry).toHaveBeenCalledWith({ state: 'ready' }), LOOP_WAIT);
+    expect(findPlayer(scene).sprite.texture.key).toBe(artSheetKey('character-p02-beige-blazer', 'walk'));
+  });
+
+  it.each([false, true])('settles dynamic floor, desk and decor art before revealing (broken: %s)', async (broken) => {
+    const bridge = createOfficeBridge();
+    const entry = vi.fn();
+    bridge.on('entry', entry);
+    const { scene } = await bootOfficeScene(bridge, { endpoint: null, waitForOfficeData: true });
+    const art = (scene as unknown as { art: ArtPackLoader }).art;
+    const manifest = art.manifest!;
+    const aliases = ['floor-plain', 'desk-wood', 'plant-ficus'].map((id) => {
+      const piece = manifest.pieces.find((piece) => piece.id === id)!;
+      return { ...piece, id: `${id}-entry`, files: piece.files.map((file) => ({ ...file,
+        path: broken ? 'entry-missing.png' : file.path })) };
+    });
+    art.adoptManifest({ ...manifest, pieces: [...manifest.pieces, ...aliases] });
+    bridge.emitCommand('spacesconfig', { spaces: [{ ...BUILT_IN_SPACES[0]!, floor: { materialId: 'floor-plain-entry', color: null } }], version: 'entry' });
+    bridge.emitCommand('desks', { desks: [{ id: 'entry', label: 'Entry', x: 320, y: 320, w: 96, h: 96, mine: false,
+      appearance: { materialId: 'desk-wood-entry', color: null },
+      occupant: { id: 'occupant', displayName: 'Occupant', items: [{ id: 'entry-plant', slot: 4, rotation: 0,
+        aboveAvatars: false, textureKey: artSheetKey('plant-ficus-entry', 'sheet') }] } }] });
+    expect(entry).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(entry).toHaveBeenCalledWith({ state: broken ? 'failed' : 'ready' }), LOOP_WAIT);
+    if (!broken) {
+      for (const alias of aliases) expect(art.status(alias.id)).toBe('ready');
+      const item = scene.children.getByName('desk-item:entry-plant') as Phaser.GameObjects.Image;
+      expect(item.texture.key).toBe(artSheetKey('plant-ficus-entry', 'sheet'));
+    }
+  });
+
+  it('never reveals after a denied join and removes its render listener when stopped', async () => {
+    const bridge = createOfficeBridge();
+    const entry = vi.fn();
+    bridge.on('entry', entry);
+    const { scene } = await bootOfficeScene(bridge, { endpoint: 'ws://fake',
+      connect: async () => { throw new OfficeAccessDeniedError('not-provisioned'); } });
+    await advanceGameClock(scene, 100);
+    expect(entry).not.toHaveBeenCalled();
+    scene.scene.stop();
+    await vi.waitFor(() => expect(scene.game.events.listenerCount(Phaser.Core.Events.POST_RENDER)).toBe(0), LOOP_WAIT);
+    bridge.emitCommand('desks', { desks: [] });
+    expect(entry).not.toHaveBeenCalled();
+  });
+
+  it('constructs the local body from current sheets rather than a procedural startup sprite', async () => {
+    const sprite = vi.spyOn(Phaser.GameObjects.GameObjectFactory.prototype, 'sprite');
+    const { scene } = await bootOfficeScene(createOfficeBridge(), { endpoint: null });
+    expect(sprite.mock.calls.some((call) => String(call[2]).startsWith('avP-'))).toBe(false);
+    expect(findPlayer(scene).sheets).not.toBeNull();
+    sprite.mockRestore();
+  });
+  it('waits for initial served data and current character, then reports after rendering only once', async () => {
+    const bridge = createOfficeBridge();
+    const entry = vi.fn();
+    bridge.on('entry', entry);
+    const { scene } = await bootOfficeScene(bridge, { endpoint: null, waitForOfficeData: true });
+    expect(entry).not.toHaveBeenCalled();
+    bridge.emitCommand('spacesconfig', { spaces: BUILT_IN_SPACES, version: BUILT_IN_SPACES_VERSION });
+    expect(entry).not.toHaveBeenCalled();
+    bridge.emitCommand('desks', { desks: [] });
+    await vi.waitFor(() => expect(entry).toHaveBeenCalledWith({ state: 'ready' }), LOOP_WAIT);
+    expect(findPlayer(scene).sprite.texture.key).toMatch(/^art:character-/);
+    expect(scene.textures.exists(artSheetKey('tileset-terrain', 'sheet'))).toBe(true);
+    await advanceGameClock(scene, 100);
+    expect(entry).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports unavailable art as a failure, never a ready legacy office', async () => {
+    const bridge = createOfficeBridge();
+    const entry = vi.fn();
+    bridge.on('entry', entry);
+    await bootOfficeScene(bridge, { endpoint: null, artManifestUrl: null });
+    await vi.waitFor(() => expect(entry).toHaveBeenCalledWith({ state: 'failed' }), LOOP_WAIT);
+    expect(entry).not.toHaveBeenCalledWith({ state: 'ready' });
+  });
+
+  it('fails entry if a required static sheet downloads HTML instead of PNG', async () => {
+    const originalPreload = ArtPackLoader.prototype.preload;
+    const restore: (() => void)[] = [];
+    const preload = vi.spyOn(ArtPackLoader.prototype, 'preload').mockImplementation(function (this: ArtPackLoader) {
+      // Phaser installs file-type methods on each loader instance, not its prototype.
+      const load = (this as unknown as { scene: Phaser.Scene }).scene.load;
+      const original = load.spritesheet;
+      const sheet = vi.spyOn(load, 'spritesheet').mockImplementation(function (this: Phaser.Loader.LoaderPlugin, key, url, config, xhr) {
+        return original.call(this, key, key === artSheetKey('tileset-terrain', 'sheet') ? 'assets/pack/entry-missing.png' : url, config, xhr);
+      });
+      restore.push(() => sheet.mockRestore());
+      originalPreload.call(this);
+    });
+    try {
+      const bridge = createOfficeBridge();
+      const entry = vi.fn();
+      bridge.on('entry', entry);
+      await bootOfficeScene(bridge, { endpoint: null });
+      await vi.waitFor(() => expect(entry).toHaveBeenCalledWith({ state: 'failed' }), LOOP_WAIT);
+      expect(entry).not.toHaveBeenCalledWith({ state: 'ready' });
+    } finally {
+      for (const restoreSheet of restore) restoreSheet();
+      preload.mockRestore();
+    }
   });
 });
 

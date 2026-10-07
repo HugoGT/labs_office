@@ -43,6 +43,7 @@ import { ContextMenu, type PeerMenuAction } from './ContextMenu';
 import { DeskDecorEditor } from './DeskDecorEditor';
 import { ExitControls } from './ExitControls';
 import { GameCanvas } from './GameCanvas';
+import type { OfficeEntryState } from './OfficeEntry';
 import { OfficeSidebar } from './OfficeSidebar';
 import { RecordingReadyStack, type RecordingReadyNotice } from './RecordingReadyStack';
 import { Toast } from './Toast';
@@ -52,6 +53,7 @@ import { VideoTiles } from './VideoTiles';
 const TOAST_TIMEOUT_MS = 3200;
 
 export interface OfficeShellProps {
+  onEntryState?: (state: OfficeEntryState) => void;
   /**
    * Sesion autenticada (#8), o `null` sin autenticacion. No se resuelve aqui:
    * la entrega `AuthGate`, que es quien conoce el puerto. Por defecto `null`,
@@ -101,6 +103,7 @@ export function OfficeShell({
   onSessionReplaced,
   onAccessRevoked,
   onAccessDenied,
+  onEntryState,
 }: OfficeShellProps) {
   const [bridge] = useState(createOfficeBridge);
   const { room, spaceId, recordings, selfSessionId, menu, presence, closeMenu } = useOfficeBridge(bridge);
@@ -749,7 +752,7 @@ export function OfficeShell({
 
   return (
     <div id="office-shell">
-      <GameCanvas bridge={bridge} endpoint={endpoint} session={session} />
+      <GameCanvas bridge={bridge} endpoint={endpoint} session={session} onEntryState={onEntryState} />
       <VideoTiles
         bridge={bridge}
         videoTracks={videoTracks}

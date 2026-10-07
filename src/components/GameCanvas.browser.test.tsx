@@ -1,9 +1,12 @@
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import Phaser from 'phaser';
 import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createOfficeBridge } from '../game/officeBridge';
 import { GameCanvas } from './GameCanvas';
+import { OfficeEntry } from './OfficeEntry';
+import { BUILT_IN_SPACES_CONFIG } from '../game/spacesConfig';
+import { SCENE_BOOT_TIMEOUT_MS } from '../test/phaserScene';
 
 /**
  * Integracion real: React monta Phaser sobre WebGL de verdad. La version con
@@ -34,6 +37,26 @@ afterEach(() => {
 });
 
 describe('GameCanvas con Phaser real', () => {
+  it('reveals the real canvas only after current office art has rendered, on the login background', async () => {
+    const { container } = nestedContainer();
+    container.style.width = '320px';
+    container.style.height = '240px';
+    const bridge = createOfficeBridge();
+    bridge.emitCommand('spacesconfig', BUILT_IN_SPACES_CONFIG);
+    bridge.emitCommand('desks', { desks: [] });
+    render(<OfficeEntry>{(report) => <GameCanvas bridge={bridge} onEntryState={report} />}</OfficeEntry>, { container });
+    const status = screen.getByRole('status');
+    expect(status.textContent).toBe('Entrando a la oficina…');
+    expect(status.closest('form')).toBeNull();
+    expect(getComputedStyle(container.firstElementChild!).visibility).toBe('hidden');
+    expect(getComputedStyle(status.parentElement!).backgroundColor).toBe('rgb(13, 17, 23)');
+    await vi.waitFor(() => {
+      const canvas = container.querySelector('canvas');
+      expect(canvas).not.toBeNull();
+      expect(getComputedStyle(canvas!).visibility).toBe('visible');
+      expect(screen.queryByRole('status')).toBeNull();
+    }, { timeout: SCENE_BOOT_TIMEOUT_MS });
+  });
   it('monta un canvas dentro de su contenedor', async () => {
     const { container } = render(<GameCanvas bridge={createOfficeBridge()} />);
 

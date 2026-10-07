@@ -73,6 +73,32 @@ describe('GameCanvas', () => {
     expect(state.destroyArgs).toEqual([true]);
   });
 
+  it('reports readiness without remounting on callback changes and unsubscribes on unmount', () => {
+    trackInstances();
+    const oldReport = vi.fn();
+    const report = vi.fn();
+    const { rerender, unmount } = render(<GameCanvas bridge={bridge} onEntryState={oldReport} />);
+    rerender(<GameCanvas bridge={bridge} onEntryState={report} />);
+    bridge.emit('entry', { state: 'ready' });
+    expect(oldReport).not.toHaveBeenCalled();
+    expect(report).toHaveBeenCalledWith('ready');
+    expect(createGameMock).toHaveBeenCalledTimes(1);
+    expect(createGameMock.mock.calls[0]![2]?.waitForOfficeData).toBe(true);
+    unmount();
+    bridge.emit('entry', { state: 'failed' });
+    expect(report).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a synchronous game boot failure and removes its readiness subscription', () => {
+    createGameMock.mockImplementation(() => { throw new Error('renderer unavailable'); });
+    const report = vi.fn();
+    const { unmount } = render(<GameCanvas bridge={bridge} onEntryState={report} />);
+    expect(report).toHaveBeenCalledWith('failed');
+    bridge.emit('entry', { state: 'ready' });
+    expect(report).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
   it('bajo StrictMode deja exactamente una instancia viva', () => {
     const state = trackInstances();
 

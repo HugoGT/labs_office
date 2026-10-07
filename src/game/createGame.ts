@@ -19,6 +19,7 @@ export function createGame(
     backgroundColor: '#0d1117',
     pixelArt: true,
     roundPixels: true,
+    loader: { timeout: 10000 },
     physics: {
       default: 'arcade',
     },

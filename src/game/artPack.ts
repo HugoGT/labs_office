@@ -106,8 +106,8 @@ export interface ArtLoadRequest {
 /**
  * Kinds the map draws as soon as the office opens. They load in `preload`, so
  * the first frame shows the pack and not the fallback: the terrain tileset
- * and every piece of the Tiled layout (art step 8). Characters load on
- * demand, once somebody wears them.
+ * and every piece of the Tiled layout (art step 8). The default character
+ * also boots with the office; other characters load once somebody wears them.
  */
 export const BOOT_PIECE_KINDS: readonly ArtPieceKind[] = ['floor', 'desk', 'chair', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table'];
 
@@ -262,7 +262,7 @@ export function pieceLoadRequests(piece: ArtPiece, manifestUrl: string): ArtLoad
 
 export function bootLoadRequests(manifest: ArtPackManifest, manifestUrl: string): ArtLoadRequest[] {
   return manifest.pieces
-    .filter((piece) => BOOT_PIECE_KINDS.includes(piece.kind))
+    .filter((piece) => BOOT_PIECE_KINDS.includes(piece.kind) || piece.id === manifest.defaults.character)
     .flatMap((piece) => pieceLoadRequests(piece, manifestUrl));
 }
 
