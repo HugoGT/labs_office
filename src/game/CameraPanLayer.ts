@@ -9,13 +9,19 @@
  *
  * Mientras la camara no sigue al jugador usa `navigationBounds` en vez de los
  * bounds del mundo: con los del mundo, una vista igual o mayor que el mapa no
- * se podia mover (#53). Los del mundo vuelven solo al aterrizar el planeo de
- * regreso, cuando reponerlos ya no provoca un salto.
+ * se podia mover (#53). Los de seguimiento vuelven solo al aterrizar el planeo
+ * de regreso, cuando reponerlos ya no provoca un salto.
+ *
+ * map-zoom: this layer is the ONLY writer of the main camera bounds, every
+ * frame -- navigation bounds while detached, `followBounds` (zoom aware, world
+ * centered where the visible area covers it) otherwise. Zoom and window resize
+ * then never need to touch the bounds themselves.
  */
 
 import Phaser from 'phaser';
 import {
   centeredScroll,
+  followBounds,
   glideStep,
   navigationBounds,
   scrollRange,
@@ -30,7 +36,7 @@ export interface CameraPanLayerOptions {
   camera: Phaser.Cameras.Scene2D.Camera;
   target: FollowTarget;
   lerp: number;
-  /** Los mismos bounds que `setBounds` pone a la camara mientras sigue al jugador. */
+  /** The world; `followBounds` derives from it the bounds the camera has while following. */
   worldBounds: Rect;
   /** Camara del minimapa (#98): un click sobre ella lleva la principal a ese punto. */
   minimap?: Phaser.Cameras.Scene2D.Camera;
@@ -113,9 +119,10 @@ export class CameraPanLayer {
     ) {
       this.dispatch({ kind: 'playerMoved' });
     }
-    // Cada cuadro y no solo al desacoplar: si la ventana cambia de tamano a
-    // mitad de la navegacion, los bounds siguen a la vista nueva.
+    // Cada cuadro y no solo al desacoplar: si la ventana cambia de tamano o el
+    // zoom cambia, los bounds siguen a la vista nueva.
     if (this.detached) this.applyNavigationBounds();
+    else this.applyFollowBounds();
     this.stepGlide();
   };
 
@@ -206,6 +213,11 @@ export class CameraPanLayer {
     this.camera.setBounds(bounds.x, bounds.y, bounds.width, bounds.height);
   }
 
+  private applyFollowBounds(): void {
+    const bounds = followBounds(this.worldBounds, this.camera, this.camera.zoom);
+    this.camera.setBounds(bounds.x, bounds.y, bounds.width, bounds.height);
+  }
+
   private stepGlide(): void {
     if (this.glide === null) return;
     const cam = this.camera;
@@ -216,9 +228,9 @@ export class CameraPanLayer {
       targetX = centeredScroll(this.glide.x, cam.width);
       targetY = centeredScroll(this.glide.y, cam.height);
     } else {
-      // Donde el seguimiento con los bounds del mundo dejaria la camara, no
-      // el jugador centrado a secas: junto a un borde del mapa no coinciden.
-      const world = this.worldBounds;
+      // Donde el seguimiento con los bounds de seguimiento dejaria la camara,
+      // no el jugador centrado a secas: junto a un borde del mapa no coinciden.
+      const world = followBounds(this.worldBounds, cam, cam.zoom);
       const rangeX = scrollRange(world.x, world.width, cam.width, cam.zoom);
       const rangeY = scrollRange(world.y, world.height, cam.height, cam.zoom);
       targetX = Phaser.Math.Clamp(centeredScroll(this.target.x, cam.width), rangeX.min, rangeX.max);
@@ -237,10 +249,9 @@ export class CameraPanLayer {
   }
 
   private reattach(): void {
-    const { x, y, width, height } = this.worldBounds;
     const savedX = this.camera.scrollX;
     const savedY = this.camera.scrollY;
-    this.camera.setBounds(x, y, width, height);
+    this.applyFollowBounds();
     // `startFollow` salta el scroll de golpe (Camera.js): reponerlo deja el
     // `preRender` de cada cuadro como unico que lo mueve, a `this.lerp`.
     this.camera.startFollow(this.target, true, this.lerp, this.lerp);
