@@ -66,6 +66,13 @@ vi.mock('../dashboard/spacesAdminClient', () => ({ createSpacesAdminClient: vi.f
 // doblarlo aqui evita que abrir el panel dispare una peticion real.
 vi.mock('../dashboard/assetAdminClient', () => ({ createAssetAdminClient: vi.fn() }));
 
+// Keep the real editor, but let the first submenu test control its lazy readiness.
+const layoutEditorLoad = vi.hoisted(() => ({ ready: null as Promise<void> | null }));
+vi.mock('./OfficeLayoutEditor', async (importOriginal) => {
+  await layoutEditorLoad.ready;
+  return importOriginal<typeof import('./OfficeLayoutEditor')>();
+});
+
 const createGameMock = vi.mocked(createGame);
 const useProximityAudioMock = vi.mocked(useProximityAudio);
 const useOfficeAdminRoleMock = vi.mocked(useOfficeAdminRole);
@@ -1467,21 +1474,39 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
   });
 
   it('entrar en modo edicion de SALAS tambien cierra el editor de decoracion (#74, PR4)', async () => {
-    const user = userEvent.setup();
-    render(<OfficeShell session={SESION} />);
-    const bridge = createGameMock.mock.calls[0][1];
-    await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
-    await act(async () => {});
-    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
-    await user.click(await screen.findByRole('button', { name: /Decorar/ }));
-    expect(await screen.findByRole('dialog', { name: /Mesa 4/ })).toBeInTheDocument();
+    let resolveEditor!: () => void;
+    layoutEditorLoad.ready = new Promise<void>((resolve) => { resolveEditor = resolve; });
+    try {
+      const user = userEvent.setup();
+      render(<OfficeShell session={SESION} />);
+      const bridge = createGameMock.mock.calls[0][1];
+      await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
+      await act(async () => {});
+      act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+      await user.click(await screen.findByRole('button', { name: /Decorar/ }));
+      expect(await screen.findByRole('dialog', { name: /Mesa 4/ })).toBeInTheDocument();
 
-    await openSidebar(user);
-    await user.click(await screen.findByRole('button', { name: /Editar salas/ }));
+      await openSidebar(user);
+      await user.click(await screen.findByRole('button', { name: /Editar salas/ }));
 
-    // The menu entry now mounts the lazy editor; wait for its active submenu.
-    await screen.findByRole('heading', { name: 'Salas' });
-    await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(screen.queryByRole('heading', { name: 'Salas' })).not.toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: /Mesa 4/ })).toBeInTheDocument();
+      // Import completion, not the DOM query's deadline, determines submenu readiness.
+      await act(async () => {
+        resolveEditor();
+        await vi.dynamicImportSettled();
+      });
+      await screen.findByRole('heading', { name: 'Salas' });
+      await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+      await user.click(screen.getByRole('button', { name: 'Salir' }));
+      expect(screen.getByRole('button', { name: 'Editar salas' })).toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Salas' })).not.toBeInTheDocument();
+    } finally {
+      resolveEditor();
+      layoutEditorLoad.ready = null;
+      await act(async () => { await vi.dynamicImportSettled(); });
+    }
   });
 
   it('entrar en modo edicion cierra el editor de decoracion si estaba abierto', async () => {
