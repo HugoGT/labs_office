@@ -54,3 +54,27 @@ por defecto).
 servidor y el cliente comparten ficheros de `src/game` y con proyectos composite
 un mismo fichero no puede pertenecer a dos. Lo ejecuta Node borrando tipos, y
 por eso los imports llevan extensión `.ts` explícita.
+
+## Last position on a new session (#148)
+
+Authenticated directory users re-enter at their last server-held coordinate,
+standing. Definitive leave saves `users.last_x` / `last_y` through the directory
+port; an interrupted connection keeps its existing state during the reconnection
+window and saves only when that window expires. A refresh that replaces a live
+or reconnecting session takes its current position before releasing it, preserving
+the existing last-join-wins policy. Pending writes bridge clean refreshes and run
+in order per uid within the room.
+
+Restoration checks finite values, map bounds, current terrain and current piece
+rectangles. An invalid coordinate uses the normal spawn ring. The same coordinate
+enters `liveSessions` before the first move, so LiveKit space checks remain valid.
+Without auth **or** a directory, new sessions still use spawn; there is no
+cross-session storage or client-authoritative localStorage fallback.
+
+Position read failures log a warning and use the validated live position or normal
+spawn; save failures log a warning without preventing player/session cleanup.
+There is no durable retry queue: a failed save can leave an older saved position,
+and abrupt process termination can lose positions not yet saved. A stalled write
+does not keep the avatar or LiveKit session alive, but can delay completion of the
+leave hook and subsequent writes for that uid. Directory access errors still fail
+closed, and saved coordinates never bypass revoked/expired-account checks.

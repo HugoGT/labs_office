@@ -21,6 +21,11 @@
 export type Role = 'superadmin' | 'admin' | 'employee' | 'guest';
 export type AccountStatus = 'active' | 'revoked';
 
+export interface LastPosition {
+  x: number;
+  y: number;
+}
+
 export interface DirectoryUser {
   id: string;
   uid: string | null;
@@ -90,6 +95,10 @@ export interface InvitationRow extends DirectoryUser {
 }
 
 export interface UserDirectory {
+  /** Server-held coordinates only; reads never grant access or provision a uid (#148). */
+  getLastPosition(uid: string): Promise<LastPosition | null>;
+  /** Updates an existing uid only. Invalid finite/map bounds throw before writing. */
+  saveLastPosition(uid: string, position: LastPosition): Promise<void>;
   /**
    * Resuelve al usuario del ID token ya verificado: devuelve su fila por uid
    * (refrescando solo el nombre visible) o `null` si no la tiene, que

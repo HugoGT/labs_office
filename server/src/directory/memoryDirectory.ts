@@ -26,6 +26,7 @@ import type {
   CreateUserInput,
   DirectoryUser,
   InvitationRow,
+  LastPosition,
   Role,
   UserDirectory,
 } from './directoryPort.ts';
@@ -42,6 +43,7 @@ import {
 } from './invitationRules.ts';
 import { assertAssignableRole, normalizeUserInput } from './userRules.ts';
 import { ART_PACK_DEFAULTS, normalizeStoredCharacterId } from '../decor/artCatalogRules.ts';
+import { assertLastPosition } from './positionRules.ts';
 
 export interface AuditEntry {
   actorId: string;
@@ -87,7 +89,7 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
   // en memoria dos filas creadas en el mismo milisegundo tendrian el mismo
   // `createdAt`. El orden de insercion desempata de forma determinista, que es
   // lo que en Postgres hace el `created_at` con resolucion de microsegundos.
-  const rows: DirectoryUser[] = [];
+  const rows: (DirectoryUser & { lastPosition?: LastPosition })[] = [];
   const audit: AuditEntry[] = [];
   let counter = 0;
 
@@ -101,11 +103,12 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
   }
 
   /** Copia defensiva: quien recibe la fila no debe poder mutar el almacen. */
-  function snapshot(row: DirectoryUser): DirectoryUser {
-    return { ...row };
+  function snapshot(row: DirectoryUser & { lastPosition?: LastPosition }): DirectoryUser {
+    const { lastPosition: _position, ...user } = row;
+    return user;
   }
 
-  function byUid(uid: string): DirectoryUser | undefined {
+  function byUid(uid: string): (DirectoryUser & { lastPosition?: LastPosition }) | undefined {
     return rows.find((row) => row.uid === uid);
   }
 
@@ -140,6 +143,17 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
   }
 
   return {
+    async getLastPosition(uid) {
+      const position = byUid(uid)?.lastPosition;
+      return position ? { ...position } : null;
+    },
+
+    async saveLastPosition(uid, position) {
+      assertLastPosition(position);
+      const row = byUid(uid);
+      if (row) row.lastPosition = { ...position };
+    },
+
     async resolveOnLogin(identity) {
       // Sin email no hay clave humana con la que casar una invitacion ni el
       // email de bootstrap. Ver la cabecera de `pgDirectory.ts`.
@@ -201,7 +215,7 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
       for (const row of rows) {
         if (row.invitedBy === null) continue;
         const inviter = byId(row.invitedBy);
-        invitations.push({ ...row, invitedByEmail: inviter?.email ?? null });
+        invitations.push({ ...snapshot(row), invitedByEmail: inviter?.email ?? null });
       }
       // Mas recientes primero, del ultimo insertado al primero.
       return invitations.reverse();

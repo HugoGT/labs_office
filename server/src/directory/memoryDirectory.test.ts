@@ -21,6 +21,40 @@ import { InvalidUserError } from './userRules.ts';
 const HUGO = { uid: 'uid-hugo', email: 'Hugo@Example.com', name: 'Hugo' };
 const ANA = { uid: 'uid-ana', email: 'ana@example.com', name: 'Ana' };
 
+describe('memoryDirectory: last position (#148)', () => {
+  it('invitation reads do not expose internal position storage', async () => {
+    const guest = provisioned({ role: 'guest', invitedBy: 'inviter' });
+    const directory = createMemoryDirectory({ seed: [guest] });
+    await directory.saveLastPosition(ANA.uid, { x: 300, y: 400 });
+    expect(await directory.listInvitations()).toEqual([{ ...guest, invitedByEmail: null }]);
+  });
+
+  it('stores a defensive copy by uid without changing identity or access', async () => {
+    const directory = createMemoryDirectory({ seed: [provisioned()] });
+    expect(await directory.getLastPosition(ANA.uid)).toBeNull();
+    const position = { x: 300.5, y: 400.25 };
+    await directory.saveLastPosition(ANA.uid, position);
+    position.x = 999;
+    const read = await directory.getLastPosition(ANA.uid);
+    expect(read).toEqual({ x: 300.5, y: 400.25 });
+    read!.x = 888;
+    expect(await directory.getLastPosition(ANA.uid)).toEqual({ x: 300.5, y: 400.25 });
+    expect(await directory.getLastPosition('unknown')).toBeNull();
+    await directory.saveLastPosition('unknown', position);
+    expect(await directory.listUsers()).toHaveLength(1);
+    expect(await directory.findByUid(ANA.uid)).toEqual(provisioned());
+  });
+
+  it.each([{ x: NaN, y: 400 }, { x: 300, y: Infinity }, { x: -1, y: 400 }, { x: 4033, y: 400 }, { x: 300, y: 2881 }])(
+    'invalid coordinates %j never overwrite a good position', async (invalid) => {
+      const directory = createMemoryDirectory({ seed: [provisioned()] });
+      await directory.saveLastPosition(ANA.uid, { x: 300, y: 400 });
+      await expect(directory.saveLastPosition(ANA.uid, invalid)).rejects.toThrow('Invalid last position');
+      expect(await directory.getLastPosition(ANA.uid)).toEqual({ x: 300, y: 400 });
+    },
+  );
+});
+
 /** Fila ya dada de alta, como la dejaria el panel (`createUser`/`createInvitation`). */
 function provisioned(overrides: Partial<DirectoryUser> = {}): DirectoryUser {
   return {

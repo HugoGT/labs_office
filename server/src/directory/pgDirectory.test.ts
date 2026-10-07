@@ -94,6 +94,39 @@ const USER_ROW = {
 
 const ANA = { uid: 'uid-ana', email: 'ana@example.com', name: 'Ana' };
 
+describe('pgDirectory: last position (#148)', () => {
+  it('reads nullable coordinates by uid, not by a client-supplied directory id', async () => {
+    const pool = fakePool(() => ({ rows: [{ last_x: 300.5, last_y: 400.25 }], rowCount: 1 }));
+    expect(await directoryOver(pool).getLastPosition(ANA.uid)).toEqual({ x: 300.5, y: 400.25 });
+    expect(squash(pool.queries[0].text)).toBe('select last_x, last_y from users where uid = $1');
+    expect(pool.queries[0].values).toEqual([ANA.uid]);
+  });
+
+  it.each([{ rows: [] }, { rows: [{ last_x: null, last_y: null }] }, { rows: [{ last_x: 300, last_y: null }] }])('missing or partial positions are absent (%j)', async ({ rows }) => {
+    expect(await directoryOver(fakePool(() => ({ rows, rowCount: rows.length }))).getLastPosition(ANA.uid)).toBeNull();
+  });
+
+  it('writes both coordinates in one parameterized UPDATE without touching access', async () => {
+    const pool = fakePool();
+    await directoryOver(pool).saveLastPosition(ANA.uid, { x: 300.5, y: 400.25 });
+    expect(pool.queries).toHaveLength(1);
+    expect(squash(pool.queries[0].text)).toBe('update users set last_x = $2, last_y = $3 where uid = $1');
+    expect(pool.queries[0].values).toEqual([ANA.uid, 300.5, 400.25]);
+  });
+
+  it.each([{ x: NaN, y: 400 }, { x: 300, y: Infinity }, { x: -1, y: 400 }, { x: 4033, y: 400 }, { x: 300, y: 2881 }])('rejects invalid coordinates %j before SQL', async (invalid) => {
+    const pool = fakePool();
+    await expect(directoryOver(pool).saveLastPosition(ANA.uid, invalid)).rejects.toThrow('Invalid last position');
+    expect(pool.queries).toHaveLength(0);
+  });
+
+  it('propagates read and write failures for the room to degrade safely', async () => {
+    const directory = directoryOver(fakePool(() => new Error('database unavailable')));
+    await expect(directory.getLastPosition(ANA.uid)).rejects.toThrow('database unavailable');
+    await expect(directory.saveLastPosition(ANA.uid, { x: 300, y: 400 })).rejects.toThrow('database unavailable');
+  });
+});
+
 function directoryOver(pool: DirectoryPool, bootstrapSuperadminEmail: string | null = null) {
   return createPgDirectory(pool, { bootstrapSuperadminEmail });
 }
