@@ -11,7 +11,7 @@ import {
   ZONE_LABELS,
 } from './mapData';
 import { TERRAIN_LAYER_COUNT } from './artContract';
-import { BASE_LAYOUT, withBlock } from './officeLayout';
+import { BASE_LAYOUT, terrainSnapshot, withBlock, type OfficeLayout } from './officeLayout';
 import {
   DESK_ZONE_DEPTH,
   MINIMAP_MARKER_DEPTH,
@@ -38,6 +38,7 @@ import {
   type OfficeRoomHandlers,
 } from './officeRoomClient';
 import { OFFICE_SCENE_KEY, OfficeScene, type OfficeSceneOptions } from './OfficeScene';
+import { ARRIVE_EPSILON_PX, beginAutoWalk, type AutoWalkState } from './autoWalk';
 
 /**
  * `OfficeScene` orquesta fisica, camaras, tweens y timers desde el slice 7 en
@@ -48,8 +49,248 @@ import { OFFICE_SCENE_KEY, OfficeScene, type OfficeSceneOptions } from './Office
 const games: Phaser.Game[] = [];
 const hosts: HTMLElement[] = [];
 
+// Deterministic render frames through the real SceneManager and Arcade world,
+// not a reducer simulation or a mocked body. An empty arena isolates movement.
+async function movementArena() {
+  const { scene, bridge } = await bootOfficeScene(createOfficeBridge(), {
+    endpoint: null, artManifestUrl: null, artUploadsUrl: null,
+  });
+  const player = findPlayer(scene);
+  const body = player.body as Phaser.Physics.Arcade.Body;
+  scene.game.loop.stop();
+  for (const collider of scene.physics.world.colliders.update()) collider.active = false;
+  for (const staticBody of scene.physics.world.staticBodies.getArray()) staticBody.gameObject.destroy();
+  scene.physics.world.postUpdate();
+  scene.physics.world.setBounds(0, 0, 100000, 100000);
+  body.reset(300, 300);
+  const movement = scene as unknown as {
+    walkingMs: number;
+    autoWalk?: AutoWalkState;
+    cursors: Phaser.Types.Input.Keyboard.CursorKeys;
+    buildTerrainColliders(grid: ReturnType<typeof buildTerrainGrid>): void;
+    buildPieceColliders(): void;
+    collisionRects: { x: number; y: number; w: number; h: number }[];
+    grid: ReturnType<typeof buildTerrainGrid>;
+  };
+  movement.grid.solid = Array.from({ length: 100 }, (_, y) => Array.from({ length: 3200 }, () => y === 0));
+  let time = scene.time.now;
+  const frame = (delta = 20, gap = delta) => { time += gap; scene.game.step(time, delta); };
+  const walk = (milliseconds: number) => {
+    for (let elapsed = 0; elapsed < milliseconds; elapsed += 20) frame();
+  };
+  const click = (x: number, y: number, distance = 0, over: Phaser.GameObjects.GameObject[] = []) => {
+    const pointer = { button: 0, camera: scene.cameras.main, x: 10, y: 10,
+      worldX: x, worldY: y, getDistance: () => distance };
+    scene.input.emit('pointerdown', pointer, over);
+    scene.input.emit('pointerup', pointer, over);
+  };
+  return { scene, bridge, player, body, movement, frame, walk, click };
+}
+
+describe('walking speed ramp in real Phaser frames (#145)', () => {
+  it('reproduces unbounded Arcade tunneling and prevents it through the production frame path', async () => {
+    const { scene, body, movement, frame } = await movementArena();
+    movement.collisionRects = [{ x: 0, y: 350, w: 10000, h: 1 }];
+    movement.buildPieceColliders();
+    body.setVelocity(0, 1150);
+    scene.physics.world.update(0, 100);
+    scene.physics.world.postUpdate();
+    expect(body.y).toBeGreaterThan(351);
+    body.reset(300, 300);
+    movement.walkingMs = 8000;
+    movement.cursors.down.isDown = true;
+    frame(100);
+    expect(body.bottom).toBeLessThanOrEqual(350.001);
+  });
+
+  it.each([[1, 1], [-1, -1], [1, -1], [-1, 1]])('resolves a one-pixel diagonal corner between samples (%i, %i)', async (sx, sy) => {
+    const { player, body, movement, frame } = await movementArena();
+    // The continuous path overlaps this corner for only 1px of travel, less
+    // than a bounded Arcade step. Discrete sampling alone is not sufficient.
+    const rect = { x: sx > 0 ? 350 : 649, y: sy > 0 ? 375 : 624, w: 1, h: 1 };
+    movement.collisionRects = [rect];
+    movement.buildPieceColliders();
+    const start = { x: sx > 0 ? 300 : 732, y: sy > 0 ? 299.8 : 718.2 };
+    body.reset(start.x, start.y);
+    movement.walkingMs = 8000;
+    movement.cursors.right.isDown = sx > 0;
+    movement.cursors.left.isDown = sx < 0;
+    movement.cursors.down.isDown = sy > 0;
+    movement.cursors.up.isDown = sy < 0;
+    frame(100);
+    const uninterrupted = 1150 * 0.1 / Math.SQRT2;
+    expect(Math.min((player.x - start.x) * sx, (player.y - start.y) * sy)).toBeLessThan(uninterrupted - 0.01);
+    expect(body.right > rect.x && body.x < rect.x + 1 && body.bottom > rect.y && body.y < rect.y + 1).toBe(false);
+  });
+  it.each(['keyboard', 'map click'] as const)('ramps %s through every threshold and caps at 5x', async (input) => {
+    const { body, movement, frame, walk, click } = await movementArena();
+    if (input === 'keyboard') movement.cursors.right.isDown = true;
+    else click(99000, 300);
+    for (let multiplier = 1; multiplier <= 5; multiplier++) {
+      frame();
+      expect(body.velocity.length(), JSON.stringify(movement.autoWalk)).toBeCloseTo(230 * multiplier, 5);
+      walk(2000);
+    }
+    expect(body.velocity.length()).toBeCloseTo(1150, 5);
+  });
+
+  it('preserves the clock on direction changes and keyboard takeover, but resets on release and arrival', async () => {
+    const { player, body, movement, frame, walk, click } = await movementArena();
+    movement.cursors.right.isDown = true;
+    walk(2100);
+    movement.cursors.right.isDown = false;
+    movement.cursors.down.isDown = true;
+    frame();
+    expect(body.velocity.y).toBeCloseTo(460);
+    movement.cursors.down.isDown = false;
+    click(player.x + 5000, player.y);
+    frame();
+    expect(body.velocity.x).toBeCloseTo(460);
+    movement.cursors.left.isDown = true;
+    frame();
+    expect(body.velocity.x).toBeCloseTo(-460);
+    movement.cursors.left.isDown = false;
+    frame();
+    expect(movement.walkingMs).toBe(0);
+    movement.walkingMs = 8000;
+    const goalX = player.x + 3;
+    click(goalX, player.y);
+    frame(100);
+    expect(Math.abs(player.x - goalX)).toBeLessThanOrEqual(ARRIVE_EPSILON_PX);
+    expect(movement.autoWalk).toBeUndefined();
+    expect(body.velocity.length()).toBe(0);
+    expect(movement.walkingMs).toBe(0);
+  });
+
+  it('does not credit blocked intent or sprint after a long or hidden frame', async () => {
+    const { scene, player, body, movement, frame, walk } = await movementArena();
+    movement.collisionRects = [{ x: 310, y: 0, w: 1, h: 10000 }];
+    movement.buildPieceColliders();
+    movement.cursors.right.isDown = true;
+    walk(9000);
+    expect(body.right).toBeLessThanOrEqual(310.001);
+    expect(movement.walkingMs).toBe(0);
+    movement.cursors.right.isDown = false;
+    movement.cursors.down.isDown = true;
+    movement.walkingMs = 8000;
+    const y = player.y;
+    frame(10000);
+    expect(player.y).toBe(y);
+    expect(movement.walkingMs).toBe(0);
+    frame();
+    expect(body.velocity.y).toBe(230);
+    movement.walkingMs = 8000;
+    const resumedY = player.y;
+    frame(20, 10000);
+    expect(player.y).toBe(resumedY);
+    expect(movement.walkingMs).toBe(0);
+    movement.walkingMs = 8000;
+    scene.game.events.emit(Phaser.Core.Events.HIDDEN);
+    scene.game.events.emit(Phaser.Core.Events.VISIBLE);
+    frame();
+    expect(body.velocity.y).toBe(230);
+  });
+
+  it('resets on sitting and on every layout editor mode', async () => {
+    const { scene, bridge, body, movement, frame } = await movementArena();
+    const seat = BASE_MAP_SEATS[0]!;
+    body.reset((seat.tx + 0.5) * TILE, (seat.ty + 0.5) * TILE - 18);
+    movement.walkingMs = 8000;
+    bridge.emitCommand('toggleSeat', undefined);
+    frame();
+    expect(movement.walkingMs).toBe(0);
+    expect(body.velocity.length()).toBe(0);
+    bridge.emitCommand('toggleSeat', undefined);
+    const openers = [
+      () => bridge.emitCommand('layoutedit', { pickable: [], selectedId: null, placing: null }),
+      () => bridge.emitCommand('terrainedit', { selected: null, preview: null }),
+      () => bridge.emitCommand('collisionedit', { pieceId: null, draft: [], selectedRect: null, snap: 1 }),
+    ];
+    for (const open of openers) {
+      movement.walkingMs = 8000;
+      movement.cursors.right.isDown = true;
+      movement.autoWalk = beginAutoWalk({ x: 5000, y: 5000 }, body);
+      open();
+      expect(movement.walkingMs).toBe(0);
+      frame();
+      expect(movement.walkingMs).toBe(0);
+      expect(body.velocity.length()).toBe(0);
+      expect(movement.autoWalk).toBeUndefined();
+      bridge.emitCommand('layoutedit', null);
+      bridge.emitCommand('terrainedit', null);
+      bridge.emitCommand('collisionedit', null);
+    }
+    expect(scene.sys.isActive()).toBe(true);
+  });
+
+  it('does not turn drags, item clicks, blocked goals or minimap clicks into walking', async () => {
+    const { scene, movement, click } = await movementArena();
+    click(1000, 300, 20);
+    expect(movement.autoWalk).toBeUndefined();
+    click(1000, 300, 0, [scene.add.rectangle(0, 0, 1, 1)]);
+    expect(movement.autoWalk).toBeUndefined();
+    click(16, 16);
+    expect(movement.autoWalk).toBeUndefined();
+    const pointer = { button: 0, camera: scene.cameras.cameras[1], x: 10, y: 10, getDistance: () => 0 };
+    scene.input.emit('pointerdown', pointer, []);
+    scene.input.emit('pointerup', pointer, []);
+    expect(movement.autoWalk).toBeUndefined();
+  });
+
+  it.each([20, 100, 250])('cannot tunnel at 5x with %i ms frames, cardinal or diagonal', async (delta) => {
+    const { body, movement, frame } = await movementArena();
+    for (const input of ['keyboard', 'auto-walk'] as const) {
+      for (const obstacle of ['wall', 'water', 'piece'] as const) {
+        for (const horizontal of [true, false]) {
+          for (const diagonal of [false, true]) {
+            body.reset(300, 300);
+            body.setVelocity(0, 0);
+            movement.cursors.right.isDown = input === 'keyboard' && (horizontal || diagonal);
+            movement.cursors.down.isDown = input === 'keyboard' && (!horizontal || diagonal);
+            movement.autoWalk = input === 'auto-walk' ? beginAutoWalk({
+              x: horizontal || diagonal ? 5000 : 300, y: !horizontal || diagonal ? 5000 : 300,
+            }, { x: 300, y: 300 }) : undefined;
+            movement.collisionRects = [];
+            movement.buildPieceColliders();
+            const emptyGrid = buildTerrainGrid();
+            emptyGrid.terrainSolid = [[false]];
+            movement.buildTerrainColliders(emptyGrid);
+            if (obstacle === 'piece') {
+              movement.collisionRects = [horizontal
+                ? { x: 350, y: 0, w: 1, h: 10000 }
+                : { x: 0, y: 350, w: 10000, h: 1 }];
+              movement.buildPieceColliders();
+            } else {
+              const blocked = (index: number) => horizontal
+                ? index % BASE_LAYOUT.width === 11 : Math.floor(index / BASE_LAYOUT.width) === 11;
+              const tiles = BASE_LAYOUT.width * BASE_LAYOUT.height;
+              const layout: OfficeLayout = {
+                ...BASE_LAYOUT, props: [], hedges: Array(tiles).fill(null),
+                ground: Array.from({ length: tiles }, (_, index) => obstacle === 'water' && blocked(index) ? 'water' : 'grass'),
+                walls: Array.from({ length: tiles }, (_, index) => obstacle === 'wall' && blocked(index)
+                  ? BASE_LAYOUT.walls.find((piece) => piece !== null)! : null),
+              };
+              const grid = buildTerrainGrid(terrainSnapshot(layout), layout, []);
+              movement.buildTerrainColliders(grid);
+            }
+            movement.walkingMs = 8000;
+            frame(20);
+            expect(body.velocity.length()).toBeCloseTo(1150, 5);
+            for (let i = 0; i < 6; i++) frame(delta);
+            expect(horizontal ? body.right : body.bottom).toBeLessThanOrEqual(obstacle === 'piece' ? 350.001 : 352.001);
+          }
+        }
+      }
+    }
+  });
+});
+
 afterEach(() => {
-  for (const game of games.splice(0)) game.destroy(true);
+  for (const game of games.splice(0)) {
+    game.destroy(true);
+    // destroy() is deferred to the next frame; deterministic arenas stop RAF.
+    if (!game.loop.running) game.step(0, 0);
+  }
   for (const host of hosts.splice(0)) host.remove();
 });
 
@@ -93,6 +334,9 @@ async function bootOfficeScene(
     parent: host,
     width: 320,
     height: 240,
+    // The scene has no game sounds; visibility regressions must not enqueue
+    // suspend/resume promises on AudioContexts that teardown then closes.
+    audio: { noAudio: true },
     physics: { default: 'arcade' },
     scene: [new OfficeScene(bridge, options)],
   });

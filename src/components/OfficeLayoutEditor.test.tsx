@@ -5,10 +5,65 @@ import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { AdminSpace, SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import type { LayoutEditCommand } from '../game/layoutEditor';
 import { createOfficeBridge } from '../game/officeBridge';
-import OfficeLayoutEditor from './OfficeLayoutEditor';
+import OfficeLayoutEditor, { type OfficeLayoutEditorProps } from './OfficeLayoutEditor';
 
 const MESA: AdminDesk = { id: 'id-mesa', label: 'Mesa 4', x: 10, y: 10, w: 3, h: 3, occupant: null };
 const SALA: AdminSpace = { id: 'id-sala', name: 'Sala grande', x: 0, y: 0, w: 4, h: 4, capacity: null, kind: 'room' };
+
+describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
+  it.each(['desk', 'room', 'terrain', 'collision'] as const)('unmounting %s clears editing and its bridge mode', async (section) => {
+    const bridge = createOfficeBridge();
+    const command = section === 'terrain' ? 'terrainedit' : section === 'collision' ? 'collisionedit' : 'layoutedit';
+    const commands: unknown[] = [];
+    bridge.onCommand(command, (value) => commands.push(value));
+    const onEditingChange = vi.fn();
+    const props: OfficeLayoutEditorProps = {
+      bridge, desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn(),
+      terrain: { setBlock: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() },
+      section, onEditingChange,
+    };
+    const { unmount } = render(<OfficeLayoutEditor {...props} />);
+    await screen.findByRole('button', { name: 'Salir' });
+    expect(onEditingChange).toHaveBeenLastCalledWith(true);
+    expect(commands.at(-1)).not.toBeNull();
+    unmount();
+    expect(onEditingChange).toHaveBeenLastCalledWith(false);
+    expect(commands.at(-1)).toBeNull();
+  });
+
+  it('changing the selected section closes the old overlay before opening the new one', async () => {
+    const bridge = createOfficeBridge();
+    const commands: unknown[] = [];
+    bridge.onCommand('layoutedit', (value) => commands.push(value));
+    const props = { bridge, desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn(), onEditingChange: vi.fn() };
+    const { rerender } = render(<OfficeLayoutEditor {...props} section="desk" />);
+    await screen.findByText('Mesa 4');
+    commands.length = 0;
+    rerender(<OfficeLayoutEditor {...props} section="room" />);
+    await screen.findByText('Sala grande');
+    expect(commands[0]).toBeNull();
+    expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }] });
+    expect(props.onEditingChange).toHaveBeenLastCalledWith(true);
+    expect(screen.queryByText('Mesa 4')).not.toBeInTheDocument();
+  });
+
+  it.each(['terrain', 'collision'] as const)('removing the selected %s port unmounts its editing owner', async (section) => {
+    const bridge = createOfficeBridge();
+    const command = section === 'terrain' ? 'terrainedit' : 'collisionedit';
+    const emit = vi.fn();
+    bridge.onCommand(command, emit);
+    const props = {
+      bridge, desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn(),
+      terrain: { setBlock: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() }, onEditingChange: vi.fn(), section,
+    };
+    const { rerender } = render(<OfficeLayoutEditor {...props} />);
+    await screen.findByRole('button', { name: 'Salir' });
+    expect(props.onEditingChange).toHaveBeenLastCalledWith(true);
+    rerender(<OfficeLayoutEditor {...props} {...{ [section === 'terrain' ? 'terrain' : 'collisions']: null }} />);
+    expect(props.onEditingChange).toHaveBeenLastCalledWith(false);
+    expect(emit).toHaveBeenLastCalledWith(null);
+  });
+});
 
 function fakeDesks(): DeskAdminPort {
   return {
