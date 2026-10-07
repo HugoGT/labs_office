@@ -1801,6 +1801,21 @@ describe('OfficeScene: config de espacios servida (#7, slice 3)', () => {
     await vi.waitFor(() => expect(rooms.at(-1)?.spaceId).toBe(SERVIDO.id), LOOP_WAIT);
   });
 
+  it('adopts a config that arrived before the scene finished loading (#144)', async () => {
+    // React emits the served config as soon as `/spaces` answers, which can
+    // be before `preload()` is done with the art pack. Lost, the scene kept the
+    // built-in rooms for the whole session and every space token was refused.
+    const bridge = createOfficeBridge();
+    bridge.emitCommand('spacesconfig', { spaces: [SERVIDO], version: 'version-servida' });
+    const rooms: { spaceId: string | null; name: string | null }[] = [];
+    bridge.on('room', (payload) => rooms.push(payload));
+
+    const { scene } = await bootOfficeScene(bridge);
+
+    await advanceGameClock(scene, 600);
+    await vi.waitFor(() => expect(rooms.at(-1)?.spaceId).toBe(SERVIDO.id), LOOP_WAIT);
+  });
+
   it('anuncia la version nueva a los pares con sendSpacesVersion', async () => {
     // Es la mitad que hace util al predicado mutuo: un cliente que cambia de
     // config tiene que DECIRLO, o el resto seguira creyendo que coinciden.
