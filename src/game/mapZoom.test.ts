@@ -3,6 +3,7 @@ import {
   INITIAL_WHEEL_STATE,
   WHEEL_COOLDOWN_MS,
   WHEEL_IDLE_MS,
+  WHEEL_NOTCH_MIN_PX,
   WHEEL_STEP_PX,
   ZOOM_DEFAULT,
   ZOOM_MAX,
@@ -131,10 +132,26 @@ describe('accumulateWheel', () => {
     expect(wheel(INITIAL_WHEEL_STATE, { deltaY, deltaMode, now: 1000 }).step).toBe(-1);
   });
 
-  it('small trackpad deltas accumulate; exactly the threshold steps, one pixel under does not', () => {
+  it('a notch under the classic 100 px (Chrome on Linux sends 53) is one step on its own', () => {
+    expect(stepsOf([-53])).toEqual([1]);
+    expect(stepsOf([53])).toEqual([-1]);
+  });
+
+  it('two slow notches, farther apart than the idle window, are two steps', () => {
+    const first = wheel(INITIAL_WHEEL_STATE, { deltaY: -53, now: 1000 });
+    const second = wheel(first.state, { deltaY: -53, now: 1400 });
+
+    expect([first.step, second.step]).toEqual([1, 1]);
+  });
+
+  it('a single event steps from the notch threshold, one pixel under it does not', () => {
+    expect(stepsOf([WHEEL_NOTCH_MIN_PX - 1])).toEqual([0]);
+    expect(stepsOf([WHEEL_NOTCH_MIN_PX])).toEqual([-1]);
+  });
+
+  it('small trackpad deltas accumulate until the step threshold', () => {
+    expect(stepsOf(Array.from({ length: 10 }, () => -10))).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
     expect(stepsOf([-30, -30, -30, -30])).toEqual([0, 0, 0, 1]);
-    expect(stepsOf([WHEEL_STEP_PX - 1])).toEqual([0]);
-    expect(stepsOf([WHEEL_STEP_PX])).toEqual([-1]);
   });
 
   it('ctrl+wheel (pinch) is amplified: small deltas step with ctrl, not without', () => {
@@ -151,23 +168,21 @@ describe('accumulateWheel', () => {
   });
 
   it('a direction flip discards what was accumulated the other way', () => {
-    // Without the rule, half a notch down then a full notch up sums to -40: no step.
-    const half = wheel(INITIAL_WHEEL_STATE, { deltaY: 60, now: 1000 });
-    const flipped = wheel(half.state, { deltaY: -WHEEL_STEP_PX, now: 1016 });
-
-    expect([half.step, flipped.step]).toEqual([0, 1]);
+    // Without the rule, 60 down then 120 up sums to -60: no step.
+    expect(stepsOf([30, 30, -30, -30, -30, -30])).toEqual([0, 0, 0, 0, 0, 1]);
   });
 
   it('a pause longer than the idle window discards what was accumulated', () => {
-    const first = wheel(INITIAL_WHEEL_STATE, { deltaY: 60, now: 1000 });
-    const soon = wheel(first.state, { deltaY: 60, now: 1000 + WHEEL_IDLE_MS });
-    const late = wheel(first.state, { deltaY: 60, now: 1000 + WHEEL_IDLE_MS + 1 });
+    const first = wheel(INITIAL_WHEEL_STATE, { deltaY: 35, now: 1000 });
+    const second = wheel(first.state, { deltaY: 35, now: 1016 });
+    const soon = wheel(second.state, { deltaY: 35, now: 1016 + WHEEL_IDLE_MS });
+    const late = wheel(second.state, { deltaY: 35, now: 1016 + WHEEL_IDLE_MS + 1 });
 
     expect([soon.step, late.step]).toEqual([-1, 0]);
   });
 
   it('a wheel with no vertical delta changes nothing, and the given state is never mutated', () => {
-    const half = wheel(INITIAL_WHEEL_STATE, { deltaY: 60, now: 1000 });
+    const half = wheel(INITIAL_WHEEL_STATE, { deltaY: 30, now: 1000 });
     const snapshot = { ...half.state };
     const sideways = wheel(half.state, { deltaY: 0, now: 1100 });
 

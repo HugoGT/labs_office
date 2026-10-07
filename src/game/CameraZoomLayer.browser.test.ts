@@ -161,6 +161,14 @@ describe('CameraZoomLayer: wheel', () => {
     expect(views.at(-1)).toEqual(zoomView(1.5));
   });
 
+  it('one notch of a wheel that reports under 100 px (Chrome on Linux, 53) is one step', async () => {
+    const { scene, views } = await fixture();
+
+    wheel(scene, -53);
+
+    expect(views.at(-1)).toEqual(zoomView(1.5));
+  });
+
   it('normalizes line-mode deltas: one Firefox notch is one step', async () => {
     const { scene, views } = await fixture();
 

@@ -23,7 +23,13 @@ export const ZOOM_SMOOTHING = 0.2;
 /** Under this log distance to the target the zoom lands exactly on it. */
 export const ZOOM_ARRIVE_LOG = 0.002;
 
-/** Normalized wheel travel that makes one step (one classic mouse notch). */
+/**
+ * A single plain-wheel event this large is a mouse notch and steps on its own:
+ * notches differ per browser and OS (Chrome on Linux sends about 53 px, not
+ * 100), so one notch is one step whatever the device reports.
+ */
+export const WHEEL_NOTCH_MIN_PX = 40;
+/** Accumulated travel of smaller deltas (trackpad, pinch) that makes one step. */
 export const WHEEL_STEP_PX = 100;
 /**
  * Pixels per line and per page for the wheel delta modes that are not pixels.
@@ -129,8 +135,8 @@ const ignored = (state: WheelState): { state: WheelState; step: 0 } => ({ state,
 
 /**
  * Turns wheel events into zoom steps (`1` in, `-1` out, `0` nothing yet): the
- * delta is normalized across delta modes and accumulated, so one notch gives
- * at most one step whatever the device reports.
+ * delta is normalized across delta modes; a plain notch steps at once, smaller
+ * deltas accumulate, and the cooldown keeps a fast spin to one step at a time.
  */
 export function accumulateWheel(
   state: WheelState,
@@ -141,12 +147,13 @@ export function accumulateWheel(
 
   const perUnit = deltaMode === 1 ? WHEEL_LINE_PX : deltaMode === 2 ? WHEEL_PAGE_PX : 1;
   const travel = deltaY * perUnit * (ctrlKey ? PINCH_GAIN : 1);
+  const notch = !ctrlKey && Math.abs(travel) >= WHEEL_NOTCH_MIN_PX;
 
   const idle = now - state.lastAt > WHEEL_IDLE_MS;
   const flipped = Math.sign(state.sum) * Math.sign(travel) < 0;
   const sum = (idle || flipped ? 0 : state.sum) + travel;
 
-  if (Math.abs(sum) >= WHEEL_STEP_PX) {
+  if (notch || Math.abs(sum) >= WHEEL_STEP_PX) {
     return {
       state: { sum: 0, lastAt: now, cooldownUntil: now + WHEEL_COOLDOWN_MS },
       step: sum < 0 ? 1 : -1,
