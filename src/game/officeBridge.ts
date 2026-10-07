@@ -23,6 +23,8 @@ import type { CollisionRect } from './pieceCollisions';
 import type { ActiveRecordingSnapshot, OfficeConnectionState } from './officeRoomClient';
 
 export interface OfficeEventMap {
+  /** Current entrance art has rendered, or cannot be loaded. */
+  entry: { state: 'ready' | 'failed' };
   /**
    * Espacio actual del jugador local (#7, D2). `spaceId` es la clave de
    * pertenencia estable; `name` es lo unico que pinta el HUD -- por eso

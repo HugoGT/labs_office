@@ -114,13 +114,14 @@ export function makeCharacter(
   ty: number,
   texKey: string,
   status: PresenceStatus,
+  sheets: CharacterSheets | null = null,
 ): CharacterContainer {
   const px = tx * TILE + 16;
   const py = ty * TILE + 16;
 
   // The ring marks the feet, whatever draws the body.
   const ring = scene.add.ellipse(0, AVATAR_FEET_OFFSET_Y, 34, 14).setStrokeStyle(2.5, 0x22c55e).setVisible(false);
-  const spr = scene.add.sprite(0, 0, avatarTextureKey(texKey, DEFAULT_FACING)).setScale(PROCEDURAL_SCALE);
+  const spr = scene.add.sprite(0, 0, sheets?.walk ?? avatarTextureKey(texKey, DEFAULT_FACING));
 
   const label = scene.add.text(0, 0, name, LABEL_STYLE).setOrigin(0, 0.5);
   const pillW = label.width + 24;
@@ -152,9 +153,10 @@ export function makeCharacter(
   container.facing = DEFAULT_FACING;
   container.statusDot = dot;
   container.status = status;
-  container.sheets = null;
+  container.sheets = sheets;
   container.animation = initialAnimation('S');
   container.seatFacing = null;
+  renderCharacter(container);
   return container;
 }
 
@@ -256,7 +258,7 @@ export function enableCharacterClicks(character: CharacterContainer): void {
  * sesion verificada, varias capas mas arriba. Cableado, la pildora del avatar
  * local mostraba el nombre de una persona concreta a todo el que entrase.
  */
-export function spawnPlayer(scene: Phaser.Scene, name: string): CharacterContainer {
+export function spawnPlayer(scene: Phaser.Scene, name: string, sheets: CharacterSheets | null = null): CharacterContainer {
   const player = makeCharacter(
     scene,
     name,
@@ -264,6 +266,7 @@ export function spawnPlayer(scene: Phaser.Scene, name: string): CharacterContain
     PLAYER_SPAWN_TY,
     PLAYER_TEXTURE,
     DEFAULT_STATUS,
+    sheets,
   );
   scene.physics.add.existing(player);
   const body = player.body as Phaser.Physics.Arcade.Body;

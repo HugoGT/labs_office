@@ -10,6 +10,7 @@ import { createLastDisplayNameStore } from './auth/lastDisplayNameStore';
 import { withSessionExpiry } from './auth/sessionExpiry';
 import { AuthGate } from './components/AuthGate';
 import { LeftOfficeNotice, type LeftOfficeReason } from './components/LeftOfficeNotice';
+import { OfficeEntry } from './components/OfficeEntry';
 import { ART_PACK_MANIFEST_URL, artUploadsManifestUrl } from './game/artPack';
 import { resolveOfficeEndpoint } from './game/officeEndpoint';
 import type { AccessDeniedReason } from './game/officeProtocol';
@@ -172,22 +173,25 @@ export default function App() {
         onDismissNotice={dismissAccessDenied}
       >
         {(session) => (
-          // Nada mientras llega el chunk, por el mismo motivo que `AuthGate`
-          // no ensena nada mientras no sabe si hay sesion: un cargador que
-          // parpadea unos milisegundos molesta mas de lo que informa.
+          // The dashboard keeps its quiet lazy load; office entry owns its background status.
           <Suspense fallback={null}>
             {route === 'dashboard' ? (
               <DashboardRoute session={session} fetchImpl={sessionFetch} />
             ) : leftOffice ? (
               <LeftOfficeNotice reason={leftOffice} onReenter={() => setLeftOffice(null)} />
             ) : (
-              <OfficeShell
-                session={session}
-                onLeaveOffice={() => setLeftOffice('left')}
-                onSessionReplaced={() => setLeftOffice('replaced')}
-                onAccessRevoked={() => setLeftOffice('revoked')}
-                onAccessDenied={handleAccessDenied}
-              />
+              <OfficeEntry>
+                {(onEntryState) => (
+                  <OfficeShell
+                    session={session}
+                    onEntryState={onEntryState}
+                    onLeaveOffice={() => setLeftOffice('left')}
+                    onSessionReplaced={() => setLeftOffice('replaced')}
+                    onAccessRevoked={() => setLeftOffice('revoked')}
+                    onAccessDenied={handleAccessDenied}
+                  />
+                )}
+              </OfficeEntry>
             )}
           </Suspense>
         )}

@@ -56,6 +56,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 /**
@@ -73,9 +74,28 @@ async function waitForOffice(container: HTMLElement): Promise<void> {
     expect(container.querySelector('#office-shell')).not.toBeNull();
     expect(createGameMock).toHaveBeenCalled();
   });
+  act(() => createGameMock.mock.calls.at(-1)![1].emit('entry', { state: 'ready' }));
 }
 
 describe('App', () => {
+  it.each([false, true])('keeps the office hidden until art readiness, outside any login card (restored: %s)', async (restored) => {
+    const auth = fakePort();
+    if (restored) {
+      vi.stubEnv('VITE_FIREBASE_API_KEY', 'public-key');
+      vi.stubEnv('VITE_FIREBASE_PROJECT_ID', 'office');
+      createAdapterMock.mockReturnValue(auth.port);
+    }
+    const { container } = render(<App />);
+    if (restored) auth.emit({ uid: 'ana', email: 'ana@example.com', displayName: 'Ana' });
+    await waitFor(() => expect(createGameMock).toHaveBeenCalled());
+    expect(screen.getByRole('status')).toHaveTextContent('Entrando a la oficina…');
+    expect(container.querySelector('form')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Salir' })).toBeNull();
+    act(() => createGameMock.mock.calls[0]![1].emit('entry', { state: 'ready' }));
+    expect(screen.queryByText('Entrando a la oficina…')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Salir' })).toBeVisible();
+  });
+
   it('monta un unico lienzo de juego', async () => {
     const { container } = render(<App />);
 
@@ -325,6 +345,25 @@ describe('App: access denied at join (#129)', () => {
     vi.unstubAllEnvs();
   });
 
+  it('a denial during final loading returns to login without ever revealing the office', async () => {
+    vi.stubEnv('VITE_FIREBASE_API_KEY', 'public-key');
+    vi.stubEnv('VITE_FIREBASE_PROJECT_ID', 'office');
+    const auth = fakePort();
+    createAdapterMock.mockReturnValue(auth.port);
+    auth.port.signOut.mockImplementation(async () => { auth.emit(null); });
+    render(<App />);
+    auth.emit({ uid: 'ana', email: 'ana@example.com', displayName: 'Ana' });
+    await waitFor(() => expect(createGameMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('status')).toHaveTextContent('Entrando a la oficina…');
+    expect(screen.queryByRole('button', { name: 'Salir' })).toBeNull();
+    const bridge = createGameMock.mock.calls[0]![1];
+    await act(async () => bridge.emit('presence', { online: false, peers: 0, state: 'denied', reason: 'not-provisioned', canRetry: false }));
+    expect(screen.getByLabelText(/contraseña/i)).toBeVisible();
+    expect(screen.queryByText('Entrando a la oficina…')).toBeNull();
+    act(() => bridge.emit('entry', { state: 'ready' }));
+    expect(screen.queryByRole('button', { name: 'Salir' })).toBeNull();
+  });
+
   it.each([
     ['expired', 'Tu sesión caducó. El administrador debe darte acceso a la oficina.'],
     ['revoked', 'Acceso retirado: un administrador retiró tu acceso a la oficina. Contacta con un administrador.'],
@@ -438,6 +477,7 @@ describe('App: enrutado (#24)', () => {
     // ruta no toca (#24, punto 8). `createGame` es el testigo de que no se
     // cargo: si el arbol montase la oficina, se habria llamado.
     expect(await screen.findByText(/sin autenticación/i)).toBeInTheDocument();
+    expect(screen.queryByText('Entrando a la oficina…')).toBeNull();
     expect(createGameMock).not.toHaveBeenCalled();
   });
 

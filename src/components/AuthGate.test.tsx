@@ -5,6 +5,7 @@ import type { AuthPort, AuthUser, OfficeSession } from '../auth/authPort';
 import type { CharacterPort, ReadCharacterResult } from '../auth/characterPort';
 import type { ClaimDisplayNameResult, DisplayNamePort } from '../auth/displayNamePort';
 import { AuthGate } from './AuthGate';
+import { OfficeEntry } from './OfficeEntry';
 import { createDisplayNameClient } from '../auth/displayNameClient';
 import { createCharacterClient } from '../auth/characterClient';
 import { describeAccessDenied } from '../auth/authErrors';
@@ -670,6 +671,34 @@ describe('AuthGate: HTTP entrance access denials', () => {
 });
 
 describe('AuthGate: character chosen at the entrance (art migration, step 5)', () => {
+  it('starts the final background status only after name and character save, and clears it on sign-out', async () => {
+    const user = userEvent.setup();
+    const auth = fakePort();
+    vi.mocked(auth.port.signIn).mockImplementation(async () => auth.emit(ANA));
+    let finishSave!: (result: { outcome: 'ok'; avatarId: string }) => void;
+    const character = fakeCharacterPort(NEVER_CHOSE, {
+      save: vi.fn(() => new Promise<{ outcome: 'ok'; avatarId: string }>((resolve) => { finishSave = resolve; })),
+    });
+    const report = vi.fn();
+    render(<AuthGate auth={auth.port} displayName={fakeDisplayNamePort()} character={character}>
+      {() => <OfficeEntry>{(onState) => { report.mockImplementation(onState); return <div>Current office</div>; }}</OfficeEntry>}
+    </AuthGate>);
+    auth.emit(null);
+    expect(screen.queryByText('Entrando a la oficina…')).toBeNull();
+    await submitLogin(user);
+    await user.click(await screen.findByRole('button', { name: /entrar a la oficina/i }));
+    expect(screen.queryByText('Entrando a la oficina…')).toBeNull();
+    await act(async () => finishSave({ outcome: 'ok', avatarId: 'character-p01-burgundy-suit' }));
+    expect(screen.getByRole('status')).toHaveTextContent('Entrando a la oficina…');
+    expect(screen.queryByLabelText(/contraseña/i)).toBeNull();
+    expect(screen.getByRole('status').closest('form')).toBeNull();
+    auth.emit(null);
+    expect(screen.queryByText('Entrando a la oficina…')).toBeNull();
+    expect(screen.getByLabelText(/contraseña/i)).toBeVisible();
+    act(() => report('ready'));
+    expect(screen.queryByText('Current office')).toBeNull();
+  });
+
   it('after signing in, someone who never chose sees the selector and not the office', async () => {
     const user = userEvent.setup();
     const office = officeSpy();
