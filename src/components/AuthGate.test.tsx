@@ -5,6 +5,9 @@ import type { AuthPort, AuthUser, OfficeSession } from '../auth/authPort';
 import type { CharacterPort, ReadCharacterResult } from '../auth/characterPort';
 import type { ClaimDisplayNameResult, DisplayNamePort } from '../auth/displayNamePort';
 import { AuthGate } from './AuthGate';
+import { createDisplayNameClient } from '../auth/displayNameClient';
+import { createCharacterClient } from '../auth/characterClient';
+import { describeAccessDenied } from '../auth/authErrors';
 
 const ANA: AuthUser = { uid: 'uid-ana', email: 'ana@example.com', displayName: 'Ana' };
 
@@ -98,6 +101,7 @@ describe('AuthGate: autenticacion encendida', () => {
 
     expect(screen.getByLabelText(/correo/i)).toBeInTheDocument();
     expect(screen.queryByTestId('office')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /olvidaste|enviar enlace/i })).not.toBeInTheDocument();
   });
 
   it('enviar el formulario inicia sesion por el puerto', async () => {
@@ -111,12 +115,12 @@ describe('AuthGate: autenticacion encendida', () => {
     expect(port.signIn).toHaveBeenCalledWith('ana@example.com', 'secreta');
   });
 
-  it('un fallo de credenciales se ensena traducido, no crudo', async () => {
+  it.each(['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found'])('offers reset after %s without revealing account existence', async (code) => {
     const user = userEvent.setup();
     const { port, emit } = fakePort({
       signIn: vi.fn(async () => {
         throw Object.assign(new Error('Firebase: Error (auth/invalid-credential).'), {
-          code: 'auth/invalid-credential',
+          code,
         });
       }),
     });
@@ -127,6 +131,44 @@ describe('AuthGate: autenticacion encendida', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Correo o contraseña incorrectos.');
     expect(screen.queryByText(/Firebase/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /olvidaste/i })).toBeInTheDocument();
+  });
+
+  it.each(['auth/network-request-failed', 'auth/too-many-requests', 'auth/invalid-email', 'auth/user-disabled', 'auth/internal-error'])('does not offer reset for %s', async (code) => {
+    const user = userEvent.setup();
+    const { port, emit } = fakePort({ signIn: vi.fn().mockRejectedValueOnce({ code: 'auth/wrong-password' }).mockRejectedValue({ code }) });
+    render(<AuthGate auth={port}>{officeSpy().render}</AuthGate>);
+    emit(null);
+    await submitLogin(user);
+    expect(screen.getByRole('button', { name: /olvidaste/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^entrar$/i }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /olvidaste|enviar enlace/i })).not.toBeInTheDocument();
+  });
+
+  it('clears the offer and error during retry, name resolution and fresh sign-out, preserving fields', async () => {
+    const user = userEvent.setup();
+    let finishSignIn!: () => void;
+    let finishClaim!: (value: ClaimDisplayNameResult) => void;
+    const { port, emit } = fakePort({ signIn: vi.fn().mockRejectedValueOnce({ code: 'auth/wrong-password' })
+      .mockImplementationOnce(() => new Promise<void>((resolve) => { finishSignIn = resolve; })) });
+    const displayName = fakeDisplayNamePort({ claim: vi.fn(() => new Promise<ClaimDisplayNameResult>((resolve) => { finishClaim = resolve; })) });
+    render(<AuthGate auth={port} displayName={displayName}>{officeSpy().render}</AuthGate>);
+    emit(null);
+    await submitLogin(user);
+    expect(screen.getByRole('button', { name: /olvidaste/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^entrar$/i }));
+    expect(screen.getByRole('button', { name: /entrando/i })).toBeDisabled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /olvidaste/i })).not.toBeInTheDocument();
+    await act(async () => { emit(ANA); finishSignIn(); });
+    expect(screen.queryByRole('button', { name: /olvidaste/i })).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/correo/i)).toHaveValue('ana@example.com');
+    expect(screen.getByLabelText(/^nombre$/i)).toHaveValue('Ana Lopez');
+    expect(screen.getByLabelText(/^contraseña$/i)).toHaveValue('secreta');
+    await act(async () => finishClaim({ outcome: 'ok', displayName: 'Ana Lopez' }));
+    emit(null);
+    expect(screen.queryByRole('button', { name: /olvidaste|enviar enlace/i })).not.toBeInTheDocument();
   });
 
   it('con usuario monta la oficina con su nombre y retira el login', () => {
@@ -194,10 +236,25 @@ describe('AuthGate: autenticacion encendida', () => {
 
     expect(screen.queryByTestId('office')).not.toBeInTheDocument();
     expect(screen.getByLabelText(/correo/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /olvidaste/i })).not.toBeInTheDocument();
   });
 });
 
 describe('AuthGate: login notice (#129)', () => {
+  it('an access-denied notice hides an already open reset form', async () => {
+    const user = userEvent.setup();
+    const { port, emit } = fakePort({ signIn: vi.fn().mockRejectedValue({ code: 'auth/wrong-password' }) });
+    const view = render(<AuthGate auth={port}>{officeSpy().render}</AuthGate>);
+    emit(null);
+    await submitLogin(user);
+    await user.click(screen.getByRole('button', { name: /olvidaste/i }));
+    expect(screen.getByRole('heading', { name: /recuperar contraseña/i })).toBeInTheDocument();
+    view.rerender(<AuthGate auth={port} notice={describeAccessDenied('expired')}>{officeSpy().render}</AuthGate>);
+    expect(screen.getByRole('status').textContent).toBe('Tu sesión caducó. El administrador debe darte acceso a la oficina.');
+    expect(screen.queryByRole('heading', { name: /recuperar contraseña/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /olvidaste|enviar enlace/i })).not.toBeInTheDocument();
+  });
+
   it('the login shows the notice it is handed', () => {
     const { port, emit } = fakePort();
     render(
@@ -232,8 +289,10 @@ describe('AuthGate: forgot password (#94)', () => {
     const user = userEvent.setup();
     const view = render(<AuthGate auth={port}>{officeSpy().render}</AuthGate>);
     emit(null);
+    vi.mocked(port.signIn).mockRejectedValueOnce({ code: 'auth/wrong-password' });
+    await submitLogin(user, { email });
     await user.click(screen.getByRole('button', { name: /olvidaste/i }));
-    await user.type(screen.getByLabelText(/correo/i), `${email}{Enter}`);
+    await user.click(screen.getByRole('button', { name: /enviar enlace/i }));
     const status = await screen.findByRole('status');
     const text = status.textContent;
     view.unmount();
@@ -360,14 +419,8 @@ describe('AuthGate: nombre visible auto-elegido en login (#100)', () => {
     return { claim, release: (value: ClaimDisplayNameResult) => release?.(value) };
   }
 
-  /**
-   * Un solo caso representativo a proposito: las tres copias de rechazo
-   * (taken/invalid/failed) ya se prueban exhaustivamente en
-   * `useDisplayName.test.ts`. Lo que este test aporta que el hook no puede es
-   * la parte de integracion -- que `AuthGate` de verdad ensena el error y NO
-   * desmonta `LoginScreen`, con lo que los campos escritos sobreviven (D2).
-   */
-  it('un rechazo cierra la sesion, muestra el error y preserva los campos (D2)', async () => {
+  /** Name rejections preserve fields but never offer credential recovery (D2). */
+  it.each(['taken', 'invalid', 'failed'] as const)('%s signs out, preserves fields and hides reset', async (outcome) => {
     const user = userEvent.setup();
     const { port, emit } = fakePort();
     const { claim, release } = pendingClaim();
@@ -383,15 +436,18 @@ describe('AuthGate: nombre visible auto-elegido en login (#100)', () => {
     // El aviso de sesion llega MIENTRAS el reclamo sigue en vuelo, igual que
     // en produccion (`onIdTokenChanged` no espera a que termine ningun POST).
     await act(async () => emit(ANA));
-    await act(async () => release({ outcome: 'taken' }));
+    await act(async () => release({ outcome }));
 
     await waitFor(() => expect(port.signOut).toHaveBeenCalledTimes(1));
     await act(async () => emit(null));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/ya está en uso/i);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      outcome === 'taken' ? 'Ese nombre ya está en uso.' : outcome === 'invalid' ? 'Escribe un nombre' : 'No se pudo guardar tu nombre.',
+    );
     // Los campos siguen ahi: LoginScreen nunca se desmonto (D2).
     expect(screen.getByLabelText(/^nombre$/i)).toHaveValue('Bea');
     expect(screen.getByLabelText(/correo/i)).toHaveValue('ana@example.com');
+    expect(screen.queryByRole('button', { name: /olvidaste/i })).not.toBeInTheDocument();
   });
 
   it('un rechazo NUNCA deja ver la oficina, ni por un instante', async () => {
@@ -561,6 +617,58 @@ function fakeCharacterPort(read: ReadCharacterResult, overrides: Partial<Charact
 const NEVER_CHOSE: ReadCharacterResult = { outcome: 'ok', avatarId: 'character-p01-burgundy-suit', chosen: false };
 const CHOSE_LUCIA: ReadCharacterResult = { outcome: 'ok', avatarId: 'character-p02-beige-blazer', chosen: true };
 
+describe('AuthGate: HTTP entrance access denials', () => {
+  const cases = (['expired', 'revoked', 'not-provisioned', 'session-expired'] as const)
+    .flatMap((reason) => (['name-claim', 'name-read', 'avatar-read', 'avatar-save'] as const)
+      .map((step) => ({ reason, step })));
+  it.each(cases)('$reason at $step signs out and explains access, never name retries', async ({ reason, step }) => {
+    const user = userEvent.setup();
+    const auth = fakePort();
+    vi.mocked(auth.port.signIn).mockImplementation(async () => auth.emit(ANA));
+    vi.mocked(auth.port.signOut).mockImplementation(async () => auth.emit(null));
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const name = String(url).endsWith('/me/display-name');
+      const denied = name ? step.startsWith('name-') :
+        step === 'avatar-read' || (step === 'avatar-save' && init?.method === 'POST');
+      return new Response(JSON.stringify(denied ? { error: 'unauthorized', reason } :
+        name ? { displayName: null } : { avatarId: 'character-p01-burgundy-suit', chosen: false }),
+      { status: denied ? 401 : 200 });
+    }) as typeof fetch;
+    const displayName = createDisplayNameClient({ baseUrl: 'http://office', getIdToken: auth.port.getIdToken }, fetchImpl);
+    const httpCharacter = createCharacterClient({ baseUrl: 'http://office', getIdToken: auth.port.getIdToken, manifestUrl: 'pack.json' }, fetchImpl);
+    const character = fakeCharacterPort(NEVER_CHOSE, { read: httpCharacter.read, save: httpCharacter.save });
+    const office = officeSpy();
+    render(<AuthGate auth={auth.port} displayName={displayName} character={character}>{office.render}</AuthGate>);
+    if (step === 'name-claim') {
+      auth.emit(null);
+      vi.mocked(auth.port.signIn).mockRejectedValueOnce({ code: 'auth/wrong-password' });
+      await submitLogin(user, { name: 'Fictional Name', email: 'visitor@example.com' });
+      expect(screen.getByRole('button', { name: /olvidaste/i })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /^entrar$/i }));
+    } else {
+      await act(async () => auth.emit(ANA));
+      if (step === 'avatar-save') await user.click(await screen.findByRole('button', { name: /entrar a la oficina/i }));
+    }
+    expect(await screen.findByRole('alert')).toHaveTextContent(describeAccessDenied(reason));
+    expect(screen.queryByText(/No se pudo guardar tu (nombre|personaje)/)).not.toBeInTheDocument();
+    expect(auth.port.signOut).toHaveBeenCalledTimes(1);
+    expect(office.sessions).toEqual([]);
+    expect(screen.queryByRole('button', { name: /olvidaste|enviar enlace/i })).not.toBeInTheDocument();
+    if (reason === 'expired') expect(screen.getByRole('alert').textContent).toBe('Tu sesión caducó. El administrador debe darte acceso a la oficina.');
+    if (reason === 'revoked') expect(screen.getByRole('alert')).toHaveTextContent(/administrador/i);
+  });
+
+  it('an authorized legacy account with neither chosen name nor character can choose and enter', async () => {
+    const user = userEvent.setup();
+    const auth = fakePort();
+    render(<AuthGate auth={auth.port} displayName={fakeDisplayNamePort()} character={fakeCharacterPort(NEVER_CHOSE)}>{officeSpy().render}</AuthGate>);
+    await act(async () => auth.emit(ANA));
+    await user.click(await screen.findByRole('button', { name: /entrar a la oficina/i }));
+    expect(await screen.findByTestId('office')).toHaveTextContent('Ana');
+    expect(auth.port.signOut).not.toHaveBeenCalled();
+  });
+});
+
 describe('AuthGate: character chosen at the entrance (art migration, step 5)', () => {
   it('after signing in, someone who never chose sees the selector and not the office', async () => {
     const user = userEvent.setup();
@@ -573,10 +681,14 @@ describe('AuthGate: character chosen at the entrance (art migration, step 5)', (
     );
     emit(null);
 
+    vi.mocked(port.signIn).mockRejectedValueOnce({ code: 'auth/wrong-password' });
     await submitLogin(user);
+    expect(screen.getByRole('button', { name: /olvidaste/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^entrar$/i }));
     await act(async () => emit(ANA));
 
     expect(await screen.findByRole('radiogroup', { name: /elige tu personaje/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /olvidaste/i })).not.toBeInTheDocument();
     expect(screen.queryByTestId('office')).not.toBeInTheDocument();
     expect(office.sessions).toEqual([]);
   });

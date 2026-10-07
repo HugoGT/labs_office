@@ -10,6 +10,8 @@
  * the pack default, not by retrying.
  */
 
+import type { AccessDeniedResult } from './authErrors';
+
 /** One character the selector can offer, with the sheets its previews cut frames from. */
 export interface CharacterOption {
   readonly id: string;
@@ -28,6 +30,7 @@ export interface CharacterCatalog {
 }
 
 export type ReadCharacterResult =
+  | AccessDeniedResult
   | { outcome: 'ok'; avatarId: string; chosen: boolean }
   | { outcome: 'unavailable' | 'failed' };
 
@@ -35,6 +38,7 @@ export type ReadCharacterResult =
 export type InvalidCharacterReason = 'unknown-piece' | 'retired-piece';
 
 export type SaveCharacterResult =
+  | AccessDeniedResult
   | { outcome: 'ok'; avatarId: string }
   | { outcome: 'invalid'; reason: InvalidCharacterReason }
   | { outcome: 'unavailable' | 'failed' };

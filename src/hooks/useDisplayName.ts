@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AuthUser } from '../auth/authPort';
 import type { ClaimDisplayNameResult, DisplayNamePort } from '../auth/displayNamePort';
+import { describeAccessDenied } from '../auth/authErrors';
+import type { AccessDeniedReason } from '../game/officeProtocol';
 
 /**
  * Lo que la sesion sabe sobre su propio nombre visible, una vez resuelto:
@@ -20,6 +22,7 @@ export interface UseDisplayNameResult {
   claiming: boolean;
   /** Encadena `signIn` con el reclamo del nombre; `null` si `signIn` fallo (AuthGate ya lo ensena traducido). */
   submit: (signIn: () => Promise<boolean>, name: string) => Promise<ClaimDisplayNameResult | null>;
+  onAccessDenied: (reason: AccessDeniedReason) => Promise<void>;
 }
 
 const PENDING: DisplayNameFlow = { phase: 'pending' };
@@ -45,11 +48,9 @@ function describeClaimRejection(outcome: 'taken' | 'invalid' | 'failed'): string
  * ## Reclamo (claim) vs. restauracion (restore)
  *
  * Un envio de formulario RECLAMA (POST) a traves de `submit`: un rechazo
- * cierra la sesion (D2). Una sesion que ya existia al cargar la pagina -- o
- * que `onChange` restaura sin pasar por el formulario -- solo LEE (GET), sin
- * cerrar sesion por lo que lea: un fallo de red o un directorio ausente caen
- * al nombre derivado (fail-open, D6/D7), porque el motivo de leer es
- * puramente informativo.
+ * cierra la sesion (D2).
+ * A restored session only reads (GET). Network failure or a missing directory
+ * falls back to the derived name (D6/D7); explicit denial ends the session.
  *
  * `inFlightRef` es lo que distingue las dos: mientras un `submit` esta en
  * vuelo (incluido el `signIn` que recibe), el efecto de restauracion se
@@ -75,9 +76,15 @@ export function useDisplayName(
     };
   }, []);
 
-  // Restauracion (D6): la cuenta ya tenia sesion -- recarga, o el primer
-  // aviso de `onChange` -- y nunca paso por el formulario. Solo lee; cualquier
-  // cosa que no sea un nombre confirmado cae al derivado, sin cerrar sesion.
+  // Both entrance steps use the existing name error/flow owner for denials.
+  const onAccessDenied = useCallback(async (reason: AccessDeniedReason) => {
+    if (!aliveRef.current) return;
+    setFlow(PENDING);
+    setError(describeAccessDenied(reason));
+    await signOut();
+  }, [signOut]);
+
+  // Restoration is informational unless the server explicitly refuses access.
   useEffect(() => {
     // Un `submit` en vuelo manda sobre cualquier otra cosa: ni resetea a
     // `pending` por `user === null` ni relee, este a punto de resolverse o de
@@ -101,6 +108,10 @@ export function useDisplayName(
     let cancelled = false;
     void port.read().then((result) => {
       if (cancelled || !aliveRef.current) return;
+      if (result.outcome === 'denied') {
+        void onAccessDenied(result.reason);
+        return;
+      }
       setFlow({
         phase: 'resolved',
         displayName: result.outcome === 'ok' ? result.displayName : null,
@@ -114,7 +125,7 @@ export function useDisplayName(
     // justo cuando un `submit` paralelo termina de resolver `flow`, y esa
     // relectura tardia podria pisar el nombre recien reclamado con el que
     // trae el GET (D2/D9).
-  }, [user, port]);
+  }, [user, port, onAccessDenied]);
 
   const submit = useCallback(
     async (signIn: () => Promise<boolean>, name: string): Promise<ClaimDisplayNameResult | null> => {
@@ -138,6 +149,11 @@ export function useDisplayName(
 
         const result = await port.claim(name);
 
+        if (result.outcome === 'denied') {
+          await onAccessDenied(result.reason);
+          return result;
+        }
+
         if (result.outcome === 'ok') {
           if (aliveRef.current) setFlow({ phase: 'resolved', displayName: result.displayName });
           return result;
@@ -160,8 +176,8 @@ export function useDisplayName(
         if (aliveRef.current) setClaiming(false);
       }
     },
-    [port, signOut],
+    [port, signOut, onAccessDenied],
   );
 
-  return { flow, error, claiming, submit };
+  return { flow, error, claiming, submit, onAccessDenied };
 }

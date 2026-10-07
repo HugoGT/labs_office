@@ -11,11 +11,15 @@
  * entrando con el nombre derivado, no reintentando.
  */
 
+import type { AccessDeniedResult } from './authErrors';
+
 export type ClaimDisplayNameResult =
+  | AccessDeniedResult
   | { outcome: 'ok'; displayName: string }
   | { outcome: 'taken' | 'invalid' | 'unavailable' | 'failed' };
 
 export type ReadDisplayNameResult =
+  | AccessDeniedResult
   | { outcome: 'ok'; displayName: string | null }
   | { outcome: 'unavailable' | 'failed' };
 

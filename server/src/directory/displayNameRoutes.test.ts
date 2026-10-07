@@ -52,6 +52,16 @@ function harness(): AdminDeps {
 }
 
 describe('handleGetDisplayName', () => {
+  it.each(['expired', 'revoked', 'not-provisioned'] as const)('both entrance operations explain %s without writing', async (reason) => {
+    const row = user({ id: 'id-visitor', uid: 'uid-visitor', role: 'guest',
+      status: reason === 'revoked' ? 'revoked' : 'active', expiresAt: new Date('2026-01-01T00:00:00Z') });
+    const directory = createMemoryDirectory({ seed: reason === 'not-provisioned' ? [] : [row] });
+    const deps = { directory, auth: verifier, now: () => new Date('2026-02-01T00:00:00Z'), log: () => undefined };
+    const expected = { status: 401, body: { error: 'unauthorized', reason } };
+    expect(await handleGetDisplayName('Bearer valido-uid-visitor', deps)).toEqual(expected);
+    expect(await handleSetDisplayName('Bearer valido-uid-visitor', { name: 'Fictional Name' }, deps)).toEqual(expected);
+    expect((await directory.findByUid('uid-visitor'))?.displayName ?? null).toBeNull();
+  });
   it('sin cabecera responde 401', async () => {
     const deps = harness();
 

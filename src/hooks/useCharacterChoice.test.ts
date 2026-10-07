@@ -58,6 +58,23 @@ describe('decideCharacterStep', () => {
 });
 
 describe('useCharacterChoice', () => {
+  it('a stale save denial cannot sign out a newer login, even for the same account', async () => {
+    let release!: (value: SaveCharacterResult) => void;
+    const port = fakePort({ save: vi.fn(() => new Promise<SaveCharacterResult>((resolve) => { release = resolve; })) });
+    const onAccessDenied = vi.fn(async () => undefined);
+    const { result, rerender } = renderHook(
+      ({ user }: { user: AuthUser | null }) => useCharacterChoice(port, user, user !== null, false, onAccessDenied),
+      { initialProps: { user: ANA as AuthUser | null } },
+    );
+    await act(async () => {});
+    let saving!: Promise<void>;
+    act(() => { saving = result.current.choose('character-p01-burgundy-suit'); });
+    rerender({ user: null });
+    rerender({ user: ANA });
+    await act(async () => { release({ outcome: 'denied', reason: 'session-expired' }); await saving; });
+    expect(onAccessDenied).not.toHaveBeenCalled();
+    expect(result.current.flow.phase).toBe('choosing');
+  });
   it('without a port it is resolved from the first render: nothing to choose', () => {
     const { result } = renderHook(() => useCharacterChoice(null, ANA, true, true));
 

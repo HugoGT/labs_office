@@ -8,7 +8,7 @@
  * ("Firebase: INTERNAL ASSERTION FAILED...") que no ayudan a nadie a entrar.
  */
 
-import type { AccessDeniedReason } from '../game/officeProtocol';
+import { accessDeniedReasonOf, type AccessDeniedReason } from '../game/officeProtocol';
 
 /** Ultimo recurso: tambien cubre lo que no es un `Error` (un `throw` raro, un rechazo con string). */
 const GENERIC_MESSAGE = 'No se pudo iniciar sesión.';
@@ -51,6 +51,12 @@ export function describeAuthError(error: unknown): string {
   return MESSAGES[code] ?? GENERIC_MESSAGE;
 }
 
+/** Keep the recovery offer identical for all credential failures, too. */
+export function isWrongCredentials(error: unknown): boolean {
+  const code = codeOf(error);
+  return code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found';
+}
+
 /**
  * Codes that must look exactly like a sent email (#94). Same anti-enumeration
  * rule as `WRONG_CREDENTIALS_MESSAGE`: "no account with that email" or "that
@@ -86,8 +92,8 @@ export function describePasswordResetError(error: unknown): string | null {
  * fallback: a new reason does not compile until it has its own notice.
  */
 const ACCESS_DENIED_NOTICES: Readonly<Record<AccessDeniedReason, string>> = {
-  expired: 'Tu acceso caducó. Pide a un administrador que lo renueve.',
-  revoked: 'Acceso retirado: un administrador retiró tu acceso a la oficina.',
+  expired: 'Tu sesión caducó. El administrador debe darte acceso a la oficina.',
+  revoked: 'Acceso retirado: un administrador retiró tu acceso a la oficina. Contacta con un administrador.',
   'not-provisioned': 'Tu cuenta no está dada de alta en la oficina. Pide a un administrador que te invite.',
   unauthorized: 'No se pudo comprobar tu sesión. Vuelve a iniciar sesión.',
   'session-expired': 'Tu sesión caducó. Vuelve a iniciar sesión.',
@@ -95,4 +101,17 @@ const ACCESS_DENIED_NOTICES: Readonly<Record<AccessDeniedReason, string>> = {
 
 export function describeAccessDenied(reason: AccessDeniedReason): string {
   return ACCESS_DENIED_NOTICES[reason];
+}
+
+export type AccessDeniedResult = { outcome: 'denied'; reason: AccessDeniedReason };
+
+/** A 401 is a refusal even from an older server or a non-JSON proxy response. */
+export async function readAccessDenied(response: Response): Promise<AccessDeniedResult> {
+  let body: { reason?: unknown } | null = null;
+  try {
+    body = await response.json();
+  } catch {
+    // Never turn an unreadable refusal into a name/character retry.
+  }
+  return { outcome: 'denied', reason: accessDeniedReasonOf(body?.reason) };
 }

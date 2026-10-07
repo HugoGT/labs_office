@@ -4,8 +4,8 @@
  * `displayNameClient.ts`, to test the whole contract without Vite or a server.
  *
  * Nothing here throws: the entrance is waiting for a concrete answer, and the
- * closed outcomes of `characterPort.ts` say every case. A network failure, a
- * 401 or anything unexpected is `failed`.
+ * closed outcomes of `characterPort.ts` say every case. A 401 preserves the
+ * access denial; a network failure or anything unexpected is `failed`.
  *
  * ## The catalog is the manifest the office loads
  *
@@ -22,6 +22,7 @@
  */
 
 import { combineArtManifests, findPiece, parseArtPackManifest, type ArtCatalog } from '../game/artPack';
+import { readAccessDenied } from './authErrors';
 import type {
   CharacterCatalog,
   CharacterOption,
@@ -121,6 +122,7 @@ export function createCharacterClient(
     async read(): Promise<ReadCharacterResult> {
       const response = await request(`${baseUrl}/me/avatar`, { method: 'GET' }, true);
       if (response === null) return { outcome: 'failed' };
+      if (response.status === 401) return readAccessDenied(response);
       if (response.status === 503) return { outcome: 'unavailable' };
       if (!response.ok) return { outcome: 'failed' };
       const body = await json(response);
@@ -137,6 +139,7 @@ export function createCharacterClient(
         true,
       );
       if (response === null) return { outcome: 'failed' };
+      if (response.status === 401) return readAccessDenied(response);
       if (response.status === 400) return { outcome: 'invalid', reason: invalidReason(await json(response)) };
       if (response.status === 503) return { outcome: 'unavailable' };
       if (!response.ok) return { outcome: 'failed' };

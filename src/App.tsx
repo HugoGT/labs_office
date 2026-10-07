@@ -96,9 +96,9 @@ export default function App() {
   );
   const dismissAccessDenied = useCallback(() => setAccessDenied(null), []);
   /**
-   * The `fetch` of every client that talks to the office server before or
-   * outside the office (the entrance and `/dashboard`): a 401 that says
-   * `session-expired` sends the person back to the login (#128).
+   * Dashboard HTTP session expiry still goes through App (#128). Entrance
+   * ports now preserve denials for AuthGate, which owns their sign-out; using
+   * this decorator there too would sign out twice for the same response.
    */
   const sessionFetch = useMemo(
     () => withSessionExpiry(() => handleAccessDenied('session-expired')),
@@ -117,9 +117,8 @@ export default function App() {
         baseUrl: deriveDisplayNameBaseUrl(officeEndpoint),
         getIdToken: () => auth.getIdToken(),
       },
-      sessionFetch,
     );
-  }, [officeEndpoint, auth, sessionFetch]);
+  }, [officeEndpoint, auth]);
   /**
    * Ultimo nombre elegido con exito en este dispositivo (#100, D8). Se lee UNA
    * vez para prellenar "Nombre"; `AuthGate` escribe en el mismo almacen a
@@ -148,9 +147,8 @@ export default function App() {
         // Characters an Admin uploaded (#121) join the pack's in the selector.
         uploadsManifestUrl: artUploadsManifestUrl(officeEndpoint),
       },
-      sessionFetch,
     );
-  }, [route, officeEndpoint, auth, sessionFetch]);
+  }, [route, officeEndpoint, auth]);
   /**
    * Leaving the office (#66) unmounts it rather than hiding it: tearing the
    * shell down is what leaves the Colyseus and LiveKit rooms, so nobody keeps

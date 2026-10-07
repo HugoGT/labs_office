@@ -78,7 +78,7 @@ describe('createDisplayNameClient: claim', () => {
     await expect(client.claim('Ana')).resolves.toEqual({ outcome: 'unavailable' });
   });
 
-  it('cualquier otro codigo (401, 500...) es failed', async () => {
+  it('a mute 401 is denied; a server failure remains failed', async () => {
     const client401 = createDisplayNameClient(
       { baseUrl: 'http://x', getIdToken: TOKEN },
       respondWith({ error: 'unauthorized' }, 401),
@@ -88,7 +88,7 @@ describe('createDisplayNameClient: claim', () => {
       respondWith({ error: 'internal' }, 500),
     );
 
-    await expect(client401.claim('Ana')).resolves.toEqual({ outcome: 'failed' });
+    await expect(client401.claim('Ana')).resolves.toEqual({ outcome: 'denied', reason: 'unauthorized' });
     await expect(client500.claim('Ana')).resolves.toEqual({ outcome: 'failed' });
   });
 
@@ -166,13 +166,13 @@ describe('createDisplayNameClient: read', () => {
     await expect(client.read()).resolves.toEqual({ outcome: 'unavailable' });
   });
 
-  it('un 401 es failed', async () => {
+  it('a mute 401 is denied, not an informational read failure', async () => {
     const client = createDisplayNameClient(
       { baseUrl: 'http://x', getIdToken: TOKEN },
       respondWith({ error: 'unauthorized' }, 401),
     );
 
-    await expect(client.read()).resolves.toEqual({ outcome: 'failed' });
+    await expect(client.read()).resolves.toEqual({ outcome: 'denied', reason: 'unauthorized' });
   });
 
   it('la red caida es failed', async () => {
@@ -194,5 +194,23 @@ describe('createDisplayNameClient: read', () => {
     expect(seen?.url).toBe('http://x/me/display-name');
     expect(seen?.init.method).toBe('GET');
     expect(seen?.init.body).toBeUndefined();
+  });
+});
+
+describe('entrance HTTP denial reasons', () => {
+  it.each(['expired', 'revoked', 'not-provisioned', 'session-expired', 'unknown'])(
+    'preserves %s on both display-name operations', async (reason) => {
+      const client = createDisplayNameClient(
+        { baseUrl: 'http://x', getIdToken: TOKEN }, respondWith({ error: 'unauthorized', reason }, 401),
+      );
+      const expected = { outcome: 'denied', reason: reason === 'unknown' ? 'unauthorized' : reason };
+      await expect(client.claim('Fictional Name')).resolves.toEqual(expected);
+      await expect(client.read()).resolves.toEqual(expected);
+    },
+  );
+  it('a non-JSON 401 still means denied', async () => {
+    const client = createDisplayNameClient({ baseUrl: 'http://x', getIdToken: TOKEN },
+      (async () => new Response('<html/>', { status: 401 })) as typeof fetch);
+    await expect(client.read()).resolves.toEqual({ outcome: 'denied', reason: 'unauthorized' });
   });
 });

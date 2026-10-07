@@ -55,6 +55,14 @@ function row(email: string) {
 }
 
 describe('UsersPanel (#93): the list', () => {
+  it('a revoked guest with no chosen name and future expiry already has no access to remove', async () => {
+    const guest = { ...GUEST, status: 'revoked' as const, removable: false, daysLeft: 90 };
+    render(<UsersPanel users={fakeUsers({ listUsers: vi.fn(async () => [guest]) })} />);
+    await screen.findByText('externo@example.com');
+    expect(row('externo@example.com').getByText('-')).toBeInTheDocument();
+    expect(row('externo@example.com').getByText('Sin acceso')).toBeInTheDocument();
+    expect(row('externo@example.com').queryByRole('button', { name: 'Quitar acceso' })).toBeNull();
+  });
   it('lists everyone with role, status and expiry', async () => {
     render(<UsersPanel users={fakeUsers()} />);
 

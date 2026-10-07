@@ -10,11 +10,12 @@
  * respuesta concreta -- taken, invalid, o que se guardo --, no una excepcion
  * que alguien arriba tenga que capturar. El outcome discriminado de
  * `displayNamePort.ts` es la forma de decirlo sin perder ningun caso: red
- * caida, 401, 503 y "otra cosa" caen todos en `failed`, que es la unica salida
- * que no distingue nada mas util para quien mira el formulario.
+ * HTTP 401 preserves the access denial; 503 skips the optional directory.
+ * Network failures and unexpected responses remain `failed`.
  */
 
 import type { ClaimDisplayNameResult, DisplayNamePort, ReadDisplayNameResult } from './displayNamePort';
+import { readAccessDenied } from './authErrors';
 
 /** Plazo por defecto, mismo valor que `desksClient.ts`: un servidor colgado no puede dejar la vista sin resolverse. */
 const DEFAULT_TIMEOUT_MS = 3000;
@@ -74,6 +75,7 @@ export function createDisplayNameClient(
     async claim(name): Promise<ClaimDisplayNameResult> {
       const response = await request('POST', { name });
       if (response === null) return { outcome: 'failed' };
+      if (response.status === 401) return readAccessDenied(response);
       if (response.status === 409) return { outcome: 'taken' };
       if (response.status === 400) return { outcome: 'invalid' };
       if (response.status === 503) return { outcome: 'unavailable' };
@@ -91,6 +93,7 @@ export function createDisplayNameClient(
     async read(): Promise<ReadDisplayNameResult> {
       const response = await request('GET');
       if (response === null) return { outcome: 'failed' };
+      if (response.status === 401) return readAccessDenied(response);
       if (response.status === 503) return { outcome: 'unavailable' };
       if (!response.ok) return { outcome: 'failed' };
 

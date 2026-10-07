@@ -64,6 +64,17 @@ async function harness(): Promise<AvatarDeps> {
 }
 
 describe('handleGetAvatar', () => {
+  it.each(['expired', 'revoked', 'not-provisioned'] as const)('both avatar operations explain %s without saving', async (reason) => {
+    const visitor = user({ id: 'id-visitor', uid: 'uid-visitor', role: 'guest',
+      status: reason === 'revoked' ? 'revoked' : 'active', expiresAt: new Date('2026-01-01T00:00:00Z') });
+    const deps = { ...await harness(),
+      directory: createMemoryDirectory({ seed: reason === 'not-provisioned' ? [] : [visitor] }),
+      now: () => new Date('2026-02-01T00:00:00Z'), log: () => undefined };
+    const expected = { status: 401, body: { error: 'unauthorized', reason } };
+    expect(await handleGetAvatar('Bearer valido-uid-visitor', deps)).toEqual(expected);
+    expect(await handleSetAvatar('Bearer valido-uid-visitor', { avatarId: 'character-p03-forest-suit' }, deps)).toEqual(expected);
+    expect((await deps.directory.findByUid('uid-visitor'))?.avatarChosenAt ?? null).toBeNull();
+  });
   it('without credentials answers 401', async () => {
     expect((await handleGetAvatar(undefined, await harness())).status).toBe(401);
   });
