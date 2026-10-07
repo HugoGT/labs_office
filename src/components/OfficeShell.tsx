@@ -31,6 +31,7 @@ import { useCallInvitations } from '../hooks/useCallInvitations';
 import { useDeskDecor } from '../hooks/useDeskDecor';
 import { useDesks } from '../hooks/useDesks';
 import { useInstallPrompt } from '../hooks/useInstallPrompt';
+import { useMapZoom } from '../hooks/useMapZoom';
 import { useOfficeAdminRole } from '../hooks/useOfficeAdminRole';
 import { useOfficeBridge } from '../hooks/useOfficeBridge';
 import { useProximityAudio } from '../hooks/useProximityAudio';
@@ -48,6 +49,7 @@ import { OfficeSidebar } from './OfficeSidebar';
 import { RecordingReadyStack, type RecordingReadyNotice } from './RecordingReadyStack';
 import { Toast } from './Toast';
 import { VideoTiles } from './VideoTiles';
+import { ZoomControls } from './ZoomControls';
 
 /** Duracion del toast antes de auto-ocultarse (`app.js:525`, `ms || 3200`). */
 const TOAST_TIMEOUT_MS = 3200;
@@ -119,6 +121,8 @@ export function OfficeShell({
   const { invitations, accept, dismiss } = useCallInvitations(bridge);
   // "Instalar app" in the exit controls (#13): null while installed or not installable.
   const installOffer = useInstallPrompt();
+  // Map zoom (map-zoom): subscribes in the commit that starts the game, before the scene announces it.
+  const mapZoom = useMapZoom(bridge);
   // Se resuelve una sola vez: cambiarlo remontaria Phaser entero.
   const [endpoint] = useState(() =>
     resolveOfficeEndpoint({
@@ -816,6 +820,7 @@ export function OfficeShell({
         onLeaveOffice={onLeaveOffice ?? null}
         install={installOffer}
       />
+      <ZoomControls view={mapZoom.view} onZoomIn={mapZoom.zoomIn} onZoomOut={mapZoom.zoomOut} onReset={mapZoom.reset} />
       <AudioUnblockPrompt blocked={audioBlocked} onUnblock={unblockAudio} />
       <Toast message={toastMessage} />
       <CallInvitationStack invitations={invitations} onAccept={accept} onDismiss={dismiss} />

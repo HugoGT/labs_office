@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT, RAIL_WIDTH, SIDEBAR_TOP } from './hudLayout';
+import {
+  MINIMAP_HEIGHT,
+  MINIMAP_MARGIN,
+  MINIMAP_WIDTH,
+  RAIL_RIGHT,
+  RAIL_WIDTH,
+  SIDEBAR_TOP,
+  ZOOM_CONTROLS_GAP,
+  ZOOM_CONTROLS_RIGHT,
+  ZOOM_CONTROLS_TOP,
+} from './hudLayout';
 
 describe('hudLayout: geometria compartida del HUD (#74)', () => {
   it('SIDEBAR_TOP se deriva del margen y la altura del minimapa, no un numero suelto', () => {
@@ -22,5 +32,11 @@ describe('hudLayout: geometria compartida del HUD (#74)', () => {
     expect(RAIL_RIGHT).toBe(23);
     // 280 (--hud-sidebar-width) - 2*11 (--hud-rail-inset en ambos lados) = 258
     expect(RAIL_WIDTH).toBe(258);
+  });
+
+  it('el control de zoom se deriva del minimapa: a su izquierda, a la altura de su borde superior (map-zoom)', () => {
+    expect(ZOOM_CONTROLS_TOP).toBe(MINIMAP_MARGIN);
+    expect(ZOOM_CONTROLS_RIGHT).toBe(RAIL_RIGHT + MINIMAP_WIDTH + ZOOM_CONTROLS_GAP);
+    expect(ZOOM_CONTROLS_RIGHT).toBe(289);
   });
 });

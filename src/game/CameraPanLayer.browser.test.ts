@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
 import { CameraPanLayer, type CameraPanLayerOptions } from './CameraPanLayer';
-import { navigationBounds } from './cameraBounds';
+import { followBounds, navigationBounds } from './cameraBounds';
 
 /**
  * `CameraPanLayer` traduce input real de puntero a `reduceCameraPan` y aplica
@@ -457,5 +457,86 @@ describe('CameraPanLayer: click en el minimapa (#98)', () => {
 
       expect(cam.scrollX).toBe(startScrollX);
     }
+  });
+});
+
+describe('CameraPanLayer: owns the follow bounds at every zoom (map-zoom)', () => {
+  // 200x150 world in a 320x240 canvas at 0.5: the visible area (640x480) covers it.
+  const SMALL = { x: 0, y: 0, width: 200, height: 150 };
+
+  it('while following, replaces raw world bounds with the follow bounds: the world sits centered', async () => {
+    const scene = await bootHostScene();
+    const cam = scene.cameras.main;
+    cam.setZoom(0.5);
+    cam.setBounds(SMALL.x, SMALL.y, SMALL.width, SMALL.height);
+    cam.startFollow(scene.target);
+    new CameraPanLayer(layerOptions(scene, { worldBounds: SMALL }));
+
+    await nextFrame(scene);
+
+    expect(cam.getBounds()).toMatchObject(followBounds(SMALL, cam, 0.5));
+    expect(cam.scrollX + cam.width / 2).toBeCloseTo(SMALL.width / 2);
+    expect(cam.scrollY + cam.height / 2).toBeCloseTo(SMALL.height / 2);
+  });
+
+  it('follows the new follow bounds when the zoom changes under it', async () => {
+    const scene = await bootHostScene();
+    const cam = scene.cameras.main;
+    cam.startFollow(scene.target);
+    new CameraPanLayer(layerOptions(scene, { worldBounds: SMALL }));
+    await nextFrame(scene);
+    expect(cam.getBounds()).toMatchObject(followBounds(SMALL, cam, 1));
+
+    cam.setZoom(2);
+    await nextFrame(scene);
+
+    expect(cam.getBounds()).toMatchObject(followBounds(SMALL, cam, 2));
+  });
+
+  it('after a pan at 0.5 the glide lands on the centered position and reattaches without a jump', async () => {
+    const scene = await bootHostScene();
+    const cam = scene.cameras.main;
+    cam.setZoom(0.5);
+    cam.startFollow(scene.target);
+    const startFollow = vi.spyOn(cam, 'startFollow');
+    new CameraPanLayer(layerOptions(scene, { worldBounds: SMALL }));
+    await nextFrame(scene);
+
+    scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, camera: cam }), []);
+    scene.input.emit('pointermove', fakePointer({ x: 160, y: 140, camera: cam }));
+    scene.input.emit('pointerup', fakePointer({ x: 160, y: 140, camera: cam }));
+    await nextFrame(scene);
+    scene.target.x += 32;
+
+    const scrolls: number[] = [];
+    let reattachFrame = -1;
+    for (let frame = 0; frame < 160; frame++) {
+      await nextFrame(scene);
+      scrolls.push(cam.scrollX);
+      if (reattachFrame < 0 && startFollow.mock.calls.length > 0) reattachFrame = frame;
+    }
+
+    expect(reattachFrame).toBeGreaterThan(0);
+    // The frame that reattaches moves the camera by a glide step at most, never a clamp.
+    expect(Math.abs(scrolls[reattachFrame] - scrolls[reattachFrame - 1])).toBeLessThan(1);
+    expect(cam.getBounds()).toMatchObject(followBounds(SMALL, cam, 0.5));
+    expect(cam.scrollX + cam.width / 2).toBeCloseTo(SMALL.width / 2, 0);
+    expect(cam.scrollY + cam.height / 2).toBeCloseTo(SMALL.height / 2, 0);
+  });
+
+  it.each([
+    { zoom: 0.5, expected: 200 },
+    { zoom: 2, expected: 50 },
+  ])('a 100 screen px drag at zoom $zoom scrolls $expected world px', async ({ zoom, expected }) => {
+    const scene = await bootHostScene();
+    const cam = scene.cameras.main;
+    cam.setZoom(zoom);
+    const startScrollX = cam.scrollX;
+    new CameraPanLayer(layerOptions(scene));
+
+    scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, camera: cam }), []);
+    scene.input.emit('pointermove', fakePointer({ x: 200, y: 100, camera: cam }));
+
+    expect(startScrollX - cam.scrollX).toBeCloseTo(expected);
   });
 });

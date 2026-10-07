@@ -67,6 +67,30 @@ export function navigationBounds(
 }
 
 /**
+ * Bounds while the camera follows the player, aware of zoom. Phaser's clamp
+ * collapses to the bounds start when the visible area (view / zoom) covers the
+ * bounds, which would pin the world to the top-left; on such an axis the bounds
+ * are widened to exactly the visible area, centered on the world, so the clamp
+ * pins the world centered instead. Otherwise the axis is the world's own span.
+ */
+export function followBounds(
+  world: Rect,
+  view: { width: number; height: number },
+  zoom: number,
+): Rect {
+  const displayWidth = view.width / zoom;
+  const displayHeight = view.height / zoom;
+  const centeredX = displayWidth >= world.width;
+  const centeredY = displayHeight >= world.height;
+  return {
+    x: centeredX ? world.x - (displayWidth - world.width) / 2 : world.x,
+    y: centeredY ? world.y - (displayHeight - world.height) / 2 : world.y,
+    width: centeredX ? displayWidth : world.width,
+    height: centeredY ? displayHeight : world.height,
+  };
+}
+
+/**
  * Un cuadro de planeo: la misma interpolacion por cuadro que `startFollow`
  * con lerp, para que volver al jugador o ir a un punto del minimapa se sienta
  * igual que el seguimiento de siempre.
