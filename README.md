@@ -13,7 +13,7 @@ The product reference is `PRD-Oficina-Virtual.md` (Spanish; architecture in sect
 - **Desks and decoration**: claim a desk, customize it from an asset catalog.
 - **Meeting recording**: record a space with LiveKit Egress to Google Cloud Storage, REC badge for everyone in the room, view or download through a short-lived signed URL, kept 30 days.
 - **Email + password sign-in** with GCP Identity Platform (Firebase Auth), verified server-side.
-- **Installable PWA**: web app manifest, icons and a service worker that precaches only the app shell, so the office installs as an app over HTTPS from its own "Instalar app" button (Chrome and Edge prompt; Safari on iOS and macOS gets the steps). Push notifications are not built yet.
+- **Installable PWA**: web app manifest, icons and a service worker that precaches only the hashed bundles (every load boots the deployed page from the network), so the office installs as an app over HTTPS from its own "Instalar app" button (Chrome and Edge prompt; Safari on iOS and macOS gets the steps). Push notifications are not built yet.
 - **Admin dashboard** at `/dashboard` (reached by URL, no link in the UI): invitations, users and roles, spaces, desks and assets, backed by Postgres.
 
 The UI copy is in Spanish.

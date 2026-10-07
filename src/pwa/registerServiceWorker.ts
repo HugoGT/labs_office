@@ -1,37 +1,22 @@
 /**
  * Registers the Workbox service worker that `vite-plugin-pwa` generates
- * (#13, strategy in `tools/pwa/pwaOptions.ts`) and moves the page onto a new
- * version once that version takes control.
+ * (#13, strategy in `tools/pwa/pwaOptions.ts`).
  *
- * The worker activates at once (`skipWaiting` + `clientsClaim`) and deletes
- * the previous build's bundles from its cache, so a page still running the
- * old build could ask for a lazy chunk that no longer exists anywhere. The
- * reload avoids that. It happens right after a load that found a new deploy,
- * since the browser only looks for a new `sw.js` on navigation and this SPA
- * never navigates: nobody is reloaded out of a call that is already going.
- *
- * The very first worker also claims the page, but that page already runs the
- * current build, so it is not reloaded.
+ * The worker never answers a navigation, so every load already boots the
+ * deployed index.html and its bundles. A new worker activating afterwards
+ * (`skipWaiting` + `clientsClaim`) only refreshes the precache of a page that
+ * runs the current build, so nothing reloads. Reloading here used to show
+ * the office twice after every deploy: once from the previous deploy's
+ * precached shell, then again from the new one.
  */
 
 export interface ServiceWorkerHost {
-  readonly controller: object | null;
   register(url: string, options: { scope: string }): Promise<unknown>;
-  addEventListener(type: 'controllerchange', listener: () => void): void;
 }
 
 export const SERVICE_WORKER_URL = '/sw.js';
 
-export async function registerServiceWorker(host: ServiceWorkerHost, reload: () => void): Promise<void> {
-  let current = host.controller;
-  let reloading = false;
-  host.addEventListener('controllerchange', () => {
-    const replaced = current !== null;
-    current = host.controller;
-    if (!replaced || reloading) return;
-    reloading = true;
-    reload();
-  });
+export async function registerServiceWorker(host: ServiceWorkerHost): Promise<void> {
   try {
     await host.register(SERVICE_WORKER_URL, { scope: '/' });
   } catch (error) {

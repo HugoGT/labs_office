@@ -4,23 +4,27 @@
  * `vite.config.ts`; guarded by `pwaOptions.test.ts`.
  *
  * What the service worker caches is the whole privacy story, so it is kept
- * to one rule: it precaches the files `vite build` emits (index.html, the
- * hashed bundles under /assets/, the icons and the manifest) and nothing else.
- * There is no runtime caching at all: every request the precache does not
- * list (the whole server API, Colyseus, LiveKit, uploaded and pending art,
- * the art pack) is never answered by the worker, so the browser sends it to
- * the network as if no worker existed. A private response cannot be cached
- * because no cache ever sees a response.
+ * to one rule: it precaches the hashed bundles `vite build` emits under
+ * /assets/ (plus the icons and the manifest the plugin adds) and nothing
+ * else. There is no runtime caching at all: every request the precache does
+ * not list (the whole server API, Colyseus, LiveKit, uploaded and pending
+ * art, the art pack) is never answered by the worker, so the browser sends it
+ * to the network as if no worker existed. A private response cannot be
+ * cached because no cache ever sees a response.
+ *
+ * Navigations are never answered either, index.html included: a precached
+ * shell is the previous deploy's, which booted the old office and then
+ * reloaded onto the new one once the new worker took over. From the network,
+ * every load runs the deployed build, and the precache only saves the
+ * download of bundles that did not change. Offline there is no shell, which
+ * costs nothing: the office cannot work without its server.
  *
  * Updates: `autoUpdate` with `skipWaiting` + `clientsClaim`. A deploy changes
- * index.html's revision and the bundle names, so the next load installs a new
- * worker that precaches the new shell, activates at once (no waiting until
- * every tab closes) and deletes every entry the new manifest dropped, which
- * is how no stale bundle stays behind. `cleanupOutdatedCaches` also drops
- * caches left by older Workbox versions. The page then reloads once onto the
- * new shell (`src/pwa/registerServiceWorker.ts`). The prompt strategy was
- * rejected: a tab nobody reloads would keep running a deleted build, and the
- * office has no screen to ask from.
+ * the bundle names, so the next load installs a new worker that precaches
+ * them, activates at once and deletes every entry the new manifest dropped.
+ * `cleanupOutdatedCaches` also drops caches left by older Workbox versions.
+ * The page is not reloaded (`src/pwa/registerServiceWorker.ts`): it already
+ * runs that build.
  */
 import type { ManifestOptions, VitePWAOptions } from 'vite-plugin-pwa';
 import { PWA_ICONS } from './pwaIcons.ts';
@@ -42,44 +46,26 @@ export const PWA_MANIFEST = {
   icons: PWA_ICONS.map((icon) => ({ src: icon.src, sizes: icon.sizes, type: 'image/png', purpose: icon.purpose })),
 } satisfies Partial<ManifestOptions>;
 
-/**
- * First path segments the `web` container never answers with the SPA: every
- * server route (`server/src/createOfficeServer.ts`, routed by the Caddyfile),
- * Colyseus matchmaking, and /assets/ (Vite bundles, the art pack and uploaded
- * art are files, never pages). `pwaOptions.test.ts` reads both source files,
- * so a new server route without its prefix here fails there.
- */
-const SERVER_PATH_PREFIXES = ['admin', 'assets', 'desks', 'health', 'livekit', 'matchmake', 'me', 'recordings', 'spaces'];
-
-/**
- * Navigations the worker must leave to the network instead of answering with
- * the precached index.html. Workbox tests them against `pathname + search`.
- * Without this, opening a server URL in a tab (a signed recording link, a
- * private art preview under /me/art/files/) would show the office instead.
- * Any path with a file extension (sw.js, the manifest, icons) is a file too.
- */
-export const NAVIGATE_FALLBACK_DENYLIST: RegExp[] = [
-  new RegExp(`^/(?:${SERVER_PATH_PREFIXES.join('|')})(?:[/?]|$)`),
-  /^\/[^?]*\.[A-Za-z0-9]+(?:\?|$)/,
-];
-
 export function pwaOptions(mode: string): Partial<VitePWAOptions> {
   return {
     // The E2E build gets no worker at all: Playwright drives a page whose
     // network the harness controls, never one a worker could answer.
     disable: mode === 'e2e',
-    // Registered from `src/main.tsx`, which also reloads onto a new version.
+    // Registered from `src/main.tsx`.
     injectRegister: false,
     registerType: 'autoUpdate',
     manifest: PWA_MANIFEST,
     workbox: {
-      globPatterns: ['**/*.{js,css,html}'],
+      // No html: a precached index.html would answer `/` (Workbox's
+      // directoryIndex) with the shell of the deploy that installed the worker.
+      globPatterns: ['**/*.{js,css}'],
       // The art pack keeps stable names and nginx revalidates it with
       // `no-cache`; precached, a new `pnpm art:export` would wait for a
       // worker update, and it is megabytes the shell does not need to start.
       globIgnores: ['assets/pack/**'],
-      navigateFallback: 'index.html',
-      navigateFallbackDenylist: NAVIGATE_FALLBACK_DENYLIST,
+      // Navigations go to the network, so every load boots the deployed
+      // index.html. The plugin defaults this to index.html; null turns it off.
+      navigateFallback: null,
       runtimeCaching: [],
       skipWaiting: true,
       clientsClaim: true,
