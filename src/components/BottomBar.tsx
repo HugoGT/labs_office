@@ -39,6 +39,11 @@ export interface BottomBarProps {
   screenShareOn: boolean;
   /** Connected to a space room: shares are per space, never on the open floor (#20). */
   screenShareAvailable: boolean;
+  /**
+   * Someone in this space room publishes an unmuted track (#144). Egress
+   * cannot start recording a room with nothing in it.
+   */
+  recordableMedia: boolean;
   onToggleScreenShare: () => void;
 }
 
@@ -52,6 +57,8 @@ const DND_TITLE = 'No molestar: no publicas micrófono ni cámara';
 const ONLY_IN_SPACE_TITLE = 'Solo disponible dentro de una sala';
 
 const SCREEN_SHARE_DND_TITLE = 'No molestar: no compartes pantalla';
+
+const NOTHING_TO_RECORD_TITLE = 'No hay cámaras, pantalla o audio que grabar';
 
 /**
  * Un title por estado de sesion (#52). Reciclar el de "conectado" para la
@@ -89,6 +96,7 @@ export function BottomBar({
   onRetryConnection,
   screenShareOn,
   screenShareAvailable,
+  recordableMedia,
   onToggleScreenShare,
 }: BottomBarProps) {
   // Se deriva del estado en vez de recibirse como prop propia: dos fuentes
@@ -109,6 +117,9 @@ export function BottomBar({
       : screenShareAvailable
         ? undefined
         : ONLY_IN_SPACE_TITLE;
+  // Stopping never waits for media: a recording outlives a mic turned off.
+  const recordTitle =
+    room === null ? ONLY_IN_SPACE_TITLE : recording || recordableMedia ? undefined : NOTHING_TO_RECORD_TITLE;
 
   return (
     // Three sibling blocks placed by the CSS grid: one row on wide screens
@@ -167,8 +178,8 @@ export function BottomBar({
         <button
           type="button"
           className={styles.btn}
-          disabled={room === null}
-          title={room === null ? ONLY_IN_SPACE_TITLE : undefined}
+          disabled={recordTitle !== undefined}
+          title={recordTitle}
           onClick={onToggleRecord}
         >
           {recording ? '⏹ Detener' : '⏺ Grabar'}

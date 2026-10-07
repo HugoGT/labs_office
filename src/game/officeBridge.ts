@@ -322,9 +322,25 @@ export interface OfficeBridge {
   emitCommand<K extends keyof OfficeCommandMap>(type: K, payload: OfficeCommandMap[K]): void;
 }
 
+/**
+ * Commands whose payload is the whole current state, not an action (#144).
+ * React emits them as soon as it knows them, which can be before the scene
+ * subscribes: `preload()` waits for the art pack, and `create()` subscribes
+ * only after it. The bridge keeps the latest one of each and hands it to a
+ * subscriber that arrives later. Actions (teleport, calls, reconnect, seat)
+ * are never replayed: running one twice, or late, would be a new action.
+ */
+const STATE_COMMANDS: ReadonlySet<keyof OfficeCommandMap> = new Set<keyof OfficeCommandMap>([
+  'spacesconfig',
+  'desks',
+  'setStatus',
+  'speakers',
+]);
+
 export function createOfficeBridge(): OfficeBridge {
   const events = new EventTarget();
   const commands = new EventTarget();
+  const latestState = new Map<keyof OfficeCommandMap, unknown>();
 
   function subscribe<T>(target: EventTarget, type: string, handler: (payload: T) => void): () => void {
     const controller = new AbortController();
@@ -340,7 +356,32 @@ export function createOfficeBridge(): OfficeBridge {
     type: K,
     payload: OfficeCommandMap[K],
   ): void {
+    if (STATE_COMMANDS.has(type)) latestState.set(type, payload);
     commands.dispatchEvent(new CustomEvent(type, { detail: payload }));
+  }
+
+  function subscribeCommand<K extends keyof OfficeCommandMap>(
+    type: K,
+    handler: (payload: OfficeCommandMap[K]) => void,
+  ): () => void {
+    let delivered = false;
+    let active = true;
+    const unsubscribe = subscribe<OfficeCommandMap[K]>(commands, type, (payload) => {
+      delivered = true;
+      handler(payload);
+    });
+    // After the subscriber's current task, not inside it: the scene subscribes
+    // early in `create()` and its handlers draw with what it builds later. A
+    // live emit in between already brought something newer, so it wins.
+    if (latestState.has(type)) {
+      queueMicrotask(() => {
+        if (active && !delivered) handler(latestState.get(type) as OfficeCommandMap[K]);
+      });
+    }
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }
 
   return {
@@ -350,9 +391,7 @@ export function createOfficeBridge(): OfficeBridge {
     emit(type, payload) {
       events.dispatchEvent(new CustomEvent(type, { detail: payload }));
     },
-    onCommand(type, handler) {
-      return subscribe(commands, type, handler);
-    },
+    onCommand: subscribeCommand,
     emitCommand: dispatchCommand,
   };
 }

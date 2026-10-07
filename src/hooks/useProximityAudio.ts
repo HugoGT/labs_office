@@ -95,6 +95,11 @@ export interface UseProximityAudioResult {
   localScreenShareTrack: AttachableTrack | null;
   /** Holder of the single share slot of this space, with the name to announce (#20). */
   activeScreenSharer: ActiveScreenSharer | null;
+  /**
+   * Connected to a space room where someone publishes an unmuted track
+   * (#144). Egress cannot start a recording of a room with nothing in it.
+   */
+  recordableMedia: boolean;
 }
 
 export interface ActiveScreenSharer {
@@ -129,6 +134,7 @@ export function useProximityAudio(
   );
   const [activeScreenSharer, setActiveScreenSharer] = useState<ActiveScreenSharer | null>(null);
   const [inSpaceRoom, setInSpaceRoom] = useState(false);
+  const [roomHasMedia, setRoomHasMedia] = useState(false);
   /** Names from the latest `voice` (self included), to announce who started sharing (#20). */
   const namesRef = useRef<ReadonlyMap<string, string>>(new Map());
   /** A share request in flight: the browser picker is open, a second click must not open another. */
@@ -218,6 +224,7 @@ export function useProximityAudio(
       setVideoTracks((current) => (current.size === 0 ? current : new Map()));
       setSpeakers((current) => (current.size === 0 ? current : new Set()));
       setLocalVideoTrack(null);
+      setRoomHasMedia(false);
       resetScreenShare();
     }
 
@@ -290,6 +297,10 @@ export function useProximityAudio(
               ? null
               : { sessionId, name: namesRef.current.get(sessionId) ?? UNKNOWN_SHARER_NAME },
           );
+        },
+        onRoomMediaChanged: (hasMedia) => {
+          if (!isCurrent()) return;
+          setRoomHasMedia(hasMedia);
         },
         onDisconnected: () => {
           // LiveKit gave up on this room (#84). Nothing else would notice:
@@ -565,6 +576,7 @@ export function useProximityAudio(
   }, [camOn, dnd]);
 
   const screenShareAvailable = audioAvailable && inSpaceRoom;
+  const recordableMedia = screenShareAvailable && roomHasMedia;
   const screenShareOn = localScreenShareTrack !== null;
 
   /**
@@ -599,5 +611,6 @@ export function useProximityAudio(
     screenShareTracks,
     localScreenShareTrack,
     activeScreenSharer,
+    recordableMedia,
   };
 }

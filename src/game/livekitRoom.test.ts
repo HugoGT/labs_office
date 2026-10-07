@@ -60,13 +60,19 @@ function fakeTrack(kind: 'audio' | 'video' = 'audio'): AttachableTrack {
  */
 function fakePublication(
   kind: 'audio' | 'video',
-  { source, trackName, track }: { source?: string; trackName?: string; track?: unknown } = {},
+  {
+    source,
+    trackName,
+    track,
+    isMuted = false,
+  }: { source?: string; trackName?: string; track?: unknown; isMuted?: boolean } = {},
 ) {
   const publication = {
     kind,
     source,
     trackName,
     track,
+    isMuted,
     isSubscribed: false,
     setSubscribed: vi.fn((value: boolean) => {
       publication.isSubscribed = value;
@@ -693,5 +699,94 @@ describe('connectLivekitRoom: a room lost for good is reported (#84)', () => {
     await connection.disconnect();
 
     expect(onDisconnected).not.toHaveBeenCalled();
+  });
+});
+
+describe('connectLivekitRoom: whether the room has anything to record (#144)', () => {
+  function connectWithMedia(room: ReturnType<typeof fakeRoom>) {
+    const onRoomMediaChanged = vi.fn();
+    const connected = connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onRoomMediaChanged,
+    });
+    return { connected, onRoomMediaChanged };
+  }
+
+  it('reports an empty room right after connecting', async () => {
+    const room = fakeRoom();
+    const { connected, onRoomMediaChanged } = connectWithMedia(room);
+    await connected;
+
+    expect(onRoomMediaChanged.mock.calls).toEqual([[false]]);
+  });
+
+  it('a peer already publishing when joining is reported right after connecting', async () => {
+    const room = fakeRoom();
+    room.remoteParticipants.set('p1', fakeParticipant([fakePublication('audio', { source: 'microphone' })]));
+    const { connected, onRoomMediaChanged } = connectWithMedia(room);
+    await connected;
+
+    expect(onRoomMediaChanged.mock.calls).toEqual([[true]]);
+  });
+
+  it('follows a peer publishing and unpublishing, whether or not this client subscribes', async () => {
+    const room = fakeRoom();
+    const { connected, onRoomMediaChanged } = connectWithMedia(room);
+    await connected;
+
+    const participant = fakeParticipant([fakePublication('video', { source: 'screen_share' })]);
+    room.remoteParticipants.set('p1', participant);
+    room.emit(RoomEvent.TrackPublished);
+    participant.trackPublications.clear();
+    room.emit(RoomEvent.TrackUnpublished);
+
+    expect(onRoomMediaChanged.mock.calls).toEqual([[false], [true], [false]]);
+  });
+
+  it('a muted microphone has nothing to record until it is unmuted', async () => {
+    const room = fakeRoom();
+    const microphone = fakePublication('audio', { source: 'microphone', isMuted: true });
+    room.remoteParticipants.set('p1', fakeParticipant([microphone]));
+    const { connected, onRoomMediaChanged } = connectWithMedia(room);
+    await connected;
+
+    microphone.isMuted = false;
+    room.emit(RoomEvent.TrackUnmuted);
+    microphone.isMuted = true;
+    room.emit(RoomEvent.TrackMuted);
+
+    expect(onRoomMediaChanged.mock.calls).toEqual([[false], [true], [false]]);
+  });
+
+  it('counts the own camera, and a peer leaving takes its media along', async () => {
+    const room = fakeRoom();
+    const { connected, onRoomMediaChanged } = connectWithMedia(room);
+    await connected;
+
+    const camera = fakePublication('video', { source: 'camera', track: fakeTrack('video') });
+    room.localParticipant.trackPublications.set('cam', camera);
+    room.emit(RoomEvent.LocalTrackPublished, camera);
+    room.localParticipant.trackPublications.delete('cam');
+    room.emit(RoomEvent.LocalTrackUnpublished, camera);
+    room.remoteParticipants.set('p1', fakeParticipant([fakePublication('audio', { source: 'microphone' })]));
+    room.emit(RoomEvent.ParticipantConnected);
+    room.remoteParticipants.delete('p1');
+    room.emit(RoomEvent.ParticipantDisconnected);
+
+    expect(onRoomMediaChanged.mock.calls).toEqual([[false], [true], [false], [true], [false]]);
+  });
+
+  it('reports changes only, never the same answer twice in a row', async () => {
+    const room = fakeRoom();
+    room.remoteParticipants.set('p1', fakeParticipant([fakePublication('audio', { source: 'microphone' })]));
+    const { connected, onRoomMediaChanged } = connectWithMedia(room);
+    await connected;
+
+    room.emit(RoomEvent.TrackPublished);
+    room.emit(RoomEvent.TrackUnmuted);
+
+    expect(onRoomMediaChanged.mock.calls).toEqual([[true]]);
   });
 });

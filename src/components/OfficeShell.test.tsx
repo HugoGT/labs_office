@@ -153,6 +153,7 @@ function proximityAudio(
     screenShareTracks: new Map(),
     localScreenShareTrack: null,
     activeScreenSharer: null,
+    recordableMedia: false,
     ...overrides,
   };
 }
@@ -236,6 +237,10 @@ describe('OfficeShell', () => {
   });
 
   describe('recording (#5): server-owned, visible to every occupant', () => {
+    beforeEach(() => {
+      useProximityAudioMock.mockReturnValue(proximityAudio({ recordableMedia: true }));
+    });
+
     const SELF = 'ses-me';
 
     function renderInRoom(spaceId = 'space-stub', name = 'Sala de Juntas') {
@@ -245,6 +250,15 @@ describe('OfficeShell', () => {
       act(() => bridge.emit('room', { spaceId, name }));
       return bridge;
     }
+
+    it('a room nobody publishes in offers nothing to record (#144)', () => {
+      useProximityAudioMock.mockReturnValue(proximityAudio({ recordableMedia: false }));
+      renderInRoom();
+
+      const button = screen.getByRole('button', { name: /Grabar/ });
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute('title', 'No hay cámaras, pantalla o audio que grabar');
+    });
 
     it('clicking Grabar asks the server to start; the badge waits for the synced state', async () => {
       const user = userEvent.setup();

@@ -35,6 +35,7 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
     onRetryConnection: vi.fn(),
     screenShareOn: false,
     screenShareAvailable: true,
+    recordableMedia: true,
     onToggleScreenShare: vi.fn(),
     ...overrides,
   };
@@ -80,6 +81,31 @@ describe('BottomBar', () => {
     expect(screen.getByRole('button', { name: /Grabar/ })).toBeEnabled();
   });
 
+  it('a room with nothing published has nothing to record, and says so (#144)', () => {
+    renderBar({ room: 'Sala de Juntas', recordableMedia: false });
+
+    const button = screen.getByRole('button', { name: /Grabar/ });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('title', 'No hay cámaras, pantalla o audio que grabar');
+  });
+
+  it('outside a room the reason stays the room, not the media (#144)', () => {
+    renderBar({ room: null, recordableMedia: false });
+
+    expect(screen.getByRole('button', { name: /Grabar/ })).toHaveAttribute(
+      'title',
+      'Solo disponible dentro de una sala',
+    );
+  });
+
+  it('a running recording can always be stopped, even once the media is gone (#144)', () => {
+    renderBar({ room: 'Sala de Juntas', recording: true, recordableMedia: false });
+
+    const button = screen.getByRole('button', { name: /Detener/ });
+    expect(button).toBeEnabled();
+    expect(button).not.toHaveAttribute('title');
+  });
+
   it('muestra el estado de proximidad fuera de una sala y el de sala privada dentro', () => {
     const { rerender } = render(
       <BottomBar
@@ -98,6 +124,7 @@ describe('BottomBar', () => {
         onRetryConnection={vi.fn()}
         screenShareOn={false}
         screenShareAvailable={false}
+        recordableMedia={false}
         onToggleScreenShare={vi.fn()}
       />,
     );
@@ -120,6 +147,7 @@ describe('BottomBar', () => {
         onRetryConnection={vi.fn()}
         screenShareOn={false}
         screenShareAvailable={false}
+        recordableMedia={false}
         onToggleScreenShare={vi.fn()}
       />,
     );
@@ -209,6 +237,7 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
         onRetryConnection={vi.fn()}
         screenShareOn={false}
         screenShareAvailable={false}
+        recordableMedia={false}
         onToggleScreenShare={vi.fn()}
       />,
     );
@@ -234,6 +263,7 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
         onRetryConnection={vi.fn()}
         screenShareOn={false}
         screenShareAvailable={false}
+        recordableMedia={false}
         onToggleScreenShare={vi.fn()}
       />,
     );
@@ -544,6 +574,7 @@ describe('BottomBar: indicador de grabacion junto a "Sala privada" (#85)', () =>
         onRetryConnection={vi.fn()}
         screenShareOn={false}
         screenShareAvailable={false}
+        recordableMedia={false}
         onToggleScreenShare={vi.fn()}
       />,
     );
@@ -566,6 +597,7 @@ describe('BottomBar: indicador de grabacion junto a "Sala privada" (#85)', () =>
         onRetryConnection={vi.fn()}
         screenShareOn={false}
         screenShareAvailable={false}
+        recordableMedia={false}
         onToggleScreenShare={vi.fn()}
       />,
     );

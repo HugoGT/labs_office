@@ -68,6 +68,65 @@ describe('createOfficeBridge', () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
+  it('hands a late subscriber the latest state command, once, after it subscribed (#144)', async () => {
+    const bridge = createOfficeBridge();
+    const old = { spaces: [], version: 'old' };
+    const latest = { spaces: [], version: 'latest' };
+    bridge.emitCommand('spacesconfig', old);
+    bridge.emitCommand('spacesconfig', latest);
+    bridge.emitCommand('desks', { desks: [] });
+    bridge.emitCommand('setStatus', { status: 'y' });
+    bridge.emitCommand('speakers', { sessionIds: ['sess-a'] });
+
+    const onSpaces = vi.fn();
+    const onDesks = vi.fn();
+    const onStatus = vi.fn();
+    const onSpeakers = vi.fn();
+    bridge.onCommand('spacesconfig', onSpaces);
+    bridge.onCommand('desks', onDesks);
+    bridge.onCommand('setStatus', onStatus);
+    bridge.onCommand('speakers', onSpeakers);
+    // Never in the middle of the subscriber's own setup: the scene subscribes
+    // early in `create()` and draws with things it builds afterwards.
+    expect(onSpaces).not.toHaveBeenCalled();
+
+    await Promise.resolve();
+    expect(onSpaces.mock.calls).toEqual([[latest]]);
+    expect(onDesks.mock.calls).toEqual([[{ desks: [] }]]);
+    expect(onStatus.mock.calls).toEqual([[{ status: 'y' }]]);
+    expect(onSpeakers.mock.calls).toEqual([[{ sessionIds: ['sess-a'] }]]);
+  });
+
+  it('a newer emit before the replay wins, and an unsubscribed handler gets nothing (#144)', async () => {
+    const bridge = createOfficeBridge();
+    bridge.emitCommand('spacesconfig', { spaces: [], version: 'old' });
+    const live = vi.fn();
+    const gone = vi.fn();
+    bridge.onCommand('spacesconfig', live);
+    bridge.onCommand('spacesconfig', gone)();
+    bridge.emitCommand('spacesconfig', { spaces: [], version: 'new' });
+
+    await Promise.resolve();
+    expect(live.mock.calls).toEqual([[{ spaces: [], version: 'new' }]]);
+    expect(gone).not.toHaveBeenCalled();
+  });
+
+  it('never replays an action command to a late subscriber (#144)', async () => {
+    const bridge = createOfficeBridge();
+    bridge.emitCommand('teleportToTile', { tx: 1, ty: 1 });
+    bridge.emitCommand('callPeer', { sessionId: 'sess-a' });
+    bridge.emitCommand('walkToPeer', { sessionId: 'sess-a' });
+    bridge.emitCommand('reconnect', undefined);
+    const handler = vi.fn();
+    bridge.onCommand('teleportToTile', handler);
+    bridge.onCommand('callPeer', handler);
+    bridge.onCommand('walkToPeer', handler);
+    bridge.onCommand('reconnect', handler);
+
+    await Promise.resolve();
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it('dos comandos comparten canal pero no se confunden entre tipos', () => {
     const bridge = createOfficeBridge();
     const onTeleportToTile = vi.fn();
