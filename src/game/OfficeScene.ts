@@ -161,6 +161,8 @@ const ART_FALLBACK_ALPHA = 0.6;
  * lo cubren los tests de la capa node contra un servidor de verdad.
  */
 export interface OfficeSceneOptions {
+  /** The React shell supplies initial desks/spaces before the office can be revealed. */
+  waitForOfficeData?: boolean;
   /** `null` desactiva el multijugador: la oficina corre en solitario. */
   endpoint?: string | null;
   /**
@@ -450,6 +452,30 @@ export class OfficeScene extends Phaser.Scene {
    * el HUD, y un humano nervioso pulsa el boton mas de una vez.
    */
   private reconnecting = false;
+  private connectionSettled = false;
+  private entranceDenied = false;
+  private initialSpaces = false;
+  private initialDesks = false;
+  private entryReported = false;
+  private readonly entrancePieces = new Set<string>();
+
+  /** Runs after a real render, never on a timer or just on scene creation. */
+  private readonly checkEntry = (): void => {
+    if (!this.alive || this.entryReported || this.entranceDenied || !this.connectionSettled) return;
+    if (this.options.waitForOfficeData && (!this.initialSpaces || !this.initialDesks)) return;
+    if (!this.localAvatarKnown) return;
+    if (this.pendingRedraws.size > 0) return;
+    const statuses = [...this.entrancePieces].map((id) => this.art.status(id));
+    if (this.art.manifest !== null && !statuses.includes('failed') && statuses.includes('loading')) return;
+    this.entryReported = true;
+    const failed = this.art.manifest === null || statuses.includes('failed') || this.player.sheets === null;
+    this.bridge.emit('entry', { state: failed ? 'failed' : 'ready' });
+  };
+
+  private requestArt(pieceId: string, onSettled: () => void): ReturnType<ArtPackLoader['request']> {
+    if (!this.entryReported) this.entrancePieces.add(pieceId);
+    return this.art.request(pieceId, onSettled);
+  }
 
   constructor(bridge: OfficeBridge, options: OfficeSceneOptions = {}) {
     super(OFFICE_SCENE_KEY);
@@ -489,7 +515,19 @@ export class OfficeScene extends Phaser.Scene {
     // El nombre de la sesion manda sobre la pildora del avatar local (#6).
     // Sin sesion (desarrollo local, e2e) cae en `DEFAULT_NAME`, que es como
     // llama el servidor a quien entra sin identidad verificada.
-    this.player = spawnPlayer(this, this.options.playerName ?? DEFAULT_NAME);
+    this.player = spawnPlayer(this, this.options.playerName ?? DEFAULT_NAME, this.characterSheets(null));
+    // Only art the initial office actually draws; an unused broken upload cannot block entry.
+    for (const id of ['tileset-terrain', BASE_MAP_CHAIR, ...BASE_LAYOUT.walls, ...BASE_LAYOUT.hedges,
+      ...BASE_LAYOUT.props.map((prop) => prop.piece)]) {
+      if (id !== null) this.entrancePieces.add(id);
+    }
+    this.game.events.on(Phaser.Core.Events.POST_RENDER, this.checkEntry);
+    const stopEntry = (): void => {
+      this.alive = false;
+      this.game.events.off(Phaser.Core.Events.POST_RENDER, this.checkEntry);
+    };
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, stopEntry);
+    this.events.once(Phaser.Scenes.Events.DESTROY, stopEntry);
 
     // Arcade's discrete collision checks cannot safely take a whole 5x frame.
     // Step it here in bounded slices, syncing containers after each separation.
@@ -655,7 +693,7 @@ export class OfficeScene extends Phaser.Scene {
       window.removeEventListener('focusout', this.handleFocusChange);
     });
 
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+    const cleanupOffice = (): void => {
       this.alive = false;
       this.unsubscribeSetStatus?.();
       this.unsubscribeSpeakers?.();
@@ -678,7 +716,9 @@ export class OfficeScene extends Phaser.Scene {
       this.roster?.clear();
       void this.connection?.leave();
       this.connection = undefined;
-    });
+    };
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, cleanupOffice);
+    this.events.once(Phaser.Scenes.Events.DESTROY, cleanupOffice);
 
     this.time.addEvent({
       delay: PROXIMITY_TICK_MS,
@@ -686,7 +726,7 @@ export class OfficeScene extends Phaser.Scene {
       callback: () => this.proximityTick(),
     });
 
-    void this.connectToOffice();
+    void this.connectToOffice().finally(() => { this.connectionSettled = true; });
   }
 
   /**
@@ -803,7 +843,10 @@ export class OfficeScene extends Phaser.Scene {
       // #129: a refused account is not a missing server. "Sin servidor" with
       // its retry button would send the person against a server that is up
       // and has already said no; `denied` hands the reason up instead.
-      if (error instanceof OfficeAccessDeniedError) this.emitPresence('denied', error.reason);
+      if (error instanceof OfficeAccessDeniedError) {
+        this.entranceDenied = true;
+        this.emitPresence('denied', error.reason);
+      }
       else this.emitPresence('offline');
       this.emitVoice(null, [], this.currentSpaceId);
     }
@@ -830,7 +873,7 @@ export class OfficeScene extends Phaser.Scene {
   private requestCharacter(avatarId: string | null): void {
     const id = avatarId ?? this.art.manifest?.defaults.character;
     if (id === undefined || !this.alive) return;
-    if (this.art.request(id, () => this.scheduleRedraw(this.redrawCharacters)) === 'ready') this.redrawCharacters();
+    if (this.requestArt(id, () => this.scheduleRedraw(this.redrawCharacters)) === 'ready') this.redrawCharacters();
   }
 
   /** Loaded sheets of a character (`null` is the pack default), or `null` to stay procedural. */
@@ -1127,6 +1170,7 @@ export class OfficeScene extends Phaser.Scene {
    * deja al jugador donde estaba no emite nada -- que es lo correcto.
    */
   private applySpacesConfig(spaces: readonly SpaceArea[], version: string): void {
+    this.initialSpaces = true;
     // Before the version check: floors are outside the hash, so a served config
     // equal to the built-in one still brings the floors to draw.
     this.drawSpaceFloors(spaces);
@@ -1174,6 +1218,7 @@ export class OfficeScene extends Phaser.Scene {
    * `NO_DESKS` y la oficina se dibuja exactamente como antes de esta slice.
    */
   private applyDesks(desks: readonly OfficeDesk[]): void {
+    this.initialDesks = true;
     this.desks = desks;
     // Desks and their decor collide by their pieces' rectangles, wherever the list puts them.
     this.collisionInstances = officeCollisionInstances(desks);
@@ -1200,7 +1245,7 @@ export class OfficeScene extends Phaser.Scene {
     if (now !== null) return now;
     const piece = known();
     if (piece !== undefined && piece.kind !== kind) return null;
-    return this.art.request(appearance.materialId, () => this.scheduleRedraw(redraw)) === 'ready' ? ready() : null;
+    return this.requestArt(appearance.materialId, () => this.scheduleRedraw(redraw)) === 'ready' ? ready() : null;
   }
 
   /**
@@ -1386,7 +1431,7 @@ export class OfficeScene extends Phaser.Scene {
     // desk material: the fallback below stays until it lands, then redraws.
     const art = parseArtSheetKey(textureKey);
     if (art !== null && !this.textures.exists(textureKey)) {
-      this.art.request(art.pieceId, () => this.scheduleRedraw(this.redrawDesks));
+      this.requestArt(art.pieceId, () => this.scheduleRedraw(this.redrawDesks));
     }
 
     if (!this.textures.exists(textureKey)) {

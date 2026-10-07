@@ -34,6 +34,7 @@ import {
   combineArtManifests,
   findPiece,
   parseArtPackManifest,
+  parseArtSheetKey,
   pieceLoadRequests,
   recolorFor,
   recoloredSheetKey,
@@ -86,6 +87,7 @@ export class ArtPackLoader implements ArtTextures {
   private readonly reread = new Set<string>();
   private rereadCount = 0;
   private bound = false;
+  private readonly preloaded = new Set<string>();
 
   constructor(scene: Phaser.Scene, options: ArtPackLoaderOptions = {}) {
     this.scene = scene;
@@ -113,7 +115,11 @@ export class ArtPackLoader implements ArtTextures {
       this.readManifest(MANIFEST_KEYS[source], url, (manifest) => {
         if (manifest === null) return;
         this.adoptManifest(manifest, source);
-        for (const request of bootLoadRequests(manifest, url)) this.queue(request);
+        for (const request of bootLoadRequests(manifest, url)) {
+          const piece = parseArtSheetKey(request.key);
+          if (piece !== null) this.preloaded.add(piece.pieceId);
+          this.queue(request);
+        }
       });
     }
   }
@@ -257,6 +263,11 @@ export class ArtPackLoader implements ArtTextures {
     // with index.html) fails without a `loaderror`; once the batch is over,
     // whatever is still waiting and not loaded has failed.
     this.scene.load.on('complete', () => {
+      for (const pieceId of this.preloaded) {
+        const piece = this.manifest === null ? undefined : findPiece(this.manifest, pieceId);
+        if (piece === undefined || !this.isLoaded(piece)) this.failed.add(pieceId);
+      }
+      this.preloaded.clear();
       for (const pieceId of [...this.waiting.keys()]) {
         const piece = this.manifest === null ? undefined : findPiece(this.manifest, pieceId);
         this.settle(pieceId, piece === undefined || !this.isLoaded(piece));

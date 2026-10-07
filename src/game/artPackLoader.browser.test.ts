@@ -62,9 +62,9 @@ describe('ArtPackLoader', () => {
     expect(scene.textures.get(grass as string).get(4).width).toBe(32);
     expect(art.sheet('desk-wood', 'sheet')).not.toBeNull();
     expect(art.sheet('chair-leather', 'sheet')).not.toBeNull();
-    // Characters are not drawn from the pack yet: nothing downloads them up front.
-    expect(art.sheet('character-p01-burgundy-suit', 'walk')).toBeNull();
-    expect(scene.textures.exists(artSheetKey('character-p01-burgundy-suit', 'walk'))).toBe(false);
+    // The default current character boots with the office; other characters stay on demand.
+    expect(art.sheet('character-p01-burgundy-suit', 'walk')).toBe(artSheetKey('character-p01-burgundy-suit', 'walk'));
+    expect(scene.textures.exists(artSheetKey('character-p02-beige-blazer', 'walk'))).toBe(false);
   });
 
   it('loads a piece on request during the session and tells the caller once it is ready', async () => {

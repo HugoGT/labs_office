@@ -3,8 +3,10 @@ import type Phaser from 'phaser';
 import type { OfficeSession } from '../auth/authPort';
 import { createGame } from '../game/createGame';
 import type { OfficeBridge } from '../game/officeBridge';
+import type { OfficeEntryState } from './OfficeEntry';
 
 export interface GameCanvasProps {
+  onEntryState?: (state: OfficeEntryState) => void;
   bridge: OfficeBridge;
   /** `null` corre la oficina en solitario, sin avatares reales. */
   endpoint?: string | null;
@@ -25,9 +27,12 @@ export interface GameCanvasProps {
  * este componente (D3). Aun no es `OfficeShell` (slice 8s) — ver nota en
  * `App.tsx`.
  */
-export function GameCanvas({ bridge, endpoint = null, session = null }: GameCanvasProps) {
+export function GameCanvas({ bridge, endpoint = null, session = null, onEntryState }: GameCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
+  const reportRef = useRef(onEntryState);
+  reportRef.current = onEntryState;
+  const waitForOfficeData = onEntryState !== undefined;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -36,18 +41,27 @@ export function GameCanvas({ bridge, endpoint = null, session = null }: GameCanv
     // Sin sesion no se anaden claves: el camino sin autenticacion tiene que
     // llegar a la escena exactamente como antes de #8, no con un par de
     // `undefined` que la escena tenga que interpretar.
-    gameRef.current = createGame(host, bridge, {
-      endpoint,
-      ...(session
-        ? { playerName: session.displayName, getIdToken: () => session.getIdToken() }
-        : {}),
-    });
+    const unsubscribe = bridge.on('entry', ({ state }) => reportRef.current?.(state));
+    try {
+      gameRef.current = createGame(host, bridge, {
+        endpoint,
+        ...(waitForOfficeData ? { waitForOfficeData: true } : {}),
+        ...(session
+          ? { playerName: session.displayName, getIdToken: () => session.getIdToken() }
+          : {}),
+      });
+    } catch (error) {
+      unsubscribe();
+      if (reportRef.current === undefined) throw error;
+      reportRef.current('failed');
+    }
 
     return () => {
+      unsubscribe();
       gameRef.current?.destroy(true);
       gameRef.current = null;
     };
-  }, [bridge, endpoint, session]);
+  }, [bridge, endpoint, session, waitForOfficeData]);
 
   return <div ref={hostRef} style={{ position: 'absolute', inset: 0 }} />;
 }

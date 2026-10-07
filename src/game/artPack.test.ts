@@ -113,14 +113,16 @@ describe('load requests', () => {
     ]);
   });
 
-  it('loads before the office starts what the map draws at once: everything but the characters', () => {
+  it('preloads the static office and default current character, not every character', () => {
     const requests = bootLoadRequests(pack(), ART_PACK_MANIFEST_URL);
     const kinds = new Set(requests.map((request) => request.key.split(':')[1]?.split('-')[0]));
 
-    expect(kinds).toEqual(new Set(['floor', 'desk', 'chair', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table']));
+    expect(kinds).toEqual(new Set(['floor', 'desk', 'chair', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'character']));
     // Nine floors, four desks, four chairs and four walls, the terrain tileset,
     // two trees, a plant, a bridge, a hedge and two tables (art step 8).
-    expect(requests).toHaveLength(29);
+    expect(requests).toHaveLength(31);
+    expect(requests.filter((request) => request.key.startsWith('art:character-')).map((request) => request.key))
+      .toEqual([artSheetKey(pack().defaults.character, 'walk'), artSheetKey(pack().defaults.character, 'seated')]);
     expect(requests).toContainEqual({
       key: artSheetKey('tileset-terrain', 'sheet'),
       url: 'assets/pack/tileset/terrain.png',
