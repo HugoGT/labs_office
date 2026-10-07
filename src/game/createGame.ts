@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { OfficeScene, type OfficeSceneOptions } from './OfficeScene';
 import type { OfficeBridge } from './officeBridge';
+import { browserZoomStore } from './zoomStore';
 
 /**
  * Crea la instancia de Phaser montada en `parent`. El caller es dueno de
@@ -27,6 +28,7 @@ export function createGame(
       mode: Phaser.Scale.RESIZE,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-    scene: [new OfficeScene(bridge, options)],
+    // The zoom persists per browser; a caller's store (tests) takes its place.
+    scene: [new OfficeScene(bridge, { zoomStore: browserZoomStore(), ...options })],
   });
 }

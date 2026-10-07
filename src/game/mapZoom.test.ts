@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   INITIAL_WHEEL_STATE,
   WHEEL_COOLDOWN_MS,
@@ -13,11 +13,13 @@ import {
   clampZoom,
   isZoomStop,
   nextZoomStop,
+  restoreZoom,
   zoomKeyAction,
   zoomPercent,
   zoomStep,
   zoomView,
   type WheelState,
+  type ZoomStore,
 } from './mapZoom';
 
 /** Pure rules of the map zoom: stops, smoothing, wheel accumulation, keys. */
@@ -212,5 +214,24 @@ describe('zoomPercent and zoomView', () => {
     expect(zoomView(0.5)).toEqual({ zoom: 0.5, canZoomIn: true, canZoomOut: false });
     expect(zoomView(1)).toEqual({ zoom: 1, canZoomIn: true, canZoomOut: true });
     expect(zoomView(2)).toEqual({ zoom: 2, canZoomIn: false, canZoomOut: true });
+  });
+});
+
+describe('restoreZoom: never trusts what the store gives (map-zoom)', () => {
+  const storeOf = (load: () => unknown): ZoomStore => ({ load: load as () => number, save: vi.fn() });
+
+  it('restores every stop the store returns', () => {
+    expect(ZOOM_STOPS.map((stop) => restoreZoom(storeOf(() => stop)))).toEqual([...ZOOM_STOPS]);
+  });
+
+  it.each([
+    ['no store', undefined],
+    ['a store that throws', storeOf(() => { throw new Error('blocked'); })],
+    ['a value that is not a stop', storeOf(() => 1.3)],
+    ['zero, which would divide the bounds', storeOf(() => 0)],
+    ['not a number', storeOf(() => Number.NaN)],
+    ['a string', storeOf(() => '1.5')],
+  ])('falls back to the default with %s', (_name, store) => {
+    expect(restoreZoom(store)).toBe(1);
   });
 });

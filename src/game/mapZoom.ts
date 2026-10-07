@@ -50,7 +50,7 @@ export interface ZoomView {
   canZoomOut: boolean;
 }
 
-/** Persistence seam of the chosen zoom; `load` never throws and falls back to 100%. */
+/** Persistence seam of the chosen zoom; `zoomStore.ts` is the adapter. */
 export interface ZoomStore {
   load(): number;
   save(zoom: number): void;
@@ -74,6 +74,20 @@ export function nextZoomStop(target: number, direction: 1 | -1): number {
   const from = clampZoom(target);
   if (direction === 1) return ZOOM_STOPS.find((stop) => stop > from) ?? ZOOM_MAX;
   return [...ZOOM_STOPS].reverse().find((stop) => stop < from) ?? ZOOM_MIN;
+}
+
+/**
+ * The zoom to start at. A store is an outside boundary: whatever it returns
+ * that is not a stop (or a `load` that throws) means 100%, because the camera
+ * bounds divide by the zoom.
+ */
+export function restoreZoom(store?: ZoomStore): number {
+  try {
+    const stored = store?.load();
+    return isZoomStop(stored) ? stored : ZOOM_DEFAULT;
+  } catch {
+    return ZOOM_DEFAULT;
+  }
 }
 
 export function applyZoomAction(target: number, action: ZoomAction): number {

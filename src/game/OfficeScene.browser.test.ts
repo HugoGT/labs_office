@@ -3668,6 +3668,19 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
     expect(store.save).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['a store that throws', { load: () => { throw new Error('blocked'); }, save: vi.fn() }],
+    ['a value that is not a stop', memoryStore(1.3)],
+    ['zero', memoryStore(0)],
+  ])('starts at the default with %s', async (_name, store) => {
+    const { scene, views, cam } = await zoomScene(store);
+    frames(scene, 2);
+
+    expect(cam.zoom).toBe(1);
+    expect(cam.getBounds()).toMatchObject(followBounds(WORLD, cam, 1));
+    expect(views).toEqual([zoomView(1)]);
+  });
+
   it('without a store the office starts at 100%', async () => {
     const { scene, views, cam } = await zoomScene();
     frames(scene, 2);

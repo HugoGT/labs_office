@@ -15,7 +15,7 @@ import { CameraPanLayer } from './CameraPanLayer';
 import { CameraZoomLayer } from './CameraZoomLayer';
 import { followBounds } from './cameraBounds';
 import { PAN_THRESHOLD_PX } from './cameraPan';
-import { ZOOM_DEFAULT, type ZoomStore } from './mapZoom';
+import { restoreZoom, type ZoomStore } from './mapZoom';
 import { advanceWalkingTime, MAX_WALK_FRAME_MS, walkingMultiplier } from './walkingSpeed';
 import { walkingSweepFraction } from './walkingCollision';
 import { walkFrame } from './characterAnimation';
@@ -557,7 +557,7 @@ export class OfficeScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.DESTROY, removeWalkListeners);
 
     this.buildColliders(grid);
-    this.setupCameras(this.options.zoomStore?.load() ?? ZOOM_DEFAULT);
+    this.setupCameras(restoreZoom(this.options.zoomStore));
     // Decals are a few pixels each: at minimap scale they are noise, and a
     // layer less to draw on every frame.
     if (this.terrainTilemap.decals !== null) this.minimapCamera?.ignore(this.terrainTilemap.decals);

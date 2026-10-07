@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
 import { createGame } from './createGame';
 import { createOfficeBridge } from './officeBridge';
+import { MAP_ZOOM_KEY } from './zoomStore';
 
 /**
  * Capa de navegador: Chromium real, WebGL real. Phaser no se puede ni importar
@@ -96,5 +97,42 @@ describe('createGame en un navegador real', () => {
 
   it('el motor sigue siendo Phaser 3 (PRD 6.1), no la 4 que resuelve latest', () => {
     expect(Phaser.VERSION.startsWith('3.')).toBe(true);
+  });
+});
+
+describe('createGame: map zoom persistence (map-zoom)', () => {
+  afterEach(() => window.localStorage.removeItem(MAP_ZOOM_KEY));
+
+  const mainZoom = (game: Phaser.Game): number => game.scene.getScene('office').cameras.main.zoom;
+
+  it.each([
+    ['a stored stop', '1.5', 1.5],
+    ['garbage', 'abc', 1],
+  ])('restores the zoom of this browser by default: %s', async (_name, stored, expected) => {
+    window.localStorage.setItem(MAP_ZOOM_KEY, stored);
+
+    const game = await bootedGame(mountHost());
+
+    expect(mainZoom(game)).toBe(expected);
+  });
+
+  it('saves a zoom change in this browser', async () => {
+    const bridge = createOfficeBridge();
+    const game = createGame(mountHost(), bridge);
+    games.push(game);
+    await waitForSceneRunning(game, 'office');
+
+    bridge.emitCommand('zoom', { action: 'out' });
+
+    expect(window.localStorage.getItem(MAP_ZOOM_KEY)).toBe('0.75');
+  });
+
+  it('a store given by the caller wins over the browser one', async () => {
+    window.localStorage.setItem(MAP_ZOOM_KEY, '0.5');
+    const game = createGame(mountHost(), createOfficeBridge(), { zoomStore: { load: () => 2, save: vi.fn() } });
+    games.push(game);
+    await waitForSceneRunning(game, 'office');
+
+    expect(mainZoom(game)).toBe(2);
   });
 });
