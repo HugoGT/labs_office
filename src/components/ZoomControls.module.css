@@ -38,12 +38,12 @@
   cursor: default;
 }
 
-.percent {
+.label {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
-/* At 100% there is nothing to reset, but the label is still the readout. */
-.percent:disabled {
+/* At the default there is nothing to reset, but the label is still the readout. */
+.label:disabled {
   opacity: 1;
 }

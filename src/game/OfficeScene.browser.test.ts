@@ -3658,35 +3658,36 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
   }
 
   it('starts at the stored zoom with follow bounds, announces it once and does not save it back', async () => {
-    const store = memoryStore(0.5);
-    const { scene, views, cam } = await zoomScene(store);
-    frames(scene, 2);
-
-    expect(cam.zoom).toBe(0.5);
-    expect(cam.getBounds()).toMatchObject(followBounds(WORLD, cam, 0.5));
-    expect(views).toEqual([zoomView(0.5)]);
-    expect(store.save).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ['a store that throws', { load: () => { throw new Error('blocked'); }, save: vi.fn() }],
-    ['a value that is not a stop', memoryStore(1.3)],
-    ['zero', memoryStore(0)],
-  ])('starts at the default with %s', async (_name, store) => {
+    const store = memoryStore(1);
     const { scene, views, cam } = await zoomScene(store);
     frames(scene, 2);
 
     expect(cam.zoom).toBe(1);
     expect(cam.getBounds()).toMatchObject(followBounds(WORLD, cam, 1));
     expect(views).toEqual([zoomView(1)]);
+    expect(store.save).not.toHaveBeenCalled();
   });
 
-  it('without a store the office starts at 100%', async () => {
+  it.each([
+    ['a store that throws', { load: () => { throw new Error('blocked'); }, save: vi.fn() }],
+    ['a value that is not a stop', memoryStore(1.3)],
+    ['the retired 1.5 stop', memoryStore(1.5)],
+    ['zero', memoryStore(0)],
+  ])('starts at the default with %s', async (_name, store) => {
+    const { scene, views, cam } = await zoomScene(store);
+    frames(scene, 2);
+
+    expect(cam.zoom).toBe(2);
+    expect(cam.getBounds()).toMatchObject(followBounds(WORLD, cam, 2));
+    expect(views).toEqual([zoomView(2)]);
+  });
+
+  it('without a store the office starts at the default zoom 2 (2x)', async () => {
     const { scene, views, cam } = await zoomScene();
     frames(scene, 2);
 
-    expect(cam.zoom).toBe(1);
-    expect(views).toEqual([zoomView(1)]);
+    expect(cam.zoom).toBe(2);
+    expect(views).toEqual([zoomView(2)]);
   });
 
   it.each([
@@ -3695,7 +3696,7 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
     ['the terrain editor', (b: ReturnType<typeof createOfficeBridge>) => b.emitCommand('terrainedit', { selected: null, preview: null })],
     ['the collision editor', (b: ReturnType<typeof createOfficeBridge>) => b.emitCommand('collisionedit', { pieceId: null, draft: [], selectedRect: null, snap: 1 })],
   ])('the zoom command eases the main camera only and saves the stop, with %s open', async (_name, open) => {
-    const store = memoryStore(1);
+    const store = memoryStore(2);
     const { scene, bridge, cam, minimap } = await zoomScene(store);
     open(bridge);
     const minimapView = { zoom: minimap.zoom, x: minimap.scrollX, y: minimap.scrollY };
@@ -3703,8 +3704,8 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
     bridge.emitCommand('zoom', { action: 'in' });
     frames(scene);
 
-    expect(cam.zoom).toBe(1.5);
-    expect(store.save).toHaveBeenCalledExactlyOnceWith(1.5);
+    expect(cam.zoom).toBe(3);
+    expect(store.save).toHaveBeenCalledExactlyOnceWith(3);
     expect({ zoom: minimap.zoom, x: minimap.scrollX, y: minimap.scrollY }).toEqual(minimapView);
   });
 
@@ -3719,12 +3720,12 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
     scene.game.canvas.dispatchEvent(wheel);
 
     expect(wheel.defaultPrevented).toBe(true);
-    expect(views.at(-1)).toEqual(zoomView(1.5));
+    expect(views.at(-1)).toEqual(zoomView(3));
   });
 
   it.each([
-    { zoom: 0.5, tile: { tx: 26, ty: 32 } },
-    { zoom: 2, tile: { tx: 23, ty: 29 } },
+    { zoom: 1, tile: { tx: 24, ty: 30 } },
+    { zoom: 3, tile: { tx: 23, ty: 29 } },
   ])('click-to-walk at $zoom targets the world tile under the pointer', async ({ zoom, tile }) => {
     const { scene } = await zoomScene(memoryStore(zoom));
     frames(scene, 3);
@@ -3746,7 +3747,7 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
   it.each(['SHUTDOWN', 'game.destroy'])('%s releases the zoom subscription', async (how) => {
     const { scene, bridge, views } = await zoomScene();
     bridge.emitCommand('zoom', { action: 'in' });
-    expect(views.at(-1)).toEqual(zoomView(1.5));
+    expect(views.at(-1)).toEqual(zoomView(3));
 
     if (how === 'SHUTDOWN') {
       scene.scene.stop();
@@ -3758,6 +3759,6 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
     }
     bridge.emitCommand('zoom', { action: 'out' });
 
-    expect(views.at(-1)).toEqual(zoomView(1.5));
+    expect(views.at(-1)).toEqual(zoomView(3));
   });
 });

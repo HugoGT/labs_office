@@ -1,5 +1,5 @@
 import { ZOOM_CONTROLS_RIGHT, ZOOM_CONTROLS_TOP } from '../game/hudLayout';
-import { ZOOM_DEFAULT, zoomPercent, type ZoomView } from '../game/mapZoom';
+import { ZOOM_DEFAULT, zoomLabel, type ZoomView } from '../game/mapZoom';
 import styles from './ZoomControls.module.css';
 
 export interface ZoomControlsProps {
@@ -15,8 +15,8 @@ export interface ZoomControlsProps {
  * scene, which also answers the wheel and the keys.
  */
 export function ZoomControls({ view, onZoomIn, onZoomOut, onReset }: ZoomControlsProps) {
-  const percent = zoomPercent(view.zoom);
-  const resetLabel = `Restablecer zoom (${percent})`;
+  const label = zoomLabel(view.zoom);
+  const resetLabel = `Restablecer zoom a ${zoomLabel(ZOOM_DEFAULT)} (ahora ${label})`;
 
   return (
     <div
@@ -30,13 +30,13 @@ export function ZoomControls({ view, onZoomIn, onZoomOut, onReset }: ZoomControl
       </button>
       <button
         type="button"
-        className={`${styles.btn} ${styles.percent}`}
+        className={`${styles.btn} ${styles.label}`}
         aria-label={resetLabel}
         title={resetLabel}
         disabled={view.zoom === ZOOM_DEFAULT}
         onClick={onReset}
       >
-        {percent}
+        {label}
       </button>
       <button type="button" className={styles.btn} aria-label="Alejar" title="Alejar" disabled={!view.canZoomOut} onClick={onZoomOut}>
         -

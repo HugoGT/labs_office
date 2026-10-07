@@ -193,8 +193,8 @@ export interface OfficeSceneOptions {
   artUploadsUrl?: string | null;
   /**
    * Where the chosen map zoom is remembered (map-zoom). Absent means nothing
-   * is restored or saved and the office starts at 100%; `createGame` supplies
-   * the browser's.
+   * is restored or saved and the office starts at the default stop;
+   * `createGame` supplies the browser's.
    */
   zoomStore?: ZoomStore;
 }

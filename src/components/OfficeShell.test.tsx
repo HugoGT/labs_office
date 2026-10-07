@@ -1321,15 +1321,15 @@ describe('OfficeShell: map zoom control (map-zoom)', () => {
     render(<OfficeShell />);
     const bridge = createGameMock.mock.calls[0][1];
     const group = screen.getByRole('group', { name: 'Zoom del mapa' });
-    expect(group).toHaveTextContent('100%');
+    expect(group).toHaveTextContent('2x');
 
-    act(() => bridge.emit('zoomchanged', zoomView(0.5)));
+    act(() => bridge.emit('zoomchanged', zoomView(1)));
 
-    expect(group).toHaveTextContent('50%');
+    expect(group).toHaveTextContent('1x');
     expect(screen.getByRole('button', { name: 'Alejar' })).toBeDisabled();
   });
 
-  it('sends each click to the scene as a zoom command, and the label resets to 100%', async () => {
+  it('sends each click to the scene as a zoom command, and the label resets to 2x', async () => {
     const user = userEvent.setup();
     render(<OfficeShell />);
     const bridge = createGameMock.mock.calls[0][1];
@@ -1337,16 +1337,17 @@ describe('OfficeShell: map zoom control (map-zoom)', () => {
     // Stands in for the scene: confirms a reset with the stop it landed on.
     bridge.onCommand('zoom', ({ action }) => {
       actions.push(action);
-      if (action === 'reset') bridge.emit('zoomchanged', zoomView(1));
+      if (action === 'reset') bridge.emit('zoomchanged', zoomView(2));
     });
-    act(() => bridge.emit('zoomchanged', zoomView(1.5)));
-
+    // No single stop enables all three buttons: 1x has no zoom out, 3x no zoom in.
+    act(() => bridge.emit('zoomchanged', zoomView(1)));
     await user.click(screen.getByRole('button', { name: 'Acercar' }));
+    act(() => bridge.emit('zoomchanged', zoomView(3)));
     await user.click(screen.getByRole('button', { name: 'Alejar' }));
-    await user.click(screen.getByRole('button', { name: 'Restablecer zoom (150%)' }));
+    await user.click(screen.getByRole('button', { name: 'Restablecer zoom a 2x (ahora 3x)' }));
 
     expect(actions).toEqual(['in', 'out', 'reset']);
-    expect(screen.getByRole('group', { name: 'Zoom del mapa' })).toHaveTextContent('100%');
+    expect(screen.getByRole('group', { name: 'Zoom del mapa' })).toHaveTextContent('2x');
   });
 });
 

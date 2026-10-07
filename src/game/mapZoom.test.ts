@@ -3,8 +3,9 @@ import {
   INITIAL_WHEEL_STATE,
   WHEEL_COOLDOWN_MS,
   WHEEL_IDLE_MS,
+  WHEEL_NOTCH_IDLE_MS,
   WHEEL_NOTCH_MIN_PX,
-  WHEEL_STEP_PX,
+  WHEEL_NOTCHES_PER_STEP,
   ZOOM_DEFAULT,
   ZOOM_MAX,
   ZOOM_MIN,
@@ -16,7 +17,7 @@ import {
   nextZoomStop,
   restoreZoom,
   zoomKeyAction,
-  zoomPercent,
+  zoomLabel,
   zoomStep,
   zoomView,
   type WheelState,
@@ -26,14 +27,15 @@ import {
 /** Pure rules of the map zoom: stops, smoothing, wheel accumulation, keys. */
 
 describe('zoom stops', () => {
-  it('are the five fixed stops, with 100% as the default', () => {
-    expect([...ZOOM_STOPS]).toEqual([0.5, 0.75, 1, 1.5, 2]);
-    expect([ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT]).toEqual([0.5, 2, 1]);
+  it('are the three integer stops, with the middle one (2x) as the default', () => {
+    expect([...ZOOM_STOPS]).toEqual([1, 2, 3]);
+    expect([ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT]).toEqual([1, 3, 2]);
+    for (const stop of ZOOM_STOPS) expect(Number.isInteger(stop)).toBe(true);
   });
 
   it.each([
-    { from: 1, direction: 1 as const, expected: [1.5, 2, 2] },
-    { from: 1, direction: -1 as const, expected: [0.75, 0.5, 0.5] },
+    { from: 2, direction: 1 as const, expected: [3, 3, 3] },
+    { from: 2, direction: -1 as const, expected: [1, 1, 1] },
   ])('stepping from $from toward $direction clamps at the limit', ({ from, direction, expected }) => {
     const first = nextZoomStop(from, direction);
     const second = nextZoomStop(first, direction);
@@ -43,34 +45,37 @@ describe('zoom stops', () => {
   });
 
   it('a value between stops moves to the first stop beyond it, out of range lands on the limit', () => {
-    expect(nextZoomStop(1.2, 1)).toBe(1.5);
-    expect(nextZoomStop(1.2, -1)).toBe(1);
-    expect(nextZoomStop(3, 1)).toBe(2);
-    expect(nextZoomStop(0.1, -1)).toBe(0.5);
-    expect(nextZoomStop(Number.NaN, 1)).toBe(1.5);
+    expect(nextZoomStop(1.5, 1)).toBe(2);
+    expect(nextZoomStop(1.5, -1)).toBe(1);
+    expect(nextZoomStop(2.25, 1)).toBe(3);
+    expect(nextZoomStop(2.25, -1)).toBe(2);
+    expect(nextZoomStop(5, 1)).toBe(3);
+    expect(nextZoomStop(0.5, -1)).toBe(1);
+    expect(nextZoomStop(Number.NaN, 1)).toBe(3);
   });
 
-  it('applyZoomAction steps from the target; reset goes back to 100%', () => {
-    expect(applyZoomAction(1, 'in')).toBe(1.5);
-    expect(applyZoomAction(1, 'out')).toBe(0.75);
-    expect(applyZoomAction(2, 'in')).toBe(2);
-    expect(applyZoomAction(0.5, 'out')).toBe(0.5);
-    expect(applyZoomAction(2, 'reset')).toBe(1);
+  it('applyZoomAction steps from the target; reset goes back to the default', () => {
+    expect(applyZoomAction(2, 'in')).toBe(3);
+    expect(applyZoomAction(2, 'out')).toBe(1);
+    expect(applyZoomAction(3, 'in')).toBe(3);
+    expect(applyZoomAction(1, 'out')).toBe(1);
+    expect(applyZoomAction(3, 'reset')).toBe(2);
+    expect(applyZoomAction(1, 'reset')).toBe(2);
   });
 });
 
 describe('clampZoom and isZoomStop', () => {
   it('clamps into the range, keeps in-range values and turns non-finite into the default', () => {
-    expect(clampZoom(5)).toBe(2);
-    expect(clampZoom(0.1)).toBe(0.5);
+    expect(clampZoom(5)).toBe(3);
+    expect(clampZoom(0.1)).toBe(1);
     expect(clampZoom(1.25)).toBe(1.25);
-    expect(clampZoom(Number.NaN)).toBe(1);
-    expect(clampZoom(Number.POSITIVE_INFINITY)).toBe(1);
+    expect(clampZoom(Number.NaN)).toBe(2);
+    expect(clampZoom(Number.POSITIVE_INFINITY)).toBe(2);
   });
 
-  it('recognizes only the stops, and only numbers', () => {
+  it('recognizes only the stops, and only numbers; the retired fractional stops are not stops anymore', () => {
     for (const stop of ZOOM_STOPS) expect(isZoomStop(stop)).toBe(true);
-    for (const other of [1.25, '1', null, Number.NaN]) expect(isZoomStop(other)).toBe(false);
+    for (const other of [0.5, 0.75, 1.5, 2.25, 1.25, '2', null, Number.NaN]) expect(isZoomStop(other)).toBe(false);
   });
 });
 
@@ -83,8 +88,9 @@ describe('zoomStep: smoothing in log space', () => {
   });
 
   it.each([
-    { from: 1, to: 2 },
-    { from: 1, to: 0.5 },
+    { from: 2, to: 3 },
+    { from: 2, to: 1 },
+    { from: 1, to: 3 },
   ])('goes monotonically from $from to $to over several frames and lands exactly on it', ({ from, to }) => {
     const direction = Math.sign(to - from);
     let current = from;
@@ -104,7 +110,7 @@ describe('zoomStep: smoothing in log space', () => {
   });
 
   it('on the target, or under the arrival threshold, it is arrived exactly there', () => {
-    expect(zoomStep(1.5, 1.5)).toEqual({ value: 1.5, arrived: true });
+    expect(zoomStep(2, 2)).toEqual({ value: 2, arrived: true });
     expect(zoomStep(1.999, 2)).toEqual({ value: 2, arrived: true });
   });
 });
@@ -123,30 +129,79 @@ describe('accumulateWheel', () => {
     });
   };
 
+  const notches = (count: number, deltaY: number, gapMs = 16, deltaMode = 0): number[] => {
+    let state: WheelState = INITIAL_WHEEL_STATE;
+    return Array.from({ length: count }, (_, i) => {
+      const result = wheel(state, { deltaY, deltaMode, now: 1000 + i * gapMs });
+      state = result.state;
+      return result.step;
+    });
+  };
+
+  it('needs two notches the same way for one step', () => {
+    expect(WHEEL_NOTCHES_PER_STEP).toBe(2);
+  });
+
+  it('one notch (Chrome on Linux sends 53 px) does not step, the second does: up in, down out', () => {
+    expect(notches(2, -53)).toEqual([0, 1]);
+    expect(notches(2, 53)).toEqual([0, -1]);
+  });
+
   it.each([
-    { name: 'a pixel-mode notch', deltaY: 100, deltaMode: 0 },
+    { name: 'a pixel-mode notch of 100 px', deltaY: 100, deltaMode: 0 },
     { name: 'a Firefox notch (3 lines)', deltaY: 3, deltaMode: 1 },
     { name: 'a page step', deltaY: 1, deltaMode: 2 },
-  ])('$name is one step: up zooms in, down zooms out', ({ deltaY, deltaMode }) => {
-    expect(wheel(INITIAL_WHEEL_STATE, { deltaY: -deltaY, deltaMode, now: 1000 }).step).toBe(1);
-    expect(wheel(INITIAL_WHEEL_STATE, { deltaY, deltaMode, now: 1000 }).step).toBe(-1);
+  ])('$name counts as one notch, never as a step on its own', ({ deltaY, deltaMode }) => {
+    expect(notches(2, -deltaY, 16, deltaMode)).toEqual([0, 1]);
+    expect(notches(2, deltaY, 16, deltaMode)).toEqual([0, -1]);
   });
 
-  it('a notch under the classic 100 px (Chrome on Linux sends 53) is one step on its own', () => {
-    expect(stepsOf([-53])).toEqual([1]);
-    expect(stepsOf([53])).toEqual([-1]);
+  it('two notches of a slow, deliberate turn (400 ms apart) still step', () => {
+    expect(notches(2, -53, 400)).toEqual([0, 1]);
   });
 
-  it('two slow notches, farther apart than the idle window, are two steps', () => {
+  it('a pause longer than the notch idle window restarts the count', () => {
     const first = wheel(INITIAL_WHEEL_STATE, { deltaY: -53, now: 1000 });
-    const second = wheel(first.state, { deltaY: -53, now: 1400 });
+    const soon = wheel(first.state, { deltaY: -53, now: 1000 + WHEEL_NOTCH_IDLE_MS });
+    const late = wheel(first.state, { deltaY: -53, now: 1000 + WHEEL_NOTCH_IDLE_MS + 1 });
+    const lateTwo = wheel(late.state, { deltaY: -53, now: 1100 + WHEEL_NOTCH_IDLE_MS });
 
-    expect([first.step, second.step]).toEqual([1, 1]);
+    expect([first.step, soon.step]).toEqual([0, 1]);
+    expect([late.step, lateTwo.step]).toEqual([0, 1]);
   });
 
-  it('a single event steps from the notch threshold, one pixel under it does not', () => {
-    expect(stepsOf([WHEEL_NOTCH_MIN_PX - 1])).toEqual([0]);
-    expect(stepsOf([WHEEL_NOTCH_MIN_PX])).toEqual([-1]);
+  it('a stray single notch decays: one touch, a pause, then one more does not step', () => {
+    const stray = wheel(INITIAL_WHEEL_STATE, { deltaY: -53, now: 1000 });
+    const next = wheel(stray.state, { deltaY: -53, now: 2000 });
+
+    expect([stray.step, next.step]).toEqual([0, 0]);
+  });
+
+  it('a direction flip restarts the notch count', () => {
+    let state: WheelState = INITIAL_WHEEL_STATE;
+    const steps = [-53, 53, 53].map((deltaY, i) => {
+      const result = wheel(state, { deltaY, now: 1000 + i * 50 });
+      state = result.state;
+      return result.step;
+    });
+
+    expect(steps).toEqual([0, 0, -1]);
+  });
+
+  it('a single event counts as a notch from the notch threshold; one pixel under it accumulates instead', () => {
+    expect(stepsOf([-WHEEL_NOTCH_MIN_PX, -WHEEL_NOTCH_MIN_PX])).toEqual([0, 1]);
+    const under = -(WHEEL_NOTCH_MIN_PX - 1);
+    expect(stepsOf([under, under])).toEqual([0, 0]);
+    expect(wheel(INITIAL_WHEEL_STATE, { deltaY: under, now: 1000 }).state).toMatchObject({ sum: under, notches: 0 });
+  });
+
+  it('a notch clears the small-delta travel, and a small delta leaves the notch count alone', () => {
+    const small = wheel(INITIAL_WHEEL_STATE, { deltaY: -30, now: 1000 });
+    const notch = wheel(small.state, { deltaY: -53, now: 1016 });
+    const smallAgain = wheel(notch.state, { deltaY: -30, now: 1032 });
+
+    expect(notch.state).toMatchObject({ sum: 0, notches: -1 });
+    expect(smallAgain.state).toMatchObject({ sum: -30, notches: -1 });
   });
 
   it('small trackpad deltas accumulate until the step threshold', () => {
@@ -159,12 +214,35 @@ describe('accumulateWheel', () => {
     expect(stepsOf([-10, -10, -10], false)).toEqual([0, 0, 0]);
   });
 
-  it('a notch inside the cooldown is dropped and one right after it steps again', () => {
-    const first = wheel(INITIAL_WHEEL_STATE, { deltaY: -WHEEL_STEP_PX, now: 1000 });
-    const during = wheel(first.state, { deltaY: -WHEEL_STEP_PX, now: 1000 + WHEEL_COOLDOWN_MS - 1 });
-    const after = wheel(first.state, { deltaY: -WHEEL_STEP_PX, now: 1000 + WHEEL_COOLDOWN_MS });
+  it('a step resets both counters and starts the cooldown, which drops notches right after it', () => {
+    const turn = (state: WheelState, from: number) => {
+      let current = state;
+      const steps = [0, 1].map((i) => {
+        const result = wheel(current, { deltaY: -53, now: from + i * 16 });
+        current = result.state;
+        return result.step;
+      });
+      return { state: current, steps };
+    };
+    const first = turn(INITIAL_WHEEL_STATE, 1000);
+    const stepAt = 1016;
+    const during = wheel(first.state, { deltaY: -53, now: stepAt + WHEEL_COOLDOWN_MS - 1 });
+    const after = turn(first.state, stepAt + WHEEL_COOLDOWN_MS);
 
-    expect([first.step, during.step, after.step]).toEqual([1, 0, 1]);
+    expect(first.steps).toEqual([0, 1]);
+    expect(first.state).toMatchObject({ sum: 0, notches: 0, cooldownUntil: stepAt + WHEEL_COOLDOWN_MS });
+    expect(during).toEqual({ state: first.state, step: 0 });
+    expect(after.steps).toEqual([0, 1]);
+  });
+
+  it('a trackpad step also starts the cooldown', () => {
+    const first = wheel(INITIAL_WHEEL_STATE, { deltaY: -35, now: 1000 });
+    const second = wheel(first.state, { deltaY: -35, now: 1016 });
+    const stepped = wheel(second.state, { deltaY: -35, now: 1032 });
+    const during = wheel(stepped.state, { deltaY: -35, now: 1032 + WHEEL_COOLDOWN_MS - 1 });
+
+    expect([first.step, second.step, stepped.step, during.step]).toEqual([0, 0, 1, 0]);
+    expect(stepped.state).toMatchObject({ sum: 0, notches: 0 });
   });
 
   it('a direction flip discards what was accumulated the other way', () => {
@@ -188,6 +266,19 @@ describe('accumulateWheel', () => {
 
     expect(sideways).toEqual({ state: snapshot, step: 0 });
     expect(half.state).toEqual(snapshot);
+  });
+
+  it('never mutates the given state, through notches, steps and small deltas alike', () => {
+    const initial = { ...INITIAL_WHEEL_STATE };
+    let state: WheelState = INITIAL_WHEEL_STATE;
+    for (const [i, deltaY] of [-53, -10, -53, -53, 53].entries()) {
+      const before = { ...state };
+      const given = state;
+      state = wheel(state, { deltaY, now: 1000 + i * 300 }).state;
+      expect(given).toEqual(before);
+    }
+
+    expect(INITIAL_WHEEL_STATE).toEqual(initial);
   });
 });
 
@@ -219,16 +310,21 @@ describe('zoomKeyAction', () => {
   });
 });
 
-describe('zoomPercent and zoomView', () => {
-  it('formats every stop as a rounded percent', () => {
-    expect(ZOOM_STOPS.map(zoomPercent)).toEqual(['50%', '75%', '100%', '150%', '200%']);
-    expect(zoomPercent(1 / 3)).toBe('33%');
+describe('zoomLabel and zoomView', () => {
+  it('labels every stop with the camera zoom itself: 1x, 2x, 3x', () => {
+    expect(ZOOM_STOPS.map(zoomLabel)).toEqual(['1x', '2x', '3x']);
+    expect(zoomLabel(ZOOM_DEFAULT)).toBe('2x');
   });
 
-  it('flags the limits: nothing further out at 50%, nothing further in at 200%', () => {
-    expect(zoomView(0.5)).toEqual({ zoom: 0.5, canZoomIn: true, canZoomOut: false });
-    expect(zoomView(1)).toEqual({ zoom: 1, canZoomIn: true, canZoomOut: true });
-    expect(zoomView(2)).toEqual({ zoom: 2, canZoomIn: false, canZoomOut: true });
+  it('a value between stops gets at most two decimals', () => {
+    expect(zoomLabel(1.5)).toBe('1.5x');
+    expect(zoomLabel(4 / 3)).toBe('1.33x');
+  });
+
+  it('flags the limits: nothing further out at 1x, nothing further in at 3x', () => {
+    expect(zoomView(1)).toEqual({ zoom: 1, canZoomIn: true, canZoomOut: false });
+    expect(zoomView(2)).toEqual({ zoom: 2, canZoomIn: true, canZoomOut: true });
+    expect(zoomView(3)).toEqual({ zoom: 3, canZoomIn: false, canZoomOut: true });
   });
 });
 
@@ -243,10 +339,14 @@ describe('restoreZoom: never trusts what the store gives (map-zoom)', () => {
     ['no store', undefined],
     ['a store that throws', storeOf(() => { throw new Error('blocked'); })],
     ['a value that is not a stop', storeOf(() => 1.3)],
+    ['the retired 0.5 stop', storeOf(() => 0.5)],
+    ['the retired 0.75 stop', storeOf(() => 0.75)],
+    ['the retired 1.5 stop', storeOf(() => 1.5)],
+    ['the retired 2.25 stop', storeOf(() => 2.25)],
     ['zero, which would divide the bounds', storeOf(() => 0)],
     ['not a number', storeOf(() => Number.NaN)],
-    ['a string', storeOf(() => '1.5')],
-  ])('falls back to the default with %s', (_name, store) => {
-    expect(restoreZoom(store)).toBe(1);
+    ['a string', storeOf(() => '3')],
+  ])('falls back to the default (2) with %s', (_name, store) => {
+    expect(restoreZoom(store)).toBe(2);
   });
 });

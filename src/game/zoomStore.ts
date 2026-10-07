@@ -12,7 +12,7 @@ export interface ZoomStorage {
 /**
  * Storage is untrusted twice over: it can hold anything (a hand-edited or stale
  * value) and it can refuse to answer (private mode, blocked cookies). Reading
- * falls back to 100% and writing is best effort, so zoom never breaks the app.
+ * falls back to the default stop and writing is best effort, so zoom never breaks the app.
  */
 export function createZoomStore(storage: ZoomStorage | null): ZoomStore {
   return {
@@ -28,7 +28,7 @@ export function createZoomStore(storage: ZoomStorage | null): ZoomStore {
       try {
         storage?.setItem(MAP_ZOOM_KEY, String(zoom));
       } catch {
-        // Not persisted: the next load starts at 100%.
+        // Not persisted: the next load starts at the default.
       }
     },
   };

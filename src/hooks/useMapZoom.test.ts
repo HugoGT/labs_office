@@ -5,21 +5,21 @@ import { createOfficeBridge } from '../game/officeBridge';
 import { useMapZoom } from './useMapZoom';
 
 describe('useMapZoom (map-zoom)', () => {
-  it('starts at 100% until the scene announces its zoom', () => {
+  it('starts at the default zoom 2 (2x) until the scene announces its zoom', () => {
     const { result } = renderHook(() => useMapZoom(createOfficeBridge()));
 
-    expect(result.current.view).toEqual(zoomView(1));
+    expect(result.current.view).toEqual(zoomView(2));
   });
 
   it('follows the zoom the scene announces, whatever input caused it', () => {
     const bridge = createOfficeBridge();
     const { result } = renderHook(() => useMapZoom(bridge));
 
-    act(() => bridge.emit('zoomchanged', zoomView(0.5)));
-    expect(result.current.view).toEqual({ zoom: 0.5, canZoomIn: true, canZoomOut: false });
+    act(() => bridge.emit('zoomchanged', zoomView(1)));
+    expect(result.current.view).toEqual({ zoom: 1, canZoomIn: true, canZoomOut: false });
 
-    act(() => bridge.emit('zoomchanged', zoomView(2)));
-    expect(result.current.view).toEqual({ zoom: 2, canZoomIn: false, canZoomOut: true });
+    act(() => bridge.emit('zoomchanged', zoomView(3)));
+    expect(result.current.view).toEqual({ zoom: 3, canZoomIn: false, canZoomOut: true });
   });
 
   it('asks the scene for each action with one command', () => {
@@ -41,7 +41,7 @@ describe('useMapZoom (map-zoom)', () => {
 
     act(() => result.current.zoomIn());
 
-    expect(result.current.view).toEqual(zoomView(1));
+    expect(result.current.view).toEqual(zoomView(2));
   });
 
   it('stops reacting to the scene after unmounting', () => {
@@ -49,8 +49,8 @@ describe('useMapZoom (map-zoom)', () => {
     const { result, unmount } = renderHook(() => useMapZoom(bridge));
 
     unmount();
-    act(() => bridge.emit('zoomchanged', zoomView(2)));
+    act(() => bridge.emit('zoomchanged', zoomView(3)));
 
-    expect(result.current.view).toEqual(zoomView(1));
+    expect(result.current.view).toEqual(zoomView(2));
   });
 });

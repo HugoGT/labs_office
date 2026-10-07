@@ -378,7 +378,7 @@ describe('HUD layout: map zoom control (map-zoom)', () => {
   const HEIGHT = 800;
 
   function renderZoom() {
-    render(<ZoomControls view={zoomView(1)} onZoomIn={vi.fn()} onZoomOut={vi.fn()} onReset={vi.fn()} />);
+    render(<ZoomControls view={zoomView(2)} onZoomIn={vi.fn()} onZoomOut={vi.fn()} onReset={vi.fn()} />);
     return screen.getByRole('group', { name: 'Zoom del mapa' });
   }
 

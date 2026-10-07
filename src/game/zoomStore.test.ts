@@ -30,34 +30,38 @@ describe('createZoomStore: the zoom chosen per browser (map-zoom)', () => {
     ['text', 'abc'],
     ['an empty string', ''],
     ['a number that is not a stop', '1.3'],
+    ['the retired 0.5 stop', '0.5'],
+    ['the retired 0.75 stop', '0.75'],
+    ['the retired 1.5 stop', '1.5'],
+    ['the retired 2.25 stop', '2.25'],
     ['zero', '0'],
     ['a negative', '-1'],
     ['infinity', 'Infinity'],
   ])('loads the default when it finds %s', (_name, stored) => {
     const storage = memoryStorage(stored === null ? {} : { [MAP_ZOOM_KEY]: stored });
 
-    expect(createZoomStore(storage).load()).toBe(1);
+    expect(createZoomStore(storage).load()).toBe(2);
   });
 
-  it('loads 100% and does not throw when reading is blocked', () => {
+  it('loads the default and does not throw when reading is blocked', () => {
     const storage = { getItem: vi.fn(throwing), setItem: vi.fn() };
 
-    expect(createZoomStore(storage).load()).toBe(1);
+    expect(createZoomStore(storage).load()).toBe(2);
     expect(storage.getItem).toHaveBeenCalledOnce();
   });
 
   it('does not throw when writing is blocked', () => {
     const storage = { getItem: vi.fn(() => null), setItem: vi.fn(throwing) };
 
-    expect(() => createZoomStore(storage).save(1.5)).not.toThrow();
+    expect(() => createZoomStore(storage).save(2)).not.toThrow();
     expect(storage.setItem).toHaveBeenCalledOnce();
   });
 
-  it('without storage it loads 100% and saving does nothing', () => {
+  it('without storage it loads the default and saving does nothing', () => {
     const store = createZoomStore(null);
 
-    expect(store.load()).toBe(1);
-    expect(() => store.save(2)).not.toThrow();
+    expect(store.load()).toBe(2);
+    expect(() => store.save(3)).not.toThrow();
   });
 });
 
@@ -68,18 +72,18 @@ describe('browserZoomStore', () => {
   });
 
   it('keeps the zoom in this browser local storage', () => {
-    browserZoomStore().save(0.75);
+    browserZoomStore().save(1);
 
-    expect(window.localStorage.getItem(MAP_ZOOM_KEY)).toBe('0.75');
-    expect(browserZoomStore().load()).toBe(0.75);
+    expect(window.localStorage.getItem(MAP_ZOOM_KEY)).toBe('1');
+    expect(browserZoomStore().load()).toBe(1);
   });
 
-  it('falls back to 100% when the browser denies access to its storage', () => {
+  it('falls back to the default when the browser denies access to its storage', () => {
     vi.spyOn(window, 'localStorage', 'get').mockImplementation(throwing);
 
     const store = browserZoomStore();
 
-    expect(store.load()).toBe(1);
-    expect(() => store.save(2)).not.toThrow();
+    expect(store.load()).toBe(2);
+    expect(() => store.save(3)).not.toThrow();
   });
 });

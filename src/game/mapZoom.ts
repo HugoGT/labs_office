@@ -8,32 +8,49 @@
  * or the walking speed.
  */
 
-/** The only zooms the office offers; 100% is where it always was. */
-export const ZOOM_STOPS: readonly number[] = [0.5, 0.75, 1, 1.5, 2];
-export const ZOOM_MIN = 0.5;
-export const ZOOM_MAX = 2;
-export const ZOOM_DEFAULT = 1;
+/**
+ * The only zooms the office offers, shown as 1x, 2x and 3x (`zoomLabel`); the
+ * office opens at 2x. Integers on purpose: the game renders with `pixelArt`
+ * and `roundPixels`, and Phaser only renders pixel-exact at an integer camera
+ * zoom (`renderRoundPixels`). Fractional stops (0.75, 1.5, 2.25) showed seams
+ * between tiles and flickering character details. A stored zoom that is not
+ * one of these restores to the default.
+ */
+export const ZOOM_STOPS: readonly number[] = [1, 2, 3];
+export const ZOOM_MIN = 1;
+export const ZOOM_MAX = 3;
+export const ZOOM_DEFAULT = 2;
 
 /**
  * Smoothing, in log space so zooming in and out feel the same: each frame
  * covers `ZOOM_SMOOTHING` of the remaining log distance (same idea as
- * `glideStep`). About 27 frames from 1 to 2.
+ * `glideStep`). About 24 to 27 frames from one stop to the next.
  */
 export const ZOOM_SMOOTHING = 0.2;
 /** Under this log distance to the target the zoom lands exactly on it. */
 export const ZOOM_ARRIVE_LOG = 0.002;
 
 /**
- * A single plain-wheel event this large is a mouse notch and steps on its own:
- * notches differ per browser and OS (Chrome on Linux sends about 53 px, not
- * 100), so one notch is one step whatever the device reports.
+ * A single plain-wheel event this large is a mouse notch: notches differ per
+ * browser and OS (Chrome on Linux sends about 53 px, not 100), so a notch
+ * counts as one whatever the device reports.
  */
 export const WHEEL_NOTCH_MIN_PX = 40;
+/**
+ * Notches in the same direction that make one step. One notch alone never
+ * zooms (the slightest touch of the wheel sends one), and three felt slow.
+ */
+export const WHEEL_NOTCHES_PER_STEP = 2;
+/**
+ * A pause between notches longer than this restarts the count: long enough for
+ * a slow, deliberate turn, short enough that a stray touch decays.
+ */
+export const WHEEL_NOTCH_IDLE_MS = 600;
 /** Accumulated travel of smaller deltas (trackpad, pinch) that makes one step. */
 export const WHEEL_STEP_PX = 100;
 /**
  * Pixels per line and per page for the wheel delta modes that are not pixels.
- * A Firefox notch reports 3 lines, which must reach the step on its own.
+ * A Firefox notch reports 3 lines, which must count as one notch on its own.
  */
 export const WHEEL_LINE_PX = 40;
 export const WHEEL_PAGE_PX = 800;
@@ -42,7 +59,7 @@ export const WHEEL_PAGE_PX = 800;
  * amplified so a natural pinch crosses the step threshold.
  */
 export const PINCH_GAIN = 4;
-/** A pause longer than this forgets what was accumulated. */
+/** A pause longer than this forgets the accumulated small-delta travel. */
 export const WHEEL_IDLE_MS = 250;
 /** After a step, wheel input is dropped for this long (inertia, fast spins). */
 export const WHEEL_COOLDOWN_MS = 180;
@@ -84,8 +101,8 @@ export function nextZoomStop(target: number, direction: 1 | -1): number {
 
 /**
  * The zoom to start at. A store is an outside boundary: whatever it returns
- * that is not a stop (or a `load` that throws) means 100%, because the camera
- * bounds divide by the zoom.
+ * that is not a stop (or a `load` that throws) means the default, because the
+ * camera bounds divide by the zoom.
  */
 export function restoreZoom(store?: ZoomStore): number {
   try {
@@ -113,15 +130,17 @@ export function zoomStep(
 }
 
 export interface WheelState {
-  /** Normalized travel accumulated toward the next step (signed, like `deltaY`). */
+  /** Small-delta travel (trackpad, pinch) accumulated toward the next step, signed like `deltaY`. */
   sum: number;
-  /** Clock of the last accepted event, to forget stale accumulation. */
+  /** Mouse notches counted toward the next step, signed like `deltaY`. */
+  notches: number;
+  /** Clock of the last accepted event, to forget stale accumulation and notches. */
   lastAt: number;
   /** Events before this clock are dropped. */
   cooldownUntil: number;
 }
 
-export const INITIAL_WHEEL_STATE: Readonly<WheelState> = { sum: 0, lastAt: 0, cooldownUntil: 0 };
+export const INITIAL_WHEEL_STATE: Readonly<WheelState> = { sum: 0, notches: 0, lastAt: 0, cooldownUntil: 0 };
 
 export interface WheelInput {
   deltaY: number;
@@ -131,35 +150,49 @@ export interface WheelInput {
   now: number;
 }
 
-const ignored = (state: WheelState): { state: WheelState; step: 0 } => ({ state, step: 0 });
+type WheelResult = { state: WheelState; step: -1 | 0 | 1 };
+
+const ignored = (state: WheelState): WheelResult => ({ state, step: 0 });
+
+/** A step: both counters start over and the cooldown begins. Scroll up (negative) zooms in. */
+const stepped = (now: number, signed: number): WheelResult => ({
+  state: { sum: 0, notches: 0, lastAt: now, cooldownUntil: now + WHEEL_COOLDOWN_MS },
+  step: signed < 0 ? 1 : -1,
+});
 
 /**
- * Turns wheel events into zoom steps (`1` in, `-1` out, `0` nothing yet): the
- * delta is normalized across delta modes; a plain notch steps at once, smaller
- * deltas accumulate, and the cooldown keeps a fast spin to one step at a time.
+ * Turns wheel events into zoom steps (`1` in, `-1` out, `0` nothing yet). The
+ * delta is normalized across delta modes. A plain notch counts toward
+ * `WHEEL_NOTCHES_PER_STEP` in the same direction (a flip or a pause over
+ * `WHEEL_NOTCH_IDLE_MS` restarts the count) and clears the small-delta travel;
+ * smaller deltas (trackpad, pinch) accumulate to `WHEEL_STEP_PX` and leave the
+ * notch count alone. The cooldown after a step keeps a fast spin to one step
+ * at a time. The given state is never mutated.
  */
 export function accumulateWheel(
   state: WheelState,
   { deltaY, deltaMode, ctrlKey, now }: WheelInput,
-): { state: WheelState; step: -1 | 0 | 1 } {
+): WheelResult {
   if (!Number.isFinite(deltaY) || deltaY === 0) return ignored(state);
   if (now < state.cooldownUntil) return ignored(state);
 
   const perUnit = deltaMode === 1 ? WHEEL_LINE_PX : deltaMode === 2 ? WHEEL_PAGE_PX : 1;
   const travel = deltaY * perUnit * (ctrlKey ? PINCH_GAIN : 1);
-  const notch = !ctrlKey && Math.abs(travel) >= WHEEL_NOTCH_MIN_PX;
+  const direction = Math.sign(travel);
+
+  if (!ctrlKey && Math.abs(travel) >= WHEEL_NOTCH_MIN_PX) {
+    const stale = now - state.lastAt > WHEEL_NOTCH_IDLE_MS;
+    const flipped = Math.sign(state.notches) * direction < 0;
+    const notches = (stale || flipped ? 0 : state.notches) + direction;
+    if (Math.abs(notches) >= WHEEL_NOTCHES_PER_STEP) return stepped(now, notches);
+    return { state: { ...state, sum: 0, notches, lastAt: now }, step: 0 };
+  }
 
   const idle = now - state.lastAt > WHEEL_IDLE_MS;
-  const flipped = Math.sign(state.sum) * Math.sign(travel) < 0;
+  const flipped = Math.sign(state.sum) * direction < 0;
   const sum = (idle || flipped ? 0 : state.sum) + travel;
-
-  if (notch || Math.abs(sum) >= WHEEL_STEP_PX) {
-    return {
-      state: { sum: 0, lastAt: now, cooldownUntil: now + WHEEL_COOLDOWN_MS },
-      step: sum < 0 ? 1 : -1,
-    };
-  }
-  return { state: { sum, lastAt: now, cooldownUntil: state.cooldownUntil }, step: 0 };
+  if (Math.abs(sum) >= WHEEL_STEP_PX) return stepped(now, sum);
+  return { state: { ...state, sum, lastAt: now }, step: 0 };
 }
 
 export interface ZoomKeyInput {
@@ -184,8 +217,12 @@ export function zoomKeyAction(event: ZoomKeyInput): ZoomAction | null {
   return null;
 }
 
-export function zoomPercent(zoom: number): string {
-  return `${Math.round(zoom * 100)}%`;
+/**
+ * The control's readout: the camera zoom itself, so the stops read 1x, 2x and
+ * 3x. A value between stops keeps at most two decimals.
+ */
+export function zoomLabel(zoom: number): string {
+  return `${Number(zoom.toFixed(2))}x`;
 }
 
 export function zoomView(target: number): ZoomView {

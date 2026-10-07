@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { zoomView } from '../game/mapZoom';
@@ -16,46 +16,52 @@ function renderControls(zoom: number) {
 }
 
 describe('ZoomControls (map-zoom)', () => {
-  it('is one group with the percent between zoom in and zoom out', () => {
-    const { zoomIn, zoomOut, label } = renderControls(1);
+  it('is one group with the zoom label between zoom in and zoom out', () => {
+    const { zoomIn, zoomOut, label } = renderControls(2);
 
     const group = screen.getByRole('group', { name: 'Zoom del mapa' });
     expect([...group.querySelectorAll('button')]).toEqual([zoomIn, label, zoomOut]);
-    expect(label).toHaveTextContent('100%');
-    expect(label).toHaveAccessibleName('Restablecer zoom (100%)');
+    expect(label).toHaveTextContent('2x');
+    expect(label).toHaveAccessibleName('Restablecer zoom a 2x (ahora 2x)');
   });
 
   it.each([
-    { zoom: 0.5, percent: '50%', inEnabled: true, outEnabled: false },
-    { zoom: 1.5, percent: '150%', inEnabled: true, outEnabled: true },
-    { zoom: 2, percent: '200%', inEnabled: false, outEnabled: true },
-  ])('at $percent: zoom in enabled $inEnabled, zoom out enabled $outEnabled', ({ zoom, percent, inEnabled, outEnabled }) => {
+    { zoom: 1, label: '1x', inEnabled: true, outEnabled: false },
+    { zoom: 2, label: '2x', inEnabled: true, outEnabled: true },
+    { zoom: 3, label: '3x', inEnabled: false, outEnabled: true },
+  ])('at $label: zoom in enabled $inEnabled, zoom out enabled $outEnabled', ({ zoom, label: text, inEnabled, outEnabled }) => {
     const { zoomIn, zoomOut, label } = renderControls(zoom);
 
-    expect(label).toHaveTextContent(percent);
+    expect(label).toHaveTextContent(text);
+    expect(label).toHaveAccessibleName(`Restablecer zoom a 2x (ahora ${text})`);
+    expect(label).toHaveAttribute('title', `Restablecer zoom a 2x (ahora ${text})`);
     expect(zoomIn.matches(':enabled')).toBe(inEnabled);
     expect(zoomOut.matches(':enabled')).toBe(outEnabled);
   });
 
   it('each button asks for its own action', async () => {
     const user = userEvent.setup();
-    const { zoomIn, zoomOut, label, onZoomIn, onZoomOut, onReset } = renderControls(1.5);
+    // With three stops no single one enables all three buttons: 1x has no zoom out, 3x no zoom in.
+    const atMin = renderControls(1);
+    await user.click(atMin.zoomIn);
+    await user.click(atMin.label);
+    cleanup();
+    const atMax = renderControls(3);
+    await user.click(atMax.zoomOut);
+    await user.click(atMax.label);
 
-    await user.click(zoomIn);
-    await user.click(zoomOut);
-    await user.click(label);
-
-    expect([onZoomIn, onZoomOut, onReset].map((handler) => handler.mock.calls.length)).toEqual([1, 1, 1]);
+    expect([atMin.onZoomIn, atMin.onZoomOut, atMin.onReset].map((handler) => handler.mock.calls.length)).toEqual([1, 0, 1]);
+    expect([atMax.onZoomIn, atMax.onZoomOut, atMax.onReset].map((handler) => handler.mock.calls.length)).toEqual([0, 1, 1]);
   });
 
-  it('has nothing to reset at 100%, so the label is disabled but still readable', async () => {
+  it('has nothing to reset at the default 2x, so the label is disabled but still readable', async () => {
     const user = userEvent.setup();
-    const { label, onReset } = renderControls(1);
+    const { label, onReset } = renderControls(2);
 
     await user.click(label);
 
     expect(label).toBeDisabled();
-    expect(label).toHaveTextContent('100%');
+    expect(label).toHaveTextContent('2x');
     expect(onReset).not.toHaveBeenCalled();
   });
 });

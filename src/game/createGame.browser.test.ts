@@ -106,8 +106,9 @@ describe('createGame: map zoom persistence (map-zoom)', () => {
   const mainZoom = (game: Phaser.Game): number => game.scene.getScene('office').cameras.main.zoom;
 
   it.each([
-    ['a stored stop', '1.5', 1.5],
-    ['garbage', 'abc', 1],
+    ['a stored stop', '3', 3],
+    ['a retired stop', '1.5', 2],
+    ['garbage', 'abc', 2],
   ])('restores the zoom of this browser by default: %s', async (_name, stored, expected) => {
     window.localStorage.setItem(MAP_ZOOM_KEY, stored);
 
@@ -124,15 +125,15 @@ describe('createGame: map zoom persistence (map-zoom)', () => {
 
     bridge.emitCommand('zoom', { action: 'out' });
 
-    expect(window.localStorage.getItem(MAP_ZOOM_KEY)).toBe('0.75');
+    expect(window.localStorage.getItem(MAP_ZOOM_KEY)).toBe('1');
   });
 
   it('a store given by the caller wins over the browser one', async () => {
-    window.localStorage.setItem(MAP_ZOOM_KEY, '0.5');
-    const game = createGame(mountHost(), createOfficeBridge(), { zoomStore: { load: () => 2, save: vi.fn() } });
+    window.localStorage.setItem(MAP_ZOOM_KEY, '1');
+    const game = createGame(mountHost(), createOfficeBridge(), { zoomStore: { load: () => 3, save: vi.fn() } });
     games.push(game);
     await waitForSceneRunning(game, 'office');
 
-    expect(mainZoom(game)).toBe(2);
+    expect(mainZoom(game)).toBe(3);
   });
 });
