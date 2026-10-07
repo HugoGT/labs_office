@@ -177,7 +177,7 @@ export async function authenticate(
 
   const identity = await deps.auth.verify(token);
   if (identity === null) return { ok: false, result: UNAUTHORIZED };
-  // #128: the one 401 that says why. Only a validly signed token gets here, and
+  // #128: only a validly signed token gets here, and
   // without the reason the client would retry the same token instead of
   // asking for email and password again.
   if (identity === SESSION_EXPIRED) return { ok: false, result: SESSION_TOO_OLD };
@@ -185,13 +185,13 @@ export async function authenticate(
   const user = await deps.directory.findByUid(identity.uid);
   const decision: AccessDecision = decideAccess(user, clock(deps));
   if (decision !== 'allow' || user === null) {
-    // El motivo va al log y NUNCA al cuerpo, por la misma razon que
-    // `verifyIdToken.verify` devuelve `null` en vez de una causa. Pero el
-    // operador si lo necesita: "todo el mundo cae en not-provisioned" (las
-    // migraciones no corrieron) y "un invitado caduco" son la misma respuesta
-    // HTTP y dos incidencias distintas a las tres de la manana.
+    // Same boundary as room join: only a verified identity learns its own
+    // denial. Otherwise the entrance mistakes expiry for a name-save failure.
     logger(deps)(`acceso denegado a /admin: ${decision}`);
-    return { ok: false, result: UNAUTHORIZED };
+    return {
+      ok: false,
+      result: { status: 401, body: { error: 'unauthorized', reason: decision === 'allow' ? 'not-provisioned' : decision } },
+    };
   }
 
   return { ok: true, user };

@@ -11,10 +11,9 @@
  *
  * ## Por que devuelve un motivo y no un booleano
  *
- * The HTTP routes (`adminRoutes.authenticate`) still collapse every case into
- * the same mute 401. The office join tells the reason (#129): only to a
- * validly signed token, and without it the client could only say "Sin
- * servidor". El LOG del servidor necesita la distincion en todo caso:
+ * HTTP routes and office join tell the reason only to a validly signed token.
+ * Otherwise an entrance refusal would look like a name-save or server error.
+ * The server log needs this distinction too:
  * "todo el mundo cae en not-provisioned" (las migraciones no corrieron, o el
  * bootstrap apunta al proyecto equivocado) y "un invitado caduco" son la misma
  * respuesta HTTP y dos incidencias completamente distintas a las tres de la

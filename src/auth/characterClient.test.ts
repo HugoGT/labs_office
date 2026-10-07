@@ -60,7 +60,6 @@ describe('createCharacterClient: read', () => {
   });
 
   it.each([
-    ['a 401', respondWith({ error: 'unauthorized' }, 401)],
     ['a malformed body', respondWith({ avatarId: 7, chosen: 'yes' })],
     ['a network failure', REJECTS],
   ])('%s is failed', async (_label, fetchImpl) => {
@@ -73,6 +72,17 @@ describe('createCharacterClient: read', () => {
     await expect(client(fetchImpl, async () => null).read()).resolves.toEqual({ outcome: 'failed' });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+});
+
+describe('character entrance HTTP denials', () => {
+  it.each(['expired', 'revoked', 'not-provisioned', 'session-expired', undefined, 'unknown'])(
+    'preserves %s on reads and saves', async (reason) => {
+      const port = client(respondWith({ error: 'unauthorized', reason }, 401));
+      const expected = { outcome: 'denied', reason: reason === undefined || reason === 'unknown' ? 'unauthorized' : reason };
+      await expect(port.read()).resolves.toEqual(expected);
+      await expect(port.save('character-x')).resolves.toEqual(expected);
+    },
+  );
 });
 
 describe('createCharacterClient: save', () => {

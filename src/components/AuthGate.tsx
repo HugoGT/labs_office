@@ -68,10 +68,10 @@ export function AuthGate({
   onDismissNotice,
   children,
 }: AuthGateProps) {
-  const { user, ready, pending, error, signIn } = useAuth(auth);
+  const { user, ready, pending, error, canResetPassword, signIn } = useAuth(auth);
   const reset = usePasswordReset(auth);
   const signOutQuietly = useCallback(() => auth?.signOut() ?? Promise.resolve(), [auth]);
-  const { flow, error: claimError, claiming, submit } = useDisplayName(displayNamePort, user, signOutQuietly);
+  const { flow, error: claimError, claiming, submit, onAccessDenied } = useDisplayName(displayNamePort, user, signOutQuietly);
 
   /**
    * `true` en cuanto `LoginScreen` se pinto una vez desde este montaje. Sin
@@ -102,6 +102,7 @@ export function AuthGate({
     user,
     user !== null && flow.phase === 'resolved',
     signedInHereRef.current,
+    onAccessDenied,
   );
 
   const handleSubmit = useCallback(
@@ -155,7 +156,7 @@ export function AuthGate({
     return null;
   }
 
-  if (user !== null && !everShowedLoginRef.current) {
+  if (user !== null && !everShowedLoginRef.current && claimError === null) {
     // Restauracion genuina, todavia sin pintar el formulario ni una vez: el
     // mismo hueco silencioso que `!ready` de arriba, y por la misma razon --
     // parpadear el login para una sesion que ya existia molesta mas de lo que
@@ -173,13 +174,13 @@ export function AuthGate({
       error={claimError ?? error}
       notice={notice}
       initialName={initialName}
-      passwordReset={{
+      passwordReset={canResetPassword && user === null && claimError === null && notice === null ? {
         onSend: (email) => void reset.sendReset(email),
         onClear: reset.clear,
         pending: reset.pending,
         sent: reset.sent,
         error: reset.error,
-      }}
+      } : undefined}
     />
   );
 }

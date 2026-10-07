@@ -4,13 +4,10 @@
  * 'session-expired' }` on every authenticated route; the join already says it
  * through `OfficeAccessDeniedError`.
  *
- * A `fetch` decorator and not one more outcome per port: the entrance clients
- * (`displayNameClient`, `characterClient`) and every dashboard client already
- * take an injected `fetch`, and each keeps reading the same response it read
- * before (a 401 is still `failed` or `AdminError('unauthorized')`). The only
- * new thing is the side channel to `App`, which signs out and shows the login
- * notice, so the person types email and password instead of staying on an
- * error a reload cannot clear (the same token comes back).
+ * Dashboard clients keep reading the response as `AdminError('unauthorized')`;
+ * this decorator also tells App to sign out and show the login notice. Entrance
+ * clients instead preserve denial outcomes for AuthGate, without this decorator,
+ * so a response has exactly one sign-out owner.
  */
 
 import type { AccessDeniedReason } from '../game/officeProtocol';

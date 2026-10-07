@@ -101,6 +101,7 @@ describe('App', () => {
 describe('App: autenticacion (#8)', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    window.history.pushState({}, '', '/');
   });
 
   it('sin configuracion de firebase entra directo, sin pantalla de login', async () => {
@@ -145,7 +146,8 @@ describe('App: autenticacion (#8)', () => {
     expect(screen.queryByLabelText(/contraseña/i)).not.toBeInTheDocument();
   });
 
-  it('sin sesion ensena el login dentro del <main>, sin montar Phaser', () => {
+  it.each(['/', '/dashboard'])('signed-out %s hides password reset and never mounts Phaser', (path) => {
+    window.history.pushState({}, '', path);
     vi.stubEnv('VITE_FIREBASE_API_KEY', 'AIza-publica');
     vi.stubEnv('VITE_FIREBASE_PROJECT_ID', 'oficina-virtual');
     const { port, emit } = fakePort();
@@ -157,6 +159,7 @@ describe('App: autenticacion (#8)', () => {
     const form = screen.getByLabelText(/contraseña/i);
     expect(container.querySelector('main')?.contains(form)).toBe(true);
     expect(createGameMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /olvidaste|enviar enlace/i })).not.toBeInTheDocument();
   });
 
   it('REGRESION: renovar el token no vuelve a montar la oficina', async () => {
@@ -322,7 +325,11 @@ describe('App: access denied at join (#129)', () => {
     vi.unstubAllEnvs();
   });
 
-  it('a refused join signs out and the login says why', async () => {
+  it.each([
+    ['expired', 'Tu sesión caducó. El administrador debe darte acceso a la oficina.'],
+    ['revoked', 'Acceso retirado: un administrador retiró tu acceso a la oficina. Contacta con un administrador.'],
+    ['not-provisioned', 'Tu cuenta no está dada de alta en la oficina. Pide a un administrador que te invite.'],
+  ] as const)('a %s join refusal signs out and hides reset', async (reason, notice) => {
     vi.stubEnv('VITE_FIREBASE_API_KEY', 'AIza-publica');
     vi.stubEnv('VITE_FIREBASE_PROJECT_ID', 'oficina-virtual');
     const { port, emit } = fakePort();
@@ -332,13 +339,14 @@ describe('App: access denied at join (#129)', () => {
     await waitForOffice(container);
     const bridge = createGameMock.mock.calls[0][1];
 
-    act(() => bridge.emit('presence', { online: false, peers: 0, state: 'denied', reason: 'expired', canRetry: true }));
+    act(() => bridge.emit('presence', { online: false, peers: 0, state: 'denied', reason, canRetry: true }));
 
     expect(port.signOut).toHaveBeenCalledTimes(1);
     // The port reports the sign-out like any other: no user, so the login.
     emit(null);
     expect(container.querySelector('#office-shell')).toBeNull();
-    expect(screen.getByRole('status')).toHaveTextContent('Tu acceso caducó. Pide a un administrador que lo renueve.');
+    expect(screen.getByRole('status').textContent).toBe(notice);
+    expect(screen.queryByRole('button', { name: /olvidaste|enviar enlace/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/Sin servidor/)).not.toBeInTheDocument();
   });
 });
@@ -356,10 +364,12 @@ describe('App: session older than its maximum age (#128)', () => {
     window.history.pushState({}, '', '/');
   });
 
-  function serverSaysSessionExpired() {
+  function serverSaysSessionExpired(exceptEntrance = false) {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => Response.json({ error: 'unauthorized', reason: 'session-expired' }, { status: 401 })),
+      vi.fn(async (url: string | URL | Request) => exceptEntrance && String(url).endsWith('/me/display-name')
+        ? Response.json({ displayName: null })
+        : Response.json({ error: 'unauthorized', reason: 'session-expired' }, { status: 401 })),
     );
   }
 
@@ -376,6 +386,13 @@ describe('App: session older than its maximum age (#128)', () => {
     expect(port.signOut).toHaveBeenCalledTimes(1);
     emit(null);
     expect(screen.getByRole('status')).toHaveTextContent(EXPIRED);
+    expect(screen.queryByRole('button', { name: /olvidaste/i })).not.toBeInTheDocument();
+    port.signIn.mockRejectedValueOnce({ code: 'auth/invalid-credential' });
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/^nombre$/i), 'Ana');
+    await user.type(screen.getByLabelText(/correo/i), 'ana@example.com');
+    await user.type(screen.getByLabelText(/^contraseña$/i), 'wrong{Enter}');
+    expect(screen.getByRole('button', { name: /olvidaste/i })).toBeInTheDocument();
   });
 
   it('the entrance signs out when the server says so over HTTP', async () => {
@@ -387,13 +404,14 @@ describe('App: session older than its maximum age (#128)', () => {
     render(<App />);
     emit({ uid: 'uid-ana', email: 'ana@example.com', displayName: 'Ana' });
 
-    await waitFor(() => expect(port.signOut).toHaveBeenCalled());
+    await waitFor(() => expect(port.signOut).toHaveBeenCalledTimes(1));
     emit(null);
-    expect(screen.getByRole('status')).toHaveTextContent(EXPIRED);
+    expect(screen.getByRole('alert')).toHaveTextContent(EXPIRED);
+    expect(createGameMock).not.toHaveBeenCalled();
   });
 
   it('the dashboard signs out instead of staying on an error it cannot leave', async () => {
-    serverSaysSessionExpired();
+    serverSaysSessionExpired(true);
     window.history.pushState({}, '', '/dashboard');
     const { port, emit } = fakePort();
     createAdapterMock.mockReturnValue(port);

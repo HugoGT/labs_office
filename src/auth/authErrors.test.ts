@@ -122,8 +122,8 @@ describe('describePasswordResetError (#94)', () => {
 
 describe('describeAccessDenied (#129)', () => {
   it.each([
-    ['expired', 'Tu acceso caducó. Pide a un administrador que lo renueve.'],
-    ['revoked', 'Acceso retirado: un administrador retiró tu acceso a la oficina.'],
+    ['expired', 'Tu sesión caducó. El administrador debe darte acceso a la oficina.'],
+    ['revoked', 'Acceso retirado: un administrador retiró tu acceso a la oficina. Contacta con un administrador.'],
     ['not-provisioned', 'Tu cuenta no está dada de alta en la oficina. Pide a un administrador que te invite.'],
     ['unauthorized', 'No se pudo comprobar tu sesión. Vuelve a iniciar sesión.'],
     ['session-expired', 'Tu sesión caducó. Vuelve a iniciar sesión.'],

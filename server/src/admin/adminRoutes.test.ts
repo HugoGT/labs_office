@@ -222,7 +222,7 @@ describe('autenticacion, comun a todas las rutas', () => {
       });
 
       it('401 session-expired when the login is older than the maximum session age (#128)', async () => {
-        // The only 401 with a reason: the token is validly signed, and the
+        // A signed-token 401 with a reason: the token is validly signed, and the
         // client needs it to sign out instead of retrying the same token.
         const { deps } = harness();
         expect(await llamar(bearer(TOKEN_SESION_CADUCADA), deps)).toEqual({
@@ -235,7 +235,7 @@ describe('autenticacion, comun a todas las rutas', () => {
         const { deps } = harness();
         expect(await llamar(bearer(TOKEN_FANTASMA), deps)).toEqual({
           status: 401,
-          body: { error: 'unauthorized' },
+          body: { error: 'unauthorized', reason: 'not-provisioned' },
         });
       });
 
@@ -245,7 +245,7 @@ describe('autenticacion, comun a todas las rutas', () => {
         const { deps } = harness();
         expect(await llamar(bearer(TOKEN_CADUCADO), deps)).toEqual({
           status: 401,
-          body: { error: 'unauthorized' },
+          body: { error: 'unauthorized', reason: 'expired' },
         });
       });
 
@@ -253,7 +253,7 @@ describe('autenticacion, comun a todas las rutas', () => {
         const { deps } = harness();
         expect(await llamar(bearer(TOKEN_REVOCADO), deps)).toEqual({
           status: 401,
-          body: { error: 'unauthorized' },
+          body: { error: 'unauthorized', reason: 'revoked' },
         });
       });
 
@@ -273,22 +273,21 @@ describe('autenticacion, comun a todas las rutas', () => {
     });
   }
 
-  it('REGRESION: un token forjado y un uid sin fila responden EXACTAMENTE igual', async () => {
-    // El orden de las guardas es la defensa. Si el directorio se consultase
-    // antes de verificar la firma, o si "no provisionado" tuviese su propio
-    // codigo, quien sondea distinguiria un uid que existe en el proyecto de uno
-    // inventado, y eso es un oraculo para ir afinando. Mismo argumento que la
-    // regresion de `handleLivekitToken`.
+  it('only verified identities learn their own directory denial', async () => {
     const { deps } = harness();
+    const lookup = vi.spyOn(deps.directory, 'findByUid');
 
     const forjado = await handleAdminSession(bearer('token-forjado'), deps);
+    expect(lookup).not.toHaveBeenCalled();
     const fantasma = await handleAdminSession(bearer(TOKEN_FANTASMA), deps);
     const caducado = await handleAdminSession(bearer(TOKEN_CADUCADO), deps);
     const revocado = await handleAdminSession(bearer(TOKEN_REVOCADO), deps);
 
-    expect(forjado).toEqual(fantasma);
-    expect(forjado).toEqual(caducado);
-    expect(forjado).toEqual(revocado);
+    // Only a verified identity learns its own directory denial, as on room join.
+    expect(forjado).toEqual({ status: 401, body: { error: 'unauthorized' } });
+    expect(fantasma.body.reason).toBe('not-provisioned');
+    expect(caducado.body.reason).toBe('expired');
+    expect(revocado.body.reason).toBe('revoked');
   });
 
   it('acepta el esquema Bearer en cualquier caja (RFC 7235)', async () => {
@@ -1546,9 +1545,10 @@ describe('users: list everyone and remove access (#93)', () => {
     describe(`${name}: same guards as every admin route`, () => {
       it('401 without a credential, with a forged token, and for a revoked account', async () => {
         const { deps } = setup();
-        for (const header of [undefined, bearer('token-forjado'), bearer(TOKEN_REVOCADO)]) {
+        for (const header of [undefined, bearer('token-forjado')]) {
           expect(await call(header, deps)).toEqual({ status: 401, body: { error: 'unauthorized' } });
         }
+        expect(await call(bearer(TOKEN_REVOCADO), deps)).toEqual({ status: 401, body: { error: 'unauthorized', reason: 'revoked' } });
       });
 
       it('403 for an authenticated employee, before touching the directory', async () => {

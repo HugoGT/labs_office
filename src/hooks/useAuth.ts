@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { describeAuthError } from '../auth/authErrors';
+import { describeAuthError, isWrongCredentials } from '../auth/authErrors';
 import type { AuthPort, AuthUser } from '../auth/authPort';
 
 export interface AuthState {
@@ -16,6 +16,8 @@ export interface AuthState {
   pending: boolean;
   /** Ya traducido a texto para la persona; el error crudo no sale de aqui. */
   error: string | null;
+  /** Derived from the last sign-in failure, never from translated copy. */
+  canResetPassword: boolean;
   /**
    * `Promise<boolean>` y no `Promise<void>` (#100, D9): `true` si el proveedor
    * no lanzo, `false` si lanzo -- NUNCA rechaza. `AuthGate` encadena el
@@ -54,7 +56,7 @@ export function useAuth(auth: AuthPort | null): AuthState {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [ready, setReady] = useState(auth === null);
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<{ cause: unknown } | null>(null);
   /** Corta las escrituras de estado que llegan tras el desmontaje. */
   const aliveRef = useRef(true);
 
@@ -81,6 +83,7 @@ export function useAuth(auth: AuthPort | null): AuthState {
       // volveria a crear cada hora, tirando la posicion del avatar y la conexion
       // de LiveKit de quien solo estaba trabajando.
       setUser((current) => (isSameUser(current, next) ? current : next));
+      if (next !== null) setFailure(null);
       setReady(true);
     });
 
@@ -94,7 +97,7 @@ export function useAuth(auth: AuthPort | null): AuthState {
     async (email: string, password: string): Promise<boolean> => {
       if (auth === null) return true;
 
-      setError(null);
+      setFailure(null);
       setPending(true);
       try {
         await auth.signIn(email, password);
@@ -103,7 +106,7 @@ export function useAuth(auth: AuthPort | null): AuthState {
         // No se relanza: el fallo de credenciales es parte normal del flujo,
         // no una excepcion que alguien arriba deba manejar. Vive en el estado,
         // que es donde la pantalla puede mostrarlo.
-        if (aliveRef.current) setError(describeAuthError(cause));
+        if (aliveRef.current) setFailure({ cause });
         return false;
       } finally {
         if (aliveRef.current) setPending(false);
@@ -120,5 +123,8 @@ export function useAuth(auth: AuthPort | null): AuthState {
     await auth.signOut();
   }, [auth]);
 
-  return { user, ready, pending, error, signIn, signOut };
+  return { user, ready, pending, signIn, signOut,
+    error: failure === null ? null : describeAuthError(failure.cause),
+    canResetPassword: failure !== null && isWrongCredentials(failure.cause),
+  };
 }
