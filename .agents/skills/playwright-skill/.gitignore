@@ -1,0 +1,3 @@
+# Local dependencies and lockfile produced by npm run setup.
+/node_modules/
+/package-lock.json
