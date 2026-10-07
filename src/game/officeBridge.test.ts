@@ -117,11 +117,13 @@ describe('createOfficeBridge', () => {
     bridge.emitCommand('callPeer', { sessionId: 'sess-a' });
     bridge.emitCommand('walkToPeer', { sessionId: 'sess-a' });
     bridge.emitCommand('reconnect', undefined);
+    bridge.emitCommand('zoom', { action: 'in' });
     const handler = vi.fn();
     bridge.onCommand('teleportToTile', handler);
     bridge.onCommand('callPeer', handler);
     bridge.onCommand('walkToPeer', handler);
     bridge.onCommand('reconnect', handler);
+    bridge.onCommand('zoom', handler);
 
     await Promise.resolve();
     expect(handler).not.toHaveBeenCalled();
