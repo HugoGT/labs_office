@@ -15,11 +15,14 @@ const games: Phaser.Game[] = [];
 const hosts: HTMLElement[] = [];
 
 afterEach(() => {
-  for (const game of games.splice(0)) game.destroy(true);
+  for (const game of games.splice(0)) {
+    game.destroy(true);
+    // destroy() is deferred; these fixtures no longer rely on a scheduled RAF.
+    if (!game.loop.running) game.step(0, 0);
+  }
   for (const host of hosts.splice(0)) host.remove();
 });
 
-const LOOP_WAIT = { timeout: 20000, interval: 50 } as const;
 const HOST_SCENE_KEY = 'camera-pan-layer-host';
 const WORLD = { x: 0, y: 0, width: 2000, height: 2000 } as const;
 
@@ -52,6 +55,9 @@ async function bootHostScene(): Promise<HostScene> {
   games.push(game);
 
   await waitForSceneRunning(game, HOST_SCENE_KEY);
+  // CI can deliver too few RAFs during a wall-clock poll. Own the frame
+  // scheduler after boot, but keep the real SceneManager and renderer.
+  game.loop.stop();
 
   return game.scene.getScene(HOST_SCENE_KEY) as HostScene;
 }
@@ -71,9 +77,17 @@ function layerOptions(
   };
 }
 
-/** Un cuadro completo del bucle real: update (donde planea la capa) + render (donde Phaser clampa). */
+/** 128 frames exceed the 0.12-lerp convergence bound for this 2000px world and 0.5px arrival. */
+function renderFrames(scene: Phaser.Scene, count = 128): void {
+  for (let frame = 0; frame < count; frame++) scene.game.step(scene.time.now + 16, 16);
+}
+
+/** Observe a complete real update + render, including Phaser's camera clamp/matrix. */
 function nextFrame(scene: Phaser.Scene): Promise<void> {
-  return new Promise((resolve) => scene.game.events.once(Phaser.Core.Events.POST_RENDER, () => resolve()));
+  return new Promise((resolve) => {
+    scene.game.events.once(Phaser.Core.Events.POST_RENDER, () => resolve());
+    renderFrames(scene, 1);
+  });
 }
 
 function fakePointer(
@@ -155,7 +169,8 @@ describe('CameraPanLayer: releasing a drag keeps focus until the player moves (#
     expect(cam.midPoint.x).toBeLessThan(scene.target.x);
     expect(startFollow).not.toHaveBeenCalled();
 
-    await vi.waitFor(() => expect(startFollow).toHaveBeenCalledTimes(1), LOOP_WAIT);
+    renderFrames(scene);
+    expect(startFollow).toHaveBeenCalledTimes(1);
     expect(startFollow).toHaveBeenCalledWith(scene.target, true, 0.12, 0.12);
     expect(cam.getBounds()).toMatchObject(WORLD);
     expect(cam.midPoint.x).toBeCloseTo(scene.target.x, 0);
@@ -198,7 +213,8 @@ describe('CameraPanLayer: releasing a drag keeps focus until the player moves (#
     expect(cam.scrollY).toBeCloseTo(dragged.y);
 
     scene.target.x += 32;
-    await vi.waitFor(() => expect(cam.midPoint.x).toBeCloseTo(scene.target.x, 0), LOOP_WAIT);
+    renderFrames(scene);
+    expect(cam.midPoint.x).toBeCloseTo(scene.target.x, 0);
   });
 });
 
@@ -302,7 +318,8 @@ describe('CameraPanLayer: la vista mas grande que el mundo sigue paneando (#53)'
     expect(cam.getBounds()).toMatchObject(navigationBounds(WORLD, cam, cam.zoom));
     expect(startFollow).not.toHaveBeenCalled();
     scene.target.y += 32;
-    await vi.waitFor(() => expect(startFollow).toHaveBeenCalledTimes(1), LOOP_WAIT);
+    renderFrames(scene);
+    expect(startFollow).toHaveBeenCalledTimes(1);
     const bounds = cam.getBounds();
     expect([bounds.x, bounds.y, bounds.width, bounds.height]).toEqual([
       WORLD.x,
@@ -342,10 +359,9 @@ describe('CameraPanLayer: click en el minimapa (#98)', () => {
     await nextFrame(scene);
     expect(cam.midPoint.x).not.toBeCloseTo(1000, 0);
 
-    await vi.waitFor(() => {
-      expect(cam.midPoint.x).toBeCloseTo(1000, 0);
-      expect(cam.midPoint.y).toBeCloseTo(1000, 0);
-    }, LOOP_WAIT);
+    renderFrames(scene);
+    expect(cam.midPoint.x).toBeCloseTo(1000, 0);
+    expect(cam.midPoint.y).toBeCloseTo(1000, 0);
     // Sigue ahi unos cuadros despues: el seguimiento no la reclamo.
     await nextFrame(scene);
     await nextFrame(scene);
@@ -353,7 +369,7 @@ describe('CameraPanLayer: click en el minimapa (#98)', () => {
     expect(minimap.scrollX).toBe(minimapScrollX);
   });
 
-  it('en cuanto el jugador se mueve, la camara vuelve a seguirlo', async () => {
+  it('resumes follow only after movement even when automatic RAF delivery is withheld', async () => {
     const scene = await bootHostScene();
     const cam = scene.cameras.main;
     const minimap = await addMinimap(scene);
@@ -361,12 +377,36 @@ describe('CameraPanLayer: click en el minimapa (#98)', () => {
     new CameraPanLayer(layerOptions(scene, { minimap }));
 
     scene.input.emit('pointerdown', fakePointer({ x: 250, y: 50, camera: minimap }), []);
-    await vi.waitFor(() => expect(cam.midPoint.x).toBeCloseTo(1000, 0), LOOP_WAIT);
+    renderFrames(scene);
+    expect(cam.midPoint.x).toBeCloseTo(1000, 0);
+    expect(cam.midPoint.y).toBeCloseTo(1000, 0);
 
+    expect(scene.game.loop.running).toBe(false);
+    const updates = vi.fn();
+    const renders = vi.fn();
+    scene.events.on(Phaser.Scenes.Events.UPDATE, updates);
+    scene.game.events.on(Phaser.Core.Events.POST_RENDER, renders);
+    const minimapScroll = { x: minimap.scrollX, y: minimap.scrollY };
+    renderFrames(scene, 5);
+    expect(startFollow).not.toHaveBeenCalled();
+    expect(cam.midPoint.x).toBeCloseTo(1000, 0);
     scene.target.x += 32;
 
-    await vi.waitFor(() => expect(startFollow).toHaveBeenCalledTimes(1), LOOP_WAIT);
+    // No update means no follow; one real frame starts a glide, not a jump.
+    expect(startFollow).not.toHaveBeenCalled();
+    await nextFrame(scene);
+    expect(cam.midPoint.x).toBeLessThan(1000);
+    expect(cam.midPoint.x).toBeGreaterThan(scene.target.x);
+    expect(startFollow).not.toHaveBeenCalled();
+    renderFrames(scene);
+    expect(updates).toHaveBeenCalledTimes(134);
+    expect(renders).toHaveBeenCalledTimes(134);
+    expect(startFollow).toHaveBeenCalledTimes(1);
+    expect(startFollow).toHaveBeenCalledWith(scene.target, true, 0.12, 0.12);
     expect(cam.midPoint.x).toBeCloseTo(scene.target.x, 0);
+    expect(cam.midPoint.y).toBeCloseTo(scene.target.y, 0);
+    expect(cam.getBounds()).toMatchObject(WORLD);
+    expect({ x: minimap.scrollX, y: minimap.scrollY }).toEqual(minimapScroll);
   });
 
   it('a drag interrupts minimap glide and keeps its new focus until movement after release', async () => {
@@ -391,7 +431,8 @@ describe('CameraPanLayer: click en el minimapa (#98)', () => {
     expect(startFollow).not.toHaveBeenCalled();
 
     scene.target.y += 32;
-    await vi.waitFor(() => expect(startFollow).toHaveBeenCalledTimes(1), LOOP_WAIT);
+    renderFrames(scene);
+    expect(startFollow).toHaveBeenCalledTimes(1);
   });
 
   it('boton derecho o editor de layout activo: el minimapa no mueve la camara', async () => {
