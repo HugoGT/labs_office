@@ -10,8 +10,11 @@ import {
   spaceFloorTiles,
 } from './artPlacement';
 import { feetOf, positionForFeet } from './avatarGeometry';
-import { beginAutoWalk, stepAutoWalk, type AutoWalkState } from './autoWalk';
+import { ARRIVE_EPSILON_PX, beginAutoWalk, stepAutoWalk, type AutoWalkState } from './autoWalk';
 import { CameraPanLayer } from './CameraPanLayer';
+import { PAN_THRESHOLD_PX } from './cameraPan';
+import { advanceWalkingTime, MAX_WALK_FRAME_MS, walkingMultiplier } from './walkingSpeed';
+import { walkingSweepFraction } from './walkingCollision';
 import { walkFrame } from './characterAnimation';
 import {
   animateCharacter,
@@ -121,6 +124,8 @@ import { AVATAR_KEYS, PLAYER_TEXTURE, avatarTextureKey, createOfficeTextures } f
 export const OFFICE_SCENE_KEY = 'office';
 
 const PLAYER_SPEED = 230;
+// Below both the 14px body height and Arcade's 4px overlap bias, even at 5x.
+const WALK_STEP_PX = 3;
 const PROXIMITY_TICK_MS = 250;
 /** Suavizado de `startFollow` (#53): compartido entre `setupCameras` y el `resumeFollow` de `CameraPanLayer`. */
 const FOLLOW_LERP = 0.12;
@@ -396,6 +401,17 @@ export class OfficeScene extends Phaser.Scene {
    * este campo tiene valor.
    */
   private autoWalk?: AutoWalkState;
+  private walkingMs = 0;
+  private lastWalkFrame?: number;
+  private walkClick?: Phaser.Input.Pointer;
+
+  private readonly resetWalking = (): void => {
+    this.walkingMs = 0;
+    this.lastWalkFrame = undefined;
+    this.autoWalk = undefined;
+    this.walkClick = undefined;
+    (this.player.body as Phaser.Physics.Arcade.Body).setVelocity(0, 0);
+  };
 
   private readonly options: OfficeSceneOptions;
   private remotes?: RemoteAvatarRegistry<RemoteAvatarContainer>;
@@ -475,6 +491,19 @@ export class OfficeScene extends Phaser.Scene {
     // llama el servidor a quien entra sin identidad verificada.
     this.player = spawnPlayer(this, this.options.playerName ?? DEFAULT_NAME);
 
+    // Arcade's discrete collision checks cannot safely take a whole 5x frame.
+    // Step it here in bounded slices, syncing containers after each separation.
+    this.physics.disableUpdate();
+    this.physics.world.fixedStep = false;
+    this.game.events.on(Phaser.Core.Events.HIDDEN, this.resetWalking);
+    this.game.events.on(Phaser.Core.Events.VISIBLE, this.resetWalking);
+    const removeWalkListeners = (): void => {
+      this.game.events.off(Phaser.Core.Events.HIDDEN, this.resetWalking);
+      this.game.events.off(Phaser.Core.Events.VISIBLE, this.resetWalking);
+    };
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, removeWalkListeners);
+    this.events.once(Phaser.Scenes.Events.DESTROY, removeWalkListeners);
+
     this.buildColliders(grid);
     this.setupCameras();
     // Decals are a few pixels each: at minimap scale they are noise, and a
@@ -535,6 +564,7 @@ export class OfficeScene extends Phaser.Scene {
     this.unsubscribeLayoutEdit = this.bridge.onCommand('layoutedit', (command) => {
       this.layoutCommandActive = command !== null;
       this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing;
+      if (this.layoutEditing) this.resetWalking();
     });
 
     // #123 phase 2. The layer outlines and picks blocks; the scene paints the
@@ -544,6 +574,7 @@ export class OfficeScene extends Phaser.Scene {
       const opening = command !== null && !this.terrainEditing;
       this.terrainEditing = command !== null;
       this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing;
+      if (this.layoutEditing) this.resetWalking();
       const preview = command?.preview ?? null;
       const repaint = encodePreview(preview) !== encodePreview(this.terrainPreview);
       this.terrainPreview = preview;
@@ -563,6 +594,7 @@ export class OfficeScene extends Phaser.Scene {
     this.unsubscribeCollisionEdit = this.bridge.onCommand('collisionedit', (command) => {
       this.collisionEditing = command !== null;
       this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing;
+      if (this.layoutEditing) this.resetWalking();
     });
 
     // #52: reintento manual, el ultimo recurso cuando la escalera automatica
@@ -954,7 +986,7 @@ export class OfficeScene extends Phaser.Scene {
       this.connection?.sendStand();
       return;
     }
-    this.autoWalk = undefined;
+    this.resetWalking();
     const body = this.player.body as Phaser.Physics.Arcade.Body;
     body.setVelocity(0, 0);
     body.checkCollision.none = true;
@@ -1576,7 +1608,8 @@ export class OfficeScene extends Phaser.Scene {
 
     this.input.on(
       'pointerdown',
-      (_pointer: Phaser.Input.Pointer, currentlyOver: Phaser.GameObjects.GameObject[]) => {
+      (pointer: Phaser.Input.Pointer, currentlyOver: Phaser.GameObjects.GameObject[]) => {
+        this.walkClick = undefined;
         // #74, PR3b: un clic en el mapa en modo edicion es una confirmacion
         // de colocacion para `layoutEditLayer` (su propio listener global en
         // el mismo `this.input`), no una peticion de cerrar el menu
@@ -1584,9 +1617,24 @@ export class OfficeScene extends Phaser.Scene {
         if (this.layoutEditing) return;
         if (!currentlyOver || currentlyOver.length === 0) {
           this.bridge.emit('closemenu', undefined);
+          if (pointer.button === 0 && pointer.camera === this.cameras.main) this.walkClick = pointer;
         }
       },
     );
+    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      // Once it was a drag, returning to its origin must not turn it into a click.
+      if (pointer === this.walkClick && pointer.getDistance() > PAN_THRESHOLD_PX) this.walkClick = undefined;
+    });
+    this.input.on('pointerupoutside', () => { this.walkClick = undefined; });
+    this.input.on('pointerup', (pointer: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
+      const eligible = pointer === this.walkClick;
+      this.walkClick = undefined;
+      if (!eligible || this.layoutEditing || over?.length || pointer.camera !== this.cameras.main ||
+        pointer.getDistance() > PAN_THRESHOLD_PX || !Number.isFinite(pointer.worldX) || !Number.isFinite(pointer.worldY)) return;
+      if (isBlocked(this.grid, Math.floor(pointer.worldX / TILE), Math.floor(pointer.worldY / TILE))) return;
+      this.standUp();
+      this.autoWalk = beginAutoWalk({ x: pointer.worldX, y: pointer.worldY }, this.player);
+    });
   }
 
   /**
@@ -1692,7 +1740,7 @@ export class OfficeScene extends Phaser.Scene {
     );
   }
 
-  update(_time: number, delta: number): void {
+  update(time: number, delta: number): void {
     let vx = 0;
     let vy = 0;
     // #104: WASD binds on `window` (Phaser's default keyboard target), so it
@@ -1704,17 +1752,49 @@ export class OfficeScene extends Phaser.Scene {
     else if (this.cursors.right.isDown || (wasdActive && this.wasd.D.isDown)) vx = 1;
     if (this.cursors.up.isDown || (wasdActive && this.wasd.W.isDown)) vy = -1;
     else if (this.cursors.down.isDown || (wasdActive && this.wasd.S.isDown)) vy = 1;
+    if (this.layoutEditing) { vx = 0; vy = 0; }
 
     // Step 6: E sits or stands, and walking stands up first.
     if (this.sitKey !== undefined && wasdActive && Phaser.Input.Keyboard.JustDown(this.sitKey)) this.toggleSeat();
     if (vx !== 0 || vy !== 0) this.standUp();
 
-    const body = this.player.body as Phaser.Physics.Arcade.Body;
+    const from = { x: this.player.x, y: this.player.y };
+    const gap = this.lastWalkFrame === undefined ? delta : time - this.lastWalkFrame;
+    const interrupted = this.layoutEditing || document.hidden || !Number.isFinite(delta) ||
+      delta <= 0 || delta > MAX_WALK_FRAME_MS || !Number.isFinite(gap) || gap < 0 || gap > MAX_WALK_FRAME_MS;
+    if (interrupted) this.resetWalking();
+    this.lastWalkFrame = time;
+    if (!interrupted) {
+      // Bound using the highest speed this frame could reach, not just its first slice.
+      const peakSpeed = PLAYER_SPEED * walkingMultiplier(this.walkingMs + delta);
+      const steps = vx === 0 && vy === 0 && !this.autoWalk ? 1
+        : Math.ceil((delta * peakSpeed) / (1000 * WALK_STEP_PX));
+      const stepMs = delta / steps;
+      for (let i = 0; i < steps; i++) this.stepWalking(time, stepMs, vx, vy);
+    }
 
-    // Auto-caminata (issue #2, D9/D10): se resuelve ANTES de decidir la
-    // velocidad final del cuadro, para que todo lo que viene despues (depth,
-    // facing, throttle de red, minimapa) siga leyendo this.player.x/y
-    // sin enterarse de este bloque, exactamente como pedia el diseno D9.
+    setCharacterFacing(this.player, this.facing);
+    animateCharacter(this.player, {
+      dx: this.player.x - from.x,
+      dy: this.player.y - from.y,
+      dtMs: interrupted ? 0 : delta,
+    });
+
+    for (const sessionId of this.remotes?.sessionIds() ?? []) {
+      const avatar = this.remotes?.get(sessionId);
+      if (!avatar) continue;
+      animateCharacter(avatar, { dx: avatar.x - avatar.lastX, dy: avatar.y - avatar.lastY, dtMs: delta });
+      avatar.lastX = avatar.x;
+      avatar.lastY = avatar.y;
+    }
+    this.updateSeatHint();
+    this.connection?.sendMove(this.player.x, this.player.y, this.facing);
+    this.mmMarker?.setPosition(this.player.x, this.player.y);
+  }
+
+  private stepWalking(time: number, delta: number, vx: number, vy: number): void {
+    const body = this.player.body as Phaser.Physics.Arcade.Body;
+    const speed = PLAYER_SPEED * walkingMultiplier(this.walkingMs);
     let steeredByAutoWalk = false;
     if (this.autoWalk) {
       const step = stepAutoWalk({
@@ -1722,18 +1802,12 @@ export class OfficeScene extends Phaser.Scene {
         position: this.player,
         keyboard: { vx, vy },
         deltaMs: delta,
-        speed: PLAYER_SPEED,
+        speed,
       });
 
       if (step.kind === 'walking') {
         this.autoWalk = step.state;
-        // TRAMPA DE INTEGRACION (ver discovery de la unit 12): jamas
-        // renormalizar esto con `new Phaser.Math.Vector2(step.vx,
-        // step.vy).normalize().scale(PLAYER_SPEED)`. El reductor ya recorta
-        // la velocidad del ULTIMO cuadro para aterrizar dentro de
-        // ARRIVE_EPSILON_PX (D10); normalizar tira esa magnitud y la
-        // reescala a una velocidad constante, asi que el jugador oscilaria
-        // alrededor del destino sin llegar nunca. Se aplica DIRECTO al body.
+        // Keep the reducer's shortened arrival velocity: never renormalize it.
         body.setVelocity(step.vx, step.vy);
         // `facingFrom` solo mira los signos, asi que funciona igual con la
         // velocidad ya escalada del reductor -- pero jamas con (0,0), o el
@@ -1756,35 +1830,38 @@ export class OfficeScene extends Phaser.Scene {
     }
 
     if (!steeredByAutoWalk) {
-      const velocity = new Phaser.Math.Vector2(vx, vy).normalize().scale(PLAYER_SPEED);
+      const velocity = new Phaser.Math.Vector2(vx, vy).normalize().scale(speed);
       body.setVelocity(velocity.x, velocity.y);
       this.facing = facingFrom(vx, vy, this.facing);
     }
 
-    // The walk comes from movement and never travels (step 6): the local
-    // player from its velocity this frame, each peer from how far its tween
-    // moved it. Animating also re-sorts each one by its feet.
-    setCharacterFacing(this.player, this.facing);
-    animateCharacter(this.player, {
-      dx: (body.velocity.x * delta) / 1000,
-      dy: (body.velocity.y * delta) / 1000,
-      dtMs: delta,
-    });
-
-    for (const sessionId of this.remotes?.sessionIds() ?? []) {
-      const avatar = this.remotes?.get(sessionId);
-      if (!avatar) continue;
-      animateCharacter(avatar, { dx: avatar.x - avatar.lastX, dy: avatar.y - avatar.lastY, dtMs: delta });
-      avatar.lastX = avatar.x;
-      avatar.lastY = avatar.y;
+    const from = { x: this.player.x, y: this.player.y };
+    const intended = body.velocity.lengthSq() > 0;
+    if (intended && !body.checkCollision.none) {
+      body.updateFromGameObject();
+      const dx = body.velocity.x * delta / 1000;
+      const dy = body.velocity.y * delta / 1000;
+      // Reuse Arcade's spatial index: no second collision map or pathfinding.
+      const candidates = this.physics.overlapRect(
+        body.x + Math.min(0, dx), body.y + Math.min(0, dy),
+        body.width + Math.abs(dx), body.height + Math.abs(dy), false, true,
+      );
+      let fraction = 1;
+      for (const obstacle of candidates) {
+        if (!obstacle.enable || obstacle.checkCollision.none) continue;
+        fraction = Math.min(fraction, walkingSweepFraction(body, dx, dy, obstacle));
+      }
+      body.velocity.scale(fraction);
     }
-    this.updateSeatHint();
-
-    // Se publica cada frame a proposito: el agrupado de `createMoveThrottle`
-    // decide que sale por el cable y que se descarta por no haber cambiado.
-    this.connection?.sendMove(this.player.x, this.player.y, this.facing);
-
-    this.mmMarker?.setPosition(this.player.x, this.player.y);
+    this.physics.world.update(time, delta);
+    this.physics.world.postUpdate();
+    const moved = Math.hypot(this.player.x - from.x, this.player.y - from.y) > 0.000001;
+    this.walkingMs = advanceWalkingTime(this.walkingMs, intended && moved && this.seat === null, delta);
+    if (this.autoWalk && Math.hypot(this.autoWalk.goal.x - this.player.x, this.autoWalk.goal.y - this.player.y) <= ARRIVE_EPSILON_PX) {
+      this.autoWalk = undefined;
+      this.walkingMs = 0;
+      body.setVelocity(0, 0);
+    }
   }
 }
 
