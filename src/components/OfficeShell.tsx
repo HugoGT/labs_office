@@ -341,6 +341,7 @@ export function OfficeShell({
     screenShareTracks,
     localScreenShareTrack,
     activeScreenSharer,
+    recordableMedia,
   } = useProximityAudio(bridge, { config: livekitConfig, status, session });
 
   /**
@@ -791,6 +792,7 @@ export function OfficeShell({
         onToggleRecord={() => void toggleRecording()}
         screenShareOn={screenShareOn}
         screenShareAvailable={screenShareAvailable}
+        recordableMedia={recordableMedia}
         onToggleScreenShare={toggleScreenShare}
         // #52: la barra solo avisa; quien sabe reconectar es la escena, y el
         // comando viaja por `emitCommand` como el resto -- sin metodo de

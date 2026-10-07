@@ -1542,3 +1542,50 @@ describe('useProximityAudio: a room lost for good is rebuilt (#84)', () => {
     expect(result.current.audioAvailable).toBe(true);
   });
 });
+
+describe('useProximityAudio: something to record (#144)', () => {
+  async function connectedTo(spaceId: string | null) {
+    const bridge = createOfficeBridge();
+    const captured: ConnectLivekitRoomOptions[] = [];
+    const connect = vi.fn(async (opts: ConnectLivekitRoomOptions) => {
+      captured.push(opts);
+      return fakeConnection();
+    });
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+    const rendered = renderHook(() => useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }));
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId });
+    });
+    return { ...rendered, callbacks: () => captured[captured.length - 1] };
+  }
+
+  it('is off until someone in the space room publishes, and follows the room after that', async () => {
+    const { result, callbacks } = await connectedTo('s1');
+    expect(result.current.recordableMedia).toBe(false);
+
+    await act(async () => callbacks().onRoomMediaChanged?.(true));
+    expect(result.current.recordableMedia).toBe(true);
+
+    await act(async () => callbacks().onRoomMediaChanged?.(false));
+    expect(result.current.recordableMedia).toBe(false);
+  });
+
+  it('media on the open floor is never recordable: only spaces record', async () => {
+    const { result, callbacks } = await connectedTo(null);
+
+    await act(async () => callbacks().onRoomMediaChanged?.(true));
+
+    expect(result.current.recordableMedia).toBe(false);
+  });
+
+  it('does not outlive the room that reported it', async () => {
+    const { result, callbacks } = await connectedTo('s1');
+    const lost = callbacks();
+    await act(async () => lost.onRoomMediaChanged?.(true));
+
+    await act(async () => lost.onDisconnected?.());
+    await act(async () => lost.onRoomMediaChanged?.(true));
+
+    expect(result.current.recordableMedia).toBe(false);
+  });
+});

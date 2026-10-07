@@ -115,6 +115,14 @@ export interface ConnectLivekitRoomOptions {
   /** Identity holding the single share slot of this room, `null` when nobody shares (#20). */
   onActiveScreenSharerChanged?: (identity: string | null) => void;
   /**
+   * Whether anyone in the room, self included, publishes an unmuted track
+   * (#144): Egress only starts a room composite once it can subscribe to one,
+   * and fails with "Start signal not received" otherwise. Publications count
+   * whether or not this client subscribes to them. Reported right after
+   * connecting and then on every change.
+   */
+  onRoomMediaChanged?: (hasMedia: boolean) => void;
+  /**
    * The room is gone for good and this connection is dead (#84): LiveKit gave
    * up reconnecting, or the server removed us. Never fired by our own
    * `disconnect()`. Without it a dead room keeps every button enabled, the
@@ -160,6 +168,7 @@ export async function connectLivekitRoom({
   onScreenShareTrackUnsubscribed,
   onLocalScreenShareChanged,
   onActiveScreenSharerChanged,
+  onRoomMediaChanged,
   onDisconnected,
 }: ConnectLivekitRoomOptions): Promise<LivekitRoomConnection> {
   const room = createRoom();
@@ -167,6 +176,7 @@ export async function connectLivekitRoom({
   let desiredAudio: readonly string[] = [];
   let desiredVideo: readonly string[] = [];
   let activeScreenSharer: string | null = null;
+  let roomHasMedia: boolean | null = null;
   /** Set by our own `disconnect()`, which also makes the room emit `Disconnected`. */
   let closing = false;
 
@@ -251,6 +261,29 @@ export async function connectLivekitRoom({
       onActiveScreenSharerChanged?.(winner);
     }
     if (shouldYieldScreenShare(room.localParticipant.identity, claims)) void stopScreenShare();
+  }
+
+  function reportRoomMedia(): void {
+    const publishes = (participant: Participant) =>
+      Array.from(participant.trackPublications.values()).some((publication) => !publication.isMuted);
+    const hasMedia =
+      publishes(room.localParticipant) || Array.from(room.remoteParticipants.values()).some(publishes);
+    if (hasMedia === roomHasMedia) return;
+    roomHasMedia = hasMedia;
+    onRoomMediaChanged?.(hasMedia);
+  }
+
+  for (const event of [
+    RoomEvent.TrackPublished,
+    RoomEvent.TrackUnpublished,
+    RoomEvent.TrackMuted,
+    RoomEvent.TrackUnmuted,
+    RoomEvent.LocalTrackPublished,
+    RoomEvent.LocalTrackUnpublished,
+    RoomEvent.ParticipantConnected,
+    RoomEvent.ParticipantDisconnected,
+  ]) {
+    room.on(event, () => reportRoomMedia());
   }
 
   // Re-ejecuta la reconciliacion cuando una publicacion llega TARDE (un peer
@@ -339,6 +372,7 @@ export async function connectLivekitRoom({
   onAudioPlaybackChanged?.(room.canPlaybackAudio);
   // Same for a share already running in the space when joining it.
   arbitrateScreenShare();
+  reportRoomMedia();
 
   return {
     setDesiredAudioPeers(sessionIds) {

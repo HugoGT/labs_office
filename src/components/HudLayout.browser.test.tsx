@@ -96,6 +96,7 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
       onRetryConnection={vi.fn()}
       screenShareOn={false}
       screenShareAvailable
+      recordableMedia
       onToggleScreenShare={vi.fn()}
       {...overrides}
     />,
