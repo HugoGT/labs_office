@@ -26,3 +26,13 @@ export const MINIMAP_MARGIN = 14;
  * el top").
  */
 export const SIDEBAR_TOP = MINIMAP_MARGIN + MINIMAP_HEIGHT + MINIMAP_MARGIN;
+
+/**
+ * Map zoom control (map-zoom): a vertical card just left of the minimap, from
+ * its top edge. It is shorter than the minimap, so it never reaches the
+ * sidebar below, and it is placed from these numbers (inline style) because
+ * the minimap itself is a Phaser camera with no DOM box to anchor to.
+ */
+export const ZOOM_CONTROLS_GAP = 8;
+export const ZOOM_CONTROLS_TOP = MINIMAP_MARGIN;
+export const ZOOM_CONTROLS_RIGHT = RAIL_RIGHT + MINIMAP_WIDTH + ZOOM_CONTROLS_GAP;

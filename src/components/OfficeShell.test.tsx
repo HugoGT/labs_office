@@ -13,6 +13,7 @@ import type { DeskDecorAsset, PlacedDeskItem } from '../game/deskDecorPort';
 import { claimDesk, fetchOfficeDesks, releaseDesk } from '../game/desksClient';
 import type { OfficeDesk } from '../game/desksPort';
 import { BUILT_IN_SPACES_VERSION } from '../game/mapData';
+import { zoomView, type ZoomAction } from '../game/mapZoom';
 import { DEFAULT_NAME } from '../game/officeProtocol';
 import { RecordingError, getRecordingUrl, startRecording, stopRecording } from '../game/recordingClient';
 import { useOfficeAdminRole } from '../hooks/useOfficeAdminRole';
@@ -1312,6 +1313,40 @@ describe('OfficeShell: exit controls (#66)', () => {
     await user.click(screen.getByRole('button', { name: 'Salir' }));
 
     expect(onLeaveOffice).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('OfficeShell: map zoom control (map-zoom)', () => {
+  it('shows the zoom the scene announces, whichever input changed it', () => {
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const group = screen.getByRole('group', { name: 'Zoom del mapa' });
+    expect(group).toHaveTextContent('100%');
+
+    act(() => bridge.emit('zoomchanged', zoomView(0.5)));
+
+    expect(group).toHaveTextContent('50%');
+    expect(screen.getByRole('button', { name: 'Alejar' })).toBeDisabled();
+  });
+
+  it('sends each click to the scene as a zoom command, and the label resets to 100%', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const actions: ZoomAction[] = [];
+    // Stands in for the scene: confirms a reset with the stop it landed on.
+    bridge.onCommand('zoom', ({ action }) => {
+      actions.push(action);
+      if (action === 'reset') bridge.emit('zoomchanged', zoomView(1));
+    });
+    act(() => bridge.emit('zoomchanged', zoomView(1.5)));
+
+    await user.click(screen.getByRole('button', { name: 'Acercar' }));
+    await user.click(screen.getByRole('button', { name: 'Alejar' }));
+    await user.click(screen.getByRole('button', { name: 'Restablecer zoom (150%)' }));
+
+    expect(actions).toEqual(['in', 'out', 'reset']);
+    expect(screen.getByRole('group', { name: 'Zoom del mapa' })).toHaveTextContent('100%');
   });
 });
 

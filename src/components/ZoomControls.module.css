@@ -1,0 +1,49 @@
+/* Same dark card as the exit controls and the bottom bar. Placed by an inline top/right from hudLayout.ts. */
+.controls {
+  position: fixed;
+  /* Over the video row (5), under the full-screen sidebar (15) and the toasts. */
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: #111827f2;
+  border: 1px solid #2b3444;
+  border-radius: var(--radius-panel);
+  padding: 6px;
+  box-shadow: 0 8px 30px #0009;
+}
+
+.btn {
+  height: 32px;
+  min-width: 44px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  padding: 0;
+  font-size: 16px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.btn:enabled:hover {
+  border-color: #4b5563;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.percent {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* At 100% there is nothing to reset, but the label is still the readout. */
+.percent:disabled {
+  opacity: 1;
+}

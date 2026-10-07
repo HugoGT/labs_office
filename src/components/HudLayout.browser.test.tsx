@@ -7,6 +7,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BottomBar } from './BottomBar';
 import { ExitControls } from './ExitControls';
 import { OfficeSidebar } from './OfficeSidebar';
+import { ZoomControls } from './ZoomControls';
+import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT, SIDEBAR_TOP } from '../game/hudLayout';
+import { zoomView } from '../game/mapZoom';
 import { createOfficeBridge } from '../game/officeBridge';
 
 // Same cast as `livekitRoom.browser.test.ts`: the `vitest/browser` type
@@ -368,5 +371,60 @@ describe('HUD layout: open sidebar and the bottom row (#86)', () => {
     await renderOpenSidebar();
 
     expect(screen.queryByRole('button', { name: 'Cerrar' })).not.toBeInTheDocument();
+  });
+});
+
+describe('HUD layout: map zoom control (map-zoom)', () => {
+  const HEIGHT = 800;
+
+  function renderZoom() {
+    render(<ZoomControls view={zoomView(1)} onZoomIn={vi.fn()} onZoomOut={vi.fn()} onReset={vi.fn()} />);
+    return screen.getByRole('group', { name: 'Zoom del mapa' });
+  }
+
+  it('sits left of the minimap, inside its height, and clear of the rail, bar and exits', async () => {
+    for (const width of [VERY_SMALL, 720, NARROW, 1439, WIDE]) {
+      await page.viewport(width, HEIGHT);
+      const zoom = renderZoom();
+      const exits = renderExits();
+      const { bar } = renderBar(WIDEST_BAR);
+      render(<OfficeSidebar self={{ sessionId: 'yo', name: 'Hugo', status: 'g' }} peers={[]} />);
+      const rect = box(zoom);
+
+      // The minimap is a Phaser camera, so its rectangle comes from the shared constants.
+      expect(rect.right, `left of the minimap at ${width}px`).toBeLessThanOrEqual(width - RAIL_RIGHT - MINIMAP_WIDTH);
+      expect(rect.left, `on screen at ${width}px`).toBeGreaterThanOrEqual(0);
+      expect(rect.top, `top at ${width}px`).toBeGreaterThanOrEqual(MINIMAP_MARGIN);
+      expect(rect.bottom, `bottom at ${width}px`).toBeLessThanOrEqual(MINIMAP_MARGIN + MINIMAP_HEIGHT);
+      expect(rect.bottom, `above the rail at ${width}px`).toBeLessThanOrEqual(SIDEBAR_TOP);
+      for (const other of [exits, bar, sidebar()]) expect(overlaps(rect, box(other)), `at ${width}px`).toBe(false);
+      cleanup();
+    }
+  });
+
+  it('stays clear of the docked sidebar when it opens', async () => {
+    for (const width of [720, WIDE]) {
+      await page.viewport(width, HEIGHT);
+      const zoom = renderZoom();
+      await renderOpenSidebar();
+
+      expect(overlaps(box(zoom), box(sidebar())), `at ${width}px`).toBe(false);
+      cleanup();
+    }
+  });
+
+  it('on very small screens the open sidebar covers it', async () => {
+    await page.viewport(VERY_SMALL, 700);
+    const zoom = renderZoom();
+    await renderOpenSidebar();
+
+    expect(sidebar().contains(hitAtCenter(zoom))).toBe(true);
+  });
+
+  it('keeps every button reachable: a click on each lands on it', async () => {
+    await page.viewport(WIDE, HEIGHT);
+    const zoom = renderZoom();
+
+    for (const button of zoom.querySelectorAll('button')) expect(hitAtCenter(button)).toBe(button);
   });
 });
