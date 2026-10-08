@@ -29,7 +29,7 @@ import { chairLayerDepth, worldAssetDepth } from './depthLayers';
 import { TILE, ZONE_LABELS } from './mapData';
 import { LAYOUT_MATERIALS, type LayoutProp, type OfficeLayout, type TerrainSnapshot } from './officeLayout';
 import type { MapSeat } from './seating';
-import { decalTileData, fallbackTerrainData, hedgeSprites, propFrame, terrainTileData, wallSprites } from './terrainRender';
+import { TERRAIN_FLAT_COLORS, decalTileData, fallbackTerrainData, hedgeSprites, propFrame, terrainTileData, wallSprites } from './terrainRender';
 
 /**
  * Chair of the base map's rooms. The manifest names no default chair (step 3
@@ -44,16 +44,6 @@ const GROUND_PROP_DEPTH = 0.5;
 
 /** Generated when the pack is missing: one flat 32px tile per terrain material, in `LAYOUT_MATERIALS` order. */
 export const FALLBACK_TERRAIN_KEY = 'terrain-fallback';
-const FALLBACK_TERRAIN_COLORS: Readonly<Record<(typeof LAYOUT_MATERIALS)[number], number>> = {
-  water: 0x3f78c4,
-  grass: 0x5d9b4c,
-  dirt: 0x8d6a47,
-  sand: 0xd9c48c,
-  cobblestone: 0x8c9096,
-  wood: 0xa4723f,
-  tile: 0xc5c9cf,
-  carpet: 0x7b4f8c,
-};
 const PLACEHOLDER_COLOR = 0x6b7280;
 const HEDGE_PLACEHOLDER_COLOR = 0x2f5d34;
 const PLACEHOLDER_ALPHA = 0.85;
@@ -136,7 +126,7 @@ function fallbackTileset(scene: Phaser.Scene): void {
   if (scene.textures.exists(FALLBACK_TERRAIN_KEY)) return;
   const g = scene.make.graphics({ x: 0, y: 0 }, false);
   LAYOUT_MATERIALS.forEach((material, index) => {
-    g.fillStyle(FALLBACK_TERRAIN_COLORS[material]).fillRect(index * TILE, 0, TILE, TILE);
+    g.fillStyle(TERRAIN_FLAT_COLORS[material]).fillRect(index * TILE, 0, TILE, TILE);
   });
   g.generateTexture(FALLBACK_TERRAIN_KEY, TILE * LAYOUT_MATERIALS.length, TILE);
   g.destroy();

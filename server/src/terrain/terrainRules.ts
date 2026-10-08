@@ -1,11 +1,12 @@
 /**
  * Pure rules of a terrain block edit (#123 phase 2): what a valid edit is,
- * and when water may not go where it would land. Kept apart from the runtime
+ * and when water or void may not go where it would land. Kept apart from the runtime
  * and the routes for the same reason as `spaceRules.ts`: they are tested
  * without a server, and there is one copy of them.
  *
- * Only water is ever refused. Every other material is walkable, so changing
- * between them never strands anyone or anything; drying water frees tiles.
+ * Only the nonwalkable terrain (water and void) is ever refused. Every other
+ * material is walkable, so changing between them never strands anyone or
+ * anything; building over water or void frees tiles.
  */
 
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
@@ -24,14 +25,14 @@ export class InvalidTerrainEditError extends Error {
  * Placements and the final safe spawn cannot be flooded. Players are relocated
  * by the room after the accepted snapshot is published, never a write veto.
  */
-export type WaterConflict = 'placement';
+export type UnwalkableConflict = 'placement';
 
 export class TerrainProtectedError extends Error {
   // A plain field, not a parameter property: Node's type stripping rejects those.
-  readonly reason: WaterConflict;
+  readonly reason: UnwalkableConflict;
 
-  constructor(reason: WaterConflict) {
-    super(`water would land under a ${reason}`);
+  constructor(reason: UnwalkableConflict) {
+    super(`nonwalkable terrain would land under a ${reason}`);
     this.name = 'TerrainProtectedError';
     this.reason = reason;
   }
@@ -95,7 +96,7 @@ export function parseTerrainEdit(index: unknown, body: unknown, count: number): 
 const SPAWN_REACH_TILES = 1;
 
 /**
- * Tiles of the static layout that water must not reach: the map chairs, the
+ * Tiles of the static layout that water or void must not reach: the map chairs, the
  * furniture people sit or work at (tables, desks, plants) and the spawn area.
  * Trees, hedges and walls are left out on purpose: they block over any
  * terrain, so water under them changes nothing anyone can stand on, and
@@ -121,15 +122,15 @@ export function staticProtectedTiles(layout: OfficeLayout, seats: readonly MapSe
 }
 
 /**
- * Why water may not land on `watered` (`newlyWateredTiles`), or `null` if
- * it may. Only static or stored placements veto water.
+ * Why water or void may not land on `watered` (`newlyUnwalkableTiles`), or
+ * `null` if it may. Only static or stored placements veto it.
  */
-export function findWaterConflict(
+export function findUnwalkableConflict(
   watered: readonly number[],
   width: number,
   staticTiles: ReadonlySet<number>,
   protections: TerrainProtections,
-): WaterConflict | null {
+): UnwalkableConflict | null {
   if (watered.length === 0) return null;
   const flooded = new Set(watered);
   const floods = (rect: TileRect): boolean => {

@@ -32,6 +32,7 @@ import { ArtPackLoader } from './artPackLoader';
 import { deskAreaAnchor, deskPlacement, spaceFloorTiles } from './artPlacement';
 import type { ArtDeskPiece } from './artContract';
 import { buildTerrainGrid } from './terrainGrid';
+import { VOID_COLOR } from './terrainRender';
 import type { DeskDecorItem, DeskOccupant, OfficeDesk } from './desksPort';
 import { createOfficeBridge, type OfficeEventMap } from './officeBridge';
 import { DEFAULT_NAME, DEFAULT_STATUS, type PresenceStatus } from './officeProtocol';
@@ -4004,6 +4005,20 @@ describe('OfficeScene: edited terrain', () => {
 
     bridge.emitCommand('terrainedit', null);
     expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).not.toEqual(sand);
+  });
+
+  it('draws void as nothing over a black background, on the map and the minimap, and collides with it', async () => {
+    const { scene, handlers } = await bootConnected();
+
+    handlers.onTerrain!(withBlock(BASE_LAYOUT.blocks, LAWN, 'void'));
+
+    expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy).every((index) => index === undefined || index === -1)).toBe(true);
+    expect(solidAt(scene, lawn.x, lawn.y)).toBe(true);
+    expect(scene.cameras.cameras.length).toBeGreaterThanOrEqual(2);
+    for (const camera of scene.cameras.cameras) {
+      expect(camera.backgroundColor.color).toBe(VOID_COLOR);
+      expect(camera.transparent).toBe(false);
+    }
   });
 
   it('tells the editor the current blocks when it opens', async () => {

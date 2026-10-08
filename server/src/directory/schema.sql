@@ -407,12 +407,12 @@ ALTER TABLE spaces ADD CONSTRAINT spaces_floor_color_check CHECK (floor_color IS
 -- migrate.test.ts), refreshed below like `art_pieces_kind_check`.
 CREATE TABLE IF NOT EXISTS terrain_blocks (
   block_index integer PRIMARY KEY CHECK (block_index >= 0),
-  material text NOT NULL CHECK (material IN ('water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet')),
+  material text NOT NULL CHECK (material IN ('void', 'water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet')),
   updated_by uuid REFERENCES users(id),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE terrain_blocks DROP CONSTRAINT IF EXISTS terrain_blocks_material_check;
-ALTER TABLE terrain_blocks ADD CONSTRAINT terrain_blocks_material_check CHECK (material IN ('water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet'));
+ALTER TABLE terrain_blocks ADD CONSTRAINT terrain_blocks_material_check CHECK (material IN ('void', 'water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet'));
 
 -- Collision areas per art piece (collision editor). One row per piece an
 -- admin edited: a JSON list of rectangles in art pixels from the piece's

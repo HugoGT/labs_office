@@ -342,6 +342,16 @@ describe('terrain dual grid', () => {
     ]);
   });
 
+  it('draws nothing for a corner without terrain (void), so the materials around it edge over the background', () => {
+    expect(terrainCellLayers({ nw: null, ne: null, sw: null, se: null })).toEqual([]);
+    expect(terrainCellLayers({ nw: 'grass', ne: null, sw: null, se: null })).toEqual([{ material: 'grass', mask: 1 }]);
+    // Water is not drawn under the void corner: no shore bleeds into the black.
+    expect(terrainCellLayers({ nw: 'sand', ne: 'water', sw: null, se: 'water' })).toEqual([
+      { material: 'water', mask: 1 | 2 | 8 },
+      { material: 'sand', mask: 1 },
+    ]);
+  });
+
   it('never needs more than four layers', () => {
     expect(TERRAIN_LAYER_COUNT).toBe(4);
   });
@@ -384,6 +394,19 @@ describe('terrain dual grid', () => {
     // Cell (0, 0) is all grass: one layer.
     expect(layers[0]![0]![0]).toBe(terrainTileIndex('grass', 15, terrainPhaseAt(0, 0)));
     expect(layers[1]![0]![0]).toBe(-1);
+  });
+});
+
+describe('terrain dual grid over void', () => {
+  it('leaves every layer empty where the four corners are void', () => {
+    const layers = terrainLayerData(3, 2, (tx) => (tx === 0 ? 'grass' : null));
+    // Cell (0, 0) is all grass (the corners outside the map clamp to the first column).
+    expect(layers[0]![0]![0]).toBe(terrainTileIndex('grass', 15, terrainPhaseAt(0, 0)));
+    // Cell (1, 1): grass on the west corners, void on the east ones.
+    expect(layers[0]![1]![1]).toBe(terrainTileIndex('grass', 1 | 4, terrainPhaseAt(1, 1)));
+    expect(layers[1]![1]![1]).toBe(-1);
+    // Cell (3, 1) only sees void.
+    for (const layer of layers) expect(layer[1]![3]).toBe(-1);
   });
 });
 

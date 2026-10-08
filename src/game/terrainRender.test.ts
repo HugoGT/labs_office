@@ -18,7 +18,10 @@ import {
 } from './officeLayout';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN } from '../test/legacyOffice';
 import {
+  TERRAIN_FLAT_COLORS,
+  VOID_COLOR,
   decalTileData,
+  drawnTerrainAt,
   fallbackTerrainData,
   hedgeSprites,
   propFrame,
@@ -60,7 +63,25 @@ describe('terrainTileData', () => {
     expect(data).toHaveLength(TERRAIN_LAYER_COUNT);
     expect(data[0]).toHaveLength(MAP_H + 1);
     expect(data[0]![0]).toHaveLength(MAP_W + 1);
-    expect(data).toEqual(terrainLayerData(MAP_W, MAP_H, (tx, ty) => terrainMaterialAt(BASE_TERRAIN, tx, ty)));
+    expect(data).toEqual(terrainLayerData(MAP_W, MAP_H, (tx, ty) => drawnTerrainAt(BASE_TERRAIN, tx, ty)));
+  });
+
+  it('draws nothing at all for void, so the black background shows through', () => {
+    const empty = terrainSnapshot(blankLayout({ blocks: ['void', 'void'] }));
+
+    for (const layer of terrainTileData(empty)) for (const row of layer) expect(row.every((tile) => tile === -1)).toBe(true);
+    expect(drawnTerrainAt(empty, 3, 3)).toBeNull();
+    expect(drawnTerrainAt(BASE_TERRAIN, 20, 20)).toBe(terrainMaterialAt(BASE_TERRAIN, 20, 20));
+  });
+
+  it('edges a land block straight over the void, with no water drawn under it', () => {
+    const half = terrainSnapshot(blankLayout({ blocks: ['grass', 'void'] }));
+    const data = terrainTileData(half);
+
+    // Cell (9, 4) sits on the border: grass on its west corners only, nothing else.
+    expect(data[0]![4]![9]).toBe(terrainLayerData(18, 9, (tx) => (tx < 9 ? 'grass' : null))[0]![4]![9]);
+    expect(data[1]![4]![9]).toBe(-1);
+    expect(data.flat(2).filter((tile) => tile !== -1).length).toBeGreaterThan(0);
   });
 
   it('follows a new set of blocks without another layout: the hook for live block edits', () => {
@@ -87,6 +108,14 @@ describe('decalTileData', () => {
     expect(data[4]![6]).toBe(-1);
     expect(data[0]![0]).toBe(-1);
   });
+
+  it('never draws a decal over the void', () => {
+    const layout = blankLayout({ blocks: ['void', 'void'], decals: tiles(18, { '1,1': 'clover', '4,4': 'lily-pad' }) });
+    const data = decalTileData(layout, terrainSnapshot(layout));
+
+    expect(data[1]![1]).toBe(-1);
+    expect(data[4]![4]).toBe(-1);
+  });
 });
 
 describe('fallbackTerrainData', () => {
@@ -96,6 +125,15 @@ describe('fallbackTerrainData', () => {
     expect(data).toHaveLength(MAP_H);
     expect(data[20]![20]).toBe(LAYOUT_MATERIALS.indexOf('water'));
     expect(data[28]![22]).toBe(LAYOUT_MATERIALS.indexOf('grass'));
+  });
+
+  it('paints the void solid black, like the background around the world', () => {
+    const data = fallbackTerrainData(terrainSnapshot(blankLayout({ blocks: ['void', 'grass'] })));
+
+    expect(data[4]![4]).toBe(LAYOUT_MATERIALS.indexOf('void'));
+    expect(VOID_COLOR).toBe(0x000000);
+    expect(TERRAIN_FLAT_COLORS.void).toBe(VOID_COLOR);
+    expect(Object.keys(TERRAIN_FLAT_COLORS)).toEqual([...LAYOUT_MATERIALS]);
   });
 });
 

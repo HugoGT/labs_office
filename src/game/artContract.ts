@@ -421,11 +421,16 @@ export const TERRAIN_LAYER_COUNT = 4;
  */
 export const TERRAIN_LAYER_ORIGIN = -ART_TILE / 2;
 
+/**
+ * The material at each corner of a display cell. `null` is a corner without
+ * terrain (the office layout's void): nothing is drawn for it, so the
+ * materials around it edge straight over the background.
+ */
 export interface TerrainCorners {
-  readonly nw: TerrainMaterial;
-  readonly ne: TerrainMaterial;
-  readonly sw: TerrainMaterial;
-  readonly se: TerrainMaterial;
+  readonly nw: TerrainMaterial | null;
+  readonly ne: TerrainMaterial | null;
+  readonly sw: TerrainMaterial | null;
+  readonly se: TerrainMaterial | null;
 }
 
 export interface TerrainLayerTile {
@@ -469,8 +474,11 @@ export function terrainDecalIndex(decal: TerrainDecal): number {
  * the masks means every edge blends over the material just below it.
  */
 export function terrainCellLayers(corners: TerrainCorners): TerrainLayerTile[] {
-  const rank = (material: TerrainMaterial): number => TERRAIN_MATERIALS.indexOf(material);
-  const present = [...new Set([corners.nw, corners.ne, corners.sw, corners.se])].sort((a, b) => rank(a) - rank(b));
+  // Void ranks below every material: no layer for it, and no corner bit for it in any mask.
+  const rank = (material: TerrainMaterial | null): number => (material === null ? -1 : TERRAIN_MATERIALS.indexOf(material));
+  const present = [...new Set([corners.nw, corners.ne, corners.sw, corners.se])]
+    .filter((material): material is TerrainMaterial => material !== null)
+    .sort((a, b) => rank(a) - rank(b));
   return present.map((material) => ({
     material,
     mask: terrainCornerMask({
@@ -488,22 +496,23 @@ function clamp(value: number, min: number, max: number): number {
 
 /** Corners of display cell (cx, cy) on a width x height map; outside the map, the nearest tile. */
 export function terrainCellCorners(
-  terrainAt: (tx: number, ty: number) => TerrainMaterial,
+  terrainAt: (tx: number, ty: number) => TerrainMaterial | null,
   width: number,
   height: number,
   cx: number,
   cy: number,
 ): TerrainCorners {
-  const at = (tx: number, ty: number): TerrainMaterial => terrainAt(clamp(tx, 0, width - 1), clamp(ty, 0, height - 1));
+  const at = (tx: number, ty: number): TerrainMaterial | null => terrainAt(clamp(tx, 0, width - 1), clamp(ty, 0, height - 1));
   return { nw: at(cx - 1, cy - 1), ne: at(cx, cy - 1), sw: at(cx - 1, cy), se: at(cx, cy) };
 }
 
 /**
  * Tile data of the TERRAIN_LAYER_COUNT layers of a map, `[layer][cy][cx]`,
- * `-1` where a layer draws nothing (Phaser's empty tile). Each layer is
+ * `-1` where a layer draws nothing (Phaser's empty tile), void corners
+ * (`null`) included. Each layer is
  * (width + 1) x (height + 1) cells placed at TERRAIN_LAYER_ORIGIN.
  */
-export function terrainLayerData(width: number, height: number, terrainAt: (tx: number, ty: number) => TerrainMaterial): number[][][] {
+export function terrainLayerData(width: number, height: number, terrainAt: (tx: number, ty: number) => TerrainMaterial | null): number[][][] {
   const layers = Array.from({ length: TERRAIN_LAYER_COUNT }, () =>
     Array.from({ length: height + 1 }, () => new Array<number>(width + 1).fill(-1)),
   );

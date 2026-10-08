@@ -14,7 +14,7 @@ import {
   blockCount,
   blockIndexAt,
   encodeTerrainBlocks,
-  newlyWateredTiles,
+  newlyUnwalkableTiles,
   terrainSnapshot,
   withBlock,
   type LayoutMaterial,
@@ -28,7 +28,7 @@ import {
   TerrainProtectedError,
   TerrainStaleError,
   parseTerrainBatch,
-  findWaterConflict,
+  findUnwalkableConflict,
   staticProtectedTiles,
   type TerrainEdit,
   type TerrainProtections,
@@ -44,7 +44,7 @@ export interface TerrainRuntime {
   /** False without a store (no `DATABASE_URL`): the terrain is the layout's for good. */
   readonly editable: boolean;
   /**
-   * Applies one edit, or throws `TerrainProtectedError` when water would land
+   * Applies one edit, or throws `TerrainProtectedError` when water or void would land
    * under something `protections` (read only if the edit floods a tile) or
    * the static layout protects.
    */
@@ -76,9 +76,9 @@ export function createTerrainRuntime({ layout, store, seats = BASE_MAP_SEATS }: 
     let next = [...blocks];
     for (const { index, material } of changed) next = withBlock(next, index, material);
     const nextSnapshot = terrainSnapshot(layout, next);
-    const watered = newlyWateredTiles(snapshot, nextSnapshot);
+    const watered = newlyUnwalkableTiles(snapshot, nextSnapshot);
     if (watered.length > 0) {
-      const conflict = findWaterConflict(watered, layout.width, staticTiles, await protections());
+      const conflict = findUnwalkableConflict(watered, layout.width, staticTiles, await protections());
       if (conflict !== null) throw new TerrainProtectedError(conflict);
     }
     await store.saveBlocks(changed, actorId);

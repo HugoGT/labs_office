@@ -16,6 +16,7 @@ import styles from './TerrainEditorSection.module.css';
 
 /** UI names of the materials, in the drawing order of `LAYOUT_MATERIALS`. */
 export const TERRAIN_MATERIAL_LABELS: Readonly<Record<LayoutMaterial, string>> = {
+  void: 'Vacío',
   water: 'Agua',
   grass: 'Césped',
   dirt: 'Tierra',
@@ -46,7 +47,7 @@ export function TerrainEditorSection({ bridge, terrain, onEditingChange, forceEx
   const [row, setRow] = useState('');
   const [seed, setSeed] = useState('123');
   const [landBlocks, setLandBlocks] = useState('30');
-  const [landMaterial, setLandMaterial] = useState<Exclude<LayoutMaterial, 'water'>>('grass');
+  const [landMaterial, setLandMaterial] = useState<Exclude<LayoutMaterial, 'water' | 'void'>>('grass');
   const [confirmed, setConfirmed] = useState(false);
   useEffect(() => setConfirmed(false), [editor.draft]);
 
@@ -113,9 +114,9 @@ export function TerrainEditorSection({ bridge, terrain, onEditingChange, forceEx
         </label>
         <label className={styles.field}>Material generado
           <select className={styles.input} value={landMaterial} onChange={(event) => {
-            if (isLayoutMaterial(event.target.value) && event.target.value !== 'water') { setLandMaterial(event.target.value); editor.discard(); }
+            if (isLayoutMaterial(event.target.value) && event.target.value !== 'water' && event.target.value !== 'void') { setLandMaterial(event.target.value); editor.discard(); }
           }}>
-            {LAYOUT_MATERIALS.filter((material) => material !== 'water').map((material) => <option key={material} value={material}>{TERRAIN_MATERIAL_LABELS[material]}</option>)}
+            {LAYOUT_MATERIALS.filter((material) => material !== 'water' && material !== 'void').map((material) => <option key={material} value={material}>{TERRAIN_MATERIAL_LABELS[material]}</option>)}
           </select>
         </label>
         <button className={styles.button} type="button" disabled={seed === '' || landBlocks === ''} onClick={() => editor.generate({ seed: Number(seed), landBlocks: Number(landBlocks), material: landMaterial })}>Vista previa procedural</button>

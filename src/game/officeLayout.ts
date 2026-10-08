@@ -43,12 +43,18 @@ export const LAYOUT_TILE = 32;
 /** Side of a terrain block, in tiles (#123). */
 export const BLOCK_TILES = 9;
 
-/** `TERRAIN_MATERIALS` of artContract.ts, in the same drawing priority (pinned by a test). */
-export const LAYOUT_MATERIALS = ['water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet'] as const;
+/**
+ * `void`, then the `TERRAIN_MATERIALS` of artContract.ts in the same drawing
+ * priority (pinned by a test). Void is "no terrain": unbuilt map, drawn as
+ * nothing over a black background, and never walkable. It has no art of its
+ * own, so it is not a material of the art contract.
+ */
+export const LAYOUT_MATERIALS = ['void', 'water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet'] as const;
 export type LayoutMaterial = (typeof LAYOUT_MATERIALS)[number];
 
-/** `TERRAIN_WALKABLE` of artContract.ts: water is the only terrain nobody walks on. */
+/** `TERRAIN_WALKABLE` of artContract.ts plus void: void and water are the terrain nobody walks on. */
 export const MATERIAL_WALKABLE: Readonly<Record<LayoutMaterial, boolean>> = {
+  void: false,
   water: false,
   grass: true,
   dirt: true,
@@ -349,7 +355,7 @@ export interface TerrainSnapshot {
  * The effective walkability of each tile, in this precedence (each step
  * overrides the previous one):
  *
- *   1. Terrain: walkable unless water. A `ground` tile wins over its block.
+ *   1. Terrain: walkable unless void or water. A `ground` tile wins over its block.
  *   2. Deck props (bridges): their footprint is walkable, water included.
  *   3. Layout solids: walls and hedges block, a deck under them too.
  *
@@ -468,14 +474,16 @@ export function blockAtWorldPoint(layout: Pick<OfficeLayout, 'width' | 'height'>
 }
 
 /**
- * Tiles (row-major indexes) that are water in `after` and were not in
- * `before`. Compare snapshots so explicit ground overlays, where present,
- * are respected without ever flooding neighboring blocks through jitter.
+ * Tiles (row-major indexes) whose terrain is walkable in `before` and not in
+ * `after`: what an edit turns into water or void. Compare snapshots so
+ * explicit ground overlays, where present, are respected without ever
+ * reaching neighboring blocks through jitter.
  */
-export function newlyWateredTiles(before: TerrainSnapshot, after: TerrainSnapshot): number[] {
+export function newlyUnwalkableTiles(before: TerrainSnapshot, after: TerrainSnapshot): number[] {
   const tiles: number[] = [];
   after.materials.forEach((material, index) => {
-    if (material === 'water' && before.materials[index] !== 'water') tiles.push(index);
+    const previous = before.materials[index];
+    if (!MATERIAL_WALKABLE[material] && previous !== undefined && MATERIAL_WALKABLE[previous]) tiles.push(index);
   });
   return tiles;
 }

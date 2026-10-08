@@ -53,6 +53,7 @@ import {
   renderTerrain,
   type TerrainTilemap,
 } from './mapBuilder';
+import { VOID_COLOR } from './terrainRender';
 import {
   BUILT_IN_SPACES,
   BUILT_IN_SPACES_VERSION,
@@ -1713,7 +1714,8 @@ export class OfficeScene extends Phaser.Scene {
     const bounds = followBounds({ x: 0, y: 0, width: WORLD_W, height: WORLD_H }, cam, initialZoom);
     cam.setBounds(bounds.x, bounds.y, bounds.width, bounds.height);
     cam.startFollow(this.player, true, FOLLOW_LERP, FOLLOW_LERP);
-    cam.setBackgroundColor('#0d1117');
+    // The void (unbuilt map) draws nothing: the whole screen is black around and under the terrain.
+    cam.setBackgroundColor(VOID_COLOR);
 
     const minimap = this.cameras.add(
       this.scale.width - (MINIMAP_WIDTH + RAIL_RIGHT),
@@ -1723,7 +1725,7 @@ export class OfficeScene extends Phaser.Scene {
     );
     minimap.setZoom(Math.min(MINIMAP_WIDTH / WORLD_W, MINIMAP_HEIGHT / WORLD_H));
     minimap.centerOn(WORLD_W / 2, WORLD_H / 2);
-    minimap.setBackgroundColor(0x0d1117);
+    minimap.setBackgroundColor(VOID_COLOR);
     this.minimapCamera = minimap;
 
     this.mmMarker = this.add.circle(0, 0, 42, 0xffffff, 0.45).setDepth(MINIMAP_MARKER_DEPTH);
