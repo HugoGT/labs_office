@@ -59,10 +59,11 @@ const hosts: HTMLElement[] = [];
 
 // Deterministic render frames through the real SceneManager and Arcade world,
 // not a reducer simulation or a mocked body. An empty arena isolates movement.
-async function movementArena() {
-  const { scene, bridge } = await bootOfficeScene(createOfficeBridge(), {
-    endpoint: null, artManifestUrl: null, artUploadsUrl: null,
-  });
+async function movementArena(connector?: ReturnType<typeof fakeConnector>) {
+  const { scene, bridge } = await bootOfficeScene(createOfficeBridge(), connector
+    ? { endpoint: 'ws://fake', connect: connector.connect, artManifestUrl: null, artUploadsUrl: null }
+    : { endpoint: null, artManifestUrl: null, artUploadsUrl: null });
+  if (connector) await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
   const player = findPlayer(scene);
   const body = player.body as Phaser.Physics.Arcade.Body;
   scene.game.loop.stop();
@@ -290,6 +291,154 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
         }
       }
     }
+  });
+});
+
+describe('waypoint walking around obstacles (double-click-pathfinding)', () => {
+  type Arena = Awaited<ReturnType<typeof movementArena>>;
+  const SEAT = BASE_MAP_SEATS[0]!;
+
+  /** A wall of whole tiles, in the search grid and as the collision rectangle the body bumps into. */
+  function wallColumn(movement: Arena['movement'], tx: number, ty0: number, ty1: number) {
+    const solid = movement.grid.solid as boolean[][];
+    for (let ty = ty0; ty <= ty1; ty++) solid[ty]![tx] = true;
+    // The arena keeps the real office's piece rectangles; only this test's walls may stay.
+    movement.collisionRects = [
+      ...movement.collisionRects.filter((rect) => !('piece' in rect)),
+      { x: tx * TILE, y: ty0 * TILE, w: TILE, h: (ty1 - ty0 + 1) * TILE },
+    ];
+    movement.buildPieceColliders();
+  }
+
+  /** Steps real frames until the walk ends (arrival, stall cancel) or the budget runs out. */
+  function walkUntilDone(arena: Arena, maxFrames = 1500) {
+    const ys: number[] = [];
+    for (let i = 0; i < maxFrames && arena.movement.autoWalk !== undefined; i++) {
+      arena.frame();
+      ys.push(arena.player.y);
+    }
+    return { minY: Math.min(...ys), maxY: Math.max(...ys) };
+  }
+
+  function sitOnFirstChair(arena: Arena) {
+    arena.body.reset((SEAT.tx + 0.5) * TILE, (SEAT.ty + 0.5) * TILE - 18);
+    arena.bridge.emitCommand('toggleSeat', undefined);
+    arena.frame();
+    expect(arena.player.seatFacing).not.toBeNull();
+  }
+
+  it('a click behind a wall walks around it and arrives without a stall cancel (R3)', async () => {
+    const arena = await movementArena();
+    const { player, movement } = arena;
+    // Tiles 5..14 of column 12 stand between the player (tile 9,9) and the goal.
+    wallColumn(movement, 12, 5, 14);
+    const goal = { x: 600, y: 300 };
+
+    arena.click(goal.x, goal.y);
+    expect(movement.autoWalk?.waypoints?.length, 'a wall in the way needs waypoints').toBeGreaterThan(0);
+    const path = walkUntilDone(arena);
+
+    expect(movement.autoWalk).toBeUndefined();
+    expect(Math.hypot(player.x - goal.x, player.y - goal.y)).toBeLessThanOrEqual(ARRIVE_EPSILON_PX);
+    // The wall spans y 160..480: arriving means the route left that band.
+    expect(path.minY < 160 || path.maxY > 480).toBe(true);
+  });
+
+  it('a goal past the top end of the wall is reached by an angled detour', async () => {
+    const arena = await movementArena();
+    const { player, movement } = arena;
+    wallColumn(movement, 12, 5, 14);
+    const goal = { x: 640, y: 120 };
+
+    arena.click(goal.x, goal.y);
+    walkUntilDone(arena);
+
+    expect(movement.autoWalk).toBeUndefined();
+    expect(Math.hypot(player.x - goal.x, player.y - goal.y)).toBeLessThanOrEqual(ARRIVE_EPSILON_PX);
+  });
+
+  it('a click on ground with no path does nothing and keeps a seated player seated (R4)', async () => {
+    const arena = await movementArena();
+    const { player, movement } = arena;
+    sitOnFirstChair(arena);
+    const start = { x: player.x, y: player.y };
+    // Tile (60,40) is free but fully ringed by blocked tiles.
+    const solid = movement.grid.solid as boolean[][];
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx !== 0 || dy !== 0) solid[40 + dy]![60 + dx] = true;
+
+    arena.click(60 * TILE + 16, 40 * TILE + 16);
+    arena.walk(200);
+
+    expect(movement.autoWalk).toBeUndefined();
+    expect(player.seatFacing).not.toBeNull();
+    expect({ x: player.x, y: player.y }).toEqual(start);
+  });
+
+  it('a click on a reachable tile stands a seated player up and walks (R4)', async () => {
+    const arena = await movementArena();
+    const { player, movement } = arena;
+    sitOnFirstChair(arena);
+    const goal = { x: player.x + 320, y: player.y };
+
+    arena.click(goal.x, goal.y);
+
+    expect(player.seatFacing).toBeNull();
+    expect(movement.autoWalk?.goal).toEqual(goal);
+    walkUntilDone(arena);
+    expect(Math.hypot(player.x - goal.x, player.y - goal.y)).toBeLessThanOrEqual(ARRIVE_EPSILON_PX);
+  });
+
+  it('the goal is validated on its body tile: a click whose position tile is free but whose body tile is blocked does nothing', async () => {
+    const arena = await movementArena();
+    const { movement } = arena;
+    // Both points sit in position-tile row 1 (free), but the body center (y - 9) of the
+    // first falls in row 0 (blocked) and the second's in row 1.
+    arena.click(1000, 40);
+    expect(movement.autoWalk).toBeUndefined();
+    arena.click(1000, 41);
+    expect(movement.autoWalk?.goal).toEqual({ x: 1000, y: 41 });
+  });
+
+  it('walkToPeer detours a wall and lands on the same approach tile as before (R6)', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    const { player, movement, bridge } = arena;
+    wallColumn(movement, 20, 3, 16);
+    const peerTx = 30;
+    const peerTy = 9;
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'peer-1', x: peerTx * TILE + 16, y: peerTy * TILE + 16 }));
+
+    bridge.emitCommand('walkToPeer', { sessionId: 'peer-1' });
+    expect(movement.autoWalk?.goal).toEqual({ x: (peerTx - 1) * TILE + 16, y: peerTy * TILE + 16 });
+    const path = walkUntilDone(arena);
+
+    expect(movement.autoWalk).toBeUndefined();
+    expect(Math.floor(player.x / TILE)).toBe(peerTx - 1);
+    expect(Math.floor(player.y / TILE)).toBe(peerTy);
+    expect(path.minY < 96 || path.maxY > 544).toBe(true);
+  });
+
+  it('walkToPeer with no path to the approach tile keeps a seated player seated (R6)', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    const { player, movement, bridge } = arena;
+    // A wall over the whole height cuts the map: the peer is on the other side.
+    wallColumn(movement, SEAT.tx + 3, 0, 99);
+    bridge.emitCommand('toggleSeat', undefined);
+    arena.body.reset((SEAT.tx + 0.5) * TILE, (SEAT.ty + 0.5) * TILE - 18);
+    bridge.emitCommand('toggleSeat', undefined);
+    connector.handlers()!.onLocalSeat?.(mapSeatId(0));
+    expect(player.seatFacing).not.toBeNull();
+    const start = { x: player.x, y: player.y };
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'peer-1', x: (SEAT.tx + 12) * TILE + 16, y: SEAT.ty * TILE + 16 }));
+
+    bridge.emitCommand('walkToPeer', { sessionId: 'peer-1' });
+    arena.walk(200);
+
+    expect(movement.autoWalk).toBeUndefined();
+    expect(connector.stands()).toBe(0);
+    expect(player.seatFacing).not.toBeNull();
+    expect({ x: player.x, y: player.y }).toEqual(start);
   });
 });
 
