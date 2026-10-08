@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TILE } from './mapData';
 import {
-  BASE_MAP_SEATS,
   DESK_SEAT_FACING,
   SEATING_TILE,
   deskSeatId,
@@ -10,10 +9,13 @@ import {
   mapSeatId,
   mapSeatTiles,
   parseBaseMapSeats,
-  parseSeatRef,
-  seatIdOf,
+  parseSeatRef as parseReference,
+  seatIdOf as readSeatId,
   type MapSeat,
 } from './seating';
+import { LEGACY_SEATS as BASE_MAP_SEATS } from '../test/legacyOffice';
+const parseSeatRef = (raw: unknown) => parseReference(raw, BASE_MAP_SEATS.length);
+const seatIdOf = (raw: unknown) => readSeatId(raw, BASE_MAP_SEATS.length);
 
 describe('seating: seat references', () => {
   it('restates the map tile, since it cannot import mapData', () => {

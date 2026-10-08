@@ -16,6 +16,7 @@ import Phaser from 'phaser';
 import {
   isPlacementValid,
   snapToTile,
+  snapToBlock,
   type LayoutEditCommand,
   type PickableRect,
 } from './layoutEditor';
@@ -117,7 +118,7 @@ export class LayoutEditLayer {
     if (!this.command?.placing || !this.ghost) return;
 
     const { w, h, obstacles } = this.command.placing;
-    const { tx, ty } = snapToTile(pointer.worldX, pointer.worldY, w, h);
+    const { tx, ty } = this.command.placing.snap === 'block' ? snapToBlock(pointer.worldX, pointer.worldY) : snapToTile(pointer.worldX, pointer.worldY, w, h);
     const valid = isPlacementValid({ x: tx, y: ty, w, h }, obstacles);
 
     this.ghost
@@ -130,7 +131,7 @@ export class LayoutEditLayer {
     if (!this.command?.placing) return;
 
     const { w, h, obstacles } = this.command.placing;
-    const { tx, ty } = snapToTile(pointer.worldX, pointer.worldY, w, h);
+    const { tx, ty } = this.command.placing.snap === 'block' ? snapToBlock(pointer.worldX, pointer.worldY) : snapToTile(pointer.worldX, pointer.worldY, w, h);
     const valid = isPlacementValid({ x: tx, y: ty, w, h }, obstacles);
 
     this.bridge.emit('layoutplace', { tx, ty, valid });

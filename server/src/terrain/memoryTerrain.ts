@@ -22,6 +22,9 @@ export function createMemoryTerrain(seed: Iterable<readonly [number, LayoutMater
     async saveBlock(index, material, actorId) {
       blocks.set(index, { material, actorId });
     },
+    async saveBlocks(edits, actorId) {
+      for (const { index, material } of edits) blocks.set(index, { material, actorId });
+    },
     actorOf(index) {
       return blocks.get(index)?.actorId;
     },

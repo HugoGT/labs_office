@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
 import { walkFrame } from './characterAnimation';
 import { spawnPlayer, type CharacterSheets } from './characters';
-import { feetOf } from './avatarGeometry';
+import { feetOf, physicalBodyRect } from './avatarGeometry';
 import { avatarDepth } from './depthLayers';
 import { mapSeatId } from './seating';
 import { createOfficeBridge } from './officeBridge';
@@ -109,6 +109,20 @@ function snapshot(overrides: Partial<RemotePlayerSnapshot> = {}): RemotePlayerSn
 }
 
 describe('createPhaserAvatarSink', () => {
+  it('snaps a relocated peer and its body instead of tweening across invalid ground', async () => {
+    const { avatar, body, destination } = await withPhysicsScene((scene) => {
+      const sink = createPhaserAvatarSink(scene, createOfficeBridge(), scene.add.group());
+      const avatar = sink.create(snapshot({ positionRevision: 0, seat: mapSeatId(0) }));
+      const destination = snapshot({ x: 600, y: 700, positionRevision: 1, seat: null });
+      sink.update(avatar, destination);
+      return { avatar, body: avatar.body as Phaser.Physics.Arcade.Body, destination };
+    });
+    expect({ x: avatar.x, y: avatar.y }).toEqual({ x: destination.x, y: destination.y });
+    expect(avatar.glideTween).toBeUndefined();
+    expect(avatar.seatFacing).toBeNull();
+    expect({ x: body.x, y: body.y, width: body.width, height: body.height }).toEqual(physicalBodyRect(destination));
+  });
+
   it('crea el avatar en las coordenadas de pixel que manda el servidor', async () => {
     const result = await withScene((scene) => {
       const avatar = createPhaserAvatarSink(scene, createOfficeBridge()).create(
@@ -429,7 +443,8 @@ describe('createPhaserAvatarSink: cuerpo fisico del peer con peerBodies (#59)', 
     await vi.waitFor(() => {
       expect(avatar.x).toBeGreaterThan(0);
       expect(avatar.x).toBeLessThan(640);
-      expect(Math.abs(body.center.x - avatar.x)).toBeLessThan(24);
+      expect(body.center.x).toBeCloseTo(avatar.x);
+      expect(body.bottom).toBeCloseTo(feetOf(avatar).y);
     }, PHYSICS_WAIT);
   });
 });
@@ -451,8 +466,8 @@ describe('createPhaserAvatarSink: el jugador no atraviesa a un peer con cuerpo (
       const body = player.body as Phaser.Physics.Arcade.Body;
       expect(body.velocity.x).toBe(0);
     }, PHYSICS_WAIT);
-    // Cuerpos de 22px de ancho centrados: nunca puede cruzar el centro del peer.
-    expect(player.x).toBeLessThan(peerX);
+    // Contact is two feet-centered 18px footprints, with no visual torso offset.
+    expect(player.x).toBeCloseTo(peerX - 18);
   });
 
   it('un peer en pleno tween que se desliza hacia un jugador quieto no lo atraviesa', async () => {

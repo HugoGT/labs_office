@@ -11,13 +11,12 @@ import {
 import { findPiece, parseArtPackManifest } from './artPack';
 import { MAP_H, MAP_W, TILE } from './mapData';
 import {
-  BASE_LAYOUT,
-  BASE_TERRAIN,
   LAYOUT_MATERIALS,
   terrainMaterialAt,
   terrainSnapshot,
   type OfficeLayout,
 } from './officeLayout';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN } from '../test/legacyOffice';
 import {
   decalTileData,
   fallbackTerrainData,

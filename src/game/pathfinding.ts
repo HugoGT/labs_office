@@ -4,7 +4,7 @@
  * waypoints for the auto-walk steering.
  *
  * Everything is planned in body-tile space: the server drops a move whose body
- * center lands on a blocked tile and Arcade collides the 22x14 body, so a tile
+ * center lands on a blocked tile and Arcade collides the shared body, so a tile
  * of the position (`floor(P / TILE)`) would let the body straddle a wall. A
  * tile here is the tile its body center is in.
  */
@@ -16,7 +16,7 @@ import type { TileCoord } from './terrainGrid';
 
 const BODY = physicalBodyRect({ x: 0, y: 0 });
 
-/** Half of the Arcade body, derived from the shared geometry (22x14 today). */
+/** Half of the Arcade body, derived from the shared geometry. */
 const BODY_HALF = { x: BODY.width / 2, y: BODY.height / 2 } as const;
 
 /**

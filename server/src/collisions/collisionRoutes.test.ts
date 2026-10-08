@@ -5,8 +5,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { BASE_LAYOUT } from '../../../src/game/officeLayout.ts';
-import { BASE_MAP_SEATS } from '../../../src/game/seating.ts';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS } from '../../../src/test/legacyOffice.ts';
 import type { DirectoryUser } from '../directory/directoryPort.ts';
 import { createMemoryDirectory } from '../directory/memoryDirectory.ts';
 import type { IdTokenVerifier } from '../verifyIdToken.ts';
@@ -45,7 +44,7 @@ const verifier: IdTokenVerifier = {
 const BEARER_ADMIN = 'Bearer valido-uid-admin';
 const BEARER_EMPLEADO = 'Bearer valido-uid-empleado';
 const tree = BASE_LAYOUT.props.find((prop) => prop.kind === 'tree')!;
-const onTree = { x: tree.tx * 32 + 32, y: tree.ty * 32 + 25 };
+const onTree = { x: tree.tx * 32 + 16, y: tree.ty * 32 + 5 };
 
 async function harness(players: { x: number; y: number }[] = []) {
   const store = createMemoryCollisions();

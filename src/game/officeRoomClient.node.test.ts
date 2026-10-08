@@ -7,16 +7,18 @@
 
 import { matchMaker, Room as ServerRoom, type Client as ServerClient } from '@colyseus/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createOfficeServer, type OfficeServer } from '../../server/src/createOfficeServer.ts';
+import { createOfficeServer as createServer, type OfficeServer, type OfficeServerOverrides } from '../../server/src/createOfficeServer.ts';
 import { createMemoryDirectory } from '../../server/src/directory/memoryDirectory.ts';
 import { createMemoryTerrain } from '../../server/src/terrain/memoryTerrain.ts';
 import { createMemoryCollisions } from '../../server/src/collisions/memoryCollisions.ts';
 import type { CollisionTable } from './pieceCollisions';
 import { SESSION_EXPIRED } from '../../server/src/verifyIdToken.ts';
-import { BASE_LAYOUT, type LayoutMaterial } from './officeLayout';
+import { type LayoutMaterial } from './officeLayout';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS } from '../test/legacyOffice.ts';
+const createOfficeServer = (overrides: OfficeServerOverrides = {}) => createServer({ layout: BASE_LAYOUT, seats: BASE_MAP_SEATS, ...overrides });
 import { TILE } from './mapData';
 import { OFFICE_ROOM_NAME } from './officeProtocol';
-import { BASE_MAP_SEATS, mapSeatId } from './seating';
+import { mapSeatId } from './seating';
 import {
   OfficeAccessDeniedError,
   connectOfficeRoom,
@@ -119,6 +121,33 @@ async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void
 }
 
 describe('connectOfficeRoom', () => {
+  it('reports only authoritative resets, drops pending moves, and sends the new revision', async () => {
+    await server.shutdown();
+    const layout = { ...BASE_LAYOUT, ground: BASE_LAYOUT.ground.map(() => null), props: [], walls: BASE_LAYOUT.walls.map(() => null), hedges: BASE_LAYOUT.hedges.map(() => null) };
+    const store = createMemoryTerrain();
+    server = createOfficeServer({ layout, seats: [], terrain: store });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+    const reset = vi.fn();
+    const rec = recorder();
+    const connection = await connect('Ana', { ...rec.handlers, onPositionReset: reset } as Parameters<typeof connectOfficeRoom>[0]['handlers']);
+    await waitFor(() => rec.added.length > 0);
+    connection.sendMove(300, 400, 'left');
+    await waitFor(() => server.sessions.positionOf(connection.sessionId)?.x === 300);
+    expect(reset).not.toHaveBeenCalled();
+    // A throttled but still-valid pre-reset prediction cannot be relabeled with the new revision.
+    connection.sendMove(302, 400, 'left');
+    connection.sendMove(304, 400, 'left');
+    await server.terrain.setBlock({ index: 15, material: 'water', actorId: null }, async () => ({ placements: [], players: [] }));
+    await waitFor(() => reset.mock.calls.length === 1);
+    const fallback = server.sessions.positionOf(connection.sessionId)!;
+    expect(reset.mock.calls[0]![0]).toMatchObject(fallback);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(server.sessions.positionOf(connection.sessionId)).toEqual(fallback);
+    connection.sendMove(fallback.x + 1, fallback.y, 'right');
+    await waitFor(() => server.sessions.positionOf(connection.sessionId)?.x === fallback.x + 1);
+    expect(reset).toHaveBeenCalledTimes(1);
+  });
+
   it('reports the restored own position once, before later movement echoes (#148)', async () => {
     await server.shutdown();
     const directory = createMemoryDirectory({ bootstrapSuperadminEmail: 'ana@example.com' });

@@ -2,8 +2,9 @@ import { Client, type Room } from 'colyseus.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from '../../src/game/mapData.ts';
 import { OFFICE_ROOM_NAME } from '../../src/game/officeProtocol.ts';
-import { BASE_MAP_SEATS, mapSeatId } from '../../src/game/seating.ts';
-import { BASE_LAYOUT, isPositionWalkable } from '../../src/game/officeLayout.ts';
+import { mapSeatId } from '../../src/game/seating.ts';
+import { isPositionWalkable } from '../../src/game/officeLayout.ts';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS } from '../../src/test/legacyOffice.ts';
 import { isPositionBlocked } from '../../src/game/pieceCollisions.ts';
 import { createOfficeServer, type OfficeServer } from './createOfficeServer.ts';
 import { createMemoryDirectory } from './directory/memoryDirectory.ts';
@@ -38,6 +39,7 @@ async function start(store?: UserDirectory, auth = true, overrides: NonNullable<
     spaces: null, decor: null, desks: null, terrain: null, collisions: null,
     egress: null, storage: null, assetStorage: null,
     reconnectionWindowSeconds: 0.3,
+    layout: BASE_LAYOUT, seats: BASE_MAP_SEATS,
     ...overrides,
   });
   await server.listen(0);
@@ -69,6 +71,30 @@ afterEach(async () => {
 });
 
 describe('OfficeRoom: restore last position (#148)', () => {
+  it('rejects a saved footprint that straddles water even when its center is walkable', async () => {
+    const store = await directory();
+    const position = { x: 63 * TILE + 4, y: 49 * TILE + 16 };
+    await store.saveLastPosition(UID, position);
+    const { BASE_LAYOUT: layout } = await import('../../src/game/officeLayout.ts');
+    await start(store, true, { layout, seats: [] });
+    expect(isPositionWalkable(server.terrain.snapshot(), position.x, position.y)).toBe(true);
+    const room = await join();
+    expectSpawn(room);
+    expect({ x: own(room).x, y: own(room).y }).not.toEqual(position);
+  });
+
+  it('an unoccupable spawn ring cell falls back to primary instead of intersecting a piece', async () => {
+    await start(undefined, false, { collisions: createMemoryCollisions() });
+    const first = await join();
+    const primary = { x: own(first).x, y: own(first).y };
+    // Inject a small authoritative piece rectangle at the second join's return cell.
+    const rects = vi.spyOn(server.collisions, 'rects').mockReturnValue([{ piece: 'desk-wood', x: primary.x + TILE - 4, y: primary.y + 5, w: 8, h: 12 }]);
+    expectSpawn(await join());
+    const next = rooms.at(-1)!;
+    expect({ x: own(next).x, y: own(next).y }).toEqual(primary);
+    rects.mockRestore();
+  });
+
   it('definitive leave then a new room restores position standing and tracks it for LiveKit', async () => {
     const store = await directory();
     await start(store);
@@ -201,7 +227,7 @@ describe('OfficeRoom: restore last position (#148)', () => {
   it('terrain changed after saving invalidates the restored coordinate', async () => {
     const store = await directory();
     await start(store, true, { terrain: createMemoryTerrain() });
-    const position = { x: 120 * TILE + 32, y: 85 * TILE + 25 };
+    const position = { x: 120 * TILE + 16, y: 85 * TILE + 5 };
     const first = await join();
     await move(first, position);
     await first.leave();
@@ -217,7 +243,7 @@ describe('OfficeRoom: restore last position (#148)', () => {
     const table = BASE_LAYOUT.props.find((prop) => prop.piece.startsWith('table-'))!;
     const piece = table.piece;
     await start(store, true, { collisions: createMemoryCollisions([[piece, []]]) });
-    const target = { x: table.tx * TILE + 32, y: table.ty * TILE + 25 };
+    const target = { x: table.tx * TILE + 16, y: table.ty * TILE + 5 };
     await server.collisions.setRects({ pieceId: piece, rects: [], actorId: null }, () => []);
     const first = await join();
     await move(first, target);
@@ -232,7 +258,7 @@ describe('OfficeRoom: restore last position (#148)', () => {
     await start(await directory());
     const first = await join();
     const index = BASE_MAP_SEATS.findIndex((seat) => seat.tx === 53 && seat.ty === 11);
-    const beside = { x: 53 * TILE + 32, y: 12 * TILE + 25 };
+    const beside = { x: 53 * TILE + 16, y: 12 * TILE + 5 };
     await move(first, beside);
     first.send('sit', { seat: mapSeatId(index) });
     await waitFor(() => own(first).seat === mapSeatId(index));

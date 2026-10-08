@@ -16,7 +16,8 @@
  *               9x9 block. Changing a block changes the render and the
  *               collisions with no other code (#123).
  *   - `ground`  tile layer, optional terrain per tile that wins over its block:
- *               the corridor, the river and the room floors stay tile precise.
+ *               kept empty in the shipped block-editor map; explicit fixtures
+ *               can still test legacy tile-precise geometry.
  *   - `walls`   tile layer, a `wall-*` pack piece on each solid wall tile.
  *   - `hedges`  tile layer, a `hedge-*` pack piece on each solid hedge tile.
  *   - `decals`  tile layer, optional small details over the terrain (flowers,
@@ -29,12 +30,13 @@
  * Every tile layer uses the embedded `layout-palette` tileset, whose tiles are
  * named by their type: a terrain material, a wall or hedge piece, or a decal.
  *
- * No imports but the map itself, like `mapData.ts` and `seating.ts`: the
- * server loads this file with Node type stripping, where a `.ts` import needs
- * its extension and the client build forbids it. A JSON import needs neither.
+ * Shared with the server's Node type stripping: imports use explicit `.ts`
+ * extensions and remain pure. The JSON layout is read on both sides.
  */
 
 import officeMap from './maps/office.json' with { type: 'json' };
+import { AVATAR_BODY_CENTER_OFFSET, physicalBodyRect } from './avatarGeometry.ts';
+export { AVATAR_BODY_CENTER_OFFSET } from './avatarGeometry.ts';
 
 /** Same as `TILE` in mapData.ts and `ART_TILE` in artContract.ts (pinned by tests). */
 export const LAYOUT_TILE = 32;
@@ -311,7 +313,8 @@ function clampTile(value: number, size: number): number {
 }
 
 /**
- * The block material a tile shows: the block of a point displaced by a smooth
+ * Legacy lookup helper, retained for explicit historical fixtures only;
+ * `terrainSnapshot` deliberately never calls it. The block of a point displaced by a smooth
  * deterministic noise, so borders between blocks wobble instead of running
  * straight along the 9x9 grid (#123: rectangles read as boxes). The data
  * stays one material per block; only the lookup bends.
@@ -362,7 +365,7 @@ export function terrainSnapshot(layout: OfficeLayout, blocks: readonly LayoutMat
   const materials: LayoutMaterial[] = [];
   for (let ty = 0; ty < height; ty += 1) {
     for (let tx = 0; tx < width; tx += 1) {
-      materials.push(layout.ground[ty * width + tx] ?? jitteredBlockMaterial(blocks, width, height, tx, ty));
+      materials.push(layout.ground[ty * width + tx] ?? blocks[blockIndexAt(width, tx, ty)]!);
     }
   }
   const walkable = materials.map((material) => MATERIAL_WALKABLE[material]);
@@ -392,14 +395,6 @@ export function isTileWalkable(snapshot: TerrainSnapshot, tx: number, ty: number
   return snapshot.walkable[ty * snapshot.width + tx]!;
 }
 
-/**
- * The center of an avatar's Arcade body relative to its network position
- * (`physicalBodyRect` in avatarGeometry.ts, pinned by a test). Phaser collides
- * that body, which sits up and to the left of the position, so the server
- * checks the same point the client's physics keeps off solid tiles.
- */
-export const AVATAR_BODY_CENTER_OFFSET = { x: -16, y: -9 } as const;
-
 /** The terrain half of a move check; the room also checks the pieces' rectangles (`isPositionBlocked`). */
 export function isPositionWalkable(snapshot: TerrainSnapshot, x: number, y: number): boolean {
   if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
@@ -408,6 +403,18 @@ export function isPositionWalkable(snapshot: TerrainSnapshot, x: number, y: numb
     Math.floor((x + AVATAR_BODY_CENTER_OFFSET.x) / LAYOUT_TILE),
     Math.floor((y + AVATAR_BODY_CENTER_OFFSET.y) / LAYOUT_TILE),
   );
+}
+
+/** Full half-open footprint, for authoritative restoration and terrain relocation. */
+export function isFootprintWalkable(snapshot: TerrainSnapshot, position: { x: number; y: number }): boolean {
+  if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) return false;
+  const body = physicalBodyRect(position);
+  for (let ty = Math.floor(body.y / LAYOUT_TILE); ty < Math.ceil((body.y + body.height) / LAYOUT_TILE); ty++) {
+    for (let tx = Math.floor(body.x / LAYOUT_TILE); tx < Math.ceil((body.x + body.width) / LAYOUT_TILE); tx++) {
+      if (!isTileWalkable(snapshot, tx, ty)) return false;
+    }
+  }
+  return true;
 }
 
 // --- Block edits (#123 phase 2) ----------------------------------------------------------------
@@ -462,9 +469,8 @@ export function blockAtWorldPoint(layout: Pick<OfficeLayout, 'width' | 'height'>
 
 /**
  * Tiles (row-major indexes) that are water in `after` and were not in
- * `before`. Block borders wobble, so a block's water reaches up to
- * `BORDER_JITTER_TILES` into its neighbors: only this list says what an edit
- * really floods.
+ * `before`. Compare snapshots so explicit ground overlays, where present,
+ * are respected without ever flooding neighboring blocks through jitter.
  */
 export function newlyWateredTiles(before: TerrainSnapshot, after: TerrainSnapshot): number[] {
   const tiles: number[] = [];

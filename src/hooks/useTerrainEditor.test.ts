@@ -11,10 +11,12 @@ import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import { createOfficeBridge, type OfficeCommandMap } from '../game/officeBridge';
 import { BASE_LAYOUT, withBlock } from '../game/officeLayout';
 import { useTerrainEditor } from './useTerrainEditor';
+import { generateMapBlocks } from '../game/mapGeneration';
+import { encodeTerrainBlocks } from '../game/officeLayout';
 
 const LAWN = 35;
 
-function setup(terrain: TerrainAdminPort = { setBlock: vi.fn(async () => undefined) }) {
+function setup(terrain: TerrainAdminPort = { setBlock: vi.fn(async () => undefined), setBlocks: vi.fn() }) {
   const bridge = createOfficeBridge();
   const commands: OfficeCommandMap['terrainedit'][] = [];
   bridge.onCommand('terrainedit', (command) => commands.push(command));
@@ -23,6 +25,44 @@ function setup(terrain: TerrainAdminPort = { setBlock: vi.fn(async () => undefin
 }
 
 describe('useTerrainEditor', () => {
+  it('disables further writes after authorization or configuration disappears', async () => {
+    const terrain = { setBlock: vi.fn(), setBlocks: vi.fn(async () => { throw new AdminError('forbidden'); }) };
+    const { result } = setup(terrain);
+    act(() => result.current.enter());
+    act(() => result.current.generate({ seed: 123, landBlocks: 30, material: 'grass' }));
+    await act(() => result.current.applyGenerated());
+    expect(result.current.blocked).toBe(true);
+    await act(() => result.current.applyGenerated());
+    expect(terrain.setBlocks).toHaveBeenCalledTimes(1);
+  });
+  it('previews generation without writing, explicitly applies atomically, and clears the local draft', async () => {
+    const terrain = { setBlock: vi.fn(), setBlocks: vi.fn(async () => undefined) };
+    const { result, commands } = setup(terrain);
+    act(() => result.current.enter());
+    act(() => result.current.generate({ seed: 123, landBlocks: 30, material: 'grass' }));
+    const draft = generateMapBlocks({ seed: 123, landBlocks: 30, material: 'grass' });
+    expect(commands.at(-1)?.previewBlocks).toEqual(draft);
+    expect(terrain.setBlocks).not.toHaveBeenCalled();
+    await act(() => result.current.applyGenerated());
+    expect(terrain.setBlocks).toHaveBeenCalledWith(draft.map((material, index) => ({ index, material })), encodeTerrainBlocks(BASE_LAYOUT.blocks));
+    expect(result.current.draft).toBeNull();
+  });
+
+  it('keeps a rejected batch preview and prevents edits while saving', async () => {
+    let reject!: (error: unknown) => void;
+    const terrain = { setBlock: vi.fn(), setBlocks: vi.fn(() => new Promise<void>((_, fail) => { reject = fail; })) };
+    const { result } = setup(terrain);
+    act(() => result.current.enter());
+    act(() => result.current.generate({ seed: 123, landBlocks: 30, material: 'grass' }));
+    const draft = result.current.draft;
+    let applying!: Promise<void>;
+    act(() => { applying = result.current.applyGenerated(); });
+    act(() => result.current.generate({ seed: 1, landBlocks: 1, material: 'wood' }));
+    expect(result.current.draft).toBe(draft);
+    await act(async () => { reject(new AdminError('terrain-under-placement')); await applying; });
+    expect(result.current.draft).toBe(draft);
+    expect(result.current.error).toMatch(/otro bloque/);
+  });
   it('starts closed and says nothing to the map', () => {
     const { result, commands } = setup();
 
@@ -70,10 +110,10 @@ describe('useTerrainEditor', () => {
     act(() => result.current.enter());
     act(() => bridge.emit('terrainpick', { index: LAWN }));
 
-    act(() => result.current.choose('water'));
-    expect(commands.at(-1)).toEqual({ selected: LAWN, preview: { index: LAWN, material: 'water' } });
-
     act(() => result.current.choose('grass'));
+    expect(commands.at(-1)).toEqual({ selected: LAWN, preview: { index: LAWN, material: 'grass' } });
+
+    act(() => result.current.choose('water'));
     expect(commands.at(-1)).toEqual({ selected: LAWN, preview: null });
 
     act(() => result.current.choose('sand'));
@@ -101,16 +141,16 @@ describe('useTerrainEditor', () => {
 
   it('shows why the server refused, keeping the choice on screen', async () => {
     const setBlock = vi.fn(async () => {
-      throw new AdminError('terrain-under-player');
+      throw new AdminError('terrain-under-placement');
     });
-    const { bridge, result } = setup({ setBlock });
+    const { bridge, result } = setup({ setBlock, setBlocks: vi.fn() });
     act(() => result.current.enter());
     act(() => bridge.emit('terrainpick', { index: LAWN }));
     act(() => result.current.choose('water'));
 
     await act(() => result.current.apply());
 
-    expect(result.current.error).toMatch(/alguien/);
+    expect(result.current.error).toMatch(/otro bloque/);
     expect(result.current.notice).toBeNull();
     expect(result.current.material).toBe('water');
   });
@@ -118,7 +158,7 @@ describe('useTerrainEditor', () => {
   it('reports busy while applying and ignores a second apply meanwhile', async () => {
     let finish!: () => void;
     const setBlock = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
-    const { bridge, result } = setup({ setBlock });
+    const { bridge, result } = setup({ setBlock, setBlocks: vi.fn() });
     act(() => result.current.enter());
     act(() => bridge.emit('terrainpick', { index: LAWN }));
     act(() => result.current.choose('sand'));

@@ -20,16 +20,17 @@ describe('buildInitialLayout', () => {
     expect(layout.width).toBe(126);
     expect(layout.height).toBe(90);
     expect(layout.blocks).toHaveLength(140);
-    expect(parseBaseMapSeats(map).length).toBeGreaterThan(0);
+    expect(parseBaseMapSeats(map)).toEqual([]);
   });
 
-  it('never stands a new tree on water once the block borders wobble', () => {
+  it('exactly reproduces the checked-in empty map, with one full wood block', () => {
     const layout = parseOfficeLayout(JSON.parse(serializeLayout(buildInitialLayout())));
     const bare = terrainSnapshot({ ...layout, props: layout.props.filter((prop) => prop.kind !== 'tree') });
 
-    for (const tree of layout.props.filter((prop) => prop.kind === 'tree')) {
-      expect(isTileWalkable(bare, tree.tx, tree.ty), `tree at (${tree.tx}, ${tree.ty})`).toBe(true);
-    }
+    expect(layout.props).toEqual([]);
+    expect(isTileWalkable(bare, 67, 49)).toBe(true);
+    expect(bare.walkable.filter(Boolean)).toHaveLength(81);
+    expect(serializeLayout(buildInitialLayout())).toBe(readFileSync(new URL('../../src/game/maps/office.json', import.meta.url), 'utf8'));
   });
 });
 

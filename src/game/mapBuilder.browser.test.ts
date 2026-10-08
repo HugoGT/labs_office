@@ -14,8 +14,8 @@ import {
   renderTerrain,
   type TerrainTilemap,
 } from './mapBuilder';
-import { BASE_LAYOUT, BASE_TERRAIN, terrainSnapshot } from './officeLayout';
-import { BASE_MAP_SEATS } from './seating';
+import { terrainSnapshot } from './officeLayout';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN, LEGACY_SEATS as BASE_MAP_SEATS } from '../test/legacyOffice';
 import { decalTileData, fallbackTerrainData, hedgeSprites, terrainTileData, wallSprites } from './terrainRender';
 import { createOfficeTextures } from './textures';
 

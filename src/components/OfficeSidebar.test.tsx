@@ -246,7 +246,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
 
   it('con rol admin y puerto de terreno, ofrece TAMBIEN la edicion del terreno (#123 phase 2)', async () => {
     const user = userEvent.setup();
-    renderSidebar({ ...adminProps(), terrain: { setBlock: vi.fn(async () => undefined) } });
+    renderSidebar({ ...adminProps(), terrain: { setBlock: vi.fn(async () => undefined), setBlocks: vi.fn() } });
 
     await user.click(screen.getByRole('button', { name: /Personalizar/ }));
 
@@ -364,7 +364,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     const onEditingChange = vi.fn();
     const commands: unknown[] = [];
     props.bridge.onCommand(command, (value) => commands.push(value));
-    renderSidebar({ ...props, terrain: { setBlock: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() }, onLayoutEditingChange: onEditingChange });
+    renderSidebar({ ...props, terrain: { setBlock: vi.fn(), setBlocks: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() }, onLayoutEditingChange: onEditingChange });
     await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
     await userEvent.click(screen.getByRole('button', { name: label }));
     const exit = await screen.findByRole('button', { name: 'Salir' });
@@ -407,7 +407,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
   });
 
   it('does not offer admin capabilities to guests even when all ports exist', async () => {
-    renderSidebar({ ...adminProps(), role: 'guest', assets: fakeAssets(), terrain: { setBlock: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() } });
+    renderSidebar({ ...adminProps(), role: 'guest', assets: fakeAssets(), terrain: { setBlock: vi.fn(), setBlocks: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() } });
     await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
     expect(screen.queryByRole('button', { name: /Editar/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Catálogo de decoración' })).not.toBeInTheDocument();

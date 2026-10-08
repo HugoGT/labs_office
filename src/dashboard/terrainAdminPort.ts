@@ -12,8 +12,9 @@ export interface TerrainAdminPort {
   /**
    * Sets one 9x9 block's material. Everyone, this admin included, sees the
    * change through the room state, so nothing comes back. Refused with
-   * `terrain-under-placement` or `terrain-under-player` when water would
-   * land under something or someone.
+   * `terrain-under-placement` when water would cover a placement or spawn.
+   * Affected players are relocated after persistence, including reconnects.
    */
   setBlock(index: number, material: LayoutMaterial): Promise<void>;
+  setBlocks(edits: readonly { index: number; material: LayoutMaterial }[], expected: string): Promise<void>;
 }

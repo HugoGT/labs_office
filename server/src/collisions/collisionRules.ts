@@ -30,8 +30,8 @@ export class InvalidCollisionEditError extends Error {
 
 /**
  * The edit would put a rectangle over a player who is in the office (or in
- * their reconnection window). Refused like water under a player
- * (`terrain-under-player`): it is allowed once that person walks away.
+ * their reconnection window). Unlike terrain edits, collision edits wait
+ * until that person walks away; they do not relocate players.
  */
 export class CollisionProtectedError extends Error {
   constructor() {

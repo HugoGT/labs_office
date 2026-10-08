@@ -15,4 +15,6 @@ export interface TerrainStore {
   loadBlocks(): Promise<ReadonlyMap<number, LayoutMaterial>>;
   /** Sets one block's material and who set it (a directory user id, or `null`). */
   saveBlock(index: number, material: LayoutMaterial, actorId: string | null): Promise<void>;
+  /** All rows succeed or none do; the runtime publishes only after this resolves. */
+  saveBlocks(edits: readonly { index: number; material: LayoutMaterial }[], actorId: string | null): Promise<void>;
 }

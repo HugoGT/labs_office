@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BASE_LAYOUT } from '../../../src/game/officeLayout.ts';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS } from '../../../src/test/legacyOffice.ts';
 import {
   collisionWorld,
   decodeCollisionTable,
@@ -7,18 +7,17 @@ import {
   staticCollisionInstances,
   type CollisionDesk,
 } from '../../../src/game/pieceCollisions.ts';
-import { BASE_MAP_SEATS } from '../../../src/game/seating.ts';
 import { createMemoryCollisions } from './memoryCollisions.ts';
 import { CollisionProtectedError } from './collisionRules.ts';
 import { createCollisionRuntime } from './collisionRuntime.ts';
 
 const NOBODY = (): { x: number; y: number }[] => [];
 const tree = BASE_LAYOUT.props.find((prop) => prop.kind === 'tree')!;
-/** A position whose body center (x - 16, y - 9) is the middle of the tree's tile. */
-const onTree = { x: tree.tx * 32 + 32, y: tree.ty * 32 + 25 };
+/** A position whose feet-aligned body center is the middle of the tree's tile. */
+const onTree = { x: tree.tx * 32 + 16, y: tree.ty * 32 + 5 };
 const DESK: CollisionDesk = { x: 640, y: 1600, w: 96, h: 96, materialId: 'desk-oak', items: [] };
 /** Body center in the middle of that desk. */
-const onDesk = { x: 688 + 16, y: 1648 + 9 };
+const onDesk = { x: 688, y: 1648 - 11 };
 
 function runtime(seed: [string, { x: number; y: number; w: number; h: number }[]][] = [], desks: CollisionDesk[] = []) {
   const store = createMemoryCollisions(seed);

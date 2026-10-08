@@ -184,11 +184,10 @@ export type AdminErrorCode =
   | 'appearance-immutable'
   /**
    * Water refused by the terrain editor (#123 phase 2): under something that
-   * stays (a room, a desk, a chair, the entrance: pick another block) or
-   * under someone (wait until they walk away). Two codes for two fixes.
+   * stays (a room, a desk, a chair, the entrance: pick another block).
    */
   | 'terrain-under-placement'
-  | 'terrain-under-player'
+  | 'terrain-stale'
   /** No `DATABASE_URL`: the terrain is the committed layout's and cannot be edited. */
   | 'terrain-not-configured'
   /** A collision rectangle refused because it would close over someone: wait until they step aside. */

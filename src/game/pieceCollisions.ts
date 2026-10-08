@@ -12,14 +12,15 @@
  *
  * The client collides its Arcade body with these rectangles and the room
  * refuses a `move` whose body center falls inside one, the same pairing as
- * the terrain tiles: the client body (22x14) can never put its center inside
+ * the terrain tiles: the client body can never put its center inside
  * a rectangle it is kept out of, so the server never refuses a move the
  * client allowed.
  *
- * No imports, like `officeLayout.ts` and `seating.ts`: the server loads this
- * file with Node type stripping, so shared numbers are restated and pinned by
- * tests instead.
+ * Avatar geometry comes from the same pure module as Phaser's setup. Explicit
+ * .ts imports keep this shared code loadable by Node type stripping.
  */
+
+import { AVATAR_BODY_CENTER_OFFSET, physicalBodyRect } from './avatarGeometry.ts';
 
 /** Same as `TILE` in mapData.ts (pinned by a test). */
 export const COLLISION_TILE = 32;
@@ -30,11 +31,7 @@ export const MAX_COLLISION_RECTS = 8;
  * 256x192 room table) fits with room to spare.
  */
 export const COLLISION_COORD_LIMIT = 512;
-/** `AVATAR_BODY_CENTER_OFFSET` of officeLayout.ts (pinned by a test). */
-export const COLLISION_BODY_CENTER_OFFSET = { x: -16, y: -9 } as const;
-/** Arcade body size and its offset from the network position (`physicalBodyRect`, pinned by a test). */
-const BODY_SIZE = { width: 22, height: 14 } as const;
-const BODY_OFFSET = { x: -27, y: -16 } as const;
+export const COLLISION_BODY_CENTER_OFFSET = AVATAR_BODY_CENTER_OFFSET;
 /** `PLANT` of artContract.ts: decor plants are drawn squeezed into their slot box, so the frame sets the scale. */
 export const DECOR_PLANT_FRAME = { width: 32, height: 48, anchor: { x: 16, y: 46 } } as const;
 
@@ -365,7 +362,7 @@ export function isPositionBlocked(rects: readonly CollisionRect[], x: number, y:
 
 /** The Arcade body of an avatar at a network position (`physicalBodyRect`). */
 export function bodyBoxAt(position: CollisionPoint): CollisionBox {
-  return { x: position.x + BODY_OFFSET.x, y: position.y + BODY_OFFSET.y, width: BODY_SIZE.width, height: BODY_SIZE.height };
+  return physicalBodyRect(position);
 }
 
 function overlaps(rect: CollisionRect, box: CollisionBox): boolean {

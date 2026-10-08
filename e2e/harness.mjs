@@ -1,5 +1,5 @@
 // Real-process E2E harness (D5/D6/D8). Boots the actual Colyseus server
-// (`server/src/main.ts`) and a real `vite preview` of the instrumented
+// (`e2e/server.ts`, with an explicit in-memory topology) and a real `vite preview` of the instrumented
 // build (`dist-e2e`), then drives independent Playwright browser contexts
 // against it. Nothing in this file is mocked: readiness, port occupancy,
 // and process teardown all come from a real subprocess or a real socket.
@@ -353,7 +353,7 @@ export async function startHarness({ realLivekit = false, fakeMedia = false } = 
     delete serverEnv.LIVEKIT_API_SECRET;
   }
 
-  const serverProcess = spawn('node', [path.join(projectRoot, 'server', 'src', 'main.ts')], {
+  const serverProcess = spawn('node', [path.join(projectRoot, 'e2e', 'server.ts'), String(SERVER_PORT)], {
     cwd: projectRoot,
     env: serverEnv,
     detached: true,
@@ -463,7 +463,8 @@ export async function waitForOnlineCount(page, count) {
  * are not tiles. */
 export async function waitForPeerTileCount(page, count) {
   const ownSessionId = await getOwnSessionId(page);
-  await page.waitForFunction(
+  try {
+    await page.waitForFunction(
     ({ n, own }) => {
       const nodes = document.querySelectorAll('#office-shell [data-session-id]:not(audio)');
       const peers = Array.from(nodes).filter((node) => node.dataset.sessionId !== own);
@@ -472,6 +473,14 @@ export async function waitForPeerTileCount(page, count) {
     { n: count, own: ownSessionId },
     { timeout: READINESS_DEADLINE_MS },
   );
+  } catch (cause) {
+    const state = await page.evaluate(() => ({
+      voice: window.__officeE2E?.lastVoice(),
+      tiles: Array.from(document.querySelectorAll('#office-shell [data-session-id]:not(audio)')).map((node) => node.dataset.sessionId),
+      text: document.querySelector('#office-shell')?.textContent,
+    }));
+    throw new Error(`Expected ${count} peer tiles for ${ownSessionId}: ${JSON.stringify(state)}`, { cause });
+  }
 }
 
 /** D4: drives the local player onto a tile through the gated `__officeE2E`

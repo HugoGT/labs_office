@@ -49,11 +49,13 @@ import {
   BASE_TERRAIN,
   encodeTerrainBlocks,
   isPositionWalkable,
+  isFootprintWalkable,
   type LayoutMaterial,
   type TerrainSnapshot,
 } from '../../src/game/officeLayout.ts';
 import {
   collisionWorld,
+  boxOverlapsRects,
   encodeCollisionTable,
   isPositionBlocked,
   staticCollisionInstances,
@@ -69,6 +71,7 @@ import {
   type SeatTiles,
 } from '../../src/game/seating.ts';
 import { createCallInvitationRegistry, type CallInvitationRegistry } from './callInvitations.ts';
+import { physicalBodyRect } from '../../src/game/avatarGeometry.ts';
 import { ART_PACK_DEFAULTS } from './decor/artCatalogRules.ts';
 import type { DeskDirectory } from './desks/desksPort.ts';
 import { decideAccess, type AccessDecision } from './directory/accessDecision.ts';
@@ -128,6 +131,7 @@ export interface MoveMessage {
   x: number;
   y: number;
   facing: string;
+  positionRevision?: number;
 }
 
 export interface StatusMessage {
@@ -152,6 +156,7 @@ export interface SpacesVersionMessage {
 /** A request to sit (art migration, step 6): a `seating.ts` reference. */
 export interface SitMessage {
   seat: string;
+  positionRevision?: number;
 }
 
 export interface CallMessage {
@@ -218,6 +223,7 @@ export function deriveIdentityName(identity: VerifiedIdentity, fallback: string)
 }
 
 export interface OfficeRoomOptions {
+  seats?: readonly { tx: number; ty: number; facing: 'up' | 'down' | 'left' | 'right' }[];
   /**
    * The terrain every `move` is checked against (art migration, step 8),
    * read on each move so it can change while the room lives. Absent is the
@@ -387,17 +393,31 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
    */
   private seated = new Map<string, { reach: SeatTiles; userId: string | null }>();
   private terrain: () => TerrainSnapshot = () => BASE_TERRAIN;
+  private mapSeats = BASE_MAP_SEATS;
   private collisions: () => readonly CollisionRect[] = () => BASE_COLLISION_RECTS;
   // Bridges a definitive leave and a refresh while its write is in flight.
   // Serializing per uid prevents an older slow write from undoing a newer leave.
   private positionWrites = new Map<string, { position: LastPosition; done: Promise<void> }>();
 
   onCreate(options?: OfficeRoomOptions): void {
+    this.mapSeats = options?.seats ?? BASE_MAP_SEATS;
     this.state = new OfficeState();
     if (options?.terrain) this.terrain = options.terrain;
     this.state.terrainBlocks = encodeTerrainBlocks(this.terrain().blocks);
     this.unsubscribeTerrainChanges = options?.subscribeTerrainChanges?.((blocks) => {
       this.state.terrainBlocks = encodeTerrainBlocks(blocks);
+      // The runtime has persisted and published its authoritative snapshot.
+      // Iterate replicated players, not sockets: reserved reconnects must move too.
+      for (const [sessionId, player] of this.state.players) {
+        if (isFootprintWalkable(this.terrain(), player)) continue;
+        const position = this.safeSpawn(this.joinCount++ % SPAWN_RING.length);
+        this.standUp(sessionId);
+        player.x = position.x;
+        player.y = position.y;
+        player.facing = DEFAULT_FACING;
+        player.positionRevision++;
+        this.sessions?.moveTo(sessionId, position.x, position.y);
+      }
     });
     if (options?.collisions) this.collisions = options.collisions;
     this.state.pieceCollisions = options?.collisionTable?.() ?? encodeCollisionTable(new Map());
@@ -442,6 +462,8 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     this.onMessage('move', (client: Client, message: MoveMessage) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
+
+      if ((message?.positionRevision ?? 0) !== player.positionRevision) return;
 
       const x = clamp(message?.x, 0, WORLD_W);
       const y = clamp(message?.y, 0, WORLD_H);
@@ -499,7 +521,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     // Sitting (step 6) is a request like any other: an unknown seat, one out
     // of reach, an occupied one or someone else's desk is dropped whole.
     this.onMessage('sit', (client: Client<unknown, OfficeAuthData>, message: SitMessage) => {
-      void this.sit(client, message?.seat);
+      void this.sit(client, message?.seat, message?.positionRevision ?? 0);
     });
 
     this.onMessage('stand', (client: Client) => {
@@ -644,7 +666,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     client: Client<unknown, OfficeAuthData>,
     options?: { name?: unknown; status?: unknown; spacesVersion?: unknown },
   ): Promise<void> {
-    const [dx, dy] = SPAWN_RING[this.joinCount % SPAWN_RING.length];
+    const spawnOffset = this.joinCount % SPAWN_RING.length;
     this.joinCount++;
 
     // Con identidad verificada, `options.name` deja de ser una fuente legitima:
@@ -671,12 +693,12 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
         position = this.currentPositionOf(identity.uid, client) ?? position;
       }
       if (position && (!isPositionInMap(position)
-        || !isPositionWalkable(this.terrain(), position.x, position.y)
-        || isPositionBlocked(this.collisions(), position.x, position.y))) position = null;
+        || !this.isOccupable(position))) position = null;
     }
     if (identity) this.replaceOtherSessionsOf(identity.uid, client);
-    const spawnX = position?.x ?? (PLAYER_SPAWN_TX + dx) * TILE + TILE / 2;
-    const spawnY = position?.y ?? (PLAYER_SPAWN_TY + dy) * TILE + TILE / 2;
+    const spawn = position ?? this.safeSpawn(spawnOffset);
+    const spawnX = spawn.x;
+    const spawnY = spawn.y;
 
     this.state.players.set(
       client.sessionId,
@@ -889,16 +911,16 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
    * and sitting never claims it. `recheckDeskSeats` keeps that true when the
    * desk changes hands while someone sits at it.
    */
-  private async sit(client: Client<unknown, OfficeAuthData>, raw: unknown): Promise<void> {
-    const ref = parseSeatRef(raw);
+  private async sit(client: Client<unknown, OfficeAuthData>, raw: unknown, revision: number): Promise<void> {
+    const ref = parseSeatRef(raw, this.mapSeats.length);
     if (ref === null) return;
     const seatId = raw as string;
     const player = this.state.players.get(client.sessionId);
-    if (!player || player.seat === seatId) return;
+    if (!player || player.positionRevision !== revision || player.seat === seatId) return;
     const userId = client.auth === true ? null : (client.auth?.directoryUserId ?? null);
 
     if (ref.kind === 'map') {
-      const seat = BASE_MAP_SEATS[ref.index];
+      const seat = this.mapSeats[ref.index];
       this.takeSeat(client.sessionId, seatId, { reach: mapSeatTiles(seat), userId }, seat.facing);
       return;
     }
@@ -910,7 +932,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     } catch {
       return;
     }
-    if (desk === null || !mayUseDesk(userId, desk.occupantId)) return;
+    if (desk === null || player.positionRevision !== revision || !mayUseDesk(userId, desk.occupantId)) return;
     this.takeSeat(client.sessionId, seatId, { reach: deskSeatTiles(desk), userId }, DESK_SEAT_FACING);
   }
 
@@ -934,6 +956,23 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     this.seated.delete(sessionId);
     const player = this.state.players.get(sessionId);
     if (player && player.seat !== '') player.seat = '';
+  }
+
+  private isOccupable(position: LastPosition): boolean {
+    if (!isFootprintWalkable(this.terrain(), position)) return false;
+    const body = physicalBodyRect(position);
+    return !boxOverlapsRects(this.collisions(), body);
+  }
+
+  private safeSpawn(preferred = 0): LastPosition {
+    const at = ([dx, dy]: readonly [number, number]): LastPosition => ({
+      x: (PLAYER_SPAWN_TX + dx) * TILE + TILE / 2,
+      y: (PLAYER_SPAWN_TY + dy) * TILE + TILE / 2,
+    });
+    const candidate = at(SPAWN_RING[preferred]!);
+    if (this.isOccupable(candidate)) return candidate;
+    // An unavailable return square falls back to primary spawn, then its ring.
+    return SPAWN_RING.map(at).find((position) => this.isOccupable(position)) ?? at(SPAWN_RING[0]!);
   }
 
   /**

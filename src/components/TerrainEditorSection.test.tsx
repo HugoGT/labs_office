@@ -13,12 +13,24 @@ function renderSection(overrides: Partial<Parameters<typeof TerrainEditorSection
   const bridge = overrides.bridge ?? createOfficeBridge();
   const commands: OfficeCommandMap['terrainedit'][] = [];
   bridge.onCommand('terrainedit', (command) => commands.push(command));
-  const terrain: TerrainAdminPort = overrides.terrain ?? { setBlock: vi.fn(async () => undefined) };
+  const terrain: TerrainAdminPort = overrides.terrain ?? { setBlock: vi.fn(async () => undefined), setBlocks: vi.fn() };
   const props = { bridge, terrain, ...overrides };
   return { ...props, commands, ...render(<TerrainEditorSection {...props} />) };
 }
 
 describe('TerrainEditorSection', () => {
+  it('requires a separate explicit apply and confirmation for a generated replacement', async () => {
+    const terrain = { setBlock: vi.fn(), setBlocks: vi.fn(async () => undefined) };
+    renderSection({ terrain });
+    await userEvent.click(screen.getByRole('button', { name: 'Editar terreno' }));
+    expect(screen.getByText(/9 × 9.*288 × 288/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Vista previa procedural' }));
+    expect(terrain.setBlocks).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Aplicar mapa' })).toBeDisabled();
+    await userEvent.click(screen.getByRole('checkbox', { name: /Confirmo reemplazar/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Aplicar mapa' }));
+    expect(terrain.setBlocks).toHaveBeenCalledTimes(1);
+  });
   it('offers only the way in while closed', () => {
     renderSection();
 
@@ -46,8 +58,8 @@ describe('TerrainEditorSection', () => {
 
     act(() => bridge.emit('terrainpick', { index: LAWN }));
 
-    expect(screen.getByText('Columna 8, fila 3 · ahora Césped')).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Material' })).toHaveValue('grass');
+    expect(screen.getByText('Columna 8, fila 3 · ahora Agua')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Material' })).toHaveValue('water');
   });
 
   it('selects a block by column and row', async () => {
@@ -66,16 +78,16 @@ describe('TerrainEditorSection', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Editar terreno' }));
     act(() => bridge.emit('terrainpick', { index: LAWN }));
 
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Material' }), 'Agua');
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Material' }), 'Césped');
 
-    expect(commands.at(-1)).toEqual({ selected: LAWN, preview: { index: LAWN, material: 'water' } });
+    expect(commands.at(-1)).toEqual({ selected: LAWN, preview: { index: LAWN, material: 'grass' } });
     expect(screen.getByText(/Vista previa en el mapa/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Aplicar' }));
-    expect(terrain.setBlock).toHaveBeenCalledWith(LAWN, 'water');
+    expect(terrain.setBlock).toHaveBeenCalledWith(LAWN, 'grass');
     expect(await screen.findByRole('status')).toHaveTextContent('Bloque actualizado.');
 
-    act(() => bridge.emit('terrain', { blocks: withBlock(BASE_LAYOUT.blocks, LAWN, 'water') }));
-    expect(screen.getByText('Columna 8, fila 3 · ahora Agua')).toBeInTheDocument();
+    act(() => bridge.emit('terrain', { blocks: withBlock(BASE_LAYOUT.blocks, LAWN, 'grass') }));
+    expect(screen.getByText('Columna 8, fila 3 · ahora Césped')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Aplicar' })).toBeDisabled();
   });
 
@@ -93,6 +105,7 @@ describe('TerrainEditorSection', () => {
 
   it('shows the reason a server refusal gives', async () => {
     const terrain: TerrainAdminPort = {
+      setBlocks: vi.fn(),
       setBlock: vi.fn(async () => {
         throw new AdminError('terrain-under-placement');
       }),
@@ -100,6 +113,7 @@ describe('TerrainEditorSection', () => {
     const { bridge } = renderSection({ terrain });
     await userEvent.click(screen.getByRole('button', { name: 'Editar terreno' }));
     act(() => bridge.emit('terrainpick', { index: LAWN }));
+    act(() => bridge.emit('terrain', { blocks: withBlock(BASE_LAYOUT.blocks, LAWN, 'grass') }));
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Material' }), 'Agua');
 
     await userEvent.click(screen.getByRole('button', { name: 'Aplicar' }));

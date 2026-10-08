@@ -41,18 +41,17 @@ function bodyCenterOf(position: { x: number; y: number }): { x: number; y: numbe
 
 describe('body space constants', () => {
   it('derives the body center offset from the avatar geometry and pins it to the collision rule', () => {
-    expect(BODY_CENTER_OFFSET).toEqual({ x: -16, y: -9 });
+    expect(BODY_CENTER_OFFSET).toEqual({ x: 0, y: 11 });
     expect(BODY_CENTER_OFFSET).toEqual(COLLISION_BODY_CENTER_OFFSET);
   });
 });
 
 describe('bodyTileOf', () => {
   it('reads the tile of the body center, not of the position', () => {
-    // The body center sits 16 px left of and 9 px above the position, so it
-    // crosses into tile 1 at x = 48 and y = 41, not at 32.
-    expect(bodyTileOf({ x: 47, y: 41 })).toEqual({ tx: 0, ty: 1 });
-    expect(bodyTileOf({ x: 48, y: 41 })).toEqual({ tx: 1, ty: 1 });
-    expect(bodyTileOf({ x: 48, y: 40 })).toEqual({ tx: 1, ty: 0 });
+    const edge = atBodyCenter(TILE, TILE);
+    expect(bodyTileOf({ ...edge, x: edge.x - 0.01 })).toEqual({ tx: 0, ty: 1 });
+    expect(bodyTileOf(edge)).toEqual({ tx: 1, ty: 1 });
+    expect(bodyTileOf({ ...edge, y: edge.y - 0.01 })).toEqual({ tx: 1, ty: 0 });
   });
 
   it('agrees with the Arcade body rectangle at tile edges and for negative positions', () => {
@@ -72,8 +71,8 @@ describe('bodyTileOf', () => {
 
 describe('positionForBodyTile', () => {
   it('puts the body center on the tile center', () => {
-    expect(positionForBodyTile({ tx: 0, ty: 0 })).toEqual({ x: 32, y: 25 });
-    expect(positionForBodyTile({ tx: 3, ty: 2 })).toEqual({ x: 128, y: 89 });
+    expect(positionForBodyTile({ tx: 0, ty: 0 })).toEqual(atBodyCenter(16, 16));
+    expect(positionForBodyTile({ tx: 3, ty: 2 })).toEqual(atBodyCenter(112, 80));
     expect(bodyCenterOf(positionForBodyTile({ tx: 3, ty: 2 }))).toEqual({ x: 3 * TILE + 16, y: 2 * TILE + 16 });
   });
 
@@ -216,7 +215,7 @@ function blockedAt(grid: SolidGrid, tx: number, ty: number): boolean {
 
 /**
  * Independent oracle for "this walk never touches a blocked tile": samples the
- * 22x14 body (no safety margin) every pixel along the segment and checks the
+ * shared body (no safety margin) every pixel along the segment and checks the
  * open interior of the box against every tile it covers.
  */
 function segmentClear(grid: SolidGrid, from: { x: number; y: number }, to: { x: number; y: number }): boolean {
@@ -224,10 +223,11 @@ function segmentClear(grid: SolidGrid, from: { x: number; y: number }, to: { x: 
   for (let i = 0; i <= length; i++) {
     const cx = from.x + ((to.x - from.x) * i) / length + BODY_CENTER_OFFSET.x;
     const cy = from.y + ((to.y - from.y) * i) / length + BODY_CENTER_OFFSET.y;
-    const tx0 = Math.floor((cx - 11) / TILE);
-    const tx1 = Math.ceil((cx + 11) / TILE) - 1;
-    const ty0 = Math.floor((cy - 7) / TILE);
-    const ty1 = Math.ceil((cy + 7) / TILE) - 1;
+    const footprint = physicalBodyRect({ x: 0, y: 0 });
+    const tx0 = Math.floor((cx - footprint.width / 2) / TILE);
+    const tx1 = Math.ceil((cx + footprint.width / 2) / TILE) - 1;
+    const ty0 = Math.floor((cy - footprint.height / 2) / TILE);
+    const ty1 = Math.ceil((cy + footprint.height / 2) / TILE) - 1;
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) if (blockedAt(grid, tx, ty)) return false;
     }
@@ -273,13 +273,11 @@ describe('planWalk', () => {
   });
 
   it('keeps the goal tile center as the last stop when the clicked point hugs a wall', () => {
-    // Wall on tile 3. The body (11 px half width) plus the 3 px margin touches
-    // it exactly with its center at 82; one pixel further needs the detour via
-    // the goal tile center first.
+    // Touching the swept margin is clear; one pixel further needs a waypoint.
     const grid = gridOf(['...#']);
-
-    expect(planWalk(grid, centerOf(0, 0), atBodyCenter(82, 16))).toEqual([atBodyCenter(82, 16)]);
-    expect(planWalk(grid, centerOf(0, 0), atBodyCenter(83, 16))).toEqual([centerOf(2, 0), atBodyCenter(83, 16)]);
+    const edge = 3 * TILE - physicalBodyRect({ x: 0, y: 0 }).width / 2 - 3;
+    expect(planWalk(grid, centerOf(0, 0), atBodyCenter(edge, 16))).toEqual([atBodyCenter(edge, 16)]);
+    expect(planWalk(grid, centerOf(0, 0), atBodyCenter(edge + 1, 16))).toEqual([centerOf(2, 0), atBodyCenter(edge + 1, 16)]);
   });
 
   it('refuses to pull a segment whose swept body clips a wall corner the center line misses', () => {

@@ -98,13 +98,7 @@ CREATE INDEX IF NOT EXISTS audit_log_subject ON audit_log (subject_id);
 -- cambio contra Postgres real (WASM, sin extensiones instaladas antes ni
 -- despues de crear la restriccion).
 
--- Table existence, not row count, is the initialization boundary. Existing
--- deployments (even ones with every room deleted) keep their admin choices.
--- Creation and seeding run in the same migration transaction.
-DO $spaces_initialization$
-DECLARE
-  initialize_spaces boolean := to_regclass('spaces') IS NULL;
-BEGIN
+-- New offices start without rooms. Existing placement rows are never reset.
 CREATE TABLE IF NOT EXISTS spaces (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   slug text NOT NULL, name text NOT NULL,
@@ -120,14 +114,6 @@ CREATE TABLE IF NOT EXISTS spaces (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-IF initialize_spaces THEN
-  INSERT INTO spaces (id, slug, name, x, y, w, h) VALUES
-    ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'sala-de-juntas', 'Sala de Juntas', 50, 2, 13, 14),
-    ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'cafeteria', 'Cafetería', 50, 18, 13, 14)
-  ON CONFLICT (id) DO NOTHING;
-END IF;
-END;
-$spaces_initialization$;
 CREATE UNIQUE INDEX IF NOT EXISTS spaces_slug_unique ON spaces (lower(slug));
 
 -- Dos espacios solapados harian que `detectSpace` dependiese del orden de

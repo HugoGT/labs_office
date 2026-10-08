@@ -1,15 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE } from '../../../src/game/mapData.ts';
 import {
-  BASE_LAYOUT,
-  BASE_TERRAIN,
   blockIndexAt,
   newlyWateredTiles,
   terrainSnapshot,
   withBlock,
   type LayoutMaterial,
 } from '../../../src/game/officeLayout.ts';
-import { BASE_MAP_SEATS } from '../../../src/game/seating.ts';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN, LEGACY_SEATS as BASE_MAP_SEATS } from '../../../src/test/legacyOffice.ts';
 import {
   InvalidTerrainEditError,
   TerrainProtectedError,
@@ -32,7 +30,7 @@ function watered(index: number, material: LayoutMaterial = 'water'): number[] {
 
 /** A network position whose avatar body sits in the middle of tile (tx, ty). */
 function standingOn(tx: number, ty: number) {
-  return { x: tx * TILE + 32, y: ty * TILE + 25 };
+  return { x: tx * TILE + 16, y: ty * TILE + 5 };
 }
 
 describe('parseTerrainEdit', () => {
@@ -71,6 +69,13 @@ describe('staticProtectedTiles', () => {
 });
 
 describe('findWaterConflict', () => {
+  it('does not veto player ground contact: relocation is decided after persistence', () => {
+    const protections = { placements: [], players: [{ x: 100, y: 207 }] };
+    // Footprint (91, 211)..(109, 225) crosses both x=96 and y=224.
+    expect(findWaterConflict([7 * W + 3], W, new Set(), protections)).toBeNull();
+    expect(findWaterConflict([5 * W + 2], W, new Set(), protections)).toBeNull();
+  });
+
   it('lets water onto a free lawn and anything that is not water anywhere', () => {
     expect(findWaterConflict(watered(LAWN), W, STATIC, NONE)).toBeNull();
     expect(watered(blockIndexAt(W, PLAYER_SPAWN_TX, PLAYER_SPAWN_TY), 'sand')).toEqual([]);
@@ -80,25 +85,24 @@ describe('findWaterConflict', () => {
     expect(findWaterConflict(watered(blockIndexAt(W, PLAYER_SPAWN_TX, PLAYER_SPAWN_TY)), W, STATIC, NONE)).toBe('placement');
   });
 
-  it('refuses water under a space or a desk, even when only a wobbling border reaches it', () => {
+  it('refuses water under a space or a desk on a block edge, but never floods neighboring blocks', () => {
     const flooded = watered(LAWN);
-    const outside = flooded.find((tile) => tile % W < 63 || tile % W >= 72 || tile < 18 * W || tile >= 27 * W);
-    expect(outside).toBeDefined();
-    const tx = outside! % W;
-    const ty = Math.floor(outside! / W);
+    expect(flooded.every((tile) => tile % W >= 63 && tile % W < 72 && tile >= 18 * W && tile < 27 * W)).toBe(true);
+    const tx = 63;
+    const ty = 18;
 
     expect(findWaterConflict(flooded, W, STATIC, { placements: [{ x: tx, y: ty, w: 1, h: 1 }], players: [] })).toBe('placement');
     expect(findWaterConflict(flooded, W, STATIC, { placements: [{ x: 0, y: 0, w: 9, h: 9 }], players: [] })).toBeNull();
   });
 
-  it('refuses water under a connected player, wherever their body touches it', () => {
-    expect(findWaterConflict(watered(LAWN), W, STATIC, { placements: [], players: [standingOn(67, 22)] })).toBe('player');
+  it('allows water under players, including partial footprint overlaps', () => {
+    expect(findWaterConflict(watered(LAWN), W, STATIC, { placements: [], players: [standingOn(67, 22)] })).toBeNull();
     // Body center just right of the block's last column: a third of the body still overlaps it.
     const flooded = new Set(watered(LAWN));
     expect(flooded.has(22 * W + 71)).toBe(true);
-    const halfIn = { x: 72 * TILE + 16 + 5, y: 22 * TILE + 25 };
+    const halfIn = { x: 72 * TILE + 5, y: 22 * TILE + 5 };
     const players = { placements: [], players: [halfIn] };
-    expect(findWaterConflict([22 * W + 71], W, new Set(), players)).toBe('player');
+    expect(findWaterConflict([22 * W + 71], W, new Set(), players)).toBeNull();
     expect(findWaterConflict(watered(LAWN), W, STATIC, { placements: [], players: [standingOn(10, 10)] })).toBeNull();
   });
 
@@ -109,8 +113,8 @@ describe('findWaterConflict', () => {
   });
 
   it('carries the reason on a typed error', () => {
-    const error = new TerrainProtectedError('player');
+    const error = new TerrainProtectedError('placement');
     expect(error).toBeInstanceOf(Error);
-    expect(error.reason).toBe('player');
+    expect(error.reason).toBe('placement');
   });
 });

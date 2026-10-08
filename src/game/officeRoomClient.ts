@@ -55,6 +55,7 @@ interface RemotePlayer {
   avatarId?: unknown;
   /** '' standing, absent from an older server; `seatIdOf` reads both as no seat. */
   seat?: unknown;
+  positionRevision?: number;
 }
 
 /** Active recording of a space, as synced (#5). Keyed by spaceId. */
@@ -144,6 +145,8 @@ function asAccessDenied(error: unknown): unknown {
 }
 
 export interface OfficeRoomHandlers {
+  /** A terrain relocation, not an ordinary prediction echo. */
+  onPositionReset?(snapshot: RemotePlayerSnapshot): void;
   onAdd(snapshot: RemotePlayerSnapshot): void;
   onChange(snapshot: RemotePlayerSnapshot): void;
   onRemove(sessionId: string): void;
@@ -299,6 +302,7 @@ function toSnapshot(sessionId: string, player: RemotePlayer): RemotePlayerSnapsh
     spacesVersion: player.spacesVersion,
     avatarId: characterIdOf(player.avatarId),
     seat: seatIdOf(player.seat),
+    positionRevision: player.positionRevision ?? 0,
   };
 }
 
@@ -341,6 +345,7 @@ export async function connectOfficeRoom({
    */
   let disposed = false;
   let ownPositionReady = false;
+  let positionRevision = 0;
 
   /**
    * Cablea una sala -- la del join o la de un reconnect -- con todo lo que este
@@ -371,6 +376,7 @@ export async function connectOfficeRoom({
       handlers.onAdd(snapshot);
       if (own && !initialized) {
         initialized = true;
+        positionRevision = snapshot.positionRevision ?? 0;
         handlers.onLocalPosition?.(snapshot);
         ownPositionReady = true;
         if (recovering) handlers.onConnectionState?.('connected');
@@ -384,6 +390,12 @@ export async function connectOfficeRoom({
       $(player).onChange(() => {
         if (disposed || target !== room) return;
         const changed = toSnapshot(sessionId, player);
+        if (own && changed.positionRevision !== positionRevision) {
+          // Never relabel a queued prediction as a post-reset move.
+          throttle.dispose();
+          positionRevision = changed.positionRevision ?? 0;
+          handlers.onPositionReset?.(changed);
+        }
         handlers.onChange(changed);
         if (own && changed.avatarId !== lastAvatarId) handlers.onLocalAvatar?.(changed.avatarId);
         if (own && changed.seat !== lastSeat) handlers.onLocalSeat?.(changed.seat);
@@ -551,7 +563,7 @@ export async function connectOfficeRoom({
 
   const newMoveThrottle = () => createMoveThrottle({
     intervalMs: moveIntervalMs,
-    send: (move) => { if (!disposed && ownPositionReady) room.send('move', move); },
+    send: (move) => { if (!disposed && ownPositionReady) room.send('move', { ...move, positionRevision }); },
   });
   let throttle = newMoveThrottle();
 
@@ -604,7 +616,7 @@ export async function connectOfficeRoom({
       room.send('callrespond', { from, accept });
     },
     sendSit(seat) {
-      room.send('sit', { seat });
+      if (!disposed && ownPositionReady) room.send('sit', { seat, positionRevision });
     },
     sendStand() {
       room.send('stand', {});

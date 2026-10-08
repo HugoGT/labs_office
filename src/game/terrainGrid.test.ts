@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { BUILT_IN_SPACES, MAP_H, MAP_W, TILE } from './mapData';
-import { BASE_COLLISION_RECTS } from './officeCollisions';
-import { BASE_TERRAIN, isTileWalkable } from './officeLayout';
+import { MAP_H, MAP_W, TILE } from './mapData';
+import { LEGACY_SPACES as BUILT_IN_SPACES, LEGACY_COLLISIONS as BASE_COLLISION_RECTS, LEGACY_TERRAIN as BASE_TERRAIN, LEGACY_SEATS as BASE_MAP_SEATS } from '../test/legacyOffice';
+import { buildLegacyTerrainGrid as buildTerrainGrid } from '../test/legacyTerrainGrid';
+import { isTileWalkable } from './officeLayout';
 import { isPositionBlocked } from './pieceCollisions';
-import { BASE_MAP_SEATS } from './seating';
 import { audiblePeers, type AudibleInput, type AudioPeer } from './proximityAudio';
 import {
   ADJACENT_OFFSETS,
-  buildTerrainGrid,
   findFreeAdjacentTile,
   findWalkDestination,
   isBlocked,
@@ -188,7 +187,7 @@ describe('isBlocked', () => {
     for (let ty = 0; ty < MAP_H; ty++) {
       for (let tx = 0; tx < MAP_W; tx++) {
         // A body centered on the tile, as the room judges a move.
-        const position = { x: tx * TILE + 32, y: ty * TILE + 25 };
+        const position = { x: tx * TILE + 16, y: ty * TILE + 5 };
         const walkable = isTileWalkable(BASE_TERRAIN, tx, ty) && !isPositionBlocked(BASE_COLLISION_RECTS, position.x, position.y);
         if (isBlocked(grid, tx, ty) === walkable) {
           throw new Error(`tile (${tx}, ${ty}) disagrees with isTileWalkable`);

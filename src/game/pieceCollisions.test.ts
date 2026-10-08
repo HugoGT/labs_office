@@ -46,7 +46,7 @@ function prop(overrides: Partial<LayoutProp> & Pick<LayoutProp, 'piece' | 'kind'
 const NO_EDITS = new Map<string, readonly CollisionRect[]>();
 
 describe('pieceCollisions: shared constants', () => {
-  it('restates the tile, the avatar body center and the plant frame, since it cannot import them', () => {
+  it('shares the avatar body center and pins the tile and plant frame', () => {
     expect(COLLISION_TILE).toBe(TILE);
     expect(COLLISION_BODY_CENTER_OFFSET).toEqual(AVATAR_BODY_CENTER_OFFSET);
     expect(DECOR_PLANT_FRAME).toEqual({ width: PLANT.frame.width, height: PLANT.frame.height, anchor: PLANT.anchor });
@@ -217,11 +217,11 @@ describe('pieceCollisions: the world', () => {
 
   it('blocks a position whose body center falls inside a rectangle, half open like tiles', () => {
     const world = collisionWorld(instances, NO_EDITS);
-    // Body center = position + (-16, -9).
-    expect(isPositionBlocked(world, 64 + 16, 64 + 9)).toBe(true);
-    expect(isPositionBlocked(world, 95 + 16, 95 + 9)).toBe(true);
-    expect(isPositionBlocked(world, 96 + 16, 64 + 9)).toBe(false);
-    expect(isPositionBlocked(world, 63 + 16, 64 + 9)).toBe(false);
+    // Body center = position + (0, 11); the server deliberately checks only this point.
+    expect(isPositionBlocked(world, 64, 64 - 11)).toBe(true);
+    expect(isPositionBlocked(world, 95, 95 - 11)).toBe(true);
+    expect(isPositionBlocked(world, 96, 64 - 11)).toBe(false);
+    expect(isPositionBlocked(world, 63, 64 - 11)).toBe(false);
     expect(isPositionBlocked(world, Number.NaN, 0)).toBe(true);
   });
 
@@ -234,7 +234,7 @@ describe('pieceCollisions: the world', () => {
     }
     for (let y = 20; y < 60 * 32; y += 7) {
       for (let x = 20; x < 64 * 32; x += 13) {
-        const tile = Math.floor((y - 9) / 32) * BASE_LAYOUT.width + Math.floor((x - 16) / 32);
+        const tile = Math.floor((y + 11) / 32) * BASE_LAYOUT.width + Math.floor(x / 32);
         expect(isPositionBlocked(world, x, y), `${x},${y}`).toBe(solid.has(tile));
       }
     }

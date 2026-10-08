@@ -89,8 +89,14 @@ describe('deskCollisionPlacements', () => {
 });
 
 describe('trapsPlayer', () => {
-  // A position whose Arcade body is (x - 27, y - 16) 22x14.
-  const player = { x: 127, y: 116 };
+  // Ground feet (109, 114), with an 18x14 footprint at (100, 100).
+  const player = { x: 109, y: 96 };
+
+  it('protects the feet footprint, not the old torso-offset box, including edge-only overlap', () => {
+    expect(trapsPlayer([], [{ x: 91, y: 217, w: 1, h: 1 }], [{ x: 100, y: 200 }])).toBe(true);
+    expect(trapsPlayer([], [{ x: 73, y: 184, w: 1, h: 1 }], [{ x: 100, y: 200 }])).toBe(false);
+    expect(trapsPlayer([], [{ x: 109, y: 204, w: 1, h: 1 }], [{ x: 100, y: 200 }])).toBe(false);
+  });
 
   it('names a player whose body a new rectangle would overlap', () => {
     expect(trapsPlayer([], [{ x: 110, y: 105, w: 4, h: 4 }], [player])).toBe(true);

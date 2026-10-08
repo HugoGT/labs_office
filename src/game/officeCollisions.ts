@@ -6,7 +6,7 @@
  */
 
 import type { OfficeDesk } from './desksPort';
-import { BASE_LAYOUT } from './officeLayout';
+import { BASE_LAYOUT, type OfficeLayout } from './officeLayout';
 import {
   collisionWorld,
   deskInstances,
@@ -16,7 +16,7 @@ import {
   type CollisionInstance,
   type CollisionRect,
 } from './pieceCollisions';
-import { BASE_MAP_SEATS } from './seating';
+import { BASE_MAP_SEATS, type MapSeat } from './seating';
 
 export const STATIC_COLLISION_INSTANCES: readonly CollisionInstance[] = staticCollisionInstances(BASE_LAYOUT.props, BASE_MAP_SEATS);
 /** The static office with every piece at its default: the tiles props always blocked. */
@@ -38,6 +38,6 @@ export function officeDeskPlacements(desks: readonly OfficeDesk[]): CollisionDes
   }));
 }
 
-export function officeCollisionInstances(desks: readonly OfficeDesk[]): CollisionInstance[] {
-  return [...STATIC_COLLISION_INSTANCES, ...deskInstances(officeDeskPlacements(desks))];
+export function officeCollisionInstances(desks: readonly OfficeDesk[], layout: OfficeLayout = BASE_LAYOUT, seats: readonly MapSeat[] = BASE_MAP_SEATS): CollisionInstance[] {
+  return [...staticCollisionInstances(layout.props, seats), ...deskInstances(officeDeskPlacements(desks))];
 }

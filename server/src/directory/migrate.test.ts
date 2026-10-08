@@ -273,9 +273,9 @@ describe('schema.sql: las cuatro tablas de PRD-7 (#7)', () => {
     expect(enLinea!.slice(1)).toEqual(refrescado!.slice(1));
   });
 
-  it('siembra los dos espacios de siempre de forma idempotente', () => {
-    expect(schema).toContain('insert into spaces (id, slug, name, x, y, w, h) values');
-    expect(schema).toContain('on conflict (id) do nothing');
+  it('does not seed legacy rooms or reset existing placements', () => {
+    expect(schema).not.toContain('insert into spaces (id, slug, name, x, y, w, h) values');
+    expect(schema).not.toMatch(/delete from spaces|truncate spaces|update spaces set/);
   });
 
   it('NO pide ninguna extension nueva para las cuatro tablas de PRD-7', () => {

@@ -8,9 +8,8 @@
  * between them never strands anyone or anything; drying water frees tiles.
  */
 
-import { physicalBodyRect } from '../../../src/game/avatarGeometry.ts';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
-import { LAYOUT_TILE, isLayoutMaterial, type LayoutMaterial, type OfficeLayout } from '../../../src/game/officeLayout.ts';
+import { isLayoutMaterial, type LayoutMaterial, type OfficeLayout } from '../../../src/game/officeLayout.ts';
 import type { MapSeat } from '../../../src/game/seating.ts';
 
 /** The edit was malformed: an index off the map or an unknown material (400). */
@@ -22,11 +21,10 @@ export class InvalidTerrainEditError extends Error {
 }
 
 /**
- * What water would land on. `placement` lasts (a room, a desk, a chair, the
- * spawn): the admin picks another block. `player` passes: it is allowed once
- * that person walks away. Two reasons because they are fixed differently.
+ * Placements and the final safe spawn cannot be flooded. Players are relocated
+ * by the room after the accepted snapshot is published, never a write veto.
  */
-export type WaterConflict = 'placement' | 'player';
+export type WaterConflict = 'placement';
 
 export class TerrainProtectedError extends Error {
   // A plain field, not a parameter property: Node's type stripping rejects those.
@@ -44,6 +42,25 @@ export interface TerrainEdit {
   material: LayoutMaterial;
 }
 
+export class TerrainStaleError extends Error {}
+
+export function parseTerrainBatch(body: unknown, count: number): { edits: TerrainEdit[]; expected: string } {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new InvalidTerrainEditError('invalid batch');
+  const { edits, expected } = body as Record<string, unknown>;
+  if (!Array.isArray(edits) || edits.length < 1 || edits.length > count || typeof expected !== 'string' || expected.length > 2000) throw new InvalidTerrainEditError('invalid batch');
+  const seen = new Set<number>();
+  const parsed = edits.map((edit: unknown) => {
+    if (typeof edit !== 'object' || edit === null || Array.isArray(edit)) throw new InvalidTerrainEditError('invalid edit');
+    const { index } = edit as Record<string, unknown>;
+    if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) throw new InvalidTerrainEditError('invalid index');
+    const value = parseTerrainEdit(String(index), edit, count);
+    if (seen.has(index)) throw new InvalidTerrainEditError('duplicate block');
+    seen.add(index);
+    return value;
+  });
+  return { edits: parsed, expected };
+}
+
 /** A rectangle in tiles, like `Space` and `Desk`. */
 export interface TileRect {
   x: number;
@@ -55,8 +72,8 @@ export interface TileRect {
 /**
  * The managed state an edit is checked against, read when the edit is made.
  * `placements` are spaces (rooms and desk cubicles: their decor is placed
- * inside them) and desks; `players` are network positions of the sessions
- * the room holds, those waiting to reconnect included.
+ * inside them) and desks. Player observations never veto an edit; the room
+ * rechecks its current state after persistence, including reserved sessions.
  */
 export interface TerrainProtections {
   placements: readonly TileRect[];
@@ -105,10 +122,7 @@ export function staticProtectedTiles(layout: OfficeLayout, seats: readonly MapSe
 
 /**
  * Why water may not land on `watered` (`newlyWateredTiles`), or `null` if
- * it may. A player counts on every tile their Arcade body touches, not only
- * its center: the client's physics would push the body out of a new water
- * collider it overlaps. A placement is named first, because waiting does not
- * fix it.
+ * it may. Only static or stored placements veto water.
  */
 export function findWaterConflict(
   watered: readonly number[],
@@ -129,13 +143,5 @@ export function findWaterConflict(
 
   if (watered.some((tile) => staticTiles.has(tile)) || protections.placements.some(floods)) return 'placement';
 
-  for (const position of protections.players) {
-    const body = physicalBodyRect(position);
-    const x0 = Math.floor(body.x / LAYOUT_TILE);
-    const y0 = Math.floor(body.y / LAYOUT_TILE);
-    const x1 = Math.floor((body.x + body.width - 1) / LAYOUT_TILE);
-    const y1 = Math.floor((body.y + body.height - 1) / LAYOUT_TILE);
-    if (floods({ x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 })) return 'player';
-  }
   return null;
 }

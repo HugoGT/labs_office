@@ -9,15 +9,17 @@
 import type { Client as ServerClient } from '@colyseus/core';
 import { Client } from 'colyseus.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BUILT_IN_SPACES, PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from '../../src/game/mapData.ts';
+import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from '../../src/game/mapData.ts';
 import { detectSpace } from '../../src/game/proximity.ts';
 import {
   SESSION_REPLACED_CLOSE_CODE,
   SESSION_REVOKED_CLOSE_CODE,
 } from '../../src/game/officeProtocol.ts';
-import { BASE_MAP_SEATS, DESK_SEAT_FACING, deskSeatId, mapSeatId } from '../../src/game/seating.ts';
-import { BASE_LAYOUT, decodeTerrainBlocks } from '../../src/game/officeLayout.ts';
-import { createOfficeServer, type OfficeServer } from './createOfficeServer.ts';
+import { DESK_SEAT_FACING, deskSeatId, mapSeatId } from '../../src/game/seating.ts';
+import { decodeTerrainBlocks } from '../../src/game/officeLayout.ts';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SPACES as BUILT_IN_SPACES } from '../../src/test/legacyOffice.ts';
+import { createOfficeServer as createServer, type OfficeServer, type OfficeServerOverrides } from './createOfficeServer.ts';
+const createOfficeServer = (overrides: OfficeServerOverrides = {}) => createServer({ layout: BASE_LAYOUT, seats: BASE_MAP_SEATS, ...overrides });
 import { createMemoryDesks } from './desks/memoryDesks.ts';
 import {
   DEFAULT_NAME,
@@ -172,8 +174,8 @@ describe('OfficeRoom: movimiento', () => {
  * the same tiles the client's physics never lets the avatar into.
  */
 describe('OfficeRoom: walkable terrain', () => {
-  /** A network position whose body center (x - 16, y - 9) is the middle of tile (tx, ty). */
-  const onTile = (tx: number, ty: number) => ({ x: tx * TILE + 32, y: ty * TILE + 25, facing: 'down' });
+  /** A network position whose feet-aligned body center is the middle of tile (tx, ty). */
+  const onTile = (tx: number, ty: number) => ({ x: tx * TILE + 16, y: ty * TILE + 5, facing: 'down' });
 
   /** A status sent after the moves: once it lands, the moves before it were handled. */
   async function settle(room: Awaited<ReturnType<typeof join>>) {
@@ -252,16 +254,21 @@ describe('OfficeRoom: walkable terrain', () => {
     room.send('sit', { seat: mapSeatId(index) });
     await waitFor(() => room.state.players.get(room.sessionId)?.seat === mapSeatId(index));
 
-    // Feet on the chair ground, as the client puts them: the body center falls on the table.
+    // Feet on the chair ground, as the client puts them.
     const onChair = { x: (53 + 0.5) * TILE, y: (11 + 0.5) * TILE - 18, facing: 'up' };
     room.send('move', onChair);
     await waitFor(() => room.state.players.get(room.sessionId)?.y === onChair.y);
 
+    // Still in seat reach, but the aligned body center now crosses onto the table.
+    const overTable = { ...onChair, y: onChair.y - 10 };
+    room.send('move', overTable);
+    await waitFor(() => room.state.players.get(room.sessionId)?.y === overTable.y);
+
     room.send('stand', {});
     await waitFor(() => room.state.players.get(room.sessionId)?.seat === '');
-    room.send('move', { ...onChair, y: onChair.y - 1 });
+    room.send('move', { ...overTable, y: overTable.y - 1 });
     await settle(room);
-    expect(room.state.players.get(room.sessionId)?.y).toBe(onChair.y);
+    expect(room.state.players.get(room.sessionId)?.y).toBe(overTable.y);
   });
 });
 
@@ -273,7 +280,7 @@ describe('OfficeRoom: walkable terrain', () => {
 describe('OfficeRoom: edited terrain', () => {
   const LAWN = 35;
   const LAKE = 94;
-  const onTile = (tx: number, ty: number) => ({ x: tx * TILE + 32, y: ty * TILE + 25, facing: 'down' });
+  const onTile = (tx: number, ty: number) => ({ x: tx * TILE + 16, y: ty * TILE + 5, facing: 'down' });
   const nobody = async () => ({ placements: [], players: [] });
   const blocksOf = (room: Awaited<ReturnType<typeof join>>) =>
     decodeTerrainBlocks(room.state.terrainBlocks, BASE_LAYOUT.blocks.length);
@@ -339,7 +346,7 @@ describe('OfficeRoom: edited terrain', () => {
  * change, never against the database.
  */
 describe('OfficeRoom: piece collisions', () => {
-  const onTile = (tx: number, ty: number) => ({ x: tx * TILE + 32, y: ty * TILE + 25, facing: 'down' });
+  const onTile = (tx: number, ty: number) => ({ x: tx * TILE + 16, y: ty * TILE + 5, facing: 'down' });
   const tableOf = (room: Awaited<ReturnType<typeof join>>) => decodeCollisionTable(room.state.pieceCollisions);
   const DESK = ART_PACK_DEFAULTS.desk;
 
@@ -354,6 +361,23 @@ describe('OfficeRoom: piece collisions', () => {
     const desks = createMemoryDesks({ seed: [{ id: 'desk-a', label: 'Mesa A', x: 21, y: 50, occupantId: null, createdAt: at, updatedAt: at }] });
     server = createOfficeServer({ desks, collisions: createMemoryCollisions([['tree-oak', []]]) });
     endpoint = `ws://localhost:${await server.listen(0)}`;
+  });
+
+  it('checks the feet-aligned center while still allowing full-body edge overlap', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+    // The desk pivot is (720, 1648); the saved small rectangle is deliberately asymmetric.
+    await server.collisions.setRects({ pieceId: DESK, rects: [{ x: 1, y: -12, w: 9, h: 11 }], actorId: null }, () => []);
+    const edgeOverlap = { x: 720, y: 1628, facing: 'down' };
+    room.send('move', edgeOverlap);
+    await waitFor(() => room.state.players.get(room.sessionId)?.y === edgeOverlap.y);
+    expect(server.sessions.positionOf(room.sessionId)).toEqual({ x: 720, y: 1628 });
+
+    // Center (724, 1639) is inside; the old offset center (708, 1619) was not.
+    room.send('move', { x: 724, y: 1628, facing: 'left' });
+    await settle(room);
+    expect(room.state.players.get(room.sessionId)).toMatchObject(edgeOverlap);
+    expect(server.sessions.positionOf(room.sessionId)).toEqual({ x: 720, y: 1628 });
   });
 
   it('replicates the saved table to whoever joins, and an edit to whoever is inside', async () => {

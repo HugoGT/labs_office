@@ -5,8 +5,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
 import type { CharacterContainer } from './characters';
 import {
-  BUILT_IN_SPACES,
-  BUILT_IN_SPACES_VERSION,
   PLAYER_SPAWN_TX,
   PLAYER_SPAWN_TY,
   TILE,
@@ -15,7 +13,9 @@ import {
   ZONE_LABELS,
 } from './mapData';
 import { TERRAIN_LAYER_COUNT } from './artContract';
-import { BASE_LAYOUT, terrainSnapshot, withBlock, type OfficeLayout } from './officeLayout';
+import { terrainSnapshot, withBlock, type OfficeLayout } from './officeLayout';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SPACES as BUILT_IN_SPACES } from '../test/legacyOffice';
+const BUILT_IN_SPACES_VERSION = 'a489c5da5efd7c68';
 import {
   DESK_ZONE_DEPTH,
   MINIMAP_MARKER_DEPTH,
@@ -24,7 +24,8 @@ import {
   worldAssetDepth,
 } from './depthLayers';
 import { feetOf, physicalBodyRect } from './avatarGeometry';
-import { BASE_MAP_SEATS, deskSeatId, mapSeatId } from './seating';
+import { BODY_CENTER_OFFSET, positionForBodyTile } from './pathfinding';
+import { deskSeatId, mapSeatId } from './seating';
 import { deskFurnitureName, deskZoneName } from './deskLayout';
 import { artSheetKey, recoloredSheetKey } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
@@ -137,7 +138,14 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     const rect = { x: sx > 0 ? 350 : 649, y: sy > 0 ? 375 : 624, w: 1, h: 1 };
     movement.collisionRects = [rect];
     movement.buildPieceColliders();
-    const start = { x: sx > 0 ? 300 : 732, y: sy > 0 ? 299.8 : 718.2 };
+    const footprint = physicalBodyRect({ x: 0, y: 0 });
+    const gapX = 55;
+    // Keep the continuous corner overlap below one pixel of travel for either footprint width.
+    const gapY = gapX + footprint.width + 0.2;
+    const start = {
+      x: (sx > 0 ? rect.x - gapX - footprint.width : rect.x + rect.w + gapX) - footprint.x,
+      y: (sy > 0 ? rect.y - gapY - footprint.height : rect.y + rect.h + gapY) - footprint.y,
+    };
     body.reset(start.x, start.y);
     movement.walkingMs = 8000;
     movement.cursors.right.isDown = sx > 0;
@@ -314,6 +322,41 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
 });
 
 describe('waypoint walking around obstacles (double-click-pathfinding)', () => {
+  it('authoritative reset cancels prediction, seat, keys and click pair without adopting ordinary echoes', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    const { body, movement, player } = arena;
+    arena.doubleClick(1000, 300);
+    movement.cursors.right.isDown = true;
+    arena.frame();
+    arena.click(1100, 300);
+    const target = remoteSnapshot({ x: 500, y: 600, seat: null });
+    const handlers = connector.handlers()!;
+    handlers.onPositionReset?.(target);
+    expect({ x: player.x, y: player.y }).toEqual({ x: target.x, y: target.y });
+    expect({ x: body.x, y: body.y, width: body.width, height: body.height }).toEqual(physicalBodyRect(target));
+    expect(body.velocity.length()).toBe(0);
+    expect(movement.autoWalk).toBeUndefined();
+    expect(movement.cursors.right.isDown).toBe(false);
+    arena.click(1100, 300);
+    expect(movement.autoWalk).toBeUndefined();
+    handlers.onChange(remoteSnapshot({ x: 800, y: 800 }));
+    expect({ x: player.x, y: player.y }).toEqual({ x: target.x, y: target.y });
+    const voices: OfficeEventMap['voice'][] = [];
+    arena.bridge.on('voice', (voice) => voices.push(voice));
+    handlers.onResync?.();
+    handlers.onLocalPosition?.(remoteSnapshot({ x: 52 * TILE, y: 4 * TILE, seat: mapSeatId(0) }));
+    arena.walk(300);
+    expect(voices.at(-1)?.spaceId).toBe(BUILT_IN_SPACES[0]!.id);
+    expect(player.seatFacing).not.toBeNull();
+    expect(body.checkCollision.none).toBe(true);
+    handlers.onPositionReset?.(target);
+    expect(voices.at(-1)?.spaceId).toBeNull();
+    expect(player.seatFacing).toBeNull();
+    expect(body.checkCollision.none).toBe(false);
+    expect({ x: body.x, y: body.y, width: body.width, height: body.height }).toEqual(physicalBodyRect(target));
+  });
+
   type Arena = Awaited<ReturnType<typeof movementArena>>;
   const SEAT = BASE_MAP_SEATS[0]!;
 
@@ -385,7 +428,8 @@ describe('waypoint walking around obstacles (double-click-pathfinding)', () => {
     const solid = movement.grid.solid as boolean[][];
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx !== 0 || dy !== 0) solid[40 + dy]![60 + dx] = true;
 
-    arena.doubleClick(60 * TILE + 16, 40 * TILE + 16);
+    const goal = positionForBodyTile({ tx: 60, ty: 40 });
+    arena.doubleClick(goal.x, goal.y);
     arena.walk(200);
 
     expect(movement.autoWalk).toBeUndefined();
@@ -410,12 +454,12 @@ describe('waypoint walking around obstacles (double-click-pathfinding)', () => {
   it('the goal is validated on its body tile: a click whose position tile is free but whose body tile is blocked does nothing', async () => {
     const arena = await movementArena();
     const { movement } = arena;
-    // Both points sit in position-tile row 1 (free), but the body center (y - 9) of the
-    // first falls in row 0 (blocked) and the second's in row 1.
-    arena.doubleClick(1000, 40);
+    // The body center crosses the blocked row boundary before the position.
+    const edge = TILE - BODY_CENTER_OFFSET.y;
+    arena.doubleClick(1000, edge - 0.01);
     expect(movement.autoWalk).toBeUndefined();
-    arena.doubleClick(1000, 41);
-    expect(movement.autoWalk?.goal).toEqual({ x: 1000, y: 41 });
+    arena.doubleClick(1000, edge);
+    expect(movement.autoWalk?.goal).toEqual({ x: 1000, y: edge });
   });
 
   it('walkToPeer detours a wall and lands on the same approach tile as before (R6)', async () => {
@@ -703,7 +747,7 @@ async function bootOfficeScene(
     // suspend/resume promises on AudioContexts that teardown then closes.
     audio: { noAudio: true },
     physics: { default: 'arcade' },
-    scene: [new OfficeScene(bridge, options)],
+    scene: [new OfficeScene(bridge, { layout: BASE_LAYOUT, seats: BASE_MAP_SEATS, fallbackSpaces: { spaces: BUILT_IN_SPACES, version: BUILT_IN_SPACES_VERSION }, ...options })],
   });
   games.push(game);
 
@@ -1316,6 +1360,41 @@ function findRemoteAvatars(scene: Phaser.Scene): CharacterContainer[] {
 }
 
 describe('OfficeScene: authoritative initial position (#148)', () => {
+  it('keeps the latest authoritative reset while initial connection completion is delayed', async () => {
+    const connector = fakeConnector('yo', false);
+    let finish!: () => void;
+    const bridge = createOfficeBridge();
+    const voices = vi.fn();
+    bridge.on('voice', voices);
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake', artManifestUrl: null, artUploadsUrl: null,
+      connect: (options) => connector.connect(options).then((connection) => new Promise((resolve) => { finish = () => resolve(connection); })),
+    });
+    await vi.waitFor(() => expect(finish).toBeDefined(), LOOP_WAIT);
+    const handlers = connector.handlers()!;
+    const latest = remoteSnapshot({ sessionId: 'yo', x: 67 * TILE + 16, y: 49 * TILE + 16, positionRevision: 2 });
+    handlers.onPositionReset?.(remoteSnapshot({ ...latest, x: latest.x - TILE, positionRevision: 1 }));
+    handlers.onPositionReset?.(latest);
+    handlers.onLocalPosition?.(remoteSnapshot({ sessionId: 'yo', x: 300, y: 400 }));
+    finish();
+    await vi.waitFor(() => expect(findPlayer(scene).x).toBe(latest.x), LOOP_WAIT);
+    expect(findPlayer(scene).y).toBe(latest.y);
+    expect(voices).toHaveBeenCalled();
+  });
+
+  it('publishes a served spaces version that arrives while the initial join is in flight', async () => {
+    const connector = fakeConnector();
+    let finish!: () => void;
+    const { bridge } = await bootOfficeScene(createOfficeBridge(), {
+      endpoint: 'ws://fake', artManifestUrl: null, artUploadsUrl: null,
+      connect: (options) => connector.connect(options).then((connection) => new Promise((resolve) => { finish = () => resolve(connection); })),
+    });
+    await vi.waitFor(() => expect(finish).toBeDefined(), LOOP_WAIT);
+    bridge.emitCommand('spacesconfig', { spaces: [], version: 'served-while-joining' });
+    expect(connector.sentSpacesVersions).toEqual([]);
+    finish();
+    await vi.waitFor(() => expect(connector.sentSpacesVersions).toEqual(['served-while-joining']), LOOP_WAIT);
+  });
   const restored = () => remoteSnapshot({ sessionId: 'yo', x: 300.5, y: 400.25, facing: 'left' });
   async function boot() {
     const connector = fakeConnector('yo', false);
@@ -2214,6 +2293,7 @@ describe('OfficeScene: auto-caminata al aceptar una llamada (issue #2, D9/D10)',
       await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
       const player = findPlayer(scene);
       // Zona abierta del cesped, lejos del jugador y de cualquier colisionador.
+      (player.body as Phaser.Physics.Arcade.Body).reset(22 * TILE + 16, 28 * TILE + 16);
       const peerX = 30 * TILE;
       const peerY = 30 * TILE;
       connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'peer-1', x: peerX, y: peerY }));
@@ -2351,6 +2431,7 @@ describe('OfficeScene: auto-caminata al aceptar una llamada (issue #2, D9/D10)',
       const player = findPlayer(scene);
 
       // Cubiculo 3x3 en cesped abierto, lejos de cualquier colisionador del
+      (player.body as Phaser.Physics.Arcade.Body).reset(22 * TILE + 16, 28 * TILE + 16);
       // mapa base (mismas tiles que `terrainGrid.test.ts`).
       const rect = { x0: 30, y0: 30, x1: 32, y1: 32 };
       const cubiculo = {
@@ -3798,6 +3879,24 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
  * repaints.
  */
 describe('OfficeScene: edited terrain', () => {
+  it('renders the empty production default and a full procedural preview without changing walkability until replication', async () => {
+    const { BASE_LAYOUT: empty } = await import('./officeLayout');
+    const connector = fakeConnector();
+    const { scene, bridge } = await bootOfficeScene(createOfficeBridge(), { layout: empty, seats: [], endpoint: 'ws://test', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const before = terrainTilesAt(scene, 58, 49);
+    const draft = withBlock(empty.blocks, 76, 'wood');
+    const point = { x: 58 * TILE + 16, y: 49 * TILE + 16 };
+    expect(solidAt(scene, point.x, point.y)).toBe(true);
+    bridge.emitCommand('terrainedit', { selected: null, preview: null, previewBlocks: draft });
+    expect(terrainTilesAt(scene, 58, 49)).not.toEqual(before);
+    expect(solidAt(scene, point.x, point.y)).toBe(true);
+    bridge.emitCommand('terrainedit', null);
+    expect(terrainTilesAt(scene, 58, 49)).toEqual(before);
+    connector.handlers()!.onTerrain!(draft);
+    await vi.waitFor(() => expect(solidAt(scene, point.x, point.y)).toBe(false), LOOP_WAIT);
+    expect(terrainTilesAt(scene, 58, 49)).not.toEqual(before);
+  });
   const LAWN = 35;
   /** The middle of the lawn block: its own material whatever the borders do. */
   const lawn = { x: 67 * TILE + 16, y: 22 * TILE + 16 };
@@ -4081,8 +4180,8 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
   });
 
   it.each([
-    { zoom: 1, tile: { tx: 24, ty: 30 } },
-    { zoom: 3, tile: { tx: 23, ty: 29 } },
+    { zoom: 1, tile: { tx: 69, ty: 51 } },
+    { zoom: 3, tile: { tx: 68, ty: 50 } },
   ])('double-click-to-walk at $zoom targets the world tile under the pointer', async ({ zoom, tile }) => {
     const { scene } = await zoomScene(memoryStore(zoom));
     frames(scene, 3);

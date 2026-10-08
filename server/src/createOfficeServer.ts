@@ -17,9 +17,9 @@ import { WebSocketTransport } from '@colyseus/ws-transport';
 import express from 'express';
 import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { BASE_LAYOUT } from '../../src/game/officeLayout.ts';
+import { BASE_LAYOUT, type OfficeLayout } from '../../src/game/officeLayout.ts';
 import { BASE_CHAIR_PIECE } from '../../src/game/pieceCollisions.ts';
-import { BASE_MAP_SEATS } from '../../src/game/seating.ts';
+import { BASE_MAP_SEATS, type MapSeat } from '../../src/game/seating.ts';
 import { livekitRoomFor } from '../../src/game/officeProtocol.ts';
 import {
   handleAdminSession,
@@ -108,7 +108,7 @@ import { recordingStorageFromEnv, type RecordingStoragePort } from './recording/
 import { createRecordingSpaceSnapshot } from './recording/recordingSpaceSnapshot.ts';
 import { guardSessionRequest, sessionIsInSpace } from './sessionGuard.ts';
 import type { TerrainStore } from './terrain/terrainPort.ts';
-import { handleSetTerrainBlock, type TerrainDeps } from './terrain/terrainRoutes.ts';
+import { handleSetTerrainBlock, handleSetTerrainBlocks, type TerrainDeps } from './terrain/terrainRoutes.ts';
 import type { TerrainProtections } from './terrain/terrainRules.ts';
 import { createTerrainRuntime, type TerrainRuntime } from './terrain/terrainRuntime.ts';
 import type { CollisionStore } from './collisions/collisionPort.ts';
@@ -278,6 +278,9 @@ function authVerifierFromEnv(env: { FIREBASE_PROJECT_ID?: string }): IdTokenVeri
 }
 
 export interface OfficeServerOverrides {
+  /** Explicit layouts keep integration fixtures independent of the shipped default. */
+  layout?: OfficeLayout;
+  seats?: readonly MapSeat[];
   /**
    * Sustituye el verificador que saldria de `process.env`. `null` fuerza el
    * modo sin auth. Existe para los tests: `process.env` es estado global del
@@ -440,6 +443,8 @@ export function warnIfOriginsUnrestricted(
 
 export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeServer {
   const app = express();
+  const layout = overrides?.layout ?? BASE_LAYOUT;
+  const seats = overrides?.seats ?? BASE_MAP_SEATS;
 
   // El SPA y este servidor corren en origenes distintos (D5: puerto 2599
   // fijo para el servidor, el preview/dev del cliente en cualquier otro).
@@ -615,7 +620,8 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   // `listen`, after the schema exists (#123 phase 2). The room reads its
   // snapshot on every move; the store is only touched at load and per edit.
   const terrain = createTerrainRuntime({
-    layout: BASE_LAYOUT,
+    layout,
+    seats,
     store: overrides?.terrain !== undefined ? (overrides.terrain ?? undefined) : envRuntime?.terrain,
   });
 
@@ -624,8 +630,8 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   // rectangles on every move; the stores are read at load, per edit and when
   // a desk or its decor changes.
   const collisions = createCollisionRuntime({
-    layout: BASE_LAYOUT,
-    seats: BASE_MAP_SEATS,
+    layout,
+    seats,
     store: overrides?.collisions !== undefined ? (overrides.collisions ?? undefined) : envRuntime?.collisions,
     listDesks: desks ? async () => deskCollisionPlacements(await desks.listOfficeDesks()) : undefined,
   });
@@ -1188,9 +1194,10 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     };
   }
 
-  // One block per request, POST for the same CORS reason as the other admin
+  // Single-block painting and atomic batches, POST like the other admin
   // writes. Under `/admin/*`, so Caddy already proxies it. Clients see the
   // result through the room state, not through this response.
+  app.post('/admin/terrain/blocks', terrainRoute((req, deps) => handleSetTerrainBlocks(req.header('Authorization'), req.body, deps)));
   app.post(
     '/admin/terrain/blocks/:index',
     terrainRoute((req, deps) =>
@@ -1199,7 +1206,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   );
 
   /** Whether the office knows a piece: the art catalog, the layout or the base chairs. */
-  const staticPieces = new Set([...BASE_LAYOUT.props.map((prop) => prop.piece), BASE_CHAIR_PIECE]);
+  const staticPieces = new Set([...layout.props.map((prop) => prop.piece), BASE_CHAIR_PIECE]);
   async function pieceExists(pieceId: string): Promise<boolean> {
     if (staticPieces.has(pieceId)) return true;
     const pieces = (await decor?.listArtPieces({ includeRetired: true })) ?? [];
@@ -1289,6 +1296,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   // con el verificador (#8): la sala no lee `process.env`. Y lo mismo con la
   // ventana de reconexion (#52), que ademas los tests acortan.
   gameServer.define(OFFICE_ROOM_NAME, OfficeRoom, {
+    seats,
     sessions,
     auth,
     directory,

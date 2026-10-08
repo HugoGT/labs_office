@@ -12,6 +12,8 @@
 
 import {
   blockCount,
+  blockIndexAt,
+  encodeTerrainBlocks,
   newlyWateredTiles,
   terrainSnapshot,
   withBlock,
@@ -19,10 +21,13 @@ import {
   type OfficeLayout,
   type TerrainSnapshot,
 } from '../../../src/game/officeLayout.ts';
-import { BASE_MAP_SEATS } from '../../../src/game/seating.ts';
+import { BASE_MAP_SEATS, type MapSeat } from '../../../src/game/seating.ts';
+import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
 import type { TerrainStore } from './terrainPort.ts';
 import {
   TerrainProtectedError,
+  TerrainStaleError,
+  parseTerrainBatch,
   findWaterConflict,
   staticProtectedTiles,
   type TerrainEdit,
@@ -44,31 +49,39 @@ export interface TerrainRuntime {
    * the static layout protects.
    */
   setBlock(edit: TerrainEdit & { actorId: string | null }, protections: () => Promise<TerrainProtections>): Promise<readonly LayoutMaterial[]>;
+  setBlocks(edits: readonly TerrainEdit[], actorId: string | null, protections: () => Promise<TerrainProtections>, expected?: string): Promise<readonly LayoutMaterial[]>;
   /** Called after each accepted edit with the whole new block list. */
   subscribe(listener: TerrainListener): () => void;
 }
 
-export function createTerrainRuntime({ layout, store }: { layout: OfficeLayout; store?: TerrainStore }): TerrainRuntime {
-  const staticTiles = staticProtectedTiles(layout, BASE_MAP_SEATS);
+export function createTerrainRuntime({ layout, store, seats = BASE_MAP_SEATS }: { layout: OfficeLayout; store?: TerrainStore; seats?: readonly MapSeat[] }): TerrainRuntime {
+  const spawn = blockIndexAt(layout.width, PLAYER_SPAWN_TX, PLAYER_SPAWN_TY);
+  const staticTiles = staticProtectedTiles(layout, seats);
   const listeners = new Set<TerrainListener>();
   let blocks: readonly LayoutMaterial[] = layout.blocks;
   let snapshot = terrainSnapshot(layout, blocks);
   let queue: Promise<unknown> = Promise.resolve();
 
   async function apply(
-    { index, material, actorId }: TerrainEdit & { actorId: string | null },
+    edits: readonly TerrainEdit[], actorId: string | null,
     protections: () => Promise<TerrainProtections>,
+    expected?: string,
   ): Promise<readonly LayoutMaterial[]> {
     if (!store) throw new Error('no terrain store: the terrain cannot be edited');
-    if (blocks[index] === material) return blocks;
-    const next = withBlock(blocks, index, material);
+    parseTerrainBatch({ edits, expected: expected ?? encodeTerrainBlocks(blocks) }, blocks.length);
+    if (expected !== undefined && expected !== encodeTerrainBlocks(blocks)) throw new TerrainStaleError('terrain changed since preview');
+    if (edits.some(({ index, material }) => index === spawn && material !== 'wood')) throw new TerrainProtectedError('placement');
+    const changed = edits.filter(({ index, material }) => blocks[index] !== material);
+    if (changed.length === 0) return blocks;
+    let next = [...blocks];
+    for (const { index, material } of changed) next = withBlock(next, index, material);
     const nextSnapshot = terrainSnapshot(layout, next);
     const watered = newlyWateredTiles(snapshot, nextSnapshot);
     if (watered.length > 0) {
       const conflict = findWaterConflict(watered, layout.width, staticTiles, await protections());
       if (conflict !== null) throw new TerrainProtectedError(conflict);
     }
-    await store.saveBlock(index, material, actorId);
+    await store.saveBlocks(changed, actorId);
     blocks = next;
     snapshot = nextSnapshot;
     for (const listener of listeners) listener(blocks);
@@ -82,6 +95,8 @@ export function createTerrainRuntime({ layout, store }: { layout: OfficeLayout; 
       const count = blockCount(layout);
       let next = layout.blocks;
       for (const [index, material] of saved) {
+        // Keep the default spawn safe without rewriting incompatible saved rows.
+        if (index === spawn && material !== 'wood') continue;
         if (index >= 0 && index < count) next = withBlock(next, index, material);
       }
       blocks = next;
@@ -91,8 +106,13 @@ export function createTerrainRuntime({ layout, store }: { layout: OfficeLayout; 
     snapshot: () => snapshot,
     editable: store !== undefined,
     setBlock(edit, protections) {
-      const run = queue.then(() => apply(edit, protections));
+      const run = queue.then(() => apply([edit], edit.actorId, protections));
       // The chain must survive a refused or failed edit; the caller still sees it.
+      queue = run.catch(() => undefined);
+      return run;
+    },
+    setBlocks(edits, actorId, protections, expected) {
+      const run = queue.then(() => apply(edits, actorId, protections, expected));
       queue = run.catch(() => undefined);
       return run;
     },

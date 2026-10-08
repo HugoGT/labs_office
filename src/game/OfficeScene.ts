@@ -71,6 +71,7 @@ import {
   withBlock,
   type LayoutMaterial,
   type TerrainSnapshot,
+  type OfficeLayout,
 } from './officeLayout';
 import { BASE_COLLISION_RECTS, STATIC_COLLISION_INSTANCES, officeCollisionInstances } from './officeCollisions';
 import {
@@ -115,6 +116,7 @@ import {
   mapSeatTiles,
   parseSeatRef,
   type SeatTiles,
+  type MapSeat,
 } from './seating';
 import {
   buildTerrainGrid,
@@ -166,6 +168,10 @@ const ART_FALLBACK_ALPHA = 0.6;
  * lo cubren los tests de la capa node contra un servidor de verdad.
  */
 export interface OfficeSceneOptions {
+  /** Injectable static layout and seats for isolated rendering/physics tests. */
+  layout?: OfficeLayout;
+  seats?: readonly MapSeat[];
+  fallbackSpaces?: { spaces: readonly SpaceArea[]; version: string };
   /** The React shell supplies initial desks/spaces before the office can be revealed. */
   waitForOfficeData?: boolean;
   /** `null` desactiva el multijugador: la oficina corre en solitario. */
@@ -249,6 +255,8 @@ function rosterPeerOf(snapshot: { sessionId: string; name: string; status: strin
  * `create()` arranque de forma asincrona.
  */
 export class OfficeScene extends Phaser.Scene {
+  private readonly layout: OfficeLayout;
+  private readonly mapSeats: readonly MapSeat[];
   private readonly bridge: OfficeBridge;
   private grid!: TerrainGrid;
   /** The terrain layers, redrawn in place when the terrain changes (#123 phase 2). */
@@ -257,6 +265,7 @@ export class OfficeScene extends Phaser.Scene {
   private terrainBlocks: readonly LayoutMaterial[] = BASE_LAYOUT.blocks;
   /** The terrain editor's local preview, painted over `terrainBlocks` and never collided with. */
   private terrainPreview: TerrainEditCommand['preview'] = null;
+  private terrainPreviewBlocks: readonly LayoutMaterial[] | null = null;
   /** The static bodies of the terrain grid and their collider, replaced whole on each edit. */
   private terrainColliders?: { rects: Phaser.GameObjects.Rectangle[]; collider: Phaser.Physics.Arcade.Collider };
   /** The terrain of `terrainBlocks`, kept to rebuild `grid` when the collisions change. */
@@ -504,6 +513,14 @@ export class OfficeScene extends Phaser.Scene {
     super(OFFICE_SCENE_KEY);
     this.bridge = bridge;
     this.options = options;
+    this.spaces = options.fallbackSpaces?.spaces ?? BUILT_IN_SPACES;
+    this.spacesVersion = options.fallbackSpaces?.version ?? BUILT_IN_SPACES_VERSION;
+    this.layout = options.layout ?? BASE_LAYOUT;
+    this.mapSeats = options.seats ?? BASE_MAP_SEATS;
+    this.terrainBlocks = this.layout.blocks;
+    this.terrain = terrainSnapshot(this.layout);
+    this.collisionInstances = officeCollisionInstances([], this.layout, this.mapSeats);
+    this.collisionRects = collisionWorld(this.collisionInstances, this.collisionTable);
   }
 
   /**
@@ -528,11 +545,11 @@ export class OfficeScene extends Phaser.Scene {
 
     // The static office is the Tiled layout (art step 8); collisions come from
     // the same walkability rule the room enforces on every `move`.
-    const grid: TerrainGrid = buildTerrainGrid(BASE_TERRAIN, BASE_LAYOUT, this.collisionRects);
+    const grid: TerrainGrid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
     this.grid = grid;
-    this.terrainTilemap = renderTerrain(this, BASE_TERRAIN, BASE_LAYOUT, this.art);
-    placeLayout(this, BASE_LAYOUT, this.art);
-    placeSeats(this, BASE_MAP_SEATS, this.art);
+    this.terrainTilemap = renderTerrain(this, this.terrain, this.layout, this.art);
+    placeLayout(this, this.layout, this.art);
+    placeSeats(this, this.mapSeats, this.art);
     placeZoneLabels(this);
 
     // El nombre de la sesion manda sobre la pildora del avatar local (#6).
@@ -540,8 +557,8 @@ export class OfficeScene extends Phaser.Scene {
     // llama el servidor a quien entra sin identidad verificada.
     this.player = spawnPlayer(this, this.options.playerName ?? DEFAULT_NAME, this.characterSheets(null));
     // Only art the initial office actually draws; an unused broken upload cannot block entry.
-    for (const id of ['tileset-terrain', BASE_MAP_CHAIR, ...BASE_LAYOUT.walls, ...BASE_LAYOUT.hedges,
-      ...BASE_LAYOUT.props.map((prop) => prop.piece)]) {
+    for (const id of ['tileset-terrain', ...(this.mapSeats.length > 0 ? [BASE_MAP_CHAIR] : []), ...this.layout.walls, ...this.layout.hedges,
+      ...this.layout.props.map((prop) => prop.piece)]) {
       if (id !== null) this.entrancePieces.add(id);
     }
     this.game.events.on(Phaser.Core.Events.POST_RENDER, this.checkEntry);
@@ -639,15 +656,19 @@ export class OfficeScene extends Phaser.Scene {
 
     // #123 phase 2. The layer outlines and picks blocks; the scene paints the
     // preview, and hands the editor the live blocks when it opens.
-    this.terrainEditLayer = new TerrainEditLayer(this, this.bridge, BASE_LAYOUT);
+    this.terrainEditLayer = new TerrainEditLayer(this, this.bridge, this.layout);
     this.unsubscribeTerrainEdit = this.bridge.onCommand('terrainedit', (command) => {
       const opening = command !== null && !this.terrainEditing;
       this.terrainEditing = command !== null;
       this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing;
       if (this.layoutEditing) this.resetWalking();
       const preview = command?.preview ?? null;
-      const repaint = encodePreview(preview) !== encodePreview(this.terrainPreview);
+      const previewBlocks = command?.previewBlocks ?? null;
+      const repaint = encodePreview(preview) !== encodePreview(this.terrainPreview) ||
+        (previewBlocks === null ? '' : encodeTerrainBlocks(previewBlocks)) !==
+        (this.terrainPreviewBlocks === null ? '' : encodeTerrainBlocks(this.terrainPreviewBlocks));
       this.terrainPreview = preview;
+      this.terrainPreviewBlocks = previewBlocks;
       if (repaint) this.paintTerrain();
       if (opening) this.bridge.emit('terrain', { blocks: this.terrainBlocks });
     });
@@ -790,6 +811,7 @@ export class OfficeScene extends Phaser.Scene {
     }
 
     const joinedStatus = this.status;
+    const joinedSpacesVersion = this.spacesVersion;
     this.localPositionReady = false;
     this.resetWalking();
 
@@ -801,7 +823,7 @@ export class OfficeScene extends Phaser.Scene {
         // Viaja en el join (#7, D4), no en un mensaje posterior: sin esto este
         // par quedaria "brevemente sin version" para todo el mundo hasta el
         // primer tic de proximidad.
-        spacesVersion: this.spacesVersion,
+        spacesVersion: joinedSpacesVersion,
         getIdToken,
         handlers: {
           onAdd: (snapshot) => {
@@ -851,6 +873,14 @@ export class OfficeScene extends Phaser.Scene {
             this.emitPresence(state);
           },
           onLocalPosition: (snapshot) => { if (current()) this.adoptLocalPosition(snapshot); },
+          onPositionReset: (snapshot) => {
+            if (!current()) return;
+            this.localPositionReady = false;
+            for (const key of [...Object.values(this.cursors), ...Object.values(this.wasd)]) key.reset();
+            this.sitKey?.reset();
+            this.adoptLocalPosition(snapshot);
+            this.proximityTick();
+          },
           onLocalAvatar: (avatarId) => { if (current()) this.adoptLocalAvatar(avatarId); },
           onLocalSeat: (seat) => { if (current()) this.onLocalSeat(seat); },
           onResync: () => { if (current()) this.resyncAfterReconnect(); },
@@ -866,6 +896,9 @@ export class OfficeScene extends Phaser.Scene {
       }
 
       this.connection = connection;
+      // Persisted rooms may differ from the empty fallback and arrive during
+      // the handshake. Reconcile before peers compare versions for audibility.
+      if (this.spacesVersion !== joinedSpacesVersion) connection.sendSpacesVersion(this.spacesVersion);
       // El `await` de arriba dura lo que dure el saludo con el servidor, y
       // `setStatus` no tenia conexion a la que publicar mientras tanto. Sin
       // esta reconciliacion, quien elige "No molestar" durante ese hueco queda
@@ -1001,10 +1034,10 @@ export class OfficeScene extends Phaser.Scene {
    * the last `desks` list. `null` when this client cannot place it.
    */
   private resolveSeat(id: string): ResolvedSeat | null {
-    const ref = parseSeatRef(id);
+    const ref = parseSeatRef(id, this.mapSeats.length);
     if (ref === null) return null;
     if (ref.kind === 'map') {
-      const seat = BASE_MAP_SEATS[ref.index];
+      const seat = this.mapSeats[ref.index];
       return { id, ground: { x: (seat.tx + 0.5) * TILE, y: (seat.ty + 0.5) * TILE }, facing: seat.facing, reach: mapSeatTiles(seat) };
     }
     const desk = this.desks.find((candidate) => candidate.id === ref.deskId);
@@ -1039,7 +1072,7 @@ export class OfficeScene extends Phaser.Scene {
       if (seat) taken.add(seat);
     }
     const candidates: ResolvedSeat[] = [];
-    BASE_MAP_SEATS.forEach((_, index) => {
+    this.mapSeats.forEach((_, index) => {
       const seat = this.resolveSeat(mapSeatId(index));
       if (seat) candidates.push(seat);
     });
@@ -1297,7 +1330,7 @@ export class OfficeScene extends Phaser.Scene {
     this.initialDesks = true;
     this.desks = desks;
     // Desks and their decor collide by their pieces' rectangles, wherever the list puts them.
-    this.collisionInstances = officeCollisionInstances(desks);
+    this.collisionInstances = officeCollisionInstances(desks, this.layout, this.mapSeats);
     this.refreshCollisions();
     for (const object of this.deskObjects.splice(0)) object.destroy();
     for (const desk of desks) this.drawDesk(desk);
@@ -1631,7 +1664,7 @@ export class OfficeScene extends Phaser.Scene {
   private refreshCollisions(): void {
     if (!this.alive || this.player === undefined) return;
     this.collisionRects = collisionWorld(this.collisionInstances, this.collisionTable);
-    this.grid = buildTerrainGrid(this.terrain, BASE_LAYOUT, this.collisionRects);
+    this.grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
     this.buildPieceColliders();
     this.collisionEditLayer?.refresh();
   }
@@ -1654,8 +1687,8 @@ export class OfficeScene extends Phaser.Scene {
     if (!this.alive) return;
     if (encodeTerrainBlocks(blocks) !== encodeTerrainBlocks(this.terrainBlocks)) {
       this.terrainBlocks = blocks;
-      this.terrain = terrainSnapshot(BASE_LAYOUT, blocks);
-      this.grid = buildTerrainGrid(this.terrain, BASE_LAYOUT, this.collisionRects);
+      this.terrain = terrainSnapshot(this.layout, blocks);
+      this.grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
       this.buildTerrainColliders(this.grid);
       this.paintTerrain();
     }
@@ -1665,8 +1698,8 @@ export class OfficeScene extends Phaser.Scene {
   /** Redraws the tilemap from the live blocks, with the editor's preview over them. */
   private paintTerrain(): void {
     const preview = this.terrainPreview;
-    const shown = preview === null ? this.terrainBlocks : withBlock(this.terrainBlocks, preview.index, preview.material);
-    this.terrainTilemap?.refresh(terrainSnapshot(BASE_LAYOUT, shown));
+    const shown = this.terrainPreviewBlocks ?? (preview === null ? this.terrainBlocks : withBlock(this.terrainBlocks, preview.index, preview.material));
+    this.terrainTilemap?.refresh(terrainSnapshot(this.layout, shown));
   }
 
   /** Camara principal siguiendo al jugador + minimapa en la esquina superior derecha (app.js:410-431). */

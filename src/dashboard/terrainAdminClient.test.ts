@@ -26,6 +26,16 @@ async function codeOf(promise: Promise<unknown>): Promise<AdminErrorCode | 'no-e
 }
 
 describe('createTerrainAdminClient', () => {
+  it('sends an authenticated atomic batch and maps stale preview conflicts', async () => {
+    const fetchImpl = fetchWith(200);
+    const edits = [{ index: 0, material: 'grass' as const }];
+    await clientWith(fetchImpl).setBlocks(edits, 'water,wood');
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(url).toBe(`${BASE_URL}/admin/terrain/blocks`);
+    expect(JSON.parse(init?.body as string)).toEqual({ edits, expected: 'water,wood' });
+    expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer id-token');
+    expect(await codeOf(clientWith(fetchWith(409, { error: 'terrain-stale' })).setBlocks(edits, 'old'))).toBe('terrain-stale');
+  });
   it('posts the material of one block, authenticated', async () => {
     const fetchImpl = fetchWith(200, { index: 35, material: 'water' });
 
@@ -38,12 +48,12 @@ describe('createTerrainAdminClient', () => {
     expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer id-token');
   });
 
-  it('tells a refusal under a placement from one under a player', async () => {
+  it('tells a placement refusal from a stale preview', async () => {
     expect(await codeOf(clientWith(fetchWith(409, { error: 'terrain-under-placement' })).setBlock(1, 'water'))).toBe(
       'terrain-under-placement',
     );
-    expect(await codeOf(clientWith(fetchWith(409, { error: 'terrain-under-player' })).setBlock(1, 'water'))).toBe(
-      'terrain-under-player',
+    expect(await codeOf(clientWith(fetchWith(409, { error: 'terrain-stale' })).setBlock(1, 'water'))).toBe(
+      'terrain-stale',
     );
   });
 

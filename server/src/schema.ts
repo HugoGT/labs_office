@@ -34,7 +34,10 @@ export interface PlayerSeed {
   seat: string;
 }
 
-export interface PlayerState extends PlayerSeed {}
+export interface PlayerState extends PlayerSeed {
+  /** Increments only on authoritative terrain relocation, never ordinary movement. */
+  positionRevision: number;
+}
 
 export class PlayerState extends Schema {}
 
@@ -47,6 +50,7 @@ defineTypes(PlayerState, {
   spacesVersion: 'string',
   avatarId: 'string',
   seat: 'string',
+  positionRevision: 'number',
 });
 
 /**
@@ -64,6 +68,7 @@ export function createPlayerState(seed: PlayerSeed): PlayerState {
   player.spacesVersion = seed.spacesVersion;
   player.avatarId = seed.avatarId;
   player.seat = seed.seat;
+  player.positionRevision = 0;
   return player;
 }
 
