@@ -120,12 +120,12 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     const { scene, body, movement, frame } = await movementArena();
     movement.collisionRects = [{ x: 0, y: 350, w: 10000, h: 1 }];
     movement.buildPieceColliders();
-    body.setVelocity(0, 1150);
+    body.setVelocity(0, 690);
     scene.physics.world.update(0, 100);
     scene.physics.world.postUpdate();
     expect(body.y).toBeGreaterThan(351);
     body.reset(300, 300);
-    movement.walkingMs = 8000;
+    movement.walkingMs = 3000;
     movement.cursors.down.isDown = true;
     frame(100);
     expect(body.bottom).toBeLessThanOrEqual(350.001);
@@ -139,7 +139,7 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     movement.collisionRects = [rect];
     movement.buildPieceColliders();
     const footprint = physicalBodyRect({ x: 0, y: 0 });
-    const gapX = 55;
+    const gapX = 25;
     // Keep the continuous corner overlap below one pixel of travel for either footprint width.
     const gapY = gapX + footprint.width + 0.2;
     const start = {
@@ -147,29 +147,29 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
       y: (sy > 0 ? rect.y - gapY - footprint.height : rect.y + rect.h + gapY) - footprint.y,
     };
     body.reset(start.x, start.y);
-    movement.walkingMs = 8000;
+    movement.walkingMs = 3000;
     movement.cursors.right.isDown = sx > 0;
     movement.cursors.left.isDown = sx < 0;
     movement.cursors.down.isDown = sy > 0;
     movement.cursors.up.isDown = sy < 0;
     frame(100);
-    const uninterrupted = 1150 * 0.1 / Math.SQRT2;
+    const uninterrupted = 690 * 0.1 / Math.SQRT2;
     expect(Math.min((player.x - start.x) * sx, (player.y - start.y) * sy)).toBeLessThan(uninterrupted - 0.01);
     expect(body.right > rect.x && body.x < rect.x + 1 && body.bottom > rect.y && body.y < rect.y + 1).toBe(false);
   });
-  it.each(['keyboard', 'map click'] as const)('ramps %s through every threshold and caps at 5x', async (input) => {
+  it.each(['keyboard', 'map click'] as const)('ramps %s through every threshold and caps at 3x', async (input) => {
     const { body, movement, frame, walk, doubleClick } = await movementArena();
     if (input === 'keyboard') movement.cursors.right.isDown = true;
     else doubleClick(99000, 300);
-    for (let multiplier = 1; multiplier <= 5; multiplier++) {
+    for (let multiplier = 1; multiplier <= 3; multiplier++) {
       frame();
       expect(body.velocity.length(), JSON.stringify(movement.autoWalk)).toBeCloseTo(230 * multiplier, 5);
-      walk(2000);
+      walk(1500);
     }
-    expect(body.velocity.length()).toBeCloseTo(1150, 5);
+    expect(body.velocity.length()).toBeCloseTo(690, 5);
   });
 
-  it('preserves the clock on direction changes and keyboard takeover, but resets on release and arrival', async () => {
+  it('preserves the clock on direction changes and keyboard takeover, and resets 1 s after release and on arrival', async () => {
     const { player, body, movement, frame, walk, doubleClick } = await movementArena();
     movement.cursors.right.isDown = true;
     walk(2100);
@@ -185,9 +185,11 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     frame();
     expect(body.velocity.x).toBeCloseTo(-460);
     movement.cursors.left.isDown = false;
+    walk(980);
+    expect(movement.walkingMs).toBeGreaterThan(1500);
     frame();
     expect(movement.walkingMs).toBe(0);
-    movement.walkingMs = 8000;
+    movement.walkingMs = 3000;
     const goalX = player.x + 3;
     doubleClick(goalX, player.y);
     frame(100);
@@ -195,6 +197,38 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(movement.autoWalk).toBeUndefined();
     expect(body.velocity.length()).toBe(0);
     expect(movement.walkingMs).toBe(0);
+  });
+
+  it('keeps the speed for 1 s after a bump or a gap between keys, then drops back to 1x', async () => {
+    const { body, movement, frame, walk } = await movementArena();
+    movement.cursors.right.isDown = true;
+    walk(3000);
+    frame();
+    expect(body.velocity.x).toBeCloseTo(690, 5);
+    // Release one key and press another a few frames later: the turn keeps 3x.
+    movement.cursors.right.isDown = false;
+    walk(200);
+    movement.cursors.down.isDown = true;
+    frame();
+    expect(body.velocity.y).toBeCloseTo(690, 5);
+    // A head-on bump holds the speed for under 1 s; sliding away resumes at 3x.
+    movement.collisionRects = [{ x: 0, y: body.bottom + 10, w: 10000, h: 1 }];
+    movement.buildPieceColliders();
+    walk(900);
+    expect(movement.walkingMs).toBe(3000);
+    movement.cursors.down.isDown = false;
+    movement.cursors.right.isDown = true;
+    frame();
+    expect(body.velocity.x).toBeCloseTo(690, 5);
+    // Blocked for a full second: back to normal speed.
+    movement.cursors.right.isDown = false;
+    movement.cursors.down.isDown = true;
+    walk(1000);
+    expect(movement.walkingMs).toBe(0);
+    movement.cursors.down.isDown = false;
+    movement.cursors.right.isDown = true;
+    frame();
+    expect(body.velocity.x).toBeCloseTo(230, 5);
   });
 
   it('does not credit blocked intent or sprint after a long or hidden frame', async () => {
@@ -207,19 +241,19 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(movement.walkingMs).toBe(0);
     movement.cursors.right.isDown = false;
     movement.cursors.down.isDown = true;
-    movement.walkingMs = 8000;
+    movement.walkingMs = 3000;
     const y = player.y;
     frame(10000);
     expect(player.y).toBe(y);
     expect(movement.walkingMs).toBe(0);
     frame();
     expect(body.velocity.y).toBe(230);
-    movement.walkingMs = 8000;
+    movement.walkingMs = 3000;
     const resumedY = player.y;
     frame(20, 10000);
     expect(player.y).toBe(resumedY);
     expect(movement.walkingMs).toBe(0);
-    movement.walkingMs = 8000;
+    movement.walkingMs = 3000;
     scene.game.events.emit(Phaser.Core.Events.HIDDEN);
     scene.game.events.emit(Phaser.Core.Events.VISIBLE);
     frame();
@@ -230,7 +264,7 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     const { scene, bridge, body, movement, frame } = await movementArena();
     const seat = BASE_MAP_SEATS[0]!;
     body.reset((seat.tx + 0.5) * TILE, (seat.ty + 0.5) * TILE - 18);
-    movement.walkingMs = 8000;
+    movement.walkingMs = 3000;
     bridge.emitCommand('toggleSeat', undefined);
     frame();
     expect(movement.walkingMs).toBe(0);
@@ -242,7 +276,7 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
       () => bridge.emitCommand('collisionedit', { pieceId: null, draft: [], selectedRect: null, snap: 1 }),
     ];
     for (const open of openers) {
-      movement.walkingMs = 8000;
+      movement.walkingMs = 3000;
       movement.cursors.right.isDown = true;
       movement.autoWalk = beginAutoWalk({ x: 5000, y: 5000 }, body);
       open();
@@ -273,7 +307,7 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(movement.autoWalk).toBeUndefined();
   });
 
-  it.each([20, 100, 250])('cannot tunnel at 5x with %i ms frames, cardinal or diagonal', async (delta) => {
+  it.each([20, 100, 250])('cannot tunnel at 3x with %i ms frames, cardinal or diagonal', async (delta) => {
     const { body, movement, frame } = await movementArena();
     for (const input of ['keyboard', 'auto-walk'] as const) {
       for (const obstacle of ['wall', 'water', 'piece'] as const) {
@@ -309,9 +343,9 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
               const grid = buildTerrainGrid(terrainSnapshot(layout), layout, []);
               movement.buildTerrainColliders(grid);
             }
-            movement.walkingMs = 8000;
+            movement.walkingMs = 3000;
             frame(20);
-            expect(body.velocity.length()).toBeCloseTo(1150, 5);
+            expect(body.velocity.length()).toBeCloseTo(690, 5);
             for (let i = 0; i < 6; i++) frame(delta);
             expect(horizontal ? body.right : body.bottom).toBeLessThanOrEqual(obstacle === 'piece' ? 350.001 : 352.001);
           }

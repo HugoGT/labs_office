@@ -131,7 +131,7 @@ import { AVATAR_KEYS, PLAYER_TEXTURE, avatarTextureKey, createOfficeTextures } f
 export const OFFICE_SCENE_KEY = 'office';
 
 const PLAYER_SPEED = 230;
-// Below both the 14px body height and Arcade's 4px overlap bias, even at 5x.
+// Below both the 14px body height and Arcade's 4px overlap bias, even at the top speed.
 const WALK_STEP_PX = 3;
 const PROXIMITY_TICK_MS = 250;
 /** Suavizado de `startFollow` (#53): compartido entre `setupCameras` y el `resumeFollow` de `CameraPanLayer`. */
@@ -426,6 +426,7 @@ export class OfficeScene extends Phaser.Scene {
    */
   private autoWalk?: AutoWalkState;
   private walkingMs = 0;
+  private walkingIdleMs = 0;
   private lastWalkFrame?: number;
   private walkClick?: Phaser.Input.Pointer;
   /**
@@ -437,6 +438,7 @@ export class OfficeScene extends Phaser.Scene {
 
   private readonly resetWalking = (): void => {
     this.walkingMs = 0;
+    this.walkingIdleMs = 0;
     this.lastWalkFrame = undefined;
     this.autoWalk = undefined;
     this.walkClick = undefined;
@@ -569,7 +571,7 @@ export class OfficeScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, stopEntry);
     this.events.once(Phaser.Scenes.Events.DESTROY, stopEntry);
 
-    // Arcade's discrete collision checks cannot safely take a whole 5x frame.
+    // Arcade's discrete collision checks cannot safely take a whole top-speed frame.
     // Step it here in bounded slices, syncing containers after each separation.
     this.physics.disableUpdate();
     this.physics.world.fixedStep = false;
@@ -2038,11 +2040,14 @@ export class OfficeScene extends Phaser.Scene {
     this.physics.world.update(time, delta);
     this.physics.world.postUpdate();
     const moved = Math.hypot(this.player.x - from.x, this.player.y - from.y) > 0.000001;
-    this.walkingMs = advanceWalkingTime(this.walkingMs, intended && moved && this.seat === null, delta);
+    const walking = advanceWalkingTime(this.walkingMs, this.walkingIdleMs, intended && moved && this.seat === null, delta);
+    this.walkingMs = walking.continuousMs;
+    this.walkingIdleMs = walking.idleMs;
     // Only the final goal ends a walk; the stops on the way are passed by the reducer.
     if (this.autoWalk && isAutoWalkArrived(this.autoWalk, this.player)) {
       this.autoWalk = undefined;
       this.walkingMs = 0;
+      this.walkingIdleMs = 0;
       body.setVelocity(0, 0);
     }
   }
