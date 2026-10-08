@@ -37,7 +37,11 @@ const games: Phaser.Game[] = [];
 const hosts: HTMLElement[] = [];
 
 afterEach(() => {
-  for (const game of games.splice(0)) game.destroy(true);
+  for (const game of games.splice(0)) {
+    game.destroy(true);
+    // A stopped loop needs one final step to process Phaser's deferred destruction.
+    if (!game.loop.running) game.step(0, 0);
+  }
   for (const host of hosts.splice(0)) host.remove();
 });
 
@@ -299,6 +303,14 @@ describe('avatar geometry against real Phaser (art migration, step 6)', () => {
     { side: 'below', feet: { x: 225, y: 288 }, velocity: { x: 0, y: -60 }, contact: { x: 225, y: 269 } },
   ])('contacts an asymmetric saved trunk from $side at the ground footprint, not the torso', async ({ feet, velocity, contact }) => {
     const scene = await bootWithSheets();
+    // Contact must not depend on the browser scheduling automatic frames.
+    scene.game.loop.stop();
+    const frameMs = 1000 / 60;
+    let time = scene.time.now;
+    const stepFrame = () => {
+      time += frameMs;
+      scene.game.step(time, frameMs);
+    };
     const instances = layoutPropInstances([{ piece: 'tree-oak', kind: 'tree', tx: 6, ty: 6, w: 2, h: 2, collision: 'solid', facing: null }]);
     const rects = collisionWorld(instances, new Map([['tree-oak', [{ x: 1, y: -12, w: 9, h: 11 }]]]));
     expect(rects[0]).toMatchObject({ x: 225, y: 244, w: 9, h: 11 });
@@ -312,9 +324,12 @@ describe('avatar geometry against real Phaser (art migration, step 6)', () => {
     let collided = false;
     scene.physics.add.collider(player, obstacle, () => { collided = true; });
     body.setVelocity(velocity.x, velocity.y);
-    await vi.waitFor(() => expect(collided).toBe(true), { timeout: 5000, interval: 16 });
+    // One simulated second covers the longest approach (20px at 60px/s).
+    // Game.step runs the real scene lifecycle, Arcade separation and body postUpdate.
+    for (let frame = 0; frame < 60 && !collided; frame++) stepFrame();
+    expect(collided).toBe(true);
     body.setVelocity(0, 0);
-    await nextFrames(scene);
+    for (let frame = 0; frame < 3; frame++) stepFrame();
     const bounds = player.sprite.getBounds();
     expect(bounds.x + CHARACTER_WALK.anchor.x).toBeCloseTo(contact.x);
     expect(bounds.y + CHARACTER_WALK.anchor.y).toBeCloseTo(contact.y);
