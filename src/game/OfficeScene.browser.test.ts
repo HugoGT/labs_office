@@ -169,7 +169,7 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(body.velocity.length()).toBeCloseTo(690, 5);
   });
 
-  it('preserves the clock on direction changes and keyboard takeover, but resets on release and arrival', async () => {
+  it('preserves the clock on direction changes and keyboard takeover, and resets 1 s after release and on arrival', async () => {
     const { player, body, movement, frame, walk, doubleClick } = await movementArena();
     movement.cursors.right.isDown = true;
     walk(2100);
@@ -185,6 +185,8 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     frame();
     expect(body.velocity.x).toBeCloseTo(-460);
     movement.cursors.left.isDown = false;
+    walk(980);
+    expect(movement.walkingMs).toBeGreaterThan(1500);
     frame();
     expect(movement.walkingMs).toBe(0);
     movement.walkingMs = 3000;
@@ -195,6 +197,38 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(movement.autoWalk).toBeUndefined();
     expect(body.velocity.length()).toBe(0);
     expect(movement.walkingMs).toBe(0);
+  });
+
+  it('keeps the speed for 1 s after a bump or a gap between keys, then drops back to 1x', async () => {
+    const { body, movement, frame, walk } = await movementArena();
+    movement.cursors.right.isDown = true;
+    walk(3000);
+    frame();
+    expect(body.velocity.x).toBeCloseTo(690, 5);
+    // Release one key and press another a few frames later: the turn keeps 3x.
+    movement.cursors.right.isDown = false;
+    walk(200);
+    movement.cursors.down.isDown = true;
+    frame();
+    expect(body.velocity.y).toBeCloseTo(690, 5);
+    // A head-on bump holds the speed for under 1 s; sliding away resumes at 3x.
+    movement.collisionRects = [{ x: 0, y: body.bottom + 10, w: 10000, h: 1 }];
+    movement.buildPieceColliders();
+    walk(900);
+    expect(movement.walkingMs).toBe(3000);
+    movement.cursors.down.isDown = false;
+    movement.cursors.right.isDown = true;
+    frame();
+    expect(body.velocity.x).toBeCloseTo(690, 5);
+    // Blocked for a full second: back to normal speed.
+    movement.cursors.right.isDown = false;
+    movement.cursors.down.isDown = true;
+    walk(1000);
+    expect(movement.walkingMs).toBe(0);
+    movement.cursors.down.isDown = false;
+    movement.cursors.right.isDown = true;
+    frame();
+    expect(body.velocity.x).toBeCloseTo(230, 5);
   });
 
   it('does not credit blocked intent or sprint after a long or hidden frame', async () => {

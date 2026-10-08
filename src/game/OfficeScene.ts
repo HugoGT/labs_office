@@ -426,6 +426,7 @@ export class OfficeScene extends Phaser.Scene {
    */
   private autoWalk?: AutoWalkState;
   private walkingMs = 0;
+  private walkingIdleMs = 0;
   private lastWalkFrame?: number;
   private walkClick?: Phaser.Input.Pointer;
   /**
@@ -437,6 +438,7 @@ export class OfficeScene extends Phaser.Scene {
 
   private readonly resetWalking = (): void => {
     this.walkingMs = 0;
+    this.walkingIdleMs = 0;
     this.lastWalkFrame = undefined;
     this.autoWalk = undefined;
     this.walkClick = undefined;
@@ -2038,11 +2040,14 @@ export class OfficeScene extends Phaser.Scene {
     this.physics.world.update(time, delta);
     this.physics.world.postUpdate();
     const moved = Math.hypot(this.player.x - from.x, this.player.y - from.y) > 0.000001;
-    this.walkingMs = advanceWalkingTime(this.walkingMs, intended && moved && this.seat === null, delta);
+    const walking = advanceWalkingTime(this.walkingMs, this.walkingIdleMs, intended && moved && this.seat === null, delta);
+    this.walkingMs = walking.continuousMs;
+    this.walkingIdleMs = walking.idleMs;
     // Only the final goal ends a walk; the stops on the way are passed by the reducer.
     if (this.autoWalk && isAutoWalkArrived(this.autoWalk, this.player)) {
       this.autoWalk = undefined;
       this.walkingMs = 0;
+      this.walkingIdleMs = 0;
       body.setVelocity(0, 0);
     }
   }
