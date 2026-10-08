@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { SPAWN_BLOCK_INDEX } from '../../../src/game/mapData.ts';
 import { BASE_LAYOUT, terrainSnapshot } from '../../../src/game/officeLayout.ts';
 import { createMemoryTerrain } from './memoryTerrain.ts';
 import { createTerrainRuntime } from './terrainRuntime.ts';
@@ -35,8 +36,8 @@ describe('atomic terrain batch', () => {
 
   it('protects the whole central wood block, even from other walkable materials', async () => {
     const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store: createMemoryTerrain() });
-    await expect(runtime.setBlocks([{ index: 77, material: 'grass' }], null, none)).rejects.toThrow();
-    expect(runtime.blocks()[77]).toBe('wood');
+    await expect(runtime.setBlocks([{ index: SPAWN_BLOCK_INDEX, material: 'grass' }], null, none)).rejects.toThrow();
+    expect(runtime.blocks()[SPAWN_BLOCK_INDEX]).toBe('wood');
   });
 
   it('does not publish or change the snapshot on storage failure', async () => {

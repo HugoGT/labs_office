@@ -7,6 +7,7 @@ import type { CharacterContainer } from './characters';
 import {
   PLAYER_SPAWN_TX,
   PLAYER_SPAWN_TY,
+  SPAWN_BLOCK_INDEX,
   TILE,
   WORLD_H,
   WORLD_W,
@@ -3919,18 +3920,20 @@ describe('OfficeScene: edited terrain', () => {
     const connector = fakeConnector();
     const { scene, bridge } = await bootOfficeScene(createOfficeBridge(), { layout: empty, seats: [], endpoint: 'ws://test', connect: connector.connect });
     await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
-    const before = terrainTilesAt(scene, 58, 49);
-    const draft = withBlock(empty.blocks, 76, 'wood');
-    const point = { x: 58 * TILE + 16, y: 49 * TILE + 16 };
+    // The middle of the block west of the entrance, void by default.
+    const west = { tx: PLAYER_SPAWN_TX - 9, ty: PLAYER_SPAWN_TY };
+    const before = terrainTilesAt(scene, west.tx, west.ty);
+    const draft = withBlock(empty.blocks, SPAWN_BLOCK_INDEX - 1, 'wood');
+    const point = { x: west.tx * TILE + 16, y: west.ty * TILE + 16 };
     expect(solidAt(scene, point.x, point.y)).toBe(true);
     bridge.emitCommand('terrainedit', { brush: 'wood', previewBlocks: draft });
-    expect(terrainTilesAt(scene, 58, 49)).not.toEqual(before);
+    expect(terrainTilesAt(scene, west.tx, west.ty)).not.toEqual(before);
     expect(solidAt(scene, point.x, point.y)).toBe(true);
     bridge.emitCommand('terrainedit', null);
-    expect(terrainTilesAt(scene, 58, 49)).toEqual(before);
+    expect(terrainTilesAt(scene, west.tx, west.ty)).toEqual(before);
     connector.handlers()!.onTerrain!(draft);
     await vi.waitFor(() => expect(solidAt(scene, point.x, point.y)).toBe(false), LOOP_WAIT);
-    expect(terrainTilesAt(scene, 58, 49)).not.toEqual(before);
+    expect(terrainTilesAt(scene, west.tx, west.ty)).not.toEqual(before);
   });
   const LAWN = 35;
   /** The middle of the lawn block: its own material whatever the borders do. */
@@ -4229,8 +4232,8 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
   });
 
   it.each([
-    { zoom: 1, tile: { tx: 69, ty: 51 } },
-    { zoom: 3, tile: { tx: 68, ty: 50 } },
+    { zoom: 1, tile: { tx: PLAYER_SPAWN_TX + 2, ty: PLAYER_SPAWN_TY + 2 } },
+    { zoom: 3, tile: { tx: PLAYER_SPAWN_TX + 1, ty: PLAYER_SPAWN_TY + 1 } },
   ])('double-click-to-walk at $zoom targets the world tile under the pointer', async ({ zoom, tile }) => {
     const { scene } = await zoomScene(memoryStore(zoom));
     frames(scene, 3);

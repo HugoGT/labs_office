@@ -1,10 +1,14 @@
 import { ART_TILE, TERRAIN_DECALS, TERRAIN_MATERIALS, terrainDecalIndex, terrainTileIndex, type TerrainMaterial, type RgbaImage } from '../../src/game/artContract.ts';
-import { PixelBuffer } from '../art/domain/pixelBuffer.ts';
+import { PixelBuffer, rgba } from '../art/domain/pixelBuffer.ts';
 import { decodePng } from '../../server/src/assets/pngCodec.ts';
 
 export const LAYOUT_PATH = 'src/game/maps/office.json';
 export const PALETTE_PATH = 'src/game/maps/layout-palette.png';
-export const LAYOUT_PALETTE: readonly string[] = [...TERRAIN_MATERIALS, 'wall-brick', 'wall-stone', 'wall-plaster', 'wall-glass', 'hedge-boxwood', ...TERRAIN_DECALS];
+/** Void (no terrain) comes last, so the tile ids of everything before it never move. */
+export const LAYOUT_PALETTE: readonly string[] = [...TERRAIN_MATERIALS, 'wall-brick', 'wall-stone', 'wall-plaster', 'wall-glass', 'hedge-boxwood', ...TERRAIN_DECALS, 'void'];
+
+/** The void tile: the solid black the office draws behind its terrain. */
+const VOID_RGBA = rgba(0, 0, 0);
 
 function toBuffer(image: RgbaImage): PixelBuffer {
   return new PixelBuffer(image.width, image.height, new Uint8ClampedArray(image.data));
@@ -24,7 +28,9 @@ export function renderLayoutPalette(readPack: (path: string) => Uint8Array): Pix
   };
   LAYOUT_PALETTE.forEach((name, slot) => {
     const dx = slot * ART_TILE;
-    if ((TERRAIN_MATERIALS as readonly string[]).includes(name)) {
+    if (name === 'void') {
+      for (let y = 0; y < ART_TILE; y += 1) for (let x = 0; x < ART_TILE; x += 1) out.setPixel(dx + x, y, VOID_RGBA);
+    } else if ((TERRAIN_MATERIALS as readonly string[]).includes(name)) {
       tilesetTile(terrainTileIndex(name as TerrainMaterial, 15, 0), dx);
     } else if ((TERRAIN_DECALS as readonly string[]).includes(name)) {
       tilesetTile(terrainDecalIndex(name as (typeof TERRAIN_DECALS)[number]), dx);

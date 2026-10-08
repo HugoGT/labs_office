@@ -436,7 +436,7 @@ describe('the committed layout (maps/office.json)', () => {
     const bare = terrainSnapshot({ ...BASE_LAYOUT, props: props('bridge') });
 
     expect(props('tree').length).toBeGreaterThan(100);
-    expect(BASE_TERRAIN.materials.filter((material) => material === 'water').length).toBeGreaterThan(400);
+    expect(BASE_TERRAIN.materials.filter((material) => material === 'water').length).toBeGreaterThan(300);
     for (const prop of BASE_LAYOUT.props.filter((candidate) => candidate.kind !== 'bridge')) {
       for (let ty = prop.ty; ty < prop.ty + prop.h; ty += 1) {
         for (let tx = prop.tx; tx < prop.tx + prop.w; tx += 1) {

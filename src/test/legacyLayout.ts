@@ -110,9 +110,13 @@ const GARDEN = { x0: 50, y0: 33, x1: 62, y1: 42 };
 
 // --- The new area ------------------------------------------------------------------------------------
 
-/** One material per 9x9 block: a lake with a beach to the south-east, a clearing and a plaza. */
+/**
+ * One material per 9x9 block: a lake with a beach to the south-east, a clearing and a plaza.
+ * The lake keeps to block row 6: the shared spawn tile (94, 67), the middle of the
+ * production 21x15 grid, falls on the beach of block (10, 7) so legacy tests still spawn on sand.
+ */
 function blockMaterial(bx: number, by: number): TerrainMaterial {
-  if (bx >= 9 && bx <= 11 && by >= 6 && by <= 7) return 'water';
+  if (bx >= 9 && bx <= 11 && by === 6) return 'water';
   if (bx >= 8 && bx <= 12 && by >= 5 && by <= 8) return 'sand';
   if (bx >= 1 && bx <= 2 && by >= 7 && by <= 8) return 'dirt';
   if (bx === 5 && by === 7) return 'cobblestone';

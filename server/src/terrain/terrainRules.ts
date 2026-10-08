@@ -10,7 +10,7 @@
  */
 
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
-import { isLayoutMaterial, type LayoutMaterial, type OfficeLayout } from '../../../src/game/officeLayout.ts';
+import { LAYOUT_MATERIALS, isLayoutMaterial, type LayoutMaterial, type OfficeLayout } from '../../../src/game/officeLayout.ts';
 import type { MapSeat } from '../../../src/game/seating.ts';
 
 /** The edit was malformed: an index off the map or an unknown material (400). */
@@ -45,10 +45,17 @@ export interface TerrainEdit {
 
 export class TerrainStaleError extends Error {}
 
+/** The longest wire string of `count` blocks (`encodeTerrainBlocks`): every block the longest material name. */
+function maxEncodedLength(count: number): number {
+  return count * (Math.max(...LAYOUT_MATERIALS.map((material) => material.length)) + 1);
+}
+
 export function parseTerrainBatch(body: unknown, count: number): { edits: TerrainEdit[]; expected: string } {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new InvalidTerrainEditError('invalid batch');
   const { edits, expected } = body as Record<string, unknown>;
-  if (!Array.isArray(edits) || edits.length < 1 || edits.length > count || typeof expected !== 'string' || expected.length > 2000) throw new InvalidTerrainEditError('invalid batch');
+  if (!Array.isArray(edits) || edits.length < 1 || edits.length > count || typeof expected !== 'string' || expected.length > maxEncodedLength(count)) {
+    throw new InvalidTerrainEditError('invalid batch');
+  }
   const seen = new Set<number>();
   const parsed = edits.map((edit: unknown) => {
     if (typeof edit !== 'object' || edit === null || Array.isArray(edit)) throw new InvalidTerrainEditError('invalid edit');

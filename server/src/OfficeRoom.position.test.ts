@@ -73,7 +73,8 @@ afterEach(async () => {
 describe('OfficeRoom: restore last position (#148)', () => {
   it('rejects a saved footprint that straddles water even when its center is walkable', async () => {
     const store = await directory();
-    const position = { x: 63 * TILE + 4, y: 49 * TILE + 16 };
+    // The spawn block's west edge: the center is on wood, the body straddles the void.
+    const position = { x: (PLAYER_SPAWN_TX - 4) * TILE + 4, y: PLAYER_SPAWN_TY * TILE + 16 };
     await store.saveLastPosition(UID, position);
     const { BASE_LAYOUT: layout } = await import('../../src/game/officeLayout.ts');
     await start(store, true, { layout, seats: [] });

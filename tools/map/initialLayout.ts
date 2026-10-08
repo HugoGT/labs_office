@@ -1,14 +1,14 @@
 /** Reproducible empty office bootstrap. Never touches database overrides or placements. */
 import { ART_TILE } from '../../src/game/artContract.ts';
-import { MAP_BLOCK_COLUMNS, MAP_BLOCK_ROWS, SPAWN_BLOCK_INDEX } from '../../src/game/mapData.ts';
+import { MAP_BLOCK_COLUMNS, MAP_BLOCK_ROWS, MAP_BLOCK_TILES, MAP_H, MAP_W, SPAWN_BLOCK_INDEX } from '../../src/game/mapData.ts';
 import { LAYOUT_PALETTE } from './layoutPalette.ts';
 export { LAYOUT_PALETTE, LAYOUT_PATH, PALETTE_PATH, renderLayoutPalette } from './layoutPalette.ts';
 
 export function buildInitialLayout() {
-  const width = 126;
-  const height = 90;
-  // Unbuilt everywhere but the protected central spawn block.
-  const blocks = Array.from({ length: MAP_BLOCK_COLUMNS * MAP_BLOCK_ROWS }, (_, index) => (index === SPAWN_BLOCK_INDEX ? 'wood' : 'water'));
+  const width = MAP_W;
+  const height = MAP_H;
+  // Void (no terrain) everywhere but the protected central spawn block.
+  const blocks = Array.from({ length: MAP_BLOCK_COLUMNS * MAP_BLOCK_ROWS }, (_, index) => (index === SPAWN_BLOCK_INDEX ? 'wood' : 'void'));
   const tileLayer = (id: number, name: string, cell: (x: number, y: number) => number) => ({
     data: Array.from({ length: width * height }, (_, index) => cell(index % width, Math.floor(index / width))),
     height, id, name, opacity: 1, type: 'tilelayer', visible: true, width, x: 0, y: 0,
@@ -19,7 +19,7 @@ export function buildInitialLayout() {
   return {
     compressionlevel: -1, height, infinite: false,
     layers: [
-      tileLayer(1, 'blocks', (x, y) => LAYOUT_PALETTE.indexOf(blocks[Math.floor(y / 9) * MAP_BLOCK_COLUMNS + Math.floor(x / 9)]!) + 1),
+      tileLayer(1, 'blocks', (x, y) => LAYOUT_PALETTE.indexOf(blocks[Math.floor(y / MAP_BLOCK_TILES) * MAP_BLOCK_COLUMNS + Math.floor(x / MAP_BLOCK_TILES)]!) + 1),
       ...['ground', 'decals', 'walls', 'hedges'].map((name, index) => tileLayer(index + 2, name, () => 0)),
       objectLayer(6, 'props'), objectLayer(7, 'seats'),
     ],

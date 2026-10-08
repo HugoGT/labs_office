@@ -173,16 +173,16 @@ describe('useTerrainEditor', () => {
     const { terrain, calls } = deferredPort();
     const { bridge, result, commands } = setup(terrain);
     act(() => result.current.enter());
-    act(() => result.current.pick('void'));
+    act(() => result.current.pick('water'));
     act(() => bridge.emit('terrainpick', { index: LAWN }));
     act(() => bridge.emit('terrainpick', { index: OTHER }));
 
     await act(async () => calls[0]!.reject(new AdminError('terrain-under-placement')));
 
     expect(result.current.error).toMatch(/otro bloque/);
-    expect(result.current.brush).toBe('void');
+    expect(result.current.brush).toBe('water');
     expect(calls.map((call) => call.index)).toEqual([LAWN, OTHER]);
-    expect(commands.at(-1)).toEqual({ brush: 'void', previewBlocks: withBlock(BASE_LAYOUT.blocks, OTHER, 'void') });
+    expect(commands.at(-1)).toEqual({ brush: 'water', previewBlocks: withBlock(BASE_LAYOUT.blocks, OTHER, 'water') });
     await act(async () => calls[1]!.resolve());
   });
 

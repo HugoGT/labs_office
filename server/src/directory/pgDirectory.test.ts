@@ -13,6 +13,7 @@
  * bootstrap) esta probada por comportamiento en `memoryDirectory.test.ts`.
  */
 
+import { WORLD_H, WORLD_W } from '../../../src/game/mapData.ts';
 import { describe, expect, it } from 'vitest';
 import { ART_PACK_DEFAULTS, InvalidArtChoiceError } from '../decor/artCatalogRules.ts';
 import { DisplayNameTakenError } from './displayNameRules.ts';
@@ -114,7 +115,7 @@ describe('pgDirectory: last position (#148)', () => {
     expect(pool.queries[0].values).toEqual([ANA.uid, 300.5, 400.25]);
   });
 
-  it.each([{ x: NaN, y: 400 }, { x: 300, y: Infinity }, { x: -1, y: 400 }, { x: 4033, y: 400 }, { x: 300, y: 2881 }])('rejects invalid coordinates %j before SQL', async (invalid) => {
+  it.each([{ x: NaN, y: 400 }, { x: 300, y: Infinity }, { x: -1, y: 400 }, { x: WORLD_W + 1, y: 400 }, { x: 300, y: WORLD_H + 1 }])('rejects invalid coordinates %j before SQL', async (invalid) => {
     const pool = fakePool();
     await expect(directoryOver(pool).saveLastPosition(ANA.uid, invalid)).rejects.toThrow('Invalid last position');
     expect(pool.queries).toHaveLength(0);

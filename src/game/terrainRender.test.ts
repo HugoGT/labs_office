@@ -9,7 +9,7 @@ import {
   type ArtPackManifest,
 } from './artContract';
 import { findPiece, parseArtPackManifest } from './artPack';
-import { MAP_H, MAP_W, TILE } from './mapData';
+import { TILE } from './mapData';
 import {
   LAYOUT_MATERIALS,
   terrainMaterialAt,
@@ -29,6 +29,10 @@ import {
   wallSprites,
 } from './terrainRender';
 import exportedManifest from '../../public/assets/pack/manifest.json?raw';
+
+/** The legacy fixture keeps the 126x90 world it was drawn in. */
+const MAP_W = BASE_TERRAIN.width;
+const MAP_H = BASE_TERRAIN.height;
 
 function pack(): ArtPackManifest {
   const manifest = parseArtPackManifest(JSON.parse(exportedManifest));

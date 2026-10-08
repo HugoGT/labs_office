@@ -12,6 +12,7 @@ import {
   InvalidTerrainEditError,
   TerrainProtectedError,
   findUnwalkableConflict,
+  parseTerrainBatch,
   parseTerrainEdit,
   staticProtectedTiles,
   type TerrainProtections,
@@ -32,6 +33,17 @@ function watered(index: number, material: LayoutMaterial = 'water'): number[] {
 function standingOn(tx: number, ty: number) {
   return { x: tx * TILE + 16, y: ty * TILE + 5 };
 }
+
+describe('parseTerrainBatch', () => {
+  it('accepts the expected wire string of a whole 21x15 map of the longest material name, and nothing longer', () => {
+    const count = 21 * 15;
+    const expected = new Array(count).fill('cobblestone').join(',');
+    const edits = [{ index: 0, material: 'grass' }];
+
+    expect(parseTerrainBatch({ edits, expected }, count).expected).toBe(expected);
+    expect(() => parseTerrainBatch({ edits, expected: `${expected},xx` }, count)).toThrow(InvalidTerrainEditError);
+  });
+});
 
 describe('parseTerrainEdit', () => {
   it('reads a block index from the route and a material from the body', () => {
