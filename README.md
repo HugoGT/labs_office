@@ -7,7 +7,7 @@ The product reference is `PRD-Oficina-Virtual.md` (Spanish; architecture in sect
 ## Features
 
 - **2D office map** rendered with Phaser: WASD movement, collisions, simulated NPCs, double-click to walk anywhere around obstacles, auto-walk to a colleague.
-- **Block-aligned map editor** in the office sidebar: seeded procedural preview, atomic apply, incremental terrain painting, and 9 × 9 office rooms. New maps contain only a central wood spawn block; existing database placements and terrain overrides are preserved. See [the map editor guide](docs/map-editor.md).
+- **Block-aligned map editor** in the office sidebar: a floor palette that paints 9 × 9 blocks with each click (and erases them back to void), and 9 × 9 office rooms. New maps are a black void of 21 × 15 blocks around a central wood spawn block; stored terrain and placements move once to the bigger grid and are otherwise preserved. See [the map editor guide](docs/map-editor.md).
 - **Real-time presence**: real avatars synced over WebSocket (Colyseus), with status (`En línea`, `Ocupado`, `No molestar`) and reconnection tolerance for flaky networks.
 - **Proximity audio and video** over LiveKit: you hear and see people near you; spaces (rooms and desk cubicles) get their own isolated LiveKit room.
 - **Calls by clicking an avatar**: invitation cards with accept/decline and a chime.

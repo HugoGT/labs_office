@@ -843,13 +843,15 @@ describe('connectOfficeRoom: seats (art migration, step 6)', () => {
 
   it('reports the terrain blocks on the first sync and every edit after it (#123 phase 2)', async () => {
     await server.shutdown();
-    server = createOfficeServer({ terrain: createMemoryTerrain([[35, 'water']]) });
+    // The client reads blocks of the production grid: the room must run that layout.
+    const { BASE_LAYOUT: layout } = await import('./officeLayout.ts');
+    server = createOfficeServer({ layout, seats: [], terrain: createMemoryTerrain([[35, 'water']]) });
     endpoint = `ws://localhost:${await server.listen(0)}`;
     const seen: (readonly LayoutMaterial[])[] = [];
     await connect('Ana', { ...recorder().handlers, onTerrain: (blocks) => seen.push(blocks) });
 
     await waitFor(() => seen.length > 0);
-    expect(seen[0]).toHaveLength(BASE_LAYOUT.blocks.length);
+    expect(seen[0]).toHaveLength(layout.blocks.length);
     expect(seen[0]![35]).toBe('water');
 
     await server.terrain.setBlock({ index: 94, material: 'grass', actorId: null }, async () => ({ placements: [], players: [] }));

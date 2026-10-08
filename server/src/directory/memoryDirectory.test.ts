@@ -10,6 +10,7 @@
  * infraestructura, o dejara de probarse.
  */
 
+import { WORLD_H, WORLD_W } from '../../../src/game/mapData.ts';
 import { describe, expect, it } from 'vitest';
 import { ART_PACK_DEFAULTS, InvalidArtChoiceError } from '../decor/artCatalogRules.ts';
 import type { DirectoryUser } from './directoryPort.ts';
@@ -45,7 +46,7 @@ describe('memoryDirectory: last position (#148)', () => {
     expect(await directory.findByUid(ANA.uid)).toEqual(provisioned());
   });
 
-  it.each([{ x: NaN, y: 400 }, { x: 300, y: Infinity }, { x: -1, y: 400 }, { x: 4033, y: 400 }, { x: 300, y: 2881 }])(
+  it.each([{ x: NaN, y: 400 }, { x: 300, y: Infinity }, { x: -1, y: 400 }, { x: WORLD_W + 1, y: 400 }, { x: 300, y: WORLD_H + 1 }])(
     'invalid coordinates %j never overwrite a good position', async (invalid) => {
       const directory = createMemoryDirectory({ seed: [provisioned()] });
       await directory.saveLastPosition(ANA.uid, { x: 300, y: 400 });

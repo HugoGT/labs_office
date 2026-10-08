@@ -407,12 +407,12 @@ ALTER TABLE spaces ADD CONSTRAINT spaces_floor_color_check CHECK (floor_color IS
 -- migrate.test.ts), refreshed below like `art_pieces_kind_check`.
 CREATE TABLE IF NOT EXISTS terrain_blocks (
   block_index integer PRIMARY KEY CHECK (block_index >= 0),
-  material text NOT NULL CHECK (material IN ('water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet')),
+  material text NOT NULL CHECK (material IN ('void', 'water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet')),
   updated_by uuid REFERENCES users(id),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE terrain_blocks DROP CONSTRAINT IF EXISTS terrain_blocks_material_check;
-ALTER TABLE terrain_blocks ADD CONSTRAINT terrain_blocks_material_check CHECK (material IN ('water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet'));
+ALTER TABLE terrain_blocks ADD CONSTRAINT terrain_blocks_material_check CHECK (material IN ('void', 'water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet'));
 
 -- Collision areas per art piece (collision editor). One row per piece an
 -- admin edited: a JSON list of rectangles in art pixels from the piece's
@@ -427,3 +427,44 @@ CREATE TABLE IF NOT EXISTS piece_collisions (
   updated_by uuid REFERENCES users(id),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- The 21x15 block grid (map editor palette). Stored rows were written against
+-- the first editor's 14x10 grid, which now sits at block offset (+3, +2) so
+-- the spawn block stays in the middle (`LEGACY_BLOCK_GRID` in
+-- `src/game/mapData.ts`). They move exactly once: the first start that finds
+-- no `map_layout_version` row moves them and writes the row, inside the one
+-- implicit transaction of this script, so a crash moves nothing and a restart
+-- never moves anything twice. The only marker in this file on purpose: a
+-- shift is not convergent, so it cannot be written as one more idempotent
+-- statement. A brand new database runs it over empty tables and just gets
+-- the marker. `MAP_LAYOUT_VERSION` (migrate.ts) is the version written here.
+CREATE TABLE IF NOT EXISTS map_layout_version (
+  id boolean PRIMARY KEY DEFAULT true CHECK (id),
+  version integer NOT NULL,
+  migrated_at timestamptz NOT NULL DEFAULT now()
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM map_layout_version) THEN
+    -- Rows past the old grid were never read (the runtime ignores them):
+    -- remapped, they would suddenly show up inside the new grid.
+    DELETE FROM terrain_blocks WHERE block_index >= 140;
+    -- Old index r * 14 + c becomes (r + 2) * 21 + (c + 3). Through a free
+    -- range first, so no row ever lands on the old index of one not moved yet.
+    -- Explicit water rows stay water; untouched blocks have no row and are void now.
+    UPDATE terrain_blocks SET block_index = 1000000 + (block_index / 14 + 2) * 21 + (block_index % 14 + 3);
+    UPDATE terrain_blocks SET block_index = block_index - 1000000;
+    -- Spaces (rooms and desk cubicles) and desks store TILES: +27, +18. The
+    -- free range again, so `spaces_no_overlap` and `desks_no_overlap` never
+    -- see a moved row on top of one still waiting. Decor in `space_layouts`
+    -- is relative to its space and moves with it.
+    UPDATE spaces SET x = x + 1000000, y = y + 1000000;
+    UPDATE spaces SET x = x - 1000000 + 27, y = y - 1000000 + 18;
+    UPDATE desks SET x = x + 1000000, y = y + 1000000;
+    UPDATE desks SET x = x - 1000000 + 27, y = y - 1000000 + 18;
+    -- Last positions (#148) are PIXELS: +864, +576. NULL means never saved.
+    UPDATE users SET last_x = last_x + 864, last_y = last_y + 576 WHERE last_x IS NOT NULL AND last_y IS NOT NULL;
+    INSERT INTO map_layout_version (version) VALUES (2);
+  END IF;
+END $$;

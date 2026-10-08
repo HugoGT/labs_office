@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react';
 import { defaultAppearance, previewFrame, type MaterialOption } from '../game/artMaterials';
 import type { ArtAppearance } from '../game/artPack';
 import { pagePreviewCache, type ArtPreviewCache } from '../game/artPreview';
+import { ArtPreviewCanvas } from './ArtPreviewCanvas';
 import styles from './ArtMaterialPicker.module.css';
 
 /**
@@ -33,30 +33,10 @@ export function ArtMaterialPicker({
   disabled = false,
   preview = pagePreviewCache,
 }: ArtMaterialPickerProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const selected = options.find((option) => option.id === value.materialId) ?? options[0];
   const color = selected?.colorable ? (value.color ?? selected.defaultColor) : null;
 
-  useEffect(() => {
-    if (selected === undefined) return undefined;
-    let cancelled = false;
-    void preview.sheet(selected, color).then((sheet) => {
-      const canvas = canvasRef.current;
-      if (cancelled || sheet === null || canvas === null) return;
-      const context = canvas.getContext('2d');
-      if (context === null) return;
-      const frame = previewFrame(selected);
-      context.imageSmoothingEnabled = false;
-      context.clearRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(sheet, frame.x, frame.y, frame.width, frame.height, 0, 0, frame.width, frame.height);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [selected, color, preview]);
-
   if (selected === undefined) return null;
-  const frame = previewFrame(selected);
 
   function pickMaterial(materialId: string): void {
     const option = options.find((candidate) => candidate.id === materialId);
@@ -102,15 +82,13 @@ export function ArtMaterialPicker({
             <p className={styles.hint}>Este material conserva su propio aspecto.</p>
           )}
         </div>
-        <canvas
-          ref={canvasRef}
+        <ArtPreviewCanvas
+          option={selected}
+          color={color}
+          frame={previewFrame(selected)}
+          label={`Vista previa: ${selected.name}${color === null ? '' : `, ${color}`}`}
           className={styles.preview}
-          role="img"
-          aria-label={`Vista previa: ${selected.name}${color === null ? '' : `, ${color}`}`}
-          width={frame.width}
-          height={frame.height}
-          // One sheet pixel per CSS pixel: any other scale would blur or skip art pixels.
-          style={{ width: frame.width, height: frame.height }}
+          preview={preview}
         />
       </div>
       <p className={styles.hint}>El material y el color no se pueden cambiar después de crear.</p>

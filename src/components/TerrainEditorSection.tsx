@@ -1,30 +1,19 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState } from 'react';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
+import type { ArtPreviewCache } from '../game/artPreview';
 import type { OfficeBridge } from '../game/officeBridge';
-import { LAYOUT_MATERIALS, isLayoutMaterial, type LayoutMaterial } from '../game/officeLayout';
-import { BLOCK_COLUMNS, BLOCK_ROWS, useTerrainEditor } from '../hooks/useTerrainEditor';
-import { SPAWN_BLOCK_INDEX } from '../game/mapGeneration';
+import { useMaterialCatalog, type LoadMaterials } from '../hooks/useMaterialCatalog';
+import { useTerrainEditor } from '../hooks/useTerrainEditor';
+import { TERRAIN_MATERIAL_LABELS, TerrainPalette } from './TerrainPalette';
 import styles from './TerrainEditorSection.module.css';
 
 /**
  * Terrain section of the office sidebar (#123 phase 2), next to the desk and
  * room editors and behind the same role guard. Container like
- * `DeskEditorSection`: `useTerrainEditor` holds the state, the map
- * (`TerrainEditLayer`) outlines and picks blocks, and the scene paints the
- * preview.
+ * `DeskEditorSection`: `useTerrainEditor` holds the state, the palette
+ * (`TerrainPalette`) picks the floor, the map (`TerrainEditLayer`) reports
+ * the clicked blocks, and the scene draws the pending paints.
  */
-
-/** UI names of the materials, in the drawing order of `LAYOUT_MATERIALS`. */
-export const TERRAIN_MATERIAL_LABELS: Readonly<Record<LayoutMaterial, string>> = {
-  water: 'Agua',
-  grass: 'Césped',
-  dirt: 'Tierra',
-  sand: 'Arena',
-  cobblestone: 'Empedrado',
-  wood: 'Madera',
-  tile: 'Baldosa',
-  carpet: 'Moqueta',
-};
 
 export interface TerrainEditorSectionProps {
   bridge: OfficeBridge;
@@ -38,17 +27,25 @@ export interface TerrainEditorSectionProps {
   onExit?: () => void;
   /** Called before opening, so `OfficeLayoutEditor` can close the others first. */
   onRequestActive?: () => void;
+  /** The pack floors of the thumbnails; injected by tests. */
+  loadMaterials?: LoadMaterials;
+  preview?: ArtPreviewCache;
 }
 
-export function TerrainEditorSection({ bridge, terrain, onEditingChange, forceExit = false, onRequestActive, initiallyActive = false, onExit }: TerrainEditorSectionProps) {
+export function TerrainEditorSection({
+  bridge,
+  terrain,
+  onEditingChange,
+  forceExit = false,
+  onRequestActive,
+  initiallyActive = false,
+  onExit,
+  loadMaterials,
+  preview,
+}: TerrainEditorSectionProps) {
   const editor = useTerrainEditor({ bridge, terrain });
-  const [column, setColumn] = useState('');
-  const [row, setRow] = useState('');
-  const [seed, setSeed] = useState('123');
-  const [landBlocks, setLandBlocks] = useState('30');
-  const [landMaterial, setLandMaterial] = useState<Exclude<LayoutMaterial, 'water'>>('grass');
+  const catalog = useMaterialCatalog(loadMaterials);
   const [confirmed, setConfirmed] = useState(false);
-  useEffect(() => setConfirmed(false), [editor.draft]);
 
   useEffect(() => {
     if (initiallyActive) editor.enter();
@@ -81,15 +78,9 @@ export function TerrainEditorSection({ bridge, terrain, onEditingChange, forceEx
     );
   }
 
-  const { selected, blocks } = editor;
-  const pending = editor.pending || editor.blocked;
-  const current = selected === null ? null : blocks[selected]!;
-  const chosen = selected === SPAWN_BLOCK_INDEX ? current : editor.material ?? current;
-  const changed = selected !== SPAWN_BLOCK_INDEX && current !== null && chosen !== null && chosen !== current;
-
-  function handleCoordinates(event: FormEvent<HTMLFormElement>): void {
-    event.preventDefault();
-    editor.selectAt(Number(column), Number(row));
+  async function handleClear(): Promise<void> {
+    setConfirmed(false);
+    await editor.clear();
   }
 
   return (
@@ -101,104 +92,43 @@ export function TerrainEditorSection({ bridge, terrain, onEditingChange, forceEx
         </button>
       </div>
 
-      <span className={styles.hint}>Toca un bloque en el mapa o escribe su columna y fila.</span>
-      <span className={styles.hint}>Cada bloque ocupa 9 × 9 casillas (288 × 288 px). El bloque central de madera está protegido. El agua es terreno sin construir y no se puede caminar.</span>
-      <fieldset className={styles.form} disabled={pending}>
-        <legend>Generar mapa por bloques</legend>
-        <label className={styles.field}>Semilla (0–4294967295)
-          <input className={styles.input} type="number" min={0} max={4294967295} step={1} value={seed} onChange={(event) => { setSeed(event.target.value); editor.discard(); }} />
-        </label>
-        <label className={styles.field}>Bloques de tierra (1–140, incluye la entrada)
-          <input className={styles.input} type="number" min={1} max={140} step={1} value={landBlocks} onChange={(event) => { setLandBlocks(event.target.value); editor.discard(); }} />
-        </label>
-        <label className={styles.field}>Material generado
-          <select className={styles.input} value={landMaterial} onChange={(event) => {
-            if (isLayoutMaterial(event.target.value) && event.target.value !== 'water') { setLandMaterial(event.target.value); editor.discard(); }
-          }}>
-            {LAYOUT_MATERIALS.filter((material) => material !== 'water').map((material) => <option key={material} value={material}>{TERRAIN_MATERIAL_LABELS[material]}</option>)}
-          </select>
-        </label>
-        <button className={styles.button} type="button" disabled={seed === '' || landBlocks === ''} onClick={() => editor.generate({ seed: Number(seed), landBlocks: Number(landBlocks), material: landMaterial })}>Vista previa procedural</button>
-        <button className={styles.button} type="button" onClick={() => editor.generate({ seed: 0, landBlocks: 1, material: 'wood' })}>Vista previa: solo entrada central</button>
-        {editor.draft !== null && <>
-          <span className={styles.hint}>Vista previa en el mapa: solo la ves tú. Reemplaza el terreno, no borra salas ni escritorios. Puede rechazarse si el agua cubre una ubicación o una persona.</span>
-          <label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> Confirmo reemplazar el terreno por esta vista previa</label>
-          <button className={styles.button} type="button" disabled={!confirmed} onClick={() => void editor.applyGenerated()}>Aplicar mapa</button>
-          <button className={styles.button} type="button" onClick={editor.discard}>Descartar mapa</button>
-        </>}
-      </fieldset>
-      <form className={styles.form} onSubmit={handleCoordinates}>
-        <div className={styles.coordinates}>
-          <div className={styles.field}>
-            <label className={styles.hint} htmlFor="terrain-column">
-              {`Columna (1-${BLOCK_COLUMNS})`}
-            </label>
-            <input
-              id="terrain-column"
-              className={styles.input}
-              type="number"
-              min={1}
-              max={BLOCK_COLUMNS}
-              value={column}
-              onChange={(event) => setColumn(event.target.value)}
-            />
-          </div>
-          <div className={styles.field}>
-            <label className={styles.hint} htmlFor="terrain-row">
-              {`Fila (1-${BLOCK_ROWS})`}
-            </label>
-            <input
-              id="terrain-row"
-              className={styles.input}
-              type="number"
-              min={1}
-              max={BLOCK_ROWS}
-              value={row}
-              onChange={(event) => setRow(event.target.value)}
-            />
-          </div>
-        </div>
-        <button type="submit" className={styles.button} disabled={pending || column === '' || row === ''}>
-          Seleccionar bloque
-        </button>
-      </form>
+      <span className={styles.hint}>
+        Elige un suelo y toca bloques del mapa para pintarlos: cada bloque ocupa 9 × 9 casillas (288 × 288 px). El suelo sigue elegido hasta que lo deseleccionas o pulsas Escape.
+      </span>
+      <span className={styles.hint}>
+        Pintar sobre el vacío crea terreno nuevo; «Vacío» lo borra. El agua y el vacío no se pueden caminar. El bloque central de la entrada siempre es de madera.
+      </span>
 
-      {selected !== null && current !== null && chosen !== null && (
-        <>
-          <span className={styles.row}>
-            {`Columna ${(selected % BLOCK_COLUMNS) + 1}, fila ${Math.floor(selected / BLOCK_COLUMNS) + 1} · ahora ${TERRAIN_MATERIAL_LABELS[current]}`}
-          </span>
-          <div className={styles.field}>
-            <label className={styles.hint} htmlFor="terrain-material">
-              Material
-            </label>
-            <select
-              id="terrain-material"
-              className={styles.input}
-              value={chosen}
-              disabled={pending || selected === SPAWN_BLOCK_INDEX}
-              onChange={(event) => {
-                if (isLayoutMaterial(event.target.value)) editor.choose(event.target.value);
-              }}
-            >
-              {LAYOUT_MATERIALS.map((material) => (
-                <option key={material} value={material}>
-                  {TERRAIN_MATERIAL_LABELS[material]}
-                </option>
-              ))}
-            </select>
-          </div>
-          {changed && <span className={styles.hint}>Vista previa en el mapa: solo la ves tú hasta aplicarla.</span>}
-          <div className={styles.actions}>
-            <button type="button" className={styles.button} disabled={!changed || pending} onClick={() => void editor.apply()}>
-              Aplicar
-            </button>
-            <button type="button" className={styles.button} disabled={!changed || pending} onClick={editor.discard}>
-              Descartar
-            </button>
-          </div>
-        </>
+      <TerrainPalette
+        value={editor.brush}
+        onPick={editor.pick}
+        floors={catalog?.floor ?? null}
+        disabled={editor.blocked}
+        preview={preview}
+      />
+
+      {editor.brush !== null && (
+        <div className={styles.row}>
+          <span>{`Pintando con ${TERRAIN_MATERIAL_LABELS[editor.brush]}`}</span>
+          <button type="button" className={styles.button} onClick={editor.unpick}>
+            Deseleccionar
+          </button>
+        </div>
       )}
+      {editor.pending && <span className={styles.hint}>Guardando…</span>}
+
+      <fieldset className={styles.form} disabled={editor.pending || editor.blocked}>
+        <legend className={styles.hint}>Vaciar terreno</legend>
+        <span className={styles.hint}>
+          Devuelve todos los bloques al vacío salvo la entrada. No borra salas ni escritorios: se rechaza si el vacío taparía alguno.
+        </span>
+        <label className={styles.hint}>
+          <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> Confirmo vaciar todo el terreno
+        </label>
+        <button type="button" className={styles.button} disabled={!confirmed} onClick={() => void handleClear()}>
+          Vaciar terreno
+        </button>
+      </fieldset>
 
       {editor.notice !== null && (
         <div className={styles.notice} role="status">

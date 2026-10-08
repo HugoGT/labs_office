@@ -15,7 +15,8 @@ describe('whole office block placement', () => {
   it('snaps the room to the block under the pointer, bounded to the whole world', () => {
     expect(snapToBlock(67 * TILE, 49 * TILE)).toEqual({ tx: 63, ty: 45 });
     expect(snapToBlock(-10, -10)).toEqual({ tx: 0, ty: 0 });
-    expect(snapToBlock(99999, 99999)).toEqual({ tx: 117, ty: 81 });
+    expect(snapToBlock(99999, 99999)).toEqual({ tx: MAP_W - 9, ty: MAP_H - 9 });
+    expect(snapToBlock(99999, 99999)).toEqual({ tx: 180, ty: 126 });
     expect(toLayoutEditCommand({ tag: 'placing', kind: 'room', mode: 'create' }, { items: [], placingSize: { w: 9, h: 9 } })?.placing).toMatchObject({ snap: 'block' });
     expect(toLayoutEditCommand({ tag: 'placing', kind: 'desk', mode: 'create' }, { items: [], placingSize: { w: 3, h: 3 } })?.placing).not.toHaveProperty('snap');
   });

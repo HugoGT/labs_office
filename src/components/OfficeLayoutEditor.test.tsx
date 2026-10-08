@@ -292,7 +292,7 @@ describe('OfficeLayoutEditor: terrain section', () => {
     expect(onEditingChange).toHaveBeenLastCalledWith(true);
     expect(screen.getAllByRole('button', { name: /Salir/ })).toHaveLength(1);
     expect(screen.getByRole('button', { name: /Editar escritorios/ })).toBeInTheDocument();
-    expect(terrainCommands.at(-1)).toEqual({ selected: null, preview: null });
+    expect(terrainCommands.at(-1)).toEqual({ brush: null });
 
     await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
     expect(terrainCommands.at(-1)).toBeNull();

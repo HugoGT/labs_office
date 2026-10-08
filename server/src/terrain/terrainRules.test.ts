@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE } from '../../../src/game/mapData.ts';
 import {
   blockIndexAt,
-  newlyWateredTiles,
+  newlyUnwalkableTiles,
   terrainSnapshot,
   withBlock,
   type LayoutMaterial,
@@ -11,7 +11,8 @@ import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN, LEGACY_SE
 import {
   InvalidTerrainEditError,
   TerrainProtectedError,
-  findWaterConflict,
+  findUnwalkableConflict,
+  parseTerrainBatch,
   parseTerrainEdit,
   staticProtectedTiles,
   type TerrainProtections,
@@ -25,13 +26,24 @@ const STATIC = staticProtectedTiles(BASE_LAYOUT, BASE_MAP_SEATS);
 const NONE: TerrainProtections = { placements: [], players: [] };
 
 function watered(index: number, material: LayoutMaterial = 'water'): number[] {
-  return newlyWateredTiles(BASE_TERRAIN, terrainSnapshot(BASE_LAYOUT, withBlock(BASE_LAYOUT.blocks, index, material)));
+  return newlyUnwalkableTiles(BASE_TERRAIN, terrainSnapshot(BASE_LAYOUT, withBlock(BASE_LAYOUT.blocks, index, material)));
 }
 
 /** A network position whose avatar body sits in the middle of tile (tx, ty). */
 function standingOn(tx: number, ty: number) {
   return { x: tx * TILE + 16, y: ty * TILE + 5 };
 }
+
+describe('parseTerrainBatch', () => {
+  it('accepts the expected wire string of a whole 21x15 map of the longest material name, and nothing longer', () => {
+    const count = 21 * 15;
+    const expected = new Array(count).fill('cobblestone').join(',');
+    const edits = [{ index: 0, material: 'grass' }];
+
+    expect(parseTerrainBatch({ edits, expected }, count).expected).toBe(expected);
+    expect(() => parseTerrainBatch({ edits, expected: `${expected},xx` }, count)).toThrow(InvalidTerrainEditError);
+  });
+});
 
 describe('parseTerrainEdit', () => {
   it('reads a block index from the route and a material from the body', () => {
@@ -68,21 +80,21 @@ describe('staticProtectedTiles', () => {
   });
 });
 
-describe('findWaterConflict', () => {
+describe('findUnwalkableConflict', () => {
   it('does not veto player ground contact: relocation is decided after persistence', () => {
     const protections = { placements: [], players: [{ x: 100, y: 207 }] };
     // Footprint (91, 211)..(109, 225) crosses both x=96 and y=224.
-    expect(findWaterConflict([7 * W + 3], W, new Set(), protections)).toBeNull();
-    expect(findWaterConflict([5 * W + 2], W, new Set(), protections)).toBeNull();
+    expect(findUnwalkableConflict([7 * W + 3], W, new Set(), protections)).toBeNull();
+    expect(findUnwalkableConflict([5 * W + 2], W, new Set(), protections)).toBeNull();
   });
 
   it('lets water onto a free lawn and anything that is not water anywhere', () => {
-    expect(findWaterConflict(watered(LAWN), W, STATIC, NONE)).toBeNull();
+    expect(findUnwalkableConflict(watered(LAWN), W, STATIC, NONE)).toBeNull();
     expect(watered(blockIndexAt(W, PLAYER_SPAWN_TX, PLAYER_SPAWN_TY), 'sand')).toEqual([]);
   });
 
   it('refuses water over the spawn area, where everyone enters', () => {
-    expect(findWaterConflict(watered(blockIndexAt(W, PLAYER_SPAWN_TX, PLAYER_SPAWN_TY)), W, STATIC, NONE)).toBe('placement');
+    expect(findUnwalkableConflict(watered(blockIndexAt(W, PLAYER_SPAWN_TX, PLAYER_SPAWN_TY)), W, STATIC, NONE)).toBe('placement');
   });
 
   it('refuses water under a space or a desk on a block edge, but never floods neighboring blocks', () => {
@@ -91,25 +103,37 @@ describe('findWaterConflict', () => {
     const tx = 63;
     const ty = 18;
 
-    expect(findWaterConflict(flooded, W, STATIC, { placements: [{ x: tx, y: ty, w: 1, h: 1 }], players: [] })).toBe('placement');
-    expect(findWaterConflict(flooded, W, STATIC, { placements: [{ x: 0, y: 0, w: 9, h: 9 }], players: [] })).toBeNull();
+    expect(findUnwalkableConflict(flooded, W, STATIC, { placements: [{ x: tx, y: ty, w: 1, h: 1 }], players: [] })).toBe('placement');
+    expect(findUnwalkableConflict(flooded, W, STATIC, { placements: [{ x: 0, y: 0, w: 9, h: 9 }], players: [] })).toBeNull();
   });
 
   it('allows water under players, including partial footprint overlaps', () => {
-    expect(findWaterConflict(watered(LAWN), W, STATIC, { placements: [], players: [standingOn(67, 22)] })).toBeNull();
+    expect(findUnwalkableConflict(watered(LAWN), W, STATIC, { placements: [], players: [standingOn(67, 22)] })).toBeNull();
     // Body center just right of the block's last column: a third of the body still overlaps it.
     const flooded = new Set(watered(LAWN));
     expect(flooded.has(22 * W + 71)).toBe(true);
     const halfIn = { x: 72 * TILE + 5, y: 22 * TILE + 5 };
     const players = { placements: [], players: [halfIn] };
-    expect(findWaterConflict([22 * W + 71], W, new Set(), players)).toBeNull();
-    expect(findWaterConflict(watered(LAWN), W, STATIC, { placements: [], players: [standingOn(10, 10)] })).toBeNull();
+    expect(findUnwalkableConflict([22 * W + 71], W, new Set(), players)).toBeNull();
+    expect(findUnwalkableConflict(watered(LAWN), W, STATIC, { placements: [], players: [standingOn(10, 10)] })).toBeNull();
   });
 
   it('names the placement before the player: one of them moves away, the other does not', () => {
     const flooded = watered(LAWN);
     const protections: TerrainProtections = { placements: [{ x: 63, y: 18, w: 9, h: 9 }], players: [standingOn(67, 22)] };
-    expect(findWaterConflict(flooded, W, STATIC, protections)).toBe('placement');
+    expect(findUnwalkableConflict(flooded, W, STATIC, protections)).toBe('placement');
+  });
+
+  it('treats void like water: refused under a placement or the spawn, free over a lawn', () => {
+    const erased = watered(LAWN, 'void');
+    expect(erased).toEqual(watered(LAWN));
+    expect(findUnwalkableConflict(erased, W, STATIC, NONE)).toBeNull();
+    expect(findUnwalkableConflict(erased, W, STATIC, { placements: [{ x: 63, y: 18, w: 1, h: 1 }], players: [] })).toBe('placement');
+    expect(findUnwalkableConflict(watered(blockIndexAt(W, PLAYER_SPAWN_TX, PLAYER_SPAWN_TY), 'void'), W, STATIC, NONE)).toBe('placement');
+  });
+
+  it('reads void as a material of an edit', () => {
+    expect(parseTerrainEdit('35', { material: 'void' }, COUNT)).toEqual({ index: 35, material: 'void' });
   });
 
   it('carries the reason on a typed error', () => {

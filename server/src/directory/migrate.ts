@@ -8,6 +8,10 @@
  * el esquema crezca lo bastante como para necesitar cambios destructivos, esa
  * decision habra que revisarla -- este comentario es donde empezar.
  *
+ * The one exception is the move to the 21x15 block grid: shifting stored
+ * coordinates is not convergent, so it runs once behind the
+ * `map_layout_version` marker (`MAP_LAYOUT_VERSION`), still in this script.
+ *
  * Se manda en UNA sola consulta a proposito. Postgres ejecuta una consulta
  * simple con varias sentencias dentro de una transaccion implicita, y el DDL
  * aqui es transaccional: o queda el esquema entero o no queda nada. Arrancar
@@ -29,6 +33,13 @@ import type { DirectoryQueryable } from './pgDirectory.ts';
 export function readSchemaSql(): string {
   return readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
 }
+
+/**
+ * The map layout `schema.sql` brings stored rows to: 2 is the 21x15 block
+ * grid. Its one-time move is the only step of the file guarded by a marker
+ * (`map_layout_version`), because a shift cannot converge like the rest.
+ */
+export const MAP_LAYOUT_VERSION = 2;
 
 export async function migrate(db: DirectoryQueryable): Promise<void> {
   await db.query(readSchemaSql());

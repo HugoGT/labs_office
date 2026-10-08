@@ -11,8 +11,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { LEGACY_BLOCK_GRID, MAP_BLOCK_COLUMNS, MAP_BLOCK_TILES, SPAWN_BLOCK_INDEX, TILE } from '../../../src/game/mapData.ts';
 import { LAYOUT_MATERIALS } from '../../../src/game/officeLayout.ts';
-import { migrate, readSchemaSql, reportDesksWithoutSpace } from './migrate.ts';
+import { MAP_LAYOUT_VERSION, migrate, readSchemaSql, reportDesksWithoutSpace } from './migrate.ts';
 
 /** Comparar SQL con saltos de linea y sangria es comparar formato, no contrato. */
 function squash(sql: string): string {
@@ -275,7 +276,10 @@ describe('schema.sql: las cuatro tablas de PRD-7 (#7)', () => {
 
   it('does not seed legacy rooms or reset existing placements', () => {
     expect(schema).not.toContain('insert into spaces (id, slug, name, x, y, w, h) values');
-    expect(schema).not.toMatch(/delete from spaces|truncate spaces|update spaces set/);
+    expect(schema).not.toMatch(/delete from spaces|truncate spaces/);
+    // Placements only ever move, once, with the whole map (see the 21x15 grid block below).
+    const outsideMove = schema.slice(0, schema.indexOf('do $$')) + schema.slice(schema.lastIndexOf('end $$;'));
+    expect(outsideMove).not.toMatch(/update spaces set/);
   });
 
   it('NO pide ninguna extension nueva para las cuatro tablas de PRD-7', () => {
@@ -668,5 +672,72 @@ describe('schema.sql: collision areas per piece', () => {
     expect(squashed).toContain(
       "create table if not exists piece_collisions ( piece_id text primary key, rects jsonb not null check (jsonb_typeof(rects) = 'array'), updated_by uuid references users(id), updated_at timestamptz not null default now() )",
     );
+  });
+});
+
+/**
+ * The 21x15 block grid (map editor palette): stored rows were written against
+ * the 14x10 grid, so they move once, in the same script as the rest of the
+ * schema (one implicit transaction), and a persisted marker keeps a restart
+ * from moving them again. Checked against real Postgres when written; here
+ * the statements themselves are the contract.
+ */
+describe('schema.sql: one-time move to the 21x15 block grid', () => {
+  const squashed = squash(schema);
+  const { columns, rows, offsetColumns, offsetRows } = LEGACY_BLOCK_GRID;
+  const tilesX = offsetColumns * MAP_BLOCK_TILES;
+  const tilesY = offsetRows * MAP_BLOCK_TILES;
+  const migration = squashed.slice(squashed.indexOf('do $$'), squashed.lastIndexOf('end $$;'));
+
+  it('keeps a one-row marker table of the map layout version, created idempotently', () => {
+    expect(squashed).toContain(
+      'create table if not exists map_layout_version ( id boolean primary key default true check (id), version integer not null, migrated_at timestamptz not null default now() )',
+    );
+  });
+
+  it('moves rows only while the marker is missing, and writes the marker in the same block', () => {
+    expect(migration).toContain('if not exists (select 1 from map_layout_version) then');
+    expect(migration).toContain(`insert into map_layout_version (version) values (${MAP_LAYOUT_VERSION})`);
+    expect(MAP_LAYOUT_VERSION).toBe(2);
+  });
+
+  it('remaps every terrain block of the old grid to the same block of the new one, through a free range', () => {
+    // Rows past the old grid were never read: moved, they would suddenly show up inside the new one.
+    expect(migration).toContain(`delete from terrain_blocks where block_index >= ${columns * rows}`);
+    expect(migration).toContain(
+      `update terrain_blocks set block_index = 1000000 + (block_index / ${columns} + ${offsetRows}) * ${MAP_BLOCK_COLUMNS} + (block_index % ${columns} + ${offsetColumns})`,
+    );
+    expect(migration).toContain('update terrain_blocks set block_index = block_index - 1000000');
+    // The old spawn block lands on the new one.
+    expect((Math.floor(77 / columns) + offsetRows) * MAP_BLOCK_COLUMNS + (77 % columns) + offsetColumns).toBe(SPAWN_BLOCK_INDEX);
+  });
+
+  it('shifts spaces and desks, stored in tiles, by the same offset, through a free range so no exclusion constraint trips', () => {
+    for (const table of ['spaces', 'desks']) {
+      expect(migration).toContain(`update ${table} set x = x + 1000000, y = y + 1000000`);
+      expect(migration).toContain(`update ${table} set x = x - 1000000 + ${tilesX}, y = y - 1000000 + ${tilesY}`);
+    }
+    expect([tilesX, tilesY]).toEqual([27, 18]);
+  });
+
+  it('shifts saved last positions, stored in pixels, and leaves never-saved ones NULL', () => {
+    expect(migration).toContain(
+      `update users set last_x = last_x + ${tilesX * TILE}, last_y = last_y + ${tilesY * TILE} where last_x is not null and last_y is not null`,
+    );
+    expect([tilesX * TILE, tilesY * TILE]).toEqual([864, 576]);
+  });
+
+  it('runs after every table and column it moves exists', () => {
+    const start = squashed.indexOf('do $$');
+    for (const prerequisite of [
+      'create table if not exists terrain_blocks',
+      'create table if not exists desks',
+      'alter table spaces add column if not exists desk_id',
+      'alter table users add column if not exists last_x',
+      'create table if not exists map_layout_version',
+    ]) {
+      expect(squashed.indexOf(prerequisite), prerequisite).toBeGreaterThanOrEqual(0);
+      expect(squashed.indexOf(prerequisite), prerequisite).toBeLessThan(start);
+    }
   });
 });

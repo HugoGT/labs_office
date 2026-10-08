@@ -13,7 +13,7 @@ import {
   decodeTerrainBlocks,
   encodeTerrainBlocks,
   isLayoutMaterial,
-  newlyWateredTiles,
+  newlyUnwalkableTiles,
   withBlock,
   InvalidOfficeLayoutError,
   LAYOUT_DECALS,
@@ -130,8 +130,9 @@ const grassMap = (extra: Partial<Parameters<typeof tiledMap>[0]> = {}) =>
 
 describe('layout vocabulary', () => {
   it('restates the terrain materials of the art contract in its drawing priority', () => {
-    expect(LAYOUT_MATERIALS).toEqual(TERRAIN_MATERIALS);
-    expect(MATERIAL_WALKABLE).toEqual(TERRAIN_WALKABLE);
+    // Void ("no terrain") comes first: below water, nothing is drawn for it and nobody walks on it.
+    expect(LAYOUT_MATERIALS).toEqual(['void', ...TERRAIN_MATERIALS]);
+    expect(MATERIAL_WALKABLE).toEqual({ void: false, ...TERRAIN_WALKABLE });
     expect(LAYOUT_DECALS).toEqual(TERRAIN_DECALS);
   });
 
@@ -306,12 +307,12 @@ describe('terrain per tile', () => {
 });
 
 describe('effective walkability', () => {
-  it('blocks water and nothing else of the terrain', () => {
+  it('blocks water and void and nothing else of the terrain', () => {
     const snapshot = terrainSnapshot(grassMap({ ground: (tx) => LAYOUT_MATERIALS[tx % LAYOUT_MATERIALS.length] ?? null }));
 
     for (let tx = 0; tx < 18; tx += 1) {
       const material = terrainMaterialAt(snapshot, tx, 4);
-      expect(isTileWalkable(snapshot, tx, 4)).toBe(material !== 'water');
+      expect(isTileWalkable(snapshot, tx, 4)).toBe(material !== 'water' && material !== 'void');
     }
   });
 
@@ -435,7 +436,7 @@ describe('the committed layout (maps/office.json)', () => {
     const bare = terrainSnapshot({ ...BASE_LAYOUT, props: props('bridge') });
 
     expect(props('tree').length).toBeGreaterThan(100);
-    expect(BASE_TERRAIN.materials.filter((material) => material === 'water').length).toBeGreaterThan(400);
+    expect(BASE_TERRAIN.materials.filter((material) => material === 'water').length).toBeGreaterThan(300);
     for (const prop of BASE_LAYOUT.props.filter((candidate) => candidate.kind !== 'bridge')) {
       for (let ty = prop.ty; ty < prop.ty + prop.h; ty += 1) {
         for (let tx = prop.tx; tx < prop.tx + prop.w; tx += 1) {
@@ -509,7 +510,7 @@ describe('terrain block edits', () => {
   });
 
   it('lists exactly the tiles an edit turns into water, never neighboring blocks', () => {
-    const watered = newlyWateredTiles(BASE_TERRAIN, terrainSnapshot(BASE_LAYOUT, withBlock(BASE_LAYOUT.blocks, 35, 'water')));
+    const watered = newlyUnwalkableTiles(BASE_TERRAIN, terrainSnapshot(BASE_LAYOUT, withBlock(BASE_LAYOUT.blocks, 35, 'water')));
     const inside = (index: number) => {
       const tx = index % BASE_LAYOUT.width;
       const ty = Math.floor(index / BASE_LAYOUT.width);
@@ -522,6 +523,19 @@ describe('terrain block edits', () => {
     expect(watered).toHaveLength(81);
     expect(watered.every((index) => BASE_TERRAIN.materials[index] !== 'water')).toBe(true);
     // Drying the lake floods nothing.
-    expect(newlyWateredTiles(BASE_TERRAIN, terrainSnapshot(BASE_LAYOUT, withBlock(BASE_LAYOUT.blocks, 94, 'grass')))).toEqual([]);
+    expect(newlyUnwalkableTiles(BASE_TERRAIN, terrainSnapshot(BASE_LAYOUT, withBlock(BASE_LAYOUT.blocks, 94, 'grass')))).toEqual([]);
+  });
+
+  it('treats void like water: erasing a lawn lists its tiles, turning water into void lists none', () => {
+    const erased = newlyUnwalkableTiles(BASE_TERRAIN, terrainSnapshot(BASE_LAYOUT, withBlock(BASE_LAYOUT.blocks, 35, 'void')));
+    expect(erased).toHaveLength(81);
+    expect(erased).toContain(22 * BASE_LAYOUT.width + 67);
+    expect(newlyUnwalkableTiles(BASE_TERRAIN, terrainSnapshot(BASE_LAYOUT, withBlock(BASE_LAYOUT.blocks, 94, 'void')))).toEqual([]);
+  });
+
+  it('makes a void block nonwalkable, like water', () => {
+    const voided = terrainSnapshot(BASE_LAYOUT, withBlock(BASE_LAYOUT.blocks, 35, 'void'));
+    expect(terrainMaterialAt(voided, 67, 22)).toBe('void');
+    expect(isTileWalkable(voided, 67, 22)).toBe(false);
   });
 });

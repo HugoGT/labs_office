@@ -1,24 +1,45 @@
 /** Shared import-free world constants. Runtime placements belong to the database. */
 
 export const TILE = 32;
+/** Side of a terrain block, in tiles (#123). `officeLayout.ts` reads it from here. */
+export const MAP_BLOCK_TILES = 9;
 /**
- * The world of the Tiled layout (`maps/office.json`, #123): 14x10 blocks of
- * 9x9 tiles. Restated here to keep this file import-free; `mapData.test.ts`
- * pins it to the layout.
+ * The world of the Tiled layout (`maps/office.json`, #123): 21x15 blocks of
+ * 9x9 tiles, every other size derived from them. Restated here to keep this
+ * file import-free; `mapData.test.ts` pins it to the layout. It grew from
+ * the 14x10 blocks of `LEGACY_BLOCK_GRID`, so that the spawn block stayed in
+ * the middle.
  */
-export const MAP_W = 126;
-export const MAP_H = 90;
+export const MAP_BLOCK_COLUMNS = 21;
+export const MAP_BLOCK_ROWS = 15;
+export const MAP_W = MAP_BLOCK_COLUMNS * MAP_BLOCK_TILES;
+export const MAP_H = MAP_BLOCK_ROWS * MAP_BLOCK_TILES;
 export const WORLD_W = MAP_W * TILE;
 export const WORLD_H = MAP_H * TILE;
 export const PROX_RADIUS = 170;
+/**
+ * The 14x10 block grid of the first block editor, and where it sits in this
+ * one, in blocks. `directory/schema.sql` moves stored terrain blocks,
+ * placements and last positions by it exactly once.
+ */
+export const LEGACY_BLOCK_GRID = { columns: 14, rows: 10, offsetColumns: 3, offsetRows: 2 } as const;
 
 /**
- * Tile de aparicion del jugador. Vive aqui, y no en `characters.ts`, porque el
- * servidor Colyseus tambien la necesita para situar a los avatares remotos y
- * `characters.ts` importa Phaser, que en Node no se puede ni cargar.
+ * The protected central block of the spawn tile: the middle block of the
+ * grid. It stays wood whatever is painted.
  */
-export const PLAYER_SPAWN_TX = 67;
-export const PLAYER_SPAWN_TY = 49;
+export const SPAWN_BLOCK_COLUMN = Math.floor(MAP_BLOCK_COLUMNS / 2);
+export const SPAWN_BLOCK_ROW = Math.floor(MAP_BLOCK_ROWS / 2);
+export const SPAWN_BLOCK_INDEX = SPAWN_BLOCK_ROW * MAP_BLOCK_COLUMNS + SPAWN_BLOCK_COLUMN;
+
+/**
+ * Tile de aparicion del jugador: el centro del bloque de entrada. Vive aqui,
+ * y no en `characters.ts`, porque el servidor Colyseus tambien la necesita
+ * para situar a los avatares remotos y `characters.ts` importa Phaser, que en
+ * Node no se puede ni cargar.
+ */
+export const PLAYER_SPAWN_TX = SPAWN_BLOCK_COLUMN * MAP_BLOCK_TILES + Math.floor(MAP_BLOCK_TILES / 2);
+export const PLAYER_SPAWN_TY = SPAWN_BLOCK_ROW * MAP_BLOCK_TILES + Math.floor(MAP_BLOCK_TILES / 2);
 
 export interface ZoneLabel {
   t: string;

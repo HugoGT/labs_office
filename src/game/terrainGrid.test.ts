@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAP_H, MAP_W, TILE } from './mapData';
+import { TILE } from './mapData';
 import { LEGACY_SPACES as BUILT_IN_SPACES, LEGACY_COLLISIONS as BASE_COLLISION_RECTS, LEGACY_TERRAIN as BASE_TERRAIN, LEGACY_SEATS as BASE_MAP_SEATS } from '../test/legacyOffice';
 import { buildLegacyTerrainGrid as buildTerrainGrid } from '../test/legacyTerrainGrid';
 import { isTileWalkable } from './officeLayout';
@@ -13,6 +13,10 @@ import {
   pickApproachTile,
   type TileRect,
 } from './terrainGrid';
+
+/** The legacy fixture keeps the 126x90 world it was drawn in. */
+const MAP_W = BASE_TERRAIN.width;
+const MAP_H = BASE_TERRAIN.height;
 
 /**
  * The base map as it was built in code before the Tiled layout (art step 8):
@@ -42,7 +46,7 @@ describe('buildTerrainGrid: collision rectangles', () => {
 });
 
 describe('buildTerrainGrid', () => {
-  it('covers the 126x90 world and fences it with a solid hedge', () => {
+  it('covers its 126x90 world and fences it with a solid hedge', () => {
     const grid = buildTerrainGrid();
 
     expect(grid.solid).toHaveLength(MAP_H);

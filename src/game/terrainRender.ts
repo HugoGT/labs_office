@@ -14,22 +14,51 @@ import {
   wallFrameIndex,
   wallJointRect,
   type Rect,
+  type TerrainMaterial,
 } from './artContract';
-import { LAYOUT_MATERIALS, terrainMaterialAt, type LayoutProp, type OfficeLayout, type TerrainSnapshot } from './officeLayout';
+import { LAYOUT_MATERIALS, terrainMaterialAt, type LayoutMaterial, type LayoutProp, type OfficeLayout, type TerrainSnapshot } from './officeLayout';
+
+/**
+ * The color of the void: the camera background around and under the world,
+ * the minimap's too, and the void tile of the flat fallback. Void is drawn as
+ * nothing, so an unbuilt map reads as one black screen around its terrain.
+ */
+export const VOID_COLOR = 0x000000;
+
+/** One flat color per material, for the tileset drawn when the pack is missing (`LAYOUT_MATERIALS` order). */
+export const TERRAIN_FLAT_COLORS: Readonly<Record<LayoutMaterial, number>> = {
+  void: VOID_COLOR,
+  water: 0x3f78c4,
+  grass: 0x5d9b4c,
+  dirt: 0x8d6a47,
+  sand: 0xd9c48c,
+  cobblestone: 0x8c9096,
+  wood: 0xa4723f,
+  tile: 0xc5c9cf,
+  carpet: 0x7b4f8c,
+};
+
+/** The pack material drawn on a tile, or `null` for void: nothing is drawn there. */
+export function drawnTerrainAt(terrain: TerrainSnapshot, tx: number, ty: number): TerrainMaterial | null {
+  const material = terrainMaterialAt(terrain, tx, ty);
+  return material === 'void' ? null : material;
+}
 
 /**
  * Data of the `TERRAIN_LAYER_COUNT` dual-grid layers (`[layer][cy][cx]`,
  * `-1` empty), drawn at `TERRAIN_LAYER_ORIGIN` (artContract.ts). Transitions between any two
- * neighbors come from the corner masks of `terrainLayerData`.
+ * neighbors come from the corner masks of `terrainLayerData`; against the
+ * void a material simply ends on its own edge, over the black background.
  */
 export function terrainTileData(terrain: TerrainSnapshot): number[][][] {
-  return terrainLayerData(terrain.width, terrain.height, (tx, ty) => terrainMaterialAt(terrain, tx, ty));
+  return terrainLayerData(terrain.width, terrain.height, (tx, ty) => drawnTerrainAt(terrain, tx, ty));
 }
 
 /**
  * The decal layer, on the map grid (`[ty][tx]`, `-1` empty). A decal only
  * shows on the terrain it belongs to, so a block edit that floods a lawn
- * leaves no flowers floating and a drained pond no lily pads on the grass.
+ * leaves no flowers floating, a drained pond no lily pads on the grass, and
+ * an erased block nothing at all.
  */
 export function decalTileData(layout: OfficeLayout, terrain: TerrainSnapshot): number[][] {
   const rows: number[][] = [];
@@ -37,8 +66,9 @@ export function decalTileData(layout: OfficeLayout, terrain: TerrainSnapshot): n
     const row: number[] = [];
     for (let tx = 0; tx < layout.width; tx += 1) {
       const decal = layout.decals[ty * layout.width + tx];
-      const onWater = terrainMaterialAt(terrain, tx, ty) === 'water';
-      row.push(decal === null || decal === undefined || (decal === 'lily-pad') !== onWater ? -1 : terrainDecalIndex(decal));
+      const material = terrainMaterialAt(terrain, tx, ty);
+      const onWater = material === 'water';
+      row.push(decal === null || decal === undefined || material === 'void' || (decal === 'lily-pad') !== onWater ? -1 : terrainDecalIndex(decal));
     }
     rows.push(row);
   }

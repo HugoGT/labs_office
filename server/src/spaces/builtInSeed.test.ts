@@ -25,7 +25,9 @@ describe('BUILT_IN_SEED_SPACES', () => {
     // or destructive reset is permitted for new or existing deployments.
     const sql = readSchemaSql().replace(/--[^\n]*/g, '').toLowerCase();
     expect(sql).toContain('create table if not exists spaces');
-    expect(sql).not.toMatch(/insert into spaces \(id,|delete from spaces|truncate spaces|update spaces set/);
+    expect(sql).not.toMatch(/insert into spaces \(id,|delete from spaces|truncate spaces/);
+    // Rooms only ever move, once, with the whole map (the 21x15 grid block of schema.sql).
+    expect(sql.slice(0, sql.indexOf('do $$')) + sql.slice(sql.lastIndexOf('end $$;'))).not.toMatch(/update spaces set/);
   });
 
   it('starts new offices without rooms', () => {

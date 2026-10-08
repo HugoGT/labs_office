@@ -21,7 +21,7 @@ import {
   spawnPlayer,
 } from './characters';
 import { avatarDepth, chairLayerDepth, worldAssetDepth } from './depthLayers';
-import { TILE, WORLD_H } from './mapData';
+import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H } from './mapData';
 import { DEFAULT_NAME, DEFAULT_STATUS } from './officeProtocol';
 import { STATUS_COLOR } from './presence';
 import { collisionWorld, isPositionBlocked, layoutPropInstances } from './pieceCollisions';
@@ -91,8 +91,9 @@ describe('spawnPlayer', () => {
       };
     });
 
-    expect(result.x).toBe(67 * TILE + 16);
-    expect(result.y).toBe(49 * TILE + 16);
+    expect(result.x).toBe(PLAYER_SPAWN_TX * TILE + 16);
+    expect(result.y).toBe(PLAYER_SPAWN_TY * TILE + 16);
+    expect([PLAYER_SPAWN_TX, PLAYER_SPAWN_TY]).toEqual([94, 67]);
     expect(result.hasArcadeBody).toBe(true);
     expect(result.collideWorldBounds).toBe(true);
   });

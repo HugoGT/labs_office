@@ -13,23 +13,24 @@ describe('buildInitialLayout', () => {
     expect(serializeLayout(buildInitialLayout())).toBe(serializeLayout(buildInitialLayout()));
   });
 
-  it('is a Tiled map that the office parser and the seat parser accept, 14x10 blocks of 9x9 tiles', () => {
+  it('is a Tiled map that the office parser and the seat parser accept, 21x15 blocks of 9x9 tiles', () => {
     const map = JSON.parse(serializeLayout(buildInitialLayout())) as Record<string, unknown>;
     const layout = parseOfficeLayout(map);
 
-    expect(layout.width).toBe(126);
-    expect(layout.height).toBe(90);
-    expect(layout.blocks).toHaveLength(140);
+    expect(layout.width).toBe(189);
+    expect(layout.height).toBe(135);
+    expect(layout.blocks).toHaveLength(315);
     expect(parseBaseMapSeats(map)).toEqual([]);
   });
 
-  it('exactly reproduces the checked-in empty map, with one full wood block', () => {
+  it('exactly reproduces the checked-in empty map: void around one full central wood block', () => {
     const layout = parseOfficeLayout(JSON.parse(serializeLayout(buildInitialLayout())));
     const bare = terrainSnapshot({ ...layout, props: layout.props.filter((prop) => prop.kind !== 'tree') });
 
     expect(layout.props).toEqual([]);
-    expect(isTileWalkable(bare, 67, 49)).toBe(true);
+    expect(isTileWalkable(bare, 94, 67)).toBe(true);
     expect(bare.walkable.filter(Boolean)).toHaveLength(81);
+    expect(layout.blocks.filter((material) => material === 'void')).toHaveLength(314);
     expect(serializeLayout(buildInitialLayout())).toBe(readFileSync(new URL('../../src/game/maps/office.json', import.meta.url), 'utf8'));
   });
 });
@@ -45,6 +46,10 @@ describe('renderLayoutPalette', () => {
     expect(alphaAt(LAYOUT_PALETTE.indexOf('grass'), 16, 16)).toBe(255);
     expect(alphaAt(LAYOUT_PALETTE.indexOf('wall-brick'), 16, 16)).toBe(255);
     expect(alphaAt(LAYOUT_PALETTE.indexOf('lily-pad'), 0, 0)).toBe(0);
+    // The void tile is opaque black, the color the office draws behind its terrain.
+    const voidAt = (LAYOUT_PALETTE.indexOf('void') * 32 + 16 + 16 * palette.width) * 4;
+    expect([...palette.data.slice(voidAt, voidAt + 4)]).toEqual([0, 0, 0, 255]);
+    expect(LAYOUT_PALETTE.at(-1)).toBe('void');
   });
 
   it('round-trips through PNG, as Tiled reads it', () => {

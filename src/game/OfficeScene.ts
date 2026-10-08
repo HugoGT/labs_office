@@ -53,6 +53,7 @@ import {
   renderTerrain,
   type TerrainTilemap,
 } from './mapBuilder';
+import { VOID_COLOR } from './terrainRender';
 import {
   BUILT_IN_SPACES,
   BUILT_IN_SPACES_VERSION,
@@ -68,7 +69,6 @@ import {
   BASE_TERRAIN,
   encodeTerrainBlocks,
   terrainSnapshot,
-  withBlock,
   type LayoutMaterial,
   type TerrainSnapshot,
   type OfficeLayout,
@@ -81,7 +81,6 @@ import {
   type CollisionRect,
   type CollisionTable,
 } from './pieceCollisions';
-import type { TerrainEditCommand } from './terrainEditor';
 import { TerrainEditLayer } from './TerrainEditLayer';
 import { COLLISION_EDIT_GRAPHICS_NAME, CollisionEditLayer } from './CollisionEditLayer';
 import {
@@ -263,8 +262,7 @@ export class OfficeScene extends Phaser.Scene {
   private terrainTilemap?: TerrainTilemap;
   /** The blocks the room replicated last (#123 phase 2); colliders and `grid` follow them. */
   private terrainBlocks: readonly LayoutMaterial[] = BASE_LAYOUT.blocks;
-  /** The terrain editor's local preview, painted over `terrainBlocks` and never collided with. */
-  private terrainPreview: TerrainEditCommand['preview'] = null;
+  /** The terrain editor's pending paints, drawn instead of `terrainBlocks` and never collided with. */
   private terrainPreviewBlocks: readonly LayoutMaterial[] | null = null;
   /** The static bodies of the terrain grid and their collider, replaced whole on each edit. */
   private terrainColliders?: { rects: Phaser.GameObjects.Rectangle[]; collider: Phaser.Physics.Arcade.Collider };
@@ -664,12 +662,9 @@ export class OfficeScene extends Phaser.Scene {
       this.terrainEditing = command !== null;
       this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing;
       if (this.layoutEditing) this.resetWalking();
-      const preview = command?.preview ?? null;
       const previewBlocks = command?.previewBlocks ?? null;
-      const repaint = encodePreview(preview) !== encodePreview(this.terrainPreview) ||
-        (previewBlocks === null ? '' : encodeTerrainBlocks(previewBlocks)) !==
+      const repaint = (previewBlocks === null ? '' : encodeTerrainBlocks(previewBlocks)) !==
         (this.terrainPreviewBlocks === null ? '' : encodeTerrainBlocks(this.terrainPreviewBlocks));
-      this.terrainPreview = preview;
       this.terrainPreviewBlocks = previewBlocks;
       if (repaint) this.paintTerrain();
       if (opening) this.bridge.emit('terrain', { blocks: this.terrainBlocks });
@@ -1697,11 +1692,9 @@ export class OfficeScene extends Phaser.Scene {
     this.bridge.emit('terrain', { blocks });
   }
 
-  /** Redraws the tilemap from the live blocks, with the editor's preview over them. */
+  /** Redraws the tilemap from the live blocks, or from the editor's pending paints while it has some. */
   private paintTerrain(): void {
-    const preview = this.terrainPreview;
-    const shown = this.terrainPreviewBlocks ?? (preview === null ? this.terrainBlocks : withBlock(this.terrainBlocks, preview.index, preview.material));
-    this.terrainTilemap?.refresh(terrainSnapshot(this.layout, shown));
+    this.terrainTilemap?.refresh(terrainSnapshot(this.layout, this.terrainPreviewBlocks ?? this.terrainBlocks));
   }
 
   /** Camara principal siguiendo al jugador + minimapa en la esquina superior derecha (app.js:410-431). */
@@ -1713,7 +1706,8 @@ export class OfficeScene extends Phaser.Scene {
     const bounds = followBounds({ x: 0, y: 0, width: WORLD_W, height: WORLD_H }, cam, initialZoom);
     cam.setBounds(bounds.x, bounds.y, bounds.width, bounds.height);
     cam.startFollow(this.player, true, FOLLOW_LERP, FOLLOW_LERP);
-    cam.setBackgroundColor('#0d1117');
+    // The void (unbuilt map) draws nothing: the whole screen is black around and under the terrain.
+    cam.setBackgroundColor(VOID_COLOR);
 
     const minimap = this.cameras.add(
       this.scale.width - (MINIMAP_WIDTH + RAIL_RIGHT),
@@ -1723,7 +1717,7 @@ export class OfficeScene extends Phaser.Scene {
     );
     minimap.setZoom(Math.min(MINIMAP_WIDTH / WORLD_W, MINIMAP_HEIGHT / WORLD_H));
     minimap.centerOn(WORLD_W / 2, WORLD_H / 2);
-    minimap.setBackgroundColor(0x0d1117);
+    minimap.setBackgroundColor(VOID_COLOR);
     this.minimapCamera = minimap;
 
     this.mmMarker = this.add.circle(0, 0, 42, 0xffffff, 0.45).setDepth(MINIMAP_MARKER_DEPTH);
@@ -2051,10 +2045,6 @@ export class OfficeScene extends Phaser.Scene {
       body.setVelocity(0, 0);
     }
   }
-}
-
-function encodePreview(preview: TerrainEditCommand['preview']): string {
-  return preview === null ? '' : `${preview.index}:${preview.material}`;
 }
 
 function facingFromSnapshot(facing: string): Facing {

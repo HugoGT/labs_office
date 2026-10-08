@@ -5,7 +5,7 @@ import { TERRAIN_LAYER_COUNT, TERRAIN_LAYER_ORIGIN, propPlacement, type ArtChair
 import { artSheetKey, findPiece } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
 import { chairPlacement, DEFAULT_DESK_FACING, deskPlacement, footprintAnchor } from './artPlacement';
-import { MAP_H, MAP_W, TILE, ZONE_LABELS } from './mapData';
+import { TILE, ZONE_LABELS } from './mapData';
 import {
   FALLBACK_TERRAIN_KEY,
   placeLayout,
@@ -16,6 +16,10 @@ import {
 } from './mapBuilder';
 import { terrainSnapshot } from './officeLayout';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN, LEGACY_SEATS as BASE_MAP_SEATS } from '../test/legacyOffice';
+
+/** The legacy fixture keeps the 126x90 world it was drawn in. */
+const MAP_W = BASE_TERRAIN.width;
+const MAP_H = BASE_TERRAIN.height;
 import { decalTileData, fallbackTerrainData, hedgeSprites, terrainTileData, wallSprites } from './terrainRender';
 import { createOfficeTextures } from './textures';
 
