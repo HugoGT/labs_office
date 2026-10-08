@@ -3,7 +3,7 @@ import { ART_TILE } from './artContract';
 import { BLOCK_TILES, BASE_LAYOUT, BASE_TERRAIN, LAYOUT_TILE, blockIndexAt, terrainSnapshot, withBlock } from './officeLayout';
 import {
   BUILT_IN_SPACES,
-  LEGACY_BLOCK_OFFSET,
+  LEGACY_BLOCK_GRID,
   MAP_BLOCK_COLUMNS,
   MAP_BLOCK_ROWS,
   MAP_H,
@@ -37,11 +37,13 @@ describe('mapData', () => {
   });
 
   it('grew 50% per side around the old 14x10 grid, keeping the spawn block in the middle', () => {
-    // Old spawn: block (7, 5), index 77, tile (67, 49).
-    expect(SPAWN_BLOCK_INDEX).toBe((5 + LEGACY_BLOCK_OFFSET.rows) * 21 + 7 + LEGACY_BLOCK_OFFSET.columns);
+    // Old spawn: block (7, 5) of 14x10, index 77, tile (67, 49).
+    const { columns, rows, offsetColumns, offsetRows } = LEGACY_BLOCK_GRID;
+    expect([columns * 1.5, rows * 1.5]).toEqual([MAP_BLOCK_COLUMNS, MAP_BLOCK_ROWS]);
+    expect(SPAWN_BLOCK_INDEX).toBe((5 + offsetRows) * MAP_BLOCK_COLUMNS + 7 + offsetColumns);
     expect(SPAWN_BLOCK_INDEX).toBe(157);
-    expect([PLAYER_SPAWN_TX, PLAYER_SPAWN_TY]).toEqual([67 + 27, 49 + 18]);
-    expect([LEGACY_BLOCK_OFFSET.columns * 2 + 14, LEGACY_BLOCK_OFFSET.rows * 2 + 10]).toEqual([MAP_BLOCK_COLUMNS - 1, MAP_BLOCK_ROWS - 1]);
+    expect([PLAYER_SPAWN_TX, PLAYER_SPAWN_TY]).toEqual([67 + offsetColumns * 9, 49 + offsetRows * 9]);
+    expect([PLAYER_SPAWN_TX, PLAYER_SPAWN_TY]).toEqual([94, 67]);
     expect(PLAYER_SPAWN_TX * TILE + TILE / 2).toBe(WORLD_W / 2);
     expect(PLAYER_SPAWN_TY * TILE + TILE / 2).toBe(WORLD_H / 2);
   });

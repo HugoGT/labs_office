@@ -7,9 +7,8 @@ export const MAP_BLOCK_TILES = 9;
  * The world of the Tiled layout (`maps/office.json`, #123): 21x15 blocks of
  * 9x9 tiles, every other size derived from them. Restated here to keep this
  * file import-free; `mapData.test.ts` pins it to the layout. It grew from
- * 14x10 blocks with the old grid at block offset `LEGACY_BLOCK_OFFSET`, so
- * the spawn block stayed in the middle (`directory/schema.sql` moves stored
- * placements the same way, once).
+ * the 14x10 blocks of `LEGACY_BLOCK_GRID`, so that the spawn block stayed in
+ * the middle.
  */
 export const MAP_BLOCK_COLUMNS = 21;
 export const MAP_BLOCK_ROWS = 15;
@@ -18,8 +17,12 @@ export const MAP_H = MAP_BLOCK_ROWS * MAP_BLOCK_TILES;
 export const WORLD_W = MAP_W * TILE;
 export const WORLD_H = MAP_H * TILE;
 export const PROX_RADIUS = 170;
-/** Where the 14x10 grid of the first block editor sits in this one, in blocks. */
-export const LEGACY_BLOCK_OFFSET = { columns: 3, rows: 2 } as const;
+/**
+ * The 14x10 block grid of the first block editor, and where it sits in this
+ * one, in blocks. `directory/schema.sql` moves stored terrain blocks,
+ * placements and last positions by it exactly once.
+ */
+export const LEGACY_BLOCK_GRID = { columns: 14, rows: 10, offsetColumns: 3, offsetRows: 2 } as const;
 
 /**
  * The protected central block of the spawn tile: the middle block of the
