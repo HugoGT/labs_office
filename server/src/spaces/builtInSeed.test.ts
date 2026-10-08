@@ -21,32 +21,22 @@ import { BUILT_IN_SEED_SPACES, BUILT_IN_SEED_VERSION } from './builtInSeed.ts';
 
 describe('BUILT_IN_SEED_SPACES', () => {
   it('preserves deleted defaults, replacements and pre-existing empty/populated deployments (SQL contract)', () => {
-    // Static migration proof, not a PostgreSQL execution: table existence must
-    // be captured BEFORE CREATE and guard the seed, never depend on row count.
+    // Static migration contract, not a PostgreSQL execution: no legacy seed
+    // or destructive reset is permitted for new or existing deployments.
     const sql = readSchemaSql().replace(/--[^\n]*/g, '').toLowerCase();
-    const block = sql.match(/do \$spaces_initialization\$([\s\S]*?)\$spaces_initialization\$/)?.[1];
-    expect(block).toBeDefined();
-    expect(block).toContain("initialize_spaces boolean := to_regclass('spaces') is null");
-    expect(block!.indexOf('to_regclass')).toBeLessThan(block!.indexOf('create table'));
-    expect(block).toMatch(/if initialize_spaces then\s+insert into spaces \(id,[\s\S]*?end if/);
-    expect(block).not.toMatch(/not exists\s*\(select .* from spaces/);
-    expect(sql.match(/insert into spaces \(id,/g)).toHaveLength(1);
+    expect(sql).toContain('create table if not exists spaces');
+    expect(sql).not.toMatch(/insert into spaces \(id,|delete from spaces|truncate spaces|update spaces set/);
   });
 
-  it('tiene exactamente los dos espacios de siempre', () => {
-    expect(BUILT_IN_SEED_SPACES).toHaveLength(2);
-    expect(BUILT_IN_SEED_SPACES.map((space) => space.name)).toEqual([
-      'Sala de Juntas',
-      'Cafetería',
-    ]);
+  it('starts new offices without rooms', () => {
+    expect(BUILT_IN_SEED_SPACES).toEqual([]);
   });
 
-  it('sus ids, slugs y rectangulos coinciden con lo que schema.sql siembra', () => {
+  it('has no legacy room ids in the migration', () => {
     const schema = readSchemaSql().toLowerCase();
 
-    for (const space of BUILT_IN_SEED_SPACES) {
-      expect(schema).toContain(`'${space.id}', '${space.slug}'`);
-    }
+    expect(schema).not.toContain('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+    expect(schema).not.toContain('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
   });
 
   it('BUILT_IN_SEED_VERSION es hash(BUILT_IN_SEED_SPACES): no un literal copiado a mano', () => {

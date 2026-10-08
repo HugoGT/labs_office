@@ -188,6 +188,8 @@ export function SpaceEditorSection({
           </ul>
 
           <form className={styles.form} onSubmit={handleCreateSubmit}>
+            <span className={styles.hint}>Una oficina ocupa un bloque de 9 × 9 casillas (288 × 288 px). Con ese tamaño, la sala se alinea al bloque que toques. Construye primero su terreno desde Terreno.</span>
+            <button type="button" className={styles.button} disabled={busy} onClick={() => setForm((current) => ({ ...current, w: '9', h: '9' }))}>Usar un bloque de oficina (9 × 9)</button>
             <div className={styles.field}>
               <label className={styles.hint} htmlFor="new-space-name">
                 Nombre de la nueva sala

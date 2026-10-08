@@ -35,6 +35,15 @@ function fakePool(rows: Record<string, unknown>[] = []): DirectoryPool & { queri
 }
 
 describe('pgTerrain', () => {
+  it('saves the whole batch in one atomic statement, never one query per block', async () => {
+    const pool = fakePool();
+    const edits = [{ index: 0, material: 'grass' as const }, { index: 1, material: 'wood' as const }];
+    await createPgTerrain(pool).saveBlocks(edits, 'user-1');
+    expect(pool.queries).toHaveLength(1);
+    expect(squash(pool.queries[0]!.text)).toContain('from jsonb_to_recordset($1::jsonb)');
+    expect(squash(pool.queries[0]!.text)).toContain('on conflict (block_index) do update');
+    expect(pool.queries[0]!.values).toEqual([JSON.stringify(edits), 'user-1']);
+  });
   it('loads every stored block by index, skipping a row it cannot read', async () => {
     const pool = fakePool([
       { block_index: 3, material: 'sand' },

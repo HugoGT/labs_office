@@ -5,8 +5,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
 import type { CharacterContainer } from './characters';
 import {
-  BUILT_IN_SPACES,
-  BUILT_IN_SPACES_VERSION,
   PLAYER_SPAWN_TX,
   PLAYER_SPAWN_TY,
   TILE,
@@ -15,7 +13,9 @@ import {
   ZONE_LABELS,
 } from './mapData';
 import { TERRAIN_LAYER_COUNT } from './artContract';
-import { BASE_LAYOUT, terrainSnapshot, withBlock, type OfficeLayout } from './officeLayout';
+import { terrainSnapshot, withBlock, type OfficeLayout } from './officeLayout';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SPACES as BUILT_IN_SPACES } from '../test/legacyOffice';
+const BUILT_IN_SPACES_VERSION = 'a489c5da5efd7c68';
 import {
   DESK_ZONE_DEPTH,
   MINIMAP_MARKER_DEPTH,
@@ -24,7 +24,7 @@ import {
   worldAssetDepth,
 } from './depthLayers';
 import { feetOf, physicalBodyRect } from './avatarGeometry';
-import { BASE_MAP_SEATS, deskSeatId, mapSeatId } from './seating';
+import { deskSeatId, mapSeatId } from './seating';
 import { deskFurnitureName, deskZoneName } from './deskLayout';
 import { artSheetKey, recoloredSheetKey } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
@@ -353,7 +353,7 @@ async function bootOfficeScene(
     // suspend/resume promises on AudioContexts that teardown then closes.
     audio: { noAudio: true },
     physics: { default: 'arcade' },
-    scene: [new OfficeScene(bridge, options)],
+    scene: [new OfficeScene(bridge, { layout: BASE_LAYOUT, seats: BASE_MAP_SEATS, fallbackSpaces: { spaces: BUILT_IN_SPACES, version: BUILT_IN_SPACES_VERSION }, ...options })],
   });
   games.push(game);
 
@@ -966,6 +966,19 @@ function findRemoteAvatars(scene: Phaser.Scene): CharacterContainer[] {
 }
 
 describe('OfficeScene: authoritative initial position (#148)', () => {
+  it('publishes a served spaces version that arrives while the initial join is in flight', async () => {
+    const connector = fakeConnector();
+    let finish!: () => void;
+    const { bridge } = await bootOfficeScene(createOfficeBridge(), {
+      endpoint: 'ws://fake', artManifestUrl: null, artUploadsUrl: null,
+      connect: (options) => connector.connect(options).then((connection) => new Promise((resolve) => { finish = () => resolve(connection); })),
+    });
+    await vi.waitFor(() => expect(finish).toBeDefined(), LOOP_WAIT);
+    bridge.emitCommand('spacesconfig', { spaces: [], version: 'served-while-joining' });
+    expect(connector.sentSpacesVersions).toEqual([]);
+    finish();
+    await vi.waitFor(() => expect(connector.sentSpacesVersions).toEqual(['served-while-joining']), LOOP_WAIT);
+  });
   const restored = () => remoteSnapshot({ sessionId: 'yo', x: 300.5, y: 400.25, facing: 'left' });
   async function boot() {
     const connector = fakeConnector('yo', false);
@@ -1864,6 +1877,7 @@ describe('OfficeScene: auto-caminata al aceptar una llamada (issue #2, D9/D10)',
       await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
       const player = findPlayer(scene);
       // Zona abierta del cesped, lejos del jugador y de cualquier colisionador.
+      (player.body as Phaser.Physics.Arcade.Body).reset(22 * TILE + 16, 28 * TILE + 16);
       const peerX = 30 * TILE;
       const peerY = 30 * TILE;
       connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'peer-1', x: peerX, y: peerY }));
@@ -2001,6 +2015,7 @@ describe('OfficeScene: auto-caminata al aceptar una llamada (issue #2, D9/D10)',
       const player = findPlayer(scene);
 
       // Cubiculo 3x3 en cesped abierto, lejos de cualquier colisionador del
+      (player.body as Phaser.Physics.Arcade.Body).reset(22 * TILE + 16, 28 * TILE + 16);
       // mapa base (mismas tiles que `terrainGrid.test.ts`).
       const rect = { x0: 30, y0: 30, x1: 32, y1: 32 };
       const cubiculo = {
@@ -3448,6 +3463,24 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
  * repaints.
  */
 describe('OfficeScene: edited terrain', () => {
+  it('renders the empty production default and a full procedural preview without changing walkability until replication', async () => {
+    const { BASE_LAYOUT: empty } = await import('./officeLayout');
+    const connector = fakeConnector();
+    const { scene, bridge } = await bootOfficeScene(createOfficeBridge(), { layout: empty, seats: [], endpoint: 'ws://test', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const before = terrainTilesAt(scene, 58, 49);
+    const draft = withBlock(empty.blocks, 76, 'wood');
+    const point = { x: 58 * TILE + 16, y: 49 * TILE + 16 };
+    expect(solidAt(scene, point.x, point.y)).toBe(true);
+    bridge.emitCommand('terrainedit', { selected: null, preview: null, previewBlocks: draft });
+    expect(terrainTilesAt(scene, 58, 49)).not.toEqual(before);
+    expect(solidAt(scene, point.x, point.y)).toBe(true);
+    bridge.emitCommand('terrainedit', null);
+    expect(terrainTilesAt(scene, 58, 49)).toEqual(before);
+    connector.handlers()!.onTerrain!(draft);
+    await vi.waitFor(() => expect(solidAt(scene, point.x, point.y)).toBe(false), LOOP_WAIT);
+    expect(terrainTilesAt(scene, 58, 49)).not.toEqual(before);
+  });
   const LAWN = 35;
   /** The middle of the lawn block: its own material whatever the borders do. */
   const lawn = { x: 67 * TILE + 16, y: 22 * TILE + 16 };
@@ -3731,8 +3764,8 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
   });
 
   it.each([
-    { zoom: 1, tile: { tx: 24, ty: 30 } },
-    { zoom: 3, tile: { tx: 23, ty: 29 } },
+    { zoom: 1, tile: { tx: 69, ty: 51 } },
+    { zoom: 3, tile: { tx: 68, ty: 50 } },
   ])('click-to-walk at $zoom targets the world tile under the pointer', async ({ zoom, tile }) => {
     const { scene } = await zoomScene(memoryStore(zoom));
     frames(scene, 3);

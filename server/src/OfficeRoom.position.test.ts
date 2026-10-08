@@ -2,8 +2,9 @@ import { Client, type Room } from 'colyseus.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from '../../src/game/mapData.ts';
 import { OFFICE_ROOM_NAME } from '../../src/game/officeProtocol.ts';
-import { BASE_MAP_SEATS, mapSeatId } from '../../src/game/seating.ts';
-import { BASE_LAYOUT, isPositionWalkable } from '../../src/game/officeLayout.ts';
+import { mapSeatId } from '../../src/game/seating.ts';
+import { isPositionWalkable } from '../../src/game/officeLayout.ts';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS } from '../../src/test/legacyOffice.ts';
 import { isPositionBlocked } from '../../src/game/pieceCollisions.ts';
 import { createOfficeServer, type OfficeServer } from './createOfficeServer.ts';
 import { createMemoryDirectory } from './directory/memoryDirectory.ts';
@@ -38,6 +39,7 @@ async function start(store?: UserDirectory, auth = true, overrides: NonNullable<
     spaces: null, decor: null, desks: null, terrain: null, collisions: null,
     egress: null, storage: null, assetStorage: null,
     reconnectionWindowSeconds: 0.3,
+    layout: BASE_LAYOUT, seats: BASE_MAP_SEATS,
     ...overrides,
   });
   await server.listen(0);

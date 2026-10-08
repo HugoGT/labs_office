@@ -47,6 +47,18 @@ function renderSection(overrides: Partial<Parameters<typeof SpaceEditorSection>[
 }
 
 describe('SpaceEditorSection (#74, PR4)', () => {
+  it('offers a whole office block and sends its aligned placement through the existing room tool', async () => {
+    const { spaces, bridge } = renderSection();
+    await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
+    await screen.findByText('Sala grande');
+    await userEvent.type(screen.getByLabelText('Nombre de la nueva sala'), 'Office');
+    await userEvent.click(screen.getByRole('button', { name: 'Usar un bloque de oficina (9 × 9)' }));
+    expect(screen.getByLabelText('Ancho')).toHaveValue(9);
+    expect(screen.getByLabelText('Alto')).toHaveValue(9);
+    await userEvent.click(screen.getByRole('button', { name: 'Colocar nueva sala' }));
+    act(() => bridge.emit('layoutplace', { tx: 63, ty: 45, valid: true }));
+    await waitFor(() => expect(spaces.createSpace).toHaveBeenCalledWith(expect.objectContaining({ x: 63, y: 45, w: 9, h: 9 })));
+  });
   it('fuera de modo edicion solo ofrece el boton de entrar', () => {
     renderSection();
 

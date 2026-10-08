@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
@@ -19,7 +19,7 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
     const onEditingChange = vi.fn();
     const props: OfficeLayoutEditorProps = {
       bridge, desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn(),
-      terrain: { setBlock: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() },
+      terrain: { setBlock: vi.fn(), setBlocks: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() },
       section, onEditingChange,
     };
     const { unmount } = render(<OfficeLayoutEditor {...props} />);
@@ -42,7 +42,7 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
     rerender(<OfficeLayoutEditor {...props} section="room" />);
     await screen.findByText('Sala grande');
     expect(commands[0]).toBeNull();
-    expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }] });
+    await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }] }));
     expect(props.onEditingChange).toHaveBeenLastCalledWith(true);
     expect(screen.queryByText('Mesa 4')).not.toBeInTheDocument();
   });
@@ -54,7 +54,7 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
     bridge.onCommand(command, emit);
     const props = {
       bridge, desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn(),
-      terrain: { setBlock: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() }, onEditingChange: vi.fn(), section,
+      terrain: { setBlock: vi.fn(), setBlocks: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() }, onEditingChange: vi.fn(), section,
     };
     const { rerender } = render(<OfficeLayoutEditor {...props} />);
     await screen.findByRole('button', { name: 'Salir' });
@@ -267,7 +267,7 @@ describe('OfficeLayoutEditor: terrain section', () => {
         bridge={bridge}
         desks={fakeDesks()}
         spaces={fakeSpaces()}
-        terrain={{ setBlock: vi.fn(async () => undefined) }}
+        terrain={{ setBlock: vi.fn(async () => undefined), setBlocks: vi.fn() }}
         refreshDesks={vi.fn()}
         refreshSpaces={vi.fn()}
         onEditingChange={onEditingChange}
@@ -325,7 +325,7 @@ describe('OfficeLayoutEditor: collision section', () => {
         bridge={bridge}
         desks={fakeDesks()}
         spaces={fakeSpaces()}
-        terrain={{ setBlock: vi.fn(async () => undefined) }}
+        terrain={{ setBlock: vi.fn(async () => undefined), setBlocks: vi.fn() }}
         collisions={{ saveRects: vi.fn(async () => undefined), reset: vi.fn(async () => undefined) }}
         refreshDesks={vi.fn()}
         refreshSpaces={vi.fn()}

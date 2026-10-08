@@ -1,5 +1,6 @@
 import { createOfficeServer, type OfficeServer } from './createOfficeServer.ts';
 import { createMemoryDirectory } from './directory/memoryDirectory.ts';
+import { LEGACY_LAYOUT, LEGACY_SEATS } from '../../src/test/legacyOffice.ts';
 
 let server: OfficeServer | undefined;
 
@@ -17,6 +18,7 @@ export async function authoritativePositionServer(action: 'start' | 'state' | 's
       directory, auth: { async verify() { return { uid: 'ana', email: 'ana@example.com', name: null }; } },
       spaces: null, desks: null, decor: null, terrain: null, collisions: null,
       egress: null, storage: null, assetStorage: null,
+      layout: LEGACY_LAYOUT, seats: LEGACY_SEATS,
     });
     await server.listen(0);
   }

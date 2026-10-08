@@ -15,4 +15,6 @@ export interface TerrainEditCommand {
   selected: number | null;
   /** The material to draw on a block before applying it, or `null`. */
   preview: { index: number; material: LayoutMaterial } | null;
+  /** Whole-map local draft. Drawing only, never walkability. */
+  previewBlocks?: readonly LayoutMaterial[];
 }

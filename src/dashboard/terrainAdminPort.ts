@@ -16,4 +16,5 @@ export interface TerrainAdminPort {
    * land under something or someone.
    */
   setBlock(index: number, material: LayoutMaterial): Promise<void>;
+  setBlocks(edits: readonly { index: number; material: LayoutMaterial }[], expected: string): Promise<void>;
 }

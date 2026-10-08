@@ -26,6 +26,16 @@ async function codeOf(promise: Promise<unknown>): Promise<AdminErrorCode | 'no-e
 }
 
 describe('createTerrainAdminClient', () => {
+  it('sends an authenticated atomic batch and maps stale preview conflicts', async () => {
+    const fetchImpl = fetchWith(200);
+    const edits = [{ index: 0, material: 'grass' as const }];
+    await clientWith(fetchImpl).setBlocks(edits, 'water,wood');
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(url).toBe(`${BASE_URL}/admin/terrain/blocks`);
+    expect(JSON.parse(init?.body as string)).toEqual({ edits, expected: 'water,wood' });
+    expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer id-token');
+    expect(await codeOf(clientWith(fetchWith(409, { error: 'terrain-stale' })).setBlocks(edits, 'old'))).toBe('terrain-stale');
+  });
   it('posts the material of one block, authenticated', async () => {
     const fetchImpl = fetchWith(200, { index: 35, material: 'water' });
 

@@ -19,7 +19,8 @@ import {
   recordingAvailableUntil,
 } from '../../src/game/officeProtocol.ts';
 import {
-  createOfficeServer,
+  createOfficeServer as createServer,
+  type OfficeServerOverrides,
   reconnectionWindowFromEnv,
   warnIfOriginsUnrestricted,
   type OfficeServer,
@@ -43,7 +44,8 @@ import type { TerrainStore } from './terrain/terrainPort.ts';
 import { createMemoryCollisions } from './collisions/memoryCollisions.ts';
 import type { CollisionStore } from './collisions/collisionPort.ts';
 import { decodeCollisionTable, isPositionBlocked } from '../../src/game/pieceCollisions.ts';
-import { BASE_LAYOUT } from '../../src/game/officeLayout.ts';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS } from '../../src/test/legacyOffice.ts';
+const createOfficeServer = (overrides: OfficeServerOverrides = {}) => createServer({ layout: BASE_LAYOUT, seats: LEGACY_SEATS, ...overrides });
 import { OFFICE_ROOM_NAME, RECONNECTION_WINDOW_SECONDS } from './OfficeRoom.ts';
 import type { EgressPort } from './recording/egressPort.ts';
 import type { RecordingStoragePort } from './recording/recordingStorage.ts';
@@ -2819,7 +2821,7 @@ describe('terrain routes (#123 phase 2)', () => {
   };
   const BEARER = { Authorization: 'Bearer valido-uid-admin', 'Content-Type': 'application/json' };
   const LAWN = 35;
-  const onTile = (tx: number, ty: number) => ({ x: tx * 32 + 32, y: ty * 32 + 25, facing: 'down' });
+  const onTile = (tx: number, ty: number) => ({ x: tx * 32 + 16, y: ty * 32 + 5, facing: 'down' });
 
   async function waitFor(predicate: () => boolean, timeoutMs = 4000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
@@ -2929,7 +2931,7 @@ describe('collision routes', () => {
   };
   const BEARER = { Authorization: 'Bearer valido-uid-admin', 'Content-Type': 'application/json' };
   const tree = BASE_LAYOUT.props.find((prop) => prop.kind === 'tree')!;
-  const besideTree = { x: (tree.tx + 2) * 32 + 32, y: tree.ty * 32 + 25, facing: 'down' };
+  const besideTree = { x: (tree.tx + 2) * 32 + 16, y: tree.ty * 32 + 5, facing: 'down' };
 
   async function waitFor(predicate: () => boolean, timeoutMs = 4000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
@@ -3024,7 +3026,7 @@ describe('collision routes', () => {
     expect(created.status).toBe(201);
 
     // The middle of the 3x3 area at tile (21, 50), as a body center.
-    await waitFor(() => isPositionBlocked(server.collisions.rects(), 22 * 32 + 16 + 16, 51 * 32 + 16 + 9));
+    await waitFor(() => isPositionBlocked(server.collisions.rects(), 22 * 32 + 16, 51 * 32 + 5));
     await server.shutdown();
   });
 });

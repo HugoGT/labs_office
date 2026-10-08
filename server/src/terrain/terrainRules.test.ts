@@ -1,15 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE } from '../../../src/game/mapData.ts';
 import {
-  BASE_LAYOUT,
-  BASE_TERRAIN,
   blockIndexAt,
   newlyWateredTiles,
   terrainSnapshot,
   withBlock,
   type LayoutMaterial,
 } from '../../../src/game/officeLayout.ts';
-import { BASE_MAP_SEATS } from '../../../src/game/seating.ts';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN, LEGACY_SEATS as BASE_MAP_SEATS } from '../../../src/test/legacyOffice.ts';
 import {
   InvalidTerrainEditError,
   TerrainProtectedError,
@@ -87,12 +85,11 @@ describe('findWaterConflict', () => {
     expect(findWaterConflict(watered(blockIndexAt(W, PLAYER_SPAWN_TX, PLAYER_SPAWN_TY)), W, STATIC, NONE)).toBe('placement');
   });
 
-  it('refuses water under a space or a desk, even when only a wobbling border reaches it', () => {
+  it('refuses water under a space or a desk on a block edge, but never floods neighboring blocks', () => {
     const flooded = watered(LAWN);
-    const outside = flooded.find((tile) => tile % W < 63 || tile % W >= 72 || tile < 18 * W || tile >= 27 * W);
-    expect(outside).toBeDefined();
-    const tx = outside! % W;
-    const ty = Math.floor(outside! / W);
+    expect(flooded.every((tile) => tile % W >= 63 && tile % W < 72 && tile >= 18 * W && tile < 27 * W)).toBe(true);
+    const tx = 63;
+    const ty = 18;
 
     expect(findWaterConflict(flooded, W, STATIC, { placements: [{ x: tx, y: ty, w: 1, h: 1 }], players: [] })).toBe('placement');
     expect(findWaterConflict(flooded, W, STATIC, { placements: [{ x: 0, y: 0, w: 9, h: 9 }], players: [] })).toBeNull();

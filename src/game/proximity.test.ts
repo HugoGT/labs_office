@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BUILT_IN_SPACES, PROX_RADIUS } from './mapData';
+import { PROX_RADIUS } from './mapData';
+import { LEGACY_SPACES as BUILT_IN_SPACES } from '../test/legacyOffice';
 import { detectSpace, nearbyIndices, nearbyKey } from './proximity';
 
 describe('nearbyIndices', () => {

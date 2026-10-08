@@ -44,6 +44,25 @@ export interface TerrainEdit {
   material: LayoutMaterial;
 }
 
+export class TerrainStaleError extends Error {}
+
+export function parseTerrainBatch(body: unknown, count: number): { edits: TerrainEdit[]; expected: string } {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new InvalidTerrainEditError('invalid batch');
+  const { edits, expected } = body as Record<string, unknown>;
+  if (!Array.isArray(edits) || edits.length < 1 || edits.length > count || typeof expected !== 'string' || expected.length > 2000) throw new InvalidTerrainEditError('invalid batch');
+  const seen = new Set<number>();
+  const parsed = edits.map((edit: unknown) => {
+    if (typeof edit !== 'object' || edit === null || Array.isArray(edit)) throw new InvalidTerrainEditError('invalid edit');
+    const { index } = edit as Record<string, unknown>;
+    if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) throw new InvalidTerrainEditError('invalid index');
+    const value = parseTerrainEdit(String(index), edit, count);
+    if (seen.has(index)) throw new InvalidTerrainEditError('duplicate block');
+    seen.add(index);
+    return value;
+  });
+  return { edits: parsed, expected };
+}
+
 /** A rectangle in tiles, like `Space` and `Desk`. */
 export interface TileRect {
   x: number;

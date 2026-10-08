@@ -2,11 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { TERRAIN_DECALS, TERRAIN_MATERIALS, TERRAIN_WALKABLE } from './artContract';
 import { physicalBodyRect } from './avatarGeometry';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from './mapData';
-import { BASE_MAP_SEATS } from './seating';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN, LEGACY_SEATS as BASE_MAP_SEATS } from '../test/legacyOffice';
 import {
   AVATAR_BODY_CENTER_OFFSET,
-  BASE_LAYOUT,
-  BASE_TERRAIN,
   BLOCK_TILES,
   BORDER_JITTER_TILES,
   blockAtWorldPoint,
@@ -510,7 +508,7 @@ describe('terrain block edits', () => {
     expect(blockAtWorldPoint(BASE_LAYOUT, 10, BASE_LAYOUT.height * 32)).toBeNull();
   });
 
-  it('lists the tiles an edit turns into water, borders that wobble into the neighbors included', () => {
+  it('lists exactly the tiles an edit turns into water, never neighboring blocks', () => {
     const watered = newlyWateredTiles(BASE_TERRAIN, terrainSnapshot(BASE_LAYOUT, withBlock(BASE_LAYOUT.blocks, 35, 'water')));
     const inside = (index: number) => {
       const tx = index % BASE_LAYOUT.width;
@@ -520,7 +518,8 @@ describe('terrain block edits', () => {
 
     // The middle of the block is always its own material.
     expect(watered).toContain(22 * BASE_LAYOUT.width + 67);
-    expect(watered.some((index) => !inside(index))).toBe(true);
+    expect(watered.every(inside)).toBe(true);
+    expect(watered).toHaveLength(81);
     expect(watered.every((index) => BASE_TERRAIN.materials[index] !== 'water')).toBe(true);
     // Drying the lake floods nothing.
     expect(newlyWateredTiles(BASE_TERRAIN, terrainSnapshot(BASE_LAYOUT, withBlock(BASE_LAYOUT.blocks, 94, 'grass')))).toEqual([]);

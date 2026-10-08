@@ -7,12 +7,13 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { TILE } from '../../../src/game/mapData.ts';
-import { BASE_LAYOUT } from '../../../src/game/officeLayout.ts';
+import { LEGACY_LAYOUT as BASE_LAYOUT } from '../../../src/test/legacyOffice.ts';
 import type { DirectoryUser } from '../directory/directoryPort.ts';
 import { createMemoryDirectory } from '../directory/memoryDirectory.ts';
 import type { IdTokenVerifier } from '../verifyIdToken.ts';
 import { createMemoryTerrain } from './memoryTerrain.ts';
-import { handleSetTerrainBlock, type TerrainDeps } from './terrainRoutes.ts';
+import { handleSetTerrainBlock, handleSetTerrainBlocks, type TerrainDeps } from './terrainRoutes.ts';
+import { encodeTerrainBlocks } from '../../../src/game/officeLayout.ts';
 import type { TerrainProtections } from './terrainRules.ts';
 import { createTerrainRuntime } from './terrainRuntime.ts';
 
@@ -65,6 +66,31 @@ async function harness(protections: TerrainProtections = { placements: [], playe
 }
 
 describe('handleSetTerrainBlock', () => {
+  it('authorizes the whole batch before validating and atomically refuses malformed or stale requests', async () => {
+    const { deps, terrain, store } = await harness();
+    expect((await handleSetTerrainBlocks(undefined, null, deps)).status).toBe(401);
+    expect((await handleSetTerrainBlocks(BEARER_EMPLEADO, null, deps)).status).toBe(403);
+    const expected = encodeTerrainBlocks(terrain.blocks());
+    for (const edits of [[], [{ index: 0, material: 'wood' }, { index: 0, material: 'sand' }], [{ index: 140, material: 'grass' }], [{ index: 0, material: 'lava' }], [{ index: 1.5, material: 'grass' }], Array.from({ length: 141 }, (_, index) => ({ index, material: 'grass' }))]) {
+      expect((await handleSetTerrainBlocks(BEARER_ADMIN, { edits, expected }, deps)).status).toBe(400);
+    }
+    expect((await handleSetTerrainBlocks(BEARER_ADMIN, { edits: [{ index: 0, material: 'sand' }], expected: 'outdated' }, deps)).body).toEqual({ error: 'terrain-stale' });
+    expect([...(await store.loadBlocks())]).toEqual([]);
+  });
+
+  it('applies a batch once, recording the actor, without publishing partial conflicts', async () => {
+    const { deps, terrain, store } = await harness({ placements: [{ x: 66, y: 21, w: 3, h: 3 }], players: [] });
+    const listener = vi.fn();
+    terrain.subscribe(listener);
+    const expected = encodeTerrainBlocks(terrain.blocks());
+    const refused = await handleSetTerrainBlocks(BEARER_ADMIN, { expected, edits: [{ index: 0, material: 'sand' }, { index: 35, material: 'water' }] }, deps);
+    expect(refused).toEqual({ status: 409, body: { error: 'terrain-under-placement' } });
+    expect(listener).not.toHaveBeenCalled();
+    expect([...(await store.loadBlocks())]).toEqual([]);
+    expect((await handleSetTerrainBlocks(BEARER_ADMIN, { expected, edits: [{ index: 0, material: 'sand' }, { index: 35, material: 'wood' }] }, deps)).status).toBe(200);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(store.actorOf(0)).toBe(ADMIN.id);
+  });
   it('lets an admin set a block, recording who did it', async () => {
     const { deps, store, terrain } = await harness();
 

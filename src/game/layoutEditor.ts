@@ -9,6 +9,7 @@
 import { boundsOverlap, type SpaceBounds } from './layoutGeometry';
 import { MAP_H, MAP_W, TILE } from './mapData';
 import type { TileRect } from './terrainGrid';
+import { BLOCK_TILES } from './officeLayout';
 
 /** Las dos clases de item editable (#74). `room` cubre tambien las salas incorporadas. */
 export type EditorKind = 'desk' | 'room';
@@ -110,6 +111,13 @@ export function snapToTile(worldX: number, worldY: number, w: number, h: number)
   };
 }
 
+export function snapToBlock(worldX: number, worldY: number): TilePosition {
+  return {
+    tx: clamp(Math.floor(worldX / (TILE * BLOCK_TILES)) * BLOCK_TILES, 0, MAP_W - BLOCK_TILES),
+    ty: clamp(Math.floor(worldY / (TILE * BLOCK_TILES)) * BLOCK_TILES, 0, MAP_H - BLOCK_TILES),
+  };
+}
+
 /**
  * Proyeccion, en TILES, de un admin space (sala o cubiculo de escritorio)
  * relevante para el pre-chequeo de solape del editor. Deliberadamente propio
@@ -197,7 +205,7 @@ function toObstacleTileRect(bounds: SpaceBounds): TileRect {
 export interface LayoutEditCommand {
   pickable: readonly PickableRect[];
   selectedId: string | null;
-  placing: { w: number; h: number; obstacles: readonly TileRect[] } | null;
+  placing: { w: number; h: number; obstacles: readonly TileRect[]; snap?: 'block' } | null;
 }
 
 export interface ToLayoutEditCommandOptions {
@@ -239,5 +247,5 @@ export function toLayoutEditCommand(
   const obstacleSource = options.obstacleItems ?? options.items;
   const obstacles = computeObstacles(obstacleSource, options.moving ?? null).map(toObstacleTileRect);
 
-  return { pickable, selectedId: null, placing: { w, h, obstacles } };
+  return { pickable, selectedId: null, placing: { w, h, obstacles, ...(state.kind === 'room' && w === BLOCK_TILES && h === BLOCK_TILES ? { snap: 'block' as const } : {}) } };
 }

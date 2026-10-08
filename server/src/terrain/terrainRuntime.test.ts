@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { TILE } from '../../../src/game/mapData.ts';
-import { BASE_LAYOUT, BASE_TERRAIN, isTileWalkable, type LayoutMaterial } from '../../../src/game/officeLayout.ts';
+import { TILE, PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
+import { BASE_LAYOUT as OFFICE_LAYOUT, BLOCK_TILES, blockIndexAt, blockTileRect, isPositionWalkable, isTileWalkable, type LayoutMaterial } from '../../../src/game/officeLayout.ts';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN } from '../../../src/test/legacyOffice.ts';
 import { createMemoryTerrain } from './memoryTerrain.ts';
 import type { TerrainStore } from './terrainPort.ts';
 import { TerrainProtectedError, type TerrainProtections } from './terrainRules.ts';
@@ -11,6 +12,38 @@ const LAKE = 94;
 const NONE = async (): Promise<TerrainProtections> => ({ placements: [], players: [] });
 
 describe('createTerrainRuntime', () => {
+  it.each([126, 135].flatMap((width) => (['water', 'grass', 'sand'] as const).map((material) => ({ width, material }))))(
+    'ignores saved $material at the spawn block of a $width-tile layout without changing stored rows',
+    async ({ width, material }) => {
+      const spawn = blockIndexAt(width, PLAYER_SPAWN_TX, PLAYER_SPAWN_TY);
+      const blocks: LayoutMaterial[] = new Array((width / BLOCK_TILES) * (OFFICE_LAYOUT.height / BLOCK_TILES)).fill('water');
+      blocks[spawn] = 'wood';
+      const empty = () => new Array<null>(width * OFFICE_LAYOUT.height).fill(null);
+      const layout = { ...OFFICE_LAYOUT, width, blocks, ground: empty(), walls: empty(), hedges: empty(), decals: empty() };
+      const stored: readonly (readonly [number, LayoutMaterial])[] = [[spawn, material], [spawn - 1, 'grass']];
+      const store = createMemoryTerrain(stored);
+      const saveBlock = vi.spyOn(store, 'saveBlock');
+      const saveBlocks = vi.spyOn(store, 'saveBlocks');
+      const runtime = createTerrainRuntime({ layout, store, seats: [] });
+
+      await runtime.load();
+
+      expect(runtime.blocks()[spawn]).toBe('wood');
+      expect(runtime.blocks()[spawn - 1]).toBe('grass');
+      const { tx, ty, w, h } = blockTileRect(width, spawn);
+      for (let y = ty; y < ty + h; y += 1) for (let x = tx; x < tx + w; x += 1) {
+        expect(runtime.snapshot().materials[y * width + x]).toBe('wood');
+        expect(isTileWalkable(runtime.snapshot(), x, y)).toBe(true);
+      }
+      for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+        expect(isPositionWalkable(runtime.snapshot(), (PLAYER_SPAWN_TX + dx) * TILE + TILE / 2, (PLAYER_SPAWN_TY + dy) * TILE + TILE / 2)).toBe(true);
+      }
+      expect(new Map(await store.loadBlocks())).toEqual(new Map(stored));
+      expect(saveBlock).not.toHaveBeenCalled();
+      expect(saveBlocks).not.toHaveBeenCalled();
+    },
+  );
+
   it('serves the committed layout until it loads, and without a store for good', async () => {
     const runtime = createTerrainRuntime({ layout: BASE_LAYOUT });
 
@@ -99,6 +132,7 @@ describe('createTerrainRuntime', () => {
       saveBlock: async () => {
         throw new Error('connection lost');
       },
+      saveBlocks: async () => { throw new Error('connection lost'); },
     };
     const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
     await runtime.load();

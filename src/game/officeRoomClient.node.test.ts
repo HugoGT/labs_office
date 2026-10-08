@@ -7,16 +7,18 @@
 
 import { matchMaker, Room as ServerRoom, type Client as ServerClient } from '@colyseus/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createOfficeServer, type OfficeServer } from '../../server/src/createOfficeServer.ts';
+import { createOfficeServer as createServer, type OfficeServer, type OfficeServerOverrides } from '../../server/src/createOfficeServer.ts';
 import { createMemoryDirectory } from '../../server/src/directory/memoryDirectory.ts';
 import { createMemoryTerrain } from '../../server/src/terrain/memoryTerrain.ts';
 import { createMemoryCollisions } from '../../server/src/collisions/memoryCollisions.ts';
 import type { CollisionTable } from './pieceCollisions';
 import { SESSION_EXPIRED } from '../../server/src/verifyIdToken.ts';
-import { BASE_LAYOUT, type LayoutMaterial } from './officeLayout';
+import { type LayoutMaterial } from './officeLayout';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS } from '../test/legacyOffice.ts';
+const createOfficeServer = (overrides: OfficeServerOverrides = {}) => createServer({ layout: BASE_LAYOUT, seats: BASE_MAP_SEATS, ...overrides });
 import { TILE } from './mapData';
 import { OFFICE_ROOM_NAME } from './officeProtocol';
-import { BASE_MAP_SEATS, mapSeatId } from './seating';
+import { mapSeatId } from './seating';
 import {
   OfficeAccessDeniedError,
   connectOfficeRoom,

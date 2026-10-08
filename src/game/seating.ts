@@ -99,20 +99,21 @@ const DESK_SEAT = /^desk-([A-Za-z0-9-]{1,64})$/;
  * a base chair that does not exist; whether a desk exists is the server's to
  * ask its store.
  */
-export function parseSeatRef(raw: unknown): SeatRef | null {
+export function parseSeatRef(raw: unknown, mapSeatCount = BASE_MAP_SEATS.length): SeatRef | null {
   if (typeof raw !== 'string') return null;
   const map = MAP_SEAT.exec(raw);
   if (map) {
     const index = Number(map[1]);
-    return index < BASE_MAP_SEATS.length ? { kind: 'map', index } : null;
+    return index < mapSeatCount ? { kind: 'map', index } : null;
   }
   const desk = DESK_SEAT.exec(raw);
   return desk ? { kind: 'desk', deskId: desk[1] } : null;
 }
 
-/** A replicated seat as the client reads it: the reference, or `null` when standing. */
-export function seatIdOf(raw: unknown): string | null {
-  return parseSeatRef(raw) === null ? null : (raw as string);
+/** A replicated seat is a wire reference, independent of this build's default
+ * chair count. The server and scene resolve its existence against their layout. */
+export function seatIdOf(raw: unknown, mapSeatCount = 10000): string | null {
+  return parseSeatRef(raw, mapSeatCount) === null ? null : (raw as string);
 }
 
 /** Inclusive tile rectangle. */

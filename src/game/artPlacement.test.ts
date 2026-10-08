@@ -8,7 +8,7 @@ import {
   spaceFloorTiles,
 } from './artPlacement';
 import { TILE } from './mapData';
-import { buildTerrainGrid } from './terrainGrid';
+import { buildLegacyTerrainGrid as buildTerrainGrid } from '../test/legacyTerrainGrid';
 
 const DESK_PIECE: ArtDeskPiece = {
   id: 'desk-wood',

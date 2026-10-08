@@ -101,7 +101,7 @@ test('S3: entering a private room isolates its occupant from the open-floor peer
 });
 
 test('S4: returning to the open floor reverses room isolation', async () => {
-  await teleportToTile(pageB, 22, 28); // PLAYER_SPAWN_TX/TY (mapData.ts) -- back on the open floor
+  await teleportToTile(pageB, 67, 49); // Central spawn, back on the open floor.
   await waitForOnlineCount(pageB, 1);
   await waitForPeerTileCount(pageB, 1); // W2: B sees A's chip again
   await waitForOnlineCount(pageA, 1);
@@ -132,8 +132,8 @@ test('S9: both clients entering the same room see each other', async () => {
 
   // Restore both to the open floor so S6/S5's assertions start from the
   // same known state the rest of the suite expects.
-  await teleportToTile(pageA, 22, 28);
-  await teleportToTile(pageB, 22, 28);
+  await teleportToTile(pageA, 67, 49);
+  await teleportToTile(pageB, 67, 49);
   await waitForPeerTileCount(pageA, 1);
   await waitForPeerTileCount(pageB, 1);
 });

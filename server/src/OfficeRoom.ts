@@ -218,6 +218,7 @@ export function deriveIdentityName(identity: VerifiedIdentity, fallback: string)
 }
 
 export interface OfficeRoomOptions {
+  seats?: readonly { tx: number; ty: number; facing: 'up' | 'down' | 'left' | 'right' }[];
   /**
    * The terrain every `move` is checked against (art migration, step 8),
    * read on each move so it can change while the room lives. Absent is the
@@ -387,12 +388,14 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
    */
   private seated = new Map<string, { reach: SeatTiles; userId: string | null }>();
   private terrain: () => TerrainSnapshot = () => BASE_TERRAIN;
+  private mapSeats = BASE_MAP_SEATS;
   private collisions: () => readonly CollisionRect[] = () => BASE_COLLISION_RECTS;
   // Bridges a definitive leave and a refresh while its write is in flight.
   // Serializing per uid prevents an older slow write from undoing a newer leave.
   private positionWrites = new Map<string, { position: LastPosition; done: Promise<void> }>();
 
   onCreate(options?: OfficeRoomOptions): void {
+    this.mapSeats = options?.seats ?? BASE_MAP_SEATS;
     this.state = new OfficeState();
     if (options?.terrain) this.terrain = options.terrain;
     this.state.terrainBlocks = encodeTerrainBlocks(this.terrain().blocks);
@@ -890,7 +893,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
    * desk changes hands while someone sits at it.
    */
   private async sit(client: Client<unknown, OfficeAuthData>, raw: unknown): Promise<void> {
-    const ref = parseSeatRef(raw);
+    const ref = parseSeatRef(raw, this.mapSeats.length);
     if (ref === null) return;
     const seatId = raw as string;
     const player = this.state.players.get(client.sessionId);
@@ -898,7 +901,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     const userId = client.auth === true ? null : (client.auth?.directoryUserId ?? null);
 
     if (ref.kind === 'map') {
-      const seat = BASE_MAP_SEATS[ref.index];
+      const seat = this.mapSeats[ref.index];
       this.takeSeat(client.sessionId, seatId, { reach: mapSeatTiles(seat), userId }, seat.facing);
       return;
     }

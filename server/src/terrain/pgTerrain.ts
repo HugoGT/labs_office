@@ -29,5 +29,16 @@ export function createPgTerrain(pool: DirectoryPool): TerrainStore {
         [index, material, actorId],
       );
     },
+    async saveBlocks(edits, actorId) {
+      // One statement is atomic in Postgres, including every upsert and FK check.
+      await pool.query(
+        `INSERT INTO terrain_blocks (block_index, material, updated_by)
+         SELECT entry.index, entry.material, $2::uuid
+         FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, material text)
+         ON CONFLICT (block_index) DO UPDATE
+           SET material = EXCLUDED.material, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+        [JSON.stringify(edits), actorId],
+      );
+    },
   };
 }

@@ -87,8 +87,8 @@ describe('spawnPlayer', () => {
       };
     });
 
-    expect(result.x).toBe(22 * TILE + 16);
-    expect(result.y).toBe(28 * TILE + 16);
+    expect(result.x).toBe(67 * TILE + 16);
+    expect(result.y).toBe(49 * TILE + 16);
     expect(result.hasArcadeBody).toBe(true);
     expect(result.collideWorldBounds).toBe(true);
   });

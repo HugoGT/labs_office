@@ -23,7 +23,7 @@ export function createTerrainAdminClient(
       baseUrl,
       getIdToken,
       notConfigured: 'terrain-not-configured',
-      conflicts: ['terrain-under-placement', 'terrain-under-player'],
+      conflicts: ['terrain-under-placement', 'terrain-under-player', 'terrain-stale'],
     },
     fetchImpl,
   );
@@ -31,6 +31,9 @@ export function createTerrainAdminClient(
   return {
     async setBlock(index: number, material: LayoutMaterial): Promise<void> {
       await request(`/admin/terrain/blocks/${index}`, jsonBody({ material }));
+    },
+    async setBlocks(edits, expected) {
+      await request('/admin/terrain/blocks', jsonBody({ edits, expected }));
     },
   };
 }

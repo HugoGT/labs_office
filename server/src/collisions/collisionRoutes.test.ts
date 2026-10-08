@@ -5,8 +5,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { BASE_LAYOUT } from '../../../src/game/officeLayout.ts';
-import { BASE_MAP_SEATS } from '../../../src/game/seating.ts';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS } from '../../../src/test/legacyOffice.ts';
 import type { DirectoryUser } from '../directory/directoryPort.ts';
 import { createMemoryDirectory } from '../directory/memoryDirectory.ts';
 import type { IdTokenVerifier } from '../verifyIdToken.ts';

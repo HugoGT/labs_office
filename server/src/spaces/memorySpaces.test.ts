@@ -18,7 +18,8 @@ import {
   SpaceOwnedByDeskError,
   hashSpaces,
 } from './spaceRules.ts';
-import { BUILT_IN_SEED_SPACES, BUILT_IN_SEED_VERSION } from './builtInSeed.ts';
+import { LEGACY_SEED_SPACES as BUILT_IN_SEED_SPACES } from '../../../src/test/legacyOffice.ts';
+const BUILT_IN_SEED_VERSION = hashSpaces(BUILT_IN_SEED_SPACES);
 
 describe('createMemorySpaces', () => {
   it('arranca vacio y su version es la del hash de la lista vacia', async () => {

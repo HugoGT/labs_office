@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BASE_LAYOUT } from '../../../src/game/officeLayout.ts';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS } from '../../../src/test/legacyOffice.ts';
 import {
   collisionWorld,
   decodeCollisionTable,
@@ -7,7 +7,6 @@ import {
   staticCollisionInstances,
   type CollisionDesk,
 } from '../../../src/game/pieceCollisions.ts';
-import { BASE_MAP_SEATS } from '../../../src/game/seating.ts';
 import { createMemoryCollisions } from './memoryCollisions.ts';
 import { CollisionProtectedError } from './collisionRules.ts';
 import { createCollisionRuntime } from './collisionRuntime.ts';

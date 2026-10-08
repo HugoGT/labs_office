@@ -189,6 +189,7 @@ export type AdminErrorCode =
    */
   | 'terrain-under-placement'
   | 'terrain-under-player'
+  | 'terrain-stale'
   /** No `DATABASE_URL`: the terrain is the committed layout's and cannot be edited. */
   | 'terrain-not-configured'
   /** A collision rectangle refused because it would close over someone: wait until they step aside. */

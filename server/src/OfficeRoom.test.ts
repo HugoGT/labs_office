@@ -9,15 +9,17 @@
 import type { Client as ServerClient } from '@colyseus/core';
 import { Client } from 'colyseus.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BUILT_IN_SPACES, PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from '../../src/game/mapData.ts';
+import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from '../../src/game/mapData.ts';
 import { detectSpace } from '../../src/game/proximity.ts';
 import {
   SESSION_REPLACED_CLOSE_CODE,
   SESSION_REVOKED_CLOSE_CODE,
 } from '../../src/game/officeProtocol.ts';
-import { BASE_MAP_SEATS, DESK_SEAT_FACING, deskSeatId, mapSeatId } from '../../src/game/seating.ts';
-import { BASE_LAYOUT, decodeTerrainBlocks } from '../../src/game/officeLayout.ts';
-import { createOfficeServer, type OfficeServer } from './createOfficeServer.ts';
+import { DESK_SEAT_FACING, deskSeatId, mapSeatId } from '../../src/game/seating.ts';
+import { decodeTerrainBlocks } from '../../src/game/officeLayout.ts';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SPACES as BUILT_IN_SPACES } from '../../src/test/legacyOffice.ts';
+import { createOfficeServer as createServer, type OfficeServer, type OfficeServerOverrides } from './createOfficeServer.ts';
+const createOfficeServer = (overrides: OfficeServerOverrides = {}) => createServer({ layout: BASE_LAYOUT, seats: BASE_MAP_SEATS, ...overrides });
 import { createMemoryDesks } from './desks/memoryDesks.ts';
 import {
   DEFAULT_NAME,

@@ -64,6 +64,20 @@ function findGhost(scene: Phaser.Scene): Phaser.GameObjects.Rectangle | undefine
 }
 
 describe('LayoutEditLayer: contorno pickable', () => {
+  it('previews and confirms a whole office room on exactly the chosen block', async () => {
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    new LayoutEditLayer(scene, bridge);
+    const placements: unknown[] = [];
+    bridge.on('layoutplace', (value) => placements.push(value));
+    bridge.emitCommand('layoutedit', { pickable: [], selectedId: null, placing: { w: 9, h: 9, snap: 'block', obstacles: [] } });
+    const pointer = fakePointer(67 * TILE, 49 * TILE);
+    scene.input.emit('pointermove', pointer);
+    expect(findGhost(scene)?.x).toBe((63 + 4.5) * TILE);
+    expect(findGhost(scene)?.y).toBe((45 + 4.5) * TILE);
+    scene.input.emit('pointerdown', pointer);
+    expect(placements).toEqual([{ tx: 63, ty: 45, valid: true }]);
+  });
   it('dibuja un contorno del tamano exacto por cada rectangulo pickable', async () => {
     const scene = await bootHostScene();
     const bridge = createOfficeBridge();
