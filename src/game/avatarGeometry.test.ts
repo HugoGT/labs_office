@@ -29,16 +29,15 @@ describe('avatarGeometry: network position, feet and body', () => {
     expect(feetOf(positionForFeet({ x: 40, y: 60 }))).toEqual({ x: 40, y: 60 });
   });
 
-  it('keeps the physical body exactly where the procedural avatar had it', () => {
-    // Pinned on purpose: the art change must not move what collides. Phaser
-    // places a container's body at `x + offset - displayOrigin`, and the
-    // container keeps its historic 32x44 size, so the 22x14 body ends up up
-    // and to the left of the position (`characters.browser.test.ts` checks
-    // this against real Arcade).
+  it('centers the footprint horizontally on the feet with its bottom on the ground anchor', () => {
     expect(AVATAR_CONTAINER_SIZE).toEqual({ width: 32, height: 44 });
-    expect(AVATAR_BODY_SIZE).toEqual({ width: 22, height: 14 });
-    expect(AVATAR_BODY_OFFSET).toEqual({ x: -11, y: 6 });
-    expect(physicalBodyRect({ x: 100, y: 200 })).toEqual({ x: 73, y: 184, width: 22, height: 14 });
+    expect(AVATAR_BODY_SIZE).toEqual({ width: 18, height: 14 });
+    expect(AVATAR_BODY_OFFSET).toEqual({ x: 7, y: 26 });
+    expect(physicalBodyRect({ x: 100, y: 200 })).toEqual({ x: 91, y: 204, width: 18, height: 14 });
+    for (const position of [{ x: 100, y: 200 }, { x: 713.5, y: 402.25 }]) {
+      const body = physicalBodyRect(position);
+      expect({ x: body.x + body.width / 2, y: body.y + body.height }).toEqual(feetOf(position));
+    }
   });
 });
 

@@ -45,7 +45,7 @@ const verifier: IdTokenVerifier = {
 const BEARER_ADMIN = 'Bearer valido-uid-admin';
 const BEARER_EMPLEADO = 'Bearer valido-uid-empleado';
 const tree = BASE_LAYOUT.props.find((prop) => prop.kind === 'tree')!;
-const onTree = { x: tree.tx * 32 + 32, y: tree.ty * 32 + 25 };
+const onTree = { x: tree.tx * 32 + 16, y: tree.ty * 32 + 5 };
 
 async function harness(players: { x: number; y: number }[] = []) {
   const store = createMemoryCollisions();

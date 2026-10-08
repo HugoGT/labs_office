@@ -429,7 +429,8 @@ describe('createPhaserAvatarSink: cuerpo fisico del peer con peerBodies (#59)', 
     await vi.waitFor(() => {
       expect(avatar.x).toBeGreaterThan(0);
       expect(avatar.x).toBeLessThan(640);
-      expect(Math.abs(body.center.x - avatar.x)).toBeLessThan(24);
+      expect(body.center.x).toBeCloseTo(avatar.x);
+      expect(body.bottom).toBeCloseTo(feetOf(avatar).y);
     }, PHYSICS_WAIT);
   });
 });
@@ -451,8 +452,8 @@ describe('createPhaserAvatarSink: el jugador no atraviesa a un peer con cuerpo (
       const body = player.body as Phaser.Physics.Arcade.Body;
       expect(body.velocity.x).toBe(0);
     }, PHYSICS_WAIT);
-    // Cuerpos de 22px de ancho centrados: nunca puede cruzar el centro del peer.
-    expect(player.x).toBeLessThan(peerX);
+    // Contact is two feet-centered 18px footprints, with no visual torso offset.
+    expect(player.x).toBeCloseTo(peerX - 18);
   });
 
   it('un peer en pleno tween que se desliza hacia un jugador quieto no lo atraviesa', async () => {

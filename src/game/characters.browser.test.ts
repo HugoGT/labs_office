@@ -24,6 +24,7 @@ import { avatarDepth, chairLayerDepth, worldAssetDepth } from './depthLayers';
 import { TILE, WORLD_H } from './mapData';
 import { DEFAULT_NAME, DEFAULT_STATUS } from './officeProtocol';
 import { STATUS_COLOR } from './presence';
+import { collisionWorld, isPositionBlocked, layoutPropInstances } from './pieceCollisions';
 import { avatarTextureKey, createOfficeTextures } from './textures';
 
 /**
@@ -166,7 +167,7 @@ describe('makeCharacter: render band (#70)', () => {
  * en `OfficeScene`, mismo tamano para todo el mundo.
  */
 describe('enablePeerBody', () => {
-  it('crea un cuerpo Arcade con la misma geometria que el jugador local (22x14, offset -11,6)', async () => {
+  it('gives the peer the same feet-aligned 18x14 body as the local player', async () => {
     const geometry = await withScene((scene) => {
       const container = makeCharacter(scene, 'Ana', 0, 0, 'av1', 'g');
       enablePeerBody(scene, container);
@@ -174,7 +175,7 @@ describe('enablePeerBody', () => {
       return { width: body.width, height: body.height, offsetX: body.offset.x, offsetY: body.offset.y };
     });
 
-    expect(geometry).toEqual({ width: 22, height: 14, offsetX: -11, offsetY: 6 });
+    expect(geometry).toEqual({ width: 18, height: 14, offsetX: 7, offsetY: 26 });
   });
 
   it('el cuerpo es inmovible y no se mueve por su cuenta (moves=false)', async () => {
@@ -281,9 +282,44 @@ describe('avatar geometry against real Phaser (art migration, step 6)', () => {
     expect(before.peer).toEqual(physicalBodyRect(peer));
     expect(bodyRect(player)).toEqual(before.player);
     expect(bodyRect(peer)).toEqual(before.peer);
-    // The shared geometry pins the historic numbers, so this guards both ways.
+    for (const character of [player, peer]) {
+      const rect = bodyRect(character);
+      const sprite = character.sprite.getBounds();
+      const drawnFeet = { x: sprite.x + CHARACTER_WALK.anchor.x, y: sprite.y + CHARACTER_WALK.anchor.y };
+      expect({ x: rect.x + rect.width / 2, y: rect.y + rect.height }).toEqual(drawnFeet);
+    }
     expect(player.width).toBe(AVATAR_CONTAINER_SIZE.width);
     expect(player.height).toBe(AVATAR_CONTAINER_SIZE.height);
+  });
+
+  it.each([
+    { side: 'left', feet: { x: 197, y: 249 }, velocity: { x: 60, y: 0 }, contact: { x: 216, y: 249 } },
+    { side: 'right', feet: { x: 253, y: 249 }, velocity: { x: -60, y: 0 }, contact: { x: 243, y: 249 } },
+    { side: 'above', feet: { x: 225, y: 224 }, velocity: { x: 0, y: 60 }, contact: { x: 225, y: 244 } },
+    { side: 'below', feet: { x: 225, y: 288 }, velocity: { x: 0, y: -60 }, contact: { x: 225, y: 269 } },
+  ])('contacts an asymmetric saved trunk from $side at the ground footprint, not the torso', async ({ feet, velocity, contact }) => {
+    const scene = await bootWithSheets();
+    const instances = layoutPropInstances([{ piece: 'tree-oak', kind: 'tree', tx: 6, ty: 6, w: 2, h: 2, collision: 'solid', facing: null }]);
+    const rects = collisionWorld(instances, new Map([['tree-oak', [{ x: 1, y: -12, w: 9, h: 11 }]]]));
+    expect(rects[0]).toMatchObject({ x: 225, y: 244, w: 9, h: 11 });
+    const trunk = rects[0]!;
+    const obstacle = scene.add.rectangle(trunk.x + trunk.w / 2, trunk.y + trunk.h / 2, trunk.w, trunk.h);
+    scene.physics.add.existing(obstacle, true);
+    const player = spawnPlayer(scene, 'Test', SHEETS);
+    const body = player.body as Phaser.Physics.Arcade.Body;
+    const position = positionForFeet(feet);
+    body.reset(position.x, position.y);
+    let collided = false;
+    scene.physics.add.collider(player, obstacle, () => { collided = true; });
+    body.setVelocity(velocity.x, velocity.y);
+    await vi.waitFor(() => expect(collided).toBe(true), { timeout: 5000, interval: 16 });
+    body.setVelocity(0, 0);
+    await nextFrames(scene);
+    const bounds = player.sprite.getBounds();
+    expect(bounds.x + CHARACTER_WALK.anchor.x).toBeCloseTo(contact.x);
+    expect(bounds.y + CHARACTER_WALK.anchor.y).toBeCloseTo(contact.y);
+    expect(bodyRect(player)).toEqual(physicalBodyRect(player));
+    expect(isPositionBlocked(rects, player.x, player.y)).toBe(false);
   });
 
   it('draws the walk frame with its anchor on the feet, and leaves the position alone', async () => {

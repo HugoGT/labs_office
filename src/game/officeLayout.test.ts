@@ -382,8 +382,8 @@ describe('effective walkability', () => {
 
   it('judges a network position by the tile under its body center', () => {
     const snapshot = terrainSnapshot(grassMap({ ground: (tx, ty) => (tx === 4 && ty === 4 ? 'water' : null) }));
-    // Body center (x - 16, y - 9): position (4 * 32 + 16 + 16, 4 * 32 + 9 + 16) centers it in tile (4, 4).
-    const onWater = { x: 4 * 32 + 32, y: 4 * 32 + 25 };
+    // Body center (x, y + 11), centered in tile (4, 4).
+    const onWater = { x: 4 * 32 + 16, y: 4 * 32 + 5 };
 
     expect(isPositionWalkable(snapshot, onWater.x, onWater.y)).toBe(false);
     expect(isPositionWalkable(snapshot, onWater.x + 32, onWater.y)).toBe(true);

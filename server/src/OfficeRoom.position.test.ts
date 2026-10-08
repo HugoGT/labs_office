@@ -201,7 +201,7 @@ describe('OfficeRoom: restore last position (#148)', () => {
   it('terrain changed after saving invalidates the restored coordinate', async () => {
     const store = await directory();
     await start(store, true, { terrain: createMemoryTerrain() });
-    const position = { x: 120 * TILE + 32, y: 85 * TILE + 25 };
+    const position = { x: 120 * TILE + 16, y: 85 * TILE + 5 };
     const first = await join();
     await move(first, position);
     await first.leave();
@@ -217,7 +217,7 @@ describe('OfficeRoom: restore last position (#148)', () => {
     const table = BASE_LAYOUT.props.find((prop) => prop.piece.startsWith('table-'))!;
     const piece = table.piece;
     await start(store, true, { collisions: createMemoryCollisions([[piece, []]]) });
-    const target = { x: table.tx * TILE + 32, y: table.ty * TILE + 25 };
+    const target = { x: table.tx * TILE + 16, y: table.ty * TILE + 5 };
     await server.collisions.setRects({ pieceId: piece, rects: [], actorId: null }, () => []);
     const first = await join();
     await move(first, target);
@@ -232,7 +232,7 @@ describe('OfficeRoom: restore last position (#148)', () => {
     await start(await directory());
     const first = await join();
     const index = BASE_MAP_SEATS.findIndex((seat) => seat.tx === 53 && seat.ty === 11);
-    const beside = { x: 53 * TILE + 32, y: 12 * TILE + 25 };
+    const beside = { x: 53 * TILE + 16, y: 12 * TILE + 5 };
     await move(first, beside);
     first.send('sit', { seat: mapSeatId(index) });
     await waitFor(() => own(first).seat === mapSeatId(index));

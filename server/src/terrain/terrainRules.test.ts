@@ -32,7 +32,7 @@ function watered(index: number, material: LayoutMaterial = 'water'): number[] {
 
 /** A network position whose avatar body sits in the middle of tile (tx, ty). */
 function standingOn(tx: number, ty: number) {
-  return { x: tx * TILE + 32, y: ty * TILE + 25 };
+  return { x: tx * TILE + 16, y: ty * TILE + 5 };
 }
 
 describe('parseTerrainEdit', () => {
@@ -71,6 +71,13 @@ describe('staticProtectedTiles', () => {
 });
 
 describe('findWaterConflict', () => {
+  it('protects ground contact rather than the old offset tile, even when the center is outside', () => {
+    const protections = { placements: [], players: [{ x: 100, y: 207 }] };
+    // Footprint (91, 211)..(109, 225) crosses both x=96 and y=224.
+    expect(findWaterConflict([7 * W + 3], W, new Set(), protections)).toBe('player');
+    expect(findWaterConflict([5 * W + 2], W, new Set(), protections)).toBeNull();
+  });
+
   it('lets water onto a free lawn and anything that is not water anywhere', () => {
     expect(findWaterConflict(watered(LAWN), W, STATIC, NONE)).toBeNull();
     expect(watered(blockIndexAt(W, PLAYER_SPAWN_TX, PLAYER_SPAWN_TY), 'sand')).toEqual([]);
@@ -96,7 +103,7 @@ describe('findWaterConflict', () => {
     // Body center just right of the block's last column: a third of the body still overlaps it.
     const flooded = new Set(watered(LAWN));
     expect(flooded.has(22 * W + 71)).toBe(true);
-    const halfIn = { x: 72 * TILE + 16 + 5, y: 22 * TILE + 25 };
+    const halfIn = { x: 72 * TILE + 5, y: 22 * TILE + 5 };
     const players = { placements: [], players: [halfIn] };
     expect(findWaterConflict([22 * W + 71], W, new Set(), players)).toBe('player');
     expect(findWaterConflict(watered(LAWN), W, STATIC, { placements: [], players: [standingOn(10, 10)] })).toBeNull();

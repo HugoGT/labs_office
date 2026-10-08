@@ -118,7 +118,14 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     const rect = { x: sx > 0 ? 350 : 649, y: sy > 0 ? 375 : 624, w: 1, h: 1 };
     movement.collisionRects = [rect];
     movement.buildPieceColliders();
-    const start = { x: sx > 0 ? 300 : 732, y: sy > 0 ? 299.8 : 718.2 };
+    const footprint = physicalBodyRect({ x: 0, y: 0 });
+    const gapX = 55;
+    // Keep the continuous corner overlap below one pixel of travel for either footprint width.
+    const gapY = gapX + footprint.width + 0.2;
+    const start = {
+      x: (sx > 0 ? rect.x - gapX - footprint.width : rect.x + rect.w + gapX) - footprint.x,
+      y: (sy > 0 ? rect.y - gapY - footprint.height : rect.y + rect.h + gapY) - footprint.y,
+    };
     body.reset(start.x, start.y);
     movement.walkingMs = 8000;
     movement.cursors.right.isDown = sx > 0;

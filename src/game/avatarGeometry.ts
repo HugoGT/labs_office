@@ -35,14 +35,20 @@ export const AVATAR_FEET_OFFSET_Y = 18;
 
 /**
  * Size of the avatar container. It is not the sprite size: Phaser offsets a
- * container's Arcade body and hit area by half of it, so it stays the
- * historic 32x44 to keep collisions where they were.
+ * container's Arcade body and hit area by half of it. Keep this stable so
+ * changing the footprint does not change input coordinates or sprite anchors.
  */
 export const AVATAR_CONTAINER_SIZE = { width: 32, height: 44 } as const;
 
 /** Arcade body shared by the local player and every peer (#59). */
-export const AVATAR_BODY_SIZE = { width: 22, height: 14 } as const;
-export const AVATAR_BODY_OFFSET = { x: -11, y: 6 } as const;
+export const AVATAR_BODY_SIZE = { width: 18, height: 14 } as const;
+/** Ground footprint centered horizontally, with its bottom on the drawn feet. */
+export const AVATAR_BODY_CENTER_OFFSET = { x: 0, y: AVATAR_FEET_OFFSET_Y - AVATAR_BODY_SIZE.height / 2 } as const;
+/** Arcade subtracts the container display origin before adding this offset. */
+export const AVATAR_BODY_OFFSET = {
+  x: AVATAR_CONTAINER_SIZE.width / 2 + AVATAR_BODY_CENTER_OFFSET.x - AVATAR_BODY_SIZE.width / 2,
+  y: AVATAR_CONTAINER_SIZE.height / 2 + AVATAR_BODY_CENTER_OFFSET.y - AVATAR_BODY_SIZE.height / 2,
+} as const;
 
 export function feetOf(position: GeometryPoint): GeometryPoint {
   return { x: position.x, y: position.y + AVATAR_FEET_OFFSET_Y };
@@ -54,9 +60,8 @@ export function positionForFeet(feet: GeometryPoint): GeometryPoint {
 
 /**
  * World rectangle of the Arcade body for an avatar at `position`, as Phaser
- * computes it (`position + offset - container size / 2`). It sits up and to
- * the left of the feet; that is how the procedural avatar always collided,
- * and changing it would be a gameplay change, not an art one.
+ * computes it (`position + offset - container size / 2`). Shared by physics,
+ * authoritative movement checks and edit protections, never the visual torso.
  */
 export function physicalBodyRect(position: GeometryPoint): GeometryBox {
   return {

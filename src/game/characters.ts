@@ -143,8 +143,7 @@ export function makeCharacter(
   // Avatar band (#70): above every normal asset, y-sorted among avatars. The
   // ring, pill, dot and label are children, so they ride this depth.
   container.setDepth(avatarDepth(feetOf(container).y));
-  // Not the sprite size: Arcade and input offset by half of it, so it keeps
-  // the historic value (see `avatarGeometry.ts`).
+  // Not the sprite size: Arcade and input both subtract this display origin.
   container.setSize(AVATAR_CONTAINER_SIZE.width, AVATAR_CONTAINER_SIZE.height);
   container.ring = ring;
   container.nameText = name;

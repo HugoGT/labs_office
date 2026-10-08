@@ -35,6 +35,8 @@
  */
 
 import officeMap from './maps/office.json' with { type: 'json' };
+import { AVATAR_BODY_CENTER_OFFSET } from './avatarGeometry.ts';
+export { AVATAR_BODY_CENTER_OFFSET } from './avatarGeometry.ts';
 
 /** Same as `TILE` in mapData.ts and `ART_TILE` in artContract.ts (pinned by tests). */
 export const LAYOUT_TILE = 32;
@@ -391,14 +393,6 @@ export function isTileWalkable(snapshot: TerrainSnapshot, tx: number, ty: number
   if (tx < 0 || ty < 0 || tx >= snapshot.width || ty >= snapshot.height) return false;
   return snapshot.walkable[ty * snapshot.width + tx]!;
 }
-
-/**
- * The center of an avatar's Arcade body relative to its network position
- * (`physicalBodyRect` in avatarGeometry.ts, pinned by a test). Phaser collides
- * that body, which sits up and to the left of the position, so the server
- * checks the same point the client's physics keeps off solid tiles.
- */
-export const AVATAR_BODY_CENTER_OFFSET = { x: -16, y: -9 } as const;
 
 /** The terrain half of a move check; the room also checks the pieces' rectangles (`isPositionBlocked`). */
 export function isPositionWalkable(snapshot: TerrainSnapshot, x: number, y: number): boolean {
