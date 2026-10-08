@@ -131,7 +131,7 @@ import { AVATAR_KEYS, PLAYER_TEXTURE, avatarTextureKey, createOfficeTextures } f
 export const OFFICE_SCENE_KEY = 'office';
 
 const PLAYER_SPEED = 230;
-// Below both the 14px body height and Arcade's 4px overlap bias, even at 5x.
+// Below both the 14px body height and Arcade's 4px overlap bias, even at the top speed.
 const WALK_STEP_PX = 3;
 const PROXIMITY_TICK_MS = 250;
 /** Suavizado de `startFollow` (#53): compartido entre `setupCameras` y el `resumeFollow` de `CameraPanLayer`. */
@@ -569,7 +569,7 @@ export class OfficeScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, stopEntry);
     this.events.once(Phaser.Scenes.Events.DESTROY, stopEntry);
 
-    // Arcade's discrete collision checks cannot safely take a whole 5x frame.
+    // Arcade's discrete collision checks cannot safely take a whole top-speed frame.
     // Step it here in bounded slices, syncing containers after each separation.
     this.physics.disableUpdate();
     this.physics.world.fixedStep = false;
