@@ -1,22 +1,28 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { describeAdminError } from '../dashboard/adminErrors';
 import { AdminError } from '../dashboard/adminPort';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
+import { SPAWN_BLOCK_INDEX } from '../game/mapData';
 import type { OfficeBridge } from '../game/officeBridge';
-import { BASE_LAYOUT, BLOCK_TILES, blockCount, encodeTerrainBlocks, type LayoutMaterial } from '../game/officeLayout';
-import { generateMapBlocks, SPAWN_BLOCK_INDEX, type MapGeneration } from '../game/mapGeneration';
+import { BASE_LAYOUT, encodeTerrainBlocks, type LayoutMaterial } from '../game/officeLayout';
 
 /**
- * The terrain editor of the office sidebar (#123 phase 2): pick a block on
- * the map or by column and row, choose a material, see it on the map, apply.
+ * The terrain editor of the office sidebar (#123 phase 2): pick a floor in
+ * the palette, then every click on a 9x9 block of the map paints it, until
+ * the floor is unpicked. Painting over terrain replaces it, painting over the
+ * void builds new terrain, and the void entry erases.
  *
- * The blocks it shows come from the scene (`terrain` events), which follows
- * the room: an applied edit reaches this editor the same way it reaches
- * everyone else, so the preview simply stops once the block shows it.
+ * Each paint is one `setBlock`, sent one at a time in click order: the server
+ * checks it against the terrain the previous one left. The blocks it shows
+ * come from the scene (`terrain` events), which follows the room: a paint
+ * reaches this editor the same way it reaches everyone else, so it is drawn
+ * as pending only until the room shows it.
  */
 
-export const BLOCK_COLUMNS = BASE_LAYOUT.width / BLOCK_TILES;
-export const BLOCK_ROWS = BASE_LAYOUT.height / BLOCK_TILES;
+/** The admin refused with these may not edit at all any more: no further writes. */
+const BLOCKING_ERRORS = ['forbidden', 'unauthorized', 'terrain-not-configured'];
+
+export const SPAWN_BLOCK_MESSAGE = 'El bloque central de la entrada siempre es de madera.';
 
 export interface UseTerrainEditorOptions {
   bridge: OfficeBridge;
@@ -26,124 +32,162 @@ export interface UseTerrainEditorOptions {
 export interface TerrainEditor {
   active: boolean;
   blocks: readonly LayoutMaterial[];
-  selected: number | null;
-  /** The material chosen for the selected block, or `null` before choosing. */
-  material: LayoutMaterial | null;
+  /** The floor picked in the palette, or `null`. */
+  brush: LayoutMaterial | null;
+  /** A paint or the emptying is on its way to the server. */
   pending: boolean;
   blocked: boolean;
   error: string | null;
   notice: string | null;
   enter(): void;
   exit(): void;
-  /** 1-based, as the form shows them; out of range is ignored. */
-  selectAt(column: number, row: number): void;
-  choose(material: LayoutMaterial): void;
-  discard(): void;
-  apply(): Promise<void>;
-  draft: readonly LayoutMaterial[] | null;
-  generate(params: MapGeneration): void;
-  applyGenerated(): Promise<void>;
+  /** Picks `material`, or unpicks it when it is the picked one. */
+  pick(material: LayoutMaterial): void;
+  unpick(): void;
+  /** Every block back to void but the central entrance, in one atomic batch. */
+  clear(): Promise<void>;
+}
+
+interface PendingPaint {
+  readonly index: number;
+  readonly material: LayoutMaterial;
+  /** Saved by the server; drawn until the next terrain update from the room. */
+  readonly sent: boolean;
+}
+
+function applyPaints(blocks: readonly LayoutMaterial[], paints: readonly PendingPaint[]): LayoutMaterial[] {
+  const next = [...blocks];
+  for (const { index, material } of paints) next[index] = material;
+  return next;
 }
 
 export function useTerrainEditor({ bridge, terrain }: UseTerrainEditorOptions): TerrainEditor {
   const [active, setActive] = useState(false);
   const [blocks, setBlocks] = useState<readonly LayoutMaterial[]>(BASE_LAYOUT.blocks);
-  const [selected, setSelected] = useState<number | null>(null);
-  const [material, setMaterial] = useState<LayoutMaterial | null>(null);
-  const [pending, setPending] = useState(false);
+  const [brush, setBrush] = useState<LayoutMaterial | null>(null);
+  const [paints, setPaintsState] = useState<readonly PendingPaint[]>([]);
+  const [draining, setDraining] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [blocked, setBlocked] = useState(false);
-  const pendingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [draft, setDraft] = useState<readonly LayoutMaterial[] | null>(null);
-  const expectedRef = useRef('');
+  // The queue is read and written across awaits: refs are its source of truth, state only renders it.
+  const paintsRef = useRef<readonly PendingPaint[]>([]);
+  const blocksRef = useRef<readonly LayoutMaterial[]>(BASE_LAYOUT.blocks);
+  const drainingRef = useRef(false);
+  const blockedRef = useRef(false);
+  const busyRef = useRef(false);
+
+  const setPaints = (next: readonly PendingPaint[]): void => {
+    paintsRef.current = next;
+    setPaintsState(next);
+  };
+  const setBlockedBoth = (next: boolean): void => {
+    blockedRef.current = next;
+    setBlocked(next);
+  };
   const refuse = (cause: unknown): void => {
     setNotice(null);
     setError(describeAdminError(cause));
-    if (cause instanceof AdminError && ['forbidden', 'unauthorized', 'terrain-not-configured'].includes(cause.code)) setBlocked(true);
+    if (cause instanceof AdminError && BLOCKING_ERRORS.includes(cause.code)) setBlockedBoth(true);
   };
 
-  useEffect(() => bridge.on('terrain', (payload) => setBlocks(payload.blocks)), [bridge]);
+  async function drain(): Promise<void> {
+    if (drainingRef.current) return;
+    drainingRef.current = true;
+    setDraining(true);
+    try {
+      for (let next = paintsRef.current.find((paint) => !paint.sent); next !== undefined; next = paintsRef.current.find((paint) => !paint.sent)) {
+        const paint = next;
+        try {
+          await terrain.setBlock(paint.index, paint.material);
+          setPaints(paintsRef.current.map((candidate) => (candidate === paint ? { ...paint, sent: true } : candidate)));
+        } catch (cause) {
+          refuse(cause);
+          // A refused paint is simply not drawn; once editing is gone, nothing queued is sent.
+          setPaints(paintsRef.current.filter((candidate) => candidate !== paint && !(blockedRef.current && !candidate.sent)));
+        }
+      }
+    } finally {
+      drainingRef.current = false;
+      setDraining(false);
+    }
+  }
 
-  const select = useCallback((index: number) => {
-    if (pendingRef.current || blocked) return;
-    setDraft(null);
-    setSelected(index);
+  function paintAt(index: number): void {
+    if (blockedRef.current || busyRef.current || brush === null) return;
+    if (index < 0 || index >= blocksRef.current.length) return;
+    if (index === SPAWN_BLOCK_INDEX && brush !== 'wood') {
+      setNotice(null);
+      setError(SPAWN_BLOCK_MESSAGE);
+      return;
+    }
+    if (applyPaints(blocksRef.current, paintsRef.current)[index] === brush) return;
     setError(null);
     setNotice(null);
-  }, [blocked]);
+    setPaints([...paintsRef.current, { index, material: brush, sent: false }]);
+    void drain();
+  }
 
+  useEffect(
+    () =>
+      bridge.on('terrain', (payload) => {
+        blocksRef.current = payload.blocks;
+        setBlocks(payload.blocks);
+        // The room shows every saved paint from here on, or something newer.
+        if (paintsRef.current.some((paint) => paint.sent)) setPaints(paintsRef.current.filter((paint) => !paint.sent));
+      }),
+    [bridge],
+  );
+
+  // A fresh subscription per render keeps `paintAt` reading the current brush.
   useEffect(() => {
     if (!active) return undefined;
-    return bridge.on('terrainpick', ({ index }) => select(index));
-  }, [bridge, active, select]);
+    return bridge.on('terrainpick', ({ index }) => paintAt(index));
+  });
 
-  const previewMaterial = selected !== null && selected !== SPAWN_BLOCK_INDEX && material !== null && blocks[selected] !== material ? material : null;
+  useEffect(() => {
+    if (!active || brush === null) return undefined;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setBrush(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [active, brush]);
+
+  const previewBlocks = useMemo(() => (paints.length === 0 ? null : applyPaints(blocks, paints)), [blocks, paints]);
+  const previewKey = previewBlocks === null ? '' : encodeTerrainBlocks(previewBlocks);
 
   useEffect(() => {
     if (!active) return;
-    bridge.emitCommand('terrainedit', {
-      selected,
-      preview: selected !== null && previewMaterial !== null ? { index: selected, material: previewMaterial } : null,
-      ...(draft === null ? {} : { previewBlocks: draft }),
-    });
-  }, [bridge, active, selected, previewMaterial, draft]);
+    bridge.emitCommand('terrainedit', previewBlocks === null ? { brush } : { brush, previewBlocks });
+    // `previewKey` stands for `previewBlocks`: only a different drawing is worth a command.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bridge, active, brush, previewKey]);
 
-  // Separate from the effect above so a new selection does not close and
-  // reopen the overlay: only leaving (or unmounting) does.
+  // Separate from the effect above so a new pick does not close and reopen
+  // the overlay: only leaving (or unmounting) does.
   useEffect(() => {
     if (!active) return undefined;
     return () => bridge.emitCommand('terrainedit', null);
   }, [bridge, active]);
 
   const reset = (): void => {
-    setSelected(null);
-    setMaterial(null);
+    setBrush(null);
+    setPaints([]);
     setError(null);
     setNotice(null);
-    setDraft(null);
-    setBlocked(false);
+    setBlockedBoth(false);
   };
 
   return {
     active,
     blocks,
-    selected,
-    material,
-    pending,
+    brush,
+    pending: draining || clearing,
     blocked,
     error,
     notice,
-    draft,
-    generate(params) {
-      if (pendingRef.current || blocked || !active) return;
-      try {
-        setDraft(generateMapBlocks(params));
-        expectedRef.current = encodeTerrainBlocks(blocks);
-        setSelected(null);
-        setMaterial(null);
-        setError(null);
-        setNotice(null);
-      } catch {
-        setError('Revisa la semilla (0–4294967295), los bloques (1–140) y el material.');
-      }
-    },
-    async applyGenerated() {
-      if (pendingRef.current || blocked || draft === null || !active) return;
-      pendingRef.current = true;
-      setPending(true);
-      try {
-        await terrain.setBlocks(draft.map((material, index) => ({ index, material })), expectedRef.current);
-        setDraft(null);
-        setError(null);
-        setNotice('Mapa actualizado. Las salas y los escritorios se conservan.');
-      } catch (cause) {
-        refuse(cause);
-      } finally {
-        pendingRef.current = false;
-        setPending(false);
-      }
-    },
     enter() {
       reset();
       setActive(true);
@@ -152,37 +196,36 @@ export function useTerrainEditor({ bridge, terrain }: UseTerrainEditorOptions): 
       reset();
       setActive(false);
     },
-    selectAt(column, row) {
-      if (!Number.isInteger(column) || !Number.isInteger(row)) return;
-      if (column < 1 || row < 1 || column > BLOCK_COLUMNS || row > BLOCK_ROWS) return;
-      const index = (row - 1) * BLOCK_COLUMNS + (column - 1);
-      if (index < blockCount(BASE_LAYOUT)) select(index);
-    },
-    choose(next) {
-      if (pendingRef.current || blocked || selected === SPAWN_BLOCK_INDEX) return;
-      setDraft(null);
-      setMaterial(next);
+    pick(material) {
+      setBrush((current) => (current === material ? null : material));
       setError(null);
       setNotice(null);
     },
-    discard() {
-      if (pendingRef.current) return;
-      setMaterial(null);
-      setDraft(null);
+    unpick() {
+      setBrush(null);
     },
-    async apply() {
-      if (pendingRef.current || blocked || selected === null || selected === SPAWN_BLOCK_INDEX || material === null) return;
-      pendingRef.current = true;
-      setPending(true);
+    async clear() {
+      if (!active || blockedRef.current || busyRef.current || drainingRef.current) return;
+      const current = blocksRef.current;
+      const edits = current.flatMap((material, index) => {
+        const target: LayoutMaterial = index === SPAWN_BLOCK_INDEX ? 'wood' : 'void';
+        return material === target ? [] : [{ index, material: target }];
+      });
+      setError(null);
+      if (edits.length === 0) {
+        setNotice('El terreno ya está vacío.');
+        return;
+      }
+      busyRef.current = true;
+      setClearing(true);
       try {
-        await terrain.setBlock(selected, material);
-        setError(null);
-        setNotice('Bloque actualizado.');
+        await terrain.setBlocks(edits, encodeTerrainBlocks(current));
+        setNotice('Terreno vaciado. Las salas y los escritorios se conservan.');
       } catch (cause) {
         refuse(cause);
       } finally {
-        pendingRef.current = false;
-        setPending(false);
+        busyRef.current = false;
+        setClearing(false);
       }
     },
   };

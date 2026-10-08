@@ -1,7 +1,7 @@
 /**
- * The terrain editor's lifecycle (#123 phase 2): what it asks the map to show
- * through `terrainedit`, how it follows the live blocks and map clicks, and
- * what it tells the admin after applying.
+ * The terrain editor's lifecycle (#123 phase 2, floor palette): what it asks
+ * the map to show through `terrainedit`, how a picked floor turns map clicks
+ * into block paints, and what it tells the admin.
  */
 
 import { act, renderHook, waitFor } from '@testing-library/react';
@@ -9,14 +9,18 @@ import { describe, expect, it, vi } from 'vitest';
 import { AdminError } from '../dashboard/adminPort';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import { createOfficeBridge, type OfficeCommandMap } from '../game/officeBridge';
-import { BASE_LAYOUT, withBlock } from '../game/officeLayout';
+import { SPAWN_BLOCK_INDEX } from '../game/mapData';
+import { BASE_LAYOUT, encodeTerrainBlocks, withBlock, type LayoutMaterial } from '../game/officeLayout';
 import { useTerrainEditor } from './useTerrainEditor';
-import { generateMapBlocks } from '../game/mapGeneration';
-import { encodeTerrainBlocks } from '../game/officeLayout';
 
 const LAWN = 35;
+const OTHER = 36;
 
-function setup(terrain: TerrainAdminPort = { setBlock: vi.fn(async () => undefined), setBlocks: vi.fn() }) {
+function port(overrides: Partial<TerrainAdminPort> = {}): TerrainAdminPort {
+  return { setBlock: vi.fn(async () => undefined), setBlocks: vi.fn(async () => undefined), ...overrides };
+}
+
+function setup(terrain: TerrainAdminPort = port()) {
   const bridge = createOfficeBridge();
   const commands: OfficeCommandMap['terrainedit'][] = [];
   bridge.onCommand('terrainedit', (command) => commands.push(command));
@@ -24,45 +28,16 @@ function setup(terrain: TerrainAdminPort = { setBlock: vi.fn(async () => undefin
   return { bridge, terrain, commands, ...view };
 }
 
-describe('useTerrainEditor', () => {
-  it('disables further writes after authorization or configuration disappears', async () => {
-    const terrain = { setBlock: vi.fn(), setBlocks: vi.fn(async () => { throw new AdminError('forbidden'); }) };
-    const { result } = setup(terrain);
-    act(() => result.current.enter());
-    act(() => result.current.generate({ seed: 123, landBlocks: 30, material: 'grass' }));
-    await act(() => result.current.applyGenerated());
-    expect(result.current.blocked).toBe(true);
-    await act(() => result.current.applyGenerated());
-    expect(terrain.setBlocks).toHaveBeenCalledTimes(1);
+/** A deferred `setBlock`, resolved or rejected by the test. */
+function deferredPort() {
+  const calls: { index: number; material: string; resolve: () => void; reject: (error: unknown) => void }[] = [];
+  const terrain = port({
+    setBlock: vi.fn((index, material) => new Promise<void>((resolve, reject) => calls.push({ index, material, resolve, reject }))),
   });
-  it('previews generation without writing, explicitly applies atomically, and clears the local draft', async () => {
-    const terrain = { setBlock: vi.fn(), setBlocks: vi.fn(async () => undefined) };
-    const { result, commands } = setup(terrain);
-    act(() => result.current.enter());
-    act(() => result.current.generate({ seed: 123, landBlocks: 30, material: 'grass' }));
-    const draft = generateMapBlocks({ seed: 123, landBlocks: 30, material: 'grass' });
-    expect(commands.at(-1)?.previewBlocks).toEqual(draft);
-    expect(terrain.setBlocks).not.toHaveBeenCalled();
-    await act(() => result.current.applyGenerated());
-    expect(terrain.setBlocks).toHaveBeenCalledWith(draft.map((material, index) => ({ index, material })), encodeTerrainBlocks(BASE_LAYOUT.blocks));
-    expect(result.current.draft).toBeNull();
-  });
+  return { terrain, calls };
+}
 
-  it('keeps a rejected batch preview and prevents edits while saving', async () => {
-    let reject!: (error: unknown) => void;
-    const terrain = { setBlock: vi.fn(), setBlocks: vi.fn(() => new Promise<void>((_, fail) => { reject = fail; })) };
-    const { result } = setup(terrain);
-    act(() => result.current.enter());
-    act(() => result.current.generate({ seed: 123, landBlocks: 30, material: 'grass' }));
-    const draft = result.current.draft;
-    let applying!: Promise<void>;
-    act(() => { applying = result.current.applyGenerated(); });
-    act(() => result.current.generate({ seed: 1, landBlocks: 1, material: 'wood' }));
-    expect(result.current.draft).toBe(draft);
-    await act(async () => { reject(new AdminError('terrain-under-placement')); await applying; });
-    expect(result.current.draft).toBe(draft);
-    expect(result.current.error).toMatch(/otro bloque/);
-  });
+describe('useTerrainEditor', () => {
   it('starts closed and says nothing to the map', () => {
     const { result, commands } = setup();
 
@@ -70,7 +45,7 @@ describe('useTerrainEditor', () => {
     expect(commands).toEqual([]);
   });
 
-  it('opens with nothing selected, takes the live blocks the scene answers with, and closes the map overlay on exit', () => {
+  it('opens with no floor picked, takes the live blocks the scene answers with, and closes the map overlay on exit', () => {
     const { bridge, result, commands } = setup();
     const watered = withBlock(BASE_LAYOUT.blocks, LAWN, 'water');
     bridge.onCommand('terrainedit', (command) => {
@@ -80,7 +55,8 @@ describe('useTerrainEditor', () => {
     act(() => result.current.enter());
 
     expect(result.current.active).toBe(true);
-    expect(commands.at(-1)).toEqual({ selected: null, preview: null });
+    expect(result.current.brush).toBeNull();
+    expect(commands.at(-1)).toEqual({ brush: null });
     expect(result.current.blocks[LAWN]).toBe('water');
 
     act(() => result.current.exit());
@@ -88,94 +64,175 @@ describe('useTerrainEditor', () => {
     expect(result.current.active).toBe(false);
   });
 
-  it('selects the block clicked on the map or typed by column and row, only while open', () => {
-    const { bridge, result, commands } = setup();
-
-    act(() => bridge.emit('terrainpick', { index: 3 }));
-    expect(result.current.selected).toBeNull();
-
+  it('picks a floor, unpicks it on a second pick or on demand, and tells the map', () => {
+    const { result, commands } = setup();
     act(() => result.current.enter());
-    act(() => bridge.emit('terrainpick', { index: LAWN }));
-    expect(result.current.selected).toBe(LAWN);
-    expect(commands.at(-1)).toEqual({ selected: LAWN, preview: null });
 
-    act(() => result.current.selectAt(2, 1));
-    expect(result.current.selected).toBe(1);
-    act(() => result.current.selectAt(15, 1));
-    expect(result.current.selected).toBe(1);
+    act(() => result.current.pick('grass'));
+    expect(result.current.brush).toBe('grass');
+    expect(commands.at(-1)).toEqual({ brush: 'grass' });
+
+    act(() => result.current.pick('sand'));
+    expect(result.current.brush).toBe('sand');
+    act(() => result.current.pick('sand'));
+    expect(result.current.brush).toBeNull();
+
+    act(() => result.current.pick('void'));
+    act(() => result.current.unpick());
+    expect(result.current.brush).toBeNull();
+    expect(commands.at(-1)).toEqual({ brush: null });
   });
 
-  it('previews the chosen material on the selected block, and not when it is what the block already has', () => {
-    const { bridge, result, commands } = setup();
+  it('drops the picked floor on Escape', () => {
+    const { result } = setup();
     act(() => result.current.enter());
-    act(() => bridge.emit('terrainpick', { index: LAWN }));
+    act(() => result.current.pick('grass'));
 
-    act(() => result.current.choose('grass'));
-    expect(commands.at(-1)).toEqual({ selected: LAWN, preview: { index: LAWN, material: 'grass' } });
-
-    act(() => result.current.choose('water'));
-    expect(commands.at(-1)).toEqual({ selected: LAWN, preview: null });
-
-    act(() => result.current.choose('sand'));
-    act(() => bridge.emit('terrainpick', { index: 0 }));
-    expect(commands.at(-1)).toEqual({ selected: 0, preview: { index: 0, material: 'sand' } });
-    act(() => result.current.discard());
-    expect(commands.at(-1)).toEqual({ selected: 0, preview: null });
-  });
-
-  it('applies through the port and lets the preview go once the room shows the edit', async () => {
-    const { bridge, terrain, result, commands } = setup();
-    act(() => result.current.enter());
-    act(() => bridge.emit('terrainpick', { index: LAWN }));
-    act(() => result.current.choose('water'));
-
-    await act(() => result.current.apply());
-
-    expect(terrain.setBlock).toHaveBeenCalledWith(LAWN, 'water');
-    expect(result.current.notice).toBe('Bloque actualizado.');
-    expect(result.current.error).toBeNull();
-
-    act(() => bridge.emit('terrain', { blocks: withBlock(BASE_LAYOUT.blocks, LAWN, 'water') }));
-    expect(commands.at(-1)).toEqual({ selected: LAWN, preview: null });
-  });
-
-  it('shows why the server refused, keeping the choice on screen', async () => {
-    const setBlock = vi.fn(async () => {
-      throw new AdminError('terrain-under-placement');
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     });
-    const { bridge, result } = setup({ setBlock, setBlocks: vi.fn() });
+
+    expect(result.current.brush).toBeNull();
+  });
+
+  it('ignores map clicks while closed or with no floor picked', () => {
+    const { bridge, result, terrain } = setup();
+
+    act(() => bridge.emit('terrainpick', { index: LAWN }));
     act(() => result.current.enter());
     act(() => bridge.emit('terrainpick', { index: LAWN }));
-    act(() => result.current.choose('water'));
 
-    await act(() => result.current.apply());
+    expect(terrain.setBlock).not.toHaveBeenCalled();
+  });
+
+  it('paints each clicked block with the picked floor, keeping it picked to paint many in a row', async () => {
+    const { bridge, result, terrain } = setup();
+    act(() => result.current.enter());
+    act(() => result.current.pick('grass'));
+
+    act(() => bridge.emit('terrainpick', { index: LAWN }));
+    act(() => bridge.emit('terrainpick', { index: OTHER }));
+
+    await waitFor(() => expect(terrain.setBlock).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(terrain.setBlock).mock.calls).toEqual([[LAWN, 'grass'], [OTHER, 'grass']]);
+    expect(result.current.brush).toBe('grass');
+    await waitFor(() => expect(result.current.pending).toBe(false));
+    expect(result.current.error).toBeNull();
+  });
+
+  it('sends one paint at a time, in click order, and draws the pending ones until the room shows them', async () => {
+    const { terrain, calls } = deferredPort();
+    const { bridge, result, commands } = setup(terrain);
+    act(() => result.current.enter());
+    act(() => result.current.pick('wood'));
+
+    act(() => bridge.emit('terrainpick', { index: LAWN }));
+    act(() => bridge.emit('terrainpick', { index: OTHER }));
+
+    expect(calls.map((call) => call.index)).toEqual([LAWN]);
+    expect(result.current.pending).toBe(true);
+    expect(commands.at(-1)).toEqual({ brush: 'wood', previewBlocks: withBlock(withBlock(BASE_LAYOUT.blocks, LAWN, 'wood'), OTHER, 'wood') });
+
+    await act(async () => calls[0]!.resolve());
+    expect(calls.map((call) => call.index)).toEqual([LAWN, OTHER]);
+    await act(async () => calls[1]!.resolve());
+    await waitFor(() => expect(result.current.pending).toBe(false));
+    // Saved but not shown yet by the room: still drawn.
+    expect(commands.at(-1)?.previewBlocks).toBeDefined();
+
+    act(() => bridge.emit('terrain', { blocks: withBlock(withBlock(BASE_LAYOUT.blocks, LAWN, 'wood'), OTHER, 'wood') }));
+    expect(commands.at(-1)).toEqual({ brush: 'wood' });
+  });
+
+  it('skips a click on a block that already has, or is about to have, the picked floor', async () => {
+    const { terrain, calls } = deferredPort();
+    const { bridge, result } = setup(terrain);
+    act(() => result.current.enter());
+    act(() => result.current.pick(BASE_LAYOUT.blocks[LAWN]!));
+    act(() => bridge.emit('terrainpick', { index: LAWN }));
+    expect(calls).toEqual([]);
+
+    act(() => result.current.pick('sand'));
+    act(() => bridge.emit('terrainpick', { index: LAWN }));
+    act(() => bridge.emit('terrainpick', { index: LAWN }));
+    expect(calls).toHaveLength(1);
+  });
+
+  it('keeps the central entrance block wood, saying why, without asking the server', () => {
+    const { bridge, result, terrain } = setup();
+    act(() => result.current.enter());
+    act(() => result.current.pick('void'));
+
+    act(() => bridge.emit('terrainpick', { index: SPAWN_BLOCK_INDEX }));
+
+    expect(terrain.setBlock).not.toHaveBeenCalled();
+    expect(result.current.error).toMatch(/entrada.*madera/);
+  });
+
+  it('shows why the server refused a paint, drops only that paint and goes on with the rest', async () => {
+    const { terrain, calls } = deferredPort();
+    const { bridge, result, commands } = setup(terrain);
+    act(() => result.current.enter());
+    act(() => result.current.pick('void'));
+    act(() => bridge.emit('terrainpick', { index: LAWN }));
+    act(() => bridge.emit('terrainpick', { index: OTHER }));
+
+    await act(async () => calls[0]!.reject(new AdminError('terrain-under-placement')));
 
     expect(result.current.error).toMatch(/otro bloque/);
-    expect(result.current.notice).toBeNull();
-    expect(result.current.material).toBe('water');
+    expect(result.current.brush).toBe('void');
+    expect(calls.map((call) => call.index)).toEqual([LAWN, OTHER]);
+    expect(commands.at(-1)).toEqual({ brush: 'void', previewBlocks: withBlock(BASE_LAYOUT.blocks, OTHER, 'void') });
+    await act(async () => calls[1]!.resolve());
   });
 
-  it('reports busy while applying and ignores a second apply meanwhile', async () => {
-    let finish!: () => void;
-    const setBlock = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
-    const { bridge, result } = setup({ setBlock, setBlocks: vi.fn() });
+  it('stops painting for good once authorization or configuration disappears', async () => {
+    const { terrain, calls } = deferredPort();
+    const { bridge, result, commands } = setup(terrain);
     act(() => result.current.enter());
+    act(() => result.current.pick('grass'));
     act(() => bridge.emit('terrainpick', { index: LAWN }));
-    act(() => result.current.choose('sand'));
+    act(() => bridge.emit('terrainpick', { index: OTHER }));
 
-    let first!: Promise<void>;
-    act(() => {
-      first = result.current.apply();
-    });
-    expect(result.current.pending).toBe(true);
-    await act(() => result.current.apply());
-    expect(setBlock).toHaveBeenCalledTimes(1);
+    await act(async () => calls[0]!.reject(new AdminError('forbidden')));
+    act(() => bridge.emit('terrainpick', { index: 40 }));
 
-    await act(async () => {
-      finish();
-      await first;
-    });
+    expect(result.current.blocked).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(commands.at(-1)).toEqual({ brush: 'grass' });
     await waitFor(() => expect(result.current.pending).toBe(false));
+  });
+
+  it('empties the whole terrain but the entrance in one atomic batch against the blocks it saw', async () => {
+    const terrain = port();
+    const { bridge, result } = setup(terrain);
+    const built = withBlock(withBlock(BASE_LAYOUT.blocks, LAWN, 'grass'), OTHER, 'void');
+    act(() => result.current.enter());
+    act(() => bridge.emit('terrain', { blocks: built }));
+
+    await act(() => result.current.clear());
+
+    const target = built.map((_, index) => (index === SPAWN_BLOCK_INDEX ? 'wood' : 'void'));
+    const edits = target.flatMap((material, index) => (built[index] === material ? [] : [{ index, material }]));
+    expect(terrain.setBlocks).toHaveBeenCalledWith(edits, encodeTerrainBlocks(built));
+    expect(edits.some(({ index }) => index === OTHER || index === SPAWN_BLOCK_INDEX)).toBe(false);
+    expect(result.current.notice).toMatch(/salas y los escritorios se conservan/);
+  });
+
+  it('says the terrain is already empty instead of sending an empty batch, and shows a refused one', async () => {
+    const terrain = port({ setBlocks: vi.fn(async () => { throw new AdminError('terrain-stale'); }) });
+    const { bridge, result } = setup(terrain);
+    act(() => result.current.enter());
+    const empty = BASE_LAYOUT.blocks.map((_, index): LayoutMaterial => (index === SPAWN_BLOCK_INDEX ? 'wood' : 'void'));
+    act(() => bridge.emit('terrain', { blocks: empty }));
+
+    await act(() => result.current.clear());
+    expect(terrain.setBlocks).not.toHaveBeenCalled();
+    expect(result.current.notice).toMatch(/ya está vacío/);
+
+    act(() => bridge.emit('terrain', { blocks: withBlock(empty, LAWN, 'grass') }));
+    await act(() => result.current.clear());
+    expect(result.current.error).toMatch(/cambió/);
   });
 
   it('closes the overlay when unmounted while open', () => {

@@ -36,12 +36,13 @@
 
 import officeMap from './maps/office.json' with { type: 'json' };
 import { AVATAR_BODY_CENTER_OFFSET, physicalBodyRect } from './avatarGeometry.ts';
+import { MAP_BLOCK_TILES } from './mapData.ts';
 export { AVATAR_BODY_CENTER_OFFSET } from './avatarGeometry.ts';
 
 /** Same as `TILE` in mapData.ts and `ART_TILE` in artContract.ts (pinned by tests). */
 export const LAYOUT_TILE = 32;
 /** Side of a terrain block, in tiles (#123). */
-export const BLOCK_TILES = 9;
+export const BLOCK_TILES = MAP_BLOCK_TILES;
 
 /**
  * `void`, then the `TERRAIN_MATERIALS` of artContract.ts in the same drawing

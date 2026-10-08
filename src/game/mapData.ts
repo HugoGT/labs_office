@@ -20,6 +20,14 @@ export const PROX_RADIUS = 170;
 export const PLAYER_SPAWN_TX = 67;
 export const PLAYER_SPAWN_TY = 49;
 
+/** Side of a terrain block, in tiles (#123). `officeLayout.ts` reads it from here. */
+export const MAP_BLOCK_TILES = 9;
+export const MAP_BLOCK_COLUMNS = MAP_W / MAP_BLOCK_TILES;
+export const MAP_BLOCK_ROWS = MAP_H / MAP_BLOCK_TILES;
+/** The protected central block of the spawn tile: it stays wood whatever is painted. */
+export const SPAWN_BLOCK_INDEX =
+  Math.floor(PLAYER_SPAWN_TY / MAP_BLOCK_TILES) * MAP_BLOCK_COLUMNS + Math.floor(PLAYER_SPAWN_TX / MAP_BLOCK_TILES);
+
 export interface ZoneLabel {
   t: string;
   x: number;

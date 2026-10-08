@@ -178,6 +178,8 @@ describe('describeAdminError: terrain edits (#123 phase 2)', () => {
   it('says why water was refused, so the admin can pick another block', () => {
     expect(describeAdminError(new AdminError('terrain-under-placement'))).toMatch(/agua/);
     expect(describeAdminError(new AdminError('terrain-under-placement'))).toMatch(/otro bloque/);
+    expect(describeAdminError(new AdminError('terrain-under-placement'))).toMatch(/vacío/);
+    expect(describeAdminError(new AdminError('terrain-stale'))).toMatch(/cambió/);
     expect(describeAdminError(new AdminError('terrain-not-configured'))).toMatch(/terreno/);
   });
 });

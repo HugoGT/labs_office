@@ -69,7 +69,6 @@ import {
   BASE_TERRAIN,
   encodeTerrainBlocks,
   terrainSnapshot,
-  withBlock,
   type LayoutMaterial,
   type TerrainSnapshot,
   type OfficeLayout,
@@ -82,7 +81,6 @@ import {
   type CollisionRect,
   type CollisionTable,
 } from './pieceCollisions';
-import type { TerrainEditCommand } from './terrainEditor';
 import { TerrainEditLayer } from './TerrainEditLayer';
 import { COLLISION_EDIT_GRAPHICS_NAME, CollisionEditLayer } from './CollisionEditLayer';
 import {
@@ -264,8 +262,7 @@ export class OfficeScene extends Phaser.Scene {
   private terrainTilemap?: TerrainTilemap;
   /** The blocks the room replicated last (#123 phase 2); colliders and `grid` follow them. */
   private terrainBlocks: readonly LayoutMaterial[] = BASE_LAYOUT.blocks;
-  /** The terrain editor's local preview, painted over `terrainBlocks` and never collided with. */
-  private terrainPreview: TerrainEditCommand['preview'] = null;
+  /** The terrain editor's pending paints, drawn instead of `terrainBlocks` and never collided with. */
   private terrainPreviewBlocks: readonly LayoutMaterial[] | null = null;
   /** The static bodies of the terrain grid and their collider, replaced whole on each edit. */
   private terrainColliders?: { rects: Phaser.GameObjects.Rectangle[]; collider: Phaser.Physics.Arcade.Collider };
@@ -665,12 +662,9 @@ export class OfficeScene extends Phaser.Scene {
       this.terrainEditing = command !== null;
       this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing;
       if (this.layoutEditing) this.resetWalking();
-      const preview = command?.preview ?? null;
       const previewBlocks = command?.previewBlocks ?? null;
-      const repaint = encodePreview(preview) !== encodePreview(this.terrainPreview) ||
-        (previewBlocks === null ? '' : encodeTerrainBlocks(previewBlocks)) !==
+      const repaint = (previewBlocks === null ? '' : encodeTerrainBlocks(previewBlocks)) !==
         (this.terrainPreviewBlocks === null ? '' : encodeTerrainBlocks(this.terrainPreviewBlocks));
-      this.terrainPreview = preview;
       this.terrainPreviewBlocks = previewBlocks;
       if (repaint) this.paintTerrain();
       if (opening) this.bridge.emit('terrain', { blocks: this.terrainBlocks });
@@ -1698,11 +1692,9 @@ export class OfficeScene extends Phaser.Scene {
     this.bridge.emit('terrain', { blocks });
   }
 
-  /** Redraws the tilemap from the live blocks, with the editor's preview over them. */
+  /** Redraws the tilemap from the live blocks, or from the editor's pending paints while it has some. */
   private paintTerrain(): void {
-    const preview = this.terrainPreview;
-    const shown = this.terrainPreviewBlocks ?? (preview === null ? this.terrainBlocks : withBlock(this.terrainBlocks, preview.index, preview.material));
-    this.terrainTilemap?.refresh(terrainSnapshot(this.layout, shown));
+    this.terrainTilemap?.refresh(terrainSnapshot(this.layout, this.terrainPreviewBlocks ?? this.terrainBlocks));
   }
 
   /** Camara principal siguiendo al jugador + minimapa en la esquina superior derecha (app.js:410-431). */
@@ -2053,10 +2045,6 @@ export class OfficeScene extends Phaser.Scene {
       body.setVelocity(0, 0);
     }
   }
-}
-
-function encodePreview(preview: TerrainEditCommand['preview']): string {
-  return preview === null ? '' : `${preview.index}:${preview.material}`;
 }
 
 function facingFromSnapshot(facing: string): Facing {

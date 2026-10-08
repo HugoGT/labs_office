@@ -273,7 +273,7 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     bridge.emitCommand('toggleSeat', undefined);
     const openers = [
       () => bridge.emitCommand('layoutedit', { pickable: [], selectedId: null, placing: null }),
-      () => bridge.emitCommand('terrainedit', { selected: null, preview: null }),
+      () => bridge.emitCommand('terrainedit', { brush: null }),
       () => bridge.emitCommand('collisionedit', { pieceId: null, draft: [], selectedRect: null, snap: 1 }),
     ];
     for (const open of openers) {
@@ -3914,7 +3914,7 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
  * repaints.
  */
 describe('OfficeScene: edited terrain', () => {
-  it('renders the empty production default and a full procedural preview without changing walkability until replication', async () => {
+  it('renders the empty production default and a pending paint without changing walkability until replication', async () => {
     const { BASE_LAYOUT: empty } = await import('./officeLayout');
     const connector = fakeConnector();
     const { scene, bridge } = await bootOfficeScene(createOfficeBridge(), { layout: empty, seats: [], endpoint: 'ws://test', connect: connector.connect });
@@ -3923,7 +3923,7 @@ describe('OfficeScene: edited terrain', () => {
     const draft = withBlock(empty.blocks, 76, 'wood');
     const point = { x: 58 * TILE + 16, y: 49 * TILE + 16 };
     expect(solidAt(scene, point.x, point.y)).toBe(true);
-    bridge.emitCommand('terrainedit', { selected: null, preview: null, previewBlocks: draft });
+    bridge.emitCommand('terrainedit', { brush: 'wood', previewBlocks: draft });
     expect(terrainTilesAt(scene, 58, 49)).not.toEqual(before);
     expect(solidAt(scene, point.x, point.y)).toBe(true);
     bridge.emitCommand('terrainedit', null);
@@ -3978,25 +3978,25 @@ describe('OfficeScene: edited terrain', () => {
     expect(solidAt(scene, 20 * TILE + 16, 20 * TILE + 16)).toBe(true);
   });
 
-  it('paints a preview for the editor without changing collisions, and drops it when the editor closes', async () => {
+  it('paints pending blocks for the editor without changing collisions, and drops them when the editor closes', async () => {
     const { scene, bridge } = await bootConnected();
     const grass = terrainTilesAt(scene, lawnCell.cx, lawnCell.cy);
 
-    bridge.emitCommand('terrainedit', { selected: LAWN, preview: { index: LAWN, material: 'water' } });
+    bridge.emitCommand('terrainedit', { brush: 'water', previewBlocks: withBlock(BASE_LAYOUT.blocks, LAWN, 'water') });
 
     expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).not.toEqual(grass);
     expect(solidAt(scene, lawn.x, lawn.y)).toBe(false);
 
-    bridge.emitCommand('terrainedit', { selected: LAWN, preview: null });
+    bridge.emitCommand('terrainedit', { brush: 'water' });
     expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).toEqual(grass);
-    bridge.emitCommand('terrainedit', { selected: LAWN, preview: { index: LAWN, material: 'sand' } });
+    bridge.emitCommand('terrainedit', { brush: 'sand', previewBlocks: withBlock(BASE_LAYOUT.blocks, LAWN, 'sand') });
     bridge.emitCommand('terrainedit', null);
     expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).toEqual(grass);
   });
 
-  it('keeps a preview over an edit that arrives meanwhile, then shows the edit', async () => {
+  it('keeps pending paints over an edit that arrives meanwhile, then shows the edit', async () => {
     const { scene, bridge, handlers } = await bootConnected();
-    bridge.emitCommand('terrainedit', { selected: LAWN, preview: { index: LAWN, material: 'sand' } });
+    bridge.emitCommand('terrainedit', { brush: 'sand', previewBlocks: withBlock(BASE_LAYOUT.blocks, LAWN, 'sand') });
     const sand = terrainTilesAt(scene, lawnCell.cx, lawnCell.cy);
 
     handlers.onTerrain!(withBlock(BASE_LAYOUT.blocks, LAWN, 'water'));
@@ -4028,8 +4028,8 @@ describe('OfficeScene: edited terrain', () => {
     const seen: OfficeEventMap['terrain'][] = [];
     bridge.on('terrain', (payload) => seen.push(payload));
 
-    bridge.emitCommand('terrainedit', { selected: null, preview: null });
-    bridge.emitCommand('terrainedit', { selected: 3, preview: null });
+    bridge.emitCommand('terrainedit', { brush: null });
+    bridge.emitCommand('terrainedit', { brush: 'grass' });
 
     expect(seen).toEqual([{ blocks: watered }]);
   });
@@ -4040,7 +4040,7 @@ describe('OfficeScene: edited terrain', () => {
     bridge.on('closemenu', () => events.push('closemenu'));
     bridge.on('terrainpick', ({ index }) => events.push(`pick:${index}`));
 
-    bridge.emitCommand('terrainedit', { selected: null, preview: null });
+    bridge.emitCommand('terrainedit', { brush: null });
     scene.input.emit('pointerdown', { worldX: lawn.x, worldY: lawn.y, event: { stopPropagation() {} } }, []);
 
     expect(events).toEqual([`pick:${LAWN}`]);
@@ -4198,7 +4198,7 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
   it.each([
     ['no edit tool', () => undefined],
     ['the layout editor', (b: ReturnType<typeof createOfficeBridge>) => b.emitCommand('layoutedit', { pickable: [], selectedId: null, placing: null })],
-    ['the terrain editor', (b: ReturnType<typeof createOfficeBridge>) => b.emitCommand('terrainedit', { selected: null, preview: null })],
+    ['the terrain editor', (b: ReturnType<typeof createOfficeBridge>) => b.emitCommand('terrainedit', { brush: null })],
     ['the collision editor', (b: ReturnType<typeof createOfficeBridge>) => b.emitCommand('collisionedit', { pieceId: null, draft: [], selectedRect: null, snap: 1 })],
   ])('the zoom command eases the main camera only and saves the stop, with %s open', async (_name, open) => {
     const store = memoryStore(2);
