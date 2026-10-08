@@ -10,7 +10,9 @@ import {
   spaceFloorTiles,
 } from './artPlacement';
 import { feetOf, positionForFeet } from './avatarGeometry';
-import { ARRIVE_EPSILON_PX, beginAutoWalk, stepAutoWalk, type AutoWalkState } from './autoWalk';
+import { beginAutoWalk, isAutoWalkArrived, stepAutoWalk, type AutoWalkState } from './autoWalk';
+import { planWalk } from './pathfinding';
+import { registerClick, type ClickSample } from './doubleClick';
 import { CameraPanLayer } from './CameraPanLayer';
 import { CameraZoomLayer } from './CameraZoomLayer';
 import { followBounds } from './cameraBounds';
@@ -417,12 +419,19 @@ export class OfficeScene extends Phaser.Scene {
   private walkingMs = 0;
   private lastWalkFrame?: number;
   private walkClick?: Phaser.Input.Pointer;
+  /**
+   * First click of a possible double click (screen coordinates, game clock).
+   * A walk starts only when a second eligible click completes the pair; anything
+   * that interrupts walking also drops it, so a stale click never pairs later.
+   */
+  private clickPair: ClickSample | null = null;
 
   private readonly resetWalking = (): void => {
     this.walkingMs = 0;
     this.lastWalkFrame = undefined;
     this.autoWalk = undefined;
     this.walkClick = undefined;
+    this.clickPair = null;
     (this.player.body as Phaser.Physics.Arcade.Body).setVelocity(0, 0);
   };
 
@@ -1741,15 +1750,25 @@ export class OfficeScene extends Phaser.Scene {
       // Once it was a drag, returning to its origin must not turn it into a click.
       if (pointer === this.walkClick && pointer.getDistance() > PAN_THRESHOLD_PX) this.walkClick = undefined;
     });
-    this.input.on('pointerupoutside', () => { this.walkClick = undefined; });
-    this.input.on('pointerup', (pointer: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
-      const eligible = pointer === this.walkClick;
+    this.input.on('pointerupoutside', () => {
       this.walkClick = undefined;
-      if (!eligible || this.layoutEditing || !this.localPositionReady || over?.length || pointer.camera !== this.cameras.main ||
-        pointer.getDistance() > PAN_THRESHOLD_PX || !Number.isFinite(pointer.worldX) || !Number.isFinite(pointer.worldY)) return;
-      if (isBlocked(this.grid, Math.floor(pointer.worldX / TILE), Math.floor(pointer.worldY / TILE))) return;
-      this.standUp();
-      this.autoWalk = beginAutoWalk({ x: pointer.worldX, y: pointer.worldY }, this.player);
+      this.clickPair = null;
+    });
+    this.input.on('pointerup', (pointer: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
+      const eligible = pointer === this.walkClick && !this.layoutEditing && this.localPositionReady && !over?.length &&
+        pointer.camera === this.cameras.main && pointer.getDistance() <= PAN_THRESHOLD_PX &&
+        Number.isFinite(pointer.worldX) && Number.isFinite(pointer.worldY) &&
+        Number.isFinite(pointer.x) && Number.isFinite(pointer.y);
+      this.walkClick = undefined;
+      // Any click that cannot walk also breaks a pending pair.
+      if (!eligible) {
+        this.clickPair = null;
+        return;
+      }
+      // Screen coordinates and the game clock: world points glide with the camera between the clicks.
+      const { fired, pending } = registerClick(this.clickPair, { time: this.time.now, x: pointer.x, y: pointer.y });
+      this.clickPair = pending;
+      if (fired) this.startWalk({ x: pointer.worldX, y: pointer.worldY });
     });
   }
 
@@ -1849,12 +1868,23 @@ export class OfficeScene extends Phaser.Scene {
 
     const destination = pickApproachTile(this.grid, walkerTile, peerTile, peerSpaceTiles);
     if (!destination) return;
-    this.standUp();
+    this.startWalk({ x: destination.tx * TILE + 16, y: destination.ty * TILE + 16 });
+  }
 
-    this.autoWalk = beginAutoWalk(
-      { x: destination.tx * TILE + 16, y: destination.ty * TILE + 16 },
-      this.player,
-    );
+  /**
+   * Walks to `goal` around whatever `grid.solid` blocks (pathfinding, #2). The
+   * route is planned BEFORE standing up: a goal nobody can reach leaves a
+   * seated player seated and moves nothing. The planner works on the body's
+   * tiles, so a blocked goal is judged by where the body would stand, not by
+   * the tile under the click.
+   */
+  private startWalk(goal: { x: number; y: number }): boolean {
+    const route = planWalk(this.grid.solid, this.player, goal);
+    if (route === null) return false;
+    this.standUp();
+    // The last stop is the goal itself: it stays the walk's destination.
+    this.autoWalk = beginAutoWalk(goal, this.player, route.slice(0, -1));
+    return true;
   }
 
   update(time: number, delta: number): void {
@@ -1960,7 +1990,7 @@ export class OfficeScene extends Phaser.Scene {
       body.updateFromGameObject();
       const dx = body.velocity.x * delta / 1000;
       const dy = body.velocity.y * delta / 1000;
-      // Reuse Arcade's spatial index: no second collision map or pathfinding.
+      // Reuse Arcade's spatial index: no second collision map; the route itself comes from `startWalk`.
       const candidates = this.physics.overlapRect(
         body.x + Math.min(0, dx), body.y + Math.min(0, dy),
         body.width + Math.abs(dx), body.height + Math.abs(dy), false, true,
@@ -1976,7 +2006,8 @@ export class OfficeScene extends Phaser.Scene {
     this.physics.world.postUpdate();
     const moved = Math.hypot(this.player.x - from.x, this.player.y - from.y) > 0.000001;
     this.walkingMs = advanceWalkingTime(this.walkingMs, intended && moved && this.seat === null, delta);
-    if (this.autoWalk && Math.hypot(this.autoWalk.goal.x - this.player.x, this.autoWalk.goal.y - this.player.y) <= ARRIVE_EPSILON_PX) {
+    // Only the final goal ends a walk; the stops on the way are passed by the reducer.
+    if (this.autoWalk && isAutoWalkArrived(this.autoWalk, this.player)) {
       this.autoWalk = undefined;
       this.walkingMs = 0;
       body.setVelocity(0, 0);

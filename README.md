@@ -6,7 +6,7 @@ The product reference is `PRD-Oficina-Virtual.md` (Spanish; architecture in sect
 
 ## Features
 
-- **2D office map** rendered with Phaser: WASD movement, collisions, simulated NPCs, auto-walk to a colleague.
+- **2D office map** rendered with Phaser: WASD movement, collisions, simulated NPCs, double-click to walk anywhere around obstacles, auto-walk to a colleague.
 - **Real-time presence**: real avatars synced over WebSocket (Colyseus), with status (`En línea`, `Ocupado`, `No molestar`) and reconnection tolerance for flaky networks.
 - **Proximity audio and video** over LiveKit: you hear and see people near you; spaces (rooms and desk cubicles) get their own isolated LiveKit room.
 - **Calls by clicking an avatar**: invitation cards with accept/decline and a chime.
