@@ -18,11 +18,20 @@ export interface CharacterSelectProps {
 const CARD_SCALE = 2;
 const PREVIEW_SCALE = 3;
 
-const POSES: readonly { pose: CharacterPose; caption: string; label: (name: string) => string }[] = [
-  { pose: 'idle', caption: 'Reposo', label: (name) => `${name} en reposo` },
-  { pose: 'walk', caption: 'Caminando', label: (name) => `${name} caminando` },
-  { pose: 'seated', caption: 'En su silla', label: (name) => `${name} en su silla` },
+const POSES: readonly { pose: CharacterPose; caption: string; label: (label: string) => string }[] = [
+  { pose: 'idle', caption: 'Reposo', label: (label) => `${label} en reposo` },
+  { pose: 'walk', caption: 'Caminando', label: (label) => `${label} caminando` },
+  { pose: 'seated', caption: 'En su silla', label: (label) => `${label} en su silla` },
 ];
+
+/**
+ * Manifest names stay internal (piece ids and assets are found by them): the
+ * person picks a look, not someone else's name. Screen readers still need a
+ * label per option, so it is positional.
+ */
+function optionLabel(index: number): string {
+  return `Personaje ${index + 1}`;
+}
 
 /**
  * A CSS sprite cut from the pack sheet: no canvas and no Phaser, so the
@@ -55,7 +64,8 @@ export function CharacterSelect({ options, initialId, pending, error, onSubmit }
   const [selectedId, setSelectedId] = useState(initialId);
   const titleId = useId();
   const groupName = useId();
-  const selected = options.find((option) => option.id === selectedId) ?? options[0];
+  const selectedIndex = Math.max(0, options.findIndex((option) => option.id === selectedId));
+  const selected = options[selectedIndex];
 
   const submit = () => {
     if (pending || selected === undefined) return;
@@ -84,7 +94,7 @@ export function CharacterSelect({ options, initialId, pending, error, onSubmit }
 
         <div className={styles.layout}>
           <div className={styles.grid} role="radiogroup" aria-labelledby={titleId}>
-            {options.map((option) => (
+            {options.map((option, index) => (
               <label key={option.id} className={styles.option}>
                 <input
                   className={styles.radio}
@@ -92,18 +102,17 @@ export function CharacterSelect({ options, initialId, pending, error, onSubmit }
                   name={groupName}
                   value={option.id}
                   checked={option.id === selected?.id}
+                  aria-label={optionLabel(index)}
                   onChange={() => setSelectedId(option.id)}
                   onKeyDown={handleRadioKey}
                 />
                 <span className={styles.sprite} style={spriteStyle(option, 'idle', CARD_SCALE)} aria-hidden="true" />
-                <span className={styles.name}>{option.name}</span>
               </label>
             ))}
           </div>
 
           {selected !== undefined && (
-            <section className={styles.preview} aria-label={`Vista previa de ${selected.name}`}>
-              <h2 className={styles.previewName}>{selected.name}</h2>
+            <section className={styles.preview} aria-label="Vista previa">
               {selected.author != null && <p className={styles.credit}>Autoría: {selected.author}</p>}
               <div className={styles.poses}>
                 {POSES.map(({ pose, caption, label }) => (
@@ -112,7 +121,7 @@ export function CharacterSelect({ options, initialId, pending, error, onSubmit }
                       className={pose === 'walk' ? `${styles.sprite} ${styles.walking}` : styles.sprite}
                       style={spriteStyle(selected, pose, PREVIEW_SCALE)}
                       role="img"
-                      aria-label={label(selected.name)}
+                      aria-label={label(optionLabel(selectedIndex))}
                     />
                     <figcaption className={styles.caption}>{caption}</figcaption>
                   </figure>

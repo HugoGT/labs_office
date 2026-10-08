@@ -38,7 +38,8 @@ test('production build precaches the whole app shell and nothing else', () => {
   requireBuildDir(distDir, 'pnpm build');
   const urls = precachedUrls(readFileSync(path.join(distDir, 'sw.js'), 'utf8'));
 
-  assert.ok(urls.includes('index.html'), 'index.html must be precached for the navigation fallback');
+  assert.ok(!urls.includes('index.html'), 'index.html must not be precached: navigations boot the deployed shell');
+  assert.doesNotMatch(readFileSync(path.join(distDir, 'sw.js'), 'utf8'), /\.createHandlerBoundToURL\(/, 'the worker must not answer navigations');
   assert.ok(urls.includes('manifest.webmanifest'));
   for (const bundle of bundleFiles(distDir)) {
     assert.ok(urls.includes(bundle), `${bundle} is missing from the precache`);

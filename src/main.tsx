@@ -26,7 +26,7 @@ createRoot(container).render(
 if (import.meta.env.PROD && !__OFFICE_E2E__ && 'serviceWorker' in navigator) {
   window.addEventListener(
     'load',
-    () => void registerServiceWorker(navigator.serviceWorker, () => window.location.reload()),
+    () => void registerServiceWorker(navigator.serviceWorker),
     { once: true },
   );
 }

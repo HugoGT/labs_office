@@ -735,7 +735,7 @@ describe('AuthGate: character chosen at the entrance (art migration, step 5)', (
     await submitLogin(user);
     await act(async () => emit(ANA));
 
-    await user.click(await screen.findByRole('radio', { name: 'Lucia' }));
+    await user.click(await screen.findByRole('radio', { name: 'Personaje 2' }));
     await user.click(screen.getByRole('button', { name: /entrar a la oficina/i }));
 
     expect(character.save).toHaveBeenCalledWith('character-p02-beige-blazer');
@@ -755,7 +755,7 @@ describe('AuthGate: character chosen at the entrance (art migration, step 5)', (
     await submitLogin(user);
     await act(async () => emit(ANA));
 
-    expect(await screen.findByRole('radio', { name: 'Lucia' })).toBeChecked();
+    expect(await screen.findByRole('radio', { name: 'Personaje 2' })).toBeChecked();
   });
 
   it('a restored session that already chose enters without the selector', async () => {
