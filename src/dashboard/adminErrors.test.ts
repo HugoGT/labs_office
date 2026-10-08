@@ -23,7 +23,6 @@ const CODES: AdminErrorCode[] = [
   'appearance-invalid-color',
   'appearance-immutable',
   'terrain-under-placement',
-  'terrain-under-player',
   'terrain-not-configured',
   'collision-under-player',
   'collisions-not-configured',
@@ -176,11 +175,9 @@ describe('describeAdminError: collision edits', () => {
 });
 
 describe('describeAdminError: terrain edits (#123 phase 2)', () => {
-  it('says why water was refused, so the admin knows whether to pick another block or wait', () => {
+  it('says why water was refused, so the admin can pick another block', () => {
     expect(describeAdminError(new AdminError('terrain-under-placement'))).toMatch(/agua/);
     expect(describeAdminError(new AdminError('terrain-under-placement'))).toMatch(/otro bloque/);
-    expect(describeAdminError(new AdminError('terrain-under-player'))).toMatch(/alguien/);
     expect(describeAdminError(new AdminError('terrain-not-configured'))).toMatch(/terreno/);
   });
 });
-

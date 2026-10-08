@@ -48,12 +48,12 @@ describe('createTerrainAdminClient', () => {
     expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer id-token');
   });
 
-  it('tells a refusal under a placement from one under a player', async () => {
+  it('tells a placement refusal from a stale preview', async () => {
     expect(await codeOf(clientWith(fetchWith(409, { error: 'terrain-under-placement' })).setBlock(1, 'water'))).toBe(
       'terrain-under-placement',
     );
-    expect(await codeOf(clientWith(fetchWith(409, { error: 'terrain-under-player' })).setBlock(1, 'water'))).toBe(
-      'terrain-under-player',
+    expect(await codeOf(clientWith(fetchWith(409, { error: 'terrain-stale' })).setBlock(1, 'water'))).toBe(
+      'terrain-stale',
     );
   });
 

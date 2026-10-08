@@ -51,6 +51,7 @@ export interface RemoteAvatarContainer extends CharacterContainer {
   /** Position at the last animation frame: a peer's walk comes from how far its tween moved it. */
   lastX: number;
   lastY: number;
+  positionRevision: number;
 }
 
 /**
@@ -106,6 +107,7 @@ export function createPhaserAvatarSink(
       container.lastY = snapshot.y;
       container.spacesVersion = snapshot.spacesVersion;
       container.avatarId = snapshot.avatarId;
+      container.positionRevision = snapshot.positionRevision ?? 0;
       setCharacterFacing(container, facingOf(snapshot.facing));
       container.animation = initialAnimation(FACING_WALK_DIRECTION[container.facing]);
       seatOf(container, snapshot);
@@ -159,6 +161,22 @@ export function createPhaserAvatarSink(
       avatar.avatarId = snapshot.avatarId;
       seatOf(avatar, snapshot);
       avatar.glideTween?.stop();
+      if (avatar.positionRevision !== (snapshot.positionRevision ?? 0)) {
+        avatar.positionRevision = snapshot.positionRevision ?? 0;
+        avatar.glideTween = undefined;
+        avatar.setPosition(snapshot.x, snapshot.y);
+        const body = avatar.body as Phaser.Physics.Arcade.Body | null;
+        if (body) {
+          body.reset(snapshot.x, snapshot.y);
+          body.updateFromGameObject();
+          body.prev.copy(body.position);
+          body.prevFrame.copy(body.position);
+        }
+        avatar.lastX = snapshot.x;
+        avatar.lastY = snapshot.y;
+        animateCharacter(avatar, { dx: 0, dy: 0, dtMs: 0 });
+        return;
+      }
       // Se interpola en vez de saltar: el servidor publica ~10 veces por
       // segundo, asi que un `setPosition` directo haria que los demas se
       // movieran a tirones de 10 Hz en vez de andar.

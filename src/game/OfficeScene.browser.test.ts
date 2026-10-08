@@ -24,6 +24,7 @@ import {
   worldAssetDepth,
 } from './depthLayers';
 import { feetOf, physicalBodyRect } from './avatarGeometry';
+import { BODY_CENTER_OFFSET, positionForBodyTile } from './pathfinding';
 import { deskSeatId, mapSeatId } from './seating';
 import { deskFurnitureName, deskZoneName } from './deskLayout';
 import { artSheetKey, recoloredSheetKey } from './artPack';
@@ -59,10 +60,11 @@ const hosts: HTMLElement[] = [];
 
 // Deterministic render frames through the real SceneManager and Arcade world,
 // not a reducer simulation or a mocked body. An empty arena isolates movement.
-async function movementArena() {
-  const { scene, bridge } = await bootOfficeScene(createOfficeBridge(), {
-    endpoint: null, artManifestUrl: null, artUploadsUrl: null,
-  });
+async function movementArena(connector?: ReturnType<typeof fakeConnector>) {
+  const { scene, bridge } = await bootOfficeScene(createOfficeBridge(), connector
+    ? { endpoint: 'ws://fake', connect: connector.connect, artManifestUrl: null, artUploadsUrl: null }
+    : { endpoint: null, artManifestUrl: null, artUploadsUrl: null });
+  if (connector) await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
   const player = findPlayer(scene);
   const body = player.body as Phaser.Physics.Arcade.Body;
   scene.game.loop.stop();
@@ -86,13 +88,31 @@ async function movementArena() {
   const walk = (milliseconds: number) => {
     for (let elapsed = 0; elapsed < milliseconds; elapsed += 20) frame();
   };
-  const click = (x: number, y: number, distance = 0, over: Phaser.GameObjects.GameObject[] = []) => {
-    const pointer = { button: 0, camera: scene.cameras.main, x: 10, y: 10,
+  /** Runs the game clock forward in frames the walk stall guard accepts (each gap <= 100 ms). */
+  const wait = (milliseconds: number) => {
+    for (let left = milliseconds; left > 0; left -= 100) frame(20, Math.min(left, 100));
+  };
+  /** One press and release. `screenDx` moves it on screen only: the double-click distance is in screen px. */
+  const click = (x: number, y: number, distance = 0, over: Phaser.GameObjects.GameObject[] = [], screenDx = 0) => {
+    const pointer = { button: 0, camera: scene.cameras.main, x: 10 + screenDx, y: 10,
       worldX: x, worldY: y, getDistance: () => distance };
     scene.input.emit('pointerdown', pointer, over);
     scene.input.emit('pointerup', pointer, over);
   };
-  return { scene, bridge, player, body, movement, frame, walk, click };
+  /**
+   * Two clicks, the walk gesture. Both land on the same time and screen point unless `gapMs` (game clock,
+   * advanced in real frames) or `screenDx` say otherwise. `distance`, `over` and `worldDx` shape the SECOND
+   * press only, so a test proves that press is the ineligible one. No frame runs in between by default:
+   * a frame with no input would reset the walking-speed clock, which some tests keep on purpose.
+   */
+  const doubleClick = (x: number, y: number, options: {
+    gapMs?: number; screenDx?: number; worldDx?: number; distance?: number; over?: Phaser.GameObjects.GameObject[];
+  } = {}) => {
+    click(x, y);
+    wait(options.gapMs ?? 0);
+    click(x + (options.worldDx ?? 0), y, options.distance, options.over, options.screenDx);
+  };
+  return { scene, bridge, player, body, movement, frame, walk, wait, click, doubleClick };
 }
 
 describe('walking speed ramp in real Phaser frames (#145)', () => {
@@ -138,9 +158,9 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(body.right > rect.x && body.x < rect.x + 1 && body.bottom > rect.y && body.y < rect.y + 1).toBe(false);
   });
   it.each(['keyboard', 'map click'] as const)('ramps %s through every threshold and caps at 5x', async (input) => {
-    const { body, movement, frame, walk, click } = await movementArena();
+    const { body, movement, frame, walk, doubleClick } = await movementArena();
     if (input === 'keyboard') movement.cursors.right.isDown = true;
-    else click(99000, 300);
+    else doubleClick(99000, 300);
     for (let multiplier = 1; multiplier <= 5; multiplier++) {
       frame();
       expect(body.velocity.length(), JSON.stringify(movement.autoWalk)).toBeCloseTo(230 * multiplier, 5);
@@ -150,7 +170,7 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
   });
 
   it('preserves the clock on direction changes and keyboard takeover, but resets on release and arrival', async () => {
-    const { player, body, movement, frame, walk, click } = await movementArena();
+    const { player, body, movement, frame, walk, doubleClick } = await movementArena();
     movement.cursors.right.isDown = true;
     walk(2100);
     movement.cursors.right.isDown = false;
@@ -158,7 +178,7 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     frame();
     expect(body.velocity.y).toBeCloseTo(460);
     movement.cursors.down.isDown = false;
-    click(player.x + 5000, player.y);
+    doubleClick(player.x + 5000, player.y);
     frame();
     expect(body.velocity.x).toBeCloseTo(460);
     movement.cursors.left.isDown = true;
@@ -169,7 +189,7 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(movement.walkingMs).toBe(0);
     movement.walkingMs = 8000;
     const goalX = player.x + 3;
-    click(goalX, player.y);
+    doubleClick(goalX, player.y);
     frame(100);
     expect(Math.abs(player.x - goalX)).toBeLessThanOrEqual(ARRIVE_EPSILON_PX);
     expect(movement.autoWalk).toBeUndefined();
@@ -239,13 +259,14 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
   });
 
   it('does not turn drags, item clicks, blocked goals or minimap clicks into walking', async () => {
-    const { scene, movement, click } = await movementArena();
-    click(1000, 300, 20);
+    const { scene, movement, click, doubleClick } = await movementArena();
+    doubleClick(1000, 300, { distance: 20 });
     expect(movement.autoWalk).toBeUndefined();
-    click(1000, 300, 0, [scene.add.rectangle(0, 0, 1, 1)]);
+    doubleClick(1000, 300, { over: [scene.add.rectangle(0, 0, 1, 1)] });
     expect(movement.autoWalk).toBeUndefined();
-    click(16, 16);
+    doubleClick(16, 16);
     expect(movement.autoWalk).toBeUndefined();
+    click(1000, 300);
     const pointer = { button: 0, camera: scene.cameras.cameras[1], x: 10, y: 10, getDistance: () => 0 };
     scene.input.emit('pointerdown', pointer, []);
     scene.input.emit('pointerup', pointer, []);
@@ -297,6 +318,379 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
         }
       }
     }
+  });
+});
+
+describe('waypoint walking around obstacles (double-click-pathfinding)', () => {
+  it('authoritative reset cancels prediction, seat, keys and click pair without adopting ordinary echoes', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    const { body, movement, player } = arena;
+    arena.doubleClick(1000, 300);
+    movement.cursors.right.isDown = true;
+    arena.frame();
+    arena.click(1100, 300);
+    const target = remoteSnapshot({ x: 500, y: 600, seat: null });
+    const handlers = connector.handlers()!;
+    handlers.onPositionReset?.(target);
+    expect({ x: player.x, y: player.y }).toEqual({ x: target.x, y: target.y });
+    expect({ x: body.x, y: body.y, width: body.width, height: body.height }).toEqual(physicalBodyRect(target));
+    expect(body.velocity.length()).toBe(0);
+    expect(movement.autoWalk).toBeUndefined();
+    expect(movement.cursors.right.isDown).toBe(false);
+    arena.click(1100, 300);
+    expect(movement.autoWalk).toBeUndefined();
+    handlers.onChange(remoteSnapshot({ x: 800, y: 800 }));
+    expect({ x: player.x, y: player.y }).toEqual({ x: target.x, y: target.y });
+    const voices: OfficeEventMap['voice'][] = [];
+    arena.bridge.on('voice', (voice) => voices.push(voice));
+    handlers.onResync?.();
+    handlers.onLocalPosition?.(remoteSnapshot({ x: 52 * TILE, y: 4 * TILE, seat: mapSeatId(0) }));
+    arena.walk(300);
+    expect(voices.at(-1)?.spaceId).toBe(BUILT_IN_SPACES[0]!.id);
+    expect(player.seatFacing).not.toBeNull();
+    expect(body.checkCollision.none).toBe(true);
+    handlers.onPositionReset?.(target);
+    expect(voices.at(-1)?.spaceId).toBeNull();
+    expect(player.seatFacing).toBeNull();
+    expect(body.checkCollision.none).toBe(false);
+    expect({ x: body.x, y: body.y, width: body.width, height: body.height }).toEqual(physicalBodyRect(target));
+  });
+
+  type Arena = Awaited<ReturnType<typeof movementArena>>;
+  const SEAT = BASE_MAP_SEATS[0]!;
+
+  /** A wall of whole tiles, in the search grid and as the collision rectangle the body bumps into. */
+  function wallColumn(movement: Arena['movement'], tx: number, ty0: number, ty1: number) {
+    const solid = movement.grid.solid as boolean[][];
+    for (let ty = ty0; ty <= ty1; ty++) solid[ty]![tx] = true;
+    // The arena keeps the real office's piece rectangles; only this test's walls may stay.
+    movement.collisionRects = [
+      ...movement.collisionRects.filter((rect) => !('piece' in rect)),
+      { x: tx * TILE, y: ty0 * TILE, w: TILE, h: (ty1 - ty0 + 1) * TILE },
+    ];
+    movement.buildPieceColliders();
+  }
+
+  /** Steps real frames until the walk ends (arrival, stall cancel) or the budget runs out. */
+  function walkUntilDone(arena: Arena, maxFrames = 1500) {
+    const ys: number[] = [];
+    for (let i = 0; i < maxFrames && arena.movement.autoWalk !== undefined; i++) {
+      arena.frame();
+      ys.push(arena.player.y);
+    }
+    return { minY: Math.min(...ys), maxY: Math.max(...ys) };
+  }
+
+  function sitOnFirstChair(arena: Arena) {
+    arena.body.reset((SEAT.tx + 0.5) * TILE, (SEAT.ty + 0.5) * TILE - 18);
+    arena.bridge.emitCommand('toggleSeat', undefined);
+    arena.frame();
+    expect(arena.player.seatFacing).not.toBeNull();
+  }
+
+  it('a click behind a wall walks around it and arrives without a stall cancel (R3)', async () => {
+    const arena = await movementArena();
+    const { player, movement } = arena;
+    // Tiles 5..14 of column 12 stand between the player (tile 9,9) and the goal.
+    wallColumn(movement, 12, 5, 14);
+    const goal = { x: 600, y: 300 };
+
+    arena.doubleClick(goal.x, goal.y);
+    expect(movement.autoWalk?.waypoints?.length, 'a wall in the way needs waypoints').toBeGreaterThan(0);
+    const path = walkUntilDone(arena);
+
+    expect(movement.autoWalk).toBeUndefined();
+    expect(Math.hypot(player.x - goal.x, player.y - goal.y)).toBeLessThanOrEqual(ARRIVE_EPSILON_PX);
+    // The wall spans y 160..480: arriving means the route left that band.
+    expect(path.minY < 160 || path.maxY > 480).toBe(true);
+  });
+
+  it('a goal past the top end of the wall is reached by an angled detour', async () => {
+    const arena = await movementArena();
+    const { player, movement } = arena;
+    wallColumn(movement, 12, 5, 14);
+    const goal = { x: 640, y: 120 };
+
+    arena.doubleClick(goal.x, goal.y);
+    walkUntilDone(arena);
+
+    expect(movement.autoWalk).toBeUndefined();
+    expect(Math.hypot(player.x - goal.x, player.y - goal.y)).toBeLessThanOrEqual(ARRIVE_EPSILON_PX);
+  });
+
+  it('a click on ground with no path does nothing and keeps a seated player seated (R4)', async () => {
+    const arena = await movementArena();
+    const { player, movement } = arena;
+    sitOnFirstChair(arena);
+    const start = { x: player.x, y: player.y };
+    // Tile (60,40) is free but fully ringed by blocked tiles.
+    const solid = movement.grid.solid as boolean[][];
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx !== 0 || dy !== 0) solid[40 + dy]![60 + dx] = true;
+
+    const goal = positionForBodyTile({ tx: 60, ty: 40 });
+    arena.doubleClick(goal.x, goal.y);
+    arena.walk(200);
+
+    expect(movement.autoWalk).toBeUndefined();
+    expect(player.seatFacing).not.toBeNull();
+    expect({ x: player.x, y: player.y }).toEqual(start);
+  });
+
+  it('a click on a reachable tile stands a seated player up and walks (R4)', async () => {
+    const arena = await movementArena();
+    const { player, movement } = arena;
+    sitOnFirstChair(arena);
+    const goal = { x: player.x + 320, y: player.y };
+
+    arena.doubleClick(goal.x, goal.y);
+
+    expect(player.seatFacing).toBeNull();
+    expect(movement.autoWalk?.goal).toEqual(goal);
+    walkUntilDone(arena);
+    expect(Math.hypot(player.x - goal.x, player.y - goal.y)).toBeLessThanOrEqual(ARRIVE_EPSILON_PX);
+  });
+
+  it('the goal is validated on its body tile: a click whose position tile is free but whose body tile is blocked does nothing', async () => {
+    const arena = await movementArena();
+    const { movement } = arena;
+    // The body center crosses the blocked row boundary before the position.
+    const edge = TILE - BODY_CENTER_OFFSET.y;
+    arena.doubleClick(1000, edge - 0.01);
+    expect(movement.autoWalk).toBeUndefined();
+    arena.doubleClick(1000, edge);
+    expect(movement.autoWalk?.goal).toEqual({ x: 1000, y: edge });
+  });
+
+  it('walkToPeer detours a wall and lands on the same approach tile as before (R6)', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    const { player, movement, bridge } = arena;
+    wallColumn(movement, 20, 3, 16);
+    const peerTx = 30;
+    const peerTy = 9;
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'peer-1', x: peerTx * TILE + 16, y: peerTy * TILE + 16 }));
+
+    bridge.emitCommand('walkToPeer', { sessionId: 'peer-1' });
+    expect(movement.autoWalk?.goal).toEqual({ x: (peerTx - 1) * TILE + 16, y: peerTy * TILE + 16 });
+    const path = walkUntilDone(arena);
+
+    expect(movement.autoWalk).toBeUndefined();
+    expect(Math.floor(player.x / TILE)).toBe(peerTx - 1);
+    expect(Math.floor(player.y / TILE)).toBe(peerTy);
+    expect(path.minY < 96 || path.maxY > 544).toBe(true);
+  });
+
+  it('walkToPeer with no path to the approach tile keeps a seated player seated (R6)', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    const { player, movement, bridge } = arena;
+    // A wall over the whole height cuts the map: the peer is on the other side.
+    wallColumn(movement, SEAT.tx + 3, 0, 99);
+    bridge.emitCommand('toggleSeat', undefined);
+    arena.body.reset((SEAT.tx + 0.5) * TILE, (SEAT.ty + 0.5) * TILE - 18);
+    bridge.emitCommand('toggleSeat', undefined);
+    connector.handlers()!.onLocalSeat?.(mapSeatId(0));
+    expect(player.seatFacing).not.toBeNull();
+    const start = { x: player.x, y: player.y };
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'peer-1', x: (SEAT.tx + 12) * TILE + 16, y: SEAT.ty * TILE + 16 }));
+
+    bridge.emitCommand('walkToPeer', { sessionId: 'peer-1' });
+    arena.walk(200);
+
+    expect(movement.autoWalk).toBeUndefined();
+    expect(connector.stands()).toBe(0);
+    expect(player.seatFacing).not.toBeNull();
+    expect({ x: player.x, y: player.y }).toEqual(start);
+  });
+});
+
+describe('double click to walk (double-click-pathfinding, R1 and R2)', () => {
+  type Arena = Awaited<ReturnType<typeof movementArena>>;
+  const goal = { x: 1000, y: 300 };
+
+  /** A first click lands, then something happens that must clear it, then a second one: nothing may walk. */
+  function expectNoPair(arena: Arena, between: () => void) {
+    arena.click(goal.x, goal.y);
+    between();
+    arena.click(goal.x, goal.y);
+    expect(arena.movement.autoWalk).toBeUndefined();
+  }
+
+  it('a single click does not walk but still closes the context menu (R1)', async () => {
+    const arena = await movementArena();
+    const closed = vi.fn();
+    arena.bridge.on('closemenu', closed);
+
+    arena.click(goal.x, goal.y);
+    arena.walk(200);
+
+    expect(arena.movement.autoWalk).toBeUndefined();
+    expect(closed).toHaveBeenCalledTimes(1);
+  });
+
+  it('two clicks within the window walk toward the second click\'s world point (R1)', async () => {
+    const arena = await movementArena();
+
+    arena.doubleClick(goal.x, goal.y, { gapMs: 120, screenDx: 3, worldDx: 40 });
+
+    expect(arena.movement.autoWalk?.goal).toEqual({ x: goal.x + 40, y: goal.y });
+  });
+
+  it.each([
+    { gapMs: 300, walks: true },
+    { gapMs: 301, walks: false },
+    { gapMs: 1000, walks: false },
+  ])('a second click $gapMs ms later walks: $walks', async ({ gapMs, walks }) => {
+    const arena = await movementArena();
+
+    arena.doubleClick(goal.x, goal.y, { gapMs });
+
+    expect(arena.movement.autoWalk?.goal).toEqual(walks ? goal : undefined);
+  });
+
+  it.each([
+    { screenDx: 8, walks: true },
+    { screenDx: 9, walks: false },
+    { screenDx: -9, walks: false },
+  ])('a second click $screenDx screen px away walks: $walks', async ({ screenDx, walks }) => {
+    const arena = await movementArena();
+
+    arena.doubleClick(goal.x, goal.y, { screenDx });
+
+    expect(arena.movement.autoWalk?.goal).toEqual(walks ? goal : undefined);
+  });
+
+  it('a slow second click counts as a first click: a quick third one then walks (R1)', async () => {
+    const arena = await movementArena();
+
+    arena.doubleClick(goal.x, goal.y, { gapMs: 400 });
+    expect(arena.movement.autoWalk).toBeUndefined();
+    arena.wait(100);
+    arena.click(goal.x + 20, goal.y);
+
+    expect(arena.movement.autoWalk?.goal).toEqual({ x: goal.x + 20, y: goal.y });
+  });
+
+  it('a third click after a double click does not chain, and starts a new pair (R1)', async () => {
+    const arena = await movementArena();
+    const { movement } = arena;
+    arena.doubleClick(goal.x, goal.y);
+    const walking = movement.autoWalk;
+    expect(walking?.goal).toEqual(goal);
+
+    arena.wait(60);
+    arena.click(goal.x, goal.y + 80);
+    expect(movement.autoWalk?.goal, 'the third click must not redirect the walk').toEqual(goal);
+
+    arena.wait(60);
+    arena.click(goal.x, goal.y + 80);
+    expect(movement.autoWalk?.goal, 'the third and fourth clicks are a new pair').toEqual({ x: goal.x, y: goal.y + 80 });
+  });
+
+  it('a drag between the clicks clears the pair (R2)', async () => {
+    const arena = await movementArena();
+
+    arena.doubleClick(goal.x, goal.y, { distance: 20 });
+    expect(arena.movement.autoWalk).toBeUndefined();
+    // The drag counted as no first click: this one starts over and needs a partner.
+    arena.click(goal.x, goal.y);
+
+    expect(arena.movement.autoWalk).toBeUndefined();
+  });
+
+  it('a click on a game object clears the pair (R2)', async () => {
+    const arena = await movementArena();
+    const object = arena.scene.add.rectangle(0, 0, 1, 1);
+
+    expectNoPair(arena, () => arena.click(goal.x, goal.y, 0, [object]));
+  });
+
+  it('a click on the minimap clears the pair (R2)', async () => {
+    const arena = await movementArena();
+    const minimap = arena.scene.cameras.cameras[1];
+
+    expectNoPair(arena, () => {
+      const pointer = { button: 0, camera: minimap, x: 10, y: 10, getDistance: () => 0 };
+      arena.scene.input.emit('pointerdown', pointer, []);
+      arena.scene.input.emit('pointerup', pointer, []);
+    });
+  });
+
+  it('a non-primary button click clears the pair (R2)', async () => {
+    const arena = await movementArena();
+
+    expectNoPair(arena, () => {
+      const pointer = { button: 2, camera: arena.scene.cameras.main, x: 10, y: 10,
+        worldX: goal.x, worldY: goal.y, getDistance: () => 0 };
+      arena.scene.input.emit('pointerdown', pointer, []);
+      arena.scene.input.emit('pointerup', pointer, []);
+    });
+  });
+
+  it('a release outside the canvas clears the pair (R2)', async () => {
+    const arena = await movementArena();
+
+    expectNoPair(arena, () => {
+      const pointer = { button: 0, camera: arena.scene.cameras.main, x: 10, y: 10,
+        worldX: goal.x, worldY: goal.y, getDistance: () => 0 };
+      arena.scene.input.emit('pointerdown', pointer, []);
+      arena.scene.input.emit('pointerupoutside', pointer);
+    });
+  });
+
+  it('a press that turns into a pan on the move clears the pair even if it returns to its origin (R2)', async () => {
+    const arena = await movementArena();
+    let distance = 0;
+
+    expectNoPair(arena, () => {
+      const pointer = { button: 0, camera: arena.scene.cameras.main, x: 10, y: 10,
+        worldX: goal.x, worldY: goal.y, getDistance: () => distance };
+      arena.scene.input.emit('pointerdown', pointer, []);
+      distance = 20;
+      arena.scene.input.emit('pointermove', pointer);
+      distance = 0;
+      arena.scene.input.emit('pointerup', pointer, []);
+    });
+  });
+
+  it('layout editing never walks and clears the pair (R2)', async () => {
+    const arena = await movementArena();
+
+    arena.click(goal.x, goal.y);
+    arena.bridge.emitCommand('layoutedit', { pickable: [], selectedId: null, placing: null });
+    arena.doubleClick(goal.x, goal.y);
+    expect(arena.movement.autoWalk).toBeUndefined();
+
+    arena.bridge.emitCommand('layoutedit', null);
+    arena.click(goal.x, goal.y);
+    expect(arena.movement.autoWalk, 'the click made while editing was not a first click').toBeUndefined();
+  });
+
+  it('a local position that is not ready never walks and clears the pair (R2)', async () => {
+    const arena = await movementArena();
+    const state = arena.scene as unknown as { localPositionReady: boolean };
+
+    arena.click(goal.x, goal.y);
+    state.localPositionReady = false;
+    arena.doubleClick(goal.x, goal.y);
+    expect(arena.movement.autoWalk).toBeUndefined();
+
+    state.localPositionReady = true;
+    arena.click(goal.x, goal.y);
+    expect(arena.movement.autoWalk).toBeUndefined();
+  });
+
+  it('a walk reset between the clicks (tab hidden) clears the pair', async () => {
+    const arena = await movementArena();
+
+    expectNoPair(arena, () => arena.scene.game.events.emit(Phaser.Core.Events.HIDDEN));
+  });
+
+  it('non-finite world coordinates never walk and clear the pair (R2)', async () => {
+    const arena = await movementArena();
+
+    expectNoPair(arena, () => arena.click(Number.NaN, goal.y));
   });
 });
 
@@ -966,6 +1360,28 @@ function findRemoteAvatars(scene: Phaser.Scene): CharacterContainer[] {
 }
 
 describe('OfficeScene: authoritative initial position (#148)', () => {
+  it('keeps the latest authoritative reset while initial connection completion is delayed', async () => {
+    const connector = fakeConnector('yo', false);
+    let finish!: () => void;
+    const bridge = createOfficeBridge();
+    const voices = vi.fn();
+    bridge.on('voice', voices);
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake', artManifestUrl: null, artUploadsUrl: null,
+      connect: (options) => connector.connect(options).then((connection) => new Promise((resolve) => { finish = () => resolve(connection); })),
+    });
+    await vi.waitFor(() => expect(finish).toBeDefined(), LOOP_WAIT);
+    const handlers = connector.handlers()!;
+    const latest = remoteSnapshot({ sessionId: 'yo', x: 67 * TILE + 16, y: 49 * TILE + 16, positionRevision: 2 });
+    handlers.onPositionReset?.(remoteSnapshot({ ...latest, x: latest.x - TILE, positionRevision: 1 }));
+    handlers.onPositionReset?.(latest);
+    handlers.onLocalPosition?.(remoteSnapshot({ sessionId: 'yo', x: 300, y: 400 }));
+    finish();
+    await vi.waitFor(() => expect(findPlayer(scene).x).toBe(latest.x), LOOP_WAIT);
+    expect(findPlayer(scene).y).toBe(latest.y);
+    expect(voices).toHaveBeenCalled();
+  });
+
   it('publishes a served spaces version that arrives while the initial join is in flight', async () => {
     const connector = fakeConnector();
     let finish!: () => void;
@@ -3766,7 +4182,7 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
   it.each([
     { zoom: 1, tile: { tx: 69, ty: 51 } },
     { zoom: 3, tile: { tx: 68, ty: 50 } },
-  ])('click-to-walk at $zoom targets the world tile under the pointer', async ({ zoom, tile }) => {
+  ])('double-click-to-walk at $zoom targets the world tile under the pointer', async ({ zoom, tile }) => {
     const { scene } = await zoomScene(memoryStore(zoom));
     frames(scene, 3);
     const player = findPlayer(scene);
@@ -3774,8 +4190,12 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
 
     // 64 canvas px right and down of the center, where the camera holds the player.
     mouse(scene, 'mousemove', cam.width / 2 + 64, cam.height / 2 + 64);
-    mouse(scene, 'mousedown', cam.width / 2 + 64, cam.height / 2 + 64);
-    mouse(scene, 'mouseup', cam.width / 2 + 64, cam.height / 2 + 64);
+    // Two real press and release pairs on the same point: the double click that walks.
+    for (let pair = 0; pair < 2; pair++) {
+      mouse(scene, 'mousedown', cam.width / 2 + 64, cam.height / 2 + 64);
+      mouse(scene, 'mouseup', cam.width / 2 + 64, cam.height / 2 + 64);
+      if (pair === 0) expect((scene as unknown as { autoWalk?: AutoWalkState }).autoWalk).toBeUndefined();
+    }
 
     const goal = (scene as unknown as { autoWalk?: AutoWalkState }).autoWalk?.goal;
     expect(goal).toBeDefined();

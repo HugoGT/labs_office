@@ -59,9 +59,9 @@ describe('useTerrainEditor', () => {
     act(() => { applying = result.current.applyGenerated(); });
     act(() => result.current.generate({ seed: 1, landBlocks: 1, material: 'wood' }));
     expect(result.current.draft).toBe(draft);
-    await act(async () => { reject(new AdminError('terrain-under-player')); await applying; });
+    await act(async () => { reject(new AdminError('terrain-under-placement')); await applying; });
     expect(result.current.draft).toBe(draft);
-    expect(result.current.error).toMatch(/alguien/);
+    expect(result.current.error).toMatch(/otro bloque/);
   });
   it('starts closed and says nothing to the map', () => {
     const { result, commands } = setup();
@@ -141,7 +141,7 @@ describe('useTerrainEditor', () => {
 
   it('shows why the server refused, keeping the choice on screen', async () => {
     const setBlock = vi.fn(async () => {
-      throw new AdminError('terrain-under-player');
+      throw new AdminError('terrain-under-placement');
     });
     const { bridge, result } = setup({ setBlock, setBlocks: vi.fn() });
     act(() => result.current.enter());
@@ -150,7 +150,7 @@ describe('useTerrainEditor', () => {
 
     await act(() => result.current.apply());
 
-    expect(result.current.error).toMatch(/alguien/);
+    expect(result.current.error).toMatch(/otro bloque/);
     expect(result.current.notice).toBeNull();
     expect(result.current.material).toBe('water');
   });

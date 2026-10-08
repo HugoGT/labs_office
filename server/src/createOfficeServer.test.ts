@@ -2873,7 +2873,7 @@ describe('terrain routes (#123 phase 2)', () => {
     await server.shutdown();
   });
 
-  it('refuses water under someone in the room or under a space, and applies it once nothing is there', async () => {
+  it('relocates players after water commits, but still refuses water under a space', async () => {
     const spaces = createMemorySpaces();
     const { server, url, wsUrl } = await terrainServer({ spaces });
     const room = await new Client(wsUrl).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token: 'valido-uid-admin' });
@@ -2883,12 +2883,15 @@ describe('terrain routes (#123 phase 2)', () => {
     await waitFor(() => room.state.players.get(room.sessionId)?.x === lawn.x);
 
     const underPlayer = await setBlock(url, LAWN, 'water');
-    expect(underPlayer.status).toBe(409);
-    expect(await underPlayer.json()).toEqual({ error: 'terrain-under-player' });
+    expect(underPlayer.status).toBe(200);
+    expect(await underPlayer.json()).toEqual({ index: LAWN, material: 'water' });
+    await waitFor(() => room.state.players.get(room.sessionId)?.positionRevision === 1);
+    expect(server.sessions.positionOf(room.sessionId)).not.toEqual({ x: lawn.x, y: lawn.y });
 
     const away = onTile(20, 23);
-    room.send('move', away);
+    room.send('move', { ...away, positionRevision: 1 });
     await waitFor(() => room.state.players.get(room.sessionId)?.x === away.x);
+    expect((await setBlock(url, LAWN, 'grass')).status).toBe(200);
     const sala = await spaces.createSpace({ name: 'Sala del prado', x: 66, y: 21, w: 3, h: 3, capacity: null });
     const underSpace = await setBlock(url, LAWN, 'water');
     expect(underSpace.status).toBe(409);

@@ -29,11 +29,26 @@ Deploying the new default does **not** erase or update existing `terrain_blocks`
 
 Generation and reset use `POST /admin/terrain/blocks` with `{ edits: [{ index, material }], expected }`, where `expected` is the replicated block-list wire string captured at preview time. The existing `POST /admin/terrain/blocks/:index` remains for incremental painting. Both require admin/superadmin authorization. A batch validates all indices and materials, rejects duplicates and oversized requests, runs in the same serialization queue as single-block edits, and writes all changed rows with a single atomic PostgreSQL upsert statement (or one synchronous memory mutation).
 
-Water is refused under placements or any active/reconnecting avatar footprint when those tiles would newly become water. The central spawn block cannot be changed away from wood. A stale terrain preview is rejected with `terrain-stale`; regenerate the preview before retrying. On any protection or storage failure, the previous runtime snapshot and persisted rows remain unchanged. A rejected draft stays visible for correction or discard. Missing directory/store keeps editing unavailable (503); lost authorization disables writes.
+Water is refused under placements, not under players. After persistence and publication of an accepted snapshot, the room relocates every avatar whose full physical footprint is no longer walkable to the safe primary spawn/ring, standing. Reserved reconnecting players move too; reconnect replays that position rather than resurrecting an invalid return cell. Single-block painting, generation and reset share this policy. The central spawn block remains wood.
+
+A replicated `positionRevision` distinguishes relocation from ordinary movement echoes. The client cancels held movement, auto-walk waypoints and pending double clicks, resets its complete Arcade body coordinates, and rechecks spaces/audio. Peers snap instead of tweening across removed ground. The movement throttle drops queued predictions; the server refuses move/sit messages from before that revision. Saved-position restoration also checks the full footprint against terrain and piece collisions, falling back when the return square is unavailable.
+
+A stale terrain preview is rejected with `terrain-stale`; regenerate before retrying. Protection failures, stale batches and failed atomic writes leave **both terrain and player positions unchanged**. A rejected draft stays visible for correction or discard. Missing directory/store keeps editing unavailable (503); lost authorization disables writes.
 
 Existing placements are never removed to make generation succeed. Move or remove them separately through their normal authorized tools, or choose a different preview. Terrain edits also do not carve paths automatically through stored rooms or collisions.
 
 ## Reproduction and rollback
+
+### Explicit deployment data reset (pending, not executed)
+
+The requested clear of saved terrain and spaces is an operational action, **not** a recurring schema change or startup migration. No live database reset or verified backup has been performed. Live access is currently blocked by non-interactive GCP reauthentication; resolve that separately, without changing application auth.
+
+1. Merge, verify and deploy this code first. Confirm the deployed build and that primary spawn is safe.
+2. Before any deletion, verify the target database and a restorable backup, inventory the selected terrain overrides/spaces and their dependencies, and agree on an explicit scoped reset transaction with the operator. Do not use cascading truncation.
+3. Preserve users, roles, invitations, the art/decor catalog, collision settings and personal decor. **Desk deletion is not authorized.** Retained desks recreate their cubicle spaces at startup, so clearing spaces alone cannot produce a permanently empty office. Resolve that scope explicitly before clearing related rows; do not delete desks or dependent data automatically.
+4. During an agreed maintenance window, apply only the reviewed terrain/space scope. Restart the server (or explicitly reload every affected runtime) and reload clients: changing database rows alone does not update in-memory terrain, room state or space caches. Verify safe joins, reconnects and the remaining placements.
+
+Code rollback does not restore cleared data. The verified backup and explicitly scoped restoration are the rollback boundary for any later operational clear.
 
 `pnpm map:init` reproduces the checked-in empty `src/game/maps/office.json` and the unchanged Tiled palette. It writes repository artifacts only, not database rows. `--palette-only` preserves manual Tiled edits. Keep the default's per-tile overlay layers empty if runtime block edits must control every tile.
 

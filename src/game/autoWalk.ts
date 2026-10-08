@@ -11,8 +11,14 @@
  */
 
 export interface AutoWalkState {
+  /** Final destination, the one callers and arrival always refer to. */
   goal: { x: number; y: number };
-  /** Menor distancia alcanzada hasta ahora al objetivo (para detectar bloqueo). */
+  /**
+   * Stops to pass on the way to `goal`, in order (pathfinding, #2). The key is
+   * omitted when there are none, so a straight walk keeps its original shape.
+   */
+  waypoints?: readonly { x: number; y: number }[];
+  /** Menor distancia alcanzada hasta ahora al objetivo actual (para detectar bloqueo). */
   bestDistance: number;
   /** Milisegundos continuos sin mejorar `bestDistance` en al menos STALL_PROGRESS_PX. */
   stalledMs: number;
@@ -36,11 +42,35 @@ function distanceTo(from: { x: number; y: number }, to: { x: number; y: number }
   return Math.hypot(to.x - from.x, to.y - from.y);
 }
 
-export function beginAutoWalk(
-  goal: { x: number; y: number },
-  from: { x: number; y: number },
+type Point = { x: number; y: number };
+
+/** Builds a state with `waypoints` set, or without the key when none remain. */
+function buildState(
+  goal: Point,
+  waypoints: readonly Point[],
+  bestDistance: number,
+  stalledMs: number,
 ): AutoWalkState {
-  return { goal, bestDistance: distanceTo(from, goal), stalledMs: 0 };
+  return waypoints.length > 0
+    ? { goal, waypoints, bestDistance, stalledMs }
+    : { goal, bestDistance, stalledMs };
+}
+
+export function beginAutoWalk(
+  goal: Point,
+  from: Point,
+  waypoints: readonly Point[] = [],
+): AutoWalkState {
+  const target = waypoints[0] ?? goal;
+  return buildState(goal, waypoints, distanceTo(from, target), 0);
+}
+
+/**
+ * Arrival is judged on the final goal only: a walk with stops left is never
+ * done, so passing (or standing next to) one of them cannot end it early.
+ */
+export function isAutoWalkArrived(state: AutoWalkState, position: Point): boolean {
+  return (state.waypoints?.length ?? 0) === 0 && distanceTo(position, state.goal) <= ARRIVE_EPSILON_PX;
 }
 
 export function stepAutoWalk(input: {
@@ -51,16 +81,28 @@ export function stepAutoWalk(input: {
   deltaMs: number;
   speed: number;
 }): AutoWalkStep {
-  const { state, position, keyboard, deltaMs, speed } = input;
-  const distance = distanceTo(position, state.goal);
+  const { position, keyboard, deltaMs, speed } = input;
+  let state = input.state;
 
-  if (distance <= ARRIVE_EPSILON_PX) return { kind: 'arrived' };
+  // Pass every stop already within reach, restarting the stall measure from the
+  // next target: the stall is judged per target, not along the whole route (#2).
+  const pending = state.waypoints ?? [];
+  let passed = 0;
+  while (passed < pending.length && distanceTo(position, pending[passed]) <= ARRIVE_EPSILON_PX) passed++;
+  if (passed > 0) {
+    const remaining = pending.slice(passed);
+    state = buildState(state.goal, remaining, distanceTo(position, remaining[0] ?? state.goal), 0);
+  }
+
+  if (isAutoWalkArrived(state, position)) return { kind: 'arrived' };
 
   // D10: cualquier tecla de movimiento en el mismo cuadro cancela -- ese
   // cuadro ya se mueve bajo la velocidad del teclado, no hace falta un
   // listener aparte, la lectura que ya hace update() ES la cancelacion.
   if (keyboard.vx !== 0 || keyboard.vy !== 0) return { kind: 'cancelled', reason: 'input' };
 
+  const target = state.waypoints?.[0] ?? state.goal;
+  const distance = distanceTo(position, target);
   const improved = state.bestDistance - distance >= STALL_PROGRESS_PX;
   const bestDistance = improved ? distance : state.bestDistance;
   const stalledMs = improved ? 0 : state.stalledMs + Math.max(0, deltaMs);
@@ -68,11 +110,12 @@ export function stepAutoWalk(input: {
   if (stalledMs >= STALL_TIMEOUT_MS) return { kind: 'cancelled', reason: 'blocked' };
 
   // Sin overshoot: la velocidad de este cuadro nunca cubre mas que la
-  // distancia restante. `deltaMs <= 0` (primer cuadro, o un frame de 0ms)
-  // usa la velocidad nominal completa, sin dividir por cero.
+  // distancia restante al objetivo actual (un waypoint tambien se pisa sin
+  // pasarse, o cortaria la esquina). `deltaMs <= 0` (primer cuadro, o un
+  // frame de 0ms) usa la velocidad nominal completa, sin dividir por cero.
   const frameSpeed = deltaMs > 0 ? Math.min(speed, distance / (deltaMs / 1000)) : speed;
-  const vx = ((state.goal.x - position.x) / distance) * frameSpeed;
-  const vy = ((state.goal.y - position.y) / distance) * frameSpeed;
+  const vx = ((target.x - position.x) / distance) * frameSpeed;
+  const vy = ((target.y - position.y) / distance) * frameSpeed;
 
-  return { kind: 'walking', vx, vy, state: { goal: state.goal, bestDistance, stalledMs } };
+  return { kind: 'walking', vx, vy, state: buildState(state.goal, state.waypoints ?? [], bestDistance, stalledMs) };
 }

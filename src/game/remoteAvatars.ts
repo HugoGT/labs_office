@@ -27,6 +27,8 @@ export interface RemotePlayerSnapshot {
    * seat's.
    */
   seat: string | null;
+  /** Absent from older servers/fixtures; zero until the first terrain relocation. */
+  positionRevision?: number;
 }
 
 export interface RemoteAvatarSink<TAvatar> {

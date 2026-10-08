@@ -4,7 +4,7 @@ import { BASE_LAYOUT as OFFICE_LAYOUT, BLOCK_TILES, blockIndexAt, blockTileRect,
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN } from '../../../src/test/legacyOffice.ts';
 import { createMemoryTerrain } from './memoryTerrain.ts';
 import type { TerrainStore } from './terrainPort.ts';
-import { TerrainProtectedError, type TerrainProtections } from './terrainRules.ts';
+import { type TerrainProtections } from './terrainRules.ts';
 import { createTerrainRuntime } from './terrainRuntime.ts';
 
 const LAWN = 35;
@@ -95,7 +95,7 @@ describe('createTerrainRuntime', () => {
     expect(seen).toHaveLength(1);
   });
 
-  it('refuses water under a protection without saving or announcing anything', async () => {
+  it('accepts water under a player and announces it only after saving', async () => {
     const store = createMemoryTerrain();
     const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
     await runtime.load();
@@ -106,13 +106,10 @@ describe('createTerrainRuntime', () => {
       players: [{ x: 67 * TILE + 32, y: 22 * TILE + 25 }],
     });
 
-    await expect(runtime.setBlock({ index: LAWN, material: 'water', actorId: null }, someone)).rejects.toEqual(
-      new TerrainProtectedError('player'),
-    );
-
-    expect([...(await store.loadBlocks())]).toEqual([]);
-    expect(runtime.blocks()).toEqual(BASE_LAYOUT.blocks);
-    expect(listener).not.toHaveBeenCalled();
+    await runtime.setBlock({ index: LAWN, material: 'water', actorId: null }, someone);
+    expect([...(await store.loadBlocks())]).toEqual([[LAWN, 'water']]);
+    expect(runtime.blocks()[LAWN]).toBe('water');
+    expect(listener).toHaveBeenCalledExactlyOnceWith(runtime.blocks());
   });
 
   it('only reads the protections when the edit floods something', async () => {

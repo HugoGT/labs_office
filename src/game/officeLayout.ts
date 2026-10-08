@@ -35,7 +35,7 @@
  */
 
 import officeMap from './maps/office.json' with { type: 'json' };
-import { AVATAR_BODY_CENTER_OFFSET } from './avatarGeometry.ts';
+import { AVATAR_BODY_CENTER_OFFSET, physicalBodyRect } from './avatarGeometry.ts';
 export { AVATAR_BODY_CENTER_OFFSET } from './avatarGeometry.ts';
 
 /** Same as `TILE` in mapData.ts and `ART_TILE` in artContract.ts (pinned by tests). */
@@ -403,6 +403,18 @@ export function isPositionWalkable(snapshot: TerrainSnapshot, x: number, y: numb
     Math.floor((x + AVATAR_BODY_CENTER_OFFSET.x) / LAYOUT_TILE),
     Math.floor((y + AVATAR_BODY_CENTER_OFFSET.y) / LAYOUT_TILE),
   );
+}
+
+/** Full half-open footprint, for authoritative restoration and terrain relocation. */
+export function isFootprintWalkable(snapshot: TerrainSnapshot, position: { x: number; y: number }): boolean {
+  if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) return false;
+  const body = physicalBodyRect(position);
+  for (let ty = Math.floor(body.y / LAYOUT_TILE); ty < Math.ceil((body.y + body.height) / LAYOUT_TILE); ty++) {
+    for (let tx = Math.floor(body.x / LAYOUT_TILE); tx < Math.ceil((body.x + body.width) / LAYOUT_TILE); tx++) {
+      if (!isTileWalkable(snapshot, tx, ty)) return false;
+    }
+  }
+  return true;
 }
 
 // --- Block edits (#123 phase 2) ----------------------------------------------------------------

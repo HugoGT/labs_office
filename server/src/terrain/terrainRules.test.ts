@@ -69,10 +69,10 @@ describe('staticProtectedTiles', () => {
 });
 
 describe('findWaterConflict', () => {
-  it('protects ground contact rather than the old offset tile, even when the center is outside', () => {
+  it('does not veto player ground contact: relocation is decided after persistence', () => {
     const protections = { placements: [], players: [{ x: 100, y: 207 }] };
     // Footprint (91, 211)..(109, 225) crosses both x=96 and y=224.
-    expect(findWaterConflict([7 * W + 3], W, new Set(), protections)).toBe('player');
+    expect(findWaterConflict([7 * W + 3], W, new Set(), protections)).toBeNull();
     expect(findWaterConflict([5 * W + 2], W, new Set(), protections)).toBeNull();
   });
 
@@ -95,14 +95,14 @@ describe('findWaterConflict', () => {
     expect(findWaterConflict(flooded, W, STATIC, { placements: [{ x: 0, y: 0, w: 9, h: 9 }], players: [] })).toBeNull();
   });
 
-  it('refuses water under a connected player, wherever their body touches it', () => {
-    expect(findWaterConflict(watered(LAWN), W, STATIC, { placements: [], players: [standingOn(67, 22)] })).toBe('player');
+  it('allows water under players, including partial footprint overlaps', () => {
+    expect(findWaterConflict(watered(LAWN), W, STATIC, { placements: [], players: [standingOn(67, 22)] })).toBeNull();
     // Body center just right of the block's last column: a third of the body still overlaps it.
     const flooded = new Set(watered(LAWN));
     expect(flooded.has(22 * W + 71)).toBe(true);
     const halfIn = { x: 72 * TILE + 5, y: 22 * TILE + 5 };
     const players = { placements: [], players: [halfIn] };
-    expect(findWaterConflict([22 * W + 71], W, new Set(), players)).toBe('player');
+    expect(findWaterConflict([22 * W + 71], W, new Set(), players)).toBeNull();
     expect(findWaterConflict(watered(LAWN), W, STATIC, { placements: [], players: [standingOn(10, 10)] })).toBeNull();
   });
 
@@ -113,8 +113,8 @@ describe('findWaterConflict', () => {
   });
 
   it('carries the reason on a typed error', () => {
-    const error = new TerrainProtectedError('player');
+    const error = new TerrainProtectedError('placement');
     expect(error).toBeInstanceOf(Error);
-    expect(error.reason).toBe('player');
+    expect(error.reason).toBe('placement');
   });
 });

@@ -15,7 +15,7 @@ import type { AccessDeniedResult } from './authErrors';
 /** One character the selector can offer, with the sheets its previews cut frames from. */
 export interface CharacterOption {
   readonly id: string;
-  /** Spanish name from the pack manifest. */
+  /** Name from the pack manifest; internal only, the selector never shows it. */
   readonly name: string;
   readonly walkUrl: string;
   readonly seatedUrl: string;

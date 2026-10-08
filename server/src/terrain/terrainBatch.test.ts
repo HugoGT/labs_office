@@ -20,10 +20,9 @@ describe('atomic terrain batch', () => {
     expect(store.actorOf(1)).toBe('admin');
   });
 
-  it('rejects the entire batch when any edit floods a placement or a player', async () => {
+  it('rejects the entire batch when any edit floods a placement', async () => {
     for (const protections of [
       { placements: [{ x: 10, y: 1, w: 2, h: 2 }], players: [] },
-      { placements: [], players: [{ x: 10 * 32 + 16, y: 32 + 5 }] },
     ]) {
       const store = createMemoryTerrain();
       const runtime = createTerrainRuntime({ layout, store });

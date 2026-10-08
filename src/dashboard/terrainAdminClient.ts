@@ -23,7 +23,7 @@ export function createTerrainAdminClient(
       baseUrl,
       getIdToken,
       notConfigured: 'terrain-not-configured',
-      conflicts: ['terrain-under-placement', 'terrain-under-player', 'terrain-stale'],
+      conflicts: ['terrain-under-placement', 'terrain-stale'],
     },
     fetchImpl,
   );

@@ -32,16 +32,27 @@ describe('CharacterSelect (art migration, step 5)', () => {
     const group = screen.getByRole('radiogroup', { name: /elige tu personaje/i });
     expect(group).toBeInTheDocument();
     expect(screen.getAllByRole('radio')).toHaveLength(3);
-    expect(screen.getByRole('radio', { name: 'Lucia' })).toBeChecked();
-    expect(screen.getByRole('radio', { name: 'Mateo' })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Personaje 2' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Personaje 1' })).not.toBeChecked();
+  });
+
+  it('never shows or announces the manifest names, which stay internal', () => {
+    const { container } = render(
+      <CharacterSelect options={OPTIONS} initialId="character-p02-beige-blazer" pending={false} error={null} onSubmit={vi.fn()} />,
+    );
+
+    for (const name of ['Mateo', 'Lucia', 'Diego']) {
+      expect(container).not.toHaveTextContent(name);
+      expect(container.innerHTML).not.toContain(name);
+    }
   });
 
   it('previews the selected character idle, walking and seated, from its own sheets', () => {
     renderSelect();
 
-    const idle = screen.getByRole('img', { name: 'Lucia en reposo' });
-    const walking = screen.getByRole('img', { name: 'Lucia caminando' });
-    const seated = screen.getByRole('img', { name: 'Lucia en su silla' });
+    const idle = screen.getByRole('img', { name: 'Personaje 2 en reposo' });
+    const walking = screen.getByRole('img', { name: 'Personaje 2 caminando' });
+    const seated = screen.getByRole('img', { name: 'Personaje 2 en su silla' });
     expect(idle.style.backgroundImage).toContain('pack/p02-walk.png');
     expect(walking.style.backgroundImage).toContain('pack/p02-walk.png');
     expect(seated.style.backgroundImage).toContain('pack/p02-seated.png');
@@ -53,19 +64,19 @@ describe('CharacterSelect (art migration, step 5)', () => {
     const user = userEvent.setup();
     renderSelect();
 
-    await user.click(screen.getByRole('radio', { name: 'Diego' }));
+    await user.click(screen.getByRole('radio', { name: 'Personaje 3' }));
 
-    expect(screen.getByRole('radio', { name: 'Diego' })).toBeChecked();
-    expect(screen.getByRole('img', { name: 'Diego caminando' }).style.backgroundImage).toContain('pack/p03-walk.png');
+    expect(screen.getByRole('radio', { name: 'Personaje 3' })).toBeChecked();
+    expect(screen.getByRole('img', { name: 'Personaje 3 caminando' }).style.backgroundImage).toContain('pack/p03-walk.png');
   });
 
   it('works from the keyboard: arrows move the choice, Enter submits it', async () => {
     const user = userEvent.setup();
     const { onSubmit } = renderSelect();
 
-    screen.getByRole('radio', { name: 'Lucia' }).focus();
+    screen.getByRole('radio', { name: 'Personaje 2' }).focus();
     await user.keyboard('{ArrowRight}');
-    expect(screen.getByRole('radio', { name: 'Diego' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Personaje 3' })).toBeChecked();
 
     await user.keyboard('{Enter}');
     expect(onSubmit).toHaveBeenCalledWith('character-p03-forest-suit');
@@ -86,7 +97,7 @@ describe('CharacterSelect (art migration, step 5)', () => {
 
     const button = screen.getByRole('button', { name: /guardando/i });
     expect(button).toBeDisabled();
-    screen.getByRole('radio', { name: 'Lucia' }).focus();
+    screen.getByRole('radio', { name: 'Personaje 2' }).focus();
     await user.keyboard('{Enter}');
 
     expect(onSubmit).not.toHaveBeenCalled();
@@ -104,7 +115,7 @@ describe('CharacterSelect (art migration, step 5)', () => {
     render(<CharacterSelect options={[...OPTIONS, contributed]} initialId="character-p02-beige-blazer" pending={false} error={null} onSubmit={vi.fn()} />);
 
     expect(screen.queryByText(/Autoría/)).not.toBeInTheDocument();
-    await user.click(screen.getByRole('radio', { name: 'Rosa' }));
+    await user.click(screen.getByRole('radio', { name: 'Personaje 4' }));
 
     expect(screen.getByText('Autoría: Ana')).toBeInTheDocument();
   });

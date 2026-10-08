@@ -120,7 +120,7 @@ describe('handleSetTerrainBlock', () => {
     expect((await handleSetTerrainBlock(BEARER_ADMIN, LAWN, { material: 'lava' }, deps)).status).toBe(400);
   });
 
-  it('answers 409 with its own code when water would land under a placement or a player', async () => {
+  it('refuses water under placements, but accepts water under players', async () => {
     const underDesk = await harness({ placements: [{ x: 66, y: 21, w: 3, h: 3 }], players: [] });
     expect(await handleSetTerrainBlock(BEARER_ADMIN, LAWN, { material: 'water' }, underDesk.deps)).toEqual({
       status: 409,
@@ -130,8 +130,8 @@ describe('handleSetTerrainBlock', () => {
 
     const underPlayer = await harness({ placements: [], players: [{ x: 67 * TILE + 32, y: 22 * TILE + 25 }] });
     expect(await handleSetTerrainBlock(BEARER_ADMIN, LAWN, { material: 'water' }, underPlayer.deps)).toEqual({
-      status: 409,
-      body: { error: 'terrain-under-player' },
+      status: 200,
+      body: { index: 35, material: 'water' },
     });
   });
 

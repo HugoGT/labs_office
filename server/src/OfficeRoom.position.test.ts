@@ -71,6 +71,30 @@ afterEach(async () => {
 });
 
 describe('OfficeRoom: restore last position (#148)', () => {
+  it('rejects a saved footprint that straddles water even when its center is walkable', async () => {
+    const store = await directory();
+    const position = { x: 63 * TILE + 4, y: 49 * TILE + 16 };
+    await store.saveLastPosition(UID, position);
+    const { BASE_LAYOUT: layout } = await import('../../src/game/officeLayout.ts');
+    await start(store, true, { layout, seats: [] });
+    expect(isPositionWalkable(server.terrain.snapshot(), position.x, position.y)).toBe(true);
+    const room = await join();
+    expectSpawn(room);
+    expect({ x: own(room).x, y: own(room).y }).not.toEqual(position);
+  });
+
+  it('an unoccupable spawn ring cell falls back to primary instead of intersecting a piece', async () => {
+    await start(undefined, false, { collisions: createMemoryCollisions() });
+    const first = await join();
+    const primary = { x: own(first).x, y: own(first).y };
+    // Inject a small authoritative piece rectangle at the second join's return cell.
+    const rects = vi.spyOn(server.collisions, 'rects').mockReturnValue([{ piece: 'desk-wood', x: primary.x + TILE - 4, y: primary.y + 5, w: 8, h: 12 }]);
+    expectSpawn(await join());
+    const next = rooms.at(-1)!;
+    expect({ x: own(next).x, y: own(next).y }).toEqual(primary);
+    rects.mockRestore();
+  });
+
   it('definitive leave then a new room restores position standing and tracks it for LiveKit', async () => {
     const store = await directory();
     await start(store);

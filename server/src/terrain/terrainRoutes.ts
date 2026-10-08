@@ -18,9 +18,8 @@ export interface TerrainDeps extends AdminDeps {
   protections: () => Promise<TerrainProtections>;
 }
 
-/** One code per reason, because they are fixed differently: another block, or waiting. */
+/** Placements survive terrain edits; players return to safe spawn instead. */
 const UNDER_PLACEMENT: AdminResult = { status: 409, body: { error: 'terrain-under-placement' } };
-const UNDER_PLAYER: AdminResult = { status: 409, body: { error: 'terrain-under-player' } };
 
 export async function handleSetTerrainBlocks(authorization: unknown, body: unknown, deps: TerrainDeps): Promise<AdminResult> {
   const authorized = await authorize(authorization, deps);
@@ -32,7 +31,7 @@ export async function handleSetTerrainBlocks(authorization: unknown, body: unkno
   } catch (error) {
     if (error instanceof InvalidTerrainEditError) return INVALID_REQUEST;
     if (error instanceof TerrainStaleError) return { status: 409, body: { error: 'terrain-stale' } };
-    if (error instanceof TerrainProtectedError) return error.reason === 'player' ? UNDER_PLAYER : UNDER_PLACEMENT;
+    if (error instanceof TerrainProtectedError) return UNDER_PLACEMENT;
     throw error;
   }
 }
@@ -52,7 +51,7 @@ export async function handleSetTerrainBlock(
     return { status: 200, body: { index: edit.index, material: edit.material } };
   } catch (error) {
     if (error instanceof InvalidTerrainEditError) return INVALID_REQUEST;
-    if (error instanceof TerrainProtectedError) return error.reason === 'player' ? UNDER_PLAYER : UNDER_PLACEMENT;
+    if (error instanceof TerrainProtectedError) return UNDER_PLACEMENT;
     throw error;
   }
 }
