@@ -182,7 +182,11 @@ export async function authenticate(
   // asking for email and password again.
   if (identity === SESSION_EXPIRED) return { ok: false, result: SESSION_TOO_OLD };
 
-  const user = await deps.directory.findByUid(identity.uid);
+  // A missing row may still be the bootstrap superadmin: on a fresh database
+  // the entrance reaches `/me/display-name` before it ever joins the room, the
+  // other place `resolveOnLogin` runs. It creates nobody else.
+  const user =
+    (await deps.directory.findByUid(identity.uid)) ?? (await deps.directory.resolveOnLogin(identity));
   const decision: AccessDecision = decideAccess(user, clock(deps));
   if (decision !== 'allow' || user === null) {
     // Same boundary as room join: only a verified identity learns its own

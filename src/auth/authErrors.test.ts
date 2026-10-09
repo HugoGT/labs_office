@@ -85,6 +85,12 @@ describe('describeAuthError: regresion de seguridad (enumeracion de cuentas)', (
 });
 
 describe('describePasswordResetError (#94)', () => {
+  it('explains that local accounts have no reset email, whatever the address', () => {
+    expect(describePasswordResetError(firebaseError('auth/local-password-reset-unavailable'))).toBe(
+      'Las cuentas locales no recuperan la contraseña por correo. Pídesela a quien administra la oficina.',
+    );
+  });
+
   it('REGRESSION: an unknown or disabled account reads as sent, never as an error', () => {
     // Anything else would turn "forgot your password" into an oracle that tells
     // anyone probing addresses who has an account in the office.

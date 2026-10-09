@@ -13,7 +13,13 @@
  * proyecto y viaja en el bundle por diseno. Quien protege el acceso son las
  * cuentas y la verificacion del ID token en el servidor
  * (`server/src/verifyIdToken.ts`).
+ *
+ * `resolveAuthSelection` adds the local auth mode (`VITE_AUTH_MODE=local`,
+ * local and test use only): accounts from the server's `LOCAL_AUTH_USERS`,
+ * signed in through `POST /auth/local/sign-in` (`localAuthAdapter.ts`).
  */
+
+import { deriveDisplayNameBaseUrl } from './displayNameClient';
 
 export interface AuthConfigSources {
   /** `import.meta.env.VITE_FIREBASE_API_KEY`, si esta definida. */
@@ -49,4 +55,30 @@ export function resolveAuthConfig({
     // configurarlo cuando se usa uno propio.
     authDomain: trimmedAuthDomain ? trimmedAuthDomain : `${trimmedProjectId}.firebaseapp.com`,
   };
+}
+
+export interface AuthSelectionSources extends AuthConfigSources {
+  /** `import.meta.env.VITE_AUTH_MODE`: only `local` changes anything. */
+  mode?: string;
+  /** `resolveOfficeEndpoint`'s answer: `null` means multiplayer is off. */
+  officeEndpoint: string | null;
+}
+
+export type AuthSelection =
+  | { kind: 'firebase'; config: AuthConfig }
+  | { kind: 'local'; baseUrl: string };
+
+/**
+ * Which `AuthPort` the SPA builds, or `null` for no auth. Any mode other than
+ * `local` keeps the Firebase rule above exactly, so a deployed build that
+ * never sets `VITE_AUTH_MODE` behaves as before. Local mode ignores the
+ * Firebase variables (it never initializes the SDK), and without a server it
+ * has nothing to sign in against, so it is "no auth", as with the server off.
+ */
+export function resolveAuthSelection({ mode, officeEndpoint, ...firebase }: AuthSelectionSources): AuthSelection | null {
+  if (mode?.trim().toLowerCase() === 'local') {
+    return officeEndpoint === null ? null : { kind: 'local', baseUrl: deriveDisplayNameBaseUrl(officeEndpoint) };
+  }
+  const config = resolveAuthConfig(firebase);
+  return config === null ? null : { kind: 'firebase', config };
 }

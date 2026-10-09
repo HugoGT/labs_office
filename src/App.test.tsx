@@ -182,6 +182,19 @@ describe('App: autenticacion (#8)', () => {
     expect(screen.queryByRole('button', { name: /olvidaste|enviar enlace/i })).not.toBeInTheDocument();
   });
 
+  it('VITE_AUTH_MODE=local shows the login without initializing Firebase', async () => {
+    vi.stubEnv('VITE_AUTH_MODE', 'local');
+    vi.stubEnv('VITE_FIREBASE_API_KEY', 'AIza-publica');
+    vi.stubEnv('VITE_FIREBASE_PROJECT_ID', 'oficina-virtual');
+    window.localStorage.clear();
+
+    render(<App />);
+
+    expect(await screen.findByLabelText(/contraseña/i)).toBeInTheDocument();
+    expect(createAdapterMock).not.toHaveBeenCalled();
+    expect(createGameMock).not.toHaveBeenCalled();
+  });
+
   it('REGRESION: renovar el token no vuelve a montar la oficina', async () => {
     // El SDK avisa al renovar el ID token, mas o menos cada hora, con la misma
     // identidad en un objeto nuevo. Si esa referencia nueva llegase hasta las

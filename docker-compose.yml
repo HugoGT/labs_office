@@ -77,6 +77,11 @@ services:
       # Optional features, passed through from .env. Empty keeps each one off,
       # with the same degradation as on the host (.env.example).
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+      # Local auth mode (local and test use only, never in the deployed
+      # compose): accounts from .env instead of Firebase. Both or neither, and
+      # never with FIREBASE_PROJECT_ID: the server refuses to start otherwise.
+      LOCAL_AUTH_USERS: ${LOCAL_AUTH_USERS:-}
+      LOCAL_AUTH_SECRET: ${LOCAL_AUTH_SECRET:-}
       BOOTSTRAP_SUPERADMIN_EMAIL: ${BOOTSTRAP_SUPERADMIN_EMAIL:-}
       IDENTITY_ADMIN_CREDENTIALS: ${IDENTITY_ADMIN_CREDENTIALS:-}
       ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
@@ -114,6 +119,9 @@ services:
         VITE_FIREBASE_API_KEY: ${VITE_FIREBASE_API_KEY:-}
         VITE_FIREBASE_PROJECT_ID: ${VITE_FIREBASE_PROJECT_ID:-}
         VITE_FIREBASE_AUTH_DOMAIN: ${VITE_FIREBASE_AUTH_DOMAIN:-}
+        # `local` shows the login against the server's LOCAL_AUTH_USERS
+        # instead of Firebase (leave the VITE_FIREBASE_* empty then).
+        VITE_AUTH_MODE: ${VITE_AUTH_MODE:-}
     ports:
       # 8080, not 5173: `pnpm dev` keeps its port free for the hybrid path.
       - "8080:80"

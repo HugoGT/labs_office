@@ -388,6 +388,22 @@ describe('GET /admin/session', () => {
     expect(result.body.expiresAt).toBe('2026-01-18T12:00:00.000Z');
   });
 
+  it('creates the bootstrap superadmin on a fresh directory, like joining the room does', async () => {
+    // The entrance asks `/me/display-name` before it ever joins the room, so
+    // on an empty database the bootstrap account must be created here too.
+    const directory = createMemoryDirectory({
+      now: () => NOW,
+      seed: [],
+      bootstrapSuperadminEmail: 'uid-bootstrap@example.com',
+    });
+    const { deps } = harness();
+
+    const result = await handleAdminSession(bearer('valido-uid-bootstrap'), { ...deps, directory });
+
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ role: 'superadmin', email: 'uid-bootstrap@example.com' });
+  });
+
   it('no filtra el uid ni el id interno: el panel no los necesita', async () => {
     const { deps } = harness();
 

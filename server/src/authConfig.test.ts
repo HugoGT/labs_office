@@ -5,7 +5,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { resolveAuthConfig } from './authConfig.ts';
+import { resolveAuthConfig, resolveServerAuthConfig } from './authConfig.ts';
+import { AuthConfigError } from './authConfigError.ts';
+import { LOCAL_AUTH_MIN_SECRET_LENGTH } from './localAuth/localAuthConfig.ts';
 
 describe('resolveAuthConfig', () => {
   it('devuelve el projectId cuando la variable esta definida', () => {
@@ -31,5 +33,45 @@ describe('resolveAuthConfig', () => {
     // sintoma seria "todos los tokens son invalidos" en vez de "falta config".
     expect(resolveAuthConfig({ FIREBASE_PROJECT_ID: '' })).toBeNull();
     expect(resolveAuthConfig({ FIREBASE_PROJECT_ID: '   ' })).toBeNull();
+  });
+});
+
+describe('resolveServerAuthConfig', () => {
+  const SECRET = 'k'.repeat(LOCAL_AUTH_MIN_SECRET_LENGTH);
+
+  it('is null without any auth variable: auth disabled, as before', () => {
+    expect(resolveServerAuthConfig({})).toBeNull();
+  });
+
+  it('selects Firebase from FIREBASE_PROJECT_ID alone', () => {
+    expect(resolveServerAuthConfig({ FIREBASE_PROJECT_ID: 'oficina-virtual' })).toEqual({
+      kind: 'firebase',
+      projectId: 'oficina-virtual',
+    });
+  });
+
+  it('selects local auth from LOCAL_AUTH_USERS and LOCAL_AUTH_SECRET', () => {
+    const config = resolveServerAuthConfig({
+      LOCAL_AUTH_USERS: 'ana@local.test:pw',
+      LOCAL_AUTH_SECRET: SECRET,
+    });
+    expect(config?.kind).toBe('local');
+    expect(config?.kind === 'local' && config.users.get('ana@local.test')).toBe('pw');
+  });
+
+  it.each([
+    { LOCAL_AUTH_USERS: 'ana@local.test:pw', LOCAL_AUTH_SECRET: SECRET },
+    { LOCAL_AUTH_USERS: 'ana@local.test:pw' },
+    { LOCAL_AUTH_SECRET: SECRET },
+  ])('refuses to start with Firebase and any local auth variable together', (local) => {
+    expect(() => resolveServerAuthConfig({ FIREBASE_PROJECT_ID: 'oficina-virtual', ...local })).toThrow(
+      /mutually exclusive/,
+    );
+  });
+
+  it('turns a malformed local configuration into an AuthConfigError', () => {
+    expect(() => resolveServerAuthConfig({ LOCAL_AUTH_USERS: 'ana@local.test:pw' })).toThrow(
+      AuthConfigError,
+    );
   });
 });

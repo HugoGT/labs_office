@@ -16,7 +16,18 @@
  * sala, que es justo el agujero que este cambio cierra. `/health` expone el
  * modo efectivo (`auth: 'enabled' | 'disabled'`) para poder comprobarlo desde
  * fuera sin adivinar.
+ *
+ * `resolveServerAuthConfig` below picks between that mode and the local one
+ * (`localAuth/localAuthConfig.ts`); `resolveAuthConfig` stays the Firebase
+ * half of it.
  */
+
+import { AuthConfigError } from './authConfigError.ts';
+import {
+  resolveLocalAuthConfig,
+  type LocalAuthConfig,
+  type LocalAuthEnv,
+} from './localAuth/localAuthConfig.ts';
 
 export interface AuthConfig {
   projectId: string;
@@ -26,4 +37,35 @@ export function resolveAuthConfig(env: { FIREBASE_PROJECT_ID?: string }): AuthCo
   const projectId = env.FIREBASE_PROJECT_ID?.trim();
   if (!projectId) return null;
   return { projectId };
+}
+
+/**
+ * The auth mode the server runs in: Firebase / Identity Platform, the local
+ * env-based accounts of `localAuth/localAuthConfig.ts` (local and test use
+ * only), or `null` for no auth at all.
+ */
+export type ServerAuthConfig =
+  | ({ kind: 'firebase' } & AuthConfig)
+  | ({ kind: 'local' } & LocalAuthConfig);
+
+export type ServerAuthEnv = { FIREBASE_PROJECT_ID?: string } & LocalAuthEnv;
+
+/**
+ * Throws `AuthConfigError` when the variables cannot be honored, so the server
+ * refuses to start. Firebase next to any local auth variable is one of those:
+ * guessing which one was meant could open a deployed office to the local
+ * accounts, and the deployed compose never passes the local ones anyway.
+ */
+export function resolveServerAuthConfig(env: ServerAuthEnv): ServerAuthConfig | null {
+  const firebase = resolveAuthConfig(env);
+  const localSet = Boolean(env.LOCAL_AUTH_USERS?.trim() || env.LOCAL_AUTH_SECRET?.trim());
+  if (firebase !== null && localSet) {
+    throw new AuthConfigError(
+      'FIREBASE_PROJECT_ID and LOCAL_AUTH_USERS/LOCAL_AUTH_SECRET are mutually exclusive: unset one',
+    );
+  }
+  if (firebase !== null) return { kind: 'firebase', ...firebase };
+
+  const local = resolveLocalAuthConfig(env);
+  return local === null ? null : { kind: 'local', ...local };
 }
