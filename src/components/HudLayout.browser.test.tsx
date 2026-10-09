@@ -145,6 +145,24 @@ describe('HUD layout: bottom bar (#87)', () => {
   });
 });
 
+/**
+ * Where a button's icon and label sit inside its border box: the gap on each
+ * side. Measured on the text (a Range), not the glyphs, so it holds without
+ * an emoji font too.
+ */
+function contentGaps(button: Element) {
+  const range = document.createRange();
+  range.selectNodeContents(button);
+  const content = range.getBoundingClientRect();
+  const outer = box(button);
+  return {
+    left: content.left - outer.left,
+    right: outer.right - content.right,
+    top: content.top - outer.top,
+    bottom: outer.bottom - content.bottom,
+  };
+}
+
 describe('HUD layout: camera filter caret', () => {
   it('joins the camera button at its height, and its menu opens above it, on screen', async () => {
     for (const width of [WIDE, NARROW, VERY_SMALL]) {
@@ -156,6 +174,15 @@ describe('HUD layout: camera filter caret', () => {
       expect(box(caret).height).toBeCloseTo(box(camera).height, 0);
       expect(box(caret).top).toBeCloseTo(box(camera).top, 0);
       expect(box(caret).left).toBeCloseTo(box(camera).right, 0);
+
+      // The caret must not cost the camera its centering: icon and label sit
+      // exactly as in "Mic", the plain button next to it.
+      const mic = contentGaps(screen.getByRole('button', { name: /Mic/ }));
+      const cam = contentGaps(camera);
+      expect(cam.left).toBeCloseTo(cam.right, 1);
+      expect(cam.top).toBeCloseTo(cam.bottom, 1);
+      expect(cam.left).toBeCloseTo(mic.left, 1);
+      expect(cam.right).toBeCloseTo(mic.right, 1);
 
       await userEvent.click(caret);
       const menu = box(screen.getByRole('menu', { name: 'Filtro de cámara' }));

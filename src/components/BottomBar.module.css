@@ -180,10 +180,14 @@
   align-items: stretch;
 }
 
+/*
+ * Only the corners change: the box keeps the border on all four sides, so its
+ * icon and label stay centered exactly like "Mic". Its right border is the
+ * divider; the caret draws no left border of its own.
+ */
 .splitMain {
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
-  border-right: none;
 }
 
 .status {

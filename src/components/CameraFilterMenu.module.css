@@ -6,7 +6,9 @@
 
 /*
  * Second half of a split button with the camera button (`BottomBar.splitMain`):
- * same box as the bar's `.btn`, its left corners squared to join it.
+ * same box as the bar's `.btn`, its left corners squared to join it. No left
+ * border: the camera button's right border is the divider, so that button
+ * keeps a symmetric box and its content stays centered.
  */
 .caret {
   display: inline-flex;
@@ -15,7 +17,7 @@
   background: #1f2937;
   color: #9ca3af;
   border: 1px solid #374151;
-  border-left-color: #2b3444;
+  border-left: none;
   border-radius: 0 var(--radius-control) var(--radius-control) 0;
   /* Same height as `.btn`: 6px padding around a 13px/normal line. */
   padding: 6px 8px;
