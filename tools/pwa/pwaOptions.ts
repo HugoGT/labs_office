@@ -34,8 +34,8 @@ const PAGE_BACKGROUND = '#0d1117';
 
 export const PWA_MANIFEST = {
   id: '/',
-  name: 'Oficina Virtual',
-  short_name: 'Oficina',
+  name: 'Labs',
+  short_name: 'Labs',
   description: 'Oficina virtual 2D con audio y video por proximidad.',
   lang: 'es',
   start_url: '/',

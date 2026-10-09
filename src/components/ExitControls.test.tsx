@@ -97,7 +97,7 @@ describe('ExitControls (#66)', () => {
 
       await user.click(button);
 
-      const panel = screen.getByRole('dialog', { name: 'Instalar Oficina Virtual' });
+      const panel = screen.getByRole('dialog', { name: 'Instalar Labs' });
       for (const step of steps) expect(panel).toHaveTextContent(step);
       expect(button).toHaveAttribute('aria-expanded', 'true');
       expect(button).toHaveAttribute('aria-controls', panel.id);

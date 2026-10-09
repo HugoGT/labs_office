@@ -109,7 +109,7 @@ function InstallButton({ offer }: { offer: InstallOffer }) {
           tabIndex={-1}
         >
           <p id={titleId} className={styles.panelTitle}>
-            Instalar Oficina Virtual
+            Instalar Labs
           </p>
           <ol className={styles.steps}>
             {INSTALL_STEPS[offer.kind].map((step) => (

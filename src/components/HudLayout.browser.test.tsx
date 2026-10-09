@@ -295,7 +295,7 @@ describe('HUD layout: exit controls with "Instalar app" (#13)', () => {
       const exits = renderExits({ installable: true });
       await userEvent.click(screen.getByRole('button', { name: 'Instalar app' }));
 
-      const panel = box(screen.getByRole('dialog', { name: 'Instalar Oficina Virtual' }));
+      const panel = box(screen.getByRole('dialog', { name: 'Instalar Labs' }));
       expect(panel.bottom, `at ${width}px`).toBeLessThanOrEqual(box(exits).top);
       expect(panel.left, `at ${width}px`).toBeGreaterThanOrEqual(0);
       expect(panel.right, `at ${width}px`).toBeLessThanOrEqual(width);

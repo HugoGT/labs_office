@@ -158,7 +158,7 @@ export function LoginScreen({
           onSubmit(name, email, password);
         }}
       >
-        <h1 className={styles.title}>Oficina Virtual</h1>
+        <h1 className={styles.title}>Labs</h1>
         <p className={styles.subtitle}>Entra con la cuenta que te dieron.</p>
 
         <div className={styles.field}>
