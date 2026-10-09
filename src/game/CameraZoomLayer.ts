@@ -5,6 +5,10 @@
  * pattern as `CameraPanLayer`: the layer listens and moves the camera, the
  * pure module decides.
  *
+ * It also keeps a stop pixel exact: Phaser rounds quads only at an integer
+ * zoom, so at 0.5x the layer rounds them itself and snaps the scroll to whole
+ * screen pixels, right after the camera's own `preRender`.
+ *
  * It never touches the camera bounds: `CameraPanLayer` owns them every frame,
  * and must be constructed AFTER this layer so the bounds of a frame already see
  * that frame's zoom (listeners run in UPDATE order). The view center, and so
@@ -18,6 +22,8 @@ import {
   INITIAL_WHEEL_STATE,
   accumulateWheel,
   applyZoomAction,
+  isPixelExactZoom,
+  snapScrollToScreenPixels,
   zoomKeyAction,
   zoomStep,
   zoomView,
@@ -54,6 +60,7 @@ export class CameraZoomLayer {
   private readonly keyboard: Phaser.Input.Keyboard.KeyboardPlugin | null;
   private readonly sceneEvents: Phaser.Events.EventEmitter;
   private readonly unsubscribeCommand: () => void;
+  private readonly cameraPreRender: () => void;
   /** The animated zoom the camera has now; `target` is the stop it is heading to. */
   private current: number;
   private target: number;
@@ -90,6 +97,20 @@ export class CameraZoomLayer {
     this.camera.setZoom(value);
   };
 
+  /**
+   * Runs after the camera's own `preRender`, which floors the scroll and
+   * decides `renderRoundPixels` for the frame, and before anything draws. Only
+   * at a stop: while easing, rounding would make the animation jump.
+   */
+  private readonly alignToScreenPixels = (): void => {
+    const camera = this.camera;
+    if (!camera.roundPixels || camera.zoom !== this.target || !isPixelExactZoom(camera.zoom)) return;
+    camera.scrollX = snapScrollToScreenPixels(camera.scrollX, camera.zoom);
+    camera.scrollY = snapScrollToScreenPixels(camera.scrollY, camera.zoom);
+    // Typed read-only, but it is a plain field `preRender` rewrites every frame.
+    (camera as { renderRoundPixels: boolean }).renderRoundPixels = true;
+  };
+
   constructor(options: CameraZoomLayerOptions) {
     this.camera = options.camera;
     this.minimap = options.minimap;
@@ -102,6 +123,14 @@ export class CameraZoomLayer {
     this.sceneEvents = options.scene.events;
     // The scene (setupCameras) sets the starting zoom before this layer exists.
     this.current = this.target = this.camera.zoom;
+
+    // Phaser has no hook between a camera's `preRender` and its render.
+    const camera = this.camera;
+    this.cameraPreRender = camera.preRender;
+    camera.preRender = () => {
+      this.cameraPreRender.call(camera);
+      this.alignToScreenPixels();
+    };
 
     this.input.on('wheel', this.onWheel);
     this.keyboard?.on('keydown', this.onKeyDown);
@@ -118,6 +147,7 @@ export class CameraZoomLayer {
     this.keyboard?.off('keydown', this.onKeyDown);
     this.sceneEvents.off(Phaser.Scenes.Events.UPDATE, this.onUpdate);
     this.unsubscribeCommand();
+    this.camera.preRender = this.cameraPreRender;
   }
 
   private apply(action: ZoomAction): void {

@@ -30,7 +30,6 @@ describe('createZoomStore: the zoom chosen per browser (map-zoom)', () => {
     ['text', 'abc'],
     ['an empty string', ''],
     ['a number that is not a stop', '1.3'],
-    ['the retired 0.5 stop', '0.5'],
     ['the retired 0.75 stop', '0.75'],
     ['the retired 1.5 stop', '1.5'],
     ['the retired 2.25 stop', '2.25'],

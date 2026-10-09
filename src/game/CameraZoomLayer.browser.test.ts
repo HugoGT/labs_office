@@ -257,7 +257,8 @@ describe('CameraZoomLayer: bridge command, event and store', () => {
 
     bridge.emitCommand('zoom', { action: 'in' });
     bridge.emitCommand('zoom', { action: 'in' });
-    expect(views.at(-1)).toEqual(zoomView(3));
+    expect(views.at(-1)).toEqual(zoomView(4));
+    bridge.emitCommand('zoom', { action: 'out' });
     bridge.emitCommand('zoom', { action: 'out' });
     bridge.emitCommand('zoom', { action: 'out' });
     expect(views.at(-1)).toEqual(zoomView(1));
@@ -267,7 +268,7 @@ describe('CameraZoomLayer: bridge command, event and store', () => {
 
   it('saves every change to the store, and nothing when the target does not move', async () => {
     const store = { load: () => 2, save: vi.fn() };
-    const { bridge, views } = await fixture({ store }, 3);
+    const { bridge, views } = await fixture({ store }, 4);
     const initial = views.length;
 
     bridge.emitCommand('zoom', { action: 'in' });
@@ -275,7 +276,72 @@ describe('CameraZoomLayer: bridge command, event and store', () => {
     expect(views).toHaveLength(initial);
 
     bridge.emitCommand('zoom', { action: 'out' });
-    expect(store.save).toHaveBeenCalledExactlyOnceWith(2);
+    expect(store.save).toHaveBeenCalledExactlyOnceWith(3);
+  });
+});
+
+describe('CameraZoomLayer: pixel-exact rendering', () => {
+  it('at 0.5x rounds every quad and keeps the scroll on whole screen pixels', async () => {
+    const { scene } = await fixture({}, 0.5);
+    const camera = scene.cameras.main;
+    camera.roundPixels = true;
+
+    camera.setScroll(101, 57);
+    renderFrames(scene, 1);
+
+    expect([camera.scrollX, camera.scrollY]).toEqual([100, 56]);
+    expect(camera.renderRoundPixels).toBe(true);
+  });
+
+  it('at an integer stop leaves the scroll as Phaser floored it', async () => {
+    const { scene } = await fixture({}, 2);
+    const camera = scene.cameras.main;
+    camera.roundPixels = true;
+
+    camera.setScroll(101, 57);
+    renderFrames(scene, 1);
+
+    expect([camera.scrollX, camera.scrollY]).toEqual([101, 57]);
+    expect(camera.renderRoundPixels).toBe(true);
+  });
+
+  it('while easing between stops it does not round, so the zoom animation stays smooth', async () => {
+    const { scene, bridge } = await fixture({}, 1);
+    const camera = scene.cameras.main;
+    camera.roundPixels = true;
+
+    bridge.emitCommand('zoom', { action: 'out' });
+    camera.setScroll(101, 57);
+    renderFrames(scene, 1);
+
+    expect(camera.zoom).not.toBe(0.5);
+    expect(camera.scrollX).toBe(101);
+    expect(camera.renderRoundPixels).toBe(false);
+  });
+
+  it('does nothing when the game does not round pixels', async () => {
+    const { scene } = await fixture({}, 0.5);
+    const camera = scene.cameras.main;
+    camera.roundPixels = false;
+
+    camera.setScroll(101, 57);
+    renderFrames(scene, 1);
+
+    expect(camera.scrollX).toBe(101);
+    expect(camera.renderRoundPixels).toBe(false);
+  });
+
+  it('stops after destroy', async () => {
+    const { scene, layer } = await fixture({}, 0.5);
+    const camera = scene.cameras.main;
+    camera.roundPixels = true;
+    layer.destroy();
+
+    camera.setScroll(101, 57);
+    renderFrames(scene, 1);
+
+    expect(camera.scrollX).toBe(101);
+    expect(camera.renderRoundPixels).toBe(false);
   });
 });
 

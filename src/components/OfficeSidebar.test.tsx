@@ -498,3 +498,88 @@ describe('OfficeSidebar: contributing art (#122)', () => {
     expect(screen.queryByRole('heading', { name: 'Aportar arte' })).not.toBeInTheDocument();
   });
 });
+
+describe('OfficeSidebar: Escape closes the open panel', () => {
+  it('closes "Personas conectadas" and gives focus back to its toggle, even while typing in the search', async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+    const toggle = screen.getByRole('button', { name: /Personas/ });
+    await user.click(toggle);
+    await user.click(screen.getByRole('searchbox'));
+
+    await user.keyboard('{Escape}');
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
+    expect(toggle).toHaveFocus();
+  });
+
+  it('closes the "Personalizar" menu', async () => {
+    const user = userEvent.setup();
+    renderSidebar({ role: 'employee' });
+    const toggle = screen.getByRole('button', { name: /Personalizar/ });
+    await user.click(toggle);
+
+    await user.keyboard('{Escape}');
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('region', { name: 'Personalizar' })).not.toBeInTheDocument();
+  });
+
+  it('closes "Personalizar" from a section too, and opens again on its menu', async () => {
+    const user = userEvent.setup();
+    renderSidebar({ role: 'employee' });
+    const toggle = screen.getByRole('button', { name: /Personalizar/ });
+    await user.click(toggle);
+    await user.click(screen.getByRole('button', { name: 'Mi espacio' }));
+
+    await user.keyboard('{Escape}');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(toggle);
+    expect(screen.getByRole('button', { name: 'Mi espacio' })).toBeInTheDocument();
+  });
+
+  it('leaves a map editor open: there Escape belongs to the editor (a picked brush, a draft)', async () => {
+    const user = userEvent.setup();
+    const desks: DeskAdminPort = {
+      listDesks: vi.fn(async () => []),
+      createDesk: vi.fn(),
+      updateDesk: vi.fn(),
+      deleteDesk: vi.fn(),
+    } as unknown as DeskAdminPort;
+    const spaces = { listSpaces: vi.fn(async () => []) } as unknown as SpacesAdminPort;
+    renderSidebar({
+      role: 'admin',
+      bridge: createOfficeBridge(),
+      desks,
+      spaces,
+      refreshDesks: vi.fn(),
+      refreshSpaces: vi.fn(),
+    });
+    const toggle = screen.getByRole('button', { name: /Personalizar/ });
+    await user.click(toggle);
+    await user.click(screen.getByRole('button', { name: 'Editar escritorios' }));
+
+    await user.keyboard('{Escape}');
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('ignores an Escape another control already handled', async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+    const toggle = screen.getByRole('button', { name: /Personas/ });
+    await user.click(toggle);
+    const handled = (event: KeyboardEvent) => event.preventDefault();
+    window.addEventListener('keydown', handled, { capture: true });
+
+    try {
+      await user.keyboard('{Escape}');
+    } finally {
+      window.removeEventListener('keydown', handled, { capture: true });
+    }
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  });
+});
