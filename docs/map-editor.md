@@ -18,7 +18,7 @@ New offices start as a black void with one central wood block, the entrance. Adm
 | Office block | 9 × 9 tiles, 288 × 288 px; all 81 tiles share the block's material |
 | Spawn | Tile `(94, 67)`, the world's center, in central block index `157` (column 11, row 8 counting from 1); it stays wood: incompatible saved overrides are ignored at startup, and edits cannot change it |
 | Void | Material `void`: no terrain. Nonwalkable exactly like water. Drawn as nothing over a black background (`VOID_COLOR`), on the map and the minimap, and outside the world too. Next to void a floor ends on its own edge; no water is drawn under it |
-| Floors | Water, grass, dirt, sand, cobblestone, wood, tile and carpet; water is a normal floor and stays nonwalkable |
+| Floors | Carpet, tile, wood, grass, cobblestone, dirt, sand and water, from the highest drawing priority down (where two meet, the higher one is drawn over the lower one's edge; the palette lists them in this order, then the void eraser); water is a normal floor and stays nonwalkable |
 | Borders | No displaced/jittered block lookup. The art pack's dual-grid transitions and intentional half-tile rendering origin remain |
 | Default | Void everywhere but the entrance; no ground overrides, decals, walls, hedges, props, chairs, labels, or fallback rooms |
 

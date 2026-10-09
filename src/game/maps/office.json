@@ -791,7 +791,7 @@
     },
     {
      "id": 1,
-     "type": "grass"
+     "type": "sand"
     },
     {
      "id": 2,
@@ -799,11 +799,11 @@
     },
     {
      "id": 3,
-     "type": "sand"
+     "type": "cobblestone"
     },
     {
      "id": 4,
-     "type": "cobblestone"
+     "type": "grass"
     },
     {
      "id": 5,

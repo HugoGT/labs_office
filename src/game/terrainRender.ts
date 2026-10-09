@@ -29,10 +29,10 @@ export const VOID_COLOR = 0x000000;
 export const TERRAIN_FLAT_COLORS: Readonly<Record<LayoutMaterial, number>> = {
   void: VOID_COLOR,
   water: 0x3f78c4,
-  grass: 0x5d9b4c,
-  dirt: 0x8d6a47,
   sand: 0xd9c48c,
+  dirt: 0x8d6a47,
   cobblestone: 0x8c9096,
+  grass: 0x5d9b4c,
   wood: 0xa4723f,
   tile: 0xc5c9cf,
   carpet: 0x7b4f8c,

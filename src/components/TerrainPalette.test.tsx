@@ -12,10 +12,11 @@ function noPreview(): ArtPreviewCache {
   return { sheet: vi.fn(async () => null) };
 }
 
-const NAMES = ['Agua', 'Césped', 'Tierra', 'Arena', 'Empedrado', 'Madera', 'Baldosa', 'Moqueta', 'Vacío'];
+/** Highest drawing priority first, the void eraser last. */
+const NAMES = ['Moqueta', 'Baldosa', 'Madera', 'Césped', 'Empedrado', 'Tierra', 'Arena', 'Agua', 'Vacío'];
 
 describe('TerrainPalette', () => {
-  it('offers every floor by its Spanish name, then the void eraser, none pressed until one is picked', () => {
+  it('offers every floor by its Spanish name from the highest drawing priority down, then the void eraser, none pressed until one is picked', () => {
     render(<TerrainPalette value={null} onPick={() => {}} floors={catalog.floor} preview={noPreview()} />);
 
     const group = screen.getByRole('group', { name: 'Suelos' });

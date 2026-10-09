@@ -50,7 +50,7 @@ export const BLOCK_TILES = MAP_BLOCK_TILES;
  * nothing over a black background, and never walkable. It has no art of its
  * own, so it is not a material of the art contract.
  */
-export const LAYOUT_MATERIALS = ['void', 'water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet'] as const;
+export const LAYOUT_MATERIALS = ['void', 'water', 'sand', 'dirt', 'cobblestone', 'grass', 'wood', 'tile', 'carpet'] as const;
 export type LayoutMaterial = (typeof LAYOUT_MATERIALS)[number];
 
 /** `TERRAIN_WALKABLE` of artContract.ts plus void: void and water are the terrain nobody walks on. */

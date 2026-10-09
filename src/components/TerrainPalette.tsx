@@ -26,8 +26,8 @@ export const TERRAIN_MATERIAL_LABELS: Readonly<Record<LayoutMaterial, string>> =
   carpet: 'Moqueta',
 };
 
-/** Floors in drawing order, the eraser last. */
-const PALETTE_ORDER: readonly LayoutMaterial[] = [...LAYOUT_MATERIALS.filter((material) => material !== 'void'), 'void'];
+/** Floors from the highest drawing priority down; void, the lowest, is the eraser and comes last. */
+const PALETTE_ORDER: readonly LayoutMaterial[] = [...LAYOUT_MATERIALS].reverse();
 
 /** A corner of the 96px floor motif at 1:1: enough to read the texture, small enough for a grid. */
 const THUMBNAIL: PreviewFrame = { x: 0, y: 0, width: 48, height: 48 };

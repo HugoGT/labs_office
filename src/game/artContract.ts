@@ -352,7 +352,7 @@ export const WALL: WallSpec = {
  * later one is drawn over the earlier one's edge. Water is the lowest, so every
  * shore is the land's edge over the water, and carpet the highest.
  */
-export const TERRAIN_MATERIALS = ['water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet'] as const;
+export const TERRAIN_MATERIALS = ['water', 'sand', 'dirt', 'cobblestone', 'grass', 'wood', 'tile', 'carpet'] as const;
 export type TerrainMaterial = (typeof TERRAIN_MATERIALS)[number];
 
 /** Water is solid for the client and the server alike; every other material is walkable. */

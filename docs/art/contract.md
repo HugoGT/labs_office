@@ -40,7 +40,7 @@ The office's facing order (`FACINGS` in `officeProtocol.ts`: `down, up, left, ri
 
 ## Terrain (#123)
 
-The terrain is a map of materials, one per tile. Eight materials exist, listed in `TERRAIN_MATERIALS` in drawing priority: `water, grass, dirt, sand, cobblestone, wood, tile, carpet`. Where two meet, the later one is drawn over the earlier one's edge, so every shore is the land's edge over the water. `TERRAIN_WALKABLE` makes water the only impassable material. Each material is the floor piece of the same name (`terrainFloorPieceId`, for example `floor-cobblestone`), cut into transition tiles.
+The terrain is a map of materials, one per tile. Eight materials exist, listed in `TERRAIN_MATERIALS` in drawing priority: `water, sand, dirt, cobblestone, grass, wood, tile, carpet`. Where two meet, the later one is drawn over the earlier one's edge, so every shore is the land's edge over the water. `TERRAIN_WALKABLE` makes water the only impassable material. Each material is the floor piece of the same name (`terrainFloorPieceId`, for example `floor-cobblestone`), cut into transition tiles.
 
 ### Dual grid
 

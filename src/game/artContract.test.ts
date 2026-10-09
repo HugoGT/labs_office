@@ -281,7 +281,8 @@ describe('validateArtImage', () => {
 
 describe('terrain materials (#123)', () => {
   it('lists the eight block types in drawing priority, water lowest and carpet highest', () => {
-    expect(TERRAIN_MATERIALS).toEqual(['water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet']);
+    // Highest first, the order asked for: carpet, tile, wood, grass, cobblestone, dirt, sand, water.
+    expect(TERRAIN_MATERIALS).toEqual(['water', 'sand', 'dirt', 'cobblestone', 'grass', 'wood', 'tile', 'carpet']);
   });
 
   it('makes only water impassable', () => {
@@ -332,14 +333,23 @@ describe('terrain dual grid', () => {
       { material: 'water', mask: 15 },
       { material: 'sand', mask: 1 },
     ]);
-    // Nested: grass covers the corners where dirt and carpet are too, so each
+    // Nested: dirt covers the corners where grass and carpet are too, so each
     // edge blends over the material just below it instead of over water.
     expect(terrainCellLayers({ nw: 'carpet', ne: 'dirt', sw: 'grass', se: 'water' })).toEqual([
       { material: 'water', mask: 15 },
-      { material: 'grass', mask: 1 | 2 | 4 },
-      { material: 'dirt', mask: 1 | 2 },
+      { material: 'dirt', mask: 1 | 2 | 4 },
+      { material: 'grass', mask: 1 | 4 },
       { material: 'carpet', mask: 1 },
     ]);
+  });
+
+  it('draws grass over cobblestone, dirt and sand where they meet', () => {
+    for (const low of ['cobblestone', 'dirt', 'sand'] as const) {
+      expect(terrainCellLayers({ nw: 'grass', ne: low, sw: low, se: low }), low).toEqual([
+        { material: low, mask: 15 },
+        { material: 'grass', mask: 1 },
+      ]);
+    }
   });
 
   it('draws nothing for a corner without terrain (void), so the materials around it edge over the background', () => {
@@ -371,7 +381,7 @@ describe('terrain dual grid', () => {
     expect(TERRAIN_TILESET.columns).toBe(16);
     expect(TERRAIN_TILESET.rows).toBe(TERRAIN_MATERIALS.length * 9 + 1);
     expect(terrainTileIndex('water', 15, 0)).toBe(15);
-    expect(terrainTileIndex('grass', 1, 0)).toBe(9 * 16 + 1);
+    expect(terrainTileIndex('sand', 1, 0)).toBe(9 * 16 + 1);
     expect(terrainTileIndex('carpet', 15, 8)).toBe((7 * 9 + 8) * 16 + 15);
     expect(terrainDecalIndex(TERRAIN_DECALS[0]!)).toBe(TERRAIN_MATERIALS.length * 9 * 16);
     expect(TERRAIN_DECALS.length).toBeLessThanOrEqual(16);
