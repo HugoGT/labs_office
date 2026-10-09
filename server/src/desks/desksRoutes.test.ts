@@ -13,7 +13,7 @@
  *      y borra escritorios; sentarse es cosa de cada quien.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readArtPackManifest } from '../decor/artPackFile.ts';
 import { createMemoryDecor } from '../decor/memoryDecor.ts';
 import type { DirectoryUser } from '../directory/directoryPort.ts';
@@ -29,6 +29,7 @@ import {
   handleListDesks,
   handleReleaseDesk,
   handleUpdateDesk,
+  type DeskWallGuard,
   type DesksDeps,
 } from './desksRoutes.ts';
 
@@ -512,6 +513,89 @@ describe('handleUpdateDesk', () => {
 
     expect(result.status).toBe(200);
     expect((await desks.getDesk(desk.id))?.occupantId).toBe(ANA.id);
+  });
+});
+
+/**
+ * Painted walls under a desk (terrain editor): a desk on a wall could never
+ * be reached or sat at. The walls come from the injected guard, which runs
+ * the write in the terrain edit queue so no wall lands between the check and
+ * the write.
+ */
+describe('desks over painted walls', () => {
+  const WIDTH = 40;
+
+  function wallGuard(...tiles: (readonly [number, number])[]) {
+    const walls: (string | null)[] = new Array(WIDTH * 30).fill(null);
+    for (const [tx, ty] of tiles) walls[ty * WIDTH + tx] = 'wall-brick';
+    const guard: DeskWallGuard = { run: vi.fn(async (write) => write({ width: WIDTH, walls })) };
+    return guard;
+  }
+
+  it('refuses to create a desk whose 3x3 footprint covers a wall, and creates nothing', async () => {
+    const { deps, desks } = harness();
+    const walls = wallGuard([12, 7]);
+
+    const result = await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa', x: 10, y: 5 }, { ...deps, walls });
+
+    expect(result).toEqual({ status: 409, body: { error: 'desk-on-wall' } });
+    expect(await desks.listDesks()).toEqual([]);
+  });
+
+  it('creates a desk right next to a wall', async () => {
+    const { deps } = harness();
+
+    const result = await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa', x: 10, y: 5 }, { ...deps, walls: wallGuard([13, 7]) });
+
+    expect(result.status).toBe(201);
+  });
+
+  it('still answers 400 to invalid coordinates before looking at any wall', async () => {
+    const { deps } = harness();
+    const walls = wallGuard();
+
+    expect((await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa', x: 'diez', y: 5 }, { ...deps, walls })).status).toBe(400);
+    expect(walls.run).not.toHaveBeenCalled();
+  });
+
+  it('refuses to move a desk onto a wall and leaves it where it was', async () => {
+    const { deps, desks } = harness();
+    const desk = await desks.createDesk({ label: 'Mesa', x: 0, y: 0 });
+
+    const result = await handleUpdateDesk(BEARER_ADMIN, desk.id, { x: 20, y: 20 }, { ...deps, walls: wallGuard([21, 22]) });
+
+    expect(result).toEqual({ status: 409, body: { error: 'desk-on-wall' } });
+    expect(await desks.getDesk(desk.id)).toMatchObject({ x: 0, y: 0 });
+  });
+
+  it('moves a desk to a free spot through the guard', async () => {
+    const { deps, desks } = harness();
+    const desk = await desks.createDesk({ label: 'Mesa', x: 0, y: 0 });
+    const walls = wallGuard([21, 22]);
+
+    const result = await handleUpdateDesk(BEARER_ADMIN, desk.id, { x: 25, y: 20 }, { ...deps, walls });
+
+    expect(result.body).toMatchObject({ x: 25, y: 20 });
+    expect(walls.run).toHaveBeenCalledOnce();
+  });
+
+  it('renames, claims and releases without looking at the walls', async () => {
+    const { deps, desks } = harness();
+    const desk = await desks.createDesk({ label: 'Mesa', x: 20, y: 20 });
+    // A wall under the desk can only come from before this check existed:
+    // renaming or sitting at it must keep working.
+    const walls = wallGuard([21, 21]);
+
+    expect((await handleUpdateDesk(BEARER_ADMIN, desk.id, { label: 'Otra' }, { ...deps, walls })).status).toBe(200);
+    expect((await handleClaimDesk(BEARER_ANA, desk.id, { ...deps, walls })).status).toBe(200);
+    expect((await handleReleaseDesk(BEARER_ANA, { ...deps, walls })).status).toBe(200);
+    expect(walls.run).not.toHaveBeenCalled();
+  });
+
+  it('without a guard there are no walls to refuse', async () => {
+    const { deps } = harness();
+
+    expect((await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa', x: 10, y: 5 }, deps)).status).toBe(201);
   });
 });
 

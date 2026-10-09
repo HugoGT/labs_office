@@ -298,4 +298,41 @@ describe('createTerrainRuntime walls', () => {
     expect(runtime.walls()[FREE + 2]).toBe('wall-glass');
     expect(runtime.snapshot().materials[FREE]).toBe('sand');
   });
+  it('runs an exclusive task in the edit queue, with the snapshot the edits before it left', async () => {
+    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store: createMemoryTerrain() });
+    await runtime.load();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const seen: (string | null)[] = [];
+
+    const wall = runtime.setWalls([{ index: FREE, piece: 'wall-brick' }], null, NONE);
+    const task = runtime.runExclusive(async (snapshot) => {
+      seen.push(snapshot.walls[FREE] ?? null);
+      await held;
+      return 'written';
+    });
+    const erase = runtime.setWalls([{ index: FREE, piece: null }], null, NONE);
+    await wall;
+    // The edit queued after the task waits for it to finish.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(runtime.walls()[FREE]).toBe('wall-brick');
+
+    release();
+    expect(await task).toBe('written');
+    await erase;
+    expect(seen).toEqual(['wall-brick']);
+    expect(runtime.walls()[FREE]).toBeNull();
+  });
+
+  it('keeps the queue going after an exclusive task fails, and runs one without a store too', async () => {
+    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT });
+    await runtime.load();
+
+    await expect(runtime.runExclusive(async () => {
+      throw new Error('desk refused');
+    })).rejects.toThrow('desk refused');
+    expect(await runtime.runExclusive(async (snapshot) => snapshot.width)).toBe(W);
+  });
 });

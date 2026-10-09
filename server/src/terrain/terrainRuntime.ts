@@ -71,6 +71,12 @@ export interface TerrainRuntime {
    * places a wall) or a tile the static layout protects.
    */
   setWalls(edits: readonly WallEdit[], actorId: string | null, protections: () => Promise<TerrainProtections>): Promise<readonly (string | null)[]>;
+  /**
+   * Runs `task` in the edit queue with the snapshot every edit before it
+   * left, and holds later edits until it settles. A desk write uses it so no
+   * wall lands between its wall check and its save. Works without a store.
+   */
+  runExclusive<T>(task: (snapshot: TerrainSnapshot) => Promise<T>): Promise<T>;
   /** Called after each accepted edit; see `TerrainListener`. */
   subscribe(listener: TerrainListener): () => void;
 }
@@ -173,6 +179,9 @@ export function createTerrainRuntime({ layout, store, seats = BASE_MAP_SEATS }: 
     },
     setWalls(edits, actorId, protections) {
       return enqueue(() => applyWalls(edits, actorId, protections));
+    },
+    runExclusive(task) {
+      return enqueue(() => task(snapshot));
     },
     subscribe(listener) {
       listeners.add(listener);

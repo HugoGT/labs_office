@@ -2946,6 +2946,30 @@ describe('terrain routes (#123 phase 2)', () => {
     expect((await setWalls(url, [{ index: 0, piece: 'wall-lava' }])).status).toBe(400);
     await server.shutdown();
   });
+
+  it('refuses a desk created or moved onto a live wall, and a wall painted on the moved desk', async () => {
+    const desks = createMemoryDesks();
+    const { server, url } = await terrainServer({ desks, terrain: createMemoryTerrain() });
+    const { width } = server.terrain.snapshot();
+    const postDesk = (path: string, body: unknown) =>
+      fetch(`${url}${path}`, { method: 'POST', headers: BEARER, body: JSON.stringify(body) });
+    expect((await setWalls(url, [{ index: 22 * width + 67, piece: 'wall-brick' }])).status).toBe(200);
+
+    const onWall = await postDesk('/admin/desks', { label: 'Mesa A', x: 66, y: 21 });
+    expect(onWall.status).toBe(409);
+    expect(await onWall.json()).toEqual({ error: 'desk-on-wall' });
+    expect(await desks.listDesks()).toEqual([]);
+
+    const created = await postDesk('/admin/desks', { label: 'Mesa A', x: 70, y: 21 });
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string };
+    const moved = await postDesk(`/admin/desks/${id}`, { x: 65, y: 20 });
+    expect(moved.status).toBe(409);
+    expect(await moved.json()).toEqual({ error: 'desk-on-wall' });
+    expect((await postDesk(`/admin/desks/${id}`, { label: 'Mesa B' })).status).toBe(200);
+    expect(await desks.getDesk(id)).toMatchObject({ label: 'Mesa B', x: 70, y: 21 });
+    await server.shutdown();
+  });
 });
 
 /**

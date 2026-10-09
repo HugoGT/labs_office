@@ -113,11 +113,11 @@ export function createDeskAdminClient(
       baseUrl,
       getIdToken,
       notConfigured: 'desks-not-configured',
-      // Los dos 409 de estas rutas (#10, S2 3.5): `desk-overlap` (otro
-      // escritorio) y `desk-space-overlap` (una sala). `desk-taken` no esta
-      // en la lista -- lo provoca alguien cogiendo sitio desde la oficina,
-      // no el panel, y esta ruta no puede darlo.
-      conflicts: ['desk-overlap', 'desk-space-overlap'],
+      // Los 409 de estas rutas (#10, S2 3.5): `desk-overlap` (otro
+      // escritorio), `desk-space-overlap` (una sala) y `desk-on-wall` (una
+      // pared pintada). `desk-taken` no esta en la lista -- lo provoca alguien
+      // cogiendo sitio desde la oficina, no el panel, y esta ruta no puede darlo.
+      conflicts: ['desk-overlap', 'desk-space-overlap', 'desk-on-wall'],
     },
     fetchImpl,
   );

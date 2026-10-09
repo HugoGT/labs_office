@@ -161,6 +161,24 @@ describe('DeskEditorSection (#74, PR3c)', () => {
     expect(screen.getByLabelText(/Etiqueta del nuevo escritorio/)).toHaveValue('Mesa 9');
   });
 
+  it('a desk placed over a painted wall shows why it was refused', async () => {
+    const desks = fakeDesks({
+      createDesk: vi.fn(async () => Promise.reject(new AdminError('desk-on-wall'))),
+    });
+    const bridge = createOfficeBridge();
+    render(<DeskEditorSection bridge={bridge} desks={desks} spaces={fakeSpaces()} refreshDesks={vi.fn()} refreshSpaces={vi.fn()} />);
+    await userEvent.click(screen.getByRole('button', { name: /Editar escritorios/ }));
+    await screen.findByText('Mesa 4');
+
+    await userEvent.type(screen.getByLabelText(/Etiqueta del nuevo escritorio/), 'Mesa 9');
+    await userEvent.click(screen.getByRole('button', { name: /Colocar nuevo escritorio/ }));
+    act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
+
+    expect(
+      await screen.findByText('Hay una pared en ese lugar: quítala o elige otro sitio para el escritorio.'),
+    ).toBeInTheDocument();
+  });
+
   it('#105: la etiqueta y su input viven en su propio contenedor, no sueltos en el form', async () => {
     const bridge = createOfficeBridge();
     render(<DeskEditorSection bridge={bridge} desks={fakeDesks()} spaces={fakeSpaces()} refreshDesks={vi.fn()} refreshSpaces={vi.fn()} />);

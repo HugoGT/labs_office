@@ -141,6 +141,11 @@ export type AdminErrorCode =
    */
   | 'desk-space-overlap'
   /**
+   * A painted wall stands under the desk's 3x3 footprint (terrain editor).
+   * Its own code: it is fixed by removing the wall or picking another spot.
+   */
+  | 'desk-on-wall'
+  /**
    * Dos salas pisandose (#10 + #12, S3a). Es su propio codigo y no
    * `desk-overlap` reciclado porque las dos filas con las que puede chocar
    * una sala son de otra naturaleza -- ver `spacesRoutes.ts`.

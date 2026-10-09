@@ -38,6 +38,8 @@ Walls are stored per tile in `terrain_walls` (`tile_index`, `piece_id`, `updated
 
 A wall is refused with `terrain-under-placement` on a desk (its 3 × 3 footprint), a base chair, protected static furniture or the spawn area. Rooms do not refuse walls: walls inside and around rooms are the point. Players never refuse a wall; the room relocates whoever a wall lands on exactly like after a block edit. Stored walls on a protected static tile are ignored at startup without rewriting the row.
 
+Desks refuse walls too: creating a desk, or moving one, whose 3 × 3 footprint covers a wall answers 409 `desk-on-wall` ("Hay una pared en ese lugar..."). The check runs in the terrain edit queue, so a wall painted at the same moment lands either before it (and refuses the desk) or after it (and is refused on the desk). Renaming, claiming and releasing a desk never look at walls.
+
 The live walls are part of the terrain snapshot (`terrainSnapshot(layout, blocks, walls)`), so the server refuses moves into them and the client's Arcade colliders, `grid.solid` and pathfinding see them. The room replicates them as `OfficeState.terrainWalls`, a sparse `<tile>:<material>` list (`encodeTerrainWalls`). The sidebar sends consecutive pending wall paints as one request, draws them as pending until the room replicates them, and never collides with a pending wall.
 
 Existing placements are never removed to make an edit succeed. Move or remove them separately through their normal authorized tools. Terrain edits do not carve paths automatically through stored rooms or collisions.

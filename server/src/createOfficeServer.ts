@@ -1157,7 +1157,9 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
 
       // `decor` only checks a chosen material at creation (art migration,
       // step 7); without it a desk still gets the pack default.
-      run(req, { directory, desks, auth, identityAdmin, decor })
+      // `walls`: a created or moved desk is checked against the live walls
+      // inside the terrain edit queue, so no wall edit lands in between.
+      run(req, { directory, desks, auth, identityAdmin, decor, walls: { run: (write) => terrain.runExclusive(write) } })
         .then((result) => {
           // Adapter promises resolve after COMMIT; failures never invalidate.
           if (changesDesks && result.status >= 200 && result.status < 300) notifyDesksChanged();
