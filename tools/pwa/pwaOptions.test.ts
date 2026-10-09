@@ -14,8 +14,8 @@ const read = (path: string) => readFileSync(new URL(`../../${path}`, import.meta
 describe('web app manifest', () => {
   it('describes an installable, standalone Spanish app rooted at /', () => {
     expect(PWA_MANIFEST).toMatchObject({
-      name: 'Oficina Virtual',
-      short_name: 'Oficina',
+      name: 'Labs',
+      short_name: 'Labs',
       lang: 'es',
       id: '/',
       start_url: '/',

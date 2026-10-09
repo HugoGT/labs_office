@@ -32,6 +32,19 @@ describe('PWA icons (#13)', () => {
     expect(Buffer.compare(committed, files.get(file) as Uint8Array)).toBe(0);
   });
 
+  it('draws the logo: white ink on its black background', () => {
+    for (const icon of PWA_ICONS) {
+      const image = decodePng(files.get(icon.file) as Uint8Array);
+      // The stem of the "c" crosses the middle row at 40% of the width.
+      const ink = ((image.height / 2) * image.width + Math.round(image.width * 0.4)) * 4;
+      expect(Math.min(image.data[ink], image.data[ink + 1], image.data[ink + 2])).toBeGreaterThan(200);
+      // Inside the "c", between its stem and its mouth, stays background.
+      const hole = ((image.height / 2) * image.width + Math.round(image.width * 0.5)) * 4;
+      expect([...image.data.slice(hole, hole + 4)]).toEqual([0, 0, 0, 255]);
+    }
+    expect(ICON_BACKGROUND).toEqual([0, 0, 0]);
+  });
+
   it('keeps the maskable icon full-bleed and its drawing inside the safe zone', () => {
     const icon = PWA_ICONS.find((candidate) => candidate.purpose === 'maskable');
     const image = decodePng(files.get(icon?.file as string) as Uint8Array);
