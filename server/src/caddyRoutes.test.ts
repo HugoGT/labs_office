@@ -65,11 +65,21 @@ function isCoveredBy(route: string, handle: string): boolean {
   return route === handle;
 }
 
+/**
+ * Routes that exist only in the local auth mode (`localAuth/localAuthRoutes.ts`)
+ * and must never be routed by the deployed Caddyfile: the opposite guarantee.
+ */
+const LOCAL_ONLY_ROUTES = ['/auth/local/sign-in'];
+
 describe('Caddy route coverage (#73)', () => {
   // `/admin/*` is already covered by one wildcard handle and grows on its
   // own; this guard is about routes living outside it.
   const serverRoutes = [
-    ...new Set(extractServerRoutes(serverSource()).filter((route) => !route.startsWith('/admin'))),
+    ...new Set(
+      extractServerRoutes(serverSource()).filter(
+        (route) => !route.startsWith('/admin') && !LOCAL_ONLY_ROUTES.includes(route),
+      ),
+    ),
   ];
   const caddyHandles = extractCaddyHandles(caddyfile());
 
@@ -82,6 +92,11 @@ describe('Caddy route coverage (#73)', () => {
     expect(covered, `no Caddy handle covers ${route} (handles: ${caddyHandles.join(', ')})`).toBe(
       true,
     );
+  });
+
+  it.each(LOCAL_ONLY_ROUTES)('never routes the local-only %s to the backend', (route) => {
+    expect(extractServerRoutes(serverSource())).toContain(route);
+    expect(caddyHandles.some((handle) => isCoveredBy(route, handle))).toBe(false);
   });
 
   it('routes /assets only as an exact match, never as a prefix', () => {

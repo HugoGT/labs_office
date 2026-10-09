@@ -86,7 +86,11 @@ import {
   handleUpdateSpace,
   type SpacesDeps,
 } from './spaces/spacesRoutes.ts';
-import { resolveAuthConfig } from './authConfig.ts';
+import { resolveServerAuthConfig, type ServerAuthConfig } from './authConfig.ts';
+import type { LocalAuthConfig } from './localAuth/localAuthConfig.ts';
+import { createLocalCredentialCheck, handleLocalSignIn } from './localAuth/localAuthRoutes.ts';
+import { createLocalIdTokenVerifier, createLocalTokenIssuer } from './localAuth/localAuthToken.ts';
+import { createLocalIdentityAdmin } from './localAuth/localIdentityAdmin.ts';
 import type { UserDirectory } from './directory/directoryPort.ts';
 import { directoryFromEnv, type DirectoryRuntime } from './directory/fromEnv.ts';
 import { createLiveSessionRegistry, type LiveSessionRegistry } from './liveSessions.ts';
@@ -268,13 +272,27 @@ export interface OfficeServer {
 }
 
 /**
- * Lee la configuracion de auth del entorno y construye el verificador, o
- * `undefined` si no hay projectId. Separado de `createOfficeServer` para que el
- * "sin config, sin auth" se lea de un vistazo.
+ * Builds the verifier for the auth mode, or `undefined` without one. Separate
+ * from `createOfficeServer` so "no config, no auth" reads at a glance.
  */
-function authVerifierFromEnv(env: { FIREBASE_PROJECT_ID?: string }): IdTokenVerifier | undefined {
-  const config = resolveAuthConfig(env);
-  return config ? createIdTokenVerifier(config) : undefined;
+function authVerifierFor(config: ServerAuthConfig | null): IdTokenVerifier | undefined {
+  if (config === null) return undefined;
+  return config.kind === 'local' ? createLocalIdTokenVerifier(config) : createIdTokenVerifier(config);
+}
+
+/**
+ * Local auth (`localAuth/localAuthConfig.ts`) is for a developer's machine and
+ * test environments only. Said on every start, so a deployment that somehow got
+ * it is noticed in the first log line anyone reads.
+ */
+export function warnLocalAuth(
+  config: LocalAuthConfig,
+  warn: (message: string) => void = (message) => console.warn(message),
+): void {
+  warn(
+    `[auth] LOCAL AUTH MODE: ${config.users.size} account(s) from LOCAL_AUTH_USERS, ` +
+      'tokens signed with LOCAL_AUTH_SECRET. For local and test use only, never deploy it.',
+  );
 }
 
 export interface OfficeServerOverrides {
@@ -288,6 +306,13 @@ export interface OfficeServerOverrides {
    * justo lo que `liveSessions.ts` evita al no ser un singleton de modulo.
    */
   auth?: IdTokenVerifier | null;
+  /**
+   * Turns the local auth mode on (`localAuth/localAuthConfig.ts`) instead of
+   * reading it from `process.env`: its verifier, `POST /auth/local/sign-in` and
+   * its `IdentityAdmin`. `auth` and `identityAdmin`, when also given, still win
+   * for their own piece. `null` forces it off.
+   */
+  localAuth?: LocalAuthConfig | null;
   /**
    * Sustituye el directorio que saldria de `process.env` (#24). `null` fuerza
    * el modo sin directorio. Existe por la misma razon que el de arriba, y por
@@ -580,10 +605,24 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
    * `overrides.auth` gana sobre el entorno, incluido un `null` explicito para
    * pedir el modo abierto. Sin override se lee `process.env` una sola vez aqui.
    */
+  // The environment is read only when no test override names the auth mode,
+  // and it throws `AuthConfigError` on a configuration it cannot honor (both
+  // modes at once, a malformed LOCAL_AUTH_USERS): the server refuses to start.
+  const envAuthConfig =
+    overrides?.auth === undefined && overrides?.localAuth === undefined
+      ? resolveServerAuthConfig(process.env)
+      : null;
+  const localAuth: LocalAuthConfig | undefined =
+    overrides?.localAuth !== undefined
+      ? (overrides.localAuth ?? undefined)
+      : envAuthConfig?.kind === 'local'
+        ? envAuthConfig
+        : undefined;
+  if (localAuth) warnLocalAuth(localAuth);
   const auth =
     overrides?.auth !== undefined
       ? (overrides.auth ?? undefined)
-      : authVerifierFromEnv(process.env);
+      : authVerifierFor(localAuth ? { kind: 'local', ...localAuth } : envAuthConfig);
 
   /**
    * Mismo patron que `auth`, con una pieza mas: del entorno sale ademas la
@@ -660,7 +699,32 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   const identityAdmin =
     overrides?.identityAdmin !== undefined
       ? overrides.identityAdmin
-      : identityAdminFromEnv(process.env);
+      : localAuth
+        ? // Local accounts live in LOCAL_AUTH_USERS, never in Identity Platform.
+          createLocalIdentityAdmin()
+        : identityAdminFromEnv(process.env);
+
+  /**
+   * The local auth login (`localAuth/localAuthRoutes.ts`). Registered only in
+   * that mode, so with Firebase or without auth the path is a plain 404. Never
+   * routed by the deployed Caddyfile on purpose: it has no `handle /auth/*`.
+   */
+  if (localAuth) {
+    const signInDeps = {
+      checkCredentials: createLocalCredentialCheck(localAuth.users),
+      issuer: createLocalTokenIssuer(localAuth),
+    };
+    app.post('/auth/local/sign-in', (req, res) => {
+      handleLocalSignIn(req.body, signInDeps)
+        .then((result) => {
+          res.status(result.status).json(result.body);
+        })
+        .catch(() => {
+          console.error('[auth] local sign-in failed unexpectedly');
+          res.status(500).json({ error: 'internal' });
+        });
+    });
+  }
 
   /**
    * Adaptador HTTP de las rutas de administracion. Los handlers son puros y

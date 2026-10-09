@@ -51,6 +51,8 @@ import type { EgressPort } from './recording/egressPort.ts';
 import type { RecordingStoragePort } from './recording/recordingStorage.ts';
 import type { OfficeState } from './schema.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
+import { AuthConfigError } from './authConfigError.ts';
+import type { LocalAuthConfig } from './localAuth/localAuthConfig.ts';
 
 process.setMaxListeners(100);
 
@@ -3031,5 +3033,119 @@ describe('collision routes', () => {
     // The middle of the 3x3 area at tile (21, 50), as a body center.
     await waitFor(() => isPositionBlocked(server.collisions.rects(), 22 * 32 + 16, 51 * 32 + 5));
     await server.shutdown();
+  });
+});
+
+describe('local auth mode', () => {
+  const LOCAL: LocalAuthConfig = {
+    users: new Map([
+      ['admin@local.test', 'cambiame'],
+      ['ana@local.test', 'otra'],
+    ]),
+    secret: 'a-local-secret-that-is-long-enough-0123456789',
+  };
+
+  async function localServer() {
+    const directory = createMemoryDirectory({ bootstrapSuperadminEmail: 'admin@local.test' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const local = createOfficeServer({ localAuth: LOCAL, directory });
+    const port = await local.listen(0);
+    return { local, url: `http://localhost:${port}`, ws: `ws://localhost:${port}`, warn, directory };
+  }
+
+  /** Signs in and joins the room, which is where the directory resolves the login. */
+  async function enter(url: string, ws: string, email: string, password: string): Promise<string> {
+    const { token } = (await (await signIn(url, { email, password })).json()) as { token: string };
+    const room = await new Client(ws).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token });
+    openRooms.push(room);
+    return token;
+  }
+
+  function signIn(url: string, body: unknown) {
+    return fetch(`${url}/auth/local/sign-in`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it('signs in, and the token joins the room and opens the dashboard: the bootstrap email becomes superadmin', async () => {
+    const { local, url, ws } = await localServer();
+
+    const res = await signIn(url, { email: 'Admin@Local.Test', password: 'cambiame' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ token: expect.any(String) });
+    const token = await enter(url, ws, 'Admin@Local.Test', 'cambiame');
+
+    const session = await fetch(`${url}/admin/session`, { headers: { Authorization: `Bearer ${token}` } });
+    expect(session.status).toBe(200);
+    expect(await session.json()).toMatchObject({ role: 'superadmin', email: 'admin@local.test' });
+    await local.shutdown();
+  });
+
+  it('answers the same 401 for a wrong password and an unknown email', async () => {
+    const { local, url } = await localServer();
+
+    const wrong = await signIn(url, { email: 'ana@local.test', password: 'nope' });
+    const unknown = await signIn(url, { email: 'nadie@local.test', password: 'nope' });
+
+    expect(wrong.status).toBe(401);
+    expect(await wrong.json()).toEqual({ error: 'invalid-credentials' });
+    expect(unknown.status).toBe(401);
+    expect(await unknown.json()).toEqual({ error: 'invalid-credentials' });
+    await local.shutdown();
+  });
+
+  it('reports auth enabled in /health and warns loudly at startup', async () => {
+    const { local, url, warn } = await localServer();
+
+    expect(await (await fetch(`${url}/health`)).json()).toMatchObject({ auth: 'enabled' });
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/LOCAL AUTH/));
+    await local.shutdown();
+  });
+
+  it('provisions dashboard accounts with the uid the local token carries', async () => {
+    const { local, url, ws, directory } = await localServer();
+    const token = await enter(url, ws, 'admin@local.test', 'cambiame');
+
+    const created = await fetch(`${url}/admin/users`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'ana@local.test', role: 'employee' }),
+    });
+    expect(created.status).toBe(201);
+    expect(await created.json()).toMatchObject({ outcome: 'created', emailSent: false });
+    expect((await directory.findByEmail('ana@local.test'))?.uid).toBe('local:ana@local.test');
+    await local.shutdown();
+  });
+
+  it('has no sign-in route without local auth', async () => {
+    const res = await signIn(baseUrl, { email: 'admin@local.test', password: 'cambiame' });
+    expect(res.status).toBe(404);
+  });
+
+  it('refuses to build the server with Firebase and local auth both in the environment', () => {
+    vi.stubEnv('FIREBASE_PROJECT_ID', 'oficina-virtual');
+    vi.stubEnv('LOCAL_AUTH_USERS', 'admin@local.test:cambiame');
+    vi.stubEnv('LOCAL_AUTH_SECRET', LOCAL.secret);
+
+    expect(() => createOfficeServer()).toThrow(AuthConfigError);
+  });
+
+  it('builds the local verifier and route from the environment', async () => {
+    vi.stubEnv('LOCAL_AUTH_USERS', 'admin@local.test:cambiame');
+    vi.stubEnv('LOCAL_AUTH_SECRET', LOCAL.secret);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const local = createOfficeServer({ directory: null });
+    const port = await local.listen(0);
+
+    const res = await signIn(`http://localhost:${port}`, { email: 'admin@local.test', password: 'cambiame' });
+    expect(res.status).toBe(200);
+    await local.shutdown();
   });
 });
