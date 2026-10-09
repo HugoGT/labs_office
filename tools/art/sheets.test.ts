@@ -14,8 +14,12 @@ import {
   TERRAIN_DECALS,
   TERRAIN_MASKS,
   TERRAIN_MATERIALS,
+  TERRAIN_ORGANIC_MATERIALS,
   TERRAIN_PHASES,
   TERRAIN_TILESET,
+  TERRAIN_VARIANTS,
+  TERRAIN_VOID_COLOR,
+  TERRAIN_VOID_EDGE_COMBOS,
   WALK_DIRECTIONS,
   WALL,
   bridgeFrameIndex,
@@ -25,6 +29,8 @@ import {
   terrainBankIndex,
   terrainDecalIndex,
   terrainTileIndex,
+  terrainVoidCapIndex,
+  terrainVoidEdgeIndex,
   validateArtImage,
   wallFrameIndex,
   type TerrainMaterial,
@@ -46,7 +52,7 @@ import { composeWalls } from './domain/wallRenderer.ts';
 import { crop } from './imageOps.ts';
 import { bridgeSprite, hedgeSprite, PLANT_KINDS, plantSprite, TREE_KINDS, treeSprite } from './domain/props.ts';
 import { ROOM_TABLES, roomTableSprite } from './domain/tables.ts';
-import { decalTile, terrainBankTile, terrainEdgeTile } from './domain/terrainTiles.ts';
+import { decalTile, TERRAIN_EDGES, terrainBankTile, terrainEdgeTile, terrainVoidCapTile, terrainVoidEdgeTile } from './domain/terrainTiles.ts';
 import {
   bridgeSheet,
   chairSheet,
@@ -191,13 +197,20 @@ describe('terrain tileset sheet', () => {
     expect(validateArtImage('terrain-tileset', sheet)).toEqual([]);
   });
 
-  it('holds each edge tile at its contract index, mask 0 empty, then the decals', () => {
+  it('holds each edge tile at its contract index, mask 0 empty, then the decals, the banks and the void caps', () => {
     const tile = (index: number): PixelBuffer => tileOf(sheet, index, TERRAIN_TILESET.columns, ART_TILE, ART_TILE);
     for (const material of TERRAIN_MATERIALS) {
+      const organic = TERRAIN_EDGES[material].style === 'organic';
       for (let phase = 0; phase < TERRAIN_PHASES; phase += 1) {
-        expect(tile(terrainTileIndex(material, 15, phase) - 15).countOpaque(), `${material} ${phase} mask 0`).toBe(0);
-        for (const mask of [1, 6, 9, 15]) {
-          expect(pixels(tile(terrainTileIndex(material, mask, phase))), `${material} ${mask} ${phase}`).toEqual(pixels(terrainEdgeTile(material, mask, phase)));
+        for (let variant = 0; variant < TERRAIN_VARIANTS; variant += 1) {
+          const label = `${material} ${phase} variant ${variant}`;
+          expect(tile(terrainTileIndex(material, 15, phase, variant) - 15).countOpaque(), `${label} mask 0`).toBe(0);
+          for (const mask of [1, 6, 9, 15]) {
+            const drawn = tile(terrainTileIndex(material, mask, phase, variant));
+            // Built floors only fill variant 0: their square edges have no other shape.
+            if (organic || variant === 0) expect(pixels(drawn), `${label} mask ${mask}`).toEqual(pixels(terrainEdgeTile(material, mask, phase, variant)));
+            else expect(drawn.countOpaque(), `${label} mask ${mask}`).toBe(0);
+          }
         }
       }
     }
@@ -207,6 +220,74 @@ describe('terrain tileset sheet', () => {
     }
     expect(tile(terrainBankIndex(1) - 1).countOpaque(), 'bank mask 0').toBe(0);
     for (let mask = 1; mask < TERRAIN_MASKS; mask += 1) expect(pixels(tile(terrainBankIndex(mask))), `bank ${mask}`).toEqual(pixels(terrainBankTile(mask)));
+    expect(tile(terrainVoidCapIndex(1) - 1).countOpaque(), 'void cap mask 0').toBe(0);
+    for (let mask = 1; mask < TERRAIN_MASKS; mask += 1) expect(pixels(tile(terrainVoidCapIndex(mask))), `void cap ${mask}`).toEqual(pixels(terrainVoidCapTile(mask)));
+    for (const material of TERRAIN_ORGANIC_MATERIALS) {
+      for (const phase of [0, 4, 8]) {
+        for (const { mask, voidMask } of TERRAIN_VOID_EDGE_COMBOS) {
+          expect(pixels(tile(terrainVoidEdgeIndex(material, mask, voidMask, phase))), `${material} ${mask}/${voidMask} ${phase}`).toEqual(
+            pixels(terrainVoidEdgeTile(material, mask, voidMask, phase)),
+          );
+        }
+      }
+    }
+    // The last row past the void edge tiles stays empty.
+    const used = TERRAIN_ORGANIC_MATERIALS.length * TERRAIN_PHASES * TERRAIN_VOID_EDGE_COMBOS.length;
+    const firstFree = terrainVoidEdgeIndex('water', TERRAIN_VOID_EDGE_COMBOS[0]!.mask, TERRAIN_VOID_EDGE_COMBOS[0]!.voidMask, 0) + used;
+    for (let index = firstFree; index < TERRAIN_TILESET.rows * TERRAIN_TILESET.columns; index += 1) expect(tile(index).countOpaque(), `${index}`).toBe(0);
+  });
+
+  it('meets the void line square where a shore runs into the void: no trace of the higher material beside the cap', () => {
+    // A 2x2 map whose cell (1, 1) holds the four tiles; `lower` repaints the higher material as
+    // the lower one, so any pixel that differs in the checked strip comes from the higher one.
+    const key: Record<string, TerrainMaterial | null> = { W: 'water', G: 'grass', O: 'wood', V: null };
+    const render = (rows: readonly string[]): PixelBuffer => terrainLayerImage(sheet, 2, 2, (tx, ty) => key[rows[ty]![tx]!]!);
+    const strip = (image: PixelBuffer, x: number, top: number, bottom: number): string[] =>
+      Array.from({ length: bottom - top }, (_, i) => pixels(crop(image, x, top + i, 1, 1)).join());
+    // nw void, ne water, sw grass, se wood: the void line is x = 32 above y = 32, water on its right.
+    let [image, lower] = [render(['VW', 'GO']), render(['VW', 'WO'])];
+    for (const x of [32, 33]) expect(strip(image, x, 0, 32), `example 1, column ${x}`).toEqual(strip(lower, x, 0, 32));
+    // nw grass, ne wood, sw void, se water: the void line is x = 32 below y = 32, water on its right.
+    [image, lower] = [render(['GO', 'VW']), render(['WO', 'VW'])];
+    for (const x of [32, 33]) expect(strip(image, x, 32, 64), `example 2, column ${x}`).toEqual(strip(lower, x, 32, 64));
+  });
+
+  it('edges every material straight on the tile line against the void', () => {
+    // V is void: a water pond with a grass shore and a sand beach, cut by the void on the east.
+    const rows = ['WWGV', 'WSGV', 'GGGV', 'VVVV'];
+    const key: Record<string, TerrainMaterial | null> = { W: 'water', G: 'grass', S: 'sand', V: null };
+    const image = terrainLayerImage(sheet, 4, 4, (tx, ty) => key[rows[ty]![tx]!]!);
+    const black = [(TERRAIN_VOID_COLOR >> 16) & 0xff, (TERRAIN_VOID_COLOR >> 8) & 0xff, TERRAIN_VOID_COLOR & 0xff, 255].join();
+    const at = (x: number, y: number): string => pixels(crop(image, x, y, 1, 1)).join();
+    for (let y = 0; y < image.height; y += 1) {
+      for (let x = 0; x < image.width; x += 1) {
+        const voided = rows[Math.floor(y / ART_TILE)]![Math.floor(x / ART_TILE)] === 'V';
+        // Void tiles show the void color, painted by a cap or the background where no layer draws;
+        // terrain tiles are opaque and never void color.
+        if (voided) expect([black, '0,0,0,0'], `${x},${y}`).toContain(at(x, y));
+        else {
+          expect(image.alphaAt(x, y), `${x},${y}`).toBe(255);
+          expect(at(x, y), `${x},${y}`).not.toBe(black);
+        }
+      }
+    }
+  });
+
+  it('gives a long shore a different curve on every block: the edge no longer repeats with the motif', () => {
+    // Grass over water along a straight row: with one edge shape per mask and phase, the shore
+    // repeated every 3 cells (96px), so every 9x9 block side drew the same curve.
+    const width = 36;
+    const image = terrainLayerImage(sheet, width, 2, (_tx, ty) => (ty === 0 ? 'grass' : 'water'));
+    const lawn = terrainLayerImage(sheet, width, 2, () => 'grass');
+    // The first row, per column, where the shore's rim departs from plain grass.
+    const shore = (x: number): number => {
+      let y = 0;
+      while (y < image.height && pixels(crop(image, x, y, 1, 1)).join() === pixels(crop(lawn, x, y, 1, 1)).join()) y += 1;
+      return y;
+    };
+    const curve = (fromTile: number): number[] => Array.from({ length: 3 * ART_TILE }, (_, i) => shore(fromTile * ART_TILE + i));
+    const blocks = [0, 9, 18, 27].map(curve);
+    for (let a = 0; a < blocks.length; a += 1) for (let b = a + 1; b < blocks.length; b += 1) expect(blocks[a], `blocks ${a} and ${b}`).not.toEqual(blocks[b]);
   });
 
   it('shades water at the foot of a built floor, and never a floor at the foot of another', () => {

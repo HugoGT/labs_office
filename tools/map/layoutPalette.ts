@@ -1,4 +1,4 @@
-import { ART_TILE, TERRAIN_DECALS, TERRAIN_MATERIALS, terrainDecalIndex, terrainTileIndex, type TerrainMaterial, type RgbaImage } from '../../src/game/artContract.ts';
+import { ART_TILE, TERRAIN_DECALS, TERRAIN_MATERIALS, TERRAIN_VOID_COLOR, terrainDecalIndex, terrainTileIndex, type TerrainMaterial, type RgbaImage } from '../../src/game/artContract.ts';
 import { PixelBuffer, rgba } from '../art/domain/pixelBuffer.ts';
 import { decodePng } from '../../server/src/assets/pngCodec.ts';
 
@@ -8,7 +8,7 @@ export const PALETTE_PATH = 'src/game/maps/layout-palette.png';
 export const LAYOUT_PALETTE: readonly string[] = [...TERRAIN_MATERIALS, 'wall-brick', 'wall-stone', 'wall-plaster', 'wall-glass', 'hedge-boxwood', ...TERRAIN_DECALS, 'void'];
 
 /** The void tile: the solid black the office draws behind its terrain. */
-const VOID_RGBA = rgba(0, 0, 0);
+const VOID_RGBA = rgba((TERRAIN_VOID_COLOR >> 16) & 0xff, (TERRAIN_VOID_COLOR >> 8) & 0xff, TERRAIN_VOID_COLOR & 0xff);
 
 function toBuffer(image: RgbaImage): PixelBuffer {
   return new PixelBuffer(image.width, image.height, new Uint8ClampedArray(image.data));

@@ -95,6 +95,22 @@ describe('TerrainEditorSection', () => {
     expect(screen.getByRole('button', { name: 'Vacío' })).toHaveAttribute('aria-pressed', 'false');
   });
 
+  it('leaves like «Salir» on an Escape with nothing picked', async () => {
+    const onExit = vi.fn();
+    const onEditingChange = vi.fn();
+    renderSection({ onExit, onEditingChange });
+    await open();
+    await userEvent.click(screen.getByRole('button', { name: 'Ladrillo' }));
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.getByRole('heading', { name: 'Terreno' })).toBeInTheDocument();
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('heading', { name: 'Terreno' })).not.toBeInTheDocument();
+    expect(onEditingChange).toHaveBeenLastCalledWith(false);
+    expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
   it('shows the reason a server refusal gives', async () => {
     const terrain: TerrainAdminPort = {
       setBlocks: vi.fn(),

@@ -16,8 +16,11 @@ import {
   TERRAIN_LAYER_ORIGIN,
   TERRAIN_MASKS,
   TERRAIN_MATERIALS,
+  TERRAIN_ORGANIC_MATERIALS,
   TERRAIN_PHASES,
   TERRAIN_TILESET,
+  TERRAIN_VARIANTS,
+  TERRAIN_VOID_EDGE_COMBOS,
   WALL,
   bridgeFrameIndex,
   facingColumn,
@@ -27,6 +30,9 @@ import {
   terrainDecalIndex,
   terrainLayerData,
   terrainTileIndex,
+  terrainVoidCapIndex,
+  terrainVoidEdgeIndex,
+  isTerrainBuiltFloor,
   wallBodyRect,
   wallFrameIndex,
   wallJointRect,
@@ -41,7 +47,7 @@ import { PixelBuffer } from './domain/pixelBuffer.ts';
 import { bridgeSprite, hedgeSprite, PLANT_KINDS, plantSprite, TREE_KINDS, treeSprite, type PlantKind, type TreeKind } from './domain/props.ts';
 import { buildCharacterSprites, type CharacterSprites } from './domain/spriteSheet.ts';
 import { ROOM_TABLES, roomTableSprite, TABLE_MATERIALS, tableSprite, type RoomTable, type TableMaterial } from './domain/tables.ts';
-import { decalTile, terrainBankTile, terrainEdgeTile } from './domain/terrainTiles.ts';
+import { decalTile, terrainBankTile, terrainEdgeTile, terrainVoidCapTile, terrainVoidEdgeTile } from './domain/terrainTiles.ts';
 import { TERRAINS, terrainTile, type Terrain } from './domain/tiles.ts';
 import type { WallGroup } from './domain/wallGeometry.ts';
 import { WALL_MATERIALS, type WallMaterial } from './domain/wallMap.ts';
@@ -141,17 +147,37 @@ export function wallLayer(sheet: PixelBuffer, group: WallGroup): { readonly imag
 
 // --- Terrain -----------------------------------------------------------------------------------
 
-/** Every terrain edge tile, decal and water bank at its `terrainTileIndex` / `terrainDecalIndex` / `terrainBankIndex`; mask 0 stays empty. */
+/**
+ * Every terrain edge tile, decal, water bank, void cap and void edge tile at its
+ * `terrainTileIndex` / `terrainDecalIndex` / `terrainBankIndex` / `terrainVoidCapIndex` /
+ * `terrainVoidEdgeIndex`; mask 0 stays empty, and so do the built floors' variants past 0, which
+ * `terrainLayerData` never asks for.
+ */
 export function terrainTilesetSheet(): PixelBuffer {
   const sheet = blankSheet(TERRAIN_TILESET);
   const at = (index: number): [number, number] => [(index % TERRAIN_TILESET.columns) * ART_TILE, Math.floor(index / TERRAIN_TILESET.columns) * ART_TILE];
   for (const material of TERRAIN_MATERIALS) {
+    const variants = isTerrainBuiltFloor(material) ? 1 : TERRAIN_VARIANTS;
     for (let phase = 0; phase < TERRAIN_PHASES; phase += 1) {
-      for (let mask = 1; mask < TERRAIN_MASKS; mask += 1) place(sheet, terrainEdgeTile(material, mask, phase), ...at(terrainTileIndex(material, mask, phase)));
+      for (let variant = 0; variant < variants; variant += 1) {
+        for (let mask = 1; mask < TERRAIN_MASKS; mask += 1) {
+          place(sheet, terrainEdgeTile(material, mask, phase, variant), ...at(terrainTileIndex(material, mask, phase, variant)));
+        }
+      }
     }
   }
   for (const decal of TERRAIN_DECALS) place(sheet, decalTile(decal), ...at(terrainDecalIndex(decal)));
-  for (let mask = 1; mask < TERRAIN_MASKS; mask += 1) place(sheet, terrainBankTile(mask), ...at(terrainBankIndex(mask)));
+  for (let mask = 1; mask < TERRAIN_MASKS; mask += 1) {
+    place(sheet, terrainBankTile(mask), ...at(terrainBankIndex(mask)));
+    place(sheet, terrainVoidCapTile(mask), ...at(terrainVoidCapIndex(mask)));
+  }
+  for (const material of TERRAIN_ORGANIC_MATERIALS) {
+    for (let phase = 0; phase < TERRAIN_PHASES; phase += 1) {
+      for (const { mask, voidMask } of TERRAIN_VOID_EDGE_COMBOS) {
+        place(sheet, terrainVoidEdgeTile(material, mask, voidMask, phase), ...at(terrainVoidEdgeIndex(material, mask, voidMask, phase)));
+      }
+    }
+  }
   return sheet;
 }
 
@@ -160,7 +186,7 @@ export function terrainTilesetSheet(): PixelBuffer {
  * `terrainLayerData` bottom first, each cell at TERRAIN_LAYER_ORIGIN plus its position, composited
  * over the one below and cropped to the map.
  */
-export function terrainLayerImage(tileset: PixelBuffer, width: number, height: number, terrainAt: (tx: number, ty: number) => TerrainMaterial): PixelBuffer {
+export function terrainLayerImage(tileset: PixelBuffer, width: number, height: number, terrainAt: (tx: number, ty: number) => TerrainMaterial | null): PixelBuffer {
   const image = new PixelBuffer(width * ART_TILE, height * ART_TILE);
   for (const layer of terrainLayerData(width, height, terrainAt)) {
     layer.forEach((row, cy) =>
