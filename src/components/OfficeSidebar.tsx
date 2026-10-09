@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type { Role } from '../dashboard/adminPort';
 import type { ArtContributionPort } from '../dashboard/artContributionPort';
 import type { AssetAdminPort } from '../dashboard/assetAdminPort';
@@ -119,6 +119,9 @@ export function OfficeSidebar({
   const [openPanel, setOpenPanel] = useState<'personalize' | 'people' | null>(null);
   const [query, setQuery] = useState('');
   const [section, setSection] = useState<PersonalizeSection | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const personalizeToggleRef = useRef<HTMLButtonElement>(null);
+  const peopleToggleRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (forceCollapsed) {
@@ -173,8 +176,25 @@ export function OfficeSidebar({
     setSection(null);
   }
 
+  useEffect(() => {
+    // A map editor owns Escape while it holds the map (a picked brush, a draft).
+    if (openPanel === null || layoutSection !== null) return undefined;
+    const toggle = openPanel === 'people' ? peopleToggleRef : personalizeToggleRef;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      // Focus inside the closing panel would be lost with it; elsewhere (the map) it stays put.
+      const hadFocus = rootRef.current?.contains(document.activeElement) ?? false;
+      setOpenPanel(null);
+      setSection(null);
+      if (hadFocus) toggle.current?.focus();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [openPanel, layoutSection]);
+
   return (
     <div
+      ref={rootRef}
       role="complementary"
       aria-label="Personas"
       className={openPanel !== null ? `${styles.sidebar} ${styles.expanded}` : styles.sidebar}
@@ -185,6 +205,7 @@ export function OfficeSidebar({
       }}
     >
       <button
+        ref={personalizeToggleRef}
         type="button"
         className={styles.toggle}
         aria-expanded={openPanel === 'personalize'}
@@ -243,6 +264,7 @@ export function OfficeSidebar({
         </div>
       )}
       <button
+        ref={peopleToggleRef}
         type="button"
         className={styles.toggle}
         aria-expanded={openPanel === 'people'}
