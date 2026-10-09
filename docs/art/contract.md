@@ -24,7 +24,7 @@ The executable source of truth is `src/game/artContract.ts` (`ART_CONTRACT_VERSI
 | `desk` | 64x64 | 4 x 1 | 256x64 | columns `up, down, left, right` | floor under the middle (32, 40) | 2x1 up/down, 1x2 left/right |
 | `floor` | 32x32 | 3 x 3 | 96x96 | frame `row * 3 + col` is motif sub-tile (col, row) | top-left | 1x1 per frame |
 | `wall` | 16x16 | 17 x 1 | 272x16 | 0 horizontal body, 1 vertical body, `1 + mask` joint | top-left | segment on a grid edge |
-| `terrain-tileset` | 32x32 | 16 x 73 | 512x2336 | `terrainTileIndex(material, mask, phase)`, then the decal row | top-left | 1x1 per tile, on the dual grid |
+| `terrain-tileset` | 32x32 | 16 x 74 | 512x2368 | `terrainTileIndex(material, mask, phase)`, then the decal row and the water bank row | top-left | 1x1 per tile, on the dual grid |
 | `tree` | 64x96 | 1 x 1 | 64x96 | one tree | bottom middle of the footprint (32, 90) | 1x1 |
 | `plant` | 32x48 | 1 x 1 | 32x48 | one potted plant | (16, 46) | 1x1 |
 | `bridge` | 128x128 | 2 x 1 | 256x128 | columns `north-south, east-west` | (64, 112) | 3x3 |
@@ -48,16 +48,17 @@ Transitions are corner autotiles on a dual grid, so they work between any two ne
 
 - The display grid sits half a tile up and left of the map (`TERRAIN_LAYER_ORIGIN = -16`). Display cell (cx, cy) covers world pixels (32 cx - 16, 32 cy - 16) to 32px further, and its four corners are the centers of map tiles (cx - 1, cy - 1), (cx, cy - 1), (cx - 1, cy) and (cx, cy). A w x h map needs (w + 1) x (h + 1) cells. Corners outside the map take the nearest map tile (`terrainCellCorners`).
 - A corner mask has one bit per corner in reading order: NW 1, NE 2, SW 4, SE 8 (`terrainCornerMask`).
-- A cell draws one tile per distinct material among its corners, lowest first (`terrainCellLayers`): the lowest material with mask 15, then each higher material with the mask of the corners at or above it. Nesting the masks makes every edge blend over the material just below it. A cell has four corners, so `TERRAIN_LAYER_COUNT = 4` layers always suffice.
+- A cell draws one tile per distinct material among its corners, lowest first (`terrainCellLayers`): the lowest material with mask 15, then each higher material with the mask of the corners at or above it. Nesting the masks makes every edge blend over the material just below it. When the lowest material is water and at least one corner is a built floor (`TERRAIN_BUILT_FLOORS`: wood, tile, carpet), a water bank tile goes right over the water with the mask of the built-floor corners (see Edges). A cell has four corners plus that bank, so `TERRAIN_LAYER_COUNT = 5` layers always suffice.
 - Each tile is also picked by its motif phase, so the terrain repeats the floor's 96px motif and lines up with `floorFrameAt`: `terrainPhaseAt(cx, cy)` gives the phase, and `terrainPhaseOrigin(phase)` the motif pixel at the tile's top-left.
-- `terrainTileIndex(material, mask, phase)` = `(materialIndex * 9 + phase) * 16 + mask`. Mask 0 is an empty tile that is never drawn. The last row holds the decals (`TERRAIN_DECALS`, `terrainDecalIndex`): flowers, clover, pebbles, mushrooms, leaves and lily pads, for a detail layer.
-- `terrainLayerData(width, height, terrainAt)` returns the tile data of the four layers, `[layer][cy][cx]`, with `-1` where a layer draws nothing (Phaser's empty tile). Load `tileset/terrain.png` as one tileset (32x32, no margin, no spacing) and create the four layers at `TERRAIN_LAYER_ORIGIN`.
+- `terrainTileIndex(material, mask, phase)` = `(materialIndex * 9 + phase) * 16 + mask`. Mask 0 is an empty tile that is never drawn. After the material bands, one row holds the decals (`TERRAIN_DECALS`, `terrainDecalIndex`): flowers, clover, pebbles, mushrooms, leaves and lily pads, for a detail layer. The last row holds the 15 water bank tiles, one per mask and the same for every phase: `terrainBankIndex(mask)` = `(8 * 9 + 1) * 16 + mask`, mask 0 empty again.
+- `terrainLayerData(width, height, terrainAt)` returns the tile data of the five layers, `[layer][cy][cx]`, with `-1` where a layer draws nothing (Phaser's empty tile). Load `tileset/terrain.png` as one tileset (32x32, no margin, no spacing) and create the five layers at `TERRAIN_LAYER_ORIGIN`.
 
 ### Edges
 
 - Natural materials (water, grass, dirt, sand, cobblestone) have organic edges: coverage is the bilinear blend of the corners plus smooth noise that repeats with the 96px motif. Both depend only on the shared corners and the world position, so an edge runs on from one cell into the next, and no edge crosses a cell side whose two corners agree.
 - Built floors (wood, tile, carpet) have square edges on the map tile lines, like the walls standing on them.
-- Every edge has a darker rim inside (2px on natural materials, 1px on wood, tile and carpet, whose straight edge read as a wall with two) and, on natural materials only, a 2px translucent indigo contact shadow outside, drawn over whatever is below, so one tile works over any lower neighbor. Wood, tile and carpet cast none, so their drawn edge is exactly the walkable tile line.
+- Every edge has a darker rim inside (2px on natural materials, 1px on wood, tile and carpet, whose straight edge read as a wall with two) and, on natural materials only, a 2px translucent indigo contact shadow outside, drawn over whatever is below, so one tile works over any lower neighbor. Wood, tile and carpet cast none, so their drawn edge is exactly the walkable tile line and no floor shades another.
+- Water still reads as sunk below the built floors: the water bank tile of mask m is exactly the 2px square contact shadow a built floor over the corners in m would cast, alone. It is drawn right over the water, so every higher material covers its part of it and the shadow only shows on the water.
 - A full tile (mask 15) is exactly the floor motif, so a uniform area looks like the floor piece.
 
 Breaking the straight lines between 9x9 blocks is the map's job (8b), for example by deforming block borders with deterministic noise in the material map; the tiles follow any material map.

@@ -1582,8 +1582,8 @@
           "path": "tileset/terrain.png",
           "imageKind": "terrain-tileset",
           "width": 512,
-          "height": 2336,
-          "sha256": "91d690a7bf2cc1d230c8ce1761e1bd71aa94c9f3f3891ea344f669dcf60b687f"
+          "height": 2368,
+          "sha256": "053cd2ba872ec6140f9fd29a57c572f72f7377c500a1da12944da3208277114b"
         }
       ]
     },

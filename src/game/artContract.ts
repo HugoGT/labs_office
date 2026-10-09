@@ -355,6 +355,18 @@ export const WALL: WallSpec = {
 export const TERRAIN_MATERIALS = ['water', 'sand', 'dirt', 'cobblestone', 'grass', 'wood', 'tile', 'carpet'] as const;
 export type TerrainMaterial = (typeof TERRAIN_MATERIALS)[number];
 
+/**
+ * The built floors: square edges on the map tile lines and no contact shadow,
+ * so their drawn edge is exactly their walkable tiles. Where one meets water,
+ * the water gets a bank tile instead (`terrainCellLayers`), so it still reads
+ * as sunk below the floor.
+ */
+export const TERRAIN_BUILT_FLOORS = ['wood', 'tile', 'carpet'] as const satisfies readonly TerrainMaterial[];
+
+export function isTerrainBuiltFloor(material: TerrainMaterial | null): boolean {
+  return material !== null && (TERRAIN_BUILT_FLOORS as readonly TerrainMaterial[]).includes(material);
+}
+
 /** Water is solid for the client and the server alike; every other material is walkable. */
 export const TERRAIN_WALKABLE: Readonly<Record<TerrainMaterial, boolean>> = {
   water: false,
@@ -394,14 +406,16 @@ export type TerrainDecal = (typeof TERRAIN_DECALS)[number];
 /**
  * One shared tileset for every terrain layer: a band of TERRAIN_PHASES rows per
  * material (TERRAIN_MATERIALS order), each row the 16 corner masks of one motif
- * phase, then one row of decals. Mask 0 is an empty tile so the index stays
- * arithmetic. Colors are capped per material band.
+ * phase, then one row of decals, then one row of water bank tiles by corner
+ * mask (`terrainBankIndex`). Mask 0 is an empty tile so the index stays
+ * arithmetic. Colors are capped per material band; the decal and bank rows
+ * share the last one.
  */
 export const TERRAIN_TILESET: TerrainTilesetSpec = {
   kind: 'terrain-tileset',
   frame: { width: ART_TILE, height: ART_TILE },
   columns: TERRAIN_MASKS,
-  rows: TERRAIN_MATERIALS.length * TERRAIN_PHASES + 1,
+  rows: TERRAIN_MATERIALS.length * TERRAIN_PHASES + 2,
   masks: TERRAIN_MASKS,
   phases: TERRAIN_PHASES,
   // Edge tiles are partly transparent and carry a translucent contact shadow.
@@ -411,8 +425,11 @@ export const TERRAIN_TILESET: TerrainTilesetSpec = {
   colorBandRows: TERRAIN_PHASES,
 };
 
-/** Terrain layers a map needs: a cell has four corners, so at most four materials. */
-export const TERRAIN_LAYER_COUNT = 4;
+/**
+ * Terrain layers a map needs: a cell has four corners, so at most four
+ * materials, plus the water bank over the lowest one.
+ */
+export const TERRAIN_LAYER_COUNT = 5;
 /**
  * World position of display cell (0, 0). The display grid sits half a tile up
  * and left of the map grid, so the corners of display cell (cx, cy) are the
@@ -433,10 +450,19 @@ export interface TerrainCorners {
   readonly se: TerrainMaterial | null;
 }
 
-export interface TerrainLayerTile {
+/** A material over the corners in `mask`. */
+export interface TerrainMaterialTile {
   readonly material: TerrainMaterial;
   readonly mask: number;
 }
+
+/** The contact shadow of the built floors over water, outside the corners in `mask`. */
+export interface TerrainBankTile {
+  readonly bank: true;
+  readonly mask: number;
+}
+
+export type TerrainLayerTile = TerrainMaterialTile | TerrainBankTile;
 
 export function terrainCornerMask(corners: Readonly<Record<keyof TerrainCorners, boolean>>): number {
   return (
@@ -468,10 +494,21 @@ export function terrainDecalIndex(decal: TerrainDecal): number {
   return TERRAIN_MATERIALS.length * TERRAIN_PHASES * TERRAIN_MASKS + TERRAIN_DECALS.indexOf(decal);
 }
 
+/** The water bank tile casting the built floors' shadow outside the corners in `mask` (1-15); one per mask, any phase. */
+export function terrainBankIndex(mask: number): number {
+  if (!Number.isInteger(mask) || mask < 1 || mask >= TERRAIN_MASKS) throw new Error(`Invalid terrain bank mask ${mask}`);
+  return (TERRAIN_MATERIALS.length * TERRAIN_PHASES + 1) * TERRAIN_MASKS + mask;
+}
+
 /**
  * The tiles of one display cell, bottom layer first: its lowest material
  * full, then each higher material over the corners at or above it. Nesting
  * the masks means every edge blends over the material just below it.
+ *
+ * Built floors cast no shadow, which would paint past their walkable tiles
+ * onto any neighbor. Over water, a bank tile right above it puts that shadow
+ * back on the built-floor corners: the higher materials then cover all of it
+ * but what falls on the water, which keeps reading as sunk below the floors.
  */
 export function terrainCellLayers(corners: TerrainCorners): TerrainLayerTile[] {
   // Void ranks below every material: no layer for it, and no corner bit for it in any mask.
@@ -479,7 +516,7 @@ export function terrainCellLayers(corners: TerrainCorners): TerrainLayerTile[] {
   const present = [...new Set([corners.nw, corners.ne, corners.sw, corners.se])]
     .filter((material): material is TerrainMaterial => material !== null)
     .sort((a, b) => rank(a) - rank(b));
-  return present.map((material) => ({
+  const layers: TerrainLayerTile[] = present.map((material) => ({
     material,
     mask: terrainCornerMask({
       nw: rank(corners.nw) >= rank(material),
@@ -488,6 +525,14 @@ export function terrainCellLayers(corners: TerrainCorners): TerrainLayerTile[] {
       se: rank(corners.se) >= rank(material),
     }),
   }));
+  const built = terrainCornerMask({
+    nw: isTerrainBuiltFloor(corners.nw),
+    ne: isTerrainBuiltFloor(corners.ne),
+    sw: isTerrainBuiltFloor(corners.sw),
+    se: isTerrainBuiltFloor(corners.se),
+  });
+  if (present[0] === 'water' && built !== 0) layers.splice(1, 0, { bank: true, mask: built });
+  return layers;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -520,7 +565,7 @@ export function terrainLayerData(width: number, height: number, terrainAt: (tx: 
     for (let cx = 0; cx <= width; cx += 1) {
       const phase = terrainPhaseAt(cx, cy);
       terrainCellLayers(terrainCellCorners(terrainAt, width, height, cx, cy)).forEach((tile, layer) => {
-        layers[layer]![cy]![cx] = terrainTileIndex(tile.material, tile.mask, phase);
+        layers[layer]![cy]![cx] = 'bank' in tile ? terrainBankIndex(tile.mask) : terrainTileIndex(tile.material, tile.mask, phase);
       });
     }
   }

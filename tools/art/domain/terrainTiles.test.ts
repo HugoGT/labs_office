@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ART_TILE,
   FLOOR_MOTIF_SIZE,
+  TERRAIN_BUILT_FLOORS,
   TERRAIN_CORNER_BITS,
   TERRAIN_DECALS,
   TERRAIN_MATERIALS,
@@ -10,7 +11,7 @@ import {
   terrainPhaseOrigin,
   type TerrainMaterial,
 } from '../../../src/game/artContract.ts';
-import { decalTile, TERRAIN_EDGES, terrainEdgeTile, terrainField } from './terrainTiles.ts';
+import { decalTile, TERRAIN_EDGES, terrainBankTile, terrainEdgeTile, terrainField } from './terrainTiles.ts';
 import { terrainTile } from './tiles.ts';
 
 const LAST = ART_TILE - 1;
@@ -150,6 +151,50 @@ describe('terrain edge tiles', () => {
       }
     }
     for (const material of ['grass', 'dirt', 'sand', 'cobblestone', 'water'] as const) expect(TERRAIN_EDGES[material].shadow, material).toBe(true);
+  });
+
+  it('give the built floors of the contract, and only them, square shadowless edges', () => {
+    for (const material of TERRAIN_MATERIALS) {
+      const built = (TERRAIN_BUILT_FLOORS as readonly TerrainMaterial[]).includes(material);
+      expect(TERRAIN_EDGES[material].style, material).toBe(built ? 'square' : 'organic');
+      expect(TERRAIN_EDGES[material].shadow, material).toBe(!built);
+    }
+  });
+});
+
+describe('water bank tiles', () => {
+  /** Chebyshev distance in pixels from the covered quarter of mask 1 (nw), 0 inside it. */
+  const fromNorthWest = (x: number, y: number): number => Math.max(0, x - 15, y - 15);
+
+  it('cast the old square-floor contact shadow outside the covered corners: 2px, near then far', () => {
+    const tile = terrainBankTile(TERRAIN_CORNER_BITS.nw);
+    for (let y = 0; y < ART_TILE; y += 1) {
+      for (let x = 0; x < ART_TILE; x += 1) {
+        const distance = fromNorthWest(x, y);
+        const alpha = distance === 1 ? 72 : distance === 2 ? 36 : 0;
+        expect(tile.alphaAt(x, y), `${x},${y}`).toBe(alpha);
+        if (alpha > 0) expect(tile.getPixel(x, y), `${x},${y}`).toEqual({ r: 28, g: 18, b: 44, a: alpha });
+      }
+    }
+    // A straight north edge: the two rows below the tile line, the whole width.
+    const north = terrainBankTile(TERRAIN_CORNER_BITS.nw | TERRAIN_CORNER_BITS.ne);
+    for (let x = 0; x < ART_TILE; x += 1) {
+      expect([north.alphaAt(x, 15), north.alphaAt(x, 16), north.alphaAt(x, 17), north.alphaAt(x, 18)], `${x}`).toEqual([0, 72, 36, 0]);
+    }
+  });
+
+  it('draw nothing on the covered corners, where the floor goes, and nothing at all for the full mask', () => {
+    for (let mask = 1; mask < 16; mask += 1) {
+      const bank = terrainBankTile(mask);
+      const floor = terrainEdgeTile('wood', mask, 0);
+      for (let y = 0; y < ART_TILE; y += 1) {
+        for (let x = 0; x < ART_TILE; x += 1) {
+          if (floor.alphaAt(x, y) > 0) expect(bank.alphaAt(x, y), `${mask} ${x},${y}`).toBe(0);
+        }
+      }
+      expect(countColors(bank), `${mask}`).toBeLessThanOrEqual(2);
+    }
+    expect(terrainBankTile(15).countOpaque()).toBe(0);
   });
 });
 
