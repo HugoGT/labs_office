@@ -68,10 +68,18 @@ vi.mock('../dashboard/spacesAdminClient', () => ({ createSpacesAdminClient: vi.f
 vi.mock('../dashboard/assetAdminClient', () => ({ createAssetAdminClient: vi.fn() }));
 
 // Keep the real editor, but let the first submenu test control its lazy readiness.
-const layoutEditorLoad = vi.hoisted(() => ({ ready: null as Promise<void> | null }));
+// `loaded` settles when the factory returns: `vi.dynamicImportSettled` does not track
+// a mock factory, so it could return while a cold `importOriginal` was still running.
+const layoutEditorLoad = vi.hoisted(() => {
+  let markLoaded!: () => void;
+  const loaded = new Promise<void>((resolve) => { markLoaded = resolve; });
+  return { ready: null as Promise<void> | null, loaded, markLoaded };
+});
 vi.mock('./OfficeLayoutEditor', async (importOriginal) => {
   await layoutEditorLoad.ready;
-  return importOriginal<typeof import('./OfficeLayoutEditor')>();
+  const editorModule = await importOriginal<typeof import('./OfficeLayoutEditor')>();
+  layoutEditorLoad.markLoaded();
+  return editorModule;
 });
 
 const createGameMock = vi.mocked(createGame);
@@ -1544,6 +1552,7 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
       // Import completion, not the DOM query's deadline, determines submenu readiness.
       await act(async () => {
         resolveEditor();
+        await layoutEditorLoad.loaded;
         await vi.dynamicImportSettled();
       });
       await screen.findByRole('heading', { name: 'Salas' });

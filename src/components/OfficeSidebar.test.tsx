@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ArtContributionPort } from '../dashboard/artContributionPort';
 import type { AssetAdminPort } from '../dashboard/assetAdminPort';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
@@ -11,6 +11,12 @@ import { createOfficeBridge } from '../game/officeBridge';
 import { statusCssColor } from '../game/presence';
 import type { RosterPeer } from '../game/roster';
 import { OfficeSidebar } from './OfficeSidebar';
+
+// The sidebar's lazy sections transform cold in the first test that opens one; on a loaded CI
+// runner that outlasted findBy's 1 s deadline. Warm them once so tests only wait on React.
+beforeAll(async () => {
+  await Promise.all([import('./OfficeLayoutEditor'), import('../dashboard/AssetsPanel'), import('./ArtContributionSection')]);
+});
 
 const SELF: RosterPeer = { sessionId: 'yo', name: 'Hugo', status: 'g' };
 const ANA: RosterPeer = { sessionId: 'a', name: 'Ana', status: 'g' };
