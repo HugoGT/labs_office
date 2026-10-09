@@ -15,8 +15,8 @@ describe('useMapZoom (map-zoom)', () => {
     const bridge = createOfficeBridge();
     const { result } = renderHook(() => useMapZoom(bridge));
 
-    act(() => bridge.emit('zoomchanged', zoomView(1)));
-    expect(result.current.view).toEqual({ zoom: 1, canZoomIn: true, canZoomOut: false });
+    act(() => bridge.emit('zoomchanged', zoomView(0.5)));
+    expect(result.current.view).toEqual({ zoom: 0.5, canZoomIn: true, canZoomOut: false });
 
     act(() => bridge.emit('zoomchanged', zoomView(3)));
     expect(result.current.view).toEqual({ zoom: 3, canZoomIn: false, canZoomOut: true });

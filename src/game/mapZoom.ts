@@ -9,15 +9,17 @@
  */
 
 /**
- * The only zooms the office offers, shown as 1x, 2x and 3x (`zoomLabel`); the
- * office opens at 2x. Integers on purpose: the game renders with `pixelArt`
- * and `roundPixels`, and Phaser only renders pixel-exact at an integer camera
- * zoom (`renderRoundPixels`). Fractional stops (0.75, 1.5, 2.25) showed seams
- * between tiles and flickering character details. A stored zoom that is not
- * one of these restores to the default.
+ * The only zooms the office offers, shown as 0.5x, 1x, 2x and 3x
+ * (`zoomLabel`); the office opens at 2x. Every stop is pixel exact
+ * (`isPixelExactZoom`): the game renders with `pixelArt` and `roundPixels`,
+ * and Phaser only rounds at an integer camera zoom (`renderRoundPixels`), so
+ * `CameraZoomLayer` turns the rounding on at 0.5x itself, where two world
+ * units make exactly one screen pixel. Other fractional stops (0.75, 1.5,
+ * 2.25) showed seams between tiles and flickering character details. A stored
+ * zoom that is not one of these restores to the default.
  */
-export const ZOOM_STOPS: readonly number[] = [1, 2, 3];
-export const ZOOM_MIN = 1;
+export const ZOOM_STOPS: readonly number[] = [0.5, 1, 2, 3];
+export const ZOOM_MIN = 0.5;
 export const ZOOM_MAX = 3;
 export const ZOOM_DEFAULT = 2;
 
@@ -82,6 +84,27 @@ export interface ZoomStore {
 export function clampZoom(zoom: number): number {
   if (!Number.isFinite(zoom)) return ZOOM_DEFAULT;
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom));
+}
+
+/**
+ * A zoom that maps a whole number of screen pixels to each world unit (1x,
+ * 2x, 3x) or a whole number of world units to each screen pixel (0.5x):
+ * every texel then lands on the same screen pixel grid, so tiles keep their
+ * size and nothing shimmers once quads are rounded.
+ */
+export function isPixelExactZoom(zoom: number): boolean {
+  if (!Number.isFinite(zoom) || zoom <= 0) return false;
+  return Number.isInteger(zoom) || Number.isInteger(1 / zoom);
+}
+
+/**
+ * The scroll on whole screen pixels. Phaser floors it to whole world units,
+ * which is enough at 1x and above; below 1x a world unit is less than a
+ * screen pixel, so it is floored to `1 / zoom` world units instead.
+ */
+export function snapScrollToScreenPixels(scroll: number, zoom: number): number {
+  if (zoom >= 1) return scroll;
+  return Math.floor(scroll * zoom) / zoom;
 }
 
 export function isZoomStop(zoom: unknown): zoom is number {
@@ -218,8 +241,8 @@ export function zoomKeyAction(event: ZoomKeyInput): ZoomAction | null {
 }
 
 /**
- * The control's readout: the camera zoom itself, so the stops read 1x, 2x and
- * 3x. A value between stops keeps at most two decimals.
+ * The control's readout: the camera zoom itself, so the stops read 0.5x, 1x,
+ * 2x and 3x. A value between stops keeps at most two decimals.
  */
 export function zoomLabel(zoom: number): string {
   return `${Number(zoom.toFixed(2))}x`;
