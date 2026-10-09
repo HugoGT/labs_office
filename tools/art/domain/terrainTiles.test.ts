@@ -98,17 +98,22 @@ describe('terrain edge tiles', () => {
               if (!compatible) continue;
               for (const va of variants) {
                 for (const vb of variants) {
-                  const first = tileAt(a, phase, va);
-                  const second = tileAt(b, next, vb);
-                  const fieldsA = lineAt(a, phase, va, here, names[0]);
-                  const fieldsB = lineAt(b, next, vb, there, names[1]);
+                  // Each style asserts one measure, so only that one is computed:
+                  // drawing every organic tile made this time out on CI (#175).
                   let jump = 0;
                   let alphaMismatch = 0;
-                  for (let i = 0; i < ART_TILE; i += 1) {
-                    const [x1, y1] = here(i);
-                    const [x2, y2] = there(i);
-                    jump = Math.max(jump, Math.abs(fieldsA[i]! - fieldsB[i]!));
-                    if (first.alphaAt(x1, y1) !== second.alphaAt(x2, y2)) alphaMismatch += 1;
+                  if (organic) {
+                    const fieldsA = lineAt(a, phase, va, here, names[0]);
+                    const fieldsB = lineAt(b, next, vb, there, names[1]);
+                    for (let i = 0; i < ART_TILE; i += 1) jump = Math.max(jump, Math.abs(fieldsA[i]! - fieldsB[i]!));
+                  } else {
+                    const first = tileAt(a, phase, va);
+                    const second = tileAt(b, next, vb);
+                    for (let i = 0; i < ART_TILE; i += 1) {
+                      const [x1, y1] = here(i);
+                      const [x2, y2] = there(i);
+                      if (first.alphaAt(x1, y1) !== second.alphaAt(x2, y2)) alphaMismatch += 1;
+                    }
                   }
                   if (jump > worst.jump || alphaMismatch > worst.alphaMismatch) {
                     worst = { jump: Math.max(jump, worst.jump), alphaMismatch: Math.max(alphaMismatch, worst.alphaMismatch), label: `${material} ${a}/${va}-${b}/${vb} phase ${phase}` };
