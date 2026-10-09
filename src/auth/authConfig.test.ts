@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveAuthConfig } from './authConfig';
+import { resolveAuthConfig, resolveAuthSelection } from './authConfig';
 
 describe('resolveAuthConfig', () => {
   it('devuelve la configuracion completa cuando estan las tres variables', () => {
@@ -61,5 +61,43 @@ describe('resolveAuthConfig', () => {
     // resultado tiene que ser el mismo que antes de existir el login.
     expect(resolveAuthConfig({ apiKey: '   ', projectId: '   ' })).toBeNull();
     expect(resolveAuthConfig({})).toBeNull();
+  });
+});
+
+describe('resolveAuthSelection', () => {
+  const FIREBASE = { apiKey: 'AIza-publica', projectId: 'oficina-virtual' };
+
+  it('without a mode keeps the Firebase behavior exactly', () => {
+    expect(resolveAuthSelection({ ...FIREBASE, officeEndpoint: 'ws://localhost:2567' })).toEqual({
+      kind: 'firebase',
+      config: { apiKey: 'AIza-publica', projectId: 'oficina-virtual', authDomain: 'oficina-virtual.firebaseapp.com' },
+    });
+    expect(resolveAuthSelection({ mode: 'firebase', ...FIREBASE, officeEndpoint: null })?.kind).toBe('firebase');
+  });
+
+  it('without a mode or Firebase variables there is no auth', () => {
+    expect(resolveAuthSelection({ officeEndpoint: 'ws://localhost:2567' })).toBeNull();
+    expect(resolveAuthSelection({ mode: '', officeEndpoint: 'ws://localhost:2567' })).toBeNull();
+  });
+
+  it('local mode signs in against the office server, over http(s)', () => {
+    expect(resolveAuthSelection({ mode: 'local', officeEndpoint: 'ws://localhost:2567' })).toEqual({
+      kind: 'local',
+      baseUrl: 'http://localhost:2567',
+    });
+    expect(resolveAuthSelection({ mode: ' LOCAL ', officeEndpoint: 'wss://app.example' })).toEqual({
+      kind: 'local',
+      baseUrl: 'https://app.example',
+    });
+  });
+
+  it('local mode wins over Firebase variables, which it never initializes', () => {
+    expect(resolveAuthSelection({ mode: 'local', ...FIREBASE, officeEndpoint: 'ws://localhost:2567' })?.kind).toBe(
+      'local',
+    );
+  });
+
+  it('local mode without a server has nothing to sign in against: no auth, like the server being off', () => {
+    expect(resolveAuthSelection({ mode: 'local', officeEndpoint: null })).toBeNull();
   });
 });

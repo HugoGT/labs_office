@@ -68,7 +68,16 @@ const RESET_LOOKS_SENT: ReadonlySet<string> = new Set(['auth/user-not-found', 'a
 
 const RESET_GENERIC_MESSAGE = 'No se pudo enviar el correo.';
 
+/**
+ * Local auth mode (`localAuthAdapter.ts`): accounts live in the server's
+ * `LOCAL_AUTH_USERS`, so there is no email to send. The same answer for every
+ * address, so it tells nobody which accounts exist.
+ */
+export const LOCAL_PASSWORD_RESET_UNAVAILABLE = 'auth/local-password-reset-unavailable';
+
 const RESET_MESSAGES: Readonly<Record<string, string>> = {
+  [LOCAL_PASSWORD_RESET_UNAVAILABLE]:
+    'Las cuentas locales no recuperan la contraseña por correo. Pídesela a quien administra la oficina.',
   'auth/invalid-email': MESSAGES['auth/invalid-email'],
   'auth/missing-email': 'Escribe tu correo.',
   'auth/too-many-requests': MESSAGES['auth/too-many-requests'],

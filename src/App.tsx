@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useMemo, useState } from 'react';
-import { resolveAuthConfig } from './auth/authConfig';
+import { resolveAuthSelection } from './auth/authConfig';
 import { describeAccessDenied } from './auth/authErrors';
 import { createCharacterClient } from './auth/characterClient';
 import type { CharacterPort } from './auth/characterPort';
@@ -7,6 +7,7 @@ import { createDisplayNameClient, deriveDisplayNameBaseUrl } from './auth/displa
 import type { DisplayNamePort } from './auth/displayNamePort';
 import { createFirebaseAuthAdapter } from './auth/firebaseAuthAdapter';
 import { createLastDisplayNameStore } from './auth/lastDisplayNameStore';
+import { createLocalAuthAdapter } from './auth/localAuthAdapter';
 import { withSessionExpiry } from './auth/sessionExpiry';
 import { AuthGate } from './components/AuthGate';
 import { LeftOfficeNotice, type LeftOfficeReason } from './components/LeftOfficeNotice';
@@ -47,19 +48,6 @@ const DashboardRoute = lazy(() => import('./dashboard/DashboardRoute'));
  * `/admin` responderia 401.
  */
 export default function App() {
-  // Se resuelve una sola vez, en el mismo espiritu que `endpoint` en
-  // `OfficeShell`: rehacerlo por render reiniciaria firebase y tiraria la
-  // sesion que acaba de restaurarse.
-  const [authConfig] = useState(() =>
-    resolveAuthConfig({
-      apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string | undefined,
-      projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined,
-      authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined,
-    }),
-  );
-  const [auth] = useState(() =>
-    authConfig === null ? null : createFirebaseAuthAdapter(authConfig),
-  );
   /**
    * Endpoint del servidor de avatares, resuelto UNA vez y por separado del que
    * calcula `OfficeShell` (#100): son dos copias deliberadas, no una
@@ -75,6 +63,24 @@ export default function App() {
       hostname: window.location.hostname,
     }),
   );
+  // Se resuelve una sola vez, en el mismo espiritu que `endpoint` en
+  // `OfficeShell`: rehacerlo por render reiniciaria firebase y tiraria la
+  // sesion que acaba de restaurarse. `VITE_AUTH_MODE=local` picks the
+  // env-based local accounts instead (local and test use only), which never
+  // initializes Firebase and signs in against `officeEndpoint`.
+  const [auth] = useState(() => {
+    const selection = resolveAuthSelection({
+      mode: import.meta.env.VITE_AUTH_MODE as string | undefined,
+      officeEndpoint,
+      apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string | undefined,
+      projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined,
+      authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined,
+    });
+    if (selection === null) return null;
+    return selection.kind === 'local'
+      ? createLocalAuthAdapter({ baseUrl: selection.baseUrl })
+      : createFirebaseAuthAdapter(selection.config);
+  });
   /**
    * The server refused the join (#129): the account is out, so it signs out
    * here and the login says why. Unlike `leftOffice`, coming back is a new
