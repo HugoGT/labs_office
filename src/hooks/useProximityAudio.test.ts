@@ -2,6 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import { Room } from 'livekit-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AttachableTrack } from '../game/attachableTrack';
+import type { CameraFilter } from '../game/cameraFilter';
 import { createOfficeBridge } from '../game/officeBridge';
 import type { PresenceStatus } from '../game/officeProtocol';
 import type { LivekitConfig } from '../game/livekitEndpoint';
@@ -21,6 +22,7 @@ function fakeConnection(overrides: Partial<LivekitRoomConnection> = {}): Livekit
     setDesiredVideoPeers: vi.fn(),
     setMicrophoneEnabled: vi.fn(async (enabled: boolean) => enabled),
     setCameraEnabled: vi.fn(async (enabled: boolean) => enabled),
+    setCameraFilter: vi.fn(async (filter: CameraFilter) => filter),
     setScreenShareEnabled: vi.fn(async (enabled: boolean) => enabled),
     startAudio: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),

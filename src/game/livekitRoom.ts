@@ -20,12 +20,16 @@ import {
   Track,
   type LocalTrack,
   type LocalTrackPublication,
+  type LocalVideoTrack,
   type Participant,
   type RemoteParticipant,
   type RemoteTrack,
+  type TrackProcessor,
   type TrackPublication,
 } from 'livekit-client';
 import type { AttachableTrack } from './attachableTrack';
+import { loadBackgroundBlur as loadRealBackgroundBlur } from './backgroundBlur';
+import type { CameraFilter } from './cameraFilter';
 import { reconcileSubscriptions } from './proximityAudio';
 import { createRemoteAudioSink } from './remoteAudioSink';
 import {
@@ -40,6 +44,17 @@ import {
 /** Los dos kinds que este modulo reconcilia por separado (issue #17, decision D2). */
 type TrackKind = Track.Kind.Audio | Track.Kind.Video;
 
+/**
+ * The background blur, as this module needs it (`backgroundBlur.ts` is the
+ * real one). A port so tests never load MediaPipe under jsdom.
+ */
+export interface BackgroundBlur {
+  /** The library's own check, the authority once it is loaded. */
+  supported(): boolean;
+  /** A new processor per camera track: a track that stops destroys its processor. */
+  createProcessor(): TrackProcessor<Track.Kind.Video>;
+}
+
 export interface LivekitRoomConnection {
   /** Guarda el conjunto de AUDIO deseado y reconcilia ese kind contra el estado vivo de la sala. */
   setDesiredAudioPeers(sessionIds: readonly string[]): void;
@@ -52,6 +67,14 @@ export interface LivekitRoomConnection {
   /** Devuelve el estado real: `false` si el dispositivo se deniega. */
   setMicrophoneEnabled(enabled: boolean): Promise<boolean>;
   setCameraEnabled(enabled: boolean): Promise<boolean>;
+  /**
+   * Filter for the own camera, applied on this machine before publishing.
+   * Picked with the camera off it waits for the next camera on; with the
+   * camera on it applies to the live track. Resolves the filter actually in
+   * effect: `'none'` when blur failed (unsupported browser, MediaPipe that
+   * did not load), and the camera keeps going without it.
+   */
+  setCameraFilter(filter: CameraFilter): Promise<CameraFilter>;
   /**
    * Starts or stops the own screen share (#20). Resolves `false` when the
    * user closes the browser picker: that is a choice, not an error. The share
@@ -129,6 +152,15 @@ export interface ConnectLivekitRoomOptions {
    * share picker opens and nothing is published, and no camera comes back.
    */
   onDisconnected?: () => void;
+  /** Injectable for tests; by default the lazy `@livekit/track-processors`. */
+  loadBackgroundBlur?: () => Promise<BackgroundBlur>;
+  /**
+   * The camera went on without the blur it was asked for (the library did
+   * not load, the browser lacks support, or the processor did not start).
+   * The filter is `'none'` from then on. Failures of `setCameraFilter`
+   * itself are its result instead, never this callback.
+   */
+  onCameraFilterFailed?: () => void;
 }
 
 function publicationsOf(participant: Participant, source: Track.Source): TrackPublication[] {
@@ -170,6 +202,8 @@ export async function connectLivekitRoom({
   onActiveScreenSharerChanged,
   onRoomMediaChanged,
   onDisconnected,
+  loadBackgroundBlur = loadRealBackgroundBlur,
+  onCameraFilterFailed,
 }: ConnectLivekitRoomOptions): Promise<LivekitRoomConnection> {
   const room = createRoom();
   const sink = createRemoteAudioSink(audioContainer);
@@ -179,6 +213,100 @@ export async function connectLivekitRoom({
   let roomHasMedia: boolean | null = null;
   /** Set by our own `disconnect()`, which also makes the room emit `Disconnected`. */
   let closing = false;
+  let cameraFilter: CameraFilter = 'none';
+  /**
+   * Camera toggles and filter changes run one at a time: each reads the
+   * camera publication and may replace it, so two interleaved would each
+   * decide from a state the other is about to change.
+   */
+  let cameraQueue: Promise<unknown> = Promise.resolve();
+
+  function serializeCamera<T>(task: () => Promise<T>): Promise<T> {
+    const run = cameraQueue.then(task, task);
+    cameraQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  function cameraPublication(): TrackPublication | undefined {
+    return publicationsOf(room.localParticipant, Track.Source.Camera)[0];
+  }
+
+  /**
+   * `true` when the track ends up blurred. Any processor on a camera track
+   * is a blur: it is the only one this module sets. On failure the track is
+   * left as it was, raw and working.
+   */
+  async function blurTrack(track: LocalVideoTrack): Promise<boolean> {
+    if (track.getProcessor()) return true;
+    let processor: TrackProcessor<Track.Kind.Video> | undefined;
+    try {
+      const blur = await loadBackgroundBlur();
+      if (!blur.supported()) return false;
+      processor = blur.createProcessor();
+      await track.setProcessor(processor);
+      return true;
+    } catch {
+      // `setProcessor` only keeps a processor whose `init` resolved, so a
+      // failed one is ours to clean up.
+      void processor?.destroy().catch(() => undefined);
+      return false;
+    }
+  }
+
+  async function unblurTrack(track: LocalVideoTrack): Promise<void> {
+    if (!track.getProcessor()) return;
+    try {
+      await track.stopProcessor();
+    } catch {
+      // Still blurred: harmless, and the next camera on tries again.
+    }
+  }
+
+  /** Blur did not take while turning the camera on: it is off from now on, and the UI is told. */
+  function blurFailedOnCameraOn(): void {
+    cameraFilter = 'none';
+    onCameraFilterFailed?.();
+  }
+
+  /**
+   * Camera on with blur. Unmuting a track that has no processor would
+   * publish the raw background until the processor started (MediaPipe can
+   * take seconds to download), so such a track is replaced: a new one is
+   * created, blurred, and only then published, which is what
+   * `setCameraEnabled` does for a first camera minus the processor.
+   * livekit-client's own `processor` capture option is not used because a
+   * processor failing there leaves the captured camera running.
+   */
+  async function enableBlurredCamera(): Promise<void> {
+    const publication = cameraPublication();
+    const existing = publication?.track as LocalVideoTrack | undefined;
+    if (existing && publication) {
+      if (existing.getProcessor()) {
+        // Unmuting restarts the processor on the new capture (`LocalTrack.setMediaStreamTrack`).
+        await room.localParticipant.setCameraEnabled(true);
+        return;
+      }
+      if (!publication.isMuted) {
+        if (!(await blurTrack(existing))) blurFailedOnCameraOn();
+        return;
+      }
+      await room.localParticipant.unpublishTrack(existing);
+    }
+
+    const tracks = await room.localParticipant.createTracks({ video: true });
+    const track = tracks.find((candidate) => candidate.kind === Track.Kind.Video) as LocalVideoTrack | undefined;
+    if (!track) {
+      for (const candidate of tracks) candidate.stop();
+      throw new Error('no camera track was created');
+    }
+    if (!(await blurTrack(track))) blurFailedOnCameraOn();
+    try {
+      await room.localParticipant.publishTrack(track);
+    } catch (err) {
+      track.stop();
+      throw err;
+    }
+  }
 
   /**
    * Reconcilia UN kind a la vez contra su propio conjunto deseado. Cada kind
@@ -391,13 +519,40 @@ export async function connectLivekitRoom({
         return false;
       }
     },
-    async setCameraEnabled(enabled) {
-      try {
-        await room.localParticipant.setCameraEnabled(enabled);
-        return enabled;
-      } catch {
-        return false;
-      }
+    setCameraEnabled(enabled) {
+      return serializeCamera(async () => {
+        try {
+          if (enabled && cameraFilter === 'blur') {
+            await enableBlurredCamera();
+            return true;
+          }
+          await room.localParticipant.setCameraEnabled(enabled);
+          // No filter picked while it was off: the unmuted track restarted
+          // its old processor, which is stopped now (blurred for a moment,
+          // never the other way round).
+          const track = cameraPublication()?.track as LocalVideoTrack | undefined;
+          if (enabled && track) await unblurTrack(track);
+          return enabled;
+        } catch {
+          return false;
+        }
+      });
+    },
+    setCameraFilter(filter) {
+      return serializeCamera(async () => {
+        cameraFilter = filter;
+        const publication = cameraPublication();
+        const track = publication?.track as LocalVideoTrack | undefined;
+        // Camera off (no track, or a muted one): the next camera on applies it.
+        if (!track || publication?.isMuted) return filter;
+        if (filter === 'none') {
+          await unblurTrack(track);
+          return 'none';
+        }
+        if (await blurTrack(track)) return 'blur';
+        cameraFilter = 'none';
+        return 'none';
+      });
     },
     async setScreenShareEnabled(enabled) {
       if (!enabled) {
