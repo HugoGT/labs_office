@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   TERRAIN_LAYER_COUNT,
+  TERRAIN_VOID_COLOR,
   hedgeFrameIndex,
   propPlacement,
   terrainDecalIndex,
   terrainLayerData,
+  terrainVoidCapIndex,
   wallFrameIndex,
   type ArtPackManifest,
 } from './artContract';
@@ -79,13 +81,14 @@ describe('terrainTileData', () => {
     expect(drawnTerrainAt(BASE_TERRAIN, 20, 20)).toBe(terrainMaterialAt(BASE_TERRAIN, 20, 20));
   });
 
-  it('edges a land block straight over the void, with no water drawn under it', () => {
+  it('edges a land block straight over the void: the grass runs under a void cap on the tile line', () => {
     const half = terrainSnapshot(blankLayout({ blocks: ['grass', 'void'] }));
     const data = terrainTileData(half);
 
-    // Cell (9, 4) sits on the border: grass on its west corners only, nothing else.
+    // Cell (9, 4) sits on the border: grass on its west corners, void on the east ones.
     expect(data[0]![4]![9]).toBe(terrainLayerData(18, 9, (tx) => (tx < 9 ? 'grass' : null))[0]![4]![9]);
-    expect(data[1]![4]![9]).toBe(-1);
+    expect(data[1]![4]![9]).toBe(terrainVoidCapIndex(2 | 8));
+    expect(data[2]![4]![9]).toBe(-1);
     expect(data.flat(2).filter((tile) => tile !== -1).length).toBeGreaterThan(0);
   });
 
@@ -137,6 +140,8 @@ describe('fallbackTerrainData', () => {
 
     expect(data[4]![4]).toBe(LAYOUT_MATERIALS.indexOf('void'));
     expect(VOID_COLOR).toBe(0x000000);
+    // The tileset's void caps paint this same color over the terrain's edge.
+    expect(VOID_COLOR).toBe(TERRAIN_VOID_COLOR);
     expect(TERRAIN_FLAT_COLORS.void).toBe(VOID_COLOR);
     expect(Object.keys(TERRAIN_FLAT_COLORS)).toEqual([...LAYOUT_MATERIALS]);
   });

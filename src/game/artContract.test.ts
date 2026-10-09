@@ -22,7 +22,13 @@ import {
   TERRAIN_LAYER_COUNT,
   TERRAIN_LAYER_ORIGIN,
   TERRAIN_MATERIALS,
+  TERRAIN_MASKS,
+  TERRAIN_PHASES,
   TERRAIN_TILESET,
+  TERRAIN_ORGANIC_MATERIALS,
+  TERRAIN_VARIANTS,
+  TERRAIN_VOID_COLOR,
+  TERRAIN_VOID_EDGE_COMBOS,
   TERRAIN_WALKABLE,
   TREE,
   WALK_DIRECTIONS,
@@ -46,6 +52,10 @@ import {
   terrainPhaseAt,
   terrainPhaseOrigin,
   terrainTileIndex,
+  terrainVariantAt,
+  terrainVoidCapIndex,
+  terrainVoidEdgeIndex,
+  terrainVoidMask,
   validateArtImage,
   walkRowForFacing,
   wallBodyRect,
@@ -355,13 +365,24 @@ describe('terrain dual grid', () => {
     }
   });
 
-  it('draws nothing for a corner without terrain (void), so the materials around it edge over the background', () => {
+  it('runs every material under the void corners and caps them with a square void tile on top', () => {
     expect(terrainCellLayers({ nw: null, ne: null, sw: null, se: null })).toEqual([]);
-    expect(terrainCellLayers({ nw: 'grass', ne: null, sw: null, se: null })).toEqual([{ material: 'grass', mask: 1 }]);
-    // Water is not drawn under the void corner: no shore bleeds into the black.
+    expect(terrainCellLayers({ nw: 'grass', ne: null, sw: null, se: null })).toEqual([
+      { material: 'grass', mask: 15 },
+      { void: true, mask: 2 | 4 | 8 },
+    ]);
+    // Void ranks above every material for the masks: water stays full and the sand
+    // shore runs on under the void corner, then the cap draws the straight tile line.
     expect(terrainCellLayers({ nw: 'sand', ne: 'water', sw: null, se: 'water' })).toEqual([
-      { material: 'water', mask: 1 | 2 | 8 },
-      { material: 'sand', mask: 1 },
+      { material: 'water', mask: 15 },
+      { material: 'sand', mask: 1 | 4 },
+      { void: true, mask: 4 },
+    ]);
+    expect(terrainCellLayers({ nw: 'carpet', ne: 'grass', sw: null, se: 'dirt' })).toEqual([
+      { material: 'dirt', mask: 15 },
+      { material: 'grass', mask: 1 | 2 | 4 },
+      { material: 'carpet', mask: 1 | 4 },
+      { void: true, mask: 4 },
     ]);
   });
 
@@ -383,11 +404,12 @@ describe('terrain dual grid', () => {
       { material: 'tile', mask: 1 | 8 },
       { material: 'carpet', mask: 8 },
     ]);
-    // A void corner keeps the bank: its shadow over the black background is invisible.
+    // A void corner keeps the bank under the cap, which hides whatever falls on the void quarter.
     expect(terrainCellLayers({ nw: 'wood', ne: 'water', sw: null, se: 'water' })).toEqual([
-      { material: 'water', mask: 1 | 2 | 8 },
+      { material: 'water', mask: 15 },
       { bank: true, mask: 1 },
-      { material: 'wood', mask: 1 },
+      { material: 'wood', mask: 1 | 4 },
+      { void: true, mask: 4 },
     ]);
   });
 
@@ -409,8 +431,14 @@ describe('terrain dual grid', () => {
     ]);
   });
 
-  it('needs five layers at most: four corner materials plus the bank over water', () => {
+  it('needs five layers at most: four corner materials plus the bank, or three plus the bank and the void cap', () => {
     expect(TERRAIN_LAYER_COUNT).toBe(5);
+    const values = [...TERRAIN_MATERIALS, null];
+    let most = 0;
+    for (const nw of values) for (const ne of values) for (const sw of values) for (const se of values) {
+      most = Math.max(most, terrainCellLayers({ nw, ne, sw, se }).length);
+    }
+    expect(most).toBe(TERRAIN_LAYER_COUNT);
   });
 
   it('picks the motif phase from the cell so the terrain lines up with floorFrameAt', () => {
@@ -424,29 +452,110 @@ describe('terrain dual grid', () => {
     }
   });
 
-  it('indexes the tileset by material band, phase row and mask column, then the decal row and the bank row', () => {
-    expect(TERRAIN_TILESET.columns).toBe(16);
-    expect(TERRAIN_TILESET.rows).toBe(TERRAIN_MATERIALS.length * 9 + 2);
+  it('indexes the tileset by material band, phase row and variant then mask column, then the decal row and the bank and void cap row', () => {
+    expect(TERRAIN_VARIANTS).toBe(3);
+    expect(TERRAIN_TILESET.columns).toBe(16 * 3);
+    expect(TERRAIN_TILESET.variants).toBe(3);
+    expect(TERRAIN_TILESET.rows).toBe(TERRAIN_MATERIALS.length * 9 + 2 + 34);
+    const columns = 48;
     expect(terrainTileIndex('water', 15, 0)).toBe(15);
-    expect(terrainTileIndex('sand', 1, 0)).toBe(9 * 16 + 1);
-    expect(terrainTileIndex('carpet', 15, 8)).toBe((7 * 9 + 8) * 16 + 15);
-    expect(terrainDecalIndex(TERRAIN_DECALS[0]!)).toBe(TERRAIN_MATERIALS.length * 9 * 16);
+    expect(terrainTileIndex('water', 15, 0, 2)).toBe(2 * 16 + 15);
+    expect(terrainTileIndex('sand', 1, 0)).toBe(9 * columns + 1);
+    expect(terrainTileIndex('sand', 1, 1, 1)).toBe(10 * columns + 16 + 1);
+    expect(terrainTileIndex('carpet', 15, 8)).toBe((7 * 9 + 8) * columns + 15);
+    expect(terrainDecalIndex(TERRAIN_DECALS[0]!)).toBe(TERRAIN_MATERIALS.length * 9 * columns);
     expect(TERRAIN_DECALS.length).toBeLessThanOrEqual(16);
     expect(() => terrainTileIndex('grass', 0, 0)).toThrow(/mask/);
     expect(() => terrainTileIndex('grass', 3, 9)).toThrow(/phase/);
-    expect(terrainBankIndex(1)).toBe((TERRAIN_MATERIALS.length * 9 + 1) * 16 + 1);
-    expect(terrainBankIndex(15)).toBe(TERRAIN_TILESET.rows * 16 - 1);
+    expect(() => terrainTileIndex('grass', 3, 0, 3)).toThrow(/variant/);
+    expect(() => terrainTileIndex('grass', 3, 0, -1)).toThrow(/variant/);
+    expect(() => terrainTileIndex('grass', 3, 0, 0.5)).toThrow(/variant/);
+    expect(terrainBankIndex(1)).toBe((TERRAIN_MATERIALS.length * 9 + 1) * columns + 1);
+    expect(terrainBankIndex(15)).toBe((TERRAIN_MATERIALS.length * 9 + 1) * columns + 15);
     expect(() => terrainBankIndex(0)).toThrow(/mask/);
     expect(() => terrainBankIndex(16)).toThrow(/mask/);
+    // The void caps share the bank row, right after its 16 columns.
+    expect(terrainVoidCapIndex(1)).toBe((TERRAIN_MATERIALS.length * 9 + 1) * columns + 16 + 1);
+    expect(terrainVoidCapIndex(15)).toBe((TERRAIN_MATERIALS.length * 9 + 2) * columns - 16 - 1);
+    expect(() => terrainVoidCapIndex(0)).toThrow(/mask/);
+    expect(() => terrainVoidCapIndex(16)).toThrow(/mask/);
     const indices = [
       ...TERRAIN_MATERIALS.flatMap((material) =>
-        Array.from({ length: 9 }, (_, phase) => Array.from({ length: 15 }, (_, i) => terrainTileIndex(material, i + 1, phase))).flat(),
+        Array.from({ length: 9 }, (_, phase) =>
+          Array.from({ length: 3 }, (_, variant) => Array.from({ length: 15 }, (_, i) => terrainTileIndex(material, i + 1, phase, variant))).flat(),
+        ).flat(),
       ),
       ...TERRAIN_DECALS.map(terrainDecalIndex),
       ...Array.from({ length: 15 }, (_, i) => terrainBankIndex(i + 1)),
+      ...Array.from({ length: 15 }, (_, i) => terrainVoidCapIndex(i + 1)),
+      ...TERRAIN_ORGANIC_MATERIALS.flatMap((material) =>
+        Array.from({ length: 9 }, (_, phase) => TERRAIN_VOID_EDGE_COMBOS.map(({ mask, voidMask }) => terrainVoidEdgeIndex(material, mask, voidMask, phase))).flat(),
+      ),
     ];
     expect(new Set(indices).size).toBe(indices.length);
     expect(Math.max(...indices)).toBeLessThan(TERRAIN_TILESET.rows * TERRAIN_TILESET.columns);
+  });
+
+  it('lists the 36 mask and void mask pairs an organic edge can have next to the void', () => {
+    expect(TERRAIN_ORGANIC_MATERIALS).toEqual(['water', 'sand', 'dirt', 'cobblestone', 'grass']);
+    expect(TERRAIN_VOID_EDGE_COMBOS).toHaveLength(36);
+    const keys = TERRAIN_VOID_EDGE_COMBOS.map(({ mask, voidMask }) => mask * 16 + voidMask);
+    // Every pair once, in (mask, voidMask) order.
+    expect(keys).toEqual([...keys].sort((a, b) => a - b));
+    expect(new Set(keys).size).toBe(36);
+    for (const { mask, voidMask } of TERRAIN_VOID_EDGE_COMBOS) {
+      // Void counts as covered, the material still owns a corner, and the layer has an edge.
+      expect(voidMask & ~mask, `${mask}/${voidMask}`).toBe(0);
+      expect(voidMask, `${mask}/${voidMask}`).toBeGreaterThan(0);
+      expect(mask & ~voidMask, `${mask}/${voidMask}`).toBeGreaterThan(0);
+      expect(mask, `${mask}/${voidMask}`).toBeLessThan(15);
+    }
+    // Every organic layer of a cell with void corners and an edge is one of them.
+    const values = [...TERRAIN_MATERIALS, null];
+    for (const nw of values) for (const ne of values) for (const sw of values) for (const se of values) {
+      const corners = { nw, ne, sw, se };
+      const voidMask = terrainVoidMask(corners);
+      if (voidMask === 0) continue;
+      for (const tile of terrainCellLayers(corners)) {
+        if (!('material' in tile) || tile.mask === 15 || TERRAIN_BUILT_FLOORS.includes(tile.material as never)) continue;
+        expect(TERRAIN_VOID_EDGE_COMBOS.some((combo) => combo.mask === tile.mask && combo.voidMask === voidMask), `${tile.mask}/${voidMask}`).toBe(true);
+      }
+    }
+  });
+
+  it('indexes the void edge tiles after the bank row: organic material, phase, then pair', () => {
+    const start = (TERRAIN_MATERIALS.length * 9 + 2) * 48;
+    const first = TERRAIN_VOID_EDGE_COMBOS[0]!;
+    const last = TERRAIN_VOID_EDGE_COMBOS[35]!;
+    expect(terrainVoidEdgeIndex('water', first.mask, first.voidMask, 0)).toBe(start);
+    expect(terrainVoidEdgeIndex('water', last.mask, last.voidMask, 0)).toBe(start + 35);
+    expect(terrainVoidEdgeIndex('sand', first.mask, first.voidMask, 1)).toBe(start + (1 * 9 + 1) * 36);
+    expect(terrainVoidEdgeIndex('grass', last.mask, last.voidMask, 8)).toBe(start + 5 * 9 * 36 - 1);
+    expect(Math.ceil((5 * 9 * 36) / 48)).toBe(34);
+    expect(() => terrainVoidEdgeIndex('wood', 1 | 2, 1, 0)).toThrow(/organic/);
+    expect(() => terrainVoidEdgeIndex('grass', 1 | 2, 4, 0)).toThrow(/void edge/);
+    expect(() => terrainVoidEdgeIndex('grass', 15, 1, 0)).toThrow(/void edge/);
+    expect(() => terrainVoidEdgeIndex('grass', 1 | 2, 1, 9)).toThrow(/phase/);
+    expect(terrainVoidMask({ nw: null, ne: 'grass', sw: 'wood', se: null })).toBe(1 | 8);
+  });
+
+  it('picks an edge variant per display cell from a hash that no block or motif repeat lines up with', () => {
+    const variants = (cell: (i: number) => [number, number]): number[] => Array.from({ length: 30 }, (_, i) => terrainVariantAt(...cell(i)));
+    for (let line = -2; line < 12; line += 1) {
+      for (const run of [variants((i) => [i, line]), variants((i) => [line, i])]) {
+        for (const variant of run) expect(Number.isInteger(variant) && variant >= 0 && variant < TERRAIN_VARIANTS).toBe(true);
+        expect(new Set(run).size, `line ${line}`).toBe(TERRAIN_VARIANTS);
+        // Neither the motif repeat (3 cells) nor a terrain block (9 cells) brings the same variants back.
+        for (const period of [3, 9]) expect(run.slice(period).some((variant, i) => variant !== run[i]), `line ${line} period ${period}`).toBe(true);
+      }
+    }
+    expect(terrainVariantAt(5, 7)).toBe(terrainVariantAt(5, 7));
+  });
+
+  it('shares the void color with the client, so the caps match the camera background', () => {
+    expect(TERRAIN_VOID_COLOR).toBe(0x000000);
+    expect(TERRAIN_MASKS * TERRAIN_VARIANTS).toBe(TERRAIN_TILESET.columns);
+    expect(TERRAIN_PHASES).toBe(9);
   });
 
   it('builds the tile data of every layer for a map, -1 where a layer has nothing', () => {
@@ -457,32 +566,87 @@ describe('terrain dual grid', () => {
       expect(layer).toHaveLength(3);
       for (const row of layer) expect(row).toHaveLength(4);
     }
-    // Cell (2, 1): corners grass, water, grass, water: water full, grass on the west corners.
-    expect(layers[0]![1]![2]).toBe(terrainTileIndex('water', 15, terrainPhaseAt(2, 1)));
-    expect(layers[1]![1]![2]).toBe(terrainTileIndex('grass', 1 | 4, terrainPhaseAt(2, 1)));
+    // Cell (2, 1): corners grass, water, grass, water: water full, grass on the west corners,
+    // both in the cell's edge variant.
+    const variant = terrainVariantAt(2, 1);
+    expect(layers[0]![1]![2]).toBe(terrainTileIndex('water', 15, terrainPhaseAt(2, 1), variant));
+    expect(layers[1]![1]![2]).toBe(terrainTileIndex('grass', 1 | 4, terrainPhaseAt(2, 1), variant));
     expect(layers[2]![1]![2]).toBe(-1);
     // Cell (0, 0) is all grass: one layer.
-    expect(layers[0]![0]![0]).toBe(terrainTileIndex('grass', 15, terrainPhaseAt(0, 0)));
+    expect(layers[0]![0]![0]).toBe(terrainTileIndex('grass', 15, terrainPhaseAt(0, 0), terrainVariantAt(0, 0)));
     expect(layers[1]![0]![0]).toBe(-1);
   });
 
   it('puts the bank tile in the layer right over the water', () => {
     const layers = terrainLayerData(2, 1, grid(['OW']));
     // Cell (1, 0): wood on the west corners, water on the east ones.
-    expect(layers[0]![0]![1]).toBe(terrainTileIndex('water', 15, terrainPhaseAt(1, 0)));
+    expect(layers[0]![0]![1]).toBe(terrainTileIndex('water', 15, terrainPhaseAt(1, 0), terrainVariantAt(1, 0)));
     expect(layers[1]![0]![1]).toBe(terrainBankIndex(1 | 4));
+    // Built floors have square edges, so they only come in variant 0.
     expect(layers[2]![0]![1]).toBe(terrainTileIndex('wood', 1 | 4, terrainPhaseAt(1, 0)));
+  });
+
+  it('only ever uses variant 0 for the built floors, and every variant for the natural materials', () => {
+    const variantOf = (index: number): number => Math.floor((index % TERRAIN_TILESET.columns) / TERRAIN_MASKS);
+    const seen = { wood: new Set<number>(), grass: new Set<number>() };
+    const layers = terrainLayerData(30, 30, (tx, ty) => ((tx + ty) % 2 === 0 ? 'wood' : 'grass'));
+    for (const layer of layers) {
+      for (const row of layer) {
+        for (const index of row) {
+          if (index < 0) continue;
+          const band = Math.floor(Math.floor(index / TERRAIN_TILESET.columns) / TERRAIN_PHASES);
+          const material = TERRAIN_MATERIALS[band];
+          if (material === 'wood' || material === 'grass') seen[material].add(variantOf(index));
+        }
+      }
+    }
+    expect([...seen.wood]).toEqual([0]);
+    expect([...seen.grass].sort()).toEqual([0, 1, 2]);
   });
 });
 
 describe('terrain dual grid over void', () => {
-  it('leaves every layer empty where the four corners are void', () => {
+  const keyed = (rows: readonly string[]): ((tx: number, ty: number) => TerrainMaterial | null) => {
+    const key: Record<string, TerrainMaterial | null> = { W: 'water', G: 'grass', S: 'sand', O: 'wood', V: null };
+    return (tx, ty) => key[rows[ty]![tx]!]!;
+  };
+
+  it('draws organic layers with an edge next to the void from the void edge tiles, everything else as before', () => {
+    // Cell (1, 1): nw void, ne water, sw grass, se wood.
+    let layers = terrainLayerData(2, 2, keyed(['VW', 'GO']));
+    const phase = terrainPhaseAt(1, 1);
+    expect(layers.map((layer) => layer[1]![1])).toEqual([
+      // Water is full: no edge, so its usual variant tile.
+      terrainTileIndex('water', 15, phase, terrainVariantAt(1, 1)),
+      terrainBankIndex(8),
+      terrainVoidEdgeIndex('grass', 1 | 4 | 8, 1, phase),
+      // Built floors keep their square variant 0 tile.
+      terrainTileIndex('wood', 1 | 8, phase),
+      terrainVoidCapIndex(1),
+    ]);
+    // Cell (1, 1): nw grass, ne wood, sw void, se water.
+    layers = terrainLayerData(2, 2, keyed(['GO', 'VW']));
+    expect(layers.map((layer) => layer[1]![1])).toEqual([
+      terrainTileIndex('water', 15, phase, terrainVariantAt(1, 1)),
+      terrainBankIndex(2),
+      terrainVoidEdgeIndex('grass', 1 | 2 | 4, 4, phase),
+      terrainTileIndex('wood', 2 | 4, phase),
+      terrainVoidCapIndex(4),
+    ]);
+    // Without void the same shore uses the variant tiles.
+    layers = terrainLayerData(2, 2, keyed(['GW', 'GW']));
+    expect(layers[1]![1]![1]).toBe(terrainTileIndex('grass', 1 | 4, phase, terrainVariantAt(1, 1)));
+  });
+
+  it('leaves every layer empty where the four corners are void, and caps the void quarters next to terrain', () => {
     const layers = terrainLayerData(3, 2, (tx) => (tx === 0 ? 'grass' : null));
     // Cell (0, 0) is all grass (the corners outside the map clamp to the first column).
-    expect(layers[0]![0]![0]).toBe(terrainTileIndex('grass', 15, terrainPhaseAt(0, 0)));
-    // Cell (1, 1): grass on the west corners, void on the east ones.
-    expect(layers[0]![1]![1]).toBe(terrainTileIndex('grass', 1 | 4, terrainPhaseAt(1, 1)));
-    expect(layers[1]![1]![1]).toBe(-1);
+    expect(layers[0]![0]![0]).toBe(terrainTileIndex('grass', 15, terrainPhaseAt(0, 0), terrainVariantAt(0, 0)));
+    // Cell (1, 1): grass on the west corners, void on the east ones: grass runs on under
+    // the void, then the cap covers the east half on the tile line.
+    expect(layers[0]![1]![1]).toBe(terrainTileIndex('grass', 15, terrainPhaseAt(1, 1), terrainVariantAt(1, 1)));
+    expect(layers[1]![1]![1]).toBe(terrainVoidCapIndex(2 | 8));
+    expect(layers[2]![1]![1]).toBe(-1);
     // Cell (3, 1) only sees void.
     for (const layer of layers) expect(layer[1]![3]).toBe(-1);
   });
@@ -496,7 +660,9 @@ describe('map props', () => {
     expect(sheetSize(BRIDGE)).toEqual({ width: 256, height: 128 });
     expect(sheetSize(HEDGE)).toEqual({ width: 512, height: 48 });
     expect(TABLE.frame).toEqual({ width: 256, height: 192 });
-    expect(sheetSize(TERRAIN_TILESET)).toEqual({ width: 512, height: 74 * 32 });
+    expect(sheetSize(TERRAIN_TILESET)).toEqual({ width: 1536, height: 108 * 32 });
+    // Larger textures do not load on every GPU.
+    expect(sheetSize(TERRAIN_TILESET).height).toBeLessThanOrEqual(4096);
   });
 
   it('anchors every prop on the floor at the bottom middle of its footprint, which is also its depth', () => {

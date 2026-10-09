@@ -189,6 +189,7 @@ export function renderPackFiles(): Map<string, Uint8Array> {
       columns: TERRAIN_TILESET.columns,
       masks: TERRAIN_TILESET.masks,
       phases: TERRAIN_TILESET.phases,
+      variants: TERRAIN_TILESET.variants,
       materials: TERRAIN_MATERIALS.map((material) => ({
         material,
         floor: terrainFloorPieceId(material),

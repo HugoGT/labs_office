@@ -223,6 +223,7 @@ export interface TerrainTilesetSpec extends ImageSpecBase {
   readonly kind: 'terrain-tileset';
   readonly masks: number;
   readonly phases: number;
+  readonly variants: number;
 }
 
 export type ArtImageSpec =
@@ -367,6 +368,9 @@ export function isTerrainBuiltFloor(material: TerrainMaterial | null): boolean {
   return material !== null && (TERRAIN_BUILT_FLOORS as readonly TerrainMaterial[]).includes(material);
 }
 
+/** The natural materials, with organic edges: every terrain material but the built floors, in TERRAIN_MATERIALS order. */
+export const TERRAIN_ORGANIC_MATERIALS: readonly TerrainMaterial[] = TERRAIN_MATERIALS.filter((material) => !isTerrainBuiltFloor(material));
+
 /** Water is solid for the client and the server alike; every other material is walkable. */
 export const TERRAIN_WALKABLE: Readonly<Record<TerrainMaterial, boolean>> = {
   water: false,
@@ -389,6 +393,38 @@ export const TERRAIN_CORNER_BITS = { nw: 1, ne: 2, sw: 4, se: 8 } as const;
 export const TERRAIN_MASKS = 16;
 /** One tileset row per motif tile: the terrain keeps the floor motif's 96px repeat. */
 export const TERRAIN_PHASES = MOTIF_TILES * MOTIF_TILES;
+/**
+ * Organic edges come in this many shapes per mask and phase, picked per display cell
+ * (`terrainVariantAt`). With one shape, the edge noise repeated with the 96px motif, and since
+ * terrain is painted in 9x9 blocks (a multiple of it), every block side drew the same curve.
+ */
+export const TERRAIN_VARIANTS = 3;
+/**
+ * The void's color, `0xRRGGBB`: the office draws it behind the terrain (`VOID_COLOR`) and the
+ * tileset's void caps paint it, so a cap never shows as a different black.
+ */
+export const TERRAIN_VOID_COLOR = 0x000000;
+
+/** A layer mask and the void corners of its cell (`voidMask`, always inside `mask`: void counts as covered). */
+export interface TerrainVoidEdgeCombo {
+  readonly mask: number;
+  readonly voidMask: number;
+}
+
+/**
+ * Every organic edge that can meet the void, in (mask, voidMask) order: a void corner, a corner of
+ * the material itself, and at least one uncovered corner (mask 15 has no edge). Its noise fades out
+ * next to the void quarters, so these get their own tiles (`terrainVoidEdgeIndex`), 36 of them.
+ */
+export const TERRAIN_VOID_EDGE_COMBOS: readonly TerrainVoidEdgeCombo[] = (() => {
+  const combos: TerrainVoidEdgeCombo[] = [];
+  for (let mask = 1; mask < 15; mask += 1) {
+    for (let voidMask = 1; voidMask < 16; voidMask += 1) {
+      if ((voidMask & ~mask) === 0 && voidMask !== mask) combos.push({ mask, voidMask });
+    }
+  }
+  return combos;
+})();
 
 /** Small transparent details for a decal layer over the terrain (flowers, pebbles, lily pads). */
 export const TERRAIN_DECALS = [
@@ -405,19 +441,28 @@ export type TerrainDecal = (typeof TERRAIN_DECALS)[number];
 
 /**
  * One shared tileset for every terrain layer: a band of TERRAIN_PHASES rows per
- * material (TERRAIN_MATERIALS order), each row the 16 corner masks of one motif
- * phase, then one row of decals, then one row of water bank tiles by corner
- * mask (`terrainBankIndex`). Mask 0 is an empty tile so the index stays
- * arithmetic. Colors are capped per material band; the decal and bank rows
- * share the last one.
+ * material (TERRAIN_MATERIALS order), each row the TERRAIN_VARIANTS edge
+ * variants of one motif phase side by side, 16 corner masks each (built floors
+ * only fill variant 0), then one row of decals, then one row with the water
+ * bank tiles by corner mask (`terrainBankIndex`) in its first 16 columns and
+ * the void caps (`terrainVoidCapIndex`) in the next 16, then the void edge
+ * tiles (`terrainVoidEdgeIndex`) one after the other over the full width,
+ * the last row partly empty. Mask 0 is an empty tile so the index stays
+ * arithmetic. Colors are capped per band of TERRAIN_PHASES rows: the material
+ * bands, then bands that mix decals, banks, caps and the void edges of up to
+ * two organic materials, which share their colors with the material bands.
  */
 export const TERRAIN_TILESET: TerrainTilesetSpec = {
   kind: 'terrain-tileset',
   frame: { width: ART_TILE, height: ART_TILE },
-  columns: TERRAIN_MASKS,
-  rows: TERRAIN_MATERIALS.length * TERRAIN_PHASES + 2,
+  columns: TERRAIN_MASKS * TERRAIN_VARIANTS,
+  rows:
+    TERRAIN_MATERIALS.length * TERRAIN_PHASES +
+    2 +
+    Math.ceil((TERRAIN_ORGANIC_MATERIALS.length * TERRAIN_PHASES * TERRAIN_VOID_EDGE_COMBOS.length) / (TERRAIN_MASKS * TERRAIN_VARIANTS)),
   masks: TERRAIN_MASKS,
   phases: TERRAIN_PHASES,
+  variants: TERRAIN_VARIANTS,
   // Edge tiles are partly transparent and carry a translucent contact shadow.
   alpha: 'partial',
   transparentCorners: false,
@@ -427,7 +472,8 @@ export const TERRAIN_TILESET: TerrainTilesetSpec = {
 
 /**
  * Terrain layers a map needs: a cell has four corners, so at most four
- * materials, plus the water bank over the lowest one.
+ * materials, plus the water bank over the lowest one; with a void corner, at
+ * most three materials, the bank and the void cap.
  */
 export const TERRAIN_LAYER_COUNT = 5;
 /**
@@ -440,8 +486,8 @@ export const TERRAIN_LAYER_ORIGIN = -ART_TILE / 2;
 
 /**
  * The material at each corner of a display cell. `null` is a corner without
- * terrain (the office layout's void): nothing is drawn for it, so the
- * materials around it edge straight over the background.
+ * terrain (the office layout's void): the materials run on under it and a void
+ * cap covers its quarter, so every edge against the void is the tile line.
  */
 export interface TerrainCorners {
   readonly nw: TerrainMaterial | null;
@@ -462,7 +508,13 @@ export interface TerrainBankTile {
   readonly mask: number;
 }
 
-export type TerrainLayerTile = TerrainMaterialTile | TerrainBankTile;
+/** The void over the corners in `mask`: square opaque quarters in TERRAIN_VOID_COLOR with a 1px rim outside. */
+export interface TerrainVoidTile {
+  readonly void: true;
+  readonly mask: number;
+}
+
+export type TerrainLayerTile = TerrainMaterialTile | TerrainBankTile | TerrainVoidTile;
 
 export function terrainCornerMask(corners: Readonly<Record<keyof TerrainCorners, boolean>>): number {
   return (
@@ -484,20 +536,64 @@ export function terrainPhaseOrigin(phase: number): Point {
   return { x: half + (phase % MOTIF_TILES) * ART_TILE, y: half + Math.floor(phase / MOTIF_TILES) * ART_TILE };
 }
 
-export function terrainTileIndex(material: TerrainMaterial, mask: number, phase: number): number {
+/**
+ * Edge variant of display cell (cx, cy): an integer hash of the cell, so neighbors pick
+ * independently and neither the 3-cell motif nor the 9-cell terrain block repeats a shape.
+ */
+export function terrainVariantAt(cx: number, cy: number): number {
+  let hash = Math.imul(cx, 0x9e3779b1) ^ Math.imul(cy, 0x85ebca6b);
+  hash = Math.imul(hash ^ (hash >>> 16), 0x7feb352d);
+  hash = Math.imul(hash ^ (hash >>> 15), 0x846ca68b);
+  hash ^= hash >>> 16;
+  return (hash >>> 0) % TERRAIN_VARIANTS;
+}
+
+export function terrainTileIndex(material: TerrainMaterial, mask: number, phase: number, variant = 0): number {
   if (!Number.isInteger(mask) || mask < 1 || mask >= TERRAIN_MASKS) throw new Error(`Invalid terrain mask ${mask}`);
   if (!Number.isInteger(phase) || phase < 0 || phase >= TERRAIN_PHASES) throw new Error(`Invalid terrain phase ${phase}`);
-  return (TERRAIN_MATERIALS.indexOf(material) * TERRAIN_PHASES + phase) * TERRAIN_MASKS + mask;
+  if (!Number.isInteger(variant) || variant < 0 || variant >= TERRAIN_VARIANTS) throw new Error(`Invalid terrain variant ${variant}`);
+  return (TERRAIN_MATERIALS.indexOf(material) * TERRAIN_PHASES + phase) * TERRAIN_TILESET.columns + variant * TERRAIN_MASKS + mask;
 }
 
 export function terrainDecalIndex(decal: TerrainDecal): number {
-  return TERRAIN_MATERIALS.length * TERRAIN_PHASES * TERRAIN_MASKS + TERRAIN_DECALS.indexOf(decal);
+  return TERRAIN_MATERIALS.length * TERRAIN_PHASES * TERRAIN_TILESET.columns + TERRAIN_DECALS.indexOf(decal);
 }
+
+/** First index of the row after the decals: the water banks, then the void caps. */
+const TERRAIN_BANK_ROW_START = (TERRAIN_MATERIALS.length * TERRAIN_PHASES + 1) * TERRAIN_TILESET.columns;
 
 /** The water bank tile casting the built floors' shadow outside the corners in `mask` (1-15); one per mask, any phase. */
 export function terrainBankIndex(mask: number): number {
   if (!Number.isInteger(mask) || mask < 1 || mask >= TERRAIN_MASKS) throw new Error(`Invalid terrain bank mask ${mask}`);
-  return (TERRAIN_MATERIALS.length * TERRAIN_PHASES + 1) * TERRAIN_MASKS + mask;
+  return TERRAIN_BANK_ROW_START + mask;
+}
+
+/** The void cap over the corners in `mask` (1-15); one per mask, any phase or variant. */
+export function terrainVoidCapIndex(mask: number): number {
+  if (!Number.isInteger(mask) || mask < 1 || mask >= TERRAIN_MASKS) throw new Error(`Invalid terrain void cap mask ${mask}`);
+  return TERRAIN_BANK_ROW_START + TERRAIN_MASKS + mask;
+}
+
+/** First index after the bank row: the void edge tiles. */
+const TERRAIN_VOID_EDGE_START = TERRAIN_BANK_ROW_START + TERRAIN_TILESET.columns;
+
+/**
+ * The tile of an organic `material` over `mask` in a cell whose void corners are `voidMask` (a
+ * TERRAIN_VOID_EDGE_COMBOS pair), for one motif phase. One shape per phase: next to the void the
+ * edge has to meet the tile line, so there is nothing for a variant to vary.
+ */
+export function terrainVoidEdgeIndex(material: TerrainMaterial, mask: number, voidMask: number, phase: number): number {
+  const organic = TERRAIN_ORGANIC_MATERIALS.indexOf(material);
+  if (organic < 0) throw new Error(`Void edge tiles are organic only, not ${material}`);
+  const combo = TERRAIN_VOID_EDGE_COMBOS.findIndex((entry) => entry.mask === mask && entry.voidMask === voidMask);
+  if (combo < 0) throw new Error(`Invalid terrain void edge ${mask}/${voidMask}`);
+  if (!Number.isInteger(phase) || phase < 0 || phase >= TERRAIN_PHASES) throw new Error(`Invalid terrain phase ${phase}`);
+  return TERRAIN_VOID_EDGE_START + (organic * TERRAIN_PHASES + phase) * TERRAIN_VOID_EDGE_COMBOS.length + combo;
+}
+
+/** The void corners of a display cell. */
+export function terrainVoidMask(corners: TerrainCorners): number {
+  return terrainCornerMask({ nw: corners.nw === null, ne: corners.ne === null, sw: corners.sw === null, se: corners.se === null });
 }
 
 /**
@@ -505,14 +601,18 @@ export function terrainBankIndex(mask: number): number {
  * full, then each higher material over the corners at or above it. Nesting
  * the masks means every edge blends over the material just below it.
  *
+ * Void ranks above every material, so the materials run on under the void
+ * corners, and a void cap over those corners comes last: an organic edge
+ * would wave over the black background, the cap's square quarters put every
+ * edge against the void on the tile line instead.
+ *
  * Built floors cast no shadow, which would paint past their walkable tiles
  * onto any neighbor. Over water, a bank tile right above it puts that shadow
  * back on the built-floor corners: the higher materials then cover all of it
  * but what falls on the water, which keeps reading as sunk below the floors.
  */
 export function terrainCellLayers(corners: TerrainCorners): TerrainLayerTile[] {
-  // Void ranks below every material: no layer for it, and no corner bit for it in any mask.
-  const rank = (material: TerrainMaterial | null): number => (material === null ? -1 : TERRAIN_MATERIALS.indexOf(material));
+  const rank = (material: TerrainMaterial | null): number => (material === null ? TERRAIN_MATERIALS.length : TERRAIN_MATERIALS.indexOf(material));
   const present = [...new Set([corners.nw, corners.ne, corners.sw, corners.se])]
     .filter((material): material is TerrainMaterial => material !== null)
     .sort((a, b) => rank(a) - rank(b));
@@ -532,6 +632,8 @@ export function terrainCellLayers(corners: TerrainCorners): TerrainLayerTile[] {
     se: isTerrainBuiltFloor(corners.se),
   });
   if (present[0] === 'water' && built !== 0) layers.splice(1, 0, { bank: true, mask: built });
+  const voids = terrainVoidMask(corners);
+  if (present.length > 0 && voids !== 0) layers.push({ void: true, mask: voids });
   return layers;
 }
 
@@ -553,9 +655,11 @@ export function terrainCellCorners(
 
 /**
  * Tile data of the TERRAIN_LAYER_COUNT layers of a map, `[layer][cy][cx]`,
- * `-1` where a layer draws nothing (Phaser's empty tile), void corners
- * (`null`) included. Each layer is
- * (width + 1) x (height + 1) cells placed at TERRAIN_LAYER_ORIGIN.
+ * `-1` where a layer draws nothing (Phaser's empty tile), cells whose four
+ * corners are void (`null`) included. Each layer is
+ * (width + 1) x (height + 1) cells placed at TERRAIN_LAYER_ORIGIN. Natural
+ * materials take the cell's edge variant, or their void edge tile when the
+ * cell has void corners and the layer an edge; built floors, square, only have variant 0.
  */
 export function terrainLayerData(width: number, height: number, terrainAt: (tx: number, ty: number) => TerrainMaterial | null): number[][][] {
   const layers = Array.from({ length: TERRAIN_LAYER_COUNT }, () =>
@@ -564,8 +668,16 @@ export function terrainLayerData(width: number, height: number, terrainAt: (tx: 
   for (let cy = 0; cy <= height; cy += 1) {
     for (let cx = 0; cx <= width; cx += 1) {
       const phase = terrainPhaseAt(cx, cy);
-      terrainCellLayers(terrainCellCorners(terrainAt, width, height, cx, cy)).forEach((tile, layer) => {
-        layers[layer]![cy]![cx] = 'bank' in tile ? terrainBankIndex(tile.mask) : terrainTileIndex(tile.material, tile.mask, phase);
+      const variant = terrainVariantAt(cx, cy);
+      const corners = terrainCellCorners(terrainAt, width, height, cx, cy);
+      const voids = terrainVoidMask(corners);
+      const materialIndex = (tile: TerrainMaterialTile): number => {
+        if (isTerrainBuiltFloor(tile.material)) return terrainTileIndex(tile.material, tile.mask, phase);
+        if (voids !== 0 && tile.mask !== 15) return terrainVoidEdgeIndex(tile.material, tile.mask, voids, phase);
+        return terrainTileIndex(tile.material, tile.mask, phase, variant);
+      };
+      terrainCellLayers(corners).forEach((tile, layer) => {
+        layers[layer]![cy]![cx] = 'bank' in tile ? terrainBankIndex(tile.mask) : 'void' in tile ? terrainVoidCapIndex(tile.mask) : materialIndex(tile);
       });
     }
   }
@@ -911,6 +1023,8 @@ export interface ArtTilesetPiece extends ArtPieceBase {
   readonly columns: number;
   readonly masks: number;
   readonly phases: number;
+  /** Edge variants per mask and phase, side by side in each row (`terrainTileIndex`). */
+  readonly variants: number;
   readonly materials: readonly ArtTilesetMaterial[];
   readonly decals: readonly { readonly decal: TerrainDecal; readonly tile: number }[];
 }

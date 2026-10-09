@@ -1489,9 +1489,10 @@
       "author": "HugoGT",
       "license": "proprietary-internal",
       "tileSize": 32,
-      "columns": 16,
+      "columns": 48,
       "masks": 16,
       "phases": 9,
+      "variants": 3,
       "materials": [
         {
           "material": "water",
@@ -1503,77 +1504,77 @@
           "material": "sand",
           "floor": "floor-sand",
           "walkable": true,
-          "firstTile": 144
+          "firstTile": 432
         },
         {
           "material": "dirt",
           "floor": "floor-dirt",
           "walkable": true,
-          "firstTile": 288
+          "firstTile": 864
         },
         {
           "material": "cobblestone",
           "floor": "floor-cobblestone",
           "walkable": true,
-          "firstTile": 432
+          "firstTile": 1296
         },
         {
           "material": "grass",
           "floor": "floor-grass",
           "walkable": true,
-          "firstTile": 576
+          "firstTile": 1728
         },
         {
           "material": "wood",
           "floor": "floor-wood",
           "walkable": true,
-          "firstTile": 720
+          "firstTile": 2160
         },
         {
           "material": "tile",
           "floor": "floor-tile",
           "walkable": true,
-          "firstTile": 864
+          "firstTile": 2592
         },
         {
           "material": "carpet",
           "floor": "floor-carpet",
           "walkable": true,
-          "firstTile": 1008
+          "firstTile": 3024
         }
       ],
       "decals": [
         {
           "decal": "flowers-white",
-          "tile": 1152
+          "tile": 3456
         },
         {
           "decal": "flowers-yellow",
-          "tile": 1153
+          "tile": 3457
         },
         {
           "decal": "flowers-blue",
-          "tile": 1154
+          "tile": 3458
         },
         {
           "decal": "clover",
-          "tile": 1155
+          "tile": 3459
         },
         {
           "decal": "pebbles",
-          "tile": 1156
+          "tile": 3460
         },
         {
           "decal": "mushrooms",
-          "tile": 1157
+          "tile": 3461
         },
         {
           "decal": "leaves",
-          "tile": 1158
+          "tile": 3462
         },
         {
           "decal": "lily-pad",
-          "tile": 1159
+          "tile": 3463
         }
       ],
       "files": [
@@ -1581,9 +1582,9 @@
           "role": "sheet",
           "path": "tileset/terrain.png",
           "imageKind": "terrain-tileset",
-          "width": 512,
-          "height": 2368,
-          "sha256": "053cd2ba872ec6140f9fd29a57c572f72f7377c500a1da12944da3208277114b"
+          "width": 1536,
+          "height": 3456,
+          "sha256": "efc16485269581c24bb1701cede530146f5950393b8b36544323563b0e0f7abc"
         }
       ]
     },

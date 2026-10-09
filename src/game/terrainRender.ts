@@ -6,6 +6,7 @@
  */
 
 import {
+  TERRAIN_VOID_COLOR,
   bridgeFrameIndex,
   hedgeFrameIndex,
   terrainDecalIndex,
@@ -20,10 +21,11 @@ import { LAYOUT_MATERIALS, terrainMaterialAt, type LayoutMaterial, type LayoutPr
 
 /**
  * The color of the void: the camera background around and under the world,
- * the minimap's too, and the void tile of the flat fallback. Void is drawn as
- * nothing, so an unbuilt map reads as one black screen around its terrain.
+ * the minimap's too, and the void tile of the flat fallback. Next to terrain,
+ * the tileset's void caps paint the same color (`TERRAIN_VOID_COLOR`), so an
+ * unbuilt map reads as one black screen around its terrain.
  */
-export const VOID_COLOR = 0x000000;
+export const VOID_COLOR = TERRAIN_VOID_COLOR;
 
 /** One flat color per material, for the tileset drawn when the pack is missing (`LAYOUT_MATERIALS` order). */
 export const TERRAIN_FLAT_COLORS: Readonly<Record<LayoutMaterial, number>> = {
@@ -48,7 +50,7 @@ export function drawnTerrainAt(terrain: TerrainSnapshot, tx: number, ty: number)
  * Data of the `TERRAIN_LAYER_COUNT` dual-grid layers (`[layer][cy][cx]`,
  * `-1` empty), drawn at `TERRAIN_LAYER_ORIGIN` (artContract.ts). Transitions between any two
  * neighbors come from the corner masks of `terrainLayerData`; against the
- * void a material simply ends on its own edge, over the black background.
+ * void a material runs on under an opaque void cap, so its edge is the tile line.
  */
 export function terrainTileData(terrain: TerrainSnapshot): number[][][] {
   return terrainLayerData(terrain.width, terrain.height, (tx, ty) => drawnTerrainAt(terrain, tx, ty));

@@ -198,7 +198,7 @@ describe('art pack manifest', () => {
 
   it('describes the terrain tileset: each material band, its floor and walkability, and the decals', () => {
     const tileset = manifest.pieces.find((piece): piece is ArtTilesetPiece => piece.kind === 'tileset')!;
-    expect([tileset.tileSize, tileset.columns, tileset.masks, tileset.phases]).toEqual([32, 16, 16, 9]);
+    expect([tileset.tileSize, tileset.columns, tileset.masks, tileset.phases, tileset.variants]).toEqual([32, 48, 16, 9, 3]);
     expect(tileset.materials.map((entry) => entry.material)).toEqual([...TERRAIN_MATERIALS]);
     const ids = new Set(manifest.pieces.map((piece) => piece.id));
     for (const entry of tileset.materials) {

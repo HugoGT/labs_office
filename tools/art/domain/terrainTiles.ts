@@ -7,7 +7,10 @@
  * - `organic` (natural ground): the corners blended bilinearly, plus smooth noise that repeats
  *   with the 96px motif. Both depend only on the shared corners and the world position, so an edge
  *   runs on from one cell into the next without a seam, and it never crosses a cell side where both
- *   corners agree.
+ *   corners agree. On top of that, each of the TERRAIN_VARIANTS edge variants adds its own noise
+ *   through a window that is zero on all four cell sides: the edge takes another shape inside the
+ *   cell, but the field on its sides is the same whatever variant a neighbor picks. Without it the
+ *   motif-periodic noise drew the same curve on every side of every 9x9 block.
  * - `square` (built floors): each quarter of the cell takes its corner, so the edge is the map
  *   tile line, like the walls standing on it.
  *
@@ -17,13 +20,22 @@
  * They cast no shadow either: it painted two pixels past the tile line, so the floor looked wider
  * than its walkable tiles. Over water that same shadow comes back as a bank tile per corner mask
  * (`terrainBankTile`), drawn right over the water, so the water still reads as sunk below them.
+ *
+ * Against the void (no terrain) the materials run on under the void corners and a void cap
+ * (`terrainVoidCapTile`) covers those quarters in the void color, so every edge against the void
+ * is straight on the tile line, with the built floors' one pixel rim on the terrain side. An
+ * organic edge in a cell with void corners comes from its own tile (`terrainVoidEdgeTile`), whose
+ * field turns square near the void quarters, so a shore meets the void line on the tile line too.
  */
 import { OUTLINE_INK } from '../../../src/game/artColor.ts';
 import {
   ART_TILE,
   FLOOR_MOTIF_SIZE,
   TERRAIN_CORNER_BITS,
+  TERRAIN_VARIANTS,
+  TERRAIN_VOID_COLOR,
   isTerrainBuiltFloor,
+  terrainVoidEdgeIndex,
   terrainPhaseOrigin,
   type TerrainDecal,
   type TerrainMaterial,
@@ -125,14 +137,100 @@ function edgeNoise(material: TerrainMaterial): Noise {
   return noise;
 }
 
-/** Coverage field of one pixel of a cell: covered at 0.5 and above. */
-export function terrainField(material: TerrainMaterial, mask: number, phase: number, x: number, y: number): number {
+const variantNoiseCache = new Map<string, Noise>();
+
+/** How each variant bends the edge: variant 0 keeps the shared curve, 1 swells the cover, 2 shrinks it. */
+const VARIANT_BIAS = [0, 1, -1] as const;
+if (VARIANT_BIAS.length !== TERRAIN_VARIANTS) throw new Error('One edge bias per terrain variant');
+
+/**
+ * Noise in [-1, 1] of one edge variant, one cell wide (the window pins it to the cell). A pure
+ * random noise was sometimes flat, so two variants drew the same edge; a signed bias plus a smaller
+ * smooth wobble always pushes the edge one way, by a different amount along it.
+ */
+function variantNoise(material: TerrainMaterial, variant: number): Noise {
+  const key = `${material}:${variant}`;
+  const cached = variantNoiseCache.get(key);
+  if (cached) return cached;
+  const bias = VARIANT_BIAS[variant] as number;
+  const seed = TERRAIN_EDGES[material].seed * 31 + 7919 * (variant + 1);
+  const wobble = periodicNoise(seed, ART_TILE, 4);
+  const noise: Noise = bias === 0 ? () => 0 : (x, y) => bias * (0.7 + 0.3 * (wobble(x, y) * 2 - 1));
+  variantNoiseCache.set(key, noise);
+  return noise;
+}
+
+/** Coverage field of one pixel of a cell: covered at 0.5 and above. `x`, `y` -0.5 and 31.5 are the cell sides. */
+export function terrainField(material: TerrainMaterial, mask: number, phase: number, variant: number, x: number, y: number): number {
+  if (!Number.isInteger(variant) || variant < 0 || variant >= TERRAIN_VARIANTS) throw new Error(`Invalid terrain variant ${variant}`);
   const u = (x + 0.5) / ART_TILE;
   const v = (y + 0.5) / ART_TILE;
-  const edge = TERRAIN_EDGES[material];
-  if (edge.style === 'square') return squareField(mask, u, v);
+  if (TERRAIN_EDGES[material].style === 'square') return squareField(mask, u, v);
+  return organicField(material, mask, phase, x, y) + variantTerm(material, mask, variant, x, y);
+}
+
+/** The organic field shared by every variant: the corners blended bilinearly plus the motif-periodic noise. */
+function organicField(material: TerrainMaterial, mask: number, phase: number, x: number, y: number): number {
   const origin = terrainPhaseOrigin(phase);
-  return bilinear(mask, u, v) + edge.amplitude * edgeNoise(material)(origin.x + x + 0.5, origin.y + y + 0.5);
+  const noise = TERRAIN_EDGES[material].amplitude * edgeNoise(material)(origin.x + x + 0.5, origin.y + y + 0.5);
+  return bilinear(mask, (x + 0.5) / ART_TILE, (y + 0.5) / ART_TILE) + noise;
+}
+
+/** What an edge variant adds to the organic field: its noise through a window that is zero on the cell sides. */
+function variantTerm(material: TerrainMaterial, mask: number, variant: number, x: number, y: number): number {
+  // The full mask has no edge to vary; the extra noise could only darken its middle into a stray rim.
+  if (mask === 15) return 0;
+  const u = (x + 0.5) / ART_TILE;
+  const v = (y + 0.5) / ART_TILE;
+  const window = Math.sin(Math.PI * u) * Math.sin(Math.PI * v);
+  return TERRAIN_EDGES[material].amplitude * window * variantNoise(material, variant)(x + 0.5, y + 0.5);
+}
+
+const validVoidEdges = new Set<string>();
+
+/** Throws for a pair `terrainVoidEdgeIndex` has no tile for; remembered, since the field runs per pixel. */
+function checkVoidEdge(material: TerrainMaterial, mask: number, voidMask: number, phase: number): void {
+  const key = `${material}:${mask}:${voidMask}:${phase}`;
+  if (validVoidEdges.has(key)) return;
+  terrainVoidEdgeIndex(material, mask, voidMask, phase);
+  validVoidEdges.add(key);
+}
+
+/**
+ * Weight of the edge noise in a cell with the void corners `voidMask`, at pixel (x, y): the
+ * Chebyshev distance to the nearest void quarter over half a cell, clamped to 1. It is 1 on every
+ * cell side away from the void and depends only on the void corners of a side along it, so the
+ * neighbor across any side sees the same weight there.
+ */
+export function terrainVoidWeight(voidMask: number, x: number, y: number): number {
+  const u = (x + 0.5) / ART_TILE;
+  const v = (y + 0.5) / ART_TILE;
+  let weight = 1;
+  for (const corner of CORNERS) {
+    if (bit(voidMask, corner.bit) === 0) continue;
+    const distance = Math.max(0, Math.abs(u - corner.u) - 0.5, Math.abs(v - corner.v) - 0.5);
+    weight = Math.min(weight, Math.min(1, distance / 0.5));
+  }
+  return weight;
+}
+
+/**
+ * Coverage field of an organic material's void edge tile: the plain field weighted by
+ * `terrainVoidWeight` (eased), the square field taking over next to the void quarters. Fading only the
+ * noise was not enough: the bilinear edge itself leaves a corner of the cell diagonally, so a
+ * three-corner arc still ran a wedge of the higher material down the void line. With the square
+ * field there, an edge meets the void line square on the tile line, and the weight keeps every
+ * side seamless: 1 away from the void, the same on both sides of a void corner.
+ */
+export function terrainVoidEdgeField(material: TerrainMaterial, mask: number, voidMask: number, phase: number, x: number, y: number): number {
+  checkVoidEdge(material, mask, voidMask, phase);
+  // Eased, so the square field holds a little longer by the void: with the linear weight, a pixel
+  // where the void line meets another quarter still took the higher material.
+  const linear = terrainVoidWeight(voidMask, x, y);
+  const weight = linear * linear * (3 - 2 * linear);
+  const square = squareField(mask, (x + 0.5) / ART_TILE, (y + 0.5) / ART_TILE);
+  if (weight === 0) return square;
+  return weight * organicField(material, mask, phase, x, y) + (1 - weight) * square;
 }
 
 const motifCache = new Map<TerrainMaterial, PixelBuffer>();
@@ -145,27 +243,48 @@ function motifOf(material: TerrainMaterial): PixelBuffer {
   return motif;
 }
 
-/** The tile of `material` covering the corners in `mask` (1-15), for one motif phase. */
-export function terrainEdgeTile(material: TerrainMaterial, mask: number, phase: number): PixelBuffer {
+/** Paints a tile of `material` from its coverage field: the motif, the rim inside the edge and, where `shaded`, the contact shadow outside. */
+function paintEdgeTile(material: TerrainMaterial, phase: number, fieldAt: (x: number, y: number) => number, shaded: (x: number, y: number) => boolean): PixelBuffer {
   const motif = motifOf(material);
   const origin = terrainPhaseOrigin(phase);
   const { rim, shadow } = TERRAIN_EDGES[material];
   const tile = new PixelBuffer(ART_TILE, ART_TILE);
   for (let y = 0; y < ART_TILE; y += 1) {
     for (let x = 0; x < ART_TILE; x += 1) {
-      const field = terrainField(material, mask, phase, x, y);
+      const field = fieldAt(x, y);
       if (field >= 0.5) {
         const color = motif.getPixel((origin.x + x) % FLOOR_MOTIF_SIZE, (origin.y + y) % FLOOR_MOTIF_SIZE);
         if (field < 0.5 + PIXEL) tile.setPixel(x, y, mixRgba(color, OUTLINE_INK, 0.38));
         else if (rim === 2 && field < 0.5 + 2 * PIXEL) tile.setPixel(x, y, mixRgba(color, OUTLINE_INK, 0.16));
         else tile.setPixel(x, y, color);
-      } else if (shadow) {
+      } else if (shadow && shaded(x, y)) {
         const shade = contactShadow(field);
         if (shade !== null) tile.setPixel(x, y, shade);
       }
     }
   }
   return tile;
+}
+
+/** The tile of `material` covering the corners in `mask` (1-15), for one motif phase and edge variant. */
+export function terrainEdgeTile(material: TerrainMaterial, mask: number, phase: number, variant: number): PixelBuffer {
+  return paintEdgeTile(material, phase, (x, y) => terrainField(material, mask, phase, variant, x, y), () => true);
+}
+
+/**
+ * The tile of an organic `material` over `mask` in a cell whose void corners are `voidMask`
+ * (`terrainVoidEdgeField`). It casts no shadow in the two pixels next to a void quarter: the
+ * material there runs on under the void cap, whose own rim is the edge, and the neighbor across a
+ * side may not draw this material at all, so a shadow there would stop short at the cell side.
+ */
+export function terrainVoidEdgeTile(material: TerrainMaterial, mask: number, voidMask: number, phase: number): PixelBuffer {
+  terrainVoidEdgeIndex(material, mask, voidMask, phase);
+  return paintEdgeTile(
+    material,
+    phase,
+    (x, y) => terrainVoidEdgeField(material, mask, voidMask, phase, x, y),
+    (x, y) => terrainVoidWeight(voidMask, x, y) >= 4 * PIXEL,
+  );
 }
 
 /**
@@ -178,6 +297,27 @@ export function terrainBankTile(mask: number): PixelBuffer {
     for (let x = 0; x < ART_TILE; x += 1) {
       const shade = contactShadow(squareField(mask, (x + 0.5) / ART_TILE, (y + 0.5) / ART_TILE));
       if (shade !== null) tile.setPixel(x, y, shade);
+    }
+  }
+  return tile;
+}
+
+const VOID = rgba((TERRAIN_VOID_COLOR >> 16) & 0xff, (TERRAIN_VOID_COLOR >> 8) & 0xff, TERRAIN_VOID_COLOR & 0xff);
+/** The built floors' one pixel rim, alone: drawn over whatever material runs on under the void. */
+const VOID_RIM: Rgba = { ...OUTLINE_INK, a: Math.round(0.38 * 255) };
+
+/**
+ * The void cap of mask `m` (1-15): the square quarters of the corners in `m` painted opaque in the
+ * void color, and a one pixel translucent rim just outside them, over the material's side. Like the
+ * banks it does not depend on the phase or the variant, so one row of the tileset holds them all.
+ */
+export function terrainVoidCapTile(mask: number): PixelBuffer {
+  const tile = new PixelBuffer(ART_TILE, ART_TILE);
+  for (let y = 0; y < ART_TILE; y += 1) {
+    for (let x = 0; x < ART_TILE; x += 1) {
+      const field = squareField(mask, (x + 0.5) / ART_TILE, (y + 0.5) / ART_TILE);
+      if (field >= 0.5) tile.setPixel(x, y, VOID);
+      else if (field >= 0.5 - PIXEL) tile.setPixel(x, y, VOID_RIM);
     }
   }
   return tile;
