@@ -37,6 +37,9 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
     screenShareAvailable: true,
     recordableMedia: true,
     onToggleScreenShare: vi.fn(),
+    cameraFilter: 'none' as const,
+    cameraBlurAvailable: true,
+    onChangeCameraFilter: vi.fn(),
     ...overrides,
   };
   render(<BottomBar {...props} />);
@@ -126,6 +129,9 @@ describe('BottomBar', () => {
         screenShareAvailable={false}
         recordableMedia={false}
         onToggleScreenShare={vi.fn()}
+        cameraFilter="none"
+        cameraBlurAvailable
+        onChangeCameraFilter={vi.fn()}
       />,
     );
     expect(screen.getByText('proximidad').tagName).toBe('B');
@@ -149,6 +155,9 @@ describe('BottomBar', () => {
         screenShareAvailable={false}
         recordableMedia={false}
         onToggleScreenShare={vi.fn()}
+        cameraFilter="none"
+        cameraBlurAvailable
+        onChangeCameraFilter={vi.fn()}
       />,
     );
     expect(screen.getByText('Cafeteria').tagName).toBe('B');
@@ -239,6 +248,9 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
         screenShareAvailable={false}
         recordableMedia={false}
         onToggleScreenShare={vi.fn()}
+        cameraFilter="none"
+        cameraBlurAvailable
+        onChangeCameraFilter={vi.fn()}
       />,
     );
     // El punto es decorativo y no lleva marcado de prueba: se alcanza desde
@@ -265,6 +277,9 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
         screenShareAvailable={false}
         recordableMedia={false}
         onToggleScreenShare={vi.fn()}
+        cameraFilter="none"
+        cameraBlurAvailable
+        onChangeCameraFilter={vi.fn()}
       />,
     );
     expect(dot).toHaveStyle({ background: statusCssColor('r') });
@@ -583,6 +598,9 @@ describe('BottomBar: indicador de grabacion junto a "Sala privada" (#85)', () =>
         screenShareAvailable={false}
         recordableMedia={false}
         onToggleScreenShare={vi.fn()}
+        cameraFilter="none"
+        cameraBlurAvailable
+        onChangeCameraFilter={vi.fn()}
       />,
     );
     expect(screen.getByText(/REC/)).toBeInTheDocument();
@@ -606,9 +624,52 @@ describe('BottomBar: indicador de grabacion junto a "Sala privada" (#85)', () =>
         screenShareAvailable={false}
         recordableMedia={false}
         onToggleScreenShare={vi.fn()}
+        cameraFilter="none"
+        cameraBlurAvailable
+        onChangeCameraFilter={vi.fn()}
       />,
     );
     expect(screen.queryByText(/REC/)).not.toBeInTheDocument();
     expect(screen.getByText(/Sala privada/)).toHaveTextContent(/^🔒 Sala privada: Sala de Juntas$/);
+  });
+});
+
+describe('BottomBar: camera filter caret', () => {
+  it('sits right after the camera button, inside the call controls', () => {
+    renderBar();
+
+    const toolbar = screen.getByRole('toolbar', { name: 'Controles de llamada' });
+    const buttons = within(toolbar).getAllByRole('button');
+    const camera = within(toolbar).getByRole('button', { name: /Cámara/ });
+    expect(buttons[buttons.indexOf(camera) + 1]).toHaveAccessibleName('Opciones de cámara');
+  });
+
+  it('shows the active filter and reports a pick', async () => {
+    const { onChangeCameraFilter } = renderBar({ cameraFilter: 'blur' });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Opciones de cámara' }));
+    expect(screen.getByRole('menuitemradio', { name: 'Desenfoque' })).toHaveAttribute('aria-checked', 'true');
+    await userEvent.click(screen.getByRole('menuitemradio', { name: 'Sin filtro' }));
+
+    expect(onChangeCameraFilter).toHaveBeenCalledExactlyOnceWith('none');
+  });
+
+  it('disables blur where the browser cannot do it', async () => {
+    renderBar({ cameraBlurAvailable: false });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Opciones de cámara' }));
+
+    expect(screen.getByRole('menuitemradio', { name: 'Desenfoque' })).toBeDisabled();
+  });
+
+  it.each([
+    { name: 'without LiveKit', overrides: { audioAvailable: false }, title: 'Audio no disponible: sin conexion a LiveKit' },
+    { name: 'in "No molestar"', overrides: { status: 'r' as const }, title: 'No molestar: no publicas micrófono ni cámara' },
+  ])('is disabled $name, with the camera button and its reason', ({ overrides, title }) => {
+    renderBar(overrides);
+
+    const caret = screen.getByRole('button', { name: 'Opciones de cámara' });
+    expect(caret).toBeDisabled();
+    expect(caret).toHaveAttribute('title', title);
   });
 });

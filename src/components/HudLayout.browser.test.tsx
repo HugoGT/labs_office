@@ -101,6 +101,9 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
       screenShareAvailable
       recordableMedia
       onToggleScreenShare={vi.fn()}
+      cameraFilter="none"
+      cameraBlurAvailable
+      onChangeCameraFilter={vi.fn()}
       {...overrides}
     />,
   );
@@ -139,6 +142,32 @@ describe('HUD layout: bottom bar (#87)', () => {
 
     expect(box(controls).top).toBeGreaterThanOrEqual(box(me).bottom);
     expect(box(controls).top).toBeGreaterThanOrEqual(box(info).bottom);
+  });
+});
+
+describe('HUD layout: camera filter caret', () => {
+  it('joins the camera button at its height, and its menu opens above it, on screen', async () => {
+    for (const width of [WIDE, NARROW, VERY_SMALL]) {
+      await page.viewport(width, 800);
+      renderBar();
+      const camera = screen.getByRole('button', { name: /Cámara/ });
+      const caret = screen.getByRole('button', { name: 'Opciones de cámara' });
+
+      expect(box(caret).height).toBeCloseTo(box(camera).height, 0);
+      expect(box(caret).top).toBeCloseTo(box(camera).top, 0);
+      expect(box(caret).left).toBeCloseTo(box(camera).right, 0);
+
+      await userEvent.click(caret);
+      const menu = box(screen.getByRole('menu', { name: 'Filtro de cámara' }));
+      expect(menu.bottom).toBeLessThanOrEqual(box(caret).top);
+      expect(menu.top).toBeGreaterThanOrEqual(0);
+      expect(menu.left).toBeGreaterThanOrEqual(0);
+      expect(menu.right).toBeLessThanOrEqual(width);
+      expect(hitAtCenter(screen.getByRole('menuitemradio', { name: 'Desenfoque' }))).toBe(
+        screen.getByRole('menuitemradio', { name: 'Desenfoque' }),
+      );
+      cleanup();
+    }
   });
 });
 
