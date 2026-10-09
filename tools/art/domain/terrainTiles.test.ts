@@ -139,6 +139,18 @@ describe('terrain edge tiles', () => {
       }
     }
   });
+  it('draw no contact shadow outside built floors, so the drawn edge is the walkable tile line', () => {
+    for (const material of ['wood', 'tile', 'carpet'] as const) {
+      const tile = terrainEdgeTile(material, TERRAIN_CORNER_BITS.nw, 0);
+      for (let y = 0; y < ART_TILE; y += 1) {
+        for (let x = 0; x < ART_TILE; x += 1) {
+          const inside = x < ART_TILE / 2 && y < ART_TILE / 2;
+          expect(tile.alphaAt(x, y), `${material} ${x},${y}`).toBe(inside ? 255 : 0);
+        }
+      }
+    }
+    for (const material of ['grass', 'dirt', 'sand', 'cobblestone', 'water'] as const) expect(TERRAIN_EDGES[material].shadow, material).toBe(true);
+  });
 });
 
 describe('terrain decals', () => {

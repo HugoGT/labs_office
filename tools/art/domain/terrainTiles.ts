@@ -14,6 +14,8 @@
  * Near the edge the material gets a darker rim inside and a translucent indigo contact shadow
  * outside, drawn over whatever lies below; one tile works over any lower neighbor. Built floors
  * keep a one pixel rim: a two pixel one on a straight tile line read as a wall, not as a floor.
+ * They cast no shadow either: it painted two pixels past the tile line, so the floor looked wider
+ * than its walkable tiles.
  */
 import { OUTLINE_INK } from '../../../src/game/artColor.ts';
 import {
@@ -36,20 +38,22 @@ export interface TerrainEdge {
   readonly seed: number;
   /** Width of the darker rim inside the edge, in pixels: 2 (strong, then soft) or 1 (strong). */
   readonly rim: 1 | 2;
+  /** Whether a translucent contact shadow is drawn two pixels outside the edge. */
+  readonly shadow: boolean;
 }
 
 export const TERRAIN_EDGES: Readonly<Record<TerrainMaterial, TerrainEdge>> = {
-  water: { style: 'organic', amplitude: 0.15, seed: 101, rim: 2 },
-  grass: { style: 'organic', amplitude: 0.22, seed: 102, rim: 2 },
-  dirt: { style: 'organic', amplitude: 0.18, seed: 103, rim: 2 },
-  sand: { style: 'organic', amplitude: 0.16, seed: 104, rim: 2 },
-  cobblestone: { style: 'organic', amplitude: 0.1, seed: 105, rim: 2 },
-  wood: { style: 'square', amplitude: 0, seed: 106, rim: 1 },
-  tile: { style: 'square', amplitude: 0, seed: 107, rim: 1 },
-  carpet: { style: 'square', amplitude: 0, seed: 108, rim: 1 },
+  water: { style: 'organic', amplitude: 0.15, seed: 101, rim: 2, shadow: true },
+  grass: { style: 'organic', amplitude: 0.22, seed: 102, rim: 2, shadow: true },
+  dirt: { style: 'organic', amplitude: 0.18, seed: 103, rim: 2, shadow: true },
+  sand: { style: 'organic', amplitude: 0.16, seed: 104, rim: 2, shadow: true },
+  cobblestone: { style: 'organic', amplitude: 0.1, seed: 105, rim: 2, shadow: true },
+  wood: { style: 'square', amplitude: 0, seed: 106, rim: 1, shadow: false },
+  tile: { style: 'square', amplitude: 0, seed: 107, rim: 1, shadow: false },
+  carpet: { style: 'square', amplitude: 0, seed: 108, rim: 1, shadow: false },
 };
 
-/** One pixel of field, in cells: the shadow is two pixels wide, the rim one or two (`TerrainEdge.rim`). */
+/** One pixel of field, in cells: the shadow, when drawn, is two pixels wide, the rim one or two (`TerrainEdge.rim`). */
 const PIXEL = 1 / ART_TILE;
 const SHADOW_NEAR = rgba(28, 18, 44, 72);
 const SHADOW_FAR = rgba(28, 18, 44, 36);
@@ -128,7 +132,7 @@ function motifOf(material: TerrainMaterial): PixelBuffer {
 export function terrainEdgeTile(material: TerrainMaterial, mask: number, phase: number): PixelBuffer {
   const motif = motifOf(material);
   const origin = terrainPhaseOrigin(phase);
-  const { rim } = TERRAIN_EDGES[material];
+  const { rim, shadow } = TERRAIN_EDGES[material];
   const tile = new PixelBuffer(ART_TILE, ART_TILE);
   for (let y = 0; y < ART_TILE; y += 1) {
     for (let x = 0; x < ART_TILE; x += 1) {
@@ -138,8 +142,8 @@ export function terrainEdgeTile(material: TerrainMaterial, mask: number, phase: 
         if (field < 0.5 + PIXEL) tile.setPixel(x, y, mixRgba(color, OUTLINE_INK, 0.38));
         else if (rim === 2 && field < 0.5 + 2 * PIXEL) tile.setPixel(x, y, mixRgba(color, OUTLINE_INK, 0.16));
         else tile.setPixel(x, y, color);
-      } else if (field >= 0.5 - PIXEL) tile.setPixel(x, y, SHADOW_NEAR);
-      else if (field >= 0.5 - 2 * PIXEL) tile.setPixel(x, y, SHADOW_FAR);
+      } else if (shadow && field >= 0.5 - PIXEL) tile.setPixel(x, y, SHADOW_NEAR);
+      else if (shadow && field >= 0.5 - 2 * PIXEL) tile.setPixel(x, y, SHADOW_FAR);
     }
   }
   return tile;
