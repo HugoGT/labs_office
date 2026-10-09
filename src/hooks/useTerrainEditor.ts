@@ -34,18 +34,15 @@ export interface TerrainEditor {
   blocks: readonly LayoutMaterial[];
   /** The floor picked in the palette, or `null`. */
   brush: LayoutMaterial | null;
-  /** A paint or the emptying is on its way to the server. */
+  /** A paint is on its way to the server. */
   pending: boolean;
   blocked: boolean;
   error: string | null;
-  notice: string | null;
   enter(): void;
   exit(): void;
   /** Picks `material`, or unpicks it when it is the picked one. */
   pick(material: LayoutMaterial): void;
   unpick(): void;
-  /** Every block back to void but the central entrance, in one atomic batch. */
-  clear(): Promise<void>;
 }
 
 interface PendingPaint {
@@ -67,16 +64,13 @@ export function useTerrainEditor({ bridge, terrain }: UseTerrainEditorOptions): 
   const [brush, setBrush] = useState<LayoutMaterial | null>(null);
   const [paints, setPaintsState] = useState<readonly PendingPaint[]>([]);
   const [draining, setDraining] = useState(false);
-  const [clearing, setClearing] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   // The queue is read and written across awaits: refs are its source of truth, state only renders it.
   const paintsRef = useRef<readonly PendingPaint[]>([]);
   const blocksRef = useRef<readonly LayoutMaterial[]>(BASE_LAYOUT.blocks);
   const drainingRef = useRef(false);
   const blockedRef = useRef(false);
-  const busyRef = useRef(false);
 
   const setPaints = (next: readonly PendingPaint[]): void => {
     paintsRef.current = next;
@@ -87,7 +81,6 @@ export function useTerrainEditor({ bridge, terrain }: UseTerrainEditorOptions): 
     setBlocked(next);
   };
   const refuse = (cause: unknown): void => {
-    setNotice(null);
     setError(describeAdminError(cause));
     if (cause instanceof AdminError && BLOCKING_ERRORS.includes(cause.code)) setBlockedBoth(true);
   };
@@ -115,16 +108,14 @@ export function useTerrainEditor({ bridge, terrain }: UseTerrainEditorOptions): 
   }
 
   function paintAt(index: number): void {
-    if (blockedRef.current || busyRef.current || brush === null) return;
+    if (blockedRef.current || brush === null) return;
     if (index < 0 || index >= blocksRef.current.length) return;
     if (index === SPAWN_BLOCK_INDEX && brush !== 'wood') {
-      setNotice(null);
       setError(SPAWN_BLOCK_MESSAGE);
       return;
     }
     if (applyPaints(blocksRef.current, paintsRef.current)[index] === brush) return;
     setError(null);
-    setNotice(null);
     setPaints([...paintsRef.current, { index, material: brush, sent: false }]);
     void drain();
   }
@@ -176,7 +167,6 @@ export function useTerrainEditor({ bridge, terrain }: UseTerrainEditorOptions): 
     setBrush(null);
     setPaints([]);
     setError(null);
-    setNotice(null);
     setBlockedBoth(false);
   };
 
@@ -184,10 +174,9 @@ export function useTerrainEditor({ bridge, terrain }: UseTerrainEditorOptions): 
     active,
     blocks,
     brush,
-    pending: draining || clearing,
+    pending: draining,
     blocked,
     error,
-    notice,
     enter() {
       reset();
       setActive(true);
@@ -199,34 +188,9 @@ export function useTerrainEditor({ bridge, terrain }: UseTerrainEditorOptions): 
     pick(material) {
       setBrush((current) => (current === material ? null : material));
       setError(null);
-      setNotice(null);
     },
     unpick() {
       setBrush(null);
-    },
-    async clear() {
-      if (!active || blockedRef.current || busyRef.current || drainingRef.current) return;
-      const current = blocksRef.current;
-      const edits = current.flatMap((material, index) => {
-        const target: LayoutMaterial = index === SPAWN_BLOCK_INDEX ? 'wood' : 'void';
-        return material === target ? [] : [{ index, material: target }];
-      });
-      setError(null);
-      if (edits.length === 0) {
-        setNotice('El terreno ya está vacío.');
-        return;
-      }
-      busyRef.current = true;
-      setClearing(true);
-      try {
-        await terrain.setBlocks(edits, encodeTerrainBlocks(current));
-        setNotice('Terreno vaciado. Las salas y los escritorios se conservan.');
-      } catch (cause) {
-        refuse(cause);
-      } finally {
-        busyRef.current = false;
-        setClearing(false);
-      }
     },
   };
 }

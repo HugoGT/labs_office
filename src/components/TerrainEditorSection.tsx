@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import type { ArtPreviewCache } from '../game/artPreview';
 import type { OfficeBridge } from '../game/officeBridge';
@@ -45,7 +45,6 @@ export function TerrainEditorSection({
 }: TerrainEditorSectionProps) {
   const editor = useTerrainEditor({ bridge, terrain });
   const catalog = useMaterialCatalog(loadMaterials);
-  const [confirmed, setConfirmed] = useState(false);
 
   useEffect(() => {
     if (initiallyActive) editor.enter();
@@ -76,11 +75,6 @@ export function TerrainEditorSection({
         </button>
       </div>
     );
-  }
-
-  async function handleClear(): Promise<void> {
-    setConfirmed(false);
-    await editor.clear();
   }
 
   return (
@@ -117,24 +111,6 @@ export function TerrainEditorSection({
       )}
       {editor.pending && <span className={styles.hint}>Guardando…</span>}
 
-      <fieldset className={styles.form} disabled={editor.pending || editor.blocked}>
-        <legend className={styles.hint}>Vaciar terreno</legend>
-        <span className={styles.hint}>
-          Devuelve todos los bloques al vacío salvo la entrada. No borra salas ni escritorios: se rechaza si el vacío taparía alguno.
-        </span>
-        <label className={styles.hint}>
-          <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> Confirmo vaciar todo el terreno
-        </label>
-        <button type="button" className={styles.button} disabled={!confirmed} onClick={() => void handleClear()}>
-          Vaciar terreno
-        </button>
-      </fieldset>
-
-      {editor.notice !== null && (
-        <div className={styles.notice} role="status">
-          {editor.notice}
-        </div>
-      )}
       {editor.error !== null && (
         <div className={styles.error} role="alert">
           {editor.error}

@@ -10,7 +10,7 @@ import { AdminError } from '../dashboard/adminPort';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import { createOfficeBridge, type OfficeCommandMap } from '../game/officeBridge';
 import { SPAWN_BLOCK_INDEX } from '../game/mapData';
-import { BASE_LAYOUT, encodeTerrainBlocks, withBlock, type LayoutMaterial } from '../game/officeLayout';
+import { BASE_LAYOUT, withBlock } from '../game/officeLayout';
 import { useTerrainEditor } from './useTerrainEditor';
 
 const LAWN = 35;
@@ -201,38 +201,6 @@ describe('useTerrainEditor', () => {
     expect(calls).toHaveLength(1);
     expect(commands.at(-1)).toEqual({ brush: 'grass' });
     await waitFor(() => expect(result.current.pending).toBe(false));
-  });
-
-  it('empties the whole terrain but the entrance in one atomic batch against the blocks it saw', async () => {
-    const terrain = port();
-    const { bridge, result } = setup(terrain);
-    const built = withBlock(withBlock(BASE_LAYOUT.blocks, LAWN, 'grass'), OTHER, 'void');
-    act(() => result.current.enter());
-    act(() => bridge.emit('terrain', { blocks: built }));
-
-    await act(() => result.current.clear());
-
-    const target = built.map((_, index) => (index === SPAWN_BLOCK_INDEX ? 'wood' : 'void'));
-    const edits = target.flatMap((material, index) => (built[index] === material ? [] : [{ index, material }]));
-    expect(terrain.setBlocks).toHaveBeenCalledWith(edits, encodeTerrainBlocks(built));
-    expect(edits.some(({ index }) => index === OTHER || index === SPAWN_BLOCK_INDEX)).toBe(false);
-    expect(result.current.notice).toMatch(/salas y los escritorios se conservan/);
-  });
-
-  it('says the terrain is already empty instead of sending an empty batch, and shows a refused one', async () => {
-    const terrain = port({ setBlocks: vi.fn(async () => { throw new AdminError('terrain-stale'); }) });
-    const { bridge, result } = setup(terrain);
-    act(() => result.current.enter());
-    const empty = BASE_LAYOUT.blocks.map((_, index): LayoutMaterial => (index === SPAWN_BLOCK_INDEX ? 'wood' : 'void'));
-    act(() => bridge.emit('terrain', { blocks: empty }));
-
-    await act(() => result.current.clear());
-    expect(terrain.setBlocks).not.toHaveBeenCalled();
-    expect(result.current.notice).toMatch(/ya está vacío/);
-
-    act(() => bridge.emit('terrain', { blocks: withBlock(empty, LAWN, 'grass') }));
-    await act(() => result.current.clear());
-    expect(result.current.error).toMatch(/cambió/);
   });
 
   it('closes the overlay when unmounted while open', () => {

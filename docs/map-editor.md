@@ -10,8 +10,6 @@ New offices start as a black void with one central wood block, the entrance. Adm
 4. To erase, pick **Vacío** and click blocks: they go back to void. Click the picked floor again, **Deseleccionar**, or press Escape to stop painting.
 5. In **Salas**, name the room and click **Usar un bloque de oficina (9 × 9)**. Choose its floor, click **Colocar nueva sala**, and click a built block. This size snaps exactly to the block under the pointer; other room sizes keep tile placement. Room CRUD and overlap rules are unchanged.
 
-**Vaciar terreno** (after its confirmation checkbox) turns every block back to void except the entrance, in one atomic request.
-
 ## Map contract
 
 | Topic | Contract |
@@ -26,9 +24,9 @@ New offices start as a black void with one central wood block, the entrance. Adm
 
 ## Painting, conflicts and players
 
-Each click is one `POST /admin/terrain/blocks/:index` with `{ material }`. The editor sends them one at a time, in click order, and draws each one as pending until the room replicates it; collisions never follow a pending paint. **Vaciar terreno** uses `POST /admin/terrain/blocks` with `{ edits: [{ index, material }], expected }`, where `expected` is the replicated block-list wire string the editor last saw. Both require admin/superadmin authorization and run in the same serialization queue. A batch validates all indices and materials, rejects duplicates and oversized requests, and writes all changed rows with a single atomic PostgreSQL upsert statement (or one synchronous memory mutation).
+Each click is one `POST /admin/terrain/blocks/:index` with `{ material }`. The editor sends them one at a time, in click order, and draws each one as pending until the room replicates it; collisions never follow a pending paint. The atomic batch `POST /admin/terrain/blocks` (no sidebar control uses it) takes `{ edits: [{ index, material }], expected }`, where `expected` is the replicated block-list wire string the editor last saw. Both require admin/superadmin authorization and run in the same serialization queue. A batch validates all indices and materials, rejects duplicates and oversized requests, and writes all changed rows with a single atomic PostgreSQL upsert statement (or one synchronous memory mutation).
 
-Water and void are refused under placements (stored rooms, desks, protected static furniture, seats and the spawn area) with `terrain-under-placement`, never under players. A refused paint is dropped from the pending ones and its reason shown; the others go on. Lost authorization or configuration stops painting. A changed terrain under **Vaciar terreno** is refused with `terrain-stale`; retry. Protection failures, stale batches and failed atomic writes leave **both terrain and player positions unchanged**. Missing directory/store keeps editing unavailable (503).
+Water and void are refused under placements (stored rooms, desks, protected static furniture, seats and the spawn area) with `terrain-under-placement`, never under players. A refused paint is dropped from the pending ones and its reason shown; the others go on. Lost authorization or configuration stops painting. A batch sent against a changed terrain is refused with `terrain-stale`; retry. Protection failures, stale batches and failed atomic writes leave **both terrain and player positions unchanged**. Missing directory/store keeps editing unavailable (503).
 
 After persistence and publication of an accepted snapshot, the room relocates every avatar whose full physical footprint is no longer walkable to the safe primary spawn/ring, standing. Reserved reconnecting players move too; reconnect replays that position rather than resurrecting an invalid return cell. A replicated `positionRevision` distinguishes relocation from ordinary movement echoes: the client cancels held movement, auto-walk waypoints and pending double clicks, resets its complete Arcade body coordinates, and rechecks spaces/audio. Peers snap instead of tweening across removed ground. The server refuses move/sit messages from before that revision. Saved-position restoration also checks the full footprint against terrain and piece collisions.
 

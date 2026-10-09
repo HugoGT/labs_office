@@ -123,18 +123,12 @@ describe('TerrainEditorSection', () => {
     expect(terrain.setBlock).not.toHaveBeenCalled();
   });
 
-  it('empties the terrain only after an explicit confirmation', async () => {
-    const { bridge, terrain } = renderSection();
+  it('offers no way to empty the whole terrain', async () => {
+    renderSection();
     await open();
-    act(() => bridge.emit('terrain', { blocks: withBlock(BASE_LAYOUT.blocks, LAWN, 'grass') }));
 
-    expect(screen.getByRole('button', { name: 'Vaciar terreno' })).toBeDisabled();
-    await userEvent.click(screen.getByRole('checkbox', { name: /Confirmo vaciar/ }));
-    await userEvent.click(screen.getByRole('button', { name: 'Vaciar terreno' }));
-
-    expect(terrain.setBlocks).toHaveBeenCalledTimes(1);
-    expect(await screen.findByRole('status')).toHaveTextContent(/Terreno vaciado/);
-    expect(screen.getByRole('checkbox', { name: /Confirmo vaciar/ })).not.toBeChecked();
+    expect(screen.queryByRole('button', { name: 'Vaciar terreno' })).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: /Confirmo vaciar/ })).toBeNull();
   });
 
   it('leaves when another editor takes the map', async () => {
