@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import exportedManifest from '../../public/assets/pack/manifest.json?raw';
 import { TERRAIN_DECALS, TERRAIN_MATERIALS, TERRAIN_WALKABLE } from './artContract';
 import { physicalBodyRect } from './avatarGeometry';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from './mapData';
@@ -11,7 +12,14 @@ import {
   blockCount,
   blockTileRect,
   decodeTerrainBlocks,
+  decodeTerrainWalls,
   encodeTerrainBlocks,
+  encodeTerrainWalls,
+  isWallPieceId,
+  tileAtWorldPoint,
+  withWalls,
+  MAX_WALL_EDITS,
+  WALL_PIECES,
   isLayoutMaterial,
   newlyUnwalkableTiles,
   withBlock,
@@ -537,5 +545,77 @@ describe('terrain block edits', () => {
     const voided = terrainSnapshot(BASE_LAYOUT, withBlock(BASE_LAYOUT.blocks, 35, 'void'));
     expect(terrainMaterialAt(voided, 67, 22)).toBe('void');
     expect(isTileWalkable(voided, 67, 22)).toBe(false);
+  });
+});
+
+describe('terrain walls', () => {
+  const TILES = BASE_LAYOUT.width * BASE_LAYOUT.height;
+  const at = (tx: number, ty: number) => ty * BASE_LAYOUT.width + tx;
+
+  it('names exactly the wall pieces of the art pack', () => {
+    const pack = JSON.parse(exportedManifest) as { pieces: { id: string; kind: string }[] };
+    expect([...WALL_PIECES].sort()).toEqual(pack.pieces.filter((piece) => piece.kind === 'wall').map((piece) => piece.id).sort());
+    for (const piece of WALL_PIECES) expect(isWallPieceId(piece)).toBe(true);
+    expect(isWallPieceId('wall-lava')).toBe(false);
+    expect(isWallPieceId(null)).toBe(false);
+    expect(MAX_WALL_EDITS).toBe(2000);
+  });
+
+  it('sets and erases single tiles, leaving every other tile and the input alone', () => {
+    const empty = new Array<string | null>(TILES).fill(null);
+    const built = withWalls(empty, [{ index: 5, piece: 'wall-brick' }, { index: 6, piece: 'wall-glass' }]);
+    const erased = withWalls(built, [{ index: 5, piece: null }]);
+
+    expect(built[5]).toBe('wall-brick');
+    expect(built[6]).toBe('wall-glass');
+    expect(empty.every((wall) => wall === null)).toBe(true);
+    expect(erased.filter((wall) => wall !== null)).toEqual(['wall-glass']);
+    expect(() => withWalls(empty, [{ index: TILES, piece: 'wall-brick' }])).toThrow(InvalidOfficeLayoutError);
+    expect(() => withWalls(empty, [{ index: -1, piece: 'wall-brick' }])).toThrow(InvalidOfficeLayoutError);
+  });
+
+  it('round-trips the walls through a sparse wire form, and refuses anything else', () => {
+    const walls = withWalls(new Array<string | null>(TILES).fill(null), [
+      { index: 0, piece: 'wall-brick' },
+      { index: 7, piece: 'wall-stone' },
+      { index: TILES - 1, piece: 'wall-plaster' },
+      { index: 40, piece: 'wall-glass' },
+    ]);
+    const encoded = encodeTerrainWalls(walls);
+
+    expect(encoded).toBe(`0:brick,7:stone,40:glass,${TILES - 1}:plaster`);
+    expect(decodeTerrainWalls(encoded, TILES)).toEqual(walls);
+    expect(encodeTerrainWalls(new Array<string | null>(TILES).fill(null))).toBe('');
+    expect(decodeTerrainWalls('', TILES)).toEqual(new Array(TILES).fill(null));
+    for (const garbage of [`${TILES}:brick`, '-1:brick', '1.5:brick', '3:lava', '3', '3:brick,3:stone', 'x:brick', ',', ' 3:brick']) {
+      expect(decodeTerrainWalls(garbage, TILES), garbage).toBeNull();
+    }
+    expect(decodeTerrainWalls(42, TILES)).toBeNull();
+    expect(decodeTerrainWalls(undefined, TILES)).toBeNull();
+  });
+
+  it('carries the live walls in the snapshot and makes them block, over terrain and decks alike', () => {
+    const walls = withWalls(BASE_LAYOUT.walls, [{ index: at(67, 22), piece: 'wall-brick' }]);
+    const snapshot = terrainSnapshot(BASE_LAYOUT, BASE_LAYOUT.blocks, walls);
+
+    expect(snapshot.walls).toEqual(walls);
+    expect(isTileWalkable(BASE_TERRAIN, 67, 22)).toBe(true);
+    expect(isTileWalkable(snapshot, 67, 22)).toBe(false);
+    expect(terrainSnapshot(BASE_LAYOUT).walls).toEqual(BASE_LAYOUT.walls);
+    // A bridge deck opens water, a wall on it closes it again.
+    const deck = BASE_LAYOUT.props.find((prop) => prop.collision === 'deck')!;
+    const onDeck = terrainSnapshot(BASE_LAYOUT, BASE_LAYOUT.blocks, withWalls(BASE_LAYOUT.walls, [{ index: at(deck.tx, deck.ty), piece: 'wall-stone' }]));
+    expect(isTileWalkable(BASE_TERRAIN, deck.tx, deck.ty)).toBe(true);
+    expect(isTileWalkable(onDeck, deck.tx, deck.ty)).toBe(false);
+    expect(() => terrainSnapshot(BASE_LAYOUT, BASE_LAYOUT.blocks, [])).toThrow(InvalidOfficeLayoutError);
+  });
+
+  it('finds the tile under a world point', () => {
+    expect(tileAtWorldPoint(BASE_LAYOUT, 0, 0)).toBe(0);
+    expect(tileAtWorldPoint(BASE_LAYOUT, 3 * 32 + 31, 2 * 32)).toBe(at(3, 2));
+    expect(tileAtWorldPoint(BASE_LAYOUT, BASE_LAYOUT.width * 32 - 1, BASE_LAYOUT.height * 32 - 1)).toBe(TILES - 1);
+    expect(tileAtWorldPoint(BASE_LAYOUT, -1, 10)).toBeNull();
+    expect(tileAtWorldPoint(BASE_LAYOUT, 10, BASE_LAYOUT.height * 32)).toBeNull();
+    expect(tileAtWorldPoint(BASE_LAYOUT, Number.NaN, 10)).toBeNull();
   });
 });

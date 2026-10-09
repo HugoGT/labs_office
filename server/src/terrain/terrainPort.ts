@@ -6,9 +6,12 @@
  * Only edited blocks are stored. A block nobody touched keeps the material of
  * the committed Tiled layout (`maps/office.json`), so a new layout file still
  * reaches every block an admin never changed.
+ *
+ * Walls are stored per tile, and only where one stands: removing a wall
+ * deletes its row. A stored wall wins over the layout's on its tile.
  */
 
-import type { LayoutMaterial } from '../../../src/game/officeLayout.ts';
+import type { LayoutMaterial, WallEdit, WallPieceId } from '../../../src/game/officeLayout.ts';
 
 export interface TerrainStore {
   /** Edited blocks by index. Indexes the current map no longer has are the runtime's to ignore. */
@@ -17,4 +20,8 @@ export interface TerrainStore {
   saveBlock(index: number, material: LayoutMaterial, actorId: string | null): Promise<void>;
   /** All rows succeed or none do; the runtime publishes only after this resolves. */
   saveBlocks(edits: readonly { index: number; material: LayoutMaterial }[], actorId: string | null): Promise<void>;
+  /** Placed walls by tile. Tiles the current map no longer has are the runtime's to ignore. */
+  loadWalls(): Promise<ReadonlyMap<number, WallPieceId>>;
+  /** Places (`piece`) or removes (`null`) walls; all rows succeed or none do. */
+  saveWalls(edits: readonly WallEdit[], actorId: string | null): Promise<void>;
 }

@@ -859,6 +859,23 @@ describe('connectOfficeRoom: seats (art migration, step 6)', () => {
     expect(seen.at(-1)![35]).toBe('water');
   });
 
+  it('reports the painted walls on the first sync and every wall edit after it', async () => {
+    await server.shutdown();
+    const { BASE_LAYOUT: layout } = await import('./officeLayout.ts');
+    server = createOfficeServer({ layout, seats: [], terrain: createMemoryTerrain([], [[7, 'wall-glass']]) });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+    const seen: (readonly (string | null)[])[] = [];
+    await connect('Ana', { ...recorder().handlers, onWalls: (walls) => seen.push(walls) });
+
+    await waitFor(() => seen.length > 0);
+    expect(seen[0]).toHaveLength(layout.width * layout.height);
+    expect(seen[0]![7]).toBe('wall-glass');
+
+    await server.terrain.setWalls([{ index: 8, piece: 'wall-brick' }, { index: 7, piece: null }], null, async () => ({ placements: [], players: [] }));
+    await waitFor(() => seen.at(-1)?.[8] === 'wall-brick');
+    expect(seen.at(-1)![7]).toBeNull();
+  });
+
   it('reports the collision table on the first sync and every edit after it', async () => {
     await server.shutdown();
     server = createOfficeServer({ collisions: createMemoryCollisions([['tree-oak', []]]) });

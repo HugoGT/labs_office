@@ -119,8 +119,8 @@ function shifted(rect: Rect): Rect {
   return { ...rect, x: rect.x + HALF_TILE, y: rect.y + HALF_TILE };
 }
 
-export function wallSprites(layout: OfficeLayout): WallSprite[] {
-  const { width, height, walls } = layout;
+/** The sprites of a wall grid: the layout's, or the live walls of a snapshot (painted walls). */
+export function wallSprites({ width, height, walls }: Pick<OfficeLayout, 'width' | 'height' | 'walls'>): WallSprite[] {
   const joints: WallSprite[] = [];
   const bodies: WallSprite[] = [];
   const sprite = (piece: string, part: WallSprite['part'], frame: number, rect: Rect): WallSprite => ({

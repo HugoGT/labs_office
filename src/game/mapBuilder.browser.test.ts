@@ -10,6 +10,7 @@ import {
   FALLBACK_TERRAIN_KEY,
   placeLayout,
   placeSeats,
+  placeWalls,
   placeZoneLabels,
   renderTerrain,
   type TerrainTilemap,
@@ -156,9 +157,41 @@ describe('renderTerrain', () => {
   });
 });
 
+describe('placeWalls', () => {
+  it('draws a live wall grid and hands back every object it drew, so a redraw can clear them', async () => {
+    const width = 6;
+    const height = 4;
+    const walls = new Array<string | null>(width * height).fill(null);
+    walls[width + 1] = 'wall-brick';
+    walls[width + 2] = 'wall-brick';
+    walls[2 * width + 4] = 'wall-glass';
+    const grid = { width, height, walls };
+    const result = await withArtScene((scene, art) => {
+      const drawn = placeWalls(scene, grid, art);
+      const keys = images(scene).map((img) => img.texture.key);
+      for (const object of drawn) object.destroy();
+      return { count: drawn.length, keys, left: images(scene).length };
+    });
+
+    expect(result.count).toBe(wallSprites(grid).length);
+    expect(result.keys.filter((key) => key === artSheetKey('wall-brick', 'sheet')).length).toBe(wallSprites(grid).filter((sprite) => sprite.piece === 'wall-brick').length);
+    expect(result.keys).toContain(artSheetKey('wall-glass', 'sheet'));
+    expect(result.left).toBe(0);
+  });
+
+  it('without the pack keeps a grey placeholder on every wall tile', async () => {
+    const walls = new Array<string | null>(4).fill(null);
+    walls[1] = 'wall-stone';
+    const count = await withScene((scene) => placeWalls(scene, { width: 2, height: 2, walls }).length);
+
+    expect(count).toBe(1);
+  });
+});
+
 describe('placeLayout', () => {
   it('draws walls, hedges and every prop of the layout from the pack, at their anchors', async () => {
     const result = await withArtScene((scene, art) => {
+      placeWalls(scene, BASE_LAYOUT, art);
       placeLayout(scene, BASE_LAYOUT, art);
       const manifest = art.manifest!;
       const drawn = images(scene).map((img) => ({ key: img.texture.key, x: img.x, y: img.y, frame: Number(img.frame.name) }));
@@ -199,6 +232,7 @@ describe('placeLayout', () => {
 
   it('without the pack keeps a grey placeholder on every footprint', async () => {
     const count = await withScene((scene, art) => {
+      placeWalls(scene, BASE_LAYOUT, art);
       placeLayout(scene, BASE_LAYOUT, art);
       return { rectangles: scene.children.list.filter((child) => child.type === 'Rectangle').length, images: images(scene).length };
     });

@@ -6,8 +6,8 @@ import { pagePreviewCache, type ArtPreviewCache } from '../game/artPreview';
  * One frame of a pack sheet, cut from the sheet the office draws and painted
  * by the same generator (`artPreview.ts`), so a preview shows exactly the
  * pixels the map will. Presentational: the caller picks the frame, the canvas
- * is sized to it one sheet pixel per CSS pixel (any other scale would blur or
- * skip art pixels).
+ * is sized to it one sheet pixel per CSS pixel times a whole `scale` (any
+ * other scale would blur or skip art pixels).
  */
 export interface ArtPreviewCanvasProps {
   option: MaterialOption;
@@ -15,13 +15,16 @@ export interface ArtPreviewCanvasProps {
   frame: PreviewFrame;
   /** Accessible name of the image. */
   label: string;
+  /** Whole canvas pixels per sheet pixel, drawn unsmoothed; 1 by default. */
+  scale?: number;
   className?: string;
   preview?: ArtPreviewCache;
 }
 
-export function ArtPreviewCanvas({ option, color, frame, label, className, preview = pagePreviewCache }: ArtPreviewCanvasProps) {
+export function ArtPreviewCanvas({ option, color, frame, label, className, scale = 1, preview = pagePreviewCache }: ArtPreviewCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { x, y, width, height } = frame;
+  const factor = Number.isInteger(scale) && scale >= 1 ? scale : 1;
 
   useEffect(() => {
     let cancelled = false;
@@ -32,12 +35,12 @@ export function ArtPreviewCanvas({ option, color, frame, label, className, previ
       if (context === null) return;
       context.imageSmoothingEnabled = false;
       context.clearRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(sheet, x, y, width, height, 0, 0, width, height);
+      context.drawImage(sheet, x, y, width, height, 0, 0, width * factor, height * factor);
     });
     return () => {
       cancelled = true;
     };
-  }, [option, color, preview, x, y, width, height]);
+  }, [option, color, preview, x, y, width, height, factor]);
 
   return (
     <canvas
@@ -45,9 +48,9 @@ export function ArtPreviewCanvas({ option, color, frame, label, className, previ
       className={className}
       role="img"
       aria-label={label}
-      width={width}
-      height={height}
-      style={{ width, height }}
+      width={width * factor}
+      height={height * factor}
+      style={{ width: width * factor, height: height * factor }}
     />
   );
 }

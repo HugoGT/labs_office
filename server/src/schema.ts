@@ -103,6 +103,12 @@ export interface OfficeState {
    */
   terrainBlocks: string;
   /**
+   * The live walls, painted per tile, in the sparse wire form of
+   * `encodeTerrainWalls` (`<tile>:<material>` pairs, empty for none).
+   * Replicated whole like `terrainBlocks`.
+   */
+  terrainWalls: string;
+  /**
    * The saved collision areas per piece, in the wire form of
    * `encodeCollisionTable`, replicated whole like `terrainBlocks`: every
    * client places the same rectangles from it and its own desk list.
@@ -116,8 +122,9 @@ export class OfficeState extends Schema {
     this.players = new MapSchema<PlayerState>();
     this.recordings = new MapSchema<RecordingState>();
     this.terrainBlocks = '';
+    this.terrainWalls = '';
     this.pieceCollisions = '';
   }
 }
 
-defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState }, terrainBlocks: 'string', pieceCollisions: 'string' });
+defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState }, terrainBlocks: 'string', terrainWalls: 'string', pieceCollisions: 'string' });

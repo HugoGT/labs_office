@@ -1,10 +1,11 @@
 /**
  * Postgres adapter of `TerrainStore` (#123 phase 2), on the same minimal `pg`
  * shape (`DirectoryPool`) and the same pool as the other directory-backed
- * features. The table is `terrain_blocks` in `directory/schema.sql`.
+ * features. The tables are `terrain_blocks` and `terrain_walls` in
+ * `directory/schema.sql`.
  */
 
-import { isLayoutMaterial, type LayoutMaterial } from '../../../src/game/officeLayout.ts';
+import { isLayoutMaterial, isWallPieceId, type LayoutMaterial, type WallPieceId } from '../../../src/game/officeLayout.ts';
 import type { DirectoryPool } from '../directory/pgDirectory.ts';
 import type { TerrainStore } from './terrainPort.ts';
 
@@ -37,6 +38,33 @@ export function createPgTerrain(pool: DirectoryPool): TerrainStore {
          FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, material text)
          ON CONFLICT (block_index) DO UPDATE
            SET material = EXCLUDED.material, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+        [JSON.stringify(edits), actorId],
+      );
+    },
+
+    async loadWalls() {
+      const result = await pool.query('SELECT tile_index, piece_id FROM terrain_walls');
+      const walls = new Map<number, WallPieceId>();
+      // Same as the blocks: an unreadable row is skipped, not fatal.
+      for (const row of result.rows) {
+        if (Number.isInteger(row.tile_index) && isWallPieceId(row.piece_id)) walls.set(row.tile_index as number, row.piece_id);
+      }
+      return walls;
+    },
+    async saveWalls(edits, actorId) {
+      // One statement, so removals and placements commit together. The
+      // tiles of a batch are distinct, so both halves never touch one row.
+      await pool.query(
+        `WITH entries AS (
+           SELECT entry.index, entry.piece FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, piece text)
+         ),
+         removed AS (
+           DELETE FROM terrain_walls WHERE tile_index IN (SELECT index FROM entries WHERE piece IS NULL)
+         )
+         INSERT INTO terrain_walls (tile_index, piece_id, updated_by)
+         SELECT index, piece, $2::uuid FROM entries WHERE piece IS NOT NULL
+         ON CONFLICT (tile_index) DO UPDATE
+           SET piece_id = EXCLUDED.piece_id, updated_by = EXCLUDED.updated_by, updated_at = now()`,
         [JSON.stringify(edits), actorId],
       );
     },

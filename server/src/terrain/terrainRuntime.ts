@@ -4,10 +4,15 @@
  * `move` against `snapshot()`, so a move never queries Postgres; the snapshot
  * is rebuilt once at `load()` and once per accepted edit.
  *
- * Edits run one at a time. Each one is checked against the terrain the
- * previous one left and against protections read at that moment, and the
- * snapshot only changes after the store saved it: a failed save leaves the
- * office exactly as it was.
+ * Edits run one at a time, block and wall edits in the same queue. Each one
+ * is checked against the terrain the previous one left and against
+ * protections read at that moment, and the snapshot only changes after the
+ * store saved it: a failed save leaves the office exactly as it was.
+ *
+ * The runtime owns the painted walls too: they are one more layer of the
+ * snapshot (`terrainSnapshot(layout, blocks, walls)`), so the room refuses
+ * moves into them and relocates whoever stands where one lands exactly like
+ * after a block edit.
  */
 
 import {
@@ -17,9 +22,11 @@ import {
   newlyUnwalkableTiles,
   terrainSnapshot,
   withBlock,
+  withWalls,
   type LayoutMaterial,
   type OfficeLayout,
   type TerrainSnapshot,
+  type WallEdit,
 } from '../../../src/game/officeLayout.ts';
 import { BASE_MAP_SEATS, type MapSeat } from '../../../src/game/seating.ts';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
@@ -28,12 +35,18 @@ import {
   TerrainProtectedError,
   TerrainStaleError,
   parseTerrainBatch,
+  parseWallBatch,
   findUnwalkableConflict,
+  findWallConflict,
   staticProtectedTiles,
   type TerrainEdit,
   type TerrainProtections,
 } from './terrainRules.ts';
 
+/**
+ * Called after each accepted edit, block or wall, with the whole block list.
+ * `snapshot()` already answers with the new terrain, live walls included.
+ */
 export type TerrainListener = (blocks: readonly LayoutMaterial[]) => void;
 
 export interface TerrainRuntime {
@@ -50,7 +63,15 @@ export interface TerrainRuntime {
    */
   setBlock(edit: TerrainEdit & { actorId: string | null }, protections: () => Promise<TerrainProtections>): Promise<readonly LayoutMaterial[]>;
   setBlocks(edits: readonly TerrainEdit[], actorId: string | null, protections: () => Promise<TerrainProtections>, expected?: string): Promise<readonly LayoutMaterial[]>;
-  /** Called after each accepted edit with the whole new block list. */
+  /** The live wall piece of every tile, row major: the layout's, overridden by the stored ones. */
+  walls(): readonly (string | null)[];
+  /**
+   * Places or removes walls atomically, or throws `TerrainProtectedError`
+   * when one would stand on a desk (`protections`, read only when the edit
+   * places a wall) or a tile the static layout protects.
+   */
+  setWalls(edits: readonly WallEdit[], actorId: string | null, protections: () => Promise<TerrainProtections>): Promise<readonly (string | null)[]>;
+  /** Called after each accepted edit; see `TerrainListener`. */
   subscribe(listener: TerrainListener): () => void;
 }
 
@@ -59,8 +80,16 @@ export function createTerrainRuntime({ layout, store, seats = BASE_MAP_SEATS }: 
   const staticTiles = staticProtectedTiles(layout, seats);
   const listeners = new Set<TerrainListener>();
   let blocks: readonly LayoutMaterial[] = layout.blocks;
-  let snapshot = terrainSnapshot(layout, blocks);
+  let walls: readonly (string | null)[] = layout.walls;
+  let snapshot = terrainSnapshot(layout, blocks, walls);
   let queue: Promise<unknown> = Promise.resolve();
+
+  /** Runs `edit` after every edit queued before it; the chain survives a refused or failed one. */
+  function enqueue<T>(edit: () => Promise<T>): Promise<T> {
+    const run = queue.then(edit);
+    queue = run.catch(() => undefined);
+    return run;
+  }
 
   async function apply(
     edits: readonly TerrainEdit[], actorId: string | null,
@@ -75,7 +104,7 @@ export function createTerrainRuntime({ layout, store, seats = BASE_MAP_SEATS }: 
     if (changed.length === 0) return blocks;
     let next = [...blocks];
     for (const { index, material } of changed) next = withBlock(next, index, material);
-    const nextSnapshot = terrainSnapshot(layout, next);
+    const nextSnapshot = terrainSnapshot(layout, next, walls);
     const watered = newlyUnwalkableTiles(snapshot, nextSnapshot);
     if (watered.length > 0) {
       const conflict = findUnwalkableConflict(watered, layout.width, staticTiles, await protections());
@@ -86,6 +115,28 @@ export function createTerrainRuntime({ layout, store, seats = BASE_MAP_SEATS }: 
     snapshot = nextSnapshot;
     for (const listener of listeners) listener(blocks);
     return blocks;
+  }
+
+  async function applyWalls(
+    edits: readonly WallEdit[], actorId: string | null,
+    protections: () => Promise<TerrainProtections>,
+  ): Promise<readonly (string | null)[]> {
+    if (!store) throw new Error('no terrain store: the walls cannot be edited');
+    parseWallBatch({ edits }, walls.length);
+    const changed = edits.filter(({ index, piece }) => walls[index] !== piece);
+    if (changed.length === 0) return walls;
+    const placed = changed.flatMap(({ index, piece }) => (piece === null ? [] : [index]));
+    if (placed.length > 0) {
+      const conflict = findWallConflict(placed, layout.width, staticTiles, await protections());
+      if (conflict !== null) throw new TerrainProtectedError(conflict);
+    }
+    const next = withWalls(walls, changed);
+    const nextSnapshot = terrainSnapshot(layout, blocks, next);
+    await store.saveWalls(changed, actorId);
+    walls = next;
+    snapshot = nextSnapshot;
+    for (const listener of listeners) listener(blocks);
+    return walls;
   }
 
   return {
@@ -100,21 +151,28 @@ export function createTerrainRuntime({ layout, store, seats = BASE_MAP_SEATS }: 
         if (index >= 0 && index < count) next = withBlock(next, index, material);
       }
       blocks = next;
-      snapshot = terrainSnapshot(layout, blocks);
+      const savedWalls = await store.loadWalls();
+      const wallEdits: WallEdit[] = [];
+      for (const [index, piece] of savedWalls) {
+        // Same rule as the spawn block: a wall that may not stand there is
+        // ignored, never rewritten.
+        if (index >= 0 && index < layout.walls.length && !staticTiles.has(index)) wallEdits.push({ index, piece });
+      }
+      walls = withWalls(layout.walls, wallEdits);
+      snapshot = terrainSnapshot(layout, blocks, walls);
     },
     blocks: () => blocks,
+    walls: () => walls,
     snapshot: () => snapshot,
     editable: store !== undefined,
     setBlock(edit, protections) {
-      const run = queue.then(() => apply([edit], edit.actorId, protections));
-      // The chain must survive a refused or failed edit; the caller still sees it.
-      queue = run.catch(() => undefined);
-      return run;
+      return enqueue(() => apply([edit], edit.actorId, protections));
     },
     setBlocks(edits, actorId, protections, expected) {
-      const run = queue.then(() => apply(edits, actorId, protections, expected));
-      queue = run.catch(() => undefined);
-      return run;
+      return enqueue(() => apply(edits, actorId, protections, expected));
+    },
+    setWalls(edits, actorId, protections) {
+      return enqueue(() => applyWalls(edits, actorId, protections));
     },
     subscribe(listener) {
       listeners.add(listener);

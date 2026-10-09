@@ -70,4 +70,33 @@ describe('pgTerrain', () => {
     );
     expect(query!.values).toEqual([35, 'water', 'user-1']);
   });
+
+  it('loads every stored wall by tile, skipping a row it cannot read', async () => {
+    const pool = fakePool([
+      { tile_index: 3, piece_id: 'wall-brick' },
+      { tile_index: 40, piece_id: 'wall-glass' },
+      { tile_index: 'x', piece_id: 'wall-stone' },
+      { tile_index: 7, piece_id: 'hedge-boxwood' },
+    ]);
+
+    const walls = await createPgTerrain(pool).loadWalls();
+
+    expect(new Map(walls)).toEqual(new Map([[3, 'wall-brick'], [40, 'wall-glass']]));
+    expect(squash(pool.queries[0]!.text)).toBe('select tile_index, piece_id from terrain_walls');
+  });
+
+  it('places and removes a whole wall batch in one atomic statement', async () => {
+    const pool = fakePool();
+    const edits = [{ index: 3, piece: 'wall-brick' as const }, { index: 4, piece: null }];
+
+    await createPgTerrain(pool).saveWalls(edits, 'user-1');
+
+    expect(pool.queries).toHaveLength(1);
+    const sql = squash(pool.queries[0]!.text);
+    expect(sql).toContain('from jsonb_to_recordset($1::jsonb) as entry(index integer, piece text)');
+    expect(sql).toContain('delete from terrain_walls where tile_index in (select index from entries where piece is null)');
+    expect(sql).toContain('insert into terrain_walls (tile_index, piece_id, updated_by)');
+    expect(sql).toContain('on conflict (tile_index) do update set piece_id = excluded.piece_id, updated_by = excluded.updated_by, updated_at = now()');
+    expect(pool.queries[0]!.values).toEqual([JSON.stringify(edits), 'user-1']);
+  });
 });

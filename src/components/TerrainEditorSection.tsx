@@ -3,17 +3,25 @@ import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import type { ArtPreviewCache } from '../game/artPreview';
 import type { OfficeBridge } from '../game/officeBridge';
 import { useMaterialCatalog, type LoadMaterials } from '../hooks/useMaterialCatalog';
+import type { TerrainBrush } from '../game/terrainEditor';
 import { useTerrainEditor } from '../hooks/useTerrainEditor';
-import { TERRAIN_MATERIAL_LABELS, TerrainPalette } from './TerrainPalette';
+import { TERRAIN_MATERIAL_LABELS, TerrainPalette, WALL_PIECE_LABELS, WallPalette } from './TerrainPalette';
 import styles from './TerrainEditorSection.module.css';
 
 /**
  * Terrain section of the office sidebar (#123 phase 2), next to the desk and
  * room editors and behind the same role guard. Container like
- * `DeskEditorSection`: `useTerrainEditor` holds the state, the palette
- * (`TerrainPalette`) picks the floor, the map (`TerrainEditLayer`) reports
- * the clicked blocks, and the scene draws the pending paints.
+ * `DeskEditorSection`: `useTerrainEditor` holds the state, the palettes
+ * (`TerrainPalette`, `WallPalette`) pick a floor or a wall, the map
+ * (`TerrainEditLayer`) reports the clicked blocks or tiles, and the scene
+ * draws the pending paints.
  */
+
+/** What the picked brush paints, in words. */
+function brushLabel(brush: TerrainBrush): string {
+  if (brush.kind === 'floor') return `Pintando con ${TERRAIN_MATERIAL_LABELS[brush.material]}`;
+  return brush.piece === null ? 'Quitando paredes' : `Pintando paredes de ${WALL_PIECE_LABELS[brush.piece]}`;
+}
 
 export interface TerrainEditorSectionProps {
   bridge: OfficeBridge;
@@ -101,9 +109,21 @@ export function TerrainEditorSection({
         preview={preview}
       />
 
+      <h4 className={styles.subtitle}>Paredes</h4>
+      <span className={styles.hint}>
+        Las paredes van en casillas sueltas y cortan el paso: toca o arrastra para levantarlas, y «Quitar pared» las borra. No se pueden poner sobre escritorios, sillas ni la entrada.
+      </span>
+      <WallPalette
+        value={editor.brush}
+        onPick={editor.pickWall}
+        walls={catalog?.wall ?? null}
+        disabled={editor.blocked}
+        preview={preview}
+      />
+
       {editor.brush !== null && (
         <div className={styles.row}>
-          <span>{`Pintando con ${TERRAIN_MATERIAL_LABELS[editor.brush]}`}</span>
+          <span>{brushLabel(editor.brush)}</span>
           <button type="button" className={styles.button} onClick={editor.unpick}>
             Deseleccionar
           </button>

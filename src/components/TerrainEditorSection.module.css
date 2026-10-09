@@ -32,6 +32,14 @@
   color: #e5e7eb;
 }
 
+/* Heads the wall palette, under the floor one. */
+.subtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #e5e7eb;
+}
+
 .exit {
   background: transparent;
   color: #9ca3af;

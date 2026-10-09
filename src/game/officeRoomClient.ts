@@ -19,7 +19,7 @@
 
 import { Client, getStateCallbacks, type Room } from 'colyseus.js';
 import { createMoveThrottle } from './moveThrottle';
-import { BASE_LAYOUT, decodeTerrainBlocks, type LayoutMaterial } from './officeLayout';
+import { BASE_LAYOUT, decodeTerrainBlocks, decodeTerrainWalls, type LayoutMaterial } from './officeLayout';
 import { decodeCollisionTable, type CollisionTable } from './pieceCollisions';
 import {
   ACCESS_DENIED_CODE,
@@ -70,6 +70,7 @@ interface OfficeRoomState {
   };
   recordings: unknown;
   terrainBlocks: string;
+  terrainWalls: string;
   pieceCollisions: string;
 }
 
@@ -206,6 +207,8 @@ export interface OfficeRoomHandlers {
   onDesksChanged?(): void;
   /** The whole terrain block list (#123 phase 2): on the first sync and after every accepted edit. */
   onTerrain?(blocks: readonly LayoutMaterial[]): void;
+  /** The live wall of every tile, row major: on the first sync and after every accepted wall edit. */
+  onWalls?(walls: readonly (string | null)[]): void;
   /** The saved collision table, replicated whole like the terrain: on the first sync and after every accepted edit. */
   onCollisions?(table: CollisionTable): void;
 }
@@ -361,7 +364,7 @@ export async function connectOfficeRoom({
       (state: OfficeRoomState): {
         players: PlayersCallbacks;
         recordings: RecordingsCallbacks;
-        listen(property: 'terrainBlocks' | 'pieceCollisions', handler: (value: string) => void): () => void;
+        listen(property: 'terrainBlocks' | 'terrainWalls' | 'pieceCollisions', handler: (value: string) => void): () => void;
       };
       (player: RemotePlayer): PlayerCallbacks;
     };
@@ -438,6 +441,12 @@ export async function connectOfficeRoom({
     $(target.state).listen('terrainBlocks', (value) => {
       const blocks = decodeTerrainBlocks(value, BASE_LAYOUT.blocks.length);
       if (blocks !== null) handlers.onTerrain?.(blocks);
+    });
+    // Painted walls: same rule. An older server sends no `terrainWalls`
+    // (undefined, not reported), and the scene keeps the layout's walls.
+    $(target.state).listen('terrainWalls', (value) => {
+      const walls = decodeTerrainWalls(value, BASE_LAYOUT.width * BASE_LAYOUT.height);
+      if (walls !== null) handlers.onWalls?.(walls);
     });
     // Collision areas per piece: same rule. An older server sends none, and
     // the scene keeps every piece at its default.

@@ -34,4 +34,22 @@ describe('ArtPreviewCanvas', () => {
       getContext.mockRestore();
     }
   });
+
+  it('scales a small frame by a whole factor, unsmoothed, so a 16px wall piece fills a 48px thumbnail', async () => {
+    const sheet = { width: 272, height: 16 } as unknown as HTMLCanvasElement;
+    const preview: ArtPreviewCache = { sheet: vi.fn(async () => sheet) };
+    const drawImage = vi.fn();
+    const context = { drawImage, clearRect: vi.fn(), imageSmoothingEnabled: true };
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as never);
+    try {
+      render(<ArtPreviewCanvas option={grass} color={null} frame={{ x: 176, y: 0, width: 16, height: 16 }} scale={3} label="Ladrillo" preview={preview} />);
+
+      const canvas = screen.getByRole('img', { name: 'Ladrillo' }) as HTMLCanvasElement;
+      expect([canvas.width, canvas.height, canvas.style.width]).toEqual([48, 48, '48px']);
+      await waitFor(() => expect(drawImage).toHaveBeenCalledWith(sheet, 176, 0, 16, 16, 0, 0, 48, 48));
+      expect(context.imageSmoothingEnabled).toBe(false);
+    } finally {
+      getContext.mockRestore();
+    }
+  });
 });

@@ -112,7 +112,7 @@ import { recordingStorageFromEnv, type RecordingStoragePort } from './recording/
 import { createRecordingSpaceSnapshot } from './recording/recordingSpaceSnapshot.ts';
 import { guardSessionRequest, sessionIsInSpace } from './sessionGuard.ts';
 import type { TerrainStore } from './terrain/terrainPort.ts';
-import { handleSetTerrainBlock, handleSetTerrainBlocks, type TerrainDeps } from './terrain/terrainRoutes.ts';
+import { handleSetTerrainBlock, handleSetTerrainBlocks, handleSetTerrainWalls, type TerrainDeps } from './terrain/terrainRoutes.ts';
 import type { TerrainProtections } from './terrain/terrainRules.ts';
 import { createTerrainRuntime, type TerrainRuntime } from './terrain/terrainRuntime.ts';
 import type { CollisionStore } from './collisions/collisionPort.ts';
@@ -1223,15 +1223,15 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
    * What water must not land on, read when an edit floods a tile (#123 phase
    * 2): every space (rooms and desk cubicles, whose decor stays inside them),
    * every desk and every session the room holds, those waiting to reconnect
-   * included, at the position the room last accepted.
+   * included, at the position the room last accepted. A painted wall only
+   * checks the desks: walls go inside and around rooms.
    */
   async function terrainProtections(): Promise<TerrainProtections> {
     const [rooms, assignable] = await Promise.all([spaces?.listSpaces() ?? [], desks?.listDesks() ?? []]);
+    const deskRects = assignable.map(({ x, y }) => ({ x, y, w: DESK_SIDE, h: DESK_SIDE }));
     return {
-      placements: [
-        ...rooms.map(({ x, y, w, h }) => ({ x, y, w, h })),
-        ...assignable.map(({ x, y }) => ({ x, y, w: DESK_SIDE, h: DESK_SIDE })),
-      ],
+      placements: [...rooms.map(({ x, y, w, h }) => ({ x, y, w, h })), ...deskRects],
+      desks: deskRects,
       players: sessions.ids().flatMap((id) => {
         const position = sessions.positionOf(id);
         return position === undefined ? [] : [position];
@@ -1268,6 +1268,9 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
       handleSetTerrainBlock(req.header('Authorization'), req.params.index, req.body, deps),
     ),
   );
+  // Painted walls, one tile each, a whole dragged wall per request. The
+  // global JSON parser's 100 KB fits `MAX_WALL_EDITS` edits with room to spare.
+  app.post('/admin/terrain/walls', terrainRoute((req, deps) => handleSetTerrainWalls(req.header('Authorization'), req.body, deps)));
 
   /** Whether the office knows a piece: the art catalog, the layout or the base chairs. */
   const staticPieces = new Set([...layout.props.map((prop) => prop.piece), BASE_CHAIR_PIECE]);

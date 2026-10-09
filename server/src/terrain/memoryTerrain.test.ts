@@ -18,3 +18,20 @@ describe('memoryTerrain', () => {
     expect(store.actorOf(2)).toBeNull();
   });
 });
+
+describe('memoryTerrain walls', () => {
+  it('starts with no wall, or with the wall seed', async () => {
+    expect([...(await createMemoryTerrain().loadWalls())]).toEqual([]);
+    expect([...(await createMemoryTerrain([], [[4, 'wall-brick']]).loadWalls())]).toEqual([[4, 'wall-brick']]);
+  });
+
+  it('places, replaces and removes walls in one save, recording who placed each', async () => {
+    const store = createMemoryTerrain([], [[4, 'wall-brick'], [5, 'wall-brick']]);
+    await store.saveWalls([{ index: 4, piece: 'wall-glass' }, { index: 5, piece: null }, { index: 9, piece: 'wall-stone' }], 'admin-1');
+
+    expect(new Map(await store.loadWalls())).toEqual(new Map([[4, 'wall-glass'], [9, 'wall-stone']]));
+    expect(store.wallActorOf(4)).toBe('admin-1');
+    expect(store.wallActorOf(5)).toBeUndefined();
+    expect([...(await store.loadBlocks())]).toEqual([]);
+  });
+});

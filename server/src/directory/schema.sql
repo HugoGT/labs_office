@@ -414,6 +414,23 @@ CREATE TABLE IF NOT EXISTS terrain_blocks (
 ALTER TABLE terrain_blocks DROP CONSTRAINT IF EXISTS terrain_blocks_material_check;
 ALTER TABLE terrain_blocks ADD CONSTRAINT terrain_blocks_material_check CHECK (material IN ('void', 'water', 'sand', 'dirt', 'cobblestone', 'grass', 'wood', 'tile', 'carpet'));
 
+-- Painted walls (terrain editor). One row per TILE holding a wall an admin
+-- painted, the wall piece of the art pack on it (`WALL_PIECES` in
+-- `src/game/officeLayout.ts`, pinned by migrate.test.ts and refreshed below
+-- like `terrain_blocks_material_check`). Removing a wall deletes its row. A
+-- stored wall wins over the committed layout's wall on that tile (the shipped
+-- layout has none). The tile index is row major over the current map; the
+-- server ignores rows past its last tile. Created after the 14x10 grid was
+-- retired, so the one-time grid move below never touches it.
+CREATE TABLE IF NOT EXISTS terrain_walls (
+  tile_index integer PRIMARY KEY CHECK (tile_index >= 0),
+  piece_id text NOT NULL CHECK (piece_id IN ('wall-brick', 'wall-stone', 'wall-plaster', 'wall-glass')),
+  updated_by uuid REFERENCES users(id),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE terrain_walls DROP CONSTRAINT IF EXISTS terrain_walls_piece_id_check;
+ALTER TABLE terrain_walls ADD CONSTRAINT terrain_walls_piece_id_check CHECK (piece_id IN ('wall-brick', 'wall-stone', 'wall-plaster', 'wall-glass'));
+
 -- Collision areas per art piece (collision editor). One row per piece an
 -- admin edited: a JSON list of rectangles in art pixels from the piece's
 -- anchor (`src/game/pieceCollisions.ts` validates them on every write and

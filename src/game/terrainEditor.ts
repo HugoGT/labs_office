@@ -3,7 +3,22 @@
  * kept free of Phaser so the sidebar can import them.
  */
 
-import type { LayoutMaterial } from './officeLayout';
+import type { LayoutMaterial, WallEdit, WallPieceId } from './officeLayout';
+
+/**
+ * What a map click paints: a floor on a whole 9x9 block, or a wall piece on
+ * one tile (`null`: the wall eraser).
+ */
+export type TerrainBrush =
+  | { readonly kind: 'floor'; readonly material: LayoutMaterial }
+  | { readonly kind: 'wall'; readonly piece: WallPieceId | null };
+
+/** Whether two brushes paint the same thing (brushes are compared by value, not identity). */
+export function sameBrush(a: TerrainBrush | null | undefined, b: TerrainBrush | null | undefined): boolean {
+  if (a == null || b == null) return (a ?? null) === (b ?? null);
+  if (a.kind === 'floor') return b.kind === 'floor' && a.material === b.material;
+  return b.kind === 'wall' && a.piece === b.piece;
+}
 
 /**
  * What the terrain editor asks the map to show while it is open. `null` (the
@@ -12,12 +27,16 @@ import type { LayoutMaterial } from './officeLayout';
  */
 export interface TerrainEditCommand {
   /**
-   * The floor picked in the palette, or `null`. While one is picked the map
-   * outlines the block a click would paint; every click reports its block.
+   * The palette entry picked, or `null`. While a floor is picked the map
+   * outlines the block a click would paint and reports `terrainpick`; while
+   * a wall (or the wall eraser) is picked it outlines the tile and reports
+   * `wallpick`.
    */
-  brush: LayoutMaterial | null;
+  brush: TerrainBrush | null;
   /** Paints on their way to the room, drawn over the live blocks. Drawing only, never walkability. */
   previewBlocks?: readonly LayoutMaterial[];
+  /** Wall paints on their way to the room, applied in order over the live walls. Drawing only. */
+  previewWalls?: readonly WallEdit[];
 }
 
 /** A grid of square cells over the world, row major from the top-left one. */
