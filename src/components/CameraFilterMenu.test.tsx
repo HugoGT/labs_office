@@ -32,34 +32,34 @@ describe('CameraFilterMenu', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
 
-  it('opens exactly two options, no filter first, the active one checked and focused', async () => {
-    const { caret } = renderMenu({ filter: 'blur' });
+  it('opens exactly three options, no filter first, the active one checked and focused', async () => {
+    const { caret } = renderMenu({ filter: 'blur-strong' });
 
     await userEvent.click(caret);
 
     expect(caret).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('menu', { name: 'Filtro de cámara' })).toBeInTheDocument();
-    expect(items().map((item) => item.textContent)).toEqual(['Sin filtro', 'Desenfoque']);
-    expect(items().map((item) => item.getAttribute('aria-checked'))).toEqual(['false', 'true']);
-    expect(screen.getByRole('menuitemradio', { name: 'Desenfoque' })).toHaveFocus();
+    expect(items().map((item) => item.textContent)).toEqual(['Sin filtro', 'Desenfoque ligero', 'Desenfoque total']);
+    expect(items().map((item) => item.getAttribute('aria-checked'))).toEqual(['false', 'false', 'true']);
+    expect(screen.getByRole('menuitemradio', { name: 'Desenfoque total' })).toHaveFocus();
   });
 
   it('picking an option reports it, closes and gives focus back to the caret', async () => {
     const { caret, onChange } = renderMenu();
     await userEvent.click(caret);
 
-    await userEvent.click(screen.getByRole('menuitemradio', { name: 'Desenfoque' }));
+    await userEvent.click(screen.getByRole('menuitemradio', { name: 'Desenfoque ligero' }));
 
-    expect(onChange).toHaveBeenCalledExactlyOnceWith('blur');
+    expect(onChange).toHaveBeenCalledExactlyOnceWith('blur-light');
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     expect(caret).toHaveFocus();
   });
 
   it('picking the active option only closes', async () => {
-    const { caret, onChange } = renderMenu({ filter: 'blur' });
+    const { caret, onChange } = renderMenu({ filter: 'blur-light' });
     await userEvent.click(caret);
 
-    await userEvent.click(screen.getByRole('menuitemradio', { name: 'Desenfoque' }));
+    await userEvent.click(screen.getByRole('menuitemradio', { name: 'Desenfoque ligero' }));
 
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
@@ -99,26 +99,30 @@ describe('CameraFilterMenu', () => {
   it('arrow keys move between the options', async () => {
     const { caret } = renderMenu();
     await userEvent.click(caret);
-    const [none, blur] = items();
+    const [none, light, strong] = items();
     expect(none).toHaveFocus();
 
     await userEvent.keyboard('{ArrowDown}');
-    expect(blur).toHaveFocus();
+    expect(light).toHaveFocus();
+    await userEvent.keyboard('{ArrowDown}');
+    expect(strong).toHaveFocus();
     await userEvent.keyboard('{ArrowDown}');
     expect(none).toHaveFocus();
     await userEvent.keyboard('{ArrowUp}');
-    expect(blur).toHaveFocus();
+    expect(strong).toHaveFocus();
   });
 
-  it('without blur support the option is there but disabled, and says why', async () => {
+  it('without blur support both blurs are there but disabled, and say why', async () => {
     const { caret, onChange } = renderMenu({ blurAvailable: false });
     await userEvent.click(caret);
-    const blur = screen.getByRole('menuitemradio', { name: 'Desenfoque' });
+    const [none, ...blurs] = items();
 
-    expect(blur).toBeDisabled();
-    expect(blur).toHaveAttribute('title', 'Este navegador no puede desenfocar el fondo');
-
-    await userEvent.click(blur);
+    expect(none).toBeEnabled();
+    for (const blur of blurs) {
+      expect(blur).toBeDisabled();
+      expect(blur).toHaveAttribute('title', 'Este navegador no puede desenfocar el fondo');
+      await userEvent.click(blur);
+    }
     expect(onChange).not.toHaveBeenCalled();
   });
 

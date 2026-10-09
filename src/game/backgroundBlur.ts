@@ -12,13 +12,10 @@
  */
 import type { BackgroundBlur } from './livekitRoom';
 
-/** Pixels of blur on the background; the library default is 10. */
-export const CAMERA_BLUR_RADIUS = 12;
-
 export async function loadBackgroundBlur(): Promise<BackgroundBlur> {
   const { BackgroundProcessor, supportsBackgroundProcessors } = await import('@livekit/track-processors');
   return {
     supported: supportsBackgroundProcessors,
-    createProcessor: () => BackgroundProcessor({ mode: 'background-blur', blurRadius: CAMERA_BLUR_RADIUS }),
+    createProcessor: (blurRadius) => BackgroundProcessor({ mode: 'background-blur', blurRadius }),
   };
 }

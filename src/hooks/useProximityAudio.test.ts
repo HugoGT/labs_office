@@ -1638,16 +1638,16 @@ describe('useProximityAudio: camera filter (background blur on this machine)', (
   }
 
   it('restores the filter this browser chose last, and offers blur where it is supported', () => {
-    const { result } = renderWithFilter({ store: memoryFilterStore('blur') });
+    const { result } = renderWithFilter({ store: memoryFilterStore('blur-light') });
 
-    expect(result.current.cameraFilter).toBe('blur');
+    expect(result.current.cameraFilter).toBe('blur-light');
     expect(result.current.cameraBlurAvailable).toBe(true);
   });
 
   it('starts with no filter where blur is not supported, whatever was stored, and refuses blur', async () => {
     const connection = fakeConnection();
     const { result, store, join } = renderWithFilter({
-      store: memoryFilterStore('blur'),
+      store: memoryFilterStore('blur-light'),
       blurSupported: false,
       connections: [connection],
     });
@@ -1656,11 +1656,14 @@ describe('useProximityAudio: camera filter (background blur on this machine)', (
     expect(result.current.cameraFilter).toBe('none');
     expect(result.current.cameraBlurAvailable).toBe(false);
 
-    await act(async () => result.current.setCameraFilter('blur'));
+    await act(async () => result.current.setCameraFilter('blur-light'));
+    await act(async () => result.current.setCameraFilter('blur-strong'));
 
     expect(result.current.cameraFilter).toBe('none');
-    expect(store.save).not.toHaveBeenCalledWith('blur');
-    expect(connection.setCameraFilter).not.toHaveBeenCalledWith('blur');
+    expect(store.save).not.toHaveBeenCalledWith('blur-light');
+    expect(store.save).not.toHaveBeenCalledWith('blur-strong');
+    expect(connection.setCameraFilter).not.toHaveBeenCalledWith('blur-light');
+    expect(connection.setCameraFilter).not.toHaveBeenCalledWith('blur-strong');
   });
 
   it('a pick is saved and goes to the live room', async () => {
@@ -1668,22 +1671,22 @@ describe('useProximityAudio: camera filter (background blur on this machine)', (
     const { result, store, join } = renderWithFilter({ connections: [connection] });
     await join(null);
 
-    await act(async () => result.current.setCameraFilter('blur'));
+    await act(async () => result.current.setCameraFilter('blur-light'));
 
-    expect(result.current.cameraFilter).toBe('blur');
-    expect(store.save).toHaveBeenLastCalledWith('blur');
-    expect(connection.setCameraFilter).toHaveBeenLastCalledWith('blur');
+    expect(result.current.cameraFilter).toBe('blur-light');
+    expect(store.save).toHaveBeenLastCalledWith('blur-light');
+    expect(connection.setCameraFilter).toHaveBeenLastCalledWith('blur-light');
   });
 
   it('a pick with no room yet is saved, and the room gets it as soon as it connects', async () => {
     const connection = fakeConnection();
     const { result, store, join } = renderWithFilter({ connections: [connection] });
 
-    await act(async () => result.current.setCameraFilter('blur'));
+    await act(async () => result.current.setCameraFilter('blur-light'));
     await join(null);
 
-    expect(store.save).toHaveBeenLastCalledWith('blur');
-    expect(connection.setCameraFilter).toHaveBeenCalledWith('blur');
+    expect(store.save).toHaveBeenLastCalledWith('blur-light');
+    expect(connection.setCameraFilter).toHaveBeenCalledWith('blur-light');
   });
 
   it('every new room gets the filter before the camera is turned back on', async () => {
@@ -1692,11 +1695,11 @@ describe('useProximityAudio: camera filter (background blur on this machine)', (
     const { result, join } = renderWithFilter({ connections: [first, second] });
     await join(null);
     await act(async () => result.current.toggleCam());
-    await act(async () => result.current.setCameraFilter('blur'));
+    await act(async () => result.current.setCameraFilter('blur-light'));
 
     await join('s1');
 
-    expect(second.setCameraFilter).toHaveBeenCalledWith('blur');
+    expect(second.setCameraFilter).toHaveBeenCalledWith('blur-light');
     expect(second.setCameraEnabled).toHaveBeenCalledWith(true);
     expect(vi.mocked(second.setCameraFilter).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(second.setCameraEnabled).mock.invocationCallOrder[0],
@@ -1708,7 +1711,7 @@ describe('useProximityAudio: camera filter (background blur on this machine)', (
     const { result, store, join } = renderWithFilter({ connections: [connection] });
     await join(null);
 
-    await act(async () => result.current.setCameraFilter('blur'));
+    await act(async () => result.current.setCameraFilter('blur-light'));
 
     expect(result.current.cameraFilter).toBe('none');
     expect(store.save).toHaveBeenLastCalledWith('none');
@@ -1724,16 +1727,16 @@ describe('useProximityAudio: camera filter (background blur on this machine)', (
     await join(null);
     setCameraFilter.mockImplementationOnce(() => pending.promise);
 
-    await act(async () => result.current.setCameraFilter('blur'));
-    await act(async () => result.current.setCameraFilter('blur'));
+    await act(async () => result.current.setCameraFilter('blur-light'));
+    await act(async () => result.current.setCameraFilter('blur-light'));
     // The first pick failed, but the second one already took.
     await act(async () => pending.resolve('none'));
 
-    expect(result.current.cameraFilter).toBe('blur');
+    expect(result.current.cameraFilter).toBe('blur-light');
   });
 
   it('the camera going on without the blur it asked for falls back to no filter', async () => {
-    const { result, store, captured, join } = renderWithFilter({ store: memoryFilterStore('blur') });
+    const { result, store, captured, join } = renderWithFilter({ store: memoryFilterStore('blur-light') });
     await join(null);
 
     await act(async () => captured[0].onCameraFilterFailed?.());
@@ -1744,7 +1747,7 @@ describe('useProximityAudio: camera filter (background blur on this machine)', (
 
   it('a failure reported by a room already replaced is ignored', async () => {
     const { result, captured, join } = renderWithFilter({
-      store: memoryFilterStore('blur'),
+      store: memoryFilterStore('blur-light'),
       connections: [fakeConnection(), fakeConnection()],
     });
     await join(null);
@@ -1752,6 +1755,21 @@ describe('useProximityAudio: camera filter (background blur on this machine)', (
 
     await act(async () => captured[0].onCameraFilterFailed?.());
 
-    expect(result.current.cameraFilter).toBe('blur');
+    expect(result.current.cameraFilter).toBe('blur-light');
+  });
+
+  it('changing strength is a pick like any other: saved and sent to the live room', async () => {
+    const connection = fakeConnection();
+    const { result, store, join } = renderWithFilter({
+      store: memoryFilterStore('blur-light'),
+      connections: [connection],
+    });
+    await join(null);
+
+    await act(async () => result.current.setCameraFilter('blur-strong'));
+
+    expect(result.current.cameraFilter).toBe('blur-strong');
+    expect(store.save).toHaveBeenLastCalledWith('blur-strong');
+    expect(connection.setCameraFilter).toHaveBeenLastCalledWith('blur-strong');
   });
 });

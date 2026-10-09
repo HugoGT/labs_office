@@ -4,6 +4,7 @@ import type { AttachableTrack } from '../game/attachableTrack';
 import {
   browserBlurEnvironment,
   DEFAULT_CAMERA_FILTER,
+  isBlurFilter,
   supportsCameraBlur,
   type CameraFilter,
 } from '../game/cameraFilter';
@@ -569,7 +570,7 @@ export function useProximityAudio(
 
   const setCameraFilter = useCallback(
     (filter: CameraFilter) => {
-      if (filter === 'blur' && !cameraBlurAvailable) return;
+      if (isBlurFilter(filter) && !cameraBlurAvailable) return;
       filterRequestRef.current += 1;
       const request = filterRequestRef.current;
       applyCameraFilter(filter);

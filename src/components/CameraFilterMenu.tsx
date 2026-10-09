@@ -1,10 +1,10 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { CAMERA_FILTERS, type CameraFilter } from '../game/cameraFilter';
+import { CAMERA_FILTERS, isBlurFilter, type CameraFilter } from '../game/cameraFilter';
 import styles from './CameraFilterMenu.module.css';
 
 export interface CameraFilterMenuProps {
   filter: CameraFilter;
-  /** This browser can blur; otherwise the option stays visible but disabled. */
+  /** This browser can blur; otherwise both blurs stay visible but disabled. */
   blurAvailable: boolean;
   /** Same as the camera button next to it: no LiveKit, or "No molestar". */
   disabled: boolean;
@@ -14,7 +14,8 @@ export interface CameraFilterMenuProps {
 
 const FILTER_LABEL: Record<CameraFilter, string> = {
   none: 'Sin filtro',
-  blur: 'Desenfoque',
+  'blur-light': 'Desenfoque ligero',
+  'blur-strong': 'Desenfoque total',
 };
 
 const BLUR_UNAVAILABLE_TITLE = 'Este navegador no puede desenfocar el fondo';
@@ -103,7 +104,7 @@ export function CameraFilterMenu({ filter, blurAvailable, disabled, disabledTitl
           onKeyDown={moveFocus}
         >
           {CAMERA_FILTERS.map((option) => {
-            const unavailable = option === 'blur' && !blurAvailable;
+            const unavailable = isBlurFilter(option) && !blurAvailable;
             return (
               <button
                 key={option}

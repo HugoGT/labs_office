@@ -163,9 +163,7 @@ describe('HUD layout: camera filter caret', () => {
       expect(menu.top).toBeGreaterThanOrEqual(0);
       expect(menu.left).toBeGreaterThanOrEqual(0);
       expect(menu.right).toBeLessThanOrEqual(width);
-      expect(hitAtCenter(screen.getByRole('menuitemradio', { name: 'Desenfoque' }))).toBe(
-        screen.getByRole('menuitemradio', { name: 'Desenfoque' }),
-      );
+      for (const item of screen.getAllByRole('menuitemradio')) expect(hitAtCenter(item)).toBe(item);
       cleanup();
     }
   });

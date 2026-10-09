@@ -3,6 +3,9 @@ import { DEFAULT_CAMERA_FILTER, isCameraFilter, type CameraFilter } from './came
 /** One key for the whole browser, like the map zoom: it is this device's camera. */
 export const CAMERA_FILTER_KEY = 'oficina.cameraFilter';
 
+/** What a browser stored when there was one blur, before the two strengths. */
+const LEGACY_BLUR = 'blur';
+
 export interface CameraFilterStore {
   load(): CameraFilter;
   save(filter: CameraFilter): void;
@@ -23,6 +26,8 @@ export function createCameraFilterStore(storage: CameraFilterStorage | null): Ca
     load() {
       try {
         const filter = storage?.getItem(CAMERA_FILTER_KEY);
+        // The single blur of the first version, already stored by some browsers.
+        if (filter === LEGACY_BLUR) return 'blur-light';
         return isCameraFilter(filter) ? filter : DEFAULT_CAMERA_FILTER;
       } catch {
         return DEFAULT_CAMERA_FILTER;

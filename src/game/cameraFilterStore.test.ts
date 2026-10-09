@@ -19,7 +19,7 @@ const throwing = (): never => {
 };
 
 describe('createCameraFilterStore: the camera filter chosen per browser', () => {
-  it.each(['none', 'blur'] as const)('round-trips %s under one key', (filter) => {
+  it.each(['none', 'blur-light', 'blur-strong'] as const)('round-trips %s under one key', (filter) => {
     const storage = memoryStorage();
 
     createCameraFilterStore(storage).save(filter);
@@ -32,10 +32,17 @@ describe('createCameraFilterStore: the camera filter chosen per browser', () => 
     expect(CAMERA_FILTER_KEY).toBe('oficina.cameraFilter');
   });
 
+  it('reads the single blur stored before there were two strengths as the light one', () => {
+    const storage = memoryStorage({ [CAMERA_FILTER_KEY]: 'blur' });
+
+    expect(createCameraFilterStore(storage).load()).toBe('blur-light');
+  });
+
   it.each([
     ['nothing stored', null],
     ['an empty string', ''],
     ['another case', 'Blur'],
+    ['another case of a blur', 'BLUR-LIGHT'],
     ['an unknown filter', 'virtual-background'],
     ['JSON', '"blur"'],
   ])('loads no filter when it finds %s', (_name, stored) => {
@@ -53,7 +60,7 @@ describe('createCameraFilterStore: the camera filter chosen per browser', () => 
   it('does not throw when writing is blocked', () => {
     const storage = { getItem: vi.fn(() => null), setItem: vi.fn(throwing) };
 
-    expect(() => createCameraFilterStore(storage).save('blur')).not.toThrow();
+    expect(() => createCameraFilterStore(storage).save('blur-strong')).not.toThrow();
     expect(storage.setItem).toHaveBeenCalledOnce();
   });
 
@@ -61,7 +68,7 @@ describe('createCameraFilterStore: the camera filter chosen per browser', () => 
     const store = createCameraFilterStore(null);
 
     expect(store.load()).toBe('none');
-    expect(() => store.save('blur')).not.toThrow();
+    expect(() => store.save('blur-strong')).not.toThrow();
   });
 });
 
@@ -72,10 +79,10 @@ describe('browserCameraFilterStore', () => {
   });
 
   it('keeps the filter in this browser local storage', () => {
-    browserCameraFilterStore().save('blur');
+    browserCameraFilterStore().save('blur-strong');
 
-    expect(window.localStorage.getItem(CAMERA_FILTER_KEY)).toBe('blur');
-    expect(browserCameraFilterStore().load()).toBe('blur');
+    expect(window.localStorage.getItem(CAMERA_FILTER_KEY)).toBe('blur-strong');
+    expect(browserCameraFilterStore().load()).toBe('blur-strong');
   });
 
   it('falls back to no filter when the browser denies access to its storage', () => {
@@ -84,6 +91,6 @@ describe('browserCameraFilterStore', () => {
     const store = browserCameraFilterStore();
 
     expect(store.load()).toBe('none');
-    expect(() => store.save('blur')).not.toThrow();
+    expect(() => store.save('blur-light')).not.toThrow();
   });
 });

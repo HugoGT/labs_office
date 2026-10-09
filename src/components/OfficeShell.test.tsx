@@ -562,14 +562,14 @@ describe('OfficeShell', () => {
     const user = userEvent.setup();
     const setCameraFilter = vi.fn();
     useProximityAudioMock.mockReturnValue(
-      proximityAudio({ audioAvailable: true, cameraFilter: 'blur', cameraBlurAvailable: false, setCameraFilter }),
+      proximityAudio({ audioAvailable: true, cameraFilter: 'blur-strong', cameraBlurAvailable: false, setCameraFilter }),
     );
 
     render(<OfficeShell />);
     await user.click(screen.getByRole('button', { name: 'Opciones de cámara' }));
 
-    expect(screen.getByRole('menuitemradio', { name: 'Desenfoque' })).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByRole('menuitemradio', { name: 'Desenfoque' })).toBeDisabled();
+    expect(screen.getByRole('menuitemradio', { name: 'Desenfoque total' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('menuitemradio', { name: 'Desenfoque total' })).toBeDisabled();
     await user.click(screen.getByRole('menuitemradio', { name: 'Sin filtro' }));
     expect(setCameraFilter).toHaveBeenCalledExactlyOnceWith('none');
   });

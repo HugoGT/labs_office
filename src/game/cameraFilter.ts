@@ -8,15 +8,40 @@
  * only once blur is actually needed.
  */
 
-export type CameraFilter = 'none' | 'blur';
+export type CameraFilter = 'none' | 'blur-light' | 'blur-strong';
 
-/** Menu order: no filter first. */
-export const CAMERA_FILTERS: readonly CameraFilter[] = ['none', 'blur'];
+export type BlurFilter = Exclude<CameraFilter, 'none'>;
+
+/** Menu order: no filter first, then the blurs from light to full. */
+export const CAMERA_FILTERS: readonly CameraFilter[] = ['none', 'blur-light', 'blur-strong'];
 
 export const DEFAULT_CAMERA_FILTER: CameraFilter = 'none';
 
 export function isCameraFilter(raw: unknown): raw is CameraFilter {
   return typeof raw === 'string' && (CAMERA_FILTERS as readonly string[]).includes(raw);
+}
+
+export function isBlurFilter(filter: CameraFilter): filter is BlurFilter {
+  return filter !== 'none';
+}
+
+/**
+ * `blurRadius` per strength. @livekit/track-processors 0.8 downsamples the
+ * frame by 4, divides the radius by 4 as well and runs a two-pass gaussian
+ * with sigma = that quarter radius, but at most 16 taps per side
+ * (`webgl/index.ts`, `blurShader.ts`). So 64 already uses every tap; past it
+ * the taps stay at 16 and only sigma grows, flattening the kernel toward a
+ * box (about 7% more spread, at no extra cost). 128 is that flattest kernel,
+ * the strongest blur the library can draw; 12 (3 taps) is the soft blur the
+ * single option had, more than five times narrower.
+ */
+const BLUR_RADIUS: Record<BlurFilter, number> = {
+  'blur-light': 12,
+  'blur-strong': 128,
+};
+
+export function blurRadiusOf(filter: BlurFilter): number {
+  return BLUR_RADIUS[filter];
 }
 
 /**

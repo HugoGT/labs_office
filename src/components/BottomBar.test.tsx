@@ -645,10 +645,10 @@ describe('BottomBar: camera filter caret', () => {
   });
 
   it('shows the active filter and reports a pick', async () => {
-    const { onChangeCameraFilter } = renderBar({ cameraFilter: 'blur' });
+    const { onChangeCameraFilter } = renderBar({ cameraFilter: 'blur-light' });
 
     await userEvent.click(screen.getByRole('button', { name: 'Opciones de cámara' }));
-    expect(screen.getByRole('menuitemradio', { name: 'Desenfoque' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('menuitemradio', { name: 'Desenfoque ligero' })).toHaveAttribute('aria-checked', 'true');
     await userEvent.click(screen.getByRole('menuitemradio', { name: 'Sin filtro' }));
 
     expect(onChangeCameraFilter).toHaveBeenCalledExactlyOnceWith('none');
@@ -659,7 +659,8 @@ describe('BottomBar: camera filter caret', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Opciones de cámara' }));
 
-    expect(screen.getByRole('menuitemradio', { name: 'Desenfoque' })).toBeDisabled();
+    expect(screen.getByRole('menuitemradio', { name: 'Desenfoque ligero' })).toBeDisabled();
+    expect(screen.getByRole('menuitemradio', { name: 'Desenfoque total' })).toBeDisabled();
   });
 
   it.each([

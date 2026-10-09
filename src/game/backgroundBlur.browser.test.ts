@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CAMERA_BLUR_RADIUS, loadBackgroundBlur } from './backgroundBlur';
+import { loadBackgroundBlur } from './backgroundBlur';
 import { browserBlurEnvironment, supportsCameraBlur } from './cameraFilter';
 
 /**
@@ -19,12 +19,27 @@ describe('loadBackgroundBlur', () => {
     const blur = await loadBackgroundBlur();
     if (!blur.supported()) return;
 
-    const first = blur.createProcessor();
-    const second = blur.createProcessor();
+    const first = blur.createProcessor(12);
+    const second = blur.createProcessor(128);
 
     expect(first).not.toBe(second);
     expect(first.name).toBe('background-processor');
     expect(first.processedTrack).toBeUndefined();
-    expect(CAMERA_BLUR_RADIUS).toBe(12);
+  });
+
+  it('a processor switches strength in place, the way the camera filter changes level', async () => {
+    const blur = await loadBackgroundBlur();
+    if (!blur.supported()) return;
+    const processor = blur.createProcessor(12) as ReturnType<typeof blur.createProcessor> & {
+      mode: string;
+      transformer: { options: { blurRadius?: number } };
+    };
+
+    // Not started: only the options change, which is all `switchTo` does to a
+    // running pipeline as well (`BackgroundTransformer.update`).
+    await processor.switchTo({ mode: 'background-blur', blurRadius: 128 });
+
+    expect(processor.mode).toBe('background-blur');
+    expect(processor.transformer.options.blurRadius).toBe(128);
   });
 });

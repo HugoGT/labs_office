@@ -858,11 +858,21 @@ function fakeCameraRoom() {
 }
 
 function fakeBlur({ supported = true } = {}) {
-  const processors: { name: string; destroy: ReturnType<typeof vi.fn> }[] = [];
+  const processors: {
+    name: string;
+    blurRadius: number;
+    destroy: ReturnType<typeof vi.fn>;
+    switchTo: ReturnType<typeof vi.fn>;
+  }[] = [];
   const blur = {
     supported: vi.fn(() => supported),
-    createProcessor: vi.fn(() => {
-      const processor = { name: 'blur', destroy: vi.fn(async () => undefined) };
+    createProcessor: vi.fn((blurRadius: number) => {
+      const processor = {
+        name: 'blur',
+        blurRadius,
+        destroy: vi.fn(async () => undefined),
+        switchTo: vi.fn(async () => undefined),
+      };
       processors.push(processor);
       return processor as never;
     }),
@@ -904,7 +914,7 @@ describe('camera filter: blur runs on this machine before the camera is publishe
     const { load } = fakeBlur();
     const connection = await connectCamera(room, load).connected;
 
-    expect(await connection.setCameraFilter('blur')).toBe('blur');
+    expect(await connection.setCameraFilter('blur-light')).toBe('blur-light');
 
     expect(load).not.toHaveBeenCalled();
     expect(local.createTracks).not.toHaveBeenCalled();
@@ -914,7 +924,7 @@ describe('camera filter: blur runs on this machine before the camera is publishe
     const { room, local, cameraTrack } = fakeCameraRoom();
     const { load, processors } = fakeBlur();
     const connection = await connectCamera(room, load).connected;
-    await connection.setCameraFilter('blur');
+    await connection.setCameraFilter('blur-light');
 
     expect(await connection.setCameraEnabled(true)).toBe(true);
 
@@ -932,7 +942,7 @@ describe('camera filter: blur runs on this machine before the camera is publishe
     const connection = await connectCamera(room, load).connected;
     await connection.setCameraEnabled(true);
 
-    expect(await connection.setCameraFilter('blur')).toBe('blur');
+    expect(await connection.setCameraFilter('blur-light')).toBe('blur-light');
 
     expect(created).toHaveLength(1);
     expect(cameraTrack()!.setProcessor).toHaveBeenCalledExactlyOnceWith(processors[0]);
@@ -942,7 +952,7 @@ describe('camera filter: blur runs on this machine before the camera is publishe
     const { room, cameraTrack, created } = fakeCameraRoom();
     const { load } = fakeBlur();
     const connection = await connectCamera(room, load).connected;
-    await connection.setCameraFilter('blur');
+    await connection.setCameraFilter('blur-light');
     await connection.setCameraEnabled(true);
 
     expect(await connection.setCameraFilter('none')).toBe('none');
@@ -955,7 +965,7 @@ describe('camera filter: blur runs on this machine before the camera is publishe
     const { room, cameraTrack, created } = fakeCameraRoom();
     const { load, blur } = fakeBlur();
     const connection = await connectCamera(room, load).connected;
-    await connection.setCameraFilter('blur');
+    await connection.setCameraFilter('blur-light');
     await connection.setCameraEnabled(true);
 
     expect(await connection.setCameraEnabled(false)).toBe(false);
@@ -975,7 +985,7 @@ describe('camera filter: blur runs on this machine before the camera is publishe
     await connection.setCameraEnabled(false);
     const raw = cameraTrack()!;
 
-    await connection.setCameraFilter('blur');
+    await connection.setCameraFilter('blur-light');
     expect(await connection.setCameraEnabled(true)).toBe(true);
 
     expect(room.localParticipant.unpublishTrack).toHaveBeenCalledExactlyOnceWith(raw);
@@ -990,7 +1000,7 @@ describe('camera filter: blur runs on this machine before the camera is publishe
     const { room, cameraTrack } = fakeCameraRoom();
     const { load } = fakeBlur();
     const connection = await connectCamera(room, load).connected;
-    await connection.setCameraFilter('blur');
+    await connection.setCameraFilter('blur-light');
     await connection.setCameraEnabled(true);
     await connection.setCameraEnabled(false);
 
@@ -1006,10 +1016,10 @@ describe('camera filter: blur runs on this machine before the camera is publishe
     const { load } = fakeBlur();
     const connection = await connectCamera(room, load).connected;
 
-    const filter = connection.setCameraFilter('blur');
+    const filter = connection.setCameraFilter('blur-light');
     const camera = connection.setCameraEnabled(true);
 
-    expect(await Promise.all([filter, camera])).toEqual(['blur', true]);
+    expect(await Promise.all([filter, camera])).toEqual(['blur-light', true]);
     expect(cameraTrack()!.setProcessor).toHaveBeenCalledOnce();
   });
 });
@@ -1022,7 +1032,7 @@ describe('camera filter degrades to no filter, never to no camera', () => {
     });
     const { connected, onCameraFilterFailed } = connectCamera(room, load);
     const connection = await connected;
-    await connection.setCameraFilter('blur');
+    await connection.setCameraFilter('blur-light');
 
     expect(await connection.setCameraEnabled(true)).toBe(true);
 
@@ -1036,7 +1046,7 @@ describe('camera filter degrades to no filter, never to no camera', () => {
     const { load, blur } = fakeBlur({ supported: false });
     const { connected, onCameraFilterFailed } = connectCamera(room, load);
     const connection = await connected;
-    await connection.setCameraFilter('blur');
+    await connection.setCameraFilter('blur-light');
 
     expect(await connection.setCameraEnabled(true)).toBe(true);
 
@@ -1056,7 +1066,7 @@ describe('camera filter degrades to no filter, never to no camera', () => {
     });
     const { connected, onCameraFilterFailed } = connectCamera(room, load);
     const connection = await connected;
-    await connection.setCameraFilter('blur');
+    await connection.setCameraFilter('blur-light');
 
     expect(await connection.setCameraEnabled(true)).toBe(true);
 
@@ -1071,7 +1081,7 @@ describe('camera filter degrades to no filter, never to no camera', () => {
       throw new Error('offline');
     });
     const connection = await connectCamera(room, load).connected;
-    await connection.setCameraFilter('blur');
+    await connection.setCameraFilter('blur-light');
     await connection.setCameraEnabled(true);
     await connection.setCameraEnabled(false);
 
@@ -1087,7 +1097,7 @@ describe('camera filter degrades to no filter, never to no camera', () => {
     const connection = await connected;
     await connection.setCameraEnabled(true);
 
-    expect(await connection.setCameraFilter('blur')).toBe('none');
+    expect(await connection.setCameraFilter('blur-light')).toBe('none');
 
     expect(cameraTrack()).toBeDefined();
     expect(cameraTrack()!.setProcessor).not.toHaveBeenCalled();
@@ -1100,11 +1110,75 @@ describe('camera filter degrades to no filter, never to no camera', () => {
     local.createTracks.mockRejectedValueOnce(new DOMException('denied', 'NotAllowedError'));
     const { connected, onCameraFilterFailed } = connectCamera(room, load);
     const connection = await connected;
-    await connection.setCameraFilter('blur');
+    await connection.setCameraFilter('blur-light');
 
     expect(await connection.setCameraEnabled(true)).toBe(false);
 
     expect(onCameraFilterFailed).not.toHaveBeenCalled();
     expect(room.localParticipant.publishTrack).not.toHaveBeenCalled();
+  });
+});
+
+describe('camera filter: two blur strengths switch on the running processor', () => {
+  it('a fresh camera starts at the strength picked: 12 for light, 128 for full', async () => {
+    for (const [filter, radius] of [['blur-light', 12], ['blur-strong', 128]] as const) {
+      const { room } = fakeCameraRoom();
+      const { load, blur } = fakeBlur();
+      const connection = await connectCamera(room, load).connected;
+      await connection.setCameraFilter(filter);
+
+      await connection.setCameraEnabled(true);
+
+      expect(blur.createProcessor).toHaveBeenCalledExactlyOnceWith(radius);
+    }
+  });
+
+  it('light to full with the camera on only switches the processor: same track, same processor', async () => {
+    const { room, cameraTrack, created } = fakeCameraRoom();
+    const { load, blur, processors } = fakeBlur();
+    const connection = await connectCamera(room, load).connected;
+    await connection.setCameraFilter('blur-light');
+    await connection.setCameraEnabled(true);
+
+    expect(await connection.setCameraFilter('blur-strong')).toBe('blur-strong');
+
+    expect(processors[0].switchTo).toHaveBeenCalledExactlyOnceWith({ mode: 'background-blur', blurRadius: 128 });
+    expect(blur.createProcessor).toHaveBeenCalledOnce();
+    expect(cameraTrack()!.setProcessor).toHaveBeenCalledOnce();
+    expect(cameraTrack()!.stopProcessor).not.toHaveBeenCalled();
+    expect(created).toHaveLength(1);
+  });
+
+  it('a strength changed while the camera is off is switched to right after it unmutes', async () => {
+    const { room, created } = fakeCameraRoom();
+    const { load, blur, processors } = fakeBlur();
+    const connection = await connectCamera(room, load).connected;
+    await connection.setCameraFilter('blur-strong');
+    await connection.setCameraEnabled(true);
+    await connection.setCameraEnabled(false);
+
+    expect(await connection.setCameraFilter('blur-light')).toBe('blur-light');
+    expect(processors[0].switchTo).not.toHaveBeenCalled();
+    await connection.setCameraEnabled(true);
+
+    expect(created).toHaveLength(1);
+    expect(blur.createProcessor).toHaveBeenCalledOnce();
+    expect(processors[0].switchTo).toHaveBeenCalledExactlyOnceWith({ mode: 'background-blur', blurRadius: 12 });
+    expect(room.localParticipant.setCameraEnabled.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      processors[0].switchTo.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('a switch that fails drops the blur rather than leave a strength nobody picked', async () => {
+    const { room, cameraTrack } = fakeCameraRoom();
+    const { load, processors } = fakeBlur();
+    const connection = await connectCamera(room, load).connected;
+    await connection.setCameraFilter('blur-light');
+    await connection.setCameraEnabled(true);
+    processors[0].switchTo.mockRejectedValueOnce(new Error('context lost'));
+
+    expect(await connection.setCameraFilter('blur-strong')).toBe('none');
+
+    expect(cameraTrack()!.stopProcessor).toHaveBeenCalledOnce();
   });
 });
