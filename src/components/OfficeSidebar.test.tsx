@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -368,8 +368,9 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
     await userEvent.click(screen.getByRole('button', { name: label }));
     const exit = await screen.findByRole('button', { name: 'Salir' });
-    expect(onEditingChange).toHaveBeenLastCalledWith(true);
-    expect(commands.at(-1)).toBeDefined();
+    // The lazy editor resolves outside act: 'Salir' can commit before the passive effect reports editing.
+    await waitFor(() => expect(onEditingChange).toHaveBeenLastCalledWith(true));
+    await waitFor(() => expect(commands.at(-1)).toBeDefined());
     expect(commands.at(-1)).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Mi espacio' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Editar/ })).not.toBeInTheDocument();
