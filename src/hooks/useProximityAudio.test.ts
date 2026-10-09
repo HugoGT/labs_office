@@ -1591,3 +1591,167 @@ describe('useProximityAudio: something to record (#144)', () => {
     expect(result.current.recordableMedia).toBe(false);
   });
 });
+
+describe('useProximityAudio: camera filter (background blur on this machine)', () => {
+  function memoryFilterStore(initial: CameraFilter = 'none') {
+    let stored = initial;
+    return {
+      load: vi.fn(() => stored),
+      save: vi.fn((filter: CameraFilter) => {
+        stored = filter;
+      }),
+    };
+  }
+
+  function renderWithFilter({
+    store = memoryFilterStore(),
+    blurSupported = true,
+    connections = [fakeConnection()],
+  }: {
+    store?: ReturnType<typeof memoryFilterStore>;
+    blurSupported?: boolean;
+    connections?: LivekitRoomConnection[];
+  } = {}) {
+    const bridge = createOfficeBridge();
+    const captured: ConnectLivekitRoomOptions[] = [];
+    const queue = [...connections];
+    const connect = vi.fn(async (opts: ConnectLivekitRoomOptions) => {
+      captured.push(opts);
+      return queue.shift() ?? fakeConnection();
+    });
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+    const rendered = renderHook(() =>
+      useProximityAudio(bridge, {
+        config: CONFIG,
+        status: 'g',
+        connect,
+        fetchToken,
+        cameraFilterStore: store,
+        blurSupported,
+      }),
+    );
+    const join = (spaceId: string | null) =>
+      act(async () => {
+        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId });
+      });
+    return { ...rendered, store, captured, join };
+  }
+
+  it('restores the filter this browser chose last, and offers blur where it is supported', () => {
+    const { result } = renderWithFilter({ store: memoryFilterStore('blur') });
+
+    expect(result.current.cameraFilter).toBe('blur');
+    expect(result.current.cameraBlurAvailable).toBe(true);
+  });
+
+  it('starts with no filter where blur is not supported, whatever was stored, and refuses blur', async () => {
+    const connection = fakeConnection();
+    const { result, store, join } = renderWithFilter({
+      store: memoryFilterStore('blur'),
+      blurSupported: false,
+      connections: [connection],
+    });
+    await join(null);
+
+    expect(result.current.cameraFilter).toBe('none');
+    expect(result.current.cameraBlurAvailable).toBe(false);
+
+    await act(async () => result.current.setCameraFilter('blur'));
+
+    expect(result.current.cameraFilter).toBe('none');
+    expect(store.save).not.toHaveBeenCalledWith('blur');
+    expect(connection.setCameraFilter).not.toHaveBeenCalledWith('blur');
+  });
+
+  it('a pick is saved and goes to the live room', async () => {
+    const connection = fakeConnection();
+    const { result, store, join } = renderWithFilter({ connections: [connection] });
+    await join(null);
+
+    await act(async () => result.current.setCameraFilter('blur'));
+
+    expect(result.current.cameraFilter).toBe('blur');
+    expect(store.save).toHaveBeenLastCalledWith('blur');
+    expect(connection.setCameraFilter).toHaveBeenLastCalledWith('blur');
+  });
+
+  it('a pick with no room yet is saved, and the room gets it as soon as it connects', async () => {
+    const connection = fakeConnection();
+    const { result, store, join } = renderWithFilter({ connections: [connection] });
+
+    await act(async () => result.current.setCameraFilter('blur'));
+    await join(null);
+
+    expect(store.save).toHaveBeenLastCalledWith('blur');
+    expect(connection.setCameraFilter).toHaveBeenCalledWith('blur');
+  });
+
+  it('every new room gets the filter before the camera is turned back on', async () => {
+    const first = fakeConnection();
+    const second = fakeConnection();
+    const { result, join } = renderWithFilter({ connections: [first, second] });
+    await join(null);
+    await act(async () => result.current.toggleCam());
+    await act(async () => result.current.setCameraFilter('blur'));
+
+    await join('s1');
+
+    expect(second.setCameraFilter).toHaveBeenCalledWith('blur');
+    expect(second.setCameraEnabled).toHaveBeenCalledWith(true);
+    expect(vi.mocked(second.setCameraFilter).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(second.setCameraEnabled).mock.invocationCallOrder[0],
+    );
+  });
+
+  it('blur the room could not apply falls back to no filter, saved as such', async () => {
+    const connection = fakeConnection({ setCameraFilter: vi.fn(async () => 'none' as const) });
+    const { result, store, join } = renderWithFilter({ connections: [connection] });
+    await join(null);
+
+    await act(async () => result.current.setCameraFilter('blur'));
+
+    expect(result.current.cameraFilter).toBe('none');
+    expect(store.save).toHaveBeenLastCalledWith('none');
+  });
+
+  it('a slow answer to an older pick never overrides a newer one', async () => {
+    const pending = deferred<CameraFilter>();
+    const setCameraFilter = vi
+      .fn<(filter: CameraFilter) => Promise<CameraFilter>>()
+      .mockImplementation(async (filter) => filter);
+    const connection = fakeConnection({ setCameraFilter });
+    const { result, join } = renderWithFilter({ connections: [connection] });
+    await join(null);
+    setCameraFilter.mockImplementationOnce(() => pending.promise);
+
+    await act(async () => result.current.setCameraFilter('blur'));
+    await act(async () => result.current.setCameraFilter('blur'));
+    // The first pick failed, but the second one already took.
+    await act(async () => pending.resolve('none'));
+
+    expect(result.current.cameraFilter).toBe('blur');
+  });
+
+  it('the camera going on without the blur it asked for falls back to no filter', async () => {
+    const { result, store, captured, join } = renderWithFilter({ store: memoryFilterStore('blur') });
+    await join(null);
+
+    await act(async () => captured[0].onCameraFilterFailed?.());
+
+    expect(result.current.cameraFilter).toBe('none');
+    expect(store.save).toHaveBeenLastCalledWith('none');
+  });
+
+  it('a failure reported by a room already replaced is ignored', async () => {
+    const { result, captured, join } = renderWithFilter({
+      store: memoryFilterStore('blur'),
+      connections: [fakeConnection(), fakeConnection()],
+    });
+    await join(null);
+    await join('s1');
+
+    await act(async () => captured[0].onCameraFilterFailed?.());
+
+    expect(result.current.cameraFilter).toBe('blur');
+  });
+});

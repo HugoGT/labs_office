@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OfficeSession } from '../auth/authPort';
 import type { AttachableTrack } from '../game/attachableTrack';
+import {
+  browserBlurEnvironment,
+  DEFAULT_CAMERA_FILTER,
+  supportsCameraBlur,
+  type CameraFilter,
+} from '../game/cameraFilter';
+import { browserCameraFilterStore, type CameraFilterStore } from '../game/cameraFilterStore';
 import type { LivekitConfig } from '../game/livekitEndpoint';
 import {
   connectLivekitRoom,
@@ -56,6 +63,10 @@ export interface UseProximityAudioOptions {
   /** Inyectable para pruebas; por defecto la implementacion real. */
   connect?: (opts: ConnectLivekitRoomOptions) => Promise<LivekitRoomConnection>;
   fetchToken?: (request: LivekitTokenRequest) => Promise<LivekitTokenResponse>;
+  /** Where the camera filter is kept; by default this browser's local storage. */
+  cameraFilterStore?: CameraFilterStore;
+  /** Whether this browser can blur; by default `supportsCameraBlur` on the real browser. */
+  blurSupported?: boolean;
 }
 
 export interface UseProximityAudioResult {
@@ -100,6 +111,15 @@ export interface UseProximityAudioResult {
    * (#144). Egress cannot start a recording of a room with nothing in it.
    */
   recordableMedia: boolean;
+  /**
+   * Filter for the own camera, applied before publishing. Kept per browser
+   * and applied to every room, camera on or off; falls back to `'none'`
+   * whenever the blur cannot run.
+   */
+  cameraFilter: CameraFilter;
+  setCameraFilter: (filter: CameraFilter) => void;
+  /** This browser can blur: without it the menu disables the option. */
+  cameraBlurAvailable: boolean;
 }
 
 export interface ActiveScreenSharer {
@@ -118,9 +138,23 @@ export function useProximityAudio(
     session = null,
     connect = connectLivekitRoom,
     fetchToken = fetchLivekitToken,
+    cameraFilterStore,
+    blurSupported,
   }: UseProximityAudioOptions,
 ): UseProximityAudioResult {
   const dnd = status === DO_NOT_DISTURB;
+  // Read once: the store and the browser do not change during a session.
+  const [filterStore] = useState(() => cameraFilterStore ?? browserCameraFilterStore());
+  const [cameraBlurAvailable] = useState(
+    () => blurSupported ?? supportsCameraBlur(browserBlurEnvironment()),
+  );
+  const [cameraFilter, setCameraFilterState] = useState<CameraFilter>(() =>
+    cameraBlurAvailable ? filterStore.load() : DEFAULT_CAMERA_FILTER,
+  );
+  /** Fresh filter for a room connecting later, like `camOnRef`. */
+  const cameraFilterRef = useRef(cameraFilter);
+  /** Latest pick: an answer to an older one never overrides it. */
+  const filterRequestRef = useRef(0);
   const [micOn, setMicOn] = useState(false);
   const [camOn, setCamOn] = useState(false);
   const [audioAvailable, setAudioAvailable] = useState(false);
@@ -181,6 +215,10 @@ export function useProximityAudio(
 
     /** Reaplica el microfono/camara deseados tras CUALQUIER conexion nueva (#12): sin esto, una sala recien conectada arranca sin publicar nada aunque el usuario ya lo hubiera encendido en la sala anterior. */
     function reapplyPublishIntent(connection: LivekitRoomConnection): void {
+      // First, and even in "No molestar": it only records the filter, and
+      // the connection runs camera calls in order, so the camera below
+      // already goes on with it.
+      void connection.setCameraFilter(cameraFilterRef.current);
       if (dndRef.current) return;
       if (micOnRef.current) void connection.setMicrophoneEnabled(true);
       if (camOnRef.current) void connection.setCameraEnabled(true);
@@ -312,6 +350,10 @@ export function useProximityAudio(
           if (!isCurrent() || target === null) return;
           clearRoomState();
           handleReconnect(target, { retryOnFailure: true });
+        },
+        onCameraFilterFailed: () => {
+          if (!isCurrent()) return;
+          applyCameraFilter('none');
         },
       };
     }
@@ -515,6 +557,32 @@ export function useProximityAudio(
     };
   }, [bridge, config, session, connect, fetchToken]);
 
+  /** The filter in effect: state, the ref new rooms read, and this browser's storage. */
+  const applyCameraFilter = useCallback(
+    (filter: CameraFilter) => {
+      cameraFilterRef.current = filter;
+      setCameraFilterState(filter);
+      filterStore.save(filter);
+    },
+    [filterStore],
+  );
+
+  const setCameraFilter = useCallback(
+    (filter: CameraFilter) => {
+      if (filter === 'blur' && !cameraBlurAvailable) return;
+      filterRequestRef.current += 1;
+      const request = filterRequestRef.current;
+      applyCameraFilter(filter);
+      const connection = connectionRef.current;
+      if (!connection) return;
+      void connection.setCameraFilter(filter).then((effective) => {
+        if (request !== filterRequestRef.current || connectionRef.current !== connection) return;
+        if (effective !== filter) applyCameraFilter(effective);
+      });
+    },
+    [applyCameraFilter, cameraBlurAvailable],
+  );
+
   useEffect(() => {
     micOnRef.current = micOn;
     camOnRef.current = camOn;
@@ -612,5 +680,8 @@ export function useProximityAudio(
     localScreenShareTrack,
     activeScreenSharer,
     recordableMedia,
+    cameraFilter,
+    setCameraFilter,
+    cameraBlurAvailable,
   };
 }

@@ -163,6 +163,9 @@ function proximityAudio(
     localScreenShareTrack: null,
     activeScreenSharer: null,
     recordableMedia: false,
+    cameraFilter: 'none',
+    setCameraFilter: vi.fn(),
+    cameraBlurAvailable: true,
     ...overrides,
   };
 }
