@@ -34,6 +34,8 @@ export const WALL_UNDER_PLACEMENT_MESSAGE = 'Una pared no puede tapar un escrito
 export interface UseTerrainEditorOptions {
   bridge: OfficeBridge;
   terrain: TerrainAdminPort;
+  /** The editor closed itself: an Escape with nothing picked, so the admin can walk and try the map. */
+  onExit?: () => void;
 }
 
 export interface TerrainEditor {
@@ -95,7 +97,7 @@ function wallRun(paints: readonly PendingPaint[], first: WallPaint): WallPaint[]
   return run;
 }
 
-export function useTerrainEditor({ bridge, terrain }: UseTerrainEditorOptions): TerrainEditor {
+export function useTerrainEditor({ bridge, terrain, onExit }: UseTerrainEditorOptions): TerrainEditor {
   const [active, setActive] = useState(false);
   const [blocks, setBlocks] = useState<readonly LayoutMaterial[]>(BASE_LAYOUT.blocks);
   const [walls, setWalls] = useState<readonly (string | null)[]>(BASE_LAYOUT.walls);
@@ -110,6 +112,8 @@ export function useTerrainEditor({ bridge, terrain }: UseTerrainEditorOptions): 
   const wallsRef = useRef<readonly (string | null)[]>(BASE_LAYOUT.walls);
   const drainingRef = useRef(false);
   const blockedRef = useRef(false);
+  const onExitRef = useRef(onExit);
+  onExitRef.current = onExit;
 
   const setPaints = (next: readonly PendingPaint[]): void => {
     paintsRef.current = next;
@@ -195,10 +199,21 @@ export function useTerrainEditor({ bridge, terrain }: UseTerrainEditorOptions): 
     };
   });
 
+  // Escape steps out one level at a time: the picked brush first, then the
+  // editor itself. Each press is the editor's, so the sidebar (which closes
+  // its panel on an unhandled Escape) waits for the next one.
   useEffect(() => {
-    if (!active || brush === null) return undefined;
+    if (!active) return undefined;
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setBrush(null);
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      event.preventDefault();
+      if (brush !== null) {
+        setBrush(null);
+        return;
+      }
+      reset();
+      setActive(false);
+      onExitRef.current?.();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);

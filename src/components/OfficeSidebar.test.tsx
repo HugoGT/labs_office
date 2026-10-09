@@ -573,6 +573,38 @@ describe('OfficeSidebar: Escape closes the open panel', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
   });
 
+  it('steps out of the terrain editor one Escape at a time: brush, editor, then the panel', async () => {
+    const user = userEvent.setup();
+    const desks = { listDesks: vi.fn(async () => []) } as unknown as DeskAdminPort;
+    const spaces = { listSpaces: vi.fn(async () => []) } as unknown as SpacesAdminPort;
+    const onLayoutEditingChange = vi.fn();
+    renderSidebar({
+      role: 'admin',
+      bridge: createOfficeBridge(),
+      desks,
+      spaces,
+      refreshDesks: vi.fn(),
+      refreshSpaces: vi.fn(),
+      terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn() },
+      onLayoutEditingChange,
+    });
+    const toggle = screen.getByRole('button', { name: /Personalizar/ });
+    await user.click(toggle);
+    await user.click(screen.getByRole('button', { name: 'Editar terreno' }));
+    await user.click(await screen.findByRole('button', { name: 'Césped' }));
+
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('button', { name: 'Césped' })).toHaveAttribute('aria-pressed', 'false');
+
+    await user.keyboard('{Escape}');
+    expect(await screen.findByRole('button', { name: 'Editar terreno' })).toBeInTheDocument();
+    expect(onLayoutEditingChange).toHaveBeenLastCalledWith(false);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+    await user.keyboard('{Escape}');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  });
+
   it('ignores an Escape another control already handled', async () => {
     const user = userEvent.setup();
     renderSidebar();

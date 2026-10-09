@@ -98,6 +98,54 @@ describe('useTerrainEditor', () => {
     expect(result.current.brush).toBeNull();
   });
 
+  it('closes on Escape with nothing picked, so the admin can walk again, and says so through onExit', () => {
+    const bridge = createOfficeBridge();
+    const commands: OfficeCommandMap['terrainedit'][] = [];
+    bridge.onCommand('terrainedit', (command) => commands.push(command));
+    const onExit = vi.fn();
+    const { result } = renderHook(() => useTerrainEditor({ bridge, terrain: port(), onExit }));
+    act(() => result.current.enter());
+    act(() => result.current.pick('grass'));
+
+    const first = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    act(() => {
+      window.dispatchEvent(first);
+    });
+    expect(result.current.active).toBe(true);
+    expect(onExit).not.toHaveBeenCalled();
+
+    const second = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    act(() => {
+      window.dispatchEvent(second);
+    });
+
+    expect(result.current.active).toBe(false);
+    expect(commands.at(-1)).toBeNull();
+    expect(onExit).toHaveBeenCalledTimes(1);
+    // Both presses are the editor's: the sidebar must not also close its panel on them.
+    expect(first.defaultPrevented).toBe(true);
+    expect(second.defaultPrevented).toBe(true);
+  });
+
+  it('leaves an Escape another control already handled alone', () => {
+    const onExit = vi.fn();
+    const { result } = renderHook(() => useTerrainEditor({ bridge: createOfficeBridge(), terrain: port(), onExit }));
+    act(() => result.current.enter());
+    const handled = (event: KeyboardEvent): void => event.preventDefault();
+    window.addEventListener('keydown', handled, { capture: true });
+
+    try {
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
+      });
+    } finally {
+      window.removeEventListener('keydown', handled, { capture: true });
+    }
+
+    expect(result.current.active).toBe(true);
+    expect(onExit).not.toHaveBeenCalled();
+  });
+
   it('ignores map clicks while closed or with no floor picked', () => {
     const { bridge, result, terrain } = setup();
 
