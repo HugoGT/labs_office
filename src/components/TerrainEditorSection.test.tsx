@@ -129,7 +129,7 @@ describe('TerrainEditorSection', () => {
     await open();
 
     expect(screen.getByRole('group', { name: 'Paredes' })).toBeInTheDocument();
-    expect(screen.getByText(/paredes van en casillas sueltas/i)).toBeInTheDocument();
+    expect(screen.getByText(/paredes van sobre las líneas entre casillas/i)).toBeInTheDocument();
     expect(screen.getByText(/escritorios, sillas ni la entrada/i)).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Césped' }));

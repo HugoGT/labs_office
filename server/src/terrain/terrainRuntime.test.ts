@@ -183,9 +183,11 @@ describe('createTerrainRuntime walls', () => {
     await expect(runtime.setWalls([{ index: FREE, piece: 'wall-brick' }], null, NONE)).rejects.toThrow(/no terrain store/);
   });
 
-  it('loads stored walls over the layout ones, ignoring tiles off the map or under the spawn area', async () => {
+  it('loads stored walls over the layout ones, ignoring posts off the map or whose footprint touches the spawn area', async () => {
     const spawn = at(PLAYER_SPAWN_TX, PLAYER_SPAWN_TY);
-    const store = createMemoryTerrain([], [[FREE, 'wall-glass'], [W * BASE_LAYOUT.height, 'wall-brick'], [spawn, 'wall-stone']]);
+    // Two vertices down and right of the spawn tile: the post's joint reaches its ring.
+    const nearSpawn = at(PLAYER_SPAWN_TX + 2, PLAYER_SPAWN_TY + 2);
+    const store = createMemoryTerrain([], [[FREE, 'wall-glass'], [W * BASE_LAYOUT.height, 'wall-brick'], [spawn, 'wall-stone'], [nearSpawn, 'wall-stone']]);
     const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
 
     await runtime.load();
@@ -193,7 +195,10 @@ describe('createTerrainRuntime walls', () => {
     expect(runtime.walls()[FREE]).toBe('wall-glass');
     expect(runtime.walls()).toHaveLength(W * BASE_LAYOUT.height);
     expect(runtime.walls()[spawn]).toBe(BASE_LAYOUT.walls[spawn]);
-    expect(isTileWalkable(runtime.snapshot(), 67, 22)).toBe(false);
+    expect(runtime.walls()[nearSpawn]).toBe(BASE_LAYOUT.walls[nearSpawn]);
+    // The post stands on the top-left corner of tile (67, 22): it blocks there, not the tile's middle.
+    expect(isPositionWalkable(runtime.snapshot(), 67 * TILE, 22 * TILE - 11)).toBe(false);
+    expect(isTileWalkable(runtime.snapshot(), 67, 22)).toBe(true);
     expect(isTileWalkable(runtime.snapshot(), PLAYER_SPAWN_TX, PLAYER_SPAWN_TY)).toBe(true);
   });
 
@@ -208,13 +213,16 @@ describe('createTerrainRuntime walls', () => {
 
     expect(new Map(await store.loadWalls())).toEqual(new Map([[FREE, 'wall-brick'], [FREE + 1, 'wall-brick']]));
     expect(store.wallActorOf(FREE)).toBe('admin-1');
-    expect(isTileWalkable(runtime.snapshot(), 68, 22)).toBe(false);
+    // The body between the two posts, on the grid line y = 22 * TILE.
+    const onBody = { x: 67 * TILE + TILE / 2, y: 22 * TILE - 11 };
+    expect(isPositionWalkable(runtime.snapshot(), onBody.x, onBody.y)).toBe(false);
     expect(runtime.snapshot().walls).toEqual(runtime.walls());
     expect(listener).toHaveBeenCalledExactlyOnceWith(runtime.blocks());
 
     await runtime.setWalls([{ index: FREE, piece: null }], 'admin-1', NONE);
     expect([...(await store.loadWalls())]).toEqual([[FREE + 1, 'wall-brick']]);
-    expect(isTileWalkable(runtime.snapshot(), 67, 22)).toBe(true);
+    expect(isPositionWalkable(runtime.snapshot(), onBody.x, onBody.y)).toBe(true);
+    expect(isPositionWalkable(runtime.snapshot(), 68 * TILE, 22 * TILE - 11)).toBe(false);
     expect(listener).toHaveBeenCalledTimes(2);
   });
 

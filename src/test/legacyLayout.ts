@@ -136,7 +136,12 @@ function groundMaterial(tx: number, ty: number): TerrainMaterial | null {
   return null;
 }
 
-function wallAt(tx: number, ty: number): string | null {
+/**
+ * The ring of tiles each room's walls block. Walls are posts on grid
+ * vertices (`wallPostAt`); this keeps the tiles the old tile walls stood on
+ * for the rest of the fixture (decals, tree gaps).
+ */
+function wallTileAt(tx: number, ty: number): string | null {
   for (const room of ROOMS) {
     const x1 = room.x0 + room.w - 1;
     const y1 = room.y0 + room.h - 1;
@@ -144,6 +149,27 @@ function wallAt(tx: number, ty: number): string | null {
     const edge = tx === room.x0 || tx === x1 || ty === room.y0 || ty === y1;
     if (!inside || !edge) continue;
     if (tx === room.x0 && (room.doors as readonly number[]).includes(ty)) return null;
+    return room.wall;
+  }
+  return null;
+}
+
+/**
+ * The posts of each room's walls, on the vertices one tile inside its edge:
+ * a wall on a grid line blocks the tiles on both sides of it, so these keep
+ * the ring of edge tiles blocked (plus the ring inside it) and the corridor
+ * outside free. The door leaves out the posts whose footprint would touch
+ * its rows.
+ */
+function wallPostAt(tx: number, ty: number): string | null {
+  for (const room of ROOMS) {
+    const x1 = room.x0 + room.w - 1;
+    const y1 = room.y0 + room.h - 1;
+    const inside = tx >= room.x0 + 1 && tx <= x1 && ty >= room.y0 + 1 && ty <= y1;
+    const edge = tx === room.x0 + 1 || tx === x1 || ty === room.y0 + 1 || ty === y1;
+    if (!inside || !edge) continue;
+    const doors = room.doors as readonly number[];
+    if (tx === room.x0 + 1 && ty >= Math.min(...doors) && ty <= Math.max(...doors) + 1) return null;
     return room.wall;
   }
   return null;
@@ -200,7 +226,7 @@ function clearAround(tx: number, ty: number, gap: number, seats: readonly Footpr
       const x = tx + dx;
       const y = ty + dy;
       if (x < 0 || y < 0 || x >= W || y >= H) return false;
-      if (groundMaterial(x, y) !== null || wallAt(x, y) !== null || hedgeAt(x, y)) return false;
+      if (groundMaterial(x, y) !== null || wallTileAt(x, y) !== null || hedgeAt(x, y)) return false;
     }
   }
   return !seats.some((seat) => near(seat, tx, ty, gap));
@@ -313,7 +339,7 @@ export function buildLegacyLayout() {
   );
 
   const solid = (tx: number, ty: number): boolean =>
-    wallAt(tx, ty) !== null || hedgeAt(tx, ty) || taken.some((prop) => near(prop, tx, ty, 0)) || seatFootprints.some((s) => near(s, tx, ty, 0));
+    wallTileAt(tx, ty) !== null || hedgeAt(tx, ty) || taken.some((prop) => near(prop, tx, ty, 0)) || seatFootprints.some((s) => near(s, tx, ty, 0));
 
   return {
     compressionlevel: -1,
@@ -330,7 +356,7 @@ export function buildLegacyLayout() {
         return decal === null ? 0 : gid(decal);
       }),
       tileLayer(4, 'walls', (tx, ty) => {
-        const wall = wallAt(tx, ty);
+        const wall = wallPostAt(tx, ty);
         return wall === null ? 0 : gid(wall);
       }),
       tileLayer(5, 'hedges', (tx, ty) => (hedgeAt(tx, ty) ? gid(HEDGE) : 0)),

@@ -14,6 +14,7 @@ import {
   LAYOUT_MATERIALS,
   terrainMaterialAt,
   terrainSnapshot,
+  wallFootprintRects,
   type OfficeLayout,
 } from './officeLayout';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN } from '../test/legacyOffice';
@@ -142,38 +143,46 @@ describe('fallbackTerrainData', () => {
 });
 
 describe('wallSprites', () => {
-  it('runs a wall through the centers of its tiles: joints by their connections, bodies in between', () => {
-    // An L: (2,2) (3,2) (3,3).
+  it('runs a wall along the grid lines between its posts: joints by their connections, bodies in between', () => {
+    // An L of posts on the vertices (2,2) (3,2) (3,3): the top-left corners of those tiles.
     const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '3,3': 'wall-glass' }) });
     const sprites = wallSprites(layout);
     const joints = sprites.filter((sprite) => sprite.part === 'joint');
     const bodies = sprites.filter((sprite) => sprite.part === 'body');
 
     expect(joints).toEqual([
-      { piece: 'wall-brick', part: 'joint', frame: wallFrameIndex({ piece: 'joint', mask: 2 }), x: 2 * TILE + 8, y: 2 * TILE + 8, depthY: 2 * TILE + 24 },
-      { piece: 'wall-brick', part: 'joint', frame: wallFrameIndex({ piece: 'joint', mask: 8 | 4 }), x: 3 * TILE + 8, y: 2 * TILE + 8, depthY: 2 * TILE + 24 },
-      { piece: 'wall-glass', part: 'joint', frame: wallFrameIndex({ piece: 'joint', mask: 1 }), x: 3 * TILE + 8, y: 3 * TILE + 8, depthY: 3 * TILE + 24 },
+      { piece: 'wall-brick', part: 'joint', frame: wallFrameIndex({ piece: 'joint', mask: 2 }), x: 2 * TILE - 8, y: 2 * TILE - 8, depthY: 2 * TILE + 8 },
+      { piece: 'wall-brick', part: 'joint', frame: wallFrameIndex({ piece: 'joint', mask: 8 | 4 }), x: 3 * TILE - 8, y: 2 * TILE - 8, depthY: 2 * TILE + 8 },
+      { piece: 'wall-glass', part: 'joint', frame: wallFrameIndex({ piece: 'joint', mask: 1 }), x: 3 * TILE - 8, y: 3 * TILE - 8, depthY: 3 * TILE + 8 },
     ]);
     expect(bodies).toEqual([
-      { piece: 'wall-brick', part: 'body', frame: wallFrameIndex({ piece: 'body', axis: 'horizontal' }), x: 2 * TILE + 24, y: 2 * TILE + 8, depthY: 2 * TILE + 24 },
-      { piece: 'wall-brick', part: 'body', frame: wallFrameIndex({ piece: 'body', axis: 'vertical' }), x: 3 * TILE + 8, y: 2 * TILE + 24, depthY: 2 * TILE + 40 },
+      { piece: 'wall-brick', part: 'body', frame: wallFrameIndex({ piece: 'body', axis: 'horizontal' }), x: 2 * TILE + 8, y: 2 * TILE - 8, depthY: 2 * TILE + 8 },
+      { piece: 'wall-brick', part: 'body', frame: wallFrameIndex({ piece: 'body', axis: 'vertical' }), x: 3 * TILE - 8, y: 2 * TILE + 8, depthY: 2 * TILE + 24 },
     ]);
   });
 
-  it('shows a lone wall tile as a post instead of dropping it', () => {
+  it('draws exactly the rectangles the wall blocks', () => {
+    const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '3,3': 'wall-glass' }) });
+    const drawn = wallSprites(layout).map(({ x, y }) => ({ x, y, w: 16, h: 16 }));
+
+    expect(drawn).toEqual(wallFootprintRects(layout));
+  });
+
+  it('shows a lone post instead of dropping it', () => {
     const sprites = wallSprites(blankLayout({ walls: tiles(18, { '5,5': 'wall-stone' }) }));
 
     expect(sprites).toEqual([
-      { piece: 'wall-stone', part: 'joint', frame: wallFrameIndex({ piece: 'body', axis: 'vertical' }), x: 5 * TILE + 8, y: 5 * TILE + 8, depthY: 5 * TILE + 24 },
+      { piece: 'wall-stone', part: 'joint', frame: wallFrameIndex({ piece: 'body', axis: 'vertical' }), x: 5 * TILE - 8, y: 5 * TILE - 8, depthY: 5 * TILE + 8 },
     ]);
   });
 
   it('closes both rooms of the office except their doors', () => {
     const joints = wallSprites(BASE_LAYOUT).filter((sprite) => sprite.part === 'joint');
 
-    // Two 13x14 rings of 50 tiles each, less a two-tile door.
-    expect(joints).toHaveLength(2 * (2 * 13 + 2 * 12 - 2));
-    expect(joints.some((joint) => joint.x === 50 * TILE + 8 && joint.y === 8 * TILE + 8)).toBe(false);
+    // Two rings of posts on the vertices one tile inside each 13x14 room (12x13
+    // posts, 46 each), less the three posts around each two-tile door.
+    expect(joints).toHaveLength(2 * (2 * 12 + 2 * 13 - 4 - 3));
+    for (const ty of [8, 9, 10]) expect(joints.some((joint) => joint.x === 51 * TILE - 8 && joint.y === ty * TILE - 8)).toBe(false);
   });
 });
 

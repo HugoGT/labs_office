@@ -132,7 +132,7 @@ export function WallPalette({ value, onPick, walls, disabled = false, preview }:
         className={styles.entry}
         aria-pressed={pressed(null)}
         disabled={disabled}
-        title="Goma: quita la pared de cada casilla"
+        title="Goma: quita la pared de cada esquina"
         onClick={() => onPick(null)}
       >
         <span className={`${styles.thumbnail} ${styles.eraser}`} aria-hidden="true" />

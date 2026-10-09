@@ -94,15 +94,16 @@ describe('chairPlacement', () => {
 });
 
 describe('spaceFloorTiles', () => {
-  it('covers the tiles of a space except its walls and hedges', () => {
+  it('covers the tiles of a space under its walls, but not its hedges', () => {
     const grid = buildTerrainGrid();
     // Built-in Sala de Juntas: 13x14 tiles at (50,2), walled with a two-tile door.
+    // Walls stand on grid lines, so the floor runs under them to the room's edge.
     const tiles = spaceFloorTiles({ x: 50 * TILE, y: 2 * TILE, w: 13 * TILE, h: 14 * TILE }, grid);
 
-    expect(tiles).toHaveLength(11 * 12 + 2);
+    expect(tiles).toHaveLength(13 * 14);
     expect(tiles).toContainEqual({ tx: 51, ty: 3 });
     expect(tiles).toContainEqual({ tx: 50, ty: 8 });
-    expect(tiles).not.toContainEqual({ tx: 50, ty: 2 });
+    expect(tiles).toContainEqual({ tx: 50, ty: 2 });
   });
 
   it('never paints a floor over water, which would hide that it blocks the way', () => {

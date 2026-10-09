@@ -4051,6 +4051,8 @@ describe('OfficeScene: edited terrain', () => {
   });
 
   const lawnTile = 22 * BASE_LAYOUT.width + 67;
+  /** The grid vertex a post on `lawnTile` stands on: the tile's top-left corner. */
+  const lawnVertex = { x: 67 * TILE, y: 22 * TILE };
   const wallObjects = (scene: Phaser.Scene) => scene.children.list.filter((child) => child.name === WALL_OBJECT_NAME);
 
   it('draws and collides with the walls the room sends, rebuilding both on every change, and tells React', async () => {
@@ -4058,17 +4060,22 @@ describe('OfficeScene: edited terrain', () => {
     const seen: OfficeEventMap['terrain'][] = [];
     bridge.on('terrain', (payload) => seen.push(payload));
     const before = wallObjects(scene).length;
-    expect(solidAt(scene, lawn.x, lawn.y)).toBe(false);
+    expect(solidAt(scene, lawnVertex.x, lawnVertex.y)).toBe(false);
 
-    const walled = withWalls(BASE_LAYOUT.walls, [{ index: lawnTile, piece: 'wall-brick' }]);
+    const walled = withWalls(BASE_LAYOUT.walls, [{ index: lawnTile, piece: 'wall-brick' }, { index: lawnTile + 1, piece: 'wall-brick' }]);
     handlers.onWalls!(walled);
 
-    expect(solidAt(scene, lawn.x, lawn.y)).toBe(true);
+    // The posts stand on the tiles' top-left vertices: the wall runs along the grid line between them, not through the tile.
+    expect(solidAt(scene, lawnVertex.x, lawnVertex.y)).toBe(true);
+    expect(solidAt(scene, lawnVertex.x + TILE / 2, lawnVertex.y)).toBe(true);
+    expect(solidAt(scene, lawnVertex.x + TILE / 2, lawnVertex.y - 7)).toBe(true);
+    expect(solidAt(scene, lawnVertex.x + TILE / 2, lawnVertex.y + 9)).toBe(false);
+    expect(solidAt(scene, lawn.x, lawn.y)).toBe(false);
     expect(wallObjects(scene).length).toBeGreaterThan(before);
     expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled }]);
 
     handlers.onWalls!(BASE_LAYOUT.walls);
-    await vi.waitFor(() => expect(solidAt(scene, lawn.x, lawn.y)).toBe(false), LOOP_WAIT);
+    await vi.waitFor(() => expect(solidAt(scene, lawnVertex.x, lawnVertex.y)).toBe(false), LOOP_WAIT);
     expect(wallObjects(scene)).toHaveLength(before);
     // Walls of another map size are not this layout's: ignored.
     handlers.onWalls!([]);
@@ -4082,7 +4089,7 @@ describe('OfficeScene: edited terrain', () => {
     bridge.emitCommand('terrainedit', { brush: { kind: 'wall', piece: 'wall-glass' }, previewWalls: [{ index: lawnTile, piece: 'wall-glass' }, { index: lawnTile + 1, piece: 'wall-glass' }] });
 
     expect(wallObjects(scene).length).toBeGreaterThan(before);
-    expect(solidAt(scene, lawn.x, lawn.y)).toBe(false);
+    expect(solidAt(scene, lawnVertex.x, lawnVertex.y)).toBe(false);
 
     bridge.emitCommand('terrainedit', null);
     expect(wallObjects(scene)).toHaveLength(before);

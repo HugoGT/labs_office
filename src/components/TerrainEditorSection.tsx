@@ -111,7 +111,7 @@ export function TerrainEditorSection({
 
       <h4 className={styles.subtitle}>Paredes</h4>
       <span className={styles.hint}>
-        Las paredes van en casillas sueltas y cortan el paso: toca o arrastra para levantarlas, y «Quitar pared» las borra. No se pueden poner sobre escritorios, sillas ni la entrada.
+        Las paredes van sobre las líneas entre casillas y cortan el paso: toca o arrastra cerca de una esquina para levantarlas desde ella, y «Quitar pared» las borra. No se pueden poner sobre escritorios, sillas ni la entrada.
       </span>
       <WallPalette
         value={editor.brush}

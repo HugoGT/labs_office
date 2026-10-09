@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TILE } from './mapData';
 import { LEGACY_SPACES as BUILT_IN_SPACES, LEGACY_COLLISIONS as BASE_COLLISION_RECTS, LEGACY_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN, LEGACY_SEATS as BASE_MAP_SEATS } from '../test/legacyOffice';
 import { buildLegacyTerrainGrid as buildTerrainGrid } from '../test/legacyTerrainGrid';
-import { isTileWalkable, terrainSnapshot, withWalls } from './officeLayout';
+import { isPositionWalkable, terrainSnapshot, wallColliderRects, withWalls } from './officeLayout';
 import { isPositionBlocked } from './pieceCollisions';
 import { audiblePeers, type AudibleInput, type AudioPeer } from './proximityAudio';
 import {
@@ -46,18 +46,25 @@ describe('buildTerrainGrid: collision rectangles', () => {
 });
 
 describe('buildTerrainGrid: painted walls', () => {
-  it('walls off and blocks the live walls of the snapshot, not the layout ones', () => {
+  it('blocks every tile a live wall rectangle touches for the tile helpers, never as an Arcade tile', () => {
     const lawn = { tx: 67, ty: 22 };
     const index = lawn.ty * MAP_W + lawn.tx;
     const firstLayoutWall = LEGACY_LAYOUT.walls.findIndex((wall) => wall !== null);
     const walls = withWalls(LEGACY_LAYOUT.walls, [{ index, piece: 'wall-brick' }, { index: firstLayoutWall, piece: null }]);
     const grid = buildTerrainGrid(terrainSnapshot(LEGACY_LAYOUT, LEGACY_LAYOUT.blocks, walls), LEGACY_LAYOUT, []);
 
-    expect(grid.walled[lawn.ty][lawn.tx]).toBe(true);
-    expect(grid.terrainSolid[lawn.ty][lawn.tx]).toBe(true);
-    expect(grid.solid[lawn.ty][lawn.tx]).toBe(true);
-    const erased = { tx: firstLayoutWall % MAP_W, ty: Math.floor(firstLayoutWall / MAP_W) };
-    expect(grid.walled[erased.ty][erased.tx]).toBe(LEGACY_LAYOUT.hedges[firstLayoutWall] !== null);
+    // The post stands on the top-left corner of the tile: the four tiles around it.
+    for (const [tx, ty] of [[66, 21], [67, 21], [66, 22], [67, 22]] as const) {
+      expect(grid.solid[ty][tx]).toBe(true);
+      expect(grid.terrainSolid[ty][tx]).toBe(false);
+      // A floor runs under a wall: walls stand on grid lines.
+      expect(grid.walled[ty][tx]).toBe(false);
+    }
+    expect(grid.solid[22][68]).toBe(false);
+    expect(grid.solid[23][67]).toBe(false);
+    // Arcade collides with the walls' own rectangles, merged into straight runs.
+    expect(grid.wallRects).toEqual(wallColliderRects({ width: MAP_W, height: MAP_H, walls }));
+    expect(grid.wallRects).toContainEqual({ x: 67 * TILE - 8, y: 22 * TILE - 8, w: 16, h: 16 });
   });
 });
 
@@ -116,7 +123,9 @@ describe('buildTerrainGrid', () => {
           expect(grid.terrain[y][x]).toBe(floor);
           if (!isWall) continue;
           const isDoor = x === x0 && doorY.includes(y);
-          expect(grid.walled[y][x]).toBe(!isDoor);
+          // Walls stand on grid lines (posts on the vertices inside the ring): the
+          // tile helpers see the ring blocked, a room floor still runs under it.
+          expect(grid.walled[y][x]).toBe(false);
           expect(grid.solid[y][x]).toBe(!isDoor);
         }
       }
@@ -208,9 +217,11 @@ describe('isBlocked', () => {
       for (let tx = 0; tx < MAP_W; tx++) {
         // A body centered on the tile, as the room judges a move.
         const position = { x: tx * TILE + 16, y: ty * TILE + 5 };
-        const walkable = isTileWalkable(BASE_TERRAIN, tx, ty) && !isPositionBlocked(BASE_COLLISION_RECTS, position.x, position.y);
-        if (isBlocked(grid, tx, ty) === walkable) {
-          throw new Error(`tile (${tx}, ${ty}) disagrees with isTileWalkable`);
+        const walkable = isPositionWalkable(BASE_TERRAIN, position.x, position.y) && !isPositionBlocked(BASE_COLLISION_RECTS, position.x, position.y);
+        // Never laxer than the room; stricter only where a wall rectangle touches the tile.
+        const wallTouched = BASE_TERRAIN.wallTiles[ty * MAP_W + tx]!;
+        if (isBlocked(grid, tx, ty) === walkable && !(walkable && wallTouched)) {
+          throw new Error(`tile (${tx}, ${ty}) disagrees with isPositionWalkable`);
         }
       }
     }

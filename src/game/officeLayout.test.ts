@@ -28,8 +28,12 @@ import {
   LAYOUT_MATERIALS,
   MATERIAL_WALKABLE,
   blockIndexAt,
+  isFootprintWalkable,
   isPositionWalkable,
   isTileWalkable,
+  wallColliderRects,
+  wallFootprintRects,
+  wallPostTiles,
   jitteredBlockMaterial,
   parseOfficeLayout,
   terrainMaterialAt,
@@ -368,7 +372,9 @@ describe('effective walkability', () => {
       }),
     );
 
-    expect(isTileWalkable(snapshot, 1, 1)).toBe(false);
+    // A wall is a post on a grid vertex: it collides through its rectangles, never by tile.
+    expect(isTileWalkable(snapshot, 1, 1)).toBe(true);
+    expect(snapshot.wallRects).toEqual([{ x: 24, y: 24, w: 16, h: 16 }]);
     expect(isTileWalkable(snapshot, 2, 1)).toBe(false);
     // The table and the plant on the deck collide through pieceCollisions.ts, not here.
     expect(isTileWalkable(snapshot, 12, 1)).toBe(true);
@@ -594,20 +600,112 @@ describe('terrain walls', () => {
     expect(decodeTerrainWalls(undefined, TILES)).toBeNull();
   });
 
-  it('carries the live walls in the snapshot and makes them block, over terrain and decks alike', () => {
+  it('carries the live walls in the snapshot as posts on grid vertices, over terrain and decks alike', () => {
     const walls = withWalls(BASE_LAYOUT.walls, [{ index: at(67, 22), piece: 'wall-brick' }]);
     const snapshot = terrainSnapshot(BASE_LAYOUT, BASE_LAYOUT.blocks, walls);
 
     expect(snapshot.walls).toEqual(walls);
-    expect(isTileWalkable(BASE_TERRAIN, 67, 22)).toBe(true);
-    expect(isTileWalkable(snapshot, 67, 22)).toBe(false);
+    // The post stands on the top-left corner of tile (67, 22): no tile turns unwalkable.
+    expect(isTileWalkable(snapshot, 67, 22)).toBe(true);
+    expect(snapshot.wallRects).toContainEqual({ x: 67 * 32 - 8, y: 22 * 32 - 8, w: 16, h: 16 });
+    expect(BASE_TERRAIN.wallRects).not.toContainEqual({ x: 67 * 32 - 8, y: 22 * 32 - 8, w: 16, h: 16 });
+    for (const [tx, ty] of [[66, 21], [67, 21], [66, 22], [67, 22]] as const) expect(snapshot.wallTiles[at(tx, ty)]).toBe(true);
+    expect(snapshot.wallTiles[at(68, 22)]).toBe(BASE_TERRAIN.wallTiles[at(68, 22)]);
     expect(terrainSnapshot(BASE_LAYOUT).walls).toEqual(BASE_LAYOUT.walls);
-    // A bridge deck opens water, a wall on it closes it again.
+    // A bridge deck opens water, a post on it closes the post's rectangle again.
     const deck = BASE_LAYOUT.props.find((prop) => prop.collision === 'deck')!;
-    const onDeck = terrainSnapshot(BASE_LAYOUT, BASE_LAYOUT.blocks, withWalls(BASE_LAYOUT.walls, [{ index: at(deck.tx, deck.ty), piece: 'wall-stone' }]));
-    expect(isTileWalkable(BASE_TERRAIN, deck.tx, deck.ty)).toBe(true);
-    expect(isTileWalkable(onDeck, deck.tx, deck.ty)).toBe(false);
+    const onDeck = terrainSnapshot(BASE_LAYOUT, BASE_LAYOUT.blocks, withWalls(BASE_LAYOUT.walls, [{ index: at(deck.tx + 1, deck.ty + 1), piece: 'wall-stone' }]));
+    const center = { x: (deck.tx + 1) * 32 - AVATAR_BODY_CENTER_OFFSET.x, y: (deck.ty + 1) * 32 - AVATAR_BODY_CENTER_OFFSET.y };
+    expect(isPositionWalkable(BASE_TERRAIN, center.x, center.y)).toBe(true);
+    expect(isPositionWalkable(onDeck, center.x, center.y)).toBe(false);
     expect(() => terrainSnapshot(BASE_LAYOUT, BASE_LAYOUT.blocks, [])).toThrow(InvalidOfficeLayoutError);
+  });
+
+  it('refuses a move whose body center falls inside a wall rectangle, half open like a tile', () => {
+    const snapshot = terrainSnapshot(BASE_LAYOUT, BASE_LAYOUT.blocks, withWalls(BASE_LAYOUT.walls, [{ index: at(67, 22), piece: 'wall-brick' }]));
+    // Network position whose body center is (cx, cy).
+    const move = (cx: number, cy: number) => isPositionWalkable(snapshot, cx - AVATAR_BODY_CENTER_OFFSET.x, cy - AVATAR_BODY_CENTER_OFFSET.y);
+    const vx = 67 * 32;
+    const vy = 22 * 32;
+
+    expect(move(vx, vy)).toBe(false);
+    expect(move(vx - 8, vy - 8)).toBe(false);
+    expect(move(vx + 7.5, vy + 7.5)).toBe(false);
+    expect(move(vx + 8, vy)).toBe(true);
+    expect(move(vx, vy + 8)).toBe(true);
+    expect(move(vx - 8.5, vy)).toBe(true);
+  });
+
+  it('keeps a whole body off a wall rectangle for restoration and relocation; touching edges do not count', () => {
+    const snapshot = terrainSnapshot(BASE_LAYOUT, BASE_LAYOUT.blocks, withWalls(BASE_LAYOUT.walls, [{ index: at(67, 22), piece: 'wall-brick' }]));
+    const vx = 67 * 32;
+    const vy = 22 * 32;
+    // The network position whose physical body has its left edge at `left` and its top at `top`.
+    const probe = physicalBodyRect({ x: 0, y: 0 });
+    const at2 = (left: number, top: number) => ({ x: left - probe.x, y: top - probe.y });
+
+    expect(isFootprintWalkable(snapshot, at2(vx + 8, vy - 4))).toBe(true);
+    expect(isFootprintWalkable(snapshot, at2(vx + 7, vy - 4))).toBe(false);
+    expect(isFootprintWalkable(snapshot, at2(vx - 8 - probe.width, vy - 4))).toBe(true);
+    expect(isFootprintWalkable(snapshot, at2(vx - 8 - probe.width + 1, vy - 4))).toBe(false);
+    expect(isFootprintWalkable(snapshot, at2(vx - 4, vy + 8))).toBe(true);
+    expect(isFootprintWalkable(BASE_TERRAIN, at2(vx + 7, vy - 4))).toBe(true);
+  });
+
+  it('draws the footprint of a wall grid: a 16px joint per post and a body between 4-adjacent posts', () => {
+    const width = 6;
+    const height = 5;
+    const walls = new Array<string | null>(width * height).fill(null);
+    const put = (tx: number, ty: number) => (walls[ty * width + tx] = 'wall-brick');
+    put(1, 1);
+    put(2, 1);
+    put(1, 2);
+    put(4, 4);
+
+    expect(wallFootprintRects({ width, height, walls })).toEqual([
+      { x: 24, y: 24, w: 16, h: 16 },
+      { x: 56, y: 24, w: 16, h: 16 },
+      { x: 24, y: 56, w: 16, h: 16 },
+      { x: 120, y: 120, w: 16, h: 16 },
+      // East of (1, 1) and south of (1, 1): no diagonal or wrapped bodies.
+      { x: 40, y: 24, w: 16, h: 16 },
+      { x: 24, y: 40, w: 16, h: 16 },
+    ]);
+    expect(wallFootprintRects({ width, height, walls: new Array(width * height).fill(null) })).toEqual([]);
+    // A post on the last column has no east neighbor on the next row.
+    const wrap = new Array<string | null>(width * height).fill(null);
+    wrap[width - 1] = 'wall-brick';
+    wrap[width] = 'wall-brick';
+    expect(wallFootprintRects({ width, height, walls: wrap })).toHaveLength(2);
+  });
+
+  it('merges the footprint into straight runs for the colliders, covering exactly the same ground', () => {
+    const width = 6;
+    const height = 5;
+    const walls = new Array<string | null>(width * height).fill(null);
+    for (const [tx, ty] of [[1, 1], [2, 1], [3, 1], [1, 2], [1, 3], [4, 4], [5, 0]] as const) walls[ty * width + tx] = 'wall-brick';
+    const grid = { width, height, walls };
+    const runs = wallColliderRects(grid);
+
+    expect(runs).toEqual([
+      { x: 24, y: 24, w: 80, h: 16 },
+      { x: 24, y: 24, w: 16, h: 80 },
+      { x: 152, y: -8, w: 16, h: 16 },
+      { x: 120, y: 120, w: 16, h: 16 },
+    ]);
+    const inside = (rects: readonly { x: number; y: number; w: number; h: number }[], x: number, y: number) =>
+      rects.some((rect) => x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h);
+    const footprint = wallFootprintRects(grid);
+    for (let y = -16; y < height * 32; y += 4) {
+      for (let x = -16; x < width * 32; x += 4) expect(inside(runs, x, y), `${x},${y}`).toBe(inside(footprint, x, y));
+    }
+  });
+
+  it('names the tiles a post touches: the four around its vertex, clipped to the map', () => {
+    const grid = { width: 6, height: 5 };
+    expect(wallPostTiles(grid, 2 * 6 + 3).sort((a, b) => a - b)).toEqual([1 * 6 + 2, 1 * 6 + 3, 2 * 6 + 2, 2 * 6 + 3]);
+    expect(wallPostTiles(grid, 0)).toEqual([0]);
+    expect(wallPostTiles(grid, 5).sort((a, b) => a - b)).toEqual([4, 5]);
   });
 
   it('finds the tile under a world point', () => {

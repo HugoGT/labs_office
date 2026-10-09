@@ -165,7 +165,7 @@ describe('TerrainEditLayer', () => {
     expect(outline(scene, TERRAIN_HOVER_NAME)).toBeNull();
   });
 
-  it('reports the tile under a click with a wall brush, as wallpick and never terrainpick', async () => {
+  it('reports the grid vertex nearest a click with a wall brush, as wallpick and never terrainpick', async () => {
     const scene = await bootHostScene();
     const bridge = createOfficeBridge();
     new TerrainEditLayer(scene, bridge, BASE_LAYOUT);
@@ -175,16 +175,17 @@ describe('TerrainEditLayer', () => {
     bridge.on('wallpick', ({ index }) => tiles.push(index));
 
     bridge.emitCommand('terrainedit', { brush: wall('wall-brick') });
-    scene.input.emit('pointerdown', pointerAt(3 * TILE + 5, 2 * TILE + 5));
-    scene.input.emit('pointerup', pointerAt(3 * TILE + 5, 2 * TILE + 5));
+    // Past the middle of tile (3, 2): the nearest vertex is (4, 3), its bottom-right corner.
+    scene.input.emit('pointerdown', pointerAt(3 * TILE + 20, 2 * TILE + 20));
+    scene.input.emit('pointerup', pointerAt(3 * TILE + 20, 2 * TILE + 20));
     bridge.emitCommand('terrainedit', { brush: wall(null) });
     scene.input.emit('pointerdown', pointerAt(TILE + 1, 1));
 
-    expect(tiles).toEqual([2 * BASE_LAYOUT.width + 3, 1]);
+    expect(tiles).toEqual([3 * BASE_LAYOUT.width + 4, 1]);
     expect(blocks).toEqual([]);
   });
 
-  it('paints every tile a held wall drag crosses, each once, through pending previews, until the brush changes', async () => {
+  it('paints every vertex a held wall drag passes, each once, through pending previews, until the brush changes', async () => {
     const scene = await bootHostScene();
     const bridge = createOfficeBridge();
     new TerrainEditLayer(scene, bridge, BASE_LAYOUT);
@@ -194,20 +195,20 @@ describe('TerrainEditLayer', () => {
     bridge.on('terrainpick', ({ index }) => blocks.push(index));
     bridge.emitCommand('terrainedit', { brush: wall('wall-stone') });
 
-    scene.input.emit('pointerdown', pointerAt(TILE / 2, TILE / 2));
-    // A fast flick jumps three tiles in one event: the ones in between are painted too.
-    scene.input.emit('pointermove', pointerAt(3 * TILE + TILE / 2, TILE / 2));
+    scene.input.emit('pointerdown', pointerAt(4, 4));
+    // A fast flick jumps three vertices in one event: the ones in between are painted too.
+    scene.input.emit('pointermove', pointerAt(3 * TILE + 4, 4));
     bridge.emitCommand('terrainedit', { brush: wall('wall-stone'), previewWalls: [{ index: 0, piece: 'wall-stone' }] });
-    scene.input.emit('pointermove', pointerAt(3 * TILE + TILE / 2, TILE + TILE / 2));
+    scene.input.emit('pointermove', pointerAt(3 * TILE + 4, TILE + 4));
     // Another brush ends the stroke: nothing more until the next press.
     bridge.emitCommand('terrainedit', { brush: floor('grass') });
-    scene.input.emit('pointermove', pointerAt(3 * TILE + TILE / 2, 3 * TILE + TILE / 2));
+    scene.input.emit('pointermove', pointerAt(3 * TILE + 4, 3 * TILE + 4));
 
     expect(tiles).toEqual([0, 1, 2, 3, BASE_LAYOUT.width + 3]);
     expect(blocks).toEqual([]);
   });
 
-  it('outlines the single tile a wall brush would paint, and the block again for a floor', async () => {
+  it('outlines a tile-sized box centered on the vertex a wall brush would paint, and the block again for a floor', async () => {
     const scene = await bootHostScene();
     const bridge = createOfficeBridge();
     new TerrainEditLayer(scene, bridge, BASE_LAYOUT);
@@ -217,7 +218,10 @@ describe('TerrainEditLayer', () => {
     const hover = outline(scene, TERRAIN_HOVER_NAME)!;
     expect(hover.visible).toBe(true);
     expect([hover.width, hover.height]).toEqual([TILE, TILE]);
-    expect([hover.x, hover.y]).toEqual([2 * TILE + TILE / 2, TILE + TILE / 2]);
+    // Centered on the grid line crossing: half the box on each side of both lines.
+    expect([hover.x, hover.y]).toEqual([2 * TILE, TILE]);
+    scene.input.emit('pointermove', pointerAt(2 * TILE + 20, TILE + 20));
+    expect([hover.x, hover.y]).toEqual([3 * TILE, 2 * TILE]);
 
     bridge.emitCommand('terrainedit', { brush: floor('sand') });
     scene.input.emit('pointermove', pointerAt(2 * TILE + 3, TILE + 3));

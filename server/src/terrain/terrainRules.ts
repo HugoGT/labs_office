@@ -15,6 +15,7 @@ import {
   MAX_WALL_EDITS,
   isLayoutMaterial,
   isWallPieceId,
+  wallPostTiles,
   type LayoutMaterial,
   type OfficeLayout,
   type WallEdit,
@@ -190,23 +191,25 @@ export function parseWallBatch(body: unknown, tileCount: number): WallEdit[] {
 }
 
 /**
- * Why a wall may not stand on one of the `placed` tiles, or `null` if it may.
- * Walls block like water but never strand anything a room holds: they are
- * refused on the static tiles (seats, furniture, the spawn area) and on desks,
- * never because of a room or a player (players are relocated).
+ * Why a wall post may not stand on one of the `placed` vertices, or `null` if
+ * it may. Walls never strand anything a room holds: a post is refused when
+ * its footprint (`wallPostTiles`: the four tiles around its vertex) touches a
+ * static tile (seats, furniture, the spawn area) or a desk, never because of
+ * a room or a player (players are relocated).
  */
 export function findWallConflict(
   placed: readonly number[],
-  width: number,
+  grid: Pick<OfficeLayout, 'width' | 'height'>,
   staticTiles: ReadonlySet<number>,
   protections: TerrainProtections,
 ): UnwalkableConflict | null {
   if (placed.length === 0) return null;
-  if (placed.some((tile) => staticTiles.has(tile))) return 'placement';
+  const touched = placed.flatMap((index) => wallPostTiles(grid, index));
+  if (touched.some((tile) => staticTiles.has(tile))) return 'placement';
   const onDesk = (tile: number): boolean => {
-    const tx = tile % width;
-    const ty = Math.floor(tile / width);
+    const tx = tile % grid.width;
+    const ty = Math.floor(tile / grid.width);
     return (protections.desks ?? []).some((desk) => tx >= desk.x && tx < desk.x + desk.w && ty >= desk.y && ty < desk.y + desk.h);
   };
-  return placed.some(onDesk) ? 'placement' : null;
+  return touched.some(onDesk) ? 'placement' : null;
 }

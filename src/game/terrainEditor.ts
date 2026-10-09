@@ -6,8 +6,8 @@
 import type { LayoutMaterial, WallEdit, WallPieceId } from './officeLayout';
 
 /**
- * What a map click paints: a floor on a whole 9x9 block, or a wall piece on
- * one tile (`null`: the wall eraser).
+ * What a map click paints: a floor on a whole 9x9 block, or a wall post on
+ * one grid vertex (`null`: the wall eraser).
  */
 export type TerrainBrush =
   | { readonly kind: 'floor'; readonly material: LayoutMaterial }
@@ -29,8 +29,8 @@ export interface TerrainEditCommand {
   /**
    * The palette entry picked, or `null`. While a floor is picked the map
    * outlines the block a click would paint and reports `terrainpick`; while
-   * a wall (or the wall eraser) is picked it outlines the tile and reports
-   * `wallpick`.
+   * a wall (or the wall eraser) is picked it outlines a tile-sized box
+   * centered on the nearest grid vertex and reports `wallpick`.
    */
   brush: TerrainBrush | null;
   /** Paints on their way to the room, drawn over the live blocks. Drawing only, never walkability. */
@@ -45,17 +45,39 @@ export interface StrokeGrid {
   readonly rows: number;
   /** Side of a cell, in world pixels. */
   readonly cellSize: number;
+  /**
+   * What a point picks: the cell under it (`cell`, the default), or the
+   * nearest grid vertex (`vertex`), named by the cell whose top-left corner
+   * it is. Wall posts stand on vertices, so a wall lands on the line between
+   * two tiles.
+   */
+  readonly snap?: 'cell' | 'vertex';
 }
 
 /** Samples per cell along a stroke: dense enough that a stroke never steps over a cell it crosses but by a corner. */
 const STROKE_SAMPLES_PER_CELL = 8;
 
+/** The cell (or, for a vertex grid, the vertex) a world point picks, or `null` off the grid. */
+function cellAt(grid: StrokeGrid, x: number, y: number): number | null {
+  if (grid.snap === 'vertex') {
+    // Off the world nothing; inside, the last half cell clamps onto the last vertex.
+    if (x < 0 || y < 0 || x >= grid.columns * grid.cellSize || y >= grid.rows * grid.cellSize) return null;
+    const col = Math.min(grid.columns - 1, Math.round(x / grid.cellSize));
+    const row = Math.min(grid.rows - 1, Math.round(y / grid.cellSize));
+    return row * grid.columns + col;
+  }
+  const col = Math.floor(x / grid.cellSize);
+  const row = Math.floor(y / grid.cellSize);
+  if (col < 0 || row < 0 || col >= grid.columns || row >= grid.rows) return null;
+  return row * grid.columns + col;
+}
+
 /**
  * The cells a pointer stroke paints, in order and each once: the cell under a
  * press (`from` null), or every cell the segment from the previous pointer
- * position to `to` crosses. A pointer reports far apart positions on a fast
- * drag, so walking the segment keeps a quick stroke from skipping cells.
- * Points off the grid paint nothing.
+ * position to `to` crosses (vertices it passes, for a vertex grid). A pointer
+ * reports far apart positions on a fast drag, so walking the segment keeps a
+ * quick stroke from skipping cells. Points off the grid paint nothing.
  */
 export function cellsAlongStroke(grid: StrokeGrid, from: { x: number; y: number } | null, to: { x: number; y: number }): number[] {
   const start = from ?? to;
@@ -65,11 +87,18 @@ export function cellsAlongStroke(grid: StrokeGrid, from: { x: number; y: number 
   const steps = Math.max(1, Math.ceil((Math.hypot(dx, dy) * STROKE_SAMPLES_PER_CELL) / grid.cellSize));
   const cells: number[] = [];
   for (let step = 0; step <= steps; step += 1) {
-    const col = Math.floor((start.x + (dx * step) / steps) / grid.cellSize);
-    const row = Math.floor((start.y + (dy * step) / steps) / grid.cellSize);
-    if (col < 0 || row < 0 || col >= grid.columns || row >= grid.rows) continue;
-    const cell = row * grid.columns + col;
-    if (!cells.includes(cell)) cells.push(cell);
+    const cell = cellAt(grid, start.x + (dx * step) / steps, start.y + (dy * step) / steps);
+    if (cell !== null && !cells.includes(cell)) cells.push(cell);
   }
   return cells;
+}
+
+/**
+ * World center of the editor's outline for a picked cell: the cell's middle,
+ * or the vertex itself for a vertex grid, so a cell-sized box around it sits
+ * half on each side of both grid lines.
+ */
+export function cellOutlineCenter(grid: StrokeGrid, index: number): { x: number; y: number } {
+  const offset = grid.snap === 'vertex' ? 0 : 0.5;
+  return { x: ((index % grid.columns) + offset) * grid.cellSize, y: (Math.floor(index / grid.columns) + offset) * grid.cellSize };
 }
