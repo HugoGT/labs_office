@@ -10,7 +10,15 @@
  */
 
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
-import { LAYOUT_MATERIALS, isLayoutMaterial, type LayoutMaterial, type OfficeLayout } from '../../../src/game/officeLayout.ts';
+import {
+  LAYOUT_MATERIALS,
+  MAX_WALL_EDITS,
+  isLayoutMaterial,
+  isWallPieceId,
+  type LayoutMaterial,
+  type OfficeLayout,
+  type WallEdit,
+} from '../../../src/game/officeLayout.ts';
 import type { MapSeat } from '../../../src/game/seating.ts';
 
 /** The edit was malformed: an index off the map or an unknown material (400). */
@@ -85,6 +93,12 @@ export interface TileRect {
  */
 export interface TerrainProtections {
   placements: readonly TileRect[];
+  /**
+   * The desks alone (they are in `placements` too): the only stored
+   * placement a wall may not cover. Walls go inside and around rooms on
+   * purpose. Absent means no desk.
+   */
+  desks?: readonly TileRect[];
   players: readonly { x: number; y: number }[];
 }
 
@@ -152,4 +166,47 @@ export function findUnwalkableConflict(
   if (watered.some((tile) => staticTiles.has(tile)) || protections.placements.some(floods)) return 'placement';
 
   return null;
+}
+
+/**
+ * The body of `POST /admin/terrain/walls`: `{ edits: [{ index, piece }] }`,
+ * one tile each, a wall piece or `null` to remove the wall. At most
+ * `MAX_WALL_EDITS` tiles, each once.
+ */
+export function parseWallBatch(body: unknown, tileCount: number): WallEdit[] {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new InvalidTerrainEditError('invalid wall batch');
+  const { edits } = body as Record<string, unknown>;
+  if (!Array.isArray(edits) || edits.length < 1 || edits.length > MAX_WALL_EDITS) throw new InvalidTerrainEditError('invalid wall batch');
+  const seen = new Set<number>();
+  return edits.map((edit: unknown) => {
+    if (typeof edit !== 'object' || edit === null || Array.isArray(edit)) throw new InvalidTerrainEditError('invalid wall edit');
+    const { index, piece } = edit as Record<string, unknown>;
+    if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= tileCount) throw new InvalidTerrainEditError('invalid tile');
+    if (piece !== null && !isWallPieceId(piece)) throw new InvalidTerrainEditError('unknown wall piece');
+    if (seen.has(index)) throw new InvalidTerrainEditError('duplicate tile');
+    seen.add(index);
+    return { index, piece };
+  });
+}
+
+/**
+ * Why a wall may not stand on one of the `placed` tiles, or `null` if it may.
+ * Walls block like water but never strand anything a room holds: they are
+ * refused on the static tiles (seats, furniture, the spawn area) and on desks,
+ * never because of a room or a player (players are relocated).
+ */
+export function findWallConflict(
+  placed: readonly number[],
+  width: number,
+  staticTiles: ReadonlySet<number>,
+  protections: TerrainProtections,
+): UnwalkableConflict | null {
+  if (placed.length === 0) return null;
+  if (placed.some((tile) => staticTiles.has(tile))) return 'placement';
+  const onDesk = (tile: number): boolean => {
+    const tx = tile % width;
+    const ty = Math.floor(tile / width);
+    return (protections.desks ?? []).some((desk) => tx >= desk.x && tx < desk.x + desk.w && ty >= desk.y && ty < desk.y + desk.h);
+  };
+  return placed.some(onDesk) ? 'placement' : null;
 }

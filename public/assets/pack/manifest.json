@@ -1500,8 +1500,8 @@
           "firstTile": 0
         },
         {
-          "material": "grass",
-          "floor": "floor-grass",
+          "material": "sand",
+          "floor": "floor-sand",
           "walkable": true,
           "firstTile": 144
         },
@@ -1512,14 +1512,14 @@
           "firstTile": 288
         },
         {
-          "material": "sand",
-          "floor": "floor-sand",
+          "material": "cobblestone",
+          "floor": "floor-cobblestone",
           "walkable": true,
           "firstTile": 432
         },
         {
-          "material": "cobblestone",
-          "floor": "floor-cobblestone",
+          "material": "grass",
+          "floor": "floor-grass",
           "walkable": true,
           "firstTile": 576
         },
@@ -1582,8 +1582,8 @@
           "path": "tileset/terrain.png",
           "imageKind": "terrain-tileset",
           "width": 512,
-          "height": 2336,
-          "sha256": "4508238ef013ea0e64cd291e6dde914fc40dab9529deea742ea213cba9bac270"
+          "height": 2368,
+          "sha256": "053cd2ba872ec6140f9fd29a57c572f72f7377c500a1da12944da3208277114b"
         }
       ]
     },

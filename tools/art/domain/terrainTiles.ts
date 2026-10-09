@@ -12,13 +12,18 @@
  *   tile line, like the walls standing on it.
  *
  * Near the edge the material gets a darker rim inside and a translucent indigo contact shadow
- * outside, drawn over whatever lies below; one tile works over any lower neighbor.
+ * outside, drawn over whatever lies below; one tile works over any lower neighbor. Built floors
+ * keep a one pixel rim: a two pixel one on a straight tile line read as a wall, not as a floor.
+ * They cast no shadow either: it painted two pixels past the tile line, so the floor looked wider
+ * than its walkable tiles. Over water that same shadow comes back as a bank tile per corner mask
+ * (`terrainBankTile`), drawn right over the water, so the water still reads as sunk below them.
  */
 import { OUTLINE_INK } from '../../../src/game/artColor.ts';
 import {
   ART_TILE,
   FLOOR_MOTIF_SIZE,
   TERRAIN_CORNER_BITS,
+  isTerrainBuiltFloor,
   terrainPhaseOrigin,
   type TerrainDecal,
   type TerrainMaterial,
@@ -33,23 +38,42 @@ export interface TerrainEdge {
   /** How far, in cells, the noise pushes an organic edge off its straight line. */
   readonly amplitude: number;
   readonly seed: number;
+  /** Width of the darker rim inside the edge, in pixels: 2 (strong, then soft) or 1 (strong). */
+  readonly rim: 1 | 2;
+  /** Whether a translucent contact shadow is drawn two pixels outside the edge. */
+  readonly shadow: boolean;
+}
+
+/** The contract's built floors (`TERRAIN_BUILT_FLOORS`) decide the style, so the bank and the edges never disagree. */
+function edgeOf(material: TerrainMaterial, amplitude: number, seed: number): TerrainEdge {
+  return isTerrainBuiltFloor(material)
+    ? { style: 'square', amplitude: 0, seed, rim: 1, shadow: false }
+    : { style: 'organic', amplitude, seed, rim: 2, shadow: true };
 }
 
 export const TERRAIN_EDGES: Readonly<Record<TerrainMaterial, TerrainEdge>> = {
-  water: { style: 'organic', amplitude: 0.15, seed: 101 },
-  grass: { style: 'organic', amplitude: 0.22, seed: 102 },
-  dirt: { style: 'organic', amplitude: 0.18, seed: 103 },
-  sand: { style: 'organic', amplitude: 0.16, seed: 104 },
-  cobblestone: { style: 'organic', amplitude: 0.1, seed: 105 },
-  wood: { style: 'square', amplitude: 0, seed: 106 },
-  tile: { style: 'square', amplitude: 0, seed: 107 },
-  carpet: { style: 'square', amplitude: 0, seed: 108 },
+  water: edgeOf('water', 0.15, 101),
+  grass: edgeOf('grass', 0.22, 102),
+  dirt: edgeOf('dirt', 0.18, 103),
+  sand: edgeOf('sand', 0.16, 104),
+  cobblestone: edgeOf('cobblestone', 0.1, 105),
+  wood: edgeOf('wood', 0, 106),
+  tile: edgeOf('tile', 0, 107),
+  carpet: edgeOf('carpet', 0, 108),
 };
 
-/** One pixel of field, in cells: the rim and the shadow are each two pixels wide. */
+/** One pixel of field, in cells: the shadow, when drawn, is two pixels wide, the rim one or two (`TerrainEdge.rim`). */
 const PIXEL = 1 / ART_TILE;
 const SHADOW_NEAR = rgba(28, 18, 44, 72);
 const SHADOW_FAR = rgba(28, 18, 44, 36);
+
+/** The contact shadow at a field level: two pixels just outside the 0.5 edge, none elsewhere. */
+function contactShadow(field: number): Rgba | null {
+  if (field >= 0.5) return null;
+  if (field >= 0.5 - PIXEL) return SHADOW_NEAR;
+  if (field >= 0.5 - 2 * PIXEL) return SHADOW_FAR;
+  return null;
+}
 
 const CORNERS = [
   { bit: TERRAIN_CORNER_BITS.nw, u: 0, v: 0 },
@@ -125,6 +149,7 @@ function motifOf(material: TerrainMaterial): PixelBuffer {
 export function terrainEdgeTile(material: TerrainMaterial, mask: number, phase: number): PixelBuffer {
   const motif = motifOf(material);
   const origin = terrainPhaseOrigin(phase);
+  const { rim, shadow } = TERRAIN_EDGES[material];
   const tile = new PixelBuffer(ART_TILE, ART_TILE);
   for (let y = 0; y < ART_TILE; y += 1) {
     for (let x = 0; x < ART_TILE; x += 1) {
@@ -132,10 +157,27 @@ export function terrainEdgeTile(material: TerrainMaterial, mask: number, phase: 
       if (field >= 0.5) {
         const color = motif.getPixel((origin.x + x) % FLOOR_MOTIF_SIZE, (origin.y + y) % FLOOR_MOTIF_SIZE);
         if (field < 0.5 + PIXEL) tile.setPixel(x, y, mixRgba(color, OUTLINE_INK, 0.38));
-        else if (field < 0.5 + 2 * PIXEL) tile.setPixel(x, y, mixRgba(color, OUTLINE_INK, 0.16));
+        else if (rim === 2 && field < 0.5 + 2 * PIXEL) tile.setPixel(x, y, mixRgba(color, OUTLINE_INK, 0.16));
         else tile.setPixel(x, y, color);
-      } else if (field >= 0.5 - PIXEL) tile.setPixel(x, y, SHADOW_NEAR);
-      else if (field >= 0.5 - 2 * PIXEL) tile.setPixel(x, y, SHADOW_FAR);
+      } else if (shadow) {
+        const shade = contactShadow(field);
+        if (shade !== null) tile.setPixel(x, y, shade);
+      }
+    }
+  }
+  return tile;
+}
+
+/**
+ * The water bank of mask `m` (1-15): the square contact shadow a built floor over the corners in
+ * `m` would cast, alone. It does not depend on the phase, so one row of the tileset holds them all.
+ */
+export function terrainBankTile(mask: number): PixelBuffer {
+  const tile = new PixelBuffer(ART_TILE, ART_TILE);
+  for (let y = 0; y < ART_TILE; y += 1) {
+    for (let x = 0; x < ART_TILE; x += 1) {
+      const shade = contactShadow(squareField(mask, (x + 0.5) / ART_TILE, (y + 0.5) / ART_TILE));
+      if (shade !== null) tile.setPixel(x, y, shade);
     }
   }
   return tile;

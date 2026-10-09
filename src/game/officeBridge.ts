@@ -182,13 +182,16 @@ export interface OfficeEventMap {
    */
   layoutplace: { tx: number; ty: number; valid: boolean };
   /**
-   * The live terrain blocks (#123 phase 2), as the room replicates them:
-   * after every accepted edit, and again when the terrain editor opens, so
-   * it starts from what the map shows without a fetch of its own.
+   * The live terrain blocks (#123 phase 2) and walls (one per tile, row
+   * major), as the room replicates them: after every accepted edit, and
+   * again when the terrain editor opens, so it starts from what the map
+   * shows without a fetch of its own.
    */
-  terrain: { blocks: readonly LayoutMaterial[] };
-  /** The terrain editor is open and someone clicked a block on the map (#123 phase 2). */
+  terrain: { blocks: readonly LayoutMaterial[]; walls: readonly (string | null)[] };
+  /** The terrain editor has a floor picked and someone clicked a block on the map (#123 phase 2). */
   terrainpick: { index: number };
+  /** The terrain editor has a wall (or the wall eraser) picked and someone clicked a tile on the map. */
+  wallpick: { index: number };
   /**
    * The collision editor is open and someone clicked a placed piece: its id,
    * the rectangles it collides with now (saved, or its default turned into

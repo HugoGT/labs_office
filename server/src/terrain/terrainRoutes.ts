@@ -3,22 +3,31 @@
  * `{ status, body }`, same contract as `spacesRoutes.ts`, and the same role
  * guard (`authorize`): editing the map is administration, like rooms and desks.
  *
- * There is no read route. Every client already gets the blocks with the room
- * state (`OfficeState.terrainBlocks`), on join and on every change, so a
- * second copy over HTTP would be one more thing to keep in step.
+ * There is no read route. Every client already gets the blocks and the walls
+ * with the room state (`OfficeState.terrainBlocks`, `terrainWalls`), on join
+ * and on every change, so a second copy over HTTP would be one more thing to
+ * keep in step.
  */
 
 import { authorize, INVALID_REQUEST, type AdminDeps, type AdminResult } from '../admin/adminRoutes.ts';
-import { InvalidTerrainEditError, TerrainProtectedError, TerrainStaleError, parseTerrainBatch, parseTerrainEdit, type TerrainProtections } from './terrainRules.ts';
+import {
+  InvalidTerrainEditError,
+  TerrainProtectedError,
+  TerrainStaleError,
+  parseTerrainBatch,
+  parseTerrainEdit,
+  parseWallBatch,
+  type TerrainProtections,
+} from './terrainRules.ts';
 import type { TerrainRuntime } from './terrainRuntime.ts';
 
 export interface TerrainDeps extends AdminDeps {
   terrain: TerrainRuntime;
-  /** Read only when an edit would flood a tile; see `TerrainProtections`. */
+  /** Read only when an edit would flood a tile or place a wall; see `TerrainProtections`. */
   protections: () => Promise<TerrainProtections>;
 }
 
-/** Placements survive terrain edits; players return to safe spawn instead. */
+/** Placements survive terrain and wall edits; players return to safe spawn instead. */
 const UNDER_PLACEMENT: AdminResult = { status: 409, body: { error: 'terrain-under-placement' } };
 
 export async function handleSetTerrainBlocks(authorization: unknown, body: unknown, deps: TerrainDeps): Promise<AdminResult> {
@@ -49,6 +58,25 @@ export async function handleSetTerrainBlock(
     const edit = parseTerrainEdit(index, body, deps.terrain.blocks().length);
     await deps.terrain.setBlock({ ...edit, actorId: authorized.user.id }, deps.protections);
     return { status: 200, body: { index: edit.index, material: edit.material } };
+  } catch (error) {
+    if (error instanceof InvalidTerrainEditError) return INVALID_REQUEST;
+    if (error instanceof TerrainProtectedError) return UNDER_PLACEMENT;
+    throw error;
+  }
+}
+
+/**
+ * `POST /admin/terrain/walls` `{ edits: [{ index, piece }] }`: places (`piece`
+ * a wall piece) or removes (`null`) walls on single tiles, all or none. A
+ * dragged wall is one request.
+ */
+export async function handleSetTerrainWalls(authorization: unknown, body: unknown, deps: TerrainDeps): Promise<AdminResult> {
+  const authorized = await authorize(authorization, deps);
+  if (!authorized.ok) return authorized.result;
+  try {
+    const edits = parseWallBatch(body, deps.terrain.walls().length);
+    await deps.terrain.setWalls(edits, authorized.user.id, deps.protections);
+    return { status: 200, body: { updated: edits.length } };
   } catch (error) {
     if (error instanceof InvalidTerrainEditError) return INVALID_REQUEST;
     if (error instanceof TerrainProtectedError) return UNDER_PLACEMENT;

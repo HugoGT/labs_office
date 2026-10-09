@@ -63,4 +63,19 @@ describe('createTerrainAdminClient', () => {
     expect(await codeOf(clientWith(fetchWith(400, { error: 'invalid-request' })).setBlock(1, 'sand'))).toBe('invalid-request');
     expect(await codeOf(clientWith(fetchWith(200), async () => null).setBlock(1, 'sand'))).toBe('unauthorized');
   });
+
+  it('posts a whole wall batch to one route, authenticated, and maps its refusals', async () => {
+    const fetchImpl = fetchWith(200, { updated: 2 });
+    const edits = [{ index: 3, piece: 'wall-brick' as const }, { index: 4, piece: null }];
+
+    await clientWith(fetchImpl).setWalls(edits);
+
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(url).toBe(`${BASE_URL}/admin/terrain/walls`);
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(init?.body as string)).toEqual({ edits });
+    expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer id-token');
+    expect(await codeOf(clientWith(fetchWith(409, { error: 'terrain-under-placement' })).setWalls(edits))).toBe('terrain-under-placement');
+    expect(await codeOf(clientWith(fetchWith(503)).setWalls(edits))).toBe('terrain-not-configured');
+  });
 });

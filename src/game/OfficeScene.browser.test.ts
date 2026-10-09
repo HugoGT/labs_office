@@ -14,7 +14,8 @@ import {
   ZONE_LABELS,
 } from './mapData';
 import { TERRAIN_LAYER_COUNT } from './artContract';
-import { terrainSnapshot, withBlock, type OfficeLayout } from './officeLayout';
+import { terrainSnapshot, withBlock, withWalls, type OfficeLayout } from './officeLayout';
+import { WALL_OBJECT_NAME } from './mapBuilder';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SPACES as BUILT_IN_SPACES } from '../test/legacyOffice';
 const BUILT_IN_SPACES_VERSION = 'a489c5da5efd7c68';
 import {
@@ -3926,7 +3927,7 @@ describe('OfficeScene: edited terrain', () => {
     const draft = withBlock(empty.blocks, SPAWN_BLOCK_INDEX - 1, 'wood');
     const point = { x: west.tx * TILE + 16, y: west.ty * TILE + 16 };
     expect(solidAt(scene, point.x, point.y)).toBe(true);
-    bridge.emitCommand('terrainedit', { brush: 'wood', previewBlocks: draft });
+    bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'wood' }, previewBlocks: draft });
     expect(terrainTilesAt(scene, west.tx, west.ty)).not.toEqual(before);
     expect(solidAt(scene, point.x, point.y)).toBe(true);
     bridge.emitCommand('terrainedit', null);
@@ -3971,7 +3972,7 @@ describe('OfficeScene: edited terrain', () => {
 
     expect(solidAt(scene, lawn.x, lawn.y)).toBe(true);
     expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).not.toEqual(grass);
-    expect(seen).toEqual([{ blocks: watered }]);
+    expect(seen).toEqual([{ blocks: watered, walls: BASE_LAYOUT.walls }]);
 
     handlers.onTerrain!(BASE_LAYOUT.blocks);
     // Arcade drops a destroyed static body on its next step.
@@ -3985,21 +3986,21 @@ describe('OfficeScene: edited terrain', () => {
     const { scene, bridge } = await bootConnected();
     const grass = terrainTilesAt(scene, lawnCell.cx, lawnCell.cy);
 
-    bridge.emitCommand('terrainedit', { brush: 'water', previewBlocks: withBlock(BASE_LAYOUT.blocks, LAWN, 'water') });
+    bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'water' }, previewBlocks: withBlock(BASE_LAYOUT.blocks, LAWN, 'water') });
 
     expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).not.toEqual(grass);
     expect(solidAt(scene, lawn.x, lawn.y)).toBe(false);
 
-    bridge.emitCommand('terrainedit', { brush: 'water' });
+    bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'water' } });
     expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).toEqual(grass);
-    bridge.emitCommand('terrainedit', { brush: 'sand', previewBlocks: withBlock(BASE_LAYOUT.blocks, LAWN, 'sand') });
+    bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'sand' }, previewBlocks: withBlock(BASE_LAYOUT.blocks, LAWN, 'sand') });
     bridge.emitCommand('terrainedit', null);
     expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).toEqual(grass);
   });
 
   it('keeps pending paints over an edit that arrives meanwhile, then shows the edit', async () => {
     const { scene, bridge, handlers } = await bootConnected();
-    bridge.emitCommand('terrainedit', { brush: 'sand', previewBlocks: withBlock(BASE_LAYOUT.blocks, LAWN, 'sand') });
+    bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'sand' }, previewBlocks: withBlock(BASE_LAYOUT.blocks, LAWN, 'sand') });
     const sand = terrainTilesAt(scene, lawnCell.cx, lawnCell.cy);
 
     handlers.onTerrain!(withBlock(BASE_LAYOUT.blocks, LAWN, 'water'));
@@ -4032,9 +4033,9 @@ describe('OfficeScene: edited terrain', () => {
     bridge.on('terrain', (payload) => seen.push(payload));
 
     bridge.emitCommand('terrainedit', { brush: null });
-    bridge.emitCommand('terrainedit', { brush: 'grass' });
+    bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'grass' } });
 
-    expect(seen).toEqual([{ blocks: watered }]);
+    expect(seen).toEqual([{ blocks: watered, walls: BASE_LAYOUT.walls }]);
   });
 
   it('a click on the map picks a block instead of closing menus while the editor is open', async () => {
@@ -4043,10 +4044,60 @@ describe('OfficeScene: edited terrain', () => {
     bridge.on('closemenu', () => events.push('closemenu'));
     bridge.on('terrainpick', ({ index }) => events.push(`pick:${index}`));
 
-    bridge.emitCommand('terrainedit', { brush: null });
-    scene.input.emit('pointerdown', { worldX: lawn.x, worldY: lawn.y, event: { stopPropagation() {} } }, []);
+    bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'grass' } });
+    scene.input.emit('pointerdown', { worldX: lawn.x, worldY: lawn.y, button: 0, event: { stopPropagation() {} } }, []);
 
     expect(events).toEqual([`pick:${LAWN}`]);
+  });
+
+  const lawnTile = 22 * BASE_LAYOUT.width + 67;
+  const wallObjects = (scene: Phaser.Scene) => scene.children.list.filter((child) => child.name === WALL_OBJECT_NAME);
+
+  it('draws and collides with the walls the room sends, rebuilding both on every change, and tells React', async () => {
+    const { scene, bridge, handlers } = await bootConnected();
+    const seen: OfficeEventMap['terrain'][] = [];
+    bridge.on('terrain', (payload) => seen.push(payload));
+    const before = wallObjects(scene).length;
+    expect(solidAt(scene, lawn.x, lawn.y)).toBe(false);
+
+    const walled = withWalls(BASE_LAYOUT.walls, [{ index: lawnTile, piece: 'wall-brick' }]);
+    handlers.onWalls!(walled);
+
+    expect(solidAt(scene, lawn.x, lawn.y)).toBe(true);
+    expect(wallObjects(scene).length).toBeGreaterThan(before);
+    expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled }]);
+
+    handlers.onWalls!(BASE_LAYOUT.walls);
+    await vi.waitFor(() => expect(solidAt(scene, lawn.x, lawn.y)).toBe(false), LOOP_WAIT);
+    expect(wallObjects(scene)).toHaveLength(before);
+    // Walls of another map size are not this layout's: ignored.
+    handlers.onWalls!([]);
+    expect(wallObjects(scene)).toHaveLength(before);
+  });
+
+  it('draws pending walls for the editor without colliding with them, and drops them when it closes', async () => {
+    const { scene, bridge } = await bootConnected();
+    const before = wallObjects(scene).length;
+
+    bridge.emitCommand('terrainedit', { brush: { kind: 'wall', piece: 'wall-glass' }, previewWalls: [{ index: lawnTile, piece: 'wall-glass' }, { index: lawnTile + 1, piece: 'wall-glass' }] });
+
+    expect(wallObjects(scene).length).toBeGreaterThan(before);
+    expect(solidAt(scene, lawn.x, lawn.y)).toBe(false);
+
+    bridge.emitCommand('terrainedit', null);
+    expect(wallObjects(scene)).toHaveLength(before);
+  });
+
+  it('tells the editor the current walls when it opens', async () => {
+    const { bridge, handlers } = await bootConnected();
+    const walled = withWalls(BASE_LAYOUT.walls, [{ index: lawnTile, piece: 'wall-stone' }]);
+    handlers.onWalls!(walled);
+    const seen: OfficeEventMap['terrain'][] = [];
+    bridge.on('terrain', (payload) => seen.push(payload));
+
+    bridge.emitCommand('terrainedit', { brush: null });
+
+    expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled }]);
   });
 });
 

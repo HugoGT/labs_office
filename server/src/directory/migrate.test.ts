@@ -12,7 +12,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { LEGACY_BLOCK_GRID, MAP_BLOCK_COLUMNS, MAP_BLOCK_TILES, SPAWN_BLOCK_INDEX, TILE } from '../../../src/game/mapData.ts';
-import { LAYOUT_MATERIALS } from '../../../src/game/officeLayout.ts';
+import { LAYOUT_MATERIALS, WALL_PIECES } from '../../../src/game/officeLayout.ts';
 import { MAP_LAYOUT_VERSION, migrate, readSchemaSql, reportDesksWithoutSpace } from './migrate.ts';
 
 /** Comparar SQL con saltos de linea y sangria es comparar formato, no contrato. */
@@ -662,6 +662,25 @@ describe('schema.sql: persisted terrain blocks (#123 phase 2)', () => {
     expect(squashed).toContain(
       `alter table terrain_blocks add constraint terrain_blocks_material_check check (material in (${materials}))`,
     );
+  });
+});
+
+describe('schema.sql: painted terrain walls', () => {
+  const squashed = squash(schema);
+  const pieces = WALL_PIECES.map((piece) => `'${piece}'`).join(', ');
+
+  it('stores one row per tile holding a wall, bounded to the shared wall pieces, with who placed it and when', () => {
+    expect(squashed).toContain(
+      `create table if not exists terrain_walls ( tile_index integer primary key check (tile_index >= 0), piece_id text not null check (piece_id in (${pieces})), updated_by uuid references users(id), updated_at timestamptz not null default now() )`,
+    );
+    expect(squashed).toContain('alter table terrain_walls drop constraint if exists terrain_walls_piece_id_check');
+    expect(squashed).toContain(`alter table terrain_walls add constraint terrain_walls_piece_id_check check (piece_id in (${pieces}))`);
+  });
+
+  it('is created after the users it references and outside the one-time grid move, whose grid it never had', () => {
+    expect(squashed.indexOf('create table if not exists terrain_walls')).toBeGreaterThan(squashed.indexOf('create table if not exists users'));
+    const migration = squashed.slice(squashed.indexOf('do $$'), squashed.lastIndexOf('end $$;'));
+    expect(migration).not.toContain('terrain_walls');
   });
 });
 

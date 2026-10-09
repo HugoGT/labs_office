@@ -1,5 +1,5 @@
 /**
- * Draws the static office from the Tiled layout (art migration, step 8, #4):
+ * Draws the office from the Tiled layout (art migration, step 8, #4):
  * the terrain as tilemap layers of the shared `tileset-terrain`, and walls,
  * hedges, props and the base chairs from the art pack at native size, placed
  * by their anchors. Depende de Phaser en tiempo de ejecucion: se prueba en la
@@ -174,18 +174,31 @@ export function renderTerrain(scene: Phaser.Scene, terrain: TerrainSnapshot, lay
 
 // --- Layout pieces -----------------------------------------------------------------------------
 
-function placeWalls(scene: Phaser.Scene, layout: OfficeLayout, art?: ArtTextures): void {
-  const sprites = wallSprites(layout);
-  for (const sprite of sprites) {
+/** Name of every object `placeWalls` draws, so tests and tools can find the walls on the map. */
+export const WALL_OBJECT_NAME = 'map:wall';
+
+/**
+ * The walls of a wall grid (the layout's, or the live painted ones), from the
+ * pack or as a grey placeholder per tile. Returns what it drew, so the scene
+ * can destroy it and draw the walls again after an edit.
+ */
+export function placeWalls(
+  scene: Phaser.Scene,
+  grid: Pick<OfficeLayout, 'width' | 'height' | 'walls'>,
+  art?: ArtTextures,
+): Phaser.GameObjects.GameObject[] {
+  const drawn: Phaser.GameObjects.GameObject[] = [];
+  for (const sprite of wallSprites(grid)) {
     const sheet = packSheet(art, sprite.piece, isAny);
-    if (sheet !== null) putArtSprite(scene, sheet.key, sprite, worldAssetDepth(sprite.depthY));
+    if (sheet !== null) drawn.push(putArtSprite(scene, sheet.key, sprite, worldAssetDepth(sprite.depthY)).setName(WALL_OBJECT_NAME));
   }
-  layout.walls.forEach((wall, index) => {
+  grid.walls.forEach((wall, index) => {
     if (wall === null || packSheet(art, wall, isAny) !== null) return;
-    const tx = index % layout.width;
-    const ty = Math.floor(index / layout.width);
-    placeholder(scene, tx * TILE, ty * TILE, TILE, TILE, PLACEHOLDER_COLOR, worldAssetDepth((ty + 1) * TILE));
+    const tx = index % grid.width;
+    const ty = Math.floor(index / grid.width);
+    drawn.push(placeholder(scene, tx * TILE, ty * TILE, TILE, TILE, PLACEHOLDER_COLOR, worldAssetDepth((ty + 1) * TILE)).setName(WALL_OBJECT_NAME));
   });
+  return drawn;
 }
 
 function placeHedges(scene: Phaser.Scene, layout: OfficeLayout, art?: ArtTextures): void {
@@ -224,13 +237,13 @@ function placeProp(scene: Phaser.Scene, prop: LayoutProp, art?: ArtTextures): vo
 }
 
 /**
- * Walls, hedges and props of the layout. Collision is not decided here: the
- * scene builds its colliders from the shared rules the server enforces too,
- * the terrain tiles (`terrainSnapshot`) and the pieces' rectangles
- * (`pieceCollisions.ts`).
+ * Hedges and props of the layout; walls are drawn apart (`placeWalls`)
+ * because painted walls change while the office is open. Collision is not
+ * decided here: the scene builds its colliders from the shared rules the
+ * server enforces too, the terrain tiles (`terrainSnapshot`) and the pieces'
+ * rectangles (`pieceCollisions.ts`).
  */
 export function placeLayout(scene: Phaser.Scene, layout: OfficeLayout, art?: ArtTextures): void {
-  placeWalls(scene, layout, art);
   placeHedges(scene, layout, art);
   for (const prop of layout.props) placeProp(scene, prop, art);
 }

@@ -23,6 +23,7 @@ import {
   facingColumn,
   hedgeFrameIndex,
   sheetSize,
+  terrainBankIndex,
   terrainDecalIndex,
   terrainLayerData,
   terrainTileIndex,
@@ -40,7 +41,7 @@ import { PixelBuffer } from './domain/pixelBuffer.ts';
 import { bridgeSprite, hedgeSprite, PLANT_KINDS, plantSprite, TREE_KINDS, treeSprite, type PlantKind, type TreeKind } from './domain/props.ts';
 import { buildCharacterSprites, type CharacterSprites } from './domain/spriteSheet.ts';
 import { ROOM_TABLES, roomTableSprite, TABLE_MATERIALS, tableSprite, type RoomTable, type TableMaterial } from './domain/tables.ts';
-import { decalTile, terrainEdgeTile } from './domain/terrainTiles.ts';
+import { decalTile, terrainBankTile, terrainEdgeTile } from './domain/terrainTiles.ts';
 import { TERRAINS, terrainTile, type Terrain } from './domain/tiles.ts';
 import type { WallGroup } from './domain/wallGeometry.ts';
 import { WALL_MATERIALS, type WallMaterial } from './domain/wallMap.ts';
@@ -140,7 +141,7 @@ export function wallLayer(sheet: PixelBuffer, group: WallGroup): { readonly imag
 
 // --- Terrain -----------------------------------------------------------------------------------
 
-/** Every terrain edge tile and decal at its `terrainTileIndex` / `terrainDecalIndex`; mask 0 stays empty. */
+/** Every terrain edge tile, decal and water bank at its `terrainTileIndex` / `terrainDecalIndex` / `terrainBankIndex`; mask 0 stays empty. */
 export function terrainTilesetSheet(): PixelBuffer {
   const sheet = blankSheet(TERRAIN_TILESET);
   const at = (index: number): [number, number] => [(index % TERRAIN_TILESET.columns) * ART_TILE, Math.floor(index / TERRAIN_TILESET.columns) * ART_TILE];
@@ -150,6 +151,7 @@ export function terrainTilesetSheet(): PixelBuffer {
     }
   }
   for (const decal of TERRAIN_DECALS) place(sheet, decalTile(decal), ...at(terrainDecalIndex(decal)));
+  for (let mask = 1; mask < TERRAIN_MASKS; mask += 1) place(sheet, terrainBankTile(mask), ...at(terrainBankIndex(mask)));
   return sheet;
 }
 

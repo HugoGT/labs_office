@@ -48,6 +48,7 @@ import {
   BASE_LAYOUT,
   BASE_TERRAIN,
   encodeTerrainBlocks,
+  encodeTerrainWalls,
   isPositionWalkable,
   isFootprintWalkable,
   type LayoutMaterial,
@@ -232,8 +233,9 @@ export interface OfficeRoomOptions {
    */
   terrain?: () => TerrainSnapshot;
   /**
-   * Accepted terrain edits (#123 phase 2), with the whole new block list,
-   * which the room replicates as `state.terrainBlocks`. `terrain` above must
+   * Accepted terrain edits (#123 phase 2) and wall edits, with the whole new
+   * block list, which the room replicates as `state.terrainBlocks`; the walls
+   * (`state.terrainWalls`) come from the snapshot. `terrain` above must
    * already answer with the new snapshot when this fires.
    */
   subscribeTerrainChanges?: (listener: (blocks: readonly LayoutMaterial[]) => void) => () => void;
@@ -404,8 +406,10 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     this.state = new OfficeState();
     if (options?.terrain) this.terrain = options.terrain;
     this.state.terrainBlocks = encodeTerrainBlocks(this.terrain().blocks);
+    this.state.terrainWalls = encodeTerrainWalls(this.terrain().walls);
     this.unsubscribeTerrainChanges = options?.subscribeTerrainChanges?.((blocks) => {
       this.state.terrainBlocks = encodeTerrainBlocks(blocks);
+      this.state.terrainWalls = encodeTerrainWalls(this.terrain().walls);
       // The runtime has persisted and published its authoritative snapshot.
       // Iterate replicated players, not sockets: reserved reconnects must move too.
       for (const [sessionId, player] of this.state.players) {

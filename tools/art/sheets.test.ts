@@ -12,6 +12,7 @@ import {
   HEDGE,
   PACK_FACINGS,
   TERRAIN_DECALS,
+  TERRAIN_MASKS,
   TERRAIN_MATERIALS,
   TERRAIN_PHASES,
   TERRAIN_TILESET,
@@ -21,6 +22,7 @@ import {
   facingColumn,
   floorFrameAt,
   hedgeFrameIndex,
+  terrainBankIndex,
   terrainDecalIndex,
   terrainTileIndex,
   validateArtImage,
@@ -44,7 +46,7 @@ import { composeWalls } from './domain/wallRenderer.ts';
 import { crop } from './imageOps.ts';
 import { bridgeSprite, hedgeSprite, PLANT_KINDS, plantSprite, TREE_KINDS, treeSprite } from './domain/props.ts';
 import { ROOM_TABLES, roomTableSprite } from './domain/tables.ts';
-import { decalTile, terrainEdgeTile } from './domain/terrainTiles.ts';
+import { decalTile, terrainBankTile, terrainEdgeTile } from './domain/terrainTiles.ts';
 import {
   bridgeSheet,
   chairSheet,
@@ -203,6 +205,24 @@ describe('terrain tileset sheet', () => {
     for (let column = TERRAIN_DECALS.length; column < TERRAIN_TILESET.columns; column += 1) {
       expect(tile(terrainDecalIndex(TERRAIN_DECALS[0]!) + column).countOpaque()).toBe(0);
     }
+    expect(tile(terrainBankIndex(1) - 1).countOpaque(), 'bank mask 0').toBe(0);
+    for (let mask = 1; mask < TERRAIN_MASKS; mask += 1) expect(pixels(tile(terrainBankIndex(mask))), `bank ${mask}`).toEqual(pixels(terrainBankTile(mask)));
+  });
+
+  it('shades water at the foot of a built floor, and never a floor at the foot of another', () => {
+    const shaded = (rows: readonly string[], x: number, y: number): boolean => {
+      const key: Record<string, TerrainMaterial> = { W: 'water', O: 'wood', G: 'grass' };
+      const at = (tx: number, ty: number): TerrainMaterial => key[rows[ty]![tx]!]!;
+      const [width, height] = [rows[0]!.length, rows.length];
+      const image = terrainLayerImage(sheet, width, height, at);
+      // The same map all of the pixel's material: the same motif phase, no edge anywhere.
+      const uniform = terrainLayerImage(sheet, width, height, () => at(Math.floor(x / ART_TILE), Math.floor(y / ART_TILE)));
+      return pixels(crop(image, x, y, 1, 1)).join() !== pixels(crop(uniform, x, y, 1, 1)).join();
+    };
+    // The first water column right of a wood tile line (x = 32) is darker than open water.
+    expect(shaded(['OWW', 'OWW', 'OWW'], 32, 40)).toBe(true);
+    // Grass over water keeps its own shadow; wood over grass draws none.
+    expect(shaded(['OGG', 'OGG', 'OGG'], 32, 40)).toBe(false);
   });
 
   it('lays a uniform map out exactly like the floor of the same material, aligned to the world', () => {

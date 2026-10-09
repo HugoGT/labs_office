@@ -181,6 +181,13 @@ describe('createDeskAdminClient: como cuenta los fallos', () => {
     );
   });
 
+  it('a desk over a painted wall is its own 409, on creation and on a move', async () => {
+    const client = clientWith(fetchWith(409, { error: 'desk-on-wall' }));
+
+    expect(await codeOf(client.createDesk({ label: 'Mesa 4', x: 6, y: 9 }))).toBe('desk-on-wall');
+    expect(await codeOf(client.updateDesk('desk-1', { x: 6, y: 9 }))).toBe('desk-on-wall');
+  });
+
   it('un 409 cuyo cuerpo trae un motivo que esta ruta no declara cae al primero de la lista', async () => {
     // El cuerpo trae un codigo ajeno a esta ruta (por ejemplo, uno de otra
     // superficie); sin poder confiar en el, se cuenta como el 409 mas

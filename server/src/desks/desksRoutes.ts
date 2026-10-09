@@ -67,7 +67,18 @@ import {
   resolveBodyAppearance,
   type ArtCatalogReader,
 } from '../decor/artAppearanceBody.ts';
-import { DESK_SIDE, DeskOverlapError, DeskSpaceOverlapError, DeskTakenError, InvalidDeskError } from './deskRules.ts';
+import {
+  DESK_SIDE,
+  DeskOnWallError,
+  DeskOverlapError,
+  DeskSpaceOverlapError,
+  DeskTakenError,
+  InvalidDeskError,
+  assertValidDeskPosition,
+  deskCoversWall,
+  type DeskPosition,
+  type WallGrid,
+} from './deskRules.ts';
 import type { Desk, DeskDirectory, OfficeDesk, UpdateDeskInput } from './desksPort.ts';
 
 export interface DesksDeps extends AdminDeps {
@@ -77,6 +88,20 @@ export interface DesksDeps extends AdminDeps {
    * migration, step 7). Optional: a body without an appearance needs none.
    */
   decor?: ArtCatalogReader;
+  /**
+   * The live painted walls a created or moved desk may not cover. Optional:
+   * without it there are no walls to refuse.
+   */
+  walls?: DeskWallGuard;
+}
+
+/**
+ * Gives a desk write the live walls and keeps wall edits out until the write
+ * settles, so a wall cannot land between the check and the save. Wired to the
+ * terrain runtime's edit queue in `createOfficeServer.ts`.
+ */
+export interface DeskWallGuard {
+  run<T>(write: (grid: WallGrid) => Promise<T>): Promise<T>;
 }
 
 /**
@@ -90,6 +115,8 @@ export interface DesksDeps extends AdminDeps {
 const OVERLAP: AdminResult = { status: 409, body: { error: 'desk-overlap' } };
 const TAKEN: AdminResult = { status: 409, body: { error: 'desk-taken' } };
 const SPACE_OVERLAP: AdminResult = { status: 409, body: { error: 'desk-space-overlap' } };
+/** Painted walls under the desk (terrain editor): fixed by removing them or picking another spot. */
+const ON_WALL: AdminResult = { status: 409, body: { error: 'desk-on-wall' } };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -166,8 +193,25 @@ async function translating(run: () => Promise<AdminResult>): Promise<AdminResult
     if (error instanceof DeskOverlapError) return OVERLAP;
     if (error instanceof DeskSpaceOverlapError) return SPACE_OVERLAP;
     if (error instanceof DeskTakenError) return TAKEN;
+    if (error instanceof DeskOnWallError) return ON_WALL;
     throw error;
   }
+}
+
+/**
+ * Runs a write that puts a desk at `position` only if no live wall lies under
+ * its footprint. `null` (a rename) writes without looking at the walls. The
+ * coordinates are validated first so a bad body stays a 400. The guard
+ * serializes this against wall edits in this process only, which is enough
+ * while one server owns the terrain.
+ */
+async function clearOfWalls<T>(position: DeskPosition | null, deps: DesksDeps, write: () => Promise<T>): Promise<T> {
+  if (position === null || deps.walls === undefined) return write();
+  assertValidDeskPosition(position);
+  return deps.walls.run(async (grid) => {
+    if (deskCoversWall(position, grid)) throw new DeskOnWallError('a wall stands under the desk');
+    return write();
+  });
 }
 
 /**
@@ -214,12 +258,14 @@ export async function handleCreateDesk(
   return refusingInvalidAppearance(() =>
     translating(async () => {
       const appearance = await resolveBodyAppearance(body, DESK_APPEARANCE_FIELDS, 'desk', deps.decor);
-      const created = await deps.desks.createDesk({
-        label: body.label as string,
-        x: body.x as number,
-        y: body.y as number,
-        ...(appearance === undefined ? {} : { appearance }),
-      });
+      const position = { x: body.x as number, y: body.y as number };
+      const created = await clearOfWalls(position, deps, () =>
+        deps.desks.createDesk({
+          label: body.label as string,
+          ...position,
+          ...(appearance === undefined ? {} : { appearance }),
+        }),
+      );
       return { status: 201, body: toAdminDeskBody(created) };
     }),
   );
@@ -249,8 +295,11 @@ export async function handleUpdateDesk(
   if ('x' in body) patch.x = body.x as number;
   if ('y' in body) patch.y = body.y as number;
 
+  // Only a move looks at the walls: renaming keeps the desk where it is.
+  const moved = 'x' in body || 'y' in body ? { x: patch.x as number, y: patch.y as number } : null;
+
   return translating(async () => {
-    const updated = await deps.desks.updateDesk(id, patch);
+    const updated = await clearOfWalls(moved, deps, () => deps.desks.updateDesk(id, patch));
     if (updated === null) return NOT_FOUND;
     return { status: 200, body: toAdminDeskBody(updated) };
   });

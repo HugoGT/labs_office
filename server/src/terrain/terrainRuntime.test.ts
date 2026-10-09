@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { TILE, PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
-import { BASE_LAYOUT as OFFICE_LAYOUT, BLOCK_TILES, blockIndexAt, blockTileRect, isPositionWalkable, isTileWalkable, type LayoutMaterial } from '../../../src/game/officeLayout.ts';
-import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN } from '../../../src/test/legacyOffice.ts';
+import { BASE_LAYOUT as OFFICE_LAYOUT, BLOCK_TILES, blockIndexAt, blockTileRect, isPositionWalkable, isTileWalkable, withWalls, type LayoutMaterial } from '../../../src/game/officeLayout.ts';
+import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_TERRAIN as BASE_TERRAIN } from '../../../src/test/legacyOffice.ts';
 import { createMemoryTerrain } from './memoryTerrain.ts';
 import type { TerrainStore } from './terrainPort.ts';
-import { type TerrainProtections } from './terrainRules.ts';
+import { TerrainProtectedError, type TerrainProtections } from './terrainRules.ts';
 import { createTerrainRuntime } from './terrainRuntime.ts';
 
 const LAWN = 35;
@@ -130,6 +130,8 @@ describe('createTerrainRuntime', () => {
         throw new Error('connection lost');
       },
       saveBlocks: async () => { throw new Error('connection lost'); },
+      loadWalls: async () => new Map(),
+      saveWalls: async () => { throw new Error('connection lost'); },
     };
     const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
     await runtime.load();
@@ -162,5 +164,175 @@ describe('createTerrainRuntime', () => {
     const runtime = createTerrainRuntime({ layout: BASE_LAYOUT });
 
     await expect(runtime.setBlock({ index: LAWN, material: 'sand', actorId: null }, NONE)).rejects.toThrow(/no terrain store/);
+  });
+});
+
+describe('createTerrainRuntime walls', () => {
+  const W = BASE_LAYOUT.width;
+  const at = (tx: number, ty: number) => ty * W + tx;
+  /** A free lawn tile: no seat, furniture or spawn on it. */
+  const FREE = at(67, 22);
+  const DESK = { x: 66, y: 21, w: 3, h: 3 };
+
+  it('serves the layout walls until it loads, and without a store for good', async () => {
+    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT });
+    await runtime.load();
+
+    expect(runtime.walls()).toEqual(BASE_LAYOUT.walls);
+    expect(runtime.snapshot().walls).toEqual(BASE_LAYOUT.walls);
+    await expect(runtime.setWalls([{ index: FREE, piece: 'wall-brick' }], null, NONE)).rejects.toThrow(/no terrain store/);
+  });
+
+  it('loads stored walls over the layout ones, ignoring tiles off the map or under the spawn area', async () => {
+    const spawn = at(PLAYER_SPAWN_TX, PLAYER_SPAWN_TY);
+    const store = createMemoryTerrain([], [[FREE, 'wall-glass'], [W * BASE_LAYOUT.height, 'wall-brick'], [spawn, 'wall-stone']]);
+    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+
+    await runtime.load();
+
+    expect(runtime.walls()[FREE]).toBe('wall-glass');
+    expect(runtime.walls()).toHaveLength(W * BASE_LAYOUT.height);
+    expect(runtime.walls()[spawn]).toBe(BASE_LAYOUT.walls[spawn]);
+    expect(isTileWalkable(runtime.snapshot(), 67, 22)).toBe(false);
+    expect(isTileWalkable(runtime.snapshot(), PLAYER_SPAWN_TX, PLAYER_SPAWN_TY)).toBe(true);
+  });
+
+  it('places and removes walls atomically, rebuilding the snapshot and telling every subscriber once', async () => {
+    const store = createMemoryTerrain();
+    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+    await runtime.load();
+    const listener = vi.fn();
+    runtime.subscribe(listener);
+
+    await runtime.setWalls([{ index: FREE, piece: 'wall-brick' }, { index: FREE + 1, piece: 'wall-brick' }], 'admin-1', NONE);
+
+    expect(new Map(await store.loadWalls())).toEqual(new Map([[FREE, 'wall-brick'], [FREE + 1, 'wall-brick']]));
+    expect(store.wallActorOf(FREE)).toBe('admin-1');
+    expect(isTileWalkable(runtime.snapshot(), 68, 22)).toBe(false);
+    expect(runtime.snapshot().walls).toEqual(runtime.walls());
+    expect(listener).toHaveBeenCalledExactlyOnceWith(runtime.blocks());
+
+    await runtime.setWalls([{ index: FREE, piece: null }], 'admin-1', NONE);
+    expect([...(await store.loadWalls())]).toEqual([[FREE + 1, 'wall-brick']]);
+    expect(isTileWalkable(runtime.snapshot(), 67, 22)).toBe(true);
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the live walls when blocks change, and the live blocks when walls change', async () => {
+    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store: createMemoryTerrain() });
+    await runtime.load();
+
+    await runtime.setWalls([{ index: FREE, piece: 'wall-stone' }], null, NONE);
+    await runtime.setBlock({ index: LAKE, material: 'grass', actorId: null }, NONE);
+    await runtime.setWalls([{ index: FREE + 1, piece: 'wall-stone' }], null, NONE);
+
+    expect(runtime.snapshot().walls).toEqual(withWalls(BASE_LAYOUT.walls, [{ index: FREE, piece: 'wall-stone' }, { index: FREE + 1, piece: 'wall-stone' }]));
+    expect(runtime.blocks()[LAKE]).toBe('grass');
+    expect(isTileWalkable(runtime.snapshot(), 94, 58)).toBe(true);
+  });
+
+  it('saves nothing and tells nobody when every tile already holds what the edit asks', async () => {
+    const store = createMemoryTerrain([], [[FREE, 'wall-brick']]);
+    const saveWalls = vi.spyOn(store, 'saveWalls');
+    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+    await runtime.load();
+    const listener = vi.fn();
+    runtime.subscribe(listener);
+
+    await runtime.setWalls([{ index: FREE, piece: 'wall-brick' }, { index: FREE + 5, piece: null }], null, NONE);
+
+    expect(saveWalls).not.toHaveBeenCalled();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('refuses the whole batch when one wall lands on a desk or a static tile, reading protections only to place walls', async () => {
+    const store = createMemoryTerrain([], [[FREE + 4, 'wall-brick']]);
+    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store, seats: BASE_MAP_SEATS });
+    await runtime.load();
+    const desks = vi.fn(async (): Promise<TerrainProtections> => ({ placements: [DESK], desks: [DESK], players: [] }));
+    const seat = BASE_MAP_SEATS[0]!;
+
+    await expect(runtime.setWalls([{ index: at(64, 19), piece: 'wall-brick' }, { index: FREE, piece: 'wall-brick' }], null, desks)).rejects.toThrow(TerrainProtectedError);
+    await expect(runtime.setWalls([{ index: at(seat.tx, seat.ty), piece: 'wall-brick' }], null, NONE)).rejects.toThrow(TerrainProtectedError);
+    expect([...(await store.loadWalls())]).toEqual([[FREE + 4, 'wall-brick']]);
+    expect(runtime.walls()[at(64, 19)]).toBeNull();
+
+    desks.mockClear();
+    await runtime.setWalls([{ index: FREE + 4, piece: null }], null, desks);
+    expect(desks).not.toHaveBeenCalled();
+    // A room is no desk: walls go inside and around rooms.
+    await runtime.setWalls([{ index: FREE, piece: 'wall-plaster' }], null, async () => ({ placements: [DESK], desks: [], players: [] }));
+    expect(runtime.walls()[FREE]).toBe('wall-plaster');
+  });
+
+  it('keeps the old walls when saving fails', async () => {
+    const store = createMemoryTerrain();
+    vi.spyOn(store, 'saveWalls').mockRejectedValue(new Error('connection lost'));
+    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+    await runtime.load();
+    const listener = vi.fn();
+    runtime.subscribe(listener);
+
+    await expect(runtime.setWalls([{ index: FREE, piece: 'wall-brick' }], null, NONE)).rejects.toThrow('connection lost');
+
+    expect(runtime.walls()).toEqual(BASE_LAYOUT.walls);
+    expect(isTileWalkable(runtime.snapshot(), 67, 22)).toBe(true);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('runs wall and block edits in one queue, each checked against what the previous one left', async () => {
+    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store: createMemoryTerrain() });
+    await runtime.load();
+
+    const wall = runtime.setWalls([{ index: FREE, piece: 'wall-brick' }], null, NONE);
+    const failed = runtime.setWalls([{ index: FREE + 1, piece: 'wall-brick' }], null, async () => {
+      throw new Error('desks unavailable');
+    });
+    const block = runtime.setBlock({ index: LAWN, material: 'sand', actorId: null }, NONE);
+    const erase = runtime.setWalls([{ index: FREE, piece: null }, { index: FREE + 2, piece: 'wall-glass' }], null, NONE);
+
+    await Promise.all([wall, block, erase]);
+    await expect(failed).rejects.toThrow('desks unavailable');
+    expect(runtime.walls()[FREE]).toBeNull();
+    expect(runtime.walls()[FREE + 1]).toBeNull();
+    expect(runtime.walls()[FREE + 2]).toBe('wall-glass');
+    expect(runtime.snapshot().materials[FREE]).toBe('sand');
+  });
+  it('runs an exclusive task in the edit queue, with the snapshot the edits before it left', async () => {
+    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store: createMemoryTerrain() });
+    await runtime.load();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const seen: (string | null)[] = [];
+
+    const wall = runtime.setWalls([{ index: FREE, piece: 'wall-brick' }], null, NONE);
+    const task = runtime.runExclusive(async (snapshot) => {
+      seen.push(snapshot.walls[FREE] ?? null);
+      await held;
+      return 'written';
+    });
+    const erase = runtime.setWalls([{ index: FREE, piece: null }], null, NONE);
+    await wall;
+    // The edit queued after the task waits for it to finish.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(runtime.walls()[FREE]).toBe('wall-brick');
+
+    release();
+    expect(await task).toBe('written');
+    await erase;
+    expect(seen).toEqual(['wall-brick']);
+    expect(runtime.walls()[FREE]).toBeNull();
+  });
+
+  it('keeps the queue going after an exclusive task fails, and runs one without a store too', async () => {
+    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT });
+    await runtime.load();
+
+    await expect(runtime.runExclusive(async () => {
+      throw new Error('desk refused');
+    })).rejects.toThrow('desk refused');
+    expect(await runtime.runExclusive(async (snapshot) => snapshot.width)).toBe(W);
   });
 });

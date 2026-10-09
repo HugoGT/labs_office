@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { TILE } from './mapData';
-import { LEGACY_SPACES as BUILT_IN_SPACES, LEGACY_COLLISIONS as BASE_COLLISION_RECTS, LEGACY_TERRAIN as BASE_TERRAIN, LEGACY_SEATS as BASE_MAP_SEATS } from '../test/legacyOffice';
+import { LEGACY_SPACES as BUILT_IN_SPACES, LEGACY_COLLISIONS as BASE_COLLISION_RECTS, LEGACY_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN, LEGACY_SEATS as BASE_MAP_SEATS } from '../test/legacyOffice';
 import { buildLegacyTerrainGrid as buildTerrainGrid } from '../test/legacyTerrainGrid';
-import { isTileWalkable } from './officeLayout';
+import { isTileWalkable, terrainSnapshot, withWalls } from './officeLayout';
 import { isPositionBlocked } from './pieceCollisions';
 import { audiblePeers, type AudibleInput, type AudioPeer } from './proximityAudio';
 import {
@@ -42,6 +42,22 @@ describe('buildTerrainGrid: collision rectangles', () => {
 
     expect(grid.terrainSolid[2][2]).toBe(false);
     expect(grid.solid[2][2]).toBe(true);
+  });
+});
+
+describe('buildTerrainGrid: painted walls', () => {
+  it('walls off and blocks the live walls of the snapshot, not the layout ones', () => {
+    const lawn = { tx: 67, ty: 22 };
+    const index = lawn.ty * MAP_W + lawn.tx;
+    const firstLayoutWall = LEGACY_LAYOUT.walls.findIndex((wall) => wall !== null);
+    const walls = withWalls(LEGACY_LAYOUT.walls, [{ index, piece: 'wall-brick' }, { index: firstLayoutWall, piece: null }]);
+    const grid = buildTerrainGrid(terrainSnapshot(LEGACY_LAYOUT, LEGACY_LAYOUT.blocks, walls), LEGACY_LAYOUT, []);
+
+    expect(grid.walled[lawn.ty][lawn.tx]).toBe(true);
+    expect(grid.terrainSolid[lawn.ty][lawn.tx]).toBe(true);
+    expect(grid.solid[lawn.ty][lawn.tx]).toBe(true);
+    const erased = { tx: firstLayoutWall % MAP_W, ty: Math.floor(firstLayoutWall / MAP_W) };
+    expect(grid.walled[erased.ty][erased.tx]).toBe(LEGACY_LAYOUT.hedges[firstLayoutWall] !== null);
   });
 });
 

@@ -50,7 +50,7 @@ export const BLOCK_TILES = MAP_BLOCK_TILES;
  * nothing over a black background, and never walkable. It has no art of its
  * own, so it is not a material of the art contract.
  */
-export const LAYOUT_MATERIALS = ['void', 'water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet'] as const;
+export const LAYOUT_MATERIALS = ['void', 'water', 'sand', 'dirt', 'cobblestone', 'grass', 'wood', 'tile', 'carpet'] as const;
 export type LayoutMaterial = (typeof LAYOUT_MATERIALS)[number];
 
 /** `TERRAIN_WALKABLE` of artContract.ts plus void: void and water are the terrain nobody walks on. */
@@ -348,6 +348,8 @@ export interface TerrainSnapshot {
   readonly width: number;
   readonly height: number;
   readonly blocks: readonly LayoutMaterial[];
+  /** The live wall piece of each tile (row major), `null` where there is none. */
+  readonly walls: readonly (string | null)[];
   readonly materials: readonly LayoutMaterial[];
   readonly walkable: readonly boolean[];
 }
@@ -358,17 +360,23 @@ export interface TerrainSnapshot {
  *
  *   1. Terrain: walkable unless void or water. A `ground` tile wins over its block.
  *   2. Deck props (bridges): their footprint is walkable, water included.
- *   3. Layout solids: walls and hedges block, a deck under them too.
+ *   3. Solids: walls (the layout's, or the live ones an admin painted) and
+ *      hedges block, a deck under them too.
  *
  * Solid props (trees, plants, tables, desks) are not stamped here: they
  * collide through their pieces' rectangles (`pieceCollisions.ts`), whose
  * default is their whole footprint, so an untouched piece blocks the same
  * tiles it always did. Outside the map nothing is walkable (`isTileWalkable`).
  */
-export function terrainSnapshot(layout: OfficeLayout, blocks: readonly LayoutMaterial[] = layout.blocks): TerrainSnapshot {
+export function terrainSnapshot(
+  layout: OfficeLayout,
+  blocks: readonly LayoutMaterial[] = layout.blocks,
+  walls: readonly (string | null)[] = layout.walls,
+): TerrainSnapshot {
   const { width, height } = layout;
   const expected = (width / BLOCK_TILES) * (height / BLOCK_TILES);
   if (blocks.length !== expected) throw new InvalidOfficeLayoutError(`the map has ${expected} blocks, got ${blocks.length}`);
+  if (walls.length !== width * height) throw new InvalidOfficeLayoutError(`the map has ${width * height} tiles, got ${walls.length} walls`);
   const materials: LayoutMaterial[] = [];
   for (let ty = 0; ty < height; ty += 1) {
     for (let tx = 0; tx < width; tx += 1) {
@@ -382,13 +390,13 @@ export function terrainSnapshot(layout: OfficeLayout, blocks: readonly LayoutMat
     }
   };
   for (const prop of layout.props) if (prop.collision === 'deck') cover(prop, true);
-  layout.walls.forEach((wall, index) => {
+  walls.forEach((wall, index) => {
     if (wall !== null) walkable[index] = false;
   });
   layout.hedges.forEach((hedge, index) => {
     if (hedge !== null) walkable[index] = false;
   });
-  return { width, height, blocks: [...blocks], materials, walkable };
+  return { width, height, blocks: [...blocks], walls: [...walls], materials, walkable };
 }
 
 /** Effective material of a tile; outside the map, the nearest tile's. */
@@ -487,6 +495,77 @@ export function newlyUnwalkableTiles(before: TerrainSnapshot, after: TerrainSnap
     if (!MATERIAL_WALKABLE[material] && previous !== undefined && MATERIAL_WALKABLE[previous]) tiles.push(index);
   });
   return tiles;
+}
+
+// --- Wall edits ---------------------------------------------------------------------------------
+
+/**
+ * The wall pieces of the art pack (pinned by a test against the manifest):
+ * the only pieces the terrain editor paints, one per tile.
+ */
+export const WALL_PIECES = ['wall-brick', 'wall-stone', 'wall-plaster', 'wall-glass'] as const;
+export type WallPieceId = (typeof WALL_PIECES)[number];
+
+/** The most wall tiles one request may set: a long dragged wall is one request, never an unbounded one. */
+export const MAX_WALL_EDITS = 2000;
+
+/** One tile of a wall edit: a wall piece, or `null` to remove the wall there. */
+export interface WallEdit {
+  readonly index: number;
+  readonly piece: WallPieceId | null;
+}
+
+export function isWallPieceId(value: unknown): value is WallPieceId {
+  return typeof value === 'string' && (WALL_PIECES as readonly string[]).includes(value);
+}
+
+/** A copy of `walls` with every edit applied in order; a tile off the map throws. */
+export function withWalls(walls: readonly (string | null)[], edits: readonly WallEdit[]): (string | null)[] {
+  const next = [...walls];
+  for (const { index, piece } of edits) {
+    if (!Number.isInteger(index) || index < 0 || index >= next.length) throw new InvalidOfficeLayoutError(`tile ${index} is not on the map`);
+    next[index] = piece;
+  }
+  return next;
+}
+
+const WALL_PREFIX = 'wall-';
+
+/**
+ * The wire form of the walls, a replicated string of the room state: sparse,
+ * `<tile>:<material>` per wall joined by commas (`3:brick,4:brick`), empty
+ * for none. A whole map of tiles would be tens of kilobytes; walls are few.
+ */
+export function encodeTerrainWalls(walls: readonly (string | null)[]): string {
+  const parts: string[] = [];
+  walls.forEach((wall, index) => {
+    if (wall !== null && wall.startsWith(WALL_PREFIX)) parts.push(`${index}:${wall.slice(WALL_PREFIX.length)}`);
+  });
+  return parts.join(',');
+}
+
+/** The walls of a wire string, one entry per tile, or `null` unless every entry is a known wall on a distinct tile of the map. */
+export function decodeTerrainWalls(raw: unknown, count: number): (WallPieceId | null)[] | null {
+  if (typeof raw !== 'string') return null;
+  const walls = new Array<WallPieceId | null>(count).fill(null);
+  if (raw === '') return walls;
+  for (const part of raw.split(',')) {
+    const match = /^(\d+):([a-z]+)$/.exec(part);
+    if (match === null) return null;
+    const index = Number(match[1]);
+    const piece = `${WALL_PREFIX}${match[2]}`;
+    if (index >= count || !isWallPieceId(piece) || walls[index] !== null) return null;
+    walls[index] = piece;
+  }
+  return walls;
+}
+
+/** The tile under a world pixel, row major, or `null` off the map. */
+export function tileAtWorldPoint(layout: Pick<OfficeLayout, 'width' | 'height'>, x: number, y: number): number | null {
+  const tx = Math.floor(x / LAYOUT_TILE);
+  const ty = Math.floor(y / LAYOUT_TILE);
+  if (!Number.isFinite(tx) || !Number.isFinite(ty) || tx < 0 || ty < 0 || tx >= layout.width || ty >= layout.height) return null;
+  return ty * layout.width + tx;
 }
 
 // --- The office --------------------------------------------------------------------------------

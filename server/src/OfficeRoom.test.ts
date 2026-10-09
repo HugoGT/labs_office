@@ -16,7 +16,7 @@ import {
   SESSION_REVOKED_CLOSE_CODE,
 } from '../../src/game/officeProtocol.ts';
 import { DESK_SEAT_FACING, deskSeatId, mapSeatId } from '../../src/game/seating.ts';
-import { decodeTerrainBlocks } from '../../src/game/officeLayout.ts';
+import { decodeTerrainBlocks, decodeTerrainWalls } from '../../src/game/officeLayout.ts';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SPACES as BUILT_IN_SPACES } from '../../src/test/legacyOffice.ts';
 import { createOfficeServer as createServer, type OfficeServer, type OfficeServerOverrides } from './createOfficeServer.ts';
 const createOfficeServer = (overrides: OfficeServerOverrides = {}) => createServer({ layout: BASE_LAYOUT, seats: BASE_MAP_SEATS, ...overrides });
@@ -337,6 +337,42 @@ describe('OfficeRoom: edited terrain', () => {
     room.send('move', dried);
     await waitFor(() => room.state.players.get(room.sessionId)?.x === dried.x);
     expect(server.sessions.positionOf(room.sessionId)).toEqual({ x: dried.x, y: dried.y });
+  });
+
+  const wallsOf = (room: Awaited<ReturnType<typeof join>>) =>
+    decodeTerrainWalls(room.state.terrainWalls, BASE_LAYOUT.width * BASE_LAYOUT.height);
+  const tile = (tx: number, ty: number) => ty * BASE_LAYOUT.width + tx;
+
+  it('replicates painted walls to whoever is inside and whoever joins after', async () => {
+    const ana = await join('Ana');
+    await waitFor(() => wallsOf(ana) !== null);
+
+    await server.terrain.setWalls([{ index: tile(20, 30), piece: 'wall-brick' }, { index: tile(21, 30), piece: 'wall-glass' }], null, nobody);
+
+    await waitFor(() => wallsOf(ana)?.[tile(21, 30)] === 'wall-glass');
+    expect(wallsOf(ana)?.[tile(20, 30)]).toBe('wall-brick');
+    const late = await join('Beto');
+    await waitFor(() => wallsOf(late)?.[tile(20, 30)] === 'wall-brick');
+    expect(blocksOf(late)?.[LAWN]).toBe('water');
+  });
+
+  it('drops a move into a wall, and returns someone a wall lands on to the spawn', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+    const ashore = onTile(20, 23);
+    room.send('move', ashore);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === ashore.x);
+
+    await server.terrain.setWalls([{ index: tile(21, 23), piece: 'wall-stone' }], null, nobody);
+    room.send('move', onTile(21, 23));
+    await settle(room);
+    expect(room.state.players.get(room.sessionId)).toMatchObject({ x: ashore.x, y: ashore.y, positionRevision: 0 });
+
+    await server.terrain.setWalls([{ index: tile(20, 23), piece: 'wall-stone' }], null, nobody);
+    await waitFor(() => room.state.players.get(room.sessionId)?.positionRevision === 1);
+    const moved = room.state.players.get(room.sessionId)!;
+    expect(moved.x).not.toBe(ashore.x);
+    expect(server.sessions.positionOf(room.sessionId)).toEqual({ x: moved.x, y: moved.y });
   });
 });
 

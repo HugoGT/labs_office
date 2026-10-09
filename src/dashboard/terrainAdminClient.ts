@@ -35,5 +35,8 @@ export function createTerrainAdminClient(
     async setBlocks(edits, expected) {
       await request('/admin/terrain/blocks', jsonBody({ edits, expected }));
     },
+    async setWalls(edits) {
+      await request('/admin/terrain/walls', jsonBody({ edits }));
+    },
   };
 }

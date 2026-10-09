@@ -18,7 +18,7 @@ export interface TerrainGrid {
   terrain: LayoutMaterial[][];
   /** Walls and hedges: tiles a space's floor never covers. */
   walled: boolean[][];
-  /** Not walkable as terrain (`terrainSnapshot`): water, walls, hedges. The Arcade tile colliders. */
+  /** Not walkable as terrain (`terrainSnapshot`): water, void, live walls, hedges. The Arcade tile colliders. */
   terrainSolid: boolean[][];
   /**
    * Blocked for the tile helpers (auto-walk, free tile next to someone, the
@@ -30,8 +30,8 @@ export interface TerrainGrid {
 
 /**
  * The grid of a terrain snapshot and the collision rectangles of the pieces.
- * Persisted blocks (#123 phase 2) pass their own snapshot; the layout
- * supplies the walls and hedges, which blocks never change.
+ * Persisted blocks (#123 phase 2) and painted walls pass their own snapshot,
+ * which carries the live walls; the layout supplies the hedges.
  */
 export function buildTerrainGrid(
   terrain: TerrainSnapshot = BASE_TERRAIN,
@@ -47,7 +47,7 @@ export function buildTerrainGrid(
     grid.terrainSolid.push(terrainSolid);
     grid.solid.push(terrainSolid.map((blocked, tx) => blocked || covered[row + tx]!));
     grid.walled.push(
-      Array.from({ length: terrain.width }, (_, tx) => layout.walls[row + tx] !== null || layout.hedges[row + tx] !== null),
+      Array.from({ length: terrain.width }, (_, tx) => terrain.walls[row + tx] !== null || layout.hedges[row + tx] !== null),
     );
   }
   return grid;

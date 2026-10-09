@@ -50,6 +50,7 @@ import { OFFICE_ROOM_NAME, RECONNECTION_WINDOW_SECONDS } from './OfficeRoom.ts';
 import type { EgressPort } from './recording/egressPort.ts';
 import type { RecordingStoragePort } from './recording/recordingStorage.ts';
 import type { OfficeState } from './schema.ts';
+import { decodeTerrainWalls } from '../../src/game/officeLayout.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 import { AuthConfigError } from './authConfigError.ts';
 import type { LocalAuthConfig } from './localAuth/localAuthConfig.ts';
@@ -2838,12 +2839,13 @@ describe('terrain routes (#123 phase 2)', () => {
     throw new Error('condition not met before the timeout');
   }
 
-  async function terrainServer(overrides: { terrain?: TerrainStore | null; spaces?: SpacesDirectory } = {}) {
+  async function terrainServer(overrides: { terrain?: TerrainStore | null; spaces?: SpacesDirectory; desks?: OfficeServerOverrides['desks'] } = {}) {
     const terrain = overrides.terrain === undefined ? createMemoryTerrain() : overrides.terrain;
     const server = createOfficeServer({
       auth: terrainVerifier,
       directory: createMemoryDirectory({ seed: [ADMIN_TERRAIN] }),
       spaces: overrides.spaces ?? createMemorySpaces(),
+      ...(overrides.desks !== undefined ? { desks: overrides.desks } : {}),
       terrain,
       identityAdmin: null,
     });
@@ -2904,6 +2906,68 @@ describe('terrain routes (#123 phase 2)', () => {
     expect(accepted.status).toBe(200);
     expect(await accepted.json()).toEqual({ index: LAWN, material: 'water' });
     await waitFor(() => room.state.terrainBlocks.split(',')[LAWN] === 'water');
+    await server.shutdown();
+  });
+
+  function setWalls(url: string, edits: unknown) {
+    return fetch(`${url}/admin/terrain/walls`, { method: 'POST', headers: BEARER, body: JSON.stringify({ edits }) });
+  }
+
+  it('answers 503 to wall edits without a terrain store, never 404', async () => {
+    const { server, url } = await terrainServer({ terrain: null });
+    const res = await setWalls(url, [{ index: 0, piece: 'wall-brick' }]);
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'terrain-not-configured' });
+    expect(server.terrain.walls()[0]).toBeNull();
+    await server.shutdown();
+  });
+
+  it('paints walls into the room state, refusing one on a served desk but not in a room', async () => {
+    const at = new Date('2026-01-01T00:00:00.000Z');
+    const desks = createMemoryDesks({ seed: [{ id: 'desk-a', label: 'Mesa A', x: 66, y: 21, occupantId: null, createdAt: at, updatedAt: at }] });
+    const spaces = createMemorySpaces();
+    await spaces.createSpace({ name: 'Sala del prado', x: 70, y: 18, w: 5, h: 5, capacity: null });
+    const { server, url, wsUrl } = await terrainServer({ spaces, desks, terrain: createMemoryTerrain([], [[5, 'wall-stone']]) });
+    const room = await new Client(wsUrl).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token: 'valido-uid-admin' });
+    openRooms.push(room);
+    const { width, height } = server.terrain.snapshot();
+    const wallAt = (index: number) => decodeTerrainWalls(room.state.terrainWalls, width * height)?.[index];
+    await waitFor(() => wallAt(5) === 'wall-stone');
+
+    const onDesk = await setWalls(url, [{ index: 22 * width + 67, piece: 'wall-brick' }]);
+    expect(onDesk.status).toBe(409);
+    expect(await onDesk.json()).toEqual({ error: 'terrain-under-placement' });
+
+    const inRoom = await setWalls(url, [{ index: 20 * width + 72, piece: 'wall-brick' }, { index: 5, piece: null }]);
+    expect(inRoom.status).toBe(200);
+    expect(await inRoom.json()).toEqual({ updated: 2 });
+    await waitFor(() => wallAt(20 * width + 72) === 'wall-brick');
+    expect(wallAt(5)).toBeNull();
+    expect((await setWalls(url, [{ index: 0, piece: 'wall-lava' }])).status).toBe(400);
+    await server.shutdown();
+  });
+
+  it('refuses a desk created or moved onto a live wall, and a wall painted on the moved desk', async () => {
+    const desks = createMemoryDesks();
+    const { server, url } = await terrainServer({ desks, terrain: createMemoryTerrain() });
+    const { width } = server.terrain.snapshot();
+    const postDesk = (path: string, body: unknown) =>
+      fetch(`${url}${path}`, { method: 'POST', headers: BEARER, body: JSON.stringify(body) });
+    expect((await setWalls(url, [{ index: 22 * width + 67, piece: 'wall-brick' }])).status).toBe(200);
+
+    const onWall = await postDesk('/admin/desks', { label: 'Mesa A', x: 66, y: 21 });
+    expect(onWall.status).toBe(409);
+    expect(await onWall.json()).toEqual({ error: 'desk-on-wall' });
+    expect(await desks.listDesks()).toEqual([]);
+
+    const created = await postDesk('/admin/desks', { label: 'Mesa A', x: 70, y: 21 });
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string };
+    const moved = await postDesk(`/admin/desks/${id}`, { x: 65, y: 20 });
+    expect(moved.status).toBe(409);
+    expect(await moved.json()).toEqual({ error: 'desk-on-wall' });
+    expect((await postDesk(`/admin/desks/${id}`, { label: 'Mesa B' })).status).toBe(200);
+    expect(await desks.getDesk(id)).toMatchObject({ label: 'Mesa B', x: 70, y: 21 });
     await server.shutdown();
   });
 });

@@ -83,6 +83,18 @@ export class DeskSpaceOverlapError extends Error {
   }
 }
 
+/**
+ * The desk would stand on a painted wall (terrain editor): nobody could reach
+ * or sit at it. Its own type because it is fixed by removing the wall or
+ * picking another spot, not by moving away from another desk or a room.
+ */
+export class DeskOnWallError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DeskOnWallError';
+  }
+}
+
 export interface DeskPosition {
   x: number;
   y: number;
@@ -190,4 +202,27 @@ export function normalizeUpdateDeskInput(input: UpdateDeskInput): UpdateDeskInpu
   }
 
   return result;
+}
+
+/** The live wall piece of each tile, row major (`ty * width + tx`), `null` where there is none. */
+export interface WallGrid {
+  readonly width: number;
+  readonly walls: readonly (string | null)[];
+}
+
+/**
+ * Whether any tile of the desk's 3x3 footprint holds a wall. The reverse of
+ * `findWallConflict` in `terrainRules.ts`, which refuses a wall on a desk.
+ * Tiles off the grid hold no wall: the column past the right edge is never
+ * read as the first tile of the next row.
+ */
+export function deskCoversWall(position: DeskPosition, grid: WallGrid): boolean {
+  const height = Math.floor(grid.walls.length / grid.width);
+  for (let ty = position.y; ty < position.y + DESK_SIDE; ty += 1) {
+    for (let tx = position.x; tx < position.x + DESK_SIDE; tx += 1) {
+      if (tx < 0 || ty < 0 || tx >= grid.width || ty >= height) continue;
+      if (grid.walls[ty * grid.width + tx] != null) return true;
+    }
+  }
+  return false;
 }

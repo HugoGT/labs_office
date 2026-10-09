@@ -12,7 +12,7 @@ import type { DirectoryUser } from '../directory/directoryPort.ts';
 import { createMemoryDirectory } from '../directory/memoryDirectory.ts';
 import type { IdTokenVerifier } from '../verifyIdToken.ts';
 import { createMemoryTerrain } from './memoryTerrain.ts';
-import { handleSetTerrainBlock, handleSetTerrainBlocks, type TerrainDeps } from './terrainRoutes.ts';
+import { handleSetTerrainBlock, handleSetTerrainBlocks, handleSetTerrainWalls, type TerrainDeps } from './terrainRoutes.ts';
 import { encodeTerrainBlocks } from '../../../src/game/officeLayout.ts';
 import type { TerrainProtections } from './terrainRules.ts';
 import { createTerrainRuntime } from './terrainRuntime.ts';
@@ -147,5 +147,54 @@ describe('handleSetTerrainBlock', () => {
     const failing = { ...deps, protections: async () => Promise.reject(new Error('spaces down')) };
 
     await expect(handleSetTerrainBlock(BEARER_ADMIN, LAWN, { material: 'water' }, failing)).rejects.toThrow('spaces down');
+  });
+});
+
+describe('handleSetTerrainWalls', () => {
+  const FREE = 22 * BASE_LAYOUT.width + 67;
+  const DESK = { x: 66, y: 21, w: 3, h: 3 };
+
+  it('checks the role before reading the body', async () => {
+    const { deps, terrain } = await harness();
+
+    expect((await handleSetTerrainWalls(undefined, null, deps)).status).toBe(401);
+    expect((await handleSetTerrainWalls(BEARER_EMPLEADO, null, deps)).status).toBe(403);
+    expect((await handleSetTerrainWalls(BEARER_EMPLEADO, { edits: [{ index: FREE, piece: 'wall-brick' }] }, deps)).status).toBe(403);
+    expect(terrain.walls()[FREE]).toBeNull();
+  });
+
+  it('lets an admin place and remove walls in one request, recording who did it', async () => {
+    const { deps, store, terrain } = await harness();
+
+    const placed = await handleSetTerrainWalls(BEARER_ADMIN, { edits: [{ index: FREE, piece: 'wall-brick' }, { index: FREE + 1, piece: 'wall-glass' }] }, deps);
+    expect(placed).toEqual({ status: 200, body: { updated: 2 } });
+    expect(terrain.walls()[FREE + 1]).toBe('wall-glass');
+    expect(store.wallActorOf(FREE)).toBe(ADMIN.id);
+
+    expect((await handleSetTerrainWalls(BEARER_ADMIN, { edits: [{ index: FREE, piece: null }] }, deps)).status).toBe(200);
+    expect([...(await store.loadWalls())]).toEqual([[FREE + 1, 'wall-glass']]);
+  });
+
+  it('answers 400 to malformed batches, without writing anything', async () => {
+    const { deps, store } = await harness();
+    const tiles = BASE_LAYOUT.width * BASE_LAYOUT.height;
+
+    for (const body of [null, {}, { edits: [] }, { edits: [{ index: tiles, piece: 'wall-brick' }] }, { edits: [{ index: FREE, piece: 'wall-lava' }] },
+      { edits: [{ index: FREE, piece: 'wall-brick' }, { index: FREE, piece: null }] }, { edits: Array.from({ length: 2001 }, (_, index) => ({ index, piece: 'wall-brick' })) }]) {
+      expect(await handleSetTerrainWalls(BEARER_ADMIN, body, deps)).toEqual({ status: 400, body: { error: 'invalid-request' } });
+    }
+    expect([...(await store.loadWalls())]).toEqual([]);
+  });
+
+  it('refuses a wall on a desk with 409, but places one in a room or under a player', async () => {
+    const onDesk = await harness({ placements: [DESK], desks: [DESK], players: [] });
+    expect(await handleSetTerrainWalls(BEARER_ADMIN, { edits: [{ index: FREE, piece: 'wall-stone' }] }, onDesk.deps)).toEqual({
+      status: 409,
+      body: { error: 'terrain-under-placement' },
+    });
+    expect(onDesk.terrain.walls()[FREE]).toBeNull();
+
+    const inRoom = await harness({ placements: [{ x: 60, y: 18, w: 12, h: 9 }], desks: [], players: [{ x: 67 * TILE + 16, y: 22 * TILE + 5 }] });
+    expect((await handleSetTerrainWalls(BEARER_ADMIN, { edits: [{ index: FREE, piece: 'wall-stone' }] }, inRoom.deps)).status).toBe(200);
   });
 });

@@ -17,6 +17,7 @@ import {
   PACK_FACINGS,
   PLANT,
   TABLE,
+  TERRAIN_BUILT_FLOORS,
   TERRAIN_DECALS,
   TERRAIN_LAYER_COUNT,
   TERRAIN_LAYER_ORIGIN,
@@ -35,6 +36,7 @@ import {
   seatedRowForFacing,
   sheetSize,
   splitFloorMotif,
+  terrainBankIndex,
   terrainCellCorners,
   terrainCellLayers,
   terrainCornerMask,
@@ -281,7 +283,8 @@ describe('validateArtImage', () => {
 
 describe('terrain materials (#123)', () => {
   it('lists the eight block types in drawing priority, water lowest and carpet highest', () => {
-    expect(TERRAIN_MATERIALS).toEqual(['water', 'grass', 'dirt', 'sand', 'cobblestone', 'wood', 'tile', 'carpet']);
+    // Highest first, the order asked for: carpet, tile, wood, grass, cobblestone, dirt, sand, water.
+    expect(TERRAIN_MATERIALS).toEqual(['water', 'sand', 'dirt', 'cobblestone', 'grass', 'wood', 'tile', 'carpet']);
   });
 
   it('makes only water impassable', () => {
@@ -332,14 +335,24 @@ describe('terrain dual grid', () => {
       { material: 'water', mask: 15 },
       { material: 'sand', mask: 1 },
     ]);
-    // Nested: grass covers the corners where dirt and carpet are too, so each
+    // Nested: dirt covers the corners where grass and carpet are too, so each
     // edge blends over the material just below it instead of over water.
     expect(terrainCellLayers({ nw: 'carpet', ne: 'dirt', sw: 'grass', se: 'water' })).toEqual([
       { material: 'water', mask: 15 },
-      { material: 'grass', mask: 1 | 2 | 4 },
-      { material: 'dirt', mask: 1 | 2 },
+      { bank: true, mask: 1 },
+      { material: 'dirt', mask: 1 | 2 | 4 },
+      { material: 'grass', mask: 1 | 4 },
       { material: 'carpet', mask: 1 },
     ]);
+  });
+
+  it('draws grass over cobblestone, dirt and sand where they meet', () => {
+    for (const low of ['cobblestone', 'dirt', 'sand'] as const) {
+      expect(terrainCellLayers({ nw: 'grass', ne: low, sw: low, se: low }), low).toEqual([
+        { material: low, mask: 15 },
+        { material: 'grass', mask: 1 },
+      ]);
+    }
   });
 
   it('draws nothing for a corner without terrain (void), so the materials around it edge over the background', () => {
@@ -352,8 +365,52 @@ describe('terrain dual grid', () => {
     ]);
   });
 
-  it('never needs more than four layers', () => {
-    expect(TERRAIN_LAYER_COUNT).toBe(4);
+  it('names wood, tile and carpet the built floors', () => {
+    expect(TERRAIN_BUILT_FLOORS).toEqual(['wood', 'tile', 'carpet']);
+  });
+
+  it('sinks water under the built floors: a bank right over the water, on the built-floor corners', () => {
+    expect(terrainCellLayers({ nw: 'wood', ne: 'water', sw: 'water', se: 'water' })).toEqual([
+      { material: 'water', mask: 15 },
+      { bank: true, mask: 1 },
+      { material: 'wood', mask: 1 },
+    ]);
+    // Every built floor counts, and a natural material between them draws over the bank.
+    expect(terrainCellLayers({ nw: 'tile', ne: 'grass', sw: 'water', se: 'carpet' })).toEqual([
+      { material: 'water', mask: 15 },
+      { bank: true, mask: 1 | 8 },
+      { material: 'grass', mask: 1 | 2 | 8 },
+      { material: 'tile', mask: 1 | 8 },
+      { material: 'carpet', mask: 8 },
+    ]);
+    // A void corner keeps the bank: its shadow over the black background is invisible.
+    expect(terrainCellLayers({ nw: 'wood', ne: 'water', sw: null, se: 'water' })).toEqual([
+      { material: 'water', mask: 1 | 2 | 8 },
+      { bank: true, mask: 1 },
+      { material: 'wood', mask: 1 },
+    ]);
+  });
+
+  it('draws no bank without water or without a built floor: floors cast no shadow on each other', () => {
+    expect(terrainCellLayers({ nw: 'grass', ne: 'water', sw: 'sand', se: 'water' })).toEqual([
+      { material: 'water', mask: 15 },
+      { material: 'sand', mask: 1 | 4 },
+      { material: 'grass', mask: 1 },
+    ]);
+    expect(terrainCellLayers({ nw: 'wood', ne: 'carpet', sw: 'tile', se: 'wood' })).toEqual([
+      { material: 'wood', mask: 15 },
+      { material: 'tile', mask: 2 | 4 },
+      { material: 'carpet', mask: 2 },
+    ]);
+    expect(terrainCellLayers({ nw: 'wood', ne: 'grass', sw: 'dirt', se: 'wood' })).toEqual([
+      { material: 'dirt', mask: 15 },
+      { material: 'grass', mask: 1 | 2 | 8 },
+      { material: 'wood', mask: 1 | 8 },
+    ]);
+  });
+
+  it('needs five layers at most: four corner materials plus the bank over water', () => {
+    expect(TERRAIN_LAYER_COUNT).toBe(5);
   });
 
   it('picks the motif phase from the cell so the terrain lines up with floorFrameAt', () => {
@@ -367,16 +424,29 @@ describe('terrain dual grid', () => {
     }
   });
 
-  it('indexes the tileset by material band, phase row and mask column, then the decal row', () => {
+  it('indexes the tileset by material band, phase row and mask column, then the decal row and the bank row', () => {
     expect(TERRAIN_TILESET.columns).toBe(16);
-    expect(TERRAIN_TILESET.rows).toBe(TERRAIN_MATERIALS.length * 9 + 1);
+    expect(TERRAIN_TILESET.rows).toBe(TERRAIN_MATERIALS.length * 9 + 2);
     expect(terrainTileIndex('water', 15, 0)).toBe(15);
-    expect(terrainTileIndex('grass', 1, 0)).toBe(9 * 16 + 1);
+    expect(terrainTileIndex('sand', 1, 0)).toBe(9 * 16 + 1);
     expect(terrainTileIndex('carpet', 15, 8)).toBe((7 * 9 + 8) * 16 + 15);
     expect(terrainDecalIndex(TERRAIN_DECALS[0]!)).toBe(TERRAIN_MATERIALS.length * 9 * 16);
     expect(TERRAIN_DECALS.length).toBeLessThanOrEqual(16);
     expect(() => terrainTileIndex('grass', 0, 0)).toThrow(/mask/);
     expect(() => terrainTileIndex('grass', 3, 9)).toThrow(/phase/);
+    expect(terrainBankIndex(1)).toBe((TERRAIN_MATERIALS.length * 9 + 1) * 16 + 1);
+    expect(terrainBankIndex(15)).toBe(TERRAIN_TILESET.rows * 16 - 1);
+    expect(() => terrainBankIndex(0)).toThrow(/mask/);
+    expect(() => terrainBankIndex(16)).toThrow(/mask/);
+    const indices = [
+      ...TERRAIN_MATERIALS.flatMap((material) =>
+        Array.from({ length: 9 }, (_, phase) => Array.from({ length: 15 }, (_, i) => terrainTileIndex(material, i + 1, phase))).flat(),
+      ),
+      ...TERRAIN_DECALS.map(terrainDecalIndex),
+      ...Array.from({ length: 15 }, (_, i) => terrainBankIndex(i + 1)),
+    ];
+    expect(new Set(indices).size).toBe(indices.length);
+    expect(Math.max(...indices)).toBeLessThan(TERRAIN_TILESET.rows * TERRAIN_TILESET.columns);
   });
 
   it('builds the tile data of every layer for a map, -1 where a layer has nothing', () => {
@@ -394,6 +464,14 @@ describe('terrain dual grid', () => {
     // Cell (0, 0) is all grass: one layer.
     expect(layers[0]![0]![0]).toBe(terrainTileIndex('grass', 15, terrainPhaseAt(0, 0)));
     expect(layers[1]![0]![0]).toBe(-1);
+  });
+
+  it('puts the bank tile in the layer right over the water', () => {
+    const layers = terrainLayerData(2, 1, grid(['OW']));
+    // Cell (1, 0): wood on the west corners, water on the east ones.
+    expect(layers[0]![0]![1]).toBe(terrainTileIndex('water', 15, terrainPhaseAt(1, 0)));
+    expect(layers[1]![0]![1]).toBe(terrainBankIndex(1 | 4));
+    expect(layers[2]![0]![1]).toBe(terrainTileIndex('wood', 1 | 4, terrainPhaseAt(1, 0)));
   });
 });
 
@@ -418,7 +496,7 @@ describe('map props', () => {
     expect(sheetSize(BRIDGE)).toEqual({ width: 256, height: 128 });
     expect(sheetSize(HEDGE)).toEqual({ width: 512, height: 48 });
     expect(TABLE.frame).toEqual({ width: 256, height: 192 });
-    expect(sheetSize(TERRAIN_TILESET)).toEqual({ width: 512, height: 73 * 32 });
+    expect(sheetSize(TERRAIN_TILESET)).toEqual({ width: 512, height: 74 * 32 });
   });
 
   it('anchors every prop on the floor at the bottom middle of its footprint, which is also its depth', () => {

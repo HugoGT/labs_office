@@ -1,19 +1,27 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import type { ArtPreviewCache } from '../game/artPreview';
 import type { OfficeBridge } from '../game/officeBridge';
 import { useMaterialCatalog, type LoadMaterials } from '../hooks/useMaterialCatalog';
+import type { TerrainBrush } from '../game/terrainEditor';
 import { useTerrainEditor } from '../hooks/useTerrainEditor';
-import { TERRAIN_MATERIAL_LABELS, TerrainPalette } from './TerrainPalette';
+import { TERRAIN_MATERIAL_LABELS, TerrainPalette, WALL_PIECE_LABELS, WallPalette } from './TerrainPalette';
 import styles from './TerrainEditorSection.module.css';
 
 /**
  * Terrain section of the office sidebar (#123 phase 2), next to the desk and
  * room editors and behind the same role guard. Container like
- * `DeskEditorSection`: `useTerrainEditor` holds the state, the palette
- * (`TerrainPalette`) picks the floor, the map (`TerrainEditLayer`) reports
- * the clicked blocks, and the scene draws the pending paints.
+ * `DeskEditorSection`: `useTerrainEditor` holds the state, the palettes
+ * (`TerrainPalette`, `WallPalette`) pick a floor or a wall, the map
+ * (`TerrainEditLayer`) reports the clicked blocks or tiles, and the scene
+ * draws the pending paints.
  */
+
+/** What the picked brush paints, in words. */
+function brushLabel(brush: TerrainBrush): string {
+  if (brush.kind === 'floor') return `Pintando con ${TERRAIN_MATERIAL_LABELS[brush.material]}`;
+  return brush.piece === null ? 'Quitando paredes' : `Pintando paredes de ${WALL_PIECE_LABELS[brush.piece]}`;
+}
 
 export interface TerrainEditorSectionProps {
   bridge: OfficeBridge;
@@ -45,7 +53,6 @@ export function TerrainEditorSection({
 }: TerrainEditorSectionProps) {
   const editor = useTerrainEditor({ bridge, terrain });
   const catalog = useMaterialCatalog(loadMaterials);
-  const [confirmed, setConfirmed] = useState(false);
 
   useEffect(() => {
     if (initiallyActive) editor.enter();
@@ -78,11 +85,6 @@ export function TerrainEditorSection({
     );
   }
 
-  async function handleClear(): Promise<void> {
-    setConfirmed(false);
-    await editor.clear();
-  }
-
   return (
     <div className={styles.section}>
       <div className={styles.header}>
@@ -93,7 +95,7 @@ export function TerrainEditorSection({
       </div>
 
       <span className={styles.hint}>
-        Elige un suelo y toca bloques del mapa para pintarlos: cada bloque ocupa 9 × 9 casillas (288 × 288 px). El suelo sigue elegido hasta que lo deseleccionas o pulsas Escape.
+        Elige un suelo y toca bloques del mapa para pintarlos, o mantén pulsado y arrastra para pintar un área: cada bloque ocupa 9 × 9 casillas (288 × 288 px). El suelo sigue elegido hasta que lo deseleccionas o pulsas Escape.
       </span>
       <span className={styles.hint}>
         Pintar sobre el vacío crea terreno nuevo; «Vacío» lo borra. El agua y el vacío no se pueden caminar. El bloque central de la entrada siempre es de madera.
@@ -107,9 +109,21 @@ export function TerrainEditorSection({
         preview={preview}
       />
 
+      <h4 className={styles.subtitle}>Paredes</h4>
+      <span className={styles.hint}>
+        Las paredes van en casillas sueltas y cortan el paso: toca o arrastra para levantarlas, y «Quitar pared» las borra. No se pueden poner sobre escritorios, sillas ni la entrada.
+      </span>
+      <WallPalette
+        value={editor.brush}
+        onPick={editor.pickWall}
+        walls={catalog?.wall ?? null}
+        disabled={editor.blocked}
+        preview={preview}
+      />
+
       {editor.brush !== null && (
         <div className={styles.row}>
-          <span>{`Pintando con ${TERRAIN_MATERIAL_LABELS[editor.brush]}`}</span>
+          <span>{brushLabel(editor.brush)}</span>
           <button type="button" className={styles.button} onClick={editor.unpick}>
             Deseleccionar
           </button>
@@ -117,24 +131,6 @@ export function TerrainEditorSection({
       )}
       {editor.pending && <span className={styles.hint}>Guardando…</span>}
 
-      <fieldset className={styles.form} disabled={editor.pending || editor.blocked}>
-        <legend className={styles.hint}>Vaciar terreno</legend>
-        <span className={styles.hint}>
-          Devuelve todos los bloques al vacío salvo la entrada. No borra salas ni escritorios: se rechaza si el vacío taparía alguno.
-        </span>
-        <label className={styles.hint}>
-          <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> Confirmo vaciar todo el terreno
-        </label>
-        <button type="button" className={styles.button} disabled={!confirmed} onClick={() => void handleClear()}>
-          Vaciar terreno
-        </button>
-      </fieldset>
-
-      {editor.notice !== null && (
-        <div className={styles.notice} role="status">
-          {editor.notice}
-        </div>
-      )}
       {editor.error !== null && (
         <div className={styles.error} role="alert">
           {editor.error}

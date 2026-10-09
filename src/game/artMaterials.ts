@@ -11,17 +11,20 @@
  *
  * Materials an Admin uploaded (#121) come from the office server's uploads
  * manifest and are offered after the pack's, each sheet next to its manifest.
+ *
+ * The wall pieces ride along for the terrain editor's wall palette, which
+ * cuts its thumbnails the same way; no creation form offers them.
  */
 
-import { ART_IMAGE_SPECS, facingColumn, type ArtDeskPiece, type ArtFloorPiece } from './artContract';
+import { ART_IMAGE_SPECS, facingColumn, wallFrameIndex, type ArtDeskPiece, type ArtFloorPiece, type ArtWallPiece } from './artContract';
 import { combineArtManifests, parseArtPackManifest, type ArtAppearance } from './artPack';
 
-/** The role of the one sheet a desk or floor piece ships, as `mapBuilder.ts` reads it. */
+/** The role of the one sheet a desk, floor or wall piece ships, as `mapBuilder.ts` reads it. */
 const SHEET_ROLE = 'sheet';
 
 export interface MaterialOption {
   readonly id: string;
-  readonly kind: 'desk' | 'floor';
+  readonly kind: 'desk' | 'floor' | 'wall';
   /** Spanish name from the manifest. */
   readonly name: string;
   readonly colorable: boolean;
@@ -29,12 +32,16 @@ export interface MaterialOption {
   /** The exported sheet, the one the office loads for this piece. */
   readonly sheetUrl: string;
   /** The manifest entry, so the preview decides recolors with `recolorFor` like the office. */
-  readonly piece: ArtDeskPiece | ArtFloorPiece;
+  readonly piece: ArtDeskPiece | ArtFloorPiece | ArtWallPiece;
 }
+
+type CatalogPiece = ArtDeskPiece | ArtFloorPiece | ArtWallPiece;
 
 export interface MaterialCatalog {
   readonly desk: readonly MaterialOption[];
   readonly floor: readonly MaterialOption[];
+  /** The wall pieces, for the terrain editor (never colorable). */
+  readonly wall: readonly MaterialOption[];
   /** Pack defaults, or the first offered option when the default is not offered. */
   readonly defaults: { readonly desk: string; readonly floor: string };
 }
@@ -43,15 +50,15 @@ function manifestFolder(manifestUrl: string): string {
   return manifestUrl.slice(0, manifestUrl.lastIndexOf('/') + 1);
 }
 
-function optionOf(piece: ArtDeskPiece | ArtFloorPiece, folder: string): MaterialOption | null {
+function optionOf(piece: CatalogPiece, folder: string): MaterialOption | null {
   const sheet = piece.files.find((file) => file.role === SHEET_ROLE && file.imageKind === piece.kind);
   if (sheet === undefined) return null;
   return {
     id: piece.id,
     kind: piece.kind,
     name: piece.name,
-    colorable: piece.colorable,
-    defaultColor: piece.defaultColor,
+    colorable: piece.kind === 'wall' ? false : piece.colorable,
+    defaultColor: piece.kind === 'wall' ? null : piece.defaultColor,
     sheetUrl: `${folder}${sheet.path}`,
     piece,
   };
@@ -80,17 +87,17 @@ export function materialCatalogFrom(raw: unknown, manifestUrl: string, uploads?:
     { manifest: uploads === undefined ? null : parseArtPackManifest(uploads.raw), url: uploads?.url ?? manifestUrl },
   ]);
   if (joined === null) return null;
-  const desk: MaterialOption[] = [];
-  const floor: MaterialOption[] = [];
+  const options: Record<MaterialOption['kind'], MaterialOption[]> = { desk: [], floor: [], wall: [] };
   for (const piece of joined.manifest.pieces) {
-    if (piece.kind !== 'desk' && piece.kind !== 'floor') continue;
+    if (piece.kind !== 'desk' && piece.kind !== 'floor' && piece.kind !== 'wall') continue;
     const option = optionOf(piece, manifestFolder(joined.sourceOf(piece.id) ?? manifestUrl));
-    if (option !== null) (piece.kind === 'desk' ? desk : floor).push(option);
+    if (option !== null) options[piece.kind].push(option);
   }
+  const { desk, floor, wall } = options;
   const deskDefault = defaultOf(desk, manifest.defaults.desk);
   const floorDefault = defaultOf(floor, manifest.defaults.floor);
   if (deskDefault === null || floorDefault === null) return null;
-  return { desk, floor, defaults: { desk: deskDefault, floor: floorDefault } };
+  return { desk, floor, wall, defaults: { desk: deskDefault, floor: floorDefault } };
 }
 
 /** What a form holds right after picking `option`: a colorable material starts in its default color. */
@@ -115,9 +122,14 @@ export interface PreviewFrame {
 
 /**
  * The part of the sheet a preview shows: a desk's front-facing cell (how it
- * reads facing the viewer), or the whole floor motif, which is what tiles.
+ * reads facing the viewer), the whole floor motif, which is what tiles, or a
+ * wall's east-west joint, the middle of a straight painted wall.
  */
 export function previewFrame(option: MaterialOption): PreviewFrame {
+  if (option.kind === 'wall') {
+    const { frame } = ART_IMAGE_SPECS.wall;
+    return { x: frame.width * wallFrameIndex({ piece: 'joint', mask: 2 | 8 }), y: 0, width: frame.width, height: frame.height };
+  }
   if (option.kind === 'floor') {
     const { frame, columns, rows } = ART_IMAGE_SPECS.floor;
     return { x: 0, y: 0, width: frame.width * columns, height: frame.height * rows };

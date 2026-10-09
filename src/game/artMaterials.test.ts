@@ -65,6 +65,19 @@ describe('materialCatalogFrom', () => {
   });
 });
 
+describe('materialCatalogFrom: walls', () => {
+  it('offers every wall piece of the pack, never colorable, next to the manifest', () => {
+    expect(catalog().wall.map((option) => [option.id, option.kind, option.name])).toEqual([
+      ['wall-brick', 'wall', 'Ladrillo'],
+      ['wall-stone', 'wall', 'Piedra'],
+      ['wall-plaster', 'wall', 'Yeso'],
+      ['wall-glass', 'wall', 'Vidrio'],
+    ]);
+    expect(catalog().wall.every((option) => !option.colorable && option.defaultColor === null)).toBe(true);
+    expect(catalog().wall[0]!.sheetUrl).toBe('assets/pack/wall/brick.png');
+  });
+});
+
 describe('defaultAppearance', () => {
   it('a colorable default starts in its default color, any other one without color', () => {
     const painted = catalog().desk.find((option) => option.id === 'desk-painted');
@@ -89,6 +102,11 @@ describe('previewFrame', () => {
 
     expect(previewFrame(desk)).toEqual({ x: 64, y: 0, width: 64, height: 64 });
     expect(previewFrame(floor)).toEqual({ x: 0, y: 0, width: 96, height: 96 });
+  });
+
+  it('a wall previews the joint of a straight east-west run, how a painted line of wall reads', () => {
+    // Frame 1 + mask: east (2) and west (8).
+    expect(previewFrame(catalog().wall[0]!)).toEqual({ x: 11 * 16, y: 0, width: 16, height: 16 });
   });
 });
 

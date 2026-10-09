@@ -46,6 +46,7 @@ import {
   BASE_MAP_CHAIR,
   placeLayout,
   placeSeats,
+  placeWalls,
   placeZoneLabels,
   putArtSprite,
   putChair,
@@ -67,11 +68,15 @@ import type { OfficeBridge } from './officeBridge';
 import {
   BASE_LAYOUT,
   BASE_TERRAIN,
+  WALL_PIECES,
   encodeTerrainBlocks,
+  encodeTerrainWalls,
   terrainSnapshot,
+  withWalls,
   type LayoutMaterial,
   type TerrainSnapshot,
   type OfficeLayout,
+  type WallEdit,
 } from './officeLayout';
 import { BASE_COLLISION_RECTS, STATIC_COLLISION_INSTANCES, officeCollisionInstances } from './officeCollisions';
 import {
@@ -264,9 +269,15 @@ export class OfficeScene extends Phaser.Scene {
   private terrainBlocks: readonly LayoutMaterial[] = BASE_LAYOUT.blocks;
   /** The terrain editor's pending paints, drawn instead of `terrainBlocks` and never collided with. */
   private terrainPreviewBlocks: readonly LayoutMaterial[] | null = null;
+  /** The walls the room replicated last, one per tile; colliders and `grid` follow them. */
+  private terrainWalls: readonly (string | null)[] = BASE_LAYOUT.walls;
+  /** The terrain editor's pending wall paints, drawn over `terrainWalls` and never collided with. */
+  private wallPreview: readonly WallEdit[] | null = null;
+  /** What the walls drew, destroyed and drawn again whenever the walls or their preview change. */
+  private wallObjects: Phaser.GameObjects.GameObject[] = [];
   /** The static bodies of the terrain grid and their collider, replaced whole on each edit. */
   private terrainColliders?: { rects: Phaser.GameObjects.Rectangle[]; collider: Phaser.Physics.Arcade.Collider };
-  /** The terrain of `terrainBlocks`, kept to rebuild `grid` when the collisions change. */
+  /** The terrain of `terrainBlocks` and `terrainWalls`, kept to rebuild `grid` when the collisions change. */
   private terrain: TerrainSnapshot = BASE_TERRAIN;
   /** The saved collision table the room replicated last; a piece missing here keeps its default. */
   private collisionTable: CollisionTable = new Map();
@@ -518,6 +529,7 @@ export class OfficeScene extends Phaser.Scene {
     this.layout = options.layout ?? BASE_LAYOUT;
     this.mapSeats = options.seats ?? BASE_MAP_SEATS;
     this.terrainBlocks = this.layout.blocks;
+    this.terrainWalls = this.layout.walls;
     this.terrain = terrainSnapshot(this.layout);
     this.collisionInstances = officeCollisionInstances([], this.layout, this.mapSeats);
     this.collisionRects = collisionWorld(this.collisionInstances, this.collisionTable);
@@ -548,6 +560,7 @@ export class OfficeScene extends Phaser.Scene {
     const grid: TerrainGrid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
     this.grid = grid;
     this.terrainTilemap = renderTerrain(this, this.terrain, this.layout, this.art);
+    this.paintWalls();
     placeLayout(this, this.layout, this.art);
     placeSeats(this, this.mapSeats, this.art);
     placeZoneLabels(this);
@@ -557,7 +570,8 @@ export class OfficeScene extends Phaser.Scene {
     // llama el servidor a quien entra sin identidad verificada.
     this.player = spawnPlayer(this, this.options.playerName ?? DEFAULT_NAME, this.characterSheets(null));
     // Only art the initial office actually draws; an unused broken upload cannot block entry.
-    for (const id of ['tileset-terrain', ...(this.mapSeats.length > 0 ? [BASE_MAP_CHAIR] : []), ...this.layout.walls, ...this.layout.hedges,
+    // Every wall piece, not only the layout's: a wall painted live draws at once.
+    for (const id of ['tileset-terrain', ...(this.mapSeats.length > 0 ? [BASE_MAP_CHAIR] : []), ...WALL_PIECES, ...this.layout.walls, ...this.layout.hedges,
       ...this.layout.props.map((prop) => prop.piece)]) {
       if (id !== null) this.entrancePieces.add(id);
     }
@@ -667,7 +681,11 @@ export class OfficeScene extends Phaser.Scene {
         (this.terrainPreviewBlocks === null ? '' : encodeTerrainBlocks(this.terrainPreviewBlocks));
       this.terrainPreviewBlocks = previewBlocks;
       if (repaint) this.paintTerrain();
-      if (opening) this.bridge.emit('terrain', { blocks: this.terrainBlocks });
+      const wallPreview = command?.previewWalls ?? null;
+      const rewall = JSON.stringify(wallPreview) !== JSON.stringify(this.wallPreview);
+      this.wallPreview = wallPreview;
+      if (rewall) this.paintWalls();
+      if (opening) this.emitTerrain();
     });
 
     // The collision editor: the layer draws the draft and picks pieces from
@@ -860,6 +878,7 @@ export class OfficeScene extends Phaser.Scene {
           onRecordingReady: (payload) => this.bridge.emit('recordingready', payload),
           onDesksChanged: () => this.bridge.emit('deskschanged', undefined),
           onTerrain: (blocks) => this.applyTerrain(blocks),
+          onWalls: (walls) => this.applyWalls(walls),
           onCollisions: (table) => this.applyCollisions(table),
           onConnectionState: (state) => {
             if (!current()) return;
@@ -1684,17 +1703,46 @@ export class OfficeScene extends Phaser.Scene {
     if (!this.alive) return;
     if (encodeTerrainBlocks(blocks) !== encodeTerrainBlocks(this.terrainBlocks)) {
       this.terrainBlocks = blocks;
-      this.terrain = terrainSnapshot(this.layout, blocks);
+      this.terrain = terrainSnapshot(this.layout, blocks, this.terrainWalls);
       this.grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
       this.buildTerrainColliders(this.grid);
       this.paintTerrain();
     }
-    this.bridge.emit('terrain', { blocks });
+    this.emitTerrain();
+  }
+
+  /**
+   * New walls from the room: like new blocks, the grid, the tile colliders
+   * and the drawing follow at once. Walls of another map size (a server on
+   * another layout) are not this map's and are ignored.
+   */
+  private applyWalls(walls: readonly (string | null)[]): void {
+    if (!this.alive || walls.length !== this.layout.width * this.layout.height) return;
+    if (encodeTerrainWalls(walls) !== encodeTerrainWalls(this.terrainWalls)) {
+      this.terrainWalls = walls;
+      this.terrain = terrainSnapshot(this.layout, this.terrainBlocks, walls);
+      this.grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
+      this.buildTerrainColliders(this.grid);
+      this.paintWalls();
+    }
+    this.emitTerrain();
+  }
+
+  /** Hands the editor what the room shows: the live blocks and walls. */
+  private emitTerrain(): void {
+    this.bridge.emit('terrain', { blocks: this.terrainBlocks, walls: this.terrainWalls });
   }
 
   /** Redraws the tilemap from the live blocks, or from the editor's pending paints while it has some. */
   private paintTerrain(): void {
-    this.terrainTilemap?.refresh(terrainSnapshot(this.layout, this.terrainPreviewBlocks ?? this.terrainBlocks));
+    this.terrainTilemap?.refresh(terrainSnapshot(this.layout, this.terrainPreviewBlocks ?? this.terrainBlocks, this.terrainWalls));
+  }
+
+  /** Redraws every wall from the live walls, with the editor's pending wall paints over them. */
+  private paintWalls(): void {
+    for (const object of this.wallObjects) object.destroy();
+    const walls = this.wallPreview === null ? this.terrainWalls : withWalls(this.terrainWalls, this.wallPreview);
+    this.wallObjects = placeWalls(this, { width: this.layout.width, height: this.layout.height, walls }, this.art);
   }
 
   /** Camara principal siguiendo al jugador + minimapa en la esquina superior derecha (app.js:410-431). */

@@ -12,12 +12,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   DESK_SIDE,
+  DeskOnWallError,
   DeskOverlapError,
   DeskSpaceOverlapError,
   DeskTakenError,
   InvalidDeskError,
   assertValidDeskPosition,
   deskBoundsOverlap,
+  deskCoversWall,
   normalizeCreateDeskInput,
   normalizeDeskLabel,
   normalizeUpdateDeskInput,
@@ -182,5 +184,52 @@ describe('los errores de dominio son tipos y no textos', () => {
     expect(new DeskSpaceOverlapError('x').name).toBe('DeskSpaceOverlapError');
     expect(new DeskSpaceOverlapError('x')).toBeInstanceOf(Error);
     expect(new DeskSpaceOverlapError('x')).not.toBeInstanceOf(DeskOverlapError);
+  });
+});
+
+describe('deskCoversWall', () => {
+  /** A 10x8 grid with one wall at (5, 4). */
+  const WIDTH = 10;
+  const grid = (...tiles: (readonly [number, number])[]) => {
+    const walls: (string | null)[] = new Array(WIDTH * 8).fill(null);
+    for (const [tx, ty] of tiles) walls[ty * WIDTH + tx] = 'wall-brick';
+    return { width: WIDTH, walls };
+  };
+
+  it('is true when any of the 3x3 tiles holds a wall, corners included', () => {
+    const walls = grid([5, 4]);
+
+    expect(deskCoversWall({ x: 5, y: 4 }, walls)).toBe(true);
+    expect(deskCoversWall({ x: 3, y: 2 }, walls)).toBe(true);
+    expect(deskCoversWall({ x: 4, y: 3 }, walls)).toBe(true);
+  });
+
+  it('is false when the wall only touches the footprint from outside', () => {
+    const walls = grid([5, 4]);
+
+    expect(deskCoversWall({ x: 6, y: 4 }, walls)).toBe(false);
+    expect(deskCoversWall({ x: 2, y: 4 }, walls)).toBe(false);
+    expect(deskCoversWall({ x: 5, y: 5 }, walls)).toBe(false);
+    expect(deskCoversWall({ x: 5, y: 1 }, walls)).toBe(false);
+  });
+
+  it('never reads a wall from the next row, nor past the edges of the grid', () => {
+    // Row major: tile (0, 5) follows tile (9, 4) in the array, but a desk at
+    // x = 8 covers columns 8 to 10, and column 10 is off the map, not (0, 5).
+    expect(deskCoversWall({ x: 8, y: 3 }, grid([0, 5]))).toBe(false);
+    expect(deskCoversWall({ x: 8, y: 6 }, grid([0, 7]))).toBe(false);
+    expect(deskCoversWall({ x: 20, y: 20 }, grid([5, 4]))).toBe(false);
+  });
+
+  it('is false on a grid without walls', () => {
+    expect(deskCoversWall({ x: 0, y: 0 }, grid())).toBe(false);
+  });
+});
+
+describe('DeskOnWallError', () => {
+  it('is its own type: a wall is fixed by removing it, not by picking another desk', () => {
+    expect(new DeskOnWallError('x').name).toBe('DeskOnWallError');
+    expect(new DeskOnWallError('x')).toBeInstanceOf(Error);
+    expect(new DeskOnWallError('x')).not.toBeInstanceOf(DeskOverlapError);
   });
 });

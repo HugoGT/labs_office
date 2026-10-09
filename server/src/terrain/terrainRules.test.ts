@@ -12,7 +12,9 @@ import {
   InvalidTerrainEditError,
   TerrainProtectedError,
   findUnwalkableConflict,
+  findWallConflict,
   parseTerrainBatch,
+  parseWallBatch,
   parseTerrainEdit,
   staticProtectedTiles,
   type TerrainProtections,
@@ -140,5 +142,66 @@ describe('findUnwalkableConflict', () => {
     const error = new TerrainProtectedError('placement');
     expect(error).toBeInstanceOf(Error);
     expect(error.reason).toBe('placement');
+  });
+});
+
+describe('parseWallBatch', () => {
+  const TILES = BASE_LAYOUT.width * BASE_LAYOUT.height;
+
+  it('reads wall pieces and erasures on distinct tiles of the map', () => {
+    expect(parseWallBatch({ edits: [{ index: 0, piece: 'wall-brick' }, { index: TILES - 1, piece: null }, { index: 7, piece: 'wall-glass' }] }, TILES)).toEqual([
+      { index: 0, piece: 'wall-brick' },
+      { index: TILES - 1, piece: null },
+      { index: 7, piece: 'wall-glass' },
+    ]);
+  });
+
+  it.each([
+    ['no body', null],
+    ['an array body', []],
+    ['no edits', {}],
+    ['an empty batch', { edits: [] }],
+    ['a tile off the map', { edits: [{ index: 189 * 135 * 10, piece: 'wall-brick' }] }],
+    ['a negative tile', { edits: [{ index: -1, piece: 'wall-brick' }] }],
+    ['a fractional tile', { edits: [{ index: 1.5, piece: 'wall-brick' }] }],
+    ['a tile as text', { edits: [{ index: '3', piece: 'wall-brick' }] }],
+    ['an unknown piece', { edits: [{ index: 3, piece: 'wall-lava' }] }],
+    ['a hedge', { edits: [{ index: 3, piece: 'hedge-boxwood' }] }],
+    ['a missing piece', { edits: [{ index: 3 }] }],
+    ['a repeated tile', { edits: [{ index: 3, piece: 'wall-brick' }, { index: 3, piece: null }] }],
+    ['an edit that is not an object', { edits: [3] }],
+  ])('refuses %s', (_name, body) => {
+    expect(() => parseWallBatch(body, TILES)).toThrow(InvalidTerrainEditError);
+  });
+
+  it('caps a batch at MAX_WALL_EDITS tiles', () => {
+    const edits = (count: number) => Array.from({ length: count }, (_, index) => ({ index, piece: 'wall-stone' }));
+    expect(parseWallBatch({ edits: edits(2000) }, TILES)).toHaveLength(2000);
+    expect(() => parseWallBatch({ edits: edits(2001) }, TILES)).toThrow(InvalidTerrainEditError);
+  });
+});
+
+describe('findWallConflict', () => {
+  const spawn = PLAYER_SPAWN_TY * W + PLAYER_SPAWN_TX;
+  const free = 22 * W + 67;
+  const desk = { x: 66, y: 21, w: 3, h: 3 };
+
+  it('lets a wall go anywhere nothing static and no desk stands, rooms and players included', () => {
+    const protections: TerrainProtections = { placements: [{ x: 60, y: 18, w: 12, h: 9 }], players: [standingOn(67, 22)] };
+    expect(findWallConflict([free], W, STATIC, protections)).toBeNull();
+    expect(findWallConflict([], W, STATIC, protections)).toBeNull();
+  });
+
+  it('refuses a wall on a seat, static furniture or the spawn area', () => {
+    const seat = BASE_MAP_SEATS[0]!;
+    expect(findWallConflict([seat.ty * W + seat.tx], W, STATIC, NONE)).toBe('placement');
+    expect(findWallConflict([spawn], W, STATIC, NONE)).toBe('placement');
+    expect(findWallConflict([spawn + W + 1], W, STATIC, NONE)).toBe('placement');
+  });
+
+  it('refuses a wall on any tile of a desk', () => {
+    expect(findWallConflict([free], W, STATIC, { ...NONE, desks: [desk] })).toBe('placement');
+    expect(findWallConflict([23 * W + 68], W, STATIC, { ...NONE, desks: [desk] })).toBe('placement');
+    expect(findWallConflict([24 * W + 68], W, STATIC, { ...NONE, desks: [desk] })).toBeNull();
   });
 });

@@ -29,10 +29,10 @@ export const VOID_COLOR = 0x000000;
 export const TERRAIN_FLAT_COLORS: Readonly<Record<LayoutMaterial, number>> = {
   void: VOID_COLOR,
   water: 0x3f78c4,
-  grass: 0x5d9b4c,
-  dirt: 0x8d6a47,
   sand: 0xd9c48c,
+  dirt: 0x8d6a47,
   cobblestone: 0x8c9096,
+  grass: 0x5d9b4c,
   wood: 0xa4723f,
   tile: 0xc5c9cf,
   carpet: 0x7b4f8c,
@@ -119,8 +119,8 @@ function shifted(rect: Rect): Rect {
   return { ...rect, x: rect.x + HALF_TILE, y: rect.y + HALF_TILE };
 }
 
-export function wallSprites(layout: OfficeLayout): WallSprite[] {
-  const { width, height, walls } = layout;
+/** The sprites of a wall grid: the layout's, or the live walls of a snapshot (painted walls). */
+export function wallSprites({ width, height, walls }: Pick<OfficeLayout, 'width' | 'height' | 'walls'>): WallSprite[] {
   const joints: WallSprite[] = [];
   const bodies: WallSprite[] = [];
   const sprite = (piece: string, part: WallSprite['part'], frame: number, rect: Rect): WallSprite => ({
