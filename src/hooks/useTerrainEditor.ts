@@ -12,7 +12,8 @@ import { sameBrush, type TerrainBrush } from '../game/terrainEditor';
  * the palette, then every click on a 9x9 block of the map paints it, until
  * the floor is unpicked. Painting over terrain replaces it, painting over the
  * void builds new terrain, and the void entry erases. Picking a wall (or the
- * wall eraser) instead paints single tiles: a wall blocks the way.
+ * wall eraser) instead paints single posts on the grid vertex nearest the
+ * click: a wall runs along the line between tiles and blocks the way.
  *
  * Paints go to the server one request at a time, in click order: the server
  * checks each against the terrain the previous one left. A block paint is
@@ -28,7 +29,7 @@ const BLOCKING_ERRORS = ['forbidden', 'unauthorized', 'terrain-not-configured'];
 
 export const SPAWN_BLOCK_MESSAGE = 'El bloque central de la entrada siempre es de madera.';
 /** `terrain-under-placement` for a wall: what a wall may not cover is not what water may not. */
-export const WALL_UNDER_PLACEMENT_MESSAGE = 'Una pared no puede tapar un escritorio, una silla ni la entrada de la oficina. Elige otra casilla.';
+export const WALL_UNDER_PLACEMENT_MESSAGE = 'Una pared no puede tapar un escritorio, una silla ni la entrada de la oficina. Elige otra esquina.';
 
 export interface UseTerrainEditorOptions {
   bridge: OfficeBridge;
@@ -38,7 +39,7 @@ export interface UseTerrainEditorOptions {
 export interface TerrainEditor {
   active: boolean;
   blocks: readonly LayoutMaterial[];
-  /** The live wall of every tile, row major. */
+  /** The live wall post of every grid vertex (a tile's top-left corner), row major. */
   walls: readonly (string | null)[];
   /** The palette entry picked, floor or wall, or `null`. */
   brush: TerrainBrush | null;
@@ -70,7 +71,7 @@ function applyPaints(blocks: readonly LayoutMaterial[], paints: readonly Pending
   return next;
 }
 
-/** The wall a tile will hold once every pending paint lands. */
+/** The wall post a vertex will hold once every pending paint lands. */
 function wallAfter(walls: readonly (string | null)[], paints: readonly PendingPaint[], index: number): string | null {
   let wall = walls[index] ?? null;
   for (const paint of paints) if (isWallPaint(paint) && paint.index === index) wall = paint.piece;
@@ -79,8 +80,8 @@ function wallAfter(walls: readonly (string | null)[], paints: readonly PendingPa
 
 /**
  * The unsent wall paints that leave together with `first`: the ones right
- * after it in the queue, up to the first block paint, a tile already in the
- * request (the server refuses a tile twice) or `MAX_WALL_EDITS`.
+ * after it in the queue, up to the first block paint, a vertex already in the
+ * request (the server refuses one twice) or `MAX_WALL_EDITS`.
  */
 function wallRun(paints: readonly PendingPaint[], first: WallPaint): WallPaint[] {
   const run: WallPaint[] = [];

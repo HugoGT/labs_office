@@ -9,10 +9,10 @@
  * protections read at that moment, and the snapshot only changes after the
  * store saved it: a failed save leaves the office exactly as it was.
  *
- * The runtime owns the painted walls too: they are one more layer of the
- * snapshot (`terrainSnapshot(layout, blocks, walls)`), so the room refuses
- * moves into them and relocates whoever stands where one lands exactly like
- * after a block edit.
+ * The runtime owns the painted walls too: posts on grid vertices, one more
+ * layer of the snapshot (`terrainSnapshot(layout, blocks, walls)`) that
+ * blocks by its rectangles, so the room refuses moves into them and
+ * relocates whoever a wall now overlaps exactly like after a block edit.
  */
 
 import {
@@ -21,6 +21,7 @@ import {
   encodeTerrainBlocks,
   newlyUnwalkableTiles,
   terrainSnapshot,
+  wallPostTiles,
   withBlock,
   withWalls,
   type LayoutMaterial,
@@ -63,12 +64,12 @@ export interface TerrainRuntime {
    */
   setBlock(edit: TerrainEdit & { actorId: string | null }, protections: () => Promise<TerrainProtections>): Promise<readonly LayoutMaterial[]>;
   setBlocks(edits: readonly TerrainEdit[], actorId: string | null, protections: () => Promise<TerrainProtections>, expected?: string): Promise<readonly LayoutMaterial[]>;
-  /** The live wall piece of every tile, row major: the layout's, overridden by the stored ones. */
+  /** The live wall post of every grid vertex, row major: the layout's, overridden by the stored ones. */
   walls(): readonly (string | null)[];
   /**
-   * Places or removes walls atomically, or throws `TerrainProtectedError`
-   * when one would stand on a desk (`protections`, read only when the edit
-   * places a wall) or a tile the static layout protects.
+   * Places or removes wall posts atomically, or throws `TerrainProtectedError`
+   * when one's footprint would touch a desk (`protections`, read only when
+   * the edit places a post) or a tile the static layout protects.
    */
   setWalls(edits: readonly WallEdit[], actorId: string | null, protections: () => Promise<TerrainProtections>): Promise<readonly (string | null)[]>;
   /**
@@ -133,7 +134,7 @@ export function createTerrainRuntime({ layout, store, seats = BASE_MAP_SEATS }: 
     if (changed.length === 0) return walls;
     const placed = changed.flatMap(({ index, piece }) => (piece === null ? [] : [index]));
     if (placed.length > 0) {
-      const conflict = findWallConflict(placed, layout.width, staticTiles, await protections());
+      const conflict = findWallConflict(placed, layout, staticTiles, await protections());
       if (conflict !== null) throw new TerrainProtectedError(conflict);
     }
     const next = withWalls(walls, changed);
@@ -160,9 +161,10 @@ export function createTerrainRuntime({ layout, store, seats = BASE_MAP_SEATS }: 
       const savedWalls = await store.loadWalls();
       const wallEdits: WallEdit[] = [];
       for (const [index, piece] of savedWalls) {
-        // Same rule as the spawn block: a wall that may not stand there is
-        // ignored, never rewritten.
-        if (index >= 0 && index < layout.walls.length && !staticTiles.has(index)) wallEdits.push({ index, piece });
+        // Same rule as the spawn block: a post whose footprint may not stand
+        // there is ignored, never rewritten.
+        if (index < 0 || index >= layout.walls.length) continue;
+        if (!wallPostTiles(layout, index).some((tile) => staticTiles.has(tile))) wallEdits.push({ index, piece });
       }
       walls = withWalls(layout.walls, wallEdits);
       snapshot = terrainSnapshot(layout, blocks, walls);

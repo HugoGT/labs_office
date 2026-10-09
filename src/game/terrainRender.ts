@@ -108,18 +108,13 @@ function neighborMask(cells: readonly (string | null)[], width: number, height: 
 }
 
 /**
- * A layout wall is a solid tile; the pack draws walls on grid lines. Running
- * the line through the tile centers keeps the 16px wall over the tile that
- * blocks, with the joints, bodies and masks of the contract shifted half a
- * tile.
+ * The sprites of a wall grid: the layout's, or the live walls of a snapshot
+ * (painted walls). Each entry is a post on the top-left vertex of its tile,
+ * drawn on the pack's own geometry: the joint centered on the vertex, the
+ * bodies along the grid lines to its neighbors, so a wall sits on the edge
+ * between two terrains, half on each. They draw exactly the rectangles the
+ * wall blocks (`wallFootprintRects`).
  */
-const HALF_TILE = 16;
-
-function shifted(rect: Rect): Rect {
-  return { ...rect, x: rect.x + HALF_TILE, y: rect.y + HALF_TILE };
-}
-
-/** The sprites of a wall grid: the layout's, or the live walls of a snapshot (painted walls). */
 export function wallSprites({ width, height, walls }: Pick<OfficeLayout, 'width' | 'height' | 'walls'>): WallSprite[] {
   const joints: WallSprite[] = [];
   const bodies: WallSprite[] = [];
@@ -136,14 +131,14 @@ export function wallSprites({ width, height, walls }: Pick<OfficeLayout, 'width'
       const piece = walls[ty * width + tx];
       if (piece === null || piece === undefined) continue;
       const mask = neighborMask(walls, width, height, tx, ty);
-      // A lone wall tile has no joint frame (masks start at 1): it stands as a post.
+      // A lone post has no joint frame (masks start at 1): it stands as a vertical body.
       const frame = mask === 0 ? wallFrameIndex({ piece: 'body', axis: 'vertical' }) : wallFrameIndex({ piece: 'joint', mask });
-      joints.push(sprite(piece, 'joint', frame, shifted(wallJointRect({ col: tx, row: ty }))));
+      joints.push(sprite(piece, 'joint', frame, wallJointRect({ col: tx, row: ty })));
       if (mask & EAST) {
-        bodies.push(sprite(piece, 'body', wallFrameIndex({ piece: 'body', axis: 'horizontal' }), shifted(wallBodyRect({ col: tx, row: ty, axis: 'horizontal' }))));
+        bodies.push(sprite(piece, 'body', wallFrameIndex({ piece: 'body', axis: 'horizontal' }), wallBodyRect({ col: tx, row: ty, axis: 'horizontal' })));
       }
       if (mask & SOUTH) {
-        bodies.push(sprite(piece, 'body', wallFrameIndex({ piece: 'body', axis: 'vertical' }), shifted(wallBodyRect({ col: tx, row: ty, axis: 'vertical' }))));
+        bodies.push(sprite(piece, 'body', wallFrameIndex({ piece: 'body', axis: 'vertical' }), wallBodyRect({ col: tx, row: ty, axis: 'vertical' })));
       }
     }
   }

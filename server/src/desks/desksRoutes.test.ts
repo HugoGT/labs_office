@@ -544,8 +544,9 @@ describe('desks over painted walls', () => {
 
   it('creates a desk right next to a wall', async () => {
     const { deps } = harness();
+    // The desk ends on the grid line x = 13; a post on it would straddle the edge, one on x = 14 stands clear.
 
-    const result = await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa', x: 10, y: 5 }, { ...deps, walls: wallGuard([13, 7]) });
+    const result = await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa', x: 10, y: 5 }, { ...deps, walls: wallGuard([14, 7]) });
 
     expect(result.status).toBe(201);
   });

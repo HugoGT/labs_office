@@ -15,7 +15,7 @@ import {
   renderTerrain,
   type TerrainTilemap,
 } from './mapBuilder';
-import { terrainSnapshot } from './officeLayout';
+import { terrainSnapshot, wallFootprintRects } from './officeLayout';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN, LEGACY_SEATS as BASE_MAP_SEATS } from '../test/legacyOffice';
 
 /** The legacy fixture keeps the 126x90 world it was drawn in. */
@@ -179,12 +179,23 @@ describe('placeWalls', () => {
     expect(result.left).toBe(0);
   });
 
-  it('without the pack keeps a grey placeholder on every wall tile', async () => {
+  it('without the pack draws a grey placeholder over the footprint of every post, never a whole tile', async () => {
     const walls = new Array<string | null>(4).fill(null);
     walls[1] = 'wall-stone';
-    const count = await withScene((scene) => placeWalls(scene, { width: 2, height: 2, walls }).length);
+    const lone = await withScene((scene) => placeWalls(scene, { width: 2, height: 2, walls }).length);
+    expect(lone).toBe(1);
 
-    expect(count).toBe(1);
+    // Two connected posts on the vertices (0,1) and (1,1): two joints and the body between them.
+    const pair = new Array<string | null>(4).fill(null);
+    pair[2] = 'wall-stone';
+    pair[3] = 'wall-stone';
+    const boxes = await withScene((scene) =>
+      placeWalls(scene, { width: 2, height: 2, walls: pair }).map((object) => {
+        const rect = object as Phaser.GameObjects.Rectangle;
+        return { x: rect.x - rect.width / 2, y: rect.y - rect.height / 2, w: rect.width, h: rect.height };
+      }),
+    );
+    expect(boxes).toEqual(wallFootprintRects({ width: 2, height: 2, walls: pair }));
   });
 });
 
@@ -237,7 +248,7 @@ describe('placeLayout', () => {
       return { rectangles: scene.children.list.filter((child) => child.type === 'Rectangle').length, images: images(scene).length };
     });
 
-    const walls = BASE_LAYOUT.walls.filter((wall) => wall !== null).length;
+    const walls = wallSprites(BASE_LAYOUT).length;
     const hedges = BASE_LAYOUT.hedges.filter((hedge) => hedge !== null).length;
     expect(count.rectangles).toBe(walls + hedges + BASE_LAYOUT.props.length);
     expect(count.images).toBe(0);

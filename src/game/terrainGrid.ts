@@ -10,45 +10,50 @@
  */
 
 import { BASE_COLLISION_RECTS } from './officeCollisions';
-import { BASE_LAYOUT, BASE_TERRAIN, type LayoutMaterial, type OfficeLayout, type TerrainSnapshot } from './officeLayout';
+import { BASE_LAYOUT, BASE_TERRAIN, wallColliderRects, type LayoutMaterial, type OfficeLayout, type TerrainSnapshot } from './officeLayout';
 import { coveredTiles, type CollisionRect } from './pieceCollisions';
 
 export interface TerrainGrid {
   /** Effective terrain material of each tile, `[ty][tx]`. */
   terrain: LayoutMaterial[][];
-  /** Walls and hedges: tiles a space's floor never covers. */
+  /** Hedges: tiles a space's floor never covers. Walls stand on grid lines, so a floor runs under them. */
   walled: boolean[][];
-  /** Not walkable as terrain (`terrainSnapshot`): water, void, live walls, hedges. The Arcade tile colliders. */
+  /**
+   * Not walkable as terrain (`terrainSnapshot`): water, void, hedges. The
+   * Arcade tile colliders; walls collide as their own rectangles
+   * (`TerrainSnapshot.wallRects`).
+   */
   terrainSolid: boolean[][];
   /**
    * Blocked for the tile helpers (auto-walk, free tile next to someone, the
-   * e2e teleport): the terrain, plus any tile a piece's collision rectangle
-   * touches at all, even a corner of it (`coveredTiles`).
+   * e2e teleport): the terrain, plus any tile a wall's or a piece's collision
+   * rectangle touches at all, even a corner of it (`coveredTiles`).
    */
   solid: boolean[][];
+  /** The live walls as Arcade static bodies: their footprint merged into straight runs (`wallColliderRects`). */
+  wallRects: readonly CollisionRect[];
 }
 
 /**
  * The grid of a terrain snapshot and the collision rectangles of the pieces.
  * Persisted blocks (#123 phase 2) and painted walls pass their own snapshot,
- * which carries the live walls; the layout supplies the hedges.
+ * which carries the live walls and the tiles they touch; the layout supplies
+ * the hedges.
  */
 export function buildTerrainGrid(
   terrain: TerrainSnapshot = BASE_TERRAIN,
   layout: OfficeLayout = BASE_LAYOUT,
   rects: readonly CollisionRect[] = BASE_COLLISION_RECTS,
 ): TerrainGrid {
-  const grid: TerrainGrid = { terrain: [], walled: [], terrainSolid: [], solid: [] };
+  const grid: TerrainGrid = { terrain: [], walled: [], terrainSolid: [], solid: [], wallRects: wallColliderRects(terrain) };
   const covered = coveredTiles(rects, terrain.width, terrain.height);
   for (let ty = 0; ty < terrain.height; ty++) {
     const row = ty * terrain.width;
     grid.terrain.push(terrain.materials.slice(row, row + terrain.width));
     const terrainSolid = terrain.walkable.slice(row, row + terrain.width).map((walkable) => !walkable);
     grid.terrainSolid.push(terrainSolid);
-    grid.solid.push(terrainSolid.map((blocked, tx) => blocked || covered[row + tx]!));
-    grid.walled.push(
-      Array.from({ length: terrain.width }, (_, tx) => terrain.walls[row + tx] !== null || layout.hedges[row + tx] !== null),
-    );
+    grid.solid.push(terrainSolid.map((blocked, tx) => blocked || covered[row + tx]! || terrain.wallTiles[row + tx]!));
+    grid.walled.push(Array.from({ length: terrain.width }, (_, tx) => layout.hedges[row + tx] !== null));
   }
   return grid;
 }

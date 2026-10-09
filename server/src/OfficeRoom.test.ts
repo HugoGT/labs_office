@@ -213,7 +213,8 @@ describe('OfficeRoom: walkable terrain', () => {
     await waitFor(() => room.state.players.size === 1);
     const start = room.state.players.get(room.sessionId)?.x;
 
-    room.send('move', onTile(50, 4));
+    // On the Sala de Juntas' west wall: posts stand on the vertices of x = 51, the wall runs down that line.
+    room.send('move', { x: 51 * TILE, y: 4 * TILE + 5, facing: 'down' });
     room.send('move', onTile(55, 8));
     room.send('move', onTile(2, 2));
     await settle(room);
@@ -359,21 +360,25 @@ describe('OfficeRoom: edited terrain', () => {
   it('drops a move into a wall, and returns someone a wall lands on to the spawn', async () => {
     const room = await join('Ana');
     await waitFor(() => room.state.players.size === 1);
-    const ashore = onTile(20, 23);
+    const ashore = onTile(22, 23);
     room.send('move', ashore);
     await waitFor(() => room.state.players.get(room.sessionId)?.x === ashore.x);
 
-    await server.terrain.setWalls([{ index: tile(21, 23), piece: 'wall-stone' }], null, nobody);
-    room.send('move', onTile(21, 23));
+    // A lone post on the top-left corner of tile (23, 23) clears the body: nobody moves.
+    await server.terrain.setWalls([{ index: tile(23, 23), piece: 'wall-stone' }], null, nobody);
+    // A move whose body center lands on the post's vertex is refused.
+    room.send('move', { x: 23 * TILE, y: 23 * TILE - 11, facing: 'down' });
     await settle(room);
     expect(room.state.players.get(room.sessionId)).toMatchObject({ x: ashore.x, y: ashore.y, positionRevision: 0 });
 
-    await server.terrain.setWalls([{ index: tile(20, 23), piece: 'wall-stone' }], null, nobody);
+    // Joined to a post below it, the wall runs down x = 23 * TILE and clips the 18 px body standing west of it.
+    await server.terrain.setWalls([{ index: tile(23, 24), piece: 'wall-stone' }], null, nobody);
     await waitFor(() => room.state.players.get(room.sessionId)?.positionRevision === 1);
     const moved = room.state.players.get(room.sessionId)!;
     expect(moved.x).not.toBe(ashore.x);
     expect(server.sessions.positionOf(room.sessionId)).toEqual({ x: moved.x, y: moved.y });
   });
+
 });
 
 /**

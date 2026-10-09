@@ -14,6 +14,7 @@ import type Phaser from 'phaser';
 import {
   TERRAIN_LAYER_COUNT,
   TERRAIN_LAYER_ORIGIN,
+  WALL,
   floorFrameAt,
   propPlacement,
   type ArtChairPiece,
@@ -179,8 +180,9 @@ export const WALL_OBJECT_NAME = 'map:wall';
 
 /**
  * The walls of a wall grid (the layout's, or the live painted ones), from the
- * pack or as a grey placeholder per tile. Returns what it drew, so the scene
- * can destroy it and draw the walls again after an edit.
+ * pack or as grey placeholders over the same joints and bodies: a wall's
+ * footprint on its grid lines, never a whole tile. Returns what it drew, so
+ * the scene can destroy it and draw the walls again after an edit.
  */
 export function placeWalls(
   scene: Phaser.Scene,
@@ -190,14 +192,14 @@ export function placeWalls(
   const drawn: Phaser.GameObjects.GameObject[] = [];
   for (const sprite of wallSprites(grid)) {
     const sheet = packSheet(art, sprite.piece, isAny);
-    if (sheet !== null) drawn.push(putArtSprite(scene, sheet.key, sprite, worldAssetDepth(sprite.depthY)).setName(WALL_OBJECT_NAME));
+    const depth = worldAssetDepth(sprite.depthY);
+    drawn.push(
+      (sheet !== null
+        ? putArtSprite(scene, sheet.key, sprite, depth)
+        : placeholder(scene, sprite.x, sprite.y, WALL.frame.width, WALL.frame.height, PLACEHOLDER_COLOR, depth)
+      ).setName(WALL_OBJECT_NAME),
+    );
   }
-  grid.walls.forEach((wall, index) => {
-    if (wall === null || packSheet(art, wall, isAny) !== null) return;
-    const tx = index % grid.width;
-    const ty = Math.floor(index / grid.width);
-    drawn.push(placeholder(scene, tx * TILE, ty * TILE, TILE, TILE, PLACEHOLDER_COLOR, worldAssetDepth((ty + 1) * TILE)).setName(WALL_OBJECT_NAME));
-  });
   return drawn;
 }
 

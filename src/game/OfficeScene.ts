@@ -1638,16 +1638,19 @@ export class OfficeScene extends Phaser.Scene {
     this.physics.add.collider(this.player, this.peerGroup);
   }
 
-  /** The static bodies of `grid`, replacing the previous ones (#123 phase 2: blocks change live). */
+  /**
+   * The static bodies of `grid`, replacing the previous ones (#123 phase 2:
+   * blocks change live): the merged terrain tiles, then the walls' own
+   * rectangles, which stand on grid lines and never fill a tile.
+   */
   private buildTerrainColliders(grid: TerrainGrid): void {
     if (this.terrainColliders) {
       this.physics.world.removeCollider(this.terrainColliders.collider);
       for (const rect of this.terrainColliders.rects) rect.destroy();
     }
-    const rects = mergeColliderRects(grid.terrainSolid).map((r) => {
-      const w = r.w * TILE;
-      const h = r.h * TILE;
-      const rect = this.add.rectangle(r.x * TILE + w / 2, r.y * TILE + h / 2, w, h);
+    const tiles = mergeColliderRects(grid.terrainSolid).map((r) => ({ x: r.x * TILE, y: r.y * TILE, w: r.w * TILE, h: r.h * TILE }));
+    const rects = [...tiles, ...grid.wallRects].map((r) => {
+      const rect = this.add.rectangle(r.x + r.w / 2, r.y + r.h / 2, r.w, r.h);
       this.physics.add.existing(rect, true);
       return rect;
     });

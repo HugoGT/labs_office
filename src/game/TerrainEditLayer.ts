@@ -2,8 +2,8 @@
  * Phaser layer of the terrain editor (#123 phase 2): outlines the cell under
  * the pointer while a palette entry is picked, and turns a click on the map
  * into a pick: with a floor the cell is a 9x9 block and the pick a
- * `terrainpick`, with a wall (or the wall eraser) it is one tile and a
- * `wallpick`. Holding the primary button down and dragging keeps reporting
+ * `terrainpick`, with a wall (or the wall eraser) it is the nearest grid
+ * vertex (a wall post stands on the line between tiles) and a `wallpick`. Holding the primary button down and dragging keeps reporting
  * every cell the stroke crosses, so a large area or a long wall is one
  * gesture instead of a click per cell. Same split as `LayoutEditLayer`: the
  * layer draws and reports pointer facts, React decides. Pending paints are
@@ -16,7 +16,7 @@ import { LAYOUT_GHOST_DEPTH } from './depthLayers';
 import { TILE } from './mapData';
 import type { OfficeBridge } from './officeBridge';
 import { BLOCK_TILES, type OfficeLayout } from './officeLayout';
-import { cellsAlongStroke, sameBrush, type StrokeGrid, type TerrainBrush, type TerrainEditCommand } from './terrainEditor';
+import { cellOutlineCenter, cellsAlongStroke, sameBrush, type StrokeGrid, type TerrainBrush, type TerrainEditCommand } from './terrainEditor';
 
 export const TERRAIN_HOVER_NAME = 'terrain-edit:hover';
 
@@ -30,8 +30,8 @@ export class TerrainEditLayer {
   private hover: Phaser.GameObjects.Rectangle | null = null;
   /** Floors paint 9x9 blocks. */
   private readonly blocks: StrokeGrid;
-  /** Walls paint single tiles. */
-  private readonly tiles: StrokeGrid;
+  /** Walls paint single posts, on the grid vertices. */
+  private readonly vertices: StrokeGrid;
   /** World point of the last pointer event of a held stroke, or `null` while no stroke is held. */
   private stroke: { x: number; y: number } | null = null;
   private lastPicked: number | null = null;
@@ -54,7 +54,7 @@ export class TerrainEditLayer {
     this.scene = scene;
     this.bridge = bridge;
     this.blocks = { columns: layout.width / BLOCK_TILES, rows: layout.height / BLOCK_TILES, cellSize: BLOCK_TILES * TILE };
-    this.tiles = { columns: layout.width, rows: layout.height, cellSize: TILE };
+    this.vertices = { columns: layout.width, rows: layout.height, cellSize: TILE, snap: 'vertex' };
     this.unsubscribeCommand = bridge.onCommand('terrainedit', (command) => this.applyCommand(command));
     scene.input.on('pointermove', this.onPointerMove);
     scene.input.on('pointerdown', this.onPointerDown);
@@ -71,9 +71,9 @@ export class TerrainEditLayer {
     this.applyCommand(null);
   }
 
-  /** The grid a brush paints on: blocks for a floor, tiles for a wall. */
+  /** The grid a brush paints on: blocks for a floor, vertices for a wall. */
   private gridOf(brush: TerrainBrush): StrokeGrid {
-    return brush.kind === 'floor' ? this.blocks : this.tiles;
+    return brush.kind === 'floor' ? this.blocks : this.vertices;
   }
 
   /** Reports the cells from `from` (the press when `null`) to the pointer, skipping the one just reported. */
@@ -117,8 +117,7 @@ export class TerrainEditLayer {
       .setDepth(LAYOUT_GHOST_DEPTH)
       .setName(TERRAIN_HOVER_NAME);
     if (this.hover.width !== size) this.hover.setSize(size, size);
-    const column = index % grid.columns;
-    const row = Math.floor(index / grid.columns);
-    this.hover.setPosition((column + 0.5) * size, (row + 0.5) * size).setVisible(true);
+    const center = cellOutlineCenter(grid, index);
+    this.hover.setPosition(center.x, center.y).setVisible(true);
   }
 }

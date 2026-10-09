@@ -18,7 +18,9 @@
  *   - `ground`  tile layer, optional terrain per tile that wins over its block:
  *               kept empty in the shipped block-editor map; explicit fixtures
  *               can still test legacy tile-precise geometry.
- *   - `walls`   tile layer, a `wall-*` pack piece on each solid wall tile.
+ *   - `walls`   tile layer, a `wall-*` pack piece per wall post: the entry of
+ *               tile (tx, ty) stands on the grid vertex at its top-left
+ *               corner, and 4-adjacent posts join along the grid line.
  *   - `hedges`  tile layer, a `hedge-*` pack piece on each solid hedge tile.
  *   - `decals`  tile layer, optional small details over the terrain (flowers,
  *               pebbles, lily pads). Drawing only; they never block.
@@ -35,8 +37,10 @@
  */
 
 import officeMap from './maps/office.json' with { type: 'json' };
+import { wallBodyRect, wallJointRect, type Rect } from './artContract.ts';
 import { AVATAR_BODY_CENTER_OFFSET, physicalBodyRect } from './avatarGeometry.ts';
 import { MAP_BLOCK_TILES } from './mapData.ts';
+import { boxOverlapsRects, coveredTiles, isPositionBlocked, type CollisionRect } from './pieceCollisions.ts';
 export { AVATAR_BODY_CENTER_OFFSET } from './avatarGeometry.ts';
 
 /** Same as `TILE` in mapData.ts and `ART_TILE` in artContract.ts (pinned by tests). */
@@ -348,9 +352,14 @@ export interface TerrainSnapshot {
   readonly width: number;
   readonly height: number;
   readonly blocks: readonly LayoutMaterial[];
-  /** The live wall piece of each tile (row major), `null` where there is none. */
+  /** The live wall post of each grid vertex (row major, the top-left corner of the tile), `null` where there is none. */
   readonly walls: readonly (string | null)[];
+  /** World rectangles the walls block (`wallFootprintRects`): what the room and Arcade collide with. */
+  readonly wallRects: readonly CollisionRect[];
+  /** Tiles (row major) a wall rectangle touches at all: blocked for the tile helpers. */
+  readonly wallTiles: readonly boolean[];
   readonly materials: readonly LayoutMaterial[];
+  /** Terrain walkability per tile: void, water and hedges block; walls do not (they block by rectangle). */
   readonly walkable: readonly boolean[];
 }
 
@@ -360,8 +369,11 @@ export interface TerrainSnapshot {
  *
  *   1. Terrain: walkable unless void or water. A `ground` tile wins over its block.
  *   2. Deck props (bridges): their footprint is walkable, water included.
- *   3. Solids: walls (the layout's, or the live ones an admin painted) and
- *      hedges block, a deck under them too.
+ *   3. Solids: hedges block, a deck under them too.
+ *
+ * Walls (the layout's, or the live ones an admin painted) stand on grid lines,
+ * half on each side, so they never block whole tiles: they block by their
+ * footprint rectangles (`wallRects`), checked on top of the tiles.
  *
  * Solid props (trees, plants, tables, desks) are not stamped here: they
  * collide through their pieces' rectangles (`pieceCollisions.ts`), whose
@@ -390,13 +402,11 @@ export function terrainSnapshot(
     }
   };
   for (const prop of layout.props) if (prop.collision === 'deck') cover(prop, true);
-  walls.forEach((wall, index) => {
-    if (wall !== null) walkable[index] = false;
-  });
   layout.hedges.forEach((hedge, index) => {
     if (hedge !== null) walkable[index] = false;
   });
-  return { width, height, blocks: [...blocks], walls: [...walls], materials, walkable };
+  const wallRects = wallFootprintRects({ width, height, walls });
+  return { width, height, blocks: [...blocks], walls: [...walls], wallRects, wallTiles: coveredTiles(wallRects, width, height), materials, walkable };
 }
 
 /** Effective material of a tile; outside the map, the nearest tile's. */
@@ -410,17 +420,21 @@ export function isTileWalkable(snapshot: TerrainSnapshot, tx: number, ty: number
   return snapshot.walkable[ty * snapshot.width + tx]!;
 }
 
-/** The terrain half of a move check; the room also checks the pieces' rectangles (`isPositionBlocked`). */
+/**
+ * The terrain half of a move check: the body center on a walkable tile and
+ * outside every wall rectangle (half open, like a tile). The room also checks
+ * the pieces' rectangles (`isPositionBlocked`).
+ */
 export function isPositionWalkable(snapshot: TerrainSnapshot, x: number, y: number): boolean {
   if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
-  return isTileWalkable(
-    snapshot,
-    Math.floor((x + AVATAR_BODY_CENTER_OFFSET.x) / LAYOUT_TILE),
-    Math.floor((y + AVATAR_BODY_CENTER_OFFSET.y) / LAYOUT_TILE),
-  );
+  const tx = Math.floor((x + AVATAR_BODY_CENTER_OFFSET.x) / LAYOUT_TILE);
+  const ty = Math.floor((y + AVATAR_BODY_CENTER_OFFSET.y) / LAYOUT_TILE);
+  if (!isTileWalkable(snapshot, tx, ty)) return false;
+  // Every move runs this: only a tile a wall touches pays for the rectangles.
+  return !snapshot.wallTiles[ty * snapshot.width + tx] || !isPositionBlocked(snapshot.wallRects, x, y);
 }
 
-/** Full half-open footprint, for authoritative restoration and terrain relocation. */
+/** Full half-open footprint, for authoritative restoration and terrain relocation: walkable tiles, clear of every wall. */
 export function isFootprintWalkable(snapshot: TerrainSnapshot, position: { x: number; y: number }): boolean {
   if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) return false;
   const body = physicalBodyRect(position);
@@ -429,7 +443,7 @@ export function isFootprintWalkable(snapshot: TerrainSnapshot, position: { x: nu
       if (!isTileWalkable(snapshot, tx, ty)) return false;
     }
   }
-  return true;
+  return !boxOverlapsRects(snapshot.wallRects, body);
 }
 
 // --- Block edits (#123 phase 2) ----------------------------------------------------------------
@@ -501,15 +515,19 @@ export function newlyUnwalkableTiles(before: TerrainSnapshot, after: TerrainSnap
 
 /**
  * The wall pieces of the art pack (pinned by a test against the manifest):
- * the only pieces the terrain editor paints, one per tile.
+ * the only pieces the terrain editor paints, one per grid vertex.
  */
 export const WALL_PIECES = ['wall-brick', 'wall-stone', 'wall-plaster', 'wall-glass'] as const;
 export type WallPieceId = (typeof WALL_PIECES)[number];
 
-/** The most wall tiles one request may set: a long dragged wall is one request, never an unbounded one. */
+/** The most wall posts one request may set: a long dragged wall is one request, never an unbounded one. */
 export const MAX_WALL_EDITS = 2000;
 
-/** One tile of a wall edit: a wall piece, or `null` to remove the wall there. */
+/**
+ * One post of a wall edit: a wall piece, or `null` to remove the post there.
+ * `index` is row major (`ty * width + tx`) and names the grid vertex at the
+ * top-left corner of tile (tx, ty).
+ */
 export interface WallEdit {
   readonly index: number;
   readonly piece: WallPieceId | null;
@@ -527,6 +545,96 @@ export function withWalls(walls: readonly (string | null)[], edits: readonly Wal
     next[index] = piece;
   }
   return next;
+}
+
+/** A wall grid: one post (a wall piece) or `null` per grid vertex, row major. */
+export type WallGrid = Pick<OfficeLayout, 'width' | 'height' | 'walls'>;
+
+function collisionRect({ x, y, width, height }: Rect): CollisionRect {
+  return { x, y, w: width, h: height };
+}
+
+/**
+ * The world rectangles a wall grid blocks, the pack's own geometry
+ * (`wallJointRect`, `wallBodyRect`): a 16x16 joint centered on each post,
+ * then a body along the grid line between each post and its east and south
+ * neighbors. Joints first, then bodies, like the sprites.
+ */
+export function wallFootprintRects({ width, height, walls }: WallGrid): CollisionRect[] {
+  const joints: CollisionRect[] = [];
+  const bodies: CollisionRect[] = [];
+  const at = (tx: number, ty: number): boolean => tx < width && ty < height && walls[ty * width + tx] != null;
+  for (let ty = 0; ty < height; ty += 1) {
+    for (let tx = 0; tx < width; tx += 1) {
+      if (!at(tx, ty)) continue;
+      joints.push(collisionRect(wallJointRect({ col: tx, row: ty })));
+      if (at(tx + 1, ty)) bodies.push(collisionRect(wallBodyRect({ col: tx, row: ty, axis: 'horizontal' })));
+      if (at(tx, ty + 1)) bodies.push(collisionRect(wallBodyRect({ col: tx, row: ty, axis: 'vertical' })));
+    }
+  }
+  return [...joints, ...bodies];
+}
+
+/**
+ * The same ground as `wallFootprintRects`, merged into straight runs for the
+ * Arcade colliders: one rectangle per maximal horizontal run of connected
+ * posts (row by row), one per vertical run (column by column), then a joint
+ * per post with no neighbor. A wall is then one smooth body to slide along,
+ * not a row of 16px boxes whose seams could snag the avatar.
+ */
+export function wallColliderRects({ width, height, walls }: WallGrid): CollisionRect[] {
+  const at = (tx: number, ty: number): boolean => tx >= 0 && ty >= 0 && tx < width && ty < height && walls[ty * width + tx] != null;
+  const span = (first: Rect, last: Rect): CollisionRect => ({
+    x: first.x,
+    y: first.y,
+    w: last.x + last.width - first.x,
+    h: last.y + last.height - first.y,
+  });
+  const rows: CollisionRect[] = [];
+  const columns: CollisionRect[] = [];
+  const lone: CollisionRect[] = [];
+  for (let ty = 0; ty < height; ty += 1) {
+    for (let tx = 0; tx < width; tx += 1) {
+      if (!at(tx, ty) || at(tx - 1, ty) || !at(tx + 1, ty)) continue;
+      let end = tx + 1;
+      while (at(end + 1, ty)) end += 1;
+      rows.push(span(wallJointRect({ col: tx, row: ty }), wallJointRect({ col: end, row: ty })));
+    }
+  }
+  for (let tx = 0; tx < width; tx += 1) {
+    for (let ty = 0; ty < height; ty += 1) {
+      if (!at(tx, ty) || at(tx, ty - 1) || !at(tx, ty + 1)) continue;
+      let end = ty + 1;
+      while (at(tx, end + 1)) end += 1;
+      columns.push(span(wallJointRect({ col: tx, row: ty }), wallJointRect({ col: tx, row: end })));
+    }
+  }
+  for (let ty = 0; ty < height; ty += 1) {
+    for (let tx = 0; tx < width; tx += 1) {
+      if (at(tx, ty) && !at(tx - 1, ty) && !at(tx + 1, ty) && !at(tx, ty - 1) && !at(tx, ty + 1)) {
+        lone.push(collisionRect(wallJointRect({ col: tx, row: ty })));
+      }
+    }
+  }
+  return [...rows, ...columns, ...lone];
+}
+
+/**
+ * Tiles (row major) the footprint of the post at `index` touches: the four
+ * around its vertex, clipped to the map. The bodies it shares with its
+ * neighbors stay inside them, so this is every tile placing the post can
+ * reach, whatever stands next to it.
+ */
+export function wallPostTiles({ width, height }: Pick<OfficeLayout, 'width' | 'height'>, index: number): number[] {
+  const tx = index % width;
+  const ty = Math.floor(index / width);
+  const tiles: number[] = [];
+  for (let y = ty - 1; y <= ty; y += 1) {
+    for (let x = tx - 1; x <= tx; x += 1) {
+      if (x >= 0 && y >= 0 && x < width && y < height) tiles.push(y * width + x);
+    }
+  }
+  return tiles;
 }
 
 const WALL_PREFIX = 'wall-';

@@ -480,9 +480,10 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       // Seated, the facing is the seat's, whatever the client says.
       const reach = this.seated.get(client.sessionId)?.reach;
       const withinSeat = reach !== undefined && inSeatReach({ x, y }, reach);
-      // The same rule the client collides with (step 8): water, walls and
-      // hedges block by tile, and the collision rectangles of the pieces
-      // (props, desks, decor, chairs) by the body center. A sitter is exempt
+      // The same rule the client collides with (step 8): water and hedges
+      // block by tile, and the wall rectangles (posts on grid vertices) and
+      // the collision rectangles of the pieces (props, desks, decor, chairs)
+      // by the body center. A sitter is exempt
       // within its seat's reach: feet on the chair put the body over the
       // table, out of the collider.
       if (!withinSeat && (!isPositionWalkable(this.terrain(), x, y) || isPositionBlocked(this.collisions(), x, y))) return;
