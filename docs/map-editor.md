@@ -6,7 +6,7 @@ New offices start as a black void with one central wood block, the entrance. Adm
 
 1. Sign in as an admin or superadmin with the directory configured. Open the office sidebar's **Terreno** section.
 2. Pick a floor in the palette (for example **Madera**). It stays highlighted and picked.
-3. Click blocks on the map. Each click paints the 9 × 9 block under the pointer at once and for everyone; keep clicking to paint many blocks in a row. Painting over the void builds new terrain, painting over terrain replaces it.
+3. Click blocks on the map. Each click paints the 9 × 9 block under the pointer at once and for everyone. To paint an area, hold the button down and drag: every block the stroke crosses is painted, each once, until you release it. Painting over the void builds new terrain, painting over terrain replaces it.
 4. To erase, pick **Vacío** and click blocks: they go back to void. Click the picked floor again, **Deseleccionar**, or press Escape to stop painting.
 5. In **Salas**, name the room and click **Usar un bloque de oficina (9 × 9)**. Choose its floor, click **Colocar nueva sala**, and click a built block. This size snaps exactly to the block under the pointer; other room sizes keep tile placement. Room CRUD and overlap rules are unchanged.
 
@@ -24,7 +24,7 @@ New offices start as a black void with one central wood block, the entrance. Adm
 
 ## Painting, conflicts and players
 
-Each click is one `POST /admin/terrain/blocks/:index` with `{ material }`. The editor sends them one at a time, in click order, and draws each one as pending until the room replicates it; collisions never follow a pending paint. The atomic batch `POST /admin/terrain/blocks` (no sidebar control uses it) takes `{ edits: [{ index, material }], expected }`, where `expected` is the replicated block-list wire string the editor last saw. Both require admin/superadmin authorization and run in the same serialization queue. A batch validates all indices and materials, rejects duplicates and oversized requests, and writes all changed rows with a single atomic PostgreSQL upsert statement (or one synchronous memory mutation).
+Each painted block (a click, or each block a drag crosses) is one `POST /admin/terrain/blocks/:index` with `{ material }`. The editor sends them one at a time, in stroke order, and draws each one as pending until the room replicates it; collisions never follow a pending paint. The atomic batch `POST /admin/terrain/blocks` (no sidebar control uses it) takes `{ edits: [{ index, material }], expected }`, where `expected` is the replicated block-list wire string the editor last saw. Both require admin/superadmin authorization and run in the same serialization queue. A batch validates all indices and materials, rejects duplicates and oversized requests, and writes all changed rows with a single atomic PostgreSQL upsert statement (or one synchronous memory mutation).
 
 Water and void are refused under placements (stored rooms, desks, protected static furniture, seats and the spawn area) with `terrain-under-placement`, never under players. A refused paint is dropped from the pending ones and its reason shown; the others go on. Lost authorization or configuration stops painting. A batch sent against a changed terrain is refused with `terrain-stale`; retry. Protection failures, stale batches and failed atomic writes leave **both terrain and player positions unchanged**. Missing directory/store keeps editing unavailable (503).
 

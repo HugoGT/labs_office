@@ -4043,8 +4043,8 @@ describe('OfficeScene: edited terrain', () => {
     bridge.on('closemenu', () => events.push('closemenu'));
     bridge.on('terrainpick', ({ index }) => events.push(`pick:${index}`));
 
-    bridge.emitCommand('terrainedit', { brush: null });
-    scene.input.emit('pointerdown', { worldX: lawn.x, worldY: lawn.y, event: { stopPropagation() {} } }, []);
+    bridge.emitCommand('terrainedit', { brush: 'grass' });
+    scene.input.emit('pointerdown', { worldX: lawn.x, worldY: lawn.y, button: 0, event: { stopPropagation() {} } }, []);
 
     expect(events).toEqual([`pick:${LAWN}`]);
   });
