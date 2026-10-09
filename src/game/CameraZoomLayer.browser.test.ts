@@ -257,7 +257,8 @@ describe('CameraZoomLayer: bridge command, event and store', () => {
 
     bridge.emitCommand('zoom', { action: 'in' });
     bridge.emitCommand('zoom', { action: 'in' });
-    expect(views.at(-1)).toEqual(zoomView(3));
+    expect(views.at(-1)).toEqual(zoomView(4));
+    bridge.emitCommand('zoom', { action: 'out' });
     bridge.emitCommand('zoom', { action: 'out' });
     bridge.emitCommand('zoom', { action: 'out' });
     expect(views.at(-1)).toEqual(zoomView(1));
@@ -267,7 +268,7 @@ describe('CameraZoomLayer: bridge command, event and store', () => {
 
   it('saves every change to the store, and nothing when the target does not move', async () => {
     const store = { load: () => 2, save: vi.fn() };
-    const { bridge, views } = await fixture({ store }, 3);
+    const { bridge, views } = await fixture({ store }, 4);
     const initial = views.length;
 
     bridge.emitCommand('zoom', { action: 'in' });
@@ -275,7 +276,7 @@ describe('CameraZoomLayer: bridge command, event and store', () => {
     expect(views).toHaveLength(initial);
 
     bridge.emitCommand('zoom', { action: 'out' });
-    expect(store.save).toHaveBeenCalledExactlyOnceWith(2);
+    expect(store.save).toHaveBeenCalledExactlyOnceWith(3);
   });
 });
 

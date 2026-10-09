@@ -18,8 +18,8 @@ describe('useMapZoom (map-zoom)', () => {
     act(() => bridge.emit('zoomchanged', zoomView(0.5)));
     expect(result.current.view).toEqual({ zoom: 0.5, canZoomIn: true, canZoomOut: false });
 
-    act(() => bridge.emit('zoomchanged', zoomView(3)));
-    expect(result.current.view).toEqual({ zoom: 3, canZoomIn: false, canZoomOut: true });
+    act(() => bridge.emit('zoomchanged', zoomView(4)));
+    expect(result.current.view).toEqual({ zoom: 4, canZoomIn: false, canZoomOut: true });
   });
 
   it('asks the scene for each action with one command', () => {

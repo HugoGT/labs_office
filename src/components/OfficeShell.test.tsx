@@ -1339,12 +1339,12 @@ describe('OfficeShell: map zoom control (map-zoom)', () => {
       actions.push(action);
       if (action === 'reset') bridge.emit('zoomchanged', zoomView(2));
     });
-    // The limits each disable one button: 0.5x has no zoom out, 3x no zoom in.
+    // The limits each disable one button: 0.5x has no zoom out, 4x no zoom in.
     act(() => bridge.emit('zoomchanged', zoomView(0.5)));
     await user.click(screen.getByRole('button', { name: 'Acercar' }));
-    act(() => bridge.emit('zoomchanged', zoomView(3)));
+    act(() => bridge.emit('zoomchanged', zoomView(4)));
     await user.click(screen.getByRole('button', { name: 'Alejar' }));
-    await user.click(screen.getByRole('button', { name: 'Restablecer zoom a 2x (ahora 3x)' }));
+    await user.click(screen.getByRole('button', { name: 'Restablecer zoom a 2x (ahora 4x)' }));
 
     expect(actions).toEqual(['in', 'out', 'reset']);
     expect(screen.getByRole('group', { name: 'Zoom del mapa' })).toHaveTextContent('2x');

@@ -29,7 +29,8 @@ describe('ZoomControls (map-zoom)', () => {
     { zoom: 0.5, label: '0.5x', inEnabled: true, outEnabled: false },
     { zoom: 1, label: '1x', inEnabled: true, outEnabled: true },
     { zoom: 2, label: '2x', inEnabled: true, outEnabled: true },
-    { zoom: 3, label: '3x', inEnabled: false, outEnabled: true },
+    { zoom: 3, label: '3x', inEnabled: true, outEnabled: true },
+    { zoom: 4, label: '4x', inEnabled: false, outEnabled: true },
   ])('at $label: zoom in enabled $inEnabled, zoom out enabled $outEnabled', ({ zoom, label: text, inEnabled, outEnabled }) => {
     const { zoomIn, zoomOut, label } = renderControls(zoom);
 
@@ -42,12 +43,12 @@ describe('ZoomControls (map-zoom)', () => {
 
   it('each button asks for its own action', async () => {
     const user = userEvent.setup();
-    // The limits each disable one button: 0.5x has no zoom out, 3x no zoom in.
+    // The limits each disable one button: 0.5x has no zoom out, 4x no zoom in.
     const atMin = renderControls(0.5);
     await user.click(atMin.zoomIn);
     await user.click(atMin.label);
     cleanup();
-    const atMax = renderControls(3);
+    const atMax = renderControls(4);
     await user.click(atMax.zoomOut);
     await user.click(atMax.label);
 

@@ -9,7 +9,7 @@
  */
 
 /**
- * The only zooms the office offers, shown as 0.5x, 1x, 2x and 3x
+ * The only zooms the office offers, shown as 0.5x, 1x, 2x, 3x and 4x
  * (`zoomLabel`); the office opens at 2x. Every stop is pixel exact
  * (`isPixelExactZoom`): the game renders with `pixelArt` and `roundPixels`,
  * and Phaser only rounds at an integer camera zoom (`renderRoundPixels`), so
@@ -18,9 +18,9 @@
  * 2.25) showed seams between tiles and flickering character details. A stored
  * zoom that is not one of these restores to the default.
  */
-export const ZOOM_STOPS: readonly number[] = [0.5, 1, 2, 3];
+export const ZOOM_STOPS: readonly number[] = [0.5, 1, 2, 3, 4];
 export const ZOOM_MIN = 0.5;
-export const ZOOM_MAX = 3;
+export const ZOOM_MAX = 4;
 export const ZOOM_DEFAULT = 2;
 
 /**
@@ -242,7 +242,7 @@ export function zoomKeyAction(event: ZoomKeyInput): ZoomAction | null {
 
 /**
  * The control's readout: the camera zoom itself, so the stops read 0.5x, 1x,
- * 2x and 3x. A value between stops keeps at most two decimals.
+ * 2x, 3x and 4x. A value between stops keeps at most two decimals.
  */
 export function zoomLabel(zoom: number): string {
   return `${Number(zoom.toFixed(2))}x`;

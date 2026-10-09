@@ -29,9 +29,9 @@ import {
 /** Pure rules of the map zoom: stops, smoothing, wheel accumulation, keys. */
 
 describe('zoom stops', () => {
-  it('are 0.5x plus the integer stops, with 2x as the default', () => {
-    expect([...ZOOM_STOPS]).toEqual([0.5, 1, 2, 3]);
-    expect([ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT]).toEqual([0.5, 3, 2]);
+  it('are 0.5x plus the integer stops up to 4x, with 2x as the default', () => {
+    expect([...ZOOM_STOPS]).toEqual([0.5, 1, 2, 3, 4]);
+    expect([ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT]).toEqual([0.5, 4, 2]);
   });
 
   it('every stop is pixel exact: a whole number of screen pixels per world unit, or of world units per screen pixel', () => {
@@ -39,7 +39,7 @@ describe('zoom stops', () => {
   });
 
   it.each([
-    { from: 2, direction: 1 as const, expected: [3, 3, 3] },
+    { from: 2, direction: 1 as const, expected: [3, 4, 4] },
     { from: 2, direction: -1 as const, expected: [1, 0.5, 0.5] },
   ])('stepping from $from toward $direction clamps at the limit', ({ from, direction, expected }) => {
     const first = nextZoomStop(from, direction);
@@ -54,7 +54,9 @@ describe('zoom stops', () => {
     expect(nextZoomStop(1.5, -1)).toBe(1);
     expect(nextZoomStop(2.25, 1)).toBe(3);
     expect(nextZoomStop(2.25, -1)).toBe(2);
-    expect(nextZoomStop(5, 1)).toBe(3);
+    expect(nextZoomStop(3.5, 1)).toBe(4);
+    expect(nextZoomStop(3.5, -1)).toBe(3);
+    expect(nextZoomStop(5, 1)).toBe(4);
     expect(nextZoomStop(0.75, -1)).toBe(0.5);
     expect(nextZoomStop(0.75, 1)).toBe(1);
     expect(nextZoomStop(0.1, -1)).toBe(0.5);
@@ -64,18 +66,20 @@ describe('zoom stops', () => {
   it('applyZoomAction steps from the target; reset goes back to the default', () => {
     expect(applyZoomAction(2, 'in')).toBe(3);
     expect(applyZoomAction(2, 'out')).toBe(1);
-    expect(applyZoomAction(3, 'in')).toBe(3);
+    expect(applyZoomAction(3, 'in')).toBe(4);
+    expect(applyZoomAction(4, 'in')).toBe(4);
+    expect(applyZoomAction(4, 'out')).toBe(3);
     expect(applyZoomAction(1, 'out')).toBe(0.5);
     expect(applyZoomAction(0.5, 'out')).toBe(0.5);
     expect(applyZoomAction(0.5, 'in')).toBe(1);
-    expect(applyZoomAction(3, 'reset')).toBe(2);
+    expect(applyZoomAction(4, 'reset')).toBe(2);
     expect(applyZoomAction(0.5, 'reset')).toBe(2);
   });
 });
 
 describe('clampZoom and isZoomStop', () => {
   it('clamps into the range, keeps in-range values and turns non-finite into the default', () => {
-    expect(clampZoom(5)).toBe(3);
+    expect(clampZoom(5)).toBe(4);
     expect(clampZoom(0.1)).toBe(0.5);
     expect(clampZoom(1.25)).toBe(1.25);
     expect(clampZoom(Number.NaN)).toBe(2);
@@ -121,6 +125,7 @@ describe('zoomStep: smoothing in log space', () => {
     { from: 2, to: 1 },
     { from: 1, to: 3 },
     { from: 1, to: 0.5 },
+    { from: 3, to: 4 },
   ])('goes monotonically from $from to $to over several frames and lands exactly on it', ({ from, to }) => {
     const direction = Math.sign(to - from);
     let current = from;
@@ -341,8 +346,8 @@ describe('zoomKeyAction', () => {
 });
 
 describe('zoomLabel and zoomView', () => {
-  it('labels every stop with the camera zoom itself: 0.5x, 1x, 2x, 3x', () => {
-    expect(ZOOM_STOPS.map(zoomLabel)).toEqual(['0.5x', '1x', '2x', '3x']);
+  it('labels every stop with the camera zoom itself: 0.5x, 1x, 2x, 3x, 4x', () => {
+    expect(ZOOM_STOPS.map(zoomLabel)).toEqual(['0.5x', '1x', '2x', '3x', '4x']);
     expect(zoomLabel(ZOOM_DEFAULT)).toBe('2x');
   });
 
@@ -351,11 +356,12 @@ describe('zoomLabel and zoomView', () => {
     expect(zoomLabel(4 / 3)).toBe('1.33x');
   });
 
-  it('flags the limits: nothing further out at 0.5x, nothing further in at 3x', () => {
+  it('flags the limits: nothing further out at 0.5x, nothing further in at 4x', () => {
     expect(zoomView(0.5)).toEqual({ zoom: 0.5, canZoomIn: true, canZoomOut: false });
     expect(zoomView(1)).toEqual({ zoom: 1, canZoomIn: true, canZoomOut: true });
     expect(zoomView(2)).toEqual({ zoom: 2, canZoomIn: true, canZoomOut: true });
-    expect(zoomView(3)).toEqual({ zoom: 3, canZoomIn: false, canZoomOut: true });
+    expect(zoomView(3)).toEqual({ zoom: 3, canZoomIn: true, canZoomOut: true });
+    expect(zoomView(4)).toEqual({ zoom: 4, canZoomIn: false, canZoomOut: true });
   });
 });
 
