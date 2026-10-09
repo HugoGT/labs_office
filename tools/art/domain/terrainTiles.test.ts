@@ -122,6 +122,23 @@ describe('terrain edge tiles', () => {
     expect(rim).toBeGreaterThan(10);
     expect(shadow).toBeGreaterThan(10);
   });
+  it('give built floors a one pixel rim, so their edge reads as floor and not as a wall', () => {
+    for (const material of ['wood', 'tile', 'carpet'] as const) {
+      const motif = terrainTile(material);
+      const origin = terrainPhaseOrigin(0);
+      // Mask nw covers the top-left quarter: rows 0-15, so row 15 is the edge and row 14 the next one in.
+      const tile = terrainEdgeTile(material, TERRAIN_CORNER_BITS.nw, 0);
+      const differs = (x: number, y: number): boolean => {
+        const pixel = tile.getPixel(x, y);
+        const under = motif.getPixel((origin.x + x) % FLOOR_MOTIF_SIZE, (origin.y + y) % FLOOR_MOTIF_SIZE);
+        return pixel.r !== under.r || pixel.g !== under.g || pixel.b !== under.b;
+      };
+      for (let x = 0; x < ART_TILE / 2 - 2; x += 1) {
+        expect(differs(x, ART_TILE / 2 - 1), `${material} edge row, x ${x}`).toBe(true);
+        expect(differs(x, ART_TILE / 2 - 2), `${material} row inside, x ${x}`).toBe(false);
+      }
+    }
+  });
 });
 
 describe('terrain decals', () => {

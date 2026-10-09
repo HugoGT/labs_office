@@ -57,7 +57,7 @@ Transitions are corner autotiles on a dual grid, so they work between any two ne
 
 - Natural materials (water, grass, dirt, sand, cobblestone) have organic edges: coverage is the bilinear blend of the corners plus smooth noise that repeats with the 96px motif. Both depend only on the shared corners and the world position, so an edge runs on from one cell into the next, and no edge crosses a cell side whose two corners agree.
 - Built floors (wood, tile, carpet) have square edges on the map tile lines, like the walls standing on them.
-- Every edge has a 2px darker rim inside and a 2px translucent indigo contact shadow outside, drawn over whatever is below, so one tile works over any lower neighbor.
+- Every edge has a darker rim inside (2px on natural materials, 1px on wood, tile and carpet, whose straight edge read as a wall with two) and a 2px translucent indigo contact shadow outside, drawn over whatever is below, so one tile works over any lower neighbor.
 - A full tile (mask 15) is exactly the floor motif, so a uniform area looks like the floor piece.
 
 Breaking the straight lines between 9x9 blocks is the map's job (8b), for example by deforming block borders with deterministic noise in the material map; the tiles follow any material map.
