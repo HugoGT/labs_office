@@ -76,9 +76,20 @@ docker compose ps                    # postgres, server: healthy; livekit, egres
 curl http://localhost:2567/health    # "ok":true, "directory":"enabled"
 ```
 
-Open http://localhost:8080 (two windows to test proximity audio/video). The directory is always on in this stack. `/dashboard` additionally needs auth: without the Firebase variables it only explains that. The stack reads `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` and the optional feature variables from `.env`; `DATABASE_URL`, `LIVEKIT_URL`, `LIVEKIT_API_URL` and `VITE_COLYSEUS_URL` are set by the compose file and any value in `.env` is ignored. There is no hot reload: rebuild with `docker compose up -d --build` after a change.
+Open http://localhost:8080 (two windows to test proximity audio/video). The directory is always on in this stack. `/dashboard` additionally needs auth: without the Firebase variables or the local auth mode it only explains that. The stack reads `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` and the optional feature variables from `.env`; `DATABASE_URL`, `LIVEKIT_URL`, `LIVEKIT_API_URL` and `VITE_COLYSEUS_URL` are set by the compose file and any value in `.env` is ignored. There is no hot reload: rebuild with `docker compose up -d --build` after a change.
 
 Stop with `docker compose down` (add `-v` to also wipe the Postgres volume).
+
+To log in locally without any Firebase project, use the local auth mode (local and test use only, never deployed). In `.env`:
+
+```sh
+LOCAL_AUTH_USERS=admin@local.test:cambiame,ana@local.test:cambiame2
+LOCAL_AUTH_SECRET=<output of: openssl rand -hex 32>
+VITE_AUTH_MODE=local
+BOOTSTRAP_SUPERADMIN_EMAIL=admin@local.test
+```
+
+Leave `FIREBASE_PROJECT_ID` and the `VITE_FIREBASE_*` empty (the server refuses to start with both modes, the web build fails), then `docker compose up -d --build`. The first login of the bootstrap email becomes superadmin; add the other local emails from `/dashboard` (no email is sent in this mode). Changing `LOCAL_AUTH_SECRET` signs everyone out.
 
 ### Option 2: backing services in Docker, app on the host (hot reload)
 
@@ -167,6 +178,7 @@ Copy `.env.example` to `.env` and fill in only what you need. Every variable is 
 | Recording | `RECORDING_GCS_BUCKET` | `/recordings/*` answers 503 |
 | CORS | `ALLOWED_ORIGIN` | `*` |
 | Auth | `FIREBASE_PROJECT_ID` (server), `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_AUTH_DOMAIN` (client) | no login |
+| Local auth (local/test only) | `LOCAL_AUTH_USERS`, `LOCAL_AUTH_SECRET` (server), `VITE_AUTH_MODE=local` (client) | Firebase or no login, as above |
 | Directory | `DATABASE_URL`, `DATABASE_SSL_CA_FILE`, `BOOTSTRAP_SUPERADMIN_EMAIL`, `IDENTITY_ADMIN_CREDENTIALS`, `IDENTITY_ADMIN_USE_METADATA` | no roles, invitations, spaces or desks; with `DATABASE_URL` but no CA file, a plain (non-TLS) connection |
 
 With auth and the directory both on, login fails closed (issue #72): only accounts that already have a row in `users` get in. The one exception is the first login of `BOOTSTRAP_SUPERADMIN_EMAIL` while no superadmin exists, which creates that superadmin; everyone else is added from `/dashboard`.

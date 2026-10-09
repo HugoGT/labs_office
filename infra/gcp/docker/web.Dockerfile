@@ -19,6 +19,10 @@
 # despues, con su FIREBASE_PROJECT_ID puesto, pero el usuario solo veria una
 # oficina rota sin saber por que. Fallar aqui, en el build, es mas barato.
 #
+# VITE_AUTH_MODE=local es solo para el stack local (docker-compose.yml de la
+# raiz): el login usa las cuentas de LOCAL_AUTH_USERS del servidor en vez de
+# Firebase. El despliegue nunca la pasa, y no se combina con VITE_FIREBASE_*.
+#
 # La apiKey no es un secreto: Firebase la publica en el bundle por diseno y no
 # autoriza nada por si sola. Quien decide quien entra son las cuentas del
 # proyecto y la verificacion del ID token en server/src/verifyIdToken.ts.
@@ -48,6 +52,9 @@ ENV VITE_FIREBASE_API_KEY=${VITE_FIREBASE_API_KEY}
 ENV VITE_FIREBASE_PROJECT_ID=${VITE_FIREBASE_PROJECT_ID}
 ENV VITE_FIREBASE_AUTH_DOMAIN=${VITE_FIREBASE_AUTH_DOMAIN}
 
+ARG VITE_AUTH_MODE
+ENV VITE_AUTH_MODE=${VITE_AUTH_MODE}
+
 # `vite build` solo, no `pnpm build`. Los dos pasos de `tsc` que lleva ese
 # script tienen `noEmit: true`: son comprobacion de tipos, no generan nada, y
 # esa comprobacion ya la hace .github/workflows/ci.yml en cada push. Repetirla
@@ -69,7 +76,16 @@ RUN set -eu; \
   if [ -n "${VITE_FIREBASE_PROJECT_ID:-}" ] && [ -z "${VITE_FIREBASE_API_KEY:-}" ]; then \
     echo "VITE_FIREBASE_PROJECT_ID sin VITE_FIREBASE_API_KEY: define las dos o ninguna" >&2; exit 1; \
   fi; \
-  if [ -z "${VITE_FIREBASE_API_KEY:-}" ]; then \
+  case "${VITE_AUTH_MODE:-}" in \
+    ''|firebase|local) ;; \
+    *) echo "VITE_AUTH_MODE solo admite firebase o local" >&2; exit 1 ;; \
+  esac; \
+  if [ "${VITE_AUTH_MODE:-}" = "local" ] && [ -n "${VITE_FIREBASE_API_KEY:-}${VITE_FIREBASE_PROJECT_ID:-}" ]; then \
+    echo "VITE_AUTH_MODE=local con VITE_FIREBASE_*: elige un modo de login" >&2; exit 1; \
+  fi; \
+  if [ "${VITE_AUTH_MODE:-}" = "local" ]; then \
+    echo "AVISO: VITE_AUTH_MODE=local, login con cuentas locales (solo para uso local)" >&2; \
+  elif [ -z "${VITE_FIREBASE_API_KEY:-}" ]; then \
     echo "AVISO: sin VITE_FIREBASE_*, el SPA se construye sin pantalla de login" >&2; \
   fi; \
   pnpm exec vite build
