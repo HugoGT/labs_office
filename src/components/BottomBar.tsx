@@ -194,12 +194,6 @@ export function BottomBar({
           ) : room ? (
             <>
               🔒 Sala privada: <b>{room}</b>
-              {recording && (
-                <>
-                  {' | '}
-                  <span className={styles.recDot} /> REC
-                </>
-              )}
             </>
           ) : (
             <>
@@ -207,6 +201,14 @@ export function BottomBar({
             </>
           )}
         </div>
+        {/* Its own segment, outside the ellipsized line: a long room name
+            never cuts it, and it gets the bar's separator, not a typed pipe. */}
+        {!dnd && room && recording && (
+          <div className={styles.rec}>
+            <span className={styles.recDot} />
+            REC
+          </div>
+        )}
         {/* Connected says nothing here: who is online, and how many, lives in
             the sidebar roster. Only a broken session earns a spot in the bar. */}
         {presence.state !== 'connected' && (

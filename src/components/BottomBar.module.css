@@ -189,8 +189,19 @@
 }
 
 
-/* Same separator the old row had, only when a connection indicator follows. */
-.status + .presence {
+.rec {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+
+/* Same separator the old row had, only when another indicator follows. */
+.status + .rec,
+.status + .presence,
+.rec + .presence {
   padding-left: 10px;
   border-left: 1px solid #2b3444;
 }

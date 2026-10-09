@@ -552,8 +552,15 @@ describe('BottomBar: indicador de grabacion junto a "Sala privada" (#85)', () =>
   it('muestra REC junto al nombre de la sala mientras se graba', () => {
     renderBar({ room: 'Sala de Juntas', recording: true });
 
-    const line = screen.getByText(/Sala privada/);
-    expect(line).toHaveTextContent(/^🔒 Sala privada: Sala de Juntas \| REC$/);
+    expect(screen.getByText(/Sala privada/)).toHaveTextContent(/^🔒 Sala privada: Sala de Juntas$/);
+    expect(screen.getByText('REC')).toBeInTheDocument();
+  });
+
+  it('separa REC con la linea del bar, nunca con un pipe escrito', () => {
+    renderBar({ room: 'Sala de Juntas', recording: true });
+
+    const status = screen.getByRole('group', { name: 'Estado' });
+    expect(status).not.toHaveTextContent('|');
   });
 
   it('deja de mostrar REC apenas la grabacion termina, sin desmontar la linea', () => {
