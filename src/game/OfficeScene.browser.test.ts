@@ -49,6 +49,7 @@ import {
 } from './officeRoomClient';
 import { OFFICE_SCENE_KEY, OfficeScene, type OfficeSceneOptions } from './OfficeScene';
 import { ARRIVE_EPSILON_PX, beginAutoWalk, type AutoWalkState } from './autoWalk';
+import { SIT_LOCK_MS } from './autoSit';
 import { followBounds } from './cameraBounds';
 import { zoomView, type ZoomStore, type ZoomView } from './mapZoom';
 
@@ -815,7 +816,7 @@ function findPlayer(scene: Phaser.Scene): CharacterContainer {
 }
 
 /** Codigos de tecla legacy (`keyCode`), que es lo que Phaser's Key matching usa internamente. */
-const KEY = { RIGHT: 39, LEFT: 37, DOWN: 40, D: 68 } as const;
+const KEY = { RIGHT: 39, LEFT: 37, DOWN: 40, D: 68, E: 69 } as const;
 
 function dispatchKey(type: 'keydown' | 'keyup', keyCode: number): KeyboardEvent {
   const event = new KeyboardEvent(type, { bubbles: true, cancelable: true } as KeyboardEventInit);
@@ -3658,6 +3659,162 @@ describe('OfficeScene: persisted character ids (art migration, step 5)', () => {
   });
 });
 
+/**
+ * Push-to-sit: walking into a free chair from right next to it sits the
+ * player, then movement is locked for `SIT_LOCK_MS`; after that the held key
+ * stands the player up without sitting again at once. There is no E key.
+ */
+describe('OfficeScene: push-to-sit', () => {
+  type Arena = Awaited<ReturnType<typeof movementArena>>;
+  const SEAT = BASE_MAP_SEATS[0]!;
+  const GROUND = { x: (SEAT.tx + 0.5) * TILE, y: (SEAT.ty + 0.5) * TILE };
+  const sitLock = (arena: Arena) => (arena.scene as unknown as { sitLockUntil: number | null }).sitLockUntil;
+
+  /** On the tile north of the chair, its feet 14 px above the chair ground point. */
+  function besideChair(arena: Arena) {
+    arena.body.reset(GROUND.x, GROUND.y - TILE);
+  }
+
+  /** Holds the down arrow (toward the chair) until the player sits, at most a few frames. */
+  function pushIntoChair(arena: Arena) {
+    besideChair(arena);
+    arena.movement.cursors.down.isDown = true;
+    for (let i = 0; i < 10 && arena.player.seatFacing === null; i++) arena.frame();
+  }
+
+  it('pushing into a free chair from the next tile sits on it and stops the walk', async () => {
+    const arena = await movementArena();
+    pushIntoChair(arena);
+
+    expect(arena.player.seatFacing).toBe(SEAT.facing);
+    expect(feetOf(arena.player)).toEqual(GROUND);
+    expect(arena.body.velocity.length()).toBe(0);
+    expect(arena.movement.walkingMs).toBe(0);
+  });
+
+  it('E next to a chair does nothing any more', async () => {
+    const arena = await movementArena();
+    besideChair(arena);
+    dispatchKey('keydown', KEY.E);
+    try {
+      arena.walk(200);
+    } finally {
+      dispatchKey('keyup', KEY.E);
+    }
+    expect(arena.player.seatFacing).toBeNull();
+  });
+
+  it('walking past a row of chairs, next to them, does not sit', async () => {
+    const arena = await movementArena();
+    besideChair(arena);
+    arena.movement.cursors.right.isDown = true;
+    arena.walk(400);
+
+    expect(arena.player.seatFacing).toBeNull();
+    expect(arena.player.x).toBeGreaterThan(GROUND.x + 2 * TILE);
+  });
+
+  it('double-click walking onto a chair does not sit', async () => {
+    const arena = await movementArena();
+    arena.body.reset(GROUND.x, GROUND.y - 3 * TILE);
+    arena.doubleClick(GROUND.x, GROUND.y - 18);
+    for (let i = 0; i < 200 && arena.movement.autoWalk !== undefined; i++) arena.frame();
+
+    expect(arena.movement.autoWalk).toBeUndefined();
+    expect(arena.player.seatFacing).toBeNull();
+  });
+
+  it('locks movement for SIT_LOCK_MS, then the held key stands up and walks away without sitting again', async () => {
+    const arena = await movementArena();
+    pushIntoChair(arena);
+    const seated = { x: arena.player.x, y: arena.player.y };
+
+    arena.walk(SIT_LOCK_MS - 100);
+    expect(arena.player.seatFacing).toBe(SEAT.facing);
+    expect({ x: arena.player.x, y: arena.player.y }).toEqual(seated);
+
+    arena.walk(200);
+    expect(arena.player.seatFacing).toBeNull();
+    expect(arena.player.y).toBeGreaterThan(seated.y);
+    expect(sitLock(arena)).toBeNull();
+
+    // Still held: the chair just left is ignored, not sat on again.
+    arena.walk(60);
+    expect(arena.player.seatFacing).toBeNull();
+  });
+
+  it('a released key lifts the re-sit guard: a fresh push into the chair sits again', async () => {
+    const arena = await movementArena();
+    pushIntoChair(arena);
+    arena.walk(SIT_LOCK_MS + 60);
+    expect(arena.player.seatFacing).toBeNull();
+
+    arena.movement.cursors.down.isDown = false;
+    arena.frame();
+    arena.movement.cursors.up.isDown = true;
+    for (let i = 0; i < 10 && arena.player.seatFacing === null; i++) arena.frame();
+    expect(arena.player.seatFacing).toBe(SEAT.facing);
+  });
+
+  it('asks the room for the seat once and only its confirmation seats the player', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    besideChair(arena);
+    arena.movement.cursors.down.isDown = true;
+    for (let i = 0; i < 10 && connector.sits.length === 0; i++) arena.frame();
+    expect(connector.sits).toEqual([mapSeatId(0)]);
+    expect(arena.player.seatFacing).toBeNull();
+
+    // Locked while the answer is on its way: the held key moves nothing.
+    const asked = { x: arena.player.x, y: arena.player.y };
+    arena.walk(200);
+    expect({ x: arena.player.x, y: arena.player.y }).toEqual(asked);
+    expect(connector.sits).toEqual([mapSeatId(0)]);
+
+    connector.handlers()!.onLocalSeat?.(mapSeatId(0));
+    expect(feetOf(arena.player)).toEqual(GROUND);
+  });
+
+  it('a refused request never locks longer than SIT_LOCK_MS', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    besideChair(arena);
+    arena.movement.cursors.down.isDown = true;
+    for (let i = 0; i < 10 && connector.sits.length === 0; i++) arena.frame();
+    const asked = arena.player.y;
+
+    arena.walk(SIT_LOCK_MS + 60);
+    expect(arena.player.y).toBeGreaterThan(asked);
+    expect(connector.stands()).toBe(1);
+    expect(connector.sits).toEqual([mapSeatId(0)]);
+  });
+
+  it('the room standing the player up, or a position reset, ends the lock at once', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    const handlers = connector.handlers()!;
+    pushIntoChair(arena);
+    handlers.onLocalSeat?.(mapSeatId(0));
+    expect(sitLock(arena)).not.toBeNull();
+    handlers.onLocalSeat?.(null);
+    expect(sitLock(arena)).toBeNull();
+    const stoodAt = arena.player.y;
+    arena.frame();
+    expect(arena.player.y).toBeGreaterThan(stoodAt);
+
+    // Far from the chair, then a fresh push into it, and a reset during the lock.
+    arena.movement.cursors.down.isDown = false;
+    arena.frame();
+    pushIntoChair(arena);
+    expect(sitLock(arena)).not.toBeNull();
+    handlers.onPositionReset?.(remoteSnapshot({ sessionId: 'mi-sesion', x: 500, y: 600 }));
+    expect(sitLock(arena)).toBeNull();
+    arena.movement.cursors.down.isDown = true;
+    arena.frame();
+    expect(arena.player.y).toBeGreaterThan(600);
+  });
+});
+
 describe('OfficeScene: pack characters, walking and seats (art migration, step 6)', () => {
   const CHAIR_INDEX = 0;
   const CHAIR = BASE_MAP_SEATS[CHAIR_INDEX];
@@ -3738,7 +3895,7 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
     expect(connector.sent.at(-1)).toMatchObject(position);
   });
 
-  it('E next to a free chair asks the room to sit; only the confirmation seats the player on it', async () => {
+  it('toggleSeat next to a free chair asks the room to sit; only the confirmation seats the player on it', async () => {
     const { connector, scene, player } = await connected();
     nextToChair(player);
     await advanceGameClock(scene, 50);
@@ -3759,7 +3916,7 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
     }, LOOP_WAIT);
   });
 
-  it('pressing E again stands up; walking stands up too', async () => {
+  it('toggleSeat again stands up; walking stands up too', async () => {
     const { connector, scene, player } = await connected();
     const bridge = (scene as unknown as { bridge: ReturnType<typeof createOfficeBridge> }).bridge;
     nextToChair(player);

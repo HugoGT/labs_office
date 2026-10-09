@@ -11,6 +11,7 @@ import {
 } from './artPlacement';
 import { feetOf, positionForFeet } from './avatarGeometry';
 import { beginAutoWalk, isAutoWalkArrived, stepAutoWalk, type AutoWalkState } from './autoWalk';
+import { IDLE_AUTO_SIT, SIT_LOCK_MS, guardLeftSeat, sitLockActive, stepAutoSit, type AutoSitState } from './autoSit';
 import { planWalk } from './pathfinding';
 import { registerClick, type ClickSample } from './doubleClick';
 import { CameraPanLayer } from './CameraPanLayer';
@@ -223,10 +224,6 @@ interface ResolvedSeat {
 /** How long a sit request waits for the room before it is forgotten. */
 const SEAT_ANSWER_MS = 2000;
 
-/** Hint over the seat in reach (Spanish UI copy). */
-const SIT_HINT = 'E · Sentarse';
-const STAND_HINT = 'E · Levantarse';
-
 interface WasdKeys {
   W: Phaser.Input.Keyboard.Key;
   A: Phaser.Input.Keyboard.Key;
@@ -293,8 +290,6 @@ export class OfficeScene extends Phaser.Scene {
   private player!: CharacterContainer;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WasdKeys;
-  /** Sit or stand (step 6). Not captured: E has no browser default to block. */
-  private sitKey?: Phaser.Input.Keyboard.Key;
   /**
    * The seat the room confirmed for the local player, or `null` standing
    * (step 6). Only `onLocalSeat` sets it: a request alone never seats anyone.
@@ -302,8 +297,14 @@ export class OfficeScene extends Phaser.Scene {
   private seat: ResolvedSeat | null = null;
   /** Seat asked for and not answered yet; moving forgets it. */
   private pendingSeat: string | null = null;
-  /** Created the first time a seat comes in reach, so a scene far from any chair adds no text. */
-  private seatHint?: Phaser.GameObjects.Text;
+  /** Push-to-sit dwell and re-sit guard (`autoSit.ts`), fed the keyboard every frame. */
+  private autoSit: AutoSitState = IDLE_AUTO_SIT;
+  /**
+   * Game time until which movement input is ignored after a push-to-sit
+   * request (`SIT_LOCK_MS`), or `null`. Started on the request, so a refused
+   * one never locks longer either.
+   */
+  private sitLockUntil: number | null = null;
   /** Last `characterportraits` payload, so an unchanged set is not re-sent. */
   private lastPortraitsKey = '';
   private readonly portraitCache = new Map<string, string>();
@@ -446,6 +447,7 @@ export class OfficeScene extends Phaser.Scene {
   private clickPair: ClickSample | null = null;
 
   private readonly resetWalking = (): void => {
+    this.autoSit = { push: null, guard: this.autoSit.guard };
     this.walkingMs = 0;
     this.walkingIdleMs = 0;
     this.lastWalkFrame = undefined;
@@ -893,7 +895,6 @@ export class OfficeScene extends Phaser.Scene {
             if (!current()) return;
             this.localPositionReady = false;
             for (const key of [...Object.values(this.cursors), ...Object.values(this.wasd)]) key.reset();
-            this.sitKey?.reset();
             this.adoptLocalPosition(snapshot);
             this.proximityTick();
           },
@@ -956,6 +957,8 @@ export class OfficeScene extends Phaser.Scene {
     if (this.localPositionReady) return;
     this.resetWalking();
     this.pendingSeat = null;
+    this.autoSit = IDLE_AUTO_SIT;
+    this.sitLockUntil = null;
     this.leaveSeat();
     const body = this.player.body as Phaser.Physics.Arcade.Body;
     body.reset(snapshot.x, snapshot.y);
@@ -1082,6 +1085,22 @@ export class OfficeScene extends Phaser.Scene {
    * offer what the room would refuse.
    */
   private seatInReach(): ResolvedSeat | null {
+    const feet = feetOf(this.player);
+    let best: ResolvedSeat | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const seat of this.freeSeats()) {
+      if (!inSeatReach(this.player, seat.reach)) continue;
+      const distance = Math.hypot(seat.ground.x - feet.x, seat.ground.y - feet.y);
+      if (distance < bestDistance) {
+        best = seat;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
+
+  /** Every seat no peer sits on, map chairs and the desks this player may use. */
+  private freeSeats(): ResolvedSeat[] {
     const taken = new Set<string>();
     for (const sessionId of this.remotes?.sessionIds() ?? []) {
       const seat = this.remotes?.get(sessionId)?.seat;
@@ -1095,21 +1114,10 @@ export class OfficeScene extends Phaser.Scene {
     for (const desk of this.desks) {
       if (desk.occupant === null || desk.mine) candidates.push(this.deskSeat(desk));
     }
-    const feet = feetOf(this.player);
-    let best: ResolvedSeat | null = null;
-    let bestDistance = Number.POSITIVE_INFINITY;
-    for (const seat of candidates) {
-      if (taken.has(seat.id) || !inSeatReach(this.player, seat.reach)) continue;
-      const distance = Math.hypot(seat.ground.x - feet.x, seat.ground.y - feet.y);
-      if (distance < bestDistance) {
-        best = seat;
-        bestDistance = distance;
-      }
-    }
-    return best;
+    return candidates.filter((seat) => !taken.has(seat.id));
   }
 
-  /** E, or the `toggleSeat` command: stand when seated, else ask for the seat in reach. */
+  /** The `toggleSeat` command: stand when seated, else ask for the seat in reach. */
   private toggleSeat(): void {
     if (!this.localPositionReady) return;
     if (this.seat !== null || this.pendingSeat !== null) {
@@ -1117,7 +1125,36 @@ export class OfficeScene extends Phaser.Scene {
       return;
     }
     const seat = this.seatInReach();
-    if (seat === null) return;
+    if (seat !== null) this.requestSeat(seat);
+  }
+
+  /**
+   * One frame of push-to-sit while standing (`autoSit.ts`): walking into a
+   * free chair from next to it stops the walk, asks for the chair and locks
+   * movement for `SIT_LOCK_MS`. Returns whether it asked, so the frame's
+   * movement is dropped.
+   */
+  private pushToSit(time: number, vx: number, vy: number): boolean {
+    if (this.seat !== null || this.pendingSeat !== null || !this.localPositionReady || this.layoutEditing) {
+      this.autoSit = { push: null, guard: this.autoSit.guard };
+      return false;
+    }
+    const step = stepAutoSit(this.autoSit, {
+      nowMs: time,
+      feet: feetOf(this.player),
+      input: { vx, vy },
+      candidates: this.freeSeats().map((seat) => ({ ...seat, inReach: inSeatReach(this.player, seat.reach) })),
+    });
+    this.autoSit = step.state;
+    const seat = step.sit;
+    if (seat === null) return false;
+    this.resetWalking();
+    this.sitLockUntil = time + SIT_LOCK_MS;
+    this.requestSeat(seat);
+    return true;
+  }
+
+  private requestSeat(seat: ResolvedSeat): void {
     this.pendingSeat = seat.id;
     // Offline nobody else can see or contest the seat, so it is taken here.
     if (!this.connection) {
@@ -1126,7 +1163,7 @@ export class OfficeScene extends Phaser.Scene {
     }
     this.connection.sendSit(seat.id);
     // The room refuses without a word; after a while the request is
-    // forgotten, so the next E asks again instead of standing up.
+    // forgotten, so the next request asks again instead of standing up.
     this.time.delayedCall(SEAT_ANSWER_MS, () => {
       if (this.pendingSeat === seat.id) this.pendingSeat = null;
     });
@@ -1142,6 +1179,8 @@ export class OfficeScene extends Phaser.Scene {
   private onLocalSeat(seatId: string | null): void {
     if (seatId === null) {
       this.pendingSeat = null;
+      this.autoSit = { push: null, guard: this.autoSit.guard };
+      this.sitLockUntil = null;
       this.leaveSeat();
       return;
     }
@@ -1165,9 +1204,16 @@ export class OfficeScene extends Phaser.Scene {
     this.connection?.sendMove(stand.x, stand.y, seat.facing);
   }
 
-  /** Stands the local player up and tells the room (E again, walking, a teleport). */
+  /**
+   * Stands the local player up and tells the room (`toggleSeat` again,
+   * walking, a teleport). The seat left is guarded, so the key that stood the
+   * player up does not sit them on it again at once.
+   */
   private standUp(): void {
     if (this.seat === null && this.pendingSeat === null) return;
+    const left = this.seat?.id ?? this.pendingSeat;
+    if (left !== null) this.autoSit = guardLeftSeat(left);
+    this.sitLockUntil = null;
     this.pendingSeat = null;
     this.leaveSeat();
     this.connection?.sendStand();
@@ -1178,32 +1224,6 @@ export class OfficeScene extends Phaser.Scene {
     this.seat = null;
     this.player.seatFacing = null;
     (this.player.body as Phaser.Physics.Arcade.Body).checkCollision.none = false;
-  }
-
-  /** Keeps the E hint over the seat in reach, or over the own seat while seated. */
-  private updateSeatHint(): void {
-    const seat = this.seat ?? (this.pendingSeat === null ? this.seatInReach() : null);
-    if (seat === null) {
-      this.seatHint?.setVisible(false);
-      return;
-    }
-    if (this.seatHint === undefined) {
-      this.seatHint = this.add
-        .text(0, 0, SIT_HINT, {
-          fontFamily: 'Cantarell, Noto Sans, DejaVu Sans, Segoe UI, sans-serif',
-          fontSize: '11px',
-          color: '#f9fafb',
-          backgroundColor: '#111827cc',
-          padding: { x: 6, y: 3 },
-        })
-        .setOrigin(0.5, 1)
-        .setDepth(MINIMAP_MARKER_DEPTH - 1);
-      this.minimapCamera?.ignore(this.seatHint);
-    }
-    this.seatHint
-      .setText(this.seat === null ? SIT_HINT : STAND_HINT)
-      .setPosition(seat.ground.x, seat.ground.y - 64)
-      .setVisible(true);
   }
 
   /**
@@ -1803,7 +1823,6 @@ export class OfficeScene extends Phaser.Scene {
     this.cursors = keyboard.createCursorKeys();
     this.wasd = keyboard.addKeys('W,A,S,D') as WasdKeys;
     keyboard.addCapture('UP,DOWN,LEFT,RIGHT,SPACE');
-    this.sitKey = keyboard.addKey('E', false);
 
     // `focusin`/`focusout` (a diferencia de `focus`/`blur`) burbujean, asi que
     // un solo listener en `window` ve cualquier campo de la pagina, sin
@@ -1981,9 +2000,12 @@ export class OfficeScene extends Phaser.Scene {
     else if (this.cursors.down.isDown || (wasdActive && this.wasd.S.isDown)) vy = 1;
     if (this.layoutEditing || !this.localPositionReady) { vx = 0; vy = 0; }
 
-    // Step 6: E sits or stands, and walking stands up first.
-    if (this.sitKey !== undefined && wasdActive && Phaser.Input.Keyboard.JustDown(this.sitKey)) this.toggleSeat();
+    // Push-to-sit: right after asking for a seat the keys move nothing, then
+    // walking stands up first; walking into a free chair sits.
+    if (sitLockActive(this.sitLockUntil, time)) { vx = 0; vy = 0; }
+    else this.sitLockUntil = null;
     if (vx !== 0 || vy !== 0) this.standUp();
+    if (this.pushToSit(time, vx, vy)) { vx = 0; vy = 0; }
 
     const from = { x: this.player.x, y: this.player.y };
     const gap = this.lastWalkFrame === undefined ? delta : time - this.lastWalkFrame;
@@ -2014,7 +2036,6 @@ export class OfficeScene extends Phaser.Scene {
       avatar.lastX = avatar.x;
       avatar.lastY = avatar.y;
     }
-    this.updateSeatHint();
     if (this.localPositionReady && this.connectionState === 'connected') {
       this.connection?.sendMove(this.player.x, this.player.y, this.facing);
     }
