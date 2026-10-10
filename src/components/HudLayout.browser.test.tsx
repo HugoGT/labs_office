@@ -127,6 +127,32 @@ describe('HUD layout: bottom bar (#87)', () => {
     expect(box(info).left - box(controls).right).toBeLessThanOrEqual(16.5);
   });
 
+  it('on wide screens every separator has the same space on each side (#186)', async () => {
+    await page.viewport(WIDE, 800);
+    const { me, controls, info } = renderBar({
+      room: 'Sala 1',
+      recording: true,
+      presence: { online: false, peers: 0, state: 'offline', canRetry: false },
+    });
+    const buttons = controls.querySelectorAll('button');
+    const status = info.children[0]!;
+    const rec = screen.getByText('REC');
+    const presence = screen.getByText(/Sin servidor/);
+    const recDot = rec.firstElementChild!;
+    const presenceText = document.createRange();
+    presenceText.selectNodeContents(presence);
+
+    // A separator is a 1px border: the gap before it and the padding after it.
+    const reference = box(controls).left - box(me).right;
+    expect(box(buttons[0]!).left - box(controls).left - 1).toBeCloseTo(reference, 0);
+    expect(box(controls).right - 1 - box(buttons[buttons.length - 1]!).right).toBeCloseTo(reference, 0);
+    expect(box(info).left - box(controls).right).toBeCloseTo(reference, 0);
+    expect(box(rec).left - box(status).right).toBeCloseTo(reference, 0);
+    expect(box(recDot).left - box(rec).left - 1).toBeCloseTo(reference, 0);
+    expect(box(presence).left - box(rec).right).toBeCloseTo(reference, 0);
+    expect(presenceText.getBoundingClientRect().left - box(presence).left - 1).toBeCloseTo(reference, 0);
+  });
+
   it('on wide screens the bar height does not depend on the indicator text (#67)', async () => {
     await page.viewport(WIDE, 800);
     const short = box(renderBar().bar).height;
