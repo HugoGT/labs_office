@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
 import { MINIMAP_MARKER_RADIUS_PX, MinimapLayer, type MinimapLayerOptions } from './MinimapLayer';
 
@@ -67,6 +67,12 @@ function layerOptions(scene: HostScene, overrides: Partial<MinimapLayerOptions> 
     marker: scene.marker,
     ...overrides,
   };
+}
+
+function fakePointer(
+  overrides: Partial<{ x: number; y: number; button: number; camera: Phaser.Cameras.Scene2D.Camera }> = {},
+): Phaser.Input.Pointer {
+  return { x: 0, y: 0, button: 0, camera: undefined, ...overrides } as unknown as Phaser.Input.Pointer;
 }
 
 /** One real frame: the camera's `preRender` clamps the scroll and updates `worldView`. */
@@ -143,5 +149,77 @@ describe('MinimapLayer: framed on the terrain region', () => {
 
     layer.setRegion({ x: 0, y: 0, width: 4800, height: 200 });
     expect(scene.marker.radius * scene.minimap.zoom).toBeCloseTo(MINIMAP_MARKER_RADIUS_PX, 6);
+  });
+});
+
+describe('MinimapLayer: drag and click', () => {
+  // Zoom 100/480: the minimap shows 240 of the 1200 world px tall region.
+  const TALL = { x: 0, y: 0, width: 480, height: 1200 };
+
+  it('a drag scrolls a region taller than the minimap, never past its edges, and is no click', async () => {
+    const scene = await bootHostScene();
+    const onFocus = vi.fn();
+    new MinimapLayer(layerOptions(scene, { region: TALL, center: { x: 0, y: 600 }, onFocus }));
+    renderFrame(scene);
+    const map = scene.minimap;
+
+    scene.input.emit('pointerdown', fakePointer({ x: 250, y: 25, camera: map }), []);
+    // 20 screen px up is 96 world px down the region.
+    scene.input.emit('pointermove', fakePointer({ x: 250, y: 5, camera: map }));
+    renderFrame(scene);
+    expect(map.worldView.centerY).toBeCloseTo(600 + 20 * (TALL.width / MAP.width), 0);
+
+    scene.input.emit('pointermove', fakePointer({ x: 250, y: -500 }));
+    renderFrame(scene);
+    expect(map.worldView.bottom).toBeCloseTo(TALL.height, 0);
+
+    scene.input.emit('pointerup', fakePointer({ x: 250, y: -500 }));
+    expect(onFocus).not.toHaveBeenCalled();
+  });
+
+  it('a click focuses the world point under the pointer', async () => {
+    const scene = await bootHostScene();
+    const onFocus = vi.fn();
+    new MinimapLayer(layerOptions(scene, { region: TALL, center: { x: 0, y: 600 }, onFocus }));
+    renderFrame(scene);
+
+    // The minimap's screen middle (250, 25) is the band's middle (240, 600).
+    scene.input.emit('pointerdown', fakePointer({ x: 250, y: 25, camera: scene.minimap }), []);
+    scene.input.emit('pointerup', fakePointer({ x: 251, y: 25 }));
+
+    expect(onFocus).toHaveBeenCalledTimes(1);
+    expect(onFocus.mock.calls[0]![0].x).toBeCloseTo(240, 0);
+    expect(onFocus.mock.calls[0]![0].y).toBeCloseTo(600, 0);
+  });
+
+  it('ignores the secondary button, presses over the main camera and a release outside the canvas', async () => {
+    const scene = await bootHostScene();
+    const onFocus = vi.fn();
+    new MinimapLayer(layerOptions(scene, { region: TALL, center: { x: 0, y: 600 }, onFocus }));
+    renderFrame(scene);
+    const before = scene.minimap.scrollY;
+
+    scene.input.emit('pointerdown', fakePointer({ x: 250, y: 25, button: 2, camera: scene.minimap }), []);
+    scene.input.emit('pointermove', fakePointer({ x: 250, y: 0 }));
+    scene.input.emit('pointerup', fakePointer({ x: 250, y: 0 }));
+    scene.input.emit('pointerdown', fakePointer({ x: 50, y: 50, camera: scene.cameras.main }), []);
+    scene.input.emit('pointerup', fakePointer({ x: 50, y: 50 }));
+    scene.input.emit('pointerdown', fakePointer({ x: 250, y: 25, camera: scene.minimap }), []);
+    scene.input.emit('pointerupoutside', fakePointer({ x: 250, y: 25 }));
+
+    expect(scene.minimap.scrollY).toBe(before);
+    expect(onFocus).not.toHaveBeenCalled();
+  });
+
+  it('destroy() removes its listeners', async () => {
+    const scene = await bootHostScene();
+    const onFocus = vi.fn();
+    const layer = new MinimapLayer(layerOptions(scene, { region: TALL, center: { x: 0, y: 600 }, onFocus }));
+    layer.destroy();
+
+    scene.input.emit('pointerdown', fakePointer({ x: 250, y: 25, camera: scene.minimap }), []);
+    scene.input.emit('pointerup', fakePointer({ x: 250, y: 25 }));
+
+    expect(onFocus).not.toHaveBeenCalled();
   });
 });

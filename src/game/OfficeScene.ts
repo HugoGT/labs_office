@@ -639,7 +639,6 @@ export class OfficeScene extends Phaser.Scene {
       target: this.player,
       lerp: FOLLOW_LERP,
       region: this.cameraRegion(),
-      minimap: this.minimapCamera,
       isSuspended: () => this.layoutEditing || !this.localPositionReady,
     });
 
@@ -806,6 +805,7 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeCollisionEdit?.();
       this.collisionEditLayer?.destroy();
       this.cameraPanLayer?.destroy();
+      this.minimapLayer?.destroy();
       this.cameraZoomLayer?.destroy();
       this.remotes?.clear();
       this.roster?.clear();
@@ -1931,6 +1931,8 @@ export class OfficeScene extends Phaser.Scene {
       region: this.cameraRegion(),
       center: { x: this.player.x, y: this.player.y },
       marker: this.mmMarker,
+      // The pan layer is created later in `create()`; it exists by the first click.
+      onFocus: (point) => this.cameraPanLayer?.focus(point),
     });
 
     this.scale.on('resize', (gameSize: Phaser.Structs.Size) => {
