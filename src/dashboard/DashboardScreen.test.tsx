@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AdminError, type AdminPort, type AdminSession } from './adminPort';
 import { DashboardScreen } from './DashboardScreen';
 
@@ -597,5 +597,127 @@ describe('DashboardScreen: an email that already has an account (#125)', () => {
 
     await screen.findByRole('region', { name: /cuenta creada/i });
     expect(within(tarjeta(/nuevo usuario/i)).queryByRole('status')).not.toBeInTheDocument();
+  });
+});
+
+describe('DashboardScreen: giving access back', () => {
+  it('a revoked guest restored by re-inviting says the access was renewed, not created', async () => {
+    const user = userEvent.setup();
+    const admin = fakeAdmin({
+      createInvitation: vi.fn(async () => ({
+        id: 'inv-1',
+        email: 'externo@example.com',
+        expiresAt: '2026-09-24T00:00:00.000Z',
+        emailSent: true,
+        outcome: 'restored' as const,
+      })),
+    });
+    render(<DashboardScreen admin={admin} />);
+    await screen.findByRole('region', { name: /^invitaciones$/i });
+
+    await invitar(user, 'externo@example.com', '7');
+
+    const panel = within(
+      await screen.findByRole('region', { name: /acceso renovado para externo@example.com/i }),
+    );
+    expect(panel.getByText(/su contraseña de antes vuelve a servir/i)).toBeInTheDocument();
+    expect(panel.getByText(/el acceso caduca el 24\/09\/2026/i)).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: /cuenta creada/i })).not.toBeInTheDocument();
+  });
+
+  it('inviting revoked staff explains where to give the access back', async () => {
+    const user = userEvent.setup();
+    const admin = fakeAdmin({
+      createInvitation: vi.fn(async () => {
+        throw new AdminError('revoked-staff');
+      }),
+    });
+    render(<DashboardScreen admin={admin} />);
+    await screen.findByRole('region', { name: /^invitaciones$/i });
+
+    await invitar(user, 'ex-empleada@example.com', '7');
+
+    expect(await within(tarjeta(/^invitaciones$/i)).findByRole('alert')).toHaveTextContent(
+      /Renovar acceso/,
+    );
+  });
+
+  afterEach(() => {
+    // jsdom has no `scrollIntoView`; the test that installs one removes it.
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  });
+
+  it('a guest to renew fills the invitation email and focuses the days', async () => {
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    render(
+      <DashboardScreen
+        admin={fakeAdmin()}
+        renewTarget={{ email: 'externo@example.com', role: 'guest', requestId: 1 }}
+      />,
+    );
+    const card = within(await screen.findByRole('region', { name: /^invitaciones$/i }));
+
+    expect(card.getByLabelText(/correo/i)).toHaveValue('externo@example.com');
+    expect(card.getByLabelText(/días/i)).toHaveFocus();
+    expect(scrolled).toHaveBeenCalled();
+    expect(within(tarjeta(/nuevo usuario/i)).getByLabelText(/correo/i)).toHaveValue('');
+  });
+
+  it('staff to renew fills "Crear usuario" with the email and the previous role', async () => {
+    const admin = fakeAdmin({ session: vi.fn(async () => ({ ...ADMIN, role: 'superadmin' as const })) });
+    render(
+      <DashboardScreen
+        admin={admin}
+        renewTarget={{ email: 'ex-admin@example.com', role: 'admin', requestId: 1 }}
+      />,
+    );
+    const card = within(await screen.findByRole('region', { name: /nuevo usuario/i }));
+
+    expect(card.getByLabelText(/correo/i)).toHaveValue('ex-admin@example.com');
+    expect(card.getByLabelText(/rol/i)).toHaveValue('admin');
+    expect(card.getByLabelText(/rol/i)).toHaveFocus();
+    expect(within(tarjeta(/^invitaciones$/i)).getByLabelText(/correo/i)).toHaveValue('');
+  });
+
+  it('asking again for the same person fills the form again', async () => {
+    const user = userEvent.setup();
+    const target = { email: 'externo@example.com', role: 'guest' as const, requestId: 1 };
+    const { rerender } = render(<DashboardScreen admin={fakeAdmin()} renewTarget={target} />);
+    const card = within(await screen.findByRole('region', { name: /^invitaciones$/i }));
+    await user.clear(card.getByLabelText(/correo/i));
+
+    rerender(<DashboardScreen admin={fakeAdmin()} renewTarget={{ ...target, requestId: 2 }} />);
+
+    expect(card.getByLabelText(/correo/i)).toHaveValue('externo@example.com');
+    expect(card.getByLabelText(/días/i)).toHaveFocus();
+  });
+
+  it('tells the panels below when an account changed, and not when nothing did', async () => {
+    const user = userEvent.setup();
+    const onAccountsChanged = vi.fn();
+    const createUser = vi
+      .fn<AdminPort['createUser']>()
+      .mockResolvedValueOnce({ id: 'u', email: 'nadia@example.com', role: 'employee', outcome: 'unchanged' })
+      .mockResolvedValueOnce({
+        id: 'n',
+        email: 'nueva@example.com',
+        role: 'employee',
+        emailSent: true,
+        outcome: 'created',
+      });
+    render(<DashboardScreen admin={fakeAdmin({ createUser })} onAccountsChanged={onAccountsChanged} />);
+    await screen.findByRole('region', { name: /nuevo usuario/i });
+
+    await darDeAlta(user, 'nadia@example.com');
+    await within(tarjeta(/nuevo usuario/i)).findByRole('status');
+    expect(onAccountsChanged).not.toHaveBeenCalled();
+
+    await darDeAlta(user, 'nueva@example.com');
+    await screen.findByRole('region', { name: /cuenta creada/i });
+    expect(onAccountsChanged).toHaveBeenCalledTimes(1);
+
+    await invitar(user, 'otro@example.com', '7');
+    await vi.waitFor(() => expect(onAccountsChanged).toHaveBeenCalledTimes(2));
   });
 });

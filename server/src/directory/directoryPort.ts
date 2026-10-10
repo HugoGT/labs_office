@@ -89,6 +89,18 @@ export interface ConvertToStaffInput {
   actorId: string;
 }
 
+export interface RestoreInvitationInput {
+  /** New duration from now, 1..90 like `createInvitation`. */
+  days: number;
+  /**
+   * Identity Platform uid of the account: the row's own, re-enabled, or a new
+   * one when that account was deleted by hand.
+   */
+  uid: string;
+  /** id (no uid) of the admin giving access back. */
+  actorId: string;
+}
+
 export interface InvitationRow extends DirectoryUser {
   /** Email de quien invito, resuelto por JOIN. null si no se puede resolver. */
   invitedByEmail: string | null;
@@ -137,6 +149,16 @@ export interface UserDirectory {
    * no existe o no es una invitacion (`invitedBy` nulo).
    */
   renewInvitation(id: string, days: number): Promise<DirectoryUser | null>;
+  /**
+   * Gives a REVOKED guest its access back in place: same id, inviter and
+   * createdAt; `status = 'active'`, `expiresAt` = now + `days` (replacing, like
+   * `renewInvitation`), the given `uid`, plus a `restore-invitation` audit
+   * entry, atomically. Unlike renewing, this IS a new decision about who gets
+   * in, so it is audited. Returns null when the row is gone or is no longer a
+   * revoked guest invitation. Throws `InvalidInvitationError` for days outside
+   * 1..90. WHO may restore whom is `canRemove`, checked by the route.
+   */
+  restoreInvitation(id: string, input: RestoreInvitationInput): Promise<DirectoryUser | null>;
   /**
    * Alta de alguien de casa: sin caducidad y sin `invited_by`. Esos dos nulos
    * son lo que lo separa de `createInvitation`, y no son cosmeticos -- sin

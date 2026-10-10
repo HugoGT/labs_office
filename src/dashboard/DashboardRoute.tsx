@@ -4,7 +4,7 @@ import { resolveOfficeEndpoint } from '../game/officeEndpoint';
 import { createAdminClient, resolveAdminBaseUrl } from './adminClient';
 import type { AdminPort } from './adminPort';
 import { createUsersAdminClient } from './usersAdminClient';
-import type { UsersAdminPort } from './usersAdminPort';
+import type { AdminUser, UsersAdminPort } from './usersAdminPort';
 import { UsersPanel } from './UsersPanel';
 import { ArtUploadPanel } from './ArtUploadPanel';
 import { createArtUploadClient } from './artUploadClient';
@@ -12,7 +12,7 @@ import type { ArtUploadPort } from './artUploadPort';
 import { ArtReviewPanel } from './ArtReviewPanel';
 import { createArtReviewClient } from './artReviewClient';
 import type { ArtReviewPort } from './artReviewPort';
-import { DashboardScreen } from './DashboardScreen';
+import { DashboardScreen, type RenewTarget } from './DashboardScreen';
 import styles from './DashboardScreen.module.css';
 import { resolveOfficeApiBaseUrl } from './officeApiBaseUrl';
 
@@ -99,6 +99,20 @@ export default function DashboardRoute({ session, fetchImpl }: DashboardRoutePro
     };
   });
 
+  // The users table and the forms are siblings under `DashboardScreen`, so
+  // the little they share lives here: which row to renew (the forms fill
+  // themselves from it) and a counter the forms bump so the table re-reads.
+  const [renewTarget, setRenewTarget] = useState<RenewTarget | null>(null);
+  const [usersVersion, setUsersVersion] = useState(0);
+
+  function handleRenew(user: AdminUser): void {
+    setRenewTarget((previous) => ({
+      email: user.email,
+      role: user.role,
+      requestId: (previous?.requestId ?? 0) + 1,
+    }));
+  }
+
   if (session === null) {
     /**
      * Sin autenticacion no hay panel posible, y decirlo es mejor que una
@@ -137,10 +151,14 @@ export default function DashboardRoute({ session, fetchImpl }: DashboardRoutePro
    * `DashboardScreen` vale para todo lo que cuelgue de ella.
    */
   return (
-    <DashboardScreen admin={ports.admin}>
+    <DashboardScreen
+      admin={ports.admin}
+      renewTarget={renewTarget}
+      onAccountsChanged={() => setUsersVersion((version) => version + 1)}
+    >
       {/* First of the extra panels: who is in the office is what an admin
           looks for right after the invitations (#93). */}
-      <UsersPanel users={ports.users} />
+      <UsersPanel users={ports.users} onRenew={handleRenew} version={usersVersion} />
       <ArtReviewPanel reviews={ports.reviews} />
       <ArtUploadPanel uploads={ports.uploads} />
     </DashboardScreen>

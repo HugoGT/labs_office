@@ -15,6 +15,7 @@ const SERVED_EMPLOYEE = {
   expiresAt: null,
   daysLeft: null,
   removable: true,
+  renewable: false,
 };
 
 const SERVED_GUEST = {
@@ -27,6 +28,7 @@ const SERVED_GUEST = {
   expiresAt: '2026-02-01T00:00:00.000Z',
   daysLeft: 0,
   removable: false,
+  renewable: true,
 };
 
 function fakeResponse(status: number, body: unknown): Response {
@@ -79,6 +81,7 @@ describe('createUsersAdminClient (#93)', () => {
       { ...SERVED_EMPLOYEE, role: 'owner' },
       { ...SERVED_EMPLOYEE, status: 'gone' },
       { ...SERVED_EMPLOYEE, removable: 'yes' },
+      { ...SERVED_EMPLOYEE, renewable: 'yes' },
       { ...SERVED_EMPLOYEE, id: '' },
       null,
     ]) {
@@ -86,6 +89,15 @@ describe('createUsersAdminClient (#93)', () => {
       expect(await codeOf(clientWith(fetchImpl).listUsers())).toBe('unknown');
     }
     expect(await codeOf(clientWith(fetchWith(200, { nope: [] })).listUsers())).toBe('unknown');
+  });
+
+  it('a row from a server without renewable reads as not renewable', async () => {
+    const { renewable: _renewable, ...older } = SERVED_GUEST;
+    const fetchImpl = fetchWith(200, { users: [older] });
+
+    const [user] = await clientWith(fetchImpl).listUsers();
+
+    expect(user.renewable).toBe(false);
   });
 
   it('POST /admin/users/{id}/revoke escapes the id', async () => {

@@ -49,6 +49,12 @@ export interface CreatedInvitation {
   email: string;
   expiresAt: string;
   emailSent: boolean;
+  /**
+   * `restored`: the email belonged to a REVOKED guest, and that same row got
+   * its access back until `expiresAt`, with its account re-enabled (its
+   * previous password works again). Absent for a new or renewed invitation.
+   */
+  outcome?: 'restored';
 }
 
 /**
@@ -126,6 +132,12 @@ export type AdminErrorCode =
   | 'forbidden'
   | 'invalid-request'
   | 'conflict'
+  /**
+   * Inviting someone who was staff and had their access taken away. Its own
+   * code and not `conflict`: it is fixed with "Renovar acceso" in the users
+   * table (or "Crear usuario"), never by inviting them as a guest.
+   */
+  | 'revoked-staff'
   /** El id ya no esta: otra persona lo quito entre la lectura y el clic. */
   | 'not-found'
   /**

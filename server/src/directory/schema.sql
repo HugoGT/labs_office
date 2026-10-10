@@ -62,7 +62,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_single_superadmin ON users ((role))
 CREATE TABLE IF NOT EXISTS audit_log (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   actor_id uuid REFERENCES users(id),
-  action text NOT NULL CHECK (action IN ('invite', 'revoke', 'create-user', 'revoke-user', 'convert-user', 'upload-art', 'submit-art', 'approve-art', 'reject-art', 'retire-art')),
+  action text NOT NULL CHECK (action IN ('invite', 'revoke', 'create-user', 'revoke-user', 'convert-user', 'restore-invitation', 'upload-art', 'submit-art', 'approve-art', 'reject-art', 'retire-art')),
   subject_id uuid REFERENCES users(id),
   created_at timestamptz NOT NULL DEFAULT now()
 );
@@ -80,11 +80,13 @@ CREATE TABLE IF NOT EXISTS audit_log (
 -- 'revoke-user' (#93) is its own action and not 'revoke': taking access away
 -- from staff is a different decision from withdrawing an invitation, and the
 -- trail has to tell them apart. 'convert-user' (#125) records an existing
--- row turned into staff by "Crear usuario" (a guest, or revoked staff). The '*-art' actions (#122) record the art
+-- row turned into staff by "Crear usuario" (a guest, or revoked staff).
+-- 'restore-invitation' records a revoked guest given access back by
+-- re-inviting its email. The '*-art' actions (#122) record the art
 -- catalog: an Admin upload, a contribution, its review and its withdrawal;
 -- their subject is a piece (`piece_id`, added after `art_pieces` below).
 ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_action_check;
-ALTER TABLE audit_log ADD CONSTRAINT audit_log_action_check CHECK (action IN ('invite', 'revoke', 'create-user', 'revoke-user', 'convert-user', 'upload-art', 'submit-art', 'approve-art', 'reject-art', 'retire-art'));
+ALTER TABLE audit_log ADD CONSTRAINT audit_log_action_check CHECK (action IN ('invite', 'revoke', 'create-user', 'revoke-user', 'convert-user', 'restore-invitation', 'upload-art', 'submit-art', 'approve-art', 'reject-art', 'retire-art'));
 
 -- El panel consulta el rastro por sujeto ("quien invito a esta persona"), no
 -- recorriendo la tabla entera.

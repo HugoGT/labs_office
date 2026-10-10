@@ -117,6 +117,8 @@ const IDENTITY_UNAVAILABLE: AdminResult = {
 };
 const INTERNAL: AdminResult = { status: 500, body: { error: 'internal' } };
 const CONFLICT: AdminResult = { status: 409, body: { error: 'conflict' } };
+/** Inviting revoked staff: "Crear usuario" restores them, never as a guest. */
+const REVOKED_STAFF: AdminResult = { status: 409, body: { error: 'revoked-staff' } };
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -448,10 +450,25 @@ export async function handleCreateInvitation(
     return unchangedAccount(existing);
   }
 
-  // Any other row (a revoked guest or revoked staff) answers 409 HERE, before
-  // asking Identity Platform for an account: creating first is how #125 piled
-  // up orphan accounts, since the insert then hit the unique email. Giving
-  // such a row access back is "Crear usuario", which converts it.
+  // A revoked guest gets its access back in the same row: re-inviting its
+  // email is how the admin says "let them in again".
+  if (
+    existing !== null &&
+    existing.status === 'revoked' &&
+    existing.role === 'guest' &&
+    existing.invitedBy !== null
+  ) {
+    return restoreRevokedInvitation(existing, days as number, authorized.user, identityAdmin, deps);
+  }
+
+  // Revoked staff is never downgraded to a guest: their access comes back
+  // through "Crear usuario", which converts the row, and this code lets the
+  // panel say so. Any other row answers 409 too. Both HERE, before asking
+  // Identity Platform for an account: creating first is how #125 piled up
+  // orphan accounts, since the insert then hit the unique email.
+  if (existing !== null && existing.status === 'revoked' && existing.role !== 'guest') {
+    return REVOKED_STAFF;
+  }
   if (existing !== null) return CONFLICT;
 
   let uid: string;
@@ -686,9 +703,10 @@ function unchangedAccount(user: DirectoryUser): AdminResult {
  *   4. convert the row (`convertToStaff`, with its audit entry);
  *   5. send the password-reset email.
  *
- * A failed save after re-enabling (not creating) does NOT disable the
- * account: it is the row's own, and disabling it would lock out an active
- * guest. The row still decides access, so a revoked or expired row stays out.
+ * A failed save undoes step 3 exactly (`reactivateAccount`): a created
+ * account is disabled, a re-enabled one is disabled again only when the row
+ * was revoked, since disabling an active guest's own account would lock it
+ * out. The row still decides access, so a revoked or expired row stays out.
  */
 async function convertExistingUser(
   existing: DirectoryUser,
@@ -703,31 +721,9 @@ async function convertExistingUser(
 
   if (!canRemove(actor, existing)) return FORBIDDEN;
 
-  let uid = existing.uid;
-  if (uid !== null) {
-    try {
-      await identityAdmin.enableAccount(uid);
-    } catch (error) {
-      if (!(error instanceof IdentityAdminError && error.code === 'user-not-found')) {
-        logger(deps)(`could not re-enable uid=${uid} (${existing.email}) in Identity Platform`);
-        return IDENTITY_UNAVAILABLE;
-      }
-      logger(deps)(`uid=${uid} (${existing.email}) no longer exists in Identity Platform; creating it again`);
-      uid = null;
-    }
-  }
-
-  let createdUid: string | null = null;
-  if (uid === null) {
-    try {
-      createdUid = await identityAdmin.createAccount(existing.email, generatePassword());
-    } catch (error) {
-      if (error instanceof IdentityAdminError && error.code === 'email-exists') return CONFLICT;
-      logger(deps)(`no se pudo crear la cuenta de ${existing.email} en Identity Platform`);
-      return IDENTITY_UNAVAILABLE;
-    }
-    uid = createdUid;
-  }
+  const account = await reactivateAccount(existing, identityAdmin, deps);
+  if (!account.ok) return account.result;
+  const { uid } = account;
 
   let converted: DirectoryUser | null;
   try {
@@ -738,18 +734,7 @@ async function convertExistingUser(
 
   if (converted === null) {
     logger(deps)(`could not convert ${existing.email} (id=${existing.id}) to ${role}`);
-    if (createdUid !== null) {
-      // Same orphan and same compensation as `handleCreateUser`.
-      try {
-        await identityAdmin.disableAccount(createdUid);
-        logger(deps)(`cuenta huerfana uid=${createdUid} desactivada por compensacion`);
-      } catch {
-        logger(deps)(
-          `FALLO LA COMPENSACION: la cuenta uid=${createdUid} (${existing.email}) sigue activa en ` +
-            `Identity Platform y no tiene fila en el directorio; hay que desactivarla a mano en GCP`,
-        );
-      }
-    }
+    await account.undo();
     return INTERNAL;
   }
 
@@ -763,6 +748,154 @@ async function convertExistingUser(
       role: converted.role,
       emailSent,
       outcome: 'converted',
+    },
+  };
+}
+
+type ReactivatedAccount =
+  | { ok: true; uid: string; undo: () => Promise<void> }
+  | { ok: false; result: AdminResult };
+
+/**
+ * Gives an existing row's Identity Platform account back (#125), shared by
+ * converting to staff and restoring a revoked invitation: re-enable the row's
+ * own account, or, deleted by hand in GCP (or a row without uid), create it
+ * again. Revocation only disables the account, so a re-enabled one keeps the
+ * person's previous password.
+ *
+ * `undo` is what the caller runs when saving the row then fails, the exact
+ * inverse of what happened here:
+ *   - an account created here is the orphan of `handleCreateUser`: disabled,
+ *     never deleted, with the uid in the log if even that fails;
+ *   - an account re-enabled for a REVOKED row is disabled again, as the
+ *     revocation left it;
+ *   - an account re-enabled for an active or expired row was never disabled,
+ *     so it stays: disabling it would lock out an active guest, and the row
+ *     still decides access.
+ */
+async function reactivateAccount(
+  existing: DirectoryUser,
+  identityAdmin: IdentityAdmin,
+  deps: AdminDeps,
+): Promise<ReactivatedAccount> {
+  let uid = existing.uid;
+  if (uid !== null) {
+    try {
+      await identityAdmin.enableAccount(uid);
+    } catch (error) {
+      if (!(error instanceof IdentityAdminError && error.code === 'user-not-found')) {
+        logger(deps)(`could not re-enable uid=${uid} (${existing.email}) in Identity Platform`);
+        return { ok: false, result: IDENTITY_UNAVAILABLE };
+      }
+      logger(deps)(`uid=${uid} (${existing.email}) no longer exists in Identity Platform; creating it again`);
+      uid = null;
+    }
+  }
+
+  if (uid !== null) {
+    const enabledUid = uid;
+    const wasDisabled = existing.status === 'revoked';
+    return {
+      ok: true,
+      uid: enabledUid,
+      async undo() {
+        if (!wasDisabled) return;
+        try {
+          await identityAdmin.disableAccount(enabledUid);
+        } catch {
+          logger(deps)(
+            `could not disable uid=${enabledUid} (${existing.email}) again after a failed save: ` +
+              `its row is still revoked, but the account has to be disabled by hand in GCP`,
+          );
+        }
+      },
+    };
+  }
+
+  let createdUid: string;
+  try {
+    // Same throwaway password as the invitation flow: see the comment there.
+    createdUid = await identityAdmin.createAccount(existing.email, generatePassword());
+  } catch (error) {
+    if (error instanceof IdentityAdminError && error.code === 'email-exists') {
+      return { ok: false, result: CONFLICT };
+    }
+    logger(deps)(`no se pudo crear la cuenta de ${existing.email} en Identity Platform`);
+    return { ok: false, result: IDENTITY_UNAVAILABLE };
+  }
+
+  return {
+    ok: true,
+    uid: createdUid,
+    async undo() {
+      // Same orphan and same compensation as `handleCreateUser`.
+      try {
+        await identityAdmin.disableAccount(createdUid);
+        logger(deps)(`cuenta huerfana uid=${createdUid} desactivada por compensacion`);
+      } catch {
+        logger(deps)(
+          `FALLO LA COMPENSACION: la cuenta uid=${createdUid} (${existing.email}) sigue activa en ` +
+            `Identity Platform y no tiene fila en el directorio; hay que desactivarla a mano en GCP`,
+        );
+      }
+    },
+  };
+}
+
+/**
+ * "Invitaciones" on the email of a REVOKED guest: its access comes back in the
+ * same row instead of a 409 nobody could act on. Same order as
+ * `convertExistingUser`, each step failing before the next leaves something
+ * half done:
+ *
+ *   1. `canRemove`: giving access back is the same decision as taking it
+ *      away, so it follows the revoke rule (403);
+ *   2. reactivate the Identity Platform account (`reactivateAccount`);
+ *   3. reactivate the row with the new expiry (`restoreInvitation`, with its
+ *      `restore-invitation` audit entry); null means it stopped being a
+ *      revoked guest meanwhile (404, like the renewal branch);
+ *   4. send the password-reset email, only a notice here: the previous
+ *      password works again.
+ */
+async function restoreRevokedInvitation(
+  existing: DirectoryUser,
+  days: number,
+  actor: DirectoryUser,
+  identityAdmin: IdentityAdmin,
+  deps: AdminDeps,
+): Promise<AdminResult> {
+  if (!canRemove(actor, existing)) return FORBIDDEN;
+
+  const account = await reactivateAccount(existing, identityAdmin, deps);
+  if (!account.ok) return account.result;
+
+  let restored: DirectoryUser | null;
+  try {
+    restored = await deps.directory.restoreInvitation(existing.id, {
+      days,
+      uid: account.uid,
+      actorId: actor.id,
+    });
+  } catch {
+    logger(deps)(`could not restore the invitation of ${existing.email} (id=${existing.id})`);
+    await account.undo();
+    return INTERNAL;
+  }
+
+  if (restored === null) {
+    await account.undo();
+    return NOT_FOUND;
+  }
+
+  const emailSent = await sendResetEmail(identityAdmin, { email: restored.email, uid: account.uid }, deps);
+  return {
+    status: 201,
+    body: {
+      id: restored.id,
+      email: restored.email,
+      expiresAt: toIso(restored.expiresAt),
+      emailSent,
+      outcome: 'restored',
     },
   };
 }
@@ -885,6 +1018,12 @@ export async function handleRevokeInvitation(
   return { status: 200, body: { id: revoked.id, status: 'revoked' } };
 }
 
+/** A row whose access the panel can give back: revoked, or an expired guest. */
+function isRenewable(row: DirectoryUser, now: Date): boolean {
+  const access = decideAccess(row, now);
+  return access === 'revoked' || (access === 'expired' && row.role === 'guest');
+}
+
 /**
  * Every user of the directory, for the users table of the panel (#93).
  *
@@ -893,6 +1032,7 @@ export async function handleRevokeInvitation(
  * caller on the server, so the panel shows the button from the very rule that
  * the revoke route enforces instead of a client copy that could drift. It is
  * only a hint for the screen; `handleRevokeUser` checks the rule again.
+ * `renewable` follows the same rule for the "Renovar acceso" button.
  */
 function toUserBody(row: DirectoryUser, actor: DirectoryUser, now: Date): Record<string, unknown> {
   return {
@@ -905,6 +1045,7 @@ function toUserBody(row: DirectoryUser, actor: DirectoryUser, now: Date): Record
     expiresAt: toIso(row.expiresAt),
     daysLeft: daysLeft(row.expiresAt, now),
     removable: row.status === 'active' && canRemove(actor, row),
+    renewable: canRemove(actor, row) && isRenewable(row, now),
   };
 }
 

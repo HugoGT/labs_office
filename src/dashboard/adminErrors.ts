@@ -23,6 +23,9 @@ const MESSAGES: Readonly<Record<AdminErrorCode, string>> = {
   // al mover algo que ya existe lo es igual.
   'invalid-request': 'El servidor no aceptó esos datos.',
   conflict: 'Ese correo ya tiene una cuenta.',
+  // Says how to fix it: staff come back as staff, never as a guest.
+  'revoked-staff':
+    'Esa persona era del equipo y tiene el acceso quitado: no se le invita. Usa «Renovar acceso» en Usuarios para devolvérselo con su rol.',
   // No dice "no se encontró": el dato que se mando estaba bien cuando se leyo
   // la lista. Lo que cambio fue el servidor, y decirlo asi evita que quien
   // administra revise unas coordenadas que no tenian nada de malo.

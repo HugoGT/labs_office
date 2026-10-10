@@ -248,6 +248,38 @@ describe('createAdminClient: traduccion de estados', () => {
     });
   }
 
+  it("a 409 'revoked-staff' keeps its own code: the panel explains how to restore staff", async () => {
+    const client = clientWith(fetchWith(409, { error: 'revoked-staff' }));
+
+    expect(await codeOf(client.createInvitation('a@example.com', 7))).toBe('revoked-staff');
+  });
+
+  it('a 409 whose body is not JSON is still a conflict', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 409,
+      json: async () => {
+        throw new SyntaxError('not json');
+      },
+    })) as unknown as typeof fetch;
+    const client = clientWith(fetchImpl);
+
+    expect(await codeOf(client.createInvitation('a@example.com', 7))).toBe('conflict');
+  });
+
+  it('passes the restored outcome of a revoked guest through', async () => {
+    const restored = {
+      id: 'inv-1',
+      email: 'a@example.com',
+      expiresAt: '2026-02-01T00:00:00.000Z',
+      emailSent: true,
+      outcome: 'restored',
+    };
+    const client = clientWith(fetchWith(201, restored));
+
+    expect(await client.createInvitation('a@example.com', 7)).toEqual(restored);
+  });
+
   it('las tres operaciones traducen igual, no solo la sesion', async () => {
     const client = clientWith(fetchWith(403, {}));
 
