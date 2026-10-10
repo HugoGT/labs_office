@@ -1,8 +1,10 @@
+import type { CameraFilter } from '../game/cameraFilter';
 import type { OfficeEventMap } from '../game/officeBridge';
 import { DO_NOT_DISTURB, PRESENCE_STATUSES, type PresenceStatus } from '../game/officeProtocol';
 import { STATUS_EMOJI, STATUS_LABEL, statusCssColor } from '../game/presence';
 import { useHeightCssVar } from '../hooks/useHeightCssVar';
 import styles from './BottomBar.module.css';
+import { CameraFilterMenu } from './CameraFilterMenu';
 
 export interface BottomBarProps {
   /**
@@ -45,6 +47,11 @@ export interface BottomBarProps {
    */
   recordableMedia: boolean;
   onToggleScreenShare: () => void;
+  /** Filter applied to the own camera before publishing (background blur). */
+  cameraFilter: CameraFilter;
+  /** This browser can blur: without it the option is shown disabled. */
+  cameraBlurAvailable: boolean;
+  onChangeCameraFilter: (filter: CameraFilter) => void;
 }
 
 /** Explica el `disabled` de mic/camara cuando no hay conexion viva a LiveKit. */
@@ -98,6 +105,9 @@ export function BottomBar({
   screenShareAvailable,
   recordableMedia,
   onToggleScreenShare,
+  cameraFilter,
+  cameraBlurAvailable,
+  onChangeCameraFilter,
 }: BottomBarProps) {
   // Se deriva del estado en vez de recibirse como prop propia: dos fuentes
   // para el mismo hecho acabarian discrepando en algun render.
@@ -155,16 +165,33 @@ export function BottomBar({
         >
           {micOn ? '🎙️ Mic' : '🔇 Mic'}
         </button>
-        <button
-          type="button"
-          className={styles.btn}
-          aria-pressed={camOn}
-          disabled={audioDisabled}
-          title={audioTitle}
-          onClick={onToggleCam}
-        >
-          {camOn ? '📷 Cámara' : '🚫 Cámara'}
-        </button>
+        {/* Split button: the caret's filter menu belongs to the camera. */}
+        <span className={styles.split}>
+          <button
+            type="button"
+            className={`${styles.btn} ${styles.splitMain}`}
+            aria-pressed={camOn}
+            disabled={audioDisabled}
+            title={audioTitle}
+            onClick={onToggleCam}
+          >
+            {/* Segoe UI Emoji (Windows) draws this one glyph low on the line. */}
+            {camOn ? (
+              <>
+                <span className={styles.liftedIcon}>📷</span> Cámara
+              </>
+            ) : (
+              '🚫 Cámara'
+            )}
+          </button>
+          <CameraFilterMenu
+            filter={cameraFilter}
+            blurAvailable={cameraBlurAvailable}
+            disabled={audioDisabled}
+            disabledTitle={audioTitle}
+            onChange={onChangeCameraFilter}
+          />
+        </span>
         <button
           type="button"
           className={styles.btn}

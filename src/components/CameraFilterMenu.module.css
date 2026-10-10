@@ -1,0 +1,98 @@
+/* The menu opens above the caret, over the camera button it belongs to. */
+.anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+/*
+ * Second half of a split button with the camera button (`BottomBar.splitMain`):
+ * same box as the bar's `.btn`, its left corners squared to join it. No left
+ * border: the camera button's right border is the divider, so that button
+ * keeps a symmetric box and its content stays centered.
+ */
+.caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #1f2937;
+  color: #9ca3af;
+  border: 1px solid #374151;
+  border-left: none;
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  /* Same height as `.btn`: 6px padding around a 13px/normal line. */
+  padding: 6px 8px;
+  font-size: 13px;
+  line-height: normal;
+  cursor: pointer;
+}
+
+.caret:hover:not(:disabled),
+.caret[aria-expanded='true'] {
+  color: #e5e7eb;
+  border-color: #4b5563;
+}
+
+.caret:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.caret:focus-visible,
+.item:focus-visible {
+  outline: 2px solid #4ade80;
+  outline-offset: 1px;
+}
+
+.menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 150px;
+  padding: 6px;
+  background: #111827f2;
+  border: 1px solid #2b3444;
+  border-radius: var(--radius-panel);
+  box-shadow: 0 8px 30px #0009;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: transparent;
+  color: #e5e7eb;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Fixed slot for the check, so both labels line up whichever is active. */
+.item::before {
+  content: '';
+  width: 12px;
+  color: #4ade80;
+}
+
+.item[aria-checked='true']::before {
+  content: '\2713';
+}
+
+.item:hover:not(:disabled) {
+  background: #1f2937;
+  border-color: #374151;
+}
+
+.item:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}

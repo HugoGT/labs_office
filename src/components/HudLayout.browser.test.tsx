@@ -101,6 +101,9 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
       screenShareAvailable
       recordableMedia
       onToggleScreenShare={vi.fn()}
+      cameraFilter="none"
+      cameraBlurAvailable
+      onChangeCameraFilter={vi.fn()}
       {...overrides}
     />,
   );
@@ -139,6 +142,60 @@ describe('HUD layout: bottom bar (#87)', () => {
 
     expect(box(controls).top).toBeGreaterThanOrEqual(box(me).bottom);
     expect(box(controls).top).toBeGreaterThanOrEqual(box(info).bottom);
+  });
+});
+
+/**
+ * Where a button's icon and label sit inside its border box: the gap on each
+ * side. Measured on the text (a Range), not the glyphs, so it holds without
+ * an emoji font too.
+ */
+function contentGaps(button: Element) {
+  const range = document.createRange();
+  range.selectNodeContents(button);
+  const content = range.getBoundingClientRect();
+  const outer = box(button);
+  return {
+    left: content.left - outer.left,
+    right: outer.right - content.right,
+    top: content.top - outer.top,
+    bottom: outer.bottom - content.bottom,
+  };
+}
+
+describe('HUD layout: camera filter caret', () => {
+  it('joins the camera button at its height, and its menu opens above it, on screen', async () => {
+    for (const width of [WIDE, NARROW, VERY_SMALL]) {
+      await page.viewport(width, 800);
+      renderBar();
+      const camera = screen.getByRole('button', { name: /Cámara/ });
+      const caret = screen.getByRole('button', { name: 'Opciones de cámara' });
+
+      expect(box(caret).height).toBeCloseTo(box(camera).height, 0);
+      expect(box(caret).top).toBeCloseTo(box(camera).top, 0);
+      expect(box(caret).left).toBeCloseTo(box(camera).right, 0);
+
+      // The caret must not cost the camera its centering: icon and label sit
+      // exactly as in "Mic", the plain button next to it.
+      const mic = contentGaps(screen.getByRole('button', { name: /Mic/ }));
+      const cam = contentGaps(camera);
+      expect(cam.left).toBeCloseTo(cam.right, 1);
+      expect(cam.left).toBeCloseTo(mic.left, 1);
+      expect(cam.right).toBeCloseTo(mic.right, 1);
+      // Vertically the line is Mic's, except the active camera emoji lifted
+      // 2px on purpose (Segoe UI Emoji draws it low).
+      expect(cam.bottom).toBeCloseTo(mic.bottom, 1);
+      expect(cam.top).toBeCloseTo(mic.top - 2, 1);
+
+      await userEvent.click(caret);
+      const menu = box(screen.getByRole('menu', { name: 'Filtro de cámara' }));
+      expect(menu.bottom).toBeLessThanOrEqual(box(caret).top);
+      expect(menu.top).toBeGreaterThanOrEqual(0);
+      expect(menu.left).toBeGreaterThanOrEqual(0);
+      expect(menu.right).toBeLessThanOrEqual(width);
+      for (const item of screen.getAllByRole('menuitemradio')) expect(hitAtCenter(item)).toBe(item);
+      cleanup();
+    }
   });
 });
 

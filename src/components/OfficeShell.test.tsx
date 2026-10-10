@@ -163,6 +163,9 @@ function proximityAudio(
     localScreenShareTrack: null,
     activeScreenSharer: null,
     recordableMedia: false,
+    cameraFilter: 'none',
+    setCameraFilter: vi.fn(),
+    cameraBlurAvailable: true,
     ...overrides,
   };
 }
@@ -553,6 +556,22 @@ describe('OfficeShell', () => {
 
     expect(toggleMic).toHaveBeenCalledTimes(1);
     expect(toggleCam).not.toHaveBeenCalled();
+  });
+
+  it('the camera filter menu shows the hook filter and sends picks to it', async () => {
+    const user = userEvent.setup();
+    const setCameraFilter = vi.fn();
+    useProximityAudioMock.mockReturnValue(
+      proximityAudio({ audioAvailable: true, cameraFilter: 'blur-strong', cameraBlurAvailable: false, setCameraFilter }),
+    );
+
+    render(<OfficeShell />);
+    await user.click(screen.getByRole('button', { name: 'Opciones de cámara' }));
+
+    expect(screen.getByRole('menuitemradio', { name: 'Desenfoque total' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('menuitemradio', { name: 'Desenfoque total' })).toBeDisabled();
+    await user.click(screen.getByRole('menuitemradio', { name: 'Sin filtro' }));
+    expect(setCameraFilter).toHaveBeenCalledExactlyOnceWith('none');
   });
 
   it('OfficeShell es el unico dueno del bridge: se lo pasa al hook, BottomBar solo recibe props planas', () => {
