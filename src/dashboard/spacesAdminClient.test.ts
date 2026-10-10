@@ -321,42 +321,13 @@ describe('createSpacesAdminClient: como cuenta los fallos', () => {
   });
 });
 
-describe('createSpacesAdminClient: floor chosen at creation (art step 7)', () => {
-  it('sends the chosen floor with the new room, under the names GET /spaces serves', async () => {
+describe('createSpacesAdminClient: a room has no floor of its own (#182)', () => {
+  it('sends only the area, even when the caller still carries a floor', async () => {
     const fetchImpl = fetchWith(201, SERVED_ROOM);
+    const legacy = { name: 'Sala', x: 10, y: 4, w: 6, h: 5, floor: { materialId: 'floor-plain', color: '#2c3e50' } };
 
-    await clientWith(fetchImpl).createSpace({
-      name: 'Sala',
-      x: 10,
-      y: 4,
-      w: 6,
-      h: 5,
-      floor: { materialId: 'floor-plain', color: '#2c3e50' },
-    });
+    await clientWith(fetchImpl).createSpace(legacy as Parameters<ReturnType<typeof clientWith>['createSpace']>[0]);
 
-    expect(sentBody(fetchImpl)).toEqual({
-      name: 'Sala',
-      x: 10,
-      y: 4,
-      w: 6,
-      h: 5,
-      capacity: null,
-      floorMaterialId: 'floor-plain',
-      floorColor: '#2c3e50',
-    });
-  });
-
-  it('a floor without a color sends no color', async () => {
-    const fetchImpl = fetchWith(201, SERVED_ROOM);
-
-    await clientWith(fetchImpl).createSpace({ name: 'Sala', x: 10, y: 4, w: 6, h: 5, floor: { materialId: 'floor-grass', color: null } });
-
-    expect(sentBody(fetchImpl)).toEqual({ name: 'Sala', x: 10, y: 4, w: 6, h: 5, capacity: null, floorMaterialId: 'floor-grass' });
-  });
-
-  it('a refused floor is told by its reason', async () => {
-    const client = clientWith(fetchWith(400, { error: 'invalid-appearance', reason: 'color-not-allowed' }));
-
-    expect(await codeOf(client.createSpace({ name: 'Sala', x: 10, y: 4, w: 6, h: 5 }))).toBe('appearance-color-not-allowed');
+    expect(sentBody(fetchImpl)).toEqual({ name: 'Sala', x: 10, y: 4, w: 6, h: 5, capacity: null });
   });
 });

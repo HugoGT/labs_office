@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { AdminError } from '../dashboard/adminPort';
@@ -6,9 +6,13 @@ import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { AdminSpace, SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import exportedManifest from '../../public/assets/pack/manifest.json?raw';
 import { materialCatalogFrom } from '../game/artMaterials';
-import type { ArtPreviewCache } from '../game/artPreview';
 import { createOfficeBridge } from '../game/officeBridge';
 import { SpaceEditorSection } from './SpaceEditorSection';
+
+// A loaded catalog everywhere: the form must still offer no floor (#182).
+vi.mock('../hooks/useMaterialCatalog', () => ({
+  useMaterialCatalog: () => materialCatalogFrom(JSON.parse(exportedManifest), 'assets/pack/manifest.json'),
+}));
 
 const SALA: AdminSpace = { id: 'id-sala', name: 'Sala grande', x: 10, y: 10, w: 5, h: 5, capacity: 8, kind: 'room' };
 
@@ -271,77 +275,28 @@ describe('SpaceEditorSection (#74, PR4)', () => {
   });
 });
 
-describe('SpaceEditorSection: floor chosen at creation (art step 7)', () => {
-  const catalog = materialCatalogFrom(JSON.parse(exportedManifest), 'assets/pack/manifest.json')!;
-  const noPreview: ArtPreviewCache = { sheet: async () => null };
+describe('SpaceEditorSection: a room only asks for its area, the floor is the terrain (#182)', () => {
+  it('shows no floor picker even with the material catalog loaded, and creates without a floor', async () => {
+    const spaces = fakeSpaces();
+    const bridge = createOfficeBridge();
+    renderSection({ spaces, bridge });
+    await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
+    await screen.findByText('Sala grande');
+    // Let the (mocked, loaded) catalog settle before looking for a picker.
+    await act(async () => {});
 
-  async function fillRoom() {
+    expect(screen.queryByRole('group', { name: 'Suelo de la sala' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Material')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Color')).not.toBeInTheDocument();
+
     await userEvent.type(screen.getByLabelText(/Nombre de la nueva sala/), 'Sala chica');
     await userEvent.type(screen.getByLabelText(/^Ancho$/), '4');
     await userEvent.type(screen.getByLabelText(/^Alto$/), '3');
-  }
-
-  it('creating a room on the plain floor sends its floor material and color', async () => {
-    const spaces = fakeSpaces();
-    const bridge = createOfficeBridge();
-    renderSection({ spaces, bridge, loadMaterials: async () => catalog, preview: noPreview });
-    await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
-    await screen.findByText('Sala grande');
-
-    expect(await screen.findByLabelText('Material')).toHaveValue('floor-wood');
-    expect(screen.getByRole('group', { name: 'Suelo de la sala' })).toBeInTheDocument();
-    await fillRoom();
-    await userEvent.selectOptions(screen.getByLabelText('Material'), 'floor-plain');
-    fireEvent.input(screen.getByLabelText('Color'), { target: { value: '#2c3e50' } });
     await userEvent.click(screen.getByRole('button', { name: /Colocar nueva sala/ }));
     act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
 
     await waitFor(() =>
-      expect(spaces.createSpace).toHaveBeenCalledWith({
-        name: 'Sala chica',
-        x: 1,
-        y: 2,
-        w: 4,
-        h: 3,
-        capacity: null,
-        floor: { materialId: 'floor-plain', color: '#2c3e50' },
-      }),
+      expect(spaces.createSpace).toHaveBeenCalledWith({ name: 'Sala chica', x: 1, y: 2, w: 4, h: 3, capacity: null }),
     );
-  });
-
-  it('a floor with its own look sends no color', async () => {
-    const spaces = fakeSpaces();
-    const bridge = createOfficeBridge();
-    renderSection({ spaces, bridge, loadMaterials: async () => catalog, preview: noPreview });
-    await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
-    await screen.findByText('Sala grande');
-
-    await fillRoom();
-    await userEvent.selectOptions(await screen.findByLabelText('Material'), 'floor-grass');
-    expect(screen.queryByLabelText('Color')).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: /Colocar nueva sala/ }));
-    act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
-
-    await waitFor(() =>
-      expect(spaces.createSpace).toHaveBeenCalledWith(
-        expect.objectContaining({ floor: { materialId: 'floor-grass', color: null } }),
-      ),
-    );
-  });
-
-  it('a refused floor is told in words', async () => {
-    const spaces = fakeSpaces({
-      createSpace: vi.fn(async () => Promise.reject(new AdminError('appearance-invalid-color'))),
-    });
-    const bridge = createOfficeBridge();
-    renderSection({ spaces, bridge, loadMaterials: async () => catalog, preview: noPreview });
-    await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
-    await screen.findByText('Sala grande');
-
-    await fillRoom();
-    await userEvent.click(screen.getByRole('button', { name: /Colocar nueva sala/ }));
-    act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
-
-    expect(await screen.findByText('El color no es válido: elige uno con la forma #rrggbb.')).toBeInTheDocument();
   });
 });

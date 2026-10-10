@@ -27,7 +27,7 @@
 
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { describeAdminError } from '../dashboard/adminErrors';
-import type { AdminAppearance, AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
+import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { AdminSpace, SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import {
   OFF_STATE,
@@ -54,8 +54,6 @@ export interface SpaceCreateInput {
   h: number;
   /** `null` es "sin limite", un dato real -- ver `spacesAdminPort.ts`. */
   capacity: number | null;
-  /** Chosen here and only here (art step 7); absent, the server stores the pack default floor. */
-  floor?: AdminAppearance;
 }
 
 export interface UseSpaceEditorResult {
@@ -167,7 +165,6 @@ export function useSpaceEditor({
                 w: create.w,
                 h: create.h,
                 capacity: create.capacity,
-                ...(create.floor === undefined ? {} : { floor: create.floor }),
               });
             }
             pendingCreateRef.current = null;
