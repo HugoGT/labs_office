@@ -704,7 +704,11 @@ describe('OfficeShell: llamar a un companero real (issue #2, unit 11, D3/D12)', 
     // D3: React solo pide la invitacion, nunca aprende que "aceptar" implica
     // caminar -- por eso el unico comando que ve esta prueba es `callPeer`.
     expect(commands).toEqual([{ sessionId: 'peer-1' }]);
-    expect(screen.getByText(/Llamando a/)).toBeInTheDocument();
+    const toast = screen.getByText(/Llamando a/);
+    expect(toast).toBeInTheDocument();
+    // #187: the green svg phone, never the red phone emoji.
+    expect(toast.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(toast.textContent).not.toContain('\u{1F4DE}');
     expect(screen.queryByRole('button', { name: /Llamar/ })).not.toBeInTheDocument();
   });
 

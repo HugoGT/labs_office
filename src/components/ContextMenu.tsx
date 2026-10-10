@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { OfficeEventMap } from '../game/officeBridge';
 import { DO_NOT_DISTURB } from '../game/officeProtocol';
 import { statusCssColor } from '../game/presence';
+import { PhoneIcon } from './PhoneIcon';
 import styles from './ContextMenu.module.css';
 
 export type PeerMenuAction = 'call' | 'profile';
@@ -66,7 +67,7 @@ export function ContextMenu({ menu, onAction, onClose }: ContextMenuProps) {
         title={callDisabled ? 'No molestar: no se puede llamar ahora' : undefined}
         onClick={() => onAction('call', menu)}
       >
-        📞 Llamar
+        <PhoneIcon /> Llamar
       </button>
       <button type="button" className={styles.action} onClick={() => onAction('profile', menu)}>
         👤 Ver perfil

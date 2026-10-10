@@ -99,6 +99,14 @@ describe('ContextMenu', () => {
     expect(screen.getByRole('button', { name: /Llamar/ })).toBeDisabled();
   });
 
+  it('"Llamar" draws the green svg phone, not the red phone emoji (#187)', () => {
+    render(<ContextMenu menu={MENU} onAction={vi.fn()} onClose={vi.fn()} />);
+    const call = screen.getByRole('button', { name: 'Llamar' });
+
+    expect(call.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(call.textContent).not.toContain('\u{1F4DE}');
+  });
+
   it('Llamar sigue habilitado para un companero que no esta en No molestar', () => {
     render(<ContextMenu menu={MENU} onAction={vi.fn()} onClose={vi.fn()} />);
 

@@ -46,6 +46,7 @@ import { ExitControls } from './ExitControls';
 import { GameCanvas } from './GameCanvas';
 import type { OfficeEntryState } from './OfficeEntry';
 import { OfficeSidebar } from './OfficeSidebar';
+import { PhoneIcon } from './PhoneIcon';
 import { RecordingReadyStack, type RecordingReadyNotice } from './RecordingReadyStack';
 import { Toast } from './Toast';
 import { VideoTiles } from './VideoTiles';
@@ -722,7 +723,7 @@ export function OfficeShell({
       bridge.emitCommand('callPeer', { sessionId: menu.sessionId });
       setToastMessage(
         <>
-          📞 Llamando a <b>{menu.name}</b>…
+          <PhoneIcon /> Llamando a <b>{menu.name}</b>…
         </>,
       );
       return;

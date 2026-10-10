@@ -1,5 +1,6 @@
 import type { CallInvitationCard as CallInvitationCardData } from '../hooks/useCallInvitations';
 import styles from './CallInvitationCard.module.css';
+import { PhoneIcon } from './PhoneIcon';
 
 export interface CallInvitationCardProps {
   invitation: CallInvitationCardData;
@@ -19,7 +20,7 @@ export function CallInvitationCard({ invitation, onAccept, onDismiss }: CallInvi
       <div className={styles.body}>
         {invitation.callerPresent ? (
           <>
-            📞 <b>{invitation.name}</b> te está llamando
+            <PhoneIcon /> <b>{invitation.name}</b> te está llamando
           </>
         ) : (
           // D7, decision humana #305.5: la notificacion no se descarta al
