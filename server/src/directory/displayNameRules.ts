@@ -27,6 +27,7 @@
  */
 
 import { MAX_NAME_LENGTH } from '../../../src/game/officeProtocol.ts';
+import { stripDisplayNameEmailSuffix } from '../../../src/game/displayName.ts';
 
 export { MAX_NAME_LENGTH };
 
@@ -62,13 +63,12 @@ export class DisplayNameTakenError extends Error {
 const CONTROL_CHAR = /\p{Cc}/u;
 
 /**
- * Colapsa cualquier run de espacio en blanco (incluye tabuladores, saltos de
- * linea y NBSP, que `\s` de JavaScript cubre entero) a un unico espacio,
- * recorta los extremos, y rechaza lo que quede vacio, con caracteres de
- * control, o por encima de `MAX_NAME_LENGTH` medido DESPUES del colapso.
+ * Removes email suffixes, collapses whitespace (including tabs, newlines and
+ * NBSP) and trims the result. Rejects empty names, remaining control characters
+ * and names exceeding `MAX_NAME_LENGTH` after normalization.
  */
 export function canonicalizeDisplayName(raw: string): string {
-  const collapsed = raw.replace(/\s+/g, ' ').trim();
+  const collapsed = stripDisplayNameEmailSuffix(raw).replace(/\s+/g, ' ').trim();
 
   if (collapsed.length === 0) {
     throw new InvalidDisplayNameError('el nombre no puede estar vacio');
