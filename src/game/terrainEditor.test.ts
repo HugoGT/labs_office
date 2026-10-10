@@ -65,6 +65,11 @@ describe('sameBrush', () => {
     expect(sameBrush({ kind: 'wall', piece: null }, { kind: 'wall', piece: null })).toBe(true);
     expect(sameBrush({ kind: 'wall', piece: null }, { kind: 'wall', piece: 'wall-glass' })).toBe(false);
     expect(sameBrush({ kind: 'floor', material: 'void' }, { kind: 'wall', piece: null })).toBe(false);
+    expect(sameBrush({ kind: 'chair', piece: 'chair-wood', facing: 'down' }, { kind: 'chair', piece: 'chair-wood', facing: 'down' })).toBe(true);
+    expect(sameBrush({ kind: 'chair', piece: 'chair-wood', facing: 'down' }, { kind: 'chair', piece: 'chair-wood', facing: 'up' })).toBe(false);
+    expect(sameBrush({ kind: 'chair', piece: 'chair-wood', facing: 'down' }, { kind: 'chair', piece: 'chair-metal', facing: 'down' })).toBe(false);
+    expect(sameBrush({ kind: 'chair', piece: null, facing: 'down' }, { kind: 'wall', piece: null })).toBe(false);
+    expect(sameBrush({ kind: 'wall', piece: null }, { kind: 'chair', piece: null, facing: 'down' })).toBe(false);
     expect(sameBrush(null, undefined)).toBe(true);
     expect(sameBrush(null, { kind: 'wall', piece: null })).toBe(false);
   });

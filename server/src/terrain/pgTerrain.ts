@@ -1,11 +1,12 @@
 /**
  * Postgres adapter of `TerrainStore` (#123 phase 2), on the same minimal `pg`
  * shape (`DirectoryPool`) and the same pool as the other directory-backed
- * features. The tables are `terrain_blocks` and `terrain_walls` in
+ * features. The tables are `terrain_blocks`, `terrain_walls` and `terrain_chairs` in
  * `directory/schema.sql`.
  */
 
 import { isLayoutMaterial, isWallPieceId, type LayoutMaterial, type WallPieceId } from '../../../src/game/officeLayout.ts';
+import { isChairPieceId, isSeatFacing, type PlacedChair } from '../../../src/game/seating.ts';
 import type { DirectoryPool } from '../directory/pgDirectory.ts';
 import type { TerrainStore } from './terrainPort.ts';
 
@@ -66,6 +67,36 @@ export function createPgTerrain(pool: DirectoryPool): TerrainStore {
          ON CONFLICT (tile_index) DO UPDATE
            SET piece_id = EXCLUDED.piece_id, updated_by = EXCLUDED.updated_by, updated_at = now()`,
         [JSON.stringify(edits), actorId],
+      );
+    },
+
+    async loadChairs() {
+      const result = await pool.query('SELECT tile_index, piece_id, facing FROM terrain_chairs');
+      const chairs: PlacedChair[] = [];
+      // Same as the walls: an unreadable row is skipped, not fatal.
+      for (const row of result.rows) {
+        if (Number.isInteger(row.tile_index) && isChairPieceId(row.piece_id) && isSeatFacing(row.facing)) {
+          chairs.push({ index: row.tile_index as number, piece: row.piece_id, facing: row.facing });
+        }
+      }
+      return chairs.sort((a, b) => a.index - b.index);
+    },
+    async saveChairs(edits, actorId) {
+      // One statement, like the walls: removals and placements commit
+      // together, and the tiles of a batch are distinct.
+      const entries = edits.map(({ index, chair }) => ({ index, piece: chair?.piece ?? null, facing: chair?.facing ?? null }));
+      await pool.query(
+        `WITH entries AS (
+           SELECT entry.index, entry.piece, entry.facing FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, piece text, facing text)
+         ),
+         removed AS (
+           DELETE FROM terrain_chairs WHERE tile_index IN (SELECT index FROM entries WHERE piece IS NULL)
+         )
+         INSERT INTO terrain_chairs (tile_index, piece_id, facing, updated_by)
+         SELECT index, piece, facing, $2::uuid FROM entries WHERE piece IS NOT NULL
+         ON CONFLICT (tile_index) DO UPDATE
+           SET piece_id = EXCLUDED.piece_id, facing = EXCLUDED.facing, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+        [JSON.stringify(entries), actorId],
       );
     },
   };

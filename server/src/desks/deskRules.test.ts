@@ -19,6 +19,7 @@ import {
   InvalidDeskError,
   assertValidDeskPosition,
   deskBoundsOverlap,
+  deskCoversChair,
   deskCoversWall,
   normalizeCreateDeskInput,
   normalizeDeskLabel,
@@ -184,6 +185,26 @@ describe('los errores de dominio son tipos y no textos', () => {
     expect(new DeskSpaceOverlapError('x').name).toBe('DeskSpaceOverlapError');
     expect(new DeskSpaceOverlapError('x')).toBeInstanceOf(Error);
     expect(new DeskSpaceOverlapError('x')).not.toBeInstanceOf(DeskOverlapError);
+  });
+});
+
+describe('deskCoversChair', () => {
+  const WIDTH = 10;
+  const grid = (...tiles: (readonly [number, number])[]) => ({
+    width: WIDTH,
+    walls: new Array<string | null>(WIDTH * 8).fill(null),
+    chairs: tiles.map(([tx, ty]) => ({ index: ty * WIDTH + tx })),
+  });
+
+  it('is true when a placed chair stands on one of the 3x3 footprint tiles', () => {
+    expect(deskCoversChair({ x: 3, y: 2 }, grid([3, 2]))).toBe(true);
+    expect(deskCoversChair({ x: 3, y: 2 }, grid([5, 4]))).toBe(true);
+  });
+
+  it('is false for a chair right next to the footprint, or without chairs', () => {
+    expect(deskCoversChair({ x: 3, y: 2 }, grid([6, 2], [3, 5], [2, 2]))).toBe(false);
+    expect(deskCoversChair({ x: 3, y: 2 }, grid())).toBe(false);
+    expect(deskCoversChair({ x: 3, y: 2 }, { width: WIDTH, walls: [] })).toBe(false);
   });
 });
 

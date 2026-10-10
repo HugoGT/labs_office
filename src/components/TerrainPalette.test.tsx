@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import exportedManifest from '../../public/assets/pack/manifest.json?raw';
 import { materialCatalogFrom } from '../game/artMaterials';
 import type { ArtPreviewCache } from '../game/artPreview';
-import { TerrainPalette, WallPalette } from './TerrainPalette';
+import { ChairPalette, TerrainPalette, WallPalette } from './TerrainPalette';
 
 const catalog = materialCatalogFrom(JSON.parse(exportedManifest), 'assets/pack/manifest.json')!;
 
@@ -102,5 +102,46 @@ describe('WallPalette', () => {
     expect(screen.getAllByRole('button')).toHaveLength(WALL_NAMES.length);
     expect(screen.queryAllByRole('img')).toHaveLength(0);
     expect(screen.getAllByRole('button').every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+  });
+});
+
+describe('ChairPalette', () => {
+  const NAMES_CHAIRS = ['Silla de madera', 'Silla de metal', 'Silla de cuero', 'Silla gamer', 'Quitar silla'];
+
+  it('offers every chair by its Spanish name, then the chair eraser, none pressed while a wall or nothing is picked', () => {
+    const { rerender } = render(<ChairPalette value={null} onPick={() => {}} chairs={catalog.chair} preview={noPreview()} />);
+
+    const group = screen.getByRole('group', { name: 'Sillas' });
+    const buttons = Array.from(group.querySelectorAll('button'));
+    expect(buttons.map((button) => button.textContent)).toEqual(NAMES_CHAIRS);
+    expect(buttons.every((button) => button.getAttribute('aria-pressed') === 'false')).toBe(true);
+    rerender(<ChairPalette value={{ kind: 'wall', piece: null }} onPick={() => {}} chairs={catalog.chair} preview={noPreview()} />);
+    expect(Array.from(group.querySelectorAll('button')).every((button) => button.getAttribute('aria-pressed') === 'false')).toBe(true);
+  });
+
+  it('marks the picked chair or the eraser as pressed, whatever way it faces, and reports every click', async () => {
+    const onPick = vi.fn();
+    const { rerender } = render(<ChairPalette value={{ kind: 'chair', piece: 'chair-metal', facing: 'left' }} onPick={onPick} chairs={catalog.chair} preview={noPreview()} />);
+
+    expect(screen.getByRole('button', { name: 'Silla de metal' })).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Silla gamer' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Quitar silla' }));
+    expect(onPick.mock.calls).toEqual([['chair-gamer'], [null]]);
+
+    rerender(<ChairPalette value={{ kind: 'chair', piece: null, facing: 'down' }} onPick={onPick} chairs={catalog.chair} preview={noPreview()} />);
+    expect(screen.getByRole('button', { name: 'Quitar silla' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('cuts each thumbnail from both layers of the pack chair sheet, and keeps flat swatches without the catalog', async () => {
+    const preview = noPreview();
+    const { unmount } = render(<ChairPalette value={null} onPick={() => {}} chairs={catalog.chair} preview={preview} />);
+    await waitFor(() => expect(preview.sheet).toHaveBeenCalledWith(catalog.chair[0], null));
+    // Two layers per chair, one sheet each.
+    expect(preview.sheet).toHaveBeenCalledTimes(8);
+    unmount();
+
+    render(<ChairPalette value={null} onPick={() => {}} chairs={null} preview={noPreview()} disabled />);
+    expect(screen.queryAllByRole('img')).toEqual([]);
+    expect(screen.getByRole('button', { name: 'Silla de madera' })).toBeDisabled();
   });
 });

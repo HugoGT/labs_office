@@ -112,7 +112,7 @@ import { recordingStorageFromEnv, type RecordingStoragePort } from './recording/
 import { createRecordingSpaceSnapshot } from './recording/recordingSpaceSnapshot.ts';
 import { guardSessionRequest, sessionIsInSpace } from './sessionGuard.ts';
 import type { TerrainStore } from './terrain/terrainPort.ts';
-import { handleSetTerrainBlock, handleSetTerrainBlocks, handleSetTerrainWalls, type TerrainDeps } from './terrain/terrainRoutes.ts';
+import { handleSetTerrainBlock, handleSetTerrainBlocks, handleSetTerrainChairs, handleSetTerrainWalls, type TerrainDeps } from './terrain/terrainRoutes.ts';
 import type { TerrainProtections } from './terrain/terrainRules.ts';
 import { createTerrainRuntime, type TerrainRuntime } from './terrain/terrainRuntime.ts';
 import type { CollisionStore } from './collisions/collisionPort.ts';
@@ -673,6 +673,14 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     seats,
     store: overrides?.collisions !== undefined ? (overrides.collisions ?? undefined) : envRuntime?.collisions,
     listDesks: desks ? async () => deskCollisionPlacements(await desks.listOfficeDesks()) : undefined,
+    chairs: () => terrain.chairs(),
+  });
+  // Placed chairs are pieces too: an accepted terrain edit may have moved
+  // one, so the collision rectangles follow. Cheap: no store is read.
+  terrain.subscribe(() => {
+    collisions.refreshChairs().catch(() => {
+      console.error('[collisions] could not place the chairs');
+    });
   });
 
   app.get('/health', (_req, res) => {
@@ -1158,8 +1166,11 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
       // `decor` only checks a chosen material at creation (art migration,
       // step 7); without it a desk still gets the pack default.
       // `walls`: a created or moved desk is checked against the live walls
-      // inside the terrain edit queue, so no wall edit lands in between.
-      run(req, { directory, desks, auth, identityAdmin, decor, walls: { run: (write) => terrain.runExclusive(write) } })
+      // and placed chairs inside the terrain edit queue, so no wall or chair
+      // edit lands in between.
+      const walls = { run: <T>(write: (grid: { width: number; walls: readonly (string | null)[]; chairs: readonly { index: number }[] }) => Promise<T>) =>
+        terrain.runExclusive((snapshot) => write({ width: snapshot.width, walls: snapshot.walls, chairs: terrain.chairs() })) };
+      run(req, { directory, desks, auth, identityAdmin, decor, walls })
         .then((result) => {
           // Adapter promises resolve after COMMIT; failures never invalidate.
           if (changesDesks && result.status >= 200 && result.status < 300) notifyDesksChanged();
@@ -1273,6 +1284,8 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   // Painted walls, one tile each, a whole dragged wall per request. The
   // global JSON parser's 100 KB fits `MAX_WALL_EDITS` edits with room to spare.
   app.post('/admin/terrain/walls', terrainRoute((req, deps) => handleSetTerrainWalls(req.header('Authorization'), req.body, deps)));
+  // Placed chairs, one tile each, a whole dragged row per request.
+  app.post('/admin/terrain/chairs', terrainRoute((req, deps) => handleSetTerrainChairs(req.header('Authorization'), req.body, deps)));
 
   /** Whether the office knows a piece: the art catalog, the layout or the base chairs. */
   const staticPieces = new Set([...layout.props.map((prop) => prop.piece), BASE_CHAIR_PIECE]);
@@ -1376,6 +1389,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     desks,
     terrain: () => terrain.snapshot(),
     subscribeTerrainChanges: terrain.subscribe,
+    chairs: () => terrain.chairs(),
     collisions: () => collisions.rects(),
     collisionTable: () => collisions.encoded(),
     subscribeCollisionChanges: collisions.subscribe,

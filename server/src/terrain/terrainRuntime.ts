@@ -13,6 +13,11 @@
  * layer of the snapshot (`terrainSnapshot(layout, blocks, walls)`) that
  * blocks by its rectangles, so the room refuses moves into them and
  * relocates whoever a wall now overlaps exactly like after a block edit.
+ *
+ * And the placed chairs: one per tile, seats anyone may take. They are not
+ * part of the snapshot (they never change walkability; their piece's
+ * rectangles, if any, collide through the collision runtime), but they are
+ * protected like static seats: no water, void or wall may land on one.
  */
 
 import {
@@ -29,14 +34,16 @@ import {
   type TerrainSnapshot,
   type WallEdit,
 } from '../../../src/game/officeLayout.ts';
-import { BASE_MAP_SEATS, type MapSeat } from '../../../src/game/seating.ts';
+import { BASE_MAP_SEATS, withChairs, type ChairEdit, type MapSeat, type PlacedChair } from '../../../src/game/seating.ts';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
 import type { TerrainStore } from './terrainPort.ts';
 import {
   TerrainProtectedError,
   TerrainStaleError,
   parseTerrainBatch,
+  parseChairBatch,
   parseWallBatch,
+  findChairConflict,
   findUnwalkableConflict,
   findWallConflict,
   staticProtectedTiles,
@@ -45,8 +52,8 @@ import {
 } from './terrainRules.ts';
 
 /**
- * Called after each accepted edit, block or wall, with the whole block list.
- * `snapshot()` already answers with the new terrain, live walls included.
+ * Called after each accepted edit, block, wall or chair, with the whole block
+ * list. `snapshot()` and `chairs()` already answer with the new terrain.
  */
 export type TerrainListener = (blocks: readonly LayoutMaterial[]) => void;
 
@@ -72,6 +79,15 @@ export interface TerrainRuntime {
    * the edit places a post) or a tile the static layout protects.
    */
   setWalls(edits: readonly WallEdit[], actorId: string | null, protections: () => Promise<TerrainProtections>): Promise<readonly (string | null)[]>;
+  /** The placed chairs, sorted by tile. */
+  chairs(): readonly PlacedChair[];
+  /**
+   * Places, turns or removes chairs atomically, or throws
+   * `TerrainProtectedError` when one would stand on unwalkable ground, a
+   * wall, a desk (`protections`, read only when the edit places a chair) or
+   * a tile the static layout protects.
+   */
+  setChairs(edits: readonly ChairEdit[], actorId: string | null, protections: () => Promise<TerrainProtections>): Promise<readonly PlacedChair[]>;
   /**
    * Runs `task` in the edit queue with the snapshot every edit before it
    * left, and holds later edits until it settles. A desk write uses it so no
@@ -89,7 +105,14 @@ export function createTerrainRuntime({ layout, store, seats = BASE_MAP_SEATS }: 
   let blocks: readonly LayoutMaterial[] = layout.blocks;
   let walls: readonly (string | null)[] = layout.walls;
   let snapshot = terrainSnapshot(layout, blocks, walls);
+  let chairs: readonly PlacedChair[] = [];
   let queue: Promise<unknown> = Promise.resolve();
+
+  /** The static tiles plus every placed chair's: what water, void and walls must not reach. */
+  function protectedTiles(): ReadonlySet<number> {
+    if (chairs.length === 0) return staticTiles;
+    return new Set([...staticTiles, ...chairs.map((chair) => chair.index)]);
+  }
 
   /** Runs `edit` after every edit queued before it; the chain survives a refused or failed one. */
   function enqueue<T>(edit: () => Promise<T>): Promise<T> {
@@ -114,7 +137,7 @@ export function createTerrainRuntime({ layout, store, seats = BASE_MAP_SEATS }: 
     const nextSnapshot = terrainSnapshot(layout, next, walls);
     const watered = newlyUnwalkableTiles(snapshot, nextSnapshot);
     if (watered.length > 0) {
-      const conflict = findUnwalkableConflict(watered, layout.width, staticTiles, await protections());
+      const conflict = findUnwalkableConflict(watered, layout.width, protectedTiles(), await protections());
       if (conflict !== null) throw new TerrainProtectedError(conflict);
     }
     await store.saveBlocks(changed, actorId);
@@ -134,7 +157,7 @@ export function createTerrainRuntime({ layout, store, seats = BASE_MAP_SEATS }: 
     if (changed.length === 0) return walls;
     const placed = changed.flatMap(({ index, piece }) => (piece === null ? [] : [index]));
     if (placed.length > 0) {
-      const conflict = findWallConflict(placed, layout, staticTiles, await protections());
+      const conflict = findWallConflict(placed, layout, protectedTiles(), await protections());
       if (conflict !== null) throw new TerrainProtectedError(conflict);
     }
     const next = withWalls(walls, changed);
@@ -144,6 +167,31 @@ export function createTerrainRuntime({ layout, store, seats = BASE_MAP_SEATS }: 
     snapshot = nextSnapshot;
     for (const listener of listeners) listener(blocks);
     return walls;
+  }
+
+  async function applyChairs(
+    edits: readonly ChairEdit[], actorId: string | null,
+    protections: () => Promise<TerrainProtections>,
+  ): Promise<readonly PlacedChair[]> {
+    if (!store) throw new Error('no terrain store: the chairs cannot be edited');
+    parseChairBatch({ edits }, layout.width * layout.height);
+    const byTile = new Map(chairs.map((chair) => [chair.index, chair]));
+    const changed = edits.filter(({ index, chair }) => {
+      const current = byTile.get(index);
+      if (chair === null) return current !== undefined;
+      return current === undefined || current.piece !== chair.piece || current.facing !== chair.facing;
+    });
+    if (changed.length === 0) return chairs;
+    const placed = changed.flatMap(({ index, chair }) => (chair === null ? [] : [index]));
+    if (placed.length > 0) {
+      const conflict = findChairConflict(placed, snapshot, staticTiles, await protections());
+      if (conflict !== null) throw new TerrainProtectedError(conflict);
+    }
+    const next = withChairs(chairs, changed);
+    await store.saveChairs(changed, actorId);
+    chairs = next;
+    for (const listener of listeners) listener(blocks);
+    return chairs;
   }
 
   return {
@@ -168,9 +216,13 @@ export function createTerrainRuntime({ layout, store, seats = BASE_MAP_SEATS }: 
       }
       walls = withWalls(layout.walls, wallEdits);
       snapshot = terrainSnapshot(layout, blocks, walls);
+      const tileCount = layout.width * layout.height;
+      // Same rule as the walls: a chair that may not stand there is ignored, never rewritten.
+      chairs = (await store.loadChairs()).filter(({ index }) => index >= 0 && index < tileCount && !staticTiles.has(index));
     },
     blocks: () => blocks,
     walls: () => walls,
+    chairs: () => chairs,
     snapshot: () => snapshot,
     editable: store !== undefined,
     setBlock(edit, protections) {
@@ -181,6 +233,9 @@ export function createTerrainRuntime({ layout, store, seats = BASE_MAP_SEATS }: 
     },
     setWalls(edits, actorId, protections) {
       return enqueue(() => applyWalls(edits, actorId, protections));
+    },
+    setChairs(edits, actorId, protections) {
+      return enqueue(() => applyChairs(edits, actorId, protections));
     },
     runExclusive(task) {
       return enqueue(() => task(snapshot));

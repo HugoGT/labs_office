@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import exportedManifest from '../../public/assets/pack/manifest.json?raw';
+import { facingColumn } from './artContract';
 import {
+  chairPreviewFrames,
   defaultAppearance,
   defaultChoice,
   loadMaterialCatalog,
@@ -62,6 +64,29 @@ describe('materialCatalogFrom', () => {
 
   it('answers null for a manifest the office cannot read', () => {
     expect(materialCatalogFrom({ format: 'other' }, MANIFEST_URL)).toBeNull();
+  });
+});
+
+describe('materialCatalogFrom: chairs', () => {
+  it('offers every chair piece of the pack, never colorable, next to the manifest', () => {
+    expect(catalog().chair.map((option) => [option.id, option.kind])).toEqual([
+      ['chair-wood', 'chair'],
+      ['chair-metal', 'chair'],
+      ['chair-leather', 'chair'],
+      ['chair-gamer', 'chair'],
+    ]);
+    expect(catalog().chair.every((option) => !option.colorable && option.defaultColor === null)).toBe(true);
+    expect(catalog().chair[0]!.sheetUrl).toBe('assets/pack/chair/wood.png');
+  });
+
+  it('a chair previews both layers of its down-facing cell, back first', () => {
+    const chair = catalog().chair[0]!;
+    const column = 36 * facingColumn('down');
+    expect(chairPreviewFrames()).toEqual([
+      { x: column, y: 0, width: 36, height: 38 },
+      { x: column, y: 38, width: 36, height: 38 },
+    ]);
+    expect(previewFrame(chair)).toEqual(chairPreviewFrames()[0]);
   });
 });
 

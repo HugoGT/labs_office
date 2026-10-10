@@ -105,6 +105,25 @@ describe('createCollisionRuntime', () => {
     expect(isPositionBlocked(collisions.rects(), onDesk.x, onDesk.y)).toBe(true);
   });
 
+  it('follows the placed chairs when they change, each with its own piece', async () => {
+    const chairs: { index: number; piece: 'chair-gamer' | 'chair-wood'; facing: 'down' }[] = [];
+    const store = createMemoryCollisions([['chair-gamer', [{ x: -8, y: -8, w: 16, h: 16 }]]]);
+    const collisions = createCollisionRuntime({ layout: BASE_LAYOUT, seats: BASE_MAP_SEATS, store, chairs: () => chairs });
+    await collisions.load();
+    /** Body center in the middle of tile (67, 22). */
+    const onChair = { x: 67 * 32 + 16, y: 22 * 32 + 16 - 11 };
+    const onWood = { x: 68 * 32 + 16, y: 22 * 32 + 16 - 11 };
+    expect(isPositionBlocked(collisions.rects(), onChair.x, onChair.y)).toBe(false);
+
+    chairs.push({ index: 22 * BASE_LAYOUT.width + 67, piece: 'chair-gamer', facing: 'down' }, { index: 22 * BASE_LAYOUT.width + 68, piece: 'chair-wood', facing: 'down' });
+    await collisions.refreshChairs();
+
+    expect(isPositionBlocked(collisions.rects(), onChair.x, onChair.y)).toBe(true);
+    expect(isPositionBlocked(collisions.rects(), onWood.x, onWood.y)).toBe(false);
+    // The trap check of an edit sees placed chairs too.
+    await expect(collisions.setRects({ pieceId: 'chair-wood', rects: [{ x: -8, y: -8, w: 16, h: 16 }], actorId: null }, () => [onWood])).rejects.toThrow(CollisionProtectedError);
+  });
+
   it('keeps the edits in order and survives a failed save', async () => {
     const { collisions, store } = runtime();
     await collisions.load();

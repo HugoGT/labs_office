@@ -803,6 +803,40 @@ describe('createPgDecor: art pack catalog (art migration, step 3)', () => {
     expect(result).toEqual({ registered: PACK.pieces.length, retired: ['desk-old'] });
   });
 
+  it('gives each pack chair one decor asset, once by texture key, inside the same transaction', async () => {
+    const pool = registrationPool();
+
+    await createPgDecor(pool).registerArtPack(PACK);
+
+    const inserts = pool.queries.filter((query) => /insert into assets/i.test(query.text));
+    expect(inserts.map((query) => query.values[3]).sort()).toEqual([
+      'art:chair-gamer:sheet',
+      'art:chair-leather:sheet',
+      'art:chair-metal:sheet',
+      'art:chair-wood:sheet',
+    ]);
+    const wood = inserts.find((query) => query.values[3] === 'art:chair-wood:sheet')!;
+    expect(wood.values).toEqual(['silla-de-madera', 'Silla de madera', 'furniture', 'art:chair-wood:sheet', 1, 1, true, false]);
+    // Archived or not, an existing asset of that texture is never recreated,
+    // and a name already taken skips the chair instead of failing the start.
+    expect(squash(wood.text)).toContain('where not exists (select 1 from assets where texture_key = $4)');
+    expect(squash(wood.text)).toContain('on conflict do nothing');
+    const texts = pool.queries.map((query) => squash(query.text));
+    expect(texts.indexOf(squash(wood.text))).toBeLessThan(texts.lastIndexOf('commit'));
+  });
+
+  it('archives the decor assets of the pieces it retires, and none when nothing retires', async () => {
+    const retiring = registrationPool(['chair-old']);
+    await createPgDecor(retiring).registerArtPack(PACK);
+    const archive = retiring.queries.find((query) => /update assets set archived_at/i.test(query.text))!;
+    expect(squash(archive.text)).toContain('where texture_key = any($1::text[]) and archived_at is null');
+    expect(archive.values).toEqual([['art:chair-old:sheet']]);
+
+    const steady = registrationPool();
+    await createPgDecor(steady).registerArtPack(PACK);
+    expect(steady.queries.some((query) => /update assets/i.test(query.text))).toBe(false);
+  });
+
   it('rejects an invalid pack before asking for a connection', async () => {
     const pool = registrationPool();
 

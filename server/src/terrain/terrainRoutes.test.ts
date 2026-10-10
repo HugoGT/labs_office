@@ -12,7 +12,7 @@ import type { DirectoryUser } from '../directory/directoryPort.ts';
 import { createMemoryDirectory } from '../directory/memoryDirectory.ts';
 import type { IdTokenVerifier } from '../verifyIdToken.ts';
 import { createMemoryTerrain } from './memoryTerrain.ts';
-import { handleSetTerrainBlock, handleSetTerrainBlocks, handleSetTerrainWalls, type TerrainDeps } from './terrainRoutes.ts';
+import { handleSetTerrainBlock, handleSetTerrainBlocks, handleSetTerrainChairs, handleSetTerrainWalls, type TerrainDeps } from './terrainRoutes.ts';
 import { encodeTerrainBlocks } from '../../../src/game/officeLayout.ts';
 import type { TerrainProtections } from './terrainRules.ts';
 import { createTerrainRuntime } from './terrainRuntime.ts';
@@ -196,5 +196,55 @@ describe('handleSetTerrainWalls', () => {
 
     const inRoom = await harness({ placements: [{ x: 60, y: 18, w: 12, h: 9 }], desks: [], players: [{ x: 67 * TILE + 16, y: 22 * TILE + 5 }] });
     expect((await handleSetTerrainWalls(BEARER_ADMIN, { edits: [{ index: FREE, piece: 'wall-stone' }] }, inRoom.deps)).status).toBe(200);
+  });
+});
+
+describe('handleSetTerrainChairs', () => {
+  const FREE = 22 * BASE_LAYOUT.width + 67;
+  const DESK = { x: 66, y: 21, w: 3, h: 3 };
+  const WOOD = { piece: 'chair-wood', facing: 'down' };
+
+  it('checks the role before reading the body', async () => {
+    const { deps, terrain } = await harness();
+
+    expect((await handleSetTerrainChairs(undefined, null, deps)).status).toBe(401);
+    expect((await handleSetTerrainChairs(BEARER_EMPLEADO, null, deps)).status).toBe(403);
+    expect((await handleSetTerrainChairs(BEARER_EMPLEADO, { edits: [{ index: FREE, chair: WOOD }] }, deps)).status).toBe(403);
+    expect(terrain.chairs()).toEqual([]);
+  });
+
+  it('lets an admin place, turn and remove chairs in one request, recording who did it', async () => {
+    const { deps, store, terrain } = await harness();
+
+    const placed = await handleSetTerrainChairs(BEARER_ADMIN, { edits: [{ index: FREE, chair: WOOD }, { index: FREE + 1, chair: { piece: 'chair-gamer', facing: 'left' } }] }, deps);
+    expect(placed).toEqual({ status: 200, body: { updated: 2 } });
+    expect(terrain.chairs()).toEqual([{ index: FREE, piece: 'chair-wood', facing: 'down' }, { index: FREE + 1, piece: 'chair-gamer', facing: 'left' }]);
+    expect(store.chairActorOf(FREE)).toBe(ADMIN.id);
+
+    expect((await handleSetTerrainChairs(BEARER_ADMIN, { edits: [{ index: FREE, chair: null }] }, deps)).status).toBe(200);
+    expect(await store.loadChairs()).toEqual([{ index: FREE + 1, piece: 'chair-gamer', facing: 'left' }]);
+  });
+
+  it('answers 400 to malformed batches, without writing anything', async () => {
+    const { deps, store } = await harness();
+    const tiles = BASE_LAYOUT.width * BASE_LAYOUT.height;
+
+    for (const body of [null, {}, { edits: [] }, { edits: [{ index: tiles, chair: WOOD }] }, { edits: [{ index: FREE, chair: { piece: 'chair-throne', facing: 'down' } }] },
+      { edits: [{ index: FREE, chair: WOOD }, { index: FREE, chair: null }] }, { edits: Array.from({ length: 501 }, (_, index) => ({ index, chair: null })) }]) {
+      expect(await handleSetTerrainChairs(BEARER_ADMIN, body, deps)).toEqual({ status: 400, body: { error: 'invalid-request' } });
+    }
+    expect(await store.loadChairs()).toEqual([]);
+  });
+
+  it('refuses a chair on a desk with 409, but places one in a room or under a player', async () => {
+    const onDesk = await harness({ placements: [DESK], desks: [DESK], players: [] });
+    expect(await handleSetTerrainChairs(BEARER_ADMIN, { edits: [{ index: FREE, chair: WOOD }] }, onDesk.deps)).toEqual({
+      status: 409,
+      body: { error: 'terrain-under-placement' },
+    });
+    expect(onDesk.terrain.chairs()).toEqual([]);
+
+    const inRoom = await harness({ placements: [{ x: 60, y: 18, w: 12, h: 9 }], desks: [], players: [{ x: 67 * TILE + 16, y: 22 * TILE + 5 }] });
+    expect((await handleSetTerrainChairs(BEARER_ADMIN, { edits: [{ index: FREE, chair: WOOD }] }, inRoom.deps)).status).toBe(200);
   });
 });

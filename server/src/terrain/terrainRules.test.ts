@@ -12,7 +12,9 @@ import {
   InvalidTerrainEditError,
   TerrainProtectedError,
   findUnwalkableConflict,
+  findChairConflict,
   findWallConflict,
+  parseChairBatch,
   parseTerrainBatch,
   parseWallBatch,
   parseTerrainEdit,
@@ -212,5 +214,75 @@ describe('findWallConflict', () => {
     expect(findWallConflict([25 * W + 68], MAP, STATIC, { ...NONE, desks: [desk] })).toBeNull();
     expect(findWallConflict([22 * W + 70], MAP, STATIC, { ...NONE, desks: [desk] })).toBeNull();
     expect(findWallConflict([20 * W + 67], MAP, STATIC, { ...NONE, desks: [desk] })).toBeNull();
+  });
+});
+
+describe('parseChairBatch', () => {
+  const TILES = BASE_LAYOUT.width * BASE_LAYOUT.height;
+
+  it('reads chairs and erasures on distinct tiles of the map', () => {
+    expect(
+      parseChairBatch({ edits: [{ index: 0, chair: { piece: 'chair-wood', facing: 'down' } }, { index: TILES - 1, chair: null }] }, TILES),
+    ).toEqual([
+      { index: 0, chair: { piece: 'chair-wood', facing: 'down' } },
+      { index: TILES - 1, chair: null },
+    ]);
+  });
+
+  it.each([
+    ['no body', null],
+    ['an array body', []],
+    ['no edits', {}],
+    ['an empty batch', { edits: [] }],
+    ['a tile off the map', { edits: [{ index: 189 * 135 * 10, chair: null }] }],
+    ['a negative tile', { edits: [{ index: -1, chair: null }] }],
+    ['a fractional tile', { edits: [{ index: 1.5, chair: null }] }],
+    ['an unknown piece', { edits: [{ index: 3, chair: { piece: 'chair-throne', facing: 'down' } }] }],
+    ['a wall piece', { edits: [{ index: 3, chair: { piece: 'wall-brick', facing: 'down' } }] }],
+    ['an unknown facing', { edits: [{ index: 3, chair: { piece: 'chair-wood', facing: 'north' } }] }],
+    ['a chair that is not an object', { edits: [{ index: 3, chair: 'chair-wood' }] }],
+    ['a missing chair', { edits: [{ index: 3 }] }],
+    ['a repeated tile', { edits: [{ index: 3, chair: null }, { index: 3, chair: { piece: 'chair-wood', facing: 'up' } }] }],
+    ['an edit that is not an object', { edits: [3] }],
+  ])('refuses %s', (_name, body) => {
+    expect(() => parseChairBatch(body, TILES)).toThrow(InvalidTerrainEditError);
+  });
+
+  it('caps a batch at MAX_CHAIR_EDITS tiles', () => {
+    const edits = (count: number) => Array.from({ length: count }, (_, index) => ({ index, chair: null }));
+    expect(parseChairBatch({ edits: edits(500) }, TILES)).toHaveLength(500);
+    expect(() => parseChairBatch({ edits: edits(501) }, TILES)).toThrow(InvalidTerrainEditError);
+  });
+});
+
+describe('findChairConflict', () => {
+  const free = 22 * W + 67;
+  const desk = { x: 66, y: 21, w: 3, h: 3 };
+
+  it('lets a chair stand on any free walkable tile, rooms and players included', () => {
+    const protections: TerrainProtections = { placements: [{ x: 60, y: 18, w: 12, h: 9 }], players: [standingOn(67, 22)] };
+    expect(findChairConflict([free], BASE_TERRAIN, STATIC, protections)).toBeNull();
+    expect(findChairConflict([], BASE_TERRAIN, STATIC, protections)).toBeNull();
+  });
+
+  it('refuses a chair on water or void, on a seat, static furniture or the spawn area, or on a desk', () => {
+    const seat = BASE_MAP_SEATS[0]!;
+    const lake = 58 * W + 94;
+    expect(BASE_TERRAIN.walkable[lake]).toBe(false);
+    expect(findChairConflict([free, lake], BASE_TERRAIN, STATIC, NONE)).toBe('placement');
+    expect(findChairConflict([seat.ty * W + seat.tx], BASE_TERRAIN, STATIC, NONE)).toBe('placement');
+    expect(findChairConflict([PLAYER_SPAWN_TY * W + PLAYER_SPAWN_TX + 1], BASE_TERRAIN, STATIC, NONE)).toBe('placement');
+    expect(findChairConflict([free], BASE_TERRAIN, STATIC, { ...NONE, desks: [desk] })).toBe('placement');
+    expect(findChairConflict([22 * W + 69], BASE_TERRAIN, STATIC, { ...NONE, desks: [desk] })).toBeNull();
+  });
+
+  it('refuses a chair on a tile a wall rectangle covers', () => {
+    const walls = new Array<string | null>(W * BASE_LAYOUT.height).fill(null);
+    walls[free] = 'wall-brick';
+    const walled = terrainSnapshot(BASE_LAYOUT, BASE_LAYOUT.blocks, walls);
+    // The post on the top-left corner of the tile reaches into it and its three neighbors.
+    expect(findChairConflict([free], walled, STATIC, NONE)).toBe('placement');
+    expect(findChairConflict([free - W - 1], walled, STATIC, NONE)).toBe('placement');
+    expect(findChairConflict([free + 1], walled, STATIC, NONE)).toBeNull();
   });
 });

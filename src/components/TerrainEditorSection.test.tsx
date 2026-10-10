@@ -19,7 +19,7 @@ function renderSection(overrides: Partial<Parameters<typeof TerrainEditorSection
   const bridge = overrides.bridge ?? createOfficeBridge();
   const commands: OfficeCommandMap['terrainedit'][] = [];
   bridge.onCommand('terrainedit', (command) => commands.push(command));
-  const terrain: TerrainAdminPort = overrides.terrain ?? { setBlock: vi.fn(async () => undefined), setBlocks: vi.fn(async () => undefined), setWalls: vi.fn(async () => undefined) };
+  const terrain: TerrainAdminPort = overrides.terrain ?? { setBlock: vi.fn(async () => undefined), setBlocks: vi.fn(async () => undefined), setWalls: vi.fn(async () => undefined), setChairs: vi.fn(async () => undefined) };
   const props = { bridge, terrain, loadMaterials: async () => catalog, preview: noPreview, ...overrides };
   return { ...props, commands, ...render(<TerrainEditorSection {...props} />) };
 }
@@ -115,6 +115,7 @@ describe('TerrainEditorSection', () => {
     const terrain: TerrainAdminPort = {
       setBlocks: vi.fn(),
       setWalls: vi.fn(),
+      setChairs: vi.fn(),
       setBlock: vi.fn(async () => {
         throw new AdminError('terrain-under-placement');
       }),
@@ -165,7 +166,7 @@ describe('TerrainEditorSection', () => {
     const setWalls = vi.fn(async () => {
       throw new AdminError('terrain-under-placement');
     });
-    const { bridge } = renderSection({ terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls } });
+    const { bridge } = renderSection({ terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls, setChairs: vi.fn() } });
     await open();
     await userEvent.click(screen.getByRole('button', { name: 'Piedra' }));
 
@@ -173,6 +174,41 @@ describe('TerrainEditorSection', () => {
 
     await vi.waitFor(() => expect(setWalls).toHaveBeenCalledWith([{ index: 7, piece: 'wall-stone' }]));
     expect(await screen.findByRole('alert')).toHaveTextContent(/Una pared no puede tapar un escritorio/);
+  });
+
+  it('offers the chairs below the walls, turns the brush with «Girar» and says what it places', async () => {
+    const { commands } = renderSection();
+    await open();
+
+    expect(screen.getByRole('group', { name: 'Sillas' })).toBeInTheDocument();
+    expect(screen.getByText('Mirando hacia abajo')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Silla gamer' }));
+    expect(screen.getByRole('button', { name: 'Silla gamer' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('Poniendo Silla gamer mirando hacia abajo')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Girar' }));
+    expect(screen.getByText('Mirando hacia la izquierda')).toBeInTheDocument();
+    expect(commands.at(-1)).toEqual({ brush: { kind: 'chair', piece: 'chair-gamer', facing: 'left' } });
+    expect(screen.getByRole('button', { name: 'Silla gamer' })).toHaveAttribute('aria-pressed', 'true');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Quitar silla' }));
+    expect(screen.getByText('Quitando sillas')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Deseleccionar' }));
+    expect(screen.getByRole('button', { name: 'Quitar silla' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('places a chair on the clicked tile, and says why the server refused one', async () => {
+    const setChairs = vi.fn(async () => {
+      throw new AdminError('terrain-under-placement');
+    });
+    const { bridge } = renderSection({ terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn(), setChairs } });
+    await open();
+    await userEvent.click(screen.getByRole('button', { name: 'Silla de cuero' }));
+
+    act(() => bridge.emit('chairpick', { index: 7 }));
+
+    await vi.waitFor(() => expect(setChairs).toHaveBeenCalledWith([{ index: 7, chair: { piece: 'chair-leather', facing: 'down' } }]));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Una silla necesita suelo libre/);
   });
 
   it('offers no way to empty the whole terrain', async () => {

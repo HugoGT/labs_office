@@ -65,6 +65,8 @@ const verifier: IdTokenVerifier = {
 const AS_ADMIN = 'Bearer valido-uid-admin';
 const AS_ANA = 'Bearer valido-uid-ana';
 const AS_BETO = 'Bearer valido-uid-beto';
+/** Leaves out the pack chairs, desk decor from the pack registration on. */
+const notPackChair = (asset: { textureKey: string }) => !asset.textureKey.startsWith('art:chair-');
 const PACK: ArtPackManifest = readArtPackManifest(new URL('../../../public/assets/pack/manifest.json', import.meta.url));
 
 /** A valid sheet; `shade` changes its pixels, so each shade is another piece. */
@@ -276,7 +278,8 @@ describe('review', () => {
     await handleApproveContribution(AS_ADMIN, body.contribution.id, d);
 
     const assets = await handleListOfficeAssets(AS_BETO, d);
-    expect(assets.body.assets).toEqual([expect.objectContaining({ textureKey: artSheetKey(body.contribution.id, 'sheet'), author: 'Ana' })]);
+    // The pack chairs are desk decor from the registration on; only the contribution is new.
+    expect((assets.body.assets as { textureKey: string }[]).filter(notPackChair)).toEqual([expect.objectContaining({ textureKey: artSheetKey(body.contribution.id, 'sheet'), author: 'Ana' })]);
   });
 
   it('a rejection needs a reason, and the uploader reads it', async () => {
@@ -341,7 +344,7 @@ describe('handleRetireArtPiece', () => {
 
     expect((await handleRetireArtPiece(AS_ADMIN, id, d)).status).toBe(200);
 
-    expect((await handleListOfficeAssets(AS_BETO, d)).body.assets).toEqual([]);
+    expect(((await handleListOfficeAssets(AS_BETO, d)).body.assets as { textureKey: string }[]).filter(notPackChair)).toEqual([]);
     expect(parseArtPackManifest((await handleUploadedArtManifest(d.decor)).body)?.pieces.map((piece) => piece.id)).toEqual([id]);
     expect((await handleGetAssetFile(body.contribution.piece.files[0]!.path, d)).status).toBe(200);
     expect(d.retiredLive).toEqual([]);

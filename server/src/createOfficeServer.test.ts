@@ -51,6 +51,7 @@ import type { EgressPort } from './recording/egressPort.ts';
 import type { RecordingStoragePort } from './recording/recordingStorage.ts';
 import type { OfficeState } from './schema.ts';
 import { decodeTerrainWalls } from '../../src/game/officeLayout.ts';
+import { decodeTerrainChairs } from '../../src/game/seating.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 import { AuthConfigError } from './authConfigError.ts';
 import type { LocalAuthConfig } from './localAuth/localAuthConfig.ts';
@@ -2968,6 +2969,50 @@ describe('terrain routes (#123 phase 2)', () => {
     expect(await moved.json()).toEqual({ error: 'desk-on-wall' });
     expect((await postDesk(`/admin/desks/${id}`, { label: 'Mesa B' })).status).toBe(200);
     expect(await desks.getDesk(id)).toMatchObject({ label: 'Mesa B', x: 70, y: 21 });
+    await server.shutdown();
+  });
+
+  function setChairs(url: string, edits: unknown) {
+    return fetch(`${url}/admin/terrain/chairs`, { method: 'POST', headers: BEARER, body: JSON.stringify({ edits }) });
+  }
+
+  it('answers 503 to chair edits without a terrain store, never 404', async () => {
+    const { server, url } = await terrainServer({ terrain: null });
+    const res = await setChairs(url, [{ index: 0, chair: { piece: 'chair-wood', facing: 'down' } }]);
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'terrain-not-configured' });
+    expect(server.terrain.chairs()).toEqual([]);
+    await server.shutdown();
+  });
+
+  it('places chairs into the room state, keeps desks and water off them and them off desks', async () => {
+    const desks = createMemoryDesks();
+    const { server, url, wsUrl } = await terrainServer({ desks, terrain: createMemoryTerrain() });
+    const room = await new Client(wsUrl).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token: 'valido-uid-admin' });
+    openRooms.push(room);
+    const { width, height } = server.terrain.snapshot();
+    const chair = 22 * width + 67;
+    const postDesk = (path: string, body: unknown) =>
+      fetch(`${url}${path}`, { method: 'POST', headers: BEARER, body: JSON.stringify(body) });
+
+    const placed = await setChairs(url, [{ index: chair, chair: { piece: 'chair-metal', facing: 'right' } }]);
+    expect(placed.status).toBe(200);
+    expect(await placed.json()).toEqual({ updated: 1 });
+    await waitFor(() => decodeTerrainChairs(room.state.terrainChairs, width * height)?.[0]?.index === chair);
+    expect((await setChairs(url, [{ index: 0, chair: { piece: 'chair-throne', facing: 'down' } }])).status).toBe(400);
+
+    const onChair = await postDesk('/admin/desks', { label: 'Mesa A', x: 66, y: 21 });
+    expect(onChair.status).toBe(409);
+    expect(await onChair.json()).toEqual({ error: 'desk-on-chair' });
+    expect(await desks.listDesks()).toEqual([]);
+    const blocked = await setBlock(url, LAWN, 'water');
+    expect(blocked.status).toBe(409);
+    expect(await blocked.json()).toEqual({ error: 'terrain-under-placement' });
+
+    // A desk under the chair's tile refuses the chair the other way round.
+    expect((await postDesk('/admin/desks', { label: 'Mesa B', x: 70, y: 21 })).status).toBe(201);
+    const onDesk = await setChairs(url, [{ index: 22 * width + 71, chair: { piece: 'chair-wood', facing: 'down' } }]);
+    expect(onDesk.status).toBe(409);
     await server.shutdown();
   });
 });

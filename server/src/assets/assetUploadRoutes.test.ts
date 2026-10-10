@@ -54,6 +54,8 @@ const verifier: IdTokenVerifier = {
 
 const BEARER_ADMIN = 'Bearer valido-uid-admin';
 const BEARER_EMPLEADO = 'Bearer valido-uid-empleado';
+/** Leaves out the pack chairs, desk decor from the pack registration on. */
+const notPackChair = (textureKey: string) => !textureKey.startsWith('art:chair-');
 const PACK: ArtPackManifest = readArtPackManifest(new URL('../../../public/assets/pack/manifest.json', import.meta.url));
 
 function sheet(kind: ArtImageKind): Buffer {
@@ -128,7 +130,8 @@ describe('handleUploadAsset', () => {
     const id = (result.body.piece as { id: string }).id;
 
     expect(result.body.asset).toMatchObject({ name: 'Helecho', kind: 'plant', textureKey: artSheetKey(id, 'sheet'), w: 1, h: 1, placeableOnDesk: true });
-    expect((await d.decor.listAssets()).map((asset) => asset.textureKey)).toEqual([artSheetKey(id, 'sheet')]);
+    // The pack chairs are desk decor from the registration on; only the upload is new.
+    expect((await d.decor.listAssets()).map((asset) => asset.textureKey).filter(notPackChair)).toEqual([artSheetKey(id, 'sheet')]);
   });
 
   it('gives a desk without facings the geometry of the pack default desk', async () => {
@@ -155,7 +158,7 @@ describe('handleUploadAsset', () => {
     expect(await handleUploadAsset(BEARER_ADMIN, { ...plantBody(), kind: 'wall' }, d)).toEqual({ status: 400, body: { error: 'invalid-metadata', field: 'kind' } });
     // A name the decor catalog cannot turn into a slug.
     expect(await handleUploadAsset(BEARER_ADMIN, { ...plantBody(), name: '!!!' }, d)).toEqual({ status: 400, body: { error: 'invalid-metadata', field: 'name' } });
-    expect(await d.decor.listAssets()).toEqual([]);
+    expect((await d.decor.listAssets()).map((asset) => asset.textureKey).filter(notPackChair)).toEqual([]);
   });
 
   it('refuses the same pixels twice, and a decor name already taken', async () => {

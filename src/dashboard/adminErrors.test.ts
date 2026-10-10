@@ -11,6 +11,7 @@ const CODES: AdminErrorCode[] = [
   'desk-overlap',
   'desk-space-overlap',
   'desk-on-wall',
+  'desk-on-chair',
   'space-overlap',
   'space-name-taken',
   'space-owned-by-desk',
@@ -117,6 +118,14 @@ describe('describeAdminError', () => {
     expect(message).toMatch(/pared/i);
     expect(message).not.toBe(describeAdminError(new AdminError('desk-overlap')));
     expect(message).not.toBe(describeAdminError(new AdminError('desk-space-overlap')));
+  });
+
+  it('a desk over a placed chair names the chair, not a wall or another desk', () => {
+    const message = describeAdminError(new AdminError('desk-on-chair'));
+
+    expect(message).toMatch(/silla/i);
+    expect(message).not.toBe(describeAdminError(new AdminError('desk-on-wall')));
+    expect(message).not.toBe(describeAdminError(new AdminError('desk-overlap')));
   });
 
   it('cada "no configurado" nombra la pieza que falta en el despliegue', () => {

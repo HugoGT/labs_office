@@ -28,7 +28,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { ART_CONTRACT_VERSION, artSheetKey, type ArtPackManifest } from '../../../src/game/artContract.ts';
-import { ArtPieceExistsError, artPieceFields, assertUploadedArtPiece, normalizeArtPack } from './artCatalogRules.ts';
+import { ArtPieceExistsError, artPieceFields, assertUploadedArtPiece, normalizeArtPack, packDecorAsset } from './artCatalogRules.ts';
 import {
   CONTRIBUTION_QUOTA_WINDOW_MS,
   assertContributionQuota,
@@ -290,6 +290,25 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): MemoryDecor
         if (piece.source !== 'pack' || piece.retiredAt !== null || shipped.has(piece.id)) continue;
         artPieces.set(piece.id, { ...piece, retiredAt: at, updatedAt: at });
         retired.push(piece.id);
+      }
+
+      // Same as the pg statements: a pack chair gets its decor asset once, by
+      // texture key and whatever its archive state, so neither a restart nor
+      // an admin's archive is undone; a name already taken skips it instead of
+      // stopping the start. A retired piece's asset is archived like a retired plant's.
+      for (const piece of valid.pieces) {
+        const input = packDecorAsset(piece);
+        if (input === null || [...assets.values()].some((entry) => entry.textureKey === input.textureKey)) continue;
+        try {
+          const created = prepareAsset(input);
+          assets.set(created.id, created);
+        } catch (error) {
+          if (!(error instanceof AssetNameTakenError)) throw error;
+        }
+      }
+      const retiredKeys = new Set(retired.map((id) => artSheetKey(id, 'sheet')));
+      for (const entry of assets.values()) {
+        if (retiredKeys.has(entry.textureKey) && entry.archivedAt === null) assets.set(entry.id, { ...entry, archivedAt: at });
       }
 
       return { registered: valid.pieces.length, retired };
