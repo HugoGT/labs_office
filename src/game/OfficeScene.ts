@@ -40,6 +40,7 @@ import {
 import { deskFurnitureName, deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
+import { MinimapLayer } from './MinimapLayer';
 import { isEditableElementFocused } from './inputFocusGuard';
 import { LayoutEditLayer } from './LayoutEditLayer';
 import {
@@ -60,8 +61,6 @@ import {
   BUILT_IN_SPACES_VERSION,
   PROX_RADIUS,
   TILE,
-  WORLD_H,
-  WORLD_W,
   type SpaceArea,
 } from './mapData';
 import type { OfficeBridge } from './officeBridge';
@@ -391,6 +390,8 @@ export class OfficeScene extends Phaser.Scene {
    * que hoy tampoco corta un auto-walk en curso.
    */
   private cameraPanLayer?: CameraPanLayer;
+  /** Frames the minimap camera on the terrain region, like the pan layer does the main one. */
+  private minimapLayer?: MinimapLayer;
   /** Map zoom (map-zoom); created before the pan layer, see `create()`. */
   private cameraZoomLayer?: CameraZoomLayer;
   /**
@@ -1012,6 +1013,7 @@ export class OfficeScene extends Phaser.Scene {
     animateCharacter(this.player, { dx: 0, dy: 0, dtMs: 0 });
     this.cameraPanLayer?.resetFollow();
     this.mmMarker?.setPosition(snapshot.x, snapshot.y);
+    this.minimapLayer?.show(snapshot);
     this.localPositionReady = true;
   }
 
@@ -1813,6 +1815,7 @@ export class OfficeScene extends Phaser.Scene {
       this.buildTerrainColliders(this.grid);
       this.paintTerrain();
       this.cameraPanLayer?.setRegion(this.cameraRegion());
+      this.minimapLayer?.setRegion(this.cameraRegion());
     }
     this.emitTerrain();
   }
@@ -1917,13 +1920,18 @@ export class OfficeScene extends Phaser.Scene {
       MINIMAP_WIDTH,
       MINIMAP_HEIGHT,
     );
-    minimap.setZoom(Math.min(MINIMAP_WIDTH / WORLD_W, MINIMAP_HEIGHT / WORLD_H));
-    minimap.centerOn(WORLD_W / 2, WORLD_H / 2);
     minimap.setBackgroundColor(VOID_COLOR);
     this.minimapCamera = minimap;
 
     this.mmMarker = this.add.circle(0, 0, 42, 0xffffff, 0.45).setDepth(MINIMAP_MARKER_DEPTH);
     cam.ignore(this.mmMarker);
+    this.minimapLayer = new MinimapLayer({
+      scene: this,
+      camera: minimap,
+      region: this.cameraRegion(),
+      center: { x: this.player.x, y: this.player.y },
+      marker: this.mmMarker,
+    });
 
     this.scale.on('resize', (gameSize: Phaser.Structs.Size) => {
       minimap.setPosition(gameSize.width - (MINIMAP_WIDTH + RAIL_RIGHT), MINIMAP_MARGIN);
