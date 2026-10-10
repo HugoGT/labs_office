@@ -29,6 +29,12 @@ export interface AdminUser {
    * panel only uses it to show the button; the server checks it again.
    */
   removable: boolean;
+  /**
+   * Whether the caller may give this user access back: `canRemove` for the
+   * caller AND the user is revoked, or a guest whose access expired. Decided
+   * by the server, like `removable`; the panel only shows "Renovar acceso".
+   */
+  renewable: boolean;
 }
 
 export interface UsersAdminPort {

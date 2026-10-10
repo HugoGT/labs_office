@@ -15,6 +15,7 @@ const SUPER: AdminUser = {
   expiresAt: null,
   daysLeft: null,
   removable: false,
+  renewable: false,
 };
 const ANA: AdminUser = {
   ...SUPER,
@@ -211,5 +212,75 @@ describe('UsersPanel (#93): removing access', () => {
     await user.click(row('ana@example.com').getByRole('button', { name: 'Sí, quitar acceso' }));
 
     expect(await screen.findByRole('alert')).toBeInTheDocument();
+  });
+});
+
+describe('UsersPanel: renewing access', () => {
+  const REVOKED_GUEST: AdminUser = {
+    ...GUEST,
+    id: 'u-revoked-guest',
+    email: 'quitado@example.com',
+    status: 'revoked',
+    removable: false,
+    renewable: true,
+  };
+  const REVOKED_STAFF: AdminUser = { ...GONE, renewable: true };
+
+  it('offers "Renovar acceso" only where the server says the caller can renew', async () => {
+    render(
+      <UsersPanel
+        users={fakeUsers({ listUsers: vi.fn(async () => [SUPER, ANA, GUEST, REVOKED_STAFF, REVOKED_GUEST]) })}
+        onRenew={vi.fn()}
+      />,
+    );
+    await screen.findByText('hugo@example.com');
+
+    expect(row('gone@example.com').getByRole('button', { name: 'Renovar acceso' })).toBeInTheDocument();
+    expect(row('quitado@example.com').getByRole('button', { name: 'Renovar acceso' })).toBeInTheDocument();
+    for (const email of ['hugo@example.com', 'ana@example.com', 'externo@example.com']) {
+      expect(row(email).queryByRole('button', { name: 'Renovar acceso' })).toBeNull();
+    }
+  });
+
+  it('is not the red revoke button', async () => {
+    render(
+      <UsersPanel users={fakeUsers({ listUsers: vi.fn(async () => [ANA, REVOKED_GUEST]) })} onRenew={vi.fn()} />,
+    );
+    await screen.findByText('quitado@example.com');
+
+    const renew = row('quitado@example.com').getByRole('button', { name: 'Renovar acceso' });
+    const revoke = row('ana@example.com').getByRole('button', { name: 'Quitar acceso' });
+    expect(renew.className).not.toBe(revoke.className);
+  });
+
+  it('clicking it hands the row up to whoever owns the forms', async () => {
+    const user = userEvent.setup();
+    const onRenew = vi.fn();
+    render(
+      <UsersPanel users={fakeUsers({ listUsers: vi.fn(async () => [REVOKED_GUEST]) })} onRenew={onRenew} />,
+    );
+    await screen.findByText('quitado@example.com');
+
+    await user.click(row('quitado@example.com').getByRole('button', { name: 'Renovar acceso' }));
+
+    expect(onRenew).toHaveBeenCalledWith(REVOKED_GUEST);
+  });
+
+  it('without anyone to hand it to, there is no button', async () => {
+    render(<UsersPanel users={fakeUsers({ listUsers: vi.fn(async () => [REVOKED_GUEST]) })} />);
+    await screen.findByText('quitado@example.com');
+
+    expect(row('quitado@example.com').queryByRole('button', { name: 'Renovar acceso' })).toBeNull();
+  });
+
+  it('reads the list again when the forms above say an account changed', async () => {
+    const users = fakeUsers();
+    const { rerender } = render(<UsersPanel users={users} version={0} />);
+    await screen.findByText('hugo@example.com');
+    expect(users.listUsers).toHaveBeenCalledTimes(1);
+
+    rerender(<UsersPanel users={users} version={1} />);
+
+    await waitFor(() => expect(users.listUsers).toHaveBeenCalledTimes(2));
   });
 });

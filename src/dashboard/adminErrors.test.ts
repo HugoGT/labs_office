@@ -7,6 +7,7 @@ const CODES: AdminErrorCode[] = [
   'forbidden',
   'invalid-request',
   'conflict',
+  'revoked-staff',
   'not-found',
   'desk-overlap',
   'desk-space-overlap',
@@ -80,6 +81,13 @@ describe('describeAdminError', () => {
     for (const code of ['invalid-request', 'conflict'] as const) {
       expect(describeAdminError(new AdminError(code))).not.toMatch(/invitaci/i);
     }
+  });
+
+  it('inviting revoked staff points to the way back in, not to a dead end', () => {
+    const message = describeAdminError(new AdminError('revoked-staff'));
+
+    expect(message).toMatch(/Renovar acceso/);
+    expect(message).toMatch(/Usuarios/);
   });
 
   it('el 400 tampoco nombra un alta: tambien lo dan mover y retirar', () => {

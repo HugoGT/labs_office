@@ -239,6 +239,27 @@
   cursor: not-allowed;
 }
 
+/* Giving access back: the panel's blue, never the red of taking it away. */
+.renew {
+  background: #1e3a8a66;
+  color: #bfdbfe;
+  border: 1px solid #3b82f6;
+  border-radius: var(--radius-control);
+  padding: 5px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.renew:hover:not(:disabled) {
+  background: #1e3a8aaa;
+}
+
+.renew:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 .empty {
   margin: 0;
   font-size: 13px;

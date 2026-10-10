@@ -41,6 +41,9 @@ function toAdminUser(raw: unknown): AdminUser | null {
   if (!isString(row.createdAt) || !isStringOrNull(row.expiresAt)) return null;
   if (row.daysLeft !== null && typeof row.daysLeft !== 'number') return null;
   if (typeof row.removable !== 'boolean') return null;
+  // Absent (a server from before the flag) reads as false; present, it has
+  // to be a boolean like `removable`.
+  if (row.renewable !== undefined && typeof row.renewable !== 'boolean') return null;
 
   return {
     id: row.id,
@@ -52,6 +55,7 @@ function toAdminUser(raw: unknown): AdminUser | null {
     expiresAt: row.expiresAt,
     daysLeft: row.daysLeft as number | null,
     removable: row.removable,
+    renewable: (row.renewable as boolean | undefined) ?? false,
   };
 }
 

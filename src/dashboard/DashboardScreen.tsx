@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { describeAdminError } from './adminErrors';
 import {
   AdminError,
@@ -63,6 +63,26 @@ export function describeUnchangedAccount(account: UnchangedAccount, invitation: 
   return invitation ? `${already}: no hace falta invitarlo.` : `${already}.`;
 }
 
+/**
+ * A row of the users table whose access the admin asked to renew. The
+ * `requestId` changes on every click, so asking again for the same person
+ * fills and focuses the form again.
+ */
+export interface RenewTarget {
+  email: string;
+  role: Role;
+  requestId: number;
+}
+
+/**
+ * Brings a form into view and focuses the field still to decide when a renew
+ * request arrives. `scrollIntoView` is optional: jsdom has none.
+ */
+function revealForm(form: HTMLFormElement | null, field: HTMLElement | null): void {
+  form?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+  field?.focus({ preventScroll: true });
+}
+
 export interface InviteFormProps {
   /** Devuelve `true` si la invitacion se creo; solo entonces se limpia. */
   onSubmit: (email: string, days: number) => Promise<boolean>;
@@ -71,6 +91,8 @@ export interface InviteFormProps {
   error: string | null;
   /** Informative, not an error: the email already has that access (#125). */
   notice?: string | null;
+  /** "Renovar acceso" on a guest: fill the email and focus the days. */
+  prefill?: { email: string; requestId: number } | null;
 }
 
 /**
@@ -78,9 +100,21 @@ export interface InviteFormProps {
  * avisa hacia arriba. Es un `<form>` de verdad, como `LoginScreen`, para que
  * Enter envie y el navegador valide los campos obligatorios.
  */
-export function InviteForm({ onSubmit, pending, error, notice = null }: InviteFormProps) {
+export function InviteForm({ onSubmit, pending, error, notice = null, prefill = null }: InviteFormProps) {
   const [email, setEmail] = useState('');
   const [days, setDays] = useState(DEFAULT_DAYS);
+  const formRef = useRef<HTMLFormElement>(null);
+  const daysRef = useRef<HTMLInputElement>(null);
+
+  // Keyed on the request, not the object: a new object every render of the
+  // parent would refill the field while the admin types in it. A layout
+  // effect so the form never paints empty before it is filled.
+  const prefillRequest = prefill?.requestId;
+  useLayoutEffect(() => {
+    if (prefill === null) return;
+    setEmail(prefill.email);
+    revealForm(formRef.current, daysRef.current);
+  }, [prefillRequest]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     // Sin esto el navegador navegaria a la misma URL y se perderia el estado.
@@ -96,7 +130,7 @@ export function InviteForm({ onSubmit, pending, error, notice = null }: InviteFo
   }
 
   return (
-    <form className={styles.form} onSubmit={handleSubmit}>
+    <form className={styles.form} onSubmit={handleSubmit} ref={formRef}>
       <div className={`${styles.field} ${styles.emailField}`}>
         <label className={styles.label} htmlFor="invite-email">
           Correo
@@ -121,6 +155,7 @@ export function InviteForm({ onSubmit, pending, error, notice = null }: InviteFo
         <input
           className={`${styles.input} ${styles.daysInput}`}
           id="invite-days"
+          ref={daysRef}
           type="number"
           min={MIN_DAYS}
           max={MAX_DAYS}
@@ -161,6 +196,8 @@ export interface UserFormProps {
    * mira, solo si esa opcion se pinta (D3).
    */
   canCreateAdmins: boolean;
+  /** "Renovar acceso" on staff: fill the email and the previous role. */
+  prefill?: { email: string; role: AssignableRole; requestId: number } | null;
 }
 
 /**
@@ -175,9 +212,27 @@ export interface UserFormProps {
  * a un admin que intente crear otro admin. Esto solo evita ofrecer una opcion
  * que a esa persona le va a fallar siempre.
  */
-export function UserForm({ onSubmit, pending, error, notice = null, canCreateAdmins }: UserFormProps) {
+export function UserForm({
+  onSubmit,
+  pending,
+  error,
+  notice = null,
+  canCreateAdmins,
+  prefill = null,
+}: UserFormProps) {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<AssignableRole>('employee');
+  const formRef = useRef<HTMLFormElement>(null);
+  const roleRef = useRef<HTMLSelectElement>(null);
+
+  // Same keying and timing as `InviteForm`: only a new request refills.
+  const prefillRequest = prefill?.requestId;
+  useLayoutEffect(() => {
+    if (prefill === null) return;
+    setEmail(prefill.email);
+    setRole(prefill.role);
+    revealForm(formRef.current, roleRef.current);
+  }, [prefillRequest]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     // Sin esto el navegador navegaria a la misma URL y se perderia el estado.
@@ -193,7 +248,7 @@ export function UserForm({ onSubmit, pending, error, notice = null, canCreateAdm
   }
 
   return (
-    <form className={styles.form} onSubmit={handleSubmit}>
+    <form className={styles.form} onSubmit={handleSubmit} ref={formRef}>
       <div className={`${styles.field} ${styles.emailField}`}>
         <label className={styles.label} htmlFor="user-email">
           Correo
@@ -216,6 +271,7 @@ export function UserForm({ onSubmit, pending, error, notice = null, canCreateAdm
         <select
           className={`${styles.input} ${styles.roleSelect}`}
           id="user-role"
+          ref={roleRef}
           value={role}
           onChange={(event) => setRole(event.target.value as AssignableRole)}
         >
@@ -249,7 +305,14 @@ export interface AccountCreatedProps {
    * cuenta y solo se diferencian en si hay fecha de vencimiento, asi que pedir
    * lo minimo que hace falta para pintarla evita un segundo panel identico.
    */
-  created: { email: string; expiresAt: string | null; emailSent: boolean; convertedTo?: Role };
+  created: {
+    email: string;
+    expiresAt: string | null;
+    emailSent: boolean;
+    convertedTo?: Role;
+    /** A revoked guest got its access back: no account was created. */
+    restored?: boolean;
+  };
   onResend: () => void;
   /** `true` while a re-send is in flight. */
   resending: boolean;
@@ -269,13 +332,17 @@ export function AccountCreated({ created, onResend, resending, error, onDismiss 
     <section className={styles.secret} aria-labelledby="cuenta-creada" aria-live="polite">
       <h2 className={styles.secretTitle} id="cuenta-creada">
         {/* #125: an existing row was converted, so no account was created. */}
-        {created.convertedTo === undefined
-          ? `Cuenta creada para ${created.email}`
-          : `${created.email} ahora es ${ROLE_LABELS[created.convertedTo]}`}
+        {created.restored === true
+          ? `Acceso renovado para ${created.email}`
+          : created.convertedTo === undefined
+            ? `Cuenta creada para ${created.email}`
+            : `${created.email} ahora es ${ROLE_LABELS[created.convertedTo]}`}
       </h2>
       {created.emailSent ? (
         <p className={styles.secretWarning}>
-          Enviamos un correo a {created.email} para que cree su contraseña. Nadie más la conoce.
+          {created.restored === true
+            ? `Su contraseña de antes vuelve a servir. Enviamos a ${created.email} un correo para cambiarla si no la recuerda.`
+            : `Enviamos un correo a ${created.email} para que cree su contraseña. Nadie más la conoce.`}
         </p>
       ) : (
         // `role="alert"`: the admin has to act on it, and it appears away from
@@ -323,6 +390,13 @@ export interface DashboardScreenProps {
    * panel la repitiese por su cuenta seria la copia que un dia se olvida.
    */
   children?: ReactNode;
+  /**
+   * "Renovar acceso" from the users table, lifted by the composition root:
+   * a guest fills "Invitaciones", staff fill "Nuevo usuario".
+   */
+  renewTarget?: RenewTarget | null;
+  /** Called after a form changed an account, so the users table re-reads. */
+  onAccountsChanged?: () => void;
 }
 
 type Phase = 'loading' | 'denied' | 'failed' | 'ready';
@@ -335,7 +409,12 @@ type Phase = 'loading' | 'denied' | 'failed' | 'ready';
  * Lo que se ve al llegar sale de `session()`, es decir del SERVIDOR: el rol no
  * se deduce del ID token en el navegador, que es manipulable.
  */
-export function DashboardScreen({ admin, children }: DashboardScreenProps) {
+export function DashboardScreen({
+  admin,
+  children,
+  renewTarget = null,
+  onAccountsChanged,
+}: DashboardScreenProps) {
   const [session, setSession] = useState<AdminSession | null>(null);
   const [phase, setPhase] = useState<Phase>('loading');
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -408,12 +487,19 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
     setCreating(true);
     try {
       const invitation = await admin.createInvitation(email, days);
-      if ('outcome' in invitation) {
+      if (invitation.outcome === 'unchanged') {
         setInviteNotice(describeUnchangedAccount(invitation, true));
         return true;
       }
       setCreatedError(null);
-      setCreated(invitation);
+      setCreated({
+        id: invitation.id,
+        email: invitation.email,
+        expiresAt: invitation.expiresAt,
+        emailSent: invitation.emailSent,
+        restored: invitation.outcome === 'restored',
+      });
+      onAccountsChanged?.();
       return true;
     } catch (error) {
       setActionError(describeAdminError(error));
@@ -443,6 +529,7 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
         expiresAt: null,
         convertedTo: user.outcome === 'converted' ? user.role : undefined,
       });
+      onAccountsChanged?.();
       return true;
     } catch (error) {
       setUserError(describeAdminError(error));
@@ -563,6 +650,11 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
             // El rol de quien mira lo dice el SERVIDOR (`session()`), no el ID
             // token del navegador, que es manipulable.
             canCreateAdmins={session.role === 'superadmin'}
+            prefill={
+              renewTarget !== null && (renewTarget.role === 'employee' || renewTarget.role === 'admin')
+                ? { email: renewTarget.email, role: renewTarget.role, requestId: renewTarget.requestId }
+                : null
+            }
           />
         </section>
 
@@ -578,6 +670,11 @@ export function DashboardScreen({ admin, children }: DashboardScreenProps) {
             pending={creating}
             error={actionError}
             notice={inviteNotice}
+            prefill={
+              renewTarget?.role === 'guest'
+                ? { email: renewTarget.email, requestId: renewTarget.requestId }
+                : null
+            }
           />
         </section>
 

@@ -1,10 +1,11 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OfficeSession } from '../auth/authPort';
 import { createAdminClient } from './adminClient';
 import type { AdminPort } from './adminPort';
 import { createUsersAdminClient } from './usersAdminClient';
-import type { UsersAdminPort } from './usersAdminPort';
+import type { AdminUser, UsersAdminPort } from './usersAdminPort';
 import DashboardRoute from './DashboardRoute';
 
 // El adaptador real habla HTTP; aqui solo importa con que se construye y que
@@ -155,5 +156,48 @@ describe('DashboardRoute: users panel (#93)', () => {
     render(<DashboardRoute session={fakeSession()} />);
 
     expect(await screen.findByRole('region', { name: 'Usuarios' })).toBeInTheDocument();
+  });
+});
+
+describe('DashboardRoute: "Renovar acceso" reaches the forms above', () => {
+  const REVOKED_GUEST: AdminUser = {
+    id: 'u-guest',
+    email: 'externo@example.com',
+    displayName: null,
+    role: 'guest',
+    status: 'revoked',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    expiresAt: '2026-02-01T00:00:00.000Z',
+    daysLeft: 0,
+    removable: false,
+    renewable: true,
+  };
+
+  it('fills the invitation form, and the list is read again after inviting', async () => {
+    const user = userEvent.setup();
+    const users = fakeUsersPort();
+    vi.mocked(users.listUsers).mockResolvedValue([REVOKED_GUEST]);
+    createUsersAdminClientMock.mockReturnValue(users);
+    const admin = fakePort();
+    vi.mocked(admin.createInvitation).mockResolvedValue({
+      id: 'u-guest',
+      email: 'externo@example.com',
+      expiresAt: '2026-09-24T00:00:00.000Z',
+      emailSent: true,
+      outcome: 'restored',
+    });
+    createAdminClientMock.mockReturnValue(admin);
+    render(<DashboardRoute session={fakeSession()} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Renovar acceso' }));
+
+    const invitations = within(screen.getByRole('region', { name: /^invitaciones$/i }));
+    expect(invitations.getByLabelText(/correo/i)).toHaveValue('externo@example.com');
+    expect(invitations.getByLabelText(/días/i)).toHaveFocus();
+
+    await user.click(invitations.getByRole('button', { name: /invitar/i }));
+
+    expect(admin.createInvitation).toHaveBeenCalledWith('externo@example.com', 7);
+    await waitFor(() => expect(users.listUsers).toHaveBeenCalledTimes(2));
   });
 });

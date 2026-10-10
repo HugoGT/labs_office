@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { describeAdminError } from './adminErrors';
 import type { Role } from './adminPort';
 import { formatUtcDate } from './DashboardScreen';
@@ -13,6 +13,11 @@ import styles from './DashboardScreen.module.css';
  * The button shows only where the server said `removable`, which is
  * `canRemove` evaluated for the caller. That hides what would end in a 403;
  * it protects nothing, and the revoke route checks the rule again.
+ *
+ * "Renovar acceso" shows where the server said `renewable`. It changes
+ * nothing by itself: it hands the row up (`onRenew`) so the screen fills the
+ * form that gives that access back, "Invitaciones" for a guest and "Crear
+ * usuario" for staff, and the admin still confirms there.
  */
 
 const ROLE_LABELS: Readonly<Record<Role, string>> = {
@@ -51,6 +56,8 @@ export interface UsersTableProps {
   onAskRevoke: (id: string) => void;
   onCancelRevoke: () => void;
   onRevoke: (id: string) => void;
+  /** Absent: nobody owns the forms, so there is no "Renovar acceso". */
+  onRenew?: (user: AdminUser) => void;
 }
 
 /** Users table. Presentational: plain props and callbacks up. */
@@ -61,6 +68,7 @@ export function UsersTable({
   onAskRevoke,
   onCancelRevoke,
   onRevoke,
+  onRenew,
 }: UsersTableProps) {
   if (users.length === 0) {
     return <p className={styles.empty}>Todavía no hay usuarios en el directorio.</p>;
@@ -103,6 +111,16 @@ export function UsersTable({
                   )}
                 </td>
                 <td>
+                  {user.renewable && onRenew !== undefined && (
+                    <button
+                      className={styles.renew}
+                      type="button"
+                      disabled={busyId !== null}
+                      onClick={() => onRenew(user)}
+                    >
+                      Renovar acceso
+                    </button>
+                  )}
                   {!user.removable ? null : confirmingId === user.id ? (
                     <>
                       <span className={styles.confirmNote}>
@@ -143,11 +161,18 @@ export function UsersTable({
 export interface UsersPanelProps {
   /** Port already built (`DashboardRoute`); this panel knows nothing of HTTP. */
   users: UsersAdminPort;
+  /** "Renovar acceso" on a row: the composition root fills the right form. */
+  onRenew?: (user: AdminUser) => void;
+  /**
+   * Bumped by the composition root when a form above changed an account:
+   * every change reads the list again (see `refresh`).
+   */
+  version?: number;
 }
 
 type Phase = 'loading' | 'failed' | 'ready';
 
-export function UsersPanel({ users }: UsersPanelProps) {
+export function UsersPanel({ users, onRenew, version = 0 }: UsersPanelProps) {
   const [list, setList] = useState<AdminUser[]>([]);
   const [phase, setPhase] = useState<Phase>('loading');
   const [error, setError] = useState<string | null>(null);
@@ -191,6 +216,15 @@ export function UsersPanel({ users }: UsersPanelProps) {
       setError(describeAdminError(loadError));
     }
   }
+
+  // Not on mount: the load above already reads the list once.
+  const seenVersion = useRef(version);
+  useEffect(() => {
+    if (seenVersion.current === version) return;
+    seenVersion.current = version;
+    void handleRefresh();
+    // `handleRefresh` is recreated every render; only the version matters.
+  }, [version]);
 
   async function handleRevoke(id: string): Promise<void> {
     setError(null);
@@ -238,6 +272,7 @@ export function UsersPanel({ users }: UsersPanelProps) {
             onAskRevoke={setConfirmingId}
             onCancelRevoke={() => setConfirmingId(null)}
             onRevoke={(id) => void handleRevoke(id)}
+            onRenew={onRenew}
           />
         </>
       )}

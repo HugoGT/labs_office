@@ -72,6 +72,23 @@ function codeForStatus(status: number): AdminErrorCode {
   }
 }
 
+/**
+ * The one 409 that is fixed differently: inviting revoked staff
+ * (`revoked-staff`) is answered with "Renovar acceso", not with another
+ * email. Only a 409 body is read; any other status keeps its fixed code.
+ */
+async function codeForRefusal(response: Response): Promise<AdminErrorCode> {
+  if (response.status === 409) {
+    try {
+      const body = (await response.json()) as { error?: unknown } | null;
+      if (body?.error === 'revoked-staff') return 'revoked-staff';
+    } catch {
+      // A 409 without a JSON body is still a conflict.
+    }
+  }
+  return codeForStatus(response.status);
+}
+
 export function createAdminClient(
   { baseUrl, getIdToken }: AdminClientOptions,
   fetchImpl: typeof fetch = fetch,
@@ -97,7 +114,7 @@ export function createAdminClient(
       throw new AdminError('network');
     }
 
-    if (!response.ok) throw new AdminError(codeForStatus(response.status));
+    if (!response.ok) throw new AdminError(await codeForRefusal(response));
 
     try {
       return (await response.json()) as T;
