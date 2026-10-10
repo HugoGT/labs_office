@@ -175,7 +175,14 @@ export function BottomBar({
             title={audioTitle}
             onClick={onToggleCam}
           >
-            {camOn ? '📷 Cámara' : '🚫 Cámara'}
+            {/* Segoe UI Emoji (Windows) draws this one glyph low on the line. */}
+            {camOn ? (
+              <>
+                <span className={styles.liftedIcon}>📷</span> Cámara
+              </>
+            ) : (
+              '🚫 Cámara'
+            )}
           </button>
           <CameraFilterMenu
             filter={cameraFilter}

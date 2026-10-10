@@ -180,9 +180,12 @@ describe('HUD layout: camera filter caret', () => {
       const mic = contentGaps(screen.getByRole('button', { name: /Mic/ }));
       const cam = contentGaps(camera);
       expect(cam.left).toBeCloseTo(cam.right, 1);
-      expect(cam.top).toBeCloseTo(cam.bottom, 1);
       expect(cam.left).toBeCloseTo(mic.left, 1);
       expect(cam.right).toBeCloseTo(mic.right, 1);
+      // Vertically the line is Mic's, except the active camera emoji lifted
+      // 2px on purpose (Segoe UI Emoji draws it low).
+      expect(cam.bottom).toBeCloseTo(mic.bottom, 1);
+      expect(cam.top).toBeCloseTo(mic.top - 2, 1);
 
       await userEvent.click(caret);
       const menu = box(screen.getByRole('menu', { name: 'Filtro de cámara' }));

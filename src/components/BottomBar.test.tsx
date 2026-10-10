@@ -6,6 +6,7 @@ import { DEFAULT_NAME } from '../game/officeProtocol';
 import { STATUS_COLOR, statusCssColor } from '../game/presence';
 import type { OfficeEventMap } from '../game/officeBridge';
 import { BottomBar } from './BottomBar';
+import styles from './BottomBar.module.css';
 
 /** Modo solitario: sin endpoint configurado, no hay nada que reintentar. */
 const OFFLINE_SOLO: OfficeEventMap['presence'] = {
@@ -672,5 +673,28 @@ describe('BottomBar: camera filter caret', () => {
     const caret = screen.getByRole('button', { name: 'Opciones de cámara' });
     expect(caret).toBeDisabled();
     expect(caret).toHaveAttribute('title', title);
+  });
+});
+
+describe('BottomBar: active camera emoji', () => {
+  it('lifts only the camera-on glyph, keeping the accessible name', () => {
+    renderBar({ camOn: true });
+
+    const camera = screen.getByRole('button', { name: '📷 Cámara' });
+    const lifted = camera.querySelectorAll('span');
+    expect(lifted).toHaveLength(1);
+    expect(lifted[0]).toHaveTextContent('📷');
+    expect(styles.liftedIcon).toBeTruthy();
+    expect(lifted[0]).toHaveClass(styles.liftedIcon);
+  });
+
+  it('renders the camera-off glyph and the other buttons as plain text, as before', () => {
+    renderBar({ camOn: false, micOn: true, screenShareOn: false });
+
+    expect(screen.getByRole('button', { name: '🚫 Cámara' }).querySelector('span')).toBeNull();
+    for (const name of ['🎙️ Mic', '🖥️ Compartir', '⏺ Grabar']) {
+      expect(screen.getByRole('button', { name }).querySelector('span')).toBeNull();
+    }
+    expect(document.querySelector(`.${styles.liftedIcon}`)).toBeNull();
   });
 });
