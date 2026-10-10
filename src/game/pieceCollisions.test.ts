@@ -208,6 +208,23 @@ describe('pieceCollisions: instances', () => {
     expect(instances.filter((instance) => instance.piece === BASE_CHAIR_PIECE)).toHaveLength(BASE_MAP_SEATS.length);
   });
 
+  it('places a decor chair 1:1 on its slot box middle, turned like a placed chair with that facing', () => {
+    const desk = { x: 320, y: 160, w: 96, h: 96, materialId: 'desk-oak', items: [
+      { slot: 8, rotation: 90, pieceId: 'chair-gamer' },
+      { slot: 0, rotation: 180, pieceId: 'chair-wood' },
+    ] };
+    const [, right, up] = deskInstances([desk]);
+    const box = deskSlotRect(desk, 8)!;
+    const [placed] = placedChairInstances([{ index: 0, piece: 'chair-gamer', facing: 'right' }], 1);
+
+    expect(right).toMatchObject({ piece: 'chair-gamer', pivot: { x: box.x + 16, y: box.y + 16 }, rotation: 90, scale: { x: 1, y: 1 }, offset: { x: 0, y: 0 }, defaults: [], pickBox: { x: box.x, y: box.y, w: 32, h: 32 } });
+    // The facing picks a drawing, so up keeps the down rectangles, exactly as a placed chair facing up.
+    expect(up).toMatchObject({ piece: 'chair-wood', rotation: rotationForFacing('up') });
+    const table = new Map([['chair-gamer', [{ x: -6, y: -10, w: 12, h: 4 }]]]);
+    const shift = { x: right!.pivot.x - placed!.pivot.x, y: right!.pivot.y - placed!.pivot.y };
+    expect(worldRectsOf(right!, table)).toEqual(worldRectsOf(placed!, table).map((rect) => ({ ...rect, x: rect.x + shift.x, y: rect.y + shift.y })));
+  });
+
   it('skips a desk without a material', () => {
     expect(deskInstances([{ x: 0, y: 0, w: 96, h: 96, materialId: null, items: [] }])).toEqual([]);
   });

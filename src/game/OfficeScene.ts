@@ -119,6 +119,13 @@ import {
   chairGround,
   chairSeatId,
   chairSeatTiles,
+  decorChairAt,
+  decorChairPiece,
+  decorChairs,
+  decorSeatFacing,
+  decorSeatGround,
+  decorSeatId,
+  decorSeatTiles,
   deskSeatId,
   deskSeatTiles,
   encodeTerrainChairs,
@@ -1071,8 +1078,9 @@ export class OfficeScene extends Phaser.Scene {
 
   /**
    * A seat by reference (step 6): a base map chair, a chair placed from the
-   * terrain editor the room replicated, or the chair of a desk in the last
-   * `desks` list. `null` when this client cannot place it.
+   * terrain editor the room replicated, or the chair of a desk or a decor
+   * chair of its occupant in the last `desks` list. `null` when this client
+   * cannot place it.
    */
   private resolveSeat(id: string): ResolvedSeat | null {
     const ref = parseSeatRef(id, this.mapSeats.length);
@@ -1088,6 +1096,12 @@ export class OfficeScene extends Phaser.Scene {
       return { id, ground: chairGround(width, chair.index), facing: chair.facing, reach: chairSeatTiles(width, chair.index) };
     }
     const desk = this.desks.find((candidate) => candidate.id === ref.deskId);
+    if (ref.kind === 'decor') {
+      const chair = desk === undefined ? null : decorChairAt(desk.occupant?.items ?? [], ref.slot);
+      if (desk === undefined || chair === null) return null;
+      const origin = { x: desk.x / TILE, y: desk.y / TILE };
+      return { id, ground: decorSeatGround(origin, ref.slot), facing: chair.facing, reach: decorSeatTiles(origin, ref.slot) };
+    }
     return desk === undefined ? null : this.deskSeat(desk);
   }
 
@@ -1127,7 +1141,7 @@ export class OfficeScene extends Phaser.Scene {
     return best;
   }
 
-  /** Every seat no peer sits on: map chairs, placed chairs and the desks this player may use. */
+  /** Every seat no peer sits on: map chairs, placed chairs, the desks this player may use and every decor chair. */
   private freeSeats(): ResolvedSeat[] {
     const taken = new Set<string>();
     for (const sessionId of this.remotes?.sessionIds() ?? []) {
@@ -1145,6 +1159,11 @@ export class OfficeScene extends Phaser.Scene {
     }
     for (const desk of this.desks) {
       if (desk.occupant === null || desk.mine) candidates.push(this.deskSeat(desk));
+      // Decor chairs are guest seats: offered whoever owns the desk.
+      for (const { slot } of decorChairs(desk.occupant?.items ?? [])) {
+        const seat = this.resolveSeat(decorSeatId(desk.id, slot));
+        if (seat) candidates.push(seat);
+      }
     }
     return candidates.filter((seat) => !taken.has(seat.id));
   }
@@ -1402,6 +1421,30 @@ export class OfficeScene extends Phaser.Scene {
     this.refreshCollisions();
     for (const object of this.deskObjects.splice(0)) object.destroy();
     for (const desk of desks) this.drawDesk(desk);
+    this.recheckDecorSeat();
+  }
+
+  /**
+   * A decor chair the local player sits on that the new desks list no longer
+   * has (removed, replaced, moved to another slot, or gone with its desk or occupant) stands
+   * them up here, without waiting for the room's own answer; a turned one
+   * turns them. A pending request for one that is gone is forgotten.
+   */
+  private recheckDecorSeat(): void {
+    const isDecor = (id: string | null | undefined): id is string =>
+      typeof id === 'string' && parseSeatRef(id, this.mapSeats.length)?.kind === 'decor';
+    if (this.seat !== null && isDecor(this.seat.id)) {
+      const seat = this.resolveSeat(this.seat.id);
+      if (seat === null) {
+        this.leaveSeat();
+      } else if (seat.facing !== this.seat.facing) {
+        this.seat = seat;
+        this.facing = seat.facing;
+        setCharacterFacing(this.player, seat.facing);
+        this.player.seatFacing = seat.facing;
+      }
+    }
+    if (isDecor(this.pendingSeat) && this.resolveSeat(this.pendingSeat) === null) this.pendingSeat = null;
   }
 
   /**
@@ -1554,8 +1597,10 @@ export class OfficeScene extends Phaser.Scene {
       // A special piece (#71) keeps the same bottom edge but moves to the band
       // above avatars, so it covers whoever walks through the desk.
       const itemDepth = item.aboveAvatars ? specialAssetDepth(bottom) : depth;
+      const chair = decorChairPiece(item.textureKey);
+      const chairLayers = chair === null ? null : this.drawDecorChair(item.id, chair, item.rotation, box);
       this.deskObjects.push(
-        this.drawDeskItem(item.id, item.textureKey, item.rotation, box, itemDepth),
+        ...(chairLayers ?? [this.drawDeskItem(item.id, item.textureKey, item.rotation, box, itemDepth)]),
       );
     }
 
@@ -1582,6 +1627,27 @@ export class OfficeScene extends Phaser.Scene {
         action: mine ? 'release' : 'claim',
       });
     });
+  }
+
+  /**
+   * A decor chair (a guest seat): drawn like a placed chair, 1:1 in both
+   * layers on the middle of its slot box in the facing its rotation picks,
+   * never squeezed into the box, so whoever sits on it sits between its
+   * layers. `null` while its sheet is not loaded: the caller draws the decor
+   * fallback, and the sheet's arrival redraws the desks.
+   */
+  private drawDecorChair(
+    itemId: string,
+    pieceId: string,
+    rotation: number,
+    box: { x: number; y: number; w: number; h: number },
+  ): Phaser.GameObjects.GameObject[] | null {
+    const sheet = this.artSheet({ materialId: pieceId, color: null }, 'chair', this.redrawDesks);
+    if (sheet === null || sheet.piece.kind !== 'chair') return null;
+    const ground = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+    return putChair(this, sheet.key, chairPlacement(sheet.piece, decorSeatFacing(rotation), ground)).map((layer) =>
+      layer.setName(deskItemName(itemId)),
+    );
   }
 
   /**

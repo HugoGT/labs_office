@@ -27,8 +27,8 @@ import {
 } from './depthLayers';
 import { feetOf, physicalBodyRect } from './avatarGeometry';
 import { BODY_CENTER_OFFSET, positionForBodyTile } from './pathfinding';
-import { chairSeatId, deskSeatId, mapSeatId } from './seating';
-import { deskFurnitureName, deskZoneName } from './deskLayout';
+import { chairSeatId, decorSeatId, deskSeatId, mapSeatId } from './seating';
+import { deskFurnitureName, deskItemName, deskZoneName } from './deskLayout';
 import { artSheetKey, recoloredSheetKey } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
 import { deskAreaAnchor, deskPlacement, spaceFloorTiles } from './artPlacement';
@@ -4075,6 +4075,48 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
     bridge.emitCommand('toggleSeat', undefined);
 
     expect(connector.sits).toEqual([]);
+  });
+
+  it('offers a decor chair of a desk someone else claimed as a guest seat, drawn in its slot, and stands up when it goes', async () => {
+    const { connector, scene, player } = await connected();
+    const bridge = (scene as unknown as { bridge: ReturnType<typeof createOfficeBridge> }).bridge;
+    const decorChair = { id: 'item-silla', slot: 8, rotation: 90 as const, textureKey: artSheetKey('chair-gamer', 'sheet'), aboveAvatars: false };
+    const desk: OfficeDesk = {
+      id: 'id-mesa-ajena',
+      label: 'Mesa 2',
+      x: 10 * TILE,
+      y: 30 * TILE,
+      w: 3 * TILE,
+      h: 3 * TILE,
+      occupant: { id: 'id-otra', displayName: 'Otra', items: [decorChair] },
+      mine: false,
+    };
+    // Slot 8 is the bottom right box of the 3x3 desk: tile (12, 32).
+    const ground = { x: 12.5 * TILE, y: 32.5 * TILE };
+    const gamerLayers = () =>
+      scene.children.list.filter(
+        (c) => c.type === 'Image' && (c as Phaser.GameObjects.Image).texture.key === artSheetKey('chair-gamer', 'sheet'),
+      ) as Phaser.GameObjects.Image[];
+    bridge.emitCommand('desks', { desks: [desk] });
+    await vi.waitFor(() => expect(gamerLayers()).toHaveLength(2), LOOP_WAIT);
+    // Both layers around the chair ground, like any other chair, facing right (rotation 90).
+    expect(gamerLayers().map((layer) => layer.depth).sort((a, b) => a - b)).toEqual([
+      chairLayerDepth(ground.y, 'back'),
+      chairLayerDepth(ground.y, 'front'),
+    ]);
+    expect(gamerLayers().every((layer) => layer.name === deskItemName(decorChair.id))).toBe(true);
+
+    player.setPosition(ground.x, ground.y - TILE);
+    await advanceGameClock(scene, 50);
+    bridge.emitCommand('toggleSeat', undefined);
+    expect(connector.sits).toEqual([decorSeatId(desk.id, 8)]);
+    connector.handlers()!.onLocalSeat?.(decorSeatId(desk.id, 8));
+    expect(feetOf(player)).toEqual(ground);
+    expect(player.seatFacing).toBe('right');
+
+    bridge.emitCommand('desks', { desks: [{ ...desk, occupant: { ...desk.occupant!, items: [] } }] });
+    expect(player.seatFacing).toBeNull();
+    expect(gamerLayers()).toHaveLength(0);
   });
 
   it('publishes the pack portrait of the own session for the video tiles', async () => {

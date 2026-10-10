@@ -50,6 +50,19 @@ describe('officeCollisions', () => {
     expect(instances.at(-1)?.piece).toBe('desk-oak');
   });
 
+  it('collides with a decor chair once an admin gave its piece rectangles, nothing before', () => {
+    const served = desk({
+      occupant: { id: 'u1', displayName: null, items: [{ id: 'i1', slot: 8, rotation: 0, textureKey: 'art:chair-leather:sheet', aboveAvatars: false }] },
+    });
+    const instances = officeCollisionInstances([served]);
+
+    expect(instances.at(-1)).toMatchObject({ piece: 'chair-leather', pivot: { x: 320 + 80, y: 160 + 80 } });
+    expect(collisionWorld(instances.slice(-1), new Map())).toEqual([]);
+    expect(collisionWorld(instances.slice(-1), new Map([['chair-leather', [{ x: -8, y: -4, w: 16, h: 8 }]]]))).toEqual([
+      { piece: 'chair-leather', x: 392, y: 236, w: 16, h: 8 },
+    ]);
+  });
+
   it('adds the placed chairs last, each as its own piece', () => {
     const instances = officeCollisionInstances([desk()], undefined, undefined, [{ index: 5, piece: 'chair-gamer', facing: 'up' }]);
 

@@ -21,7 +21,7 @@
  */
 
 import { ART_CONTRACT_VERSION, artSheetKey, type ArtPackManifest, type ArtPiece } from '../../../src/game/artContract.ts';
-import { ArtPieceExistsError, artPieceFields, assertUploadedArtPiece, normalizeArtPack } from './artCatalogRules.ts';
+import { ArtPieceExistsError, artPieceFields, assertUploadedArtPiece, normalizeArtPack, packDecorAsset } from './artCatalogRules.ts';
 import {
   CONTRIBUTION_QUOTA_WINDOW_MS,
   assertContributionQuota,
@@ -174,6 +174,24 @@ const UPLOADED_ART_PIECE_RETIRE = `
 
 /** Archived, never deleted: whoever placed the plant keeps seeing it (D1b). */
 const DECOR_ASSET_ARCHIVE_BY_TEXTURE = 'UPDATE assets SET archived_at = now() WHERE texture_key = $1 AND archived_at IS NULL';
+
+/**
+ * The decor asset of a pack chair, at every registration. Keyed by texture:
+ * an asset of that texture, archived or not, is never recreated, so a restart
+ * neither duplicates it nor undoes an admin's archive. `ON CONFLICT DO
+ * NOTHING` covers `assets_slug_unique`: a name some other asset already took
+ * skips the chair rather than stopping the server. Casts because the values
+ * go through a SELECT, where Postgres would type them as text.
+ */
+const PACK_DECOR_ASSET_INSERT = `
+  INSERT INTO assets (slug, name, kind, texture_key, w, h, placeable_on_desk, above_avatars)
+  SELECT $1, $2, $3, $4, $5::int, $6::int, $7::boolean, $8::boolean
+  WHERE NOT EXISTS (SELECT 1 FROM assets WHERE texture_key = $4)
+  ON CONFLICT DO NOTHING
+`;
+
+/** The decor assets of the pieces a pack registration retired, like `DECOR_ASSET_ARCHIVE_BY_TEXTURE`. */
+const DECOR_ASSET_ARCHIVE_BY_TEXTURES = 'UPDATE assets SET archived_at = now() WHERE texture_key = ANY($1::text[]) AND archived_at IS NULL';
 
 const ASSET_INSERT = `
   INSERT INTO assets (slug, name, kind, texture_key, w, h, placeable_on_desk, above_avatars)
@@ -472,7 +490,26 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
           ]);
         }
         const retired = await client.query(ART_PIECE_RETIRE, [valid.pieces.map((piece) => piece.id)]);
-        return { registered: valid.pieces.length, retired: retired.rows.map((row) => row.id as string) };
+        const retiredIds = retired.rows.map((row) => row.id as string);
+        for (const piece of valid.pieces) {
+          const input = packDecorAsset(piece);
+          if (input === null) continue;
+          const asset = normalizeCreateAssetInput(input);
+          await client.query(PACK_DECOR_ASSET_INSERT, [
+            asset.slug,
+            asset.name,
+            asset.kind,
+            asset.textureKey,
+            asset.w,
+            asset.h,
+            asset.placeableOnDesk,
+            asset.aboveAvatars,
+          ]);
+        }
+        if (retiredIds.length > 0) {
+          await client.query(DECOR_ASSET_ARCHIVE_BY_TEXTURES, [retiredIds.map((id) => artSheetKey(id, 'sheet'))]);
+        }
+        return { registered: valid.pieces.length, retired: retiredIds };
       });
     },
 

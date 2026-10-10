@@ -88,7 +88,8 @@ export const DESK_SEAT_FACING: SeatFacing = 'down';
 export type SeatRef =
   | { readonly kind: 'map'; readonly index: number }
   | { readonly kind: 'desk'; readonly deskId: string }
-  | { readonly kind: 'chair'; readonly index: number };
+  | { readonly kind: 'chair'; readonly index: number }
+  | { readonly kind: 'decor'; readonly deskId: string; readonly slot: number };
 
 export function mapSeatId(index: number): string {
   return `map-${index}`;
@@ -103,15 +104,22 @@ export function chairSeatId(index: number): string {
   return `chair-${index}`;
 }
 
+/** A chair someone put in a decor slot of their desk (`DeskDecorEditor`). */
+export function decorSeatId(deskId: string, slot: number): string {
+  return `decor-${deskId}-${slot}`;
+}
+
 const MAP_SEAT = /^map-(0|[1-9]\d{0,3})$/;
 const DESK_SEAT = /^desk-([A-Za-z0-9-]{1,64})$/;
 /** Six digits cover any tile of the 189x135 world and leave room for a bigger one. */
 const CHAIR_SEAT = /^chair-(0|[1-9]\d{0,5})$/;
+/** The desk id as in `DESK_SEAT`; the last `-<digit>` is the slot, 0..8. */
+const DECOR_SEAT = /^decor-([A-Za-z0-9-]{1,64})-([0-8])$/;
 
 /**
  * Reads a seat reference from the wire. `null` for anything malformed or for
- * a base chair that does not exist; whether a desk or a placed chair exists
- * is the server's to ask its store or its live terrain.
+ * a base chair that does not exist; whether a desk, a placed chair or a decor
+ * chair exists is the server's to ask its store or its live terrain.
  */
 export function parseSeatRef(raw: unknown, mapSeatCount = BASE_MAP_SEATS.length): SeatRef | null {
   if (typeof raw !== 'string') return null;
@@ -122,6 +130,8 @@ export function parseSeatRef(raw: unknown, mapSeatCount = BASE_MAP_SEATS.length)
   }
   const chair = CHAIR_SEAT.exec(raw);
   if (chair) return { kind: 'chair', index: Number(chair[1]) };
+  const decor = DECOR_SEAT.exec(raw);
+  if (decor) return { kind: 'decor', deskId: decor[1] as string, slot: Number(decor[2]) };
   const desk = DESK_SEAT.exec(raw);
   return desk ? { kind: 'desk', deskId: desk[1] } : null;
 }
@@ -258,4 +268,74 @@ export function decodeTerrainChairs(raw: unknown, tileCount: number): PlacedChai
     chairs.set(index, { index, piece, facing });
   }
   return [...chairs.values()].sort((a, b) => a.index - b.index);
+}
+
+// --- Decor chairs (desk decor) ------------------------------------------------------------------
+
+/**
+ * Decor slots of a desk, one seat each: `DESK_SLOT_COUNT` of deskLayout.ts
+ * (pinned by a test), a 3x3 grid by rows over the 3x3 tile desk, so every
+ * slot box is exactly one tile.
+ */
+export const DECOR_SEAT_SLOTS = 9;
+const DECOR_SLOT_COLUMNS = 3;
+
+/** The tile of a slot box, from the desk origin in tiles. */
+function decorSlotTile(desk: { readonly x: number; readonly y: number }, slot: number): { tx: number; ty: number } {
+  return { tx: desk.x + (slot % DECOR_SLOT_COLUMNS), ty: desk.y + Math.floor(slot / DECOR_SLOT_COLUMNS) };
+}
+
+/** Where a decor chair's sitter's feet go: the middle of its slot box (`deskSlotRect`), like a placed chair on its tile. */
+export function decorSeatGround(desk: { readonly x: number; readonly y: number }, slot: number): { x: number; y: number } {
+  const { tx, ty } = decorSlotTile(desk, slot);
+  return { x: (tx + 0.5) * SEATING_TILE, y: (ty + 0.5) * SEATING_TILE };
+}
+
+/** The tile the slot box covers; the reach ring goes around it. */
+export function decorSeatTiles(desk: { readonly x: number; readonly y: number }, slot: number): SeatTiles {
+  const { tx, ty } = decorSlotTile(desk, slot);
+  return { x0: tx, y0: ty, x1: tx, y1: ty };
+}
+
+/**
+ * The facing of a decor chair from its item rotation: 0 is the pack's
+ * default down drawing and the rotation turns it clockwise, so 90 is right,
+ * 180 up and 270 left, the same pairing `rotationForFacing` of
+ * pieceCollisions.ts uses (right 90, left 270). Anything else reads as down.
+ */
+export function decorSeatFacing(rotation: number): SeatFacing {
+  if (rotation === 90) return 'right';
+  if (rotation === 180) return 'up';
+  if (rotation === 270) return 'left';
+  return 'down';
+}
+
+const DECOR_CHAIR_KEY = /^art:(chair-[a-z0-9]+(?:-[a-z0-9]+)*):sheet$/;
+
+/** The chair piece of a decor texture key (`art:chair-<x>:sheet`, what the pack chairs' decor assets carry), else `null`. */
+export function decorChairPiece(textureKey: string): string | null {
+  const match = DECOR_CHAIR_KEY.exec(textureKey);
+  return match === null ? null : (match[1] as string);
+}
+
+/** The parts of a desk decor item a seat reads; both sides' `DeskItem` fit. */
+export interface DecorSeatItem {
+  readonly slot: number;
+  readonly rotation: number;
+  readonly textureKey: string;
+}
+
+/** The decor chair in `slot`, or `null` when that slot is empty or holds anything but a chair. */
+export function decorChairAt(items: readonly DecorSeatItem[], slot: number): { piece: string; facing: SeatFacing } | null {
+  const item = items.find((candidate) => candidate.slot === slot);
+  const piece = item === undefined ? null : decorChairPiece(item.textureKey);
+  return piece === null ? null : { piece, facing: decorSeatFacing(item!.rotation) };
+}
+
+/** Every decor chair of a desk's items, in item order. */
+export function decorChairs(items: readonly DecorSeatItem[]): { slot: number; piece: string; facing: SeatFacing }[] {
+  return items.flatMap((item) => {
+    const piece = decorChairPiece(item.textureKey);
+    return piece === null ? [] : [{ slot: item.slot, piece, facing: decorSeatFacing(item.rotation) }];
+  });
 }

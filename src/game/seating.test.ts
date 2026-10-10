@@ -1,9 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import exportedManifest from '../../public/assets/pack/manifest.json?raw';
 import { TILE } from './mapData';
+import { DESK_SLOT_COUNT, deskSlotRect } from './deskLayout';
+import { rotationForFacing } from './pieceCollisions';
 import {
   CHAIR_PIECES,
+  DECOR_SEAT_SLOTS,
   DESK_SEAT_FACING,
+  decorChairAt,
+  decorChairPiece,
+  decorChairs,
+  decorSeatFacing,
+  decorSeatGround,
+  decorSeatId,
+  decorSeatTiles,
   MAX_CHAIR_EDITS,
   chairGround,
   chairSeatId,
@@ -227,5 +237,67 @@ describe('seating: placed chairs', () => {
     }
     expect(decodeTerrainChairs(42, TILES)).toBeNull();
     expect(decodeTerrainChairs(undefined, TILES)).toBeNull();
+  });
+});
+
+describe('seating: decor chairs on a desk', () => {
+  const DESK_ID = '0f5e2c1a-1111-4111-8111-111111111111';
+  const DESK = { x: 10, y: 20 };
+
+  it('names a decor chair by its desk and slot, and parses it back', () => {
+    expect(decorSeatId(DESK_ID, 5)).toBe(`decor-${DESK_ID}-5`);
+    expect(parseSeatRef(`decor-${DESK_ID}-5`)).toEqual({ kind: 'decor', deskId: DESK_ID, slot: 5 });
+    expect(parseSeatRef('decor-a-0')).toEqual({ kind: 'decor', deskId: 'a', slot: 0 });
+    expect(seatIdOf(`decor-${DESK_ID}-8`)).toBe(`decor-${DESK_ID}-8`);
+    for (const raw of ['decor-', 'decor-a', 'decor-a-', 'decor-a-9', 'decor-a-10', 'decor--1', `decor-${'x'.repeat(65)}-1`, 'decor-a b-1']) {
+      expect(parseSeatRef(raw), raw).toBeNull();
+    }
+  });
+
+  it('has one seat per decor slot of the desk', () => {
+    expect(DECOR_SEAT_SLOTS).toBe(DESK_SLOT_COUNT);
+  });
+
+  it('stands in its slot box: ground at the box middle, reach the box tile and the ring around it', () => {
+    const desk = { x: DESK.x * TILE, y: DESK.y * TILE, w: 3 * TILE, h: 3 * TILE };
+    for (let slot = 0; slot < DESK_SLOT_COUNT; slot += 1) {
+      const box = deskSlotRect(desk, slot)!;
+      expect(decorSeatGround(DESK, slot)).toEqual({ x: box.x + box.w / 2, y: box.y + box.h / 2 });
+      const tx = box.x / TILE;
+      const ty = box.y / TILE;
+      expect(decorSeatTiles(DESK, slot)).toEqual({ x0: tx, y0: ty, x1: tx, y1: ty });
+    }
+    expect(inSeatReach({ x: 14 * TILE - 1, y: 23 * TILE + 1 }, decorSeatTiles(DESK, 8))).toBe(true);
+    expect(inSeatReach({ x: 14 * TILE, y: 23 * TILE + 1 }, decorSeatTiles(DESK, 8))).toBe(false);
+  });
+
+  it('faces down at rotation 0 and turns clockwise, the same way collisions turn a facing', () => {
+    expect(decorSeatFacing(0)).toBe('down');
+    expect(decorSeatFacing(90)).toBe('right');
+    expect(decorSeatFacing(180)).toBe('up');
+    expect(decorSeatFacing(270)).toBe('left');
+    expect(decorSeatFacing(45)).toBe('down');
+    for (const facing of ['left', 'right'] as const) {
+      expect(rotationForFacing(facing)).toBe([0, 90, 180, 270].find((rotation) => decorSeatFacing(rotation) === facing));
+    }
+  });
+
+  it('only a pack chair sheet is a decor chair', () => {
+    expect(decorChairPiece('art:chair-wood:sheet')).toBe('chair-wood');
+    expect(decorChairPiece('art:chair-gamer:sheet')).toBe('chair-gamer');
+    for (const key of ['art:plant-ficus:sheet', 'art:chair-wood:seated', 'chair-wood', 'art:chair-:sheet', 'planta']) {
+      expect(decorChairPiece(key), key).toBeNull();
+    }
+  });
+
+  it('finds the decor chair of a slot among the occupant items, facing as its rotation says', () => {
+    const items = [
+      { slot: 1, rotation: 0, textureKey: 'art:plant-ficus:sheet' },
+      { slot: 4, rotation: 270, textureKey: 'art:chair-leather:sheet' },
+    ];
+    expect(decorChairAt(items, 4)).toEqual({ piece: 'chair-leather', facing: 'left' });
+    expect(decorChairAt(items, 1)).toBeNull();
+    expect(decorChairAt(items, 2)).toBeNull();
+    expect(decorChairs(items)).toEqual([{ slot: 4, piece: 'chair-leather', facing: 'left' }]);
   });
 });

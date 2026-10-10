@@ -15,7 +15,7 @@ import {
   SESSION_REPLACED_CLOSE_CODE,
   SESSION_REVOKED_CLOSE_CODE,
 } from '../../src/game/officeProtocol.ts';
-import { DESK_SEAT_FACING, chairSeatId, decodeTerrainChairs, deskSeatId, mapSeatId } from '../../src/game/seating.ts';
+import { DESK_SEAT_FACING, chairSeatId, decodeTerrainChairs, decorSeatId, deskSeatId, mapSeatId } from '../../src/game/seating.ts';
 import { decodeTerrainBlocks, decodeTerrainWalls } from '../../src/game/officeLayout.ts';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SPACES as BUILT_IN_SPACES } from '../../src/test/legacyOffice.ts';
 import { createOfficeServer as createServer, type OfficeServer, type OfficeServerOverrides } from './createOfficeServer.ts';
@@ -33,6 +33,7 @@ import {
 import type { DirectoryUser, UserDirectory } from './directory/directoryPort.ts';
 import { createMemoryDirectory } from './directory/memoryDirectory.ts';
 import { ART_PACK_DEFAULTS } from './decor/artCatalogRules.ts';
+import { createMemoryDecor } from './decor/memoryDecor.ts';
 import type { OfficeState } from './schema.ts';
 import { createMemoryTerrain } from './terrain/memoryTerrain.ts';
 import { createMemoryCollisions } from './collisions/memoryCollisions.ts';
@@ -2278,5 +2279,127 @@ describe('OfficeRoom: desk seats', () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(ana.state.players.get(ana.sessionId)?.seat).toBe(deskSeatId('mesa-ana'));
+  });
+});
+
+/**
+ * Chairs in a desk's decor: guest seats anyone may take, whoever owns the
+ * desk, checked against the occupant's decor the desks store resolves.
+ */
+describe('OfficeRoom: decor chairs', () => {
+  const BETO: VerifiedIdentity = { uid: 'uid-beto', email: 'beto@example.com', name: 'Beto Ruiz' };
+  const ANA_ID = '11111111-1111-4111-8111-111111111111';
+  const BETO_ID = '22222222-2222-4222-8222-222222222222';
+  const DESK = { x: 10, y: 25 };
+  const at = new Date('2026-01-01T00:00:00.000Z');
+  const decorAsset = (id: string, textureKey: string) => ({
+    id, slug: id, name: id, kind: 'furniture' as const, textureKey, w: 1, h: 1, placeableOnDesk: true, aboveAvatars: false, archivedAt: null, createdAt: at,
+  });
+  const CHAIR = decorAsset('silla', 'art:chair-wood:sheet');
+  const PLANT = decorAsset('planta', 'art:plant-ficus:sheet');
+  const GUEST_SEAT = decorSeatId('mesa-ana', 8);
+  let decorServer: OfficeServer | undefined;
+  let decorPort = 0;
+
+  async function start() {
+    const directory = createMemoryDirectory({
+      seed: [
+        seededUser({}),
+        seededUser({ id: BETO_ID, uid: 'uid-beto', email: 'beto@example.com', displayName: 'Beto' }),
+      ],
+    });
+    const decor = createMemoryDecor({ seed: [CHAIR, PLANT], now: () => at });
+    await decor.replaceDeskConfig(ANA_ID, [
+      { assetId: CHAIR.id, slot: 8, rotation: 270 },
+      { assetId: PLANT.id, slot: 0, rotation: 0 },
+    ]);
+    const desks = createMemoryDesks({
+      decor,
+      seed: [{ id: 'mesa-ana', label: 'Mesa 1', ...DESK, occupantId: ANA_ID, createdAt: at, updatedAt: at }],
+    });
+    decorServer = createOfficeServer({ auth: stubVerifier({ 'token-de-ana': ANA, 'token-de-beto': BETO }), directory, desks, decor });
+    decorPort = await decorServer.listen(0);
+    return `ws://localhost:${decorPort}`;
+  }
+
+  async function joinNearDesk(endpoint: string, token: string) {
+    const room = await new Client(endpoint).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token });
+    openRooms.push(room);
+    const x = (DESK.x + 1) * TILE + 16;
+    const y = (DESK.y + 1) * TILE;
+    room.send('move', { x, y, facing: 'down' });
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === x);
+    return room;
+  }
+
+  function saveDecor(items: unknown[]) {
+    return fetch(`http://localhost:${decorPort}/me/desk`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer token-de-ana', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+    });
+  }
+
+  afterEach(async () => {
+    await decorServer?.shutdown();
+    decorServer = undefined;
+  });
+
+  it('seats a guest at a decor chair of a claimed desk, facing as the chair is turned', async () => {
+    const endpoint = await start();
+    const ana = await joinNearDesk(endpoint, 'token-de-ana');
+    const beto = await joinNearDesk(endpoint, 'token-de-beto');
+
+    beto.send('sit', { seat: GUEST_SEAT });
+
+    await waitFor(() => ana.state.players.get(beto.sessionId)?.seat === GUEST_SEAT);
+    expect(ana.state.players.get(beto.sessionId)?.facing).toBe('left');
+
+    // One sitter per decor chair, the desk's owner included.
+    ana.send('sit', { seat: GUEST_SEAT });
+    ana.send('status', { status: 'y' });
+    await waitFor(() => ana.state.players.get(ana.sessionId)?.status === 'y');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(ana.state.players.get(ana.sessionId)?.seat).toBe('');
+  });
+
+  it('ignores a slot without a chair, an empty slot and a desk that does not exist', async () => {
+    const endpoint = await start();
+    const beto = await joinNearDesk(endpoint, 'token-de-beto');
+
+    beto.send('sit', { seat: decorSeatId('mesa-ana', 0) });
+    beto.send('sit', { seat: decorSeatId('mesa-ana', 4) });
+    beto.send('sit', { seat: decorSeatId('no-existe', 8) });
+    beto.send('status', { status: 'y' });
+
+    await waitFor(() => beto.state.players.get(beto.sessionId)?.status === 'y');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(beto.state.players.get(beto.sessionId)?.seat).toBe('');
+  });
+
+  it('turns the guest with a turned chair, and stands them up when the chair is taken away', async () => {
+    const endpoint = await start();
+    const beto = await joinNearDesk(endpoint, 'token-de-beto');
+    beto.send('sit', { seat: GUEST_SEAT });
+    await waitFor(() => beto.state.players.get(beto.sessionId)?.seat === GUEST_SEAT);
+
+    expect((await saveDecor([{ assetId: CHAIR.id, slot: 8, rotation: 180 }])).status).toBe(200);
+    await waitFor(() => beto.state.players.get(beto.sessionId)?.facing === 'up');
+    expect(beto.state.players.get(beto.sessionId)?.seat).toBe(GUEST_SEAT);
+
+    expect((await saveDecor([{ assetId: PLANT.id, slot: 8, rotation: 0 }])).status).toBe(200);
+    await waitFor(() => beto.state.players.get(beto.sessionId)?.seat === '');
+  });
+
+  it('stands the guest up when the owner releases the desk, taking the decor along', async () => {
+    const endpoint = await start();
+    const beto = await joinNearDesk(endpoint, 'token-de-beto');
+    beto.send('sit', { seat: GUEST_SEAT });
+    await waitFor(() => beto.state.players.get(beto.sessionId)?.seat === GUEST_SEAT);
+
+    const released = await fetch(`http://localhost:${decorPort}/me/desk/release`, { method: 'POST', headers: { Authorization: 'Bearer token-de-ana' } });
+    expect(released.status).toBe(200);
+
+    await waitFor(() => beto.state.players.get(beto.sessionId)?.seat === '');
   });
 });
