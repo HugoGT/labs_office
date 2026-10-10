@@ -4,6 +4,7 @@ import type { CollisionAdminPort } from '../dashboard/collisionAdminPort';
 import { newRectToward, type CollisionSnap } from '../game/collisionEditor';
 import type { OfficeBridge } from '../game/officeBridge';
 import { InvalidCollisionRectsError, MAX_COLLISION_RECTS, parseCollisionRects, type CollisionRect } from '../game/pieceCollisions';
+import { useEscapeStep } from './useEscapeStep';
 
 /**
  * The collision editor of the office sidebar: pick a placed piece on the map,
@@ -141,6 +142,15 @@ export function useCollisionEditor({ bridge, collisions }: UseCollisionEditorOpt
     clearMessages();
   };
 
+  // A piece with unsaved changes stays: Escape never throws a draft away.
+  const dirty = piece !== null && !sameRects(rects, piece.baseline);
+  useEscapeStep(active, () => {
+    if (selectedRect !== null) setSelectedRect(null);
+    else if (piece !== null && !dirty) reset();
+    else return false;
+    return true;
+  });
+
   const edit = (next: readonly CollisionRect[], index: number | null): void => {
     setRects(next);
     setSelectedRect(index);
@@ -171,7 +181,7 @@ export function useCollisionEditor({ bridge, collisions }: UseCollisionEditorOpt
     rects,
     selectedRect,
     saved: piece?.saved ?? false,
-    dirty: piece !== null && !sameRects(rects, piece.baseline),
+    dirty,
     snap,
     showAll,
     pending,

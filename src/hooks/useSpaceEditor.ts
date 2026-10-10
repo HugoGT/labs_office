@@ -37,6 +37,7 @@ import {
   type LayoutObstacleItem,
 } from '../game/layoutEditor';
 import type { OfficeBridge } from '../game/officeBridge';
+import { useEscapeStep } from './useEscapeStep';
 
 export interface UseSpaceEditorOptions {
   bridge: OfficeBridge;
@@ -220,6 +221,14 @@ export function useSpaceEditor({
   const select = useCallback((id: string) => dispatch({ type: 'select', id }), []);
 
   const deselect = useCallback(() => dispatch({ type: 'deselect' }), []);
+
+  useEscapeStep(active, () => {
+    const current = stateRef.current;
+    if (current.tag === 'placing') cancelPlacing();
+    else if (current.tag === 'selected') deselect();
+    else return false;
+    return true;
+  });
 
   const remove = useCallback(async (): Promise<void> => {
     const current = stateRef.current;

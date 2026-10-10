@@ -262,7 +262,7 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(body.velocity.y).toBe(230);
   });
 
-  it('resets on sitting and on every layout editor mode', async () => {
+  it('resets on sitting and on every editor that picks something', async () => {
     const { scene, bridge, body, movement, frame } = await movementArena();
     const seat = BASE_MAP_SEATS[0]!;
     body.reset((seat.tx + 0.5) * TILE, (seat.ty + 0.5) * TILE - 18);
@@ -273,9 +273,10 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(body.velocity.length()).toBe(0);
     bridge.emitCommand('toggleSeat', undefined);
     const openers = [
-      () => bridge.emitCommand('layoutedit', { pickable: [], selectedId: null, placing: null }),
-      () => bridge.emitCommand('terrainedit', { brush: null }),
-      () => bridge.emitCommand('collisionedit', { pieceId: null, draft: [], selectedRect: null, snap: 1 }),
+      () => bridge.emitCommand('layoutedit', { pickable: [], selectedId: 'desk-1', placing: null }),
+      () => bridge.emitCommand('layoutedit', { pickable: [], selectedId: null, placing: { w: 3, h: 3, obstacles: [] } }),
+      () => bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'grass' } }),
+      () => bridge.emitCommand('collisionedit', { pieceId: 'tree-oak', draft: [], selectedRect: null, snap: 1 }),
     ];
     for (const open of openers) {
       movement.walkingMs = 3000;
@@ -292,6 +293,30 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
       bridge.emitCommand('collisionedit', null);
     }
     expect(scene.sys.isActive()).toBe(true);
+  });
+
+  it('keeps walking with an editor open and nothing picked, and stops once something is', async () => {
+    const { bridge, body, movement, frame } = await movementArena();
+    const idle = [
+      () => bridge.emitCommand('layoutedit', { pickable: [], selectedId: null, placing: null }),
+      () => bridge.emitCommand('terrainedit', { brush: null }),
+      () => bridge.emitCommand('collisionedit', { pieceId: null, draft: [], selectedRect: null, snap: 1 }),
+    ];
+    movement.cursors.right.isDown = true;
+    for (const open of idle) {
+      open();
+      frame();
+      expect(body.velocity.x).toBeGreaterThan(0);
+    }
+
+    // Picking a brush holds the map; Escape (the brush back to null) frees it again.
+    bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'grass' } });
+    frame();
+    expect(body.velocity.length()).toBe(0);
+    bridge.emitCommand('terrainedit', { brush: null });
+    frame();
+    expect(body.velocity.x).toBeGreaterThan(0);
+    movement.cursors.right.isDown = false;
   });
 
   it('does not turn drags, item clicks, blocked goals or minimap clicks into walking', async () => {
@@ -706,17 +731,27 @@ describe('double click to walk (double-click-pathfinding, R1 and R2)', () => {
     });
   });
 
-  it('layout editing never walks and clears the pair (R2)', async () => {
+  it('a held layout editor never walks and clears the pair (R2)', async () => {
     const arena = await movementArena();
 
     arena.click(goal.x, goal.y);
-    arena.bridge.emitCommand('layoutedit', { pickable: [], selectedId: null, placing: null });
+    arena.bridge.emitCommand('layoutedit', { pickable: [], selectedId: 'desk-1', placing: null });
     arena.doubleClick(goal.x, goal.y);
     expect(arena.movement.autoWalk).toBeUndefined();
 
     arena.bridge.emitCommand('layoutedit', null);
     arena.click(goal.x, goal.y);
     expect(arena.movement.autoWalk, 'the click made while editing was not a first click').toBeUndefined();
+  });
+
+  it('an open layout editor with nothing selected still walks on a double click', async () => {
+    const arena = await movementArena();
+
+    arena.bridge.emitCommand('layoutedit', { pickable: [], selectedId: null, placing: null });
+    arena.doubleClick(goal.x, goal.y);
+
+    expect(arena.movement.autoWalk?.goal).toEqual(goal);
+    arena.bridge.emitCommand('layoutedit', null);
   });
 
   it('a local position that is not ready never walks and clears the pair (R2)', async () => {
