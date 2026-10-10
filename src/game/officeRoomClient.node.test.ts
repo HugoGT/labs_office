@@ -18,7 +18,7 @@ import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS } from '..
 const createOfficeServer = (overrides: OfficeServerOverrides = {}) => createServer({ layout: BASE_LAYOUT, seats: BASE_MAP_SEATS, ...overrides });
 import { TILE } from './mapData';
 import { OFFICE_ROOM_NAME } from './officeProtocol';
-import { mapSeatId } from './seating';
+import { mapSeatId, type PlacedChair } from './seating';
 import {
   OfficeAccessDeniedError,
   connectOfficeRoom,
@@ -874,6 +874,23 @@ describe('connectOfficeRoom: seats (art migration, step 6)', () => {
     await server.terrain.setWalls([{ index: 8, piece: 'wall-brick' }, { index: 7, piece: null }], null, async () => ({ placements: [], players: [] }));
     await waitFor(() => seen.at(-1)?.[8] === 'wall-brick');
     expect(seen.at(-1)![7]).toBeNull();
+  });
+
+  it('reports the placed chairs on the first sync and every chair edit after it', async () => {
+    await server.shutdown();
+    const { BASE_LAYOUT: layout } = await import('./officeLayout.ts');
+    const tile = (tx: number, ty: number) => ty * layout.width + tx;
+    server = createOfficeServer({ layout, seats: [], terrain: createMemoryTerrain([], [], [{ index: tile(91, 64), piece: 'chair-gamer', facing: 'left' }]) });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+    const seen: (readonly PlacedChair[])[] = [];
+    await connect('Ana', { ...recorder().handlers, onChairs: (chairs) => seen.push(chairs) });
+
+    await waitFor(() => seen.length > 0);
+    expect(seen[0]).toEqual([{ index: tile(91, 64), piece: 'chair-gamer', facing: 'left' }]);
+
+    await server.terrain.setChairs([{ index: tile(91, 64), chair: null }, { index: tile(97, 70), chair: { piece: 'chair-wood', facing: 'up' } }], null, async () => ({ placements: [], players: [] }));
+    await waitFor(() => seen.at(-1)?.[0]?.index === tile(97, 70));
+    expect(seen.at(-1)).toEqual([{ index: tile(97, 70), piece: 'chair-wood', facing: 'up' }]);
   });
 
   it('reports the collision table on the first sync and every edit after it', async () => {

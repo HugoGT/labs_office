@@ -109,6 +109,12 @@ export interface OfficeState {
    */
   terrainWalls: string;
   /**
+   * The chairs placed from the terrain editor, in the sparse wire form of
+   * `encodeTerrainChairs` (`<tile>:<material>:<facing>` triples, empty for
+   * none). Replicated whole like `terrainBlocks`.
+   */
+  terrainChairs: string;
+  /**
    * The saved collision areas per piece, in the wire form of
    * `encodeCollisionTable`, replicated whole like `terrainBlocks`: every
    * client places the same rectangles from it and its own desk list.
@@ -123,8 +129,9 @@ export class OfficeState extends Schema {
     this.recordings = new MapSchema<RecordingState>();
     this.terrainBlocks = '';
     this.terrainWalls = '';
+    this.terrainChairs = '';
     this.pieceCollisions = '';
   }
 }
 
-defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState }, terrainBlocks: 'string', terrainWalls: 'string', pieceCollisions: 'string' });
+defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState }, terrainBlocks: 'string', terrainWalls: 'string', terrainChairs: 'string', pieceCollisions: 'string' });

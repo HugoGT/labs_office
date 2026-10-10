@@ -228,4 +228,32 @@ describe('TerrainEditLayer', () => {
     expect([hover.width, hover.height]).toEqual([9 * TILE, 9 * TILE]);
     expect([hover.x, hover.y]).toEqual([(9 * TILE) / 2, (9 * TILE) / 2]);
   });
+
+  it('reports and outlines the tile under the pointer with a chair brush, as chairpick only, along a held drag', async () => {
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    new TerrainEditLayer(scene, bridge, BASE_LAYOUT);
+    const chairs: number[] = [];
+    const others: number[] = [];
+    bridge.on('chairpick', ({ index }) => chairs.push(index));
+    bridge.on('wallpick', ({ index }) => others.push(index));
+    bridge.on('terrainpick', ({ index }) => others.push(index));
+    bridge.emitCommand('terrainedit', { brush: { kind: 'chair', piece: 'chair-wood', facing: 'down' } });
+
+    scene.input.emit('pointermove', pointerAt(3 * TILE + 20, 2 * TILE + 20));
+    const hover = outline(scene, TERRAIN_HOVER_NAME)!;
+    expect([hover.width, hover.height]).toEqual([TILE, TILE]);
+    // The middle of the tile under the pointer, never a vertex.
+    expect([hover.x, hover.y]).toEqual([3 * TILE + TILE / 2, 2 * TILE + TILE / 2]);
+
+    scene.input.emit('pointerdown', pointerAt(3 * TILE + 20, 2 * TILE + 20));
+    scene.input.emit('pointermove', pointerAt(5 * TILE + 20, 2 * TILE + 20));
+    scene.input.emit('pointerup', pointerAt(5 * TILE + 20, 2 * TILE + 20));
+    bridge.emitCommand('terrainedit', { brush: { kind: 'chair', piece: null, facing: 'down' } });
+    scene.input.emit('pointerdown', pointerAt(1, 1));
+
+    const row = 2 * BASE_LAYOUT.width;
+    expect(chairs).toEqual([row + 3, row + 4, row + 5, 0]);
+    expect(others).toEqual([]);
+  });
 });

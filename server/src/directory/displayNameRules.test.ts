@@ -17,6 +17,24 @@ import {
 } from './displayNameRules.ts';
 
 describe('canonicalizeDisplayName', () => {
+  it.each([
+    ['ana@example.com', 'ana'],
+    ['  Ana.Lopez+office @example.com  ', 'Ana.Lopez+office'],
+    ['Ana   Lopez@example.com', 'Ana Lopez'],
+    ['ana@first@second', 'ana'],
+    ['ana@', 'ana'],
+    ['A'.repeat(24) + '@example.com', 'A'.repeat(24)],
+  ])('strips the first @ and its suffix before validating %s', (raw, expected) => {
+    expect(canonicalizeDisplayName(raw)).toBe(expected);
+    expect(canonicalizeDisplayName(expected)).toBe(expected);
+  });
+
+  it.each(['@example.com', '  @example.com', 'A'.repeat(25) + '@example.com', 'Ana\x01@example.com'])(
+    'rejects an invalid local part in %s', (raw) => {
+      expect(() => canonicalizeDisplayName(raw)).toThrow(InvalidDisplayNameError);
+    },
+  );
+
   it('recorta espacios al principio y al final', () => {
     expect(canonicalizeDisplayName('  Ana Lopez  ')).toBe('Ana Lopez');
   });

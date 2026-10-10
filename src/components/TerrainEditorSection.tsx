@@ -5,21 +5,31 @@ import type { OfficeBridge } from '../game/officeBridge';
 import { useMaterialCatalog, type LoadMaterials } from '../hooks/useMaterialCatalog';
 import type { TerrainBrush } from '../game/terrainEditor';
 import { useTerrainEditor } from '../hooks/useTerrainEditor';
-import { TERRAIN_MATERIAL_LABELS, TerrainPalette, WALL_PIECE_LABELS, WallPalette } from './TerrainPalette';
+import type { SeatFacing } from '../game/seating';
+import { CHAIR_PIECE_LABELS, ChairPalette, TERRAIN_MATERIAL_LABELS, TerrainPalette, WALL_PIECE_LABELS, WallPalette } from './TerrainPalette';
 import styles from './TerrainEditorSection.module.css';
 
 /**
  * Terrain section of the office sidebar (#123 phase 2), next to the desk and
  * room editors and behind the same role guard. Container like
  * `DeskEditorSection`: `useTerrainEditor` holds the state, the palettes
- * (`TerrainPalette`, `WallPalette`) pick a floor or a wall, the map
- * (`TerrainEditLayer`) reports the clicked blocks or tiles, and the scene
- * draws the pending paints.
+ * (`TerrainPalette`, `WallPalette`, `ChairPalette`) pick a floor, a wall or a
+ * chair, the map (`TerrainEditLayer`) reports the clicked blocks or tiles,
+ * and the scene draws the pending paints.
  */
+
+/** The way a chair faces, in words. */
+const FACING_LABELS: Readonly<Record<SeatFacing, string>> = {
+  down: 'hacia abajo',
+  left: 'hacia la izquierda',
+  up: 'hacia arriba',
+  right: 'hacia la derecha',
+};
 
 /** What the picked brush paints, in words. */
 function brushLabel(brush: TerrainBrush): string {
   if (brush.kind === 'floor') return `Pintando con ${TERRAIN_MATERIAL_LABELS[brush.material]}`;
+  if (brush.kind === 'chair') return brush.piece === null ? 'Quitando sillas' : `Poniendo ${CHAIR_PIECE_LABELS[brush.piece]} mirando ${FACING_LABELS[brush.facing]}`;
   return brush.piece === null ? 'Quitando paredes' : `Pintando paredes de ${WALL_PIECE_LABELS[brush.piece]}`;
 }
 
@@ -120,6 +130,24 @@ export function TerrainEditorSection({
         disabled={editor.blocked}
         preview={preview}
       />
+
+      <h4 className={styles.subtitle}>Sillas</h4>
+      <span className={styles.hint}>
+        Elige una silla y toca o arrastra por las casillas del mapa para ponerlas; cualquiera puede sentarse en ellas. «Girar» cambia hacia dónde miran las siguientes, y poner una silla sobre otra la gira o la cambia. No se pueden poner sobre agua, vacío, paredes, escritorios ni la entrada.
+      </span>
+      <ChairPalette
+        value={editor.brush}
+        onPick={editor.pickChair}
+        chairs={catalog?.chair ?? null}
+        disabled={editor.blocked}
+        preview={preview}
+      />
+      <div className={styles.row}>
+        <span>Mirando {FACING_LABELS[editor.chairFacing]}</span>
+        <button type="button" className={styles.button} onClick={editor.rotateChair} disabled={editor.blocked}>
+          Girar
+        </button>
+      </div>
 
       {editor.brush !== null && (
         <div className={styles.row}>

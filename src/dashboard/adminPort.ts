@@ -146,6 +146,11 @@ export type AdminErrorCode =
    */
   | 'desk-on-wall'
   /**
+   * A chair placed from the terrain editor stands on the desk's 3x3
+   * footprint. Fixed the same way as a wall: remove it or pick another spot.
+   */
+  | 'desk-on-chair'
+  /**
    * Dos salas pisandose (#10 + #12, S3a). Es su propio codigo y no
    * `desk-overlap` reciclado porque las dos filas con las que puede chocar
    * una sala son de otra naturaleza -- ver `spacesRoutes.ts`.

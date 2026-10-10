@@ -18,6 +18,7 @@ import type { SpaceArea } from './mapData';
 import type { AccessDeniedReason, PresenceStatus, RecordingReadyPayload } from './officeProtocol';
 import type { RosterPeer } from './roster';
 import type { TerrainEditCommand } from './terrainEditor';
+import type { PlacedChair } from './seating';
 import type { CollisionEditCommand } from './collisionEditor';
 import type { CollisionRect } from './pieceCollisions';
 import type { ActiveRecordingSnapshot, OfficeConnectionState } from './officeRoomClient';
@@ -187,11 +188,18 @@ export interface OfficeEventMap {
    * again when the terrain editor opens, so it starts from what the map
    * shows without a fetch of its own.
    */
-  terrain: { blocks: readonly LayoutMaterial[]; walls: readonly (string | null)[] };
+  terrain: {
+    blocks: readonly LayoutMaterial[];
+    walls: readonly (string | null)[];
+    /** The placed chairs, sorted by tile. Absent: unchanged since the last event. */
+    chairs?: readonly PlacedChair[];
+  };
   /** The terrain editor has a floor picked and someone clicked a block on the map (#123 phase 2). */
   terrainpick: { index: number };
   /** The terrain editor has a wall (or the wall eraser) picked and someone clicked a tile on the map. */
   wallpick: { index: number };
+  /** The terrain editor has a chair (or the chair eraser) picked and someone clicked a tile on the map. */
+  chairpick: { index: number };
   /**
    * The collision editor is open and someone clicked a placed piece: its id,
    * the rectangles it collides with now (saved, or its default turned into

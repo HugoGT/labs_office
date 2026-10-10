@@ -12,19 +12,20 @@
  * Materials an Admin uploaded (#121) come from the office server's uploads
  * manifest and are offered after the pack's, each sheet next to its manifest.
  *
- * The wall pieces ride along for the terrain editor's wall palette, which
- * cuts its thumbnails the same way; no creation form offers them.
+ * The wall and chair pieces ride along for the terrain editor's wall and
+ * chair palettes, which cut their thumbnails the same way; no creation form
+ * offers them.
  */
 
-import { ART_IMAGE_SPECS, facingColumn, wallFrameIndex, type ArtDeskPiece, type ArtFloorPiece, type ArtWallPiece } from './artContract';
+import { ART_IMAGE_SPECS, facingColumn, wallFrameIndex, type ArtChairPiece, type ArtDeskPiece, type ArtFloorPiece, type ArtWallPiece } from './artContract';
 import { combineArtManifests, parseArtPackManifest, type ArtAppearance } from './artPack';
 
-/** The role of the one sheet a desk, floor or wall piece ships, as `mapBuilder.ts` reads it. */
+/** The role of the one sheet a desk, floor, wall or chair piece ships, as `mapBuilder.ts` reads it. */
 const SHEET_ROLE = 'sheet';
 
 export interface MaterialOption {
   readonly id: string;
-  readonly kind: 'desk' | 'floor' | 'wall';
+  readonly kind: 'desk' | 'floor' | 'wall' | 'chair';
   /** Spanish name from the manifest. */
   readonly name: string;
   readonly colorable: boolean;
@@ -32,16 +33,18 @@ export interface MaterialOption {
   /** The exported sheet, the one the office loads for this piece. */
   readonly sheetUrl: string;
   /** The manifest entry, so the preview decides recolors with `recolorFor` like the office. */
-  readonly piece: ArtDeskPiece | ArtFloorPiece | ArtWallPiece;
+  readonly piece: ArtDeskPiece | ArtFloorPiece | ArtWallPiece | ArtChairPiece;
 }
 
-type CatalogPiece = ArtDeskPiece | ArtFloorPiece | ArtWallPiece;
+type CatalogPiece = ArtDeskPiece | ArtFloorPiece | ArtWallPiece | ArtChairPiece;
 
 export interface MaterialCatalog {
   readonly desk: readonly MaterialOption[];
   readonly floor: readonly MaterialOption[];
   /** The wall pieces, for the terrain editor (never colorable). */
   readonly wall: readonly MaterialOption[];
+  /** The chair pieces, for the terrain editor (never colorable). */
+  readonly chair: readonly MaterialOption[];
   /** Pack defaults, or the first offered option when the default is not offered. */
   readonly defaults: { readonly desk: string; readonly floor: string };
 }
@@ -57,8 +60,8 @@ function optionOf(piece: CatalogPiece, folder: string): MaterialOption | null {
     id: piece.id,
     kind: piece.kind,
     name: piece.name,
-    colorable: piece.kind === 'wall' ? false : piece.colorable,
-    defaultColor: piece.kind === 'wall' ? null : piece.defaultColor,
+    colorable: piece.kind === 'wall' || piece.kind === 'chair' ? false : piece.colorable,
+    defaultColor: piece.kind === 'wall' || piece.kind === 'chair' ? null : piece.defaultColor,
     sheetUrl: `${folder}${sheet.path}`,
     piece,
   };
@@ -87,17 +90,17 @@ export function materialCatalogFrom(raw: unknown, manifestUrl: string, uploads?:
     { manifest: uploads === undefined ? null : parseArtPackManifest(uploads.raw), url: uploads?.url ?? manifestUrl },
   ]);
   if (joined === null) return null;
-  const options: Record<MaterialOption['kind'], MaterialOption[]> = { desk: [], floor: [], wall: [] };
+  const options: Record<MaterialOption['kind'], MaterialOption[]> = { desk: [], floor: [], wall: [], chair: [] };
   for (const piece of joined.manifest.pieces) {
-    if (piece.kind !== 'desk' && piece.kind !== 'floor' && piece.kind !== 'wall') continue;
+    if (piece.kind !== 'desk' && piece.kind !== 'floor' && piece.kind !== 'wall' && piece.kind !== 'chair') continue;
     const option = optionOf(piece, manifestFolder(joined.sourceOf(piece.id) ?? manifestUrl));
     if (option !== null) options[piece.kind].push(option);
   }
-  const { desk, floor, wall } = options;
+  const { desk, floor, wall, chair } = options;
   const deskDefault = defaultOf(desk, manifest.defaults.desk);
   const floorDefault = defaultOf(floor, manifest.defaults.floor);
   if (deskDefault === null || floorDefault === null) return null;
-  return { desk, floor, wall, defaults: { desk: deskDefault, floor: floorDefault } };
+  return { desk, floor, wall, chair, defaults: { desk: deskDefault, floor: floorDefault } };
 }
 
 /** What a form holds right after picking `option`: a colorable material starts in its default color. */
@@ -126,6 +129,7 @@ export interface PreviewFrame {
  * wall's east-west joint, the middle of a straight painted wall.
  */
 export function previewFrame(option: MaterialOption): PreviewFrame {
+  if (option.kind === 'chair') return chairPreviewFrames()[0];
   if (option.kind === 'wall') {
     const { frame } = ART_IMAGE_SPECS.wall;
     return { x: frame.width * wallFrameIndex({ piece: 'joint', mask: 2 | 8 }), y: 0, width: frame.width, height: frame.height };
@@ -136,6 +140,19 @@ export function previewFrame(option: MaterialOption): PreviewFrame {
   }
   const { frame } = ART_IMAGE_SPECS.desk;
   return { x: frame.width * facingColumn('down'), y: 0, width: frame.width, height: frame.height };
+}
+
+/**
+ * The two layers of a chair facing down (the sheet's `back` row, then its
+ * `front` row), drawn one over the other: a chair reads whole only with both.
+ */
+export function chairPreviewFrames(): readonly [PreviewFrame, PreviewFrame] {
+  const { frame } = ART_IMAGE_SPECS.chair;
+  const x = frame.width * facingColumn('down');
+  return [
+    { x, y: 0, width: frame.width, height: frame.height },
+    { x, y: frame.height, width: frame.width, height: frame.height },
+  ];
 }
 
 export interface LoadMaterialCatalogOptions {

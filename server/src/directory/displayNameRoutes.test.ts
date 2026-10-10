@@ -86,6 +86,26 @@ describe('handleGetDisplayName', () => {
 });
 
 describe('handleSetDisplayName', () => {
+  it('persists only the email local part and returns it on subsequent reads', async () => {
+    const deps = harness();
+
+    expect(await handleSetDisplayName(BEARER_ANA, { name: 'Ana.Lopez@example.com' }, deps))
+      .toEqual({ status: 200, body: { displayName: 'Ana.Lopez' } });
+    expect((await deps.directory.findByUid('uid-ana'))?.displayName).toBe('Ana.Lopez');
+    expect(await handleGetDisplayName(BEARER_ANA, deps))
+      .toEqual({ status: 200, body: { displayName: 'Ana.Lopez' } });
+  });
+
+  it('checks uniqueness after stripping the domain and leaves a rejected claim unchanged', async () => {
+    const deps = harness();
+
+    expect(await handleSetDisplayName(BEARER_ANA, { name: '  BEA@example.com' }, deps))
+      .toEqual({ status: 409, body: { error: 'display-name-taken' } });
+    expect((await deps.directory.findByUid('uid-ana'))?.displayName).toBeNull();
+    expect(await handleSetDisplayName(BEARER_BEA, { name: 'Bea@example.com' }, deps))
+      .toEqual({ status: 200, body: { displayName: 'Bea' } });
+  });
+
   it('sin cabecera responde 401 y no llega a mirar el cuerpo', async () => {
     const deps = harness();
 

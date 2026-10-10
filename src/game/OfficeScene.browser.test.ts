@@ -15,7 +15,7 @@ import {
 } from './mapData';
 import { TERRAIN_LAYER_COUNT } from './artContract';
 import { terrainSnapshot, withBlock, withWalls, type OfficeLayout } from './officeLayout';
-import { WALL_OBJECT_NAME } from './mapBuilder';
+import { CHAIR_OBJECT_NAME, WALL_OBJECT_NAME } from './mapBuilder';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SPACES as BUILT_IN_SPACES } from '../test/legacyOffice';
 const BUILT_IN_SPACES_VERSION = 'a489c5da5efd7c68';
 import {
@@ -27,8 +27,8 @@ import {
 } from './depthLayers';
 import { feetOf, physicalBodyRect } from './avatarGeometry';
 import { BODY_CENTER_OFFSET, positionForBodyTile } from './pathfinding';
-import { deskSeatId, mapSeatId } from './seating';
-import { deskFurnitureName, deskZoneName } from './deskLayout';
+import { chairSeatId, decorSeatId, deskSeatId, mapSeatId } from './seating';
+import { deskFurnitureName, deskItemName, deskZoneName } from './deskLayout';
 import { artSheetKey, recoloredSheetKey } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
 import { deskAreaAnchor, deskPlacement, spaceFloorTiles } from './artPlacement';
@@ -49,6 +49,7 @@ import {
 } from './officeRoomClient';
 import { OFFICE_SCENE_KEY, OfficeScene, type OfficeSceneOptions } from './OfficeScene';
 import { ARRIVE_EPSILON_PX, beginAutoWalk, type AutoWalkState } from './autoWalk';
+import { SIT_LOCK_MS } from './autoSit';
 import { followBounds } from './cameraBounds';
 import { zoomView, type ZoomStore, type ZoomView } from './mapZoom';
 
@@ -815,7 +816,7 @@ function findPlayer(scene: Phaser.Scene): CharacterContainer {
 }
 
 /** Codigos de tecla legacy (`keyCode`), que es lo que Phaser's Key matching usa internamente. */
-const KEY = { RIGHT: 39, LEFT: 37, DOWN: 40, D: 68 } as const;
+const KEY = { RIGHT: 39, LEFT: 37, DOWN: 40, D: 68, E: 69 } as const;
 
 function dispatchKey(type: 'keydown' | 'keyup', keyCode: number): KeyboardEvent {
   const event = new KeyboardEvent(type, { bubbles: true, cancelable: true } as KeyboardEventInit);
@@ -3658,6 +3659,162 @@ describe('OfficeScene: persisted character ids (art migration, step 5)', () => {
   });
 });
 
+/**
+ * Push-to-sit: walking into a free chair from right next to it sits the
+ * player, then movement is locked for `SIT_LOCK_MS`; after that the held key
+ * stands the player up without sitting again at once. There is no E key.
+ */
+describe('OfficeScene: push-to-sit', () => {
+  type Arena = Awaited<ReturnType<typeof movementArena>>;
+  const SEAT = BASE_MAP_SEATS[0]!;
+  const GROUND = { x: (SEAT.tx + 0.5) * TILE, y: (SEAT.ty + 0.5) * TILE };
+  const sitLock = (arena: Arena) => (arena.scene as unknown as { sitLockUntil: number | null }).sitLockUntil;
+
+  /** On the tile north of the chair, its feet 14 px above the chair ground point. */
+  function besideChair(arena: Arena) {
+    arena.body.reset(GROUND.x, GROUND.y - TILE);
+  }
+
+  /** Holds the down arrow (toward the chair) until the player sits, at most a few frames. */
+  function pushIntoChair(arena: Arena) {
+    besideChair(arena);
+    arena.movement.cursors.down.isDown = true;
+    for (let i = 0; i < 10 && arena.player.seatFacing === null; i++) arena.frame();
+  }
+
+  it('pushing into a free chair from the next tile sits on it and stops the walk', async () => {
+    const arena = await movementArena();
+    pushIntoChair(arena);
+
+    expect(arena.player.seatFacing).toBe(SEAT.facing);
+    expect(feetOf(arena.player)).toEqual(GROUND);
+    expect(arena.body.velocity.length()).toBe(0);
+    expect(arena.movement.walkingMs).toBe(0);
+  });
+
+  it('E next to a chair does nothing any more', async () => {
+    const arena = await movementArena();
+    besideChair(arena);
+    dispatchKey('keydown', KEY.E);
+    try {
+      arena.walk(200);
+    } finally {
+      dispatchKey('keyup', KEY.E);
+    }
+    expect(arena.player.seatFacing).toBeNull();
+  });
+
+  it('walking past a row of chairs, next to them, does not sit', async () => {
+    const arena = await movementArena();
+    besideChair(arena);
+    arena.movement.cursors.right.isDown = true;
+    arena.walk(400);
+
+    expect(arena.player.seatFacing).toBeNull();
+    expect(arena.player.x).toBeGreaterThan(GROUND.x + 2 * TILE);
+  });
+
+  it('double-click walking onto a chair does not sit', async () => {
+    const arena = await movementArena();
+    arena.body.reset(GROUND.x, GROUND.y - 3 * TILE);
+    arena.doubleClick(GROUND.x, GROUND.y - 18);
+    for (let i = 0; i < 200 && arena.movement.autoWalk !== undefined; i++) arena.frame();
+
+    expect(arena.movement.autoWalk).toBeUndefined();
+    expect(arena.player.seatFacing).toBeNull();
+  });
+
+  it('locks movement for SIT_LOCK_MS, then the held key stands up and walks away without sitting again', async () => {
+    const arena = await movementArena();
+    pushIntoChair(arena);
+    const seated = { x: arena.player.x, y: arena.player.y };
+
+    arena.walk(SIT_LOCK_MS - 100);
+    expect(arena.player.seatFacing).toBe(SEAT.facing);
+    expect({ x: arena.player.x, y: arena.player.y }).toEqual(seated);
+
+    arena.walk(200);
+    expect(arena.player.seatFacing).toBeNull();
+    expect(arena.player.y).toBeGreaterThan(seated.y);
+    expect(sitLock(arena)).toBeNull();
+
+    // Still held: the chair just left is ignored, not sat on again.
+    arena.walk(60);
+    expect(arena.player.seatFacing).toBeNull();
+  });
+
+  it('a released key lifts the re-sit guard: a fresh push into the chair sits again', async () => {
+    const arena = await movementArena();
+    pushIntoChair(arena);
+    arena.walk(SIT_LOCK_MS + 60);
+    expect(arena.player.seatFacing).toBeNull();
+
+    arena.movement.cursors.down.isDown = false;
+    arena.frame();
+    arena.movement.cursors.up.isDown = true;
+    for (let i = 0; i < 10 && arena.player.seatFacing === null; i++) arena.frame();
+    expect(arena.player.seatFacing).toBe(SEAT.facing);
+  });
+
+  it('asks the room for the seat once and only its confirmation seats the player', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    besideChair(arena);
+    arena.movement.cursors.down.isDown = true;
+    for (let i = 0; i < 10 && connector.sits.length === 0; i++) arena.frame();
+    expect(connector.sits).toEqual([mapSeatId(0)]);
+    expect(arena.player.seatFacing).toBeNull();
+
+    // Locked while the answer is on its way: the held key moves nothing.
+    const asked = { x: arena.player.x, y: arena.player.y };
+    arena.walk(200);
+    expect({ x: arena.player.x, y: arena.player.y }).toEqual(asked);
+    expect(connector.sits).toEqual([mapSeatId(0)]);
+
+    connector.handlers()!.onLocalSeat?.(mapSeatId(0));
+    expect(feetOf(arena.player)).toEqual(GROUND);
+  });
+
+  it('a refused request never locks longer than SIT_LOCK_MS', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    besideChair(arena);
+    arena.movement.cursors.down.isDown = true;
+    for (let i = 0; i < 10 && connector.sits.length === 0; i++) arena.frame();
+    const asked = arena.player.y;
+
+    arena.walk(SIT_LOCK_MS + 60);
+    expect(arena.player.y).toBeGreaterThan(asked);
+    expect(connector.stands()).toBe(1);
+    expect(connector.sits).toEqual([mapSeatId(0)]);
+  });
+
+  it('the room standing the player up, or a position reset, ends the lock at once', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    const handlers = connector.handlers()!;
+    pushIntoChair(arena);
+    handlers.onLocalSeat?.(mapSeatId(0));
+    expect(sitLock(arena)).not.toBeNull();
+    handlers.onLocalSeat?.(null);
+    expect(sitLock(arena)).toBeNull();
+    const stoodAt = arena.player.y;
+    arena.frame();
+    expect(arena.player.y).toBeGreaterThan(stoodAt);
+
+    // Far from the chair, then a fresh push into it, and a reset during the lock.
+    arena.movement.cursors.down.isDown = false;
+    arena.frame();
+    pushIntoChair(arena);
+    expect(sitLock(arena)).not.toBeNull();
+    handlers.onPositionReset?.(remoteSnapshot({ sessionId: 'mi-sesion', x: 500, y: 600 }));
+    expect(sitLock(arena)).toBeNull();
+    arena.movement.cursors.down.isDown = true;
+    arena.frame();
+    expect(arena.player.y).toBeGreaterThan(600);
+  });
+});
+
 describe('OfficeScene: pack characters, walking and seats (art migration, step 6)', () => {
   const CHAIR_INDEX = 0;
   const CHAIR = BASE_MAP_SEATS[CHAIR_INDEX];
@@ -3738,7 +3895,7 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
     expect(connector.sent.at(-1)).toMatchObject(position);
   });
 
-  it('E next to a free chair asks the room to sit; only the confirmation seats the player on it', async () => {
+  it('toggleSeat next to a free chair asks the room to sit; only the confirmation seats the player on it', async () => {
     const { connector, scene, player } = await connected();
     nextToChair(player);
     await advanceGameClock(scene, 50);
@@ -3759,7 +3916,29 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
     }, LOOP_WAIT);
   });
 
-  it('pressing E again stands up; walking stands up too', async () => {
+  it('offers a placed chair the room sends, seats the player on its tile facing its way, and stands them up when it goes', async () => {
+    const { connector, scene, player } = await connected();
+    // On the open lawn, far from every base chair.
+    const chairIndex = 22 * BASE_LAYOUT.width + 67;
+    const ground = { x: 67.5 * TILE, y: 22.5 * TILE };
+    const chairObjects = () => scene.children.list.filter((child) => child.name === CHAIR_OBJECT_NAME);
+    connector.handlers()!.onChairs?.([{ index: chairIndex, piece: 'chair-gamer', facing: 'left' }]);
+    expect(chairObjects().length).toBeGreaterThan(0);
+    player.setPosition(ground.x, ground.y - TILE);
+    await advanceGameClock(scene, 50);
+
+    (scene as unknown as { bridge: ReturnType<typeof createOfficeBridge> }).bridge.emitCommand('toggleSeat', undefined);
+    expect(connector.sits).toEqual([chairSeatId(chairIndex)]);
+    connector.handlers()!.onLocalSeat?.(chairSeatId(chairIndex));
+    expect(feetOf(player)).toEqual(ground);
+    expect(player.seatFacing).toBe('left');
+
+    connector.handlers()!.onChairs?.([]);
+    expect(player.seatFacing).toBeNull();
+    expect(chairObjects()).toHaveLength(0);
+  });
+
+  it('toggleSeat again stands up; walking stands up too', async () => {
     const { connector, scene, player } = await connected();
     const bridge = (scene as unknown as { bridge: ReturnType<typeof createOfficeBridge> }).bridge;
     nextToChair(player);
@@ -3898,6 +4077,48 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
     expect(connector.sits).toEqual([]);
   });
 
+  it('offers a decor chair of a desk someone else claimed as a guest seat, drawn in its slot, and stands up when it goes', async () => {
+    const { connector, scene, player } = await connected();
+    const bridge = (scene as unknown as { bridge: ReturnType<typeof createOfficeBridge> }).bridge;
+    const decorChair = { id: 'item-silla', slot: 8, rotation: 90 as const, textureKey: artSheetKey('chair-gamer', 'sheet'), aboveAvatars: false };
+    const desk: OfficeDesk = {
+      id: 'id-mesa-ajena',
+      label: 'Mesa 2',
+      x: 10 * TILE,
+      y: 30 * TILE,
+      w: 3 * TILE,
+      h: 3 * TILE,
+      occupant: { id: 'id-otra', displayName: 'Otra', items: [decorChair] },
+      mine: false,
+    };
+    // Slot 8 is the bottom right box of the 3x3 desk: tile (12, 32).
+    const ground = { x: 12.5 * TILE, y: 32.5 * TILE };
+    const gamerLayers = () =>
+      scene.children.list.filter(
+        (c) => c.type === 'Image' && (c as Phaser.GameObjects.Image).texture.key === artSheetKey('chair-gamer', 'sheet'),
+      ) as Phaser.GameObjects.Image[];
+    bridge.emitCommand('desks', { desks: [desk] });
+    await vi.waitFor(() => expect(gamerLayers()).toHaveLength(2), LOOP_WAIT);
+    // Both layers around the chair ground, like any other chair, facing right (rotation 90).
+    expect(gamerLayers().map((layer) => layer.depth).sort((a, b) => a - b)).toEqual([
+      chairLayerDepth(ground.y, 'back'),
+      chairLayerDepth(ground.y, 'front'),
+    ]);
+    expect(gamerLayers().every((layer) => layer.name === deskItemName(decorChair.id))).toBe(true);
+
+    player.setPosition(ground.x, ground.y - TILE);
+    await advanceGameClock(scene, 50);
+    bridge.emitCommand('toggleSeat', undefined);
+    expect(connector.sits).toEqual([decorSeatId(desk.id, 8)]);
+    connector.handlers()!.onLocalSeat?.(decorSeatId(desk.id, 8));
+    expect(feetOf(player)).toEqual(ground);
+    expect(player.seatFacing).toBe('right');
+
+    bridge.emitCommand('desks', { desks: [{ ...desk, occupant: { ...desk.occupant!, items: [] } }] });
+    expect(player.seatFacing).toBeNull();
+    expect(gamerLayers()).toHaveLength(0);
+  });
+
   it('publishes the pack portrait of the own session for the video tiles', async () => {
     const bridge = createOfficeBridge();
     const portraits: OfficeEventMap['characterportraits'][] = [];
@@ -3972,7 +4193,7 @@ describe('OfficeScene: edited terrain', () => {
 
     expect(solidAt(scene, lawn.x, lawn.y)).toBe(true);
     expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).not.toEqual(grass);
-    expect(seen).toEqual([{ blocks: watered, walls: BASE_LAYOUT.walls }]);
+    expect(seen).toEqual([{ blocks: watered, walls: BASE_LAYOUT.walls, chairs: [] }]);
 
     handlers.onTerrain!(BASE_LAYOUT.blocks);
     // Arcade drops a destroyed static body on its next step.
@@ -4035,7 +4256,7 @@ describe('OfficeScene: edited terrain', () => {
     bridge.emitCommand('terrainedit', { brush: null });
     bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'grass' } });
 
-    expect(seen).toEqual([{ blocks: watered, walls: BASE_LAYOUT.walls }]);
+    expect(seen).toEqual([{ blocks: watered, walls: BASE_LAYOUT.walls, chairs: [] }]);
   });
 
   it('a click on the map picks a block instead of closing menus while the editor is open', async () => {
@@ -4072,7 +4293,7 @@ describe('OfficeScene: edited terrain', () => {
     expect(solidAt(scene, lawnVertex.x + TILE / 2, lawnVertex.y + 9)).toBe(false);
     expect(solidAt(scene, lawn.x, lawn.y)).toBe(false);
     expect(wallObjects(scene).length).toBeGreaterThan(before);
-    expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled }]);
+    expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled, chairs: [] }]);
 
     handlers.onWalls!(BASE_LAYOUT.walls);
     await vi.waitFor(() => expect(solidAt(scene, lawnVertex.x, lawnVertex.y)).toBe(false), LOOP_WAIT);
@@ -4095,6 +4316,26 @@ describe('OfficeScene: edited terrain', () => {
     expect(wallObjects(scene)).toHaveLength(before);
   });
 
+  it('draws pending chairs for the editor over the live ones, and tells it the live chairs', async () => {
+    const { scene, bridge, handlers } = await bootConnected();
+    const chairObjects = () => scene.children.list.filter((child) => child.name === CHAIR_OBJECT_NAME);
+    const seen: OfficeEventMap['terrain'][] = [];
+    bridge.on('terrain', (payload) => seen.push(payload));
+    const live = [{ index: lawnTile, piece: 'chair-wood' as const, facing: 'down' as const }];
+    handlers.onChairs!(live);
+    const one = chairObjects().length;
+    expect(one).toBeGreaterThan(0);
+    expect(seen.at(-1)).toEqual({ blocks: BASE_LAYOUT.blocks, walls: BASE_LAYOUT.walls, chairs: live });
+
+    bridge.emitCommand('terrainedit', { brush: { kind: 'chair', piece: 'chair-metal', facing: 'up' }, previewChairs: [{ index: lawnTile + 1, chair: { piece: 'chair-metal', facing: 'up' } }, { index: lawnTile, chair: null }] });
+    expect(chairObjects()).toHaveLength(one);
+    bridge.emitCommand('terrainedit', { brush: { kind: 'chair', piece: 'chair-metal', facing: 'up' }, previewChairs: [{ index: lawnTile + 1, chair: { piece: 'chair-metal', facing: 'up' } }] });
+    expect(chairObjects()).toHaveLength(2 * one);
+
+    bridge.emitCommand('terrainedit', null);
+    expect(chairObjects()).toHaveLength(one);
+  });
+
   it('tells the editor the current walls when it opens', async () => {
     const { bridge, handlers } = await bootConnected();
     const walled = withWalls(BASE_LAYOUT.walls, [{ index: lawnTile, piece: 'wall-stone' }]);
@@ -4104,7 +4345,7 @@ describe('OfficeScene: edited terrain', () => {
 
     bridge.emitCommand('terrainedit', { brush: null });
 
-    expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled }]);
+    expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled, chairs: [] }]);
   });
 });
 

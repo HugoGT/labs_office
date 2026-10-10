@@ -69,12 +69,14 @@ import {
 } from '../decor/artAppearanceBody.ts';
 import {
   DESK_SIDE,
+  DeskOnChairError,
   DeskOnWallError,
   DeskOverlapError,
   DeskSpaceOverlapError,
   DeskTakenError,
   InvalidDeskError,
   assertValidDeskPosition,
+  deskCoversChair,
   deskCoversWall,
   type DeskPosition,
   type WallGrid,
@@ -89,8 +91,8 @@ export interface DesksDeps extends AdminDeps {
    */
   decor?: ArtCatalogReader;
   /**
-   * The live painted walls a created or moved desk may not cover. Optional:
-   * without it there are no walls to refuse.
+   * The live painted walls and placed chairs a created or moved desk may not
+   * cover. Optional: without it there are no walls or chairs to refuse.
    */
   walls?: DeskWallGuard;
 }
@@ -117,6 +119,8 @@ const TAKEN: AdminResult = { status: 409, body: { error: 'desk-taken' } };
 const SPACE_OVERLAP: AdminResult = { status: 409, body: { error: 'desk-space-overlap' } };
 /** Painted walls under the desk (terrain editor): fixed by removing them or picking another spot. */
 const ON_WALL: AdminResult = { status: 409, body: { error: 'desk-on-wall' } };
+/** A placed chair under the desk (terrain editor): fixed the same way, removing it or picking another spot. */
+const ON_CHAIR: AdminResult = { status: 409, body: { error: 'desk-on-chair' } };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -194,13 +198,15 @@ async function translating(run: () => Promise<AdminResult>): Promise<AdminResult
     if (error instanceof DeskSpaceOverlapError) return SPACE_OVERLAP;
     if (error instanceof DeskTakenError) return TAKEN;
     if (error instanceof DeskOnWallError) return ON_WALL;
+    if (error instanceof DeskOnChairError) return ON_CHAIR;
     throw error;
   }
 }
 
 /**
- * Runs a write that puts a desk at `position` only if no live wall lies under
- * its footprint. `null` (a rename) writes without looking at the walls. The
+ * Runs a write that puts a desk at `position` only if no live wall or placed
+ * chair lies under its footprint. `null` (a rename) writes without looking at
+ * the walls. The
  * coordinates are validated first so a bad body stays a 400. The guard
  * serializes this against wall edits in this process only, which is enough
  * while one server owns the terrain.
@@ -210,6 +216,7 @@ async function clearOfWalls<T>(position: DeskPosition | null, deps: DesksDeps, w
   assertValidDeskPosition(position);
   return deps.walls.run(async (grid) => {
     if (deskCoversWall(position, grid)) throw new DeskOnWallError('a wall stands under the desk');
+    if (deskCoversChair(position, grid)) throw new DeskOnChairError('a chair stands under the desk');
     return write();
   });
 }

@@ -29,7 +29,7 @@ import { chairPlacement, deskPlacement, footprintAnchor, type SpritePlacement } 
 import { chairLayerDepth, worldAssetDepth } from './depthLayers';
 import { TILE, ZONE_LABELS } from './mapData';
 import { LAYOUT_MATERIALS, type LayoutProp, type OfficeLayout, type TerrainSnapshot } from './officeLayout';
-import type { MapSeat } from './seating';
+import { chairGround, type MapSeat, type PlacedChair } from './seating';
 import { TERRAIN_FLAT_COLORS, decalTileData, fallbackTerrainData, hedgeSprites, propFrame, terrainTileData, wallSprites } from './terrainRender';
 
 /**
@@ -265,6 +265,32 @@ export function placeSeats(scene: Phaser.Scene, seats: readonly MapSeat[], art?:
     const ground: Point = { x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE };
     putChair(scene, chair.key, chairPlacement(chair.piece, facing, ground));
   }
+}
+
+/** Name of every object `placeChairs` draws, so tests and tools can find the placed chairs on the map. */
+export const CHAIR_OBJECT_NAME = 'map:chair';
+
+/**
+ * The chairs placed from the terrain editor, each its own pack piece in both
+ * layers on the middle of its tile, like `placeSeats`; a grey placeholder
+ * while its sheet is missing. Returns what it drew, so the scene can destroy
+ * it and draw the chairs again after an edit.
+ */
+export function placeChairs(scene: Phaser.Scene, chairs: readonly PlacedChair[], width: number, art?: ArtTextures): Phaser.GameObjects.GameObject[] {
+  const drawn: Phaser.GameObjects.GameObject[] = [];
+  for (const { index, piece, facing } of chairs) {
+    const sheet = packSheet(art, piece, isChair);
+    const ground = chairGround(width, index);
+    if (sheet === null) {
+      const tx = Math.floor(ground.x / TILE);
+      const ty = Math.floor(ground.y / TILE);
+      drawn.push(placeholder(scene, tx * TILE + 8, ty * TILE + 8, TILE - 16, TILE - 16, PLACEHOLDER_COLOR, worldAssetDepth((ty + 1) * TILE)));
+      continue;
+    }
+    drawn.push(...putChair(scene, sheet.key, chairPlacement(sheet.piece, facing, ground)));
+  }
+  for (const object of drawn) object.setName(CHAIR_OBJECT_NAME);
+  return drawn;
 }
 
 /** Etiquetas translucidas de zona superpuestas al mapa (app.js:315-322). */

@@ -35,3 +35,35 @@ describe('memoryTerrain walls', () => {
     expect([...(await store.loadBlocks())]).toEqual([]);
   });
 });
+
+describe('memoryTerrain chairs', () => {
+  it('starts with no chair, or with the chair seed', async () => {
+    expect(await createMemoryTerrain().loadChairs()).toEqual([]);
+    expect(await createMemoryTerrain([], [], [{ index: 4, piece: 'chair-wood', facing: 'down' }]).loadChairs()).toEqual([
+      { index: 4, piece: 'chair-wood', facing: 'down' },
+    ]);
+  });
+
+  it('places, turns and removes chairs in one save, recording who placed each', async () => {
+    const store = createMemoryTerrain([], [], [
+      { index: 4, piece: 'chair-wood', facing: 'down' },
+      { index: 5, piece: 'chair-wood', facing: 'down' },
+    ]);
+    await store.saveChairs(
+      [
+        { index: 4, chair: { piece: 'chair-metal', facing: 'left' } },
+        { index: 5, chair: null },
+        { index: 9, chair: { piece: 'chair-gamer', facing: 'up' } },
+      ],
+      'admin-1',
+    );
+
+    expect(await store.loadChairs()).toEqual([
+      { index: 4, piece: 'chair-metal', facing: 'left' },
+      { index: 9, piece: 'chair-gamer', facing: 'up' },
+    ]);
+    expect(store.chairActorOf(4)).toBe('admin-1');
+    expect(store.chairActorOf(5)).toBeUndefined();
+    expect([...(await store.loadWalls())]).toEqual([]);
+  });
+});

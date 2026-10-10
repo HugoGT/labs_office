@@ -250,6 +250,19 @@ export function seatInstances(
   }));
 }
 
+/**
+ * Instances of the chairs placed from the terrain editor (`PlacedChair` of
+ * seating.ts, restated here to stay import-free): each its own piece on the
+ * middle of its tile, exactly like a base chair, so a chair piece's saved
+ * rectangles apply to every chair of it.
+ */
+export function placedChairInstances(
+  chairs: readonly { readonly index: number; readonly piece: string; readonly facing: CollisionFacing }[],
+  width: number,
+): CollisionInstance[] {
+  return chairs.flatMap(({ index, piece, facing }) => seatInstances([{ tx: index % width, ty: Math.floor(index / width), facing }], piece));
+}
+
 /** The chair of the base map's rooms (`BASE_MAP_CHAIR` of mapBuilder.ts, pinned by a test). */
 export const BASE_CHAIR_PIECE = 'chair-wood';
 
@@ -280,10 +293,11 @@ function isRotation(value: number): value is CollisionRotation {
 
 /**
  * Instances of the served desks (furniture in the middle of the area, facing
- * down like `DEFAULT_DESK_FACING`) and of the plants of their decor, each in
- * its slot box (`deskSlotRect`). A decor plant is drawn squeezed into its box
- * and turned by the item rotation, so its rectangles are too. Decor that is
- * not a plant of the art pack or an upload has no piece and never collides.
+ * down like `DEFAULT_DESK_FACING`) and of the plants and chairs of their
+ * decor, each in its slot box (`deskSlotRect`). A decor plant is drawn
+ * squeezed into its box and turned by the item rotation, so its rectangles
+ * are too; a decor chair stands 1:1 on the box middle in the facing its
+ * rotation picks. Decor that is neither has no piece and never collides.
  */
 export function deskInstances(desks: readonly CollisionDesk[]): CollisionInstance[] {
   const instances: CollisionInstance[] = [];
@@ -301,9 +315,20 @@ export function deskInstances(desks: readonly CollisionDesk[]): CollisionInstanc
     const boxW = desk.w / SLOT_COLUMNS;
     const boxH = desk.h / SLOT_COLUMNS;
     for (const item of desk.items) {
-      if (item.pieceId === null || !item.pieceId.startsWith('plant-')) continue;
+      if (item.pieceId === null) continue;
+      const chair = item.pieceId.startsWith('chair-');
+      if (!chair && !item.pieceId.startsWith('plant-')) continue;
       if (!Number.isInteger(item.slot) || item.slot < 0 || item.slot >= SLOT_COUNT) continue;
       const box = { x: desk.x + (item.slot % SLOT_COLUMNS) * boxW, y: desk.y + Math.floor(item.slot / SLOT_COLUMNS) * boxH, w: boxW, h: boxH };
+      if (chair) {
+        // A decor chair is drawn 1:1 on the middle of its box like a placed
+        // chair on its tile, and its rotation picks a facing
+        // (`decorSeatFacing` of seating.ts: 90 right, 180 up, 270 left), so
+        // it turns as that facing does: up keeps the down rectangles.
+        const rotation = item.rotation === 90 || item.rotation === 270 ? item.rotation : 0;
+        instances.push({ piece: item.pieceId, pivot: { x: box.x + boxW / 2, y: box.y + boxH / 2 }, rotation, scale: UNIT, offset: ORIGIN, defaults: [], pickBox: box });
+        continue;
+      }
       const scale = { x: boxW / DECOR_PLANT_FRAME.width, y: boxH / DECOR_PLANT_FRAME.height };
       instances.push({
         piece: item.pieceId,

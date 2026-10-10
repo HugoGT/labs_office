@@ -99,4 +99,41 @@ describe('pgTerrain', () => {
     expect(sql).toContain('on conflict (tile_index) do update set piece_id = excluded.piece_id, updated_by = excluded.updated_by, updated_at = now()');
     expect(pool.queries[0]!.values).toEqual([JSON.stringify(edits), 'user-1']);
   });
+
+  it('loads every stored chair sorted by tile, skipping a row it cannot read', async () => {
+    const pool = fakePool([
+      { tile_index: 40, piece_id: 'chair-gamer', facing: 'left' },
+      { tile_index: 3, piece_id: 'chair-wood', facing: 'down' },
+      { tile_index: 'x', piece_id: 'chair-wood', facing: 'down' },
+      { tile_index: 7, piece_id: 'wall-brick', facing: 'down' },
+      { tile_index: 8, piece_id: 'chair-metal', facing: 'north' },
+    ]);
+
+    const chairs = await createPgTerrain(pool).loadChairs();
+
+    expect(chairs).toEqual([
+      { index: 3, piece: 'chair-wood', facing: 'down' },
+      { index: 40, piece: 'chair-gamer', facing: 'left' },
+    ]);
+    expect(squash(pool.queries[0]!.text)).toBe('select tile_index, piece_id, facing from terrain_chairs');
+  });
+
+  it('places, turns and removes a whole chair batch in one atomic statement', async () => {
+    const pool = fakePool();
+
+    await createPgTerrain(pool).saveChairs([{ index: 3, chair: { piece: 'chair-wood', facing: 'up' } }, { index: 4, chair: null }], 'user-1');
+
+    expect(pool.queries).toHaveLength(1);
+    const sql = squash(pool.queries[0]!.text);
+    expect(sql).toContain('from jsonb_to_recordset($1::jsonb) as entry(index integer, piece text, facing text)');
+    expect(sql).toContain('delete from terrain_chairs where tile_index in (select index from entries where piece is null)');
+    expect(sql).toContain('insert into terrain_chairs (tile_index, piece_id, facing, updated_by)');
+    expect(sql).toContain(
+      'on conflict (tile_index) do update set piece_id = excluded.piece_id, facing = excluded.facing, updated_by = excluded.updated_by, updated_at = now()',
+    );
+    expect(pool.queries[0]!.values).toEqual([
+      JSON.stringify([{ index: 3, piece: 'chair-wood', facing: 'up' }, { index: 4, piece: null, facing: null }]),
+      'user-1',
+    ]);
+  });
 });

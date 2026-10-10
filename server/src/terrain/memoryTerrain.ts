@@ -4,6 +4,7 @@
  */
 
 import type { LayoutMaterial, WallPieceId } from '../../../src/game/officeLayout.ts';
+import { withChairs, type PlacedChair } from '../../../src/game/seating.ts';
 import type { TerrainStore } from './terrainPort.ts';
 
 export interface MemoryTerrain extends TerrainStore {
@@ -11,16 +12,21 @@ export interface MemoryTerrain extends TerrainStore {
   actorOf(index: number): string | null | undefined;
   /** Who placed the wall on a tile, `undefined` where none stands. */
   wallActorOf(index: number): string | null | undefined;
+  /** Who placed the chair on a tile, `undefined` where none stands. */
+  chairActorOf(index: number): string | null | undefined;
 }
 
 export function createMemoryTerrain(
   seed: Iterable<readonly [number, LayoutMaterial]> = [],
   wallSeed: Iterable<readonly [number, WallPieceId]> = [],
+  chairSeed: Iterable<PlacedChair> = [],
 ): MemoryTerrain {
   const blocks = new Map<number, { material: LayoutMaterial; actorId: string | null }>();
   for (const [index, material] of seed) blocks.set(index, { material, actorId: null });
   const walls = new Map<number, { piece: WallPieceId; actorId: string | null }>();
   for (const [index, piece] of wallSeed) walls.set(index, { piece, actorId: null });
+  let chairs: readonly PlacedChair[] = withChairs([], [...chairSeed].map(({ index, piece, facing }) => ({ index, chair: { piece, facing } })));
+  const chairActors = new Map<number, string | null>(chairs.map((chair) => [chair.index, null]));
 
   return {
     async loadBlocks() {
@@ -47,6 +53,20 @@ export function createMemoryTerrain(
     },
     wallActorOf(index) {
       return walls.get(index)?.actorId;
+    },
+    async loadChairs() {
+      return chairs;
+    },
+    async saveChairs(edits, actorId) {
+      // Synchronous between the read and the writes, like one Postgres statement.
+      chairs = withChairs(chairs, edits);
+      for (const { index, chair } of edits) {
+        if (chair === null) chairActors.delete(index);
+        else chairActors.set(index, actorId);
+      }
+    },
+    chairActorOf(index) {
+      return chairActors.get(index);
     },
   };
 }

@@ -31,11 +31,13 @@ import {
   ART_CONTRACT_VERSION,
   ART_PACK_FORMAT,
   ART_PIECE_KINDS,
+  artSheetKey,
   type ArtPackManifest,
   type ArtPiece,
   type ArtPieceFile,
   type ArtPieceKind,
 } from '../../../src/game/artContract.ts';
+import type { CreateAssetInput } from './decorPort.ts';
 
 /**
  * Pack defaults as literals, because `schema.sql` needs them as column
@@ -226,6 +228,17 @@ export function artPieceFields(piece: ArtPiece): ArtPieceFields {
     files: piece.files,
     spec: piece,
   };
+}
+
+/**
+ * The desk decor asset a pack piece brings with it, or `null`. Only chairs:
+ * a decor chair is a guest seat anyone may take, while pack plants and the
+ * rest stay layout pieces (an uploaded plant gets its asset through
+ * `decorAssetForPiece` instead). One tile, like the slot box it is drawn in.
+ */
+export function packDecorAsset(piece: ArtPiece): CreateAssetInput | null {
+  if (piece.kind !== 'chair') return null;
+  return { name: piece.name, kind: 'furniture', textureKey: artSheetKey(piece.id, 'sheet'), w: 1, h: 1, placeableOnDesk: true };
 }
 
 function activePiece(catalog: readonly ArtPieceRef[], kind: ArtPieceKind, id: string): ArtPieceRef {

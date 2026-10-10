@@ -549,6 +549,66 @@ describe('createMemoryDecor: art pack catalog (art migration, step 3)', () => {
     });
   });
 
+  const CHAIR_KEYS = ['art:chair-gamer:sheet', 'art:chair-leather:sheet', 'art:chair-metal:sheet', 'art:chair-wood:sheet'];
+  const chairAssets = async (catalog: ReturnType<typeof decor>, includeArchived = false) =>
+    (await catalog.listAssets({ includeArchived })).filter((entry) => entry.textureKey.startsWith('art:chair-'));
+
+  it('offers the pack chairs as desk decor assets under their manifest names', async () => {
+    const catalog = decor();
+    await catalog.registerArtPack(PACK);
+
+    const chairs = await chairAssets(catalog);
+    expect(chairs.map((entry) => entry.textureKey).sort()).toEqual(CHAIR_KEYS);
+    expect(chairs.find((entry) => entry.textureKey === 'art:chair-wood:sheet')).toMatchObject({
+      name: 'Silla de madera',
+      kind: 'furniture',
+      w: 1,
+      h: 1,
+      placeableOnDesk: true,
+      aboveAvatars: false,
+      archivedAt: null,
+    });
+    // Pack plants stay layout pieces: no decor asset for them.
+    expect((await catalog.listAssets()).some((entry) => entry.textureKey === 'art:plant-ficus:sheet')).toBe(false);
+  });
+
+  it('registering again never duplicates a chair asset, nor brings back one an admin archived', async () => {
+    const catalog = decor();
+    await catalog.registerArtPack(PACK);
+    const wood = (await chairAssets(catalog)).find((entry) => entry.textureKey === 'art:chair-wood:sheet')!;
+    await catalog.archiveAsset(wood.id);
+
+    await catalog.registerArtPack(PACK);
+
+    const all = await chairAssets(catalog, true);
+    expect(all).toHaveLength(4);
+    expect(all.find((entry) => entry.id === wood.id)?.archivedAt).toEqual(NOW);
+  });
+
+  it('archives the decor asset of a chair a newer pack retires, keeping it for whoever placed it', async () => {
+    let clock = NOW;
+    const catalog = createMemoryDecor({ now: () => clock });
+    await catalog.registerArtPack(PACK);
+    const metal = (await chairAssets(catalog)).find((entry) => entry.textureKey === 'art:chair-metal:sheet')!;
+    await catalog.replaceDeskConfig(USER, [{ assetId: metal.id, slot: 4, rotation: 90 }]);
+
+    clock = LATER;
+    await catalog.registerArtPack(withoutPiece('chair-metal'));
+
+    expect((await chairAssets(catalog)).map((entry) => entry.textureKey)).not.toContain('art:chair-metal:sheet');
+    expect((await chairAssets(catalog, true)).find((entry) => entry.id === metal.id)?.archivedAt).toEqual(LATER);
+    expect((await catalog.getDeskConfig(USER))[0]).toMatchObject({ textureKey: 'art:chair-metal:sheet', slot: 4 });
+  });
+
+  it('skips a chair whose name an existing asset already takes instead of failing the registration', async () => {
+    const taken = asset({ id: 'asset-silla', slug: 'silla-de-madera', name: 'Silla de madera', textureKey: 'chair-old' });
+    const catalog = decor([taken]);
+
+    await expect(catalog.registerArtPack(PACK)).resolves.toMatchObject({ retired: [] });
+
+    expect((await chairAssets(catalog)).map((entry) => entry.textureKey).sort()).toEqual(CHAIR_KEYS.filter((key) => key !== 'art:chair-wood:sheet'));
+  });
+
   it('rejects an invalid pack without touching the catalog', async () => {
     const catalog = decor();
     await catalog.registerArtPack(PACK);

@@ -18,6 +18,7 @@ import {
   normalizeArtColor,
   normalizeArtPack,
   normalizeStoredAppearance,
+  packDecorAsset,
   resolveCharacterChoice,
   resolveDeskAppearance,
   resolveFloorAppearance,
@@ -293,5 +294,29 @@ describe('normalizeStoredAppearance', () => {
     expect(choiceError(() => normalizeStoredAppearance({ materialId: 'desk-painted', color: 'red' }, 'desk-wood')).code).toBe(
       'invalid-color',
     );
+  });
+});
+
+describe('packDecorAsset', () => {
+  it('offers every pack chair as a one-tile desk decor asset under its Spanish name', () => {
+    const chairs = MANIFEST.pieces.filter((piece) => piece.kind === 'chair');
+    expect(chairs.map((piece) => piece.id).sort()).toEqual(['chair-gamer', 'chair-leather', 'chair-metal', 'chair-wood']);
+    for (const chair of chairs) {
+      expect(packDecorAsset(chair)).toEqual({
+        name: chair.name,
+        kind: 'furniture',
+        textureKey: `art:${chair.id}:sheet`,
+        w: 1,
+        h: 1,
+        placeableOnDesk: true,
+      });
+    }
+    expect(packDecorAsset(MANIFEST.pieces.find((piece) => piece.id === 'chair-wood')!)?.name).toBe('Silla de madera');
+  });
+
+  it('offers no other pack piece: pack plants and desks are not desk decor', () => {
+    for (const piece of MANIFEST.pieces.filter((candidate) => candidate.kind !== 'chair')) {
+      expect(packDecorAsset(piece), piece.id).toBeNull();
+    }
   });
 });

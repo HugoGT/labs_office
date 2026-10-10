@@ -8,6 +8,7 @@
  */
 
 import type { LayoutMaterial, WallEdit } from '../game/officeLayout';
+import type { ChairEdit } from '../game/seating';
 
 export interface TerrainAdminPort {
   /**
@@ -30,4 +31,12 @@ export interface TerrainAdminPort {
    * Players a wall lands on are returned to the entrance.
    */
   setWalls(edits: readonly WallEdit[]): Promise<void>;
+  /**
+   * Places or turns (`chair`) or removes (`null`) chairs on single tiles, all
+   * or none, at most `MAX_CHAIR_EDITS` per call. Refused with
+   * `terrain-under-placement` when a chair would stand on water, void, a
+   * wall, a desk, a base seat, furniture or the entrance. Anyone sitting on
+   * a removed chair stands up.
+   */
+  setChairs(edits: readonly ChairEdit[]): Promise<void>;
 }
