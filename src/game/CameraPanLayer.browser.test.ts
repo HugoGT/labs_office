@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
 import { CameraPanLayer, type CameraPanLayerOptions } from './CameraPanLayer';
-import { followBounds, navigationBounds } from './cameraBounds';
+import { regionBounds } from './cameraBounds';
 
 /**
  * `CameraPanLayer` traduce input real de puntero a `reduceCameraPan` y aplica
@@ -71,7 +71,7 @@ function layerOptions(
     camera: scene.cameras.main,
     target: scene.target,
     lerp: 0.12,
-    worldBounds: WORLD,
+    region: WORLD,
     isSuspended: () => false,
     ...overrides,
   };
@@ -160,7 +160,7 @@ describe('CameraPanLayer: releasing a drag keeps focus until the player moves (#
     expect(cam.scrollX).toBeCloseTo(scrollAtRelease.x);
     expect(cam.scrollY).toBeCloseTo(scrollAtRelease.y);
     expect(startFollow).not.toHaveBeenCalled();
-    expect(cam.getBounds()).toMatchObject(navigationBounds(WORLD, cam, cam.zoom));
+    expect(cam.getBounds()).toMatchObject(regionBounds(WORLD, cam, cam.zoom));
 
     scene.target.x += 32;
     expect(cam.scrollX).toBeCloseTo(scrollAtRelease.x);
@@ -201,12 +201,13 @@ describe('CameraPanLayer: releasing a drag keeps focus until the player moves (#
     };
 
     const originalScroll = cam.scrollX;
-    sendTouch('touchstart', 100, 100);
-    sendTouch('touchmove', 160, 130);
+    // Toward increasing scroll: the camera starts at the region's top-left edge.
+    sendTouch('touchstart', 160, 130);
+    sendTouch('touchmove', 100, 100);
     await nextFrame(scene);
     const dragged = { x: cam.scrollX, y: cam.scrollY };
     expect(dragged.x).not.toBeCloseTo(originalScroll);
-    sendTouch('touchcancel', 160, 130);
+    sendTouch('touchcancel', 100, 100);
     scene.input.emit('pointermove', fakePointer({ x: 180, y: 150, camera: cam }));
     for (let frame = 0; frame < 5; frame++) await nextFrame(scene);
     expect(cam.scrollX).toBeCloseTo(dragged.x);
@@ -281,30 +282,26 @@ describe('CameraPanLayer: destroy', () => {
   });
 });
 
-describe('CameraPanLayer: la vista mas grande que el mundo sigue paneando (#53)', () => {
-  it('con bounds mas chicos que el canvas, el drag mueve la camara y el clamp del cuadro siguiente no lo deshace', async () => {
+describe('CameraPanLayer: a visible area larger than the region (#53, #179)', () => {
+  it('centers a region smaller than the canvas and a drag cannot move it off center', async () => {
     const scene = await bootHostScene();
     const cam = scene.cameras.main;
-    // Mundo 200x150 en un canvas 320x240: el mismo caso que 2048x1408 en un
-    // monitor 2560x1440, donde `setBounds` al mundo dejaba el scroll fijo.
-    const world = { x: 0, y: 0, width: 200, height: 150 };
-    cam.setBounds(world.x, world.y, world.width, world.height);
+    // 200x150 region in a 320x240 canvas: the visible area covers both axes.
+    const region = { x: 0, y: 0, width: 200, height: 150 };
+    new CameraPanLayer(layerOptions(scene, { region }));
     await nextFrame(scene);
-    const startScrollX = cam.scrollX;
-    const startScrollY = cam.scrollY;
-    new CameraPanLayer(layerOptions(scene, { worldBounds: world }));
 
     scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, camera: cam }), []);
     scene.input.emit('pointermove', fakePointer({ x: 160, y: 140, camera: cam }));
     await nextFrame(scene);
 
-    expect(cam.scrollX).toBeCloseTo(startScrollX - 60);
-    expect(cam.scrollY).toBeCloseTo(startScrollY - 40);
+    expect(cam.midPoint.x).toBeCloseTo(region.width / 2, 0);
+    expect(cam.midPoint.y).toBeCloseTo(region.height / 2, 0);
 
     scene.input.emit('pointerup', fakePointer({ x: 160, y: 140, camera: cam }));
   });
 
-  it('retains navigation bounds after release and restores world bounds only after player movement', async () => {
+  it('keeps the same region bounds through drag, release and the return to follow', async () => {
     const scene = await bootHostScene();
     const cam = scene.cameras.main;
     const startFollow = vi.spyOn(cam, 'startFollow');
@@ -312,24 +309,120 @@ describe('CameraPanLayer: la vista mas grande que el mundo sigue paneando (#53)'
 
     scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, camera: cam }), []);
     scene.input.emit('pointermove', fakePointer({ x: 300, y: 250, camera: cam }));
+    await nextFrame(scene);
+    expect(cam.getBounds()).toMatchObject(regionBounds(WORLD, cam, cam.zoom));
     scene.input.emit('pointerup', fakePointer({ x: 300, y: 250, camera: cam }));
 
     await nextFrame(scene);
-    expect(cam.getBounds()).toMatchObject(navigationBounds(WORLD, cam, cam.zoom));
+    expect(cam.getBounds()).toMatchObject(regionBounds(WORLD, cam, cam.zoom));
     expect(startFollow).not.toHaveBeenCalled();
     scene.target.y += 32;
     renderFrames(scene);
     expect(startFollow).toHaveBeenCalledTimes(1);
-    const bounds = cam.getBounds();
-    expect([bounds.x, bounds.y, bounds.width, bounds.height]).toEqual([
-      WORLD.x,
-      WORLD.y,
-      WORLD.width,
-      WORLD.height,
-    ]);
+    expect(cam.getBounds()).toMatchObject(regionBounds(WORLD, cam, cam.zoom));
     // Aterriza donde el seguimiento la habria dejado: el target centrado.
     expect(cam.midPoint.x).toBeCloseTo(scene.target.x, 0);
     expect(cam.midPoint.y).toBeCloseTo(scene.target.y, 0);
+  });
+});
+
+describe('CameraPanLayer: the view never leaves the terrain region (#179)', () => {
+  // Three 288 px blocks a side inside the 2000x2000 world, around the target (400, 300).
+  const REGION = { x: 200, y: 100, width: 864, height: 864 };
+
+  async function addMinimap(scene: HostScene): Promise<Phaser.Cameras.Scene2D.Camera> {
+    const minimap = scene.cameras.add(200, 0, 100, 100);
+    minimap.setZoom(100 / WORLD.width);
+    minimap.centerOn(WORLD.width / 2, WORLD.height / 2);
+    await nextFrame(scene);
+    return minimap;
+  }
+
+  function expectViewInside(cam: Phaser.Cameras.Scene2D.Camera, region: typeof REGION): void {
+    const view = cam.worldView;
+    expect(view.x).toBeGreaterThanOrEqual(region.x - 0.5);
+    expect(view.y).toBeGreaterThanOrEqual(region.y - 0.5);
+    expect(view.right).toBeLessThanOrEqual(region.x + region.width + 0.5);
+    expect(view.bottom).toBeLessThanOrEqual(region.y + region.height + 0.5);
+  }
+
+  it.each([
+    { name: 'up-left', to: { x: 3000, y: 3000 }, edge: { x: REGION.x, y: REGION.y } },
+    { name: 'down-right', to: { x: -3000, y: -3000 }, edge: { x: REGION.x + REGION.width - 320, y: REGION.y + REGION.height - 240 } },
+  ])('a long drag $name stops at the region edge', async ({ to, edge }) => {
+    const scene = await bootHostScene();
+    const cam = scene.cameras.main;
+    cam.startFollow(scene.target);
+    new CameraPanLayer(layerOptions(scene, { region: REGION }));
+    await nextFrame(scene);
+
+    scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, camera: cam }), []);
+    scene.input.emit('pointermove', fakePointer({ ...to, camera: cam }));
+    await nextFrame(scene);
+
+    expectViewInside(cam, REGION);
+    expect(cam.worldView.x).toBeCloseTo(edge.x, 0);
+    expect(cam.worldView.y).toBeCloseTo(edge.y, 0);
+    scene.input.emit('pointerup', fakePointer({ ...to, camera: cam }));
+  });
+
+  it('a minimap click far in the void eases into the nearest region corner', async () => {
+    const scene = await bootHostScene();
+    const cam = scene.cameras.main;
+    cam.startFollow(scene.target);
+    const minimap = await addMinimap(scene);
+    new CameraPanLayer(layerOptions(scene, { region: REGION, minimap }));
+
+    // Minimap screen (290, 90) is world (1800, 1800), far past the region.
+    scene.input.emit('pointerdown', fakePointer({ x: 290, y: 90, camera: minimap }), []);
+    const scrolls: number[] = [];
+    for (let frame = 0; frame < 128; frame++) {
+      await nextFrame(scene);
+      expectViewInside(cam, REGION);
+      scrolls.push(cam.scrollX);
+    }
+
+    expect(cam.worldView.right).toBeCloseTo(REGION.x + REGION.width, 0);
+    expect(cam.worldView.bottom).toBeCloseTo(REGION.y + REGION.height, 0);
+    // The glide aims at a reachable scroll: its last moving frame is a small
+    // eased step, not a full-speed stop against the clamp.
+    const steps = scrolls.slice(1).map((value, index) => value - scrolls[index]!).filter((step) => step !== 0);
+    expect(Math.abs(steps.at(-1)!)).toBeLessThanOrEqual(1);
+  });
+
+  it('following a player near the region edge shows no more than the margin', async () => {
+    const scene = await bootHostScene();
+    const cam = scene.cameras.main;
+    scene.target.setPosition(REGION.x + 10, REGION.y + 10);
+    cam.startFollow(scene.target);
+    new CameraPanLayer(layerOptions(scene, { region: REGION }));
+
+    renderFrames(scene, 4);
+
+    expect(cam.worldView.x).toBeCloseTo(REGION.x, 0);
+    expect(cam.worldView.y).toBeCloseTo(REGION.y, 0);
+  });
+
+  it('setRegion with more terrain lets the same drag go further', async () => {
+    const scene = await bootHostScene();
+    const cam = scene.cameras.main;
+    cam.startFollow(scene.target);
+    const layer = new CameraPanLayer(layerOptions(scene, { region: REGION }));
+    await nextFrame(scene);
+    const drag = async (): Promise<void> => {
+      scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, camera: cam }), []);
+      scene.input.emit('pointermove', fakePointer({ x: 3000, y: 100, camera: cam }));
+      await nextFrame(scene);
+      scene.input.emit('pointerup', fakePointer({ x: 3000, y: 100, camera: cam }));
+    };
+
+    await drag();
+    expect(cam.worldView.x).toBeCloseTo(REGION.x, 0);
+
+    // A block painted in the left margin grows the region one block that way.
+    layer.setRegion({ ...REGION, x: REGION.x - 288, width: REGION.width + 288 });
+    await drag();
+    expect(cam.worldView.x).toBeCloseTo(REGION.x - 288, 0);
   });
 });
 
@@ -460,46 +553,46 @@ describe('CameraPanLayer: click en el minimapa (#98)', () => {
   });
 });
 
-describe('CameraPanLayer: owns the follow bounds at every zoom (map-zoom)', () => {
+describe('CameraPanLayer: owns the region bounds at every zoom (map-zoom)', () => {
   // 200x150 world in a 320x240 canvas at 0.5: the visible area (640x480) covers it.
   const SMALL = { x: 0, y: 0, width: 200, height: 150 };
 
-  it('while following, replaces raw world bounds with the follow bounds: the world sits centered', async () => {
+  it('while following, replaces raw bounds with the region bounds: the region sits centered', async () => {
     const scene = await bootHostScene();
     const cam = scene.cameras.main;
     cam.setZoom(0.5);
     cam.setBounds(SMALL.x, SMALL.y, SMALL.width, SMALL.height);
     cam.startFollow(scene.target);
-    new CameraPanLayer(layerOptions(scene, { worldBounds: SMALL }));
+    new CameraPanLayer(layerOptions(scene, { region: SMALL }));
 
     await nextFrame(scene);
 
-    expect(cam.getBounds()).toMatchObject(followBounds(SMALL, cam, 0.5));
+    expect(cam.getBounds()).toMatchObject(regionBounds(SMALL, cam, 0.5));
     expect(cam.scrollX + cam.width / 2).toBeCloseTo(SMALL.width / 2);
     expect(cam.scrollY + cam.height / 2).toBeCloseTo(SMALL.height / 2);
   });
 
-  it('follows the new follow bounds when the zoom changes under it', async () => {
+  it('follows the new region bounds when the zoom changes under it', async () => {
     const scene = await bootHostScene();
     const cam = scene.cameras.main;
     cam.startFollow(scene.target);
-    new CameraPanLayer(layerOptions(scene, { worldBounds: SMALL }));
+    new CameraPanLayer(layerOptions(scene, { region: SMALL }));
     await nextFrame(scene);
-    expect(cam.getBounds()).toMatchObject(followBounds(SMALL, cam, 1));
+    expect(cam.getBounds()).toMatchObject(regionBounds(SMALL, cam, 1));
 
     cam.setZoom(2);
     await nextFrame(scene);
 
-    expect(cam.getBounds()).toMatchObject(followBounds(SMALL, cam, 2));
+    expect(cam.getBounds()).toMatchObject(regionBounds(SMALL, cam, 2));
   });
 
-  it('after a pan at 0.5 the glide lands on the centered position and reattaches without a jump', async () => {
+  it('after a drag at 0.5 the covered region stays centered and reattaches without a jump', async () => {
     const scene = await bootHostScene();
     const cam = scene.cameras.main;
     cam.setZoom(0.5);
     cam.startFollow(scene.target);
     const startFollow = vi.spyOn(cam, 'startFollow');
-    new CameraPanLayer(layerOptions(scene, { worldBounds: SMALL }));
+    new CameraPanLayer(layerOptions(scene, { region: SMALL }));
     await nextFrame(scene);
 
     scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, camera: cam }), []);
@@ -508,7 +601,8 @@ describe('CameraPanLayer: owns the follow bounds at every zoom (map-zoom)', () =
     await nextFrame(scene);
     scene.target.x += 32;
 
-    const scrolls: number[] = [];
+    // The visible area covers the region on both axes: the drag had nothing to move.
+    const scrolls: number[] = [cam.scrollX];
     let reattachFrame = -1;
     for (let frame = 0; frame < 160; frame++) {
       await nextFrame(scene);
@@ -516,10 +610,10 @@ describe('CameraPanLayer: owns the follow bounds at every zoom (map-zoom)', () =
       if (reattachFrame < 0 && startFollow.mock.calls.length > 0) reattachFrame = frame;
     }
 
-    expect(reattachFrame).toBeGreaterThan(0);
+    expect(reattachFrame).toBeGreaterThanOrEqual(0);
     // The frame that reattaches moves the camera by a glide step at most, never a clamp.
-    expect(Math.abs(scrolls[reattachFrame] - scrolls[reattachFrame - 1])).toBeLessThan(1);
-    expect(cam.getBounds()).toMatchObject(followBounds(SMALL, cam, 0.5));
+    expect(Math.abs(scrolls[reattachFrame + 1]! - scrolls[reattachFrame]!)).toBeLessThan(1);
+    expect(cam.getBounds()).toMatchObject(regionBounds(SMALL, cam, 0.5));
     expect(cam.scrollX + cam.width / 2).toBeCloseTo(SMALL.width / 2, 0);
     expect(cam.scrollY + cam.height / 2).toBeCloseTo(SMALL.height / 2, 0);
   });

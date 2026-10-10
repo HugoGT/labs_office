@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { centeredScroll, followBounds, glideStep, navigationBounds, scrollRange } from './cameraBounds';
+import { CAMERA_MARGIN_TILES, centeredScroll, regionBounds, glideStep, scrollRange, terrainRegion } from './cameraBounds';
 
 /**
- * Geometria pura de la camara principal (#53, #98), sin Phaser. Reproduce
+ * Geometria pura de la camara principal (#53, #98, #179), sin Phaser. Reproduce
  * `Camera.clampX/clampY` de Phaser 3.90 para poder decidir hacia donde
  * planear sin depender del clamp que `preRender` aplica a destiempo.
  */
@@ -22,33 +22,61 @@ describe('scrollRange: mismo clamp que Phaser', () => {
   });
 });
 
-describe('navigationBounds: bounds mientras la camara navega sin el jugador', () => {
-  it('cualquier punto del mundo, incluidas las esquinas, puede quedar centrado aunque la vista sea mas grande que el mundo', () => {
-    const view = { width: 2560, height: 1440 };
-    const bounds = navigationBounds({ x: 0, y: 0, width: 2048, height: 1408 }, view, 1);
-    const rangeX = scrollRange(bounds.x, bounds.width, view.width, 1);
-    const rangeY = scrollRange(bounds.y, bounds.height, view.height, 1);
+describe('terrainRegion: where the main camera may look (#179)', () => {
+  const BLOCK = 288;
+  /** Three 32 px tiles, what `OfficeScene` passes (`CAMERA_MARGIN_TILES`). */
+  const MARGIN = 96;
+  /** A row-major grid of `columns` x `rows` void blocks with `painted` overrides. */
+  function grid(columns: number, rows: number, painted: Record<number, string>): string[] {
+    return Array.from({ length: columns * rows }, (_, index) => painted[index] ?? 'void');
+  }
 
-    for (const [px, py] of [
-      [0, 0],
-      [2048, 1408],
-      [1024, 704],
-    ]) {
-      expect(centeredScroll(px, view.width)).toBeGreaterThanOrEqual(rangeX.min);
-      expect(centeredScroll(px, view.width)).toBeLessThanOrEqual(rangeX.max);
-      expect(centeredScroll(py, view.height)).toBeGreaterThanOrEqual(rangeY.min);
-      expect(centeredScroll(py, view.height)).toBeLessThanOrEqual(rangeY.max);
-    }
+  it('keeps the margin at three tiles, not a whole block', () => {
+    expect(CAMERA_MARGIN_TILES).toBe(3);
   });
 
-  it('no deja alejarse mas alla de centrar el borde: el pan no se pierde en el vacio', () => {
-    const view = { width: 1000, height: 800 };
-    const bounds = navigationBounds({ x: 0, y: 0, width: 2048, height: 1408 }, view, 1);
-
-    expect(scrollRange(bounds.x, bounds.width, view.width, 1)).toEqual({
-      min: centeredScroll(0, view.width),
-      max: centeredScroll(2048, view.width),
+  it('is the one painted block plus the margin on every side', () => {
+    // 21x15 grid, the central wood block 157 (column 10, row 7).
+    expect(terrainRegion(grid(21, 15, { 157: 'wood' }), 21, BLOCK, MARGIN)).toEqual({
+      x: 10 * BLOCK - MARGIN,
+      y: 7 * BLOCK - MARGIN,
+      width: BLOCK + 2 * MARGIN,
+      height: BLOCK + 2 * MARGIN,
     });
+  });
+
+  it('bounds scattered blocks together: an L shape spans its whole bounding box', () => {
+    // Column 2 rows 1..3, then row 3 columns 2..5.
+    const blocks = grid(8, 6, { 10: 'grass', 18: 'grass', 26: 'grass', 27: 'sand', 28: 'sand', 29: 'tile' });
+
+    expect(terrainRegion(blocks, 8, BLOCK, MARGIN)).toEqual({
+      x: 2 * BLOCK - MARGIN,
+      y: BLOCK - MARGIN,
+      width: 4 * BLOCK + 2 * MARGIN,
+      height: 3 * BLOCK + 2 * MARGIN,
+    });
+  });
+
+  it('counts water as painted terrain: only void is outside it', () => {
+    expect(terrainRegion(grid(5, 5, { 12: 'water', 13: 'wood' }), 5, BLOCK, MARGIN)).toEqual({
+      x: 2 * BLOCK - MARGIN,
+      y: 2 * BLOCK - MARGIN,
+      width: 2 * BLOCK + 2 * MARGIN,
+      height: BLOCK + 2 * MARGIN,
+    });
+  });
+
+  it('a block on the grid edge keeps its margin past the world', () => {
+    expect(terrainRegion(grid(4, 3, { 0: 'grass', 11: 'wood' }), 4, BLOCK, MARGIN)).toEqual({
+      x: -MARGIN,
+      y: -MARGIN,
+      width: 4 * BLOCK + 2 * MARGIN,
+      height: 3 * BLOCK + 2 * MARGIN,
+    });
+  });
+
+  it('falls back to the whole block grid when every block is void', () => {
+    expect(terrainRegion(grid(4, 3, {}), 4, BLOCK, MARGIN)).toEqual({ x: 0, y: 0, width: 4 * BLOCK, height: 3 * BLOCK });
   });
 });
 
@@ -68,10 +96,10 @@ describe('glideStep: el planeo por cuadro', () => {
   });
 });
 
-describe('followBounds: bounds while the camera follows the player, zoom aware', () => {
-  const WORLD = { x: 0, y: 0, width: 4032, height: 2880 };
+describe('regionBounds: the main camera bounds for a region, zoom aware', () => {
+  const REGION = { x: 0, y: 0, width: 4032, height: 2880 };
 
-  /** The one scroll Phaser's clamp allows on an axis whose display covers the world. */
+  /** The one scroll Phaser's clamp allows on an axis whose display covers the region. */
   function pinnedScroll(
     bounds: { x: number; width: number },
     viewSize: number,
@@ -82,45 +110,45 @@ describe('followBounds: bounds while the camera follows the player, zoom aware',
     return range.min;
   }
 
-  it('is the world itself while the visible area is smaller than it on both axes', () => {
-    expect(followBounds(WORLD, { width: 1280, height: 720 }, 1)).toEqual(WORLD);
-    expect(followBounds(WORLD, { width: 2560, height: 1440 }, 1)).toEqual(WORLD);
+  it('is the region itself while the visible area is smaller than it on both axes', () => {
+    expect(regionBounds(REGION, { width: 1280, height: 720 }, 1)).toEqual(REGION);
+    expect(regionBounds(REGION, { width: 2560, height: 1440 }, 1)).toEqual(REGION);
   });
 
-  it('centers the world on x when only the width fits at 0.5 (2560x1440)', () => {
+  it('centers the region on x when only the width fits at 0.5 (2560x1440)', () => {
     const view = { width: 2560, height: 1440 };
-    const bounds = followBounds(WORLD, view, 0.5);
+    const bounds = regionBounds(REGION, view, 0.5);
 
     expect(bounds).toEqual({ x: -544, y: 0, width: 5120, height: 2880 });
-    expect(pinnedScroll(bounds, view.width, 0.5)).toBe(centeredScroll(WORLD.width / 2, view.width));
+    expect(pinnedScroll(bounds, view.width, 0.5)).toBe(centeredScroll(REGION.width / 2, view.width));
   });
 
-  it('centers the world on y only when just the height fits', () => {
+  it('centers the region on y only when just the height fits', () => {
     const view = { width: 1000, height: 1500 };
-    const bounds = followBounds(WORLD, view, 0.5);
+    const bounds = regionBounds(REGION, view, 0.5);
 
     expect(bounds).toEqual({ x: 0, y: -60, width: 4032, height: 3000 });
     expect(pinnedScroll({ x: bounds.y, width: bounds.height }, view.height, 0.5)).toBe(
-      centeredScroll(WORLD.height / 2, view.height),
+      centeredScroll(REGION.height / 2, view.height),
     );
   });
 
-  it('centers the world on both axes when the whole world fits', () => {
+  it('centers the region on both axes when the whole region fits', () => {
     const view = { width: 3000, height: 1800 };
-    const bounds = followBounds(WORLD, view, 0.5);
+    const bounds = regionBounds(REGION, view, 0.5);
 
     expect(bounds).toEqual({ x: -984, y: -360, width: 6000, height: 3600 });
-    expect(pinnedScroll(bounds, view.width, 0.5)).toBe(centeredScroll(WORLD.width / 2, view.width));
+    expect(pinnedScroll(bounds, view.width, 0.5)).toBe(centeredScroll(REGION.width / 2, view.width));
   });
 
-  it('zooming in shrinks the visible area back below the world: the bounds are the world again', () => {
-    expect(followBounds(WORLD, { width: 2560, height: 1440 }, 2)).toEqual(WORLD);
+  it('zooming in shrinks the visible area back below the region: the bounds are the region again', () => {
+    expect(regionBounds(REGION, { width: 2560, height: 1440 }, 2)).toEqual(REGION);
   });
 
-  it('keeps the world origin: an offset world is centered around its own middle', () => {
+  it('keeps the region origin: an offset region is centered around its own middle', () => {
     const offset = { x: 100, y: 50, width: 400, height: 300 };
 
-    expect(followBounds(offset, { width: 1000, height: 800 }, 1)).toEqual({
+    expect(regionBounds(offset, { width: 1000, height: 800 }, 1)).toEqual({
       x: -200,
       y: -200,
       width: 1000,
