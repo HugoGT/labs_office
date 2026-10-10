@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { MAX_NAME_LENGTH } from '../game/officeProtocol';
+import { stripDisplayNameEmailSuffix } from '../game/displayName';
 import styles from './LoginScreen.module.css';
 
 /** The "forgot your password" flow (#94), already wired by `AuthGate`. */
@@ -15,7 +16,7 @@ export interface PasswordResetProps {
 }
 
 export interface LoginScreenProps {
-  /** `name` es el texto crudo del campo; el servidor lo canonicaliza (#100, D10). */
+  /** Email suffixes are removed; the server canonicalizes the remaining name. */
   onSubmit: (name: string, email: string, password: string) => void;
   /** `true` mientras el intento anterior sigue en vuelo. */
   pending: boolean;
@@ -71,7 +72,7 @@ export function LoginScreen({
   initialName,
   notice = null,
 }: LoginScreenProps) {
-  const [name, setName] = useState(initialName ?? '');
+  const [name, setName] = useState(() => stripDisplayNameEmailSuffix(initialName ?? ''));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [resetting, setResetting] = useState(false);
@@ -150,12 +151,14 @@ export function LoginScreen({
           // la query y se perderia todo el estado de React.
           event.preventDefault();
           if (pending) return;
+          const submittedName = stripDisplayNameEmailSuffix(name);
           // Bloqueado ANTES de cualquier llamada de red (#100): un nombre vacio
           // o solo espacio en blanco no llega ni siquiera a `onSubmit`. El
           // `required` del input ya cubre al navegador; esto cubre al mismo
           // navegador dejando pasar espacios, que `required` no rechaza.
-          if (name.trim().length === 0) return;
-          onSubmit(name, email, password);
+          if (submittedName.trim().length === 0) return;
+          setName(submittedName);
+          onSubmit(submittedName, email, password);
         }}
       >
         <h1 className={styles.title}>Labs</h1>

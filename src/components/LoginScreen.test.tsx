@@ -59,6 +59,41 @@ describe('LoginScreen', () => {
     expect(onSubmit).toHaveBeenCalledWith('Ana Lopez', 'ana@example.com', 'secreta');
   });
 
+  it('submits only the local part of an email in Nombre without changing credentials', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(<LoginScreen onSubmit={onSubmit} pending={false} error={null} />);
+
+    await fillLoginForm(user, { name: 'ana@example.com' });
+    await user.click(screen.getByRole('button', { name: /entrar/i }));
+
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith('ana', 'ana@example.com', 'secreta');
+    expect(screen.getByLabelText(/^nombre$/i)).toHaveValue('ana');
+  });
+
+  it('prefills and resubmits a previously saved email name without its domain', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(<LoginScreen onSubmit={onSubmit} pending={false} error={null} initialName="ana@example.com" />);
+
+    expect(screen.getByLabelText(/^nombre$/i)).toHaveValue('ana');
+    await fillLoginForm(user, { name: '' });
+    await user.type(screen.getByLabelText(/contraseña/i), '{Enter}');
+
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith('ana', 'ana@example.com', 'secreta');
+  });
+
+  it.each(['@example.com', '  @example.com'])('blocks an empty local part in %s before submission', async (name) => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(<LoginScreen onSubmit={onSubmit} pending={false} error={null} />);
+
+    await fillLoginForm(user, { name });
+    await user.click(screen.getByRole('button', { name: /entrar/i }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it('la tecla Enter envia el formulario, sin recargar la pagina', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();

@@ -25,6 +25,9 @@ coverage/
 # Indice de CodeGraph: es por-checkout, nunca se comparte ni se reutiliza
 .codegraph/
 
+# Local security audit
+/docs/security-audit-2026-10-09.md
+
 # Editor / SO
 .vscode/*
 !.vscode/extensions.json

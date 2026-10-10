@@ -326,6 +326,26 @@ describe('AuthGate: forgot password (#94)', () => {
 });
 
 describe('AuthGate: nombre visible auto-elegido en login (#100)', () => {
+  it('claims and remembers the local part while authenticating with the full email', async () => {
+    const user = userEvent.setup();
+    const { port, emit } = fakePort();
+    const onNameClaimed = vi.fn();
+    const displayName = fakeDisplayNamePort({
+      claim: vi.fn(async (name) => ({ outcome: 'ok' as const, displayName: name })),
+    });
+    const office = officeSpy();
+    render(<AuthGate auth={port} displayName={displayName} onNameClaimed={onNameClaimed}>{office.render}</AuthGate>);
+    emit(null);
+
+    await submitLogin(user, { name: 'ana@example.com' });
+    await act(async () => emit(ANA));
+
+    expect(port.signIn).toHaveBeenCalledExactlyOnceWith('ana@example.com', 'secreta');
+    expect(displayName.claim).toHaveBeenCalledExactlyOnceWith('ana');
+    expect(onNameClaimed).toHaveBeenCalledExactlyOnceWith('ana');
+    expect(await screen.findByTestId('office')).toHaveTextContent('ana');
+  });
+
   it('invariante de una sola rama: nunca se ven la oficina y el login a la vez', async () => {
     const user = userEvent.setup();
     const office = officeSpy();
