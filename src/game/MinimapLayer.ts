@@ -11,11 +11,14 @@
  *
  * Dragging the minimap scrolls that band; a click (a press released within
  * the drag threshold, `minimapGesture.ts`) hands its world point to
- * `onFocus`, which glides the main camera there (#98).
+ * `onFocus`, which glides the main camera there (#98). Two clicks that make
+ * a double click (`doubleClick.ts`, the same rule as the map) also hand it
+ * to `onWalk`, which sends the player there.
  */
 
 import Phaser from 'phaser';
 import { regionBounds, type Rect } from './cameraBounds';
+import { registerClick, type ClickSample } from './doubleClick';
 import { reduceMinimapGesture, type MinimapGestureEvent, type MinimapGestureState } from './minimapGesture';
 
 /** The player marker's radius in screen pixels, whatever the minimap zoom. */
@@ -33,6 +36,8 @@ export interface MinimapLayerOptions {
   marker?: Phaser.GameObjects.Arc;
   /** A click on the minimap, as the world point under it. */
   onFocus?: (point: { x: number; y: number }) => void;
+  /** A double click on the minimap, as the world point under it. */
+  onWalk?: (point: { x: number; y: number }) => void;
 }
 
 export class MinimapLayer {
@@ -40,8 +45,11 @@ export class MinimapLayer {
   private readonly camera: Phaser.Cameras.Scene2D.Camera;
   private readonly marker?: Phaser.GameObjects.Arc;
   private readonly onFocus?: (point: { x: number; y: number }) => void;
+  private readonly onWalk?: (point: { x: number; y: number }) => void;
   private region: Rect;
   private gesture: MinimapGestureState = { kind: 'idle' };
+  /** First click of a possible double click, in screen pixels and game time. */
+  private clickPair: ClickSample | null = null;
 
   private readonly onPointerDown = (pointer: Phaser.Input.Pointer): void => {
     // Whatever is under it: a desk or a peer is a couple of pixels here, not a target.
@@ -59,6 +67,7 @@ export class MinimapLayer {
 
   private readonly onPointerUpOutside = (): void => {
     this.dispatch({ kind: 'cancel' });
+    this.clickPair = null;
   };
 
   constructor(options: MinimapLayerOptions) {
@@ -66,6 +75,7 @@ export class MinimapLayer {
     this.camera = options.camera;
     this.marker = options.marker;
     this.onFocus = options.onFocus;
+    this.onWalk = options.onWalk;
     this.region = options.region;
     this.frame(options.center.y);
 
@@ -102,13 +112,20 @@ export class MinimapLayer {
       case 'none':
         return;
       case 'scroll':
+        this.clickPair = null;
         // Clamped now, not at the next render, so a long drag past an edge comes back at once.
         cam.scrollX = cam.clampX(cam.scrollX - effect.dx / cam.zoom);
         cam.scrollY = cam.clampY(cam.scrollY - effect.dy / cam.zoom);
         return;
-      case 'click':
-        this.onFocus?.(cam.getWorldPoint(effect.x, effect.y));
+      case 'click': {
+        const point = cam.getWorldPoint(effect.x, effect.y);
+        this.onFocus?.(point);
+        // Screen coordinates: the second click lands on the same spot of the minimap.
+        const { fired, pending } = registerClick(this.clickPair, { time: this.scene.time.now, x: effect.x, y: effect.y });
+        this.clickPair = pending;
+        if (fired) this.onWalk?.(point);
         return;
+      }
     }
   }
 

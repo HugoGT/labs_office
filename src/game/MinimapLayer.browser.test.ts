@@ -223,3 +223,52 @@ describe('MinimapLayer: drag and click', () => {
     expect(onFocus).not.toHaveBeenCalled();
   });
 });
+
+describe('MinimapLayer: double click walks there', () => {
+  const TALL = { x: 0, y: 0, width: 480, height: 1200 };
+
+  function click(scene: HostScene, x: number, y: number): void {
+    scene.input.emit('pointerdown', fakePointer({ x, y, camera: scene.minimap }), []);
+    scene.input.emit('pointerup', fakePointer({ x, y }));
+  }
+
+  it('two quick clicks on one spot walk to its world point, and each click still focuses', async () => {
+    const scene = await bootHostScene();
+    const onFocus = vi.fn();
+    const onWalk = vi.fn();
+    new MinimapLayer(layerOptions(scene, { region: TALL, center: { x: 0, y: 600 }, onFocus, onWalk }));
+    renderFrame(scene);
+
+    click(scene, 250, 25);
+    expect(onWalk).not.toHaveBeenCalled();
+    click(scene, 252, 26);
+
+    expect(onFocus).toHaveBeenCalledTimes(2);
+    expect(onWalk).toHaveBeenCalledTimes(1);
+    expect(onWalk.mock.calls[0]![0].x).toBeCloseTo(240 + 2 * (TALL.width / MAP.width), 0);
+    expect(onWalk.mock.calls[0]![0].y).toBeCloseTo(600 + 1 * (TALL.width / MAP.width), 0);
+
+    // A third click starts a new pair instead of chaining.
+    click(scene, 252, 26);
+    expect(onWalk).toHaveBeenCalledTimes(1);
+  });
+
+  it('clicks too far apart in time or space, or a drag between them, do not walk', async () => {
+    const scene = await bootHostScene();
+    const onWalk = vi.fn();
+    new MinimapLayer(layerOptions(scene, { region: TALL, center: { x: 0, y: 600 }, onWalk }));
+    renderFrame(scene);
+
+    click(scene, 250, 25);
+    for (let frame = 0; frame < 25; frame++) renderFrame(scene);
+    click(scene, 250, 25);
+    click(scene, 270, 25);
+
+    scene.input.emit('pointerdown', fakePointer({ x: 270, y: 25, camera: scene.minimap }), []);
+    scene.input.emit('pointermove', fakePointer({ x: 270, y: 45 }));
+    scene.input.emit('pointerup', fakePointer({ x: 270, y: 45 }));
+    click(scene, 270, 25);
+
+    expect(onWalk).not.toHaveBeenCalled();
+  });
+});

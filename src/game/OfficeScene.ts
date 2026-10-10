@@ -1933,6 +1933,10 @@ export class OfficeScene extends Phaser.Scene {
       marker: this.mmMarker,
       // The pan layer is created later in `create()`; it exists by the first click.
       onFocus: (point) => this.cameraPanLayer?.focus(point),
+      // Same guards as a double click on the map: no walking while editing or before the room placed us.
+      onWalk: (point) => {
+        if (!this.layoutEditing && this.localPositionReady) this.startWalk(point);
+      },
     });
 
     this.scale.on('resize', (gameSize: Phaser.Structs.Size) => {

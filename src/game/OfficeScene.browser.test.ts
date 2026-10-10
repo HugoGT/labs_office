@@ -309,6 +309,22 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(movement.autoWalk).toBeUndefined();
   });
 
+  it('walks to the world point under a double click on the minimap', async () => {
+    const { scene, movement } = await movementArena();
+    const minimap = scene.cameras.cameras[1]!;
+    const screen = { x: minimap.x + minimap.width / 2, y: minimap.y + minimap.height / 2 };
+    const goal = minimap.getWorldPoint(screen.x, screen.y);
+    const pointer = { button: 0, camera: minimap, ...screen, getDistance: () => 0 };
+
+    for (let press = 0; press < 2; press++) {
+      scene.input.emit('pointerdown', pointer, []);
+      scene.input.emit('pointerup', pointer, []);
+    }
+
+    expect(movement.autoWalk?.goal.x).toBeCloseTo(goal.x, 6);
+    expect(movement.autoWalk?.goal.y).toBeCloseTo(goal.y, 6);
+  });
+
   it.each([20, 100, 250])('cannot tunnel at 3x with %i ms frames, cardinal or diagonal', async (delta) => {
     const { body, movement, frame } = await movementArena();
     for (const input of ['keyboard', 'auto-walk'] as const) {
