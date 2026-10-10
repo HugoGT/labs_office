@@ -23,8 +23,6 @@
  * en el formulario y la que guarda el servidor.
  */
 
-import type { AdminAppearance } from './deskAdminPort';
-
 /** Deriva de `desk_id` en el servidor: `'desk'` si un escritorio es dueno del cubiculo, `'room'` si no. */
 export type AdminSpaceKind = 'room' | 'desk';
 
@@ -50,8 +48,6 @@ export interface CreateSpaceInput {
   h: number;
   /** Ausente equivale a "sin limite": el adaptador manda `null` de todas formas, ver `spacesAdminClient.ts`. */
   capacity?: number | null;
-  /** Floor material and color (art migration, step 7). Absent: the pack default; never changed afterwards. */
-  floor?: AdminAppearance;
 }
 
 /**

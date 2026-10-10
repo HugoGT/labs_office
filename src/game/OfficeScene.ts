@@ -7,7 +7,6 @@ import {
   DEFAULT_DESK_FACING,
   deskAreaAnchor,
   deskPlacement,
-  spaceFloorTiles,
 } from './artPlacement';
 import { feetOf, positionForFeet } from './avatarGeometry';
 import { beginAutoWalk, isAutoWalkArrived, stepAutoWalk, type AutoWalkState } from './autoWalk';
@@ -52,7 +51,6 @@ import {
   placeZoneLabels,
   putArtSprite,
   putChair,
-  putFloorTile,
   renderTerrain,
   type TerrainTilemap,
 } from './mapBuilder';
@@ -173,12 +171,6 @@ const DESK_COLOR = {
 } as const;
 const DESK_FILL_ALPHA = 0.22;
 const DESK_STROKE_WIDTH = 2;
-/**
- * Served space floors go over the base ground (0) and the legacy flower tiles
- * (1), under the zone labels (2) and every world asset, which starts at its
- * own bottom edge in pixels.
- */
-const SPACE_FLOOR_DEPTH = 1.5;
 /** A piece that cannot be drawn yet (or ever) still shows where it goes. */
 const ART_FALLBACK_COLOR = 0x6b7280;
 const ART_FALLBACK_ALPHA = 0.6;
@@ -426,9 +418,6 @@ export class OfficeScene extends Phaser.Scene {
   private deskObjects: Phaser.GameObjects.GameObject[] = [];
   /** Last `desks` list, redrawn whole when a piece it needs finishes loading. */
   private desks: readonly OfficeDesk[] = [];
-  /** Floors of the served spaces (art step 4), replaced whole like `deskObjects`. */
-  private floorObjects: Phaser.GameObjects.GameObject[] = [];
-  private floorSpaces: readonly SpaceArea[] = [];
   /** Created in `preload()`, where `this.load` first exists. */
   private art!: ArtPackLoader;
   private readonly pendingRedraws = new Set<() => void>();
@@ -450,7 +439,6 @@ export class OfficeScene extends Phaser.Scene {
     return this.localAvatarId;
   }
   private readonly redrawDesks = (): void => this.applyDesks(this.desks);
-  private readonly redrawFloors = (): void => this.drawSpaceFloors(this.floorSpaces);
   /**
    * Objetivo de auto-caminata en curso (issue #2, D9/D10). `undefined` cuando
    * nadie esta siendo perseguido: `update()` solo dirige al reductor mientras
@@ -1367,9 +1355,7 @@ export class OfficeScene extends Phaser.Scene {
    */
   private applySpacesConfig(spaces: readonly SpaceArea[], version: string): void {
     this.initialSpaces = true;
-    // Before the version check: floors are outside the hash, so a served config
-    // equal to the built-in one still brings the floors to draw.
-    this.drawSpaceFloors(spaces);
+    // Spaces draw no floor of their own: the painted terrain shows (#182).
 
     // Misma version = misma config. Es el caso normal de un despliegue sin
     // editar, donde lo servido coincide con lo incorporado; reenviarlo al
@@ -1450,9 +1436,9 @@ export class OfficeScene extends Phaser.Scene {
   /**
    * Loaded sheet of an appearance, or `null`. When the piece is not loaded yet
    * it asks the loader for it and redraws once it settles; a piece of the
-   * wrong kind (a desk id as a floor) never draws.
+   * wrong kind (a chair id as a desk) never draws.
    */
-  private artSheet(appearance: ArtAppearance, kind: 'desk' | 'floor' | 'chair', redraw: () => void): { key: string; piece: ArtPiece } | null {
+  private artSheet(appearance: ArtAppearance, kind: 'desk' | 'chair', redraw: () => void): { key: string; piece: ArtPiece } | null {
     const known = (): ArtPiece | undefined =>
       this.art.manifest === null ? undefined : findPiece(this.art.manifest, appearance.materialId);
     const ready = (): { key: string; piece: ArtPiece } | null => {
@@ -1479,33 +1465,6 @@ export class OfficeScene extends Phaser.Scene {
       this.pendingRedraws.delete(redraw);
       if (this.alive) redraw();
     });
-  }
-
-  /**
-   * Floors of the served spaces (art migration, step 4), a desk's cubicle
-   * included, in their persisted material and color. Built-in rooms without a
-   * served floor keep the terrain of the layout under them.
-   * A floor that cannot load shows a neutral veil over the space, so a room
-   * with a broken floor still reads as a room.
-   */
-  private drawSpaceFloors(spaces: readonly SpaceArea[]): void {
-    this.floorSpaces = spaces;
-    for (const object of this.floorObjects.splice(0)) object.destroy();
-    for (const space of spaces) {
-      if (space.floor === undefined) continue;
-      const sheet = this.artSheet(space.floor, 'floor', this.redrawFloors);
-      if (sheet === null) {
-        this.floorObjects.push(
-          this.add
-            .rectangle(space.x + space.w / 2, space.y + space.h / 2, space.w, space.h, ART_FALLBACK_COLOR, DESK_FILL_ALPHA)
-            .setDepth(SPACE_FLOOR_DEPTH),
-        );
-        continue;
-      }
-      for (const { tx, ty } of spaceFloorTiles(space, this.grid)) {
-        this.floorObjects.push(putFloorTile(this, sheet.key, tx, ty, SPACE_FLOOR_DEPTH));
-      }
-    }
   }
 
   /**

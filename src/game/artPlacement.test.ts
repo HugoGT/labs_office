@@ -5,10 +5,8 @@ import {
   deskAreaAnchor,
   deskPlacement,
   footprintAnchor,
-  spaceFloorTiles,
 } from './artPlacement';
 import { TILE } from './mapData';
-import { buildLegacyTerrainGrid as buildTerrainGrid } from '../test/legacyTerrainGrid';
 
 const DESK_PIECE: ArtDeskPiece = {
   id: 'desk-wood',
@@ -90,37 +88,5 @@ describe('chairPlacement', () => {
     expect(back).toEqual({ x: 82, y: 169, width: CHAIR.frame.width, height: CHAIR.frame.height, frame: 2, depthY: 200 });
     // Row 1 of the sheet holds the front layer: same column, one row down.
     expect(front).toEqual({ ...back, frame: CHAIR.columns + 2 });
-  });
-});
-
-describe('spaceFloorTiles', () => {
-  it('covers the tiles of a space under its walls, but not its hedges', () => {
-    const grid = buildTerrainGrid();
-    // Built-in Sala de Juntas: 13x14 tiles at (50,2), walled with a two-tile door.
-    // Walls stand on grid lines, so the floor runs under them to the room's edge.
-    const tiles = spaceFloorTiles({ x: 50 * TILE, y: 2 * TILE, w: 13 * TILE, h: 14 * TILE }, grid);
-
-    expect(tiles).toHaveLength(13 * 14);
-    expect(tiles).toContainEqual({ tx: 51, ty: 3 });
-    expect(tiles).toContainEqual({ tx: 50, ty: 8 });
-    expect(tiles).toContainEqual({ tx: 50, ty: 2 });
-  });
-
-  it('never paints a floor over water, which would hide that it blocks the way', () => {
-    const grid = buildTerrainGrid();
-    const tiles = spaceFloorTiles({ x: 12 * TILE, y: 18 * TILE, w: 5 * TILE, h: 5 * TILE }, grid);
-
-    expect(tiles.some(({ tx, ty }) => grid.terrain[ty][tx] === 'water' && grid.solid[ty][tx])).toBe(false);
-    // The bridge deck at x 13..15 is walkable over the water, so it does get the floor.
-    expect(tiles).toContainEqual({ tx: 13, ty: 19 });
-    expect(tiles).not.toContainEqual({ tx: 12, ty: 19 });
-  });
-
-  it('clips a space that reaches past the map', () => {
-    const grid = buildTerrainGrid();
-    const tiles = spaceFloorTiles({ x: -TILE, y: -TILE, w: 3 * TILE, h: 3 * TILE }, grid);
-
-    // Row and column 0 are the hedge of the world's border.
-    expect(tiles).toEqual([{ tx: 1, ty: 1 }]);
   });
 });

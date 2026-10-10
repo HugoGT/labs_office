@@ -103,6 +103,22 @@ describe('useSpaceEditor (#74, PR4)', () => {
     await waitFor(() => expect(result.current.state).toEqual({ tag: 'idle', kind: 'room' }));
   });
 
+  it('creating sends only the area, never a floor: a room shows the terrain under it (#182)', async () => {
+    const spaces = fakeSpaces();
+    const { bridge, result } = setup(spaces);
+    act(() => result.current.enter());
+    await waitFor(() => expect(result.current.spaces).toHaveLength(2));
+
+    // A caller still holding the old shape cannot smuggle a floor through.
+    const legacy = { name: 'Sala nueva', w: 4, h: 3, capacity: null, floor: { materialId: 'floor-plain', color: '#2c3e50' } };
+    act(() => result.current.startCreate(legacy as Parameters<typeof result.current.startCreate>[0]));
+    act(() => bridge.emit('layoutplace', { tx: 7, ty: 8, valid: true }));
+
+    await waitFor(() =>
+      expect(spaces.createSpace).toHaveBeenCalledWith({ name: 'Sala nueva', x: 7, y: 8, w: 4, h: 3, capacity: null }),
+    );
+  });
+
   it('mover: un layoutplace valido llama a updateSpace con el id seleccionado', async () => {
     const spaces = fakeSpaces();
     const { bridge, refreshDesks, refreshSpaces, result } = setup(spaces);

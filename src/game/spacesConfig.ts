@@ -17,7 +17,6 @@
  * silencio es mutuo y por tanto correcto.
  */
 
-import { parseArtAppearance } from './artPack';
 import {
   BUILT_IN_SPACES,
   BUILT_IN_SPACES_VERSION,
@@ -74,11 +73,8 @@ function toSpaceArea(raw: unknown): SpaceArea | null {
   if (!isFiniteNumber(row.x) || !isFiniteNumber(row.y)) return null;
   if (!isFiniteNumber(row.w) || !isFiniteNumber(row.h)) return null;
 
-  // The floor is for drawing only (art migration, step 4). A row without a
-  // usable one keeps its rectangle: dropping the row would change membership,
-  // and rejecting the list over a floor would change the published version.
-  const floor = parseArtAppearance(row.floorMaterialId, row.floorColor);
-
+  // A served floor (`floorMaterialId`) is ignored: a space shows the painted
+  // terrain under it (#182).
   return {
     id: row.id,
     name: row.name,
@@ -86,7 +82,6 @@ function toSpaceArea(raw: unknown): SpaceArea | null {
     y: row.y * TILE,
     w: row.w * TILE,
     h: row.h * TILE,
-    ...(floor === null ? {} : { floor }),
   };
 }
 

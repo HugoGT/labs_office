@@ -1,13 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
-import { defaultChoice } from '../game/artMaterials';
-import type { ArtAppearance } from '../game/artPack';
-import type { ArtPreviewCache } from '../game/artPreview';
 import type { OfficeBridge } from '../game/officeBridge';
-import { useMaterialCatalog, type LoadMaterials } from '../hooks/useMaterialCatalog';
 import { useSpaceEditor } from '../hooks/useSpaceEditor';
-import { ArtMaterialPicker } from './ArtMaterialPicker';
 import styles from './SpaceEditorSection.module.css';
 
 /**
@@ -18,7 +13,8 @@ import styles from './SpaceEditorSection.module.css';
  *
  * A diferencia de un escritorio (tamano fijo 3x3), una sala pide su propio
  * ancho/alto -- y opcionalmente aforo -- en el formulario, mismo criterio que
- * `SpaceForm` en `/dashboard`.
+ * `SpaceForm` en `/dashboard`. No floor choice: a room shows the painted
+ * terrain under it (#182).
  */
 
 const MIN_SIZE = 1;
@@ -40,10 +36,6 @@ export interface SpaceEditorSectionProps {
   onExit?: () => void;
   /** Se llama ANTES de `editor.enter()` (#74, PR4 correction): ver `DeskEditorSection.onRequestActive`. */
   onRequestActive?: () => void;
-  /** Where the material list comes from (art step 7); the page's pack manifest by default. */
-  loadMaterials?: LoadMaterials;
-  /** The preview generator; the page-wide cache by default. */
-  preview?: ArtPreviewCache;
 }
 
 interface CreateFormValues {
@@ -81,14 +73,9 @@ export function SpaceEditorSection({
   initiallyActive = false,
   onExit,
   onRequestActive,
-  loadMaterials,
-  preview,
 }: SpaceEditorSectionProps) {
   const editor = useSpaceEditor({ bridge, spaces, desks, refreshDesks, refreshSpaces });
   const [form, setForm] = useState<CreateFormValues>(EMPTY_FORM);
-  const catalog = useMaterialCatalog(loadMaterials);
-  /** `null` until the person picks something: the form then shows the pack default floor. */
-  const [floor, setFloor] = useState<ArtAppearance | null>(null);
   const wasCreatingRef = useRef(false);
 
   const active = editor.state.tag !== 'off';
@@ -118,10 +105,7 @@ export function SpaceEditorSection({
     // spec, para no tener que volver a escribirlo tras un `space-name-taken`.
     if (editor.state.tag === 'idle' && wasCreatingRef.current) {
       wasCreatingRef.current = false;
-      if (editor.error === null) {
-        setForm(EMPTY_FORM);
-        setFloor(null);
-      }
+      if (editor.error === null) setForm(EMPTY_FORM);
     }
   }, [editor.state, editor.error]);
 
@@ -149,15 +133,13 @@ export function SpaceEditorSection({
   const w = toSize(form.w);
   const h = toSize(form.h);
   const canCreate = form.name.trim() !== '' && w !== null && h !== null;
-  // Same rule as `DeskEditorSection`: no catalog, no choice, the pack default floor.
-  const chosenFloor = floor ?? (catalog === null ? null : defaultChoice(catalog, 'floor'));
 
   function handleCreateSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     if (busy || !canCreate || w === null || h === null) return;
     const capacity = toCapacity(form.capacity);
     if (capacity === undefined) return;
-    editor.startCreate({ name: form.name.trim(), w, h, capacity, ...(chosenFloor === null ? {} : { floor: chosenFloor }) });
+    editor.startCreate({ name: form.name.trim(), w, h, capacity });
   }
 
   return (
@@ -255,18 +237,6 @@ export function SpaceEditorSection({
                 onChange={(event) => setForm((current) => ({ ...current, capacity: event.target.value }))}
               />
             </div>
-
-            {catalog !== null && chosenFloor !== null && (
-              <ArtMaterialPicker
-                id="new-space-floor"
-                legend="Suelo de la sala"
-                options={catalog.floor}
-                value={chosenFloor}
-                onChange={setFloor}
-                disabled={busy}
-                preview={preview}
-              />
-            )}
 
             <button type="submit" className={styles.button} disabled={busy || !canCreate}>
               Colocar nueva sala
