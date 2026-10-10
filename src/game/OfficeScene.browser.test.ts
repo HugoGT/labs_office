@@ -1395,6 +1395,76 @@ function findRemoteAvatars(scene: Phaser.Scene): CharacterContainer[] {
   );
 }
 
+describe('OfficeScene: a newcomer is heard as soon as it hears (#185)', () => {
+  /** Far from the spawn, so a voice from the spawn position would miss it. */
+  const RESTORED_SPACE = { id: 'id-restored-space', name: 'Restored', x: 10 * TILE, y: 10 * TILE, w: 6 * TILE, h: 6 * TILE };
+  const insideRestoredSpace = () => remoteSnapshot({ sessionId: 'yo', x: 12 * TILE + 16, y: 12 * TILE + 16 });
+
+  it('joins with the served spaces version when it was emitted before the scene started', async () => {
+    const connector = fakeConnector();
+    const bridge = createOfficeBridge();
+    bridge.emitCommand('spacesconfig', { spaces: [], version: 'version-servida' });
+
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+
+    await vi.waitFor(() => expect(connector.joinedSpacesVersion()).toBe('version-servida'), LOOP_WAIT);
+    // Nothing to correct after the handshake: peers never saw another version.
+    expect(connector.sentSpacesVersions).toEqual([]);
+  });
+
+  it('sends no voice with a session before the own position is adopted, then voices from the restored one', async () => {
+    const connector = fakeConnector('yo', false);
+    const bridge = createOfficeBridge();
+    const voices: OfficeEventMap['voice'][] = [];
+    bridge.on('voice', (voice) => voices.push(voice));
+    bridge.emitCommand('spacesconfig', { spaces: [RESTORED_SPACE], version: 'version-servida' });
+
+    const { scene } = await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    await advanceGameClock(scene, 600);
+    expect(voices.filter((voice) => voice.selfSessionId !== null)).toEqual([]);
+
+    connector.handlers()!.onLocalPosition?.(insideRestoredSpace());
+
+    await vi.waitFor(() => expect(voices.some((voice) => voice.selfSessionId === 'yo')).toBe(true), LOOP_WAIT);
+    expect(voices.find((voice) => voice.selfSessionId === 'yo')?.spaceId).toBe(RESTORED_SPACE.id);
+  });
+
+  it('waits for the served spaces too when the office waits for its data', async () => {
+    const connector = fakeConnector('yo');
+    const bridge = createOfficeBridge();
+    const voices: OfficeEventMap['voice'][] = [];
+    bridge.on('voice', (voice) => voices.push(voice));
+
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake', connect: connector.connect, waitForOfficeData: true,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    await advanceGameClock(scene, 600);
+    expect(voices.filter((voice) => voice.selfSessionId !== null)).toEqual([]);
+
+    bridge.emitCommand('spacesconfig', { spaces: [], version: 'version-servida' });
+
+    await vi.waitFor(() => expect(voices.some((voice) => voice.selfSessionId === 'yo')).toBe(true), LOOP_WAIT);
+  });
+
+  it('a position reset still voices from the reset position', async () => {
+    const connector = fakeConnector('yo');
+    const bridge = createOfficeBridge();
+    const voices: OfficeEventMap['voice'][] = [];
+    bridge.on('voice', (voice) => voices.push(voice));
+    bridge.emitCommand('spacesconfig', { spaces: [RESTORED_SPACE], version: 'version-servida' });
+
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(voices.some((voice) => voice.selfSessionId === 'yo')).toBe(true), LOOP_WAIT);
+    expect(voices.at(-1)?.spaceId).toBeNull();
+
+    connector.handlers()!.onPositionReset?.(remoteSnapshot({ ...insideRestoredSpace(), positionRevision: 1 }));
+
+    expect(voices.at(-1)).toMatchObject({ selfSessionId: 'yo', spaceId: RESTORED_SPACE.id });
+  });
+});
+
 describe('OfficeScene: authoritative initial position (#148)', () => {
   it('keeps the latest authoritative reset while initial connection completion is delayed', async () => {
     const connector = fakeConnector('yo', false);
@@ -3196,6 +3266,9 @@ describe('OfficeScene: reconexion (issue #52)', () => {
     // puede hacer que se reemita es haber borrado la clave de dedupe.
     connector.handlers()!.onResync!();
     connector.handlers()!.onAdd(audible());
+    // The recovered room replays the own player too, as `officeRoomClient`
+    // does: no voice goes out before it places us again (#185).
+    connector.handlers()!.onLocalPosition?.(remoteSnapshot({ sessionId: 'mi-sesion', x: player.x, y: player.y }));
 
     // Esta es la trampa de la issue #41 vuelta a pisar: `emitVoice` deduplica
     // por `lastVoiceKey`, asi que sin invalidarla el par recuperado se veria y
