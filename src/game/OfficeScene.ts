@@ -1312,17 +1312,19 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
-   * Aplica el conjunto de habla real reportado por React (D7): solo enciende
-   * el anillo de avatares REMOTOS. El jugador local no tiene tile ni anillo
-   * propio que mostrar en este canvas -- eso lo cubrira React en PR3b. El
-   * comando trae el conjunto AUTORITATIVO completo (no un delta), asi que
-   * cada sessionId conocido se apaga salvo que este en el arreglo.
+   * Aplica el conjunto de habla real reportado por React (D7) al anillo de
+   * cada avatar remoto y al del jugador local (#181: LiveKit reporta tambien
+   * la identidad local, que es el sessionId de Colyseus). El comando trae el
+   * conjunto AUTORITATIVO completo (no un delta), asi que cada sessionId
+   * conocido se apaga salvo que este en el arreglo.
    */
   private applySpeakers(sessionIds: readonly string[]): void {
     const speaking = new Set(sessionIds);
     for (const sessionId of this.remotes?.sessionIds() ?? []) {
       this.remotes?.get(sessionId)?.ring.setVisible(speaking.has(sessionId));
     }
+    const selfId = this.connection?.sessionId;
+    this.player.ring.setVisible(selfId !== undefined && speaking.has(selfId));
   }
 
   /**
