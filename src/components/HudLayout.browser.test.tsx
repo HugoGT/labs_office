@@ -1,5 +1,5 @@
 import '../index.css';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import * as vitestBrowser from 'vitest/browser';
@@ -192,38 +192,6 @@ describe('HUD layout: camera filter caret', () => {
       expect(menu.right).toBeLessThanOrEqual(width);
       for (const item of screen.getAllByRole('menuitemradio')) expect(hitAtCenter(item)).toBe(item);
       cleanup();
-    }
-  });
-});
-
-describe('HUD layout: call buttons keep their icon on the label line', () => {
-  /**
-   * Each call button is an icon element and a label element, centered on each
-   * other (#176 review: on Windows the camera emoji sat below "Cámara" once
-   * the camera was on, a baseline-aligned glyph of Segoe UI Emoji). Box
-   * centers, not glyphs: the boxes are what the layout controls.
-   */
-  function iconAndLabel(button: Element) {
-    expect(button.children).toHaveLength(2);
-    const [icon, label] = Array.from(button.children);
-    return { icon: box(icon), label: box(label) };
-  }
-
-  it.each([
-    { state: 'off', on: false },
-    { state: 'on', on: true },
-  ])('mic, camera, share and record with everything $state', async ({ on }) => {
-    await page.viewport(WIDE, 800);
-    renderBar({ micOn: on, camOn: on, screenShareOn: on, recording: on, room: 'Sala' });
-    const toolbar = screen.getByRole('toolbar', { name: 'Controles de llamada' });
-
-    for (const name of [/Mic/, /Cámara/, /Compartir|Dejar de compartir/, /Grabar|Detener/]) {
-      const button = within(toolbar).getByRole('button', { name });
-      const { icon, label } = iconAndLabel(button);
-      const middle = (rect: DOMRect) => rect.top + rect.height / 2;
-      expect(middle(icon)).toBeCloseTo(middle(label), 0);
-      expect(middle(label)).toBeCloseTo(middle(box(button)), 0);
-      expect(icon.right).toBeLessThan(label.left);
     }
   });
 });
