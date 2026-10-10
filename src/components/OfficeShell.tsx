@@ -710,6 +710,19 @@ export function OfficeShell({
   );
 
   /**
+   * The one way to call someone (#187): the context menu and the sidebar's
+   * "Personas conectadas" both land here, so both ask the same and say so.
+   */
+  function callPeer(sessionId: string, name: string): void {
+    bridge.emitCommand('callPeer', { sessionId });
+    setToastMessage(
+      <>
+        <PhoneIcon /> Llamando a <b>{name}</b>…
+      </>,
+    );
+  }
+
+  /**
    * Acciones del menu contextual (`app.js:602-604`). Solo quedan dos desde que
    * se retiraron los NPCs simulados: `call` pide la invitacion y `profile`
    * muestra la ficha. `respondCall` es UN comando, no accept/pass -- la escena
@@ -720,12 +733,7 @@ export function OfficeShell({
     closeMenu();
 
     if (action === 'call') {
-      bridge.emitCommand('callPeer', { sessionId: menu.sessionId });
-      setToastMessage(
-        <>
-          <PhoneIcon /> Llamando a <b>{menu.name}</b>…
-        </>,
-      );
+      callPeer(menu.sessionId, menu.name);
       return;
     }
 
@@ -787,6 +795,7 @@ export function OfficeShell({
         refreshSpaces={refreshSpaces}
         onLayoutEditingChange={setLayoutEditing}
         forceExitLayoutEditing={decorOpen}
+        onCallPeer={callPeer}
       />
       <BottomBar
         playerName={session?.displayName ?? DEFAULT_NAME}

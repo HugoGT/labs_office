@@ -1461,6 +1461,23 @@ describe('OfficeShell: barra lateral de personas (#74)', () => {
     expect(screen.getByText(/Ana Remota/)).toBeInTheDocument();
   });
 
+  it('calling a peer from the sidebar emits callPeer and shows the same calling toast as the menu (#187)', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const commands: { sessionId: string }[] = [];
+    bridge.onCommand('callPeer', (payload) => commands.push(payload));
+
+    act(() => bridge.emit('roster', { peers: [{ sessionId: 'a', name: 'Ana Remota', status: 'g' }] }));
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+    await user.click(screen.getByRole('button', { name: 'Llamar a Ana Remota' }));
+
+    expect(commands).toEqual([{ sessionId: 'a' }]);
+    const toast = screen.getByText(/Llamando a/);
+    expect(toast).toHaveTextContent('Llamando a Ana Remota');
+    expect(toast.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+  });
+
   it('el nombre propio que ve la barra inferior es el mismo que se antepone en la barra lateral', async () => {
     const user = userEvent.setup();
     render(<OfficeShell session={{ displayName: 'Ana Torres', getIdToken: async () => null }} />);

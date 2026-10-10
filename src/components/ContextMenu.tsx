@@ -7,6 +7,9 @@ import styles from './ContextMenu.module.css';
 
 export type PeerMenuAction = 'call' | 'profile';
 
+/** Why "Llamar" is disabled (D8), shared with the sidebar's per-person call (#187). */
+export const CALL_DISABLED_TITLE = 'No molestar: no se puede llamar ahora';
+
 export interface ContextMenuProps {
   menu: OfficeEventMap['peermenu'] | null;
   onAction: (action: PeerMenuAction, menu: OfficeEventMap['peermenu']) => void;
@@ -64,7 +67,7 @@ export function ContextMenu({ menu, onAction, onClose }: ContextMenuProps) {
         type="button"
         className={styles.action}
         disabled={callDisabled}
-        title={callDisabled ? 'No molestar: no se puede llamar ahora' : undefined}
+        title={callDisabled ? CALL_DISABLED_TITLE : undefined}
         onClick={() => onAction('call', menu)}
       >
         <PhoneIcon /> Llamar
