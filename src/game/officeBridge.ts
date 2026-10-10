@@ -140,6 +140,8 @@ export interface OfficeEventMap {
   deskclick: { deskId: string; label: string; action: 'claim' | 'release' };
   /** A committed occupancy/decor mutation; refetch the authenticated desk list. */
   deskschanged: undefined;
+  /** An admin edited the spaces (#183); refetch `/spaces` (and the desks with them). */
+  spaceschanged: undefined;
   /**
    * Every active recording in the office, keyed by spaceId (#5). Server-owned
    * synced state, so every occupant gets the same map; always the whole map.

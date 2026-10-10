@@ -111,7 +111,7 @@ import { createPhaserAvatarSink, type RemoteAvatarContainer } from './remoteAvat
 import { detectSpace, nearbyKey } from './proximity';
 import { createRosterTracker, type RosterPeer, type RosterTracker } from './roster';
 import { createStaleSpacesVersionTracker } from './spacesConfig';
-import { audiblePeers, type AudioPeer } from './proximityAudio';
+import { audiblePeersWithVersionGrace, type AudioPeer } from './proximityAudio';
 import {
   BASE_MAP_SEATS,
   CHAIR_PIECES,
@@ -343,6 +343,11 @@ export class OfficeScene extends Phaser.Scene {
   private minimapCamera?: Phaser.Cameras.Scene2D.Camera;
   /** Clave de dedupe de "voice" (D3): incluye espacio y `selfSessionId`, no solo los pares. */
   private lastVoiceKey = '';
+  /**
+   * When each peer was last strictly audible, for the spaces version grace
+   * (#183). Per session: cleared whenever the connection or its peers reset.
+   */
+  private readonly lastAudibleAt = new Map<string, number>();
   private currentSpaceId: string | null = null;
   /**
    * Config de espacios que la escena usa para derivar pertenencia (#7, D3).
@@ -815,7 +820,14 @@ export class OfficeScene extends Phaser.Scene {
       callback: () => this.proximityTick(),
     });
 
-    void this.connectToOffice().finally(() => { this.connectionSettled = true; });
+    // A microtask, not now (#185): the bridge replays a stored `spacesconfig`
+    // in a microtask queued by the subscription above, and microtasks run in
+    // order, so the join reads the served version instead of the fallback one
+    // peers would drop this newcomer for until the correction arrived.
+    queueMicrotask(() => {
+      if (!this.alive) return;
+      void this.connectToOffice().finally(() => { this.connectionSettled = true; });
+    });
   }
 
   /**
@@ -845,6 +857,7 @@ export class OfficeScene extends Phaser.Scene {
 
     const joinedStatus = this.status;
     const joinedSpacesVersion = this.spacesVersion;
+    this.lastAudibleAt.clear();
     this.localPositionReady = false;
     this.resetWalking();
 
@@ -895,6 +908,7 @@ export class OfficeScene extends Phaser.Scene {
           onRecordings: (active) => this.bridge.emit('recordings', { active }),
           onRecordingReady: (payload) => this.bridge.emit('recordingready', payload),
           onDesksChanged: () => this.bridge.emit('deskschanged', undefined),
+          onSpacesChanged: () => this.bridge.emit('spaceschanged', undefined),
           onTerrain: (blocks) => this.applyTerrain(blocks),
           onWalls: (walls) => this.applyWalls(walls),
           onChairs: (chairs) => this.applyChairs(chairs),
@@ -907,7 +921,12 @@ export class OfficeScene extends Phaser.Scene {
             }
             this.emitPresence(state);
           },
-          onLocalPosition: (snapshot) => { if (current()) this.adoptLocalPosition(snapshot); },
+          onLocalPosition: (snapshot) => {
+            if (!current()) return;
+            this.adoptLocalPosition(snapshot);
+            // Voice from the restored position at once, not on the next tick (#185).
+            this.proximityTick();
+          },
           onPositionReset: (snapshot) => {
             if (!current()) return;
             this.localPositionReady = false;
@@ -953,7 +972,9 @@ export class OfficeScene extends Phaser.Scene {
       this.emitPresence('connected');
       this.emitCharacterPortraits();
       // Sesion viva, todavia sin pares conocidos (el primer tic los completa).
-      this.emitVoice(connection.sessionId, [], this.currentSpaceId);
+      // Recomputed, never `currentSpaceId` (#185): that one comes from the
+      // last tick, at the spawn, and the restored position may be elsewhere.
+      this.proximityTick();
     } catch (error) {
       if (!current()) return;
       this.localPositionReady = !(error instanceof OfficeAccessDeniedError);
@@ -1294,6 +1315,7 @@ export class OfficeScene extends Phaser.Scene {
     this.resetWalking();
     this.remotes?.clear();
     this.roster?.clear();
+    this.lastAudibleAt.clear();
     this.lastVoiceKey = '';
   }
 
@@ -1980,6 +2002,11 @@ export class OfficeScene extends Phaser.Scene {
     });
   }
 
+  /** The same office data `checkEntry` waits for: the own position and, when asked, the served spaces. */
+  private voiceReady(): boolean {
+    return this.localPositionReady && (!this.options.waitForOfficeData || this.initialSpaces);
+  }
+
   /**
    * Cercania + deteccion de sala cada 250 ms (app.js:444-471), emitidas por el
    * puente (D1). Desde este cambio (D7) tambien pliega `this.remotes` en la
@@ -2011,7 +2038,15 @@ export class OfficeScene extends Phaser.Scene {
         },
       ];
     });
-    const audibleIds = audiblePeers({
+    // No voice for a live session until the room placed us (#185): the spawn
+    // is not where the session restores, and a first LiveKit room picked from
+    // it cost peers seconds of a wrong room. Teardown (no session) still goes.
+    if (selfSessionId !== null && !this.voiceReady()) return;
+
+    // An admin desk or space edit reaches each client a moment apart, and the
+    // strict version predicate cut everyone's audio and video in between
+    // (#183): peers who stay put keep hearing each other for a short grace.
+    const audibleIds = audiblePeersWithVersionGrace({
       self: {
         sessionId: selfSessionId,
         x: player.x,
@@ -2022,6 +2057,8 @@ export class OfficeScene extends Phaser.Scene {
       },
       peers: audioPeers,
       radius: PROX_RADIUS,
+      lastAudibleAt: this.lastAudibleAt,
+      now: Date.now(),
     });
     // Nombre de cada audible (issue #17, D-voz): la etiqueta del tile se
     // resuelve desde aqui, nunca redibujada -- misma fuente que ya pintaba

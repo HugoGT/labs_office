@@ -317,6 +317,8 @@ export interface OfficeRoomOptions {
   finished?: FinishedRecordingStore;
   /** Shared committed desk mutations; no occupant data travels in the notice. */
   subscribeDesksChanges?: (listener: () => void) => () => void;
+  /** Committed admin space edits (#183); clients refetch `/spaces`, nothing travels. */
+  subscribeSpacesChanges?: (listener: () => void) => () => void;
   /**
    * Live eviction (#93): the room registers here so an admin route can throw
    * a revoked account out right away. Absent, nobody can evict from outside.
@@ -382,6 +384,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private unsubscribeRecordings?: () => void;
   private unsubscribeReady?: () => void;
   private unsubscribeDesksChanges?: () => void;
+  private unsubscribeSpacesChanges?: () => void;
   private unsubscribeTerrainChanges?: () => void;
   private unsubscribeCollisionChanges?: () => void;
   private unregisterEviction?: () => void;
@@ -458,6 +461,9 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     this.unsubscribeDesksChanges = options?.subscribeDesksChanges?.(() => {
       this.broadcast('deskschanged');
       void this.recheckDeskSeats();
+    });
+    this.unsubscribeSpacesChanges = options?.subscribeSpacesChanges?.(() => {
+      this.broadcast('spaceschanged');
     });
     // Late joiners get the mirror for free: it is plain synced state.
     for (const entry of this.recordings?.list() ?? []) {
@@ -597,6 +603,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     this.unsubscribeRecordings?.();
     this.unsubscribeReady?.();
     this.unsubscribeDesksChanges?.();
+    this.unsubscribeSpacesChanges?.();
     this.unsubscribeTerrainChanges?.();
     this.unsubscribeCollisionChanges?.();
     this.unregisterEviction?.();

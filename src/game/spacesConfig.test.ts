@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { BUILT_IN_SPACES, BUILT_IN_SPACES_VERSION, TILE } from './mapData';
 import {
   BUILT_IN_SPACES_CONFIG,
+  STALE_SPACES_RETRY_MS,
   createStaleSpacesVersionTracker,
   deriveSpacesUrl,
   fetchSpacesConfig,
@@ -214,9 +215,9 @@ describe('createStaleSpacesVersionTracker (#74)', () => {
     expect(isStale('version-mia', 'version-mia')).toBe(false);
   });
 
-  it('la version incorporada nunca es obsoleta: nadie tiene a quien pedirle una mejor', () => {
+  it('flags the built-in version too: deleting the last spaces makes it the served one (#183)', () => {
     const isStale = createStaleSpacesVersionTracker();
-    expect(isStale(BUILT_IN_SPACES_VERSION, 'version-mia')).toBe(false);
+    expect(isStale(BUILT_IN_SPACES_VERSION, 'version-mia')).toBe(true);
   });
 
   it('una version ya vista no vuelve a marcarse obsoleta', () => {
@@ -237,5 +238,31 @@ describe('createStaleSpacesVersionTracker (#74)', () => {
     const isStale = createStaleSpacesVersionTracker();
     expect(isStale('version-a', 'version-mia')).toBe(true);
     expect(isStale('version-b', 'version-mia')).toBe(true);
+  });
+
+  it('does not flag the same version again before the retry interval (#183)', () => {
+    let now = 1_000;
+    const isStale = createStaleSpacesVersionTracker({ now: () => now });
+    expect(isStale('version-nueva', 'version-mia')).toBe(true);
+    now += STALE_SPACES_RETRY_MS - 1;
+    expect(isStale('version-nueva', 'version-mia')).toBe(false);
+  });
+
+  it('flags the same version again once the retry interval passed, so a failed refetch is retried (#183)', () => {
+    let now = 1_000;
+    const isStale = createStaleSpacesVersionTracker({ now: () => now });
+    expect(isStale('version-nueva', 'version-mia')).toBe(true);
+    now += STALE_SPACES_RETRY_MS;
+    expect(isStale('version-nueva', 'version-mia')).toBe(true);
+    // The interval restarts from the last flag, not from the first one.
+    now += STALE_SPACES_RETRY_MS - 1;
+    expect(isStale('version-nueva', 'version-mia')).toBe(false);
+  });
+
+  it('never flags my own version, however long it has been (#183)', () => {
+    let now = 1_000;
+    const isStale = createStaleSpacesVersionTracker({ now: () => now });
+    now += STALE_SPACES_RETRY_MS * 10;
+    expect(isStale('version-mia', 'version-mia')).toBe(false);
   });
 });

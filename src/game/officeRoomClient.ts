@@ -206,6 +206,8 @@ export interface OfficeRoomHandlers {
   onRecordingReady?(payload: RecordingReadyPayload): void;
   /** Refetch occupancy/decor without changing the geometry version. */
   onDesksChanged?(): void;
+  /** An admin edited the spaces (#183): refetch `/spaces` without waiting for the version drift. */
+  onSpacesChanged?(): void;
   /** The whole terrain block list (#123 phase 2): on the first sync and after every accepted edit. */
   onTerrain?(blocks: readonly LayoutMaterial[]): void;
   /** The live wall of every tile, row major: on the first sync and after every accepted wall edit. */
@@ -479,6 +481,7 @@ export async function connectOfficeRoom({
       handlers.onRecordingReady?.(payload);
     });
     target.onMessage('deskschanged', () => handlers.onDesksChanged?.());
+    target.onMessage('spaceschanged', () => handlers.onSpacesChanged?.());
 
     // No dispara el reintento -- de eso se encarga `onLeave`, que es el unico
     // que sabe si la sala se murio -- pero tragarselo en silencio es

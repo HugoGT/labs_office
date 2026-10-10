@@ -1060,6 +1060,44 @@ describe('rutas de espacios (#7, slice 3)', () => {
     await server.shutdown();
   });
 
+  it('announces admin space creation, updates and deletion so every client refetches (#183)', async () => {
+    const { server, url } = await spacesServer();
+    let notifications = 0;
+    const observer = await connectOfficeRoom({
+      endpoint: url.replace('http:', 'ws:'), name: 'Admin', getIdToken: async () => 'valido-uid-admin',
+      handlers: { onAdd() {}, onChange() {}, onRemove() {}, onSpacesChanged() { notifications++; } },
+    });
+    try {
+      const created = await fetch(`${url}/admin/spaces`, {
+        method: 'POST', headers: BEARER,
+        body: JSON.stringify({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: null }),
+      });
+      expect(created.status).toBe(201);
+      const { id } = (await created.json()) as { id: string };
+      await vi.waitFor(() => expect(notifications).toBe(1));
+      const renamed = await fetch(`${url}/admin/spaces/${id}`, {
+        method: 'POST', headers: BEARER, body: JSON.stringify({ name: 'Otra' }),
+      });
+      expect(renamed.status).toBe(200);
+      await vi.waitFor(() => expect(notifications).toBe(2));
+      const deleted = await fetch(`${url}/admin/spaces/${id}/delete`, { method: 'POST', headers: BEARER });
+      expect(deleted.status).toBe(200);
+      await vi.waitFor(() => expect(notifications).toBe(3));
+
+      // A refused write changes nothing, so it announces nothing.
+      const unauthenticated = await fetch(`${url}/admin/spaces`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: null }),
+      });
+      expect(unauthenticated.status).toBe(401);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(notifications).toBe(3);
+    } finally {
+      await observer.leave();
+      await server.shutdown();
+    }
+  });
+
   it('las rutas de administracion sin almacen responden 503', async () => {
     const { server, url } = await spacesServer({ spaces: null });
 
@@ -2040,6 +2078,38 @@ describe('rutas de escritorios (#7, slice 5)', () => {
       for (const path of [`/desks/${desk.id}/claim`, '/me/desk/release', '/me/desk']) {
         expect((await fetch(`${url}${path}`, { method: 'POST', headers: BEARER_ANA, body: '{"items":[]}' })).status).toBe(500);
       }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(notifications).toBe(3);
+    } finally {
+      await observer.leave();
+      await server.shutdown();
+    }
+  });
+
+  it('announces admin desk creation, moves and deletion so every client refetches (#183)', async () => {
+    const { server, url } = await desksServer();
+    let notifications = 0;
+    const observer = await connectOfficeRoom({
+      endpoint: url.replace('http:', 'ws:'), name: 'Bruno', getIdToken: async () => 'valido-uid-bruno',
+      handlers: { onAdd() {}, onChange() {}, onRemove() {}, onDesksChanged() { notifications++; } },
+    });
+    try {
+      const desk = await createDesk(url, { label: 'Mesa', x: 0, y: 0 });
+      await vi.waitFor(() => expect(notifications).toBe(1));
+      const moved = await fetch(`${url}/admin/desks/${desk.id}`, {
+        method: 'POST', headers: BEARER_ADMIN, body: JSON.stringify({ x: 8, y: 0 }),
+      });
+      expect(moved.status).toBe(200);
+      await vi.waitFor(() => expect(notifications).toBe(2));
+      const deleted = await fetch(`${url}/admin/desks/${desk.id}/delete`, { method: 'POST', headers: BEARER_ADMIN });
+      expect(deleted.status).toBe(200);
+      await vi.waitFor(() => expect(notifications).toBe(3));
+
+      // A refused write changes nothing, so it announces nothing.
+      const missing = await fetch(`${url}/admin/desks/no-existe`, {
+        method: 'POST', headers: BEARER_ADMIN, body: JSON.stringify({ label: 'Mesa' }),
+      });
+      expect(missing.status).toBe(404);
       await new Promise((resolve) => setTimeout(resolve, 100));
       expect(notifications).toBe(3);
     } finally {

@@ -124,3 +124,45 @@ test(
     await waitForAudioAvailable(pageB);
   },
 );
+
+/**
+ * #185: the people already in the office heard a newcomer seconds after the
+ * newcomer heard them (a join with the fallback spaces version, a first voice
+ * from the spawn instead of the restored position). Both directions are timed
+ * from the same instant and the present peer may lag by less than the 5 s slow
+ * token retry (`SLOW_RETRY_MS`), the delay that asymmetry used to show.
+ */
+const NEWCOMER_LAG_BUDGET_MS = 2500;
+
+test(
+  "already-present peer subscribes to a newcomer as fast as the newcomer subscribes to it (#185)",
+  { skip: !AUDIO_E2E_ENABLED },
+  async () => {
+    const contextC = await harness.newContext();
+    try {
+      const pageC = await contextC.newPage();
+      await pageC.goto(harness.previewUrl);
+      await waitForAudioAvailable(pageC);
+      await enableMic(pageC);
+      await waitForOnlineCount(pageC, 2);
+      const peerCId = await getOwnSessionId(pageC);
+      assert.ok(
+        typeof peerCId === 'string' && peerCId.length > 0,
+        'expected pageC to report its own session id via lastVoice()',
+      );
+
+      const started = Date.now();
+      const [presentHearsNewcomerAt, newcomerHearsPresentAt] = await Promise.all([
+        waitForPeerAudioPlaying(pageA, peerCId).then(() => Date.now() - started),
+        waitForPeerAudioPlaying(pageC, peerAId).then(() => Date.now() - started),
+      ]);
+      assert.ok(
+        presentHearsNewcomerAt - newcomerHearsPresentAt < NEWCOMER_LAG_BUDGET_MS,
+        `expected A to hear the newcomer within ${NEWCOMER_LAG_BUDGET_MS} ms of the newcomer hearing A, ` +
+          `got ${presentHearsNewcomerAt} ms vs ${newcomerHearsPresentAt} ms`,
+      );
+    } finally {
+      await contextC.close();
+    }
+  },
+);
