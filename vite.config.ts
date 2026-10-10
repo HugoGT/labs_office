@@ -49,10 +49,6 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react(), VitePWA(pwaOptions(mode))],
     server: { port: 5173, host: true },
-    // Sin esto, la primera corrida de `pnpm test:browser` que toca
-    // `livekitRoom.ts` re-optimiza dependencias a mitad de ejecucion y Vite
-    // recarga el test, con el aviso "unexpectedly reloaded a test" de Vitest.
-    optimizeDeps: { include: ['livekit-client'] },
     define: officeE2eDefine,
     build: {
       target: 'es2022',
@@ -103,6 +99,14 @@ export default defineConfig(({ mode }) => {
         },
         {
           define: officeE2eDefine,
+          // Like `define`, this must live in the project: the root
+          // `optimizeDeps` never reached it (#196). A dependency a browser test
+          // first reaches mid-run (`livekit-client` via `livekitRoom.ts`,
+          // firebase and `react-dom/client` via `OfficeEntry` in
+          // `GameCanvas.browser.test.tsx`) makes Vite re-optimize and reload,
+          // and the in-flight test import fails ("unexpectedly reloaded a
+          // test"). CI fails the run if Vite logs that reload again.
+          optimizeDeps: { include: ['livekit-client', 'firebase/app', 'firebase/auth', 'react-dom/client'] },
           test: {
             name: { label: 'browser', color: 'magenta' },
             include: ['src/**/*.browser.test.{ts,tsx}'],

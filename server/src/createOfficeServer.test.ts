@@ -1070,7 +1070,7 @@ describe('rutas de espacios (#7, slice 3)', () => {
     try {
       const created = await fetch(`${url}/admin/spaces`, {
         method: 'POST', headers: BEARER,
-        body: JSON.stringify({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: null }),
+        body: JSON.stringify({ name: 'Sala', x: 1, y: 1, w: 6, h: 6, capacity: null }),
       });
       expect(created.status).toBe(201);
       const { id } = (await created.json()) as { id: string };
@@ -1087,7 +1087,7 @@ describe('rutas de espacios (#7, slice 3)', () => {
       // A refused write changes nothing, so it announces nothing.
       const unauthenticated = await fetch(`${url}/admin/spaces`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: null }),
+        body: JSON.stringify({ name: 'Sala', x: 1, y: 1, w: 6, h: 6, capacity: null }),
       });
       expect(unauthenticated.status).toBe(401);
       await new Promise((resolve) => setTimeout(resolve, 100));
