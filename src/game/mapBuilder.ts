@@ -15,7 +15,6 @@ import {
   TERRAIN_LAYER_COUNT,
   TERRAIN_LAYER_ORIGIN,
   WALL,
-  floorFrameAt,
   propPlacement,
   type ArtChairPiece,
   type ArtDeskPiece,
@@ -72,17 +71,6 @@ export function putArtSprite(
   depth: number,
 ): Phaser.GameObjects.Image {
   return scene.add.image(placement.x, placement.y, key, placement.frame).setOrigin(0).setDepth(depth);
-}
-
-/** A tile of a pack floor: frame `floorFrameAt` so the 96px motif repeats whole. */
-export function putFloorTile(
-  scene: Phaser.Scene,
-  key: string,
-  tx: number,
-  ty: number,
-  depth: number,
-): Phaser.GameObjects.Image {
-  return scene.add.image(tx * TILE, ty * TILE, key, floorFrameAt(tx, ty)).setOrigin(0).setDepth(depth);
 }
 
 /** A loaded pack sheet for the piece `id` when it is of the expected kind, else `null` (fallback). */

@@ -75,8 +75,8 @@ export function seatedAvatarDepth(groundY: number): number {
 }
 
 /**
- * Status tint of an assignable desk: a floor marker over the space floors
- * (1.5) and under the zone labels (2), so it never veils the desk's sitter.
+ * Status tint of an assignable desk: a floor marker over the terrain and
+ * under the zone labels (2), so it never veils the desk's sitter.
  */
 export const DESK_ZONE_DEPTH = 1.75;
 

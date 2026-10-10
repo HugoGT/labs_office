@@ -70,25 +70,21 @@ describe('fetchSpacesConfig', () => {
     });
   });
 
-  it('carries the floor of each space for drawing, without making it part of membership (art step 4)', async () => {
+  it('ignores the served floor: a space shows the terrain under it (#182)', async () => {
     const config = await fetchSpacesConfig({
       url: 'http://x/spaces',
       fetchImpl: respondWith({
         spaces: [
           servedSpace({ floorMaterialId: 'floor-plain', floorColor: '#2C3E50' }),
-          servedSpace({ id: 'sin-suelo' }),
           servedSpace({ id: 'suelo-roto', floorMaterialId: '' }),
         ],
         version: 'abc123',
       }),
     });
 
-    expect(config.spaces[0]?.floor).toEqual({ materialId: 'floor-plain', color: '#2c3e50' });
-    // A row without a usable floor keeps its place in the list: its rectangle
-    // still decides who hears whom, and the version covers the whole list.
-    expect(config.spaces).toHaveLength(3);
-    expect(config.spaces[1]?.floor).toBeUndefined();
-    expect(config.spaces[2]?.floor).toBeUndefined();
+    // The rows still count whole: their rectangles decide who hears whom.
+    expect(config.spaces).toHaveLength(2);
+    for (const space of config.spaces) expect(space).not.toHaveProperty('floor');
   });
 
   it('publica la version tal cual la manda el servidor, sin recalcularla', async () => {

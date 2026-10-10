@@ -18,9 +18,7 @@ import {
   type ArtFacing,
   type Point,
 } from './artContract';
-import { MAP_H, MAP_W, TILE } from './mapData';
 import { DESK_SEAT_FACING } from './seating';
-import type { TerrainGrid } from './terrainGrid';
 
 /**
  * Facing of every desk until desks store one: the sitter looks down, toward
@@ -85,25 +83,4 @@ export function chairPlacement(piece: ArtChairPiece, facing: ArtFacing, ground: 
     depthY: ground.y,
   };
   return { back, front: { ...back, frame: CHAIR.columns + column } };
-}
-
-/**
- * Tiles of a space that take its floor: its rectangle clipped to the map, less
- * walls, hedges and water. Water stays visible because it blocks the way;
- * painting a floor over it would show a walkable room where nobody can walk.
- * A bridge deck over water is walkable, so it takes the floor.
- */
-export function spaceFloorTiles(space: PixelRect, grid: TerrainGrid): { tx: number; ty: number }[] {
-  const x0 = Math.max(0, Math.floor(space.x / TILE));
-  const y0 = Math.max(0, Math.floor(space.y / TILE));
-  const x1 = Math.min(MAP_W, Math.ceil((space.x + space.w) / TILE));
-  const y1 = Math.min(MAP_H, Math.ceil((space.y + space.h) / TILE));
-  const tiles: { tx: number; ty: number }[] = [];
-  for (let ty = y0; ty < y1; ty++) {
-    for (let tx = x0; tx < x1; tx++) {
-      if (grid.walled[ty][tx] || (grid.terrain[ty][tx] === 'water' && grid.solid[ty][tx])) continue;
-      tiles.push({ tx, ty });
-    }
-  }
-  return tiles;
 }

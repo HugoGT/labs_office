@@ -31,7 +31,7 @@ import { chairSeatId, decorSeatId, deskSeatId, mapSeatId } from './seating';
 import { deskFurnitureName, deskItemName, deskZoneName } from './deskLayout';
 import { artSheetKey, recoloredSheetKey } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
-import { deskAreaAnchor, deskPlacement, spaceFloorTiles } from './artPlacement';
+import { deskAreaAnchor, deskPlacement } from './artPlacement';
 import type { ArtDeskPiece } from './artContract';
 import { buildTerrainGrid } from './terrainGrid';
 import { VOID_COLOR } from './terrainRender';
@@ -854,20 +854,20 @@ describe('office entry art readiness', () => {
     expect(findPlayer(scene).sprite.texture.key).toBe(artSheetKey('character-p02-beige-blazer', 'walk'));
   });
 
-  it.each([false, true])('settles dynamic floor, desk and decor art before revealing (broken: %s)', async (broken) => {
+  it.each([false, true])('settles dynamic desk and decor art before revealing (broken: %s)', async (broken) => {
     const bridge = createOfficeBridge();
     const entry = vi.fn();
     bridge.on('entry', entry);
     const { scene } = await bootOfficeScene(bridge, { endpoint: null, waitForOfficeData: true });
     const art = (scene as unknown as { art: ArtPackLoader }).art;
     const manifest = art.manifest!;
-    const aliases = ['floor-plain', 'desk-wood', 'plant-ficus'].map((id) => {
+    const aliases = ['desk-wood', 'plant-ficus'].map((id) => {
       const piece = manifest.pieces.find((piece) => piece.id === id)!;
       return { ...piece, id: `${id}-entry`, files: piece.files.map((file) => ({ ...file,
         path: broken ? 'entry-missing.png' : file.path })) };
     });
     art.adoptManifest({ ...manifest, pieces: [...manifest.pieces, ...aliases] });
-    bridge.emitCommand('spacesconfig', { spaces: [{ ...BUILT_IN_SPACES[0]!, floor: { materialId: 'floor-plain-entry', color: null } }], version: 'entry' });
+    bridge.emitCommand('spacesconfig', { spaces: [BUILT_IN_SPACES[0]!], version: 'entry' });
     bridge.emitCommand('desks', { desks: [{ id: 'entry', label: 'Entry', x: 320, y: 320, w: 96, h: 96, mine: false,
       appearance: { materialId: 'desk-wood-entry', color: null },
       occupant: { id: 'occupant', displayName: 'Occupant', items: [{ id: 'entry-plant', slot: 4, rotation: 0,
@@ -2657,48 +2657,21 @@ describe('OfficeScene: config de espacios servida (#7, slice 3)', () => {
     expect(connector.sentSpacesVersions).toEqual([]);
   });
 
-  it('paints each served space with its persisted floor, recolored and over the walkable tiles only (art step 4)', async () => {
+  it('a served space, a desk cubicle included, leaves the painted terrain visible: no floor tiles nor veil (#182)', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
-    const floorKey = recoloredSheetKey('floor-plain', 'sheet', '#2c3e50');
+    // An older server still serves the floor columns; the scene draws none of them.
+    const withFloor = { ...SERVIDO, floor: { materialId: 'floor-plain', color: '#2c3e50' } } as typeof SERVIDO;
+    const cubicle = { ...withFloor, id: 'cubiculo', x: 0, floor: { materialId: 'floor-wood', color: null } } as typeof SERVIDO;
+    const before = scene.children.list.length;
 
-    bridge.emitCommand('spacesconfig', {
-      spaces: [{ ...SERVIDO, floor: { materialId: 'floor-plain', color: '#2c3e50' } }, { ...SERVIDO, id: 'sin-suelo', x: 0 }],
-      version: 'version-servida',
-    });
+    bridge.emitCommand('spacesconfig', { spaces: [withFloor, cubicle], version: 'version-servida' });
+    await advanceGameClock(scene, 100);
 
-    const floors = scene.children.list.filter(
-      (c): c is Phaser.GameObjects.Image => c.type === 'Image' && (c as Phaser.GameObjects.Image).texture.key === floorKey,
-    );
-    expect(floors).toHaveLength(spaceFloorTiles(SERVIDO, buildTerrainGrid()).length);
-    expect(floors[0]?.depth).toBe(1.5);
-  });
-
-  it('a config equal to the built-in one still brings its floors, and a new one replaces them', async () => {
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge);
-    const grassRooms = BUILT_IN_SPACES.map((room) => ({ ...room, floor: { materialId: 'floor-grass', color: null } }));
-    const count = (): number =>
-      scene.children.list.filter((c) => c.type === 'Image' && (c as Phaser.GameObjects.Image).depth === 1.5).length;
-
-    bridge.emitCommand('spacesconfig', { spaces: grassRooms, version: BUILT_IN_SPACES_VERSION });
-    expect(count()).toBeGreaterThan(0);
-
-    bridge.emitCommand('spacesconfig', { spaces: [], version: 'version-vacia' });
-    expect(count()).toBe(0);
-  });
-
-  it('a space floor that cannot load leaves a visible veil instead of nothing', async () => {
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge, { artManifestUrl: null });
-
-    bridge.emitCommand('spacesconfig', {
-      spaces: [{ ...SERVIDO, floor: { materialId: 'floor-wood', color: null } }],
-      version: 'version-servida',
-    });
-
-    const veils = scene.children.list.filter((c) => c.type === 'Rectangle' && (c as Phaser.GameObjects.Rectangle).depth === 1.5);
-    expect(veils).toHaveLength(1);
+    const floorKeys = [recoloredSheetKey('floor-plain', 'sheet', '#2c3e50'), artSheetKey('floor-wood', 'sheet')];
+    expect(scene.children.list.filter((c) => c.type === 'Image'
+      && floorKeys.includes((c as Phaser.GameObjects.Image).texture.key))).toHaveLength(0);
+    expect(scene.children.list.length).toBe(before);
   });
 
   it('una lista servida vacia deja al jugador en piso abierto', async () => {

@@ -65,12 +65,6 @@ export interface SpaceArea {
   w: number;
   h: number;
   name: string;
-  /**
-   * Floor material and color served by `GET /spaces` (art migration, step 4),
-   * an `ArtAppearance` spelled out to keep this file import-free. Drawing only:
- * membership never reads it.
-   */
-  floor?: { readonly materialId: string; readonly color: string | null };
 }
 
 /** Empty fallback and new-database topology, pinned to the server bootstrap. */
