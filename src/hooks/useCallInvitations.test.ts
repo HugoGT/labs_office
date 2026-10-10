@@ -4,19 +4,21 @@ import * as callChimeModule from '../game/callChime';
 import { createOfficeBridge } from '../game/officeBridge';
 import { CALL_ALERT_MS, useCallInvitations } from './useCallInvitations';
 
-// La campanilla real depende de WebAudio (ausente en jsdom por diseno, ver
-// callChime.test.ts); se mockea el modulo entero para poder afirmar que
-// `accept()` la hace sonar sin levantar un AudioContext falso.
+// The real ring plays an audio file (callChime.test.ts covers it); the whole
+// module is mocked to assert when the hook rings and silences it.
 vi.mock('../game/callChime', () => ({
   createCallChime: vi.fn(),
 }));
 
 describe('useCallInvitations', () => {
   let play: ReturnType<typeof vi.fn<() => void>>;
+  let stop: ReturnType<typeof vi.fn<() => void>>;
 
   beforeEach(() => {
     play = vi.fn<() => void>();
-    vi.mocked(callChimeModule.createCallChime).mockReturnValue({ play });
+    stop = vi.fn<() => void>();
+    vi.mocked(callChimeModule.createCallChime).mockClear();
+    vi.mocked(callChimeModule.createCallChime).mockReturnValue({ play, stop });
   });
 
   afterEach(() => {
@@ -117,6 +119,102 @@ describe('useCallInvitations', () => {
     act(() => bridge.emit('callinvite', { from: 'B', name: 'Berto' }));
 
     expect(play).toHaveBeenCalledTimes(2);
+  });
+
+  it('builds one chime for the life of the hook, not one per render (#187)', () => {
+    const bridge = createOfficeBridge();
+    const { rerender } = renderHook(() => useCallInvitations(bridge));
+
+    rerender();
+    rerender();
+
+    expect(callChimeModule.createCallChime).toHaveBeenCalledTimes(1);
+  });
+
+  it('answering the only ringing invitation silences the ring (#187)', () => {
+    const bridge = createOfficeBridge();
+    const { result } = renderHook(() => useCallInvitations(bridge));
+
+    act(() => bridge.emit('callinvite', { from: 'A', name: 'Ana' }));
+    expect(stop).not.toHaveBeenCalled();
+    act(() => result.current.accept('A'));
+
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('passing on the only ringing invitation silences the ring (#187)', () => {
+    const bridge = createOfficeBridge();
+    const { result } = renderHook(() => useCallInvitations(bridge));
+
+    act(() => bridge.emit('callinvite', { from: 'A', name: 'Ana' }));
+    act(() => result.current.dismiss('A'));
+
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('answering one invitation keeps ringing for another that is still alerting (#187)', () => {
+    const bridge = createOfficeBridge();
+    const { result } = renderHook(() => useCallInvitations(bridge));
+
+    act(() => {
+      bridge.emit('callinvite', { from: 'A', name: 'Ana' });
+      bridge.emit('callinvite', { from: 'C', name: 'Carlos' });
+    });
+    act(() => result.current.dismiss('A'));
+    expect(stop).not.toHaveBeenCalled();
+
+    act(() => result.current.accept('C'));
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('the ring ends with the alert window, while the card keeps floating (#187)', () => {
+    vi.useFakeTimers();
+    const bridge = createOfficeBridge();
+    const { result } = renderHook(() => useCallInvitations(bridge));
+
+    act(() => bridge.emit('callinvite', { from: 'A', name: 'Ana' }));
+    act(() => vi.advanceTimersByTime(CALL_ALERT_MS - 1));
+    expect(stop).not.toHaveBeenCalled();
+
+    act(() => vi.advanceTimersByTime(1));
+
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(result.current.invitations).toHaveLength(1);
+  });
+
+  it('a caller who leaves stops ringing: there is nobody to go to anymore (#187)', () => {
+    const bridge = createOfficeBridge();
+    renderHook(() => useCallInvitations(bridge));
+
+    act(() => bridge.emit('callinvite', { from: 'A', name: 'Ana' }));
+    act(() => bridge.emit('callerleft', { from: 'A' }));
+
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('answering a tombstone or a card whose alert already ended does not touch a ring for someone else (#187)', () => {
+    vi.useFakeTimers();
+    const bridge = createOfficeBridge();
+    const { result } = renderHook(() => useCallInvitations(bridge));
+
+    act(() => bridge.emit('callinvite', { from: 'A', name: 'Ana' }));
+    act(() => vi.advanceTimersByTime(CALL_ALERT_MS));
+    act(() => bridge.emit('callinvite', { from: 'C', name: 'Carlos' }));
+    stop.mockClear();
+
+    act(() => result.current.dismiss('A'));
+
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it('unmounting silences any ring in progress (#187)', () => {
+    const bridge = createOfficeBridge();
+    const { unmount } = renderHook(() => useCallInvitations(bridge));
+
+    act(() => bridge.emit('callinvite', { from: 'A', name: 'Ana' }));
+    unmount();
+
+    expect(stop).toHaveBeenCalled();
   });
 
   it('accept emite respondCall{accept:true} y quita la tarjeta, sin sonar de nuevo (D3)', () => {

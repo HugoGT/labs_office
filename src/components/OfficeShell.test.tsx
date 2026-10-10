@@ -47,6 +47,9 @@ vi.mock('../hooks/useProximityAudio', () => ({ useProximityAudio: vi.fn() }));
 // PR3a); aqui solo importa que `OfficeShell` lo llame y ofrezca (o no) la
 // seccion de administracion segun lo que devuelva (#74, PR3c).
 vi.mock('../hooks/useOfficeAdminRole', () => ({ useOfficeAdminRole: vi.fn() }));
+// The ring has its own suite (`callChime.test.ts`); jsdom implements no media
+// playback, so a real one here would only log "Not implemented" (#187).
+vi.mock('../game/callChime', () => ({ createCallChime: () => ({ play: () => {}, stop: () => {} }) }));
 // The only module that talks to `/recordings/*` (#5): whether a room is being
 // recorded comes from the bridge, never from these calls.
 vi.mock('../game/recordingClient', async (importOriginal) => ({
