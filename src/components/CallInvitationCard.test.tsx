@@ -49,6 +49,15 @@ describe('CallInvitationCard', () => {
     expect(screen.getByRole('button', { name: /Pasar/ })).toBeInTheDocument();
   });
 
+  it('announces the call with the green svg phone, not the red phone emoji (#187)', () => {
+    render(<CallInvitationCard invitation={INVITATION} onAccept={vi.fn()} onDismiss={vi.fn()} />);
+    const body = screen.getByText('Ana').parentElement;
+
+    expect(body?.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(body?.textContent).not.toContain('\u{1F4DE}');
+    expect(body).toHaveTextContent('Ana te está llamando');
+  });
+
   it('oculta "Ir con la persona" cuando el llamador se desconecto (D7, tombstone)', () => {
     render(
       <CallInvitationCard

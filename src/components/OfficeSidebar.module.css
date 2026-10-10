@@ -127,8 +127,43 @@
   color: #e5e7eb;
 }
 
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .self {
   font-weight: 600;
+}
+
+/* Per-person call (#187): an icon button, the green PhoneIcon on the panel's
+   control style. */
+.call {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.call:hover:not(:disabled) {
+  border-color: #4b5563;
+  background: #2b3444;
+}
+
+.call:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 /* Mismo punto sobrio que `BottomBar.module.css` `.meDot` (#116): color por

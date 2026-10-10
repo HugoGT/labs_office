@@ -143,6 +143,64 @@ describe('OfficeSidebar (#74)', () => {
   });
 });
 
+describe('OfficeSidebar: calling from "Personas conectadas" (#187)', () => {
+  it('each peer gets a "Llamar" button that calls onCallPeer with its session and name', async () => {
+    const user = userEvent.setup();
+    const onCallPeer = vi.fn();
+    renderSidebar({ onCallPeer });
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    await user.click(screen.getByRole('button', { name: 'Llamar a Beto' }));
+
+    expect(onCallPeer).toHaveBeenCalledTimes(1);
+    expect(onCallPeer).toHaveBeenCalledWith('b', 'Beto');
+  });
+
+  it('the button draws the green svg phone, not the red phone emoji', async () => {
+    const user = userEvent.setup();
+    renderSidebar({ onCallPeer: vi.fn() });
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    const call = screen.getByRole('button', { name: 'Llamar a Ana' });
+    expect(call.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(call.textContent).not.toContain('\u{1F4DE}');
+  });
+
+  it('there is no button to call oneself', async () => {
+    const user = userEvent.setup();
+    renderSidebar({ onCallPeer: vi.fn() });
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    const selfItem = screen.getAllByRole('listitem')[0];
+    expect(selfItem).toHaveTextContent('Hugo (tú)');
+    expect(selfItem.querySelector('button')).toBeNull();
+    expect(screen.getAllByRole('button', { name: /Llamar/ })).toHaveLength(2);
+  });
+
+  it('a peer in "No molestar" cannot be called, with the same title as the context menu', async () => {
+    const user = userEvent.setup();
+    const onCallPeer = vi.fn();
+    renderSidebar({ peers: [ANA, { sessionId: 'c', name: 'Carla', status: 'r' }], onCallPeer });
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    const call = screen.getByRole('button', { name: 'Llamar a Carla' });
+    expect(call).toBeDisabled();
+    expect(call).toHaveAttribute('title', 'No molestar: no se puede llamar ahora');
+    expect(screen.getByRole('button', { name: 'Llamar a Ana' })).toBeEnabled();
+
+    await user.click(call);
+    expect(onCallPeer).not.toHaveBeenCalled();
+  });
+
+  it('without onCallPeer the list offers no calls', async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    expect(screen.queryByRole('button', { name: /Llamar/ })).not.toBeInTheDocument();
+  });
+});
+
 describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/salas y el catalogo)', () => {
   const MESA: AdminDesk = { id: 'id-mesa', label: 'Mesa 4', x: 10, y: 10, w: 3, h: 3, occupant: null };
   const SALA: AdminSpace = { id: 'id-sala', name: 'Sala grande', x: 0, y: 0, w: 4, h: 4, capacity: null, kind: 'room' };

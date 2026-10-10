@@ -47,6 +47,9 @@ vi.mock('../hooks/useProximityAudio', () => ({ useProximityAudio: vi.fn() }));
 // PR3a); aqui solo importa que `OfficeShell` lo llame y ofrezca (o no) la
 // seccion de administracion segun lo que devuelva (#74, PR3c).
 vi.mock('../hooks/useOfficeAdminRole', () => ({ useOfficeAdminRole: vi.fn() }));
+// The ring has its own suite (`callChime.test.ts`); jsdom implements no media
+// playback, so a real one here would only log "Not implemented" (#187).
+vi.mock('../game/callChime', () => ({ createCallChime: () => ({ play: () => {}, stop: () => {} }) }));
 // The only module that talks to `/recordings/*` (#5): whether a room is being
 // recorded comes from the bridge, never from these calls.
 vi.mock('../game/recordingClient', async (importOriginal) => ({
@@ -704,7 +707,11 @@ describe('OfficeShell: llamar a un companero real (issue #2, unit 11, D3/D12)', 
     // D3: React solo pide la invitacion, nunca aprende que "aceptar" implica
     // caminar -- por eso el unico comando que ve esta prueba es `callPeer`.
     expect(commands).toEqual([{ sessionId: 'peer-1' }]);
-    expect(screen.getByText(/Llamando a/)).toBeInTheDocument();
+    const toast = screen.getByText(/Llamando a/);
+    expect(toast).toBeInTheDocument();
+    // #187: the green svg phone, never the red phone emoji.
+    expect(toast.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(toast.textContent).not.toContain('\u{1F4DE}');
     expect(screen.queryByRole('button', { name: /Llamar/ })).not.toBeInTheDocument();
   });
 
@@ -1455,6 +1462,23 @@ describe('OfficeShell: barra lateral de personas (#74)', () => {
     await user.click(screen.getByRole('button', { name: /Personas/ }));
 
     expect(screen.getByText(/Ana Remota/)).toBeInTheDocument();
+  });
+
+  it('calling a peer from the sidebar emits callPeer and shows the same calling toast as the menu (#187)', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const commands: { sessionId: string }[] = [];
+    bridge.onCommand('callPeer', (payload) => commands.push(payload));
+
+    act(() => bridge.emit('roster', { peers: [{ sessionId: 'a', name: 'Ana Remota', status: 'g' }] }));
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+    await user.click(screen.getByRole('button', { name: 'Llamar a Ana Remota' }));
+
+    expect(commands).toEqual([{ sessionId: 'a' }]);
+    const toast = screen.getByText(/Llamando a/);
+    expect(toast).toHaveTextContent('Llamando a Ana Remota');
+    expect(toast.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
   });
 
   it('el nombre propio que ve la barra inferior es el mismo que se antepone en la barra lateral', async () => {

@@ -42,12 +42,23 @@ export interface UseCallInvitationsResult {
 export function useCallInvitations(bridge: OfficeBridge): UseCallInvitationsResult {
   const [invitations, setInvitations] = useState<readonly CallInvitationCard[]>([]);
   // Un chime por hook, no por tarjeta: es un efecto de sonido puntual, no
-  // estado por invitacion (D11).
-  const chimeRef = useRef(createCallChime());
+  // estado por invitacion (D11). Built once (#187): `useRef(createCallChime())`
+  // would build a new one, and drop it, on every render.
+  const [chime] = useState(() => createCallChime());
+  // Callers whose invitation is still ringing (#187). The ring (about 3.7 s)
+  // plays once per arrival, inside the CALL_ALERT_MS window; it is silenced
+  // early once nobody in here is left: every ringing card answered, passed,
+  // its caller gone or its alert over.
+  const ringing = useRef(new Set<string>());
   // Un temporizador de aviso POR llamador pendiente -- a diferencia del toast
   // unico de `OfficeShell`, aqui puede haber varias tarjetas "alerting" a la
   // vez y cada una se apaga por su cuenta.
   const alertTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+  function stopRinging(from: string): void {
+    if (!ringing.current.delete(from)) return;
+    if (ringing.current.size === 0) chime.stop();
+  }
 
   function clearAlertTimer(from: string): void {
     const timer = alertTimers.current.get(from);
@@ -64,8 +75,9 @@ export function useCallInvitations(bridge: OfficeBridge): UseCallInvitationsResu
     return () => {
       for (const timer of timers.values()) clearTimeout(timer);
       timers.clear();
+      chime.stop();
     };
-  }, []);
+  }, [chime]);
 
   useEffect(
     () =>
@@ -78,36 +90,40 @@ export function useCallInvitations(bridge: OfficeBridge): UseCallInvitationsResu
         // El aviso ANUNCIA la llegada (decision humana #305.3), que es lo
         // unico que la persona no puede ver si esta en otra ventana. Sonar al
         // responder avisaria de algo que acaba de hacer ella misma.
-        chimeRef.current.play();
+        ringing.current.add(from);
+        chime.play();
 
         const timer = setTimeout(() => {
           alertTimers.current.delete(from);
+          stopRinging(from);
           setInvitations((current) =>
             current.map((invite) => (invite.from === from ? { ...invite, alerting: false } : invite)),
           );
         }, CALL_ALERT_MS);
         alertTimers.current.set(from, timer);
       }),
-    [bridge],
+    [bridge, chime],
   );
 
   useEffect(
     () =>
       bridge.on('callerleft', ({ from }) => {
+        stopRinging(from);
         setInvitations((current) =>
           current.map((invite) => (invite.from === from ? { ...invite, callerPresent: false } : invite)),
         );
       }),
-    [bridge],
+    [bridge, chime],
   );
 
   const accept = useCallback(
     (from: string) => {
       clearAlertTimer(from);
+      stopRinging(from);
       bridge.emitCommand('respondCall', { from, accept: true });
       setInvitations((current) => current.filter((invite) => invite.from !== from));
     },
-    [bridge],
+    [bridge, chime],
   );
 
   const dismiss = useCallback(
@@ -116,10 +132,11 @@ export function useCallInvitations(bridge: OfficeBridge): UseCallInvitationsResu
       // sola regla, el `has()` del servidor la vuelve un no-op inofensivo, la
       // misma que ya rechaza una respuesta forjada o tardia.
       clearAlertTimer(from);
+      stopRinging(from);
       bridge.emitCommand('respondCall', { from, accept: false });
       setInvitations((current) => current.filter((invite) => invite.from !== from));
     },
-    [bridge],
+    [bridge, chime],
   );
 
   return { invitations, accept, dismiss };

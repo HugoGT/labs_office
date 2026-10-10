@@ -12,6 +12,7 @@ Oficina Virtual is an internal, Gather-style 2D top-down virtual office. A React
 src/                    SPA (Vite + React + Phaser)
   main.tsx, App.tsx     entrypoint; App resolves auth and route once at startup
   pwa/                  service worker registration (production builds only)
+  assets/sounds/        bundled audio (call ring), imported so Vite hashes it under /assets/; LICENSE.txt has the attribution
   routing/route.ts      two routes only: office (default) and /dashboard (no router lib)
   auth/                 Firebase/Identity Platform auth port + adapter
   components/           React UI (OfficeShell, GameCanvas, BottomBar, VideoTiles, RecBadge, ...)

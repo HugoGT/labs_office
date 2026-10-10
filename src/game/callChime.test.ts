@@ -1,70 +1,115 @@
-import { describe, expect, it, vi } from 'vitest';
-import { createCallChime } from './callChime';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createCallChime, type RingPlayer } from './callChime';
 
-function makeRunningContextFake() {
-  const oscillator = {
-    frequency: { value: 0 },
-    connect: vi.fn(),
-    start: vi.fn(),
-    stop: vi.fn(),
-  };
-  const gain = {
-    gain: { value: 0 },
-    connect: vi.fn(),
-  };
-  const ctx = {
-    state: 'running',
+function makePlayerFake(playResult: Promise<void> | undefined = Promise.resolve()) {
+  const player = {
     currentTime: 0,
-    destination: {},
-    createOscillator: vi.fn(() => oscillator),
-    createGain: vi.fn(() => gain),
+    play: vi.fn(() => playResult),
+    pause: vi.fn(),
   };
-  return { ctx, oscillator, gain };
+  return player;
 }
 
-describe('createCallChime', () => {
-  it('programa un oscilador cuando el AudioContext esta running (D11)', () => {
-    const { ctx, oscillator, gain } = makeRunningContextFake();
+describe('createCallChime (#187: the recorded ring)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
-    const chime = createCallChime(() => ctx as unknown as AudioContext);
+  it('plays the ring from the start', () => {
+    const player = makePlayerFake();
+    player.currentTime = 2.5;
+    const chime = createCallChime(() => player as RingPlayer);
+
     chime.play();
 
-    expect(ctx.createOscillator).toHaveBeenCalledTimes(1);
-    expect(oscillator.connect).toHaveBeenCalledWith(gain);
-    expect(gain.connect).toHaveBeenCalledWith(ctx.destination);
-    expect(oscillator.start).toHaveBeenCalledTimes(1);
-    expect(oscillator.stop).toHaveBeenCalledTimes(1);
+    expect(player.play).toHaveBeenCalledTimes(1);
+    expect(player.currentTime).toBe(0);
   });
 
-  it('no hace nada ni lanza cuando el factory devuelve undefined (D11: AudioContext ausente)', () => {
-    const makeContext = vi.fn(() => undefined);
-    const chime = createCallChime(makeContext);
+  it('builds ONE player and reuses it on every ring (the old chime leaked an AudioContext per play)', () => {
+    const player = makePlayerFake();
+    const makePlayer = vi.fn(() => player as RingPlayer);
+    const chime = createCallChime(makePlayer);
+
+    chime.play();
+    chime.play();
+    chime.play();
+
+    expect(makePlayer).toHaveBeenCalledTimes(1);
+    expect(player.play).toHaveBeenCalledTimes(3);
+  });
+
+  it('builds nothing until the first ring', () => {
+    const makePlayer = vi.fn(() => makePlayerFake() as RingPlayer);
+
+    createCallChime(makePlayer);
+
+    expect(makePlayer).not.toHaveBeenCalled();
+  });
+
+  it('stop pauses the ring and rewinds it', () => {
+    const player = makePlayerFake();
+    const chime = createCallChime(() => player as RingPlayer);
+    chime.play();
+    player.currentTime = 1.2;
+
+    chime.stop();
+
+    expect(player.pause).toHaveBeenCalledTimes(1);
+    expect(player.currentTime).toBe(0);
+  });
+
+  it('stop before any ring builds nothing and does not throw', () => {
+    const makePlayer = vi.fn(() => makePlayerFake() as RingPlayer);
+    const chime = createCallChime(makePlayer);
+
+    expect(() => chime.stop()).not.toThrow();
+    expect(makePlayer).not.toHaveBeenCalled();
+  });
+
+  it('an autoplay refusal (rejected play promise) is swallowed, never an unhandled rejection', async () => {
+    const refusal = Promise.reject(new DOMException('blocked', 'NotAllowedError'));
+    const player = makePlayerFake(refusal);
+    const chime = createCallChime(() => player as RingPlayer);
 
     expect(() => chime.play()).not.toThrow();
-    expect(makeContext).toHaveBeenCalledTimes(1);
+    // A handler is attached synchronously, so awaiting the same promise here
+    // only observes the rejection the chime already handled.
+    await expect(refusal).rejects.toThrow('blocked');
   });
 
-  it('no hace nada ni lanza cuando el contexto esta suspended (D11: autoplay bloqueado)', () => {
-    const { ctx } = makeRunningContextFake();
-    ctx.state = 'suspended';
-
-    const chime = createCallChime(() => ctx as unknown as AudioContext);
+  it('a play() that throws synchronously is swallowed too', () => {
+    const player = makePlayerFake();
+    player.play.mockImplementation(() => {
+      throw new Error('not supported');
+    });
+    const chime = createCallChime(() => player as RingPlayer);
 
     expect(() => chime.play()).not.toThrow();
-    expect(ctx.createOscillator).not.toHaveBeenCalled();
   });
 
-  it('sin argumentos, en jsdom (sin AudioContext global) no lanza (degradacion por defecto)', () => {
+  it('a factory that returns undefined or throws leaves the ring silent, without throwing', () => {
+    const silent = createCallChime(() => undefined);
+    const broken = createCallChime(() => {
+      throw new Error('no audio here');
+    });
+
+    expect(() => silent.play()).not.toThrow();
+    expect(() => broken.play()).not.toThrow();
+    expect(() => broken.stop()).not.toThrow();
+  });
+
+  it('by default plays the bundled call-ring.mp3 through an audio element', () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (this: HTMLMediaElement) {
+      return Promise.reject(new DOMException('blocked', 'NotAllowedError'));
+    });
     const chime = createCallChime();
 
     expect(() => chime.play()).not.toThrow();
-  });
 
-  it('un factory que lanza al construir el contexto tampoco se propaga (best-effort real)', () => {
-    const chime = createCallChime(() => {
-      throw new Error('AudioContext no disponible en este navegador');
-    });
-
-    expect(() => chime.play()).not.toThrow();
+    expect(play).toHaveBeenCalledTimes(1);
+    const element = play.mock.contexts[0] as HTMLMediaElement;
+    expect(element).toBeInstanceOf(HTMLAudioElement);
+    expect(element.src).toMatch(/call-ring.*\.mp3$/);
   });
 });

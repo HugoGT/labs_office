@@ -9,9 +9,12 @@ import type { CollisionAdminPort } from '../dashboard/collisionAdminPort';
 import type { LayoutEditorSection } from './OfficeLayoutEditor';
 import { SIDEBAR_TOP } from '../game/hudLayout';
 import type { OfficeBridge } from '../game/officeBridge';
+import { DO_NOT_DISTURB } from '../game/officeProtocol';
 import { statusCssColor } from '../game/presence';
 import type { RosterPeer } from '../game/roster';
+import { CALL_DISABLED_TITLE } from './ContextMenu';
 import { MiEspacioPanel } from './MiEspacioPanel';
+import { PhoneIcon } from './PhoneIcon';
 import { visibleRoster } from './rosterView';
 import styles from './OfficeSidebar.module.css';
 
@@ -88,6 +91,11 @@ export interface OfficeSidebarProps {
    * leaves the section out.
    */
   contributions?: ArtContributionPort | null;
+  /**
+   * Calls a person from "Personas conectadas" (#187), the same request as the
+   * context menu's "Llamar". Without it the list offers no calls.
+   */
+  onCallPeer?: (sessionId: string, name: string) => void;
 }
 
 /**
@@ -115,6 +123,7 @@ export function OfficeSidebar({
   forceExitLayoutEditing,
   assets,
   contributions,
+  onCallPeer,
 }: OfficeSidebarProps) {
   const [openPanel, setOpenPanel] = useState<'personalize' | 'people' | null>(null);
   const [query, setQuery] = useState('');
@@ -301,10 +310,23 @@ export function OfficeSidebar({
                     muestran el estado a la izquierda del nombre deben verse
                     igual. */}
                 <span className={styles.personDot} style={{ background: statusCssColor(person.status) }} />
-                <span className={person.isSelf ? styles.self : undefined}>
+                <span className={person.isSelf ? `${styles.name} ${styles.self}` : styles.name}>
                   {person.name}
                   {person.isSelf ? ' (tú)' : ''}
                 </span>
+                {!person.isSelf && onCallPeer !== undefined && (
+                  <button
+                    type="button"
+                    className={styles.call}
+                    aria-label={`Llamar a ${person.name}`}
+                    // Same D8 rule as the context menu: the server would drop it anyway.
+                    disabled={person.status === DO_NOT_DISTURB}
+                    title={person.status === DO_NOT_DISTURB ? CALL_DISABLED_TITLE : `Llamar a ${person.name}`}
+                    onClick={() => onCallPeer(person.sessionId, person.name)}
+                  >
+                    <PhoneIcon />
+                  </button>
+                )}
               </li>
             ))}
           </ul>
