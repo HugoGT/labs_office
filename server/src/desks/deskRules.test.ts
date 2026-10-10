@@ -80,15 +80,13 @@ describe('deskBoundsOverlap', () => {
     expect(deskBoundsOverlap({ x: 0, y: 0 }, { x: 4, y: 4 })).toBe(false);
   });
 
-  it('el contacto exacto de un borde CUENTA como solape, igual que box && box', () => {
-    // El `&&` de `box` trata el contacto de una linea como solape: dos areas
-    // pegadas, sin superficie en comun, chocan igual contra `desks_no_overlap`.
-    // Un `<` estricto aqui dejaria pasar lo que la base de datos rechaza y el
-    // administrador veria un 500 en vez de un 409. Mismo hallazgo que ya
-    // documenta `spaceRules.boundsOverlap`.
-    expect(deskBoundsOverlap({ x: 0, y: 0 }, { x: DESK_SIDE, y: 0 })).toBe(true);
-    expect(deskBoundsOverlap({ x: 0, y: 0 }, { x: 0, y: DESK_SIDE })).toBe(true);
-    expect(deskBoundsOverlap({ x: 0, y: 0 }, { x: DESK_SIDE + 1, y: 0 })).toBe(false);
+  it.each([{ x: DESK_SIDE, y: 0 }, { x: 0, y: DESK_SIDE }, { x: DESK_SIDE, y: DESK_SIDE }])('allows edge and corner adjacency: %j', (position) => {
+    expect(deskBoundsOverlap({ x: 0, y: 0 }, position)).toBe(false);
+    expect(deskBoundsOverlap(position, { x: 0, y: 0 })).toBe(false);
+  });
+
+  it('rejects a one-tile positive-area overlap', () => {
+    expect(deskBoundsOverlap({ x: 0, y: 0 }, { x: DESK_SIDE - 1, y: DESK_SIDE - 1 })).toBe(true);
   });
 });
 

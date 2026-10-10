@@ -106,6 +106,38 @@ function harness(
   };
 }
 
+describe('desk placement adjacency (#180)', () => {
+  for (const obstacle of ['desk', 'room'] as const) {
+    it.each(['create', 'move'] as const)('%s accepts edge/corner adjacency to a ' + obstacle + ' and keeps desk/cubicle writes atomic', async (mode) => {
+      const { deps, desks, spaces } = harness();
+      if (obstacle === 'desk') {
+        await desks.createDesk({ label: 'Fixed', x: 10, y: 10 });
+      } else {
+        await spaces.createSpace({ name: 'Fixed', x: 10, y: 10, w: 3, h: 3, capacity: null });
+      }
+      const moving = mode === 'move' ? await desks.createDesk({ label: 'Moving', x: 30, y: 30 }) : null;
+      for (const [index, position] of [{ x: 13, y: 10 }, { x: 10, y: 13 }, { x: 13, y: 13 }, { x: 12, y: 12 }].entries()) {
+        const beforeDesks = await desks.listDesks();
+        const beforeSpaces = await spaces.listSpaces();
+        const result = moving
+          ? await handleUpdateDesk(BEARER_ADMIN, moving.id, position, deps)
+          : await handleCreateDesk(BEARER_ADMIN, { label: `Adjacent ${index}`, ...position }, deps);
+        if (index === 3) {
+          expect(result).toEqual({ status: 409, body: { error: obstacle === 'desk' ? 'desk-overlap' : 'desk-space-overlap' } });
+          expect(await desks.listDesks()).toEqual(beforeDesks);
+          expect(await spaces.listSpaces()).toEqual(beforeSpaces);
+        } else {
+          expect(result.status).toBe(moving ? 200 : 201);
+          expect(result.body).toMatchObject(position);
+          const cubicle = (await spaces.listSpaces()).find((space) => space.deskId === result.body.id);
+          expect(cubicle).toMatchObject({ ...position, w: 3, h: 3 });
+          if (!moving) await desks.deleteDesk(result.body.id as string);
+        }
+      }
+    });
+  }
+});
+
 describe('handleListDesks', () => {
   it('sin cabecera responde 401: quien se sienta donde NO es publico', async () => {
     // A diferencia de `GET /spaces`, que no publica nada que no este ya en el

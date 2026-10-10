@@ -149,17 +149,9 @@ export function normalizeDeskLabel(raw: string): string {
 }
 
 /**
- * Pre-chequeo de solape en aplicacion, para devolver 409 en vez del 500 que
- * daria dejar que `desks_no_overlap` lo atrape primero. La restriccion de la
- * base de datos sigue siendo la garantia real -- esta funcion es la version
- * amable, igual que `boundsOverlap` lo es de `spaces_no_overlap`.
- *
- * Reutiliza `boundsOverlap` en vez de repetir la comparacion, por lo mismo que
- * `decorRules` reutiliza `deriveSlug`: dos copias acaban divergiendo, y el dia
- * que pase, un solape seria un 409 para los espacios y un 500 para los
- * escritorios sin que nadie hubiese cambiado nada a proposito. De ahi viene
- * ademas el `<=` -- el contacto exacto de un borde CUENTA como solape, porque
- * asi lo trata el `&&` de `box` (ver la nota del spike en `spaceRules.ts`).
+ * Reuse the shared half-open geometry so desks, their cubicles and editor
+ * ghosts agree (#180). The database exclusion remains the concurrency guard;
+ * adapters translate its violations to overlap conflicts.
  */
 export function deskBoundsOverlap(a: DeskPosition, b: DeskPosition): boolean {
   return boundsOverlap(

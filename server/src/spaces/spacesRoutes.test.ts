@@ -60,7 +60,7 @@ const BEARER_EMPLEADO = 'Bearer valido-uid-empleado';
 
 interface Harness {
   deps: SpacesDeps;
-  spaces: SpacesDirectory;
+  spaces: ReturnType<typeof createMemorySpaces>;
 }
 
 function harness(): Harness {
@@ -217,6 +217,36 @@ describe('handleGetSpacesConfig', () => {
 
     expect((result.body.spaces as Record<string, unknown>[])[0].kind).toBe('desk');
   });
+});
+
+describe('room placement adjacency (#180)', () => {
+  for (const obstacle of ['room', 'cubicle'] as const) {
+    it.each(['create', 'move'] as const)('%s accepts edge/corner adjacency to a ' + obstacle + ' and preserves overlap conflicts', async (mode) => {
+      const { deps, spaces } = harness();
+      if (obstacle === 'room') {
+        await spaces.createSpace({ name: 'Fixed', x: 10, y: 10, w: 3, h: 3, capacity: null });
+      } else {
+        spaces.deskSpaces.upsertDeskSpace({ id: 'fixed-desk', label: 'Fixed', x: 10, y: 10 });
+      }
+      const moving = mode === 'move'
+        ? await spaces.createSpace({ name: 'Moving', x: 30, y: 30, w: 3, h: 3, capacity: null }) : null;
+      for (const [index, position] of [{ x: 13, y: 10 }, { x: 10, y: 13 }, { x: 13, y: 13 }, { x: 12, y: 12 }].entries()) {
+        const bounds = { ...position, w: 3, h: 3 };
+        const before = await spaces.listSpaces();
+        const result = moving
+          ? await handleUpdateSpace(BEARER_ADMIN, moving.id, bounds, deps)
+          : await handleCreateSpace(BEARER_ADMIN, body({ name: `Adjacent ${index}`, ...bounds }), deps);
+        if (index === 3) {
+          expect(result).toEqual({ status: 409, body: { error: 'space-overlap' } });
+          expect(await spaces.listSpaces()).toEqual(before);
+        } else {
+          expect(result.status).toBe(moving ? 200 : 201);
+          expect(result.body).toMatchObject(bounds);
+          if (!moving) await spaces.deleteSpace(result.body.id as string);
+        }
+      }
+    });
+  }
 });
 
 describe('handleCreateSpace', () => {

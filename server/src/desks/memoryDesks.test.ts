@@ -106,14 +106,12 @@ describe('memoryDesks: createDesk', () => {
     );
   });
 
-  it('dos escritorios pegados borde con borde tambien chocan, igual que en Postgres', async () => {
+  it('creates edge-adjacent and corner-adjacent desks', async () => {
     const directory = desks();
     await directory.createDesk({ label: 'Mesa 1', x: 0, y: 0 });
 
-    await expect(directory.createDesk({ label: 'Mesa 2', x: 3, y: 0 })).rejects.toThrow(
-      DeskOverlapError,
-    );
-    await expect(directory.createDesk({ label: 'Mesa 3', x: 4, y: 0 })).resolves.toBeDefined();
+    await expect(directory.createDesk({ label: 'Desk 2', x: 3, y: 0 })).resolves.toBeDefined();
+    await expect(directory.createDesk({ label: 'Desk 3', x: 3, y: 3 })).resolves.toBeDefined();
   });
 });
 

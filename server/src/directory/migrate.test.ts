@@ -196,14 +196,10 @@ describe('schema.sql: las cuatro tablas de PRD-7 (#7)', () => {
     expect(schema).toContain('archived_at timestamptz');
   });
 
-  it('impide dos espacios solapados con una restriccion de exclusion GiST, sin extension', () => {
-    // Verificado empiricamente en la fase de apply de este cambio (#7) contra
-    // Postgres real (WASM, sin ninguna extension instalada): `box`/GiST
-    // (box_ops) es de nucleo, `EXCLUDE USING gist` no necesita `postgis` ni
-    // ninguna `CREATE EXTENSION`. Ver nota del spike en apply-progress.
-    expect(schema).toContain('drop constraint if exists spaces_no_overlap');
+  it('prevents positive-area space overlap with built-in half-open GiST ranges', () => {
+    expect(schema).toContain('drop constraint spaces_no_overlap');
     expect(schema).toContain(
-      'exclude using gist (box(point(x, y), point(x + w, y + h)) with &&)',
+      "exclude using gist (int4range(x, x + w, '[)') with &&, int4range(y, y + h, '[)') with &&)",
     );
     expect(schema).not.toContain('create extension');
   });
@@ -324,12 +320,10 @@ describe('schema.sql: los escritorios asignables (#7, slice 5)', () => {
     expect(schema).toContain('where occupant_id is not null');
   });
 
-  it('impide dos escritorios solapados con una restriccion de exclusion GiST, sin extension', () => {
-    // Mismo mecanismo y mismo par DROP/ADD que `spaces_no_overlap`: no existe
-    // forma `IF NOT EXISTS` para una restriccion de exclusion.
-    expect(schema).toContain('drop constraint if exists desks_no_overlap');
+  it('prevents positive-area desk overlap with built-in half-open GiST ranges', () => {
+    expect(schema).toContain('drop constraint desks_no_overlap');
     expect(schema).toContain(
-      'exclude using gist (box(point(x, y), point(x + 3, y + 3)) with &&)',
+      "exclude using gist (int4range(x, x + 3, '[)') with &&, int4range(y, y + 3, '[)') with &&)",
     );
     expect(schema).not.toContain('create extension');
   });

@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { InvalidSpaceError, SpaceNameTakenError, SpaceOverlapError, SpaceOwnedByDeskError } from './spaceRules.ts';
 import { createPgSpaces } from './pgSpaces.ts';
+import { readSchemaSql } from '../directory/migrate.ts';
 import { ART_PACK_DEFAULTS, InvalidArtChoiceError } from '../decor/artCatalogRules.ts';
 import type { DirectoryPool, DirectoryQueryResult } from '../directory/pgDirectory.ts';
 
@@ -96,6 +97,21 @@ const LAYOUT_ROW = {
   z_index: 0,
   created_at: new Date('2026-01-01T00:00:00.000Z'),
 };
+
+describe('spaces exclusion schema (#180)', () => {
+  it('uses half-open tile ranges on both axes, before the desk cubicle backfill', () => {
+    const sql = squash(readSchemaSql());
+    expect(sql).toContain("exclude using gist (int4range(x, x + w, '[)') with &&, int4range(y, y + h, '[)') with &&)");
+    expect(sql.indexOf('add constraint spaces_no_overlap')).toBeLessThan(sql.indexOf('insert into spaces (desk_id'));
+  });
+
+  it('only replaces the legacy box constraint, scoped to spaces, and adds a missing constraint', () => {
+    const sql = squash(readSchemaSql());
+    expect(sql).toMatch(/if exists \(select 1 from pg_constraint where conrelid = 'spaces'::regclass and conname = 'spaces_no_overlap' and pg_get_constraintdef\(oid\) like '%box\(%'\) then alter table spaces drop constraint spaces_no_overlap; end if;/);
+    expect(sql).toMatch(/if not exists \(select 1 from pg_constraint where conrelid = 'spaces'::regclass and conname = 'spaces_no_overlap'\) then alter table spaces add constraint spaces_no_overlap/);
+    expect(sql).not.toContain('alter table spaces drop constraint if exists spaces_no_overlap');
+  });
+});
 
 describe('pgSpaces: listSpaces', () => {
   it('mapea las filas al tipo del puerto en orden deterministico', async () => {

@@ -149,6 +149,23 @@ describe('computeObstacles', () => {
 });
 
 describe('isPlacementValid', () => {
+  it.each(['desk', 'room'] as const)('allows adjacent %s ghosts for create and move, but not positive-area overlap', (kind) => {
+    const side = kind === 'desk' ? 3 : 9;
+    const fixed: LayoutObstacleItem = { id: 'fixed', kind, x: 0, y: 0, w: side, h: side };
+    const moving: LayoutObstacleItem = { id: 'moving', kind, x: 30, y: 30, w: side, h: side };
+    for (const mode of ['create', 'move'] as const) {
+      const command = toLayoutEditCommand(
+        mode === 'move' ? { tag: 'placing', kind, mode, id: moving.id } : { tag: 'placing', kind, mode },
+        { items: [fixed, moving], placingSize: { w: side, h: side }, moving: mode === 'move' ? moving : null },
+      );
+      const obstacles = command!.placing!.obstacles;
+      for (const position of [{ x: side, y: 0 }, { x: 0, y: side }, { x: side, y: side }]) {
+        expect(isPlacementValid({ ...position, w: side, h: side }, obstacles)).toBe(true);
+      }
+      expect(isPlacementValid({ x: side - 1, y: side - 1, w: side, h: side }, obstacles)).toBe(false);
+    }
+  });
+
   it('valido cuando no solapa ningun obstaculo', () => {
     const valid = isPlacementValid({ x: 0, y: 0, w: 3, h: 3 }, [{ x0: 10, y0: 10, x1: 12, y1: 12 }]);
 
