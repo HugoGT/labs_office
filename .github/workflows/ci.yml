@@ -57,8 +57,18 @@ jobs:
 
       # Tres capas: `unit` (jsdom), `server` (Node, levanta un Colyseus real en
       # un puerto efimero) y `browser` (Chromium). `test:all` corre las tres.
+      # CI always starts with a cold Vite cache, so a dependency the `browser`
+      # project discovers mid-run shows up here as a reload that breaks
+      # in-flight test imports (#196). Fail on it even when the tests survive,
+      # and add the dependency to that project's `optimizeDeps.include`.
       - name: Tests (jsdom + Node + Chromium)
-        run: pnpm test:all
+        run: |
+          set -o pipefail
+          pnpm test:all 2>&1 | tee test-all.log
+          if grep -q 'optimized dependencies changed' test-all.log; then
+            echo "::error::Vite re-optimized dependencies mid-run; add them to optimizeDeps.include of the browser project in vite.config.ts"
+            exit 1
+          fi
 
       # Pruebas puras del arnes E2E (extraccion de la URL de `vite preview`).
       # Van antes de los builds a proposito: no necesitan bundle y cuestan
