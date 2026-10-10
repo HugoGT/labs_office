@@ -519,13 +519,13 @@ describe('POST /livekit/token con auth activa (#8)', () => {
 describe('POST /livekit/token con spaceId (#10, #12): autorizacion contra la posicion trackeada', () => {
   async function tokenServerWithSpace() {
     const spaces = createMemorySpaces();
-    // Rectangulo en tiles (10,10)-(13,13) -> pixeles (320,320)-(416,416).
+    // Rectangulo en tiles (10,10)-(16,16) -> pixeles (320,320)-(512,512).
     const created = await spaces.createSpace({
       name: 'Sala de pruebas',
       x: 10,
       y: 10,
-      w: 3,
-      h: 3,
+      w: 6,
+      h: 6,
       capacity: null,
     });
     const server = createOfficeServer({ spaces });
@@ -553,7 +553,7 @@ describe('POST /livekit/token con spaceId (#10, #12): autorizacion contra la pos
     const { server, spaceId, url } = await tokenServerWithSpace();
     const wsUrl = url.replace('http://', 'ws://');
     const room = await joinAt(wsUrl);
-    server.sessions.moveTo(room.sessionId, 330, 330); // dentro de (320,320)-(416,416)
+    server.sessions.moveTo(room.sessionId, 330, 330); // dentro de (320,320)-(512,512)
 
     const res = await postTokenTo(url, { sessionId: room.sessionId, spaceId });
 
@@ -569,7 +569,7 @@ describe('POST /livekit/token con spaceId (#10, #12): autorizacion contra la pos
     const { server, spaceId, url } = await tokenServerWithSpace();
     const wsUrl = url.replace('http://', 'ws://');
     const room = await joinAt(wsUrl);
-    server.sessions.moveTo(room.sessionId, 0, 0); // fuera de (320,320)-(416,416)
+    server.sessions.moveTo(room.sessionId, 0, 0); // fuera de (320,320)-(512,512)
 
     const res = await postTokenTo(url, { sessionId: room.sessionId, spaceId });
 
@@ -644,8 +644,8 @@ describe('POST /livekit/token con spaceId (#10, #12): autorizacion contra la pos
       name: 'Sala de pruebas',
       x: 10,
       y: 10,
-      w: 3,
-      h: 3,
+      w: 6,
+      h: 6,
       capacity: null,
     });
     const authServer = createOfficeServer({ auth: verifier, spaces });
@@ -1009,7 +1009,7 @@ describe('rutas de espacios (#7, slice 3)', () => {
     const res = await fetch(`${url}/admin/spaces`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: null }),
+      body: JSON.stringify({ name: 'Sala', x: 1, y: 1, w: 6, h: 6, capacity: null }),
     });
 
     expect(res.status).toBe(401);
@@ -1022,7 +1022,7 @@ describe('rutas de espacios (#7, slice 3)', () => {
     const created = await fetch(`${url}/admin/spaces`, {
       method: 'POST',
       headers: BEARER,
-      body: JSON.stringify({ name: 'Sala de Juntas', x: 1, y: 1, w: 4, h: 4, capacity: null }),
+      body: JSON.stringify({ name: 'Sala de Juntas', x: 1, y: 1, w: 6, h: 6, capacity: null }),
     });
 
     expect(created.status).toBe(201);
@@ -1033,7 +1033,7 @@ describe('rutas de espacios (#7, slice 3)', () => {
 
   it('POST /admin/spaces/:id renombra sin cambiar el id', async () => {
     const { server, spaces, url } = await spacesServer();
-    const created = await spaces!.createSpace({ name: 'Antes', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    const created = await spaces!.createSpace({ name: 'Antes', x: 1, y: 1, w: 6, h: 6, capacity: null });
 
     const res = await fetch(`${url}/admin/spaces/${created.id}`, {
       method: 'POST',
@@ -1048,7 +1048,7 @@ describe('rutas de espacios (#7, slice 3)', () => {
 
   it('POST /admin/spaces/:id/delete borra el espacio', async () => {
     const { server, spaces, url } = await spacesServer();
-    const created = await spaces!.createSpace({ name: 'Una', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    const created = await spaces!.createSpace({ name: 'Una', x: 1, y: 1, w: 6, h: 6, capacity: null });
 
     const res = await fetch(`${url}/admin/spaces/${created.id}/delete`, {
       method: 'POST',
@@ -1066,7 +1066,7 @@ describe('rutas de espacios (#7, slice 3)', () => {
     const res = await fetch(`${url}/admin/spaces`, {
       method: 'POST',
       headers: BEARER,
-      body: JSON.stringify({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: null }),
+      body: JSON.stringify({ name: 'Sala', x: 1, y: 1, w: 6, h: 6, capacity: null }),
     });
 
     expect(res.status).toBe(503);
@@ -2344,8 +2344,8 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
     auth?: IdTokenVerifier,
   ) {
     const spaces = source ?? createMemorySpaces();
-    // Tiles (10,10)-(13,13) -> pixels (320,320)-(416,416).
-    const created = await spaces.createSpace({ name: 'Sala', x: 10, y: 10, w: 3, h: 3, capacity: null });
+    // Tiles (10,10)-(16,16) -> pixels (320,320)-(512,512).
+    const created = await spaces.createSpace({ name: 'Sala', x: 10, y: 10, w: 6, h: 6, capacity: null });
     const recServer = createOfficeServer({
       spaces,
       auth,
@@ -2500,7 +2500,7 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
     const desks = createMemoryDesks({ spaces: spaces.deskSpaces });
     const desk = kind === 'desk' ? await desks.createDesk({ label: 'Desk', x: 10, y: 10 }) : null;
     const space = kind === 'room'
-      ? await spaces.createSpace({ name: 'Room', x: 10, y: 10, w: 3, h: 3, capacity: null })
+      ? await spaces.createSpace({ name: 'Room', x: 10, y: 10, w: 6, h: 6, capacity: null })
       : (await spaces.listSpaces())[0];
     const directory = createMemoryDirectory({ seed: ['owner', 'old', 'middle', 'after-delete', 'admin'].map((uid): DirectoryUser => ({
       id: `id-${uid}`, uid, email: `${uid}@example.com`, displayName: uid,
@@ -2529,7 +2529,7 @@ describe('recordings (#5): routes, synced state and cleanup', () => {
       const path = kind === 'room' ? `/admin/spaces/${space.id}` : `/admin/desks/${desk!.id}`;
       const headers = { Authorization: 'Bearer admin', 'Content-Type': 'application/json' };
       expect((await fetch(`${url}${path}`, { method: 'POST', headers,
-        body: JSON.stringify(kind === 'room' ? { x: 20, y: 10, w: 3, h: 3 } : { x: 20, y: 10 }) })).status).toBe(200);
+        body: JSON.stringify(kind === 'room' ? { x: 20, y: 10, w: 6, h: 6 } : { x: 20, y: 10 }) })).status).toBe(200);
       for (const [client, x] of [[old, 330], [middle, 650]] as const) {
         client.send('move', { x, y: 330, facing: 'down' });
         await waitFor(() => recServer.sessions.positionOf(client.sessionId)?.x === x);
@@ -2897,7 +2897,7 @@ describe('terrain routes (#123 phase 2)', () => {
     room.send('move', { ...away, positionRevision: 1 });
     await waitFor(() => room.state.players.get(room.sessionId)?.x === away.x);
     expect((await setBlock(url, LAWN, 'grass')).status).toBe(200);
-    const sala = await spaces.createSpace({ name: 'Sala del prado', x: 66, y: 21, w: 3, h: 3, capacity: null });
+    const sala = await spaces.createSpace({ name: 'Sala del prado', x: 66, y: 21, w: 6, h: 6, capacity: null });
     const underSpace = await setBlock(url, LAWN, 'water');
     expect(underSpace.status).toBe(409);
     expect(await underSpace.json()).toEqual({ error: 'terrain-under-placement' });
@@ -2927,7 +2927,7 @@ describe('terrain routes (#123 phase 2)', () => {
     const at = new Date('2026-01-01T00:00:00.000Z');
     const desks = createMemoryDesks({ seed: [{ id: 'desk-a', label: 'Mesa A', x: 66, y: 21, occupantId: null, createdAt: at, updatedAt: at }] });
     const spaces = createMemorySpaces();
-    await spaces.createSpace({ name: 'Sala del prado', x: 70, y: 18, w: 5, h: 5, capacity: null });
+    await spaces.createSpace({ name: 'Sala del prado', x: 70, y: 18, w: 6, h: 6, capacity: null });
     const { server, url, wsUrl } = await terrainServer({ spaces, desks, terrain: createMemoryTerrain([], [[5, 'wall-stone']]) });
     const room = await new Client(wsUrl).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token: 'valido-uid-admin' });
     openRooms.push(room);

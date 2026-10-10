@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   InvalidSpaceError,
+  MIN_ROOM_SIDE,
   SpaceNameTakenError,
   SpaceOverlapError,
   SpaceOwnedByDeskError,
@@ -137,6 +138,20 @@ describe('normalizeCreateSpaceInput', () => {
     });
   });
 
+  it.each([
+    { w: 5, h: 9 },
+    { w: 9, h: 5 },
+  ])('refuses a room with a side under MIN_ROOM_SIDE (#184): %o', (size) => {
+    expect(() => normalizeCreateSpaceInput({ name: 'X', x: 0, y: 0, ...size, capacity: null })).toThrow(
+      InvalidSpaceError,
+    );
+  });
+
+  it('accepts a room of exactly MIN_ROOM_SIDE per side (#184)', () => {
+    expect(MIN_ROOM_SIDE).toBe(6);
+    expect(normalizeCreateSpaceInput({ name: 'X', x: 0, y: 0, w: 6, h: 6, capacity: null })).toMatchObject({ w: 6, h: 6 });
+  });
+
   it('propaga el error de bounds invalidos: no normaliza silenciosamente', () => {
     expect(() =>
       normalizeCreateSpaceInput({ name: 'X', x: -1, y: 0, w: 10, h: 10, capacity: null }),
@@ -153,17 +168,22 @@ describe('normalizeUpdateSpaceInput', () => {
   });
 
   it('un rectangulo completo se valida y se pasa igual', () => {
-    expect(normalizeUpdateSpaceInput({ x: 1, y: 2, w: 3, h: 4 })).toEqual({
+    expect(normalizeUpdateSpaceInput({ x: 1, y: 2, w: 6, h: 7 })).toEqual({
       x: 1,
       y: 2,
-      w: 3,
-      h: 4,
+      w: 6,
+      h: 7,
     });
+  });
+
+  it('refuses resizing a room under MIN_ROOM_SIDE, like the creation (#184)', () => {
+    expect(() => normalizeUpdateSpaceInput({ x: 1, y: 2, w: 5, h: 9 })).toThrow(InvalidSpaceError);
+    expect(() => normalizeUpdateSpaceInput({ x: 1, y: 2, w: 9, h: 5 })).toThrow(InvalidSpaceError);
   });
 
   it('rechaza un rectangulo parcial: mover exige las cuatro coordenadas juntas', () => {
     expect(() => normalizeUpdateSpaceInput({ x: 1, y: 2 })).toThrow(InvalidSpaceError);
-    expect(() => normalizeUpdateSpaceInput({ w: 3 })).toThrow(InvalidSpaceError);
+    expect(() => normalizeUpdateSpaceInput({ w: 6 })).toThrow(InvalidSpaceError);
   });
 
   it('un rectangulo completo invalido se rechaza igual que en el alta', () => {

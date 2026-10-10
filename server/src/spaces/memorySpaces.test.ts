@@ -41,7 +41,7 @@ describe('createMemorySpaces', () => {
   it('createSpace deriva el slug del nombre, igual que el adaptador de Postgres', async () => {
     const spaces = createMemorySpaces();
 
-    const created = await spaces.createSpace({ name: 'Sala de Juntas', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    const created = await spaces.createSpace({ name: 'Sala de Juntas', x: 1, y: 1, w: 6, h: 6, capacity: null });
 
     expect(created.slug).toBe('sala-de-juntas');
     expect(created.name).toBe('Sala de Juntas');
@@ -57,10 +57,10 @@ describe('createMemorySpaces', () => {
 
   it('createSpace rechaza un solape con SpaceOverlapError', async () => {
     const spaces = createMemorySpaces();
-    await spaces.createSpace({ name: 'Primera', x: 10, y: 10, w: 5, h: 5, capacity: null });
+    await spaces.createSpace({ name: 'Primera', x: 10, y: 10, w: 6, h: 6, capacity: null });
 
     await expect(
-      spaces.createSpace({ name: 'Encima', x: 12, y: 12, w: 5, h: 5, capacity: null }),
+      spaces.createSpace({ name: 'Encima', x: 12, y: 12, w: 6, h: 6, capacity: null }),
     ).rejects.toThrow(SpaceOverlapError);
   });
 
@@ -69,10 +69,10 @@ describe('createMemorySpaces', () => {
     // y "CAFETERIA" son la misma sala. Si este adaptador no lo reprodujese, la
     // ruta pasaria el test contra memoria y devolveria un 500 en produccion.
     const spaces = createMemorySpaces();
-    await spaces.createSpace({ name: 'Cafeteria', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    await spaces.createSpace({ name: 'Cafeteria', x: 1, y: 1, w: 6, h: 6, capacity: null });
 
     await expect(
-      spaces.createSpace({ name: 'CAFETERIA', x: 30, y: 1, w: 4, h: 4, capacity: null }),
+      spaces.createSpace({ name: 'CAFETERIA', x: 30, y: 1, w: 6, h: 6, capacity: null }),
     ).rejects.toThrow(SpaceNameTakenError);
   });
 
@@ -81,17 +81,17 @@ describe('createMemorySpaces', () => {
     // y "Sala-A" son nombres distintos hasta para `lower()`, pero el slug
     // derivado es el mismo y el indice de slug los rechaza igual.
     const spaces = createMemorySpaces();
-    await spaces.createSpace({ name: 'Sala A', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    await spaces.createSpace({ name: 'Sala A', x: 1, y: 1, w: 6, h: 6, capacity: null });
 
     await expect(
-      spaces.createSpace({ name: 'Sala-A', x: 30, y: 1, w: 4, h: 4, capacity: null }),
+      spaces.createSpace({ name: 'Sala-A', x: 30, y: 1, w: 6, h: 6, capacity: null }),
     ).rejects.toThrow(SpaceNameTakenError);
   });
 
   it('updateSpace rechaza renombrar a un nombre que ya es de otro espacio', async () => {
     const spaces = createMemorySpaces();
-    await spaces.createSpace({ name: 'Cafeteria', x: 1, y: 1, w: 4, h: 4, capacity: null });
-    const otra = await spaces.createSpace({ name: 'War Room', x: 30, y: 1, w: 4, h: 4, capacity: null });
+    await spaces.createSpace({ name: 'Cafeteria', x: 1, y: 1, w: 6, h: 6, capacity: null });
+    const otra = await spaces.createSpace({ name: 'War Room', x: 30, y: 1, w: 6, h: 6, capacity: null });
 
     await expect(spaces.updateSpace(otra.id, { name: 'cafeteria' })).rejects.toThrow(
       SpaceNameTakenError,
@@ -103,7 +103,7 @@ describe('createMemorySpaces', () => {
     // Postgres el UPDATE reemplaza la entrada del indice de esa misma fila. Sin
     // esta exclusion, corregir "cafeteria" a "Cafeteria" seria imposible.
     const spaces = createMemorySpaces();
-    const created = await spaces.createSpace({ name: 'cafeteria', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    const created = await spaces.createSpace({ name: 'cafeteria', x: 1, y: 1, w: 6, h: 6, capacity: null });
 
     const updated = await spaces.updateSpace(created.id, { name: 'Cafeteria' });
 
@@ -112,7 +112,7 @@ describe('createMemorySpaces', () => {
 
   it('la version cambia al renombrar: el nombre entra en el hash canonico', async () => {
     const spaces = createMemorySpaces();
-    const created = await spaces.createSpace({ name: 'Antes', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    const created = await spaces.createSpace({ name: 'Antes', x: 1, y: 1, w: 6, h: 6, capacity: null });
     const before = await spaces.version();
 
     await spaces.updateSpace(created.id, { name: 'Despues' });
@@ -122,7 +122,7 @@ describe('createMemorySpaces', () => {
 
   it('renombrar NO cambia el id: es la promesa de la reclave de la rebanada 2', async () => {
     const spaces = createMemorySpaces();
-    const created = await spaces.createSpace({ name: 'Antes', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    const created = await spaces.createSpace({ name: 'Antes', x: 1, y: 1, w: 6, h: 6, capacity: null });
 
     const updated = await spaces.updateSpace(created.id, { name: 'Despues' });
 
@@ -139,16 +139,16 @@ describe('createMemorySpaces', () => {
     // Mover un espacio a un sitio que se solapa con SU PROPIA posicion previa
     // es legal: el rectangulo viejo deja de existir en el mismo movimiento.
     const spaces = createMemorySpaces();
-    const created = await spaces.createSpace({ name: 'Una', x: 10, y: 10, w: 5, h: 5, capacity: null });
+    const created = await spaces.createSpace({ name: 'Una', x: 10, y: 10, w: 6, h: 6, capacity: null });
 
-    const moved = await spaces.updateSpace(created.id, { x: 11, y: 11, w: 5, h: 5 });
+    const moved = await spaces.updateSpace(created.id, { x: 11, y: 11, w: 6, h: 6 });
 
     expect(moved?.x).toBe(11);
   });
 
   it('deleteSpace devuelve true la primera vez y false la segunda', async () => {
     const spaces = createMemorySpaces();
-    const created = await spaces.createSpace({ name: 'Una', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    const created = await spaces.createSpace({ name: 'Una', x: 1, y: 1, w: 6, h: 6, capacity: null });
 
     expect(await spaces.deleteSpace(created.id)).toBe(true);
     expect(await spaces.deleteSpace(created.id)).toBe(false);
@@ -156,15 +156,15 @@ describe('createMemorySpaces', () => {
 
   it('listSpaces ordena por (x, y, id), igual que el adaptador de Postgres', async () => {
     const spaces = createMemorySpaces();
-    await spaces.createSpace({ name: 'Lejos', x: 30, y: 1, w: 4, h: 4, capacity: null });
-    await spaces.createSpace({ name: 'Cerca', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    await spaces.createSpace({ name: 'Lejos', x: 30, y: 1, w: 6, h: 6, capacity: null });
+    await spaces.createSpace({ name: 'Cerca', x: 1, y: 1, w: 6, h: 6, capacity: null });
 
     expect((await spaces.listSpaces()).map((space) => space.name)).toEqual(['Cerca', 'Lejos']);
   });
 
   it('replaceLayout sustituye el layout entero del espacio', async () => {
     const spaces = createMemorySpaces();
-    const created = await spaces.createSpace({ name: 'Una', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    const created = await spaces.createSpace({ name: 'Una', x: 1, y: 1, w: 6, h: 6, capacity: null });
     await spaces.replaceLayout(created.id, [{ assetId: 'a-1', x: 0, y: 0, rotation: 0, zIndex: 0 }]);
 
     await spaces.replaceLayout(created.id, [{ assetId: 'a-2', x: 1, y: 1, rotation: 90, zIndex: 1 }]);
@@ -174,7 +174,7 @@ describe('createMemorySpaces', () => {
 
   it('borrar un espacio se lleva su layout, como la cascada de schema.sql', async () => {
     const spaces = createMemorySpaces();
-    const created = await spaces.createSpace({ name: 'Una', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    const created = await spaces.createSpace({ name: 'Una', x: 1, y: 1, w: 6, h: 6, capacity: null });
     await spaces.replaceLayout(created.id, [{ assetId: 'a-1', x: 0, y: 0, rotation: 0, zIndex: 0 }]);
 
     await spaces.deleteSpace(created.id);
@@ -193,8 +193,8 @@ describe('createMemorySpaces', () => {
       name: 'Sala de Juntas',
       x: 30,
       y: 1,
-      w: 4,
-      h: 4,
+      w: 6,
+      h: 6,
       capacity: null,
     });
 
@@ -310,7 +310,7 @@ describe('createMemorySpaces: floor (art migration, step 3)', () => {
   });
 
   it('a room created without a floor gets the default one', async () => {
-    const created = await createMemorySpaces().createSpace({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    const created = await createMemorySpaces().createSpace({ name: 'Sala', x: 1, y: 1, w: 6, h: 6, capacity: null });
 
     expect(created).toMatchObject({ floorMaterialId: ART_PACK_DEFAULTS.floor, floorColor: null });
   });
@@ -321,13 +321,13 @@ describe('createMemorySpaces: floor (art migration, step 3)', () => {
       name: 'Sala',
       x: 1,
       y: 1,
-      w: 4,
-      h: 4,
+      w: 6,
+      h: 6,
       capacity: null,
       floor: { materialId: 'floor-plain', color: '#AABBCC' },
     });
 
-    await spaces.updateSpace(created.id, { name: 'Sala Grande', x: 2, y: 2, w: 4, h: 4 });
+    await spaces.updateSpace(created.id, { name: 'Sala Grande', x: 2, y: 2, w: 6, h: 6 });
 
     expect(await spaces.getSpace(created.id)).toMatchObject({ floorMaterialId: 'floor-plain', floorColor: '#aabbcc' });
   });
@@ -336,7 +336,7 @@ describe('createMemorySpaces: floor (art migration, step 3)', () => {
     const spaces = createMemorySpaces();
 
     await expect(
-      spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: null, floor: { materialId: '', color: null } }),
+      spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 6, h: 6, capacity: null, floor: { materialId: '', color: null } }),
     ).rejects.toBeInstanceOf(InvalidArtChoiceError);
     expect(await spaces.listSpaces()).toEqual([]);
   });

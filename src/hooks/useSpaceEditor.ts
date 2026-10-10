@@ -105,6 +105,8 @@ export function useSpaceEditor({
   const pendingCreateRef = useRef<SpaceCreateInput | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const roomListRef = useRef(roomList);
+  roomListRef.current = roomList;
 
   const active = state.tag !== 'off';
 
@@ -148,6 +150,10 @@ export function useSpaceEditor({
 
         const moveId = current.mode === 'move' ? current.id : null;
         const create = pendingCreateRef.current;
+        // The server moves a rectangle whole or not at all (`normalizeUpdateSpaceInput`),
+        // so a move carries the room's own size: `{ x, y }` alone answered 400.
+        const moved = moveId === null ? undefined : roomListRef.current.find((room) => room.id === moveId);
+        if (moveId !== null && moved === undefined) return;
 
         dispatch({ type: 'confirmPlacement' });
         setError(null);
@@ -155,8 +161,8 @@ export function useSpaceEditor({
 
         void (async () => {
           try {
-            if (moveId !== null) {
-              await spaces.updateSpace(moveId, { x: tx, y: ty });
+            if (moved !== undefined) {
+              await spaces.updateSpace(moved.id, { x: tx, y: ty, w: moved.w, h: moved.h });
             } else if (create !== null) {
               await spaces.createSpace({
                 name: create.name,

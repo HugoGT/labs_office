@@ -10,7 +10,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { boundsOverlap, type SpaceBounds } from '../../../src/game/layoutGeometry.ts';
+import { MIN_ROOM_SIDE, boundsOverlap, type SpaceBounds } from '../../../src/game/layoutGeometry.ts';
 
 // Reexportados tal cual (#74, PR3a): `boundsOverlap` se mudo a
 // `src/game/layoutGeometry.ts` porque el editor de layout en oficina (PR3b)
@@ -18,7 +18,7 @@ import { boundsOverlap, type SpaceBounds } from '../../../src/game/layoutGeometr
 // este modulo entero (arrastra `node:crypto` via `hashSpaces`). Reexportar en
 // vez de duplicar es lo que garantiza que las dos copias nunca diverjan; ver
 // la cabecera de `layoutGeometry.ts` para la nota completa.
-export { boundsOverlap, type SpaceBounds };
+export { MIN_ROOM_SIDE, boundsOverlap, type SpaceBounds };
 
 /**
  * Errores propios y no `Error` pelado, misma razon que `InvalidInvitationError`
@@ -105,6 +105,13 @@ export function assertValidBounds(bounds: SpaceBounds): void {
   if (h <= 0) throw new InvalidSpaceError('h debe ser mayor que 0');
 }
 
+/** A room's own minimum (#184), on top of `assertValidBounds`; desk cubicles never get here. */
+function assertValidRoomBounds(bounds: SpaceBounds): void {
+  assertValidBounds(bounds);
+  if (bounds.w < MIN_ROOM_SIDE) throw new InvalidSpaceError(`w debe ser al menos ${MIN_ROOM_SIDE}`);
+  if (bounds.h < MIN_ROOM_SIDE) throw new InvalidSpaceError(`h debe ser al menos ${MIN_ROOM_SIDE}`);
+}
+
 export function assertValidCapacity(capacity: number | null): void {
   if (capacity === null) return;
   if (typeof capacity !== 'number' || !Number.isInteger(capacity)) {
@@ -158,7 +165,7 @@ export interface NormalizedCreateSpaceInput {
 
 /** Valida y normaliza de una vez lo que entra por `SpacesDirectory.createSpace`. */
 export function normalizeCreateSpaceInput(input: CreateSpaceInput): NormalizedCreateSpaceInput {
-  assertValidBounds(input);
+  assertValidRoomBounds(input);
   assertValidCapacity(input.capacity);
   const name = normalizeSpaceName(input.name);
   return {
@@ -214,7 +221,7 @@ export function normalizeUpdateSpaceInput(input: UpdateSpaceInput): NormalizedUp
       );
     }
     const bounds = { x: input.x!, y: input.y!, w: input.w!, h: input.h! };
-    assertValidBounds(bounds);
+    assertValidRoomBounds(bounds);
     Object.assign(result, bounds);
   }
 

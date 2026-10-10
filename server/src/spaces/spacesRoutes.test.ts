@@ -79,13 +79,13 @@ function harness(): Harness {
 
 /** Rectangulo valido y libre, para que cada test escriba solo lo que le importa. */
 function body(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return { name: 'Sala Nueva', x: 1, y: 1, w: 4, h: 4, capacity: null, ...overrides };
+  return { name: 'Sala Nueva', x: 1, y: 1, w: 6, h: 6, capacity: null, ...overrides };
 }
 
 describe('handleGetSpacesConfig', () => {
   it('hashes the fetched mixed room/cubicle snapshot even when the store changes immediately afterwards', async () => {
     const { deps, spaces } = harness();
-    const room = await spaces.createSpace({ name: 'Room', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    const room = await spaces.createSpace({ name: 'Room', x: 1, y: 1, w: 6, h: 6, capacity: null });
     const desk = { ...room, id: 'cubicle', slug: 'desk-cubicle', name: 'Desk', x: 10, deskId: 'desk' };
     const snapshot = [room, desk];
     let current = snapshot;
@@ -107,7 +107,7 @@ describe('handleGetSpacesConfig', () => {
 
   it('serves the floor of each space, which the version hash leaves out (art step 4)', async () => {
     const { deps, spaces } = harness();
-    await spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: null, floor: { materialId: 'floor-plain', color: '#2c3e50' } });
+    await spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 6, h: 6, capacity: null, floor: { materialId: 'floor-plain', color: '#2c3e50' } });
     const versionBefore = await spaces.version();
 
     const result = await handleGetSpacesConfig(deps);
@@ -156,7 +156,7 @@ describe('handleGetSpacesConfig', () => {
     // servidor (D4). `kind` SI viaja aunque no entre en el hash (D8): es
     // derivado de `deskId`, no un dato propio que pudiese divergir.
     const { deps, spaces } = harness();
-    await spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: 8 });
+    await spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 6, h: 6, capacity: 8 });
 
     const result = await handleGetSpacesConfig(deps);
 
@@ -179,7 +179,7 @@ describe('handleGetSpacesConfig', () => {
 
   it('una sala (sin desk_id) reporta kind "room" (#10 + #12)', async () => {
     const { deps, spaces } = harness();
-    await spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    await spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 6, h: 6, capacity: null });
 
     const result = await handleGetSpacesConfig(deps);
 
@@ -223,15 +223,18 @@ describe('room placement adjacency (#180)', () => {
   for (const obstacle of ['room', 'cubicle'] as const) {
     it.each(['create', 'move'] as const)('%s accepts edge/corner adjacency to a ' + obstacle + ' and preserves overlap conflicts', async (mode) => {
       const { deps, spaces } = harness();
+      // A cubicle is 3x3; a room is at least MIN_ROOM_SIDE (6) a side (#184).
+      const side = obstacle === 'room' ? 6 : 3;
       if (obstacle === 'room') {
-        await spaces.createSpace({ name: 'Fixed', x: 10, y: 10, w: 3, h: 3, capacity: null });
+        await spaces.createSpace({ name: 'Fixed', x: 10, y: 10, w: side, h: side, capacity: null });
       } else {
         spaces.deskSpaces.upsertDeskSpace({ id: 'fixed-desk', label: 'Fixed', x: 10, y: 10 });
       }
       const moving = mode === 'move'
-        ? await spaces.createSpace({ name: 'Moving', x: 30, y: 30, w: 3, h: 3, capacity: null }) : null;
-      for (const [index, position] of [{ x: 13, y: 10 }, { x: 10, y: 13 }, { x: 13, y: 13 }, { x: 12, y: 12 }].entries()) {
-        const bounds = { ...position, w: 3, h: 3 };
+        ? await spaces.createSpace({ name: 'Moving', x: 30, y: 30, w: 6, h: 6, capacity: null }) : null;
+      const end = 10 + side;
+      for (const [index, position] of [{ x: end, y: 10 }, { x: 10, y: end }, { x: end, y: end }, { x: 12, y: 12 }].entries()) {
+        const bounds = { ...position, w: 6, h: 6 };
         const before = await spaces.listSpaces();
         const result = moving
           ? await handleUpdateSpace(BEARER_ADMIN, moving.id, bounds, deps)
@@ -272,7 +275,7 @@ describe('handleCreateSpace', () => {
 
   it('el 403 va ANTES que la comprobacion de solape', async () => {
     const { deps, spaces } = harness();
-    await spaces.createSpace({ name: 'Ocupa', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    await spaces.createSpace({ name: 'Ocupa', x: 1, y: 1, w: 6, h: 6, capacity: null });
 
     expect((await handleCreateSpace(BEARER_EMPLEADO, body(), deps)).status).toBe(403);
   });
@@ -305,6 +308,15 @@ describe('handleCreateSpace', () => {
     expect(await spaces.listSpaces()).toEqual([]);
   });
 
+  it('a room with a side under 6 tiles answers 400 and creates nothing (#184)', async () => {
+    const { deps, spaces } = harness();
+
+    const result = await handleCreateSpace(BEARER_ADMIN, body({ w: 5, h: 9 }), deps);
+
+    expect(result.status).toBe(400);
+    expect(await spaces.listSpaces()).toEqual([]);
+  });
+
   it('un cuerpo que no es un objeto responde 400', async () => {
     const { deps } = harness();
 
@@ -313,7 +325,7 @@ describe('handleCreateSpace', () => {
 
   it('un solape responde 409 y no 500', async () => {
     const { deps, spaces } = harness();
-    await spaces.createSpace({ name: 'Ocupa', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    await spaces.createSpace({ name: 'Ocupa', x: 1, y: 1, w: 6, h: 6, capacity: null });
 
     expect((await handleCreateSpace(BEARER_ADMIN, body(), deps)).status).toBe(409);
   });
@@ -323,7 +335,7 @@ describe('handleCreateSpace', () => {
     // `lower(name)`: escribir "SALA NUEVA" donde ya hay una "Sala Nueva" es una
     // equivocacion corriente del administrador, no una averia del servidor.
     const { deps, spaces } = harness();
-    await spaces.createSpace({ name: 'Sala Nueva', x: 30, y: 1, w: 4, h: 4, capacity: null });
+    await spaces.createSpace({ name: 'Sala Nueva', x: 30, y: 1, w: 6, h: 6, capacity: null });
 
     const result = await handleCreateSpace(BEARER_ADMIN, body({ name: 'SALA NUEVA' }), deps);
 
@@ -336,7 +348,7 @@ describe('handleCreateSpace', () => {
     // nombre. Si los dos dijesen `space-overlap`, el admin moveria una sala que
     // estaba bien colocada.
     const { deps, spaces } = harness();
-    await spaces.createSpace({ name: 'Ocupa', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    await spaces.createSpace({ name: 'Ocupa', x: 1, y: 1, w: 6, h: 6, capacity: null });
 
     const solape = await handleCreateSpace(BEARER_ADMIN, body(), deps);
     const repetido = await handleCreateSpace(
@@ -354,7 +366,7 @@ describe('handleCreateSpace', () => {
     // y "Sala-A" no son el mismo nombre ni para `lower()`, pero si el mismo
     // slug.
     const { deps, spaces } = harness();
-    await spaces.createSpace({ name: 'Sala A', x: 30, y: 1, w: 4, h: 4, capacity: null });
+    await spaces.createSpace({ name: 'Sala A', x: 30, y: 1, w: 6, h: 6, capacity: null });
 
     const result = await handleCreateSpace(BEARER_ADMIN, body({ name: 'Sala-A' }), deps);
 
@@ -392,7 +404,7 @@ describe('handleCreateSpace', () => {
 describe('handleUpdateSpace', () => {
   async function conEspacio(): Promise<{ deps: SpacesDeps; spaces: SpacesDirectory; id: string }> {
     const { deps, spaces } = harness();
-    const created = await spaces.createSpace({ name: 'Antes', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    const created = await spaces.createSpace({ name: 'Antes', x: 1, y: 1, w: 6, h: 6, capacity: null });
     return { deps, spaces, id: created.id };
   }
 
@@ -460,9 +472,9 @@ describe('handleUpdateSpace', () => {
 
   it('mover encima de otro espacio responde 409', async () => {
     const { deps, spaces, id } = await conEspacio();
-    await spaces.createSpace({ name: 'Otra', x: 20, y: 20, w: 4, h: 4, capacity: null });
+    await spaces.createSpace({ name: 'Otra', x: 20, y: 20, w: 6, h: 6, capacity: null });
 
-    const result = await handleUpdateSpace(BEARER_ADMIN, id, { x: 21, y: 21, w: 4, h: 4 }, deps);
+    const result = await handleUpdateSpace(BEARER_ADMIN, id, { x: 21, y: 21, w: 6, h: 6 }, deps);
 
     expect(result.status).toBe(409);
   });
@@ -472,7 +484,7 @@ describe('handleUpdateSpace', () => {
     // saliese un 500 haria que la misma falta se contase de dos maneras segun
     // por que puerta entrase.
     const { deps, spaces, id } = await conEspacio();
-    await spaces.createSpace({ name: 'Cafeteria', x: 20, y: 20, w: 4, h: 4, capacity: null });
+    await spaces.createSpace({ name: 'Cafeteria', x: 20, y: 20, w: 6, h: 6, capacity: null });
 
     const result = await handleUpdateSpace(BEARER_ADMIN, id, { name: 'CAFETERIA' }, deps);
 
@@ -529,7 +541,7 @@ describe('handleDeleteSpace', () => {
 
   it('un admin borra y recibe 200', async () => {
     const { deps, spaces } = harness();
-    const created = await spaces.createSpace({ name: 'Una', x: 1, y: 1, w: 4, h: 4, capacity: null });
+    const created = await spaces.createSpace({ name: 'Una', x: 1, y: 1, w: 6, h: 6, capacity: null });
 
     const result = await handleDeleteSpace(BEARER_ADMIN, created.id, deps);
 
@@ -650,8 +662,8 @@ describe('space floor, chosen only at creation (art step 7)', () => {
       name: 'Sala',
       x: 1,
       y: 1,
-      w: 4,
-      h: 4,
+      w: 6,
+      h: 6,
       capacity: null,
       floor: { materialId: 'floor-plain', color: '#2c3e50' },
     });
@@ -669,7 +681,7 @@ describe('space floor, chosen only at creation (art step 7)', () => {
     const created = await handleCreateSpace(BEARER_ADMIN, body({ floorMaterialId: 'floor-plain', floorColor: '#2c3e50' }), deps);
     const id = created.body.id as string;
 
-    expect((await handleUpdateSpace(BEARER_ADMIN, id, { x: 10, y: 10, w: 4, h: 4 }, deps)).status).toBe(200);
+    expect((await handleUpdateSpace(BEARER_ADMIN, id, { x: 10, y: 10, w: 6, h: 6 }, deps)).status).toBe(200);
     const renamed = await handleUpdateSpace(BEARER_ADMIN, id, { name: 'Sala movida' }, deps);
 
     expect(renamed.body).toEqual(

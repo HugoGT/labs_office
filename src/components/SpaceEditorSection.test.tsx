@@ -51,14 +51,14 @@ function renderSection(overrides: Partial<Parameters<typeof SpaceEditorSection>[
 }
 
 describe('SpaceEditorSection (#74, PR4)', () => {
-  it('offers a whole office block and sends its aligned placement through the existing room tool', async () => {
+  it('starts at a whole office block and sends its aligned placement through the existing room tool (#184)', async () => {
     const { spaces, bridge } = renderSection();
     await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
     await screen.findByText('Sala grande');
-    await userEvent.type(screen.getByLabelText('Nombre de la nueva sala'), 'Office');
-    await userEvent.click(screen.getByRole('button', { name: 'Usar un bloque de oficina (9 × 9)' }));
     expect(screen.getByLabelText('Ancho')).toHaveValue(9);
     expect(screen.getByLabelText('Alto')).toHaveValue(9);
+    expect(screen.queryByRole('button', { name: /Usar un bloque de oficina/ })).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('Nombre de la nueva sala'), 'Office');
     await userEvent.click(screen.getByRole('button', { name: 'Colocar nueva sala' }));
     act(() => bridge.emit('layoutplace', { tx: 63, ty: 45, valid: true }));
     await waitFor(() => expect(spaces.createSpace).toHaveBeenCalledWith(expect.objectContaining({ x: 63, y: 45, w: 9, h: 9 })));
@@ -117,7 +117,7 @@ describe('SpaceEditorSection (#74, PR4)', () => {
 
     act(() => bridge.emit('layoutplace', { tx: 5, ty: 6, valid: true }));
 
-    await waitFor(() => expect(spaces.updateSpace).toHaveBeenCalledWith('id-sala', { x: 5, y: 6 }));
+    await waitFor(() => expect(spaces.updateSpace).toHaveBeenCalledWith('id-sala', { x: 5, y: 6, w: 5, h: 5 }));
   });
 
   it('eliminar llama a deleteSpace con el id seleccionado', async () => {
@@ -141,14 +141,14 @@ describe('SpaceEditorSection (#74, PR4)', () => {
 
     await userEvent.type(screen.getByLabelText(/Nombre de la nueva sala/), 'Sala chica');
     await userEvent.clear(screen.getByLabelText(/^Ancho$/));
-    await userEvent.type(screen.getByLabelText(/^Ancho$/), '4');
+    await userEvent.type(screen.getByLabelText(/^Ancho$/), '7');
     await userEvent.clear(screen.getByLabelText(/^Alto$/));
-    await userEvent.type(screen.getByLabelText(/^Alto$/), '3');
+    await userEvent.type(screen.getByLabelText(/^Alto$/), '6');
     await userEvent.click(screen.getByRole('button', { name: /Colocar nueva sala/ }));
     act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
 
     await waitFor(() =>
-      expect(spaces.createSpace).toHaveBeenCalledWith({ name: 'Sala chica', x: 1, y: 2, w: 4, h: 3, capacity: null }),
+      expect(spaces.createSpace).toHaveBeenCalledWith({ name: 'Sala chica', x: 1, y: 2, w: 7, h: 6, capacity: null }),
     );
   });
 
@@ -161,15 +161,15 @@ describe('SpaceEditorSection (#74, PR4)', () => {
 
     await userEvent.type(screen.getByLabelText(/Nombre de la nueva sala/), 'Sala chica');
     await userEvent.clear(screen.getByLabelText(/^Ancho$/));
-    await userEvent.type(screen.getByLabelText(/^Ancho$/), '4');
+    await userEvent.type(screen.getByLabelText(/^Ancho$/), '7');
     await userEvent.clear(screen.getByLabelText(/^Alto$/));
-    await userEvent.type(screen.getByLabelText(/^Alto$/), '3');
+    await userEvent.type(screen.getByLabelText(/^Alto$/), '6');
     await userEvent.type(screen.getByLabelText(/Aforo/), '6');
     await userEvent.click(screen.getByRole('button', { name: /Colocar nueva sala/ }));
     act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
 
     await waitFor(() =>
-      expect(spaces.createSpace).toHaveBeenCalledWith({ name: 'Sala chica', x: 1, y: 2, w: 4, h: 3, capacity: 6 }),
+      expect(spaces.createSpace).toHaveBeenCalledWith({ name: 'Sala chica', x: 1, y: 2, w: 7, h: 6, capacity: 6 }),
     );
   });
 
@@ -181,8 +181,35 @@ describe('SpaceEditorSection (#74, PR4)', () => {
     expect(screen.getByRole('button', { name: /Colocar nueva sala/ })).toBeDisabled();
 
     await userEvent.type(screen.getByLabelText(/Nombre de la nueva sala/), 'Sala chica');
+    expect(screen.getByRole('button', { name: /Colocar nueva sala/ })).toBeEnabled();
 
+    await userEvent.clear(screen.getByLabelText(/^Ancho$/));
     expect(screen.getByRole('button', { name: /Colocar nueva sala/ })).toBeDisabled();
+  });
+
+  it('refuses a side under 6 tiles and accepts exactly 6 (#184)', async () => {
+    renderSection();
+    await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
+    await screen.findByText('Sala grande');
+    await userEvent.type(screen.getByLabelText(/Nombre de la nueva sala/), 'Sala chica');
+    const place = screen.getByRole('button', { name: /Colocar nueva sala/ });
+
+    expect(screen.getByLabelText(/^Ancho$/)).toHaveAttribute('min', '6');
+    expect(screen.getByLabelText(/^Alto$/)).toHaveAttribute('min', '6');
+
+    await userEvent.clear(screen.getByLabelText(/^Ancho$/));
+    await userEvent.type(screen.getByLabelText(/^Ancho$/), '5');
+    expect(place).toBeDisabled();
+
+    await userEvent.clear(screen.getByLabelText(/^Ancho$/));
+    await userEvent.type(screen.getByLabelText(/^Ancho$/), '6');
+    await userEvent.clear(screen.getByLabelText(/^Alto$/));
+    await userEvent.type(screen.getByLabelText(/^Alto$/), '5');
+    expect(place).toBeDisabled();
+
+    await userEvent.clear(screen.getByLabelText(/^Alto$/));
+    await userEvent.type(screen.getByLabelText(/^Alto$/), '6');
+    expect(place).toBeEnabled();
   });
 
   it('un space-name-taken se muestra visible y no borra en silencio el formulario pendiente', async () => {
@@ -196,9 +223,9 @@ describe('SpaceEditorSection (#74, PR4)', () => {
 
     await userEvent.type(screen.getByLabelText(/Nombre de la nueva sala/), 'Sala grande');
     await userEvent.clear(screen.getByLabelText(/^Ancho$/));
-    await userEvent.type(screen.getByLabelText(/^Ancho$/), '4');
+    await userEvent.type(screen.getByLabelText(/^Ancho$/), '7');
     await userEvent.clear(screen.getByLabelText(/^Alto$/));
-    await userEvent.type(screen.getByLabelText(/^Alto$/), '3');
+    await userEvent.type(screen.getByLabelText(/^Alto$/), '6');
     await userEvent.click(screen.getByRole('button', { name: /Colocar nueva sala/ }));
     act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
 
@@ -217,9 +244,9 @@ describe('SpaceEditorSection (#74, PR4)', () => {
 
     await userEvent.type(screen.getByLabelText(/Nombre de la nueva sala/), 'Sala chica');
     await userEvent.clear(screen.getByLabelText(/^Ancho$/));
-    await userEvent.type(screen.getByLabelText(/^Ancho$/), '4');
+    await userEvent.type(screen.getByLabelText(/^Ancho$/), '7');
     await userEvent.clear(screen.getByLabelText(/^Alto$/));
-    await userEvent.type(screen.getByLabelText(/^Alto$/), '3');
+    await userEvent.type(screen.getByLabelText(/^Alto$/), '6');
     await userEvent.click(screen.getByRole('button', { name: /Colocar nueva sala/ }));
     act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
 
@@ -290,13 +317,15 @@ describe('SpaceEditorSection: a room only asks for its area, the floor is the te
     expect(screen.queryByLabelText('Color')).not.toBeInTheDocument();
 
     await userEvent.type(screen.getByLabelText(/Nombre de la nueva sala/), 'Sala chica');
-    await userEvent.type(screen.getByLabelText(/^Ancho$/), '4');
-    await userEvent.type(screen.getByLabelText(/^Alto$/), '3');
+    await userEvent.clear(screen.getByLabelText(/^Ancho$/));
+    await userEvent.type(screen.getByLabelText(/^Ancho$/), '7');
+    await userEvent.clear(screen.getByLabelText(/^Alto$/));
+    await userEvent.type(screen.getByLabelText(/^Alto$/), '6');
     await userEvent.click(screen.getByRole('button', { name: /Colocar nueva sala/ }));
     act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
 
     await waitFor(() =>
-      expect(spaces.createSpace).toHaveBeenCalledWith({ name: 'Sala chica', x: 1, y: 2, w: 4, h: 3, capacity: null }),
+      expect(spaces.createSpace).toHaveBeenCalledWith({ name: 'Sala chica', x: 1, y: 2, w: 7, h: 6, capacity: null }),
     );
   });
 });

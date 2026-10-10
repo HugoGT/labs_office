@@ -224,7 +224,7 @@ describe('pgSpaces: createSpace', () => {
     const pool = fakePool(() => Object.assign(new Error('connection terminated'), { code: '08006' }));
 
     await expect(
-      createPgSpaces(pool).createSpace({ name: 'X', x: 0, y: 0, w: 1, h: 1, capacity: null }),
+      createPgSpaces(pool).createSpace({ name: 'X', x: 0, y: 0, w: 6, h: 6, capacity: null }),
     ).rejects.toThrow('connection terminated');
   });
 
@@ -236,8 +236,8 @@ describe('pgSpaces: createSpace', () => {
         name: 'Cafeteria',
         x: 0,
         y: 0,
-        w: 1,
-        h: 1,
+        w: 6,
+        h: 6,
         capacity: null,
       }),
     ).rejects.toThrow(SpaceNameTakenError);
@@ -250,7 +250,7 @@ describe('pgSpaces: createSpace', () => {
     const pool = fakePool(() => uniqueViolation('spaces_slug_unique'));
 
     await expect(
-      createPgSpaces(pool).createSpace({ name: 'Sala-A', x: 0, y: 0, w: 1, h: 1, capacity: null }),
+      createPgSpaces(pool).createSpace({ name: 'Sala-A', x: 0, y: 0, w: 6, h: 6, capacity: null }),
     ).rejects.toThrow(SpaceNameTakenError);
   });
 
@@ -262,7 +262,7 @@ describe('pgSpaces: createSpace', () => {
     const pool = fakePool(() => uniqueViolation('spaces_name_unique'));
 
     const thrown = await createPgSpaces(pool)
-      .createSpace({ name: 'Cafeteria', x: 0, y: 0, w: 1, h: 1, capacity: null })
+      .createSpace({ name: 'Cafeteria', x: 0, y: 0, w: 6, h: 6, capacity: null })
       .catch((error: unknown) => error);
 
     expect(thrown).toBeInstanceOf(SpaceNameTakenError);
@@ -278,7 +278,7 @@ describe('pgSpaces: createSpace', () => {
     );
 
     await expect(
-      createPgSpaces(pool).createSpace({ name: 'X', x: 0, y: 0, w: 1, h: 1, capacity: null }),
+      createPgSpaces(pool).createSpace({ name: 'X', x: 0, y: 0, w: 6, h: 6, capacity: null }),
     ).rejects.toThrow('violates foreign key constraint');
   });
 });
@@ -326,7 +326,7 @@ describe('pgSpaces: updateSpace', () => {
     const pool = fakePool(() => exclusionViolation());
 
     await expect(
-      createPgSpaces(pool).updateSpace(SPACE_ROW.id, { x: 0, y: 0, w: 5, h: 5 }),
+      createPgSpaces(pool).updateSpace(SPACE_ROW.id, { x: 0, y: 0, w: 6, h: 6 }),
     ).rejects.toThrow(SpaceOverlapError);
   });
 
@@ -574,8 +574,8 @@ describe('pgSpaces: floor (art migration, step 3)', () => {
         name: 'Sala',
         x: 0,
         y: 0,
-        w: 4,
-        h: 4,
+        w: 6,
+        h: 6,
         capacity: null,
         floor: { materialId: 'floor-plain', color: 'gris' },
       }),

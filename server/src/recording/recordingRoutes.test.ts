@@ -100,7 +100,7 @@ let egress: FakeEgress;
 let spaceId: string;
 let deps: RecordingDeps;
 
-// Space in tiles (10,10)-(13,13) -> pixels (320,320)-(416,416).
+// Space in tiles (10,10)-(16,16) -> pixels (320,320)-(512,512).
 const INSIDE = [330, 330] as const;
 const OUTSIDE = [0, 0] as const;
 
@@ -112,7 +112,7 @@ beforeEach(async () => {
   egress = fakeEgress();
   finished = createFinishedRecordingStore();
   storage = fakeStorage();
-  const created = await spaces.createSpace({ name: 'Sala', x: 10, y: 10, w: 3, h: 3, capacity: null });
+  const created = await spaces.createSpace({ name: 'Sala', x: 10, y: 10, w: 6, h: 6, capacity: null });
   spaceId = created.id;
   deps = {
     sessions,
@@ -572,7 +572,7 @@ describe('handleRecordingUrl (#58)', () => {
     spaces.listSpaces = async () => { await gate; return list(); };
     const stopping = handleStopRecording({ sessionId: 'ses-ana', spaceId }, deps);
     await vi.waitFor(() => expect(recordings.list()).toEqual([]));
-    await spaces.updateSpace(spaceId, { x: 20, y: 10, w: 3, h: 3 });
+    await spaces.updateSpace(spaceId, { x: 20, y: 10, w: 6, h: 6 });
     release();
     const result = await stopping;
     expect(finished.get(result.body.recordingId as string)!.participants).not.toContain('ses-fuera');
@@ -580,7 +580,7 @@ describe('handleRecordingUrl (#58)', () => {
 
   it('tracks moved geometry immediately and never grants visitors from its old footprint', async () => {
     await handleStartRecording({ sessionId: 'ses-ana', spaceId }, deps);
-    await spaces.updateSpace(spaceId, { x: 20, y: 10, w: 3, h: 3 });
+    await spaces.updateSpace(spaceId, { x: 20, y: 10, w: 6, h: 6 });
     sessions.add('old-footprint', 'uid-outside');
     sessions.moveTo('old-footprint', ...INSIDE);
     sessions.moveTo('old-footprint', ...OUTSIDE);

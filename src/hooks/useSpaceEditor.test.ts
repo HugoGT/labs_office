@@ -119,7 +119,7 @@ describe('useSpaceEditor (#74, PR4)', () => {
     );
   });
 
-  it('mover: un layoutplace valido llama a updateSpace con el id seleccionado', async () => {
+  it('mover: un layoutplace valido manda el rectangulo entero, con el tamano de la sala', async () => {
     const spaces = fakeSpaces();
     const { bridge, refreshDesks, refreshSpaces, result } = setup(spaces);
     act(() => result.current.enter());
@@ -129,7 +129,7 @@ describe('useSpaceEditor (#74, PR4)', () => {
 
     act(() => bridge.emit('layoutplace', { tx: 3, ty: 4, valid: true }));
 
-    await waitFor(() => expect(spaces.updateSpace).toHaveBeenCalledWith('id-sala', { x: 3, y: 4 }));
+    await waitFor(() => expect(spaces.updateSpace).toHaveBeenCalledWith('id-sala', { x: 3, y: 4, w: 5, h: 5 }));
     await waitFor(() => expect(refreshSpaces).toHaveBeenCalledTimes(1));
     expect(refreshDesks).toHaveBeenCalledTimes(1);
   });
