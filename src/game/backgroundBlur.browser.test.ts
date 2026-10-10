@@ -20,7 +20,7 @@ describe('loadBackgroundBlur', () => {
     if (!blur.supported()) return;
 
     const first = blur.createProcessor(12);
-    const second = blur.createProcessor(128);
+    const second = blur.createProcessor(40);
 
     expect(first).not.toBe(second);
     expect(first.name).toBe('background-processor');
@@ -37,9 +37,9 @@ describe('loadBackgroundBlur', () => {
 
     // Not started: only the options change, which is all `switchTo` does to a
     // running pipeline as well (`BackgroundTransformer.update`).
-    await processor.switchTo({ mode: 'background-blur', blurRadius: 128 });
+    await processor.switchTo({ mode: 'background-blur', blurRadius: 40 });
 
     expect(processor.mode).toBe('background-blur');
-    expect(processor.transformer.options.blurRadius).toBe(128);
+    expect(processor.transformer.options.blurRadius).toBe(40);
   });
 });

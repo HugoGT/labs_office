@@ -1120,8 +1120,8 @@ describe('camera filter degrades to no filter, never to no camera', () => {
 });
 
 describe('camera filter: two blur strengths switch on the running processor', () => {
-  it('a fresh camera starts at the strength picked: 12 for light, 128 for full', async () => {
-    for (const [filter, radius] of [['blur-light', 12], ['blur-strong', 128]] as const) {
+  it('a fresh camera starts at the strength picked: 12 for light, 40 for full', async () => {
+    for (const [filter, radius] of [['blur-light', 12], ['blur-strong', 40]] as const) {
       const { room } = fakeCameraRoom();
       const { load, blur } = fakeBlur();
       const connection = await connectCamera(room, load).connected;
@@ -1142,7 +1142,7 @@ describe('camera filter: two blur strengths switch on the running processor', ()
 
     expect(await connection.setCameraFilter('blur-strong')).toBe('blur-strong');
 
-    expect(processors[0].switchTo).toHaveBeenCalledExactlyOnceWith({ mode: 'background-blur', blurRadius: 128 });
+    expect(processors[0].switchTo).toHaveBeenCalledExactlyOnceWith({ mode: 'background-blur', blurRadius: 40 });
     expect(blur.createProcessor).toHaveBeenCalledOnce();
     expect(cameraTrack()!.setProcessor).toHaveBeenCalledOnce();
     expect(cameraTrack()!.stopProcessor).not.toHaveBeenCalled();

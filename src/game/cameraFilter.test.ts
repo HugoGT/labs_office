@@ -53,17 +53,15 @@ describe('blurRadiusOf: two strengths the library can actually tell apart', () =
     expect(blurRadiusOf('blur-light')).toBe(12);
   });
 
-  it('gives the full blur every tap the shader has, so nothing of the background survives', () => {
-    expect(taps(blurRadiusOf('blur-strong'))).toBe(MAX_TAPS);
+  it('puts the full blur at 40: several times the light one, short of the 16-tap cap', () => {
+    expect(blurRadiusOf('blur-strong')).toBe(40);
+    expect(taps(blurRadiusOf('blur-strong'))).toBeGreaterThanOrEqual(3 * taps(blurRadiusOf('blur-light')));
+    expect(taps(blurRadiusOf('blur-strong'))).toBeLessThan(MAX_TAPS);
   });
 
-  it('goes past the tap cap only to flatten the kernel toward a box, never wastefully far', () => {
-    expect(blurRadiusOf('blur-strong')).toBeGreaterThan(MAX_TAPS * DOWNSAMPLE);
-    expect(blurRadiusOf('blur-strong')).toBeLessThanOrEqual(2 * MAX_TAPS * DOWNSAMPLE);
-  });
-
-  it('the full blur spreads several times wider than the light one', () => {
-    expect(taps(blurRadiusOf('blur-strong'))).toBeGreaterThanOrEqual(5 * taps(blurRadiusOf('blur-light')));
+  it('lands on a whole number of taps, so no radius is lost to the division by 4', () => {
+    expect(blurRadiusOf('blur-light') % DOWNSAMPLE).toBe(0);
+    expect(blurRadiusOf('blur-strong') % DOWNSAMPLE).toBe(0);
   });
 });
 
