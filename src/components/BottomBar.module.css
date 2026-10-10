@@ -157,6 +157,11 @@
 }
 
 .btn {
+  /* Icon and label centered on each other, not on a shared baseline (#176). */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   background: #1f2937;
   color: #e5e7eb;
   border: 1px solid #374151;
@@ -167,6 +172,11 @@
   padding: 6px 12px;
   font-size: 13px;
   cursor: pointer;
+}
+
+/* The em square of the emoji, the same box whatever font draws it. */
+.icon {
+  line-height: 1;
 }
 
 .btn:disabled {

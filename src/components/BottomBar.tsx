@@ -81,6 +81,22 @@ const PRESENCE_TITLE = {
 } as const;
 
 /**
+ * Icon and label of a call button as two boxes centered on each other, never
+ * one text line on a shared baseline: each emoji font places its glyphs
+ * differently on the baseline (Segoe UI Emoji drew the camera below
+ * "Cámara" once it was on, #176), while the box of a `line-height: 1` icon is
+ * the same em square everywhere. The space keeps the accessible name as it
+ * was ("🖥️ Compartir"); the flex `gap` is what spaces them visually.
+ */
+function CallButtonContent({ icon, label }: { icon: string; label: string }) {
+  return (
+    <>
+      <span className={styles.icon}>{icon}</span> <span>{label}</span>
+    </>
+  );
+}
+
+/**
  * Barra inferior: mic/camara/grabar + estado de audio, portada de `#bar`
  * (`index.html`, `app.js:516-571`). Puramente presentacional (D3): no recibe
  * el bridge, solo props y callbacks. Los chips de cercania se retiraron
@@ -163,7 +179,7 @@ export function BottomBar({
           title={audioTitle}
           onClick={onToggleMic}
         >
-          {micOn ? '🎙️ Mic' : '🔇 Mic'}
+          <CallButtonContent icon={micOn ? '🎙️' : '🔇'} label="Mic" />
         </button>
         {/* Split button: the caret's filter menu belongs to the camera. */}
         <span className={styles.split}>
@@ -175,7 +191,7 @@ export function BottomBar({
             title={audioTitle}
             onClick={onToggleCam}
           >
-            {camOn ? '📷 Cámara' : '🚫 Cámara'}
+            <CallButtonContent icon={camOn ? '📷' : '🚫'} label="Cámara" />
           </button>
           <CameraFilterMenu
             filter={cameraFilter}
@@ -193,7 +209,7 @@ export function BottomBar({
           title={screenShareTitle}
           onClick={onToggleScreenShare}
         >
-          {screenShareOn ? '🖥️ Dejar de compartir' : '🖥️ Compartir'}
+          <CallButtonContent icon="🖥️" label={screenShareOn ? 'Dejar de compartir' : 'Compartir'} />
         </button>
         <button
           type="button"
@@ -202,7 +218,11 @@ export function BottomBar({
           title={recordTitle}
           onClick={onToggleRecord}
         >
-          {recording ? '⏹ Detener' : '⏺ Grabar'}
+          {recording ? (
+            <CallButtonContent icon="⏹" label="Detener" />
+          ) : (
+            <CallButtonContent icon="⏺" label="Grabar" />
+          )}
         </button>
       </div>
       <div className={styles.info} role="group" aria-label="Estado">
