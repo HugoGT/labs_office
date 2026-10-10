@@ -25,7 +25,9 @@
     'controls controls';
   justify-content: center;
   align-items: center;
-  column-gap: 10px;
+  /* Space on each side of every separator in the bar (#186). */
+  --bar-sep: 10px;
+  column-gap: var(--bar-sep);
   row-gap: 8px;
   background: #111827f2;
   border: 1px solid #2b3444;
@@ -43,7 +45,7 @@
   font-weight: 600;
   font-size: 14px;
   white-space: nowrap;
-  padding-right: 10px;
+  padding-right: var(--bar-sep);
   border-right: 1px solid #2b3444;
 }
 
@@ -63,7 +65,7 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--bar-sep);
   white-space: nowrap;
 }
 
@@ -76,7 +78,7 @@
   .bar {
     grid-template-columns: auto auto auto;
     grid-template-areas: 'me controls info';
-    column-gap: 16px;
+    --bar-sep: 16px;
   }
 
   .me {
@@ -86,7 +88,7 @@
 
   .controls {
     flex-wrap: nowrap;
-    padding: 0 16px;
+    padding: 0 var(--bar-sep);
     border-top: none;
     border-left: 1px solid #2b3444;
     border-right: 1px solid #2b3444;
@@ -224,6 +226,6 @@
 .status + .rec,
 .status + .presence,
 .rec + .presence {
-  padding-left: 10px;
+  padding-left: var(--bar-sep);
   border-left: 1px solid #2b3444;
 }
