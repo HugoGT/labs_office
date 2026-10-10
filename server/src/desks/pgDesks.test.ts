@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest';
 import { DeskOverlapError, DeskSpaceOverlapError, DeskTakenError, InvalidDeskError } from './deskRules.ts';
 import { createPgDesks } from './pgDesks.ts';
+import { readSchemaSql } from '../directory/migrate.ts';
 import { ART_PACK_DEFAULTS, InvalidArtChoiceError } from '../decor/artCatalogRules.ts';
 import type { DirectoryPool, DirectoryQueryResult } from '../directory/pgDirectory.ts';
 
@@ -84,6 +85,21 @@ const DESK_ROW = {
 };
 
 const ANA = '22222222-2222-4222-8222-222222222222';
+
+describe('desks exclusion schema (#180)', () => {
+  it('uses half-open 3x3 tile ranges before the desk cubicle backfill', () => {
+    const sql = squash(readSchemaSql());
+    expect(sql).toContain("exclude using gist (int4range(x, x + 3, '[)') with &&, int4range(y, y + 3, '[)') with &&)");
+    expect(sql.indexOf('add constraint desks_no_overlap')).toBeLessThan(sql.indexOf('insert into spaces (desk_id'));
+  });
+
+  it('only replaces the legacy box constraint, scoped to desks, and adds a missing constraint', () => {
+    const sql = squash(readSchemaSql());
+    expect(sql).toMatch(/if exists \(select 1 from pg_constraint where conrelid = 'desks'::regclass and conname = 'desks_no_overlap' and pg_get_constraintdef\(oid\) like '%box\(%'\) then alter table desks drop constraint desks_no_overlap; end if;/);
+    expect(sql).toMatch(/if not exists \(select 1 from pg_constraint where conrelid = 'desks'::regclass and conname = 'desks_no_overlap'\) then alter table desks add constraint desks_no_overlap/);
+    expect(sql).not.toContain('alter table desks drop constraint if exists desks_no_overlap');
+  });
+});
 
 function sqls(pool: FakePool): string[] {
   return pool.queries.map((query) => squash(query.text));

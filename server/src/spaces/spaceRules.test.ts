@@ -81,15 +81,11 @@ describe('boundsOverlap', () => {
     expect(boundsOverlap(a, b)).toBe(false);
   });
 
-  it('trata el contacto exacto de borde como solape (verificado contra Postgres real en el spike de #7)', () => {
-    // `box && box` de Postgres rechazo un rectangulo que solo tocaba el borde
-    // (x=10 contra un rectangulo que termina en x=10) en el spike de la tarea
-    // 2.1. El pre-chequeo debe coincidir con eso: si no coincidiera, esta
-    // regla dejaria pasar algo que la base de datos rechazaria de todas
-    // formas con un 500 en vez de un 400.
+  it.each([{ x: 10, y: 0 }, { x: 0, y: 10 }, { x: 10, y: 10 }])('allows edge and corner adjacency through the shared re-export: %j', (position) => {
     const a = { x: 0, y: 0, w: 10, h: 10 };
-    const b = { x: 10, y: 0, w: 10, h: 10 };
-    expect(boundsOverlap(a, b)).toBe(true);
+    const b = { ...position, w: 10, h: 10 };
+    expect(boundsOverlap(a, b)).toBe(false);
+    expect(boundsOverlap(b, a)).toBe(false);
   });
 
   it('es simetrico: da el mismo resultado en cualquier orden de los argumentos', () => {

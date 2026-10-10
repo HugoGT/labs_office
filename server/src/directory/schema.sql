@@ -90,13 +90,8 @@ ALTER TABLE audit_log ADD CONSTRAINT audit_log_action_check CHECK (action IN ('i
 -- recorriendo la tabla entera.
 CREATE INDEX IF NOT EXISTS audit_log_subject ON audit_log (subject_id);
 
--- Cuatro tablas nuevas para PRD-7 (#7): Space, Asset, SpaceLayout,
--- UserDeskConfig. Mismo patron que arriba: `IF NOT EXISTS` en tablas e
--- indices, sin extensiones. `box`/GiST (box_ops) es de nucleo desde siempre
--- en Postgres; `EXCLUDE USING gist` de abajo no necesita `postgis` ni ninguna
--- `CREATE EXTENSION` -- verificado empiricamente en la fase de apply de este
--- cambio contra Postgres real (WASM, sin extensiones instaladas antes ni
--- despues de crear la restriccion).
+-- Space, Asset, SpaceLayout and UserDeskConfig (PRD-7). The int4range GiST
+-- exclusions below use built-in range_ops, without extensions.
 
 -- New offices start without rooms. Existing placement rows are never reset.
 CREATE TABLE IF NOT EXISTS spaces (
@@ -116,15 +111,22 @@ CREATE TABLE IF NOT EXISTS spaces (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS spaces_slug_unique ON spaces (lower(slug));
 
--- Dos espacios solapados harian que `detectSpace` dependiese del orden de
--- comparacion en el cliente, y ese orden puede diferir entre clientes:
--- asimetria de audibilidad. Un UPDATE escrito a mano contra la base tampoco
--- puede crear el solape -- misma razon que `users_single_superadmin` mas
--- arriba. No existe forma `IF NOT EXISTS` para una restriccion de exclusion,
--- de ahi el DROP/ADD -- mismo precedente que `audit_log_action_check`.
-ALTER TABLE spaces DROP CONSTRAINT IF EXISTS spaces_no_overlap;
-ALTER TABLE spaces ADD CONSTRAINT spaces_no_overlap
-  EXCLUDE USING gist (box(point(x, y), point(x + w, y + h)) WITH &&);
+-- #180: rooms and desk cubicles may share an edge or corner, never area.
+-- Replace only the legacy inclusive box exclusion; leave an upgraded index
+-- intact on subsequent starts. Both steps are transactional with this script,
+-- and run before the cubicle backfill, without changing any placement rows.
+DO $spaces_overlap$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'spaces'::regclass
+    AND conname = 'spaces_no_overlap' AND pg_get_constraintdef(oid) LIKE '%box(%') THEN
+    ALTER TABLE spaces DROP CONSTRAINT spaces_no_overlap;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'spaces'::regclass
+    AND conname = 'spaces_no_overlap') THEN
+    ALTER TABLE spaces ADD CONSTRAINT spaces_no_overlap
+      EXCLUDE USING gist (int4range(x, x + w, '[)') WITH &&, int4range(y, y + h, '[)') WITH &&);
+  END IF;
+END $spaces_overlap$;
 
 CREATE TABLE IF NOT EXISTS assets (          -- antes que space_layouts: orden de FK
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -217,13 +219,19 @@ CREATE TABLE IF NOT EXISTS desks (
 CREATE UNIQUE INDEX IF NOT EXISTS desks_single_occupant ON desks (occupant_id)
   WHERE occupant_id IS NOT NULL;
 
--- Dos escritorios solapados serian dos sitios que se pintan encima y una
--- persona sentada en los dos a la vez para quien mire el mapa. Mismo mecanismo
--- y mismo par DROP/ADD que `spaces_no_overlap`: no existe forma
--- `IF NOT EXISTS` para una restriccion de exclusion.
-ALTER TABLE desks DROP CONSTRAINT IF EXISTS desks_no_overlap;
-ALTER TABLE desks ADD CONSTRAINT desks_no_overlap
-  EXCLUDE USING gist (box(point(x, y), point(x + 3, y + 3)) WITH &&);
+-- Same half-open migration as spaces: desk footprints are always 3x3.
+DO $desks_overlap$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'desks'::regclass
+    AND conname = 'desks_no_overlap' AND pg_get_constraintdef(oid) LIKE '%box(%') THEN
+    ALTER TABLE desks DROP CONSTRAINT desks_no_overlap;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'desks'::regclass
+    AND conname = 'desks_no_overlap') THEN
+    ALTER TABLE desks ADD CONSTRAINT desks_no_overlap
+      EXCLUDE USING gist (int4range(x, x + 3, '[)') WITH &&, int4range(y, y + 3, '[)') WITH &&);
+  END IF;
+END $desks_overlap$;
 
 -- Cada escritorio es tambien un espacio (#10 + #12): su cubiculo propio, con
 -- el mismo mecanismo generico de pertenencia (`detectSpace`, `audiblePeers`,
