@@ -29,6 +29,7 @@ import {
   pickInstance,
   pieceIdOfTextureKey,
   pieceRectsOf,
+  placedChairInstances,
   rotateRect,
   rotationForFacing,
   seatInstances,
@@ -167,6 +168,16 @@ describe('pieceCollisions: instances', () => {
     expect(seat).toMatchObject({ piece: 'chair-wood', pivot: { x: 3 * 32 + 16, y: 5 * 32 + 16 }, rotation: 90 });
     expect(worldRectsOf(seat!, NO_EDITS)).toEqual([]);
     expect(worldRectsOf(seat!, new Map([['chair-wood', [{ x: -4, y: -6, w: 8, h: 4 }]]]))).toEqual([{ x: 114, y: 172, w: 4, h: 8 }]);
+  });
+
+  it('puts each placed chair on the middle of its tile, as its own piece, turned by its facing', () => {
+    const instances = placedChairInstances([{ index: 2 * 10 + 3, piece: 'chair-gamer', facing: 'left' }, { index: 0, piece: 'chair-metal', facing: 'down' }], 10);
+
+    expect(instances.map((instance) => instance.piece)).toEqual(['chair-gamer', 'chair-metal']);
+    expect(instances[0]).toMatchObject({ pivot: { x: 3 * 32 + 16, y: 2 * 32 + 16 }, rotation: 270, pickBox: { x: 96, y: 64, w: 32, h: 32 } });
+    expect(instances.every((instance) => worldRectsOf(instance, NO_EDITS).length === 0)).toBe(true);
+    // An edit of the piece reaches every chair of it, placed or base.
+    expect(worldRectsOf(instances[1]!, new Map([['chair-metal', [{ x: -4, y: -4, w: 8, h: 8 }]]]))).toEqual([{ x: 12, y: 12, w: 8, h: 8 }]);
   });
 
   it('puts a served desk in the middle of its area and its decor plants in their slot boxes', () => {

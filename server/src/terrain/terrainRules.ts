@@ -18,9 +18,10 @@ import {
   wallPostTiles,
   type LayoutMaterial,
   type OfficeLayout,
+  type TerrainSnapshot,
   type WallEdit,
 } from '../../../src/game/officeLayout.ts';
-import type { MapSeat } from '../../../src/game/seating.ts';
+import { MAX_CHAIR_EDITS, isChairPieceId, isSeatFacing, type ChairEdit, type MapSeat } from '../../../src/game/seating.ts';
 
 /** The edit was malformed: an index off the map or an unknown material (400). */
 export class InvalidTerrainEditError extends Error {
@@ -212,4 +213,52 @@ export function findWallConflict(
     return (protections.desks ?? []).some((desk) => tx >= desk.x && tx < desk.x + desk.w && ty >= desk.y && ty < desk.y + desk.h);
   };
   return touched.some(onDesk) ? 'placement' : null;
+}
+
+/**
+ * The body of `POST /admin/terrain/chairs`: `{ edits: [{ index, chair }] }`,
+ * one tile each, a chair (`{ piece, facing }`) or `null` to remove the one
+ * there. At most `MAX_CHAIR_EDITS` tiles, each once.
+ */
+export function parseChairBatch(body: unknown, tileCount: number): ChairEdit[] {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new InvalidTerrainEditError('invalid chair batch');
+  const { edits } = body as Record<string, unknown>;
+  if (!Array.isArray(edits) || edits.length < 1 || edits.length > MAX_CHAIR_EDITS) throw new InvalidTerrainEditError('invalid chair batch');
+  const seen = new Set<number>();
+  return edits.map((edit: unknown) => {
+    if (typeof edit !== 'object' || edit === null || Array.isArray(edit)) throw new InvalidTerrainEditError('invalid chair edit');
+    const { index, chair } = edit as Record<string, unknown>;
+    if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= tileCount) throw new InvalidTerrainEditError('invalid tile');
+    if (seen.has(index)) throw new InvalidTerrainEditError('duplicate tile');
+    seen.add(index);
+    if (chair === null) return { index, chair: null };
+    if (typeof chair !== 'object' || chair === undefined || Array.isArray(chair)) throw new InvalidTerrainEditError('invalid chair');
+    const { piece, facing } = chair as Record<string, unknown>;
+    if (!isChairPieceId(piece)) throw new InvalidTerrainEditError('unknown chair piece');
+    if (!isSeatFacing(facing)) throw new InvalidTerrainEditError('unknown facing');
+    return { index, chair: { piece, facing } };
+  });
+}
+
+/**
+ * Why a chair may not stand on one of the `placed` tiles, or `null` if it
+ * may: a chair needs walkable ground nobody else claims. It is refused on
+ * water or void, on a tile a wall rectangle touches (`wallTiles`, the same
+ * ground `findWallConflict` keeps walls off chairs by), on a static tile
+ * (base seats, furniture, the spawn area) or on a desk. Rooms and players
+ * never veto it: a chair is walk-through unless its piece has rectangles.
+ */
+export function findChairConflict(
+  placed: readonly number[],
+  snapshot: Pick<TerrainSnapshot, 'width' | 'walkable' | 'wallTiles'>,
+  staticTiles: ReadonlySet<number>,
+  protections: TerrainProtections,
+): UnwalkableConflict | null {
+  const onDesk = (tile: number): boolean => {
+    const tx = tile % snapshot.width;
+    const ty = Math.floor(tile / snapshot.width);
+    return (protections.desks ?? []).some((desk) => tx >= desk.x && tx < desk.x + desk.w && ty >= desk.y && ty < desk.y + desk.h);
+  };
+  const blocked = (tile: number): boolean => !snapshot.walkable[tile] || snapshot.wallTiles[tile] === true || staticTiles.has(tile) || onDesk(tile);
+  return placed.some(blocked) ? 'placement' : null;
 }

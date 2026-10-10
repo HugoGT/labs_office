@@ -36,7 +36,7 @@ import {
 import { onPageHide } from './pageLifecycle';
 import { decideReconnect } from './reconnectPolicy';
 import type { RemotePlayerSnapshot } from './remoteAvatars';
-import { seatIdOf } from './seating';
+import { decodeTerrainChairs, seatIdOf, type PlacedChair } from './seating';
 
 /**
  * Forma del jugador tal y como llega por el cable. El cliente no declara el
@@ -71,6 +71,7 @@ interface OfficeRoomState {
   recordings: unknown;
   terrainBlocks: string;
   terrainWalls: string;
+  terrainChairs: string;
   pieceCollisions: string;
 }
 
@@ -209,6 +210,8 @@ export interface OfficeRoomHandlers {
   onTerrain?(blocks: readonly LayoutMaterial[]): void;
   /** The live wall of every tile, row major: on the first sync and after every accepted wall edit. */
   onWalls?(walls: readonly (string | null)[]): void;
+  /** The placed chairs, sorted by tile: on the first sync and after every accepted chair edit. */
+  onChairs?(chairs: readonly PlacedChair[]): void;
   /** The saved collision table, replicated whole like the terrain: on the first sync and after every accepted edit. */
   onCollisions?(table: CollisionTable): void;
 }
@@ -364,7 +367,7 @@ export async function connectOfficeRoom({
       (state: OfficeRoomState): {
         players: PlayersCallbacks;
         recordings: RecordingsCallbacks;
-        listen(property: 'terrainBlocks' | 'terrainWalls' | 'pieceCollisions', handler: (value: string) => void): () => void;
+        listen(property: 'terrainBlocks' | 'terrainWalls' | 'terrainChairs' | 'pieceCollisions', handler: (value: string) => void): () => void;
       };
       (player: RemotePlayer): PlayerCallbacks;
     };
@@ -447,6 +450,11 @@ export async function connectOfficeRoom({
     $(target.state).listen('terrainWalls', (value) => {
       const walls = decodeTerrainWalls(value, BASE_LAYOUT.width * BASE_LAYOUT.height);
       if (walls !== null) handlers.onWalls?.(walls);
+    });
+    // Placed chairs: same rule. An older server sends none, and the scene draws none.
+    $(target.state).listen('terrainChairs', (value) => {
+      const chairs = decodeTerrainChairs(value, BASE_LAYOUT.width * BASE_LAYOUT.height);
+      if (chairs !== null) handlers.onChairs?.(chairs);
     });
     // Collision areas per piece: same rule. An older server sends none, and
     // the scene keeps every piece at its default.

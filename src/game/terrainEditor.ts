@@ -4,19 +4,23 @@
  */
 
 import type { LayoutMaterial, WallEdit, WallPieceId } from './officeLayout';
+import type { ChairEdit, ChairPieceId, SeatFacing } from './seating';
 
 /**
- * What a map click paints: a floor on a whole 9x9 block, or a wall post on
- * one grid vertex (`null`: the wall eraser).
+ * What a map click paints: a floor on a whole 9x9 block, a wall post on one
+ * grid vertex (`null`: the wall eraser), or a chair facing `facing` on one
+ * tile (`null`: the chair eraser).
  */
 export type TerrainBrush =
   | { readonly kind: 'floor'; readonly material: LayoutMaterial }
-  | { readonly kind: 'wall'; readonly piece: WallPieceId | null };
+  | { readonly kind: 'wall'; readonly piece: WallPieceId | null }
+  | { readonly kind: 'chair'; readonly piece: ChairPieceId | null; readonly facing: SeatFacing };
 
 /** Whether two brushes paint the same thing (brushes are compared by value, not identity). */
 export function sameBrush(a: TerrainBrush | null | undefined, b: TerrainBrush | null | undefined): boolean {
   if (a == null || b == null) return (a ?? null) === (b ?? null);
   if (a.kind === 'floor') return b.kind === 'floor' && a.material === b.material;
+  if (a.kind === 'chair') return b.kind === 'chair' && a.piece === b.piece && a.facing === b.facing;
   return b.kind === 'wall' && a.piece === b.piece;
 }
 
@@ -30,13 +34,17 @@ export interface TerrainEditCommand {
    * The palette entry picked, or `null`. While a floor is picked the map
    * outlines the block a click would paint and reports `terrainpick`; while
    * a wall (or the wall eraser) is picked it outlines a tile-sized box
-   * centered on the nearest grid vertex and reports `wallpick`.
+   * centered on the nearest grid vertex and reports `wallpick`; while a
+   * chair (or the chair eraser) is picked it outlines the tile under the
+   * pointer and reports `chairpick`.
    */
   brush: TerrainBrush | null;
   /** Paints on their way to the room, drawn over the live blocks. Drawing only, never walkability. */
   previewBlocks?: readonly LayoutMaterial[];
   /** Wall paints on their way to the room, applied in order over the live walls. Drawing only. */
   previewWalls?: readonly WallEdit[];
+  /** Chair paints on their way to the room, applied in order over the live chairs. Drawing only. */
+  previewChairs?: readonly ChairEdit[];
 }
 
 /** A grid of square cells over the world, row major from the top-left one. */

@@ -431,6 +431,23 @@ CREATE TABLE IF NOT EXISTS terrain_walls (
 ALTER TABLE terrain_walls DROP CONSTRAINT IF EXISTS terrain_walls_piece_id_check;
 ALTER TABLE terrain_walls ADD CONSTRAINT terrain_walls_piece_id_check CHECK (piece_id IN ('wall-brick', 'wall-stone', 'wall-plaster', 'wall-glass'));
 
+-- Placed chairs (terrain editor). One row per TILE holding a chair an admin
+-- placed: the chair piece of the art pack (`CHAIR_PIECES` in
+-- `src/game/seating.ts`, pinned by migrate.test.ts and refreshed below like
+-- the wall pieces) and the way it faces. Removing a chair deletes its row.
+-- Same row-major tile index as `terrain_walls`; the server ignores rows past
+-- its last tile. Created after the 14x10 grid was retired, so the one-time
+-- grid move below never touches it.
+CREATE TABLE IF NOT EXISTS terrain_chairs (
+  tile_index integer PRIMARY KEY CHECK (tile_index >= 0),
+  piece_id text NOT NULL CHECK (piece_id IN ('chair-wood', 'chair-metal', 'chair-leather', 'chair-gamer')),
+  facing text NOT NULL CHECK (facing IN ('up', 'down', 'left', 'right')),
+  updated_by uuid REFERENCES users(id),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE terrain_chairs DROP CONSTRAINT IF EXISTS terrain_chairs_piece_id_check;
+ALTER TABLE terrain_chairs ADD CONSTRAINT terrain_chairs_piece_id_check CHECK (piece_id IN ('chair-wood', 'chair-metal', 'chair-leather', 'chair-gamer'));
+
 -- Collision areas per art piece (collision editor). One row per piece an
 -- admin edited: a JSON list of rectangles in art pixels from the piece's
 -- anchor (`src/game/pieceCollisions.ts` validates them on every write and

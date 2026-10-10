@@ -47,6 +47,18 @@
   background: linear-gradient(to top right, transparent calc(50% - 1px), #ef4444 calc(50% - 1px), #ef4444 calc(50% + 1px), transparent calc(50% + 1px)), #111827;
 }
 
+/* A chair's two layers stacked in the middle of its thumbnail. */
+.layered {
+  position: relative;
+}
+
+.layer {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
 /* Pixel art: never smoothed. Its size is the frame's, set inline. */
 .canvas {
   display: block;

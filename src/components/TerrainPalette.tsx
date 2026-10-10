@@ -1,7 +1,8 @@
 import { terrainFloorPieceId } from '../game/artContract';
-import { previewFrame, type MaterialOption, type PreviewFrame } from '../game/artMaterials';
+import { chairPreviewFrames, previewFrame, type MaterialOption, type PreviewFrame } from '../game/artMaterials';
 import type { ArtPreviewCache } from '../game/artPreview';
 import { LAYOUT_MATERIALS, WALL_PIECES, type LayoutMaterial, type WallPieceId } from '../game/officeLayout';
+import { CHAIR_PIECES, type ChairPieceId } from '../game/seating';
 import type { TerrainBrush } from '../game/terrainEditor';
 import { TERRAIN_FLAT_COLORS } from '../game/terrainRender';
 import { ArtPreviewCanvas } from './ArtPreviewCanvas';
@@ -11,9 +12,10 @@ import styles from './TerrainPalette.module.css';
  * The palettes of the terrain editor. Floors: one entry per terrain
  * material, each with a thumbnail cut from its pack floor, then the void as
  * an eraser. Walls: one entry per wall piece, each with a thumbnail cut from
- * its pack sheet, then the wall eraser. Presentational: the editor owns which
- * entry is picked (one across both palettes) and what a click on the map does
- * with it.
+ * its pack sheet, then the wall eraser. Chairs: one entry per chair piece,
+ * its down-facing cell as the thumbnail, then the chair eraser.
+ * Presentational: the editor owns which entry is picked (one across every
+ * palette) and what a click on the map does with it.
  */
 
 /** UI names of the materials. */
@@ -137,6 +139,70 @@ export function WallPalette({ value, onPick, walls, disabled = false, preview }:
       >
         <span className={`${styles.thumbnail} ${styles.eraser}`} aria-hidden="true" />
         <span className={styles.label}>{WALL_ERASER_LABEL}</span>
+      </button>
+    </div>
+  );
+}
+
+/** UI names of the chair pieces (the manifest's names), distinct from the floor names next to them. */
+export const CHAIR_PIECE_LABELS: Readonly<Record<ChairPieceId, string>> = {
+  'chair-wood': 'Silla de madera',
+  'chair-metal': 'Silla de metal',
+  'chair-leather': 'Silla de cuero',
+  'chair-gamer': 'Silla gamer',
+};
+
+export const CHAIR_ERASER_LABEL = 'Quitar silla';
+
+/** Flat swatches while the pack catalog is unavailable: a hint of each chair, not its art. */
+const CHAIR_FLAT_COLORS: Readonly<Record<ChairPieceId, number>> = {
+  'chair-wood': 0x8b5a2b,
+  'chair-metal': 0x9ca3af,
+  'chair-leather': 0x5b3a29,
+  'chair-gamer': 0xb91c1c,
+};
+
+export interface ChairPaletteProps {
+  /** The editor's brush: an entry here is pressed only while its chair (or the eraser) is picked, whatever way it faces. */
+  value: TerrainBrush | null;
+  /** The chair piece, or `null` for the eraser. */
+  onPick: (piece: ChairPieceId | null) => void;
+  /** Chair pieces of the pack catalog, or `null` while it is unavailable: flat swatches then. */
+  chairs: readonly MaterialOption[] | null;
+  disabled?: boolean;
+  preview?: ArtPreviewCache;
+}
+
+export function ChairPalette({ value, onPick, chairs, disabled = false, preview }: ChairPaletteProps) {
+  const pressed = (piece: ChairPieceId | null): boolean => value?.kind === 'chair' && value.piece === piece;
+  return (
+    <div className={styles.palette} role="group" aria-label="Sillas">
+      {CHAIR_PIECES.map((piece) => {
+        const option = chairs?.find((candidate) => candidate.id === piece);
+        const label = CHAIR_PIECE_LABELS[piece];
+        return (
+          <button key={piece} type="button" className={styles.entry} aria-pressed={pressed(piece)} disabled={disabled} onClick={() => onPick(piece)}>
+            <span className={`${styles.thumbnail} ${styles.layered}`} aria-hidden="true" style={{ background: hexColor(CHAIR_FLAT_COLORS[piece]) }}>
+              {/* Back layer, then front layer on top: the chair as the map draws it. */}
+              {option !== undefined &&
+                chairPreviewFrames().map((frame) => (
+                  <ArtPreviewCanvas key={frame.y} option={option} color={null} frame={frame} label={label} className={`${styles.canvas} ${styles.layer}`} preview={preview} />
+                ))}
+            </span>
+            <span className={styles.label}>{label}</span>
+          </button>
+        );
+      })}
+      <button
+        type="button"
+        className={styles.entry}
+        aria-pressed={pressed(null)}
+        disabled={disabled}
+        title="Goma: quita la silla de cada casilla"
+        onClick={() => onPick(null)}
+      >
+        <span className={`${styles.thumbnail} ${styles.eraser}`} aria-hidden="true" />
+        <span className={styles.label}>{CHAIR_ERASER_LABEL}</span>
       </button>
     </div>
   );

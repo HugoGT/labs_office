@@ -23,7 +23,11 @@ export interface MapSeat {
   readonly facing: SeatFacing;
 }
 
-const SEAT_FACINGS: readonly SeatFacing[] = ['up', 'down', 'left', 'right'];
+export const SEAT_FACINGS: readonly SeatFacing[] = ['up', 'down', 'left', 'right'];
+
+export function isSeatFacing(value: unknown): value is SeatFacing {
+  return typeof value === 'string' && (SEAT_FACINGS as readonly string[]).includes(value);
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -81,7 +85,10 @@ export const BASE_MAP_SEATS: readonly MapSeat[] = parseBaseMapSeats(officeMap);
  */
 export const DESK_SEAT_FACING: SeatFacing = 'down';
 
-export type SeatRef = { readonly kind: 'map'; readonly index: number } | { readonly kind: 'desk'; readonly deskId: string };
+export type SeatRef =
+  | { readonly kind: 'map'; readonly index: number }
+  | { readonly kind: 'desk'; readonly deskId: string }
+  | { readonly kind: 'chair'; readonly index: number };
 
 export function mapSeatId(index: number): string {
   return `map-${index}`;
@@ -91,13 +98,20 @@ export function deskSeatId(deskId: string): string {
   return `desk-${deskId}`;
 }
 
+/** A chair placed from the terrain editor, named by its tile (`ty * width + tx`). */
+export function chairSeatId(index: number): string {
+  return `chair-${index}`;
+}
+
 const MAP_SEAT = /^map-(0|[1-9]\d{0,3})$/;
 const DESK_SEAT = /^desk-([A-Za-z0-9-]{1,64})$/;
+/** Six digits cover any tile of the 189x135 world and leave room for a bigger one. */
+const CHAIR_SEAT = /^chair-(0|[1-9]\d{0,5})$/;
 
 /**
  * Reads a seat reference from the wire. `null` for anything malformed or for
- * a base chair that does not exist; whether a desk exists is the server's to
- * ask its store.
+ * a base chair that does not exist; whether a desk or a placed chair exists
+ * is the server's to ask its store or its live terrain.
  */
 export function parseSeatRef(raw: unknown, mapSeatCount = BASE_MAP_SEATS.length): SeatRef | null {
   if (typeof raw !== 'string') return null;
@@ -106,6 +120,8 @@ export function parseSeatRef(raw: unknown, mapSeatCount = BASE_MAP_SEATS.length)
     const index = Number(map[1]);
     return index < mapSeatCount ? { kind: 'map', index } : null;
   }
+  const chair = CHAIR_SEAT.exec(raw);
+  if (chair) return { kind: 'chair', index: Number(chair[1]) };
   const desk = DESK_SEAT.exec(raw);
   return desk ? { kind: 'desk', deskId: desk[1] } : null;
 }
@@ -152,4 +168,94 @@ export function inSeatReach(position: { readonly x: number; readonly y: number }
     ty >= tiles.y0 - SEAT_REACH_TILES &&
     ty <= tiles.y1 + SEAT_REACH_TILES
   );
+}
+
+// --- Placed chairs (terrain editor) -------------------------------------------------------------
+
+/**
+ * The chair pieces of the art pack (pinned by a test against the manifest):
+ * the only pieces the terrain editor places, one per tile.
+ */
+export const CHAIR_PIECES = ['chair-wood', 'chair-metal', 'chair-leather', 'chair-gamer'] as const;
+export type ChairPieceId = (typeof CHAIR_PIECES)[number];
+
+/** The most chairs one request may set: a dragged row of chairs is one request, never an unbounded one. */
+export const MAX_CHAIR_EDITS = 500;
+
+export function isChairPieceId(value: unknown): value is ChairPieceId {
+  return typeof value === 'string' && (CHAIR_PIECES as readonly string[]).includes(value);
+}
+
+/**
+ * A chair an admin placed: one per tile, `index` row major (`ty * width + tx`),
+ * its ground point the middle of that tile, like a base map chair.
+ */
+export interface PlacedChair {
+  readonly index: number;
+  readonly piece: ChairPieceId;
+  readonly facing: SeatFacing;
+}
+
+/** One tile of a chair edit: the chair to stand there, or `null` to remove the one there. */
+export interface ChairEdit {
+  readonly index: number;
+  readonly chair: { readonly piece: ChairPieceId; readonly facing: SeatFacing } | null;
+}
+
+/** Tile column and row of a placed chair. */
+function chairTile(width: number, index: number): { tx: number; ty: number } {
+  return { tx: index % width, ty: Math.floor(index / width) };
+}
+
+/** Where a sitter's feet go: the middle of the chair's tile (`placeSeats` grounds base chairs the same way). */
+export function chairGround(width: number, index: number): { x: number; y: number } {
+  const { tx, ty } = chairTile(width, index);
+  return { x: (tx + 0.5) * SEATING_TILE, y: (ty + 0.5) * SEATING_TILE };
+}
+
+/** A placed chair's own tile, like `mapSeatTiles`: the reach ring goes around it. */
+export function chairSeatTiles(width: number, index: number): SeatTiles {
+  const { tx, ty } = chairTile(width, index);
+  return { x0: tx, y0: ty, x1: tx, y1: ty };
+}
+
+/** A copy of `chairs` with every edit applied in order, sorted by tile. */
+export function withChairs(chairs: readonly PlacedChair[], edits: readonly ChairEdit[]): PlacedChair[] {
+  const byTile = new Map(chairs.map((chair) => [chair.index, chair]));
+  for (const { index, chair } of edits) {
+    if (chair === null) byTile.delete(index);
+    else byTile.set(index, { index, piece: chair.piece, facing: chair.facing });
+  }
+  return [...byTile.values()].sort((a, b) => a.index - b.index);
+}
+
+const CHAIR_PREFIX = 'chair-';
+
+/**
+ * The wire form of the placed chairs, a replicated string of the room state:
+ * sparse like the walls, `<tile>:<material>:<facing>` per chair joined by
+ * commas (`3:wood:down`), empty for none.
+ */
+export function encodeTerrainChairs(chairs: readonly PlacedChair[]): string {
+  return [...chairs]
+    .sort((a, b) => a.index - b.index)
+    .map(({ index, piece, facing }) => `${index}:${piece.slice(CHAIR_PREFIX.length)}:${facing}`)
+    .join(',');
+}
+
+/** The chairs of a wire string, sorted by tile, or `null` unless every entry is a known chair on a distinct tile of the map. */
+export function decodeTerrainChairs(raw: unknown, tileCount: number): PlacedChair[] | null {
+  if (typeof raw !== 'string') return null;
+  if (raw === '') return [];
+  const chairs = new Map<number, PlacedChair>();
+  for (const part of raw.split(',')) {
+    const match = /^(\d+):([a-z]+):([a-z]+)$/.exec(part);
+    if (match === null) return null;
+    const index = Number(match[1]);
+    const piece = `${CHAIR_PREFIX}${match[2]}`;
+    const facing = match[3];
+    if (index >= tileCount || !isChairPieceId(piece) || !isSeatFacing(facing) || chairs.has(index)) return null;
+    chairs.set(index, { index, piece, facing });
+  }
+  return [...chairs.values()].sort((a, b) => a.index - b.index);
 }

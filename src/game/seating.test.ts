@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
+import exportedManifest from '../../public/assets/pack/manifest.json?raw';
 import { TILE } from './mapData';
 import {
+  CHAIR_PIECES,
   DESK_SEAT_FACING,
+  MAX_CHAIR_EDITS,
+  chairGround,
+  chairSeatId,
+  chairSeatTiles,
+  decodeTerrainChairs,
+  encodeTerrainChairs,
+  isChairPieceId,
+  withChairs,
   SEATING_TILE,
   deskSeatId,
   deskSeatTiles,
@@ -22,24 +32,28 @@ describe('seating: seat references', () => {
     expect(SEATING_TILE).toBe(TILE);
   });
 
-  it('names a base map chair by its index and a desk seat by its desk', () => {
+  it('names a base map chair by its index, a desk seat by its desk and a placed chair by its tile', () => {
     expect(mapSeatId(3)).toBe('map-3');
+    expect(chairSeatId(4321)).toBe('chair-4321');
     expect(deskSeatId('0f5e2c1a-1111-4111-8111-111111111111')).toBe('desk-0f5e2c1a-1111-4111-8111-111111111111');
   });
 
   it('parses both kinds back', () => {
     expect(parseSeatRef('map-0')).toEqual({ kind: 'map', index: 0 });
     expect(parseSeatRef('desk-abc-123')).toEqual({ kind: 'desk', deskId: 'abc-123' });
+    expect(parseSeatRef('chair-0')).toEqual({ kind: 'chair', index: 0 });
+    expect(parseSeatRef('chair-25514')).toEqual({ kind: 'chair', index: 25514 });
   });
 
   it('rejects anything else, a base chair that does not exist included', () => {
-    for (const raw of [undefined, null, 7, '', 'map-', 'map--1', `map-${BASE_MAP_SEATS.length}`, 'map-01', 'desk-', 'desk-a b', 'chair-1', `desk-${'x'.repeat(65)}`]) {
+    for (const raw of [undefined, null, 7, '', 'map-', 'map--1', `map-${BASE_MAP_SEATS.length}`, 'map-01', 'desk-', 'desk-a b', 'chair-', 'chair-01', 'chair--1', 'chair-1234567', `desk-${'x'.repeat(65)}`]) {
       expect(parseSeatRef(raw)).toBeNull();
     }
   });
 
   it('seatIdOf keeps a well formed reference and drops the rest (an older server sends none)', () => {
     expect(seatIdOf('map-2')).toBe('map-2');
+    expect(seatIdOf('chair-17')).toBe('chair-17');
     expect(seatIdOf('')).toBeNull();
     expect(seatIdOf(undefined)).toBeNull();
     expect(seatIdOf('nonsense')).toBeNull();
@@ -155,5 +169,63 @@ describe('seating: reach', () => {
   it('rejects positions that are not finite numbers', () => {
     const tiles = mapSeatTiles(BASE_MAP_SEATS[0]);
     expect(inSeatReach({ x: Number.NaN, y: 5 * TILE }, tiles)).toBe(false);
+  });
+});
+
+describe('seating: placed chairs', () => {
+  const WIDTH = 10;
+  const TILES = WIDTH * 8;
+
+  it('names exactly the chair pieces of the art pack', () => {
+    const pack = JSON.parse(exportedManifest) as { pieces: { id: string; kind: string }[] };
+    expect([...CHAIR_PIECES].sort()).toEqual(pack.pieces.filter((piece) => piece.kind === 'chair').map((piece) => piece.id).sort());
+    for (const piece of CHAIR_PIECES) expect(isChairPieceId(piece)).toBe(true);
+    expect(isChairPieceId('chair-throne')).toBe(false);
+    expect(isChairPieceId(null)).toBe(false);
+    expect(MAX_CHAIR_EDITS).toBe(500);
+  });
+
+  it('stands on its tile: the ground point is the tile middle and the reach is that one tile', () => {
+    expect(chairGround(WIDTH, 23)).toEqual({ x: 3.5 * TILE, y: 2.5 * TILE });
+    expect(chairSeatTiles(WIDTH, 23)).toEqual({ x0: 3, y0: 2, x1: 3, y1: 2 });
+    expect(inSeatReach({ x: 2 * TILE + 1, y: 1 * TILE + 1 }, chairSeatTiles(WIDTH, 23))).toBe(true);
+    expect(inSeatReach({ x: 5 * TILE + 1, y: 2 * TILE + 1 }, chairSeatTiles(WIDTH, 23))).toBe(false);
+  });
+
+  it('places, turns and removes chairs one per tile, sorted by tile, leaving the input alone', () => {
+    const none: readonly { index: number; piece: 'chair-wood'; facing: 'down' }[] = [];
+    const placed = withChairs(none, [
+      { index: 9, chair: { piece: 'chair-gamer', facing: 'left' } },
+      { index: 2, chair: { piece: 'chair-wood', facing: 'down' } },
+    ]);
+    const turned = withChairs(placed, [{ index: 9, chair: { piece: 'chair-gamer', facing: 'up' } }]);
+    const removed = withChairs(turned, [{ index: 2, chair: null }, { index: 50, chair: null }]);
+
+    expect(placed).toEqual([
+      { index: 2, piece: 'chair-wood', facing: 'down' },
+      { index: 9, piece: 'chair-gamer', facing: 'left' },
+    ]);
+    expect(turned[1]).toEqual({ index: 9, piece: 'chair-gamer', facing: 'up' });
+    expect(removed).toEqual([{ index: 9, piece: 'chair-gamer', facing: 'up' }]);
+    expect(none).toEqual([]);
+  });
+
+  it('round-trips the chairs through a sparse wire form, and refuses anything else', () => {
+    const chairs = withChairs([], [
+      { index: 0, chair: { piece: 'chair-wood', facing: 'down' } },
+      { index: TILES - 1, chair: { piece: 'chair-leather', facing: 'right' } },
+      { index: 7, chair: { piece: 'chair-metal', facing: 'up' } },
+    ]);
+    const encoded = encodeTerrainChairs(chairs);
+
+    expect(encoded).toBe(`0:wood:down,7:metal:up,${TILES - 1}:leather:right`);
+    expect(decodeTerrainChairs(encoded, TILES)).toEqual(chairs);
+    expect(encodeTerrainChairs([])).toBe('');
+    expect(decodeTerrainChairs('', TILES)).toEqual([]);
+    for (const garbage of [`${TILES}:wood:down`, '-1:wood:down', '3:throne:down', '3:wood:north', '3:wood', '3:wood:down,3:metal:up', ',', ' 3:wood:down']) {
+      expect(decodeTerrainChairs(garbage, TILES), garbage).toBeNull();
+    }
+    expect(decodeTerrainChairs(42, TILES)).toBeNull();
+    expect(decodeTerrainChairs(undefined, TILES)).toBeNull();
   });
 });

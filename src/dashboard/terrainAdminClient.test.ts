@@ -78,4 +78,18 @@ describe('createTerrainAdminClient', () => {
     expect(await codeOf(clientWith(fetchWith(409, { error: 'terrain-under-placement' })).setWalls(edits))).toBe('terrain-under-placement');
     expect(await codeOf(clientWith(fetchWith(503)).setWalls(edits))).toBe('terrain-not-configured');
   });
+
+  it('places, turns and removes chairs in one POST to /admin/terrain/chairs', async () => {
+    const fetchImpl = fetchWith(200, { updated: 2 });
+    const edits = [{ index: 7, chair: { piece: 'chair-wood' as const, facing: 'left' as const } }, { index: 8, chair: null }];
+
+    await clientWith(fetchImpl).setChairs(edits);
+
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(url).toBe(`${BASE_URL}/admin/terrain/chairs`);
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(init?.body as string)).toEqual({ edits });
+    expect(await codeOf(clientWith(fetchWith(409, { error: 'terrain-under-placement' })).setChairs(edits))).toBe('terrain-under-placement');
+    expect(await codeOf(clientWith(fetchWith(503)).setChairs(edits))).toBe('terrain-not-configured');
+  });
 });

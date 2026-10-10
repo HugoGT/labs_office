@@ -11,12 +11,13 @@ import {
   collisionWorld,
   deskInstances,
   pieceIdOfTextureKey,
+  placedChairInstances,
   staticCollisionInstances,
   type CollisionDesk,
   type CollisionInstance,
   type CollisionRect,
 } from './pieceCollisions';
-import { BASE_MAP_SEATS, type MapSeat } from './seating';
+import { BASE_MAP_SEATS, type MapSeat, type PlacedChair } from './seating';
 
 export const STATIC_COLLISION_INSTANCES: readonly CollisionInstance[] = staticCollisionInstances(BASE_LAYOUT.props, BASE_MAP_SEATS);
 /** The static office with every piece at its default: the tiles props always blocked. */
@@ -38,6 +39,12 @@ export function officeDeskPlacements(desks: readonly OfficeDesk[]): CollisionDes
   }));
 }
 
-export function officeCollisionInstances(desks: readonly OfficeDesk[], layout: OfficeLayout = BASE_LAYOUT, seats: readonly MapSeat[] = BASE_MAP_SEATS): CollisionInstance[] {
-  return [...staticCollisionInstances(layout.props, seats), ...deskInstances(officeDeskPlacements(desks))];
+/** Every placed piece: the static office, the served desks and their decor, and the chairs placed from the terrain editor. */
+export function officeCollisionInstances(
+  desks: readonly OfficeDesk[],
+  layout: OfficeLayout = BASE_LAYOUT,
+  seats: readonly MapSeat[] = BASE_MAP_SEATS,
+  chairs: readonly PlacedChair[] = [],
+): CollisionInstance[] {
+  return [...staticCollisionInstances(layout.props, seats), ...deskInstances(officeDeskPlacements(desks)), ...placedChairInstances(chairs, layout.width)];
 }

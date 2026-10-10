@@ -15,7 +15,7 @@ import {
   SESSION_REPLACED_CLOSE_CODE,
   SESSION_REVOKED_CLOSE_CODE,
 } from '../../src/game/officeProtocol.ts';
-import { DESK_SEAT_FACING, deskSeatId, mapSeatId } from '../../src/game/seating.ts';
+import { DESK_SEAT_FACING, chairSeatId, decodeTerrainChairs, deskSeatId, mapSeatId } from '../../src/game/seating.ts';
 import { decodeTerrainBlocks, decodeTerrainWalls } from '../../src/game/officeLayout.ts';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SPACES as BUILT_IN_SPACES } from '../../src/test/legacyOffice.ts';
 import { createOfficeServer as createServer, type OfficeServer, type OfficeServerOverrides } from './createOfficeServer.ts';
@@ -2082,6 +2082,81 @@ describe('OfficeRoom: seats', () => {
 
     await waitFor(() => room.state.players.get(room.sessionId)?.status === 'y');
     expect(room.state.players.get(room.sessionId)?.seat).toBe('');
+  });
+});
+
+/**
+ * Chairs placed from the terrain editor: replicated like the walls, and a
+ * seat anyone may take, checked against the live chairs the terrain runtime
+ * holds.
+ */
+describe('OfficeRoom: placed chairs', () => {
+  const tile = (tx: number, ty: number) => ty * BASE_LAYOUT.width + tx;
+  const CHAIR = tile(22, 23);
+  const besideChair = { x: 21 * TILE + 16, y: 23 * TILE + 5, facing: 'down' };
+  const nobody = async () => ({ placements: [], players: [] });
+  const chairsOf = (room: Awaited<ReturnType<typeof join>>) => decodeTerrainChairs(room.state.terrainChairs, BASE_LAYOUT.width * BASE_LAYOUT.height);
+
+  beforeEach(async () => {
+    await server.shutdown();
+    server = createOfficeServer({ terrain: createMemoryTerrain([], [], [{ index: CHAIR, piece: 'chair-gamer', facing: 'left' }]) });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+  });
+
+  async function moveNextToChair(room: Awaited<ReturnType<typeof join>>) {
+    room.send('move', besideChair);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === besideChair.x);
+  }
+
+  it('replicates the placed chairs to whoever is inside and whoever joins after', async () => {
+    const ana = await join('Ana');
+    await waitFor(() => chairsOf(ana)?.length === 1);
+    expect(chairsOf(ana)).toEqual([{ index: CHAIR, piece: 'chair-gamer', facing: 'left' }]);
+
+    await server.terrain.setChairs([{ index: tile(30, 23), chair: { piece: 'chair-wood', facing: 'up' } }], null, nobody);
+
+    await waitFor(() => chairsOf(ana)?.length === 2);
+    const late = await join('Beto');
+    await waitFor(() => chairsOf(late)?.length === 2);
+  });
+
+  it('seats anyone next to a placed chair, facing the way the chair does', async () => {
+    const a = await join('Ana');
+    const b = await join('Beto');
+    await waitFor(() => b.state.players.size === 2);
+    await moveNextToChair(a);
+
+    a.send('sit', { seat: chairSeatId(CHAIR) });
+
+    await waitFor(() => b.state.players.get(a.sessionId)?.seat === chairSeatId(CHAIR));
+    expect(b.state.players.get(a.sessionId)?.facing).toBe('left');
+  });
+
+  it('ignores a placed chair that does not stand there, or one out of reach', async () => {
+    const room = await join('Ana');
+    await waitFor(() => room.state.players.size === 1);
+
+    room.send('sit', { seat: chairSeatId(CHAIR) });
+    await moveNextToChair(room);
+    room.send('sit', { seat: chairSeatId(tile(21, 22)) });
+    room.send('status', { status: 'y' });
+
+    await waitFor(() => room.state.players.get(room.sessionId)?.status === 'y');
+    expect(room.state.players.get(room.sessionId)?.seat).toBe('');
+  });
+
+  it('turns the sitter with a turned chair, and stands them up when the chair is removed', async () => {
+    const room = await join('Ana');
+    await moveNextToChair(room);
+    room.send('sit', { seat: chairSeatId(CHAIR) });
+    await waitFor(() => room.state.players.get(room.sessionId)?.seat === chairSeatId(CHAIR));
+
+    await server.terrain.setChairs([{ index: CHAIR, chair: { piece: 'chair-gamer', facing: 'up' } }], null, nobody);
+    await waitFor(() => room.state.players.get(room.sessionId)?.facing === 'up');
+    expect(room.state.players.get(room.sessionId)?.seat).toBe(chairSeatId(CHAIR));
+
+    await server.terrain.setChairs([{ index: CHAIR, chair: null }], null, nobody);
+    await waitFor(() => room.state.players.get(room.sessionId)?.seat === '');
   });
 });
 

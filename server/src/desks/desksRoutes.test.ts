@@ -569,6 +569,18 @@ describe('desks over painted walls', () => {
     expect(await desks.getDesk(desk.id)).toMatchObject({ x: 0, y: 0 });
   });
 
+  it('refuses to create or move a desk over a placed chair', async () => {
+    const { deps, desks } = harness();
+    const chairs: DeskWallGuard = { run: vi.fn(async (write) => write({ width: WIDTH, walls: new Array(WIDTH * 30).fill(null), chairs: [{ index: 6 * WIDTH + 11 }] })) };
+    const desk = await desks.createDesk({ label: 'Mesa', x: 0, y: 0 });
+
+    expect(await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa', x: 10, y: 5 }, { ...deps, walls: chairs })).toEqual({ status: 409, body: { error: 'desk-on-chair' } });
+    expect(await handleUpdateDesk(BEARER_ADMIN, desk.id, { x: 9, y: 4 }, { ...deps, walls: chairs })).toEqual({ status: 409, body: { error: 'desk-on-chair' } });
+    expect(await desks.listDesks()).toHaveLength(1);
+    expect(await desks.getDesk(desk.id)).toMatchObject({ x: 0, y: 0 });
+    expect((await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa', x: 12, y: 5 }, { ...deps, walls: chairs })).status).toBe(201);
+  });
+
   it('moves a desk to a free spot through the guard', async () => {
     const { deps, desks } = harness();
     const desk = await desks.createDesk({ label: 'Mesa', x: 0, y: 0 });

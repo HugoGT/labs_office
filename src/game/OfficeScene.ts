@@ -45,6 +45,7 @@ import { isEditableElementFocused } from './inputFocusGuard';
 import { LayoutEditLayer } from './LayoutEditLayer';
 import {
   BASE_MAP_CHAIR,
+  placeChairs,
   placeLayout,
   placeSeats,
   placeWalls,
@@ -114,12 +115,20 @@ import { createStaleSpacesVersionTracker } from './spacesConfig';
 import { audiblePeers, type AudioPeer } from './proximityAudio';
 import {
   BASE_MAP_SEATS,
+  CHAIR_PIECES,
+  chairGround,
+  chairSeatId,
+  chairSeatTiles,
   deskSeatId,
   deskSeatTiles,
+  encodeTerrainChairs,
   inSeatReach,
   mapSeatId,
   mapSeatTiles,
   parseSeatRef,
+  withChairs,
+  type ChairEdit,
+  type PlacedChair,
   type SeatTiles,
   type MapSeat,
 } from './seating';
@@ -272,6 +281,12 @@ export class OfficeScene extends Phaser.Scene {
   private wallPreview: readonly WallEdit[] | null = null;
   /** What the walls drew, destroyed and drawn again whenever the walls or their preview change. */
   private wallObjects: Phaser.GameObjects.GameObject[] = [];
+  /** The chairs placed from the terrain editor, as the room replicated them last; seats anyone may take. */
+  private terrainChairs: readonly PlacedChair[] = [];
+  /** The terrain editor's pending chair paints, drawn over `terrainChairs` and never sat on or collided with. */
+  private chairPreview: readonly ChairEdit[] | null = null;
+  /** What the placed chairs drew, destroyed and drawn again whenever they or their preview change. */
+  private chairObjects: Phaser.GameObjects.GameObject[] = [];
   /** The static bodies of the terrain grid and their collider, replaced whole on each edit. */
   private terrainColliders?: { rects: Phaser.GameObjects.Rectangle[]; collider: Phaser.Physics.Arcade.Collider };
   /** The terrain of `terrainBlocks` and `terrainWalls`, kept to rebuild `grid` when the collisions change. */
@@ -565,6 +580,7 @@ export class OfficeScene extends Phaser.Scene {
     this.paintWalls();
     placeLayout(this, this.layout, this.art);
     placeSeats(this, this.mapSeats, this.art);
+    this.paintChairs();
     placeZoneLabels(this);
 
     // El nombre de la sesion manda sobre la pildora del avatar local (#6).
@@ -572,8 +588,8 @@ export class OfficeScene extends Phaser.Scene {
     // llama el servidor a quien entra sin identidad verificada.
     this.player = spawnPlayer(this, this.options.playerName ?? DEFAULT_NAME, this.characterSheets(null));
     // Only art the initial office actually draws; an unused broken upload cannot block entry.
-    // Every wall piece, not only the layout's: a wall painted live draws at once.
-    for (const id of ['tileset-terrain', ...(this.mapSeats.length > 0 ? [BASE_MAP_CHAIR] : []), ...WALL_PIECES, ...this.layout.walls, ...this.layout.hedges,
+    // Every wall and chair piece, not only the layout's: a wall painted or a chair placed live draws at once.
+    for (const id of ['tileset-terrain', ...(this.mapSeats.length > 0 ? [BASE_MAP_CHAIR] : []), ...WALL_PIECES, ...CHAIR_PIECES, ...this.layout.walls, ...this.layout.hedges,
       ...this.layout.props.map((prop) => prop.piece)]) {
       if (id !== null) this.entrancePieces.add(id);
     }
@@ -687,6 +703,10 @@ export class OfficeScene extends Phaser.Scene {
       const rewall = JSON.stringify(wallPreview) !== JSON.stringify(this.wallPreview);
       this.wallPreview = wallPreview;
       if (rewall) this.paintWalls();
+      const chairPreview = command?.previewChairs ?? null;
+      const rechair = JSON.stringify(chairPreview) !== JSON.stringify(this.chairPreview);
+      this.chairPreview = chairPreview;
+      if (rechair) this.paintChairs();
       if (opening) this.emitTerrain();
     });
 
@@ -881,6 +901,7 @@ export class OfficeScene extends Phaser.Scene {
           onDesksChanged: () => this.bridge.emit('deskschanged', undefined),
           onTerrain: (blocks) => this.applyTerrain(blocks),
           onWalls: (walls) => this.applyWalls(walls),
+          onChairs: (chairs) => this.applyChairs(chairs),
           onCollisions: (table) => this.applyCollisions(table),
           onConnectionState: (state) => {
             if (!current()) return;
@@ -1049,8 +1070,9 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
-   * A seat by reference (step 6): a base map chair, or the chair of a desk in
-   * the last `desks` list. `null` when this client cannot place it.
+   * A seat by reference (step 6): a base map chair, a chair placed from the
+   * terrain editor the room replicated, or the chair of a desk in the last
+   * `desks` list. `null` when this client cannot place it.
    */
   private resolveSeat(id: string): ResolvedSeat | null {
     const ref = parseSeatRef(id, this.mapSeats.length);
@@ -1058,6 +1080,12 @@ export class OfficeScene extends Phaser.Scene {
     if (ref.kind === 'map') {
       const seat = this.mapSeats[ref.index];
       return { id, ground: { x: (seat.tx + 0.5) * TILE, y: (seat.ty + 0.5) * TILE }, facing: seat.facing, reach: mapSeatTiles(seat) };
+    }
+    if (ref.kind === 'chair') {
+      const chair = this.terrainChairs.find((candidate) => candidate.index === ref.index);
+      if (chair === undefined) return null;
+      const width = this.layout.width;
+      return { id, ground: chairGround(width, chair.index), facing: chair.facing, reach: chairSeatTiles(width, chair.index) };
     }
     const desk = this.desks.find((candidate) => candidate.id === ref.deskId);
     return desk === undefined ? null : this.deskSeat(desk);
@@ -1099,7 +1127,7 @@ export class OfficeScene extends Phaser.Scene {
     return best;
   }
 
-  /** Every seat no peer sits on, map chairs and the desks this player may use. */
+  /** Every seat no peer sits on: map chairs, placed chairs and the desks this player may use. */
   private freeSeats(): ResolvedSeat[] {
     const taken = new Set<string>();
     for (const sessionId of this.remotes?.sessionIds() ?? []) {
@@ -1111,6 +1139,10 @@ export class OfficeScene extends Phaser.Scene {
       const seat = this.resolveSeat(mapSeatId(index));
       if (seat) candidates.push(seat);
     });
+    for (const chair of this.terrainChairs) {
+      const seat = this.resolveSeat(chairSeatId(chair.index));
+      if (seat) candidates.push(seat);
+    }
     for (const desk of this.desks) {
       if (desk.occupant === null || desk.mine) candidates.push(this.deskSeat(desk));
     }
@@ -1366,7 +1398,7 @@ export class OfficeScene extends Phaser.Scene {
     this.initialDesks = true;
     this.desks = desks;
     // Desks and their decor collide by their pieces' rectangles, wherever the list puts them.
-    this.collisionInstances = officeCollisionInstances(desks, this.layout, this.mapSeats);
+    this.collisionInstances = officeCollisionInstances(desks, this.layout, this.mapSeats, this.terrainChairs);
     this.refreshCollisions();
     for (const object of this.deskObjects.splice(0)) object.destroy();
     for (const desk of desks) this.drawDesk(desk);
@@ -1751,9 +1783,48 @@ export class OfficeScene extends Phaser.Scene {
     this.emitTerrain();
   }
 
-  /** Hands the editor what the room shows: the live blocks and walls. */
+  /**
+   * New placed chairs from the room: drawn, offered as seats and collided
+   * with (by their pieces' rectangles) at once. A chair the local player sits
+   * on that is gone stands them up here too, without waiting for the room's
+   * own answer; a turned one turns them.
+   */
+  private applyChairs(chairs: readonly PlacedChair[]): void {
+    if (!this.alive) return;
+    if (encodeTerrainChairs(chairs) !== encodeTerrainChairs(this.terrainChairs)) {
+      this.terrainChairs = chairs;
+      this.collisionInstances = officeCollisionInstances(this.desks, this.layout, this.mapSeats, chairs);
+      this.refreshCollisions();
+      this.paintChairs();
+      const ref = this.seat === null ? null : parseSeatRef(this.seat.id, this.mapSeats.length);
+      if (this.seat !== null && ref?.kind === 'chair') {
+        const seat = this.resolveSeat(this.seat.id);
+        if (seat === null) {
+          this.leaveSeat();
+        } else if (seat.facing !== this.seat.facing) {
+          this.seat = seat;
+          this.facing = seat.facing;
+          setCharacterFacing(this.player, seat.facing);
+          this.player.seatFacing = seat.facing;
+        }
+      }
+      if (this.pendingSeat !== null && parseSeatRef(this.pendingSeat, this.mapSeats.length)?.kind === 'chair' && this.resolveSeat(this.pendingSeat) === null) {
+        this.pendingSeat = null;
+      }
+    }
+    this.emitTerrain();
+  }
+
+  /** Hands the editor what the room shows: the live blocks, walls and placed chairs. */
   private emitTerrain(): void {
-    this.bridge.emit('terrain', { blocks: this.terrainBlocks, walls: this.terrainWalls });
+    this.bridge.emit('terrain', { blocks: this.terrainBlocks, walls: this.terrainWalls, chairs: this.terrainChairs });
+  }
+
+  /** Redraws every placed chair from the live chairs, with the editor's pending chair paints over them. */
+  private paintChairs(): void {
+    for (const object of this.chairObjects) object.destroy();
+    const chairs = this.chairPreview === null ? this.terrainChairs : withChairs(this.terrainChairs, this.chairPreview);
+    this.chairObjects = placeChairs(this, chairs, this.layout.width, this.art);
   }
 
   /** Redraws the tilemap from the live blocks, or from the editor's pending paints while it has some. */

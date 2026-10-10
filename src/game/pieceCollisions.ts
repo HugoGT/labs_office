@@ -250,6 +250,19 @@ export function seatInstances(
   }));
 }
 
+/**
+ * Instances of the chairs placed from the terrain editor (`PlacedChair` of
+ * seating.ts, restated here to stay import-free): each its own piece on the
+ * middle of its tile, exactly like a base chair, so a chair piece's saved
+ * rectangles apply to every chair of it.
+ */
+export function placedChairInstances(
+  chairs: readonly { readonly index: number; readonly piece: string; readonly facing: CollisionFacing }[],
+  width: number,
+): CollisionInstance[] {
+  return chairs.flatMap(({ index, piece, facing }) => seatInstances([{ tx: index % width, ty: Math.floor(index / width), facing }], piece));
+}
+
 /** The chair of the base map's rooms (`BASE_MAP_CHAIR` of mapBuilder.ts, pinned by a test). */
 export const BASE_CHAIR_PIECE = 'chair-wood';
 

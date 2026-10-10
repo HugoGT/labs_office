@@ -15,7 +15,7 @@ import {
 } from './mapData';
 import { TERRAIN_LAYER_COUNT } from './artContract';
 import { terrainSnapshot, withBlock, withWalls, type OfficeLayout } from './officeLayout';
-import { WALL_OBJECT_NAME } from './mapBuilder';
+import { CHAIR_OBJECT_NAME, WALL_OBJECT_NAME } from './mapBuilder';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SPACES as BUILT_IN_SPACES } from '../test/legacyOffice';
 const BUILT_IN_SPACES_VERSION = 'a489c5da5efd7c68';
 import {
@@ -27,7 +27,7 @@ import {
 } from './depthLayers';
 import { feetOf, physicalBodyRect } from './avatarGeometry';
 import { BODY_CENTER_OFFSET, positionForBodyTile } from './pathfinding';
-import { deskSeatId, mapSeatId } from './seating';
+import { chairSeatId, deskSeatId, mapSeatId } from './seating';
 import { deskFurnitureName, deskZoneName } from './deskLayout';
 import { artSheetKey, recoloredSheetKey } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
@@ -3916,6 +3916,28 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
     }, LOOP_WAIT);
   });
 
+  it('offers a placed chair the room sends, seats the player on its tile facing its way, and stands them up when it goes', async () => {
+    const { connector, scene, player } = await connected();
+    // On the open lawn, far from every base chair.
+    const chairIndex = 22 * BASE_LAYOUT.width + 67;
+    const ground = { x: 67.5 * TILE, y: 22.5 * TILE };
+    const chairObjects = () => scene.children.list.filter((child) => child.name === CHAIR_OBJECT_NAME);
+    connector.handlers()!.onChairs?.([{ index: chairIndex, piece: 'chair-gamer', facing: 'left' }]);
+    expect(chairObjects().length).toBeGreaterThan(0);
+    player.setPosition(ground.x, ground.y - TILE);
+    await advanceGameClock(scene, 50);
+
+    (scene as unknown as { bridge: ReturnType<typeof createOfficeBridge> }).bridge.emitCommand('toggleSeat', undefined);
+    expect(connector.sits).toEqual([chairSeatId(chairIndex)]);
+    connector.handlers()!.onLocalSeat?.(chairSeatId(chairIndex));
+    expect(feetOf(player)).toEqual(ground);
+    expect(player.seatFacing).toBe('left');
+
+    connector.handlers()!.onChairs?.([]);
+    expect(player.seatFacing).toBeNull();
+    expect(chairObjects()).toHaveLength(0);
+  });
+
   it('toggleSeat again stands up; walking stands up too', async () => {
     const { connector, scene, player } = await connected();
     const bridge = (scene as unknown as { bridge: ReturnType<typeof createOfficeBridge> }).bridge;
@@ -4129,7 +4151,7 @@ describe('OfficeScene: edited terrain', () => {
 
     expect(solidAt(scene, lawn.x, lawn.y)).toBe(true);
     expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).not.toEqual(grass);
-    expect(seen).toEqual([{ blocks: watered, walls: BASE_LAYOUT.walls }]);
+    expect(seen).toEqual([{ blocks: watered, walls: BASE_LAYOUT.walls, chairs: [] }]);
 
     handlers.onTerrain!(BASE_LAYOUT.blocks);
     // Arcade drops a destroyed static body on its next step.
@@ -4192,7 +4214,7 @@ describe('OfficeScene: edited terrain', () => {
     bridge.emitCommand('terrainedit', { brush: null });
     bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'grass' } });
 
-    expect(seen).toEqual([{ blocks: watered, walls: BASE_LAYOUT.walls }]);
+    expect(seen).toEqual([{ blocks: watered, walls: BASE_LAYOUT.walls, chairs: [] }]);
   });
 
   it('a click on the map picks a block instead of closing menus while the editor is open', async () => {
@@ -4229,7 +4251,7 @@ describe('OfficeScene: edited terrain', () => {
     expect(solidAt(scene, lawnVertex.x + TILE / 2, lawnVertex.y + 9)).toBe(false);
     expect(solidAt(scene, lawn.x, lawn.y)).toBe(false);
     expect(wallObjects(scene).length).toBeGreaterThan(before);
-    expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled }]);
+    expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled, chairs: [] }]);
 
     handlers.onWalls!(BASE_LAYOUT.walls);
     await vi.waitFor(() => expect(solidAt(scene, lawnVertex.x, lawnVertex.y)).toBe(false), LOOP_WAIT);
@@ -4252,6 +4274,26 @@ describe('OfficeScene: edited terrain', () => {
     expect(wallObjects(scene)).toHaveLength(before);
   });
 
+  it('draws pending chairs for the editor over the live ones, and tells it the live chairs', async () => {
+    const { scene, bridge, handlers } = await bootConnected();
+    const chairObjects = () => scene.children.list.filter((child) => child.name === CHAIR_OBJECT_NAME);
+    const seen: OfficeEventMap['terrain'][] = [];
+    bridge.on('terrain', (payload) => seen.push(payload));
+    const live = [{ index: lawnTile, piece: 'chair-wood' as const, facing: 'down' as const }];
+    handlers.onChairs!(live);
+    const one = chairObjects().length;
+    expect(one).toBeGreaterThan(0);
+    expect(seen.at(-1)).toEqual({ blocks: BASE_LAYOUT.blocks, walls: BASE_LAYOUT.walls, chairs: live });
+
+    bridge.emitCommand('terrainedit', { brush: { kind: 'chair', piece: 'chair-metal', facing: 'up' }, previewChairs: [{ index: lawnTile + 1, chair: { piece: 'chair-metal', facing: 'up' } }, { index: lawnTile, chair: null }] });
+    expect(chairObjects()).toHaveLength(one);
+    bridge.emitCommand('terrainedit', { brush: { kind: 'chair', piece: 'chair-metal', facing: 'up' }, previewChairs: [{ index: lawnTile + 1, chair: { piece: 'chair-metal', facing: 'up' } }] });
+    expect(chairObjects()).toHaveLength(2 * one);
+
+    bridge.emitCommand('terrainedit', null);
+    expect(chairObjects()).toHaveLength(one);
+  });
+
   it('tells the editor the current walls when it opens', async () => {
     const { bridge, handlers } = await bootConnected();
     const walled = withWalls(BASE_LAYOUT.walls, [{ index: lawnTile, piece: 'wall-stone' }]);
@@ -4261,7 +4303,7 @@ describe('OfficeScene: edited terrain', () => {
 
     bridge.emitCommand('terrainedit', { brush: null });
 
-    expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled }]);
+    expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled, chairs: [] }]);
   });
 });
 

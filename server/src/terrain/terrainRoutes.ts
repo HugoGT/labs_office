@@ -4,7 +4,8 @@
  * guard (`authorize`): editing the map is administration, like rooms and desks.
  *
  * There is no read route. Every client already gets the blocks and the walls
- * with the room state (`OfficeState.terrainBlocks`, `terrainWalls`), on join
+ * with the room state (`OfficeState.terrainBlocks`, `terrainWalls`,
+ * `terrainChairs`), on join
  * and on every change, so a second copy over HTTP would be one more thing to
  * keep in step.
  */
@@ -14,6 +15,7 @@ import {
   InvalidTerrainEditError,
   TerrainProtectedError,
   TerrainStaleError,
+  parseChairBatch,
   parseTerrainBatch,
   parseTerrainEdit,
   parseWallBatch,
@@ -76,6 +78,26 @@ export async function handleSetTerrainWalls(authorization: unknown, body: unknow
   try {
     const edits = parseWallBatch(body, deps.terrain.walls().length);
     await deps.terrain.setWalls(edits, authorized.user.id, deps.protections);
+    return { status: 200, body: { updated: edits.length } };
+  } catch (error) {
+    if (error instanceof InvalidTerrainEditError) return INVALID_REQUEST;
+    if (error instanceof TerrainProtectedError) return UNDER_PLACEMENT;
+    throw error;
+  }
+}
+
+/**
+ * `POST /admin/terrain/chairs` `{ edits: [{ index, chair }] }`: places or
+ * turns (`chair` a `{ piece, facing }`) or removes (`null`) chairs on single
+ * tiles, all or none. A dragged row of chairs is one request.
+ */
+export async function handleSetTerrainChairs(authorization: unknown, body: unknown, deps: TerrainDeps): Promise<AdminResult> {
+  const authorized = await authorize(authorization, deps);
+  if (!authorized.ok) return authorized.result;
+  try {
+    // Every tile of the map, the same count as the wall grid.
+    const edits = parseChairBatch(body, deps.terrain.walls().length);
+    await deps.terrain.setChairs(edits, authorized.user.id, deps.protections);
     return { status: 200, body: { updated: edits.length } };
   } catch (error) {
     if (error instanceof InvalidTerrainEditError) return INVALID_REQUEST;

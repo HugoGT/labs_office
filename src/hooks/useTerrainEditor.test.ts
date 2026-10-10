@@ -12,7 +12,8 @@ import { createOfficeBridge, type OfficeCommandMap } from '../game/officeBridge'
 import { SPAWN_BLOCK_INDEX } from '../game/mapData';
 import { BASE_LAYOUT, MAX_WALL_EDITS, withBlock, withWalls, type LayoutMaterial, type WallEdit } from '../game/officeLayout';
 import type { TerrainBrush } from '../game/terrainEditor';
-import { WALL_UNDER_PLACEMENT_MESSAGE, useTerrainEditor } from './useTerrainEditor';
+import { MAX_CHAIR_EDITS, type ChairEdit } from '../game/seating';
+import { CHAIR_UNDER_PLACEMENT_MESSAGE, WALL_UNDER_PLACEMENT_MESSAGE, useTerrainEditor } from './useTerrainEditor';
 
 const floor = (material: LayoutMaterial): TerrainBrush => ({ kind: 'floor', material });
 
@@ -20,7 +21,13 @@ const LAWN = 35;
 const OTHER = 36;
 
 function port(overrides: Partial<TerrainAdminPort> = {}): TerrainAdminPort {
-  return { setBlock: vi.fn(async () => undefined), setBlocks: vi.fn(async () => undefined), setWalls: vi.fn(async () => undefined), ...overrides };
+  return {
+    setBlock: vi.fn(async () => undefined),
+    setBlocks: vi.fn(async () => undefined),
+    setWalls: vi.fn(async () => undefined),
+    setChairs: vi.fn(async () => undefined),
+    ...overrides,
+  };
 }
 
 function setup(terrain: TerrainAdminPort = port()) {
@@ -416,6 +423,131 @@ describe('useTerrainEditor', () => {
       await act(async () => calls[1]!.reject(new AdminError('forbidden')));
       expect(result.current.blocked).toBe(true);
       expect(result.current.error).toMatch(/permiso/i);
+    });
+  });
+
+  describe('chairs', () => {
+    const TILE_A = 22 * BASE_LAYOUT.width + 67;
+    const TILE_B = TILE_A + 1;
+
+    /** A deferred `setChairs`, resolved or rejected by the test. */
+    function deferredChairs() {
+      const calls: { edits: readonly ChairEdit[]; resolve: () => void; reject: (error: unknown) => void }[] = [];
+      const terrain = port({
+        setChairs: vi.fn((edits: readonly ChairEdit[]) => new Promise<void>((resolve, reject) => calls.push({ edits: [...edits], resolve, reject }))),
+      });
+      return { terrain, calls };
+    }
+
+    it('picks a chair or the chair eraser facing down, turns the brush with rotate, and unpicks on a second pick or Escape', () => {
+      const { result, commands } = setup();
+      act(() => result.current.enter());
+
+      act(() => result.current.pickChair('chair-gamer'));
+      expect(result.current.brush).toEqual({ kind: 'chair', piece: 'chair-gamer', facing: 'down' });
+      expect(commands.at(-1)).toEqual({ brush: { kind: 'chair', piece: 'chair-gamer', facing: 'down' } });
+
+      act(() => result.current.rotateChair());
+      expect(result.current.chairFacing).toBe('left');
+      expect(result.current.brush).toEqual({ kind: 'chair', piece: 'chair-gamer', facing: 'left' });
+      act(() => result.current.rotateChair());
+      act(() => result.current.rotateChair());
+      act(() => result.current.rotateChair());
+      expect(result.current.chairFacing).toBe('down');
+
+      act(() => result.current.pickChair('chair-gamer'));
+      expect(result.current.brush).toBeNull();
+      // The facing outlives the brush: the next chair picked faces the same way.
+      act(() => result.current.rotateChair());
+      act(() => result.current.pickChair('chair-wood'));
+      expect(result.current.brush).toEqual({ kind: 'chair', piece: 'chair-wood', facing: 'left' });
+      act(() => result.current.pickChair(null));
+      expect(result.current.brush).toEqual({ kind: 'chair', piece: null, facing: 'left' });
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      });
+      expect(result.current.brush).toBeNull();
+    });
+
+    it('turns tile clicks into chair paints only with a chair brush, sending the ones queued meanwhile as one request', async () => {
+      const { terrain, calls } = deferredChairs();
+      const { bridge, result, commands } = setup(terrain);
+      act(() => result.current.enter());
+      act(() => bridge.emit('chairpick', { index: TILE_A }));
+      act(() => result.current.pickWall('wall-brick'));
+      act(() => bridge.emit('chairpick', { index: TILE_A }));
+      expect(calls).toEqual([]);
+
+      act(() => result.current.pickChair('chair-metal'));
+      act(() => bridge.emit('chairpick', { index: TILE_A }));
+      act(() => bridge.emit('chairpick', { index: TILE_B }));
+
+      expect(calls.map((call) => call.edits)).toEqual([[{ index: TILE_A, chair: { piece: 'chair-metal', facing: 'down' } }]]);
+      expect(commands.at(-1)?.previewChairs).toEqual([
+        { index: TILE_A, chair: { piece: 'chair-metal', facing: 'down' } },
+        { index: TILE_B, chair: { piece: 'chair-metal', facing: 'down' } },
+      ]);
+      await act(async () => calls[0]!.resolve());
+      expect(calls[1]!.edits).toEqual([{ index: TILE_B, chair: { piece: 'chair-metal', facing: 'down' } }]);
+      await act(async () => calls[1]!.resolve());
+
+      act(() => bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls: BASE_LAYOUT.walls, chairs: [
+        { index: TILE_A, piece: 'chair-metal', facing: 'down' },
+        { index: TILE_B, piece: 'chair-metal', facing: 'down' },
+      ] }));
+      expect(commands.at(-1)).toEqual({ brush: { kind: 'chair', piece: 'chair-metal', facing: 'down' } });
+      expect(result.current.chairs).toHaveLength(2);
+      expect(terrain.setWalls).not.toHaveBeenCalled();
+    });
+
+    it('skips a tile that already holds that exact chair, or erasing where there is none, but turns a chair in place', async () => {
+      const { terrain, calls } = deferredChairs();
+      const { bridge, result } = setup(terrain);
+      act(() => result.current.enter());
+      act(() => bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls: BASE_LAYOUT.walls, chairs: [{ index: TILE_A, piece: 'chair-wood', facing: 'down' }] }));
+      act(() => result.current.pickChair('chair-wood'));
+      act(() => bridge.emit('chairpick', { index: TILE_A }));
+      act(() => result.current.pickChair(null));
+      act(() => bridge.emit('chairpick', { index: TILE_B }));
+      expect(calls).toEqual([]);
+
+      act(() => result.current.pickChair('chair-wood'));
+      act(() => result.current.rotateChair());
+      act(() => bridge.emit('chairpick', { index: TILE_A }));
+      act(() => bridge.emit('chairpick', { index: TILE_A }));
+      expect(calls.map((call) => call.edits)).toEqual([[{ index: TILE_A, chair: { piece: 'chair-wood', facing: 'left' } }]]);
+      await act(async () => calls[0]!.resolve());
+    });
+
+    it('never sends one tile twice in a request, and caps one request at MAX_CHAIR_EDITS tiles', async () => {
+      const { terrain, calls } = deferredChairs();
+      const { bridge, result } = setup(terrain);
+      act(() => result.current.enter());
+      act(() => result.current.pickChair('chair-leather'));
+      act(() => {
+        for (let index = 0; index <= MAX_CHAIR_EDITS + 1; index += 1) bridge.emit('chairpick', { index });
+      });
+      act(() => result.current.rotateChair());
+      act(() => bridge.emit('chairpick', { index: 5 }));
+
+      await act(async () => calls[0]!.resolve());
+      expect(calls[1]!.edits).toHaveLength(MAX_CHAIR_EDITS);
+      await act(async () => calls[1]!.resolve());
+      expect(calls[2]!.edits).toEqual([{ index: MAX_CHAIR_EDITS + 1, chair: { piece: 'chair-leather', facing: 'down' } }, { index: 5, chair: { piece: 'chair-leather', facing: 'left' } }]);
+      await act(async () => calls[2]!.resolve());
+    });
+
+    it('drops a refused chair request and says why in chair terms', async () => {
+      const { terrain, calls } = deferredChairs();
+      const { bridge, result, commands } = setup(terrain);
+      act(() => result.current.enter());
+      act(() => result.current.pickChair('chair-wood'));
+      act(() => bridge.emit('chairpick', { index: TILE_A }));
+
+      await act(async () => calls[0]!.reject(new AdminError('terrain-under-placement')));
+
+      expect(result.current.error).toBe(CHAIR_UNDER_PLACEMENT_MESSAGE);
+      expect(commands.at(-1)?.previewChairs).toBeUndefined();
     });
   });
 });

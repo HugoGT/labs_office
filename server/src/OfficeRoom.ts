@@ -65,10 +65,13 @@ import {
 import {
   BASE_MAP_SEATS,
   DESK_SEAT_FACING,
+  chairSeatTiles,
   deskSeatTiles,
+  encodeTerrainChairs,
   inSeatReach,
   mapSeatTiles,
   parseSeatRef,
+  type PlacedChair,
   type SeatTiles,
 } from '../../src/game/seating.ts';
 import { createCallInvitationRegistry, type CallInvitationRegistry } from './callInvitations.ts';
@@ -240,6 +243,12 @@ export interface OfficeRoomOptions {
    */
   subscribeTerrainChanges?: (listener: (blocks: readonly LayoutMaterial[]) => void) => () => void;
   /**
+   * The chairs placed from the terrain editor, read when someone asks for one
+   * and on every terrain change, replicated as `state.terrainChairs`. Absent,
+   * there are none.
+   */
+  chairs?: () => readonly PlacedChair[];
+  /**
    * The collision rectangles every `move` is checked against, read on each
    * move. Absent is the static office with every piece at its default (the
    * footprint of each Tiled prop), exactly the tiles props blocked before.
@@ -396,6 +405,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private seated = new Map<string, { reach: SeatTiles; userId: string | null }>();
   private terrain: () => TerrainSnapshot = () => BASE_TERRAIN;
   private mapSeats = BASE_MAP_SEATS;
+  private chairs: () => readonly PlacedChair[] = () => [];
   private collisions: () => readonly CollisionRect[] = () => BASE_COLLISION_RECTS;
   // Bridges a definitive leave and a refresh while its write is in flight.
   // Serializing per uid prevents an older slow write from undoing a newer leave.
@@ -405,11 +415,15 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     this.mapSeats = options?.seats ?? BASE_MAP_SEATS;
     this.state = new OfficeState();
     if (options?.terrain) this.terrain = options.terrain;
+    if (options?.chairs) this.chairs = options.chairs;
     this.state.terrainBlocks = encodeTerrainBlocks(this.terrain().blocks);
     this.state.terrainWalls = encodeTerrainWalls(this.terrain().walls);
+    this.state.terrainChairs = encodeTerrainChairs(this.chairs());
     this.unsubscribeTerrainChanges = options?.subscribeTerrainChanges?.((blocks) => {
       this.state.terrainBlocks = encodeTerrainBlocks(blocks);
       this.state.terrainWalls = encodeTerrainWalls(this.terrain().walls);
+      this.state.terrainChairs = encodeTerrainChairs(this.chairs());
+      this.recheckChairSeats();
       // The runtime has persisted and published its authoritative snapshot.
       // Iterate replicated players, not sockets: reserved reconnects must move too.
       for (const [sessionId, player] of this.state.players) {
@@ -930,6 +944,14 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       return;
     }
 
+    if (ref.kind === 'chair') {
+      // A placed chair seats anyone, like a base map chair, if it stands there now.
+      const chair = this.chairs().find((candidate) => candidate.index === ref.index);
+      if (chair === undefined) return;
+      this.takeSeat(client.sessionId, seatId, { reach: chairSeatTiles(this.terrain().width, chair.index), userId }, chair.facing);
+      return;
+    }
+
     if (!this.desks) return;
     let desk: Awaited<ReturnType<DeskDirectory['getDesk']>>;
     try {
@@ -978,6 +1000,22 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     if (this.isOccupable(candidate)) return candidate;
     // An unavailable return square falls back to primary spawn, then its ring.
     return SPAWN_RING.map(at).find((position) => this.isOccupable(position)) ?? at(SPAWN_RING[0]!);
+  }
+
+  /**
+   * The placed chairs changed: whoever sits on one that is gone stands up,
+   * and whoever sits on a turned one turns with it.
+   */
+  private recheckChairSeats(): void {
+    const byTile = new Map(this.chairs().map((chair) => [chair.index, chair]));
+    for (const [sessionId] of this.seated) {
+      const player = this.state.players.get(sessionId);
+      const ref = parseSeatRef(player?.seat);
+      if (!player || ref?.kind !== 'chair') continue;
+      const chair = byTile.get(ref.index);
+      if (chair === undefined) this.standUp(sessionId);
+      else if (player.facing !== chair.facing) player.facing = chair.facing;
+    }
   }
 
   /**

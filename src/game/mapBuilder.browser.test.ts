@@ -7,7 +7,9 @@ import { ArtPackLoader } from './artPackLoader';
 import { chairPlacement, DEFAULT_DESK_FACING, deskPlacement, footprintAnchor } from './artPlacement';
 import { TILE, ZONE_LABELS } from './mapData';
 import {
+  CHAIR_OBJECT_NAME,
   FALLBACK_TERRAIN_KEY,
+  placeChairs,
   placeLayout,
   placeSeats,
   placeWalls,
@@ -280,6 +282,43 @@ describe('placeSeats', () => {
     });
 
     expect(rectangles).toBe(BASE_MAP_SEATS.length);
+  });
+});
+
+describe('placeChairs', () => {
+  const W = BASE_LAYOUT.width;
+
+  it('draws each placed chair from its own pack piece in both layers, on the middle of its tile, facing its way', async () => {
+    const drawn = await withArtScene((scene, art) => {
+      const objects = placeChairs(scene, [{ index: 5 * W + 3, piece: 'chair-gamer', facing: 'left' }, { index: 7 * W + 9, piece: 'chair-metal', facing: 'up' }], W, art);
+      return {
+        count: objects.length,
+        named: objects.every((object) => object.name === CHAIR_OBJECT_NAME),
+        gamer: images(scene)
+          .filter((img) => img.texture.key === artSheetKey('chair-gamer', 'sheet'))
+          .map((img) => ({ x: img.x, y: img.y, frame: Number(img.frame.name) })),
+        metal: images(scene).filter((img) => img.texture.key === artSheetKey('chair-metal', 'sheet')).length,
+      };
+    });
+
+    expect(drawn.count).toBe(4);
+    expect(drawn.named).toBe(true);
+    expect(drawn.metal).toBe(2);
+    const piece = { anchors: { seat: { x: 18, y: 22 }, ground: { x: 18, y: 31 } } } as ArtChairPiece;
+    const { back, front } = chairPlacement(piece, 'left', { x: 3.5 * TILE, y: 5.5 * TILE });
+    expect(drawn.gamer).toEqual([
+      { x: back.x, y: back.y, frame: back.frame },
+      { x: front.x, y: front.y, frame: front.frame },
+    ]);
+  });
+
+  it('without the pack marks each chair with a placeholder, and draws nothing for no chair', async () => {
+    const counts = await withScene((scene, art) => [
+      placeChairs(scene, [{ index: 0, piece: 'chair-wood', facing: 'down' }], W, art).length,
+      placeChairs(scene, [], W, art).length,
+    ]);
+
+    expect(counts).toEqual([1, 0]);
   });
 });
 

@@ -49,4 +49,11 @@ describe('officeCollisions', () => {
     expect(instances.slice(0, STATIC_COLLISION_INSTANCES.length)).toEqual(STATIC_COLLISION_INSTANCES);
     expect(instances.at(-1)?.piece).toBe('desk-oak');
   });
+
+  it('adds the placed chairs last, each as its own piece', () => {
+    const instances = officeCollisionInstances([desk()], undefined, undefined, [{ index: 5, piece: 'chair-gamer', facing: 'up' }]);
+
+    expect(instances.at(-2)?.piece).toBe('desk-oak');
+    expect(instances.at(-1)).toMatchObject({ piece: 'chair-gamer', pivot: { x: 5 * 32 + 16, y: 16 } });
+  });
 });
