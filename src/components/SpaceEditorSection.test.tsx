@@ -117,7 +117,7 @@ describe('SpaceEditorSection (#74, PR4)', () => {
 
     act(() => bridge.emit('layoutplace', { tx: 5, ty: 6, valid: true }));
 
-    await waitFor(() => expect(spaces.updateSpace).toHaveBeenCalledWith('id-sala', { x: 5, y: 6 }));
+    await waitFor(() => expect(spaces.updateSpace).toHaveBeenCalledWith('id-sala', { x: 5, y: 6, w: 5, h: 5 }));
   });
 
   it('eliminar llama a deleteSpace con el id seleccionado', async () => {
