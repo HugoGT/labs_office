@@ -122,30 +122,46 @@ function parseSpacesConfig(payload: unknown): SpacesConfig | null {
 
 /**
  * Predicado de obsolescencia para la version de un PAR (#74, PR3a), acotado a
- * UN refetch por version distinta observada. `spacesVersion` no es un push de
- * cambios de layout -- es el propio cliente reportando su hash (ver
- * `OfficeScene.applySpacesConfig`) -- asi que un par con una version distinta
- * es la unica senal de que hay algo nuevo que pedir. `Set`-backed: una vez
- * marcada obsoleta una version, DEJA de estarlo para siempre, sin importar
- * cuantos pares distintos la repitan despues (no es un refetch por par, es
- * uno por version).
+ * UN refetch por version distinta observada cada `STALE_SPACES_RETRY_MS`.
+ * `spacesVersion` no es un push de cambios de layout -- es el propio cliente
+ * reportando su hash (ver `OfficeScene.applySpacesConfig`) -- asi que un par
+ * con una version distinta es la unica senal de que hay algo nuevo que pedir.
+ * Es uno por version, no uno por par: cuantos pares distintos repitan la misma
+ * version dentro del intervalo no importa.
  *
- * La version incorporada (`BUILT_IN_SPACES_VERSION`) nunca se marca obsoleta:
- * es lo que reporta quien no tiene nada mejor que ofrecer (503, red caida), y
- * pedirle `/spaces` a ese par no traeria una config mas nueva, solo repetiria
- * la misma llamada que ya fallo para el.
+ * Por que se vuelve a marcar tras el intervalo (#183): un refetch fallido
+ * conserva la config vieja (`useSpacesConfig`), y marcar la version "para
+ * siempre" dejaba a este cliente aislado hasta recargar. El intervalo acota el
+ * coste: como mucho un `/spaces` por version y por intervalo.
+ *
+ * La version incorporada (`BUILT_IN_SPACES_VERSION`) YA NO es una excepcion
+ * (#183): es el hash de la lista vacia, asi que borrar los ultimos espacios la
+ * convierte en la version servida, e ignorarla dejaba a todos sin releer y
+ * sordos entre si para siempre.
  */
 export type StaleSpacesVersionPredicate = (peerVersion: string, myVersion: string) => boolean;
 
-export function createStaleSpacesVersionTracker(): StaleSpacesVersionPredicate {
-  const seen = new Set<string>();
+/** Minimum time before the same peer version may trigger another refetch (#183). */
+export const STALE_SPACES_RETRY_MS = 10_000;
+
+export interface StaleSpacesVersionTrackerOptions {
+  /** Injectable clock for tests. */
+  now?: () => number;
+}
+
+export function createStaleSpacesVersionTracker({
+  now = Date.now,
+}: StaleSpacesVersionTrackerOptions = {}): StaleSpacesVersionPredicate {
+  const lastFlaggedAt = new Map<string, number>();
 
   return function isStaleSpacesVersion(peerVersion, myVersion) {
     if (peerVersion === myVersion) return false;
-    if (peerVersion === BUILT_IN_SPACES_VERSION) return false;
-    if (seen.has(peerVersion)) return false;
 
-    seen.add(peerVersion);
+    const at = now();
+    const last = lastFlaggedAt.get(peerVersion);
+    if (last !== undefined && at - last < STALE_SPACES_RETRY_MS) return false;
+
+    lastFlaggedAt.set(peerVersion, at);
     return true;
   };
 }

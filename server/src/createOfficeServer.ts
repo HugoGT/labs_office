@@ -558,6 +558,12 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   const recordings = createRecordingRegistry();
   const finished = createFinishedRecordingStore();
   const desksChangeListeners = new Set<() => void>();
+  // Spaces have no push of their own otherwise: peers only noticed an admin
+  // edit through the spaces version drift, muting each other meanwhile (#183).
+  const spacesChangeListeners = new Set<() => void>();
+  const notifySpacesChanged = () => {
+    for (const listener of spacesChangeListeners) listener();
+  };
   /**
    * The served desks or their decor changed: the collision placements follow
    * them. A failure keeps the previous placements, never the request.
@@ -855,6 +861,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
       // 7); without it a room still gets the pack default.
       run(req, { directory, spaces, auth, identityAdmin, decor })
         .then((result) => {
+          if (req.method === 'POST' && result.status >= 200 && result.status < 300) notifySpacesChanged();
           res.status(result.status).json(result.body);
         })
         .catch(() => {
@@ -1173,9 +1180,8 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
       run(req, { directory, desks, auth, identityAdmin, decor, walls })
         .then((result) => {
           // Adapter promises resolve after COMMIT; failures never invalidate.
+          // `notifyDesksChanged` also refreshes the collision placements.
           if (changesDesks && result.status >= 200 && result.status < 300) notifyDesksChanged();
-          // Creating, moving or deleting a desk moves its collision too.
-          else if (req.method === 'POST' && result.status >= 200 && result.status < 300) refreshCollisionPlacements();
           res.status(result.status).json(result.body);
         })
         .catch(() => {
@@ -1194,25 +1200,30 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     desksRoute((req, deps) => handleListDesks(req.header('Authorization'), deps)),
   );
 
+  // Creating, moving or deleting a desk also writes its cubicle space, so it
+  // is announced like a claim (#183): every client rereads desks and spaces
+  // together instead of waiting for the version drift.
+  //
   // Las cuatro de escritura van por POST y ninguna por PUT/PATCH/DELETE: el
   // middleware de CORS de arriba anuncia `GET,POST,OPTIONS`, asi que cualquier
   // otro verbo moriria en el preflight del navegador antes de llegar a
   // Express. Misma forma que `/admin/spaces/:id/delete`.
   app.post(
     '/admin/desks',
-    desksRoute((req, deps) => handleCreateDesk(req.header('Authorization'), req.body, deps)),
+    desksRoute((req, deps) => handleCreateDesk(req.header('Authorization'), req.body, deps), true),
   );
 
   app.post(
     '/admin/desks/:id',
-    desksRoute((req, deps) =>
-      handleUpdateDesk(req.header('Authorization'), req.params.id, req.body, deps),
+    desksRoute(
+      (req, deps) => handleUpdateDesk(req.header('Authorization'), req.params.id, req.body, deps),
+      true,
     ),
   );
 
   app.post(
     '/admin/desks/:id/delete',
-    desksRoute((req, deps) => handleDeleteDesk(req.header('Authorization'), req.params.id, deps)),
+    desksRoute((req, deps) => handleDeleteDesk(req.header('Authorization'), req.params.id, deps), true),
   );
 
   // Coger y dejar sitio NO cuelgan de `/admin`: quien administra decide cuantos
@@ -1396,6 +1407,10 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     subscribeDesksChanges: (listener: () => void) => {
       desksChangeListeners.add(listener);
       return () => { desksChangeListeners.delete(listener); };
+    },
+    subscribeSpacesChanges: (listener: () => void) => {
+      spacesChangeListeners.add(listener);
+      return () => { spacesChangeListeners.delete(listener); };
     },
     stopRecording: (entry: Parameters<typeof finishRecording>[0]) => {
       const deps = recordingDeps();

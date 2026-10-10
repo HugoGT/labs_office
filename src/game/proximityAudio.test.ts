@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { PROX_RADIUS, type SpaceArea } from './mapData';
 import { detectSpace } from './proximity';
+import { DO_NOT_DISTURB } from './officeProtocol';
 import {
+  SPACES_VERSION_GRACE_MS,
   audiblePeers,
+  audiblePeersWithVersionGrace,
   reconcileSubscriptions,
   type AudibleInput,
   type AudioPeer,
@@ -607,5 +610,92 @@ describe('reconcileSubscriptions: deltas minimos, sin fugas de privacidad', () =
 
     expect(delta.unsubscribe).toEqual(['p1']);
     expect(delta.subscribe).toEqual([]);
+  });
+});
+
+describe('audiblePeersWithVersionGrace: peers who do not move are not cut while versions converge (#183)', () => {
+  const SELF: AudibleInput['self'] = { sessionId: 'a', x: 0, y: 0, spaceId: null, spacesVersion: 'v1', status: 'g' };
+  const NEAR: AudioPeer = { sessionId: 'b', x: 10, y: 0, spaceId: null, spacesVersion: 'v1', status: 'g' };
+
+  function tick(peers: readonly AudioPeer[], lastAudibleAt: Map<string, number>, now: number, self = SELF) {
+    return audiblePeersWithVersionGrace({ self, peers, radius: PROX_RADIUS, lastAudibleAt, now });
+  }
+
+  it('returns the strict result and remembers when each peer was strictly audible', () => {
+    const lastAudibleAt = new Map<string, number>();
+    expect(tick([NEAR], lastAudibleAt, 1_000)).toEqual(['b']);
+    expect(lastAudibleAt.get('b')).toBe(1_000);
+  });
+
+  it('keeps a peer whose only difference is its spaces version within the grace, and drops it after', () => {
+    const lastAudibleAt = new Map<string, number>();
+    tick([NEAR], lastAudibleAt, 1_000);
+    const edited = { ...NEAR, spacesVersion: 'v2' };
+
+    expect(tick([edited], lastAudibleAt, 1_000 + SPACES_VERSION_GRACE_MS - 1)).toEqual(['b']);
+    expect(tick([edited], lastAudibleAt, 1_000 + SPACES_VERSION_GRACE_MS)).toEqual([]);
+  });
+
+  it('never refreshes the grace from a held peer, so it ends', () => {
+    const lastAudibleAt = new Map<string, number>();
+    tick([NEAR], lastAudibleAt, 1_000);
+    const edited = { ...NEAR, spacesVersion: 'v2' };
+    tick([edited], lastAudibleAt, 2_000);
+    expect(lastAudibleAt.get('b')).toBe(1_000);
+  });
+
+  it('is symmetric: both sides hold each other through the same window', () => {
+    const aMap = new Map<string, number>();
+    const bMap = new Map<string, number>();
+    const selfB: AudibleInput['self'] = { ...SELF, sessionId: 'b', x: 10 };
+    const peerA: AudioPeer = { sessionId: 'a', x: 0, y: 0, spaceId: null, spacesVersion: 'v1', status: 'g' };
+    tick([NEAR], aMap, 1_000);
+    tick([peerA], bMap, 1_000, selfB);
+
+    // B already adopted v2, A not yet.
+    expect(tick([{ ...NEAR, spacesVersion: 'v2' }], aMap, 2_000)).toEqual(['b']);
+    expect(tick([peerA], bMap, 2_000, { ...selfB, spacesVersion: 'v2' })).toEqual(['a']);
+  });
+
+  it('does not hold a peer that would not be audible with matching versions either', () => {
+    const lastAudibleAt = new Map<string, number>();
+    tick([NEAR], lastAudibleAt, 1_000);
+    // Walked into a room (or out of the radius) while versions differed.
+    const inRoom = { ...NEAR, spacesVersion: 'v2', spaceId: 'sala' };
+    const far = { ...NEAR, spacesVersion: 'v2', x: PROX_RADIUS * 2 };
+    expect(tick([inRoom], lastAudibleAt, 1_500)).toEqual([]);
+    expect(tick([far], lastAudibleAt, 1_500)).toEqual([]);
+  });
+
+  it('does not hold a peer that never was strictly audible', () => {
+    expect(tick([{ ...NEAR, spacesVersion: 'v2' }], new Map(), 1_000)).toEqual([]);
+  });
+
+  it('never holds a peer in "No molestar", nor anyone while I am in it', () => {
+    const lastAudibleAt = new Map<string, number>();
+    tick([NEAR], lastAudibleAt, 1_000);
+    expect(tick([{ ...NEAR, spacesVersion: 'v2', status: DO_NOT_DISTURB }], lastAudibleAt, 1_500)).toEqual([]);
+    expect(tick([{ ...NEAR, spacesVersion: 'v2' }], lastAudibleAt, 1_500, { ...SELF, status: DO_NOT_DISTURB })).toEqual([]);
+  });
+
+  it('never holds anyone without an own session', () => {
+    const lastAudibleAt = new Map<string, number>();
+    tick([NEAR], lastAudibleAt, 1_000);
+    expect(tick([{ ...NEAR, spacesVersion: 'v2' }], lastAudibleAt, 1_500, { ...SELF, sessionId: null })).toEqual([]);
+  });
+
+  it('forgets peers that left', () => {
+    const lastAudibleAt = new Map<string, number>();
+    tick([NEAR], lastAudibleAt, 1_000);
+    tick([], lastAudibleAt, 1_100);
+    expect(lastAudibleAt.has('b')).toBe(false);
+  });
+
+  it('keeps the output sorted, held peers included', () => {
+    const lastAudibleAt = new Map<string, number>();
+    const c: AudioPeer = { ...NEAR, sessionId: 'c' };
+    const z: AudioPeer = { ...NEAR, sessionId: 'z' };
+    tick([z, c], lastAudibleAt, 1_000);
+    expect(tick([{ ...z, spacesVersion: 'v2' }, c], lastAudibleAt, 1_500)).toEqual(['c', 'z']);
   });
 });

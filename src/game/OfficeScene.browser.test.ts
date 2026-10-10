@@ -2298,6 +2298,17 @@ describe('OfficeScene: mensajes de llamada del servidor se relanzan al puente (i
     expect(changed).toHaveBeenCalledTimes(1);
   });
 
+  it('forwards transport space invalidation to the bridge (#183)', async () => {
+    const bridge = createOfficeBridge();
+    const changed = vi.fn();
+    bridge.on('spaceschanged', changed);
+    const connector = fakeConnector();
+    await bootOfficeScene(bridge, { endpoint: 'ws://office', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    connector.handlers()!.onSpacesChanged?.();
+    expect(changed).toHaveBeenCalledTimes(1);
+  });
+
   it('onCallerLeft del transporte se relanza como "callerleft"', async () => {
     const bridge = createOfficeBridge();
     const events: { from: string }[] = [];

@@ -95,6 +95,64 @@ export function audiblePeers(input: AudibleInput): string[] {
   return [...new Set(audible.map((peer) => peer.sessionId))].sort();
 }
 
+/** How long a peer stays audible while only our spaces versions disagree (#183). */
+export const SPACES_VERSION_GRACE_MS = 3000;
+
+export interface VersionGraceInput extends AudibleInput {
+  /**
+   * When each peer was last STRICTLY audible, owned by the caller across
+   * ticks. Updated in place: refreshed for strictly audible peers only, and
+   * pruned of peers no longer present.
+   */
+  lastAudibleAt: Map<string, number>;
+  now: number;
+}
+
+/**
+ * `audiblePeers` plus a short grace for the window in which two peers who did
+ * not move disagree only on `spacesVersion` (#183): an admin desk or space
+ * edit reaches each client at a slightly different moment, and the strict D4
+ * predicate cut audio and video for everyone in between.
+ *
+ * `audiblePeers` keeps its semantics; this only adds back a peer that
+ *   - was strictly audible less than `SPACES_VERSION_GRACE_MS` ago,
+ *   - differs from me in `spacesVersion`, and
+ *   - would be audible if our versions matched (so walking into a room or
+ *     out of the radius still cuts at once).
+ * Never for "No molestar" on either side nor without an own session, which
+ * `audiblePeers` already reduces to nobody. The grace is only refreshed by
+ * strict audibility, so it always ends: a disagreement that outlives it is
+ * the real one D4 exists to silence. Both sides evaluate the same rule over
+ * the same history, so the hold stays mutual.
+ */
+export function audiblePeersWithVersionGrace(input: VersionGraceInput): string[] {
+  const { self, peers, lastAudibleAt, now } = input;
+  const strict = audiblePeers(input);
+
+  const present = new Set(peers.map((peer) => peer.sessionId));
+  for (const id of lastAudibleAt.keys()) {
+    if (!present.has(id)) lastAudibleAt.delete(id);
+  }
+  for (const id of strict) lastAudibleAt.set(id, now);
+
+  const strictSet = new Set(strict);
+  const versionDiffers = new Set(
+    peers.filter((peer) => peer.spacesVersion !== self.spacesVersion).map((peer) => peer.sessionId),
+  );
+  const asIfAgreed = audiblePeers({
+    ...input,
+    peers: peers.map((peer) => ({ ...peer, spacesVersion: self.spacesVersion })),
+  });
+  const held = asIfAgreed.filter((id) => {
+    if (strictSet.has(id) || !versionDiffers.has(id)) return false;
+    const last = lastAudibleAt.get(id);
+    return last !== undefined && now - last < SPACES_VERSION_GRACE_MS;
+  });
+
+  if (held.length === 0) return strict;
+  return [...strict, ...held].sort();
+}
+
 export interface SubscriptionDelta {
   subscribe: string[];
   unsubscribe: string[];

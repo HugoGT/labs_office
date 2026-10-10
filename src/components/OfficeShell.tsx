@@ -259,17 +259,25 @@ export function OfficeShell({
    */
   const { desks, claim, release, refresh: refreshDesks } = useDesks(endpoint, session);
   useEffect(() => {
-    const offDesks = bridge.on('deskschanged', refreshDesks);
+    // Both lists on either notice (#183): a desk write also writes its cubicle
+    // space, and rereading only one leaves this client on an old spaces
+    // version, muted by every peer until the drift catches up.
+    const refreshBoth = () => {
+      refreshDesks();
+      refreshSpaces();
+    };
+    const offDesks = bridge.on('deskschanged', refreshBoth);
+    const offSpaces = bridge.on('spaceschanged', refreshBoth);
     // A broadcast can be missed during an outage. Refetch on the connected
     // edge (not every peer-presence update) to close that window too.
     let connected = false;
     const offPresence = bridge.on('presence', ({ state }) => {
       const next = state === 'connected';
-      if (next && !connected) refreshDesks();
+      if (next && !connected) refreshBoth();
       connected = next;
     });
-    return () => { offDesks(); offPresence(); };
-  }, [bridge, refreshDesks]);
+    return () => { offDesks(); offSpaces(); offPresence(); };
+  }, [bridge, refreshDesks, refreshSpaces]);
   /**
    * Convergencia tras el drift de un par (#74, PR3a): la escena ya acota
    * `spacesstale` a una vez por version distinta observada

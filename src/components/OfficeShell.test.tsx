@@ -912,6 +912,47 @@ describe('OfficeShell: config de espacios servida (#7, slice 3)', () => {
 describe('OfficeShell: convergencia tras drift de un par (#74, PR3a)', () => {
   const SESION = { displayName: 'Ana Torres', getIdToken: async () => 'id-token' };
 
+  function spacesReads(fetchSpy: { mock: { calls: unknown[][] } }): number {
+    return fetchSpy.mock.calls.filter(([url]) => String(url).endsWith('/spaces')).length;
+  }
+
+  it.each(['deskschanged', 'spaceschanged'] as const)(
+    'a "%s" rereads both /desks and /spaces so desk edits converge at once (#183)',
+    async (event) => {
+      vi.mocked(fetchOfficeDesks).mockResolvedValue([]);
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('sin red en jsdom'));
+
+      render(<OfficeShell session={SESION} />);
+      const bridge = createGameMock.mock.calls[0][1];
+      await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(spacesReads(fetchSpy)).toBe(1));
+
+      act(() => bridge.emit(event, undefined));
+
+      await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(spacesReads(fetchSpy)).toBe(2));
+      fetchSpy.mockRestore();
+    },
+  );
+
+  it('rereads /spaces on the connected edge too, so a missed edit converges (#183)', async () => {
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([]);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('sin red en jsdom'));
+
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await vi.waitFor(() => expect(spacesReads(fetchSpy)).toBe(1));
+    const presence = (state: 'connected' | 'reconnecting') => ({ online: state === 'connected', peers: 0, state, canRetry: true });
+
+    act(() => bridge.emit('presence', presence('connected')));
+    await vi.waitFor(() => expect(spacesReads(fetchSpy)).toBe(2));
+    act(() => bridge.emit('presence', presence('connected')));
+    act(() => bridge.emit('presence', presence('reconnecting')));
+    act(() => bridge.emit('presence', presence('connected')));
+    await vi.waitFor(() => expect(spacesReads(fetchSpy)).toBe(3));
+    fetchSpy.mockRestore();
+  });
+
   it('un "spacesstale" del puente relee tanto /desks como /spaces', async () => {
     vi.mocked(fetchOfficeDesks).mockResolvedValue([]);
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('sin red en jsdom'));
