@@ -330,14 +330,6 @@ describe('CameraPanLayer: the view never leaves the terrain region (#179)', () =
   // Three 288 px blocks a side inside the 2000x2000 world, around the target (400, 300).
   const REGION = { x: 200, y: 100, width: 864, height: 864 };
 
-  async function addMinimap(scene: HostScene): Promise<Phaser.Cameras.Scene2D.Camera> {
-    const minimap = scene.cameras.add(200, 0, 100, 100);
-    minimap.setZoom(100 / WORLD.width);
-    minimap.centerOn(WORLD.width / 2, WORLD.height / 2);
-    await nextFrame(scene);
-    return minimap;
-  }
-
   function expectViewInside(cam: Phaser.Cameras.Scene2D.Camera, region: typeof REGION): void {
     const view = cam.worldView;
     expect(view.x).toBeGreaterThanOrEqual(region.x - 0.5);
@@ -370,11 +362,10 @@ describe('CameraPanLayer: the view never leaves the terrain region (#179)', () =
     const scene = await bootHostScene();
     const cam = scene.cameras.main;
     cam.startFollow(scene.target);
-    const minimap = await addMinimap(scene);
-    new CameraPanLayer(layerOptions(scene, { region: REGION, minimap }));
+    const layer = new CameraPanLayer(layerOptions(scene, { region: REGION }));
 
-    // Minimap screen (290, 90) is world (1800, 1800), far past the region.
-    scene.input.emit('pointerdown', fakePointer({ x: 290, y: 90, camera: minimap }), []);
+    // A minimap point far past the region.
+    layer.focus({ x: 1800, y: 1800 });
     const scrolls: number[] = [];
     for (let frame = 0; frame < 128; frame++) {
       await nextFrame(scene);
@@ -445,9 +436,9 @@ describe('CameraPanLayer: click en el minimapa (#98)', () => {
     cam.startFollow(scene.target);
     const minimap = await addMinimap(scene);
     const minimapScrollX = minimap.scrollX;
-    new CameraPanLayer(layerOptions(scene, { minimap }));
+    const layer = new CameraPanLayer(layerOptions(scene));
 
-    scene.input.emit('pointerdown', fakePointer({ x: 250, y: 50, camera: minimap }), []);
+    layer.focus({ x: 1000, y: 1000 });
     // Planeo, no salto: el cuadro siguiente todavia no llego.
     await nextFrame(scene);
     expect(cam.midPoint.x).not.toBeCloseTo(1000, 0);
@@ -467,9 +458,9 @@ describe('CameraPanLayer: click en el minimapa (#98)', () => {
     const cam = scene.cameras.main;
     const minimap = await addMinimap(scene);
     const startFollow = vi.spyOn(cam, 'startFollow');
-    new CameraPanLayer(layerOptions(scene, { minimap }));
+    const layer = new CameraPanLayer(layerOptions(scene));
 
-    scene.input.emit('pointerdown', fakePointer({ x: 250, y: 50, camera: minimap }), []);
+    layer.focus({ x: 1000, y: 1000 });
     renderFrames(scene);
     expect(cam.midPoint.x).toBeCloseTo(1000, 0);
     expect(cam.midPoint.y).toBeCloseTo(1000, 0);
@@ -505,11 +496,10 @@ describe('CameraPanLayer: click en el minimapa (#98)', () => {
   it('a drag interrupts minimap glide and keeps its new focus until movement after release', async () => {
     const scene = await bootHostScene();
     const cam = scene.cameras.main;
-    const minimap = await addMinimap(scene);
     const startFollow = vi.spyOn(cam, 'startFollow');
-    new CameraPanLayer(layerOptions(scene, { minimap }));
+    const layer = new CameraPanLayer(layerOptions(scene));
 
-    scene.input.emit('pointerdown', fakePointer({ x: 250, y: 50, camera: minimap }), []);
+    layer.focus({ x: 1000, y: 1000 });
     await nextFrame(scene);
     scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, camera: cam }), []);
     scene.input.emit('pointermove', fakePointer({ x: 120, y: 90, camera: cam }));
@@ -528,28 +518,18 @@ describe('CameraPanLayer: click en el minimapa (#98)', () => {
     expect(startFollow).toHaveBeenCalledTimes(1);
   });
 
-  it('boton derecho o editor de layout activo: el minimapa no mueve la camara', async () => {
-    for (const guard of [
-      { button: 2, isSuspended: () => false },
-      { button: 0, isSuspended: () => true },
-    ]) {
-      const scene = await bootHostScene();
-      const cam = scene.cameras.main;
-      const minimap = await addMinimap(scene);
-      await nextFrame(scene);
-      const startScrollX = cam.scrollX;
-      new CameraPanLayer(layerOptions(scene, { minimap, isSuspended: guard.isSuspended }));
+  it('editor de layout activo: el foco del minimapa no mueve la camara', async () => {
+    const scene = await bootHostScene();
+    const cam = scene.cameras.main;
+    await nextFrame(scene);
+    const startScrollX = cam.scrollX;
+    const layer = new CameraPanLayer(layerOptions(scene, { isSuspended: () => true }));
 
-      scene.input.emit(
-        'pointerdown',
-        fakePointer({ x: 250, y: 50, button: guard.button, camera: minimap }),
-        [],
-      );
-      await nextFrame(scene);
-      await nextFrame(scene);
+    layer.focus({ x: 1000, y: 1000 });
+    await nextFrame(scene);
+    await nextFrame(scene);
 
-      expect(cam.scrollX).toBe(startScrollX);
-    }
+    expect(cam.scrollX).toBe(startScrollX);
   });
 });
 

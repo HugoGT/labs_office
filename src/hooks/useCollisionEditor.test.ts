@@ -163,3 +163,42 @@ describe('useCollisionEditor', () => {
     expect(debug).toEqual([{ show: true }, { show: false }]);
   });
 });
+
+describe('useCollisionEditor: Escape frees the map one step at a time', () => {
+  function escape(): KeyboardEvent {
+    const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    act(() => {
+      window.dispatchEvent(event);
+    });
+    return event;
+  }
+
+  it('drops the selected rectangle, then the piece, then leaves the open editor alone', () => {
+    const { bridge, result, commands } = setup();
+    act(() => result.current.enter());
+    pickTree(bridge);
+    act(() => result.current.selectRect(0));
+
+    expect(escape().defaultPrevented).toBe(true);
+    expect(result.current.selectedRect).toBeNull();
+    expect(result.current.pieceId).toBe('tree-oak');
+
+    expect(escape().defaultPrevented).toBe(true);
+    expect(result.current.pieceId).toBeNull();
+    expect(commands.at(-1)).toEqual({ pieceId: null, draft: [], selectedRect: null, snap: 1 });
+
+    expect(escape().defaultPrevented).toBe(false);
+    expect(result.current.active).toBe(true);
+  });
+
+  it('keeps a piece with unsaved changes: Escape never throws a draft away', () => {
+    const { bridge, result } = setup();
+    act(() => result.current.enter());
+    pickTree(bridge);
+    act(() => bridge.emit('collisiondraft', { rects: [{ x: -4, y: -8, w: 8, h: 8 }], selectedRect: null }));
+
+    expect(escape().defaultPrevented).toBe(false);
+    expect(result.current.pieceId).toBe('tree-oak');
+    expect(result.current.dirty).toBe(true);
+  });
+});

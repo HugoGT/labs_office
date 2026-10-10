@@ -40,6 +40,8 @@ import {
 import { deskFurnitureName, deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
+import { MinimapLayer } from './MinimapLayer';
+import { collisionEditHoldsMap, layoutEditHoldsMap, terrainEditHoldsMap } from './editorMapHold';
 import { isEditableElementFocused } from './inputFocusGuard';
 import { LayoutEditLayer } from './LayoutEditLayer';
 import {
@@ -60,8 +62,6 @@ import {
   BUILT_IN_SPACES_VERSION,
   PROX_RADIUS,
   TILE,
-  WORLD_H,
-  WORLD_W,
   type SpaceArea,
 } from './mapData';
 import type { OfficeBridge } from './officeBridge';
@@ -385,12 +385,14 @@ export class OfficeScene extends Phaser.Scene {
   /**
    * Capa del pan de camara (#53): se crea despues de `setupInput`, igual que
    * `layoutEditLayer` se crea en su propio punto -- ambas escuchan el mismo
-   * `this.input`. `isSuspended` lee `this.layoutEditing` en el momento del
+   * `this.input`. `isSuspended` lee `this.mapHeld` en el momento del
    * `pointerdown` (mismo momento en que `closemenu` ya lo consulta): un
    * `layoutedit` que llega a mitad de un pan ya en curso no lo corta, igual
    * que hoy tampoco corta un auto-walk en curso.
    */
   private cameraPanLayer?: CameraPanLayer;
+  /** Frames the minimap camera on the terrain region, like the pan layer does the main one. */
+  private minimapLayer?: MinimapLayer;
   /** Map zoom (map-zoom); created before the pan layer, see `create()`. */
   private cameraZoomLayer?: CameraZoomLayer;
   /**
@@ -409,12 +411,22 @@ export class OfficeScene extends Phaser.Scene {
    */
   private layoutEditing = false;
   /**
-   * Which editor holds the map (#123 phase 2): either one suspends desk
-   * clicks, menus and camera pan through `layoutEditing`, which is their OR.
+   * Which editor is open (#123 phase 2): either one suspends desk clicks and
+   * menus through `layoutEditing`, which is their OR.
    */
   private layoutCommandActive = false;
   private terrainEditing = false;
   private collisionEditing = false;
+  /**
+   * Whether an open editor holds the map (`editorMapHold.ts`): something is
+   * picked that the next click acts on. Only then do walking, sitting, the
+   * view drag and the minimap stop; an editor with nothing picked leaves the
+   * admin free to move around.
+   */
+  private mapHeld = false;
+  private layoutHolds = false;
+  private terrainHolds = false;
+  private collisionHolds = false;
   /**
    * Todo lo dibujado del ultimo comando `desks` (#7, slice 5): zonas,
    * etiquetas y decoracion. Se guarda entero porque cada lista nueva sustituye
@@ -461,6 +473,13 @@ export class OfficeScene extends Phaser.Scene {
    * that interrupts walking also drops it, so a stale click never pairs later.
    */
   private clickPair: ClickSample | null = null;
+
+  /** Recomputes both editing flags; the map becoming held stops any walk at once. */
+  private syncEditing(): void {
+    this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing;
+    this.mapHeld = this.layoutHolds || this.terrainHolds || this.collisionHolds;
+    if (this.mapHeld) this.resetWalking();
+  }
 
   private readonly resetWalking = (): void => {
     this.autoSit = { push: null, guard: this.autoSit.guard };
@@ -638,8 +657,7 @@ export class OfficeScene extends Phaser.Scene {
       target: this.player,
       lerp: FOLLOW_LERP,
       region: this.cameraRegion(),
-      minimap: this.minimapCamera,
-      isSuspended: () => this.layoutEditing || !this.localPositionReady,
+      isSuspended: () => this.mapHeld || !this.localPositionReady,
     });
 
     this.unsubscribeSetStatus = this.bridge.onCommand('setStatus', ({ status }) => {
@@ -683,8 +701,8 @@ export class OfficeScene extends Phaser.Scene {
     this.layoutEditLayer = new LayoutEditLayer(this, this.bridge);
     this.unsubscribeLayoutEdit = this.bridge.onCommand('layoutedit', (command) => {
       this.layoutCommandActive = command !== null;
-      this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing;
-      if (this.layoutEditing) this.resetWalking();
+      this.layoutHolds = layoutEditHoldsMap(command);
+      this.syncEditing();
     });
 
     // #123 phase 2. The layer outlines and picks blocks; the scene paints the
@@ -693,8 +711,8 @@ export class OfficeScene extends Phaser.Scene {
     this.unsubscribeTerrainEdit = this.bridge.onCommand('terrainedit', (command) => {
       const opening = command !== null && !this.terrainEditing;
       this.terrainEditing = command !== null;
-      this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing;
-      if (this.layoutEditing) this.resetWalking();
+      this.terrainHolds = terrainEditHoldsMap(command);
+      this.syncEditing();
       const previewBlocks = command?.previewBlocks ?? null;
       const repaint = (previewBlocks === null ? '' : encodeTerrainBlocks(previewBlocks)) !==
         (this.terrainPreviewBlocks === null ? '' : encodeTerrainBlocks(this.terrainPreviewBlocks));
@@ -722,8 +740,8 @@ export class OfficeScene extends Phaser.Scene {
     if (collisionOutlines !== null) this.minimapCamera?.ignore(collisionOutlines);
     this.unsubscribeCollisionEdit = this.bridge.onCommand('collisionedit', (command) => {
       this.collisionEditing = command !== null;
-      this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing;
-      if (this.layoutEditing) this.resetWalking();
+      this.collisionHolds = collisionEditHoldsMap(command);
+      this.syncEditing();
     });
 
     // #52: reintento manual, el ultimo recurso cuando la escalera automatica
@@ -805,6 +823,7 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeCollisionEdit?.();
       this.collisionEditLayer?.destroy();
       this.cameraPanLayer?.destroy();
+      this.minimapLayer?.destroy();
       this.cameraZoomLayer?.destroy();
       this.remotes?.clear();
       this.roster?.clear();
@@ -1012,6 +1031,7 @@ export class OfficeScene extends Phaser.Scene {
     animateCharacter(this.player, { dx: 0, dy: 0, dtMs: 0 });
     this.cameraPanLayer?.resetFollow();
     this.mmMarker?.setPosition(snapshot.x, snapshot.y);
+    this.minimapLayer?.show(snapshot);
     this.localPositionReady = true;
   }
 
@@ -1196,7 +1216,7 @@ export class OfficeScene extends Phaser.Scene {
    * movement is dropped.
    */
   private pushToSit(time: number, vx: number, vy: number): boolean {
-    if (this.seat !== null || this.pendingSeat !== null || !this.localPositionReady || this.layoutEditing) {
+    if (this.seat !== null || this.pendingSeat !== null || !this.localPositionReady || this.mapHeld) {
       this.autoSit = { push: null, guard: this.autoSit.guard };
       return false;
     }
@@ -1813,6 +1833,7 @@ export class OfficeScene extends Phaser.Scene {
       this.buildTerrainColliders(this.grid);
       this.paintTerrain();
       this.cameraPanLayer?.setRegion(this.cameraRegion());
+      this.minimapLayer?.setRegion(this.cameraRegion());
     }
     this.emitTerrain();
   }
@@ -1917,13 +1938,24 @@ export class OfficeScene extends Phaser.Scene {
       MINIMAP_WIDTH,
       MINIMAP_HEIGHT,
     );
-    minimap.setZoom(Math.min(MINIMAP_WIDTH / WORLD_W, MINIMAP_HEIGHT / WORLD_H));
-    minimap.centerOn(WORLD_W / 2, WORLD_H / 2);
     minimap.setBackgroundColor(VOID_COLOR);
     this.minimapCamera = minimap;
 
     this.mmMarker = this.add.circle(0, 0, 42, 0xffffff, 0.45).setDepth(MINIMAP_MARKER_DEPTH);
     cam.ignore(this.mmMarker);
+    this.minimapLayer = new MinimapLayer({
+      scene: this,
+      camera: minimap,
+      region: this.cameraRegion(),
+      center: { x: this.player.x, y: this.player.y },
+      marker: this.mmMarker,
+      // The pan layer is created later in `create()`; it exists by the first click.
+      onFocus: (point) => this.cameraPanLayer?.focus(point),
+      // Same guards as a double click on the map: no walking while editing or before the room placed us.
+      onWalk: (point) => {
+        if (!this.mapHeld && this.localPositionReady) this.startWalk(point);
+      },
+    });
 
     this.scale.on('resize', (gameSize: Phaser.Structs.Size) => {
       minimap.setPosition(gameSize.width - (MINIMAP_WIDTH + RAIL_RIGHT), MINIMAP_MARGIN);
@@ -1969,10 +2001,11 @@ export class OfficeScene extends Phaser.Scene {
         // de colocacion para `layoutEditLayer` (su propio listener global en
         // el mismo `this.input`), no una peticion de cerrar el menu
         // contextual -- que ademas no puede haber abierto mientras se edita.
-        if (this.layoutEditing || !this.localPositionReady) return;
+        if (!this.localPositionReady) return;
         if (!currentlyOver || currentlyOver.length === 0) {
-          this.bridge.emit('closemenu', undefined);
-          if (pointer.button === 0 && pointer.camera === this.cameras.main) this.walkClick = pointer;
+          if (!this.layoutEditing) this.bridge.emit('closemenu', undefined);
+          // An open editor with nothing picked still walks: only a held map does not.
+          if (!this.mapHeld && pointer.button === 0 && pointer.camera === this.cameras.main) this.walkClick = pointer;
         }
       },
     );
@@ -1985,7 +2018,7 @@ export class OfficeScene extends Phaser.Scene {
       this.clickPair = null;
     });
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
-      const eligible = pointer === this.walkClick && !this.layoutEditing && this.localPositionReady && !over?.length &&
+      const eligible = pointer === this.walkClick && !this.mapHeld && this.localPositionReady && !over?.length &&
         pointer.camera === this.cameras.main && pointer.getDistance() <= PAN_THRESHOLD_PX &&
         Number.isFinite(pointer.worldX) && Number.isFinite(pointer.worldY) &&
         Number.isFinite(pointer.x) && Number.isFinite(pointer.y);
@@ -2144,7 +2177,7 @@ export class OfficeScene extends Phaser.Scene {
     else if (this.cursors.right.isDown || (wasdActive && this.wasd.D.isDown)) vx = 1;
     if (this.cursors.up.isDown || (wasdActive && this.wasd.W.isDown)) vy = -1;
     else if (this.cursors.down.isDown || (wasdActive && this.wasd.S.isDown)) vy = 1;
-    if (this.layoutEditing || !this.localPositionReady) { vx = 0; vy = 0; }
+    if (this.mapHeld || !this.localPositionReady) { vx = 0; vy = 0; }
 
     // Push-to-sit: right after asking for a seat the keys move nothing, then
     // walking stands up first; walking into a free chair sits.
@@ -2155,7 +2188,7 @@ export class OfficeScene extends Phaser.Scene {
 
     const from = { x: this.player.x, y: this.player.y };
     const gap = this.lastWalkFrame === undefined ? delta : time - this.lastWalkFrame;
-    const interrupted = this.layoutEditing || !this.localPositionReady || document.hidden || !Number.isFinite(delta) ||
+    const interrupted = this.mapHeld || !this.localPositionReady || document.hidden || !Number.isFinite(delta) ||
       delta <= 0 || delta > MAX_WALK_FRAME_MS || !Number.isFinite(gap) || gap < 0 || gap > MAX_WALK_FRAME_MS;
     if (interrupted) this.resetWalking();
     this.lastWalkFrame = time;
