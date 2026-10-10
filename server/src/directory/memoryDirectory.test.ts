@@ -497,6 +497,103 @@ describe('memoryDirectory: renewInvitation', () => {
   });
 });
 
+describe('memoryDirectory: restoreInvitation', () => {
+  const NOW = new Date('2026-09-17T12:00:00.000Z');
+
+  async function withRevokedGuest() {
+    const directory = createMemoryDirectory({
+      bootstrapSuperadminEmail: 'hugo@example.com',
+      now: () => NOW,
+    });
+    const admin = (await directory.resolveOnLogin(HUGO))!;
+    const guest = await directory.createInvitation({
+      email: 'externo@example.com',
+      days: 90,
+      invitedById: admin.id,
+      uid: 'uid-externo',
+    });
+    await directory.revoke(guest.id, admin.id);
+    return { directory, admin, guest };
+  }
+
+  it('reactivates the same row with a fresh expiry from NOW and keeps id, inviter and createdAt', async () => {
+    const { directory, admin, guest } = await withRevokedGuest();
+
+    const restored = await directory.restoreInvitation(guest.id, {
+      days: 7,
+      uid: 'uid-externo',
+      actorId: admin.id,
+    });
+
+    expect(restored).toMatchObject({
+      id: guest.id,
+      uid: 'uid-externo',
+      role: 'guest',
+      status: 'active',
+      invitedBy: admin.id,
+      createdAt: guest.createdAt,
+      expiresAt: new Date('2026-09-24T12:00:00.000Z'),
+    });
+    expect(await directory.findById(guest.id)).toEqual(restored);
+  });
+
+  it('stores the uid it is given, for an account created again in Identity Platform', async () => {
+    const { directory, admin, guest } = await withRevokedGuest();
+
+    await directory.restoreInvitation(guest.id, { days: 7, uid: 'uid-nueva', actorId: admin.id });
+
+    expect(await directory.findByUid('uid-nueva')).toMatchObject({ id: guest.id, status: 'active' });
+  });
+
+  it('writes its own audit action', async () => {
+    const { directory, admin, guest } = await withRevokedGuest();
+
+    await directory.restoreInvitation(guest.id, { days: 7, uid: 'uid-externo', actorId: admin.id });
+
+    expect(directory.auditLog().at(-1)).toEqual({
+      actorId: admin.id,
+      action: 'restore-invitation',
+      subjectId: guest.id,
+    });
+  });
+
+  it('returns null and changes nothing for an unknown id, an active guest or staff', async () => {
+    const { directory, admin } = await withRevokedGuest();
+    const active = await directory.createInvitation({
+      email: 'activo@example.com',
+      days: 30,
+      invitedById: admin.id,
+      uid: 'uid-activo',
+    });
+    const before = directory.auditLog().length;
+
+    expect(
+      await directory.restoreInvitation('00000000-0000-4000-8000-000000000000', {
+        days: 7,
+        uid: 'x',
+        actorId: admin.id,
+      }),
+    ).toBeNull();
+    expect(
+      await directory.restoreInvitation(active.id, { days: 7, uid: 'uid-activo', actorId: admin.id }),
+    ).toBeNull();
+    expect(
+      await directory.restoreInvitation(admin.id, { days: 7, uid: 'uid-hugo', actorId: admin.id }),
+    ).toBeNull();
+    expect((await directory.findById(active.id))?.expiresAt).toEqual(active.expiresAt);
+    expect(directory.auditLog()).toHaveLength(before);
+  });
+
+  it('rejects a duration outside 1..90 before touching the row', async () => {
+    const { directory, admin, guest } = await withRevokedGuest();
+
+    await expect(
+      directory.restoreInvitation(guest.id, { days: 91, uid: 'uid-externo', actorId: admin.id }),
+    ).rejects.toBeInstanceOf(InvalidInvitationError);
+    expect((await directory.findById(guest.id))?.status).toBe('revoked');
+  });
+});
+
 describe('memoryDirectory: revocacion', () => {
   async function withGuest() {
     const directory = createMemoryDirectory({ bootstrapSuperadminEmail: 'hugo@example.com' });

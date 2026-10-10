@@ -384,6 +384,35 @@ export function createPgDirectory(
       return row ? toDirectoryUser(row) : null;
     },
 
+    async restoreInvitation(id, { days, uid, actorId }) {
+      // Validate before asking for a connection, like `createInvitation`.
+      assertValidInvitationDays(days);
+
+      return inTransaction(async (client) => {
+        // The guards live in the WHERE, like `revoke`: no window between
+        // checking and updating, and no way to call this that turns staff or
+        // an active invitation into something else.
+        const updated = await client.query(
+          `
+            UPDATE users
+            SET status = 'active', uid = $3, expires_at = now() + make_interval(days => $2::int)
+            WHERE id = $1 AND invited_by IS NOT NULL AND role = 'guest' AND status = 'revoked'
+            RETURNING ${USER_COLUMNS}
+          `,
+          [id, days, uid],
+        );
+        const row = updated.rows[0];
+        if (!row) return null;
+
+        await client.query(
+          'INSERT INTO audit_log (actor_id, action, subject_id) VALUES ($1, $2, $3)',
+          [actorId, 'restore-invitation', id],
+        );
+
+        return toDirectoryUser(row);
+      });
+    },
+
     async createUser(input: CreateUserInput) {
       // Validar ANTES de pedir conexion, misma razon que en `createInvitation`:
       // una guarda dentro de la transaccion cobraria una conexion del pool y un

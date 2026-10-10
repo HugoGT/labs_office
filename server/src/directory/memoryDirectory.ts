@@ -47,7 +47,7 @@ import { assertLastPosition } from './positionRules.ts';
 
 export interface AuditEntry {
   actorId: string;
-  action: 'invite' | 'revoke' | 'create-user' | 'revoke-user' | 'convert-user';
+  action: 'invite' | 'revoke' | 'create-user' | 'revoke-user' | 'convert-user' | 'restore-invitation';
   subjectId: string;
 }
 
@@ -253,6 +253,21 @@ export function createMemoryDirectory(options: MemoryDirectoryOptions = {}): Mem
       // "tienes N dias a partir de ahora", no "tienes N dias mas de los que
       // le quedaban".
       row.expiresAt = expiresAtFrom(now(), days);
+      return snapshot(row);
+    },
+
+    async restoreInvitation(id, { days, uid, actorId }) {
+      assertValidInvitationDays(days);
+
+      const row = byId(id);
+      // Same guard as the WHERE of `pgDirectory.restoreInvitation`.
+      if (!row || row.invitedBy === null || row.role !== 'guest' || row.status !== 'revoked') {
+        return null;
+      }
+
+      Object.assign(row, { uid, status: 'active', expiresAt: expiresAtFrom(now(), days) });
+      audit.push({ actorId, action: 'restore-invitation', subjectId: row.id });
+
       return snapshot(row);
     },
 

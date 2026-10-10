@@ -624,6 +624,85 @@ describe('pgDirectory: renewInvitation', () => {
   });
 });
 
+describe('pgDirectory: restoreInvitation', () => {
+  const RESTORED_ROW = {
+    ...USER_ROW,
+    id: '22222222-2222-4222-8222-222222222222',
+    uid: 'uid-externo',
+    email: 'externo@example.com',
+    display_name: null,
+    role: 'guest',
+    status: 'active',
+    expires_at: new Date('2026-09-24T12:00:00.000Z'),
+    invited_by: USER_ROW.id,
+  };
+
+  function restoringPool(rows: Record<string, unknown>[]) {
+    return fakePool((text) =>
+      squash(text).startsWith('update users') ? { rows, rowCount: rows.length } : NO_ROW,
+    );
+  }
+
+  it('validates the days before touching the pool', async () => {
+    const pool = fakePool();
+
+    await expect(
+      directoryOver(pool).restoreInvitation(RESTORED_ROW.id, { days: 0, uid: 'uid-externo', actorId: USER_ROW.id }),
+    ).rejects.toBeInstanceOf(InvalidInvitationError);
+    expect(pool.queries).toHaveLength(0);
+  });
+
+  it('reactivates and audits in the same transaction, with the expiry from the postgres clock', async () => {
+    const pool = restoringPool([RESTORED_ROW]);
+
+    const restored = await directoryOver(pool).restoreInvitation(RESTORED_ROW.id, {
+      days: 7,
+      uid: 'uid-externo',
+      actorId: USER_ROW.id,
+    });
+
+    const sqls = pool.queries.map((query) => squash(query.text));
+    expect(sqls[0]).toBe('begin');
+    expect(sqls[1]).toContain("status = 'active'");
+    expect(sqls[1]).toContain('now() + make_interval(days => $2::int)');
+    expect(pool.queries[1].values).toEqual([RESTORED_ROW.id, 7, 'uid-externo']);
+    expect(sqls[2]).toContain('insert into audit_log');
+    expect(pool.queries[2].values).toEqual([USER_ROW.id, 'restore-invitation', RESTORED_ROW.id]);
+    expect(sqls[3]).toBe('commit');
+    expect(restored).toMatchObject({ id: RESTORED_ROW.id, status: 'active', uid: 'uid-externo' });
+  });
+
+  it('only touches a revoked guest invitation: the statement itself requires it', async () => {
+    const pool = restoringPool([RESTORED_ROW]);
+
+    await directoryOver(pool).restoreInvitation(RESTORED_ROW.id, {
+      days: 7,
+      uid: 'uid-externo',
+      actorId: USER_ROW.id,
+    });
+
+    const update = squash(pool.queries[1].text);
+    expect(update).toContain('invited_by is not null');
+    expect(update).toContain("role = 'guest'");
+    expect(update).toContain("status = 'revoked'");
+  });
+
+  it('a row that is gone or no longer revoked changes nothing, audits nothing and returns null', async () => {
+    const pool = restoringPool([]);
+
+    const restored = await directoryOver(pool).restoreInvitation(RESTORED_ROW.id, {
+      days: 7,
+      uid: 'uid-externo',
+      actorId: USER_ROW.id,
+    });
+
+    const sqls = pool.queries.map((query) => squash(query.text));
+    expect(restored).toBeNull();
+    expect(sqls).not.toContain(expect.stringContaining('audit_log'));
+    expect(sqls.at(-1)).toBe('rollback');
+  });
+});
+
 describe('pgDirectory: createUser', () => {
   const EMPLOYEE_ROW = {
     ...USER_ROW,
