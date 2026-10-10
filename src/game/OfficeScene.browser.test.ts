@@ -2158,6 +2158,40 @@ describe('OfficeScene: comando speakers via el puente (issue #17, D7 -- habla re
 
     expect(avatar.ring.visible).toBe(false);
   });
+
+  // #181: the local player's own ring lights up while they speak, like a peer's.
+  it('lights the local player ring when its own sessionId is speaking, and turns it off with an empty set', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const player = findPlayer(scene);
+    expect(player.ring.visible).toBe(false);
+
+    bridge.emitCommand('speakers', { sessionIds: ['mi-sesion'] });
+    expect(player.ring.visible).toBe(true);
+
+    bridge.emitCommand('speakers', { sessionIds: [] });
+    expect(player.ring.visible).toBe(false);
+  });
+
+  it('keeps the local player ring off when only a peer is speaking', async () => {
+    const bridge = createOfficeBridge();
+    const connector = fakeConnector('mi-sesion');
+    const { scene } = await bootOfficeScene(bridge, {
+      endpoint: 'ws://fake',
+      connect: connector.connect,
+    });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1' }));
+
+    bridge.emitCommand('speakers', { sessionIds: ['par-1'] });
+
+    expect(findPlayer(scene).ring.visible).toBe(false);
+  });
 });
 
 describe('OfficeScene: retratos fieles exportados una vez desde create() (issue #17, D1)', () => {
