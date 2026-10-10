@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
+import { MIN_ROOM_SIDE } from '../game/layoutGeometry';
 import type { OfficeBridge } from '../game/officeBridge';
 import { useSpaceEditor } from '../hooks/useSpaceEditor';
 import styles from './SpaceEditorSection.module.css';
@@ -17,7 +18,7 @@ import styles from './SpaceEditorSection.module.css';
  * terrain under it (#182).
  */
 
-const MIN_SIZE = 1;
+const MIN_CAPACITY = 1;
 
 export interface SpaceEditorSectionProps {
   bridge: OfficeBridge;
@@ -46,11 +47,12 @@ interface CreateFormValues {
   capacity: string;
 }
 
-const EMPTY_FORM: CreateFormValues = { name: '', w: '', h: '', capacity: '' };
+// A whole office block by default (#184): 9x9 is what snaps to the block grid.
+const EMPTY_FORM: CreateFormValues = { name: '', w: '9', h: '9', capacity: '' };
 
 function toSize(raw: string): number | null {
   const value = Number(raw);
-  if (!Number.isInteger(value) || value < MIN_SIZE) return null;
+  if (!Number.isInteger(value) || value < MIN_ROOM_SIDE) return null;
   return value;
 }
 
@@ -58,7 +60,7 @@ function toSize(raw: string): number | null {
 function toCapacity(raw: string): number | null | undefined {
   if (raw.trim() === '') return null;
   const value = Number(raw);
-  if (!Number.isInteger(value) || value < MIN_SIZE) return undefined;
+  if (!Number.isInteger(value) || value < MIN_CAPACITY) return undefined;
   return value;
 }
 
@@ -170,8 +172,7 @@ export function SpaceEditorSection({
           </ul>
 
           <form className={styles.form} onSubmit={handleCreateSubmit}>
-            <span className={styles.hint}>Una oficina ocupa un bloque de 9 × 9 casillas (288 × 288 px). Con ese tamaño, la sala se alinea al bloque que toques. Construye primero su terreno desde Terreno.</span>
-            <button type="button" className={styles.button} disabled={busy} onClick={() => setForm((current) => ({ ...current, w: '9', h: '9' }))}>Usar un bloque de oficina (9 × 9)</button>
+            <span className={styles.hint}>{`Una sala mide al menos ${MIN_ROOM_SIDE} × ${MIN_ROOM_SIDE} casillas. Con 9 × 9, un bloque de oficina, se alinea al bloque que toques. Construye primero su terreno desde Terreno.`}</span>
             <div className={styles.field}>
               <label className={styles.hint} htmlFor="new-space-name">
                 Nombre de la nueva sala
@@ -196,7 +197,7 @@ export function SpaceEditorSection({
                 id="new-space-w"
                 className={`${styles.input} ${styles.dimInput}`}
                 type="number"
-                min={MIN_SIZE}
+                min={MIN_ROOM_SIDE}
                 step={1}
                 required
                 disabled={busy}
@@ -213,7 +214,7 @@ export function SpaceEditorSection({
                 id="new-space-h"
                 className={`${styles.input} ${styles.dimInput}`}
                 type="number"
-                min={MIN_SIZE}
+                min={MIN_ROOM_SIDE}
                 step={1}
                 required
                 disabled={busy}
@@ -230,7 +231,7 @@ export function SpaceEditorSection({
                 id="new-space-capacity"
                 className={`${styles.input} ${styles.dimInput}`}
                 type="number"
-                min={MIN_SIZE}
+                min={MIN_CAPACITY}
                 step={1}
                 disabled={busy}
                 value={form.capacity}

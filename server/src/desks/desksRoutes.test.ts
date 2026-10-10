@@ -110,13 +110,16 @@ describe('desk placement adjacency (#180)', () => {
   for (const obstacle of ['desk', 'room'] as const) {
     it.each(['create', 'move'] as const)('%s accepts edge/corner adjacency to a ' + obstacle + ' and keeps desk/cubicle writes atomic', async (mode) => {
       const { deps, desks, spaces } = harness();
+      // A desk is 3x3; a room is at least MIN_ROOM_SIDE (6) a side (#184).
+      const side = obstacle === 'desk' ? 3 : 6;
       if (obstacle === 'desk') {
         await desks.createDesk({ label: 'Fixed', x: 10, y: 10 });
       } else {
-        await spaces.createSpace({ name: 'Fixed', x: 10, y: 10, w: 3, h: 3, capacity: null });
+        await spaces.createSpace({ name: 'Fixed', x: 10, y: 10, w: side, h: side, capacity: null });
       }
       const moving = mode === 'move' ? await desks.createDesk({ label: 'Moving', x: 30, y: 30 }) : null;
-      for (const [index, position] of [{ x: 13, y: 10 }, { x: 10, y: 13 }, { x: 13, y: 13 }, { x: 12, y: 12 }].entries()) {
+      const end = 10 + side;
+      for (const [index, position] of [{ x: end, y: 10 }, { x: 10, y: end }, { x: end, y: end }, { x: 12, y: 12 }].entries()) {
         const beforeDesks = await desks.listDesks();
         const beforeSpaces = await spaces.listSpaces();
         const result = moving

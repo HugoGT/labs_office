@@ -1,5 +1,11 @@
 /** Shared placement geometry, kept import-free for both client and server. */
 
+/**
+ * Smallest room side in tiles (#184). Rooms only: desk cubicles are 3x3 and
+ * never go through the room rules, so `schema.sql` keeps its `w > 0` check.
+ */
+export const MIN_ROOM_SIDE = 6;
+
 export interface SpaceBounds {
   x: number;
   y: number;

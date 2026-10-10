@@ -3,7 +3,7 @@ import { createMemorySpaces } from '../spaces/memorySpaces.ts';
 import type { DeskDirectory } from '../desks/desksPort.ts';
 import { createRecordingSpaceSnapshot } from './recordingSpaceSnapshot.ts';
 
-const INPUT = { name: 'Room', x: 10, y: 10, w: 3, h: 3, capacity: null };
+const INPUT = { name: 'Room', x: 10, y: 10, w: 6, h: 6, capacity: null };
 
 describe('recording geometry snapshot', () => {
   it('observes committed room updates/deletions without adding database reads', async () => {
@@ -13,7 +13,7 @@ describe('recording geometry snapshot', () => {
     const read = vi.spyOn(source, 'listSpaces');
     const changed = vi.fn();
     const off = snapshot.geometry.subscribe(changed);
-    await snapshot.spaces.updateSpace(room.id, { x: 20, y: 10, w: 3, h: 3 });
+    await snapshot.spaces.updateSpace(room.id, { x: 20, y: 10, w: 6, h: 6 });
     expect(snapshot.geometry.getSpace(room.id)?.x).toBe(20);
     await snapshot.spaces.deleteSpace(room.id);
     expect(snapshot.geometry.getSpace(room.id)).toBeUndefined();
@@ -32,7 +32,7 @@ describe('recording geometry snapshot', () => {
     vi.spyOn(source, 'listSpaces').mockImplementation(() => new Promise((done) => { resolve = done; }));
     const snapshot = createRecordingSpaceSnapshot(source);
     const pending = snapshot.spaces.listSpaces();
-    await snapshot.spaces.updateSpace(room.id, { x: 20, y: 10, w: 3, h: 3 });
+    await snapshot.spaces.updateSpace(room.id, { x: 20, y: 10, w: 6, h: 6 });
     resolve(oldRows);
     expect(await pending).toEqual(oldRows); // HTTP snapshot semantics remain unchanged (F4).
     expect(snapshot.geometry.getSpace(room.id)?.x).toBe(20);
