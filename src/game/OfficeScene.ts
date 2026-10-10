@@ -16,7 +16,7 @@ import { planWalk } from './pathfinding';
 import { registerClick, type ClickSample } from './doubleClick';
 import { CameraPanLayer } from './CameraPanLayer';
 import { CameraZoomLayer } from './CameraZoomLayer';
-import { followBounds } from './cameraBounds';
+import { CAMERA_MARGIN_TILES, regionBounds, terrainRegion, type Rect } from './cameraBounds';
 import { PAN_THRESHOLD_PX } from './cameraPan';
 import { restoreZoom, type ZoomStore } from './mapZoom';
 import { advanceWalkingTime, MAX_WALK_FRAME_MS, walkingMultiplier } from './walkingSpeed';
@@ -70,6 +70,7 @@ import type { OfficeBridge } from './officeBridge';
 import {
   BASE_LAYOUT,
   BASE_TERRAIN,
+  BLOCK_TILES,
   WALL_PIECES,
   encodeTerrainBlocks,
   encodeTerrainWalls,
@@ -643,7 +644,7 @@ export class OfficeScene extends Phaser.Scene {
       camera: this.cameras.main,
       target: this.player,
       lerp: FOLLOW_LERP,
-      worldBounds: { x: 0, y: 0, width: WORLD_W, height: WORLD_H },
+      region: this.cameraRegion(),
       minimap: this.minimapCamera,
       isSuspended: () => this.layoutEditing || !this.localPositionReady,
     });
@@ -1828,8 +1829,18 @@ export class OfficeScene extends Phaser.Scene {
       this.grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
       this.buildTerrainColliders(this.grid);
       this.paintTerrain();
+      this.cameraPanLayer?.setRegion(this.cameraRegion());
     }
     this.emitTerrain();
+  }
+
+  /**
+   * Where the main camera may look (#179): the live blocks only, never the
+   * editor's preview, so a draft paint does not open the void to the camera.
+   * Columns come from the layout because injected layouts have other sizes.
+   */
+  private cameraRegion(): Rect {
+    return terrainRegion(this.terrainBlocks, this.layout.width / BLOCK_TILES, BLOCK_TILES * TILE, CAMERA_MARGIN_TILES * TILE);
   }
 
   /**
@@ -1911,7 +1922,7 @@ export class OfficeScene extends Phaser.Scene {
     // Zoom and zoom-aware bounds BEFORE `startFollow`, whose snap clamps with
     // them: no glide on load. `CameraPanLayer` owns the bounds from then on.
     cam.setZoom(initialZoom);
-    const bounds = followBounds({ x: 0, y: 0, width: WORLD_W, height: WORLD_H }, cam, initialZoom);
+    const bounds = regionBounds(this.cameraRegion(), cam, initialZoom);
     cam.setBounds(bounds.x, bounds.y, bounds.width, bounds.height);
     cam.startFollow(this.player, true, FOLLOW_LERP, FOLLOW_LERP);
     // The void (unbuilt map) draws nothing: the whole screen is black around and under the terrain.

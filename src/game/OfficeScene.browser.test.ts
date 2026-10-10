@@ -9,8 +9,6 @@ import {
   PLAYER_SPAWN_TY,
   SPAWN_BLOCK_INDEX,
   TILE,
-  WORLD_H,
-  WORLD_W,
   ZONE_LABELS,
 } from './mapData';
 import { TERRAIN_LAYER_COUNT } from './artContract';
@@ -50,7 +48,7 @@ import {
 import { OFFICE_SCENE_KEY, OfficeScene, type OfficeSceneOptions } from './OfficeScene';
 import { ARRIVE_EPSILON_PX, beginAutoWalk, type AutoWalkState } from './autoWalk';
 import { SIT_LOCK_MS } from './autoSit';
-import { followBounds } from './cameraBounds';
+import { regionBounds } from './cameraBounds';
 import { zoomView, type ZoomStore, type ZoomView } from './mapZoom';
 
 /**
@@ -4157,6 +4155,25 @@ describe('OfficeScene: edited terrain', () => {
     await vi.waitFor(() => expect(solidAt(scene, point.x, point.y)).toBe(false), LOOP_WAIT);
     expect(terrainTilesAt(scene, west.tx, west.ty)).not.toEqual(before);
   });
+  it('bounds the main camera to the painted terrain plus three tiles and grows them with a replicated block (#179)', async () => {
+    const { BASE_LAYOUT: empty } = await import('./officeLayout');
+    const connector = fakeConnector();
+    const { scene } = await bootOfficeScene(createOfficeBridge(), { layout: empty, seats: [], endpoint: 'ws://test', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const cam = scene.cameras.main;
+    const block = 9 * TILE;
+    const margin = 3 * TILE;
+    // Only the spawn block (column 10, row 7) is painted; the default zoom 2 shows less than it.
+    const spawnRegion = { x: 10 * block - margin, y: 7 * block - margin, width: block + 2 * margin, height: block + 2 * margin };
+    await vi.waitFor(() => expect(cam.getBounds()).toMatchObject(spawnRegion), LOOP_WAIT);
+
+    connector.handlers()!.onTerrain!(withBlock(empty.blocks, SPAWN_BLOCK_INDEX - 1, 'wood'));
+
+    await vi.waitFor(
+      () => expect(cam.getBounds()).toMatchObject({ ...spawnRegion, x: 9 * block - margin, width: 2 * block + 2 * margin }),
+      LOOP_WAIT,
+    );
+  });
   const LAWN = 35;
   /** The middle of the lawn block: its own material whatever the borders do. */
   const lawn = { x: 67 * TILE + 16, y: 22 * TILE + 16 };
@@ -4439,7 +4456,8 @@ describe('OfficeScene: piece collisions', () => {
 
 describe('OfficeScene: map zoom (map-zoom)', () => {
   const offline = { endpoint: null, artManifestUrl: null, artUploadsUrl: null } as const;
-  const WORLD = { x: 0, y: 0, width: WORLD_W, height: WORLD_H };
+  /** The legacy 14x10-block layout is painted everywhere: its region is the grid plus three tiles a side (#179). */
+  const REGION = { x: -3 * TILE, y: -3 * TILE, width: 14 * 9 * TILE + 6 * TILE, height: 10 * 9 * TILE + 6 * TILE };
   const memoryStore = (zoom: number) => ({ load: () => zoom, save: vi.fn() }) satisfies ZoomStore;
 
   async function zoomScene(zoomStore?: ZoomStore) {
@@ -4464,13 +4482,13 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
     }));
   }
 
-  it('starts at the stored zoom with follow bounds, announces it once and does not save it back', async () => {
+  it('starts at the stored zoom with the terrain region bounds, announces it once and does not save it back', async () => {
     const store = memoryStore(1);
     const { scene, views, cam } = await zoomScene(store);
     frames(scene, 2);
 
     expect(cam.zoom).toBe(1);
-    expect(cam.getBounds()).toMatchObject(followBounds(WORLD, cam, 1));
+    expect(cam.getBounds()).toMatchObject(regionBounds(REGION, cam, 1));
     expect(views).toEqual([zoomView(1)]);
     expect(store.save).not.toHaveBeenCalled();
   });
@@ -4485,7 +4503,7 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
     frames(scene, 2);
 
     expect(cam.zoom).toBe(2);
-    expect(cam.getBounds()).toMatchObject(followBounds(WORLD, cam, 2));
+    expect(cam.getBounds()).toMatchObject(regionBounds(REGION, cam, 2));
     expect(views).toEqual([zoomView(2)]);
   });
 
