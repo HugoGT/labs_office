@@ -36,8 +36,6 @@ export interface CameraPanLayerOptions {
   lerp: number;
   /** Where the view may go (#179): `terrainRegion` of the live blocks, replaced through `setRegion`. */
   region: Rect;
-  /** Camara del minimapa (#98): un click sobre ella lleva la principal a ese punto. */
-  minimap?: Phaser.Cameras.Scene2D.Camera;
   /** Verdadero mientras el pan debe quedar desarmado (editor de layout activo). */
   isSuspended: () => boolean;
 }
@@ -50,7 +48,6 @@ export class CameraPanLayer {
   private readonly target: FollowTarget;
   private readonly lerp: number;
   private region: Rect;
-  private readonly minimap?: Phaser.Cameras.Scene2D.Camera;
   private readonly isSuspended: () => boolean;
   private state: CameraPanState = { kind: 'idle' };
   private glide: Glide | null = null;
@@ -71,20 +68,6 @@ export class CameraPanLayer {
     pointer: Phaser.Input.Pointer,
     currentlyOver: Phaser.GameObjects.GameObject[],
   ): void => {
-    if (this.minimap && pointer.camera === this.minimap) {
-      // Sin exigir `currentlyOver` vacio: en el minimapa un escritorio o un
-      // peer mide un par de pixeles y no es un destino de clic razonable.
-      if (pointer.button !== 0 || this.isSuspended()) return;
-      const point = this.minimap.getWorldPoint(pointer.x, pointer.y);
-      const { x, y, width, height } = this.region;
-      this.dispatch({
-        kind: 'minimap',
-        x: Phaser.Math.Clamp(point.x, x, x + width),
-        y: Phaser.Math.Clamp(point.y, y, y + height),
-      });
-      return;
-    }
-
     // Mismo criterio que `closemenu` (OfficeScene.setupInput) para el clic
     // izquierdo sobre mapa vacio, mas dos guardas propias de este gesto:
     // nunca sobre la camara del minimapa, nunca editando layout.
@@ -126,7 +109,6 @@ export class CameraPanLayer {
     this.target = options.target;
     this.lerp = options.lerp;
     this.region = options.region;
-    this.minimap = options.minimap;
     this.isSuspended = options.isSuspended;
 
     this.scene.input.on('pointerdown', this.onPointerDown);
@@ -148,6 +130,20 @@ export class CameraPanLayer {
   /** New live terrain (#179); the next frame clamps the view into it. */
   setRegion(region: Rect): void {
     this.region = region;
+  }
+
+  /**
+   * #98: a minimap click (`MinimapLayer` tells clicks from drags) glides the
+   * view to that world point and leaves it there until the player moves.
+   */
+  focus(point: { x: number; y: number }): void {
+    if (this.isSuspended()) return;
+    const { x, y, width, height } = this.region;
+    this.dispatch({
+      kind: 'minimap',
+      x: Phaser.Math.Clamp(point.x, x, x + width),
+      y: Phaser.Math.Clamp(point.y, y, y + height),
+    });
   }
 
   /** A new authoritative origin must not keep a pan/glide aimed at the old spawn (#148). */

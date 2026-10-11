@@ -236,3 +236,27 @@ describe('useSpaceEditor (#74, PR4)', () => {
     });
   });
 });
+
+describe('useSpaceEditor: Escape frees the map one step at a time', () => {
+  function escape(): KeyboardEvent {
+    const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    act(() => {
+      window.dispatchEvent(event);
+    });
+    return event;
+  }
+
+  it('cancels a room being placed, then drops a selected one', async () => {
+    const { bridge, result } = setup(fakeSpaces());
+    act(() => result.current.enter());
+    act(() => result.current.startCreate({ name: 'Sala nueva', w: 6, h: 6, capacity: 6 }));
+
+    expect(escape().defaultPrevented).toBe(true);
+    expect(result.current.state).toEqual({ tag: 'idle', kind: 'room' });
+
+    act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
+    expect(escape().defaultPrevented).toBe(true);
+    expect(result.current.state).toEqual({ tag: 'idle', kind: 'room' });
+    expect(escape().defaultPrevented).toBe(false);
+  });
+});

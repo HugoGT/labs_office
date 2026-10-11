@@ -252,3 +252,38 @@ describe('useLayoutEditor (#74, PR3c)', () => {
     expect(result.current.state).toEqual({ tag: 'off' });
   });
 });
+
+describe('useLayoutEditor: Escape frees the map one step at a time', () => {
+  function escape(): KeyboardEvent {
+    const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    act(() => {
+      window.dispatchEvent(event);
+    });
+    return event;
+  }
+
+  it('cancels placing, then drops the selection, and leaves the open editor alone after that', async () => {
+    const { bridge, result } = setup(fakeDesks());
+    act(() => result.current.enter());
+    await waitFor(() => expect(result.current.desks).toHaveLength(2));
+    act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+    act(() => result.current.startMove());
+
+    expect(escape().defaultPrevented).toBe(true);
+    expect(result.current.state).toEqual({ tag: 'idle', kind: 'desk' });
+
+    act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+    expect(escape().defaultPrevented).toBe(true);
+    expect(result.current.state).toEqual({ tag: 'idle', kind: 'desk' });
+
+    expect(escape().defaultPrevented).toBe(false);
+    expect(result.current.state).toEqual({ tag: 'idle', kind: 'desk' });
+  });
+
+  it('ignores Escape while closed', () => {
+    const { result } = setup(fakeDesks());
+
+    expect(escape().defaultPrevented).toBe(false);
+    expect(result.current.state).toEqual({ tag: 'off' });
+  });
+});

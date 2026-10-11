@@ -56,6 +56,7 @@ import {
   type LayoutObstacleItem,
 } from '../game/layoutEditor';
 import type { OfficeBridge } from '../game/officeBridge';
+import { useEscapeStep } from './useEscapeStep';
 
 /** Mismo tamano que el servidor fija para cada escritorio nuevo (`server/src/desks/deskRules.ts`'s `DESK_SIDE`); no se importa porque `game/`/`hooks/` no leen del servidor -- ver `deskAdminPort.ts`. */
 const NEW_DESK_TILES = 3;
@@ -229,6 +230,14 @@ export function useLayoutEditor({
   const select = useCallback((id: string) => dispatch({ type: 'select', id }), []);
 
   const deselect = useCallback(() => dispatch({ type: 'deselect' }), []);
+
+  useEscapeStep(active, () => {
+    const current = stateRef.current;
+    if (current.tag === 'placing') cancelPlacing();
+    else if (current.tag === 'selected') deselect();
+    else return false;
+    return true;
+  });
 
   const remove = useCallback(async (): Promise<void> => {
     const current = stateRef.current;
