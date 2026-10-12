@@ -1250,11 +1250,11 @@ export class OfficeScene extends Phaser.Scene {
     // The room refuses without a word; after a while the request is
     // forgotten, so the next request asks again instead of standing up. The
     // seat is guarded like one just left: standing still beside it, the idle
-    // rule would otherwise ask again and again for a seat the room refuses.
+    // rule would otherwise ask every frame for a seat the room refuses.
     this.time.delayedCall(SEAT_ANSWER_MS, () => {
       if (this.pendingSeat !== seat.id) return;
       this.pendingSeat = null;
-      this.autoSit = guardLeftSeat(seat.id);
+      this.autoSit = guardLeftSeat(seat.id, this.time.now);
     });
   }
 
@@ -1270,7 +1270,7 @@ export class OfficeScene extends Phaser.Scene {
       this.pendingSeat = null;
       // The room stood a seated player up (desk changed hands, chair gone,
       // out of reach): never sit straight back down by standing still there.
-      this.autoSit = this.seat === null ? dropSitDwells(this.autoSit) : guardLeftSeat(this.seat.id);
+      this.autoSit = this.seat === null ? dropSitDwells(this.autoSit) : guardLeftSeat(this.seat.id, this.time.now);
       this.sitLockUntil = null;
       this.leaveSeat();
       return;
@@ -1303,7 +1303,7 @@ export class OfficeScene extends Phaser.Scene {
   private standUp(): void {
     if (this.seat === null && this.pendingSeat === null) return;
     const left = this.seat?.id ?? this.pendingSeat;
-    if (left !== null) this.autoSit = guardLeftSeat(left);
+    if (left !== null) this.autoSit = guardLeftSeat(left, this.time.now);
     this.sitLockUntil = null;
     this.pendingSeat = null;
     this.leaveSeat();

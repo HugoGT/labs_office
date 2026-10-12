@@ -32,6 +32,13 @@ export interface SitCandidate {
 /** "Next to" the chair: feet within 1.25 tiles of its ground point. */
 export const SIT_NEAR_PX = 40;
 /**
+ * The idle rule's "next to", tighter than the push one: chairs in a row stand
+ * one tile (32 px) apart, so 40 px would reach the neighbours of the chair
+ * the player stands in front of. At 28 px only a strip between two chairs
+ * reaches both, and the closest one wins there.
+ */
+export const SIT_IDLE_NEAR_PX = 28;
+/**
  * Feet this close to the ground point are on the chair. There the push has
  * no meaningful direction, and a push that began off the chair has arrived:
  * chairs do not collide by default, so a push from the next tile walks onto
@@ -55,6 +62,15 @@ export const SIT_LOCK_MS = 1000;
  * the way past a chair does not.
  */
 export const SIT_IDLE_MS = 500;
+/**
+ * After standing up, the idle rule sits on no chair for `SIT_AGAIN_OTHER_MS`
+ * and skips the chair left for `SIT_AGAIN_SAME_MS`: whoever stands up beside
+ * a row of chairs gets a moment to walk off before any chair takes them, and
+ * a longer one before the same chair does. Time only, never the reach, so
+ * stepping out and back in does not lift it early.
+ */
+export const SIT_AGAIN_SAME_MS = 3000;
+export const SIT_AGAIN_OTHER_MS = 1000;
 
 /** Which rule asked for the seat: only a push holds keys that need `SIT_LOCK_MS`. */
 export type SitVia = 'push' | 'idle';
@@ -74,16 +90,16 @@ export interface AutoSitState {
   /** The seat closest to still feet, since when (game clock). */
   readonly idle: { readonly seatId: string; readonly sinceMs: number } | null;
   /**
-   * The seat just left, for the idle rule. Releasing the keys must not lift
-   * it (standing still is exactly what the idle rule waits for), so it holds
-   * until that seat is no longer an in-reach candidate. Only that seat is
-   * skipped: another chair next to the feet still sits after `SIT_IDLE_MS`.
+   * The seat just left and when (game clock), for the idle rule: no idle sit
+   * until `SIT_AGAIN_OTHER_MS` later, and none on that seat until
+   * `SIT_AGAIN_SAME_MS` later. Releasing the keys does not lift it (standing
+   * still is exactly what the idle rule waits for); only time does.
    */
-  readonly idleGuard: string | null;
+  readonly rest: { readonly seatId: string; readonly sinceMs: number } | null;
 }
 
 /** Nothing in progress and nothing guarded (not "standing still"). */
-export const IDLE_AUTO_SIT: AutoSitState = { push: null, guard: null, idle: null, idleGuard: null };
+export const IDLE_AUTO_SIT: AutoSitState = { push: null, guard: null, idle: null, rest: null };
 
 /** The closest seat the input pushes into, skipping `ignore`; `null` without input. */
 export function pushTarget<T extends SitCandidate>(
@@ -110,15 +126,15 @@ export function pushTarget<T extends SitCandidate>(
   return best;
 }
 
-/** The closest seat in reach whose ground point is next to the feet, skipping `ignore`. */
-export function idleTarget<T extends SitCandidate>(feet: SitPoint, candidates: readonly T[], ignore: string | null): T | null {
+/** The closest seat in reach whose ground point is within `SIT_IDLE_NEAR_PX` of the feet. */
+export function idleTarget<T extends SitCandidate>(feet: SitPoint, candidates: readonly T[]): T | null {
   if (!Number.isFinite(feet.x) || !Number.isFinite(feet.y)) return null;
   let best: T | null = null;
   let bestDistance = Number.POSITIVE_INFINITY;
   for (const seat of candidates) {
-    if (seat.id === ignore || !seat.inReach) continue;
+    if (!seat.inReach) continue;
     const distance = Math.hypot(seat.ground.x - feet.x, seat.ground.y - feet.y);
-    if (!(distance <= SIT_NEAR_PX) || distance >= bestDistance) continue;
+    if (!(distance <= SIT_IDLE_NEAR_PX) || distance >= bestDistance) continue;
     best = seat;
     bestDistance = distance;
   }
@@ -156,16 +172,19 @@ function heldGuard(guard: string | null, candidates: readonly SitCandidate[]): s
 export function stepAutoSit<T extends SitCandidate>(state: AutoSitState, frame: AutoSitFrame<T>): AutoSitStep<T> {
   const noInput = frame.input.vx === 0 && frame.input.vy === 0;
   const guard = noInput ? null : heldGuard(state.guard, frame.candidates);
-  const idleGuard = heldGuard(state.idleGuard, frame.candidates);
+  const restedMs = state.rest === null ? Number.POSITIVE_INFINITY : frame.nowMs - state.rest.sinceMs;
+  const rest = restedMs < SIT_AGAIN_SAME_MS ? state.rest : null;
   const none = (push: AutoSitState['push'], idle: AutoSitState['idle']): AutoSitStep<T> =>
-    ({ state: { push, guard, idle, idleGuard }, sit: null, via: null });
+    ({ state: { push, guard, idle, rest }, sit: null, via: null });
   const sit = (seat: T, via: SitVia): AutoSitStep<T> =>
-    ({ state: { push: null, guard, idle: null, idleGuard }, sit: seat, via });
+    ({ state: { push: null, guard, idle: null, rest }, sit: seat, via });
 
   if (noInput) {
-    if (frame.walking) return none(null, null);
-    const target = idleTarget(frame.feet, frame.candidates, idleGuard);
-    if (target === null) return none(null, null);
+    if (frame.walking || restedMs < SIT_AGAIN_OTHER_MS) return none(null, null);
+    // The closest chair only: while it is the seat left and still resting,
+    // the player waits for it instead of landing on the one beside it.
+    const target = idleTarget(frame.feet, frame.candidates);
+    if (target === null || target.id === rest?.seatId) return none(null, null);
     if (state.idle === null || state.idle.seatId !== target.id) return none(null, { seatId: target.id, sinceMs: frame.nowMs });
     if (frame.nowMs - state.idle.sinceMs < SIT_IDLE_MS) return none(null, state.idle);
     return sit(target, 'idle');
@@ -182,14 +201,14 @@ export function stepAutoSit<T extends SitCandidate>(state: AutoSitState, frame: 
   return sit(target, 'push');
 }
 
-/** The player stood up from `seatId`: guard it against an immediate re-sit by either rule and drop any dwell. */
-export function guardLeftSeat(seatId: string): AutoSitState {
-  return { push: null, guard: seatId, idle: null, idleGuard: seatId };
+/** The player stood up from `seatId` at `nowMs`: guard it against an immediate re-sit by either rule and drop any dwell. */
+export function guardLeftSeat(seatId: string, nowMs: number): AutoSitState {
+  return { push: null, guard: seatId, idle: null, rest: { seatId, sinceMs: nowMs } };
 }
 
 /** Walking was interrupted or sitting is not possible right now: both dwells start over, both guards stay. */
 export function dropSitDwells(state: AutoSitState): AutoSitState {
-  return { push: null, guard: state.guard, idle: null, idleGuard: state.idleGuard };
+  return { push: null, guard: state.guard, idle: null, rest: state.rest };
 }
 
 /** Whether movement is still locked after a sit request (`lockUntilMs` is request time + `SIT_LOCK_MS`). */

@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   IDLE_AUTO_SIT,
+  SIT_AGAIN_OTHER_MS,
+  SIT_AGAIN_SAME_MS,
   SIT_DIRECTION_MIN_COS,
   SIT_LOCK_MS,
   SIT_NEAR_PX,
   SIT_IDLE_MS,
+  SIT_IDLE_NEAR_PX,
   SIT_ON_SEAT_PX,
   SIT_PUSH_MS,
   dropSitDwells,
@@ -64,6 +67,9 @@ describe('autoSit constants', () => {
     expect(SIT_PUSH_MS).toBe(150);
     expect(SIT_LOCK_MS).toBe(1000);
     expect(SIT_IDLE_MS).toBe(500);
+    expect(SIT_IDLE_NEAR_PX).toBe(28);
+    expect(SIT_AGAIN_SAME_MS).toBe(3000);
+    expect(SIT_AGAIN_OTHER_MS).toBe(1000);
   });
 });
 
@@ -182,7 +188,7 @@ describe('stepAutoSit', () => {
 
 describe('the re-sit guard', () => {
   it('ignores the seat just left while the input is held and it is still in reach', () => {
-    const guarded = guardLeftSeat('map-0');
+    const guarded = guardLeftSeat('map-0', 0);
     const { sits, state } = run(guarded, [
       { nowMs: 0, feet: { x: 100, y: 100 } },
       { nowMs: SIT_PUSH_MS * 4, feet: { x: 100, y: 100 } },
@@ -192,7 +198,7 @@ describe('the re-sit guard', () => {
   });
 
   it('is lifted by releasing the input; a fresh push then sits again', () => {
-    const guarded = guardLeftSeat('map-0');
+    const guarded = guardLeftSeat('map-0', 0);
     const { sits, state } = run(guarded, [
       { nowMs: 0 },
       { nowMs: 20, input: NONE },
@@ -204,14 +210,14 @@ describe('the re-sit guard', () => {
   });
 
   it('is lifted by leaving the seat reach, even with the input held', () => {
-    const guarded = guardLeftSeat('map-0');
+    const guarded = guardLeftSeat('map-0', 0);
     const { state } = run(guarded, [{ nowMs: 0, candidates: [{ ...chair, inReach: false }] }]);
     expect(state.guard).toBeNull();
   });
 
   it('only guards that seat: another one in front of the input still sits', () => {
     const other: SitCandidate = { id: 'map-1', ground: { x: 100, y: 110 }, inReach: true };
-    const guarded = guardLeftSeat('map-0');
+    const guarded = guardLeftSeat('map-0', 0);
     const { sits } = run(guarded, [
       { nowMs: 0, candidates: [chair, other] },
       { nowMs: SIT_PUSH_MS, candidates: [chair, other] },
@@ -220,25 +226,32 @@ describe('the re-sit guard', () => {
   });
 
   it('a guarded state starts with no dwell and guards the seat for both rules', () => {
-    expect(guardLeftSeat('map-0')).toEqual({ push: null, idle: null, guard: 'map-0', idleGuard: 'map-0' });
+    expect(guardLeftSeat('map-0', 1000)).toEqual({ push: null, idle: null, guard: 'map-0', rest: { seatId: 'map-0', sinceMs: 1000 } });
   });
 });
 
 describe('idleTarget', () => {
   it('is the closest seat in reach whose ground point is next to the feet', () => {
     const far: SitCandidate = { id: 'map-1', ground: { x: 100, y: 115 }, inReach: true };
-    expect(idleTarget(NORTH, [far, chair], null)).toBe(chair);
+    expect(idleTarget(NORTH, [far, chair])).toBe(chair);
   });
 
-  it('ignores a seat out of reach, beyond SIT_NEAR_PX, or the ignored one', () => {
-    expect(idleTarget(NORTH, [{ ...chair, inReach: false }], null)).toBeNull();
-    expect(idleTarget({ x: 100, y: 100 - SIT_NEAR_PX }, [chair], null)).toBe(chair);
-    expect(idleTarget({ x: 100, y: 100 - SIT_NEAR_PX - 1 }, [chair], null)).toBeNull();
-    expect(idleTarget(NORTH, [chair], 'map-0')).toBeNull();
+  it('ignores a seat out of reach or beyond SIT_IDLE_NEAR_PX, a tighter circle than the push one', () => {
+    expect(idleTarget(NORTH, [{ ...chair, inReach: false }])).toBeNull();
+    expect(idleTarget({ x: 100, y: 100 - SIT_IDLE_NEAR_PX }, [chair])).toBe(chair);
+    expect(idleTarget({ x: 100, y: 100 - SIT_IDLE_NEAR_PX - 1 }, [chair])).toBeNull();
+    expect(SIT_IDLE_NEAR_PX).toBeLessThan(SIT_NEAR_PX);
+  });
+
+  it('standing in front of a chair in a row of chairs one tile apart, the neighbours are out of range', () => {
+    const left: SitCandidate = { id: 'map-1', ground: { x: 68, y: 100 }, inReach: true };
+    const right: SitCandidate = { id: 'map-2', ground: { x: 132, y: 100 }, inReach: true };
+    expect(idleTarget({ x: 100, y: 120 }, [left, right])).toBeNull();
+    expect(idleTarget({ x: 100, y: 120 }, [left, chair, right])).toBe(chair);
   });
 
   it('rejects non finite feet', () => {
-    expect(idleTarget({ x: Number.NaN, y: 80 }, [chair], null)).toBeNull();
+    expect(idleTarget({ x: Number.NaN, y: 80 }, [chair])).toBeNull();
   });
 });
 
@@ -305,7 +318,7 @@ describe('stepAutoSit: standing still next to a chair', () => {
   });
 
   it('the closest seat wins, and a change of closest restarts the dwell', () => {
-    const other: SitCandidate = { id: 'map-1', ground: { x: 130, y: 100 }, inReach: true };
+    const other: SitCandidate = { id: 'map-1', ground: { x: 115, y: 100 }, inReach: true };
     const both = [other, chair];
     const { sits } = still(IDLE_AUTO_SIT, [
       { nowMs: 0, candidates: both },
@@ -328,63 +341,71 @@ describe('stepAutoSit: standing still next to a chair', () => {
     expect(sits).toEqual([null, null, null]);
   });
 
-  it('never sits on a seat out of reach or beyond SIT_NEAR_PX', () => {
+  it('never sits on a seat out of reach or beyond SIT_IDLE_NEAR_PX', () => {
     const outOfReach = still(IDLE_AUTO_SIT, [
       { nowMs: 0, candidates: [{ ...chair, inReach: false }] },
       { nowMs: SIT_IDLE_MS * 4, candidates: [{ ...chair, inReach: false }] },
     ]);
     expect(outOfReach.sits).toEqual([null, null]);
-    const tooFar = { x: 100, y: 100 - SIT_NEAR_PX - 1 };
+    const tooFar = { x: 100, y: 100 - SIT_IDLE_NEAR_PX - 1 };
     const far = still(IDLE_AUTO_SIT, [{ nowMs: 0, feet: tooFar }, { nowMs: SIT_IDLE_MS * 4, feet: tooFar }]);
     expect(far.sits).toEqual([null, null]);
   });
 });
 
-describe('the idle re-sit guard', () => {
-  it('ignores the seat just left while it stays in reach, even once the keys are released', () => {
-    const { sits, state } = run(guardLeftSeat('map-0'), [
+describe('the idle rest after standing up', () => {
+  const next: SitCandidate = { id: 'map-1', ground: { x: 132, y: 100 }, inReach: true };
+  const row = [chair, next];
+
+  it('sits on no chair for SIT_AGAIN_OTHER_MS, then on a closer neighbour after a full SIT_IDLE_MS', () => {
+    const nearNext = { x: 124, y: 100 };
+    const { sits, vias } = still(guardLeftSeat('map-0', 0), [
+      { nowMs: 0, feet: nearNext, candidates: row },
+      { nowMs: SIT_AGAIN_OTHER_MS - 1, feet: nearNext, candidates: row },
+      { nowMs: SIT_AGAIN_OTHER_MS, feet: nearNext, candidates: row },
+      { nowMs: SIT_AGAIN_OTHER_MS + SIT_IDLE_MS - 1, feet: nearNext, candidates: row },
+      { nowMs: SIT_AGAIN_OTHER_MS + SIT_IDLE_MS, feet: nearNext, candidates: row },
+    ]);
+    expect(sits).toEqual([null, null, null, null, 'map-1']);
+    expect(vias).toEqual([null, null, null, null, 'idle']);
+  });
+
+  it('skips the seat left for SIT_AGAIN_SAME_MS, released keys or not, then sits on it after SIT_IDLE_MS', () => {
+    const { sits, state } = run(guardLeftSeat('map-0', 0), [
       { nowMs: 0, feet: chair.ground, input: DOWN },
       { nowMs: 20, feet: chair.ground, input: NONE },
-      { nowMs: 20 + SIT_IDLE_MS, feet: chair.ground, input: NONE },
-      { nowMs: 20 + SIT_IDLE_MS * 4, input: NONE },
+      { nowMs: SIT_AGAIN_SAME_MS - 1, feet: chair.ground, input: NONE },
+      { nowMs: SIT_AGAIN_SAME_MS, feet: chair.ground, input: NONE },
+      { nowMs: SIT_AGAIN_SAME_MS + SIT_IDLE_MS - 1, feet: chair.ground, input: NONE },
+      { nowMs: SIT_AGAIN_SAME_MS + SIT_IDLE_MS, feet: chair.ground, input: NONE },
     ]);
-    expect(sits).toEqual([null, null, null, null]);
-    expect(state.idleGuard).toBe('map-0');
+    expect(sits).toEqual([null, null, null, null, null, 'map-0']);
+    expect(state.rest).toBeNull();
     // The push guard keeps today's meaning: the release lifted it.
     expect(state.guard).toBeNull();
   });
 
-  it('is lifted by leaving the seat reach; coming back still waits the full SIT_IDLE_MS', () => {
-    const { sits, state } = still(guardLeftSeat('map-0'), [
-      { nowMs: 0 },
-      { nowMs: 100, candidates: [{ ...chair, inReach: false }] },
-      { nowMs: 200 },
-      { nowMs: 200 + SIT_IDLE_MS - 1 },
-      { nowMs: 200 + SIT_IDLE_MS },
+  it('waits for the seat left when it is the closest one, never falling back to a neighbour', () => {
+    const between = { x: 112, y: 100 };
+    const steps = [0, SIT_AGAIN_OTHER_MS, SIT_AGAIN_OTHER_MS + SIT_IDLE_MS, SIT_AGAIN_SAME_MS - 1, SIT_AGAIN_SAME_MS, SIT_AGAIN_SAME_MS + SIT_IDLE_MS]
+      .map((nowMs) => ({ nowMs, feet: between, candidates: row }));
+    const { sits } = still(guardLeftSeat('map-0', 0), steps);
+    expect(sits).toEqual([null, null, null, null, null, 'map-0']);
+  });
+
+  it('is time only: leaving the reach and coming back does not lift it early', () => {
+    const { sits } = still(guardLeftSeat('map-0', 0), [
+      { nowMs: 1500, candidates: [{ ...chair, inReach: false }] },
+      { nowMs: 1600 },
+      { nowMs: 1600 + SIT_IDLE_MS },
+      { nowMs: SIT_AGAIN_SAME_MS },
+      { nowMs: SIT_AGAIN_SAME_MS + SIT_IDLE_MS },
     ]);
     expect(sits).toEqual([null, null, null, null, 'map-0']);
-    expect(state.idleGuard).toBeNull();
-  });
-
-  it('is lifted when the seat is no longer offered', () => {
-    const { state } = still(guardLeftSeat('map-0'), [{ nowMs: 0, candidates: [] }]);
-    expect(state.idleGuard).toBeNull();
-  });
-
-  it('excludes only the seat left: a neighbouring chair in reach still sits after SIT_IDLE_MS', () => {
-    const next: SitCandidate = { id: 'map-1', ground: { x: 132, y: 100 }, inReach: true };
-    const { sits, vias, state } = still(guardLeftSeat('map-0'), [
-      { nowMs: 0, feet: chair.ground, candidates: [chair, next] },
-      { nowMs: SIT_IDLE_MS - 1, feet: chair.ground, candidates: [chair, next] },
-      { nowMs: SIT_IDLE_MS, feet: chair.ground, candidates: [chair, next] },
-    ]);
-    expect(sits).toEqual([null, null, 'map-1']);
-    expect(vias).toEqual([null, null, 'idle']);
-    expect(state.idleGuard).toBe('map-0');
   });
 
   it('does not hold the push rule back: a fresh push into the seat left still sits', () => {
-    const { sits, vias } = run(guardLeftSeat('map-0'), [
+    const { sits, vias } = run(guardLeftSeat('map-0', 0), [
       { nowMs: 0, input: NONE },
       { nowMs: 20 },
       { nowMs: 20 + SIT_PUSH_MS },
@@ -400,9 +421,9 @@ describe('dropSitDwells', () => {
       push: { seatId: 'map-0', sinceMs: 0, fromOff: true },
       idle: { seatId: 'map-1', sinceMs: 0 },
       guard: 'map-2',
-      idleGuard: 'map-3',
+      rest: { seatId: 'map-3', sinceMs: 0 },
     };
-    expect(dropSitDwells(state)).toEqual({ push: null, idle: null, guard: 'map-2', idleGuard: 'map-3' });
+    expect(dropSitDwells(state)).toEqual({ push: null, idle: null, guard: 'map-2', rest: { seatId: 'map-3', sinceMs: 0 } });
   });
 });
 

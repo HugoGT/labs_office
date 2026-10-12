@@ -47,7 +47,7 @@ import {
 } from './officeRoomClient';
 import { OFFICE_SCENE_KEY, OfficeScene, type OfficeSceneOptions } from './OfficeScene';
 import { ARRIVE_EPSILON_PX, beginAutoWalk, type AutoWalkState } from './autoWalk';
-import { SIT_IDLE_MS, SIT_LOCK_MS } from './autoSit';
+import { SIT_AGAIN_SAME_MS, SIT_IDLE_MS, SIT_LOCK_MS } from './autoSit';
 import { regionBounds } from './cameraBounds';
 import { zoomView, type ZoomStore, type ZoomView } from './mapZoom';
 
@@ -3895,7 +3895,7 @@ describe('OfficeScene: push-to-sit', () => {
     expect(arena.player.y).toBeGreaterThan(seated);
   });
 
-  it('standing up beside the chair never sits on it again while still next to it, only on a neighbour', async () => {
+  it('standing up and staying put waits SIT_AGAIN_SAME_MS for the same chair, never taking the one beside it', async () => {
     const connector = fakeConnector('mi-sesion');
     const arena = await movementArena(connector);
     besideChair(arena);
@@ -3905,10 +3905,10 @@ describe('OfficeScene: push-to-sit', () => {
 
     arena.bridge.emitCommand('toggleSeat', undefined);
     expect(arena.player.seatFacing).toBeNull();
-    arena.walk(SIT_IDLE_MS * 4);
-    // The row's next chair is within SIT_NEAR_PX, so it is asked for; the chair left never is.
-    expect(connector.sits.filter((id) => id === mapSeatId(0))).toEqual([mapSeatId(0)]);
-    expect(connector.sits.length).toBeGreaterThan(1);
+    arena.walk(SIT_AGAIN_SAME_MS + SIT_IDLE_MS - 60);
+    expect(connector.sits).toEqual([mapSeatId(0)]);
+    arena.walk(100);
+    expect(connector.sits).toEqual([mapSeatId(0), mapSeatId(0)]);
   });
 
   it('the room standing a seated player up never idle-sits them straight back down', async () => {
