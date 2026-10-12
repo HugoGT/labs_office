@@ -713,6 +713,8 @@ export class OfficeScene extends Phaser.Scene {
       this.terrainEditing = command !== null;
       this.terrainHolds = terrainEditHoldsMap(command);
       this.syncEditing();
+      // The DOM rail hides with it (`OfficeShell`); a hidden camera takes no pointer, so the map under it paints.
+      this.minimapCamera?.setVisible(!this.terrainHolds);
       const previewBlocks = command?.previewBlocks ?? null;
       const repaint = (previewBlocks === null ? '' : encodeTerrainBlocks(previewBlocks)) !==
         (this.terrainPreviewBlocks === null ? '' : encodeTerrainBlocks(this.terrainPreviewBlocks));

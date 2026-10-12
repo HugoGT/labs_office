@@ -105,7 +105,7 @@ export function TerrainEditorSection({
       </div>
 
       <span className={styles.hint}>
-        Elige un suelo y toca bloques del mapa para pintarlos, o mantén pulsado y arrastra para pintar un área: cada bloque ocupa 9 × 9 casillas (288 × 288 px). El suelo sigue elegido hasta que lo deseleccionas o pulsas Escape; con nada elegido, Escape sale del editor.
+        Elige un suelo y toca bloques del mapa para pintarlos, o mantén pulsado y arrastra para pintar un área: cada bloque ocupa 9 × 9 casillas (288 × 288 px). El suelo sigue elegido hasta que lo deseleccionas o pulsas Escape; con nada elegido, Escape sale del editor. Con un suelo, una pared o una silla elegidos se ocultan el minimapa y los menús de la derecha para que puedas pintar debajo; Escape los vuelve a mostrar.
       </span>
       <span className={styles.hint}>
         Pintar sobre el vacío crea terreno nuevo; «Vacío» lo borra. El agua y el vacío no se pueden caminar. El bloque central de la entrada siempre es de madera.

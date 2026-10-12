@@ -178,6 +178,16 @@ describe('CameraZoomLayer: wheel', () => {
     expect(f.views).toHaveLength(initial);
   });
 
+  it('zooms with a wheel inside the minimap rect while the minimap is hidden (terrain editor)', async () => {
+    const f = await fixture();
+    const initial = f.views.length;
+    f.minimap.setVisible(false);
+
+    notches(f, -100, 2, { camera: f.scene.cameras.main, x: 250, y: 50 });
+
+    expect(f.views).toHaveLength(initial + 1);
+  });
+
   it('tolerates a pointer with no camera yet', async () => {
     const f = await fixture();
 

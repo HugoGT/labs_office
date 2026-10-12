@@ -15,7 +15,11 @@ export function layoutEditHoldsMap(command: LayoutEditCommand | null): boolean {
   return command !== null && (command.selectedId !== null || command.placing !== null);
 }
 
-/** A floor, wall or chair brush (erasers included) picked. */
+/**
+ * A floor, wall or chair brush (erasers included) picked. It also hides the
+ * right rail (minimap, zoom card, sidebar, exit buttons) so the map can be
+ * painted up to the screen edge, until Escape unpicks the brush.
+ */
 export function terrainEditHoldsMap(command: Pick<TerrainEditCommand, 'brush'> | null): boolean {
   return command !== null && command.brush !== null;
 }

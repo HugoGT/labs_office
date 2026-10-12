@@ -14,6 +14,7 @@ import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import { createCollisionAdminClient } from '../dashboard/collisionAdminClient';
 import type { CollisionAdminPort } from '../dashboard/collisionAdminPort';
 import { resolveLivekitConfig } from '../game/livekitEndpoint';
+import { terrainEditHoldsMap } from '../game/editorMapHold';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
 import { DEFAULT_NAME, DEFAULT_STATUS, type AccessDeniedReason, type PresenceStatus } from '../game/officeProtocol';
@@ -205,6 +206,14 @@ export function OfficeShell({
    * `forceExitLayoutEditing`, mismo patron rising-edge que `forceCollapsed`.
    */
   const [layoutEditing, setLayoutEditing] = useState(false);
+  /**
+   * A terrain brush (floor, wall or chair) hides the right rail (minimap, zoom, sidebar, exit
+   * buttons) so the map can be painted under it; Escape unpicks the brush and
+   * brings it back. Read from the same `terrainedit` command the scene follows,
+   * so the sidebar stays mounted (only hidden) and keeps the editor's state.
+   */
+  const [hudHidden, setHudHidden] = useState(false);
+  useEffect(() => bridge.onCommand('terrainedit', (command) => setHudHidden(terrainEditHoldsMap(command))), [bridge]);
   /**
    * Config de espacios servida (#7, slice 3). Vive aqui y no en `GameCanvas`
    * por la misma razon que `endpoint`: quien sabe donde esta el servidor es
@@ -774,6 +783,9 @@ export function OfficeShell({
     status,
   };
 
+  // `contents` keeps the fixed children placed and stacked as if unwrapped.
+  const rightRailStyle = { display: hudHidden ? 'none' : 'contents' } as const;
+
   return (
     <div id="office-shell">
       <GameCanvas bridge={bridge} endpoint={endpoint} session={session} onEntryState={onEntryState} />
@@ -787,24 +799,26 @@ export function OfficeShell({
         activeScreenSharer={activeScreenSharer?.sessionId ?? null}
       />
       <ContextMenu menu={menu} onAction={handleMenuAction} onClose={closeMenu} />
-      <OfficeSidebar
-        self={rosterSelf}
-        peers={rosterPeers}
-        forceCollapsed={decorOpen}
-        role={adminRole}
-        bridge={bridge}
-        desks={deskAdminPort}
-        spaces={spacesAdminPort}
-        terrain={terrainAdminPort}
-        collisions={collisionAdminPort}
-        assets={assetsAdminPort}
-        contributions={contributionsPort}
-        refreshDesks={refreshDesks}
-        refreshSpaces={refreshSpaces}
-        onLayoutEditingChange={setLayoutEditing}
-        forceExitLayoutEditing={decorOpen}
-        onCallPeer={callPeer}
-      />
+      <div style={rightRailStyle}>
+        <OfficeSidebar
+          self={rosterSelf}
+          peers={rosterPeers}
+          forceCollapsed={decorOpen}
+          role={adminRole}
+          bridge={bridge}
+          desks={deskAdminPort}
+          spaces={spacesAdminPort}
+          terrain={terrainAdminPort}
+          collisions={collisionAdminPort}
+          assets={assetsAdminPort}
+          contributions={contributionsPort}
+          refreshDesks={refreshDesks}
+          refreshSpaces={refreshSpaces}
+          onLayoutEditingChange={setLayoutEditing}
+          forceExitLayoutEditing={decorOpen}
+          onCallPeer={callPeer}
+        />
+      </div>
       <BottomBar
         playerName={session?.displayName ?? DEFAULT_NAME}
         micOn={micOn}
@@ -839,12 +853,14 @@ export function OfficeShell({
           onClose={() => setDecorOpen(false)}
         />
       )}
-      <ExitControls
-        onSignOut={session?.signOut ? () => void signOut(session) : null}
-        onLeaveOffice={onLeaveOffice ?? null}
-        install={installOffer}
-      />
-      <ZoomControls view={mapZoom.view} onZoomIn={mapZoom.zoomIn} onZoomOut={mapZoom.zoomOut} onReset={mapZoom.reset} />
+      <div style={rightRailStyle}>
+        <ExitControls
+          onSignOut={session?.signOut ? () => void signOut(session) : null}
+          onLeaveOffice={onLeaveOffice ?? null}
+          install={installOffer}
+        />
+        <ZoomControls view={mapZoom.view} onZoomIn={mapZoom.zoomIn} onZoomOut={mapZoom.zoomOut} onReset={mapZoom.reset} />
+      </div>
       <AudioUnblockPrompt blocked={audioBlocked} onUnblock={unblockAudio} />
       <Toast message={toastMessage} />
       <CallInvitationStack invitations={invitations} onAccept={accept} onDismiss={dismiss} />
