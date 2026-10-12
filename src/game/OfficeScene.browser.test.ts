@@ -319,6 +319,23 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     movement.cursors.right.isDown = false;
   });
 
+  it('hides the minimap while a terrain brush is picked, and shows it again once it is not', async () => {
+    const { scene, bridge } = await movementArena();
+    const minimap = scene.cameras.cameras[1]!;
+    expect(minimap.visible).toBe(true);
+
+    bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'grass' } });
+    expect(minimap.visible).toBe(false);
+    bridge.emitCommand('terrainedit', { brush: null });
+    expect(minimap.visible).toBe(true);
+    bridge.emitCommand('terrainedit', { brush: { kind: 'wall', piece: 'wall-brick' } });
+    expect(minimap.visible).toBe(false);
+    bridge.emitCommand('terrainedit', { brush: { kind: 'chair', piece: null, facing: 'down' } });
+    expect(minimap.visible).toBe(false);
+    bridge.emitCommand('terrainedit', null);
+    expect(minimap.visible).toBe(true);
+  });
+
   it('does not turn drags, item clicks, blocked goals or minimap clicks into walking', async () => {
     const { scene, movement, click, doubleClick } = await movementArena();
     doubleClick(1000, 300, { distance: 20 });

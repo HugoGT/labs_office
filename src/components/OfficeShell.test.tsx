@@ -1764,3 +1764,33 @@ describe('OfficeShell: instalar la app (#13)', () => {
     await vi.waitFor(() => expect(screen.queryByRole('button', { name: 'Instalar app' })).not.toBeInTheDocument());
   });
 });
+
+describe('OfficeShell: right rail while painting terrain', () => {
+  it('hides the right-hand HUD while a terrain brush is picked, and shows it again once it is not', () => {
+    render(<OfficeShell onLeaveOffice={vi.fn()} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const rail = () => [
+      screen.getByRole('complementary', { name: 'Personas', hidden: true }),
+      screen.getByRole('group', { name: 'Zoom del mapa', hidden: true }),
+      screen.getByRole('button', { name: 'Salir', hidden: true }),
+    ];
+    rail().forEach((element) => expect(element).toBeVisible());
+
+    act(() => bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'grass' } }));
+    rail().forEach((element) => expect(element).not.toBeVisible());
+
+    // Escape unpicks the brush: the editor stays open and so does the HUD.
+    act(() => bridge.emitCommand('terrainedit', { brush: null }));
+    rail().forEach((element) => expect(element).toBeVisible());
+
+    act(() => bridge.emitCommand('terrainedit', { brush: { kind: 'wall', piece: null } }));
+    rail().forEach((element) => expect(element).not.toBeVisible());
+
+    act(() => bridge.emitCommand('terrainedit', { brush: { kind: 'chair', piece: null, facing: 'down' } }));
+    rail().forEach((element) => expect(element).not.toBeVisible());
+
+    act(() => bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'grass' } }));
+    act(() => bridge.emitCommand('terrainedit', null));
+    rail().forEach((element) => expect(element).toBeVisible());
+  });
+});

@@ -160,7 +160,7 @@ export class CameraZoomLayer {
 
   private isOverMinimap(pointer: Phaser.Input.Pointer): boolean {
     const map = this.minimap;
-    if (!map) return false;
+    if (!map?.visible) return false;
     return pointer.x >= map.x && pointer.x < map.x + map.width && pointer.y >= map.y && pointer.y < map.y + map.height;
   }
 }
