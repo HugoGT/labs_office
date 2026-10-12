@@ -10,7 +10,7 @@ import {
 } from './artPlacement';
 import { feetOf, positionForFeet } from './avatarGeometry';
 import { beginAutoWalk, isAutoWalkArrived, stepAutoWalk, type AutoWalkState } from './autoWalk';
-import { IDLE_AUTO_SIT, SIT_LOCK_MS, guardLeftSeat, sitLockActive, stepAutoSit, type AutoSitState } from './autoSit';
+import { IDLE_AUTO_SIT, SIT_LOCK_MS, dropSitDwells, guardLeftSeat, sitLockActive, stepAutoSit, type AutoSitState } from './autoSit';
 import { planWalk } from './pathfinding';
 import { registerClick, type ClickSample } from './doubleClick';
 import { CameraPanLayer } from './CameraPanLayer';
@@ -312,12 +312,12 @@ export class OfficeScene extends Phaser.Scene {
   private seat: ResolvedSeat | null = null;
   /** Seat asked for and not answered yet; moving forgets it. */
   private pendingSeat: string | null = null;
-  /** Push-to-sit dwell and re-sit guard (`autoSit.ts`), fed the keyboard every frame. */
+  /** Push and idle sit dwells and re-sit guards (`autoSit.ts`), fed the keyboard and the auto-walk every frame. */
   private autoSit: AutoSitState = IDLE_AUTO_SIT;
   /**
    * Game time until which movement input is ignored after a push-to-sit
    * request (`SIT_LOCK_MS`), or `null`. Started on the request, so a refused
-   * one never locks longer either.
+   * one never locks longer either. An idle sit sets none: no key is held.
    */
   private sitLockUntil: number | null = null;
   /** Last `characterportraits` payload, so an unchanged set is not re-sent. */
@@ -482,7 +482,7 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   private readonly resetWalking = (): void => {
-    this.autoSit = { push: null, guard: this.autoSit.guard };
+    this.autoSit = dropSitDwells(this.autoSit);
     this.walkingMs = 0;
     this.walkingIdleMs = 0;
     this.lastWalkFrame = undefined;
@@ -1210,28 +1210,32 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
-   * One frame of push-to-sit while standing (`autoSit.ts`): walking into a
-   * free chair from next to it stops the walk, asks for the chair and locks
-   * movement for `SIT_LOCK_MS`. Returns whether it asked, so the frame's
-   * movement is dropped.
+   * One frame of sitting while standing (`autoSit.ts`): walking into a free
+   * chair from next to it, or standing still next to one (a double-click
+   * walk that ended there included), stops the walk and asks for the chair.
+   * Only a push locks movement for `SIT_LOCK_MS`: its key is still held. An
+   * idle sit has no key held, so the first movement afterwards stands up.
+   * Returns whether it asked, so the frame's movement is dropped.
    */
   private pushToSit(time: number, vx: number, vy: number): boolean {
     if (this.seat !== null || this.pendingSeat !== null || !this.localPositionReady || this.mapHeld) {
-      this.autoSit = { push: null, guard: this.autoSit.guard };
+      this.autoSit = dropSitDwells(this.autoSit);
       return false;
     }
     const step = stepAutoSit(this.autoSit, {
       nowMs: time,
       feet: feetOf(this.player),
       input: { vx, vy },
+      // `update()` runs this before `stepWalking`, so a walk that arrived
+      // last frame is already `undefined` here: the player is still.
+      walking: this.autoWalk !== undefined,
       candidates: this.freeSeats().map((seat) => ({ ...seat, inReach: inSeatReach(this.player, seat.reach) })),
     });
     this.autoSit = step.state;
-    const seat = step.sit;
-    if (seat === null) return false;
+    if (step.sit === null) return false;
     this.resetWalking();
-    this.sitLockUntil = time + SIT_LOCK_MS;
-    this.requestSeat(seat);
+    if (step.via === 'push') this.sitLockUntil = time + SIT_LOCK_MS;
+    this.requestSeat(step.sit);
     return true;
   }
 
@@ -1244,9 +1248,13 @@ export class OfficeScene extends Phaser.Scene {
     }
     this.connection.sendSit(seat.id);
     // The room refuses without a word; after a while the request is
-    // forgotten, so the next request asks again instead of standing up.
+    // forgotten, so the next request asks again instead of standing up. The
+    // seat is guarded like one just left: standing still beside it, the idle
+    // rule would otherwise ask every frame for a seat the room refuses.
     this.time.delayedCall(SEAT_ANSWER_MS, () => {
-      if (this.pendingSeat === seat.id) this.pendingSeat = null;
+      if (this.pendingSeat !== seat.id) return;
+      this.pendingSeat = null;
+      this.autoSit = guardLeftSeat(seat.id, this.time.now);
     });
   }
 
@@ -1260,7 +1268,9 @@ export class OfficeScene extends Phaser.Scene {
   private onLocalSeat(seatId: string | null): void {
     if (seatId === null) {
       this.pendingSeat = null;
-      this.autoSit = { push: null, guard: this.autoSit.guard };
+      // The room stood a seated player up (desk changed hands, chair gone,
+      // out of reach): never sit straight back down by standing still there.
+      this.autoSit = this.seat === null ? dropSitDwells(this.autoSit) : guardLeftSeat(this.seat.id, this.time.now);
       this.sitLockUntil = null;
       this.leaveSeat();
       return;
@@ -1293,7 +1303,7 @@ export class OfficeScene extends Phaser.Scene {
   private standUp(): void {
     if (this.seat === null && this.pendingSeat === null) return;
     const left = this.seat?.id ?? this.pendingSeat;
-    if (left !== null) this.autoSit = guardLeftSeat(left);
+    if (left !== null) this.autoSit = guardLeftSeat(left, this.time.now);
     this.sitLockUntil = null;
     this.pendingSeat = null;
     this.leaveSeat();

@@ -47,7 +47,7 @@ import {
 } from './officeRoomClient';
 import { OFFICE_SCENE_KEY, OfficeScene, type OfficeSceneOptions } from './OfficeScene';
 import { ARRIVE_EPSILON_PX, beginAutoWalk, type AutoWalkState } from './autoWalk';
-import { SIT_LOCK_MS } from './autoSit';
+import { SIT_AGAIN_SAME_MS, SIT_IDLE_MS, SIT_LOCK_MS } from './autoSit';
 import { regionBounds } from './cameraBounds';
 import { zoomView, type ZoomStore, type ZoomView } from './mapZoom';
 
@@ -3802,7 +3802,8 @@ describe('OfficeScene: persisted character ids (art migration, step 5)', () => {
 /**
  * Push-to-sit: walking into a free chair from right next to it sits the
  * player, then movement is locked for `SIT_LOCK_MS`; after that the held key
- * stands the player up without sitting again at once. There is no E key.
+ * stands the player up without sitting again at once. Standing still next to
+ * one for `SIT_IDLE_MS` sits too, with no lock. There is no E key.
  */
 describe('OfficeScene: push-to-sit', () => {
   type Arena = Awaited<ReturnType<typeof movementArena>>;
@@ -3854,13 +3855,85 @@ describe('OfficeScene: push-to-sit', () => {
     expect(arena.player.x).toBeGreaterThan(GROUND.x + 2 * TILE);
   });
 
-  it('double-click walking onto a chair does not sit', async () => {
+  it('double-click walking onto a chair does not sit on arrival, then sits once still for SIT_IDLE_MS', async () => {
     const arena = await movementArena();
     arena.body.reset(GROUND.x, GROUND.y - 3 * TILE);
     arena.doubleClick(GROUND.x, GROUND.y - 18);
     for (let i = 0; i < 200 && arena.movement.autoWalk !== undefined; i++) arena.frame();
 
     expect(arena.movement.autoWalk).toBeUndefined();
+    expect(arena.player.seatFacing).toBeNull();
+    arena.walk(SIT_IDLE_MS - 40);
+    expect(arena.player.seatFacing).toBeNull();
+    arena.walk(60);
+    expect(arena.player.seatFacing).toBe(SEAT.facing);
+    expect(sitLock(arena)).toBeNull();
+  });
+
+  it('standing still next to a free chair for SIT_IDLE_MS sits on it, not before', async () => {
+    const arena = await movementArena();
+    besideChair(arena);
+    arena.walk(SIT_IDLE_MS - 40);
+    expect(arena.player.seatFacing).toBeNull();
+
+    arena.walk(60);
+    expect(arena.player.seatFacing).toBe(SEAT.facing);
+    expect(feetOf(arena.player)).toEqual(GROUND);
+  });
+
+  it('an idle sit sets no lock: the first key stands up and walks at once', async () => {
+    const arena = await movementArena();
+    besideChair(arena);
+    arena.walk(SIT_IDLE_MS + 20);
+    expect(arena.player.seatFacing).toBe(SEAT.facing);
+    expect(sitLock(arena)).toBeNull();
+    const seated = arena.player.y;
+
+    arena.movement.cursors.down.isDown = true;
+    arena.frame();
+    expect(arena.player.seatFacing).toBeNull();
+    expect(arena.player.y).toBeGreaterThan(seated);
+  });
+
+  it('standing up and staying put waits SIT_AGAIN_SAME_MS for the same chair, never taking the one beside it', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    besideChair(arena);
+    arena.walk(SIT_IDLE_MS + 20);
+    connector.handlers()!.onLocalSeat?.(mapSeatId(0));
+    expect(arena.player.seatFacing).toBe(SEAT.facing);
+
+    arena.bridge.emitCommand('toggleSeat', undefined);
+    expect(arena.player.seatFacing).toBeNull();
+    arena.walk(SIT_AGAIN_SAME_MS + SIT_IDLE_MS - 60);
+    expect(connector.sits).toEqual([mapSeatId(0)]);
+    arena.walk(100);
+    expect(connector.sits).toEqual([mapSeatId(0), mapSeatId(0)]);
+  });
+
+  it('the room standing a seated player up never idle-sits them straight back down', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    besideChair(arena);
+    arena.walk(SIT_IDLE_MS + 20);
+    connector.handlers()!.onLocalSeat?.(mapSeatId(0));
+    expect(arena.player.seatFacing).toBe(SEAT.facing);
+
+    connector.handlers()!.onLocalSeat?.(null);
+    arena.walk(SIT_IDLE_MS * 3);
+    expect(connector.sits.filter((id) => id === mapSeatId(0))).toEqual([mapSeatId(0)]);
+  });
+
+  it('an idle request the room never answers is not asked again while still beside the chair', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    besideChair(arena);
+    arena.walk(SIT_IDLE_MS + 20);
+    expect(connector.sits).toEqual([mapSeatId(0)]);
+
+    // Past the scene's answer timeout (2 s) and another idle dwell.
+    arena.walk(2000 + SIT_IDLE_MS * 2);
+    expect(connector.sits.filter((id) => id === mapSeatId(0))).toEqual([mapSeatId(0)]);
     expect(arena.player.seatFacing).toBeNull();
   });
 
