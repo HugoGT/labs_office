@@ -30,16 +30,17 @@ e2e/                    real-process E2E harness (node:test + Playwright)
 tools/art/              art pack exporter: pure generators (domain/), sheets, manifest, previews
 tools/map/              initial Tiled layout generator and its editor palette (`pnpm map:init`)
 tools/pwa/              PWA: manifest + Workbox options read by vite.config.ts, icon generator (`pnpm pwa:icons`)
+tools/vm/               office-hours rules of the test VM (vmSchedule.ts) and `node tools/vm/vm.ts` (nightly job, office-vm.sh)
 docs/art/               art contract (contract.md) and generated review previews (preview/)
 docs/assets/            guide templates for artists (templates/, templates.md)
 docker-compose.yml      full local stack (include of infra/livekit + postgres + server + web images)
 infra/livekit/          local LiveKit + Egress + Redis docker compose stack
-infra/gcp/              deployed `test` environment: Terraform, VM compose, Caddy, office-deploy
+infra/gcp/              deployed `test` environment: Terraform, VM compose, Caddy, office-deploy, office-vm.sh (manual VM control)
 prototype/              pre-port standalone prototype, reference only (not built, not run)
 public/assets/          static art: pack/ is the generated art pack, never hand-edited
 public/icons/           generated PWA icons (`pnpm pwa:icons`), never hand-edited
 src/game/maps/          office.json, the Tiled base layout (static map), and its editor palette
-.github/workflows/      ci.yml (verify) and deploy-test.yml (deploy after green CI on main)
+.github/workflows/      ci.yml (verify), deploy-test.yml (deploy after green CI on main), vm-nightly.yml (stop the VM after hours, size the next day)
 ```
 
 Shared code: the server imports `src/game/officeProtocol.ts`, `src/game/mapData.ts`, `src/game/artContract.ts`, `src/game/seating.ts`, `src/game/officeLayout.ts` and `src/game/pieceCollisions.ts` directly (import-free but for `maps/office.json`, a JSON import with `with { type: 'json' }`). Changes there affect both client and server.
@@ -227,6 +228,7 @@ Only a `test` environment exists (`infra/gcp/README.md` is the full runbook).
 - `deploy-test.yml` triggers on `workflow_run` of CI completing successfully for a push to `main` (or manually via `gh workflow run deploy-test.yml`, which skips CI). It deploys `workflow_run.head_sha`, not the tip of `main`.
 - It builds and pushes `caddy`, `colyseus` and `web` images tagged with the commit SHA (never `latest`) to Artifact Registry, then SSHes over IAP and runs `office-deploy <sha>`, then smoke checks `https://<APP_HOST>/health`.
 - `infra/gcp/scripts/office-deploy.sh` (installed on the VM as `/usr/local/bin/office-deploy`, refreshed from instance metadata on every deploy) is idempotent: reads config (compose, Caddyfile, `livekit.yaml.tpl`) from instance metadata, reads secrets from Secret Manager, atomically rewrites `/opt/office/.env` (0600), `docker compose pull` + `up -d`, reloads Caddy, restarts LiveKit only if `livekit.yaml` changed, prunes old images.
+- Office hours: the VM runs Monday to Friday 07:45-20:00 America/Lima (a Terraform instance schedule, `google_compute_resource_policy.office_hours`; GCE may act up to 15 minutes late). `vm-nightly.yml` (20:30, 23:30, 02:30 Lima, `deploy-test` concurrency group) stops a VM still running after its `office-hold-until` metadata expired, then sets the stopped VM's size for the next office day: `e2-standard-8` on a date in `office-heavy-days`, else `e2-standard-4`. The rules are `tools/vm/vmSchedule.ts` (pure, import-free, run by Node type stripping); `infra/gcp/scripts/office-vm.sh` (`status`, `start [--for 2h] [--size TYPE]`, `stop [-y]`, `heavy add|rm|list`, `deploy`) is the manual control. `deploy-test.yml` starts a stopped VM with a 1h hold, waits for the boot's startup script, and `office-deploy` serializes runs with `flock`. README: "VM schedule".
 - Terraform (`infra/gcp/terraform/`) is applied by a human, never by CI. Config files reach the VM as metadata written by `terraform apply`; image rollback alone (`office-deploy <old-sha>`) does not revert config.
 - Secrets (LiveKit key/secret, DB password, optional identity admin key) live only in Secret Manager, never in the repo, GitHub secrets or Terraform state.
 - GitHub repository variables (not secrets): `GCP_PROJECT_ID`, `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_DEPLOYER_SA`, `APP_HOST`, optional `FIREBASE_API_KEY`, `FIREBASE_PROJECT_ID`, `FIREBASE_AUTH_DOMAIN`, `GCP_ZONE`, `GCP_REGION`, `GCP_INSTANCE`, `GCP_AR_REPOSITORY`.
@@ -250,6 +252,8 @@ Only a `test` environment exists (`infra/gcp/README.md` is the full runbook).
 - `vite.config.ts` repeats `define` per Vitest project on purpose (`test.projects` does not inherit it); `__OFFICE_E2E__` must be defined in each.
 - `.env.e2e` keeps Firebase keys empty on purpose so a developer's real `.env` does not leak into the e2e bundle.
 - `@colyseus/core` 0.16.25 is published broken and there is no JS client for Colyseus 0.17: stay on 0.16.24 (override in `pnpm-workspace.yaml`). Do not use the `colyseus` meta-package.
+- `google_compute_instance.office` ignores `machine_type` and the metadata keys `office-heavy-days`/`office-hold-until` (written at runtime by the nightly job, office-vm.sh and deploys). Never declare those keys in the `metadata` map nor set `desired_status`, or every apply fights the schedule. A plan touching the instance must say `update in-place`. `tools/vm/scheduleDrift.test.ts` ties the Terraform schedule defaults, the nightly crons and the shared concurrency group to `vmSchedule.ts`.
+- The instance schedule's 20:00 stop ignores holds: a hold only protects a VM from the nightly job. Outside office hours the app does not answer at all (no "office closed" page), and starting can fail on zone capacity.
 - Recording on the default `e2-medium` VM is refused by Egress admission (every start returns 502 `egress-failed`); `e2-standard-4` allows one concurrent recording.
 - Signed URLs need the VM service account to have `roles/iam.serviceAccountTokenCreator` on itself; service account keys are forbidden in the GCP project. Locally, use impersonated ADC (`infra/livekit/README.md`, "Local recording"); plain user ADC cannot sign.
 - Egress needs the upload destination in each request; the storage block in its config is not a default destination.
