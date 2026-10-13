@@ -443,6 +443,53 @@ resource "google_service_account_iam_member" "vm_signs_as_itself" {
 }
 
 # ---------------------------------------------------------------------------
+# Office hours: instance schedule (cost cut)
+# ---------------------------------------------------------------------------
+
+# Starts the VM on weekday mornings and stops it in the evening, in the
+# office's time zone. GCE may run each operation up to 15 minutes late. The
+# nightly job (.github/workflows/vm-nightly.yml) covers what a schedule cannot:
+# a VM someone started after hours, and the machine size of the next day.
+# Changing the times or the zone later is an in-place update of this policy.
+resource "google_compute_resource_policy" "office_hours" {
+  name        = "${local.name}-office-hours"
+  region      = var.region
+  description = "Arranque y parada de la VM de la oficina virtual (${var.env}) en horario de oficina."
+
+  instance_schedule_policy {
+    time_zone = var.vm_schedule_timezone
+
+    vm_start_schedule {
+      schedule = var.vm_start_schedule
+    }
+
+    vm_stop_schedule {
+      schedule = var.vm_stop_schedule
+    }
+  }
+}
+
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
+# The schedule acts as the Compute Engine Service Agent, which needs
+# compute.instances.start/stop. PROJECT level, against this file's rule of
+# binding per resource, because that is the only scope GCP documents for it
+# ("grant the Compute Instance Admin (v1) role to the Compute Engine Service
+# Agent on the project", docs: compute/docs/instances/schedule-instance-start-stop).
+# An instance-level binding is undocumented and GCE checks it when the policy
+# is attached, so a wrong guess would fail the apply. The member is a
+# Google-managed agent that only acts on behalf of schedules and other
+# platform features, never on a key anyone holds, and the binding is
+# additive (`_member`), so nothing else in the shared project changes.
+resource "google_project_iam_member" "compute_agent_schedules" {
+  project = var.project_id
+  role    = "roles/compute.instanceAdmin.v1"
+  member  = "serviceAccount:service-${data.google_project.current.number}@compute-system.iam.gserviceaccount.com"
+}
+
+# ---------------------------------------------------------------------------
 # VM
 # ---------------------------------------------------------------------------
 
@@ -456,6 +503,11 @@ resource "google_compute_instance" "office" {
   # Los cambios de metadata (fichero compose, Caddyfile, scripts) requieren
   # parar la instancia en algunos casos; sin esto el apply falla en vez de
   # aplicarlos.
+  #
+  # Since the office-hours schedule, `machine_type` is ignored (lifecycle
+  # below), so no change in this file stops the VM today; adding or editing
+  # `resource_policies` and metadata keys runs on a live VM. Kept for the
+  # fields that still require a stop (service account, shielded VM, network).
   allow_stopping_for_update = true
 
   boot_disk {
@@ -491,6 +543,20 @@ resource "google_compute_instance" "office" {
 
   metadata_startup_script = file("${path.module}/../startup-script.sh")
 
+  # Office hours (see "VM schedule" in the README). Attaching or detaching it
+  # is an in-place update (addResourcePolicies/removeResourcePolicies on the
+  # running instance), not ForceNew: in provider 7.x only
+  # `boot_disk.initialize_params.resource_policies` forces a replacement, and
+  # this is the instance-level list. GCE refuses the attach while the service
+  # agent lacks start/stop, hence the depends_on.
+  resource_policies = [google_compute_resource_policy.office_hours.id]
+
+  # Never set `desired_status`: the schedule, the nightly job and office-vm.sh
+  # own the power state, and a declared status would fight all three on every
+  # apply.
+
+  depends_on = [google_project_iam_member.compute_agent_schedules]
+
   lifecycle {
     # `metadata_startup_script` is ForceNew in the provider: ANY edit to
     # startup-script.sh plans a delete + create of the VM. That is how the
@@ -501,7 +567,22 @@ resource "google_compute_instance" "office" {
     # `terraform apply -replace=google_compute_instance.office`, never a side
     # effect. To roll out a startup script change in place, see the README
     # ("Startup script changes").
-    ignore_changes = [metadata_startup_script]
+    #
+    # `machine_type`: the nightly job and office-vm.sh switch it between
+    # e2-standard-4 and e2-standard-8 for heavy days. Planning it back would
+    # undo their choice and, on a running VM, stop it (allow_stopping_for_update)
+    # in the middle of the day.
+    #
+    # The two metadata keys are written at runtime by the same tools (heavy
+    # days, and the hold a manual start or a deploy sets). Ignoring them by key
+    # keeps them in the planned map, so an apply that changes any other key
+    # sends them back unchanged instead of wiping them.
+    ignore_changes = [
+      metadata_startup_script,
+      machine_type,
+      metadata["office-heavy-days"],
+      metadata["office-hold-until"],
+    ]
   }
 
   metadata = {
@@ -684,15 +765,49 @@ resource "google_compute_instance_iam_member" "deployer_instance_read" {
   member        = "serviceAccount:${google_service_account.deployer.email}"
 }
 
+# Power and size of the VM for the nightly job (vm-nightly.yml) and for a
+# deploy that finds it stopped (deploy-test.yml): start, stop, resize, and
+# write the office-heavy-days / office-hold-until metadata keys. Bound ONLY on
+# this instance, same pattern as instance_read; compute.instances.get comes
+# from that role. Still far less than roles/compute.instanceAdmin.v1: no
+# delete, no disks, no network or service account changes. Starting a VM that
+# runs as a service account also takes iam.serviceAccounts.actAs on it, which
+# deployer_uses_vm_sa below already grants on the VM's account alone.
+resource "google_project_iam_custom_role" "instance_power" {
+  role_id     = "${replace(local.name, "-", "_")}_instance_power"
+  title       = "Encendido y tamano de la instancia de la oficina virtual (${var.env})"
+  description = "Start, stop, machine type and metadata of the office VM, for the nightly job and deploys."
+  permissions = [
+    "compute.instances.setMachineType",
+    "compute.instances.setMetadata",
+    "compute.instances.start",
+    "compute.instances.stop",
+  ]
+}
+
+resource "google_compute_instance_iam_member" "deployer_instance_power" {
+  project       = var.project_id
+  zone          = var.zone
+  instance_name = google_compute_instance.office.name
+  role          = google_project_iam_custom_role.instance_power.id
+  member        = "serviceAccount:${google_service_account.deployer.email}"
+}
+
 # gcloud consulta ademas el proyecto (para saber si OS Login esta activo) y la
 # zona. Son lecturas de metadatos de configuracion, sin acceso a datos, y no
 # existe un recurso mas fino al que atarlas.
+#
+# compute.zoneOperations.get: gcloud waits for start, stop, set-machine-type
+# and add-metadata (instance_power) by reading the zonal operation they
+# return. Operations are not IAM resources, so the project is the only scope;
+# it reads operation records, never instances, disks or metadata.
 resource "google_project_iam_custom_role" "project_read" {
   role_id     = "${replace(local.name, "-", "_")}_project_read"
   title       = "Lectura de proyecto para el despliegue (${var.env})"
-  description = "Lo minimo que gcloud compute ssh consulta a nivel de proyecto y zona."
+  description = "Lo minimo que gcloud compute ssh consulta a nivel de proyecto y zona, y las operaciones que espera."
   permissions = [
     "compute.projects.get",
+    "compute.zoneOperations.get",
     "compute.zones.get",
     "compute.zones.list",
   ]
