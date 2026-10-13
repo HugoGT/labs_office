@@ -1,0 +1,90 @@
+name: VM nightly (test)
+
+# Cost cut for the test VM (see "VM schedule" in infra/gcp/README.md). The
+# instance schedule in Terraform starts the VM on weekday mornings and stops it
+# at 20:00 America/Lima; this job covers what a schedule cannot:
+#
+#   1. A VM someone started after hours (office-vm.sh start, or a deploy that
+#      woke it) keeps running until its office-hold-until metadata expires.
+#      Here it is stopped once the hold is over.
+#   2. The machine type can only change while the VM is stopped, so the size
+#      of the next office day (e2-standard-8 on a heavy day, e2-standard-4
+#      otherwise) is set here, at night.
+#
+# All decisions live in tools/vm/vmSchedule.ts; this file only wires
+# credentials and runs it.
+on:
+  # 20:30, 23:30 and 02:30 in America/Lima (UTC-5, no DST), written in UTC
+  # because GitHub reads crons in UTC. Three runs so a hold that expires late
+  # still gets stopped the same night. tools/vm/scheduleDrift.test.ts checks
+  # they all fall outside office hours. GitHub may start a scheduled run late
+  # or, under load, skip it; the next run catches up.
+  schedule:
+    - cron: '30 1 * * *'
+    - cron: '30 4 * * *'
+    - cron: '30 7 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only print what would be done
+        type: boolean
+        default: false
+
+# The same group as deploy-test.yml: a stop must never land in the middle of a
+# deploy, and a deploy must never find the VM half stopped. Without
+# cancel-in-progress, like the deploy.
+concurrency:
+  group: deploy-test
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # OIDC token for Workload Identity Federation, exactly like deploy-test.yml.
+  id-token: write
+
+jobs:
+  nightly:
+    name: Stop after hours and size for the next day
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_INSTANCE: ${{ vars.GCP_INSTANCE || 'labs-office-test' }}
+      GCP_ZONE: ${{ vars.GCP_ZONE || 'us-central1-a' }}
+      DRY_RUN: ${{ inputs.dry_run }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check the variables are set
+        run: |
+          test -n "${GCP_PROJECT_ID}" || { echo "Missing repository variable GCP_PROJECT_ID"; exit 1; }
+          test -n "${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}" || { echo "Missing variable GCP_WORKLOAD_IDENTITY_PROVIDER"; exit 1; }
+          test -n "${{ vars.GCP_DEPLOYER_SA }}" || { echo "Missing variable GCP_DEPLOYER_SA"; exit 1; }
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      # Node 24 runs tools/vm/*.ts by type stripping. The module is import-free,
+      # so there is no pnpm install here.
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Stop after hours and size for the next office day
+        run: |
+          if [ "${DRY_RUN}" = "true" ]; then
+            node tools/vm/vm.ts nightly --dry-run
+          else
+            node tools/vm/vm.ts nightly
+          fi

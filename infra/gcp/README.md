@@ -21,6 +21,7 @@ Todo está parametrizado por `var.env` para que el segundo entorno sea un
 | `livekit.yaml.tpl` | Configuración del SFU. Plantilla: los hostnames se sustituyen al desplegar |
 | `startup-script.sh` | Arranque de la VM: instala Docker y el script de operación |
 | `scripts/office-deploy.sh` | Despliegue idempotente. Se instala como `/usr/local/bin/office-deploy` |
+| `scripts/office-vm.sh` | Manual control of the VM outside office hours: status, start, stop, heavy days, deploy (see *VM schedule*) |
 | `docker/caddy.Dockerfile` | Imagen propia de Caddy con el módulo `layer4` (issue #19) |
 | `docker/colyseus.Dockerfile` | Imagen del servidor de Node |
 | `docker/web.Dockerfile` | Imagen del SPA construido |
@@ -30,7 +31,8 @@ Todo está parametrizado por `var.env` para que el segundo entorno sea un
 
 El workflow de despliegue es `.github/workflows/deploy-test.yml`, separado de
 `ci.yml`. El `.dockerignore` de la raíz acota el contexto de build de las tres
-imágenes.
+imágenes. `.github/workflows/vm-nightly.yml` stops the VM after hours and sizes
+it for the next day (see *VM schedule*).
 
 ## Por qué una sola VM
 
@@ -257,7 +259,9 @@ es la vía para redesplegar sin cambiar código (por ejemplo, después de un
 
 **Terraform no corre en la CI, y es deliberado.** La cuenta de servicio de despliegue
 solo puede escribir en el Artifact Registry, tunelizar por IAP hacia *esta* instancia y
-entrar en ella (ver `terraform/main.tf`, cada binding acotado a su recurso). Un
+entrar en ella (ver `terraform/main.tf`, cada binding acotado a su recurso); since
+the office-hours schedule, also start, stop and resize *this* instance and write
+its metadata (see *VM schedule*). Un
 `terraform apply` automático exigiría darle administración de compute, IAM, roles y
 Secret Manager sobre un proyecto que es **compartido** y aloja recursos ajenos. Los
 `terraform apply` los sigue lanzando una persona, como describe el resto de este
@@ -307,6 +311,115 @@ sudo docker compose --project-directory /opt/office ps
 sudo docker compose --project-directory /opt/office logs --tail 100 caddy
 sudo journalctl -u google-startup-scripts     # problemas de arranque de la VM
 ```
+
+## VM schedule (cost cut)
+
+The VM only runs during office hours: Monday to Friday, 07:45 to 20:00
+America/Lima. That cuts its compute bill to about a third (see *Cost*). Three
+pieces share one set of rules, `tools/vm/vmSchedule.ts`:
+
+| Piece | What it does |
+|---|---|
+| `google_compute_resource_policy.office_hours` (`terraform/main.tf`) | Instance schedule: starts the VM at 07:45 and stops it at 20:00 on weekdays (`vm_schedule_timezone`, `vm_start_schedule`, `vm_stop_schedule`) |
+| `.github/workflows/vm-nightly.yml` | At 20:30, 23:30 and 02:30 Lima, every day: stops the VM if it still runs and its hold has expired, then sets the size of the next office day while it is stopped |
+| `scripts/office-vm.sh` | Manual control from a developer machine: status, start with a hold, stop, heavy days, deploy |
+
+**Office hours are `[07:45, 20:00)` on weekdays.** 07:45 is inside, 20:00 is
+already outside. The schedule starts 15 minutes before the office opens
+because GCE may begin a scheduled operation **up to 15 minutes late**: expect
+the VM between 07:45 and 08:00, and the stop between 20:00 and 20:15. The
+nightly job never stops a VM during office hours, whatever its hold says.
+
+**Holds.** `office-hold-until` (instance metadata, an ISO instant) keeps the
+nightly job from stopping a VM someone started after hours. `office-vm.sh
+start` writes it (default 2 hours), and so does a deploy that wakes the VM (1
+hour). A hold does **not** stop the schedule: at 20:00 on a weekday the VM
+stops anyway; start it again after that. A value that does not parse counts as
+no hold, so a typo never keeps the VM running.
+
+**Heavy days.** `office-heavy-days` (comma-separated `YYYY-MM-DD`, Lima dates)
+lists the days that run on `e2-standard-8` (two concurrent recordings instead
+of one, see *Capacity* under *Recordings*); every other office day runs on
+`e2-standard-4`. The machine type only changes while the VM is stopped, so the
+nightly job sets it the night before. Mark a day before the 02:30 run of that
+night, or start it by hand with `--size`.
+
+```sh
+infra/gcp/scripts/office-vm.sh status                 # status, size, hold, heavy days, /health
+infra/gcp/scripts/office-vm.sh start --for 3h         # after hours: start and hold for 3 hours
+infra/gcp/scripts/office-vm.sh start --size e2-standard-8   # stopped VM only: resize, then start
+infra/gcp/scripts/office-vm.sh stop                   # asks first; -y skips the question
+infra/gcp/scripts/office-vm.sh heavy add 2026-10-20   # heavy list / heavy rm YYYY-MM-DD
+infra/gcp/scripts/office-vm.sh deploy                 # start if needed, run deploy-test.yml, follow it
+```
+
+`office-vm.sh` needs gcloud logged in with permission to start, stop and resize
+the instance, Node 24 (it runs `tools/vm/vm.ts`) and, for `deploy`, `gh`.
+Target and timeouts come from `GCP_PROJECT_ID`, `GCP_ZONE`, `GCP_INSTANCE`,
+`APP_HOST` and `OFFICE_VM_HEALTH_TIMEOUT`; `--help` lists the defaults. `start
+--size` refuses a running VM rather than stopping it behind your back. The
+next nightly run puts the planned size back, so a manual size lasts one night
+at most. `node tools/vm/vm.ts nightly --dry-run` (or the workflow's `dry_run`
+input) prints what the nightly job would do without doing it.
+
+**Deploys while the VM is stopped.** `deploy-test.yml` starts a stopped VM
+before building the images, after writing a 1 hour hold. Booting runs the
+startup script, which runs `office-deploy` with the previous tag; the deploy
+step waits for `google-startup-scripts.service` to finish, and `office-deploy`
+takes a lock (`flock` on `/run/office-deploy.lock`), so the two runs never
+overlap. A push to `main` at night therefore deploys normally and leaves the
+VM up until the nightly job stops it after the hold.
+
+**Concurrency.** The nightly job shares the `deploy-test` concurrency group, so
+it never stops the VM during a deploy. GitHub keeps one *pending* run per
+group: if a deploy is running, another deploy is waiting and the nightly job
+fires, the waiting deploy is cancelled in favor of the nightly run. Rerun it
+with `gh workflow run deploy-test.yml`. Scheduled runs only exist on the
+default branch, may start late, and GitHub disables them after 60 days without
+activity on a public repository.
+
+**IAM.** The schedule acts as the Compute Engine Service Agent
+(`service-<project number>@compute-system.iam.gserviceaccount.com`), which
+gets `roles/compute.instanceAdmin.v1` **on the project**: the only scope GCP
+documents for instance schedules. The deployer account gets a custom role with
+exactly start, stop, `setMachineType` and `setMetadata`, bound on this instance
+only, plus `compute.zoneOperations.get` on the project (gcloud waits on the
+operation; operations have no narrower scope).
+
+**Applying it (one time).** Every plan that touches the instance must read
+`update in-place` (issue #72). Expect: the new resource policy, the two IAM
+members, the new custom role and its binding, `compute.zoneOperations.get`
+added to `project_read`, and `google_compute_instance.office` updated in place
+with `resource_policies`. `resource_policies` on the instance is not ForceNew
+(only the boot disk's is) and `machine_type` is now ignored, so nothing stops
+the VM. If the plan says `must be replaced`, stop. The first apply may fail to
+attach the schedule while the new grant propagates (GCE checks the service
+agent's start/stop at attach time); run `terraform apply` again a minute later.
+
+### Cost
+
+On-demand us-central1 prices, VM compute only (E2 has no sustained-use
+discount), about 266 office hours a month out of 730:
+
+| | Always on | Office hours |
+|---|---|---|
+| `e2-standard-4` (about $0.134/h) | about $98 | about $36 |
+| one heavy day on `e2-standard-8` (about $0.268/h) | | about +$1.6 |
+
+The boot disk and the static IP are billed while the VM is stopped (a reserved
+IP not attached to a running VM is billed at the higher idle rate), and Cloud
+SQL is separate. Check the billing report, filtered by the `app` label.
+
+### Out of scope
+
+- **No "office closed" page.** Outside office hours `https://app.../` does not
+  answer at all (connection refused or timeout), and so do LiveKit and TURN.
+  Start the VM with `office-vm.sh start` if you need it.
+- **Zone capacity.** A stopped VM gives its resources back. Starting it, by the
+  schedule or by hand, can fail with `ZONE_RESOURCE_POOL_EXHAUSTED` when
+  `us-central1-a` has no capacity for the machine type, `e2-standard-8` being
+  the likelier to hit it. Instance schedules guarantee no capacity; retry
+  later, or start it with the smaller size.
 
 ## Secretos: de dónde salen y dónde no están
 
@@ -873,9 +986,11 @@ terraform apply
 gh workflow run deploy-test.yml   # pulls the new compose (redis, egress) and .env
 ```
 
-Resize the VM in the same `apply` if recordings must actually work (next
-section): `machine_type = "e2-standard-4"` in `terraform.tfvars`. The VM stops
-for the change (`allow_stopping_for_update`): a few minutes of downtime.
+Recordings need at least `e2-standard-4` (next section). Since the
+office-hours schedule Terraform ignores `machine_type` after creation: the
+nightly job sizes the VM (`e2-standard-4`, or `e2-standard-8` on a heavy day)
+and `office-vm.sh start --size` resizes a stopped one (see *VM schedule*).
+`machine_type` in `terraform.tfvars` only matters when the VM is created.
 
 ### Capacity: the VM size decides whether recording works at all
 

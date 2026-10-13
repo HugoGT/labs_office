@@ -36,6 +36,19 @@ if [[ "$(id -u)" != "0" ]]; then
   exit 1
 fi
 
+# One run at a time. Since the office-hours schedule a deploy can find the VM
+# stopped: the workflow starts it, and the boot's startup script runs
+# office-deploy with the previous tag while the workflow's SSH runs it with the
+# new one. Two runs at once would interleave `.env` writes and `compose up`.
+# The lock is taken before reading anything, so the second run sees the `.env`
+# the first one wrote. /run is a tmpfs, so a lock never outlives a reboot, and
+# the kernel drops it when the holder exits, crashed or not.
+exec 9>/run/office-deploy.lock
+if ! flock -w 900 9; then
+  echo "[office-deploy] another office-deploy has held the lock for 15 minutes; giving up" >&2
+  exit 1
+fi
+
 # --- Configuracion ---------------------------------------------------------
 
 PROJECT_ID="$(metadata office-project-id)"

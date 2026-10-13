@@ -42,7 +42,7 @@ variable "zone" {
 }
 
 variable "machine_type" {
-  description = "Tipo de maquina. e2-medium (2 vCPU / 4 GB) es el minimo con el que el SFU no compite con Caddy y el servidor de Node por CPU."
+  description = "Tipo de maquina AL CREAR la VM. e2-medium (2 vCPU / 4 GB) es el minimo con el que el SFU no compite con Caddy y el servidor de Node por CPU. Despues de crearla Terraform lo ignora (lifecycle.ignore_changes en main.tf): el job nocturno y office-vm.sh la cambian entre e2-standard-4 y e2-standard-8 segun los dias pesados, y un apply no debe deshacerlo ni parar la VM para hacerlo."
   type        = string
   default     = "e2-medium"
 }
@@ -144,4 +144,22 @@ variable "db_password_version" {
   # newline (#72). Bump it here, not in terraform.tfvars, so every checkout
   # applies the same number and none pushes an older one back.
   default = 2
+}
+
+variable "vm_schedule_timezone" {
+  description = "IANA time zone of the VM's instance schedule (cost cut: the VM only runs during office hours). MUST equal OFFICE_TIMEZONE in tools/vm/vmSchedule.ts, which decides what the nightly job stops and resizes; tools/vm/scheduleDrift.test.ts fails if they drift."
+  type        = string
+  default     = "America/Lima"
+}
+
+variable "vm_start_schedule" {
+  description = "Cron (in vm_schedule_timezone) at which the instance schedule starts the VM. GCE may begin it up to 15 minutes late, hence 07:45 for an office that opens at 08:00. MUST equal OFFICE_START_CRON in tools/vm/vmSchedule.ts (drift-tested)."
+  type        = string
+  default     = "45 7 * * 1-5"
+}
+
+variable "vm_stop_schedule" {
+  description = "Cron (in vm_schedule_timezone) at which the instance schedule stops the VM. It stops it even when someone asked for a hold with office-vm.sh: the hold only protects the VM from the nightly job. MUST equal OFFICE_STOP_CRON in tools/vm/vmSchedule.ts (drift-tested)."
+  type        = string
+  default     = "0 20 * * 1-5"
 }
