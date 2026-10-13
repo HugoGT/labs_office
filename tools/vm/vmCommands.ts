@@ -183,8 +183,7 @@ export function runVmCommand(argv: readonly string[], deps: VmCommandDeps): numb
     return command(args, deps);
   } catch (error) {
     if (!(error instanceof UsageError)) throw error;
-    deps.out(`error: ${error.message}`);
-    deps.out(USAGE);
+    deps.out(`error: ${error.message} (help: node tools/vm/vm.ts help)`);
     return 2;
   }
 }
