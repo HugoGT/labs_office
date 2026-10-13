@@ -1,7 +1,7 @@
 import { Room, RoomEvent } from 'livekit-client';
 import { describe, expect, it, vi } from 'vitest';
 import type { AttachableTrack } from './attachableTrack';
-import { connectLivekitRoom } from './livekitRoom';
+import { connectLivekitRoom, createOfficeRoom } from './livekitRoom';
 
 /**
  * Sala falsa: reproduce solo la superficie de `Room` que este modulo usa. El
@@ -95,6 +95,17 @@ function connect(room: ReturnType<typeof fakeRoom>, container: HTMLElement) {
     audioContainer: container,
   });
 }
+
+describe('createOfficeRoom: bandwidth for a full space', () => {
+  it('subscribes each video at the size its tile shows and publishes only the layers someone receives', () => {
+    const room = createOfficeRoom();
+
+    // A space of 50 people renders cameras as small tiles: without these the
+    // SFU forwards every camera at its top simulcast layer to every viewer.
+    expect(room.options.adaptiveStream).toBeTruthy();
+    expect(room.options.dynacast).toBe(true);
+  });
+});
 
 describe('connectLivekitRoom (cableado de reproduccion, #18)', () => {
   it('TrackSubscribed adjunta la pista al DOM: sin esto la suscripcion es silencio', async () => {

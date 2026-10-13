@@ -191,10 +191,23 @@ function currentlySubscribed(room: Room, kind: TrackKind): string[] {
   return subscribed;
 }
 
+/**
+ * A space puts every occupant's camera and share on every screen, mostly as
+ * small tiles. `adaptiveStream` subscribes each video at the layer its
+ * attached element shows (and pauses it while hidden), so a tile pulls a low
+ * simulcast layer instead of the top one; `dynacast` stops the publisher
+ * encoding layers nobody receives. Both cut SFU egress and viewers' decoding
+ * in a full space. Needs videos attached through `track.attach()`, which
+ * `VideoTile` does.
+ */
+export function createOfficeRoom(): Room {
+  return new Room({ adaptiveStream: true, dynacast: true });
+}
+
 export async function connectLivekitRoom({
   url,
   token,
-  createRoom = () => new Room(),
+  createRoom = createOfficeRoom,
   audioContainer,
   onAudioPlaybackChanged,
   onVideoTrackSubscribed,
