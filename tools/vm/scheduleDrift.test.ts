@@ -85,3 +85,21 @@ describe('nightly workflow', () => {
     }
   });
 });
+
+describe('deploy while the VM is stopped', () => {
+  const deploy = read('../../.github/workflows/deploy-test.yml');
+  const officeDeploy = read('../../infra/gcp/scripts/office-deploy.sh');
+
+  it('wakes the VM, with a hold, before it deploys over SSH', () => {
+    const wake = deploy.indexOf('name: Wake the VM if it is stopped');
+    expect(wake).toBeGreaterThan(-1);
+    expect(wake).toBeLessThan(deploy.indexOf('name: Deploy over the IAP tunnel'));
+    expect(deploy).toContain(`--metadata "${HOLD_UNTIL_METADATA_KEY}=`);
+  });
+
+  it('serializes office-deploy runs before reading any configuration', () => {
+    const lock = officeDeploy.indexOf('flock -w');
+    expect(lock).toBeGreaterThan(-1);
+    expect(lock).toBeLessThan(officeDeploy.indexOf('PROJECT_ID="$(metadata office-project-id)"'));
+  });
+});

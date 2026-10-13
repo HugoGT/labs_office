@@ -120,6 +120,33 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
 
+      # Since the office-hours schedule (infra/gcp/README.md, "VM schedule")
+      # the VM is stopped at night and on weekends. Started here, before the
+      # image builds, so it boots while they run. The hold comes first: it
+      # keeps the nightly job (same concurrency group, so never during this
+      # run) from stopping a VM that was just woken for a deploy someone may
+      # want to look at. Booting runs the startup script, which runs
+      # office-deploy with the previous tag; the deploy step below waits for it.
+      - name: Wake the VM if it is stopped
+        run: |
+          status="$(gcloud compute instances describe "${INSTANCE}" --zone "${ZONE}" --format='value(status)')"
+          echo "VM status: ${status}"
+          if [ "${status}" = "STOPPING" ]; then
+            for _ in $(seq 1 30); do
+              sleep 10
+              status="$(gcloud compute instances describe "${INSTANCE}" --zone "${ZONE}" --format='value(status)')"
+              [ "${status}" = "STOPPING" ] || break
+            done
+          fi
+          if [ "${status}" = "TERMINATED" ]; then
+            hold="$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)"
+            gcloud compute instances add-metadata "${INSTANCE}" --zone "${ZONE}" --metadata "office-hold-until=${hold}"
+            gcloud compute instances start "${INSTANCE}" --zone "${ZONE}"
+            echo "started, held until ${hold}"
+          elif [ "${status}" != "RUNNING" ]; then
+            echo "::warning::VM is ${status}; the deploy step will try anyway"
+          fi
+
       - name: Log in to Artifact Registry
         run: gcloud auth configure-docker "${REGISTRY}" --quiet
 
@@ -202,13 +229,39 @@ jobs:
       # despliegue. Esa pareja descuadrada es exactamente lo que rompio el
       # despliegue del 2026-09-17: compose nuevo con Postgres, script viejo que
       # no sabia escribir sus variables, y la base arrancando sin contrasena.
+      #
+      # On a VM the step above just woke, the boot's startup script may still
+      # be running office-deploy with the previous tag. The script below waits
+      # for that unit to have run (oneshot: "activating" while it runs,
+      # "inactive" or "failed" after), and office-deploy itself takes a lock,
+      # so the two runs serialize even past the wait's timeout. The refresh
+      # writes a new file and renames it: overwriting in place would change the
+      # bytes under a bash that is still reading the old script.
       - name: Deploy over the IAP tunnel
         run: |
           gcloud compute ssh "${INSTANCE}" \
             --zone "${ZONE}" \
             --tunnel-through-iap \
             --quiet \
-            --command "sudo curl -sS -f -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/attributes/office-deploy-script -o /usr/local/bin/office-deploy && sudo chmod 0755 /usr/local/bin/office-deploy && sudo /usr/local/bin/office-deploy ${{ env.DEPLOY_SHA }}"
+            --command "sudo bash -s -- ${DEPLOY_SHA}" <<'REMOTE'
+          set -euo pipefail
+          unit=google-startup-scripts.service
+          for _ in $(seq 1 60); do
+            started="$(systemctl show -p InactiveExitTimestampMonotonic --value "${unit}")"
+            state="$(systemctl show -p ActiveState --value "${unit}")"
+            if [ "${started:-0}" != "0" ] && [ "${state}" != "activating" ]; then
+              break
+            fi
+            echo "waiting for the startup script (${state})"
+            sleep 10
+          done
+          curl -sS -f -H 'Metadata-Flavor: Google' \
+            http://metadata.google.internal/computeMetadata/v1/instance/attributes/office-deploy-script \
+            -o /usr/local/bin/office-deploy.new
+          chmod 0755 /usr/local/bin/office-deploy.new
+          mv -f /usr/local/bin/office-deploy.new /usr/local/bin/office-deploy
+          /usr/local/bin/office-deploy "$1"
+          REMOTE
 
       # Sin esto el workflow diria "desplegado" en cuanto docker compose
       # devuelve el control, que es antes de que ningun contenedor conteste.
