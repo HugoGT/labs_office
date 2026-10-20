@@ -186,6 +186,14 @@ describe('toCharacterSpec', () => {
   it('keeps the scrunchie apart from hair of the same yellow', () => {
     const yellow = toCharacterSpec({ ...SPEC, hair: { style: 'ponytail', color: '#f2c230' } });
     expect(yellow.palette.scrunchie).not.toBe('#f2c230');
+    const blond = toCharacterSpec({ ...SPEC, hair: { style: 'ponytail', color: '#efd395' } });
+    expect(blond.palette.scrunchie).toBe('#e8508a');
+  });
+
+  it('pins the hash of a fixed spec, so a new render version or encoding is a visible decision', () => {
+    // Version 4: derived colors follow rules for any rgb input. Update only together with the version.
+    expect(CHARACTER_RENDER_VERSION).toBe(4);
+    expect(customCharacterHash(CHARACTER_TEMPLATES[0]!.spec)).toBe('23fb28cf061fb37021d909fb39d7b97a');
   });
 
   it('uses the top color as the shirt itself when there is no jacket', () => {

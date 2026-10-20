@@ -25,7 +25,7 @@ import { sha256Hex } from './sha256.ts';
  * `/assets/characters/<hash>/*` URLs) changes, so no browser keeps a stale cached sheet for a
  * newly saved character. Rows saved before keep their hash and are drawn by the current renderer.
  */
-export const CHARACTER_RENDER_VERSION = 3;
+export const CHARACTER_RENDER_VERSION = 4;
 
 export const CUSTOM_CHARACTER_ID_PREFIX = 'character-custom-';
 const HASH_LENGTH = 32;
@@ -390,7 +390,7 @@ export function toCharacterSpec(custom: CustomCharacterSpec): CharacterSpec {
       accessory: accessory.main,
       ...(accessory.detail ? { accessoryDetail: accessory.detail } : {}),
       // Yellow, unless the hair is close enough to yellow to hide it.
-      scrunchie: distance(custom.hair.color, SCRUNCHIE) < 96 ? '#e8508a' : SCRUNCHIE,
+      scrunchie: distance(custom.hair.color, SCRUNCHIE) < 128 ? '#e8508a' : SCRUNCHIE,
     },
   };
 }
