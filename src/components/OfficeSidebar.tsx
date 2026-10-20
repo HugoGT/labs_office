@@ -13,7 +13,7 @@ import { DO_NOT_DISTURB } from '../game/officeProtocol';
 import { statusCssColor } from '../game/presence';
 import type { RosterPeer } from '../game/roster';
 import { CALL_DISABLED_TITLE } from './ContextMenu';
-import { MiEspacioPanel } from './MiEspacioPanel';
+import { MiEspacioPanel, type MiEspacioPanelProps } from './MiEspacioPanel';
 import { PhoneIcon } from './PhoneIcon';
 import { visibleRoster } from './rosterView';
 import styles from './OfficeSidebar.module.css';
@@ -43,16 +43,31 @@ const ArtContributionSectionLazy = lazy(() =>
 
 type PersonalizeSection = LayoutEditorSection | 'assets' | 'space' | 'art';
 
+/** "Mi espacio" without a server: no desk to decorate. */
+const NO_SPACE: MiEspacioPanelProps = {
+  hasDesk: false,
+  phase: 'unavailable',
+  catalog: [],
+  items: [],
+  onSave: async () => 'failed',
+};
+
 export interface OfficeSidebarProps {
   /** Uno mismo, para anteponerlo (#74): el `roster` del puente ya lo excluye. */
   self: RosterPeer;
   peers: readonly RosterPeer[];
   /**
-   * Se activa cuando otra pieza del HUD reclama el rincon (`DeskDecorEditor`,
-   * #74, PR2). Un flanco a `true` colapsa; volver a abrirla queda a mano del
-   * usuario, no bloqueada mientras siga en `true`.
+   * Se activa cuando otra pieza del HUD reclama el rincon (#74, PR2). Un
+   * flanco a `true` colapsa; volver a abrirla queda a mano del usuario, no
+   * bloqueada mientras siga en `true`.
    */
   forceCollapsed?: boolean;
+  /**
+   * What "Mi espacio" edits: the decor of one's own desk (Editar espacios).
+   * Absent (no server, the open office) it asks to claim a desk, which there
+   * is no way to do there either.
+   */
+  mySpace?: MiEspacioPanelProps;
   /**
    * Rol de sesion (#74, PR3c), resuelto por `OfficeShell` via
    * `useOfficeAdminRole` y pasado por prop -- este componente sigue sin
@@ -111,6 +126,7 @@ export function OfficeSidebar({
   self,
   peers,
   forceCollapsed = false,
+  mySpace = NO_SPACE,
   role = null,
   bridge,
   desks,
@@ -263,7 +279,7 @@ export function OfficeSidebar({
               <AssetsPanelLazy assets={assets} />
             </Suspense>
           )}
-          {currentSection === 'space' && <MiEspacioPanel />}
+          {currentSection === 'space' && <MiEspacioPanel {...mySpace} />}
           {currentSection === 'art' && contributions !== undefined && contributions !== null && (
             <Suspense fallback={null}>
               <ArtContributionSectionLazy contributions={contributions} />

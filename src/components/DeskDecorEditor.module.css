@@ -2,21 +2,10 @@
    fondo #111827, borde #374151, radio 12px y texto #e5e7eb. Una paleta propia
    haria que este panel se leyese como de otra aplicacion. */
 
+/* Lives inside "Mi espacio" in the sidebar panel, which already draws the box. */
 .panel {
-  position: fixed;
-  z-index: 30;
-  right: 12px;
-  bottom: 80px;
-  width: 300px;
-  max-height: 70vh;
-  overflow-y: auto;
-  background: #111827f2;
-  border: 1px solid #374151;
-  border-radius: var(--radius-panel);
-  padding: 12px 14px;
   color: #e5e7eb;
   font-size: 13px;
-  box-shadow: 0 10px 40px #000c;
 }
 
 .head {
@@ -203,4 +192,23 @@
   margin: 0;
   color: #9ca3af;
   font-size: 12px;
+}
+
+/* The table's three boxes: they belong to it, nothing is placed there. */
+.slotTable,
+.slotTable:hover {
+  background: #3b2f22;
+  border-style: dashed;
+  color: #e5e7eb;
+  cursor: default;
+}
+
+.table {
+  margin-bottom: 10px;
+}
+
+.subtitle {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
 }

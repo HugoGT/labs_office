@@ -1,23 +1,62 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
-import { MiEspacioPanel } from './MiEspacioPanel';
+import { userEvent } from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+import type { DeskDecorAsset, PlacedDeskItem } from '../game/deskDecorPort';
+import { MiEspacioPanel, type MiEspacioPanelProps } from './MiEspacioPanel';
+
+const PLANTA: DeskDecorAsset = { id: 'id-planta', name: 'Planta', kind: 'plant', textureKey: 'plant-small' };
+const MESA: DeskDecorAsset = { id: 'id-mesa', name: 'Escritorio de madera', kind: 'furniture', textureKey: 'art:desk-wood:sheet' };
+
+function panel(overrides: Partial<MiEspacioPanelProps> = {}) {
+  const props: MiEspacioPanelProps = {
+    hasDesk: true,
+    phase: 'ready',
+    catalog: [PLANTA, MESA],
+    items: [] as readonly PlacedDeskItem[],
+    onSave: vi.fn().mockResolvedValue('saved'),
+    ...overrides,
+  };
+  render(<MiEspacioPanel {...props} />);
+  return props;
+}
 
 /**
- * Placeholder inerte (issue de seguimiento tras esta rama): sin funcionalidad
- * real todavia, solo el titulo y el aviso de que llega despues. Disponible
- * tanto para quien administra como para quien no -- este componente no sabe
- * de roles, esa decision vive en `OfficeSidebar`.
+ * "Mi espacio" is where anyone, admin or not, decorates the desk they claimed
+ * (Editar espacios): a table on one edge, chairs and plants. Whether a desk is
+ * claimed is the UI's to tell; the server stores decor for the person anyway.
  */
-describe('MiEspacioPanel: placeholder inerte', () => {
-  it('muestra el titulo "Mi espacio"', () => {
-    render(<MiEspacioPanel />);
+describe('MiEspacioPanel', () => {
+  it('shows the title "Mi espacio"', () => {
+    panel();
 
     expect(screen.getByRole('heading', { name: 'Mi espacio' })).toBeInTheDocument();
   });
 
-  it('avisa que todavia no hay nada que hacer aqui', () => {
-    render(<MiEspacioPanel />);
+  it('without a claimed desk asks to claim one and shows no editor', () => {
+    panel({ hasDesk: false });
 
-    expect(screen.getByText(/próximamente/i)).toBeInTheDocument();
+    expect(screen.getByText('Reclama un escritorio para personalizar tu espacio.')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Decorar mi escritorio' })).not.toBeInTheDocument();
+  });
+
+  it('with a claimed desk hosts the decor editor: the table, the boxes and save', async () => {
+    const { onSave } = panel();
+
+    expect(screen.getByRole('region', { name: 'Decorar mi escritorio' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Abajo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }));
+
+    expect(onSave).toHaveBeenCalledWith([{ assetId: 'id-mesa', slot: 7, rotation: 0 }]);
+  });
+
+  it('says it is loading while the decor is read, and when it cannot be edited', () => {
+    panel({ phase: 'loading' });
+    expect(screen.getByText(/Cargando/)).toBeInTheDocument();
+  });
+
+  it('says when the decor cannot be edited now', () => {
+    panel({ phase: 'unavailable' });
+    expect(screen.getByText('La decoración no está disponible ahora mismo.')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Decorar mi escritorio' })).not.toBeInTheDocument();
   });
 });

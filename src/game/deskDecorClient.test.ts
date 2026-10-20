@@ -112,6 +112,22 @@ describe('fetchDeskCatalog', () => {
     expect(catalog.map((asset) => asset.id)).toEqual(['id-planta']);
   });
 
+  it('never offers a piece that does not fit a desk: room tables, map pieces, anything larger than 3x3', async () => {
+    const fetchImpl = respondWith({
+      assets: [
+        servedAsset(),
+        servedAsset({ id: 'id-mesa', kind: 'furniture', textureKey: 'art:desk-wood:sheet', w: 3, h: 1 }),
+        servedAsset({ id: 'id-sala', kind: 'furniture', textureKey: 'art:table-meeting:sheet', w: 7, h: 5 }),
+        servedAsset({ id: 'id-cafeteria', kind: 'furniture', textureKey: 'art:table-cafeteria:sheet', w: 1, h: 1 }),
+        servedAsset({ id: 'id-alfombra', kind: 'decor', textureKey: 'rug', w: 4, h: 4 }),
+      ],
+    });
+
+    const catalog = await fetchDeskCatalog({ baseUrl: 'http://x', getIdToken: TOKEN, fetchImpl });
+
+    expect(catalog.map((asset) => asset.id)).toEqual(['id-planta', 'id-mesa']);
+  });
+
   it('una fila mal formada tumba la respuesta entera', async () => {
     // Mismo criterio que `parseOfficeDesks`: media lista es media verdad sobre
     // que se puede colocar, y una pieza que falta se lee igual que una que
