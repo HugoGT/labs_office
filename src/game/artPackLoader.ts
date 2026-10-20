@@ -21,6 +21,10 @@
  * and each piece keeps the folder of the catalog it came from, so an Admin
  * upload shows up in a session without a deploy.
  *
+ * Characters built with the creator (`character-custom-<hash>`) are in no
+ * catalog: `customCharacterPiece` synthesizes their piece and they load from
+ * the server folder that draws them (`customCharactersUrl`).
+ *
  * Nothing here throws at the scene: a manifest or file that fails to load
  * leaves the piece `failed`, and callers keep their visible fallback.
  */
@@ -42,6 +46,7 @@ import {
   type ArtLoadRequest,
 } from './artPack';
 import { paintRecoloredCanvas, type PaintableImage } from './artRecolorCanvas';
+import { customCharacterPiece } from './customCharacterArt';
 
 export type ArtPieceStatus = 'ready' | 'loading' | 'failed';
 
@@ -65,6 +70,8 @@ export interface ArtPackLoaderOptions {
   manifestUrl?: string | null;
   /** Manifest of the Admin uploads (`artUploadsManifestUrl`). Absent or `null`: the pack only. */
   uploadsUrl?: string | null;
+  /** Folder of the server-drawn custom characters (`artCustomCharactersUrl`). Absent or `null`: none load. */
+  customCharactersUrl?: string | null;
 }
 
 /** The two catalogs, in the order they are joined: the pack keeps any id it lists. */
@@ -79,6 +86,7 @@ const MANIFEST_KEYS: Readonly<Record<ArtManifestSourceName, string>> = {
 export class ArtPackLoader implements ArtTextures {
   private readonly scene: Phaser.Scene;
   private readonly urls: Readonly<Record<ArtManifestSourceName, string | null>>;
+  private readonly customCharactersUrl: string | null;
   private readonly sources: Record<ArtManifestSourceName, ArtPackManifest | null> = { pack: null, uploads: null };
   private catalog: ArtCatalog | null = null;
   private readonly failed = new Set<string>();
@@ -95,6 +103,7 @@ export class ArtPackLoader implements ArtTextures {
       pack: options.manifestUrl === undefined ? ART_PACK_MANIFEST_URL : options.manifestUrl,
       uploads: options.uploadsUrl ?? null,
     };
+    this.customCharactersUrl = options.customCharactersUrl ?? null;
   }
 
   get manifest(): ArtPackManifest | null {
@@ -102,7 +111,16 @@ export class ArtPackLoader implements ArtTextures {
   }
 
   private get enabled(): boolean {
-    return SOURCES.some((source) => this.urls[source] !== null);
+    return SOURCES.some((source) => this.urls[source] !== null) || this.customCharactersUrl !== null;
+  }
+
+  /** A catalog piece, or the synthesized one of a custom character when there is a server to draw it. */
+  private pieceOf(pieceId: string): ArtPiece | undefined {
+    if (this.customCharactersUrl !== null) {
+      const custom = customCharacterPiece(pieceId);
+      if (custom !== null) return custom;
+    }
+    return this.manifest === null ? undefined : findPiece(this.manifest, pieceId);
   }
 
   /** Goes in the scene's `preload()`: files queued there finish before `create()`. */
@@ -138,13 +156,13 @@ export class ArtPackLoader implements ArtTextures {
 
   status(pieceId: string): ArtPieceStatus {
     if (this.failed.has(pieceId)) return 'failed';
-    const piece = this.manifest === null ? undefined : findPiece(this.manifest, pieceId);
+    const piece = this.pieceOf(pieceId);
     if (piece !== undefined && this.isLoaded(piece)) return 'ready';
     return 'loading';
   }
 
   sheet(pieceId: string, role: string, color: string | null = null): string | null {
-    const piece = this.manifest === null ? undefined : findPiece(this.manifest, pieceId);
+    const piece = this.pieceOf(pieceId);
     if (piece === undefined || this.failed.has(pieceId)) return null;
     const key = artSheetKey(pieceId, role);
     if (!this.scene.textures.exists(key)) return null;
@@ -158,7 +176,7 @@ export class ArtPackLoader implements ArtTextures {
 
   request(pieceId: string, onSettled: () => void): ArtPieceStatus {
     if (!this.enabled || this.failed.has(pieceId)) return 'failed';
-    const piece = this.manifest === null ? undefined : findPiece(this.manifest, pieceId);
+    const piece = this.pieceOf(pieceId);
     if (piece !== undefined && this.isLoaded(piece)) return 'ready';
 
     const listeners = this.waiting.get(pieceId);
@@ -184,7 +202,7 @@ export class ArtPackLoader implements ArtTextures {
           if (manifest !== null) this.adoptManifest(manifest, source);
           remaining -= 1;
           if (remaining > 0) return;
-          const found = this.manifest === null ? undefined : findPiece(this.manifest, pieceId);
+          const found = this.pieceOf(pieceId);
           if (found === undefined) this.settle(pieceId, true);
           else if (this.isLoaded(found)) this.settle(pieceId, false);
           else this.loadPiece(found);
@@ -202,7 +220,9 @@ export class ArtPackLoader implements ArtTextures {
   }
 
   private loadPiece(piece: ArtPiece): void {
-    const url = this.catalog?.sourceOf(piece.id) ?? this.urls.pack ?? ART_PACK_MANIFEST_URL;
+    // A custom character's file paths are relative to its folder, which ends in `/`.
+    const custom = this.customCharactersUrl !== null && customCharacterPiece(piece.id) !== null ? this.customCharactersUrl : undefined;
+    const url = custom ?? this.catalog?.sourceOf(piece.id) ?? this.urls.pack ?? ART_PACK_MANIFEST_URL;
     for (const request of pieceLoadRequests(piece, url)) this.queue(request);
     this.startLoader();
   }
@@ -264,12 +284,12 @@ export class ArtPackLoader implements ArtTextures {
     // whatever is still waiting and not loaded has failed.
     this.scene.load.on('complete', () => {
       for (const pieceId of this.preloaded) {
-        const piece = this.manifest === null ? undefined : findPiece(this.manifest, pieceId);
+        const piece = this.pieceOf(pieceId);
         if (piece === undefined || !this.isLoaded(piece)) this.failed.add(pieceId);
       }
       this.preloaded.clear();
       for (const pieceId of [...this.waiting.keys()]) {
-        const piece = this.manifest === null ? undefined : findPiece(this.manifest, pieceId);
+        const piece = this.pieceOf(pieceId);
         this.settle(pieceId, piece === undefined || !this.isLoaded(piece));
       }
     });
@@ -277,7 +297,7 @@ export class ArtPackLoader implements ArtTextures {
 
   private onFileSettled(key: string, failed: boolean): void {
     for (const pieceId of [...this.waiting.keys()]) {
-      const piece = this.manifest === null ? undefined : findPiece(this.manifest, pieceId);
+      const piece = this.pieceOf(pieceId);
       if (piece === undefined) continue;
       const keys = piece.files.map((file) => artSheetKey(piece.id, file.role));
       if (!keys.includes(key)) continue;
