@@ -15,7 +15,8 @@ const NOBODY = (): { x: number; y: number }[] => [];
 const tree = BASE_LAYOUT.props.find((prop) => prop.kind === 'tree')!;
 /** A position whose feet-aligned body center is the middle of the tree's tile. */
 const onTree = { x: tree.tx * 32 + 16, y: tree.ty * 32 + 5 };
-const DESK: CollisionDesk = { x: 640, y: 1600, w: 96, h: 96, materialId: 'desk-oak', items: [] };
+/** A desk whose occupant put a chair in the middle slot: a desk has no piece of its own, its decor collides. */
+const DESK: CollisionDesk = { x: 640, y: 1600, w: 96, h: 96, items: [{ slot: 4, rotation: 0, pieceId: 'chair-oak' }] };
 /** Body center in the middle of that desk. */
 const onDesk = { x: 688, y: 1648 - 11 };
 
@@ -38,7 +39,7 @@ describe('createCollisionRuntime', () => {
   });
 
   it('loads the saved pieces and the served desks once', async () => {
-    const { collisions, listDesks } = runtime([['tree-oak', []], ['desk-oak', [{ x: -8, y: -8, w: 16, h: 16 }]]], [DESK]);
+    const { collisions, listDesks } = runtime([['tree-oak', []], ['chair-oak', [{ x: -8, y: -8, w: 16, h: 16 }]]], [DESK]);
 
     await collisions.load();
 
@@ -81,7 +82,7 @@ describe('createCollisionRuntime', () => {
     await collisions.load();
 
     await expect(
-      collisions.setRects({ pieceId: 'desk-oak', rects: [{ x: -40, y: -40, w: 80, h: 80 }], actorId: 'admin-1' }, () => [onDesk]),
+      collisions.setRects({ pieceId: 'chair-oak', rects: [{ x: -40, y: -40, w: 80, h: 80 }], actorId: 'admin-1' }, () => [onDesk]),
     ).rejects.toBeInstanceOf(CollisionProtectedError);
     expect((await store.loadCollisions()).size).toBe(0);
     expect(isPositionBlocked(collisions.rects(), onDesk.x, onDesk.y)).toBe(false);
@@ -94,7 +95,7 @@ describe('createCollisionRuntime', () => {
 
   it('follows the served desks when they change', async () => {
     const desks: CollisionDesk[] = [];
-    const store = createMemoryCollisions([['desk-oak', [{ x: -8, y: -8, w: 16, h: 16 }]]]);
+    const store = createMemoryCollisions([['chair-oak', [{ x: -8, y: -8, w: 16, h: 16 }]]]);
     const collisions = createCollisionRuntime({ layout: BASE_LAYOUT, seats: BASE_MAP_SEATS, store, listDesks: async () => desks });
     await collisions.load();
     expect(isPositionBlocked(collisions.rects(), onDesk.x, onDesk.y)).toBe(false);
@@ -103,6 +104,16 @@ describe('createCollisionRuntime', () => {
     await collisions.refreshPlacements();
 
     expect(isPositionBlocked(collisions.rects(), onDesk.x, onDesk.y)).toBe(true);
+  });
+
+  it('blocks a decor table on its desk edge out of the box, and frees the rest of the desk', async () => {
+    // Bottom row of the desk at (640, 1600): its middle tile center is (688, 1680).
+    const desks: CollisionDesk[] = [{ x: 640, y: 1600, w: 96, h: 96, items: [{ slot: 7, rotation: 0, pieceId: 'desk-wood' }] }];
+    const collisions = createCollisionRuntime({ layout: BASE_LAYOUT, seats: BASE_MAP_SEATS, store: createMemoryCollisions([]), listDesks: async () => desks });
+    await collisions.load();
+
+    expect(isPositionBlocked(collisions.rects(), 688, 1680 - 11)).toBe(true);
+    expect(isPositionBlocked(collisions.rects(), 688, 1616 - 11)).toBe(false);
   });
 
   it('follows the placed chairs when they change, each with its own piece', async () => {

@@ -64,11 +64,9 @@ import {
 } from '../../src/game/pieceCollisions.ts';
 import {
   BASE_MAP_SEATS,
-  DESK_SEAT_FACING,
   chairSeatTiles,
   decorChairAt,
   decorSeatTiles,
-  deskSeatTiles,
   encodeTerrainChairs,
   inSeatReach,
   mapSeatTiles,
@@ -79,7 +77,7 @@ import {
 import { createCallInvitationRegistry, type CallInvitationRegistry } from './callInvitations.ts';
 import { physicalBodyRect } from '../../src/game/avatarGeometry.ts';
 import { ART_PACK_DEFAULTS } from './decor/artCatalogRules.ts';
-import type { Desk, DeskDirectory, DeskOccupant } from './desks/desksPort.ts';
+import type { DeskDirectory, OfficeDesk } from './desks/desksPort.ts';
 import { decideAccess, type AccessDecision } from './directory/accessDecision.ts';
 import type { LastPosition, UserDirectory } from './directory/directoryPort.ts';
 import { isPositionInMap } from './directory/positionRules.ts';
@@ -330,12 +328,12 @@ export interface OfficeRoomOptions {
    */
   characters?: CharacterUpdatesHub;
   /**
-   * Assignable desks (art migration, step 6), to check a desk seat: that the
-   * desk exists, where it is and who owns it, and the decor chairs of its
-   * occupant. Absent (no `DATABASE_URL`) there are no desks, so only the base
-   * map chairs can be sat on.
+   * Assignable desks, to check a decor chair seat: that the desk exists, where
+   * it is and the decor chairs of its occupant. A desk has no seat of its own
+   * (Editar espacios). Absent (no `DATABASE_URL`) there are no desks, so only
+   * the base map chairs and the placed chairs can be sat on.
    */
-  desks?: Pick<DeskDirectory, 'getDesk' | 'listDesks' | 'listOfficeDesks'>;
+  desks?: Pick<DeskDirectory, 'listOfficeDesks'>;
 }
 
 /** Registro del motivo por el que el directorio cerro la puerta. */
@@ -357,11 +355,6 @@ type OfficeAuthData =
 /** Account behind a client, or `undefined` in the open office (#78). */
 function accountOf(client: Client<unknown, OfficeAuthData>): string | undefined {
   return client.auth === true ? undefined : client.auth?.uid;
-}
-
-/** A claimed desk seats only its owner; a free one seats anyone (step 6). */
-function mayUseDesk(userId: string | null, occupantId: string | null): boolean {
-  return occupantId === null || (userId !== null && userId === occupantId);
 }
 
 export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthData> {
@@ -401,10 +394,10 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
    * same account can find them and cancel the seat.
    */
   private pendingReconnections = new Map<string, { uid: string; seat: Deferred<Client> }>();
-  private desks?: Pick<DeskDirectory, 'getDesk' | 'listDesks' | 'listOfficeDesks'>;
+  private desks?: Pick<DeskDirectory, 'listOfficeDesks'>;
   /**
    * Each sitter's seat reach and directory id, by session (step 6). Kept
-   * because a desk seat's area comes from the store, and a `move` has to know
+   * because a decor chair's area comes from the store, and a `move` has to know
    * it without asking the store on every step; the id survives a
    * reconnection window, when the client is not in `this.clients`.
    */
@@ -949,14 +942,12 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   }
 
   /**
-   * Seats `client` on `raw` if the room agrees (step 6). A base map chair is
-   * checked right away; a desk seat or a decor chair asks the store, so everything is checked
-   * again after that wait: the player may have moved, left or lost the seat
-   * to someone faster in between.
-   *
-   * Desk rule: a claimed desk only seats its owner; a free one seats anyone,
-   * and sitting never claims it. `recheckDeskSeats` keeps that true when the
-   * desk changes hands while someone sits at it.
+   * Seats `client` on `raw` if the room agrees (step 6). A base map chair or a
+   * placed chair is checked right away; a decor chair asks the store, so
+   * everything is checked again after that wait: the player may have moved,
+   * left or lost the seat to someone faster in between. A desk has no seat of
+   * its own (Editar espacios): its seats are the decor chairs, guest seats
+   * anyone may take whoever owns the desk.
    */
   private async sit(client: Client<unknown, OfficeAuthData>, raw: unknown, revision: number): Promise<void> {
     const ref = parseSeatRef(raw, this.mapSeats.length);
@@ -982,30 +973,18 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
 
     if (!this.desks) return;
 
-    if (ref.kind === 'decor') {
-      // A decor chair is a guest seat: anyone sits on it, whoever owns the
-      // desk, as long as the occupant's decor holds a chair in that slot now.
-      let desks: Awaited<ReturnType<DeskDirectory['listOfficeDesks']>>;
-      try {
-        desks = await this.desks.listOfficeDesks();
-      } catch {
-        return;
-      }
-      const desk = desks.find((candidate) => candidate.id === ref.deskId);
-      const chair = desk === undefined ? null : decorChairAt(desk.occupant?.items ?? [], ref.slot);
-      if (desk === undefined || chair === null || player.positionRevision !== revision) return;
-      this.takeSeat(client.sessionId, seatId, { reach: decorSeatTiles(desk, ref.slot), userId }, chair.facing);
-      return;
-    }
-
-    let desk: Awaited<ReturnType<DeskDirectory['getDesk']>>;
+    // A decor chair is a guest seat: anyone sits on it, whoever owns the
+    // desk, as long as the occupant's decor holds a chair in that slot now.
+    let desks: Awaited<ReturnType<DeskDirectory['listOfficeDesks']>>;
     try {
-      desk = await this.desks.getDesk(ref.deskId);
+      desks = await this.desks.listOfficeDesks();
     } catch {
       return;
     }
-    if (desk === null || player.positionRevision !== revision || !mayUseDesk(userId, desk.occupantId)) return;
-    this.takeSeat(client.sessionId, seatId, { reach: deskSeatTiles(desk), userId }, DESK_SEAT_FACING);
+    const desk = desks.find((candidate) => candidate.id === ref.deskId);
+    const chair = desk === undefined ? null : decorChairAt(desk.occupant?.items ?? [], ref.slot);
+    if (desk === undefined || chair === null || player.positionRevision !== revision) return;
+    this.takeSeat(client.sessionId, seatId, { reach: decorSeatTiles(desk, ref.slot), userId }, chair.facing);
   }
 
   private takeSeat(
@@ -1065,45 +1044,34 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
 
   /**
    * A desk or its decor changed (claimed, released, moved, deleted, or its
-   * occupant saved new decor): whoever sits at a desk it no longer allows, or
-   * no longer reaches, stands up, and so does whoever sits on a decor chair
-   * that is gone (removed, replaced, moved to another slot, or gone with its
-   * desk or occupant); a turned decor chair turns its sitter.
+   * occupant saved new decor): whoever sits on a decor chair that is gone
+   * (removed, replaced, moved to another slot, or gone with its desk or
+   * occupant) or no longer reaches it stands up; a turned decor chair turns
+   * its sitter.
    */
   private async recheckDeskSeats(): Promise<void> {
     if (!this.desks) return;
-    const kindOf = (sessionId: string) => parseSeatRef(this.state.players.get(sessionId)?.seat)?.kind;
-    const deskSitters = [...this.seated].filter(([sessionId]) => kindOf(sessionId) === 'desk' || kindOf(sessionId) === 'decor');
-    if (deskSitters.length === 0) return;
-    // The decor comes only with the office read; plain desk seats keep the lighter one.
-    const withDecor = deskSitters.some(([sessionId]) => kindOf(sessionId) === 'decor');
-    let desks: readonly (Desk & { occupant?: DeskOccupant | null })[];
+    const decorSitters = [...this.seated].filter(([sessionId]) => parseSeatRef(this.state.players.get(sessionId)?.seat)?.kind === 'decor');
+    if (decorSitters.length === 0) return;
+    let desks: readonly OfficeDesk[];
     try {
-      desks = withDecor ? await this.desks.listOfficeDesks() : await this.desks.listDesks();
+      desks = await this.desks.listOfficeDesks();
     } catch {
       return;
     }
     const byId = new Map(desks.map((desk) => [desk.id, desk]));
-    for (const [sessionId, seat] of deskSitters) {
+    for (const [sessionId, seat] of decorSitters) {
       const player = this.state.players.get(sessionId);
       const ref = parseSeatRef(player?.seat);
-      if (!player || (ref?.kind !== 'desk' && ref?.kind !== 'decor') || this.seated.get(sessionId) !== seat) continue;
+      if (!player || ref?.kind !== 'decor' || this.seated.get(sessionId) !== seat) continue;
       const desk = byId.get(ref.deskId);
-      if (ref.kind === 'decor') {
-        const chair = desk === undefined ? null : decorChairAt(desk.occupant?.items ?? [], ref.slot);
-        const reach = desk === undefined ? null : decorSeatTiles(desk, ref.slot);
-        if (chair === null || reach === null || !inSeatReach(player, reach)) {
-          this.standUp(sessionId);
-        } else {
-          this.seated.set(sessionId, { ...seat, reach });
-          if (player.facing !== chair.facing) player.facing = chair.facing;
-        }
-        continue;
-      }
-      if (desk === undefined || !mayUseDesk(seat.userId, desk.occupantId) || !inSeatReach(player, deskSeatTiles(desk))) {
+      const chair = desk === undefined ? null : decorChairAt(desk.occupant?.items ?? [], ref.slot);
+      const reach = desk === undefined ? null : decorSeatTiles(desk, ref.slot);
+      if (chair === null || reach === null || !inSeatReach(player, reach)) {
         this.standUp(sessionId);
       } else {
-        this.seated.set(sessionId, { ...seat, reach: deskSeatTiles(desk) });
+        this.seated.set(sessionId, { ...seat, reach });
+        if (player.facing !== chair.facing) player.facing = chair.facing;
       }
     }
   }

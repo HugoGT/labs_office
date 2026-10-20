@@ -67,7 +67,8 @@ const AS_ADMIN = 'Bearer valido-uid-admin';
 const AS_ANA = 'Bearer valido-uid-ana';
 const AS_BETO = 'Bearer valido-uid-beto';
 /** Leaves out the pack chairs, desk decor from the pack registration on. */
-const notPackChair = (asset: { textureKey: string }) => !asset.textureKey.startsWith('art:chair-');
+/** The pack's chairs and desks bring their own decor assets (chairs and tables). */
+const notPackChair = (asset: { textureKey: string }) => !/^art:(chair|desk)-(?!upload-)/.test(asset.textureKey);
 const PACK: ArtPackManifest = readArtPackManifest(new URL('../../../public/assets/pack/manifest.json', import.meta.url));
 
 /** A valid sheet; `shade` changes its pixels, so each shade is another piece. */

@@ -10,8 +10,10 @@
  *      puede quitar, y guardar cualquier otro cambio la conserva.
  *   2. **Una caja, una pieza.** El servidor rechaza dos piezas en el mismo
  *      slot con un 400; colocar sobre una caja ocupada sustituye.
- *   3. **Sin escritorio no hay editor.** Se ofrece coger uno, no una pantalla
- *      atada a nada.
+ *   3. **Una mesa por escritorio, en un borde.** La mesa ocupa las tres
+ *      cajas de su borde y nada mas puede ir encima (Editar espacios).
+ *
+ * Sin escritorio no hay editor: eso lo decide `MiEspacioPanel`, que lo monta.
  */
 
 import { fireEvent, render, screen, within } from '@testing-library/react';
@@ -56,17 +58,14 @@ const RETIRADA: PlacedDeskItem = {
 
 function editor(overrides: Partial<Parameters<typeof DeskDecorEditor>[0]> = {}) {
   const onSave = vi.fn().mockResolvedValue('saved');
-  const onClose = vi.fn();
   const props = {
-    deskLabel: 'Mesa 4',
     catalog: [PLANTA, LAMPARA],
     items: [] as readonly PlacedDeskItem[],
     onSave,
-    onClose,
     ...overrides,
   };
   render(<DeskDecorEditor {...props} />);
-  return { onSave: props.onSave, onClose: props.onClose };
+  return { onSave: props.onSave };
 }
 
 /** La caja N-esima por su etiqueta accesible, que es como la nombra quien la usa. */
@@ -226,31 +225,12 @@ describe('DeskDecorEditor', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
-  it('sin escritorio propio ofrece coger uno y no pinta editor', () => {
-    // Un editor atado a nada no tiene donde guardar: `/me/desk` escribe la
-    // decoracion de la persona, pero sin sitio donde sentarse no se ve en
-    // ninguna parte de la oficina.
-    editor({ deskLabel: null, items: [] });
-
-    expect(screen.queryByRole('button', { name: /^Caja \d/ })).not.toBeInTheDocument();
-    expect(screen.getByText(/elige un escritorio libre/i)).toBeInTheDocument();
-  });
-
-  it('nombra el escritorio que se esta decorando', () => {
+  it('is a region of the panel that hosts it, not a dialog of its own', () => {
     editor();
 
-    expect(screen.getByRole('dialog', { name: /Mesa 4/ })).toBeInTheDocument();
-  });
-
-  it('se puede cerrar sin guardar', async () => {
-    const { onSave, onClose } = editor({ items: [PUESTA] });
-
-    await userEvent.click(box(5));
-    await userEvent.click(screen.getByRole('button', { name: /Quitar/ }));
-    await userEvent.click(screen.getByRole('button', { name: /Cerrar/ }));
-
-    expect(onClose).toHaveBeenCalled();
-    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByRole('region', { name: 'Decorar mi escritorio' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Cerrar/ })).not.toBeInTheDocument();
   });
 
   it('el selector solo ofrece lo que se puede colocar hoy', () => {
@@ -407,5 +387,86 @@ describe('DeskDecorEditor: arrastrar y soltar', () => {
     await userEvent.click(screen.getByRole('button', { name: /Guardar/ }));
 
     expect(onSave).toHaveBeenCalledWith([{ assetId: 'id-planta', slot: 1, rotation: 90 }]);
+  });
+});
+
+const MESA_MADERA: DeskDecorAsset = { id: 'id-mesa-madera', name: 'Escritorio de madera', kind: 'furniture', textureKey: 'art:desk-wood:sheet' };
+const MESA_VIDRIO: DeskDecorAsset = { id: 'id-mesa-vidrio', name: 'Escritorio de vidrio', kind: 'furniture', textureKey: 'art:desk-glass:sheet' };
+
+describe('DeskDecorEditor: a table on one edge (Editar espacios)', () => {
+  const catalog = [PLANTA, MESA_MADERA, MESA_VIDRIO];
+
+  it('offers the tables apart from the pieces of the boxes', () => {
+    editor({ catalog });
+
+    const pieces = screen.getByRole('list', { name: /piezas/i });
+    expect(within(pieces).getAllByRole('button').map((button) => button.textContent)).toEqual(['Planta']);
+    const tables = screen.getByRole('list', { name: /mesas/i });
+    expect(within(tables).getAllByRole('button').map((button) => button.textContent)).toEqual(['Escritorio de madera', 'Escritorio de vidrio']);
+  });
+
+  it('places the chosen table on an edge, covering its three boxes, and saves it on the middle one', async () => {
+    const { onSave } = editor({ catalog });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Escritorio de vidrio' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Arriba' }));
+
+    for (const number of [1, 2, 3]) {
+      expect(box(number)).toHaveAccessibleName(`Caja ${number}: mesa (Escritorio de vidrio)`);
+      expect(box(number)).toBeDisabled();
+    }
+    expect(box(5)).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Arriba' })).toHaveAttribute('aria-pressed', 'true');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }));
+    expect(onSave).toHaveBeenCalledWith([{ assetId: 'id-mesa-vidrio', slot: 1, rotation: 180 }]);
+  });
+
+  it('moves the table to another edge and swaps its material in place', async () => {
+    const { onSave } = editor({ catalog });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Abajo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Derecha' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Escritorio de vidrio' }));
+
+    expect(box(7)).toBeEnabled();
+    expect(box(9)).toHaveAccessibleName('Caja 9: mesa (Escritorio de vidrio)');
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }));
+    expect(onSave).toHaveBeenCalledWith([{ assetId: 'id-mesa-vidrio', slot: 5, rotation: 90 }]);
+  });
+
+  it('an edge with something on it cannot take the table', async () => {
+    editor({ catalog, items: [PUESTA, { ...PUESTA, id: 'id-otra', slot: 6 }] });
+
+    expect(screen.getByRole('button', { name: 'Izquierda' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Abajo' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Arriba' })).toBeEnabled();
+  });
+
+  it('reads the placed table back, keeps it on save and lets it go', async () => {
+    const placed: PlacedDeskItem = { id: 'id-item-mesa', assetId: 'id-mesa-madera', slot: 3, rotation: 270, textureKey: 'art:desk-wood:sheet', name: 'Escritorio de madera' };
+    const { onSave } = editor({ catalog, items: [placed, PUESTA] });
+
+    expect(box(1)).toHaveAccessibleName('Caja 1: mesa (Escritorio de madera)');
+    expect(screen.getByRole('button', { name: 'Izquierda' })).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }));
+    expect(onSave).toHaveBeenLastCalledWith([
+      { assetId: 'id-planta', slot: 4, rotation: 0 },
+      { assetId: 'id-mesa-madera', slot: 3, rotation: 270 },
+    ]);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Quitar mesa' }));
+    expect(box(1)).toHaveAccessibleName('Caja 1: vacía');
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }));
+    expect(onSave).toHaveBeenLastCalledWith([{ assetId: 'id-planta', slot: 4, rotation: 0 }]);
+  });
+
+  it('nothing is dropped on a table box', async () => {
+    editor({ catalog });
+    await userEvent.click(screen.getByRole('button', { name: 'Abajo' }));
+
+    drag(piece(/Planta/), box(8));
+
+    expect(box(8)).toHaveAccessibleName('Caja 8: mesa (Escritorio de madera)');
   });
 });

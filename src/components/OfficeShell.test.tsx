@@ -1185,80 +1185,89 @@ describe('OfficeShell: editor de decoracion (#7, slice 6)', () => {
     vi.mocked(saveMyDesk).mockResolvedValue('saved');
   });
 
-  /**
-   * Espera a que las dos lecturas del editor hayan aterrizado. El aviso del
-   * escritorio propio se compone cuando llega el clic, asi que ofrecer
-   * "Decorar" depende de lo que se sepa EN ESE INSTANTE.
-   */
-  async function readyToDecorate(): Promise<void> {
+  async function openMySpace(user: ReturnType<typeof userEvent.setup>): Promise<void> {
     await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
     await act(async () => {});
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+    await user.click(screen.getByRole('button', { name: 'Mi espacio' }));
   }
 
-  it('clicar el propio escritorio ofrece decorarlo, ademas de dejarlo', async () => {
+  it('clicar el propio escritorio solo ofrece dejarlo: decorar vive en "Mi espacio"', async () => {
     render(<OfficeShell session={SESION} />);
     const bridge = createGameMock.mock.calls[0][1];
-    await readyToDecorate();
+    await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
+    await act(async () => {});
 
     act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
 
-    await userEvent.click(await screen.findByRole('button', { name: /Decorar/ }));
-    expect(await screen.findByRole('dialog', { name: /Mesa 4/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Dejarlo/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Decorar/ })).not.toBeInTheDocument();
   });
 
-  it('clicar un escritorio libre NO abre el editor: solo se decora el propio', async () => {
-    // El escritorio ajeno ni siquiera es clicable en la escena, y el libre lo
-    // que ofrece es sentarse. Un editor abierto sobre un sitio que no es tuyo
-    // guardaria tu decoracion mientras miras el de otra persona.
+  it('"Mi espacio" decora el escritorio propio con lo ya puesto', async () => {
+    const user = userEvent.setup();
     render(<OfficeShell session={SESION} />);
-    const bridge = createGameMock.mock.calls[0][1];
-    await vi.waitFor(() => expect(fetchDeskCatalog).toHaveBeenCalled());
 
-    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'claim' }));
+    await openMySpace(user);
 
-    expect(await screen.findByText(/Te sentaste en/)).toBeInTheDocument();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: 'Decorar mi escritorio' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Caja 5: Planta' })).toBeInTheDocument();
   });
 
-  it('sin catalogo no se ofrece decorar nada', async () => {
+  it('sin escritorio propio "Mi espacio" pide reclamar uno, aunque el catalogo este listo', async () => {
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([{ ...MIA, occupant: null, mine: false }]);
+    const user = userEvent.setup();
+    render(<OfficeShell session={SESION} />);
+
+    await openMySpace(user);
+
+    expect(await screen.findByText('Reclama un escritorio para personalizar tu espacio.')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Decorar mi escritorio' })).not.toBeInTheDocument();
+  });
+
+  it('sin catalogo "Mi espacio" no ofrece editor', async () => {
     // La degradacion de la slice: un despliegue sin `DATABASE_URL` responde
     // 503 y la oficina se comporta exactamente como antes, sin editor.
     vi.mocked(fetchDeskCatalog).mockResolvedValue([]);
+    const user = userEvent.setup();
+    render(<OfficeShell session={SESION} />);
+
+    await openMySpace(user);
+
+    expect(await screen.findByText('La decoración no está disponible ahora mismo.')).toBeInTheDocument();
+  });
+
+  it('sin poder leer el escritorio propio tampoco se ofrece editor', async () => {
+    // Guardar reemplaza el escritorio entero: con lo puesto sin leer, el
+    // primer guardado borraria lo que nunca se vio.
+    vi.mocked(fetchMyDeskItems).mockResolvedValue(null);
+    const user = userEvent.setup();
+    render(<OfficeShell session={SESION} />);
+
+    await openMySpace(user);
+
+    expect(await screen.findByText('La decoración no está disponible ahora mismo.')).toBeInTheDocument();
+  });
+
+  it('clicar un escritorio libre lo coge y recuerda donde se decora', async () => {
     render(<OfficeShell session={SESION} />);
     const bridge = createGameMock.mock.calls[0][1];
     await vi.waitFor(() => expect(fetchDeskCatalog).toHaveBeenCalled());
 
-    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+    act(() => bridge.emit('deskclick', { deskId: 'id-otra', label: '', action: 'claim' }));
 
-    expect(await screen.findByRole('button', { name: /Dejarlo/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Decorar/ })).not.toBeInTheDocument();
-  });
-
-  it('sin poder leer el escritorio propio tampoco se ofrece decorar', async () => {
-    // Guardar reemplaza el escritorio entero: con lo puesto sin leer, el
-    // primer guardado borraria lo que nunca se vio.
-    vi.mocked(fetchMyDeskItems).mockResolvedValue(null);
-    render(<OfficeShell session={SESION} />);
-    const bridge = createGameMock.mock.calls[0][1];
-    await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
-
-    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
-
-    expect(await screen.findByRole('button', { name: /Dejarlo/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Decorar/ })).not.toBeInTheDocument();
+    expect(await screen.findByText(/Te sentaste en/)).toHaveTextContent('Te sentaste en este escritorio · Decóralo en Personalizar › Mi espacio');
   });
 
   it('guardar vuelve a leer los escritorios: la escena lo refleja sin recargar', async () => {
     // Mismo camino que coger y soltar sitio: la lista es autoritativa y la
     // escena redibuja lo que le llega por comando.
+    const user = userEvent.setup();
     render(<OfficeShell session={SESION} />);
-    const bridge = createGameMock.mock.calls[0][1];
     await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(1));
-    await readyToDecorate();
-    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
-    await userEvent.click(await screen.findByRole('button', { name: /Decorar/ }));
+    await openMySpace(user);
 
-    await userEvent.click(await screen.findByRole('button', { name: /^Guardar/ }));
+    await user.click(await screen.findByRole('button', { name: /^Guardar/ }));
 
     expect(saveMyDesk).toHaveBeenCalledWith(
       expect.objectContaining({ items: [{ assetId: 'id-planta', slot: 4, rotation: 0 }] }),
@@ -1531,39 +1540,10 @@ describe('OfficeShell: barra lateral de personas (#74)', () => {
     expect(screen.getAllByText(/Ana Torres/).length).toBeGreaterThan(0);
   });
 
-  it('abrir el editor de decoracion colapsa la barra lateral, aunque estuviese expandida', async () => {
-    const SESION = { displayName: 'Ana Torres', getIdToken: async () => 'id-token' };
-    const MIA: OfficeDesk = {
-      id: 'id-mesa',
-      label: 'Mesa 4',
-      x: 320,
-      y: 384,
-      w: 96,
-      h: 96,
-      occupant: { id: 'id-ana', displayName: 'Ana Torres', items: [] },
-      mine: true,
-    };
-    vi.mocked(fetchOfficeDesks).mockResolvedValue([MIA]);
-    vi.mocked(fetchDeskCatalog).mockResolvedValue([{ id: 'p', name: 'Planta', kind: 'plant', textureKey: 'plant-small' }]);
-    vi.mocked(fetchMyDeskItems).mockResolvedValue([]);
-
-    const user = userEvent.setup();
-    render(<OfficeShell session={SESION} />);
-    const bridge = createGameMock.mock.calls[0][1];
-    await user.click(screen.getByRole('button', { name: /Personas/ }));
-    expect(screen.getByRole('button', { name: /Personas/ })).toHaveAttribute('aria-expanded', 'true');
-    await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
-
-    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
-    await user.click(await screen.findByRole('button', { name: /Decorar/ }));
-
-    expect(screen.getByRole('button', { name: /Personas/ })).toHaveAttribute('aria-expanded', 'false');
-  });
 });
 
 /**
- * Exclusividad entre el modo edicion de layout y `DeskDecorEditor`, y
- * suspension de coger/soltar sitio mientras se edita (#74, PR3c). El puerto
+ * Suspension de coger/soltar sitio mientras se edita el mapa (#74, PR3c). El puerto
  * de escritorios ya se dobla en el `beforeEach` de arriba; aqui cada test solo
  * fija el rol y, si hace falta, controla la lista que ve el editor.
  */
@@ -1594,45 +1574,29 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
   });
 
   async function openSidebar(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-    // "Editar escritorios"/"Editar salas" migraron al panel "Personalizar":
-    // ya no viven bajo "Personas conectadas".
+    // "Editar espacios" vive en el panel "Personalizar", no bajo "Personas conectadas".
     await user.click(screen.getByRole('button', { name: /Personalizar/ }));
   }
 
-  it('con rol admin, la seccion de escritorios se ofrece en el sidebar', async () => {
+  it('con rol admin, "Editar espacios" (escritorios y salas) se ofrece en el sidebar', async () => {
     const user = userEvent.setup();
     render(<OfficeShell session={SESION} />);
     await openSidebar(user);
 
-    expect(await screen.findByRole('button', { name: /Editar escritorios/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Editar espacios' })).toBeInTheDocument();
   });
 
-  it('con rol admin, la seccion de salas TAMBIEN se ofrece en el sidebar (#74, PR4)', async () => {
-    const user = userEvent.setup();
-    render(<OfficeShell session={SESION} />);
-    await openSidebar(user);
-
-    expect(await screen.findByRole('button', { name: /Editar salas/ })).toBeInTheDocument();
-  });
-
-  it('entrar en modo edicion de SALAS tambien cierra el editor de decoracion (#74, PR4)', async () => {
+  it('"Editar espacios" opens once its lazy editor loads, and its rooms part edits the rooms (#74, PR4)', async () => {
     let resolveEditor!: () => void;
     layoutEditorLoad.ready = new Promise<void>((resolve) => { resolveEditor = resolve; });
     try {
       const user = userEvent.setup();
       render(<OfficeShell session={SESION} />);
-      const bridge = createGameMock.mock.calls[0][1];
-      await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
-      await act(async () => {});
-      act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
-      await user.click(await screen.findByRole('button', { name: /Decorar/ }));
-      expect(await screen.findByRole('dialog', { name: /Mesa 4/ })).toBeInTheDocument();
 
       await openSidebar(user);
-      await user.click(await screen.findByRole('button', { name: /Editar salas/ }));
+      await user.click(await screen.findByRole('button', { name: 'Editar espacios' }));
 
       expect(screen.queryByRole('heading', { name: 'Salas' })).not.toBeInTheDocument();
-      expect(screen.getByRole('dialog', { name: /Mesa 4/ })).toBeInTheDocument();
       // Import completion, not the DOM query's deadline, determines submenu readiness.
       await act(async () => {
         resolveEditor();
@@ -1640,10 +1604,11 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
         await vi.dynamicImportSettled();
       });
       await screen.findByRole('heading', { name: 'Salas' });
-      await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      await user.click(screen.getByRole('button', { name: 'Editar salas' }));
+      await screen.findByText(/Nombre de la nueva sala/);
 
       await user.click(screen.getByRole('button', { name: 'Salir' }));
-      expect(screen.getByRole('button', { name: 'Editar salas' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Editar espacios' })).toBeInTheDocument();
       expect(screen.queryByRole('heading', { name: 'Salas' })).not.toBeInTheDocument();
     } finally {
       resolveEditor();
@@ -1652,59 +1617,12 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
     }
   });
 
-  it('entrar en modo edicion cierra el editor de decoracion si estaba abierto', async () => {
-    const user = userEvent.setup();
-    render(<OfficeShell session={SESION} />);
-    const bridge = createGameMock.mock.calls[0][1];
-    await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
-    await act(async () => {});
-    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
-    await user.click(await screen.findByRole('button', { name: /Decorar/ }));
-    expect(await screen.findByRole('dialog', { name: /Mesa 4/ })).toBeInTheDocument();
-
-    await openSidebar(user);
-    await user.click(await screen.findByRole('button', { name: /Editar escritorios/ }));
-
-    await screen.findByRole('heading', { name: 'Escritorios' });
-    await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-  });
-
-  /**
-   * El sentido inverso ("abrir decorar sale de edicion") no es alcanzable por
-   * interaccion real en ESTE integration test: la unica puerta a
-   * `DeskDecorEditor` es un `deskclick` de accion `release`, y ese mismo
-   * evento esta SUPRIMIDO mientras se edita (ver el siguiente test, y
-   * `OfficeScene.ts`'s `layoutEditing` de PR3b) -- "tratar el clic como
-   * seleccion de edicion" significa que NINGUN `deskclick` sale, ni el de
-   * `claim`/`release` ni el que ofreceria "Decorar". El cableado
-   * `forceExitLayoutEditing` existe igual como defensa en profundidad, y su
-   * propio efecto SI se prueba de punta a punta en
-   * `DeskEditorSection.test.tsx` ("forceExit saca del modo edicion aunque
-   * estuviese activo"), donde forzarlo no depende de ese camino irrealizable.
-   */
-  it('mientras se edita, un deskclick no abre el editor de decoracion (la unica puerta a el)', async () => {
-    const user = userEvent.setup();
-    render(<OfficeShell session={SESION} />);
-    const bridge = createGameMock.mock.calls[0][1];
-    await openSidebar(user);
-    await user.click(await screen.findByRole('button', { name: /Editar escritorios/ }));
-    expect(screen.getByRole('button', { name: /Salir/ })).toBeInTheDocument();
-    await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
-    await act(async () => {});
-
-    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
-
-    expect(screen.queryByRole('button', { name: /Decorar/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Salir/ })).toBeInTheDocument();
-  });
-
   it('mientras se edita, un deskclick del propio escritorio no ofrece dejarlo ni decorarlo', async () => {
     const user = userEvent.setup();
     render(<OfficeShell session={SESION} />);
     const bridge = createGameMock.mock.calls[0][1];
     await openSidebar(user);
-    await user.click(await screen.findByRole('button', { name: /Editar escritorios/ }));
+    await user.click(await screen.findByRole('button', { name: 'Editar espacios' }));
     await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
 
     act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
@@ -1728,7 +1646,8 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
     render(<OfficeShell session={SESION} />);
     const bridge = createGameMock.mock.calls[0][1];
     await openSidebar(user);
-    await user.click(await screen.findByRole('button', { name: /Editar salas/ }));
+    await user.click(await screen.findByRole('button', { name: 'Editar espacios' }));
+    await user.click(await screen.findByRole('button', { name: 'Editar salas' }));
     expect(screen.getByRole('button', { name: /Salir/ })).toBeInTheDocument();
     await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
     await act(async () => {});

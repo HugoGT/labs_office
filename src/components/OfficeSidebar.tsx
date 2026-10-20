@@ -14,7 +14,7 @@ import { DO_NOT_DISTURB } from '../game/officeProtocol';
 import { statusCssColor } from '../game/presence';
 import type { RosterPeer } from '../game/roster';
 import { CALL_DISABLED_TITLE } from './ContextMenu';
-import { MiEspacioPanel } from './MiEspacioPanel';
+import { MiEspacioPanel, type MiEspacioPanelProps } from './MiEspacioPanel';
 import { PhoneIcon } from './PhoneIcon';
 import { visibleRoster } from './rosterView';
 import styles from './OfficeSidebar.module.css';
@@ -49,16 +49,31 @@ const MyCharacterSectionLazy = lazy(() =>
 
 type PersonalizeSection = LayoutEditorSection | 'assets' | 'space' | 'art' | 'character';
 
+/** "Mi espacio" without a server: no desk to decorate. */
+const NO_SPACE: MiEspacioPanelProps = {
+  hasDesk: false,
+  phase: 'unavailable',
+  catalog: [],
+  items: [],
+  onSave: async () => 'failed',
+};
+
 export interface OfficeSidebarProps {
   /** Uno mismo, para anteponerlo (#74): el `roster` del puente ya lo excluye. */
   self: RosterPeer;
   peers: readonly RosterPeer[];
   /**
-   * Se activa cuando otra pieza del HUD reclama el rincon (`DeskDecorEditor`,
-   * #74, PR2). Un flanco a `true` colapsa; volver a abrirla queda a mano del
-   * usuario, no bloqueada mientras siga en `true`.
+   * Se activa cuando otra pieza del HUD reclama el rincon (#74, PR2). Un
+   * flanco a `true` colapsa; volver a abrirla queda a mano del usuario, no
+   * bloqueada mientras siga en `true`.
    */
   forceCollapsed?: boolean;
+  /**
+   * What "Mi espacio" edits: the decor of one's own desk (Editar espacios).
+   * Absent (no server, the open office) it asks to claim a desk, which there
+   * is no way to do there either.
+   */
+  mySpace?: MiEspacioPanelProps;
   /**
    * Rol de sesion (#74, PR3c), resuelto por `OfficeShell` via
    * `useOfficeAdminRole` y pasado por prop -- este componente sigue sin
@@ -122,6 +137,7 @@ export function OfficeSidebar({
   self,
   peers,
   forceCollapsed = false,
+  mySpace = NO_SPACE,
   role = null,
   bridge,
   desks,
@@ -154,7 +170,7 @@ export function OfficeSidebar({
   useEffect(() => {
     if (forceExitLayoutEditing) {
       // A rising edge gives the map to another editor without trapping navigation.
-      setSection((current) => current === 'desk' || current === 'room' || current === 'terrain' || current === 'collision' ? null : current);
+      setSection((current) => current === 'spaces' || current === 'terrain' || current === 'collision' ? null : current);
     }
   }, [forceExitLayoutEditing]);
 
@@ -171,8 +187,7 @@ export function OfficeSidebar({
 
   const entries: { section: PersonalizeSection; label: string }[] = [
     ...(canAdminister ? [
-      { section: 'desk' as const, label: 'Editar escritorios' },
-      { section: 'room' as const, label: 'Editar salas' },
+      { section: 'spaces' as const, label: 'Editar espacios' },
       ...(terrain ? [{ section: 'terrain' as const, label: 'Editar terreno' }] : []),
       ...(collisions ? [{ section: 'collision' as const, label: 'Editar colisiones' }] : []),
       ...(assets ? [{ section: 'assets' as const, label: 'Catálogo de decoración' }] : []),
@@ -185,7 +200,7 @@ export function OfficeSidebar({
   // Drop unavailable selections immediately, not just hide them until a port returns.
   if (!available) setSection(null);
   const currentSection = available ? section : null;
-  const layoutSection = currentSection === 'desk' || currentSection === 'room' || currentSection === 'terrain' || currentSection === 'collision'
+  const layoutSection = currentSection === 'spaces' || currentSection === 'terrain' || currentSection === 'collision'
     ? currentSection : null;
 
   function togglePanel(panel: 'personalize' | 'people'): void {
@@ -277,7 +292,7 @@ export function OfficeSidebar({
               <AssetsPanelLazy assets={assets} />
             </Suspense>
           )}
-          {currentSection === 'space' && <MiEspacioPanel />}
+          {currentSection === 'space' && <MiEspacioPanel {...mySpace} />}
           {currentSection === 'character' && character !== undefined && character !== null && (
             <Suspense fallback={null}>
               <MyCharacterSectionLazy character={character} onClose={() => setSection(null)} />

@@ -66,6 +66,14 @@ async function codeOf(promise: Promise<unknown>): Promise<AdminErrorCode | 'no-e
 }
 
 describe('createSpacesAdminClient: contrato del servidor', () => {
+  it('keeps the cubicle of an empty desk, which has no name (Editar espacios)', async () => {
+    const fetchImpl = fetchWith(200, { spaces: [SERVED_ROOM, { ...SERVED_DESK_SPACE, name: '' }], version: 'v1' });
+
+    const spaces = await clientWith(fetchImpl).listSpaces();
+
+    expect(spaces.map((space) => [space.kind, space.name])).toEqual([['room', SERVED_ROOM.name], ['desk', '']]);
+  });
+
   it('lee la lista de /spaces, que NO cuelga de /admin', async () => {
     // `GET /spaces` no exige ni credencial (spacesRoutes.ts): es la config que
     // lee cada cliente al arrancar. El panel reusa la misma ruta en vez de

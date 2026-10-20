@@ -9,8 +9,16 @@ import { DeskEditorSection } from './DeskEditorSection';
 import { SpaceEditorSection } from './SpaceEditorSection';
 import { TerrainEditorSection } from './TerrainEditorSection';
 import { CollisionEditorSection } from './CollisionEditorSection';
+import styles from './OfficeLayoutEditor.module.css';
 
-export type LayoutEditorSection = 'desk' | 'room' | 'terrain' | 'collision';
+/**
+ * The sidebar's map editors. `spaces` ("Editar espacios") holds the desks
+ * first and the rooms after them, one of the two editing at a time.
+ */
+export type LayoutEditorSection = 'spaces' | 'terrain' | 'collision';
+
+/** The parts of the editor that arbitrate among themselves. */
+type EditorPart = 'desk' | 'room' | 'terrain' | 'collision';
 
 export interface OfficeLayoutEditorProps {
   bridge: OfficeBridge;
@@ -38,8 +46,10 @@ function LayoutEditorSections({
   bridge, desks, spaces, terrain, collisions, refreshDesks, refreshSpaces,
   onEditingChange, forceExit = false, section, onExit,
 }: OfficeLayoutEditorProps) {
-  // Only standalone consumers need arbitration; the sidebar supplies its selection.
-  const [activeSection, setActiveSection] = useState<LayoutEditorSection | null>(null);
+  // Standalone consumers and "Editar espacios" arbitrate among their parts; the
+  // sidebar supplies every other selection. Spaces opens on the desks.
+  const arbitrated = section === undefined || section === 'spaces';
+  const [activeSection, setActiveSection] = useState<EditorPart | null>(section === 'spaces' ? 'desk' : null);
   const editingChangeRef = useRef(onEditingChange);
   editingChangeRef.current = onEditingChange;
 
@@ -50,13 +60,13 @@ function LayoutEditorSections({
     editingChangeRef.current?.(false);
   }, [bridge]);
 
-  const requestActive = useCallback((next: LayoutEditorSection) => {
+  const requestActive = useCallback((next: EditorPart) => {
     // The old reducer must emit its null BEFORE the incoming reducer enters.
     flushSync(() => setActiveSection(next));
   }, []);
 
-  function reportEditing(current: LayoutEditorSection, editing: boolean): void {
-    if (section !== undefined) {
+  function reportEditing(current: EditorPart, editing: boolean): void {
+    if (!arbitrated) {
       onEditingChange?.(editing);
     } else if (editing) {
       onEditingChange?.(true);
@@ -66,14 +76,17 @@ function LayoutEditorSections({
     }
   }
 
-  const shown = (current: LayoutEditorSection): boolean => section === undefined || section === current;
-  const forced = (current: LayoutEditorSection): boolean => forceExit || (section === undefined && activeSection !== null && activeSection !== current);
-  const shared = { bridge, desks, spaces, refreshDesks, refreshSpaces, initiallyActive: section !== undefined, onExit };
+  const shown = (current: EditorPart): boolean =>
+    section === undefined || (section === 'spaces' ? current === 'desk' || current === 'room' : section === current);
+  const forced = (current: EditorPart): boolean => forceExit || (arbitrated && activeSection !== null && activeSection !== current);
+  const embedded = section === 'spaces';
+  const shared = { bridge, desks, spaces, refreshDesks, refreshSpaces, embedded, onExit };
 
-  return (
+  const parts = (
     <>
       {shown('desk') && (
         <DeskEditorSection {...shared}
+          initiallyActive={section !== undefined}
           onEditingChange={(editing) => reportEditing('desk', editing)}
           forceExit={forced('desk')}
           onRequestActive={() => requestActive('desk')}
@@ -81,6 +94,7 @@ function LayoutEditorSections({
       )}
       {shown('room') && (
         <SpaceEditorSection {...shared}
+          initiallyActive={section !== undefined && !embedded}
           onEditingChange={(editing) => reportEditing('room', editing)}
           forceExit={forced('room')}
           onRequestActive={() => requestActive('room')}
@@ -103,5 +117,18 @@ function LayoutEditorSections({
         />
       )}
     </>
+  );
+
+  if (!embedded) return parts;
+  return (
+    <div className={styles.spaces}>
+      <div className={styles.header}>
+        <h2 className={styles.title}>Editar espacios</h2>
+        <button type="button" className={styles.exit} onClick={() => onExit?.()}>
+          Salir
+        </button>
+      </div>
+      {parts}
+    </div>
   );
 }

@@ -45,7 +45,6 @@ import { AudioUnblockPrompt } from './AudioUnblockPrompt';
 import { BottomBar } from './BottomBar';
 import { CallInvitationStack } from './CallInvitationStack';
 import { ContextMenu, type PeerMenuAction } from './ContextMenu';
-import { DeskDecorEditor } from './DeskDecorEditor';
 import { ExitControls } from './ExitControls';
 import { GameCanvas } from './GameCanvas';
 import type { OfficeEntryState } from './OfficeEntry';
@@ -104,6 +103,12 @@ export interface OfficeShellProps {
  * el nombre ya resuelto (#6): `BottomBar` es presentacional y no tiene por que
  * aprender que existe una sesion para poder escribir un nombre.
  */
+
+/** How toasts name a desk: its label, or "este escritorio" for one created empty (Editar espacios). */
+function deskLabelOf(label: string): string {
+  return label === '' ? 'este escritorio' : label;
+}
+
 export function OfficeShell({
   session = null,
   onLeaveOffice,
@@ -218,12 +223,9 @@ export function OfficeShell({
     });
   });
   /**
-   * Exclusividad entre el modo edicion de layout y `DeskDecorEditor` (#74,
-   * PR3c): los dos reclaman el mismo rincon del HUD y el mismo escritorio
-   * clicable, asi que solo uno puede estar activo. `DeskEditorSection` (via
-   * `OfficeSidebar`) reporta sus cambios aqui; el sentido inverso -- salir de
-   * edicion cuando se abre decorar -- viaja hacia abajo con
-   * `forceExitLayoutEditing`, mismo patron rising-edge que `forceCollapsed`.
+   * Whether a map editor holds the desks (#74, PR3c): `OfficeLayoutEditor`
+   * (via `OfficeSidebar`) reports it here, and a desk click is then the
+   * editor's, never a claim or a release.
    */
   const [layoutEditing, setLayoutEditing] = useState(false);
   /**
@@ -330,21 +332,13 @@ export function OfficeShell({
    * colocar no es una propiedad de ningun escritorio. Ver `deskDecorPort.ts`.
    */
   const decor = useDeskDecor(endpoint, session);
-  const [decorOpen, setDecorOpen] = useState(false);
-
-  // Entrar en modo edicion cierra el editor de decoracion si estaba abierto
-  // (#74, PR3c): el sentido inverso vive en `DeskEditorSection` via
-  // `forceExitLayoutEditing={decorOpen}`, mas abajo en el JSX.
-  useEffect(() => {
-    if (layoutEditing) setDecorOpen(false);
-  }, [layoutEditing]);
   /**
    * El escritorio propio, que es el UNICO que se puede decorar. Lo contesta el
    * servidor (`OfficeDesk.mine`) y no se deduce comparando nombres: ver
    * `desksPort.OfficeDesk.mine`.
    *
-   * `null` es un estado legitimo -- nadie esta obligado a sentarse -- y el
-   * editor lo cuenta ofreciendo coger un sitio, no una pantalla atada a nada.
+   * `null` es un estado legitimo -- nadie esta obligado a sentarse -- y "Mi
+   * espacio" lo cuenta pidiendo reclamar uno, no una pantalla atada a nada.
    */
   const myDesk = desks?.find((desk) => desk.mine) ?? null;
 
@@ -631,12 +625,13 @@ export function OfficeShell({
    * caso, porque la vista de quien hizo clic dejo de valer.
    */
   const takeDesk = useCallback(
-    async (deskId: string, label: string): Promise<void> => {
+    async (deskId: string, rawLabel: string): Promise<void> => {
+      const label = deskLabelOf(rawLabel);
       const outcome = await claim(deskId);
       if (outcome === 'claimed') {
         setToastMessage(
           <>
-            🪑 Te sentaste en <b>{label}</b>
+            🪑 Te sentaste en <b>{label}</b> · Decóralo en Personalizar › Mi espacio
           </>,
         );
         return;
@@ -657,7 +652,8 @@ export function OfficeShell({
   );
 
   const leaveDesk = useCallback(
-    async (label: string): Promise<void> => {
+    async (rawLabel: string): Promise<void> => {
+      const label = deskLabelOf(rawLabel);
       const outcome = await release();
       setToastMessage(
         outcome === 'released' ? (
@@ -673,8 +669,6 @@ export function OfficeShell({
     },
     [release],
   );
-
-  const decorReady = decor.phase === 'ready';
 
   /**
    * Guardar la decoracion del escritorio propio (#7, slice 6). El escritorio
@@ -718,32 +712,17 @@ export function OfficeShell({
           void takeDesk(deskId, label);
           return;
         }
+        // Decorating lives in "Mi espacio" (Editar espacios); the toast only offers to leave it.
         setToastMessage(
           <>
-            🪑 <b>{label}</b> es tu escritorio ·{' '}
-            {/* Decorar solo se ofrece cuando de verdad se puede: sin catalogo
-                o sin haber podido leer lo que ya hay puesto, el editor no
-                tendria ni que ofrecer ni que conservar.
-                El aviso se compone con lo que se sepa en el instante del clic
-                -- por eso `decorReady` esta en las dependencias de abajo, para
-                que el siguiente clic ya lo ofrezca. Las dos lecturas arrancan
-                al montar, a la vez que `/desks`, asi que cuando hay un
-                escritorio propio que clicar ya han aterrizado. */}
-            {decorReady && (
-              <>
-                <button type="button" onClick={() => setDecorOpen(true)}>
-                  Decorar
-                </button>{' '}
-                ·{' '}
-              </>
-            )}
+            🪑 Es tu escritorio ·{' '}
             <button type="button" onClick={() => void leaveDesk(label)}>
               Dejarlo
             </button>
           </>,
         );
       }),
-    [bridge, takeDesk, leaveDesk, decorReady, layoutEditing],
+    [bridge, takeDesk, leaveDesk, layoutEditing],
   );
 
   /**
@@ -823,7 +802,7 @@ export function OfficeShell({
         <OfficeSidebar
           self={rosterSelf}
           peers={rosterPeers}
-          forceCollapsed={decorOpen}
+          mySpace={{ hasDesk: myDesk !== null, phase: decor.phase, catalog: decor.catalog, items: decor.items, onSave: saveDecor }}
           role={adminRole}
           bridge={bridge}
           desks={deskAdminPort}
@@ -836,7 +815,6 @@ export function OfficeShell({
           refreshDesks={refreshDesks}
           refreshSpaces={refreshSpaces}
           onLayoutEditingChange={setLayoutEditing}
-          forceExitLayoutEditing={decorOpen}
           onCallPeer={callPeer}
         />
       </div>
@@ -865,15 +843,6 @@ export function OfficeShell({
         // conveniencia en el puente.
         onRetryConnection={() => bridge.emitCommand('reconnect', undefined)}
       />
-      {decorOpen && decorReady && (
-        <DeskDecorEditor
-          deskLabel={myDesk?.label ?? null}
-          catalog={decor.catalog}
-          items={decor.items}
-          onSave={saveDecor}
-          onClose={() => setDecorOpen(false)}
-        />
-      )}
       <div style={rightRailStyle}>
         <ExitControls
           onSignOut={session?.signOut ? () => void signOut(session) : null}

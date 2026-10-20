@@ -79,24 +79,13 @@ export function parseBaseMapSeats(raw: unknown): MapSeat[] {
  */
 export const BASE_MAP_SEATS: readonly MapSeat[] = parseBaseMapSeats(officeMap);
 
-/**
- * A desk seat looks the way every desk faces until desks store a facing
- * (`DEFAULT_DESK_FACING` in artPlacement.ts is this value).
- */
-export const DESK_SEAT_FACING: SeatFacing = 'down';
-
 export type SeatRef =
   | { readonly kind: 'map'; readonly index: number }
-  | { readonly kind: 'desk'; readonly deskId: string }
   | { readonly kind: 'chair'; readonly index: number }
   | { readonly kind: 'decor'; readonly deskId: string; readonly slot: number };
 
 export function mapSeatId(index: number): string {
   return `map-${index}`;
-}
-
-export function deskSeatId(deskId: string): string {
-  return `desk-${deskId}`;
 }
 
 /** A chair placed from the terrain editor, named by its tile (`ty * width + tx`). */
@@ -110,16 +99,15 @@ export function decorSeatId(deskId: string, slot: number): string {
 }
 
 const MAP_SEAT = /^map-(0|[1-9]\d{0,3})$/;
-const DESK_SEAT = /^desk-([A-Za-z0-9-]{1,64})$/;
 /** Six digits cover any tile of the 189x135 world and leave room for a bigger one. */
 const CHAIR_SEAT = /^chair-(0|[1-9]\d{0,5})$/;
-/** The desk id as in `DESK_SEAT`; the last `-<digit>` is the slot, 0..8. */
+/** A desk id (uuid-like, up to 64 characters); the last `-<digit>` is the slot, 0..8. */
 const DECOR_SEAT = /^decor-([A-Za-z0-9-]{1,64})-([0-8])$/;
 
 /**
  * Reads a seat reference from the wire. `null` for anything malformed or for
- * a base chair that does not exist; whether a desk, a placed chair or a decor
- * chair exists is the server's to ask its store or its live terrain.
+ * a base chair that does not exist; whether a placed chair or a decor chair
+ * exists is the server's to ask its live terrain or its desks store.
  */
 export function parseSeatRef(raw: unknown, mapSeatCount = BASE_MAP_SEATS.length): SeatRef | null {
   if (typeof raw !== 'string') return null;
@@ -130,10 +118,10 @@ export function parseSeatRef(raw: unknown, mapSeatCount = BASE_MAP_SEATS.length)
   }
   const chair = CHAIR_SEAT.exec(raw);
   if (chair) return { kind: 'chair', index: Number(chair[1]) };
+  // A desk has no seat of its own since it is an empty area (Editar
+  // espacios): `desk-<id>`, what older clients sent, reads as nothing.
   const decor = DECOR_SEAT.exec(raw);
-  if (decor) return { kind: 'decor', deskId: decor[1] as string, slot: Number(decor[2]) };
-  const desk = DESK_SEAT.exec(raw);
-  return desk ? { kind: 'desk', deskId: desk[1] } : null;
+  return decor ? { kind: 'decor', deskId: decor[1] as string, slot: Number(decor[2]) } : null;
 }
 
 /** A replicated seat is a wire reference, independent of this build's default
@@ -152,11 +140,6 @@ export interface SeatTiles {
 
 export function mapSeatTiles(seat: MapSeat): SeatTiles {
   return { x0: seat.tx, y0: seat.ty, x1: seat.tx, y1: seat.ty };
-}
-
-/** A desk origin in tiles; its area is always 3x3 (`DESK_SIDE`). */
-export function deskSeatTiles(desk: { readonly x: number; readonly y: number }): SeatTiles {
-  return { x0: desk.x, y0: desk.y, x1: desk.x + 2, y1: desk.y + 2 };
 }
 
 /** Tiles around the seat's own tiles from which it can be taken. */

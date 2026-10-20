@@ -23,18 +23,13 @@ export const STATIC_COLLISION_INSTANCES: readonly CollisionInstance[] = staticCo
 /** The static office with every piece at its default: the tiles props always blocked. */
 export const BASE_COLLISION_RECTS: readonly CollisionRect[] = collisionWorld(STATIC_COLLISION_INSTANCES, new Map());
 
-/**
- * The served desks as collision placements. A desk without an appearance (an
- * older server) has no known piece here, so it does not collide; the server
- * always sends one.
- */
+/** The served desks as collision placements: only their decor has pieces. */
 export function officeDeskPlacements(desks: readonly OfficeDesk[]): CollisionDesk[] {
   return desks.map((desk) => ({
     x: desk.x,
     y: desk.y,
     w: desk.w,
     h: desk.h,
-    materialId: desk.appearance?.materialId ?? null,
     items: (desk.occupant?.items ?? []).map((item) => ({ slot: item.slot, rotation: item.rotation, pieceId: pieceIdOfTextureKey(item.textureKey) })),
   }));
 }

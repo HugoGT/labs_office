@@ -3313,14 +3313,15 @@ describe('collision routes', () => {
     await server.shutdown();
   });
 
-  it('places a desk the admin creates, so its piece collides without a restart', async () => {
+  it('an empty desk the admin creates places no piece: no built-in table collides in its area', async () => {
     const desks = createMemoryDesks();
     const { server, url } = await collisionServer({ desks, collisions: createMemoryCollisions([['desk-wood', [{ x: -8, y: -8, w: 16, h: 16 }]]]) });
-    const created = await fetch(`${url}/admin/desks`, { method: 'POST', headers: BEARER, body: JSON.stringify({ label: 'Mesa C', x: 21, y: 50 }) });
+    const created = await fetch(`${url}/admin/desks`, { method: 'POST', headers: BEARER, body: JSON.stringify({ x: 21, y: 50 }) });
     expect(created.status).toBe(201);
+    await server.collisions.refreshPlacements();
 
     // The middle of the 3x3 area at tile (21, 50), as a body center.
-    await waitFor(() => isPositionBlocked(server.collisions.rects(), 22 * 32 + 16, 51 * 32 + 5));
+    expect(isPositionBlocked(server.collisions.rects(), 22 * 32 + 16, 51 * 32 + 5)).toBe(false);
     await server.shutdown();
   });
 });

@@ -122,7 +122,8 @@ describe('ArtPackLoader', () => {
 
     expect(key).toBe(recoloredSheetKey('desk-painted', 'sheet', '#c0392b'));
     const texture = scene.textures.get(key as string);
-    expect(texture.get(1)).toMatchObject({ width: 64, height: 64 });
+    // The desk cell (a decor table, 2.5 tiles long), not stretched.
+    expect(texture.get(1)).toMatchObject({ width: 96, height: 104 });
     expect(art.sheet('desk-painted', 'sheet', '#C0392B')).toBe(key);
     expect(scene.textures.get(key as string)).toBe(texture);
     // The exported color and a non-colorable material draw the exported sheet.

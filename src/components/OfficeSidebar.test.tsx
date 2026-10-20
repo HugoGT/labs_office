@@ -263,8 +263,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
 
     expect(screen.getByRole('button', { name: 'Mi espacio' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Mi espacio' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Editar escritorios/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Editar salas/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Editar espacios/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: /Catálogo/ })).not.toBeInTheDocument();
   });
 
@@ -277,22 +276,24 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     expect(screen.getByRole('button', { name: 'Mi espacio' })).toBeInTheDocument();
   });
 
-  it('con rol admin, ofrece la edicion de escritorios (cargada de forma diferida)', async () => {
+  it('con rol admin, ofrece "Editar espacios" en lugar de escritorios y salas por separado', async () => {
     const user = userEvent.setup();
     renderSidebar(adminProps());
 
     await user.click(screen.getByRole('button', { name: /Personalizar/ }));
 
-    expect(await screen.findByRole('button', { name: /Editar escritorios/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Editar espacios' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Editar escritorios/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Editar salas/ })).not.toBeInTheDocument();
   });
 
-  it('con rol superadmin, ofrece la edicion de escritorios', async () => {
+  it('con rol superadmin, ofrece "Editar espacios"', async () => {
     const user = userEvent.setup();
     renderSidebar({ ...adminProps(), role: 'superadmin' });
 
     await user.click(screen.getByRole('button', { name: /Personalizar/ }));
 
-    expect(await screen.findByRole('button', { name: /Editar escritorios/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Editar espacios' })).toBeInTheDocument();
   });
 
   it('con rol admin y el resto de props, pero sin spaces, no ofrece edicion de layout (#74, PR4 addition)', async () => {
@@ -302,16 +303,20 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
 
     await user.click(screen.getByRole('button', { name: /Personalizar/ }));
 
-    expect(screen.queryByRole('button', { name: /Editar escritorios/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Editar espacios/ })).not.toBeInTheDocument();
   });
 
-  it('con rol admin y spaces, ofrece TAMBIEN la edicion de salas', async () => {
+  it('"Editar espacios" holds the desks first and the rooms after them', async () => {
     const user = userEvent.setup();
     renderSidebar(adminProps());
 
     await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+    await user.click(await screen.findByRole('button', { name: 'Editar espacios' }));
 
-    expect(await screen.findByRole('button', { name: /Editar salas/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Crear escritorio' })).toBeInTheDocument();
+    const headings = screen.getAllByRole('heading').map((heading) => heading.textContent);
+    expect(headings.indexOf('Escritorios')).toBeLessThan(headings.indexOf('Salas'));
+    expect(screen.getByRole('button', { name: 'Editar salas' })).toBeInTheDocument();
   });
 
   it('con rol admin y puerto de terreno, ofrece TAMBIEN la edicion del terreno (#123 phase 2)', async () => {
@@ -338,7 +343,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
 
     await user.click(screen.getByRole('button', { name: /Personalizar/ }));
 
-    await screen.findByRole('button', { name: /Editar escritorios/ });
+    await screen.findByRole('button', { name: 'Editar espacios' });
     expect(screen.queryByRole('button', { name: 'Editar terreno' })).not.toBeInTheDocument();
   });
 
@@ -358,7 +363,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
 
     await user.click(screen.getByRole('button', { name: /Personalizar/ }));
 
-    await screen.findByRole('button', { name: /Editar escritorios/ });
+    await screen.findByRole('button', { name: 'Editar espacios' });
     expect(screen.queryByRole('region', { name: /Catálogo/ })).not.toBeInTheDocument();
   });
 
@@ -401,8 +406,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
 
     await user.click(screen.getByRole('button', { name: /Personas/ }));
 
-    expect(screen.queryByRole('button', { name: /Editar escritorios/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Editar salas/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Editar espacios/ })).not.toBeInTheDocument();
   });
 
   it('opening either panel closes the other, and reopening starts at the root', async () => {
@@ -415,7 +419,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Mi espacio' }));
     expect(screen.getByRole('heading', { name: 'Mi espacio' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Editar salas' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Editar espacios' })).not.toBeInTheDocument();
     await userEvent.click(people);
     expect(personalize).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('heading', { name: 'Mi espacio' })).not.toBeInTheDocument();
@@ -425,8 +429,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
   });
 
   it.each([
-    ['Editar escritorios', 'layoutedit'],
-    ['Editar salas', 'layoutedit'],
+    ['Editar espacios', 'layoutedit'],
     ['Editar terreno', 'terrainedit'],
     ['Editar colisiones', 'collisionedit'],
   ] as const)('%s enters only its submenu and leaving clears the map mode', async (label, command) => {
@@ -443,7 +446,10 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     await waitFor(() => expect(commands.at(-1)).toBeDefined());
     expect(commands.at(-1)).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Mi espacio' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Editar/ })).not.toBeInTheDocument();
+    // Only its own submenu: no other menu entry (inside "Editar espacios" the rooms offer their own entry).
+    for (const entry of ['Editar espacios', 'Editar terreno', 'Editar colisiones']) {
+      expect(screen.queryByRole('button', { name: entry })).not.toBeInTheDocument();
+    }
     await userEvent.click(exit);
     expect(onEditingChange).toHaveBeenLastCalledWith(false);
     expect(commands.at(-1)).toBeNull();
@@ -457,7 +463,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     props.bridge.onCommand('layoutedit', (value) => commands.push(value));
     const { rerender } = render(<OfficeSidebar {...props} />);
     await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
-    await userEvent.click(screen.getByRole('button', { name: 'Editar escritorios' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Editar espacios' }));
     await screen.findByText('Mesa 4');
     if (reason === 'people') await userEvent.click(screen.getByRole('button', { name: /Personas conectadas/ }));
     if (reason === 'toggle') await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
@@ -503,7 +509,8 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     props.bridge.onCommand('layoutedit', (value) => commands.push(value));
     const { rerender } = render(<OfficeSidebar {...props} />);
     await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
-    await userEvent.click(screen.getByRole('button', { name: 'Editar salas' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Editar espacios' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar salas' }));
     await screen.findByText('Sala grande');
     rerender(<OfficeSidebar {...props} forceExitLayoutEditing />);
     expect(props.onLayoutEditingChange).toHaveBeenLastCalledWith(false);
@@ -512,7 +519,8 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     await userEvent.click(screen.getByRole('button', { name: 'Mi espacio' }));
     expect(screen.getByRole('button', { name: 'Salir' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Salir' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Editar salas' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Editar espacios' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar salas' }));
     await screen.findByText('Sala grande');
     expect(props.onLayoutEditingChange).toHaveBeenLastCalledWith(true);
   });
@@ -667,7 +675,7 @@ describe('OfficeSidebar: Escape closes the open panel', () => {
     });
     const toggle = screen.getByRole('button', { name: /Personalizar/ });
     await user.click(toggle);
-    await user.click(screen.getByRole('button', { name: 'Editar escritorios' }));
+    await user.click(screen.getByRole('button', { name: 'Editar espacios' }));
 
     await user.keyboard('{Escape}');
 

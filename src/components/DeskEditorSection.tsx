@@ -1,14 +1,22 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import type { DeskAdminPort } from '../dashboard/deskAdminPort';
+import { useEffect } from 'react';
+import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
-import { defaultChoice } from '../game/artMaterials';
-import type { ArtAppearance } from '../game/artPack';
-import type { ArtPreviewCache } from '../game/artPreview';
 import type { OfficeBridge } from '../game/officeBridge';
 import { useLayoutEditor } from '../hooks/useLayoutEditor';
-import { useMaterialCatalog, type LoadMaterials } from '../hooks/useMaterialCatalog';
-import { ArtMaterialPicker } from './ArtMaterialPicker';
 import styles from './DeskEditorSection.module.css';
+
+/**
+ * How the list names a desk: its own label when an older one has it, else
+ * where it is and, when claimed, whose it is. A desk is created empty
+ * (Editar espacios), with no label asked.
+ */
+export function deskName(desk: AdminDesk): string {
+  if (desk.label !== '') return desk.label;
+  const where = `(${desk.x}, ${desk.y})`;
+  const owner = desk.occupant?.displayName;
+  if (desk.occupant === null) return `Escritorio libre ${where}`;
+  return owner ? `Escritorio de ${owner} ${where}` : `Escritorio ocupado ${where}`;
+}
 
 /**
  * Seccion de administracion de escritorios dentro del sidebar (#74, PR3c).
@@ -37,6 +45,11 @@ export interface DeskEditorSectionProps {
   forceExit?: boolean;
   /** A chosen sidebar submenu opens directly; standalone consumers keep the entry button. */
   initiallyActive?: boolean;
+  /**
+   * Inside "Editar espacios", next to the rooms: the section around it owns
+   * the exit, so this part shows none of its own.
+   */
+  embedded?: boolean;
   onExit?: () => void;
   /**
    * Se llama ANTES de `editor.enter()` (#74, PR4 correction: exclusividad
@@ -45,10 +58,6 @@ export interface DeskEditorSectionProps {
    * quede resuelto del todo antes de que este `enter()` se dispare.
    */
   onRequestActive?: () => void;
-  /** Where the material list comes from (art step 7); the page's pack manifest by default. */
-  loadMaterials?: LoadMaterials;
-  /** The preview generator; the page-wide cache by default. */
-  preview?: ArtPreviewCache;
 }
 
 export function DeskEditorSection({
@@ -60,17 +69,11 @@ export function DeskEditorSection({
   onEditingChange,
   forceExit = false,
   initiallyActive = false,
+  embedded = false,
   onExit,
   onRequestActive,
-  loadMaterials,
-  preview,
 }: DeskEditorSectionProps) {
   const editor = useLayoutEditor({ bridge, desks, spaces, refreshDesks, refreshSpaces });
-  const [label, setLabel] = useState('');
-  const catalog = useMaterialCatalog(loadMaterials);
-  /** `null` until the person picks something: the form then shows the pack default. */
-  const [appearance, setAppearance] = useState<ArtAppearance | null>(null);
-  const wasCreatingRef = useRef(false);
 
   const active = editor.state.tag !== 'off';
 
@@ -93,24 +96,6 @@ export function DeskEditorSection({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [forceExit]);
 
-  useEffect(() => {
-    if (editor.state.tag === 'placing' && editor.state.mode === 'create') {
-      wasCreatingRef.current = true;
-      return;
-    }
-    // Colocacion de creacion resuelta (exito o fallo): solo se limpia el
-    // campo en EXITO -- en fallo, "no se borra en silencio" es justo lo que
-    // pide la spec, para que quien administra no tenga que volver a
-    // escribirla tras un `desk-overlap`.
-    if (editor.state.tag === 'idle' && wasCreatingRef.current) {
-      wasCreatingRef.current = false;
-      if (editor.error === null) {
-        setLabel('');
-        setAppearance(null);
-      }
-    }
-  }, [editor.state, editor.error]);
-
   function handleEnter(): void {
     onRequestActive?.();
     editor.enter();
@@ -119,6 +104,7 @@ export function DeskEditorSection({
   if (!active) {
     return (
       <div className={styles.section}>
+        {embedded && <h3 className={styles.title}>Escritorios</h3>}
         <button type="button" className={styles.enter} onClick={handleEnter}>
           Editar escritorios
         </button>
@@ -131,23 +117,16 @@ export function DeskEditorSection({
     state.tag === 'selected' ? editor.desks.find((desk) => desk.id === state.id) ?? null : null;
   const placing = state.tag === 'placing';
   const busy = editor.state.tag === 'saving' || editor.pending;
-  // Without a readable catalog nothing is offered, and the server stores the pack default.
-  const chosen = appearance ?? (catalog === null ? null : defaultChoice(catalog, 'desk'));
-
-  function handleCreateSubmit(event: FormEvent<HTMLFormElement>): void {
-    event.preventDefault();
-    const trimmed = label.trim();
-    if (trimmed === '' || busy) return;
-    editor.startCreate(trimmed, chosen ?? undefined);
-  }
 
   return (
     <div className={styles.section}>
       <div className={styles.header}>
         <h3 className={styles.title}>Escritorios</h3>
-        <button type="button" className={styles.exit} onClick={() => { editor.exit(); onExit?.(); }}>
-          Salir
-        </button>
+        {!embedded && (
+          <button type="button" className={styles.exit} onClick={() => { editor.exit(); onExit?.(); }}>
+            Salir
+          </button>
+        )}
       </div>
 
       {selected === null && !placing && (
@@ -155,56 +134,29 @@ export function DeskEditorSection({
           <ul className={styles.list}>
             {editor.desks.map((desk) => (
               <li key={desk.id} className={styles.row}>
-                <span>{desk.label}</span>
+                <span>{deskName(desk)}</span>
                 <button
                   type="button"
                   className={styles.button}
                   disabled={busy}
                   onClick={() => editor.select(desk.id)}
                 >
-                  {`Seleccionar ${desk.label}`}
+                  {`Seleccionar ${deskName(desk)}`}
                 </button>
               </li>
             ))}
           </ul>
 
-          <form className={styles.form} onSubmit={handleCreateSubmit}>
-            <div className={styles.field}>
-              <label className={styles.hint} htmlFor="new-desk-label">
-                Etiqueta del nuevo escritorio
-              </label>
-              <input
-                id="new-desk-label"
-                className={styles.input}
-                type="text"
-                autoComplete="off"
-                required
-                disabled={busy}
-                value={label}
-                onChange={(event) => setLabel(event.target.value)}
-              />
-            </div>
-            {catalog !== null && chosen !== null && (
-              <ArtMaterialPicker
-                id="new-desk"
-                legend="Aspecto del escritorio"
-                options={catalog.desk}
-                value={chosen}
-                onChange={setAppearance}
-                disabled={busy}
-                preview={preview}
-              />
-            )}
-            <button type="submit" className={styles.button} disabled={busy || label.trim() === ''}>
-              Colocar nuevo escritorio
-            </button>
-          </form>
+          {/* Nothing to ask: a desk is created empty, and its occupant decorates it from "Mi espacio". */}
+          <button type="button" className={styles.button} disabled={busy} onClick={editor.startCreate}>
+            Crear escritorio
+          </button>
         </>
       )}
 
       {selected !== null && !placing && (
         <div className={styles.row}>
-          <span>{selected.label}</span>
+          <span>{deskName(selected)}</span>
           <div className={styles.rowActions}>
             <button type="button" className={styles.button} disabled={busy} onClick={editor.startMove}>
               Mover

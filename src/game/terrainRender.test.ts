@@ -213,7 +213,9 @@ describe('props of the committed layout against the pack', () => {
       expect(piece?.kind, prop.piece).toBe(prop.kind);
       if (piece === undefined) continue;
       if (piece.kind === 'desk') {
-        expect(piece.facings[prop.facing!].footprint).toEqual({ w: prop.w, h: prop.h });
+        // A desk piece is a decor table now (3 tiles); a Tiled desk keeps its own footprint, along the same axis.
+        const declared = piece.facings[prop.facing!].footprint;
+        expect(declared.w > declared.h).toBe(prop.w > prop.h);
       } else if ('footprint' in piece) {
         expect(piece.footprint, `${prop.piece} at (${prop.tx}, ${prop.ty})`).toEqual({ w: prop.w, h: prop.h });
       }

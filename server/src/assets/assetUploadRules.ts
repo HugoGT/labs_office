@@ -230,9 +230,14 @@ export function prepareContribution(body: unknown): PreparedUpload {
 
 /**
  * The desk decor asset that draws an uploaded plant, so the existing decor
- * flow (`/me/desk`) can place it with no change. Any other kind has none.
+ * flow (`/me/desk`) can place it with no change, or an uploaded desk, the
+ * table of a desk decor like the pack desks (`packDecorAsset`). Any other
+ * kind has none.
  */
 export function decorAssetForPiece(piece: ArtPiece): CreateAssetInput | undefined {
+  if (piece.kind === 'desk') {
+    return { name: piece.name, kind: 'furniture', textureKey: artSheetKey(piece.id, 'sheet'), w: 3, h: 1, placeableOnDesk: true };
+  }
   if (piece.kind !== 'plant') return undefined;
   return { name: piece.name, kind: 'plant', textureKey: artSheetKey(piece.id, 'sheet'), w: piece.footprint.w, h: piece.footprint.h, placeableOnDesk: true };
 }

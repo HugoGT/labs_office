@@ -1,5 +1,6 @@
 import { useState, type DragEvent } from 'react';
 import { DESK_SLOT_COLUMNS, DESK_SLOT_COUNT } from '../game/deskLayout';
+import { decorTablePiece, tableEdgeSlot, tableSlots, type TableRotation } from '../game/deskTable';
 import {
   DESK_ROTATIONS,
   type DeskDecorAsset,
@@ -36,12 +37,34 @@ import styles from './DeskDecorEditor.module.css';
  * lector de pantalla; el arrastre solo anade un atajo con raton encima. Por eso
  * el boton del selector conserva su `disabled` y el arrastrable es el `<li>`.
  *
- * ## Sin escritorio no hay editor
+ * ## Una mesa, en un borde (Editar espacios)
  *
- * La decoracion cuelga de la persona, pero se ve en el sitio donde esa persona
- * se sienta. Sin sitio, un editor seria una pantalla que guarda algo que nadie
- * puede ver: se ofrece coger uno.
+ * Un escritorio es un area vacia de 3x3. La mesa (una pieza `desk-*` del
+ * catalogo) va aparte de las cajas: se elige cual y en que borde, ocupa las
+ * tres cajas de ese borde y nada mas puede ir encima (`deskTable.ts`, la
+ * misma regla que aplica el servidor). Un borde con algo puesto no la admite.
+ *
+ * Sin escritorio no hay editor: lo decide `MiEspacioPanel`, que lo monta.
  */
+
+/** The four edges in the order the buttons show them, with the rotation that picks each. */
+const EDGES: readonly { label: string; rotation: TableRotation }[] = [
+  { label: 'Arriba', rotation: 180 },
+  { label: 'Abajo', rotation: 0 },
+  { label: 'Izquierda', rotation: 270 },
+  { label: 'Derecha', rotation: 90 },
+];
+
+/** The table of the draft: which piece and the edge its rotation picks. */
+interface DraftTable {
+  assetId: string;
+  name: string;
+  rotation: TableRotation;
+}
+
+function isTable(asset: { textureKey: string }): boolean {
+  return decorTablePiece(asset.textureKey) !== null;
+}
 
 /** Una caja del borrador. `assetId` es lo unico que el servidor lee; el resto es para pintarla. */
 interface DraftItem {
@@ -60,15 +83,12 @@ type DragLoad =
   | { from: 'slot'; slot: number };
 
 export interface DeskDecorEditorProps {
-  /** Como se llama el escritorio propio, o `null` si no se ocupa ninguno. */
-  deskLabel: string | null;
   /** Lo que se puede colocar hoy. Llega ya filtrado: ver la cabecera. */
   catalog: readonly DeskDecorAsset[];
   /** Lo que ya esta puesto, tal como lo sirve `/me/desk`. */
   items: readonly PlacedDeskItem[];
   /** Recibe el escritorio ENTERO. Devuelve lo que contesto el servidor. */
   onSave: (items: readonly DeskItemPlacement[]) => Promise<SaveDeskOutcome>;
-  onClose: () => void;
 }
 
 /** El giro siguiente, dando la vuelta. Solo las cuatro que el servidor acepta. */
@@ -77,22 +97,25 @@ function nextRotation(rotation: DeskRotation): DeskRotation {
   return DESK_ROTATIONS[(index + 1) % DESK_ROTATIONS.length];
 }
 
-/** Lo puesto, indexado por caja. Una caja, una pieza: el servidor rechaza dos con un 400. */
+/** Lo puesto, indexado por caja. Una caja, una pieza: el servidor rechaza dos con un 400. The table goes apart. */
 function toDraft(items: readonly PlacedDeskItem[]): Map<number, DraftItem> {
   return new Map(
-    items.map((item) => [
-      item.slot,
-      { assetId: item.assetId, rotation: item.rotation, name: item.name },
-    ]),
+    items
+      .filter((item) => !isTable(item))
+      .map((item) => [item.slot, { assetId: item.assetId, rotation: item.rotation, name: item.name }]),
   );
 }
 
+/** The table already placed, if it sits where its rotation says. */
+function toDraftTable(items: readonly PlacedDeskItem[]): DraftTable | null {
+  const table = items.find((item) => isTable(item) && tableEdgeSlot(item.rotation as TableRotation) === item.slot);
+  return table === undefined ? null : { assetId: table.assetId, name: table.name, rotation: table.rotation as TableRotation };
+}
+
 export function DeskDecorEditor({
-  deskLabel,
   catalog,
   items,
   onSave,
-  onClose,
 }: DeskDecorEditorProps) {
   /**
    * El borrador se siembra UNA vez con lo que habia. No se resincroniza con
@@ -106,26 +129,40 @@ export function DeskDecorEditor({
   const [error, setError] = useState<string | null>(null);
   const [dragLoad, setDragLoad] = useState<DragLoad | null>(null);
   const [dragOverSlot, setDragOverSlot] = useState<number | null>(null);
+  const [table, setTable] = useState<DraftTable | null>(() => toDraftTable(items));
+  const tables = catalog.filter(isTable);
+  const pieces = catalog.filter((asset) => !isTable(asset));
+  /** The table piece the edge buttons place: the placed one, else the one picked, else the first. */
+  const [tablePick, setTablePick] = useState<string | null>(null);
+  const pickedTable = tables.find((asset) => asset.id === (tablePick ?? table?.assetId)) ?? tables[0];
+  const tableBoxes = new Set(table === null ? [] : tableSlots(table.rotation));
 
-  if (deskLabel === null) {
-    return (
-      <section className={styles.panel} aria-label="Decorar mi escritorio">
-        <div className={styles.head}>
-          <h2 className={styles.title}>Decorar mi escritorio</h2>
-          <button className={styles.close} type="button" onClick={onClose}>
-            Cerrar
-          </button>
-        </div>
-        <p className={styles.empty}>
-          Todavía no te sientas en ningún sitio: elige un escritorio libre en la oficina y vuelve
-          para decorarlo.
-        </p>
-      </section>
-    );
+  function edgeFree(rotation: TableRotation): boolean {
+    return tableSlots(rotation).every((slot) => !draft.has(slot));
+  }
+
+  function placeTable(rotation: TableRotation): void {
+    if (pickedTable === undefined || !edgeFree(rotation)) return;
+    setSaved(false);
+    setTable({ assetId: pickedTable.id, name: pickedTable.name, rotation });
+    if (selected !== null && tableSlots(rotation).includes(selected)) setSelected(null);
+  }
+
+  function pickTable(asset: DeskDecorAsset): void {
+    setTablePick(asset.id);
+    if (table === null) return;
+    // A placed table swaps its piece where it stands.
+    setSaved(false);
+    setTable({ ...table, assetId: asset.id, name: asset.name });
+  }
+
+  function removeTable(): void {
+    setSaved(false);
+    setTable(null);
   }
 
   function place(asset: DeskDecorAsset): void {
-    if (selected === null) return;
+    if (selected === null || tableBoxes.has(selected)) return;
     setSaved(false);
     // Sustituye lo que hubiese en esa caja: apilar dos piezas en el mismo slot
     // es el 400 de `assertValidDeskShape`.
@@ -154,7 +191,8 @@ export function DeskDecorEditor({
   }
 
   function allowDrop(event: DragEvent<HTMLElement>, slot: number): void {
-    if (dragLoad === null) return;
+    // A table box takes nothing: without `preventDefault` the drop never fires.
+    if (dragLoad === null || tableBoxes.has(slot)) return;
     // Sin `preventDefault` el navegador toma la caja por destino invalido y el
     // `drop` no se dispara NUNCA. Es el fallo clasico de esta API.
     event.preventDefault();
@@ -173,7 +211,7 @@ export function DeskDecorEditor({
     event.preventDefault();
     const load = dragLoad;
     endDrag();
-    if (load === null) return;
+    if (load === null || tableBoxes.has(slot)) return;
 
     const next = new Map(draft);
     if (load.from === 'catalog') {
@@ -239,6 +277,8 @@ export function DeskDecorEditor({
       const placements: DeskItemPlacement[] = [...draft.entries()]
         .sort(([a], [b]) => a - b)
         .map(([slot, item]) => ({ assetId: item.assetId, slot, rotation: item.rotation }));
+      // The table last, on the middle box of its edge (`deskTable.ts`).
+      if (table !== null) placements.push({ assetId: table.assetId, slot: tableEdgeSlot(table.rotation), rotation: table.rotation });
 
       const outcome = await onSave(placements);
       if (outcome === 'saved') {
@@ -260,13 +300,7 @@ export function DeskDecorEditor({
   const current = selected === null ? undefined : draft.get(selected);
 
   return (
-    <section className={styles.panel} role="dialog" aria-label={`Decorar ${deskLabel}`}>
-      <div className={styles.head}>
-        <h2 className={styles.title}>Decorar {deskLabel}</h2>
-        <button className={styles.close} type="button" onClick={onClose}>
-          Cerrar
-        </button>
-      </div>
+    <section className={styles.panel} aria-label="Decorar mi escritorio">
 
       <p className={styles.hint}>
         Arrastra una pieza hasta una caja, o elige la caja y luego la pieza. Arrastra una caja sobre
@@ -283,6 +317,7 @@ export function DeskDecorEditor({
       >
         {Array.from({ length: DESK_SLOT_COUNT }, (_unused, slot) => {
           const item = draft.get(slot);
+          const onTable = tableBoxes.has(slot);
           const className = [
             styles.slot,
             item === undefined ? styles.slotEmpty : '',
@@ -298,9 +333,11 @@ export function DeskDecorEditor({
               // La etiqueta lleva el numero de caja Y lo que hay dentro: sin lo
               // segundo, quien navega con lector de pantalla no sabria cual
               // esta ocupada.
-              aria-label={`Caja ${slot + 1}: ${item?.name ?? 'vacía'}`}
+              aria-label={onTable ? `Caja ${slot + 1}: mesa (${table!.name})` : `Caja ${slot + 1}: ${item?.name ?? 'vacía'}`}
               aria-pressed={selected === slot}
-              className={className}
+              className={onTable ? `${className} ${styles.slotTable}` : className}
+              // A table box is the table's: nothing is chosen, placed or dropped there.
+              disabled={onTable}
               // Solo una caja con pieza se arrastra; toda caja recibe.
               draggable={item !== undefined}
               onClick={() => setSelected(slot)}
@@ -310,7 +347,7 @@ export function DeskDecorEditor({
               onDrop={(event) => drop(event, slot)}
               onDragEnd={endDrag}
             >
-              {item?.name ?? '+'}
+              {onTable ? 'Mesa' : (item?.name ?? '+')}
             </button>
           );
         })}
@@ -335,11 +372,49 @@ export function DeskDecorEditor({
         </button>
       </div>
 
+      {tables.length > 0 && (
+        <div className={styles.table}>
+          <h3 className={styles.subtitle}>Mesa</h3>
+          <ul className={styles.pieces} aria-label="Mesas que puedes colocar">
+            {tables.map((asset) => (
+              <li key={asset.id} className={styles.pieceItem}>
+                <button
+                  className={styles.piece}
+                  type="button"
+                  aria-pressed={pickedTable?.id === asset.id}
+                  onClick={() => pickTable(asset)}
+                >
+                  {asset.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className={styles.actions} role="group" aria-label="Borde de la mesa">
+            {EDGES.map(({ label, rotation }) => (
+              <button
+                key={rotation}
+                className={styles.action}
+                type="button"
+                aria-pressed={table?.rotation === rotation}
+                disabled={!edgeFree(rotation)}
+                title={edgeFree(rotation) ? undefined : 'Quita primero lo que hay en ese borde'}
+                onClick={() => placeTable(rotation)}
+              >
+                {label}
+              </button>
+            ))}
+            <button className={styles.action} type="button" disabled={table === null} onClick={removeTable}>
+              Quitar mesa
+            </button>
+          </div>
+        </div>
+      )}
+
       {catalog.length === 0 ? (
         <p className={styles.empty}>Todavía no hay piezas en el catálogo de la oficina.</p>
       ) : (
         <ul className={styles.pieces} aria-label="Piezas que puedes colocar">
-          {catalog.map((asset) => (
+          {pieces.map((asset) => (
             /* El arrastrable es el `<li>` y no el boton: un control
                deshabilitado no dispara eventos de arrastre, y el boton lo esta
                mientras no haya caja elegida. Arrastrar si nombra el destino por

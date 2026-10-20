@@ -55,7 +55,8 @@ const verifier: IdTokenVerifier = {
 const BEARER_ADMIN = 'Bearer valido-uid-admin';
 const BEARER_EMPLEADO = 'Bearer valido-uid-empleado';
 /** Leaves out the pack chairs, desk decor from the pack registration on. */
-const notPackChair = (textureKey: string) => !textureKey.startsWith('art:chair-');
+/** The pack's chairs and desks bring their own decor assets (chairs and tables). */
+const notPackChair = (textureKey: string) => !/^art:(chair|desk)-(?!upload-)/.test(textureKey);
 const PACK: ArtPackManifest = readArtPackManifest(new URL('../../../public/assets/pack/manifest.json', import.meta.url));
 
 function sheet(kind: ArtImageKind): Buffer {
@@ -134,7 +135,7 @@ describe('handleUploadAsset', () => {
     expect((await d.decor.listAssets()).map((asset) => asset.textureKey).filter(notPackChair)).toEqual([artSheetKey(id, 'sheet')]);
   });
 
-  it('gives a desk without facings the geometry of the pack default desk', async () => {
+  it('gives a desk without facings the geometry of the pack default desk, and its decor table', async () => {
     const d = await deps();
     const body = { kind: 'desk', ...CREDITS, material: 'roble', files: { sheet: sheet('desk').toString('base64') } };
 
@@ -143,7 +144,8 @@ describe('handleUploadAsset', () => {
     expect(result.status).toBe(201);
     const wood = PACK.pieces.find((piece) => piece.id === 'desk-wood');
     expect((result.body.piece as { facings: unknown }).facings).toEqual(wood?.kind === 'desk' ? wood.facings : null);
-    expect(result.body.asset).toBeNull();
+    // A desk is a decor table (Editar espacios): three tiles along a desk edge.
+    expect(result.body.asset).toMatchObject({ kind: 'furniture', w: 3, h: 1, textureKey: `art:${(result.body.piece as { id: string }).id}:sheet` });
   });
 
   it('answers a readable code and the file or field it is about', async () => {

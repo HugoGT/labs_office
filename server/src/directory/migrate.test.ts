@@ -579,6 +579,11 @@ describe('schema.sql: art pack catalog and appearance (art migration, step 3)', 
     expect(squashed).toContain('alter table spaces add column if not exists floor_color text');
   });
 
+  it('lets a desk be created empty: its label defaults to the empty string, idempotently, keeping NOT NULL', () => {
+    expect(squashed).toContain("alter table desks alter column label set default ''");
+    expect(squashed).not.toContain('alter table desks alter column label drop not null');
+  });
+
   it('bounds stored colors to lowercase #rrggbb, refreshing the CHECK on a live database', () => {
     for (const [table, column] of [
       ['desks', 'color'],

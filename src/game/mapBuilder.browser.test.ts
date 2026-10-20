@@ -4,7 +4,7 @@ import { waitForSceneRunning } from '../test/phaserScene';
 import { TERRAIN_LAYER_COUNT, TERRAIN_LAYER_ORIGIN, propPlacement, type ArtChairPiece } from './artContract';
 import { artSheetKey, findPiece } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
-import { chairPlacement, DEFAULT_DESK_FACING, deskPlacement, footprintAnchor } from './artPlacement';
+import { chairPlacement, deskPlacement, footprintAnchor } from './artPlacement';
 import { TILE, ZONE_LABELS } from './mapData';
 import {
   CHAIR_OBJECT_NAME,
@@ -221,7 +221,7 @@ describe('placeLayout', () => {
     for (const prop of BASE_LAYOUT.props) {
       const piece = findPiece(manifest, prop.piece)!;
       if (piece.kind === 'desk') {
-        const placement = deskPlacement(piece, prop.facing ?? DEFAULT_DESK_FACING, footprintAnchor({ x: prop.tx * TILE, y: prop.ty * TILE, w: prop.w * TILE, h: prop.h * TILE }));
+        const placement = deskPlacement(piece, prop.facing ?? 'down', footprintAnchor({ x: prop.tx * TILE, y: prop.ty * TILE, w: prop.w * TILE, h: prop.h * TILE }));
         expect(drawn).toContainEqual({ key: artSheetKey(prop.piece, 'sheet'), x: placement.x, y: placement.y, frame: placement.frame });
         continue;
       }

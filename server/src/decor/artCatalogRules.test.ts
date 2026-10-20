@@ -314,8 +314,23 @@ describe('packDecorAsset', () => {
     expect(packDecorAsset(MANIFEST.pieces.find((piece) => piece.id === 'chair-wood')!)?.name).toBe('Silla de madera');
   });
 
-  it('offers no other pack piece: pack plants and desks are not desk decor', () => {
-    for (const piece of MANIFEST.pieces.filter((candidate) => candidate.kind !== 'chair')) {
+  it('offers every pack desk as the table of a desk decor, three tiles along an edge (Editar espacios)', () => {
+    const desks = MANIFEST.pieces.filter((piece) => piece.kind === 'desk');
+    expect(desks.map((piece) => piece.id).sort()).toEqual(['desk-glass', 'desk-metal', 'desk-painted', 'desk-wood']);
+    for (const desk of desks) {
+      expect(packDecorAsset(desk)).toEqual({
+        name: desk.name,
+        kind: 'furniture',
+        textureKey: `art:${desk.id}:sheet`,
+        w: 3,
+        h: 1,
+        placeableOnDesk: true,
+      });
+    }
+  });
+
+  it('offers no other pack piece: pack plants and room tables are not desk decor', () => {
+    for (const piece of MANIFEST.pieces.filter((candidate) => candidate.kind !== 'chair' && candidate.kind !== 'desk')) {
       expect(packDecorAsset(piece), piece.id).toBeNull();
     }
   });

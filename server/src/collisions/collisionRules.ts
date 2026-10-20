@@ -64,9 +64,8 @@ export function parseCollisionEdit(pieceId: unknown, body: unknown): CollisionEd
 }
 
 /**
- * The served desks as the client gets them from `GET /desks` (pixels, the
- * desk material, the decor of its occupant), so both sides place the same
- * rectangles.
+ * The served desks as the client gets them from `GET /desks` (pixels and the
+ * decor of its occupant), so both sides place the same rectangles.
  */
 export function deskCollisionPlacements(desks: readonly OfficeDesk[]): CollisionDesk[] {
   return desks.map((desk) => ({
@@ -74,7 +73,6 @@ export function deskCollisionPlacements(desks: readonly OfficeDesk[]): Collision
     y: desk.y * TILE,
     w: DESK_SIDE * TILE,
     h: DESK_SIDE * TILE,
-    materialId: desk.materialId,
     items: (desk.occupant?.items ?? []).map((item) => ({ slot: item.slot, rotation: item.rotation, pieceId: pieceIdOfTextureKey(item.textureKey) })),
   }));
 }

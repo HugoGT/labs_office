@@ -28,7 +28,6 @@
  * decoracion del anterior inquilino.
  */
 
-import type { ArtAppearance } from './artPack';
 
 /**
  * Una pieza colocada en una de las nueve cajas del escritorio.
@@ -71,7 +70,7 @@ export interface DeskOccupant {
 /** Un escritorio asignable con su ocupante resuelto. Coordenadas en PIXELES. */
 export interface OfficeDesk {
   id: string;
-  /** Como lo llama la oficina ("Mesa 4"). Se pinta en el mapa. */
+  /** Como lo llama la oficina ("Mesa 4"); `''` for a desk created empty. Drawn only when not empty. */
   label: string;
   x: number;
   y: number;
@@ -93,12 +92,6 @@ export interface OfficeDesk {
    * dos homonimos verian los dos el mismo resaltado.
    */
   mine: boolean;
-  /**
-   * Material and color of the desk itself (art migration, step 4). They belong
-   * to the desk, not to whoever sits there. Absent when the server sent none
-   * (an older server): the scene draws the pack default desk then.
-   */
-  appearance?: ArtAppearance;
 }
 
 /**

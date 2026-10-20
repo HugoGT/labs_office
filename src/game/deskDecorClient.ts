@@ -27,6 +27,7 @@
  * que el servidor no tiene.
  */
 
+import { fitsDeskDecor } from './deskTable';
 import { DESK_ROTATIONS, NO_DESK_ASSETS } from './deskDecorPort';
 import type {
   DeskAssetKind,
@@ -86,6 +87,10 @@ function toDeskAsset(raw: unknown): DeskDecorAsset | 'not-placeable' | null {
   if (typeof row.placeableOnDesk !== 'boolean') return null;
 
   if (!row.placeableOnDesk) return 'not-placeable';
+  // Same rule the server applies (`deskTable.ts`): a room table, a map piece
+  // or anything larger than the desk is never offered, placeable or not.
+  const size = { w: isFiniteNumber(row.w) ? row.w : 1, h: isFiniteNumber(row.h) ? row.h : 1 };
+  if (!fitsDeskDecor({ textureKey: row.textureKey, ...size })) return 'not-placeable';
   return {
     id: row.id,
     name: row.name,

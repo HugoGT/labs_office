@@ -290,19 +290,25 @@ export const CHAIR: ChairSpec = {
   maxColors: MAX_COLORS_PER_IMAGE,
 };
 
-/** 64px cells (2x2 tiles) fit a desk in any facing; its footprint follows the long side. */
+/**
+ * A desk piece is the table a person places on one 3-tile edge of their desk
+ * (desk decor, Editar espacios): about 2.5 tiles (80px) long in any facing,
+ * so it looks centered on the edge and leaves the rest of the 3x3 free. A
+ * 96x104 cell fits it horizontal or vertical (the vertical one stands its top
+ * over 80 floor rows); the footprint is the whole edge, along the long side.
+ */
 export const DESK: DeskSpec = {
   kind: 'desk',
-  frame: { width: 64, height: 64 },
+  frame: { width: 96, height: 104 },
   columns: PACK_FACINGS.length,
   rows: 1,
   columnOrder: PACK_FACINGS,
-  anchor: { x: 32, y: 40 },
+  anchor: { x: 48, y: 60 },
   footprintByFacing: {
-    up: { w: 2, h: 1 },
-    down: { w: 2, h: 1 },
-    left: { w: 1, h: 2 },
-    right: { w: 1, h: 2 },
+    up: { w: 3, h: 1 },
+    down: { w: 3, h: 1 },
+    left: { w: 1, h: 3 },
+    right: { w: 1, h: 3 },
   },
   alpha: 'partial',
   transparentCorners: true,

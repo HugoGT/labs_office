@@ -125,7 +125,7 @@ describe('previewFrame', () => {
     const desk = catalog().desk[0]!;
     const floor = catalog().floor[0]!;
 
-    expect(previewFrame(desk)).toEqual({ x: 64, y: 0, width: 64, height: 64 });
+    expect(previewFrame(desk)).toEqual({ x: 96, y: 0, width: 96, height: 104 });
     expect(previewFrame(floor)).toEqual({ x: 0, y: 0, width: 96, height: 96 });
   });
 

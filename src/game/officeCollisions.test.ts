@@ -6,7 +6,7 @@ import { collisionWorld, staticCollisionInstances } from './pieceCollisions';
 import { BASE_MAP_SEATS } from './seating';
 
 function desk(overrides: Partial<OfficeDesk> = {}): OfficeDesk {
-  return { id: 'd1', label: 'Mesa 1', x: 320, y: 160, w: 96, h: 96, occupant: null, mine: false, appearance: { materialId: 'desk-oak', color: null }, ...overrides };
+  return { id: 'd1', label: 'Mesa 1', x: 320, y: 160, w: 96, h: 96, occupant: null, mine: false, ...overrides };
 }
 
 describe('officeCollisions', () => {
@@ -15,7 +15,7 @@ describe('officeCollisions', () => {
     expect(BASE_COLLISION_RECTS).toEqual(collisionWorld(STATIC_COLLISION_INSTANCES, new Map()));
   });
 
-  it('places the served desks as the server does: pixels, material, and the pieces of the decor', () => {
+  it('places the served desks as the server does: pixels and the pieces of the decor, never a material', () => {
     const served = desk({
       occupant: {
         id: 'u1',
@@ -27,27 +27,23 @@ describe('officeCollisions', () => {
       },
     });
 
-    expect(officeDeskPlacements([served, desk({ id: 'd2', appearance: undefined })])).toEqual([
+    expect(officeDeskPlacements([served, desk({ id: 'd2' })])).toEqual([
       {
         x: 320,
         y: 160,
         w: 96,
         h: 96,
-        materialId: 'desk-oak',
         items: [
           { slot: 4, rotation: 90, pieceId: 'plant-ficus' },
           { slot: 1, rotation: 0, pieceId: null },
         ],
       },
-      { x: 320, y: 160, w: 96, h: 96, materialId: null, items: [] },
+      { x: 320, y: 160, w: 96, h: 96, items: [] },
     ]);
   });
 
-  it('adds the desk instances after the static ones', () => {
-    const instances = officeCollisionInstances([desk()]);
-
-    expect(instances.slice(0, STATIC_COLLISION_INSTANCES.length)).toEqual(STATIC_COLLISION_INSTANCES);
-    expect(instances.at(-1)?.piece).toBe('desk-oak');
+  it('adds no instance for an empty desk: it has no built-in table', () => {
+    expect(officeCollisionInstances([desk()])).toEqual(STATIC_COLLISION_INSTANCES);
   });
 
   it('collides with a decor chair once an admin gave its piece rectangles, nothing before', () => {
@@ -66,7 +62,7 @@ describe('officeCollisions', () => {
   it('adds the placed chairs last, each as its own piece', () => {
     const instances = officeCollisionInstances([desk()], undefined, undefined, [{ index: 5, piece: 'chair-gamer', facing: 'up' }]);
 
-    expect(instances.at(-2)?.piece).toBe('desk-oak');
+    expect(instances).toHaveLength(STATIC_COLLISION_INSTANCES.length + 1);
     expect(instances.at(-1)).toMatchObject({ piece: 'chair-gamer', pivot: { x: 5 * 32 + 16, y: 16 } });
   });
 });

@@ -180,17 +180,16 @@ describe('pieceCollisions: instances', () => {
     expect(worldRectsOf(instances[1]!, new Map([['chair-metal', [{ x: -4, y: -4, w: 8, h: 8 }]]]))).toEqual([{ x: 12, y: 12, w: 8, h: 8 }]);
   });
 
-  it('puts a served desk in the middle of its area and its decor plants in their slot boxes', () => {
-    const desk = { x: 320, y: 160, w: 96, h: 96, materialId: 'desk-oak', items: [{ slot: 4, rotation: 0, pieceId: 'plant-upload-0123456789abcdef' }, { slot: 9, rotation: 0, pieceId: 'plant-ficus' }, { slot: 0, rotation: 0, pieceId: null }] };
+  it('a served desk is an empty area with no piece of its own; its decor plants go in their slot boxes', () => {
+    const desk = { x: 320, y: 160, w: 96, h: 96, items: [{ slot: 4, rotation: 0, pieceId: 'plant-upload-0123456789abcdef' }, { slot: 9, rotation: 0, pieceId: 'plant-ficus' }, { slot: 0, rotation: 0, pieceId: null }] };
     const instances = deskInstances([desk]);
 
-    expect(instances.map((instance) => instance.piece)).toEqual(['desk-oak', 'plant-upload-0123456789abcdef']);
-    expect(instances[0]).toMatchObject({ pivot: { x: 368, y: 208 }, rotation: 0 });
+    expect(instances.map((instance) => instance.piece)).toEqual(['plant-upload-0123456789abcdef']);
     expect(instances.every((instance) => worldRectsOf(instance, NO_EDITS).length === 0)).toBe(true);
 
     // A 32x48 plant squeezed into its 32x32 slot: its anchor lands on the bottom middle of the box.
     const box = deskSlotRect(desk, 4)!;
-    const plant = instances[1]!;
+    const plant = instances[0]!;
     const table = new Map([['plant-upload-0123456789abcdef', [{ x: -8, y: -12, w: 16, h: 12 }]]]);
     const [rect] = worldRectsOf(plant, table);
     expect(rect!.x).toBeCloseTo(box.x + 8);
@@ -209,11 +208,11 @@ describe('pieceCollisions: instances', () => {
   });
 
   it('places a decor chair 1:1 on its slot box middle, turned like a placed chair with that facing', () => {
-    const desk = { x: 320, y: 160, w: 96, h: 96, materialId: 'desk-oak', items: [
+    const desk = { x: 320, y: 160, w: 96, h: 96, items: [
       { slot: 8, rotation: 90, pieceId: 'chair-gamer' },
       { slot: 0, rotation: 180, pieceId: 'chair-wood' },
     ] };
-    const [, right, up] = deskInstances([desk]);
+    const [right, up] = deskInstances([desk]);
     const box = deskSlotRect(desk, 8)!;
     const [placed] = placedChairInstances([{ index: 0, piece: 'chair-gamer', facing: 'right' }], 1);
 
@@ -225,8 +224,41 @@ describe('pieceCollisions: instances', () => {
     expect(worldRectsOf(right!, table)).toEqual(worldRectsOf(placed!, table).map((rect) => ({ ...rect, x: rect.x + shift.x, y: rect.y + shift.y })));
   });
 
-  it('skips a desk without a material', () => {
-    expect(deskInstances([{ x: 0, y: 0, w: 96, h: 96, materialId: null, items: [] }])).toEqual([]);
+  it('places a decor table on the middle of its edge, blocking the floor under its top until an admin edits it', () => {
+    const desk = { x: 320, y: 160, w: 96, h: 96, items: [{ slot: 1, rotation: 180, pieceId: 'desk-wood' }, { slot: 4, rotation: 0, pieceId: 'plant-ficus' }] };
+    const [table] = deskInstances([desk]);
+    const top = deskSlotRect(desk, 1)!;
+
+    expect(table).toMatchObject({
+      piece: 'desk-wood',
+      pivot: { x: top.x + 16, y: top.y + 16 },
+      rotation: rotationForFacing('up'),
+      scale: { x: 1, y: 1 },
+      offset: { x: 0, y: 0 },
+      pickBox: { x: 320, y: 160, w: 96, h: 32 },
+    });
+    // Unedited: the floor under its 80px top, along the top row.
+    expect(worldRectsOf(table!, NO_EDITS)).toEqual([{ x: top.x + 16 - 40, y: top.y + 16 - 7, w: 80, h: 14 }]);
+    // Edited: the piece's rectangles, turned by its facing.
+    expect(worldRectsOf(table!, new Map([['desk-wood', [{ x: -30, y: -4, w: 60, h: 8 }]]]))).toEqual([{ x: top.x + 16 - 30, y: top.y + 12, w: 60, h: 8 }]);
+  });
+
+  it('turns a decor table on a side edge a quarter, like its vertical drawing', () => {
+    const desk = { x: 320, y: 160, w: 96, h: 96, items: [{ slot: 5, rotation: 90, pieceId: 'desk-glass' }] };
+    const [table] = deskInstances([desk]);
+    const middle = deskSlotRect(desk, 5)!;
+
+    expect(table).toMatchObject({ rotation: 90, pivot: { x: middle.x + 16, y: middle.y + 16 }, pickBox: { x: 384, y: 160, w: 32, h: 96 } });
+    expect(worldRectsOf(table!, NO_EDITS)).toEqual([{ x: middle.x + 16 - 12, y: middle.y + 16 - 40, w: 24, h: 80 }]);
+    expect(worldRectsOf(table!, new Map([['desk-glass', [{ x: -30, y: -4, w: 60, h: 8 }]]]))).toEqual([{ x: middle.x + 12, y: middle.y + 16 - 30, w: 8, h: 60 }]);
+  });
+
+  it('skips a table off the middle of its edge', () => {
+    expect(deskInstances([{ x: 0, y: 0, w: 96, h: 96, items: [{ slot: 4, rotation: 0, pieceId: 'desk-wood' }] }])).toEqual([]);
+  });
+
+  it('an empty desk places nothing: no built-in table, no fixed chair', () => {
+    expect(deskInstances([{ x: 0, y: 0, w: 96, h: 96, items: [] }])).toEqual([]);
   });
 });
 
@@ -321,12 +353,13 @@ describe('pieceCollisions: editing support', () => {
     expect(worldRectsOf(desk!, new Map([['desk-wood', [piece]]]))).toEqual([world]);
   });
 
-  it('picks the smallest thing under a point, so decor wins over its desk', () => {
-    const instances: CollisionInstance[] = deskInstances([
-      { x: 0, y: 0, w: 96, h: 96, materialId: 'desk-oak', items: [{ slot: 4, rotation: 0, pieceId: 'plant-ficus' }] },
-    ]);
+  it('picks the smallest thing under a point, so decor wins over a prop under it', () => {
+    const instances: CollisionInstance[] = [
+      ...layoutPropInstances([prop({ piece: 'tree-oak', kind: 'tree', tx: 0, ty: 0, w: 3, h: 3 })]),
+      ...deskInstances([{ x: 0, y: 0, w: 96, h: 96, items: [{ slot: 4, rotation: 0, pieceId: 'plant-ficus' }] }]),
+    ];
     expect(pickInstance(instances, NO_EDITS, { x: 48, y: 48 })?.piece).toBe('plant-ficus');
-    expect(pickInstance(instances, NO_EDITS, { x: 5, y: 5 })?.piece).toBe('desk-oak');
+    expect(pickInstance(instances, NO_EDITS, { x: 5, y: 5 })?.piece).toBe('tree-oak');
     expect(pickInstance(instances, NO_EDITS, { x: 500, y: 5 })).toBeNull();
   });
 });

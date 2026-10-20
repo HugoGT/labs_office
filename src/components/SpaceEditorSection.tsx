@@ -34,6 +34,8 @@ export interface SpaceEditorSectionProps {
   forceExit?: boolean;
   /** A chosen sidebar submenu opens directly; standalone consumers keep the entry button. */
   initiallyActive?: boolean;
+  /** Inside "Editar espacios", after the desks: the section around it owns the exit. */
+  embedded?: boolean;
   onExit?: () => void;
   /** Se llama ANTES de `editor.enter()` (#74, PR4 correction): ver `DeskEditorSection.onRequestActive`. */
   onRequestActive?: () => void;
@@ -73,6 +75,7 @@ export function SpaceEditorSection({
   onEditingChange,
   forceExit = false,
   initiallyActive = false,
+  embedded = false,
   onExit,
   onRequestActive,
 }: SpaceEditorSectionProps) {
@@ -119,6 +122,7 @@ export function SpaceEditorSection({
   if (!active) {
     return (
       <div className={styles.section}>
+        {embedded && <h3 className={styles.title}>Salas</h3>}
         <button type="button" className={styles.enter} onClick={handleEnter}>
           Editar salas
         </button>
@@ -148,9 +152,11 @@ export function SpaceEditorSection({
     <div className={styles.section}>
       <div className={styles.header}>
         <h3 className={styles.title}>Salas</h3>
-        <button type="button" className={styles.exit} onClick={() => { editor.exit(); onExit?.(); }}>
-          Salir
-        </button>
+        {!embedded && (
+          <button type="button" className={styles.exit} onClick={() => { editor.exit(); onExit?.(); }}>
+            Salir
+          </button>
+        )}
       </div>
 
       {selected === null && !placing && (

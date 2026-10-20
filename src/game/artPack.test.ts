@@ -108,8 +108,8 @@ describe('load requests', () => {
       {
         key: artSheetKey('desk-painted', 'sheet'),
         url: 'https://cdn.example/pack/desk/painted.png',
-        frameWidth: 64,
-        frameHeight: 64,
+        frameWidth: 96,
+        frameHeight: 104,
       },
     ]);
   });

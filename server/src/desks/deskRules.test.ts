@@ -63,11 +63,14 @@ describe('normalizeDeskLabel', () => {
     expect(normalizeDeskLabel('  Mesa 4  ')).toBe('Mesa 4');
   });
 
-  it('rechaza una etiqueta vacia', () => {
-    // `label text NOT NULL` admitiria la cadena vacia, y el mapa pintaria un
-    // escritorio sin nada que lo identifique al moverlo o borrarlo.
-    expect(() => normalizeDeskLabel('   ')).toThrow(InvalidDeskError);
-    expect(() => normalizeDeskLabel(undefined as unknown as string)).toThrow(InvalidDeskError);
+  it('a desk needs no label: absent or blank reads as empty (Editar espacios)', () => {
+    expect(normalizeDeskLabel('   ')).toBe('');
+    expect(normalizeDeskLabel(undefined)).toBe('');
+  });
+
+  it('refuses a label that is not a string', () => {
+    expect(() => normalizeDeskLabel(42 as unknown as string)).toThrow(InvalidDeskError);
+    expect(() => normalizeDeskLabel(null as unknown as string)).toThrow(InvalidDeskError);
   });
 });
 
@@ -105,8 +108,9 @@ describe('normalizeCreateDeskInput', () => {
     );
   });
 
-  it('rechaza una etiqueta vacia', () => {
-    expect(() => normalizeCreateDeskInput({ label: '', x: 0, y: 0 })).toThrow(InvalidDeskError);
+  it('creates an empty desk: no label is asked', () => {
+    expect(normalizeCreateDeskInput({ x: 0, y: 0 })).toEqual({ label: '', x: 0, y: 0 });
+    expect(normalizeCreateDeskInput({ label: '', x: 0, y: 0 })).toEqual({ label: '', x: 0, y: 0 });
   });
 
   it('NO lee un occupantId del input: quien se sienta no lo decide el alta', () => {

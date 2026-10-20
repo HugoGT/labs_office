@@ -33,10 +33,10 @@ function sheet(kind: ArtImageKind, rgb: readonly [number, number, number] = [200
 }
 
 const FACINGS: ArtDeskPiece['facings'] = {
-  up: { footprint: { w: 2, h: 1 }, ground: { x: 0, y: 6 }, chairGround: { x: 0, y: 10 } },
-  down: { footprint: { w: 2, h: 1 }, ground: { x: 0, y: 6 }, chairGround: { x: 0, y: -10 } },
-  left: { footprint: { w: 1, h: 2 }, ground: { x: 0, y: 15 }, chairGround: { x: 21, y: 0 } },
-  right: { footprint: { w: 1, h: 2 }, ground: { x: 0, y: 15 }, chairGround: { x: -21, y: 0 } },
+  up: { footprint: { w: 3, h: 1 }, ground: { x: 0, y: 6 }, chairGround: { x: 0, y: 10 } },
+  down: { footprint: { w: 3, h: 1 }, ground: { x: 0, y: 6 }, chairGround: { x: 0, y: -10 } },
+  left: { footprint: { w: 1, h: 3 }, ground: { x: 0, y: 15 }, chairGround: { x: 21, y: 0 } },
+  right: { footprint: { w: 1, h: 3 }, ground: { x: 0, y: 15 }, chairGround: { x: -21, y: 0 } },
 };
 
 const CREDITS = { name: 'Lucía', author: 'Equipo de arte', license: 'proprietary-internal' };
@@ -209,5 +209,21 @@ describe('decorAssetForPiece', () => {
       placeableOnDesk: true,
     });
     expect(decorAssetForPiece(person)).toBeUndefined();
+  });
+
+  it('an uploaded desk is a decor table, three tiles along a desk edge, like the pack desks (Editar espacios)', () => {
+    const { piece: desk } = prepareAssetUpload(
+      { kind: 'desk', name: 'Mesa de roble', author: 'A', license: 'L', material: 'roble', files: { sheet: sheet('desk') } },
+      { defaultDeskFacings: FACINGS },
+    );
+
+    expect(decorAssetForPiece(desk)).toEqual({
+      name: 'Mesa de roble',
+      kind: 'furniture',
+      textureKey: `art:${desk.id}:sheet`,
+      w: 3,
+      h: 1,
+      placeableOnDesk: true,
+    });
   });
 });

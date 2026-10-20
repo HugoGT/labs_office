@@ -572,6 +572,42 @@ describe('createMemoryDecor: art pack catalog (art migration, step 3)', () => {
     expect((await catalog.listAssets()).some((entry) => entry.textureKey === 'art:plant-ficus:sheet')).toBe(false);
   });
 
+  it('places one pack table on a desk edge and refuses a chair on its tiles', async () => {
+    const catalog = decor();
+    await catalog.registerArtPack(PACK);
+    const assets = await catalog.listAssets();
+    const table = assets.find((entry) => entry.textureKey === 'art:desk-wood:sheet')!;
+    const chair = assets.find((entry) => entry.textureKey === 'art:chair-wood:sheet')!;
+
+    const placed = await catalog.replaceDeskConfig('user-1', [
+      { assetId: table.id, slot: 7, rotation: 0 },
+      { assetId: chair.id, slot: 4, rotation: 0 },
+    ]);
+    expect(placed.map((item) => [item.textureKey, item.slot, item.rotation])).toEqual([
+      ['art:chair-wood:sheet', 4, 0],
+      ['art:desk-wood:sheet', 7, 0],
+    ]);
+
+    await expect(
+      catalog.replaceDeskConfig('user-1', [
+        { assetId: table.id, slot: 7, rotation: 0 },
+        { assetId: chair.id, slot: 6, rotation: 0 },
+      ]),
+    ).rejects.toBeInstanceOf(InvalidDeskConfigError);
+  });
+
+  it('offers the pack desks as decor tables, three tiles long, once across restarts (Editar espacios)', async () => {
+    const catalog = decor();
+    await catalog.registerArtPack(PACK);
+    await catalog.registerArtPack(PACK);
+
+    const tables = (await catalog.listAssets({ includeArchived: true })).filter((entry) => entry.textureKey.startsWith('art:desk-'));
+    expect(tables.map((entry) => entry.textureKey).sort()).toEqual(
+      PACK.pieces.filter((piece) => piece.kind === 'desk').map((piece) => `art:${piece.id}:sheet`).sort(),
+    );
+    expect(tables.every((entry) => entry.w === 3 && entry.h === 1 && entry.placeableOnDesk && entry.kind === 'furniture')).toBe(true);
+  });
+
   it('registering again never duplicates a chair asset, nor brings back one an admin archived', async () => {
     const catalog = decor();
     await catalog.registerArtPack(PACK);

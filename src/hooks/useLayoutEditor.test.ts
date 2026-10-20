@@ -91,16 +91,16 @@ describe('useLayoutEditor (#74, PR3c)', () => {
     expect(result.current.state).toEqual({ tag: 'selected', kind: 'desk', id: 'id-otra' });
   });
 
-  it('crear: un layoutplace valido llama a createDesk con la etiqueta pedida y la posicion encajada', async () => {
+  it('crear: un layoutplace valido crea un escritorio vacio en la posicion encajada (Editar espacios)', async () => {
     const desks = fakeDesks();
     const { bridge, refreshDesks, refreshSpaces, result } = setup(desks);
     act(() => result.current.enter());
     await waitFor(() => expect(result.current.desks).toHaveLength(2));
 
-    act(() => result.current.startCreate('Mesa 6'));
+    act(() => result.current.startCreate());
     act(() => bridge.emit('layoutplace', { tx: 7, ty: 8, valid: true }));
 
-    await waitFor(() => expect(desks.createDesk).toHaveBeenCalledWith({ label: 'Mesa 6', x: 7, y: 8 }));
+    await waitFor(() => expect(desks.createDesk).toHaveBeenCalledWith({ x: 7, y: 8 }));
     await waitFor(() => expect(refreshDesks).toHaveBeenCalledTimes(1));
     expect(refreshSpaces).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(result.current.state).toEqual({ tag: 'idle', kind: 'desk' }));
@@ -126,7 +126,7 @@ describe('useLayoutEditor (#74, PR3c)', () => {
     const { bridge, refreshDesks, result } = setup(desks);
     act(() => result.current.enter());
     await waitFor(() => expect(result.current.desks).toHaveLength(2));
-    act(() => result.current.startCreate('Mesa 6'));
+    act(() => result.current.startCreate());
 
     act(() => bridge.emit('layoutplace', { tx: 7, ty: 8, valid: false }));
 
@@ -140,7 +140,7 @@ describe('useLayoutEditor (#74, PR3c)', () => {
     const { bridge, refreshDesks, refreshSpaces, result } = setup(desks);
     act(() => result.current.enter());
     await waitFor(() => expect(result.current.desks).toHaveLength(2));
-    act(() => result.current.startCreate('Mesa 6'));
+    act(() => result.current.startCreate());
 
     act(() => bridge.emit('layoutplace', { tx: 7, ty: 8, valid: true }));
 
@@ -190,7 +190,7 @@ describe('useLayoutEditor (#74, PR3c)', () => {
       act(() => result.current.enter());
       await waitFor(() => expect(result.current.desks).toHaveLength(2));
 
-      act(() => result.current.startCreate('Mesa 6'));
+      act(() => result.current.startCreate());
 
       await waitFor(() => {
         const obstacles = commands.at(-1)?.placing?.obstacles ?? [];
@@ -204,7 +204,7 @@ describe('useLayoutEditor (#74, PR3c)', () => {
       act(() => result.current.enter());
       await waitFor(() => expect(result.current.desks).toHaveLength(2));
 
-      act(() => result.current.startCreate('Mesa 6'));
+      act(() => result.current.startCreate());
 
       await waitFor(() => {
         const obstacles = commands.at(-1)?.placing?.obstacles ?? [];
@@ -233,7 +233,7 @@ describe('useLayoutEditor (#74, PR3c)', () => {
       const { bridge, result } = setup(desks, spaces);
       act(() => result.current.enter());
       await waitFor(() => expect(result.current.desks).toHaveLength(2));
-      act(() => result.current.startCreate('Mesa 6'));
+      act(() => result.current.startCreate());
 
       act(() => bridge.emit('layoutplace', { tx: 7, ty: 8, valid: true }));
 
