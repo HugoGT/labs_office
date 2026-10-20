@@ -2005,6 +2005,24 @@ describe('custom character routes (creator)', () => {
     await server.shutdown();
   });
 
+  it('a character saved from "Personalizar" reaches the live room without reconnecting', async () => {
+    const { server, url } = await creatorServer();
+    const room = await new Client(url.replace('http:', 'ws:')).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token: 'valido-uid-ana' });
+    try {
+      await waitUntil(() => room.state.players?.get(room.sessionId)?.avatarId === 'character-p01-burgundy-suit');
+
+      const posted = await fetch(`${url}/me/avatar`, { method: 'POST', headers: BEARER, body: JSON.stringify({ spec: SPEC }) });
+      expect(posted.status).toBe(200);
+
+      const id = `character-custom-${customCharacterHash(SPEC)}`;
+      await waitUntil(() => room.state.players?.get(room.sessionId)?.avatarId === id);
+      expect(server.sessions.has(room.sessionId)).toBe(true);
+    } finally {
+      await room.leave();
+      await server.shutdown();
+    }
+  });
+
   it('answers 404 for a hash nobody stored', async () => {
     const { server, url } = await creatorServer();
 

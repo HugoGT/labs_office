@@ -1,7 +1,8 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import type { CharacterPort } from '../auth/characterPort';
 import type { ArtContributionPort } from '../dashboard/artContributionPort';
 import type { AssetAdminPort } from '../dashboard/assetAdminPort';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
@@ -15,7 +16,12 @@ import { OfficeSidebar } from './OfficeSidebar';
 // The sidebar's lazy sections transform cold in the first test that opens one; on a loaded CI
 // runner that outlasted findBy's 1 s deadline. Warm them once so tests only wait on React.
 beforeAll(async () => {
-  await Promise.all([import('./OfficeLayoutEditor'), import('../dashboard/AssetsPanel'), import('./ArtContributionSection')]);
+  await Promise.all([
+    import('./OfficeLayoutEditor'),
+    import('../dashboard/AssetsPanel'),
+    import('./ArtContributionSection'),
+    import('./MyCharacterSection'),
+  ]);
 });
 
 const SELF: RosterPeer = { sessionId: 'yo', name: 'Hugo', status: 'g' };
@@ -561,6 +567,43 @@ describe('OfficeSidebar: contributing art (#122)', () => {
     await user.click(screen.getByRole('button', { name: /Personalizar/ }));
 
     expect(screen.queryByRole('heading', { name: 'Aportar arte' })).not.toBeInTheDocument();
+  });
+});
+
+describe('OfficeSidebar: my character', () => {
+  function fakeCharacter(): CharacterPort {
+    return {
+      read: vi.fn(async () => ({ outcome: 'ok' as const, avatarId: 'character-p01-burgundy-suit', chosen: true })),
+      save: vi.fn(async () => ({ outcome: 'ok' as const, avatarId: 'character-p01-burgundy-suit' })),
+      catalog: vi.fn(async () => ({
+        defaultId: 'character-p01-burgundy-suit',
+        options: [{ id: 'character-p01-burgundy-suit', name: 'Mateo', walkUrl: 'w.png', seatedUrl: 's.png' }],
+      })),
+    };
+  }
+
+  it('anyone signed in opens the creator from "Mi personaje" and cancelling goes back to the menu', async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+    const user = userEvent.setup();
+    renderSidebar({ role: 'employee', character: fakeCharacter() });
+
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+    await user.click(screen.getByRole('button', { name: 'Mi personaje' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Mi personaje' });
+
+    await user.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mi personaje' })).toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
+  it('without a character port (no server, or no session) there is no "Mi personaje"', async () => {
+    const user = userEvent.setup();
+    renderSidebar({ role: 'employee' });
+
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+
+    expect(screen.queryByRole('button', { name: 'Mi personaje' })).not.toBeInTheDocument();
   });
 });
 

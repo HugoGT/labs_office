@@ -1,5 +1,5 @@
-import { useDeferredValue, useEffect, useId, useMemo, useState } from 'react';
-import type { CSSProperties, FormEvent, ReactNode } from 'react';
+import { useDeferredValue, useEffect, useId, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, FormEvent, KeyboardEvent, ReactNode } from 'react';
 import {
   BOTTOM_STYLE_OPTIONS,
   BUILD_OPTIONS,
@@ -175,14 +175,25 @@ export function CharacterCreator({
   const deferredSpec = useDeferredValue(spec);
   const frames = useMemo(() => (piece === undefined ? customCharacterPreview(deferredSpec) : null), [piece, deferredSpec]);
 
+  const dialog = onCancel !== undefined;
+  const rootRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (onCancel === undefined) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCancel();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onCancel]);
+    // A dialog over the office takes the focus, so the keyboard starts inside it.
+    if (dialog) rootRef.current?.focus();
+  }, [dialog]);
+
+  /**
+   * Over the office, nothing typed in the dialog reaches `window`, where the
+   * office listens (the arrow keys walk the avatar, the sidebar closes on
+   * Escape): Escape here only cancels the dialog.
+   */
+  const handleDialogKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onCancel?.();
+    }
+  };
 
   const edit = (next: Partial<CustomCharacterSpec>) => {
     setSpec((current) => ({ ...current, ...next }));
@@ -197,7 +208,15 @@ export function CharacterCreator({
   };
 
   return (
-    <div className={styles.screen} role={onCancel ? 'dialog' : undefined} aria-modal={onCancel ? true : undefined} aria-labelledby={titleId}>
+    <div
+      ref={rootRef}
+      className={styles.screen}
+      role={dialog ? 'dialog' : undefined}
+      aria-modal={dialog ? true : undefined}
+      aria-labelledby={dialog ? titleId : undefined}
+      tabIndex={dialog ? -1 : undefined}
+      onKeyDown={dialog ? handleDialogKey : undefined}
+    >
       <form className={styles.card} onSubmit={handleSubmit}>
         <h1 className={styles.title} id={titleId}>
           {heading}
