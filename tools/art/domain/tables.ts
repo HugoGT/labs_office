@@ -12,8 +12,8 @@
 import { makeRamp, mixRgba, type Ramp } from './color.ts';
 import { ART_TILE, TABLE, type Footprint } from '../../../src/game/artContract.ts';
 import { DEPTH_SCALE, floorPoint, floorSpans, renderFurniture, type Box, type FurnitureModel, type Span, type SurfacePoint } from './furnitureModel.ts';
-import { PixelBuffer, rgba, type Rgba } from './pixelBuffer.ts';
-import type { Facing, SeatPoint } from './seating.ts';
+import { PixelBuffer, rgba, type Rgba } from '../../../src/art/pixelBuffer.ts';
+import type { Facing, SeatPoint } from '../../../src/art/seating.ts';
 
 export const TABLE_MATERIALS = ['glass', 'metal', 'wood', 'painted'] as const;
 export type TableMaterial = (typeof TABLE_MATERIALS)[number];

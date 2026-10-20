@@ -1,5 +1,5 @@
 import { ART_TILE, TERRAIN_DECALS, TERRAIN_MATERIALS, TERRAIN_VOID_COLOR, terrainDecalIndex, terrainTileIndex, type TerrainMaterial, type RgbaImage } from '../../src/game/artContract.ts';
-import { PixelBuffer, rgba } from '../art/domain/pixelBuffer.ts';
+import { PixelBuffer, rgba } from '../../src/art/pixelBuffer.ts';
 import { decodePng } from '../../server/src/assets/pngCodec.ts';
 
 export const LAYOUT_PATH = 'src/game/maps/office.json';

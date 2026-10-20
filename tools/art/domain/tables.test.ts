@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { PixelBuffer } from './pixelBuffer.ts';
-import { FACINGS } from './seating.ts';
+import { PixelBuffer } from '../../../src/art/pixelBuffer.ts';
+import { FACINGS } from '../../../src/art/seating.ts';
 import { DEFAULT_TABLE_COLOR, TABLE_MATERIALS, tableSprite } from './tables.ts';
 
 const luma = (p: { r: number; g: number; b: number }): number => p.r * 0.3 + p.g * 0.59 + p.b * 0.11;

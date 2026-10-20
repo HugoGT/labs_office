@@ -30,6 +30,11 @@ import {
 /** Served next to the SPA from `public/`, relative to the page. */
 export const ART_PACK_MANIFEST_URL = 'assets/pack/manifest.json';
 
+/** A file of the pack by its manifest path, from the same folder as the manifest. */
+export function artPackFileUrl(path: string, manifestUrl: string = ART_PACK_MANIFEST_URL): string {
+  return `${manifestUrl.slice(0, manifestUrl.lastIndexOf('/') + 1)}${path}`;
+}
+
 /**
  * What a desk or a space stores about its look (art migration, step 3): a
  * piece id of the pack and, only for a colorable material, a `#rrggbb` color.

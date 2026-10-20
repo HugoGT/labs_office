@@ -49,7 +49,7 @@ import { authenticate, authorize, NOT_FOUND, type AdminDeps, type AdminResult } 
 import { ART_PACK_DEFAULTS, ArtPieceExistsError } from '../decor/artCatalogRules.ts';
 import type { ArtCatalogPiece, DecorCatalog } from '../decor/decorPort.ts';
 import { AssetNameTakenError, InvalidAssetError } from '../decor/decorRules.ts';
-import type { CharacterRetirement } from '../characterRetirement.ts';
+import type { CharacterUpdates } from '../characterUpdates.ts';
 import { AssetUploadError } from './assetImageRules.ts';
 import { isAssetHash, type AssetStoragePort } from './assetStoragePort.ts';
 import { ASSET_FILE_HEADERS, type AssetFileResult } from './assetUploadRoutes.ts';
@@ -63,7 +63,7 @@ export interface ArtContributionDeps extends AdminDeps {
    * (#122). Absent, the persisted choice still changes and takes effect on
    * the next join.
    */
-  characters?: CharacterRetirement;
+  characters?: Pick<CharacterUpdates, 'retireCharacter'>;
 }
 
 /** A preview is the viewer's business only: no shared cache keeps it, no browser stores it. */

@@ -1,6 +1,6 @@
 # Character Option Catalog
 
-Source of truth: `tools/art/domain/characters.ts` (types) and `tools/art/domain/rig.ts` (drawing). Base ids are listed as examples; see them in `docs/art/preview/characters.png`.
+Source of truth: `src/art/characters.ts` (types) and `src/art/rig.ts` (drawing). Base ids are listed as examples; see them in `docs/art/preview/characters.png`.
 
 ## Build
 
@@ -55,12 +55,13 @@ Set unused `inner` to `WHITE_SHIRT`. Without `tie`, the tie falls back to `inner
 | `briefcase` | Case | Clasp | p05, p08, p14 |
 | `folder` | Cover | Page edge | p06, p11, p16 |
 | `jacketOverShoulder` | Jacket | Unused | p09, p15 |
+| `none` | Unused | Unused | custom characters from the creator (`src/art/customCharacter.ts`) |
 
 ## Flags
 
 | Field | Effect |
 |-------|--------|
-| `glasses` | Dark frames and light lenses; one skin pixel between the frames is drawn automatically |
+| `glasses` | `'none'`, `'glasses'` (a two-pixel lens per eye: the eye with a light pane, a rim under it, a one-pixel bridge) or `'sunglasses'` (the same frame with dark lenses) |
 | `earrings` | Gold earrings (fixed color) |
 | `darkerHair` | Draws the whole hair ramp one tone darker |
 | `palette.scrunchie` | Scrunchie color, used only by `ponytail` and `wavyPonytail`; defaults to the hair color |

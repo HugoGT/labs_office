@@ -33,7 +33,7 @@ import {
   type TerrainDecal,
   type TerrainMaterial,
 } from '../../src/game/artContract.ts';
-import { PixelBuffer } from './domain/pixelBuffer.ts';
+import { PixelBuffer } from '../../src/art/pixelBuffer.ts';
 import type { Terrain } from './domain/tiles.ts';
 import { groupWallGeometry, resolveWallGeometry } from './domain/wallGeometry.ts';
 import { WallMap, type WallMaterial } from './domain/wallMap.ts';

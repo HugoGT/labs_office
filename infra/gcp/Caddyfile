@@ -207,6 +207,14 @@ http://{$APP_HOST}, http://{$LK_HOST}, http://{$TURN_HOST} {
 		reverse_proxy colyseus:2567
 	}
 
+	# Personajes creados por piezas en la entrada: el servidor dibuja sus dos
+	# hojas desde la especificacion guardada (solo hashes guardados, 404 para
+	# el resto). Prefijo propio por lo mismo que /assets/files/*: nunca
+	# `/assets/*`. El servidor responde con cache inmutable; no necesita bucket.
+	handle /assets/characters/* {
+		reverse_proxy colyseus:2567
+	}
+
 	# Escritorios asignables (issue #7, slice 5): listado y coger/dejar sitio.
 	# `/desks` y `/desks/*` (que cubre `/desks/:id/claim`) van por separado
 	# porque el comodin de un solo segmento no casa la ruta exacta.

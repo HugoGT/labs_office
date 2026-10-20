@@ -1,9 +1,9 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { CHARACTER_HEIGHT, FRAME_HEIGHT } from './camera.ts';
-import { CHARACTERS } from './characters.ts';
+import { CHARACTER_HEIGHT, FRAME_HEIGHT } from '../../../src/art/camera.ts';
+import { CHARACTERS } from '../../../src/art/characters.ts';
 import { hexToRgba } from './color.ts';
-import { buildCharacterSprites } from './spriteSheet.ts';
+import { buildCharacterSprites } from '../../../src/art/spriteSheet.ts';
 import { TERRAIN_MATERIALS, countColors } from '../../../src/game/artContract.ts';
 import {
   carpetTile,

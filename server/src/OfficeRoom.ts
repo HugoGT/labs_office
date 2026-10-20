@@ -85,7 +85,7 @@ import type { LastPosition, UserDirectory } from './directory/directoryPort.ts';
 import { isPositionInMap } from './directory/positionRules.ts';
 import type { LiveSessionRegistry } from './liveSessions.ts';
 import type { SessionEvictionHub } from './sessionEviction.ts';
-import type { CharacterRetirementHub } from './characterRetirement.ts';
+import type { CharacterUpdatesHub } from './characterUpdates.ts';
 import { participantKeyOf, type FinishedRecordingStore } from './recording/finishedRecordings.ts';
 import type { ActiveRecording, RecordingRegistry } from './recording/recordingRegistry.ts';
 import { OfficeState, createPlayerState, createRecordingState } from './schema.ts';
@@ -328,7 +328,7 @@ export interface OfficeRoomOptions {
    * Live reset of a retired character (#122): the room registers here so the
    * retire route can put every player wearing it on the pack default.
    */
-  characters?: CharacterRetirementHub;
+  characters?: CharacterUpdatesHub;
   /**
    * Assignable desks (art migration, step 6), to check a desk seat: that the
    * desk exists, where it is and who owns it, and the decor chairs of its
@@ -477,7 +477,10 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     // `availableUntil` is when the bucket lifecycle deletes it (#5), for the
     // "Disponible hasta" of the notice.
     this.unregisterEviction = options?.eviction?.register((uid) => this.evictAccount(uid));
-    this.unregisterCharacters = options?.characters?.register((pieceId, fallbackId) => this.retireCharacter(pieceId, fallbackId));
+    this.unregisterCharacters = options?.characters?.register({
+      retireCharacter: (pieceId, fallbackId) => this.retireCharacter(pieceId, fallbackId),
+      changeCharacterOf: (uid, avatarId) => this.changeCharacterOf(uid, avatarId),
+    });
     this.unsubscribeReady = options?.finished?.onReady(({ recordingId, spaceId, participants, stoppedAt }) => {
       const notice = { recordingId, spaceId, availableUntil: recordingAvailableUntil(stoppedAt) };
       for (const client of this.clients) {
@@ -845,6 +848,21 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private retireCharacter(pieceId: string, fallbackId: string): void {
     for (const player of this.state.players.values()) {
       if (player.avatarId === pieceId) player.avatarId = fallbackId;
+    }
+  }
+
+  /**
+   * A character saved from "Personalizar" (the creator): every session of
+   * `uid`, connected or inside its reconnection window, wears it now, the
+   * same replicated-field-only change as a retirement.
+   */
+  private changeCharacterOf(uid: string, avatarId: string): void {
+    const sessions = new Set<string>();
+    for (const client of this.clients) if (accountOf(client) === uid) sessions.add(client.sessionId);
+    for (const [sessionId, pending] of this.pendingReconnections) if (pending.uid === uid) sessions.add(sessionId);
+    for (const sessionId of sessions) {
+      const player = this.state.players.get(sessionId);
+      if (player) player.avatarId = avatarId;
     }
   }
 

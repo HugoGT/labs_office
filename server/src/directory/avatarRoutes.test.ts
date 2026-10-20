@@ -7,7 +7,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { CHARACTER_TEMPLATES, customCharacterHash, customCharacterId } from '../../../src/art/customCharacter.ts';
 import type { ArtPackManifest } from '../../../src/game/artContract.ts';
+import { createMemoryCustomCharacters } from '../characters/memoryCustomCharacters.ts';
 import { ART_PACK_DEFAULTS } from '../decor/artCatalogRules.ts';
 import { readArtPackManifest } from '../decor/artPackFile.ts';
 import { createMemoryDecor } from '../decor/memoryDecor.ts';
@@ -161,4 +163,110 @@ describe('handleSetAvatar', () => {
       expect((await deps.directory.findById(ANA.id))?.avatarChosenAt).toBeNull();
     },
   );
+});
+
+describe('custom characters built with the creator', () => {
+  const SPEC = CHARACTER_TEMPLATES[4]!.spec;
+  const HASH = customCharacterHash(SPEC);
+  const ID = customCharacterId(HASH);
+
+  async function creatorHarness() {
+    const changes: [string, string][] = [];
+    const deps = {
+      ...(await harness()),
+      customCharacters: createMemoryCustomCharacters(),
+      characters: { changeCharacterOf: (uid: string, avatarId: string) => void changes.push([uid, avatarId]) },
+    };
+    return { deps, changes };
+  }
+
+  it('stores a valid spec by its hash, points the caller at it and returns it', async () => {
+    const { deps } = await creatorHarness();
+
+    const result = await handleSetAvatar(BEARER_ANA, { spec: SPEC }, deps);
+
+    expect(result).toEqual({ status: 200, body: { avatarId: ID, chosen: true, spec: SPEC } });
+    expect(await deps.customCharacters.findCustomCharacter(HASH)).toEqual(SPEC);
+    const stored = await deps.directory.findById(ANA.id);
+    expect(stored?.avatarId).toBe(ID);
+    expect(stored?.avatarChosenAt).not.toBeNull();
+  });
+
+  it('puts every saved character on the live sessions of the caller', async () => {
+    const { deps, changes } = await creatorHarness();
+
+    await handleSetAvatar(BEARER_ANA, { spec: SPEC }, deps);
+    await handleSetAvatar(BEARER_ANA, { avatarId: 'character-p03-forest-suit' }, deps);
+
+    expect(changes).toEqual([
+      ['uid-ana', ID],
+      ['uid-ana', 'character-p03-forest-suit'],
+    ]);
+  });
+
+  it('a room that fails to redraw does not undo the saved choice', async () => {
+    const { deps } = await creatorHarness();
+    const failing = { ...deps, characters: { changeCharacterOf: () => { throw new Error('room down'); } }, log: () => undefined };
+
+    const result = await handleSetAvatar(BEARER_ANA, { spec: SPEC }, failing);
+
+    expect(result.status).toBe(200);
+    expect((await deps.directory.findById(ANA.id))?.avatarId).toBe(ID);
+  });
+
+  it.each([
+    [{ ...SPEC, skin: '#12345' }, 'skin'],
+    [{ ...SPEC, hair: { style: 'mohawk', color: SPEC.hair.color } }, 'hair.style'],
+    ['bob', 'spec'],
+  ])('rejects a spec outside the curated options (%j) naming the field, storing nothing', async (spec, field) => {
+    const { deps, changes } = await creatorHarness();
+
+    const result = await handleSetAvatar(BEARER_ANA, { spec }, deps);
+
+    expect(result).toEqual({ status: 400, body: { error: 'invalid-character', reason: 'invalid-spec', field } });
+    expect((await deps.directory.findById(ANA.id))?.avatarChosenAt).toBeNull();
+    expect(changes).toEqual([]);
+  });
+
+  it('answers 503 for a spec when the server has no custom character store', async () => {
+    const deps = await harness();
+
+    const result = await handleSetAvatar(BEARER_ANA, { spec: SPEC }, deps);
+
+    expect(result).toEqual({ status: 503, body: { error: 'custom-characters-not-configured' } });
+  });
+
+  it('chooses a stored custom character again by its id, and refuses an unknown one', async () => {
+    const { deps } = await creatorHarness();
+    await deps.customCharacters.saveCustomCharacter(HASH, SPEC);
+
+    expect(await handleSetAvatar(BEARER_ANA, { avatarId: ID }, deps)).toEqual({
+      status: 200,
+      body: { avatarId: ID, chosen: true, spec: SPEC },
+    });
+    expect(await handleSetAvatar(BEARER_ANA, { avatarId: customCharacterId('f'.repeat(32)) }, deps)).toEqual({
+      status: 400,
+      body: { error: 'invalid-character', reason: 'unknown-piece' },
+    });
+    expect(await handleSetAvatar(BEARER_ANA, { avatarId: 'character-custom-nothex' }, deps)).toEqual({
+      status: 400,
+      body: { error: 'invalid-character', reason: 'unknown-piece' },
+    });
+  });
+
+  it('GET returns the stored spec of a custom character so the creator can reopen it', async () => {
+    const { deps } = await creatorHarness();
+    await handleSetAvatar(BEARER_ANA, { spec: SPEC }, deps);
+
+    expect(await handleGetAvatar(BEARER_ANA, deps)).toEqual({ status: 200, body: { avatarId: ID, chosen: true, spec: SPEC } });
+  });
+
+  it('GET of a pack or uploaded character carries no spec', async () => {
+    const { deps } = await creatorHarness();
+
+    expect(await handleGetAvatar(BEARER_BEA, deps)).toEqual({
+      status: 200,
+      body: { avatarId: 'character-p02-beige-blazer', chosen: true },
+    });
+  });
 });

@@ -1,4 +1,4 @@
-// Paste inside CUSTOM_CHARACTERS in tools/art/domain/characters.ts. Option values: references/catalog.md.
+// Paste inside CUSTOM_CHARACTERS in src/art/characters.ts. Option values: references/catalog.md.
 // The constants (LIGHT_SKIN, WHITE_SHIRT, BLACK_SHOES...) are already defined in that file.
 {
   id: 'c01-teal-blazer', // cNN-<look>: next free number, kebab-case, never renamed later
@@ -10,7 +10,7 @@
   bottom: 'pants', // 'pants' | 'widePants' | 'skirt'
   shoes: 'heels', // 'dress' | 'heels'
   accessory: 'tablet', // 'coffee' | 'handbag' | 'laptop' | 'tablet' | 'briefcase' | 'folder' | 'jacketOverShoulder'
-  glasses: false,
+  glasses: 'none', // 'none' | 'glasses' | 'sunglasses'
   earrings: true,
   // darkerHair: true, // brown hair, or hair close to the skin tone
   palette: {

@@ -1,9 +1,10 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthPort, AuthUser, OfficeSession } from '../auth/authPort';
-import type { CharacterPort, ReadCharacterResult } from '../auth/characterPort';
+import type { CharacterChoice, CharacterPort, ReadCharacterResult } from '../auth/characterPort';
 import type { ClaimDisplayNameResult, DisplayNamePort } from '../auth/displayNamePort';
+import { CHARACTER_TEMPLATES } from '../art/customCharacter';
 import { AuthGate } from './AuthGate';
 import { OfficeEntry } from './OfficeEntry';
 import { createDisplayNameClient } from '../auth/displayNameClient';
@@ -11,6 +12,11 @@ import { createCharacterClient } from '../auth/characterClient';
 import { describeAccessDenied } from '../auth/authErrors';
 
 const ANA: AuthUser = { uid: 'uid-ana', email: 'ana@example.com', displayName: 'Ana' };
+
+// jsdom has no 2D canvas; the creator's canvas previews just stay blank.
+beforeEach(() => {
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+});
 
 function fakePort(overrides: Partial<AuthPort> = {}) {
   let listener: ((user: AuthUser | null) => void) | null = null;
@@ -623,7 +629,10 @@ describe('AuthGate: nombre visible auto-elegido en login (#100)', () => {
 function fakeCharacterPort(read: ReadCharacterResult, overrides: Partial<CharacterPort> = {}): CharacterPort {
   return {
     read: vi.fn(async () => read),
-    save: vi.fn(async (avatarId: string) => ({ outcome: 'ok' as const, avatarId })),
+    save: vi.fn(async (choice: CharacterChoice) => ({
+      outcome: 'ok' as const,
+      avatarId: choice.kind === 'piece' ? choice.avatarId : 'character-custom-x',
+    })),
     catalog: vi.fn(async () => ({
       defaultId: 'character-p01-burgundy-suit',
       options: [
@@ -736,7 +745,7 @@ describe('AuthGate: character chosen at the entrance (art migration, step 5)', (
     await user.click(screen.getByRole('button', { name: /^entrar$/i }));
     await act(async () => emit(ANA));
 
-    expect(await screen.findByRole('radiogroup', { name: /elige tu personaje/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /crea tu personaje/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /olvidaste/i })).not.toBeInTheDocument();
     expect(screen.queryByTestId('office')).not.toBeInTheDocument();
     expect(office.sessions).toEqual([]);
@@ -755,12 +764,55 @@ describe('AuthGate: character chosen at the entrance (art migration, step 5)', (
     await submitLogin(user);
     await act(async () => emit(ANA));
 
-    await user.click(await screen.findByRole('radio', { name: 'Personaje 2' }));
+    await user.click(await screen.findByRole('button', { name: 'Plantilla 2' }));
     await user.click(screen.getByRole('button', { name: /entrar a la oficina/i }));
 
-    expect(character.save).toHaveBeenCalledWith('character-p02-beige-blazer');
+    expect(character.save).toHaveBeenCalledWith({ kind: 'piece', avatarId: 'character-p02-beige-blazer' });
     expect(await screen.findByTestId('office')).toHaveTextContent('Ana Lopez');
-    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /crea tu personaje/i })).not.toBeInTheDocument();
+  });
+
+  it('a character built from parts at the entrance is saved as its spec, then the office opens', async () => {
+    const user = userEvent.setup();
+    const { port, emit } = fakePort();
+    const character = fakeCharacterPort(NEVER_CHOSE);
+    render(
+      <AuthGate auth={port} displayName={fakeDisplayNamePort()} character={character}>
+        {officeSpy().render}
+      </AuthGate>,
+    );
+    emit(null);
+    await submitLogin(user);
+    await act(async () => emit(ANA));
+
+    await user.click(within(await screen.findByRole('group', { name: 'Superior' })).getByRole('button', { name: /^Lentes/ }));
+    await user.click(screen.getByRole('menuitemradio', { name: 'Lentes' }));
+    await user.click(screen.getByRole('button', { name: /entrar a la oficina/i }));
+
+    expect(character.save).toHaveBeenCalledWith({ kind: 'custom', spec: { ...CHARACTER_TEMPLATES[0]!.spec, glasses: 'glasses' } });
+    expect(await screen.findByTestId('office')).toBeInTheDocument();
+  });
+
+  it('on a later sign-in a saved custom character reopens with its parts', async () => {
+    const user = userEvent.setup();
+    const spec = { ...CHARACTER_TEMPLATES[3]!.spec, earrings: false, build: 'broad' as const };
+    const { port, emit } = fakePort();
+    render(
+      <AuthGate
+        auth={port}
+        displayName={fakeDisplayNamePort()}
+        character={fakeCharacterPort({ outcome: 'ok', avatarId: 'character-custom-x', chosen: true, spec })}
+      >
+        {officeSpy().render}
+      </AuthGate>,
+    );
+    emit(null);
+    await submitLogin(user);
+    await act(async () => emit(ANA));
+
+    const bottom = await screen.findByRole('group', { name: 'Inferior' });
+    expect(within(bottom).getByRole('button', { name: 'Estilo de la parte inferior: Falda' })).toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: 'Superior' })).getByRole('button', { name: 'Estilo de la parte superior: Blazer' })).toBeInTheDocument();
   });
 
   it('on a later sign-in the saved character is preselected', async () => {
@@ -775,7 +827,7 @@ describe('AuthGate: character chosen at the entrance (art migration, step 5)', (
     await submitLogin(user);
     await act(async () => emit(ANA));
 
-    expect(await screen.findByRole('radio', { name: 'Personaje 2' })).toBeChecked();
+    expect(await screen.findByRole('button', { name: 'Plantilla 2' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('a restored session that already chose enters without the selector', async () => {
@@ -790,7 +842,7 @@ describe('AuthGate: character chosen at the entrance (art migration, step 5)', (
     await act(async () => emit(ANA));
 
     expect(await screen.findByTestId('office')).toBeInTheDocument();
-    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /crea tu personaje/i })).not.toBeInTheDocument();
     expect(character.save).not.toHaveBeenCalled();
   });
 
@@ -804,7 +856,7 @@ describe('AuthGate: character chosen at the entrance (art migration, step 5)', (
 
     await act(async () => emit(ANA));
 
-    expect(await screen.findByRole('radiogroup', { name: /elige tu personaje/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /crea tu personaje/i })).toBeInTheDocument();
     expect(screen.queryByTestId('office')).not.toBeInTheDocument();
   });
 

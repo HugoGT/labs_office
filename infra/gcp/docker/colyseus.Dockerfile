@@ -50,6 +50,10 @@ COPY package.json ./
 # `move` is checked against, comes with this same copy.
 COPY server/src ./server/src
 COPY src/game ./src/game
+# The character renderer (src/art): the server draws the sheets of characters
+# built with the creator. server/src/serverImage.test.ts fails when the server
+# imports a file this list does not copy.
+COPY src/art ./src/art
 
 # The art pack manifest, which the server registers in the catalog at start
 # (server/src/directory/fromEnv.ts). Only the JSON: the web image serves the PNGs.

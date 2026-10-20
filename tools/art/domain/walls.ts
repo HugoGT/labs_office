@@ -15,7 +15,7 @@
  * interface with the neighboring piece, and the ring just inside it is lit on its top/left side.
  */
 import { makeRamp, mixRgba, type Ramp } from './color.ts';
-import { PixelBuffer, rgba, type Rgba } from './pixelBuffer.ts';
+import { PixelBuffer, rgba, type Rgba } from '../../../src/art/pixelBuffer.ts';
 import { createRng, type Rng } from './random.ts';
 import {
   BODY_LENGTH,

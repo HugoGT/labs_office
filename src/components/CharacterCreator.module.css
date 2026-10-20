@@ -1,0 +1,290 @@
+/* Same full-screen backdrop and card as LoginScreen: one entrance, two steps. Also the
+   "Mi personaje" dialog of Personalizar, over the office. The whole creator fits one
+   screen (1280x720 and up) with no vertical scroll; narrow phones may scroll. */
+.screen {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0d1117;
+  color: #e5e7eb;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+/* The "Mi personaje" dialog takes the focus itself; its controls show their own ring. */
+.screen:focus {
+  outline: none;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 900px;
+  max-height: 100%;
+  overflow-y: auto;
+  background: #111827f2;
+  border: 1px solid #2b3444;
+  border-radius: var(--radius-panel);
+  padding: 16px 20px;
+  box-shadow: 0 8px 30px #0009;
+}
+
+.title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.subtitle {
+  margin: -6px 0 0;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+/* Templates and whole characters side by side: one scrolling row of thumbnails each. */
+.band {
+  display: flex;
+  gap: 12px;
+}
+
+.templates {
+  flex: 1;
+}
+
+.whole {
+  flex: 0 1 auto;
+  max-width: 34%;
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.rowTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #d1d5db;
+}
+
+.thumbs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px 2px 6px;
+}
+
+.thumb {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.thumb:hover {
+  border-color: #4b5563;
+}
+
+.thumb[aria-pressed='true'] {
+  background: #1e3a8a55;
+  border-color: #3b82f6;
+}
+
+.thumb:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+.layout {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+
+/*
+ * Two rows of parts, in reading order Pelo, Piel, Superior, Inferior, Zapatos,
+ * with Zapatos right under Inferior:
+ *   Pelo     Piel   Inferior
+ *   Superior        Zapatos
+ */
+.parts {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto auto auto;
+  grid-template-areas:
+    'pelo piel inferior'
+    'superior superior zapatos';
+  gap: 8px;
+  align-content: start;
+  justify-content: start;
+}
+
+.pelo {
+  grid-area: pelo;
+}
+
+.piel {
+  grid-area: piel;
+}
+
+.superior {
+  grid-area: superior;
+}
+
+.inferior {
+  grid-area: inferior;
+}
+
+.zapatos {
+  grid-area: zapatos;
+}
+
+.part {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 6px 10px 8px;
+  background: #0d1117;
+  border: 1px solid #2b3444;
+  border-radius: var(--radius-control);
+}
+
+.partLegend {
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sprite {
+  display: block;
+  flex: none;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+
+.preview {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  overflow: hidden;
+  border: 1px solid #2b3444;
+  border-radius: var(--radius-control);
+}
+
+/* The pack's wood floor, tiled at the preview's scale (the size comes inline). */
+.floor {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 200px;
+  padding: 12px 16px;
+  background-repeat: repeat;
+  background-position: center;
+  image-rendering: pixelated;
+}
+
+/* Credit of a contributed character (#122). */
+.credit {
+  margin: 0;
+  padding: 6px 10px 0;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.error {
+  background: #7f1d1d66;
+  border: 1px solid #b91c1c;
+  border-radius: var(--radius-control);
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #fecaca;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.secondary {
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  padding: 9px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.secondary:hover:not(:disabled) {
+  border-color: #4b5563;
+}
+
+.submit {
+  min-width: 200px;
+  background: #1d4ed8;
+  color: #eff6ff;
+  border: 1px solid #3b82f6;
+  border-radius: var(--radius-control);
+  padding: 9px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.submit:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.submit:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Narrow screens: the preview goes above the parts and the buttons span the card. */
+@media (max-width: 760px) {
+  .layout {
+    flex-direction: column-reverse;
+  }
+
+  .band {
+    flex-direction: column;
+  }
+
+  .whole {
+    max-width: none;
+  }
+
+  .parts {
+    grid-template-columns: 1fr;
+    grid-template-areas: none;
+  }
+
+  .parts > * {
+    grid-area: auto;
+  }
+
+  .actions > * {
+    flex: 1;
+  }
+}
