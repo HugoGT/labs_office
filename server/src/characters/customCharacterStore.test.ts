@@ -88,7 +88,7 @@ describe('pgCustomCharacters', () => {
   });
 
   it('reads one row by hash and skips a stored spec that no longer validates', async () => {
-    const pool = fakePool([{ hash: HASH, spec: { ...SPEC, skin: '#000000' }, render_version: 1 }]);
+    const pool = fakePool([{ hash: HASH, spec: { ...SPEC, skin: 'not-a-color' }, render_version: 1 }]);
 
     expect(await createPgCustomCharacters(pool).findCustomCharacter(HASH)).toBeNull();
     expect(squash(pool.queries[0]!.text)).toBe('select spec from custom_characters where hash = $1');

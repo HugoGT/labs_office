@@ -29,8 +29,8 @@ export function createPgCustomCharacters(pool: DirectoryPool): CustomCharacterSt
       const result = await pool.query('SELECT spec FROM custom_characters WHERE hash = $1', [hash]);
       const row = result.rows[0];
       if (!row) return null;
-      // `jsonb` has no shape of its own, and a swatch removed from the lists
-      // makes an old row invalid: such a row is drawn by nobody.
+      // `jsonb` has no shape of its own: a row that does not parse (edited by
+      // hand, or from a future format) is drawn by nobody.
       const parsed = parseCustomCharacterSpec(row.spec);
       return parsed.ok ? parsed.spec : null;
     },

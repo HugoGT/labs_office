@@ -215,7 +215,7 @@ describe('custom characters built with the creator', () => {
   });
 
   it.each([
-    [{ ...SPEC, skin: '#123456' }, 'skin'],
+    [{ ...SPEC, skin: '#12345' }, 'skin'],
     [{ ...SPEC, hair: { style: 'mohawk', color: SPEC.hair.color } }, 'hair.style'],
     ['bob', 'spec'],
   ])('rejects a spec outside the curated options (%j) naming the field, storing nothing', async (spec, field) => {

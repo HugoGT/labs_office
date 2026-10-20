@@ -26,6 +26,15 @@ import {
   type CustomCharacterSpec,
 } from './customCharacter.ts';
 
+function luminance(hex: string): number {
+  const [r, g, b] = [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16) / 255) as [number, number, number];
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrast(a: string, b: string): number {
+  return Math.abs(luminance(a) - luminance(b));
+}
+
 const SPEC: CustomCharacterSpec = {
   build: 'slim',
   skin: SKIN_TONES[2]!.hex,
@@ -39,7 +48,7 @@ const SPEC: CustomCharacterSpec = {
 };
 
 describe('curated options', () => {
-  it('keeps every list unique and within its curated size', () => {
+  it('keeps every preset list unique and within its curated size', () => {
     for (const [list, min, max] of [
       [SKIN_TONES, 6, 8],
       [HAIR_COLORS, 8, 10],
@@ -79,9 +88,21 @@ describe('parseCustomCharacterSpec', () => {
     ]);
   });
 
-  it('accepts upper case colors as the same swatch', () => {
+  it('accepts upper case colors, normalized to lower case', () => {
     const result = parseCustomCharacterSpec({ ...SPEC, skin: SPEC.skin.toUpperCase() });
     expect(result).toEqual({ ok: true, spec: SPEC });
+  });
+
+  it('accepts any rgb color, presets being only suggestions', () => {
+    const spec = {
+      ...SPEC,
+      skin: '#123456',
+      hair: { style: 'bob', color: '#00FF7f' },
+      top: { style: 'suit', color: '#000000' },
+      bottom: { style: 'pants', color: '#ffffff' },
+      shoes: { style: 'dress', color: '#abcdef' },
+    };
+    expect(parseCustomCharacterSpec(spec)).toEqual({ ok: true, spec: { ...spec, hair: { style: 'bob', color: '#00ff7f' } } });
   });
 
   it.each([
@@ -89,16 +110,19 @@ describe('parseCustomCharacterSpec', () => {
     ['spec', 'spec'],
     [[], 'spec'],
     [{ ...SPEC, build: 'tall' }, 'build'],
-    [{ ...SPEC, skin: '#123456' }, 'skin'],
+    [{ ...SPEC, skin: '#12345' }, 'skin'],
+    [{ ...SPEC, skin: '#1234567' }, 'skin'],
+    [{ ...SPEC, skin: 'red' }, 'skin'],
+    [{ ...SPEC, skin: '123456' }, 'skin'],
     [{ ...SPEC, hair: 'bob' }, 'hair'],
     [{ ...SPEC, hair: { style: 'mohawk', color: SPEC.hair.color } }, 'hair.style'],
-    [{ ...SPEC, hair: { style: 'bob', color: '#000001' } }, 'hair.color'],
+    [{ ...SPEC, hair: { style: 'bob', color: '#00000g' } }, 'hair.color'],
     [{ ...SPEC, top: { style: 'hoodie', color: SPEC.top.color } }, 'top.style'],
-    [{ ...SPEC, top: { style: 'suit', color: SKIN_TONES[0]!.hex } }, 'top.color'],
+    [{ ...SPEC, top: { style: 'suit', color: 'rgb(1,2,3)' } }, 'top.color'],
     [{ ...SPEC, bottom: { style: 'shorts', color: SPEC.bottom.color } }, 'bottom.style'],
     [{ ...SPEC, bottom: { style: 'pants', color: 42 } }, 'bottom.color'],
     [{ ...SPEC, shoes: { style: 'boots', color: SPEC.shoes.color } }, 'shoes.style'],
-    [{ ...SPEC, shoes: { style: 'dress', color: '#ffffff' } }, 'shoes.color'],
+    [{ ...SPEC, shoes: { style: 'dress', color: ' #ffffff' } }, 'shoes.color'],
     [{ ...SPEC, accessory: 'umbrella' }, 'accessory'],
     [{ ...SPEC, glasses: 'yes' }, 'glasses'],
     [{ ...SPEC, glasses: 1 }, 'glasses'],
@@ -150,6 +174,18 @@ describe('toCharacterSpec', () => {
       palette: { skin: SPEC.skin, hair: SPEC.hair.color, top: SPEC.top.color, bottom: SPEC.bottom.color, shoes: SPEC.shoes.color },
     });
     expect(spec.palette.inner).not.toBe(SPEC.top.color);
+  });
+
+  it.each(['#000000', '#ffffff', '#f3efe6', '#808080', '#ff00ff'])('derives a shirt and tie that stand out from a %s jacket', (color) => {
+    const spec = toCharacterSpec({ ...SPEC, top: { style: 'suit', color } });
+    expect(contrast(spec.palette.inner, color)).toBeGreaterThan(0.3);
+    expect(spec.palette.tie).toMatch(/^#[0-9a-f]{6}$/);
+    expect(spec.palette.tie).not.toBe(color);
+  });
+
+  it('keeps the scrunchie apart from hair of the same yellow', () => {
+    const yellow = toCharacterSpec({ ...SPEC, hair: { style: 'ponytail', color: '#f2c230' } });
+    expect(yellow.palette.scrunchie).not.toBe('#f2c230');
   });
 
   it('uses the top color as the shirt itself when there is no jacket', () => {
@@ -204,11 +240,18 @@ describe('templates', () => {
     }
   });
 
-  it('keeps the exact colors of a base character whose colors are curated', () => {
-    const base = BASE_CHARACTERS[0]!;
-    const template = templateFromBase(base);
-    expect(template.skin).toBe(base.palette.skin);
-    expect(template.top.color).toBe(base.palette.top);
+  it('keeps the exact colors of every base character, and its darker hair', () => {
+    for (const base of BASE_CHARACTERS) {
+      const template = templateFromBase(base);
+      expect(template).toMatchObject({
+        skin: base.palette.skin,
+        hair: { color: base.palette.hair },
+        top: { color: base.palette.top },
+        bottom: { color: base.palette.bottom },
+        shoes: { color: base.palette.shoes },
+      });
+      expect(toCharacterSpec(template).darkerHair, base.id).toBe(base.darkerHair ?? false);
+    }
   });
 
   it('names each template after its base character', () => {

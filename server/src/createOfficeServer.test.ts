@@ -2036,7 +2036,7 @@ describe('custom character routes (creator)', () => {
     const res = await fetch(`${url}/me/avatar`, {
       method: 'POST',
       headers: BEARER,
-      body: JSON.stringify({ spec: { ...SPEC, skin: '#123456' } }),
+      body: JSON.stringify({ spec: { ...SPEC, skin: 'red' } }),
     });
 
     expect(res.status).toBe(400);
