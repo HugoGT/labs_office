@@ -1594,25 +1594,16 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
   });
 
   async function openSidebar(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-    // "Editar escritorios"/"Editar salas" migraron al panel "Personalizar":
-    // ya no viven bajo "Personas conectadas".
+    // "Editar espacios" vive en el panel "Personalizar", no bajo "Personas conectadas".
     await user.click(screen.getByRole('button', { name: /Personalizar/ }));
   }
 
-  it('con rol admin, la seccion de escritorios se ofrece en el sidebar', async () => {
+  it('con rol admin, "Editar espacios" (escritorios y salas) se ofrece en el sidebar', async () => {
     const user = userEvent.setup();
     render(<OfficeShell session={SESION} />);
     await openSidebar(user);
 
-    expect(await screen.findByRole('button', { name: /Editar escritorios/ })).toBeInTheDocument();
-  });
-
-  it('con rol admin, la seccion de salas TAMBIEN se ofrece en el sidebar (#74, PR4)', async () => {
-    const user = userEvent.setup();
-    render(<OfficeShell session={SESION} />);
-    await openSidebar(user);
-
-    expect(await screen.findByRole('button', { name: /Editar salas/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Editar espacios' })).toBeInTheDocument();
   });
 
   it('entrar en modo edicion de SALAS tambien cierra el editor de decoracion (#74, PR4)', async () => {
@@ -1629,7 +1620,7 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
       expect(await screen.findByRole('dialog', { name: /Mesa 4/ })).toBeInTheDocument();
 
       await openSidebar(user);
-      await user.click(await screen.findByRole('button', { name: /Editar salas/ }));
+      await user.click(await screen.findByRole('button', { name: 'Editar espacios' }));
 
       expect(screen.queryByRole('heading', { name: 'Salas' })).not.toBeInTheDocument();
       expect(screen.getByRole('dialog', { name: /Mesa 4/ })).toBeInTheDocument();
@@ -1641,9 +1632,11 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
       });
       await screen.findByRole('heading', { name: 'Salas' });
       await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      await user.click(screen.getByRole('button', { name: 'Editar salas' }));
+      await screen.findByText(/Nombre de la nueva sala/);
 
       await user.click(screen.getByRole('button', { name: 'Salir' }));
-      expect(screen.getByRole('button', { name: 'Editar salas' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Editar espacios' })).toBeInTheDocument();
       expect(screen.queryByRole('heading', { name: 'Salas' })).not.toBeInTheDocument();
     } finally {
       resolveEditor();
@@ -1663,7 +1656,7 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
     expect(await screen.findByRole('dialog', { name: /Mesa 4/ })).toBeInTheDocument();
 
     await openSidebar(user);
-    await user.click(await screen.findByRole('button', { name: /Editar escritorios/ }));
+    await user.click(await screen.findByRole('button', { name: 'Editar espacios' }));
 
     await screen.findByRole('heading', { name: 'Escritorios' });
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
@@ -1687,7 +1680,7 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
     render(<OfficeShell session={SESION} />);
     const bridge = createGameMock.mock.calls[0][1];
     await openSidebar(user);
-    await user.click(await screen.findByRole('button', { name: /Editar escritorios/ }));
+    await user.click(await screen.findByRole('button', { name: 'Editar espacios' }));
     expect(screen.getByRole('button', { name: /Salir/ })).toBeInTheDocument();
     await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
     await act(async () => {});
@@ -1704,7 +1697,7 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
     render(<OfficeShell session={SESION} />);
     const bridge = createGameMock.mock.calls[0][1];
     await openSidebar(user);
-    await user.click(await screen.findByRole('button', { name: /Editar escritorios/ }));
+    await user.click(await screen.findByRole('button', { name: 'Editar espacios' }));
     await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
 
     act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
@@ -1728,7 +1721,8 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
     render(<OfficeShell session={SESION} />);
     const bridge = createGameMock.mock.calls[0][1];
     await openSidebar(user);
-    await user.click(await screen.findByRole('button', { name: /Editar salas/ }));
+    await user.click(await screen.findByRole('button', { name: 'Editar espacios' }));
+    await user.click(await screen.findByRole('button', { name: 'Editar salas' }));
     expect(screen.getByRole('button', { name: /Salir/ })).toBeInTheDocument();
     await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
     await act(async () => {});

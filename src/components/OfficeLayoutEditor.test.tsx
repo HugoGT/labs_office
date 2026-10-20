@@ -11,7 +11,7 @@ const MESA: AdminDesk = { id: 'id-mesa', label: 'Mesa 4', x: 10, y: 10, w: 3, h:
 const SALA: AdminSpace = { id: 'id-sala', name: 'Sala grande', x: 0, y: 0, w: 4, h: 4, capacity: null, kind: 'room' };
 
 describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
-  it.each(['desk', 'room', 'terrain', 'collision'] as const)('unmounting %s clears editing and its bridge mode', async (section) => {
+  it.each(['spaces', 'terrain', 'collision'] as const)('unmounting %s clears editing and its bridge mode', async (section) => {
     const bridge = createOfficeBridge();
     const command = section === 'terrain' ? 'terrainedit' : section === 'collision' ? 'collisionedit' : 'layoutedit';
     const commands: unknown[] = [];
@@ -31,20 +31,50 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
     expect(commands.at(-1)).toBeNull();
   });
 
-  it('changing the selected section closes the old overlay before opening the new one', async () => {
+  it('"Editar espacios" opens the desks first, with the rooms after them, and one exit for both', async () => {
+    const bridge = createOfficeBridge();
+    const onExit = vi.fn();
+    const onEditingChange = vi.fn();
+    const props = { bridge, desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn(), onEditingChange, onExit };
+    render(<OfficeLayoutEditor {...props} section="spaces" />);
+
+    expect(await screen.findByText('Mesa 4')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Editar espacios' })).toBeInTheDocument();
+    const headings = screen.getAllByRole('heading').map((heading) => heading.textContent);
+    expect(headings.indexOf('Escritorios')).toBeLessThan(headings.indexOf('Salas'));
+    expect(screen.getByRole('button', { name: 'Crear escritorio' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Editar salas' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Salir' })).toHaveLength(1);
+    expect(onEditingChange).toHaveBeenLastCalledWith(true);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Salir' }));
+    expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it('inside "Editar espacios", entering the rooms closes the desk overlay before opening theirs, and back', async () => {
     const bridge = createOfficeBridge();
     const commands: unknown[] = [];
     bridge.onCommand('layoutedit', (value) => commands.push(value));
-    const props = { bridge, desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn(), onEditingChange: vi.fn() };
-    const { rerender } = render(<OfficeLayoutEditor {...props} section="desk" />);
+    const onEditingChange = vi.fn();
+    const props = { bridge, desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn(), onEditingChange };
+    render(<OfficeLayoutEditor {...props} section="spaces" />);
     await screen.findByText('Mesa 4');
     commands.length = 0;
-    rerender(<OfficeLayoutEditor {...props} section="room" />);
+    onEditingChange.mockClear();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Editar salas' }));
+
     await screen.findByText('Sala grande');
     expect(commands[0]).toBeNull();
     await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }] }));
-    expect(props.onEditingChange).toHaveBeenLastCalledWith(true);
+    expect(onEditingChange).not.toHaveBeenCalledWith(false);
     expect(screen.queryByText('Mesa 4')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Editar escritorios' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Editar escritorios' }));
+    expect(await screen.findByText('Mesa 4')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Editar salas' })).toBeInTheDocument();
+    expect(onEditingChange).not.toHaveBeenCalledWith(false);
   });
 
   it.each(['terrain', 'collision'] as const)('removing the selected %s port unmounts its editing owner', async (section) => {

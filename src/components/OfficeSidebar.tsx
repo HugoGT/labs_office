@@ -142,7 +142,7 @@ export function OfficeSidebar({
   useEffect(() => {
     if (forceExitLayoutEditing) {
       // A rising edge gives the map to another editor without trapping navigation.
-      setSection((current) => current === 'desk' || current === 'room' || current === 'terrain' || current === 'collision' ? null : current);
+      setSection((current) => current === 'spaces' || current === 'terrain' || current === 'collision' ? null : current);
     }
   }, [forceExitLayoutEditing]);
 
@@ -159,8 +159,7 @@ export function OfficeSidebar({
 
   const entries: { section: PersonalizeSection; label: string }[] = [
     ...(canAdminister ? [
-      { section: 'desk' as const, label: 'Editar escritorios' },
-      { section: 'room' as const, label: 'Editar salas' },
+      { section: 'spaces' as const, label: 'Editar espacios' },
       ...(terrain ? [{ section: 'terrain' as const, label: 'Editar terreno' }] : []),
       ...(collisions ? [{ section: 'collision' as const, label: 'Editar colisiones' }] : []),
       ...(assets ? [{ section: 'assets' as const, label: 'Catálogo de decoración' }] : []),
@@ -172,7 +171,7 @@ export function OfficeSidebar({
   // Drop unavailable selections immediately, not just hide them until a port returns.
   if (!available) setSection(null);
   const currentSection = available ? section : null;
-  const layoutSection = currentSection === 'desk' || currentSection === 'room' || currentSection === 'terrain' || currentSection === 'collision'
+  const layoutSection = currentSection === 'spaces' || currentSection === 'terrain' || currentSection === 'collision'
     ? currentSection : null;
 
   function togglePanel(panel: 'personalize' | 'people'): void {

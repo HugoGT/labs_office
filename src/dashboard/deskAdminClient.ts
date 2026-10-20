@@ -76,9 +76,9 @@ function toAdminDesk(raw: unknown): AdminDesk | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const row = raw as Record<string, unknown>;
 
-  // Sin `id` no se puede mover ni borrar, y sin `label` no se puede nombrar en
-  // la tabla lo que se esta a punto de tocar.
-  if (!isNonEmptyString(row.id) || !isNonEmptyString(row.label)) return null;
+  // Sin `id` no se puede mover ni borrar. The label may be empty: a desk is
+  // created empty since "Editar espacios".
+  if (!isNonEmptyString(row.id) || typeof row.label !== 'string') return null;
   if (!isFiniteNumber(row.x) || !isFiniteNumber(row.y)) return null;
   if (!isFiniteNumber(row.w) || !isFiniteNumber(row.h)) return null;
 
@@ -138,20 +138,9 @@ export function createDeskAdminClient(
 
     async createDesk(input: CreateDeskInput): Promise<AdminDesk> {
       // Se manda solo lo que el servidor lee. Ni `id` ni `occupantId`: el id lo
-      // genera la base de datos y quien se sienta lo decide esa persona.
-      // The appearance travels under the names `GET /desks` serves. A null
-      // color is left out rather than sent: the server reads "no color" as
-      // the material's own look or its default color, which is what it means.
-      const appearance =
-        input.appearance === undefined
-          ? {}
-          : {
-              materialId: input.appearance.materialId,
-              ...(input.appearance.color === null ? {} : { color: input.appearance.color }),
-            };
-      return parseAdminDesk(
-        await request('/admin/desks', jsonBody({ label: input.label, x: input.x, y: input.y, ...appearance })),
-      );
+      // genera la base de datos y quien se sienta lo decide esa persona. Nor a
+      // label or a material: a desk is created empty (Editar espacios).
+      return parseAdminDesk(await request('/admin/desks', jsonBody({ x: input.x, y: input.y })));
     },
 
     async updateDesk(id: string, input: UpdateDeskInput): Promise<AdminDesk> {

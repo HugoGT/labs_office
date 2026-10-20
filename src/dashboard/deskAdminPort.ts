@@ -34,7 +34,7 @@ export interface AdminDeskOccupant {
 
 export interface AdminDesk {
   id: string;
-  /** Como lo llama la oficina ("Mesa 4"). Se pinta en el mapa. */
+  /** Como lo llama la oficina ("Mesa 4"); `''` for a desk created empty. */
   label: string;
   /** Origen en TILES. Ver la cabecera. */
   x: number;
@@ -49,33 +49,12 @@ export interface AdminDesk {
   occupant: AdminDeskOccupant | null;
 }
 
-/**
- * Material (an art pack desk id) and color, chosen only at creation (art
- * migration, step 7). `color` is `null` for a material that keeps its own
- * look; the server checks the pair against the catalog.
- */
-export interface AdminAppearance {
-  materialId: string;
-  color: string | null;
-}
-
+/** A desk is created empty (Editar espacios): its position is all it takes. */
 export interface CreateDeskInput {
-  label: string;
   x: number;
   y: number;
-  /** Absent: the pack default. There is no way to change it afterwards. */
-  appearance?: AdminAppearance;
 }
 
-/**
- * Cambio PARCIAL: renombrar sin mover y mover sin renombrar son dos peticiones
- * distintas. El servidor copia solo las claves presentes, asi que mandar la
- * posicion al renombrar devolveria el escritorio a la ultima que se leyo si
- * alguien lo movio mientras tanto.
- *
- * `x` e `y` van juntas o no van: media coordenada no es una posicion, y el
- * servidor la rechaza con un 400.
- */
 export interface UpdateDeskInput {
   // No appearance on purpose: the server refuses it with `appearance-immutable`.
   label?: string;

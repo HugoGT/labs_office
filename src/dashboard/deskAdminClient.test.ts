@@ -98,17 +98,18 @@ describe('createDeskAdminClient: contrato del servidor', () => {
     expect(desk.occupant).toEqual({ id: 'user-7', displayName: 'Ana' });
   });
 
-  it('crea con POST /admin/desks y solo con lo que el servidor lee', async () => {
-    const fetchImpl = fetchWith(201, SERVED_DESK);
+  it('crea con POST /admin/desks un escritorio vacio: solo la posicion (Editar espacios)', async () => {
+    const fetchImpl = fetchWith(201, { ...SERVED_DESK, label: '' });
 
-    await clientWith(fetchImpl).createDesk({ label: 'Mesa 4', x: 6, y: 9 });
+    const created = await clientWith(fetchImpl).createDesk({ x: 6, y: 9 });
 
     const [url, init] = fetchImpl.mock.calls[0];
     expect(url).toBe('http://localhost:2567/admin/desks');
     expect(init?.method).toBe('POST');
     // Ni `id` ni `occupantId`: el id lo genera la base de datos y quien se
-    // sienta lo decide esa persona. Quien administra no reparte sitios.
-    expect(sentBody(fetchImpl)).toEqual({ label: 'Mesa 4', x: 6, y: 9 });
+    // sienta lo decide esa persona. Ni etiqueta ni material: un escritorio nace vacio.
+    expect(sentBody(fetchImpl)).toEqual({ x: 6, y: 9 });
+    expect(created.label).toBe('');
   });
 
   it('mover y renombrar son dos peticiones distintas, no una con huecos', async () => {
@@ -170,13 +171,13 @@ describe('createDeskAdminClient: como cuenta los fallos', () => {
     // la frase de un correo repetido.
     const client = clientWith(fetchWith(409, { error: 'desk-overlap' }));
 
-    expect(await codeOf(client.createDesk({ label: 'Mesa 4', x: 6, y: 9 }))).toBe('desk-overlap');
+    expect(await codeOf(client.createDesk({ x: 6, y: 9 }))).toBe('desk-overlap');
   });
 
   it('un escritorio que pisa una sala es su propio 409, distinto del solape entre escritorios (#10, S2 3.5)', async () => {
     const client = clientWith(fetchWith(409, { error: 'desk-space-overlap' }));
 
-    expect(await codeOf(client.createDesk({ label: 'Mesa 4', x: 6, y: 9 }))).toBe(
+    expect(await codeOf(client.createDesk({ x: 6, y: 9 }))).toBe(
       'desk-space-overlap',
     );
   });
@@ -184,14 +185,14 @@ describe('createDeskAdminClient: como cuenta los fallos', () => {
   it('a desk over a painted wall is its own 409, on creation and on a move', async () => {
     const client = clientWith(fetchWith(409, { error: 'desk-on-wall' }));
 
-    expect(await codeOf(client.createDesk({ label: 'Mesa 4', x: 6, y: 9 }))).toBe('desk-on-wall');
+    expect(await codeOf(client.createDesk({ x: 6, y: 9 }))).toBe('desk-on-wall');
     expect(await codeOf(client.updateDesk('desk-1', { x: 6, y: 9 }))).toBe('desk-on-wall');
   });
 
   it('a desk over a placed chair is its own 409, on creation and on a move', async () => {
     const client = clientWith(fetchWith(409, { error: 'desk-on-chair' }));
 
-    expect(await codeOf(client.createDesk({ label: 'Mesa 4', x: 6, y: 9 }))).toBe('desk-on-chair');
+    expect(await codeOf(client.createDesk({ x: 6, y: 9 }))).toBe('desk-on-chair');
     expect(await codeOf(client.updateDesk('desk-1', { x: 6, y: 9 }))).toBe('desk-on-chair');
   });
 
@@ -201,7 +202,7 @@ describe('createDeskAdminClient: como cuenta los fallos', () => {
     // frecuente de las dos que puede dar `createDesk`.
     const client = clientWith(fetchWith(409, { error: 'space-owned-by-desk' }));
 
-    expect(await codeOf(client.createDesk({ label: 'Mesa 4', x: 6, y: 9 }))).toBe('desk-overlap');
+    expect(await codeOf(client.createDesk({ x: 6, y: 9 }))).toBe('desk-overlap');
   });
 
   it('un 409 sin cuerpo JSON legible tambien cae al primero de la lista', async () => {
@@ -215,7 +216,7 @@ describe('createDeskAdminClient: como cuenta los fallos', () => {
       })) as unknown as typeof fetch,
     );
 
-    expect(await codeOf(client.createDesk({ label: 'Mesa 4', x: 6, y: 9 }))).toBe('desk-overlap');
+    expect(await codeOf(client.createDesk({ x: 6, y: 9 }))).toBe('desk-overlap');
   });
 
   it('un id que ya no existe es un 404 y se cuenta como tal', async () => {
@@ -293,28 +294,7 @@ describe('createDeskAdminClient: como cuenta los fallos', () => {
   });
 });
 
-describe('createDeskAdminClient: appearance chosen at creation (art step 7)', () => {
-  it('sends the chosen material and color with the new desk, under the names GET /desks serves', async () => {
-    const fetchImpl = fetchWith(201, SERVED_DESK);
-
-    await clientWith(fetchImpl).createDesk({
-      label: 'Mesa 4',
-      x: 6,
-      y: 9,
-      appearance: { materialId: 'desk-painted', color: '#c0392b' },
-    });
-
-    expect(sentBody(fetchImpl)).toEqual({ label: 'Mesa 4', x: 6, y: 9, materialId: 'desk-painted', color: '#c0392b' });
-  });
-
-  it('a material without a color sends no color, so the server keeps the material look', async () => {
-    const fetchImpl = fetchWith(201, SERVED_DESK);
-
-    await clientWith(fetchImpl).createDesk({ label: 'Mesa 4', x: 6, y: 9, appearance: { materialId: 'desk-glass', color: null } });
-
-    expect(sentBody(fetchImpl)).toEqual({ label: 'Mesa 4', x: 6, y: 9, materialId: 'desk-glass' });
-  });
-
+describe('createDeskAdminClient: appearance errors an older server may still answer', () => {
   it.each([
     ['unknown-piece', 'appearance-unknown-piece'],
     ['retired-piece', 'appearance-retired-piece'],
@@ -323,7 +303,7 @@ describe('createDeskAdminClient: appearance chosen at creation (art step 7)', ()
   ] as const)('a refused %s choice is its own reason, not a generic invalid request', async (reason, code) => {
     const client = clientWith(fetchWith(400, { error: 'invalid-appearance', reason }));
 
-    expect(await codeOf(client.createDesk({ label: 'Mesa 4', x: 6, y: 9 }))).toBe(code);
+    expect(await codeOf(client.createDesk({ x: 6, y: 9 }))).toBe(code);
   });
 
   it('an update that touches the appearance is refused as appearance-immutable', async () => {

@@ -2784,6 +2784,18 @@ describe('OfficeScene: config de espacios servida (#7, slice 3)', () => {
     await vi.waitFor(() => expect(rooms.at(-1)?.spaceId).toBe(SERVIDO.id), LOOP_WAIT);
   });
 
+  it('names the cubicle of an empty desk "Escritorio": it has no label (Editar espacios)', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const rooms: { spaceId: string | null; name: string | null }[] = [];
+    bridge.on('room', (payload) => rooms.push(payload));
+
+    bridge.emitCommand('spacesconfig', { spaces: [{ ...SERVIDO, name: '' }], version: 'cubiculo' });
+
+    await advanceGameClock(scene, 600);
+    await vi.waitFor(() => expect(rooms.at(-1)).toEqual({ spaceId: SERVIDO.id, name: 'Escritorio' }), LOOP_WAIT);
+  });
+
   it('adopts a config that arrived before the scene finished loading (#144)', async () => {
     // React emits the served config as soon as `/spaces` answers, which can
     // be before `preload()` is done with the art pack. Lost, the scene kept the

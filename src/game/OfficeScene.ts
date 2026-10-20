@@ -2094,7 +2094,8 @@ export class OfficeScene extends Phaser.Scene {
     const spaceId = space?.id ?? null;
     if (spaceId !== this.currentSpaceId) {
       this.currentSpaceId = spaceId;
-      this.bridge.emit('room', { spaceId, name: space?.name ?? null });
+      // A desk created empty has no label, nor does its cubicle (Editar espacios).
+      this.bridge.emit('room', { spaceId, name: space === undefined || space === null ? null : space.name || 'Escritorio' });
     }
 
     this.emitVoice(selfSessionId, peers, spaceId);

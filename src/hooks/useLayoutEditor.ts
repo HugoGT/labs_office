@@ -46,7 +46,7 @@
 
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { describeAdminError } from '../dashboard/adminErrors';
-import type { AdminAppearance, AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
+import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { AdminSpace, SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import {
   OFF_STATE,
@@ -82,11 +82,10 @@ export interface UseLayoutEditorResult {
   enter: () => void;
   exit: () => void;
   /**
-   * Pide crear uno nuevo con esta etiqueta; el ghost de colocacion sigue a
-   * continuacion. `appearance` is chosen here and only here (art step 7);
-   * absent, the server stores the pack default.
+   * Pide crear uno nuevo; el ghost de colocacion sigue a continuacion. A
+   * desk is created empty (Editar espacios): no label, no material.
    */
-  startCreate: (label: string, appearance?: AdminAppearance) => void;
+  startCreate: () => void;
   startMove: () => void;
   cancelPlacing: () => void;
   /** Selecciona un escritorio existente por id, igual que un `layoutpick` del mapa (misma accion del reductor). */
@@ -121,10 +120,6 @@ export function useLayoutEditor({
   const [roomObstacles, setRoomObstacles] = useState<readonly AdminSpace[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  /** La etiqueta pedida para el proximo `createDesk`, guardada fuera del reductor: no tiene sitio propio en `EditorState`. */
-  const pendingLabelRef = useRef<string | null>(null);
-  /** Same reason as `pendingLabelRef`: the appearance asked for the next `createDesk`. */
-  const pendingAppearanceRef = useRef<AdminAppearance | undefined>(undefined);
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -154,15 +149,13 @@ export function useLayoutEditor({
     () =>
       bridge.on('layoutplace', ({ tx, ty, valid }) => {
         // Invalido: el ghost se queda donde esta, para que se pueda
-        // reintentar sin perder ni la etiqueta pedida ni la seleccion.
+        // reintentar sin perder la seleccion.
         if (!valid) return;
 
         const current = stateRef.current;
         if (current.tag !== 'placing') return;
 
         const moveId = current.mode === 'move' ? current.id : null;
-        const label = pendingLabelRef.current ?? '';
-        const appearance = pendingAppearanceRef.current;
 
         dispatch({ type: 'confirmPlacement' });
         setError(null);
@@ -173,10 +166,8 @@ export function useLayoutEditor({
             if (moveId !== null) {
               await desks.updateDesk(moveId, { x: tx, y: ty });
             } else {
-              await desks.createDesk({ label, x: tx, y: ty, ...(appearance === undefined ? {} : { appearance }) });
+              await desks.createDesk({ x: tx, y: ty });
             }
-            pendingLabelRef.current = null;
-            pendingAppearanceRef.current = undefined;
             dispatch({ type: 'saveSucceeded' });
             refreshDesks();
             refreshSpaces();
@@ -186,7 +177,7 @@ export function useLayoutEditor({
           } catch (err) {
             // Fallo del servidor: se cuenta con `describeAdminError` y NO se
             // relee nada -- nada cambio que valga la pena volver a leer, y
-            // releer perderia la etiqueta/seleccion sin necesidad.
+            // releer perderia la seleccion sin necesidad.
             setError(describeAdminError(err));
             dispatch({ type: 'saveFailed' });
           } finally {
@@ -203,15 +194,11 @@ export function useLayoutEditor({
   }, []);
 
   const exit = useCallback(() => {
-    pendingLabelRef.current = null;
-    pendingAppearanceRef.current = undefined;
     setError(null);
     dispatch({ type: 'exit' });
   }, []);
 
-  const startCreate = useCallback((label: string, appearance?: AdminAppearance) => {
-    pendingLabelRef.current = label;
-    pendingAppearanceRef.current = appearance;
+  const startCreate = useCallback(() => {
     setError(null);
     dispatch({ type: 'startCreate' });
   }, []);
@@ -222,8 +209,6 @@ export function useLayoutEditor({
   }, []);
 
   const cancelPlacing = useCallback(() => {
-    pendingLabelRef.current = null;
-    pendingAppearanceRef.current = undefined;
     dispatch({ type: 'cancelPlacing' });
   }, []);
 

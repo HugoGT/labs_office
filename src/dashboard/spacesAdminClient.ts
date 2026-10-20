@@ -52,7 +52,9 @@ function toAdminSpace(raw: unknown): AdminSpace | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const row = raw as Record<string, unknown>;
 
-  if (!isNonEmptyString(row.id) || !isNonEmptyString(row.name)) return null;
+  // A room always has a name; the cubicle of a desk created empty has none (Editar espacios).
+  if (!isNonEmptyString(row.id) || typeof row.name !== 'string') return null;
+  if (row.name === '' && row.kind !== 'desk') return null;
   if (!isFiniteNumber(row.x) || !isFiniteNumber(row.y)) return null;
   if (!isFiniteNumber(row.w) || !isFiniteNumber(row.h)) return null;
   // `null` es un dato ("sin limite"), no un hueco: el servidor lo sirve

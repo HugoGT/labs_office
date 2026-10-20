@@ -1,0 +1,28 @@
+/* "Editar espacios": desks and rooms under one header, same vocabulary as DeskEditorSection.module.css. */
+.spaces {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #e5e7eb;
+}
+
+.exit {
+  background: transparent;
+  color: #9ca3af;
+  border: none;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
