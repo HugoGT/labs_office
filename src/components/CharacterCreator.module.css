@@ -18,7 +18,7 @@
   flex-direction: column;
   gap: 14px;
   width: 100%;
-  max-width: 1040px;
+  max-width: 820px;
   max-height: 100%;
   overflow-y: auto;
   background: #111827f2;
@@ -96,9 +96,9 @@
 .parts {
   flex: 1;
   min-width: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .part {
@@ -127,6 +127,46 @@
   border: none;
 }
 
+/* A labelled select: the long option lists, one row each. */
+.field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field .choiceLegend {
+  margin: 0;
+  min-width: 44px;
+}
+
+.select {
+  flex: 1;
+  min-width: 0;
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  padding: 4px 8px;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.select:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+/* Extras and Lentes side by side in "Superior". */
+.pair {
+  display: flex;
+  gap: 12px;
+}
+
+.pair > .field {
+  flex: 1;
+  min-width: 0;
+}
+
 .choiceLegend {
   padding: 0;
   margin-bottom: 4px;
@@ -134,31 +174,12 @@
   color: #9ca3af;
 }
 
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
 
-.chip {
-  position: relative;
-  padding: 4px 8px;
-  font-size: 12px;
-  background: #1f2937;
-  border: 1px solid #374151;
-  border-radius: var(--radius-control);
-  cursor: pointer;
-}
 
-.chip:hover,
 .swatch:hover {
   border-color: #4b5563;
 }
 
-.chip:has(.radio:checked) {
-  background: #1e3a8a55;
-  border-color: #3b82f6;
-}
 
 .swatches {
   display: flex;
@@ -188,7 +209,6 @@
   border: 1px solid #0006;
 }
 
-.chip:has(.radio:focus-visible),
 .swatch:has(.radio:focus-visible) {
   outline: 2px solid #93c5fd;
   outline-offset: 2px;
@@ -205,18 +225,7 @@
   white-space: nowrap;
 }
 
-.checks {
-  display: flex;
-  gap: 16px;
-}
 
-.check {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  cursor: pointer;
-}
 
 .sprite {
   display: block;
@@ -225,21 +234,7 @@
   image-rendering: pixelated;
 }
 
-.walking {
-  animation: walk 1s steps(var(--sprite-steps)) infinite;
-}
 
-@keyframes walk {
-  to {
-    background-position-x: var(--sprite-travel);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .walking {
-    animation: none;
-  }
-}
 
 .preview {
   position: sticky;
@@ -247,8 +242,9 @@
   flex: none;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 8px;
-  padding: 12px;
+  padding: 16px;
   background: #0d1117;
   border: 1px solid #2b3444;
   border-radius: var(--radius-control);
@@ -261,24 +257,8 @@
   opacity: 0.75;
 }
 
-.poses {
-  display: flex;
-  gap: 12px;
-  align-items: flex-end;
-}
 
-.pose {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  margin: 0;
-}
 
-.caption {
-  font-size: 11px;
-  color: #9ca3af;
-}
 
 .error {
   background: #7f1d1d66;
@@ -342,8 +322,13 @@
     position: static;
   }
 
-  .poses {
-    justify-content: center;
+  .preview {
+    align-items: center;
+  }
+
+  .pair {
+    flex-direction: column;
+    gap: 8px;
   }
 
   .actions > * {

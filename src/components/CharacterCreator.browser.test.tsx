@@ -19,7 +19,7 @@ function opaquePixels(canvas: HTMLCanvasElement): number {
 }
 
 describe('CharacterCreator in a browser', () => {
-  it('draws the character being built on its preview canvases and redraws it after a change', async () => {
+  it('draws the character being built on its preview canvas and redraws it after a change', async () => {
     const user = userEvent.setup();
     render(
       <CharacterCreator
@@ -35,13 +35,11 @@ describe('CharacterCreator in a browser', () => {
     );
 
     const preview = screen.getByRole('region', { name: 'Vista previa' });
-    const idle = within(preview).getByRole('img', { name: 'Tu personaje en reposo' }) as HTMLCanvasElement;
-    const seated = within(preview).getByRole('img', { name: 'Tu personaje en su silla' }) as HTMLCanvasElement;
+    const idle = within(preview).getByRole('img', { name: 'Tu personaje' }) as HTMLCanvasElement;
     await vi.waitFor(() => expect(opaquePixels(idle)).toBeGreaterThan(100));
-    expect(opaquePixels(seated)).toBeGreaterThan(100);
     const before = idle.getContext('2d')!.getImageData(0, 0, idle.width, idle.height).data.slice();
 
-    await user.click(within(screen.getByRole('group', { name: 'Parte superior' })).getByRole('radio', { name: 'Blanco' }));
+    await user.click(within(screen.getByRole('group', { name: 'Superior' })).getByRole('radio', { name: 'Blanco' }));
 
     await vi.waitFor(() => {
       const after = idle.getContext('2d')!.getImageData(0, 0, idle.width, idle.height).data;

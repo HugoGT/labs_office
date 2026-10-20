@@ -31,8 +31,8 @@ describe('MyCharacterSection', () => {
     render(<MyCharacterSection character={fakePort({ outcome: 'ok', avatarId: 'character-custom-x', chosen: true, spec: SPEC })} onClose={vi.fn()} />);
 
     const dialog = await screen.findByRole('dialog', { name: 'Mi personaje' });
-    const top = within(dialog).getByRole('group', { name: 'Parte superior' });
-    expect(within(top).getByRole('radio', { name: 'Traje con corbata' })).toBeChecked();
+    const top = within(dialog).getByRole('group', { name: 'Superior' });
+    expect(within(top).getByRole('combobox', { name: 'Estilo' })).toHaveDisplayValue('Traje con corbata');
   });
 
   it('opens on a saved pack character as its pressed template', async () => {
@@ -52,16 +52,16 @@ describe('MyCharacterSection', () => {
     render(<MyCharacterSection character={port} onClose={vi.fn()} />);
 
     const dialog = await screen.findByRole('dialog', { name: 'Mi personaje' });
-    await user.click(within(dialog).getByRole('checkbox', { name: 'Gafas' }));
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Lentes' }), 'Lentes de sol');
     await user.click(within(dialog).getByRole('button', { name: 'Guardar personaje' }));
 
-    expect(port.save).toHaveBeenCalledWith({ kind: 'custom', spec: { ...SPEC, glasses: SPEC.glasses === 'none' ? 'glasses' : 'none' } });
+    expect(port.save).toHaveBeenCalledWith({ kind: 'custom', spec: { ...SPEC, glasses: 'sunglasses' } });
     expect(await screen.findByRole('status')).toHaveTextContent('Personaje guardado. Ya te ven así en la oficina.');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Editar de nuevo' }));
     const again = await screen.findByRole('dialog', { name: 'Mi personaje' });
-    expect(within(again).getByRole('checkbox', { name: 'Gafas' })).toBeChecked();
+    expect(within(again).getByRole('combobox', { name: 'Lentes' })).toHaveDisplayValue('Lentes de sol');
     expect(port.read).toHaveBeenCalledTimes(2);
   });
 
@@ -98,7 +98,7 @@ describe('MyCharacterSection', () => {
     try {
       render(<MyCharacterSection character={fakePort({ outcome: 'ok', avatarId: OPTIONS[0]!.id, chosen: true })} onClose={onClose} />);
       const dialog = await screen.findByRole('dialog');
-      within(dialog).getByRole('checkbox', { name: 'Gafas' }).focus();
+      within(within(dialog).getByRole('group', { name: 'Piel' })).getAllByRole('radio')[0]!.focus();
 
       await user.keyboard('{ArrowLeft}');
       await user.keyboard('{Escape}');

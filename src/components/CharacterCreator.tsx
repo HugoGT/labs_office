@@ -2,10 +2,10 @@ import { useDeferredValue, useEffect, useId, useMemo, useRef, useState } from 'r
 import type { CSSProperties, FormEvent, KeyboardEvent, ReactNode } from 'react';
 import {
   BOTTOM_STYLE_OPTIONS,
-  BUILD_OPTIONS,
   CHARACTER_TEMPLATES,
   CLOTHING_COLORS,
   CUSTOM_ACCESSORIES,
+  GLASSES_OPTIONS,
   HAIR_COLORS,
   HAIR_STYLE_OPTIONS,
   SHOE_COLORS,
@@ -40,13 +40,9 @@ export interface CharacterCreatorProps {
 
 /** Integer scales only: the frames are 1:1 pixel art (see `characterPreviewFrame`). */
 const THUMB_SCALE = 2;
-const PREVIEW_SCALE = 3;
-
-const POSES: readonly { pose: CharacterPose; caption: string; label: string }[] = [
-  { pose: 'idle', caption: 'Reposo', label: 'Tu personaje en reposo' },
-  { pose: 'walk', caption: 'Caminando', label: 'Tu personaje caminando' },
-  { pose: 'seated', caption: 'En su silla', label: 'Tu personaje en su silla' },
-];
+/** The one standing pose, as big as the column beside the controls allows. */
+export const PREVIEW_SCALE = 5;
+const PREVIEW_LABEL = 'Tu personaje';
 
 /** A CSS sprite cut from a whole character's sheet, the same cells the office draws. */
 function spriteStyle(option: CharacterOption, pose: CharacterPose, scale: number): CSSProperties {
@@ -62,32 +58,35 @@ function spriteStyle(option: CharacterOption, pose: CharacterPose, scale: number
   };
 }
 
-function StyleOptions<T extends string>({ legend, options, value, onChange }: {
-  legend: string;
+/** A long option list in one row: a native select, labelled, keyboard and screen reader ready. */
+function Select<T extends string>({ label, options, value, onChange }: {
+  label: string;
   options: readonly Option<T>[];
   value: T;
   onChange: (value: T) => void;
 }) {
-  const name = useId();
+  const id = useId();
   return (
-    <fieldset className={styles.choiceGroup}>
-      <legend className={styles.choiceLegend}>{legend}</legend>
-      <div className={styles.chips}>
+    <div className={styles.field}>
+      <label className={styles.choiceLegend} htmlFor={id}>
+        {label}
+      </label>
+      <select
+        id={id}
+        className={styles.select}
+        value={value}
+        onChange={(event) => {
+          const picked = options.find((option) => option.value === event.target.value);
+          if (picked) onChange(picked.value);
+        }}
+      >
         {options.map((option) => (
-          <label key={option.value} className={styles.chip}>
-            <input
-              className={styles.radio}
-              type="radio"
-              name={name}
-              value={option.value}
-              checked={option.value === value}
-              onChange={() => onChange(option.value)}
-            />
-            <span>{option.label}</span>
-          </label>
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
         ))}
-      </div>
-    </fieldset>
+      </select>
+    </div>
   );
 }
 
@@ -144,13 +143,15 @@ function specFor(choice: CharacterChoice): CustomCharacterSpec {
  * The person either keeps a whole character (a template used as is, which
  * stays that exact pack character, or an uploaded one) or builds one from
  * parts; touching any part turns the current look into a character of its
- * own. Every control is a native radio or checkbox inside a labelled
- * fieldset, so the keyboard works without any code here (arrows inside a
- * group, Tab between groups, Space on checkboxes).
+ * own. Build and earrings are not offered: they come with the template and
+ * stay as they are when other parts change. Every control is native (a
+ * select per long list, swatch radios inside a labelled fieldset), so the
+ * keyboard works without any code here.
  *
- * A built character is previewed on canvas by the same renderer the server
- * draws it with (`customCharacterPreview`), deferred so clicking stays
- * responsive while the frames render; whole characters cut their own sheets.
+ * The preview is the character standing still, big. A built one is drawn on
+ * canvas by the same renderer the server draws it with
+ * (`customCharacterPreview`), deferred so clicking stays responsive; whole
+ * characters cut their own sheet.
  */
 export function CharacterCreator({
   heading,
@@ -173,7 +174,7 @@ export function CharacterCreator({
   const piece = pieceId === null ? undefined : byId.get(pieceId);
 
   const deferredSpec = useDeferredValue(spec);
-  const frames = useMemo(() => (piece === undefined ? customCharacterPreview(deferredSpec) : null), [piece, deferredSpec]);
+  const idle = useMemo(() => (piece === undefined ? customCharacterPreview(deferredSpec) : null), [piece, deferredSpec]);
 
   const dialog = onCancel !== undefined;
   const rootRef = useRef<HTMLDivElement>(null);
@@ -243,7 +244,7 @@ export function CharacterCreator({
                   {option ? (
                     <span className={styles.sprite} style={spriteStyle(option, 'idle', THUMB_SCALE)} aria-hidden="true" />
                   ) : (
-                    <PixelFramesCanvas frames={[customCharacterPreview(template.spec).idle]} scale={THUMB_SCALE} label="" />
+                    <PixelFramesCanvas frames={[customCharacterPreview(template.spec)]} scale={THUMB_SCALE} label="" />
                   )}
                 </button>
               );
@@ -273,64 +274,38 @@ export function CharacterCreator({
 
         <div className={styles.layout}>
           <div className={styles.parts}>
+            <Part legend="Pelo">
+              <Select label="Estilo" options={HAIR_STYLE_OPTIONS} value={spec.hair.style} onChange={(style) => edit({ hair: { ...spec.hair, style } })} />
+              <Swatches legend="Color" swatches={HAIR_COLORS} value={spec.hair.color} onChange={(color) => edit({ hair: { ...spec.hair, color } })} />
+            </Part>
             <Part legend="Piel">
               <Swatches legend="Tono" swatches={SKIN_TONES} value={spec.skin} onChange={(skin) => edit({ skin })} />
             </Part>
-            <Part legend="Pelo">
-              <StyleOptions legend="Estilo" options={HAIR_STYLE_OPTIONS} value={spec.hair.style} onChange={(style) => edit({ hair: { ...spec.hair, style } })} />
-              <Swatches legend="Color" swatches={HAIR_COLORS} value={spec.hair.color} onChange={(color) => edit({ hair: { ...spec.hair, color } })} />
-            </Part>
-            <Part legend="Parte superior">
-              <StyleOptions legend="Estilo" options={TOP_STYLE_OPTIONS} value={spec.top.style} onChange={(style) => edit({ top: { ...spec.top, style } })} />
+            <Part legend="Superior">
+              <Select label="Estilo" options={TOP_STYLE_OPTIONS} value={spec.top.style} onChange={(style) => edit({ top: { ...spec.top, style } })} />
               <Swatches legend="Color" swatches={CLOTHING_COLORS} value={spec.top.color} onChange={(color) => edit({ top: { ...spec.top, color } })} />
+              <div className={styles.pair}>
+                <Select label="Extras" options={CUSTOM_ACCESSORIES} value={spec.accessory} onChange={(accessory) => edit({ accessory })} />
+                <Select label="Lentes" options={GLASSES_OPTIONS} value={spec.glasses} onChange={(glasses) => edit({ glasses })} />
+              </div>
             </Part>
-            <Part legend="Parte inferior">
-              <StyleOptions legend="Estilo" options={BOTTOM_STYLE_OPTIONS} value={spec.bottom.style} onChange={(style) => edit({ bottom: { ...spec.bottom, style } })} />
+            <Part legend="Inferior">
+              <Select label="Estilo" options={BOTTOM_STYLE_OPTIONS} value={spec.bottom.style} onChange={(style) => edit({ bottom: { ...spec.bottom, style } })} />
               <Swatches legend="Color" swatches={CLOTHING_COLORS} value={spec.bottom.color} onChange={(color) => edit({ bottom: { ...spec.bottom, color } })} />
             </Part>
             <Part legend="Zapatos">
-              <StyleOptions legend="Estilo" options={SHOE_STYLE_OPTIONS} value={spec.shoes.style} onChange={(style) => edit({ shoes: { ...spec.shoes, style } })} />
+              <Select label="Estilo" options={SHOE_STYLE_OPTIONS} value={spec.shoes.style} onChange={(style) => edit({ shoes: { ...spec.shoes, style } })} />
               <Swatches legend="Color" swatches={SHOE_COLORS} value={spec.shoes.color} onChange={(color) => edit({ shoes: { ...spec.shoes, color } })} />
-            </Part>
-            <Part legend="Extras">
-              <div className={styles.checks}>
-                <label className={styles.check}>
-                  <input type="checkbox" checked={spec.glasses !== 'none'} onChange={(event) => edit({ glasses: event.target.checked ? 'glasses' : 'none' })} />
-                  <span>Gafas</span>
-                </label>
-                <label className={styles.check}>
-                  <input type="checkbox" checked={spec.earrings} onChange={(event) => edit({ earrings: event.target.checked })} />
-                  <span>Aretes</span>
-                </label>
-              </div>
-              <StyleOptions legend="Accesorio" options={CUSTOM_ACCESSORIES} value={spec.accessory} onChange={(accessory) => edit({ accessory })} />
-              <StyleOptions legend="Complexión" options={BUILD_OPTIONS} value={spec.build} onChange={(build) => edit({ build })} />
             </Part>
           </div>
 
           <section className={styles.preview} aria-label="Vista previa">
             {piece?.author != null && <p className={styles.credit}>Autoría: {piece.author}</p>}
-            <div className={styles.poses}>
-              {POSES.map(({ pose, caption, label }) => (
-                <figure key={pose} className={styles.pose}>
-                  {piece !== undefined ? (
-                    <span
-                      className={pose === 'walk' ? `${styles.sprite} ${styles.walking}` : styles.sprite}
-                      style={spriteStyle(piece, pose, PREVIEW_SCALE)}
-                      role="img"
-                      aria-label={label}
-                    />
-                  ) : (
-                    <PixelFramesCanvas
-                      frames={frames === null ? [] : pose === 'walk' ? frames.walk : [pose === 'idle' ? frames.idle : frames.seated]}
-                      scale={PREVIEW_SCALE}
-                      label={label}
-                    />
-                  )}
-                  <figcaption className={styles.caption}>{caption}</figcaption>
-                </figure>
-              ))}
-            </div>
+            {piece !== undefined ? (
+              <span className={styles.sprite} style={spriteStyle(piece, 'idle', PREVIEW_SCALE)} role="img" aria-label={PREVIEW_LABEL} />
+            ) : (
+              <PixelFramesCanvas frames={idle === null ? [] : [idle]} scale={PREVIEW_SCALE} label={PREVIEW_LABEL} />
+            )}
           </section>
         </div>
 

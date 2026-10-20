@@ -124,7 +124,7 @@ export const TOP_STYLE_OPTIONS: readonly Option<TopStyle>[] = [
 ];
 
 export const BOTTOM_STYLE_OPTIONS: readonly Option<BottomStyle>[] = [
-  { value: 'pants', label: 'Pantalón' },
+  { value: 'pants', label: 'Jean' },
   { value: 'widePants', label: 'Pantalón ancho' },
   { value: 'skirt', label: 'Falda' },
 ];
