@@ -1,6 +1,6 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import type { PixelBuffer, Rgba } from './pixelBuffer.ts';
+import type { PixelBuffer, Rgba } from '../../../src/art/pixelBuffer.ts';
 import { demoWallMap } from './wallDemo.ts';
 import {
   BODY_LENGTH,

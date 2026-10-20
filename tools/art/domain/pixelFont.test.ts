@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GLYPH_HEIGHT, GLYPH_WIDTH, LINE_HEIGHT, drawText, textWidth } from './pixelFont.ts';
-import { PixelBuffer, rgba } from './pixelBuffer.ts';
+import { PixelBuffer, rgba } from '../../../src/art/pixelBuffer.ts';
 
 const INK = rgba(10, 20, 30);
 

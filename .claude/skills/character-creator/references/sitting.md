@@ -1,6 +1,6 @@
 # Sitting Sprites and the Seat Contract
 
-Every character gets a sit sheet automatically from `buildCharacterSprites(spec).sit`. Nothing is set per character: the pose, the anchor and the frame layout are shared. Source: `tools/art/domain/sitCycle.ts` (pose, layout, anchor), `tools/art/domain/rig.ts` (seated scene), `tools/art/domain/seating.ts` (chair contract).
+Every character gets a sit sheet automatically from `buildCharacterSprites(spec).sit`. Nothing is set per character: the pose, the anchor and the frame layout are shared. Source: `src/art/sitCycle.ts` (pose, layout, anchor), `src/art/rig.ts` (seated scene), `src/art/seating.ts` (chair contract).
 
 ## Sheet Layout
 

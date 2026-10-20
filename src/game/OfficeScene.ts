@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import type { ArtFacing, ArtPiece, Point } from './artContract';
 import { artUploadsManifestUrl, findPiece, parseArtSheetKey, type ArtAppearance } from './artPack';
+import { artCustomCharactersUrl } from './customCharacterArt';
 import { ArtPackLoader } from './artPackLoader';
 import { chairPlacement, deskPlacement } from './artPlacement';
 import { feetOf, positionForFeet } from './avatarGeometry';
@@ -207,6 +208,12 @@ export interface OfficeSceneOptions {
    * (`artUploadsManifestUrl(endpoint)`); `null` leaves the pack alone.
    */
   artUploadsUrl?: string | null;
+  /**
+   * Folder of the characters built with the creator, drawn by the office
+   * server. Defaults to `artCustomCharactersUrl(endpoint)`; `null` leaves
+   * them on the procedural body.
+   */
+  artCustomCharactersUrl?: string | null;
   /**
    * Where the chosen map zoom is remembered (map-zoom). Absent means nothing
    * is restored or saved and the office starts at the default stop;
@@ -575,6 +582,8 @@ export class OfficeScene extends Phaser.Scene {
     this.art = new ArtPackLoader(this, {
       manifestUrl: this.options.artManifestUrl,
       uploadsUrl: this.options.artUploadsUrl !== undefined ? this.options.artUploadsUrl : artUploadsManifestUrl(this.options.endpoint),
+      customCharactersUrl:
+        this.options.artCustomCharactersUrl !== undefined ? this.options.artCustomCharactersUrl : artCustomCharactersUrl(this.options.endpoint),
     });
     this.art.preload();
   }

@@ -16,11 +16,16 @@
  * registered catalog, so a stale manifest can only offer a piece the server
  * then refuses with a readable reason.
  *
+ * A save is a `CharacterChoice`: `{ avatarId }` for a whole piece or `{ spec }`
+ * for a character built with the creator; a read or save answer may carry the
+ * stored `spec`, validated again here like any server input.
+ *
  * Characters an Admin uploaded (#121) come from the office server's uploads
  * manifest, the second catalog the office loader reads, joined after the pack
  * the same way (`combineArtManifests`). Without it the selector is the pack's.
  */
 
+import { parseCustomCharacterSpec, type CustomCharacterSpec } from '../art/customCharacter';
 import { combineArtManifests, findPiece, parseArtPackManifest, type ArtCatalog } from '../game/artPack';
 import { readAccessDenied } from './authErrors';
 import type {
@@ -79,7 +84,15 @@ function characterOptions(catalog: ArtCatalog, uploadsUrl: string | null): Chara
 }
 
 function invalidReason(body: unknown): InvalidCharacterReason {
-  return isRecord(body) && body.reason === 'retired-piece' ? 'retired-piece' : 'unknown-piece';
+  if (isRecord(body) && (body.reason === 'retired-piece' || body.reason === 'invalid-spec')) return body.reason;
+  return 'unknown-piece';
+}
+
+/** A spec the server sent, checked like any input: one that does not validate is left out. */
+function specOf(body: Record<string, unknown>): { spec?: CustomCharacterSpec } {
+  if (!('spec' in body)) return {};
+  const parsed = parseCustomCharacterSpec(body.spec);
+  return parsed.ok ? { spec: parsed.spec } : {};
 }
 
 export function createCharacterClient(
@@ -129,15 +142,12 @@ export function createCharacterClient(
       if (!isRecord(body) || typeof body.avatarId !== 'string' || typeof body.chosen !== 'boolean') {
         return { outcome: 'failed' };
       }
-      return { outcome: 'ok', avatarId: body.avatarId, chosen: body.chosen };
+      return { outcome: 'ok', avatarId: body.avatarId, chosen: body.chosen, ...specOf(body) };
     },
 
-    async save(avatarId): Promise<SaveCharacterResult> {
-      const response = await request(
-        `${baseUrl}/me/avatar`,
-        { method: 'POST', body: JSON.stringify({ avatarId }) },
-        true,
-      );
+    async save(choice): Promise<SaveCharacterResult> {
+      const payload = choice.kind === 'custom' ? { spec: choice.spec } : { avatarId: choice.avatarId };
+      const response = await request(`${baseUrl}/me/avatar`, { method: 'POST', body: JSON.stringify(payload) }, true);
       if (response === null) return { outcome: 'failed' };
       if (response.status === 401) return readAccessDenied(response);
       if (response.status === 400) return { outcome: 'invalid', reason: invalidReason(await json(response)) };
@@ -145,7 +155,7 @@ export function createCharacterClient(
       if (!response.ok) return { outcome: 'failed' };
       const body = await json(response);
       if (!isRecord(body) || typeof body.avatarId !== 'string') return { outcome: 'failed' };
-      return { outcome: 'ok', avatarId: body.avatarId };
+      return { outcome: 'ok', avatarId: body.avatarId, ...specOf(body) };
     },
 
     async catalog(): Promise<CharacterCatalog | null> {

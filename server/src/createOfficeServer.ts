@@ -54,9 +54,12 @@ import {
   handleSubmitContribution,
   type ArtContributionDeps,
 } from './assets/artContributionRoutes.ts';
-import { createCharacterRetirementHub, type CharacterRetirement } from './characterRetirement.ts';
+import { createCharacterUpdatesHub, type CharacterUpdates } from './characterUpdates.ts';
 import { handleGetDisplayName, handleSetDisplayName } from './directory/displayNameRoutes.ts';
 import { handleGetAvatar, handleSetAvatar } from './directory/avatarRoutes.ts';
+import type { CustomCharacterStore } from './characters/customCharacterPort.ts';
+import { handleGetCustomCharacterSheet } from './characters/customCharacterRoutes.ts';
+import { createCharacterSheetCache } from './characters/customCharacterSheets.ts';
 import {
   handleArchiveAsset,
   handleCreateAsset,
@@ -254,8 +257,8 @@ export interface OfficeServer {
   recordings: RecordingRegistry;
   /** Live eviction of a revoked account (#93); exposed for tests, like `sessions`. */
   eviction: SessionEvictor;
-  /** Live reset of a retired character (#122); exposed for tests, like `eviction`. */
-  characters: CharacterRetirement;
+  /** Live character changes, a retirement (#122) or a new saved character; exposed for tests, like `eviction`. */
+  characters: CharacterUpdates;
   /** The live terrain blocks and snapshot (#123 phase 2); exposed for tests, like `sessions`. */
   terrain: TerrainRuntime;
   /** The live collision areas per piece; exposed for tests, like `terrain`. */
@@ -382,6 +385,12 @@ export interface OfficeServerOverrides {
   storage?: RecordingStoragePort | null;
   /** Same again, for the bucket of uploaded art files (#121). `null`: uploads answer 503. */
   assetStorage?: AssetStoragePort | null;
+  /**
+   * Replaces the characters built with the creator that would come from
+   * `process.env`. `null` forces "no store": a posted spec answers 503 and so
+   * do the sheets under `/assets/characters/`.
+   */
+  customCharacters?: CustomCharacterStore | null;
   /** Shortens the upload polling after a stop (#58), for the same reason as the window below. */
   recordingReadiness?: { intervalMs: number; timeoutMs: number };
   /**
@@ -579,8 +588,9 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   };
   // Shared by the room (which registers) and the admin routes (which evict) (#93).
   const eviction = createSessionEvictionHub();
-  // Shared by the room (which registers) and the retire route (which resets) (#122).
-  const characters = createCharacterRetirementHub();
+  // Shared by the room (which registers), the retire route (which resets, #122)
+  // and `/me/avatar` (which puts a newly saved character on every session).
+  const characters = createCharacterUpdatesHub();
   // Read per call, like the LiveKit credentials of `/livekit/token`.
   const egressFor = (): EgressPort | null =>
     overrides?.egress !== undefined ? overrides.egress : egressFromEnv(process.env);
@@ -656,6 +666,11 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
 
   const decor =
     overrides?.decor !== undefined ? (overrides.decor ?? undefined) : envRuntime?.decor;
+
+  const customCharacters =
+    overrides?.customCharacters !== undefined ? (overrides.customCharacters ?? undefined) : envRuntime?.customCharacters;
+  // One per server: the sheets of a stored character are drawn once and kept.
+  const characterSheets = createCharacterSheetCache();
 
   const desksSource =
     overrides?.desks !== undefined ? (overrides.desks ?? undefined) : envRuntime?.desks;
@@ -1145,15 +1160,36 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   // hangs from `decorRoute` and not `admin`: the choice is checked against the
   // art catalog, so a server without one answers 503 and the SPA lets people
   // in with the pack default instead of blocking the entrance.
+  // A spec from the creator is stored in `customCharacters`, and every saved
+  // choice reaches the live rooms through `characters`.
   app.get(
     '/me/avatar',
-    decorRoute((req, deps) => handleGetAvatar(req.header('Authorization'), deps)),
+    decorRoute((req, deps) => handleGetAvatar(req.header('Authorization'), { ...deps, customCharacters })),
   );
 
   app.post(
     '/me/avatar',
-    decorRoute((req, deps) => handleSetAvatar(req.header('Authorization'), req.body, deps)),
+    decorRoute((req, deps) =>
+      handleSetAvatar(req.header('Authorization'), req.body, { ...deps, customCharacters, characters }),
+    ),
   );
+
+  // The sheets of a character built with the creator, drawn by the server from
+  // its stored spec. Public and immutable like `/assets/files/*`, but needing
+  // only the database, never the bucket. Its own Caddy handle, for the same
+  // reason `/assets/files/*` has one.
+  app.get('/assets/characters/:hash/:file', (req, res) => {
+    if (customCharacters === undefined) {
+      res.status(503).json({ error: 'custom-characters-not-configured' });
+      return;
+    }
+    handleGetCustomCharacterSheet(req.params.hash, req.params.file, { store: customCharacters, cache: characterSheets })
+      .then((result) => sendArtFile(res, result))
+      .catch(() => {
+        console.error('[assets] unhandled failure drawing a custom character');
+        res.status(500).json({ error: 'internal' });
+      });
+  });
 
   /**
    * Mismo adaptador que `spacesRoute(...)`/`decorRoute(...)`, con los

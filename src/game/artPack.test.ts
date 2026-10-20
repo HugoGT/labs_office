@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ART_CONTRACT_VERSION, type ArtPackManifest } from './artContract';
 import {
   ART_PACK_MANIFEST_URL,
+  artPackFileUrl,
   artSheetKey,
   artUploadsManifestUrl,
   bootLoadRequests,
@@ -219,5 +220,12 @@ describe('uploaded art (#121)', () => {
     expect(parseArtSheetKey(artSheetKey('plant-upload-0123456789abcdef', 'sheet'))).toEqual({ pieceId: 'plant-upload-0123456789abcdef', role: 'sheet' });
     expect(parseArtSheetKey('plant-large')).toBeNull();
     expect(parseArtSheetKey('art:only-one-part')).toBeNull();
+  });
+});
+
+describe('artPackFileUrl', () => {
+  it('finds a pack file next to the manifest', () => {
+    expect(artPackFileUrl('floor/wood.png')).toBe('assets/pack/floor/wood.png');
+    expect(artPackFileUrl('floor/wood.png', 'https://cdn.example/pack/manifest.json')).toBe('https://cdn.example/pack/floor/wood.png');
   });
 });

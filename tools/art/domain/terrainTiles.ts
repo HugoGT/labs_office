@@ -42,7 +42,7 @@ import {
 } from '../../../src/game/artContract.ts';
 import { hexToRgba, makeRamp, mixRgba } from './color.ts';
 import { periodicNoise, type Noise } from './noise.ts';
-import { PixelBuffer, rgba, type Rgba } from './pixelBuffer.ts';
+import { PixelBuffer, rgba, type Rgba } from '../../../src/art/pixelBuffer.ts';
 import { terrainTile } from './tiles.ts';
 
 export interface TerrainEdge {

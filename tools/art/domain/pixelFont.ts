@@ -3,7 +3,7 @@
  * frame fits seven of these glyphs per line, enough for a direction plus a frame number, and
  * every label is pixels like the rest of the image, so no font file or renderer is involved.
  */
-import type { PixelBuffer, Rgba } from './pixelBuffer.ts';
+import type { PixelBuffer, Rgba } from '../../../src/art/pixelBuffer.ts';
 
 export const GLYPH_WIDTH = 3;
 export const GLYPH_HEIGHT = 5;

@@ -8,7 +8,11 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import exportedManifest from '../../public/assets/pack/manifest.json?raw';
+import { CHARACTER_TEMPLATES } from '../art/customCharacter';
 import { createCharacterClient } from './characterClient';
+
+const SPEC = CHARACTER_TEMPLATES[1]!.spec;
+const CUSTOM_ID = `character-custom-${'a'.repeat(32)}`;
 
 const TOKEN = async () => 'id-token';
 const MANIFEST = JSON.parse(exportedManifest);
@@ -53,6 +57,20 @@ describe('createCharacterClient: read', () => {
     );
   });
 
+  it('carries the stored spec of a custom character, dropping one that does not validate', async () => {
+    await expect(client(respondWith({ avatarId: CUSTOM_ID, chosen: true, spec: SPEC })).read()).resolves.toEqual({
+      outcome: 'ok',
+      avatarId: CUSTOM_ID,
+      chosen: true,
+      spec: SPEC,
+    });
+    await expect(client(respondWith({ avatarId: CUSTOM_ID, chosen: true, spec: { ...SPEC, skin: 'red' } })).read()).resolves.toEqual({
+      outcome: 'ok',
+      avatarId: CUSTOM_ID,
+      chosen: true,
+    });
+  });
+
   it('503 is unavailable: no directory or no catalog', async () => {
     await expect(client(respondWith({ error: 'decor-not-configured' }, 503)).read()).resolves.toEqual({
       outcome: 'unavailable',
@@ -80,7 +98,7 @@ describe('character entrance HTTP denials', () => {
       const port = client(respondWith({ error: 'unauthorized', reason }, 401));
       const expected = { outcome: 'denied', reason: reason === undefined || reason === 'unknown' ? 'unauthorized' : reason };
       await expect(port.read()).resolves.toEqual(expected);
-      await expect(port.save('character-x')).resolves.toEqual(expected);
+      await expect(port.save({ kind: 'piece', avatarId: 'character-x' })).resolves.toEqual(expected);
     },
   );
 });
@@ -89,7 +107,7 @@ describe('createCharacterClient: save', () => {
   it('posts only the avatarId and answers ok with what the server stored', async () => {
     const fetchImpl = respondWith({ avatarId: 'character-p03-forest-suit', chosen: true });
 
-    await expect(client(fetchImpl).save('character-p03-forest-suit')).resolves.toEqual({
+    await expect(client(fetchImpl).save({ kind: 'piece', avatarId: 'character-p03-forest-suit' })).resolves.toEqual({
       outcome: 'ok',
       avatarId: 'character-p03-forest-suit',
     });
@@ -99,22 +117,42 @@ describe('createCharacterClient: save', () => {
     );
   });
 
+  it('posts a custom spec and answers ok with its avatar id and spec', async () => {
+    const fetchImpl = respondWith({ avatarId: CUSTOM_ID, chosen: true, spec: SPEC });
+
+    await expect(client(fetchImpl).save({ kind: 'custom', spec: SPEC })).resolves.toEqual({
+      outcome: 'ok',
+      avatarId: CUSTOM_ID,
+      spec: SPEC,
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://server/me/avatar',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ spec: SPEC }) }),
+    );
+  });
+
+  it('400 invalid-spec is invalid with that reason', async () => {
+    const fetchImpl = respondWith({ error: 'invalid-character', reason: 'invalid-spec', field: 'skin' }, 400);
+
+    await expect(client(fetchImpl).save({ kind: 'custom', spec: SPEC })).resolves.toEqual({ outcome: 'invalid', reason: 'invalid-spec' });
+  });
+
   it.each(['unknown-piece', 'retired-piece'] as const)('400 %s is invalid with that reason', async (reason) => {
     const fetchImpl = respondWith({ error: 'invalid-character', reason }, 400);
 
-    await expect(client(fetchImpl).save('character-x')).resolves.toEqual({ outcome: 'invalid', reason });
+    await expect(client(fetchImpl).save({ kind: 'piece', avatarId: 'character-x' })).resolves.toEqual({ outcome: 'invalid', reason });
   });
 
   it('a 400 with an unexpected reason is still invalid, as unknown-piece', async () => {
     const fetchImpl = respondWith({ error: 'invalid-character', reason: 'invalid-color' }, 400);
 
-    await expect(client(fetchImpl).save('character-x')).resolves.toEqual({ outcome: 'invalid', reason: 'unknown-piece' });
+    await expect(client(fetchImpl).save({ kind: 'piece', avatarId: 'character-x' })).resolves.toEqual({ outcome: 'invalid', reason: 'unknown-piece' });
   });
 
   it('503 is unavailable, anything else is failed', async () => {
-    await expect(client(respondWith({}, 503)).save('character-x')).resolves.toEqual({ outcome: 'unavailable' });
-    await expect(client(respondWith({}, 500)).save('character-x')).resolves.toEqual({ outcome: 'failed' });
-    await expect(client(REJECTS).save('character-x')).resolves.toEqual({ outcome: 'failed' });
+    await expect(client(respondWith({}, 503)).save({ kind: 'piece', avatarId: 'character-x' })).resolves.toEqual({ outcome: 'unavailable' });
+    await expect(client(respondWith({}, 500)).save({ kind: 'piece', avatarId: 'character-x' })).resolves.toEqual({ outcome: 'failed' });
+    await expect(client(REJECTS).save({ kind: 'piece', avatarId: 'character-x' })).resolves.toEqual({ outcome: 'failed' });
   });
 });
 

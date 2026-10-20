@@ -1,5 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { OfficeSession } from '../auth/authPort';
+import { createCharacterClient } from '../auth/characterClient';
+import type { CharacterPort } from '../auth/characterPort';
 import { createAssetAdminClient } from '../dashboard/assetAdminClient';
 import { createArtContributionClient } from '../dashboard/artContributionClient';
 import type { ArtContributionPort } from '../dashboard/artContributionPort';
@@ -13,6 +15,7 @@ import { createTerrainAdminClient } from '../dashboard/terrainAdminClient';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import { createCollisionAdminClient } from '../dashboard/collisionAdminClient';
 import type { CollisionAdminPort } from '../dashboard/collisionAdminPort';
+import { ART_PACK_MANIFEST_URL, artUploadsManifestUrl } from '../game/artPack';
 import { resolveLivekitConfig } from '../game/livekitEndpoint';
 import { terrainEditHoldsMap } from '../game/editorMapHold';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
@@ -201,6 +204,23 @@ export function OfficeShell({
     if (apiBaseUrl === null || !session) return null;
     const signedIn = session;
     return createArtContributionClient({ baseUrl: apiBaseUrl, getIdToken: () => signedIn.getIdToken() });
+  });
+  /**
+   * "Mi personaje" in "Personalizar": the entrance's character port, built
+   * once like the others, for anyone signed in. Its save reaches this same
+   * office live through the room (`CharacterUpdates`), so nothing here
+   * refreshes after it.
+   */
+  const [characterPort] = useState<CharacterPort | null>(() => {
+    const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
+    if (apiBaseUrl === null || !session) return null;
+    const signedIn = session;
+    return createCharacterClient({
+      baseUrl: apiBaseUrl,
+      getIdToken: () => signedIn.getIdToken(),
+      manifestUrl: ART_PACK_MANIFEST_URL,
+      uploadsManifestUrl: artUploadsManifestUrl(endpoint),
+    });
   });
   /**
    * Whether a map editor holds the desks (#74, PR3c): `OfficeLayoutEditor`
@@ -791,6 +811,7 @@ export function OfficeShell({
           collisions={collisionAdminPort}
           assets={assetsAdminPort}
           contributions={contributionsPort}
+          character={characterPort}
           refreshDesks={refreshDesks}
           refreshSpaces={refreshSpaces}
           onLayoutEditingChange={setLayoutEditing}

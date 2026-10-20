@@ -13,7 +13,7 @@ Load when a user wants to add or change a character (look, colors, hair, outfit,
 
 ## Hard Rules
 
-- Edit only data in `tools/art/domain/characters.ts`. Touch `rig.ts` or `spriteRenderer.ts` only after the user explicitly approves a new style feature.
+- Edit only data in `src/art/characters.ts`. Touch `rig.ts` or `spriteRenderer.ts` only after the user explicitly approves a new style feature.
 - New characters go in `CUSTOM_CHARACTERS`: id `cNN-<look>` (next free number, kebab-case), no `source`.
 - Edit existing characters in place. Never rename an `id`: it is the pack piece id `character-<id>` stored in `users.avatar_id`, and the sprite file names.
 - Every character in `CHARACTERS` ships in the art pack (`public/assets/pack/`) and becomes selectable for everyone on the next deploy. A pack that drops one retires it (`retired_at`).
@@ -56,4 +56,4 @@ Return:
 - `references/catalog.md`: option values, palette keys per style, skin constants, color tips.
 - `references/sitting.md`: sit sheet layout, seat anchor contract, timing, and the walk/idle hash lock.
 - `assets/character-template.ts`: commented spec to paste into `CUSTOM_CHARACTERS`.
-- `tools/art/domain/characters.ts`: types, shared constants, and the base and custom rosters.
+- `src/art/characters.ts`: types, shared constants, and the base and custom rosters.

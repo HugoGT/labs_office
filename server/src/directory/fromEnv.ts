@@ -26,6 +26,8 @@ import { createPgSpaces } from '../spaces/pgSpaces.ts';
 import type { SpacesDirectory } from '../spaces/spacesPort.ts';
 import type { CollisionStore } from '../collisions/collisionPort.ts';
 import { createPgCollisions } from '../collisions/pgCollisions.ts';
+import type { CustomCharacterStore } from '../characters/customCharacterPort.ts';
+import { createPgCustomCharacters } from '../characters/pgCustomCharacters.ts';
 import { createPgTerrain } from '../terrain/pgTerrain.ts';
 import type { TerrainStore } from '../terrain/terrainPort.ts';
 
@@ -78,6 +80,8 @@ export interface DirectoryRuntime {
   terrain: TerrainStore;
   /** Saved collision areas per piece, on the same pool; `piece_collisions` is in the same `schema.sql`. */
   collisions: CollisionStore;
+  /** Characters built with the creator, on the same pool; `custom_characters` is in the same `schema.sql`. */
+  customCharacters: CustomCharacterStore;
   /**
    * Aplica el esquema. Idempotente: corre en cada arranque. Ver `migrate.ts`.
    *
@@ -113,6 +117,7 @@ export function directoryFromEnv(
     desks: createPgDesks(pool),
     terrain: createPgTerrain(pool),
     collisions: createPgCollisions(pool),
+    customCharacters: createPgCustomCharacters(pool),
     migrate: async () => {
       await migrate(pool);
       await reportDesksWithoutSpace(pool);

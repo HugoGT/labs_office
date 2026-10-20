@@ -8,7 +8,7 @@
  * toward the outside), and a screen pixel that samples an outline pixel further in takes the color
  * of the nearest inner pixel instead.
  */
-import { PixelBuffer, type Rgba } from './pixelBuffer.ts';
+import { PixelBuffer, type Rgba } from '../../../src/art/pixelBuffer.ts';
 import type { Rect, WallGroup } from './wallGeometry.ts';
 import { bodySprite, jointSprite, RIM_OUTLINE, RIM_RING, wallOutline, type WallSprite } from './walls.ts';
 

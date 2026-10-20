@@ -10,6 +10,7 @@
  * the pack default, not by retrying.
  */
 
+import type { CustomCharacterSpec } from '../art/customCharacter';
 import type { AccessDeniedResult } from './authErrors';
 
 /** One character the selector can offer, with the sheets its previews cut frames from. */
@@ -29,24 +30,33 @@ export interface CharacterCatalog {
   readonly defaultId: string;
 }
 
+/**
+ * What the creator saves: a whole piece (a pack character used as is, or an
+ * uploaded one) by id, or a character built from parts.
+ */
+export type CharacterChoice =
+  | { readonly kind: 'piece'; readonly avatarId: string }
+  | { readonly kind: 'custom'; readonly spec: CustomCharacterSpec };
+
+/** `spec` comes with a custom character (`character-custom-<hash>`), so the creator reopens it. */
 export type ReadCharacterResult =
   | AccessDeniedResult
-  | { outcome: 'ok'; avatarId: string; chosen: boolean }
+  | { outcome: 'ok'; avatarId: string; chosen: boolean; spec?: CustomCharacterSpec }
   | { outcome: 'unavailable' | 'failed' };
 
-/** `reason` is the server's `InvalidArtChoiceError` code, for the copy the selector shows. */
-export type InvalidCharacterReason = 'unknown-piece' | 'retired-piece';
+/** `reason` is the server's code (`InvalidArtChoiceError`, or `invalid-spec`), for the copy the creator shows. */
+export type InvalidCharacterReason = 'unknown-piece' | 'retired-piece' | 'invalid-spec';
 
 export type SaveCharacterResult =
   | AccessDeniedResult
-  | { outcome: 'ok'; avatarId: string }
+  | { outcome: 'ok'; avatarId: string; spec?: CustomCharacterSpec }
   | { outcome: 'invalid'; reason: InvalidCharacterReason }
   | { outcome: 'unavailable' | 'failed' };
 
 export interface CharacterPort {
   /** The saved character and whether it was ever chosen. */
   read(): Promise<ReadCharacterResult>;
-  save(avatarId: string): Promise<SaveCharacterResult>;
+  save(choice: CharacterChoice): Promise<SaveCharacterResult>;
   /** The characters of the pack the SPA serves; `null` when it cannot be read. */
   catalog(): Promise<CharacterCatalog | null>;
 }

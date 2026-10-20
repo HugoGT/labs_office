@@ -15,8 +15,8 @@
  */
 import { makeRamp, mixRgba, type Ramp } from './color.ts';
 import { renderFurniture, type Box, type FurnitureModel, type Layer, type Part, type Span } from './furnitureModel.ts';
-import type { PixelBuffer, Rgba } from './pixelBuffer.ts';
-import { SEAT_HEIGHT, type Facing, type SeatPoint } from './seating.ts';
+import type { PixelBuffer, Rgba } from '../../../src/art/pixelBuffer.ts';
+import { SEAT_HEIGHT, type Facing, type SeatPoint } from '../../../src/art/seating.ts';
 
 export const CHAIR_MATERIALS = ['wood', 'metal', 'leather', 'gamer'] as const;
 export type ChairMaterial = (typeof CHAIR_MATERIALS)[number];

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ART_TILE, BRIDGE, BRIDGE_ORIENTATIONS, HEDGE, PLANT, TABLE, TREE, countColors } from '../../../src/game/artContract.ts';
-import type { PixelBuffer } from './pixelBuffer.ts';
+import type { PixelBuffer } from '../../../src/art/pixelBuffer.ts';
 import { bridgeSprite, hedgeSprite, plantSprite, PLANT_KINDS, treeSprite, TREE_KINDS } from './props.ts';
 import { ROOM_TABLE_FOOTPRINTS, ROOM_TABLES, roomTableSprite, TABLE_HEIGHT } from './tables.ts';
 

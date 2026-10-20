@@ -9,6 +9,7 @@
  * transition lands in the audit trail.
  */
 
+import type { CharacterUpdates } from '../characterUpdates.ts';
 import { describe, expect, it } from 'vitest';
 import { ART_IMAGE_SPECS, artSheetKey, sheetSize, type ArtImageKind, type ArtPackManifest } from '../../../src/game/artContract.ts';
 import { parseArtPackManifest } from '../../../src/game/artPack.ts';
@@ -99,6 +100,7 @@ function plantBody(shade = 0): Record<string, unknown> {
 interface Harness extends ArtContributionDeps {
   decor: MemoryDecor;
   retiredLive: [string, string][];
+  characters: CharacterUpdates;
 }
 
 async function deps(overrides: { storage?: AssetStoragePort; now?: () => Date } = {}): Promise<Harness> {
@@ -111,7 +113,10 @@ async function deps(overrides: { storage?: AssetStoragePort; now?: () => Date } 
     identityAdmin: null,
     decor,
     storage: overrides.storage ?? createMemoryAssetStorage(),
-    characters: { retireCharacter: (pieceId, fallbackId) => void retiredLive.push([pieceId, fallbackId]) },
+    characters: {
+      retireCharacter: (pieceId, fallbackId) => void retiredLive.push([pieceId, fallbackId]),
+      changeCharacterOf: () => undefined,
+    },
     retiredLive,
   };
 }

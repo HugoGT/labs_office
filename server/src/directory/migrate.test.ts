@@ -714,6 +714,21 @@ describe('schema.sql: collision areas per piece', () => {
   });
 });
 
+describe('schema.sql: custom characters', () => {
+  const squashed = squash(schema);
+
+  it('stores each spec once by its 32 hex content hash, with its render version and creation time', () => {
+    expect(squashed).toContain(
+      "create table if not exists custom_characters ( hash text primary key check (hash ~ '^[0-9a-f]{32}$'), spec jsonb not null check (jsonb_typeof(spec) = 'object'), render_version integer not null, created_at timestamptz not null default now() )",
+    );
+  });
+
+  it('stays outside the one-time grid move', () => {
+    const migration = squashed.slice(squashed.indexOf('do $$'), squashed.lastIndexOf('end $$;'));
+    expect(migration).not.toContain('custom_characters');
+  });
+});
+
 /**
  * The 21x15 block grid (map editor palette): stored rows were written against
  * the 14x10 grid, so they move once, in the same script as the rest of the

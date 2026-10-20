@@ -37,7 +37,7 @@
   image-rendering: pixelated;
 }
 
-/* Same step animation as the character selector (`CharacterSelect.module.css`). */
+/* Same step animation as the character creator (`CharacterCreator.module.css`). */
 .walking {
   animation: walk 1s steps(var(--sprite-steps)) infinite;
 }

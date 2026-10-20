@@ -24,7 +24,11 @@ export type BottomStyle = 'pants' | 'widePants' | 'skirt';
 
 export type ShoeStyle = 'dress' | 'heels';
 
-export type Accessory = 'coffee' | 'handbag' | 'laptop' | 'tablet' | 'briefcase' | 'folder' | 'jacketOverShoulder';
+/** 'none' leaves both hands free; only custom characters use it, so the pack stays as it was. */
+/** Clear lenses in a frame, or dark ones; drawn on the face decals of `rig.ts`. */
+export type Glasses = 'none' | 'glasses' | 'sunglasses';
+
+export type Accessory = 'none' | 'coffee' | 'handbag' | 'laptop' | 'tablet' | 'briefcase' | 'folder' | 'jacketOverShoulder';
 
 export interface Palette {
   readonly skin: string;
@@ -52,7 +56,7 @@ export interface CharacterSpec {
   readonly bottom: BottomStyle;
   readonly shoes: ShoeStyle;
   readonly accessory: Accessory;
-  readonly glasses: boolean;
+  readonly glasses: Glasses;
   readonly earrings: boolean;
   /** Paints the whole hair ramp one tone darker so brown hair separates clearly from the face. */
   readonly darkerHair?: boolean;
@@ -78,7 +82,7 @@ export const BASE_CHARACTERS: readonly CharacterSpec[] = [
     bottom: 'pants',
     shoes: 'dress',
     accessory: 'coffee',
-    glasses: false,
+    glasses: 'none',
     earrings: false,
     darkerHair: true,
     palette: {
@@ -103,7 +107,7 @@ export const BASE_CHARACTERS: readonly CharacterSpec[] = [
     bottom: 'widePants',
     shoes: 'heels',
     accessory: 'handbag',
-    glasses: false,
+    glasses: 'none',
     earrings: true,
     darkerHair: true,
     palette: {
@@ -127,7 +131,7 @@ export const BASE_CHARACTERS: readonly CharacterSpec[] = [
     bottom: 'pants',
     shoes: 'dress',
     accessory: 'laptop',
-    glasses: false,
+    glasses: 'none',
     earrings: false,
     darkerHair: true,
     palette: {
@@ -152,7 +156,7 @@ export const BASE_CHARACTERS: readonly CharacterSpec[] = [
     bottom: 'skirt',
     shoes: 'heels',
     accessory: 'tablet',
-    glasses: false,
+    glasses: 'none',
     earrings: true,
     darkerHair: true,
     palette: {
@@ -177,7 +181,7 @@ export const BASE_CHARACTERS: readonly CharacterSpec[] = [
     bottom: 'pants',
     shoes: 'dress',
     accessory: 'briefcase',
-    glasses: true,
+    glasses: 'glasses',
     earrings: false,
     palette: {
       skin: DEEP_SKIN,
@@ -201,7 +205,7 @@ export const BASE_CHARACTERS: readonly CharacterSpec[] = [
     bottom: 'widePants',
     shoes: 'heels',
     accessory: 'folder',
-    glasses: false,
+    glasses: 'none',
     earrings: true,
     palette: {
       skin: DEEP_SKIN,
@@ -224,7 +228,7 @@ export const BASE_CHARACTERS: readonly CharacterSpec[] = [
     bottom: 'pants',
     shoes: 'dress',
     accessory: 'coffee',
-    glasses: false,
+    glasses: 'none',
     earrings: false,
     palette: {
       skin: LIGHT_SKIN,
@@ -248,7 +252,7 @@ export const BASE_CHARACTERS: readonly CharacterSpec[] = [
     bottom: 'pants',
     shoes: 'dress',
     accessory: 'briefcase',
-    glasses: false,
+    glasses: 'none',
     earrings: false,
     darkerHair: true,
     palette: {
@@ -273,7 +277,7 @@ export const BASE_CHARACTERS: readonly CharacterSpec[] = [
     bottom: 'pants',
     shoes: 'dress',
     accessory: 'jacketOverShoulder',
-    glasses: false,
+    glasses: 'none',
     earrings: false,
     palette: {
       skin: LIGHT_SKIN,
@@ -296,7 +300,7 @@ export const BASE_CHARACTERS: readonly CharacterSpec[] = [
     bottom: 'pants',
     shoes: 'heels',
     accessory: 'tablet',
-    glasses: false,
+    glasses: 'none',
     earrings: false,
     palette: {
       skin: FAIR_SKIN,
@@ -319,7 +323,7 @@ export const BASE_CHARACTERS: readonly CharacterSpec[] = [
     bottom: 'skirt',
     shoes: 'heels',
     accessory: 'folder',
-    glasses: false,
+    glasses: 'none',
     earrings: true,
     palette: {
       skin: FAIR_SKIN,
@@ -342,7 +346,7 @@ export const BASE_CHARACTERS: readonly CharacterSpec[] = [
     bottom: 'pants',
     shoes: 'heels',
     accessory: 'handbag',
-    glasses: false,
+    glasses: 'none',
     earrings: true,
     palette: {
       skin: FAIR_SKIN,
@@ -366,7 +370,7 @@ export const BASE_CHARACTERS: readonly CharacterSpec[] = [
     bottom: 'pants',
     shoes: 'dress',
     accessory: 'coffee',
-    glasses: false,
+    glasses: 'none',
     earrings: false,
     palette: {
       skin: LIGHT_SKIN,
@@ -390,7 +394,7 @@ export const BASE_CHARACTERS: readonly CharacterSpec[] = [
     bottom: 'pants',
     shoes: 'dress',
     accessory: 'briefcase',
-    glasses: false,
+    glasses: 'none',
     earrings: false,
     palette: {
       skin: LIGHT_SKIN,
@@ -414,7 +418,7 @@ export const BASE_CHARACTERS: readonly CharacterSpec[] = [
     bottom: 'pants',
     shoes: 'dress',
     accessory: 'jacketOverShoulder',
-    glasses: false,
+    glasses: 'none',
     earrings: false,
     darkerHair: true,
     palette: {
@@ -438,7 +442,7 @@ export const BASE_CHARACTERS: readonly CharacterSpec[] = [
     bottom: 'skirt',
     shoes: 'heels',
     accessory: 'folder',
-    glasses: false,
+    glasses: 'none',
     earrings: false,
     palette: {
       skin: FAIR_SKIN,
@@ -462,7 +466,7 @@ export const BASE_CHARACTERS: readonly CharacterSpec[] = [
     bottom: 'widePants',
     shoes: 'heels',
     accessory: 'tablet',
-    glasses: false,
+    glasses: 'none',
     earrings: false,
     palette: {
       skin: FAIR_SKIN,
@@ -486,7 +490,7 @@ export const BASE_CHARACTERS: readonly CharacterSpec[] = [
     bottom: 'skirt',
     shoes: 'heels',
     accessory: 'handbag',
-    glasses: false,
+    glasses: 'none',
     earrings: true,
     palette: {
       skin: FAIR_SKIN,

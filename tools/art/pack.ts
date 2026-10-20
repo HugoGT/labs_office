@@ -39,7 +39,7 @@ import {
   type ArtPieceFile,
 } from '../../src/game/artContract.ts';
 import type { ChairMaterial } from './domain/chairs.ts';
-import type { PixelBuffer } from './domain/pixelBuffer.ts';
+import type { PixelBuffer } from '../../src/art/pixelBuffer.ts';
 import type { PlantKind, TreeKind } from './domain/props.ts';
 import { DEFAULT_TABLE_COLOR, ROOM_TABLE_FOOTPRINTS, type RoomTable, type TableMaterial } from './domain/tables.ts';
 import { DEFAULT_PLAIN_COLOR, type Terrain } from './domain/tiles.ts';

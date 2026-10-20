@@ -18,7 +18,7 @@ import {
 } from '../../../src/game/artContract.ts';
 import { makeRamp, mixRgba, type Ramp } from './color.ts';
 import { periodicNoise, type Noise } from './noise.ts';
-import { PixelBuffer, rgba, type Rgba } from './pixelBuffer.ts';
+import { PixelBuffer, rgba, type Rgba } from '../../../src/art/pixelBuffer.ts';
 
 /** Same contact shadow as furniture and characters. */
 const CONTACT_SHADOW = rgba(46, 26, 20, 78);

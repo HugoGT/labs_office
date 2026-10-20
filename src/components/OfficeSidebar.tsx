@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import type { CharacterPort } from '../auth/characterPort';
 import type { Role } from '../dashboard/adminPort';
 import type { ArtContributionPort } from '../dashboard/artContributionPort';
 import type { AssetAdminPort } from '../dashboard/assetAdminPort';
@@ -41,7 +42,12 @@ const ArtContributionSectionLazy = lazy(() =>
   import('./ArtContributionSection').then((sectionModule) => ({ default: sectionModule.ArtContributionSection })),
 );
 
-type PersonalizeSection = LayoutEditorSection | 'assets' | 'space' | 'art';
+/** "Mi personaje": the entrance's creator again, lazy like the others until someone opens it. */
+const MyCharacterSectionLazy = lazy(() =>
+  import('./MyCharacterSection').then((sectionModule) => ({ default: sectionModule.MyCharacterSection })),
+);
+
+type PersonalizeSection = LayoutEditorSection | 'assets' | 'space' | 'art' | 'character';
 
 /** "Mi espacio" without a server: no desk to decorate. */
 const NO_SPACE: MiEspacioPanelProps = {
@@ -107,6 +113,11 @@ export interface OfficeSidebarProps {
    */
   contributions?: ArtContributionPort | null;
   /**
+   * Editing one's own character ("Mi personaje"), for anyone signed in: the
+   * entrance's port. `undefined`/`null` (no server, or no session) leaves it out.
+   */
+  character?: CharacterPort | null;
+  /**
    * Calls a person from "Personas conectadas" (#187), the same request as the
    * context menu's "Llamar". Without it the list offers no calls.
    */
@@ -139,6 +150,7 @@ export function OfficeSidebar({
   forceExitLayoutEditing,
   assets,
   contributions,
+  character,
   onCallPeer,
 }: OfficeSidebarProps) {
   const [openPanel, setOpenPanel] = useState<'personalize' | 'people' | null>(null);
@@ -180,6 +192,7 @@ export function OfficeSidebar({
       ...(collisions ? [{ section: 'collision' as const, label: 'Editar colisiones' }] : []),
       ...(assets ? [{ section: 'assets' as const, label: 'Catálogo de decoración' }] : []),
     ] : []),
+    ...(character ? [{ section: 'character' as const, label: 'Mi personaje' }] : []),
     { section: 'space', label: 'Mi espacio' },
     ...(contributions ? [{ section: 'art' as const, label: 'Aportar arte' }] : []),
   ];
@@ -280,6 +293,11 @@ export function OfficeSidebar({
             </Suspense>
           )}
           {currentSection === 'space' && <MiEspacioPanel {...mySpace} />}
+          {currentSection === 'character' && character !== undefined && character !== null && (
+            <Suspense fallback={null}>
+              <MyCharacterSectionLazy character={character} onClose={() => setSection(null)} />
+            </Suspense>
+          )}
           {currentSection === 'art' && contributions !== undefined && contributions !== null && (
             <Suspense fallback={null}>
               <ArtContributionSectionLazy contributions={contributions} />

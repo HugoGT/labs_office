@@ -1,7 +1,11 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { AuthUser } from '../auth/authPort';
-import type { CharacterCatalog, CharacterPort, SaveCharacterResult } from '../auth/characterPort';
+import { CHARACTER_TEMPLATES } from '../art/customCharacter';
+import type { CharacterCatalog, CharacterChoice, CharacterPort, SaveCharacterResult } from '../auth/characterPort';
+
+const SPEC = CHARACTER_TEMPLATES[5]!.spec;
+const piece = (avatarId: string): CharacterChoice => ({ kind: 'piece', avatarId });
 import { decideCharacterStep, useCharacterChoice } from './useCharacterChoice';
 
 const ANA: AuthUser = { uid: 'uid-ana', email: 'ana@example.com', displayName: 'Ana' };
@@ -17,7 +21,7 @@ const CATALOG: CharacterCatalog = {
 function fakePort(overrides: Partial<CharacterPort> = {}): CharacterPort {
   return {
     read: vi.fn(async () => ({ outcome: 'ok' as const, avatarId: 'character-p02-beige-blazer', chosen: false })),
-    save: vi.fn(async (avatarId: string) => ({ outcome: 'ok' as const, avatarId })),
+    save: vi.fn(async (choice: CharacterChoice) => ({ outcome: 'ok' as const, avatarId: choice.kind === 'piece' ? choice.avatarId : 'character-custom-x' })),
     catalog: vi.fn(async () => CATALOG),
     ...overrides,
   };
@@ -27,7 +31,7 @@ describe('decideCharacterStep', () => {
   it('someone who never chose is asked, with the stored character preselected', () => {
     expect(
       decideCharacterStep({ outcome: 'ok', avatarId: 'character-p02-beige-blazer', chosen: false }, CATALOG, false),
-    ).toEqual({ phase: 'choosing', options: CATALOG.options, initialId: 'character-p02-beige-blazer' });
+    ).toEqual({ phase: 'choosing', options: CATALOG.options, initial: piece('character-p02-beige-blazer') });
   });
 
   it('a restored session that already chose enters straight away', () => {
@@ -39,13 +43,19 @@ describe('decideCharacterStep', () => {
   it('a fresh sign-in is asked again, with the saved character preselected', () => {
     expect(
       decideCharacterStep({ outcome: 'ok', avatarId: 'character-p02-beige-blazer', chosen: true }, CATALOG, true),
-    ).toEqual({ phase: 'choosing', options: CATALOG.options, initialId: 'character-p02-beige-blazer' });
+    ).toEqual({ phase: 'choosing', options: CATALOG.options, initial: piece('character-p02-beige-blazer') });
+  });
+
+  it('a custom character reopens with its stored spec', () => {
+    expect(
+      decideCharacterStep({ outcome: 'ok', avatarId: 'character-custom-x', chosen: true, spec: SPEC }, CATALOG, true),
+    ).toEqual({ phase: 'choosing', options: CATALOG.options, initial: { kind: 'custom', spec: SPEC } });
   });
 
   it('a stored character the pack no longer offers preselects the pack default', () => {
     expect(
       decideCharacterStep({ outcome: 'ok', avatarId: 'character-p99-gone', chosen: true }, CATALOG, true),
-    ).toMatchObject({ phase: 'choosing', initialId: 'character-p01-burgundy-suit' });
+    ).toMatchObject({ phase: 'choosing', initial: piece('character-p01-burgundy-suit') });
   });
 
   it.each([
@@ -68,7 +78,7 @@ describe('useCharacterChoice', () => {
     );
     await act(async () => {});
     let saving!: Promise<void>;
-    act(() => { saving = result.current.choose('character-p01-burgundy-suit'); });
+    act(() => { saving = result.current.choose(piece('character-p01-burgundy-suit')); });
     rerender({ user: null });
     rerender({ user: ANA });
     await act(async () => { release({ outcome: 'denied', reason: 'session-expired' }); await saving; });
@@ -107,7 +117,7 @@ describe('useCharacterChoice', () => {
     const { result } = renderHook(() => useCharacterChoice(port, ANA, true, false));
     await act(async () => {});
 
-    expect(result.current.flow).toMatchObject({ phase: 'choosing', initialId: 'character-p02-beige-blazer' });
+    expect(result.current.flow).toMatchObject({ phase: 'choosing', initial: piece('character-p02-beige-blazer') });
     expect(port.read).toHaveBeenCalledTimes(1);
     expect(port.catalog).toHaveBeenCalledTimes(1);
   });
@@ -129,10 +139,10 @@ describe('useCharacterChoice', () => {
     await act(async () => {});
 
     await act(async () => {
-      await result.current.choose('character-p01-burgundy-suit');
+      await result.current.choose(piece('character-p01-burgundy-suit'));
     });
 
-    expect(port.save).toHaveBeenCalledWith('character-p01-burgundy-suit');
+    expect(port.save).toHaveBeenCalledWith(piece('character-p01-burgundy-suit'));
     expect(result.current.flow).toEqual({ phase: 'resolved' });
     expect(result.current.error).toBeNull();
   });
@@ -145,7 +155,7 @@ describe('useCharacterChoice', () => {
 
     let saving!: Promise<void>;
     act(() => {
-      saving = result.current.choose('character-p01-burgundy-suit');
+      saving = result.current.choose(piece('character-p01-burgundy-suit'));
     });
     expect(result.current.saving).toBe(true);
 
@@ -159,6 +169,7 @@ describe('useCharacterChoice', () => {
   it.each([
     [{ outcome: 'invalid' as const, reason: 'retired-piece' as const }, 'Ese personaje ya no está disponible. Elige otro.'],
     [{ outcome: 'invalid' as const, reason: 'unknown-piece' as const }, 'Ese personaje no existe. Elige otro.'],
+    [{ outcome: 'invalid' as const, reason: 'invalid-spec' as const }, 'Esa combinación no está disponible. Revisa las opciones.'],
     [{ outcome: 'failed' as const }, 'No se pudo guardar tu personaje. Inténtalo de nuevo.'],
   ])('a rejected save (%j) keeps the selector open with a readable error', async (outcome, message) => {
     const port = fakePort({ save: vi.fn(async () => outcome) });
@@ -166,7 +177,7 @@ describe('useCharacterChoice', () => {
     await act(async () => {});
 
     await act(async () => {
-      await result.current.choose('character-p01-burgundy-suit');
+      await result.current.choose(piece('character-p01-burgundy-suit'));
     });
 
     expect(result.current.flow).toMatchObject({ phase: 'choosing' });
@@ -179,7 +190,7 @@ describe('useCharacterChoice', () => {
     await act(async () => {});
 
     await act(async () => {
-      await result.current.choose('character-p01-burgundy-suit');
+      await result.current.choose(piece('character-p01-burgundy-suit'));
     });
 
     expect(result.current.flow).toEqual({ phase: 'resolved' });

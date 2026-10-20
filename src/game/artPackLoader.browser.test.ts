@@ -147,6 +147,60 @@ describe('ArtPackLoader', () => {
     expect(art.request('floor-grass', () => {})).toBe('failed');
   });
 
+  describe('characters built with the creator', () => {
+    const HASH = '0123456789abcdef0123456789abcdef';
+    const ID = `character-custom-${HASH}`;
+    const FOLDER = 'http://127.0.0.1:9/assets/characters/';
+
+    /**
+     * The office server draws these sheets; here a pack character's PNGs stand
+     * in for them, so the test still sees which URL was asked for.
+     */
+    function serveFromPack(scene: Phaser.Scene): string[] {
+      const asked: string[] = [];
+      const load = scene.load;
+      const original = load.spritesheet.bind(load);
+      vi.spyOn(load, 'spritesheet').mockImplementation(((key: string, url: string, config: Phaser.Types.Loader.FileTypes.ImageFrameConfig) => {
+        asked.push(url);
+        const standIn = url.startsWith(FOLDER)
+          ? `assets/pack/character/p02-beige-blazer-${url.endsWith('walk.png') ? 'walk' : 'seated'}.png`
+          : url;
+        return original(key, standIn, config);
+      }) as typeof load.spritesheet);
+      return asked;
+    }
+
+    it('loads a custom id from the server folder with the pack frame grid, without re-reading any catalog', async () => {
+      const { scene, art } = await boot({ customCharactersUrl: FOLDER });
+      const asked = serveFromPack(scene);
+
+      await settle(art, ID);
+
+      expect(art.status(ID)).toBe('ready');
+      expect(asked).toEqual([`${FOLDER}${HASH}/walk.png`, `${FOLDER}${HASH}/seated.png`]);
+      const walk = art.sheet(ID, 'walk') as string;
+      expect(scene.textures.get(walk).get(0)).toMatchObject({ width: 32, height: 52 });
+      expect(art.sheet(ID, 'seated')).not.toBeNull();
+    });
+
+    it('a sheet the server cannot draw leaves the custom character failed, so the avatar stays procedural', async () => {
+      const { art } = await boot({ customCharactersUrl: FOLDER });
+
+      await settle(art, ID);
+
+      expect(art.status(ID)).toBe('failed');
+      expect(art.sheet(ID, 'walk')).toBeNull();
+    });
+
+    it('without a server folder a custom id is an unknown piece', async () => {
+      const { art } = await boot();
+
+      await settle(art, ID);
+
+      expect(art.status(ID)).toBe('failed');
+    });
+  });
+
   describe('uploaded pieces (#121)', () => {
     // The uploads manifest lives on the office server in production. Here the
     // pack's own manifest stands in for it: same format, files next to it.

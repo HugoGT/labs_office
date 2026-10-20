@@ -7,7 +7,7 @@
  * 5. a dark outline around the silhouette and a soft contact shadow under the feet.
  */
 import { CAMERA_PITCH, LIGHT_DIRECTION, WALK_FRAME, type FrameGeometry } from './camera.ts';
-import { hexToRgba, mixRgba, TONES, type Ramp, type Tone } from './color.ts';
+import { hexToRgba, mixRgba, TONES, type Ramp, type Tone } from '../game/artColor.ts';
 import { add, dot, emptyHit, scale, sub, v3, type Primitive, type Vec3 } from './geometry.ts';
 import { PixelBuffer, rgba } from './pixelBuffer.ts';
 import type { MaterialKey, Scene } from './rig.ts';
