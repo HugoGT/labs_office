@@ -4,9 +4,9 @@
  * so tiles can repeat in any direction. Shading follows the sprites: hue-shifted ramps, light from
  * the upper left.
  */
-import { CHARACTER_HEIGHT } from './camera.ts';
+import { CHARACTER_HEIGHT } from '../../../src/art/camera.ts';
 import { hexToRgba, makeRamp, mixRgba } from './color.ts';
-import { PixelBuffer, rgba, type Rgba } from './pixelBuffer.ts';
+import { PixelBuffer, rgba, type Rgba } from '../../../src/art/pixelBuffer.ts';
 import { createRng, type Rng } from './random.ts';
 
 export const TILE_SIZE = CHARACTER_HEIGHT * 2;

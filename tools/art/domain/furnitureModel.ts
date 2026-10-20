@@ -13,8 +13,8 @@
  */
 import { OUTLINE_INK, OUTLINE_INK_MIX } from '../../../src/game/artColor.ts';
 import { mixRgba, type Ramp, type Tone } from './color.ts';
-import { PixelBuffer, rgba, type Rgba } from './pixelBuffer.ts';
-import type { Facing, SeatPoint } from './seating.ts';
+import { PixelBuffer, rgba, type Rgba } from '../../../src/art/pixelBuffer.ts';
+import type { Facing, SeatPoint } from '../../../src/art/seating.ts';
 
 /** Floor depth (north-south) drawn this much shorter than width. */
 export const DEPTH_SCALE = 0.6;

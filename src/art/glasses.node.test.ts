@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { CHARACTERS } from './characters.ts';
-import { hexToRgba } from './color.ts';
+import { hexToRgba } from '../game/artColor.ts';
 import type { Rgba } from './pixelBuffer.ts';
 import { buildCharacterSprites, frameRect } from './spriteSheet.ts';
 

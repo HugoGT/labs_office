@@ -18,6 +18,7 @@ src/                    SPA (Vite + React + Phaser)
   components/           React UI (OfficeShell, GameCanvas, BottomBar, VideoTiles, RecBadge, ...)
   dashboard/            admin panel (/dashboard): *Port.ts + *Client.ts + *Panel.tsx
   game/                 Phaser scene, map, proximity, LiveKit and Colyseus clients, protocol
+  art/                  pure character renderer shared by tools/art, the SPA and the server (spec, rig, sheets)
   hooks/                React hooks bridging game/clients to UI (useProximityAudio, useDesks, ...)
   test/                 Vitest setup files
 server/src/             Node server, run directly by Node type stripping (no build step)
@@ -27,7 +28,7 @@ server/src/             Node server, run directly by Node type stripping (no bui
   admin/ assets/ collisions/ decor/ desks/ directory/ recording/ spaces/ terrain/   feature modules (ports and adapters)
   directory/schema.sql  Postgres schema, applied idempotently on every start
 e2e/                    real-process E2E harness (node:test + Playwright)
-tools/art/              art pack exporter: pure generators (domain/), sheets, manifest, previews
+tools/art/              art pack exporter: pure generators (domain/; characters come from src/art/), sheets, manifest, previews
 tools/map/              initial Tiled layout generator and its editor palette (`pnpm map:init`)
 tools/pwa/              PWA: manifest + Workbox options read by vite.config.ts, icon generator (`pnpm pwa:icons`)
 tools/vm/               office-hours rules of the test VM (vmSchedule.ts) and `node tools/vm/vm.ts` (nightly job, office-vm.sh)
@@ -44,6 +45,8 @@ src/game/maps/          office.json, the Tiled base layout (static map), and its
 ```
 
 Shared code: the server imports `src/game/officeProtocol.ts`, `src/game/mapData.ts`, `src/game/artContract.ts`, `src/game/seating.ts`, `src/game/officeLayout.ts` and `src/game/pieceCollisions.ts` directly (import-free but for `maps/office.json`, a JSON import with `with { type: 'json' }`). Changes there affect both client and server.
+
+The character renderer lives in `src/art/` (pure TS, explicit `.ts` imports, only its `*.node.test.ts` import `node:`): `characters.ts` (`CharacterSpec`, `BASE_CHARACTERS`), the rig and ray caster (`rig.ts`, `spriteRenderer.ts`, `geometry.ts`, `camera.ts`), the cycles (`walkCycle.ts`, `sitCycle.ts`), `spriteSheet.ts` and `characterSheets.ts` (`renderCharacterSheets`: the contract walk and seated sheets). `tools/art` draws the pack's characters with it, so `pnpm art:export` and `tools/art/pack.test.ts` guard it too; `PixelBuffer` (`src/art/pixelBuffer.ts`) is also the image type of every other generator.
 
 ## Tech stack
 

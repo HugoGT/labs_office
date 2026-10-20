@@ -15,7 +15,7 @@ import {
 } from '../../../src/game/artContract.ts';
 import { UPLOAD_FILE_ROLES } from '../../../server/src/assets/assetUploadRules.ts';
 import { LINE_HEIGHT, drawText, textWidth } from './pixelFont.ts';
-import { PixelBuffer, type Rgba } from './pixelBuffer.ts';
+import { PixelBuffer, type Rgba } from '../../../src/art/pixelBuffer.ts';
 import {
   TEMPLATE_COLORS,
   TEMPLATE_IMAGE_KINDS,

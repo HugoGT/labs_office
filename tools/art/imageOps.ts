@@ -1,5 +1,7 @@
 /** Small pixel-buffer helpers shared by the PNG export and preview scripts. */
-import { PixelBuffer, type Rgba } from './domain/pixelBuffer.ts';
+import { PixelBuffer, type Rgba } from '../../src/art/pixelBuffer.ts';
+
+export { place } from '../../src/art/pixelBuffer.ts';
 
 /** Light brown floor tone, so exported sprites read the same as in the simulation. */
 export const BACKDROP: Rgba = { r: 201, g: 167, b: 124, a: 255 };
@@ -28,16 +30,3 @@ export function crop(image: PixelBuffer, x: number, y: number, width: number, he
   return out;
 }
 
-/**
- * Copies `source` into `target` with its top-left at (dx, dy), pixels written as they are. Sheets
- * are assembled with this instead of `blit`, so no alpha blending can touch a translucent pixel.
- */
-export function place(target: PixelBuffer, source: PixelBuffer, dx: number, dy: number): void {
-  if (dx < 0 || dy < 0 || dx + source.width > target.width || dy + source.height > target.height) {
-    throw new Error(`A ${source.width}x${source.height} image does not fit at (${dx}, ${dy}) in ${target.width}x${target.height}`);
-  }
-  for (let y = 0; y < source.height; y += 1) {
-    const from = y * source.width * 4;
-    target.data.set(source.data.subarray(from, from + source.width * 4), ((dy + y) * target.width + dx) * 4);
-  }
-}

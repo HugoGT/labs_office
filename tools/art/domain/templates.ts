@@ -23,7 +23,7 @@ import {
   type Point,
 } from '../../../src/game/artContract.ts';
 import { LINE_HEIGHT, drawText } from './pixelFont.ts';
-import { PixelBuffer, rgba, type Rgba } from './pixelBuffer.ts';
+import { PixelBuffer, rgba, type Rgba } from '../../../src/art/pixelBuffer.ts';
 
 /** Kinds with a template: every image an upload takes (characters, desks, floors, plants) plus the chair. */
 export const TEMPLATE_IMAGE_KINDS = ['character-walk', 'character-seated', 'chair', 'desk', 'floor', 'plant'] as const satisfies readonly ArtImageKind[];

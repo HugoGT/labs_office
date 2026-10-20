@@ -8,7 +8,7 @@
  */
 import { CAMERA_PITCH } from './camera.ts';
 import type { Accessory, CharacterSpec, HairStyle } from './characters.ts';
-import { darkenRamp, makeRamp, type Ramp, type Tone } from './color.ts';
+import { darkenRamp, makeRamp, type Ramp, type Tone } from '../game/artColor.ts';
 import {
   add,
   applyBasis,

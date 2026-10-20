@@ -35,17 +35,17 @@ import {
   wallFrameIndex,
   type TerrainMaterial,
 } from '../../src/game/artContract.ts';
-import { ANCHOR_X, ANCHOR_Y, FRAME_HEIGHT, FRAME_WIDTH } from './domain/camera.ts';
+import { ANCHOR_X, ANCHOR_Y, FRAME_HEIGHT, FRAME_WIDTH } from '../../src/art/camera.ts';
 import { chairSprite, CHAIR_MATERIALS } from './domain/chairs.ts';
-import { BASE_CHARACTERS } from './domain/characters.ts';
-import { DIRECTIONS } from './domain/directions.ts';
-import { PixelBuffer } from './domain/pixelBuffer.ts';
-import { FACINGS, SEAT_BLOCK, SEAT_HEIGHT } from './domain/seating.ts';
-import { SIT_ANCHOR_X, SIT_ANCHOR_Y, SIT_DOWN_FRAME_COUNT, SIT_FRAME_HEIGHT, SIT_FRAME_WIDTH, SIT_ROWS } from './domain/sitCycle.ts';
-import { buildCharacterSprites } from './domain/spriteSheet.ts';
+import { BASE_CHARACTERS } from '../../src/art/characters.ts';
+import { DIRECTIONS } from '../../src/art/directions.ts';
+import { PixelBuffer } from '../../src/art/pixelBuffer.ts';
+import { FACINGS, SEAT_BLOCK, SEAT_HEIGHT } from '../../src/art/seating.ts';
+import { SIT_ANCHOR_X, SIT_ANCHOR_Y, SIT_DOWN_FRAME_COUNT, SIT_FRAME_HEIGHT, SIT_FRAME_WIDTH, SIT_ROWS } from '../../src/art/sitCycle.ts';
+import { buildCharacterSprites } from '../../src/art/spriteSheet.ts';
 import { tableSprite, TABLE_MATERIALS } from './domain/tables.ts';
 import { terrainTile, TERRAINS, TILE_SIZE } from './domain/tiles.ts';
-import { WALK_FRAME_COUNT } from './domain/walkCycle.ts';
+import { WALK_FRAME_COUNT } from '../../src/art/walkCycle.ts';
 import { groupWallGeometry, resolveWallGeometry } from './domain/wallGeometry.ts';
 import { WALL_MATERIALS, WallMap } from './domain/wallMap.ts';
 import { composeWalls } from './domain/wallRenderer.ts';

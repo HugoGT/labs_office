@@ -1,6 +1,6 @@
 # Character Option Catalog
 
-Source of truth: `tools/art/domain/characters.ts` (types) and `tools/art/domain/rig.ts` (drawing). Base ids are listed as examples; see them in `docs/art/preview/characters.png`.
+Source of truth: `src/art/characters.ts` (types) and `src/art/rig.ts` (drawing). Base ids are listed as examples; see them in `docs/art/preview/characters.png`.
 
 ## Build
 

@@ -8,7 +8,6 @@ import {
   BRIDGE,
   BRIDGE_ORIENTATIONS,
   CHAIR,
-  CHARACTER_WALK,
   DESK,
   HEDGE,
   PACK_FACINGS,
@@ -42,10 +41,10 @@ import {
   type WallPiece,
 } from '../../src/game/artContract.ts';
 import { CHAIR_MATERIALS, chairSprite, type ChairMaterial } from './domain/chairs.ts';
-import { BASE_CHARACTERS, type CharacterSpec } from './domain/characters.ts';
-import { PixelBuffer } from './domain/pixelBuffer.ts';
+import { BASE_CHARACTERS, type CharacterSpec } from '../../src/art/characters.ts';
+import { PixelBuffer } from '../../src/art/pixelBuffer.ts';
 import { bridgeSprite, hedgeSprite, PLANT_KINDS, plantSprite, TREE_KINDS, treeSprite, type PlantKind, type TreeKind } from './domain/props.ts';
-import { buildCharacterSprites, type CharacterSprites } from './domain/spriteSheet.ts';
+import { renderCharacterSheets } from '../../src/art/characterSheets.ts';
 import { ROOM_TABLES, roomTableSprite, TABLE_MATERIALS, tableSprite, type RoomTable, type TableMaterial } from './domain/tables.ts';
 import { decalTile, terrainBankTile, terrainEdgeTile, terrainVoidCapTile, terrainVoidEdgeTile } from './domain/terrainTiles.ts';
 import { TERRAINS, terrainTile, type Terrain } from './domain/tiles.ts';
@@ -54,22 +53,11 @@ import { WALL_MATERIALS, type WallMaterial } from './domain/wallMap.ts';
 import { bodySprite, jointSprite } from './domain/walls.ts';
 import { crop, place } from './imageOps.ts';
 
+export { characterSeatedSheet, characterWalkSheet } from '../../src/art/characterSheets.ts';
+
 function blankSheet(spec: Parameters<typeof sheetSize>[0]): PixelBuffer {
   const { width, height } = sheetSize(spec);
   return new PixelBuffer(width, height);
-}
-
-/** The ten walk steps, then the idle pose in the last column. */
-export function characterWalkSheet(sprites: CharacterSprites): PixelBuffer {
-  const sheet = blankSheet(CHARACTER_WALK);
-  place(sheet, sprites.walk, 0, 0);
-  place(sheet, sprites.idle, CHARACTER_WALK.idleColumn * CHARACTER_WALK.frame.width, 0);
-  return sheet;
-}
-
-/** The generator already draws the seated sheet in the contract layout. */
-export function characterSeatedSheet(sprites: CharacterSprites): PixelBuffer {
-  return new PixelBuffer(sprites.sit.width, sprites.sit.height, sprites.sit.data.slice());
 }
 
 /**
@@ -246,8 +234,8 @@ export interface PackSheets {
 export function buildPackSheets(): PackSheets {
   return {
     characters: BASE_CHARACTERS.map((spec) => {
-      const sprites = buildCharacterSprites(spec);
-      return { spec, walk: characterWalkSheet(sprites), seated: characterSeatedSheet(sprites) };
+      const { walk, seated } = renderCharacterSheets(spec);
+      return { spec, walk, seated };
     }),
     chairs: CHAIR_MATERIALS.map((material) => ({ material, image: chairSheet(material) })),
     desks: TABLE_MATERIALS.map((material) => ({ material, sheet: deskSheet(material) })),
