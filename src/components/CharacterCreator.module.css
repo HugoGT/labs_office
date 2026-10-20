@@ -1,0 +1,352 @@
+/* Same full-screen backdrop and card as LoginScreen: one entrance, two steps. Also the
+   "Mi personaje" dialog of Personalizar, over the office. */
+.screen {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0d1117;
+  color: #e5e7eb;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 1040px;
+  max-height: 100%;
+  overflow-y: auto;
+  background: #111827f2;
+  border: 1px solid #2b3444;
+  border-radius: var(--radius-panel);
+  padding: 24px;
+  box-shadow: 0 8px 30px #0009;
+}
+
+.title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+/* Templates and whole characters: one scrolling row of thumbnails each. */
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rowTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #d1d5db;
+}
+
+.thumbs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px 2px 6px;
+}
+
+.thumb {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 4px;
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.thumb:hover {
+  border-color: #4b5563;
+}
+
+.thumb[aria-pressed='true'] {
+  background: #1e3a8a55;
+  border-color: #3b82f6;
+}
+
+.thumb:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+.parts {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.part {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px 12px;
+  background: #0d1117;
+  border: 1px solid #2b3444;
+  border-radius: var(--radius-control);
+}
+
+.partLegend {
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.choiceGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.choiceLegend {
+  padding: 0;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  position: relative;
+  padding: 4px 8px;
+  font-size: 12px;
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.chip:hover,
+.swatch:hover {
+  border-color: #4b5563;
+}
+
+.chip:has(.radio:checked) {
+  background: #1e3a8a55;
+  border-color: #3b82f6;
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.swatch {
+  position: relative;
+  display: flex;
+  padding: 3px;
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.swatch:has(.radio:checked) {
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 1px #93c5fd;
+}
+
+.swatchColor {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-tag);
+  border: 1px solid #0006;
+}
+
+.chip:has(.radio:focus-visible),
+.swatch:has(.radio:focus-visible) {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+/* Visually hidden but still focusable and announced: the label is the control. */
+.radio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.checks {
+  display: flex;
+  gap: 16px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sprite {
+  display: block;
+  flex: none;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+
+.walking {
+  animation: walk 1s steps(var(--sprite-steps)) infinite;
+}
+
+@keyframes walk {
+  to {
+    background-position-x: var(--sprite-travel);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .walking {
+    animation: none;
+  }
+}
+
+.preview {
+  position: sticky;
+  top: 0;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: #0d1117;
+  border: 1px solid #2b3444;
+  border-radius: var(--radius-control);
+}
+
+/* Credit of a contributed character (#122). */
+.credit {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.poses {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.pose {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+}
+
+.caption {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.error {
+  background: #7f1d1d66;
+  border: 1px solid #b91c1c;
+  border-radius: var(--radius-control);
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #fecaca;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.secondary {
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.secondary:hover:not(:disabled) {
+  border-color: #4b5563;
+}
+
+.submit {
+  min-width: 200px;
+  background: #1d4ed8;
+  color: #eff6ff;
+  border: 1px solid #3b82f6;
+  border-radius: var(--radius-control);
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.submit:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.submit:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Narrow screens: the preview goes above the parts and the buttons span the card. */
+@media (max-width: 760px) {
+  .layout {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .preview {
+    position: static;
+  }
+
+  .poses {
+    justify-content: center;
+  }
+
+  .actions > * {
+    flex: 1;
+  }
+}

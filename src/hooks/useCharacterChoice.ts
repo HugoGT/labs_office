@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AuthUser } from '../auth/authPort';
+import type { CustomCharacterSpec } from '../art/customCharacter';
 import type { AccessDeniedReason } from '../game/officeProtocol';
 import type {
   CharacterCatalog,
+  CharacterChoice,
   CharacterOption,
   CharacterPort,
   ReadCharacterResult,
@@ -12,13 +14,13 @@ import type {
 /**
  * Where the entrance stands on the character (art migration, step 5):
  * `pending` while the name is not resolved yet or the choice is being read,
- * `choosing` while the selector is shown, and `resolved` once the office may
+ * `choosing` while the creator is shown (`initial` is what it opens with), and `resolved` once the office may
  * open. `resolved` carries no id on purpose: the office draws the character
  * the server replicates, never one this hook remembers.
  */
 export type CharacterFlow =
   | { phase: 'pending' }
-  | { phase: 'choosing'; options: readonly CharacterOption[]; initialId: string }
+  | { phase: 'choosing'; options: readonly CharacterOption[]; initial: CharacterChoice }
   | { phase: 'resolved' };
 
 export interface UseCharacterChoiceResult {
@@ -26,7 +28,7 @@ export interface UseCharacterChoiceResult {
   /** Spanish copy of the last rejected save; `null` while there is none. */
   error: string | null;
   saving: boolean;
-  choose: (avatarId: string) => Promise<void>;
+  choose: (choice: CharacterChoice) => Promise<void>;
 }
 
 const PENDING: CharacterFlow = { phase: 'pending' };
@@ -53,12 +55,19 @@ export function decideCharacterStep(
   if (read.outcome === 'denied') return PENDING;
   if (read.outcome !== 'ok' || catalog === null) return RESOLVED;
   if (read.chosen && !freshSignIn) return RESOLVED;
-  const offered = catalog.options.some((option) => option.id === read.avatarId);
-  return { phase: 'choosing', options: catalog.options, initialId: offered ? read.avatarId : catalog.defaultId };
+  return { phase: 'choosing', options: catalog.options, initial: initialChoice(read, catalog) };
 }
 
-function describeSaveRejection(result: SaveCharacterResult): string {
+/** A custom character reopens with its parts; a piece is preselected while it is still offered. */
+export function initialChoice(read: { avatarId: string; spec?: CustomCharacterSpec }, catalog: CharacterCatalog): CharacterChoice {
+  if (read.spec !== undefined) return { kind: 'custom', spec: read.spec };
+  const offered = catalog.options.some((option) => option.id === read.avatarId);
+  return { kind: 'piece', avatarId: offered ? read.avatarId : catalog.defaultId };
+}
+
+export function describeSaveRejection(result: SaveCharacterResult): string {
   if (result.outcome !== 'invalid') return 'No se pudo guardar tu personaje. Inténtalo de nuevo.';
+  if (result.reason === 'invalid-spec') return 'Esa combinación no está disponible. Revisa las opciones.';
   return result.reason === 'retired-piece'
     ? 'Ese personaje ya no está disponible. Elige otro.'
     : 'Ese personaje no existe. Elige otro.';
@@ -130,7 +139,7 @@ export function useCharacterChoice(
   }, [port, user, nameResolved, onAccessDenied]);
 
   const choose = useCallback(
-    async (avatarId: string): Promise<void> => {
+    async (choice: CharacterChoice): Promise<void> => {
       if (port === null) return;
       const generation = saveGenerationRef.current;
       if (aliveRef.current) {
@@ -138,7 +147,7 @@ export function useCharacterChoice(
         setError(null);
       }
       try {
-        const result = await port.save(avatarId);
+        const result = await port.save(choice);
         if (!aliveRef.current || generation !== saveGenerationRef.current) return;
         if (result.outcome === 'denied') {
           setFlow(PENDING);

@@ -7,7 +7,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useCharacterChoice } from '../hooks/useCharacterChoice';
 import { useDisplayName } from '../hooks/useDisplayName';
 import { usePasswordReset } from '../hooks/usePasswordReset';
-import { CharacterSelect } from './CharacterSelect';
+import { CharacterCreator } from './CharacterCreator';
 import { LoginScreen } from './LoginScreen';
 
 export type { OfficeSession };
@@ -143,12 +143,15 @@ export function AuthGate({
     if (character.flow.phase === 'resolved') return <>{children(session)}</>;
     if (character.flow.phase === 'choosing') {
       return (
-        <CharacterSelect
+        <CharacterCreator
+          heading="Crea tu personaje"
+          description="Así te verán tus compañeros en la oficina. Empieza desde una plantilla y cambia lo que quieras."
           options={character.flow.options}
-          initialId={character.flow.initialId}
+          initial={character.flow.initial}
           pending={character.saving}
           error={character.error}
-          onSubmit={(avatarId) => void character.choose(avatarId)}
+          submitLabel="Entrar a la oficina"
+          onSubmit={(choice) => void character.choose(choice)}
         />
       );
     }
