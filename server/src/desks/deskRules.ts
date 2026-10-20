@@ -135,17 +135,15 @@ export function assertValidDeskPosition(position: DeskPosition): void {
 }
 
 /**
- * La etiqueta se guarda tal cual la escribio el admin, solo recortada: se
- * pinta en el mapa. Vacia NO se admite -- `label text NOT NULL` dejaria pasar
- * la cadena vacia y el mapa mostraria un escritorio que no se puede nombrar al
- * moverlo o borrarlo.
+ * The label is optional since "Editar espacios": a desk is created empty, with
+ * no name asked, and absent or blank reads as `''` (the column's DEFAULT). A
+ * label an older client still sends is kept trimmed and drawn on the map;
+ * anything but a string is a malformed body.
  */
-export function normalizeDeskLabel(raw: string): string {
-  const label = typeof raw === 'string' ? raw.trim() : '';
-  if (label.length === 0) {
-    throw new InvalidDeskError('label debe ser una cadena no vacia');
-  }
-  return label;
+export function normalizeDeskLabel(raw: string | undefined): string {
+  if (raw === undefined) return '';
+  if (typeof raw !== 'string') throw new InvalidDeskError('label debe ser una cadena');
+  return raw.trim();
 }
 
 /**
@@ -161,7 +159,8 @@ export function deskBoundsOverlap(a: DeskPosition, b: DeskPosition): boolean {
 }
 
 export interface CreateDeskInput {
-  label: string;
+  /** Optional: an empty desk has no label. */
+  label?: string;
   x: number;
   y: number;
 }
@@ -173,7 +172,7 @@ export interface CreateDeskInput {
  * hacer ruido: quien se sienta en un escritorio lo decide esa persona con
  * `claimDesk`, no el administrador que lo crea.
  */
-export function normalizeCreateDeskInput(input: CreateDeskInput): CreateDeskInput {
+export function normalizeCreateDeskInput(input: CreateDeskInput): Required<CreateDeskInput> {
   assertValidDeskPosition(input);
   return { label: normalizeDeskLabel(input.label), x: input.x, y: input.y };
 }

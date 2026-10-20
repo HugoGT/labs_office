@@ -396,6 +396,14 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_id text NOT NULL DEFAULT 'char
 -- accounts through the character selector on their first access after it.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_chosen_at timestamptz;
 
+-- "Editar espacios": a desk is created empty, with no label asked. NOT NULL
+-- stays (every reader takes a string) and the empty string is the default;
+-- SET DEFAULT is idempotent and touches no existing row.
+ALTER TABLE desks ALTER COLUMN label SET DEFAULT '';
+
+-- Material and color stopped meaning anything when the table became desk
+-- decor (Editar espacios): nothing draws them. Kept so older rows and older
+-- clients stay valid.
 ALTER TABLE desks ADD COLUMN IF NOT EXISTS material_id text NOT NULL DEFAULT 'desk-wood';
 ALTER TABLE desks ADD COLUMN IF NOT EXISTS color text;
 ALTER TABLE desks DROP CONSTRAINT IF EXISTS desks_color_check;

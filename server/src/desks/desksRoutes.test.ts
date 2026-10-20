@@ -361,6 +361,22 @@ describe('handleCreateDesk', () => {
     expect(result.body).toMatchObject({ label: 'Mesa 1', x: 4, y: 4, occupant: null });
   });
 
+  it('creates an empty desk from a position alone: no label, no material (Editar espacios)', async () => {
+    const { deps, desks } = harness();
+
+    const result = await handleCreateDesk(BEARER_ADMIN, { x: 4, y: 4 }, deps);
+
+    expect(result.status).toBe(201);
+    expect(result.body).toMatchObject({ label: '', x: 4, y: 4, occupant: null });
+    expect(await desks.listDesks()).toEqual([expect.objectContaining({ label: '', x: 4, y: 4, occupantId: null })]);
+  });
+
+  it('refuses a label that is not a string', async () => {
+    const { deps } = harness();
+
+    expect((await handleCreateDesk(BEARER_ADMIN, { label: 7, x: 4, y: 4 }, deps)).status).toBe(400);
+  });
+
   it('coordenadas invalidas responden 400', async () => {
     const { deps } = harness();
 
@@ -773,6 +789,18 @@ describe('handleClaimDesk', () => {
 
     expect((await desks.getDesk(viejo.id))?.occupantId).toBeNull();
     expect((await desks.getDesk(nuevo.id))?.occupantId).toBe(ANA.id);
+  });
+
+  it('one desk per person, admins included: claiming another releases the first', async () => {
+    const { deps, desks } = harness();
+    const first = await desks.createDesk({ x: 0, y: 0 });
+    const second = await desks.createDesk({ x: 8, y: 0 });
+
+    expect((await handleClaimDesk(BEARER_ADMIN, first.id, deps)).status).toBe(200);
+    expect((await handleClaimDesk(BEARER_ADMIN, second.id, deps)).status).toBe(200);
+
+    const held = (await desks.listDesks()).filter((desk) => desk.occupantId === ADMIN.id);
+    expect(held.map((desk) => desk.id)).toEqual([second.id]);
   });
 
   it('un id que no existe responde 404', async () => {

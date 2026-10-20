@@ -35,7 +35,10 @@ import type { DeskItem } from '../decor/decorPort.ts';
 
 export interface Desk {
   id: string;
-  /** Como lo llama la oficina ("Mesa 4"). Se pinta en el mapa. */
+  /**
+   * Como lo llama la oficina ("Mesa 4"), `''` for a desk created empty
+   * ("Editar espacios" asks no label). Drawn on the map only when not empty.
+   */
   label: string;
   /**
    * Origen en TILES, no en pixeles. Misma unidad que `Space`. El tamano NO
@@ -81,7 +84,8 @@ export interface OfficeDesk extends Desk {
 }
 
 export interface CreateDeskInput {
-  label: string;
+  /** Optional: absent means an empty desk (`''`). */
+  label?: string;
   x: number;
   y: number;
   /**
