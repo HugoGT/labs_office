@@ -274,13 +274,12 @@ export function staticCollisionInstances(
   return [...layoutPropInstances(props), ...seatInstances(seats, BASE_CHAIR_PIECE)];
 }
 
-/** A served desk area in world pixels, with its material and the pieces of its decor. */
+/** A served desk area in world pixels and the pieces of its decor. */
 export interface CollisionDesk {
   readonly x: number;
   readonly y: number;
   readonly w: number;
   readonly h: number;
-  readonly materialId: string | null;
   readonly items: readonly { readonly slot: number; readonly rotation: number; readonly pieceId: string | null }[];
 }
 
@@ -292,9 +291,9 @@ function isRotation(value: number): value is CollisionRotation {
 }
 
 /**
- * Instances of the served desks (furniture in the middle of the area, facing
- * down like `DEFAULT_DESK_FACING`) and of the plants and chairs of their
- * decor, each in its slot box (`deskSlotRect`). A decor plant is drawn
+ * Instances of the decor on the served desks. A desk is an empty 3x3 area
+ * with no piece of its own (Editar espacios): only the plants and chairs of
+ * its occupant's decor stand there, each in its slot box (`deskSlotRect`). A decor plant is drawn
  * squeezed into its box and turned by the item rotation, so its rectangles
  * are too; a decor chair stands 1:1 on the box middle in the facing its
  * rotation picks. Decor that is neither has no piece and never collides.
@@ -302,16 +301,6 @@ function isRotation(value: number): value is CollisionRotation {
 export function deskInstances(desks: readonly CollisionDesk[]): CollisionInstance[] {
   const instances: CollisionInstance[] = [];
   for (const desk of desks) {
-    if (desk.materialId === null) continue;
-    instances.push({
-      piece: desk.materialId,
-      pivot: { x: desk.x + desk.w / 2, y: desk.y + desk.h / 2 },
-      rotation: 0,
-      scale: UNIT,
-      offset: ORIGIN,
-      defaults: [],
-      pickBox: { x: desk.x, y: desk.y, w: desk.w, h: desk.h },
-    });
     const boxW = desk.w / SLOT_COLUMNS;
     const boxH = desk.h / SLOT_COLUMNS;
     for (const item of desk.items) {

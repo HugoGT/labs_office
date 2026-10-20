@@ -25,12 +25,10 @@ import {
 } from './depthLayers';
 import { feetOf, physicalBodyRect } from './avatarGeometry';
 import { BODY_CENTER_OFFSET, positionForBodyTile } from './pathfinding';
-import { chairSeatId, decorSeatId, deskSeatId, mapSeatId } from './seating';
-import { deskFurnitureName, deskItemName, deskZoneName } from './deskLayout';
+import { chairSeatId, decorSeatId, mapSeatId } from './seating';
+import { deskItemName, deskZoneName } from './deskLayout';
 import { artSheetKey, recoloredSheetKey } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
-import { deskAreaAnchor, deskPlacement } from './artPlacement';
-import type { ArtDeskPiece } from './artContract';
 import { buildTerrainGrid } from './terrainGrid';
 import { VOID_COLOR } from './terrainRender';
 import type { DeskDecorItem, DeskOccupant, OfficeDesk } from './desksPort';
@@ -927,7 +925,7 @@ describe('office entry art readiness', () => {
     const { scene } = await bootOfficeScene(bridge, { endpoint: null, waitForOfficeData: true });
     const art = (scene as unknown as { art: ArtPackLoader }).art;
     const manifest = art.manifest!;
-    const aliases = ['desk-wood', 'plant-ficus'].map((id) => {
+    const aliases = ['plant-ficus'].map((id) => {
       const piece = manifest.pieces.find((piece) => piece.id === id)!;
       return { ...piece, id: `${id}-entry`, files: piece.files.map((file) => ({ ...file,
         path: broken ? 'entry-missing.png' : file.path })) };
@@ -935,7 +933,6 @@ describe('office entry art readiness', () => {
     art.adoptManifest({ ...manifest, pieces: [...manifest.pieces, ...aliases] });
     bridge.emitCommand('spacesconfig', { spaces: [BUILT_IN_SPACES[0]!], version: 'entry' });
     bridge.emitCommand('desks', { desks: [{ id: 'entry', label: 'Entry', x: 320, y: 320, w: 96, h: 96, mine: false,
-      appearance: { materialId: 'desk-wood-entry', color: null },
       occupant: { id: 'occupant', displayName: 'Occupant', items: [{ id: 'entry-plant', slot: 4, rotation: 0,
         aboveAvatars: false, textureKey: artSheetKey('plant-ficus-entry', 'sheet') }] } }] });
     expect(entry).not.toHaveBeenCalled();
@@ -2957,89 +2954,31 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
     expect(baseDesks).toHaveLength(deskCount);
   });
 
-  function furniture(scene: Phaser.Scene, deskId: string): Phaser.GameObjects.Image | Phaser.GameObjects.Rectangle | null {
-    return scene.children.getByName(deskFurnitureName(deskId)) as Phaser.GameObjects.Image | null;
-  }
-
-  it('draws the desk in its persisted material and color, at native size in the middle of the area (art step 4)', async () => {
+  it('an empty desk is just its zone marker: no built-in table, no fixed chair (Editar espacios)', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
+    const before = new Set(scene.children.list);
 
-    bridge.emitCommand('desks', { desks: [servedDesk({ appearance: { materialId: 'desk-painted', color: '#c0392b' } })] });
+    bridge.emitCommand('desks', { desks: [servedDesk({ label: '' })] });
 
-    const image = furniture(scene, 'id-mesa') as Phaser.GameObjects.Image;
-    expect(image.type).toBe('Image');
-    expect(image.texture.key).toBe(recoloredSheetKey('desk-painted', 'sheet', '#c0392b'));
-    const anchor = deskAreaAnchor({ x: 10 * TILE, y: 12 * TILE, w: 3 * TILE, h: 3 * TILE });
-    const piece = { anchor: { x: 32, y: 40 }, facings: { down: { ground: { x: 0, y: 6 }, chairGround: { x: 0, y: -10 } } } };
-    const placement = deskPlacement(piece as unknown as ArtDeskPiece, 'down', anchor);
-    expect({ x: image.x, y: image.y, frame: Number(image.frame.name) }).toEqual({ x: placement.x, y: placement.y, frame: 1 });
-    // 64px, the PNG cell: not stretched to the 96px area.
-    expect(image.displayWidth).toBe(64);
-    expect(image.displayHeight).toBe(64);
+    const added = scene.children.list.filter((child) => !before.has(child));
+    expect(added.filter((child) => child.name !== '').map((child) => child.name)).toEqual([deskZoneName('id-mesa')]);
+    const furniture = added.filter(
+      (child) => child.type === 'Image' && /^art:(desk|chair)-/.test((child as Phaser.GameObjects.Image).texture.key),
+    );
+    expect(furniture).toEqual([]);
+    expect(added.filter((child) => child.type === 'Text')).toEqual([]);
   });
 
-  it('a desk without appearance draws the pack default desk', async () => {
+  it('an older desk keeps drawing its label', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
+    const before = new Set(scene.children.list);
 
     bridge.emitCommand('desks', { desks: [servedDesk()] });
 
-    expect((furniture(scene, 'id-mesa') as Phaser.GameObjects.Image).texture.key).toBe(artSheetKey('desk-wood', 'sheet'));
-  });
-
-  it('a desk whose material cannot load keeps a visible placeholder', async () => {
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge);
-
-    bridge.emitCommand('desks', { desks: [servedDesk({ appearance: { materialId: 'desk-retirado', color: null } })] });
-
-    expect(furniture(scene, 'id-mesa')?.type).toBe('Rectangle');
-    // After the catalog re-read finds nothing, it stays a placeholder, still drawn.
-    await advanceGameClock(scene, 600);
-    expect(furniture(scene, 'id-mesa')?.type).toBe('Rectangle');
-  });
-
-  it('redraws a desk once its texture finishes loading during the session', async () => {
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge);
-    // As if this material had not been loaded at boot.
-    scene.textures.remove(artSheetKey('desk-glass', 'sheet'));
-
-    bridge.emitCommand('desks', { desks: [servedDesk({ appearance: { materialId: 'desk-glass', color: null } })] });
-
-    expect(furniture(scene, 'id-mesa')?.type).toBe('Rectangle');
-    await vi.waitFor(() => {
-      const drawn = furniture(scene, 'id-mesa') as Phaser.GameObjects.Image | null;
-      expect(drawn?.type).toBe('Image');
-      expect(drawn?.texture.key).toBe(artSheetKey('desk-glass', 'sheet'));
-    }, LOOP_WAIT);
-  });
-
-  it('draws pieces of the uploads catalog too (#121)', async () => {
-    const bridge = createOfficeBridge();
-    // The pack manifest stands in for the server's uploads manifest: same format.
-    const { scene } = await bootOfficeScene(bridge, {
-      artManifestUrl: 'assets/pack/missing-manifest.json',
-      artUploadsUrl: 'assets/pack/manifest.json',
-    });
-
-    bridge.emitCommand('desks', { desks: [servedDesk({ appearance: { materialId: 'desk-glass', color: null } })] });
-
-    await vi.waitFor(() => {
-      const drawn = furniture(scene, 'id-mesa') as Phaser.GameObjects.Image | null;
-      expect(drawn?.texture.key).toBe(artSheetKey('desk-glass', 'sheet'));
-    }, LOOP_WAIT);
-  });
-
-  it('without the art pack a desk is a visible placeholder, not a crash', async () => {
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge, { artManifestUrl: null });
-
-    bridge.emitCommand('desks', { desks: [servedDesk()] });
-
-    expect(findZone(scene, 'id-mesa')).not.toBeNull();
-    expect(furniture(scene, 'id-mesa')?.type).toBe('Rectangle');
+    const texts = scene.children.list.filter((child) => !before.has(child) && child.type === 'Text') as Phaser.GameObjects.Text[];
+    expect(texts.map((text) => text.text)).toEqual(['Mesa 4']);
   });
 
   it('pinta la decoracion del ocupante dentro de su caja, no en cualquier sitio', async () => {
@@ -3168,7 +3107,8 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
 
     bridge.emitCommand('desks', { desks: [servedDesk()] });
 
-    expect(furniture(scene, 'id-mesa')!.depth).toBe(12 * TILE + 3 * TILE);
+    const label = scene.children.list.find((child) => child.type === 'Text' && (child as Phaser.GameObjects.Text).text === 'Mesa 4')!;
+    expect((label as Phaser.GameObjects.Text).depth).toBe(12 * TILE + 3 * TILE);
     expect(findZone(scene, 'id-mesa')!.depth).toBe(DESK_ZONE_DEPTH);
   });
 
@@ -4255,35 +4195,33 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
     expect(peer.animation.walkMs).toBeGreaterThan(0);
   });
 
-  it('sits at an assignable desk it may use, on a chair drawn at the desk', async () => {
+  it('never offers a desk itself as a seat: it has no fixed chair, even when free or its own', async () => {
     const { connector, scene, player } = await connected();
     const bridge = (scene as unknown as { bridge: ReturnType<typeof createOfficeBridge> }).bridge;
-    const desk: OfficeDesk = {
-      id: 'id-mesa-libre',
-      label: 'Mesa 1',
-      x: 10 * TILE,
-      y: 30 * TILE,
-      w: 3 * TILE,
-      h: 3 * TILE,
-      occupant: null,
-      mine: false,
-    };
-    bridge.emitCommand('desks', { desks: [desk] });
     const chairs = () =>
       scene.children.list.filter(
         (c) => c.type === 'Image' && (c as Phaser.GameObjects.Image).texture.key === artSheetKey('chair-wood', 'sheet'),
       ).length;
-    const baseChairs = BASE_MAP_SEATS.length * 2;
-    await vi.waitFor(() => expect(chairs()).toBe(baseChairs + 2), LOOP_WAIT);
+    const baseChairs = chairs();
+    for (const mine of [false, true]) {
+      const desk: OfficeDesk = {
+        id: 'id-mesa-libre',
+        label: '',
+        x: 10 * TILE,
+        y: 30 * TILE,
+        w: 3 * TILE,
+        h: 3 * TILE,
+        occupant: mine ? { id: 'id-yo', displayName: 'Yo', items: [] } : null,
+        mine,
+      };
+      bridge.emitCommand('desks', { desks: [desk] });
+      await advanceGameClock(scene, 50);
+      expect(chairs()).toBe(baseChairs);
 
-    player.setPosition(desk.x + desk.w / 2, desk.y + desk.h / 2);
-    bridge.emitCommand('toggleSeat', undefined);
-    expect(connector.sits).toEqual([deskSeatId(desk.id)]);
-
-    connector.handlers()!.onLocalSeat?.(deskSeatId(desk.id));
-    const furnitureImage = scene.children.getByName(deskFurnitureName(desk.id)) as Phaser.GameObjects.Image;
-    expect(feetOf(player).y).toBeLessThan(furnitureImage.depth);
-    expect(player.seatFacing).toBe('down');
+      player.setPosition(desk.x + desk.w / 2, desk.y + desk.h / 2);
+      bridge.emitCommand('toggleSeat', undefined);
+      expect(connector.sits).toEqual([]);
+    }
   });
 
   it('never offers a desk someone else claimed', async () => {
@@ -4615,9 +4553,8 @@ describe('OfficeScene: piece collisions', () => {
     y: 50 * TILE,
     w: 3 * TILE,
     h: 3 * TILE,
-    occupant: null,
+    occupant: { id: 'id-ana', displayName: 'Ana', items: [{ id: 'item-silla', slot: 4, rotation: 0, textureKey: 'art:chair-gamer:sheet', aboveAvatars: false }] },
     mine: false,
-    appearance: { materialId: 'desk-oak', color: null },
   };
   const deskMiddle = { x: 22 * TILE + 16, y: 51 * TILE + 16 };
 
@@ -4643,12 +4580,12 @@ describe('OfficeScene: piece collisions', () => {
     expect(solidAt(scene, 20 * TILE + 16, 16)).toBe(true);
   });
 
-  it('collides with a served desk once its piece has rectangles, wherever the desk list puts it', async () => {
+  it('collides with the decor of a served desk once its piece has rectangles, wherever the desk list puts it', async () => {
     const { scene, bridge, handlers } = await bootConnected();
     bridge.emitCommand('desks', { desks: [lawnDesk] });
     expect(solidAt(scene, deskMiddle.x, deskMiddle.y)).toBe(false);
 
-    handlers.onCollisions!(new Map([['desk-oak', [{ x: -20, y: -12, w: 40, h: 16 }]]]));
+    handlers.onCollisions!(new Map([['chair-gamer', [{ x: -20, y: -12, w: 40, h: 16 }]]]));
     expect(solidAt(scene, deskMiddle.x, deskMiddle.y)).toBe(true);
     expect(solidAt(scene, deskMiddle.x + 21, deskMiddle.y)).toBe(false);
 

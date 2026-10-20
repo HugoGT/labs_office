@@ -6,7 +6,6 @@ import { rotationForFacing } from './pieceCollisions';
 import {
   CHAIR_PIECES,
   DECOR_SEAT_SLOTS,
-  DESK_SEAT_FACING,
   decorChairAt,
   decorChairPiece,
   decorChairs,
@@ -23,8 +22,6 @@ import {
   isChairPieceId,
   withChairs,
   SEATING_TILE,
-  deskSeatId,
-  deskSeatTiles,
   inSeatReach,
   mapSeatId,
   mapSeatTiles,
@@ -42,21 +39,19 @@ describe('seating: seat references', () => {
     expect(SEATING_TILE).toBe(TILE);
   });
 
-  it('names a base map chair by its index, a desk seat by its desk and a placed chair by its tile', () => {
+  it('names a base map chair by its index and a placed chair by its tile', () => {
     expect(mapSeatId(3)).toBe('map-3');
     expect(chairSeatId(4321)).toBe('chair-4321');
-    expect(deskSeatId('0f5e2c1a-1111-4111-8111-111111111111')).toBe('desk-0f5e2c1a-1111-4111-8111-111111111111');
   });
 
   it('parses both kinds back', () => {
     expect(parseSeatRef('map-0')).toEqual({ kind: 'map', index: 0 });
-    expect(parseSeatRef('desk-abc-123')).toEqual({ kind: 'desk', deskId: 'abc-123' });
     expect(parseSeatRef('chair-0')).toEqual({ kind: 'chair', index: 0 });
     expect(parseSeatRef('chair-25514')).toEqual({ kind: 'chair', index: 25514 });
   });
 
   it('rejects anything else, a base chair that does not exist included', () => {
-    for (const raw of [undefined, null, 7, '', 'map-', 'map--1', `map-${BASE_MAP_SEATS.length}`, 'map-01', 'desk-', 'desk-a b', 'chair-', 'chair-01', 'chair--1', 'chair-1234567', `desk-${'x'.repeat(65)}`]) {
+    for (const raw of [undefined, null, 7, '', 'map-', 'map--1', `map-${BASE_MAP_SEATS.length}`, 'map-01', 'desk-', 'desk-a b', 'desk-abc-123', 'chair-', 'chair-01', 'chair--1', 'chair-1234567', `desk-${'x'.repeat(65)}`]) {
       expect(parseSeatRef(raw)).toBeNull();
     }
   });
@@ -163,17 +158,6 @@ describe('seating: reach', () => {
     expect(inSeatReach({ x: 9 * TILE - 0.5, y: 9 * TILE }, tiles)).toBe(false);
     expect(inSeatReach({ x: 12 * TILE - 0.5, y: 12 * TILE - 0.5 }, tiles)).toBe(true);
     expect(inSeatReach({ x: 12 * TILE, y: 10 * TILE }, tiles)).toBe(false);
-  });
-
-  it('a desk seat is in reach from its 3x3 area and the ring around it', () => {
-    const tiles = deskSeatTiles({ x: 10, y: 20 });
-    expect(tiles).toEqual({ x0: 10, y0: 20, x1: 12, y1: 22 });
-    expect(inSeatReach({ x: 9 * TILE + 1, y: 23 * TILE + 1 }, tiles)).toBe(true);
-    expect(inSeatReach({ x: 14 * TILE + 1, y: 21 * TILE }, tiles)).toBe(false);
-  });
-
-  it('a desk seat looks the way desks face today', () => {
-    expect(DESK_SEAT_FACING).toBe('down');
   });
 
   it('rejects positions that are not finite numbers', () => {

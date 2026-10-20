@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { CHAIR, DESK, type ArtChairPiece, type ArtDeskPiece } from './artContract';
 import {
   chairPlacement,
-  deskAreaAnchor,
   deskPlacement,
   footprintAnchor,
 } from './artPlacement';
@@ -67,17 +66,6 @@ describe('deskPlacement', () => {
 describe('anchors', () => {
   it('puts a piece in the middle of its footprint', () => {
     expect(footprintAnchor({ x: 3 * TILE, y: 5 * TILE, w: 2 * TILE, h: TILE })).toEqual({ x: 4 * TILE, y: 5.5 * TILE });
-  });
-
-  it('keeps a 64px desk at its own size in the middle of a 3x3 desk area instead of stretching it', () => {
-    const area = { x: 10 * TILE, y: 10 * TILE, w: 3 * TILE, h: 3 * TILE };
-    const anchor = deskAreaAnchor(area);
-    const placement = deskPlacement(DESK_PIECE, 'down', anchor);
-
-    expect(anchor).toEqual({ x: 11.5 * TILE, y: 11.5 * TILE });
-    expect(placement.width).toBe(64);
-    expect(placement.x).toBeGreaterThan(area.x);
-    expect(placement.x + placement.width).toBeLessThan(area.x + area.w);
   });
 });
 

@@ -4,8 +4,7 @@
  * the scene only copies these numbers into game objects.
  *
  * Every piece is drawn at its native size (one PNG pixel, one world pixel) and
- * positioned by its anchor, never stretched to a logical area: a 3x3 tile desk
- * area holds a 64px desk, not a 96px one. Facings pick an exported column of
+ * positioned by its anchor, never stretched to a logical area. Facings pick an exported column of
  * the sheet instead of rotating a perspective drawing.
  */
 
@@ -18,15 +17,6 @@ import {
   type ArtFacing,
   type Point,
 } from './artContract';
-import { DESK_SEAT_FACING } from './seating';
-
-/**
- * Facing of every desk until desks store one: the sitter looks down, toward
- * the viewer, so their face shows and the desk sits in front of them. Desks
- * have no persisted facing (step 3 stores material and color only); the room
- * seats people at a desk facing the same way (`DESK_SEAT_FACING`).
- */
-export const DEFAULT_DESK_FACING: ArtFacing = DESK_SEAT_FACING;
 
 /** A frame of a spritesheet placed in the world: top-left corner, size, frame index and y-sort point. */
 export interface SpritePlacement {
@@ -54,9 +44,6 @@ export interface PixelRect {
 export function footprintAnchor(rect: PixelRect): Point {
   return { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
 }
-
-/** An assignable desk (a 3x3 tile area) holds its desk in the middle. */
-export const deskAreaAnchor = footprintAnchor;
 
 export function deskPlacement(piece: ArtDeskPiece, facing: ArtFacing, anchor: Point): DeskPlacement {
   const { ground, chairGround } = piece.facings[facing];

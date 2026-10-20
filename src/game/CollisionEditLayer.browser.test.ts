@@ -48,7 +48,7 @@ const INSTANCES: CollisionInstance[] = [
     { piece: 'tree-oak', kind: 'tree', tx: 6, ty: 2, w: 1, h: 1, collision: 'solid', facing: null },
     { piece: 'table-meeting', kind: 'table', tx: 2, ty: 6, w: 3, h: 2, collision: 'solid', facing: null },
   ]),
-  ...deskInstances([{ x: 320, y: 320, w: 96, h: 96, materialId: 'desk-oak', items: [] }]),
+  ...deskInstances([{ x: 320, y: 320, w: 96, h: 96, items: [{ slot: 4, rotation: 0, pieceId: 'plant-ficus' }] }]),
 ];
 
 function boot(table: CollisionTable = new Map()) {

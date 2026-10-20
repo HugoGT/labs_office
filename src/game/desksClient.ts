@@ -24,7 +24,6 @@
  * nada avisase.
  */
 
-import { parseArtAppearance } from './artPack';
 import {
   NO_DESKS,
   type DeskClaimOutcome,
@@ -110,9 +109,9 @@ function toOfficeDesk(raw: unknown): OfficeDesk | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const row = raw as Record<string, unknown>;
 
-  // Sin `id` no se puede pedir el sitio, y sin `label` no se puede nombrar en
-  // el mapa lo que se esta pidiendo.
-  if (!isNonEmptyString(row.id) || !isNonEmptyString(row.label)) return null;
+  // Sin `id` no se puede pedir el sitio. The label may be empty: a desk is
+  // created empty since "Editar espacios", with no name asked.
+  if (!isNonEmptyString(row.id) || typeof row.label !== 'string') return null;
   if (!isFiniteNumber(row.x) || !isFiniteNumber(row.y)) return null;
   if (!isFiniteNumber(row.w) || !isFiniteNumber(row.h)) return null;
   // Ausente NO se da por `false`: quien mira se quedaria sin su propio
@@ -127,10 +126,6 @@ function toOfficeDesk(raw: unknown): OfficeDesk | null {
   const occupant = row.occupant === null ? null : toOccupant(row.occupant);
   if (row.occupant !== null && occupant === null) return null;
 
-  // A missing or malformed appearance only costs the desk its material: it is
-  // drawn as the pack default, and the list keeps every desk that can be claimed.
-  const appearance = parseArtAppearance(row.materialId, row.color);
-
   return {
     id: row.id,
     label: row.label,
@@ -140,7 +135,6 @@ function toOfficeDesk(raw: unknown): OfficeDesk | null {
     h: row.h * TILE,
     occupant,
     mine: row.mine,
-    ...(appearance === null ? {} : { appearance }),
   };
 }
 

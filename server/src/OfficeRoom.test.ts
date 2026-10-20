@@ -15,7 +15,7 @@ import {
   SESSION_REPLACED_CLOSE_CODE,
   SESSION_REVOKED_CLOSE_CODE,
 } from '../../src/game/officeProtocol.ts';
-import { DESK_SEAT_FACING, chairSeatId, decodeTerrainChairs, decorSeatId, deskSeatId, mapSeatId } from '../../src/game/seating.ts';
+import { chairSeatId, decodeTerrainChairs, decorSeatId, mapSeatId } from '../../src/game/seating.ts';
 import { decodeTerrainBlocks, decodeTerrainWalls } from '../../src/game/officeLayout.ts';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SPACES as BUILT_IN_SPACES } from '../../src/test/legacyOffice.ts';
 import { createOfficeServer as createServer, type OfficeServer, type OfficeServerOverrides } from './createOfficeServer.ts';
@@ -390,7 +390,8 @@ describe('OfficeRoom: edited terrain', () => {
 describe('OfficeRoom: piece collisions', () => {
   const onTile = (tx: number, ty: number) => ({ x: tx * TILE + 16, y: ty * TILE + 5, facing: 'down' });
   const tableOf = (room: Awaited<ReturnType<typeof join>>) => decodeCollisionTable(room.state.pieceCollisions);
-  const DESK = ART_PACK_DEFAULTS.desk;
+  /** The decor chair its occupant put in the middle slot of the desk: a desk has no piece of its own. */
+  const DESK = 'chair-wood';
 
   async function settle(room: Awaited<ReturnType<typeof join>>) {
     room.send('status', { status: 'y' });
@@ -400,7 +401,11 @@ describe('OfficeRoom: piece collisions', () => {
   beforeEach(async () => {
     await server.shutdown();
     const at = new Date('2026-01-01T00:00:00.000Z');
-    const desks = createMemoryDesks({ seed: [{ id: 'desk-a', label: 'Mesa A', x: 21, y: 50, occupantId: null, createdAt: at, updatedAt: at }] });
+    const chair = { id: 'item-a', assetId: 'asset-a', slot: 4, rotation: 0 as const, textureKey: `art:${DESK}:sheet`, w: 1, h: 1, name: 'Silla', aboveAvatars: false, createdAt: at };
+    const desks = createMemoryDesks({
+      seed: [{ id: 'desk-a', label: 'Mesa A', x: 21, y: 50, occupantId: 'id-ana', createdAt: at, updatedAt: at }],
+      decor: { getDeskConfig: async () => [chair] },
+    });
     server = createOfficeServer({ desks, collisions: createMemoryCollisions([['tree-oak', []]]) });
     endpoint = `ws://localhost:${await server.listen(0)}`;
   });
@@ -408,7 +413,7 @@ describe('OfficeRoom: piece collisions', () => {
   it('checks the feet-aligned center while still allowing full-body edge overlap', async () => {
     const room = await join('Ana');
     await waitFor(() => room.state.players.size === 1);
-    // The desk pivot is (720, 1648); the saved small rectangle is deliberately asymmetric.
+    // The chair pivot, the desk middle, is (720, 1648); the saved small rectangle is deliberately asymmetric.
     await server.collisions.setRects({ pieceId: DESK, rects: [{ x: 1, y: -12, w: 9, h: 11 }], actorId: null }, () => []);
     const edgeOverlap = { x: 720, y: 1628, facing: 'down' };
     room.send('move', edgeOverlap);
@@ -433,7 +438,7 @@ describe('OfficeRoom: piece collisions', () => {
     await waitFor(() => tableOf(late)?.get(DESK)?.[0]?.w === 40);
   });
 
-  it('drops a move into a served desk once its piece has rectangles', async () => {
+  it('drops a move into the decor of a served desk once its piece has rectangles', async () => {
     const room = await join('Ana');
     await waitFor(() => room.state.players.size === 1);
     const middle = onTile(22, 51);
@@ -2092,10 +2097,10 @@ describe('OfficeRoom: seats', () => {
     expect(server.sessions.positionOf(room.sessionId)).toEqual({ x: besideChair.x, y: besideChair.y });
   });
 
-  it('without a desk store a desk seat is never granted', async () => {
+  it('a desk seat is never granted: desks have none (Editar espacios)', async () => {
     const room = await join('Ana');
     await waitFor(() => room.state.players.size === 1);
-    room.send('sit', { seat: deskSeatId('id-mesa') });
+    room.send('sit', { seat: 'desk-id-mesa' });
     room.send('status', { status: 'y' });
 
     await waitFor(() => room.state.players.get(room.sessionId)?.status === 'y');
@@ -2178,7 +2183,7 @@ describe('OfficeRoom: placed chairs', () => {
   });
 });
 
-describe('OfficeRoom: desk seats', () => {
+describe('OfficeRoom: no desk seats (Editar espacios)', () => {
   const BETO: VerifiedIdentity = { uid: 'uid-beto', email: 'beto@example.com', name: 'Beto Ruiz' };
   const ANA_ID = '11111111-1111-4111-8111-111111111111';
   const BETO_ID = '22222222-2222-4222-8222-222222222222';
@@ -2225,77 +2230,30 @@ describe('OfficeRoom: desk seats', () => {
     deskServer = undefined;
   });
 
-  it('only its owner sits at a claimed desk', async () => {
+  // A desk is an empty 3x3 area (Editar espacios): no fixed chair, so no seat
+  // of its own. Only the decor chairs its occupant places are seats.
+  it('a desk has no seat of its own, not even for its owner', async () => {
     const endpoint = await start(ANA_ID);
     const ana = await joinNearDesk(endpoint, 'token-de-ana');
-    const beto = await joinNearDesk(endpoint, 'token-de-beto');
 
-    beto.send('sit', { seat: deskSeatId('mesa-ana') });
-    beto.send('status', { status: 'y' });
-    await waitFor(() => beto.state.players.get(beto.sessionId)?.status === 'y');
-    expect(beto.state.players.get(beto.sessionId)?.seat).toBe('');
-
-    ana.send('sit', { seat: deskSeatId('mesa-ana') });
-    await waitFor(() => beto.state.players.get(ana.sessionId)?.seat === deskSeatId('mesa-ana'));
-    expect(beto.state.players.get(ana.sessionId)?.facing).toBe(DESK_SEAT_FACING);
-  });
-
-  it('anyone sits at a free desk, and sitting does not claim it', async () => {
-    const endpoint = await start(null);
-    const beto = await joinNearDesk(endpoint, 'token-de-beto');
-
-    beto.send('sit', { seat: deskSeatId('mesa-ana') });
-
-    await waitFor(() => beto.state.players.get(beto.sessionId)?.seat === deskSeatId('mesa-ana'));
-    const listed = await fetch(`http://localhost:${deskPort}/desks`, { headers: { Authorization: 'Bearer token-de-beto' } });
-    const body = (await listed.json()) as { desks: { id: string; occupant: unknown }[] };
-    expect(body.desks.find((desk) => desk.id === 'mesa-ana')?.occupant).toBeNull();
-  });
-
-  it('ignores a desk out of reach and a desk that does not exist', async () => {
-    const endpoint = await start(null);
-    const beto = await joinNearDesk(endpoint, 'token-de-beto');
-
-    beto.send('sit', { seat: deskSeatId('mesa-lejos') });
-    beto.send('sit', { seat: deskSeatId('no-existe') });
-    beto.send('status', { status: 'y' });
-
-    await waitFor(() => beto.state.players.get(beto.sessionId)?.status === 'y');
-    // Desk seats are checked against the store asynchronously; give them time.
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(beto.state.players.get(beto.sessionId)?.seat).toBe('');
-  });
-
-  it('when someone else claims the desk, its non-owner sitter stands up', async () => {
-    const endpoint = await start(null);
-    const beto = await joinNearDesk(endpoint, 'token-de-beto');
-    beto.send('sit', { seat: deskSeatId('mesa-ana') });
-    await waitFor(() => beto.state.players.get(beto.sessionId)?.seat === deskSeatId('mesa-ana'));
-
-    const claimed = await fetch(`http://localhost:${deskPort}/desks/mesa-ana/claim`, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer token-de-ana' },
-    });
-    expect(claimed.status).toBe(200);
-
-    await waitFor(() => beto.state.players.get(beto.sessionId)?.seat === '');
-  });
-
-  it('the owner keeps sitting when they claim the desk they sit at', async () => {
-    const endpoint = await start(null);
-    const ana = await joinNearDesk(endpoint, 'token-de-ana');
-    ana.send('sit', { seat: deskSeatId('mesa-ana') });
-    await waitFor(() => ana.state.players.get(ana.sessionId)?.seat === deskSeatId('mesa-ana'));
-
-    await fetch(`http://localhost:${deskPort}/desks/mesa-ana/claim`, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer token-de-ana' },
-    });
+    ana.send('sit', { seat: 'desk-mesa-ana' });
     ana.send('status', { status: 'y' });
     await waitFor(() => ana.state.players.get(ana.sessionId)?.status === 'y');
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    expect(ana.state.players.get(ana.sessionId)?.seat).toBe(deskSeatId('mesa-ana'));
+    expect(ana.state.players.get(ana.sessionId)?.seat).toBe('');
+  });
+
+  it('nor for anyone at a free desk', async () => {
+    const endpoint = await start(null);
+    const beto = await joinNearDesk(endpoint, 'token-de-beto');
+
+    beto.send('sit', { seat: 'desk-mesa-ana' });
+    beto.send('status', { status: 'y' });
+    await waitFor(() => beto.state.players.get(beto.sessionId)?.status === 'y');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(beto.state.players.get(beto.sessionId)?.seat).toBe('');
   });
 });
 

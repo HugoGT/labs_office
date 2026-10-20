@@ -2,12 +2,7 @@ import Phaser from 'phaser';
 import type { ArtFacing, ArtPiece, Point } from './artContract';
 import { artUploadsManifestUrl, findPiece, parseArtSheetKey, type ArtAppearance } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
-import {
-  chairPlacement,
-  DEFAULT_DESK_FACING,
-  deskAreaAnchor,
-  deskPlacement,
-} from './artPlacement';
+import { chairPlacement } from './artPlacement';
 import { feetOf, positionForFeet } from './avatarGeometry';
 import { beginAutoWalk, isAutoWalkArrived, stepAutoWalk, type AutoWalkState } from './autoWalk';
 import { IDLE_AUTO_SIT, SIT_LOCK_MS, dropSitDwells, guardLeftSeat, sitLockActive, stepAutoSit, type AutoSitState } from './autoSit';
@@ -37,7 +32,7 @@ import {
   specialAssetDepth,
   worldAssetDepth,
 } from './depthLayers';
-import { deskFurnitureName, deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
+import { deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
 import { MinimapLayer } from './MinimapLayer';
@@ -51,7 +46,6 @@ import {
   placeSeats,
   placeWalls,
   placeZoneLabels,
-  putArtSprite,
   putChair,
   renderTerrain,
   type TerrainTilemap,
@@ -125,8 +119,6 @@ import {
   decorSeatGround,
   decorSeatId,
   decorSeatTiles,
-  deskSeatId,
-  deskSeatTiles,
   encodeTerrainChairs,
   inSeatReach,
   mapSeatId,
@@ -172,9 +164,6 @@ const DESK_COLOR = {
 } as const;
 const DESK_FILL_ALPHA = 0.22;
 const DESK_STROKE_WIDTH = 2;
-/** A piece that cannot be drawn yet (or ever) still shows where it goes. */
-const ART_FALLBACK_COLOR = 0x6b7280;
-const ART_FALLBACK_ALPHA = 0.6;
 
 /**
  * Como se conecta la escena al servidor. `connect` se inyecta para poder
@@ -1110,9 +1099,9 @@ export class OfficeScene extends Phaser.Scene {
 
   /**
    * A seat by reference (step 6): a base map chair, a chair placed from the
-   * terrain editor the room replicated, or the chair of a desk or a decor
-   * chair of its occupant in the last `desks` list. `null` when this client
-   * cannot place it.
+   * terrain editor the room replicated, or a decor chair of a desk's
+   * occupant in the last `desks` list. `null` when this client cannot place
+   * it.
    */
   private resolveSeat(id: string): ResolvedSeat | null {
     const ref = parseSeatRef(id, this.mapSeats.length);
@@ -1127,35 +1116,17 @@ export class OfficeScene extends Phaser.Scene {
       const width = this.layout.width;
       return { id, ground: chairGround(width, chair.index), facing: chair.facing, reach: chairSeatTiles(width, chair.index) };
     }
+    // A desk has no seat of its own (Editar espacios): only its decor chairs.
     const desk = this.desks.find((candidate) => candidate.id === ref.deskId);
-    if (ref.kind === 'decor') {
-      const chair = desk === undefined ? null : decorChairAt(desk.occupant?.items ?? [], ref.slot);
-      if (desk === undefined || chair === null) return null;
-      const origin = { x: desk.x / TILE, y: desk.y / TILE };
-      return { id, ground: decorSeatGround(origin, ref.slot), facing: chair.facing, reach: decorSeatTiles(origin, ref.slot) };
-    }
-    return desk === undefined ? null : this.deskSeat(desk);
-  }
-
-  private deskSeat(desk: OfficeDesk): ResolvedSeat {
-    const anchor = deskAreaAnchor(desk);
-    const materialId = desk.appearance?.materialId ?? this.art.manifest?.defaults.desk;
-    const piece = materialId === undefined || this.art.manifest === null ? undefined : findPiece(this.art.manifest, materialId);
-    // The desk art says where its chair goes; without the catalog the middle
-    // of the area is as close as this client can tell.
-    const offset = piece?.kind === 'desk' ? piece.facings[DEFAULT_DESK_FACING].chairGround : { x: 0, y: 0 };
-    return {
-      id: deskSeatId(desk.id),
-      ground: { x: anchor.x + offset.x, y: anchor.y + offset.y },
-      facing: DEFAULT_DESK_FACING,
-      reach: deskSeatTiles({ x: desk.x / TILE, y: desk.y / TILE }),
-    };
+    const chair = desk === undefined ? null : decorChairAt(desk.occupant?.items ?? [], ref.slot);
+    if (desk === undefined || chair === null) return null;
+    const origin = { x: desk.x / TILE, y: desk.y / TILE };
+    return { id, ground: decorSeatGround(origin, ref.slot), facing: chair.facing, reach: decorSeatTiles(origin, ref.slot) };
   }
 
   /**
    * The free seat in reach closest to the feet, if any. A seat is free when
-   * no peer sits on it and, at a desk, when the desk is unclaimed or claimed
-   * by this player: the same rules the room applies, so the scene does not
+   * no peer sits on it: the same rule the room applies, so the scene does not
    * offer what the room would refuse.
    */
   private seatInReach(): ResolvedSeat | null {
@@ -1173,7 +1144,7 @@ export class OfficeScene extends Phaser.Scene {
     return best;
   }
 
-  /** Every seat no peer sits on: map chairs, placed chairs, the desks this player may use and every decor chair. */
+  /** Every seat no peer sits on: map chairs, placed chairs and every decor chair. */
   private freeSeats(): ResolvedSeat[] {
     const taken = new Set<string>();
     for (const sessionId of this.remotes?.sessionIds() ?? []) {
@@ -1190,7 +1161,6 @@ export class OfficeScene extends Phaser.Scene {
       if (seat) candidates.push(seat);
     }
     for (const desk of this.desks) {
-      if (desk.occupant === null || desk.mine) candidates.push(this.deskSeat(desk));
       // Decor chairs are guest seats: offered whoever owns the desk.
       for (const { slot } of decorChairs(desk.occupant?.items ?? [])) {
         const seat = this.resolveSeat(decorSeatId(desk.id, slot));
@@ -1525,47 +1495,8 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
-   * The desk furniture in the middle of the area: its persisted material and
-   * color, at native size and in the exported facing, never stretched to the
-   * 3x3 area. Without an appearance (an older server) it is the pack default.
-   *
-   * Same depth as the zone and drawn after it, so the status tint stays a floor
-   * marker under the desk instead of a veil over it; decor goes on top.
-   */
-  private drawDeskFurniture(desk: OfficeDesk, depth: number): void {
-    const name = deskFurnitureName(desk.id);
-    const anchor = deskAreaAnchor(desk);
-    const materialId = desk.appearance?.materialId ?? this.art.manifest?.defaults.desk;
-    const sheet =
-      materialId === undefined
-        ? null
-        : this.artSheet({ materialId, color: desk.appearance?.color ?? null }, 'desk', this.redrawDesks);
-
-    if (sheet === null || sheet.piece.kind !== 'desk') {
-      // Same visible fallback as a decor piece without texture: the desk is
-      // there even when its art is not, sized like the 2x1 footprint.
-      this.deskObjects.push(
-        this.add
-          .rectangle(anchor.x, anchor.y, 2 * TILE, TILE, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
-          .setDepth(depth)
-          .setName(name),
-      );
-      return;
-    }
-    const placement = deskPlacement(sheet.piece, DEFAULT_DESK_FACING, anchor);
-    this.deskObjects.push(putArtSprite(this, sheet.key, placement, depth).setName(name));
-
-    // Its chair (step 6), where the room seats people at this desk. Sorted
-    // by its own ground, under the desk, so the desk covers the sitter's legs.
-    const chair = this.artSheet({ materialId: BASE_MAP_CHAIR, color: null }, 'chair', this.redrawDesks);
-    if (chair !== null && chair.piece.kind === 'chair') {
-      this.deskObjects.push(...putChair(this, chair.key, chairPlacement(chair.piece, DEFAULT_DESK_FACING, placement.chairGround)));
-    }
-  }
-
-  /**
-   * Dibuja la zona de 3x3 de un escritorio, su etiqueta y la decoracion de
-   * quien lo ocupe.
+   * Dibuja la zona de 3x3 de un escritorio, su etiqueta (si tiene) y la
+   * decoracion de quien lo ocupe.
    *
    * The depth is the BOTTOM edge of the area in the world band, same
    * convention as `placeLayout` (`(y + h) * TILE`), so the desk y-sorts
@@ -1593,16 +1524,20 @@ export class OfficeScene extends Phaser.Scene {
       .setName(deskZoneName(desk.id));
     this.deskObjects.push(zone);
 
-    const label = this.add
-      .text(desk.x + 3, desk.y + 2, desk.label, {
-        fontFamily: 'Cantarell, Noto Sans, DejaVu Sans, Segoe UI, sans-serif',
-        fontSize: '11px',
-        color: '#e5e7eb',
-      })
-      .setDepth(depth);
-    this.deskObjects.push(label);
+    // A desk created empty has no label (Editar espacios); an older one keeps its own.
+    if (desk.label !== '') {
+      const label = this.add
+        .text(desk.x + 3, desk.y + 2, desk.label, {
+          fontFamily: 'Cantarell, Noto Sans, DejaVu Sans, Segoe UI, sans-serif',
+          fontSize: '11px',
+          color: '#e5e7eb',
+        })
+        .setDepth(depth);
+      this.deskObjects.push(label);
+    }
 
-    this.drawDeskFurniture(desk, depth);
+    // No built-in table or fixed chair: the area is a floor marker and its
+    // occupant's decor (a table on one edge, chairs, plants) is all it holds.
 
     for (const item of desk.occupant?.items ?? []) {
       // `null` = ese slot no es una de las nueve cajas. Se salta la pieza y no

@@ -78,7 +78,6 @@ describe('deskCollisionPlacements', () => {
         y: 5 * TILE,
         w: DESK_SIDE * TILE,
         h: DESK_SIDE * TILE,
-        materialId: 'desk-oak',
         items: [
           { slot: 2, rotation: 90, pieceId: 'plant-upload-0123456789abcdef' },
           { slot: 3, rotation: 0, pieceId: null },
