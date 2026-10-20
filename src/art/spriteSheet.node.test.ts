@@ -78,7 +78,7 @@ const WALK_IDLE_HASHES: Readonly<Record<string, string>> = {
   'p02-beige-blazer': 'd5ba6b1740b63761',
   'p03-forest-suit': '871f47b3f0bfa487',
   'p04-coral-skirt': 'a4d8e2415bfc7840',
-  'p05-charcoal-suit': '07527fe49e3ee3b5',
+  'p05-charcoal-suit': 'e5a28bf76d6cba86',
   'p06-lavender-blouse': '3bccad50f9f2f9bc',
   'p07-green-suit': 'cee41b8e103653ed',
   'p08-purple-suit': 'e2b50fd92ee3a0fa',

@@ -904,20 +904,18 @@ function addHead(body: Body): void {
 }
 
 /**
- * One lens around an eye (the eye is the column at dx 0, rows 0 and 1): a rim
- * above AND below the lens and a bar on its outer side, so at this size it
- * reads as a frame and not as a brow line. The inner pixels of both lenses
- * make a one-pixel bridge. Clear lenses keep the eye in ink with a light pane beside it;
- * sunglasses fill the pane dark with one highlight.
+ * One lens over an eye, two pixels tall: the eye row (the eye at dx 0, the
+ * pane beside it) and a rim under it, with a bar on the outer side. Nothing
+ * sits above the eye, so at this size it reads as glasses and never as a brow
+ * line. The inner pixels of both lenses make a one-pixel bridge, so the nose
+ * shows under it. Clear lenses keep the eye in ink with a light pane;
+ * sunglasses fill the lens dark with one highlight.
  */
 function drawLens(ctx: DecalContext, glasses: 'glasses' | 'sunglasses'): void {
   const out = ctx.screenSide;
   const sideView = ctx.facing <= 0.45;
-  for (const dx of [0, out]) {
-    ctx.plot(dx, -1, 'frame', 'base');
-    ctx.plot(dx, 2, 'frame', 'base');
-  }
-  // The bridge is one pixel tall, so the nose shows under it and the pair never reads as a mask.
+  ctx.plot(0, 1, 'frame', 'base');
+  ctx.plot(out, 1, 'frame', 'base');
   ctx.plot(-out, 0, 'frame', 'base');
   if (!sideView) {
     ctx.plot(2 * out, 0, 'frame', 'base');
@@ -925,15 +923,11 @@ function drawLens(ctx: DecalContext, glasses: 'glasses' | 'sunglasses'): void {
   }
   if (glasses === 'sunglasses') {
     ctx.plot(0, 0, 'shade', 'base');
-    ctx.plot(0, 1, 'shade', 'shadow');
     ctx.plot(out, 0, 'shade', 'light');
-    ctx.plot(out, 1, 'shade', 'base');
     return;
   }
   ctx.plot(0, 0, 'ink', 'base');
-  ctx.plot(0, 1, 'ink', 'base');
   ctx.plot(out, 0, 'lens', 'light');
-  ctx.plot(out, 1, 'lens', 'base');
 }
 
 interface HairKit {

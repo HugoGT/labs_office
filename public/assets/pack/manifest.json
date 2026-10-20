@@ -194,7 +194,7 @@
           "imageKind": "character-walk",
           "width": 352,
           "height": 416,
-          "sha256": "599799f5fef635a418c606f2459902417250063f0b9bd7a9d80cd198b4ea2049"
+          "sha256": "94f7a6473afe0bdd1602aa0c80f73758d66cdb1c19fab5a8e3bd6ecf8fa1e825"
         },
         {
           "role": "seated",
@@ -202,7 +202,7 @@
           "imageKind": "character-seated",
           "width": 352,
           "height": 232,
-          "sha256": "6def942dec8d0c44e0a83d2637b63b458341c7386f126be3fbe88fe8020b87b6"
+          "sha256": "6b30780b7c7f03718fc56f769b09102d6c7e9f7faab53ac2b90c256cf1630b62"
         }
       ]
     },

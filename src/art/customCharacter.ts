@@ -25,7 +25,7 @@ import { sha256Hex } from './sha256.ts';
  * `/assets/characters/<hash>/*` URLs) changes, so no browser keeps a stale cached sheet for a
  * newly saved character. Rows saved before keep their hash and are drawn by the current renderer.
  */
-export const CHARACTER_RENDER_VERSION = 2;
+export const CHARACTER_RENDER_VERSION = 3;
 
 export const CUSTOM_CHARACTER_ID_PREFIX = 'character-custom-';
 const HASH_LENGTH = 32;

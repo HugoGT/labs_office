@@ -33,7 +33,7 @@ describe('glasses', () => {
     for (const base of BASE_CHARACTERS) if (base !== ANDRE) expect(base.glasses).toBe('none');
   });
 
-  it('draws a frame around each lens, under the eyes as well as over them, so it never reads as a brow', () => {
+  it('draws each lens two pixels tall, framed under the eyes and never as a bar over them', () => {
     const spec = wearing(MATEO, 'glasses');
     const { idle } = buildCharacterSprites(spec);
     const front = frameRect('S', 0);
@@ -43,11 +43,32 @@ describe('glasses', () => {
     expect(lens.length).toBeGreaterThanOrEqual(2);
     const lensTop = Math.min(...lens.map((p) => p.y));
     const lensBottom = Math.max(...lens.map((p) => p.y));
-    expect(frame.some((p) => p.y < lensTop)).toBe(true);
+    expect(frame.some((p) => p.y < lensTop)).toBe(false);
     expect(frame.some((p) => p.y > lensBottom)).toBe(true);
     // Two lenses, one each side of a bridge between them.
     const lensXs = [...new Set(lens.map((p) => p.x))].sort((a, b) => a - b);
     expect(lensXs.at(-1)! - lensXs[0]!).toBeGreaterThanOrEqual(3);
+  });
+
+  it.each(['glasses', 'sunglasses'] as const)('%s are two pixels tall in every view that shows them', (glasses) => {
+    const spec = wearing(MATEO, glasses);
+    const sprites = buildCharacterSprites(spec);
+    // A lens is its pane and the rim under it: nothing of the glasses ever sits above a pane (at a
+    // silhouette edge the rim may fall outside the head and is clipped).
+    for (const [sheet, rect, view] of [
+      ...FACE_DIRECTIONS.map((direction) => [sprites.idle, frameRect(direction, 0), direction] as const),
+      ...(['down', 'left', 'right'] as const).map((facing) => [sprites.sit, sitFrameRect(facing, 6), facing] as const),
+    ]) {
+      const glassesAt = new Set(
+        (['frame', 'lens', 'shade'] as const).flatMap((key) => pixelsOf(spec, sheet, rect, key).map((p) => `${p.x},${p.y}`)),
+      );
+      const panes = pixelsOf(spec, sheet, rect, glasses === 'glasses' ? 'lens' : 'shade');
+      for (const pane of panes) {
+        expect(glassesAt.has(`${pane.x},${pane.y - 1}`), `${view}: above ${pane.x},${pane.y}`).toBe(false);
+      }
+    }
+    const front = [...(['frame', 'lens', 'shade'] as const)].flatMap((key) => pixelsOf(spec, sprites.idle, frameRect('S', 0), key).map((p) => p.y));
+    expect(Math.max(...front) - Math.min(...front) + 1).toBe(2);
   });
 
   it('sunglasses have dark lenses instead of clear ones', () => {
