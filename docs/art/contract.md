@@ -21,7 +21,7 @@ The executable source of truth is `src/game/artContract.ts` (`ART_CONTRACT_VERSI
 | `character-walk` | 32x52 | 11 x 8 | 352x416 | columns 0-9 steps, 10 idle; rows `S, SE, E, NE, N, NW, W, SW` | feet (16, 47) | 1x1 (feet tile) |
 | `character-seated` | 44x58 | 8 x 4 | 352x232 | columns 0-5 sit-down, 6-7 seated idle; rows `up, down, left, right` | pelvis on seat (22, 42) | the chair's |
 | `chair` | 36x38 | 4 x 2 | 144x76 | columns `up, down, left, right`; row 0 `back`, row 1 `front` | seat (18, 22), ground (18, 31) | 1x1 |
-| `desk` | 64x64 | 4 x 1 | 256x64 | columns `up, down, left, right` | floor under the middle (32, 40) | 2x1 up/down, 1x2 left/right |
+| `desk` | 96x104 | 4 x 1 | 384x104 | columns `up, down, left, right` | floor under the middle (48, 60) | 3x1 up/down, 1x3 left/right |
 | `floor` | 32x32 | 3 x 3 | 96x96 | frame `row * 3 + col` is motif sub-tile (col, row) | top-left | 1x1 per frame |
 | `wall` | 16x16 | 17 x 1 | 272x16 | 0 horizontal body, 1 vertical body, `1 + mask` joint | top-left | segment on a grid edge |
 | `terrain-tileset` | 32x32 | 48 x 108 | 1536x3456 | `terrainTileIndex(material, mask, phase, variant)`, then the decal row, the water bank and void cap row, and the void edge tiles | top-left | 1x1 per tile, on the dual grid |
@@ -34,7 +34,7 @@ The executable source of truth is `src/game/artContract.ts` (`ART_CONTRACT_VERSI
 The office's facing order (`FACINGS` in `officeProtocol.ts`: `down, up, left, right`) differs from the pack order (`up, down, left, right`). To pick a row or column, use `walkRowForFacing` and `seatedRowForFacing`/`facingColumn`, never a raw index. A facing is the direction a seated character looks.
 
 - **Seating**: draw a sitter at `chair seat - (22, 42)`. Draw in this order: chair `back`, then the character, then chair `front`. The ground point y-sorts the chair and its sitter against the furniture around them, so a desk in front covers the sitter's legs; walking characters stay above both (`depthLayers.ts`).
-- **Desks**: the manifest gives, per facing, the depth point and where the ground point of a matching chair goes. Both are offsets from the desk anchor.
+- **Desks**: a desk piece is the table a person places on one 3-tile edge of their desk area (desk decor). Its top runs about 2.5 tiles (80px) of floor along the long side in every facing, so it looks centered on the edge and leaves the other 2x3 tiles free; facing left or right that length runs along the shortened floor depth, so the model is longer there. The manifest gives, per facing, the depth point and where the ground point of a matching chair goes. Both are offsets from the desk anchor.
 - **Floors**: each floor is a 96x96 seamless motif split into nine 32x32 tiles (`splitFloorMotif`). World tile (tx, ty) draws frame `floorFrameAt(tx, ty)`, so the full motif repeats every 3 tiles instead of one tile of it.
 - **Walls**: walls sit on the edges of the 32px grid. Each is 16px thick and centered on its line. Every vertex that has a wall gets a 16x16 joint, shaped by its connection mask (north 1, east 2, south 4, west 8). Between two joints sits a 16px body (`wallJointRect`, `wallBodyRect`). The art was drawn for a 96px grid. The exporter regenerates it at 32px.
 
@@ -100,7 +100,7 @@ Issue #121 set a first contract before the pack existed. The pack does not fit i
 | Character frame | 32x64, 4 directions, 4 steps, one seated row (128x320) | 32x52 walk with 8 directions, 10 steps and idle; separate 44x58 seated sheet with 6+2 frames | The pack's characters are drawn at this size and cadence. The seated pose needs a wider cell. |
 | Facing order | down, left, right, up | Pack order up, down, left, right, mapped explicitly | This matches the generated sheets. The mapping helpers remove the ambiguity. |
 | Chair | 32x32 cells, row 0 base, row 1 backrest | 36x38 cells, row 0 back, row 1 front, fixed seat anchor | Chairs are up to 22x36, and aligned on one seat pixel they span 37 rows. Layers are split by draw order, not by part. |
-| Desk | `w*32 x h*32` plus 32px overhang, anchored bottom-left | Fixed 64x64 cell per facing, anchored under the middle, with a footprint separate from the PNG | Desks come in 4 orientations of different shapes (54x31, 27x48). |
+| Desk | `w*32 x h*32` plus 32px overhang, anchored bottom-left | Fixed 96x104 cell per facing, anchored under the middle, with a footprint separate from the PNG | Desks come in 4 orientations of different shapes (82x31, 27x97): an 80px top that fits a 3-tile desk edge. |
 | Alpha | Binary (0 or 255) | Partial allowed; floors opaque | Shadows and glass are intentionally translucent. |
 | Colors | 64 per piece | 128 per file | Measured characters reach about 75. |
 

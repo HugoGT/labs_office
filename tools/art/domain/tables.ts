@@ -31,14 +31,22 @@ export interface TableSprite {
   readonly ground: SeatPoint;
   /** Where the ground point of a chair with the same facing goes, tucked a little under the top. */
   readonly chairGround: SeatPoint;
+  /** Screen pixels of floor the top runs along its long side, the outline aside. */
+  readonly floorLength: number;
 }
 
 /** Model extents: `u` runs from the sitter's side (negative) to the far side, `v` along the top. */
 const HALF_DEPTH = 12;
-const HALF_WIDTH = 26;
+/**
+ * Half the long side on screen: 80px, about 2.5 tiles, so a table sits
+ * centered on a 3-tile edge of a desk (a decor table, Editar espacios) and
+ * leaves the rest of the 3x3 free. Facing left or right the long side runs
+ * along the floor depth, which DEPTH_SCALE shortens, so the model is longer
+ * there to draw the same 80px.
+ */
+const HALF_LENGTH_PX = 40;
 const TOP_UNDER = TABLE_HEIGHT - 2;
 const LEG_U: Span = [HALF_DEPTH - 3, HALF_DEPTH - 1];
-const LEG_V: Span = [HALF_WIDTH - 3, HALF_WIDTH - 1];
 /**
  * A chair's seat is 14 deep. In front of or behind the table it slides 3 pixels under the top; beside
  * it (left/right) the sitter sorts before the table, so the seat stops 2 pixels short of the top
@@ -64,7 +72,13 @@ function mirrorV(box: Box): Box {
   return { ...box, v: [-box.v[1], -box.v[0]] };
 }
 
-function tableModel(look: TableLook): FurnitureModel {
+/** Half the model length `v` that draws HALF_LENGTH_PX on screen for a facing. */
+function halfWidthFor(facing: Facing): number {
+  return facing === 'up' || facing === 'down' ? HALF_LENGTH_PX : Math.round(HALF_LENGTH_PX / DEPTH_SCALE);
+}
+
+function tableModel(look: TableLook, HALF_WIDTH: number): FurnitureModel {
+  const LEG_V: Span = [HALF_WIDTH - 3, HALF_WIDTH - 1];
   const leg: Box = { u: LEG_U, v: LEG_V, y: [0, TOP_UNDER], ramp: look.frame, top: 'light', side: 'base' };
   const legs = [leg, mirrorU(leg), mirrorV(leg), mirrorU(mirrorV(leg))];
   const glassAlpha = look.glass ? GLASS_ALPHA : undefined;
@@ -157,14 +171,18 @@ export function tableSprite(material: TableMaterial, facing: Facing, color = DEF
   const id = `${material}:${facing}:${material === 'painted' ? color : ''}`;
   const cached = cache.get(id);
   if (cached) return cached;
-  const { back, origin } = renderFurniture(tableModel(look(material, color)), facing);
-  const front = floorSpans(facing, [-HALF_DEPTH, HALF_DEPTH], [-HALF_WIDTH, HALF_WIDTH]).z[1] - 1;
+  const halfWidth = halfWidthFor(facing);
+  const { back, origin } = renderFurniture(tableModel(look(material, color), halfWidth), facing, 192);
+  const spans = floorSpans(facing, [-HALF_DEPTH, HALF_DEPTH], [-halfWidth, halfWidth]);
+  const front = spans.z[1] - 1;
+  const floorLength = facing === 'up' || facing === 'down' ? spans.x[1] - spans.x[0] : spans.z[1] - spans.z[0];
   const chair = floorPoint(facing, facing === 'left' || facing === 'right' ? SIDE_CHAIR_U : CHAIR_U, 0);
   const sprite: TableSprite = {
     image: back,
     center: origin,
     ground: { x: origin.x, y: origin.y + front },
     chairGround: { x: origin.x + chair.x, y: origin.y + chair.y },
+    floorLength,
   };
   if (material === 'painted' && cache.size > 64) cache.clear();
   cache.set(id, sprite);

@@ -7,7 +7,7 @@ Guide PNGs for drawing a piece that passes the upload checks. There is one templ
 | `character-walk.png` | character `walk` | 352x416 | 32x52 | 11 x 8 |
 | `character-seated.png` | character `seated` | 352x232 | 44x58 | 8 x 4 |
 | `chair.png` | none (pack only) | 144x76 | 36x38 | 4 x 2 |
-| `desk.png` | desk `sheet` | 256x64 | 64x64 | 4 x 1 |
+| `desk.png` | desk `sheet` | 384x104 | 96x104 | 4 x 1 |
 | `floor.png` | floor `sheet` | 96x96 | 32x32 | 3 x 3 |
 | `plant.png` | plant `sheet` | 32x48 | 32x48 | 1 x 1 |
 
@@ -37,7 +37,7 @@ The labels follow the contract's order. Draw each frame in the cell that has its
 - **Character walk**: one row per direction, `S, SE, E, NE, N, NW, W, SW`. Columns `STEP 0` to `STEP 9` are the walk cycle, and the last column is `IDLE`.
 - **Character seated**: one row per facing, `UP, DOWN, LEFT, RIGHT` (the way the sitter looks). Columns `SIT 0` to `SIT 5` sit down, and `IDLE 6` and `IDLE 7` loop while seated.
 - **Chair**: one column per facing, `UP, DOWN, LEFT, RIGHT`. Row `BACK` is drawn behind the sitter, and row `FRONT` is drawn in front of them.
-- **Desk**: one column per facing, `UP, DOWN, LEFT, RIGHT`. The second line is its footprint in tiles (`2X1` or `1X2`).
+- **Desk**: one column per facing, `UP, DOWN, LEFT, RIGHT`. The second line is its footprint in tiles (`3X1` or `1X3`): the desk edge the table stands on. Keep the top about 80px long so it sits centered on that edge.
 - **Floor**: frame `row * 3 + col` is a 32x32 tile of one 96x96 motif. The whole sheet must tile seamlessly and be fully opaque.
 - **Plant**: one frame.
 

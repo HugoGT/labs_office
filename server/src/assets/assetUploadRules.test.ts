@@ -33,10 +33,10 @@ function sheet(kind: ArtImageKind, rgb: readonly [number, number, number] = [200
 }
 
 const FACINGS: ArtDeskPiece['facings'] = {
-  up: { footprint: { w: 2, h: 1 }, ground: { x: 0, y: 6 }, chairGround: { x: 0, y: 10 } },
-  down: { footprint: { w: 2, h: 1 }, ground: { x: 0, y: 6 }, chairGround: { x: 0, y: -10 } },
-  left: { footprint: { w: 1, h: 2 }, ground: { x: 0, y: 15 }, chairGround: { x: 21, y: 0 } },
-  right: { footprint: { w: 1, h: 2 }, ground: { x: 0, y: 15 }, chairGround: { x: -21, y: 0 } },
+  up: { footprint: { w: 3, h: 1 }, ground: { x: 0, y: 6 }, chairGround: { x: 0, y: 10 } },
+  down: { footprint: { w: 3, h: 1 }, ground: { x: 0, y: 6 }, chairGround: { x: 0, y: -10 } },
+  left: { footprint: { w: 1, h: 3 }, ground: { x: 0, y: 15 }, chairGround: { x: 21, y: 0 } },
+  right: { footprint: { w: 1, h: 3 }, ground: { x: 0, y: 15 }, chairGround: { x: -21, y: 0 } },
 };
 
 const CREDITS = { name: 'Lucía', author: 'Equipo de arte', license: 'proprietary-internal' };

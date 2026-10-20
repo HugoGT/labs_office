@@ -24,7 +24,18 @@ test('tables are wide facing up or down and deep facing left or right, small eno
     const name = `${material} ${facing}`;
     if (facing === 'up' || facing === 'down') assert.ok(width > height * 1.4, `${name}: ${width}x${height}`);
     else assert.ok(height > width * 1.4, `${name}: ${width}x${height}`);
-    assert.ok(width <= 60 && height <= 60, `${name}: ${width}x${height}`);
+    assert.ok(width <= 96 && height <= 104, `${name}: ${width}x${height}`);
+  }
+});
+
+test('a table is about 2.5 tiles long on screen, horizontal or vertical, so it sits centered on a 3-tile desk edge', () => {
+  // The floor run of the top along the long side: 80px, 2.4 to 2.6 tiles, the outline aside.
+  for (const { material, facing, sprite } of ALL) {
+    const name = `${material} ${facing}`;
+    const { floorLength } = sprite;
+    assert.ok(floorLength >= 2.4 * 32 && floorLength <= 2.6 * 32, `${name}: ${floorLength}`);
+    const drawn = facing === 'up' || facing === 'down' ? sprite.image.width : sprite.image.height;
+    assert.ok(drawn >= floorLength && drawn < 3 * 32 + 8, `${name}: ${drawn}`);
   }
 });
 
@@ -72,7 +83,8 @@ test('glass tops are translucent so the legs and floor show through; other table
     }
     const area = sprite.image.width * sprite.image.height;
     if (material === 'glass') assert.ok(translucent > area * 0.25, `glass ${facing}: ${translucent} translucent pixels`);
-    else assert.ok(translucent < area * 0.25, `${material} ${facing}: only the contact shadow is translucent`);
+    // The long top leaves a wide knee space facing up, where the contact shadow shows: still well under glass.
+    else assert.ok(translucent < area * 0.3, `${material} ${facing}: only the contact shadow is translucent`);
   }
 });
 

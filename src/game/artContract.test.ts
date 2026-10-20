@@ -133,12 +133,13 @@ describe('art contract constants', () => {
     // A chair cell is 36x38, bigger than a tile, but it still occupies one tile.
     expect(ART_IMAGE_SPECS.chair.frame).toEqual({ width: 36, height: 38 });
     expect(ART_IMAGE_SPECS.chair.footprint).toEqual({ w: 1, h: 1 });
-    expect(ART_IMAGE_SPECS.desk.frame).toEqual({ width: 64, height: 64 });
+    // A desk (a decor table) is about 2.5 tiles long and spans a 3-tile desk edge.
+    expect(ART_IMAGE_SPECS.desk.frame).toEqual({ width: 96, height: 104 });
     expect(ART_IMAGE_SPECS.desk.footprintByFacing).toEqual({
-      up: { w: 2, h: 1 },
-      down: { w: 2, h: 1 },
-      left: { w: 1, h: 2 },
-      right: { w: 1, h: 2 },
+      up: { w: 3, h: 1 },
+      down: { w: 3, h: 1 },
+      left: { w: 1, h: 3 },
+      right: { w: 1, h: 3 },
     });
   });
 
