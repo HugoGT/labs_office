@@ -1,5 +1,6 @@
 /* Same full-screen backdrop and card as LoginScreen: one entrance, two steps. Also the
-   "Mi personaje" dialog of Personalizar, over the office. */
+   "Mi personaje" dialog of Personalizar, over the office. The whole creator fits one
+   screen (1280x720 and up) with no vertical scroll; narrow phones may scroll. */
 .screen {
   position: fixed;
   inset: 0;
@@ -9,22 +10,27 @@
   justify-content: center;
   background: #0d1117;
   color: #e5e7eb;
-  padding: 16px;
+  padding: 12px;
   overflow-y: auto;
+}
+
+/* The "Mi personaje" dialog takes the focus itself; its controls show their own ring. */
+.screen:focus {
+  outline: none;
 }
 
 .card {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
   width: 100%;
-  max-width: 820px;
+  max-width: 900px;
   max-height: 100%;
   overflow-y: auto;
   background: #111827f2;
   border: 1px solid #2b3444;
   border-radius: var(--radius-panel);
-  padding: 24px;
+  padding: 16px 20px;
   box-shadow: 0 8px 30px #0009;
 }
 
@@ -35,22 +41,31 @@
 }
 
 .subtitle {
-  margin: 0;
+  margin: -6px 0 0;
   font-size: 12px;
   color: #9ca3af;
 }
 
-.layout {
+/* Templates and whole characters side by side: one scrolling row of thumbnails each. */
+.band {
   display: flex;
-  gap: 16px;
-  align-items: flex-start;
+  gap: 12px;
 }
 
-/* Templates and whole characters: one scrolling row of thumbnails each. */
+.templates {
+  flex: 1;
+}
+
+.whole {
+  flex: 0 1 auto;
+  max-width: 34%;
+}
+
 .row {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  min-width: 0;
 }
 
 .rowTitle {
@@ -72,7 +87,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 6px 4px;
+  padding: 4px;
   background: #1f2937;
   border: 1px solid #374151;
   border-radius: var(--radius-control);
@@ -93,20 +108,58 @@
   outline-offset: 2px;
 }
 
+.layout {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+
+/*
+ * Two rows of parts, in reading order Pelo, Piel, Superior, Inferior, Zapatos,
+ * with Zapatos right under Inferior:
+ *   Pelo     Piel   Inferior
+ *   Superior        Zapatos
+ */
 .parts {
   flex: 1;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: auto auto auto;
+  grid-template-areas:
+    'pelo piel inferior'
+    'superior superior zapatos';
   gap: 8px;
+  align-content: start;
+  justify-content: start;
+}
+
+.pelo {
+  grid-area: pelo;
+}
+
+.piel {
+  grid-area: piel;
+}
+
+.superior {
+  grid-area: superior;
+}
+
+.inferior {
+  grid-area: inferior;
+}
+
+.zapatos {
+  grid-area: zapatos;
 }
 
 .part {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
   margin: 0;
-  padding: 10px 12px 12px;
+  padding: 6px 10px 8px;
   background: #0d1117;
   border: 1px solid #2b3444;
   border-radius: var(--radius-control);
@@ -118,115 +171,6 @@
   font-weight: 600;
 }
 
-.choiceGroup {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  border: none;
-}
-
-/* A labelled select: the long option lists, one row each. */
-.field {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.field .choiceLegend {
-  margin: 0;
-  min-width: 44px;
-}
-
-.select {
-  flex: 1;
-  min-width: 0;
-  background: #1f2937;
-  color: #e5e7eb;
-  border: 1px solid #374151;
-  border-radius: var(--radius-control);
-  padding: 4px 8px;
-  font-size: 12px;
-  font-family: inherit;
-}
-
-.select:focus-visible {
-  outline: 2px solid #93c5fd;
-  outline-offset: 2px;
-}
-
-/* Extras and Lentes side by side in "Superior". */
-.pair {
-  display: flex;
-  gap: 12px;
-}
-
-.pair > .field {
-  flex: 1;
-  min-width: 0;
-}
-
-.choiceLegend {
-  padding: 0;
-  margin-bottom: 4px;
-  font-size: 11px;
-  color: #9ca3af;
-}
-
-
-
-.swatch:hover {
-  border-color: #4b5563;
-}
-
-
-.swatches {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.swatch {
-  position: relative;
-  display: flex;
-  padding: 3px;
-  background: #1f2937;
-  border: 1px solid #374151;
-  border-radius: var(--radius-control);
-  cursor: pointer;
-}
-
-.swatch:has(.radio:checked) {
-  border-color: #93c5fd;
-  box-shadow: 0 0 0 1px #93c5fd;
-}
-
-.swatchColor {
-  width: 20px;
-  height: 20px;
-  border-radius: var(--radius-tag);
-  border: 1px solid #0006;
-}
-
-.swatch:has(.radio:focus-visible) {
-  outline: 2px solid #93c5fd;
-  outline-offset: 2px;
-}
-
-/* Visually hidden but still focusable and announced: the label is the control. */
-.radio {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-
-
 .sprite {
   display: block;
   flex: none;
@@ -234,31 +178,37 @@
   image-rendering: pixelated;
 }
 
-
-
 .preview {
-  position: sticky;
-  top: 0;
   flex: none;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 16px;
-  background: #0d1117;
+  align-items: stretch;
+  gap: 6px;
+  overflow: hidden;
   border: 1px solid #2b3444;
   border-radius: var(--radius-control);
+}
+
+/* The pack's wood floor, tiled at the preview's scale (the size comes inline). */
+.floor {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 200px;
+  padding: 12px 16px;
+  background-repeat: repeat;
+  background-position: center;
+  image-rendering: pixelated;
 }
 
 /* Credit of a contributed character (#122). */
 .credit {
   margin: 0;
+  padding: 6px 10px 0;
   font-size: 12px;
   opacity: 0.75;
 }
-
-
-
 
 .error {
   background: #7f1d1d66;
@@ -280,7 +230,7 @@
   color: #e5e7eb;
   border: 1px solid #374151;
   border-radius: var(--radius-control);
-  padding: 10px 12px;
+  padding: 9px 12px;
   font-size: 14px;
   font-family: inherit;
   cursor: pointer;
@@ -296,7 +246,7 @@
   color: #eff6ff;
   border: 1px solid #3b82f6;
   border-radius: var(--radius-control);
-  padding: 10px 12px;
+  padding: 9px 12px;
   font-size: 14px;
   font-family: inherit;
   cursor: pointer;
@@ -315,28 +265,26 @@
 @media (max-width: 760px) {
   .layout {
     flex-direction: column-reverse;
-    align-items: stretch;
   }
 
-  .preview {
-    position: static;
-  }
-
-  .preview {
-    align-items: center;
-  }
-
-  .pair {
+  .band {
     flex-direction: column;
-    gap: 8px;
+  }
+
+  .whole {
+    max-width: none;
+  }
+
+  .parts {
+    grid-template-columns: 1fr;
+    grid-template-areas: none;
+  }
+
+  .parts > * {
+    grid-area: auto;
   }
 
   .actions > * {
     flex: 1;
   }
-}
-
-/* The "Mi personaje" dialog takes the focus itself; its controls show their own ring. */
-.screen:focus {
-  outline: none;
 }

@@ -13,14 +13,15 @@ import {
   SKIN_TONES,
   TOP_STYLE_OPTIONS,
   type CustomCharacterSpec,
-  type Option,
-  type Swatch,
 } from '../art/customCharacter';
 import type { CharacterChoice, CharacterOption } from '../auth/characterPort';
+import { artPackFileUrl } from '../game/artPack';
 import { characterPreviewFrame, type CharacterPose } from '../game/characterPreview';
-import { customCharacterPreview } from '../game/customCharacterPreview';
+import { customCharacterPart, customCharacterPreview, type CharacterPart } from '../game/customCharacterPreview';
 import styles from './CharacterCreator.module.css';
+import { ColorPicker } from './ColorPicker';
 import { PixelFramesCanvas } from './PixelFramesCanvas';
+import { StylePicker } from './StylePicker';
 
 export interface CharacterCreatorProps {
   heading: string;
@@ -43,6 +44,11 @@ const THUMB_SCALE = 2;
 /** The one standing pose, as big as the column beside the controls allows. */
 export const PREVIEW_SCALE = 5;
 const PREVIEW_LABEL = 'Tu personaje';
+/** The pack's wood floor, tiled under the preview like the office's: its 96 px motif at the preview scale. */
+const FLOOR_URL = artPackFileUrl('floor/wood.png');
+const FLOOR_MOTIF_PX = 96;
+/** The glasses crop is small: drawn bigger so the lenses read. */
+const PART_SCALE: Partial<Record<CharacterPart, number>> = { glasses: 3, shoes: 3 };
 
 /** A CSS sprite cut from a whole character's sheet, the same cells the office draws. */
 function spriteStyle(option: CharacterOption, pose: CharacterPose, scale: number): CSSProperties {
@@ -58,71 +64,11 @@ function spriteStyle(option: CharacterOption, pose: CharacterPose, scale: number
   };
 }
 
-/** A long option list in one row: a native select, labelled, keyboard and screen reader ready. */
-function Select<T extends string>({ label, options, value, onChange }: {
-  label: string;
-  options: readonly Option<T>[];
-  value: T;
-  onChange: (value: T) => void;
-}) {
-  const id = useId();
-  return (
-    <div className={styles.field}>
-      <label className={styles.choiceLegend} htmlFor={id}>
-        {label}
-      </label>
-      <select
-        id={id}
-        className={styles.select}
-        value={value}
-        onChange={(event) => {
-          const picked = options.find((option) => option.value === event.target.value);
-          if (picked) onChange(picked.value);
-        }}
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
+type PartArea = 'pelo' | 'piel' | 'superior' | 'inferior' | 'zapatos';
 
-function Swatches({ legend, swatches, value, onChange }: {
-  legend: string;
-  swatches: readonly Swatch[];
-  value: string;
-  onChange: (hex: string) => void;
-}) {
-  const name = useId();
+function Part({ legend, area, children }: { legend: string; area: PartArea; children: ReactNode }) {
   return (
-    <fieldset className={styles.choiceGroup}>
-      <legend className={styles.choiceLegend}>{legend}</legend>
-      <div className={styles.swatches}>
-        {swatches.map((swatch) => (
-          <label key={swatch.hex} className={styles.swatch} title={swatch.label}>
-            <input
-              className={styles.radio}
-              type="radio"
-              name={name}
-              value={swatch.hex}
-              checked={swatch.hex === value}
-              aria-label={swatch.label}
-              onChange={() => onChange(swatch.hex)}
-            />
-            <span className={styles.swatchColor} style={{ backgroundColor: swatch.hex }} aria-hidden="true" />
-          </label>
-        ))}
-      </div>
-    </fieldset>
-  );
-}
-
-function Part({ legend, children }: { legend: string; children: ReactNode }) {
-  return (
-    <fieldset className={styles.part}>
+    <fieldset className={`${styles.part} ${styles[area]}`}>
       <legend className={styles.partLegend}>{legend}</legend>
       {children}
     </fieldset>
@@ -144,14 +90,16 @@ function specFor(choice: CharacterChoice): CustomCharacterSpec {
  * stays that exact pack character, or an uploaded one) or builds one from
  * parts; touching any part turns the current look into a character of its
  * own. Build and earrings are not offered: they come with the template and
- * stay as they are when other parts change. Every control is native (a
- * select per long list, swatch radios inside a labelled fieldset), so the
- * keyboard works without any code here.
+ * stay as they are when other parts change. Styles are picked by looking:
+ * `StylePicker` shows each option drawn on the person's own character,
+ * cropped to the part it changes; colors come from `ColorPicker`, curated
+ * presets plus any RGB. Everything fits one screen with no vertical scroll
+ * (narrow phones may still scroll).
  *
- * The preview is the character standing still, big. A built one is drawn on
- * canvas by the same renderer the server draws it with
- * (`customCharacterPreview`), deferred so clicking stays responsive; whole
- * characters cut their own sheet.
+ * The preview is the character standing still, big, over the pack's wood
+ * floor. A built one is drawn on canvas by the same renderer the server
+ * draws it with (`customCharacterPreview`), deferred so clicking stays
+ * responsive; whole characters cut their own sheet.
  */
 export function CharacterCreator({
   heading,
@@ -196,6 +144,9 @@ export function CharacterCreator({
     }
   };
 
+  /** An option drawn on the person's current character, cropped to the part it changes. */
+  const thumbnail = (region: CharacterPart, change: Partial<CustomCharacterSpec>) => customCharacterPart({ ...spec, ...change }, region);
+
   const edit = (next: Partial<CustomCharacterSpec>) => {
     setSpec((current) => ({ ...current, ...next }));
     setPieceId(null);
@@ -224,7 +175,8 @@ export function CharacterCreator({
         </h1>
         <p className={styles.subtitle}>{description}</p>
 
-        <section className={styles.row} aria-label="Plantillas">
+        <div className={styles.band}>
+        <section className={`${styles.row} ${styles.templates}`} aria-label="Plantillas">
           <h2 className={styles.rowTitle}>Empieza desde una plantilla</h2>
           <div className={styles.thumbs}>
             {CHARACTER_TEMPLATES.map((template, index) => {
@@ -253,7 +205,7 @@ export function CharacterCreator({
         </section>
 
         {wholeCharacters.length > 0 && (
-          <section className={styles.row} aria-label="Personajes completos">
+          <section className={`${styles.row} ${styles.whole}`} aria-label="Personajes completos">
             <h2 className={styles.rowTitle}>Personajes completos</h2>
             <div className={styles.thumbs}>
               {wholeCharacters.map((option, index) => (
@@ -271,41 +223,102 @@ export function CharacterCreator({
             </div>
           </section>
         )}
+        </div>
 
         <div className={styles.layout}>
           <div className={styles.parts}>
-            <Part legend="Pelo">
-              <Select label="Estilo" options={HAIR_STYLE_OPTIONS} value={spec.hair.style} onChange={(style) => edit({ hair: { ...spec.hair, style } })} />
-              <Swatches legend="Color" swatches={HAIR_COLORS} value={spec.hair.color} onChange={(color) => edit({ hair: { ...spec.hair, color } })} />
+            <Part legend="Pelo" area="pelo">
+              <StylePicker
+                label="Estilo de pelo"
+                caption="Estilo"
+                options={HAIR_STYLE_OPTIONS}
+                value={spec.hair.style}
+                thumbnail={(style) => thumbnail('hair', { hair: { ...spec.hair, style } })}
+                onChange={(style) => edit({ hair: { ...spec.hair, style } })}
+              />
+              <ColorPicker label="Color de pelo" caption="Color" presets={HAIR_COLORS} value={spec.hair.color} onChange={(color) => edit({ hair: { ...spec.hair, color } })} />
             </Part>
-            <Part legend="Piel">
-              <Swatches legend="Tono" swatches={SKIN_TONES} value={spec.skin} onChange={(skin) => edit({ skin })} />
+            <Part legend="Piel" area="piel">
+              <ColorPicker label="Tono de piel" caption="Tono" presets={SKIN_TONES} value={spec.skin} onChange={(skin) => edit({ skin })} />
             </Part>
-            <Part legend="Superior">
-              <Select label="Estilo" options={TOP_STYLE_OPTIONS} value={spec.top.style} onChange={(style) => edit({ top: { ...spec.top, style } })} />
-              <Swatches legend="Color" swatches={CLOTHING_COLORS} value={spec.top.color} onChange={(color) => edit({ top: { ...spec.top, color } })} />
-              <div className={styles.pair}>
-                <Select label="Extras" options={CUSTOM_ACCESSORIES} value={spec.accessory} onChange={(accessory) => edit({ accessory })} />
-                <Select label="Lentes" options={GLASSES_OPTIONS} value={spec.glasses} onChange={(glasses) => edit({ glasses })} />
-              </div>
+            <Part legend="Superior" area="superior">
+              <StylePicker
+                label="Estilo de la parte superior"
+                caption="Estilo"
+                options={TOP_STYLE_OPTIONS}
+                value={spec.top.style}
+                thumbnail={(style) => thumbnail('top', { top: { ...spec.top, style } })}
+                onChange={(style) => edit({ top: { ...spec.top, style } })}
+              />
+              <ColorPicker
+                label="Color de la parte superior"
+                caption="Color"
+                presets={CLOTHING_COLORS}
+                value={spec.top.color}
+                onChange={(color) => edit({ top: { ...spec.top, color } })}
+              />
+              <StylePicker
+                label="Extras"
+                caption="Extras"
+                options={CUSTOM_ACCESSORIES}
+                value={spec.accessory}
+                thumbnail={(accessory) => thumbnail('accessory', { accessory })}
+                onChange={(accessory) => edit({ accessory })}
+              />
+              <StylePicker
+                label="Lentes"
+                caption="Lentes"
+                options={GLASSES_OPTIONS}
+                value={spec.glasses}
+                thumbnail={(glasses) => thumbnail('glasses', { glasses })}
+                scale={PART_SCALE.glasses}
+                onChange={(glasses) => edit({ glasses })}
+              />
             </Part>
-            <Part legend="Inferior">
-              <Select label="Estilo" options={BOTTOM_STYLE_OPTIONS} value={spec.bottom.style} onChange={(style) => edit({ bottom: { ...spec.bottom, style } })} />
-              <Swatches legend="Color" swatches={CLOTHING_COLORS} value={spec.bottom.color} onChange={(color) => edit({ bottom: { ...spec.bottom, color } })} />
+            <Part legend="Inferior" area="inferior">
+              <StylePicker
+                label="Estilo de la parte inferior"
+                caption="Estilo"
+                options={BOTTOM_STYLE_OPTIONS}
+                value={spec.bottom.style}
+                thumbnail={(style) => thumbnail('bottom', { bottom: { ...spec.bottom, style } })}
+                onChange={(style) => edit({ bottom: { ...spec.bottom, style } })}
+              />
+              <ColorPicker
+                label="Color de la parte inferior"
+                caption="Color"
+                presets={CLOTHING_COLORS}
+                value={spec.bottom.color}
+                onChange={(color) => edit({ bottom: { ...spec.bottom, color } })}
+              />
             </Part>
-            <Part legend="Zapatos">
-              <Select label="Estilo" options={SHOE_STYLE_OPTIONS} value={spec.shoes.style} onChange={(style) => edit({ shoes: { ...spec.shoes, style } })} />
-              <Swatches legend="Color" swatches={SHOE_COLORS} value={spec.shoes.color} onChange={(color) => edit({ shoes: { ...spec.shoes, color } })} />
+            <Part legend="Zapatos" area="zapatos">
+              <StylePicker
+                label="Estilo de zapatos"
+                caption="Estilo"
+                options={SHOE_STYLE_OPTIONS}
+                value={spec.shoes.style}
+                thumbnail={(style) => thumbnail('shoes', { shoes: { ...spec.shoes, style } })}
+                scale={PART_SCALE.shoes}
+                onChange={(style) => edit({ shoes: { ...spec.shoes, style } })}
+              />
+              <ColorPicker label="Color de zapatos" caption="Color" presets={SHOE_COLORS} value={spec.shoes.color} onChange={(color) => edit({ shoes: { ...spec.shoes, color } })} />
             </Part>
           </div>
 
           <section className={styles.preview} aria-label="Vista previa">
             {piece?.author != null && <p className={styles.credit}>Autoría: {piece.author}</p>}
-            {piece !== undefined ? (
-              <span className={styles.sprite} style={spriteStyle(piece, 'idle', PREVIEW_SCALE)} role="img" aria-label={PREVIEW_LABEL} />
-            ) : (
-              <PixelFramesCanvas frames={idle === null ? [] : [idle]} scale={PREVIEW_SCALE} label={PREVIEW_LABEL} />
-            )}
+            <div
+              data-floor
+              className={styles.floor}
+              style={{ backgroundImage: `url("${FLOOR_URL}")`, backgroundSize: `${FLOOR_MOTIF_PX * PREVIEW_SCALE}px ${FLOOR_MOTIF_PX * PREVIEW_SCALE}px` }}
+            >
+              {piece !== undefined ? (
+                <span className={styles.sprite} style={spriteStyle(piece, 'idle', PREVIEW_SCALE)} role="img" aria-label={PREVIEW_LABEL} />
+              ) : (
+                <PixelFramesCanvas frames={idle === null ? [] : [idle]} scale={PREVIEW_SCALE} label={PREVIEW_LABEL} />
+              )}
+            </div>
           </section>
         </div>
 

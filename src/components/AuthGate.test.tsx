@@ -785,7 +785,8 @@ describe('AuthGate: character chosen at the entrance (art migration, step 5)', (
     await submitLogin(user);
     await act(async () => emit(ANA));
 
-    await user.selectOptions(within(await screen.findByRole('group', { name: 'Superior' })).getByRole('combobox', { name: 'Lentes' }), 'Lentes');
+    await user.click(within(await screen.findByRole('group', { name: 'Superior' })).getByRole('button', { name: /^Lentes/ }));
+    await user.click(screen.getByRole('menuitemradio', { name: 'Lentes' }));
     await user.click(screen.getByRole('button', { name: /entrar a la oficina/i }));
 
     expect(character.save).toHaveBeenCalledWith({ kind: 'custom', spec: { ...CHARACTER_TEMPLATES[0]!.spec, glasses: 'glasses' } });
@@ -810,8 +811,8 @@ describe('AuthGate: character chosen at the entrance (art migration, step 5)', (
     await act(async () => emit(ANA));
 
     const bottom = await screen.findByRole('group', { name: 'Inferior' });
-    expect(within(bottom).getByRole('combobox', { name: 'Estilo' })).toHaveDisplayValue('Falda');
-    expect(within(screen.getByRole('group', { name: 'Superior' })).getByRole('combobox', { name: 'Estilo' })).toHaveDisplayValue('Blazer');
+    expect(within(bottom).getByRole('button', { name: 'Estilo de la parte inferior: Falda' })).toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: 'Superior' })).getByRole('button', { name: 'Estilo de la parte superior: Blazer' })).toBeInTheDocument();
   });
 
   it('on a later sign-in the saved character is preselected', async () => {

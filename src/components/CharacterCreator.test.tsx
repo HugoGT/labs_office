@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BASE_CHARACTERS } from '../art/characters';
@@ -45,6 +45,18 @@ function part(name: string) {
   return screen.getByRole('group', { name });
 }
 
+type User = ReturnType<typeof userEvent.setup>;
+
+async function pickStyle(user: User, section: string, trigger: RegExp, option: string): Promise<void> {
+  await user.click(within(part(section)).getByRole('button', { name: trigger }));
+  await user.click(screen.getByRole('menuitemradio', { name: option }));
+}
+
+async function pickPreset(user: User, section: string, trigger: RegExp, preset: string): Promise<void> {
+  await user.click(within(part(section)).getByRole('button', { name: trigger }));
+  await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: preset }));
+}
+
 function submitted(onSubmit: ReturnType<typeof renderCreator>['onSubmit']): CharacterChoice {
   expect(onSubmit).toHaveBeenCalledTimes(1);
   return onSubmit.mock.calls[0]![0];
@@ -59,7 +71,7 @@ describe('CharacterCreator', () => {
     vi.restoreAllMocks();
   });
 
-  it('groups the parts in labelled sections, in order, each long list as one select', () => {
+  it('groups the parts in labelled sections, in order, each choice a picture button', () => {
     renderCreator();
 
     expect(screen.getByRole('heading', { name: 'Crea tu personaje' })).toBeInTheDocument();
@@ -68,13 +80,20 @@ describe('CharacterCreator', () => {
     sections.slice(1).forEach((section, index) => {
       expect(sections[index]!.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
-    for (const name of ['Pelo', 'Superior', 'Inferior', 'Zapatos']) {
-      expect(within(part(name)).getByRole('combobox', { name: 'Estilo' })).toBeInTheDocument();
-      expect(within(part(name)).getByRole('group', { name: 'Color' })).toBeInTheDocument();
-    }
-    expect(within(part('Piel')).getByRole('group', { name: 'Tono' })).toBeInTheDocument();
-    expect(within(part('Superior')).getByRole('combobox', { name: 'Extras' })).toBeInTheDocument();
-    expect(within(part('Superior')).getByRole('combobox', { name: 'Lentes' })).toBeInTheDocument();
+    const lucia = CHARACTER_TEMPLATES[1]!.spec;
+    expect(within(part('Pelo')).getByRole('button', { name: 'Estilo de pelo: Largo liso' })).toHaveAttribute('aria-haspopup', 'menu');
+    expect(within(part('Pelo')).getByRole('button', { name: `Color de pelo: ${lucia.hair.color}` })).toHaveAttribute('aria-haspopup', 'dialog');
+    const skin = SKIN_TONES.find((swatch) => swatch.hex === lucia.skin)!;
+    expect(within(part('Piel')).getByRole('button', { name: `Tono de piel: ${skin.label}` })).toBeInTheDocument();
+    expect(within(part('Superior')).getByRole('button', { name: 'Estilo de la parte superior: Blazer' })).toBeInTheDocument();
+    expect(within(part('Superior')).getByRole('button', { name: /^Color de la parte superior: / })).toBeInTheDocument();
+    expect(within(part('Superior')).getByRole('button', { name: 'Extras: Bolso' })).toBeInTheDocument();
+    expect(within(part('Superior')).getByRole('button', { name: 'Lentes: Ninguno' })).toBeInTheDocument();
+    expect(within(part('Inferior')).getByRole('button', { name: 'Estilo de la parte inferior: Pantalón ancho' })).toBeInTheDocument();
+    expect(within(part('Inferior')).getByRole('button', { name: /^Color de la parte inferior: / })).toBeInTheDocument();
+    expect(within(part('Zapatos')).getByRole('button', { name: 'Estilo de zapatos: Tacones' })).toBeInTheDocument();
+    expect(within(part('Zapatos')).getByRole('button', { name: /^Color de zapatos: / })).toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
   });
 
   it('offers no build, earrings or separate extras section', () => {
@@ -86,25 +105,22 @@ describe('CharacterCreator', () => {
     expect(screen.queryByText('Complexión')).not.toBeInTheDocument();
   });
 
-  it('names the bottoms Jean, Pantalón ancho and Falda, and the lenses Ninguno, Lentes and Lentes de sol', () => {
+  it('names the bottoms Jean, Pantalón ancho and Falda, and the lenses Ninguno, Lentes and Lentes de sol', async () => {
+    const user = userEvent.setup();
     renderCreator();
 
-    const bottoms = within(part('Inferior')).getByRole('combobox', { name: 'Estilo' });
-    expect(within(bottoms).getAllByRole('option').map((option) => option.textContent)).toEqual(['Jean', 'Pantalón ancho', 'Falda']);
-    const lenses = within(part('Superior')).getByRole('combobox', { name: 'Lentes' });
-    expect(within(lenses).getAllByRole('option').map((option) => option.textContent)).toEqual(['Ninguno', 'Lentes', 'Lentes de sol']);
+    await user.click(within(part('Inferior')).getByRole('button', { name: /^Estilo de la parte inferior/ }));
+    expect(screen.getAllByRole('menuitemradio').map((item) => item.getAttribute('aria-label'))).toEqual(['Jean', 'Pantalón ancho', 'Falda']);
+    await user.keyboard('{Escape}');
+    await user.click(within(part('Superior')).getByRole('button', { name: /^Lentes/ }));
+    expect(screen.getAllByRole('menuitemradio').map((item) => item.getAttribute('aria-label'))).toEqual(['Ninguno', 'Lentes', 'Lentes de sol']);
   });
 
-  it('opens on the saved pack character as a pressed template, with its parts in the controls', () => {
+  it('opens on the saved pack character as a pressed template', () => {
     renderCreator();
 
     expect(screen.getByRole('button', { name: 'Plantilla 2' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Plantilla 1' })).toHaveAttribute('aria-pressed', 'false');
-    const lucia = CHARACTER_TEMPLATES[1]!.spec;
-    expect(within(part('Pelo')).getByRole('combobox', { name: 'Estilo' })).toHaveDisplayValue('Largo liso');
-    expect(within(part('Superior')).getByRole('combobox', { name: 'Estilo' })).toHaveDisplayValue('Blazer');
-    const skin = SKIN_TONES.find((swatch) => swatch.hex === lucia.skin)!;
-    expect(within(part('Piel')).getByRole('radio', { name: skin.label })).toBeChecked();
   });
 
   it('a template used as is is saved as that pack character, so it keeps its exact art', async () => {
@@ -117,7 +133,7 @@ describe('CharacterCreator', () => {
     expect(submitted(onSubmit)).toEqual({ kind: 'piece', avatarId: PACK[2]!.id });
   });
 
-  it('previews a piece standing still only, big and without a caption', () => {
+  it('previews a piece standing still only, big, over the wood floor and without a caption', () => {
     renderCreator();
 
     const preview = screen.getByRole('region', { name: 'Vista previa' });
@@ -127,17 +143,20 @@ describe('CharacterCreator', () => {
     expect(images[0]!.style.backgroundImage).toContain('pack/p2-walk.png');
     expect(images[0]!.style.width).toBe(`${32 * PREVIEW_SCALE}px`);
     expect(preview).not.toHaveTextContent(/Reposo|Caminando|En su silla/);
+    const floor = preview.querySelector<HTMLElement>('[data-floor]')!;
+    expect(floor.style.backgroundImage).toContain('assets/pack/floor/wood.png');
+    expect(floor.style.backgroundSize).toBe(`${96 * PREVIEW_SCALE}px ${96 * PREVIEW_SCALE}px`);
   });
 
   it('changing any part turns the template into a character of its own, previewed on canvas', async () => {
     const user = userEvent.setup();
     const { onSubmit } = renderCreator();
 
-    await user.selectOptions(within(part('Pelo')).getByRole('combobox', { name: 'Estilo' }), 'Coleta');
-    await user.click(within(within(part('Pelo')).getByRole('group', { name: 'Color' })).getByRole('radio', { name: HAIR_COLORS[4]!.label }));
-    await user.selectOptions(within(part('Superior')).getByRole('combobox', { name: 'Lentes' }), 'Lentes de sol');
-    await user.selectOptions(within(part('Superior')).getByRole('combobox', { name: 'Extras' }), 'Ninguno');
-    await user.selectOptions(within(part('Inferior')).getByRole('combobox', { name: 'Estilo' }), 'Jean');
+    await pickStyle(user, 'Pelo', /^Estilo de pelo/, 'Coleta');
+    await pickPreset(user, 'Pelo', /^Color de pelo/, HAIR_COLORS[4]!.label);
+    await pickStyle(user, 'Superior', /^Lentes/, 'Lentes de sol');
+    await pickStyle(user, 'Superior', /^Extras/, 'Ninguno');
+    await pickStyle(user, 'Inferior', /^Estilo de la parte inferior/, 'Jean');
 
     expect(screen.getByRole('button', { name: 'Plantilla 2' })).toHaveAttribute('aria-pressed', 'false');
     const preview = screen.getByRole('region', { name: 'Vista previa' });
@@ -157,12 +176,26 @@ describe('CharacterCreator', () => {
     expect(submitted(onSubmit)).toEqual({ kind: 'custom', spec: expected });
   });
 
+  it('takes any rgb color from the free picker', async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = renderCreator();
+
+    await user.click(within(part('Zapatos')).getByRole('button', { name: /^Color de zapatos/ }));
+    fireEvent.input(screen.getByLabelText('Otro color'), { target: { value: '#12AB34' } });
+    await user.keyboard('{Escape}');
+
+    expect(within(part('Zapatos')).getByRole('button', { name: 'Color de zapatos: #12ab34' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Entrar a la oficina' }));
+    const template = CHARACTER_TEMPLATES[1]!.spec;
+    expect(submitted(onSubmit)).toEqual({ kind: 'custom', spec: { ...template, shoes: { ...template.shoes, color: '#12ab34' } } });
+  });
+
   it('reopens a custom character with its parts and saves it unchanged', async () => {
     const user = userEvent.setup();
     const spec: CustomCharacterSpec = { ...CHARACTER_TEMPLATES[4]!.spec, build: 'broad', earrings: true };
     const { onSubmit } = renderCreator({ initial: { kind: 'custom', spec } });
 
-    expect(within(part('Superior')).getByRole('combobox', { name: 'Estilo' })).toHaveDisplayValue('Traje con corbata');
+    expect(within(part('Superior')).getByRole('button', { name: 'Estilo de la parte superior: Traje con corbata' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Plantilla 5' })).toHaveAttribute('aria-pressed', 'false');
     await user.click(screen.getByRole('button', { name: 'Entrar a la oficina' }));
 
@@ -174,7 +207,7 @@ describe('CharacterCreator', () => {
     const spec: CustomCharacterSpec = { ...CHARACTER_TEMPLATES[4]!.spec, build: 'broad', earrings: true };
     const { onSubmit } = renderCreator({ initial: { kind: 'custom', spec } });
 
-    await user.selectOptions(within(part('Zapatos')).getByRole('combobox', { name: 'Estilo' }), 'Tacones');
+    await pickStyle(user, 'Zapatos', /^Estilo de zapatos/, 'Tacones');
     await user.click(screen.getByRole('button', { name: 'Entrar a la oficina' }));
 
     expect(submitted(onSubmit)).toEqual({ kind: 'custom', spec: { ...spec, shoes: { ...spec.shoes, style: 'heels' } } });
@@ -185,7 +218,7 @@ describe('CharacterCreator', () => {
     const { onSubmit } = renderCreator();
 
     await user.click(screen.getByRole('button', { name: 'Plantilla 5' }));
-    await user.selectOptions(within(part('Superior')).getByRole('combobox', { name: 'Lentes' }), 'Ninguno');
+    await pickStyle(user, 'Superior', /^Lentes/, 'Ninguno');
     await user.click(screen.getByRole('button', { name: 'Entrar a la oficina' }));
 
     const template = CHARACTER_TEMPLATES[4]!.spec;

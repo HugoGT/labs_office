@@ -32,7 +32,7 @@ describe('MyCharacterSection', () => {
 
     const dialog = await screen.findByRole('dialog', { name: 'Mi personaje' });
     const top = within(dialog).getByRole('group', { name: 'Superior' });
-    expect(within(top).getByRole('combobox', { name: 'Estilo' })).toHaveDisplayValue('Traje con corbata');
+    expect(within(top).getByRole('button', { name: 'Estilo de la parte superior: Traje con corbata' })).toBeInTheDocument();
   });
 
   it('opens on a saved pack character as its pressed template', async () => {
@@ -52,7 +52,8 @@ describe('MyCharacterSection', () => {
     render(<MyCharacterSection character={port} onClose={vi.fn()} />);
 
     const dialog = await screen.findByRole('dialog', { name: 'Mi personaje' });
-    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Lentes' }), 'Lentes de sol');
+    await user.click(within(dialog).getByRole('button', { name: /^Lentes/ }));
+    await user.click(screen.getByRole('menuitemradio', { name: 'Lentes de sol' }));
     await user.click(within(dialog).getByRole('button', { name: 'Guardar personaje' }));
 
     expect(port.save).toHaveBeenCalledWith({ kind: 'custom', spec: { ...SPEC, glasses: 'sunglasses' } });
@@ -61,7 +62,7 @@ describe('MyCharacterSection', () => {
 
     await user.click(screen.getByRole('button', { name: 'Editar de nuevo' }));
     const again = await screen.findByRole('dialog', { name: 'Mi personaje' });
-    expect(within(again).getByRole('combobox', { name: 'Lentes' })).toHaveDisplayValue('Lentes de sol');
+    expect(within(again).getByRole('button', { name: 'Lentes: Lentes de sol' })).toBeInTheDocument();
     expect(port.read).toHaveBeenCalledTimes(2);
   });
 
@@ -98,7 +99,7 @@ describe('MyCharacterSection', () => {
     try {
       render(<MyCharacterSection character={fakePort({ outcome: 'ok', avatarId: OPTIONS[0]!.id, chosen: true })} onClose={onClose} />);
       const dialog = await screen.findByRole('dialog');
-      within(within(dialog).getByRole('group', { name: 'Piel' })).getAllByRole('radio')[0]!.focus();
+      within(within(dialog).getByRole('group', { name: 'Piel' })).getByRole('button', { name: /^Tono de piel/ }).focus();
 
       await user.keyboard('{ArrowLeft}');
       await user.keyboard('{Escape}');
@@ -108,6 +109,20 @@ describe('MyCharacterSection', () => {
     } finally {
       window.removeEventListener('keydown', onWindowKey);
     }
+  });
+
+  it('Escape in an open style menu closes only the menu, never the dialog', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<MyCharacterSection character={fakePort({ outcome: 'ok', avatarId: OPTIONS[0]!.id, chosen: true })} onClose={onClose} />);
+    const dialog = await screen.findByRole('dialog', { name: 'Mi personaje' });
+
+    await user.click(within(dialog).getByRole('button', { name: /^Lentes/ }));
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Mi personaje' })).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('says so when the saved character cannot be read', async () => {
