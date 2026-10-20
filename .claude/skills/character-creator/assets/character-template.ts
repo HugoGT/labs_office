@@ -10,7 +10,7 @@
   bottom: 'pants', // 'pants' | 'widePants' | 'skirt'
   shoes: 'heels', // 'dress' | 'heels'
   accessory: 'tablet', // 'coffee' | 'handbag' | 'laptop' | 'tablet' | 'briefcase' | 'folder' | 'jacketOverShoulder'
-  glasses: false,
+  glasses: 'none', // 'none' | 'glasses' | 'sunglasses'
   earrings: true,
   // darkerHair: true, // brown hair, or hair close to the skin tone
   palette: {

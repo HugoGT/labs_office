@@ -7,7 +7,17 @@
  *
  * Pure TS (the roster and a pure SHA-256 only), so the browser, the server and the tools share it.
  */
-import { BASE_CHARACTERS, type Accessory, type BottomStyle, type Build, type CharacterSpec, type HairStyle, type ShoeStyle, type TopStyle } from './characters.ts';
+import {
+  BASE_CHARACTERS,
+  type Accessory,
+  type BottomStyle,
+  type Build,
+  type CharacterSpec,
+  type Glasses,
+  type HairStyle,
+  type ShoeStyle,
+  type TopStyle,
+} from './characters.ts';
 import { sha256Hex } from './sha256.ts';
 
 /**
@@ -15,7 +25,7 @@ import { sha256Hex } from './sha256.ts';
  * `/assets/characters/<hash>/*` URLs) changes, so no browser keeps a stale cached sheet for a
  * newly saved character. Rows saved before keep their hash and are drawn by the current renderer.
  */
-export const CHARACTER_RENDER_VERSION = 1;
+export const CHARACTER_RENDER_VERSION = 2;
 
 export const CUSTOM_CHARACTER_ID_PREFIX = 'character-custom-';
 const HASH_LENGTH = 32;
@@ -135,6 +145,12 @@ export const CUSTOM_ACCESSORIES: readonly Option<Accessory>[] = [
   { value: 'jacketOverShoulder', label: 'Chaqueta al hombro' },
 ];
 
+export const GLASSES_OPTIONS: readonly Option<Glasses>[] = [
+  { value: 'none', label: 'Ninguno' },
+  { value: 'glasses', label: 'Lentes' },
+  { value: 'sunglasses', label: 'Lentes de sol' },
+];
+
 export interface CustomCharacterSpec {
   readonly build: Build;
   readonly skin: string;
@@ -143,7 +159,7 @@ export interface CustomCharacterSpec {
   readonly bottom: { readonly style: BottomStyle; readonly color: string };
   readonly shoes: { readonly style: ShoeStyle; readonly color: string };
   readonly accessory: Accessory;
-  readonly glasses: boolean;
+  readonly glasses: Glasses;
   readonly earrings: boolean;
 }
 
@@ -197,6 +213,13 @@ function pickColor(swatches: readonly Swatch[], value: unknown, field: CustomCha
   return hex;
 }
 
+/** Specs saved before sunglasses existed carry a boolean: `true` was the only glasses there were. */
+function pickGlasses(value: unknown): Glasses {
+  if (value === true) return 'glasses';
+  if (value === false) return 'none';
+  return pickOption(GLASSES_OPTIONS, value, 'glasses');
+}
+
 function pickBoolean(value: unknown, field: CustomCharacterField): boolean {
   if (typeof value !== 'boolean') throw new InvalidField(field);
   return value;
@@ -236,7 +259,7 @@ export function parseCustomCharacterSpec(input: unknown): CustomCharacterParse {
         bottom: { style: bottomStyle, color: bottomColor },
         shoes: { style: shoeStyle, color: shoeColor },
         accessory: pickOption(CUSTOM_ACCESSORIES, input.accessory, 'accessory'),
-        glasses: pickBoolean(input.glasses, 'glasses'),
+        glasses: pickGlasses(input.glasses),
         earrings: pickBoolean(input.earrings, 'earrings'),
       },
     };

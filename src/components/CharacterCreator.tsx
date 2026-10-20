@@ -295,7 +295,7 @@ export function CharacterCreator({
             <Part legend="Extras">
               <div className={styles.checks}>
                 <label className={styles.check}>
-                  <input type="checkbox" checked={spec.glasses} onChange={(event) => edit({ glasses: event.target.checked })} />
+                  <input type="checkbox" checked={spec.glasses !== 'none'} onChange={(event) => edit({ glasses: event.target.checked ? 'glasses' : 'none' })} />
                   <span>Gafas</span>
                 </label>
                 <label className={styles.check}>

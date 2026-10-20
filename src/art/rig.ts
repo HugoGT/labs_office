@@ -57,7 +57,9 @@ export type MaterialKey =
   | 'screen'
   | 'lanyard'
   | 'photo'
-  | 'lens';
+  | 'lens'
+  | 'frame'
+  | 'shade';
 
 export interface DecalContext {
   /** How directly the decal surface faces the camera, from -1 to 1. */
@@ -219,6 +221,8 @@ export function rampsFor(spec: CharacterSpec): Readonly<Record<MaterialKey, Ramp
     lanyard: makeRamp('#2a2442'),
     photo: makeRamp('#4a7fd0'),
     lens: makeRamp('#c4e6f5'),
+    frame: makeRamp('#4a3b5c'),
+    shade: makeRamp('#1d2a3a'),
   };
 }
 
@@ -858,6 +862,7 @@ function addHead(body: Body): void {
   );
 
   const lashes = spec.build === 'slim';
+  const glasses = spec.glasses;
   for (const side of [LEFT, RIGHT] as const) {
     const eye = frontPoint(h, r, side * 1.75, -0.8);
     body.decals.push({
@@ -865,14 +870,13 @@ function addHead(body: Body): void {
       normal: eye.normal,
       minFacing: 0.15,
       draw(ctx) {
-        ctx.plot(0, 0, 'ink', 'base');
-        ctx.plot(0, 1, 'ink', 'base');
-        if (lashes && ctx.facing > 0.35) ctx.plot(ctx.screenSide, 0, 'ink', 'base');
-        if (spec.glasses) {
-          for (const dx of [-1, 0, 1]) ctx.plot(dx, -1, 'ink', 'base');
-          ctx.plot(-ctx.screenSide, 0, 'ink', 'base');
-          if (ctx.facing > 0.45) ctx.plot(ctx.screenSide, 0, 'lens', 'base');
+        if (glasses === 'none') {
+          ctx.plot(0, 0, 'ink', 'base');
+          ctx.plot(0, 1, 'ink', 'base');
+          if (lashes && ctx.facing > 0.35) ctx.plot(ctx.screenSide, 0, 'ink', 'base');
+          return;
         }
+        drawLens(ctx, glasses);
       },
     });
     if (spec.earrings) {
@@ -888,18 +892,6 @@ function addHead(body: Body): void {
       });
     }
   }
-  if (spec.glasses) {
-    // Both frame tops meet between the eyes and read as a unibrow; keep one skin pixel there.
-    const bridge = frontPoint(h, r, 0, -0.8);
-    body.decals.push({
-      anchor: bridge.point,
-      normal: bridge.normal,
-      minFacing: 0.5,
-      draw(ctx) {
-        ctx.plot(0, -1, 'skin', 'base');
-      },
-    });
-  }
   const mouth = frontPoint(jawCenter, jawRadii, 0, -0.4);
   body.decals.push({
     anchor: mouth.point,
@@ -909,6 +901,39 @@ function addHead(body: Body): void {
       ctx.plot(0, 0, 'skin', 'deep');
     },
   });
+}
+
+/**
+ * One lens around an eye (the eye is the column at dx 0, rows 0 and 1): a rim
+ * above AND below the lens and a bar on its outer side, so at this size it
+ * reads as a frame and not as a brow line. The inner pixels of both lenses
+ * make a one-pixel bridge. Clear lenses keep the eye in ink with a light pane beside it;
+ * sunglasses fill the pane dark with one highlight.
+ */
+function drawLens(ctx: DecalContext, glasses: 'glasses' | 'sunglasses'): void {
+  const out = ctx.screenSide;
+  const sideView = ctx.facing <= 0.45;
+  for (const dx of [0, out]) {
+    ctx.plot(dx, -1, 'frame', 'base');
+    ctx.plot(dx, 2, 'frame', 'base');
+  }
+  // The bridge is one pixel tall, so the nose shows under it and the pair never reads as a mask.
+  ctx.plot(-out, 0, 'frame', 'base');
+  if (!sideView) {
+    ctx.plot(2 * out, 0, 'frame', 'base');
+    ctx.plot(2 * out, 1, 'frame', 'base');
+  }
+  if (glasses === 'sunglasses') {
+    ctx.plot(0, 0, 'shade', 'base');
+    ctx.plot(0, 1, 'shade', 'shadow');
+    ctx.plot(out, 0, 'shade', 'light');
+    ctx.plot(out, 1, 'shade', 'base');
+    return;
+  }
+  ctx.plot(0, 0, 'ink', 'base');
+  ctx.plot(0, 1, 'ink', 'base');
+  ctx.plot(out, 0, 'lens', 'light');
+  ctx.plot(out, 1, 'lens', 'base');
 }
 
 interface HairKit {

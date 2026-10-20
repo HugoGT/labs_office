@@ -1,35 +1,81 @@
-import { test } from 'vitest';
-import assert from 'node:assert/strict';
-import { CHARACTERS } from './characters.ts';
-import { hexToRgba } from '../game/artColor.ts';
-import type { Rgba } from './pixelBuffer.ts';
-import { buildCharacterSprites, frameRect } from './spriteSheet.ts';
+import { describe, expect, it } from 'vitest';
+import { BASE_CHARACTERS, type CharacterSpec, type Glasses } from './characters.ts';
+import type { PixelBuffer } from './pixelBuffer.ts';
+import { rampsFor, type MaterialKey } from './rig.ts';
+import { buildCharacterSprites, frameRect, sitFrameRect, type FrameRect } from './spriteSheet.ts';
+import type { Direction } from './directions.ts';
 
-const LENS = hexToRgba('#c4e6f5');
+const ANDRE = BASE_CHARACTERS.find((character) => character.id === 'p05-charcoal-suit')!;
+const MATEO = BASE_CHARACTERS[0]!;
 
-function same(a: Rgba, b: Rgba): boolean {
-  return a.r === b.r && a.g === b.g && a.b === b.b && a.a === b.a;
+function wearing(base: CharacterSpec, glasses: Glasses): CharacterSpec {
+  return { ...base, glasses };
 }
 
-test('glasses frames do not join into a single brow line above the eyes', () => {
-  const wearers = CHARACTERS.filter((character) => character.glasses);
-  assert.ok(wearers.length >= 1);
-  for (const character of wearers) {
-    const { idle } = buildCharacterSprites(character);
-    const cell = frameRect('S', 0);
-    const lenses: { x: number; y: number }[] = [];
-    for (let y = cell.y; y < cell.y + cell.height; y += 1) {
-      for (let x = cell.x; x < cell.x + cell.width; x += 1) {
-        if (same(idle.getPixel(x, y), LENS)) lenses.push({ x, y });
-      }
+/** Every pixel of a frame painted with one material, by its ramp colors. */
+function pixelsOf(spec: CharacterSpec, sheet: PixelBuffer, rect: FrameRect, key: MaterialKey): { x: number; y: number }[] {
+  const ramp = Object.values(rampsFor(spec)[key]);
+  const found: { x: number; y: number }[] = [];
+  for (let y = 0; y < rect.height; y += 1) {
+    for (let x = 0; x < rect.width; x += 1) {
+      const c = sheet.getPixel(rect.x + x, rect.y + y);
+      if (c.a === 255 && ramp.some((r) => r.r === c.r && r.g === c.g && r.b === c.b)) found.push({ x, y });
     }
-    assert.equal(lenses.length, 2, `${character.id}: expected two lenses in the front view`);
-    const [left, right] = lenses as [{ x: number; y: number }, { x: number; y: number }];
-    const skin = hexToRgba(character.palette.skin);
-    const gap: number[] = [];
-    for (let x = left.x + 1; x < right.x; x += 1) {
-      if (same(idle.getPixel(x, left.y - 1), skin)) gap.push(x);
-    }
-    assert.equal(gap.length, 1, `${character.id}: expected one skin pixel splitting the brow line`);
   }
+  return found;
+}
+
+const FACE_DIRECTIONS: readonly Direction[] = ['S', 'SE', 'E', 'W', 'SW'];
+
+describe('glasses', () => {
+  it('base characters keep their regular glasses, and nobody else wears any', () => {
+    expect(ANDRE.glasses).toBe('glasses');
+    for (const base of BASE_CHARACTERS) if (base !== ANDRE) expect(base.glasses).toBe('none');
+  });
+
+  it('draws a frame around each lens, under the eyes as well as over them, so it never reads as a brow', () => {
+    const spec = wearing(MATEO, 'glasses');
+    const { idle } = buildCharacterSprites(spec);
+    const front = frameRect('S', 0);
+    const lens = pixelsOf(spec, idle, front, 'lens');
+    const frame = pixelsOf(spec, idle, front, 'frame');
+
+    expect(lens.length).toBeGreaterThanOrEqual(2);
+    const lensTop = Math.min(...lens.map((p) => p.y));
+    const lensBottom = Math.max(...lens.map((p) => p.y));
+    expect(frame.some((p) => p.y < lensTop)).toBe(true);
+    expect(frame.some((p) => p.y > lensBottom)).toBe(true);
+    // Two lenses, one each side of a bridge between them.
+    const lensXs = [...new Set(lens.map((p) => p.x))].sort((a, b) => a - b);
+    expect(lensXs.at(-1)! - lensXs[0]!).toBeGreaterThanOrEqual(3);
+  });
+
+  it('sunglasses have dark lenses instead of clear ones', () => {
+    const spec = wearing(MATEO, 'sunglasses');
+    const { idle } = buildCharacterSprites(spec);
+    const front = frameRect('S', 0);
+
+    expect(pixelsOf(spec, idle, front, 'shade').length).toBeGreaterThanOrEqual(4);
+    expect(pixelsOf(spec, idle, front, 'frame').length).toBeGreaterThan(0);
+  });
+
+  it.each(['glasses', 'sunglasses'] as const)('%s show in every walk direction and seated facing that shows the face', (glasses) => {
+    const spec = wearing(MATEO, glasses);
+    const sprites = buildCharacterSprites(spec);
+    for (const direction of FACE_DIRECTIONS) {
+      expect(pixelsOf(spec, sprites.idle, frameRect(direction, 0), 'frame').length, direction).toBeGreaterThan(0);
+      expect(pixelsOf(spec, sprites.walk, frameRect(direction, 3), 'frame').length, `${direction} walking`).toBeGreaterThan(0);
+    }
+    for (const facing of ['down', 'left', 'right'] as const) {
+      expect(pixelsOf(spec, sprites.sit, sitFrameRect(facing, 6), 'frame').length, facing).toBeGreaterThan(0);
+    }
+    expect(pixelsOf(spec, sprites.idle, frameRect('N', 0), 'frame')).toEqual([]);
+  });
+
+  it('none draws neither frame nor lens', () => {
+    const spec = wearing(MATEO, 'none');
+    const { idle } = buildCharacterSprites(spec);
+    expect(pixelsOf(spec, idle, frameRect('S', 0), 'frame')).toEqual([]);
+    expect(pixelsOf(spec, idle, frameRect('S', 0), 'shade')).toEqual([]);
+  });
 });

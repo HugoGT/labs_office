@@ -61,7 +61,7 @@ Set unused `inner` to `WHITE_SHIRT`. Without `tie`, the tie falls back to `inner
 
 | Field | Effect |
 |-------|--------|
-| `glasses` | Dark frames and light lenses; one skin pixel between the frames is drawn automatically |
+| `glasses` | `'none'`, `'glasses'` (a frame around each eye with a light lens and a one-pixel bridge) or `'sunglasses'` (the same frame with dark lenses) |
 | `earrings` | Gold earrings (fixed color) |
 | `darkerHair` | Draws the whole hair ramp one tone darker |
 | `palette.scrunchie` | Scrunchie color, used only by `ponytail` and `wavyPonytail`; defaults to the hair color |

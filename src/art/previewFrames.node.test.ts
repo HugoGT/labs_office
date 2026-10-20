@@ -18,7 +18,7 @@ function cut(sheet: PixelBuffer, rect: FrameRect): number[] {
 describe('renderCharacterPreview', () => {
   it.each([
     ['a base character', BASE_CHARACTERS[3]!],
-    ['a custom character', toCharacterSpec({ ...CHARACTER_TEMPLATES[7]!.spec, accessory: 'none', glasses: true })],
+    ['a custom character', toCharacterSpec({ ...CHARACTER_TEMPLATES[7]!.spec, accessory: 'none', glasses: 'sunglasses' })],
   ])('draws exactly the cells of the full sheets for %s, facing the viewer', (_label, spec) => {
     const sprites = buildCharacterSprites(spec);
     const preview = renderCharacterPreview(spec);

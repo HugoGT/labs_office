@@ -55,7 +55,7 @@ describe('MyCharacterSection', () => {
     await user.click(within(dialog).getByRole('checkbox', { name: 'Gafas' }));
     await user.click(within(dialog).getByRole('button', { name: 'Guardar personaje' }));
 
-    expect(port.save).toHaveBeenCalledWith({ kind: 'custom', spec: { ...SPEC, glasses: !SPEC.glasses } });
+    expect(port.save).toHaveBeenCalledWith({ kind: 'custom', spec: { ...SPEC, glasses: SPEC.glasses === 'none' ? 'glasses' : 'none' } });
     expect(await screen.findByRole('status')).toHaveTextContent('Personaje guardado. Ya te ven así en la oficina.');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 

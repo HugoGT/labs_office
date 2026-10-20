@@ -15,6 +15,7 @@ import {
   SKIN_TONES,
   TOP_STYLE_OPTIONS,
   CHARACTER_TEMPLATES,
+  GLASSES_OPTIONS,
   customCharacterHash,
   customCharacterHashOf,
   customCharacterId,
@@ -33,7 +34,7 @@ const SPEC: CustomCharacterSpec = {
   bottom: { style: 'skirt', color: CLOTHING_COLORS[5]!.hex },
   shoes: { style: 'heels', color: SHOE_COLORS[1]!.hex },
   accessory: 'tablet',
-  glasses: true,
+  glasses: 'glasses',
   earrings: false,
 };
 
@@ -65,6 +66,19 @@ describe('parseCustomCharacterSpec', () => {
     expect(result).toEqual({ ok: true, spec: SPEC });
   });
 
+  it('still reads the boolean glasses of specs saved before sunglasses existed', () => {
+    expect(parseCustomCharacterSpec({ ...SPEC, glasses: true })).toEqual({ ok: true, spec: { ...SPEC, glasses: 'glasses' } });
+    expect(parseCustomCharacterSpec({ ...SPEC, glasses: false })).toEqual({ ok: true, spec: { ...SPEC, glasses: 'none' } });
+  });
+
+  it('offers no glasses, glasses and sunglasses', () => {
+    expect(GLASSES_OPTIONS.map((option) => [option.value, option.label])).toEqual([
+      ['none', 'Ninguno'],
+      ['glasses', 'Lentes'],
+      ['sunglasses', 'Lentes de sol'],
+    ]);
+  });
+
   it('accepts upper case colors as the same swatch', () => {
     const result = parseCustomCharacterSpec({ ...SPEC, skin: SPEC.skin.toUpperCase() });
     expect(result).toEqual({ ok: true, spec: SPEC });
@@ -87,6 +101,7 @@ describe('parseCustomCharacterSpec', () => {
     [{ ...SPEC, shoes: { style: 'dress', color: '#ffffff' } }, 'shoes.color'],
     [{ ...SPEC, accessory: 'umbrella' }, 'accessory'],
     [{ ...SPEC, glasses: 'yes' }, 'glasses'],
+    [{ ...SPEC, glasses: 1 }, 'glasses'],
     [{ ...SPEC, earrings: undefined }, 'earrings'],
   ])('rejects %j at %s', (input, field) => {
     expect(parseCustomCharacterSpec(input)).toEqual({ ok: false, field });
@@ -104,7 +119,7 @@ describe('canonical encoding and hash', () => {
     const hash = customCharacterHash(SPEC);
     expect(hash).toMatch(/^[0-9a-f]{32}$/);
     expect(customCharacterHash({ ...SPEC })).toBe(hash);
-    expect(customCharacterHash({ ...SPEC, glasses: false })).not.toBe(hash);
+    expect(customCharacterHash({ ...SPEC, glasses: 'sunglasses' })).not.toBe(hash);
     expect(customCharacterHash(SPEC, CHARACTER_RENDER_VERSION + 1)).not.toBe(hash);
   });
 
@@ -130,7 +145,7 @@ describe('toCharacterSpec', () => {
       bottom: 'skirt',
       shoes: 'heels',
       accessory: 'tablet',
-      glasses: true,
+      glasses: 'glasses',
       earrings: false,
       palette: { skin: SPEC.skin, hair: SPEC.hair.color, top: SPEC.top.color, bottom: SPEC.bottom.color, shoes: SPEC.shoes.color },
     });
@@ -154,7 +169,7 @@ describe('toCharacterSpec', () => {
         bottom: { style: pick(BOTTOM_STYLE_OPTIONS).value, color: pick(CLOTHING_COLORS).hex },
         shoes: { style: pick(SHOE_STYLE_OPTIONS).value, color: pick(SHOE_COLORS).hex },
         accessory: pick(CUSTOM_ACCESSORIES).value,
-        glasses: i % 2 === 0,
+        glasses: pick(GLASSES_OPTIONS).value,
         earrings: i % 3 === 0,
       };
       const { walk, seated } = renderCharacterSheets(toCharacterSpec(custom));

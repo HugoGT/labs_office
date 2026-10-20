@@ -788,7 +788,7 @@ describe('AuthGate: character chosen at the entrance (art migration, step 5)', (
     await user.click(within(await screen.findByRole('group', { name: 'Extras' })).getByRole('checkbox', { name: 'Gafas' }));
     await user.click(screen.getByRole('button', { name: /entrar a la oficina/i }));
 
-    expect(character.save).toHaveBeenCalledWith({ kind: 'custom', spec: { ...CHARACTER_TEMPLATES[0]!.spec, glasses: true } });
+    expect(character.save).toHaveBeenCalledWith({ kind: 'custom', spec: { ...CHARACTER_TEMPLATES[0]!.spec, glasses: 'glasses' } });
     expect(await screen.findByTestId('office')).toBeInTheDocument();
   });
 

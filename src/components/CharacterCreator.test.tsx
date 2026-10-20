@@ -122,7 +122,7 @@ describe('CharacterCreator', () => {
     const expected: CustomCharacterSpec = {
       ...CHARACTER_TEMPLATES[1]!.spec,
       hair: { style: 'ponytail', color: HAIR_COLORS[4]!.hex },
-      glasses: true,
+      glasses: 'glasses',
       accessory: 'none',
     };
     expect(submitted(onSubmit)).toEqual({ kind: 'custom', spec: expected });
