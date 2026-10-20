@@ -24,7 +24,8 @@ export type BottomStyle = 'pants' | 'widePants' | 'skirt';
 
 export type ShoeStyle = 'dress' | 'heels';
 
-export type Accessory = 'coffee' | 'handbag' | 'laptop' | 'tablet' | 'briefcase' | 'folder' | 'jacketOverShoulder';
+/** 'none' leaves both hands free; only custom characters use it, so the pack stays as it was. */
+export type Accessory = 'none' | 'coffee' | 'handbag' | 'laptop' | 'tablet' | 'briefcase' | 'folder' | 'jacketOverShoulder';
 
 export interface Palette {
   readonly skin: string;

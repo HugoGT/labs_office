@@ -188,7 +188,7 @@ interface HoldPose {
 }
 
 /** How the right arm holds each accessory. Angles in radians, swing is the leftover arm swing. */
-const HOLDS: Readonly<Record<Accessory, HoldPose>> = {
+const HOLDS: Readonly<Partial<Record<Accessory, HoldPose>>> = {
   coffee: { gamma: 6 * DEG, delta: 84 * DEG, swing: 0, spread: 0.12, inward: 0.3 },
   tablet: { gamma: 14 * DEG, delta: 66 * DEG, swing: 0, spread: 0.1, inward: 0.4 },
   folder: { gamma: 2 * DEG, delta: 104 * DEG, swing: 0, spread: 0.12, inward: 0.55 },

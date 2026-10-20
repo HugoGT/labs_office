@@ -55,6 +55,7 @@ Set unused `inner` to `WHITE_SHIRT`. Without `tie`, the tie falls back to `inner
 | `briefcase` | Case | Clasp | p05, p08, p14 |
 | `folder` | Cover | Page edge | p06, p11, p16 |
 | `jacketOverShoulder` | Jacket | Unused | p09, p15 |
+| `none` | Unused | Unused | custom characters from the creator (`src/art/customCharacter.ts`) |
 
 ## Flags
 
