@@ -32,7 +32,10 @@ import type { DecorCatalog } from './decor/decorPort.ts';
 import { readArtPackManifest } from './decor/artPackFile.ts';
 import type { AssetStoragePort } from './assets/assetStoragePort.ts';
 import { createMemoryAssetStorage } from './assets/memoryAssetStorage.ts';
-import { encodePng } from './assets/pngCodec.ts';
+import { encodePng, hasPngSignature } from './assets/pngCodec.ts';
+import { CHARACTER_TEMPLATES, customCharacterHash } from '../../src/art/customCharacter.ts';
+import type { CustomCharacterStore } from './characters/customCharacterPort.ts';
+import { createMemoryCustomCharacters } from './characters/memoryCustomCharacters.ts';
 import { ART_IMAGE_SPECS, sheetSize } from '../../src/game/artContract.ts';
 import { createHash } from 'node:crypto';
 import { createMemoryDesks } from './desks/memoryDesks.ts';
@@ -1938,6 +1941,95 @@ describe('character routes (art migration, step 5)', () => {
       body: JSON.stringify({ avatarId: 'character-p05-charcoal-suit' }),
     });
     expect(posted.status).toBe(503);
+    await server.shutdown();
+  });
+});
+
+/**
+ * Wiring of the creator: a spec posted to `/me/avatar` is stored and its
+ * sheets are served by `/assets/characters/<hash>/*`, drawn by the server
+ * with no bucket configured (`assetStorage: null`). The rules are in
+ * `avatarRoutes.test.ts` and `characters/customCharacterRoutes.test.ts`.
+ */
+describe('custom character routes (creator)', () => {
+  const ANA_CREATOR: DirectoryUser = {
+    id: 'id-ana',
+    uid: 'uid-ana',
+    email: 'ana@example.com',
+    displayName: null,
+    role: 'employee',
+    status: 'active',
+    expiresAt: null,
+    invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
+    createdAt: new Date('2025-12-01T00:00:00.000Z'),
+  };
+  const creatorVerifier: IdTokenVerifier = {
+    async verify(token: unknown) {
+      return token === 'valido-uid-ana' ? { uid: 'uid-ana', email: 'ana@example.com', name: null } : null;
+    },
+  };
+  const BEARER = { Authorization: 'Bearer valido-uid-ana', 'Content-Type': 'application/json' };
+  const SPEC = CHARACTER_TEMPLATES[2]!.spec;
+
+  async function creatorServer(customCharacters: CustomCharacterStore | null = createMemoryCustomCharacters()) {
+    const decor = createMemoryDecor();
+    await decor.registerArtPack(readArtPackManifest(new URL('../../public/assets/pack/manifest.json', import.meta.url)));
+    const server = createOfficeServer({
+      auth: creatorVerifier,
+      directory: createMemoryDirectory({ seed: [ANA_CREATOR] }),
+      decor,
+      identityAdmin: null,
+      assetStorage: null,
+      customCharacters,
+    });
+    const port = await server.listen(0);
+    return { server, url: `http://localhost:${port}` };
+  }
+
+  it('stores a posted spec and serves its sheets as immutable PNGs without a bucket', async () => {
+    const { server, url } = await creatorServer();
+    const hash = customCharacterHash(SPEC);
+
+    const posted = await fetch(`${url}/me/avatar`, { method: 'POST', headers: BEARER, body: JSON.stringify({ spec: SPEC }) });
+    expect(await posted.json()).toEqual({ avatarId: `character-custom-${hash}`, chosen: true, spec: SPEC });
+
+    for (const file of ['walk.png', 'seated.png']) {
+      const sheet = await fetch(`${url}/assets/characters/${hash}/${file}`);
+      expect(sheet.status).toBe(200);
+      expect(sheet.headers.get('content-type')).toBe('image/png');
+      expect(sheet.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+      expect(hasPngSignature(new Uint8Array(await sheet.arrayBuffer()))).toBe(true);
+    }
+    await server.shutdown();
+  });
+
+  it('answers 404 for a hash nobody stored', async () => {
+    const { server, url } = await creatorServer();
+
+    expect((await fetch(`${url}/assets/characters/${'f'.repeat(32)}/walk.png`)).status).toBe(404);
+    await server.shutdown();
+  });
+
+  it('a spec outside the curated options answers 400 end to end', async () => {
+    const { server, url } = await creatorServer();
+
+    const res = await fetch(`${url}/me/avatar`, {
+      method: 'POST',
+      headers: BEARER,
+      body: JSON.stringify({ spec: { ...SPEC, skin: '#123456' } }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid-character', reason: 'invalid-spec', field: 'skin' });
+    await server.shutdown();
+  });
+
+  it('without a store the sheets answer 503, never 404', async () => {
+    const { server, url } = await creatorServer(null);
+
+    expect((await fetch(`${url}/assets/characters/${'f'.repeat(32)}/walk.png`)).status).toBe(503);
     await server.shutdown();
   });
 });

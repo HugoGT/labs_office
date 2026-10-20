@@ -472,6 +472,19 @@ CREATE TABLE IF NOT EXISTS piece_collisions (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Characters built with the creator (`src/art/customCharacter.ts`), by the
+-- content hash of their canonical spec and render version. A row is written
+-- once and never changed (a different spec is a different hash); users point
+-- at one with `users.avatar_id = 'character-custom-<hash>'`, which has no
+-- foreign key for the same reason the pack ids above have none. The server
+-- renders only hashes stored here (`GET /assets/characters/<hash>/*`).
+CREATE TABLE IF NOT EXISTS custom_characters (
+  hash text PRIMARY KEY CHECK (hash ~ '^[0-9a-f]{32}$'),
+  spec jsonb NOT NULL CHECK (jsonb_typeof(spec) = 'object'),
+  render_version integer NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
 -- The 21x15 block grid (map editor palette). Stored rows were written against
 -- the first editor's 14x10 grid, which now sits at block offset (+3, +2) so
 -- the spawn block stays in the middle (`LEGACY_BLOCK_GRID` in
