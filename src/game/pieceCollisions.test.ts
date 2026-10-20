@@ -224,6 +224,39 @@ describe('pieceCollisions: instances', () => {
     expect(worldRectsOf(right!, table)).toEqual(worldRectsOf(placed!, table).map((rect) => ({ ...rect, x: rect.x + shift.x, y: rect.y + shift.y })));
   });
 
+  it('places a decor table on the middle of its edge, blocking the floor under its top until an admin edits it', () => {
+    const desk = { x: 320, y: 160, w: 96, h: 96, items: [{ slot: 1, rotation: 180, pieceId: 'desk-wood' }, { slot: 4, rotation: 0, pieceId: 'plant-ficus' }] };
+    const [table] = deskInstances([desk]);
+    const top = deskSlotRect(desk, 1)!;
+
+    expect(table).toMatchObject({
+      piece: 'desk-wood',
+      pivot: { x: top.x + 16, y: top.y + 16 },
+      rotation: rotationForFacing('up'),
+      scale: { x: 1, y: 1 },
+      offset: { x: 0, y: 0 },
+      pickBox: { x: 320, y: 160, w: 96, h: 32 },
+    });
+    // Unedited: the floor under its 80px top, along the top row.
+    expect(worldRectsOf(table!, NO_EDITS)).toEqual([{ x: top.x + 16 - 40, y: top.y + 16 - 7, w: 80, h: 14 }]);
+    // Edited: the piece's rectangles, turned by its facing.
+    expect(worldRectsOf(table!, new Map([['desk-wood', [{ x: -30, y: -4, w: 60, h: 8 }]]]))).toEqual([{ x: top.x + 16 - 30, y: top.y + 12, w: 60, h: 8 }]);
+  });
+
+  it('turns a decor table on a side edge a quarter, like its vertical drawing', () => {
+    const desk = { x: 320, y: 160, w: 96, h: 96, items: [{ slot: 5, rotation: 90, pieceId: 'desk-glass' }] };
+    const [table] = deskInstances([desk]);
+    const middle = deskSlotRect(desk, 5)!;
+
+    expect(table).toMatchObject({ rotation: 90, pivot: { x: middle.x + 16, y: middle.y + 16 }, pickBox: { x: 384, y: 160, w: 32, h: 96 } });
+    expect(worldRectsOf(table!, NO_EDITS)).toEqual([{ x: middle.x + 16 - 12, y: middle.y + 16 - 40, w: 24, h: 80 }]);
+    expect(worldRectsOf(table!, new Map([['desk-glass', [{ x: -30, y: -4, w: 60, h: 8 }]]]))).toEqual([{ x: middle.x + 12, y: middle.y + 16 - 30, w: 8, h: 60 }]);
+  });
+
+  it('skips a table off the middle of its edge', () => {
+    expect(deskInstances([{ x: 0, y: 0, w: 96, h: 96, items: [{ slot: 4, rotation: 0, pieceId: 'desk-wood' }] }])).toEqual([]);
+  });
+
   it('an empty desk places nothing: no built-in table, no fixed chair', () => {
     expect(deskInstances([{ x: 0, y: 0, w: 96, h: 96, items: [] }])).toEqual([]);
   });

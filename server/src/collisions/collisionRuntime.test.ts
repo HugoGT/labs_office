@@ -106,6 +106,16 @@ describe('createCollisionRuntime', () => {
     expect(isPositionBlocked(collisions.rects(), onDesk.x, onDesk.y)).toBe(true);
   });
 
+  it('blocks a decor table on its desk edge out of the box, and frees the rest of the desk', async () => {
+    // Bottom row of the desk at (640, 1600): its middle tile center is (688, 1680).
+    const desks: CollisionDesk[] = [{ x: 640, y: 1600, w: 96, h: 96, items: [{ slot: 7, rotation: 0, pieceId: 'desk-wood' }] }];
+    const collisions = createCollisionRuntime({ layout: BASE_LAYOUT, seats: BASE_MAP_SEATS, store: createMemoryCollisions([]), listDesks: async () => desks });
+    await collisions.load();
+
+    expect(isPositionBlocked(collisions.rects(), 688, 1680 - 11)).toBe(true);
+    expect(isPositionBlocked(collisions.rects(), 688, 1616 - 11)).toBe(false);
+  });
+
   it('follows the placed chairs when they change, each with its own piece', async () => {
     const chairs: { index: number; piece: 'chair-gamer' | 'chair-wood'; facing: 'down' }[] = [];
     const store = createMemoryCollisions([['chair-gamer', [{ x: -8, y: -8, w: 16, h: 16 }]]]);

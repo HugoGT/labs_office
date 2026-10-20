@@ -210,4 +210,20 @@ describe('decorAssetForPiece', () => {
     });
     expect(decorAssetForPiece(person)).toBeUndefined();
   });
+
+  it('an uploaded desk is a decor table, three tiles along a desk edge, like the pack desks (Editar espacios)', () => {
+    const { piece: desk } = prepareAssetUpload(
+      { kind: 'desk', name: 'Mesa de roble', author: 'A', license: 'L', material: 'roble', files: { sheet: sheet('desk') } },
+      { defaultDeskFacings: FACINGS },
+    );
+
+    expect(decorAssetForPiece(desk)).toEqual({
+      name: 'Mesa de roble',
+      kind: 'furniture',
+      textureKey: `art:${desk.id}:sheet`,
+      w: 3,
+      h: 1,
+      placeableOnDesk: true,
+    });
+  });
 });

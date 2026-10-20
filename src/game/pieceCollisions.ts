@@ -6,8 +6,9 @@
  * served desks and the decor placed on them.
  *
  * A piece nobody edited keeps its default: the whole footprint for a layout
- * prop (exactly the tiles it blocked before this editor), nothing for the
- * pieces the database places (desks, decor, chairs). An edited piece with an
+ * prop (exactly the tiles it blocked before this editor), the floor under
+ * its top for a desk decor table, nothing for the other pieces the database
+ * places (decor plants and chairs, placed chairs). An edited piece with an
  * empty list is walk-through.
  *
  * The client collides its Arcade body with these rectangles and the room
@@ -21,6 +22,7 @@
  */
 
 import { AVATAR_BODY_CENTER_OFFSET, physicalBodyRect } from './avatarGeometry.ts';
+import { TABLE_ROTATIONS, tableEdgeSlot, tableFacing, tableFloorRect, tableSlots } from './deskTable.ts';
 
 /** Same as `TILE` in mapData.ts (pinned by a test). */
 export const COLLISION_TILE = 32;
@@ -292,8 +294,9 @@ function isRotation(value: number): value is CollisionRotation {
 
 /**
  * Instances of the decor on the served desks. A desk is an empty 3x3 area
- * with no piece of its own (Editar espacios): only the plants and chairs of
- * its occupant's decor stand there, each in its slot box (`deskSlotRect`). A decor plant is drawn
+ * with no piece of its own (Editar espacios): only the table, plants and
+ * chairs of its occupant's decor stand there, each in its slot box
+ * (`deskSlotRect`), the table along its edge. A decor plant is drawn
  * squeezed into its box and turned by the item rotation, so its rectangles
  * are too; a decor chair stands 1:1 on the box middle in the facing its
  * rotation picks. Decor that is neither has no piece and never collides.
@@ -303,12 +306,32 @@ export function deskInstances(desks: readonly CollisionDesk[]): CollisionInstanc
   for (const desk of desks) {
     const boxW = desk.w / SLOT_COLUMNS;
     const boxH = desk.h / SLOT_COLUMNS;
+    const slotBox = (slot: number): CollisionRect => ({ x: desk.x + (slot % SLOT_COLUMNS) * boxW, y: desk.y + Math.floor(slot / SLOT_COLUMNS) * boxH, w: boxW, h: boxH });
     for (const item of desk.items) {
       if (item.pieceId === null) continue;
+      if (item.pieceId.startsWith('desk-')) {
+        // A table (`deskTable.ts`): drawn 1:1 on the middle of the edge its
+        // rotation picks, turned like its facing's drawing. Unedited, it
+        // blocks the floor under its top; nothing else of the desk.
+        const rotation = TABLE_ROTATIONS.find((candidate) => candidate === item.rotation);
+        if (rotation === undefined || tableEdgeSlot(rotation) !== item.slot) continue;
+        const middle = slotBox(item.slot);
+        const [first, , last] = tableSlots(rotation).map(slotBox);
+        instances.push({
+          piece: item.pieceId,
+          pivot: { x: middle.x + boxW / 2, y: middle.y + boxH / 2 },
+          rotation: rotationForFacing(tableFacing(rotation)),
+          scale: UNIT,
+          offset: ORIGIN,
+          defaults: [tableFloorRect(rotation)],
+          pickBox: { x: first!.x, y: first!.y, w: last!.x + last!.w - first!.x, h: last!.y + last!.h - first!.y },
+        });
+        continue;
+      }
       const chair = item.pieceId.startsWith('chair-');
       if (!chair && !item.pieceId.startsWith('plant-')) continue;
       if (!Number.isInteger(item.slot) || item.slot < 0 || item.slot >= SLOT_COUNT) continue;
-      const box = { x: desk.x + (item.slot % SLOT_COLUMNS) * boxW, y: desk.y + Math.floor(item.slot / SLOT_COLUMNS) * boxH, w: boxW, h: boxH };
+      const box = slotBox(item.slot);
       if (chair) {
         // A decor chair is drawn 1:1 on the middle of its box like a placed
         // chair on its tile, and its rotation picks a facing

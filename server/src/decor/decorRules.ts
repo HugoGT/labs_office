@@ -14,6 +14,7 @@
  * `boundsOverlap` lo es de `spaces_no_overlap`.
  */
 
+import { deskDecorConflict, fitsDeskDecor } from '../../../src/game/deskTable.ts';
 import { deriveSlug } from '../spaces/spaceRules.ts';
 
 /**
@@ -228,13 +229,28 @@ export interface PlaceableAsset {
   placeableOnDesk: boolean;
   /** `null` mientras siga en el catalogo. Ver `assertNotReAddingArchived`. */
   archivedAt: Date | null;
+  /** What it draws and its size in tiles: a table is a desk piece, and nothing larger than the desk fits (Editar espacios). */
+  textureKey: string;
+  w: number;
+  h: number;
 }
 
+/**
+ * Placeable, and a piece a desk takes (`fitsDeskDecor`): a chair, a plant, a
+ * table or a legacy sprite no larger than the desk. A room table or a tree
+ * marked placeable by hand is still refused.
+ */
 export function assertPlaceableOnDesk(asset: PlaceableAsset): void {
-  if (!asset.placeableOnDesk) {
+  if (!asset.placeableOnDesk || !fitsDeskDecor(asset)) {
     throw new InvalidDeskConfigError(`el asset ${asset.id} no se puede colocar en un escritorio`);
   }
 }
+
+const TABLE_CONFLICTS = {
+  'table-off-edge': 'una mesa va en el centro del borde que elige su giro',
+  'second-table': 'un escritorio admite una sola mesa',
+  'on-table': 'nada puede ir encima de la mesa',
+} as const;
 
 /**
  * La mitad de D1b que no es "sigue pintandose". La frase entera del diseno es
@@ -335,7 +351,7 @@ export function normalizeDeskConfig(
   const byId = new Map(catalog.map((asset) => [asset.id, asset]));
   const retained = new Set(alreadyPlaced);
 
-  return items.map((item) => {
+  const normalized = items.map((item) => {
     const asset = byId.get(item.assetId);
     if (asset === undefined) {
       // La FK tambien lo atraparia, pero como un 23503 indistinguible de una
@@ -347,4 +363,12 @@ export function normalizeDeskConfig(
 
     return { assetId: item.assetId, slot: item.slot, rotation: item.rotation as DeskRotation };
   });
+
+  // The table (Editar espacios): on the middle of the edge its rotation
+  // picks, one at most, and nothing on its three tiles.
+  const conflict = deskDecorConflict(
+    normalized.map((item) => ({ ...item, textureKey: byId.get(item.assetId)!.textureKey })),
+  );
+  if (conflict !== null) throw new InvalidDeskConfigError(TABLE_CONFLICTS[conflict]);
+  return normalized;
 }

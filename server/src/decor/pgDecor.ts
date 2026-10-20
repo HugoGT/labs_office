@@ -433,7 +433,7 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
         // retirado fuese indistinguible de uno inexistente, y quien lo tuviese
         // puesto lo perderia al guardar cualquier otro cambio (D1b).
         const catalog = await client.query(
-          'SELECT id, placeable_on_desk, archived_at FROM assets WHERE id = ANY($1::uuid[])',
+          'SELECT id, placeable_on_desk, archived_at, texture_key, w, h FROM assets WHERE id = ANY($1::uuid[])',
           [ids],
         );
         const normalized = normalizeDeskConfig(
@@ -442,6 +442,9 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
             id: row.id as string,
             placeableOnDesk: row.placeable_on_desk as boolean,
             archivedAt: (row.archived_at as Date | null) ?? null,
+            textureKey: row.texture_key as string,
+            w: row.w as number,
+            h: row.h as number,
           })),
           current.rows.map((row) => row.asset_id as string),
         );

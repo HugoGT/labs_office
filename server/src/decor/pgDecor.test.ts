@@ -122,6 +122,9 @@ function deskPool(respond?: Responder, options: DeskPoolOptions = {}): FakePool 
             id: ASSET_ROW.id,
             placeable_on_desk: true,
             archived_at: options.archivedAt ?? null,
+            texture_key: ASSET_ROW.texture_key,
+            w: ASSET_ROW.w,
+            h: ASSET_ROW.h,
           },
         ],
         rowCount: 1,
@@ -542,7 +545,7 @@ describe('pgDecor: replaceDeskConfig', () => {
   it('un asset que no es colocable se rechaza y no llega a escribir', async () => {
     const pool = fakePool((text) =>
       squash(text).startsWith('select id, placeable_on_desk')
-        ? { rows: [{ id: ASSET_ROW.id, placeable_on_desk: false, archived_at: null }], rowCount: 1 }
+        ? { rows: [{ id: ASSET_ROW.id, placeable_on_desk: false, archived_at: null, texture_key: ASSET_ROW.texture_key, w: 1, h: 1 }], rowCount: 1 }
         : { rows: [], rowCount: 0 },
     );
 
@@ -583,6 +586,8 @@ describe('pgDecor: replaceDeskConfig', () => {
     expect(catalogQuery).toBeDefined();
     expect(squash(catalogQuery!.text)).toContain('archived_at');
     expect(squash(catalogQuery!.text)).not.toContain('archived_at is null');
+    // What it draws and its size decide whether it fits a desk and whether it is a table.
+    expect(squash(catalogQuery!.text)).toContain('texture_key, w, h');
   });
 
   it('lee el escritorio actual DENTRO de la transaccion, antes del DELETE', async () => {
@@ -814,7 +819,8 @@ describe('createPgDecor: art pack catalog (art migration, step 3)', () => {
       'art:chair-leather:sheet',
       'art:chair-metal:sheet',
       'art:chair-wood:sheet',
-    ]);
+      ...PACK.pieces.filter((piece) => piece.kind === 'desk').map((piece) => `art:${piece.id}:sheet`).sort(),
+    ].sort());
     const wood = inserts.find((query) => query.values[3] === 'art:chair-wood:sheet')!;
     expect(wood.values).toEqual(['silla-de-madera', 'Silla de madera', 'furniture', 'art:chair-wood:sheet', 1, 1, true, false]);
     // Archived or not, an existing asset of that texture is never recreated,

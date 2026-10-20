@@ -231,14 +231,18 @@ export function artPieceFields(piece: ArtPiece): ArtPieceFields {
 }
 
 /**
- * The desk decor asset a pack piece brings with it, or `null`. Only chairs:
- * a decor chair is a guest seat anyone may take, while pack plants and the
- * rest stay layout pieces (an uploaded plant gets its asset through
- * `decorAssetForPiece` instead). One tile, like the slot box it is drawn in.
+ * The desk decor asset a pack piece brings with it, or `null`. Chairs, one
+ * tile like the slot box they are drawn in: a decor chair is a guest seat
+ * anyone may take. Desks, three tiles: since a desk is an empty area (Editar
+ * espacios) a desk piece is the table its occupant places on one 3-tile edge
+ * (`deskTable.ts`). Pack plants, room tables and the rest stay layout pieces
+ * (an uploaded plant gets its asset through `decorAssetForPiece` instead).
  */
 export function packDecorAsset(piece: ArtPiece): CreateAssetInput | null {
-  if (piece.kind !== 'chair') return null;
-  return { name: piece.name, kind: 'furniture', textureKey: artSheetKey(piece.id, 'sheet'), w: 1, h: 1, placeableOnDesk: true };
+  const textureKey = artSheetKey(piece.id, 'sheet');
+  if (piece.kind === 'chair') return { name: piece.name, kind: 'furniture', textureKey, w: 1, h: 1, placeableOnDesk: true };
+  if (piece.kind === 'desk') return { name: piece.name, kind: 'furniture', textureKey, w: 3, h: 1, placeableOnDesk: true };
+  return null;
 }
 
 function activePiece(catalog: readonly ArtPieceRef[], kind: ArtPieceKind, id: string): ArtPieceRef {

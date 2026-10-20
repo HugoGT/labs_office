@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import type { ArtFacing, ArtPiece, Point } from './artContract';
 import { artUploadsManifestUrl, findPiece, parseArtSheetKey, type ArtAppearance } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
-import { chairPlacement } from './artPlacement';
+import { chairPlacement, deskPlacement } from './artPlacement';
 import { feetOf, positionForFeet } from './avatarGeometry';
 import { beginAutoWalk, isAutoWalkArrived, stepAutoWalk, type AutoWalkState } from './autoWalk';
 import { IDLE_AUTO_SIT, SIT_LOCK_MS, dropSitDwells, guardLeftSeat, sitLockActive, stepAutoSit, type AutoSitState } from './autoSit';
@@ -33,6 +33,7 @@ import {
   worldAssetDepth,
 } from './depthLayers';
 import { deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
+import { decorTablePiece, tableEdgeSlot, tableFacing, tableFloorRect, TABLE_ROTATIONS } from './deskTable';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
 import { MinimapLayer } from './MinimapLayer';
@@ -46,6 +47,7 @@ import {
   placeSeats,
   placeWalls,
   placeZoneLabels,
+  putArtSprite,
   putChair,
   renderTerrain,
   type TerrainTilemap,
@@ -164,6 +166,9 @@ const DESK_COLOR = {
 } as const;
 const DESK_FILL_ALPHA = 0.22;
 const DESK_STROKE_WIDTH = 2;
+/** A piece that cannot be drawn yet (or ever) still shows where it goes. */
+const ART_FALLBACK_COLOR = 0x6b7280;
+const ART_FALLBACK_ALPHA = 0.6;
 
 /**
  * Como se conecta la escena al servidor. `connect` se inyecta para poder
@@ -1548,6 +1553,11 @@ export class OfficeScene extends Phaser.Scene {
       // A special piece (#71) keeps the same bottom edge but moves to the band
       // above avatars, so it covers whoever walks through the desk.
       const itemDepth = item.aboveAvatars ? specialAssetDepth(bottom) : depth;
+      const table = decorTablePiece(item.textureKey);
+      if (table !== null) {
+        this.deskObjects.push(...this.drawDecorTable(item.id, table, item.slot, item.rotation, box));
+        continue;
+      }
       const chair = decorChairPiece(item.textureKey);
       const chairLayers = chair === null ? null : this.drawDecorChair(item.id, chair, item.rotation, box);
       this.deskObjects.push(
@@ -1578,6 +1588,39 @@ export class OfficeScene extends Phaser.Scene {
         action: mine ? 'release' : 'claim',
       });
     });
+  }
+
+  /**
+   * A decor table (`deskTable.ts`): a desk piece drawn 1:1 with its anchor on
+   * the middle of the edge its rotation picks (`box`, the item's slot box),
+   * in the column of its facing, y-sorted by its own depth point like a
+   * Tiled desk. A table off the middle of its edge is skipped, as the room's
+   * collisions skip it. While its sheet is not loaded a placeholder covers
+   * the floor under its top, and the sheet's arrival redraws the desks.
+   */
+  private drawDecorTable(
+    itemId: string,
+    pieceId: string,
+    slot: number,
+    rotation: number,
+    box: { x: number; y: number; w: number; h: number },
+  ): Phaser.GameObjects.GameObject[] {
+    const edge = TABLE_ROTATIONS.find((candidate) => candidate === rotation);
+    if (edge === undefined || tableEdgeSlot(edge) !== slot) return [];
+    const anchor = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+    const name = deskItemName(itemId);
+    const sheet = this.artSheet({ materialId: pieceId, color: null }, 'desk', this.redrawDesks);
+    if (sheet === null || sheet.piece.kind !== 'desk') {
+      const floor = tableFloorRect(edge);
+      return [
+        this.add
+          .rectangle(anchor.x, anchor.y, floor.w, floor.h, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
+          .setDepth(worldAssetDepth(anchor.y + floor.y + floor.h))
+          .setName(name),
+      ];
+    }
+    const placement = deskPlacement(sheet.piece, tableFacing(edge), anchor);
+    return [putArtSprite(this, sheet.key, placement, worldAssetDepth(placement.depthY)).setName(name)];
   }
 
   /**

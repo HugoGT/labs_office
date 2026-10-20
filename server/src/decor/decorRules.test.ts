@@ -31,11 +31,17 @@ import {
 
 const RETIRADO_EL = new Date('2026-02-01T00:00:00.000Z');
 
-const PLANTA = { id: 'asset-planta', placeableOnDesk: true, archivedAt: null };
-const SOFA = { id: 'asset-sofa', placeableOnDesk: false, archivedAt: null };
+const PLANTA = { id: 'asset-planta', placeableOnDesk: true, archivedAt: null, textureKey: 'plant-small', w: 1, h: 1 };
+const SOFA = { id: 'asset-sofa', placeableOnDesk: false, archivedAt: null, textureKey: 'sofa', w: 1, h: 1 };
 /** Retirada del catalogo: quien ya la tenia la conserva, nadie la vuelve a poner. */
-const RETIRADA = { id: 'asset-retirada', placeableOnDesk: true, archivedAt: RETIRADO_EL };
-const CATALOG = [PLANTA, SOFA, RETIRADA];
+const RETIRADA = { id: 'asset-retirada', placeableOnDesk: true, archivedAt: RETIRADO_EL, textureKey: 'lamp', w: 1, h: 1 };
+/** A pack desk mirrored as decor: the table placed on one edge (Editar espacios). */
+const MESA = { id: 'asset-mesa', placeableOnDesk: true, archivedAt: null, textureKey: 'art:desk-wood:sheet', w: 3, h: 1 };
+const MESA_VIDRIO = { id: 'asset-mesa-vidrio', placeableOnDesk: true, archivedAt: null, textureKey: 'art:desk-glass:sheet', w: 3, h: 1 };
+/** Pieces that do not fit a desk, even if someone marked them placeable. */
+const SALA = { id: 'asset-sala', placeableOnDesk: true, archivedAt: null, textureKey: 'art:table-meeting:sheet', w: 7, h: 5 };
+const ALFOMBRA = { id: 'asset-alfombra', placeableOnDesk: true, archivedAt: null, textureKey: 'rug', w: 4, h: 4 };
+const CATALOG = [PLANTA, SOFA, RETIRADA, MESA, MESA_VIDRIO, SALA, ALFOMBRA];
 
 /** Escritorio de partida vacio: la mayoria de los casos no habla de retenidos. */
 const NADA_PUESTO: readonly string[] = [];
@@ -394,6 +400,9 @@ describe('normalizeDeskConfig', () => {
       id: 'asset-otra-retirada',
       placeableOnDesk: true,
       archivedAt: RETIRADO_EL,
+      textureKey: 'vase',
+      w: 1,
+      h: 1,
     };
 
     expect(() =>
@@ -435,6 +444,41 @@ describe('normalizeDeskConfig', () => {
     ];
 
     expect(normalizeDeskConfig(items, CATALOG, NADA_PUESTO).map((item) => item.slot)).toEqual([3, 1]);
+  });
+
+  it('takes one table on the edge its rotation picks, with decor on the rest of the 3x3', () => {
+    const items = [
+      { assetId: MESA.id, slot: 1, rotation: 180 },
+      { assetId: PLANTA.id, slot: 4, rotation: 0 },
+      { assetId: PLANTA.id, slot: 8, rotation: 0 },
+    ];
+    expect(normalizeDeskConfig(items, CATALOG, NADA_PUESTO)).toEqual(items);
+  });
+
+  it('refuses a table off the middle of its edge', () => {
+    expect(() => normalizeDeskConfig([{ assetId: MESA.id, slot: 4, rotation: 0 }], CATALOG, NADA_PUESTO)).toThrow(InvalidDeskConfigError);
+    expect(() => normalizeDeskConfig([{ assetId: MESA.id, slot: 1, rotation: 0 }], CATALOG, NADA_PUESTO)).toThrow(InvalidDeskConfigError);
+  });
+
+  it('refuses a second table', () => {
+    const items = [
+      { assetId: MESA.id, slot: 7, rotation: 0 },
+      { assetId: MESA_VIDRIO.id, slot: 1, rotation: 180 },
+    ];
+    expect(() => normalizeDeskConfig(items, CATALOG, NADA_PUESTO)).toThrow(InvalidDeskConfigError);
+  });
+
+  it('refuses any other item on a table tile', () => {
+    const items = [
+      { assetId: MESA.id, slot: 3, rotation: 270 },
+      { assetId: PLANTA.id, slot: 6, rotation: 0 },
+    ];
+    expect(() => normalizeDeskConfig(items, CATALOG, NADA_PUESTO)).toThrow(InvalidDeskConfigError);
+  });
+
+  it('refuses a room table or anything larger than the desk, placeable or not', () => {
+    expect(() => normalizeDeskConfig([{ assetId: SALA.id, slot: 4, rotation: 0 }], CATALOG, NADA_PUESTO)).toThrow(InvalidDeskConfigError);
+    expect(() => normalizeDeskConfig([{ assetId: ALFOMBRA.id, slot: 4, rotation: 0 }], CATALOG, NADA_PUESTO)).toThrow(InvalidDeskConfigError);
   });
 });
 

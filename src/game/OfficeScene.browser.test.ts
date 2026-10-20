@@ -2981,6 +2981,34 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
     expect(texts.map((text) => text.text)).toEqual(['Mesa 4']);
   });
 
+  it('draws a decor table 1:1 centered on the edge its rotation picks, in the column of its facing (Editar espacios)', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const top = { id: 'mesa-arriba', slot: 1, rotation: 180 as const, textureKey: artSheetKey('desk-wood', 'sheet'), aboveAvatars: false };
+    const right = { id: 'mesa-derecha', slot: 5, rotation: 90 as const, textureKey: artSheetKey('desk-glass', 'sheet'), aboveAvatars: false };
+
+    bridge.emitCommand('desks', {
+      desks: [servedDesk({ occupant: occupant('Ana Torres', [top]) }), servedDesk({ id: 'otra', x: 20 * TILE, occupant: occupant('Luis Paz', [right]) })],
+    });
+
+    await vi.waitFor(() => {
+      const image = scene.children.getByName(deskItemName(top.id)) as Phaser.GameObjects.Image | null;
+      expect(image?.type).toBe('Image');
+      // The anchor (48, 60) of a 96x104 cell on the middle of the top row: tile (11, 12).
+      expect({ x: image!.x, y: image!.y, w: image!.displayWidth, h: image!.displayHeight, frame: Number(image!.frame.name) }).toEqual({
+        x: 11.5 * TILE - 48,
+        y: 12.5 * TILE - 60,
+        w: 96,
+        h: 104,
+        frame: 0,
+      });
+      const side = scene.children.getByName(deskItemName(right.id)) as Phaser.GameObjects.Image | null;
+      expect(side?.texture.key).toBe(artSheetKey('desk-glass', 'sheet'));
+      // Right column middle: tile (22, 13); `right` is the pack's fourth column.
+      expect({ x: side!.x, y: side!.y, frame: Number(side!.frame.name) }).toEqual({ x: 22.5 * TILE - 48, y: 13.5 * TILE - 60, frame: 3 });
+    }, LOOP_WAIT);
+  });
+
   it('pinta la decoracion del ocupante dentro de su caja, no en cualquier sitio', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
