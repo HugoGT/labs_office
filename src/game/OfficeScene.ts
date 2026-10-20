@@ -546,7 +546,13 @@ export class OfficeScene extends Phaser.Scene {
     if (this.options.waitForOfficeData && (!this.initialSpaces || !this.initialDesks)) return;
     if (!this.localAvatarKnown || !this.localPositionReady) return;
     if (this.pendingRedraws.size > 0) return;
-    const statuses = [...this.entrancePieces].map((id) => this.art.status(id));
+    // A character that cannot load is drawn as the pack default
+    // (`characterSheets`), so it never blocks the office: only the player
+    // left without any sheets does.
+    const statuses = [...this.entrancePieces]
+      .map((id) => ({ id, status: this.art.status(id) }))
+      .filter(({ id, status }) => status !== 'failed' || !id.startsWith('character-'))
+      .map(({ status }) => status);
     if (this.art.manifest !== null && !statuses.includes('failed') && statuses.includes('loading')) return;
     this.entryReported = true;
     const failed = this.art.manifest === null || statuses.includes('failed') || this.player.sheets === null;
@@ -1043,7 +1049,7 @@ export class OfficeScene extends Phaser.Scene {
   /**
    * The own character, as the room replicates it or the pack default alone.
    * Redrawn at once: a character whose sheets are still loading shows the
-   * procedural body until they land, never the previous character.
+   * pack default until they land, never the previous character.
    */
   private adoptLocalAvatar(avatarId: string | null): void {
     this.localAvatarId = avatarId;
@@ -1055,18 +1061,30 @@ export class OfficeScene extends Phaser.Scene {
   /**
    * Starts loading a character's sheets as soon as its id is known (art
    * migration, step 5), and redraws every avatar once they settle (step 6).
-   * Until then, and for good if they fail, the avatar keeps its procedural
-   * body. `null` (no character replicated) is the pack default.
+   * The pack default loads with it: it stands in until they land, and for
+   * good if they fail. `null` (no character replicated) is the pack default.
    */
   private requestCharacter(avatarId: string | null): void {
-    const id = avatarId ?? this.art.manifest?.defaults.character;
-    if (id === undefined || !this.alive) return;
-    if (this.requestArt(id, () => this.scheduleRedraw(this.redrawCharacters)) === 'ready') this.redrawCharacters();
+    const fallback = this.art.manifest?.defaults.character;
+    if (!this.alive) return;
+    for (const id of new Set([avatarId ?? fallback, fallback])) {
+      if (id === undefined) continue;
+      if (this.requestArt(id, () => this.scheduleRedraw(this.redrawCharacters)) === 'ready') this.redrawCharacters();
+    }
   }
 
-  /** Loaded sheets of a character (`null` is the pack default), or `null` to stay procedural. */
+  /**
+   * Sheets to draw a character with (`null` is the pack default): its own,
+   * else the pack default's while they load or after they fail, so an avatar
+   * keeps the current art and never shows the procedural body or a previous
+   * character. `null` (procedural) only while not even the default is loaded.
+   */
   private characterSheets(avatarId: string | null): CharacterSheets | null {
-    const id = avatarId ?? this.art.manifest?.defaults.character;
+    const fallback = this.art.manifest?.defaults.character;
+    return this.loadedSheets(avatarId ?? fallback) ?? this.loadedSheets(fallback);
+  }
+
+  private loadedSheets(id: string | undefined): CharacterSheets | null {
     if (id === undefined) return null;
     const walk = this.art.sheet(id, 'walk');
     const seated = this.art.sheet(id, 'seated');

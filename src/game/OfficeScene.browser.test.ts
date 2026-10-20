@@ -918,6 +918,22 @@ describe('office entry art readiness', () => {
     expect(findPlayer(scene).sprite.texture.key).toBe(artSheetKey('character-p02-beige-blazer', 'walk'));
   });
 
+  it('enters with the pack default character when the own custom character cannot load', async () => {
+    const bridge = createOfficeBridge();
+    const entry = vi.fn();
+    bridge.on('entry', entry);
+    const connector = fakeConnector();
+    const { scene } = await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect,
+      artCustomCharactersUrl: 'assets/pack/missing-characters/' });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+
+    connector.handlers()!.onLocalAvatar?.(`character-custom-${'a'.repeat(32)}`);
+
+    await vi.waitFor(() => expect(entry).toHaveBeenCalledWith({ state: 'ready' }), LOOP_WAIT);
+    expect(entry).not.toHaveBeenCalledWith({ state: 'failed' });
+    expect(findPlayer(scene).sprite.texture.key).toBe(artSheetKey('character-p01-burgundy-suit', 'walk'));
+  });
+
   it.each([false, true])('settles dynamic desk and decor art before revealing (broken: %s)', async (broken) => {
     const bridge = createOfficeBridge();
     const entry = vi.fn();
@@ -4075,6 +4091,32 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
 
     await vi.waitFor(() => {
       expect(findRemoteAvatars(scene)[0].sprite.texture.key).toBe(artSheetKey('character-p09-mint-shirt', 'walk'));
+    }, LOOP_WAIT);
+  });
+
+  it('draws the pack default, never the previous character, while a new own character loads', async () => {
+    const { connector, scene } = await connected();
+    const player = findPlayer(scene);
+    connector.handlers()!.onLocalAvatar?.('character-p07-green-suit');
+    await vi.waitFor(() => {
+      expect(player.sprite.texture.key).toBe(artSheetKey('character-p07-green-suit', 'walk'));
+    }, LOOP_WAIT);
+
+    connector.handlers()!.onLocalAvatar?.('character-p12-mint-blazer');
+
+    expect(player.sprite.texture.key).toBe(artSheetKey('character-p01-burgundy-suit', 'walk'));
+    await vi.waitFor(() => {
+      expect(player.sprite.texture.key).toBe(artSheetKey('character-p12-mint-blazer', 'walk'));
+    }, LOOP_WAIT);
+  });
+
+  it('draws a peer whose character cannot load as the pack default, not the procedural body', async () => {
+    const { connector, scene } = await connected();
+
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', avatarId: `character-custom-${'b'.repeat(32)}` }));
+
+    await vi.waitFor(() => {
+      expect(findRemoteAvatars(scene)[0].sprite.texture.key).toBe(artSheetKey('character-p01-burgundy-suit', 'walk'));
     }, LOOP_WAIT);
   });
 
