@@ -121,6 +121,54 @@ describe('useLayoutEditor (#74, PR3c)', () => {
     expect(refreshSpaces).toHaveBeenCalledTimes(1);
   });
 
+  it('mover con id: empieza a mover ese escritorio de la lista sin seleccionarlo antes', async () => {
+    const desks = fakeDesks();
+    const { bridge, refreshDesks, result } = setup(desks);
+    act(() => result.current.enter());
+    await waitFor(() => expect(result.current.desks).toHaveLength(2));
+
+    act(() => result.current.startMove('id-otra'));
+
+    expect(result.current.state).toEqual({ tag: 'placing', kind: 'desk', mode: 'move', id: 'id-otra' });
+    act(() => bridge.emit('layoutplace', { tx: 3, ty: 4, valid: true }));
+    await waitFor(() => expect(desks.updateDesk).toHaveBeenCalledWith('id-otra', { x: 3, y: 4 }));
+    expect(desks.updateDesk).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(refreshDesks).toHaveBeenCalledTimes(1));
+  });
+
+  it('mover con id mueve el pedido aunque haya otro escritorio seleccionado en el mapa', async () => {
+    const { bridge, result } = setup(fakeDesks());
+    act(() => result.current.enter());
+    await waitFor(() => expect(result.current.desks).toHaveLength(2));
+    act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+
+    act(() => result.current.startMove('id-otra'));
+
+    expect(result.current.state).toEqual({ tag: 'placing', kind: 'desk', mode: 'move', id: 'id-otra' });
+  });
+
+  it('mover con id del mismo escritorio ya seleccionado sigue siendo mover ese', async () => {
+    const { bridge, result } = setup(fakeDesks());
+    act(() => result.current.enter());
+    await waitFor(() => expect(result.current.desks).toHaveLength(2));
+    act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+
+    act(() => result.current.startMove('id-mesa'));
+
+    expect(result.current.state).toEqual({ tag: 'placing', kind: 'desk', mode: 'move', id: 'id-mesa' });
+  });
+
+  it('mover con id no hace nada mientras ya se coloca otra cosa', async () => {
+    const { result } = setup(fakeDesks());
+    act(() => result.current.enter());
+    await waitFor(() => expect(result.current.desks).toHaveLength(2));
+    act(() => result.current.startCreate());
+
+    act(() => result.current.startMove('id-otra'));
+
+    expect(result.current.state).toEqual({ tag: 'placing', kind: 'desk', mode: 'create' });
+  });
+
   it('un layoutplace invalido no llama al puerto: el ghost sigue pendiente de intentarlo de nuevo', async () => {
     const desks = fakeDesks();
     const { bridge, refreshDesks, result } = setup(desks);
@@ -182,6 +230,49 @@ describe('useLayoutEditor (#74, PR3c)', () => {
     expect(result.current.error).toBe('No se pudo completar la operación.');
     expect(refreshDesks).not.toHaveBeenCalled();
     expect(result.current.state).toEqual({ tag: 'selected', kind: 'desk', id: 'id-mesa' });
+  });
+
+  it('borrar con id: borra ese escritorio de la lista sin seleccionarlo antes y relee ambas listas', async () => {
+    const desks = fakeDesks();
+    const { refreshDesks, refreshSpaces, result } = setup(desks);
+    act(() => result.current.enter());
+    await waitFor(() => expect(result.current.desks).toHaveLength(2));
+
+    await act(async () => result.current.remove('id-otra'));
+
+    expect(desks.deleteDesk).toHaveBeenCalledTimes(1);
+    expect(desks.deleteDesk).toHaveBeenCalledWith('id-otra');
+    expect(refreshDesks).toHaveBeenCalledTimes(1);
+    expect(refreshSpaces).toHaveBeenCalledTimes(1);
+    expect(result.current.state).toEqual({ tag: 'idle', kind: 'desk' });
+  });
+
+  it('borrar con id deja como estaba la seleccion de otro escritorio, y borrar el seleccionado la suelta', async () => {
+    const desks = fakeDesks();
+    const { bridge, result } = setup(desks);
+    act(() => result.current.enter());
+    await waitFor(() => expect(result.current.desks).toHaveLength(2));
+    act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+
+    await act(async () => result.current.remove('id-otra'));
+    expect(result.current.state).toEqual({ tag: 'selected', kind: 'desk', id: 'id-mesa' });
+
+    await act(async () => result.current.remove('id-mesa'));
+    expect(desks.deleteDesk).toHaveBeenLastCalledWith('id-mesa');
+    expect(result.current.state).toEqual({ tag: 'idle', kind: 'desk' });
+  });
+
+  it('un fallo al borrar con id se cuenta y no relee nada', async () => {
+    const desks = fakeDesks({ deleteDesk: vi.fn(async () => Promise.reject(new AdminError('unknown'))) });
+    const { refreshDesks, result } = setup(desks);
+    act(() => result.current.enter());
+    await waitFor(() => expect(result.current.desks).toHaveLength(2));
+
+    await act(async () => result.current.remove('id-otra'));
+
+    expect(result.current.error).toBe('No se pudo completar la operación.');
+    expect(refreshDesks).not.toHaveBeenCalled();
+    expect(result.current.state).toEqual({ tag: 'idle', kind: 'desk' });
   });
 
   describe('cruce escritorio<->sala (#74, PR4 addition)', () => {

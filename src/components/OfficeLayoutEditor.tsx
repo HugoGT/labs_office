@@ -47,9 +47,10 @@ function LayoutEditorSections({
   onEditingChange, forceExit = false, section, onExit,
 }: OfficeLayoutEditorProps) {
   // Standalone consumers and "Editar espacios" arbitrate among their parts; the
-  // sidebar supplies every other selection. Spaces opens on the desks.
+  // sidebar supplies every other selection. Spaces opens on the rooms, the
+  // desks being one button away.
   const arbitrated = section === undefined || section === 'spaces';
-  const [activeSection, setActiveSection] = useState<EditorPart | null>(section === 'spaces' ? 'desk' : null);
+  const [activeSection, setActiveSection] = useState<EditorPart | null>(section === 'spaces' ? 'room' : null);
   const editingChangeRef = useRef(onEditingChange);
   editingChangeRef.current = onEditingChange;
 
@@ -81,20 +82,23 @@ function LayoutEditorSections({
   const forced = (current: EditorPart): boolean => forceExit || (arbitrated && activeSection !== null && activeSection !== current);
   const embedded = section === 'spaces';
   const shared = { bridge, desks, spaces, refreshDesks, refreshSpaces, embedded, onExit };
+  // The desk view of "Editar espacios" shows no rooms at all. Unmounting them
+  // leaves nothing behind: the desk's next layoutedit command replaces the
+  // rooms' overlay wholesale, and coming back remounts them already entered.
+  const deskView = embedded && activeSection === 'desk';
 
   const parts = (
     <>
       {shown('desk') && (
         <DeskEditorSection {...shared}
-          initiallyActive={section !== undefined}
           onEditingChange={(editing) => reportEditing('desk', editing)}
           forceExit={forced('desk')}
           onRequestActive={() => requestActive('desk')}
         />
       )}
-      {shown('room') && (
+      {shown('room') && !deskView && (
         <SpaceEditorSection {...shared}
-          initiallyActive={section !== undefined && !embedded}
+          initiallyActive={embedded}
           onEditingChange={(editing) => reportEditing('room', editing)}
           forceExit={forced('room')}
           onRequestActive={() => requestActive('room')}
