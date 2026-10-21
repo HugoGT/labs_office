@@ -88,7 +88,7 @@ export function createPgTerrain(pool: DirectoryPool): TerrainStore {
       const entries = edits.map(({ index, item }) => ({ index, piece: item?.piece ?? null, rotation: item?.rotation ?? null, color: item?.color ?? null }));
       await pool.query(
         `WITH entries AS (
-           SELECT entry.index, entry.piece, entry.rotation FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, piece text, rotation smallint, color text)
+           SELECT entry.index, entry.piece, entry.rotation, entry.color FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, piece text, rotation smallint, color text)
          ),
          removed AS (
            DELETE FROM office_decor WHERE tile_index IN (SELECT index FROM entries WHERE piece IS NULL)

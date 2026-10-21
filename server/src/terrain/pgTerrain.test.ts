@@ -132,6 +132,8 @@ describe('pgTerrain', () => {
     expect(pool.queries).toHaveLength(1);
     const sql = squash(pool.queries[0]!.text);
     expect(sql).toContain('from jsonb_to_recordset($1::jsonb) as entry(index integer, piece text, rotation smallint, color text)');
+    // The insert reads color from entries, so the CTE must carry it.
+    expect(sql).toContain('select entry.index, entry.piece, entry.rotation, entry.color from jsonb_to_recordset');
     expect(sql).toContain('delete from office_decor where tile_index in (select index from entries where piece is null)');
     expect(sql).toContain('insert into office_decor (tile_index, piece_id, rotation, color, updated_by)');
     expect(sql).toContain(
