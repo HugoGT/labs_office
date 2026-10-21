@@ -109,14 +109,19 @@ describe('materialCatalogFrom: plants and room tables (#208)', () => {
     expect(catalog().table.map((option) => [option.id, option.kind])).toEqual([
       ['table-meeting', 'table'],
       ['table-cafeteria', 'table'],
+      ['table-oval', 'table'],
     ]);
     expect([...catalog().plant, ...catalog().table].every((option) => !option.colorable && option.defaultColor === null)).toBe(true);
     expect(catalog().plant[0]!.sheetUrl).toBe('assets/pack/plant/ficus.png');
   });
 
-  it('a plant or a room table previews its one frame', () => {
+  it('a plant previews its one frame, a room table the part of its horizontal frame its footprint and lifted top cover', () => {
     expect(previewFrame(catalog().plant[0]!)).toEqual({ x: 0, y: 0, width: 32, height: 48 });
-    expect(previewFrame(catalog().table[0]!)).toEqual({ x: 0, y: 0, width: 256, height: 192 });
+    // The 7x5 meeting table: 224 wide around the anchor (128, 244), 160 rows of floor plus its top, plus a margin.
+    expect(previewFrame(catalog().table[0]!)).toEqual({ x: 128 - 112 - 2, y: 244 - 160 - 18, width: 224 + 4, height: 160 + 18 + 4 });
+    // The 2x1 oval one is small: its preview is too, so the thumbnail can draw it bigger.
+    const oval = catalog().table.find((option) => option.id === 'table-oval')!;
+    expect(previewFrame(oval)).toEqual({ x: 128 - 32 - 2, y: 244 - 32 - 18, width: 64 + 4, height: 32 + 18 + 4 });
   });
 });
 

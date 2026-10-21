@@ -23,7 +23,7 @@
 
 import { AVATAR_BODY_CENTER_OFFSET, physicalBodyRect } from './avatarGeometry.ts';
 import { tableFacing, tableFloorRect } from './deskTable.ts';
-import { decorChairFacing, decorFootprint, type DecorItem, type DecorPieceInfo } from './officeDecor.ts';
+import { decorChairFacing, decorFootprint, decorRotationFor, type DecorItem, type DecorPieceInfo } from './officeDecor.ts';
 
 /** Same as `TILE` in mapData.ts (pinned by a test). */
 export const COLLISION_TILE = 32;
@@ -269,8 +269,9 @@ export function staticCollisionInstances(
  * table lies 1:1 on its middle tile, turned like its facing's drawing, and
  * blocks the floor under its top until edited; a plant or a room table
  * stands on the bottom middle of its footprint like a Tiled prop, the plant
- * walk-through and the table solid by default. A piece the caller cannot
- * resolve places nothing.
+ * walk-through and the table solid by default; a vertical room table (90)
+ * stands on its swapped footprint, its rectangles turned a quarter about its
+ * center. A piece the caller cannot resolve places nothing.
  */
 export function officeDecorInstances(
   items: readonly DecorItem[],
@@ -297,6 +298,22 @@ export function officeDecorInstances(
         scale: UNIT,
         offset: ORIGIN,
         defaults: [tableFloorRect(item.rotation)],
+        pickBox,
+      });
+      continue;
+    }
+    if (info.kind === 'table' && decorRotationFor('table', item.rotation) === 90) {
+      // The vertical frame: the piece's rectangles are stated from the bottom
+      // middle of its horizontal footprint, so they shift to its center
+      // (`offset`) and turn a quarter clockwise about the vertical one's center.
+      const center = { x: (rect.x + rect.w / 2) * COLLISION_TILE, y: (rect.y + rect.h / 2) * COLLISION_TILE };
+      instances.push({
+        piece: item.piece,
+        pivot: center,
+        rotation: 90,
+        scale: UNIT,
+        offset: { x: 0, y: (info.footprint.h * COLLISION_TILE) / 2 },
+        defaults: [{ x: pickBox.x - center.x, y: pickBox.y - center.y, w: pickBox.w, h: pickBox.h }],
         pickBox,
       });
       continue;

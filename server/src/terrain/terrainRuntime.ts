@@ -42,8 +42,8 @@ import {
   decorInfoFromPieceId,
   decorPieceInfo,
   decorTiles,
+  decorRotationsOf,
   fitsInsideDesk,
-  isRotatable,
   withDecor,
   type DecorEdit,
   type DecorItem,
@@ -106,8 +106,9 @@ export interface TerrainRuntime {
   /**
    * Places, turns, replaces or removes decor items atomically. Throws
    * `InvalidTerrainEditError` for a malformed batch, a piece the catalog
-   * does not offer (unknown, retired or of a kind the layer does not place)
-   * or a turned piece that does not turn; `DecorOutsideAreaError` when
+   * does not offer (unknown, retired or of a kind the layer does not place),
+   * a rotation the piece does not take (a plant any, a room table 180 or
+   * 270) or a color on a piece that is not colorable; `DecorOutsideAreaError` when
    * `area` is given (a desk, `POST /me/decor`) and an item placed, replaced
    * or removed does not lie entirely inside it; `TerrainProtectedError` when
    * a placed item would stand off the map, on unwalkable ground, a wall, a
@@ -137,6 +138,8 @@ export interface DecorCatalogPiece {
   readonly id: string;
   readonly kind: string;
   readonly footprint?: { readonly w: number; readonly h: number };
+  /** Whether it takes a color of its own (a colorable desk table); absent is not. */
+  readonly colorable?: boolean;
   readonly retired: boolean;
 }
 
@@ -241,7 +244,7 @@ export function createTerrainRuntime({
     const changed = edits.filter(({ index, item }) => {
       const current = byTile.get(index);
       if (item === null) return current !== undefined;
-      return current === undefined || current.piece !== item.piece || current.rotation !== item.rotation;
+      return current === undefined || current.piece !== item.piece || current.rotation !== item.rotation || current.color !== item.color;
     });
     if (changed.length === 0) return decor;
     for (const { item } of changed) {
@@ -251,7 +254,10 @@ export function createTerrainRuntime({
       const known = catalog.get(item.piece);
       const info = decorPieces ? (known === undefined || known.retired ? null : decorPieceInfo(known)) : decorInfoFromPieceId(item.piece);
       if (info === null) throw new InvalidTerrainEditError('unknown decor piece');
-      if (item.rotation !== 0 && !isRotatable(info.kind)) throw new InvalidTerrainEditError('this piece does not turn');
+      // A room table is symmetric: only its horizontal (0) and vertical (90) frames exist.
+      if (!decorRotationsOf(info.kind).includes(item.rotation)) throw new InvalidTerrainEditError('this piece does not turn that way');
+      // A colorable piece without a color draws in its manifest default; any other piece takes none.
+      if (item.color !== undefined && info.colorable !== true) throw new InvalidTerrainEditError('this piece takes no color');
     }
     if (area !== undefined) {
       const inside = (item: Pick<DecorItem, 'index' | 'piece' | 'rotation'>): boolean =>

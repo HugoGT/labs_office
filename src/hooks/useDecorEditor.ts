@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { describeAdminError } from '../dashboard/adminErrors';
 import { AdminError } from '../dashboard/adminPort';
-import { sameDecorBrush, decorBrushTarget, type DecorBrush } from '../game/decorEditor';
+import { decorBrushTarget, type DecorBrush } from '../game/decorEditor';
 import { MAP_W } from '../game/mapData';
 import type { OfficeBridge } from '../game/officeBridge';
 import {
   MAX_DECOR_EDITS,
-  decorInfoFromPieceId,
-  decorItemCovering,
+  decorRotationFor,
   fitsInsideDesk,
   isRotatable,
   nextDecorRotation,
@@ -24,11 +23,12 @@ import type { OfficeDecorPort } from '../game/officeDecorPort';
  * The decor editor (#208), shared by "Decoración" (an admin, the whole map,
  * `POST /admin/decor`) and "Mi espacio" (anyone, inside their own desk,
  * `POST /me/decor`): pick a piece in the palette, then a click on the map
- * anchors it on the clicked tile, turned the way "Girar", R or the wheel
- * last left it. One click places one piece and unpicks the brush, so the
- * right rail comes back; with "Múltiple" on (#207) the brush stays picked
- * click after click until Escape. A piece painted over an anchor replaces what stands
- * there; the eraser removes the item whose footprint covers the clicked tile.
+ * anchors it on the clicked tile, turned the way R or the wheel last left
+ * it, and a colorable piece in the color chosen on its palette tile. One
+ * click places one piece and unpicks the brush, so the right rail comes
+ * back; with "Múltiple" on (#207) the brush stays picked click after click
+ * until Escape. A piece painted over an anchor replaces what stands there.
+ * (Removing items comes back as selecting one on the map.)
  *
  * Edits go to the server one request at a time, in click order, each request
  * carrying every click queued meanwhile (the server checks a batch as a
@@ -55,13 +55,17 @@ export interface DecorPick {
   readonly info: DecorPieceInfo;
 }
 
+/** Whether an event comes from inside a popover (the color picker's dialog), whose own Escape closes it. */
+function insidePopover(event: Event): boolean {
+  const target = event.target;
+  return target instanceof Element && target.closest('[role="dialog"]') !== null;
+}
+
 export interface UseDecorEditorOptions {
   bridge: OfficeBridge;
   decor: OfficeDecorPort;
   /** Where the editor may act, in tiles: the person's desk, or `null` for the whole map. */
   area: DecorTileRect | null;
-  /** How the layer's pieces are sized (the catalog); without it, what each id says. */
-  infoOf?: (piece: string) => DecorPieceInfo | null;
   /**
    * The editor may close itself: an Escape with nothing picked does, and says
    * so here. Absent ("Mi espacio") that Escape is left to the sidebar.
@@ -75,8 +79,12 @@ export interface DecorEditor {
   items: readonly DecorItem[];
   /** The palette entry picked, or `null`. */
   brush: DecorBrush | null;
-  /** The way the next chair or desk table faces; "Girar" (or the map) turns it. */
+  /** The way the next rotatable piece turns; R or the wheel on the map turns it. */
   rotation: DecorRotation;
+  /** The color chosen per colorable piece on its palette tile; a piece without one draws in its manifest default. */
+  colors: Readonly<Record<string, string>>;
+  /** Chooses the color of a colorable piece: the next pick of it, and the picked brush if it is that piece. */
+  setColor(piece: string, color: string): void;
   /** An edit is on its way to the server. */
   pending: boolean;
   /** "Múltiple" (#207): the brush stays picked after a click. Off by default; kept across enter and exit. */
@@ -88,10 +96,6 @@ export interface DecorEditor {
   exit(): void;
   /** Picks a piece, or unpicks it when it is the picked one. */
   pick(option: DecorPick): void;
-  /** Picks the eraser, or unpicks it when it is picked. */
-  pickEraser(): void;
-  /** Turns `rotation` (and a picked chair or desk table) a quarter turn: `1` down, left, up, right. */
-  rotate(step?: 1 | -1): void;
   unpick(): void;
 }
 
@@ -113,15 +117,18 @@ function nextBatch(edits: readonly PendingEdit[]): PendingEdit[] {
   return batch;
 }
 
-function brushFor(option: DecorPick, rotation: DecorRotation): DecorBrush {
-  return { kind: 'piece', piece: option.id, info: option.info, rotation: isRotatable(option.info.kind) ? rotation : 0 };
+function brushFor(option: DecorPick, rotation: DecorRotation, color: string | undefined): DecorBrush {
+  // A room table takes the symmetric half of the turn (0 or 90), a plant none.
+  const brush: DecorBrush = { kind: 'piece', piece: option.id, info: option.info, rotation: decorRotationFor(option.info.kind, rotation) };
+  return option.info.colorable === true && color !== undefined ? { ...brush, color } : brush;
 }
 
-export function useDecorEditor({ bridge, decor, area, infoOf = decorInfoFromPieceId, onExit }: UseDecorEditorOptions): DecorEditor {
+export function useDecorEditor({ bridge, decor, area, onExit }: UseDecorEditorOptions): DecorEditor {
   const [active, setActive] = useState(false);
   const [items, setItems] = useState<readonly DecorItem[]>([]);
   const [brush, setBrush] = useState<DecorBrush | null>(null);
   const [rotation, setRotation] = useState<DecorRotation>(0);
+  const [colors, setColors] = useState<Readonly<Record<string, string>>>({});
   const [multiple, setMultiple] = useState(false);
   const [edits, setEditsState] = useState<readonly PendingEdit[]>([]);
   const [draining, setDraining] = useState(false);
@@ -183,31 +190,26 @@ export function useDecorEditor({ bridge, decor, area, infoOf = decorInfoFromPiec
     if (!Number.isInteger(index) || index < 0) return;
     // What the layer will hold once every pending edit lands: clicks are judged against it.
     const after = withDecor(itemsRef.current, editsRef.current);
-    // The tiles the click acts on (the clicked one when the eraser finds nothing) must be the desk's.
-    const target = decorBrushTarget(after, infoOf, MAP_W, index, brush) ?? { x: index % MAP_W, y: Math.floor(index / MAP_W), w: 1, h: 1 };
-    if (area !== null && !fitsInsideDesk(target, area)) {
+    // Every tile the piece would cover must be the desk's.
+    if (area !== null && !fitsInsideDesk(decorBrushTarget(index, brush, MAP_W), area)) {
       setError(DECOR_AREA_MESSAGE);
       return;
     }
-    if (brush.kind === 'eraser') {
-      const covering = decorItemCovering(after, infoOf, MAP_W, index);
-      if (covering === null) return;
-      queue({ index: covering.index, item: null });
-    } else {
-      const anchored = after.find((item) => item.index === index);
-      if (anchored !== undefined && anchored.piece === brush.piece && anchored.rotation === brush.rotation) return;
-      queue({ index, item: { piece: brush.piece, rotation: brush.rotation } });
-    }
+    const anchored = after.find((item) => item.index === index);
+    if (anchored !== undefined && anchored.piece === brush.piece && anchored.rotation === brush.rotation && anchored.color === brush.color) return;
+    queue({ index, item: { piece: brush.piece, rotation: brush.rotation, ...(brush.color === undefined ? {} : { color: brush.color }) } });
     // A click that placed nothing keeps the brush; one that did ends it unless "Múltiple" is on.
     // A refusal arriving later only drops that edit: the brush is never touched by it.
     if (!multiple) setBrush(null);
   }
 
   function turn(step: 1 | -1): void {
-    const next = nextDecorRotation(rotation, step);
+    // Only a picked piece that turns: the map asks only then (`holdsWheel`).
+    if (brush === null || !isRotatable(brush.info.kind)) return;
+    // A chair or desk table turns a quarter, a room table between horizontal and vertical.
+    const next = nextDecorRotation(brush.rotation, step, brush.info.kind);
     setRotation(next);
-    // A picked chair or desk table turns at once; a plant or a room table keeps its one drawing.
-    setBrush((current) => (current?.kind === 'piece' && isRotatable(current.info.kind) ? { ...current, rotation: next } : current));
+    setBrush({ ...brush, rotation: next });
   }
 
   useEffect(
@@ -239,7 +241,8 @@ export function useDecorEditor({ bridge, decor, area, infoOf = decorInfoFromPiec
   useEffect(() => {
     if (!active) return undefined;
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      // An open color picker closes on its own Escape and keeps the editor as it is.
+      if (event.key !== 'Escape' || event.defaultPrevented || insidePopover(event)) return;
       if (brush !== null) {
         event.preventDefault();
         setBrush(null);
@@ -279,16 +282,16 @@ export function useDecorEditor({ bridge, decor, area, infoOf = decorInfoFromPiec
     setBlockedBoth(false);
   };
 
-  const toggle = (next: DecorBrush): void => {
-    setBrush((current) => (sameDecorBrush(current, next) ? null : next));
-    setError(null);
-  };
-
   return {
     active,
     items,
     brush,
     rotation,
+    colors,
+    setColor(piece, color) {
+      setColors((current) => ({ ...current, [piece]: color }));
+      setBrush((current) => (current !== null && current.piece === piece && current.info.colorable === true ? { ...current, color } : current));
+    },
     pending: draining,
     multiple,
     setMultiple,
@@ -304,14 +307,8 @@ export function useDecorEditor({ bridge, decor, area, infoOf = decorInfoFromPiec
     },
     pick(option) {
       // Another turn of the same piece is the same entry: a second pick unpicks it.
-      setBrush((current) => (current?.kind === 'piece' && current.piece === option.id ? null : brushFor(option, rotation)));
+      setBrush((current) => (current?.piece === option.id ? null : brushFor(option, rotation, colors[option.id])));
       setError(null);
-    },
-    pickEraser() {
-      toggle({ kind: 'eraser' });
-    },
-    rotate(step = 1) {
-      turn(step);
     },
     unpick() {
       setBrush(null);

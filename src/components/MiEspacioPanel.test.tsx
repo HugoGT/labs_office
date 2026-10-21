@@ -52,7 +52,9 @@ describe('MiEspacioPanel', () => {
 
     expect(screen.queryByText('Reclama un escritorio libre en el mapa para decorarlo.')).not.toBeInTheDocument();
     expect(await screen.findByRole('group', { name: 'Sillas' })).toBeInTheDocument();
-    expect(screen.queryByRole('group', { name: 'Mesas de sala' })).not.toBeInTheDocument();
+    // Only the room tables that fit a 3x3 desk: the 2x1 oval one.
+    expect(screen.queryByRole('button', { name: 'Mesa de reuniones' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mesa ovalada' })).toBeInTheDocument();
     expect(commands.at(-1)).toEqual({ brush: null, area: DESK });
 
     const buttons = screen.getAllByRole('button');

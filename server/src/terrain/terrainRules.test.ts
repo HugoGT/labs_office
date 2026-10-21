@@ -247,8 +247,30 @@ describe('parseDecorBatch', () => {
     ['a missing item', { edits: [{ index: 3 }] }],
     ['a repeated tile', { edits: [{ index: 3, item: null }, { index: 3, item: { piece: 'chair-wood', rotation: 0 } }] }],
     ['an edit that is not an object', { edits: [3] }],
+    ['a color that is not #rrggbb', { edits: [{ index: 3, item: { piece: 'desk-painted', rotation: 0, color: 'red' } }] }],
+    ['a short color', { edits: [{ index: 3, item: { piece: 'desk-painted', rotation: 0, color: '#c83c3' } }] }],
+    ['a color that is not a string', { edits: [{ index: 3, item: { piece: 'desk-painted', rotation: 0, color: 0xc83c3c } }] }],
   ])('refuses %s', (_name, body) => {
     expect(() => parseDecorBatch(body, TILES)).toThrow(InvalidTerrainEditError);
+  });
+
+  it('reads an item color, normalized to lower case, and no color as none', () => {
+    expect(
+      parseDecorBatch(
+        {
+          edits: [
+            { index: 3, item: { piece: 'desk-painted', rotation: 90, color: '#C83C3C' } },
+            { index: 9, item: { piece: 'desk-painted', rotation: 0, color: null } },
+            { index: 12, item: { piece: 'desk-painted', rotation: 0 } },
+          ],
+        },
+        TILES,
+      ),
+    ).toEqual([
+      { index: 3, item: { piece: 'desk-painted', rotation: 90, color: '#c83c3c' } },
+      { index: 9, item: { piece: 'desk-painted', rotation: 0 } },
+      { index: 12, item: { piece: 'desk-painted', rotation: 0 } },
+    ]);
   });
 
   it('caps a batch at MAX_DECOR_EDITS tiles', () => {

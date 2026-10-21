@@ -824,6 +824,12 @@ describe('schema.sql: the office decor layer (#208)', () => {
     );
   });
 
+  it('adds the nullable color of a painted item as a column of its own, a strict lower-case #rrggbb, so existing databases migrate', () => {
+    // `CREATE TABLE IF NOT EXISTS` never touches a live table: the column comes with an ALTER.
+    expect(squashed).toContain("alter table office_decor add column if not exists color text check (color ~ '^#[0-9a-f]{6}$');");
+    expect(squashed.indexOf('alter table office_decor add column if not exists color')).toBeGreaterThan(squashed.indexOf('create table if not exists office_decor ('));
+  });
+
   it('keeps a one-row marker and copies the old rows only while it is missing, writing it in the same block', () => {
     expect(squashed).toContain(
       'create table if not exists office_decor_version ( id boolean primary key default true check (id), version integer not null, migrated_at timestamptz not null default now() )',

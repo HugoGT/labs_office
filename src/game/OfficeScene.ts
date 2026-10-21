@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { propPlacement, type ArtFacing, type ArtPiece, type Point } from './artContract';
+import { propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type Point } from './artContract';
 import { artUploadsManifestUrl, findPiece, type ArtAppearance } from './artPack';
 import { artCustomCharactersUrl } from './customCharacterArt';
 import { ArtPackLoader } from './artPackLoader';
@@ -661,7 +661,7 @@ export class OfficeScene extends Phaser.Scene {
       minimap: this.minimapCamera,
       bridge: this.bridge,
       store: this.options.zoomStore,
-      // #207: a picked chair or desk table turns with the wheel instead (`DecorEditLayer`).
+      // #207: a picked chair, desk table or room table turns with the wheel instead (`DecorEditLayer`).
       wheelSuppressed: () => this.decorEditLayer?.holdsWheel() ?? false,
     });
     // #53: despues de `setupInput` (comparte `this.input`, mismo momento en
@@ -1581,7 +1581,8 @@ export class OfficeScene extends Phaser.Scene {
    * One non-chair item of the decor layer (#208). A desk table is drawn 1:1
    * with its anchor on the middle of its middle tile, in the column of its
    * facing, y-sorted by its own depth point like a Tiled desk; a plant or a
-   * room table 1:1 on the bottom middle of its footprint, like a Tiled prop.
+   * room table 1:1 on the bottom middle of its footprint, like a Tiled prop
+   * (a vertical room table on its swapped footprint, in its second frame).
    * While its sheet is not loaded a placeholder covers its footprint (the
    * floor under its top for a desk table), and the sheet's arrival redraws
    * the decor.
@@ -1593,7 +1594,8 @@ export class OfficeScene extends Phaser.Scene {
     const rect = decorFootprint(item, infoOf(item.piece), width);
     if (kind === 'desk') {
       const anchor = { x: ((item.index % width) + 0.5) * TILE, y: (Math.floor(item.index / width) + 0.5) * TILE };
-      const sheet = this.artSheet({ materialId: item.piece, color: null }, 'desk', this.redrawDecor);
+      // A painted desk table in its own color; without one, its manifest default (the exported sheet).
+      const sheet = this.artSheet({ materialId: item.piece, color: item.color ?? null }, 'desk', this.redrawDecor);
       if (sheet === null || sheet.piece.kind !== 'desk') {
         const floor = tableFloorRect(item.rotation);
         return [
@@ -1616,8 +1618,10 @@ export class OfficeScene extends Phaser.Scene {
           .setName(decorObjectName(item.index)),
       ];
     }
-    const placement = propPlacement(sheet.piece, rect.x, rect.y);
-    return [putArtSprite(this, sheet.key, { ...placement, frame: 0 }, worldAssetDepth(placement.depthY)).setName(decorObjectName(item.index))];
+    // A room table standing vertical is its sheet's second frame, anchored on its swapped footprint.
+    const placement = propPlacement({ anchor: sheet.piece.anchor, footprint: { w: rect.w, h: rect.h } }, rect.x, rect.y);
+    const frame = sheet.piece.kind === 'table' ? tableFrameIndex(item.rotation) : 0;
+    return [putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(placement.depthY)).setName(decorObjectName(item.index))];
   }
 
   /**

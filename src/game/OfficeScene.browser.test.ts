@@ -339,7 +339,7 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     bridge.emitCommand('decoredit', { brush: null, area: null });
     expect(minimap.visible).toBe(true);
     expect((scene as unknown as { mapHeld: boolean }).mapHeld).toBe(false);
-    bridge.emitCommand('decoredit', { brush: { kind: 'eraser' }, area: null });
+    bridge.emitCommand('decoredit', { brush: { kind: 'piece', piece: 'chair-wood', info: { kind: 'chair', footprint: { w: 1, h: 1 } }, rotation: 0 }, area: null });
     expect(minimap.visible).toBe(false);
     expect((scene as unknown as { mapHeld: boolean }).mapHeld).toBe(true);
     expect(movement.autoWalk).toBeUndefined();
@@ -4688,6 +4688,23 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
     expect(views.at(-1)).toEqual(zoomView(3));
   });
 
+  it('with a room table picked the wheel turns it too and does not zoom (#207, #208)', async () => {
+    const { scene, bridge, views } = await zoomScene();
+    const turns: number[] = [];
+    bridge.on('decorrotate', ({ step }) => turns.push(step));
+    const rect = scene.game.canvas.getBoundingClientRect();
+    const spin = (): void => {
+      scene.game.canvas.dispatchEvent(new WheelEvent('wheel', {
+        deltaY: -100, ctrlKey: true, clientX: rect.left + 50, clientY: rect.top + 200, bubbles: true, cancelable: true,
+      }));
+    };
+
+    bridge.emitCommand('decoredit', { brush: { kind: 'piece', piece: 'table-meeting', info: { kind: 'table', footprint: { w: 7, h: 5 } }, rotation: 0 }, area: null });
+    spin();
+    expect(turns).toEqual([-1]);
+    expect(views).toEqual([zoomView(2)]);
+  });
+
   it.each([
     { zoom: 1, tile: { tx: PLAYER_SPAWN_TX + 2, ty: PLAYER_SPAWN_TY + 2 } },
     { zoom: 3, tile: { tx: PLAYER_SPAWN_TX + 1, ty: PLAYER_SPAWN_TY + 1 } },
@@ -4794,8 +4811,43 @@ describe('OfficeScene: the office decor layer (#208)', () => {
       expect({ x: plant?.x, y: plant?.y, key: plant?.texture.key }).toEqual({ x: 30 * TILE, y: 21 * TILE - 46, key: artSheetKey('plant-ficus', 'sheet') });
       expect(plant!.depth).toBe(worldAssetDepth(21 * TILE));
       const table = image(scene, at(40, 40));
-      // The 7x5 footprint runs from tile (37, 38); its bottom middle is (40.5, 43) tiles, the frame's anchor (128, 180).
-      expect({ x: table?.x, y: table?.y }).toEqual({ x: 40.5 * TILE - 128, y: 43 * TILE - 180 });
+      // The 7x5 footprint runs from tile (37, 38); its bottom middle is (40.5, 43) tiles, the frame's anchor (128, 244).
+      expect({ x: table?.x, y: table?.y, frame: Number(table?.frame.name) }).toEqual({ x: 40.5 * TILE - 128, y: 43 * TILE - 244, frame: 0 });
+    }, LOOP_WAIT);
+  });
+
+  it('draws a vertical room table (90) in its sheet\'s second frame on the bottom middle of its swapped footprint', async () => {
+    const { scene, handlers } = await bootConnected();
+    handlers.onDecor!([
+      { index: at(40, 40), piece: 'table-meeting', rotation: 90 },
+      { index: at(60, 40), piece: 'table-oval', rotation: 0 },
+    ]);
+
+    await vi.waitFor(() => {
+      const table = image(scene, at(40, 40));
+      // 5x7 from tile (38, 37): its bottom middle is (40.5, 44) tiles, the frame's anchor (128, 244).
+      expect({ x: table?.x, y: table?.y, frame: Number(table?.frame.name) }).toEqual({ x: 40.5 * TILE - 128, y: 44 * TILE - 244, frame: 1 });
+      const oval = image(scene, at(60, 40));
+      // 2x1 from tile (59, 40): its bottom middle is (60, 41) tiles.
+      expect({ x: oval?.x, y: oval?.y, frame: Number(oval?.frame.name), key: oval?.texture.key }).toEqual({
+        x: 60 * TILE - 128,
+        y: 41 * TILE - 244,
+        frame: 0,
+        key: artSheetKey('table-oval', 'sheet'),
+      });
+    }, LOOP_WAIT);
+  });
+
+  it('draws a painted desk table in its own color, and in the manifest default without one', async () => {
+    const { scene, handlers } = await bootConnected();
+    handlers.onDecor!([
+      { index: at(11, 12), piece: 'desk-painted', rotation: 0, color: '#c83c3c' },
+      { index: at(21, 12), piece: 'desk-painted', rotation: 0 },
+    ]);
+
+    await vi.waitFor(() => {
+      expect(image(scene, at(11, 12))?.texture.key).toBe(recoloredSheetKey('desk-painted', 'sheet', '#c83c3c'));
+      expect(image(scene, at(21, 12))?.texture.key).toBe(artSheetKey('desk-painted', 'sheet'));
     }, LOOP_WAIT);
   });
 

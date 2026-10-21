@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest';
 import {
   decorBrushTarget,
   decorPlacementAllowed,
+  decorSizeLabel,
+  decorTileName,
   fitsDeskArea,
   sameDecorBrush,
   type DecorBrush,
@@ -43,10 +45,45 @@ describe('sameDecorBrush', () => {
     expect(sameDecorBrush(chairBrush(), chairBrush())).toBe(true);
     expect(sameDecorBrush(chairBrush(), chairBrush(90))).toBe(false);
     expect(sameDecorBrush(chairBrush(), deskBrush())).toBe(false);
-    expect(sameDecorBrush({ kind: 'eraser' }, { kind: 'eraser' })).toBe(true);
-    expect(sameDecorBrush({ kind: 'eraser' }, chairBrush())).toBe(false);
     expect(sameDecorBrush(null, undefined)).toBe(true);
-    expect(sameDecorBrush(null, { kind: 'eraser' })).toBe(false);
+    expect(sameDecorBrush(null, chairBrush())).toBe(false);
+  });
+
+  it('tells two colors of the same piece apart', () => {
+    const painted = (color?: string): DecorBrush => ({ kind: 'piece', piece: 'desk-painted', info: { ...DESK, colorable: true }, rotation: 0, ...(color === undefined ? {} : { color }) });
+    expect(sameDecorBrush(painted('#c83c3c'), painted('#c83c3c'))).toBe(true);
+    expect(sameDecorBrush(painted('#c83c3c'), painted('#3c5ac8'))).toBe(false);
+    expect(sameDecorBrush(painted('#c83c3c'), painted())).toBe(false);
+  });
+});
+
+describe('decorTileName', () => {
+  it('keeps only what tells a piece apart from the others of its group, capitalized', () => {
+    expect(decorTileName('chair', 'Silla de madera')).toBe('Madera');
+    expect(decorTileName('chair', 'Silla de metal')).toBe('Metal');
+    expect(decorTileName('chair', 'Silla de cuero')).toBe('Cuero');
+    expect(decorTileName('chair', 'Silla gamer')).toBe('Gamer');
+    expect(decorTileName('desk', 'Escritorio de vidrio')).toBe('Vidrio');
+    expect(decorTileName('desk', 'Escritorio pintado')).toBe('Pintado');
+    expect(decorTileName('table', 'Mesa de reuniones')).toBe('Reuniones');
+    expect(decorTileName('table', 'Mesa de cafetería')).toBe('Cafetería');
+    expect(decorTileName('table', 'Mesa ovalada')).toBe('Ovalada');
+  });
+
+  it('keeps the whole name of a piece not named after its kind, or named only by it', () => {
+    expect(decorTileName('plant', 'Ficus')).toBe('Ficus');
+    expect(decorTileName('chair', 'Trono de Ana')).toBe('Trono de Ana');
+    expect(decorTileName('chair', 'Sillas apiladas')).toBe('Sillas apiladas');
+    expect(decorTileName('chair', 'Silla')).toBe('Silla');
+    expect(decorTileName('chair', 'Silla de')).toBe('Silla de');
+    expect(decorTileName('chair', 'silla de bambú')).toBe('Bambú');
+  });
+});
+
+describe('decorSizeLabel', () => {
+  it('states a footprint in tiles, columns by rows', () => {
+    expect(decorSizeLabel(MEETING)).toBe('7x5');
+    expect(decorSizeLabel({ kind: 'table', footprint: { w: 2, h: 1 } })).toBe('2x1');
   });
 });
 
@@ -92,23 +129,18 @@ describe('decorPlacementAllowed', () => {
     expect(decorPlacementAllowed(none, infoOf, ground(), desk, at(6, 3), chairBrush())).toBe(false);
   });
 
-  it('lets the eraser act only on an item, and a desk-scoped one only on an item wholly inside the desk', () => {
-    const items: DecorItem[] = [
-      { index: at(4, 4), piece: 'desk-wood', rotation: 0 },
-      { index: at(7, 4), piece: 'chair-wood', rotation: 0 },
-    ];
-    expect(decorPlacementAllowed(items, infoOf, ground(), null, at(5, 4), { kind: 'eraser' })).toBe(true);
-    expect(decorPlacementAllowed(items, infoOf, ground(), null, at(5, 6), { kind: 'eraser' })).toBe(false);
-    expect(decorPlacementAllowed(items, infoOf, ground(), { x: 3, y: 3, w: 3, h: 3 }, at(4, 4), { kind: 'eraser' })).toBe(true);
-    expect(decorPlacementAllowed(items, infoOf, ground(), { x: 4, y: 3, w: 3, h: 3 }, at(4, 4), { kind: 'eraser' })).toBe(false);
+  it('judges a vertical room table on its swapped footprint', () => {
+    const oval: DecorBrush = { kind: 'piece', piece: 'table-oval', info: { kind: 'table', footprint: { w: 2, h: 1 } }, rotation: 90 };
+    // 1x2 standing on (4, 3) and (4, 4).
+    expect(decorPlacementAllowed(none, infoOf, ground(), null, at(4, 4), oval)).toBe(true);
+    expect(decorPlacementAllowed(none, infoOf, ground(), null, at(9, 1), oval)).toBe(false);
+    expect(decorPlacementAllowed(none, infoOf, ground(), null, at(4, 0), oval)).toBe(false);
   });
 });
 
 describe('decorBrushTarget', () => {
-  it('is the footprint a piece brush would cover, or the one of the item the eraser would remove', () => {
-    const items: DecorItem[] = [{ index: at(4, 4), piece: 'desk-wood', rotation: 90 }];
-    expect(decorBrushTarget(items, infoOf, WIDTH, at(2, 2), deskBrush())).toEqual({ x: 1, y: 2, w: 3, h: 1 });
-    expect(decorBrushTarget(items, infoOf, WIDTH, at(4, 5), { kind: 'eraser' })).toEqual({ x: 4, y: 3, w: 1, h: 3 });
-    expect(decorBrushTarget(items, infoOf, WIDTH, at(7, 7), { kind: 'eraser' })).toBeNull();
+  it('is the footprint the brush would cover', () => {
+    expect(decorBrushTarget(at(2, 2), deskBrush(), WIDTH)).toEqual({ x: 1, y: 2, w: 3, h: 1 });
+    expect(decorBrushTarget(at(4, 4), { kind: 'piece', piece: 'table-meeting', info: MEETING, rotation: 90 }, WIDTH)).toEqual({ x: 2, y: 1, w: 5, h: 7 });
   });
 });

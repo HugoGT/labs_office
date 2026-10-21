@@ -467,16 +467,16 @@ describe('DeskEditorSection inside "Editar espacios" (embedded)', () => {
   describe('«Múltiple» (#207)', () => {
     it('is offered next to "Crear escritorio", off, and stays while the desk is placed', async () => {
       renderEmbedded();
-      expect(screen.getByRole('checkbox', { name: 'Múltiple' })).not.toBeChecked();
+      expect(screen.getByRole('checkbox', { name: /^Múltiple/ })).not.toBeChecked();
 
       await userEvent.click(screen.getByRole('button', { name: 'Crear escritorio' }));
-      expect(screen.getByRole('checkbox', { name: 'Múltiple' })).toBeInTheDocument();
+      expect(screen.getByRole('checkbox', { name: /^Múltiple/ })).toBeInTheDocument();
     });
 
     it('on, a created desk goes straight back to placing the next one, until Escape', async () => {
       const desks = fakeDesks();
       const { bridge } = renderEmbedded({ desks });
-      await userEvent.click(screen.getByRole('checkbox', { name: 'Múltiple' }));
+      await userEvent.click(screen.getByRole('checkbox', { name: /^Múltiple/ }));
       await userEvent.click(screen.getByRole('button', { name: 'Crear escritorio' }));
 
       placeAt(bridge, 1, 2);
@@ -496,30 +496,35 @@ describe('DeskEditorSection inside "Editar espacios" (embedded)', () => {
       const createDesk = vi.fn<DeskAdminPort['createDesk']>(async () => Promise.reject(new AdminError('desk-on-wall')));
       const desks = fakeDesks({ createDesk });
       const { bridge } = renderEmbedded({ desks });
-      await userEvent.click(screen.getByRole('checkbox', { name: 'Múltiple' }));
+      await userEvent.click(screen.getByRole('checkbox', { name: /^Múltiple/ }));
       await userEvent.click(screen.getByRole('button', { name: 'Crear escritorio' }));
 
       placeAt(bridge, 1, 2);
       await waitFor(() => expect(createDesk).toHaveBeenCalledTimes(1));
-      await waitFor(() => expect(screen.getByText(/Toca el nuevo sitio/)).toBeInTheDocument());
-      expect(screen.getByRole('alert')).toBeInTheDocument();
+      // Under load the refusal and the placing hint can land in different renders: wait for both.
+      await waitFor(() => {
+        expect(screen.getByText(/Toca el nuevo sitio/)).toBeInTheDocument();
+        expect(screen.getByRole('alert')).toBeInTheDocument();
+      });
 
       createDesk.mockImplementation(async () => MESA);
       placeAt(bridge, 6, 2);
       await waitFor(() => expect(createDesk).toHaveBeenCalledWith({ x: 6, y: 2 }));
-      await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
-      expect(screen.getByText(/Toca el nuevo sitio/)).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+        expect(screen.getByText(/Toca el nuevo sitio/)).toBeInTheDocument();
+      });
     });
 
     it('on, "Cancelar" still stops and goes back to the default view', async () => {
       renderEmbedded();
-      await userEvent.click(screen.getByRole('checkbox', { name: 'Múltiple' }));
+      await userEvent.click(screen.getByRole('checkbox', { name: /^Múltiple/ }));
       await userEvent.click(screen.getByRole('button', { name: 'Crear escritorio' }));
 
       await userEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
 
       expect(screen.getByRole('button', { name: 'Editar escritorios' })).toBeInTheDocument();
-      expect(screen.getByRole('checkbox', { name: 'Múltiple' })).toBeChecked();
+      expect(screen.getByRole('checkbox', { name: /^Múltiple/ })).toBeChecked();
     });
   });
 

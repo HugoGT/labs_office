@@ -1,20 +1,23 @@
+import type { Swatch } from '../art/customCharacter';
 import { chairPreviewFrames, previewFrame, type MaterialCatalog, type MaterialOption } from '../game/artMaterials';
 import type { ArtPreviewCache } from '../game/artPreview';
-import type { DecorBrush } from '../game/decorEditor';
+import { decorSizeLabel, decorTileName, type DecorBrush } from '../game/decorEditor';
 import { decorPieceInfo, type DecorPieceInfo } from '../game/officeDecor';
 import type { DecorPick } from '../hooks/useDecorEditor';
 import { ArtPreviewCanvas } from './ArtPreviewCanvas';
+import { ColorPicker } from './ColorPicker';
 import styles from './DecorPalette.module.css';
 
 /**
  * The palette of the decor editor (#208): every piece the office decor layer
  * places, grouped by kind, each with a thumbnail cut from its sheet (pack and
- * approved uploads, from the same catalog as the other palettes), then the
- * eraser. Presentational: the editor owns which entry is picked and what a
- * click on the map does with it.
+ * approved uploads, from the same catalog as the other palettes). A tile
+ * names only what tells it apart in its group (the heading says the kind);
+ * a room table also shows its size, and a colorable piece carries a color
+ * picker, chosen before picking because the rail steps aside once a piece is
+ * picked. Presentational: the editor owns which entry is picked, the colors
+ * and what a click on the map does.
  */
-
-export const DECOR_ERASER_LABEL = 'Quitar';
 
 type DecorCatalogKind = 'chair' | 'desk' | 'table' | 'plant';
 
@@ -26,8 +29,37 @@ const GROUPS: readonly { kind: DecorCatalogKind; label: string }[] = [
   { kind: 'plant', label: 'Plantas' },
 ];
 
-/** Sheet pixels per thumbnail pixel: a desk cell (96x104) and a room table frame (256x192) are bigger than the 48px box. */
-const SHRINK: Readonly<Record<DecorCatalogKind, number>> = { chair: 1, desk: 2, table: 6, plant: 1 };
+/**
+ * Quick picks for a colorable piece, the painted desk's default first; any
+ * other color comes from the picker's own "Otro color".
+ */
+export const DECOR_COLORS: readonly Swatch[] = [
+  { hex: '#4f9a8a', label: 'Verde azulado' },
+  { hex: '#f3efe6', label: 'Blanco' },
+  { hex: '#9aa3ad', label: 'Gris' },
+  { hex: '#3a3f45', label: 'Grafito' },
+  { hex: '#c0392b', label: 'Rojo' },
+  { hex: '#e08a3c', label: 'Naranja' },
+  { hex: '#e6c84a', label: 'Amarillo' },
+  { hex: '#5a9a4f', label: 'Verde' },
+  { hex: '#3c6ac8', label: 'Azul' },
+  { hex: '#7a4fb0', label: 'Morado' },
+  { hex: '#d77fa1', label: 'Rosa' },
+];
+
+/** The thumbnail box, in pixels. */
+const THUMBNAIL_PX = 48;
+
+/**
+ * Sheet pixels per thumbnail pixel: a desk cell (96x104) is bigger than the
+ * box, and a room table shrinks just enough to fit, so the small oval one
+ * reads as big as it can.
+ */
+function shrinkFor(kind: DecorCatalogKind, frame: { readonly width: number; readonly height: number }): number {
+  if (kind === 'desk') return 2;
+  if (kind === 'table') return Math.max(1, Math.ceil(Math.max(frame.width, frame.height) / THUMBNAIL_PX));
+  return 1;
+}
 
 /** A catalog entry as the editor picks it, or `null` when the decor layer does not place it. */
 export function decorPickOf(option: MaterialOption): DecorPick | null {
@@ -48,19 +80,21 @@ export function catalogDecorInfo(catalog: MaterialCatalog | null): (piece: strin
 }
 
 export interface DecorPaletteProps {
-  /** The editor's brush: an entry is pressed while its piece (any rotation) or the eraser is picked. */
+  /** The editor's brush: an entry is pressed while its piece (any rotation or color) is picked. */
   value: DecorBrush | null;
-  /** The pack and uploads catalog, or `null` while it is unavailable: only the eraser then. */
+  /** The pack and uploads catalog, or `null` while it is unavailable: nothing to offer then. */
   catalog: MaterialCatalog | null;
   /** Which pieces to offer ("Mi espacio": what fits a desk); every one by default. */
   offers?: (info: DecorPieceInfo) => boolean;
+  /** The color chosen per colorable piece; one without starts in its manifest default. */
+  colors?: Readonly<Record<string, string>>;
   onPick: (pick: DecorPick) => void;
-  onErase: () => void;
+  onColorChange?: (piece: string, color: string) => void;
   disabled?: boolean;
   preview?: ArtPreviewCache;
 }
 
-function Thumbnail({ option, kind, preview }: { option: MaterialOption; kind: DecorCatalogKind; preview?: ArtPreviewCache }) {
+function Thumbnail({ option, kind, color, preview }: { option: MaterialOption; kind: DecorCatalogKind; color: string | null; preview?: ArtPreviewCache }) {
   // A chair reads whole only with both of its layers, back first.
   const frames = kind === 'chair' ? chairPreviewFrames() : [previewFrame(option)];
   return (
@@ -69,9 +103,9 @@ function Thumbnail({ option, kind, preview }: { option: MaterialOption; kind: De
         <ArtPreviewCanvas
           key={frame.y}
           option={option}
-          color={null}
+          color={color}
           frame={frame}
-          shrink={SHRINK[kind]}
+          shrink={shrinkFor(kind, frame)}
           label={option.name}
           className={styles.canvas}
           preview={preview}
@@ -81,8 +115,8 @@ function Thumbnail({ option, kind, preview }: { option: MaterialOption; kind: De
   );
 }
 
-export function DecorPalette({ value, catalog, offers = () => true, onPick, onErase, disabled = false, preview }: DecorPaletteProps) {
-  const pressed = (id: string): boolean => value?.kind === 'piece' && value.piece === id;
+export function DecorPalette({ value, catalog, offers = () => true, colors = {}, onPick, onColorChange, disabled = false, preview }: DecorPaletteProps) {
+  const pressed = (id: string): boolean => value?.piece === id;
   return (
     <div className={styles.palettes}>
       {GROUPS.map(({ kind, label }) => {
@@ -95,36 +129,50 @@ export function DecorPalette({ value, catalog, offers = () => true, onPick, onEr
           <div key={kind} className={styles.group}>
             <h4 className={styles.subtitle}>{label}</h4>
             <div className={styles.palette} role="group" aria-label={label}>
-              {entries.map(({ option, pick }) => (
-                <button
-                  key={option.id}
-                  type="button"
-                  className={styles.entry}
-                  aria-pressed={pressed(option.id)}
-                  disabled={disabled}
-                  onClick={() => onPick(pick)}
-                >
-                  <Thumbnail option={option} kind={kind} preview={preview} />
-                  <span className={styles.label}>{option.name}</span>
-                </button>
-              ))}
+              {entries.map(({ option, pick }) => {
+                const colorable = pick.info.colorable === true && option.defaultColor !== null;
+                const color = colorable ? (colors[option.id] ?? option.defaultColor) : null;
+                // Room tables tell their size apart; the horizontal one, as the catalog states it.
+                const size = kind === 'table' ? decorSizeLabel(pick.info) : null;
+                return (
+                  <div key={option.id} className={styles.cell}>
+                    <button
+                      type="button"
+                      className={styles.entry}
+                      aria-label={option.name}
+                      title={size === null ? option.name : `${option.name} (${size})`}
+                      aria-pressed={pressed(option.id)}
+                      disabled={disabled}
+                      onClick={() => onPick(pick)}
+                    >
+                      <Thumbnail option={option} kind={kind} color={color} preview={preview} />
+                      <span className={styles.label} data-tile-name>
+                        {decorTileName(kind, option.name)}
+                      </span>
+                      {size !== null && (
+                        <span className={styles.size} data-tile-size>
+                          {size}
+                        </span>
+                      )}
+                    </button>
+                    {colorable && color !== null && (
+                      <ColorPicker
+                        label={`Color de ${option.name}`}
+                        caption=""
+                        presets={DECOR_COLORS}
+                        value={color}
+                        compact
+                        disabled={disabled}
+                        onChange={(hex) => onColorChange?.(option.id, hex)}
+                      />
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         );
       })}
-      <div className={styles.palette}>
-        <button
-          type="button"
-          className={styles.entry}
-          aria-pressed={value?.kind === 'eraser'}
-          disabled={disabled}
-          title="Goma: quita el mueble que ocupa la casilla que toques"
-          onClick={onErase}
-        >
-          <span className={`${styles.thumbnail} ${styles.eraser}`} aria-hidden="true" />
-          <span className={styles.label}>{DECOR_ERASER_LABEL}</span>
-        </button>
-      </div>
     </div>
   );
 }

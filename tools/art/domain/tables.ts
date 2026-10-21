@@ -10,7 +10,7 @@
  * end with the panel's edge on one side and the drawer pull on the other (left and right).
  */
 import { makeRamp, mixRgba, type Ramp } from './color.ts';
-import { ART_TILE, TABLE, type Footprint } from '../../../src/game/artContract.ts';
+import { ART_TILE, TABLE, type Footprint, type TableFacing } from '../../../src/game/artContract.ts';
 import { DEPTH_SCALE, floorPoint, floorSpans, renderFurniture, type Box, type FurnitureModel, type Span, type SurfacePoint } from './furnitureModel.ts';
 import { PixelBuffer, rgba, type Rgba } from '../../../src/art/pixelBuffer.ts';
 import type { Facing, SeatPoint } from '../../../src/art/seating.ts';
@@ -191,35 +191,48 @@ export function tableSprite(material: TableMaterial, facing: Facing, color = DEF
 
 // --- Room tables -------------------------------------------------------------------------------
 
-/** The two shared tables of the map: the meeting room's and the cafeteria's. */
-export const ROOM_TABLES = ['meeting', 'cafeteria'] as const;
+/** The shared tables of the map: the meeting room's, the cafeteria's and a small oval one (#208). */
+export const ROOM_TABLES = ['meeting', 'cafeteria', 'oval'] as const;
 export type RoomTable = (typeof ROOM_TABLES)[number];
 
-/** The tiles each table covers on the map (its `props` object in src/game/maps/office.json). */
+/**
+ * The tiles each table covers standing horizontal (the meeting and cafeteria ones are the
+ * `props` objects in src/game/maps/office.json); standing vertical it covers them swapped.
+ */
 export const ROOM_TABLE_FOOTPRINTS: Readonly<Record<RoomTable, Footprint>> = {
   meeting: { w: 7, h: 5 },
   cafeteria: { w: 5, h: 3 },
+  oval: { w: 2, h: 1 },
 };
 
 const BEECH = makeRamp('#c8a06a');
+const OAK = makeRamp('#b07d52');
 
-/** Wood grain along the length of a long top, in broken lines. */
-function longGrain(shadow: Rgba): (point: SurfacePoint, color: Rgba) => Rgba {
+/** Wood grain along the length of a long top, in broken lines: across the screen, or down it when `vertical`. */
+function longGrain(shadow: Rgba, vertical: boolean): (point: SurfacePoint, color: Rgba) => Rgba {
   return (point, color) => {
     if (point.face !== 'top') return color;
-    const line = point.row % 5 === 2;
-    const broken = Math.floor((point.col + point.row * 7) / 9) % 4 === 0;
+    const [across, along] = vertical ? [point.col, point.row] : [point.row, point.col];
+    const line = across % 5 === 2;
+    const broken = Math.floor((along + across * 7) / 9) % 4 === 0;
     return line && !broken ? mixRgba(color, shadow, 0.35) : color;
   };
 }
 
+/** The footprint a table covers in a facing: as stated horizontal, swapped vertical. */
+function facingFootprint(kind: RoomTable, facing: TableFacing): Footprint {
+  const { w, h } = ROOM_TABLE_FOOTPRINTS[kind];
+  return facing === 'vertical' ? { w: h, h: w } : { w, h };
+}
+
 /**
  * A table seated on every side: a thick top over an apron ring and legs at the corners (and in
- * the middle of a long side), built from the same boxes as the desks. Seen from the front, so its
- * floor rows are the footprint's height in tiles.
+ * the middle of a long side), built from the same boxes as the desks. Seen from the front in
+ * either facing, so its floor rows are the footprint's height in tiles: standing vertical it is
+ * modeled long in depth, never a turned copy of the horizontal drawing.
  */
-function roomTableModel(kind: RoomTable): FurnitureModel {
-  const { w, h } = ROOM_TABLE_FOOTPRINTS[kind];
+function roomTableModel(kind: 'meeting' | 'cafeteria', facing: TableFacing): FurnitureModel {
+  const { w, h } = facingFootprint(kind, facing);
   const wood = kind === 'meeting' ? WALNUT : BEECH;
   const halfWidth = (w * ART_TILE) / 2;
   const halfDepth = (h * ART_TILE) / 2 / DEPTH_SCALE;
@@ -230,31 +243,72 @@ function roomTableModel(kind: RoomTable): FurnitureModel {
     ramp: wood,
     top: 'base',
     side: 'shadow',
-    shade: longGrain(wood.shadow),
+    shade: longGrain(wood.shadow, facing === 'vertical'),
   };
   const apronU: Span = [halfDepth - 6, halfDepth - 4];
   const apron: Box[] = [
     { u: apronU, v: [-halfWidth + 4, halfWidth - 4], y: [TOP_UNDER - 3, TOP_UNDER], ramp: wood, top: 'shadow', side: 'shadow' },
     { u: [-apronU[1], -apronU[0]], v: [-halfWidth + 4, halfWidth - 4], y: [TOP_UNDER - 3, TOP_UNDER], ramp: wood, top: 'shadow', side: 'shadow' },
   ];
-  const legU: Span = [halfDepth - 7, halfDepth - 3];
+  const legUs: Span[] = [[halfDepth - 7, halfDepth - 3], [-(halfDepth - 3), -(halfDepth - 7)]];
   const legVs: Span[] = [[halfWidth - 6, halfWidth - 2], [-(halfWidth - 2), -(halfWidth - 6)]];
+  // A long side gets a leg in its middle too, whichever way it runs.
   if (w >= 6) legVs.push([-2, 2]);
-  const legs = legVs.flatMap((v): Box[] => [
-    { u: legU, v, y: [0, TOP_UNDER], ramp: wood, top: 'base', side: 'shadow' },
-    { u: [-legU[1], -legU[0]], v, y: [0, TOP_UNDER], ramp: wood, top: 'base', side: 'shadow' },
-  ]);
+  if (h >= 6) legUs.push([-2, 2]);
+  const legs = legVs.flatMap((v) => legUs.map((u): Box => ({ u, v, y: [0, TOP_UNDER], ramp: wood, top: 'base', side: 'shadow' })));
   return {
     shadow: { u: [-halfDepth + 2, halfDepth - 2], v: [-halfWidth + 2, halfWidth - 2], shape: 'rect' },
     parts: [{ boxes: legs }, { boxes: apron }, { boxes: [top] }],
   };
 }
 
-/** A room table in the TABLE frame, the floor under the middle of its footprint's south edge on TABLE.anchor. */
-export function roomTableSprite(kind: RoomTable): PixelBuffer {
-  const { back, origin } = renderFurniture(roomTableModel(kind), 'down', 320);
+/**
+ * The oval table: its top an ellipse inscribed in the footprint, built as one slab per floor row
+ * (the boxes are axis aligned), each as wide as the ellipse at that row, so the rim curves and
+ * the front half shows its thin edge. One pedestal on a foot along the long side holds it up.
+ * The rim catches the light from the upper left and the grain runs along the long side.
+ */
+function ovalTableModel(facing: TableFacing): FurnitureModel {
+  const { w, h } = facingFootprint('oval', facing);
+  const vertical = facing === 'vertical';
+  // One pixel inside the footprint, so the outline stays on it.
+  const radiusX = (w * ART_TILE) / 2 - 1;
+  const radiusRows = (h * ART_TILE) / 2 - 1;
+  const halfDepth = radiusRows / DEPTH_SCALE;
+  const grain = longGrain(OAK.shadow, vertical);
+  const shade = (point: SurfacePoint, color: Rgba): Rgba => {
+    if (point.face !== 'top') return color;
+    // Screen left is +v facing down, screen up is -u.
+    const across = point.v / radiusX;
+    const deep = point.u / halfDepth;
+    if (across * across + deep * deep > 0.72 && (across > 0.35 || deep < -0.35)) return mixRgba(color, OAK.light, 0.45);
+    return grain(point, color);
+  };
+  const slabs: Box[] = [];
+  for (let row = -radiusRows; row < radiusRows; row += 1) {
+    const middle = (row + 0.5) / radiusRows;
+    const half = Math.max(1, Math.round(radiusX * Math.sqrt(Math.max(0, 1 - middle * middle))));
+    slabs.push({ u: [row / DEPTH_SCALE, (row + 1) / DEPTH_SCALE], v: [-half, half], y: [TOP_UNDER, TABLE_HEIGHT], ramp: OAK, top: 'base', side: 'shadow', shade });
+  }
+  const pedestal: Box = { u: [-4, 4], v: [-3, 3], y: [2, TOP_UNDER], ramp: OAK, top: 'shadow', side: 'shadow' };
+  const foot: Box = vertical
+    ? { u: [-halfDepth + 10, halfDepth - 10], v: [-5, 5], y: [0, 2], ramp: OAK, top: 'base', side: 'shadow' }
+    : { u: [-6, 6], v: [-radiusX + 12, radiusX - 12], y: [0, 2], ramp: OAK, top: 'base', side: 'shadow' };
+  return {
+    shadow: { u: [-halfDepth + 2, halfDepth - 2], v: [-radiusX + 2, radiusX - 2], shape: 'ellipse' },
+    parts: [{ boxes: [foot, pedestal] }, { boxes: slabs }],
+  };
+}
+
+/**
+ * A room table in one frame of the TABLE sheet, the floor under the middle of its footprint's
+ * south edge (the footprint swapped when vertical) on TABLE.anchor.
+ */
+export function roomTableSprite(kind: RoomTable, facing: TableFacing = 'horizontal'): PixelBuffer {
+  const model = kind === 'oval' ? ovalTableModel(facing) : roomTableModel(kind, facing);
+  const { back, origin } = renderFurniture(model, 'down', 400);
   const frame = new PixelBuffer(TABLE.frame.width, TABLE.frame.height);
-  const halfRows = (ROOM_TABLE_FOOTPRINTS[kind].h * ART_TILE) / 2;
+  const halfRows = (facingFootprint(kind, facing).h * ART_TILE) / 2;
   frame.blit(back, TABLE.anchor.x - origin.x, TABLE.anchor.y - halfRows - origin.y);
   return frame;
 }

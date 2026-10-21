@@ -16,10 +16,9 @@ describe('editorMapHold', () => {
     expect(terrainEditHoldsMap({ brush: { kind: 'wall', piece: null } })).toBe(true);
   });
 
-  it('the decor editor holds the map only with a piece or the eraser picked (#208)', () => {
+  it('the decor editor holds the map only with a piece picked (#208)', () => {
     expect(decorEditHoldsMap(null)).toBe(false);
     expect(decorEditHoldsMap({ brush: null, area: null })).toBe(false);
-    expect(decorEditHoldsMap({ brush: { kind: 'eraser' }, area: null })).toBe(true);
     expect(
       decorEditHoldsMap({ brush: { kind: 'piece', piece: 'chair-wood', info: { kind: 'chair', footprint: { w: 1, h: 1 } }, rotation: 0 }, area: { x: 1, y: 1, w: 3, h: 3 } }),
     ).toBe(true);

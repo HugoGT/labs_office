@@ -19,6 +19,7 @@
 
 import {
   ART_IMAGE_SPECS,
+  ART_TILE,
   facingColumn,
   wallFrameIndex,
   type ArtChairPiece,
@@ -140,11 +141,27 @@ export interface PreviewFrame {
 /**
  * The part of the sheet a preview shows: a desk's front-facing cell (how it
  * reads facing the viewer), the whole floor motif, which is what tiles, a
- * wall's east-west joint, the middle of a straight painted wall, or the one
- * frame of a plant or a room table.
+ * wall's east-west joint, the middle of a straight painted wall, the one
+ * frame of a plant, or of a room table the part its horizontal drawing
+ * covers (its footprint and the top lifted over it), so a small table is not
+ * lost in the frame that fits the largest.
  */
+/** Pixels around a room table's footprint its preview keeps: the outline, and above it the lifted top. */
+const TABLE_PREVIEW_MARGIN = 2;
+const TABLE_PREVIEW_LIFT = 18;
+
 export function previewFrame(option: MaterialOption): PreviewFrame {
   if (option.kind === 'chair') return chairPreviewFrames()[0];
+  if (option.kind === 'table' && option.piece.kind === 'table') {
+    const { frame } = ART_IMAGE_SPECS.table;
+    const { anchor, footprint } = option.piece;
+    const halfWidth = (footprint.w * ART_TILE) / 2 + TABLE_PREVIEW_MARGIN;
+    const x = Math.max(0, anchor.x - halfWidth);
+    const y = Math.max(0, anchor.y - footprint.h * ART_TILE - TABLE_PREVIEW_LIFT);
+    const right = Math.min(frame.width, anchor.x + halfWidth);
+    const bottom = Math.min(frame.height, anchor.y + TABLE_PREVIEW_MARGIN * 2);
+    return { x, y, width: right - x, height: bottom - y };
+  }
   if (option.kind === 'plant' || option.kind === 'table') {
     const { frame } = ART_IMAGE_SPECS[option.kind];
     return { x: 0, y: 0, width: frame.width, height: frame.height };

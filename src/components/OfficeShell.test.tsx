@@ -1636,18 +1636,18 @@ describe('OfficeShell: right rail while painting terrain', () => {
     rail().forEach((element) => expect(element).toBeVisible());
   });
 
-  it('hides it the same way while a decor piece or the decor eraser is picked (#208)', () => {
+  it('hides it the same way while a decor piece is picked (#208)', () => {
     render(<OfficeShell onLeaveOffice={vi.fn()} />);
     const bridge = createGameMock.mock.calls[0][1];
     const sidebar = () => screen.getByRole('complementary', { name: 'Personas', hidden: true });
 
-    act(() => bridge.emitCommand('decoredit', { brush: { kind: 'eraser' }, area: null }));
+    act(() => bridge.emitCommand('decoredit', { brush: { kind: 'piece', piece: 'chair-wood', info: { kind: 'chair', footprint: { w: 1, h: 1 } }, rotation: 0 }, area: null }));
     expect(sidebar()).not.toBeVisible();
     act(() => bridge.emitCommand('decoredit', { brush: null, area: null }));
     expect(sidebar()).toBeVisible();
 
     // Either editor holding the map keeps it hidden until both let go.
-    act(() => bridge.emitCommand('decoredit', { brush: { kind: 'eraser' }, area: null }));
+    act(() => bridge.emitCommand('decoredit', { brush: { kind: 'piece', piece: 'chair-wood', info: { kind: 'chair', footprint: { w: 1, h: 1 } }, rotation: 0 }, area: null }));
     act(() => bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'grass' } }));
     act(() => bridge.emitCommand('decoredit', null));
     expect(sidebar()).not.toBeVisible();

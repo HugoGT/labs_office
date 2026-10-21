@@ -205,11 +205,12 @@ export interface OfficeEventMap {
    * starts from what the map shows without a fetch of its own.
    */
   decor: { items: readonly DecorItem[] };
-  /** A decor editor has a piece (or the eraser) picked and someone clicked this tile of the map. */
+  /** A decor editor has a piece picked and someone clicked this tile of the map. */
   decorpick: { index: number };
   /**
-   * Turn the picked decor brush a quarter turn (`nextDecorRotation`): `1`
-   * down, left, up, right, `-1` back. The map sends it for the R key (Shift+R
+   * Turn the picked decor brush (`nextDecorRotation`): a chair or desk table
+   * a quarter turn, `1` down, left, up, right, `-1` back; a room table
+   * between horizontal and vertical either way. The map sends it for the R key (Shift+R
    * back) while a rotatable piece is picked; the wheel can send it too (#207).
    */
   decorrotate: { step: 1 | -1 };

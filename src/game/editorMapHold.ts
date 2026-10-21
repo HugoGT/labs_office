@@ -26,7 +26,7 @@ export function terrainEditHoldsMap(command: Pick<TerrainEditCommand, 'brush'> |
 }
 
 /**
- * A decor piece or the decor eraser picked (#208). Like a terrain brush it
+ * A decor piece picked (#208). Like a terrain brush it
  * also hides the right rail, so the ghost can be placed up to the screen
  * edge, until Escape unpicks it.
  */

@@ -20,6 +20,23 @@
   cursor: pointer;
 }
 
+/* ColorPicker `compact`: the swatch of a decor palette tile, as wide as the tile. */
+.compact {
+  width: 100%;
+  height: 24px;
+}
+
+.compact [data-swatch] {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.trigger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .trigger:hover,
 .trigger[aria-expanded='true'],
 .item:hover {

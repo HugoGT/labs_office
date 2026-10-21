@@ -248,6 +248,20 @@ describe('pieceCollisions: instances', () => {
     expect(worldRectsOf(table!, NO_EDITS)).toEqual([{ x: 7 * 32, y: 8 * 32, w: 7 * 32, h: 5 * 32 }]);
   });
 
+  it('blocks a vertical room table\'s whole swapped footprint by default, and turns saved rectangles a quarter clockwise', () => {
+    const [table] = officeDecorInstances([{ index: 10 * 20 + 10, piece: 'table-meeting', rotation: 90 }], infoOf, 20);
+
+    // 5x7 centered on the anchor tile (10, 10): tiles 8..12 by 7..13.
+    expect(table).toMatchObject({ rotation: 90, pivot: { x: 10.5 * 32, y: 10.5 * 32 }, pickBox: { x: 8 * 32, y: 7 * 32, w: 5 * 32, h: 7 * 32 } });
+    expect(worldRectsOf(table!, NO_EDITS)).toEqual([{ x: 8 * 32, y: 7 * 32, w: 5 * 32, h: 7 * 32 }]);
+    // The whole horizontal footprint, saved in piece space (from the bottom middle), covers the vertical one.
+    const whole = new Map([['table-meeting', [{ x: -112, y: -160, w: 224, h: 160 }]]]);
+    expect(worldRectsOf(table!, whole)).toEqual([{ x: 8 * 32, y: 7 * 32, w: 5 * 32, h: 7 * 32 }]);
+    // A rectangle along the top edge of the horizontal table lands along the right edge of the vertical one.
+    const top = new Map([['table-meeting', [{ x: -112, y: -160, w: 224, h: 32 }]]]);
+    expect(worldRectsOf(table!, top)).toEqual([{ x: 12 * 32, y: 7 * 32, w: 32, h: 7 * 32 }]);
+  });
+
   it('skips a piece the catalog does not know', () => {
     expect(officeDecorInstances([{ index: 0, piece: 'table-gone', rotation: 0 }], infoOf, 20)).toEqual([]);
   });

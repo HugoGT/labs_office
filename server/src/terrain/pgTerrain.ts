@@ -6,7 +6,7 @@
  */
 
 import { isLayoutMaterial, isWallPieceId, type LayoutMaterial, type WallPieceId } from '../../../src/game/officeLayout.ts';
-import { isDecorPieceId, isDecorRotation, type DecorItem } from '../../../src/game/officeDecor.ts';
+import { isDecorColor, isDecorPieceId, isDecorRotation, type DecorItem } from '../../../src/game/officeDecor.ts';
 import type { DirectoryPool } from '../directory/pgDirectory.ts';
 import type { TerrainStore } from './terrainPort.ts';
 
@@ -71,31 +71,32 @@ export function createPgTerrain(pool: DirectoryPool): TerrainStore {
     },
 
     async loadDecor() {
-      const result = await pool.query('SELECT tile_index, piece_id, rotation FROM office_decor');
+      const result = await pool.query('SELECT tile_index, piece_id, rotation, color FROM office_decor');
       const items: DecorItem[] = [];
       // Same as the walls: an unreadable row is skipped, not fatal.
       for (const row of result.rows) {
-        if (Number.isInteger(row.tile_index) && isDecorPieceId(row.piece_id) && isDecorRotation(row.rotation)) {
-          items.push({ index: row.tile_index as number, piece: row.piece_id, rotation: row.rotation });
-        }
+        const color: unknown = row.color ?? null;
+        if (!Number.isInteger(row.tile_index) || !isDecorPieceId(row.piece_id) || !isDecorRotation(row.rotation)) continue;
+        if (color !== null && !isDecorColor(color)) continue;
+        items.push({ index: row.tile_index as number, piece: row.piece_id, rotation: row.rotation, ...(color === null ? {} : { color }) });
       }
       return items.sort((a, b) => a.index - b.index);
     },
     async saveDecor(edits, actorId) {
       // One statement, like the walls: removals and placements commit
       // together, and the tiles of a batch are distinct.
-      const entries = edits.map(({ index, item }) => ({ index, piece: item?.piece ?? null, rotation: item?.rotation ?? null }));
+      const entries = edits.map(({ index, item }) => ({ index, piece: item?.piece ?? null, rotation: item?.rotation ?? null, color: item?.color ?? null }));
       await pool.query(
         `WITH entries AS (
-           SELECT entry.index, entry.piece, entry.rotation FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, piece text, rotation smallint)
+           SELECT entry.index, entry.piece, entry.rotation FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, piece text, rotation smallint, color text)
          ),
          removed AS (
            DELETE FROM office_decor WHERE tile_index IN (SELECT index FROM entries WHERE piece IS NULL)
          )
-         INSERT INTO office_decor (tile_index, piece_id, rotation, updated_by)
-         SELECT index, piece, rotation, $2::uuid FROM entries WHERE piece IS NOT NULL
+         INSERT INTO office_decor (tile_index, piece_id, rotation, color, updated_by)
+         SELECT index, piece, rotation, color, $2::uuid FROM entries WHERE piece IS NOT NULL
          ON CONFLICT (tile_index) DO UPDATE
-           SET piece_id = EXCLUDED.piece_id, rotation = EXCLUDED.rotation, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+           SET piece_id = EXCLUDED.piece_id, rotation = EXCLUDED.rotation, color = EXCLUDED.color, updated_by = EXCLUDED.updated_by, updated_at = now()`,
         [JSON.stringify(entries), actorId],
       );
     },

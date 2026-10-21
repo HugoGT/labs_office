@@ -1,3 +1,10 @@
+/* The checkbox over its hint, both as wide as the panel lets them. */
+.wrapper {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .toggle {
   display: inline-flex;
   align-items: center;
@@ -17,4 +24,11 @@
 .toggle:has(input:disabled) {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Lines up with the label text, past the checkbox. */
+.hint {
+  padding-left: 19px;
+  font-size: 11px;
+  color: #9ca3af;
 }

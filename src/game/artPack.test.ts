@@ -120,8 +120,8 @@ describe('load requests', () => {
 
     expect(kinds).toEqual(new Set(['floor', 'desk', 'chair', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'character']));
     // Nine floors, four desks, four chairs and four walls, the terrain tileset,
-    // two trees, a plant, a bridge, a hedge and two tables (art step 8).
-    expect(requests).toHaveLength(31);
+    // two trees, a plant, a bridge, a hedge and three tables (art step 8, the oval one since #208).
+    expect(requests).toHaveLength(32);
     expect(requests.filter((request) => request.key.startsWith('art:character-')).map((request) => request.key))
       .toEqual([artSheetKey(pack().defaults.character, 'walk'), artSheetKey(pack().defaults.character, 'seated')]);
     expect(requests).toContainEqual({

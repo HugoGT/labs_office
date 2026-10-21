@@ -61,6 +61,10 @@ const PLANT: DecorPieceInfo = { kind: 'plant', footprint: { w: 1, h: 1 } };
 const chair: DecorBrush = { kind: 'piece', piece: 'chair-wood', info: CHAIR, rotation: 0 };
 const desk: DecorBrush = { kind: 'piece', piece: 'desk-wood', info: DESK, rotation: 0 };
 const plant: DecorBrush = { kind: 'piece', piece: 'plant-ficus', info: PLANT, rotation: 0 };
+const MEETING: DecorPieceInfo = { kind: 'table', footprint: { w: 7, h: 5 } };
+const OVAL: DecorPieceInfo = { kind: 'table', footprint: { w: 2, h: 1 } };
+const meeting: DecorBrush = { kind: 'piece', piece: 'table-meeting', info: MEETING, rotation: 0 };
+const oval: DecorBrush = { kind: 'piece', piece: 'table-oval', info: OVAL, rotation: 0 };
 
 /** A lawn everywhere but column 0, water. */
 const GROUND: DecorGround = {
@@ -150,19 +154,19 @@ describe('DecorEditLayer', () => {
     expect(hover(scene)!.strokeColor).toBe(DECOR_INVALID_COLOR);
   });
 
-  it('outlines what the eraser would remove, with no ghost, or the bare tile in red where there is nothing', async () => {
+  it('draws the ghost of a painted piece in its color, and outlines a vertical room table on its swapped footprint', async () => {
     const scene = await bootHostScene();
-    const { bridge, drawn } = layer(scene, [{ index: at(10, 10), piece: 'desk-wood', rotation: 90 }]);
-    bridge.emitCommand('decoredit', { brush: { kind: 'eraser' }, area: null });
+    const { bridge, drawn } = layer(scene);
+    bridge.emitCommand('decoredit', { brush: { ...desk, piece: 'desk-painted', info: { ...DESK, colorable: true }, color: '#c83c3c' }, area: null });
+    scene.input.emit('pointermove', pointerAt(5 * TILE + 5, 5 * TILE + 5));
+    expect(drawn.at(-1)).toEqual({ index: at(5, 5), piece: 'desk-painted', rotation: 0, color: '#c83c3c' });
 
-    scene.input.emit('pointermove', pointerAt(10 * TILE + 5, 11 * TILE + 5));
+    bridge.emitCommand('decoredit', { brush: { ...meeting, rotation: 90 }, area: null });
+    scene.input.emit('pointermove', pointerAt(10 * TILE + 5, 7 * TILE + 5));
     const outline = hover(scene)!;
-    expect([outline.x, outline.y, outline.width, outline.height]).toEqual([10.5 * TILE, 10.5 * TILE, TILE, 3 * TILE]);
-    expect(outline.strokeColor).toBe(DECOR_VALID_COLOR);
-    expect(drawn).toEqual([]);
-
-    scene.input.emit('pointermove', pointerAt(3 * TILE + 5, 3 * TILE + 5));
-    expect([hover(scene)!.width, hover(scene)!.strokeColor]).toEqual([TILE, DECOR_INVALID_COLOR]);
+    // 5x7 centered on (10, 7): tiles 8..12 by 4..10.
+    expect([outline.x, outline.y, outline.width, outline.height]).toEqual([10.5 * TILE, 7.5 * TILE, 5 * TILE, 7 * TILE]);
+    expect(drawn.at(-1)).toEqual({ index: at(10, 7), piece: 'table-meeting', rotation: 90 });
   });
 
   it('reports the clicked tile with a primary click while something is picked, and only then', async () => {
@@ -183,7 +187,7 @@ describe('DecorEditLayer', () => {
     expect(picks).toEqual([at(3, 2)]);
   });
 
-  it('turns a picked chair or desk table with R, back with Shift+R, never a plant nor while typing', async () => {
+  it('turns a picked chair, desk table or room table with R, back with Shift+R, never a plant nor while typing', async () => {
     const scene = await bootHostScene();
     const { bridge } = layer(scene);
     const steps: number[] = [];
@@ -197,6 +201,8 @@ describe('DecorEditLayer', () => {
     key({ key: 'r', repeat: true });
     bridge.emitCommand('decoredit', { brush: plant, area: null });
     key({ key: 'r' });
+    bridge.emitCommand('decoredit', { brush: oval, area: null });
+    key({ key: 'r' });
     bridge.emitCommand('decoredit', { brush: desk, area: null });
     const input = document.createElement('input');
     document.body.append(input);
@@ -204,7 +210,7 @@ describe('DecorEditLayer', () => {
     key({ key: 'r' });
     input.remove();
 
-    expect(steps).toEqual([1, -1]);
+    expect(steps).toEqual([1, -1, 1]);
   });
 
   it('turns a picked chair or desk table with the wheel, one quarter turn per notch, down forward and up back (#207)', async () => {
@@ -231,7 +237,28 @@ describe('DecorEditLayer', () => {
     expect(steps).toEqual([1, 1, -1, -1]);
   });
 
-  it('a trackpad gesture turns the piece once, and the wheel stays the zoom\'s for plants, the eraser and nothing picked', async () => {
+  it('turns a picked room table with the wheel too, instead of zooming (#207, #208)', async () => {
+    const scene = await bootHostScene();
+    const clock = { now: 1000 };
+    const { bridge, decorLayer } = layer(scene, [], clock);
+    const steps: number[] = [];
+    bridge.on('decorrotate', ({ step }) => steps.push(step));
+    const notch = (deltaY: number): void => {
+      clock.now += 400;
+      wheel(scene, deltaY);
+    };
+
+    for (const table of [meeting, oval]) {
+      bridge.emitCommand('decoredit', { brush: table, area: null });
+      expect(decorLayer.holdsWheel(), table.piece).toBe(true);
+      notch(100);
+      notch(100);
+    }
+
+    expect(steps).toEqual([1, 1, 1, 1]);
+  });
+
+  it('a trackpad gesture turns the piece once, and the wheel stays the zoom\'s for plants and nothing picked', async () => {
     const scene = await bootHostScene();
     const clock = { now: 1000 };
     const { bridge, decorLayer } = layer(scene, [], clock);
@@ -245,7 +272,7 @@ describe('DecorEditLayer', () => {
     }
     expect(rotate).toHaveBeenCalledTimes(1);
 
-    for (const brush of [plant, { kind: 'eraser' } as const, null]) {
+    for (const brush of [plant, null]) {
       bridge.emitCommand('decoredit', { brush, area: null });
       expect(decorLayer.holdsWheel()).toBe(false);
       clock.now += 1000;

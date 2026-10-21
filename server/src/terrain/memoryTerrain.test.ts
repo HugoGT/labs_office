@@ -66,4 +66,12 @@ describe('memoryTerrain decor', () => {
     expect(store.decorActorOf(5)).toBeUndefined();
     expect([...(await store.loadWalls())]).toEqual([]);
   });
+
+  it('keeps the color of a painted item, seeded or saved', async () => {
+    const store = createMemoryTerrain([], [], [{ index: 4, piece: 'desk-painted', rotation: 0, color: '#c83c3c' }]);
+    expect(await store.loadDecor()).toEqual([{ index: 4, piece: 'desk-painted', rotation: 0, color: '#c83c3c' }]);
+
+    await store.saveDecor([{ index: 6, item: { piece: 'desk-painted', rotation: 90, color: '#3c5ac8' } }], null);
+    expect(await store.loadDecor()).toContainEqual({ index: 6, piece: 'desk-painted', rotation: 90, color: '#3c5ac8' });
+  });
 });

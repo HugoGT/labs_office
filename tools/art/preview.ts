@@ -15,6 +15,7 @@ import {
   PACK_FACINGS,
   PLANT,
   TABLE,
+  TABLE_FACINGS,
   TERRAIN_MATERIALS,
   TERRAIN_TILESET,
   TREE,
@@ -23,6 +24,7 @@ import {
   floorFrameAt,
   hedgeFrameIndex,
   propPlacement,
+  type TableFacing,
   seatedRowForFacing,
   terrainDecalIndex,
   WALK_DIRECTIONS,
@@ -321,12 +323,24 @@ function terrainPairsPreview(sheets: PackSheets): PixelBuffer {
   return out;
 }
 
-/** Map seats around a table whose footprint starts at (x, y), as BASE_MAP_SEATS lays them out. */
-function tableSeats(x: number, y: number, { w, h }: Footprint, ends: boolean): { tx: number; ty: number; facing: ArtFacing }[] {
+/**
+ * Map seats around a table whose footprint starts at (x, y), as BASE_MAP_SEATS lays them out:
+ * along its top and bottom rows (`rows`) and at its left and right ends (`ends`).
+ */
+function tableSeats(x: number, y: number, { w, h }: Footprint, ends: boolean, rows = true): { tx: number; ty: number; facing: ArtFacing }[] {
   const seats: { tx: number; ty: number; facing: ArtFacing }[] = [];
-  for (let i = 0; i < w; i += 1) seats.push({ tx: x + i, ty: y - 1, facing: 'down' }, { tx: x + i, ty: y + h, facing: 'up' });
+  if (rows) for (let i = 0; i < w; i += 1) seats.push({ tx: x + i, ty: y - 1, facing: 'down' }, { tx: x + i, ty: y + h, facing: 'up' });
   if (ends) for (let j = 0; j < h; j += 1) seats.push({ tx: x - 1, ty: y + j, facing: 'right' }, { tx: x + w, ty: y + j, facing: 'left' });
   return seats;
+}
+
+/** A room table's frame for a facing and the footprint it covers there (swapped standing vertical). */
+function roomTable(sheets: PackSheets, kind: RoomTable, facing: TableFacing): { frame: PixelBuffer; footprint: Footprint } {
+  const { w, h } = ROOM_TABLE_FOOTPRINTS[kind];
+  return {
+    frame: frameOf(sheetOf(sheets.tables, kind), TABLE, TABLE_FACINGS.indexOf(facing), 0),
+    footprint: facing === 'vertical' ? { w: h, h: w } : { w, h },
+  };
 }
 
 function chairAt(chair: PixelBuffer, seat: { tx: number; ty: number; facing: ArtFacing }): Drawable {
@@ -377,10 +391,10 @@ function propsPreview(sheets: PackSheets): PixelBuffer {
   const roomRows = 9;
   const room = tiledFloor(sheets.floors.find((entry) => entry.terrain === 'wood')!.image, roomCols, roomRows);
   const chair = sheets.chairs.find((entry) => entry.material === 'wood')!.image;
-  const table = (kind: RoomTable, tx: number, ty: number, ends: boolean): Drawable[] => [
-    prop(sheetOf(sheets.tables, kind), { anchor: TABLE.anchor, footprint: ROOM_TABLE_FOOTPRINTS[kind] }, tx, ty),
-    ...tableSeats(tx, ty, ROOM_TABLE_FOOTPRINTS[kind], ends).map((seat) => chairAt(chair, seat)),
-  ];
+  const table = (kind: RoomTable, tx: number, ty: number, ends: boolean): Drawable[] => {
+    const { frame, footprint } = roomTable(sheets, kind, 'horizontal');
+    return [prop(frame, { anchor: TABLE.anchor, footprint }, tx, ty), ...tableSeats(tx, ty, footprint, ends).map((seat) => chairAt(chair, seat))];
+  };
   drawScene(room, [
     ...table('meeting', 1, 2, true),
     ...table('cafeteria', 12, 3, false),
@@ -394,6 +408,30 @@ function propsPreview(sheets: PackSheets): PixelBuffer {
   return out;
 }
 
+/**
+ * Every room table in both facings with chairs around it (#208): horizontal on the top row,
+ * standing vertical on the bottom one, each above or below its own horizontal drawing.
+ */
+function tablesPreview(sheets: PackSheets): PixelBuffer {
+  const chair = sheets.chairs.find((entry) => entry.material === 'wood')!.image;
+  const room = tiledFloor(sheets.floors.find((entry) => entry.terrain === 'wood')!.image, 24, 19);
+  const table = (kind: RoomTable, facing: TableFacing, tx: number, ty: number, seats: { ends: boolean; rows: boolean }): Drawable[] => {
+    const { frame, footprint } = roomTable(sheets, kind, facing);
+    return [prop(frame, { anchor: TABLE.anchor, footprint }, tx, ty), ...tableSeats(tx, ty, footprint, seats.ends, seats.rows).map((seat) => chairAt(chair, seat))];
+  };
+  drawScene(room, [
+    ...table('meeting', 'horizontal', 1, 2, { ends: true, rows: true }),
+    ...table('cafeteria', 'horizontal', 10, 2, { ends: false, rows: true }),
+    ...table('oval', 'horizontal', 17, 2, { ends: true, rows: true }),
+    ...table('oval', 'vertical', 22, 2, { ends: true, rows: true }),
+    ...table('meeting', 'vertical', 2, 10, { ends: true, rows: true }),
+    ...table('cafeteria', 'vertical', 11, 10, { ends: true, rows: false }),
+  ]);
+  const out = backdrop(GAP + room.width + GAP, GAP + room.height + GAP);
+  out.blit(room, GAP, GAP);
+  return out;
+}
+
 /** Preview images by file name, already upscaled. */
 export function renderPreviews(sheets: PackSheets): Map<string, PixelBuffer> {
   return new Map([
@@ -401,6 +439,7 @@ export function renderPreviews(sheets: PackSheets): Map<string, PixelBuffer> {
     ['floors.png', upscale(floorsPreview(sheets), PREVIEW_SCALE)],
     ['furniture.png', upscale(furniturePreview(sheets), PREVIEW_SCALE)],
     ['props.png', upscale(propsPreview(sheets), PREVIEW_SCALE)],
+    ['tables.png', upscale(tablesPreview(sheets), PREVIEW_SCALE)],
     ['terrain-pairs.png', upscale(terrainPairsPreview(sheets), PREVIEW_SCALE)],
     ['terrain.png', upscale(terrainScene(sheets), PREVIEW_SCALE)],
     ['walls.png', upscale(wallsPreview(sheets), PREVIEW_SCALE)],

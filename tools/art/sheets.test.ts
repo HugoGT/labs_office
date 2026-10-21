@@ -11,6 +11,8 @@ import {
   FLOOR_MOTIF_SIZE,
   HEDGE,
   PACK_FACINGS,
+  TABLE,
+  TABLE_FACINGS,
   TERRAIN_DECALS,
   TERRAIN_MASKS,
   TERRAIN_MATERIALS,
@@ -340,7 +342,10 @@ describe('prop sheets', () => {
     }
     for (const kind of ROOM_TABLES) {
       expect(validateArtImage('table', tableSheet(kind)), kind).toEqual([]);
-      expect(pixels(tableSheet(kind))).toEqual(pixels(roomTableSprite(kind)));
+      for (const facing of TABLE_FACINGS) {
+        const frame = crop(tableSheet(kind), TABLE_FACINGS.indexOf(facing) * TABLE.frame.width, 0, TABLE.frame.width, TABLE.frame.height);
+        expect(pixels(frame), `${kind} ${facing}`).toEqual(pixels(roomTableSprite(kind, facing)));
+      }
     }
   });
 

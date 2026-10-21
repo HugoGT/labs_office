@@ -25,7 +25,7 @@ export function createMemoryTerrain(
   for (const [index, material] of seed) blocks.set(index, { material, actorId: null });
   const walls = new Map<number, { piece: WallPieceId; actorId: string | null }>();
   for (const [index, piece] of wallSeed) walls.set(index, { piece, actorId: null });
-  let decor: readonly DecorItem[] = withDecor([], [...decorSeed].map(({ index, piece, rotation }) => ({ index, item: { piece, rotation } })));
+  let decor: readonly DecorItem[] = withDecor([], [...decorSeed].map(({ index, ...item }) => ({ index, item })));
   const decorActors = new Map<number, string | null>(decor.map((item) => [item.index, null]));
 
   return {

@@ -1760,18 +1760,22 @@
       },
       "anchor": {
         "x": 128,
-        "y": 180
+        "y": 244
       },
       "layer": "sorted",
       "collision": "solid",
+      "facings": [
+        "horizontal",
+        "vertical"
+      ],
       "files": [
         {
           "role": "sheet",
           "path": "table/meeting.png",
           "imageKind": "table",
-          "width": 256,
-          "height": 192,
-          "sha256": "38b666176614092ad6af257b69a83198270331e977ffd3c25e32d5e29e5d7bec"
+          "width": 512,
+          "height": 256,
+          "sha256": "acdedf1188602bf3a3fb19c5ccf467f58c84c01df457e3276961143b69f8fc6d"
         }
       ]
     },
@@ -1788,18 +1792,54 @@
       },
       "anchor": {
         "x": 128,
-        "y": 180
+        "y": 244
       },
       "layer": "sorted",
       "collision": "solid",
+      "facings": [
+        "horizontal",
+        "vertical"
+      ],
       "files": [
         {
           "role": "sheet",
           "path": "table/cafeteria.png",
           "imageKind": "table",
-          "width": 256,
-          "height": 192,
-          "sha256": "671418ba7cea35d57c4efd96d86f77b580333417dfb7e356b647211dff192ef5"
+          "width": 512,
+          "height": 256,
+          "sha256": "c00cf2af87b03a1c53a81822a581ad99968904984493c11318b564543291cbc5"
+        }
+      ]
+    },
+    {
+      "id": "table-oval",
+      "kind": "table",
+      "name": "Mesa ovalada",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "oak",
+      "footprint": {
+        "w": 2,
+        "h": 1
+      },
+      "anchor": {
+        "x": 128,
+        "y": 244
+      },
+      "layer": "sorted",
+      "collision": "solid",
+      "facings": [
+        "horizontal",
+        "vertical"
+      ],
+      "files": [
+        {
+          "role": "sheet",
+          "path": "table/oval.png",
+          "imageKind": "table",
+          "width": 512,
+          "height": 256,
+          "sha256": "3e76f1040407a81ee30452436d42950f37bbea5d75b7ff932e0408a78d785020"
         }
       ]
     }

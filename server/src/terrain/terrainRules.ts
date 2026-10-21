@@ -27,6 +27,7 @@ import {
   decorTiles,
   insideMap,
   isDecorPieceId,
+  isDecorColor,
   isDecorRotation,
   rectTiles,
   type DecorEdit,
@@ -229,10 +230,12 @@ export function findWallConflict(
 
 /**
  * The body of `POST /admin/decor` and `POST /me/decor` (#208):
- * `{ edits: [{ index, item }] }`, one anchor tile each, a piece and its
- * rotation (`{ piece, rotation }`) or `null` to remove the item anchored
- * there. At most `MAX_DECOR_EDITS` tiles, each once. Whether the piece exists
- * and turns is the catalog's, checked by the runtime.
+ * `{ edits: [{ index, item }] }`, one anchor tile each, a piece, its
+ * rotation and an optional `#rrggbb` color (`{ piece, rotation, color? }`;
+ * any case, stored lower case; `null` is no color) or `null` to remove the
+ * item anchored there. At most `MAX_DECOR_EDITS` tiles, each once. Whether
+ * the piece exists, turns that way and takes a color is the catalog's,
+ * checked by the runtime.
  */
 export function parseDecorBatch(body: unknown, tileCount: number): DecorEdit[] {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new InvalidTerrainEditError('invalid decor batch');
@@ -247,10 +250,13 @@ export function parseDecorBatch(body: unknown, tileCount: number): DecorEdit[] {
     seen.add(index);
     if (item === null) return { index, item: null };
     if (typeof item !== 'object' || item === undefined || Array.isArray(item)) throw new InvalidTerrainEditError('invalid decor item');
-    const { piece, rotation } = item as Record<string, unknown>;
+    const { piece, rotation, color } = item as Record<string, unknown>;
     if (!isDecorPieceId(piece)) throw new InvalidTerrainEditError('invalid piece');
     if (!isDecorRotation(rotation)) throw new InvalidTerrainEditError('invalid rotation');
-    return { index, item: { piece, rotation } };
+    if (color === undefined || color === null) return { index, item: { piece, rotation } };
+    const normalized = typeof color === 'string' ? color.toLowerCase() : color;
+    if (!isDecorColor(normalized)) throw new InvalidTerrainEditError('invalid color');
+    return { index, item: { piece, rotation, color: normalized } };
   });
 }
 

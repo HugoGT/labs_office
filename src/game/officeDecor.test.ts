@@ -16,6 +16,9 @@ import {
   fitsInsideDesk,
   isDecorPieceId,
   isDecorRotation,
+  decorRotationFor,
+  decorRotationsOf,
+  isDecorColor,
   isRotatable,
   nextDecorRotation,
   withDecor,
@@ -62,11 +65,35 @@ describe('officeDecor: pieces', () => {
     expect(decorInfoFromPieceId('tree-oak')).toBeNull();
   });
 
-  it('turns only chairs and desk tables', () => {
+  it('turns chairs, desk tables and room tables, never plants', () => {
     expect(isRotatable('chair')).toBe(true);
     expect(isRotatable('desk')).toBe(true);
+    expect(isRotatable('table')).toBe(true);
     expect(isRotatable('plant')).toBe(false);
-    expect(isRotatable('table')).toBe(false);
+  });
+
+  it('turns a room table only between horizontal (0) and vertical (90): it is symmetric', () => {
+    expect(decorRotationsOf('chair')).toEqual([0, 90, 180, 270]);
+    expect(decorRotationsOf('desk')).toEqual([0, 90, 180, 270]);
+    expect(decorRotationsOf('table')).toEqual([0, 90]);
+    expect(decorRotationsOf('plant')).toEqual([0]);
+    expect(decorRotationFor('table', 180)).toBe(0);
+    expect(decorRotationFor('table', 270)).toBe(90);
+    expect(decorRotationFor('plant', 90)).toBe(0);
+    expect(decorRotationFor('chair', 270)).toBe(270);
+  });
+
+  it('marks a colorable desk table colorable, and nothing else', () => {
+    expect(decorPieceInfo({ kind: 'desk', colorable: true })).toEqual({ kind: 'desk', footprint: { w: 3, h: 1 }, colorable: true });
+    expect(decorPieceInfo({ kind: 'desk', colorable: false })?.colorable).toBeUndefined();
+    expect(decorPieceInfo({ kind: 'chair', colorable: true })?.colorable).toBeUndefined();
+    const manifest = JSON.parse(exportedManifest) as { pieces: { id: string; kind: string; colorable?: boolean }[] };
+    expect(decorPieceInfo(manifest.pieces.find((piece) => piece.id === 'desk-painted')!)?.colorable).toBe(true);
+  });
+
+  it('takes a color only as a strict lower-case #rrggbb', () => {
+    expect(isDecorColor('#4f9a8a')).toBe(true);
+    for (const raw of ['#4F9A8A', '4f9a8a', '#4f9a8', '#4f9a8a0', 'red', '', null, 7]) expect(isDecorColor(raw), String(raw)).toBe(false);
   });
 
   it('accepts piece ids of the art vocabulary only', () => {
@@ -105,6 +132,16 @@ describe('officeDecor: footprints', () => {
     expect(decorFootprint({ index: at(4, 6), piece: 'plant-ficus', rotation: 0 }, PLANT, WIDTH)).toEqual({ x: 4, y: 6, w: 1, h: 1 });
     expect(decorFootprint({ index: at(10, 10), piece: 'table-meeting', rotation: 0 }, MEETING, WIDTH)).toEqual({ x: 7, y: 8, w: 7, h: 5 });
     expect(decorFootprint({ index: at(10, 10), piece: 'table-cafeteria', rotation: 0 }, { kind: 'table', footprint: { w: 5, h: 3 } }, WIDTH)).toEqual({ x: 8, y: 9, w: 5, h: 3 });
+  });
+
+  it('stands a vertical room table (90) on the swapped footprint, centered on the same anchor', () => {
+    expect(decorFootprint({ index: at(10, 10), piece: 'table-meeting', rotation: 90 }, MEETING, WIDTH)).toEqual({ x: 8, y: 7, w: 5, h: 7 });
+    // A stored 180 or 270 reads as its symmetric 0 or 90.
+    expect(decorFootprint({ index: at(10, 10), piece: 'table-meeting', rotation: 270 }, MEETING, WIDTH)).toEqual({ x: 8, y: 7, w: 5, h: 7 });
+    expect(decorFootprint({ index: at(10, 10), piece: 'table-meeting', rotation: 180 }, MEETING, WIDTH)).toEqual({ x: 7, y: 8, w: 7, h: 5 });
+    const oval: DecorPieceInfo = { kind: 'table', footprint: { w: 2, h: 1 } };
+    expect(decorFootprint({ index: at(10, 10), piece: 'table-oval', rotation: 0 }, oval, WIDTH)).toEqual({ x: 9, y: 10, w: 2, h: 1 });
+    expect(decorFootprint({ index: at(10, 10), piece: 'table-oval', rotation: 90 }, oval, WIDTH)).toEqual({ x: 10, y: 9, w: 1, h: 2 });
   });
 
   it('keeps an unknown piece on its anchor tile alone', () => {
@@ -156,6 +193,16 @@ describe('officeDecor: rotation', () => {
     expect(nextDecorRotation(90, -1)).toBe(180);
   });
 
+  it('toggles a room table between 0 and 90 either way, and leaves a plant at 0', () => {
+    expect(nextDecorRotation(0, 1, 'table')).toBe(90);
+    expect(nextDecorRotation(90, 1, 'table')).toBe(0);
+    expect(nextDecorRotation(0, -1, 'table')).toBe(90);
+    expect(nextDecorRotation(90, -1, 'table')).toBe(0);
+    expect(nextDecorRotation(180, 1, 'table')).toBe(90);
+    expect(nextDecorRotation(0, 1, 'plant')).toBe(0);
+    expect(nextDecorRotation(0, 1, 'desk')).toBe(270);
+  });
+
   it('reads a chair rotation as its facing: 0 down, 90 right, 180 up, 270 left', () => {
     expect(decorChairFacing(0)).toBe('down');
     expect(decorChairFacing(90)).toBe('right');
@@ -173,6 +220,27 @@ describe('officeDecor: edits and wire form', () => {
     expect(placed.map(({ index }) => index)).toEqual([2, 9]);
     const replaced = withDecor(placed, [{ index: 9, item: { piece: 'desk-wood', rotation: 90 } }, { index: 2, item: null }, { index: 50, item: null }]);
     expect(replaced).toEqual([{ index: 9, piece: 'desk-wood', rotation: 90 }]);
+  });
+
+  it('keeps an item color through edits, and a later edit without one drops it', () => {
+    const painted = withDecor([], [{ index: 4, item: { piece: 'desk-painted', rotation: 0, color: '#c83c3c' } }]);
+    expect(painted).toEqual([{ index: 4, piece: 'desk-painted', rotation: 0, color: '#c83c3c' }]);
+    expect(withDecor(painted, [{ index: 4, item: { piece: 'desk-painted', rotation: 90 } }])).toEqual([{ index: 4, piece: 'desk-painted', rotation: 90 }]);
+  });
+
+  it('carries a color as a fourth field on the wire, and still reads entries without one', () => {
+    const tiles = WIDTH * WIDTH;
+    const items: DecorItem[] = [
+      { index: 3, piece: 'chair-wood', rotation: 270 },
+      { index: 8, piece: 'desk-painted', rotation: 90, color: '#c83c3c' },
+    ];
+    const encoded = encodeOfficeDecor(items);
+    expect(encoded).toBe('3:chair-wood:270,8:desk-painted:90:#c83c3c');
+    expect(decodeOfficeDecor(encoded, tiles)).toEqual(items);
+    expect(decodeOfficeDecor('8:desk-painted:0', tiles)).toEqual([{ index: 8, piece: 'desk-painted', rotation: 0 }]);
+    for (const garbage of ['8:desk-painted:0:', '8:desk-painted:0:#C83C3C', '8:desk-painted:0:red', '8:desk-painted:0:#c83c3c:1']) {
+      expect(decodeOfficeDecor(garbage, tiles), garbage).toBeNull();
+    }
   });
 
   it('round-trips the wire string and refuses anything malformed', () => {

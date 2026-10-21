@@ -552,6 +552,10 @@ CREATE TABLE IF NOT EXISTS office_decor (
   updated_by uuid REFERENCES users(id),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+-- The color of a painted item (a colorable desk table), NULL for its manifest
+-- default and for every piece that takes none. An ALTER because `CREATE TABLE
+-- IF NOT EXISTS` never touches a live table; lower case like the art pack.
+ALTER TABLE office_decor ADD COLUMN IF NOT EXISTS color text CHECK (color ~ '^#[0-9a-f]{6}$');
 
 -- `terrain_chairs` and `user_desk_configs` are legacy since the decor layer:
 -- only the one-time copy below reads them. It runs once, behind its own

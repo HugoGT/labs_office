@@ -358,6 +358,7 @@ describe('createTerrainRuntime decor', () => {
     { id: 'chair-wood', kind: 'chair', retired: false },
     { id: 'chair-metal', kind: 'chair', retired: false },
     { id: 'desk-wood', kind: 'desk', retired: false },
+    { id: 'desk-painted', kind: 'desk', colorable: true, retired: false },
     { id: 'plant-ficus', kind: 'plant', footprint: { w: 1, h: 1 }, retired: false },
     { id: 'table-meeting', kind: 'table', footprint: { w: 7, h: 5 }, retired: false },
     { id: 'plant-gone', kind: 'plant', footprint: { w: 1, h: 1 }, retired: true },
@@ -441,13 +442,44 @@ describe('createTerrainRuntime decor', () => {
     ['a retired piece', { piece: 'plant-gone', rotation: 0 }],
     ['a piece the layer does not place', { piece: 'tree-oak', rotation: 0 }],
     ['a turned plant', { piece: 'plant-ficus', rotation: 90 }],
-    ['a turned room table', { piece: 'table-meeting', rotation: 180 }],
+    ['a room table turned 180 (symmetric: only 0 and 90)', { piece: 'table-meeting', rotation: 180 }],
+    ['a room table turned 270', { piece: 'table-meeting', rotation: 270 }],
+    ['a color on a piece that takes none', { piece: 'desk-wood', rotation: 0, color: '#c83c3c' }],
+    ['a color on a chair', { piece: 'chair-wood', rotation: 0, color: '#c83c3c' }],
   ] as const)('refuses %s as an invalid edit', async (_name, item) => {
     const runtime = runtimeWith();
     await runtime.load();
 
     await expect(runtime.setDecor([{ index: FREE, item }], null)).rejects.toThrow(InvalidTerrainEditError);
     expect(runtime.decor()).toEqual([]);
+  });
+
+  it('places a room table vertical (90) on its swapped footprint', async () => {
+    const runtime = runtimeWith();
+    await runtime.load();
+
+    await runtime.setDecor([{ index: at(70, 30), item: { piece: 'table-meeting', rotation: 90 } }], null);
+
+    expect(runtime.decor()).toEqual([{ index: at(70, 30), piece: 'table-meeting', rotation: 90 }]);
+    // 5x7 now: a chair two columns right of the anchor is beside it, not under it.
+    await runtime.setDecor([{ index: at(73, 30), item: WOOD_DOWN }], null);
+    await expect(runtime.setDecor([{ index: at(70, 33), item: WOOD_DOWN }], null)).rejects.toThrow(TerrainProtectedError);
+  });
+
+  it('paints a colorable piece in its own color, saved with it, and repaints it as a change', async () => {
+    const store = createMemoryTerrain();
+    const runtime = runtimeWith(store);
+    await runtime.load();
+
+    await runtime.setDecor([{ index: FREE, item: { piece: 'desk-painted', rotation: 0, color: '#c83c3c' } }], null);
+    expect(runtime.decor()).toEqual([{ index: FREE, piece: 'desk-painted', rotation: 0, color: '#c83c3c' }]);
+    expect(await store.loadDecor()).toEqual(runtime.decor());
+
+    await runtime.setDecor([{ index: FREE, item: { piece: 'desk-painted', rotation: 0, color: '#3c5ac8' } }], null);
+    expect(runtime.decor()).toEqual([{ index: FREE, piece: 'desk-painted', rotation: 0, color: '#3c5ac8' }]);
+    // Without a color it draws in its manifest default.
+    await runtime.setDecor([{ index: FREE, item: { piece: 'desk-painted', rotation: 0 } }], null);
+    expect(runtime.decor()).toEqual([{ index: FREE, piece: 'desk-painted', rotation: 0 }]);
   });
 
   it('keeps an already placed retired piece and lets it be removed', async () => {

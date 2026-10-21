@@ -2,9 +2,9 @@
  * Phaser layer of the decor editor (#208): while a piece is picked it draws
  * a translucent ghost of it on the tile under the pointer, turned the way the
  * brush is, with its footprint outlined (red where the room would refuse
- * it), and turns a primary click into a `decorpick` of that tile. With the
- * eraser it outlines the item a click would remove. The R key (Shift+R back)
- * turns a picked chair or desk table through `decorrotate`, and so does
+ * it), and turns a primary click into a `decorpick` of that tile. The R key
+ * (Shift+R back) turns a picked chair, desk table or room table through
+ * `decorrotate`, and so does
  * the mouse wheel (#207: one notch a quarter turn, down forward, up back,
  * while `CameraZoomLayer` leaves the wheel alone through `holdsWheel`), so
  * the brush turns without reaching for the sidebar, which steps aside while
@@ -113,12 +113,12 @@ export class DecorEditLayer {
   }
 
   /**
-   * Whether the wheel turns the brush instead of zooming: a chair or a desk
-   * table is picked. Plants, room tables and the eraser have nothing to turn.
+   * Whether the wheel turns the brush instead of zooming: a chair, a desk
+   * table or a room table is picked. A plant has nothing to turn.
    */
   holdsWheel(): boolean {
     const brush = this.command?.brush;
-    return brush?.kind === 'piece' && isRotatable(brush.info.kind);
+    return brush != null && isRotatable(brush.info.kind);
   }
 
   /** Judges and draws the ghost again: the layer or the terrain under it changed. */
@@ -169,19 +169,18 @@ export class DecorEditLayer {
     const { width } = this.deps;
     const items = this.deps.items();
     const infoOf = (piece: string): DecorPieceInfo | null => this.deps.infoOf(piece);
-    const target = decorBrushTarget(items, infoOf, width, this.tile, brush) ?? { x: this.tile % width, y: Math.floor(this.tile / width), w: 1, h: 1 };
+    const target = decorBrushTarget(this.tile, brush, width);
     const allowed = decorPlacementAllowed(items, infoOf, this.deps.ground(), this.command?.area ?? null, this.tile, brush);
 
     this.clearGhost();
-    if (brush.kind === 'piece') {
-      this.ghost = this.deps.drawPiece({ index: this.tile, piece: brush.piece, rotation: brush.rotation });
-      for (const object of this.ghost) {
-        const shown = object as unknown as Phaser.GameObjects.Components.Alpha & Phaser.GameObjects.Components.Depth;
-        // A chair's two layers keep their order: the front one stays over the back one.
-        shown.setDepth?.(LAYOUT_GHOST_DEPTH + (shown.depth % 1));
-        shown.setAlpha?.(DECOR_GHOST_ALPHA);
-        object.setName(DECOR_GHOST_NAME);
-      }
+    // The ghost is the piece as it would stand, painted color included.
+    this.ghost = this.deps.drawPiece({ index: this.tile, piece: brush.piece, rotation: brush.rotation, ...(brush.color === undefined ? {} : { color: brush.color }) });
+    for (const object of this.ghost) {
+      const shown = object as unknown as Phaser.GameObjects.Components.Alpha & Phaser.GameObjects.Components.Depth;
+      // A chair's two layers keep their order: the front one stays over the back one.
+      shown.setDepth?.(LAYOUT_GHOST_DEPTH + (shown.depth % 1));
+      shown.setAlpha?.(DECOR_GHOST_ALPHA);
+      object.setName(DECOR_GHOST_NAME);
     }
 
     this.hover ??= this.scene.add.rectangle(0, 0, TILE, TILE).setFillStyle().setDepth(LAYOUT_GHOST_DEPTH + 1).setName(DECOR_HOVER_NAME);

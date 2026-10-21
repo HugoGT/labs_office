@@ -349,7 +349,7 @@ describe('SpaceEditorSection: «Múltiple» (#207)', () => {
 
   it('is off by default: a created room goes back to an empty form', async () => {
     const { bridge, spaces } = await openForm('Sala 1');
-    expect(screen.getByRole('checkbox', { name: 'Múltiple' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /^Múltiple/ })).not.toBeChecked();
     await userEvent.click(screen.getByRole('button', { name: /Colocar nueva sala/ }));
     place(bridge, 1);
 
@@ -359,13 +359,13 @@ describe('SpaceEditorSection: «Múltiple» (#207)', () => {
 
   it('on, a created room goes back to placing the next one: same size and capacity, the next name, until Escape', async () => {
     const { bridge, spaces } = await openForm('Sala 1');
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Múltiple' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: /^Múltiple/ }));
     await userEvent.click(screen.getByRole('button', { name: /Colocar nueva sala/ }));
 
     place(bridge, 1);
     await waitFor(() => expect(spaces.createSpace).toHaveBeenCalledWith({ name: 'Sala 1', x: 1, y: 2, w: 7, h: 6, capacity: 4 }));
     expect(await screen.findByText(/Toca el nuevo sitio/)).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: 'Múltiple' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /^Múltiple/ })).toBeChecked();
     place(bridge, 20);
     await waitFor(() => expect(spaces.createSpace).toHaveBeenCalledWith({ name: 'Sala 2', x: 20, y: 2, w: 7, h: 6, capacity: 4 }));
     expect(await screen.findByText(/Toca el nuevo sitio/)).toBeInTheDocument();
@@ -382,7 +382,7 @@ describe('SpaceEditorSection: «Múltiple» (#207)', () => {
   it('on, skips a next name another room already has', async () => {
     const spaces = fakeSpaces({ listSpaces: vi.fn(async () => [SALA, { ...SALA, id: 'id-2', name: 'Sala 2' }]) });
     const { bridge } = await openForm('Sala 1', spaces);
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Múltiple' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: /^Múltiple/ }));
     await userEvent.click(screen.getByRole('button', { name: /Colocar nueva sala/ }));
 
     place(bridge, 1);
@@ -396,7 +396,7 @@ describe('SpaceEditorSection: «Múltiple» (#207)', () => {
     const createSpace = vi.fn<SpacesAdminPort['createSpace']>(async () => Promise.reject(new AdminError('space-overlap')));
     const spaces = fakeSpaces({ createSpace });
     const { bridge } = await openForm('Sala 1', spaces);
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Múltiple' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: /^Múltiple/ }));
     await userEvent.click(screen.getByRole('button', { name: /Colocar nueva sala/ }));
 
     place(bridge, 1);

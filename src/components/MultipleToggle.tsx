@@ -1,4 +1,10 @@
+import { useId } from 'react';
 import styles from './MultipleToggle.module.css';
+
+/** What the toggle does, as its visible label and accessible name. */
+export const MULTIPLE_LABEL = 'Múltiple: seguir colocando después de cada clic';
+/** How the multiple placing ends, under the label and as the checkbox's description. */
+export const MULTIPLE_HINT = 'Termina con Escape.';
 
 export interface MultipleToggleProps {
   checked: boolean;
@@ -10,13 +16,27 @@ export interface MultipleToggleProps {
  * "Múltiple" (#207), shared by the decor, desk and room editors: off, one
  * click on the map places one piece and the tool is put down; on, the tool
  * stays picked until Escape or "Salir". Presentational: each editor owns the
- * value, which it keeps while the tool is picked, so it is set before.
+ * value, which it keeps while the tool is picked, so it is set before. The
+ * label says what it does and the hint how it ends, since the rail that holds
+ * it steps aside while a tool is picked.
  */
 export function MultipleToggle({ checked, onChange, disabled = false }: MultipleToggleProps) {
+  const hintId = useId();
   return (
-    <label className={styles.toggle}>
-      <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
-      Múltiple
-    </label>
+    <span className={styles.wrapper}>
+      <label className={styles.toggle}>
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={disabled}
+          aria-describedby={hintId}
+          onChange={(event) => onChange(event.target.checked)}
+        />
+        {MULTIPLE_LABEL}
+      </label>
+      <span id={hintId} className={styles.hint}>
+        {MULTIPLE_HINT}
+      </span>
+    </span>
   );
 }

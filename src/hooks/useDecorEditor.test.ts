@@ -1,14 +1,14 @@
 /**
  * The decor editor's lifecycle (#208): what it asks the map to show through
- * `decoredit`, how a picked piece or the eraser turns map clicks into decor
- * edits, how "Mi espacio" keeps them inside the desk, and what it says.
+ * `decoredit`, how a picked piece turns map clicks into decor edits, turned
+ * and painted, how "Mi espacio" keeps them inside the desk, and what it says.
  */
 
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { AdminError } from '../dashboard/adminPort';
 import { createOfficeBridge, type OfficeCommandMap } from '../game/officeBridge';
-import { MAX_DECOR_EDITS, type DecorEdit, type DecorItem, type DecorPieceInfo, type DecorTileRect } from '../game/officeDecor';
+import { MAX_DECOR_EDITS, type DecorEdit, type DecorItem, type DecorTileRect } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
 import { DECOR_AREA_MESSAGE, DECOR_UNDER_PLACEMENT_MESSAGE, useDecorEditor, type DecorPick } from './useDecorEditor';
 
@@ -19,8 +19,8 @@ const CHAIR: DecorPick = { id: 'chair-gamer', info: { kind: 'chair', footprint: 
 const DESK: DecorPick = { id: 'desk-wood', info: { kind: 'desk', footprint: { w: 3, h: 1 } } };
 const PLANT: DecorPick = { id: 'plant-ficus', info: { kind: 'plant', footprint: { w: 1, h: 1 } } };
 const TABLE: DecorPick = { id: 'table-meeting', info: { kind: 'table', footprint: { w: 7, h: 5 } } };
-const PICKS = [CHAIR, DESK, PLANT, TABLE];
-const infoOf = (piece: string): DecorPieceInfo | null => PICKS.find((pick) => pick.id === piece)?.info ?? null;
+const OVAL: DecorPick = { id: 'table-oval', info: { kind: 'table', footprint: { w: 2, h: 1 } } };
+const PAINTED: DecorPick = { id: 'desk-painted', info: { kind: 'desk', footprint: { w: 3, h: 1 }, colorable: true } };
 
 /** A deferred `setDecor`, resolved or rejected by the test. */
 function deferredPort() {
@@ -35,7 +35,7 @@ function setup({ decor = deferredPort().decor, area = null, onExit }: { decor?: 
   const bridge = createOfficeBridge();
   const commands: OfficeCommandMap['decoredit'][] = [];
   bridge.onCommand('decoredit', (command) => commands.push(command));
-  const view = renderHook((props: { area: DecorTileRect | null }) => useDecorEditor({ bridge, decor, area: props.area, infoOf, onExit }), {
+  const view = renderHook((props: { area: DecorTileRect | null }) => useDecorEditor({ bridge, decor, area: props.area, onExit }), {
     initialProps: { area },
   });
   return { bridge, decor, commands, ...view };
@@ -69,7 +69,7 @@ describe('useDecorEditor', () => {
     expect(result.current.items).toEqual(items);
   });
 
-  it('picks a piece or the eraser, one at a time, unpicks on a second pick or on demand, and tells the map', () => {
+  it('picks a piece, one at a time, unpicks on a second pick or on demand, and tells the map', () => {
     const { result, commands } = setup();
     act(() => result.current.enter());
 
@@ -79,8 +79,7 @@ describe('useDecorEditor', () => {
     act(() => result.current.pick(CHAIR));
     expect(result.current.brush).toBeNull();
 
-    act(() => result.current.pickEraser());
-    expect(result.current.brush).toEqual({ kind: 'eraser' });
+    act(() => result.current.pick(CHAIR));
     act(() => result.current.pick(DESK));
     expect(result.current.brush).toMatchObject({ piece: 'desk-wood' });
     act(() => result.current.unpick());
@@ -88,12 +87,12 @@ describe('useDecorEditor', () => {
     expect(commands.at(-1)).toEqual({ brush: null, area: null });
   });
 
-  it('turns the rotation down, left, up, right with «Girar» or the map, keeps it for the next pick, and never turns a plant or a room table', () => {
+  it('turns a picked chair down, left, up, right with the map (wheel or R), and keeps the turn for the next pick', () => {
     const { bridge, result } = setup();
     act(() => result.current.enter());
     act(() => result.current.pick(CHAIR));
 
-    act(() => result.current.rotate());
+    act(() => bridge.emit('decorrotate', { step: 1 }));
     expect(result.current.rotation).toBe(270);
     expect(result.current.brush).toMatchObject({ rotation: 270 });
     act(() => bridge.emit('decorrotate', { step: 1 }));
@@ -103,15 +102,86 @@ describe('useDecorEditor', () => {
 
     act(() => result.current.pick(DESK));
     expect(result.current.brush).toMatchObject({ piece: 'desk-wood', rotation: 270 });
+  });
+
+  it('never turns a plant, and with nothing picked the map turns nothing', () => {
+    const { bridge, result } = setup();
+    act(() => result.current.enter());
+    act(() => bridge.emit('decorrotate', { step: 1 }));
+    expect(result.current.rotation).toBe(0);
 
     act(() => result.current.pick(PLANT));
+    act(() => bridge.emit('decorrotate', { step: 1 }));
     expect(result.current.brush).toMatchObject({ piece: 'plant-ficus', rotation: 0 });
-    act(() => result.current.rotate());
-    expect(result.current.brush).toMatchObject({ rotation: 0 });
+    expect(result.current.rotation).toBe(0);
+  });
+
+  it('turns a picked room table between horizontal (0) and vertical (90) either way, and takes the symmetric half of a chair turn', () => {
+    const { bridge, result } = setup();
+    act(() => result.current.enter());
     act(() => result.current.pick(TABLE));
     expect(result.current.brush).toMatchObject({ rotation: 0 });
-    // The rotation itself still turned, for the next chair or desk table.
-    expect(result.current.rotation).toBe(180);
+
+    act(() => bridge.emit('decorrotate', { step: 1 }));
+    expect(result.current.brush).toMatchObject({ piece: 'table-meeting', rotation: 90 });
+    act(() => bridge.emit('decorrotate', { step: 1 }));
+    expect(result.current.brush).toMatchObject({ rotation: 0 });
+    act(() => bridge.emit('decorrotate', { step: -1 }));
+    expect(result.current.brush).toMatchObject({ rotation: 90 });
+
+    // A chair turned left (270) hands a table its vertical frame; one turned up (180), the horizontal one.
+    act(() => result.current.pick(CHAIR));
+    act(() => bridge.emit('decorrotate', { step: 1 }));
+    expect(result.current.brush).toMatchObject({ rotation: 0 });
+    act(() => bridge.emit('decorrotate', { step: 1 }));
+    act(() => result.current.pick(OVAL));
+    expect(result.current.brush).toMatchObject({ piece: 'table-oval', rotation: 90 });
+  });
+
+  it('paints a colorable piece in the color chosen for it, the picked brush included; without one it takes the manifest default', async () => {
+    const { decor, calls } = deferredPort();
+    const { bridge, result, commands } = setup({ decor });
+    act(() => result.current.enter());
+    act(() => result.current.setMultiple(true));
+
+    act(() => result.current.pick(PAINTED));
+    expect(result.current.brush).not.toHaveProperty('color');
+    act(() => bridge.emit('decorpick', { index: at(5, 5) }));
+    expect(calls[0]!.edits).toEqual([{ index: at(5, 5), item: { piece: 'desk-painted', rotation: 0 } }]);
+
+    act(() => result.current.setColor('desk-painted', '#c83c3c'));
+    expect(result.current.colors).toEqual({ 'desk-painted': '#c83c3c' });
+    expect(result.current.brush).toMatchObject({ color: '#c83c3c' });
+    expect(commands.at(-1)?.brush).toMatchObject({ color: '#c83c3c' });
+    act(() => bridge.emit('decorpick', { index: at(9, 5) }));
+    await act(async () => calls[0]!.resolve());
+    expect(calls[1]!.edits).toEqual([{ index: at(9, 5), item: { piece: 'desk-painted', rotation: 0, color: '#c83c3c' } }]);
+
+    // Kept for the next pick; a piece that takes no color never carries one.
+    act(() => result.current.unpick());
+    act(() => result.current.pick(PAINTED));
+    expect(result.current.brush).toMatchObject({ color: '#c83c3c' });
+    act(() => result.current.setColor('desk-wood', '#3c5ac8'));
+    act(() => result.current.pick(DESK));
+    expect(result.current.brush).not.toHaveProperty('color');
+    await act(async () => calls[1]!.resolve());
+  });
+
+  it('repaints a piece of another color on the same tile, but skips one already in that color', async () => {
+    const { decor, calls } = deferredPort();
+    const { bridge, result } = setup({ decor });
+    act(() => bridge.emit('decor', { items: [{ index: at(5, 5), piece: 'desk-painted', rotation: 0, color: '#c83c3c' }] }));
+    act(() => result.current.enter());
+    act(() => result.current.setMultiple(true));
+    act(() => result.current.setColor('desk-painted', '#c83c3c'));
+    act(() => result.current.pick(PAINTED));
+    act(() => bridge.emit('decorpick', { index: at(5, 5) }));
+    expect(decor.setDecor).not.toHaveBeenCalled();
+
+    act(() => result.current.setColor('desk-painted', '#3c5ac8'));
+    act(() => bridge.emit('decorpick', { index: at(5, 5) }));
+    expect(calls.map((call) => call.edits)).toEqual([[{ index: at(5, 5), item: { piece: 'desk-painted', rotation: 0, color: '#3c5ac8' } }]]);
+    await act(async () => calls[0]!.resolve());
   });
 
   it('with «Múltiple» off (the default) one click places one piece and unpicks the brush, so the rail comes back (#207)', async () => {
@@ -126,16 +196,7 @@ describe('useDecorEditor', () => {
     expect(commands.at(-1)).toMatchObject({ brush: null });
     act(() => bridge.emit('decorpick', { index: at(6, 5) }));
     expect(calls.map((call) => call.edits)).toEqual([[{ index: at(5, 5), item: { piece: 'chair-gamer', rotation: 0 } }]]);
-
-    // The eraser too; a click that removes nothing keeps it picked.
-    act(() => bridge.emit('decor', { items: [{ index: at(9, 9), piece: 'plant-ficus', rotation: 0 }] }));
-    act(() => result.current.pickEraser());
-    act(() => bridge.emit('decorpick', { index: at(20, 20) }));
-    expect(result.current.brush).toEqual({ kind: 'eraser' });
-    act(() => bridge.emit('decorpick', { index: at(9, 9) }));
-    expect(result.current.brush).toBeNull();
     await act(async () => calls[0]!.resolve());
-    expect(calls[1]!.edits).toEqual([{ index: at(9, 9), item: null }]);
   });
 
   it('with «Múltiple» on the brush stays picked click after click, until Escape; turning it off again keeps the editor as it is', () => {
@@ -196,27 +257,11 @@ describe('useDecorEditor', () => {
     act(() => bridge.emit('decorpick', { index: at(5, 5) }));
     expect(decor.setDecor).not.toHaveBeenCalled();
 
-    act(() => result.current.rotate());
+    act(() => result.current.setMultiple(true));
+    act(() => bridge.emit('decorrotate', { step: 1 }));
     act(() => bridge.emit('decorpick', { index: at(5, 5) }));
     act(() => bridge.emit('decorpick', { index: at(5, 5) }));
     expect(calls.map((call) => call.edits)).toEqual([[{ index: at(5, 5), item: { piece: 'chair-gamer', rotation: 270 } }]]);
-    await act(async () => calls[0]!.resolve());
-    expect(calls).toHaveLength(1);
-  });
-
-  it('erases the item whose footprint covers the clicked tile, by its anchor, and does nothing on a free tile', async () => {
-    const { decor, calls } = deferredPort();
-    const { bridge, result } = setup({ decor });
-    act(() => bridge.emit('decor', { items: [{ index: at(10, 10), piece: 'desk-wood', rotation: 0 }] }));
-    act(() => result.current.enter());
-    act(() => result.current.pickEraser());
-
-    act(() => bridge.emit('decorpick', { index: at(20, 20) }));
-    expect(decor.setDecor).not.toHaveBeenCalled();
-    act(() => bridge.emit('decorpick', { index: at(11, 10) }));
-    expect(calls.map((call) => call.edits)).toEqual([[{ index: at(10, 10), item: null }]]);
-    // Already on its way out: a second click on it sends nothing more.
-    act(() => bridge.emit('decorpick', { index: at(9, 10) }));
     await act(async () => calls[0]!.resolve());
     expect(calls).toHaveLength(1);
   });
@@ -230,7 +275,7 @@ describe('useDecorEditor', () => {
     act(() => {
       for (let index = 0; index <= MAX_DECOR_EDITS + 1; index += 1) bridge.emit('decorpick', { index });
     });
-    act(() => result.current.rotate());
+    act(() => bridge.emit('decorrotate', { step: 1 }));
     act(() => bridge.emit('decorpick', { index: 5 }));
 
     await act(async () => calls[0]!.resolve());
@@ -256,14 +301,12 @@ describe('useDecorEditor', () => {
     // The desk table's footprint would stick out of the left edge.
     act(() => result.current.pick(DESK));
     act(() => bridge.emit('decorpick', { index: at(10, 11) }));
-    // Someone else's chair right outside the desk is not one's to remove.
-    act(() => result.current.pickEraser());
-    act(() => bridge.emit('decorpick', { index: at(13, 11) }));
     expect(result.current.error).toBe(DECOR_AREA_MESSAGE);
     expect(decor.setDecor).not.toHaveBeenCalled();
 
-    act(() => result.current.pick(DESK));
+    act(() => result.current.pick(CHAIR));
     expect(result.current.error).toBeNull();
+    act(() => result.current.pick(DESK));
     act(() => bridge.emit('decorpick', { index: at(11, 12) }));
     expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(11, 12), item: { piece: 'desk-wood', rotation: 0 } }]);
   });
@@ -312,6 +355,27 @@ describe('useDecorEditor', () => {
     expect(escape().defaultPrevented).toBe(true);
     expect(result.current.active).toBe(false);
     expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves an Escape from inside a popover (the color picker) to the popover', () => {
+    const onExit = vi.fn();
+    const { result } = setup({ onExit });
+    act(() => result.current.enter());
+    const popover = document.createElement('div');
+    popover.setAttribute('role', 'dialog');
+    const swatch = document.createElement('button');
+    popover.append(swatch);
+    document.body.append(popover);
+
+    const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true, bubbles: true });
+    act(() => {
+      swatch.dispatchEvent(event);
+    });
+    popover.remove();
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(result.current.active).toBe(true);
+    expect(onExit).not.toHaveBeenCalled();
   });
 
   it('without a way to leave ("Mi espacio") an Escape with nothing picked is left for the sidebar', () => {

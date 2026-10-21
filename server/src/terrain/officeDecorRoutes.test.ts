@@ -24,6 +24,7 @@ const CHAIR = { piece: 'chair-wood', rotation: 0 } as const;
 const CATALOG = [
   { id: 'chair-wood', kind: 'chair', retired: false },
   { id: 'desk-wood', kind: 'desk', retired: false },
+  { id: 'desk-painted', kind: 'desk', colorable: true, retired: false },
   { id: 'plant-ficus', kind: 'plant', footprint: { w: 1, h: 1 }, retired: false },
 ];
 
@@ -109,12 +110,24 @@ describe('handleSetOfficeDecor (POST /admin/decor)', () => {
       { edits: [{ index: tiles, item: CHAIR }] },
       { edits: [{ index: FREE, item: { piece: 'chair-throne', rotation: 0 } }] },
       { edits: [{ index: FREE, item: { piece: 'plant-ficus', rotation: 90 } }] },
+      { edits: [{ index: FREE, item: { piece: 'desk-wood', rotation: 0, color: '#c83c3c' } }] },
+      { edits: [{ index: FREE, item: { piece: 'desk-painted', rotation: 0, color: 'rojo' } }] },
       { edits: [{ index: FREE, item: CHAIR }, { index: FREE, item: null }] },
       { edits: Array.from({ length: 501 }, (_, index) => ({ index, item: null })) },
     ]) {
       expect(await handleSetOfficeDecor(BEARER_ADMIN, body, deps)).toEqual({ status: 400, body: { error: 'invalid-request' } });
     }
     expect(await store.loadDecor()).toEqual([]);
+  });
+
+  it('places a colorable piece in the color asked, or in its default without one', async () => {
+    const { deps, store } = await harness();
+
+    expect(await handleSetOfficeDecor(BEARER_ADMIN, { edits: [{ index: FREE, item: { piece: 'desk-painted', rotation: 0, color: '#c83c3c' } }] }, deps)).toEqual({
+      status: 200,
+      body: { updated: 1 },
+    });
+    expect(await store.loadDecor()).toEqual([{ index: FREE, piece: 'desk-painted', rotation: 0, color: '#c83c3c' }]);
   });
 
   it('answers 409 to an item on water or on another item, and places one on a desk', async () => {

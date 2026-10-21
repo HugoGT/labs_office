@@ -681,6 +681,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
             id: piece.id,
             kind: piece.kind,
             ...('footprint' in piece.spec ? { footprint: piece.spec.footprint } : {}),
+            colorable: piece.colorable,
             retired: piece.retiredAt !== null,
           }))
       : undefined,

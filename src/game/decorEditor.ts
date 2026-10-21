@@ -11,33 +11,64 @@
 
 import {
   decorFootprint,
-  decorItemCovering,
   decorTiles,
   fitsInsideDesk,
   insideMap,
   rectTiles,
   type DecorEdit,
   type DecorItem,
+  type DecorKind,
   type DecorPieceInfo,
   type DecorRotation,
   type DecorTileRect,
 } from './officeDecor';
 
 /**
- * What a map click does: anchor `piece` turned `rotation` on the clicked
- * tile (a piece already anchored there is replaced), or remove the item
- * whose footprint covers the clicked tile (`eraser`). The brush carries the
- * piece's info, so the map draws its footprint without a catalog of its own.
+ * What a map click does: anchor `piece` turned `rotation` (and painted
+ * `color`, a colorable piece only; absent is its manifest default) on the
+ * clicked tile, replacing a piece already anchored there. The brush carries
+ * the piece's info, so the map draws its footprint without a catalog of its
+ * own. (Removing items comes back as selecting one on the map.)
  */
-export type DecorBrush =
-  | { readonly kind: 'piece'; readonly piece: string; readonly info: DecorPieceInfo; readonly rotation: DecorRotation }
-  | { readonly kind: 'eraser' };
+export interface DecorBrush {
+  readonly kind: 'piece';
+  readonly piece: string;
+  readonly info: DecorPieceInfo;
+  readonly rotation: DecorRotation;
+  readonly color?: string;
+}
 
 /** Whether two brushes place the same thing (compared by value, not identity). */
 export function sameDecorBrush(a: DecorBrush | null | undefined, b: DecorBrush | null | undefined): boolean {
   if (a == null || b == null) return (a ?? null) === (b ?? null);
-  if (a.kind === 'eraser' || b.kind === 'eraser') return a.kind === b.kind;
-  return a.piece === b.piece && a.rotation === b.rotation;
+  return a.piece === b.piece && a.rotation === b.rotation && a.color === b.color;
+}
+
+/** The word each group's pieces are named after in Spanish ("Silla de madera"). */
+const KIND_WORDS: Readonly<Record<DecorKind, string>> = {
+  chair: 'silla',
+  desk: 'escritorio',
+  table: 'mesa',
+  plant: 'planta',
+};
+
+/**
+ * The name of a palette tile: only what tells a piece apart within its group,
+ * whose heading already says the kind ("Silla de madera" is "Madera" under
+ * "Sillas"). The kind word and a following "de " go and the rest is
+ * capitalized; a name that does not start with the kind word as a word (an
+ * upload named anything) or would be left empty keeps its whole name.
+ */
+export function decorTileName(kind: DecorKind, name: string): string {
+  const match = new RegExp(`^${KIND_WORDS[kind]}\\s+(?:de\\s+)?(\\S.*)$`, 'iu').exec(name.trim());
+  const rest = match?.[1];
+  if (rest === undefined || /^de$/iu.test(rest)) return name;
+  return rest.charAt(0).toLocaleUpperCase('es') + rest.slice(1);
+}
+
+/** A footprint as the palette states it, columns by rows in tiles: "7x5". */
+export function decorSizeLabel(info: DecorPieceInfo): string {
+  return `${info.footprint.w}x${info.footprint.h}`;
 }
 
 /**
@@ -70,30 +101,17 @@ export function fitsDeskArea(info: DecorPieceInfo): boolean {
   return info.footprint.w <= DESK_SIDE && info.footprint.h <= DESK_SIDE;
 }
 
-/**
- * The tiles a brush on `index` acts on: the footprint the piece would cover,
- * or the footprint of the item the eraser would remove (`null` when there is
- * none under the tile).
- */
-export function decorBrushTarget(
-  items: readonly DecorItem[],
-  infoOf: (piece: string) => DecorPieceInfo | null,
-  width: number,
-  index: number,
-  brush: DecorBrush,
-): DecorTileRect | null {
-  if (brush.kind === 'piece') return decorFootprint({ index, rotation: brush.rotation }, brush.info, width);
-  const covering = decorItemCovering(items, infoOf, width, index);
-  return covering === null ? null : decorFootprint(covering, infoOf(covering.piece), width);
+/** The tiles a brush on `index` would cover, turned the way it is. */
+export function decorBrushTarget(index: number, brush: DecorBrush, width: number): DecorTileRect {
+  return decorFootprint({ index, rotation: brush.rotation }, brush.info, width);
 }
 
 /**
- * Whether the room would likely take the brush on `index`. A piece needs its
- * whole footprint on the map (and inside `area` when there is one), on
- * walkable ground, off every tile a wall touches and off every other item;
- * the item anchored on `index` itself does not count, because painting over
- * an anchor replaces what stands there. The eraser needs an item under the
- * tile, wholly inside `area` when there is one.
+ * Whether the room would likely take the brush on `index`: its whole
+ * footprint on the map (and inside `area` when there is one), on walkable
+ * ground, off every tile a wall touches and off every other item; the item
+ * anchored on `index` itself does not count, because painting over an
+ * anchor replaces what stands there.
  */
 export function decorPlacementAllowed(
   items: readonly DecorItem[],
@@ -103,10 +121,8 @@ export function decorPlacementAllowed(
   index: number,
   brush: DecorBrush,
 ): boolean {
-  const target = decorBrushTarget(items, infoOf, ground.width, index, brush);
-  if (target === null) return false;
+  const target = decorBrushTarget(index, brush, ground.width);
   if (area !== null && !fitsInsideDesk(target, area)) return false;
-  if (brush.kind === 'eraser') return true;
   if (!insideMap(target, ground.width, ground.height)) return false;
   const taken = new Set(items.filter((item) => item.index !== index).flatMap((item) => decorTiles(item, infoOf(item.piece), ground.width)));
   return rectTiles(target, ground.width).every((tile) => ground.walkable[tile] === true && ground.wallTiles[tile] !== true && !taken.has(tile));
