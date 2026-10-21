@@ -3,7 +3,8 @@ import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import { MIN_ROOM_SIDE } from '../game/layoutGeometry';
 import type { OfficeBridge } from '../game/officeBridge';
-import { nextRoomName } from '../game/roomNames';
+import { roomCapacityMax } from '../game/roomCapacity';
+import { DEFAULT_ROOM_NAME, freeRoomName, nextRoomName } from '../game/roomNames';
 import { useEscapeStep } from '../hooks/useEscapeStep';
 import { useSpaceEditor, type SpaceCreateInput } from '../hooks/useSpaceEditor';
 import { MultipleToggle } from './MultipleToggle';
@@ -16,9 +17,9 @@ import styles from './SpaceEditorSection.module.css';
  * `OfficeLayoutEditor` solo la monta junto a `DeskEditorSection`.
  *
  * A diferencia de un escritorio (tamano fijo 3x3), una sala pide su propio
- * ancho/alto -- y opcionalmente aforo -- en el formulario, mismo criterio que
- * `SpaceForm` en `/dashboard`. No floor choice: a room shows the painted
- * terrain under it (#182).
+ * ancho/alto y aforo en el formulario. No floor choice: a room shows the
+ * painted terrain under it (#182). The form starts complete: the first free
+ * "Sala N" and the largest capacity, so placing a room takes one click.
  */
 
 const MIN_CAPACITY = 1;
@@ -45,18 +46,46 @@ export interface SpaceEditorSectionProps {
 }
 
 interface CreateFormValues {
-  name: string;
+  /**
+   * `null` until typed: the field shows the first free "Sala N" of the room
+   * list, worked out at render so it follows the list as it (re)loads, a room
+   * just created included.
+   */
+  name: string | null;
   w: string;
   h: string;
-  /** Cadena vacia = sin limite; se manda `null` de todas formas, nunca se omite -- mismo criterio que `SpaceForm`. */
-  capacity: string;
+  /** `null` until typed: the field shows `capacityMax` and follows the size. */
+  capacity: string | null;
+  /** The limit of the last valid size, so a side being retyped never drops it. */
+  capacityMax: number;
 }
 
 // A whole office block by default (#184): 9x9 is what snaps to the block grid.
-const EMPTY_FORM: CreateFormValues = { name: '', w: '9', h: '9', capacity: '' };
+const DEFAULT_SIDE = 9;
+const EMPTY_FORM: CreateFormValues = {
+  name: null,
+  w: String(DEFAULT_SIDE),
+  h: String(DEFAULT_SIDE),
+  capacity: null,
+  capacityMax: roomCapacityMax(DEFAULT_SIDE, DEFAULT_SIDE),
+};
 
 function toForm(input: SpaceCreateInput): CreateFormValues {
-  return { name: input.name, w: String(input.w), h: String(input.h), capacity: input.capacity === null ? '' : String(input.capacity) };
+  const capacityMax = roomCapacityMax(input.w, input.h);
+  const capacity = input.capacity === null || input.capacity === capacityMax ? null : String(input.capacity);
+  return { name: input.name, w: String(input.w), h: String(input.h), capacity, capacityMax };
+}
+
+/** A new side: an untouched capacity follows the new maximum, a typed one only shrinks to it. */
+function withSide(form: CreateFormValues, side: 'w' | 'h', raw: string): CreateFormValues {
+  const next = { ...form, [side]: raw };
+  const w = toSize(next.w);
+  const h = toSize(next.h);
+  if (w === null || h === null) return next;
+  const capacityMax = roomCapacityMax(w, h);
+  const typed = next.capacity === null ? NaN : Number(next.capacity);
+  const capacity = next.capacity !== null && next.capacity.trim() !== '' && typed > capacityMax ? String(capacityMax) : next.capacity;
+  return { ...next, capacity, capacityMax };
 }
 
 function toSize(raw: string): number | null {
@@ -65,11 +94,11 @@ function toSize(raw: string): number | null {
   return value;
 }
 
-/** `undefined` marca "invalido"; `null` es el valor real de "sin limite" -- mismo criterio que `SpacesPanel.toCapacity`. */
-function toCapacity(raw: string): number | null | undefined {
+/** `null` for an empty, fractional or out of range capacity: this form always sends one. */
+function toCapacity(raw: string, max: number): number | null {
   if (raw.trim() === '') return null;
   const value = Number(raw);
-  if (!Number.isInteger(value) || value < MIN_CAPACITY) return undefined;
+  if (!Number.isInteger(value) || value < MIN_CAPACITY || value > max) return null;
   return value;
 }
 
@@ -138,7 +167,7 @@ export function SpaceEditorSection({
     if (multiple && input !== null) {
       if (phase === 'saving') {
         // Created: the next room. Refused: the same one again, somewhere else; only that placement is dropped.
-        const next = editor.error === null ? { ...input, name: freeNextName(input.name) } : input;
+        const next = editor.error === null ? { ...input, name: freeRoomName(nextRoomName(input.name), takenNames()) } : input;
         createInputRef.current = next;
         setRunError(editor.error);
         setForm(toForm(next));
@@ -158,12 +187,9 @@ export function SpaceEditorSection({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor.state, editor.error]);
 
-  /** The next name of a run that no room in the list has yet (names are unique, `space-name-taken`). */
-  function freeNextName(name: string): string {
-    const taken = new Set(editor.spaces.map((space) => space.name.trim().toLowerCase()));
-    let next = nextRoomName(name);
-    for (let tries = 0; tries <= taken.size && taken.has(next.toLowerCase()); tries++) next = nextRoomName(next);
-    return next;
+  /** Room names are unique (`space-name-taken`): what the form offers skips the ones the list holds. */
+  function takenNames(): string[] {
+    return editor.spaces.map((space) => space.name);
   }
 
   // Escape: a selection or a placement is the hook's to release; with none held
@@ -203,16 +229,17 @@ export function SpaceEditorSection({
   const placing = state.tag === 'placing';
   const busy = editor.state.tag === 'saving' || editor.pending;
 
+  const name = form.name ?? freeRoomName(DEFAULT_ROOM_NAME, takenNames());
+  const capacityText = form.capacity ?? String(form.capacityMax);
   const w = toSize(form.w);
   const h = toSize(form.h);
-  const canCreate = form.name.trim() !== '' && w !== null && h !== null;
+  const capacity = toCapacity(capacityText, form.capacityMax);
+  const canCreate = name.trim() !== '' && w !== null && h !== null && capacity !== null;
 
   function handleCreateSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (busy || !canCreate || w === null || h === null) return;
-    const capacity = toCapacity(form.capacity);
-    if (capacity === undefined) return;
-    const input = { name: form.name.trim(), w, h, capacity };
+    if (busy || !canCreate || w === null || h === null || capacity === null) return;
+    const input = { name: name.trim(), w, h, capacity };
     createInputRef.current = input;
     editor.startCreate(input);
   }
@@ -259,43 +286,45 @@ export function SpaceEditorSection({
                 autoComplete="off"
                 required
                 disabled={busy}
-                value={form.name}
+                value={name}
                 onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
               />
             </div>
 
-            <div className={styles.field}>
-              <label className={styles.hint} htmlFor="new-space-w">
-                Ancho
-              </label>
-              <input
-                id="new-space-w"
-                className={`${styles.input} ${styles.dimInput}`}
-                type="number"
-                min={MIN_ROOM_SIDE}
-                step={1}
-                required
-                disabled={busy}
-                value={form.w}
-                onChange={(event) => setForm((current) => ({ ...current, w: event.target.value }))}
-              />
-            </div>
+            <div className={styles.fieldRow}>
+              <div className={styles.field}>
+                <label className={styles.hint} htmlFor="new-space-w">
+                  Ancho
+                </label>
+                <input
+                  id="new-space-w"
+                  className={`${styles.input} ${styles.dimInput}`}
+                  type="number"
+                  min={MIN_ROOM_SIDE}
+                  step={1}
+                  required
+                  disabled={busy}
+                  value={form.w}
+                  onChange={(event) => { const raw = event.target.value; setForm((current) => withSide(current, 'w', raw)); }}
+                />
+              </div>
 
-            <div className={styles.field}>
-              <label className={styles.hint} htmlFor="new-space-h">
-                Alto
-              </label>
-              <input
-                id="new-space-h"
-                className={`${styles.input} ${styles.dimInput}`}
-                type="number"
-                min={MIN_ROOM_SIDE}
-                step={1}
-                required
-                disabled={busy}
-                value={form.h}
-                onChange={(event) => setForm((current) => ({ ...current, h: event.target.value }))}
-              />
+              <div className={styles.field}>
+                <label className={styles.hint} htmlFor="new-space-h">
+                  Alto
+                </label>
+                <input
+                  id="new-space-h"
+                  className={`${styles.input} ${styles.dimInput}`}
+                  type="number"
+                  min={MIN_ROOM_SIDE}
+                  step={1}
+                  required
+                  disabled={busy}
+                  value={form.h}
+                  onChange={(event) => { const raw = event.target.value; setForm((current) => withSide(current, 'h', raw)); }}
+                />
+              </div>
             </div>
 
             <div className={styles.field}>
@@ -307,9 +336,11 @@ export function SpaceEditorSection({
                 className={`${styles.input} ${styles.dimInput}`}
                 type="number"
                 min={MIN_CAPACITY}
+                max={form.capacityMax}
                 step={1}
+                required
                 disabled={busy}
-                value={form.capacity}
+                value={capacityText}
                 onChange={(event) => setForm((current) => ({ ...current, capacity: event.target.value }))}
               />
             </div>

@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { AdminError } from '../dashboard/adminPort';
@@ -132,13 +132,14 @@ describe('SpaceEditorSection (#74, PR4)', () => {
     await waitFor(() => expect(spaces.deleteSpace).toHaveBeenCalledWith('id-sala'));
   });
 
-  it('crear: nombre + ancho + alto y colocar en el mapa llama a createSpace', async () => {
+  it('crear: nombre + ancho + alto y colocar en el mapa llama a createSpace, con el aforo maximo por defecto', async () => {
     const spaces = fakeSpaces();
     const bridge = createOfficeBridge();
     renderSection({ spaces, bridge });
     await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
     await screen.findByText('Sala grande');
 
+    await userEvent.clear(screen.getByLabelText(/Nombre de la nueva sala/));
     await userEvent.type(screen.getByLabelText(/Nombre de la nueva sala/), 'Sala chica');
     await userEvent.clear(screen.getByLabelText(/^Ancho$/));
     await userEvent.type(screen.getByLabelText(/^Ancho$/), '7');
@@ -148,7 +149,7 @@ describe('SpaceEditorSection (#74, PR4)', () => {
     act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
 
     await waitFor(() =>
-      expect(spaces.createSpace).toHaveBeenCalledWith({ name: 'Sala chica', x: 1, y: 2, w: 7, h: 6, capacity: null }),
+      expect(spaces.createSpace).toHaveBeenCalledWith({ name: 'Sala chica', x: 1, y: 2, w: 7, h: 6, capacity: 8 }),
     );
   });
 
@@ -159,11 +160,13 @@ describe('SpaceEditorSection (#74, PR4)', () => {
     await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
     await screen.findByText('Sala grande');
 
+    await userEvent.clear(screen.getByLabelText(/Nombre de la nueva sala/));
     await userEvent.type(screen.getByLabelText(/Nombre de la nueva sala/), 'Sala chica');
     await userEvent.clear(screen.getByLabelText(/^Ancho$/));
     await userEvent.type(screen.getByLabelText(/^Ancho$/), '7');
     await userEvent.clear(screen.getByLabelText(/^Alto$/));
     await userEvent.type(screen.getByLabelText(/^Alto$/), '6');
+    await userEvent.clear(screen.getByLabelText(/Aforo/));
     await userEvent.type(screen.getByLabelText(/Aforo/), '6');
     await userEvent.click(screen.getByRole('button', { name: /Colocar nueva sala/ }));
     act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
@@ -178,6 +181,10 @@ describe('SpaceEditorSection (#74, PR4)', () => {
     await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
     await screen.findByText('Sala grande');
 
+    // The form starts complete: a free name and the largest capacity.
+    expect(screen.getByRole('button', { name: /Colocar nueva sala/ })).toBeEnabled();
+
+    await userEvent.clear(screen.getByLabelText(/Nombre de la nueva sala/));
     expect(screen.getByRole('button', { name: /Colocar nueva sala/ })).toBeDisabled();
 
     await userEvent.type(screen.getByLabelText(/Nombre de la nueva sala/), 'Sala chica');
@@ -221,6 +228,7 @@ describe('SpaceEditorSection (#74, PR4)', () => {
     await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
     await screen.findByText('Sala grande');
 
+    await userEvent.clear(screen.getByLabelText(/Nombre de la nueva sala/));
     await userEvent.type(screen.getByLabelText(/Nombre de la nueva sala/), 'Sala grande');
     await userEvent.clear(screen.getByLabelText(/^Ancho$/));
     await userEvent.type(screen.getByLabelText(/^Ancho$/), '7');
@@ -316,6 +324,7 @@ describe('SpaceEditorSection: a room only asks for its area, the floor is the te
     expect(screen.queryByLabelText('Material')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Color')).not.toBeInTheDocument();
 
+    await userEvent.clear(screen.getByLabelText(/Nombre de la nueva sala/));
     await userEvent.type(screen.getByLabelText(/Nombre de la nueva sala/), 'Sala chica');
     await userEvent.clear(screen.getByLabelText(/^Ancho$/));
     await userEvent.type(screen.getByLabelText(/^Ancho$/), '7');
@@ -325,8 +334,124 @@ describe('SpaceEditorSection: a room only asks for its area, the floor is the te
     act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
 
     await waitFor(() =>
-      expect(spaces.createSpace).toHaveBeenCalledWith({ name: 'Sala chica', x: 1, y: 2, w: 7, h: 6, capacity: null }),
+      expect(spaces.createSpace).toHaveBeenCalledWith({ name: 'Sala chica', x: 1, y: 2, w: 7, h: 6, capacity: 8 }),
     );
+  });
+});
+
+/** A port whose list holds every room created through it, like the server's. */
+function listingCreatedRooms(): SpacesAdminPort {
+  const rooms: AdminSpace[] = [SALA];
+  return fakeSpaces({
+    listSpaces: vi.fn(async () => [...rooms]),
+    createSpace: vi.fn(async (input) => {
+      const room: AdminSpace = { ...SALA, ...input, id: `id-${rooms.length}`, capacity: input.capacity ?? null };
+      rooms.push(room);
+      return room;
+    }),
+  });
+}
+
+describe('SpaceEditorSection: the form starts with a free name and the largest capacity', () => {
+  async function open(spaces = fakeSpaces()) {
+    const bridge = createOfficeBridge();
+    renderSection({ spaces, bridge });
+    await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
+    await screen.findByText('Sala grande');
+    return { bridge, spaces };
+  }
+  const nameField = () => screen.getByLabelText(/Nombre de la nueva sala/);
+  const capacityField = () => screen.getByLabelText(/Aforo/);
+  const placeButton = () => screen.getByRole('button', { name: /Colocar nueva sala/ });
+  async function setSide(label: RegExp, value: string) {
+    await userEvent.clear(screen.getByLabelText(label));
+    await userEvent.type(screen.getByLabelText(label), value);
+  }
+
+  it('prefills "Sala 1" as a real value when no room holds it', async () => {
+    await open();
+    expect(nameField()).toHaveValue('Sala 1');
+  });
+
+  it('prefills the first "Sala N" no room holds, ignoring case', async () => {
+    await open(fakeSpaces({
+      listSpaces: vi.fn(async () => [SALA, { ...SALA, id: 'id-1', name: 'sala 1' }, { ...SALA, id: 'id-2', name: 'Sala 2' }]),
+    }));
+    await waitFor(() => expect(nameField()).toHaveValue('Sala 3'));
+  });
+
+  it('lets the name be overwritten', async () => {
+    const { bridge, spaces } = await open();
+    await userEvent.clear(nameField());
+    await userEvent.type(nameField(), 'Cafetería');
+    await userEvent.click(placeButton());
+    act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
+    await waitFor(() => expect(spaces.createSpace).toHaveBeenCalledWith(expect.objectContaining({ name: 'Cafetería' })));
+  });
+
+  it('prefills the capacity with its maximum, one more than the longer side, and bounds the field with it', async () => {
+    const { bridge, spaces } = await open();
+    expect(capacityField()).toHaveValue(10);
+    expect(capacityField()).toHaveAttribute('min', '1');
+    expect(capacityField()).toHaveAttribute('max', '10');
+
+    await userEvent.click(placeButton());
+    act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
+    await waitFor(() => expect(spaces.createSpace).toHaveBeenCalledWith(expect.objectContaining({ w: 9, h: 9, capacity: 10 })));
+  });
+
+  it('an untouched capacity follows the size', async () => {
+    await open();
+    await setSide(/^Alto$/, '6');
+    expect(capacityField()).toHaveValue(10);
+    await setSide(/^Ancho$/, '7');
+    expect(capacityField()).toHaveValue(8);
+    expect(capacityField()).toHaveAttribute('max', '8');
+    await setSide(/^Alto$/, '12');
+    expect(capacityField()).toHaveValue(13);
+  });
+
+  it('a typed capacity stays while it fits and is clamped when the size shrinks under it', async () => {
+    await open();
+    await userEvent.clear(capacityField());
+    await userEvent.type(capacityField(), '5');
+    await setSide(/^Ancho$/, '6');
+    await setSide(/^Alto$/, '6');
+    expect(capacityField()).toHaveValue(5);
+
+    await setSide(/^Alto$/, '9');
+    await userEvent.clear(capacityField());
+    await userEvent.type(capacityField(), '10');
+    await setSide(/^Alto$/, '7');
+    expect(capacityField()).toHaveValue(8);
+    expect(placeButton()).toBeEnabled();
+  });
+
+  it.each(['', '0', '11', '2.5'])('refuses a capacity of %j', async (value) => {
+    await open();
+    fireEvent.change(capacityField(), { target: { value } });
+    expect(placeButton()).toBeDisabled();
+  });
+
+  it('an invalid side keeps the last maximum and disables placing', async () => {
+    await open();
+    await userEvent.clear(screen.getByLabelText(/^Ancho$/));
+    expect(capacityField()).toHaveValue(10);
+    expect(capacityField()).toHaveAttribute('max', '10');
+    expect(placeButton()).toBeDisabled();
+  });
+
+  it('puts Ancho and Alto on one row, apart from the rest of the form', async () => {
+    await open();
+    const form = placeButton().closest('form');
+    const widthField = screen.getByLabelText(/^Ancho$/).parentElement;
+    const heightField = screen.getByLabelText(/^Alto$/).parentElement;
+    const row = widthField?.parentElement;
+    expect(row).toBe(heightField?.parentElement);
+    expect(row).not.toBe(form);
+    expect(row?.parentElement).toBe(form);
+    expect(capacityField().parentElement?.parentElement).toBe(form);
+    expect(nameField().parentElement?.parentElement).toBe(form);
   });
 });
 
@@ -336,25 +461,29 @@ describe('SpaceEditorSection: «Múltiple» (#207)', () => {
     renderSection({ spaces, bridge });
     await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
     await screen.findByText('Sala grande');
+    await userEvent.clear(screen.getByLabelText(/Nombre de la nueva sala/));
     await userEvent.type(screen.getByLabelText(/Nombre de la nueva sala/), name);
     await userEvent.clear(screen.getByLabelText(/^Ancho$/));
     await userEvent.type(screen.getByLabelText(/^Ancho$/), '7');
     await userEvent.clear(screen.getByLabelText(/^Alto$/));
     await userEvent.type(screen.getByLabelText(/^Alto$/), '6');
+    await userEvent.clear(screen.getByLabelText(/Aforo/));
     await userEvent.type(screen.getByLabelText(/Aforo/), '4');
     return { bridge, spaces };
   }
   const place = (bridge: ReturnType<typeof createOfficeBridge>, tx: number) =>
     act(() => bridge.emit('layoutplace', { tx, ty: 2, valid: true }));
 
-  it('is off by default: a created room goes back to an empty form', async () => {
-    const { bridge, spaces } = await openForm('Sala 1');
+  it('is off by default: a created room goes back to a fresh form with the next free name', async () => {
+    const { bridge, spaces } = await openForm('Sala 1', listingCreatedRooms());
     expect(screen.getByRole('checkbox', { name: /^Múltiple/ })).not.toBeChecked();
     await userEvent.click(screen.getByRole('button', { name: /Colocar nueva sala/ }));
     place(bridge, 1);
 
     await waitFor(() => expect(spaces.createSpace).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.getByLabelText(/Nombre de la nueva sala/)).toHaveValue(''));
+    await waitFor(() => expect(screen.getByLabelText(/Nombre de la nueva sala/)).toHaveValue('Sala 2'));
+    expect(screen.getByLabelText(/^Ancho$/)).toHaveValue(9);
+    expect(screen.getByLabelText(/Aforo/)).toHaveValue(10);
   });
 
   it('on, a created room goes back to placing the next one: same size and capacity, the next name, until Escape', async () => {

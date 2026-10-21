@@ -96,6 +96,17 @@
   gap: 2px;
 }
 
+/* Ancho and Alto side by side: two short numbers, one row. */
+.fieldRow {
+  display: flex;
+  gap: 8px;
+}
+
+.fieldRow > .field {
+  flex: 1;
+  min-width: 0;
+}
+
 .input {
   width: 100%;
   min-width: 0;
