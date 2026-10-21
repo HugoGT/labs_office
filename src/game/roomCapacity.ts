@@ -1,8 +1,8 @@
 /**
- * The most people the room form lets a room hold: one more than its longer
- * side. A UI default and limit only; the server still takes any capacity.
- * Import-free.
+ * The capacity the room form offers for a new room: one more than its longer
+ * side. A default only, never a limit: the admin may type any larger number,
+ * and the server takes any capacity. Import-free.
  */
-export function roomCapacityMax(w: number, h: number): number {
+export function defaultRoomCapacity(w: number, h: number): number {
   return Math.max(w, h) + 1;
 }

@@ -57,6 +57,8 @@ function LayoutEditorSections({
   // desks being one button away.
   const arbitrated = section === undefined || section === 'spaces';
   const [activeSection, setActiveSection] = useState<EditorPart | null>(section === 'spaces' ? 'room' : null);
+  /** "Editar salas" holds the panel: the desks step aside, like the rooms for "Editar escritorios". */
+  const [roomListView, setRoomListView] = useState(false);
   const editingChangeRef = useRef(onEditingChange);
   editingChangeRef.current = onEditingChange;
 
@@ -104,7 +106,9 @@ function LayoutEditorSections({
         />
       )}
       {shown('desk') && (
-        <DeskEditorSection {...shared}
+        // Concealed rather than unmounted: an off desk editor mounting again
+        // would emit its null `layoutedit` over the rooms' overlay.
+        <DeskEditorSection {...shared} concealed={embedded && roomListView}
           onEditingChange={(editing) => reportEditing('desk', editing)}
           forceExit={forced('desk')}
           onRequestActive={() => requestActive('desk')}
@@ -113,6 +117,7 @@ function LayoutEditorSections({
       {shown('room') && !deskView && (
         <SpaceEditorSection {...shared}
           initiallyActive={embedded}
+          onListViewChange={setRoomListView}
           onEditingChange={(editing) => reportEditing('room', editing)}
           forceExit={forced('room')}
           onRequestActive={() => requestActive('room')}

@@ -5,8 +5,8 @@ import type { OfficeBridge } from '../game/officeBridge';
 import { useEscapeStep } from '../hooks/useEscapeStep';
 import { useLayoutEditor } from '../hooks/useLayoutEditor';
 import styles from './DeskEditorSection.module.css';
+import { LayoutItemList } from './LayoutItemList';
 import { MultipleToggle } from './MultipleToggle';
-import { TrashIcon } from './TrashIcon';
 
 /**
  * How the list names a desk: its own label when an older one has it, else
@@ -55,6 +55,12 @@ export interface DeskEditorSectionProps {
    * offers "Volver".
    */
   embedded?: boolean;
+  /**
+   * Renders nothing while the desk editor is off: "Editar salas" holds the
+   * panel. The section stays mounted, so its off hook never re-emits a null
+   * `layoutedit` over the rooms' overlay and its state survives.
+   */
+  concealed?: boolean;
   onExit?: () => void;
   /**
    * Se llama ANTES de `editor.enter()` (#74, PR4 correction: exclusividad
@@ -75,6 +81,7 @@ export function DeskEditorSection({
   forceExit = false,
   initiallyActive = false,
   embedded = false,
+  concealed = false,
   onExit,
   onRequestActive,
 }: DeskEditorSectionProps) {
@@ -171,6 +178,7 @@ export function DeskEditorSection({
   }
 
   if (!active) {
+    if (concealed) return null;
     if (!embedded) {
       return (
         <div className={styles.section}>
@@ -227,39 +235,13 @@ export function DeskEditorSection({
 
       {selected === null && !placing && !creating && (
         <>
-          <ul className={styles.list}>
-            {editor.desks.map((desk) => {
-              const name = deskName(desk);
-              // One line per desk: no selection step, each button acts on its own row.
-              return (
-                <li key={desk.id} className={styles.row}>
-                  <span className={styles.name} title={name}>{name}</span>
-                  <div className={styles.rowActions}>
-                    {/* The visible text stays short; the label keeps each accessible name unique. */}
-                    <button
-                      type="button"
-                      className={styles.button}
-                      aria-label={`Mover ${name}`}
-                      disabled={busy}
-                      onClick={() => editor.startMove(desk.id)}
-                    >
-                      Mover
-                    </button>
-                    <button
-                      type="button"
-                      className={`${styles.button} ${styles.danger}`}
-                      aria-label={`Eliminar ${name}`}
-                      title="Eliminar"
-                      disabled={busy}
-                      onClick={() => void editor.remove(desk.id)}
-                    >
-                      <TrashIcon />
-                    </button>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+          {/* One line per desk: no selection step, each button acts on its own row. */}
+          <LayoutItemList
+            items={editor.desks.map((desk) => ({ id: desk.id, name: deskName(desk) }))}
+            busy={busy}
+            onMove={(id) => editor.startMove(id)}
+            onRemove={(id) => void editor.remove(id)}
+          />
 
           {/* Nothing to ask: a desk is created empty, and its occupant decorates it from "Mi espacio". */}
           {!embedded && (

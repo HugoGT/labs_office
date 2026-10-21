@@ -41,17 +41,6 @@
   cursor: pointer;
 }
 
-.list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 140px;
-  overflow-y: auto;
-}
-
 .row {
   display: flex;
   align-items: center;
@@ -61,8 +50,18 @@
   color: #e5e7eb;
 }
 
+/* The selected room's name stays on one line, like a list row (`LayoutItemList`). */
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .rowActions {
   display: flex;
+  flex-shrink: 0;
   gap: 4px;
 }
 

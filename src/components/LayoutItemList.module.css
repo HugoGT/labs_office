@@ -1,0 +1,64 @@
+/*
+ * The row list of "Editar escritorios" and "Editar salas". No height of its
+ * own on purpose: it grows with its rows and the sidebar panel scrolls it, so
+ * a long list uses the whole panel instead of a small inner box.
+ */
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  font-size: 12px;
+  color: #e5e7eb;
+}
+
+/* A name stays on one line, cut with an ellipsis: the buttons beside it never wrap. */
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowActions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+}
+
+.button {
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The trash of a row: red like the dashboard's revoke button. It stretches to the height of "Mover" beside it. */
+.danger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: #7f1d1d66;
+  color: #ef4444;
+  border-color: #b91c1c;
+}

@@ -1,6 +1,6 @@
 /**
- * The delete icon of a desk row (Editar espacios). Drawn with `currentColor`,
- * so the button that holds it (`DeskEditorSection.module.css` `.danger`) sets
+ * The delete icon of a desk or room row (Editar espacios). Drawn with `currentColor`,
+ * so the button that holds it (`LayoutItemList.module.css` `.danger`) sets
  * the red; the button carries the accessible name, the icon is decoration.
  */
 export function TrashIcon() {

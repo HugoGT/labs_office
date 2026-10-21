@@ -41,17 +41,6 @@
   cursor: pointer;
 }
 
-.list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 140px;
-  overflow-y: auto;
-}
-
 .row {
   display: flex;
   align-items: center;
@@ -61,7 +50,7 @@
   color: #e5e7eb;
 }
 
-/* A desk's name stays on one line, cut with an ellipsis: the buttons beside it never wrap. */
+/* The selected desk's name stays on one line, cut with an ellipsis: the buttons beside it never wrap. */
 .name {
   flex: 1;
   min-width: 0;
@@ -90,17 +79,6 @@
 .button:disabled {
   opacity: 0.5;
   cursor: default;
-}
-
-/* The trash of a desk row: red like the dashboard's revoke button. It stretches to the height of "Mover" beside it. */
-.danger {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  background: #7f1d1d66;
-  color: #ef4444;
-  border-color: #b91c1c;
 }
 
 .form {

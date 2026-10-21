@@ -3,10 +3,11 @@ import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import { MIN_ROOM_SIDE } from '../game/layoutGeometry';
 import type { OfficeBridge } from '../game/officeBridge';
-import { roomCapacityMax } from '../game/roomCapacity';
+import { defaultRoomCapacity } from '../game/roomCapacity';
 import { DEFAULT_ROOM_NAME, freeRoomName, nextRoomName } from '../game/roomNames';
 import { useEscapeStep } from '../hooks/useEscapeStep';
 import { useSpaceEditor, type SpaceCreateInput } from '../hooks/useSpaceEditor';
+import { LayoutItemList } from './LayoutItemList';
 import { MultipleToggle } from './MultipleToggle';
 import styles from './SpaceEditorSection.module.css';
 
@@ -19,7 +20,11 @@ import styles from './SpaceEditorSection.module.css';
  * A diferencia de un escritorio (tamano fijo 3x3), una sala pide su propio
  * ancho/alto y aforo en el formulario. No floor choice: a room shows the
  * painted terrain under it (#182). The form starts complete: the first free
- * "Sala N" and the largest capacity, so placing a room takes one click.
+ * "Sala N" and a default capacity, so placing a room takes one click.
+ *
+ * Embedded in "Editar espacios" it mirrors the desks: the default view is the
+ * creation form behind an "Editar salas" button, which swaps it for the room
+ * list (one row per room, `LayoutItemList`) until "Volver" or Escape.
  */
 
 const MIN_CAPACITY = 1;
@@ -40,6 +45,12 @@ export interface SpaceEditorSectionProps {
   initiallyActive?: boolean;
   /** Inside "Editar espacios", after the desks: the section around it owns the exit. */
   embedded?: boolean;
+  /**
+   * Embedded, reports when the room list takes the panel or gives it back, so
+   * the section around it hides the desks meanwhile, like the desk list hides
+   * the rooms.
+   */
+  onListViewChange?: (listing: boolean) => void;
   onExit?: () => void;
   /** Se llama ANTES de `editor.enter()` (#74, PR4 correction): ver `DeskEditorSection.onRequestActive`. */
   onRequestActive?: () => void;
@@ -54,10 +65,10 @@ interface CreateFormValues {
   name: string | null;
   w: string;
   h: string;
-  /** `null` until typed: the field shows `capacityMax` and follows the size. */
+  /** `null` until typed: the field shows `capacityDefault` and follows the size. */
   capacity: string | null;
-  /** The limit of the last valid size, so a side being retyped never drops it. */
-  capacityMax: number;
+  /** The default of the last valid size, so a side being retyped never drops it. */
+  capacityDefault: number;
 }
 
 // A whole office block by default (#184): 9x9 is what snaps to the block grid.
@@ -67,25 +78,25 @@ const EMPTY_FORM: CreateFormValues = {
   w: String(DEFAULT_SIDE),
   h: String(DEFAULT_SIDE),
   capacity: null,
-  capacityMax: roomCapacityMax(DEFAULT_SIDE, DEFAULT_SIDE),
+  capacityDefault: defaultRoomCapacity(DEFAULT_SIDE, DEFAULT_SIDE),
 };
 
 function toForm(input: SpaceCreateInput): CreateFormValues {
-  const capacityMax = roomCapacityMax(input.w, input.h);
-  const capacity = input.capacity === null || input.capacity === capacityMax ? null : String(input.capacity);
-  return { name: input.name, w: String(input.w), h: String(input.h), capacity, capacityMax };
+  const capacityDefault = defaultRoomCapacity(input.w, input.h);
+  const capacity = input.capacity === null || input.capacity === capacityDefault ? null : String(input.capacity);
+  return { name: input.name, w: String(input.w), h: String(input.h), capacity, capacityDefault };
 }
 
-/** A new side: an untouched capacity follows the new maximum, a typed one only shrinks to it. */
+/**
+ * A new side: an untouched capacity follows the new default. A typed one is
+ * the admin's and stays as typed, never clamped: the default is no limit.
+ */
 function withSide(form: CreateFormValues, side: 'w' | 'h', raw: string): CreateFormValues {
   const next = { ...form, [side]: raw };
   const w = toSize(next.w);
   const h = toSize(next.h);
   if (w === null || h === null) return next;
-  const capacityMax = roomCapacityMax(w, h);
-  const typed = next.capacity === null ? NaN : Number(next.capacity);
-  const capacity = next.capacity !== null && next.capacity.trim() !== '' && typed > capacityMax ? String(capacityMax) : next.capacity;
-  return { ...next, capacity, capacityMax };
+  return { ...next, capacityDefault: defaultRoomCapacity(w, h) };
 }
 
 function toSize(raw: string): number | null {
@@ -94,11 +105,11 @@ function toSize(raw: string): number | null {
   return value;
 }
 
-/** `null` for an empty, fractional or out of range capacity: this form always sends one. */
-function toCapacity(raw: string, max: number): number | null {
+/** `null` for an empty, fractional or non-positive capacity: this form always sends one. */
+function toCapacity(raw: string): number | null {
   if (raw.trim() === '') return null;
   const value = Number(raw);
-  if (!Number.isInteger(value) || value < MIN_CAPACITY || value > max) return null;
+  if (!Number.isInteger(value) || value < MIN_CAPACITY) return null;
   return value;
 }
 
@@ -112,11 +123,16 @@ export function SpaceEditorSection({
   forceExit = false,
   initiallyActive = false,
   embedded = false,
+  onListViewChange,
   onExit,
   onRequestActive,
 }: SpaceEditorSectionProps) {
   const editor = useSpaceEditor({ bridge, spaces, desks, refreshDesks, refreshSpaces });
   const [form, setForm] = useState<CreateFormValues>(EMPTY_FORM);
+  /** Embedded only: the room list ("Editar salas") instead of the default view's form. */
+  const [listing, setListing] = useState(false);
+  const listViewChangeRef = useRef(onListViewChange);
+  listViewChangeRef.current = onListViewChange;
   /**
    * "Múltiple" (#207): a room placed starts placing the next one, with the
    * same size and capacity and the next free name, until Escape or "Cancelar".
@@ -145,6 +161,17 @@ export function SpaceEditorSection({
     if (forceExit) editor.exit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [forceExit]);
+
+  // The list lives only while the editor is on: leaving it drops the list too.
+  const listShown = embedded && listing && active;
+  useEffect(() => {
+    listViewChangeRef.current?.(listShown);
+  }, [listShown]);
+  // An unmounted list must not keep the desks hidden around it.
+  useEffect(() => () => listViewChangeRef.current?.(false), []);
+  useEffect(() => {
+    if (!active) setListing(false);
+  }, [active]);
 
   useEffect(() => {
     const state = editor.state;
@@ -193,10 +220,15 @@ export function SpaceEditorSection({
   }
 
   // Escape: a selection or a placement is the hook's to release; with none held
-  // the editor leaves like "Salir". Embedded, the section around it owns the
-  // exit, so the press goes to it and this view stays as it is.
+  // the editor leaves like "Salir". Embedded, the room list goes back to the
+  // default view first, then the section around it owns the exit, so the press
+  // goes to it and this view stays as it is.
   useEscapeStep(active, () => {
     if (editor.state.tag !== 'idle') return false;
+    if (listShown) {
+      setListing(false);
+      return true;
+    }
     if (embedded) {
       if (onExit === undefined) return false;
       onExit();
@@ -210,13 +242,22 @@ export function SpaceEditorSection({
   function handleEnter(): void {
     onRequestActive?.();
     editor.enter();
+    // Embedded, the entry button is the list's, like "Editar escritorios".
+    if (embedded) setListing(true);
+  }
+
+  /** "Volver": drops whatever the list view holds and gives the panel back to the default view. */
+  function handleBack(): void {
+    editor.cancelPlacing();
+    editor.deselect();
+    setListing(false);
   }
 
   if (!active) {
     return (
       <div className={styles.section}>
         {embedded && <h3 className={styles.title}>Salas</h3>}
-        <button type="button" className={styles.enter} onClick={handleEnter}>
+        <button type="button" className={embedded ? styles.button : styles.enter} onClick={handleEnter}>
           Editar salas
         </button>
       </div>
@@ -230,10 +271,10 @@ export function SpaceEditorSection({
   const busy = editor.state.tag === 'saving' || editor.pending;
 
   const name = form.name ?? freeRoomName(DEFAULT_ROOM_NAME, takenNames());
-  const capacityText = form.capacity ?? String(form.capacityMax);
+  const capacityText = form.capacity ?? String(form.capacityDefault);
   const w = toSize(form.w);
   const h = toSize(form.h);
-  const capacity = toCapacity(capacityText, form.capacityMax);
+  const capacity = toCapacity(capacityText);
   const canCreate = name.trim() !== '' && w !== null && h !== null && capacity !== null;
 
   function handleCreateSubmit(event: FormEvent<HTMLFormElement>): void {
@@ -248,7 +289,14 @@ export function SpaceEditorSection({
     <div className={styles.section}>
       <div className={styles.header}>
         <h3 className={styles.title}>Salas</h3>
-        {!embedded && (
+        {embedded ? (
+          // The section around it owns "Salir"; the list only goes back to the default view.
+          listShown && (
+            <button type="button" className={styles.exit} onClick={handleBack}>
+              Volver
+            </button>
+          )
+        ) : (
           <button type="button" className={styles.exit} onClick={() => { editor.exit(); onExit?.(); }}>
             Salir
           </button>
@@ -257,108 +305,109 @@ export function SpaceEditorSection({
 
       {selected === null && !placing && (
         <>
-          <ul className={styles.list}>
-            {editor.spaces.map((space) => (
-              <li key={space.id} className={styles.row}>
-                <span>{space.name}</span>
-                <button
-                  type="button"
-                  className={styles.button}
-                  disabled={busy}
-                  onClick={() => editor.select(space.id)}
-                >
-                  {`Seleccionar ${space.name}`}
-                </button>
-              </li>
-            ))}
-          </ul>
-
-          <form className={styles.form} onSubmit={handleCreateSubmit}>
-            <span className={styles.hint}>{`Una sala mide al menos ${MIN_ROOM_SIDE} × ${MIN_ROOM_SIDE} casillas. Con 9 × 9, un bloque de oficina, se alinea al bloque que toques. Construye primero su terreno desde Terreno.`}</span>
-            <div className={styles.field}>
-              <label className={styles.hint} htmlFor="new-space-name">
-                Nombre de la nueva sala
-              </label>
-              <input
-                id="new-space-name"
-                className={styles.input}
-                type="text"
-                autoComplete="off"
-                required
-                disabled={busy}
-                value={name}
-                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-              />
-            </div>
-
-            <div className={styles.fieldRow}>
-              <div className={styles.field}>
-                <label className={styles.hint} htmlFor="new-space-w">
-                  Ancho
-                </label>
-                <input
-                  id="new-space-w"
-                  className={`${styles.input} ${styles.dimInput}`}
-                  type="number"
-                  min={MIN_ROOM_SIDE}
-                  step={1}
-                  required
-                  disabled={busy}
-                  value={form.w}
-                  onChange={(event) => { const raw = event.target.value; setForm((current) => withSide(current, 'w', raw)); }}
-                />
-              </div>
-
-              <div className={styles.field}>
-                <label className={styles.hint} htmlFor="new-space-h">
-                  Alto
-                </label>
-                <input
-                  id="new-space-h"
-                  className={`${styles.input} ${styles.dimInput}`}
-                  type="number"
-                  min={MIN_ROOM_SIDE}
-                  step={1}
-                  required
-                  disabled={busy}
-                  value={form.h}
-                  onChange={(event) => { const raw = event.target.value; setForm((current) => withSide(current, 'h', raw)); }}
-                />
-              </div>
-            </div>
-
-            <div className={styles.field}>
-              <label className={styles.hint} htmlFor="new-space-capacity">
-                Aforo
-              </label>
-              <input
-                id="new-space-capacity"
-                className={`${styles.input} ${styles.dimInput}`}
-                type="number"
-                min={MIN_CAPACITY}
-                max={form.capacityMax}
-                step={1}
-                required
-                disabled={busy}
-                value={capacityText}
-                onChange={(event) => setForm((current) => ({ ...current, capacity: event.target.value }))}
-              />
-            </div>
-
-            <MultipleToggle checked={multiple} onChange={setMultiple} disabled={busy} />
-
-            <button type="submit" className={styles.button} disabled={busy || !canCreate}>
-              Colocar nueva sala
+          {embedded && !listShown && (
+            <button type="button" className={styles.button} disabled={busy} onClick={() => setListing(true)}>
+              Editar salas
             </button>
-          </form>
+          )}
+
+          {(!embedded || listShown) && (
+            // One line per room, like the desk list: each button acts on its own row.
+            <LayoutItemList
+              items={editor.spaces.map((space) => ({ id: space.id, name: space.name }))}
+              busy={busy}
+              onMove={(id) => editor.startMove(id)}
+              onRemove={(id) => void editor.remove(id)}
+            />
+          )}
+
+          {!listShown && (
+            <form className={styles.form} onSubmit={handleCreateSubmit}>
+              <span className={styles.hint}>{`Una sala mide al menos ${MIN_ROOM_SIDE} × ${MIN_ROOM_SIDE} casillas. Con 9 × 9, un bloque de oficina, se alinea al bloque que toques. Construye primero su terreno desde Terreno.`}</span>
+              <div className={styles.field}>
+                <label className={styles.hint} htmlFor="new-space-name">
+                  Nombre de la nueva sala
+                </label>
+                <input
+                  id="new-space-name"
+                  className={styles.input}
+                  type="text"
+                  autoComplete="off"
+                  required
+                  disabled={busy}
+                  value={name}
+                  onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                />
+              </div>
+
+              <div className={styles.fieldRow}>
+                <div className={styles.field}>
+                  <label className={styles.hint} htmlFor="new-space-w">
+                    Ancho
+                  </label>
+                  <input
+                    id="new-space-w"
+                    className={`${styles.input} ${styles.dimInput}`}
+                    type="number"
+                    min={MIN_ROOM_SIDE}
+                    step={1}
+                    required
+                    disabled={busy}
+                    value={form.w}
+                    onChange={(event) => { const raw = event.target.value; setForm((current) => withSide(current, 'w', raw)); }}
+                  />
+                </div>
+
+                <div className={styles.field}>
+                  <label className={styles.hint} htmlFor="new-space-h">
+                    Alto
+                  </label>
+                  <input
+                    id="new-space-h"
+                    className={`${styles.input} ${styles.dimInput}`}
+                    type="number"
+                    min={MIN_ROOM_SIDE}
+                    step={1}
+                    required
+                    disabled={busy}
+                    value={form.h}
+                    onChange={(event) => { const raw = event.target.value; setForm((current) => withSide(current, 'h', raw)); }}
+                  />
+                </div>
+              </div>
+
+              <div className={styles.field}>
+                <label className={styles.hint} htmlFor="new-space-capacity">
+                  Aforo
+                </label>
+                <input
+                  id="new-space-capacity"
+                  className={`${styles.input} ${styles.dimInput}`}
+                  type="number"
+                  min={MIN_CAPACITY}
+                  step={1}
+                  required
+                  disabled={busy}
+                  value={capacityText}
+                  onChange={(event) => setForm((current) => ({ ...current, capacity: event.target.value }))}
+                />
+              </div>
+
+              <MultipleToggle checked={multiple} onChange={setMultiple} disabled={busy} />
+
+              <button type="submit" className={styles.button} disabled={busy || !canCreate}>
+                Colocar nueva sala
+              </button>
+            </form>
+          )}
         </>
       )}
 
       {selected !== null && !placing && (
         <div className={styles.row}>
-          <span>{selected.name}</span>
+          <span className={styles.name} title={selected.name}>{selected.name}</span>
           <div className={styles.rowActions}>
-            <button type="button" className={styles.button} disabled={busy} onClick={editor.startMove}>
+            <button type="button" className={styles.button} disabled={busy} onClick={() => editor.startMove()}>
               Mover
             </button>
             <button

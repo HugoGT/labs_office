@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { AdminError } from '../dashboard/adminPort';
@@ -93,41 +93,79 @@ describe('SpaceEditorSection (#74, PR4)', () => {
     expect(screen.queryByRole('button', { name: /Salir/ })).not.toBeInTheDocument();
   });
 
-  it('seleccionar una sala de la lista ofrece moverla y eliminarla', async () => {
-    renderSection();
+  const SALA_B: AdminSpace = { ...SALA, id: 'id-sala-b', name: 'Sala chica de un nombre muy largo', x: 30, y: 30, w: 6, h: 7 };
+
+  async function openListOfTwo() {
+    const spaces = fakeSpaces({ listSpaces: vi.fn(async () => [SALA, SALA_B]) });
+    const bridge = createOfficeBridge();
+    renderSection({ spaces, bridge });
     await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
-    await screen.findByText('Sala grande');
+    await screen.findByText(SALA_B.name);
+    return { spaces, bridge };
+  }
 
-    await userEvent.click(screen.getByRole('button', { name: /Seleccionar Sala grande/ }));
+  it('each row is one line, like a desk row: the name, a "Mover" and a trash, with no "Seleccionar"', async () => {
+    await openListOfTwo();
 
-    expect(screen.getByRole('button', { name: /^Mover/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Eliminar/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Seleccionar/ })).not.toBeInTheDocument();
+    for (const name of [SALA.name, SALA_B.name]) {
+      expect(screen.getByRole('button', { name: `Mover ${name}` })).toHaveTextContent(/^Mover$/);
+      const trash = screen.getByRole('button', { name: `Eliminar ${name}` });
+      expect(trash).toHaveAttribute('title', 'Eliminar');
+      expect(trash).toHaveTextContent('');
+      expect(trash.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    }
+    // A long name keeps its full text as a tooltip: the row cuts it with an ellipsis.
+    expect(screen.getByText(SALA_B.name)).toHaveAttribute('title', SALA_B.name);
+    const row = screen.getByText(SALA.name).closest('li');
+    expect(within(row as HTMLElement).getAllByRole('button')).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Deseleccionar' })).not.toBeInTheDocument();
   });
 
-  it('mover pide colocar en el mapa y un clic valido llama a updateSpace', async () => {
+  it('"Mover" on a row moves that room, with its own size', async () => {
+    const { spaces, bridge } = await openListOfTwo();
+
+    await userEvent.click(screen.getByRole('button', { name: `Mover ${SALA_B.name}` }));
+    expect(screen.getByText(/Toca el nuevo sitio en el mapa/)).toBeInTheDocument();
+    act(() => bridge.emit('layoutplace', { tx: 5, ty: 6, valid: true }));
+
+    await waitFor(() => expect(spaces.updateSpace).toHaveBeenCalledWith('id-sala-b', { x: 5, y: 6, w: 6, h: 7 }));
+    expect(spaces.updateSpace).toHaveBeenCalledTimes(1);
+  });
+
+  it('the trash on a row deletes that room, not another one', async () => {
+    const { spaces } = await openListOfTwo();
+
+    await userEvent.click(screen.getByRole('button', { name: `Eliminar ${SALA_B.name}` }));
+
+    await waitFor(() => expect(spaces.deleteSpace).toHaveBeenCalledWith('id-sala-b'));
+    expect(spaces.deleteSpace).toHaveBeenCalledTimes(1);
+  });
+
+  it('a room picked on the map still offers moving, deleting and deselecting it', async () => {
     const spaces = fakeSpaces();
     const bridge = createOfficeBridge();
     renderSection({ spaces, bridge });
     await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
     await screen.findByText('Sala grande');
-    await userEvent.click(screen.getByRole('button', { name: /Seleccionar Sala grande/ }));
 
-    await userEvent.click(screen.getByRole('button', { name: /^Mover/ }));
-    expect(screen.getByText(/Toca el nuevo sitio en el mapa/)).toBeInTheDocument();
+    act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
 
+    expect(screen.getByRole('button', { name: 'Deseleccionar' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Mover' }));
     act(() => bridge.emit('layoutplace', { tx: 5, ty: 6, valid: true }));
-
     await waitFor(() => expect(spaces.updateSpace).toHaveBeenCalledWith('id-sala', { x: 5, y: 6, w: 5, h: 5 }));
   });
 
-  it('eliminar llama a deleteSpace con el id seleccionado', async () => {
+  it('eliminar la sala elegida en el mapa llama a deleteSpace con su id', async () => {
     const spaces = fakeSpaces();
-    renderSection({ spaces });
+    const bridge = createOfficeBridge();
+    renderSection({ spaces, bridge });
     await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
     await screen.findByText('Sala grande');
-    await userEvent.click(screen.getByRole('button', { name: /Seleccionar Sala grande/ }));
+    act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
 
-    await userEvent.click(screen.getByRole('button', { name: /^Eliminar/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Eliminar' }));
 
     await waitFor(() => expect(spaces.deleteSpace).toHaveBeenCalledWith('id-sala'));
   });
@@ -352,7 +390,7 @@ function listingCreatedRooms(): SpacesAdminPort {
   });
 }
 
-describe('SpaceEditorSection: the form starts with a free name and the largest capacity', () => {
+describe('SpaceEditorSection: the form starts with a free name and a default capacity', () => {
   async function open(spaces = fakeSpaces()) {
     const bridge = createOfficeBridge();
     renderSection({ spaces, bridge });
@@ -389,11 +427,11 @@ describe('SpaceEditorSection: the form starts with a free name and the largest c
     await waitFor(() => expect(spaces.createSpace).toHaveBeenCalledWith(expect.objectContaining({ name: 'Cafetería' })));
   });
 
-  it('prefills the capacity with its maximum, one more than the longer side, and bounds the field with it', async () => {
+  it('prefills the capacity with its default, one more than the longer side, with no upper bound', async () => {
     const { bridge, spaces } = await open();
     expect(capacityField()).toHaveValue(10);
     expect(capacityField()).toHaveAttribute('min', '1');
-    expect(capacityField()).toHaveAttribute('max', '10');
+    expect(capacityField()).not.toHaveAttribute('max');
 
     await userEvent.click(placeButton());
     act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
@@ -406,38 +444,42 @@ describe('SpaceEditorSection: the form starts with a free name and the largest c
     expect(capacityField()).toHaveValue(10);
     await setSide(/^Ancho$/, '7');
     expect(capacityField()).toHaveValue(8);
-    expect(capacityField()).toHaveAttribute('max', '8');
     await setSide(/^Alto$/, '12');
     expect(capacityField()).toHaveValue(13);
   });
 
-  it('a typed capacity stays while it fits and is clamped when the size shrinks under it', async () => {
-    await open();
+  it('a typed capacity is the admin\'s: any size change keeps it, larger than the default included', async () => {
+    const { bridge, spaces } = await open();
     await userEvent.clear(capacityField());
-    await userEvent.type(capacityField(), '5');
+    await userEvent.type(capacityField(), '50');
+    expect(placeButton()).toBeEnabled();
+
     await setSide(/^Ancho$/, '6');
     await setSide(/^Alto$/, '6');
-    expect(capacityField()).toHaveValue(5);
-
-    await setSide(/^Alto$/, '9');
-    await userEvent.clear(capacityField());
-    await userEvent.type(capacityField(), '10');
-    await setSide(/^Alto$/, '7');
-    expect(capacityField()).toHaveValue(8);
+    expect(capacityField()).toHaveValue(50);
     expect(placeButton()).toBeEnabled();
+
+    await userEvent.click(placeButton());
+    act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
+    await waitFor(() => expect(spaces.createSpace).toHaveBeenCalledWith(expect.objectContaining({ w: 6, h: 6, capacity: 50 })));
   });
 
-  it.each(['', '0', '11', '2.5'])('refuses a capacity of %j', async (value) => {
+  it.each(['', '0', '-3', '2.5'])('refuses a capacity of %j', async (value) => {
     await open();
     fireEvent.change(capacityField(), { target: { value } });
     expect(placeButton()).toBeDisabled();
   });
 
-  it('an invalid side keeps the last maximum and disables placing', async () => {
+  it.each(['1', '11', '500'])('accepts a capacity of %j', async (value) => {
+    await open();
+    fireEvent.change(capacityField(), { target: { value } });
+    expect(placeButton()).toBeEnabled();
+  });
+
+  it('an invalid side keeps the last default and disables placing', async () => {
     await open();
     await userEvent.clear(screen.getByLabelText(/^Ancho$/));
     expect(capacityField()).toHaveValue(10);
-    expect(capacityField()).toHaveAttribute('max', '10');
     expect(placeButton()).toBeDisabled();
   });
 
@@ -543,13 +585,14 @@ describe('SpaceEditorSection: Escape, one level per press', () => {
   it('standalone: releases a selection first, then leaves like "Salir"', async () => {
     const onExit = vi.fn();
     const onEditingChange = vi.fn();
-    renderSection({ onExit, onEditingChange });
+    const { bridge } = renderSection({ onExit, onEditingChange });
     await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
-    await userEvent.click(await screen.findByRole('button', { name: /Seleccionar Sala grande/ }));
-    expect(screen.getByRole('button', { name: /^Mover/ })).toBeInTheDocument();
+    await screen.findByText('Sala grande');
+    act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
+    expect(screen.getByRole('button', { name: 'Deseleccionar' })).toBeInTheDocument();
 
     await userEvent.keyboard('{Escape}');
-    expect(screen.queryByRole('button', { name: /^Mover/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Deseleccionar' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Salir/ })).toBeInTheDocument();
     expect(onExit).not.toHaveBeenCalled();
 
@@ -574,23 +617,40 @@ describe('SpaceEditorSection: Escape, one level per press', () => {
     expect(onExit).not.toHaveBeenCalled();
   });
 
-  it('embedded: with nothing held it asks the section around it to exit, and keeps its own view', async () => {
+  it('embedded: a selection is released first, then with nothing held it asks the section around it to exit', async () => {
     const onExit = vi.fn();
-    renderSection({ embedded: true, initiallyActive: true, onExit });
-    await userEvent.click(await screen.findByRole('button', { name: /Seleccionar Sala grande/ }));
+    const { bridge, spaces } = renderSection({ embedded: true, initiallyActive: true, onExit });
+    await waitFor(() => expect(spaces.listSpaces).toHaveBeenCalled());
+    act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
+    await screen.findByRole('button', { name: 'Deseleccionar' });
 
     await userEvent.keyboard('{Escape}');
+    expect(onExit).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Deseleccionar' })).not.toBeInTheDocument();
+
+    await userEvent.keyboard('{Escape}');
+    expect(onExit).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Colocar nueva sala' })).toBeInTheDocument();
+  });
+
+  it('embedded: the room list goes back to the default view first, and only the next press exits', async () => {
+    const onExit = vi.fn();
+    renderSection({ embedded: true, initiallyActive: true, onExit });
+    await userEvent.click(screen.getByRole('button', { name: 'Editar salas' }));
+    await screen.findByText('Sala grande');
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByText('Sala grande')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Editar salas' })).toBeInTheDocument();
     expect(onExit).not.toHaveBeenCalled();
 
     await userEvent.keyboard('{Escape}');
     expect(onExit).toHaveBeenCalledTimes(1);
-    expect(screen.getByText('Sala grande')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Editar salas/ })).not.toBeInTheDocument();
   });
 
   it('embedded without a way to exit leaves the press alone', async () => {
-    renderSection({ embedded: true, initiallyActive: true });
-    await screen.findByText('Sala grande');
+    const { spaces } = renderSection({ embedded: true, initiallyActive: true });
+    await waitFor(() => expect(spaces.listSpaces).toHaveBeenCalled());
     const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
 
     window.dispatchEvent(event);
@@ -599,3 +659,72 @@ describe('SpaceEditorSection: Escape, one level per press', () => {
   });
 });
 
+
+describe('SpaceEditorSection embedded in "Editar espacios": the rooms behind "Editar salas", like the desks', () => {
+  function renderEmbedded(overrides: Partial<Parameters<typeof SpaceEditorSection>[0]> = {}) {
+    return renderSection({ embedded: true, initiallyActive: true, ...overrides });
+  }
+
+  it('the default view lists no rooms: "Editar salas" and the creation form', async () => {
+    const { spaces } = renderEmbedded();
+    await waitFor(() => expect(spaces.listSpaces).toHaveBeenCalled());
+    await act(async () => {});
+
+    expect(screen.getByRole('heading', { name: 'Salas' })).toBeInTheDocument();
+    const enter = screen.getByRole('button', { name: 'Editar salas' });
+    const form = screen.getByRole('button', { name: 'Colocar nueva sala' }).closest('form');
+    // Above the form, like "Editar escritorios" heads the desk group.
+    expect(enter.compareDocumentPosition(form as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText('Sala grande')).not.toBeInTheDocument();
+    expect(screen.queryByRole('list')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Volver' })).not.toBeInTheDocument();
+  });
+
+  it('"Editar salas" swaps the form for the room list, and "Volver" swaps it back', async () => {
+    const onListViewChange = vi.fn();
+    renderEmbedded({ onListViewChange });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Editar salas' }));
+
+    expect(await screen.findByText('Sala grande')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mover Sala grande' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Eliminar Sala grande' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Volver' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Colocar nueva sala' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Editar salas' })).not.toBeInTheDocument();
+    expect(onListViewChange).toHaveBeenLastCalledWith(true);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Volver' }));
+
+    expect(screen.queryByText('Sala grande')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Colocar nueva sala' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Editar salas' })).toBeInTheDocument();
+    expect(onListViewChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('a row move goes back to the room list once placed', async () => {
+    const { spaces, bridge } = renderEmbedded();
+    await userEvent.click(screen.getByRole('button', { name: 'Editar salas' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Mover Sala grande' }));
+
+    act(() => bridge.emit('layoutplace', { tx: 5, ty: 6, valid: true }));
+
+    await waitFor(() => expect(spaces.updateSpace).toHaveBeenCalledWith('id-sala', { x: 5, y: 6, w: 5, h: 5 }));
+    expect(await screen.findByRole('button', { name: 'Mover Sala grande' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Volver' })).toBeInTheDocument();
+  });
+
+  it('a room picked on the map from the default view offers its actions there, as before', async () => {
+    const { spaces, bridge } = renderEmbedded();
+    await waitFor(() => expect(spaces.listSpaces).toHaveBeenCalled());
+    await act(async () => {});
+
+    act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
+
+    expect(screen.getByText('Sala grande')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mover' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Eliminar' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Deseleccionar' }));
+    expect(screen.getByRole('button', { name: 'Colocar nueva sala' })).toBeInTheDocument();
+  });
+});
