@@ -4,8 +4,8 @@ import { BASE_LAYOUT as OFFICE_LAYOUT, BLOCK_TILES, blockIndexAt, blockTileRect,
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_TERRAIN as BASE_TERRAIN } from '../../../src/test/legacyOffice.ts';
 import { createMemoryTerrain } from './memoryTerrain.ts';
 import type { TerrainStore } from './terrainPort.ts';
-import { TerrainProtectedError, type TerrainProtections } from './terrainRules.ts';
-import { createTerrainRuntime } from './terrainRuntime.ts';
+import { InvalidTerrainEditError, TerrainProtectedError, type TerrainProtections } from './terrainRules.ts';
+import { DecorOutsideAreaError, createTerrainRuntime } from './terrainRuntime.ts';
 
 const LAWN = 35;
 const LAKE = 94;
@@ -132,8 +132,8 @@ describe('createTerrainRuntime', () => {
       saveBlocks: async () => { throw new Error('connection lost'); },
       loadWalls: async () => new Map(),
       saveWalls: async () => { throw new Error('connection lost'); },
-      loadChairs: async () => [],
-      saveChairs: async () => { throw new Error('connection lost'); },
+      loadDecor: async () => [],
+      saveDecor: async () => { throw new Error('connection lost'); },
     };
     const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
     await runtime.load();
@@ -347,131 +347,198 @@ describe('createTerrainRuntime walls', () => {
   });
 });
 
-describe('createTerrainRuntime chairs', () => {
+describe('createTerrainRuntime decor', () => {
   const W = BASE_LAYOUT.width;
   const at = (tx: number, ty: number) => ty * W + tx;
-  /** A free lawn tile: no seat, furniture or spawn on it. */
+  /** A free lawn tile: no seat, furniture or spawn on it, nor on the tiles around it. */
   const FREE = at(67, 22);
   const DESK = { x: 66, y: 21, w: 3, h: 3 };
-  const WOOD_DOWN = { piece: 'chair-wood', facing: 'down' } as const;
+  const WOOD_DOWN = { piece: 'chair-wood', rotation: 0 } as const;
+  const CATALOG = [
+    { id: 'chair-wood', kind: 'chair', retired: false },
+    { id: 'chair-metal', kind: 'chair', retired: false },
+    { id: 'desk-wood', kind: 'desk', retired: false },
+    { id: 'plant-ficus', kind: 'plant', footprint: { w: 1, h: 1 }, retired: false },
+    { id: 'table-meeting', kind: 'table', footprint: { w: 7, h: 5 }, retired: false },
+    { id: 'plant-gone', kind: 'plant', footprint: { w: 1, h: 1 }, retired: true },
+    { id: 'tree-oak', kind: 'tree', footprint: { w: 1, h: 1 }, retired: false },
+  ];
+  const decorPieces = async () => CATALOG;
+  const runtimeWith = (store = createMemoryTerrain(), pieces = vi.fn(decorPieces)) =>
+    createTerrainRuntime({ layout: BASE_LAYOUT, store, seats: BASE_MAP_SEATS, decorPieces: pieces });
 
-  it('serves no chair until it loads, and without a store for good', async () => {
+  it('serves no decor until it loads, and without a store for good', async () => {
     const runtime = createTerrainRuntime({ layout: BASE_LAYOUT });
     await runtime.load();
 
-    expect(runtime.chairs()).toEqual([]);
-    await expect(runtime.setChairs([{ index: FREE, chair: WOOD_DOWN }], null, NONE)).rejects.toThrow(/no terrain store/);
+    expect(runtime.decor()).toEqual([]);
+    await expect(runtime.setDecor([{ index: FREE, item: WOOD_DOWN }], null)).rejects.toThrow(/no terrain store/);
   });
 
-  it('loads stored chairs, ignoring those off the map or on a static tile', async () => {
+  it('loads stored items, ignoring only those off the map: one on a static tile is kept and drawn', async () => {
     const seat = BASE_MAP_SEATS[0]!;
     const store = createMemoryTerrain([], [], [
-      { index: FREE, piece: 'chair-gamer', facing: 'left' },
-      { index: W * BASE_LAYOUT.height, piece: 'chair-wood', facing: 'down' },
-      { index: at(seat.tx, seat.ty), piece: 'chair-wood', facing: 'down' },
-      { index: at(PLAYER_SPAWN_TX, PLAYER_SPAWN_TY), piece: 'chair-wood', facing: 'down' },
+      { index: FREE, piece: 'chair-metal', rotation: 270 },
+      { index: W * BASE_LAYOUT.height, piece: 'chair-wood', rotation: 0 },
+      { index: at(seat.tx, seat.ty), piece: 'chair-wood', rotation: 0 },
     ]);
-    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store, seats: BASE_MAP_SEATS });
+    const runtime = runtimeWith(store);
 
     await runtime.load();
 
-    expect(runtime.chairs()).toEqual([{ index: FREE, piece: 'chair-gamer', facing: 'left' }]);
+    expect(runtime.decor()).toEqual([
+      { index: at(seat.tx, seat.ty), piece: 'chair-wood', rotation: 0 },
+      { index: FREE, piece: 'chair-metal', rotation: 270 },
+    ]);
   });
 
-  it('places, turns and removes chairs atomically, telling every subscriber once per edit', async () => {
+  it('resolves the pieces it places from the catalog, retired ones included, with a fallback by id', async () => {
+    const runtime = runtimeWith();
+    await runtime.load();
+
+    expect(runtime.decorInfo('table-meeting')).toEqual({ kind: 'table', footprint: { w: 7, h: 5 } });
+    expect(runtime.decorInfo('plant-gone')).toEqual({ kind: 'plant', footprint: { w: 1, h: 1 } });
+    expect(runtime.decorInfo('tree-oak')).toBeNull();
+    expect(runtime.decorInfo('desk-glass')).toEqual({ kind: 'desk', footprint: { w: 3, h: 1 } });
+    expect(runtime.decorInfo('table-unknown')).toBeNull();
+  });
+
+  it('places, turns and removes items atomically, telling every subscriber once per edit', async () => {
     const store = createMemoryTerrain();
-    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+    const runtime = runtimeWith(store);
     await runtime.load();
     const listener = vi.fn();
     runtime.subscribe(listener);
 
-    await runtime.setChairs([{ index: FREE, chair: WOOD_DOWN }, { index: FREE + 1, chair: { piece: 'chair-metal', facing: 'up' } }], 'admin-1', NONE);
+    await runtime.setDecor([{ index: FREE, item: WOOD_DOWN }, { index: FREE + 2 * W, item: { piece: 'desk-wood', rotation: 180 } }], 'admin-1');
 
-    expect(runtime.chairs()).toEqual([{ index: FREE, ...WOOD_DOWN }, { index: FREE + 1, piece: 'chair-metal', facing: 'up' }]);
-    expect(await store.loadChairs()).toEqual(runtime.chairs());
-    expect(store.chairActorOf(FREE)).toBe('admin-1');
+    expect(runtime.decor()).toEqual([{ index: FREE, ...WOOD_DOWN }, { index: FREE + 2 * W, piece: 'desk-wood', rotation: 180 }]);
+    expect(await store.loadDecor()).toEqual(runtime.decor());
+    expect(store.decorActorOf(FREE)).toBe('admin-1');
     expect(listener).toHaveBeenCalledExactlyOnceWith(runtime.blocks());
 
-    await runtime.setChairs([{ index: FREE, chair: null }, { index: FREE + 1, chair: { piece: 'chair-metal', facing: 'left' } }], 'admin-1', NONE);
-    expect(runtime.chairs()).toEqual([{ index: FREE + 1, piece: 'chair-metal', facing: 'left' }]);
+    await runtime.setDecor([{ index: FREE, item: null }, { index: FREE + 2 * W, item: { piece: 'desk-wood', rotation: 90 } }], 'admin-1');
+    expect(runtime.decor()).toEqual([{ index: FREE + 2 * W, piece: 'desk-wood', rotation: 90 }]);
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
   it('saves nothing and tells nobody when every tile already holds what the edit asks', async () => {
     const store = createMemoryTerrain([], [], [{ index: FREE, ...WOOD_DOWN }]);
-    const saveChairs = vi.spyOn(store, 'saveChairs');
-    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+    const saveDecor = vi.spyOn(store, 'saveDecor');
+    const runtime = runtimeWith(store);
     await runtime.load();
     const listener = vi.fn();
     runtime.subscribe(listener);
 
-    await runtime.setChairs([{ index: FREE, chair: WOOD_DOWN }, { index: FREE + 5, chair: null }], null, NONE);
+    await runtime.setDecor([{ index: FREE, item: WOOD_DOWN }, { index: FREE + 5, item: null }], null);
 
-    expect(saveChairs).not.toHaveBeenCalled();
+    expect(saveDecor).not.toHaveBeenCalled();
     expect(listener).not.toHaveBeenCalled();
   });
 
-  it('refuses the whole batch when one chair lands on water, a wall, a desk or a static tile, reading protections only to place chairs', async () => {
-    const store = createMemoryTerrain([], [[at(70, 22), 'wall-brick']], [{ index: FREE + 4, ...WOOD_DOWN }]);
-    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store, seats: BASE_MAP_SEATS });
+  it.each([
+    ['an unknown piece', { piece: 'chair-throne', rotation: 0 }],
+    ['a retired piece', { piece: 'plant-gone', rotation: 0 }],
+    ['a piece the layer does not place', { piece: 'tree-oak', rotation: 0 }],
+    ['a turned plant', { piece: 'plant-ficus', rotation: 90 }],
+    ['a turned room table', { piece: 'table-meeting', rotation: 180 }],
+  ] as const)('refuses %s as an invalid edit', async (_name, item) => {
+    const runtime = runtimeWith();
     await runtime.load();
-    const desks = vi.fn(async (): Promise<TerrainProtections> => ({ placements: [DESK], desks: [DESK], players: [] }));
 
-    await expect(runtime.setChairs([{ index: at(30, 30), chair: WOOD_DOWN }, { index: FREE, chair: WOOD_DOWN }], null, desks)).rejects.toThrow(TerrainProtectedError);
-    await expect(runtime.setChairs([{ index: at(94, 58), chair: WOOD_DOWN }], null, NONE)).rejects.toThrow(TerrainProtectedError);
-    await expect(runtime.setChairs([{ index: at(70, 22), chair: WOOD_DOWN }], null, NONE)).rejects.toThrow(TerrainProtectedError);
-    await expect(runtime.setChairs([{ index: at(PLAYER_SPAWN_TX, PLAYER_SPAWN_TY), chair: WOOD_DOWN }], null, NONE)).rejects.toThrow(TerrainProtectedError);
-    expect(runtime.chairs()).toEqual([{ index: FREE + 4, ...WOOD_DOWN }]);
-
-    desks.mockClear();
-    await runtime.setChairs([{ index: FREE + 4, chair: null }], null, desks);
-    expect(desks).not.toHaveBeenCalled();
-    expect(runtime.chairs()).toEqual([]);
+    await expect(runtime.setDecor([{ index: FREE, item }], null)).rejects.toThrow(InvalidTerrainEditError);
+    expect(runtime.decor()).toEqual([]);
   });
 
-  it('protects placed chairs from water, void and walls', async () => {
-    const store = createMemoryTerrain([], [], [{ index: FREE, ...WOOD_DOWN }]);
-    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+  it('keeps an already placed retired piece and lets it be removed', async () => {
+    const store = createMemoryTerrain([], [], [{ index: FREE, piece: 'plant-gone', rotation: 0 }]);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+
+    expect(runtime.decor()).toEqual([{ index: FREE, piece: 'plant-gone', rotation: 0 }]);
+    await runtime.setDecor([{ index: FREE, item: null }], null);
+    expect(runtime.decor()).toEqual([]);
+  });
+
+  it('refuses the whole batch when one item lands on water, a wall, a static tile or another item, never because of a desk', async () => {
+    const store = createMemoryTerrain([], [[at(70, 22), 'wall-brick']], [{ index: FREE + 4, ...WOOD_DOWN }]);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+
+    await expect(runtime.setDecor([{ index: at(30, 30), item: WOOD_DOWN }, { index: at(94, 58), item: WOOD_DOWN }], null)).rejects.toThrow(TerrainProtectedError);
+    await expect(runtime.setDecor([{ index: at(70, 22), item: WOOD_DOWN }], null)).rejects.toThrow(TerrainProtectedError);
+    await expect(runtime.setDecor([{ index: at(PLAYER_SPAWN_TX, PLAYER_SPAWN_TY), item: WOOD_DOWN }], null)).rejects.toThrow(TerrainProtectedError);
+    // A desk table along a column whose top end lands on the stored chair.
+    await expect(runtime.setDecor([{ index: FREE + 4 + W, item: { piece: 'desk-wood', rotation: 90 } }], null)).rejects.toThrow(TerrainProtectedError);
+    expect(runtime.decor()).toEqual([{ index: FREE + 4, ...WOOD_DOWN }]);
+
+    // Inside a desk zone is fine: a desk is only a zone.
+    await runtime.setDecor([{ index: at(DESK.x + 1, DESK.y + 2), item: { piece: 'desk-wood', rotation: 0 } }], null);
+    expect(runtime.decor()).toContainEqual({ index: at(DESK.x + 1, DESK.y + 2), piece: 'desk-wood', rotation: 0 });
+  });
+
+  it('only edits inside the area it is given, removals and replacements included', async () => {
+    const outside = at(DESK.x + 5, DESK.y);
+    const store = createMemoryTerrain([], [], [{ index: outside, ...WOOD_DOWN }, { index: at(DESK.x, DESK.y), ...WOOD_DOWN }]);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+
+    // A desk table on the middle of the bottom row fits; one on the left column's corner does not.
+    await runtime.setDecor([{ index: at(DESK.x + 1, DESK.y + 2), item: { piece: 'desk-wood', rotation: 0 } }], 'user-1', DESK);
+    await expect(runtime.setDecor([{ index: at(DESK.x, DESK.y + 2), item: { piece: 'desk-wood', rotation: 90 } }], 'user-1', DESK)).rejects.toThrow(DecorOutsideAreaError);
+    await expect(runtime.setDecor([{ index: outside, item: null }], 'user-1', DESK)).rejects.toThrow(DecorOutsideAreaError);
+    await expect(runtime.setDecor([{ index: outside, item: { piece: 'chair-metal', rotation: 0 } }], 'user-1', DESK)).rejects.toThrow(DecorOutsideAreaError);
+    // Removing what stands inside is fine.
+    await runtime.setDecor([{ index: at(DESK.x, DESK.y), item: null }], 'user-1', DESK);
+    expect(runtime.decor()).toEqual([
+      { index: outside, ...WOOD_DOWN },
+      { index: at(DESK.x + 1, DESK.y + 2), piece: 'desk-wood', rotation: 0 },
+    ]);
+  });
+
+  it('protects every tile of every item from water, void and walls', async () => {
+    const store = createMemoryTerrain([], [], [{ index: FREE, piece: 'desk-wood', rotation: 0 }]);
+    const runtime = runtimeWith(store);
     await runtime.load();
 
     await expect(runtime.setBlock({ index: LAWN, material: 'water', actorId: null }, NONE)).rejects.toThrow(TerrainProtectedError);
     await expect(runtime.setBlock({ index: LAWN, material: 'void', actorId: null }, NONE)).rejects.toThrow(TerrainProtectedError);
-    // The post on the bottom-right corner of the chair's tile reaches into it.
-    await expect(runtime.setWalls([{ index: FREE + W + 1, piece: 'wall-brick' }], null, NONE)).rejects.toThrow(TerrainProtectedError);
+    // The post on the bottom-right corner of the table's last tile reaches into it.
+    await expect(runtime.setWalls([{ index: FREE + W + 2, piece: 'wall-brick' }], null, NONE)).rejects.toThrow(TerrainProtectedError);
     expect(runtime.blocks()[LAWN]).toBe(BASE_LAYOUT.blocks[LAWN]);
-    expect(runtime.walls()[FREE + W + 1]).toBeNull();
+    expect(runtime.walls()[FREE + W + 2]).toBeNull();
 
-    // Without the chair the same edits go through.
-    await runtime.setChairs([{ index: FREE, chair: null }], null, NONE);
-    await runtime.setWalls([{ index: FREE + W + 1, piece: 'wall-brick' }], null, NONE);
-    expect(runtime.walls()[FREE + W + 1]).toBe('wall-brick');
+    // Without the table the same edits go through.
+    await runtime.setDecor([{ index: FREE, item: null }], null);
+    await runtime.setWalls([{ index: FREE + W + 2, piece: 'wall-brick' }], null, NONE);
+    expect(runtime.walls()[FREE + W + 2]).toBe('wall-brick');
   });
 
-  it('keeps the old chairs when saving fails', async () => {
+  it('keeps the old decor when saving fails', async () => {
     const store = createMemoryTerrain();
-    vi.spyOn(store, 'saveChairs').mockRejectedValue(new Error('connection lost'));
-    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+    vi.spyOn(store, 'saveDecor').mockRejectedValue(new Error('connection lost'));
+    const runtime = runtimeWith(store);
     await runtime.load();
     const listener = vi.fn();
     runtime.subscribe(listener);
 
-    await expect(runtime.setChairs([{ index: FREE, chair: WOOD_DOWN }], null, NONE)).rejects.toThrow('connection lost');
+    await expect(runtime.setDecor([{ index: FREE, item: WOOD_DOWN }], null)).rejects.toThrow('connection lost');
 
-    expect(runtime.chairs()).toEqual([]);
+    expect(runtime.decor()).toEqual([]);
     expect(listener).not.toHaveBeenCalled();
   });
 
-  it('runs chair edits in the same queue as walls and blocks', async () => {
-    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store: createMemoryTerrain() });
+  it('runs decor edits in the same queue as walls and blocks', async () => {
+    const runtime = runtimeWith();
     await runtime.load();
 
     const wall = runtime.setWalls([{ index: FREE, piece: 'wall-brick' }], null, NONE);
     // Checked against the wall queued before it: refused.
-    const chair = runtime.setChairs([{ index: FREE, chair: WOOD_DOWN }], null, NONE);
-    const seen = runtime.runExclusive(async () => runtime.chairs());
+    const decor = runtime.setDecor([{ index: FREE, item: WOOD_DOWN }], null);
+    const seen = runtime.runExclusive(async () => runtime.decor());
 
     await wall;
-    await expect(chair).rejects.toThrow(TerrainProtectedError);
+    await expect(decor).rejects.toThrow(TerrainProtectedError);
     expect(await seen).toEqual([]);
   });
 });

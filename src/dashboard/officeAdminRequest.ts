@@ -46,6 +46,12 @@ export interface OfficeAdminRequestOptions {
    * que no se puede leer, cae al primero de la lista (D-diseno seccion 7).
    */
   conflicts: readonly AdminErrorCode[];
+  /**
+   * The 403s that say why (`POST /me/decor`, #208: `no-desk`, `outside-desk`),
+   * read from the body like the 409s. Any other 403, or one whose body names
+   * none of these, stays `forbidden`.
+   */
+  forbidden?: readonly AdminErrorCode[];
 }
 
 /**
@@ -122,15 +128,24 @@ async function errorForInvalidRequest(response: Response): Promise<AdminError> {
 
 async function errorForStatus(
   response: Response,
-  { notConfigured, conflicts }: OfficeAdminRequestOptions,
+  { notConfigured, conflicts, forbidden = [] }: OfficeAdminRequestOptions,
 ): Promise<AdminError> {
   switch (response.status) {
     case 400:
       return errorForInvalidRequest(response);
     case 401:
       return new AdminError('unauthorized');
-    case 403:
-      return new AdminError('forbidden');
+    case 403: {
+      if (forbidden.length === 0) return new AdminError('forbidden');
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        return new AdminError('forbidden');
+      }
+      const error = typeof body === 'object' && body !== null ? (body as Record<string, unknown>).error : undefined;
+      return new AdminError(typeof error === 'string' && (forbidden as readonly string[]).includes(error) ? (error as AdminErrorCode) : 'forbidden');
+    }
     case 404:
       return new AdminError('not-found');
     case 409: {

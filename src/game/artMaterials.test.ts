@@ -103,6 +103,23 @@ describe('materialCatalogFrom: walls', () => {
   });
 });
 
+describe('materialCatalogFrom: plants and room tables (#208)', () => {
+  it('offers every plant and room table of the pack, never colorable, for the decor palette', () => {
+    expect(catalog().plant.map((option) => [option.id, option.kind, option.name])).toEqual([['plant-ficus', 'plant', 'Ficus']]);
+    expect(catalog().table.map((option) => [option.id, option.kind])).toEqual([
+      ['table-meeting', 'table'],
+      ['table-cafeteria', 'table'],
+    ]);
+    expect([...catalog().plant, ...catalog().table].every((option) => !option.colorable && option.defaultColor === null)).toBe(true);
+    expect(catalog().plant[0]!.sheetUrl).toBe('assets/pack/plant/ficus.png');
+  });
+
+  it('a plant or a room table previews its one frame', () => {
+    expect(previewFrame(catalog().plant[0]!)).toEqual({ x: 0, y: 0, width: 32, height: 48 });
+    expect(previewFrame(catalog().table[0]!)).toEqual({ x: 0, y: 0, width: 256, height: 192 });
+  });
+});
+
 describe('defaultAppearance', () => {
   it('a colorable default starts in its default color, any other one without color', () => {
     const painted = catalog().desk.find((option) => option.id === 'desk-painted');

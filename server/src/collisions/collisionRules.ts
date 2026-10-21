@@ -1,7 +1,6 @@
 /**
- * Pure rules of a collision edit: what a valid edit is, how the served desks
- * become collision placements, and when an edit would close a rectangle over
- * someone. Kept apart from the runtime and the routes for the same reason as
+ * Pure rules of a collision edit: what a valid edit is and when an edit would
+ * close a rectangle over someone. Kept apart from the runtime and the routes for the same reason as
  * `terrainRules.ts`: they are tested without a server.
  */
 
@@ -11,14 +10,9 @@ import {
   boxOverlapsRects,
   isEditablePieceId,
   parseCollisionRects,
-  pieceIdOfTextureKey,
-  type CollisionDesk,
   type CollisionPoint,
   type CollisionRect,
 } from '../../../src/game/pieceCollisions.ts';
-import { TILE } from '../../../src/game/mapData.ts';
-import type { OfficeDesk } from '../desks/desksPort.ts';
-import { DESK_SIDE } from '../desks/deskRules.ts';
 
 /** The edit was malformed: a piece that cannot be edited or invalid rectangles (400). */
 export class InvalidCollisionEditError extends Error {
@@ -61,20 +55,6 @@ export function parseCollisionEdit(pieceId: unknown, body: unknown): CollisionEd
     if (error instanceof InvalidCollisionRectsError) throw new InvalidCollisionEditError(error.message);
     throw error;
   }
-}
-
-/**
- * The served desks as the client gets them from `GET /desks` (pixels and the
- * decor of its occupant), so both sides place the same rectangles.
- */
-export function deskCollisionPlacements(desks: readonly OfficeDesk[]): CollisionDesk[] {
-  return desks.map((desk) => ({
-    x: desk.x * TILE,
-    y: desk.y * TILE,
-    w: DESK_SIDE * TILE,
-    h: DESK_SIDE * TILE,
-    items: (desk.occupant?.items ?? []).map((item) => ({ slot: item.slot, rotation: item.rotation, pieceId: pieceIdOfTextureKey(item.textureKey) })),
-  }));
 }
 
 /**

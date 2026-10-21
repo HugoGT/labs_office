@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collisionEditHoldsMap, layoutEditHoldsMap, terrainEditHoldsMap } from './editorMapHold';
+import { collisionEditHoldsMap, decorEditHoldsMap, layoutEditHoldsMap, terrainEditHoldsMap } from './editorMapHold';
 
 describe('editorMapHold', () => {
   it('the layout editor holds the map only with an item selected or being placed', () => {
@@ -14,7 +14,15 @@ describe('editorMapHold', () => {
     expect(terrainEditHoldsMap({ brush: null })).toBe(false);
     expect(terrainEditHoldsMap({ brush: { kind: 'floor', material: 'wood' } })).toBe(true);
     expect(terrainEditHoldsMap({ brush: { kind: 'wall', piece: null } })).toBe(true);
-    expect(terrainEditHoldsMap({ brush: { kind: 'chair', piece: null, facing: 'down' } })).toBe(true);
+  });
+
+  it('the decor editor holds the map only with a piece or the eraser picked (#208)', () => {
+    expect(decorEditHoldsMap(null)).toBe(false);
+    expect(decorEditHoldsMap({ brush: null, area: null })).toBe(false);
+    expect(decorEditHoldsMap({ brush: { kind: 'eraser' }, area: null })).toBe(true);
+    expect(
+      decorEditHoldsMap({ brush: { kind: 'piece', piece: 'chair-wood', info: { kind: 'chair', footprint: { w: 1, h: 1 } }, rotation: 0 }, area: { x: 1, y: 1, w: 3, h: 3 } }),
+    ).toBe(true);
   });
 
   it('the collision editor holds the map only with a piece picked', () => {

@@ -10,12 +10,13 @@
  * Walls are stored per tile, and only where one stands: removing a wall
  * deletes its row. A stored wall wins over the layout's on its tile.
  *
- * Placed chairs are stored the same way, one per tile and only where one
- * stands. The layout has none of its own (its base chairs are `BASE_MAP_SEATS`).
+ * The office decor layer (#208, `officeDecor.ts`) is stored the same way, one
+ * item per anchor tile and only where one stands. The layout has none of its
+ * own (its base chairs are `BASE_MAP_SEATS`, its props the Tiled ones).
  */
 
 import type { LayoutMaterial, WallEdit, WallPieceId } from '../../../src/game/officeLayout.ts';
-import type { ChairEdit, PlacedChair } from '../../../src/game/seating.ts';
+import type { DecorEdit, DecorItem } from '../../../src/game/officeDecor.ts';
 
 export interface TerrainStore {
   /** Edited blocks by index. Indexes the current map no longer has are the runtime's to ignore. */
@@ -28,8 +29,8 @@ export interface TerrainStore {
   loadWalls(): Promise<ReadonlyMap<number, WallPieceId>>;
   /** Places (`piece`) or removes (`null`) walls; all rows succeed or none do. */
   saveWalls(edits: readonly WallEdit[], actorId: string | null): Promise<void>;
-  /** Placed chairs sorted by tile. Tiles the current map no longer has are the runtime's to ignore. */
-  loadChairs(): Promise<readonly PlacedChair[]>;
-  /** Places or turns (`chair`) or removes (`null`) chairs; all rows succeed or none do. */
-  saveChairs(edits: readonly ChairEdit[], actorId: string | null): Promise<void>;
+  /** Decor items sorted by anchor tile. Tiles the current map no longer has are the runtime's to ignore. */
+  loadDecor(): Promise<readonly DecorItem[]>;
+  /** Places, turns or replaces (`item`) or removes (`null`) decor items; all rows succeed or none do. */
+  saveDecor(edits: readonly DecorEdit[], actorId: string | null): Promise<void>;
 }

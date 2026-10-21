@@ -65,19 +65,15 @@ import {
 import {
   BASE_MAP_SEATS,
   chairSeatTiles,
-  decorChairAt,
-  decorSeatTiles,
-  encodeTerrainChairs,
   inSeatReach,
   mapSeatTiles,
   parseSeatRef,
-  type PlacedChair,
   type SeatTiles,
 } from '../../src/game/seating.ts';
+import { decorChairs, encodeOfficeDecor, type DecorItem } from '../../src/game/officeDecor.ts';
 import { createCallInvitationRegistry, type CallInvitationRegistry } from './callInvitations.ts';
 import { physicalBodyRect } from '../../src/game/avatarGeometry.ts';
 import { ART_PACK_DEFAULTS } from './decor/artCatalogRules.ts';
-import type { DeskDirectory, OfficeDesk } from './desks/desksPort.ts';
 import { decideAccess, type AccessDecision } from './directory/accessDecision.ts';
 import type { LastPosition, UserDirectory } from './directory/directoryPort.ts';
 import { isPositionInMap } from './directory/positionRules.ts';
@@ -243,11 +239,11 @@ export interface OfficeRoomOptions {
    */
   subscribeTerrainChanges?: (listener: (blocks: readonly LayoutMaterial[]) => void) => () => void;
   /**
-   * The chairs placed from the terrain editor, read when someone asks for one
-   * and on every terrain change, replicated as `state.terrainChairs`. Absent,
-   * there are none.
+   * The office decor layer (#208), read when someone asks for one of its
+   * chairs and on every terrain change, replicated as `state.officeDecor`.
+   * Absent, there is none.
    */
-  chairs?: () => readonly PlacedChair[];
+  decor?: () => readonly DecorItem[];
   /**
    * The collision rectangles every `move` is checked against, read on each
    * move. Absent is the static office with every piece at its default (the
@@ -327,13 +323,6 @@ export interface OfficeRoomOptions {
    * retire route can put every player wearing it on the pack default.
    */
   characters?: CharacterUpdatesHub;
-  /**
-   * Assignable desks, to check a decor chair seat: that the desk exists, where
-   * it is and the decor chairs of its occupant. A desk has no seat of its own
-   * (Editar espacios). Absent (no `DATABASE_URL`) there are no desks, so only
-   * the base map chairs and the placed chairs can be sat on.
-   */
-  desks?: Pick<DeskDirectory, 'listOfficeDesks'>;
 }
 
 /** Registro del motivo por el que el directorio cerro la puerta. */
@@ -394,17 +383,15 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
    * same account can find them and cancel the seat.
    */
   private pendingReconnections = new Map<string, { uid: string; seat: Deferred<Client> }>();
-  private desks?: Pick<DeskDirectory, 'listOfficeDesks'>;
   /**
-   * Each sitter's seat reach and directory id, by session (step 6). Kept
-   * because a decor chair's area comes from the store, and a `move` has to know
-   * it without asking the store on every step; the id survives a
-   * reconnection window, when the client is not in `this.clients`.
+   * Each sitter's seat reach and directory id, by session (step 6). Kept so
+   * a `move` knows the reach without resolving the seat on every step; the id
+   * survives a reconnection window, when the client is not in `this.clients`.
    */
   private seated = new Map<string, { reach: SeatTiles; userId: string | null }>();
   private terrain: () => TerrainSnapshot = () => BASE_TERRAIN;
   private mapSeats = BASE_MAP_SEATS;
-  private chairs: () => readonly PlacedChair[] = () => [];
+  private decor: () => readonly DecorItem[] = () => [];
   private collisions: () => readonly CollisionRect[] = () => BASE_COLLISION_RECTS;
   // Bridges a definitive leave and a refresh while its write is in flight.
   // Serializing per uid prevents an older slow write from undoing a newer leave.
@@ -414,14 +401,14 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     this.mapSeats = options?.seats ?? BASE_MAP_SEATS;
     this.state = new OfficeState();
     if (options?.terrain) this.terrain = options.terrain;
-    if (options?.chairs) this.chairs = options.chairs;
+    if (options?.decor) this.decor = options.decor;
     this.state.terrainBlocks = encodeTerrainBlocks(this.terrain().blocks);
     this.state.terrainWalls = encodeTerrainWalls(this.terrain().walls);
-    this.state.terrainChairs = encodeTerrainChairs(this.chairs());
+    this.state.officeDecor = encodeOfficeDecor(this.decor());
     this.unsubscribeTerrainChanges = options?.subscribeTerrainChanges?.((blocks) => {
       this.state.terrainBlocks = encodeTerrainBlocks(blocks);
       this.state.terrainWalls = encodeTerrainWalls(this.terrain().walls);
-      this.state.terrainChairs = encodeTerrainChairs(this.chairs());
+      this.state.officeDecor = encodeOfficeDecor(this.decor());
       this.recheckChairSeats();
       // The runtime has persisted and published its authoritative snapshot.
       // Iterate replicated players, not sockets: reserved reconnects must move too.
@@ -450,10 +437,8 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     }
     this.stopRecording = options?.stopRecording;
     this.recordings = options?.recordings;
-    this.desks = options?.desks;
     this.unsubscribeDesksChanges = options?.subscribeDesksChanges?.(() => {
       this.broadcast('deskschanged');
-      void this.recheckDeskSeats();
     });
     this.unsubscribeSpacesChanges = options?.subscribeSpacesChanges?.(() => {
       this.broadcast('spaceschanged');
@@ -545,7 +530,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     // Sitting (step 6) is a request like any other: an unknown seat, one out
     // of reach, an occupied one or someone else's desk is dropped whole.
     this.onMessage('sit', (client: Client<unknown, OfficeAuthData>, message: SitMessage) => {
-      void this.sit(client, message?.seat, message?.positionRevision ?? 0);
+      this.sit(client, message?.seat, message?.positionRevision ?? 0);
     });
 
     this.onMessage('stand', (client: Client) => {
@@ -942,14 +927,12 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   }
 
   /**
-   * Seats `client` on `raw` if the room agrees (step 6). A base map chair or a
-   * placed chair is checked right away; a decor chair asks the store, so
-   * everything is checked again after that wait: the player may have moved,
-   * left or lost the seat to someone faster in between. A desk has no seat of
-   * its own (Editar espacios): its seats are the decor chairs, guest seats
-   * anyone may take whoever owns the desk.
+   * Seats `client` on `raw` if the room agrees (step 6): a base map chair, or
+   * a chair of the decor layer (#208) that stands there now. A desk has no
+   * seat of its own: its seats are the decor chairs on it, guest seats anyone
+   * may take whoever owns the desk.
    */
-  private async sit(client: Client<unknown, OfficeAuthData>, raw: unknown, revision: number): Promise<void> {
+  private sit(client: Client<unknown, OfficeAuthData>, raw: unknown, revision: number): void {
     const ref = parseSeatRef(raw, this.mapSeats.length);
     if (ref === null) return;
     const seatId = raw as string;
@@ -963,28 +946,10 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       return;
     }
 
-    if (ref.kind === 'chair') {
-      // A placed chair seats anyone, like a base map chair, if it stands there now.
-      const chair = this.chairs().find((candidate) => candidate.index === ref.index);
-      if (chair === undefined) return;
-      this.takeSeat(client.sessionId, seatId, { reach: chairSeatTiles(this.terrain().width, chair.index), userId }, chair.facing);
-      return;
-    }
-
-    if (!this.desks) return;
-
-    // A decor chair is a guest seat: anyone sits on it, whoever owns the
-    // desk, as long as the occupant's decor holds a chair in that slot now.
-    let desks: Awaited<ReturnType<DeskDirectory['listOfficeDesks']>>;
-    try {
-      desks = await this.desks.listOfficeDesks();
-    } catch {
-      return;
-    }
-    const desk = desks.find((candidate) => candidate.id === ref.deskId);
-    const chair = desk === undefined ? null : decorChairAt(desk.occupant?.items ?? [], ref.slot);
-    if (desk === undefined || chair === null || player.positionRevision !== revision) return;
-    this.takeSeat(client.sessionId, seatId, { reach: decorSeatTiles(desk, ref.slot), userId }, chair.facing);
+    // A decor chair seats anyone, like a base map chair, if it stands there now.
+    const chair = decorChairs(this.decor()).find((candidate) => candidate.index === ref.index);
+    if (chair === undefined) return;
+    this.takeSeat(client.sessionId, seatId, { reach: chairSeatTiles(this.terrain().width, chair.index), userId }, chair.facing);
   }
 
   private takeSeat(
@@ -1027,11 +992,12 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   }
 
   /**
-   * The placed chairs changed: whoever sits on one that is gone stands up,
-   * and whoever sits on a turned one turns with it.
+   * The decor layer changed: whoever sits on a chair that is gone (removed or
+   * replaced by another piece) stands up, and whoever sits on a turned one
+   * turns with it.
    */
   private recheckChairSeats(): void {
-    const byTile = new Map(this.chairs().map((chair) => [chair.index, chair]));
+    const byTile = new Map(decorChairs(this.decor()).map((chair) => [chair.index, chair]));
     for (const [sessionId] of this.seated) {
       const player = this.state.players.get(sessionId);
       const ref = parseSeatRef(player?.seat);
@@ -1039,40 +1005,6 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       const chair = byTile.get(ref.index);
       if (chair === undefined) this.standUp(sessionId);
       else if (player.facing !== chair.facing) player.facing = chair.facing;
-    }
-  }
-
-  /**
-   * A desk or its decor changed (claimed, released, moved, deleted, or its
-   * occupant saved new decor): whoever sits on a decor chair that is gone
-   * (removed, replaced, moved to another slot, or gone with its desk or
-   * occupant) or no longer reaches it stands up; a turned decor chair turns
-   * its sitter.
-   */
-  private async recheckDeskSeats(): Promise<void> {
-    if (!this.desks) return;
-    const decorSitters = [...this.seated].filter(([sessionId]) => parseSeatRef(this.state.players.get(sessionId)?.seat)?.kind === 'decor');
-    if (decorSitters.length === 0) return;
-    let desks: readonly OfficeDesk[];
-    try {
-      desks = await this.desks.listOfficeDesks();
-    } catch {
-      return;
-    }
-    const byId = new Map(desks.map((desk) => [desk.id, desk]));
-    for (const [sessionId, seat] of decorSitters) {
-      const player = this.state.players.get(sessionId);
-      const ref = parseSeatRef(player?.seat);
-      if (!player || ref?.kind !== 'decor' || this.seated.get(sessionId) !== seat) continue;
-      const desk = byId.get(ref.deskId);
-      const chair = desk === undefined ? null : decorChairAt(desk.occupant?.items ?? [], ref.slot);
-      const reach = desk === undefined ? null : decorSeatTiles(desk, ref.slot);
-      if (chair === null || reach === null || !inSeatReach(player, reach)) {
-        this.standUp(sessionId);
-      } else {
-        this.seated.set(sessionId, { ...seat, reach });
-        if (player.facing !== chair.facing) player.facing = chair.facing;
-      }
     }
   }
 

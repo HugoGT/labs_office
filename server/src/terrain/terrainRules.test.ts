@@ -7,14 +7,15 @@ import {
   withBlock,
   type LayoutMaterial,
 } from '../../../src/game/officeLayout.ts';
+import { MAX_DECOR_EDITS, type DecorItem, type DecorPieceInfo } from '../../../src/game/officeDecor.ts';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN, LEGACY_SEATS as BASE_MAP_SEATS } from '../../../src/test/legacyOffice.ts';
 import {
   InvalidTerrainEditError,
   TerrainProtectedError,
   findUnwalkableConflict,
-  findChairConflict,
+  findDecorConflict,
   findWallConflict,
-  parseChairBatch,
+  parseDecorBatch,
   parseTerrainBatch,
   parseWallBatch,
   parseTerrainEdit,
@@ -217,15 +218,16 @@ describe('findWallConflict', () => {
   });
 });
 
-describe('parseChairBatch', () => {
+describe('parseDecorBatch', () => {
   const TILES = BASE_LAYOUT.width * BASE_LAYOUT.height;
 
-  it('reads chairs and erasures on distinct tiles of the map', () => {
+  it('reads items and erasures on distinct tiles of the map', () => {
     expect(
-      parseChairBatch({ edits: [{ index: 0, chair: { piece: 'chair-wood', facing: 'down' } }, { index: TILES - 1, chair: null }] }, TILES),
+      parseDecorBatch({ edits: [{ index: 0, item: { piece: 'chair-wood', rotation: 270 } }, { index: TILES - 1, item: null }, { index: 5, item: { piece: 'plant-upload-0123456789abcdef', rotation: 0 } }] }, TILES),
     ).toEqual([
-      { index: 0, chair: { piece: 'chair-wood', facing: 'down' } },
-      { index: TILES - 1, chair: null },
+      { index: 0, item: { piece: 'chair-wood', rotation: 270 } },
+      { index: TILES - 1, item: null },
+      { index: 5, item: { piece: 'plant-upload-0123456789abcdef', rotation: 0 } },
     ]);
   });
 
@@ -234,55 +236,71 @@ describe('parseChairBatch', () => {
     ['an array body', []],
     ['no edits', {}],
     ['an empty batch', { edits: [] }],
-    ['a tile off the map', { edits: [{ index: 189 * 135 * 10, chair: null }] }],
-    ['a negative tile', { edits: [{ index: -1, chair: null }] }],
-    ['a fractional tile', { edits: [{ index: 1.5, chair: null }] }],
-    ['an unknown piece', { edits: [{ index: 3, chair: { piece: 'chair-throne', facing: 'down' } }] }],
-    ['a wall piece', { edits: [{ index: 3, chair: { piece: 'wall-brick', facing: 'down' } }] }],
-    ['an unknown facing', { edits: [{ index: 3, chair: { piece: 'chair-wood', facing: 'north' } }] }],
-    ['a chair that is not an object', { edits: [{ index: 3, chair: 'chair-wood' }] }],
-    ['a missing chair', { edits: [{ index: 3 }] }],
-    ['a repeated tile', { edits: [{ index: 3, chair: null }, { index: 3, chair: { piece: 'chair-wood', facing: 'up' } }] }],
+    ['a tile off the map', { edits: [{ index: TILES, item: null }] }],
+    ['a negative tile', { edits: [{ index: -1, item: null }] }],
+    ['a fractional tile', { edits: [{ index: 1.5, item: null }] }],
+    ['a malformed piece id', { edits: [{ index: 3, item: { piece: 'chair:wood', rotation: 0 } }] }],
+    ['a piece that is not a string', { edits: [{ index: 3, item: { piece: 7, rotation: 0 } }] }],
+    ['an unknown rotation', { edits: [{ index: 3, item: { piece: 'chair-wood', rotation: 45 } }] }],
+    ['a missing rotation', { edits: [{ index: 3, item: { piece: 'chair-wood' } }] }],
+    ['an item that is not an object', { edits: [{ index: 3, item: 'chair-wood' }] }],
+    ['a missing item', { edits: [{ index: 3 }] }],
+    ['a repeated tile', { edits: [{ index: 3, item: null }, { index: 3, item: { piece: 'chair-wood', rotation: 0 } }] }],
     ['an edit that is not an object', { edits: [3] }],
   ])('refuses %s', (_name, body) => {
-    expect(() => parseChairBatch(body, TILES)).toThrow(InvalidTerrainEditError);
+    expect(() => parseDecorBatch(body, TILES)).toThrow(InvalidTerrainEditError);
   });
 
-  it('caps a batch at MAX_CHAIR_EDITS tiles', () => {
-    const edits = (count: number) => Array.from({ length: count }, (_, index) => ({ index, chair: null }));
-    expect(parseChairBatch({ edits: edits(500) }, TILES)).toHaveLength(500);
-    expect(() => parseChairBatch({ edits: edits(501) }, TILES)).toThrow(InvalidTerrainEditError);
+  it('caps a batch at MAX_DECOR_EDITS tiles', () => {
+    const edits = (count: number) => Array.from({ length: count }, (_, index) => ({ index, item: null }));
+    expect(parseDecorBatch({ edits: edits(MAX_DECOR_EDITS) }, TILES)).toHaveLength(MAX_DECOR_EDITS);
+    expect(() => parseDecorBatch({ edits: edits(MAX_DECOR_EDITS + 1) }, TILES)).toThrow(InvalidTerrainEditError);
   });
 });
 
-describe('findChairConflict', () => {
-  const free = 22 * W + 67;
-  const desk = { x: 66, y: 21, w: 3, h: 3 };
+describe('findDecorConflict', () => {
+  const at = (tx: number, ty: number) => ty * W + tx;
+  const free = at(67, 22);
+  const INFO: Record<string, DecorPieceInfo> = {
+    'chair-wood': { kind: 'chair', footprint: { w: 1, h: 1 } },
+    'desk-wood': { kind: 'desk', footprint: { w: 3, h: 1 } },
+    'table-meeting': { kind: 'table', footprint: { w: 7, h: 5 } },
+  };
+  const infoOf = (piece: string) => INFO[piece] ?? null;
+  const conflict = (after: DecorItem[], placed: number[], snapshot = BASE_TERRAIN) => findDecorConflict(after, new Set(placed), infoOf, snapshot, STATIC);
 
-  it('lets a chair stand on any free walkable tile, rooms and players included', () => {
-    const protections: TerrainProtections = { placements: [{ x: 60, y: 18, w: 12, h: 9 }], players: [standingOn(67, 22)] };
-    expect(findChairConflict([free], BASE_TERRAIN, STATIC, protections)).toBeNull();
-    expect(findChairConflict([], BASE_TERRAIN, STATIC, protections)).toBeNull();
+  it('lets an item stand on free walkable ground, desks, rooms and players included', () => {
+    expect(conflict([{ index: free, piece: 'chair-wood', rotation: 0 }], [free])).toBeNull();
+    expect(conflict([{ index: free, piece: 'desk-wood', rotation: 90 }], [free])).toBeNull();
+    expect(conflict([], [])).toBeNull();
   });
 
-  it('refuses a chair on water or void, on a seat, static furniture or the spawn area, or on a desk', () => {
+  it('refuses any tile of a footprint on water or void, a static tile or the spawn area, or off the map', () => {
     const seat = BASE_MAP_SEATS[0]!;
-    const lake = 58 * W + 94;
+    const lake = at(94, 58);
     expect(BASE_TERRAIN.walkable[lake]).toBe(false);
-    expect(findChairConflict([free, lake], BASE_TERRAIN, STATIC, NONE)).toBe('placement');
-    expect(findChairConflict([seat.ty * W + seat.tx], BASE_TERRAIN, STATIC, NONE)).toBe('placement');
-    expect(findChairConflict([PLAYER_SPAWN_TY * W + PLAYER_SPAWN_TX + 1], BASE_TERRAIN, STATIC, NONE)).toBe('placement');
-    expect(findChairConflict([free], BASE_TERRAIN, STATIC, { ...NONE, desks: [desk] })).toBe('placement');
-    expect(findChairConflict([22 * W + 69], BASE_TERRAIN, STATIC, { ...NONE, desks: [desk] })).toBeNull();
+    expect(conflict([{ index: lake, piece: 'chair-wood', rotation: 0 }], [lake])).toBe('placement');
+    // A desk table next to the seat reaches it with an end tile.
+    expect(conflict([{ index: at(seat.tx + 1, seat.ty), piece: 'desk-wood', rotation: 0 }], [at(seat.tx + 1, seat.ty)])).toBe('placement');
+    expect(conflict([{ index: at(PLAYER_SPAWN_TX + 1, PLAYER_SPAWN_TY), piece: 'chair-wood', rotation: 0 }], [at(PLAYER_SPAWN_TX + 1, PLAYER_SPAWN_TY)])).toBe('placement');
+    expect(conflict([{ index: at(0, 5), piece: 'desk-wood', rotation: 0 }], [at(0, 5)])).toBe('placement');
   });
 
-  it('refuses a chair on a tile a wall rectangle covers', () => {
+  it('refuses a footprint on a tile a wall rectangle covers', () => {
     const walls = new Array<string | null>(W * BASE_LAYOUT.height).fill(null);
     walls[free] = 'wall-brick';
     const walled = terrainSnapshot(BASE_LAYOUT, BASE_LAYOUT.blocks, walls);
     // The post on the top-left corner of the tile reaches into it and its three neighbors.
-    expect(findChairConflict([free], walled, STATIC, NONE)).toBe('placement');
-    expect(findChairConflict([free - W - 1], walled, STATIC, NONE)).toBe('placement');
-    expect(findChairConflict([free + 1], walled, STATIC, NONE)).toBeNull();
+    expect(conflict([{ index: free, piece: 'chair-wood', rotation: 0 }], [free], walled)).toBe('placement');
+    expect(conflict([{ index: free + 2, piece: 'desk-wood', rotation: 0 }], [free + 2], walled)).toBeNull();
+    expect(conflict([{ index: free + 1, piece: 'desk-wood', rotation: 0 }], [free + 1], walled)).toBe('placement');
+  });
+
+  it('refuses a placed item overlapping another one, but never blames stored items for overlapping each other', () => {
+    const table = { index: free, piece: 'desk-wood', rotation: 0 } as const;
+    expect(conflict([table, { index: free + 1, piece: 'chair-wood', rotation: 0 }], [free + 1])).toBe('placement');
+    expect(conflict([table, { index: free + W, piece: 'chair-wood', rotation: 0 }], [free + W])).toBeNull();
+    // Two stored items that overlap already (kept at load) never veto an edit elsewhere.
+    expect(conflict([table, { index: free + 1, piece: 'chair-wood', rotation: 0 }, { index: free + 5 * W, piece: 'chair-wood', rotation: 0 }], [free + 5 * W])).toBeNull();
   });
 });

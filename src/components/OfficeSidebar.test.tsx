@@ -329,7 +329,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
 
   it('con rol admin y puerto de terreno, ofrece TAMBIEN la edicion del terreno (#123 phase 2)', async () => {
     const user = userEvent.setup();
-    renderSidebar({ ...adminProps(), terrain: { setBlock: vi.fn(async () => undefined), setBlocks: vi.fn(), setWalls: vi.fn(), setChairs: vi.fn() } });
+    renderSidebar({ ...adminProps(), terrain: { setBlock: vi.fn(async () => undefined), setBlocks: vi.fn(), setWalls: vi.fn() } });
 
     await user.click(screen.getByRole('button', { name: /Personalizar/ }));
 
@@ -436,7 +436,22 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     expect(screen.queryByRole('button', { name: 'Salir' })).not.toBeInTheDocument();
   });
 
+  it('offers "Decoración" first to admins with the decor port, and to nobody else (#208)', async () => {
+    const decor = { setDecor: vi.fn(async () => undefined) };
+    const { unmount } = render(<OfficeSidebar self={SELF} peers={[ANA]} {...adminProps()} decor={decor} terrain={{ setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn() }} />);
+    await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
+    const panel = screen.getByRole('region', { name: 'Personalizar' });
+    const entries = within(panel).getAllByRole('button').filter((button) => button.getAttribute('aria-label') !== 'Cerrar');
+    expect(entries[0]).toHaveTextContent('Decoración');
+    unmount();
+
+    renderSidebar({ ...adminProps(), role: 'employee', decor });
+    await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
+    expect(screen.queryByRole('button', { name: 'Decoración' })).not.toBeInTheDocument();
+  });
+
   it.each([
+    ['Decoración', 'decoredit'],
     ['Editar espacios', 'layoutedit'],
     ['Editar terreno', 'terrainedit'],
     ['Editar colisiones', 'collisionedit'],
@@ -445,7 +460,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     const onEditingChange = vi.fn();
     const commands: unknown[] = [];
     props.bridge.onCommand(command, (value) => commands.push(value));
-    renderSidebar({ ...props, terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn(), setChairs: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() }, onLayoutEditingChange: onEditingChange });
+    renderSidebar({ ...props, decor: { setDecor: vi.fn() }, terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() }, onLayoutEditingChange: onEditingChange });
     await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
     await userEvent.click(screen.getByRole('button', { name: label }));
     const exit = await screen.findByRole('button', { name: 'Salir' });
@@ -455,7 +470,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     expect(commands.at(-1)).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Mi espacio' })).not.toBeInTheDocument();
     // Only its own submenu: no other menu entry (inside "Editar espacios" the rooms offer their own entry).
-    for (const entry of ['Editar espacios', 'Editar terreno', 'Editar colisiones']) {
+    for (const entry of ['Decoración', 'Editar espacios', 'Editar terreno', 'Editar colisiones'].filter((other) => other !== label)) {
       expect(screen.queryByRole('button', { name: entry })).not.toBeInTheDocument();
     }
     await userEvent.click(exit);
@@ -491,8 +506,26 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     }
   });
 
+  it('"Mi espacio" with a claimed desk decorates it on the map and ends with «Dejar escritorio» (#208)', async () => {
+    const props = adminProps();
+    const commands: unknown[] = [];
+    props.bridge.onCommand('decoredit', (value) => commands.push(value));
+    const onLeaveDesk = vi.fn();
+    const area = { x: 10, y: 12, w: 3, h: 3 };
+    renderSidebar({ ...props, role: 'employee', mySpace: { hasDesk: true, area, decor: { setDecor: vi.fn() }, onLeaveDesk } });
+    await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Mi espacio' }));
+
+    expect(commands.at(-1)).toEqual({ brush: null, area });
+    await userEvent.click(screen.getByRole('button', { name: 'Dejar escritorio' }));
+    expect(onLeaveDesk).toHaveBeenCalledTimes(1);
+    // Back to the menu: the desk editor lets go of the map.
+    await userEvent.click(screen.getByRole('button', { name: 'Salir' }));
+    expect(commands.at(-1)).toBeNull();
+  });
+
   it('does not offer admin capabilities to guests even when all ports exist', async () => {
-    renderSidebar({ ...adminProps(), role: 'guest', assets: fakeAssets(), terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn(), setChairs: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() } });
+    renderSidebar({ ...adminProps(), role: 'guest', assets: fakeAssets(), terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() } });
     await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
     expect(screen.queryByRole('button', { name: /Editar/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Catálogo de decoración' })).not.toBeInTheDocument();
@@ -763,7 +796,7 @@ describe('OfficeSidebar: Escape closes the open panel', () => {
       spaces,
       refreshDesks: vi.fn(),
       refreshSpaces: vi.fn(),
-      terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn(), setChairs: vi.fn() },
+      terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn() },
       onLayoutEditingChange,
     });
     const toggle = screen.getByRole('button', { name: /Personalizar/ });

@@ -330,6 +330,86 @@ describe('SpaceEditorSection: a room only asks for its area, the floor is the te
   });
 });
 
+describe('SpaceEditorSection: «Múltiple» (#207)', () => {
+  async function openForm(name: string, spaces = fakeSpaces()) {
+    const bridge = createOfficeBridge();
+    renderSection({ spaces, bridge });
+    await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
+    await screen.findByText('Sala grande');
+    await userEvent.type(screen.getByLabelText(/Nombre de la nueva sala/), name);
+    await userEvent.clear(screen.getByLabelText(/^Ancho$/));
+    await userEvent.type(screen.getByLabelText(/^Ancho$/), '7');
+    await userEvent.clear(screen.getByLabelText(/^Alto$/));
+    await userEvent.type(screen.getByLabelText(/^Alto$/), '6');
+    await userEvent.type(screen.getByLabelText(/Aforo/), '4');
+    return { bridge, spaces };
+  }
+  const place = (bridge: ReturnType<typeof createOfficeBridge>, tx: number) =>
+    act(() => bridge.emit('layoutplace', { tx, ty: 2, valid: true }));
+
+  it('is off by default: a created room goes back to an empty form', async () => {
+    const { bridge, spaces } = await openForm('Sala 1');
+    expect(screen.getByRole('checkbox', { name: 'Múltiple' })).not.toBeChecked();
+    await userEvent.click(screen.getByRole('button', { name: /Colocar nueva sala/ }));
+    place(bridge, 1);
+
+    await waitFor(() => expect(spaces.createSpace).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByLabelText(/Nombre de la nueva sala/)).toHaveValue(''));
+  });
+
+  it('on, a created room goes back to placing the next one: same size and capacity, the next name, until Escape', async () => {
+    const { bridge, spaces } = await openForm('Sala 1');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Múltiple' }));
+    await userEvent.click(screen.getByRole('button', { name: /Colocar nueva sala/ }));
+
+    place(bridge, 1);
+    await waitFor(() => expect(spaces.createSpace).toHaveBeenCalledWith({ name: 'Sala 1', x: 1, y: 2, w: 7, h: 6, capacity: 4 }));
+    expect(await screen.findByText(/Toca el nuevo sitio/)).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Múltiple' })).toBeChecked();
+    place(bridge, 20);
+    await waitFor(() => expect(spaces.createSpace).toHaveBeenCalledWith({ name: 'Sala 2', x: 20, y: 2, w: 7, h: 6, capacity: 4 }));
+    expect(await screen.findByText(/Toca el nuevo sitio/)).toBeInTheDocument();
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByText(/Toca el nuevo sitio/)).not.toBeInTheDocument();
+    // The form holds what was about to be placed, ready to go on later.
+    await waitFor(() => expect(screen.getByLabelText(/Nombre de la nueva sala/)).toHaveValue('Sala 3'));
+    expect(screen.getByLabelText(/^Ancho$/)).toHaveValue(7);
+    expect(screen.getByLabelText(/Aforo/)).toHaveValue(4);
+    expect(spaces.createSpace).toHaveBeenCalledTimes(2);
+  });
+
+  it('on, skips a next name another room already has', async () => {
+    const spaces = fakeSpaces({ listSpaces: vi.fn(async () => [SALA, { ...SALA, id: 'id-2', name: 'Sala 2' }]) });
+    const { bridge } = await openForm('Sala 1', spaces);
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Múltiple' }));
+    await userEvent.click(screen.getByRole('button', { name: /Colocar nueva sala/ }));
+
+    place(bridge, 1);
+    await waitFor(() => expect(spaces.createSpace).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/Toca el nuevo sitio/)).toBeInTheDocument();
+    place(bridge, 20);
+    await waitFor(() => expect(spaces.createSpace).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'Sala 3' })));
+  });
+
+  it('on, a refused room shows why and is placed again with the same name: only that placement is dropped', async () => {
+    const createSpace = vi.fn<SpacesAdminPort['createSpace']>(async () => Promise.reject(new AdminError('space-overlap')));
+    const spaces = fakeSpaces({ createSpace });
+    const { bridge } = await openForm('Sala 1', spaces);
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Múltiple' }));
+    await userEvent.click(screen.getByRole('button', { name: /Colocar nueva sala/ }));
+
+    place(bridge, 1);
+    await waitFor(() => expect(createSpace).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText(/Toca el nuevo sitio/)).toBeInTheDocument());
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+
+    createSpace.mockImplementation(async () => SALA);
+    place(bridge, 20);
+    await waitFor(() => expect(createSpace).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'Sala 1', x: 20 })));
+  });
+});
+
 describe('SpaceEditorSection: Escape, one level per press', () => {
   it('standalone: releases a selection first, then leaves like "Salir"', async () => {
     const onExit = vi.fn();

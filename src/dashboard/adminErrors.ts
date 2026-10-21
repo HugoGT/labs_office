@@ -42,7 +42,6 @@ const MESSAGES: Readonly<Record<AdminErrorCode, string>> = {
     'Esas coordenadas chocan con una sala: el cubiculo de 3×3 del escritorio no puede pisar su rectángulo.',
   // A painted wall under the desk: removing it or moving elsewhere fixes it.
   'desk-on-wall': 'Hay una pared en ese lugar: quítala o elige otro sitio para el escritorio.',
-  'desk-on-chair': 'Hay una silla en ese lugar: quítala desde Terreno o elige otro sitio para el escritorio.',
   // Dos salas pisandose (#10 + #12, S3a). Mismo criterio que `desk-overlap`:
   // se arregla escribiendo otras coordenadas, no cambiando de nombre.
   'space-overlap': 'Esas coordenadas chocan con otra sala existente.',
@@ -79,6 +78,8 @@ const MESSAGES: Readonly<Record<AdminErrorCode, string>> = {
   'terrain-under-placement':
     'El agua o el vacío taparían una sala, un escritorio, una silla o la entrada de la oficina. Elige otro bloque o material.',
   'terrain-stale': 'El terreno cambió mientras tanto. Vuelve a intentarlo.',
+  'no-desk': 'Ya no tienes escritorio: reclama uno libre en el mapa para decorarlo.',
+  'outside-desk': 'Solo puedes decorar dentro de tu escritorio.',
   'terrain-not-configured': 'La edición del terreno no está configurada en este servidor.',
   // Collision editor: the only refusal passes once that person moves.
   'collision-under-player': 'Hay alguien dentro de esa zona: la colisión podrá guardarse cuando se aparte.',

@@ -7,6 +7,7 @@
  */
 
 import type { CollisionEditCommand } from './collisionEditor';
+import type { DecorEditCommand } from './decorEditor';
 import type { LayoutEditCommand } from './layoutEditor';
 import type { TerrainEditCommand } from './terrainEditor';
 
@@ -16,11 +17,20 @@ export function layoutEditHoldsMap(command: LayoutEditCommand | null): boolean {
 }
 
 /**
- * A floor, wall or chair brush (erasers included) picked. It also hides the
+ * A floor or wall brush (erasers included) picked. It also hides the
  * right rail (minimap, zoom card, sidebar, exit buttons) so the map can be
  * painted up to the screen edge, until Escape unpicks the brush.
  */
 export function terrainEditHoldsMap(command: Pick<TerrainEditCommand, 'brush'> | null): boolean {
+  return command !== null && command.brush !== null;
+}
+
+/**
+ * A decor piece or the decor eraser picked (#208). Like a terrain brush it
+ * also hides the right rail, so the ghost can be placed up to the screen
+ * edge, until Escape unpicks it.
+ */
+export function decorEditHoldsMap(command: DecorEditCommand | null): boolean {
   return command !== null && command.brush !== null;
 }
 

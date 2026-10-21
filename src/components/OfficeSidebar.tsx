@@ -10,6 +10,7 @@ import type { CollisionAdminPort } from '../dashboard/collisionAdminPort';
 import type { LayoutEditorSection } from './OfficeLayoutEditor';
 import { SIDEBAR_TOP } from '../game/hudLayout';
 import type { OfficeBridge } from '../game/officeBridge';
+import type { OfficeDecorPort } from '../game/officeDecorPort';
 import { DO_NOT_DISTURB } from '../game/officeProtocol';
 import { statusCssColor } from '../game/presence';
 import type { RosterPeer } from '../game/roster';
@@ -50,13 +51,7 @@ const MyCharacterSectionLazy = lazy(() =>
 type PersonalizeSection = LayoutEditorSection | 'assets' | 'space' | 'art' | 'character';
 
 /** "Mi espacio" without a server: no desk to decorate. */
-const NO_SPACE: MiEspacioPanelProps = {
-  hasDesk: false,
-  phase: 'unavailable',
-  catalog: [],
-  items: [],
-  onSave: async () => 'failed',
-};
+const NO_SPACE: MiEspacioPanelProps = { hasDesk: false };
 
 export interface OfficeSidebarProps {
   /** Uno mismo, para anteponerlo (#74): el `roster` del puente ya lo excluye. */
@@ -69,11 +64,11 @@ export interface OfficeSidebarProps {
    */
   forceCollapsed?: boolean;
   /**
-   * What "Mi espacio" edits: the decor of one's own desk (Editar espacios).
-   * Absent (no server, the open office) it asks to claim a desk, which there
-   * is no way to do there either.
+   * What "Mi espacio" edits: the decor on one's own desk (#208) and the way
+   * to leave it. Absent (no server, the open office) it asks to claim a desk,
+   * which there is no way to do there either. The bridge is the sidebar's.
    */
-  mySpace?: MiEspacioPanelProps;
+  mySpace?: Omit<MiEspacioPanelProps, 'bridge'>;
   /**
    * Rol de sesion (#74, PR3c), resuelto por `OfficeShell` via
    * `useOfficeAdminRole` y pasado por prop -- este componente sigue sin
@@ -94,6 +89,8 @@ export interface OfficeSidebarProps {
   terrain?: TerrainAdminPort | null;
   /** Collision areas per piece: optional inside the layout editor, like `terrain`. */
   collisions?: CollisionAdminPort | null;
+  /** The office decor layer for "Decoración" (#208, `POST /admin/decor`): optional like `terrain`. */
+  decor?: OfficeDecorPort | null;
   refreshDesks?: () => void;
   refreshSpaces?: () => void;
   /** Reenviado tal cual a `OfficeLayoutEditor` (#74, PR3c: exclusividad con `DeskDecorEditor`). */
@@ -144,6 +141,7 @@ export function OfficeSidebar({
   spaces,
   terrain,
   collisions,
+  decor,
   refreshDesks,
   refreshSpaces,
   onLayoutEditingChange,
@@ -170,7 +168,7 @@ export function OfficeSidebar({
   useEffect(() => {
     if (forceExitLayoutEditing) {
       // A rising edge gives the map to another editor without trapping navigation.
-      setSection((current) => current === 'spaces' || current === 'terrain' || current === 'collision' ? null : current);
+      setSection((current) => current === 'decor' || current === 'spaces' || current === 'terrain' || current === 'collision' ? null : current);
     }
   }, [forceExitLayoutEditing]);
 
@@ -187,6 +185,8 @@ export function OfficeSidebar({
 
   const entries: { section: PersonalizeSection; label: string }[] = [
     ...(canAdminister ? [
+      // First: laying out tables and chairs is what desks are then created on top of.
+      ...(decor ? [{ section: 'decor' as const, label: 'Decoración' }] : []),
       { section: 'spaces' as const, label: 'Editar espacios' },
       ...(terrain ? [{ section: 'terrain' as const, label: 'Editar terreno' }] : []),
       ...(collisions ? [{ section: 'collision' as const, label: 'Editar colisiones' }] : []),
@@ -200,7 +200,7 @@ export function OfficeSidebar({
   // Drop unavailable selections immediately, not just hide them until a port returns.
   if (!available) setSection(null);
   const currentSection = available ? section : null;
-  const layoutSection = currentSection === 'spaces' || currentSection === 'terrain' || currentSection === 'collision'
+  const layoutSection = currentSection === 'decor' || currentSection === 'spaces' || currentSection === 'terrain' || currentSection === 'collision'
     ? currentSection : null;
 
   function togglePanel(panel: 'personalize' | 'people'): void {
@@ -281,6 +281,7 @@ export function OfficeSidebar({
                 spaces={spaces}
                 terrain={terrain}
                 collisions={collisions}
+                decor={decor}
                 refreshDesks={refreshDesks}
                 refreshSpaces={refreshSpaces}
                 onEditingChange={onLayoutEditingChange}
@@ -292,7 +293,7 @@ export function OfficeSidebar({
               <AssetsPanelLazy assets={assets} />
             </Suspense>
           )}
-          {currentSection === 'space' && <MiEspacioPanel {...mySpace} />}
+          {currentSection === 'space' && <MiEspacioPanel {...mySpace} bridge={bridge} />}
           {currentSection === 'character' && character !== undefined && character !== null && (
             <Suspense fallback={null}>
               <MyCharacterSectionLazy character={character} onClose={() => setSection(null)} />

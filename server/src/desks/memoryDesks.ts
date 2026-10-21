@@ -25,7 +25,6 @@
 
 import { randomUUID } from 'node:crypto';
 import { ART_PACK_DEFAULTS, normalizeStoredAppearance } from '../decor/artCatalogRules.ts';
-import type { DecorCatalog } from '../decor/decorPort.ts';
 import type { UserDirectory } from '../directory/directoryPort.ts';
 import type {
   CreateDeskInput,
@@ -82,12 +81,6 @@ export interface MemoryDesksOptions {
    * nombre, asi que no inventa un caso que Postgres no pueda dar.
    */
   directory?: Pick<UserDirectory, 'findById'>;
-  /**
-   * De donde sale la decoracion del ocupante en `listOfficeDesks`. Sin el, un
-   * ocupante se resuelve sin items: exactamente lo que devuelve la consulta de
-   * `pgDesks` para quien no ha decorado nada.
-   */
-  decor?: Pick<DecorCatalog, 'getDeskConfig'>;
   /**
    * La afordancia `deskSpaces` de `createMemorySpaces` (#10 + #12, tarea 2.5).
    * Sin ella, crear/mover/renombrar un escritorio no sincroniza ningun
@@ -146,15 +139,12 @@ export function createMemoryDesks(options: MemoryDesksOptions = {}): DeskDirecto
           continue;
         }
 
-        // El nombre y la decoracion se resuelven por separado porque vienen de
-        // dos almacenes distintos; en `pgDesks` son un JOIN y una segunda
-        // consulta acotada. Lo que tiene que coincidir es la FORMA del
+        // En `pgDesks` es un JOIN; lo que tiene que coincidir es la FORMA del
         // resultado, no el numero de lecturas.
         const user = await options.directory?.findById(desk.occupantId);
-        const items = (await options.decor?.getDeskConfig(desk.occupantId)) ?? [];
         office.push({
           ...desk,
-          occupant: { id: desk.occupantId, displayName: user?.displayName ?? null, items },
+          occupant: { id: desk.occupantId, displayName: user?.displayName ?? null },
         });
       }
 

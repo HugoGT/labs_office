@@ -1,68 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import type { OfficeDesk } from './desksPort';
+import exportedManifest from '../../public/assets/pack/manifest.json?raw';
+import type { ArtPackManifest } from './artContract';
 import { BASE_LAYOUT } from './officeLayout';
-import { BASE_COLLISION_RECTS, STATIC_COLLISION_INSTANCES, officeCollisionInstances, officeDeskPlacements } from './officeCollisions';
+import { BASE_COLLISION_RECTS, STATIC_COLLISION_INSTANCES, decorInfoFromManifest, officeCollisionInstances } from './officeCollisions';
 import { collisionWorld, staticCollisionInstances } from './pieceCollisions';
 import { BASE_MAP_SEATS } from './seating';
 
-function desk(overrides: Partial<OfficeDesk> = {}): OfficeDesk {
-  return { id: 'd1', label: 'Mesa 1', x: 320, y: 160, w: 96, h: 96, occupant: null, mine: false, ...overrides };
-}
+const PACK = JSON.parse(exportedManifest) as ArtPackManifest;
 
 describe('officeCollisions', () => {
   it('starts from the static office with every piece at its default', () => {
     expect(STATIC_COLLISION_INSTANCES).toEqual(staticCollisionInstances(BASE_LAYOUT.props, BASE_MAP_SEATS));
     expect(BASE_COLLISION_RECTS).toEqual(collisionWorld(STATIC_COLLISION_INSTANCES, new Map()));
+    expect(officeCollisionInstances()).toEqual(STATIC_COLLISION_INSTANCES);
   });
 
-  it('places the served desks as the server does: pixels and the pieces of the decor, never a material', () => {
-    const served = desk({
-      occupant: {
-        id: 'u1',
-        displayName: null,
-        items: [
-          { id: 'i1', slot: 4, rotation: 90, textureKey: 'art:plant-ficus:sheet', aboveAvatars: false },
-          { id: 'i2', slot: 1, rotation: 0, textureKey: 'decor-mug', aboveAvatars: false },
-        ],
-      },
-    });
-
-    expect(officeDeskPlacements([served, desk({ id: 'd2' })])).toEqual([
-      {
-        x: 320,
-        y: 160,
-        w: 96,
-        h: 96,
-        items: [
-          { slot: 4, rotation: 90, pieceId: 'plant-ficus' },
-          { slot: 1, rotation: 0, pieceId: null },
-        ],
-      },
-      { x: 320, y: 160, w: 96, h: 96, items: [] },
-    ]);
+  it('resolves decor pieces from the manifest, falling back on the id while it is not loaded', () => {
+    const infoOf = decorInfoFromManifest(PACK);
+    expect(infoOf('table-meeting')).toEqual({ kind: 'table', footprint: { w: 7, h: 5 } });
+    expect(infoOf('chair-wood')).toEqual({ kind: 'chair', footprint: { w: 1, h: 1 } });
+    expect(infoOf('tree-oak')).toBeNull();
+    expect(decorInfoFromManifest(null)('desk-upload-0123456789abcdef')).toEqual({ kind: 'desk', footprint: { w: 3, h: 1 } });
+    expect(decorInfoFromManifest(null)('table-meeting')).toBeNull();
   });
 
-  it('adds no instance for an empty desk: it has no built-in table', () => {
-    expect(officeCollisionInstances([desk()])).toEqual(STATIC_COLLISION_INSTANCES);
-  });
-
-  it('collides with a decor chair once an admin gave its piece rectangles, nothing before', () => {
-    const served = desk({
-      occupant: { id: 'u1', displayName: null, items: [{ id: 'i1', slot: 8, rotation: 0, textureKey: 'art:chair-leather:sheet', aboveAvatars: false }] },
-    });
-    const instances = officeCollisionInstances([served]);
-
-    expect(instances.at(-1)).toMatchObject({ piece: 'chair-leather', pivot: { x: 320 + 80, y: 160 + 80 } });
-    expect(collisionWorld(instances.slice(-1), new Map())).toEqual([]);
-    expect(collisionWorld(instances.slice(-1), new Map([['chair-leather', [{ x: -8, y: -4, w: 16, h: 8 }]]]))).toEqual([
-      { piece: 'chair-leather', x: 392, y: 236, w: 16, h: 8 },
-    ]);
-  });
-
-  it('adds the placed chairs last, each as its own piece', () => {
-    const instances = officeCollisionInstances([desk()], undefined, undefined, [{ index: 5, piece: 'chair-gamer', facing: 'up' }]);
+  it('adds the decor layer last, each item as its own piece, as the room does', () => {
+    const instances = officeCollisionInstances(BASE_LAYOUT, BASE_MAP_SEATS, [{ index: 5, piece: 'chair-gamer', rotation: 180 }], decorInfoFromManifest(PACK));
 
     expect(instances).toHaveLength(STATIC_COLLISION_INSTANCES.length + 1);
     expect(instances.at(-1)).toMatchObject({ piece: 'chair-gamer', pivot: { x: 5 * 32 + 16, y: 16 } });
+    expect(collisionWorld(instances.slice(-1), new Map())).toEqual([]);
   });
 });

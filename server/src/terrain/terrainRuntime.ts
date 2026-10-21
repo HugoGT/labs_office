@@ -14,10 +14,12 @@
  * blocks by its rectangles, so the room refuses moves into them and
  * relocates whoever a wall now overlaps exactly like after a block edit.
  *
- * And the placed chairs: one per tile, seats anyone may take. They are not
- * part of the snapshot (they never change walkability; their piece's
- * rectangles, if any, collide through the collision runtime), but they are
- * protected like static seats: no water, void or wall may land on one.
+ * And the office decor layer (#208, `officeDecor.ts`): every chair, desk
+ * table, plant and room table, one item per anchor tile, in the same queue.
+ * It is not part of the snapshot (it never changes walkability; its pieces'
+ * rectangles collide through the collision runtime), but every tile of every
+ * item is protected like a static seat: no water, void or wall may land on
+ * one.
  */
 
 import {
@@ -34,16 +36,30 @@ import {
   type TerrainSnapshot,
   type WallEdit,
 } from '../../../src/game/officeLayout.ts';
-import { BASE_MAP_SEATS, withChairs, type ChairEdit, type MapSeat, type PlacedChair } from '../../../src/game/seating.ts';
+import { BASE_MAP_SEATS, type MapSeat } from '../../../src/game/seating.ts';
+import {
+  decorFootprint,
+  decorInfoFromPieceId,
+  decorPieceInfo,
+  decorTiles,
+  fitsInsideDesk,
+  isRotatable,
+  withDecor,
+  type DecorEdit,
+  type DecorItem,
+  type DecorPieceInfo,
+  type DecorTileRect,
+} from '../../../src/game/officeDecor.ts';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
 import type { TerrainStore } from './terrainPort.ts';
 import {
+  InvalidTerrainEditError,
   TerrainProtectedError,
   TerrainStaleError,
   parseTerrainBatch,
-  parseChairBatch,
+  parseDecorBatch,
   parseWallBatch,
-  findChairConflict,
+  findDecorConflict,
   findUnwalkableConflict,
   findWallConflict,
   staticProtectedTiles,
@@ -52,8 +68,8 @@ import {
 } from './terrainRules.ts';
 
 /**
- * Called after each accepted edit, block, wall or chair, with the whole block
- * list. `snapshot()` and `chairs()` already answer with the new terrain.
+ * Called after each accepted edit, block, wall or decor, with the whole block
+ * list. `snapshot()` and `decor()` already answer with the new terrain.
  */
 export type TerrainListener = (blocks: readonly LayoutMaterial[]) => void;
 
@@ -79,15 +95,25 @@ export interface TerrainRuntime {
    * the edit places a post) or a tile the static layout protects.
    */
   setWalls(edits: readonly WallEdit[], actorId: string | null, protections: () => Promise<TerrainProtections>): Promise<readonly (string | null)[]>;
-  /** The placed chairs, sorted by tile. */
-  chairs(): readonly PlacedChair[];
+  /** The office decor layer (#208), sorted by anchor tile. */
+  decor(): readonly DecorItem[];
   /**
-   * Places, turns or removes chairs atomically, or throws
-   * `TerrainProtectedError` when one would stand on unwalkable ground, a
-   * wall, a desk (`protections`, read only when the edit places a chair) or
-   * a tile the static layout protects.
+   * What the decor rules know of a piece: from the catalog last read (at
+   * load and on every decor edit, retired pieces included), else from its id
+   * for chairs, desk tables and plants. `null` for a piece it cannot place.
    */
-  setChairs(edits: readonly ChairEdit[], actorId: string | null, protections: () => Promise<TerrainProtections>): Promise<readonly PlacedChair[]>;
+  decorInfo(piece: string): DecorPieceInfo | null;
+  /**
+   * Places, turns, replaces or removes decor items atomically. Throws
+   * `InvalidTerrainEditError` for a malformed batch, a piece the catalog
+   * does not offer (unknown, retired or of a kind the layer does not place)
+   * or a turned piece that does not turn; `DecorOutsideAreaError` when
+   * `area` is given (a desk, `POST /me/decor`) and an item placed, replaced
+   * or removed does not lie entirely inside it; `TerrainProtectedError` when
+   * a placed item would stand off the map, on unwalkable ground, a wall, a
+   * static tile or another item.
+   */
+  setDecor(edits: readonly DecorEdit[], actorId: string | null, area?: DecorTileRect): Promise<readonly DecorItem[]>;
   /**
    * Runs `task` in the edit queue with the snapshot every edit before it
    * left, and holds later edits until it settles. A desk write uses it so no
@@ -98,20 +124,58 @@ export interface TerrainRuntime {
   subscribe(listener: TerrainListener): () => void;
 }
 
-export function createTerrainRuntime({ layout, store, seats = BASE_MAP_SEATS }: { layout: OfficeLayout; store?: TerrainStore; seats?: readonly MapSeat[] }): TerrainRuntime {
+/** An edit of `POST /me/decor` reaches outside the caller's desk (403 `outside-desk`). */
+export class DecorOutsideAreaError extends Error {
+  constructor() {
+    super('a decor item lies outside the desk');
+    this.name = 'DecorOutsideAreaError';
+  }
+}
+
+/** One catalog piece as the decor rules read it: `art_pieces`, retired ones included. */
+export interface DecorCatalogPiece {
+  readonly id: string;
+  readonly kind: string;
+  readonly footprint?: { readonly w: number; readonly h: number };
+  readonly retired: boolean;
+}
+
+export function createTerrainRuntime({
+  layout,
+  store,
+  seats = BASE_MAP_SEATS,
+  decorPieces,
+}: {
+  layout: OfficeLayout;
+  store?: TerrainStore;
+  seats?: readonly MapSeat[];
+  /** Reads the art catalog, retired pieces included. Absent: pieces resolve by id and only chairs, desk tables and plants place. */
+  decorPieces?: () => Promise<readonly DecorCatalogPiece[]>;
+}): TerrainRuntime {
   const spawn = blockIndexAt(layout.width, PLAYER_SPAWN_TX, PLAYER_SPAWN_TY);
   const staticTiles = staticProtectedTiles(layout, seats);
   const listeners = new Set<TerrainListener>();
   let blocks: readonly LayoutMaterial[] = layout.blocks;
   let walls: readonly (string | null)[] = layout.walls;
   let snapshot = terrainSnapshot(layout, blocks, walls);
-  let chairs: readonly PlacedChair[] = [];
+  let decor: readonly DecorItem[] = [];
+  let catalog = new Map<string, DecorCatalogPiece>();
   let queue: Promise<unknown> = Promise.resolve();
 
-  /** The static tiles plus every placed chair's: what water, void and walls must not reach. */
+  function decorInfo(piece: string): DecorPieceInfo | null {
+    const known = catalog.get(piece);
+    return known === undefined ? decorInfoFromPieceId(piece) : decorPieceInfo(known);
+  }
+
+  async function readCatalog(): Promise<void> {
+    if (!decorPieces) return;
+    catalog = new Map((await decorPieces()).map((piece) => [piece.id, piece]));
+  }
+
+  /** The static tiles plus every tile of every decor item: what water, void and walls must not reach. */
   function protectedTiles(): ReadonlySet<number> {
-    if (chairs.length === 0) return staticTiles;
-    return new Set([...staticTiles, ...chairs.map((chair) => chair.index)]);
+    if (decor.length === 0) return staticTiles;
+    return new Set([...staticTiles, ...decor.flatMap((item) => decorTiles(item, decorInfo(item.piece), layout.width))]);
   }
 
   /** Runs `edit` after every edit queued before it; the chain survives a refused or failed one. */
@@ -169,29 +233,43 @@ export function createTerrainRuntime({ layout, store, seats = BASE_MAP_SEATS }: 
     return walls;
   }
 
-  async function applyChairs(
-    edits: readonly ChairEdit[], actorId: string | null,
-    protections: () => Promise<TerrainProtections>,
-  ): Promise<readonly PlacedChair[]> {
-    if (!store) throw new Error('no terrain store: the chairs cannot be edited');
-    parseChairBatch({ edits }, layout.width * layout.height);
-    const byTile = new Map(chairs.map((chair) => [chair.index, chair]));
-    const changed = edits.filter(({ index, chair }) => {
+  async function applyDecor(edits: readonly DecorEdit[], actorId: string | null, area?: DecorTileRect): Promise<readonly DecorItem[]> {
+    if (!store) throw new Error('no terrain store: the decor cannot be edited');
+    parseDecorBatch({ edits }, layout.width * layout.height);
+    await readCatalog();
+    const byTile = new Map(decor.map((item) => [item.index, item]));
+    const changed = edits.filter(({ index, item }) => {
       const current = byTile.get(index);
-      if (chair === null) return current !== undefined;
-      return current === undefined || current.piece !== chair.piece || current.facing !== chair.facing;
+      if (item === null) return current !== undefined;
+      return current === undefined || current.piece !== item.piece || current.rotation !== item.rotation;
     });
-    if (changed.length === 0) return chairs;
-    const placed = changed.flatMap(({ index, chair }) => (chair === null ? [] : [index]));
-    if (placed.length > 0) {
-      const conflict = findChairConflict(placed, snapshot, staticTiles, await protections());
-      if (conflict !== null) throw new TerrainProtectedError(conflict);
+    if (changed.length === 0) return decor;
+    for (const { item } of changed) {
+      if (item === null) continue;
+      // A new placement needs a piece the catalog offers today; one already
+      // placed keeps drawing even after it was retired.
+      const known = catalog.get(item.piece);
+      const info = decorPieces ? (known === undefined || known.retired ? null : decorPieceInfo(known)) : decorInfoFromPieceId(item.piece);
+      if (info === null) throw new InvalidTerrainEditError('unknown decor piece');
+      if (item.rotation !== 0 && !isRotatable(info.kind)) throw new InvalidTerrainEditError('this piece does not turn');
     }
-    const next = withChairs(chairs, changed);
-    await store.saveChairs(changed, actorId);
-    chairs = next;
+    if (area !== undefined) {
+      const inside = (item: Pick<DecorItem, 'index' | 'piece' | 'rotation'>): boolean =>
+        fitsInsideDesk(decorFootprint(item, decorInfo(item.piece), layout.width), area);
+      for (const { index, item } of changed) {
+        const current = byTile.get(index);
+        if (current !== undefined && !inside(current)) throw new DecorOutsideAreaError();
+        if (item !== null && !inside({ index, ...item })) throw new DecorOutsideAreaError();
+      }
+    }
+    const next = withDecor(decor, changed);
+    const placed = new Set(changed.flatMap(({ index, item }) => (item === null ? [] : [index])));
+    const conflict = findDecorConflict(next, placed, decorInfo, snapshot, staticTiles);
+    if (conflict !== null) throw new TerrainProtectedError(conflict);
+    await store.saveDecor(changed, actorId);
+    decor = next;
     for (const listener of listeners) listener(blocks);
-    return chairs;
+    return decor;
   }
 
   return {
@@ -217,12 +295,16 @@ export function createTerrainRuntime({ layout, store, seats = BASE_MAP_SEATS }: 
       walls = withWalls(layout.walls, wallEdits);
       snapshot = terrainSnapshot(layout, blocks, walls);
       const tileCount = layout.width * layout.height;
-      // Same rule as the walls: a chair that may not stand there is ignored, never rewritten.
-      chairs = (await store.loadChairs()).filter(({ index }) => index >= 0 && index < tileCount && !staticTiles.has(index));
+      await readCatalog();
+      // Unlike the walls, a stored item that breaks today's rules is kept and
+      // drawn: it is someone's furniture, and only new edits are checked.
+      // Only an anchor off the map is left out.
+      decor = (await store.loadDecor()).filter(({ index }) => index >= 0 && index < tileCount);
     },
     blocks: () => blocks,
     walls: () => walls,
-    chairs: () => chairs,
+    decor: () => decor,
+    decorInfo,
     snapshot: () => snapshot,
     editable: store !== undefined,
     setBlock(edit, protections) {
@@ -234,8 +316,8 @@ export function createTerrainRuntime({ layout, store, seats = BASE_MAP_SEATS }: 
     setWalls(edits, actorId, protections) {
       return enqueue(() => applyWalls(edits, actorId, protections));
     },
-    setChairs(edits, actorId, protections) {
-      return enqueue(() => applyChairs(edits, actorId, protections));
+    setDecor(edits, actorId, area) {
+      return enqueue(() => applyDecor(edits, actorId, area));
     },
     runExclusive(task) {
       return enqueue(() => task(snapshot));

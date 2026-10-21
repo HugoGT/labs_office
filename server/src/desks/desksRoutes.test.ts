@@ -96,9 +96,8 @@ function harness(
     now: () => NOW,
     seed,
   });
-  const decor = createMemoryDecor({ now: () => NOW });
   const spaces = createMemorySpaces({ now: () => NOW, ...roomSeed });
-  const desks = createMemoryDesks({ now: () => NOW, directory, decor, spaces: spaces.deskSpaces });
+  const desks = createMemoryDesks({ now: () => NOW, directory, spaces: spaces.deskSpaces });
   return {
     desks,
     spaces,
@@ -169,7 +168,7 @@ describe('handleListDesks', () => {
     expect(await handleListDesks(BEARER_ANA, deps)).toEqual({ status: 200, body: { desks: [] } });
   });
 
-  it('cada escritorio viaja con su ocupante y la decoracion de ese ocupante', async () => {
+  it('cada escritorio viaja con su ocupante, sin decoracion: la decoracion es del mapa (#208)', async () => {
     const { deps, desks } = harness();
     const desk = await desks.createDesk({ label: 'Mesa 1', x: 4, y: 4 });
     await desks.claimDesk(desk.id, ANA.id);
@@ -182,7 +181,7 @@ describe('handleListDesks', () => {
         label: 'Mesa 1',
         x: 4,
         y: 4,
-        occupant: { id: ANA.id, displayName: 'Ana', items: [] },
+        occupant: { id: ANA.id, displayName: 'Ana' },
       }),
     ]);
   });
@@ -522,7 +521,6 @@ describe('handleUpdateDesk', () => {
     // `INSERT ... ON CONFLICT DO NOTHING` del backfill en `schema.sql`), y sin
     // fila emparejada en `spaces` todavia.
     const directory = createMemoryDirectory({ now: () => NOW, seed: [ADMIN] });
-    const decor = createMemoryDecor({ now: () => NOW });
     const spaces = createMemorySpaces({
       now: () => NOW,
       seed: [{ id: 'sala-1', slug: 'sala-1', name: 'Sala de Juntas', x: 50, y: 2, w: 13, h: 14, capacity: null }],
@@ -536,7 +534,7 @@ describe('handleUpdateDesk', () => {
       createdAt: NOW,
       updatedAt: NOW,
     };
-    const desks = createMemoryDesks({ now: () => NOW, directory, decor, spaces: spaces.deskSpaces, seed: [D0] });
+    const desks = createMemoryDesks({ now: () => NOW, directory, spaces: spaces.deskSpaces, seed: [D0] });
     const deps: DesksDeps = { directory, desks, auth: verifier, now: () => NOW, log: () => {} };
 
     // Un renombrado no lo mueve, y sigue chocando: 409 desk-space-overlap.
@@ -618,18 +616,6 @@ describe('desks over painted walls', () => {
 
     expect(result).toEqual({ status: 409, body: { error: 'desk-on-wall' } });
     expect(await desks.getDesk(desk.id)).toMatchObject({ x: 0, y: 0 });
-  });
-
-  it('refuses to create or move a desk over a placed chair', async () => {
-    const { deps, desks } = harness();
-    const chairs: DeskWallGuard = { run: vi.fn(async (write) => write({ width: WIDTH, walls: new Array(WIDTH * 30).fill(null), chairs: [{ index: 6 * WIDTH + 11 }] })) };
-    const desk = await desks.createDesk({ label: 'Mesa', x: 0, y: 0 });
-
-    expect(await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa', x: 10, y: 5 }, { ...deps, walls: chairs })).toEqual({ status: 409, body: { error: 'desk-on-chair' } });
-    expect(await handleUpdateDesk(BEARER_ADMIN, desk.id, { x: 9, y: 4 }, { ...deps, walls: chairs })).toEqual({ status: 409, body: { error: 'desk-on-chair' } });
-    expect(await desks.listDesks()).toHaveLength(1);
-    expect(await desks.getDesk(desk.id)).toMatchObject({ x: 0, y: 0 });
-    expect((await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa', x: 12, y: 5 }, { ...deps, walls: chairs })).status).toBe(201);
   });
 
   it('moves a desk to a free spot through the guard', async () => {
@@ -855,6 +841,23 @@ describe('handleReleaseDesk', () => {
     expect((await desks.getDesk(desk.id))?.occupantId).toBeNull();
   });
 
+  it('a released desk is free for anyone: someone else can claim it, and so can the person who left it (#208)', async () => {
+    const { deps, desks } = harness();
+    const desk = await desks.createDesk({ label: 'Mesa', x: 0, y: 0 });
+    const other = await desks.createDesk({ label: 'Otra', x: 8, y: 0 });
+    expect((await handleClaimDesk(BEARER_ANA, desk.id, deps)).status).toBe(200);
+    expect((await handleReleaseDesk(BEARER_ANA, deps)).status).toBe(200);
+
+    expect((await handleClaimDesk(BEARER_BRUNO, desk.id, deps)).status).toBe(200);
+    expect((await desks.getDesk(desk.id))?.occupantId).toBe(BRUNO.id);
+    // The person who left can take another one, and the same one again once it is free.
+    expect((await handleClaimDesk(BEARER_ANA, other.id, deps)).status).toBe(200);
+    expect((await handleReleaseDesk(BEARER_BRUNO, deps)).status).toBe(200);
+    expect((await handleClaimDesk(BEARER_ANA, desk.id, deps)).status).toBe(200);
+    expect((await desks.getDesk(desk.id))?.occupantId).toBe(ANA.id);
+    expect((await desks.getDesk(other.id))?.occupantId).toBeNull();
+  });
+
   it('soltar sin tener nada responde 200: es idempotente', async () => {
     const { deps } = harness();
 
@@ -897,13 +900,13 @@ describe('handleReleaseDesk', () => {
 describe('desk appearance, chosen only at creation (art step 7)', () => {
   const PACK = readArtPackManifest(new URL('../../../public/assets/pack/manifest.json', import.meta.url));
 
-  /** Same wiring as `harness`, with the pack registered in the catalog the desks read decor from. */
+  /** Same wiring as `harness`, with the pack registered in the catalog a creation checks its material against. */
   async function withCatalog() {
     const directory = createMemoryDirectory({ now: () => NOW, seed: [ADMIN, ANA, BRUNO, CADUCADO] });
     const decor = createMemoryDecor({ now: () => NOW });
     await decor.registerArtPack(PACK);
     const spaces = createMemorySpaces({ now: () => NOW });
-    const desks = createMemoryDesks({ now: () => NOW, directory, decor, spaces: spaces.deskSpaces });
+    const desks = createMemoryDesks({ now: () => NOW, directory, spaces: spaces.deskSpaces });
     const deps: DesksDeps = { directory, desks, decor, auth: verifier, now: () => NOW, log: () => {} };
     return { deps, desks, decor };
   }
@@ -1003,8 +1006,8 @@ describe('desk appearance, chosen only at creation (art step 7)', () => {
     );
   });
 
-  it('moving, renaming, claiming and releasing keep the appearance; the decor follows the person', async () => {
-    const { deps, desks, decor } = await withCatalog();
+  it('moving, renaming, claiming and releasing keep the appearance', async () => {
+    const { deps, desks } = await withCatalog();
     const painted = await handleCreateDesk(
       BEARER_ADMIN,
       { label: 'Mesa 1', x: 0, y: 0, materialId: 'desk-painted', color: '#c0392b' },
@@ -1013,13 +1016,10 @@ describe('desk appearance, chosen only at creation (art step 7)', () => {
     const glass = await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa 2', x: 8, y: 0, materialId: 'desk-glass' }, deps);
     const paintedId = painted.body.id as string;
     const glassId = glass.body.id as string;
-    const plant = await decor.createAsset({ name: 'Planta', kind: 'plant', textureKey: 'plant-large', w: 1, h: 1, placeableOnDesk: true });
-    await decor.replaceDeskConfig(ANA.id, [{ assetId: plant.id, slot: 0, rotation: 0 }]);
 
     expect((await handleUpdateDesk(BEARER_ADMIN, paintedId, { x: 4, y: 4 }, deps)).status).toBe(200);
     expect((await handleUpdateDesk(BEARER_ADMIN, paintedId, { label: 'Mesa roja' }, deps)).status).toBe(200);
     expect((await handleClaimDesk(BEARER_ANA, paintedId, deps)).status).toBe(200);
-    // Ana moving to another desk takes her decor along, never the furniture color.
     expect((await handleClaimDesk(BEARER_ANA, glassId, deps)).status).toBe(200);
 
     const seated = await handleListDesks(BEARER_BRUNO, deps);
@@ -1029,7 +1029,7 @@ describe('desk appearance, chosen only at creation (art step 7)', () => {
         id: glassId,
         materialId: 'desk-glass',
         color: null,
-        occupant: expect.objectContaining({ id: ANA.id, items: [expect.objectContaining({ assetId: plant.id })] }),
+        occupant: { id: ANA.id, displayName: 'Ana' },
       }),
     ]);
 

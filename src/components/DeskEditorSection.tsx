@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import type { OfficeBridge } from '../game/officeBridge';
 import { useEscapeStep } from '../hooks/useEscapeStep';
 import { useLayoutEditor } from '../hooks/useLayoutEditor';
 import styles from './DeskEditorSection.module.css';
+import { MultipleToggle } from './MultipleToggle';
 import { TrashIcon } from './TrashIcon';
 
 /**
@@ -82,6 +83,15 @@ export function DeskEditorSection({
   const [creating, setCreating] = useState(false);
   /** Why the server refused that desk, kept for the default view the section goes back to. */
   const [createError, setCreateError] = useState<string | null>(null);
+  /**
+   * "Múltiple" (#207): a desk placed, created or refused, starts placing the
+   * next one instead of going back, until Escape, "Cancelar" or "Salir".
+   */
+  const [multiple, setMultiple] = useState(false);
+  /** Why the server refused the previous desk of a "Múltiple" run: the next placement clears the hook's error. */
+  const [runError, setRunError] = useState<string | null>(null);
+  /** Where a create placement is: `saving` once its click was sent, so its end tells a placement from a cancel. */
+  const createPhaseRef = useRef<'none' | 'placing' | 'saving'>('none');
 
   const active = editor.state.tag !== 'off';
 
@@ -105,17 +115,36 @@ export function DeskEditorSection({
   }, [forceExit]);
 
   useEffect(() => {
+    const state = editor.state;
+    if (state.tag === 'placing') {
+      createPhaseRef.current = state.mode === 'create' ? 'placing' : 'none';
+      return;
+    }
+    if (state.tag === 'saving') {
+      if (createPhaseRef.current === 'placing') createPhaseRef.current = 'saving';
+      setRunError(null);
+      return;
+    }
+    const placed = createPhaseRef.current === 'saving';
+    createPhaseRef.current = 'none';
+    if (state.tag === 'idle' && placed && multiple) {
+      // Created or refused, the run goes on: only that desk is dropped.
+      setRunError(editor.error);
+      editor.startCreate();
+      return;
+    }
+    setRunError(null);
     if (!creating) return;
-    if (editor.state.tag === 'off') {
+    if (state.tag === 'off') {
       setCreating(false);
-    } else if (editor.state.tag === 'idle') {
+    } else if (state.tag === 'idle') {
       // The placement ended, created, cancelled or refused: back to the default view.
       setCreating(false);
       setCreateError(editor.error);
       editor.exit();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [creating, editor.state.tag, editor.error]);
+  }, [creating, editor.state, editor.error]);
 
   // Escape: a selection or a placement is the hook's to release; with none held
   // it leaves, a level at a time (the terrain editor's rule): the list goes back
@@ -161,6 +190,7 @@ export function DeskEditorSection({
         <button type="button" className={styles.button} onClick={handleCreate}>
           Crear escritorio
         </button>
+        <MultipleToggle checked={multiple} onChange={setMultiple} />
         {createError !== null && (
           <div className={styles.error} role="alert">
             {createError}
@@ -233,9 +263,12 @@ export function DeskEditorSection({
 
           {/* Nothing to ask: a desk is created empty, and its occupant decorates it from "Mi espacio". */}
           {!embedded && (
-            <button type="button" className={styles.button} disabled={busy} onClick={editor.startCreate}>
-              Crear escritorio
-            </button>
+            <>
+              <button type="button" className={styles.button} disabled={busy} onClick={editor.startCreate}>
+                Crear escritorio
+              </button>
+              <MultipleToggle checked={multiple} onChange={setMultiple} />
+            </>
           )}
         </>
       )}
@@ -270,10 +303,12 @@ export function DeskEditorSection({
           </button>
         </div>
       )}
+      {/* Reachable during a run, to end it after the next desk; the list view offers its own. */}
+      {(creating || (state.tag === 'placing' && state.mode === 'create')) && <MultipleToggle checked={multiple} onChange={setMultiple} />}
 
-      {editor.error !== null && (
+      {(editor.error ?? runError) !== null && (
         <div className={styles.error} role="alert">
-          {editor.error}
+          {editor.error ?? runError}
         </div>
       )}
     </div>

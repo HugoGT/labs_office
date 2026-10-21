@@ -5,20 +5,23 @@ import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import type { CollisionAdminPort } from '../dashboard/collisionAdminPort';
 import type { OfficeBridge } from '../game/officeBridge';
+import type { OfficeDecorPort } from '../game/officeDecorPort';
 import { DeskEditorSection } from './DeskEditorSection';
 import { SpaceEditorSection } from './SpaceEditorSection';
 import { TerrainEditorSection } from './TerrainEditorSection';
 import { CollisionEditorSection } from './CollisionEditorSection';
+import { DecorEditorSection } from './DecorEditorSection';
 import styles from './OfficeLayoutEditor.module.css';
 
 /**
  * The sidebar's map editors. `spaces` ("Editar espacios") holds the desks
- * first and the rooms after them, one of the two editing at a time.
+ * first and the rooms after them, one of the two editing at a time; `decor`
+ * ("Decoración", #208) places furniture anywhere on the map.
  */
-export type LayoutEditorSection = 'spaces' | 'terrain' | 'collision';
+export type LayoutEditorSection = 'decor' | 'spaces' | 'terrain' | 'collision';
 
 /** The parts of the editor that arbitrate among themselves. */
-type EditorPart = 'desk' | 'room' | 'terrain' | 'collision';
+type EditorPart = 'desk' | 'room' | 'terrain' | 'collision' | 'decor';
 
 export interface OfficeLayoutEditorProps {
   bridge: OfficeBridge;
@@ -26,6 +29,8 @@ export interface OfficeLayoutEditorProps {
   spaces: SpacesAdminPort;
   terrain?: TerrainAdminPort | null;
   collisions?: CollisionAdminPort | null;
+  /** The office decor layer (`POST /admin/decor`): optional like `terrain`. */
+  decor?: OfficeDecorPort | null;
   refreshDesks: () => void;
   refreshSpaces: () => void;
   onEditingChange?: (editing: boolean) => void;
@@ -39,11 +44,12 @@ export interface OfficeLayoutEditorProps {
 export default function OfficeLayoutEditor(props: OfficeLayoutEditorProps) {
   if (props.section === 'terrain' && !props.terrain) return null;
   if (props.section === 'collision' && !props.collisions) return null;
+  if (props.section === 'decor' && !props.decor) return null;
   return <LayoutEditorSections key={props.section ?? 'all'} {...props} />;
 }
 
 function LayoutEditorSections({
-  bridge, desks, spaces, terrain, collisions, refreshDesks, refreshSpaces,
+  bridge, desks, spaces, terrain, collisions, decor, refreshDesks, refreshSpaces,
   onEditingChange, forceExit = false, section, onExit,
 }: OfficeLayoutEditorProps) {
   // Standalone consumers and "Editar espacios" arbitrate among their parts; the
@@ -89,6 +95,14 @@ function LayoutEditorSections({
 
   const parts = (
     <>
+      {shown('decor') && decor !== undefined && decor !== null && (
+        <DecorEditorSection bridge={bridge} decor={decor} scope="office" area={null}
+          initiallyActive={section !== undefined} onExit={onExit}
+          onEditingChange={(editing) => reportEditing('decor', editing)}
+          forceExit={forced('decor')}
+          onRequestActive={() => requestActive('decor')}
+        />
+      )}
       {shown('desk') && (
         <DeskEditorSection {...shared}
           onEditingChange={(editing) => reportEditing('desk', editing)}

@@ -25,13 +25,13 @@ import {
 } from './depthLayers';
 import { feetOf, physicalBodyRect } from './avatarGeometry';
 import { BODY_CENTER_OFFSET, positionForBodyTile } from './pathfinding';
-import { chairSeatId, decorSeatId, mapSeatId } from './seating';
-import { deskItemName, deskZoneName } from './deskLayout';
+import { chairSeatId, mapSeatId } from './seating';
+import { deskZoneName } from './deskLayout';
 import { artSheetKey, recoloredSheetKey } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
 import { buildTerrainGrid } from './terrainGrid';
 import { VOID_COLOR } from './terrainRender';
-import type { DeskDecorItem, DeskOccupant, OfficeDesk } from './desksPort';
+import type { DeskOccupant, OfficeDesk } from './desksPort';
 import { createOfficeBridge, type OfficeEventMap } from './officeBridge';
 import { DEFAULT_NAME, DEFAULT_STATUS, type PresenceStatus } from './officeProtocol';
 import { STATUS_COLOR } from './presence';
@@ -43,7 +43,7 @@ import {
   type OfficeConnection,
   type OfficeRoomHandlers,
 } from './officeRoomClient';
-import { OFFICE_SCENE_KEY, OfficeScene, type OfficeSceneOptions } from './OfficeScene';
+import { OFFICE_SCENE_KEY, OfficeScene, decorObjectName, type OfficeSceneOptions } from './OfficeScene';
 import { ARRIVE_EPSILON_PX, beginAutoWalk, type AutoWalkState } from './autoWalk';
 import { SIT_AGAIN_SAME_MS, SIT_IDLE_MS, SIT_LOCK_MS } from './autoSit';
 import { regionBounds } from './cameraBounds';
@@ -328,10 +328,24 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(minimap.visible).toBe(true);
     bridge.emitCommand('terrainedit', { brush: { kind: 'wall', piece: 'wall-brick' } });
     expect(minimap.visible).toBe(false);
-    bridge.emitCommand('terrainedit', { brush: { kind: 'chair', piece: null, facing: 'down' } });
-    expect(minimap.visible).toBe(false);
     bridge.emitCommand('terrainedit', null);
     expect(minimap.visible).toBe(true);
+  });
+
+  it('hides the minimap and holds the map while a decor piece is picked, and lets go once it is not (#208)', async () => {
+    const { scene, bridge, movement } = await movementArena();
+    const minimap = scene.cameras.cameras[1]!;
+
+    bridge.emitCommand('decoredit', { brush: null, area: null });
+    expect(minimap.visible).toBe(true);
+    expect((scene as unknown as { mapHeld: boolean }).mapHeld).toBe(false);
+    bridge.emitCommand('decoredit', { brush: { kind: 'eraser' }, area: null });
+    expect(minimap.visible).toBe(false);
+    expect((scene as unknown as { mapHeld: boolean }).mapHeld).toBe(true);
+    expect(movement.autoWalk).toBeUndefined();
+    bridge.emitCommand('decoredit', null);
+    expect(minimap.visible).toBe(true);
+    expect((scene as unknown as { mapHeld: boolean }).mapHeld).toBe(false);
   });
 
   it('does not turn drags, item clicks, blocked goals or minimap clicks into walking', async () => {
@@ -934,29 +948,28 @@ describe('office entry art readiness', () => {
     expect(findPlayer(scene).sprite.texture.key).toBe(artSheetKey('character-p01-burgundy-suit', 'walk'));
   });
 
-  it.each([false, true])('settles dynamic desk and decor art before revealing (broken: %s)', async (broken) => {
+  it.each([false, true])('settles the art of the decor layer before revealing (broken: %s) (#208)', async (broken) => {
     const bridge = createOfficeBridge();
     const entry = vi.fn();
     bridge.on('entry', entry);
-    const { scene } = await bootOfficeScene(bridge, { endpoint: null, waitForOfficeData: true });
+    const connector = fakeConnector();
+    const { scene } = await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect, artUploadsUrl: null });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
     const art = (scene as unknown as { art: ArtPackLoader }).art;
     const manifest = art.manifest!;
-    const aliases = ['plant-ficus'].map((id) => {
-      const piece = manifest.pieces.find((piece) => piece.id === id)!;
-      return { ...piece, id: `${id}-entry`, files: piece.files.map((file) => ({ ...file,
-        path: broken ? 'entry-missing.png' : file.path })) };
-    });
-    art.adoptManifest({ ...manifest, pieces: [...manifest.pieces, ...aliases] });
-    bridge.emitCommand('spacesconfig', { spaces: [BUILT_IN_SPACES[0]!], version: 'entry' });
-    bridge.emitCommand('desks', { desks: [{ id: 'entry', label: 'Entry', x: 320, y: 320, w: 96, h: 96, mine: false,
-      occupant: { id: 'occupant', displayName: 'Occupant', items: [{ id: 'entry-plant', slot: 4, rotation: 0,
-        aboveAvatars: false, textureKey: artSheetKey('plant-ficus-entry', 'sheet') }] } }] });
-    expect(entry).not.toHaveBeenCalled();
+    const ficus = manifest.pieces.find((piece) => piece.id === 'plant-ficus')!;
+    const alias = { ...ficus, id: 'plant-ficus-entry', files: ficus.files.map((file) => ({ ...file, path: broken ? 'entry-missing.png' : file.path })) };
+    art.adoptManifest({ ...manifest, pieces: [...manifest.pieces, alias] });
+    const index = 40 * BASE_LAYOUT.width + 30;
+
+    connector.handlers()!.onDecor?.([{ index, piece: alias.id, rotation: 0 }]);
+    connector.handlers()!.onLocalAvatar?.('character-p01-burgundy-suit');
+
     await vi.waitFor(() => expect(entry).toHaveBeenCalledWith({ state: broken ? 'failed' : 'ready' }), LOOP_WAIT);
     if (!broken) {
-      for (const alias of aliases) expect(art.status(alias.id)).toBe('ready');
-      const item = scene.children.getByName('desk-item:entry-plant') as Phaser.GameObjects.Image;
-      expect(item.texture.key).toBe(artSheetKey('plant-ficus-entry', 'sheet'));
+      expect(art.status(alias.id)).toBe('ready');
+      const plant = scene.children.getByName(decorObjectName(index)) as Phaser.GameObjects.Image;
+      expect(plant.texture.key).toBe(artSheetKey(alias.id, 'sheet'));
     }
   });
 
@@ -2924,8 +2937,8 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
     };
   }
 
-  function occupant(displayName: string | null, items: DeskDecorItem[] = []): DeskOccupant {
-    return { id: `id-${displayName ?? 'anonimo'}`, displayName, items };
+  function occupant(displayName: string | null): DeskOccupant {
+    return { id: `id-${displayName ?? 'anonimo'}`, displayName };
   }
 
   function fakePointer(): Phaser.Input.Pointer {
@@ -3007,95 +3020,6 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
 
     const texts = scene.children.list.filter((child) => !before.has(child) && child.type === 'Text') as Phaser.GameObjects.Text[];
     expect(texts.map((text) => text.text)).toEqual(['Mesa 4']);
-  });
-
-  it('draws a decor table 1:1 centered on the edge its rotation picks, in the column of its facing (Editar espacios)', async () => {
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge);
-    const top = { id: 'mesa-arriba', slot: 1, rotation: 180 as const, textureKey: artSheetKey('desk-wood', 'sheet'), aboveAvatars: false };
-    const right = { id: 'mesa-derecha', slot: 5, rotation: 90 as const, textureKey: artSheetKey('desk-glass', 'sheet'), aboveAvatars: false };
-
-    bridge.emitCommand('desks', {
-      desks: [servedDesk({ occupant: occupant('Ana Torres', [top]) }), servedDesk({ id: 'otra', x: 20 * TILE, occupant: occupant('Luis Paz', [right]) })],
-    });
-
-    await vi.waitFor(() => {
-      const image = scene.children.getByName(deskItemName(top.id)) as Phaser.GameObjects.Image | null;
-      expect(image?.type).toBe('Image');
-      // The anchor (48, 60) of a 96x104 cell on the middle of the top row: tile (11, 12).
-      expect({ x: image!.x, y: image!.y, w: image!.displayWidth, h: image!.displayHeight, frame: Number(image!.frame.name) }).toEqual({
-        x: 11.5 * TILE - 48,
-        y: 12.5 * TILE - 60,
-        w: 96,
-        h: 104,
-        frame: 0,
-      });
-      const side = scene.children.getByName(deskItemName(right.id)) as Phaser.GameObjects.Image | null;
-      expect(side?.texture.key).toBe(artSheetKey('desk-glass', 'sheet'));
-      // Right column middle: tile (22, 13); `right` is the pack's fourth column.
-      expect({ x: side!.x, y: side!.y, frame: Number(side!.frame.name) }).toEqual({ x: 22.5 * TILE - 48, y: 13.5 * TILE - 60, frame: 3 });
-    }, LOOP_WAIT);
-  });
-
-  it('pinta la decoracion del ocupante dentro de su caja, no en cualquier sitio', async () => {
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge);
-
-    bridge.emitCommand('desks', {
-      desks: [
-        servedDesk({
-          occupant: occupant('Ana Torres', [
-            { id: 'id-item', slot: 8, rotation: 0, textureKey: 'no-existe-en-el-bundle', aboveAvatars: false },
-          ]),
-        }),
-      ],
-    });
-
-    // El slot 8 es la caja de abajo a la derecha (`deskSlotRect`): su centro
-    // cae a dos tiles y medio del origen del escritorio.
-    const decor = scene.children.getByName('desk-item:id-item') as Phaser.GameObjects.Rectangle;
-    expect(decor).not.toBeNull();
-    expect(decor.x).toBe(10 * TILE + 2.5 * TILE);
-    expect(decor.y).toBe(12 * TILE + 2.5 * TILE);
-  });
-
-  it('decor that points at an art texture (an uploaded plant, #121) loads that piece on demand and redraws with it', async () => {
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge);
-    // Any sheet the map has not loaded stands in for an upload that arrived
-    // after the page did; a character sheet is one nobody draws at boot.
-    const textureKey = artSheetKey('character-p02-beige-blazer', 'walk');
-
-    bridge.emitCommand('desks', {
-      desks: [servedDesk({ occupant: occupant('Ana Torres', [{ id: 'id-planta', slot: 4, rotation: 0, textureKey, aboveAvatars: false }]) })],
-    });
-
-    expect(scene.children.getByName('desk-item:id-planta')?.type).toBe('Rectangle');
-    await vi.waitFor(() => {
-      const drawn = scene.children.getByName('desk-item:id-planta') as Phaser.GameObjects.Image | null;
-      expect(drawn?.type).toBe('Image');
-      expect(drawn?.texture.key).toBe(textureKey);
-    }, LOOP_WAIT);
-  });
-
-  it('una pieza con un slot que no existe se salta sin llevarse el escritorio por delante', async () => {
-    // El dato viene de la red. Pintarla en una caja inventada la dejaria fuera
-    // del escritorio, y no pintar nada dejaria la oficina sin ese sitio.
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge);
-
-    bridge.emitCommand('desks', {
-      desks: [
-        servedDesk({
-          occupant: occupant('Ana Torres', [
-            { id: 'id-fuera', slot: 99, rotation: 0, textureKey: 'x', aboveAvatars: false },
-          ]),
-        }),
-      ],
-    });
-
-    expect(scene.children.getByName('desk-item:id-fuera')).toBeNull();
-    expect(findZone(scene, 'id-mesa')).not.toBeNull();
   });
 
   it('el escritorio propio se distingue del de otra persona', async () => {
@@ -3515,7 +3439,7 @@ describe('OfficeScene: modo edicion de layout (#74, PR3b)', () => {
  * each object in its band, for both the local player and remote peers.
  */
 describe('OfficeScene: render layers (#70, #71)', () => {
-  function renderDesk(items: DeskDecorItem[] = []): OfficeDesk {
+  function renderDesk(): OfficeDesk {
     return {
       id: 'id-mesa-capas',
       label: 'Mesa 9',
@@ -3523,7 +3447,7 @@ describe('OfficeScene: render layers (#70, #71)', () => {
       y: 30 * TILE,
       w: 3 * TILE,
       h: 3 * TILE,
-      occupant: { id: 'id-ocupante', displayName: 'Ana Torres', items },
+      occupant: { id: 'id-ocupante', displayName: 'Ana Torres' },
       mine: false,
     };
   }
@@ -3546,19 +3470,7 @@ describe('OfficeScene: render layers (#70, #71)', () => {
   it('the local player covers every normal asset, even standing north of it (#70)', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
-    bridge.emitCommand('desks', {
-      desks: [
-        renderDesk([
-          {
-            id: 'id-normal',
-            slot: 4,
-            rotation: 0,
-            textureKey: 'no-existe-en-el-bundle',
-            aboveAvatars: false,
-          },
-        ]),
-      ],
-    });
+    bridge.emitCommand('desks', { desks: [renderDesk()] });
     const player = findPlayer(scene);
 
     // Near the top of the map: with plain y-sorting almost every tree, desk
@@ -3588,49 +3500,6 @@ describe('OfficeScene: render layers (#70, #71)', () => {
     expect(remote.depth).toBeGreaterThan(maxDepth(normalWorldObjects(scene)));
   });
 
-  it('a special asset covers a player passing under it; a normal one does not (#71)', async () => {
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge);
-    const desk = renderDesk([
-      { id: 'id-normal', slot: 3, rotation: 0, textureKey: 'no-existe-en-el-bundle', aboveAvatars: false },
-      { id: 'id-especial', slot: 5, rotation: 0, textureKey: 'no-existe-en-el-bundle', aboveAvatars: true },
-    ]);
-    bridge.emitCommand('desks', { desks: [desk] });
-    const normal = scene.children.getByName('desk-item:id-normal')!;
-    const special = scene.children.getByName('desk-item:id-especial')!;
-    const player = findPlayer(scene);
-
-    // Walking through the middle row of the desk, below both pieces' bottom
-    // edge: plain y-sorting would put the player over both.
-    player.setPosition(desk.x + desk.w / 2, desk.y + desk.h - 4);
-
-    await vi.waitFor(() => {
-      expect(player.depth).toBeGreaterThan(depthOf(normal));
-      expect(depthOf(special)).toBeGreaterThan(player.depth);
-    }, LOOP_WAIT);
-  });
-
-  it('a special asset covers remote peers as well (#71)', async () => {
-    const connector = fakeConnector();
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge, {
-      endpoint: 'ws://fake',
-      connect: connector.connect,
-    });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
-    const desk = renderDesk([
-      { id: 'id-especial', slot: 4, rotation: 0, textureKey: 'no-existe-en-el-bundle', aboveAvatars: true },
-    ]);
-    bridge.emitCommand('desks', { desks: [desk] });
-
-    connector.handlers()!.onAdd(
-      remoteSnapshot({ sessionId: 'par-debajo', x: desk.x + desk.w / 2, y: desk.y + desk.h }),
-    );
-    const remote = findRemoteAvatars(scene)[0];
-
-    await advanceGameClock(scene, 100);
-    expect(depthOf(scene.children.getByName('desk-item:id-especial')!)).toBeGreaterThan(remote.depth);
-  });
 });
 
 describe('OfficeScene: integracion camera pan y colision de peers (#53, #59)', () => {
@@ -4174,7 +4043,7 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
     const chairIndex = 22 * BASE_LAYOUT.width + 67;
     const ground = { x: 67.5 * TILE, y: 22.5 * TILE };
     const chairObjects = () => scene.children.list.filter((child) => child.name === CHAIR_OBJECT_NAME);
-    connector.handlers()!.onChairs?.([{ index: chairIndex, piece: 'chair-gamer', facing: 'left' }]);
+    connector.handlers()!.onDecor?.([{ index: chairIndex, piece: 'chair-gamer', rotation: 270 }]);
     expect(chairObjects().length).toBeGreaterThan(0);
     player.setPosition(ground.x, ground.y - TILE);
     await advanceGameClock(scene, 50);
@@ -4185,7 +4054,7 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
     expect(feetOf(player)).toEqual(ground);
     expect(player.seatFacing).toBe('left');
 
-    connector.handlers()!.onChairs?.([]);
+    connector.handlers()!.onDecor?.([]);
     expect(player.seatFacing).toBeNull();
     expect(chairObjects()).toHaveLength(0);
   });
@@ -4293,7 +4162,7 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
         y: 30 * TILE,
         w: 3 * TILE,
         h: 3 * TILE,
-        occupant: mine ? { id: 'id-yo', displayName: 'Yo', items: [] } : null,
+        occupant: mine ? { id: 'id-yo', displayName: 'Yo' } : null,
         mine,
       };
       bridge.emitCommand('desks', { desks: [desk] });
@@ -4316,7 +4185,7 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
       y: 30 * TILE,
       w: 3 * TILE,
       h: 3 * TILE,
-      occupant: { id: 'id-otra', displayName: 'Otra', items: [] },
+      occupant: { id: 'id-otra', displayName: 'Otra' },
       mine: false,
     };
     bridge.emitCommand('desks', { desks: [desk] });
@@ -4327,10 +4196,9 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
     expect(connector.sits).toEqual([]);
   });
 
-  it('offers a decor chair of a desk someone else claimed as a guest seat, drawn in its slot, and stands up when it goes', async () => {
+  it('offers a decor chair standing on a desk someone else claimed as a guest seat, and stands up when it goes (#208)', async () => {
     const { connector, scene, player } = await connected();
     const bridge = (scene as unknown as { bridge: ReturnType<typeof createOfficeBridge> }).bridge;
-    const decorChair = { id: 'item-silla', slot: 8, rotation: 90 as const, textureKey: artSheetKey('chair-gamer', 'sheet'), aboveAvatars: false };
     const desk: OfficeDesk = {
       id: 'id-mesa-ajena',
       label: 'Mesa 2',
@@ -4338,33 +4206,34 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
       y: 30 * TILE,
       w: 3 * TILE,
       h: 3 * TILE,
-      occupant: { id: 'id-otra', displayName: 'Otra', items: [decorChair] },
+      occupant: { id: 'id-otra', displayName: 'Otra' },
       mine: false,
     };
-    // Slot 8 is the bottom right box of the 3x3 desk: tile (12, 32).
+    // The bottom right tile of the desk: (12, 32), a chair turned right.
+    const chairIndex = 32 * BASE_LAYOUT.width + 12;
     const ground = { x: 12.5 * TILE, y: 32.5 * TILE };
     const gamerLayers = () =>
       scene.children.list.filter(
         (c) => c.type === 'Image' && (c as Phaser.GameObjects.Image).texture.key === artSheetKey('chair-gamer', 'sheet'),
       ) as Phaser.GameObjects.Image[];
     bridge.emitCommand('desks', { desks: [desk] });
+    connector.handlers()!.onDecor?.([{ index: chairIndex, piece: 'chair-gamer', rotation: 90 }]);
     await vi.waitFor(() => expect(gamerLayers()).toHaveLength(2), LOOP_WAIT);
-    // Both layers around the chair ground, like any other chair, facing right (rotation 90).
+    // Both layers around the chair ground, like any other chair.
     expect(gamerLayers().map((layer) => layer.depth).sort((a, b) => a - b)).toEqual([
       chairLayerDepth(ground.y, 'back'),
       chairLayerDepth(ground.y, 'front'),
     ]);
-    expect(gamerLayers().every((layer) => layer.name === deskItemName(decorChair.id))).toBe(true);
 
     player.setPosition(ground.x, ground.y - TILE);
     await advanceGameClock(scene, 50);
     bridge.emitCommand('toggleSeat', undefined);
-    expect(connector.sits).toEqual([decorSeatId(desk.id, 8)]);
-    connector.handlers()!.onLocalSeat?.(decorSeatId(desk.id, 8));
+    expect(connector.sits).toEqual([chairSeatId(chairIndex)]);
+    connector.handlers()!.onLocalSeat?.(chairSeatId(chairIndex));
     expect(feetOf(player)).toEqual(ground);
     expect(player.seatFacing).toBe('right');
 
-    bridge.emitCommand('desks', { desks: [{ ...desk, occupant: { ...desk.occupant!, items: [] } }] });
+    connector.handlers()!.onDecor?.([]);
     expect(player.seatFacing).toBeNull();
     expect(gamerLayers()).toHaveLength(0);
   });
@@ -4462,7 +4331,7 @@ describe('OfficeScene: edited terrain', () => {
 
     expect(solidAt(scene, lawn.x, lawn.y)).toBe(true);
     expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).not.toEqual(grass);
-    expect(seen).toEqual([{ blocks: watered, walls: BASE_LAYOUT.walls, chairs: [] }]);
+    expect(seen).toEqual([{ blocks: watered, walls: BASE_LAYOUT.walls }]);
 
     handlers.onTerrain!(BASE_LAYOUT.blocks);
     // Arcade drops a destroyed static body on its next step.
@@ -4525,7 +4394,7 @@ describe('OfficeScene: edited terrain', () => {
     bridge.emitCommand('terrainedit', { brush: null });
     bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'grass' } });
 
-    expect(seen).toEqual([{ blocks: watered, walls: BASE_LAYOUT.walls, chairs: [] }]);
+    expect(seen).toEqual([{ blocks: watered, walls: BASE_LAYOUT.walls }]);
   });
 
   it('a click on the map picks a block instead of closing menus while the editor is open', async () => {
@@ -4562,7 +4431,7 @@ describe('OfficeScene: edited terrain', () => {
     expect(solidAt(scene, lawnVertex.x + TILE / 2, lawnVertex.y + 9)).toBe(false);
     expect(solidAt(scene, lawn.x, lawn.y)).toBe(false);
     expect(wallObjects(scene).length).toBeGreaterThan(before);
-    expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled, chairs: [] }]);
+    expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled }]);
 
     handlers.onWalls!(BASE_LAYOUT.walls);
     await vi.waitFor(() => expect(solidAt(scene, lawnVertex.x, lawnVertex.y)).toBe(false), LOOP_WAIT);
@@ -4585,24 +4454,29 @@ describe('OfficeScene: edited terrain', () => {
     expect(wallObjects(scene)).toHaveLength(before);
   });
 
-  it('draws pending chairs for the editor over the live ones, and tells it the live chairs', async () => {
+  it('draws pending decor edits for the editor over the live layer, never collided with, and tells it the live layer (#208)', async () => {
     const { scene, bridge, handlers } = await bootConnected();
     const chairObjects = () => scene.children.list.filter((child) => child.name === CHAIR_OBJECT_NAME);
-    const seen: OfficeEventMap['terrain'][] = [];
-    bridge.on('terrain', (payload) => seen.push(payload));
-    const live = [{ index: lawnTile, piece: 'chair-wood' as const, facing: 'down' as const }];
-    handlers.onChairs!(live);
+    const seen: OfficeEventMap['decor'][] = [];
+    bridge.on('decor', (payload) => seen.push(payload));
+    const live = [{ index: lawnTile, piece: 'chair-wood', rotation: 0 as const }];
+    handlers.onDecor!(live);
     const one = chairObjects().length;
     expect(one).toBeGreaterThan(0);
-    expect(seen.at(-1)).toEqual({ blocks: BASE_LAYOUT.blocks, walls: BASE_LAYOUT.walls, chairs: live });
+    expect(seen.at(-1)).toEqual({ items: live });
 
-    bridge.emitCommand('terrainedit', { brush: { kind: 'chair', piece: 'chair-metal', facing: 'up' }, previewChairs: [{ index: lawnTile + 1, chair: { piece: 'chair-metal', facing: 'up' } }, { index: lawnTile, chair: null }] });
+    // Opening an editor hands it the live layer again.
+    bridge.emitCommand('decoredit', { brush: null, area: null });
+    expect(seen).toHaveLength(2);
+    bridge.emitCommand('decoredit', { brush: null, area: null, preview: [{ index: lawnTile + 1, item: { piece: 'chair-metal', rotation: 180 } }, { index: lawnTile, item: null }] });
     expect(chairObjects()).toHaveLength(one);
-    bridge.emitCommand('terrainedit', { brush: { kind: 'chair', piece: 'chair-metal', facing: 'up' }, previewChairs: [{ index: lawnTile + 1, chair: { piece: 'chair-metal', facing: 'up' } }] });
+    bridge.emitCommand('decoredit', { brush: null, area: null, preview: [{ index: lawnTile + 1, item: { piece: 'chair-metal', rotation: 180 } }] });
     expect(chairObjects()).toHaveLength(2 * one);
+    expect((scene as unknown as { collisionInstances: unknown[] }).collisionInstances.filter((instance) => JSON.stringify(instance).includes('chair-metal'))).toEqual([]);
 
-    bridge.emitCommand('terrainedit', null);
+    bridge.emitCommand('decoredit', null);
     expect(chairObjects()).toHaveLength(one);
+    expect(seen).toHaveLength(2);
   });
 
   it('tells the editor the current walls when it opens', async () => {
@@ -4614,7 +4488,7 @@ describe('OfficeScene: edited terrain', () => {
 
     bridge.emitCommand('terrainedit', { brush: null });
 
-    expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled, chairs: [] }]);
+    expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled }]);
   });
 });
 
@@ -4627,17 +4501,8 @@ describe('OfficeScene: edited terrain', () => {
 describe('OfficeScene: piece collisions', () => {
   /** The middle of the first Tiled tree's tile, (2, 2): a tree-oak. */
   const treeTile = { x: 2 * TILE + 16, y: 2 * TILE + 16 };
-  /** A served desk on the open lawn, and the middle of its area. */
-  const lawnDesk: OfficeDesk = {
-    id: 'id-mesa',
-    label: 'Mesa 9',
-    x: 21 * TILE,
-    y: 50 * TILE,
-    w: 3 * TILE,
-    h: 3 * TILE,
-    occupant: { id: 'id-ana', displayName: 'Ana', items: [{ id: 'item-silla', slot: 4, rotation: 0, textureKey: 'art:chair-gamer:sheet', aboveAvatars: false }] },
-    mine: false,
-  };
+  /** A decor chair on the open lawn, tile (22, 51), and the middle of that tile. */
+  const lawnChair = { index: 51 * BASE_LAYOUT.width + 22, piece: 'chair-gamer', rotation: 0 } as const;
   const deskMiddle = { x: 22 * TILE + 16, y: 51 * TILE + 16 };
 
   function solidAt(scene: Phaser.Scene, x: number, y: number): boolean {
@@ -4662,16 +4527,16 @@ describe('OfficeScene: piece collisions', () => {
     expect(solidAt(scene, 20 * TILE + 16, 16)).toBe(true);
   });
 
-  it('collides with the decor of a served desk once its piece has rectangles, wherever the desk list puts it', async () => {
-    const { scene, bridge, handlers } = await bootConnected();
-    bridge.emitCommand('desks', { desks: [lawnDesk] });
+  it('collides with a decor item once its piece has rectangles, wherever the decor layer puts it (#208)', async () => {
+    const { scene, handlers } = await bootConnected();
+    handlers.onDecor!([lawnChair]);
     expect(solidAt(scene, deskMiddle.x, deskMiddle.y)).toBe(false);
 
     handlers.onCollisions!(new Map([['chair-gamer', [{ x: -20, y: -12, w: 40, h: 16 }]]]));
     expect(solidAt(scene, deskMiddle.x, deskMiddle.y)).toBe(true);
     expect(solidAt(scene, deskMiddle.x + 21, deskMiddle.y)).toBe(false);
 
-    bridge.emitCommand('desks', { desks: [] });
+    handlers.onDecor!([]);
     await vi.waitFor(() => expect(solidAt(scene, deskMiddle.x, deskMiddle.y)).toBe(false), LOOP_WAIT);
   });
 
@@ -4799,6 +4664,30 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
     expect(views.at(-1)).toEqual(zoomView(3));
   });
 
+  it('with a chair picked in the decor editor the wheel turns it and does not zoom; with a plant it zooms again (#207)', async () => {
+    const { scene, bridge, views } = await zoomScene();
+    const turns: number[] = [];
+    bridge.on('decorrotate', ({ step }) => turns.push(step));
+    const rect = scene.game.canvas.getBoundingClientRect();
+    const spin = (): void => {
+      scene.game.canvas.dispatchEvent(new WheelEvent('wheel', {
+        deltaY: -100, ctrlKey: true, clientX: rect.left + 50, clientY: rect.top + 200, bubbles: true, cancelable: true,
+      }));
+    };
+    const chair = { kind: 'chair', footprint: { w: 1, h: 1 } } as const;
+    const plant = { kind: 'plant', footprint: { w: 1, h: 1 } } as const;
+
+    bridge.emitCommand('decoredit', { brush: { kind: 'piece', piece: 'chair-wood', info: chair, rotation: 0 }, area: null });
+    spin();
+    expect(turns).toEqual([-1]);
+    expect(views).toEqual([zoomView(2)]);
+
+    bridge.emitCommand('decoredit', { brush: { kind: 'piece', piece: 'plant-ficus', info: plant, rotation: 0 }, area: null });
+    spin();
+    expect(turns).toEqual([-1]);
+    expect(views.at(-1)).toEqual(zoomView(3));
+  });
+
   it.each([
     { zoom: 1, tile: { tx: PLAYER_SPAWN_TX + 2, ty: PLAYER_SPAWN_TY + 2 } },
     { zoom: 3, tile: { tx: PLAYER_SPAWN_TX + 1, ty: PLAYER_SPAWN_TY + 1 } },
@@ -4840,5 +4729,119 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
     bridge.emitCommand('zoom', { action: 'out' });
 
     expect(views.at(-1)).toEqual(zoomView(3));
+  });
+});
+
+/**
+ * The office decor layer (#208): every item the room replicates is drawn on
+ * its anchor tile by its kind, whoever's desk it stands on, and collides by
+ * its piece's rectangles.
+ */
+describe('OfficeScene: the office decor layer (#208)', () => {
+  const W = BASE_LAYOUT.width;
+  const at = (tx: number, ty: number): number => ty * W + tx;
+
+  async function bootConnected(options: OfficeSceneOptions = {}) {
+    const connector = fakeConnector();
+    const booted = await bootOfficeScene(createOfficeBridge(), { endpoint: 'ws://test', connect: connector.connect, ...options });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    return { ...booted, handlers: connector.handlers()! };
+  }
+
+  function image(scene: Phaser.Scene, index: number): Phaser.GameObjects.Image | null {
+    const found = scene.children.getByName(decorObjectName(index));
+    return found?.type === 'Image' ? (found as Phaser.GameObjects.Image) : null;
+  }
+
+  function solidAt(scene: Phaser.Scene, x: number, y: number): boolean {
+    return scene.physics.world.staticBodies.getArray().some((body) => body.hitTest(x, y));
+  }
+
+  it('draws a desk table 1:1 centered on its middle tile, in the column of its facing', async () => {
+    const { scene, handlers } = await bootConnected();
+    handlers.onDecor!([
+      { index: at(11, 12), piece: 'desk-wood', rotation: 180 },
+      { index: at(22, 13), piece: 'desk-glass', rotation: 90 },
+    ]);
+
+    await vi.waitFor(() => {
+      const top = image(scene, at(11, 12));
+      // The anchor (48, 60) of a 96x104 cell on the middle of tile (11, 12).
+      expect({ x: top?.x, y: top?.y, w: top?.displayWidth, h: top?.displayHeight, frame: Number(top?.frame.name) }).toEqual({
+        x: 11.5 * TILE - 48,
+        y: 12.5 * TILE - 60,
+        w: 96,
+        h: 104,
+        frame: 0,
+      });
+      const side = image(scene, at(22, 13));
+      expect(side?.texture.key).toBe(artSheetKey('desk-glass', 'sheet'));
+      // Turned right: the pack's fourth column.
+      expect({ x: side?.x, y: side?.y, frame: Number(side?.frame.name) }).toEqual({ x: 22.5 * TILE - 48, y: 13.5 * TILE - 60, frame: 3 });
+    }, LOOP_WAIT);
+  });
+
+  it('draws a plant and a room table 1:1 on the bottom middle of their footprint, centered on the anchor', async () => {
+    const { scene, handlers } = await bootConnected();
+    handlers.onDecor!([
+      { index: at(30, 20), piece: 'plant-ficus', rotation: 0 },
+      { index: at(40, 40), piece: 'table-meeting', rotation: 0 },
+    ]);
+
+    await vi.waitFor(() => {
+      const plant = image(scene, at(30, 20));
+      // A 32x48 frame anchored at (16, 46) on the bottom middle of tile (30, 20).
+      expect({ x: plant?.x, y: plant?.y, key: plant?.texture.key }).toEqual({ x: 30 * TILE, y: 21 * TILE - 46, key: artSheetKey('plant-ficus', 'sheet') });
+      expect(plant!.depth).toBe(worldAssetDepth(21 * TILE));
+      const table = image(scene, at(40, 40));
+      // The 7x5 footprint runs from tile (37, 38); its bottom middle is (40.5, 43) tiles, the frame's anchor (128, 180).
+      expect({ x: table?.x, y: table?.y }).toEqual({ x: 40.5 * TILE - 128, y: 43 * TILE - 180 });
+    }, LOOP_WAIT);
+  });
+
+  it('draws a chair in both of its layers around its ground point', async () => {
+    const { scene, handlers } = await bootConnected();
+    handlers.onDecor!([{ index: at(30, 30), piece: 'chair-leather', rotation: 270 }]);
+
+    await vi.waitFor(() => {
+      const layers = scene.children.list.filter(
+        (child) => child.name === CHAIR_OBJECT_NAME && child.type === 'Image' && (child as Phaser.GameObjects.Image).texture.key === artSheetKey('chair-leather', 'sheet'),
+      );
+      expect(layers.map((layer) => (layer as Phaser.GameObjects.Image).depth).sort((a, b) => a - b)).toEqual([
+        chairLayerDepth(30.5 * TILE, 'back'),
+        chairLayerDepth(30.5 * TILE, 'front'),
+      ]);
+    }, LOOP_WAIT);
+  });
+
+  it('keeps a placeholder on the footprint of a piece no catalog knows, and goes when the room drops it', async () => {
+    const { scene, handlers } = await bootConnected({ artUploadsUrl: null });
+    handlers.onDecor!([{ index: at(50, 50), piece: 'plant-nowhere', rotation: 0 }]);
+    const placeholder = scene.children.getByName(decorObjectName(at(50, 50))) as Phaser.GameObjects.Rectangle;
+    expect(placeholder.type).toBe('Rectangle');
+    expect([placeholder.x, placeholder.y]).toEqual([50.5 * TILE, 50.5 * TILE]);
+
+    handlers.onDecor!([]);
+    expect(scene.children.getByName(decorObjectName(at(50, 50)))).toBeNull();
+  });
+
+  it('collides with a room table once a catalog read later knows its footprint, and redraws it', async () => {
+    const { scene, handlers } = await bootConnected({ artUploadsUrl: null });
+    const art = (scene as unknown as { art: ArtPackLoader }).art;
+    const meeting = art.manifest!.pieces.find((piece) => piece.id === 'table-meeting')!;
+    const upload = { ...meeting, id: 'table-upload-0123456789abcdef' };
+    // Three tiles left of the anchor: inside the 7x5 footprint, outside the anchor tile.
+    const inside = { x: 37 * TILE + 16, y: 40 * TILE + 16 };
+
+    handlers.onDecor!([{ index: at(40, 40), piece: upload.id, rotation: 0 }]);
+    expect(solidAt(scene, inside.x, inside.y)).toBe(false);
+
+    // The uploads catalog grows while the scene re-reads for the unknown piece.
+    art.adoptManifest({ ...art.manifest!, pieces: [upload] }, 'uploads');
+
+    await vi.waitFor(() => {
+      expect(solidAt(scene, inside.x, inside.y)).toBe(true);
+      expect(image(scene, at(40, 40))?.texture.key).toBe(artSheetKey(upload.id, 'sheet'));
+    }, LOOP_WAIT);
   });
 });

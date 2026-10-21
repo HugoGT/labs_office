@@ -12,12 +12,8 @@
  *
  *   - `listAssets` lo lleva. Es la lectura de CATALOGO: lo que el panel puede
  *     ofrecer para colocar hoy.
- *   - `getDeskConfig` NO lo lleva. Es la lectura de COLOCACION: quien ya tenia
- *     la pieza puesta la sigue viendo, con su `texture_key` resuelto.
- *   - La consulta de validacion de `replaceDeskConfig` tampoco. Archivar dice
- *     que no se puede colocar de NUEVO desde el panel, no que el escritorio de
- *     alguien haya dejado de ser valido; si filtrase, mover una pieza
- *     cualquiera le borraria a esa persona la retirada que ya tenia.
+ *   - Lo ya colocado no pasa por aqui: la capa de decoracion de la oficina
+ *     (#208) guarda la pieza de arte, y una retirada se sigue pintando.
  */
 
 import { ART_CONTRACT_VERSION, artSheetKey, type ArtPackManifest, type ArtPiece } from '../../../src/game/artContract.ts';
@@ -39,8 +35,6 @@ import type {
   Asset,
   CreateAssetInput,
   DecorCatalog,
-  DeskItem,
-  DeskItemInput,
   ListArtPiecesOptions,
   ListAssetsOptions,
   ListUploadedArtOptions,
@@ -49,9 +43,7 @@ import type {
 } from './decorPort.ts';
 import {
   AssetNameTakenError,
-  assertValidDeskShape,
   normalizeCreateAssetInput,
-  normalizeDeskConfig,
   normalizeUpdateAssetInput,
   type NormalizedCreateAssetInput,
 } from './decorRules.ts';
@@ -69,24 +61,6 @@ function isUniqueViolation(error: unknown): boolean {
 
 const ASSET_COLUMNS =
   'id, slug, name, kind, texture_key, w, h, placeable_on_desk, above_avatars, archived_at, created_at';
-
-/**
- * Las columnas del escritorio ya cruzadas con su asset. Se enumeran una a una
- * en vez de `d.*, a.*`: los dos lados tienen `id`, `w`, `h`, `name` y
- * `created_at`, y un `*` dejaria cual gana a merced del orden de las tablas.
- */
-const DESK_COLUMNS = `
-  d.id, d.asset_id, d.slot, d.rotation, d.created_at,
-  a.texture_key, a.w, a.h, a.name, a.above_avatars
-`;
-
-const DESK_SELECT = `
-  SELECT ${DESK_COLUMNS}
-  FROM user_desk_configs d
-  JOIN assets a ON a.id = d.asset_id
-  WHERE d.user_id = $1
-  ORDER BY d.slot
-`;
 
 const ART_PIECE_COLUMNS =
   'id, kind, name, material, colorable, default_color, author, license, files, spec, contract_version, retired_at, registered_at, updated_at, source, uploaded_by, status, reviewed_by, reviewed_at, review_note, license_accepted_at';
@@ -269,21 +243,6 @@ function toAsset(row: Record<string, unknown>): Asset {
   };
 }
 
-function toDeskItem(row: Record<string, unknown>): DeskItem {
-  return {
-    id: row.id as string,
-    assetId: row.asset_id as string,
-    slot: row.slot as number,
-    rotation: row.rotation as DeskItem['rotation'],
-    textureKey: row.texture_key as string,
-    w: row.w as number,
-    h: row.h as number,
-    name: row.name as string,
-    aboveAvatars: row.above_avatars === true,
-    createdAt: row.created_at as Date,
-  };
-}
-
 export function createPgDecor(pool: DirectoryPool): DecorCatalog {
   /**
    * Misma razon que `pgDirectory.inTransaction` y `pgSpaces.inTransaction`:
@@ -389,87 +348,6 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
       return row ? toAsset(row) : null;
     },
 
-    async getDeskConfig(userId: string) {
-      const result = await pool.query(DESK_SELECT, [userId]);
-      return result.rows.map(toDeskItem);
-    },
-
-    async replaceDeskConfig(userId: string, items: readonly DeskItemInput[]) {
-      if (items.length === 0) {
-        // Sin items no hay catalogo que consultar ni nada que insertar, pero
-        // si hay que borrar: vaciar el escritorio es una peticion legitima.
-        return inTransaction(async (client) => {
-          await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [userId]);
-          await client.query('DELETE FROM user_desk_configs WHERE user_id = $1', [userId]);
-          return [];
-        });
-      }
-
-      // Lo que se puede validar sin base de datos (slot, rotacion, slots
-      // repetidos) se valida sin base de datos: un cuerpo mal escrito no debe
-      // costar una conexion. Lo unico que si obliga a consultar es si cada
-      // asset existe y es colocable, y eso se hace ya dentro de la
-      // transaccion.
-      assertValidDeskShape(items);
-      const ids = [...new Set(items.map((item) => item.assetId))];
-
-      return inTransaction(async (client) => {
-        // Lock the stable owner row: locking placements cannot serialize two
-        // replacements when the config is empty (READ COMMITTED).
-        await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [userId]);
-        // El escritorio ACTUAL se lee dentro de la MISMA transaccion que luego
-        // borra e inserta, y antes del DELETE. Fuera de ella, una escritura
-        // concurrente decidiria si una pieza retirada cuenta como retenida:
-        // dos guardados simultaneos podrian acordar entre ellos que si estaba
-        // puesta cuando ya no lo estaba. Despues del DELETE seria peor todavia
-        // -- el escritorio actual siempre estaria vacio y ninguna retirada se
-        // conservaria nunca.
-        const current = await client.query(
-          'SELECT asset_id FROM user_desk_configs WHERE user_id = $1',
-          [userId],
-        );
-
-        // `archived_at` se TRAE, no se filtra: filtrar haria que un asset
-        // retirado fuese indistinguible de uno inexistente, y quien lo tuviese
-        // puesto lo perderia al guardar cualquier otro cambio (D1b).
-        const catalog = await client.query(
-          'SELECT id, placeable_on_desk, archived_at, texture_key, w, h FROM assets WHERE id = ANY($1::uuid[])',
-          [ids],
-        );
-        const normalized = normalizeDeskConfig(
-          items,
-          catalog.rows.map((row) => ({
-            id: row.id as string,
-            placeableOnDesk: row.placeable_on_desk as boolean,
-            archivedAt: (row.archived_at as Date | null) ?? null,
-            textureKey: row.texture_key as string,
-            w: row.w as number,
-            h: row.h as number,
-          })),
-          current.rows.map((row) => row.asset_id as string),
-        );
-
-        await client.query('DELETE FROM user_desk_configs WHERE user_id = $1', [userId]);
-
-        for (const item of normalized) {
-          await client.query(
-            `
-              INSERT INTO user_desk_configs (user_id, asset_id, slot, rotation)
-              VALUES ($1, $2, $3, $4)
-            `,
-            [userId, item.assetId, item.slot, item.rotation],
-          );
-        }
-
-        // Se RELEE cruzado en vez de devolver el RETURNING del INSERT: los
-        // campos del asset (`textureKey`, `w`, `h`, `name`) no salen de la
-        // fila insertada, y pedirselos al cliente en una segunda vuelta
-        // volveria a meter el filtro del catalogo por la puerta de atras.
-        const result = await client.query(DESK_SELECT, [userId]);
-        return result.rows.map(toDeskItem);
-      });
-    },
-
     async registerArtPack(pack: ArtPackManifest) {
       // Validated before asking for a connection, same as `createAsset`.
       const valid = normalizeArtPack(pack);
@@ -553,7 +431,7 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
         // The user row is the lock every submission of that user queues on
         // (READ COMMITTED): two parallel uploads count one after the other,
         // so they cannot both take the last pending slot or the last of the
-        // hour. Same stable-row lock as `replaceDeskConfig`.
+        // hour. The lock is on the stable owner row.
         await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [submittedBy]);
         const counted = await client.query(CONTRIBUTION_USAGE, [submittedBy, CONTRIBUTION_QUOTA_WINDOW_MS / 1000]);
         assertContributionQuota(toUsage(counted.rows[0]));

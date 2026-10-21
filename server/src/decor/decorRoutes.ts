@@ -14,23 +14,11 @@
  *     cuenta que la oficina admite, y rol que administra. El catalogo lo CURA
  *     alguien; que cualquiera pudiese dar de alta una pieza convertiria una
  *     lista revisada en un vertedero.
- *   - `/me/desk` (leer, guardar) corre `authenticate`: los dos primeros pasos
- *     pero NO el tercero. El escritorio es de quien lo usa, no de quien
- *     administra; exigir rol aqui dejaria la funcion sin usuarios.
+ *   - `GET /assets` corre `authenticate`: los dos primeros pasos pero NO el
+ *     tercero, porque lo lee cualquiera de la oficina.
  *
- * ## El `userId` sale del token y NUNCA del cuerpo
- *
- * Es la propiedad que sostiene la mitad de `/me/desk`. Estas rutas viven en
- * una url publica y cualquiera con un ID token valido puede llamarlas a mano
- * con curl, sin pasar por ninguna pantalla. Si el cuerpo pudiese decir a quien
- * pertenece la escritura, "cada quien edita su escritorio" seria una costumbre
- * del cliente y no una propiedad del servidor: bastaria un `userId` ajeno para
- * redecorarle el sitio a otra persona.
- *
- * Por eso no se valida un `userId` del cuerpo ni se compara con el del token:
- * simplemente NO SE LEE. Compararlos daria un 403 que confirma que ese id
- * existe, y ademas seria una guarda que alguien podria quitar sin que ninguna
- * ruta dejase de funcionar. Lo que no se lee no se puede olvidar de comprobar.
+ * The per-desk decor of `/me/desk` is gone (#208): furniture lives in the
+ * office decor layer (`terrain/officeDecorRoutes.ts`).
  */
 
 import {
@@ -42,8 +30,8 @@ import {
   type AdminResult,
 } from '../admin/adminRoutes.ts';
 import { artSheetKey } from '../../../src/game/artContract.ts';
-import type { Asset, DecorCatalog, DeskItem, DeskItemInput } from './decorPort.ts';
-import { AssetNameTakenError, InvalidAssetError, InvalidDeskConfigError } from './decorRules.ts';
+import type { Asset, DecorCatalog } from './decorPort.ts';
+import { AssetNameTakenError, InvalidAssetError } from './decorRules.ts';
 
 export interface DecorDeps extends AdminDeps {
   decor: DecorCatalog;
@@ -101,21 +89,6 @@ async function catalogBody(decor: DecorCatalog): Promise<Record<string, unknown>
   return { assets: assets.map((asset) => toAssetBody(asset, authors.get(asset.textureKey) ?? null)) };
 }
 
-/** Lo justo para pintar la pieza. `createdAt` no dice nada al cliente y no viaja. */
-function toDeskItemBody(item: DeskItem): Record<string, unknown> {
-  return {
-    id: item.id,
-    assetId: item.assetId,
-    slot: item.slot,
-    rotation: item.rotation,
-    textureKey: item.textureKey,
-    w: item.w,
-    h: item.h,
-    name: item.name,
-    aboveAvatars: item.aboveAvatars,
-  };
-}
-
 /**
  * Traduce los errores de dominio de `decorRules.ts` a HTTP. Cualquier otra
  * cosa se relanza para que el cableado responda 500 y lo registre: tragarse un
@@ -127,7 +100,6 @@ async function translating(run: () => Promise<AdminResult>): Promise<AdminResult
     return await run();
   } catch (error) {
     if (error instanceof InvalidAssetError) return INVALID_REQUEST;
-    if (error instanceof InvalidDeskConfigError) return INVALID_REQUEST;
     if (error instanceof AssetNameTakenError) return NAME_TAKEN;
     throw error;
   }
@@ -149,14 +121,12 @@ export async function handleListAssets(
 
 /**
  * El MISMO catalogo, para quien lo va a colocar y no lo administra (#7, slice
- * 6). Corre `authenticate` y no `authorize`, igual que `/me/desk` y por lo
- * mismo: decorar el escritorio propio no es administrar nada, y exigir rol
- * aqui dejaria el selector vacio para todo el mundo menos para quien no lo
- * necesita.
+ * 6). Corre `authenticate` y no `authorize`: decorar el escritorio propio no
+ * es administrar nada, y exigir rol aqui dejaria el selector vacio para todo
+ * el mundo menos para quien no lo necesita.
  *
- * Tampoco pasa `includeArchived`, y eso no es una omision: este es el selector
- * de quien anade, y `assertNotReAddingArchived` rechaza anadir una pieza
- * retirada (D1b). Ofrecerla aqui seria ofrecer un 400.
+ * Tampoco pasa `includeArchived`, y eso no es una omision: este es el
+ * selector de quien anade, y una pieza retirada no se vuelve a colocar (D1b).
  *
  * El cuerpo es el de `handleListAssets` y no uno propio: dos formas del mismo
  * asset segun quien pregunte obligarian al cliente a aprender las dos.
@@ -247,37 +217,3 @@ export async function handleArchiveAsset(
   return { status: 200, body: toAssetBody(archived) };
 }
 
-export async function handleGetDeskConfig(
-  authorization: unknown,
-  deps: DecorDeps,
-): Promise<AdminResult> {
-  // `authenticate` y no `authorize`: el escritorio es de quien lo usa. Los
-  // pasos 1 y 2 siguen corriendo, asi que una cuenta caducada o revocada
-  // tampoco lo lee.
-  const authenticated = await authenticate(authorization, deps);
-  if (!authenticated.ok) return authenticated.result;
-
-  const items = await deps.decor.getDeskConfig(authenticated.user.id);
-  return { status: 200, body: { items: items.map(toDeskItemBody) } };
-}
-
-export async function handleReplaceDeskConfig(
-  authorization: unknown,
-  body: unknown,
-  deps: DecorDeps,
-): Promise<AdminResult> {
-  const authenticated = await authenticate(authorization, deps);
-  if (!authenticated.ok) return authenticated.result;
-
-  if (!isPlainObject(body) || !Array.isArray(body.items)) return INVALID_REQUEST;
-
-  // El `userId` sale de `authenticated.user`, que es la fila que el directorio
-  // devolvio para el uid del token verificado. Un `userId` en el cuerpo NO se
-  // lee -- ver la cabecera: lo que no se lee no se puede olvidar de comprobar.
-  const userId = authenticated.user.id;
-
-  return translating(async () => {
-    const saved = await deps.decor.replaceDeskConfig(userId, body.items as DeskItemInput[]);
-    return { status: 200, body: { items: saved.map(toDeskItemBody) } };
-  });
-}

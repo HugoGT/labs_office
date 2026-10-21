@@ -8,9 +8,11 @@
  * el esquema crezca lo bastante como para necesitar cambios destructivos, esa
  * decision habra que revisarla -- este comentario es donde empezar.
  *
- * The one exception is the move to the 21x15 block grid: shifting stored
+ * The exceptions are the move to the 21x15 block grid (shifting stored
  * coordinates is not convergent, so it runs once behind the
- * `map_layout_version` marker (`MAP_LAYOUT_VERSION`), still in this script.
+ * `map_layout_version` marker, `MAP_LAYOUT_VERSION`) and the copy into the
+ * office decor layer (#208, `office_decor_version`, `OFFICE_DECOR_VERSION`),
+ * still in this script.
  *
  * Se manda en UNA sola consulta a proposito. Postgres ejecuta una consulta
  * simple con varias sentencias dentro de una transaccion implicita, y el DDL
@@ -40,6 +42,13 @@ export function readSchemaSql(): string {
  * (`map_layout_version`), because a shift cannot converge like the rest.
  */
 export const MAP_LAYOUT_VERSION = 2;
+
+/**
+ * The one-time copy of the placed chairs and the per-desk decor into the
+ * office decor layer (#208), behind its own marker (`office_decor_version`)
+ * so a restart never adds back an item an admin removed afterwards.
+ */
+export const OFFICE_DECOR_VERSION = 1;
 
 export async function migrate(db: DirectoryQueryable): Promise<void> {
   await db.query(readSchemaSql());

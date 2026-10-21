@@ -16,8 +16,7 @@ import { boundsOverlap } from '../spaces/spaceRules.ts';
 /**
  * El lado del escritorio, en tiles. Un `TILE` son 32px y el contenedor de un
  * jugador mide 32x44, asi que 3x3 son nueve cajas de mas o menos una persona
- * de ancho cada una -- las mismas nueve que cuenta el `slot` de
- * `user_desk_configs` (ver `decorRules.DESK_SLOT_MAX`).
+ * de ancho cada una.
  *
  * Es una constante con nombre y no un `3` repartido por el codigo. La UNICA
  * copia literal que queda es la de `desks_no_overlap` en `schema.sql`, porque
@@ -95,18 +94,6 @@ export class DeskOnWallError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'DeskOnWallError';
-  }
-}
-
-/**
- * The desk would stand on a chair placed from the terrain editor: the chair
- * would be lost under it. Its own type for the same reason as
- * `DeskOnWallError`: it is fixed by removing the chair or picking another spot.
- */
-export class DeskOnChairError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'DeskOnChairError';
   }
 }
 
@@ -214,8 +201,6 @@ export function normalizeUpdateDeskInput(input: UpdateDeskInput): UpdateDeskInpu
 export interface WallGrid {
   readonly width: number;
   readonly walls: readonly (string | null)[];
-  /** The chairs placed from the terrain editor, by tile (`ty * width + tx`). Absent means none. */
-  readonly chairs?: readonly { readonly index: number }[];
 }
 
 /**
@@ -225,19 +210,6 @@ export interface WallGrid {
  * tile away does not. The reverse of `findWallConflict` in `terrainRules.ts`,
  * which refuses a wall on a desk.
  */
-/**
- * Whether a placed chair stands on one of the desk's 3x3 footprint tiles. The
- * reverse of `findChairConflict` in `terrainRules.ts`, which refuses a chair
- * on a desk.
- */
-export function deskCoversChair(position: DeskPosition, grid: WallGrid): boolean {
-  return (grid.chairs ?? []).some(({ index }) => {
-    const tx = index % grid.width;
-    const ty = Math.floor(index / grid.width);
-    return tx >= position.x && tx < position.x + DESK_SIDE && ty >= position.y && ty < position.y + DESK_SIDE;
-  });
-}
-
 export function deskCoversWall(position: DeskPosition, grid: WallGrid): boolean {
   const height = Math.floor(grid.walls.length / grid.width);
   const footprint = { x: position.x * TILE, y: position.y * TILE, width: DESK_SIDE * TILE, height: DESK_SIDE * TILE };

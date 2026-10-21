@@ -27,7 +27,6 @@
 import {
   NO_DESKS,
   type DeskClaimOutcome,
-  type DeskDecorItem,
   type DeskOccupant,
   type DeskReleaseOutcome,
   type OfficeDesk,
@@ -37,9 +36,6 @@ import { TILE } from './mapData';
 /** Plazo por defecto. Un servidor colgado no puede dejar la vista sin resolverse. */
 const DEFAULT_TIMEOUT_MS = 3000;
 
-/** Nueve cajas, de la 0 a la 8. El mismo `CHECK` que `decorRules.DESK_SLOT_MAX`. */
-const SLOT_MIN = 0;
-const SLOT_MAX = 8;
 
 /**
  * Las rutas de escritorio cuelgan de la RAIZ (`/desks`, `/desks/:id/claim`,
@@ -60,44 +56,16 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
 
-function toDecorItem(raw: unknown): DeskDecorItem | null {
-  if (typeof raw !== 'object' || raw === null) return null;
-  const row = raw as Record<string, unknown>;
-
-  if (!isNonEmptyString(row.id) || !isNonEmptyString(row.textureKey)) return null;
-  // Un slot fuera del area no cabe en el escritorio: pintarlo dejaria la pieza
-  // flotando fuera de su sitio o encima de la caja de al lado.
-  if (!isFiniteNumber(row.slot) || row.slot < SLOT_MIN || row.slot > SLOT_MAX) return null;
-  if (!isFiniteNumber(row.rotation)) return null;
-
-  return {
-    id: row.id,
-    slot: row.slot,
-    rotation: row.rotation,
-    textureKey: row.textureKey,
-    // Only a render layer (#71): anything but `true` (an older server that
-    // does not send it, a malformed value) degrades to a normal piece instead
-    // of discarding the whole list like a bad slot does.
-    aboveAvatars: row.aboveAvatars === true,
-  };
-}
-
 function toOccupant(raw: unknown): DeskOccupant | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const row = raw as Record<string, unknown>;
 
   if (!isNonEmptyString(row.id)) return null;
   if (row.displayName !== null && typeof row.displayName !== 'string') return null;
-  if (!Array.isArray(row.items)) return null;
 
-  const items: DeskDecorItem[] = [];
-  for (const rawItem of row.items) {
-    const item = toDecorItem(rawItem);
-    if (item === null) return null;
-    items.push(item);
-  }
-
-  return { id: row.id, displayName: row.displayName, items };
+  // The decor is the office decor layer's (#208): any `items` an older
+  // server sends with the occupant are ignored.
+  return { id: row.id, displayName: row.displayName };
 }
 
 /**

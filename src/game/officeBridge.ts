@@ -18,7 +18,8 @@ import type { SpaceArea } from './mapData';
 import type { AccessDeniedReason, PresenceStatus, RecordingReadyPayload } from './officeProtocol';
 import type { RosterPeer } from './roster';
 import type { TerrainEditCommand } from './terrainEditor';
-import type { PlacedChair } from './seating';
+import type { DecorEditCommand } from './decorEditor';
+import type { DecorItem } from './officeDecor';
 import type { CollisionEditCommand } from './collisionEditor';
 import type { CollisionRect } from './pieceCollisions';
 import type { ActiveRecordingSnapshot, OfficeConnectionState } from './officeRoomClient';
@@ -193,15 +194,25 @@ export interface OfficeEventMap {
   terrain: {
     blocks: readonly LayoutMaterial[];
     walls: readonly (string | null)[];
-    /** The placed chairs, sorted by tile. Absent: unchanged since the last event. */
-    chairs?: readonly PlacedChair[];
   };
   /** The terrain editor has a floor picked and someone clicked a block on the map (#123 phase 2). */
   terrainpick: { index: number };
   /** The terrain editor has a wall (or the wall eraser) picked and someone clicked a tile on the map. */
   wallpick: { index: number };
-  /** The terrain editor has a chair (or the chair eraser) picked and someone clicked a tile on the map. */
-  chairpick: { index: number };
+  /**
+   * The office decor layer (#208) as the room replicates it, sorted by
+   * anchor: after every change, and again when a decor editor opens, so it
+   * starts from what the map shows without a fetch of its own.
+   */
+  decor: { items: readonly DecorItem[] };
+  /** A decor editor has a piece (or the eraser) picked and someone clicked this tile of the map. */
+  decorpick: { index: number };
+  /**
+   * Turn the picked decor brush a quarter turn (`nextDecorRotation`): `1`
+   * down, left, up, right, `-1` back. The map sends it for the R key (Shift+R
+   * back) while a rotatable piece is picked; the wheel can send it too (#207).
+   */
+  decorrotate: { step: 1 | -1 };
   /**
    * The collision editor is open and someone clicked a placed piece: its id,
    * the rectangles it collides with now (saved, or its default turned into
@@ -314,6 +325,13 @@ export interface OfficeCommandMap {
    * preview is painted by the scene, which owns the tilemap.
    */
   terrainedit: TerrainEditCommand | null;
+  /**
+   * A decor editor (#208, "Decoración" or "Mi espacio"): the brush, where it
+   * may act and the local preview, or `null` when it closes. The ghost is
+   * drawn by `DecorEditLayer`; the preview is painted by the scene, which
+   * owns the decor layer.
+   */
+  decoredit: DecorEditCommand | null;
   /**
    * The collision editor: the piece, its draft drawn over every instance and
    * the rectangle with handles, or `null` when it closes. Drawn by

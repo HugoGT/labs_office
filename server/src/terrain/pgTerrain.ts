@@ -1,12 +1,12 @@
 /**
  * Postgres adapter of `TerrainStore` (#123 phase 2), on the same minimal `pg`
  * shape (`DirectoryPool`) and the same pool as the other directory-backed
- * features. The tables are `terrain_blocks`, `terrain_walls` and `terrain_chairs` in
+ * features. The tables are `terrain_blocks`, `terrain_walls` and `office_decor` in
  * `directory/schema.sql`.
  */
 
 import { isLayoutMaterial, isWallPieceId, type LayoutMaterial, type WallPieceId } from '../../../src/game/officeLayout.ts';
-import { isChairPieceId, isSeatFacing, type PlacedChair } from '../../../src/game/seating.ts';
+import { isDecorPieceId, isDecorRotation, type DecorItem } from '../../../src/game/officeDecor.ts';
 import type { DirectoryPool } from '../directory/pgDirectory.ts';
 import type { TerrainStore } from './terrainPort.ts';
 
@@ -70,32 +70,32 @@ export function createPgTerrain(pool: DirectoryPool): TerrainStore {
       );
     },
 
-    async loadChairs() {
-      const result = await pool.query('SELECT tile_index, piece_id, facing FROM terrain_chairs');
-      const chairs: PlacedChair[] = [];
+    async loadDecor() {
+      const result = await pool.query('SELECT tile_index, piece_id, rotation FROM office_decor');
+      const items: DecorItem[] = [];
       // Same as the walls: an unreadable row is skipped, not fatal.
       for (const row of result.rows) {
-        if (Number.isInteger(row.tile_index) && isChairPieceId(row.piece_id) && isSeatFacing(row.facing)) {
-          chairs.push({ index: row.tile_index as number, piece: row.piece_id, facing: row.facing });
+        if (Number.isInteger(row.tile_index) && isDecorPieceId(row.piece_id) && isDecorRotation(row.rotation)) {
+          items.push({ index: row.tile_index as number, piece: row.piece_id, rotation: row.rotation });
         }
       }
-      return chairs.sort((a, b) => a.index - b.index);
+      return items.sort((a, b) => a.index - b.index);
     },
-    async saveChairs(edits, actorId) {
+    async saveDecor(edits, actorId) {
       // One statement, like the walls: removals and placements commit
       // together, and the tiles of a batch are distinct.
-      const entries = edits.map(({ index, chair }) => ({ index, piece: chair?.piece ?? null, facing: chair?.facing ?? null }));
+      const entries = edits.map(({ index, item }) => ({ index, piece: item?.piece ?? null, rotation: item?.rotation ?? null }));
       await pool.query(
         `WITH entries AS (
-           SELECT entry.index, entry.piece, entry.facing FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, piece text, facing text)
+           SELECT entry.index, entry.piece, entry.rotation FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, piece text, rotation smallint)
          ),
          removed AS (
-           DELETE FROM terrain_chairs WHERE tile_index IN (SELECT index FROM entries WHERE piece IS NULL)
+           DELETE FROM office_decor WHERE tile_index IN (SELECT index FROM entries WHERE piece IS NULL)
          )
-         INSERT INTO terrain_chairs (tile_index, piece_id, facing, updated_by)
-         SELECT index, piece, facing, $2::uuid FROM entries WHERE piece IS NOT NULL
+         INSERT INTO office_decor (tile_index, piece_id, rotation, updated_by)
+         SELECT index, piece, rotation, $2::uuid FROM entries WHERE piece IS NOT NULL
          ON CONFLICT (tile_index) DO UPDATE
-           SET piece_id = EXCLUDED.piece_id, facing = EXCLUDED.facing, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+           SET piece_id = EXCLUDED.piece_id, rotation = EXCLUDED.rotation, updated_by = EXCLUDED.updated_by, updated_at = now()`,
         [JSON.stringify(entries), actorId],
       );
     },

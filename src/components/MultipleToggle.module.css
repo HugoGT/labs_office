@@ -1,0 +1,20 @@
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #e5e7eb;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle input {
+  margin: 0;
+  accent-color: #38bdf8;
+  cursor: inherit;
+}
+
+.toggle:has(input:disabled) {
+  opacity: 0.5;
+  cursor: default;
+}

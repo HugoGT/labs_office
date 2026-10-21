@@ -12,16 +12,16 @@ const MESA: AdminDesk = { id: 'id-mesa', label: 'Mesa 4', x: 10, y: 10, w: 3, h:
 const SALA: AdminSpace = { id: 'id-sala', name: 'Sala grande', x: 0, y: 0, w: 4, h: 4, capacity: null, kind: 'room' };
 
 describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
-  it.each(['spaces', 'terrain', 'collision'] as const)('unmounting %s clears editing and its bridge mode', async (section) => {
+  it.each(['decor', 'spaces', 'terrain', 'collision'] as const)('unmounting %s clears editing and its bridge mode', async (section) => {
     const bridge = createOfficeBridge();
-    const command = section === 'terrain' ? 'terrainedit' : section === 'collision' ? 'collisionedit' : 'layoutedit';
+    const command = section === 'decor' ? 'decoredit' : section === 'terrain' ? 'terrainedit' : section === 'collision' ? 'collisionedit' : 'layoutedit';
     const commands: unknown[] = [];
     bridge.onCommand(command, (value) => commands.push(value));
     const onEditingChange = vi.fn();
     const props: OfficeLayoutEditorProps = {
       bridge, desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn(),
-      terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn(), setChairs: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() },
-      section, onEditingChange,
+      terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() },
+      decor: { setDecor: vi.fn() }, section, onEditingChange,
     };
     const { unmount } = render(<OfficeLayoutEditor {...props} />);
     await screen.findByRole('button', { name: 'Salir' });
@@ -233,7 +233,7 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
     bridge.onCommand(command, emit);
     const props = {
       bridge, desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn(),
-      terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn(), setChairs: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() }, onEditingChange: vi.fn(), section,
+      terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() }, onEditingChange: vi.fn(), section,
     };
     const { rerender } = render(<OfficeLayoutEditor {...props} />);
     await screen.findByRole('button', { name: 'Salir' });
@@ -446,7 +446,7 @@ describe('OfficeLayoutEditor: terrain section', () => {
         bridge={bridge}
         desks={fakeDesks()}
         spaces={fakeSpaces()}
-        terrain={{ setBlock: vi.fn(async () => undefined), setBlocks: vi.fn(), setWalls: vi.fn(), setChairs: vi.fn() }}
+        terrain={{ setBlock: vi.fn(async () => undefined), setBlocks: vi.fn(), setWalls: vi.fn() }}
         refreshDesks={vi.fn()}
         refreshSpaces={vi.fn()}
         onEditingChange={onEditingChange}
@@ -504,7 +504,7 @@ describe('OfficeLayoutEditor: collision section', () => {
         bridge={bridge}
         desks={fakeDesks()}
         spaces={fakeSpaces()}
-        terrain={{ setBlock: vi.fn(async () => undefined), setBlocks: vi.fn(), setWalls: vi.fn(), setChairs: vi.fn() }}
+        terrain={{ setBlock: vi.fn(async () => undefined), setBlocks: vi.fn(), setWalls: vi.fn() }}
         collisions={{ saveRects: vi.fn(async () => undefined), reset: vi.fn(async () => undefined) }}
         refreshDesks={vi.fn()}
         refreshSpaces={vi.fn()}

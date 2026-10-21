@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
 import { CollisionEditLayer } from './CollisionEditLayer';
 import { createOfficeBridge, type OfficeEventMap } from './officeBridge';
-import { deskInstances, layoutPropInstances, type CollisionInstance, type CollisionRect, type CollisionTable } from './pieceCollisions';
+import { officeDecorInstances, layoutPropInstances, type CollisionInstance, type CollisionRect, type CollisionTable } from './pieceCollisions';
 
 /**
  * `CollisionEditLayer` draws real Phaser graphics and turns real pointer
@@ -48,7 +48,8 @@ const INSTANCES: CollisionInstance[] = [
     { piece: 'tree-oak', kind: 'tree', tx: 6, ty: 2, w: 1, h: 1, collision: 'solid', facing: null },
     { piece: 'table-meeting', kind: 'table', tx: 2, ty: 6, w: 3, h: 2, collision: 'solid', facing: null },
   ]),
-  ...deskInstances([{ x: 320, y: 320, w: 96, h: 96, items: [{ slot: 4, rotation: 0, pieceId: 'plant-ficus' }] }]),
+  // A decor plant on tile (11, 11), the middle of the old desk area.
+  ...officeDecorInstances([{ index: 11 * 100 + 11, piece: 'plant-ficus', rotation: 0 }], () => ({ kind: 'plant', footprint: { w: 1, h: 1 } }), 100),
 ];
 
 function boot(table: CollisionTable = new Map()) {

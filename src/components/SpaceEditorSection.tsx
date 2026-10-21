@@ -3,8 +3,10 @@ import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import { MIN_ROOM_SIDE } from '../game/layoutGeometry';
 import type { OfficeBridge } from '../game/officeBridge';
+import { nextRoomName } from '../game/roomNames';
 import { useEscapeStep } from '../hooks/useEscapeStep';
-import { useSpaceEditor } from '../hooks/useSpaceEditor';
+import { useSpaceEditor, type SpaceCreateInput } from '../hooks/useSpaceEditor';
+import { MultipleToggle } from './MultipleToggle';
 import styles from './SpaceEditorSection.module.css';
 
 /**
@@ -53,6 +55,10 @@ interface CreateFormValues {
 // A whole office block by default (#184): 9x9 is what snaps to the block grid.
 const EMPTY_FORM: CreateFormValues = { name: '', w: '9', h: '9', capacity: '' };
 
+function toForm(input: SpaceCreateInput): CreateFormValues {
+  return { name: input.name, w: String(input.w), h: String(input.h), capacity: input.capacity === null ? '' : String(input.capacity) };
+}
+
 function toSize(raw: string): number | null {
   const value = Number(raw);
   if (!Number.isInteger(value) || value < MIN_ROOM_SIDE) return null;
@@ -82,7 +88,17 @@ export function SpaceEditorSection({
 }: SpaceEditorSectionProps) {
   const editor = useSpaceEditor({ bridge, spaces, desks, refreshDesks, refreshSpaces });
   const [form, setForm] = useState<CreateFormValues>(EMPTY_FORM);
-  const wasCreatingRef = useRef(false);
+  /**
+   * "Múltiple" (#207): a room placed starts placing the next one, with the
+   * same size and capacity and the next free name, until Escape or "Cancelar".
+   */
+  const [multiple, setMultiple] = useState(false);
+  /** Why the server refused the previous room of a "Múltiple" run: starting the next placement clears the hook's error. */
+  const [runError, setRunError] = useState<string | null>(null);
+  /** Where a create placement is: `saving` once its click was sent, so its end tells a placement from a cancel. */
+  const createPhaseRef = useRef<'none' | 'placing' | 'saving'>('none');
+  /** What the create placement in progress places. */
+  const createInputRef = useRef<SpaceCreateInput | null>(null);
 
   const active = editor.state.tag !== 'off';
 
@@ -102,18 +118,53 @@ export function SpaceEditorSection({
   }, [forceExit]);
 
   useEffect(() => {
-    if (editor.state.tag === 'placing' && editor.state.mode === 'create') {
-      wasCreatingRef.current = true;
+    const state = editor.state;
+    if (state.tag === 'placing') {
+      createPhaseRef.current = state.mode === 'create' ? 'placing' : 'none';
+      return;
+    }
+    if (state.tag === 'saving') {
+      if (createPhaseRef.current === 'placing') createPhaseRef.current = 'saving';
+      setRunError(null);
+      return;
+    }
+    const phase = createPhaseRef.current;
+    createPhaseRef.current = 'none';
+    if (state.tag !== 'idle' || phase === 'none') {
+      setRunError(null);
+      return;
+    }
+    const input = createInputRef.current;
+    if (multiple && input !== null) {
+      if (phase === 'saving') {
+        // Created: the next room. Refused: the same one again, somewhere else; only that placement is dropped.
+        const next = editor.error === null ? { ...input, name: freeNextName(input.name) } : input;
+        createInputRef.current = next;
+        setRunError(editor.error);
+        setForm(toForm(next));
+        editor.startCreate(next);
+        return;
+      }
+      // Cancelled mid-run: the form keeps what was about to be placed.
+      setRunError(null);
+      setForm(toForm(input));
       return;
     }
     // Mismo criterio que `DeskEditorSection`: el formulario solo se limpia en
     // EXITO -- en fallo, "no se borra en silencio" es justo lo que pide la
     // spec, para no tener que volver a escribirlo tras un `space-name-taken`.
-    if (editor.state.tag === 'idle' && wasCreatingRef.current) {
-      wasCreatingRef.current = false;
-      if (editor.error === null) setForm(EMPTY_FORM);
-    }
+    setRunError(null);
+    if (editor.error === null) setForm(EMPTY_FORM);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor.state, editor.error]);
+
+  /** The next name of a run that no room in the list has yet (names are unique, `space-name-taken`). */
+  function freeNextName(name: string): string {
+    const taken = new Set(editor.spaces.map((space) => space.name.trim().toLowerCase()));
+    let next = nextRoomName(name);
+    for (let tries = 0; tries <= taken.size && taken.has(next.toLowerCase()); tries++) next = nextRoomName(next);
+    return next;
+  }
 
   // Escape: a selection or a placement is the hook's to release; with none held
   // the editor leaves like "Salir". Embedded, the section around it owns the
@@ -161,7 +212,9 @@ export function SpaceEditorSection({
     if (busy || !canCreate || w === null || h === null) return;
     const capacity = toCapacity(form.capacity);
     if (capacity === undefined) return;
-    editor.startCreate({ name: form.name.trim(), w, h, capacity });
+    const input = { name: form.name.trim(), w, h, capacity };
+    createInputRef.current = input;
+    editor.startCreate(input);
   }
 
   return (
@@ -261,6 +314,8 @@ export function SpaceEditorSection({
               />
             </div>
 
+            <MultipleToggle checked={multiple} onChange={setMultiple} disabled={busy} />
+
             <button type="submit" className={styles.button} disabled={busy || !canCreate}>
               Colocar nueva sala
             </button>
@@ -298,10 +353,12 @@ export function SpaceEditorSection({
           </button>
         </div>
       )}
+      {/* Reachable during a run, to end it after the next room. */}
+      {state.tag === 'placing' && state.mode === 'create' && <MultipleToggle checked={multiple} onChange={setMultiple} />}
 
-      {editor.error !== null && (
+      {(editor.error ?? runError) !== null && (
         <div className={styles.error} role="alert">
-          {editor.error}
+          {editor.error ?? runError}
         </div>
       )}
     </div>

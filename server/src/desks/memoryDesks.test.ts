@@ -15,8 +15,6 @@
 
 import { describe, expect, it } from 'vitest';
 import { ART_PACK_DEFAULTS, InvalidArtChoiceError } from '../decor/artCatalogRules.ts';
-import { createMemoryDecor } from '../decor/memoryDecor.ts';
-import type { Asset } from '../decor/decorPort.ts';
 import { createMemoryDirectory } from '../directory/memoryDirectory.ts';
 import type { DirectoryUser } from '../directory/directoryPort.ts';
 import { DeskOverlapError, DeskTakenError, InvalidDeskError } from './deskRules.ts';
@@ -43,27 +41,12 @@ function user(id: string, displayName: string | null): DirectoryUser {
 const ANA = user('id-ana', 'Ana');
 const BRUNO = user('id-bruno', 'Bruno');
 
-const PLANTA: Asset = {
-  id: 'asset-planta',
-  slug: 'planta',
-  name: 'Planta',
-  kind: 'plant',
-  textureKey: 'plant-small',
-  w: 1,
-  h: 1,
-  placeableOnDesk: true,
-  aboveAvatars: false,
-  archivedAt: null,
-  createdAt: NOW,
-};
-
 function desks() {
   let counter = 0;
   return createMemoryDesks({
     now: () => NOW,
     newId: () => `desk-${++counter}`,
     directory: createMemoryDirectory({ now: () => NOW, seed: [ANA, BRUNO] }),
-    decor: createMemoryDecor({ now: () => NOW, seed: [PLANTA] }),
   });
 }
 
@@ -328,46 +311,14 @@ describe('memoryDesks: listOfficeDesks', () => {
     expect(office.occupant).toMatchObject({ id: ANA.id, displayName: 'Ana' });
   });
 
-  it('trae la decoracion del ocupante en la MISMA lectura', async () => {
-    // Todo lo que hace falta para pintar la oficina en una llamada. Partirla
-    // obligaria al cliente a cruzar dos listas y a decidir el que hacer cuando
-    // lleguen desfasadas.
-    const decor = createMemoryDecor({ now: () => NOW, seed: [PLANTA] });
-    const directory = createMemoryDesks({
-      now: () => NOW,
-      directory: createMemoryDirectory({ now: () => NOW, seed: [ANA] }),
-      decor,
-    });
+  it('resolves the occupant without any decor: the office decor layer is not the desks\' (#208)', async () => {
+    const directory = createMemoryDesks({ now: () => NOW, directory: createMemoryDirectory({ now: () => NOW, seed: [ANA] }) });
     const desk = await directory.createDesk({ label: 'Mesa', x: 0, y: 0 });
     await directory.claimDesk(desk.id, ANA.id);
-    await decor.replaceDeskConfig(ANA.id, [{ assetId: PLANTA.id, slot: 8, rotation: 90 }]);
 
     const [office] = await directory.listOfficeDesks();
 
-    expect(office.occupant?.items).toEqual([
-      expect.objectContaining({ assetId: PLANTA.id, slot: 8, textureKey: 'plant-small' }),
-    ]);
-  });
-
-  it('la decoracion SIGUE a la persona cuando se cambia de escritorio', async () => {
-    // La propiedad del producto que sostiene el esquema: `user_desk_configs`
-    // esta indexada por `user_id`, no por escritorio.
-    const decor = createMemoryDecor({ now: () => NOW, seed: [PLANTA] });
-    const directory = createMemoryDesks({
-      now: () => NOW,
-      directory: createMemoryDirectory({ now: () => NOW, seed: [ANA] }),
-      decor,
-    });
-    const viejo = await directory.createDesk({ label: 'Mesa 1', x: 0, y: 0 });
-    const nuevo = await directory.createDesk({ label: 'Mesa 2', x: 8, y: 0 });
-    await directory.claimDesk(viejo.id, ANA.id);
-    await decor.replaceDeskConfig(ANA.id, [{ assetId: PLANTA.id, slot: 0, rotation: 0 }]);
-
-    await directory.claimDesk(nuevo.id, ANA.id);
-
-    const office = await directory.listOfficeDesks();
-    expect(office.find((desk) => desk.id === viejo.id)?.occupant).toBeNull();
-    expect(office.find((desk) => desk.id === nuevo.id)?.occupant?.items).toHaveLength(1);
+    expect(office.occupant).toEqual({ id: ANA.id, displayName: 'Ana' });
   });
 
   it('mantiene el mismo orden que listDesks', async () => {
