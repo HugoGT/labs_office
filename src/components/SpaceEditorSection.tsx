@@ -323,7 +323,7 @@ export function SpaceEditorSection({
 
           {!listShown && (
             <form className={styles.form} onSubmit={handleCreateSubmit}>
-              <span className={styles.hint}>{`Una sala mide al menos ${MIN_ROOM_SIDE} × ${MIN_ROOM_SIDE} casillas. Con 9 × 9, un bloque de oficina, se alinea al bloque que toques. Construye primero su terreno desde Terreno.`}</span>
+              <span className={styles.hint}>{`Mínimo ${MIN_ROOM_SIDE} × ${MIN_ROOM_SIDE}`}</span>
               <div className={styles.field}>
                 <label className={styles.hint} htmlFor="new-space-name">
                   Nombre de la nueva sala

@@ -257,6 +257,15 @@ describe('SpaceEditorSection (#74, PR4)', () => {
     expect(place).toBeEnabled();
   });
 
+  it('the form only states the minimum size, nothing else', async () => {
+    renderSection();
+    await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
+    await screen.findByRole('button', { name: /Colocar nueva sala/ });
+
+    expect(screen.getByText('Mínimo 6 × 6')).toBeInTheDocument();
+    expect(screen.queryByText(/Construye primero/)).toBeNull();
+  });
+
   it('un space-name-taken se muestra visible y no borra en silencio el formulario pendiente', async () => {
     const spaces = fakeSpaces({
       createSpace: vi.fn(async () => Promise.reject(new AdminError('space-name-taken'))),
