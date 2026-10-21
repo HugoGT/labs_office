@@ -4,6 +4,7 @@ import { COLLISION_SNAPS, type CollisionSnap } from '../game/collisionEditor';
 import type { OfficeBridge } from '../game/officeBridge';
 import { MAX_COLLISION_RECTS } from '../game/pieceCollisions';
 import { useCollisionEditor, type RectField } from '../hooks/useCollisionEditor';
+import { useEscapeStep } from '../hooks/useEscapeStep';
 import styles from './CollisionEditorSection.module.css';
 
 /**
@@ -53,6 +54,16 @@ export function CollisionEditorSection({ bridge, collisions, onEditingChange, fo
     if (forceExit) editor.exit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [forceExit]);
+
+  // Escape: the rectangle and the picked piece are the hook's to release (an
+  // unsaved draft stays). With no piece picked it leaves like "Salir", so the
+  // next press is the sidebar's.
+  useEscapeStep(editor.active, () => {
+    if (editor.pieceId !== null) return false;
+    editor.exit();
+    onExit?.();
+    return true;
+  });
 
   function handleEnter(): void {
     onRequestActive?.();
