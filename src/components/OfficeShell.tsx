@@ -17,7 +17,7 @@ import { createCollisionAdminClient } from '../dashboard/collisionAdminClient';
 import type { CollisionAdminPort } from '../dashboard/collisionAdminPort';
 import { ART_PACK_MANIFEST_URL, artUploadsManifestUrl } from '../game/artPack';
 import { resolveLivekitConfig } from '../game/livekitEndpoint';
-import { decorEditHoldsMap, terrainEditHoldsMap } from '../game/editorMapHold';
+import { decorEditHidesRail, terrainEditHoldsMap } from '../game/editorMapHold';
 import { TILE } from '../game/mapData';
 import { createOfficeDecorClient } from '../game/officeDecorClient';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
@@ -246,17 +246,17 @@ export function OfficeShell({
    */
   const [layoutEditing, setLayoutEditing] = useState(false);
   /**
-   * A terrain brush (floor or wall) or a decor piece (#208) hides the right
+   * A terrain brush (floor or wall) or a picked decor piece (#208; a mere selection does not) hides the right
    * rail (minimap, zoom, sidebar, exit buttons) so the map can be edited
    * under it; Escape unpicks it and brings the rail back. Read from the same
    * `terrainedit` and `decoredit` commands the scene follows, so the sidebar
    * stays mounted (only hidden) and keeps the editor's state.
    */
   const [terrainHolds, setTerrainHolds] = useState(false);
-  const [decorHolds, setDecorHolds] = useState(false);
+  const [decorHidesRail, setDecorHidesRail] = useState(false);
   useEffect(() => bridge.onCommand('terrainedit', (command) => setTerrainHolds(terrainEditHoldsMap(command))), [bridge]);
-  useEffect(() => bridge.onCommand('decoredit', (command) => setDecorHolds(decorEditHoldsMap(command))), [bridge]);
-  const hudHidden = terrainHolds || decorHolds;
+  useEffect(() => bridge.onCommand('decoredit', (command) => setDecorHidesRail(decorEditHidesRail(command))), [bridge]);
+  const hudHidden = terrainHolds || decorHidesRail;
   /**
    * Config de espacios servida (#7, slice 3). Vive aqui y no en `GameCanvas`
    * por la misma razon que `endpoint`: quien sabe donde esta el servidor es

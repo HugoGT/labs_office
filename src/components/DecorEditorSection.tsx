@@ -2,11 +2,11 @@ import { useEffect, useMemo } from 'react';
 import type { ArtPreviewCache } from '../game/artPreview';
 import { fitsDeskArea, type DecorBrush } from '../game/decorEditor';
 import type { OfficeBridge } from '../game/officeBridge';
-import type { DecorTileRect } from '../game/officeDecor';
+import { decorInfoFromPieceId, type DecorTileRect } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
 import { useDecorEditor } from '../hooks/useDecorEditor';
 import { useMaterialCatalog, type LoadMaterials } from '../hooks/useMaterialCatalog';
-import { DecorPalette } from './DecorPalette';
+import { DecorPalette, catalogDecorInfo } from './DecorPalette';
 import { MultipleToggle } from './MultipleToggle';
 import styles from './TerrainEditorSection.module.css';
 
@@ -15,7 +15,9 @@ import styles from './TerrainEditorSection.module.css';
  * its places. Container like `TerrainEditorSection`: `useDecorEditor` holds
  * the state, `DecorPalette` picks a piece (and the color of a colorable
  * one), the map (`DecorEditLayer`) draws the ghost, turns it with the wheel
- * or R and reports the clicked tile, and the scene draws the pending edits.
+ * or R and reports the clicked tile, or with nothing picked selects a placed
+ * item and offers its move and trash buttons, and the scene draws the
+ * pending edits. The panel explains nothing: the map shows it.
  *
  *   - `office` ("Decoración", admins): the whole map and every piece, room
  *     tables included, through `POST /admin/decor`; it has its own way in and out.
@@ -57,8 +59,12 @@ export function DecorEditorSection({
   preview,
 }: DecorEditorSectionProps) {
   const catalog = useMaterialCatalog(loadMaterials);
+  const infoOf = useMemo(() => {
+    const fromCatalog = catalogDecorInfo(catalog);
+    return (piece: string) => fromCatalog(piece) ?? decorInfoFromPieceId(piece);
+  }, [catalog]);
   const office = scope === 'office';
-  const editor = useDecorEditor({ bridge, decor, area, onExit: office ? onExit : undefined });
+  const editor = useDecorEditor({ bridge, decor, area, infoOf, onExit: office ? onExit : undefined });
   const names = useMemo(() => {
     const byId = new Map<string, string>();
     for (const kind of ['chair', 'desk', 'table', 'plant'] as const) for (const option of catalog?.[kind] ?? []) byId.set(option.id, option.name);
@@ -82,8 +88,10 @@ export function DecorEditorSection({
   }, [forceExit]);
 
   function brushLabel(brush: DecorBrush): string {
-    return `Poniendo ${names.get(brush.piece) ?? brush.piece}`;
+    return `${brush.from === undefined ? 'Poniendo' : 'Moviendo'} ${names.get(brush.piece) ?? brush.piece}`;
   }
+
+  const selectedItem = editor.selected === null ? undefined : editor.items.find((item) => item.index === editor.selected);
 
   if (!editor.active) {
     if (!office) return null;
@@ -121,16 +129,6 @@ export function DecorEditorSection({
         </div>
       )}
 
-      <span className={styles.hint}>
-        {office
-          ? 'Elige una pieza y toca una casilla del mapa para ponerla: la sombra muestra dónde queda y se vuelve roja donde no cabe. Poner una pieza en la casilla de otra la cambia. Con una pieza elegida se ocultan el minimapa y los menús de la derecha; vuelven al ponerla, o con Escape, y con nada elegido Escape sale del editor.'
-          : 'Elige una pieza y toca una casilla de tu escritorio para ponerla. Lo que pongas se queda en el escritorio aunque lo dejes. Con una pieza elegida se ocultan los menús de la derecha; vuelven al ponerla, o con Escape.'}
-      </span>
-      <span className={styles.hint}>
-        Con la pieza elegida, gírala con la rueda del mouse o con R sobre el mapa (Mayúsculas + R al revés). Las sillas y las mesas de escritorio miran a los cuatro lados; las mesas de sala se ponen en horizontal o en vertical.
-      </span>
-      <span className={styles.hint}>Una pieza con muestra de color se pone en el color que elijas en la muestra antes de elegirla.</span>
-
       <div className={styles.row}>
         <MultipleToggle checked={editor.multiple} onChange={editor.setMultiple} disabled={editor.blocked} />
       </div>
@@ -152,6 +150,11 @@ export function DecorEditorSection({
           <button type="button" className={styles.button} onClick={editor.unpick}>
             Deseleccionar
           </button>
+        </div>
+      )}
+      {selectedItem !== undefined && editor.brush === null && (
+        <div className={styles.row}>
+          <span>Seleccionado: {names.get(selectedItem.piece) ?? selectedItem.piece}</span>
         </div>
       )}
       {editor.pending && <span className={styles.hint}>Guardando…</span>}

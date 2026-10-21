@@ -38,7 +38,7 @@ import { decorChairs, decorFootprint, encodeOfficeDecor, withDecor, type DecorEd
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
 import { MinimapLayer } from './MinimapLayer';
-import { collisionEditHoldsMap, decorEditHoldsMap, layoutEditHoldsMap, terrainEditHoldsMap } from './editorMapHold';
+import { collisionEditHoldsMap, decorEditHidesRail, decorEditHoldsMap, layoutEditHoldsMap, terrainEditHoldsMap } from './editorMapHold';
 import { DecorEditLayer } from './DecorEditLayer';
 import { isEditableElementFocused } from './inputFocusGuard';
 import { LayoutEditLayer } from './LayoutEditLayer';
@@ -432,6 +432,8 @@ export class OfficeScene extends Phaser.Scene {
   private terrainHolds = false;
   private collisionHolds = false;
   private decorHolds = false;
+  /** A decor piece picked: the minimap steps aside like the rail; a mere selection keeps both. */
+  private decorHidesRail = false;
   /**
    * Todo lo dibujado del ultimo comando `desks` (#7, slice 5): zonas y
    * etiquetas. Se guarda entero porque cada lista nueva sustituye
@@ -482,7 +484,7 @@ export class OfficeScene extends Phaser.Scene {
     this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing || this.decorEditing;
     this.mapHeld = this.layoutHolds || this.terrainHolds || this.collisionHolds || this.decorHolds;
     // A hidden camera takes no pointer, so the map under the minimap can be edited too.
-    this.minimapCamera?.setVisible(!this.terrainHolds && !this.decorHolds);
+    this.minimapCamera?.setVisible(!this.terrainHolds && !this.decorHidesRail);
     if (this.mapHeld) this.resetWalking();
   }
 
@@ -755,6 +757,7 @@ export class OfficeScene extends Phaser.Scene {
       const opening = command !== null && !this.decorEditing;
       this.decorEditing = command !== null;
       this.decorHolds = decorEditHoldsMap(command);
+      this.decorHidesRail = decorEditHidesRail(command);
       this.syncEditing();
       const preview = command?.preview ?? null;
       const repaint = JSON.stringify(preview) !== JSON.stringify(this.decorPreview);

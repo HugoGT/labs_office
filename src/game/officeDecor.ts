@@ -209,14 +209,27 @@ export function findDecorOverlap(items: readonly DecorItem[], infoOf: (piece: st
   return null;
 }
 
-/** The item whose footprint covers `tile` (the one a click on that tile is about), or `null`. */
+/**
+ * The item whose footprint covers `tile`, the one a click on that tile is
+ * about, or `null`. Where footprints stack (a chair at a room table) the
+ * smallest wins, like the collision editor's pick: it is drawn over the
+ * other and could not be reached any other way.
+ */
 export function decorItemCovering(
   items: readonly DecorItem[],
   infoOf: (piece: string) => DecorPieceInfo | null,
   width: number,
   tile: number,
 ): DecorItem | null {
-  return items.find((item) => decorTiles(item, infoOf(item.piece), width).includes(tile)) ?? null;
+  let best: DecorItem | null = null;
+  let bestArea = Number.POSITIVE_INFINITY;
+  for (const item of items) {
+    const rect = decorFootprint(item, infoOf(item.piece), width);
+    if (!rectTiles(rect, width).includes(tile) || rect.w * rect.h >= bestArea) continue;
+    best = item;
+    bestArea = rect.w * rect.h;
+  }
+  return best;
 }
 
 /**

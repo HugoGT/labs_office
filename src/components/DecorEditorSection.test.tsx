@@ -49,20 +49,23 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
     await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: { piece: 'chair-gamer', rotation: 0 } }]));
   });
 
-  it('says the wheel and R turn the piece, room tables included, and offers no turn or eraser control of its own (#207, #208)', async () => {
-    renderSection({ initiallyActive: true });
-    expect(await screen.findByText(/gírala con la rueda del mouse o con R sobre el mapa/)).toBeInTheDocument();
-    expect(screen.getByText(/las mesas de sala se ponen en horizontal o en vertical/)).toBeInTheDocument();
+  it('explains nothing between its header and «Múltiple», and offers no turn or eraser control of its own (#207, #208)', async () => {
+    const { container } = renderSection({ initiallyActive: true });
+    const multiple = await screen.findByRole('checkbox', { name: 'Múltiple: varios a la vez' });
+    expect(multiple).not.toHaveAttribute('aria-describedby');
+    expect(screen.queryByText(/rueda del mouse/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Elige una pieza/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sin pieza elegida/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/muestra de color/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Termina con Escape.')).not.toBeInTheDocument();
+    // The header's title is followed straight by the checkbox's row.
+    const title = screen.getByRole('heading', { name: 'Decoración' });
+    expect(title.parentElement?.nextElementSibling).toContainElement(multiple);
+    expect(container.textContent).not.toMatch(/gírala/);
     expect(screen.queryByRole('button', { name: 'Girar' })).not.toBeInTheDocument();
     expect(screen.queryByText(/^Mirando/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Quitar' })).not.toBeInTheDocument();
     expect(screen.queryByText(/Quitar/)).not.toBeInTheDocument();
-  });
-
-  it('describes «Múltiple» and how it ends', async () => {
-    renderSection({ initiallyActive: true });
-    const multiple = await screen.findByRole('checkbox', { name: 'Múltiple: seguir colocando después de cada clic' });
-    expect(multiple).toHaveAccessibleDescription('Termina con Escape.');
   });
 
   it('with «Múltiple» off one click places one piece and the brush is put down; on, it stays picked (#207)', async () => {
@@ -161,9 +164,12 @@ describe('DecorEditorSection: Mi espacio (one desk)', () => {
     expect(commands.at(-1)).toEqual({ brush: null, area: DESK });
   });
 
-  it('offers «Múltiple» too', async () => {
-    renderSection({ scope: 'desk', area: DESK });
-    expect(await screen.findByRole('checkbox', { name: /^Múltiple/ })).not.toBeChecked();
+  it('offers «Múltiple» too, with no explanations before it', async () => {
+    const { container } = renderSection({ scope: 'desk', area: DESK });
+    const multiple = await screen.findByRole('checkbox', { name: 'Múltiple: varios a la vez' });
+    expect(multiple).not.toBeChecked();
+    // Nothing comes before the checkbox's row in "Mi espacio".
+    expect(container.firstElementChild?.firstElementChild).toContainElement(multiple);
   });
 
   it('refuses a tile outside the desk without asking the server', async () => {

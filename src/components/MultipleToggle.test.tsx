@@ -1,21 +1,20 @@
 import { render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { MULTIPLE_HINT, MULTIPLE_LABEL, MultipleToggle } from './MultipleToggle';
+import { MULTIPLE_LABEL, MultipleToggle } from './MultipleToggle';
 
 describe('MultipleToggle (#207)', () => {
-  it('says what it does: «Múltiple» keeps placing after each click', () => {
-    expect(MULTIPLE_LABEL).toBe('Múltiple: seguir colocando después de cada clic');
-    expect(MULTIPLE_HINT).toBe('Termina con Escape.');
+  it('says what it does in its label and nothing else: «Múltiple» places several at once', () => {
+    expect(MULTIPLE_LABEL).toBe('Múltiple: varios a la vez');
   });
 
-  it('is a checkbox named after what it does, described by how to end it, that reports the new value', async () => {
+  it('is a checkbox named after what it does, with no description, that reports the new value', async () => {
     const onChange = vi.fn();
-    const { rerender } = render(<MultipleToggle checked={false} onChange={onChange} />);
+    const { rerender, container } = render(<MultipleToggle checked={false} onChange={onChange} />);
     const box = screen.getByRole('checkbox', { name: MULTIPLE_LABEL });
     expect(box).not.toBeChecked();
-    expect(box).toHaveAccessibleDescription(MULTIPLE_HINT);
-    expect(screen.getByText(MULTIPLE_HINT)).toBeVisible();
+    expect(box).not.toHaveAttribute('aria-describedby');
+    expect(container).toHaveTextContent(/^Múltiple: varios a la vez$/);
 
     await userEvent.click(box);
     expect(onChange).toHaveBeenCalledExactlyOnceWith(true);

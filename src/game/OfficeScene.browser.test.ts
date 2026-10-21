@@ -343,6 +343,10 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(minimap.visible).toBe(false);
     expect((scene as unknown as { mapHeld: boolean }).mapHeld).toBe(true);
     expect(movement.autoWalk).toBeUndefined();
+    // A selected item holds the map too (the next click acts on it), but keeps the minimap.
+    bridge.emitCommand('decoredit', { brush: null, area: null, selected: 4242 });
+    expect(minimap.visible).toBe(true);
+    expect((scene as unknown as { mapHeld: boolean }).mapHeld).toBe(true);
     bridge.emitCommand('decoredit', null);
     expect(minimap.visible).toBe(true);
     expect((scene as unknown as { mapHeld: boolean }).mapHeld).toBe(false);
@@ -4477,6 +4481,30 @@ describe('OfficeScene: edited terrain', () => {
     bridge.emitCommand('decoredit', null);
     expect(chairObjects()).toHaveLength(one);
     expect(seen).toHaveLength(2);
+  });
+
+  it('selects a live decor item on a click with nothing picked, from the layer and catalog it draws (#208)', async () => {
+    const { scene, bridge, handlers } = await bootConnected();
+    const selected: (number | null)[] = [];
+    bridge.on('decorselect', ({ index }) => selected.push(index));
+    handlers.onDecor!([{ index: lawnTile, piece: 'chair-wood', rotation: 0 }]);
+    bridge.emitCommand('decoredit', { brush: null, area: null });
+    const click = (tile: number): void => {
+      const pointer = {
+        worldX: (tile % BASE_LAYOUT.width) * TILE + TILE / 2,
+        worldY: Math.floor(tile / BASE_LAYOUT.width) * TILE + TILE / 2,
+        button: 0,
+        camera: scene.cameras.main,
+        getDistance: () => 0,
+      } as unknown as Phaser.Input.Pointer;
+      scene.input.emit('pointerdown', pointer, []);
+      scene.input.emit('pointerup', pointer, []);
+    };
+
+    click(lawnTile);
+    click(lawnTile + 2);
+
+    expect(selected).toEqual([lawnTile, null]);
   });
 
   it('tells the editor the current walls when it opens', async () => {

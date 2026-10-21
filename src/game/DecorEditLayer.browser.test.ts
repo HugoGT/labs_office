@@ -1,11 +1,18 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
+import { PAN_THRESHOLD_PX } from './cameraPan';
 import {
+  DECOR_BUTTON_PX,
+  DECOR_DELETE_BUTTON_NAME,
+  DECOR_DELETE_COLOR,
   DECOR_GHOST_ALPHA,
   DECOR_GHOST_NAME,
   DECOR_HOVER_NAME,
   DECOR_INVALID_COLOR,
+  DECOR_MOVE_BUTTON_NAME,
+  DECOR_SELECTION_COLOR,
+  DECOR_SELECTION_NAME,
   DECOR_VALID_COLOR,
   DecorEditLayer,
   type DecorEditLayerDeps,
@@ -48,9 +55,18 @@ async function bootHostScene(): Promise<Phaser.Scene> {
   return game.scene.getScene(HOST_SCENE_KEY) as Phaser.Scene;
 }
 
-function pointerAt(worldX: number, worldY: number, button = 0): Phaser.Input.Pointer {
-  return { worldX, worldY, button } as unknown as Phaser.Input.Pointer;
+function pointerAt(worldX: number, worldY: number, button = 0, distance = 0): Phaser.Input.Pointer {
+  return { worldX, worldY, button, getDistance: () => distance } as unknown as Phaser.Input.Pointer;
 }
+
+/** A whole click as the scene's input reports it: the press, then the release on the same spot. */
+function clickAt(scene: Phaser.Scene, worldX: number, worldY: number, button = 0, distance = 0): void {
+  scene.input.emit('pointerdown', pointerAt(worldX, worldY, button));
+  scene.input.emit('pointerup', pointerAt(worldX, worldY, button, distance));
+}
+
+/** The middle of tile (tx, ty) in world pixels. */
+const mid = (t: number): number => t * TILE + TILE / 2;
 
 const WIDTH = 20;
 const HEIGHT = 15;
@@ -82,7 +98,7 @@ function layer(scene: Phaser.Scene, items: DecorItem[] = [], clock = { now: 1000
     width: WIDTH,
     height: HEIGHT,
     items: () => items,
-    infoOf: (piece) => (piece.startsWith('desk-') ? DESK : piece.startsWith('chair-') ? CHAIR : PLANT),
+    infoOf: (piece) => (piece.startsWith('desk-') ? DESK : piece.startsWith('chair-') ? CHAIR : piece === 'table-meeting' ? MEETING : PLANT),
     ground: () => GROUND,
     drawPiece: (item) => {
       drawn.push(item);
@@ -95,6 +111,10 @@ function layer(scene: Phaser.Scene, items: DecorItem[] = [], clock = { now: 1000
 
 function hover(scene: Phaser.Scene): Phaser.GameObjects.Rectangle | null {
   return scene.children.getByName(DECOR_HOVER_NAME) as Phaser.GameObjects.Rectangle | null;
+}
+
+function named<T extends Phaser.GameObjects.GameObject>(scene: Phaser.Scene, name: string): T | null {
+  return scene.children.getByName(name) as T | null;
 }
 
 function ghosts(scene: Phaser.Scene): Phaser.GameObjects.GameObject[] {
@@ -304,5 +324,151 @@ describe('DecorEditLayer', () => {
     key({ key: 'r' });
     wheel(scene, 100);
     expect(rotate).not.toHaveBeenCalled();
+  });
+
+  describe('selecting a placed item with nothing picked (#208)', () => {
+    // A 7x5 room table centered on (10, 7), tiles 7..13 by 5..9, a chair on (10, 9) at it, a plant on (3, 3).
+    const placed: DecorItem[] = [
+      { index: at(10, 7), piece: 'table-meeting', rotation: 0 },
+      { index: at(10, 9), piece: 'chair-wood', rotation: 0 },
+      { index: at(3, 3), piece: 'plant-ficus', rotation: 0 },
+    ];
+
+    function selections(bridge: ReturnType<typeof createOfficeBridge>): (number | null)[] {
+      const seen: (number | null)[] = [];
+      bridge.on('decorselect', ({ index }) => seen.push(index));
+      return seen;
+    }
+
+    it('reports the item under a primary click (the smallest where they stack), and null for bare ground or off the map', async () => {
+      const scene = await bootHostScene();
+      const { bridge } = layer(scene, placed);
+      const seen = selections(bridge);
+
+      // The editor closed: the map is the office's.
+      clickAt(scene, mid(3), mid(3));
+      bridge.emitCommand('decoredit', { brush: null, area: null });
+      clickAt(scene, mid(3), mid(3));
+      clickAt(scene, mid(10), mid(9));
+      clickAt(scene, mid(8), mid(6));
+      clickAt(scene, mid(16), mid(12));
+      clickAt(scene, -5, mid(2));
+
+      expect(seen).toEqual([at(3, 3), at(10, 9), at(10, 7), null, null]);
+    });
+
+    it('in a desk area reports only items wholly inside it', async () => {
+      const scene = await bootHostScene();
+      const { bridge } = layer(scene, placed);
+      const seen = selections(bridge);
+      bridge.emitCommand('decoredit', { brush: null, area: { x: 9, y: 8, w: 3, h: 3 } });
+
+      // The chair is inside the desk; the table it stands at reaches out of it.
+      clickAt(scene, mid(10), mid(9));
+      clickAt(scene, mid(9), mid(8));
+
+      expect(seen).toEqual([at(10, 9), null]);
+    });
+
+    it('never selects while a piece is picked, on a drag, with another button, or on the release of a click that placed', async () => {
+      const scene = await bootHostScene();
+      const { bridge } = layer(scene, placed);
+      const seen = selections(bridge);
+      const picks: number[] = [];
+      bridge.on('decorpick', ({ index }) => picks.push(index));
+
+      bridge.emitCommand('decoredit', { brush: chair, area: null });
+      clickAt(scene, mid(3), mid(3));
+      expect(picks).toEqual([at(3, 3)]);
+      // The click placed: the brush goes before its release arrives, which still selects nothing.
+      scene.input.emit('pointerdown', pointerAt(mid(5), mid(5)));
+      bridge.emitCommand('decoredit', { brush: null, area: null });
+      scene.input.emit('pointerup', pointerAt(mid(5), mid(5)));
+
+      clickAt(scene, mid(3), mid(3), 0, PAN_THRESHOLD_PX + 1);
+      clickAt(scene, mid(3), mid(3), 2);
+
+      expect(seen).toEqual([]);
+    });
+
+    it('outlines the selected item and draws a move button and a red trash button under it, a screen size at any zoom', async () => {
+      const scene = await bootHostScene();
+      const { bridge } = layer(scene, placed);
+      bridge.emitCommand('decoredit', { brush: null, area: null, selected: at(10, 7) });
+
+      const outline = named<Phaser.GameObjects.Rectangle>(scene, DECOR_SELECTION_NAME)!;
+      expect([outline.x, outline.y, outline.width, outline.height]).toEqual([10.5 * TILE, 7.5 * TILE, 7 * TILE, 5 * TILE]);
+      expect(outline.strokeColor).toBe(DECOR_SELECTION_COLOR);
+      expect(outline.visible).toBe(true);
+
+      const move = named<Phaser.GameObjects.Rectangle>(scene, DECOR_MOVE_BUTTON_NAME)!;
+      const trash = named<Phaser.GameObjects.Rectangle>(scene, DECOR_DELETE_BUTTON_NAME)!;
+      expect(trash.fillColor).toBe(DECOR_DELETE_COLOR);
+      // Side by side under the footprint, centered on it: move left, trash right.
+      expect(move.x).toBeLessThan(10.5 * TILE);
+      expect(trash.x).toBeGreaterThan(10.5 * TILE);
+      expect((move.x + trash.x) / 2).toBeCloseTo(10.5 * TILE);
+      expect(move.getBounds().top).toBeGreaterThanOrEqual(10 * TILE);
+      expect(move.getBounds().width).toBeCloseTo(DECOR_BUTTON_PX);
+      expect(move.depth).toBeGreaterThan(LAYOUT_GHOST_DEPTH);
+
+      // At 2x the buttons keep their size on screen: half of it in world pixels.
+      scene.cameras.main.setZoom(2);
+      scene.events.emit(Phaser.Scenes.Events.POST_UPDATE);
+      expect(named<Phaser.GameObjects.Rectangle>(scene, DECOR_MOVE_BUTTON_NAME)!.getBounds().width).toBeCloseTo(DECOR_BUTTON_PX / 2);
+    });
+
+    it('a click on the move button asks to move the item, on the trash to delete it, and selects nothing under them', async () => {
+      const scene = await bootHostScene();
+      const { bridge } = layer(scene, placed);
+      const seen = selections(bridge);
+      const moves: number[] = [];
+      const deletes: number[] = [];
+      bridge.on('decormove', ({ index }) => moves.push(index));
+      bridge.on('decordelete', ({ index }) => deletes.push(index));
+      bridge.emitCommand('decoredit', { brush: null, area: null, selected: at(3, 3) });
+
+      const move = named<Phaser.GameObjects.Rectangle>(scene, DECOR_MOVE_BUTTON_NAME)!;
+      const trash = named<Phaser.GameObjects.Rectangle>(scene, DECOR_DELETE_BUTTON_NAME)!;
+      clickAt(scene, move.x, move.y);
+      clickAt(scene, trash.x, trash.y);
+
+      expect(moves).toEqual([at(3, 3)]);
+      expect(deletes).toEqual([at(3, 3)]);
+      expect(seen).toEqual([]);
+    });
+
+    it('drops the outline and buttons once nothing is selected, a piece is picked, the item is gone or the editor closes', async () => {
+      const scene = await bootHostScene();
+      const items = [...placed];
+      const { bridge, decorLayer } = layer(scene, items);
+      const shown = (): boolean => named<Phaser.GameObjects.Rectangle>(scene, DECOR_SELECTION_NAME)?.visible === true &&
+        named<Phaser.GameObjects.Rectangle>(scene, DECOR_MOVE_BUTTON_NAME)?.visible === true;
+
+      bridge.emitCommand('decoredit', { brush: null, area: null, selected: at(3, 3) });
+      expect(shown()).toBe(true);
+      bridge.emitCommand('decoredit', { brush: null, area: null });
+      expect(shown()).toBe(false);
+
+      bridge.emitCommand('decoredit', { brush: null, area: null, selected: at(3, 3) });
+      bridge.emitCommand('decoredit', { brush: chair, area: null, selected: at(3, 3) });
+      expect(shown()).toBe(false);
+
+      bridge.emitCommand('decoredit', { brush: null, area: null, selected: at(3, 3) });
+      expect(shown()).toBe(true);
+      items.splice(2, 1);
+      decorLayer.refresh();
+      expect(shown()).toBe(false);
+
+      items.push(placed[2]!);
+      decorLayer.refresh();
+      expect(shown()).toBe(true);
+      bridge.emitCommand('decoredit', null);
+      expect(shown()).toBe(false);
+      decorLayer.destroy();
+      expect(named(scene, DECOR_SELECTION_NAME)).toBeNull();
+      expect(named(scene, DECOR_MOVE_BUTTON_NAME)).toBeNull();
+      expect(named(scene, DECOR_DELETE_BUTTON_NAME)).toBeNull();
+    });
   });
 });

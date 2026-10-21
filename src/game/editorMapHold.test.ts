@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collisionEditHoldsMap, decorEditHoldsMap, layoutEditHoldsMap, terrainEditHoldsMap } from './editorMapHold';
+import { collisionEditHoldsMap, decorEditHidesRail, decorEditHoldsMap, layoutEditHoldsMap, terrainEditHoldsMap } from './editorMapHold';
 
 describe('editorMapHold', () => {
   it('the layout editor holds the map only with an item selected or being placed', () => {
@@ -22,6 +22,16 @@ describe('editorMapHold', () => {
     expect(
       decorEditHoldsMap({ brush: { kind: 'piece', piece: 'chair-wood', info: { kind: 'chair', footprint: { w: 1, h: 1 } }, rotation: 0 }, area: { x: 1, y: 1, w: 3, h: 3 } }),
     ).toBe(true);
+  });
+
+  it('the decor editor holds the map with an item selected too, but only a picked piece hides the rail', () => {
+    const chair = { kind: 'piece', piece: 'chair-wood', info: { kind: 'chair', footprint: { w: 1, h: 1 } }, rotation: 0 } as const;
+    expect(decorEditHoldsMap({ brush: null, area: null, selected: 40 })).toBe(true);
+    expect(decorEditHoldsMap({ brush: null, area: null, selected: null })).toBe(false);
+    expect(decorEditHidesRail({ brush: null, area: null, selected: 40 })).toBe(false);
+    expect(decorEditHidesRail({ brush: chair, area: null })).toBe(true);
+    expect(decorEditHidesRail({ brush: null, area: null })).toBe(false);
+    expect(decorEditHidesRail(null)).toBe(false);
   });
 
   it('the collision editor holds the map only with a piece picked', () => {

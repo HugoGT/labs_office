@@ -8,7 +8,7 @@ import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { AdminError } from '../dashboard/adminPort';
 import { createOfficeBridge, type OfficeCommandMap } from '../game/officeBridge';
-import { MAX_DECOR_EDITS, type DecorEdit, type DecorItem, type DecorTileRect } from '../game/officeDecor';
+import { MAX_DECOR_EDITS, type DecorEdit, type DecorItem, type DecorPieceInfo, type DecorTileRect } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
 import { DECOR_AREA_MESSAGE, DECOR_UNDER_PLACEMENT_MESSAGE, useDecorEditor, type DecorPick } from './useDecorEditor';
 
@@ -21,6 +21,8 @@ const PLANT: DecorPick = { id: 'plant-ficus', info: { kind: 'plant', footprint: 
 const TABLE: DecorPick = { id: 'table-meeting', info: { kind: 'table', footprint: { w: 7, h: 5 } } };
 const OVAL: DecorPick = { id: 'table-oval', info: { kind: 'table', footprint: { w: 2, h: 1 } } };
 const PAINTED: DecorPick = { id: 'desk-painted', info: { kind: 'desk', footprint: { w: 3, h: 1 }, colorable: true } };
+const PICKS = [CHAIR, DESK, PLANT, TABLE, OVAL, PAINTED];
+const infoOf = (piece: string): DecorPieceInfo | null => PICKS.find((pick) => pick.id === piece)?.info ?? null;
 
 /** A deferred `setDecor`, resolved or rejected by the test. */
 function deferredPort() {
@@ -35,7 +37,7 @@ function setup({ decor = deferredPort().decor, area = null, onExit }: { decor?: 
   const bridge = createOfficeBridge();
   const commands: OfficeCommandMap['decoredit'][] = [];
   bridge.onCommand('decoredit', (command) => commands.push(command));
-  const view = renderHook((props: { area: DecorTileRect | null }) => useDecorEditor({ bridge, decor, area: props.area, onExit }), {
+  const view = renderHook((props: { area: DecorTileRect | null }) => useDecorEditor({ bridge, decor, area: props.area, infoOf, onExit }), {
     initialProps: { area },
   });
   return { bridge, decor, commands, ...view };
@@ -390,5 +392,209 @@ describe('useDecorEditor', () => {
     act(() => result.current.enter());
     unmount();
     expect(commands.at(-1)).toBeNull();
+  });
+
+  describe('selecting a placed item with nothing picked', () => {
+    const DESK_AT = at(10, 10);
+    const PLACED: DecorItem[] = [
+      { index: DESK_AT, piece: 'desk-painted', rotation: 90, color: '#c83c3c' },
+      { index: at(20, 20), piece: 'chair-gamer', rotation: 270 },
+    ];
+
+    function selecting(options: Parameters<typeof setup>[0] = {}) {
+      const port = deferredPort();
+      const view = setup({ decor: port.decor, ...options });
+      act(() => view.bridge.emit('decor', { items: PLACED }));
+      act(() => view.result.current.enter());
+      return { ...view, calls: port.calls };
+    }
+
+    function key(init: KeyboardEventInit, target: EventTarget = document.body): KeyboardEvent {
+      const event = new KeyboardEvent('keydown', { cancelable: true, bubbles: true, ...init });
+      act(() => {
+        target.dispatchEvent(event);
+      });
+      return event;
+    }
+
+    it('selects the item a map click is about and tells the map, and an empty click deselects', () => {
+      const { bridge, result, commands } = selecting();
+
+      act(() => bridge.emit('decorselect', { index: DESK_AT }));
+      expect(result.current.selected).toBe(DESK_AT);
+      expect(commands.at(-1)).toEqual({ brush: null, area: null, selected: DESK_AT });
+
+      act(() => bridge.emit('decorselect', { index: null }));
+      expect(result.current.selected).toBeNull();
+      expect(commands.at(-1)).toEqual({ brush: null, area: null });
+
+      // Nothing placed there: nothing to select.
+      act(() => bridge.emit('decorselect', { index: at(30, 30) }));
+      expect(result.current.selected).toBeNull();
+    });
+
+    it('never selects while a piece is picked, and picking a piece clears the selection', () => {
+      const { bridge, result } = selecting();
+      act(() => result.current.pick(CHAIR));
+      act(() => bridge.emit('decorselect', { index: DESK_AT }));
+      expect(result.current.selected).toBeNull();
+
+      act(() => result.current.unpick());
+      act(() => bridge.emit('decorselect', { index: DESK_AT }));
+      act(() => result.current.pick(PLANT));
+      expect(result.current.selected).toBeNull();
+      expect(result.current.brush).toMatchObject({ piece: 'plant-ficus' });
+    });
+
+    it('moves the item: the move button turns it into a brush of the same piece, turn and color, and the next click moves it in one batch', async () => {
+      const { bridge, result, calls, commands } = selecting();
+      act(() => result.current.setMultiple(true));
+      act(() => bridge.emit('decorselect', { index: DESK_AT }));
+
+      act(() => bridge.emit('decormove', { index: DESK_AT }));
+      expect(result.current.selected).toBeNull();
+      expect(result.current.brush).toEqual({ kind: 'piece', piece: 'desk-painted', info: PAINTED.info, rotation: 90, color: '#c83c3c', from: DESK_AT });
+      expect(commands.at(-1)).toMatchObject({ brush: { from: DESK_AT } });
+
+      // It turns like any brush.
+      act(() => bridge.emit('decorrotate', { step: 1 }));
+      act(() => bridge.emit('decorpick', { index: at(14, 10) }));
+      expect(calls.map((call) => call.edits)).toEqual([
+        [
+          { index: DESK_AT, item: null },
+          { index: at(14, 10), item: { piece: 'desk-painted', rotation: 0, color: '#c83c3c' } },
+        ],
+      ]);
+      // A move is one move, whatever «Múltiple» says.
+      expect(result.current.brush).toBeNull();
+      expect(commands.at(-1)?.preview).toEqual(calls[0]!.edits);
+      await act(async () => calls[0]!.resolve());
+    });
+
+    it('turns an item in place when the move lands on its own tile, and does nothing when nothing changed', async () => {
+      const { bridge, result, calls } = selecting();
+      act(() => bridge.emit('decormove', { index: DESK_AT }));
+      act(() => bridge.emit('decorpick', { index: DESK_AT }));
+      expect(calls).toHaveLength(0);
+      expect(result.current.brush).toBeNull();
+
+      act(() => bridge.emit('decormove', { index: DESK_AT }));
+      act(() => bridge.emit('decorrotate', { step: 1 }));
+      act(() => bridge.emit('decorpick', { index: DESK_AT }));
+      expect(calls.map((call) => call.edits)).toEqual([[{ index: DESK_AT, item: { piece: 'desk-painted', rotation: 0, color: '#c83c3c' } }]]);
+      await act(async () => calls[0]!.resolve());
+    });
+
+    it('never moves onto another item\'s anchor, and a refused move leaves the item where it was with the reason', async () => {
+      const { bridge, result, calls, commands } = selecting();
+      act(() => bridge.emit('decormove', { index: DESK_AT }));
+      act(() => bridge.emit('decorpick', { index: at(20, 20) }));
+      expect(calls).toHaveLength(0);
+      expect(result.current.error).toBe(DECOR_UNDER_PLACEMENT_MESSAGE);
+      expect(result.current.brush).toBeNull();
+
+      act(() => bridge.emit('decormove', { index: DESK_AT }));
+      act(() => bridge.emit('decorpick', { index: at(30, 30) }));
+      await act(async () => calls[0]!.reject(new AdminError('terrain-under-placement')));
+      expect(result.current.error).toBe(DECOR_UNDER_PLACEMENT_MESSAGE);
+      expect(commands.at(-1)?.preview).toBeUndefined();
+      expect(result.current.items).toEqual(PLACED);
+    });
+
+    it('Escape cancels a move first, back to the item selected, then deselects, then leaves the editor', () => {
+      const onExit = vi.fn();
+      const { bridge, result, calls, commands } = selecting({ onExit });
+      act(() => bridge.emit('decorselect', { index: DESK_AT }));
+      act(() => bridge.emit('decormove', { index: DESK_AT }));
+
+      expect(escape().defaultPrevented).toBe(true);
+      expect(result.current.brush).toBeNull();
+      expect(result.current.selected).toBe(DESK_AT);
+      expect(commands.at(-1)).toEqual({ brush: null, area: null, selected: DESK_AT });
+      expect(calls).toHaveLength(0);
+
+      expect(escape().defaultPrevented).toBe(true);
+      expect(result.current.selected).toBeNull();
+      expect(result.current.active).toBe(true);
+
+      escape();
+      expect(result.current.active).toBe(false);
+      expect(onExit).toHaveBeenCalledTimes(1);
+    });
+
+    it('deletes the selected item with the trash button, Supr or Backspace, never while typing', async () => {
+      const { bridge, result, calls } = selecting();
+      act(() => bridge.emit('decorselect', { index: DESK_AT }));
+      act(() => bridge.emit('decordelete', { index: DESK_AT }));
+      expect(calls.map((call) => call.edits)).toEqual([[{ index: DESK_AT, item: null }]]);
+      expect(result.current.selected).toBeNull();
+      await act(async () => calls[0]!.resolve());
+
+      act(() => bridge.emit('decorselect', { index: at(20, 20) }));
+      const input = document.createElement('input');
+      document.body.append(input);
+      input.focus();
+      expect(key({ key: 'Delete' }, input).defaultPrevented).toBe(false);
+      input.remove();
+      expect(calls).toHaveLength(1);
+
+      expect(key({ key: 'Delete' }).defaultPrevented).toBe(true);
+      expect(calls[1]!.edits).toEqual([{ index: at(20, 20), item: null }]);
+      await act(async () => calls[1]!.resolve());
+      // Nothing selected: the keys do nothing.
+      expect(key({ key: 'Backspace' }).defaultPrevented).toBe(false);
+
+      act(() => bridge.emit('decor', { items: [{ index: at(20, 20), piece: 'chair-gamer', rotation: 270 }] }));
+      act(() => bridge.emit('decorselect', { index: at(20, 20) }));
+      key({ key: 'Backspace' });
+      expect(calls[2]!.edits).toEqual([{ index: at(20, 20), item: null }]);
+      await act(async () => calls[2]!.resolve());
+    });
+
+    it('«Deseleccionar» during a move puts the brush down and goes back to the item selected too', () => {
+      const { bridge, result } = selecting();
+      act(() => bridge.emit('decorselect', { index: DESK_AT }));
+      act(() => bridge.emit('decormove', { index: DESK_AT }));
+      act(() => result.current.unpick());
+      expect(result.current.brush).toBeNull();
+      expect(result.current.selected).toBe(DESK_AT);
+    });
+
+    it('drops the selection once the item is gone from the layer', () => {
+      const { bridge, result } = selecting();
+      act(() => bridge.emit('decorselect', { index: DESK_AT }));
+      act(() => bridge.emit('decor', { items: PLACED.slice(1) }));
+      expect(result.current.selected).toBeNull();
+    });
+
+    it('in a desk ("Mi espacio") selects only items wholly inside it, and moves them only within it', () => {
+      const area = { x: 19, y: 19, w: 3, h: 3 };
+      const { bridge, result, calls } = selecting({ area });
+      act(() => bridge.emit('decorselect', { index: DESK_AT }));
+      expect(result.current.selected).toBeNull();
+
+      act(() => bridge.emit('decorselect', { index: at(20, 20) }));
+      expect(result.current.selected).toBe(at(20, 20));
+      act(() => bridge.emit('decormove', { index: at(20, 20) }));
+      act(() => bridge.emit('decorpick', { index: at(25, 20) }));
+      expect(result.current.error).toBe(DECOR_AREA_MESSAGE);
+      expect(calls).toHaveLength(0);
+      act(() => bridge.emit('decorpick', { index: at(21, 21) }));
+      expect(calls.map((call) => call.edits)).toEqual([[{ index: at(20, 20), item: null }, { index: at(21, 21), item: { piece: 'chair-gamer', rotation: 270 } }]]);
+    });
+
+    it('never splits a move across two requests', async () => {
+      const { bridge, result, calls } = selecting();
+      act(() => result.current.setMultiple(true));
+      act(() => result.current.pick(CHAIR));
+      act(() => bridge.emit('decorpick', { index: at(40, 40) }));
+      act(() => result.current.unpick());
+      // While the first request is out, a move queues; it leaves whole in the next one.
+      act(() => bridge.emit('decormove', { index: at(20, 20) }));
+      act(() => bridge.emit('decorpick', { index: at(22, 20) }));
+      await act(async () => calls[0]!.resolve());
+      expect(calls[1]!.edits).toEqual([{ index: at(20, 20), item: null }, { index: at(22, 20), item: { piece: 'chair-gamer', rotation: 270 } }]);
+      await act(async () => calls[1]!.resolve());
+    });
   });
 });

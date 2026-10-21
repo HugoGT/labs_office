@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   decorBrushTarget,
+  decorPickAt,
   decorPlacementAllowed,
   decorSizeLabel,
   decorTileName,
@@ -142,5 +143,44 @@ describe('decorBrushTarget', () => {
   it('is the footprint the brush would cover', () => {
     expect(decorBrushTarget(at(2, 2), deskBrush(), WIDTH)).toEqual({ x: 1, y: 2, w: 3, h: 1 });
     expect(decorBrushTarget(at(4, 4), { kind: 'piece', piece: 'table-meeting', info: MEETING, rotation: 90 }, WIDTH)).toEqual({ x: 2, y: 1, w: 5, h: 7 });
+  });
+});
+
+describe('decorPlacementAllowed: moving an item (a brush `from` its anchor)', () => {
+  it('ignores the moved item\'s own place, so it can move onto tiles it covers now', () => {
+    const items: DecorItem[] = [{ index: at(4, 4), piece: 'desk-wood', rotation: 0 }];
+    const move: DecorBrush = { ...deskBrush(), from: at(4, 4) };
+    expect(decorPlacementAllowed(items, infoOf, ground(), null, at(5, 4), move)).toBe(true);
+    expect(decorPlacementAllowed(items, infoOf, ground(), null, at(5, 4), deskBrush())).toBe(false);
+  });
+
+  it('never drops onto another item\'s anchor: a move replaces nothing', () => {
+    const items: DecorItem[] = [
+      { index: at(4, 4), piece: 'chair-wood', rotation: 0 },
+      { index: at(7, 4), piece: 'chair-metal', rotation: 0 },
+    ];
+    expect(decorPlacementAllowed(items, infoOf, ground(), null, at(7, 4), { ...chairBrush(), from: at(4, 4) })).toBe(false);
+    expect(decorPlacementAllowed(items, infoOf, ground(), null, at(7, 4), chairBrush())).toBe(true);
+  });
+});
+
+describe('decorPickAt', () => {
+  const items: DecorItem[] = [
+    { index: at(5, 5), piece: 'table-meeting', rotation: 0 },
+    { index: at(5, 6), piece: 'chair-wood', rotation: 0 },
+  ];
+  const tableInfo = (piece: string): DecorPieceInfo | null => (piece.startsWith('table-') ? { kind: 'table', footprint: { w: 3, h: 3 } } : infoOf(piece));
+
+  it('finds the item under a tile, the smallest footprint winning where they stack', () => {
+    // The 3x3 table covers (4..6, 4..6); the chair stands on (5, 6) over it.
+    expect(decorPickAt(items, tableInfo, WIDTH, at(5, 6), null)).toEqual(items[1]);
+    expect(decorPickAt(items, tableInfo, WIDTH, at(4, 4), null)).toEqual(items[0]);
+    expect(decorPickAt(items, tableInfo, WIDTH, at(9, 9), null)).toBeNull();
+  });
+
+  it('in a desk area finds only items wholly inside it', () => {
+    const desk = { x: 4, y: 5, w: 3, h: 3 };
+    expect(decorPickAt(items, tableInfo, WIDTH, at(5, 6), desk)).toEqual(items[1]);
+    expect(decorPickAt(items, tableInfo, WIDTH, at(4, 5), desk)).toBeNull();
   });
 });

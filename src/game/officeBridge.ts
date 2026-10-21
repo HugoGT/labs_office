@@ -208,6 +208,16 @@ export interface OfficeEventMap {
   /** A decor editor has a piece picked and someone clicked this tile of the map. */
   decorpick: { index: number };
   /**
+   * A decor editor has nothing picked and someone clicked the map: the anchor
+   * of the placed item under the pointer (`decorPickAt`, inside the editor's
+   * area), or `null` for a click on no item, which deselects.
+   */
+  decorselect: { index: number | null };
+  /** The move button of the selected decor item was clicked: the item anchored there becomes a move brush. */
+  decormove: { index: number };
+  /** The trash button of the selected decor item was clicked: the item anchored there goes. */
+  decordelete: { index: number };
+  /**
    * Turn the picked decor brush (`nextDecorRotation`): a chair or desk table
    * a quarter turn, `1` down, left, up, right, `-1` back; a room table
    * between horizontal and vertical either way. The map sends it for the R key (Shift+R

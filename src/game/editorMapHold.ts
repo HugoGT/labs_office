@@ -26,11 +26,20 @@ export function terrainEditHoldsMap(command: Pick<TerrainEditCommand, 'brush'> |
 }
 
 /**
- * A decor piece picked (#208). Like a terrain brush it
- * also hides the right rail, so the ghost can be placed up to the screen
- * edge, until Escape unpicks it.
+ * A decor piece picked, or a placed item selected (#208): the next click on
+ * the map places, moves or deletes, so it must not walk or sit too.
  */
 export function decorEditHoldsMap(command: DecorEditCommand | null): boolean {
+  return command !== null && (command.brush !== null || (command.selected ?? null) !== null);
+}
+
+/**
+ * Only a picked piece (a new one or an item being moved) hides the right
+ * rail, like a terrain brush, so the ghost can be placed up to the screen
+ * edge until Escape unpicks it. A selection keeps the rail: the editor's
+ * panel stays at hand.
+ */
+export function decorEditHidesRail(command: DecorEditCommand | null): boolean {
   return command !== null && command.brush !== null;
 }
 

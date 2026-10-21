@@ -1645,6 +1645,9 @@ describe('OfficeShell: right rail while painting terrain', () => {
     expect(sidebar()).not.toBeVisible();
     act(() => bridge.emitCommand('decoredit', { brush: null, area: null }));
     expect(sidebar()).toBeVisible();
+    // A selected item holds the map but keeps the rail: the editor's panel stays at hand.
+    act(() => bridge.emitCommand('decoredit', { brush: null, area: null, selected: 4242 }));
+    expect(sidebar()).toBeVisible();
 
     // Either editor holding the map keeps it hidden until both let go.
     act(() => bridge.emitCommand('decoredit', { brush: { kind: 'piece', piece: 'chair-wood', info: { kind: 'chair', footprint: { w: 1, h: 1 } }, rotation: 0 }, area: null }));
