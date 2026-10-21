@@ -1604,7 +1604,7 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
         await vi.dynamicImportSettled();
       });
       await screen.findByRole('heading', { name: 'Salas' });
-      await user.click(screen.getByRole('button', { name: 'Editar salas' }));
+      // The rooms part opens already expanded.
       await screen.findByText(/Nombre de la nueva sala/);
 
       await user.click(screen.getByRole('button', { name: 'Salir' }));
@@ -1647,7 +1647,8 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
     const bridge = createGameMock.mock.calls[0][1];
     await openSidebar(user);
     await user.click(await screen.findByRole('button', { name: 'Editar espacios' }));
-    await user.click(await screen.findByRole('button', { name: 'Editar salas' }));
+    // The rooms part is the one open by default.
+    await screen.findByText(/Nombre de la nueva sala/);
     expect(screen.getByRole('button', { name: /Salir/ })).toBeInTheDocument();
     await vi.waitFor(() => expect(fetchMyDeskItems).toHaveBeenCalled());
     await act(async () => {});

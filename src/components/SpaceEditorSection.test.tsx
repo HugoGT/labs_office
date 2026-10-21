@@ -329,3 +329,64 @@ describe('SpaceEditorSection: a room only asks for its area, the floor is the te
     );
   });
 });
+
+describe('SpaceEditorSection: Escape, one level per press', () => {
+  it('standalone: releases a selection first, then leaves like "Salir"', async () => {
+    const onExit = vi.fn();
+    const onEditingChange = vi.fn();
+    renderSection({ onExit, onEditingChange });
+    await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /Seleccionar Sala grande/ }));
+    expect(screen.getByRole('button', { name: /^Mover/ })).toBeInTheDocument();
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('button', { name: /^Mover/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Salir/ })).toBeInTheDocument();
+    expect(onExit).not.toHaveBeenCalled();
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('button', { name: /Salir/ })).not.toBeInTheDocument();
+    expect(onEditingChange).toHaveBeenLastCalledWith(false);
+    expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels a placement before anything else', async () => {
+    const onExit = vi.fn();
+    renderSection({ onExit });
+    await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
+    await screen.findByText('Sala grande');
+    await userEvent.type(screen.getByLabelText('Nombre de la nueva sala'), 'Office');
+    await userEvent.click(screen.getByRole('button', { name: 'Colocar nueva sala' }));
+    expect(screen.getByText(/Toca el nuevo sitio/)).toBeInTheDocument();
+
+    await userEvent.keyboard('{Escape}');
+
+    expect(screen.queryByText(/Toca el nuevo sitio/)).not.toBeInTheDocument();
+    expect(onExit).not.toHaveBeenCalled();
+  });
+
+  it('embedded: with nothing held it asks the section around it to exit, and keeps its own view', async () => {
+    const onExit = vi.fn();
+    renderSection({ embedded: true, initiallyActive: true, onExit });
+    await userEvent.click(await screen.findByRole('button', { name: /Seleccionar Sala grande/ }));
+
+    await userEvent.keyboard('{Escape}');
+    expect(onExit).not.toHaveBeenCalled();
+
+    await userEvent.keyboard('{Escape}');
+    expect(onExit).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Sala grande')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Editar salas/ })).not.toBeInTheDocument();
+  });
+
+  it('embedded without a way to exit leaves the press alone', async () => {
+    renderSection({ embedded: true, initiallyActive: true });
+    await screen.findByText('Sala grande');
+    const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+  });
+});
+

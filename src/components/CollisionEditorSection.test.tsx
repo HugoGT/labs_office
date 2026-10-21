@@ -105,3 +105,48 @@ describe('CollisionEditorSection', () => {
     expect(screen.getByRole('button', { name: 'Editar colisiones' })).toBeInTheDocument();
   });
 });
+
+describe('CollisionEditorSection: Escape, one level per press', () => {
+  it('releases the rectangle, then the piece, then leaves like "Salir"', async () => {
+    const onExit = vi.fn();
+    const { bridge } = renderSection({ onExit });
+    await openOnTree(bridge);
+    act(() => bridge.emit('collisiondraft', { rects: FOOTPRINT, selectedRect: 0 }));
+    expect(screen.getByRole('button', { name: 'Rectángulo 1' })).toHaveAttribute('aria-pressed', 'true');
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.getByRole('button', { name: 'Rectángulo 1' })).toHaveAttribute('aria-pressed', 'false');
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.getByText(/Toca un objeto en el mapa/)).toBeInTheDocument();
+    expect(onExit).not.toHaveBeenCalled();
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.getByRole('button', { name: 'Editar colisiones' })).toBeInTheDocument();
+    expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an unsaved draft: it never exits over it', async () => {
+    const onExit = vi.fn();
+    const { bridge } = renderSection({ onExit });
+    await openOnTree(bridge);
+    act(() => bridge.emit('collisiondraft', { rects: [{ x: 0, y: 0, w: 4, h: 4 }], selectedRect: null }));
+
+    await userEvent.keyboard('{Escape}');
+    await userEvent.keyboard('{Escape}');
+
+    expect(screen.getByText('tree-oak · por defecto')).toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: 'Ancho del rectángulo 1' })).toHaveValue(4);
+    expect(onExit).not.toHaveBeenCalled();
+  });
+
+  it('is not listening while the editor is closed', async () => {
+    const onExit = vi.fn();
+    renderSection({ onExit });
+
+    await userEvent.keyboard('{Escape}');
+
+    expect(onExit).not.toHaveBeenCalled();
+  });
+});
+

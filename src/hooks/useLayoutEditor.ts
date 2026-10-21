@@ -86,13 +86,17 @@ export interface UseLayoutEditorResult {
    * desk is created empty (Editar espacios): no label, no material.
    */
   startCreate: () => void;
-  startMove: () => void;
+  /**
+   * Starts moving the selected desk, or, given an id, that one: a row of the
+   * list moves its own desk without a visible selection step in between.
+   */
+  startMove: (id?: string) => void;
   cancelPlacing: () => void;
   /** Selecciona un escritorio existente por id, igual que un `layoutpick` del mapa (misma accion del reductor). */
   select: (id: string) => void;
   deselect: () => void;
-  /** Borra el seleccionado. Ver la nota de cabecera: no pasa por `saving`. */
-  remove: () => Promise<void>;
+  /** Borra el seleccionado, o, con un id, ese escritorio. Ver la nota de cabecera: no pasa por `saving`. */
+  remove: (id?: string) => Promise<void>;
 }
 
 function toObstacleItem(desk: AdminDesk): LayoutObstacleItem {
@@ -203,8 +207,17 @@ export function useLayoutEditor({
     dispatch({ type: 'startCreate' });
   }, []);
 
-  const startMove = useCallback(() => {
+  const startMove = useCallback((id?: string) => {
     setError(null);
+    const current = stateRef.current;
+    // Actions queue in order within one tick, so a row can pick its desk and
+    // start moving it together. The reducer ignores `deselect`/`select` unless
+    // they apply, so another desk's selection gives way and a placement in
+    // progress is left alone.
+    if (id !== undefined && !(current.tag === 'selected' && current.id === id)) {
+      dispatch({ type: 'deselect' });
+      dispatch({ type: 'select', id });
+    }
     dispatch({ type: 'startMove' });
   }, []);
 
@@ -224,15 +237,17 @@ export function useLayoutEditor({
     return true;
   });
 
-  const remove = useCallback(async (): Promise<void> => {
+  const remove = useCallback(async (id?: string): Promise<void> => {
     const current = stateRef.current;
-    if (current.tag !== 'selected') return;
+    const target = id ?? (current.tag === 'selected' ? current.id : null);
+    if (target === null) return;
 
     setError(null);
     setPending(true);
     try {
-      await desks.deleteDesk(current.id);
-      dispatch({ type: 'deselect' });
+      await desks.deleteDesk(target);
+      // Only the removed desk's own selection goes; another one stays selected.
+      if (current.tag === 'selected' && current.id === target) dispatch({ type: 'deselect' });
       refreshDesks();
       refreshSpaces();
       const [resolvedDesks, resolvedSpaces] = await Promise.all([desks.listDesks(), spaces.listSpaces()]);

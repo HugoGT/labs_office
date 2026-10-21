@@ -3,6 +3,7 @@ import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import { MIN_ROOM_SIDE } from '../game/layoutGeometry';
 import type { OfficeBridge } from '../game/officeBridge';
+import { useEscapeStep } from '../hooks/useEscapeStep';
 import { useSpaceEditor } from '../hooks/useSpaceEditor';
 import styles from './SpaceEditorSection.module.css';
 
@@ -113,6 +114,21 @@ export function SpaceEditorSection({
       if (editor.error === null) setForm(EMPTY_FORM);
     }
   }, [editor.state, editor.error]);
+
+  // Escape: a selection or a placement is the hook's to release; with none held
+  // the editor leaves like "Salir". Embedded, the section around it owns the
+  // exit, so the press goes to it and this view stays as it is.
+  useEscapeStep(active, () => {
+    if (editor.state.tag !== 'idle') return false;
+    if (embedded) {
+      if (onExit === undefined) return false;
+      onExit();
+      return true;
+    }
+    editor.exit();
+    onExit?.();
+    return true;
+  });
 
   function handleEnter(): void {
     onRequestActive?.();
