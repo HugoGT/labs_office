@@ -46,7 +46,9 @@ describe('DeskBanner', () => {
   it('a free desk says so and claims it', async () => {
     const props = renderBanner({ kind: 'free', deskId: 'd1', label: 'Mesa 4', canClaim: true });
 
-    expect(screen.getByText('Escritorio Libre')).toBeInTheDocument();
+    // Only the button shows; the banner keeps the name for screen readers.
+    expect(screen.getByRole('dialog', { name: 'Escritorio Libre' })).toBeInTheDocument();
+    expect(screen.queryByText('Escritorio Libre')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Reclamar escritorio' }));
 
     expect(props.onClaim).toHaveBeenCalledTimes(1);

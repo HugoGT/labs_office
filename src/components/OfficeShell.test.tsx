@@ -1078,13 +1078,13 @@ describe('OfficeShell: escritorios asignables (#7, slice 5)', () => {
     const bridge = createGameMock.mock.calls[0][1];
     await hoverDesk(bridge);
 
-    expect(screen.getByText('Escritorio Libre')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Escritorio Libre' })).toBeInTheDocument();
     expect(claimDesk).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole('button', { name: 'Reclamar escritorio' }));
 
     expect(await screen.findByText(/Te sentaste en/)).toBeInTheDocument();
     expect(claimDesk).toHaveBeenCalledWith(expect.objectContaining({ deskId: 'id-mesa' }));
-    expect(screen.queryByText('Escritorio Libre')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Escritorio Libre' })).not.toBeInTheDocument();
   });
 
   it('con un escritorio propio no ofrece reclamar otro', async () => {
@@ -1172,11 +1172,11 @@ describe('OfficeShell: escritorios asignables (#7, slice 5)', () => {
     render(<OfficeShell session={SESION} />);
     const bridge = createGameMock.mock.calls[0][1];
     await hoverDesk(bridge);
-    expect(screen.getByText('Escritorio Libre')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Escritorio Libre' })).toBeInTheDocument();
 
     act(() => bridge.emit('deskhover', null));
 
-    await vi.waitFor(() => expect(screen.queryByText('Escritorio Libre')).not.toBeInTheDocument());
+    await vi.waitFor(() => expect(screen.queryByRole('dialog', { name: 'Escritorio Libre' })).not.toBeInTheDocument());
   });
 });
 

@@ -54,7 +54,6 @@ export function DeskBanner({
     >
       {view.kind === 'free' ? (
         <>
-          <div className={styles.freeLabel}>{title}</div>
           <button
             type="button"
             className={styles.claim}
