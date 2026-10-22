@@ -38,6 +38,11 @@ export const AVATAR_BAND_BASE = WORLD_BAND_BASE + BAND_SPAN;
  * above both bands, so peers out there step back too, and under the HUD.
  */
 export const SPACE_SHADE_DEPTH = 90_000;
+/**
+ * Outlines of the layout editor ("Editar espacios"): above walls, furniture
+ * and avatars, so the whole reach of a room or desk shows.
+ */
+export const LAYOUT_OUTLINE_DEPTH = 99_000;
 /** Minimap position marker: only drawn by the minimap camera, always on top. */
 export const MINIMAP_MARKER_DEPTH = 99_999;
 /** Placement ghost of the layout editor: above anything on the map, marker included. */

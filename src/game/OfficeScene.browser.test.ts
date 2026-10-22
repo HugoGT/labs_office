@@ -18,6 +18,7 @@ import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SP
 const BUILT_IN_SPACES_VERSION = 'a489c5da5efd7c68';
 import {
   DESK_ZONE_DEPTH,
+  LAYOUT_OUTLINE_DEPTH,
   SPACE_SHADE_DEPTH,
   MINIMAP_MARKER_DEPTH,
   avatarDepth,
@@ -29,6 +30,7 @@ import { BODY_CENTER_OFFSET, positionForBodyTile } from './pathfinding';
 import { chairSeatId, mapSeatId } from './seating';
 import { deskZoneName } from './deskLayout';
 import { SPACE_SHADE_NAME } from './spaceFocus';
+import { LAYOUT_OUTLINE_NAME, layoutPickName } from './LayoutEditLayer';
 import { artSheetKey, recoloredSheetKey } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
 import { buildTerrainGrid } from './terrainGrid';
@@ -3498,6 +3500,34 @@ describe('OfficeScene: modo edicion de layout (#74, PR3b)', () => {
     await advanceGameClock(scene, 50);
 
     expect(hovers.at(-1)).toBeNull();
+  });
+
+  it('draws the pickable and the context outlines above walls and avatars, only the pickable ones clickable', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+
+    bridge.emitCommand('layoutedit', {
+      pickable: [{ id: 'sala', x0: 10, y0: 10, x1: 14, y1: 14 }],
+      selectedId: null,
+      placing: null,
+      outlines: [{ x0: 2, y0: 2, x1: 4, y1: 4 }],
+    });
+
+    const pick = scene.children.getByName(layoutPickName('sala')) as Phaser.GameObjects.Rectangle;
+    const outlines = scene.children.list.filter((child) => child.name === LAYOUT_OUTLINE_NAME) as Phaser.GameObjects.Rectangle[];
+    expect(outlines).toHaveLength(1);
+    for (const rect of [pick, ...outlines]) {
+      expect(rect.depth).toBe(LAYOUT_OUTLINE_DEPTH);
+      expect(rect.isStroked).toBe(true);
+      expect(rect.isFilled).toBe(false);
+    }
+    expect(outlines[0]!.strokeColor).toBe(pick.strokeColor);
+    expect(outlines[0]!.getBounds()).toMatchObject({ x: 2 * TILE, y: 2 * TILE, width: 3 * TILE, height: 3 * TILE });
+    expect(pick.input).not.toBeNull();
+    expect(outlines[0]!.input).toBeNull();
+
+    bridge.emitCommand('layoutedit', null);
+    expect(scene.children.list.filter((child) => child.name === LAYOUT_OUTLINE_NAME)).toEqual([]);
   });
 
   it('un clic en el mapa mientras se coloca emite layoutplace con la posicion encajada', async () => {
