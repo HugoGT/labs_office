@@ -17,6 +17,8 @@ async function get(path: string): Promise<unknown> {
       authorization: `Bearer ${env.GITHUB_TOKEN}`,
       'x-github-api-version': '2022-11-28',
     },
+    // A stalled request must end in the catch below, not in a step timeout.
+    signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) throw new Error(`GET ${path}: HTTP ${res.status}`);
   return res.json();

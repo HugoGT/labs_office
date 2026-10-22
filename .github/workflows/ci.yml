@@ -46,7 +46,9 @@ jobs:
     timeout-minutes: 5
     # Every step may fail without failing the job: a failed job would skip
     # `verify` (implicit `success()` on `needs`) and leave main red with
-    # nothing deployed, while an empty output just runs the full CI.
+    # nothing deployed, while an empty output just runs the full CI. The step
+    # timeouts add up to well under the job's, because `continue-on-error`
+    # covers a step that times out but not a job that does.
     outputs:
       tested: ${{ steps.check.outputs.tested }}
 
@@ -54,6 +56,7 @@ jobs:
       - name: Checkout the check
         if: github.event_name == 'push'
         continue-on-error: true
+        timeout-minutes: 1
         uses: actions/checkout@v7
         with:
           sparse-checkout: tools/ci
@@ -61,6 +64,7 @@ jobs:
       - name: Set up Node
         if: github.event_name == 'push'
         continue-on-error: true
+        timeout-minutes: 1
         uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -69,6 +73,7 @@ jobs:
         id: check
         if: github.event_name == 'push'
         continue-on-error: true
+        timeout-minutes: 1
         run: node tools/ci/skipTestedTree.ts
         env:
           GITHUB_TOKEN: ${{ github.token }}
