@@ -1,5 +1,5 @@
 import { STATUS_LABEL, statusCssColor } from '../game/presence';
-import { CharacterIcon, DecorateIcon, LeaveIcon } from './DeskBannerIcons';
+import { CharacterIcon, ClaimIcon, DecorateIcon, LeaveIcon } from './DeskBannerIcons';
 import type { DeskBannerView } from './deskBannerView';
 import { PhoneIcon } from './PhoneIcon';
 import styles from './DeskBanner.module.css';
@@ -47,14 +47,14 @@ export function DeskBanner({
     <div
       role="dialog"
       aria-label={title}
-      className={styles.banner}
+      className={view.kind === 'free' ? `${styles.banner} ${styles.free}` : styles.banner}
       style={{ left: anchor.x, top: anchor.y }}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
     >
       {view.kind === 'free' ? (
         <>
-          <div className={styles.name}>{title}</div>
+          <div className={styles.freeLabel}>{title}</div>
           <button
             type="button"
             className={styles.claim}
@@ -62,6 +62,7 @@ export function DeskBanner({
             title={view.canClaim ? undefined : CLAIM_DISABLED_TITLE}
             onClick={onClaim}
           >
+            <ClaimIcon />
             Reclamar escritorio
           </button>
         </>

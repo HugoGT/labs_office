@@ -82,21 +82,43 @@
 }
 
 .claim {
-  margin-top: 8px;
-  padding: 6px 12px;
-  background: #2563eb;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 5px 12px 5px 8px;
+  background: #f9fafb;
   border: none;
   border-radius: var(--radius-control);
-  color: #fff;
+  box-shadow: 0 4px 14px #0007;
+  color: #111827;
   font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
 }
 
 .claim:hover:not(:disabled) {
-  background: #1d4ed8;
+  background: #fff;
 }
 
 .claim:disabled {
-  opacity: 0.4;
+  opacity: 0.55;
   cursor: not-allowed;
+}
+
+/* A free desk: no card, only its name and the claim button over the map. */
+.free {
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  box-shadow: none;
+}
+
+.freeLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: #f9fafb;
+  text-shadow: 0 1px 3px #000, 0 0 2px #000;
 }
