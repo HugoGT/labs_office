@@ -58,8 +58,8 @@ export interface DirectoryRuntime {
    * triple de conexiones que la instancia cuenta con `directory.close()`
    * cerrando solo una de ellas.
    *
-   * Tampoco lleva `migrate` propio: `assets` y `user_desk_configs` ya estan en
-   * el mismo `schema.sql` que aplica `migrate()` de aqui abajo.
+   * Tampoco lleva `migrate` propio: `assets` ya esta en el mismo `schema.sql`
+   * que aplica `migrate()` de aqui abajo.
    */
   decor: DecorCatalog;
   /**

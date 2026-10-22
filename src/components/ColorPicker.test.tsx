@@ -82,4 +82,16 @@ describe('ColorPicker', () => {
     await user.click(screen.getByRole('button', { name: 'fuera' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
+
+  it('comes in a compact size without a caption, for a palette tile, and can be disabled', async () => {
+    const onChange = vi.fn();
+    const { container } = render(<ColorPicker label="Color de mesa" caption="" presets={PRESETS} value="#201816" onChange={onChange} compact disabled />);
+    const trigger = screen.getByRole('button', { name: 'Color de mesa: Negro' });
+
+    expect(trigger.className).toMatch(/compact/);
+    expect(container.textContent).toBe('');
+    expect(trigger).toBeDisabled();
+    await userEvent.click(trigger);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
 });

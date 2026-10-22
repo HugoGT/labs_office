@@ -63,10 +63,8 @@ import { createCharacterSheetCache } from './characters/customCharacterSheets.ts
 import {
   handleArchiveAsset,
   handleCreateAsset,
-  handleGetDeskConfig,
   handleListAssets,
   handleListOfficeAssets,
-  handleReplaceDeskConfig,
   handleUpdateAsset,
   type DecorDeps,
 } from './decor/decorRoutes.ts';
@@ -115,12 +113,12 @@ import { recordingStorageFromEnv, type RecordingStoragePort } from './recording/
 import { createRecordingSpaceSnapshot } from './recording/recordingSpaceSnapshot.ts';
 import { guardSessionRequest, sessionIsInSpace } from './sessionGuard.ts';
 import type { TerrainStore } from './terrain/terrainPort.ts';
-import { handleSetTerrainBlock, handleSetTerrainBlocks, handleSetTerrainChairs, handleSetTerrainWalls, type TerrainDeps } from './terrain/terrainRoutes.ts';
+import { handleSetTerrainBlock, handleSetTerrainBlocks, handleSetTerrainWalls, type TerrainDeps } from './terrain/terrainRoutes.ts';
+import { handleSetMyDecor, handleSetOfficeDecor, type OfficeDecorDeps } from './terrain/officeDecorRoutes.ts';
 import type { TerrainProtections } from './terrain/terrainRules.ts';
 import { createTerrainRuntime, type TerrainRuntime } from './terrain/terrainRuntime.ts';
 import type { CollisionStore } from './collisions/collisionPort.ts';
 import { handleResetPieceCollision, handleSetPieceCollision, type CollisionDeps } from './collisions/collisionRoutes.ts';
-import { deskCollisionPlacements } from './collisions/collisionRules.ts';
 import { createCollisionRuntime, type CollisionRuntime } from './collisions/collisionRuntime.ts';
 import { createIdTokenVerifier, type IdTokenVerifier } from './verifyIdToken.ts';
 
@@ -573,18 +571,9 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   const notifySpacesChanged = () => {
     for (const listener of spacesChangeListeners) listener();
   };
-  /**
-   * The served desks or their decor changed: the collision placements follow
-   * them. A failure keeps the previous placements, never the request.
-   */
-  function refreshCollisionPlacements(): void {
-    collisions.refreshPlacements().catch(() => {
-      console.error('[collisions] could not re-read the desks');
-    });
-  }
+  // Desks place no collision of their own (#208): what stands on them is decor.
   const notifyDesksChanged = () => {
     for (const listener of desksChangeListeners) listener();
-    refreshCollisionPlacements();
   };
   // Shared by the room (which registers) and the admin routes (which evict) (#93).
   const eviction = createSessionEvictionHub();
@@ -679,28 +668,40 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   // Built from the committed layout now and from the persisted blocks in
   // `listen`, after the schema exists (#123 phase 2). The room reads its
   // snapshot on every move; the store is only touched at load and per edit.
+  //
+  // The decor layer (#208) resolves its pieces through the art catalog,
+  // retired ones included so placed ones keep their footprint.
   const terrain = createTerrainRuntime({
     layout,
     seats,
     store: overrides?.terrain !== undefined ? (overrides.terrain ?? undefined) : envRuntime?.terrain,
+    decorPieces: decor
+      ? async () =>
+          (await decor.listArtPieces({ includeRetired: true })).map((piece) => ({
+            id: piece.id,
+            kind: piece.kind,
+            ...('footprint' in piece.spec ? { footprint: piece.spec.footprint } : {}),
+            colorable: piece.colorable,
+            retired: piece.retiredAt !== null,
+          }))
+      : undefined,
   });
 
   // Same split as the terrain: built from the static office now, from the
-  // saved pieces and the served desks in `listen`. The room reads its
-  // rectangles on every move; the stores are read at load, per edit and when
-  // a desk or its decor changes.
+  // saved pieces and the decor layer in `listen`. The room reads its
+  // rectangles on every move; the store is read at load and per edit.
   const collisions = createCollisionRuntime({
     layout,
     seats,
     store: overrides?.collisions !== undefined ? (overrides.collisions ?? undefined) : envRuntime?.collisions,
-    listDesks: desks ? async () => deskCollisionPlacements(await desks.listOfficeDesks()) : undefined,
-    chairs: () => terrain.chairs(),
+    decor: () => terrain.decor(),
+    decorInfo: (piece) => terrain.decorInfo(piece),
   });
-  // Placed chairs are pieces too: an accepted terrain edit may have moved
-  // one, so the collision rectangles follow. Cheap: no store is read.
+  // Decor items are pieces: an accepted terrain edit may have placed, moved
+  // or removed one, so the collision rectangles follow. Cheap: no store is read.
   terrain.subscribe(() => {
-    collisions.refreshChairs().catch(() => {
-      console.error('[collisions] could not place the chairs');
+    collisions.refreshDecor().catch(() => {
+      console.error('[collisions] could not place the decor');
     });
   });
 
@@ -1143,19 +1144,6 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     decorRoute((req, deps) => handleListOfficeAssets(req.header('Authorization'), deps)),
   );
 
-  // `/me/desk` cuelga de la raiz y no de `/admin`: el escritorio es de quien
-  // lo usa, no de quien administra. La ruta lo dice tan claro como la guarda
-  // que corre dentro (ver la cabecera de `decorRoutes.ts`).
-  app.get(
-    '/me/desk',
-    decorRoute((req, deps) => handleGetDeskConfig(req.header('Authorization'), deps)),
-  );
-
-  app.post(
-    '/me/desk',
-    decorRoute((req, deps) => handleReplaceDeskConfig(req.header('Authorization'), req.body, deps), true),
-  );
-
   // The character chosen at the office entrance (art migration, step 5). It
   // hangs from `decorRoute` and not `admin`: the choice is checked against the
   // art catalog, so a server without one answers 503 and the SPA lets people
@@ -1209,10 +1197,10 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
       // `decor` only checks a chosen material at creation (art migration,
       // step 7); without it a desk still gets the pack default.
       // `walls`: a created or moved desk is checked against the live walls
-      // and placed chairs inside the terrain edit queue, so no wall or chair
-      // edit lands in between.
-      const walls = { run: <T>(write: (grid: { width: number; walls: readonly (string | null)[]; chairs: readonly { index: number }[] }) => Promise<T>) =>
-        terrain.runExclusive((snapshot) => write({ width: snapshot.width, walls: snapshot.walls, chairs: terrain.chairs() })) };
+      // inside the terrain edit queue, so no wall edit lands in between.
+      // Decor never refuses a desk (#208).
+      const walls = { run: <T>(write: (grid: { width: number; walls: readonly (string | null)[] }) => Promise<T>) =>
+        terrain.runExclusive((snapshot) => write({ width: snapshot.width, walls: snapshot.walls })) };
       run(req, { directory, desks, auth, identityAdmin, decor, walls })
         .then((result) => {
           // Adapter promises resolve after COMMIT; failures never invalidate.
@@ -1331,8 +1319,33 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   // Painted walls, one tile each, a whole dragged wall per request. The
   // global JSON parser's 100 KB fits `MAX_WALL_EDITS` edits with room to spare.
   app.post('/admin/terrain/walls', terrainRoute((req, deps) => handleSetTerrainWalls(req.header('Authorization'), req.body, deps)));
-  // Placed chairs, one tile each, a whole dragged row per request.
-  app.post('/admin/terrain/chairs', terrainRoute((req, deps) => handleSetTerrainChairs(req.header('Authorization'), req.body, deps)));
+
+  /**
+   * The office decor layer (#208). Same "no store -> 503, never 404" as
+   * `terrainRoute`: the layer lives in the terrain runtime and its store.
+   */
+  function decorLayerRoute(run: (req: express.Request, deps: OfficeDecorDeps) => Promise<AdminResult>) {
+    return (req: express.Request, res: express.Response): void => {
+      if (directory === undefined || !terrain.editable) {
+        res.status(503).json({ error: 'terrain-not-configured' });
+        return;
+      }
+
+      run(req, { directory, auth, identityAdmin, terrain, desks })
+        .then((result) => {
+          res.status(result.status).json(result.body);
+        })
+        .catch(() => {
+          console.error('[decor] unhandled failure in a decor layer route');
+          res.status(500).json({ error: 'internal' });
+        });
+    };
+  }
+
+  // Under `/admin/*` and `/me/*`, which Caddy already proxies. Clients see
+  // the result through the room state (`officeDecor`), not this response.
+  app.post('/admin/decor', decorLayerRoute((req, deps) => handleSetOfficeDecor(req.header('Authorization'), req.body, deps)));
+  app.post('/me/decor', decorLayerRoute((req, deps) => handleSetMyDecor(req.header('Authorization'), req.body, deps)));
 
   /** Whether the office knows a piece: the art catalog, the layout or the base chairs. */
   const staticPieces = new Set([...layout.props.map((prop) => prop.piece), BASE_CHAIR_PIECE]);
@@ -1433,10 +1446,9 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     finished,
     eviction,
     characters,
-    desks,
     terrain: () => terrain.snapshot(),
     subscribeTerrainChanges: terrain.subscribe,
-    chairs: () => terrain.chairs(),
+    decor: () => terrain.decor(),
     collisions: () => collisions.rects(),
     collisionTable: () => collisions.encoded(),
     subscribeCollisionChanges: collisions.subscribe,

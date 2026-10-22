@@ -1,31 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { TILE } from '../../../src/game/mapData.ts';
 import { MAX_COLLISION_RECTS } from '../../../src/game/pieceCollisions.ts';
-import type { OfficeDesk } from '../desks/desksPort.ts';
-import { DESK_SIDE } from '../desks/deskRules.ts';
 import {
   InvalidCollisionEditError,
-  deskCollisionPlacements,
   parseCollisionEdit,
   parsePieceId,
   trapsPlayer,
 } from './collisionRules.ts';
-
-function officeDesk(overrides: Partial<OfficeDesk> = {}): OfficeDesk {
-  return {
-    id: 'desk-1',
-    label: 'Mesa 1',
-    x: 10,
-    y: 5,
-    occupantId: null,
-    materialId: 'desk-oak',
-    color: null,
-    createdAt: new Date(0),
-    updatedAt: new Date(0),
-    occupant: null,
-    ...overrides,
-  };
-}
 
 describe('parseCollisionEdit', () => {
   it('reads the piece of the path and the rectangles of the body', () => {
@@ -53,37 +33,6 @@ describe('parseCollisionEdit', () => {
   it('reads a piece id alone, for a reset', () => {
     expect(parsePieceId('chair-wood')).toBe('chair-wood');
     expect(() => parsePieceId('hedge-boxwood')).toThrow(InvalidCollisionEditError);
-  });
-});
-
-describe('deskCollisionPlacements', () => {
-  it('turns served desks into pixel areas with their material and the pieces of their decor', () => {
-    const desks = [
-      officeDesk({
-        occupantId: 'u1',
-        occupant: {
-          id: 'u1',
-          displayName: null,
-          items: [
-            { id: 'i1', assetId: 'a1', slot: 2, rotation: 90, textureKey: 'art:plant-upload-0123456789abcdef:sheet', w: 1, h: 1, name: 'Helecho', aboveAvatars: false, createdAt: new Date(0) },
-            { id: 'i2', assetId: 'a2', slot: 3, rotation: 0, textureKey: 'decor-mug', w: 1, h: 1, name: 'Taza', aboveAvatars: false, createdAt: new Date(0) },
-          ],
-        },
-      }),
-    ];
-
-    expect(deskCollisionPlacements(desks)).toEqual([
-      {
-        x: 10 * TILE,
-        y: 5 * TILE,
-        w: DESK_SIDE * TILE,
-        h: DESK_SIDE * TILE,
-        items: [
-          { slot: 2, rotation: 90, pieceId: 'plant-upload-0123456789abcdef' },
-          { slot: 3, rotation: 0, pieceId: null },
-        ],
-      },
-    ]);
   });
 });
 

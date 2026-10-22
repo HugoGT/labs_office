@@ -33,7 +33,7 @@ import {
   type ArtTilesetPiece,
   type RgbaImage,
 } from '../../src/game/artContract.ts';
-import { ROOM_TABLE_FOOTPRINTS } from './domain/tables.ts';
+import { ROOM_TABLE_FOOTPRINTS, type RoomTable } from './domain/tables.ts';
 import { BASE_CHARACTERS } from '../../src/art/characters.ts';
 import { terrainTile } from './domain/tiles.ts';
 import { PACK_DIR, PREVIEW_DIR, renderPackFiles, writePackFiles } from './pack.ts';
@@ -131,7 +131,7 @@ describe('art pack manifest', () => {
   it('registers the characters, furniture, floors, walls, the terrain tileset and the map props', () => {
     const count = (kind: string): number => manifest.pieces.filter((piece) => piece.kind === kind).length;
     const kinds = ['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table'];
-    expect(kinds.map(count)).toEqual([18, 4, 4, 9, 4, 1, 2, 1, 1, 1, 2]);
+    expect(kinds.map(count)).toEqual([18, 4, 4, 9, 4, 1, 2, 1, 1, 1, 3]);
   });
 
   it('uses stable ids derived from the generators, unique and prefixed by kind', () => {
@@ -158,6 +158,7 @@ describe('art pack manifest', () => {
         'hedge-boxwood',
         'table-meeting',
         'table-cafeteria',
+        'table-oval',
       ]),
     );
   });
@@ -213,15 +214,17 @@ describe('art pack manifest', () => {
 
   it('places every map prop by the contract: footprint, anchor, layer and collision', () => {
     const props = manifest.pieces.filter((piece): piece is ArtPropPiece => ['tree', 'plant', 'bridge', 'hedge', 'table'].includes(piece.kind));
-    expect(props).toHaveLength(7);
+    expect(props).toHaveLength(8);
     const specs = { tree: TREE, plant: PLANT, bridge: BRIDGE, hedge: HEDGE, table: TABLE } as const;
     for (const piece of props) {
       const spec = specs[piece.kind];
       expect(piece.anchor, piece.id).toEqual(spec.anchor);
       expect([piece.layer, piece.collision], piece.id).toEqual([spec.layer, spec.collision]);
       expect(piece.files.map((file) => file.imageKind), piece.id).toEqual([piece.kind]);
-      const footprint = piece.kind === 'table' ? ROOM_TABLE_FOOTPRINTS[piece.material === 'walnut' ? 'meeting' : 'cafeteria'] : specs[piece.kind].footprint;
+      const footprint = piece.kind === 'table' ? ROOM_TABLE_FOOTPRINTS[piece.id.slice('table-'.length) as RoomTable] : specs[piece.kind].footprint;
       expect(piece.footprint, piece.id).toEqual(footprint);
+      // A room table stands horizontal or vertical, one sheet column each (#208).
+      if (piece.kind === 'table') expect(piece.facings, piece.id).toEqual(['horizontal', 'vertical']);
       if (piece.kind === 'bridge') {
         expect(piece.orientations).toEqual(['north-south', 'east-west']);
         // The whole deck is walkable, over water too.

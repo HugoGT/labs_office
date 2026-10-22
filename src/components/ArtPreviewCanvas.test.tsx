@@ -52,4 +52,21 @@ describe('ArtPreviewCanvas', () => {
       getContext.mockRestore();
     }
   });
+
+  it('shrinks a large frame by a whole divisor, so a room table fits a palette thumbnail (#208)', async () => {
+    const sheet = { width: 256, height: 192 } as unknown as HTMLCanvasElement;
+    const preview: ArtPreviewCache = { sheet: vi.fn(async () => sheet) };
+    const drawImage = vi.fn();
+    const context = { drawImage, clearRect: vi.fn(), imageSmoothingEnabled: true };
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as never);
+    try {
+      render(<ArtPreviewCanvas option={grass} color={null} frame={{ x: 0, y: 0, width: 256, height: 192 }} shrink={4} label="Mesa" preview={preview} />);
+
+      const canvas = screen.getByRole('img', { name: 'Mesa' }) as HTMLCanvasElement;
+      expect([canvas.width, canvas.height, canvas.style.width]).toEqual([64, 48, '64px']);
+      await waitFor(() => expect(drawImage).toHaveBeenCalledWith(sheet, 0, 0, 256, 192, 0, 0, 64, 48));
+    } finally {
+      getContext.mockRestore();
+    }
+  });
 });

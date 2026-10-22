@@ -24,6 +24,7 @@ import {
   PACK_FACINGS,
   PLANT,
   TABLE,
+  TABLE_FACINGS,
   TERRAIN_DECALS,
   TERRAIN_MATERIALS,
   TERRAIN_TILESET,
@@ -87,6 +88,7 @@ const PLANT_NAMES: Readonly<Record<PlantKind, string>> = { ficus: 'Ficus' };
 const TABLES: Readonly<Record<RoomTable, { readonly name: string; readonly material: string }>> = {
   meeting: { name: 'Mesa de reuniones', material: 'walnut' },
   cafeteria: { name: 'Mesa de cafetería', material: 'beech' },
+  oval: { name: 'Mesa ovalada', material: 'oak' },
 };
 /** The whole 3x3 deck is walkable in both orientations; the rails are thin enough to step along. */
 const FULL_DECK = { x: 0, y: 0, w: BRIDGE.footprint.w, h: BRIDGE.footprint.h } as const;
@@ -265,6 +267,7 @@ export function renderPackFiles(): Map<string, Uint8Array> {
         anchor: TABLE.anchor,
         layer: TABLE.layer,
         collision: TABLE.collision,
+        facings: TABLE_FACINGS,
         files: [png(`table/${kind}.png`, 'sheet', 'table', image)],
       }),
     ),

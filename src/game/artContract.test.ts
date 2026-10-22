@@ -17,6 +17,8 @@ import {
   PACK_FACINGS,
   PLANT,
   TABLE,
+  TABLE_FACINGS,
+  tableFrameIndex,
   TERRAIN_BUILT_FLOORS,
   TERRAIN_DECALS,
   TERRAIN_LAYER_COUNT,
@@ -660,7 +662,11 @@ describe('map props', () => {
     expect(PLANT.frame).toEqual({ width: 32, height: 48 });
     expect(sheetSize(BRIDGE)).toEqual({ width: 256, height: 128 });
     expect(sheetSize(HEDGE)).toEqual({ width: 512, height: 48 });
-    expect(TABLE.frame).toEqual({ width: 256, height: 192 });
+    // Two frames: horizontal, then the same table standing vertical (#208).
+    expect(TABLE.frame).toEqual({ width: 256, height: 256 });
+    expect(TABLE_FACINGS).toEqual(['horizontal', 'vertical']);
+    expect(TABLE.columnOrder).toEqual(TABLE_FACINGS);
+    expect(sheetSize(TABLE)).toEqual({ width: 512, height: 256 });
     expect(sheetSize(TERRAIN_TILESET)).toEqual({ width: 1536, height: 108 * 32 });
     // Larger textures do not load on every GPU.
     expect(sheetSize(TERRAIN_TILESET).height).toBeLessThanOrEqual(4096);
@@ -675,7 +681,7 @@ describe('map props', () => {
     const placed = propPlacement({ anchor: TREE.anchor, footprint: { w: 1, h: 1 } }, 10, 4);
     expect(placed).toEqual({ x: 10 * 32 + 16 - 32, y: 5 * 32 - 90, depthY: 5 * 32 });
     const table = propPlacement({ anchor: TABLE.anchor, footprint: { w: 7, h: 5 } }, 53, 6);
-    expect(table).toEqual({ x: 53 * 32 + 112 - 128, y: 11 * 32 - 180, depthY: 11 * 32 });
+    expect(table).toEqual({ x: 53 * 32 + 112 - 128, y: 11 * 32 - 244, depthY: 11 * 32 });
   });
 
   it('draws bridges on the ground and lets people walk their deck; everything else is solid and depth sorted', () => {
@@ -692,10 +698,20 @@ describe('map props', () => {
     expect(() => hedgeFrameIndex(16)).toThrow(/mask/);
   });
 
-  it('fits the largest table footprint in its frame', () => {
+  it('fits the largest table footprint in its frame, horizontal and vertical', () => {
     expect(TABLE.maxFootprint).toEqual({ w: 7, h: 5 });
+    expect(TABLE.anchor).toEqual({ x: 128, y: 244 });
     expect(TABLE.maxFootprint.w * ART_TILE).toBeLessThan(TABLE.frame.width);
-    expect(TABLE.anchor.y - TABLE.maxFootprint.h * ART_TILE).toBeGreaterThan(16);
+    // Standing vertical, its long side runs along the floor depth: 7 tiles under a lifted top.
+    expect(TABLE.anchor.y - TABLE.maxFootprint.w * ART_TILE).toBeGreaterThan(16);
+    expect(TABLE.frame.height - TABLE.anchor.y).toBe(12);
+  });
+
+  it('numbers table frames by rotation: 0 horizontal, 90 vertical, and the symmetric 180 and 270 alike', () => {
+    expect(tableFrameIndex(0)).toBe(0);
+    expect(tableFrameIndex(90)).toBe(1);
+    expect(tableFrameIndex(180)).toBe(0);
+    expect(tableFrameIndex(270)).toBe(1);
   });
 });
 

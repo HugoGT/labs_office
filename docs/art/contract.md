@@ -29,7 +29,7 @@ The executable source of truth is `src/game/artContract.ts` (`ART_CONTRACT_VERSI
 | `plant` | 32x48 | 1 x 1 | 32x48 | one potted plant | (16, 46) | 1x1 |
 | `bridge` | 128x128 | 2 x 1 | 256x128 | columns `north-south, east-west` | (64, 112) | 3x3 |
 | `hedge` | 32x48 | 16 x 1 | 512x48 | frame = connection mask 0-15 | (16, 48) | 1x1 |
-| `table` | 256x192 | 1 x 1 | 256x192 | one room table | (128, 180) | per piece, up to 7x5 |
+| `table` | 256x256 | 2 x 1 | 512x256 | columns `horizontal, vertical` (`TABLE_FACINGS`) | (128, 244) | per piece, up to 7x5 (swapped when vertical) |
 
 The office's facing order (`FACINGS` in `officeProtocol.ts`: `down, up, left, right`) differs from the pack order (`up, down, left, right`). To pick a row or column, use `walkRowForFacing` and `seatedRowForFacing`/`facingColumn`, never a raw index. A facing is the direction a seated character looks.
 
@@ -76,9 +76,9 @@ Trees, plants, bridges, hedges and room tables share one placement model (`propP
 - `collision`: `solid` footprints block movement. A bridge is `deck`: the tiles of its `deck` rect (the whole 3x3 footprint in both orientations) are walkable over water, and the rest of the footprint would be solid.
 - Bridges have a frame per orientation (`bridgeFrameIndex`): `north-south` crosses a river flowing east-west. Each one reaches 16px onto both banks with stone abutments.
 - Hedges have a frame per connection mask to neighboring hedge tiles (`hedgeFrameIndex`, north 1, east 2, south 4, west 8, like wall joints; 0 is a lone bush). Their top rises `height` (16) pixels over the footprint, and a darker front face shows only where no hedge continues south.
-- Tables are seated on every side. Each piece states its footprint: `table-meeting` is 7x5 and `table-cafeteria` 5x3, the room tables of the current map.
+- Tables are seated on every side. Each piece states its horizontal footprint (`facings` lists its frames): `table-meeting` is 7x5 and `table-cafeteria` 5x3, the room tables of the current map, and `table-oval` 2x1, a small oval table on one pedestal. A room table has a frame per facing (`tableFrameIndex`, #208): `horizontal` is the stated footprint, `vertical` the same table standing long side down the screen, drawn as its own top-down 3/4 view (never a turned bitmap) over the footprint swapped (7x5 becomes 5x7). The anchor is the bottom middle of the footprint in either frame, so `propPlacement` takes the swapped footprint for the vertical one. A table is symmetric, so these are its only turns: the decor layer's rotation 0 is `horizontal` and 90 `vertical` (180 and 270 are refused). The Tiled layout always draws the horizontal frame.
 
-Pieces: `tree-oak`, `tree-maple`, `plant-ficus`, `bridge-wood`, `hedge-boxwood`, `table-meeting`, `table-cafeteria`, and the tileset `tileset-terrain`, whose manifest entry lists each material with its floor piece, walkability and first tile, and each decal with its tile.
+Pieces: `tree-oak`, `tree-maple`, `plant-ficus`, `bridge-wood`, `hedge-boxwood`, `table-meeting`, `table-cafeteria`, `table-oval`, and the tileset `tileset-terrain`, whose manifest entry lists each material with its floor piece, walkability and first tile, and each decal with its tile.
 
 ## Validation
 
@@ -120,4 +120,5 @@ Refusals use the codes of the table above plus `too-large`, `not-png`, `invalid-
 ## Version history
 
 - **2**: added the terrain tileset, the five missing terrain floors (dirt, sand, cobblestone, tile, carpet) and the map props. Readers of version 1 reject the new piece kinds, so the server catalog and the office only accept version 2 packs; the `art_pieces` kind CHECK is replaced on existing databases.
+  Still version 2 since #208, the `table` sheet grew a `vertical` column (256x192 became two 256x256 frames). Room tables ship only with the pack, never as uploads, and the office checks each file's size against the contract grid (`isPieceFile` in `artPack.ts`), so a table sheet of the old size is dropped instead of sliced wrong.
 - **1**: characters, chairs, desks, floors and walls.

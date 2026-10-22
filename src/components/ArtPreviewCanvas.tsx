@@ -7,7 +7,8 @@ import { pagePreviewCache, type ArtPreviewCache } from '../game/artPreview';
  * by the same generator (`artPreview.ts`), so a preview shows exactly the
  * pixels the map will. Presentational: the caller picks the frame, the canvas
  * is sized to it one sheet pixel per CSS pixel times a whole `scale` (any
- * other scale would blur or skip art pixels).
+ * other scale would blur or skip art pixels), or divided by a whole `shrink`
+ * for a frame too big for its thumbnail, which skips pixels on purpose.
  */
 export interface ArtPreviewCanvasProps {
   option: MaterialOption;
@@ -17,14 +18,19 @@ export interface ArtPreviewCanvasProps {
   label: string;
   /** Whole canvas pixels per sheet pixel, drawn unsmoothed; 1 by default. */
   scale?: number;
+  /** Whole sheet pixels per canvas pixel instead, for a frame bigger than its thumbnail (a room table); 1 by default. */
+  shrink?: number;
   className?: string;
   preview?: ArtPreviewCache;
 }
 
-export function ArtPreviewCanvas({ option, color, frame, label, className, scale = 1, preview = pagePreviewCache }: ArtPreviewCanvasProps) {
+export function ArtPreviewCanvas({ option, color, frame, label, className, scale = 1, shrink = 1, preview = pagePreviewCache }: ArtPreviewCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { x, y, width, height } = frame;
-  const factor = Number.isInteger(scale) && scale >= 1 ? scale : 1;
+  const divisor = Number.isInteger(shrink) && shrink >= 1 ? shrink : 1;
+  const factor = (Number.isInteger(scale) && scale >= 1 ? scale : 1) / divisor;
+  const canvasWidth = Math.ceil(width * factor);
+  const canvasHeight = Math.ceil(height * factor);
 
   useEffect(() => {
     let cancelled = false;
@@ -35,12 +41,12 @@ export function ArtPreviewCanvas({ option, color, frame, label, className, scale
       if (context === null) return;
       context.imageSmoothingEnabled = false;
       context.clearRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(sheet, x, y, width, height, 0, 0, width * factor, height * factor);
+      context.drawImage(sheet, x, y, width, height, 0, 0, canvasWidth, canvasHeight);
     });
     return () => {
       cancelled = true;
     };
-  }, [option, color, preview, x, y, width, height, factor]);
+  }, [option, color, preview, x, y, width, height, canvasWidth, canvasHeight]);
 
   return (
     <canvas
@@ -48,9 +54,9 @@ export function ArtPreviewCanvas({ option, color, frame, label, className, scale
       className={className}
       role="img"
       aria-label={label}
-      width={width * factor}
-      height={height * factor}
-      style={{ width: width * factor, height: height * factor }}
+      width={canvasWidth}
+      height={canvasHeight}
+      style={{ width: canvasWidth, height: canvasHeight }}
     />
   );
 }

@@ -39,7 +39,6 @@ import {
   normalizeUpdateDeskInput,
 } from './deskRules.ts';
 import { ART_PACK_DEFAULTS, normalizeStoredAppearance } from '../decor/artCatalogRules.ts';
-import type { DeskItem } from '../decor/decorPort.ts';
 import type { DirectoryPool, DirectoryQueryable } from '../directory/pgDirectory.ts';
 
 /** Codigo de `exclusion_violation` de Postgres: lo que salta `desks_no_overlap`. */
@@ -64,21 +63,6 @@ const OFFICE_SELECT = `
   ORDER BY d.x, d.y, d.id
 `;
 
-/**
- * La decoracion de todos los ocupantes de una vez. Sin `archived_at IS NULL`,
- * igual que `pgDecor.getDeskConfig` y por la misma razon (D1b): esto es una
- * lectura de COLOCACION, y quien ya tenia puesta una pieza retirada la sigue
- * viendo.
- */
-const OFFICE_ITEMS_SELECT = `
-  SELECT d.id, d.user_id, d.asset_id, d.slot, d.rotation, d.created_at,
-         a.texture_key, a.w, a.h, a.name, a.above_avatars
-  FROM user_desk_configs d
-  JOIN assets a ON a.id = d.asset_id
-  WHERE d.user_id = ANY($1::uuid[])
-  ORDER BY d.slot
-`;
-
 function toDesk(row: Record<string, unknown>): Desk {
   return {
     id: row.id as string,
@@ -92,22 +76,6 @@ function toDesk(row: Record<string, unknown>): Desk {
     color: (row.color as string | null | undefined) ?? null,
     createdAt: row.created_at as Date,
     updatedAt: row.updated_at as Date,
-  };
-}
-
-function toDeskItem(row: Record<string, unknown>): DeskItem {
-  return {
-    id: row.id as string,
-    assetId: row.asset_id as string,
-    slot: row.slot as number,
-    rotation: row.rotation as DeskItem['rotation'],
-    textureKey: row.texture_key as string,
-    w: row.w as number,
-    h: row.h as number,
-    name: row.name as string,
-    // Same read as `pgDecor.toDeskItem`: anything but `true` is a normal asset (#71).
-    aboveAvatars: row.above_avatars === true,
-    createdAt: row.created_at as Date,
   };
 }
 
@@ -185,29 +153,6 @@ export function createPgDesks(pool: DirectoryPool): DeskDirectory {
     async listOfficeDesks(): Promise<OfficeDesk[]> {
       const desks = await pool.query(OFFICE_SELECT);
 
-      const occupantIds = [
-        ...new Set(
-          desks.rows
-            .map((row) => row.occupant_id as string | null)
-            .filter((id): id is string => id !== null),
-        ),
-      ];
-
-      // Sin nadie sentado no hay decoracion que pedir. Y con gente sentada se
-      // pide UNA vez para todos: una consulta por ocupante convertiria pintar
-      // la oficina en tantas idas y vueltas como personas haya.
-      const items = occupantIds.length === 0
-        ? []
-        : (await pool.query(OFFICE_ITEMS_SELECT, [occupantIds])).rows;
-
-      const byUser = new Map<string, DeskItem[]>();
-      for (const row of items) {
-        const userId = row.user_id as string;
-        const list = byUser.get(userId) ?? [];
-        list.push(toDeskItem(row));
-        byUser.set(userId, list);
-      }
-
       return desks.rows.map((row) => {
         const desk = toDesk(row);
         if (desk.occupantId === null) return { ...desk, occupant: null };
@@ -215,7 +160,6 @@ export function createPgDesks(pool: DirectoryPool): DeskDirectory {
         const occupant: DeskOccupant = {
           id: desk.occupantId,
           displayName: (row.display_name as string | null) ?? null,
-          items: byUser.get(desk.occupantId) ?? [],
         };
         return { ...desk, occupant };
       });

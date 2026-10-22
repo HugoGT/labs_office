@@ -1,9 +1,9 @@
 import Phaser from 'phaser';
-import type { ArtFacing, ArtPiece, Point } from './artContract';
-import { artUploadsManifestUrl, findPiece, parseArtSheetKey, type ArtAppearance } from './artPack';
+import { propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type Point } from './artContract';
+import { artUploadsManifestUrl, findPiece, type ArtAppearance } from './artPack';
 import { artCustomCharactersUrl } from './customCharacterArt';
 import { ArtPackLoader } from './artPackLoader';
-import { chairPlacement, deskPlacement } from './artPlacement';
+import { deskPlacement } from './artPlacement';
 import { feetOf, positionForFeet } from './avatarGeometry';
 import { beginAutoWalk, isAutoWalkArrived, stepAutoWalk, type AutoWalkState } from './autoWalk';
 import { IDLE_AUTO_SIT, SIT_LOCK_MS, dropSitDwells, guardLeftSeat, sitLockActive, stepAutoSit, type AutoSitState } from './autoSit';
@@ -30,15 +30,16 @@ import { mergeColliderRects } from './colliderMerge';
 import {
   DESK_ZONE_DEPTH,
   MINIMAP_MARKER_DEPTH,
-  specialAssetDepth,
   worldAssetDepth,
 } from './depthLayers';
-import { deskItemName, deskSlotRect, deskZoneName } from './deskLayout';
-import { decorTablePiece, tableEdgeSlot, tableFacing, tableFloorRect, TABLE_ROTATIONS } from './deskTable';
+import { deskZoneName } from './deskLayout';
+import { tableFacing, tableFloorRect } from './deskTable';
+import { decorChairs, decorFootprint, encodeOfficeDecor, withDecor, type DecorEdit, type DecorItem } from './officeDecor';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
 import { MinimapLayer } from './MinimapLayer';
-import { collisionEditHoldsMap, layoutEditHoldsMap, terrainEditHoldsMap } from './editorMapHold';
+import { collisionEditHoldsMap, decorEditHidesRail, decorEditHoldsMap, layoutEditHoldsMap, terrainEditHoldsMap } from './editorMapHold';
+import { DecorEditLayer } from './DecorEditLayer';
 import { isEditableElementFocused } from './inputFocusGuard';
 import { LayoutEditLayer } from './LayoutEditLayer';
 import {
@@ -49,7 +50,6 @@ import {
   placeWalls,
   placeZoneLabels,
   putArtSprite,
-  putChair,
   renderTerrain,
   type TerrainTilemap,
 } from './mapBuilder';
@@ -76,7 +76,7 @@ import {
   type OfficeLayout,
   type WallEdit,
 } from './officeLayout';
-import { BASE_COLLISION_RECTS, STATIC_COLLISION_INSTANCES, officeCollisionInstances } from './officeCollisions';
+import { BASE_COLLISION_RECTS, STATIC_COLLISION_INSTANCES, decorInfoFromManifest, officeCollisionInstances } from './officeCollisions';
 import {
   collisionWorld,
   encodeCollisionTable,
@@ -115,21 +115,11 @@ import {
   chairGround,
   chairSeatId,
   chairSeatTiles,
-  decorChairAt,
-  decorChairPiece,
-  decorChairs,
-  decorSeatFacing,
-  decorSeatGround,
-  decorSeatId,
-  decorSeatTiles,
-  encodeTerrainChairs,
   inSeatReach,
+  isChairPieceId,
   mapSeatId,
   mapSeatTiles,
   parseSeatRef,
-  withChairs,
-  type ChairEdit,
-  type PlacedChair,
   type SeatTiles,
   type MapSeat,
 } from './seating';
@@ -168,6 +158,10 @@ const DESK_COLOR = {
 const DESK_FILL_ALPHA = 0.22;
 const DESK_STROKE_WIDTH = 2;
 /** A piece that cannot be drawn yet (or ever) still shows where it goes. */
+/** Name of what the decor layer draws for the non-chair item anchored on `index` (chairs are `CHAIR_OBJECT_NAME`). */
+export function decorObjectName(index: number): string {
+  return `decor:${index}`;
+}
 const ART_FALLBACK_COLOR = 0x6b7280;
 const ART_FALLBACK_ALPHA = 0.6;
 
@@ -282,12 +276,18 @@ export class OfficeScene extends Phaser.Scene {
   private wallPreview: readonly WallEdit[] | null = null;
   /** What the walls drew, destroyed and drawn again whenever the walls or their preview change. */
   private wallObjects: Phaser.GameObjects.GameObject[] = [];
-  /** The chairs placed from the terrain editor, as the room replicated them last; seats anyone may take. */
-  private terrainChairs: readonly PlacedChair[] = [];
-  /** The terrain editor's pending chair paints, drawn over `terrainChairs` and never sat on or collided with. */
-  private chairPreview: readonly ChairEdit[] | null = null;
-  /** What the placed chairs drew, destroyed and drawn again whenever they or their preview change. */
-  private chairObjects: Phaser.GameObjects.GameObject[] = [];
+  /** The office decor layer (#208) as the room replicated it last; its chairs are seats anyone may take. */
+  private officeDecor: readonly DecorItem[] = [];
+  /** The decor editor's pending edits, drawn over the layer and never sat on or collided with. */
+  private decorPreview: readonly DecorEdit[] | null = null;
+  /**
+   * The catalog the decor collisions were placed with: a manifest read later
+   * (an upload approved after the page loaded) can size a piece the first one
+   * did not know, and then the instances are placed again.
+   */
+  private decorCollisionsManifest: ArtPackLoader['manifest'] = null;
+  /** What the decor layer drew, destroyed and drawn again whenever it or its preview change. */
+  private decorObjects: Phaser.GameObjects.GameObject[] = [];
   /** The static bodies of the terrain grid and their collider, replaced whole on each edit. */
   private terrainColliders?: { rects: Phaser.GameObjects.Rectangle[]; collider: Phaser.Physics.Arcade.Collider };
   /** The terrain of `terrainBlocks` and `terrainWalls`, kept to rebuild `grid` when the collisions change. */
@@ -303,6 +303,8 @@ export class OfficeScene extends Phaser.Scene {
   private unsubscribeTerrainEdit?: () => void;
   private collisionEditLayer?: CollisionEditLayer;
   private unsubscribeCollisionEdit?: () => void;
+  private decorEditLayer?: DecorEditLayer;
+  private unsubscribeDecorEdit?: () => void;
   private player!: CharacterContainer;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WasdKeys;
@@ -418,6 +420,7 @@ export class OfficeScene extends Phaser.Scene {
   private layoutCommandActive = false;
   private terrainEditing = false;
   private collisionEditing = false;
+  private decorEditing = false;
   /**
    * Whether an open editor holds the map (`editorMapHold.ts`): something is
    * picked that the next click acts on. Only then do walking, sitting, the
@@ -428,15 +431,16 @@ export class OfficeScene extends Phaser.Scene {
   private layoutHolds = false;
   private terrainHolds = false;
   private collisionHolds = false;
+  private decorHolds = false;
+  /** A decor piece picked: the minimap steps aside like the rail; a mere selection keeps both. */
+  private decorHidesRail = false;
   /**
-   * Todo lo dibujado del ultimo comando `desks` (#7, slice 5): zonas,
-   * etiquetas y decoracion. Se guarda entero porque cada lista nueva sustituye
+   * Todo lo dibujado del ultimo comando `desks` (#7, slice 5): zonas y
+   * etiquetas. Se guarda entero porque cada lista nueva sustituye
    * a la anterior y hay que poder retirar la vieja de una vez -- dibujar
    * encima dejaria pintado como ocupado un sitio que alguien acaba de soltar.
    */
   private deskObjects: Phaser.GameObjects.GameObject[] = [];
-  /** Last `desks` list, redrawn whole when a piece it needs finishes loading. */
-  private desks: readonly OfficeDesk[] = [];
   /** Created in `preload()`, where `this.load` first exists. */
   private art!: ArtPackLoader;
   private readonly pendingRedraws = new Set<() => void>();
@@ -457,7 +461,7 @@ export class OfficeScene extends Phaser.Scene {
   get playerAvatarId(): string | null {
     return this.localAvatarId;
   }
-  private readonly redrawDesks = (): void => this.applyDesks(this.desks);
+  private readonly redrawDecor = (): void => this.paintDecor();
   /**
    * Objetivo de auto-caminata en curso (issue #2, D9/D10). `undefined` cuando
    * nadie esta siendo perseguido: `update()` solo dirige al reductor mientras
@@ -477,8 +481,10 @@ export class OfficeScene extends Phaser.Scene {
 
   /** Recomputes both editing flags; the map becoming held stops any walk at once. */
   private syncEditing(): void {
-    this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing;
-    this.mapHeld = this.layoutHolds || this.terrainHolds || this.collisionHolds;
+    this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing || this.decorEditing;
+    this.mapHeld = this.layoutHolds || this.terrainHolds || this.collisionHolds || this.decorHolds;
+    // A hidden camera takes no pointer, so the map under the minimap can be edited too.
+    this.minimapCamera?.setVisible(!this.terrainHolds && !this.decorHidesRail);
     if (this.mapHeld) this.resetWalking();
   }
 
@@ -575,7 +581,7 @@ export class OfficeScene extends Phaser.Scene {
     this.terrainBlocks = this.layout.blocks;
     this.terrainWalls = this.layout.walls;
     this.terrain = terrainSnapshot(this.layout);
-    this.collisionInstances = officeCollisionInstances([], this.layout, this.mapSeats);
+    this.collisionInstances = officeCollisionInstances(this.layout, this.mapSeats);
     this.collisionRects = collisionWorld(this.collisionInstances, this.collisionTable);
   }
 
@@ -609,7 +615,7 @@ export class OfficeScene extends Phaser.Scene {
     this.paintWalls();
     placeLayout(this, this.layout, this.art);
     placeSeats(this, this.mapSeats, this.art);
-    this.paintChairs();
+    this.paintDecor();
     placeZoneLabels(this);
 
     // El nombre de la sesion manda sobre la pildora del avatar local (#6).
@@ -657,6 +663,8 @@ export class OfficeScene extends Phaser.Scene {
       minimap: this.minimapCamera,
       bridge: this.bridge,
       store: this.options.zoomStore,
+      // #207: a picked chair, desk table or room table turns with the wheel instead (`DecorEditLayer`).
+      wheelSuppressed: () => this.decorEditLayer?.holdsWheel() ?? false,
     });
     // #53: despues de `setupInput` (comparte `this.input`, mismo momento en
     // que `layoutEditLayer` se crea mas abajo).
@@ -721,9 +729,8 @@ export class OfficeScene extends Phaser.Scene {
       const opening = command !== null && !this.terrainEditing;
       this.terrainEditing = command !== null;
       this.terrainHolds = terrainEditHoldsMap(command);
+      // The DOM rail hides with it (`OfficeShell`), and `syncEditing` hides the minimap.
       this.syncEditing();
-      // The DOM rail hides with it (`OfficeShell`); a hidden camera takes no pointer, so the map under it paints.
-      this.minimapCamera?.setVisible(!this.terrainHolds);
       const previewBlocks = command?.previewBlocks ?? null;
       const repaint = (previewBlocks === null ? '' : encodeTerrainBlocks(previewBlocks)) !==
         (this.terrainPreviewBlocks === null ? '' : encodeTerrainBlocks(this.terrainPreviewBlocks));
@@ -733,11 +740,30 @@ export class OfficeScene extends Phaser.Scene {
       const rewall = JSON.stringify(wallPreview) !== JSON.stringify(this.wallPreview);
       this.wallPreview = wallPreview;
       if (rewall) this.paintWalls();
-      const chairPreview = command?.previewChairs ?? null;
-      const rechair = JSON.stringify(chairPreview) !== JSON.stringify(this.chairPreview);
-      this.chairPreview = chairPreview;
-      if (rechair) this.paintChairs();
       if (opening) this.emitTerrain();
+    });
+
+    // #208. The layer draws the ghost and picks tiles; the scene paints the
+    // pending edits, and hands the editor the live layer when it opens.
+    this.decorEditLayer = new DecorEditLayer(this, this.bridge, {
+      width: this.layout.width,
+      height: this.layout.height,
+      items: () => (this.decorPreview === null ? this.officeDecor : withDecor(this.officeDecor, this.decorPreview)),
+      infoOf: (piece) => decorInfoFromManifest(this.art.manifest)(piece),
+      ground: () => this.terrain,
+      drawPiece: (item) => this.drawDecorPiece(item),
+    });
+    this.unsubscribeDecorEdit = this.bridge.onCommand('decoredit', (command) => {
+      const opening = command !== null && !this.decorEditing;
+      this.decorEditing = command !== null;
+      this.decorHolds = decorEditHoldsMap(command);
+      this.decorHidesRail = decorEditHidesRail(command);
+      this.syncEditing();
+      const preview = command?.preview ?? null;
+      const repaint = JSON.stringify(preview) !== JSON.stringify(this.decorPreview);
+      this.decorPreview = preview;
+      if (repaint) this.paintDecor();
+      if (opening) this.emitDecor();
     });
 
     // The collision editor: the layer draws the draft and picks pieces from
@@ -833,6 +859,8 @@ export class OfficeScene extends Phaser.Scene {
       this.terrainEditLayer?.destroy();
       this.unsubscribeCollisionEdit?.();
       this.collisionEditLayer?.destroy();
+      this.unsubscribeDecorEdit?.();
+      this.decorEditLayer?.destroy();
       this.cameraPanLayer?.destroy();
       this.minimapLayer?.destroy();
       this.cameraZoomLayer?.destroy();
@@ -941,7 +969,7 @@ export class OfficeScene extends Phaser.Scene {
           onSpacesChanged: () => this.bridge.emit('spaceschanged', undefined),
           onTerrain: (blocks) => this.applyTerrain(blocks),
           onWalls: (walls) => this.applyWalls(walls),
-          onChairs: (chairs) => this.applyChairs(chairs),
+          onDecor: (items) => this.applyDecor(items),
           onCollisions: (table) => this.applyCollisions(table),
           onConnectionState: (state) => {
             if (!current()) return;
@@ -1142,18 +1170,11 @@ export class OfficeScene extends Phaser.Scene {
       const seat = this.mapSeats[ref.index];
       return { id, ground: { x: (seat.tx + 0.5) * TILE, y: (seat.ty + 0.5) * TILE }, facing: seat.facing, reach: mapSeatTiles(seat) };
     }
-    if (ref.kind === 'chair') {
-      const chair = this.terrainChairs.find((candidate) => candidate.index === ref.index);
-      if (chair === undefined) return null;
-      const width = this.layout.width;
-      return { id, ground: chairGround(width, chair.index), facing: chair.facing, reach: chairSeatTiles(width, chair.index) };
-    }
-    // A desk has no seat of its own (Editar espacios): only its decor chairs.
-    const desk = this.desks.find((candidate) => candidate.id === ref.deskId);
-    const chair = desk === undefined ? null : decorChairAt(desk.occupant?.items ?? [], ref.slot);
-    if (desk === undefined || chair === null) return null;
-    const origin = { x: desk.x / TILE, y: desk.y / TILE };
-    return { id, ground: decorSeatGround(origin, ref.slot), facing: chair.facing, reach: decorSeatTiles(origin, ref.slot) };
+    // A chair of the decor layer (#208); a desk has no seat of its own.
+    const chair = decorChairs(this.officeDecor).find((candidate) => candidate.index === ref.index);
+    if (chair === undefined) return null;
+    const width = this.layout.width;
+    return { id, ground: chairGround(width, chair.index), facing: chair.facing, reach: chairSeatTiles(width, chair.index) };
   }
 
   /**
@@ -1176,7 +1197,7 @@ export class OfficeScene extends Phaser.Scene {
     return best;
   }
 
-  /** Every seat no peer sits on: map chairs, placed chairs and every decor chair. */
+  /** Every seat no peer sits on: map chairs and every decor chair. */
   private freeSeats(): ResolvedSeat[] {
     const taken = new Set<string>();
     for (const sessionId of this.remotes?.sessionIds() ?? []) {
@@ -1188,16 +1209,9 @@ export class OfficeScene extends Phaser.Scene {
       const seat = this.resolveSeat(mapSeatId(index));
       if (seat) candidates.push(seat);
     });
-    for (const chair of this.terrainChairs) {
+    for (const chair of decorChairs(this.officeDecor)) {
       const seat = this.resolveSeat(chairSeatId(chair.index));
       if (seat) candidates.push(seat);
-    }
-    for (const desk of this.desks) {
-      // Decor chairs are guest seats: offered whoever owns the desk.
-      for (const { slot } of decorChairs(desk.occupant?.items ?? [])) {
-        const seat = this.resolveSeat(decorSeatId(desk.id, slot));
-        if (seat) candidates.push(seat);
-      }
     }
     return candidates.filter((seat) => !taken.has(seat.id));
   }
@@ -1460,36 +1474,9 @@ export class OfficeScene extends Phaser.Scene {
    */
   private applyDesks(desks: readonly OfficeDesk[]): void {
     this.initialDesks = true;
-    this.desks = desks;
-    // Desks and their decor collide by their pieces' rectangles, wherever the list puts them.
-    this.collisionInstances = officeCollisionInstances(desks, this.layout, this.mapSeats, this.terrainChairs);
-    this.refreshCollisions();
+    // A desk places no collision of its own (#208): what stands on it is decor.
     for (const object of this.deskObjects.splice(0)) object.destroy();
     for (const desk of desks) this.drawDesk(desk);
-    this.recheckDecorSeat();
-  }
-
-  /**
-   * A decor chair the local player sits on that the new desks list no longer
-   * has (removed, replaced, moved to another slot, or gone with its desk or occupant) stands
-   * them up here, without waiting for the room's own answer; a turned one
-   * turns them. A pending request for one that is gone is forgotten.
-   */
-  private recheckDecorSeat(): void {
-    const isDecor = (id: string | null | undefined): id is string =>
-      typeof id === 'string' && parseSeatRef(id, this.mapSeats.length)?.kind === 'decor';
-    if (this.seat !== null && isDecor(this.seat.id)) {
-      const seat = this.resolveSeat(this.seat.id);
-      if (seat === null) {
-        this.leaveSeat();
-      } else if (seat.facing !== this.seat.facing) {
-        this.seat = seat;
-        this.facing = seat.facing;
-        setCharacterFacing(this.player, seat.facing);
-        this.player.seatFacing = seat.facing;
-      }
-    }
-    if (isDecor(this.pendingSeat) && this.resolveSeat(this.pendingSeat) === null) this.pendingSeat = null;
   }
 
   /**
@@ -1497,7 +1484,7 @@ export class OfficeScene extends Phaser.Scene {
    * it asks the loader for it and redraws once it settles; a piece of the
    * wrong kind (a chair id as a desk) never draws.
    */
-  private artSheet(appearance: ArtAppearance, kind: 'desk' | 'chair', redraw: () => void): { key: string; piece: ArtPiece } | null {
+  private artSheet(appearance: ArtAppearance, kind: ArtPiece['kind'], redraw: () => void): { key: string; piece: ArtPiece } | null {
     const known = (): ArtPiece | undefined =>
       this.art.manifest === null ? undefined : findPiece(this.art.manifest, appearance.materialId);
     const ready = (): { key: string; piece: ArtPiece } | null => {
@@ -1527,8 +1514,8 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
-   * Dibuja la zona de 3x3 de un escritorio, su etiqueta (si tiene) y la
-   * decoracion de quien lo ocupe.
+   * Dibuja la zona de 3x3 de un escritorio y su etiqueta (si tiene). What
+   * stands on it is the decor layer's (#208, `paintDecor`).
    *
    * The depth is the BOTTOM edge of the area in the world band, same
    * convention as `placeLayout` (`(y + h) * TILE`), so the desk y-sorts
@@ -1568,30 +1555,6 @@ export class OfficeScene extends Phaser.Scene {
       this.deskObjects.push(label);
     }
 
-    // No built-in table or fixed chair: the area is a floor marker and its
-    // occupant's decor (a table on one edge, chairs, plants) is all it holds.
-
-    for (const item of desk.occupant?.items ?? []) {
-      // `null` = ese slot no es una de las nueve cajas. Se salta la pieza y no
-      // el escritorio: pintarla en una caja inventada la dejaria fuera del
-      // area, y renunciar al escritorio entero quitaria un sitio que si existe.
-      const box = deskSlotRect(desk, item.slot);
-      if (box === null) continue;
-      // A special piece (#71) keeps the same bottom edge but moves to the band
-      // above avatars, so it covers whoever walks through the desk.
-      const itemDepth = item.aboveAvatars ? specialAssetDepth(bottom) : depth;
-      const table = decorTablePiece(item.textureKey);
-      if (table !== null) {
-        this.deskObjects.push(...this.drawDecorTable(item.id, table, item.slot, item.rotation, box));
-        continue;
-      }
-      const chair = decorChairPiece(item.textureKey);
-      const chairLayers = chair === null ? null : this.drawDecorChair(item.id, chair, item.rotation, box);
-      this.deskObjects.push(
-        ...(chairLayers ?? [this.drawDeskItem(item.id, item.textureKey, item.rotation, box, itemDepth)]),
-      );
-    }
-
     // Un escritorio ajeno no se hace clicable siquiera: no tiene ninguna
     // accion que ofrecer, y `release` solo suelta el propio.
     if (desk.occupant !== null && !mine) return;
@@ -1618,99 +1581,50 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
-   * A decor table (`deskTable.ts`): a desk piece drawn 1:1 with its anchor on
-   * the middle of the edge its rotation picks (`box`, the item's slot box),
-   * in the column of its facing, y-sorted by its own depth point like a
-   * Tiled desk. A table off the middle of its edge is skipped, as the room's
-   * collisions skip it. While its sheet is not loaded a placeholder covers
-   * the floor under its top, and the sheet's arrival redraws the desks.
+   * One non-chair item of the decor layer (#208). A desk table is drawn 1:1
+   * with its anchor on the middle of its middle tile, in the column of its
+   * facing, y-sorted by its own depth point like a Tiled desk; a plant or a
+   * room table 1:1 on the bottom middle of its footprint, like a Tiled prop
+   * (a vertical room table on its swapped footprint, in its second frame).
+   * While its sheet is not loaded a placeholder covers its footprint (the
+   * floor under its top for a desk table), and the sheet's arrival redraws
+   * the decor.
    */
-  private drawDecorTable(
-    itemId: string,
-    pieceId: string,
-    slot: number,
-    rotation: number,
-    box: { x: number; y: number; w: number; h: number },
-  ): Phaser.GameObjects.GameObject[] {
-    const edge = TABLE_ROTATIONS.find((candidate) => candidate === rotation);
-    if (edge === undefined || tableEdgeSlot(edge) !== slot) return [];
-    const anchor = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
-    const name = deskItemName(itemId);
-    const sheet = this.artSheet({ materialId: pieceId, color: null }, 'desk', this.redrawDesks);
-    if (sheet === null || sheet.piece.kind !== 'desk') {
-      const floor = tableFloorRect(edge);
+  private drawDecorItem(item: DecorItem): Phaser.GameObjects.GameObject[] {
+    const width = this.layout.width;
+    const kind = item.piece.slice(0, item.piece.indexOf('-'));
+    const infoOf = decorInfoFromManifest(this.art.manifest);
+    const rect = decorFootprint(item, infoOf(item.piece), width);
+    if (kind === 'desk') {
+      const anchor = { x: ((item.index % width) + 0.5) * TILE, y: (Math.floor(item.index / width) + 0.5) * TILE };
+      // A painted desk table in its own color; without one, its manifest default (the exported sheet).
+      const sheet = this.artSheet({ materialId: item.piece, color: item.color ?? null }, 'desk', this.redrawDecor);
+      if (sheet === null || sheet.piece.kind !== 'desk') {
+        const floor = tableFloorRect(item.rotation);
+        return [
+          this.add
+            .rectangle(anchor.x, anchor.y, floor.w, floor.h, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
+            .setDepth(worldAssetDepth(anchor.y + floor.y + floor.h))
+            .setName(decorObjectName(item.index)),
+        ];
+      }
+      const placement = deskPlacement(sheet.piece, tableFacing(item.rotation), anchor);
+      return [putArtSprite(this, sheet.key, placement, worldAssetDepth(placement.depthY)).setName(decorObjectName(item.index))];
+    }
+    const propKind = kind === 'table' ? 'table' : 'plant';
+    const sheet = this.artSheet({ materialId: item.piece, color: null }, propKind, this.redrawDecor);
+    if (sheet === null || (sheet.piece.kind !== 'plant' && sheet.piece.kind !== 'table')) {
       return [
         this.add
-          .rectangle(anchor.x, anchor.y, floor.w, floor.h, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
-          .setDepth(worldAssetDepth(anchor.y + floor.y + floor.h))
-          .setName(name),
+          .rectangle((rect.x + rect.w / 2) * TILE, (rect.y + rect.h / 2) * TILE, rect.w * TILE, rect.h * TILE, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
+          .setDepth(worldAssetDepth((rect.y + rect.h) * TILE))
+          .setName(decorObjectName(item.index)),
       ];
     }
-    const placement = deskPlacement(sheet.piece, tableFacing(edge), anchor);
-    return [putArtSprite(this, sheet.key, placement, worldAssetDepth(placement.depthY)).setName(name)];
-  }
-
-  /**
-   * A decor chair (a guest seat): drawn like a placed chair, 1:1 in both
-   * layers on the middle of its slot box in the facing its rotation picks,
-   * never squeezed into the box, so whoever sits on it sits between its
-   * layers. `null` while its sheet is not loaded: the caller draws the decor
-   * fallback, and the sheet's arrival redraws the desks.
-   */
-  private drawDecorChair(
-    itemId: string,
-    pieceId: string,
-    rotation: number,
-    box: { x: number; y: number; w: number; h: number },
-  ): Phaser.GameObjects.GameObject[] | null {
-    const sheet = this.artSheet({ materialId: pieceId, color: null }, 'chair', this.redrawDesks);
-    if (sheet === null || sheet.piece.kind !== 'chair') return null;
-    const ground = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
-    return putChair(this, sheet.key, chairPlacement(sheet.piece, decorSeatFacing(rotation), ground)).map((layer) =>
-      layer.setName(deskItemName(itemId)),
-    );
-  }
-
-  /**
-   * Una pieza de decoracion ocupando su caja.
-   *
-   * Si la textura no esta cargada se dibuja un recuadro neutro en su sitio.
-   * El catalogo es curado y promete claves que el bundle ya trae, pero esto
-   * lee una respuesta de red: `add.image` con una clave desconocida pinta la
-   * textura de error verde y negra de Phaser en mitad de la oficina, y un
-   * hueco silencioso escondería que ese escritorio SI tiene algo puesto.
-   */
-  private drawDeskItem(
-    itemId: string,
-    textureKey: string,
-    rotation: number,
-    box: { x: number; y: number; w: number; h: number },
-    depth: number,
-  ): Phaser.GameObjects.GameObject {
-    const cx = box.x + box.w / 2;
-    const cy = box.y + box.h / 2;
-    const name = deskItemName(itemId);
-
-    // A key of the art pack or an upload (#121) is loaded on demand, like a
-    // desk material: the fallback below stays until it lands, then redraws.
-    const art = parseArtSheetKey(textureKey);
-    if (art !== null && !this.textures.exists(textureKey)) {
-      this.requestArt(art.pieceId, () => this.scheduleRedraw(this.redrawDesks));
-    }
-
-    if (!this.textures.exists(textureKey)) {
-      return this.add
-        .rectangle(cx, cy, box.w, box.h, DESK_COLOR.taken, DESK_FILL_ALPHA)
-        .setDepth(depth)
-        .setName(name);
-    }
-
-    return this.add
-      .image(cx, cy, textureKey)
-      .setDisplaySize(box.w, box.h)
-      .setAngle(rotation)
-      .setDepth(depth)
-      .setName(name);
+    // A room table standing vertical is its sheet's second frame, anchored on its swapped footprint.
+    const placement = propPlacement({ anchor: sheet.piece.anchor, footprint: { w: rect.w, h: rect.h } }, rect.x, rect.y);
+    const frame = sheet.piece.kind === 'table' ? tableFrameIndex(item.rotation) : 0;
+    return [putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(placement.depthY)).setName(decorObjectName(item.index))];
   }
 
   /**
@@ -1887,13 +1801,12 @@ export class OfficeScene extends Phaser.Scene {
    * on that is gone stands them up here too, without waiting for the room's
    * own answer; a turned one turns them.
    */
-  private applyChairs(chairs: readonly PlacedChair[]): void {
+  private applyDecor(items: readonly DecorItem[]): void {
     if (!this.alive) return;
-    if (encodeTerrainChairs(chairs) !== encodeTerrainChairs(this.terrainChairs)) {
-      this.terrainChairs = chairs;
-      this.collisionInstances = officeCollisionInstances(this.desks, this.layout, this.mapSeats, chairs);
-      this.refreshCollisions();
-      this.paintChairs();
+    if (encodeOfficeDecor(items) !== encodeOfficeDecor(this.officeDecor)) {
+      this.officeDecor = items;
+      this.placeDecorCollisions();
+      this.paintDecor();
       const ref = this.seat === null ? null : parseSeatRef(this.seat.id, this.mapSeats.length);
       if (this.seat !== null && ref?.kind === 'chair') {
         const seat = this.resolveSeat(this.seat.id);
@@ -1910,19 +1823,50 @@ export class OfficeScene extends Phaser.Scene {
         this.pendingSeat = null;
       }
     }
-    this.emitTerrain();
+    this.emitDecor();
   }
 
-  /** Hands the editor what the room shows: the live blocks, walls and placed chairs. */
+  /**
+   * Places the collision instances of the static office and the decor layer
+   * with the catalog as it is now, and rebuilds the colliders from them.
+   */
+  private placeDecorCollisions(): void {
+    this.decorCollisionsManifest = this.art.manifest;
+    this.collisionInstances = officeCollisionInstances(this.layout, this.mapSeats, this.officeDecor, decorInfoFromManifest(this.art.manifest));
+    this.refreshCollisions();
+  }
+
+  /** Hands the terrain editor what the room shows: the live blocks and walls. */
   private emitTerrain(): void {
-    this.bridge.emit('terrain', { blocks: this.terrainBlocks, walls: this.terrainWalls, chairs: this.terrainChairs });
+    this.bridge.emit('terrain', { blocks: this.terrainBlocks, walls: this.terrainWalls });
+    this.decorEditLayer?.refresh();
   }
 
-  /** Redraws every placed chair from the live chairs, with the editor's pending chair paints over them. */
-  private paintChairs(): void {
-    for (const object of this.chairObjects) object.destroy();
-    const chairs = this.chairPreview === null ? this.terrainChairs : withChairs(this.terrainChairs, this.chairPreview);
-    this.chairObjects = placeChairs(this, chairs, this.layout.width, this.art);
+  /** Hands the decor editors what the room shows: the live decor layer. */
+  private emitDecor(): void {
+    this.bridge.emit('decor', { items: this.officeDecor });
+    this.decorEditLayer?.refresh();
+  }
+
+  /**
+   * Redraws the decor layer (#208) from the live items, with the decor
+   * editor's pending edits over them. Also the redraw a piece's sheet asks
+   * for when it lands: a catalog read since the collisions were placed may
+   * size an uploaded piece the first one did not know, so they are placed
+   * again then.
+   */
+  private paintDecor(): void {
+    if (this.art.manifest !== this.decorCollisionsManifest && this.officeDecor.length > 0) this.placeDecorCollisions();
+    for (const object of this.decorObjects) object.destroy();
+    const items = this.decorPreview === null ? this.officeDecor : withDecor(this.officeDecor, this.decorPreview);
+    this.decorObjects = items.flatMap((item) => this.drawDecorPiece(item));
+  }
+
+  /** One item of the decor layer: a chair in both layers like a base chair (`placeChairs`), anything else by `drawDecorItem`. */
+  private drawDecorPiece(item: DecorItem): Phaser.GameObjects.GameObject[] {
+    if (!isChairPieceId(item.piece)) return this.drawDecorItem(item);
+    const [chair] = decorChairs([item]);
+    return chair === undefined ? [] : placeChairs(this, [{ index: chair.index, piece: item.piece, facing: chair.facing }], this.layout.width, this.art);
   }
 
   /** Redraws the tilemap from the live blocks, or from the editor's pending paints while it has some. */

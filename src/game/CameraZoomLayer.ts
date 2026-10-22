@@ -46,6 +46,12 @@ export interface CameraZoomLayerOptions {
   now?: () => number;
   /** Keys are ignored while a text field has the keystroke. */
   isEditableFocused?: () => boolean;
+  /**
+   * While it says so, the wheel belongs to someone else and never zooms: the
+   * decor editor turns a picked chair or desk table with it (#207). The keys,
+   * the bridge command and the zoom card keep zooming meanwhile.
+   */
+  wheelSuppressed?: () => boolean;
 }
 
 export class CameraZoomLayer {
@@ -55,6 +61,7 @@ export class CameraZoomLayer {
   private readonly store?: ZoomStore;
   private readonly now: () => number;
   private readonly isEditableFocused: () => boolean;
+  private readonly wheelSuppressed: () => boolean;
   // Captured now: after `game.destroy()` the scene no longer reaches its plugins.
   private readonly input: Phaser.Input.InputPlugin;
   private readonly keyboard: Phaser.Input.Keyboard.KeyboardPlugin | null;
@@ -73,6 +80,11 @@ export class CameraZoomLayer {
     // minimap rect is checked on its own.
     if (pointer.camera && pointer.camera !== this.camera) return;
     if (this.isOverMinimap(pointer)) return;
+    if (this.wheelSuppressed()) {
+      // Turns of a piece must not count toward the next zoom step.
+      this.wheelState = INITIAL_WHEEL_STATE;
+      return;
+    }
     const native = pointer.event as WheelEvent | undefined;
     const { state, step } = accumulateWheel(this.wheelState, {
       deltaY,
@@ -118,6 +130,7 @@ export class CameraZoomLayer {
     this.store = options.store;
     this.now = options.now ?? (() => performance.now());
     this.isEditableFocused = options.isEditableFocused ?? (() => isEditableElementFocused());
+    this.wheelSuppressed = options.wheelSuppressed ?? (() => false);
     this.input = options.scene.input;
     this.keyboard = options.scene.input.keyboard;
     this.sceneEvents = options.scene.events;

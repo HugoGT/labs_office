@@ -3,9 +3,8 @@
  * the pointer while a palette entry is picked, and turns a click on the map
  * into a pick: with a floor the cell is a 9x9 block and the pick a
  * `terrainpick`, with a wall (or the wall eraser) it is the nearest grid
- * vertex (a wall post stands on the line between tiles) and a `wallpick`,
- * with a chair (or the chair eraser) the tile under the pointer and a
- * `chairpick`. Holding the primary button down and dragging keeps reporting
+ * vertex (a wall post stands on the line between tiles) and a `wallpick`.
+ * Holding the primary button down and dragging keeps reporting
  * every cell the stroke crosses, so a large area or a long wall is one
  * gesture instead of a click per cell. Same split as `LayoutEditLayer`: the
  * layer draws and reports pointer facts, React decides. Pending paints are
@@ -25,7 +24,7 @@ export const TERRAIN_HOVER_NAME = 'terrain-edit:hover';
 const HOVER_STROKE_COLOR = 0x38bdf8;
 
 /** What a pick reports, by the kind of brush that made it. */
-const PICK_EVENT = { floor: 'terrainpick', wall: 'wallpick', chair: 'chairpick' } as const;
+const PICK_EVENT = { floor: 'terrainpick', wall: 'wallpick' } as const;
 const STROKE_WIDTH = 3;
 
 export class TerrainEditLayer {
@@ -37,8 +36,6 @@ export class TerrainEditLayer {
   private readonly blocks: StrokeGrid;
   /** Walls paint single posts, on the grid vertices. */
   private readonly vertices: StrokeGrid;
-  /** Chairs stand one per tile. */
-  private readonly tiles: StrokeGrid;
   /** World point of the last pointer event of a held stroke, or `null` while no stroke is held. */
   private stroke: { x: number; y: number } | null = null;
   private lastPicked: number | null = null;
@@ -62,7 +59,6 @@ export class TerrainEditLayer {
     this.bridge = bridge;
     this.blocks = { columns: layout.width / BLOCK_TILES, rows: layout.height / BLOCK_TILES, cellSize: BLOCK_TILES * TILE };
     this.vertices = { columns: layout.width, rows: layout.height, cellSize: TILE, snap: 'vertex' };
-    this.tiles = { columns: layout.width, rows: layout.height, cellSize: TILE };
     this.unsubscribeCommand = bridge.onCommand('terrainedit', (command) => this.applyCommand(command));
     scene.input.on('pointermove', this.onPointerMove);
     scene.input.on('pointerdown', this.onPointerDown);
@@ -79,10 +75,9 @@ export class TerrainEditLayer {
     this.applyCommand(null);
   }
 
-  /** The grid a brush paints on: blocks for a floor, vertices for a wall, tiles for a chair. */
+  /** The grid a brush paints on: blocks for a floor, vertices for a wall. */
   private gridOf(brush: TerrainBrush): StrokeGrid {
-    if (brush.kind === 'floor') return this.blocks;
-    return brush.kind === 'wall' ? this.vertices : this.tiles;
+    return brush.kind === 'floor' ? this.blocks : this.vertices;
   }
 
   /** Reports the cells from `from` (the press when `null`) to the pointer, skipping the one just reported. */

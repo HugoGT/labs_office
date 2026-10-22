@@ -2,9 +2,9 @@
  * The live collision areas of the server: the saved rectangles per piece and
  * the world rectangles of every instance, kept in memory. `OfficeRoom`
  * checks every `move` against `rects()`, so a move never queries Postgres;
- * they are rebuilt at `load()`, per accepted edit, when the served desks or
- * their decor change (`refreshPlacements`) and when the placed chairs change
- * (`refreshChairs`).
+ * they are rebuilt at `load()`, per accepted edit and when the office decor
+ * layer changes (`refreshDecor`). Desks place nothing: a desk is only a zone,
+ * and whatever stands on it is decor (#208).
  *
  * Edits and refreshes run one at a time. The table only changes after the
  * store saved it: a failed save leaves the office exactly as it was.
@@ -13,18 +13,17 @@
 import type { OfficeLayout } from '../../../src/game/officeLayout.ts';
 import {
   collisionWorld,
-  deskInstances,
   encodeCollisionTable,
-  placedChairInstances,
+  officeDecorInstances,
   staticCollisionInstances,
-  type CollisionDesk,
   type CollisionInstance,
   type CollisionPoint,
   type CollisionRect,
   type CollisionTable,
   type WorldCollisionRect,
 } from '../../../src/game/pieceCollisions.ts';
-import type { MapSeat, PlacedChair } from '../../../src/game/seating.ts';
+import type { DecorItem, DecorPieceInfo } from '../../../src/game/officeDecor.ts';
+import type { MapSeat } from '../../../src/game/seating.ts';
 import type { CollisionStore } from './collisionPort.ts';
 import { CollisionProtectedError, trapsPlayer } from './collisionRules.ts';
 
@@ -33,7 +32,7 @@ export type CollisionListener = (encoded: string) => void;
 export type PlayerPositions = () => readonly CollisionPoint[];
 
 export interface CollisionRuntime {
-  /** Reads the saved pieces and the served desks. Called once, after the schema is applied. */
+  /** Reads the saved pieces and places the decor. Called once, after the schema and the terrain loaded. */
   load(): Promise<void>;
   table(): CollisionTable;
   /** The table in its wire form (`encodeCollisionTable`), as the room replicates it. */
@@ -46,10 +45,8 @@ export interface CollisionRuntime {
   setRects(edit: { pieceId: string; rects: readonly CollisionRect[]; actorId: string | null }, players: PlayerPositions): Promise<void>;
   /** Gives a piece back its default, under the same player check. */
   reset(edit: { pieceId: string; actorId: string | null }, players: PlayerPositions): Promise<void>;
-  /** Re-reads the served desks and their decor. */
-  refreshPlacements(): Promise<void>;
-  /** Re-reads the placed chairs (`chairs`); no store is touched. */
-  refreshChairs(): Promise<void>;
+  /** Re-reads the decor layer (`decor`); no store is touched. */
+  refreshDecor(): Promise<void>;
   /** Called after each accepted edit with the new wire form. */
   subscribe(listener: CollisionListener): () => void;
 }
@@ -58,19 +55,18 @@ export function createCollisionRuntime({
   layout,
   seats,
   store,
-  listDesks,
-  chairs,
+  decor,
+  decorInfo = () => null,
 }: {
   layout: Pick<OfficeLayout, 'props' | 'width'>;
   seats: readonly MapSeat[];
   store?: CollisionStore;
-  /** The served desks; absent (no desks store), there are none. */
-  listDesks?: () => Promise<readonly CollisionDesk[]>;
-  /** The live placed chairs (the terrain runtime's); absent, there are none. */
-  chairs?: () => readonly PlacedChair[];
+  /** The live decor layer (the terrain runtime's); absent, there is none. */
+  decor?: () => readonly DecorItem[];
+  /** How the decor rules see a piece (the terrain runtime's `decorInfo`); a piece it cannot resolve places nothing. */
+  decorInfo?: (piece: string) => DecorPieceInfo | null;
 }): CollisionRuntime {
   const staticInstances = staticCollisionInstances(layout.props, seats);
-  let deskPlacements: readonly CollisionInstance[] = [];
   const listeners = new Set<CollisionListener>();
   let table: CollisionTable = new Map();
   let instances: readonly CollisionInstance[] = staticInstances;
@@ -107,13 +103,8 @@ export function createCollisionRuntime({
   }
 
   function placeAll(): void {
-    instances = [...staticInstances, ...deskPlacements, ...placedChairInstances(chairs?.() ?? [], layout.width)];
+    instances = [...staticInstances, ...officeDecorInstances(decor?.() ?? [], decorInfo, layout.width)];
     rebuild();
-  }
-
-  async function readPlacements(): Promise<void> {
-    deskPlacements = deskInstances((await listDesks?.()) ?? []);
-    placeAll();
   }
 
   return {
@@ -123,7 +114,7 @@ export function createCollisionRuntime({
           table = new Map(await store.loadCollisions());
           encoded = encodeCollisionTable(table);
         }
-        await readPlacements();
+        placeAll();
       });
     },
     table: () => table,
@@ -143,10 +134,7 @@ export function createCollisionRuntime({
         return change(pieceId, null, players, () => store.deleteCollision(pieceId));
       });
     },
-    refreshPlacements() {
-      return serialized(readPlacements);
-    },
-    refreshChairs() {
+    refreshDecor() {
       return serialized(async () => placeAll());
     },
     subscribe(listener) {

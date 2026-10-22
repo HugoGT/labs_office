@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   INITIAL_WHEEL_STATE,
+  ROTATE_WHEEL_RULES,
   WHEEL_COOLDOWN_MS,
   WHEEL_IDLE_MS,
   WHEEL_NOTCH_IDLE_MS,
@@ -314,6 +315,59 @@ describe('accumulateWheel', () => {
     }
 
     expect(INITIAL_WHEEL_STATE).toEqual(initial);
+  });
+});
+
+describe('accumulateWheel with ROTATE_WHEEL_RULES (#207: the wheel turns a picked piece)', () => {
+  const at = (now: number, deltaY = 100, extra: { deltaMode?: number; ctrlKey?: boolean } = {}) => ({
+    deltaY,
+    deltaMode: extra.deltaMode ?? 0,
+    ctrlKey: extra.ctrlKey ?? false,
+    now,
+  });
+
+  it('one mouse notch is one step, signed like the zoom (down -1, up 1)', () => {
+    expect(accumulateWheel(INITIAL_WHEEL_STATE, at(1000, 100), ROTATE_WHEEL_RULES).step).toBe(-1);
+    expect(accumulateWheel(INITIAL_WHEEL_STATE, at(1000, -100), ROTATE_WHEEL_RULES).step).toBe(1);
+    expect(accumulateWheel(INITIAL_WHEEL_STATE, at(1000, 3, { deltaMode: 1 }), ROTATE_WHEEL_RULES).step).toBe(-1);
+  });
+
+  it('notches a deliberate pace apart turn one step each', () => {
+    let state = INITIAL_WHEEL_STATE;
+    const steps: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      const result = accumulateWheel(state, at(1000 + i * (WHEEL_COOLDOWN_MS + 50)), ROTATE_WHEEL_RULES);
+      state = result.state;
+      steps.push(result.step);
+    }
+    expect(steps).toEqual([-1, -1, -1, -1]);
+  });
+
+  it('a trackpad gesture (small deltas every frame for a second, inertia included) turns once', () => {
+    let state = INITIAL_WHEEL_STATE;
+    let turned = 0;
+    for (let t = 0; t < 1000; t += 16) {
+      const result = accumulateWheel(state, at(1000 + t, 12), ROTATE_WHEEL_RULES);
+      state = result.state;
+      if (result.step !== 0) turned++;
+    }
+    expect(turned).toBe(1);
+  });
+
+  it('a fast spin of the wheel turns once, and the next notch after a pause turns again', () => {
+    let state = INITIAL_WHEEL_STATE;
+    const steps: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      const result = accumulateWheel(state, at(1000 + i * 30), ROTATE_WHEEL_RULES);
+      state = result.state;
+      steps.push(result.step);
+    }
+    expect(steps.filter((step) => step !== 0)).toHaveLength(1);
+    expect(accumulateWheel(state, at(1000 + 5 * 30 + WHEEL_COOLDOWN_MS + 1), ROTATE_WHEEL_RULES).step).toBe(-1);
+  });
+
+  it('without rules the zoom still needs WHEEL_NOTCHES_PER_STEP notches', () => {
+    expect(accumulateWheel(INITIAL_WHEEL_STATE, at(1000)).step).toBe(0);
   });
 });
 

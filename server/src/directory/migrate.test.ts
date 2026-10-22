@@ -11,10 +11,21 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { LEGACY_BLOCK_GRID, MAP_BLOCK_COLUMNS, MAP_BLOCK_TILES, SPAWN_BLOCK_INDEX, TILE } from '../../../src/game/mapData.ts';
+import { LEGACY_BLOCK_GRID, MAP_BLOCK_COLUMNS, MAP_BLOCK_TILES, MAP_W, SPAWN_BLOCK_INDEX, TILE } from '../../../src/game/mapData.ts';
+import { BASE_LAYOUT } from '../../../src/game/officeLayout.ts';
+import { DECOR_ROTATIONS } from '../../../src/game/officeDecor.ts';
 import { LAYOUT_MATERIALS, WALL_PIECES } from '../../../src/game/officeLayout.ts';
 import { CHAIR_PIECES, SEAT_FACINGS } from '../../../src/game/seating.ts';
-import { MAP_LAYOUT_VERSION, migrate, readSchemaSql, reportDesksWithoutSpace } from './migrate.ts';
+import { MAP_LAYOUT_VERSION, OFFICE_DECOR_VERSION, migrate, readSchemaSql, reportDesksWithoutSpace } from './migrate.ts';
+
+/**
+ * The one-time move to the 21x15 grid: the first `DO` block of the file. The
+ * decor layer's one-time copy (#208) is a second one, after it.
+ */
+function gridMoveOf(sql: string): string {
+  const start = sql.indexOf('do $$');
+  return sql.slice(start, sql.indexOf('end $$;', start));
+}
 
 /** Comparar SQL con saltos de linea y sangria es comparar formato, no contrato. */
 function squash(sql: string): string {
@@ -275,7 +286,7 @@ describe('schema.sql: las cuatro tablas de PRD-7 (#7)', () => {
     expect(schema).not.toContain('insert into spaces (id, slug, name, x, y, w, h) values');
     expect(schema).not.toMatch(/delete from spaces|truncate spaces/);
     // Placements only ever move, once, with the whole map (see the 21x15 grid block below).
-    const outsideMove = schema.slice(0, schema.indexOf('do $$')) + schema.slice(schema.lastIndexOf('end $$;'));
+    const outsideMove = schema.slice(0, schema.indexOf('do $$')) + schema.slice(schema.indexOf('end $$;'));
     expect(outsideMove).not.toMatch(/update spaces set/);
   });
 
@@ -679,7 +690,7 @@ describe('schema.sql: painted terrain walls', () => {
 
   it('is created after the users it references and outside the one-time grid move, whose grid it never had', () => {
     expect(squashed.indexOf('create table if not exists terrain_walls')).toBeGreaterThan(squashed.indexOf('create table if not exists users'));
-    const migration = squashed.slice(squashed.indexOf('do $$'), squashed.lastIndexOf('end $$;'));
+    const migration = gridMoveOf(squashed);
     expect(migration).not.toContain('terrain_walls');
   });
 });
@@ -699,7 +710,7 @@ describe('schema.sql: placed chairs', () => {
 
   it('is created after the users it references and outside the one-time grid move, whose grid it never had', () => {
     expect(squashed.indexOf('create table if not exists terrain_chairs')).toBeGreaterThan(squashed.indexOf('create table if not exists users'));
-    const migration = squashed.slice(squashed.indexOf('do $$'), squashed.lastIndexOf('end $$;'));
+    const migration = gridMoveOf(squashed);
     expect(migration).not.toContain('terrain_chairs');
   });
 });
@@ -724,7 +735,7 @@ describe('schema.sql: custom characters', () => {
   });
 
   it('stays outside the one-time grid move', () => {
-    const migration = squashed.slice(squashed.indexOf('do $$'), squashed.lastIndexOf('end $$;'));
+    const migration = gridMoveOf(squashed);
     expect(migration).not.toContain('custom_characters');
   });
 });
@@ -741,7 +752,7 @@ describe('schema.sql: one-time move to the 21x15 block grid', () => {
   const { columns, rows, offsetColumns, offsetRows } = LEGACY_BLOCK_GRID;
   const tilesX = offsetColumns * MAP_BLOCK_TILES;
   const tilesY = offsetRows * MAP_BLOCK_TILES;
-  const migration = squashed.slice(squashed.indexOf('do $$'), squashed.lastIndexOf('end $$;'));
+  const migration = gridMoveOf(squashed);
 
   it('keeps a one-row marker table of the map layout version, created idempotently', () => {
     expect(squashed).toContain(
@@ -789,6 +800,70 @@ describe('schema.sql: one-time move to the 21x15 block grid', () => {
       'alter table spaces add column if not exists desk_id',
       'alter table users add column if not exists last_x',
       'create table if not exists map_layout_version',
+    ]) {
+      expect(squashed.indexOf(prerequisite), prerequisite).toBeGreaterThanOrEqual(0);
+      expect(squashed.indexOf(prerequisite), prerequisite).toBeLessThan(start);
+    }
+  });
+});
+
+/**
+ * The office decor layer (#208): one row per anchor tile, and a one-time copy
+ * of the placed chairs and of the per-desk decor of whoever occupies a desk,
+ * behind its own marker so a restart never adds back what an admin removed.
+ */
+describe('schema.sql: the office decor layer (#208)', () => {
+  const squashed = squash(schema);
+  const decorStart = squashed.indexOf('if not exists (select 1 from office_decor_version) then');
+  const copy = squashed.slice(decorStart, squashed.indexOf('end $$;', decorStart));
+
+  it('stores one item per anchor tile with its piece and rotation, who placed it and when', () => {
+    const rotations = DECOR_ROTATIONS.join(', ');
+    expect(squashed).toContain(
+      `create table if not exists office_decor ( tile_index integer primary key check (tile_index >= 0), piece_id text not null, rotation smallint not null check (rotation in (${rotations})), updated_by uuid references users(id), updated_at timestamptz not null default now() )`,
+    );
+  });
+
+  it('adds the nullable color of a painted item as a column of its own, a strict lower-case #rrggbb, so existing databases migrate', () => {
+    // `CREATE TABLE IF NOT EXISTS` never touches a live table: the column comes with an ALTER.
+    expect(squashed).toContain("alter table office_decor add column if not exists color text check (color ~ '^#[0-9a-f]{6}$');");
+    expect(squashed.indexOf('alter table office_decor add column if not exists color')).toBeGreaterThan(squashed.indexOf('create table if not exists office_decor ('));
+  });
+
+  it('keeps a one-row marker and copies the old rows only while it is missing, writing it in the same block', () => {
+    expect(squashed).toContain(
+      'create table if not exists office_decor_version ( id boolean primary key default true check (id), version integer not null, migrated_at timestamptz not null default now() )',
+    );
+    expect(decorStart).toBeGreaterThan(0);
+    expect(copy).toContain(`insert into office_decor_version (version) values (${OFFICE_DECOR_VERSION})`);
+    expect(OFFICE_DECOR_VERSION).toBe(1);
+  });
+
+  it('copies every placed chair with its facing as a rotation: down 0, right 90, up 180, left 270', () => {
+    expect(copy).toContain("case facing when 'right' then 90 when 'up' then 180 when 'left' then 270 else 0 end");
+    expect(copy).toMatch(/from terrain_chairs on conflict \(tile_index\) do nothing/);
+  });
+
+  it('copies the art decor of desk occupants to the tile of its slot box on the 189 tile wide map', () => {
+    expect(MAP_W).toBe(189);
+    expect(BASE_LAYOUT.width).toBe(MAP_W);
+    expect(copy).toContain(`(d.y + c.slot / 3) * ${MAP_W} + d.x + c.slot % 3`);
+    expect(copy).toContain('join desks d on d.occupant_id = c.user_id');
+    expect(copy).toContain("where a.texture_key ~ '^art:[a-z0-9-]+:sheet$'");
+    expect(copy).toMatch(/from user_desk_configs c .* on conflict \(tile_index\) do nothing/);
+  });
+
+  it('runs after the grid move, every table it reads and the layer it fills', () => {
+    const start = squashed.lastIndexOf('do $$');
+    expect(start).toBeGreaterThan(squashed.indexOf('end $$;'));
+    expect(start).toBeLessThan(decorStart);
+    for (const prerequisite of [
+      'create table if not exists terrain_chairs',
+      'create table if not exists user_desk_configs',
+      'create table if not exists desks',
+      'create table if not exists assets',
+      'create table if not exists office_decor',
+      'create table if not exists office_decor_version',
     ]) {
       expect(squashed.indexOf(prerequisite), prerequisite).toBeGreaterThanOrEqual(0);
       expect(squashed.indexOf(prerequisite), prerequisite).toBeLessThan(start);

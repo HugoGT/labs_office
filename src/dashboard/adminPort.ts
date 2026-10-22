@@ -158,11 +158,6 @@ export type AdminErrorCode =
    */
   | 'desk-on-wall'
   /**
-   * A chair placed from the terrain editor stands on the desk's 3x3
-   * footprint. Fixed the same way as a wall: remove it or pick another spot.
-   */
-  | 'desk-on-chair'
-  /**
    * Dos salas pisandose (#10 + #12, S3a). Es su propio codigo y no
    * `desk-overlap` reciclado porque las dos filas con las que puede chocar
    * una sala son de otra naturaleza -- ver `spacesRoutes.ts`.
@@ -210,6 +205,13 @@ export type AdminErrorCode =
    */
   | 'terrain-under-placement'
   | 'terrain-stale'
+  /**
+   * "Mi espacio" refused (#208, `POST /me/decor`): the person has no desk any
+   * more (`no-desk`, claim one to go on), or the edit reaches outside it
+   * (`outside-desk`, pick a tile inside the desk).
+   */
+  | 'no-desk'
+  | 'outside-desk'
   /** No `DATABASE_URL`: the terrain is the committed layout's and cannot be edited. */
   | 'terrain-not-configured'
   /** A collision rectangle refused because it would close over someone: wait until they step aside. */

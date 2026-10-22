@@ -270,6 +270,48 @@ describe('HUD layout: sidebar toggle (#90)', () => {
   });
 });
 
+describe('HUD layout: "Editar espacios" lists use the whole panel', () => {
+  const MANY = 40;
+  const desks = Array.from({ length: MANY }, (_, index) => ({
+    id: `desk-${index}`, label: `Mesa ${index}`, x: index * 4, y: 0, w: 3, h: 3, occupant: null,
+  }));
+  const rooms = Array.from({ length: MANY }, (_, index) => ({
+    id: `room-${index}`, name: `Sala ${index}`, x: index * 10, y: 20, w: 9, h: 9, capacity: 10, kind: 'room' as const,
+  }));
+
+  async function openList(button: 'Editar escritorios' | 'Editar salas', first: string) {
+    render(<OfficeSidebar self={{ sessionId: 'yo', name: 'Hugo', status: 'g' }} peers={[]}
+      role="admin" bridge={createOfficeBridge()} refreshDesks={vi.fn()} refreshSpaces={vi.fn()}
+      desks={{ listDesks: vi.fn(async () => desks), createDesk: vi.fn(), updateDesk: vi.fn(), deleteDesk: vi.fn() }}
+      spaces={{ listSpaces: vi.fn(async () => rooms), createSpace: vi.fn(), updateSpace: vi.fn(), deleteSpace: vi.fn() }}
+    />);
+    await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Editar espacios' }));
+    await userEvent.click(await screen.findByRole('button', { name: button }));
+    const row = (await screen.findByText(first)).closest('li')!;
+    return { panel: screen.getByRole('region', { name: 'Personalizar' }), list: row.parentElement!, row };
+  }
+
+  it('the desk and the room lists never scroll on their own: the panel scrolls them, the same way', async () => {
+    await page.viewport(WIDE, 800);
+    const views = [];
+    for (const [button, first] of [['Editar escritorios', 'Mesa 0'], ['Editar salas', 'Sala 0']] as const) {
+      const { panel, list, row } = await openList(button, first);
+      expect(getComputedStyle(list).overflowY).toBe('visible');
+      expect(getComputedStyle(list).maxHeight).toBe('none');
+      // Every row is laid out at full height: no inner box clips them.
+      expect(list.scrollHeight).toBeLessThanOrEqual(list.clientHeight + 1);
+      expect(box(list).height).toBeGreaterThan(box(panel).height);
+      expect(panel.scrollHeight).toBeGreaterThan(panel.clientHeight);
+      panel.scrollTop = panel.scrollHeight;
+      expect(panel.scrollTop).toBeGreaterThan(0);
+      views.push({ rowHeight: box(row).height, rowWidth: box(row).width, gap: getComputedStyle(list).rowGap });
+      cleanup();
+    }
+    expect(views[1]).toEqual(views[0]);
+  });
+});
+
 describe('HUD layout: sidebar panel card matches the rail (#86)', () => {
   it('the open panel card is as wide as the toggle above it', async () => {
     await page.viewport(WIDE, 800);
@@ -388,6 +430,11 @@ describe('HUD layout: exit controls with "Instalar app" (#13)', () => {
 });
 
 describe('HUD layout: open sidebar and the bottom row (#86)', () => {
+  // The bar height reaches the sidebar through a ResizeObserver, which fires only
+  // on the next rendered frame; a loaded CI runner can go past the default 1 s
+  // poll without rendering one.
+  const RESIZE_POLL = { timeout: 5000 };
+
   it('the open panel stops above the bottom bar and the exit controls, however tall the bar gets', async () => {
     // 720px is the tightest width that still docks the sidebar.
     for (const width of [720, NARROW, 1199, 1200, WIDE, 1920]) {
@@ -397,7 +444,7 @@ describe('HUD layout: open sidebar and the bottom row (#86)', () => {
       await renderOpenSidebar();
 
       await expect
-        .poll(() => box(sidebar()).bottom, { message: `at ${width}px` })
+        .poll(() => box(sidebar()).bottom, { ...RESIZE_POLL, message: `at ${width}px` })
         .toBeLessThanOrEqual(Math.min(box(bar).top, box(exits).top));
       cleanup();
     }
@@ -412,7 +459,7 @@ describe('HUD layout: open sidebar and the bottom row (#86)', () => {
     // Stands in for anything that makes the bar taller: fonts, zoom, wrapping.
     bar.style.height = '300px';
 
-    await expect.poll(() => box(sidebar()).bottom).toBeLessThanOrEqual(box(bar).top);
+    await expect.poll(() => box(sidebar()).bottom, RESIZE_POLL).toBeLessThanOrEqual(box(bar).top);
   });
 
   it('on very small screens the open sidebar covers the whole screen, bottom row included', async () => {

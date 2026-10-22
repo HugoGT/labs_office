@@ -36,34 +36,42 @@ describe('memoryTerrain walls', () => {
   });
 });
 
-describe('memoryTerrain chairs', () => {
-  it('starts with no chair, or with the chair seed', async () => {
-    expect(await createMemoryTerrain().loadChairs()).toEqual([]);
-    expect(await createMemoryTerrain([], [], [{ index: 4, piece: 'chair-wood', facing: 'down' }]).loadChairs()).toEqual([
-      { index: 4, piece: 'chair-wood', facing: 'down' },
+describe('memoryTerrain decor', () => {
+  it('starts with no item, or with the decor seed', async () => {
+    expect(await createMemoryTerrain().loadDecor()).toEqual([]);
+    expect(await createMemoryTerrain([], [], [{ index: 4, piece: 'chair-wood', rotation: 0 }]).loadDecor()).toEqual([
+      { index: 4, piece: 'chair-wood', rotation: 0 },
     ]);
   });
 
-  it('places, turns and removes chairs in one save, recording who placed each', async () => {
+  it('places, turns and removes items in one save, recording who placed each', async () => {
     const store = createMemoryTerrain([], [], [
-      { index: 4, piece: 'chair-wood', facing: 'down' },
-      { index: 5, piece: 'chair-wood', facing: 'down' },
+      { index: 4, piece: 'chair-wood', rotation: 0 },
+      { index: 5, piece: 'chair-wood', rotation: 0 },
     ]);
-    await store.saveChairs(
+    await store.saveDecor(
       [
-        { index: 4, chair: { piece: 'chair-metal', facing: 'left' } },
-        { index: 5, chair: null },
-        { index: 9, chair: { piece: 'chair-gamer', facing: 'up' } },
+        { index: 4, item: { piece: 'chair-metal', rotation: 270 } },
+        { index: 5, item: null },
+        { index: 9, item: { piece: 'table-meeting', rotation: 0 } },
       ],
       'admin-1',
     );
 
-    expect(await store.loadChairs()).toEqual([
-      { index: 4, piece: 'chair-metal', facing: 'left' },
-      { index: 9, piece: 'chair-gamer', facing: 'up' },
+    expect(await store.loadDecor()).toEqual([
+      { index: 4, piece: 'chair-metal', rotation: 270 },
+      { index: 9, piece: 'table-meeting', rotation: 0 },
     ]);
-    expect(store.chairActorOf(4)).toBe('admin-1');
-    expect(store.chairActorOf(5)).toBeUndefined();
+    expect(store.decorActorOf(4)).toBe('admin-1');
+    expect(store.decorActorOf(5)).toBeUndefined();
     expect([...(await store.loadWalls())]).toEqual([]);
+  });
+
+  it('keeps the color of a painted item, seeded or saved', async () => {
+    const store = createMemoryTerrain([], [], [{ index: 4, piece: 'desk-painted', rotation: 0, color: '#c83c3c' }]);
+    expect(await store.loadDecor()).toEqual([{ index: 4, piece: 'desk-painted', rotation: 0, color: '#c83c3c' }]);
+
+    await store.saveDecor([{ index: 6, item: { piece: 'desk-painted', rotation: 90, color: '#3c5ac8' } }], null);
+    expect(await store.loadDecor()).toContainEqual({ index: 6, piece: 'desk-painted', rotation: 90, color: '#3c5ac8' });
   });
 });

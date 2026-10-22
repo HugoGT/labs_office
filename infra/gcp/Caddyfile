@@ -227,19 +227,19 @@ http://{$APP_HOST}, http://{$LK_HOST}, http://{$TURN_HOST} {
 	}
 
 	# El escritorio de quien lo usa, no de quien administra (ver la cabecera
-	# de `decorRoutes.ts`/`desksRoutes.ts`). `/me/desk/*` cubre
-	# `/me/desk/release`; `/me/desk` en solitario cubre GET y POST sobre esa
-	# misma ruta exacta.
-	handle /me/desk {
-		reverse_proxy colyseus:2567
-	}
-
+	# de `desksRoutes.ts`). `/me/desk/*` cubre `/me/desk/release`.
 	handle /me/desk/* {
 		reverse_proxy colyseus:2567
 	}
 
+	# Decorating the desk one occupies (#208, `officeDecorRoutes.ts`): POST on
+	# this exact path.
+	handle /me/decor {
+		reverse_proxy colyseus:2567
+	}
+
 	# Nombre visible auto-elegido en login (issue #100): GET y POST sobre la
-	# misma ruta exacta, igual que /me/desk en solitario.
+	# misma ruta exacta, igual que /me/decor.
 	handle /me/display-name {
 		reverse_proxy colyseus:2567
 	}
@@ -251,7 +251,7 @@ http://{$APP_HOST}, http://{$LK_HOST}, http://{$TURN_HOST} {
 	}
 
 	# Contribuciones de arte (#122): subir y listar las propias, y la vista
-	# previa privada de sus archivos. Prefijo propio: /me/avatar y /me/desk
+	# previa privada de sus archivos. Prefijo propio: /me/avatar y /me/decor
 	# son rutas exactas y no lo cubren.
 	handle /me/art/* {
 		reverse_proxy colyseus:2567

@@ -11,6 +11,8 @@ import {
   DESK,
   HEDGE,
   PACK_FACINGS,
+  TABLE,
+  TABLE_FACINGS,
   TERRAIN_DECALS,
   TERRAIN_LAYER_ORIGIN,
   TERRAIN_MASKS,
@@ -198,8 +200,11 @@ export function plantSheet(kind: PlantKind): PixelBuffer {
   return plantSprite(kind);
 }
 
+/** One column per facing, in TABLE_FACINGS order: horizontal, then vertical. */
 export function tableSheet(kind: RoomTable): PixelBuffer {
-  return roomTableSprite(kind);
+  const sheet = blankSheet(TABLE);
+  for (const facing of TABLE_FACINGS) place(sheet, roomTableSprite(kind, facing), TABLE_FACINGS.indexOf(facing) * TABLE.frame.width, 0);
+  return sheet;
 }
 
 /** One column per orientation, in BRIDGE_ORIENTATIONS order. */

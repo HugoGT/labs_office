@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ART_TILE, BRIDGE, BRIDGE_ORIENTATIONS, HEDGE, PLANT, TABLE, TREE, countColors } from '../../../src/game/artContract.ts';
+import { ART_TILE, BRIDGE, BRIDGE_ORIENTATIONS, HEDGE, PLANT, TABLE, TABLE_FACINGS, TREE, countColors } from '../../../src/game/artContract.ts';
 import type { PixelBuffer } from '../../../src/art/pixelBuffer.ts';
 import { bridgeSprite, hedgeSprite, plantSprite, PLANT_KINDS, treeSprite, TREE_KINDS } from './props.ts';
 import { ROOM_TABLE_FOOTPRINTS, ROOM_TABLES, roomTableSprite, TABLE_HEIGHT } from './tables.ts';
@@ -150,25 +150,60 @@ describe('hedges', () => {
 });
 
 describe('room tables', () => {
-  it('match the meeting room and cafeteria tables of the map', () => {
-    expect(ROOM_TABLES).toEqual(['meeting', 'cafeteria']);
-    expect(ROOM_TABLE_FOOTPRINTS).toEqual({ meeting: { w: 7, h: 5 }, cafeteria: { w: 5, h: 3 } });
+  it('match the meeting room and cafeteria tables of the map, plus a small oval one', () => {
+    expect(ROOM_TABLES).toEqual(['meeting', 'cafeteria', 'oval']);
+    expect(ROOM_TABLE_FOOTPRINTS).toEqual({ meeting: { w: 7, h: 5 }, cafeteria: { w: 5, h: 3 }, oval: { w: 2, h: 1 } });
   });
 
-  it('cover their footprint, lift their top TABLE_HEIGHT over it and fit the table frame', () => {
+  it('cover their footprint in both facings, the vertical one swapped, lift their top TABLE_HEIGHT over it and fit the table frame', () => {
     for (const kind of ROOM_TABLES) {
-      const table = roomTableSprite(kind);
+      for (const facing of TABLE_FACINGS) {
+        const name = `${kind} ${facing}`;
+        const table = roomTableSprite(kind, facing);
+        const stated = ROOM_TABLE_FOOTPRINTS[kind];
+        const { w, h } = facing === 'vertical' ? { w: stated.h, h: stated.w } : stated;
+        expect([table.width, table.height]).toEqual([TABLE.frame.width, TABLE.frame.height]);
+        expect(corners(table), name).toEqual([0, 0, 0, 0]);
+        const bounds = opaqueBounds(table);
+        const halfWidth = (w * ART_TILE) / 2;
+        expect(bounds.x0, name).toBeGreaterThanOrEqual(TABLE.anchor.x - halfWidth - 2);
+        expect(bounds.x1, name).toBeLessThanOrEqual(TABLE.anchor.x + halfWidth + 1);
+        expect(bounds.y1, name).toBeLessThanOrEqual(TABLE.anchor.y + 1);
+        expect(bounds.y0, name).toBeGreaterThanOrEqual(TABLE.anchor.y - h * ART_TILE - TABLE_HEIGHT - 2);
+        // Most of the footprint is under the table: it is drawn at its size, not shrunk into the frame.
+        expect(bounds.x1 - bounds.x0, name).toBeGreaterThanOrEqual(w * ART_TILE - 8);
+        expect(table.alphaAt(TABLE.anchor.x, TABLE.anchor.y - (h * ART_TILE) / 2), `${name} top`).toBe(255);
+        expect(countColors(table), name).toBeLessThanOrEqual(64);
+      }
+    }
+  });
+
+  it('draw the vertical facing as its own top-down drawing, not the horizontal one turned', () => {
+    for (const kind of ROOM_TABLES) {
+      const horizontal = opaqueBounds(roomTableSprite(kind, 'horizontal'));
+      const vertical = opaqueBounds(roomTableSprite(kind, 'vertical'));
       const { w, h } = ROOM_TABLE_FOOTPRINTS[kind];
-      expect([table.width, table.height]).toEqual([TABLE.frame.width, TABLE.frame.height]);
-      expect(corners(table), kind).toEqual([0, 0, 0, 0]);
-      const bounds = opaqueBounds(table);
-      const halfWidth = (w * ART_TILE) / 2;
-      expect(bounds.x0, kind).toBeGreaterThanOrEqual(TABLE.anchor.x - halfWidth - 2);
-      expect(bounds.x1, kind).toBeLessThanOrEqual(TABLE.anchor.x + halfWidth + 1);
-      expect(bounds.y1, kind).toBeLessThanOrEqual(TABLE.anchor.y + 1);
-      expect(bounds.y0, kind).toBeGreaterThanOrEqual(TABLE.anchor.y - h * ART_TILE - TABLE_HEIGHT - 2);
-      expect(table.alphaAt(TABLE.anchor.x, TABLE.anchor.y - (h * ART_TILE) / 2), `${kind} top`).toBe(255);
-      expect(countColors(table), kind).toBeLessThanOrEqual(64);
+      // Width on screen follows the footprint across, height its floor depth plus the same lift.
+      expect(vertical.x1 - vertical.x0, kind).toBeLessThan(horizontal.x1 - horizontal.x0);
+      // (the oval's pedestal shows a little more under its rounded front edge).
+      const taller = vertical.y1 - vertical.y0 - (horizontal.y1 - horizontal.y0);
+      expect(taller, kind).toBeGreaterThanOrEqual((w - h) * ART_TILE);
+      expect(taller, kind).toBeLessThanOrEqual((w - h) * ART_TILE + 8);
+    }
+  });
+
+  it('round the oval table: the corners of its footprint stay clear while its middle is covered', () => {
+    for (const facing of TABLE_FACINGS) {
+      const table = roomTableSprite('oval', facing);
+      const stated = ROOM_TABLE_FOOTPRINTS.oval;
+      const { w, h } = facing === 'vertical' ? { w: stated.h, h: stated.w } : stated;
+      const left = TABLE.anchor.x - (w * ART_TILE) / 2;
+      const top = TABLE.anchor.y - h * ART_TILE - TABLE_HEIGHT;
+      // The top's corner pixels, lifted TABLE_HEIGHT over the footprint's corners: an oval leaves them empty.
+      expect(table.alphaAt(left + 1, top + 1), `oval ${facing} top left`).toBe(0);
+      expect(table.alphaAt(left + w * ART_TILE - 2, top + 1), `oval ${facing} top right`).toBe(0);
+      expect(table.alphaAt(TABLE.anchor.x, top + (h * ART_TILE) / 2), `oval ${facing} middle`).toBe(255);
     }
   });
 });
+

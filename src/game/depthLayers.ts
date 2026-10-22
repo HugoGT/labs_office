@@ -2,21 +2,22 @@
  * Render bands of the office scene (#70, #71): the single owner of every
  * Phaser depth that decides who covers whom in the world.
  *
- * Phaser draws by `depth`, so "players always above normal assets" and
- * "special assets above players" are expressed as three stacked bands, each
- * `BAND_SPAN` wide:
+ * Phaser draws by `depth`, so "players always above normal assets" is
+ * expressed as two stacked bands, each `BAND_SPAN` wide:
  *
  *   - world band   [0, BAND_SPAN): ground, furniture, trees, desk zones and
- *     normal desk decor. Y-sorted by the object's bottom edge, so a chair
+ *     the office decor layer. Y-sorted by the object's bottom edge, so a chair
  *     still covers the table behind it.
  *   - avatar band  [AVATAR_BAND_BASE, ...): local player and remote peers.
  *     Y-sorted by the feet, so two overlapping avatars still read right. Every
  *     avatar decoration (ring, name pill, status dot) is a child of the avatar
  *     container, so it rides the container's depth for free.
- *   - special band [SPECIAL_BAND_BASE, ...): catalog assets flagged
- *     `aboveAvatars` (#71), which cover any avatar walking through their area.
  *
- * HUD overlays (minimap marker, layout editor ghost) sit above all three.
+ * A third band once held desk decor flagged `aboveAvatars` (#71). The office
+ * decor layer (#208) draws art pieces, which carry no such flag, so nothing
+ * covers a walking avatar any more and that band is gone.
+ *
+ * HUD overlays (minimap marker, editor ghosts) sit above both.
  *
  * Every y is clamped to the map height before it is added to its band base.
  * `depthLayers.test.ts` pins `WORLD_H < BAND_SPAN`, so the clamp is what makes
@@ -31,7 +32,6 @@ export const BAND_SPAN = 10_000;
 
 const WORLD_BAND_BASE = 0;
 export const AVATAR_BAND_BASE = WORLD_BAND_BASE + BAND_SPAN;
-export const SPECIAL_BAND_BASE = AVATAR_BAND_BASE + BAND_SPAN;
 
 /** Minimap position marker: only drawn by the minimap camera, always on top. */
 export const MINIMAP_MARKER_DEPTH = 99_999;
@@ -79,8 +79,3 @@ export function seatedAvatarDepth(groundY: number): number {
  * under the zone labels (2), so it never veils the desk's sitter.
  */
 export const DESK_ZONE_DEPTH = 1.75;
-
-/** Depth of a special (`aboveAvatars`) asset whose bottom edge is at `bottomY` (world px). */
-export function specialAssetDepth(bottomY: number): number {
-  return SPECIAL_BAND_BASE + clampY(bottomY);
-}

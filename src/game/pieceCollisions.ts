@@ -2,14 +2,14 @@
  * Collision areas per art piece (collision editor). A piece's collision is a
  * short list of axis-aligned rectangles in art pixels, measured from the
  * piece's anchor in its default (down-facing) orientation, and it applies to
- * every instance of that piece: the Tiled props, the base map chairs, the
- * served desks and the decor placed on them.
+ * every instance of that piece: the Tiled props, the base map chairs and
+ * the office decor layer (#208).
  *
  * A piece nobody edited keeps its default: the whole footprint for a layout
- * prop (exactly the tiles it blocked before this editor), the floor under
- * its top for a desk decor table, nothing for the other pieces the database
- * places (decor plants and chairs, placed chairs). An edited piece with an
- * empty list is walk-through.
+ * prop or a decor room table (exactly the tiles a layout prop blocked before
+ * this editor), the floor under its top for a decor desk table, nothing for
+ * decor plants and chairs. An edited piece with an empty list is
+ * walk-through.
  *
  * The client collides its Arcade body with these rectangles and the room
  * refuses a `move` whose body center falls inside one, the same pairing as
@@ -22,7 +22,8 @@
  */
 
 import { AVATAR_BODY_CENTER_OFFSET, physicalBodyRect } from './avatarGeometry.ts';
-import { TABLE_ROTATIONS, tableEdgeSlot, tableFacing, tableFloorRect, tableSlots } from './deskTable.ts';
+import { tableFacing, tableFloorRect } from './deskTable.ts';
+import { decorChairFacing, decorFootprint, decorRotationFor, type DecorItem, type DecorPieceInfo } from './officeDecor.ts';
 
 /** Same as `TILE` in mapData.ts (pinned by a test). */
 export const COLLISION_TILE = 32;
@@ -34,8 +35,6 @@ export const MAX_COLLISION_RECTS = 8;
  */
 export const COLLISION_COORD_LIMIT = 512;
 export const COLLISION_BODY_CENTER_OFFSET = AVATAR_BODY_CENTER_OFFSET;
-/** `PLANT` of artContract.ts: decor plants are drawn squeezed into their slot box, so the frame sets the scale. */
-export const DECOR_PLANT_FRAME = { width: 32, height: 48, anchor: { x: 16, y: 46 } } as const;
 
 /** Pieces that stand in the world. Walls and hedges stay tile based; bridges are decks. */
 export const EDITABLE_PIECE_KINDS = ['tree', 'plant', 'table', 'desk', 'chair'] as const;
@@ -252,19 +251,6 @@ export function seatInstances(
   }));
 }
 
-/**
- * Instances of the chairs placed from the terrain editor (`PlacedChair` of
- * seating.ts, restated here to stay import-free): each its own piece on the
- * middle of its tile, exactly like a base chair, so a chair piece's saved
- * rectangles apply to every chair of it.
- */
-export function placedChairInstances(
-  chairs: readonly { readonly index: number; readonly piece: string; readonly facing: CollisionFacing }[],
-  width: number,
-): CollisionInstance[] {
-  return chairs.flatMap(({ index, piece, facing }) => seatInstances([{ tx: index % width, ty: Math.floor(index / width), facing }], piece));
-}
-
 /** The chair of the base map's rooms (`BASE_MAP_CHAIR` of mapBuilder.ts, pinned by a test). */
 export const BASE_CHAIR_PIECE = 'chair-wood';
 
@@ -276,82 +262,64 @@ export function staticCollisionInstances(
   return [...layoutPropInstances(props), ...seatInstances(seats, BASE_CHAIR_PIECE)];
 }
 
-/** A served desk area in world pixels and the pieces of its decor. */
-export interface CollisionDesk {
-  readonly x: number;
-  readonly y: number;
-  readonly w: number;
-  readonly h: number;
-  readonly items: readonly { readonly slot: number; readonly rotation: number; readonly pieceId: string | null }[];
-}
-
-const SLOT_COLUMNS = 3;
-const SLOT_COUNT = 9;
-
-function isRotation(value: number): value is CollisionRotation {
-  return value === 0 || value === 90 || value === 180 || value === 270;
-}
-
 /**
- * Instances of the decor on the served desks. A desk is an empty 3x3 area
- * with no piece of its own (Editar espacios): only the table, plants and
- * chairs of its occupant's decor stand there, each in its slot box
- * (`deskSlotRect`), the table along its edge. A decor plant is drawn
- * squeezed into its box and turned by the item rotation, so its rectangles
- * are too; a decor chair stands 1:1 on the box middle in the facing its
- * rotation picks. Decor that is neither has no piece and never collides.
+ * Instances of the office decor layer (#208), each piece by its anchor tile
+ * (`decorFootprint` of officeDecor.ts). A chair stands on the middle of its
+ * tile like a base chair, turned by the facing its rotation picks; a desk
+ * table lies 1:1 on its middle tile, turned like its facing's drawing, and
+ * blocks the floor under its top until edited; a plant or a room table
+ * stands on the bottom middle of its footprint like a Tiled prop, the plant
+ * walk-through and the table solid by default; a vertical room table (90)
+ * stands on its swapped footprint, its rectangles turned a quarter about its
+ * center. A piece the caller cannot resolve places nothing.
  */
-export function deskInstances(desks: readonly CollisionDesk[]): CollisionInstance[] {
+export function officeDecorInstances(
+  items: readonly DecorItem[],
+  infoOf: (piece: string) => DecorPieceInfo | null,
+  width: number,
+): CollisionInstance[] {
   const instances: CollisionInstance[] = [];
-  for (const desk of desks) {
-    const boxW = desk.w / SLOT_COLUMNS;
-    const boxH = desk.h / SLOT_COLUMNS;
-    const slotBox = (slot: number): CollisionRect => ({ x: desk.x + (slot % SLOT_COLUMNS) * boxW, y: desk.y + Math.floor(slot / SLOT_COLUMNS) * boxH, w: boxW, h: boxH });
-    for (const item of desk.items) {
-      if (item.pieceId === null) continue;
-      if (item.pieceId.startsWith('desk-')) {
-        // A table (`deskTable.ts`): drawn 1:1 on the middle of the edge its
-        // rotation picks, turned like its facing's drawing. Unedited, it
-        // blocks the floor under its top; nothing else of the desk.
-        const rotation = TABLE_ROTATIONS.find((candidate) => candidate === item.rotation);
-        if (rotation === undefined || tableEdgeSlot(rotation) !== item.slot) continue;
-        const middle = slotBox(item.slot);
-        const [first, , last] = tableSlots(rotation).map(slotBox);
-        instances.push({
-          piece: item.pieceId,
-          pivot: { x: middle.x + boxW / 2, y: middle.y + boxH / 2 },
-          rotation: rotationForFacing(tableFacing(rotation)),
-          scale: UNIT,
-          offset: ORIGIN,
-          defaults: [tableFloorRect(rotation)],
-          pickBox: { x: first!.x, y: first!.y, w: last!.x + last!.w - first!.x, h: last!.y + last!.h - first!.y },
-        });
-        continue;
-      }
-      const chair = item.pieceId.startsWith('chair-');
-      if (!chair && !item.pieceId.startsWith('plant-')) continue;
-      if (!Number.isInteger(item.slot) || item.slot < 0 || item.slot >= SLOT_COUNT) continue;
-      const box = slotBox(item.slot);
-      if (chair) {
-        // A decor chair is drawn 1:1 on the middle of its box like a placed
-        // chair on its tile, and its rotation picks a facing
-        // (`decorSeatFacing` of seating.ts: 90 right, 180 up, 270 left), so
-        // it turns as that facing does: up keeps the down rectangles.
-        const rotation = item.rotation === 90 || item.rotation === 270 ? item.rotation : 0;
-        instances.push({ piece: item.pieceId, pivot: { x: box.x + boxW / 2, y: box.y + boxH / 2 }, rotation, scale: UNIT, offset: ORIGIN, defaults: [], pickBox: box });
-        continue;
-      }
-      const scale = { x: boxW / DECOR_PLANT_FRAME.width, y: boxH / DECOR_PLANT_FRAME.height };
-      instances.push({
-        piece: item.pieceId,
-        pivot: { x: box.x + boxW / 2, y: box.y + boxH / 2 },
-        rotation: isRotation(item.rotation) ? item.rotation : 0,
-        scale,
-        offset: { x: scale.x * DECOR_PLANT_FRAME.anchor.x - boxW / 2, y: scale.y * DECOR_PLANT_FRAME.anchor.y - boxH / 2 },
-        defaults: [],
-        pickBox: box,
-      });
+  for (const item of items) {
+    const info = infoOf(item.piece);
+    if (info === null) continue;
+    const rect = decorFootprint(item, info, width);
+    const pickBox = { x: rect.x * COLLISION_TILE, y: rect.y * COLLISION_TILE, w: rect.w * COLLISION_TILE, h: rect.h * COLLISION_TILE };
+    const tx = item.index % width;
+    const ty = Math.floor(item.index / width);
+    if (info.kind === 'chair') {
+      instances.push(...seatInstances([{ tx, ty, facing: decorChairFacing(item.rotation) }], item.piece));
+      continue;
     }
+    if (info.kind === 'desk') {
+      instances.push({
+        piece: item.piece,
+        pivot: { x: (tx + 0.5) * COLLISION_TILE, y: (ty + 0.5) * COLLISION_TILE },
+        rotation: rotationForFacing(tableFacing(item.rotation)),
+        scale: UNIT,
+        offset: ORIGIN,
+        defaults: [tableFloorRect(item.rotation)],
+        pickBox,
+      });
+      continue;
+    }
+    if (info.kind === 'table' && decorRotationFor('table', item.rotation) === 90) {
+      // The vertical frame: the piece's rectangles are stated from the bottom
+      // middle of its horizontal footprint, so they shift to its center
+      // (`offset`) and turn a quarter clockwise about the vertical one's center.
+      const center = { x: (rect.x + rect.w / 2) * COLLISION_TILE, y: (rect.y + rect.h / 2) * COLLISION_TILE };
+      instances.push({
+        piece: item.piece,
+        pivot: center,
+        rotation: 90,
+        scale: UNIT,
+        offset: { x: 0, y: (info.footprint.h * COLLISION_TILE) / 2 },
+        defaults: [{ x: pickBox.x - center.x, y: pickBox.y - center.y, w: pickBox.w, h: pickBox.h }],
+        pickBox,
+      });
+      continue;
+    }
+    const [prop] = layoutPropInstances([{ piece: item.piece, kind: info.kind, tx: rect.x, ty: rect.y, w: rect.w, h: rect.h, collision: 'solid', facing: null }]);
+    instances.push(info.kind === 'plant' ? { ...prop!, defaults: [] } : prop!);
   }
   return instances;
 }

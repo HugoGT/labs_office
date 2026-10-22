@@ -69,13 +69,17 @@ export interface UseSpaceEditorResult {
   exit: () => void;
   /** Pide crear una nueva con estos datos; el ghost de colocacion sigue a continuacion. */
   startCreate: (input: SpaceCreateInput) => void;
-  startMove: () => void;
+  /**
+   * Starts moving the selected room, or, given an id, that one: a row of the
+   * list moves its own room without a visible selection step, like desks.
+   */
+  startMove: (id?: string) => void;
   cancelPlacing: () => void;
   /** Selecciona una sala existente por id, igual que un `layoutpick` del mapa (misma accion del reductor). */
   select: (id: string) => void;
   deselect: () => void;
-  /** Borra la seleccionada. Mismo patron que `useLayoutEditor.remove`: no pasa por `saving`. */
-  remove: () => Promise<void>;
+  /** Borra la seleccionada, o, con un id, esa sala. Mismo patron que `useLayoutEditor.remove`: no pasa por `saving`. */
+  remove: (id?: string) => Promise<void>;
 }
 
 function isRoom(space: AdminSpace): boolean {
@@ -208,8 +212,16 @@ export function useSpaceEditor({
     dispatch({ type: 'startCreate' });
   }, []);
 
-  const startMove = useCallback(() => {
+  const startMove = useCallback((id?: string) => {
     setError(null);
+    const current = stateRef.current;
+    // Same queueing as `useLayoutEditor.startMove`: the reducer ignores
+    // `deselect`/`select` unless they apply, so another room's selection gives
+    // way and a placement in progress is left alone.
+    if (id !== undefined && !(current.tag === 'selected' && current.id === id)) {
+      dispatch({ type: 'deselect' });
+      dispatch({ type: 'select', id });
+    }
     dispatch({ type: 'startMove' });
   }, []);
 
@@ -230,15 +242,17 @@ export function useSpaceEditor({
     return true;
   });
 
-  const remove = useCallback(async (): Promise<void> => {
+  const remove = useCallback(async (id?: string): Promise<void> => {
     const current = stateRef.current;
-    if (current.tag !== 'selected') return;
+    const target = id ?? (current.tag === 'selected' ? current.id : null);
+    if (target === null) return;
 
     setError(null);
     setPending(true);
     try {
-      await spaces.deleteSpace(current.id);
-      dispatch({ type: 'deselect' });
+      await spaces.deleteSpace(target);
+      // Only the removed room's own selection goes; another one stays selected.
+      if (current.tag === 'selected' && current.id === target) dispatch({ type: 'deselect' });
       refreshDesks();
       refreshSpaces();
       await reload();

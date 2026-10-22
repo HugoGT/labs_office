@@ -581,54 +581,14 @@ describe('pgDesks: listOfficeDesks', () => {
     expect(office[0].occupant).toBeNull();
   });
 
-  it('trae la decoracion de TODOS los ocupantes en una sola consulta acotada', async () => {
-    // Una consulta por ocupante seria una oficina llena de idas y vueltas
-    // proporcional a cuanta gente haya sentada.
+  it('reads no decor: the office decor layer is not the desks\' (#208)', async () => {
     const pool = officePool([OCCUPIED_ROW], [ITEM_ROW]);
 
     const office = await createPgDesks(pool).listOfficeDesks();
 
-    expect(office[0].occupant?.items).toEqual([
-      expect.objectContaining({ assetId: ITEM_ROW.asset_id, slot: 8, textureKey: 'plant-small' }),
-    ]);
-    const items = sqls(pool).find((sql) => sql.includes('user_desk_configs'))!;
-    expect(items).toContain('user_id = any($1::uuid[])');
-    expect(pool.queries.at(-1)?.values).toEqual([[ANA]]);
-  });
-
-  it('resolves above_avatars from the asset so the scene can pick the render layer (#71)', async () => {
-    const pool = officePool([OCCUPIED_ROW], [{ ...ITEM_ROW, above_avatars: true }]);
-
-    const office = await createPgDesks(pool).listOfficeDesks();
-
-    expect(office[0].occupant?.items[0].aboveAvatars).toBe(true);
-    const items = sqls(pool).find((sql) => sql.includes('user_desk_configs'))!;
-    expect(items).toContain('a.above_avatars');
-  });
-
-  it('an item row without above_avatars is a normal asset (#71)', async () => {
-    const pool = officePool([OCCUPIED_ROW], [ITEM_ROW]);
-
-    const office = await createPgDesks(pool).listOfficeDesks();
-
-    expect(office[0].occupant?.items[0].aboveAvatars).toBe(false);
-  });
-
-  it('la decoracion NO filtra archivados: quien ya la tenia puesta la sigue viendo (D1b)', async () => {
-    const pool = officePool([OCCUPIED_ROW], [ITEM_ROW]);
-
-    await createPgDesks(pool).listOfficeDesks();
-
-    const items = sqls(pool).find((sql) => sql.includes('user_desk_configs'))!;
-    expect(items).not.toContain('archived_at');
-  });
-
-  it('sin nadie sentado NO pregunta por decoracion de nadie', async () => {
-    const pool = officePool([DESK_ROW], []);
-
-    await createPgDesks(pool).listOfficeDesks();
-
+    expect(office[0].occupant).toEqual({ id: ANA, displayName: 'Ana' });
     expect(sqls(pool).some((sql) => sql.includes('user_desk_configs'))).toBe(false);
+    expect(pool.queries).toHaveLength(1);
   });
 
   it('mantiene el mismo orden que listDesks', async () => {

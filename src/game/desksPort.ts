@@ -20,41 +20,15 @@
  * frontera donde `spacesConfig.toSpaceArea` convierte los espacios. Hacerla
  * mas tarde la repartiria entre el renderizador y quien calcule las cajas.
  *
- * ## La decoracion cuelga de la PERSONA, no del sitio
+ * ## La decoracion no cuelga de aqui
  *
- * `occupant.items` viaja dentro del ocupante y no del escritorio porque en el
- * servidor esta indexada por persona: quien se muda de sitio se lleva su
- * decoracion puesta. Un `items` colgado del escritorio invitaria a pintar la
- * decoracion del anterior inquilino.
+ * Furniture is the office decor layer's (#208, `officeDecor.ts`), replicated
+ * with the room state: a desk is only a zone, and keeps what stands on it.
  */
 
 
 /**
- * Una pieza colocada en una de las nueve cajas del escritorio.
- *
- * Es una PROYECCION de lo que sirve el servidor, no una copia: `assetId`,
- * `name`, `w`, `h` y `createdAt` llegan y se ignoran. Lo que dibuja esta
- * slice es una pieza por caja, y la caja es la unidad que el servidor valida
- * (`slot` entre 0 y 8). El tamano en tiles del asset le importa al editor de
- * decoracion, que es la PR siguiente y no esta; declararlo aqui sin usarlo
- * seria prometer una colocacion que este renderizador no hace.
- */
-export interface DeskDecorItem {
-  id: string;
-  /** 0..8 inclusive, una por caja del area de 3x3. Ver `deskLayout.deskSlotRect`. */
-  slot: number;
-  rotation: number;
-  /** Clave del sprite. El catalogo es curado: apunta a algo que el bundle ya trae. */
-  textureKey: string;
-  /**
-   * Special asset (#71): drawn above every avatar instead of below it.
-   * Resolved from the catalog by the server, like `textureKey`.
-   */
-  aboveAvatars: boolean;
-}
-
-/**
- * Quien ocupa un escritorio, con su decoracion ya resuelta.
+ * Quien ocupa un escritorio.
  *
  * `displayName` es para ETIQUETAR, nunca para decidir de quien es el sitio:
  * eso lo contesta `OfficeDesk.mine`. Dos personas del directorio pueden
@@ -64,7 +38,6 @@ export interface DeskDecorItem {
 export interface DeskOccupant {
   id: string;
   displayName: string | null;
-  items: readonly DeskDecorItem[];
 }
 
 /** Un escritorio asignable con su ocupante resuelto. Coordenadas en PIXELES. */

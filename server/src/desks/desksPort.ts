@@ -22,16 +22,12 @@
  *
  * ## La decoracion NO cuelga de aqui
  *
- * `user_desk_configs` esta indexada por `user_id`, asi que la decoracion de
- * alguien le SIGUE al escritorio que ocupe. Es una propiedad del esquema que
- * ya existia y que esta slice se limita a no romper: una columna `desk_id`
- * alla anclaria la decoracion a un sitio y se la borraria a esa persona en
- * cuanto se mudase a otro. Por eso `DeskOccupant` TRAE los items en vez de
- * apuntar a ellos: quien los resuelve es el ocupante, no el escritorio.
+ * The office decor layer (#208, `officeDecor.ts`) is the map's, anchored per
+ * tile: a desk is only a claimable zone, and whatever stands on it stays when
+ * the desk changes hands, moves or goes away.
  */
 
 import type { ArtAppearance } from '../decor/artCatalogRules.ts';
-import type { DeskItem } from '../decor/decorPort.ts';
 
 export interface Desk {
   id: string;
@@ -50,8 +46,8 @@ export interface Desk {
   occupantId: string | null;
   /**
    * Material (an art pack desk id) and color (art migration, step 3). They
-   * belong to the desk, not to whoever sits there: decor follows the person,
-   * the furniture stays. `color` is null unless the material is colorable.
+   * belong to the desk, not to whoever sits there. Unused since the table
+   * became decor; `color` is null unless the material is colorable.
    */
   materialId: string;
   color: string | null;
@@ -60,7 +56,7 @@ export interface Desk {
 }
 
 /**
- * Quien ocupa un escritorio, con su decoracion ya resuelta.
+ * Quien ocupa un escritorio.
  *
  * `displayName` viaja porque el cliente no tiene otra forma de casar esta fila
  * con el avatar que ya esta pintando: el estado de Colyseus identifica a cada
@@ -70,8 +66,6 @@ export interface Desk {
 export interface DeskOccupant {
   id: string;
   displayName: string | null;
-  /** Su decoracion. Le sigue de escritorio en escritorio: ver la cabecera. */
-  items: DeskItem[];
 }
 
 /**
@@ -111,10 +105,10 @@ export interface DeskDirectory {
   /** Orden deterministico (x, y, id), igual que `listSpaces`. */
   listDesks(): Promise<Desk[]>;
   /**
-   * Todo lo que hace falta para dibujar la oficina: cada escritorio, su
-   * ocupante y la decoracion de ese ocupante. En una llamada y no en tres,
-   * porque partirla obligaria al cliente a cruzar las tres listas y a decidir
-   * el que hacer cuando lleguen desfasadas.
+   * Todo lo que hace falta para dibujar los escritorios: cada uno y su
+   * ocupante. En una llamada y no en dos, porque partirla obligaria al
+   * cliente a cruzar las listas y a decidir el que hacer cuando lleguen
+   * desfasadas.
    */
   listOfficeDesks(): Promise<OfficeDesk[]>;
   getDesk(id: string): Promise<Desk | null>;

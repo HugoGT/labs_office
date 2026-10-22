@@ -15,7 +15,8 @@ import {
   SESSION_REPLACED_CLOSE_CODE,
   SESSION_REVOKED_CLOSE_CODE,
 } from '../../src/game/officeProtocol.ts';
-import { chairSeatId, decodeTerrainChairs, decorSeatId, mapSeatId } from '../../src/game/seating.ts';
+import { chairSeatId, mapSeatId } from '../../src/game/seating.ts';
+import { decodeOfficeDecor } from '../../src/game/officeDecor.ts';
 import { decodeTerrainBlocks, decodeTerrainWalls } from '../../src/game/officeLayout.ts';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SPACES as BUILT_IN_SPACES } from '../../src/test/legacyOffice.ts';
 import { createOfficeServer as createServer, type OfficeServer, type OfficeServerOverrides } from './createOfficeServer.ts';
@@ -33,7 +34,6 @@ import {
 import type { DirectoryUser, UserDirectory } from './directory/directoryPort.ts';
 import { createMemoryDirectory } from './directory/memoryDirectory.ts';
 import { ART_PACK_DEFAULTS } from './decor/artCatalogRules.ts';
-import { createMemoryDecor } from './decor/memoryDecor.ts';
 import type { OfficeState } from './schema.ts';
 import { createMemoryTerrain } from './terrain/memoryTerrain.ts';
 import { createMemoryCollisions } from './collisions/memoryCollisions.ts';
@@ -390,7 +390,7 @@ describe('OfficeRoom: edited terrain', () => {
 describe('OfficeRoom: piece collisions', () => {
   const onTile = (tx: number, ty: number) => ({ x: tx * TILE + 16, y: ty * TILE + 5, facing: 'down' });
   const tableOf = (room: Awaited<ReturnType<typeof join>>) => decodeCollisionTable(room.state.pieceCollisions);
-  /** The decor chair its occupant put in the middle slot of the desk: a desk has no piece of its own. */
+  /** A decor chair on tile (22, 51): the decor layer collides by its pieces. */
   const DESK = 'chair-wood';
 
   async function settle(room: Awaited<ReturnType<typeof join>>) {
@@ -400,20 +400,15 @@ describe('OfficeRoom: piece collisions', () => {
 
   beforeEach(async () => {
     await server.shutdown();
-    const at = new Date('2026-01-01T00:00:00.000Z');
-    const chair = { id: 'item-a', assetId: 'asset-a', slot: 4, rotation: 0 as const, textureKey: `art:${DESK}:sheet`, w: 1, h: 1, name: 'Silla', aboveAvatars: false, createdAt: at };
-    const desks = createMemoryDesks({
-      seed: [{ id: 'desk-a', label: 'Mesa A', x: 21, y: 50, occupantId: 'id-ana', createdAt: at, updatedAt: at }],
-      decor: { getDeskConfig: async () => [chair] },
-    });
-    server = createOfficeServer({ desks, collisions: createMemoryCollisions([['tree-oak', []]]) });
+    const terrain = createMemoryTerrain([], [], [{ index: 51 * BASE_LAYOUT.width + 22, piece: DESK, rotation: 0 }]);
+    server = createOfficeServer({ terrain, collisions: createMemoryCollisions([['tree-oak', []]]) });
     endpoint = `ws://localhost:${await server.listen(0)}`;
   });
 
   it('checks the feet-aligned center while still allowing full-body edge overlap', async () => {
     const room = await join('Ana');
     await waitFor(() => room.state.players.size === 1);
-    // The chair pivot, the desk middle, is (720, 1648); the saved small rectangle is deliberately asymmetric.
+    // The chair pivot, its tile middle, is (720, 1648); the saved small rectangle is deliberately asymmetric.
     await server.collisions.setRects({ pieceId: DESK, rects: [{ x: 1, y: -12, w: 9, h: 11 }], actorId: null }, () => []);
     const edgeOverlap = { x: 720, y: 1628, facing: 'down' };
     room.send('move', edgeOverlap);
@@ -2140,20 +2135,19 @@ describe('OfficeRoom: seats', () => {
 });
 
 /**
- * Chairs placed from the terrain editor: replicated like the walls, and a
- * seat anyone may take, checked against the live chairs the terrain runtime
- * holds.
+ * The office decor layer (#208): replicated like the walls, and every chair
+ * of it a seat anyone may take, checked against the live layer the terrain
+ * runtime holds.
  */
-describe('OfficeRoom: placed chairs', () => {
+describe('OfficeRoom: decor chairs', () => {
   const tile = (tx: number, ty: number) => ty * BASE_LAYOUT.width + tx;
   const CHAIR = tile(22, 23);
   const besideChair = { x: 21 * TILE + 16, y: 23 * TILE + 5, facing: 'down' };
-  const nobody = async () => ({ placements: [], players: [] });
-  const chairsOf = (room: Awaited<ReturnType<typeof join>>) => decodeTerrainChairs(room.state.terrainChairs, BASE_LAYOUT.width * BASE_LAYOUT.height);
+  const decorOf = (room: Awaited<ReturnType<typeof join>>) => decodeOfficeDecor(room.state.officeDecor, BASE_LAYOUT.width * BASE_LAYOUT.height);
 
   beforeEach(async () => {
     await server.shutdown();
-    server = createOfficeServer({ terrain: createMemoryTerrain([], [], [{ index: CHAIR, piece: 'chair-gamer', facing: 'left' }]) });
+    server = createOfficeServer({ terrain: createMemoryTerrain([], [], [{ index: CHAIR, piece: 'chair-gamer', rotation: 270 }]) });
     endpoint = `ws://localhost:${await server.listen(0)}`;
   });
 
@@ -2162,19 +2156,19 @@ describe('OfficeRoom: placed chairs', () => {
     await waitFor(() => room.state.players.get(room.sessionId)?.x === besideChair.x);
   }
 
-  it('replicates the placed chairs to whoever is inside and whoever joins after', async () => {
+  it('replicates the decor layer to whoever is inside and whoever joins after', async () => {
     const ana = await join('Ana');
-    await waitFor(() => chairsOf(ana)?.length === 1);
-    expect(chairsOf(ana)).toEqual([{ index: CHAIR, piece: 'chair-gamer', facing: 'left' }]);
+    await waitFor(() => decorOf(ana)?.length === 1);
+    expect(decorOf(ana)).toEqual([{ index: CHAIR, piece: 'chair-gamer', rotation: 270 }]);
 
-    await server.terrain.setChairs([{ index: tile(30, 23), chair: { piece: 'chair-wood', facing: 'up' } }], null, nobody);
+    await server.terrain.setDecor([{ index: tile(30, 23), item: { piece: 'chair-wood', rotation: 180 } }], null);
 
-    await waitFor(() => chairsOf(ana)?.length === 2);
+    await waitFor(() => decorOf(ana)?.length === 2);
     const late = await join('Beto');
-    await waitFor(() => chairsOf(late)?.length === 2);
+    await waitFor(() => decorOf(late)?.length === 2);
   });
 
-  it('seats anyone next to a placed chair, facing the way the chair does', async () => {
+  it('seats anyone next to a decor chair, facing the way the chair does', async () => {
     const a = await join('Ana');
     const b = await join('Beto');
     await waitFor(() => b.state.players.size === 2);
@@ -2186,13 +2180,16 @@ describe('OfficeRoom: placed chairs', () => {
     expect(b.state.players.get(a.sessionId)?.facing).toBe('left');
   });
 
-  it('ignores a placed chair that does not stand there, or one out of reach', async () => {
+  it('ignores a chair that does not stand there, one out of reach, any other decor piece and the old per-desk seat', async () => {
+    await server.terrain.setDecor([{ index: tile(21, 22), item: { piece: 'plant-ficus', rotation: 0 } }], null);
     const room = await join('Ana');
     await waitFor(() => room.state.players.size === 1);
 
     room.send('sit', { seat: chairSeatId(CHAIR) });
     await moveNextToChair(room);
     room.send('sit', { seat: chairSeatId(tile(21, 22)) });
+    room.send('sit', { seat: chairSeatId(tile(20, 23)) });
+    room.send('sit', { seat: 'decor-mesa-ana-8' });
     room.send('status', { status: 'y' });
 
     await waitFor(() => room.state.players.get(room.sessionId)?.status === 'y');
@@ -2205,11 +2202,21 @@ describe('OfficeRoom: placed chairs', () => {
     room.send('sit', { seat: chairSeatId(CHAIR) });
     await waitFor(() => room.state.players.get(room.sessionId)?.seat === chairSeatId(CHAIR));
 
-    await server.terrain.setChairs([{ index: CHAIR, chair: { piece: 'chair-gamer', facing: 'up' } }], null, nobody);
+    await server.terrain.setDecor([{ index: CHAIR, item: { piece: 'chair-gamer', rotation: 180 } }], null);
     await waitFor(() => room.state.players.get(room.sessionId)?.facing === 'up');
     expect(room.state.players.get(room.sessionId)?.seat).toBe(chairSeatId(CHAIR));
 
-    await server.terrain.setChairs([{ index: CHAIR, chair: null }], null, nobody);
+    await server.terrain.setDecor([{ index: CHAIR, item: null }], null);
+    await waitFor(() => room.state.players.get(room.sessionId)?.seat === '');
+  });
+
+  it('stands the sitter up when the chair is replaced by another piece', async () => {
+    const room = await join('Ana');
+    await moveNextToChair(room);
+    room.send('sit', { seat: chairSeatId(CHAIR) });
+    await waitFor(() => room.state.players.get(room.sessionId)?.seat === chairSeatId(CHAIR));
+
+    await server.terrain.setDecor([{ index: CHAIR, item: { piece: 'plant-ficus', rotation: 0 } }], null);
     await waitFor(() => room.state.players.get(room.sessionId)?.seat === '');
   });
 });
@@ -2289,23 +2296,19 @@ describe('OfficeRoom: no desk seats (Editar espacios)', () => {
 });
 
 /**
- * Chairs in a desk's decor: guest seats anyone may take, whoever owns the
- * desk, checked against the occupant's decor the desks store resolves.
+ * A chair standing on a desk is a decor chair like any other (#208): a guest
+ * seat anyone may take, and it stays when the desk changes hands.
  */
-describe('OfficeRoom: decor chairs', () => {
+describe('OfficeRoom: chairs on a desk', () => {
   const BETO: VerifiedIdentity = { uid: 'uid-beto', email: 'beto@example.com', name: 'Beto Ruiz' };
   const ANA_ID = '11111111-1111-4111-8111-111111111111';
   const BETO_ID = '22222222-2222-4222-8222-222222222222';
   const DESK = { x: 10, y: 25 };
   const at = new Date('2026-01-01T00:00:00.000Z');
-  const decorAsset = (id: string, textureKey: string) => ({
-    id, slug: id, name: id, kind: 'furniture' as const, textureKey, w: 1, h: 1, placeableOnDesk: true, aboveAvatars: false, archivedAt: null, createdAt: at,
-  });
-  const CHAIR = decorAsset('silla', 'art:chair-wood:sheet');
-  const PLANT = decorAsset('planta', 'art:plant-ficus:sheet');
-  const GUEST_SEAT = decorSeatId('mesa-ana', 8);
-  let decorServer: OfficeServer | undefined;
-  let decorPort = 0;
+  /** The bottom-right tile of the desk, a chair turned left. */
+  const CHAIR = (DESK.y + 2) * BASE_LAYOUT.width + DESK.x + 2;
+  let deskServer: OfficeServer | undefined;
+  let deskPort = 0;
 
   async function start() {
     const directory = createMemoryDirectory({
@@ -2314,18 +2317,13 @@ describe('OfficeRoom: decor chairs', () => {
         seededUser({ id: BETO_ID, uid: 'uid-beto', email: 'beto@example.com', displayName: 'Beto' }),
       ],
     });
-    const decor = createMemoryDecor({ seed: [CHAIR, PLANT], now: () => at });
-    await decor.replaceDeskConfig(ANA_ID, [
-      { assetId: CHAIR.id, slot: 8, rotation: 270 },
-      { assetId: PLANT.id, slot: 0, rotation: 0 },
-    ]);
     const desks = createMemoryDesks({
-      decor,
       seed: [{ id: 'mesa-ana', label: 'Mesa 1', ...DESK, occupantId: ANA_ID, createdAt: at, updatedAt: at }],
     });
-    decorServer = createOfficeServer({ auth: stubVerifier({ 'token-de-ana': ANA, 'token-de-beto': BETO }), directory, desks, decor });
-    decorPort = await decorServer.listen(0);
-    return `ws://localhost:${decorPort}`;
+    const terrain = createMemoryTerrain([], [], [{ index: CHAIR, piece: 'chair-wood', rotation: 270 }]);
+    deskServer = createOfficeServer({ auth: stubVerifier({ 'token-de-ana': ANA, 'token-de-beto': BETO }), directory, desks, terrain });
+    deskPort = await deskServer.listen(0);
+    return `ws://localhost:${deskPort}`;
   }
 
   async function joinNearDesk(endpoint: string, token: string) {
@@ -2338,74 +2336,41 @@ describe('OfficeRoom: decor chairs', () => {
     return room;
   }
 
-  function saveDecor(items: unknown[]) {
-    return fetch(`http://localhost:${decorPort}/me/desk`, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer token-de-ana', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items }),
-    });
-  }
-
   afterEach(async () => {
-    await decorServer?.shutdown();
-    decorServer = undefined;
+    await deskServer?.shutdown();
+    deskServer = undefined;
   });
 
-  it('seats a guest at a decor chair of a claimed desk, facing as the chair is turned', async () => {
+  it('seats a guest at a chair on a claimed desk, one sitter at a time, the owner included', async () => {
     const endpoint = await start();
     const ana = await joinNearDesk(endpoint, 'token-de-ana');
     const beto = await joinNearDesk(endpoint, 'token-de-beto');
 
-    beto.send('sit', { seat: GUEST_SEAT });
+    beto.send('sit', { seat: chairSeatId(CHAIR) });
 
-    await waitFor(() => ana.state.players.get(beto.sessionId)?.seat === GUEST_SEAT);
+    await waitFor(() => ana.state.players.get(beto.sessionId)?.seat === chairSeatId(CHAIR));
     expect(ana.state.players.get(beto.sessionId)?.facing).toBe('left');
 
-    // One sitter per decor chair, the desk's owner included.
-    ana.send('sit', { seat: GUEST_SEAT });
+    ana.send('sit', { seat: chairSeatId(CHAIR) });
     ana.send('status', { status: 'y' });
     await waitFor(() => ana.state.players.get(ana.sessionId)?.status === 'y');
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(ana.state.players.get(ana.sessionId)?.seat).toBe('');
   });
 
-  it('ignores a slot without a chair, an empty slot and a desk that does not exist', async () => {
+  it('keeps the guest seated when the owner releases the desk: the chair stays', async () => {
     const endpoint = await start();
     const beto = await joinNearDesk(endpoint, 'token-de-beto');
+    beto.send('sit', { seat: chairSeatId(CHAIR) });
+    await waitFor(() => beto.state.players.get(beto.sessionId)?.seat === chairSeatId(CHAIR));
 
-    beto.send('sit', { seat: decorSeatId('mesa-ana', 0) });
-    beto.send('sit', { seat: decorSeatId('mesa-ana', 4) });
-    beto.send('sit', { seat: decorSeatId('no-existe', 8) });
-    beto.send('status', { status: 'y' });
-
-    await waitFor(() => beto.state.players.get(beto.sessionId)?.status === 'y');
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(beto.state.players.get(beto.sessionId)?.seat).toBe('');
-  });
-
-  it('turns the guest with a turned chair, and stands them up when the chair is taken away', async () => {
-    const endpoint = await start();
-    const beto = await joinNearDesk(endpoint, 'token-de-beto');
-    beto.send('sit', { seat: GUEST_SEAT });
-    await waitFor(() => beto.state.players.get(beto.sessionId)?.seat === GUEST_SEAT);
-
-    expect((await saveDecor([{ assetId: CHAIR.id, slot: 8, rotation: 180 }])).status).toBe(200);
-    await waitFor(() => beto.state.players.get(beto.sessionId)?.facing === 'up');
-    expect(beto.state.players.get(beto.sessionId)?.seat).toBe(GUEST_SEAT);
-
-    expect((await saveDecor([{ assetId: PLANT.id, slot: 8, rotation: 0 }])).status).toBe(200);
-    await waitFor(() => beto.state.players.get(beto.sessionId)?.seat === '');
-  });
-
-  it('stands the guest up when the owner releases the desk, taking the decor along', async () => {
-    const endpoint = await start();
-    const beto = await joinNearDesk(endpoint, 'token-de-beto');
-    beto.send('sit', { seat: GUEST_SEAT });
-    await waitFor(() => beto.state.players.get(beto.sessionId)?.seat === GUEST_SEAT);
-
-    const released = await fetch(`http://localhost:${decorPort}/me/desk/release`, { method: 'POST', headers: { Authorization: 'Bearer token-de-ana' } });
+    const released = await fetch(`http://localhost:${deskPort}/me/desk/release`, { method: 'POST', headers: { Authorization: 'Bearer token-de-ana' } });
     expect(released.status).toBe(200);
 
-    await waitFor(() => beto.state.players.get(beto.sessionId)?.seat === '');
+    beto.send('status', { status: 'y' });
+    await waitFor(() => beto.state.players.get(beto.sessionId)?.status === 'y');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(beto.state.players.get(beto.sessionId)?.seat).toBe(chairSeatId(CHAIR));
+    expect(deskServer!.terrain.decor()).toEqual([{ index: CHAIR, piece: 'chair-wood', rotation: 270 }]);
   });
 });

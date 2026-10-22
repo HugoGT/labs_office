@@ -1,29 +1,35 @@
 import { render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { DeskDecorAsset, PlacedDeskItem } from '../game/deskDecorPort';
+import exportedManifest from '../../public/assets/pack/manifest.json?raw';
+import { materialCatalogFrom } from '../game/artMaterials';
+import { createOfficeBridge, type OfficeCommandMap } from '../game/officeBridge';
 import { MiEspacioPanel, type MiEspacioPanelProps } from './MiEspacioPanel';
 
-const PLANTA: DeskDecorAsset = { id: 'id-planta', name: 'Planta', kind: 'plant', textureKey: 'plant-small' };
-const MESA: DeskDecorAsset = { id: 'id-mesa', name: 'Escritorio de madera', kind: 'furniture', textureKey: 'art:desk-wood:sheet' };
+const catalog = materialCatalogFrom(JSON.parse(exportedManifest), 'assets/pack/manifest.json')!;
+const DESK = { x: 10, y: 12, w: 3, h: 3 };
 
 function panel(overrides: Partial<MiEspacioPanelProps> = {}) {
+  const bridge = createOfficeBridge();
+  const commands: OfficeCommandMap['decoredit'][] = [];
+  bridge.onCommand('decoredit', (command) => commands.push(command));
   const props: MiEspacioPanelProps = {
     hasDesk: true,
-    phase: 'ready',
-    catalog: [PLANTA, MESA],
-    items: [] as readonly PlacedDeskItem[],
-    onSave: vi.fn().mockResolvedValue('saved'),
+    area: DESK,
+    bridge,
+    decor: { setDecor: vi.fn(async () => undefined) },
+    onLeaveDesk: vi.fn(),
+    loadMaterials: async () => catalog,
+    preview: { sheet: vi.fn(async () => null) },
     ...overrides,
   };
-  render(<MiEspacioPanel {...props} />);
-  return props;
+  return { props, ...props, commands, ...render(<MiEspacioPanel {...props} />) };
 }
 
 /**
  * "Mi espacio" is where anyone, admin or not, decorates the desk they claimed
- * (Editar espacios): a table on one edge, chairs and plants. Whether a desk is
- * claimed is the UI's to tell; the server stores decor for the person anyway.
+ * (#208): the decor editor scoped to that desk, writing the office decor
+ * layer through `POST /me/decor`, and the way to leave the desk.
  */
 describe('MiEspacioPanel', () => {
   it('shows the title "Mi espacio"', () => {
@@ -32,31 +38,36 @@ describe('MiEspacioPanel', () => {
     expect(screen.getByRole('heading', { name: 'Mi espacio' })).toBeInTheDocument();
   });
 
-  it('without a claimed desk asks to claim one and shows no editor', () => {
-    panel({ hasDesk: false });
+  it('without a claimed desk asks to claim a free one on the map, and offers neither decor nor leaving', () => {
+    const { commands } = panel({ hasDesk: false, area: null });
 
-    expect(screen.getByText('Reclama un escritorio para personalizar tu espacio.')).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: 'Decorar mi escritorio' })).not.toBeInTheDocument();
+    expect(screen.getByText('Reclama un escritorio libre en el mapa para decorarlo.')).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Sillas' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Dejar escritorio' })).not.toBeInTheDocument();
+    expect(commands).toEqual([]);
   });
 
-  it('with a claimed desk hosts the decor editor: the table, the boxes and save', async () => {
-    const { onSave } = panel();
+  it('with a claimed desk decorates it with the pieces that fit, and ends with «Dejar escritorio»', async () => {
+    const { commands, onLeaveDesk } = panel();
 
-    expect(screen.getByRole('region', { name: 'Decorar mi escritorio' })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Abajo' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }));
+    expect(screen.queryByText('Reclama un escritorio libre en el mapa para decorarlo.')).not.toBeInTheDocument();
+    expect(await screen.findByRole('group', { name: 'Sillas' })).toBeInTheDocument();
+    // Only the room tables that fit a 3x3 desk: the 2x1 oval one.
+    expect(screen.queryByRole('button', { name: 'Mesa de reuniones' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mesa ovalada' })).toBeInTheDocument();
+    expect(commands.at(-1)).toEqual({ brush: null, area: DESK });
 
-    expect(onSave).toHaveBeenCalledWith([{ assetId: 'id-mesa', slot: 7, rotation: 0 }]);
+    const buttons = screen.getAllByRole('button');
+    const leave = screen.getByRole('button', { name: 'Dejar escritorio' });
+    expect(buttons.at(-1)).toBe(leave);
+    await userEvent.click(leave);
+    expect(onLeaveDesk).toHaveBeenCalledTimes(1);
   });
 
-  it('says it is loading while the decor is read, and when it cannot be edited', () => {
-    panel({ phase: 'loading' });
-    expect(screen.getByText(/Cargando/)).toBeInTheDocument();
-  });
-
-  it('says when the decor cannot be edited now', () => {
-    panel({ phase: 'unavailable' });
-    expect(screen.getByText('La decoración no está disponible ahora mismo.')).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: 'Decorar mi escritorio' })).not.toBeInTheDocument();
+  it('closes the map overlay once the desk is gone', () => {
+    const { commands, rerender, props } = panel();
+    rerender(<MiEspacioPanel {...props} hasDesk={false} area={null} />);
+    expect(commands.at(-1)).toBeNull();
+    expect(screen.getByText('Reclama un escritorio libre en el mapa para decorarlo.')).toBeInTheDocument();
   });
 });

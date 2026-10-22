@@ -165,6 +165,29 @@ export interface WheelState {
 
 export const INITIAL_WHEEL_STATE: Readonly<WheelState> = { sum: 0, notches: 0, lastAt: 0, cooldownUntil: 0 };
 
+/** How wheel input becomes steps: the zoom's rules, or the rotation's. */
+export interface WheelRules {
+  /** Mouse notches in the same direction that make one step. */
+  readonly notchesPerStep: number;
+  /** Input dropped after a step. */
+  readonly cooldownMs: number;
+  /**
+   * Input dropped inside the cooldown pushes it on, so a gesture that keeps
+   * sending events (a trackpad flick and its inertia, a fast spin) makes one
+   * step until it pauses for `cooldownMs`.
+   */
+  readonly holdCooldown: boolean;
+}
+
+export const ZOOM_WHEEL_RULES: WheelRules = { notchesPerStep: WHEEL_NOTCHES_PER_STEP, cooldownMs: WHEEL_COOLDOWN_MS, holdCooldown: false };
+
+/**
+ * The wheel turning a picked chair or desk table (#207): one notch is one
+ * quarter turn (a turn is cheap to undo, unlike a stray zoom), and one
+ * trackpad gesture is one turn whatever its length, so it never spins round.
+ */
+export const ROTATE_WHEEL_RULES: WheelRules = { notchesPerStep: 1, cooldownMs: WHEEL_COOLDOWN_MS, holdCooldown: true };
+
 export interface WheelInput {
   deltaY: number;
   /** `WheelEvent.deltaMode`: 0 pixels, 1 lines, 2 pages. */
@@ -178,8 +201,8 @@ type WheelResult = { state: WheelState; step: -1 | 0 | 1 };
 const ignored = (state: WheelState): WheelResult => ({ state, step: 0 });
 
 /** A step: both counters start over and the cooldown begins. Scroll up (negative) zooms in. */
-const stepped = (now: number, signed: number): WheelResult => ({
-  state: { sum: 0, notches: 0, lastAt: now, cooldownUntil: now + WHEEL_COOLDOWN_MS },
+const stepped = (now: number, signed: number, rules: WheelRules): WheelResult => ({
+  state: { sum: 0, notches: 0, lastAt: now, cooldownUntil: now + rules.cooldownMs },
   step: signed < 0 ? 1 : -1,
 });
 
@@ -190,14 +213,18 @@ const stepped = (now: number, signed: number): WheelResult => ({
  * `WHEEL_NOTCH_IDLE_MS` restarts the count) and clears the small-delta travel;
  * smaller deltas (trackpad, pinch) accumulate to `WHEEL_STEP_PX` and leave the
  * notch count alone. The cooldown after a step keeps a fast spin to one step
- * at a time. The given state is never mutated.
+ * at a time. The given state is never mutated. `rules` default to the
+ * zoom's; the decor editor turns pieces with `ROTATE_WHEEL_RULES`.
  */
 export function accumulateWheel(
   state: WheelState,
   { deltaY, deltaMode, ctrlKey, now }: WheelInput,
+  rules: WheelRules = ZOOM_WHEEL_RULES,
 ): WheelResult {
   if (!Number.isFinite(deltaY) || deltaY === 0) return ignored(state);
-  if (now < state.cooldownUntil) return ignored(state);
+  if (now < state.cooldownUntil) {
+    return rules.holdCooldown ? ignored({ ...state, cooldownUntil: now + rules.cooldownMs }) : ignored(state);
+  }
 
   const perUnit = deltaMode === 1 ? WHEEL_LINE_PX : deltaMode === 2 ? WHEEL_PAGE_PX : 1;
   const travel = deltaY * perUnit * (ctrlKey ? PINCH_GAIN : 1);
@@ -207,14 +234,14 @@ export function accumulateWheel(
     const stale = now - state.lastAt > WHEEL_NOTCH_IDLE_MS;
     const flipped = Math.sign(state.notches) * direction < 0;
     const notches = (stale || flipped ? 0 : state.notches) + direction;
-    if (Math.abs(notches) >= WHEEL_NOTCHES_PER_STEP) return stepped(now, notches);
+    if (Math.abs(notches) >= rules.notchesPerStep) return stepped(now, notches, rules);
     return { state: { ...state, sum: 0, notches, lastAt: now }, step: 0 };
   }
 
   const idle = now - state.lastAt > WHEEL_IDLE_MS;
   const flipped = Math.sign(state.sum) * direction < 0;
   const sum = (idle || flipped ? 0 : state.sum) + travel;
-  if (Math.abs(sum) >= WHEEL_STEP_PX) return stepped(now, sum);
+  if (Math.abs(sum) >= WHEEL_STEP_PX) return stepped(now, sum, rules);
   return { state: { ...state, sum, lastAt: now }, step: 0 };
 }
 

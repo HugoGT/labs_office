@@ -21,7 +21,20 @@ import {
   type TerrainSnapshot,
   type WallEdit,
 } from '../../../src/game/officeLayout.ts';
-import { MAX_CHAIR_EDITS, isChairPieceId, isSeatFacing, type ChairEdit, type MapSeat } from '../../../src/game/seating.ts';
+import {
+  MAX_DECOR_EDITS,
+  decorFootprint,
+  decorTiles,
+  insideMap,
+  isDecorPieceId,
+  isDecorColor,
+  isDecorRotation,
+  rectTiles,
+  type DecorEdit,
+  type DecorItem,
+  type DecorPieceInfo,
+} from '../../../src/game/officeDecor.ts';
+import type { MapSeat } from '../../../src/game/seating.ts';
 
 /** The edit was malformed: an index off the map or an unknown material (400). */
 export class InvalidTerrainEditError extends Error {
@@ -216,49 +229,68 @@ export function findWallConflict(
 }
 
 /**
- * The body of `POST /admin/terrain/chairs`: `{ edits: [{ index, chair }] }`,
- * one tile each, a chair (`{ piece, facing }`) or `null` to remove the one
- * there. At most `MAX_CHAIR_EDITS` tiles, each once.
+ * The body of `POST /admin/decor` and `POST /me/decor` (#208):
+ * `{ edits: [{ index, item }] }`, one anchor tile each, a piece, its
+ * rotation and an optional `#rrggbb` color (`{ piece, rotation, color? }`;
+ * any case, stored lower case; `null` is no color) or `null` to remove the
+ * item anchored there. At most `MAX_DECOR_EDITS` tiles, each once. Whether
+ * the piece exists, turns that way and takes a color is the catalog's,
+ * checked by the runtime.
  */
-export function parseChairBatch(body: unknown, tileCount: number): ChairEdit[] {
-  if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new InvalidTerrainEditError('invalid chair batch');
+export function parseDecorBatch(body: unknown, tileCount: number): DecorEdit[] {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new InvalidTerrainEditError('invalid decor batch');
   const { edits } = body as Record<string, unknown>;
-  if (!Array.isArray(edits) || edits.length < 1 || edits.length > MAX_CHAIR_EDITS) throw new InvalidTerrainEditError('invalid chair batch');
+  if (!Array.isArray(edits) || edits.length < 1 || edits.length > MAX_DECOR_EDITS) throw new InvalidTerrainEditError('invalid decor batch');
   const seen = new Set<number>();
   return edits.map((edit: unknown) => {
-    if (typeof edit !== 'object' || edit === null || Array.isArray(edit)) throw new InvalidTerrainEditError('invalid chair edit');
-    const { index, chair } = edit as Record<string, unknown>;
+    if (typeof edit !== 'object' || edit === null || Array.isArray(edit)) throw new InvalidTerrainEditError('invalid decor edit');
+    const { index, item } = edit as Record<string, unknown>;
     if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= tileCount) throw new InvalidTerrainEditError('invalid tile');
     if (seen.has(index)) throw new InvalidTerrainEditError('duplicate tile');
     seen.add(index);
-    if (chair === null) return { index, chair: null };
-    if (typeof chair !== 'object' || chair === undefined || Array.isArray(chair)) throw new InvalidTerrainEditError('invalid chair');
-    const { piece, facing } = chair as Record<string, unknown>;
-    if (!isChairPieceId(piece)) throw new InvalidTerrainEditError('unknown chair piece');
-    if (!isSeatFacing(facing)) throw new InvalidTerrainEditError('unknown facing');
-    return { index, chair: { piece, facing } };
+    if (item === null) return { index, item: null };
+    if (typeof item !== 'object' || item === undefined || Array.isArray(item)) throw new InvalidTerrainEditError('invalid decor item');
+    const { piece, rotation, color } = item as Record<string, unknown>;
+    if (!isDecorPieceId(piece)) throw new InvalidTerrainEditError('invalid piece');
+    if (!isDecorRotation(rotation)) throw new InvalidTerrainEditError('invalid rotation');
+    if (color === undefined || color === null) return { index, item: { piece, rotation } };
+    const normalized = typeof color === 'string' ? color.toLowerCase() : color;
+    if (!isDecorColor(normalized)) throw new InvalidTerrainEditError('invalid color');
+    return { index, item: { piece, rotation, color: normalized } };
   });
 }
 
 /**
- * Why a chair may not stand on one of the `placed` tiles, or `null` if it
- * may: a chair needs walkable ground nobody else claims. It is refused on
- * water or void, on a tile a wall rectangle touches (`wallTiles`, the same
- * ground `findWallConflict` keeps walls off chairs by), on a static tile
- * (base seats, furniture, the spawn area) or on a desk. Rooms and players
- * never veto it: a chair is walk-through unless its piece has rectangles.
+ * Why a decor item of the batch may not stand where it is, or `null` if
+ * every one may. `after` is the whole layer with the batch applied and
+ * `placed` the anchors the batch places. A placed item's footprint must lie
+ * on the map, on walkable ground (no water or void), off every tile a wall
+ * rectangle touches (`wallTiles`) and every static tile (base seats,
+ * furniture, the spawn area), and share no tile with another item. Desks,
+ * rooms and players never veto it: a desk is only a zone, and creating one
+ * over decor is allowed too. Stored items that already overlap (kept at
+ * load) never veto an edit elsewhere.
  */
-export function findChairConflict(
-  placed: readonly number[],
-  snapshot: Pick<TerrainSnapshot, 'width' | 'walkable' | 'wallTiles'>,
+export function findDecorConflict(
+  after: readonly DecorItem[],
+  placed: ReadonlySet<number>,
+  infoOf: (piece: string) => DecorPieceInfo | null,
+  snapshot: Pick<TerrainSnapshot, 'width' | 'height' | 'walkable' | 'wallTiles'>,
   staticTiles: ReadonlySet<number>,
-  protections: TerrainProtections,
 ): UnwalkableConflict | null {
-  const onDesk = (tile: number): boolean => {
-    const tx = tile % snapshot.width;
-    const ty = Math.floor(tile / snapshot.width);
-    return (protections.desks ?? []).some((desk) => tx >= desk.x && tx < desk.x + desk.w && ty >= desk.y && ty < desk.y + desk.h);
-  };
-  const blocked = (tile: number): boolean => !snapshot.walkable[tile] || snapshot.wallTiles[tile] === true || staticTiles.has(tile) || onDesk(tile);
-  return placed.some(blocked) ? 'placement' : null;
+  if (placed.size === 0) return null;
+  const taken = new Set<number>();
+  for (const item of after) {
+    if (!placed.has(item.index)) for (const tile of decorTiles(item, infoOf(item.piece), snapshot.width)) taken.add(tile);
+  }
+  for (const item of after) {
+    if (!placed.has(item.index)) continue;
+    const rect = decorFootprint(item, infoOf(item.piece), snapshot.width);
+    if (!insideMap(rect, snapshot.width, snapshot.height)) return 'placement';
+    for (const tile of rectTiles(rect, snapshot.width)) {
+      if (!snapshot.walkable[tile] || snapshot.wallTiles[tile] === true || staticTiles.has(tile) || taken.has(tile)) return 'placement';
+      taken.add(tile);
+    }
+  }
+  return null;
 }

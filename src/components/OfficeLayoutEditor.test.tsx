@@ -12,16 +12,16 @@ const MESA: AdminDesk = { id: 'id-mesa', label: 'Mesa 4', x: 10, y: 10, w: 3, h:
 const SALA: AdminSpace = { id: 'id-sala', name: 'Sala grande', x: 0, y: 0, w: 4, h: 4, capacity: null, kind: 'room' };
 
 describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
-  it.each(['spaces', 'terrain', 'collision'] as const)('unmounting %s clears editing and its bridge mode', async (section) => {
+  it.each(['decor', 'spaces', 'terrain', 'collision'] as const)('unmounting %s clears editing and its bridge mode', async (section) => {
     const bridge = createOfficeBridge();
-    const command = section === 'terrain' ? 'terrainedit' : section === 'collision' ? 'collisionedit' : 'layoutedit';
+    const command = section === 'decor' ? 'decoredit' : section === 'terrain' ? 'terrainedit' : section === 'collision' ? 'collisionedit' : 'layoutedit';
     const commands: unknown[] = [];
     bridge.onCommand(command, (value) => commands.push(value));
     const onEditingChange = vi.fn();
     const props: OfficeLayoutEditorProps = {
       bridge, desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn(),
-      terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn(), setChairs: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() },
-      section, onEditingChange,
+      terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() },
+      decor: { setDecor: vi.fn() }, section, onEditingChange,
     };
     const { unmount } = render(<OfficeLayoutEditor {...props} />);
     await screen.findByRole('button', { name: 'Salir' });
@@ -32,23 +32,25 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
     expect(commands.at(-1)).toBeNull();
   });
 
-  it('"Editar espacios" opens with the rooms expanded and the desks behind one button, with one exit for both', async () => {
+  it('"Editar espacios" opens on the room form with desks and rooms each behind one button, with one exit for both', async () => {
     const bridge = createOfficeBridge();
     const onExit = vi.fn();
     const onEditingChange = vi.fn();
     const props = { bridge, desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn(), onEditingChange, onExit };
     render(<OfficeLayoutEditor {...props} section="spaces" />);
+    await waitFor(() => expect(props.spaces.listSpaces).toHaveBeenCalled());
+    await act(async () => {});
 
-    expect(await screen.findByText('Sala grande')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Editar espacios' })).toBeInTheDocument();
     const headings = screen.getAllByRole('heading').map((heading) => heading.textContent);
     expect(headings.indexOf('Escritorios')).toBeLessThan(headings.indexOf('Salas'));
     expect(screen.getByRole('button', { name: 'Editar escritorios' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Colocar nueva sala' })).toBeInTheDocument();
-    // "Crear escritorio" sits beside the submenu, at the level of "Salas"; no desk list, no room entry button.
+    // "Crear escritorio" sits beside the submenu, at the level of "Salas"; neither list is shown.
     expect(screen.getByRole('button', { name: 'Crear escritorio' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Editar salas' })).toBeInTheDocument();
     expect(screen.queryByText('Mesa 4')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Editar salas' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Sala grande')).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Salir' })).toHaveLength(1);
     expect(onEditingChange).toHaveBeenLastCalledWith(true);
 
@@ -63,7 +65,6 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
     const onEditingChange = vi.fn();
     const props = { bridge, desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn(), onEditingChange };
     render(<OfficeLayoutEditor {...props} section="spaces" />);
-    await screen.findByText('Sala grande');
     await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }] }));
     commands.length = 0;
     onEditingChange.mockClear();
@@ -87,12 +88,48 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Volver' }));
 
-    expect(await screen.findByText('Sala grande')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Salas' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Colocar nueva sala' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Editar salas' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Editar escritorios' })).toBeInTheDocument();
     expect(screen.queryByText('Mesa 4')).not.toBeInTheDocument();
     await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }] }));
     await waitFor(() => expect(onEditingChange).toHaveBeenLastCalledWith(true));
+  });
+
+  it('inside "Editar espacios", "Editar salas" swaps the desks and the form for the room list, and "Volver" swaps them back', async () => {
+    const bridge = createOfficeBridge();
+    const commands: (LayoutEditCommand | null)[] = [];
+    bridge.onCommand('layoutedit', (value) => commands.push(value));
+    const onEditingChange = vi.fn();
+    const props = { bridge, desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn(), onEditingChange };
+    render(<OfficeLayoutEditor {...props} section="spaces" />);
+    await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }] }));
+    commands.length = 0;
+    onEditingChange.mockClear();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Editar salas' }));
+
+    expect(await screen.findByText('Sala grande')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mover Sala grande' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Volver' })).toBeInTheDocument();
+    // The desks are gone altogether, like the rooms in the desk view.
+    expect(screen.queryByRole('heading', { name: 'Escritorios' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Editar escritorios' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Crear escritorio' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Colocar nueva sala' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Salir' })).toHaveLength(1);
+    // The rooms keep the map: nothing nulls their overlay.
+    expect(commands).not.toContain(null);
+    expect(onEditingChange).not.toHaveBeenCalledWith(false);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Volver' }));
+
+    expect(screen.getByRole('button', { name: 'Editar escritorios' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Crear escritorio' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Colocar nueva sala' })).toBeInTheDocument();
+    expect(screen.queryByText('Sala grande')).not.toBeInTheDocument();
+    // Whatever the rooms re-emit is still theirs: the desks never take the overlay.
+    expect(commands.every((command) => command?.pickable.some((rect) => rect.id === 'id-sala'))).toBe(true);
   });
 
   describe('"Crear escritorio" from the default view', () => {
@@ -109,28 +146,27 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
 
     it('starts the placement at once and hides the rooms while the desk editor holds the panel', async () => {
       const { commands, onEditingChange } = renderSpaces();
-      await screen.findByText('Sala grande');
+      await roomsLoaded();
 
       await userEvent.click(screen.getByRole('button', { name: 'Crear escritorio' }));
 
       expect(screen.getByText(/Toca el nuevo sitio en el mapa para confirmarlo/)).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Cancelar' })).toBeInTheDocument();
       expect(screen.queryByRole('heading', { name: 'Salas' })).not.toBeInTheDocument();
-      expect(screen.queryByText('Sala grande')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Colocar nueva sala' })).not.toBeInTheDocument();
       await waitFor(() => expect(commands.at(-1)).toMatchObject({ placing: { w: 3, h: 3 } }));
       expect(onEditingChange).toHaveBeenLastCalledWith(true);
     });
 
     it('a map click creates the desk and the rooms come back expanded', async () => {
       const { bridge, desks, commands, onEditingChange } = renderSpaces();
-      await screen.findByText('Sala grande');
+      await roomsLoaded();
       await userEvent.click(screen.getByRole('button', { name: 'Crear escritorio' }));
 
       act(() => bridge.emit('layoutplace', { tx: 20, ty: 30, valid: true }));
 
       await waitFor(() => expect(desks.createDesk).toHaveBeenCalledWith({ x: 20, y: 30 }));
-      expect(await screen.findByText('Sala grande')).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'Salas' })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Colocar nueva sala' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Editar escritorios' })).toBeInTheDocument();
       expect(screen.queryByText(/Toca el nuevo sitio/)).not.toBeInTheDocument();
       expect(screen.queryByText('Mesa 4')).not.toBeInTheDocument();
@@ -140,12 +176,12 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
 
     it('"Cancelar" brings the rooms back, still without creating anything', async () => {
       const { desks } = renderSpaces();
-      await screen.findByText('Sala grande');
+      await roomsLoaded();
       await userEvent.click(screen.getByRole('button', { name: 'Crear escritorio' }));
 
       await userEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
 
-      expect(await screen.findByText('Sala grande')).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Colocar nueva sala' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Editar escritorios' })).toBeInTheDocument();
       expect(desks.createDesk).not.toHaveBeenCalled();
     });
@@ -154,13 +190,13 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
       const bridge = createOfficeBridge();
       const desks = { ...fakeDesks(), createDesk: vi.fn(async () => Promise.reject(new AdminError('desk-on-wall'))) } as unknown as DeskAdminPort;
       renderSpaces({ bridge, desks });
-      await screen.findByText('Sala grande');
+      await roomsLoaded();
       await userEvent.click(screen.getByRole('button', { name: 'Crear escritorio' }));
 
       act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
 
       expect(await screen.findByRole('alert')).toHaveTextContent('Hay una pared en ese lugar');
-      expect(await screen.findByText('Sala grande')).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Colocar nueva sala' })).toBeInTheDocument();
     });
   });
 
@@ -174,7 +210,7 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
 
     it('the default view exits the editor like "Salir"', async () => {
       const { onExit } = renderSpacesWithExit();
-      await screen.findByText('Sala grande');
+      await roomsLoaded();
 
       await userEvent.keyboard('{Escape}');
 
@@ -183,13 +219,28 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
 
     it('the desk list goes back to the default view first, and only the next press exits', async () => {
       const { onExit } = renderSpacesWithExit();
-      await screen.findByText('Sala grande');
+      await roomsLoaded();
       await userEvent.click(screen.getByRole('button', { name: 'Editar escritorios' }));
       await screen.findByText('Mesa 4');
 
       await userEvent.keyboard('{Escape}');
-      expect(await screen.findByText('Sala grande')).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Colocar nueva sala' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Editar escritorios' })).toBeInTheDocument();
+      expect(onExit).not.toHaveBeenCalled();
+
+      await userEvent.keyboard('{Escape}');
+      expect(onExit).toHaveBeenCalledTimes(1);
+    });
+
+    it('the room list goes back to the default view first, and only the next press exits', async () => {
+      const { onExit } = renderSpacesWithExit();
+      await userEvent.click(screen.getByRole('button', { name: 'Editar salas' }));
+      await screen.findByText('Sala grande');
+
+      await userEvent.keyboard('{Escape}');
+      expect(screen.queryByText('Sala grande')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Editar escritorios' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Editar salas' })).toBeInTheDocument();
       expect(onExit).not.toHaveBeenCalled();
 
       await userEvent.keyboard('{Escape}');
@@ -198,12 +249,12 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
 
     it('a placement is cancelled first, from either part', async () => {
       const { onExit } = renderSpacesWithExit();
-      await screen.findByText('Sala grande');
+      await roomsLoaded();
       await userEvent.click(screen.getByRole('button', { name: 'Crear escritorio' }));
 
       await userEvent.keyboard('{Escape}');
 
-      expect(await screen.findByText('Sala grande')).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Colocar nueva sala' })).toBeInTheDocument();
       expect(screen.queryByText(/Toca el nuevo sitio/)).not.toBeInTheDocument();
       expect(onExit).not.toHaveBeenCalled();
     });
@@ -215,7 +266,7 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
     bridge.onCommand('layoutedit', (value) => commands.push(value));
     const props = { bridge, desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn() };
     render(<OfficeLayoutEditor {...props} section="spaces" />);
-    await screen.findByText('Sala grande');
+    await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }] }));
     await userEvent.type(screen.getByLabelText('Nombre de la nueva sala'), 'Office');
     await userEvent.click(screen.getByRole('button', { name: 'Colocar nueva sala' }));
     await waitFor(() => expect(commands.at(-1)).toMatchObject({ placing: expect.anything() }));
@@ -233,7 +284,7 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
     bridge.onCommand(command, emit);
     const props = {
       bridge, desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn(),
-      terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn(), setChairs: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() }, onEditingChange: vi.fn(), section,
+      terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() }, onEditingChange: vi.fn(), section,
     };
     const { rerender } = render(<OfficeLayoutEditor {...props} />);
     await screen.findByRole('button', { name: 'Salir' });
@@ -243,6 +294,13 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
     expect(emit).toHaveBeenLastCalledWith(null);
   });
 });
+
+/** The embedded default view lists no rooms: wait for the room editor's first read to settle. */
+async function roomsLoaded(): Promise<void> {
+  // The form shows only once the room editor is on, unlike the heading of its off view.
+  await screen.findByRole('button', { name: 'Colocar nueva sala' });
+  await act(async () => {});
+}
 
 function fakeDesks(): DeskAdminPort {
   return {
@@ -446,7 +504,7 @@ describe('OfficeLayoutEditor: terrain section', () => {
         bridge={bridge}
         desks={fakeDesks()}
         spaces={fakeSpaces()}
-        terrain={{ setBlock: vi.fn(async () => undefined), setBlocks: vi.fn(), setWalls: vi.fn(), setChairs: vi.fn() }}
+        terrain={{ setBlock: vi.fn(async () => undefined), setBlocks: vi.fn(), setWalls: vi.fn() }}
         refreshDesks={vi.fn()}
         refreshSpaces={vi.fn()}
         onEditingChange={onEditingChange}
@@ -504,7 +562,7 @@ describe('OfficeLayoutEditor: collision section', () => {
         bridge={bridge}
         desks={fakeDesks()}
         spaces={fakeSpaces()}
-        terrain={{ setBlock: vi.fn(async () => undefined), setBlocks: vi.fn(), setWalls: vi.fn(), setChairs: vi.fn() }}
+        terrain={{ setBlock: vi.fn(async () => undefined), setBlocks: vi.fn(), setWalls: vi.fn() }}
         collisions={{ saveRects: vi.fn(async () => undefined), reset: vi.fn(async () => undefined) }}
         refreshDesks={vi.fn()}
         refreshSpaces={vi.fn()}

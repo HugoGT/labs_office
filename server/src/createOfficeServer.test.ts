@@ -54,7 +54,7 @@ import type { EgressPort } from './recording/egressPort.ts';
 import type { RecordingStoragePort } from './recording/recordingStorage.ts';
 import type { OfficeState } from './schema.ts';
 import { decodeTerrainWalls } from '../../src/game/officeLayout.ts';
-import { decodeTerrainChairs } from '../../src/game/seating.ts';
+import { decodeOfficeDecor } from '../../src/game/officeDecor.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 import { AuthConfigError } from './authConfigError.ts';
 import type { LocalAuthConfig } from './localAuth/localAuthConfig.ts';
@@ -1348,109 +1348,7 @@ describe('rutas de decoracion (#7, slice 4)', () => {
     await server.shutdown();
   });
 
-  it('GET /me/desk no exige rol de administracion', async () => {
-    const { server, url } = await decorServer();
-
-    const res = await fetch(`${url}/me/desk`, { headers: BEARER_EMPLEADO });
-
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ items: [] });
-    await server.shutdown();
-  });
-
-  it('POST /me/desk guarda el escritorio de quien manda el token, no el del cuerpo', async () => {
-    // La propiedad de la slice, comprobada tambien de extremo a extremo: un
-    // `userId` ajeno en el cuerpo no puede escribir el sitio de otra persona.
-    const { server, decor, url } = await decorServer();
-    const created = (await (
-      await fetch(`${url}/admin/assets`, {
-        method: 'POST',
-        headers: BEARER_ADMIN,
-        body: JSON.stringify(ASSET),
-      })
-    ).json()) as { id: string };
-
-    const res = await fetch(`${url}/me/desk`, {
-      method: 'POST',
-      headers: BEARER_EMPLEADO,
-      body: JSON.stringify({
-        userId: ADMIN_DECOR.id,
-        items: [{ assetId: created.id, slot: 0, rotation: 90 }],
-      }),
-    });
-
-    expect(res.status).toBe(200);
-    expect(await decor!.getDeskConfig(EMPLEADO_DECOR.id)).toHaveLength(1);
-    expect(await decor!.getDeskConfig(ADMIN_DECOR.id)).toEqual([]);
-    await server.shutdown();
-  });
-
-  it('POST /me/desk conserva una pieza retirada ya puesta, pero rechaza anadirla de nuevo (D1b)', async () => {
-    // El diseno dice que una pieza retirada se conserva, se puede quitar y no
-    // se puede volver a anadir. Las tres, de extremo a extremo: sin el 400 del
-    // final, "no se puede re-anadir" seria solo que el selector la esconde.
-    const { server, url } = await decorServer();
-    const created = (await (
-      await fetch(`${url}/admin/assets`, {
-        method: 'POST',
-        headers: BEARER_ADMIN,
-        body: JSON.stringify(ASSET),
-      })
-    ).json()) as { id: string };
-    const items = [{ assetId: created.id, slot: 0, rotation: 90 }];
-
-    await fetch(`${url}/me/desk`, {
-      method: 'POST',
-      headers: BEARER_EMPLEADO,
-      body: JSON.stringify({ items }),
-    });
-    await fetch(`${url}/admin/assets/${created.id}/archive`, {
-      method: 'POST',
-      headers: BEARER_ADMIN,
-    });
-
-    // Conservarla al reguardar: sigue ahi.
-    const conservada = await fetch(`${url}/me/desk`, {
-      method: 'POST',
-      headers: BEARER_EMPLEADO,
-      body: JSON.stringify({ items: [{ assetId: created.id, slot: 3, rotation: 0 }] }),
-    });
-    expect(conservada.status).toBe(200);
-
-    // Quitarla: se puede.
-    const vaciada = await fetch(`${url}/me/desk`, {
-      method: 'POST',
-      headers: BEARER_EMPLEADO,
-      body: JSON.stringify({ items: [] }),
-    });
-    expect(vaciada.status).toBe(200);
-
-    // Volver a ponerla: ya no.
-    const reanadida = await fetch(`${url}/me/desk`, {
-      method: 'POST',
-      headers: BEARER_EMPLEADO,
-      body: JSON.stringify({ items }),
-    });
-    expect(reanadida.status).toBe(400);
-    expect(await reanadida.json()).toEqual({ error: 'invalid-request' });
-
-    await server.shutdown();
-  });
-
-  it('POST /me/desk con un slot invalido responde 400', async () => {
-    const { server, url } = await decorServer();
-
-    const res = await fetch(`${url}/me/desk`, {
-      method: 'POST',
-      headers: BEARER_EMPLEADO,
-      body: JSON.stringify({ items: [{ assetId: 'cualquiera', slot: 99, rotation: 0 }] }),
-    });
-
-    expect(res.status).toBe(400);
-    await server.shutdown();
-  });
-
-  it('sin almacen las cinco rutas responden 503 y nunca 404', async () => {
+  it('sin almacen las tres rutas responden 503 y nunca 404', async () => {
     // Un 404 aqui es indistinguible del `index.html` que sirve Caddy cuando
     // falta su bloque `handle`: dos averias con el mismo sintoma y causas
     // opuestas. El 503 afirma que la ruta existe y que falta la configuracion.
@@ -1464,15 +1362,9 @@ describe('rutas de decoracion (#7, slice 4)', () => {
         body: JSON.stringify(ASSET),
       }),
       fetch(`${url}/admin/assets/cualquiera/archive`, { method: 'POST', headers: BEARER_ADMIN }),
-      fetch(`${url}/me/desk`, { headers: BEARER_EMPLEADO }),
-      fetch(`${url}/me/desk`, {
-        method: 'POST',
-        headers: BEARER_EMPLEADO,
-        body: JSON.stringify({ items: [] }),
-      }),
     ]);
 
-    expect(respuestas.map((res) => res.status)).toEqual([503, 503, 503, 503, 503]);
+    expect(respuestas.map((res) => res.status)).toEqual([503, 503, 503]);
     expect(await respuestas[0].json()).toEqual({ error: 'decor-not-configured' });
     await server.shutdown();
   });
@@ -2120,7 +2012,7 @@ describe('rutas de escritorios (#7, slice 5)', () => {
     const directory = createMemoryDirectory({ seed: [ADMIN_DESKS, ANA_DESKS, BRUNO_DESKS] });
     const decor = createMemoryDecor();
     const desks =
-      overrides.desks === undefined ? createMemoryDesks({ directory, decor }) : overrides.desks;
+      overrides.desks === undefined ? createMemoryDesks({ directory }) : overrides.desks;
     const server = createOfficeServer({
       auth: desksVerifier,
       directory,
@@ -2141,12 +2033,11 @@ describe('rutas de escritorios (#7, slice 5)', () => {
     return (await res.json()) as { id: string };
   }
 
-  it('converges a remote authenticated client after committed claim, decoration and release only', async () => {
-    const { server, desks, decor, url } = await desksServer();
+  it('converges a remote authenticated client after committed claim and release only', async () => {
+    const { server, desks, url } = await desksServer();
     const desk = await createDesk(url, { label: 'Shared desk', x: 4, y: 4 });
-    const asset = await decor.createAsset({ name: 'Plant', kind: 'plant', textureKey: 'plant-large', w: 1, h: 1, placeableOnDesk: true });
     let notifications = 0;
-    let remote: { occupant: { displayName: string; items: unknown[] } | null }[] = [];
+    let remote: { occupant: { displayName: string } | null }[] = [];
     let reads = Promise.resolve();
     const observer = await connectOfficeRoom({
       endpoint: url.replace('http:', 'ws:'), name: 'Bruno', getIdToken: async () => 'valido-uid-bruno',
@@ -2167,29 +2058,22 @@ describe('rutas de escritorios (#7, slice 5)', () => {
       expect((await fetch(`${url}/desks/${desk.id}/claim`, { method: 'POST', headers: BEARER_ANA })).status).toBe(200);
       await vi.waitFor(() => expect(notifications).toBe(1));
       await reads;
-      expect(remote[0].occupant).toMatchObject({ displayName: 'Ana', items: [] });
-      expect((await fetch(`${url}/me/desk`, { method: 'POST', headers: BEARER_ANA,
-        body: JSON.stringify({ items: [{ assetId: asset.id, slot: 0, rotation: 0 }] }) })).status).toBe(200);
-      await vi.waitFor(() => expect(notifications).toBe(2));
-      await reads;
-      expect(remote[0].occupant?.items).toHaveLength(1);
+      expect(remote[0].occupant).toEqual({ id: ANA_DESKS.id, displayName: 'Ana' });
       expect((await fetch(`${url}/me/desk/release`, { method: 'POST', headers: BEARER_ANA })).status).toBe(200);
-      await vi.waitFor(() => expect(notifications).toBe(3));
+      await vi.waitFor(() => expect(notifications).toBe(2));
       await reads;
       expect(remote[0].occupant).toBeNull();
 
       // Rejected requests and adapter failures (including rollback errors) do
       // not announce changes. Only a successfully completed write may do so.
       expect((await fetch(`${url}/desks/${desk.id}/claim`, { method: 'POST' })).status).toBe(401);
-      expect((await fetch(`${url}/me/desk`, { method: 'POST', headers: BEARER_ANA, body: '{}' })).status).toBe(400);
       vi.spyOn(desks!, 'claimDesk').mockRejectedValue(new Error('transaction rolled back'));
       vi.spyOn(desks!, 'releaseDesk').mockRejectedValue(new Error('transaction rolled back'));
-      vi.spyOn(decor, 'replaceDeskConfig').mockRejectedValue(new Error('transaction rolled back'));
-      for (const path of [`/desks/${desk.id}/claim`, '/me/desk/release', '/me/desk']) {
-        expect((await fetch(`${url}${path}`, { method: 'POST', headers: BEARER_ANA, body: '{"items":[]}' })).status).toBe(500);
+      for (const path of [`/desks/${desk.id}/claim`, '/me/desk/release']) {
+        expect((await fetch(`${url}${path}`, { method: 'POST', headers: BEARER_ANA })).status).toBe(500);
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(notifications).toBe(3);
+      expect(notifications).toBe(2);
     } finally {
       await observer.leave();
       await server.shutdown();
@@ -2360,39 +2244,6 @@ describe('rutas de escritorios (#7, slice 5)', () => {
 
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: 'desk-taken' });
-    await server.shutdown();
-  });
-
-  it('coger otro escritorio suelta el anterior y la decoracion SIGUE a la persona', async () => {
-    const { server, decor, url } = await desksServer();
-    const viejo = await createDesk(url, { label: 'Mesa 1', x: 0, y: 0 });
-    const nuevo = await createDesk(url, { label: 'Mesa 2', x: 8, y: 0 });
-    const asset = (await (
-      await fetch(`${url}/admin/assets`, {
-        method: 'POST',
-        headers: BEARER_ADMIN,
-        body: JSON.stringify({
-          name: 'Planta Grande',
-          kind: 'plant',
-          textureKey: 'plant-large',
-          w: 1,
-          h: 1,
-          placeableOnDesk: true,
-        }),
-      })
-    ).json()) as { id: string };
-    await decor!.replaceDeskConfig(ANA_DESKS.id, [
-      { assetId: asset.id, slot: 8, rotation: 0 },
-    ]);
-
-    await fetch(`${url}/desks/${viejo.id}/claim`, { method: 'POST', headers: BEARER_ANA });
-    await fetch(`${url}/desks/${nuevo.id}/claim`, { method: 'POST', headers: BEARER_ANA });
-
-    const office = (await (await fetch(`${url}/desks`, { headers: BEARER_ANA })).json()) as {
-      desks: { id: string; occupant: { items: unknown[] } | null }[];
-    };
-    expect(office.desks.find((desk) => desk.id === viejo.id)?.occupant).toBeNull();
-    expect(office.desks.find((desk) => desk.id === nuevo.id)?.occupant?.items).toHaveLength(1);
     await server.shutdown();
   });
 
@@ -3152,47 +3003,78 @@ describe('terrain routes (#123 phase 2)', () => {
     await server.shutdown();
   });
 
-  function setChairs(url: string, edits: unknown) {
-    return fetch(`${url}/admin/terrain/chairs`, { method: 'POST', headers: BEARER, body: JSON.stringify({ edits }) });
+  function setDecor(url: string, path: '/admin/decor' | '/me/decor', edits: unknown) {
+    return fetch(`${url}${path}`, { method: 'POST', headers: BEARER, body: JSON.stringify({ edits }) });
   }
 
-  it('answers 503 to chair edits without a terrain store, never 404', async () => {
+  it('answers 503 to decor edits without a terrain store, never 404, and the old chair route is gone', async () => {
     const { server, url } = await terrainServer({ terrain: null });
-    const res = await setChairs(url, [{ index: 0, chair: { piece: 'chair-wood', facing: 'down' } }]);
-    expect(res.status).toBe(503);
-    expect(await res.json()).toEqual({ error: 'terrain-not-configured' });
-    expect(server.terrain.chairs()).toEqual([]);
+    for (const path of ['/admin/decor', '/me/decor'] as const) {
+      const res = await setDecor(url, path, [{ index: 0, item: { piece: 'chair-wood', rotation: 0 } }]);
+      expect(res.status, path).toBe(503);
+      expect(await res.json()).toEqual({ error: 'terrain-not-configured' });
+    }
+    expect(server.terrain.decor()).toEqual([]);
+    expect((await fetch(`${url}/admin/terrain/chairs`, { method: 'POST', headers: BEARER, body: '{"edits":[]}' })).status).toBe(404);
+    expect((await fetch(`${url}/me/desk`, { headers: BEARER })).status).toBe(404);
     await server.shutdown();
   });
 
-  it('places chairs into the room state, keeps desks and water off them and them off desks', async () => {
+  it('places decor into the room state; desks are created, moved and deleted over it, never refused and never deleting it', async () => {
     const desks = createMemoryDesks();
     const { server, url, wsUrl } = await terrainServer({ desks, terrain: createMemoryTerrain() });
     const room = await new Client(wsUrl).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token: 'valido-uid-admin' });
     openRooms.push(room);
     const { width, height } = server.terrain.snapshot();
     const chair = 22 * width + 67;
+    const table = 23 * width + 72;
     const postDesk = (path: string, body: unknown) =>
       fetch(`${url}${path}`, { method: 'POST', headers: BEARER, body: JSON.stringify(body) });
 
-    const placed = await setChairs(url, [{ index: chair, chair: { piece: 'chair-metal', facing: 'right' } }]);
+    const placed = await setDecor(url, '/admin/decor', [
+      { index: chair, item: { piece: 'chair-metal', rotation: 90 } },
+      { index: table, item: { piece: 'desk-wood', rotation: 0 } },
+    ]);
     expect(placed.status).toBe(200);
-    expect(await placed.json()).toEqual({ updated: 1 });
-    await waitFor(() => decodeTerrainChairs(room.state.terrainChairs, width * height)?.[0]?.index === chair);
-    expect((await setChairs(url, [{ index: 0, chair: { piece: 'chair-throne', facing: 'down' } }])).status).toBe(400);
+    expect(await placed.json()).toEqual({ updated: 2 });
+    await waitFor(() => decodeOfficeDecor(room.state.officeDecor, width * height)?.length === 2);
+    expect((await setDecor(url, '/admin/decor', [{ index: 0, item: { piece: 'chair', rotation: 0 } }])).status).toBe(400);
 
-    const onChair = await postDesk('/admin/desks', { label: 'Mesa A', x: 66, y: 21 });
-    expect(onChair.status).toBe(409);
-    expect(await onChair.json()).toEqual({ error: 'desk-on-chair' });
-    expect(await desks.listDesks()).toEqual([]);
+    const overChair = await postDesk('/admin/desks', { label: 'Mesa A', x: 66, y: 21 });
+    expect(overChair.status).toBe(201);
+    const { id } = (await overChair.json()) as { id: string };
+    expect((await postDesk(`/admin/desks/${id}`, { x: 71, y: 21 })).status).toBe(200);
+    expect((await postDesk(`/admin/desks/${id}/delete`, {})).status).toBe(200);
+    expect(server.terrain.decor()).toEqual([
+      { index: chair, piece: 'chair-metal', rotation: 90 },
+      { index: table, piece: 'desk-wood', rotation: 0 },
+    ]);
+
     const blocked = await setBlock(url, LAWN, 'water');
     expect(blocked.status).toBe(409);
     expect(await blocked.json()).toEqual({ error: 'terrain-under-placement' });
+    await server.shutdown();
+  });
 
-    // A desk under the chair's tile refuses the chair the other way round.
-    expect((await postDesk('/admin/desks', { label: 'Mesa B', x: 70, y: 21 })).status).toBe(201);
-    const onDesk = await setChairs(url, [{ index: 22 * width + 71, chair: { piece: 'chair-wood', facing: 'down' } }]);
-    expect(onDesk.status).toBe(409);
+  it('lets a desk occupant decorate inside the desk only, through /me/decor', async () => {
+    const desks = createMemoryDesks();
+    const { server, url } = await terrainServer({ desks, terrain: createMemoryTerrain() });
+    const { width } = server.terrain.snapshot();
+    const none = await setDecor(url, '/me/decor', [{ index: 22 * width + 67, item: { piece: 'chair-wood', rotation: 0 } }]);
+    expect(none.status).toBe(403);
+    expect(await none.json()).toEqual({ error: 'no-desk' });
+
+    const desk = await desks.createDesk({ x: 66, y: 21 });
+    await desks.claimDesk(desk.id, ADMIN_TERRAIN.id);
+    expect((await setDecor(url, '/me/decor', [{ index: 23 * width + 67, item: { piece: 'desk-wood', rotation: 0 } }])).status).toBe(200);
+    const outside = await setDecor(url, '/me/decor', [{ index: 22 * width + 69, item: { piece: 'chair-wood', rotation: 0 } }]);
+    expect(outside.status).toBe(403);
+    expect(await outside.json()).toEqual({ error: 'outside-desk' });
+    expect(server.terrain.decor()).toEqual([{ index: 23 * width + 67, piece: 'desk-wood', rotation: 0 }]);
+
+    // Releasing the desk keeps what stands on it.
+    expect((await fetch(`${url}/me/desk/release`, { method: 'POST', headers: BEARER })).status).toBe(200);
+    expect(server.terrain.decor()).toHaveLength(1);
     await server.shutdown();
   });
 });
@@ -3318,7 +3200,6 @@ describe('collision routes', () => {
     const { server, url } = await collisionServer({ desks, collisions: createMemoryCollisions([['desk-wood', [{ x: -8, y: -8, w: 16, h: 16 }]]]) });
     const created = await fetch(`${url}/admin/desks`, { method: 'POST', headers: BEARER, body: JSON.stringify({ x: 21, y: 50 }) });
     expect(created.status).toBe(201);
-    await server.collisions.refreshPlacements();
 
     // The middle of the 3x3 area at tile (21, 50), as a body center.
     expect(isPositionBlocked(server.collisions.rects(), 22 * 32 + 16, 51 * 32 + 5)).toBe(false);

@@ -188,6 +188,32 @@ describe('CameraZoomLayer: wheel', () => {
     expect(f.views).toHaveLength(initial + 1);
   });
 
+  it('does not zoom while the wheel is suppressed (a rotatable decor piece is picked, #207), and zooms again after', async () => {
+    let suppressed = true;
+    const f = await fixture({ wheelSuppressed: () => suppressed });
+    const initial = f.views.length;
+
+    notches(f, -100, 4);
+    renderFrames(f.scene, 3);
+    expect(f.views).toHaveLength(initial);
+    expect(f.scene.cameras.main.zoom).toBe(2);
+
+    suppressed = false;
+    // The notches turned while suppressed do not count toward the next zoom step.
+    notches(f, -100, 1);
+    expect(f.views).toHaveLength(initial);
+    notches(f, -100, 1);
+    expect(f.views.at(-1)).toEqual(zoomView(3));
+  });
+
+  it('keeps zooming with the keys while the wheel is suppressed', async () => {
+    const f = await fixture({ wheelSuppressed: () => true });
+
+    key(f.scene, '+');
+
+    expect(f.views.at(-1)).toEqual(zoomView(3));
+  });
+
   it('tolerates a pointer with no camera yet', async () => {
     const f = await fixture();
 

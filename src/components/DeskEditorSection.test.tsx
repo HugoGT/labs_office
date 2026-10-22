@@ -464,6 +464,70 @@ describe('DeskEditorSection inside "Editar espacios" (embedded)', () => {
     expect(screen.queryByRole('button', { name: 'Mover' })).not.toBeInTheDocument();
   });
 
+  describe('«Múltiple» (#207)', () => {
+    it('is offered next to "Crear escritorio", off, and stays while the desk is placed', async () => {
+      renderEmbedded();
+      expect(screen.getByRole('checkbox', { name: /^Múltiple/ })).not.toBeChecked();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Crear escritorio' }));
+      expect(screen.getByRole('checkbox', { name: /^Múltiple/ })).toBeInTheDocument();
+    });
+
+    it('on, a created desk goes straight back to placing the next one, until Escape', async () => {
+      const desks = fakeDesks();
+      const { bridge } = renderEmbedded({ desks });
+      await userEvent.click(screen.getByRole('checkbox', { name: /^Múltiple/ }));
+      await userEvent.click(screen.getByRole('button', { name: 'Crear escritorio' }));
+
+      placeAt(bridge, 1, 2);
+      await waitFor(() => expect(desks.createDesk).toHaveBeenCalledWith({ x: 1, y: 2 }));
+      expect(await screen.findByText(/Toca el nuevo sitio/)).toBeInTheDocument();
+      placeAt(bridge, 6, 2);
+      await waitFor(() => expect(desks.createDesk).toHaveBeenCalledWith({ x: 6, y: 2 }));
+      expect(await screen.findByText(/Toca el nuevo sitio/)).toBeInTheDocument();
+
+      await userEvent.keyboard('{Escape}');
+      expect(screen.getByRole('button', { name: 'Editar escritorios' })).toBeInTheDocument();
+      expect(screen.queryByText(/Toca el nuevo sitio/)).not.toBeInTheDocument();
+      expect(desks.createDesk).toHaveBeenCalledTimes(2);
+    });
+
+    it('on, a refused desk shows why and goes back to placing too: only that one is dropped', async () => {
+      const createDesk = vi.fn<DeskAdminPort['createDesk']>(async () => Promise.reject(new AdminError('desk-on-wall')));
+      const desks = fakeDesks({ createDesk });
+      const { bridge } = renderEmbedded({ desks });
+      await userEvent.click(screen.getByRole('checkbox', { name: /^Múltiple/ }));
+      await userEvent.click(screen.getByRole('button', { name: 'Crear escritorio' }));
+
+      placeAt(bridge, 1, 2);
+      await waitFor(() => expect(createDesk).toHaveBeenCalledTimes(1));
+      // Under load the refusal and the placing hint can land in different renders: wait for both.
+      await waitFor(() => {
+        expect(screen.getByText(/Toca el nuevo sitio/)).toBeInTheDocument();
+        expect(screen.getByRole('alert')).toBeInTheDocument();
+      });
+
+      createDesk.mockImplementation(async () => MESA);
+      placeAt(bridge, 6, 2);
+      await waitFor(() => expect(createDesk).toHaveBeenCalledWith({ x: 6, y: 2 }));
+      await waitFor(() => {
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+        expect(screen.getByText(/Toca el nuevo sitio/)).toBeInTheDocument();
+      });
+    });
+
+    it('on, "Cancelar" still stops and goes back to the default view', async () => {
+      renderEmbedded();
+      await userEvent.click(screen.getByRole('checkbox', { name: /^Múltiple/ }));
+      await userEvent.click(screen.getByRole('button', { name: 'Crear escritorio' }));
+
+      await userEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+
+      expect(screen.getByRole('button', { name: 'Editar escritorios' })).toBeInTheDocument();
+      expect(screen.getByRole('checkbox', { name: /^Múltiple/ })).toBeChecked();
+    });
+  });
+
   describe('Escape, one level per press', () => {
     it('releases a selection made on the map first, then leaves the list for the default view, and never asks the section around it to exit', async () => {
       const onExit = vi.fn();

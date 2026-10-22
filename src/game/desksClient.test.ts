@@ -36,19 +36,6 @@ function servedOccupant(overrides: Record<string, unknown> = {}): Record<string,
   return {
     id: 'id-persona',
     displayName: 'Ana Torres',
-    items: [
-      {
-        id: 'id-item',
-        assetId: 'id-asset',
-        slot: 4,
-        rotation: 90,
-        textureKey: 'plant-small',
-        name: 'Planta',
-        w: 1,
-        h: 1,
-        createdAt: '2026-01-01T00:00:00.000Z',
-      },
-    ],
     ...overrides,
   };
 }
@@ -130,51 +117,24 @@ describe('fetchOfficeDesks', () => {
     expect(desks[0]).not.toHaveProperty('materialId');
   });
 
-  it('resuelve al ocupante con su decoracion, que le sigue de escritorio en escritorio', async () => {
+  it('resuelve al ocupante, sin decoracion: la decoracion es del mapa (#208)', async () => {
     const desks = await fetchOfficeDesks({
       baseUrl: 'http://x',
       getIdToken: TOKEN,
       fetchImpl: respondWith({ desks: [servedDesk({ occupant: servedOccupant() })] }),
     });
 
-    expect(desks[0].occupant).toEqual({
-      id: 'id-persona',
-      displayName: 'Ana Torres',
-      items: [
-        { id: 'id-item', slot: 4, rotation: 90, textureKey: 'plant-small', aboveAvatars: false },
-      ],
-    });
+    expect(desks[0].occupant).toEqual({ id: 'id-persona', displayName: 'Ana Torres' });
   });
 
-  it('carries the render layer of each piece (#71)', async () => {
-    const [item] = servedOccupant().items as Record<string, unknown>[];
+  it('ignores the items an older server still sends with the occupant', async () => {
     const desks = await fetchOfficeDesks({
       baseUrl: 'http://x',
       getIdToken: TOKEN,
-      fetchImpl: respondWith({
-        desks: [servedDesk({ occupant: servedOccupant({ items: [{ ...item, aboveAvatars: true }] }) })],
-      }),
+      fetchImpl: respondWith({ desks: [servedDesk({ occupant: servedOccupant({ items: [{ id: 'i', slot: 9 }] }) })] }),
     });
 
-    expect(desks[0].occupant?.items[0].aboveAvatars).toBe(true);
-  });
-
-  it('a missing or malformed aboveAvatars is a normal piece, not a broken list (#71)', async () => {
-    // Older servers do not send the field. It only picks a render layer, so
-    // anything but `true` degrades to the safe default instead of blanking the
-    // office like a malformed slot does.
-    const [item] = servedOccupant().items as Record<string, unknown>[];
-    const desks = await fetchOfficeDesks({
-      baseUrl: 'http://x',
-      getIdToken: TOKEN,
-      fetchImpl: respondWith({
-        desks: [
-          servedDesk({ occupant: servedOccupant({ items: [{ ...item, aboveAvatars: 'si' }] }) }),
-        ],
-      }),
-    });
-
-    expect(desks[0].occupant?.items[0].aboveAvatars).toBe(false);
+    expect(desks[0].occupant).toEqual({ id: 'id-persona', displayName: 'Ana Torres' });
   });
 
   it('un escritorio libre llega con ocupante nulo, no ausente', async () => {
@@ -305,26 +265,6 @@ describe('fetchOfficeDesks', () => {
       getIdToken: TOKEN,
       fetchImpl: respondWith({
         desks: [servedDesk({ occupant: servedOccupant({ id: 42 }) })],
-      }),
-    });
-
-    expect(desks).toBe(NO_DESKS);
-  });
-
-  it('un item con slot fuera del area de 3x3 descarta la lista entera', async () => {
-    // Nueve cajas, de la 0 a la 8. Un slot de 9 no cabe en el escritorio y
-    // pintarlo dejaria decoracion flotando fuera de su sitio.
-    const desks = await fetchOfficeDesks({
-      baseUrl: 'http://x',
-      getIdToken: TOKEN,
-      fetchImpl: respondWith({
-        desks: [
-          servedDesk({
-            occupant: servedOccupant({
-              items: [{ id: 'i', slot: 9, rotation: 0, textureKey: 'x' }],
-            }),
-          }),
-        ],
       }),
     });
 

@@ -17,7 +17,10 @@ import { createCollisionAdminClient } from '../dashboard/collisionAdminClient';
 import type { CollisionAdminPort } from '../dashboard/collisionAdminPort';
 import { ART_PACK_MANIFEST_URL, artUploadsManifestUrl } from '../game/artPack';
 import { resolveLivekitConfig } from '../game/livekitEndpoint';
-import { terrainEditHoldsMap } from '../game/editorMapHold';
+import { decorEditHidesRail, terrainEditHoldsMap } from '../game/editorMapHold';
+import { TILE } from '../game/mapData';
+import { createOfficeDecorClient } from '../game/officeDecorClient';
+import type { OfficeDecorPort } from '../game/officeDecorPort';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
 import { DEFAULT_NAME, DEFAULT_STATUS, type AccessDeniedReason, type PresenceStatus } from '../game/officeProtocol';
@@ -29,10 +32,8 @@ import {
   stopRecording,
   type RecordingRequest,
 } from '../game/recordingClient';
-import type { DeskItemPlacement, SaveDeskOutcome } from '../game/deskDecorPort';
 import type { RosterPeer } from '../game/roster';
 import { useCallInvitations } from '../hooks/useCallInvitations';
-import { useDeskDecor } from '../hooks/useDeskDecor';
 import { useDesks } from '../hooks/useDesks';
 import { useInstallPrompt } from '../hooks/useInstallPrompt';
 import { useMapZoom } from '../hooks/useMapZoom';
@@ -178,6 +179,22 @@ export function OfficeShell({
     if (apiBaseUrl === null) return null;
     return createTerrainAdminClient({ baseUrl: apiBaseUrl, getIdToken: () => session?.getIdToken() ?? Promise.resolve(null) });
   });
+  /**
+   * The office decor layer (#208): "Decoración" writes anywhere as an admin,
+   * "Mi espacio" inside one's own desk. Same pattern as `terrainAdminPort`;
+   * the desk one needs a session, there is no desk without one.
+   */
+  const [decorAdminPort] = useState<OfficeDecorPort | null>(() => {
+    const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
+    if (apiBaseUrl === null) return null;
+    return createOfficeDecorClient({ baseUrl: apiBaseUrl, getIdToken: () => session?.getIdToken() ?? Promise.resolve(null), scope: 'office' });
+  });
+  const [myDecorPort] = useState<OfficeDecorPort | null>(() => {
+    const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
+    if (apiBaseUrl === null || !session) return null;
+    const signedIn = session;
+    return createOfficeDecorClient({ baseUrl: apiBaseUrl, getIdToken: () => signedIn.getIdToken(), scope: 'desk' });
+  });
   /** Collision areas per piece: same pattern and reason as `terrainAdminPort`. */
   const [collisionAdminPort] = useState<CollisionAdminPort | null>(() => {
     const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
@@ -229,13 +246,17 @@ export function OfficeShell({
    */
   const [layoutEditing, setLayoutEditing] = useState(false);
   /**
-   * A terrain brush (floor, wall or chair) hides the right rail (minimap, zoom, sidebar, exit
-   * buttons) so the map can be painted under it; Escape unpicks the brush and
-   * brings it back. Read from the same `terrainedit` command the scene follows,
-   * so the sidebar stays mounted (only hidden) and keeps the editor's state.
+   * A terrain brush (floor or wall) or a picked decor piece (#208; a mere selection does not) hides the right
+   * rail (minimap, zoom, sidebar, exit buttons) so the map can be edited
+   * under it; Escape unpicks it and brings the rail back. Read from the same
+   * `terrainedit` and `decoredit` commands the scene follows, so the sidebar
+   * stays mounted (only hidden) and keeps the editor's state.
    */
-  const [hudHidden, setHudHidden] = useState(false);
-  useEffect(() => bridge.onCommand('terrainedit', (command) => setHudHidden(terrainEditHoldsMap(command))), [bridge]);
+  const [terrainHolds, setTerrainHolds] = useState(false);
+  const [decorHidesRail, setDecorHidesRail] = useState(false);
+  useEffect(() => bridge.onCommand('terrainedit', (command) => setTerrainHolds(terrainEditHoldsMap(command))), [bridge]);
+  useEffect(() => bridge.onCommand('decoredit', (command) => setDecorHidesRail(decorEditHidesRail(command))), [bridge]);
+  const hudHidden = terrainHolds || decorHidesRail;
   /**
    * Config de espacios servida (#7, slice 3). Vive aqui y no en `GameCanvas`
    * por la misma razon que `endpoint`: quien sabe donde esta el servidor es
@@ -321,17 +342,6 @@ export function OfficeShell({
     refreshDesks();
     refreshSpaces();
   }), [bridge, refreshDesks, refreshSpaces]);
-  /**
-   * Lo que el editor de decoracion necesita saber (#7, slice 6). Vive aqui por
-   * lo mismo que `desks`: quien sabe donde esta el servidor es este
-   * componente.
-   *
-   * Es una lectura APARTE de `/desks` y no un campo mas de aquella. `/desks`
-   * trae la decoracion de todo el mundo ya resuelta para PINTARLA, sin el
-   * `assetId` con el que se vuelve a guardar; y el catalogo de lo que se puede
-   * colocar no es una propiedad de ningun escritorio. Ver `deskDecorPort.ts`.
-   */
-  const decor = useDeskDecor(endpoint, session);
   /**
    * El escritorio propio, que es el UNICO que se puede decorar. Lo contesta el
    * servidor (`OfficeDesk.mine`) y no se deduce comparando nombres: ver
@@ -671,24 +681,6 @@ export function OfficeShell({
   );
 
   /**
-   * Guardar la decoracion del escritorio propio (#7, slice 6). El escritorio
-   * entero, que es lo que lee `POST /me/desk`.
-   *
-   * Un guardado bueno RELEE `/desks`, y ese es el camino por el que la escena
-   * se entera sin recargar la pagina: la lista es autoritativa y viaja por
-   * comando, igual que despues de coger o soltar sitio. Sin esto, la pieza
-   * recien colocada solo existiria dentro de este panel.
-   */
-  const saveDecor = useCallback(
-    async (items: readonly DeskItemPlacement[]): Promise<SaveDeskOutcome> => {
-      const outcome = await decor.save(items);
-      if (outcome === 'saved') refreshDesks();
-      return outcome;
-    },
-    [decor, refreshDesks],
-  );
-
-  /**
    * Clic en un escritorio asignable (#7, slice 5). Se suscribe DIRECTAMENTE
    * aqui y no en un hook, misma razon que `callaccepted`: es un toast y este
    * componente ya es el unico dueno del puente.
@@ -802,13 +794,20 @@ export function OfficeShell({
         <OfficeSidebar
           self={rosterSelf}
           peers={rosterPeers}
-          mySpace={{ hasDesk: myDesk !== null, phase: decor.phase, catalog: decor.catalog, items: decor.items, onSave: saveDecor }}
+          mySpace={{
+            hasDesk: myDesk !== null,
+            // Desks are served in world pixels; the decor layer counts tiles.
+            area: myDesk === null ? null : { x: Math.round(myDesk.x / TILE), y: Math.round(myDesk.y / TILE), w: Math.round(myDesk.w / TILE), h: Math.round(myDesk.h / TILE) },
+            decor: myDecorPort,
+            onLeaveDesk: myDesk === null ? undefined : () => void leaveDesk(myDesk.label),
+          }}
           role={adminRole}
           bridge={bridge}
           desks={deskAdminPort}
           spaces={spacesAdminPort}
           terrain={terrainAdminPort}
           collisions={collisionAdminPort}
+          decor={decorAdminPort}
           assets={assetsAdminPort}
           contributions={contributionsPort}
           character={characterPort}

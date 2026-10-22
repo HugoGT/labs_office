@@ -160,6 +160,8 @@ CREATE TABLE IF NOT EXISTS space_layouts (
 );
 CREATE INDEX IF NOT EXISTS space_layouts_space ON space_layouts (space_id);
 
+-- LEGACY since the office decor layer (#208): read only by its one-time copy
+-- at the end of this file.
 CREATE TABLE IF NOT EXISTS user_desk_configs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -449,7 +451,8 @@ CREATE TABLE IF NOT EXISTS terrain_walls (
 ALTER TABLE terrain_walls DROP CONSTRAINT IF EXISTS terrain_walls_piece_id_check;
 ALTER TABLE terrain_walls ADD CONSTRAINT terrain_walls_piece_id_check CHECK (piece_id IN ('wall-brick', 'wall-stone', 'wall-plaster', 'wall-glass'));
 
--- Placed chairs (terrain editor). One row per TILE holding a chair an admin
+-- LEGACY since the office decor layer (#208): read only by its one-time copy
+-- at the end of this file. Placed chairs (terrain editor). One row per TILE holding a chair an admin
 -- placed: the chair piece of the art pack (`CHAIR_PIECES` in
 -- `src/game/seating.ts`, pinned by migrate.test.ts and refreshed below like
 -- the wall pieces) and the way it faces. Removing a chair deletes its row.
@@ -499,9 +502,9 @@ CREATE TABLE IF NOT EXISTS custom_characters (
 -- `src/game/mapData.ts`). They move exactly once: the first start that finds
 -- no `map_layout_version` row moves them and writes the row, inside the one
 -- implicit transaction of this script, so a crash moves nothing and a restart
--- never moves anything twice. The only marker in this file on purpose: a
--- shift is not convergent, so it cannot be written as one more idempotent
--- statement. A brand new database runs it over empty tables and just gets
+-- never moves anything twice. A marker on purpose: a shift is not
+-- convergent, so it cannot be written as one more idempotent statement (the
+-- decor layer's one-time copy at the end of the file is the other one). A brand new database runs it over empty tables and just gets
 -- the marker. `MAP_LAYOUT_VERSION` (migrate.ts) is the version written here.
 CREATE TABLE IF NOT EXISTS map_layout_version (
   id boolean PRIMARY KEY DEFAULT true CHECK (id),
@@ -531,5 +534,60 @@ BEGIN
     -- Last positions (#148) are PIXELS: +864, +576. NULL means never saved.
     UPDATE users SET last_x = last_x + 864, last_y = last_y + 576 WHERE last_x IS NOT NULL AND last_y IS NOT NULL;
     INSERT INTO map_layout_version (version) VALUES (2);
+  END IF;
+END $$;
+
+-- The office decor layer (#208). Every piece of furniture people put in the
+-- office (chairs, desk tables, plants and room tables) is one row, anchored
+-- on a TILE (row major over the current map, `src/game/officeDecor.ts`), with
+-- the art piece and its rotation (0 down, 90 right, 180 up, 270 left).
+-- Independent of desks: a desk is only a claimable zone, and what stands on
+-- it stays when the desk changes hands, moves or goes away. No CHECK on the
+-- piece: uploads are added at runtime, so the routes check it against
+-- `art_pieces`. Removing an item deletes its row.
+CREATE TABLE IF NOT EXISTS office_decor (
+  tile_index integer PRIMARY KEY CHECK (tile_index >= 0),
+  piece_id text NOT NULL,
+  rotation smallint NOT NULL CHECK (rotation IN (0, 90, 180, 270)),
+  updated_by uuid REFERENCES users(id),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+-- The color of a painted item (a colorable desk table), NULL for its manifest
+-- default and for every piece that takes none. An ALTER because `CREATE TABLE
+-- IF NOT EXISTS` never touches a live table; lower case like the art pack.
+ALTER TABLE office_decor ADD COLUMN IF NOT EXISTS color text CHECK (color ~ '^#[0-9a-f]{6}$');
+
+-- `terrain_chairs` and `user_desk_configs` are legacy since the decor layer:
+-- only the one-time copy below reads them. It runs once, behind its own
+-- marker like the grid move (`OFFICE_DECOR_VERSION` in migrate.ts), so a
+-- restart never adds back an item an admin removed afterwards:
+--   1. every placed chair, its facing turned into a rotation;
+--   2. the art decor (`art:<id>:sheet`) of whoever occupies a desk, on the
+--      tile of its slot box: `(y + slot / 3) * 189 + x + slot % 3`, 189 being
+--      the map width in tiles (`MAP_W`, pinned by migrate.test.ts). A table
+--      was stored on the middle of its edge, which is its anchor now. The
+--      decor of people without a desk, and legacy bundle sprites, are dropped.
+-- After the grid move, so desks are already on the 21x15 grid.
+CREATE TABLE IF NOT EXISTS office_decor_version (
+  id boolean PRIMARY KEY DEFAULT true CHECK (id),
+  version integer NOT NULL,
+  migrated_at timestamptz NOT NULL DEFAULT now()
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM office_decor_version) THEN
+    INSERT INTO office_decor (tile_index, piece_id, rotation, updated_by, updated_at)
+      SELECT tile_index, piece_id, CASE facing WHEN 'right' THEN 90 WHEN 'up' THEN 180 WHEN 'left' THEN 270 ELSE 0 END, updated_by, updated_at
+      FROM terrain_chairs
+      ON CONFLICT (tile_index) DO NOTHING;
+    INSERT INTO office_decor (tile_index, piece_id, rotation, updated_by)
+      SELECT (d.y + c.slot / 3) * 189 + d.x + c.slot % 3, substring(a.texture_key FROM '^art:([a-z0-9-]+):sheet$'), c.rotation, c.user_id
+      FROM user_desk_configs c
+      JOIN desks d ON d.occupant_id = c.user_id
+      JOIN assets a ON a.id = c.asset_id
+      WHERE a.texture_key ~ '^art:[a-z0-9-]+:sheet$'
+      ON CONFLICT (tile_index) DO NOTHING;
+    INSERT INTO office_decor_version (version) VALUES (1);
   END IF;
 END $$;

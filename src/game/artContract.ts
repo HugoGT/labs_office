@@ -213,9 +213,19 @@ export interface HedgeSpec extends PropSpecBase {
   readonly height: number;
 }
 
-/** Room tables differ in size: each piece states its footprint, up to `maxFootprint`. */
+/**
+ * The two ways a room table stands (#208): its long side across the screen
+ * (`horizontal`, the footprint as stated) or along the floor depth
+ * (`vertical`, the footprint swapped). A room table is symmetric, so these
+ * are all its turns: the decor layer's rotation 0 and 90.
+ */
+export const TABLE_FACINGS = ['horizontal', 'vertical'] as const;
+export type TableFacing = (typeof TABLE_FACINGS)[number];
+
+/** Room tables differ in size: each piece states its (horizontal) footprint, up to `maxFootprint`. */
 export interface TableSpec extends PropSpecBase {
   readonly kind: 'table';
+  readonly columnOrder: readonly TableFacing[];
   readonly maxFootprint: Footprint;
 }
 
@@ -748,12 +758,20 @@ export const HEDGE: HedgeSpec = {
   transparentCorners: false,
 };
 
-/** Meeting and cafeteria tables: one frame fits the largest, the 7x5 meeting table. */
+/**
+ * Room tables, one column per `TABLE_FACINGS`: a frame fits the largest, the
+ * 7x5 meeting table, both horizontal and standing vertical (5x7, its lifted
+ * top over 7 tiles of floor depth). The anchor is the floor under the bottom
+ * middle of the footprint in either frame, the footprint swapped in the
+ * vertical one, and 12 rows of frame stay below it like before.
+ */
 export const TABLE: TableSpec = {
   ...PROP_BASE,
   kind: 'table',
-  frame: { width: 256, height: 192 },
-  anchor: { x: 128, y: 180 },
+  frame: { width: 256, height: 256 },
+  columns: TABLE_FACINGS.length,
+  columnOrder: TABLE_FACINGS,
+  anchor: { x: 128, y: 244 },
   maxFootprint: { w: 7, h: 5 },
   layer: 'sorted',
   collision: 'solid',
@@ -761,6 +779,11 @@ export const TABLE: TableSpec = {
 
 export function bridgeFrameIndex(orientation: BridgeOrientation): number {
   return BRIDGE_ORIENTATIONS.indexOf(orientation);
+}
+
+/** The frame of a room table for a decor rotation: 0 and 180 horizontal, 90 and 270 vertical (it is symmetric). */
+export function tableFrameIndex(rotation: 0 | 90 | 180 | 270): number {
+  return TABLE_FACINGS.indexOf(rotation === 90 || rotation === 270 ? 'vertical' : 'horizontal');
 }
 
 export function hedgeFrameIndex(mask: number): number {
@@ -1054,6 +1077,8 @@ export interface ArtPlantPiece extends ArtPropPieceBase {
 
 export interface ArtTablePiece extends ArtPropPieceBase {
   readonly kind: 'table';
+  /** The frames of its sheet, in `TABLE_FACINGS` order; `footprint` is the horizontal one. */
+  readonly facings: readonly TableFacing[];
 }
 
 export interface ArtHedgePiece extends ArtPropPieceBase {

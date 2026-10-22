@@ -192,6 +192,75 @@ describe('useSpaceEditor (#74, PR4)', () => {
     expect(result.current.state).toEqual({ tag: 'selected', kind: 'room', id: 'id-sala' });
   });
 
+  describe('row actions: a room list row acts on its own room, no selection step (like desks)', () => {
+    it('moving by id places that room, with its own size', async () => {
+      const spaces = fakeSpaces();
+      const { bridge, refreshSpaces, result } = setup(spaces);
+      act(() => result.current.enter());
+      await waitFor(() => expect(result.current.spaces).toHaveLength(2));
+
+      act(() => result.current.startMove('id-otra-sala'));
+
+      expect(result.current.state).toEqual({ tag: 'placing', kind: 'room', mode: 'move', id: 'id-otra-sala' });
+      act(() => bridge.emit('layoutplace', { tx: 3, ty: 4, valid: true }));
+      await waitFor(() => expect(spaces.updateSpace).toHaveBeenCalledWith('id-otra-sala', { x: 3, y: 4, w: 3, h: 3 }));
+      await waitFor(() => expect(refreshSpaces).toHaveBeenCalledTimes(1));
+    });
+
+    it('moving by id moves that room even while another one is selected on the map', async () => {
+      const { bridge, result } = setup(fakeSpaces());
+      act(() => result.current.enter());
+      await waitFor(() => expect(result.current.spaces).toHaveLength(2));
+      act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
+
+      act(() => result.current.startMove('id-otra-sala'));
+
+      expect(result.current.state).toEqual({ tag: 'placing', kind: 'room', mode: 'move', id: 'id-otra-sala' });
+    });
+
+    it('moving by id does nothing while something else is being placed', async () => {
+      const { result } = setup(fakeSpaces());
+      act(() => result.current.enter());
+      await waitFor(() => expect(result.current.spaces).toHaveLength(2));
+      act(() => result.current.startCreate({ name: 'Sala nueva', w: 6, h: 6, capacity: 7 }));
+
+      act(() => result.current.startMove('id-otra-sala'));
+
+      expect(result.current.state).toEqual({ tag: 'placing', kind: 'room', mode: 'create' });
+    });
+
+    it('removing by id deletes that room and keeps another one selected; removing the selected one drops it', async () => {
+      const spaces = fakeSpaces();
+      const { bridge, refreshDesks, refreshSpaces, result } = setup(spaces);
+      act(() => result.current.enter());
+      await waitFor(() => expect(result.current.spaces).toHaveLength(2));
+      act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
+
+      await act(async () => result.current.remove('id-otra-sala'));
+      expect(spaces.deleteSpace).toHaveBeenCalledWith('id-otra-sala');
+      expect(refreshDesks).toHaveBeenCalledTimes(1);
+      expect(refreshSpaces).toHaveBeenCalledTimes(1);
+      expect(result.current.state).toEqual({ tag: 'selected', kind: 'room', id: 'id-sala' });
+
+      await act(async () => result.current.remove('id-sala'));
+      expect(spaces.deleteSpace).toHaveBeenLastCalledWith('id-sala');
+      expect(result.current.state).toEqual({ tag: 'idle', kind: 'room' });
+    });
+
+    it('a failed remove by id shows why and reloads nothing', async () => {
+      const spaces = fakeSpaces({ deleteSpace: vi.fn(async () => Promise.reject(new AdminError('unknown'))) });
+      const { refreshSpaces, result } = setup(spaces);
+      act(() => result.current.enter());
+      await waitFor(() => expect(result.current.spaces).toHaveLength(2));
+
+      await act(async () => result.current.remove('id-otra-sala'));
+
+      expect(result.current.error).toBe('No se pudo completar la operación.');
+      expect(refreshSpaces).not.toHaveBeenCalled();
+      expect(result.current.state).toEqual({ tag: 'idle', kind: 'room' });
+    });
+  });
+
   it('exit vuelve a off y deja de publicar comando (null)', async () => {
     const { commands, result } = setup(fakeSpaces());
     act(() => result.current.enter());

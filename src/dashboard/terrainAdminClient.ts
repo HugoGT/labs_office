@@ -38,8 +38,5 @@ export function createTerrainAdminClient(
     async setWalls(edits) {
       await request('/admin/terrain/walls', jsonBody({ edits }));
     },
-    async setChairs(edits) {
-      await request('/admin/terrain/chairs', jsonBody({ edits }));
-    },
   };
 }

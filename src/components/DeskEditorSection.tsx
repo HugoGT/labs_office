@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import type { OfficeBridge } from '../game/officeBridge';
 import { useEscapeStep } from '../hooks/useEscapeStep';
 import { useLayoutEditor } from '../hooks/useLayoutEditor';
 import styles from './DeskEditorSection.module.css';
-import { TrashIcon } from './TrashIcon';
+import { LayoutItemList } from './LayoutItemList';
+import { MultipleToggle } from './MultipleToggle';
 
 /**
  * How the list names a desk: its own label when an older one has it, else
@@ -54,6 +55,12 @@ export interface DeskEditorSectionProps {
    * offers "Volver".
    */
   embedded?: boolean;
+  /**
+   * Renders nothing while the desk editor is off: "Editar salas" holds the
+   * panel. The section stays mounted, so its off hook never re-emits a null
+   * `layoutedit` over the rooms' overlay and its state survives.
+   */
+  concealed?: boolean;
   onExit?: () => void;
   /**
    * Se llama ANTES de `editor.enter()` (#74, PR4 correction: exclusividad
@@ -74,6 +81,7 @@ export function DeskEditorSection({
   forceExit = false,
   initiallyActive = false,
   embedded = false,
+  concealed = false,
   onExit,
   onRequestActive,
 }: DeskEditorSectionProps) {
@@ -82,6 +90,15 @@ export function DeskEditorSection({
   const [creating, setCreating] = useState(false);
   /** Why the server refused that desk, kept for the default view the section goes back to. */
   const [createError, setCreateError] = useState<string | null>(null);
+  /**
+   * "Múltiple" (#207): a desk placed, created or refused, starts placing the
+   * next one instead of going back, until Escape, "Cancelar" or "Salir".
+   */
+  const [multiple, setMultiple] = useState(false);
+  /** Why the server refused the previous desk of a "Múltiple" run: the next placement clears the hook's error. */
+  const [runError, setRunError] = useState<string | null>(null);
+  /** Where a create placement is: `saving` once its click was sent, so its end tells a placement from a cancel. */
+  const createPhaseRef = useRef<'none' | 'placing' | 'saving'>('none');
 
   const active = editor.state.tag !== 'off';
 
@@ -105,17 +122,36 @@ export function DeskEditorSection({
   }, [forceExit]);
 
   useEffect(() => {
+    const state = editor.state;
+    if (state.tag === 'placing') {
+      createPhaseRef.current = state.mode === 'create' ? 'placing' : 'none';
+      return;
+    }
+    if (state.tag === 'saving') {
+      if (createPhaseRef.current === 'placing') createPhaseRef.current = 'saving';
+      setRunError(null);
+      return;
+    }
+    const placed = createPhaseRef.current === 'saving';
+    createPhaseRef.current = 'none';
+    if (state.tag === 'idle' && placed && multiple) {
+      // Created or refused, the run goes on: only that desk is dropped.
+      setRunError(editor.error);
+      editor.startCreate();
+      return;
+    }
+    setRunError(null);
     if (!creating) return;
-    if (editor.state.tag === 'off') {
+    if (state.tag === 'off') {
       setCreating(false);
-    } else if (editor.state.tag === 'idle') {
+    } else if (state.tag === 'idle') {
       // The placement ended, created, cancelled or refused: back to the default view.
       setCreating(false);
       setCreateError(editor.error);
       editor.exit();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [creating, editor.state.tag, editor.error]);
+  }, [creating, editor.state, editor.error]);
 
   // Escape: a selection or a placement is the hook's to release; with none held
   // it leaves, a level at a time (the terrain editor's rule): the list goes back
@@ -142,6 +178,7 @@ export function DeskEditorSection({
   }
 
   if (!active) {
+    if (concealed) return null;
     if (!embedded) {
       return (
         <div className={styles.section}>
@@ -161,6 +198,7 @@ export function DeskEditorSection({
         <button type="button" className={styles.button} onClick={handleCreate}>
           Crear escritorio
         </button>
+        <MultipleToggle checked={multiple} onChange={setMultiple} />
         {createError !== null && (
           <div className={styles.error} role="alert">
             {createError}
@@ -197,45 +235,22 @@ export function DeskEditorSection({
 
       {selected === null && !placing && !creating && (
         <>
-          <ul className={styles.list}>
-            {editor.desks.map((desk) => {
-              const name = deskName(desk);
-              // One line per desk: no selection step, each button acts on its own row.
-              return (
-                <li key={desk.id} className={styles.row}>
-                  <span className={styles.name} title={name}>{name}</span>
-                  <div className={styles.rowActions}>
-                    {/* The visible text stays short; the label keeps each accessible name unique. */}
-                    <button
-                      type="button"
-                      className={styles.button}
-                      aria-label={`Mover ${name}`}
-                      disabled={busy}
-                      onClick={() => editor.startMove(desk.id)}
-                    >
-                      Mover
-                    </button>
-                    <button
-                      type="button"
-                      className={`${styles.button} ${styles.danger}`}
-                      aria-label={`Eliminar ${name}`}
-                      title="Eliminar"
-                      disabled={busy}
-                      onClick={() => void editor.remove(desk.id)}
-                    >
-                      <TrashIcon />
-                    </button>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+          {/* One line per desk: no selection step, each button acts on its own row. */}
+          <LayoutItemList
+            items={editor.desks.map((desk) => ({ id: desk.id, name: deskName(desk) }))}
+            busy={busy}
+            onMove={(id) => editor.startMove(id)}
+            onRemove={(id) => void editor.remove(id)}
+          />
 
           {/* Nothing to ask: a desk is created empty, and its occupant decorates it from "Mi espacio". */}
           {!embedded && (
-            <button type="button" className={styles.button} disabled={busy} onClick={editor.startCreate}>
-              Crear escritorio
-            </button>
+            <>
+              <button type="button" className={styles.button} disabled={busy} onClick={editor.startCreate}>
+                Crear escritorio
+              </button>
+              <MultipleToggle checked={multiple} onChange={setMultiple} />
+            </>
           )}
         </>
       )}
@@ -270,10 +285,12 @@ export function DeskEditorSection({
           </button>
         </div>
       )}
+      {/* Reachable during a run, to end it after the next desk; the list view offers its own. */}
+      {(creating || (state.tag === 'placing' && state.mode === 'create')) && <MultipleToggle checked={multiple} onChange={setMultiple} />}
 
-      {editor.error !== null && (
+      {(editor.error ?? runError) !== null && (
         <div className={styles.error} role="alert">
-          {editor.error}
+          {editor.error ?? runError}
         </div>
       )}
     </div>

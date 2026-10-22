@@ -13,6 +13,9 @@ export interface ColorPickerProps {
   /** `#rrggbb`. */
   value: string;
   onChange: (hex: string) => void;
+  /** A small swatch (a decor palette tile's) instead of the creator's large one. */
+  compact?: boolean;
+  disabled?: boolean;
 }
 
 /**
@@ -21,7 +24,7 @@ export interface ColorPickerProps {
  * for any other RGB, the way desks take a color (`ArtMaterialPicker`). A
  * preset closes it; the free picker keeps it open while it is dragged.
  */
-export function ColorPicker({ label, caption, presets, value, onChange }: ColorPickerProps) {
+export function ColorPicker({ label, caption, presets, value, onChange, compact = false, disabled = false }: ColorPickerProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const popoverId = useId();
@@ -45,7 +48,8 @@ export function ColorPicker({ label, caption, presets, value, onChange }: ColorP
       <button
         ref={triggerRef}
         type="button"
-        className={styles.trigger}
+        className={compact ? `${styles.trigger} ${styles.compact}` : styles.trigger}
+        disabled={disabled}
         aria-label={`${label}: ${name}`}
         title={`${label}: ${name}`}
         aria-haspopup="dialog"
@@ -55,9 +59,11 @@ export function ColorPicker({ label, caption, presets, value, onChange }: ColorP
       >
         <span data-swatch className={styles.swatchLarge} style={{ backgroundColor: value }} aria-hidden="true" />
       </button>
-      <span className={styles.caption} aria-hidden="true">
-        {caption}
-      </span>
+      {caption !== '' && (
+        <span className={styles.caption} aria-hidden="true">
+          {caption}
+        </span>
+      )}
       {popover.open && (
         <div
           ref={popoverRef}
