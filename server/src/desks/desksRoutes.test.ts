@@ -14,6 +14,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { decorInfoFromPieceId, type DecorItem } from '../../../src/game/officeDecor.ts';
 import { readArtPackManifest } from '../decor/artPackFile.ts';
 import { createMemoryDecor } from '../decor/memoryDecor.ts';
 import type { DirectoryUser } from '../directory/directoryPort.ts';
@@ -646,6 +647,56 @@ describe('desks over painted walls', () => {
     const { deps } = harness();
 
     expect((await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa', x: 10, y: 5 }, deps)).status).toBe(201);
+  });
+});
+
+/**
+ * One desk table per desk (`deskDecorRules.ts`): a desk created or moved so
+ * that its 3x3 touches two desk tables would hold two. The decor comes with
+ * the walls, from the same guard, so no decor edit lands in between.
+ */
+describe('desks between two desk tables', () => {
+  const WIDTH = 40;
+  const table = (tx: number, ty: number) => ({ index: ty * WIDTH + tx, piece: 'desk-wood', rotation: 0 as const });
+
+  function decorGuard(...decor: DecorItem[]) {
+    const walls: (string | null)[] = new Array(WIDTH * 30).fill(null);
+    const guard: DeskWallGuard = { run: vi.fn(async (write) => write({ width: WIDTH, walls, decor, decorInfo: decorInfoFromPieceId })) };
+    return guard;
+  }
+
+  it('refuses to create a desk touching two desk tables, and creates nothing', async () => {
+    const { deps, desks } = harness();
+    // One along the desk's top row (x 10..12, y 5), the other along its bottom row.
+    const walls = decorGuard(table(11, 5), table(11, 7));
+
+    expect(await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa', x: 10, y: 5 }, { ...deps, walls })).toEqual({ status: 409, body: { error: 'desk-between-tables' } });
+    expect(await desks.listDesks()).toEqual([]);
+  });
+
+  it('creates a desk on one desk table, or beside a second one that does not touch it', async () => {
+    const { deps } = harness();
+
+    expect((await handleCreateDesk(BEARER_ADMIN, { label: 'Mesa', x: 10, y: 5 }, { ...deps, walls: decorGuard(table(11, 5), table(11, 9)) })).status).toBe(201);
+  });
+
+  it('refuses to move a desk between two desk tables and leaves it where it was', async () => {
+    const { deps, desks } = harness();
+    const desk = await desks.createDesk({ label: 'Mesa', x: 0, y: 0 });
+
+    const result = await handleUpdateDesk(BEARER_ADMIN, desk.id, { x: 20, y: 20 }, { ...deps, walls: decorGuard(table(19, 21), table(23, 21)) });
+
+    expect(result).toEqual({ status: 409, body: { error: 'desk-between-tables' } });
+    expect(await desks.getDesk(desk.id)).toMatchObject({ x: 0, y: 0 });
+  });
+
+  it('renames without looking at the decor', async () => {
+    const { deps, desks } = harness();
+    const desk = await desks.createDesk({ label: 'Mesa', x: 20, y: 20 });
+    const walls = decorGuard(table(19, 21), table(23, 21));
+
+    expect((await handleUpdateDesk(BEARER_ADMIN, desk.id, { label: 'Otra' }, { ...deps, walls })).status).toBe(200);
+    expect(walls.run).not.toHaveBeenCalled();
   });
 });
 

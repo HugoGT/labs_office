@@ -11,6 +11,10 @@
  *     The desk is read from the store, never from the body, so nobody
  *     decorates someone else's desk by naming it.
  *
+ * Both apply the desk rules (`deskDecorRules.ts`): a desk table placed on a
+ * desk replaces the other desk tables on it, and a fourth chair on a desk is
+ * refused with 409 `desk-chair-limit`.
+ *
  * There is no read route: every client gets the layer with the room state
  * (`OfficeState.officeDecor`), on join and on every change.
  */
@@ -20,7 +24,7 @@ import { DESK_SIDE } from '../desks/deskRules.ts';
 import type { DeskDirectory } from '../desks/desksPort.ts';
 import type { DecorTileRect } from '../../../src/game/officeDecor.ts';
 import { InvalidTerrainEditError, TerrainProtectedError, parseDecorBatch } from './terrainRules.ts';
-import { DecorOutsideAreaError, type TerrainRuntime } from './terrainRuntime.ts';
+import { DecorOutsideAreaError, DeskChairLimitError, type TerrainRuntime } from './terrainRuntime.ts';
 
 export interface OfficeDecorDeps extends AdminDeps {
   terrain: TerrainRuntime;
@@ -31,16 +35,24 @@ export interface OfficeDecorDeps extends AdminDeps {
 const UNDER_PLACEMENT: AdminResult = { status: 409, body: { error: 'terrain-under-placement' } };
 const NO_DESK: AdminResult = { status: 403, body: { error: 'no-desk' } };
 const OUTSIDE_DESK: AdminResult = { status: 403, body: { error: 'outside-desk' } };
+/** A desk takes at most `MAX_DESK_CHAIRS` chairs (`deskDecorRules.ts`). */
+const CHAIR_LIMIT: AdminResult = { status: 409, body: { error: 'desk-chair-limit' } };
+
+/** Every desk area in tiles, read inside the edit queue: the desk rules judge the layer after the batch. */
+function deskAreas(deps: OfficeDecorDeps): () => Promise<readonly DecorTileRect[]> {
+  return async () => ((await deps.desks?.listDesks()) ?? []).map(({ x, y }) => ({ x, y, w: DESK_SIDE, h: DESK_SIDE }));
+}
 
 async function apply(body: unknown, actorId: string, deps: OfficeDecorDeps, area?: DecorTileRect): Promise<AdminResult> {
   try {
     // Every tile of the map, the same count as the wall grid.
     const edits = parseDecorBatch(body, deps.terrain.walls().length);
-    await deps.terrain.setDecor(edits, actorId, area);
+    await deps.terrain.setDecor(edits, actorId, area, deskAreas(deps));
     return { status: 200, body: { updated: edits.length } };
   } catch (error) {
     if (error instanceof InvalidTerrainEditError) return INVALID_REQUEST;
     if (error instanceof DecorOutsideAreaError) return OUTSIDE_DESK;
+    if (error instanceof DeskChairLimitError) return CHAIR_LIMIT;
     if (error instanceof TerrainProtectedError) return UNDER_PLACEMENT;
     throw error;
   }

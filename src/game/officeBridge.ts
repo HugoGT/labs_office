@@ -141,6 +141,12 @@ export interface OfficeEventMap {
   deskclick: { deskId: string; label: string; action: 'claim' | 'release' };
   /** A committed occupancy/decor mutation; refetch the authenticated desk list. */
   deskschanged: undefined;
+  /**
+   * The local player tried to walk into a desk that already holds
+   * `MAX_DESK_OCCUPANCY` other people (`deskDecorRules.ts`): once per
+   * attempt, so pushing against it says it once.
+   */
+  deskfull: undefined;
   /** An admin edited the spaces (#183); refetch `/spaces` (and the desks with them). */
   spaceschanged: undefined;
   /**
@@ -337,7 +343,7 @@ export interface OfficeCommandMap {
    */
   terrainedit: TerrainEditCommand | null;
   /**
-   * A decor editor (#208, "Decoración" or "Mi espacio"): the brush, where it
+   * A decor editor (#208, "Decoración", either scope): the brush, where it
    * may act and the local preview, or `null` when it closes. The ghost is
    * drawn by `DecorEditLayer`; the preview is painted by the scene, which
    * owns the decor layer.

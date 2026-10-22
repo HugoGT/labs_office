@@ -255,25 +255,26 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     expect(screen.getByRole('button', { name: /Personalizar/ })).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it('without admin access, offers Mi espacio as a submenu without layout entries', async () => {
+  it('without admin access, offers Decoración as a submenu without layout entries, and no "Mi espacio"', async () => {
     const user = userEvent.setup();
-    renderSidebar({ role: 'employee' });
+    renderSidebar({ role: 'employee', bridge: createOfficeBridge() });
 
     await user.click(screen.getByRole('button', { name: /Personalizar/ }));
 
-    expect(screen.getByRole('button', { name: 'Mi espacio' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Mi espacio' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Decoración' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Decoración' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mi espacio' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Editar espacios/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: /Catálogo/ })).not.toBeInTheDocument();
   });
 
   it('with an unresolved role, still offers the personal submenu', async () => {
     const user = userEvent.setup();
-    renderSidebar({ role: null });
+    renderSidebar({ role: null, bridge: createOfficeBridge() });
 
     await user.click(screen.getByRole('button', { name: /Personalizar/ }));
 
-    expect(screen.getByRole('button', { name: 'Mi espacio' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Decoración' })).toBeInTheDocument();
   });
 
   it('con rol admin, ofrece "Editar espacios" en lugar de escritorios y salas por separado', async () => {
@@ -376,18 +377,19 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     expect(screen.queryByRole('region', { name: /Catálogo/ })).not.toBeInTheDocument();
   });
 
-  it('con rol admin, tambien ofrece "Mi espacio" junto al resto', async () => {
+  it('con rol admin ya no ofrece "Mi espacio": Decoración es el unico menu de decoracion', async () => {
     const user = userEvent.setup();
     renderSidebar(adminProps());
 
     await user.click(screen.getByRole('button', { name: /Personalizar/ }));
 
-    expect(screen.getByRole('button', { name: 'Mi espacio' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Decoración' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mi espacio' })).not.toBeInTheDocument();
   });
 
   it('activarlo y volver a activarlo lo colapsa', async () => {
     const user = userEvent.setup();
-    renderSidebar({ role: 'employee' });
+    renderSidebar({ role: 'employee', bridge: createOfficeBridge() });
     const toggle = screen.getByRole('button', { name: /Personalizar/ });
 
     await user.click(toggle);
@@ -395,7 +397,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
 
     await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByRole('heading', { name: 'Mi espacio' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Decoración' })).not.toBeInTheDocument();
   });
 
   it('forceCollapsed en true tambien lo colapsa aunque estuviese expandido', async () => {
@@ -426,29 +428,36 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     await userEvent.click(personalize);
     expect(people).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Mi espacio' }));
-    expect(screen.getByRole('heading', { name: 'Mi espacio' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Decoración' }));
+    expect(screen.getByRole('heading', { name: 'Decoración' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Editar espacios' })).not.toBeInTheDocument();
     await userEvent.click(people);
     expect(personalize).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByRole('heading', { name: 'Mi espacio' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Decoración' })).not.toBeInTheDocument();
     await userEvent.click(personalize);
-    expect(screen.getByRole('button', { name: 'Mi espacio' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Decoración' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Salir' })).not.toBeInTheDocument();
   });
 
-  it('offers "Decoración" first to admins with the decor port, and to nobody else (#208)', async () => {
+  it('offers "Decoración" first to everyone: the whole map to admins, the own desk to the rest (#208)', async () => {
     const decor = { setDecor: vi.fn(async () => undefined) };
+    const firstEntry = () => {
+      const panel = screen.getByRole('region', { name: 'Personalizar' });
+      return within(panel).getAllByRole('button').filter((button) => button.getAttribute('aria-label') !== 'Cerrar')[0];
+    };
     const { unmount } = render(<OfficeSidebar self={SELF} peers={[ANA]} {...adminProps()} decor={decor} terrain={{ setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn() }} />);
     await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
-    const panel = screen.getByRole('region', { name: 'Personalizar' });
-    const entries = within(panel).getAllByRole('button').filter((button) => button.getAttribute('aria-label') !== 'Cerrar');
-    expect(entries[0]).toHaveTextContent('Decoración');
+    expect(firstEntry()).toHaveTextContent('Decoración');
+    await userEvent.click(firstEntry()!);
+    expect(await screen.findByRole('checkbox', { name: /Múltiple/ })).toBeInTheDocument();
     unmount();
 
     renderSidebar({ ...adminProps(), role: 'employee', decor });
     await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
-    expect(screen.queryByRole('button', { name: 'Decoración' })).not.toBeInTheDocument();
+    expect(firstEntry()).toHaveTextContent('Decoración');
+    await userEvent.click(firstEntry()!);
+    expect(screen.getByText('Reclama un escritorio libre en el mapa para decorarlo.')).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /Múltiple/ })).not.toBeInTheDocument();
   });
 
   it.each([
@@ -469,7 +478,6 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     await waitFor(() => expect(onEditingChange).toHaveBeenLastCalledWith(true));
     await waitFor(() => expect(commands.at(-1)).toBeDefined());
     expect(commands.at(-1)).not.toBeNull();
-    expect(screen.queryByRole('button', { name: 'Mi espacio' })).not.toBeInTheDocument();
     // Only its own submenu: no other menu entry (inside "Editar espacios" the rooms offer their own entry).
     for (const entry of ['Decoración', 'Editar espacios', 'Editar terreno', 'Editar colisiones'].filter((other) => other !== label)) {
       expect(screen.queryByRole('button', { name: entry })).not.toBeInTheDocument();
@@ -497,7 +505,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     expect(commands.at(-1)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Salir' })).not.toBeInTheDocument();
     if (reason === 'capability') {
-      expect(screen.getByRole('button', { name: 'Mi espacio' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Decoración' })).toBeInTheDocument();
       rerender(<OfficeSidebar {...props} />);
       expect(screen.queryByText('Mesa 4')).not.toBeInTheDocument();
     }
@@ -507,17 +515,21 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     }
   });
 
-  it('"Mi espacio" with a claimed desk decorates it on the map and ends with «Dejar escritorio» (#208)', async () => {
+  it('"Decoración" without admin access decorates the claimed desk on the map and ends with «Dejar escritorio» (#208)', async () => {
     const props = adminProps();
     const commands: unknown[] = [];
     props.bridge.onCommand('decoredit', (value) => commands.push(value));
     const onLeaveDesk = vi.fn();
+    const onLayoutEditingChange = vi.fn();
     const area = { x: 10, y: 12, w: 3, h: 3 };
-    renderSidebar({ ...props, role: 'employee', mySpace: { hasDesk: true, area, decor: { setDecor: vi.fn() }, onLeaveDesk } });
+    const deskAreas = [area, { x: 20, y: 12, w: 3, h: 3 }];
+    renderSidebar({ ...props, role: 'employee', mySpace: { area, decor: { setDecor: vi.fn() }, onLeaveDesk }, deskAreas, onLayoutEditingChange });
     await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
-    await userEvent.click(screen.getByRole('button', { name: 'Mi espacio' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Decoración' }));
 
-    expect(commands.at(-1)).toEqual({ brush: null, area });
+    expect(commands.at(-1)).toEqual({ brush: null, area, desks: deskAreas });
+    // Desk clicks stay claims and releases: this editor does not hold the desks.
+    expect(onLayoutEditingChange).not.toHaveBeenCalledWith(true);
     await userEvent.click(screen.getByRole('button', { name: 'Dejar escritorio' }));
     expect(onLeaveDesk).toHaveBeenCalledTimes(1);
     // Back to the menu: the desk editor lets go of the map.
@@ -539,7 +551,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     await userEvent.click(screen.getByRole('button', { name: 'Catálogo de decoración' }));
     await screen.findByRole('region', { name: 'Catálogo de decoración' });
     rerender(<OfficeSidebar {...props} assets={null} />);
-    expect(screen.getByRole('button', { name: 'Mi espacio' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Decoración' })).toBeInTheDocument();
     rerender(<OfficeSidebar {...props} />);
     expect(screen.getByRole('button', { name: 'Catálogo de decoración' })).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Catálogo de decoración' })).not.toBeInTheDocument();
@@ -556,8 +568,8 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     rerender(<OfficeSidebar {...props} forceExitLayoutEditing />);
     expect(props.onLayoutEditingChange).toHaveBeenLastCalledWith(false);
     expect(commands.at(-1)).toBeNull();
-    expect(screen.getByRole('button', { name: 'Mi espacio' })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Mi espacio' }));
+    expect(screen.getByRole('button', { name: 'Decoración' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Decoración' }));
     expect(screen.getByRole('button', { name: 'Salir' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Salir' }));
     await userEvent.click(screen.getByRole('button', { name: 'Editar espacios' }));
@@ -580,7 +592,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     expect(debug).toHaveBeenLastCalledWith({ show: false });
     expect(edit).toHaveBeenLastCalledWith(null);
     expect(props.onLayoutEditingChange).toHaveBeenLastCalledWith(false);
-    expect(screen.getByRole('button', { name: 'Mi espacio' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Decoración' })).toBeInTheDocument();
     rerender(<OfficeSidebar {...props} />);
     expect(screen.getByRole('button', { name: 'Editar colisiones' })).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: 'Mostrar colisiones' })).not.toBeInTheDocument();
@@ -767,18 +779,20 @@ describe('OfficeSidebar: Escape closes the open panel', () => {
     expect(screen.queryByRole('region', { name: 'Personalizar' })).not.toBeInTheDocument();
   });
 
-  it('closes "Personalizar" from a section too, and opens again on its menu', async () => {
+  it('steps out of "Decoración" without a desk like the admin one: the menu first, then the panel', async () => {
     const user = userEvent.setup();
-    renderSidebar({ role: 'employee' });
+    renderSidebar({ role: 'employee', bridge: createOfficeBridge() });
     const toggle = screen.getByRole('button', { name: /Personalizar/ });
     await user.click(toggle);
-    await user.click(screen.getByRole('button', { name: 'Mi espacio' }));
+    await user.click(screen.getByRole('button', { name: 'Decoración' }));
+
+    await user.keyboard('{Escape}');
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Decoración' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Decoración' })).not.toBeInTheDocument();
 
     await user.keyboard('{Escape}');
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-
-    await user.click(toggle);
-    expect(screen.getByRole('button', { name: 'Mi espacio' })).toBeInTheDocument();
   });
 
   it('leaves a map editor open: there Escape belongs to the editor (a picked brush, a draft)', async () => {

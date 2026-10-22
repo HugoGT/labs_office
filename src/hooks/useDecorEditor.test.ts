@@ -1,7 +1,7 @@
 /**
  * The decor editor's lifecycle (#208): what it asks the map to show through
  * `decoredit`, how a picked piece turns map clicks into decor edits, turned
- * and painted, how "Mi espacio" keeps them inside the desk, and what it says.
+ * and painted, how the desk scope keeps them inside the desk, and what it says.
  */
 
 import { act, renderHook } from '@testing-library/react';
@@ -10,7 +10,7 @@ import { AdminError } from '../dashboard/adminPort';
 import { createOfficeBridge, type OfficeCommandMap } from '../game/officeBridge';
 import { MAX_DECOR_EDITS, type DecorEdit, type DecorItem, type DecorPieceInfo, type DecorTileRect } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
-import { DECOR_AREA_MESSAGE, DECOR_UNDER_PLACEMENT_MESSAGE, useDecorEditor, type DecorPick } from './useDecorEditor';
+import { DECOR_AREA_MESSAGE, DECOR_CHAIR_LIMIT_MESSAGE, DECOR_UNDER_PLACEMENT_MESSAGE, useDecorEditor, type DecorPick } from './useDecorEditor';
 
 const WIDTH = 189;
 const at = (tx: number, ty: number): number => ty * WIDTH + tx;
@@ -33,11 +33,16 @@ function deferredPort() {
   return { decor, calls };
 }
 
-function setup({ decor = deferredPort().decor, area = null, onExit }: { decor?: OfficeDecorPort; area?: DecorTileRect | null; onExit?: () => void } = {}) {
+function setup({ decor = deferredPort().decor, area = null, onExit, desks }: {
+  decor?: OfficeDecorPort;
+  area?: DecorTileRect | null;
+  onExit?: () => void;
+  desks?: readonly DecorTileRect[];
+} = {}) {
   const bridge = createOfficeBridge();
   const commands: OfficeCommandMap['decoredit'][] = [];
   bridge.onCommand('decoredit', (command) => commands.push(command));
-  const view = renderHook((props: { area: DecorTileRect | null }) => useDecorEditor({ bridge, decor, area: props.area, infoOf, onExit }), {
+  const view = renderHook((props: { area: DecorTileRect | null }) => useDecorEditor({ bridge, decor, area: props.area, infoOf, onExit, desks }), {
     initialProps: { area },
   });
   return { bridge, decor, commands, ...view };
@@ -320,6 +325,80 @@ describe('useDecorEditor', () => {
     expect(commands.at(-1)).toEqual({ brush: null, area: { x: 5, y: 1, w: 3, h: 3 } });
   });
 
+  describe('desk rules', () => {
+    const DESK_AREA = { x: 10, y: 10, w: 3, h: 3 };
+    const TABLE_ON_TOP: DecorItem = { index: at(11, 10), piece: 'desk-wood', rotation: 0 };
+
+    it('tells the map where the desks are', () => {
+      const { result, commands } = setup({ desks: [DESK_AREA] });
+      act(() => result.current.enter());
+      expect(commands.at(-1)).toEqual({ brush: null, area: null, desks: [DESK_AREA] });
+    });
+
+    it('a desk table placed on a desk takes the other desk table off it in the same request, and draws both', async () => {
+      const { decor, calls } = deferredPort();
+      const { bridge, result, commands } = setup({ decor, desks: [DESK_AREA] });
+      act(() => bridge.emit('decor', { items: [TABLE_ON_TOP] }));
+      act(() => result.current.enter());
+
+      act(() => result.current.pick(DESK));
+      act(() => bridge.emit('decorpick', { index: at(11, 12) }));
+
+      const edits = [{ index: at(11, 12), item: { piece: 'desk-wood', rotation: 0 } }, { index: at(11, 10), item: null }];
+      expect(calls.map((call) => call.edits)).toEqual([edits]);
+      expect(commands.at(-1)?.preview).toEqual(edits);
+      await act(async () => calls[0]!.resolve());
+    });
+
+    it('a desk table moved onto a desk takes the other one off it too, whatever the scope', async () => {
+      const { decor, calls } = deferredPort();
+      const { bridge, result } = setup({ decor, desks: [DESK_AREA], area: DESK_AREA });
+      // Only its right end lies on the desk: not the occupant's to edit, but displaced all the same.
+      const partly: DecorItem = { index: at(9, 11), piece: 'desk-wood', rotation: 0 };
+      act(() => bridge.emit('decor', { items: [partly, TABLE_ON_TOP] }));
+      act(() => result.current.enter());
+
+      act(() => bridge.emit('decormove', { index: at(11, 10) }));
+      act(() => bridge.emit('decorpick', { index: at(11, 12) }));
+
+      expect(calls.map((call) => call.edits)).toEqual([[
+        { index: at(11, 10), item: null },
+        { index: at(11, 12), item: { piece: 'desk-wood', rotation: 0 } },
+        { index: at(9, 11), item: null },
+      ]]);
+      await act(async () => calls[0]!.resolve());
+    });
+
+    it('refuses a fourth chair on a desk without asking, pending chairs included', () => {
+      const { decor } = deferredPort();
+      const { bridge, result } = setup({ decor, desks: [DESK_AREA] });
+      act(() => bridge.emit('decor', { items: [at(10, 10), at(11, 10)].map((index) => ({ index, piece: 'chair-gamer', rotation: 0 as const })) }));
+      act(() => result.current.enter());
+      act(() => result.current.setMultiple(true));
+      act(() => result.current.pick(CHAIR));
+
+      act(() => bridge.emit('decorpick', { index: at(12, 10) }));
+      act(() => bridge.emit('decorpick', { index: at(12, 12) }));
+
+      expect(result.current.error).toBe(DECOR_CHAIR_LIMIT_MESSAGE);
+      expect(decor.setDecor).toHaveBeenCalledTimes(1);
+      // Off every desk, a chair is never counted.
+      act(() => bridge.emit('decorpick', { index: at(20, 20) }));
+      expect(result.current.error).toBeNull();
+    });
+
+    it('says the chair limit when the server refuses with it', async () => {
+      const { decor, calls } = deferredPort();
+      const { bridge, result } = setup({ decor });
+      act(() => result.current.enter());
+      act(() => result.current.pick(CHAIR));
+      act(() => bridge.emit('decorpick', { index: at(5, 5) }));
+
+      await act(async () => calls[0]!.reject(new AdminError('desk-chair-limit')));
+      expect(result.current.error).toBe(DECOR_CHAIR_LIMIT_MESSAGE);
+    });
+  });
+
   it('shows why the server refused, drops only that edit and goes on, «Múltiple» included; a lost permission or desk stops for good', async () => {
     const { decor, calls } = deferredPort();
     const { bridge, result, commands } = setup({ decor });
@@ -380,7 +459,7 @@ describe('useDecorEditor', () => {
     expect(onExit).not.toHaveBeenCalled();
   });
 
-  it('without a way to leave ("Mi espacio") an Escape with nothing picked is left for the sidebar', () => {
+  it('without a way to leave an Escape with nothing picked is left for the sidebar', () => {
     const { result } = setup({ area: { x: 1, y: 1, w: 3, h: 3 } });
     act(() => result.current.enter());
     expect(escape().defaultPrevented).toBe(false);
@@ -567,7 +646,7 @@ describe('useDecorEditor', () => {
       expect(result.current.selected).toBeNull();
     });
 
-    it('in a desk ("Mi espacio") selects only items wholly inside it, and moves them only within it', () => {
+    it('in a desk (desk scope) selects only items wholly inside it, and moves them only within it', () => {
       const area = { x: 19, y: 19, w: 3, h: 3 };
       const { bridge, result, calls } = selecting({ area });
       act(() => bridge.emit('decorselect', { index: DESK_AT }));

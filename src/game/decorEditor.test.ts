@@ -130,6 +130,16 @@ describe('decorPlacementAllowed', () => {
     expect(decorPlacementAllowed(none, infoOf, ground(), desk, at(6, 3), chairBrush())).toBe(false);
   });
 
+  it('refuses a chair that would be the fourth on a desk, never one off every desk', () => {
+    const desk = { x: 3, y: 3, w: 3, h: 3 };
+    const chairs: DecorItem[] = [at(3, 3), at(4, 3), at(5, 3)].map((index) => ({ index, piece: 'chair-wood', rotation: 0 }));
+    expect(decorPlacementAllowed(chairs, infoOf, ground(), null, at(3, 5), chairBrush(), [desk])).toBe(false);
+    expect(decorPlacementAllowed(chairs, infoOf, ground(), null, at(7, 5), chairBrush(), [desk])).toBe(true);
+    // Turning one of the three adds none.
+    expect(decorPlacementAllowed(chairs, infoOf, ground(), null, at(3, 3), chairBrush(90), [desk])).toBe(true);
+    expect(decorPlacementAllowed(chairs, infoOf, ground(), null, at(3, 5), chairBrush())).toBe(true);
+  });
+
   it('judges a vertical room table on its swapped footprint', () => {
     const oval: DecorBrush = { kind: 'piece', piece: 'table-oval', info: { kind: 'table', footprint: { w: 2, h: 1 } }, rotation: 90 };
     // 1x2 standing on (4, 3) and (4, 4).

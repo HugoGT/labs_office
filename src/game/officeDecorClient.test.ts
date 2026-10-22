@@ -57,6 +57,12 @@ describe('createOfficeDecorClient', () => {
     expect(await codeOf(clientWith('office', fetchWith(200), async () => null).setDecor(EDITS))).toBe('unauthorized');
   });
 
+  it('tells the chair limit of a desk apart from a placement refusal, on both surfaces', async () => {
+    for (const scope of ['office', 'desk'] as const) {
+      expect(await codeOf(clientWith(scope, fetchWith(409, { error: 'desk-chair-limit' })).setDecor(EDITS))).toBe('desk-chair-limit');
+    }
+  });
+
   it('reads why /me/decor refused: no desk any more, or an edit outside it', async () => {
     expect(await codeOf(clientWith('desk', fetchWith(403, { error: 'no-desk' })).setDecor(EDITS))).toBe('no-desk');
     expect(await codeOf(clientWith('desk', fetchWith(403, { error: 'outside-desk' })).setDecor(EDITS))).toBe('outside-desk');

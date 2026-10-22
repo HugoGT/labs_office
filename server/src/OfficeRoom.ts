@@ -64,15 +64,17 @@ import {
 } from '../../src/game/pieceCollisions.ts';
 import {
   BASE_MAP_SEATS,
+  chairGround,
   chairSeatTiles,
   inSeatReach,
   mapSeatTiles,
   parseSeatRef,
   type SeatTiles,
 } from '../../src/game/seating.ts';
-import { decorChairs, encodeOfficeDecor, type DecorItem } from '../../src/game/officeDecor.ts';
+import { decorChairs, encodeOfficeDecor, type DecorItem, type DecorTileRect } from '../../src/game/officeDecor.ts';
+import { deskEntryRefused } from '../../src/game/deskDecorRules.ts';
 import { createCallInvitationRegistry, type CallInvitationRegistry } from './callInvitations.ts';
-import { physicalBodyRect } from '../../src/game/avatarGeometry.ts';
+import { physicalBodyRect, positionForFeet } from '../../src/game/avatarGeometry.ts';
 import { ART_PACK_DEFAULTS } from './decor/artCatalogRules.ts';
 import { decideAccess, type AccessDecision } from './directory/accessDecision.ts';
 import type { LastPosition, UserDirectory } from './directory/directoryPort.ts';
@@ -245,6 +247,13 @@ export interface OfficeRoomOptions {
    */
   decor?: () => readonly DecorItem[];
   /**
+   * Every desk area in tiles, read on each `move` and `sit`: at most
+   * `MAX_DESK_OCCUPANCY` people inside one (`deskDecorRules.ts`), so the
+   * move or the seat that would take one more in is dropped. Kept fresh by
+   * the caller on every committed desk change. Absent, there are no desks.
+   */
+  desks?: () => readonly DecorTileRect[];
+  /**
    * The collision rectangles every `move` is checked against, read on each
    * move. Absent is the static office with every piece at its default (the
    * footprint of each Tiled prop), exactly the tiles props blocked before.
@@ -392,6 +401,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private terrain: () => TerrainSnapshot = () => BASE_TERRAIN;
   private mapSeats = BASE_MAP_SEATS;
   private decor: () => readonly DecorItem[] = () => [];
+  private desks: () => readonly DecorTileRect[] = () => [];
   private collisions: () => readonly CollisionRect[] = () => BASE_COLLISION_RECTS;
   // Bridges a definitive leave and a refresh while its write is in flight.
   // Serializing per uid prevents an older slow write from undoing a newer leave.
@@ -402,6 +412,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     this.state = new OfficeState();
     if (options?.terrain) this.terrain = options.terrain;
     if (options?.decor) this.decor = options.decor;
+    if (options?.desks) this.desks = options.desks;
     this.state.terrainBlocks = encodeTerrainBlocks(this.terrain().blocks);
     this.state.terrainWalls = encodeTerrainWalls(this.terrain().walls);
     this.state.officeDecor = encodeOfficeDecor(this.decor());
@@ -491,6 +502,8 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       // within its seat's reach: feet on the chair put the body over the
       // table, out of the collider.
       if (!withinSeat && (!isPositionWalkable(this.terrain(), x, y) || isPositionBlocked(this.collisions(), x, y))) return;
+      // A full desk takes nobody else in; whoever is inside moves freely.
+      if (this.entersFullDesk(client.sessionId, player, { x, y })) return;
 
       player.x = x;
       player.y = y;
@@ -940,8 +953,13 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     if (!player || player.positionRevision !== revision || player.seat === seatId) return;
     const userId = client.auth === true ? null : (client.auth?.directoryUserId ?? null);
 
+    // The sitter stands with its feet on the chair's ground: a seat in a full
+    // desk would take one more person in, so it is refused like the move.
+    const seatedAt = (ground: { x: number; y: number }): boolean => this.entersFullDesk(client.sessionId, player, positionForFeet(ground));
+
     if (ref.kind === 'map') {
       const seat = this.mapSeats[ref.index];
+      if (seatedAt({ x: (seat.tx + 0.5) * TILE, y: (seat.ty + 0.5) * TILE })) return;
       this.takeSeat(client.sessionId, seatId, { reach: mapSeatTiles(seat), userId }, seat.facing);
       return;
     }
@@ -949,7 +967,22 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     // A decor chair seats anyone, like a base map chair, if it stands there now.
     const chair = decorChairs(this.decor()).find((candidate) => candidate.index === ref.index);
     if (chair === undefined) return;
+    if (seatedAt(chairGround(this.terrain().width, chair.index))) return;
     this.takeSeat(client.sessionId, seatId, { reach: chairSeatTiles(this.terrain().width, chair.index), userId }, chair.facing);
+  }
+
+  /**
+   * Whether moving `player` from where it stands to `to` walks into a desk
+   * area that already holds `MAX_DESK_OCCUPANCY` other players. Every
+   * replicated player counts, reserved reconnects and sitters included: the
+   * same peers every client sees, so the client refuses exactly the same.
+   */
+  private entersFullDesk(sessionId: string, player: { x: number; y: number }, to: { x: number; y: number }): boolean {
+    const desks = this.desks();
+    if (desks.length === 0) return false;
+    const others: { x: number; y: number }[] = [];
+    for (const [otherId, other] of this.state.players) if (otherId !== sessionId) others.push({ x: other.x, y: other.y });
+    return deskEntryRefused(player, to, desks, others, TILE) !== null;
   }
 
   private takeSeat(

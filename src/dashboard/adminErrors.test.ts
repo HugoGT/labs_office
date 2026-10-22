@@ -12,6 +12,8 @@ const CODES: AdminErrorCode[] = [
   'desk-overlap',
   'desk-space-overlap',
   'desk-on-wall',
+  'desk-between-tables',
+  'desk-chair-limit',
   'space-overlap',
   'space-name-taken',
   'space-owned-by-desk',
@@ -127,6 +129,13 @@ describe('describeAdminError', () => {
     expect(message).toMatch(/pared/i);
     expect(message).not.toBe(describeAdminError(new AdminError('desk-overlap')));
     expect(message).not.toBe(describeAdminError(new AdminError('desk-space-overlap')));
+  });
+
+  it('the desk rules name what to change: the desk position, or the chairs', () => {
+    expect(describeAdminError(new AdminError('desk-between-tables'))).toBe(
+      'No se puede poner un escritorio entre dos mesas de escritorio: elige otra posición.',
+    );
+    expect(describeAdminError(new AdminError('desk-chair-limit'))).toBe('Un escritorio admite como máximo 3 sillas.');
   });
 
   it('cada "no configurado" nombra la pieza que falta en el despliegue', () => {

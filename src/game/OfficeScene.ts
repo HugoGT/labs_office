@@ -34,7 +34,8 @@ import {
 } from './depthLayers';
 import { deskZoneName } from './deskLayout';
 import { tableFacing, tableFloorRect } from './deskTable';
-import { decorChairs, decorFootprint, encodeOfficeDecor, withDecor, type DecorEdit, type DecorItem } from './officeDecor';
+import { decorChairs, decorFootprint, encodeOfficeDecor, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
+import { deskEntryRefused } from './deskDecorRules';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
 import { MinimapLayer } from './MinimapLayer';
@@ -441,6 +442,14 @@ export class OfficeScene extends Phaser.Scene {
    * encima dejaria pintado como ocupado un sitio que alguien acaba de soltar.
    */
   private deskObjects: Phaser.GameObjects.GameObject[] = [];
+  /**
+   * Every desk area in tiles, from the last `desks` command: a desk holding
+   * `MAX_DESK_OCCUPANCY` other people takes the local player in no more
+   * (`deskDecorRules.ts`), the same rule the room drops the move with.
+   */
+  private deskAreas: DecorTileRect[] = [];
+  /** A walk into a full desk was already told (`deskfull`) for this push: once per attempt. */
+  private deskFullTold = false;
   /** Created in `preload()`, where `this.load` first exists. */
   private art!: ArtPackLoader;
   private readonly pendingRedraws = new Set<() => void>();
@@ -1213,7 +1222,9 @@ export class OfficeScene extends Phaser.Scene {
       const seat = this.resolveSeat(chairSeatId(chair.index));
       if (seat) candidates.push(seat);
     }
-    return candidates.filter((seat) => !taken.has(seat.id));
+    // A seat whose sitter would stand inside a full desk is refused by the room too.
+    const here = { x: this.player.x, y: this.player.y };
+    return candidates.filter((seat) => !taken.has(seat.id) && this.fullDeskOnTheWay(here, positionForFeet(seat.ground)) === null);
   }
 
   /** The `toggleSeat` command: stand when seated, else ask for the seat in reach. */
@@ -1477,6 +1488,22 @@ export class OfficeScene extends Phaser.Scene {
     // A desk places no collision of its own (#208): what stands on it is decor.
     for (const object of this.deskObjects.splice(0)) object.destroy();
     for (const desk of desks) this.drawDesk(desk);
+    this.deskAreas = desks.map((desk) => ({ x: Math.round(desk.x / TILE), y: Math.round(desk.y / TILE), w: Math.round(desk.w / TILE), h: Math.round(desk.h / TILE) }));
+  }
+
+  /**
+   * The desk a local move from `from` to `to` would walk into while it holds
+   * `MAX_DESK_OCCUPANCY` peers, or `null`. Peers count where they are drawn,
+   * every replicated one: the room counts the same players.
+   */
+  private fullDeskOnTheWay(from: { x: number; y: number }, to: { x: number; y: number }): DecorTileRect | null {
+    if (this.deskAreas.length === 0) return null;
+    const peers: { x: number; y: number }[] = [];
+    for (const sessionId of this.remotes?.sessionIds() ?? []) {
+      const avatar = this.remotes?.get(sessionId);
+      if (avatar) peers.push({ x: avatar.x, y: avatar.y });
+    }
+    return deskEntryRefused(from, to, this.deskAreas, peers, TILE);
   }
 
   /**
@@ -2246,6 +2273,18 @@ export class OfficeScene extends Phaser.Scene {
     }
     this.physics.world.update(time, delta);
     this.physics.world.postUpdate();
+    // A full desk takes nobody else in (`deskDecorRules.ts`): the step that
+    // would enter it is undone, and an auto-walk into it ends there.
+    if (intended && this.fullDeskOnTheWay(from, this.player) !== null) {
+      body.reset(from.x, from.y);
+      body.updateFromGameObject();
+      body.setVelocity(0, 0);
+      this.autoWalk = undefined;
+      if (!this.deskFullTold) this.bridge.emit('deskfull', undefined);
+      this.deskFullTold = true;
+    } else if (!intended || Math.hypot(this.player.x - from.x, this.player.y - from.y) > 0.000001) {
+      this.deskFullTold = false;
+    }
     const moved = Math.hypot(this.player.x - from.x, this.player.y - from.y) > 0.000001;
     const walking = advanceWalkingTime(this.walkingMs, this.walkingIdleMs, intended && moved && this.seat === null, delta);
     this.walkingMs = walking.continuousMs;

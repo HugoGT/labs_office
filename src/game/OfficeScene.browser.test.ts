@@ -4925,3 +4925,67 @@ describe('OfficeScene: the office decor layer (#208)', () => {
     }, LOOP_WAIT);
   });
 });
+
+/**
+ * At most `MAX_DESK_OCCUPANCY` people inside a desk's 3x3 area: the room
+ * drops the move that would take one more in, so the local player never
+ * walks in either (the client is the stricter side), by keys or auto-walk,
+ * and hears why once per attempt. Its seats are not offered either.
+ */
+describe('OfficeScene: a full desk takes nobody else in', () => {
+  const DESK_TX = 12;
+  const DESK_TY = 8;
+  const desk: OfficeDesk = { id: 'id-llena', label: '', x: DESK_TX * TILE, y: DESK_TY * TILE, w: 3 * TILE, h: 3 * TILE, occupant: null, mine: false };
+  /** Six peers on the desk's two right columns, so its left column stays free ground. */
+  const peers = Array.from({ length: 6 }, (_, i) => remoteSnapshot({
+    sessionId: `par-${i}`, x: (DESK_TX + 1 + (i % 2)) * TILE + 16, y: (DESK_TY + Math.floor(i / 2)) * TILE + 16,
+  }));
+  const insideDesk = (point: { x: number; y: number }) =>
+    point.x >= DESK_TX * TILE && point.x < (DESK_TX + 3) * TILE && point.y >= DESK_TY * TILE && point.y < (DESK_TY + 3) * TILE;
+
+  async function fullDesk() {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    const notices: number[] = [];
+    arena.bridge.on('deskfull', () => notices.push(arena.scene.time.now));
+    arena.bridge.emitCommand('desks', { desks: [desk] });
+    for (const peer of peers) connector.handlers()!.onAdd(peer);
+    // Level with the desk's middle row, two tiles left of it.
+    arena.body.reset((DESK_TX - 2) * TILE + 16, (DESK_TY + 1) * TILE + 16);
+    return { ...arena, connector, notices };
+  }
+
+  it('stops the player at the edge, says so once per push, and lets it in once someone leaves', async () => {
+    const { player, movement, walk, connector, notices } = await fullDesk();
+
+    movement.cursors.right.isDown = true;
+    walk(1500);
+    expect(insideDesk(player)).toBe(false);
+    expect(player.x).toBeGreaterThan((DESK_TX - 1) * TILE);
+    expect(connector.sent.some(insideDesk)).toBe(false);
+    expect(notices).toHaveLength(1);
+
+    movement.cursors.right.isDown = false;
+    walk(100);
+    movement.cursors.right.isDown = true;
+    walk(300);
+    expect(notices).toHaveLength(2);
+
+    connector.handlers()!.onRemove('par-0');
+    walk(300);
+    expect(insideDesk(player)).toBe(true);
+    movement.cursors.right.isDown = false;
+  });
+
+  it('ends an auto-walk into it at the edge', async () => {
+    const { player, movement, walk, doubleClick, notices } = await fullDesk();
+
+    doubleClick(DESK_TX * TILE + 16, (DESK_TY + 1) * TILE + 16);
+    expect(movement.autoWalk).toBeDefined();
+    walk(2000);
+
+    expect(movement.autoWalk).toBeUndefined();
+    expect(insideDesk(player)).toBe(false);
+    expect(notices).toHaveLength(1);
+  });
+});

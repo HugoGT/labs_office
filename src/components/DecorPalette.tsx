@@ -84,7 +84,7 @@ export interface DecorPaletteProps {
   value: DecorBrush | null;
   /** The pack and uploads catalog, or `null` while it is unavailable: nothing to offer then. */
   catalog: MaterialCatalog | null;
-  /** Which pieces to offer ("Mi espacio": what fits a desk); every one by default. */
+  /** Which pieces to offer (the desk scope: what fits a desk); every one by default. */
   offers?: (info: DecorPieceInfo) => boolean;
   /** The color chosen per colorable piece; one without starts in its manifest default. */
   colors?: Readonly<Record<string, string>>;

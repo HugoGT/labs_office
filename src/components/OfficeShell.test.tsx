@@ -59,7 +59,7 @@ vi.mock('../dashboard/spacesAdminClient', () => ({ createSpacesAdminClient: vi.f
 // Mismo criterio con `/admin/assets` (catalogo migrado a "Personalizar"):
 // doblarlo aqui evita que abrir el panel dispare una peticion real.
 vi.mock('../dashboard/assetAdminClient', () => ({ createAssetAdminClient: vi.fn() }));
-// The only module that writes the decor layer (#208): "Decoración" and "Mi espacio" without network.
+// The only module that writes the decor layer (#208): both scopes of "Decoración" without network.
 vi.mock('../game/officeDecorClient', () => ({ createOfficeDecorClient: vi.fn(() => ({ setDecor: vi.fn(async () => undefined) })) }));
 
 // Keep the real editor, but let the first submenu test control its lazy readiness.
@@ -1125,10 +1125,10 @@ describe('OfficeShell: escritorios asignables (#7, slice 5)', () => {
 });
 
 /**
- * "Mi espacio" for whoever occupies a desk (#7, slice 6, then #208): the
- * decor is the office decor layer's now, edited here inside the desk.
+ * "Decoración" for whoever occupies a desk and does not administer (#7,
+ * slice 6, then #208): the office decor layer, edited inside the desk.
  */
-describe('OfficeShell: Mi espacio', () => {
+describe('OfficeShell: Decoración for one desk', () => {
   const SESION = { displayName: 'Ana Torres', getIdToken: async () => 'id-token' };
 
   const MIA: OfficeDesk = {
@@ -1152,10 +1152,10 @@ describe('OfficeShell: Mi espacio', () => {
     await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalled());
     await act(async () => {});
     await user.click(screen.getByRole('button', { name: /Personalizar/ }));
-    await user.click(screen.getByRole('button', { name: 'Mi espacio' }));
+    await user.click(screen.getByRole('button', { name: 'Decoración' }));
   }
 
-  it('clicar el propio escritorio solo ofrece dejarlo: decorar vive en "Mi espacio"', async () => {
+  it('clicar el propio escritorio solo ofrece dejarlo: decorar vive en "Decoración"', async () => {
     render(<OfficeShell session={SESION} />);
     const bridge = createGameMock.mock.calls[0][1];
     await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalled());
@@ -1167,7 +1167,7 @@ describe('OfficeShell: Mi espacio', () => {
     expect(screen.queryByRole('button', { name: /Decorar/ })).not.toBeInTheDocument();
   });
 
-  it('sin escritorio propio "Mi espacio" pide reclamar uno libre', async () => {
+  it('sin escritorio propio "Decoración" pide reclamar uno libre', async () => {
     vi.mocked(fetchOfficeDesks).mockResolvedValue([{ ...MIA, occupant: null, mine: false }]);
     const user = userEvent.setup();
     render(<OfficeShell session={SESION} />);
@@ -1177,17 +1177,17 @@ describe('OfficeShell: Mi espacio', () => {
     expect(await screen.findByText('Reclama un escritorio libre en el mapa para decorarlo.')).toBeInTheDocument();
   });
 
-  it('con escritorio propio "Mi espacio" no pide reclamar ninguno', async () => {
+  it('con escritorio propio "Decoración" no pide reclamar ninguno', async () => {
     const user = userEvent.setup();
     render(<OfficeShell session={SESION} />);
 
     await openMySpace(user);
 
-    expect(await screen.findByRole('heading', { name: 'Mi espacio' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Decoración' })).toBeInTheDocument();
     expect(screen.queryByText('Reclama un escritorio libre en el mapa para decorarlo.')).not.toBeInTheDocument();
   });
 
-  it('con escritorio propio "Mi espacio" lo decora con /me/decor sobre su recuadro y termina con «Dejar escritorio»', async () => {
+  it('con escritorio propio "Decoración" lo decora con /me/decor sobre su recuadro y termina con «Dejar escritorio»', async () => {
     const user = userEvent.setup();
     render(<OfficeShell session={SESION} />);
     const bridge = createGameMock.mock.calls[0][1];
@@ -1197,8 +1197,8 @@ describe('OfficeShell: Mi espacio', () => {
     await openMySpace(user);
 
     expect(vi.mocked(createOfficeDecorClient)).toHaveBeenCalledWith(expect.objectContaining({ scope: 'desk' }));
-    // The desk at (320, 384) px is the 3x3 tiles from (10, 12).
-    expect(commands.at(-1)).toEqual({ brush: null, area: { x: 10, y: 12, w: 3, h: 3 } });
+    // The desk at (320, 384) px is the 3x3 tiles from (10, 12), and the only desk the rules know.
+    expect(commands.at(-1)).toEqual({ brush: null, area: { x: 10, y: 12, w: 3, h: 3 }, desks: [{ x: 10, y: 12, w: 3, h: 3 }] });
 
     await user.click(screen.getByRole('button', { name: 'Dejar escritorio' }));
     expect(releaseDesk).toHaveBeenCalledTimes(1);
@@ -1212,7 +1212,16 @@ describe('OfficeShell: Mi espacio', () => {
 
     act(() => bridge.emit('deskclick', { deskId: 'id-otra', label: '', action: 'claim' }));
 
-    expect(await screen.findByText(/Te sentaste en/)).toHaveTextContent('Te sentaste en este escritorio · Decóralo en Personalizar › Mi espacio');
+    expect(await screen.findByText(/Te sentaste en/)).toHaveTextContent('Te sentaste en este escritorio · Decóralo en Personalizar › Decoración');
+  });
+
+  it('dice que un escritorio esta lleno cuando la escena no deja entrar en el', async () => {
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+
+    act(() => bridge.emit('deskfull', undefined));
+
+    expect(await screen.findByText('Este escritorio está lleno (máximo 6 personas).')).toBeInTheDocument();
   });
 });
 
