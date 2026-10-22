@@ -41,7 +41,7 @@ export interface DecorEditorSectionProps {
   area: DecorTileRect | null;
   /** Every desk area in tiles, for the desk rules; absent, none. */
   desks?: readonly DecorTileRect[];
-  /** `desk` only: releases the claimed desk ("Dejar escritorio"), the map toast's "Dejarlo". */
+  /** `desk` only: releases the claimed desk ("Dejar escritorio"), like the desk banner's. */
   onLeaveDesk?: () => void;
   /** Reports each closed/open change, like the other sections. */
   onEditingChange?: (editing: boolean) => void;

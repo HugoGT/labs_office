@@ -206,6 +206,12 @@ export interface LayoutEditCommand {
   pickable: readonly PickableRect[];
   selectedId: string | null;
   placing: { w: number; h: number; obstacles: readonly TileRect[]; snap?: 'block' } | null;
+  /**
+   * What stands on the map but is not pickable in this mode (the desks while
+   * editing rooms, the rooms while editing desks), outlined so it shows: a
+   * desk has no tint of its own. Absent draws none.
+   */
+  outlines?: readonly TileRect[];
 }
 
 export interface ToLayoutEditCommandOptions {
@@ -235,17 +241,19 @@ export function toLayoutEditCommand(
   options: ToLayoutEditCommandOptions,
 ): LayoutEditCommand | null {
   if (state.tag === 'off') return null;
-  if (state.tag === 'saving') return { pickable: [], selectedId: null, placing: null };
+  if (state.tag === 'saving') return { pickable: [], selectedId: null, placing: null, outlines: [] };
 
   const pickable = options.items.map(toPickableRect);
+  const isItem = (other: LayoutObstacleItem): boolean => options.items.some((item) => item.id === other.id && item.kind === other.kind);
+  const outlines = (options.obstacleItems ?? []).filter((other) => !isItem(other)).map(toObstacleTileRect);
 
   if (state.tag !== 'placing') {
-    return { pickable, selectedId: state.tag === 'selected' ? state.id : null, placing: null };
+    return { pickable, selectedId: state.tag === 'selected' ? state.id : null, placing: null, outlines };
   }
 
   const { w, h } = options.placingSize ?? { w: 0, h: 0 };
   const obstacleSource = options.obstacleItems ?? options.items;
   const obstacles = computeObstacles(obstacleSource, options.moving ?? null).map(toObstacleTileRect);
 
-  return { pickable, selectedId: null, placing: { w, h, obstacles, ...(state.kind === 'room' && w === BLOCK_TILES && h === BLOCK_TILES ? { snap: 'block' as const } : {}) } };
+  return { pickable, selectedId: null, placing: { w, h, obstacles, ...(state.kind === 'room' && w === BLOCK_TILES && h === BLOCK_TILES ? { snap: 'block' as const } : {}) }, outlines };
 }

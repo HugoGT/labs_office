@@ -20,7 +20,8 @@ import {
   type LayoutEditCommand,
   type PickableRect,
 } from './layoutEditor';
-import { LAYOUT_GHOST_DEPTH } from './depthLayers';
+import type { TileRect } from './terrainGrid';
+import { LAYOUT_GHOST_DEPTH, LAYOUT_OUTLINE_DEPTH } from './depthLayers';
 import { TILE } from './mapData';
 import type { OfficeBridge } from './officeBridge';
 
@@ -29,6 +30,9 @@ const PICKABLE_STROKE_WIDTH = 2;
 const GHOST_VALID_COLOR = 0x22c55e;
 const GHOST_INVALID_COLOR = 0xef4444;
 const GHOST_ALPHA = 0.35;
+
+/** Name of a context outline: on the map, not pickable in this mode (`LayoutEditCommand.outlines`). */
+export const LAYOUT_OUTLINE_NAME = 'layout-outline';
 
 /** Nombre Phaser del contorno pickable de un item, para volver a encontrarlo (mismo idioma que `deskZoneName`). */
 export function layoutPickName(id: string): string {
@@ -77,6 +81,7 @@ export class LayoutEditLayer {
 
     if (command === null) return;
 
+    for (const rect of command.outlines ?? []) this.pickableObjects.push(this.drawOutline(rect).setName(LAYOUT_OUTLINE_NAME));
     for (const rect of command.pickable) this.drawPickable(rect);
 
     if (command.placing) {
@@ -89,15 +94,18 @@ export class LayoutEditLayer {
     }
   }
 
-  private drawPickable(rect: PickableRect): void {
+  /** A light blue outline over walls and avatars, so the whole reach of the area shows. */
+  private drawOutline(rect: TileRect): Phaser.GameObjects.Rectangle {
     const w = (rect.x1 - rect.x0 + 1) * TILE;
     const h = (rect.y1 - rect.y0 + 1) * TILE;
-
-    const zone = this.scene.add
+    return this.scene.add
       .rectangle(rect.x0 * TILE + w / 2, rect.y0 * TILE + h / 2, w, h)
       .setStrokeStyle(PICKABLE_STROKE_WIDTH, PICKABLE_STROKE_COLOR)
-      .setName(layoutPickName(rect.id))
-      .setInteractive();
+      .setDepth(LAYOUT_OUTLINE_DEPTH);
+  }
+
+  private drawPickable(rect: PickableRect): void {
+    const zone = this.drawOutline(rect).setName(layoutPickName(rect.id)).setInteractive();
 
     zone.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       // Mismo `stopPropagation` que el clic de un escritorio: sin el, el

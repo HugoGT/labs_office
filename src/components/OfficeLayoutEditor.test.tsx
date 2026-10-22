@@ -458,7 +458,7 @@ describe('OfficeLayoutEditor (#74, PR4 correction): exclusividad escritorios<->s
     // escritorios saliendo -- eso es justo lo que ordena esta asercion.
     expect(commands.slice(before, before + 2)).toEqual([
       null,
-      { pickable: [], selectedId: null, placing: null },
+      { pickable: [], selectedId: null, placing: null, outlines: [] },
     ]);
   });
 

@@ -197,6 +197,7 @@ describe('toLayoutEditCommand', () => {
       ],
       selectedId: null,
       placing: null,
+      outlines: [],
     });
   });
 
@@ -269,6 +270,26 @@ describe('toLayoutEditCommand', () => {
       pickable: [],
       selectedId: null,
       placing: null,
+      outlines: [],
     });
+  });
+
+  it('outlines what is on the map but not pickable in this mode: desks while editing rooms', () => {
+    const rooms: LayoutObstacleItem[] = [{ id: 'room-1', kind: 'room', x: 10, y: 10, w: 5, h: 5 }];
+    const desks: LayoutObstacleItem[] = [{ id: 'desk-1', kind: 'desk', x: 2, y: 2, w: 3, h: 3 }];
+
+    for (const state of [{ tag: 'idle', kind: 'room' }, { tag: 'placing', kind: 'room', mode: 'create' }] as const) {
+      const command = toLayoutEditCommand(state, { items: rooms, obstacleItems: [...rooms, ...desks], placingSize: { w: 5, h: 5 } });
+      expect(command?.outlines).toEqual([{ x0: 2, y0: 2, x1: 4, y1: 4 }]);
+    }
+  });
+
+  it('a room and a desk sharing an id are still told apart by kind', () => {
+    const rooms: LayoutObstacleItem[] = [{ id: 'same', kind: 'room', x: 10, y: 10, w: 5, h: 5 }];
+    const desks: LayoutObstacleItem[] = [{ id: 'same', kind: 'desk', x: 2, y: 2, w: 3, h: 3 }];
+
+    const command = toLayoutEditCommand({ tag: 'idle', kind: 'room' }, { items: rooms, obstacleItems: [...rooms, ...desks] });
+
+    expect(command?.outlines).toEqual([{ x0: 2, y0: 2, x1: 4, y1: 4 }]);
   });
 });

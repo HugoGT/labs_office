@@ -1,0 +1,117 @@
+/*
+ * Centered on the desk's top edge and lifted above it, but its bottom reaches
+ * a little into the desk: the pointer goes from the desk to the banner
+ * without crossing a gap.
+ */
+.banner {
+  position: fixed;
+  z-index: 25;
+  transform: translate(-50%, calc(-100% + 14px));
+  min-width: 150px;
+  max-width: 240px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: #1f2937f2;
+  border: 1px solid #374151;
+  border-radius: var(--radius-panel);
+  box-shadow: 0 10px 30px #0009;
+  color: #e5e7eb;
+  text-align: center;
+}
+
+/* The pack portrait is a whole standing frame: the circle keeps the head and shoulders. */
+.portrait {
+  width: 44px;
+  height: 44px;
+  margin-top: -34px;
+  object-fit: cover;
+  object-position: 50% 0;
+  background: #111827;
+  border: 2px solid #374151;
+  border-radius: 50%;
+  image-rendering: pixelated;
+}
+
+.name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.status {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-control);
+  color: #d1d5db;
+  cursor: pointer;
+}
+
+.action:hover {
+  background: #374151;
+  color: #fff;
+}
+
+.claim {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 5px 12px 5px 8px;
+  background: #f9fafb;
+  border: none;
+  border-radius: var(--radius-control);
+  box-shadow: 0 4px 14px #0007;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.claim:hover:not(:disabled) {
+  background: #fff;
+}
+
+.claim:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* A free desk: no card, only the claim button over the map. */
+.free {
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  box-shadow: none;
+}

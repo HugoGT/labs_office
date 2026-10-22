@@ -36,6 +36,7 @@ import {
 } from '../game/recordingClient';
 import type { RosterPeer } from '../game/roster';
 import { useCallInvitations } from '../hooks/useCallInvitations';
+import { useDeskHover } from '../hooks/useDeskHover';
 import { useDesks } from '../hooks/useDesks';
 import { useInstallPrompt } from '../hooks/useInstallPrompt';
 import { useMapZoom } from '../hooks/useMapZoom';
@@ -48,10 +49,12 @@ import { AudioUnblockPrompt } from './AudioUnblockPrompt';
 import { BottomBar } from './BottomBar';
 import { CallInvitationStack } from './CallInvitationStack';
 import { ContextMenu, type PeerMenuAction } from './ContextMenu';
+import { DeskBanner } from './DeskBanner';
+import { deskBannerView } from './deskBannerView';
 import { ExitControls } from './ExitControls';
 import { GameCanvas } from './GameCanvas';
 import type { OfficeEntryState } from './OfficeEntry';
-import { OfficeSidebar } from './OfficeSidebar';
+import { OfficeSidebar, type SidebarOpenRequest } from './OfficeSidebar';
 import { PhoneIcon } from './PhoneIcon';
 import { RecordingReadyStack, type RecordingReadyNotice } from './RecordingReadyStack';
 import { Toast } from './Toast';
@@ -637,9 +640,8 @@ export function OfficeShell({
   );
 
   /**
-   * Coger un sitio libre (#7, slice 5). La escena decide QUE se puede hacer
-   * con cada escritorio -- es quien sabe que hay dibujado y de quien es cada
-   * uno -- y aqui se habla con el servidor y se cuenta lo que paso.
+   * Coger un sitio libre (#7, slice 5), from the desk banner's "Reclamar
+   * escritorio": aqui se habla con el servidor y se cuenta lo que paso.
    *
    * Los tres finales se cuentan por separado y ninguno se traga. El 409 es el
    * que importa: alguien se adelanto, y decir "hecho" dejaria el escritorio
@@ -693,41 +695,16 @@ export function OfficeShell({
   );
 
   /**
-   * Clic en un escritorio asignable (#7, slice 5). Se suscribe DIRECTAMENTE
-   * aqui y no en un hook, misma razon que `callaccepted`: es un toast y este
-   * componente ya es el unico dueno del puente.
-   *
-   * Dejar el sitio se OFRECE, no se hace: el toast que el HUD ya tiene lleva
-   * el boton, y solo suelta quien lo pulsa. Soltar al primer clic es demasiado
-   * facil de hacer sin querer -- basta con volver a clicar el propio sitio --
-   * y una pantalla de confirmacion propia seria una superficie nueva para una
-   * sola pregunta.
-   *
-   * `layoutEditing` se comprueba primero (#74, PR3c): la escena YA suprime
-   * `deskclick` mientras se edita (`OfficeScene.ts`, PR3b), pero esta guarda
-   * es defensa en profundidad -- y la unica que un test de este archivo, sin
-   * Phaser real, puede ejercer emitiendo el evento directamente.
+   * The hover banner of a desk (`deskhover`): who holds it and what can be
+   * done there. Its "Mi personaje" and "Decorar" open those sections of
+   * "Personalizar"; `seq` makes the same section open again after closing.
    */
-  useEffect(
-    () =>
-      bridge.on('deskclick', ({ deskId, label, action }) => {
-        if (layoutEditing) return;
-        if (action === 'claim') {
-          void takeDesk(deskId, label);
-          return;
-        }
-        // Decorating lives in "Decoración"; the toast only offers to leave it.
-        setToastMessage(
-          <>
-            🪑 Es tu escritorio ·{' '}
-            <button type="button" onClick={() => void leaveDesk(label)}>
-              Dejarlo
-            </button>
-          </>,
-        );
-      }),
-    [bridge, takeDesk, leaveDesk, layoutEditing],
-  );
+  const deskHover = useDeskHover(bridge);
+  const [sidebarRequest, setSidebarRequest] = useState<SidebarOpenRequest | null>(null);
+  const openSidebarSection = (section: SidebarOpenRequest['section']): void => {
+    deskHover.dismiss();
+    setSidebarRequest((current) => ({ section, seq: (current?.seq ?? 0) + 1 }));
+  };
 
   /**
    * The one way to call someone (#187): the context menu and the sidebar's
@@ -786,6 +763,35 @@ export function OfficeShell({
     status,
   };
 
+  // An editor owns the map, and a hidden rail means one holds it: no banner then.
+  const deskAnchor = layoutEditing || hudHidden ? null : deskHover.hover;
+  const hoveredDesk = deskAnchor === null ? null : (desks?.find((desk) => desk.id === deskAnchor.deskId) ?? null);
+  const deskView = hoveredDesk === null ? null : deskBannerView(hoveredDesk, { self: rosterSelf, peers: rosterPeers, desks: desks ?? [] });
+  const deskBannerSession = deskView === null || deskView.kind === 'free' ? null : deskView.sessionId;
+  const deskBanner = deskAnchor !== null && hoveredDesk !== null && deskView !== null && (
+    <DeskBanner
+      view={deskView}
+      anchor={deskAnchor}
+      portrait={deskBannerSession === null ? null : (deskHover.portraits[deskBannerSession] ?? null)}
+      onClaim={() => {
+        deskHover.dismiss();
+        void takeDesk(hoveredDesk.id, hoveredDesk.label);
+      }}
+      onCall={(sessionId, name) => {
+        deskHover.dismiss();
+        callPeer(sessionId, name);
+      }}
+      onCharacter={characterPort === null ? undefined : () => openSidebarSection('character')}
+      onDecorate={() => openSidebarSection('decor')}
+      onLeave={() => {
+        deskHover.dismiss();
+        void leaveDesk(hoveredDesk.label);
+      }}
+      onPointerEnter={deskHover.enter}
+      onPointerLeave={deskHover.leave}
+    />
+  );
+
   // `contents` keeps the fixed children placed and stacked as if unwrapped.
   const rightRailStyle = { display: hudHidden ? 'none' : 'contents' } as const;
 
@@ -802,6 +808,7 @@ export function OfficeShell({
         activeScreenSharer={activeScreenSharer?.sessionId ?? null}
       />
       <ContextMenu menu={menu} onAction={handleMenuAction} onClose={closeMenu} />
+      {deskBanner}
       <div style={rightRailStyle}>
         <OfficeSidebar
           self={rosterSelf}
@@ -826,6 +833,7 @@ export function OfficeShell({
           refreshSpaces={refreshSpaces}
           onLayoutEditingChange={setLayoutEditing}
           onCallPeer={callPeer}
+          openRequest={sidebarRequest}
         />
       </div>
       <BottomBar

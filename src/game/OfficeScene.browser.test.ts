@@ -18,6 +18,8 @@ import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SP
 const BUILT_IN_SPACES_VERSION = 'a489c5da5efd7c68';
 import {
   DESK_ZONE_DEPTH,
+  LAYOUT_OUTLINE_DEPTH,
+  SPACE_SHADE_DEPTH,
   MINIMAP_MARKER_DEPTH,
   avatarDepth,
   chairLayerDepth,
@@ -27,6 +29,8 @@ import { feetOf, physicalBodyRect } from './avatarGeometry';
 import { BODY_CENTER_OFFSET, positionForBodyTile } from './pathfinding';
 import { chairSeatId, mapSeatId } from './seating';
 import { deskZoneName } from './deskLayout';
+import { SPACE_SHADE_NAME } from './spaceFocus';
+import { LAYOUT_OUTLINE_NAME, layoutPickName } from './LayoutEditLayer';
 import { artSheetKey, recoloredSheetKey } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
 import { buildTerrainGrid } from './terrainGrid';
@@ -843,6 +847,18 @@ async function advanceGameClock(scene: Phaser.Scene, ms: number): Promise<void> 
   await vi.waitFor(() => {
     expect(scene.time.now).toBeGreaterThanOrEqual(target);
   }, LOOP_WAIT);
+}
+
+/** Waits until the following camera stops moving, so a world point keeps its place on screen. */
+async function settleCamera(scene: Phaser.Scene): Promise<void> {
+  let last = '';
+  for (let i = 0; i < 40; i++) {
+    await advanceGameClock(scene, 100);
+    const view = scene.cameras.main.worldView;
+    const now = `${view.x},${view.y},${scene.cameras.main.zoom}`;
+    if (now === last) return;
+    last = now;
+  }
 }
 
 async function bootOfficeScene(
@@ -2817,6 +2833,45 @@ describe('OfficeScene: config de espacios servida (#7, slice 3)', () => {
     await vi.waitFor(() => expect(rooms.at(-1)?.spaceId).toBe(SERVIDO.id), LOOP_WAIT);
   });
 
+  function visibleShade(scene: Phaser.Scene): Phaser.GameObjects.Rectangle[] {
+    return scene.children.list.filter(
+      (child) => child.name === SPACE_SHADE_NAME && (child as Phaser.GameObjects.Rectangle).visible,
+    ) as Phaser.GameObjects.Rectangle[];
+  }
+
+  it('shades everything outside the space the player stands in, never the space itself', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+
+    bridge.emitCommand('spacesconfig', { spaces: [SERVIDO], version: 'sombra' });
+    await advanceGameClock(scene, 100);
+
+    const shade = await vi.waitFor(() => {
+      const rects = visibleShade(scene);
+      expect(rects.length).toBeGreaterThan(0);
+      return rects;
+    }, LOOP_WAIT);
+    for (const rect of shade) {
+      expect(rect.depth).toBe(SPACE_SHADE_DEPTH);
+      expect(rect.fillAlpha).toBeGreaterThan(0);
+      expect(rect.fillAlpha).toBeLessThan(0.5);
+      const bounds = rect.getBounds();
+      const overlapsSpace = bounds.x < SERVIDO.x + SERVIDO.w && bounds.right > SERVIDO.x &&
+        bounds.y < SERVIDO.y + SERVIDO.h && bounds.bottom > SERVIDO.y;
+      expect(overlapsSpace).toBe(false);
+    }
+  });
+
+  it('draws no shade on the open floor', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+
+    bridge.emitCommand('spacesconfig', { spaces: [{ ...SERVIDO, x: SERVIDO.x + 40 * TILE }], version: 'lejos' });
+    await advanceGameClock(scene, 100);
+
+    expect(visibleShade(scene)).toEqual([]);
+  });
+
   it('names the cubicle of an empty desk "Escritorio": it has no label (Editar espacios)', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
@@ -2886,7 +2941,9 @@ describe('OfficeScene: config de espacios servida (#7, slice 3)', () => {
     // An older server still serves the floor columns; the scene draws none of them.
     const withFloor = { ...SERVIDO, floor: { materialId: 'floor-plain', color: '#2c3e50' } } as typeof SERVIDO;
     const cubicle = { ...withFloor, id: 'cubiculo', x: 0, floor: { materialId: 'floor-wood', color: null } } as typeof SERVIDO;
-    const before = scene.children.list.length;
+    // The shade outside the player's space is drawn around it, never on it (`spaceFocus.ts`).
+    const drawn = () => scene.children.list.filter((child) => child.name !== SPACE_SHADE_NAME).length;
+    const before = drawn();
 
     bridge.emitCommand('spacesconfig', { spaces: [withFloor, cubicle], version: 'version-servida' });
     await advanceGameClock(scene, 100);
@@ -2894,7 +2951,7 @@ describe('OfficeScene: config de espacios servida (#7, slice 3)', () => {
     const floorKeys = [recoloredSheetKey('floor-plain', 'sheet', '#2c3e50'), artSheetKey('floor-wood', 'sheet')];
     expect(scene.children.list.filter((c) => c.type === 'Image'
       && floorKeys.includes((c as Phaser.GameObjects.Image).texture.key))).toHaveLength(0);
-    expect(scene.children.list.length).toBe(before);
+    expect(drawn()).toBe(before);
   });
 
   it('una lista servida vacia deja al jugador en piso abierto', async () => {
@@ -2945,12 +3002,33 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
     return { id: `id-${displayName ?? 'anonimo'}`, displayName };
   }
 
-  function fakePointer(): Phaser.Input.Pointer {
-    return { event: { stopPropagation: vi.fn() } } as unknown as Phaser.Input.Pointer;
-  }
-
   function findZone(scene: Phaser.Scene, deskId: string): Phaser.GameObjects.Rectangle | null {
     return scene.children.getByName(deskZoneName(deskId)) as Phaser.GameObjects.Rectangle | null;
+  }
+
+  /**
+   * A free desk at the bottom left of the main camera's view. The test canvas
+   * is small and the minimap covers most of it: only the bottom rows of the
+   * desk (`bottomOf`) are under the main camera alone.
+   */
+  async function deskInView(scene: Phaser.Scene): Promise<OfficeDesk> {
+    await settleCamera(scene);
+    const view = scene.cameras.main.worldView;
+    return servedDesk({ x: Math.round(view.x + 8), y: Math.round(view.bottom - 3 * TILE - 4) });
+  }
+
+  function bottomOf(desk: OfficeDesk, dx = 4): { x: number; y: number } {
+    return { x: desk.x + dx, y: desk.y + desk.h - 4 };
+  }
+
+  /** Moves the mouse over the main camera to a world point, as Phaser would. */
+  function pointAt(scene: Phaser.Scene, world: { x: number; y: number }): void {
+    const camera = scene.cameras.main;
+    scene.input.activePointer.position.set(
+      camera.x + (world.x - camera.worldView.x) * camera.zoom,
+      camera.y + (world.y - camera.worldView.y) * camera.zoom,
+    );
+    scene.input.emit('pointermove', scene.input.activePointer);
   }
 
   function countZones(scene: Phaser.Scene): number {
@@ -3026,7 +3104,7 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
     expect(texts.map((text) => text.text)).toEqual(['Mesa 4']);
   });
 
-  it('el escritorio propio se distingue del de otra persona', async () => {
+  it('no desk carries a tint: free, own or someone else\'s', async () => {
     // Cual es el propio lo dice el SERVIDOR (`mine`), que es quien sabe quien
     // pregunta. La escena lo lee, no lo deduce.
     const bridge = createOfficeBridge();
@@ -3039,34 +3117,14 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
       ],
     });
 
-    expect(findZone(scene, 'mia')!.fillColor).not.toBe(findZone(scene, 'ajena')!.fillColor);
+    // Being inside a desk shades the rest, and hovering it says whose it is.
+    for (const id of ['mia', 'ajena']) {
+      expect(findZone(scene, id)!.isFilled).toBe(false);
+      expect(findZone(scene, id)!.isStroked).toBe(false);
+    }
   });
 
-  it('un homonimo NO hereda tu escritorio: manda `mine`, no el nombre', async () => {
-    // El pin de regresion de esta slice. Decidir la pertenencia comparando el
-    // nombre visible es lo que la slice 1 de esta misma issue retiro de
-    // `proximityAudio.ts`: alli un renombrado cambiaba en silencio quien oye a
-    // quien, y aqui cambiaria de manos un escritorio. Dos personas del
-    // directorio pueden llamarse igual, y una de ellas puede llamarse como tu
-    // desde que un Admin la renombro.
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge, { playerName: 'Ana Torres' });
-
-    bridge.emitCommand('desks', {
-      desks: [
-        servedDesk({ id: 'homonima', occupant: occupant('Ana Torres'), mine: false }),
-        servedDesk({ id: 'ajena', x: 20 * TILE, occupant: occupant('Luis Paz') }),
-      ],
-    });
-
-    // Se ve como lo que es: el escritorio de otra persona, y sin nada que
-    // ofrecer al clicarlo.
-    const homonima = findZone(scene, 'homonima')!;
-    expect(homonima.fillColor).toBe(findZone(scene, 'ajena')!.fillColor);
-    expect(homonima.input).toBeNull();
-  });
-
-  it('un escritorio libre se distingue de uno ocupado', async () => {
+  it('a free desk and a taken one both draw without a tint', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
 
@@ -3077,7 +3135,11 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
       ],
     });
 
-    expect(findZone(scene, 'libre')!.fillColor).not.toBe(findZone(scene, 'ocupada')!.fillColor);
+    // Its hover banner says it is free.
+    for (const id of ['libre', 'ocupada']) {
+      expect(findZone(scene, id)!.isFilled).toBe(false);
+      expect(findZone(scene, id)!.isStroked).toBe(false);
+    }
   });
 
   it('la profundidad es el borde inferior, misma convencion que el mobiliario del mapa', async () => {
@@ -3096,74 +3158,97 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
     expect(findZone(scene, 'id-mesa')!.depth).toBe(DESK_ZONE_DEPTH);
   });
 
-  it('clicar un escritorio libre pide cogerlo', async () => {
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge);
-    const clicks: unknown[] = [];
-    bridge.on('deskclick', (payload) => clicks.push(payload));
-
-    bridge.emitCommand('desks', { desks: [servedDesk()] });
-    findZone(scene, 'id-mesa')!.emit('pointerdown', fakePointer());
-
-    // La escena sabe que hay dibujado; quien habla con el servidor es React.
-    expect(clicks).toEqual([{ deskId: 'id-mesa', label: 'Mesa 4', action: 'claim' }]);
-  });
-
-  it('clicar el propio ofrece dejarlo', async () => {
+  it('no zone takes the pointer, so a double click still walks onto any desk', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge, { playerName: 'Ana Torres' });
-    const clicks: unknown[] = [];
-    bridge.on('deskclick', (payload) => clicks.push(payload));
 
     bridge.emitCommand('desks', {
-      desks: [servedDesk({ occupant: occupant('Ana Torres'), mine: true })],
+      desks: [
+        servedDesk({ id: 'libre' }),
+        servedDesk({ id: 'mia', x: 20 * TILE, occupant: occupant('Ana Torres'), mine: true }),
+        servedDesk({ id: 'ajena', x: 30 * TILE, occupant: occupant('Luis Paz') }),
+      ],
     });
-    findZone(scene, 'id-mesa')!.emit('pointerdown', fakePointer());
 
-    expect(clicks).toEqual([{ deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }]);
+    for (const id of ['libre', 'mia', 'ajena']) expect(findZone(scene, id)!.input).toBeNull();
   });
 
-  it('clicar el de otra persona no hace nada', async () => {
-    // Ni siquiera se hace clicable: un escritorio ajeno no tiene ninguna
-    // accion que ofrecer, y `release` solo suelta el propio.
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge, { playerName: 'Ana Torres' });
-    const clicks: unknown[] = [];
-    bridge.on('deskclick', (payload) => clicks.push(payload));
-
-    bridge.emitCommand('desks', { desks: [servedDesk({ occupant: occupant('Luis Paz') })] });
-    const zone = findZone(scene, 'id-mesa')!;
-    zone.emit('pointerdown', fakePointer());
-
-    expect(zone.input).toBeNull();
-    expect(clicks).toEqual([]);
-  });
-
-  it('un clic que llega por el minimapa no ofrece el escritorio: solo mueve la camara (#98)', async () => {
+  it('with the pointer over a desk, says which one and where its top edge is on the page', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
-    const clicks: unknown[] = [];
-    bridge.on('deskclick', (payload) => clicks.push(payload));
+    const hovers: OfficeEventMap['deskhover'][] = [];
+    bridge.on('deskhover', (payload) => hovers.push(payload));
+    const desk = await deskInView(scene);
+    bridge.emitCommand('desks', { desks: [desk] });
 
-    bridge.emitCommand('desks', { desks: [servedDesk()] });
-    const pointer = { ...fakePointer(), camera: scene.cameras.cameras[1] } as Phaser.Input.Pointer;
-    findZone(scene, 'id-mesa')!.emit('pointerdown', pointer);
+    pointAt(scene, bottomOf(desk));
+    await advanceGameClock(scene, 50);
 
-    expect(clicks).toEqual([]);
+    const hover = hovers.at(-1)!;
+    expect(hover?.deskId).toBe(desk.id);
+    const camera = scene.cameras.main;
+    const canvas = scene.game.canvas.getBoundingClientRect();
+    expect(hover!.x).toBe(Math.round(canvas.left + (desk.x + desk.w / 2 - camera.worldView.x) * camera.zoom));
+    expect(hover!.y).toBe(Math.round(canvas.top + (desk.y - camera.worldView.y) * camera.zoom));
   });
 
-  it('el clic no se cuela al mapa de fondo', async () => {
-    // Mismo `stopPropagation` que el clic de un peer: sin el, el
-    // `pointerdown` de la escena cerraria el menu contextual a la vez.
+  it('says null once the pointer leaves the desk, and only once', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
-    const pointer = fakePointer();
+    const hovers: OfficeEventMap['deskhover'][] = [];
+    bridge.on('deskhover', (payload) => hovers.push(payload));
+    const desk = await deskInView(scene);
+    bridge.emitCommand('desks', { desks: [desk] });
+    pointAt(scene, bottomOf(desk));
+    await advanceGameClock(scene, 50);
 
-    bridge.emitCommand('desks', { desks: [servedDesk()] });
-    findZone(scene, 'id-mesa')!.emit('pointerdown', pointer);
+    pointAt(scene, bottomOf(desk, desk.w + 4));
+    await advanceGameClock(scene, 100);
 
-    const { stopPropagation } = pointer.event as unknown as { stopPropagation: () => void };
-    expect(stopPropagation).toHaveBeenCalled();
+    expect(hovers.filter((hover) => hover === null)).toHaveLength(1);
+    expect(hovers.at(-1)).toBeNull();
+  });
+
+  it('a pointer over the minimap hovers no desk (#98)', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const hovers: OfficeEventMap['deskhover'][] = [];
+    bridge.on('deskhover', (payload) => hovers.push(payload));
+    const minimap = scene.cameras.cameras[1];
+    const camera = scene.cameras.main;
+    // A desk under the middle of the minimap, in the main camera's world.
+    const under = camera.getWorldPoint(minimap.x + minimap.width / 2, minimap.y + minimap.height / 2);
+    bridge.emitCommand('desks', { desks: [servedDesk({ x: under.x - 48, y: under.y - 48 })] });
+
+    scene.input.activePointer.position.set(minimap.x + minimap.width / 2, minimap.y + minimap.height / 2);
+    scene.input.emit('pointermove', scene.input.activePointer);
+    await advanceGameClock(scene, 50);
+
+    expect(hovers).toEqual([]);
+  });
+
+  it('hovers nothing until the pointer moves onto the map, and nothing once it leaves the canvas', async () => {
+    // Phaser starts the pointer at (0, 0) and calls it "over" the canvas: a
+    // desk under that corner must not show its banner on load.
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const hovers: OfficeEventMap['deskhover'][] = [];
+    bridge.on('deskhover', (payload) => hovers.push(payload));
+    await settleCamera(scene);
+    const view = scene.cameras.main.worldView;
+    const corner = servedDesk({ x: Math.floor(view.x) - 8, y: Math.floor(view.y) - 8 });
+    bridge.emitCommand('desks', { desks: [corner] });
+
+    await advanceGameClock(scene, 50);
+    expect(hovers).toEqual([]);
+
+    scene.input.emit('pointermove', scene.input.activePointer);
+    await advanceGameClock(scene, 50);
+    expect(hovers.at(-1)?.deskId).toBe(corner.id);
+
+    scene.input.emit('gameout');
+    await advanceGameClock(scene, 50);
+    expect(hovers.at(-1)).toBeNull();
   });
 
   it('una lista nueva reemplaza a la anterior en vez de acumularse encima', async () => {
@@ -3392,32 +3477,57 @@ describe('OfficeScene: modo edicion de layout (#74, PR3b)', () => {
     };
   }
 
-  it('mientras se edita, clicar un escritorio no ofrece cogerlo ni soltarlo', async () => {
+  it('mientras se edita, pasar sobre un escritorio no lo ofrece, y el que estaba ofrecido se retira', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
-    const clicks: unknown[] = [];
-    bridge.on('deskclick', (payload) => clicks.push(payload));
+    const hovers: OfficeEventMap['deskhover'][] = [];
+    bridge.on('deskhover', (payload) => hovers.push(payload));
+    await settleCamera(scene);
+    const view = scene.cameras.main.worldView;
+    // The bottom rows of the view: the minimap covers the rest of the small test canvas.
+    const desk = { ...editableDesk(), x: Math.round(view.x + 8), y: Math.round(view.bottom - 3 * TILE - 4) };
+    bridge.emitCommand('desks', { desks: [desk] });
+    const camera = scene.cameras.main;
+    scene.input.activePointer.position.set(
+      (desk.x + 4 - camera.worldView.x) * camera.zoom,
+      (desk.y + desk.h - 4 - camera.worldView.y) * camera.zoom,
+    );
+    scene.input.emit('pointermove', scene.input.activePointer);
+    await advanceGameClock(scene, 50);
+    expect(hovers.at(-1)?.deskId).toBe('id-mesa');
 
     bridge.emitCommand('layoutedit', { pickable: [], selectedId: null, placing: null });
-    bridge.emitCommand('desks', { desks: [editableDesk()] });
+    await advanceGameClock(scene, 50);
 
-    const zone = scene.children.getByName(deskZoneName('id-mesa')) as Phaser.GameObjects.Rectangle;
-    zone.emit('pointerdown', fakePointer());
-
-    expect(clicks).toEqual([]);
+    expect(hovers.at(-1)).toBeNull();
   });
 
-  it('fuera del modo edicion, el clic del escritorio sigue ofreciendo cogerlo (sin regresion)', async () => {
+  it('draws the pickable and the context outlines above walls and avatars, only the pickable ones clickable', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
-    const clicks: unknown[] = [];
-    bridge.on('deskclick', (payload) => clicks.push(payload));
 
-    bridge.emitCommand('desks', { desks: [editableDesk()] });
-    const zone = scene.children.getByName(deskZoneName('id-mesa')) as Phaser.GameObjects.Rectangle;
-    zone.emit('pointerdown', fakePointer());
+    bridge.emitCommand('layoutedit', {
+      pickable: [{ id: 'sala', x0: 10, y0: 10, x1: 14, y1: 14 }],
+      selectedId: null,
+      placing: null,
+      outlines: [{ x0: 2, y0: 2, x1: 4, y1: 4 }],
+    });
 
-    expect(clicks).toEqual([{ deskId: 'id-mesa', label: 'Mesa 4', action: 'claim' }]);
+    const pick = scene.children.getByName(layoutPickName('sala')) as Phaser.GameObjects.Rectangle;
+    const outlines = scene.children.list.filter((child) => child.name === LAYOUT_OUTLINE_NAME) as Phaser.GameObjects.Rectangle[];
+    expect(outlines).toHaveLength(1);
+    for (const rect of [pick, ...outlines]) {
+      expect(rect.depth).toBe(LAYOUT_OUTLINE_DEPTH);
+      expect(rect.isStroked).toBe(true);
+      expect(rect.isFilled).toBe(false);
+    }
+    expect(outlines[0]!.strokeColor).toBe(pick.strokeColor);
+    expect(outlines[0]!.getBounds()).toMatchObject({ x: 2 * TILE, y: 2 * TILE, width: 3 * TILE, height: 3 * TILE });
+    expect(pick.input).not.toBeNull();
+    expect(outlines[0]!.input).toBeNull();
+
+    bridge.emitCommand('layoutedit', null);
+    expect(scene.children.list.filter((child) => child.name === LAYOUT_OUTLINE_NAME)).toEqual([]);
   });
 
   it('un clic en el mapa mientras se coloca emite layoutplace con la posicion encajada', async () => {
