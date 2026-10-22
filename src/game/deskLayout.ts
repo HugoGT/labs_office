@@ -15,3 +15,15 @@
 export function deskZoneName(deskId: string): string {
   return `desk:${deskId}`;
 }
+
+/**
+ * The desk under a world point, for the hover banner. A plain hit test and not
+ * an interactive zone: an interactive object under the pointer stops the map's
+ * double click from walking there, and a colleague's desk is where one walks to.
+ */
+export function deskAt<T extends { x: number; y: number; w: number; h: number }>(
+  point: { x: number; y: number },
+  desks: readonly T[],
+): T | null {
+  return desks.find((desk) => point.x >= desk.x && point.x < desk.x + desk.w && point.y >= desk.y && point.y < desk.y + desk.h) ?? null;
+}

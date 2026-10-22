@@ -847,6 +847,18 @@ async function advanceGameClock(scene: Phaser.Scene, ms: number): Promise<void> 
   }, LOOP_WAIT);
 }
 
+/** Waits until the following camera stops moving, so a world point keeps its place on screen. */
+async function settleCamera(scene: Phaser.Scene): Promise<void> {
+  let last = '';
+  for (let i = 0; i < 40; i++) {
+    await advanceGameClock(scene, 100);
+    const view = scene.cameras.main.worldView;
+    const now = `${view.x},${view.y},${scene.cameras.main.zoom}`;
+    if (now === last) return;
+    last = now;
+  }
+}
+
 async function bootOfficeScene(
   bridge = createOfficeBridge(),
   options: OfficeSceneOptions = {},
@@ -2988,12 +3000,33 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
     return { id: `id-${displayName ?? 'anonimo'}`, displayName };
   }
 
-  function fakePointer(): Phaser.Input.Pointer {
-    return { event: { stopPropagation: vi.fn() } } as unknown as Phaser.Input.Pointer;
-  }
-
   function findZone(scene: Phaser.Scene, deskId: string): Phaser.GameObjects.Rectangle | null {
     return scene.children.getByName(deskZoneName(deskId)) as Phaser.GameObjects.Rectangle | null;
+  }
+
+  /**
+   * A free desk at the bottom left of the main camera's view. The test canvas
+   * is small and the minimap covers most of it: only the bottom rows of the
+   * desk (`bottomOf`) are under the main camera alone.
+   */
+  async function deskInView(scene: Phaser.Scene): Promise<OfficeDesk> {
+    await settleCamera(scene);
+    const view = scene.cameras.main.worldView;
+    return servedDesk({ x: Math.round(view.x + 8), y: Math.round(view.bottom - 3 * TILE - 4) });
+  }
+
+  function bottomOf(desk: OfficeDesk, dx = 4): { x: number; y: number } {
+    return { x: desk.x + dx, y: desk.y + desk.h - 4 };
+  }
+
+  /** Moves the mouse over the main camera to a world point, as Phaser would. */
+  function pointAt(scene: Phaser.Scene, world: { x: number; y: number }): void {
+    const camera = scene.cameras.main;
+    scene.input.activePointer.position.set(
+      camera.x + (world.x - camera.worldView.x) * camera.zoom,
+      camera.y + (world.y - camera.worldView.y) * camera.zoom,
+    );
+    scene.input.emit('pointermove', scene.input.activePointer);
   }
 
   function countZones(scene: Phaser.Scene): number {
@@ -3145,74 +3178,97 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
     expect(findZone(scene, 'id-mesa')!.depth).toBe(DESK_ZONE_DEPTH);
   });
 
-  it('clicar un escritorio libre pide cogerlo', async () => {
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge);
-    const clicks: unknown[] = [];
-    bridge.on('deskclick', (payload) => clicks.push(payload));
-
-    bridge.emitCommand('desks', { desks: [servedDesk()] });
-    findZone(scene, 'id-mesa')!.emit('pointerdown', fakePointer());
-
-    // La escena sabe que hay dibujado; quien habla con el servidor es React.
-    expect(clicks).toEqual([{ deskId: 'id-mesa', label: 'Mesa 4', action: 'claim' }]);
-  });
-
-  it('clicar el propio ofrece dejarlo', async () => {
+  it('no zone takes the pointer, so a double click still walks onto any desk', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge, { playerName: 'Ana Torres' });
-    const clicks: unknown[] = [];
-    bridge.on('deskclick', (payload) => clicks.push(payload));
 
     bridge.emitCommand('desks', {
-      desks: [servedDesk({ occupant: occupant('Ana Torres'), mine: true })],
+      desks: [
+        servedDesk({ id: 'libre' }),
+        servedDesk({ id: 'mia', x: 20 * TILE, occupant: occupant('Ana Torres'), mine: true }),
+        servedDesk({ id: 'ajena', x: 30 * TILE, occupant: occupant('Luis Paz') }),
+      ],
     });
-    findZone(scene, 'id-mesa')!.emit('pointerdown', fakePointer());
 
-    expect(clicks).toEqual([{ deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }]);
+    for (const id of ['libre', 'mia', 'ajena']) expect(findZone(scene, id)!.input).toBeNull();
   });
 
-  it('clicar el de otra persona no hace nada', async () => {
-    // Ni siquiera se hace clicable: un escritorio ajeno no tiene ninguna
-    // accion que ofrecer, y `release` solo suelta el propio.
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge, { playerName: 'Ana Torres' });
-    const clicks: unknown[] = [];
-    bridge.on('deskclick', (payload) => clicks.push(payload));
-
-    bridge.emitCommand('desks', { desks: [servedDesk({ occupant: occupant('Luis Paz') })] });
-    const zone = findZone(scene, 'id-mesa')!;
-    zone.emit('pointerdown', fakePointer());
-
-    expect(zone.input).toBeNull();
-    expect(clicks).toEqual([]);
-  });
-
-  it('un clic que llega por el minimapa no ofrece el escritorio: solo mueve la camara (#98)', async () => {
+  it('with the pointer over a desk, says which one and where its top edge is on the page', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
-    const clicks: unknown[] = [];
-    bridge.on('deskclick', (payload) => clicks.push(payload));
+    const hovers: OfficeEventMap['deskhover'][] = [];
+    bridge.on('deskhover', (payload) => hovers.push(payload));
+    const desk = await deskInView(scene);
+    bridge.emitCommand('desks', { desks: [desk] });
 
-    bridge.emitCommand('desks', { desks: [servedDesk()] });
-    const pointer = { ...fakePointer(), camera: scene.cameras.cameras[1] } as Phaser.Input.Pointer;
-    findZone(scene, 'id-mesa')!.emit('pointerdown', pointer);
+    pointAt(scene, bottomOf(desk));
+    await advanceGameClock(scene, 50);
 
-    expect(clicks).toEqual([]);
+    const hover = hovers.at(-1)!;
+    expect(hover?.deskId).toBe(desk.id);
+    const camera = scene.cameras.main;
+    const canvas = scene.game.canvas.getBoundingClientRect();
+    expect(hover!.x).toBe(Math.round(canvas.left + (desk.x + desk.w / 2 - camera.worldView.x) * camera.zoom));
+    expect(hover!.y).toBe(Math.round(canvas.top + (desk.y - camera.worldView.y) * camera.zoom));
   });
 
-  it('el clic no se cuela al mapa de fondo', async () => {
-    // Mismo `stopPropagation` que el clic de un peer: sin el, el
-    // `pointerdown` de la escena cerraria el menu contextual a la vez.
+  it('says null once the pointer leaves the desk, and only once', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
-    const pointer = fakePointer();
+    const hovers: OfficeEventMap['deskhover'][] = [];
+    bridge.on('deskhover', (payload) => hovers.push(payload));
+    const desk = await deskInView(scene);
+    bridge.emitCommand('desks', { desks: [desk] });
+    pointAt(scene, bottomOf(desk));
+    await advanceGameClock(scene, 50);
 
-    bridge.emitCommand('desks', { desks: [servedDesk()] });
-    findZone(scene, 'id-mesa')!.emit('pointerdown', pointer);
+    pointAt(scene, bottomOf(desk, desk.w + 4));
+    await advanceGameClock(scene, 100);
 
-    const { stopPropagation } = pointer.event as unknown as { stopPropagation: () => void };
-    expect(stopPropagation).toHaveBeenCalled();
+    expect(hovers.filter((hover) => hover === null)).toHaveLength(1);
+    expect(hovers.at(-1)).toBeNull();
+  });
+
+  it('a pointer over the minimap hovers no desk (#98)', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const hovers: OfficeEventMap['deskhover'][] = [];
+    bridge.on('deskhover', (payload) => hovers.push(payload));
+    const minimap = scene.cameras.cameras[1];
+    const camera = scene.cameras.main;
+    // A desk under the middle of the minimap, in the main camera's world.
+    const under = camera.getWorldPoint(minimap.x + minimap.width / 2, minimap.y + minimap.height / 2);
+    bridge.emitCommand('desks', { desks: [servedDesk({ x: under.x - 48, y: under.y - 48 })] });
+
+    scene.input.activePointer.position.set(minimap.x + minimap.width / 2, minimap.y + minimap.height / 2);
+    scene.input.emit('pointermove', scene.input.activePointer);
+    await advanceGameClock(scene, 50);
+
+    expect(hovers).toEqual([]);
+  });
+
+  it('hovers nothing until the pointer moves onto the map, and nothing once it leaves the canvas', async () => {
+    // Phaser starts the pointer at (0, 0) and calls it "over" the canvas: a
+    // desk under that corner must not show its banner on load.
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const hovers: OfficeEventMap['deskhover'][] = [];
+    bridge.on('deskhover', (payload) => hovers.push(payload));
+    await settleCamera(scene);
+    const view = scene.cameras.main.worldView;
+    const corner = servedDesk({ x: Math.floor(view.x) - 8, y: Math.floor(view.y) - 8 });
+    bridge.emitCommand('desks', { desks: [corner] });
+
+    await advanceGameClock(scene, 50);
+    expect(hovers).toEqual([]);
+
+    scene.input.emit('pointermove', scene.input.activePointer);
+    await advanceGameClock(scene, 50);
+    expect(hovers.at(-1)?.deskId).toBe(corner.id);
+
+    scene.input.emit('gameout');
+    await advanceGameClock(scene, 50);
+    expect(hovers.at(-1)).toBeNull();
   });
 
   it('una lista nueva reemplaza a la anterior en vez de acumularse encima', async () => {
@@ -3441,32 +3497,29 @@ describe('OfficeScene: modo edicion de layout (#74, PR3b)', () => {
     };
   }
 
-  it('mientras se edita, clicar un escritorio no ofrece cogerlo ni soltarlo', async () => {
+  it('mientras se edita, pasar sobre un escritorio no lo ofrece, y el que estaba ofrecido se retira', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
-    const clicks: unknown[] = [];
-    bridge.on('deskclick', (payload) => clicks.push(payload));
+    const hovers: OfficeEventMap['deskhover'][] = [];
+    bridge.on('deskhover', (payload) => hovers.push(payload));
+    await settleCamera(scene);
+    const view = scene.cameras.main.worldView;
+    // The bottom rows of the view: the minimap covers the rest of the small test canvas.
+    const desk = { ...editableDesk(), x: Math.round(view.x + 8), y: Math.round(view.bottom - 3 * TILE - 4) };
+    bridge.emitCommand('desks', { desks: [desk] });
+    const camera = scene.cameras.main;
+    scene.input.activePointer.position.set(
+      (desk.x + 4 - camera.worldView.x) * camera.zoom,
+      (desk.y + desk.h - 4 - camera.worldView.y) * camera.zoom,
+    );
+    scene.input.emit('pointermove', scene.input.activePointer);
+    await advanceGameClock(scene, 50);
+    expect(hovers.at(-1)?.deskId).toBe('id-mesa');
 
     bridge.emitCommand('layoutedit', { pickable: [], selectedId: null, placing: null });
-    bridge.emitCommand('desks', { desks: [editableDesk()] });
+    await advanceGameClock(scene, 50);
 
-    const zone = scene.children.getByName(deskZoneName('id-mesa')) as Phaser.GameObjects.Rectangle;
-    zone.emit('pointerdown', fakePointer());
-
-    expect(clicks).toEqual([]);
-  });
-
-  it('fuera del modo edicion, el clic del escritorio sigue ofreciendo cogerlo (sin regresion)', async () => {
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge);
-    const clicks: unknown[] = [];
-    bridge.on('deskclick', (payload) => clicks.push(payload));
-
-    bridge.emitCommand('desks', { desks: [editableDesk()] });
-    const zone = scene.children.getByName(deskZoneName('id-mesa')) as Phaser.GameObjects.Rectangle;
-    zone.emit('pointerdown', fakePointer());
-
-    expect(clicks).toEqual([{ deskId: 'id-mesa', label: 'Mesa 4', action: 'claim' }]);
+    expect(hovers.at(-1)).toBeNull();
   });
 
   it('un clic en el mapa mientras se coloca emite layoutplace con la posicion encajada', async () => {

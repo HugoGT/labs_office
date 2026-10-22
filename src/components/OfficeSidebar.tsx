@@ -57,8 +57,18 @@ export interface MySpace {
   area: DecorTileRect | null;
   /** `POST /me/decor`; without it (no server) there is nothing to write to. */
   decor?: OfficeDecorPort | null;
-  /** Releases the desk, the same way as the map toast's "Dejarlo". */
+  /** Releases the desk, the same way as the desk banner's "Dejar escritorio". */
   onLeaveDesk?: () => void;
+}
+
+/**
+ * Opens "Personalizar" on one section from outside (the desk banner's "Mi
+ * personaje" and "Decorar"). A new `seq` is a new request, so the same
+ * section opens again after it was closed.
+ */
+export interface SidebarOpenRequest {
+  section: 'character' | 'decor';
+  seq: number;
 }
 
 /** Without a server: no desk to decorate. */
@@ -136,6 +146,8 @@ export interface OfficeSidebarProps {
    * context menu's "Llamar". Without it the list offers no calls.
    */
   onCallPeer?: (sessionId: string, name: string) => void;
+  /** Opens a section of "Personalizar" on each new request. */
+  openRequest?: SidebarOpenRequest | null;
 }
 
 /**
@@ -168,6 +180,7 @@ export function OfficeSidebar({
   contributions,
   character,
   onCallPeer,
+  openRequest = null,
 }: OfficeSidebarProps) {
   const [openPanel, setOpenPanel] = useState<'personalize' | 'people' | null>(null);
   const [query, setQuery] = useState('');
@@ -189,6 +202,12 @@ export function OfficeSidebar({
       setSection((current) => (current === 'decor' && officeDecor) || current === 'spaces' || current === 'terrain' || current === 'collision' ? null : current);
     }
   }, [forceExitLayoutEditing]);
+
+  useEffect(() => {
+    if (openRequest === null) return;
+    setOpenPanel('personalize');
+    setSection(openRequest.section);
+  }, [openRequest]);
 
   const visible = visibleRoster(self, peers, query);
   const canAdminister =

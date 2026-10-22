@@ -126,19 +126,13 @@ export interface OfficeEventMap {
    */
   characterportraits: { bySession: Record<string, string> };
   /**
-   * Alguien hizo clic en un escritorio asignable sobre el que SI hay algo que
-   * hacer (#7, slice 5). Un escritorio ajeno no emite nada: no se ofrece.
-   *
-   * La escena decide `action` y React no la recalcula, por la misma razon que
-   * `respondCall` es UN comando y no dos: quien sabe que hay dibujado y de
-   * quien es cada sitio es la escena, y quien habla con el servidor es React.
-   * Recalcularlo en React exigiria que React mantuviese su propia copia de la
-   * ocupacion y las dos podrian discrepar justo en el instante del clic.
-   *
-   * `label` viaja porque es lo que hay que decirle a quien mira ("cogiste Mesa
-   * 4"), y buscarlo otra vez por id seria pedirle a React esa misma copia.
+   * The assignable desk under the pointer, for its hover banner, with the
+   * client point (CSS px) of the middle of its top edge: the banner sits
+   * there. Re-emitted when that point moves (the camera follows the player);
+   * `null` once the pointer leaves it, leaves the canvas or an editor opens.
+   * Who holds the desk is React's to read from the same `/desks` list it sent.
    */
-  deskclick: { deskId: string; label: string; action: 'claim' | 'release' };
+  deskhover: { deskId: string; x: number; y: number } | null;
   /** A committed occupancy/decor mutation; refetch the authenticated desk list. */
   deskschanged: undefined;
   /**

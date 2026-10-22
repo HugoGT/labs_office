@@ -33,7 +33,7 @@ import {
   SPACE_SHADE_DEPTH,
   worldAssetDepth,
 } from './depthLayers';
-import { deskZoneName } from './deskLayout';
+import { deskAt, deskZoneName } from './deskLayout';
 import { SPACE_SHADE_ALPHA, SPACE_SHADE_NAME, shadeAround, shadeKey } from './spaceFocus';
 import { tableFacing, tableFloorRect } from './deskTable';
 import { decorChairs, decorFootprint, encodeOfficeDecor, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
@@ -403,7 +403,7 @@ export class OfficeScene extends Phaser.Scene {
   private peerGroup?: Phaser.GameObjects.Group;
   /**
    * Si el modo edicion esta activo (#74, PR3b): la UNICA cosa que la escena
-   * necesita saber de el para suspender claim/release en `drawDesk`. Todo lo
+   * necesita saber de el para suspender el banner de `updateDeskHover`. Todo lo
    * demas -- que dibujar, que es pickable, donde va el ghost -- lo sigue
    * `layoutEditLayer` por su cuenta desde el mismo comando `layoutedit`.
    */
@@ -436,6 +436,12 @@ export class OfficeScene extends Phaser.Scene {
    * encima dejaria pintado como ocupado un sitio que alguien acaba de soltar.
    */
   private deskObjects: Phaser.GameObjects.GameObject[] = [];
+  /** The last `desks` list, for the hover banner's hit test (`updateDeskHover`). */
+  private desks: readonly OfficeDesk[] = [];
+  /** Whether the pointer moved over the canvas since it last left it (`updateDeskHover`). */
+  private pointerOnMap = false;
+  /** What the last `deskhover` said, so it is only sent again when it changes. */
+  private deskHoverKey: string | null = null;
   /** The shade outside the player's space and what it was drawn for (`updateSpaceShade`). */
   private spaceShade: Phaser.GameObjects.Rectangle[] = [];
   private spaceShadeKey: string | null = null;
@@ -1485,6 +1491,7 @@ export class OfficeScene extends Phaser.Scene {
     // A desk places no collision of its own (#208): what stands on it is decor.
     for (const object of this.deskObjects.splice(0)) object.destroy();
     for (const desk of desks) this.drawDesk(desk);
+    this.desks = desks;
     this.deskAreas = desks.map((desk) => ({ x: Math.round(desk.x / TILE), y: Math.round(desk.y / TILE), w: Math.round(desk.w / TILE), h: Math.round(desk.h / TILE) }));
   }
 
@@ -1557,7 +1564,7 @@ export class OfficeScene extends Phaser.Scene {
     const depth = worldAssetDepth(bottom);
 
     // A floor marker (step 6): at the furniture's depth it would veil
-    // whoever sits at the desk. Unfilled, it still takes the pointer.
+    // whoever sits at the desk. Never interactive: the hover is `updateDeskHover`'s.
     const zone = this.add
       .rectangle(desk.x + desk.w / 2, desk.y + desk.h / 2, desk.w, desk.h)
       .setDepth(DESK_ZONE_DEPTH)
@@ -1579,29 +1586,6 @@ export class OfficeScene extends Phaser.Scene {
       this.deskObjects.push(label);
     }
 
-    // Un escritorio ajeno no se hace clicable siquiera: no tiene ninguna
-    // accion que ofrecer, y `release` solo suelta el propio.
-    if (desk.occupant !== null && !mine) return;
-
-    zone.setInteractive();
-    zone.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      // #74, PR3b: en modo edicion, un clic sobre un escritorio es cosa del
-      // editor de layout (`layoutEditLayer`, que ya escucha su propio
-      // `pointerdown` global), no una oferta de coger/soltar. Se retorna sin
-      // `stopPropagation` para no tragarse el clic que el editor necesita.
-      if (this.layoutEditing) return;
-      // #98: por el minimapa el clic es navegacion (`CameraPanLayer`), no
-      // una oferta de coger/soltar un escritorio que ahi mide unos pixeles.
-      if (pointer.camera && pointer.camera !== this.cameras.main) return;
-      // Mismo `stopPropagation` que el clic de un peer: sin el, el
-      // `pointerdown` de la escena cerraria el menu contextual a la vez.
-      pointer.event.stopPropagation();
-      this.bridge.emit('deskclick', {
-        deskId: desk.id,
-        label: desk.label,
-        action: mine ? 'release' : 'claim',
-      });
-    });
   }
 
   /**
@@ -1994,7 +1978,11 @@ export class OfficeScene extends Phaser.Scene {
         }
       },
     );
+    // The hover banner reads the pointer only once it really is on the map:
+    // until the first move Phaser places it at (0, 0) and calls it "over".
+    this.input.on('gameout', () => { this.pointerOnMap = false; });
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      this.pointerOnMap = true;
       // Once it was a drag, returning to its origin must not turn it into a click.
       if (pointer === this.walkClick && pointer.getDistance() > PAN_THRESHOLD_PX) this.walkClick = undefined;
     });
@@ -2206,6 +2194,37 @@ export class OfficeScene extends Phaser.Scene {
     }
     this.mmMarker?.setPosition(this.player.x, this.player.y);
     this.updateSpaceShade();
+    this.updateDeskHover();
+  }
+
+  /**
+   * Tells React which desk is under the pointer and where its top edge is on
+   * screen (`deskhover`), every frame since the camera moves under a still
+   * pointer. A hit test on the served areas, not interactive zones
+   * (`deskAt`). Nothing while an editor is open, the pointer is off the canvas
+   * or over the minimap.
+   */
+  private updateDeskHover(): void {
+    const camera = this.cameras.main;
+    const pointer = this.input.activePointer;
+    const overMap = !this.layoutEditing && this.pointerOnMap && this.cameras.getCamerasBelowPointer(pointer)[0] === camera;
+    const desk = overMap ? deskAt(camera.getWorldPoint(pointer.x, pointer.y), this.desks) : null;
+    if (desk === null) {
+      if (this.deskHoverKey !== null) this.bridge.emit('deskhover', null);
+      this.deskHoverKey = null;
+      return;
+    }
+
+    // Game pixels to CSS pixels of the page: the canvas may be offset or scaled.
+    const canvas = this.game.canvas.getBoundingClientRect();
+    const scaleX = canvas.width / this.scale.width;
+    const scaleY = canvas.height / this.scale.height;
+    const x = Math.round(canvas.left + (camera.x + (desk.x + desk.w / 2 - camera.worldView.x) * camera.zoom) * scaleX);
+    const y = Math.round(canvas.top + (camera.y + (desk.y - camera.worldView.y) * camera.zoom) * scaleY);
+    const key = `${desk.id}:${x},${y}`;
+    if (key === this.deskHoverKey) return;
+    this.deskHoverKey = key;
+    this.bridge.emit('deskhover', { deskId: desk.id, x, y });
   }
 
   /**

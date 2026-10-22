@@ -742,6 +742,22 @@ describe('OfficeSidebar: my character', () => {
     vi.restoreAllMocks();
   });
 
+  it('a request from the desk banner opens "Mi personaje" directly, and a new one opens it again', async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+    const user = userEvent.setup();
+    const props = { self: SELF, peers: [ANA, BETO], role: 'employee' as const, character: fakeCharacter() };
+    const { rerender } = render(<OfficeSidebar {...props} openRequest={{ section: 'character', seq: 1 }} />);
+
+    expect(screen.getByRole('button', { name: /Personalizar/ })).toHaveAttribute('aria-expanded', 'true');
+    await user.click(within(await screen.findByRole('dialog', { name: 'Mi personaje' })).getByRole('button', { name: 'Cancelar' }));
+    await user.click(screen.getByRole('button', { name: 'Cerrar' }));
+
+    rerender(<OfficeSidebar {...props} openRequest={{ section: 'character', seq: 2 }} />);
+
+    expect(await screen.findByRole('dialog', { name: 'Mi personaje' })).toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
   it('without a character port (no server, or no session) there is no "Mi personaje"', async () => {
     const user = userEvent.setup();
     renderSidebar({ role: 'employee' });

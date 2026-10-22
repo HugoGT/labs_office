@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAssetAdminClient } from '../dashboard/assetAdminClient';
@@ -11,6 +11,7 @@ import { createGame } from '../game/createGame';
 import { createOfficeDecorClient } from '../game/officeDecorClient';
 import { claimDesk, fetchOfficeDesks, releaseDesk } from '../game/desksClient';
 import type { OfficeDesk } from '../game/desksPort';
+import type { OfficeBridge } from '../game/officeBridge';
 import { BUILT_IN_SPACES_VERSION } from '../game/mapData';
 import { zoomView, type ZoomAction } from '../game/mapZoom';
 import { DEFAULT_NAME } from '../game/officeProtocol';
@@ -1065,14 +1066,37 @@ describe('OfficeShell: escritorios asignables (#7, slice 5)', () => {
     expect(listas.every(({ desks }) => desks.length === 0)).toBe(true);
   });
 
-  it('clicar un escritorio libre lo coge y lo dice', async () => {
+  /** The scene says the pointer is over a desk; the banner waits for the list that names it. */
+  async function hoverDesk(bridge: OfficeBridge, deskId = 'id-mesa'): Promise<void> {
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalled());
+    await act(async () => {});
+    act(() => bridge.emit('deskhover', { deskId, x: 200, y: 150 }));
+  }
+
+  it('pasar sobre un escritorio libre ofrece reclamarlo, y reclamarlo lo coge y lo dice', async () => {
     render(<OfficeShell session={SESION} />);
     const bridge = createGameMock.mock.calls[0][1];
+    await hoverDesk(bridge);
 
-    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'claim' }));
+    expect(screen.getByText('Escritorio Libre')).toBeInTheDocument();
+    expect(claimDesk).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Reclamar escritorio' }));
 
     expect(await screen.findByText(/Te sentaste en/)).toBeInTheDocument();
     expect(claimDesk).toHaveBeenCalledWith(expect.objectContaining({ deskId: 'id-mesa' }));
+    expect(screen.queryByText('Escritorio Libre')).not.toBeInTheDocument();
+  });
+
+  it('con un escritorio propio no ofrece reclamar otro', async () => {
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([
+      MESA,
+      { ...MESA, id: 'id-mia', x: 640, occupant: { id: 'id-ana', displayName: 'Ana Torres' }, mine: true },
+    ]);
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await hoverDesk(bridge);
+
+    expect(screen.getByRole('button', { name: 'Reclamar escritorio' })).toBeDisabled();
   });
 
   it('un 409 dice que alguien se adelanto y vuelve a leer la lista', async () => {
@@ -1081,9 +1105,10 @@ describe('OfficeShell: escritorios asignables (#7, slice 5)', () => {
     vi.mocked(claimDesk).mockResolvedValue('taken');
     render(<OfficeShell session={SESION} />);
     const bridge = createGameMock.mock.calls[0][1];
-    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(1));
+    await hoverDesk(bridge);
+    expect(fetchOfficeDesks).toHaveBeenCalledTimes(1);
 
-    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'claim' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Reclamar escritorio' }));
 
     expect(await screen.findByText(/se adelant/)).toBeInTheDocument();
     await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(2));
@@ -1093,34 +1118,65 @@ describe('OfficeShell: escritorios asignables (#7, slice 5)', () => {
     vi.mocked(claimDesk).mockResolvedValue('failed');
     render(<OfficeShell session={SESION} />);
     const bridge = createGameMock.mock.calls[0][1];
+    await hoverDesk(bridge);
 
-    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'claim' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Reclamar escritorio' }));
 
     expect(await screen.findByText(/No se pudo coger/)).toBeInTheDocument();
   });
 
-  it('clicar el propio OFRECE dejarlo, no lo suelta por su cuenta', async () => {
+  it('pasar sobre el propio OFRECE dejarlo, no lo suelta por su cuenta', async () => {
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([{ ...MESA, occupant: { id: 'id-ana', displayName: 'Ana Torres' }, mine: true }]);
     render(<OfficeShell session={SESION} />);
     const bridge = createGameMock.mock.calls[0][1];
+    await hoverDesk(bridge);
 
-    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
-
-    expect(await screen.findByRole('button', { name: /Dejarlo/ })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Ana Torres' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Dejar escritorio' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Llamar/ })).not.toBeInTheDocument();
     expect(releaseDesk).not.toHaveBeenCalled();
   });
 
   it('aceptar la oferta suelta el escritorio y vuelve a leer la lista', async () => {
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([{ ...MESA, occupant: { id: 'id-ana', displayName: 'Ana Torres' }, mine: true }]);
     render(<OfficeShell session={SESION} />);
     const bridge = createGameMock.mock.calls[0][1];
-    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(1));
-    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+    await hoverDesk(bridge);
 
-    await userEvent.click(await screen.findByRole('button', { name: /Dejarlo/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Dejar escritorio' }));
 
     // Sin id: el servidor suelta el de la identidad verificada de quien llama.
     expect(releaseDesk).toHaveBeenCalledWith(expect.not.objectContaining({ deskId: 'id-mesa' }));
     expect(await screen.findByText(/Dejaste/)).toBeInTheDocument();
     await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(2));
+  });
+
+  it('pasar sobre el de alguien conectado ofrece llamarle, y nada mas', async () => {
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([{ ...MESA, occupant: { id: 'id-luis', displayName: 'Luis Paz' } }]);
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const calls: unknown[] = [];
+    bridge.onCommand('callPeer', (command) => calls.push(command));
+    act(() => bridge.emit('roster', { peers: [{ sessionId: 's-luis', name: 'Luis Paz', status: 'g' }] }));
+    await hoverDesk(bridge);
+
+    const banner = screen.getByRole('dialog', { name: 'Luis Paz' });
+    expect(within(banner).getAllByRole('button')).toHaveLength(1);
+    await userEvent.click(within(banner).getByRole('button', { name: 'Llamar a Luis Paz' }));
+
+    expect(calls).toEqual([{ sessionId: 's-luis' }]);
+    expect(await screen.findByText(/Llamando a/)).toBeInTheDocument();
+  });
+
+  it('el banner se va al salir del escritorio', async () => {
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await hoverDesk(bridge);
+    expect(screen.getByText('Escritorio Libre')).toBeInTheDocument();
+
+    act(() => bridge.emit('deskhover', null));
+
+    await vi.waitFor(() => expect(screen.queryByText('Escritorio Libre')).not.toBeInTheDocument());
   });
 });
 
@@ -1155,16 +1211,17 @@ describe('OfficeShell: Decoración for one desk', () => {
     await user.click(screen.getByRole('button', { name: 'Decoración' }));
   }
 
-  it('clicar el propio escritorio solo ofrece dejarlo: decorar vive en "Decoración"', async () => {
+  it('"Decorar" in the own desk banner opens "Decoración" on that desk', async () => {
     render(<OfficeShell session={SESION} />);
     const bridge = createGameMock.mock.calls[0][1];
     await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalled());
     await act(async () => {});
+    act(() => bridge.emit('deskhover', { deskId: 'id-mesa', x: 200, y: 150 }));
 
-    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Decorar' }));
 
-    expect(await screen.findByRole('button', { name: /Dejarlo/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Decorar/ })).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Decoración' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Ana Torres' })).not.toBeInTheDocument();
   });
 
   it('sin escritorio propio "Decoración" pide reclamar uno libre', async () => {
@@ -1205,12 +1262,15 @@ describe('OfficeShell: Decoración for one desk', () => {
     expect(await screen.findByText(/Dejaste/)).toBeInTheDocument();
   });
 
-  it('clicar un escritorio libre lo coge y recuerda donde se decora', async () => {
+  it('reclamar un escritorio libre lo coge y recuerda donde se decora', async () => {
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([{ ...MIA, id: 'id-otra', label: '', occupant: null, mine: false }]);
     render(<OfficeShell session={SESION} />);
     const bridge = createGameMock.mock.calls[0][1];
     await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalled());
+    await act(async () => {});
+    act(() => bridge.emit('deskhover', { deskId: 'id-otra', x: 200, y: 150 }));
 
-    act(() => bridge.emit('deskclick', { deskId: 'id-otra', label: '', action: 'claim' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Reclamar escritorio' }));
 
     expect(await screen.findByText(/Te sentaste en/)).toHaveTextContent('Te sentaste en este escritorio · Decóralo en Personalizar › Decoración');
   });
@@ -1551,18 +1611,19 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
     }
   });
 
-  it('mientras se edita, un deskclick del propio escritorio no ofrece dejarlo ni decorarlo', async () => {
+  it('mientras se edita, pasar sobre el propio escritorio no ofrece dejarlo ni decorarlo', async () => {
     const user = userEvent.setup();
     render(<OfficeShell session={SESION} />);
     const bridge = createGameMock.mock.calls[0][1];
     await openSidebar(user);
     await user.click(await screen.findByRole('button', { name: 'Editar espacios' }));
     await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalled());
+    await act(async () => {});
 
-    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+    act(() => bridge.emit('deskhover', { deskId: 'id-mesa', x: 200, y: 150 }));
 
-    expect(screen.queryByRole('button', { name: /Dejarlo/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Decorar/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Dejar escritorio' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Decorar' })).not.toBeInTheDocument();
     expect(vi.mocked(releaseDesk)).not.toHaveBeenCalled();
   });
 
@@ -1570,12 +1631,12 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
    * `layoutEditing` en `OfficeShell` viene de `onLayoutEditingChange`, que
    * `OfficeLayoutEditor` ya calcula como "cualquiera de las dos secciones"
    * (deski O sala). Este test es el mismo que "mientras se edita, un
-   * deskclick no abre..." de arriba pero entrando por SALAS en vez de
+   * deskhover no abre..." de arriba pero entrando por SALAS en vez de
    * escritorios (#74, PR4 correction): prueba que ese "cualquiera de las
-   * dos" de verdad suspende `deskclick` tambien cuando quien edita es la
+   * dos" de verdad suspende el banner tambien cuando quien edita es la
    * seccion de salas, no solo la de escritorios.
    */
-  it('mientras se edita SALAS, un deskclick no abre el editor de decoracion ni ofrece dejar el sitio', async () => {
+  it('mientras se edita SALAS, pasar sobre un escritorio no abre el editor de decoracion ni ofrece dejar el sitio', async () => {
     const user = userEvent.setup();
     render(<OfficeShell session={SESION} />);
     const bridge = createGameMock.mock.calls[0][1];
@@ -1587,10 +1648,10 @@ describe('OfficeShell: exclusividad del editor de layout (#74, PR3c)', () => {
     await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalled());
     await act(async () => {});
 
-    act(() => bridge.emit('deskclick', { deskId: 'id-mesa', label: 'Mesa 4', action: 'release' }));
+    act(() => bridge.emit('deskhover', { deskId: 'id-mesa', x: 200, y: 150 }));
 
-    expect(screen.queryByRole('button', { name: /Dejarlo/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Decorar/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Dejar escritorio' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Decorar' })).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(vi.mocked(releaseDesk)).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: /Salir/ })).toBeInTheDocument();
