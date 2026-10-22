@@ -13,6 +13,7 @@ import {
   startHarness,
   teleportToTile,
   waitForAudioAvailable,
+  waitForNewVoicePeer,
   waitForNoPeerAudio,
   waitForOnlineCount,
   waitForPeerAudioPlaying,
@@ -128,9 +129,12 @@ test(
 /**
  * #185: the people already in the office heard a newcomer seconds after the
  * newcomer heard them (a join with the fallback spaces version, a first voice
- * from the spawn instead of the restored position). Both directions are timed
- * from the same instant and the present peer may lag by less than the 5 s slow
- * token retry (`SLOW_RETRY_MS`), the delay that asymmetry used to show.
+ * from the spawn instead of the restored position). That asymmetry lived in
+ * the audible sets, so those are what is timed, both from before the newcomer
+ * opens the office: the present peer may lag by less than the 5 s slow token
+ * retry (`SLOW_RETRY_MS`), the delay it used to show. Playback is not timed:
+ * hearing a newcomer also waits for its microphone to publish, work the other
+ * direction never does, and on a loaded CI runner that alone took about 3 s.
  */
 const NEWCOMER_LAG_BUDGET_MS = 2500;
 
@@ -141,26 +145,31 @@ test(
     const contextC = await harness.newContext();
     try {
       const pageC = await contextC.newPage();
+      const started = Date.now();
       await pageC.goto(harness.previewUrl);
-      await waitForAudioAvailable(pageC);
-      await enableMic(pageC);
-      await waitForOnlineCount(pageC, 2);
+      const [[presentWants, presentWantsAt], [newcomerWants, newcomerWantsAt]] = await Promise.all([
+        waitForNewVoicePeer(pageA, [peerBId]).then((id) => [id, Date.now() - started]),
+        waitForNewVoicePeer(pageC, []).then((id) => [id, Date.now() - started]),
+      ]);
       const peerCId = await getOwnSessionId(pageC);
       assert.ok(
         typeof peerCId === 'string' && peerCId.length > 0,
         'expected pageC to report its own session id via lastVoice()',
       );
-
-      const started = Date.now();
-      const [presentHearsNewcomerAt, newcomerHearsPresentAt] = await Promise.all([
-        waitForPeerAudioPlaying(pageA, peerCId).then(() => Date.now() - started),
-        waitForPeerAudioPlaying(pageC, peerAId).then(() => Date.now() - started),
-      ]);
+      assert.equal(presentWants, peerCId, 'expected A to want the newcomer');
+      assert.equal(newcomerWants, peerAId, 'expected the newcomer to want A');
       assert.ok(
-        presentHearsNewcomerAt - newcomerHearsPresentAt < NEWCOMER_LAG_BUDGET_MS,
-        `expected A to hear the newcomer within ${NEWCOMER_LAG_BUDGET_MS} ms of the newcomer hearing A, ` +
-          `got ${presentHearsNewcomerAt} ms vs ${newcomerHearsPresentAt} ms`,
+        presentWantsAt - newcomerWantsAt < NEWCOMER_LAG_BUDGET_MS,
+        `expected A to want the newcomer within ${NEWCOMER_LAG_BUDGET_MS} ms of the newcomer wanting A, ` +
+          `got ${presentWantsAt} ms vs ${newcomerWantsAt} ms`,
       );
+
+      await waitForAudioAvailable(pageC);
+      await enableMic(pageC);
+      await Promise.all([
+        waitForPeerAudioPlaying(pageA, peerCId),
+        waitForPeerAudioPlaying(pageC, peerAId),
+      ]);
     } finally {
       await contextC.close();
     }

@@ -572,6 +572,20 @@ export async function getOwnSessionId(page) {
   return page.evaluate(() => window.__officeE2E?.lastVoice()?.selfSessionId ?? null);
 }
 
+/** Resolves with the first session id in the page's audible set (its last
+ * `voice`, what LiveKit subscribes to) that is not in `known`. */
+export async function waitForNewVoicePeer(page, known) {
+  const handle = await page.waitForFunction(
+    (ids) => {
+      const peers = window.__officeE2E?.lastVoice()?.peers ?? [];
+      return peers.find((peer) => !ids.includes(peer.sessionId))?.sessionId ?? false;
+    },
+    known,
+    { timeout: READINESS_DEADLINE_MS, polling: READINESS_POLL_INTERVAL_MS },
+  );
+  return handle.jsonValue();
+}
+
 /**
  * D6: a REAL Playwright click on the Mic button, located by text (same idiom
  * as `waitForAudioUnavailable`'s button lookup). Se usa un click real y no
