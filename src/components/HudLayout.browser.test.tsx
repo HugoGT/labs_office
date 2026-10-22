@@ -430,6 +430,11 @@ describe('HUD layout: exit controls with "Instalar app" (#13)', () => {
 });
 
 describe('HUD layout: open sidebar and the bottom row (#86)', () => {
+  // The bar height reaches the sidebar through a ResizeObserver, which fires only
+  // on the next rendered frame; a loaded CI runner can go past the default 1 s
+  // poll without rendering one.
+  const RESIZE_POLL = { timeout: 5000 };
+
   it('the open panel stops above the bottom bar and the exit controls, however tall the bar gets', async () => {
     // 720px is the tightest width that still docks the sidebar.
     for (const width of [720, NARROW, 1199, 1200, WIDE, 1920]) {
@@ -439,7 +444,7 @@ describe('HUD layout: open sidebar and the bottom row (#86)', () => {
       await renderOpenSidebar();
 
       await expect
-        .poll(() => box(sidebar()).bottom, { message: `at ${width}px` })
+        .poll(() => box(sidebar()).bottom, { ...RESIZE_POLL, message: `at ${width}px` })
         .toBeLessThanOrEqual(Math.min(box(bar).top, box(exits).top));
       cleanup();
     }
@@ -454,7 +459,7 @@ describe('HUD layout: open sidebar and the bottom row (#86)', () => {
     // Stands in for anything that makes the bar taller: fonts, zoom, wrapping.
     bar.style.height = '300px';
 
-    await expect.poll(() => box(sidebar()).bottom).toBeLessThanOrEqual(box(bar).top);
+    await expect.poll(() => box(sidebar()).bottom, RESIZE_POLL).toBeLessThanOrEqual(box(bar).top);
   });
 
   it('on very small screens the open sidebar covers the whole screen, bottom row included', async () => {
