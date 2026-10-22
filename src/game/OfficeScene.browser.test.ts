@@ -3102,7 +3102,7 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
     expect(texts.map((text) => text.text)).toEqual(['Mesa 4']);
   });
 
-  it('el escritorio propio se distingue del de otra persona', async () => {
+  it('no desk carries a tint: free, own or someone else\'s', async () => {
     // Cual es el propio lo dice el SERVIDOR (`mine`), que es quien sabe quien
     // pregunta. La escena lo lee, no lo deduce.
     const bridge = createOfficeBridge();
@@ -3115,37 +3115,14 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
       ],
     });
 
-    // The own desk carries no tint: being inside it is what shades the rest.
-    expect(findZone(scene, 'mia')!.isFilled).toBe(false);
-    expect(findZone(scene, 'mia')!.isStroked).toBe(false);
-    expect(findZone(scene, 'ajena')!.isFilled).toBe(true);
+    // Being inside a desk shades the rest, and hovering it says whose it is.
+    for (const id of ['mia', 'ajena']) {
+      expect(findZone(scene, id)!.isFilled).toBe(false);
+      expect(findZone(scene, id)!.isStroked).toBe(false);
+    }
   });
 
-  it('un homonimo NO hereda tu escritorio: manda `mine`, no el nombre', async () => {
-    // El pin de regresion de esta slice. Decidir la pertenencia comparando el
-    // nombre visible es lo que la slice 1 de esta misma issue retiro de
-    // `proximityAudio.ts`: alli un renombrado cambiaba en silencio quien oye a
-    // quien, y aqui cambiaria de manos un escritorio. Dos personas del
-    // directorio pueden llamarse igual, y una de ellas puede llamarse como tu
-    // desde que un Admin la renombro.
-    const bridge = createOfficeBridge();
-    const { scene } = await bootOfficeScene(bridge, { playerName: 'Ana Torres' });
-
-    bridge.emitCommand('desks', {
-      desks: [
-        servedDesk({ id: 'homonima', occupant: occupant('Ana Torres'), mine: false }),
-        servedDesk({ id: 'ajena', x: 20 * TILE, occupant: occupant('Luis Paz') }),
-      ],
-    });
-
-    // Se ve como lo que es: el escritorio de otra persona, y sin nada que
-    // ofrecer al clicarlo.
-    const homonima = findZone(scene, 'homonima')!;
-    expect(homonima.fillColor).toBe(findZone(scene, 'ajena')!.fillColor);
-    expect(homonima.input).toBeNull();
-  });
-
-  it('un escritorio libre se distingue de uno ocupado', async () => {
+  it('a free desk and a taken one both draw without a tint', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
 
@@ -3156,10 +3133,11 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
       ],
     });
 
-    // A free desk carries no tint either: its hover banner says it is free.
-    expect(findZone(scene, 'libre')!.isFilled).toBe(false);
-    expect(findZone(scene, 'libre')!.isStroked).toBe(false);
-    expect(findZone(scene, 'ocupada')!.isFilled).toBe(true);
+    // Its hover banner says it is free.
+    for (const id of ['libre', 'ocupada']) {
+      expect(findZone(scene, id)!.isFilled).toBe(false);
+      expect(findZone(scene, id)!.isStroked).toBe(false);
+    }
   });
 
   it('la profundidad es el borde inferior, misma convencion que el mobiliario del mapa', async () => {

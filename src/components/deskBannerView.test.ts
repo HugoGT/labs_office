@@ -42,6 +42,12 @@ describe('deskBannerView', () => {
     });
   });
 
+  it('a namesake does not inherit the own desk: `mine` decides, not the name', () => {
+    const namesake = desk({ occupant: { id: 'u-otra-ana', displayName: 'Ana Torres' }, mine: false });
+
+    expect(deskBannerView(namesake, { self: SELF, peers: [], desks: [namesake] })).toMatchObject({ kind: 'taken' });
+  });
+
   it('someone else connected can be called, found by their directory name', () => {
     const taken = desk({ occupant: LUIS });
     // The room name and the directory name differ only in case and spacing.

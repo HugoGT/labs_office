@@ -144,14 +144,6 @@ const WALK_STEP_PX = 3;
 const PROXIMITY_TICK_MS = 250;
 /** Suavizado de `startFollow` (#53): compartido entre `setupCameras` y el `resumeFollow` de `CameraPanLayer`. */
 const FOLLOW_LERP = 0.12;
-/**
- * Tint of a desk held by someone else (#7, slice 5). Free and own desks carry
- * none: the shade outside the player's space (`spaceFocus.ts`) shows where
- * one is, and hovering a desk says whose it is.
- */
-const DESK_TAKEN_COLOR = 0x6b7280;
-const DESK_FILL_ALPHA = 0.22;
-const DESK_STROKE_WIDTH = 2;
 /** A piece that cannot be drawn yet (or ever) still shows where it goes. */
 /** Name of what the decor layer draws for the non-chair item anchored on `index` (chairs are `CHAIR_OBJECT_NAME`). */
 export function decorObjectName(index: number): string {
@@ -1554,24 +1546,16 @@ export class OfficeScene extends Phaser.Scene {
    * (#70, `depthLayers.ts`), so whoever walks over the desk is never hidden.
    */
   private drawDesk(desk: OfficeDesk): void {
-    // Lo contesta el servidor y la escena lo lee (`OfficeDesk.mine`). Deducirlo
-    // comparando `occupant.displayName` con el nombre del jugador local haria
-    // que renombrar a alguien cambiase de manos un escritorio en pantalla --
-    // la misma trampa que la slice 1 de esta issue retiro de
-    // `proximityAudio.ts`.
-    const mine = desk.mine;
     const bottom = desk.y + desk.h;
     const depth = worldAssetDepth(bottom);
 
-    // A floor marker (step 6): at the furniture's depth it would veil
-    // whoever sits at the desk. Never interactive: the hover is `updateDeskHover`'s.
+    // A floor marker (step 6) with no tint: the shade outside the player's
+    // space (`spaceFocus.ts`) shows where one is, and the hover banner whose
+    // desk it is. Never interactive: the hover is `updateDeskHover`'s.
     const zone = this.add
       .rectangle(desk.x + desk.w / 2, desk.y + desk.h / 2, desk.w, desk.h)
       .setDepth(DESK_ZONE_DEPTH)
       .setName(deskZoneName(desk.id));
-    if (desk.occupant !== null && !mine) {
-      zone.setFillStyle(DESK_TAKEN_COLOR, DESK_FILL_ALPHA).setStrokeStyle(DESK_STROKE_WIDTH, DESK_TAKEN_COLOR);
-    }
     this.deskObjects.push(zone);
 
     // A desk created empty has no label (Editar espacios); an older one keeps its own.
