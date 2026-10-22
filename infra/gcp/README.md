@@ -252,6 +252,11 @@ que se notan al operarlo:
 - Si la CI queda **cancelada** (un segundo push a `main` cancela la anterior, por el
   `cancel-in-progress` de `ci.yml`), ese commit no se despliega. Lo hace el siguiente,
   que es el comportamiento que se quiere.
+- La CI del push a `main` se salta el job `verify` cuando un PR de una rama de este
+  repo ya pasó la CI con el mismo árbol exacto (`tools/ci/testedTree.ts`). Pasa al
+  mergear un PR sin que `main` se haya movido: el despliegue arranca en segundos en
+  vez de esperar una segunda corrida completa. Si `main` avanzó, el PR viene de un
+  fork o la comprobación falla, la CI corre entera como antes.
 
 `gh workflow run deploy-test.yml` sigue existiendo y **se salta la CI a propósito**:
 es la vía para redesplegar sin cambiar código (por ejemplo, después de un

@@ -24,9 +24,65 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# `actions: read` lets the push check below look up the artifacts and runs of
+# earlier pull request runs.
+permissions:
+  contents: read
+  actions: read
+
 jobs:
+  # A merged PR used to run this whole workflow twice: once on the PR and again
+  # on the push to main, before deploy-test.yml could start. The PR run tests
+  # `refs/pull/N/merge`; when main did not move before the merge, the commit on
+  # main has that exact tree, so the second run would test the same bytes.
+  # This job proves that from the tree the PR run records (last step of
+  # `verify`) and lets `verify` skip; a skipped job still leaves the workflow
+  # green, which is what deploy-test.yml waits for. If main moved, or the check
+  # cannot tell, `verify` runs as before. Fork runs never count:
+  # tools/ci/testedTree.ts explains why.
+  tested-tree:
+    name: Skip if this tree already passed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Every step may fail without failing the job: a failed job would skip
+    # `verify` (implicit `success()` on `needs`) and leave main red with
+    # nothing deployed, while an empty output just runs the full CI. The step
+    # timeouts add up to well under the job's, because `continue-on-error`
+    # covers a step that times out but not a job that does.
+    outputs:
+      tested: ${{ steps.check.outputs.tested }}
+
+    steps:
+      - name: Checkout the check
+        if: github.event_name == 'push'
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: tools/ci
+
+      - name: Set up Node
+        if: github.event_name == 'push'
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Look for a green pull request run of this tree
+        id: check
+        if: github.event_name == 'push'
+        continue-on-error: true
+        timeout-minutes: 1
+        run: node tools/ci/skipTestedTree.ts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TREE_SHA: ${{ github.event.head_commit.tree_id }}
+
   verify:
     name: Typecheck, tests and build
+    needs: tested-tree
+    if: needs.tested-tree.outputs.tested != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -141,3 +197,23 @@ jobs:
         run: |
           docker rm -f ci-livekit || true
           rm -f infra/livekit/.env
+
+      # Last on purpose: reached only when every step above passed. The empty
+      # artifact's name is the proof the `tested-tree` job looks for on main.
+      - name: Read the tested tree
+        id: tree
+        if: github.event_name == 'pull_request'
+        run: |
+          git rev-parse 'HEAD^{tree}' > tested-tree
+          echo "sha=$(cat tested-tree)" >> "$GITHUB_OUTPUT"
+
+      - name: Record the tested tree
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tested-tree-${{ steps.tree.outputs.sha }}
+          path: tested-tree
+          if-no-files-found: error
+          retention-days: 30
+          # A re-run of a green PR run uploads the same name again.
+          overwrite: true
