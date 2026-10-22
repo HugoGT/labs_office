@@ -30,9 +30,11 @@ import { mergeColliderRects } from './colliderMerge';
 import {
   DESK_ZONE_DEPTH,
   MINIMAP_MARKER_DEPTH,
+  SPACE_SHADE_DEPTH,
   worldAssetDepth,
 } from './depthLayers';
 import { deskZoneName } from './deskLayout';
+import { SPACE_SHADE_ALPHA, SPACE_SHADE_NAME, shadeAround, shadeKey } from './spaceFocus';
 import { tableFacing, tableFloorRect } from './deskTable';
 import { decorChairs, decorFootprint, encodeOfficeDecor, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
 import { deskEntryRefused } from './deskDecorRules';
@@ -143,19 +145,11 @@ const PROXIMITY_TICK_MS = 250;
 /** Suavizado de `startFollow` (#53): compartido entre `setupCameras` y el `resumeFollow` de `CameraPanLayer`. */
 const FOLLOW_LERP = 0.12;
 /**
- * Los tres estados en los que se puede ver un escritorio asignable (#7, slice
- * 5). Es lo unico que los distingue, y basta: un tinte se lee de un vistazo
- * desde cualquier punto del mapa, y esta slice solo dibuja -- el editor de
- * decoracion es otra PR.
+ * Tint of a desk held by someone else (#7, slice 5). Free and own desks carry
+ * none: the shade outside the player's space (`spaceFocus.ts`) shows where
+ * one is, and hovering a desk says whose it is.
  */
-const DESK_COLOR = {
-  /** Libre: se puede coger. */
-  free: 0x22c55e,
-  /** El propio. El unico que se puede soltar. */
-  mine: 0x3b82f6,
-  /** De otra persona. No ofrece nada. */
-  taken: 0x6b7280,
-} as const;
+const DESK_TAKEN_COLOR = 0x6b7280;
 const DESK_FILL_ALPHA = 0.22;
 const DESK_STROKE_WIDTH = 2;
 /** A piece that cannot be drawn yet (or ever) still shows where it goes. */
@@ -442,6 +436,9 @@ export class OfficeScene extends Phaser.Scene {
    * encima dejaria pintado como ocupado un sitio que alguien acaba de soltar.
    */
   private deskObjects: Phaser.GameObjects.GameObject[] = [];
+  /** The shade outside the player's space and what it was drawn for (`updateSpaceShade`). */
+  private spaceShade: Phaser.GameObjects.Rectangle[] = [];
+  private spaceShadeKey: string | null = null;
   /**
    * Every desk area in tiles, from the last `desks` command: a desk holding
    * `MAX_DESK_OCCUPANCY` other people takes the local player in no more
@@ -1556,18 +1553,18 @@ export class OfficeScene extends Phaser.Scene {
     // la misma trampa que la slice 1 de esta issue retiro de
     // `proximityAudio.ts`.
     const mine = desk.mine;
-    const color =
-      desk.occupant === null ? DESK_COLOR.free : mine ? DESK_COLOR.mine : DESK_COLOR.taken;
     const bottom = desk.y + desk.h;
     const depth = worldAssetDepth(bottom);
 
     // A floor marker (step 6): at the furniture's depth it would veil
-    // whoever sits at the desk.
+    // whoever sits at the desk. Unfilled, it still takes the pointer.
     const zone = this.add
-      .rectangle(desk.x + desk.w / 2, desk.y + desk.h / 2, desk.w, desk.h, color, DESK_FILL_ALPHA)
-      .setStrokeStyle(DESK_STROKE_WIDTH, color)
+      .rectangle(desk.x + desk.w / 2, desk.y + desk.h / 2, desk.w, desk.h)
       .setDepth(DESK_ZONE_DEPTH)
       .setName(deskZoneName(desk.id));
+    if (desk.occupant !== null && !mine) {
+      zone.setFillStyle(DESK_TAKEN_COLOR, DESK_FILL_ALPHA).setStrokeStyle(DESK_STROKE_WIDTH, DESK_TAKEN_COLOR);
+    }
     this.deskObjects.push(zone);
 
     // A desk created empty has no label (Editar espacios); an older one keeps its own.
@@ -2208,6 +2205,35 @@ export class OfficeScene extends Phaser.Scene {
       this.connection?.sendMove(this.player.x, this.player.y, this.facing);
     }
     this.mmMarker?.setPosition(this.player.x, this.player.y);
+    this.updateSpaceShade();
+  }
+
+  /**
+   * Shades everything outside the room or desk the player stands in
+   * (`spaceFocus.ts`). Redrawn only when that space changes; an open editor
+   * works on the whole map, so nothing steps back while one is.
+   */
+  private updateSpaceShade(): void {
+    const space = this.layoutEditing ? null : detectSpace({ x: this.player.x, y: this.player.y }, this.spaces);
+    const key = shadeKey(space);
+    if (key === this.spaceShadeKey) return;
+    this.spaceShadeKey = key;
+    for (const rect of this.spaceShade.splice(0)) rect.destroy();
+    if (space === null) return;
+
+    // A whole map past each edge: the camera can show the void around it.
+    const w = this.layout.width * TILE;
+    const h = this.layout.height * TILE;
+    for (const rect of shadeAround(space, { x: -w, y: -h, w: 3 * w, h: 3 * h })) {
+      const shade = this.add
+        .rectangle(rect.x, rect.y, rect.w, rect.h, 0x000000, SPACE_SHADE_ALPHA)
+        .setOrigin(0, 0)
+        .setDepth(SPACE_SHADE_DEPTH)
+        .setName(SPACE_SHADE_NAME);
+      // The minimap shows the whole office, not the player's focus.
+      this.minimapCamera?.ignore(shade);
+      this.spaceShade.push(shade);
+    }
   }
 
   private stepWalking(time: number, delta: number, vx: number, vy: number): void {

@@ -18,6 +18,7 @@ import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SP
 const BUILT_IN_SPACES_VERSION = 'a489c5da5efd7c68';
 import {
   DESK_ZONE_DEPTH,
+  SPACE_SHADE_DEPTH,
   MINIMAP_MARKER_DEPTH,
   avatarDepth,
   chairLayerDepth,
@@ -27,6 +28,7 @@ import { feetOf, physicalBodyRect } from './avatarGeometry';
 import { BODY_CENTER_OFFSET, positionForBodyTile } from './pathfinding';
 import { chairSeatId, mapSeatId } from './seating';
 import { deskZoneName } from './deskLayout';
+import { SPACE_SHADE_NAME } from './spaceFocus';
 import { artSheetKey, recoloredSheetKey } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
 import { buildTerrainGrid } from './terrainGrid';
@@ -2817,6 +2819,45 @@ describe('OfficeScene: config de espacios servida (#7, slice 3)', () => {
     await vi.waitFor(() => expect(rooms.at(-1)?.spaceId).toBe(SERVIDO.id), LOOP_WAIT);
   });
 
+  function visibleShade(scene: Phaser.Scene): Phaser.GameObjects.Rectangle[] {
+    return scene.children.list.filter(
+      (child) => child.name === SPACE_SHADE_NAME && (child as Phaser.GameObjects.Rectangle).visible,
+    ) as Phaser.GameObjects.Rectangle[];
+  }
+
+  it('shades everything outside the space the player stands in, never the space itself', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+
+    bridge.emitCommand('spacesconfig', { spaces: [SERVIDO], version: 'sombra' });
+    await advanceGameClock(scene, 100);
+
+    const shade = await vi.waitFor(() => {
+      const rects = visibleShade(scene);
+      expect(rects.length).toBeGreaterThan(0);
+      return rects;
+    }, LOOP_WAIT);
+    for (const rect of shade) {
+      expect(rect.depth).toBe(SPACE_SHADE_DEPTH);
+      expect(rect.fillAlpha).toBeGreaterThan(0);
+      expect(rect.fillAlpha).toBeLessThan(0.5);
+      const bounds = rect.getBounds();
+      const overlapsSpace = bounds.x < SERVIDO.x + SERVIDO.w && bounds.right > SERVIDO.x &&
+        bounds.y < SERVIDO.y + SERVIDO.h && bounds.bottom > SERVIDO.y;
+      expect(overlapsSpace).toBe(false);
+    }
+  });
+
+  it('draws no shade on the open floor', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+
+    bridge.emitCommand('spacesconfig', { spaces: [{ ...SERVIDO, x: SERVIDO.x + 40 * TILE }], version: 'lejos' });
+    await advanceGameClock(scene, 100);
+
+    expect(visibleShade(scene)).toEqual([]);
+  });
+
   it('names the cubicle of an empty desk "Escritorio": it has no label (Editar espacios)', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
@@ -2886,7 +2927,9 @@ describe('OfficeScene: config de espacios servida (#7, slice 3)', () => {
     // An older server still serves the floor columns; the scene draws none of them.
     const withFloor = { ...SERVIDO, floor: { materialId: 'floor-plain', color: '#2c3e50' } } as typeof SERVIDO;
     const cubicle = { ...withFloor, id: 'cubiculo', x: 0, floor: { materialId: 'floor-wood', color: null } } as typeof SERVIDO;
-    const before = scene.children.list.length;
+    // The shade outside the player's space is drawn around it, never on it (`spaceFocus.ts`).
+    const drawn = () => scene.children.list.filter((child) => child.name !== SPACE_SHADE_NAME).length;
+    const before = drawn();
 
     bridge.emitCommand('spacesconfig', { spaces: [withFloor, cubicle], version: 'version-servida' });
     await advanceGameClock(scene, 100);
@@ -2894,7 +2937,7 @@ describe('OfficeScene: config de espacios servida (#7, slice 3)', () => {
     const floorKeys = [recoloredSheetKey('floor-plain', 'sheet', '#2c3e50'), artSheetKey('floor-wood', 'sheet')];
     expect(scene.children.list.filter((c) => c.type === 'Image'
       && floorKeys.includes((c as Phaser.GameObjects.Image).texture.key))).toHaveLength(0);
-    expect(scene.children.list.length).toBe(before);
+    expect(drawn()).toBe(before);
   });
 
   it('una lista servida vacia deja al jugador en piso abierto', async () => {
@@ -3039,7 +3082,10 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
       ],
     });
 
-    expect(findZone(scene, 'mia')!.fillColor).not.toBe(findZone(scene, 'ajena')!.fillColor);
+    // The own desk carries no tint: being inside it is what shades the rest.
+    expect(findZone(scene, 'mia')!.isFilled).toBe(false);
+    expect(findZone(scene, 'mia')!.isStroked).toBe(false);
+    expect(findZone(scene, 'ajena')!.isFilled).toBe(true);
   });
 
   it('un homonimo NO hereda tu escritorio: manda `mine`, no el nombre', async () => {
@@ -3077,7 +3123,10 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
       ],
     });
 
-    expect(findZone(scene, 'libre')!.fillColor).not.toBe(findZone(scene, 'ocupada')!.fillColor);
+    // A free desk carries no tint either: its hover banner says it is free.
+    expect(findZone(scene, 'libre')!.isFilled).toBe(false);
+    expect(findZone(scene, 'libre')!.isStroked).toBe(false);
+    expect(findZone(scene, 'ocupada')!.isFilled).toBe(true);
   });
 
   it('la profundidad es el borde inferior, misma convencion que el mobiliario del mapa', async () => {

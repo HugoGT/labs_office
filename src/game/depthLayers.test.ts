@@ -5,6 +5,7 @@ import {
   LAYOUT_GHOST_DEPTH,
   MINIMAP_MARKER_DEPTH,
   DESK_ZONE_DEPTH,
+  SPACE_SHADE_DEPTH,
   avatarDepth,
   chairLayerDepth,
   seatedAvatarDepth,
@@ -34,6 +35,11 @@ describe('depthLayers: render bands (#70, #71)', () => {
     expect(avatarDepth(WORLD_H * 10)).toBe(avatarDepth(WORLD_H));
     expect(avatarDepth(Number.POSITIVE_INFINITY)).toBe(avatarDepth(WORLD_H));
     expect(avatarDepth(Number.NaN)).toBe(avatarDepth(0));
+  });
+
+  it('the shade outside the own space covers every band, under the HUD overlays', () => {
+    expect(SPACE_SHADE_DEPTH).toBeGreaterThan(avatarDepth(WORLD_H));
+    expect(SPACE_SHADE_DEPTH).toBeLessThan(MINIMAP_MARKER_DEPTH);
   });
 
   it('HUD overlays stay above every band', () => {

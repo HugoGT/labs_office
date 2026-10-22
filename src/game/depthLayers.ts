@@ -33,6 +33,11 @@ export const BAND_SPAN = 10_000;
 const WORLD_BAND_BASE = 0;
 export const AVATAR_BAND_BASE = WORLD_BAND_BASE + BAND_SPAN;
 
+/**
+ * Shade over everything outside the local player's space (`spaceFocus.ts`):
+ * above both bands, so peers out there step back too, and under the HUD.
+ */
+export const SPACE_SHADE_DEPTH = 90_000;
 /** Minimap position marker: only drawn by the minimap camera, always on top. */
 export const MINIMAP_MARKER_DEPTH = 99_999;
 /** Placement ghost of the layout editor: above anything on the map, marker included. */
