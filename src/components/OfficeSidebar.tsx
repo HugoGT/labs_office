@@ -10,12 +10,13 @@ import type { CollisionAdminPort } from '../dashboard/collisionAdminPort';
 import type { LayoutEditorSection } from './OfficeLayoutEditor';
 import { SIDEBAR_TOP } from '../game/hudLayout';
 import type { OfficeBridge } from '../game/officeBridge';
+import type { DecorTileRect } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
 import { DO_NOT_DISTURB } from '../game/officeProtocol';
 import { statusCssColor } from '../game/presence';
 import type { RosterPeer } from '../game/roster';
 import { CALL_DISABLED_TITLE } from './ContextMenu';
-import { MiEspacioPanel, type MiEspacioPanelProps } from './MiEspacioPanel';
+import { DecorEditorSection } from './DecorEditorSection';
 import { PhoneIcon } from './PhoneIcon';
 import { visibleRoster } from './rosterView';
 import styles from './OfficeSidebar.module.css';
@@ -48,10 +49,23 @@ const MyCharacterSectionLazy = lazy(() =>
   import('./MyCharacterSection').then((sectionModule) => ({ default: sectionModule.MyCharacterSection })),
 );
 
-type PersonalizeSection = LayoutEditorSection | 'assets' | 'space' | 'art' | 'character';
+type PersonalizeSection = LayoutEditorSection | 'assets' | 'art' | 'character';
 
-/** "Mi espacio" without a server: no desk to decorate. */
-const NO_SPACE: MiEspacioPanelProps = { hasDesk: false };
+/** What "Decoración" edits for whoever does not administer: the own desk (#208). */
+export interface MySpace {
+  /** The claimed desk's area in tiles, what the editor may touch; `null` without one. */
+  area: DecorTileRect | null;
+  /** `POST /me/decor`; without it (no server) there is nothing to write to. */
+  decor?: OfficeDecorPort | null;
+  /** Releases the desk, the same way as the map toast's "Dejarlo". */
+  onLeaveDesk?: () => void;
+}
+
+/** Without a server: no desk to decorate. */
+const NO_SPACE: MySpace = { area: null };
+
+/** Never called: a desk-scoped editor without a port has no desk to edit, so it never enters. */
+const NO_DECOR_PORT: OfficeDecorPort = { setDecor: async () => undefined };
 
 export interface OfficeSidebarProps {
   /** Uno mismo, para anteponerlo (#74): el `roster` del puente ya lo excluye. */
@@ -64,11 +78,14 @@ export interface OfficeSidebarProps {
    */
   forceCollapsed?: boolean;
   /**
-   * What "Mi espacio" edits: the decor on one's own desk (#208) and the way
-   * to leave it. Absent (no server, the open office) it asks to claim a desk,
-   * which there is no way to do there either. The bridge is the sidebar's.
+   * What "Decoración" edits for whoever does not administer: the decor on
+   * one's own desk (#208) and the way to leave it. Absent (no server, the
+   * open office) it asks to claim a desk, which there is no way to do there
+   * either. The bridge is the sidebar's.
    */
-  mySpace?: Omit<MiEspacioPanelProps, 'bridge'>;
+  mySpace?: MySpace;
+  /** Every desk area in tiles, for the desk rules of "Decoración" (`deskDecorRules.ts`). */
+  deskAreas?: readonly DecorTileRect[];
   /**
    * Rol de sesion (#74, PR3c), resuelto por `OfficeShell` via
    * `useOfficeAdminRole` y pasado por prop -- este componente sigue sin
@@ -135,6 +152,7 @@ export function OfficeSidebar({
   peers,
   forceCollapsed = false,
   mySpace = NO_SPACE,
+  deskAreas,
   role = null,
   bridge,
   desks,
@@ -168,7 +186,7 @@ export function OfficeSidebar({
   useEffect(() => {
     if (forceExitLayoutEditing) {
       // A rising edge gives the map to another editor without trapping navigation.
-      setSection((current) => current === 'decor' || current === 'spaces' || current === 'terrain' || current === 'collision' ? null : current);
+      setSection((current) => (current === 'decor' && officeDecor) || current === 'spaces' || current === 'terrain' || current === 'collision' ? null : current);
     }
   }, [forceExitLayoutEditing]);
 
@@ -183,25 +201,29 @@ export function OfficeSidebar({
     refreshDesks !== undefined &&
     refreshSpaces !== undefined;
 
+  // "Decoración" is one menu for everyone (#208): the whole map for an admin
+  // with the decor port, the claimed desk for anyone else.
+  const officeDecor = canAdminister && decor !== undefined && decor !== null;
   const entries: { section: PersonalizeSection; label: string }[] = [
+    // First: laying out tables and chairs is what desks are then created on top of.
+    ...(bridge !== undefined ? [{ section: 'decor' as const, label: 'Decoración' }] : []),
     ...(canAdminister ? [
-      // First: laying out tables and chairs is what desks are then created on top of.
-      ...(decor ? [{ section: 'decor' as const, label: 'Decoración' }] : []),
       { section: 'spaces' as const, label: 'Editar espacios' },
       ...(terrain ? [{ section: 'terrain' as const, label: 'Editar terreno' }] : []),
       ...(collisions ? [{ section: 'collision' as const, label: 'Editar colisiones' }] : []),
       ...(assets ? [{ section: 'assets' as const, label: 'Catálogo de decoración' }] : []),
     ] : []),
     ...(character ? [{ section: 'character' as const, label: 'Mi personaje' }] : []),
-    { section: 'space', label: 'Mi espacio' },
     ...(contributions ? [{ section: 'art' as const, label: 'Aportar arte' }] : []),
   ];
   const available = section === null || entries.some((entry) => entry.section === section);
   // Drop unavailable selections immediately, not just hide them until a port returns.
   if (!available) setSection(null);
   const currentSection = available ? section : null;
-  const layoutSection = currentSection === 'decor' || currentSection === 'spaces' || currentSection === 'terrain' || currentSection === 'collision'
+  const layoutSection = (currentSection === 'decor' && officeDecor) || currentSection === 'spaces' || currentSection === 'terrain' || currentSection === 'collision'
     ? currentSection : null;
+  /** The own desk's "Decoración": its own header and Escape steps, but it never holds the desks. */
+  const deskDecor = currentSection === 'decor' && !officeDecor;
 
   function togglePanel(panel: 'personalize' | 'people'): void {
     setSection(null);
@@ -215,7 +237,7 @@ export function OfficeSidebar({
 
   useEffect(() => {
     // A map editor owns Escape while it holds the map (a picked brush, a draft).
-    if (openPanel === null || layoutSection !== null) return undefined;
+    if (openPanel === null || layoutSection !== null || deskDecor) return undefined;
     const toggle = openPanel === 'people' ? peopleToggleRef : personalizeToggleRef;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
@@ -227,7 +249,7 @@ export function OfficeSidebar({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [openPanel, layoutSection]);
+  }, [openPanel, layoutSection, deskDecor]);
 
   return (
     <div
@@ -266,7 +288,7 @@ export function OfficeSidebar({
               {entry.label}
             </button>
           ))}
-          {currentSection !== null && layoutSection === null && (
+          {currentSection !== null && layoutSection === null && !deskDecor && (
             <button type="button" className={styles.back} onClick={() => setSection(null)}>
               Salir
             </button>
@@ -282,6 +304,7 @@ export function OfficeSidebar({
                 terrain={terrain}
                 collisions={collisions}
                 decor={decor}
+                deskAreas={deskAreas}
                 refreshDesks={refreshDesks}
                 refreshSpaces={refreshSpaces}
                 onEditingChange={onLayoutEditingChange}
@@ -293,7 +316,17 @@ export function OfficeSidebar({
               <AssetsPanelLazy assets={assets} />
             </Suspense>
           )}
-          {currentSection === 'space' && <MiEspacioPanel {...mySpace} bridge={bridge} />}
+          {deskDecor && bridge !== undefined && (
+            <DecorEditorSection
+              bridge={bridge}
+              decor={mySpace.decor ?? NO_DECOR_PORT}
+              scope="desk"
+              area={mySpace.decor == null ? null : mySpace.area}
+              desks={deskAreas}
+              onLeaveDesk={mySpace.onLeaveDesk}
+              onExit={() => setSection(null)}
+            />
+          )}
           {currentSection === 'character' && character !== undefined && character !== null && (
             <Suspense fallback={null}>
               <MyCharacterSectionLazy character={character} onClose={() => setSection(null)} />

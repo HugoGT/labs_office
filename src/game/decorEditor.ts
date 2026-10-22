@@ -9,6 +9,7 @@
  * refused and the editor says why.
  */
 
+import { deskOverChairLimit } from './deskDecorRules';
 import {
   decorFootprint,
   decorItemCovering,
@@ -16,6 +17,7 @@ import {
   fitsInsideDesk,
   insideMap,
   rectTiles,
+  withDecor,
   type DecorEdit,
   type DecorItem,
   type DecorKind,
@@ -51,7 +53,7 @@ export function sameDecorBrush(a: DecorBrush | null | undefined, b: DecorBrush |
 /**
  * The placed item a click on `tile` selects with no brush picked
  * (`decorItemCovering`: the smallest footprint where they stack), or `null`.
- * In a desk area ("Mi espacio") only items wholly inside it are its
+ * In a desk area (desk scope) only items wholly inside it are its
  * occupant's to select.
  */
 export function decorPickAt(
@@ -100,8 +102,10 @@ export function decorSizeLabel(info: DecorPieceInfo): string {
 export interface DecorEditCommand {
   /** The palette entry picked, or `null`: while one is, the map draws its ghost on the tile under the pointer and reports `decorpick`. */
   brush: DecorBrush | null;
-  /** Where this editor may act, in tiles: the person's desk in "Mi espacio", `null` (the whole map) in "Decoración". */
+  /** Where this editor may act, in tiles: the person's desk (desk scope), `null` (the whole map) for an admin. */
   area: DecorTileRect | null;
+  /** Every desk area in tiles, absent with none: the ghost turns red where a desk's chair limit refuses it. */
+  desks?: readonly DecorTileRect[];
   /** Edits on their way to the room, applied in order over the live layer. Drawing only. */
   preview?: readonly DecorEdit[];
   /**
@@ -120,10 +124,10 @@ export interface DecorGround {
   readonly wallTiles: readonly boolean[];
 }
 
-/** The side of a desk, in tiles: what "Mi espacio" may decorate. */
+/** The side of a desk, in tiles: what the desk scope may decorate. */
 const DESK_SIDE = 3;
 
-/** Whether a piece fits a 3x3 desk in some rotation, so "Mi espacio" offers it. */
+/** Whether a piece fits a 3x3 desk in some rotation, so the desk scope offers it. */
 export function fitsDeskArea(info: DecorPieceInfo): boolean {
   return info.footprint.w <= DESK_SIDE && info.footprint.h <= DESK_SIDE;
 }
@@ -140,6 +144,9 @@ export function decorBrushTarget(index: number, brush: DecorBrush, width: number
  * anchored on `index` itself does not count, because painting over an
  * anchor replaces what stands there. A move (`from`) ignores the item it
  * moves instead, and refuses another item's anchor: it replaces nothing.
+ * With `desks`, a chair that would be the fourth on a desk is refused too
+ * (`deskOverChairLimit`); a desk table is never refused for another one on
+ * the desk, which it replaces.
  */
 export function decorPlacementAllowed(
   items: readonly DecorItem[],
@@ -148,6 +155,7 @@ export function decorPlacementAllowed(
   area: DecorTileRect | null,
   index: number,
   brush: DecorBrush,
+  desks: readonly DecorTileRect[] = [],
 ): boolean {
   const target = decorBrushTarget(index, brush, ground.width);
   if (area !== null && !fitsInsideDesk(target, area)) return false;
@@ -155,5 +163,10 @@ export function decorPlacementAllowed(
   const ignored = brush.from ?? index;
   const taken = new Set(items.filter((item) => item.index !== ignored).flatMap((item) => decorTiles(item, infoOf(item.piece), ground.width)));
   if (brush.from !== undefined && index !== brush.from && items.some((item) => item.index === index)) return false;
+  if (desks.length > 0) {
+    const placed: DecorEdit = { index, item: { piece: brush.piece, rotation: brush.rotation } };
+    const after = withDecor(items, brush.from === undefined || brush.from === index ? [placed] : [{ index: brush.from, item: null }, placed]);
+    if (deskOverChairLimit(items, after, [index], infoOf, desks, ground.width) !== null) return false;
+  }
   return rectTiles(target, ground.width).every((tile) => ground.walkable[tile] === true && ground.wallTiles[tile] !== true && !taken.has(tile));
 }

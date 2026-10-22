@@ -158,6 +158,13 @@ export type AdminErrorCode =
    */
   | 'desk-on-wall'
   /**
+   * The desk would touch two desk tables of the decor layer
+   * (`deskDecorRules.ts`): a desk holds one at most. Fixed by another spot.
+   */
+  | 'desk-between-tables'
+  /** A decor edit would leave a desk with more than three chairs (`deskDecorRules.ts`). */
+  | 'desk-chair-limit'
+  /**
    * Dos salas pisandose (#10 + #12, S3a). Es su propio codigo y no
    * `desk-overlap` reciclado porque las dos filas con las que puede chocar
    * una sala son de otra naturaleza -- ver `spacesRoutes.ts`.
@@ -206,7 +213,7 @@ export type AdminErrorCode =
   | 'terrain-under-placement'
   | 'terrain-stale'
   /**
-   * "Mi espacio" refused (#208, `POST /me/decor`): the person has no desk any
+   * The desk-scoped "Decoración" refused (#208, `POST /me/decor`): the person has no desk any
    * more (`no-desk`, claim one to go on), or the edit reaches outside it
    * (`outside-desk`, pick a tile inside the desk).
    */

@@ -5,7 +5,7 @@ import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_TE
 import { createMemoryTerrain } from './memoryTerrain.ts';
 import type { TerrainStore } from './terrainPort.ts';
 import { InvalidTerrainEditError, TerrainProtectedError, type TerrainProtections } from './terrainRules.ts';
-import { DecorOutsideAreaError, createTerrainRuntime } from './terrainRuntime.ts';
+import { DecorOutsideAreaError, DeskChairLimitError, createTerrainRuntime } from './terrainRuntime.ts';
 
 const LAWN = 35;
 const LAKE = 94;
@@ -526,6 +526,75 @@ describe('createTerrainRuntime decor', () => {
       { index: outside, ...WOOD_DOWN },
       { index: at(DESK.x + 1, DESK.y + 2), piece: 'desk-wood', rotation: 0 },
     ]);
+  });
+
+  describe('desk rules', () => {
+    const desks = async () => [DESK];
+    const table = (tx: number, ty: number, rotation: 0 | 90 = 0) => ({ index: at(tx, ty), piece: 'desk-wood', rotation }) as const;
+
+    it('a desk table placed on a desk removes every other desk table on it, saved in the same batch', async () => {
+      const store = createMemoryTerrain([], [], [table(DESK.x + 1, DESK.y)]);
+      const saveDecor = vi.spyOn(store, 'saveDecor');
+      const runtime = runtimeWith(store);
+      await runtime.load();
+
+      await runtime.setDecor([{ index: at(DESK.x + 1, DESK.y + 2), item: { piece: 'desk-wood', rotation: 0 } }], 'admin-1', undefined, desks);
+
+      expect(runtime.decor()).toEqual([table(DESK.x + 1, DESK.y + 2)]);
+      expect(await store.loadDecor()).toEqual(runtime.decor());
+      expect(saveDecor).toHaveBeenCalledOnce();
+    });
+
+    it('in a batch the last desk table placed on a desk stays', async () => {
+      const runtime = runtimeWith();
+      await runtime.load();
+
+      await runtime.setDecor([
+        { index: at(DESK.x + 1, DESK.y), item: { piece: 'desk-wood', rotation: 0 } },
+        { index: at(DESK.x + 1, DESK.y + 2), item: { piece: 'desk-wood', rotation: 0 } },
+      ], 'admin-1', undefined, desks);
+
+      expect(runtime.decor()).toEqual([table(DESK.x + 1, DESK.y + 2)]);
+    });
+
+    it('in desk scope it also removes a displaced table that is not wholly inside the desk', async () => {
+      // Anchored one tile left of the desk: only its right end lies on it.
+      const partly = table(DESK.x - 1, DESK.y + 1);
+      const store = createMemoryTerrain([], [], [partly]);
+      const runtime = runtimeWith(store);
+      await runtime.load();
+
+      await runtime.setDecor([{ index: at(DESK.x + 1, DESK.y + 2), item: { piece: 'desk-wood', rotation: 0 } }], 'user-1', DESK, desks);
+
+      expect(runtime.decor()).toEqual([table(DESK.x + 1, DESK.y + 2)]);
+    });
+
+    it('keeps a desk table off every desk, and the others without desks to read', async () => {
+      const away = table(DESK.x + 1, DESK.y + 6);
+      const store = createMemoryTerrain([], [], [away, table(DESK.x + 1, DESK.y)]);
+      const runtime = runtimeWith(store);
+      await runtime.load();
+
+      await runtime.setDecor([{ index: at(DESK.x + 1, DESK.y + 2), item: { piece: 'desk-wood', rotation: 0 } }], null);
+      expect(runtime.decor()).toHaveLength(3);
+    });
+
+    it('refuses a chair that would make a desk hold more than three', async () => {
+      const store = createMemoryTerrain([], [], [
+        { index: at(DESK.x, DESK.y), ...WOOD_DOWN },
+        { index: at(DESK.x + 1, DESK.y), ...WOOD_DOWN },
+        { index: at(DESK.x + 2, DESK.y), ...WOOD_DOWN },
+      ]);
+      const runtime = runtimeWith(store);
+      await runtime.load();
+
+      await expect(runtime.setDecor([{ index: at(DESK.x, DESK.y + 2), item: WOOD_DOWN }], 'user-1', DESK, desks)).rejects.toThrow(DeskChairLimitError);
+      expect(runtime.decor()).toHaveLength(3);
+      // Turning one, or moving one inside the desk, adds no chair.
+      await runtime.setDecor([{ index: at(DESK.x, DESK.y), item: { piece: 'chair-wood', rotation: 90 } }], 'user-1', DESK, desks);
+      await runtime.setDecor([{ index: at(DESK.x + 2, DESK.y), item: null }, { index: at(DESK.x + 2, DESK.y + 2), item: WOOD_DOWN }], 'user-1', DESK, desks);
+      expect(runtime.decor()).toHaveLength(3);
+    });
   });
 
   it('protects every tile of every item from water, void and walls', async () => {

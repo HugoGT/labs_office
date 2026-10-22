@@ -151,25 +151,83 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
   });
 });
 
-describe('DecorEditorSection: Mi espacio (one desk)', () => {
+/**
+ * "Decoración" for whoever does not administer (#208): the same menu scoped
+ * to the desk they claimed, through `POST /me/decor`, with no «Múltiple».
+ */
+describe('DecorEditorSection: Decoración for one desk', () => {
   const DESK = { x: 10, y: 10, w: 3, h: 3 };
+  const NO_DESK_TEXT = 'Reclama un escritorio libre en el mapa para decorarlo.';
 
-  it('is open at once over the desk, offers only what fits it and has no way out of its own', async () => {
+  it('is open at once over the desk under the same header, offers only what fits it and no «Múltiple»', async () => {
     const { commands } = renderSection({ scope: 'desk', area: DESK });
     expect(await screen.findByRole('group', { name: 'Sillas' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Decoración' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Salir' })).toBeInTheDocument();
     // Of the room tables only the 2x1 oval one fits a 3x3 desk.
     expect(screen.queryByRole('button', { name: 'Mesa de reuniones' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Mesa ovalada' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Salir' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /Múltiple/ })).not.toBeInTheDocument();
     expect(commands.at(-1)).toEqual({ brush: null, area: DESK });
   });
 
-  it('offers «Múltiple» too, with no explanations before it', async () => {
-    const { container } = renderSection({ scope: 'desk', area: DESK });
-    const multiple = await screen.findByRole('checkbox', { name: 'Múltiple: varios a la vez' });
-    expect(multiple).not.toBeChecked();
-    // Nothing comes before the checkbox's row in "Mi espacio".
-    expect(container.firstElementChild?.firstElementChild).toContainElement(multiple);
+  it('places one piece per click and unpicks the brush', async () => {
+    const decor: OfficeDecorPort = { setDecor: vi.fn(async () => undefined) };
+    const { bridge } = renderSection({ scope: 'desk', area: DESK, decor });
+    await userEvent.click(await screen.findByRole('button', { name: 'Ficus' }));
+    act(() => bridge.emit('decorpick', { index: at(11, 11) }));
+    await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(/^Poniendo/)).not.toBeInTheDocument();
+  });
+
+  it('without a claimed desk asks to claim one, offers no pieces and leaves with «Salir» or Escape', async () => {
+    const onExit = vi.fn();
+    const { commands } = renderSection({ scope: 'desk', area: null, onExit });
+    expect(screen.getByText(NO_DESK_TEXT)).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Sillas' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Dejar escritorio' })).not.toBeInTheDocument();
+    expect(commands).toEqual([]);
+
+    await userEvent.keyboard('{Escape}');
+    expect(onExit).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole('button', { name: 'Salir' }));
+    expect(onExit).toHaveBeenCalledTimes(2);
+  });
+
+  it('with a claimed desk ends with «Dejar escritorio»', async () => {
+    const onLeaveDesk = vi.fn();
+    renderSection({ scope: 'desk', area: DESK, onLeaveDesk });
+    await screen.findByRole('group', { name: 'Sillas' });
+
+    const leave = screen.getByRole('button', { name: 'Dejar escritorio' });
+    expect(screen.getAllByRole('button').at(-1)).toBe(leave);
+    await userEvent.click(leave);
+    expect(onLeaveDesk).toHaveBeenCalledTimes(1);
+  });
+
+  it('steps out on Escape like the admin menu: the brush, then the editor itself', async () => {
+    const onExit = vi.fn();
+    const { commands } = renderSection({ scope: 'desk', area: DESK, onExit });
+    await userEvent.click(await screen.findByRole('button', { name: 'Ficus' }));
+
+    await userEvent.keyboard('{Escape}');
+    expect(commands.at(-1)).toMatchObject({ brush: null });
+    expect(onExit).not.toHaveBeenCalled();
+    await userEvent.keyboard('{Escape}');
+    expect(onExit).toHaveBeenCalledTimes(1);
+    expect(commands.at(-1)).toBeNull();
+  });
+
+  it('opens over a desk claimed meanwhile, and closes the map overlay once the desk is gone', async () => {
+    const { rerender, bridge, decor, commands } = renderSection({ scope: 'desk', area: null });
+    const props = { bridge, decor, scope: 'desk' as const, loadMaterials: async () => catalog, preview: noPreview };
+    rerender(<DecorEditorSection {...props} area={DESK} />);
+    expect(await screen.findByRole('group', { name: 'Sillas' })).toBeInTheDocument();
+    expect(commands.at(-1)).toEqual({ brush: null, area: DESK });
+
+    rerender(<DecorEditorSection {...props} area={null} />);
+    expect(commands.at(-1)).toBeNull();
+    expect(screen.getByText(NO_DESK_TEXT)).toBeInTheDocument();
   });
 
   it('refuses a tile outside the desk without asking the server', async () => {
@@ -179,5 +237,12 @@ describe('DecorEditorSection: Mi espacio (one desk)', () => {
     act(() => bridge.emit('decorpick', { index: at(20, 20) }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/dentro de tu escritorio/);
     expect(decor.setDecor).not.toHaveBeenCalled();
+  });
+
+  it('passes the desks to the map for the desk rules', async () => {
+    const desks = [DESK, { x: 20, y: 10, w: 3, h: 3 }];
+    const { commands } = renderSection({ scope: 'desk', area: DESK, desks });
+    await screen.findByRole('group', { name: 'Sillas' });
+    expect(commands.at(-1)).toEqual({ brush: null, area: DESK, desks });
   });
 });

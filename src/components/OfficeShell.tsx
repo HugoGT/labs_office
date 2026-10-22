@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { OfficeSession } from '../auth/authPort';
 import { createCharacterClient } from '../auth/characterClient';
 import type { CharacterPort } from '../auth/characterPort';
@@ -20,7 +20,9 @@ import { resolveLivekitConfig } from '../game/livekitEndpoint';
 import { decorEditHidesRail, terrainEditHoldsMap } from '../game/editorMapHold';
 import { TILE } from '../game/mapData';
 import { createOfficeDecorClient } from '../game/officeDecorClient';
+import type { DecorTileRect } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
+import type { OfficeDesk } from '../game/desksPort';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
 import { DEFAULT_NAME, DEFAULT_STATUS, type AccessDeniedReason, type PresenceStatus } from '../game/officeProtocol';
@@ -105,6 +107,11 @@ export interface OfficeShellProps {
  * aprender que existe una sesion para poder escribir un nombre.
  */
 
+/** A desk in tiles: desks are served in world pixels, the decor layer counts tiles. */
+function deskTiles(desk: Pick<OfficeDesk, 'x' | 'y' | 'w' | 'h'>): DecorTileRect {
+  return { x: Math.round(desk.x / TILE), y: Math.round(desk.y / TILE), w: Math.round(desk.w / TILE), h: Math.round(desk.h / TILE) };
+}
+
 /** How toasts name a desk: its label, or "este escritorio" for one created empty (Editar espacios). */
 function deskLabelOf(label: string): string {
   return label === '' ? 'este escritorio' : label;
@@ -181,7 +188,7 @@ export function OfficeShell({
   });
   /**
    * The office decor layer (#208): "Decoración" writes anywhere as an admin,
-   * "Mi espacio" inside one's own desk. Same pattern as `terrainAdminPort`;
+   * and inside one's own desk for anyone else. Same pattern as `terrainAdminPort`;
    * the desk one needs a session, there is no desk without one.
    */
   const [decorAdminPort] = useState<OfficeDecorPort | null>(() => {
@@ -351,6 +358,8 @@ export function OfficeShell({
    * espacio" lo cuenta pidiendo reclamar uno, no una pantalla atada a nada.
    */
   const myDesk = desks?.find((desk) => desk.mine) ?? null;
+  /** Every desk in tiles, for the desk rules of "Decoración" (`deskDecorRules.ts`). */
+  const deskAreas = useMemo(() => (desks ?? []).map(deskTiles), [desks]);
 
   useEffect(() => {
     // `null` es "todavia no": mandar una lista vacia antes de tiempo pintaria
@@ -612,6 +621,9 @@ export function OfficeShell({
    * Se suscribe DIRECTAMENTE en `OfficeShell` (D12), no en un hook, porque es
    * un solo toast y `OfficeShell` ya es el unico dueno del bridge.
    */
+  // A full desk refuses whoever tries to walk in (`deskDecorRules.ts`); the scene says so once per attempt.
+  useEffect(() => bridge.on('deskfull', () => setToastMessage('Este escritorio está lleno (máximo 6 personas).')), [bridge]);
+
   useEffect(
     () =>
       bridge.on('callaccepted', ({ name }) => {
@@ -641,7 +653,7 @@ export function OfficeShell({
       if (outcome === 'claimed') {
         setToastMessage(
           <>
-            🪑 Te sentaste en <b>{label}</b> · Decóralo en Personalizar › Mi espacio
+            🪑 Te sentaste en <b>{label}</b> · Decóralo en Personalizar › Decoración
           </>,
         );
         return;
@@ -704,7 +716,7 @@ export function OfficeShell({
           void takeDesk(deskId, label);
           return;
         }
-        // Decorating lives in "Mi espacio" (Editar espacios); the toast only offers to leave it.
+        // Decorating lives in "Decoración"; the toast only offers to leave it.
         setToastMessage(
           <>
             🪑 Es tu escritorio ·{' '}
@@ -795,12 +807,11 @@ export function OfficeShell({
           self={rosterSelf}
           peers={rosterPeers}
           mySpace={{
-            hasDesk: myDesk !== null,
-            // Desks are served in world pixels; the decor layer counts tiles.
-            area: myDesk === null ? null : { x: Math.round(myDesk.x / TILE), y: Math.round(myDesk.y / TILE), w: Math.round(myDesk.w / TILE), h: Math.round(myDesk.h / TILE) },
+            area: myDesk === null ? null : deskTiles(myDesk),
             decor: myDecorPort,
             onLeaveDesk: myDesk === null ? undefined : () => void leaveDesk(myDesk.label),
           }}
+          deskAreas={deskAreas}
           role={adminRole}
           bridge={bridge}
           desks={deskAdminPort}

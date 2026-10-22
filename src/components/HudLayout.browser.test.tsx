@@ -248,7 +248,7 @@ describe('HUD layout: sidebar toggle (#90)', () => {
       panel.scrollTop = panel.scrollHeight;
       expect(panel.scrollTop).toBeGreaterThan(0);
       await userEvent.click(screen.getByRole('button', { name: 'Salir' }));
-      expect(screen.getByRole('button', { name: 'Mi espacio' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Decoración' })).toBeInTheDocument();
       cleanup();
     }
   });

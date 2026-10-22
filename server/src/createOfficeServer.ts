@@ -20,6 +20,7 @@ import type { AddressInfo } from 'node:net';
 import { BASE_LAYOUT, type OfficeLayout } from '../../src/game/officeLayout.ts';
 import { BASE_CHAIR_PIECE } from '../../src/game/pieceCollisions.ts';
 import { BASE_MAP_SEATS, type MapSeat } from '../../src/game/seating.ts';
+import type { DecorTileRect } from '../../src/game/officeDecor.ts';
 import { livekitRoomFor } from '../../src/game/officeProtocol.ts';
 import {
   handleAdminSession,
@@ -78,6 +79,7 @@ import {
   handleReleaseDesk,
   handleUpdateDesk,
   type DesksDeps,
+  type DeskWallGuard,
 } from './desks/desksRoutes.ts';
 import type { SpacesDirectory } from './spaces/spacesPort.ts';
 import {
@@ -572,7 +574,16 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     for (const listener of spacesChangeListeners) listener();
   };
   // Desks place no collision of their own (#208): what stands on them is decor.
+  // The room keeps their areas in memory for the occupancy rule (at most
+  // `MAX_DESK_OCCUPANCY` inside one), reread on every committed desk change.
+  let deskAreas: readonly DecorTileRect[] = [];
+  const refreshDeskAreas = async (): Promise<void> => {
+    deskAreas = ((await desks?.listDesks()) ?? []).map(({ x, y }) => ({ x, y, w: DESK_SIDE, h: DESK_SIDE }));
+  };
   const notifyDesksChanged = () => {
+    refreshDeskAreas().catch(() => {
+      console.error('[desks] could not reread the desk areas');
+    });
     for (const listener of desksChangeListeners) listener();
   };
   // Shared by the room (which registers) and the admin routes (which evict) (#93).
@@ -1197,10 +1208,16 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
       // `decor` only checks a chosen material at creation (art migration,
       // step 7); without it a desk still gets the pack default.
       // `walls`: a created or moved desk is checked against the live walls
-      // inside the terrain edit queue, so no wall edit lands in between.
-      // Decor never refuses a desk (#208).
-      const walls = { run: <T>(write: (grid: { width: number; walls: readonly (string | null)[] }) => Promise<T>) =>
-        terrain.runExclusive((snapshot) => write({ width: snapshot.width, walls: snapshot.walls })) };
+      // and the decor layer's desk tables (it may not stand between two)
+      // inside the terrain edit queue, so no wall or decor edit lands in
+      // between. Any other decor never refuses a desk (#208).
+      const walls: DeskWallGuard = { run: (write) =>
+        terrain.runExclusive((snapshot) => write({
+          width: snapshot.width,
+          walls: snapshot.walls,
+          decor: terrain.decor(),
+          decorInfo: (piece) => terrain.decorInfo(piece),
+        })) };
       run(req, { directory, desks, auth, identityAdmin, decor, walls })
         .then((result) => {
           // Adapter promises resolve after COMMIT; failures never invalidate.
@@ -1449,6 +1466,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     terrain: () => terrain.snapshot(),
     subscribeTerrainChanges: terrain.subscribe,
     decor: () => terrain.decor(),
+    desks: () => deskAreas,
     collisions: () => collisions.rects(),
     collisionTable: () => collisions.encoded(),
     subscribeCollisionChanges: collisions.subscribe,
@@ -1498,6 +1516,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
       // the committed blocks instead of the persisted ones.
       await terrain.load();
       await collisions.load();
+      await refreshDeskAreas();
       await gameServer.listen(port);
       return this.port();
     },

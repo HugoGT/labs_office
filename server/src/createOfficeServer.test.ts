@@ -3056,6 +3056,37 @@ describe('terrain routes (#123 phase 2)', () => {
     await server.shutdown();
   });
 
+  it('refuses a desk created or moved between two desk tables, and keeps one desk table per desk', async () => {
+    const desks = createMemoryDesks();
+    const { server, url } = await terrainServer({ desks, terrain: createMemoryTerrain() });
+    const { width } = server.terrain.snapshot();
+    const postDesk = (path: string, body: unknown) =>
+      fetch(`${url}${path}`, { method: 'POST', headers: BEARER, body: JSON.stringify(body) });
+    // Two desk tables three rows apart: a desk at (66, 21) would touch both.
+    expect((await setDecor(url, '/admin/decor', [
+      { index: 21 * width + 67, item: { piece: 'desk-wood', rotation: 0 } },
+      { index: 23 * width + 67, item: { piece: 'desk-wood', rotation: 0 } },
+    ])).status).toBe(200);
+
+    const between = await postDesk('/admin/desks', { x: 66, y: 21 });
+    expect(between.status).toBe(409);
+    expect(await between.json()).toEqual({ error: 'desk-between-tables' });
+    const created = await postDesk('/admin/desks', { x: 66, y: 17 });
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string };
+    const moved = await postDesk(`/admin/desks/${id}`, { x: 66, y: 21 });
+    expect(await moved.json()).toEqual({ error: 'desk-between-tables' });
+
+    // On the desk at (66, 19) only the table on row 21 stands; a second one there replaces it.
+    expect((await postDesk(`/admin/desks/${id}`, { x: 66, y: 19 })).status).toBe(200);
+    expect((await setDecor(url, '/admin/decor', [{ index: 19 * width + 67, item: { piece: 'desk-wood', rotation: 0 } }])).status).toBe(200);
+    expect(server.terrain.decor()).toEqual([
+      { index: 19 * width + 67, piece: 'desk-wood', rotation: 0 },
+      { index: 23 * width + 67, piece: 'desk-wood', rotation: 0 },
+    ]);
+    await server.shutdown();
+  });
+
   it('lets a desk occupant decorate inside the desk only, through /me/decor', async () => {
     const desks = createMemoryDesks();
     const { server, url } = await terrainServer({ desks, terrain: createMemoryTerrain() });

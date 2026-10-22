@@ -69,12 +69,14 @@ import {
 } from '../decor/artAppearanceBody.ts';
 import {
   DESK_SIDE,
+  DeskBetweenTablesError,
   DeskOnWallError,
   DeskOverlapError,
   DeskSpaceOverlapError,
   DeskTakenError,
   InvalidDeskError,
   assertValidDeskPosition,
+  deskBetweenDecorTables,
   deskCoversWall,
   type DeskPosition,
   type WallGrid,
@@ -89,9 +91,10 @@ export interface DesksDeps extends AdminDeps {
    */
   decor?: ArtCatalogReader;
   /**
-   * The live painted walls a created or moved desk may not cover. Optional:
-   * without it there are no walls to refuse. Decor never refuses a desk
-   * (#208): a desk is only a zone, and what stands on it stays.
+   * The live painted walls a created or moved desk may not cover, and the
+   * decor layer it may not stand between two desk tables of. Optional:
+   * without it there is nothing to refuse. Any other decor never refuses a
+   * desk (#208): a desk is only a zone, and what stands on it stays.
    */
   walls?: DeskWallGuard;
 }
@@ -118,6 +121,8 @@ const TAKEN: AdminResult = { status: 409, body: { error: 'desk-taken' } };
 const SPACE_OVERLAP: AdminResult = { status: 409, body: { error: 'desk-space-overlap' } };
 /** Painted walls under the desk (terrain editor): fixed by removing them or picking another spot. */
 const ON_WALL: AdminResult = { status: 409, body: { error: 'desk-on-wall' } };
+/** The desk would touch two desk tables (`deskDecorRules.ts`): it holds one at most. */
+const BETWEEN_TABLES: AdminResult = { status: 409, body: { error: 'desk-between-tables' } };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -195,13 +200,14 @@ async function translating(run: () => Promise<AdminResult>): Promise<AdminResult
     if (error instanceof DeskSpaceOverlapError) return SPACE_OVERLAP;
     if (error instanceof DeskTakenError) return TAKEN;
     if (error instanceof DeskOnWallError) return ON_WALL;
+    if (error instanceof DeskBetweenTablesError) return BETWEEN_TABLES;
     throw error;
   }
 }
 
 /**
  * Runs a write that puts a desk at `position` only if no live wall lies under
- * its footprint. `null` (a rename) writes without looking at the walls. The
+ * its footprint and it touches at most one desk table. `null` (a rename) writes without looking at the walls. The
  * coordinates are validated first so a bad body stays a 400. The guard
  * serializes this against wall edits in this process only, which is enough
  * while one server owns the terrain.
@@ -211,6 +217,7 @@ async function clearOfWalls<T>(position: DeskPosition | null, deps: DesksDeps, w
   assertValidDeskPosition(position);
   return deps.walls.run(async (grid) => {
     if (deskCoversWall(position, grid)) throw new DeskOnWallError('a wall stands under the desk');
+    if (deskBetweenDecorTables(position, grid)) throw new DeskBetweenTablesError('the desk would touch two desk tables');
     return write();
   });
 }

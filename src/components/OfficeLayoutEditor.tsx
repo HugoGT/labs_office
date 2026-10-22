@@ -5,6 +5,7 @@ import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import type { CollisionAdminPort } from '../dashboard/collisionAdminPort';
 import type { OfficeBridge } from '../game/officeBridge';
+import type { DecorTileRect } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
 import { DeskEditorSection } from './DeskEditorSection';
 import { SpaceEditorSection } from './SpaceEditorSection';
@@ -31,6 +32,8 @@ export interface OfficeLayoutEditorProps {
   collisions?: CollisionAdminPort | null;
   /** The office decor layer (`POST /admin/decor`): optional like `terrain`. */
   decor?: OfficeDecorPort | null;
+  /** Every desk area in tiles, for the desk rules of "Decoración" (`deskDecorRules.ts`). */
+  deskAreas?: readonly DecorTileRect[];
   refreshDesks: () => void;
   refreshSpaces: () => void;
   onEditingChange?: (editing: boolean) => void;
@@ -49,7 +52,7 @@ export default function OfficeLayoutEditor(props: OfficeLayoutEditorProps) {
 }
 
 function LayoutEditorSections({
-  bridge, desks, spaces, terrain, collisions, decor, refreshDesks, refreshSpaces,
+  bridge, desks, spaces, terrain, collisions, decor, deskAreas, refreshDesks, refreshSpaces,
   onEditingChange, forceExit = false, section, onExit,
 }: OfficeLayoutEditorProps) {
   // Standalone consumers and "Editar espacios" arbitrate among their parts; the
@@ -98,7 +101,7 @@ function LayoutEditorSections({
   const parts = (
     <>
       {shown('decor') && decor !== undefined && decor !== null && (
-        <DecorEditorSection bridge={bridge} decor={decor} scope="office" area={null}
+        <DecorEditorSection bridge={bridge} decor={decor} scope="office" area={null} desks={deskAreas}
           initiallyActive={section !== undefined} onExit={onExit}
           onEditingChange={(editing) => reportEditing('decor', editing)}
           forceExit={forced('decor')}

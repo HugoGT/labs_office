@@ -245,7 +245,7 @@ export class DecorEditLayer {
     const items = this.deps.items();
     const infoOf = (piece: string): DecorPieceInfo | null => this.deps.infoOf(piece);
     const target = decorBrushTarget(this.tile, brush, width);
-    const allowed = decorPlacementAllowed(items, infoOf, this.deps.ground(), this.command?.area ?? null, this.tile, brush);
+    const allowed = decorPlacementAllowed(items, infoOf, this.deps.ground(), this.command?.area ?? null, this.tile, brush, this.command?.desks);
 
     this.clearGhost();
     // The ghost is the piece as it would stand, painted color included.

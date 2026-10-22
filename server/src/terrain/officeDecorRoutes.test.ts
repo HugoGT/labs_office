@@ -140,6 +140,29 @@ describe('handleSetOfficeDecor (POST /admin/decor)', () => {
   });
 });
 
+describe('desk rules on both routes', () => {
+  const TABLE = { piece: 'desk-wood', rotation: 0 } as const;
+
+  it('a desk table placed on a desk replaces the one already on it', async () => {
+    const { deps, terrain } = await harness([desk(EMPLEADO.id)], createMemoryTerrain([], [], [{ index: at(DESK.x + 1, DESK.y), ...TABLE }]));
+
+    expect((await handleSetOfficeDecor(BEARER_ADMIN, { edits: [{ index: at(DESK.x + 1, DESK.y + 2), item: TABLE }] }, deps)).status).toBe(200);
+    expect(terrain.decor()).toEqual([{ index: at(DESK.x + 1, DESK.y + 2), ...TABLE }]);
+    expect((await handleSetMyDecor(BEARER_EMPLEADO, { edits: [{ index: at(DESK.x + 1, DESK.y), item: TABLE }] }, deps)).status).toBe(200);
+    expect(terrain.decor()).toEqual([{ index: at(DESK.x + 1, DESK.y), ...TABLE }]);
+  });
+
+  it('answers 409 desk-chair-limit to a fourth chair on a desk, on either route', async () => {
+    const chairs = [at(DESK.x, DESK.y), at(DESK.x + 1, DESK.y), at(DESK.x + 2, DESK.y)].map((index) => ({ index, ...CHAIR }));
+    const { deps, terrain } = await harness([desk(EMPLEADO.id)], createMemoryTerrain([], [], chairs));
+    const LIMIT = { status: 409, body: { error: 'desk-chair-limit' } };
+
+    expect(await handleSetOfficeDecor(BEARER_ADMIN, { edits: [{ index: at(DESK.x, DESK.y + 2), item: CHAIR }] }, deps)).toEqual(LIMIT);
+    expect(await handleSetMyDecor(BEARER_EMPLEADO, { edits: [{ index: at(DESK.x, DESK.y + 2), item: CHAIR }] }, deps)).toEqual(LIMIT);
+    expect(terrain.decor()).toEqual(chairs);
+  });
+});
+
 describe('handleSetMyDecor (POST /me/decor)', () => {
   it('needs a signed-in account and answers 403 no-desk to one without a desk', async () => {
     const { deps, terrain } = await harness([desk(EMPLEADO.id)]);

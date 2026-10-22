@@ -174,6 +174,18 @@ describe('DecorEditLayer', () => {
     expect(hover(scene)!.strokeColor).toBe(DECOR_INVALID_COLOR);
   });
 
+  it('turns the outline red where a fourth chair would stand on a desk of the command', async () => {
+    const scene = await bootHostScene();
+    const chairs = [at(2, 2), at(3, 2), at(4, 2)].map((index): DecorItem => ({ index, piece: 'chair-wood', rotation: 0 }));
+    const { bridge } = layer(scene, chairs);
+    bridge.emitCommand('decoredit', { brush: chair, area: null, desks: [{ x: 2, y: 2, w: 3, h: 3 }] });
+
+    scene.input.emit('pointermove', pointerAt(3 * TILE + 5, 4 * TILE + 5));
+    expect(hover(scene)!.strokeColor).toBe(DECOR_INVALID_COLOR);
+    scene.input.emit('pointermove', pointerAt(8 * TILE + 5, 4 * TILE + 5));
+    expect(hover(scene)!.strokeColor).toBe(DECOR_VALID_COLOR);
+  });
+
   it('draws the ghost of a painted piece in its color, and outlines a vertical room table on its swapped footprint', async () => {
     const scene = await bootHostScene();
     const { bridge, drawn } = layer(scene);

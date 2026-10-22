@@ -50,6 +50,7 @@ import {
   type DecorPieceInfo,
   type DecorTileRect,
 } from '../../../src/game/officeDecor.ts';
+import { deskOverChairLimit, displacedDeskTables } from '../../../src/game/deskDecorRules.ts';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
 import type { TerrainStore } from './terrainPort.ts';
 import {
@@ -113,8 +114,20 @@ export interface TerrainRuntime {
    * or removed does not lie entirely inside it; `TerrainProtectedError` when
    * a placed item would stand off the map, on unwalkable ground, a wall, a
    * static tile or another item.
+   *
+   * `desks` (read inside the queue, the desk areas in tiles) brings the desk
+   * rules of `deskDecorRules.ts`: a desk table placed on a desk removes the
+   * other desk tables on it in the same save (in desk scope too, even one not
+   * wholly inside the caller's desk: it is the rule's consequence), and
+   * `DeskChairLimitError` refuses a batch that leaves a desk it placed a
+   * chair on with more than three. Absent, no desk rule applies.
    */
-  setDecor(edits: readonly DecorEdit[], actorId: string | null, area?: DecorTileRect): Promise<readonly DecorItem[]>;
+  setDecor(
+    edits: readonly DecorEdit[],
+    actorId: string | null,
+    area?: DecorTileRect,
+    desks?: () => Promise<readonly DecorTileRect[]>,
+  ): Promise<readonly DecorItem[]>;
   /**
    * Runs `task` in the edit queue with the snapshot every edit before it
    * left, and holds later edits until it settles. A desk write uses it so no
@@ -133,6 +146,14 @@ export class DecorOutsideAreaError extends Error {
   }
 }
 
+/** A batch would leave a desk it placed a chair on with more than `MAX_DESK_CHAIRS` (409 `desk-chair-limit`). */
+export class DeskChairLimitError extends Error {
+  constructor() {
+    super('a desk would hold too many chairs');
+    this.name = 'DeskChairLimitError';
+  }
+}
+
 /** One catalog piece as the decor rules read it: `art_pieces`, retired ones included. */
 export interface DecorCatalogPiece {
   readonly id: string;
@@ -141,6 +162,20 @@ export interface DecorCatalogPiece {
   /** Whether it takes a color of its own (a colorable desk table); absent is not. */
   readonly colorable?: boolean;
   readonly retired: boolean;
+}
+
+/** The edits that turn `before` into `after`, one per anchor that differs: what a decor batch saves. */
+function decorChanges(before: readonly DecorItem[], after: readonly DecorItem[]): DecorEdit[] {
+  const old = new Map(before.map((item) => [item.index, item]));
+  const changes: DecorEdit[] = [];
+  for (const item of after) {
+    const current = old.get(item.index);
+    old.delete(item.index);
+    if (current !== undefined && current.piece === item.piece && current.rotation === item.rotation && current.color === item.color) continue;
+    changes.push({ index: item.index, item: { piece: item.piece, rotation: item.rotation, ...(item.color === undefined ? {} : { color: item.color }) } });
+  }
+  for (const index of old.keys()) changes.push({ index, item: null });
+  return changes;
 }
 
 export function createTerrainRuntime({
@@ -236,7 +271,10 @@ export function createTerrainRuntime({
     return walls;
   }
 
-  async function applyDecor(edits: readonly DecorEdit[], actorId: string | null, area?: DecorTileRect): Promise<readonly DecorItem[]> {
+  async function applyDecor(
+    edits: readonly DecorEdit[], actorId: string | null, area?: DecorTileRect,
+    desks?: () => Promise<readonly DecorTileRect[]>,
+  ): Promise<readonly DecorItem[]> {
     if (!store) throw new Error('no terrain store: the decor cannot be edited');
     parseDecorBatch({ edits }, layout.width * layout.height);
     await readCatalog();
@@ -268,11 +306,22 @@ export function createTerrainRuntime({
         if (item !== null && !inside({ index, ...item })) throw new DecorOutsideAreaError();
       }
     }
-    const next = withDecor(decor, changed);
-    const placed = new Set(changed.flatMap(({ index, item }) => (item === null ? [] : [index])));
+    const placedInOrder = changed.flatMap(({ index, item }) => (item === null ? [] : [index]));
+    let next = withDecor(decor, changed);
+    const deskAreas = desks === undefined ? [] : await desks();
+    if (deskAreas.length > 0) {
+      // One desk table per desk: the ones a placement displaces leave in the same save.
+      const displaced = displacedDeskTables(next, placedInOrder, decorInfo, deskAreas, layout.width);
+      next = withDecor(next, displaced.map((index) => ({ index, item: null })));
+      if (deskOverChairLimit(decor, next, placedInOrder, decorInfo, deskAreas, layout.width) !== null) throw new DeskChairLimitError();
+    }
+    const nextAnchors = new Set(next.map(({ index }) => index));
+    const placed = new Set(placedInOrder.filter((index) => nextAnchors.has(index)));
     const conflict = findDecorConflict(next, placed, decorInfo, snapshot, staticTiles);
     if (conflict !== null) throw new TerrainProtectedError(conflict);
-    await store.saveDecor(changed, actorId);
+    const saved = decorChanges(decor, next);
+    if (saved.length === 0) return decor;
+    await store.saveDecor(saved, actorId);
     decor = next;
     for (const listener of listeners) listener(blocks);
     return decor;
@@ -322,8 +371,8 @@ export function createTerrainRuntime({
     setWalls(edits, actorId, protections) {
       return enqueue(() => applyWalls(edits, actorId, protections));
     },
-    setDecor(edits, actorId, area) {
-      return enqueue(() => applyDecor(edits, actorId, area));
+    setDecor(edits, actorId, area, desks) {
+      return enqueue(() => applyDecor(edits, actorId, area, desks));
     },
     runExclusive(task) {
       return enqueue(() => task(snapshot));

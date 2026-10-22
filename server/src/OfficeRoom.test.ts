@@ -2374,3 +2374,77 @@ describe('OfficeRoom: chairs on a desk', () => {
     expect(deskServer!.terrain.decor()).toEqual([{ index: CHAIR, piece: 'chair-wood', rotation: 270 }]);
   });
 });
+
+/**
+ * At most `MAX_DESK_OCCUPANCY` people inside a desk's 3x3 area: the room
+ * drops the move (and the sit) that would take one more in. Whoever is in
+ * moves freely inside, and the desks follow every committed desk change.
+ */
+describe('OfficeRoom: desk occupancy', () => {
+  const DESK = { x: 10, y: 25 };
+  const at = new Date('2026-01-01T00:00:00.000Z');
+  /** The bottom-right tile of the desk: its sitter's network position falls inside the desk. */
+  const CHAIR = (DESK.y + 2) * BASE_LAYOUT.width + DESK.x + 2;
+  const inside = (i: number) => ({ x: (DESK.x + (i % 3)) * TILE + 16, y: (DESK.y + Math.floor(i / 3)) * TILE + 10, facing: 'down' });
+  const outside = { x: (DESK.x + 3) * TILE + 16, y: (DESK.y + 2) * TILE + 5, facing: 'down' };
+
+  beforeEach(async () => {
+    await server.shutdown();
+    const desks = createMemoryDesks({ seed: [{ id: 'mesa', label: 'Mesa 1', ...DESK, occupantId: null, createdAt: at, updatedAt: at }] });
+    server = createOfficeServer({ desks, terrain: createMemoryTerrain([], [], [{ index: CHAIR, piece: 'chair-wood', rotation: 270 }]) });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+  });
+
+  async function moveTo(room: Awaited<ReturnType<typeof join>>, position: { x: number; y: number; facing: string }) {
+    room.send('move', position);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === position.x && room.state.players.get(room.sessionId)?.y === position.y);
+  }
+
+  async function settle(room: Awaited<ReturnType<typeof join>>, status: string) {
+    room.send('status', { status });
+    await waitFor(() => room.state.players.get(room.sessionId)?.status === status);
+  }
+
+  async function fillDesk() {
+    const inRooms = [];
+    for (let i = 0; i < 6; i += 1) {
+      const room = await join(`Persona ${i}`);
+      await moveTo(room, inside(i));
+      inRooms.push(room);
+    }
+    return inRooms;
+  }
+
+  it('drops the move that would take a seventh person into a desk, and lets them in once one leaves', async () => {
+    const people = await fillDesk();
+    const seventh = await join('Septima');
+    await moveTo(seventh, outside);
+
+    seventh.send('move', inside(8));
+    await settle(seventh, 'y');
+    expect(seventh.state.players.get(seventh.sessionId)).toMatchObject({ x: outside.x, y: outside.y });
+    expect(server.sessions.positionOf(seventh.sessionId)).toEqual({ x: outside.x, y: outside.y });
+
+    await moveTo(people[0]!, { ...outside, y: outside.y + TILE });
+    await moveTo(seventh, inside(8));
+  }, 20_000);
+
+  it('lets whoever is inside a full desk move around in it and out of it', async () => {
+    const people = await fillDesk();
+
+    await moveTo(people[5]!, inside(8));
+    await moveTo(people[5]!, outside);
+  }, 20_000);
+
+  it('refuses a seat whose sitter would stand inside a full desk', async () => {
+    await fillDesk();
+    const seventh = await join('Septima');
+    await moveTo(seventh, outside);
+
+    seventh.send('sit', { seat: chairSeatId(CHAIR) });
+    await settle(seventh, 'y');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(seventh.state.players.get(seventh.sessionId)?.seat).toBe('');
+  }, 20_000);
+});

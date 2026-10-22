@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { describeAdminError } from '../dashboard/adminErrors';
 import { AdminError } from '../dashboard/adminPort';
 import { decorBrushTarget, type DecorBrush } from '../game/decorEditor';
+import { deskOverChairLimit, displacedDeskTables } from '../game/deskDecorRules';
 import { isEditableElementFocused } from '../game/inputFocusGuard';
 import { MAP_W } from '../game/mapData';
 import type { OfficeBridge } from '../game/officeBridge';
@@ -23,8 +24,8 @@ import {
 import type { OfficeDecorPort } from '../game/officeDecorPort';
 
 /**
- * The decor editor (#208), shared by "Decoración" (an admin, the whole map,
- * `POST /admin/decor`) and "Mi espacio" (anyone, inside their own desk,
+ * The decor editor (#208) of "Decoración", in both its scopes (an admin, the
+ * whole map, `POST /admin/decor`; anyone else, inside their own desk,
  * `POST /me/decor`): pick a piece in the palette, then a click on the map
  * anchors it on the clicked tile, turned the way R or the wheel last left
  * it, and a colorable piece in the color chosen on its palette tile. One
@@ -32,7 +33,7 @@ import type { OfficeDecorPort } from '../game/officeDecorPort';
  * back; with "Múltiple" on (#207) the brush stays picked click after click
  * until Escape. A piece painted over an anchor replaces what stands there.
  *
- * With nothing picked, a click on a placed item selects it (in "Mi espacio"
+ * With nothing picked, a click on a placed item selects it (in desk scope
  * only items wholly inside the desk): the map outlines it and draws a move
  * and a trash button. Move makes it a brush of the same piece, turn and
  * color; the next click moves it in one request (off its old anchor, onto
@@ -55,6 +56,8 @@ export const DECOR_UNDER_PLACEMENT_MESSAGE =
   'Ese mueble necesita suelo libre: no puede ir sobre agua, vacío, una pared, otro mueble ni la entrada. Elige otra casilla.';
 /** A click the desk-scoped editor refuses before asking: the server would answer `outside-desk`. */
 export const DECOR_AREA_MESSAGE = 'Solo puedes decorar dentro de tu escritorio: elige una casilla dentro de su recuadro.';
+/** A click the editor refuses before asking, and `desk-chair-limit` from the server: a desk takes three chairs at most. */
+export const DECOR_CHAIR_LIMIT_MESSAGE = 'Un escritorio admite como máximo 3 sillas.';
 /** `invalid-request` here is a piece the catalog no longer offers (retired) or will not turn. */
 export const DECOR_INVALID_MESSAGE = 'El servidor no aceptó esa pieza: puede que ya no esté en el catálogo. Elige otra.';
 
@@ -80,9 +83,16 @@ export interface UseDecorEditorOptions {
   infoOf?: (piece: string) => DecorPieceInfo | null;
   /**
    * The editor may close itself: an Escape with nothing picked does, and says
-   * so here. Absent ("Mi espacio") that Escape is left to the sidebar.
+   * so here. Absent, that Escape is left to the sidebar.
    */
   onExit?: () => void;
+  /**
+   * Every desk area in tiles, for the desk rules (`deskDecorRules.ts`): a
+   * desk table placed on a desk takes the other desk tables off it in the
+   * same click, and a fourth chair on a desk is refused before asking. The
+   * server enforces both on its own. Absent, no desk rule applies here.
+   */
+  desks?: readonly DecorTileRect[];
 }
 
 export interface DecorEditor {
@@ -153,7 +163,9 @@ function brushFor(option: DecorPick, rotation: DecorRotation, color: string | un
   return option.info.colorable === true && color !== undefined ? { ...brush, color } : brush;
 }
 
-export function useDecorEditor({ bridge, decor, area, infoOf = decorInfoFromPieceId, onExit }: UseDecorEditorOptions): DecorEditor {
+const NO_DESKS: readonly DecorTileRect[] = [];
+
+export function useDecorEditor({ bridge, decor, area, infoOf = decorInfoFromPieceId, onExit, desks = NO_DESKS }: UseDecorEditorOptions): DecorEditor {
   const [active, setActive] = useState(false);
   const [items, setItems] = useState<readonly DecorItem[]>([]);
   const [brush, setBrush] = useState<DecorBrush | null>(null);
@@ -185,6 +197,7 @@ export function useDecorEditor({ bridge, decor, area, infoOf = decorInfoFromPiec
   const refuse = (cause: unknown): void => {
     const code = cause instanceof AdminError ? cause.code : null;
     if (code === 'terrain-under-placement') setError(DECOR_UNDER_PLACEMENT_MESSAGE);
+    else if (code === 'desk-chair-limit') setError(DECOR_CHAIR_LIMIT_MESSAGE);
     else if (code === 'invalid-request') setError(DECOR_INVALID_MESSAGE);
     else setError(describeAdminError(cause));
     if (code !== null && BLOCKING_ERRORS.includes(code)) setBlockedBoth(true);
@@ -223,6 +236,26 @@ export function useDecorEditor({ bridge, decor, area, infoOf = decorInfoFromPiec
   /** What the layer will hold once every pending edit lands: clicks are judged against it. */
   const layerAfter = (): DecorItem[] => withDecor(itemsRef.current, editsRef.current);
 
+  /**
+   * Queues one click placing on `placed` after the desk rules: the desk
+   * tables it displaces leave in the same click (so the preview shows the
+   * table gone), and a click that would put a fourth chair on a desk is
+   * refused here. Returns whether it queued.
+   */
+  function queuePlacement(after: readonly DecorItem[], click: DecorEdit[], placed: number): boolean {
+    if (desks.length > 0) {
+      const placedLayer = withDecor(after, click);
+      const removals = displacedDeskTables(placedLayer, [placed], infoOf, desks, MAP_W).map((index): DecorEdit => ({ index, item: null }));
+      if (deskOverChairLimit(after, withDecor(placedLayer, removals), [placed], infoOf, desks, MAP_W) !== null) {
+        setError(DECOR_CHAIR_LIMIT_MESSAGE);
+        return false;
+      }
+      click.push(...removals);
+    }
+    queue(...click);
+    return true;
+  }
+
   function placeAt(index: number): void {
     if (blockedRef.current || brush === null) return;
     if (!Number.isInteger(index) || index < 0) return;
@@ -238,7 +271,8 @@ export function useDecorEditor({ bridge, decor, area, infoOf = decorInfoFromPiec
     }
     const anchored = after.find((item) => item.index === index);
     if (anchored !== undefined && anchored.piece === brush.piece && anchored.rotation === brush.rotation && anchored.color === brush.color) return;
-    queue({ index, item: placementOf(brush) });
+    // A refused click keeps the brush, like one that placed nothing.
+    if (!queuePlacement(after, [{ index, item: placementOf(brush) }], index)) return;
     // A click that placed nothing keeps the brush; one that did ends it unless "Múltiple" is on.
     // A refusal arriving later only drops that edit: the brush is never touched by it.
     if (!multiple) setBrush(null);
@@ -256,14 +290,14 @@ export function useDecorEditor({ bridge, decor, area, infoOf = decorInfoFromPiec
     const moved = after.find((item) => item.index === from);
     if (moved === undefined) return;
     if (index === from) {
-      if (moved.rotation !== brush.rotation || moved.color !== brush.color) queue({ index, item: placementOf(brush) });
+      if (moved.rotation !== brush.rotation || moved.color !== brush.color) queuePlacement(after, [{ index, item: placementOf(brush) }], index);
       return;
     }
     if (after.some((item) => item.index === index)) {
       setError(DECOR_UNDER_PLACEMENT_MESSAGE);
       return;
     }
-    queue({ index: from, item: null }, { index, item: placementOf(brush) });
+    queuePlacement(after, [{ index: from, item: null }, { index, item: placementOf(brush) }], index);
   }
 
   /** Selects the item anchored on `index` if this editor may act on it (inside its area), else nothing. */
@@ -345,7 +379,7 @@ export function useDecorEditor({ bridge, decor, area, infoOf = decorInfoFromPiec
   // which leaves the item where it was) first, then the selection, then the
   // editor itself when it may leave. In the capture phase, so it runs before
   // the sidebar's own Escape (which closes its panel) and that one sees it
-  // handled; "Mi espacio" leaves an Escape with nothing picked to the sidebar.
+  // handled; without `onExit` an Escape with nothing picked is left to the sidebar.
   // Supr and Backspace delete the selected item, unless someone is typing.
   useEffect(() => {
     if (!active) return undefined;
@@ -380,12 +414,18 @@ export function useDecorEditor({ bridge, decor, area, infoOf = decorInfoFromPiec
   });
 
   const preview = useMemo<DecorEdit[] | null>(() => (edits.length === 0 ? null : edits.map(({ index, item }) => ({ index, item }))), [edits]);
-  const commandKey = JSON.stringify([brush, area, selected, preview]);
+  const commandKey = JSON.stringify([brush, area, selected, preview, desks]);
 
   useEffect(() => {
     if (!active) return;
-    bridge.emitCommand('decoredit', { brush, area, ...(selected === null ? {} : { selected }), ...(preview === null ? {} : { preview }) });
-    // `commandKey` stands for brush, area, selection and preview: only a different drawing is worth a command.
+    bridge.emitCommand('decoredit', {
+      brush,
+      area,
+      ...(desks.length === 0 ? {} : { desks }),
+      ...(selected === null ? {} : { selected }),
+      ...(preview === null ? {} : { preview }),
+    });
+    // `commandKey` stands for brush, area, desks, selection and preview: only a different drawing is worth a command.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridge, active, commandKey]);
 

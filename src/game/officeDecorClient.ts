@@ -2,7 +2,7 @@
  * HTTP adapter of `OfficeDecorPort` (#208), on the shared authenticated
  * request of the office admin clients. One adapter, two surfaces with one
  * body: "Decoración" writes anywhere through `POST /admin/decor` (admins),
- * "Mi espacio" inside one's own desk through `POST /me/decor` (anyone). The
+ * and inside one's own desk through `POST /me/decor` (anyone). The
  * server decides which desk is one's own; the client never names it.
  */
 
@@ -28,7 +28,8 @@ export function createOfficeDecorClient(
       getIdToken,
       // The decor layer is stored with the terrain: without a directory there is neither.
       notConfigured: 'terrain-not-configured',
-      conflicts: ['terrain-under-placement'],
+      // `desk-chair-limit`: a desk takes three chairs at most (`deskDecorRules.ts`).
+      conflicts: ['terrain-under-placement', 'desk-chair-limit'],
       forbidden: ['no-desk', 'outside-desk'],
     },
     fetchImpl,

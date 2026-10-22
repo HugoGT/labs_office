@@ -42,6 +42,9 @@ const MESSAGES: Readonly<Record<AdminErrorCode, string>> = {
     'Esas coordenadas chocan con una sala: el cubiculo de 3×3 del escritorio no puede pisar su rectángulo.',
   // A painted wall under the desk: removing it or moving elsewhere fixes it.
   'desk-on-wall': 'Hay una pared en ese lugar: quítala o elige otro sitio para el escritorio.',
+  // One desk table per desk: the same sentence for a creation and a move.
+  'desk-between-tables': 'No se puede poner un escritorio entre dos mesas de escritorio: elige otra posición.',
+  'desk-chair-limit': 'Un escritorio admite como máximo 3 sillas.',
   // Dos salas pisandose (#10 + #12, S3a). Mismo criterio que `desk-overlap`:
   // se arregla escribiendo otras coordenadas, no cambiando de nombre.
   'space-overlap': 'Esas coordenadas chocan con otra sala existente.',

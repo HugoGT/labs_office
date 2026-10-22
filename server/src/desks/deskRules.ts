@@ -11,6 +11,8 @@
 import { wallFootprintRects } from '../../../src/game/officeLayout.ts';
 import { boxOverlapsRects } from '../../../src/game/pieceCollisions.ts';
 import { TILE } from '../../../src/game/mapData.ts';
+import { deskBetweenTables } from '../../../src/game/deskDecorRules.ts';
+import type { DecorItem, DecorPieceInfo } from '../../../src/game/officeDecor.ts';
 import { boundsOverlap } from '../spaces/spaceRules.ts';
 
 /**
@@ -94,6 +96,18 @@ export class DeskOnWallError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'DeskOnWallError';
+  }
+}
+
+/**
+ * The desk would touch two or more desk tables of the office decor layer
+ * (`deskDecorRules.ts`): a desk holds one at most. Fixed by moving it next
+ * to one table only, or by removing a table.
+ */
+export class DeskBetweenTablesError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DeskBetweenTablesError';
   }
 }
 
@@ -201,6 +215,9 @@ export function normalizeUpdateDeskInput(input: UpdateDeskInput): UpdateDeskInpu
 export interface WallGrid {
   readonly width: number;
   readonly walls: readonly (string | null)[];
+  /** The office decor layer at that moment and how its pieces are sized; absent, no decor to judge. */
+  readonly decor?: readonly DecorItem[];
+  readonly decorInfo?: (piece: string) => DecorPieceInfo | null;
 }
 
 /**
@@ -214,4 +231,10 @@ export function deskCoversWall(position: DeskPosition, grid: WallGrid): boolean 
   const height = Math.floor(grid.walls.length / grid.width);
   const footprint = { x: position.x * TILE, y: position.y * TILE, width: DESK_SIDE * TILE, height: DESK_SIDE * TILE };
   return boxOverlapsRects(wallFootprintRects({ width: grid.width, height, walls: grid.walls }), footprint);
+}
+
+/** Whether a desk at `position` would touch two or more distinct desk tables of the grid's decor. */
+export function deskBetweenDecorTables(position: DeskPosition, grid: WallGrid): boolean {
+  if (grid.decor === undefined || grid.decorInfo === undefined) return false;
+  return deskBetweenTables({ x: position.x, y: position.y, w: DESK_SIDE, h: DESK_SIDE }, grid.decor, grid.decorInfo, grid.width);
 }

@@ -230,6 +230,25 @@ describe('DeskEditorSection (#74, PR3c)', () => {
     ).toBeInTheDocument();
   });
 
+  it('a desk placed or moved between two desk tables shows why it was refused', async () => {
+    const refused = async () => Promise.reject(new AdminError('desk-between-tables'));
+    const desks = fakeDesks({ createDesk: vi.fn(refused), updateDesk: vi.fn(refused) });
+    const bridge = createOfficeBridge();
+    render(<DeskEditorSection bridge={bridge} desks={desks} spaces={fakeSpaces()} refreshDesks={vi.fn()} refreshSpaces={vi.fn()} />);
+    await userEvent.click(screen.getByRole('button', { name: /Editar escritorios/ }));
+    await screen.findByText('Mesa 4');
+    const message = 'No se puede poner un escritorio entre dos mesas de escritorio: elige otra posición.';
+
+    await userEvent.click(screen.getByRole('button', { name: 'Crear escritorio' }));
+    act(() => bridge.emit('layoutplace', { tx: 1, ty: 2, valid: true }));
+    expect(await screen.findByText(message)).toBeInTheDocument();
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Mover Mesa 4' }));
+    act(() => bridge.emit('layoutplace', { tx: 8, ty: 2, valid: true }));
+    await waitFor(() => expect(desks.updateDesk).toHaveBeenCalled());
+    expect(await screen.findByText(message)).toBeInTheDocument();
+  });
+
   it('names an empty desk by where it is, and a claimed one by who claimed it', async () => {
     const vacio: AdminDesk = { id: 'id-vacio', label: '', x: 4, y: 7, w: 3, h: 3, occupant: null };
     const deAna: AdminDesk = { id: 'id-ana', label: '', x: 9, y: 7, w: 3, h: 3, occupant: { id: 'u-ana', displayName: 'Ana' } };

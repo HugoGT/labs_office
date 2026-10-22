@@ -85,3 +85,17 @@
   color: #fca5a5;
 }
 
+
+/* "Dejar escritorio" of the desk-scoped "Decoración", last on purpose: leaving the desk is the step after decorating it. */
+.leave {
+  align-self: flex-start;
+  margin-top: 6px;
+  background: #1f2937;
+  color: #fca5a5;
+  border: 1px solid #7f1d1d;
+  border-radius: var(--radius-control);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
