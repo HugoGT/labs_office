@@ -20,7 +20,7 @@ describe('TerrainPalette', () => {
     render(<TerrainPalette value={null} onPick={() => {}} floors={catalog.floor} preview={noPreview()} />);
 
     const group = screen.getByRole('group', { name: 'Suelos' });
-    const buttons = Array.from(group.querySelectorAll('button'));
+    const buttons = Array.from(group.querySelectorAll('button[aria-pressed]'));
     expect(buttons.map((button) => button.textContent)).toEqual(NAMES);
     expect(buttons.every((button) => button.getAttribute('aria-pressed') === 'false')).toBe(true);
   });
@@ -44,6 +44,30 @@ describe('TerrainPalette', () => {
 
     await waitFor(() => expect(preview.sheet).toHaveBeenCalledWith(expect.objectContaining({ id: 'floor-cobblestone' }), null));
     expect(preview.sheet).toHaveBeenCalledTimes(8);
+  });
+
+  it('gives carpet, and only carpet, a color picker starting at its pack default, and reports the chosen color (#222)', async () => {
+    const onColorChange = vi.fn();
+    render(<TerrainPalette value={null} onPick={() => {}} floors={catalog.floor} preview={noPreview()} onColorChange={onColorChange} />);
+
+    const pickers = screen.getAllByRole('button', { name: /^Color de / });
+    expect(pickers).toHaveLength(1);
+    expect(pickers[0]).toHaveAccessibleName('Color de Moqueta: Por defecto');
+
+    await userEvent.click(pickers[0]!);
+    expect(screen.getByRole('button', { name: 'Por defecto' })).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Rojo' }));
+
+    expect(onColorChange.mock.calls).toEqual([['carpet', '#c0392b']]);
+  });
+
+  it('shows the chosen carpet color on its picker and thumbnail (#222)', async () => {
+    const preview = noPreview();
+    render(<TerrainPalette value={null} onPick={() => {}} floors={catalog.floor} preview={preview} colors={{ carpet: '#3c6ac8' }} />);
+
+    expect(screen.getByRole('button', { name: 'Color de Moqueta: Azul' })).toBeInTheDocument();
+    await waitFor(() => expect(preview.sheet).toHaveBeenCalledWith(expect.objectContaining({ id: 'floor-carpet' }), '#3c6ac8'));
+    expect(preview.sheet).toHaveBeenCalledWith(expect.objectContaining({ id: 'floor-grass' }), null);
   });
 
   it('keeps a flat color swatch while the pack catalog is unavailable', () => {

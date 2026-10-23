@@ -71,10 +71,12 @@ import {
   BLOCK_TILES,
   WALL_PIECES,
   encodeTerrainBlocks,
+  encodeTerrainColors,
   encodeTerrainWalls,
   terrainSnapshot,
   withWalls,
   type LayoutMaterial,
+  type TerrainColors,
   type TerrainSnapshot,
   type OfficeLayout,
   type WallEdit,
@@ -257,6 +259,10 @@ export class OfficeScene extends Phaser.Scene {
   private terrainBlocks: readonly LayoutMaterial[] = BASE_LAYOUT.blocks;
   /** The terrain editor's pending paints, drawn instead of `terrainBlocks` and never collided with. */
   private terrainPreviewBlocks: readonly LayoutMaterial[] | null = null;
+  /** The color of each colored block the room sends (#222); none until it sends some. */
+  private terrainColors: TerrainColors = new Map();
+  /** The colors that go with the editor's pending blocks; `null` draws them with the live ones. */
+  private terrainPreviewColors: TerrainColors | null = null;
   /** The walls the room replicated last, one per tile; colliders and `grid` follow them. */
   private terrainWalls: readonly (string | null)[] = BASE_LAYOUT.walls;
   /** The terrain editor's pending wall paints, drawn over `terrainWalls` and never collided with. */
@@ -615,7 +621,7 @@ export class OfficeScene extends Phaser.Scene {
     // the same walkability rule the room enforces on every `move`.
     const grid: TerrainGrid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
     this.grid = grid;
-    this.terrainTilemap = renderTerrain(this, this.terrain, this.layout, this.art);
+    this.terrainTilemap = renderTerrain(this, this.terrain, this.layout, this.art, this.terrainColors);
     this.paintWalls();
     placeLayout(this, this.layout, this.art);
     placeSeats(this, this.mapSeats, this.art);
@@ -736,9 +742,12 @@ export class OfficeScene extends Phaser.Scene {
       // The DOM rail hides with it (`OfficeShell`), and `syncEditing` hides the minimap.
       this.syncEditing();
       const previewBlocks = command?.previewBlocks ?? null;
-      const repaint = (previewBlocks === null ? '' : encodeTerrainBlocks(previewBlocks)) !==
-        (this.terrainPreviewBlocks === null ? '' : encodeTerrainBlocks(this.terrainPreviewBlocks));
+      const previewColors = previewBlocks === null ? null : (command?.previewColors ?? null);
+      const encodePreview = (blocks: readonly LayoutMaterial[] | null, colors: TerrainColors | null): string =>
+        `${blocks === null ? '' : encodeTerrainBlocks(blocks)}|${colors === null ? '' : encodeTerrainColors(colors)}`;
+      const repaint = encodePreview(previewBlocks, previewColors) !== encodePreview(this.terrainPreviewBlocks, this.terrainPreviewColors);
       this.terrainPreviewBlocks = previewBlocks;
+      this.terrainPreviewColors = previewColors;
       if (repaint) this.paintTerrain();
       const wallPreview = command?.previewWalls ?? null;
       const rewall = JSON.stringify(wallPreview) !== JSON.stringify(this.wallPreview);
@@ -972,6 +981,7 @@ export class OfficeScene extends Phaser.Scene {
           onDesksChanged: () => this.bridge.emit('deskschanged', undefined),
           onSpacesChanged: () => this.bridge.emit('spaceschanged', undefined),
           onTerrain: (blocks) => this.applyTerrain(blocks),
+          onTerrainColors: (colors) => this.applyTerrainColors(colors),
           onWalls: (walls) => this.applyWalls(walls),
           onDecor: (items) => this.applyDecor(items),
           onCollisions: (table) => this.applyCollisions(table),
@@ -1762,6 +1772,20 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
+   * New block colors from the room (#222): a drawing change only, so the
+   * tilemap repaints and nothing else follows. The room sends none while no
+   * block has a color, which the empty map we start from already draws.
+   */
+  private applyTerrainColors(colors: TerrainColors): void {
+    if (!this.alive) return;
+    if (encodeTerrainColors(colors) !== encodeTerrainColors(this.terrainColors)) {
+      this.terrainColors = colors;
+      this.paintTerrain();
+    }
+    this.emitTerrain();
+  }
+
+  /**
    * Where the main camera may look (#179): the live blocks only, never the
    * editor's preview, so a draft paint does not open the void to the camera.
    * Columns come from the layout because injected layouts have other sizes.
@@ -1828,9 +1852,9 @@ export class OfficeScene extends Phaser.Scene {
     this.refreshCollisions();
   }
 
-  /** Hands the terrain editor what the room shows: the live blocks and walls. */
+  /** Hands the terrain editor what the room shows: the live blocks, walls and block colors. */
   private emitTerrain(): void {
-    this.bridge.emit('terrain', { blocks: this.terrainBlocks, walls: this.terrainWalls });
+    this.bridge.emit('terrain', { blocks: this.terrainBlocks, walls: this.terrainWalls, colors: this.terrainColors });
     this.decorEditLayer?.refresh();
   }
 
@@ -1863,7 +1887,10 @@ export class OfficeScene extends Phaser.Scene {
 
   /** Redraws the tilemap from the live blocks, or from the editor's pending paints while it has some. */
   private paintTerrain(): void {
-    this.terrainTilemap?.refresh(terrainSnapshot(this.layout, this.terrainPreviewBlocks ?? this.terrainBlocks, this.terrainWalls));
+    this.terrainTilemap?.refresh(
+      terrainSnapshot(this.layout, this.terrainPreviewBlocks ?? this.terrainBlocks, this.terrainWalls),
+      this.terrainPreviewColors ?? this.terrainColors,
+    );
   }
 
   /** Redraws every wall from the live walls, with the editor's pending wall paints over them. */

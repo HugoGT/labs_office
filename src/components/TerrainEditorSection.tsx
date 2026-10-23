@@ -106,6 +106,8 @@ export function TerrainEditorSection({
         value={editor.brush}
         onPick={editor.pick}
         floors={catalog?.floor ?? null}
+        colors={editor.colors}
+        onColorChange={editor.setColor}
         disabled={editor.blocked}
         preview={preview}
       />

@@ -121,7 +121,7 @@ describe('TerrainEditorSection', () => {
     };
     const { bridge } = renderSection({ terrain });
     await open();
-    act(() => bridge.emit('terrain', { blocks: withBlock(BASE_LAYOUT.blocks, LAWN, 'grass'), walls: BASE_LAYOUT.walls }));
+    act(() => bridge.emit('terrain', { blocks: withBlock(BASE_LAYOUT.blocks, LAWN, 'grass'), walls: BASE_LAYOUT.walls, colors: new Map() }));
     await userEvent.click(screen.getByRole('button', { name: 'Vacío' }));
 
     act(() => bridge.emit('terrainpick', { index: LAWN }));
@@ -200,5 +200,25 @@ describe('TerrainEditorSection', () => {
 
     expect(commands.at(-1)).toBeNull();
     expect(screen.getByRole('button', { name: 'Editar terreno' })).toBeInTheDocument();
+  });
+
+  it('paints carpet in the color chosen on its palette tile, like the painted desk (#222)', async () => {
+    const { bridge, terrain, commands } = renderSection();
+    await open();
+
+    await userEvent.click(await screen.findByRole('button', { name: /^Color de Moqueta/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Rojo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Moqueta' }));
+    expect(commands.at(-1)).toEqual({ brush: { kind: 'floor', material: 'carpet', color: '#c0392b' } });
+    act(() => bridge.emit('terrainpick', { index: LAWN }));
+    await vi.waitFor(() => expect(terrain.setBlock).toHaveBeenCalledTimes(1));
+    expect(terrain.setBlock).toHaveBeenLastCalledWith(LAWN, 'carpet', '#c0392b');
+
+    // Recoloring the picked carpet changes what the next click paints.
+    await userEvent.click(screen.getByRole('button', { name: 'Color de Moqueta: Rojo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Azul' }));
+    act(() => bridge.emit('terrainpick', { index: LAWN + 1 }));
+    await vi.waitFor(() => expect(terrain.setBlock).toHaveBeenCalledTimes(2));
+    expect(terrain.setBlock).toHaveBeenLastCalledWith(LAWN + 1, 'carpet', '#3c6ac8');
   });
 });

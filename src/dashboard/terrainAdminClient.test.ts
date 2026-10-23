@@ -48,6 +48,25 @@ describe('createTerrainAdminClient', () => {
     expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer id-token');
   });
 
+  it('posts the color of a painted carpet block with its material (#222)', async () => {
+    const fetchImpl = fetchWith(200);
+
+    await clientWith(fetchImpl).setBlock(35, 'carpet', '#c0392b');
+
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(url).toBe(`${BASE_URL}/admin/terrain/blocks/35`);
+    expect(JSON.parse(init?.body as string)).toEqual({ material: 'carpet', color: '#c0392b' });
+  });
+
+  it('carries each edit color of a batch as given (#222)', async () => {
+    const fetchImpl = fetchWith(200);
+    const edits = [{ index: 0, material: 'carpet' as const, color: '#3c6ac8' }, { index: 1, material: 'grass' as const }];
+
+    await clientWith(fetchImpl).setBlocks(edits, 'water,wood');
+
+    expect(JSON.parse(fetchImpl.mock.calls[0]![1]?.body as string)).toEqual({ edits, expected: 'water,wood' });
+  });
+
   it('tells a placement refusal from a stale preview', async () => {
     expect(await codeOf(clientWith(fetchWith(409, { error: 'terrain-under-placement' })).setBlock(1, 'water'))).toBe(
       'terrain-under-placement',
