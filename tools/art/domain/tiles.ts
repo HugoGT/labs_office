@@ -14,8 +14,8 @@ export const TILE_SIZE = CHARACTER_HEIGHT * 2;
 /**
  * Every floor motif of the pack. The first four came with the art project; dirt, sand,
  * cobblestone, tile and carpet complete the eight terrain materials of #123 (`plain` is the
- * colorable room floor and no terrain). Carpet is colorable too (#222), as a room floor only:
- * terrain carpet keeps its default color.
+ * colorable room floor and no terrain). Carpet is colorable too (#222): a terrain carpet block
+ * may carry a color of its own, painted at runtime from this default.
  */
 export const TERRAINS = ['wood', 'grass', 'water', 'plain', 'dirt', 'sand', 'cobblestone', 'tile', 'carpet'] as const;
 export type Terrain = (typeof TERRAINS)[number];
