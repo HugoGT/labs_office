@@ -1,17 +1,22 @@
 /**
  * Obstacle-avoiding walk planning for the local avatar (double-click to walk).
- * Pure numbers, no Phaser: `OfficeScene` hands in `grid.solid` and gets back
- * waypoints for the auto-walk steering.
+ * Pure numbers, no Phaser: `OfficeScene` hands in what Arcade collides the
+ * body with (the terrain tiles and the wall and piece rectangles) and gets
+ * back waypoints for the auto-walk steering.
  *
- * Everything is planned in body-tile space: the server drops a move whose body
- * center lands on a blocked tile and Arcade collides the shared body, so a tile
- * of the position (`floor(P / TILE)`) would let the body straddle a wall. A
- * tile here is the tile its body center is in.
+ * Everything is planned for the body, not the position: the server drops a
+ * move whose body center lands on a blocked spot and Arcade collides the
+ * shared body. Walls stand on grid lines and pieces can be any rectangle, so
+ * a whole-tile grid (`TerrainGrid.solid`) blocks the tiles on both sides of
+ * every wall and every door in it (#221). The search runs instead on a
+ * half-tile lattice of body-center spots tested against the rectangles
+ * themselves.
  */
 
 import { ARRIVE_EPSILON_PX } from './autoWalk';
 import { physicalBodyRect, type GeometryPoint } from './avatarGeometry';
 import { TILE } from './mapData';
+import type { CollisionRect } from './pieceCollisions';
 import type { TileCoord } from './terrainGrid';
 
 const BODY = physicalBodyRect({ x: 0, y: 0 });
@@ -242,28 +247,89 @@ export function findTilePath(solid: SolidGrid, start: TileCoord, goal: TileCoord
  */
 export const SWEEP_MARGIN_PX = ARRIVE_EPSILON_PX + 1;
 
-/** How far from a blocked start (a sitter under a desk, say) a free tile is looked for. */
-const ESCAPE_RADIUS_TILES = 3;
+/** How far from the start or the goal the first or last lattice spot is looked for. */
+const REACH_RADIUS_TILES = 3;
 
 /**
- * Whether the body, moved in a straight line between two positions, never
- * overlaps a blocked tile (nor leaves the map), margin included.
- *
- * The body sweeps a hexagon, and a tile hits it exactly when the segment of
- * body centers crosses that tile grown by the body half size. Walking the tile
- * rows that grown tile can touch keeps the cost proportional to the length of
- * the segment. Touching an edge is not overlapping, like in Arcade.
+ * Spacing of the search lattice. Half a tile puts a spot on every tile center
+ * and every tile edge: the middle of a one-post door (48 px between two wall
+ * joints) and of a one-tile gap between tile-aligned pieces are both spots.
  */
-function sweptBodyClear(grid: BlockedGrid, from: GeometryPoint, to: GeometryPoint): boolean {
-  const ax = from.x + BODY_CENTER_OFFSET.x;
-  const ay = from.y + BODY_CENTER_OFFSET.y;
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const reachX = BODY_HALF.x + SWEEP_MARGIN_PX;
-  const reachY = BODY_HALF.y + SWEEP_MARGIN_PX;
+const CELL = TILE / 2;
 
-  const firstRow = Math.floor((Math.min(ay, ay + dy) - reachY) / TILE);
-  const lastRow = Math.floor((Math.max(ay, ay + dy) + reachY) / TILE);
+/** What the body collides with, the same things Arcade does. */
+export interface WalkWorld {
+  /** Terrain tiles (`TerrainGrid.terrainSolid`), `[ty][tx]`, true when blocked; its size is the map's. */
+  readonly terrainSolid: SolidGrid;
+  /** Wall and piece collision rectangles in world pixels. */
+  readonly rects: readonly CollisionRect[];
+}
+
+/** The world indexed for overlap tests: each tile lists the rectangles that touch it. */
+interface Obstacles {
+  readonly terrain: BlockedGrid;
+  readonly rects: readonly CollisionRect[];
+  readonly buckets: readonly (readonly number[] | undefined)[];
+  /** Per rectangle, the last query that tested it: one rectangle over several tiles is tested once. */
+  readonly seen: Uint32Array;
+  query: number;
+}
+
+function obstaclesOf(world: WalkWorld): Obstacles {
+  const terrain = blockedGridOf(world.terrainSolid);
+  const buckets: number[][] = [];
+  world.rects.forEach((rect, index) => {
+    const x0 = Math.max(0, Math.floor(rect.x / TILE));
+    const y0 = Math.max(0, Math.floor(rect.y / TILE));
+    const x1 = Math.min(terrain.width - 1, Math.ceil((rect.x + rect.w) / TILE) - 1);
+    const y1 = Math.min(terrain.height - 1, Math.ceil((rect.y + rect.h) / TILE) - 1);
+    for (let ty = y0; ty <= y1; ty++) {
+      for (let tx = x0; tx <= x1; tx++) (buckets[ty * terrain.width + tx] ??= []).push(index);
+    }
+  });
+  return { terrain, rects: world.rects, buckets, seen: new Uint32Array(world.rects.length), query: 0 };
+}
+
+/**
+ * Whether the segment from `(ax, ay)` along `(dx, dy)` passes strictly inside
+ * the open box: touching an edge is not overlapping, like in Arcade.
+ */
+function segmentEntersBox(ax: number, ay: number, dx: number, dy: number, x0: number, y0: number, x1: number, y1: number): boolean {
+  let enter = 0;
+  let leave = 1;
+  for (const [start, delta, low, high] of [[ax, dx, x0, x1], [ay, dy, y0, y1]] as const) {
+    if (delta === 0) {
+      if (start <= low || start >= high) return false;
+      continue;
+    }
+    const t1 = (low - start) / delta;
+    const t2 = (high - start) / delta;
+    enter = Math.max(enter, Math.min(t1, t2));
+    leave = Math.min(leave, Math.max(t1, t2));
+  }
+  return enter < leave;
+}
+
+/**
+ * Whether the body, its center moved in a straight line from `(ax, ay)` to
+ * `(bx, by)`, never overlaps a blocked tile or a rectangle (nor leaves the
+ * map), grown by `margin`. A zero-length segment tests the body standing there.
+ *
+ * The body sweeps a hexagon, and an obstacle hits it exactly when the segment
+ * of body centers crosses that obstacle grown by the body half size. Walking
+ * the tile rows that grown tiles can touch keeps the cost proportional to the
+ * length of the segment.
+ */
+function bodySweepClear(obstacles: Obstacles, ax: number, ay: number, bx: number, by: number, margin: number): boolean {
+  const { terrain, rects, buckets, seen } = obstacles;
+  const query = ++obstacles.query;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const reachX = BODY_HALF.x + margin;
+  const reachY = BODY_HALF.y + margin;
+
+  const firstRow = Math.floor((Math.min(ay, by) - reachY) / TILE);
+  const lastRow = Math.floor((Math.max(ay, by) + reachY) / TILE);
   for (let row = firstRow; row <= lastRow; row++) {
     const bandTop = row * TILE - reachY;
     const bandBottom = (row + 1) * TILE + reachY;
@@ -273,8 +339,8 @@ function sweptBodyClear(grid: BlockedGrid, from: GeometryPoint, to: GeometryPoin
     let xb: number;
     if (dy === 0) {
       if (ay <= bandTop || ay >= bandBottom) continue;
-      xa = Math.min(ax, ax + dx);
-      xb = Math.max(ax, ax + dx);
+      xa = Math.min(ax, bx);
+      xb = Math.max(ax, bx);
     } else {
       const t1 = (bandTop - ay) / dy;
       const t2 = (bandBottom - ay) / dy;
@@ -287,33 +353,69 @@ function sweptBodyClear(grid: BlockedGrid, from: GeometryPoint, to: GeometryPoin
     }
 
     for (let col = Math.floor((xa - reachX) / TILE); col <= Math.floor((xb + reachX) / TILE); col++) {
-      if (isFree(grid, col, row)) continue;
-      if (xb > col * TILE - reachX && xa < (col + 1) * TILE + reachX) return false;
+      if (!isFree(terrain, col, row)) {
+        // The band is this tile grown in y, so overlapping x ranges is the exact test.
+        if (xb > col * TILE - reachX && xa < (col + 1) * TILE + reachX) return false;
+        continue;
+      }
+      for (const index of buckets[row * terrain.width + col] ?? []) {
+        if (seen[index] === query) continue;
+        seen[index] = query;
+        const rect = rects[index]!;
+        if (segmentEntersBox(ax, ay, dx, dy, rect.x - reachX, rect.y - reachY, rect.x + rect.w + reachX, rect.y + rect.h + reachY)) return false;
+      }
     }
   }
   return true;
 }
 
-/** Nearest free tile within `ESCAPE_RADIUS_TILES` of `tile`: squared distance, then row, then column. */
-function nearestFreeTile(grid: BlockedGrid, tile: TileCoord): TileCoord | null {
-  const stride = 2 * ESCAPE_RADIUS_TILES + 1;
-  let best: TileCoord | null = null;
-  let bestRank = Infinity;
-  for (let dy = -ESCAPE_RADIUS_TILES; dy <= ESCAPE_RADIUS_TILES; dy++) {
-    for (let dx = -ESCAPE_RADIUS_TILES; dx <= ESCAPE_RADIUS_TILES; dx++) {
-      if (!isFree(grid, tile.tx + dx, tile.ty + dy)) continue;
-      // One number that sorts by distance first, then by row, then by column.
-      const rank = (dx * dx + dy * dy) * stride * stride + (dy + ESCAPE_RADIUS_TILES) * stride + dx + ESCAPE_RADIUS_TILES;
-      if (rank < bestRank) {
-        best = { tx: tile.tx + dx, ty: tile.ty + dy };
-        bestRank = rank;
-      }
+/** Lattice spot `(tx, ty)` is the body center `(tx * CELL, ty * CELL)`; the lattice spans the map, edges included. */
+type Lattice = BlockedGrid;
+
+/**
+ * The spots where the body stands clear of everything by `SWEEP_MARGIN_PX`.
+ * Two neighbouring free spots are less than a body apart, so the stretch
+ * between them is clear too; a diagonal also needs both straight neighbours,
+ * which the search already asks for.
+ */
+function latticeOf(obstacles: Obstacles): Lattice {
+  const width = obstacles.terrain.width * 2 + 1;
+  const height = obstacles.terrain.height * 2 + 1;
+  const blocked = new Uint8Array(width * height);
+  for (let ty = 0; ty < height; ty++) {
+    for (let tx = 0; tx < width; tx++) {
+      const x = tx * CELL;
+      const y = ty * CELL;
+      blocked[ty * width + tx] = bodySweepClear(obstacles, x, y, x, y, SWEEP_MARGIN_PX) ? 0 : 1;
     }
   }
-  return best;
+  return { width, height, blocked };
 }
 
-/** Keeps the ends and the tiles where the direction changes; a straight run is one stretch. */
+/** Network position whose body center is lattice spot `spot`. */
+function positionForSpot(spot: TileCoord): GeometryPoint {
+  return { x: spot.tx * CELL - BODY_CENTER_OFFSET.x, y: spot.ty * CELL - BODY_CENTER_OFFSET.y };
+}
+
+/**
+ * Nearest free lattice spot within `REACH_RADIUS_TILES` of the body center
+ * `(cx, cy)` that `reachable` accepts: distance, then row, then column.
+ */
+function nearestSpot(lattice: Lattice, cx: number, cy: number, reachable: (x: number, y: number) => boolean): TileCoord | null {
+  const radius = REACH_RADIUS_TILES * TILE;
+  const candidates: { spot: TileCoord; distance: number }[] = [];
+  for (let ty = Math.ceil((cy - radius) / CELL); ty <= Math.floor((cy + radius) / CELL); ty++) {
+    for (let tx = Math.ceil((cx - radius) / CELL); tx <= Math.floor((cx + radius) / CELL); tx++) {
+      if (!isFree(lattice, tx, ty)) continue;
+      const distance = (tx * CELL - cx) ** 2 + (ty * CELL - cy) ** 2;
+      if (distance <= radius * radius) candidates.push({ spot: { tx, ty }, distance });
+    }
+  }
+  candidates.sort((a, b) => a.distance - b.distance || a.spot.ty - b.spot.ty || a.spot.tx - b.spot.tx);
+  return candidates.find(({ spot }) => reachable(spot.tx * CELL, spot.ty * CELL))?.spot ?? null;
+}
+
+/** Keeps the ends and the spots where the direction changes; a straight run is one stretch. */
 function collapseStraightRuns(path: readonly TileCoord[]): TileCoord[] {
   return path.filter((step, i) => {
     if (i === 0 || i === path.length - 1) return true;
@@ -327,20 +429,29 @@ function samePoint(a: GeometryPoint, b: GeometryPoint): boolean {
   return a.x === b.x && a.y === b.y;
 }
 
+function sweepClear(obstacles: Obstacles, from: GeometryPoint, to: GeometryPoint, margin: number): boolean {
+  return bodySweepClear(
+    obstacles,
+    from.x + BODY_CENTER_OFFSET.x, from.y + BODY_CENTER_OFFSET.y,
+    to.x + BODY_CENTER_OFFSET.x, to.y + BODY_CENTER_OFFSET.y,
+    margin,
+  );
+}
+
 /**
  * Greedy string pulling over `stops` (the first is where the walk starts): from
  * each kept stop, jump to the furthest following one the swept body reaches in
- * a straight line. Consecutive stops are always accepted: they are tile
- * centers along one run of free tiles, plus the arbitrary spot the avatar or
- * the click sits at inside its own tile, which the swept test could refuse.
+ * a straight line. Consecutive stops are always accepted: they are lattice
+ * spots along one run of free spots, plus the legs to the avatar and to the
+ * clicked point, which `planWalk` already checked without the margin.
  */
-function pullString(grid: BlockedGrid, stops: readonly GeometryPoint[]): GeometryPoint[] {
+function pullString(obstacles: Obstacles, stops: readonly GeometryPoint[]): GeometryPoint[] {
   const kept: GeometryPoint[] = [];
   let anchor = 0;
   while (anchor < stops.length - 1) {
     let reach = anchor + 1;
     for (let candidate = anchor + 2; candidate < stops.length; candidate++) {
-      if (!sweptBodyClear(grid, stops[anchor]!, stops[candidate]!)) break;
+      if (!sweepClear(obstacles, stops[anchor]!, stops[candidate]!, SWEEP_MARGIN_PX)) break;
       reach = candidate;
     }
     kept.push(stops[reach]!);
@@ -350,40 +461,44 @@ function pullString(grid: BlockedGrid, stops: readonly GeometryPoint[]): Geometr
 }
 
 /**
- * Waypoints that walk the avatar from `from` to `goal` around everything
- * blocked, the last one being `goal` itself, or `null` when the goal tile is
- * blocked or outside the map, no route exists, or a blocked start has no free
- * tile within reach. Nothing is stood up or moved here: the caller decides
- * what a `null` costs.
+ * Waypoints that walk the avatar from `from` to `goal` around everything the
+ * body collides with, the last one being `goal` itself, or `null` when the
+ * body does not fit at the goal (blocked or outside the map), no route exists,
+ * or no free spot is within reach of the start. Nothing is stood up or moved
+ * here: the caller decides what a `null` costs.
  */
-export function planWalk(solid: SolidGrid, from: GeometryPoint, goal: GeometryPoint): GeometryPoint[] | null {
+export function planWalk(world: WalkWorld, from: GeometryPoint, goal: GeometryPoint): GeometryPoint[] | null {
   if (![from.x, from.y, goal.x, goal.y].every(Number.isFinite)) return null;
 
-  const grid = blockedGridOf(solid);
-  const goalTile = bodyTileOf(goal);
-  if (!isFree(grid, goalTile.tx, goalTile.ty)) return null;
+  const obstacles = obstaclesOf(world);
+  if (!sweepClear(obstacles, goal, goal, 0)) return null;
+  const lattice = latticeOf(obstacles);
 
-  // A sitter's body is inside the desk's tiles. A swept test from there always
-  // fails, so the walk first steps out to the nearest free tile.
-  let startTile = bodyTileOf(from);
-  if (!isFree(grid, startTile.tx, startTile.ty)) {
-    const escape = nearestFreeTile(grid, startTile);
-    if (escape === null) return null;
-    startTile = escape;
-  }
+  // The first and last stretches join the avatar and the clicked point to the
+  // lattice, so they are checked like the rest of the walk: a start pressed
+  // against a desk never heads through it (#219). A body already inside
+  // something (a sitter under a desk) cannot clear any stretch, so it steps
+  // out to the nearest free spot and Arcade separates it on the way.
+  const start = { x: from.x + BODY_CENTER_OFFSET.x, y: from.y + BODY_CENTER_OFFSET.y };
+  const end = { x: goal.x + BODY_CENTER_OFFSET.x, y: goal.y + BODY_CENTER_OFFSET.y };
+  const startInside = !bodySweepClear(obstacles, start.x, start.y, start.x, start.y, 0);
+  const startSpot = nearestSpot(lattice, start.x, start.y,
+    (x, y) => startInside || bodySweepClear(obstacles, start.x, start.y, x, y, 0));
+  const goalSpot = nearestSpot(lattice, end.x, end.y, (x, y) => bodySweepClear(obstacles, x, y, end.x, end.y, 0));
+  if (startSpot === null || goalSpot === null) return null;
 
-  const path = searchTiles(grid, startTile, goalTile);
+  const path = searchTiles(lattice, startSpot, goalSpot);
   if (path === null) return null;
 
   const stops: GeometryPoint[] = [from];
   for (const step of collapseStraightRuns(path)) {
-    const center = positionForBodyTile(step);
+    const center = positionForSpot(step);
     if (!samePoint(stops[stops.length - 1]!, center)) stops.push(center);
   }
-  // The walk ends on the clicked point, not on its tile center: that keeps
+  // The walk ends on the clicked point, not on a lattice spot: that keeps
   // the landing spot of walk-to-peer and the settle tests exactly as they were.
   if (stops.length > 1 && samePoint(stops[stops.length - 1]!, goal)) stops.pop();
   stops.push({ x: goal.x, y: goal.y });
 
-  return pullString(grid, stops);
+  return pullString(obstacles, stops);
 }
