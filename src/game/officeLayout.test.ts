@@ -751,6 +751,32 @@ describe('terrain walls', () => {
     }
   });
 
+  it('blocks no body between posts of different materials (#220), in the footprint and in the colliders alike', () => {
+    const width = 6;
+    const height = 5;
+    const walls = new Array<string | null>(width * height).fill(null);
+    // A brick run (1..3, 1) whose east end meets a glass post, and a glass post under its west end.
+    for (const tx of [1, 2, 3]) walls[1 * width + tx] = 'wall-brick';
+    walls[1 * width + 4] = 'wall-glass';
+    walls[2 * width + 1] = 'wall-glass';
+    const grid = { width, height, walls };
+
+    expect(wallFootprintRects(grid)).toEqual([
+      { x: 24, y: 24, w: 16, h: 16 },
+      { x: 56, y: 24, w: 16, h: 16 },
+      { x: 88, y: 24, w: 16, h: 16 },
+      { x: 120, y: 24, w: 16, h: 16 },
+      { x: 24, y: 56, w: 16, h: 16 },
+      { x: 40, y: 24, w: 16, h: 16 },
+      { x: 72, y: 24, w: 16, h: 16 },
+    ]);
+    expect(wallColliderRects(grid)).toEqual([
+      { x: 24, y: 24, w: 80, h: 16 },
+      { x: 120, y: 24, w: 16, h: 16 },
+      { x: 24, y: 56, w: 16, h: 16 },
+    ]);
+  });
+
   it('names the tiles a post touches: the four around its vertex, clipped to the map', () => {
     const grid = { width: 6, height: 5 };
     expect(wallPostTiles(grid, 2 * 6 + 3).sort((a, b) => a - b)).toEqual([1 * 6 + 2, 1 * 6 + 3, 2 * 6 + 2, 2 * 6 + 3]);
