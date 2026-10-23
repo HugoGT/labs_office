@@ -43,7 +43,7 @@ import type { ChairMaterial } from './domain/chairs.ts';
 import type { PixelBuffer } from '../../src/art/pixelBuffer.ts';
 import type { PlantKind, TreeKind } from './domain/props.ts';
 import { DEFAULT_TABLE_COLOR, ROOM_TABLE_FOOTPRINTS, type RoomTable, type TableMaterial } from './domain/tables.ts';
-import { DEFAULT_PLAIN_COLOR, type Terrain } from './domain/tiles.ts';
+import { DEFAULT_CARPET_COLOR, DEFAULT_PLAIN_COLOR, type Terrain } from './domain/tiles.ts';
 import type { WallMaterial } from './domain/wallMap.ts';
 import { encodePng } from '../../server/src/assets/pngCodec.ts';
 import { renderPreviews } from './preview.ts';
@@ -81,6 +81,9 @@ const FLOOR_NAMES: Readonly<Record<Terrain, string>> = {
   tile: 'Baldosa',
   carpet: 'Moqueta',
 };
+/** The colorable floors and the color each is exported in; the rest have a fixed texture. */
+const FLOOR_DEFAULT_COLORS: Readonly<Partial<Record<Terrain, string>>> = { plain: DEFAULT_PLAIN_COLOR, carpet: DEFAULT_CARPET_COLOR };
+
 const WALL_NAMES: Readonly<Record<WallMaterial, string>> = { brick: 'Ladrillo', stone: 'Piedra', plaster: 'Yeso', glass: 'Vidrio' };
 
 const TREE_NAMES: Readonly<Record<TreeKind, string>> = { oak: 'Roble', maple: 'Arce' };
@@ -163,8 +166,8 @@ export function renderPackFiles(): Map<string, Uint8Array> {
         name: FLOOR_NAMES[terrain],
         ...common,
         material: terrain,
-        colorable: terrain === 'plain',
-        defaultColor: terrain === 'plain' ? DEFAULT_PLAIN_COLOR : null,
+        colorable: FLOOR_DEFAULT_COLORS[terrain] !== undefined,
+        defaultColor: FLOOR_DEFAULT_COLORS[terrain] ?? null,
         motifTiles: FLOOR.motifTiles,
         files: [png(`floor/${terrain}.png`, 'sheet', 'floor', image)],
       }),

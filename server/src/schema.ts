@@ -103,6 +103,13 @@ export interface OfficeState {
    */
   terrainBlocks: string;
   /**
+   * The live block colors (#222), in the sparse wire form of
+   * `encodeTerrainColors` (`<block>:<#rrggbb>` pairs, empty for none). Apart
+   * from `terrainBlocks` so that field keeps its encoding and an older client
+   * ignores this one. Replicated whole like `terrainBlocks`.
+   */
+  terrainColors: string;
+  /**
    * The live walls, painted per tile, in the sparse wire form of
    * `encodeTerrainWalls` (`<tile>:<material>` pairs, empty for none).
    * Replicated whole like `terrainBlocks`.
@@ -128,10 +135,11 @@ export class OfficeState extends Schema {
     this.players = new MapSchema<PlayerState>();
     this.recordings = new MapSchema<RecordingState>();
     this.terrainBlocks = '';
+    this.terrainColors = '';
     this.terrainWalls = '';
     this.officeDecor = '';
     this.pieceCollisions = '';
   }
 }
 
-defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState }, terrainBlocks: 'string', terrainWalls: 'string', officeDecor: 'string', pieceCollisions: 'string' });
+defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState }, terrainBlocks: 'string', terrainWalls: 'string', officeDecor: 'string', pieceCollisions: 'string', terrainColors: 'string' });

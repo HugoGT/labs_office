@@ -21,15 +21,17 @@ import {
   type ArtPiece,
   type ArtPropPiece,
   type Point,
+  type TerrainMaterial,
 } from './artContract';
 import { findPiece } from './artPack';
 import type { ArtTextures } from './artPackLoader';
 import { chairPlacement, deskPlacement, footprintAnchor, type SpritePlacement } from './artPlacement';
 import { chairLayerDepth, worldAssetDepth } from './depthLayers';
 import { TILE, ZONE_LABELS } from './mapData';
-import { LAYOUT_MATERIALS, type LayoutProp, type OfficeLayout, type TerrainSnapshot } from './officeLayout';
+import { LAYOUT_MATERIALS, type LayoutProp, type OfficeLayout, type TerrainColors, type TerrainSnapshot } from './officeLayout';
 import { chairGround, type MapSeat, type PlacedChair } from './seating';
-import { TERRAIN_FLAT_COLORS, decalTileData, fallbackTerrainData, hedgeSprites, propFrame, terrainTileData, wallSprites } from './terrainRender';
+import { terrainColorTileData, terrainMaterialBand, terrainRecolor } from './terrainColorTiles';
+import { TERRAIN_FLAT_COLORS, decalTileData, fallbackTerrainData, hedgeSprites, propFrame, wallSprites } from './terrainRender';
 
 /**
  * Chair of the base map's rooms. The manifest names no default chair (step 3
@@ -103,8 +105,16 @@ export interface TerrainTilemap {
   readonly layers: readonly Phaser.Tilemaps.TilemapLayer[];
   /** The decal layer, `null` in the flat fallback. */
   readonly decals: Phaser.Tilemaps.TilemapLayer | null;
-  /** Rewrites every tile from `terrain`, reusing the same layers (#123 phase 2). */
-  refresh(terrain: TerrainSnapshot): void;
+  /** Rewrites every tile from `terrain` and its block colors (#222), reusing the same layers (#123 phase 2). */
+  refresh(terrain: TerrainSnapshot, colors?: TerrainColors): void;
+}
+
+const NO_COLORS: TerrainColors = new Map();
+
+/** What `TilemapLayer.setTilesets` does for one more tileset (Phaser keeps it private): its gids now draw from it. */
+function attachTileset(layer: Phaser.Tilemaps.TilemapLayer, tileset: Phaser.Tilemaps.Tileset): void {
+  layer.tileset.push(tileset);
+  for (let tile = 0; tile < tileset.total; tile += 1) layer.gidMap[tileset.firstgid + tile] = tileset;
 }
 
 function putRows(layer: Phaser.Tilemaps.TilemapLayer, rows: readonly (readonly number[])[]): void {
@@ -125,8 +135,19 @@ function fallbackTileset(scene: Phaser.Scene): void {
  * The terrain of the whole map in `TERRAIN_LAYER_COUNT` dual-grid layers plus
  * one of decals, all from the one shared tileset: the number of game objects
  * stays the same whatever the size of the map (#123).
+ *
+ * A colored block (#222) draws from a recolored copy of its material's band,
+ * added to the same tilemap as one more tileset the first time that color is
+ * drawn and kept for the life of the map; the flat fallback has no art to
+ * recolor and draws every block in its material's flat color.
  */
-export function renderTerrain(scene: Phaser.Scene, terrain: TerrainSnapshot, layout: OfficeLayout, art?: ArtTextures): TerrainTilemap {
+export function renderTerrain(
+  scene: Phaser.Scene,
+  terrain: TerrainSnapshot,
+  layout: OfficeLayout,
+  art?: ArtTextures,
+  colors: TerrainColors = NO_COLORS,
+): TerrainTilemap {
   const { width, height } = terrain;
   const key = art?.sheet('tileset-terrain', 'sheet') ?? null;
 
@@ -150,14 +171,32 @@ export function renderTerrain(scene: Phaser.Scene, terrain: TerrainSnapshot, lay
     if (layer !== null) layers.push(layer.setDepth(TERRAIN_DEPTH + index * 0.01));
   }
   const decals = map.createBlankLayer('decals', tileset, 0, 0, width, height)?.setDepth(DECAL_DEPTH) ?? null;
-  const draw = (next: TerrainSnapshot): void => {
-    terrainTileData(next).forEach((rows, index) => {
+  // First gid of each recolored band by `material:color`; `null` when it cannot be painted, so it is not retried every redraw.
+  const bands = new Map<string, number | null>();
+  let nextGid = tileset.firstgid + tileset.total;
+  const bandGid = (material: TerrainMaterial, color: string): number | null => {
+    const id = `${material}:${color}`;
+    const known = bands.get(id);
+    if (known !== undefined) return known;
+    const recolor = terrainRecolor(art?.manifest ?? null, material, color);
+    const band = terrainMaterialBand(material);
+    const copy = recolor === null ? null : (art?.recoloredRegion('tileset-terrain', 'sheet', band.rect, recolor) ?? null);
+    const added = copy === null ? null : map.addTilesetImage(`terrain-${id}`, copy, TILE, TILE, 0, 0, nextGid);
+    if (added !== null) {
+      nextGid += added.total;
+      for (const layer of layers) attachTileset(layer, added);
+    }
+    bands.set(id, added?.firstgid ?? null);
+    return added?.firstgid ?? null;
+  };
+  const draw = (next: TerrainSnapshot, nextColors: TerrainColors = NO_COLORS): void => {
+    terrainColorTileData(next, nextColors, bandGid).forEach((rows, index) => {
       const layer = layers[index];
       if (layer !== undefined) putRows(layer, rows);
     });
     if (decals !== null) putRows(decals, decalTileData(layout, next));
   };
-  draw(terrain);
+  draw(terrain, colors);
   return { layers, decals, refresh: draw };
 }
 

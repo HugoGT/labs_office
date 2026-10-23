@@ -14,12 +14,14 @@ export const TILE_SIZE = CHARACTER_HEIGHT * 2;
 /**
  * Every floor motif of the pack. The first four came with the art project; dirt, sand,
  * cobblestone, tile and carpet complete the eight terrain materials of #123 (`plain` is the
- * colorable room floor and no terrain).
+ * colorable room floor and no terrain). Carpet is colorable too (#222): a terrain carpet block
+ * may carry a color of its own, painted at runtime from this default.
  */
 export const TERRAINS = ['wood', 'grass', 'water', 'plain', 'dirt', 'sand', 'cobblestone', 'tile', 'carpet'] as const;
 export type Terrain = (typeof TERRAINS)[number];
 
 export const DEFAULT_PLAIN_COLOR = '#b9c3cc';
+export const DEFAULT_CARPET_COLOR = '#5a6f86';
 
 function wrap(value: number): number {
   return ((value % TILE_SIZE) + TILE_SIZE) % TILE_SIZE;
@@ -319,15 +321,16 @@ export function tileFloorTile(seed = 23): PixelBuffer {
   return tile;
 }
 
-const CARPET = makeRamp('#5a6f86');
 const CARPET_SQUARE = TILE_SIZE / 2;
 
 /**
  * Office carpet tiles: four 48px squares whose woven pile alternates direction, so the floor
- * reads as laid tiles, with a few soft worn patches. Low contrast on purpose.
+ * reads as laid tiles, with a few soft worn patches. Low contrast on purpose. Painted from one
+ * ramp only, so the office can recolor it like the plain floor.
  */
-export function carpetTile(seed = 29): PixelBuffer {
+export function carpetTile(hex = DEFAULT_CARPET_COLOR, seed = 29): PixelBuffer {
   const rng = createRng(seed);
+  const CARPET = makeRamp(hex);
   const tile = solidTile(CARPET.base);
   const weave = mixRgba(CARPET.base, CARPET.shadow, 0.28);
   const seam = mixRgba(CARPET.base, CARPET.shadow, 0.45);

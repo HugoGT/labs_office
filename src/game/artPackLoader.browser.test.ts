@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SCENE_BOOT_TIMEOUT_MS, waitForSceneRunning } from '../test/phaserScene';
 import type { ArtPackManifest } from './artContract';
+import { recolorPixels } from './artColor';
 import { artSheetKey, recoloredSheetKey } from './artPack';
 import { ArtPackLoader, type ArtPackLoaderOptions } from './artPackLoader';
 
@@ -129,6 +130,29 @@ describe('ArtPackLoader', () => {
     // The exported color and a non-colorable material draw the exported sheet.
     expect(art.sheet('desk-painted', 'sheet', '#4f9a8a')).toBe(artSheetKey('desk-painted', 'sheet'));
     expect(art.sheet('desk-wood', 'sheet', '#c0392b')).toBe(artSheetKey('desk-wood', 'sheet'));
+  });
+
+  it('paints one region of a sheet in another color once, as a texture of its own (#222)', async () => {
+    const { scene, art } = await boot();
+    const region = { x: 0, y: 2016, width: 1536, height: 288 };
+    const recolor = { from: '#5a6f86', to: '#aa0000' };
+
+    const key = art.recoloredRegion('tileset-terrain', 'sheet', region, recolor);
+
+    expect(key).not.toBeNull();
+    const texture = scene.textures.get(key as string);
+    expect(texture.getSourceImage()).toMatchObject({ width: region.width, height: region.height });
+    // The middle of the full carpet tile of phase 0 (mask 15; mask 0 is the empty tile): the region's own pixel, recolored.
+    const at = { x: 15 * 32 + 16, y: 16 };
+    const base = scene.textures.getPixel(region.x + at.x, region.y + at.y, artSheetKey('tileset-terrain', 'sheet'), '__BASE')!;
+    const painted = scene.textures.getPixel(at.x, at.y, key as string, '__BASE')!;
+    const expected = recolorPixels(new Uint8ClampedArray([base.red, base.green, base.blue, base.alpha]), recolor.from, recolor.to);
+    expect([painted.red, painted.green, painted.blue]).toEqual([...expected.slice(0, 3)]);
+    expect([painted.red, painted.green, painted.blue]).not.toEqual([base.red, base.green, base.blue]);
+    expect(art.recoloredRegion('tileset-terrain', 'sheet', region, { ...recolor, to: '#AA0000' })).toBe(key);
+    expect(scene.textures.get(key as string)).toBe(texture);
+    // Nothing loaded, nothing to paint from.
+    expect(art.recoloredRegion('tileset-missing', 'sheet', region, recolor)).toBeNull();
   });
 
   it('without a manifest the office still boots, with nothing to draw from the pack', async () => {

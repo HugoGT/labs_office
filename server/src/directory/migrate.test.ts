@@ -676,6 +676,16 @@ describe('schema.sql: persisted terrain blocks (#123 phase 2)', () => {
   });
 });
 
+describe('schema.sql: terrain block colors (#222)', () => {
+  const squashed = squash(schema);
+
+  it('adds the nullable color of a block as a column of its own, a strict lower-case #rrggbb, so existing rows keep none', () => {
+    // `CREATE TABLE IF NOT EXISTS` never touches a live table: the column comes with an ALTER, and every existing row reads NULL.
+    expect(squashed).toContain("alter table terrain_blocks add column if not exists color text check (color is null or color ~ '^#[0-9a-f]{6}$');");
+    expect(squashed.indexOf('alter table terrain_blocks add column if not exists color')).toBeGreaterThan(squashed.indexOf('create table if not exists terrain_blocks ('));
+  });
+});
+
 describe('schema.sql: painted terrain walls', () => {
   const squashed = squash(schema);
   const pieces = WALL_PIECES.map((piece) => `'${piece}'`).join(', ');

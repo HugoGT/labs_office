@@ -53,7 +53,7 @@ import { OFFICE_ROOM_NAME, RECONNECTION_WINDOW_SECONDS } from './OfficeRoom.ts';
 import type { EgressPort } from './recording/egressPort.ts';
 import type { RecordingStoragePort } from './recording/recordingStorage.ts';
 import type { OfficeState } from './schema.ts';
-import { blockTileRect, decodeTerrainWalls } from '../../src/game/officeLayout.ts';
+import { blockTileRect, decodeTerrainWalls, encodeTerrainBlocks } from '../../src/game/officeLayout.ts';
 import { decodeOfficeDecor } from '../../src/game/officeDecor.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 import { AuthConfigError } from './authConfigError.ts';
@@ -2920,7 +2920,7 @@ describe('terrain routes (#123 phase 2)', () => {
 
     const underPlayer = await setBlock(url, LAWN, 'water');
     expect(underPlayer.status).toBe(200);
-    expect(await underPlayer.json()).toEqual({ index: LAWN, material: 'water' });
+    expect(await underPlayer.json()).toEqual({ index: LAWN, material: 'water', color: null });
     await waitFor(() => room.state.players.get(room.sessionId)?.positionRevision === 1);
     expect(server.sessions.positionOf(room.sessionId)).not.toEqual({ x: lawn.x, y: lawn.y });
 
@@ -2936,8 +2936,40 @@ describe('terrain routes (#123 phase 2)', () => {
     await spaces.deleteSpace(sala.id);
     const accepted = await setBlock(url, LAWN, 'water');
     expect(accepted.status).toBe(200);
-    expect(await accepted.json()).toEqual({ index: LAWN, material: 'water' });
+    expect(await accepted.json()).toEqual({ index: LAWN, material: 'water', color: null });
     await waitFor(() => room.state.terrainBlocks.split(',')[LAWN] === 'water');
+    await server.shutdown();
+  });
+
+  it('paints a carpet block in a color over HTTP, persists it with the material and replicates it; a batch too (#222)', async () => {
+    const store = createMemoryTerrain();
+    const { server, url, wsUrl } = await terrainServer({ terrain: store });
+    const room = await new Client(wsUrl).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token: 'valido-uid-admin' });
+    openRooms.push(room);
+    await waitFor(() => room.state.terrainBlocks !== '');
+    // No color yet: the empty field may not even reach the client, like an empty `terrainWalls`.
+    expect(room.state.terrainColors ?? '').toBe('');
+
+    const single = await fetch(`${url}/admin/terrain/blocks/${LAWN}`, { method: 'POST', headers: BEARER, body: JSON.stringify({ material: 'carpet', color: '#A0B1C2' }) });
+    expect(single.status).toBe(200);
+    expect(await single.json()).toEqual({ index: LAWN, material: 'carpet', color: '#a0b1c2' });
+    await waitFor(() => room.state.terrainColors === `${LAWN}:#a0b1c2`);
+    expect(new Map(await store.loadBlockColors())).toEqual(new Map([[LAWN, '#a0b1c2']]));
+
+    const refused = await fetch(`${url}/admin/terrain/blocks/${LAWN}`, { method: 'POST', headers: BEARER, body: JSON.stringify({ material: 'grass', color: '#a0b1c2' }) });
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: 'invalid-request' });
+
+    const expected = encodeTerrainBlocks(server.terrain.blocks());
+    const batch = await fetch(`${url}/admin/terrain/blocks`, {
+      method: 'POST',
+      headers: BEARER,
+      body: JSON.stringify({ expected, edits: [{ index: LAWN, material: 'grass' }, { index: LAWN + 1, material: 'carpet', color: '#0055ff' }] }),
+    });
+    expect(batch.status).toBe(200);
+    expect(await batch.json()).toEqual({ updated: 2 });
+    await waitFor(() => room.state.terrainColors === `${LAWN + 1}:#0055ff`);
+    expect(new Map(await store.loadBlockColors())).toEqual(new Map([[LAWN + 1, '#0055ff']]));
     await server.shutdown();
   });
 

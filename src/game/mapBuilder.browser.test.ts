@@ -17,7 +17,8 @@ import {
   renderTerrain,
   type TerrainTilemap,
 } from './mapBuilder';
-import { terrainSnapshot, wallFootprintRects } from './officeLayout';
+import { terrainSnapshot, wallFootprintRects, type OfficeLayout, type TerrainColors } from './officeLayout';
+import { terrainMaterialBand, terrainRecolor } from './terrainColorTiles';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN, LEGACY_SEATS as BASE_MAP_SEATS } from '../test/legacyOffice';
 
 /** The legacy fixture keeps the 126x90 world it was drawn in. */
@@ -156,6 +157,86 @@ describe('renderTerrain', () => {
     expect(result.layers).toEqual([{ x: 0, y: 0, width: MAP_W, height: MAP_H, texture: FALLBACK_TERRAIN_KEY }]);
     expect(result.tiles).toEqual([fallbackTerrainData(BASE_TERRAIN)]);
     expect(result.decals).toBeNull();
+  });
+});
+
+describe('renderTerrain: colored blocks (#222)', () => {
+  const RED = '#aa0000';
+  const empty = new Array<null>(18 * 9).fill(null);
+  /** Two carpet blocks side by side: block 0 on tiles 0-8, block 1 on tiles 9-17. */
+  const carpets: OfficeLayout = { width: 18, height: 9, blocks: ['carpet', 'carpet'], ground: empty, walls: empty, hedges: empty, decals: empty, props: [] };
+  const terrain = terrainSnapshot(carpets);
+  const band = terrainMaterialBand('carpet');
+  /** Display cells whose four corners are in one block. */
+  const inBlock0 = { cx: 4, cy: 4 };
+  const inBlock1 = { cx: 13, cy: 4 };
+
+  function drawnAt(tilemap: TerrainTilemap, cx: number, cy: number) {
+    return tilemap.layers
+      .map((layer) => layer.getTileAt(cx, cy, true))
+      .filter((tile) => tile !== null && tile.index !== -1)
+      .map((tile) => ({ index: tile.index, texture: tile.tileset?.image?.key, local: tile.index - (tile.tileset?.firstgid ?? 0) }));
+  }
+
+  function defaultAt(cx: number, cy: number) {
+    const key = artSheetKey('tileset-terrain', 'sheet');
+    return terrainTileData(terrain)
+      .map((rows) => rows[cy]![cx]!)
+      .filter((index) => index !== -1)
+      .map((index) => ({ index, texture: key, local: index }));
+  }
+
+  it('draws a colored carpet block from a recolored copy of the carpet band, and a block without a color as before', async () => {
+    const result = await withArtScene((scene, art) => {
+      const tilemap = renderTerrain(scene, terrain, carpets, art, new Map([[0, RED]]));
+      const recolor = terrainRecolor(art.manifest, 'carpet', RED)!;
+      return {
+        colored: drawnAt(tilemap, inBlock0.cx, inBlock0.cy),
+        plain: drawnAt(tilemap, inBlock1.cx, inBlock1.cy),
+        copy: art.recoloredRegion('tileset-terrain', 'sheet', band.rect, recolor),
+        objects: scene.children.list.length,
+      };
+    });
+
+    expect(result.copy).not.toBeNull();
+    expect(result.colored).toEqual(
+      defaultAt(inBlock0.cx, inBlock0.cy).map(({ index }) => ({ index: expect.any(Number), texture: result.copy, local: index - band.firstTile })),
+    );
+    expect(result.plain).toEqual(defaultAt(inBlock1.cx, inBlock1.cy));
+    // Still one tilemap: a color adds a tileset, not game objects.
+    expect(result.objects).toBe(TERRAIN_LAYER_COUNT + 1);
+  });
+
+  it('repaints a color-only change in place, and draws the default art again once the color is gone', async () => {
+    const result = await withArtScene((scene, art) => {
+      const tilemap = renderTerrain(scene, terrain, carpets, art);
+      const before = drawnAt(tilemap, inBlock0.cx, inBlock0.cy);
+      tilemap.refresh(terrain, new Map([[0, RED]]));
+      const painted = drawnAt(tilemap, inBlock0.cx, inBlock0.cy);
+      tilemap.refresh(terrain, new Map());
+      return { before, painted, after: tilemap.layers.map(layerIndices), objects: scene.children.list.length };
+    });
+
+    expect(result.before).toEqual(defaultAt(inBlock0.cx, inBlock0.cy));
+    expect(result.painted.map(({ texture }) => texture)).not.toContain(artSheetKey('tileset-terrain', 'sheet'));
+    expect(result.after).toEqual(terrainTileData(terrain));
+    expect(result.objects).toBe(TERRAIN_LAYER_COUNT + 1);
+  });
+
+  it('draws the default carpet when this browser cannot paint the copy', async () => {
+    const result = await withArtScene((scene, art) => {
+      const blind = { manifest: art.manifest, sheet: art.sheet.bind(art), request: art.request.bind(art), recoloredRegion: () => null };
+      const colors: TerrainColors = new Map([[0, RED]]);
+      return renderTerrain(scene, terrain, carpets, blind, colors).layers.map(layerIndices);
+    });
+
+    expect(result).toEqual(terrainTileData(terrain));
+  });
+
+  it('without the pack draws the flat colors as before, colored blocks included', async () => {
+    const result = await withScene((scene, art) => renderTerrain(scene, terrain, carpets, art, new Map([[0, RED]])).layers.map(layerIndices));
+
+    expect(result).toEqual([fallbackTerrainData(terrain)]);
   });
 });
 

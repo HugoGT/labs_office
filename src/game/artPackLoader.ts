@@ -44,8 +44,9 @@ import {
   recoloredSheetKey,
   type ArtCatalog,
   type ArtLoadRequest,
+  type Recolor,
 } from './artPack';
-import { paintRecoloredCanvas, type PaintableImage } from './artRecolorCanvas';
+import { paintRecoloredCanvas, type PaintRegion, type PaintableImage } from './artRecolorCanvas';
 import { customCharacterPiece } from './customCharacterArt';
 
 export type ArtPieceStatus = 'ready' | 'loading' | 'failed';
@@ -58,6 +59,13 @@ export interface ArtTextures {
    * `null` while it is not loaded (or never will be). Never starts a load.
    */
   sheet(pieceId: string, role: string, color?: string | null): string | null;
+  /**
+   * Key of a texture holding only `region` of a loaded sheet, painted from
+   * `recolor.from` to `recolor.to` (#222: the carpet band of the terrain
+   * tileset), or `null` while the sheet is not loaded or when this browser
+   * cannot read pixels back. Painted once per region and color.
+   */
+  recoloredRegion(pieceId: string, role: string, region: PaintRegion, recolor: Recolor): string | null;
   /**
    * Starts loading a piece. Answers its status now; when that is `loading`,
    * `onSettled` runs once, after the piece is ready or has failed.
@@ -172,6 +180,15 @@ export class ArtPackLoader implements ArtTextures {
     if (this.scene.textures.exists(recolored) || this.paintRecolored(key, recolored, recolor.from, recolor.to)) return recolored;
     // A browser that cannot read pixels back still shows the piece, in its exported color.
     return key;
+  }
+
+  recoloredRegion(pieceId: string, role: string, region: PaintRegion, recolor: Recolor): string | null {
+    const key = artSheetKey(pieceId, role);
+    if (this.failed.has(pieceId) || !this.scene.textures.exists(key)) return null;
+    const target = `${recoloredSheetKey(pieceId, role, recolor.to.toLowerCase())}#${region.x},${region.y},${region.width}x${region.height}`;
+    if (this.scene.textures.exists(target)) return target;
+    const canvas = paintRecoloredCanvas(this.scene.textures.get(key).getSourceImage() as PaintableImage, recolor.from, recolor.to, region);
+    return canvas !== null && this.scene.textures.addCanvas(target, canvas) !== null ? target : null;
   }
 
   request(pieceId: string, onSettled: () => void): ArtPieceStatus {

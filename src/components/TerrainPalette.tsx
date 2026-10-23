@@ -1,17 +1,21 @@
 import { terrainFloorPieceId } from '../game/artContract';
 import { previewFrame, type MaterialOption, type PreviewFrame } from '../game/artMaterials';
+import type { Swatch } from '../art/customCharacter';
 import type { ArtPreviewCache } from '../game/artPreview';
-import { LAYOUT_MATERIALS, WALL_PIECES, type LayoutMaterial, type WallPieceId } from '../game/officeLayout';
+import { LAYOUT_MATERIALS, WALL_PIECES, isColorableTerrainMaterial, type LayoutMaterial, type WallPieceId } from '../game/officeLayout';
 import type { TerrainBrush } from '../game/terrainEditor';
 import { TERRAIN_FLAT_COLORS } from '../game/terrainRender';
 import { ArtPreviewCanvas } from './ArtPreviewCanvas';
+import { ColorPicker } from './ColorPicker';
+import { DECOR_COLORS } from './DecorPalette';
 import styles from './TerrainPalette.module.css';
 
 /**
  * The palettes of the terrain editor. Floors: one entry per terrain
  * material, each with a thumbnail cut from its pack floor, then the void as
- * an eraser. Walls: one entry per wall piece, each with a thumbnail cut from
- * its pack sheet, then the wall eraser. Presentational: the editor owns which entry is picked (one across every
+ * an eraser; carpet also carries a color picker (#222), like the painted
+ * desk's tile in the decor palette. Walls: one entry per wall piece, each
+ * with a thumbnail cut from its pack sheet, then the wall eraser. Presentational: the editor owns which entry is picked (one across every
  * palette) and what a click on the map does with it.
  */
 
@@ -34,6 +38,14 @@ const PALETTE_ORDER: readonly LayoutMaterial[] = [...LAYOUT_MATERIALS].reverse()
 /** A corner of the 96px floor motif at 1:1: enough to read the texture, small enough for a grid. */
 const THUMBNAIL: PreviewFrame = { x: 0, y: 0, width: 48, height: 48 };
 
+/**
+ * Quick picks for a colorable floor: its pack default first, then the decor
+ * palette's colors (#222), so carpet and painted desks share one set.
+ */
+function floorColors(defaultColor: string): readonly Swatch[] {
+  return [{ hex: defaultColor, label: 'Por defecto' }, ...DECOR_COLORS.filter((swatch) => swatch.hex !== defaultColor)];
+}
+
 function hexColor(color: number): string {
   return `#${color.toString(16).padStart(6, '0')}`;
 }
@@ -44,17 +56,22 @@ export interface TerrainPaletteProps {
   onPick: (material: LayoutMaterial) => void;
   /** Floor pieces of the pack catalog, or `null` while it is unavailable: flat swatches then. */
   floors: readonly MaterialOption[] | null;
+  /** The color chosen per colorable floor; one without starts in its pack default. */
+  colors?: Readonly<Partial<Record<LayoutMaterial, string>>>;
+  onColorChange?: (material: LayoutMaterial, color: string) => void;
   disabled?: boolean;
   preview?: ArtPreviewCache;
 }
 
-export function TerrainPalette({ value, onPick, floors, disabled = false, preview }: TerrainPaletteProps) {
+export function TerrainPalette({ value, onPick, floors, colors = {}, onColorChange, disabled = false, preview }: TerrainPaletteProps) {
   return (
     <div className={styles.palette} role="group" aria-label="Suelos">
       {PALETTE_ORDER.map((material) => {
         const option = material === 'void' ? undefined : floors?.find((candidate) => candidate.id === terrainFloorPieceId(material));
         const label = TERRAIN_MATERIAL_LABELS[material];
-        return (
+        const defaultColor = isColorableTerrainMaterial(material) ? (option?.defaultColor ?? null) : null;
+        const color = defaultColor === null ? null : (colors[material] ?? defaultColor);
+        const entry = (
           <button
             key={material}
             type="button"
@@ -66,10 +83,26 @@ export function TerrainPalette({ value, onPick, floors, disabled = false, previe
           >
             {/* Decorative: the button is named by its label. */}
             <span className={styles.thumbnail} aria-hidden="true" style={{ background: hexColor(TERRAIN_FLAT_COLORS[material]) }}>
-              {option !== undefined && <ArtPreviewCanvas option={option} color={null} frame={THUMBNAIL} label={label} className={styles.canvas} preview={preview} />}
+              {option !== undefined && <ArtPreviewCanvas option={option} color={color} frame={THUMBNAIL} label={label} className={styles.canvas} preview={preview} />}
             </span>
             <span className={styles.label}>{label}</span>
           </button>
+        );
+        if (defaultColor === null || color === null) return entry;
+        // Chosen before or after picking, like the painted desk's tile (#222).
+        return (
+          <div key={material} className={styles.cell}>
+            {entry}
+            <ColorPicker
+              label={`Color de ${label}`}
+              caption=""
+              presets={floorColors(defaultColor)}
+              value={color}
+              compact
+              disabled={disabled}
+              onChange={(hex) => onColorChange?.(material, hex)}
+            />
+          </div>
         );
       })}
     </div>

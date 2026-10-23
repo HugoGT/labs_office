@@ -21,7 +21,7 @@ export function createMemoryTerrain(
   wallSeed: Iterable<readonly [number, WallPieceId]> = [],
   decorSeed: Iterable<DecorItem> = [],
 ): MemoryTerrain {
-  const blocks = new Map<number, { material: LayoutMaterial; actorId: string | null }>();
+  const blocks = new Map<number, { material: LayoutMaterial; color?: string; actorId: string | null }>();
   for (const [index, material] of seed) blocks.set(index, { material, actorId: null });
   const walls = new Map<number, { piece: WallPieceId; actorId: string | null }>();
   for (const [index, piece] of wallSeed) walls.set(index, { piece, actorId: null });
@@ -36,11 +36,15 @@ export function createMemoryTerrain(
       blocks.set(index, { material, actorId });
     },
     async saveBlocks(edits, actorId) {
-      for (const { index, material } of edits) blocks.set(index, { material, actorId });
+      // Like the Postgres row: an edit without a color leaves the block with none.
+      for (const { index, material, color } of edits) blocks.set(index, { material, ...(color === undefined ? {} : { color }), actorId });
+    },
+    async loadBlockColors() {
+      return new Map([...blocks].flatMap(([index, { color }]) => (color === undefined ? [] : [[index, color] as const])));
     },
     async saveBlocksClearingWalls(edits, removed, actorId) {
       // Synchronous between the read and the writes, like one Postgres statement.
-      for (const { index, material } of edits) blocks.set(index, { material, actorId });
+      for (const { index, material, color } of edits) blocks.set(index, { material, ...(color === undefined ? {} : { color }), actorId });
       for (const index of removed) walls.delete(index);
     },
     actorOf(index) {

@@ -19,6 +19,20 @@ describe('memoryTerrain', () => {
   });
 });
 
+describe('memoryTerrain block colors (#222)', () => {
+  it('keeps the color saved with a block, and drops it when the block is saved without one', async () => {
+    const store = createMemoryTerrain([[3, 'carpet']]);
+    expect([...(await store.loadBlockColors())]).toEqual([]);
+
+    await store.saveBlocks([{ index: 3, material: 'carpet', color: '#a0b1c2' }, { index: 4, material: 'carpet', color: '#0055ff' }], 'admin-1');
+    expect(new Map(await store.loadBlockColors())).toEqual(new Map([[3, '#a0b1c2'], [4, '#0055ff']]));
+
+    await store.saveBlocks([{ index: 4, material: 'grass' }], 'admin-2');
+    expect(new Map(await store.loadBlockColors())).toEqual(new Map([[3, '#a0b1c2']]));
+    expect(new Map(await store.loadBlocks())).toEqual(new Map([[3, 'carpet'], [4, 'grass']]));
+  });
+});
+
 describe('memoryTerrain walls', () => {
   it('starts with no wall, or with the wall seed', async () => {
     expect([...(await createMemoryTerrain().loadWalls())]).toEqual([]);
@@ -36,9 +50,10 @@ describe('memoryTerrain walls', () => {
   });
   it('saves blocks and removes walls in one save', async () => {
     const store = createMemoryTerrain([], [[4, 'wall-brick'], [5, 'wall-glass']]);
-    await store.saveBlocksClearingWalls([{ index: 0, material: 'void' }], [4], 'admin-1');
+    await store.saveBlocksClearingWalls([{ index: 0, material: 'void' }, { index: 1, material: 'carpet', color: '#a0b1c2' }], [4], 'admin-1');
 
-    expect([...(await store.loadBlocks())]).toEqual([[0, 'void']]);
+    expect([...(await store.loadBlocks())]).toEqual([[0, 'void'], [1, 'carpet']]);
+    expect([...(await store.loadBlockColors())]).toEqual([[1, '#a0b1c2']]);
     expect(store.actorOf(0)).toBe('admin-1');
     expect([...(await store.loadWalls())]).toEqual([[5, 'wall-glass']]);
     expect(store.wallActorOf(4)).toBeUndefined();

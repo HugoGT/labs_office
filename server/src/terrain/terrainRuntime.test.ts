@@ -131,6 +131,7 @@ describe('createTerrainRuntime', () => {
       },
       saveBlocks: async () => { throw new Error('connection lost'); },
       saveBlocksClearingWalls: async () => { throw new Error('connection lost'); },
+      loadBlockColors: async () => new Map(),
       loadWalls: async () => new Map(),
       saveWalls: async () => { throw new Error('connection lost'); },
       loadDecor: async () => [],
@@ -324,6 +325,19 @@ describe('createTerrainRuntime walls', () => {
       expect(runtime.walls()[older]).toBe('wall-glass');
       expect(runtime.snapshot().walls).toEqual(runtime.walls());
       expect(listener).toHaveBeenCalledExactlyOnceWith(runtime.blocks());
+    });
+
+    it('keeps the carpet color of a block saved in the same batch as a void that clears walls', async () => {
+      const store = createMemoryTerrain([], [[inside, 'wall-brick']]);
+      const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+      await runtime.load();
+
+      await runtime.setBlocks([{ index: LAWN, material: 'void' }, { index: LAKE, material: 'carpet', color: '#a0b1c2' }], null, NONE);
+
+      expect(runtime.walls()[inside]).toBeNull();
+      expect([...(await store.loadWalls())]).toEqual([]);
+      expect(runtime.blockColors().get(LAKE)).toBe('#a0b1c2');
+      expect([...(await store.loadBlockColors())]).toEqual([[LAKE, '#a0b1c2']]);
     });
 
     it('keeps every wall when a block turns into anything but void', async () => {
