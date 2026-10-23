@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import exportedManifest from '../../public/assets/pack/manifest.json?raw';
@@ -8,6 +8,7 @@ import { materialCatalogFrom } from '../game/artMaterials';
 import type { ArtPreviewCache } from '../game/artPreview';
 import { MAP_W } from '../game/mapData';
 import { createOfficeBridge, type OfficeCommandMap } from '../game/officeBridge';
+import { BASE_LAYOUT, withWalls } from '../game/officeLayout';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
 import { DecorEditorSection } from './DecorEditorSection';
 
@@ -172,14 +173,53 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
       expect(commands.at(-1)).toMatchObject({ brush: { kind: 'piece', piece: 'plant-ficus' } });
     });
 
+    it('puts «Borrar» right below «Múltiple», out of the walls, and says only that while it is picked (#223)', async () => {
+      const { terrainCommands } = renderSection({ initiallyActive: true, terrain: terrainPort() });
+      const multiple = await screen.findByRole('checkbox', { name: 'Múltiple: varios a la vez' });
+      const eraser = screen.getByRole('button', { name: 'Borrar' });
+
+      // The row of «Múltiple» is followed straight by the eraser, before the pieces' palettes.
+      expect(multiple.closest('label')?.parentElement?.nextElementSibling).toContainElement(eraser);
+      expect(within(screen.getByRole('group', { name: 'Paredes' })).queryByRole('button', { name: 'Borrar' })).not.toBeInTheDocument();
+      expect(eraser).toHaveTextContent(/^Borrar$/);
+      expect(eraser).toHaveAttribute('title', 'Borrar');
+      expect(document.body.textContent).not.toMatch(/Quitar pared|Quitando paredes|Goma/);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Ladrillo' }));
+      await userEvent.click(eraser);
+      expect(eraser).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByRole('button', { name: 'Ladrillo' })).toHaveAttribute('aria-pressed', 'false');
+      expect(terrainCommands.at(-1)).toEqual({ brush: { kind: 'wall', piece: null } });
+      expect(screen.getByRole('button', { name: 'Deseleccionar' }).parentElement).toHaveTextContent(/^Borrar/);
+      expect(document.body.textContent).not.toMatch(/Quitando|Quitar/);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Ficus' }));
+      expect(eraser).toHaveAttribute('aria-pressed', 'false');
+      expect(terrainCommands.at(-1)).toBeNull();
+    });
+
+    it('erases the clicked vertex when the eraser is picked, and the walls stay paintable (#223)', async () => {
+      const setWalls = vi.fn(async () => undefined);
+      const { bridge } = renderSection({ initiallyActive: true, terrain: terrainPort({ setWalls }) });
+      act(() => bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls: withWalls(BASE_LAYOUT.walls, [{ index: 7, piece: 'wall-stone' }]), colors: new Map() }));
+
+      await userEvent.click(await screen.findByRole('button', { name: 'Borrar' }));
+      act(() => bridge.emit('wallpick', { index: 7 }));
+      await vi.waitFor(() => expect(setWalls).toHaveBeenLastCalledWith([{ index: 7, piece: null }]));
+
+      await userEvent.click(screen.getByRole('button', { name: 'Ladrillo' }));
+      act(() => bridge.emit('wallpick', { index: 9 }));
+      await vi.waitFor(() => expect(setWalls).toHaveBeenLastCalledWith([{ index: 9, piece: 'wall-brick' }]));
+    });
+
     it('steps out on Escape: the picked wall first, then the editor', async () => {
       const onExit = vi.fn();
       const { commands, terrainCommands } = renderSection({ initiallyActive: true, terrain: terrainPort(), onExit });
-      await userEvent.click(await screen.findByRole('button', { name: 'Quitar pared' }));
-      expect(screen.getByText('Quitando paredes')).toBeInTheDocument();
+      await userEvent.click(await screen.findByRole('button', { name: 'Borrar' }));
+      expect(screen.getByRole('button', { name: 'Deseleccionar' }).parentElement).toHaveTextContent('Borrar');
 
       await userEvent.keyboard('{Escape}');
-      expect(screen.getByRole('button', { name: 'Quitar pared' })).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getByRole('button', { name: 'Borrar' })).toHaveAttribute('aria-pressed', 'false');
       expect(terrainCommands.at(-1)).toBeNull();
       expect(commands.at(-1)).toMatchObject({ brush: null, area: null });
       expect(onExit).not.toHaveBeenCalled();

@@ -65,6 +65,8 @@ interface WallPaint {
   readonly index: number;
   readonly piece: WallPieceId | null;
   readonly sent: boolean;
+  /** Left a refused batch: it goes to the server on its own, so it cannot take its neighbors down with it (#223). */
+  readonly alone?: boolean;
 }
 
 /** The wall post a vertex will hold once every pending paint lands. */
@@ -77,16 +79,18 @@ function wallAfter(walls: readonly (string | null)[], paints: readonly WallPaint
 /**
  * The unsent paints that leave together: the first ones of the queue, up to
  * a vertex already in the request (the server refuses one twice) or
- * `MAX_WALL_EDITS`.
+ * `MAX_WALL_EDITS`. A paint that is `alone` leaves by itself.
  */
 function nextRun(paints: readonly WallPaint[]): WallPaint[] {
   const run: WallPaint[] = [];
   const tiles = new Set<number>();
   for (const paint of paints) {
     if (paint.sent) continue;
+    if (paint.alone === true && run.length > 0) break;
     if (tiles.has(paint.index) || run.length === MAX_WALL_EDITS) break;
     tiles.add(paint.index);
     run.push(paint);
+    if (paint.alone === true) break;
   }
   return run;
 }
@@ -127,6 +131,12 @@ export function useWallEditor({ bridge, terrain }: UseWallEditorOptions): WallEd
           const underPlacement = cause instanceof AdminError && cause.code === 'terrain-under-placement';
           setError(underPlacement ? WALL_UNDER_PLACEMENT_MESSAGE : describeAdminError(cause));
           if (cause instanceof AdminError && BLOCKING_ERRORS.includes(cause.code)) setBlockedBoth(true);
+          if (underPlacement && batch.length > 1) {
+            // The server takes a batch whole or not at all, and a refusal does not say which post it is about
+            // (a door's post is never erased): each one goes again alone, so only the refused ones stay out.
+            setPaints(paintsRef.current.map((candidate) => (batch.includes(candidate) ? { ...candidate, alone: true } : candidate)));
+            continue;
+          }
           // A refused paint is simply not drawn; once editing is gone, nothing queued is sent.
           setPaints(paintsRef.current.filter((candidate) => !batch.includes(candidate) && !(blockedRef.current && !candidate.sent)));
         }

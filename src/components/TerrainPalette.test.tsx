@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import exportedManifest from '../../public/assets/pack/manifest.json?raw';
 import { materialCatalogFrom } from '../game/artMaterials';
 import type { ArtPreviewCache } from '../game/artPreview';
-import { TerrainPalette, WallPalette } from './TerrainPalette';
+import { TerrainPalette, WallEraser, WallPalette } from './TerrainPalette';
 
 const catalog = materialCatalogFrom(JSON.parse(exportedManifest), 'assets/pack/manifest.json')!;
 
@@ -86,9 +86,9 @@ describe('TerrainPalette', () => {
 });
 
 describe('WallPalette', () => {
-  const WALL_NAMES = ['Ladrillo', 'Piedra', 'Yeso', 'Vidrio', 'Quitar pared'];
+  const WALL_NAMES = ['Ladrillo', 'Piedra', 'Yeso', 'Vidrio'];
 
-  it('offers every wall by its Spanish name, then the wall eraser, none pressed while a floor or nothing is picked', () => {
+  it('offers every wall by its Spanish name and no eraser, none pressed while a floor or nothing is picked', () => {
     const { rerender } = render(<WallPalette value={null} onPick={() => {}} walls={catalog.wall} preview={noPreview()} />);
 
     const group = screen.getByRole('group', { name: 'Paredes' });
@@ -96,22 +96,23 @@ describe('WallPalette', () => {
     expect(buttons.map((button) => button.textContent)).toEqual(WALL_NAMES);
     expect(buttons.every((button) => button.getAttribute('aria-pressed') === 'false')).toBe(true);
 
+    expect(screen.queryByRole('button', { name: 'Borrar' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Quitar pared' })).not.toBeInTheDocument();
+
     rerender(<WallPalette value={{ kind: 'floor', material: 'void' }} onPick={() => {}} walls={catalog.wall} preview={noPreview()} />);
-    expect(screen.getByRole('button', { name: 'Quitar pared' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getAllByRole('button').every((button) => button.getAttribute('aria-pressed') === 'false')).toBe(true);
   });
 
-  it('marks the picked wall or the eraser as pressed and reports every click', async () => {
+  it('marks the picked wall as pressed and reports every click', async () => {
     const onPick = vi.fn();
     const { rerender } = render(<WallPalette value={{ kind: 'wall', piece: 'wall-stone' }} onPick={onPick} walls={catalog.wall} preview={noPreview()} />);
 
     expect(screen.getByRole('button', { name: 'Piedra' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: 'Quitar pared' })).toHaveAttribute('aria-pressed', 'false');
     await userEvent.click(screen.getByRole('button', { name: 'Vidrio' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Quitar pared' }));
-    expect(onPick.mock.calls).toEqual([['wall-glass'], [null]]);
+    expect(onPick.mock.calls).toEqual([['wall-glass']]);
 
+    // The wall eraser picked is no wall of this palette.
     rerender(<WallPalette value={{ kind: 'wall', piece: null }} onPick={onPick} walls={catalog.wall} preview={noPreview()} />);
-    expect(screen.getByRole('button', { name: 'Quitar pared' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Piedra' })).toHaveAttribute('aria-pressed', 'false');
   });
 
@@ -126,5 +127,38 @@ describe('WallPalette', () => {
     expect(screen.getAllByRole('button')).toHaveLength(WALL_NAMES.length);
     expect(screen.queryAllByRole('img')).toHaveLength(0);
     expect(screen.getAllByRole('button').every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+  });
+});
+
+describe('WallEraser (#223)', () => {
+  it('is one entry that says only «Borrar», in its text, its tooltip and its accessible name, and keeps its picture', () => {
+    render(<WallEraser value={null} onPick={() => {}} />);
+
+    const button = screen.getByRole('button', { name: 'Borrar' });
+    expect(button).toHaveTextContent(/^Borrar$/);
+    expect(button).toHaveAttribute('title', 'Borrar');
+    expect(button).not.toHaveAttribute('aria-label');
+    // The picture, decorative like the thumbnails of the walls.
+    expect(button.querySelector('[aria-hidden="true"]')).not.toBeNull();
+    expect(button.textContent).not.toMatch(/Quitar|Goma|pared/);
+  });
+
+  it('is pressed only while the wall eraser is picked, and reports its click as no wall', async () => {
+    const onPick = vi.fn();
+    const { rerender } = render(<WallEraser value={{ kind: 'wall', piece: 'wall-stone' }} onPick={onPick} />);
+    expect(screen.getByRole('button', { name: 'Borrar' })).toHaveAttribute('aria-pressed', 'false');
+    rerender(<WallEraser value={{ kind: 'floor', material: 'void' }} onPick={onPick} />);
+    expect(screen.getByRole('button', { name: 'Borrar' })).toHaveAttribute('aria-pressed', 'false');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Borrar' }));
+    expect(onPick.mock.calls).toEqual([[null]]);
+
+    rerender(<WallEraser value={{ kind: 'wall', piece: null }} onPick={onPick} />);
+    expect(screen.getByRole('button', { name: 'Borrar' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('can be disabled', () => {
+    render(<WallEraser value={null} onPick={() => {}} disabled />);
+    expect(screen.getByRole('button', { name: 'Borrar' })).toBeDisabled();
   });
 });
