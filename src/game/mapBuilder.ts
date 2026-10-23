@@ -28,7 +28,7 @@ import type { ArtTextures } from './artPackLoader';
 import { chairPlacement, deskPlacement, footprintAnchor, type SpritePlacement } from './artPlacement';
 import { chairLayerDepth, worldAssetDepth } from './depthLayers';
 import { TILE, ZONE_LABELS } from './mapData';
-import { LAYOUT_MATERIALS, type LayoutProp, type OfficeLayout, type TerrainColors, type TerrainSnapshot } from './officeLayout';
+import { LAYOUT_MATERIALS, type LayoutProp, type OfficeLayout, type TerrainColors, type TerrainSnapshot, type WallGrid } from './officeLayout';
 import { chairGround, type MapSeat, type PlacedChair } from './seating';
 import { terrainColorTileData, terrainMaterialBand, terrainRecolor } from './terrainColorTiles';
 import { TERRAIN_FLAT_COLORS, decalTileData, fallbackTerrainData, hedgeSprites, propFrame, wallSprites } from './terrainRender';
@@ -213,7 +213,7 @@ export const WALL_OBJECT_NAME = 'map:wall';
  */
 export function placeWalls(
   scene: Phaser.Scene,
-  grid: Pick<OfficeLayout, 'width' | 'height' | 'walls'>,
+  grid: WallGrid,
   art?: ArtTextures,
 ): Phaser.GameObjects.GameObject[] {
   const drawn: Phaser.GameObjects.GameObject[] = [];

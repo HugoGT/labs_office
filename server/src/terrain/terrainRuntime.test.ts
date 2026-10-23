@@ -728,3 +728,105 @@ describe('createTerrainRuntime decor', () => {
     expect(await seen).toEqual([]);
   });
 });
+
+describe('createTerrainRuntime doors (#223)', () => {
+  const W = BASE_LAYOUT.width;
+  const at = (tx: number, ty: number) => ty * W + tx;
+  const CATALOG = [
+    { id: 'chair-wood', kind: 'chair', retired: false },
+    { id: 'door-wood', kind: 'door', retired: false },
+  ];
+  /** A brick wall along row 22, posts on vertices 65..68, and a glass post on 69. */
+  const WALL: [number, 'wall-brick' | 'wall-glass'][] = [
+    [at(65, 22), 'wall-brick'],
+    [at(66, 22), 'wall-brick'],
+    [at(67, 22), 'wall-brick'],
+    [at(68, 22), 'wall-brick'],
+    [at(69, 22), 'wall-glass'],
+  ];
+  const DOOR = { piece: 'door-wood', rotation: 0 } as const;
+  const runtimeWith = (store = createMemoryTerrain([], WALL)) =>
+    createTerrainRuntime({ layout: BASE_LAYOUT, store, seats: BASE_MAP_SEATS, decorPieces: async () => CATALOG });
+  /** Whether a body center at (cx, cy) may stand in the runtime's snapshot. */
+  const passes = (runtime: ReturnType<typeof runtimeWith>, cx: number, cy: number) => isPositionWalkable(runtime.snapshot(), cx, cy - 11);
+  /** The middle of the edge between posts (tx, 22) and (tx + 1, 22). */
+  const through = (tx: number) => [tx * TILE + TILE / 2, 22 * TILE] as const;
+
+  it('places a door on the edge between two joined posts and opens the wall there, and only there', async () => {
+    const store = createMemoryTerrain([], WALL);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+    const listener = vi.fn();
+    runtime.subscribe(listener);
+    expect(passes(runtime, ...through(66))).toBe(false);
+
+    await runtime.setDecor([{ index: at(66, 22), item: DOOR }], 'admin-1');
+
+    expect(runtime.decor()).toEqual([{ index: at(66, 22), ...DOOR }]);
+    expect(await store.loadDecor()).toEqual(runtime.decor());
+    expect(listener).toHaveBeenCalledExactlyOnceWith(runtime.blocks());
+    expect(runtime.snapshot().openings).toEqual([{ col: 66, row: 22, axis: 'horizontal' }]);
+    expect(passes(runtime, ...through(66))).toBe(true);
+    expect(passes(runtime, ...through(65))).toBe(false);
+    expect(passes(runtime, ...through(67))).toBe(false);
+  });
+
+  it('refuses a door off a wall, across two materials, on unwalkable ground, in a desk or over another item', async () => {
+    const runtime = runtimeWith(createMemoryTerrain([], WALL, [{ index: at(67, 21), piece: 'chair-wood', rotation: 0 }]));
+    await runtime.load();
+
+    await expect(runtime.setDecor([{ index: at(66, 25), item: DOOR }], null)).rejects.toThrow(TerrainProtectedError);
+    await expect(runtime.setDecor([{ index: at(68, 22), item: DOOR }], null)).rejects.toThrow(TerrainProtectedError);
+    await expect(runtime.setDecor([{ index: at(66, 22), item: { piece: 'door-wood', rotation: 90 } }], null)).rejects.toThrow(TerrainProtectedError);
+    await expect(runtime.setDecor([{ index: at(67, 22), item: DOOR }], null)).rejects.toThrow(TerrainProtectedError);
+    await expect(runtime.setDecor([{ index: at(30, 30), item: DOOR }], null)).rejects.toThrow(TerrainProtectedError);
+    await expect(runtime.setDecor([{ index: at(66, 22), item: DOOR }], null, { x: 65, y: 21, w: 3, h: 3 })).rejects.toThrow(InvalidTerrainEditError);
+    expect(runtime.decor()).toEqual([{ index: at(67, 21), piece: 'chair-wood', rotation: 0 }]);
+    expect(runtime.snapshot().openings).toEqual([]);
+  });
+
+  it('moves and removes a door like any decor item, closing the wall it leaves', async () => {
+    const runtime = runtimeWith();
+    await runtime.load();
+    await runtime.setDecor([{ index: at(66, 22), item: DOOR }], null);
+
+    await runtime.setDecor([{ index: at(66, 22), item: null }, { index: at(65, 22), item: { piece: 'door-wood', rotation: 180 } }], null);
+    expect(runtime.decor()).toEqual([{ index: at(65, 22), piece: 'door-wood', rotation: 180 }]);
+    expect(passes(runtime, ...through(66))).toBe(false);
+    expect(passes(runtime, ...through(65))).toBe(true);
+
+    await runtime.setDecor([{ index: at(65, 22), item: null }], null);
+    expect(runtime.decor()).toEqual([]);
+    expect(runtime.snapshot().openings).toEqual([]);
+    expect(passes(runtime, ...through(65))).toBe(false);
+  });
+
+  it('refuses to erase or repaint a post that ends a door, and lets the rest of the wall change', async () => {
+    const runtime = runtimeWith();
+    await runtime.load();
+    await runtime.setDecor([{ index: at(66, 22), item: DOOR }], null);
+
+    await expect(runtime.setWalls([{ index: at(66, 22), piece: null }], null, NONE)).rejects.toThrow(TerrainProtectedError);
+    await expect(runtime.setWalls([{ index: at(67, 22), piece: 'wall-stone' }], null, NONE)).rejects.toThrow(TerrainProtectedError);
+    expect(runtime.walls()[at(66, 22)]).toBe('wall-brick');
+    expect(runtime.walls()[at(67, 22)]).toBe('wall-brick');
+
+    await runtime.setWalls([{ index: at(69, 22), piece: null }], null, NONE);
+    expect(runtime.walls()[at(69, 22)]).toBeNull();
+    // The door stays open through the wall edit.
+    expect(passes(runtime, ...through(66))).toBe(true);
+
+    await runtime.setDecor([{ index: at(66, 22), item: null }], null);
+    await runtime.setWalls([{ index: at(66, 22), piece: null }], null, NONE);
+    expect(runtime.walls()[at(66, 22)]).toBeNull();
+  });
+
+  it('opens the stored doors at load, and keeps them open through a block edit', async () => {
+    const runtime = runtimeWith(createMemoryTerrain([], WALL, [{ index: at(66, 22), ...DOOR }]));
+    await runtime.load();
+    expect(passes(runtime, ...through(66))).toBe(true);
+
+    await runtime.setBlock({ index: LAWN, material: 'sand', actorId: null }, NONE);
+    expect(passes(runtime, ...through(66))).toBe(true);
+  });
+});

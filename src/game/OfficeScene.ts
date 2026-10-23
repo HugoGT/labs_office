@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type Point } from './artContract';
+import { WALL, propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type Point } from './artContract';
 import { artUploadsManifestUrl, findPiece, type ArtAppearance } from './artPack';
 import { artCustomCharactersUrl } from './customCharacterArt';
 import { ArtPackLoader } from './artPackLoader';
@@ -37,6 +37,7 @@ import { deskAt, deskZoneName } from './deskLayout';
 import { SPACE_SHADE_ALPHA, SPACE_SHADE_NAME, shadeAround, shadeKey } from './spaceFocus';
 import { tableFacing, tableFloorRect } from './deskTable';
 import { decorChairs, decorFootprint, encodeOfficeDecor, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
+import { doorEdge, doorOpenings } from './officeDoors';
 import { deskEntryRefused } from './deskDecorRules';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
@@ -153,6 +154,8 @@ export function decorObjectName(index: number): string {
 }
 const ART_FALLBACK_COLOR = 0x6b7280;
 const ART_FALLBACK_ALPHA = 0.6;
+/** A door's placeholder plank across its edge (#223), until its sheet loads. */
+const DOOR_PLACEHOLDER_THICKNESS = 6;
 
 /**
  * Como se conecta la escena al servidor. `connect` se inyecta para poder
@@ -590,7 +593,7 @@ export class OfficeScene extends Phaser.Scene {
     this.mapSeats = options.seats ?? BASE_MAP_SEATS;
     this.terrainBlocks = this.layout.blocks;
     this.terrainWalls = this.layout.walls;
-    this.terrain = terrainSnapshot(this.layout);
+    this.terrain = this.terrainOf(this.terrainBlocks, this.terrainWalls);
     this.collisionInstances = officeCollisionInstances(this.layout, this.mapSeats);
     this.collisionRects = collisionWorld(this.collisionInstances, this.collisionTable);
   }
@@ -1613,6 +1616,7 @@ export class OfficeScene extends Phaser.Scene {
       const placement = deskPlacement(sheet.piece, tableFacing(item.rotation), anchor);
       return [putArtSprite(this, sheet.key, placement, worldAssetDepth(placement.depthY)).setName(decorObjectName(item.index))];
     }
+    if (kind === 'door') return [this.drawDoor(item)];
     const propKind = kind === 'table' ? 'table' : 'plant';
     const sheet = this.artSheet({ materialId: item.piece, color: null }, propKind, this.redrawDecor);
     if (sheet === null || (sheet.piece.kind !== 'plant' && sheet.piece.kind !== 'table')) {
@@ -1627,6 +1631,22 @@ export class OfficeScene extends Phaser.Scene {
     const placement = propPlacement({ anchor: sheet.piece.anchor, footprint: { w: rect.w, h: rect.h } }, rect.x, rect.y);
     const frame = sheet.piece.kind === 'table' ? tableFrameIndex(item.rotation) : 0;
     return [putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(placement.depthY)).setName(decorObjectName(item.index))];
+  }
+
+  /**
+   * A door of the decor layer (#223): a plank on the grid line it opens,
+   * sorted like the wall body it stands in for (`doorEdge`).
+   */
+  private drawDoor(item: DecorItem): Phaser.GameObjects.GameObject {
+    const edge = doorEdge(item, this.layout.width);
+    const horizontal = edge.axis === 'horizontal';
+    const x = horizontal ? (edge.col + 0.5) * TILE : edge.col * TILE;
+    const y = horizontal ? edge.row * TILE : (edge.row + 0.5) * TILE;
+    return this.add
+      .rectangle(x, y, horizontal ? TILE : DOOR_PLACEHOLDER_THICKNESS, horizontal ? DOOR_PLACEHOLDER_THICKNESS : TILE, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
+      // The bottom of the wall body it replaces: half a wall below the edge's middle either way.
+      .setDepth(worldAssetDepth(y + WALL.thickness / 2))
+      .setName(decorObjectName(item.index));
   }
 
   /**
@@ -1761,7 +1781,7 @@ export class OfficeScene extends Phaser.Scene {
     if (!this.alive) return;
     if (encodeTerrainBlocks(blocks) !== encodeTerrainBlocks(this.terrainBlocks)) {
       this.terrainBlocks = blocks;
-      this.terrain = terrainSnapshot(this.layout, blocks, this.terrainWalls);
+      this.terrain = this.terrainOf(blocks, this.terrainWalls);
       this.grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
       this.buildTerrainColliders(this.grid);
       this.paintTerrain();
@@ -1803,7 +1823,7 @@ export class OfficeScene extends Phaser.Scene {
     if (!this.alive || walls.length !== this.layout.width * this.layout.height) return;
     if (encodeTerrainWalls(walls) !== encodeTerrainWalls(this.terrainWalls)) {
       this.terrainWalls = walls;
-      this.terrain = terrainSnapshot(this.layout, this.terrainBlocks, walls);
+      this.terrain = this.terrainOf(this.terrainBlocks, walls);
       this.grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
       this.buildTerrainColliders(this.grid);
       this.paintWalls();
@@ -1820,7 +1840,15 @@ export class OfficeScene extends Phaser.Scene {
   private applyDecor(items: readonly DecorItem[]): void {
     if (!this.alive) return;
     if (encodeOfficeDecor(items) !== encodeOfficeDecor(this.officeDecor)) {
+      const opened = JSON.stringify(doorOpenings(this.officeDecor, this.layout.width));
       this.officeDecor = items;
+      // A door that came or went opens or closes its wall (#223): the room's snapshot changed with it.
+      if (JSON.stringify(doorOpenings(items, this.layout.width)) !== opened) {
+        this.terrain = this.terrainOf(this.terrainBlocks, this.terrainWalls);
+        this.grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
+        this.buildTerrainColliders(this.grid);
+        this.paintWalls();
+      }
       this.placeDecorCollisions();
       this.paintDecor();
       const ref = this.seat === null ? null : parseSeatRef(this.seat.id, this.mapSeats.length);
@@ -1893,11 +1921,24 @@ export class OfficeScene extends Phaser.Scene {
     );
   }
 
-  /** Redraws every wall from the live walls, with the editor's pending wall paints over them. */
+  /**
+   * The terrain the room enforces for these blocks and walls: the live
+   * doors open their wall edges (#223), exactly like the room's snapshot.
+   * The decor editor's pending edits never collide, so they open nothing.
+   */
+  private terrainOf(blocks: readonly LayoutMaterial[], walls: readonly (string | null)[]): TerrainSnapshot {
+    return terrainSnapshot(this.layout, blocks, walls, doorOpenings(this.officeDecor, this.layout.width));
+  }
+
+  /**
+   * Redraws every wall from the live walls, with the editor's pending wall
+   * paints over them; the body under a live door is left out (#223).
+   */
   private paintWalls(): void {
     for (const object of this.wallObjects) object.destroy();
     const walls = this.wallPreview === null ? this.terrainWalls : withWalls(this.terrainWalls, this.wallPreview);
-    this.wallObjects = placeWalls(this, { width: this.layout.width, height: this.layout.height, walls }, this.art);
+    const openings = doorOpenings(this.officeDecor, this.layout.width);
+    this.wallObjects = placeWalls(this, { width: this.layout.width, height: this.layout.height, walls, openings }, this.art);
   }
 
   /** Camara principal siguiendo al jugador + minimapa en la esquina superior derecha (app.js:410-431). */

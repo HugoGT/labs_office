@@ -4597,6 +4597,35 @@ describe('OfficeScene: edited terrain', () => {
     expect(wallObjects(scene)).toHaveLength(before);
   });
 
+  it('opens the wall edge a door stands on for Arcade and the tile helpers, and closes it when the door goes (#223)', async () => {
+    const { scene, handlers } = await bootConnected();
+    const grid = () => (scene as unknown as { grid: { solid: boolean[][] } }).grid;
+    // Posts on vertices 67, 68 and 69 of row 22: two segments of brick wall.
+    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
+    const doorway = { x: lawnVertex.x + TILE / 2, y: lawnVertex.y };
+    const beside = { x: lawnVertex.x + TILE + TILE / 2, y: lawnVertex.y };
+    expect(solidAt(scene, doorway.x, doorway.y)).toBe(true);
+    const walled = wallObjects(scene).length;
+
+    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 0 }]);
+
+    // Destroyed static bodies leave the world on its next step.
+    await vi.waitFor(() => expect(solidAt(scene, doorway.x, doorway.y)).toBe(false), LOOP_WAIT);
+    // The 18px body fits: the passage runs from one post's vertex to the next.
+    expect(solidAt(scene, lawnVertex.x + 1, doorway.y)).toBe(false);
+    expect(solidAt(scene, lawnVertex.x + TILE - 1, doorway.y)).toBe(false);
+    expect(solidAt(scene, lawnVertex.x - 1, doorway.y)).toBe(true);
+    expect(solidAt(scene, beside.x, beside.y)).toBe(true);
+    expect([grid().solid[21]![67], grid().solid[22]![67], grid().solid[22]![68]]).toEqual([false, false, true]);
+    // The body under the door is not drawn.
+    expect(wallObjects(scene)).toHaveLength(walled - 1);
+
+    handlers.onDecor!([]);
+    expect(solidAt(scene, doorway.x, doorway.y)).toBe(true);
+    expect(grid().solid[22]![67]).toBe(true);
+    expect(wallObjects(scene)).toHaveLength(walled);
+  });
+
   it('draws pending walls for the editor without colliding with them, and drops them when it closes', async () => {
     const { scene, bridge } = await bootConnected();
     const before = wallObjects(scene).length;

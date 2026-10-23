@@ -11,7 +11,9 @@ import {
   type SearchStats,
   type SolidGrid,
 } from './pathfinding';
-import type { TileCoord } from './terrainGrid';
+import { buildTerrainGrid, type TileCoord } from './terrainGrid';
+import { terrainSnapshot, type OfficeLayout } from './officeLayout';
+import { LEGACY_LAYOUT } from '../test/legacyOffice';
 
 /** Rows of text to a grid: `#` is blocked, anything else free. */
 function gridOf(rows: readonly string[]): SolidGrid {
@@ -397,5 +399,38 @@ describe('planWalk', () => {
     // Both branches ran, so neither assertion block above was vacuous.
     expect(found).toBeGreaterThan(10);
     expect(refused).toBeGreaterThan(5);
+  });
+});
+
+describe('planWalk through a door (#221, #223)', () => {
+  /** The legacy office cut by a brick wall along row 22, from one side of the map to the other. */
+  const walled: OfficeLayout = {
+    ...LEGACY_LAYOUT,
+    props: [],
+    hedges: LEGACY_LAYOUT.hedges.map(() => null),
+    ground: LEGACY_LAYOUT.ground.map(() => 'grass'),
+    walls: LEGACY_LAYOUT.walls.map((_, index) => (Math.floor(index / LEGACY_LAYOUT.width) === 22 ? 'wall-brick' : null)),
+  };
+  const DOOR = { col: 67, row: 22, axis: 'horizontal' as const };
+  const from = positionForBodyTile(tile(67, 17));
+  const goal = positionForBodyTile(tile(67, 27));
+
+  it('finds no way across a closed wall, and walks straight through the door that opens it', () => {
+    const closed = buildTerrainGrid(terrainSnapshot(walled), walled, []);
+    expect(planWalk(closed.solid, from, goal)).toBeNull();
+
+    const open = buildTerrainGrid(terrainSnapshot(walled, walled.blocks, walled.walls, [DOOR]), walled, []);
+    expect(open.solid[21]![67]).toBe(false);
+    expect(open.solid[22]![67]).toBe(false);
+    expect(open.solid[22]![66]).toBe(true);
+    expect(open.solid[22]![68]).toBe(true);
+    const route = planWalk(open.solid, from, goal);
+    expect(route).not.toBeNull();
+    expect(route!.at(-1)).toEqual(goal);
+    let previous = from;
+    for (const point of route!) {
+      expect(segmentClear(open.solid, previous, point)).toBe(true);
+      previous = point;
+    }
   });
 });

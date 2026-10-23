@@ -271,7 +271,8 @@ export function staticCollisionInstances(
  * stands on the bottom middle of its footprint like a Tiled prop, the plant
  * walk-through and the table solid by default; a vertical room table (90)
  * stands on its swapped footprint, its rectangles turned a quarter about its
- * center. A piece the caller cannot resolve places nothing.
+ * center. A piece the caller cannot resolve places nothing, and neither
+ * does a door (#223), which opens a wall rather than blocking.
  */
 export function officeDecorInstances(
   items: readonly DecorItem[],
@@ -281,7 +282,8 @@ export function officeDecorInstances(
   const instances: CollisionInstance[] = [];
   for (const item of items) {
     const info = infoOf(item.piece);
-    if (info === null) continue;
+    // A door (#223) never blocks: it opens the wall it stands on (`terrainSnapshot`).
+    if (info === null || info.kind === 'door') continue;
     const rect = decorFootprint(item, info, width);
     const pickBox = { x: rect.x * COLLISION_TILE, y: rect.y * COLLISION_TILE, w: rect.w * COLLISION_TILE, h: rect.h * COLLISION_TILE };
     const tx = item.index % width;

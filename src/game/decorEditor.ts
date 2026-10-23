@@ -25,6 +25,7 @@ import {
   type DecorRotation,
   type DecorTileRect,
 } from './officeDecor';
+import { doorOnWall } from './officeDoors';
 
 /**
  * What a map click does: anchor `piece` turned `rotation` (and painted
@@ -73,6 +74,7 @@ const KIND_WORDS: Readonly<Record<DecorKind, string>> = {
   desk: 'escritorio',
   table: 'mesa',
   plant: 'planta',
+  door: 'puerta',
 };
 
 /**
@@ -116,20 +118,28 @@ export interface DecorEditCommand {
   selected?: number | null;
 }
 
-/** The ground the ghost reads: the live terrain's walkable tiles and the tiles a wall touches. */
+/**
+ * The ground the ghost reads: the live terrain's walkable tiles, the tiles a
+ * wall touches and the wall posts a door needs under it (#223); absent,
+ * there is no wall to hold one.
+ */
 export interface DecorGround {
   readonly width: number;
   readonly height: number;
   readonly walkable: readonly boolean[];
   readonly wallTiles: readonly boolean[];
+  readonly walls?: readonly (string | null)[];
 }
 
 /** The side of a desk, in tiles: what the desk scope may decorate. */
 const DESK_SIDE = 3;
 
-/** Whether a piece fits a 3x3 desk in some rotation, so the desk scope offers it. */
+/**
+ * Whether a piece fits a 3x3 desk in some rotation, so the desk scope offers
+ * it. Never a door (#223): it opens a wall, which only an admin edits.
+ */
 export function fitsDeskArea(info: DecorPieceInfo): boolean {
-  return info.footprint.w <= DESK_SIDE && info.footprint.h <= DESK_SIDE;
+  return info.kind !== 'door' && info.footprint.w <= DESK_SIDE && info.footprint.h <= DESK_SIDE;
 }
 
 /** The tiles a brush on `index` would cover, turned the way it is. */
@@ -147,6 +157,11 @@ export function decorBrushTarget(index: number, brush: DecorBrush, width: number
  * With `desks`, a chair that would be the fourth on a desk is refused too
  * (`deskOverChairLimit`); a desk table is never refused for another one on
  * the desk, which it replaces.
+ *
+ * A door (#223) is the room's door rule: on the edge between two joined
+ * posts (`doorOnWall`), its two side tiles on walkable ground and free of
+ * other items. The tiles a wall touches do not count for it (its own posts
+ * touch them), and it never goes in a desk.
  */
 export function decorPlacementAllowed(
   items: readonly DecorItem[],
@@ -158,6 +173,8 @@ export function decorPlacementAllowed(
   desks: readonly DecorTileRect[] = [],
 ): boolean {
   const target = decorBrushTarget(index, brush, ground.width);
+  const door = brush.info.kind === 'door';
+  if (door && (area !== null || !doorOnWall({ width: ground.width, height: ground.height, walls: ground.walls ?? [] }, { index, rotation: brush.rotation }))) return false;
   if (area !== null && !fitsInsideDesk(target, area)) return false;
   if (!insideMap(target, ground.width, ground.height)) return false;
   const ignored = brush.from ?? index;
@@ -168,5 +185,5 @@ export function decorPlacementAllowed(
     const after = withDecor(items, brush.from === undefined || brush.from === index ? [placed] : [{ index: brush.from, item: null }, placed]);
     if (deskOverChairLimit(items, after, [index], infoOf, desks, ground.width) !== null) return false;
   }
-  return rectTiles(target, ground.width).every((tile) => ground.walkable[tile] === true && ground.wallTiles[tile] !== true && !taken.has(tile));
+  return rectTiles(target, ground.width).every((tile) => ground.walkable[tile] === true && (door || ground.wallTiles[tile] !== true) && !taken.has(tile));
 }

@@ -30,8 +30,12 @@ import type { TerrainBrush } from '../game/terrainEditor';
 /** Refused with these, the admin may not edit at all any more: no further writes. */
 const BLOCKING_ERRORS = ['forbidden', 'unauthorized', 'terrain-not-configured'];
 
-/** `terrain-under-placement` for a wall: what a wall may not cover is not what water may not. */
-export const WALL_UNDER_PLACEMENT_MESSAGE = 'Una pared no puede tapar un escritorio, una silla ni la entrada de la oficina. Elige otra esquina.';
+/**
+ * `terrain-under-placement` for a wall: what a wall may not cover is not what
+ * water may not, and a post a door stands on may not change at all (#223).
+ */
+export const WALL_UNDER_PLACEMENT_MESSAGE =
+  'Una pared no puede tapar un escritorio, una silla ni la entrada de la oficina, y el poste de una puerta no se quita ni se cambia. Elige otra esquina.';
 
 export type WallBrush = Extract<TerrainBrush, { kind: 'wall' }>;
 

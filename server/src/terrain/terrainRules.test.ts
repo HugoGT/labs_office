@@ -5,6 +5,7 @@ import {
   newlyUnwalkableTiles,
   terrainSnapshot,
   withBlock,
+  withWalls,
   type LayoutMaterial,
 } from '../../../src/game/officeLayout.ts';
 import { MAX_DECOR_EDITS, type DecorItem, type DecorPieceInfo } from '../../../src/game/officeDecor.ts';
@@ -236,6 +237,14 @@ describe('findWallConflict', () => {
     expect(findWallConflict([spawn + 3 * W + 3], MAP, STATIC, NONE)).toBeNull();
   });
 
+  it('refuses any change to a post that ends a door (#223), removal and repaint included, never to another post', () => {
+    const doorPosts = new Set([free, free + 1]);
+    expect(findWallConflict([], MAP, STATIC, NONE, [free + 1], doorPosts)).toBe('placement');
+    expect(findWallConflict([free], MAP, STATIC, NONE, [free], doorPosts)).toBe('placement');
+    expect(findWallConflict([], MAP, STATIC, NONE, [free + 2], doorPosts)).toBeNull();
+    expect(findWallConflict([free + 2], MAP, STATIC, NONE, [free + 2, free + 3], doorPosts)).toBeNull();
+  });
+
   it('refuses a post on a desk, its edge lines included', () => {
     expect(findWallConflict([free], MAP, STATIC, { ...NONE, desks: [desk] })).toBe('placement');
     // The desk's top-left and bottom-right corners: the post straddles the edge.
@@ -325,6 +334,21 @@ describe('findDecorConflict', () => {
     expect(conflict([{ index: free, piece: 'chair-wood', rotation: 0 }], [free])).toBeNull();
     expect(conflict([{ index: free, piece: 'desk-wood', rotation: 90 }], [free])).toBeNull();
     expect(conflict([], [])).toBeNull();
+  });
+
+  it('takes a door only on the edge between two joined posts, the tiles its own posts touch included (#223)', () => {
+    const door = (index: number, rotation: 0 | 90 | 180 | 270 = 0): DecorItem => ({ index, piece: 'door-wood', rotation });
+    const doorInfo = (piece: string): DecorPieceInfo | null => (piece.startsWith('door-') ? { kind: 'door', footprint: { w: 1, h: 1 } } : infoOf(piece));
+    const walled = terrainSnapshot(BASE_LAYOUT, BASE_LAYOUT.blocks, withWalls(BASE_LAYOUT.walls, [{ index: free, piece: 'wall-brick' }, { index: free + 1, piece: 'wall-brick' }]));
+    const check = (after: DecorItem[], placed: number[], snapshot = walled) => findDecorConflict(after, new Set(placed), doorInfo, snapshot, STATIC);
+    expect(check([door(free)], [free])).toBeNull();
+    expect(check([door(free, 180)], [free])).toBeNull();
+    expect(check([door(free, 90)], [free])).toBe('placement');
+    expect(check([door(free)], [free], BASE_TERRAIN)).toBe('placement');
+    // Any other piece still keeps off the tiles the wall touches.
+    expect(check([{ index: free, piece: 'chair-wood', rotation: 0 }], [free])).toBe('placement');
+    // Another item on one of its two tiles refuses it.
+    expect(check([door(free), { index: at(67, 21), piece: 'chair-wood', rotation: 0 }], [free])).toBe('placement');
   });
 
   it('refuses any tile of a footprint on water or void, a static tile or the spawn area, or off the map', () => {

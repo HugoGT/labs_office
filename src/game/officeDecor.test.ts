@@ -272,3 +272,31 @@ describe('officeDecor: edits and wire form', () => {
     ]);
   });
 });
+
+describe('officeDecor: doors (#223)', () => {
+  const DOOR: DecorPieceInfo = { kind: 'door', footprint: { w: 1, h: 1 } };
+
+  it('knows a door by its id alone, one tile wide and turned four ways', () => {
+    expect(decorInfoFromPieceId('door-wood')).toEqual(DOOR);
+    expect(decorPieceInfo({ kind: 'door' })).toEqual(DOOR);
+    expect(decorPieceInfo({ kind: 'door', footprint: { w: 3, h: 3 }, colorable: true })).toEqual(DOOR);
+    expect(isRotatable('door')).toBe(true);
+    expect(decorRotationsOf('door')).toEqual([0, 90, 180, 270]);
+    expect(nextDecorRotation(0, 1, 'door')).toBe(270);
+  });
+
+  it('covers the two tiles on either side of its edge: the top edge for 0 and 180, the left edge for 90 and 270', () => {
+    expect(decorFootprint({ index: at(4, 6), rotation: 0 }, DOOR, WIDTH)).toEqual({ x: 4, y: 5, w: 1, h: 2 });
+    expect(decorFootprint({ index: at(4, 6), rotation: 180 }, DOOR, WIDTH)).toEqual({ x: 4, y: 5, w: 1, h: 2 });
+    expect(decorFootprint({ index: at(4, 6), rotation: 90 }, DOOR, WIDTH)).toEqual({ x: 3, y: 6, w: 2, h: 1 });
+    expect(decorFootprint({ index: at(4, 6), rotation: 270 }, DOOR, WIDTH)).toEqual({ x: 3, y: 6, w: 2, h: 1 });
+    expect(decorTiles({ index: at(4, 6), rotation: 0 }, DOOR, WIDTH)).toEqual([at(4, 5), at(4, 6)]);
+  });
+
+  it('keeps the footprints of chairs, desk tables, plants and room tables as they were', () => {
+    expect(decorFootprint({ index: at(4, 6), rotation: 0 }, CHAIR, WIDTH)).toEqual({ x: 4, y: 6, w: 1, h: 1 });
+    expect(decorFootprint({ index: at(4, 6), rotation: 90 }, DESK, WIDTH)).toEqual({ x: 4, y: 5, w: 1, h: 3 });
+    expect(decorFootprint({ index: at(4, 6), rotation: 0 }, PLANT, WIDTH)).toEqual({ x: 4, y: 6, w: 1, h: 1 });
+    expect(decorFootprint({ index: at(10, 10), rotation: 0 }, MEETING, WIDTH)).toEqual({ x: 7, y: 8, w: 7, h: 5 });
+  });
+});

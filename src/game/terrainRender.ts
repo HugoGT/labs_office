@@ -17,7 +17,7 @@ import {
   type Rect,
   type TerrainMaterial,
 } from './artContract';
-import { LAYOUT_MATERIALS, terrainMaterialAt, wallsJoin, type LayoutMaterial, type LayoutProp, type OfficeLayout, type TerrainSnapshot } from './officeLayout';
+import { LAYOUT_MATERIALS, terrainMaterialAt, wallsJoin, type LayoutMaterial, type LayoutProp, type OfficeLayout, type TerrainSnapshot, type WallGrid } from './officeLayout';
 
 /**
  * The color of the void: the camera background around and under the world,
@@ -115,9 +115,11 @@ function neighborMask(cells: readonly (string | null)[], width: number, height: 
  * drawn on the pack's own geometry: the joint centered on the vertex, the
  * bodies along the grid lines to its neighbors, so a wall sits on the edge
  * between two terrains, half on each. They draw exactly the rectangles the
- * wall blocks (`wallFootprintRects`).
+ * wall blocks (`wallFootprintRects`). A door's opening (#223) draws no body,
+ * the door stands there; its joints keep their connected frames, so the wall
+ * reads as one around the door.
  */
-export function wallSprites({ width, height, walls }: Pick<OfficeLayout, 'width' | 'height' | 'walls'>): WallSprite[] {
+export function wallSprites({ width, height, walls, openings = [] }: WallGrid): WallSprite[] {
   const joints: WallSprite[] = [];
   const bodies: WallSprite[] = [];
   const sprite = (piece: string, part: WallSprite['part'], frame: number, rect: Rect): WallSprite => ({
@@ -129,6 +131,7 @@ export function wallSprites({ width, height, walls }: Pick<OfficeLayout, 'width'
     depthY: rect.y + rect.height,
   });
   const grid = { width, height, walls };
+  const open = new Set(openings.map(({ col, row, axis }) => `${axis}:${col}:${row}`));
   for (let ty = 0; ty < height; ty += 1) {
     for (let tx = 0; tx < width; tx += 1) {
       const piece = walls[ty * width + tx];
@@ -142,10 +145,10 @@ export function wallSprites({ width, height, walls }: Pick<OfficeLayout, 'width'
       // A lone post has no joint frame (masks start at 1): it stands as a vertical body.
       const frame = mask === 0 ? wallFrameIndex({ piece: 'body', axis: 'vertical' }) : wallFrameIndex({ piece: 'joint', mask });
       joints.push(sprite(piece, 'joint', frame, wallJointRect({ col: tx, row: ty })));
-      if (mask & EAST) {
+      if (mask & EAST && !open.has(`horizontal:${tx}:${ty}`)) {
         bodies.push(sprite(piece, 'body', wallFrameIndex({ piece: 'body', axis: 'horizontal' }), wallBodyRect({ col: tx, row: ty, axis: 'horizontal' })));
       }
-      if (mask & SOUTH) {
+      if (mask & SOUTH && !open.has(`vertical:${tx}:${ty}`)) {
         bodies.push(sprite(piece, 'body', wallFrameIndex({ piece: 'body', axis: 'vertical' }), wallBodyRect({ col: tx, row: ty, axis: 'vertical' })));
       }
     }

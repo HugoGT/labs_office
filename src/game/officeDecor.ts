@@ -16,9 +16,9 @@
 export type DecorRotation = 0 | 90 | 180 | 270;
 export const DECOR_ROTATIONS: readonly DecorRotation[] = [0, 90, 180, 270];
 
-/** The art piece kinds the decor layer places. */
-export type DecorKind = 'chair' | 'desk' | 'plant' | 'table';
-export const DECOR_KINDS: readonly DecorKind[] = ['chair', 'desk', 'plant', 'table'];
+/** The art piece kinds the decor layer places; a door (#223) stands on a wall's grid line (`officeDoors.ts`). */
+export type DecorKind = 'chair' | 'desk' | 'plant' | 'table' | 'door';
+export const DECOR_KINDS: readonly DecorKind[] = ['chair', 'desk', 'plant', 'table', 'door'];
 
 /** The most items one request may set, like the placed chairs before them. */
 export const MAX_DECOR_EDITS = 500;
@@ -90,7 +90,7 @@ export function isDecorColor(value: unknown): value is string {
   return typeof value === 'string' && DECOR_COLOR.test(value);
 }
 
-/** Chairs, desk tables and room tables turn; a plant is drawn in one frame. */
+/** Chairs, desk tables, room tables and doors turn; a plant is drawn in one frame. */
 export function isRotatable(kind: DecorKind): boolean {
   return kind !== 'plant';
 }
@@ -111,10 +111,15 @@ export function decorRotationFor(kind: DecorKind, rotation: DecorRotation): Deco
   return isRotatable(kind) ? rotation : 0;
 }
 
-/** A chair is 1x1 and a desk table 3x1 whatever the manifest says (its art states one footprint per facing). */
+/**
+ * A chair is 1x1 and a desk table 3x1 whatever the manifest says (its art
+ * states one footprint per facing). A door is one tile wide (#223); it
+ * covers a tile on each side of its edge (`decorFootprint`).
+ */
 const FIXED_FOOTPRINTS: Partial<Record<DecorKind, { w: number; h: number }>> = {
   chair: { w: 1, h: 1 },
   desk: { w: 3, h: 1 },
+  door: { w: 1, h: 1 },
 };
 
 /**
@@ -137,13 +142,13 @@ export function decorPieceInfo(piece: {
 }
 
 /**
- * What the id alone says when no catalog knows the piece: chairs and desk
- * tables have a fixed footprint and plants take one tile; a room table's
+ * What the id alone says when no catalog knows the piece: chairs, desk
+ * tables and doors have a fixed footprint and plants take one tile; a room table's
  * footprint only its catalog entry has, so it is `null`.
  */
 export function decorInfoFromPieceId(piece: string): DecorPieceInfo | null {
   const kind = piece.slice(0, piece.indexOf('-'));
-  if (kind === 'chair' || kind === 'desk') return decorPieceInfo({ kind });
+  if (kind === 'chair' || kind === 'desk' || kind === 'door') return decorPieceInfo({ kind });
   if (kind === 'plant') return decorPieceInfo({ kind, footprint: { w: 1, h: 1 } });
   return null;
 }
@@ -153,7 +158,9 @@ export function decorInfoFromPieceId(piece: string): DecorPieceInfo | null {
  * along a row (0, 180) or a column (90, 270) with its anchor the middle tile,
  * the old decor table's edge middle; a plant or a room table is centered on
  * its anchor (`floor(w / 2)`, `floor(h / 2)` from its top-left), a room
- * table turned vertical (90) on its footprint swapped. An unknown
+ * table turned vertical (90) on its footprint swapped. A door (#223) stands
+ * on an edge of its anchor tile, the top one for 0 and 180 and the left one
+ * for 90 and 270, and covers the tile on each side of it. An unknown
  * piece (`null`) keeps its anchor tile alone, so stored rows are never lost.
  */
 export function decorFootprint(item: DecorPlacement, info: DecorPieceInfo | null, width: number): DecorTileRect {
@@ -161,6 +168,7 @@ export function decorFootprint(item: DecorPlacement, info: DecorPieceInfo | null
   const ty = Math.floor(item.index / width);
   if (info === null) return { x: tx, y: ty, w: 1, h: 1 };
   if (info.kind === 'chair') return { x: tx, y: ty, w: 1, h: 1 };
+  if (info.kind === 'door') return item.rotation === 0 || item.rotation === 180 ? { x: tx, y: ty - 1, w: 1, h: 2 } : { x: tx - 1, y: ty, w: 2, h: 1 };
   if (info.kind === 'desk') {
     const horizontal = item.rotation === 0 || item.rotation === 180;
     return horizontal ? { x: tx - 1, y: ty, w: 3, h: 1 } : { x: tx, y: ty - 1, w: 1, h: 3 };

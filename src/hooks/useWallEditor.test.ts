@@ -209,3 +209,9 @@ describe('useWallEditor', () => {
     expect(commands.at(-1)).toBeNull();
   });
 });
+
+describe('WALL_UNDER_PLACEMENT_MESSAGE (#223)', () => {
+  it('names the doors among what keeps a post in place', () => {
+    expect(WALL_UNDER_PLACEMENT_MESSAGE).toMatch(/puerta/);
+  });
+});

@@ -181,6 +181,22 @@ describe('wallSprites', () => {
     ]);
   });
 
+  it('leaves out the body of a door opening (#223), its joints still drawn connected', () => {
+    const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '4,2': 'wall-brick' }) });
+    const sprites = wallSprites({ ...layout, openings: [{ col: 2, row: 2, axis: 'horizontal' }] });
+
+    expect(sprites.filter((sprite) => sprite.part === 'joint').map(({ frame }) => frame)).toEqual([
+      wallFrameIndex({ piece: 'joint', mask: 2 }),
+      wallFrameIndex({ piece: 'joint', mask: 2 | 8 }),
+      wallFrameIndex({ piece: 'joint', mask: 8 }),
+    ]);
+    expect(sprites.filter((sprite) => sprite.part === 'body')).toEqual([
+      { piece: 'wall-brick', part: 'body', frame: wallFrameIndex({ piece: 'body', axis: 'horizontal' }), x: 3 * TILE + 8, y: 2 * TILE - 8, depthY: 2 * TILE + 8 },
+    ]);
+    // Without openings every body is drawn as before.
+    expect(wallSprites({ ...layout, openings: [] })).toEqual(wallSprites(layout));
+  });
+
   it('draws exactly the rectangles the wall blocks', () => {
     const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '3,3': 'wall-glass' }) });
     const drawn = wallSprites(layout).map(({ x, y }) => ({ x, y, w: 16, h: 16 }));

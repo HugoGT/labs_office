@@ -793,3 +793,101 @@ describe('terrain walls', () => {
     expect(tileAtWorldPoint(BASE_LAYOUT, Number.NaN, 10)).toBeNull();
   });
 });
+
+describe('wall openings: doors (#223)', () => {
+  const width = 6;
+  const height = 5;
+  /** A brick wall along row 2, posts on vertices 1..4, with a door on the edge between posts 2 and 3. */
+  const run = () => {
+    const walls = new Array<string | null>(width * height).fill(null);
+    for (const tx of [1, 2, 3, 4]) walls[2 * width + tx] = 'wall-brick';
+    return walls;
+  };
+  const DOOR = { col: 2, row: 2, axis: 'horizontal' as const };
+  const inside = (rects: readonly { x: number; y: number; w: number; h: number }[], x: number, y: number) =>
+    rects.some((rect) => x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h);
+
+  it('leaves the body of an open edge out and clips the joints at its ends along it: a 32px passage', () => {
+    const rects = wallFootprintRects({ width, height, walls: run(), openings: [DOOR] });
+    expect(rects).toEqual([
+      { x: 24, y: 56, w: 16, h: 16 },
+      // The posts at the door's ends keep only the half away from it.
+      { x: 56, y: 56, w: 8, h: 16 },
+      { x: 96, y: 56, w: 8, h: 16 },
+      { x: 120, y: 56, w: 16, h: 16 },
+      { x: 40, y: 56, w: 16, h: 16 },
+      { x: 104, y: 56, w: 16, h: 16 },
+    ]);
+    // A double door: the post between the two leaves has no half left.
+    const double = wallFootprintRects({ width, height, walls: run(), openings: [DOOR, { col: 3, row: 2, axis: 'horizontal' }] });
+    expect(double.filter((rect) => rect.x >= 64 && rect.x < 128)).toEqual([]);
+    expect(double).toContainEqual({ x: 56, y: 56, w: 8, h: 16 });
+    expect(double).toContainEqual({ x: 128, y: 56, w: 8, h: 16 });
+  });
+
+  it('opens nothing where the edge has no joined wall: a missing post or another material', () => {
+    const lone = run();
+    lone[2 * width + 3] = null;
+    expect(wallFootprintRects({ width, height, walls: lone, openings: [DOOR] })).toEqual(wallFootprintRects({ width, height, walls: lone }));
+    const glass = run();
+    glass[2 * width + 3] = 'wall-glass';
+    expect(wallFootprintRects({ width, height, walls: glass, openings: [DOOR] })).toEqual(wallFootprintRects({ width, height, walls: glass }));
+    expect(wallFootprintRects({ width, height, walls: run(), openings: [] })).toEqual(wallFootprintRects({ width, height, walls: run() }));
+  });
+
+  it('clips the merged colliders the same way, never freeing ground the footprint blocks', () => {
+    const grid = { width, height, walls: run(), openings: [DOOR] };
+    expect(wallColliderRects(grid)).toEqual([
+      { x: 24, y: 56, w: 40, h: 16 },
+      { x: 96, y: 56, w: 40, h: 16 },
+    ]);
+    const footprint = wallFootprintRects(grid);
+    const colliders = wallColliderRects(grid);
+    for (let y = -16; y < height * 32; y += 2) {
+      for (let x = -16; x < width * 32; x += 2) if (inside(footprint, x, y)) expect(inside(colliders, x, y), `${x},${y}`).toBe(true);
+    }
+    // A wall crossing a door's end post keeps its whole joint in the colliders: the client stays the stricter side.
+    const cross = run();
+    cross[1 * width + 3] = 'wall-brick';
+    cross[3 * width + 3] = 'wall-brick';
+    const crossed = { width, height, walls: cross, openings: [DOOR] };
+    const crossedColliders = wallColliderRects(crossed);
+    for (const rect of wallFootprintRects(crossed)) {
+      for (let y = rect.y; y < rect.y + rect.h; y += 1) for (let x = rect.x; x < rect.x + rect.w; x += 1) expect(inside(crossedColliders, x, y), `${x},${y}`).toBe(true);
+    }
+    expect(inside(crossedColliders, 92, 64)).toBe(true);
+    expect(inside(crossedColliders, 87, 64)).toBe(false);
+  });
+
+  it('lets a body center and a whole 18px body through the door of a snapshot, never through the wall beside it', () => {
+    const layout: OfficeLayout = {
+      ...BASE_LAYOUT,
+      walls: (() => {
+        const walls = new Array<string | null>(BASE_LAYOUT.width * BASE_LAYOUT.height).fill(null);
+        for (const tx of [65, 66, 67, 68]) walls[22 * BASE_LAYOUT.width + tx] = 'wall-brick';
+        return walls;
+      })(),
+    };
+    const closed = terrainSnapshot(layout);
+    const open = terrainSnapshot(layout, layout.blocks, layout.walls, [{ col: 66, row: 22, axis: 'horizontal' }]);
+    expect(open.openings).toEqual([{ col: 66, row: 22, axis: 'horizontal' }]);
+    expect(closed.openings).toEqual([]);
+    // Network position whose body center is (cx, cy).
+    const move = (snapshot: typeof open, cx: number, cy: number) => isPositionWalkable(snapshot, cx - AVATAR_BODY_CENTER_OFFSET.x, cy - AVATAR_BODY_CENTER_OFFSET.y);
+    const door = { x: 66 * 32 + 16, y: 22 * 32 };
+    expect(move(closed, door.x, door.y)).toBe(false);
+    expect(move(open, door.x, door.y)).toBe(true);
+    expect(move(open, 66 * 32 + 1, door.y)).toBe(true);
+    expect(move(open, 66 * 32 - 1, door.y)).toBe(false);
+    expect(move(open, 67 * 32, door.y)).toBe(false);
+    expect(move(open, 65 * 32 + 16, door.y)).toBe(false);
+    const body = physicalBodyRect({ x: 0, y: 0 });
+    const centered = { x: door.x - (body.x + body.width / 2), y: door.y - (body.y + body.height / 2) };
+    expect(isFootprintWalkable(closed, centered)).toBe(false);
+    expect(isFootprintWalkable(open, centered)).toBe(true);
+    // The door's two tiles are no wall tiles any more; the ones beside it still are.
+    const at = (tx: number, ty: number) => ty * BASE_LAYOUT.width + tx;
+    expect([open.wallTiles[at(66, 21)], open.wallTiles[at(66, 22)]]).toEqual([false, false]);
+    expect([open.wallTiles[at(65, 22)], open.wallTiles[at(67, 22)]]).toEqual([true, true]);
+  });
+});
