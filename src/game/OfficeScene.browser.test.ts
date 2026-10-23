@@ -12,7 +12,7 @@ import {
   ZONE_LABELS,
 } from './mapData';
 import { TERRAIN_LAYER_COUNT, doorFrameIndex } from './artContract';
-import { terrainSnapshot, withBlock, withWalls, type OfficeLayout } from './officeLayout';
+import { terrainSnapshot, wallColliderRects, withBlock, withWalls, type OfficeLayout } from './officeLayout';
 import { CHAIR_OBJECT_NAME, WALL_OBJECT_NAME } from './mapBuilder';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SPACES as BUILT_IN_SPACES } from '../test/legacyOffice';
 const BUILT_IN_SPACES_VERSION = 'a489c5da5efd7c68';
@@ -34,6 +34,7 @@ import { LAYOUT_OUTLINE_NAME, layoutPickName } from './LayoutEditLayer';
 import { artSheetKey, recoloredSheetKey } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
 import { buildTerrainGrid } from './terrainGrid';
+import { coveredTiles } from './pieceCollisions';
 import { VOID_COLOR } from './terrainRender';
 import type { DeskOccupant, OfficeDesk } from './desksPort';
 import { createOfficeBridge, type OfficeEventMap } from './officeBridge';
@@ -86,7 +87,11 @@ async function movementArena(connector?: ReturnType<typeof fakeConnector>) {
     collisionRects: { x: number; y: number; w: number; h: number }[];
     grid: ReturnType<typeof buildTerrainGrid>;
   };
-  movement.grid.solid = Array.from({ length: 100 }, (_, y) => Array.from({ length: 3200 }, () => y === 0));
+  // One array for both: the planner reads the terrain, the tile helpers `solid`; a test's blocked tile is both.
+  movement.grid.solid = movement.grid.terrainSolid = Array.from({ length: 100 }, (_, y) => Array.from({ length: 3200 }, () => y === 0));
+  // The planner tests the office's walls and pieces like Arcade does: with their bodies gone, they go too.
+  movement.grid.wallRects = [];
+  movement.collisionRects = [];
   let time = scene.time.now;
   const frame = (delta = 20, gap = delta) => { time += gap; scene.game.step(time, delta); };
   const walk = (milliseconds: number) => {
@@ -478,11 +483,7 @@ describe('waypoint walking around obstacles (double-click-pathfinding)', () => {
   function wallColumn(movement: Arena['movement'], tx: number, ty0: number, ty1: number) {
     const solid = movement.grid.solid as boolean[][];
     for (let ty = ty0; ty <= ty1; ty++) solid[ty]![tx] = true;
-    // The arena keeps the real office's piece rectangles; only this test's walls may stay.
-    movement.collisionRects = [
-      ...movement.collisionRects.filter((rect) => !('piece' in rect)),
-      { x: tx * TILE, y: ty0 * TILE, w: TILE, h: (ty1 - ty0 + 1) * TILE },
-    ];
+    movement.collisionRects = [...movement.collisionRects, { x: tx * TILE, y: ty0 * TILE, w: TILE, h: (ty1 - ty0 + 1) * TILE }];
     movement.buildPieceColliders();
   }
 
@@ -565,11 +566,11 @@ describe('waypoint walking around obstacles (double-click-pathfinding)', () => {
     expect(Math.hypot(player.x - goal.x, player.y - goal.y)).toBeLessThanOrEqual(ARRIVE_EPSILON_PX);
   });
 
-  it('the goal is validated on its body tile: a click whose position tile is free but whose body tile is blocked does nothing', async () => {
+  it('the goal is validated on the whole body: a click whose body would overlap a blocked tile does nothing', async () => {
     const arena = await movementArena();
     const { movement } = arena;
-    // The body center crosses the blocked row boundary before the position.
-    const edge = TILE - BODY_CENTER_OFFSET.y;
+    // Row 0 is blocked: the body top must stay at or below y = 32, wherever the position and the body center are.
+    const edge = TILE + physicalBodyRect({ x: 0, y: 0 }).height / 2 - BODY_CENTER_OFFSET.y;
     arena.doubleClick(1000, edge - 0.01);
     expect(movement.autoWalk).toBeUndefined();
     arena.doubleClick(1000, edge);
@@ -586,7 +587,7 @@ describe('waypoint walking around obstacles (double-click-pathfinding)', () => {
     connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'peer-1', x: peerTx * TILE + 16, y: peerTy * TILE + 16 }));
 
     bridge.emitCommand('walkToPeer', { sessionId: 'peer-1' });
-    expect(movement.autoWalk?.goal).toEqual({ x: (peerTx - 1) * TILE + 16, y: peerTy * TILE + 16 });
+    expect(movement.autoWalk?.goal).toEqual(positionForBodyTile({ tx: peerTx - 1, ty: peerTy }));
     const path = walkUntilDone(arena);
 
     expect(movement.autoWalk).toBeUndefined();
@@ -616,6 +617,121 @@ describe('waypoint walking around obstacles (double-click-pathfinding)', () => {
     expect(connector.stands()).toBe(0);
     expect(player.seatFacing).not.toBeNull();
     expect({ x: player.x, y: player.y }).toEqual(start);
+  });
+});
+
+describe('auto-walk around walls and desks (#219, #221)', () => {
+  type Arena = Awaited<ReturnType<typeof movementArena>>;
+
+  /** Steps real frames until the walk ends (arrival, stall cancel) or the budget runs out. */
+  function walkUntilDone(arena: Arena, maxFrames = 1500) {
+    for (let i = 0; i < maxFrames && arena.movement.autoWalk !== undefined; i++) arena.frame();
+  }
+
+  /** What `buildTerrainGrid` does with them: every tile a rectangle touches is blocked for the tile helpers. */
+  function blockTouchedTiles(movement: Arena['movement'], rects: readonly { x: number; y: number; w: number; h: number }[]) {
+    const covered = coveredTiles(rects, 3200, 100);
+    movement.grid.solid = movement.grid.terrainSolid.map((row, ty) => row.map((blocked, tx) => blocked || covered[ty * 3200 + tx]!));
+  }
+
+  function overlaps(body: { x: number; y: number; width: number; height: number }, rect: { x: number; y: number; w: number; h: number }) {
+    return rect.x < body.x + body.width && body.x < rect.x + rect.w && rect.y < body.y + body.height && body.y < rect.y + rect.h;
+  }
+
+  /**
+   * A room whose walls run on the grid lines from vertex (20,3) to (26,9),
+   * its bottom wall missing the post at (23,9): a one-post door. The walls go
+   * in as the scene builds them: Arcade bodies, and the tiles they touch
+   * blocked in `grid.solid`.
+   */
+  function walledRoom(arena: Arena) {
+    const { movement } = arena;
+    const width = 3200;
+    const walls: (string | null)[] = Array(width * 100).fill(null);
+    for (let i = 3; i <= 9; i++) walls[i * width + 20] = walls[i * width + 26] = 'wall-brick';
+    for (let i = 20; i <= 26; i++) walls[3 * width + i] = walls[9 * width + i] = 'wall-brick';
+    walls[9 * width + 23] = null;
+    movement.grid.wallRects = wallColliderRects({ width, height: 100, walls });
+    blockTouchedTiles(movement, movement.grid.wallRects);
+    movement.buildTerrainColliders(movement.grid);
+  }
+
+  it('a double click walks from the corridor into a walled room through its door, and back out (#221)', async () => {
+    const arena = await movementArena();
+    const { player, movement, body } = arena;
+    walledRoom(arena);
+    const outside = positionForBodyTile({ tx: 23, ty: 12 });
+    const inside = positionForBodyTile({ tx: 24, ty: 4 });
+    body.reset(outside.x, outside.y);
+
+    for (const goal of [inside, outside]) {
+      arena.doubleClick(goal.x, goal.y);
+      expect(movement.autoWalk, `a walk toward ${JSON.stringify(goal)}`).toBeDefined();
+      walkUntilDone(arena);
+      expect(Math.hypot(player.x - goal.x, player.y - goal.y)).toBeLessThanOrEqual(ARRIVE_EPSILON_PX);
+    }
+  });
+
+  it('a double click reaches the floor along the inside of a wall (#221)', async () => {
+    const arena = await movementArena();
+    const { player, movement, body } = arena;
+    walledRoom(arena);
+    const start = positionForBodyTile({ tx: 23, ty: 6 });
+    body.reset(start.x, start.y);
+    // Tile (22,3) touches the top wall: blocked for the tile helpers, but the body fits on it.
+    const goal = positionForBodyTile({ tx: 22, ty: 3 });
+
+    arena.doubleClick(goal.x, goal.y);
+    expect(movement.autoWalk).toBeDefined();
+    walkUntilDone(arena);
+    expect(Math.hypot(player.x - goal.x, player.y - goal.y)).toBeLessThanOrEqual(ARRIVE_EPSILON_PX);
+  });
+
+  it('walkToPeer lands on the approach tile next to the peer\'s desk, its body clear of the desk (#219)', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    const { player, movement, bridge, body } = arena;
+    const peerTx = 30;
+    const peerTy = 9;
+    // The desk the peer works at runs under the peer and its approach tile.
+    const desk = { x: (peerTx - 2) * TILE, y: (peerTy + 1) * TILE, w: 4 * TILE, h: TILE };
+    movement.collisionRects = [desk];
+    movement.buildPieceColliders();
+    blockTouchedTiles(movement, [desk]);
+    const start = positionForBodyTile({ tx: peerTx - 8, ty: peerTy });
+    body.reset(start.x, start.y);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'peer-1', x: peerTx * TILE + 16, y: peerTy * TILE + 16 }));
+
+    bridge.emitCommand('walkToPeer', { sessionId: 'peer-1' });
+    const goal = movement.autoWalk?.goal;
+    expect(goal).toBeDefined();
+    walkUntilDone(arena);
+
+    expect(Math.hypot(player.x - goal!.x, player.y - goal!.y)).toBeLessThanOrEqual(ARRIVE_EPSILON_PX);
+    expect(Math.floor(player.x / TILE)).toBe(peerTx - 1);
+    expect(overlaps(physicalBodyRect(player), desk)).toBe(false);
+  });
+
+  it('walkToPeer from a body pressed against a desk walks around it instead of into it (#219)', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    const { player, movement, bridge, body } = arena;
+    // A desk thinner than a tile, the walker touching its bottom edge and the peer beyond it.
+    const desk = { x: 20 * TILE, y: 10 * TILE + 8, w: 4 * TILE, h: 16 };
+    movement.collisionRects = [desk];
+    movement.buildPieceColliders();
+    blockTouchedTiles(movement, [desk]);
+    const bodyBox = physicalBodyRect({ x: 0, y: 0 });
+    body.reset(22 * TILE, desk.y + desk.h - bodyBox.y);
+    expect(physicalBodyRect(player).y).toBe(desk.y + desk.h);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'peer-1', x: 22 * TILE + 16, y: 5 * TILE + 16 }));
+
+    bridge.emitCommand('walkToPeer', { sessionId: 'peer-1' });
+    const goal = movement.autoWalk?.goal;
+    expect(goal).toBeDefined();
+    walkUntilDone(arena);
+
+    expect(Math.hypot(player.x - goal!.x, player.y - goal!.y)).toBeLessThanOrEqual(ARRIVE_EPSILON_PX);
   });
 });
 

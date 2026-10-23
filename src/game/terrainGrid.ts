@@ -25,9 +25,10 @@ export interface TerrainGrid {
    */
   terrainSolid: boolean[][];
   /**
-   * Blocked for the tile helpers (auto-walk, free tile next to someone, the
-   * e2e teleport): the terrain, plus any tile a wall's or a piece's collision
-   * rectangle touches at all, even a corner of it (`coveredTiles`).
+   * Blocked for the tile helpers (free tile next to someone, the e2e
+   * teleport): the terrain, plus any tile a wall's or a piece's collision
+   * rectangle touches at all, even a corner of it (`coveredTiles`). Too coarse
+   * for the auto-walk, which plans against the rectangles (`planWalk`, #221).
    */
   solid: boolean[][];
   /** The live walls as Arcade static bodies: their footprint merged into straight runs (`wallColliderRects`). */

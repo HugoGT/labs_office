@@ -7,7 +7,7 @@ import { deskPlacement } from './artPlacement';
 import { feetOf, positionForFeet } from './avatarGeometry';
 import { beginAutoWalk, isAutoWalkArrived, stepAutoWalk, type AutoWalkState } from './autoWalk';
 import { IDLE_AUTO_SIT, SIT_LOCK_MS, dropSitDwells, guardLeftSeat, sitLockActive, stepAutoSit, type AutoSitState } from './autoSit';
-import { planWalk } from './pathfinding';
+import { bodyTileOf, planWalk, positionForBodyTile, type WalkWorld } from './pathfinding';
 import { registerClick, type ClickSample } from './doubleClick';
 import { CameraPanLayer } from './CameraPanLayer';
 import { CameraZoomLayer } from './CameraZoomLayer';
@@ -302,9 +302,9 @@ export class OfficeScene extends Phaser.Scene {
    * outside them (`lockedDoorBarriers`), keyed by their anchors: rebuilt
    * only when that set changes. Whoever is inside walks out freely.
    */
-  private doorBarriers: { key: string; inside: readonly { tx: number; ty: number }[]; rects: Phaser.GameObjects.Rectangle[]; collider?: Phaser.Physics.Arcade.Collider } = {
+  private doorBarriers: { key: string; blocks: readonly CollisionRect[]; rects: Phaser.GameObjects.Rectangle[]; collider?: Phaser.Physics.Arcade.Collider } = {
     key: '',
-    inside: [],
+    blocks: [],
     rects: [],
   };
   /** The static bodies of the terrain grid and their collider, replaced whole on each edit. */
@@ -1735,22 +1735,23 @@ export class OfficeScene extends Phaser.Scene {
     });
     this.doorBarriers = {
       key,
-      inside: barriers.map(({ inside }) => inside),
+      // For the path: the locked edge, as Arcade has it, and the whole inside tile, stricter still.
+      blocks: barriers.flatMap(({ rect, inside }) => [rect, { x: inside.tx * TILE, y: inside.ty * TILE, w: TILE, h: TILE }]),
       rects,
       ...(rects.length === 0 ? {} : { collider: this.physics.add.collider(this.player, rects) }),
     };
   }
 
-  /** The grid the double-click path plans on: the inside tiles of the locked doors that bar this player are blocked too. */
-  private walkSolid(): readonly (readonly boolean[])[] {
+  /**
+   * What the double-click path plans against (#227): what Arcade collides
+   * the body with, the terrain tiles and the wall and piece rectangles (an
+   * open door's edge is already out of the wall rectangles), plus, for each
+   * locked door this player stands outside of, its edge and its whole
+   * inside tile (#223, S13).
+   */
+  private walkWorld(): WalkWorld {
     this.updateDoorBarriers();
-    if (this.doorBarriers.inside.length === 0) return this.grid.solid;
-    const solid = this.grid.solid.map((row) => [...row]);
-    for (const { tx, ty } of this.doorBarriers.inside) {
-      const row = solid[ty];
-      if (row !== undefined && tx >= 0 && tx < row.length) row[tx] = true;
-    }
-    return solid;
+    return { terrainSolid: this.grid.terrainSolid, rects: [...this.grid.wallRects, ...this.collisionRects, ...this.doorBarriers.blocks] };
   }
 
   /**
@@ -2276,8 +2277,11 @@ export class OfficeScene extends Phaser.Scene {
     const peer = this.remotes?.get(sessionId);
     if (!peer) return; // se desconecto antes de que esto corriera: no-op silencioso.
 
-    const walkerTile = { tx: Math.floor(this.player.x / TILE), ty: Math.floor(this.player.y / TILE) };
-    const peerTile = { tx: Math.floor(peer.x / TILE), ty: Math.floor(peer.y / TILE) };
+    // Body tiles, like the planner: aiming at `tile * TILE + 16` put the body
+    // center 27 px down its tile and the body 2 px into the next one, so a
+    // desk below the approach tile stopped the walk short against it (#219).
+    const walkerTile = bodyTileOf(this.player);
+    const peerTile = bodyTileOf(peer);
     const peerSpace = detectSpace({ x: peer.x, y: peer.y }, this.spaces);
     const peerSpaceTiles: TileRect | null = peerSpace
       ? {
@@ -2290,18 +2294,18 @@ export class OfficeScene extends Phaser.Scene {
 
     const destination = pickApproachTile(this.grid, walkerTile, peerTile, peerSpaceTiles);
     if (!destination) return;
-    this.startWalk({ x: destination.tx * TILE + 16, y: destination.ty * TILE + 16 });
+    this.startWalk(positionForBodyTile(destination));
   }
 
   /**
    * Walks to `goal` around whatever `grid.solid` blocks (pathfinding, #2). The
    * route is planned BEFORE standing up: a goal nobody can reach leaves a
-   * seated player seated and moves nothing. The planner works on the body's
-   * tiles, so a blocked goal is judged by where the body would stand, not by
-   * the tile under the click.
+   * seated player seated and moves nothing. The planner tests the body
+   * against what Arcade collides it with, so a goal is judged by where the
+   * body would stand, not by the tile under the click.
    */
   private startWalk(goal: { x: number; y: number }): boolean {
-    const route = planWalk(this.walkSolid(), this.player, goal);
+    const route = planWalk(this.walkWorld(), this.player, goal);
     if (route === null) return false;
     this.standUp();
     // The last stop is the goal itself: it stays the walk's destination.
