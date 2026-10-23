@@ -91,14 +91,55 @@ describe('handleSetTerrainBlock', () => {
     expect(listener).toHaveBeenCalledTimes(1);
     expect(store.actorOf(0)).toBe(ADMIN.id);
   });
+  it('applies a batch with block colors, and refuses the whole batch for one bad color (#222)', async () => {
+    const { deps, terrain, store } = await harness();
+    const expected = encodeTerrainBlocks(terrain.blocks());
+
+    for (const edits of [
+      [{ index: 0, material: 'carpet', color: '#a0b1c2' }, { index: 1, material: 'carpet', color: 'rojo' }],
+      [{ index: 0, material: 'carpet', color: '#a0b1c2' }, { index: 1, material: 'sand', color: '#a0b1c2' }],
+    ]) {
+      expect(await handleSetTerrainBlocks(BEARER_ADMIN, { expected, edits }, deps)).toEqual({ status: 400, body: { error: 'invalid-request' } });
+    }
+    expect([...(await store.loadBlocks())]).toEqual([]);
+
+    const edits = [{ index: 0, material: 'carpet', color: '#A0B1C2' }, { index: 1, material: 'carpet' }];
+    expect(await handleSetTerrainBlocks(BEARER_ADMIN, { expected, edits }, deps)).toEqual({ status: 200, body: { updated: 2 } });
+    expect(terrain.blocks().slice(0, 2)).toEqual(['carpet', 'carpet']);
+    expect(terrain.blockColors()).toEqual(new Map([[0, '#a0b1c2']]));
+    expect(new Map(await store.loadBlockColors())).toEqual(new Map([[0, '#a0b1c2']]));
+  });
+
   it('lets an admin set a block, recording who did it', async () => {
     const { deps, store, terrain } = await harness();
 
     const result = await handleSetTerrainBlock(BEARER_ADMIN, LAWN, { material: 'water' }, deps);
 
-    expect(result).toEqual({ status: 200, body: { index: 35, material: 'water' } });
+    expect(result).toStrictEqual({ status: 200, body: { index: 35, material: 'water', color: null } });
     expect(terrain.blocks()[35]).toBe('water');
     expect(store.actorOf(35)).toBe(ADMIN.id);
+  });
+
+  it('paints a carpet block in the color asked, normalized, and answers it (#222)', async () => {
+    const { deps, store, terrain } = await harness();
+
+    const result = await handleSetTerrainBlock(BEARER_ADMIN, LAWN, { material: 'carpet', color: '#A0B1C2' }, deps);
+
+    expect(result).toStrictEqual({ status: 200, body: { index: 35, material: 'carpet', color: '#a0b1c2' } });
+    expect(terrain.blocks()[35]).toBe('carpet');
+    expect(terrain.blockColors()).toEqual(new Map([[35, '#a0b1c2']]));
+    expect(new Map(await store.loadBlockColors())).toEqual(new Map([[35, '#a0b1c2']]));
+  });
+
+  it('answers 400 to a malformed color or a color on a material that takes none, changing nothing (#222)', async () => {
+    const { deps, store, terrain } = await harness();
+
+    for (const body of [{ material: 'carpet', color: 'rojo' }, { material: 'carpet', color: '#abc' }, { material: 'wood', color: '#a0b1c2' }]) {
+      expect(await handleSetTerrainBlock(BEARER_ADMIN, LAWN, body, deps), JSON.stringify(body)).toEqual({ status: 400, body: { error: 'invalid-request' } });
+    }
+    expect(terrain.blocks()[35]).toBe('grass');
+    expect([...(await store.loadBlocks())]).toEqual([]);
+    expect([...(await store.loadBlockColors())]).toEqual([]);
   });
 
   it('answers 401 without a valid credential and 403 to someone who does not administer, before reading the body', async () => {
@@ -131,7 +172,7 @@ describe('handleSetTerrainBlock', () => {
     const underPlayer = await harness({ placements: [], players: [{ x: 67 * TILE + 32, y: 22 * TILE + 25 }] });
     expect(await handleSetTerrainBlock(BEARER_ADMIN, LAWN, { material: 'water' }, underPlayer.deps)).toEqual({
       status: 200,
-      body: { index: 35, material: 'water' },
+      body: { index: 35, material: 'water', color: null },
     });
   });
 

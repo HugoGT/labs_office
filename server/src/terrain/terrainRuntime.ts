@@ -20,19 +20,26 @@
  * rectangles collide through the collision runtime), but every tile of every
  * item is protected like a static seat: no water, void or wall may land on
  * one.
+ *
+ * Blocks of a colorable material may carry a color (#222). It is part of the
+ * block edit: saved in the same `saveBlocks` as the material, published with
+ * it, and cleared whenever the block is painted without one.
  */
 
 import {
   blockCount,
   blockIndexAt,
   encodeTerrainBlocks,
+  isColorableTerrainMaterial,
   newlyUnwalkableTiles,
   terrainSnapshot,
   wallPostTiles,
   withBlock,
+  withTerrainColors,
   withWalls,
   type LayoutMaterial,
   type OfficeLayout,
+  type TerrainColors,
   type TerrainSnapshot,
   type WallEdit,
 } from '../../../src/game/officeLayout.ts';
@@ -70,7 +77,8 @@ import {
 
 /**
  * Called after each accepted edit, block, wall or decor, with the whole block
- * list. `snapshot()` and `decor()` already answer with the new terrain.
+ * list. `snapshot()`, `blockColors()` and `decor()` already answer with the
+ * new terrain.
  */
 export type TerrainListener = (blocks: readonly LayoutMaterial[]) => void;
 
@@ -78,6 +86,8 @@ export interface TerrainRuntime {
   /** Reads the persisted blocks. Called once, after the schema is applied. */
   load(): Promise<void>;
   blocks(): readonly LayoutMaterial[];
+  /** The live block colors (#222): only colorable blocks painted in a color of their own. */
+  blockColors(): TerrainColors;
   snapshot(): TerrainSnapshot;
   /** False without a store (no `DATABASE_URL`): the terrain is the layout's for good. */
   readonly editable: boolean;
@@ -194,6 +204,7 @@ export function createTerrainRuntime({
   const staticTiles = staticProtectedTiles(layout, seats);
   const listeners = new Set<TerrainListener>();
   let blocks: readonly LayoutMaterial[] = layout.blocks;
+  let colors: TerrainColors = new Map();
   let walls: readonly (string | null)[] = layout.walls;
   let snapshot = terrainSnapshot(layout, blocks, walls);
   let decor: readonly DecorItem[] = [];
@@ -232,7 +243,8 @@ export function createTerrainRuntime({
     parseTerrainBatch({ edits, expected: expected ?? encodeTerrainBlocks(blocks) }, blocks.length);
     if (expected !== undefined && expected !== encodeTerrainBlocks(blocks)) throw new TerrainStaleError('terrain changed since preview');
     if (edits.some(({ index, material }) => index === spawn && material !== 'wood')) throw new TerrainProtectedError('placement');
-    const changed = edits.filter(({ index, material }) => blocks[index] !== material);
+    // A color change alone is a change too; parsing already refused a color on a material that takes none.
+    const changed = edits.filter(({ index, material, color }) => blocks[index] !== material || colors.get(index) !== color);
     if (changed.length === 0) return blocks;
     let next = [...blocks];
     for (const { index, material } of changed) next = withBlock(next, index, material);
@@ -242,8 +254,10 @@ export function createTerrainRuntime({
       const conflict = findUnwalkableConflict(watered, layout.width, protectedTiles(), await protections());
       if (conflict !== null) throw new TerrainProtectedError(conflict);
     }
+    const nextColors = withTerrainColors(colors, changed);
     await store.saveBlocks(changed, actorId);
     blocks = next;
+    colors = nextColors;
     snapshot = nextSnapshot;
     for (const listener of listeners) listener(blocks);
     return blocks;
@@ -339,6 +353,14 @@ export function createTerrainRuntime({
         if (index >= 0 && index < count) next = withBlock(next, index, material);
       }
       blocks = next;
+      // Rows stored before #222 have no color and draw as before. A color the
+      // block cannot take (its material, or the spawn rule above, says
+      // otherwise) is ignored, never rewritten, like the spawn block.
+      const savedColors = new Map<number, string>();
+      for (const [index, color] of await store.loadBlockColors()) {
+        if (index >= 0 && index < count && saved.get(index) === blocks[index] && isColorableTerrainMaterial(blocks[index]!)) savedColors.set(index, color);
+      }
+      colors = savedColors;
       const savedWalls = await store.loadWalls();
       const wallEdits: WallEdit[] = [];
       for (const [index, piece] of savedWalls) {
@@ -357,6 +379,7 @@ export function createTerrainRuntime({
       decor = (await store.loadDecor()).filter(({ index }) => index >= 0 && index < tileCount);
     },
     blocks: () => blocks,
+    blockColors: () => colors,
     walls: () => walls,
     decor: () => decor,
     decorInfo,

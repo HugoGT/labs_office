@@ -44,6 +44,32 @@ describe('pgTerrain', () => {
     expect(squash(pool.queries[0]!.text)).toContain('on conflict (block_index) do update');
     expect(pool.queries[0]!.values).toEqual([JSON.stringify(edits), 'user-1']);
   });
+  it('saves each block color with its material in the same statement, NULL where an edit carries none (#222)', async () => {
+    const pool = fakePool();
+    const edits = [{ index: 0, material: 'carpet' as const, color: '#a0b1c2' }, { index: 1, material: 'grass' as const }];
+    await createPgTerrain(pool).saveBlocks(edits, 'user-1');
+    expect(pool.queries).toHaveLength(1);
+    const text = squash(pool.queries[0]!.text);
+    // A missing `color` key reads as NULL in jsonb_to_recordset, so a block painted without one loses its old color.
+    expect(text).toContain('select entry.index, entry.material, entry.color, $2::uuid from jsonb_to_recordset($1::jsonb) as entry(index integer, material text, color text)');
+    expect(text).toContain('set material = excluded.material, color = excluded.color, updated_by = excluded.updated_by, updated_at = now()');
+    expect(pool.queries[0]!.values).toEqual([JSON.stringify(edits), 'user-1']);
+  });
+
+  it('loads every stored block color, skipping a row it cannot read; a row without one has none (#222)', async () => {
+    const pool = fakePool([
+      { block_index: 3, color: '#a0b1c2' },
+      { block_index: 4, color: null },
+      { block_index: 'x', color: '#a0b1c2' },
+      { block_index: 7, color: 'rojo' },
+    ]);
+
+    const colors = await createPgTerrain(pool).loadBlockColors();
+
+    expect(new Map(colors)).toEqual(new Map([[3, '#a0b1c2']]));
+    expect(squash(pool.queries[0]!.text)).toBe('select block_index, color from terrain_blocks where color is not null');
+  });
+
   it('loads every stored block by index, skipping a row it cannot read', async () => {
     const pool = fakePool([
       { block_index: 3, material: 'sand' },

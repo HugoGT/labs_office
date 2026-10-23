@@ -13,7 +13,9 @@ import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
 import {
   LAYOUT_MATERIALS,
   MAX_WALL_EDITS,
+  isColorableTerrainMaterial,
   isLayoutMaterial,
+  isTerrainColor,
   isWallPieceId,
   wallPostTiles,
   type LayoutMaterial,
@@ -64,6 +66,8 @@ export class TerrainProtectedError extends Error {
 export interface TerrainEdit {
   index: number;
   material: LayoutMaterial;
+  /** Only on a colorable material (#222); absent, the block draws its default art. */
+  color?: string;
 }
 
 export class TerrainStaleError extends Error {}
@@ -117,15 +121,23 @@ export interface TerrainProtections {
   players: readonly { x: number; y: number }[];
 }
 
-/** The block of `/admin/terrain/blocks/:index` and the `material` of the body. */
+/**
+ * The block of `/admin/terrain/blocks/:index` and the `material` and optional
+ * `color` (#222) of the body. A color is normalized to lower case like a
+ * decor one, and only a colorable material takes it; `null` is no color.
+ */
 export function parseTerrainEdit(index: unknown, body: unknown, count: number): TerrainEdit {
   if (typeof index !== 'string' || !/^\d+$/.test(index)) throw new InvalidTerrainEditError('the block index is not a number');
   const parsed = Number(index);
   if (parsed >= count) throw new InvalidTerrainEditError(`block ${parsed} is not on the map`);
   if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new InvalidTerrainEditError('the body is not an object');
-  const { material } = body as Record<string, unknown>;
+  const { material, color } = body as Record<string, unknown>;
   if (!isLayoutMaterial(material)) throw new InvalidTerrainEditError('unknown material');
-  return { index: parsed, material };
+  if (color === undefined || color === null) return { index: parsed, material };
+  const normalized = typeof color === 'string' ? color.toLowerCase() : color;
+  if (!isTerrainColor(normalized)) throw new InvalidTerrainEditError('invalid color');
+  if (!isColorableTerrainMaterial(material)) throw new InvalidTerrainEditError('this material takes no color');
+  return { index: parsed, material, color: normalized };
 }
 
 /** Half the spawn ring of `OfficeRoom`: everyone enters within a tile of the spawn tile. */

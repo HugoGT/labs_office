@@ -5,7 +5,7 @@
  * `directory/schema.sql`.
  */
 
-import { isLayoutMaterial, isWallPieceId, type LayoutMaterial, type WallPieceId } from '../../../src/game/officeLayout.ts';
+import { isLayoutMaterial, isTerrainColor, isWallPieceId, type LayoutMaterial, type WallPieceId } from '../../../src/game/officeLayout.ts';
 import { isDecorColor, isDecorPieceId, isDecorRotation, type DecorItem } from '../../../src/game/officeDecor.ts';
 import type { DirectoryPool } from '../directory/pgDirectory.ts';
 import type { TerrainStore } from './terrainPort.ts';
@@ -32,15 +32,27 @@ export function createPgTerrain(pool: DirectoryPool): TerrainStore {
       );
     },
     async saveBlocks(edits, actorId) {
-      // One statement is atomic in Postgres, including every upsert and FK check.
+      // One statement is atomic in Postgres, including every upsert and FK
+      // check, so a color (#222) commits with its material. An edit without
+      // one has no `color` key, which jsonb_to_recordset reads as NULL: the
+      // block loses the color it had.
       await pool.query(
-        `INSERT INTO terrain_blocks (block_index, material, updated_by)
-         SELECT entry.index, entry.material, $2::uuid
-         FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, material text)
+        `INSERT INTO terrain_blocks (block_index, material, color, updated_by)
+         SELECT entry.index, entry.material, entry.color, $2::uuid
+         FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, material text, color text)
          ON CONFLICT (block_index) DO UPDATE
-           SET material = EXCLUDED.material, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+           SET material = EXCLUDED.material, color = EXCLUDED.color, updated_by = EXCLUDED.updated_by, updated_at = now()`,
         [JSON.stringify(edits), actorId],
       );
+    },
+    async loadBlockColors() {
+      const result = await pool.query('SELECT block_index, color FROM terrain_blocks WHERE color IS NOT NULL');
+      const colors = new Map<number, string>();
+      // Same as the blocks: an unreadable row is skipped, not fatal.
+      for (const row of result.rows) {
+        if (Number.isInteger(row.block_index) && isTerrainColor(row.color)) colors.set(row.block_index as number, row.color);
+      }
+      return colors;
     },
 
     async loadWalls() {

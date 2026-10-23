@@ -17,7 +17,7 @@ import {
 } from '../../src/game/officeProtocol.ts';
 import { chairSeatId, mapSeatId } from '../../src/game/seating.ts';
 import { decodeOfficeDecor } from '../../src/game/officeDecor.ts';
-import { decodeTerrainBlocks, decodeTerrainWalls } from '../../src/game/officeLayout.ts';
+import { decodeTerrainBlocks, decodeTerrainColors, decodeTerrainWalls } from '../../src/game/officeLayout.ts';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SPACES as BUILT_IN_SPACES } from '../../src/test/legacyOffice.ts';
 import { createOfficeServer as createServer, type OfficeServer, type OfficeServerOverrides } from './createOfficeServer.ts';
 const createOfficeServer = (overrides: OfficeServerOverrides = {}) => createServer({ layout: BASE_LAYOUT, seats: BASE_MAP_SEATS, ...overrides });
@@ -339,6 +339,29 @@ describe('OfficeRoom: edited terrain', () => {
     room.send('move', dried);
     await waitFor(() => room.state.players.get(room.sessionId)?.x === dried.x);
     expect(server.sessions.positionOf(room.sessionId)).toEqual({ x: dried.x, y: dried.y });
+  });
+
+  const colorsOf = (room: Awaited<ReturnType<typeof join>>) =>
+    decodeTerrainColors(room.state.terrainColors, BASE_LAYOUT.blocks.length);
+
+  it('replicates block colors to whoever is inside and whoever joins after, and drops one when its block changes material (#222)', async () => {
+    const ana = await join('Ana');
+    // Blocks stored before colors existed replicate with none (an empty field may not even reach the client).
+    await waitFor(() => blocksOf(ana)?.[LAWN] === 'water');
+    expect(ana.state.terrainColors ?? '').toBe('');
+
+    await server.terrain.setBlocks([{ index: 36, material: 'carpet', color: '#a0b1c2' }, { index: 37, material: 'carpet' }], null, nobody);
+
+    await waitFor(() => colorsOf(ana)?.get(36) === '#a0b1c2');
+    expect(ana.state.terrainColors).toBe('36:#a0b1c2');
+    expect(blocksOf(ana)?.slice(36, 38)).toEqual(['carpet', 'carpet']);
+    const late = await join('Beto');
+    await waitFor(() => late.state.terrainColors === '36:#a0b1c2');
+
+    await server.terrain.setBlock({ index: 36, material: 'tile', actorId: null }, nobody);
+
+    await waitFor(() => blocksOf(ana)?.[36] === 'tile');
+    await waitFor(() => ana.state.terrainColors === '');
   });
 
   const wallsOf = (room: Awaited<ReturnType<typeof join>>) =>
