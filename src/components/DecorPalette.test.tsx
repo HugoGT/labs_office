@@ -51,6 +51,12 @@ describe('DecorPalette', () => {
     expect(screen.getByRole('button', { name: 'Silla de madera' })).toHaveAttribute('title', 'Silla de madera');
   });
 
+  it('tells under the doors that X locks one from the inside (#223)', () => {
+    render(<DecorPalette value={null} catalog={catalog} onPick={() => {}} preview={noPreview()} />);
+    const doors = screen.getByRole('group', { name: 'Puertas' }).parentElement!;
+    expect(within(doors).getByText('Desde dentro, junto a la puerta, pulsa X para cerrarla con llave o abrirla.')).toBeInTheDocument();
+  });
+
   it('shows the size of each room table on its tile, the horizontal one', () => {
     render(<DecorPalette value={null} catalog={catalog} onPick={() => {}} preview={noPreview()} />);
 

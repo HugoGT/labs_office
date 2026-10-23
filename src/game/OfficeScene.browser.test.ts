@@ -4662,6 +4662,73 @@ describe('OfficeScene: edited terrain', () => {
     await vi.waitFor(() => expect(frames()).toEqual(closed), LOOP_WAIT);
   });
 
+  it('sends doorlock on X, never while typing or while an editor holds the map (#223, S13)', async () => {
+    const connector = fakeConnector();
+    const { scene, bridge } = await bootOfficeScene(createOfficeBridge(), { endpoint: 'ws://test', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const press = () => scene.input.keyboard!.emit('keydown-X', new KeyboardEvent('keydown', { key: 'x' }));
+
+    press();
+    expect(connector.doorLocks()).toBe(1);
+
+    const field = document.createElement('input');
+    document.body.append(field);
+    field.focus();
+    press();
+    field.remove();
+    expect(connector.doorLocks()).toBe(1);
+
+    bridge.emitCommand('decoredit', { brush: { kind: 'piece', piece: 'chair-wood', info: { kind: 'chair', footprint: { w: 1, h: 1 } }, rotation: 0 }, area: null });
+    press();
+    expect(connector.doorLocks()).toBe(1);
+    bridge.emitCommand('decoredit', null);
+    press();
+    expect(connector.doorLocks()).toBe(2);
+  });
+
+  it('keeps a locked door shut and solid for whoever is outside, and open to whoever is inside (#223, S13)', async () => {
+    const { scene, handlers } = await bootConnected();
+    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
+    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 0 }]);
+    const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
+    await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
+    const frame = () => Number(leaf().frame.name);
+    const walk = scene as unknown as { startWalk(goal: { x: number; y: number }): boolean; autoWalk?: unknown };
+    const body = findPlayer(scene).body as Phaser.Physics.Arcade.Body;
+    const doorway = { x: lawnVertex.x + TILE / 2, y: lawnVertex.y };
+    // Body centers on the outside tile (67, 21) and the inside tile (67, 22).
+    const outside = { x: doorway.x, y: lawnVertex.y - TILE / 2 - 11 };
+    const inside = { x: doorway.x, y: lawnVertex.y + TILE / 2 - 11 };
+
+    body.reset(outside.x, outside.y);
+    await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(0, 'start', true)), LOOP_WAIT);
+    await vi.waitFor(() => expect(solidAt(scene, doorway.x, doorway.y)).toBe(false), LOOP_WAIT);
+    // Unlocked, the path walks in.
+    expect(walk.startWalk(inside)).toBe(true);
+    walk.autoWalk = undefined;
+    body.reset(outside.x, outside.y);
+
+    handlers.onDoorLocks!(new Set([lawnTile]));
+
+    await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(0, 'start', false)), LOOP_WAIT);
+    expect(leaf().isTinted).toBe(true);
+    await vi.waitFor(() => expect(solidAt(scene, doorway.x, doorway.y)).toBe(true), LOOP_WAIT);
+    // The door's inside tile is out of the path's reach from outside.
+    expect(walk.startWalk(inside)).toBe(false);
+    walk.autoWalk = undefined;
+
+    // Inside, it opens again and nothing holds the way out.
+    body.reset(inside.x, inside.y);
+    await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(0, 'start', true)), LOOP_WAIT);
+    await vi.waitFor(() => expect(solidAt(scene, doorway.x, doorway.y)).toBe(false), LOOP_WAIT);
+    expect(walk.startWalk({ x: doorway.x, y: lawnVertex.y - TILE - TILE / 2 - 11 })).toBe(true);
+    walk.autoWalk = undefined;
+    body.reset(inside.x, inside.y);
+
+    handlers.onDoorLocks!(new Set());
+    await vi.waitFor(() => expect(leaf().isTinted).toBe(false), LOOP_WAIT);
+  });
+
   it('draws pending walls for the editor without colliding with them, and drops them when it closes', async () => {
     const { scene, bridge } = await bootConnected();
     const before = wallObjects(scene).length;
