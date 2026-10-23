@@ -202,10 +202,43 @@ describe('useWallEditor', () => {
     expect(result.current.error).toMatch(/permiso/i);
   });
 
+  it('erases the posts around a protected one: a batch refused as a whole is sent again post by post (#223)', async () => {
+    const { terrain, calls } = deferredWalls();
+    const { bridge, result } = setup(terrain);
+    const standing = [TILE_A, TILE_B, TILE_C, TILE_C + 1].map((index) => ({ index, piece: 'wall-stone' as const }));
+    act(() => bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls: withWalls(BASE_LAYOUT.walls, standing), colors: NO_COLORS }));
+    act(() => result.current.pick(null));
+    // A drag faster than the server: the first post is in flight while the next three queue up, one of them a door's.
+    act(() => bridge.emit('wallpick', { index: TILE_A }));
+    act(() => bridge.emit('wallpick', { index: TILE_B }));
+    act(() => bridge.emit('wallpick', { index: TILE_C }));
+    act(() => bridge.emit('wallpick', { index: TILE_C + 1 }));
+    await act(async () => calls[0]!.resolve());
+    expect(calls[1]!.edits.map(({ index }) => index)).toEqual([TILE_B, TILE_C, TILE_C + 1]);
+
+    await act(async () => calls[1]!.reject(new AdminError('terrain-under-placement')));
+    expect(calls[2]!.edits).toEqual([{ index: TILE_B, piece: null }]);
+    await act(async () => calls[2]!.reject(new AdminError('terrain-under-placement')));
+    expect(calls[3]!.edits).toEqual([{ index: TILE_C, piece: null }]);
+    await act(async () => calls[3]!.resolve());
+    expect(calls[4]!.edits).toEqual([{ index: TILE_C + 1, piece: null }]);
+    await act(async () => calls[4]!.resolve());
+
+    expect(calls).toHaveLength(5);
+    expect(result.current.error).toBe(WALL_UNDER_PLACEMENT_MESSAGE);
+  });
+
   it('closes the overlay when it unmounts', () => {
     const { result, commands, unmount } = setup();
     act(() => result.current.pick('wall-brick'));
     unmount();
     expect(commands.at(-1)).toBeNull();
+  });
+});
+
+describe('WALL_UNDER_PLACEMENT_MESSAGE (#223)', () => {
+  it('names the doors among what keeps a post in place', () => {
+    expect(WALL_UNDER_PLACEMENT_MESSAGE).toMatch(/puerta/);
+    expect(WALL_UNDER_PLACEMENT_MESSAGE).not.toMatch(/cambia/);
   });
 });

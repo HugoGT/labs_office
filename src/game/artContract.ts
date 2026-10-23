@@ -91,6 +91,7 @@ export const ART_IMAGE_KINDS = [
   'bridge',
   'hedge',
   'table',
+  'door',
 ] as const;
 export type ArtImageKind = (typeof ART_IMAGE_KINDS)[number];
 
@@ -229,6 +230,30 @@ export interface TableSpec extends PropSpecBase {
   readonly maxFootprint: Footprint;
 }
 
+/**
+ * The two ends of a door's edge its hinge may sit on (#223): `start` is the
+ * west (horizontal edge) or north (vertical edge) one. A lone door hinges at
+ * its start; the leaves of a double door at the outer ends.
+ */
+export const DOOR_HINGES = ['start', 'end'] as const;
+export type DoorHinge = (typeof DOOR_HINGES)[number];
+
+/**
+ * A door leaf (#223), seen from above like a wall: one column per decor
+ * rotation (`DECOR_ROTATIONS` order: 0 opens down, 90 right, 180 up, 270
+ * left), one row per hinge and state (`doorFrameIndex`). The anchor is the
+ * middle of the door's edge, the grid line it stands on; a closed leaf lies
+ * along it and an open one swings a quarter into the side it opens to.
+ */
+export interface DoorSpec extends ImageSpecBase {
+  readonly kind: 'door';
+  readonly anchor: Point;
+  /** Along the edge: one grid segment. */
+  readonly leafLength: number;
+  /** Across the edge: the plank's thickness. */
+  readonly leafThickness: number;
+}
+
 export interface TerrainTilesetSpec extends ImageSpecBase {
   readonly kind: 'terrain-tileset';
   readonly masks: number;
@@ -248,7 +273,8 @@ export type ArtImageSpec =
   | PlantSpec
   | BridgeSpec
   | HedgeSpec
-  | TableSpec;
+  | TableSpec
+  | DoorSpec;
 
 export const CHARACTER_WALK: CharacterWalkSpec = {
   kind: 'character-walk',
@@ -777,6 +803,42 @@ export const TABLE: TableSpec = {
   collision: 'solid',
 };
 
+/** Wide enough for a leaf swung a whole segment away from its edge, either side and either axis. */
+const DOOR_FRAME = 2 * ART_TILE;
+
+export const DOOR: DoorSpec = {
+  ...PROP_BASE,
+  kind: 'door',
+  frame: { width: DOOR_FRAME, height: DOOR_FRAME },
+  columns: 4,
+  rows: DOOR_HINGES.length * 2,
+  anchor: { x: DOOR_FRAME / 2, y: DOOR_FRAME / 2 },
+  leafLength: ART_TILE,
+  leafThickness: 6,
+};
+
+/**
+ * The frame of a door leaf: its rotation's column, and the row of its hinge
+ * (`DOOR_HINGES`) closed, then open.
+ */
+export function doorFrameIndex(rotation: 0 | 90 | 180 | 270, hinge: DoorHinge, open: boolean): number {
+  const row = DOOR_HINGES.indexOf(hinge) * 2 + (open ? 1 : 0);
+  return row * DOOR.columns + rotation / 90;
+}
+
+/**
+ * Where to draw a door standing on `edge`: the frame's top-left in world
+ * pixels (the anchor on the middle of the edge) and the depth it sorts by,
+ * the bottom of the wall body it replaces.
+ */
+export function doorPlacement(edge: GridEdge): { readonly x: number; readonly y: number; readonly depthY: number } {
+  const body = wallBodyRect(edge);
+  const middle = edge.axis === 'horizontal'
+    ? { x: edge.col * ART_TILE + ART_TILE / 2, y: edge.row * ART_TILE }
+    : { x: edge.col * ART_TILE, y: edge.row * ART_TILE + ART_TILE / 2 };
+  return { x: middle.x - DOOR.anchor.x, y: middle.y - DOOR.anchor.y, depthY: body.y + body.height };
+}
+
 export function bridgeFrameIndex(orientation: BridgeOrientation): number {
   return BRIDGE_ORIENTATIONS.indexOf(orientation);
 }
@@ -818,6 +880,7 @@ export const ART_IMAGE_SPECS: Readonly<{
   bridge: BridgeSpec;
   hedge: HedgeSpec;
   table: TableSpec;
+  door: DoorSpec;
 }> = {
   'character-walk': CHARACTER_WALK,
   'character-seated': CHARACTER_SEATED,
@@ -831,6 +894,7 @@ export const ART_IMAGE_SPECS: Readonly<{
   bridge: BRIDGE,
   hedge: HEDGE,
   table: TABLE,
+  door: DOOR,
 };
 
 export function sheetSize(spec: Pick<ImageSpecBase, 'frame' | 'columns' | 'rows'>): Size {
@@ -965,7 +1029,7 @@ export function artSheetKey(pieceId: string, role: string): string {
 /** `format` of `public/assets/pack/manifest.json`. */
 export const ART_PACK_FORMAT = 'oficina-art-pack';
 
-export const ART_PIECE_KINDS = ['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table'] as const;
+export const ART_PIECE_KINDS = ['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door'] as const;
 export type ArtPieceKind = (typeof ART_PIECE_KINDS)[number];
 
 /** One PNG of a piece. Paths are relative to the manifest; `sha256` is of the file bytes. */
@@ -1103,7 +1167,19 @@ export interface ArtBridgePiece extends ArtPropPieceBase {
 
 export type ArtPropPiece = ArtTreePiece | ArtPlantPiece | ArtTablePiece | ArtHedgePiece | ArtBridgePiece;
 
-export type ArtPiece = ArtCharacterPiece | ArtChairPiece | ArtDeskPiece | ArtFloorPiece | ArtWallPiece | ArtTilesetPiece | ArtPropPiece;
+/**
+ * A door of the decor layer (#223): one sheet of `DOOR` frames. It stands on
+ * a wall's edge, never on a tile, so it states its anchor (the middle of the
+ * edge in its frame) and the one tile of wall it fills along the edge.
+ */
+export interface ArtDoorPiece extends ArtPieceBase {
+  readonly kind: 'door';
+  readonly material: string;
+  readonly anchor: Point;
+  readonly footprint: Footprint;
+}
+
+export type ArtPiece = ArtCharacterPiece | ArtChairPiece | ArtDeskPiece | ArtFloorPiece | ArtWallPiece | ArtTilesetPiece | ArtPropPiece | ArtDoorPiece;
 
 export interface ArtPackManifest {
   readonly format: typeof ART_PACK_FORMAT;

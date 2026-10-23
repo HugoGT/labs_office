@@ -46,6 +46,7 @@ import { useProximityAudio } from '../hooks/useProximityAudio';
 import { useRoster } from '../hooks/useRoster';
 import { useSpacesConfig } from '../hooks/useSpacesConfig';
 import { AudioUnblockPrompt } from './AudioUnblockPrompt';
+import { DoorLockNotice } from './DoorLockNotice';
 import { BottomBar } from './BottomBar';
 import { CallInvitationStack } from './CallInvitationStack';
 import { ContextMenu, type PeerMenuAction } from './ContextMenu';
@@ -625,6 +626,10 @@ export function OfficeShell({
    * un solo toast y `OfficeShell` ya es el unico dueno del bridge.
    */
   // A full desk refuses whoever tries to walk in (`deskDecorRules.ts`); the scene says so once per attempt.
+  // What the lock key would do where the player stands, and whether they are inside a locked room (#223, S15): the scene decides, this only shows it.
+  const [doorLock, setDoorLock] = useState<OfficeEventMap['doorlocknotice']>({ lockable: null, insideLocked: false });
+  useEffect(() => bridge.on('doorlocknotice', setDoorLock), [bridge]);
+
   useEffect(() => bridge.on('deskfull', () => setToastMessage('Este escritorio está lleno (máximo 6 personas).')), [bridge]);
 
   useEffect(
@@ -870,6 +875,7 @@ export function OfficeShell({
         <ZoomControls view={mapZoom.view} onZoomIn={mapZoom.zoomIn} onZoomOut={mapZoom.zoomOut} onReset={mapZoom.reset} />
       </div>
       <AudioUnblockPrompt blocked={audioBlocked} onUnblock={unblockAudio} />
+      <DoorLockNotice lockable={doorLock.lockable} insideLocked={doorLock.insideLocked} />
       <Toast message={toastMessage} />
       <CallInvitationStack invitations={invitations} onAccept={accept} onDismiss={dismiss} />
       <RecordingReadyStack

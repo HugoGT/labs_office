@@ -1842,6 +1842,32 @@
           "sha256": "3e76f1040407a81ee30452436d42950f37bbea5d75b7ff932e0408a78d785020"
         }
       ]
+    },
+    {
+      "id": "door-wood",
+      "kind": "door",
+      "name": "Puerta de madera",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "wood",
+      "anchor": {
+        "x": 32,
+        "y": 32
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "sheet",
+          "path": "door/wood.png",
+          "imageKind": "door",
+          "width": 256,
+          "height": 256,
+          "sha256": "149738731c9301781ca32cd1afcdc849714215b4fdd39d046e721ceb379ece9e"
+        }
+      ]
     }
   ]
 }

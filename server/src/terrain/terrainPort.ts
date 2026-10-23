@@ -8,7 +8,9 @@
  * reaches every block an admin never changed.
  *
  * Walls are stored per tile, and only where one stands: removing a wall
- * deletes its row. A stored wall wins over the layout's on its tile.
+ * deletes its row. A stored wall wins over the layout's on its tile. Its
+ * `updated_at` is when it was last placed or repainted: the placement order
+ * (#223), which decides which of two materials is drawn over the other.
  *
  * A block may carry a color of its own (#222), stored on its row and only
  * for a colorable material (`COLORABLE_TERRAIN_MATERIALS`).
@@ -43,7 +45,10 @@ export interface TerrainStore {
    * it to drop the posts it leaves with no ground around them (#217).
    */
   saveBlocksClearingWalls(edits: readonly { index: number; material: LayoutMaterial; color?: string }[], walls: readonly number[], actorId: string | null): Promise<void>;
-  /** Placed walls by tile. Tiles the current map no longer has are the runtime's to ignore. */
+  /**
+   * Placed walls by tile, in placement order, oldest first: the order of the map's entries. Tiles the
+   * current map no longer has are the runtime's to ignore.
+   */
   loadWalls(): Promise<ReadonlyMap<number, WallPieceId>>;
   /** Places (`piece`) or removes (`null`) walls; all rows succeed or none do. */
   saveWalls(edits: readonly WallEdit[], actorId: string | null): Promise<void>;

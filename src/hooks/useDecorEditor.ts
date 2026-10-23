@@ -51,9 +51,9 @@ import type { OfficeDecorPort } from '../game/officeDecorPort';
 /** Refused with these, this person may not edit at all any more: no further writes. */
 const BLOCKING_ERRORS = ['forbidden', 'unauthorized', 'terrain-not-configured', 'no-desk'];
 
-/** `terrain-under-placement`: the item needs free walkable ground. */
+/** `terrain-under-placement`: the item needs free walkable ground; a door, a wall under it that closes a room (#223, S16). */
 export const DECOR_UNDER_PLACEMENT_MESSAGE =
-  'Ese mueble necesita suelo libre: no puede ir sobre agua, vacío, una pared, otro mueble ni la entrada. Elige otra casilla.';
+  'Ese mueble necesita suelo libre: no puede ir sobre agua, vacío, una pared, otro mueble ni la entrada. La puerta va entre dos paredes y tiene que cerrar una sala. Elige otra casilla.';
 /** A click the desk-scoped editor refuses before asking: the server would answer `outside-desk`. */
 export const DECOR_AREA_MESSAGE = 'Solo puedes decorar dentro de tu escritorio: elige una casilla dentro de su recuadro.';
 /** A click the editor refuses before asking, and `desk-chair-limit` from the server: a desk takes three chairs at most. */

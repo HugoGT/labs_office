@@ -19,7 +19,7 @@
 
 import { Client, getStateCallbacks, type Room } from 'colyseus.js';
 import { createMoveThrottle } from './moveThrottle';
-import { BASE_LAYOUT, decodeTerrainBlocks, decodeTerrainColors, decodeTerrainWalls, type LayoutMaterial, type TerrainColors } from './officeLayout';
+import { BASE_LAYOUT, decodeTerrainBlocks, decodeTerrainColors, decodeTerrainWallOrder, decodeTerrainWalls, type LayoutMaterial, type TerrainColors } from './officeLayout';
 import { decodeCollisionTable, type CollisionTable } from './pieceCollisions';
 import {
   ACCESS_DENIED_CODE,
@@ -38,6 +38,7 @@ import { decideReconnect } from './reconnectPolicy';
 import type { RemotePlayerSnapshot } from './remoteAvatars';
 import { seatIdOf } from './seating';
 import { decodeOfficeDecor, type DecorItem } from './officeDecor';
+import { decodeDoorLocks } from './officeDoors';
 
 /**
  * Forma del jugador tal y como llega por el cable. El cliente no declara el
@@ -75,6 +76,7 @@ interface OfficeRoomState {
   terrainColors: string;
   officeDecor: string;
   pieceCollisions: string;
+  lockedDoors: string;
 }
 
 /**
@@ -212,8 +214,12 @@ export interface OfficeRoomHandlers {
   onSpacesChanged?(): void;
   /** The whole terrain block list (#123 phase 2): on the first sync and after every accepted edit. */
   onTerrain?(blocks: readonly LayoutMaterial[]): void;
-  /** The live wall of every tile, row major: on the first sync and after every accepted wall edit. */
-  onWalls?(walls: readonly (string | null)[]): void;
+  /**
+   * The live wall of every tile, row major: on the first sync and after every accepted wall edit.
+   * `order` is the tiles of the posts in placement order, oldest first (#223): the later wall is
+   * drawn over the earlier one where two materials meet.
+   */
+  onWalls?(walls: readonly (string | null)[], order?: readonly number[]): void;
   /**
    * The colors of painted terrain blocks (#222), a whole map on each change.
    * Not called while the office has none: start from an empty map.
@@ -223,6 +229,8 @@ export interface OfficeRoomHandlers {
   onDecor?(items: readonly DecorItem[]): void;
   /** The saved collision table, replicated whole like the terrain: on the first sync and after every accepted edit. */
   onCollisions?(table: CollisionTable): void;
+  /** The locked doors (#223) by leaf anchor: on the first sync and whenever someone locks or unlocks one. */
+  onDoorLocks?(locks: ReadonlySet<number>): void;
 }
 
 export interface ConnectOfficeRoomOptions {
@@ -286,6 +294,11 @@ export interface OfficeConnection {
   sessionId: string;
   sendMove(x: number, y: number, facing: Facing): void;
   sendStatus(status: PresenceStatus): void;
+  /**
+   * Locks or unlocks the door the player stands inside, next to it (#223,
+   * X). Carries nothing: the room decides from the position it tracks.
+   */
+  sendDoorLock(): void;
   /**
    * Publica una nueva version de config de espacios (#7, D4). Sin agrupar,
    * como `sendStatus`: agrupar podria tragarse justo la actualizacion que
@@ -376,7 +389,7 @@ export async function connectOfficeRoom({
       (state: OfficeRoomState): {
         players: PlayersCallbacks;
         recordings: RecordingsCallbacks;
-        listen(property: 'terrainBlocks' | 'terrainWalls' | 'terrainColors' | 'officeDecor' | 'pieceCollisions', handler: (value: string) => void): () => void;
+        listen(property: 'terrainBlocks' | 'terrainWalls' | 'terrainColors' | 'officeDecor' | 'pieceCollisions' | 'lockedDoors', handler: (value: string) => void): () => void;
       };
       (player: RemotePlayer): PlayerCallbacks;
     };
@@ -458,7 +471,7 @@ export async function connectOfficeRoom({
     // (undefined, not reported), and the scene keeps the layout's walls.
     $(target.state).listen('terrainWalls', (value) => {
       const walls = decodeTerrainWalls(value, BASE_LAYOUT.width * BASE_LAYOUT.height);
-      if (walls !== null) handlers.onWalls?.(walls);
+      if (walls !== null) handlers.onWalls?.(walls, decodeTerrainWallOrder(value, BASE_LAYOUT.width * BASE_LAYOUT.height) ?? []);
     });
     // Terrain colors (#222): same rule. An empty string may never arrive on
     // the first sync, so a client starts from no colors rather than waiting.
@@ -476,6 +489,11 @@ export async function connectOfficeRoom({
     $(target.state).listen('pieceCollisions', (value) => {
       const table = decodeCollisionTable(value);
       if (table !== null) handlers.onCollisions?.(table);
+    });
+    // Door locks (#223): same rule. An older server sends none, and no door is locked.
+    $(target.state).listen('lockedDoors', (value) => {
+      const locks = decodeDoorLocks(value);
+      if (locks !== null) handlers.onDoorLocks?.(locks);
     });
 
     // Mensajes sueltos del servidor (issue #2), no estado sincronizado: no hay
@@ -641,6 +659,9 @@ export async function connectOfficeRoom({
     },
     sendSpacesVersion(version) {
       room.send('spacesversion', { version });
+    },
+    sendDoorLock() {
+      room.send('doorlock');
     },
     sendCall(to) {
       room.send('call', { to });

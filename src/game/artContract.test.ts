@@ -8,6 +8,10 @@ import {
   BRIDGE,
   BRIDGE_ORIENTATIONS,
   CHAIR_LAYERS,
+  DOOR,
+  DOOR_HINGES,
+  doorFrameIndex,
+  doorPlacement,
   CHARACTER_SEATED,
   CHARACTER_WALK,
   FLOOR,
@@ -657,7 +661,7 @@ describe('terrain dual grid over void', () => {
 
 describe('map props', () => {
   it('registers a piece kind for the tileset and each prop, with a fixed frame per image kind', () => {
-    expect(ART_PIECE_KINDS).toEqual(['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table']);
+    expect(ART_PIECE_KINDS).toEqual(['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door']);
     expect(TREE.frame).toEqual({ width: 64, height: 96 });
     expect(PLANT.frame).toEqual({ width: 32, height: 48 });
     expect(sheetSize(BRIDGE)).toEqual({ width: 256, height: 128 });
@@ -727,5 +731,26 @@ describe('tileset color bands', () => {
     expect(validateArtImage('terrain-tileset', image)).toEqual([]);
     for (let i = 100; i <= MAX_COLORS_PER_IMAGE; i += 1) setPixel(image, i, 4, [i, 1, 0, 255]);
     expect(validateArtImage('terrain-tileset', image).map((v) => v.code)).toEqual(['too-many-colors']);
+  });
+});
+
+describe('doors (#223)', () => {
+  it('lays a door sheet out as one column per rotation and one row per hinge, closed then open', () => {
+    expect(ART_IMAGE_KINDS).toContain('door');
+    expect(ART_IMAGE_SPECS.door).toBe(DOOR);
+    expect(DOOR.frame).toEqual({ width: 64, height: 64 });
+    expect(sheetSize(DOOR)).toEqual({ width: 256, height: 256 });
+    expect(DOOR.anchor).toEqual({ x: 32, y: 32 });
+    expect(DOOR_HINGES).toEqual(['start', 'end']);
+    expect(doorFrameIndex(0, 'start', false)).toBe(0);
+    expect(doorFrameIndex(270, 'start', false)).toBe(3);
+    expect(doorFrameIndex(0, 'start', true)).toBe(4);
+    expect(doorFrameIndex(90, 'end', false)).toBe(9);
+    expect(doorFrameIndex(180, 'end', true)).toBe(14);
+  });
+
+  it('draws a door with its anchor on the middle of its edge, sorted like the wall body it replaces', () => {
+    expect(doorPlacement({ col: 4, row: 6, axis: 'horizontal' })).toEqual({ x: 4 * 32 + 16 - 32, y: 6 * 32 - 32, depthY: wallBodyRect({ col: 4, row: 6, axis: 'horizontal' }).y + 16 });
+    expect(doorPlacement({ col: 4, row: 6, axis: 'vertical' })).toEqual({ x: 4 * 32 - 32, y: 6 * 32 + 16 - 32, depthY: wallBodyRect({ col: 4, row: 6, axis: 'vertical' }).y + 16 });
   });
 });

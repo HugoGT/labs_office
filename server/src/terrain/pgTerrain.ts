@@ -71,7 +71,8 @@ export function createPgTerrain(pool: DirectoryPool): TerrainStore {
     },
 
     async loadWalls() {
-      const result = await pool.query('SELECT tile_index, piece_id FROM terrain_walls');
+      // Oldest first, ties by tile: the Map keeps this placement order, which decides which wall is drawn over which (#223).
+      const result = await pool.query('SELECT tile_index, piece_id FROM terrain_walls ORDER BY updated_at, tile_index');
       const walls = new Map<number, WallPieceId>();
       // Same as the blocks: an unreadable row is skipped, not fatal.
       for (const row of result.rows) {

@@ -51,6 +51,11 @@
   overflow: hidden;
 }
 
+/* One entry on its own (the wall eraser): the width of a palette cell. */
+.single {
+  width: 64px;
+}
+
 /* The wall eraser: an empty tile, crossed out. */
 .eraser {
   background: linear-gradient(to top right, transparent calc(50% - 1px), #ef4444 calc(50% - 1px), #ef4444 calc(50% + 1px), transparent calc(50% + 1px)), #111827;

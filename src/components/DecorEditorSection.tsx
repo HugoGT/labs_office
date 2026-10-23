@@ -10,7 +10,7 @@ import { useMaterialCatalog, type LoadMaterials } from '../hooks/useMaterialCata
 import { useWallEditor, type WallBrush } from '../hooks/useWallEditor';
 import { DecorPalette, catalogDecorInfo } from './DecorPalette';
 import { MultipleToggle } from './MultipleToggle';
-import { WALL_PIECE_LABELS, WallPalette } from './TerrainPalette';
+import { WALL_ERASER_LABEL, WALL_PIECE_LABELS, WallEraser, WallPalette } from './TerrainPalette';
 import styles from './TerrainEditorSection.module.css';
 
 /**
@@ -36,14 +36,15 @@ import styles from './TerrainEditorSection.module.css';
  * editor and the map's ghost judge them before the server does.
  *
  * The admin's menu also paints the walls (#224, moved from "Editar
- * terreno"), below the pieces: `useWallEditor` with `WallPalette`. One entry
- * is picked at a time across both palettes, and while a wall is, the decor
+ * terreno"), below the pieces: `useWallEditor` with `WallPalette`, and its
+ * eraser, «Borrar» (`WallEraser`), right below «Múltiple». One entry is
+ * picked at a time across the pieces, the walls and the eraser, and while a wall is, the decor
  * tool is paused so the map's clicks are the wall's.
  */
 
 /** What the picked wall brush paints, in words. */
 function wallBrushLabel(brush: WallBrush): string {
-  return brush.piece === null ? 'Quitando paredes' : `Pintando paredes de ${WALL_PIECE_LABELS[brush.piece]}`;
+  return brush.piece === null ? WALL_ERASER_LABEL : `Pintando paredes de ${WALL_PIECE_LABELS[brush.piece]}`;
 }
 
 export interface DecorEditorSectionProps {
@@ -208,6 +209,8 @@ export function DecorEditorSection({
         </div>
       )}
 
+      {offersWalls && <WallEraser value={walls.brush} onPick={walls.pick} disabled={walls.blocked} />}
+
       <DecorPalette
         value={editor.brush}
         catalog={catalog}
@@ -226,7 +229,7 @@ export function DecorEditorSection({
         <>
           <h4 className={styles.subtitle}>Paredes</h4>
           <span className={styles.hint}>
-            Las paredes van sobre las líneas entre casillas y cortan el paso: toca o arrastra cerca de una esquina para levantarlas desde ella, y «Quitar pared» las borra. No se pueden poner sobre escritorios, muebles ni la entrada.
+            Las paredes van sobre las líneas entre casillas y cortan el paso: toca o arrastra cerca de una esquina para levantarlas desde ella, y «Borrar» las quita. No se pueden poner sobre escritorios, muebles ni la entrada.
           </span>
           <WallPalette value={walls.brush} onPick={walls.pick} walls={catalog?.wall ?? null} disabled={walls.blocked} preview={preview} />
         </>

@@ -109,6 +109,16 @@ describe('createCollisionRuntime', () => {
     expect(isPositionBlocked(collisions.rects(), 688, 1616 - 11)).toBe(false);
   });
 
+  it('places no rectangle for a decor door (#223): it opens a wall instead of blocking a tile', async () => {
+    // A door anchored on tile (21, 52), turned 0: its tiles are (21, 51) and (21, 52).
+    const items: DecorItem[] = [{ index: 52 * W + 21, piece: 'door-wood', rotation: 0 }];
+    const collisions = createCollisionRuntime({ layout: BASE_LAYOUT, seats: BASE_MAP_SEATS, store: createMemoryCollisions([]), decor: () => items, decorInfo: (piece) => (piece === 'door-wood' ? { kind: 'door', footprint: { w: 1, h: 1 } } : null) });
+    await collisions.load();
+
+    expect(collisions.rects()).toEqual(collisionWorld(staticCollisionInstances(BASE_LAYOUT.props, BASE_MAP_SEATS), new Map()));
+    expect(isPositionBlocked(collisions.rects(), 21 * 32 + 16, 52 * 32 + 16 - 11)).toBe(false);
+  });
+
   it('follows the decor layer when it changes, each item with its own piece', async () => {
     const items: DecorItem[] = [];
     const store = createMemoryCollisions([['chair-gamer', [{ x: -8, y: -8, w: 16, h: 16 }]]]);

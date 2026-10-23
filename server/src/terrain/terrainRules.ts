@@ -36,6 +36,7 @@ import {
   type DecorItem,
   type DecorPieceInfo,
 } from '../../../src/game/officeDecor.ts';
+import { doorOnWall, roomMap, wallTilesAfter, type RoomMap } from '../../../src/game/officeDoors.ts';
 import type { MapSeat } from '../../../src/game/seating.ts';
 
 /** The edit was malformed: an index off the map or an unknown material (400). */
@@ -221,14 +222,19 @@ export function parseWallBatch(body: unknown, tileCount: number): WallEdit[] {
  * it may. Walls never strand anything a room holds: a post is refused when
  * its footprint (`wallPostTiles`: the four tiles around its vertex) touches a
  * static tile (seats, furniture, the spawn area) or a desk, never because of
- * a room or a player (players are relocated).
+ * a room or a player (players are relocated). A post that ends a door's edge
+ * (`doorPosts`, #223) may be repainted, the door stays on it, but not
+ * `removed`: the door would be left off its wall.
  */
 export function findWallConflict(
   placed: readonly number[],
   grid: Pick<OfficeLayout, 'width' | 'height'>,
   staticTiles: ReadonlySet<number>,
   protections: TerrainProtections,
+  removed: readonly number[] = [],
+  doorPosts: ReadonlySet<number> = new Set(),
 ): UnwalkableConflict | null {
+  if (removed.some((index) => doorPosts.has(index))) return 'placement';
   if (placed.length === 0) return null;
   const touched = placed.flatMap((index) => wallPostTiles(grid, index));
   if (touched.some((tile) => staticTiles.has(tile))) return 'placement';
@@ -282,25 +288,38 @@ export function parseDecorBatch(body: unknown, tileCount: number): DecorEdit[] {
  * rooms and players never veto it: a desk is only a zone, and creating one
  * over decor is allowed too. Stored items that already overlap (kept at
  * load) never veto an edit elsewhere.
+ *
+ * A door (#223) must stand on the edge between two joined posts that close
+ * a room on at least one side (`doorOnWall`, S16, the rule the editor's
+ * ghost applies too); the tiles a wall
+ * touches do not count for it, since its own posts touch them. The wall
+ * tiles are those of `after` (`wallTilesAfter`): a door removed or replaced
+ * in the batch closes its wall for what takes its place.
  */
 export function findDecorConflict(
   after: readonly DecorItem[],
   placed: ReadonlySet<number>,
   infoOf: (piece: string) => DecorPieceInfo | null,
-  snapshot: Pick<TerrainSnapshot, 'width' | 'height' | 'walkable' | 'wallTiles'>,
+  snapshot: Pick<TerrainSnapshot, 'width' | 'height' | 'walkable' | 'wallTiles' | 'walls'> & Partial<Pick<TerrainSnapshot, 'openings'>>,
   staticTiles: ReadonlySet<number>,
 ): UnwalkableConflict | null {
   if (placed.size === 0) return null;
+  const wallTiles = wallTilesAfter(snapshot, after);
+  // The regions of the walls are computed once (and only if a door is placed) for the whole batch.
+  let rooms: RoomMap | undefined;
   const taken = new Set<number>();
   for (const item of after) {
     if (!placed.has(item.index)) for (const tile of decorTiles(item, infoOf(item.piece), snapshot.width)) taken.add(tile);
   }
   for (const item of after) {
     if (!placed.has(item.index)) continue;
-    const rect = decorFootprint(item, infoOf(item.piece), snapshot.width);
+    const info = infoOf(item.piece);
+    const door = info?.kind === 'door';
+    if (door && !doorOnWall(snapshot, item, (rooms ??= roomMap(snapshot)))) return 'placement';
+    const rect = decorFootprint(item, info, snapshot.width);
     if (!insideMap(rect, snapshot.width, snapshot.height)) return 'placement';
     for (const tile of rectTiles(rect, snapshot.width)) {
-      if (!snapshot.walkable[tile] || snapshot.wallTiles[tile] === true || staticTiles.has(tile) || taken.has(tile)) return 'placement';
+      if (!snapshot.walkable[tile] || (!door && wallTiles[tile] === true) || staticTiles.has(tile) || taken.has(tile)) return 'placement';
       taken.add(tile);
     }
   }

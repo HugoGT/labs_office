@@ -9,6 +9,8 @@ import {
   BRIDGE_ORIENTATIONS,
   CHAIR,
   DESK,
+  DOOR,
+  DOOR_HINGES,
   HEDGE,
   PACK_FACINGS,
   TABLE,
@@ -24,6 +26,7 @@ import {
   TERRAIN_VOID_EDGE_COMBOS,
   WALL,
   bridgeFrameIndex,
+  doorFrameIndex,
   facingColumn,
   hedgeFrameIndex,
   sheetSize,
@@ -45,6 +48,7 @@ import {
 import { CHAIR_MATERIALS, chairSprite, type ChairMaterial } from './domain/chairs.ts';
 import { BASE_CHARACTERS, type CharacterSpec } from '../../src/art/characters.ts';
 import { PixelBuffer } from '../../src/art/pixelBuffer.ts';
+import { DOOR_MATERIALS, doorSprite, type DoorMaterial } from './domain/doors.ts';
 import { bridgeSprite, hedgeSprite, PLANT_KINDS, plantSprite, TREE_KINDS, treeSprite, type PlantKind, type TreeKind } from './domain/props.ts';
 import { renderCharacterSheets } from '../../src/art/characterSheets.ts';
 import { ROOM_TABLES, roomTableSprite, TABLE_MATERIALS, tableSprite, type RoomTable, type TableMaterial } from './domain/tables.ts';
@@ -221,6 +225,20 @@ export function hedgeSheet(): PixelBuffer {
   return sheet;
 }
 
+/** One frame per rotation (columns) and per hinge, closed then open (rows): `doorFrameIndex`. */
+export function doorSheet(material: DoorMaterial): PixelBuffer {
+  const sheet = blankSheet(DOOR);
+  for (const rotation of [0, 90, 180, 270] as const) {
+    for (const hinge of DOOR_HINGES) {
+      for (const open of [false, true]) {
+        const index = doorFrameIndex(rotation, hinge, open);
+        place(sheet, doorSprite(material, rotation, hinge, open), (index % DOOR.columns) * DOOR.frame.width, Math.floor(index / DOOR.columns) * DOOR.frame.height);
+      }
+    }
+  }
+  return sheet;
+}
+
 /** Every production sheet of the pack, in manifest order. */
 export interface PackSheets {
   readonly characters: readonly { readonly spec: CharacterSpec; readonly walk: PixelBuffer; readonly seated: PixelBuffer }[];
@@ -234,6 +252,7 @@ export interface PackSheets {
   readonly bridge: PixelBuffer;
   readonly hedge: PixelBuffer;
   readonly tables: readonly { readonly kind: RoomTable; readonly image: PixelBuffer }[];
+  readonly doors: readonly { readonly material: DoorMaterial; readonly image: PixelBuffer }[];
 }
 
 export function buildPackSheets(): PackSheets {
@@ -252,5 +271,6 @@ export function buildPackSheets(): PackSheets {
     bridge: bridgeSheet(),
     hedge: hedgeSheet(),
     tables: ROOM_TABLES.map((kind) => ({ kind, image: tableSheet(kind) })),
+    doors: DOOR_MATERIALS.map((material) => ({ material, image: doorSheet(material) })),
   };
 }

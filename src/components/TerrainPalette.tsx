@@ -117,7 +117,8 @@ export const WALL_PIECE_LABELS: Readonly<Record<WallPieceId, string>> = {
   'wall-glass': 'Vidrio',
 };
 
-export const WALL_ERASER_LABEL = 'Quitar pared';
+/** The wall eraser says only this, in its text, its tooltip and its accessible name (#223). */
+export const WALL_ERASER_LABEL = 'Borrar';
 
 /** Flat swatches while the pack catalog is unavailable: a hint of each material, not its art. */
 const WALL_FLAT_COLORS: Readonly<Record<WallPieceId, number>> = {
@@ -133,8 +134,7 @@ const WALL_THUMBNAIL_SCALE = 3;
 export interface WallPaletteProps {
   /** The editor's brush: an entry here is pressed only while its wall (or the eraser) is picked. */
   value: TerrainBrush | null;
-  /** The wall piece, or `null` for the eraser. */
-  onPick: (piece: WallPieceId | null) => void;
+  onPick: (piece: WallPieceId) => void;
   /** Wall pieces of the pack catalog, or `null` while it is unavailable: flat swatches then. */
   walls: readonly MaterialOption[] | null;
   disabled?: boolean;
@@ -142,7 +142,7 @@ export interface WallPaletteProps {
 }
 
 export function WallPalette({ value, onPick, walls, disabled = false, preview }: WallPaletteProps) {
-  const pressed = (piece: WallPieceId | null): boolean => value?.kind === 'wall' && value.piece === piece;
+  const pressed = (piece: WallPieceId): boolean => value?.kind === 'wall' && value.piece === piece;
   return (
     <div className={styles.palette} role="group" aria-label="Paredes">
       {WALL_PIECES.map((piece) => {
@@ -159,12 +159,32 @@ export function WallPalette({ value, onPick, walls, disabled = false, preview }:
           </button>
         );
       })}
+    </div>
+  );
+}
+
+export interface WallEraserProps {
+  /** The editor's brush: the entry is pressed only while the wall eraser is picked. */
+  value: TerrainBrush | null;
+  /** Reports the click as "no wall" (`null`), what the wall brush takes for the eraser. */
+  onPick: (piece: null) => void;
+  disabled?: boolean;
+}
+
+/**
+ * The wall eraser, one entry of its own (#223): it sits under «Múltiple», not
+ * among the walls, with the crossed-out tile for a picture and «Borrar» for
+ * all its words.
+ */
+export function WallEraser({ value, onPick, disabled = false }: WallEraserProps) {
+  return (
+    <div className={styles.single}>
       <button
         type="button"
         className={styles.entry}
-        aria-pressed={pressed(null)}
+        aria-pressed={value?.kind === 'wall' && value.piece === null}
         disabled={disabled}
-        title="Goma: quita la pared de cada esquina"
+        title={WALL_ERASER_LABEL}
         onClick={() => onPick(null)}
       >
         <span className={`${styles.thumbnail} ${styles.eraser}`} aria-hidden="true" />

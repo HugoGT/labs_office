@@ -19,6 +19,7 @@ import {
   CHARACTER_SEATED,
   CHARACTER_WALK,
   DESK,
+  DOOR,
   FLOOR,
   HEDGE,
   PACK_FACINGS,
@@ -40,6 +41,7 @@ import {
   type ArtPieceFile,
 } from '../../src/game/artContract.ts';
 import type { ChairMaterial } from './domain/chairs.ts';
+import type { DoorMaterial } from './domain/doors.ts';
 import type { PixelBuffer } from '../../src/art/pixelBuffer.ts';
 import type { PlantKind, TreeKind } from './domain/props.ts';
 import { DEFAULT_TABLE_COLOR, ROOM_TABLE_FOOTPRINTS, type RoomTable, type TableMaterial } from './domain/tables.ts';
@@ -93,6 +95,7 @@ const TABLES: Readonly<Record<RoomTable, { readonly name: string; readonly mater
   cafeteria: { name: 'Mesa de cafetería', material: 'beech' },
   oval: { name: 'Mesa ovalada', material: 'oak' },
 };
+const DOOR_NAMES: Readonly<Record<DoorMaterial, string>> = { wood: 'Puerta de madera' };
 /** The whole 3x3 deck is walkable in both orientations; the rails are thin enough to step along. */
 const FULL_DECK = { x: 0, y: 0, w: BRIDGE.footprint.w, h: BRIDGE.footprint.h } as const;
 
@@ -272,6 +275,19 @@ export function renderPackFiles(): Map<string, Uint8Array> {
         collision: TABLE.collision,
         facings: TABLE_FACINGS,
         files: [png(`table/${kind}.png`, 'sheet', 'table', image)],
+      }),
+    ),
+    // Doors (#223) stand on a wall's edge: one tile of wall wide, anchored on the middle of the edge.
+    ...sheets.doors.map(
+      ({ material, image }): ArtPiece => ({
+        id: `door-${material}`,
+        kind: 'door',
+        name: DOOR_NAMES[material],
+        ...common,
+        material,
+        anchor: DOOR.anchor,
+        footprint: { w: 1, h: 1 },
+        files: [png(`door/${material}.png`, 'sheet', 'door', image)],
       }),
     ),
   ];

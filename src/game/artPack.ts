@@ -114,7 +114,7 @@ export interface ArtLoadRequest {
  * and every piece of the Tiled layout (art step 8). The default character
  * also boots with the office; other characters load once somebody wears them.
  */
-export const BOOT_PIECE_KINDS: readonly ArtPieceKind[] = ['floor', 'desk', 'chair', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table'];
+export const BOOT_PIECE_KINDS: readonly ArtPieceKind[] = ['floor', 'desk', 'chair', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door'];
 
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/;
 
@@ -209,6 +209,9 @@ function hasDrawingFields(piece: Record<string, unknown>, kind: ArtPieceKind): b
       return isPlacedProp(piece);
     case 'hedge':
       return isPlacedProp(piece) && Number.isFinite(piece.height);
+    case 'door':
+      // A door (#223) stands on a wall's edge: its anchor on the edge's middle, one tile of wall wide.
+      return isPoint(piece.anchor) && isFootprint(piece.footprint);
     case 'bridge': {
       const deck = piece.deck;
       return isPlacedProp(piece) && isRecord(deck) && BRIDGE_ORIENTATIONS.every((orientation) => isRecord(deck[orientation]) && isFootprint(deck[orientation]));

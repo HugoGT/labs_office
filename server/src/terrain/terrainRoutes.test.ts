@@ -227,6 +227,24 @@ describe('handleSetTerrainWalls', () => {
     expect([...(await store.loadWalls())]).toEqual([]);
   });
 
+  it('refuses with 409 to erase a post a door stands on (#223), and erases it once the door is gone', async () => {
+    const { deps, terrain } = await harness();
+    // A closed room of tiles 67..69 x 22..24 (posts all round the vertices 67..70 x 22..25): a door needs one.
+    const ring = [0, 1, 2, 3].flatMap((i) => [FREE + i, FREE + 3 * BASE_LAYOUT.width + i, FREE + i * BASE_LAYOUT.width, FREE + i * BASE_LAYOUT.width + 3]);
+    const posts = [...new Set(ring)].map((index) => ({ index, piece: 'wall-brick' as const }));
+    await terrain.setWalls(posts, null, async () => ({ placements: [], players: [] }));
+    await terrain.setDecor([{ index: FREE, item: { piece: 'door-wood', rotation: 0 } }], null);
+
+    expect(await handleSetTerrainWalls(BEARER_ADMIN, { edits: [{ index: FREE + 1, piece: null }] }, deps)).toEqual({
+      status: 409,
+      body: { error: 'terrain-under-placement' },
+    });
+    expect(terrain.walls()[FREE + 1]).toBe('wall-brick');
+
+    await terrain.setDecor([{ index: FREE, item: null }], null);
+    expect((await handleSetTerrainWalls(BEARER_ADMIN, { edits: [{ index: FREE + 1, piece: null }] }, deps)).status).toBe(200);
+  });
+
   it('refuses a wall on a desk with 409, but places one in a room or under a player', async () => {
     const onDesk = await harness({ placements: [DESK], desks: [DESK], players: [] });
     expect(await handleSetTerrainWalls(BEARER_ADMIN, { edits: [{ index: FREE, piece: 'wall-stone' }] }, onDesk.deps)).toEqual({
