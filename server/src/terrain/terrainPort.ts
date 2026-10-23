@@ -25,6 +25,12 @@ export interface TerrainStore {
   saveBlock(index: number, material: LayoutMaterial, actorId: string | null): Promise<void>;
   /** All rows succeed or none do; the runtime publishes only after this resolves. */
   saveBlocks(edits: readonly { index: number; material: LayoutMaterial }[], actorId: string | null): Promise<void>;
+  /**
+   * Saves blocks like `saveBlocks` and removes the walls on `walls` (post
+   * indexes) in the same step: all rows succeed or none do. A void edit uses
+   * it to drop the posts it leaves with no ground around them (#217).
+   */
+  saveBlocksClearingWalls(edits: readonly { index: number; material: LayoutMaterial }[], walls: readonly number[], actorId: string | null): Promise<void>;
   /** Placed walls by tile. Tiles the current map no longer has are the runtime's to ignore. */
   loadWalls(): Promise<ReadonlyMap<number, WallPieceId>>;
   /** Places (`piece`) or removes (`null`) walls; all rows succeed or none do. */

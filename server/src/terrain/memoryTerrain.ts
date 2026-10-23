@@ -38,6 +38,11 @@ export function createMemoryTerrain(
     async saveBlocks(edits, actorId) {
       for (const { index, material } of edits) blocks.set(index, { material, actorId });
     },
+    async saveBlocksClearingWalls(edits, removed, actorId) {
+      // Synchronous between the read and the writes, like one Postgres statement.
+      for (const { index, material } of edits) blocks.set(index, { material, actorId });
+      for (const index of removed) walls.delete(index);
+    },
     actorOf(index) {
       return blocks.get(index)?.actorId;
     },

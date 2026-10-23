@@ -25,6 +25,7 @@
 import {
   blockCount,
   blockIndexAt,
+  blockTileRect,
   encodeTerrainBlocks,
   newlyUnwalkableTiles,
   terrainSnapshot,
@@ -84,7 +85,8 @@ export interface TerrainRuntime {
   /**
    * Applies one edit, or throws `TerrainProtectedError` when water or void would land
    * under something `protections` (read only if the edit floods a tile) or
-   * the static layout protects.
+   * the static layout protects. The wall posts it leaves with void on every
+   * side are removed in the same save (#217).
    */
   setBlock(edit: TerrainEdit & { actorId: string | null }, protections: () => Promise<TerrainProtections>): Promise<readonly LayoutMaterial[]>;
   setBlocks(edits: readonly TerrainEdit[], actorId: string | null, protections: () => Promise<TerrainProtections>, expected?: string): Promise<readonly LayoutMaterial[]>;
@@ -216,6 +218,28 @@ export function createTerrainRuntime({
     return new Set([...staticTiles, ...decor.flatMap((item) => decorTiles(item, decorInfo(item.piece), layout.width))]);
   }
 
+  /**
+   * The posts around the `voided` blocks that `next` leaves with void on
+   * every tile their footprint touches (#217): nothing to stand on. A post on
+   * the border of what remains keeps its ground on one side and stays.
+   */
+  function floatingPosts(voided: readonly number[], next: TerrainSnapshot): number[] {
+    const { width, height } = layout;
+    const posts = new Set<number>();
+    for (const block of voided) {
+      const { tx, ty, w, h } = blockTileRect(width, block);
+      // Every vertex on or inside the block's outline; the grid has none past the map's last column or row.
+      for (let y = ty; y <= Math.min(ty + h, height - 1); y += 1) {
+        for (let x = tx; x <= Math.min(tx + w, width - 1); x += 1) {
+          const post = y * width + x;
+          if (walls[post] == null || posts.has(post)) continue;
+          if (wallPostTiles(layout, post).every((tile) => next.materials[tile] === 'void')) posts.add(post);
+        }
+      }
+    }
+    return [...posts];
+  }
+
   /** Runs `edit` after every edit queued before it; the chain survives a refused or failed one. */
   function enqueue<T>(edit: () => Promise<T>): Promise<T> {
     const run = queue.then(edit);
@@ -236,14 +260,25 @@ export function createTerrainRuntime({
     if (changed.length === 0) return blocks;
     let next = [...blocks];
     for (const { index, material } of changed) next = withBlock(next, index, material);
-    const nextSnapshot = terrainSnapshot(layout, next, walls);
+    let nextSnapshot = terrainSnapshot(layout, next, walls);
     const watered = newlyUnwalkableTiles(snapshot, nextSnapshot);
     if (watered.length > 0) {
       const conflict = findUnwalkableConflict(watered, layout.width, protectedTiles(), await protections());
       if (conflict !== null) throw new TerrainProtectedError(conflict);
     }
-    await store.saveBlocks(changed, actorId);
+    // Erasing ground erases the walls left floating over it, in the same save.
+    // Posts already floating elsewhere are left for the wall eraser.
+    const floating = floatingPosts(changed.flatMap(({ index, material }) => (material === 'void' ? [index] : [])), nextSnapshot);
+    let nextWalls = walls;
+    if (floating.length === 0) {
+      await store.saveBlocks(changed, actorId);
+    } else {
+      nextWalls = withWalls(walls, floating.map((index) => ({ index, piece: null })));
+      nextSnapshot = terrainSnapshot(layout, next, nextWalls);
+      await store.saveBlocksClearingWalls(changed, floating, actorId);
+    }
     blocks = next;
+    walls = nextWalls;
     snapshot = nextSnapshot;
     for (const listener of listeners) listener(blocks);
     return blocks;

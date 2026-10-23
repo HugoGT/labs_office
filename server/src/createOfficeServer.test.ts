@@ -53,7 +53,7 @@ import { OFFICE_ROOM_NAME, RECONNECTION_WINDOW_SECONDS } from './OfficeRoom.ts';
 import type { EgressPort } from './recording/egressPort.ts';
 import type { RecordingStoragePort } from './recording/recordingStorage.ts';
 import type { OfficeState } from './schema.ts';
-import { decodeTerrainWalls } from '../../src/game/officeLayout.ts';
+import { blockTileRect, decodeTerrainWalls } from '../../src/game/officeLayout.ts';
 import { decodeOfficeDecor } from '../../src/game/officeDecor.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 import { AuthConfigError } from './authConfigError.ts';
@@ -2976,6 +2976,26 @@ describe('terrain routes (#123 phase 2)', () => {
     await waitFor(() => wallAt(20 * width + 72) === 'wall-brick');
     expect(wallAt(5)).toBeNull();
     expect((await setWalls(url, [{ index: 0, piece: 'wall-lava' }])).status).toBe(400);
+    await server.shutdown();
+  });
+
+  it('stops sending the walls a void block leaves floating once the edit is saved (#217)', async () => {
+    const width = BASE_LAYOUT.width;
+    const lawn = blockTileRect(width, LAWN);
+    const inside = (lawn.ty + 4) * width + lawn.tx + 4;
+    const store = createMemoryTerrain([], [[inside, 'wall-brick'], [5, 'wall-stone']]);
+    const { server, url, wsUrl } = await terrainServer({ terrain: store });
+    const room = await new Client(wsUrl).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token: 'valido-uid-admin' });
+    openRooms.push(room);
+    const wallAt = (index: number) => decodeTerrainWalls(room.state.terrainWalls, width * BASE_LAYOUT.height)?.[index];
+    await waitFor(() => wallAt(inside) === 'wall-brick');
+
+    const res = await setBlock(url, LAWN, 'void');
+    expect(res.status).toBe(200);
+    await waitFor(() => wallAt(inside) === null);
+    expect(room.state.terrainBlocks.split(',')[LAWN]).toBe('void');
+    expect(wallAt(5)).toBe('wall-stone');
+    expect([...(await store.loadWalls())]).toEqual([[5, 'wall-stone']]);
     await server.shutdown();
   });
 

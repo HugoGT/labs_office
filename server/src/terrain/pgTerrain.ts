@@ -42,6 +42,20 @@ export function createPgTerrain(pool: DirectoryPool): TerrainStore {
         [JSON.stringify(edits), actorId],
       );
     },
+    async saveBlocksClearingWalls(edits, walls, actorId) {
+      // One statement, so the blocks and the removed walls commit together.
+      await pool.query(
+        `WITH removed AS (
+           DELETE FROM terrain_walls WHERE tile_index IN (SELECT value::integer FROM jsonb_array_elements_text($2::jsonb))
+         )
+         INSERT INTO terrain_blocks (block_index, material, updated_by)
+         SELECT entry.index, entry.material, $3::uuid
+         FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, material text)
+         ON CONFLICT (block_index) DO UPDATE
+           SET material = EXCLUDED.material, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+        [JSON.stringify(edits), JSON.stringify(walls), actorId],
+      );
+    },
 
     async loadWalls() {
       const result = await pool.query('SELECT tile_index, piece_id FROM terrain_walls');
