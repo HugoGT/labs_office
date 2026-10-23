@@ -234,7 +234,7 @@ describe('art pack manifest', () => {
     }
   });
 
-  it('marks only the painted desk and the plain floor as colorable', () => {
+  it('marks only the painted desk, the plain floor and the carpet as colorable', () => {
     const colorable = manifest.pieces
       .filter((piece): piece is ArtDeskPiece | ArtFloorPiece => piece.kind === 'desk' || piece.kind === 'floor')
       .filter((piece) => piece.colorable)
@@ -242,6 +242,7 @@ describe('art pack manifest', () => {
     expect(colorable).toEqual([
       ['desk-painted', '#4f9a8a'],
       ['floor-plain', '#b9c3cc'],
+      ['floor-carpet', '#5a6f86'],
     ]);
   });
 });

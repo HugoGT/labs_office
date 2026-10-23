@@ -48,10 +48,12 @@ import {
   BASE_LAYOUT,
   BASE_TERRAIN,
   encodeTerrainBlocks,
+  encodeTerrainColors,
   encodeTerrainWalls,
   isPositionWalkable,
   isFootprintWalkable,
   type LayoutMaterial,
+  type TerrainColors,
   type TerrainSnapshot,
 } from '../../src/game/officeLayout.ts';
 import {
@@ -241,6 +243,12 @@ export interface OfficeRoomOptions {
    */
   subscribeTerrainChanges?: (listener: (blocks: readonly LayoutMaterial[]) => void) => () => void;
   /**
+   * The live block colors (#222), read at creation and on every terrain
+   * change like the walls, replicated as `state.terrainColors`. Absent,
+   * there are none.
+   */
+  terrainColors?: () => TerrainColors;
+  /**
    * The office decor layer (#208), read when someone asks for one of its
    * chairs and on every terrain change, replicated as `state.officeDecor`.
    * Absent, there is none.
@@ -401,6 +409,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private terrain: () => TerrainSnapshot = () => BASE_TERRAIN;
   private mapSeats = BASE_MAP_SEATS;
   private decor: () => readonly DecorItem[] = () => [];
+  private terrainColors: () => TerrainColors = () => new Map();
   private desks: () => readonly DecorTileRect[] = () => [];
   private collisions: () => readonly CollisionRect[] = () => BASE_COLLISION_RECTS;
   // Bridges a definitive leave and a refresh while its write is in flight.
@@ -412,12 +421,15 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     this.state = new OfficeState();
     if (options?.terrain) this.terrain = options.terrain;
     if (options?.decor) this.decor = options.decor;
+    if (options?.terrainColors) this.terrainColors = options.terrainColors;
     if (options?.desks) this.desks = options.desks;
     this.state.terrainBlocks = encodeTerrainBlocks(this.terrain().blocks);
+    this.state.terrainColors = encodeTerrainColors(this.terrainColors());
     this.state.terrainWalls = encodeTerrainWalls(this.terrain().walls);
     this.state.officeDecor = encodeOfficeDecor(this.decor());
     this.unsubscribeTerrainChanges = options?.subscribeTerrainChanges?.((blocks) => {
       this.state.terrainBlocks = encodeTerrainBlocks(blocks);
+      this.state.terrainColors = encodeTerrainColors(this.terrainColors());
       this.state.terrainWalls = encodeTerrainWalls(this.terrain().walls);
       this.state.officeDecor = encodeOfficeDecor(this.decor());
       this.recheckChairSeats();

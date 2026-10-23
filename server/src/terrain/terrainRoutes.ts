@@ -30,6 +30,12 @@ export interface TerrainDeps extends AdminDeps {
 /** Placements survive terrain and wall edits; players return to safe spawn instead. */
 const UNDER_PLACEMENT: AdminResult = { status: 409, body: { error: 'terrain-under-placement' } };
 
+/**
+ * `POST /admin/terrain/blocks` `{ edits: [{ index, material, color? }], expected }`:
+ * sets several blocks, all or none, if the terrain still encodes as
+ * `expected`. `color` (#222) only on a colorable material; a block painted
+ * without one loses the color it had.
+ */
 export async function handleSetTerrainBlocks(authorization: unknown, body: unknown, deps: TerrainDeps): Promise<AdminResult> {
   const authorized = await authorize(authorization, deps);
   if (!authorized.ok) return authorized.result;
@@ -45,6 +51,7 @@ export async function handleSetTerrainBlocks(authorization: unknown, body: unkno
   }
 }
 
+/** `POST /admin/terrain/blocks/:index` `{ material, color? }`: one block; same rules as a batch of one. */
 export async function handleSetTerrainBlock(
   authorization: unknown,
   index: unknown,
@@ -57,7 +64,8 @@ export async function handleSetTerrainBlock(
   try {
     const edit = parseTerrainEdit(index, body, deps.terrain.blocks().length);
     await deps.terrain.setBlock({ ...edit, actorId: authorized.user.id }, deps.protections);
-    return { status: 200, body: { index: edit.index, material: edit.material } };
+    // `color` (#222) is always present, `null` for the default art, so a client reads one shape.
+    return { status: 200, body: { index: edit.index, material: edit.material, color: edit.color ?? null } };
   } catch (error) {
     if (error instanceof InvalidTerrainEditError) return INVALID_REQUEST;
     if (error instanceof TerrainProtectedError) return UNDER_PLACEMENT;

@@ -482,6 +482,76 @@ export function decodeTerrainBlocks(raw: unknown, count: number): LayoutMaterial
   return parts as LayoutMaterial[];
 }
 
+// --- Block colors (#222) -----------------------------------------------------------------------
+
+/**
+ * The terrain materials that take a color of their own, like the painted
+ * desk: the colorable floors of the art pack (pinned by a test against the
+ * manifest). A block of one of them without a color draws its default art.
+ */
+export const COLORABLE_TERRAIN_MATERIALS = ['carpet'] as const satisfies readonly LayoutMaterial[];
+
+/** A block color: strict lower-case `#rrggbb`, the art pack's own form (like `isDecorColor`). */
+const TERRAIN_COLOR = /^#[0-9a-f]{6}$/;
+
+/**
+ * The colored blocks, by block index; a block without an entry draws its
+ * material's default art. Sparse and kept apart from the block list, so the
+ * blocks keep their wire form and every terrain stored before #222 reads
+ * the same.
+ */
+export type TerrainColors = ReadonlyMap<number, string>;
+
+export function isColorableTerrainMaterial(material: LayoutMaterial): boolean {
+  return (COLORABLE_TERRAIN_MATERIALS as readonly LayoutMaterial[]).includes(material);
+}
+
+export function isTerrainColor(value: unknown): value is string {
+  return typeof value === 'string' && TERRAIN_COLOR.test(value);
+}
+
+/**
+ * The colors after `edits`: an edit sets its block's whole look, so a color
+ * it carries on a colorable material stays, and any other edit of that block
+ * (another material, or no color) leaves it the default art. `colors` is
+ * left alone.
+ */
+export function withTerrainColors(
+  colors: TerrainColors,
+  edits: readonly { readonly index: number; readonly material: LayoutMaterial; readonly color?: string }[],
+): Map<number, string> {
+  const next = new Map(colors);
+  for (const { index, material, color } of edits) {
+    if (color !== undefined && isColorableTerrainMaterial(material)) next.set(index, color);
+    else next.delete(index);
+  }
+  return next;
+}
+
+/**
+ * The wire form of the colors, a replicated string of the room state apart
+ * from `terrainBlocks`: `<block>:<#rrggbb>` pairs sorted by block, joined by
+ * `,`, empty for none.
+ */
+export function encodeTerrainColors(colors: TerrainColors): string {
+  return [...colors].sort(([a], [b]) => a - b).map(([index, color]) => `${index}:${color}`).join(',');
+}
+
+/** The colors of a wire string, or `null` unless every entry is a valid color on a distinct block below `count`. */
+export function decodeTerrainColors(raw: unknown, count: number): Map<number, string> | null {
+  if (typeof raw !== 'string') return null;
+  const colors = new Map<number, string>();
+  if (raw === '') return colors;
+  for (const part of raw.split(',')) {
+    const match = /^(\d+):(#[0-9a-f]{6})$/.exec(part);
+    if (match === null) return null;
+    const index = Number(match[1]);
+    if (index >= count || colors.has(index)) return null;
+    colors.set(index, match[2] as string);
+  }
+  return colors;
+}
+
 /** The tiles of block `index`, top-left first. */
 export function blockTileRect(width: number, index: number): { tx: number; ty: number; w: number; h: number } {
   const columns = width / BLOCK_TILES;

@@ -29,8 +29,8 @@ export function createTerrainAdminClient(
   );
 
   return {
-    async setBlock(index: number, material: LayoutMaterial): Promise<void> {
-      await request(`/admin/terrain/blocks/${index}`, jsonBody({ material }));
+    async setBlock(index: number, material: LayoutMaterial, color?: string): Promise<void> {
+      await request(`/admin/terrain/blocks/${index}`, jsonBody(color === undefined ? { material } : { material, color }));
     },
     async setBlocks(edits, expected) {
       await request('/admin/terrain/blocks', jsonBody({ edits, expected }));

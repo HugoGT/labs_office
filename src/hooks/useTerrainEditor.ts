@@ -4,7 +4,18 @@ import { AdminError } from '../dashboard/adminPort';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import { SPAWN_BLOCK_INDEX } from '../game/mapData';
 import type { OfficeBridge } from '../game/officeBridge';
-import { BASE_LAYOUT, MAX_WALL_EDITS, encodeTerrainBlocks, type LayoutMaterial, type WallEdit, type WallPieceId } from '../game/officeLayout';
+import {
+  BASE_LAYOUT,
+  MAX_WALL_EDITS,
+  encodeTerrainBlocks,
+  encodeTerrainColors,
+  isColorableTerrainMaterial,
+  withTerrainColors,
+  type LayoutMaterial,
+  type TerrainColors,
+  type WallEdit,
+  type WallPieceId,
+} from '../game/officeLayout';
 import { sameBrush, type TerrainBrush } from '../game/terrainEditor';
 
 /**
@@ -24,6 +35,10 @@ import { sameBrush, type TerrainBrush } from '../game/terrainEditor';
  * shows come from the scene (`terrain` events), which follows the room: a
  * paint reaches this editor the same way it reaches everyone else, so it is
  * drawn as pending only until the room shows it.
+ *
+ * Carpet takes a color (#222), chosen on its palette tile the way the
+ * painted desk's is (`useDecorEditor`): the choice is kept per material and
+ * goes with every later pick, and with the picked brush when it is carpet.
  */
 
 /** The admin refused with these may not edit at all any more: no further writes. */
@@ -47,6 +62,10 @@ export interface TerrainEditor {
   walls: readonly (string | null)[];
   /** The palette entry picked, floor or wall, or `null`. */
   brush: TerrainBrush | null;
+  /** The color chosen per colorable floor on its palette tile; one without paints its default art. */
+  colors: Readonly<Partial<Record<LayoutMaterial, string>>>;
+  /** Chooses the color of a colorable floor: its next pick, and the picked brush if it is that floor. */
+  setColor(material: LayoutMaterial, color: string): void;
   /** A paint is on its way to the server. */
   pending: boolean;
   blocked: boolean;
@@ -61,7 +80,7 @@ export interface TerrainEditor {
 }
 
 type PendingPaint =
-  | { readonly kind: 'block'; readonly index: number; readonly material: LayoutMaterial; readonly sent: boolean }
+  | { readonly kind: 'block'; readonly index: number; readonly material: LayoutMaterial; readonly color?: string; readonly sent: boolean }
   | { readonly kind: 'wall'; readonly index: number; readonly piece: WallPieceId | null; readonly sent: boolean };
 type BlockPaint = Extract<PendingPaint, { kind: 'block' }>;
 type WallPaint = Extract<PendingPaint, { kind: 'wall' }>;
@@ -73,6 +92,16 @@ function applyPaints(blocks: readonly LayoutMaterial[], paints: readonly Pending
   const next = [...blocks];
   for (const paint of paints) if (isBlockPaint(paint)) next[paint.index] = paint.material;
   return next;
+}
+
+/** The block colors once every pending paint lands: a paint without a color leaves its block the default art. */
+function colorsAfter(colors: TerrainColors, paints: readonly PendingPaint[]): Map<number, string> {
+  return withTerrainColors(colors, paints.filter(isBlockPaint));
+}
+
+/** The floor brush a pick makes: a colorable one carries the color chosen for it, if any. */
+function floorBrush(material: LayoutMaterial, color: string | undefined): TerrainBrush {
+  return isColorableTerrainMaterial(material) && color !== undefined ? { kind: 'floor', material, color } : { kind: 'floor', material };
 }
 
 /** The wall post a vertex will hold once every pending paint lands. */
@@ -103,7 +132,9 @@ export function useTerrainEditor({ bridge, terrain, onExit }: UseTerrainEditorOp
   const [active, setActive] = useState(false);
   const [blocks, setBlocks] = useState<readonly LayoutMaterial[]>(BASE_LAYOUT.blocks);
   const [walls, setWalls] = useState<readonly (string | null)[]>(BASE_LAYOUT.walls);
+  const [liveColors, setLiveColors] = useState<TerrainColors>(() => new Map());
   const [brush, setBrush] = useState<TerrainBrush | null>(null);
+  const [colors, setColors] = useState<Readonly<Partial<Record<LayoutMaterial, string>>>>({});
   const [paints, setPaintsState] = useState<readonly PendingPaint[]>([]);
   const [draining, setDraining] = useState(false);
   const [blocked, setBlocked] = useState(false);
@@ -112,6 +143,7 @@ export function useTerrainEditor({ bridge, terrain, onExit }: UseTerrainEditorOp
   const paintsRef = useRef<readonly PendingPaint[]>([]);
   const blocksRef = useRef<readonly LayoutMaterial[]>(BASE_LAYOUT.blocks);
   const wallsRef = useRef<readonly (string | null)[]>(BASE_LAYOUT.walls);
+  const colorsRef = useRef<TerrainColors>(new Map());
   const drainingRef = useRef(false);
   const blockedRef = useRef(false);
   const onExitRef = useRef(onExit);
@@ -141,7 +173,8 @@ export function useTerrainEditor({ bridge, terrain, onExit }: UseTerrainEditorOp
         const batch: readonly PendingPaint[] = isBlockPaint(next) ? [next] : runOf(paintsRef.current, next);
         try {
           if (isWallPaint(next)) await terrain.setWalls((batch as readonly WallPaint[]).map(({ index, piece }) => ({ index, piece })));
-          else await terrain.setBlock(next.index, next.material);
+          else if (next.color === undefined) await terrain.setBlock(next.index, next.material);
+          else await terrain.setBlock(next.index, next.material, next.color);
           setPaints(paintsRef.current.map((candidate) => (batch.includes(candidate) ? { ...candidate, sent: true } : candidate)));
         } catch (cause) {
           refuse(cause, next.kind);
@@ -168,8 +201,10 @@ export function useTerrainEditor({ bridge, terrain, onExit }: UseTerrainEditorOp
       setError(SPAWN_BLOCK_MESSAGE);
       return;
     }
-    if (applyPaints(blocksRef.current, paintsRef.current)[index] === brush.material) return;
-    queue({ kind: 'block', index, material: brush.material, sent: false });
+    // Carpet in another color (or the default art) is a different paint, so it is sent.
+    const sameMaterial = applyPaints(blocksRef.current, paintsRef.current)[index] === brush.material;
+    if (sameMaterial && colorsAfter(colorsRef.current, paintsRef.current).get(index) === brush.color) return;
+    queue({ kind: 'block', index, material: brush.material, ...(brush.color === undefined ? {} : { color: brush.color }), sent: false });
   }
 
   function paintWallAt(index: number): void {
@@ -184,8 +219,10 @@ export function useTerrainEditor({ bridge, terrain, onExit }: UseTerrainEditorOp
       bridge.on('terrain', (payload) => {
         blocksRef.current = payload.blocks;
         wallsRef.current = payload.walls;
+        colorsRef.current = payload.colors;
         setBlocks(payload.blocks);
         setWalls(payload.walls);
+        setLiveColors(payload.colors);
         // The room shows every saved paint from here on, or something newer.
         if (paintsRef.current.some((paint) => paint.sent)) setPaints(paintsRef.current.filter((paint) => !paint.sent));
       }),
@@ -224,6 +261,12 @@ export function useTerrainEditor({ bridge, terrain, onExit }: UseTerrainEditorOp
   }, [active, brush]);
 
   const previewBlocks = useMemo(() => (paints.some(isBlockPaint) ? applyPaints(blocks, paints) : null), [blocks, paints]);
+  // Only sent when the paints change a color: absent, the map keeps drawing the live ones.
+  const previewColors = useMemo(() => {
+    if (previewBlocks === null) return null;
+    const next = colorsAfter(liveColors, paints);
+    return encodeTerrainColors(next) === encodeTerrainColors(liveColors) ? null : next;
+  }, [previewBlocks, liveColors, paints]);
   const previewWalls = useMemo<WallEdit[] | null>(() => {
     const pending = paints.filter(isWallPaint).map(({ index, piece }) => ({ index, piece }));
     return pending.length === 0 ? null : pending;
@@ -231,6 +274,7 @@ export function useTerrainEditor({ bridge, terrain, onExit }: UseTerrainEditorOp
   const previewKey = [
     previewBlocks === null ? '' : encodeTerrainBlocks(previewBlocks),
     previewWalls === null ? '' : JSON.stringify(previewWalls),
+    previewColors === null ? '' : encodeTerrainColors(previewColors),
   ].join('|');
 
   useEffect(() => {
@@ -238,6 +282,7 @@ export function useTerrainEditor({ bridge, terrain, onExit }: UseTerrainEditorOp
     bridge.emitCommand('terrainedit', {
       brush,
       ...(previewBlocks === null ? {} : { previewBlocks }),
+      ...(previewColors === null ? {} : { previewColors }),
       ...(previewWalls === null ? {} : { previewWalls }),
     });
     // `previewKey` stands for both previews: only a different drawing is worth a command.
@@ -268,6 +313,11 @@ export function useTerrainEditor({ bridge, terrain, onExit }: UseTerrainEditorOp
     blocks,
     walls,
     brush,
+    colors,
+    setColor(material, color) {
+      setColors((current) => ({ ...current, [material]: color }));
+      setBrush((current) => (current?.kind === 'floor' && current.material === material ? floorBrush(material, color) : current));
+    },
     pending: draining,
     blocked,
     error,
@@ -280,7 +330,7 @@ export function useTerrainEditor({ bridge, terrain, onExit }: UseTerrainEditorOp
       setActive(false);
     },
     pick(material) {
-      toggle({ kind: 'floor', material });
+      toggle(floorBrush(material, colors[material]));
     },
     pickWall(piece) {
       toggle({ kind: 'wall', piece });

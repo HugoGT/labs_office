@@ -10,6 +10,9 @@
  * Walls are stored per tile, and only where one stands: removing a wall
  * deletes its row. A stored wall wins over the layout's on its tile.
  *
+ * A block may carry a color of its own (#222), stored on its row and only
+ * for a colorable material (`COLORABLE_TERRAIN_MATERIALS`).
+ *
  * The office decor layer (#208, `officeDecor.ts`) is stored the same way, one
  * item per anchor tile and only where one stands. The layout has none of its
  * own (its base chairs are `BASE_MAP_SEATS`, its props the Tiled ones).
@@ -23,8 +26,17 @@ export interface TerrainStore {
   loadBlocks(): Promise<ReadonlyMap<number, LayoutMaterial>>;
   /** Sets one block's material and who set it (a directory user id, or `null`). */
   saveBlock(index: number, material: LayoutMaterial, actorId: string | null): Promise<void>;
-  /** All rows succeed or none do; the runtime publishes only after this resolves. */
-  saveBlocks(edits: readonly { index: number; material: LayoutMaterial }[], actorId: string | null): Promise<void>;
+  /**
+   * All rows succeed or none do; the runtime publishes only after this
+   * resolves. Each row takes its edit's `color` (#222), and loses any color
+   * it had when the edit carries none.
+   */
+  saveBlocks(edits: readonly { index: number; material: LayoutMaterial; color?: string }[], actorId: string | null): Promise<void>;
+  /**
+   * The color of each stored block that has one (#222), by index. A row
+   * stored before colors existed has none and draws its default art.
+   */
+  loadBlockColors(): Promise<ReadonlyMap<number, string>>;
   /** Placed walls by tile. Tiles the current map no longer has are the runtime's to ignore. */
   loadWalls(): Promise<ReadonlyMap<number, WallPieceId>>;
   /** Places (`piece`) or removes (`null`) walls; all rows succeed or none do. */

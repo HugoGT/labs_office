@@ -13,7 +13,7 @@ import { createMemoryTerrain } from '../../server/src/terrain/memoryTerrain.ts';
 import { createMemoryCollisions } from '../../server/src/collisions/memoryCollisions.ts';
 import type { CollisionTable } from './pieceCollisions';
 import { SESSION_EXPIRED } from '../../server/src/verifyIdToken.ts';
-import { type LayoutMaterial } from './officeLayout';
+import { type LayoutMaterial, type TerrainColors } from './officeLayout';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS } from '../test/legacyOffice.ts';
 const createOfficeServer = (overrides: OfficeServerOverrides = {}) => createServer({ layout: BASE_LAYOUT, seats: BASE_MAP_SEATS, ...overrides });
 import { TILE } from './mapData';
@@ -875,6 +875,22 @@ describe('connectOfficeRoom: seats (art migration, step 6)', () => {
     await server.terrain.setWalls([{ index: 8, piece: 'wall-brick' }, { index: 7, piece: null }], null, async () => ({ placements: [], players: [] }));
     await waitFor(() => seen.at(-1)?.[8] === 'wall-brick');
     expect(seen.at(-1)![7]).toBeNull();
+  });
+
+  it('reports the terrain colors (#222) on every color edit, each a whole map', async () => {
+    await server.shutdown();
+    const { BASE_LAYOUT: layout } = await import('./officeLayout.ts');
+    server = createOfficeServer({ layout, seats: [], terrain: createMemoryTerrain() });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+    const seen: TerrainColors[] = [];
+    await connect('Ana', { ...recorder().handlers, onTerrainColors: (colors) => seen.push(colors) });
+    const noProtections = async () => ({ placements: [], players: [] });
+
+    await server.terrain.setBlocks([{ index: 0, material: 'carpet', color: '#c0392b' }], null, noProtections);
+    await waitFor(() => seen.at(-1)?.get(0) === '#c0392b');
+
+    await server.terrain.setBlocks([{ index: 0, material: 'wood' }], null, noProtections);
+    await waitFor(() => seen.at(-1)?.size === 0);
   });
 
   it('reports the office decor layer on the first sync and every decor edit after it', async () => {

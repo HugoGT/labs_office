@@ -15,14 +15,16 @@ export interface TerrainAdminPort {
    * included, sees the change through the room state, so nothing comes back.
    * Refused with `terrain-under-placement` when water or void would cover a
    * placement or spawn. Affected players are relocated after persistence,
-   * including reconnects.
+   * including reconnects. `color` (#222, lower-case `#rrggbb`) only goes with
+   * a colorable material; without it the block draws its default art.
    */
-  setBlock(index: number, material: LayoutMaterial): Promise<void>;
+  setBlock(index: number, material: LayoutMaterial, color?: string): Promise<void>;
   /**
    * Sets many blocks atomically (emptying the terrain), refused with
-   * `terrain-stale` unless the live blocks still encode to `expected`.
+   * `terrain-stale` unless the live blocks still encode to `expected`. Each
+   * edit's `color` follows the same rule as `setBlock`'s.
    */
-  setBlocks(edits: readonly { index: number; material: LayoutMaterial }[], expected: string): Promise<void>;
+  setBlocks(edits: readonly { index: number; material: LayoutMaterial; color?: string }[], expected: string): Promise<void>;
   /**
    * Places (`piece`) or removes (`null`) walls on single tiles, all or none,
    * at most `MAX_WALL_EDITS` per call. Refused with `terrain-under-placement`

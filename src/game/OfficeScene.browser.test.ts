@@ -4445,7 +4445,7 @@ describe('OfficeScene: edited terrain', () => {
 
     expect(solidAt(scene, lawn.x, lawn.y)).toBe(true);
     expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).not.toEqual(grass);
-    expect(seen).toEqual([{ blocks: watered, walls: BASE_LAYOUT.walls }]);
+    expect(seen).toEqual([{ blocks: watered, walls: BASE_LAYOUT.walls, colors: new Map() }]);
 
     handlers.onTerrain!(BASE_LAYOUT.blocks);
     // Arcade drops a destroyed static body on its next step.
@@ -4508,7 +4508,49 @@ describe('OfficeScene: edited terrain', () => {
     bridge.emitCommand('terrainedit', { brush: null });
     bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'grass' } });
 
-    expect(seen).toEqual([{ blocks: watered, walls: BASE_LAYOUT.walls }]);
+    expect(seen).toEqual([{ blocks: watered, walls: BASE_LAYOUT.walls, colors: new Map() }]);
+  });
+
+  const RED = '#aa0000';
+  const GREEN = '#00bb00';
+
+  it('draws the block colors the room sends, repaints a color-only change and tells React (#222)', async () => {
+    const { scene, bridge, handlers } = await bootConnected();
+    const carpeted = withBlock(BASE_LAYOUT.blocks, LAWN, 'carpet');
+    handlers.onTerrain!(carpeted);
+    const plain = terrainTilesAt(scene, lawnCell.cx, lawnCell.cy);
+    const seen: OfficeEventMap['terrain'][] = [];
+    bridge.on('terrain', (payload) => seen.push(payload));
+
+    handlers.onTerrainColors!(new Map([[LAWN, RED]]));
+
+    expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).not.toEqual(plain);
+    expect(seen).toEqual([{ blocks: carpeted, walls: BASE_LAYOUT.walls, colors: new Map([[LAWN, RED]]) }]);
+
+    handlers.onTerrainColors!(new Map());
+    expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).toEqual(plain);
+  });
+
+  it("draws the editor's pending colors with its pending blocks, and the live colors once it has none (#222)", async () => {
+    const { scene, bridge, handlers } = await bootConnected();
+    const carpeted = withBlock(BASE_LAYOUT.blocks, LAWN, 'carpet');
+    handlers.onTerrain!(carpeted);
+    const plain = terrainTilesAt(scene, lawnCell.cx, lawnCell.cy);
+    const brush = { kind: 'floor', material: 'carpet' } as const;
+
+    bridge.emitCommand('terrainedit', { brush, previewBlocks: carpeted, previewColors: new Map([[LAWN, RED]]) });
+    const red = terrainTilesAt(scene, lawnCell.cx, lawnCell.cy);
+    expect(red).not.toEqual(plain);
+    // Only the pending color changes: still a repaint.
+    bridge.emitCommand('terrainedit', { brush, previewBlocks: carpeted, previewColors: new Map([[LAWN, GREEN]]) });
+    expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).not.toEqual(red);
+    bridge.emitCommand('terrainedit', null);
+    expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).toEqual(plain);
+
+    // Pending blocks without pending colors draw with the live ones.
+    handlers.onTerrainColors!(new Map([[LAWN, RED]]));
+    bridge.emitCommand('terrainedit', { brush, previewBlocks: carpeted });
+    expect(terrainTilesAt(scene, lawnCell.cx, lawnCell.cy)).toEqual(red);
   });
 
   it('a click on the map picks a block instead of closing menus while the editor is open', async () => {
@@ -4545,7 +4587,7 @@ describe('OfficeScene: edited terrain', () => {
     expect(solidAt(scene, lawnVertex.x + TILE / 2, lawnVertex.y + 9)).toBe(false);
     expect(solidAt(scene, lawn.x, lawn.y)).toBe(false);
     expect(wallObjects(scene).length).toBeGreaterThan(before);
-    expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled }]);
+    expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled, colors: new Map() }]);
 
     handlers.onWalls!(BASE_LAYOUT.walls);
     await vi.waitFor(() => expect(solidAt(scene, lawnVertex.x, lawnVertex.y)).toBe(false), LOOP_WAIT);
@@ -4626,7 +4668,7 @@ describe('OfficeScene: edited terrain', () => {
 
     bridge.emitCommand('terrainedit', { brush: null });
 
-    expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled }]);
+    expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled, colors: new Map() }]);
   });
 });
 

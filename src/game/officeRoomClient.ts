@@ -19,7 +19,7 @@
 
 import { Client, getStateCallbacks, type Room } from 'colyseus.js';
 import { createMoveThrottle } from './moveThrottle';
-import { BASE_LAYOUT, decodeTerrainBlocks, decodeTerrainWalls, type LayoutMaterial } from './officeLayout';
+import { BASE_LAYOUT, decodeTerrainBlocks, decodeTerrainColors, decodeTerrainWalls, type LayoutMaterial, type TerrainColors } from './officeLayout';
 import { decodeCollisionTable, type CollisionTable } from './pieceCollisions';
 import {
   ACCESS_DENIED_CODE,
@@ -72,6 +72,7 @@ interface OfficeRoomState {
   recordings: unknown;
   terrainBlocks: string;
   terrainWalls: string;
+  terrainColors: string;
   officeDecor: string;
   pieceCollisions: string;
 }
@@ -213,6 +214,11 @@ export interface OfficeRoomHandlers {
   onTerrain?(blocks: readonly LayoutMaterial[]): void;
   /** The live wall of every tile, row major: on the first sync and after every accepted wall edit. */
   onWalls?(walls: readonly (string | null)[]): void;
+  /**
+   * The colors of painted terrain blocks (#222), a whole map on each change.
+   * Not called while the office has none: start from an empty map.
+   */
+  onTerrainColors?(colors: TerrainColors): void;
   /** The office decor layer (#208), sorted by anchor: on the first sync and after every accepted decor edit. */
   onDecor?(items: readonly DecorItem[]): void;
   /** The saved collision table, replicated whole like the terrain: on the first sync and after every accepted edit. */
@@ -370,7 +376,7 @@ export async function connectOfficeRoom({
       (state: OfficeRoomState): {
         players: PlayersCallbacks;
         recordings: RecordingsCallbacks;
-        listen(property: 'terrainBlocks' | 'terrainWalls' | 'officeDecor' | 'pieceCollisions', handler: (value: string) => void): () => void;
+        listen(property: 'terrainBlocks' | 'terrainWalls' | 'terrainColors' | 'officeDecor' | 'pieceCollisions', handler: (value: string) => void): () => void;
       };
       (player: RemotePlayer): PlayerCallbacks;
     };
@@ -453,6 +459,12 @@ export async function connectOfficeRoom({
     $(target.state).listen('terrainWalls', (value) => {
       const walls = decodeTerrainWalls(value, BASE_LAYOUT.width * BASE_LAYOUT.height);
       if (walls !== null) handlers.onWalls?.(walls);
+    });
+    // Terrain colors (#222): same rule. An empty string may never arrive on
+    // the first sync, so a client starts from no colors rather than waiting.
+    $(target.state).listen('terrainColors', (value) => {
+      const colors = decodeTerrainColors(value, BASE_LAYOUT.blocks.length);
+      if (colors !== null) handlers.onTerrainColors?.(colors);
     });
     // The decor layer (#208): same rule. An older server sends none, and the scene draws none.
     $(target.state).listen('officeDecor', (value) => {

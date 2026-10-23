@@ -68,4 +68,10 @@ describe('sameBrush', () => {
     expect(sameBrush(null, undefined)).toBe(true);
     expect(sameBrush(null, { kind: 'wall', piece: null })).toBe(false);
   });
+
+  it('tells carpet brushes of different colors apart (#222)', () => {
+    expect(sameBrush({ kind: 'floor', material: 'carpet', color: '#c0392b' }, { kind: 'floor', material: 'carpet', color: '#c0392b' })).toBe(true);
+    expect(sameBrush({ kind: 'floor', material: 'carpet', color: '#c0392b' }, { kind: 'floor', material: 'carpet', color: '#3c6ac8' })).toBe(false);
+    expect(sameBrush({ kind: 'floor', material: 'carpet' }, { kind: 'floor', material: 'carpet', color: '#3c6ac8' })).toBe(false);
+  });
 });

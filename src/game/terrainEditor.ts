@@ -3,21 +3,22 @@
  * kept free of Phaser so the sidebar can import them.
  */
 
-import type { LayoutMaterial, WallEdit, WallPieceId } from './officeLayout';
+import type { LayoutMaterial, TerrainColors, WallEdit, WallPieceId } from './officeLayout';
 
 /**
  * What a map click paints: a floor on a whole 9x9 block, or a wall post on
- * one grid vertex (`null`: the wall eraser). Chairs are decor since #208
- * (`decorEditor.ts`).
+ * one grid vertex (`null`: the wall eraser). A colorable floor (carpet, #222)
+ * may carry the color it paints in; without one it paints the default art.
+ * Chairs are decor since #208 (`decorEditor.ts`).
  */
 export type TerrainBrush =
-  | { readonly kind: 'floor'; readonly material: LayoutMaterial }
+  | { readonly kind: 'floor'; readonly material: LayoutMaterial; readonly color?: string }
   | { readonly kind: 'wall'; readonly piece: WallPieceId | null };
 
 /** Whether two brushes paint the same thing (brushes are compared by value, not identity). */
 export function sameBrush(a: TerrainBrush | null | undefined, b: TerrainBrush | null | undefined): boolean {
   if (a == null || b == null) return (a ?? null) === (b ?? null);
-  if (a.kind === 'floor') return b.kind === 'floor' && a.material === b.material;
+  if (a.kind === 'floor') return b.kind === 'floor' && a.material === b.material && a.color === b.color;
   return b.kind === 'wall' && a.piece === b.piece;
 }
 
@@ -36,6 +37,8 @@ export interface TerrainEditCommand {
   brush: TerrainBrush | null;
   /** Paints on their way to the room, drawn over the live blocks. Drawing only, never walkability. */
   previewBlocks?: readonly LayoutMaterial[];
+  /** The block colors (#222) that go with `previewBlocks`, a whole map. Absent with it: the live colors. */
+  previewColors?: TerrainColors;
   /** Wall paints on their way to the room, applied in order over the live walls. Drawing only. */
   previewWalls?: readonly WallEdit[];
 }

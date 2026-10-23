@@ -130,6 +130,7 @@ describe('createTerrainRuntime', () => {
         throw new Error('connection lost');
       },
       saveBlocks: async () => { throw new Error('connection lost'); },
+      loadBlockColors: async () => new Map(),
       loadWalls: async () => new Map(),
       saveWalls: async () => { throw new Error('connection lost'); },
       loadDecor: async () => [],

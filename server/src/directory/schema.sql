@@ -433,6 +433,12 @@ CREATE TABLE IF NOT EXISTS terrain_blocks (
 );
 ALTER TABLE terrain_blocks DROP CONSTRAINT IF EXISTS terrain_blocks_material_check;
 ALTER TABLE terrain_blocks ADD CONSTRAINT terrain_blocks_material_check CHECK (material IN ('void', 'water', 'sand', 'dirt', 'cobblestone', 'grass', 'wood', 'tile', 'carpet'));
+-- The color of a painted block (#222, a colorable material such as carpet),
+-- NULL for its default art. An ALTER like `office_decor.color`, so every row
+-- stored before colors existed keeps NULL and draws exactly as before; lower
+-- case like the art pack. Which materials take one is the server's rule
+-- (`COLORABLE_TERRAIN_MATERIALS`), not a CHECK.
+ALTER TABLE terrain_blocks ADD COLUMN IF NOT EXISTS color text CHECK (color IS NULL OR color ~ '^#[0-9a-f]{6}$');
 
 -- Painted walls (terrain editor). One row per TILE holding a wall an admin
 -- painted, the wall piece of the art pack on it (`WALL_PIECES` in

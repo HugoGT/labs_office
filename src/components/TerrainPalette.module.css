@@ -5,6 +5,15 @@
   gap: 6px;
 }
 
+/* A colorable floor's tile with its color picker under it (#222), like DecorPalette's cell. */
+.cell {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+}
+
 .entry {
   display: flex;
   flex-direction: column;

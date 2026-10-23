@@ -66,6 +66,36 @@ describe('parseTerrainEdit', () => {
   });
 });
 
+describe('terrain block colors (#222)', () => {
+  it('reads a color on a colorable material, normalized to lower case, and no color as none', () => {
+    expect(parseTerrainEdit('3', { material: 'carpet', color: '#A0B1C2' }, COUNT)).toStrictEqual({ index: 3, material: 'carpet', color: '#a0b1c2' });
+    expect(parseTerrainEdit('3', { material: 'carpet', color: null }, COUNT)).toStrictEqual({ index: 3, material: 'carpet' });
+    expect(parseTerrainEdit('3', { material: 'carpet' }, COUNT)).toStrictEqual({ index: 3, material: 'carpet' });
+    expect(parseTerrainEdit('3', { material: 'grass' }, COUNT)).toStrictEqual({ index: 3, material: 'grass' });
+  });
+
+  it('refuses a malformed color', () => {
+    for (const color of ['rojo', '#abc', 'a0b1c2', '#a0b1c2 ', 3, true, {}]) {
+      expect(() => parseTerrainEdit('3', { material: 'carpet', color }, COUNT), JSON.stringify(color)).toThrow(new InvalidTerrainEditError('invalid color'));
+    }
+  });
+
+  it('refuses a color on a material that takes none', () => {
+    for (const material of ['grass', 'wood', 'tile', 'water', 'void']) {
+      expect(() => parseTerrainEdit('3', { material, color: '#a0b1c2' }, COUNT), material).toThrow(new InvalidTerrainEditError('this material takes no color'));
+    }
+  });
+
+  it('carries each edit color through a batch, and refuses the whole batch for one bad color', () => {
+    const expected = 'grass';
+    expect(parseTerrainBatch({ edits: [{ index: 1, material: 'carpet', color: '#A0B1C2' }, { index: 2, material: 'sand' }], expected }, COUNT).edits).toStrictEqual([
+      { index: 1, material: 'carpet', color: '#a0b1c2' },
+      { index: 2, material: 'sand' },
+    ]);
+    expect(() => parseTerrainBatch({ edits: [{ index: 1, material: 'carpet' }, { index: 2, material: 'sand', color: '#a0b1c2' }], expected }, COUNT)).toThrow(InvalidTerrainEditError);
+  });
+});
+
 describe('staticProtectedTiles', () => {
   it('holds every map chair, the furniture people use and the spawn area, but not the scenery', () => {
     for (const seat of BASE_MAP_SEATS) expect(STATIC.has(seat.ty * W + seat.tx)).toBe(true);

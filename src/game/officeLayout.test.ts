@@ -38,6 +38,12 @@ import {
   parseOfficeLayout,
   terrainMaterialAt,
   terrainSnapshot,
+  COLORABLE_TERRAIN_MATERIALS,
+  decodeTerrainColors,
+  encodeTerrainColors,
+  isColorableTerrainMaterial,
+  isTerrainColor,
+  withTerrainColors,
   type LayoutMaterial,
   type OfficeLayout,
 } from './officeLayout';
@@ -506,6 +512,50 @@ describe('terrain block edits', () => {
     expect(decodeTerrainBlocks(encodeTerrainBlocks(blocks).replace('carpet', 'lava'), COUNT)).toBeNull();
     expect(decodeTerrainBlocks('', COUNT)).toBeNull();
     expect(decodeTerrainBlocks(42, COUNT)).toBeNull();
+  });
+
+  it('round-trips the sparse block colors through their wire form, sorted by block, empty for none (#222)', () => {
+    const colors = new Map([[35, '#aa3322'], [2, '#0055ff']]);
+
+    expect(encodeTerrainColors(colors)).toBe('2:#0055ff,35:#aa3322');
+    expect(decodeTerrainColors(encodeTerrainColors(colors), COUNT)).toEqual(new Map([[2, '#0055ff'], [35, '#aa3322']]));
+    expect(encodeTerrainColors(new Map())).toBe('');
+    expect(decodeTerrainColors('', COUNT)).toEqual(new Map());
+  });
+
+  it('refuses a whole colors string with any malformed, off-map or repeated entry', () => {
+    for (const raw of ['2:#0055FF', '2:#05f', '2:0055ff', `${COUNT}:#0055ff`, '2:#0055ff,2:#aa3322', '2:#0055ff,', 'x:#0055ff', '-1:#0055ff']) {
+      expect(decodeTerrainColors(raw, COUNT), raw).toBeNull();
+    }
+    expect(decodeTerrainColors(undefined, COUNT)).toBeNull();
+    expect(decodeTerrainColors(42, COUNT)).toBeNull();
+  });
+
+  it('names exactly the terrain materials whose art pack floor is colorable', () => {
+    const pack = JSON.parse(exportedManifest) as { pieces: { kind: string; material?: string; colorable?: boolean }[] };
+    const colorable = pack.pieces
+      .filter((piece) => piece.kind === 'floor' && piece.colorable === true && isLayoutMaterial(piece.material))
+      .map((piece) => piece.material);
+    expect([...COLORABLE_TERRAIN_MATERIALS].sort()).toEqual(colorable.sort());
+    for (const material of LAYOUT_MATERIALS) expect(isColorableTerrainMaterial(material)).toBe(colorable.includes(material));
+  });
+
+  it('takes only a strict lower-case #rrggbb as a terrain color', () => {
+    expect(isTerrainColor('#a0b1c2')).toBe(true);
+    for (const value of ['#A0B1C2', '#abc', 'a0b1c2', '#a0b1c2 ', null, undefined, 7]) expect(isTerrainColor(value)).toBe(false);
+  });
+
+  it('sets the color an edit carries on a colorable block and clears it on any other edit of that block', () => {
+    const colors = new Map([[1, '#111111'], [2, '#222222'], [3, '#333333']]);
+
+    const next = withTerrainColors(colors, [
+      { index: 1, material: 'grass' },
+      { index: 2, material: 'carpet' },
+      { index: 4, material: 'carpet', color: '#444444' },
+    ]);
+
+    expect(next).toEqual(new Map([[3, '#333333'], [4, '#444444']]));
+    expect(colors).toEqual(new Map([[1, '#111111'], [2, '#222222'], [3, '#333333']]));
   });
 
   it('tells a material name from anything else', () => {
