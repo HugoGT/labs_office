@@ -3,14 +3,21 @@ import { physicalBodyRect } from './avatarGeometry';
 import type { DecorItem } from './officeDecor';
 import {
   DOOR_OPEN_REACH_PX,
+  crossesLockedDoor,
+  decodeDoorLocks,
   doorEdge,
   doorEndPosts,
   doorInsideTile,
   doorLeaves,
+  doorLockGroup,
   doorOnWall,
   doorOpenings,
+  encodeDoorLocks,
   isDoorPiece,
+  liveDoorLocks,
+  lockedDoorBarriers,
   openDoorLeaves,
+  toggleDoorLock,
 } from './officeDoors';
 
 const WIDTH = 12;
@@ -129,5 +136,78 @@ describe('officeDoors: open and closed (#223)', () => {
     const leaves = doorLeaves([door(1, 6), door(2, 6), door(3, 6), door(4, 6)], WIDTH);
     expect(openDoorLeaves(leaves, [standingAt(1 * 32 + 16, 6 * 32 + 16)])).toEqual(new Set([at(1, 6), at(2, 6)]));
     expect(openDoorLeaves(leaves, [standingAt(4 * 32 + 16, 6 * 32 + 16)])).toEqual(new Set([at(3, 6), at(4, 6)]));
+  });
+});
+
+describe('officeDoors: locks (#223, S13)', () => {
+  /** A network position whose body center is at (cx, cy). */
+  const centeredAt = (cx: number, cy: number) => {
+    const body = physicalBodyRect({ x: 0, y: 0 });
+    return { x: cx - (body.x + body.width / 2), y: cy - (body.y + body.height / 2) };
+  };
+  // A double door on the top edges of tiles (4, 6) and (5, 6), opening down: inside is row 6.
+  const DOUBLE: DecorItem[] = [door(4, 6, 0), door(5, 6, 0)];
+
+  it('finds the door group whose inside tile the avatar stands in, and nothing outside it or away from it', () => {
+    expect(doorLockGroup(DOUBLE, WIDTH, centeredAt(5 * 32 + 16, 6 * 32 + 16))).toEqual([at(4, 6), at(5, 6)]);
+    expect(doorLockGroup(DOUBLE, WIDTH, centeredAt(4 * 32 + 3, 6 * 32 + 30))).toEqual([at(4, 6), at(5, 6)]);
+    // Outside (row 5), beside it (6, 6) or two tiles in: no door within reach.
+    expect(doorLockGroup(DOUBLE, WIDTH, centeredAt(4 * 32 + 16, 5 * 32 + 16))).toBeNull();
+    expect(doorLockGroup(DOUBLE, WIDTH, centeredAt(6 * 32 + 16, 6 * 32 + 16))).toBeNull();
+    expect(doorLockGroup(DOUBLE, WIDTH, centeredAt(4 * 32 + 16, 7 * 32 + 16))).toBeNull();
+    // A door turned 270 opens left: its inside is the tile west of its edge.
+    expect(doorLockGroup([door(7, 2, 270)], WIDTH, centeredAt(6 * 32 + 16, 2 * 32 + 16))).toEqual([at(7, 2)]);
+    expect(doorLockGroup([door(7, 2, 270)], WIDTH, centeredAt(7 * 32 + 16, 2 * 32 + 16))).toBeNull();
+  });
+
+  it('toggles the whole group, and keeps only the locks of doors that still stand', () => {
+    const inside = centeredAt(4 * 32 + 16, 6 * 32 + 16);
+    const locked = toggleDoorLock(DOUBLE, WIDTH, new Set(), inside);
+    expect(locked).toEqual(new Set([at(4, 6), at(5, 6)]));
+    expect(toggleDoorLock(DOUBLE, WIDTH, locked!, inside)).toEqual(new Set());
+    expect(toggleDoorLock(DOUBLE, WIDTH, new Set(), centeredAt(4 * 32 + 16, 5 * 32 + 16))).toBeNull();
+    expect(liveDoorLocks([door(4, 6, 0)], locked!)).toEqual(new Set([at(4, 6)]));
+    expect(liveDoorLocks([{ index: at(5, 6), piece: 'chair-wood', rotation: 0 }], locked!)).toEqual(new Set());
+  });
+
+  it('writes the locks as sorted anchors joined by commas, and reads them back', () => {
+    expect(encodeDoorLocks(new Set([at(5, 6), at(4, 6)]))).toBe(`${at(4, 6)},${at(5, 6)}`);
+    expect(encodeDoorLocks(new Set())).toBe('');
+    expect(decodeDoorLocks(`${at(4, 6)},${at(5, 6)}`)).toEqual(new Set([at(4, 6), at(5, 6)]));
+    expect(decodeDoorLocks('')).toEqual(new Set());
+    expect(decodeDoorLocks('4,x')).toBeNull();
+    expect(decodeDoorLocks(7)).toBeNull();
+  });
+
+  it('refuses a body center crossing a locked edge from outside to inside, never leaving or passing beside it', () => {
+    const leaves = doorLeaves(DOUBLE, WIDTH);
+    const locked = new Set([at(4, 6), at(5, 6)]);
+    const edgeY = 6 * 32;
+    expect(crossesLockedDoor(leaves, locked, { x: 144, y: edgeY - 10 }, { x: 144, y: edgeY + 4 })).toBe(true);
+    expect(crossesLockedDoor(leaves, locked, { x: 176, y: edgeY }, { x: 176, y: edgeY + 1 })).toBe(true);
+    expect(crossesLockedDoor(leaves, locked, { x: 144, y: edgeY + 4 }, { x: 144, y: edgeY - 10 })).toBe(false);
+    expect(crossesLockedDoor(leaves, locked, { x: 144, y: edgeY - 10 }, { x: 144, y: edgeY - 1 })).toBe(false);
+    expect(crossesLockedDoor(leaves, locked, { x: 220, y: edgeY - 10 }, { x: 220, y: edgeY + 10 })).toBe(false);
+    expect(crossesLockedDoor(leaves, new Set(), { x: 144, y: edgeY - 10 }, { x: 144, y: edgeY + 4 })).toBe(false);
+    const west = doorLeaves([door(7, 2, 270)], WIDTH);
+    expect(crossesLockedDoor(west, new Set([at(7, 2)]), { x: 7 * 32 + 5, y: 80 }, { x: 7 * 32 - 5, y: 80 })).toBe(true);
+    expect(crossesLockedDoor(west, new Set([at(7, 2)]), { x: 7 * 32 - 5, y: 80 }, { x: 7 * 32 + 5, y: 80 })).toBe(false);
+  });
+
+  it('names the locked leaves that bar an avatar standing outside them: their opening and inside tile', () => {
+    const leaves = doorLeaves(DOUBLE, WIDTH);
+    const locked = new Set([at(4, 6)]);
+    expect(lockedDoorBarriers(leaves, locked, centeredAt(144, 6 * 32 - 20))).toEqual([
+      { index: at(4, 6), rect: { x: 128, y: 6 * 32 - 8, w: 32, h: 16 }, inside: { tx: 4, ty: 6 } },
+    ]);
+    expect(lockedDoorBarriers(leaves, locked, centeredAt(144, 6 * 32 + 20))).toEqual([]);
+  });
+
+  it('opens a locked leaf only for avatars on its inside', () => {
+    const leaves = doorLeaves([door(4, 6, 0)], WIDTH);
+    const locked = new Set([at(4, 6)]);
+    expect(openDoorLeaves(leaves, [centeredAt(144, 6 * 32 - 10)], locked)).toEqual(new Set());
+    expect(openDoorLeaves(leaves, [centeredAt(144, 6 * 32 + 10)], locked)).toEqual(new Set([at(4, 6)]));
+    expect(openDoorLeaves(leaves, [centeredAt(144, 6 * 32 - 10)])).toEqual(new Set([at(4, 6)]));
   });
 });

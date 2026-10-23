@@ -17,8 +17,8 @@
  * `officeDecor.ts`: explicit `.ts` imports of other pure modules only.
  */
 
-import type { GridEdge } from './artContract.ts';
-import { physicalBodyRect, type GeometryPoint } from './avatarGeometry.ts';
+import { WALL, type GridEdge } from './artContract.ts';
+import { AVATAR_BODY_CENTER_OFFSET, physicalBodyRect, type GeometryPoint } from './avatarGeometry.ts';
 import { decorChairFacing, type DecorItem, type DecorTileRect } from './officeDecor.ts';
 import { wallsJoin, type WallGrid } from './officeLayout.ts';
 
@@ -53,11 +53,14 @@ export function doorEndPosts(item: Pick<DecorItem, 'index' | 'rotation'>, width:
 
 /** The tile a door opens into, its inside: the side its rotation faces. */
 export function doorInsideTile(item: Pick<DecorItem, 'index' | 'rotation'>, width: number): { tx: number; ty: number } {
-  const { tx, ty } = anchorOf(item, width);
-  const facing = decorChairFacing(item.rotation);
-  if (facing === 'up') return { tx, ty: ty - 1 };
-  if (facing === 'left') return { tx: tx - 1, ty };
-  return { tx, ty };
+  return insideTileOf(doorEdge(item, width), item.rotation);
+}
+
+function insideTileOf({ col, row }: GridEdge, rotation: DecorItem['rotation']): { tx: number; ty: number } {
+  const facing = decorChairFacing(rotation);
+  if (facing === 'up') return { tx: col, ty: row - 1 };
+  if (facing === 'left') return { tx: col - 1, ty: row };
+  return { tx: col, ty: row };
 }
 
 /** Whether a door stands on a wall: both posts of its edge standing and joined (the same material, `wallsJoin`). */
@@ -152,11 +155,12 @@ export function doorLeaves(items: readonly DecorItem[], width: number): DoorLeaf
 /**
  * The anchors of the leaves drawn open: every leaf of a pair one of whose
  * leaves has an avatar's body (`physicalBodyRect` of each network position)
- * over its tiles or within `DOOR_OPEN_REACH_PX` of them. Drawing only: a door
- * never blocks anyone, open or closed.
+ * over its tiles or within `DOOR_OPEN_REACH_PX` of them. A locked leaf
+ * (S13) opens only for a body whose center is on its inside. Drawing only:
+ * an unlocked door never blocks anyone, open or closed.
  */
-export function openDoorLeaves(leaves: readonly DoorLeaf[], positions: readonly GeometryPoint[]): Set<number> {
-  const bodies = positions.map((position) => physicalBodyRect(position));
+export function openDoorLeaves(leaves: readonly DoorLeaf[], positions: readonly GeometryPoint[], locked: ReadonlySet<number> = new Set()): Set<number> {
+  const bodies = positions.map((position) => ({ box: physicalBodyRect(position), center: bodyCenter(position) }));
   const pairs = new Set<number>();
   for (const leaf of leaves) {
     const { x, y, w, h } = leaf.footprint;
@@ -164,7 +168,124 @@ export function openDoorLeaves(leaves: readonly DoorLeaf[], positions: readonly 
     const top = y * DOOR_TILE - DOOR_OPEN_REACH_PX;
     const right = (x + w) * DOOR_TILE + DOOR_OPEN_REACH_PX;
     const bottom = (y + h) * DOOR_TILE + DOOR_OPEN_REACH_PX;
-    if (bodies.some((body) => body.x < right && body.x + body.width > left && body.y < bottom && body.y + body.height > top)) pairs.add(leaf.pair);
+    const opens = bodies.some(
+      ({ box, center }) =>
+        box.x < right && box.x + box.width > left && box.y < bottom && box.y + box.height > top && (!locked.has(leaf.index) || insideOf(leaf, center) > 0),
+    );
+    if (opens) pairs.add(leaf.pair);
   }
   return new Set(leaves.filter((leaf) => pairs.has(leaf.pair)).map((leaf) => leaf.index));
+}
+
+// --- Locks (S13) --------------------------------------------------------------------------------
+//
+// Someone inside a door (on the side it opens to, the tile next to its edge)
+// may lock it, or unlock it: a lock keeps everyone outside from walking in,
+// and anyone may still walk out. Locks live in the room's state only, by the
+// anchors of the leaves of the locked group, and are never saved.
+
+/** The body center of an avatar at a network position: what the room checks a move by. */
+function bodyCenter(position: GeometryPoint): GeometryPoint {
+  return { x: position.x + AVATAR_BODY_CENTER_OFFSET.x, y: position.y + AVATAR_BODY_CENTER_OFFSET.y };
+}
+
+/** How far `point` is on a leaf's inside: positive inside, zero on the edge line, negative outside. */
+function insideOf(leaf: DoorLeaf, point: GeometryPoint): number {
+  const facing = decorChairFacing(leaf.rotation);
+  const sign = facing === 'down' || facing === 'right' ? 1 : -1;
+  return leaf.edge.axis === 'horizontal' ? (point.y - leaf.edge.row * DOOR_TILE) * sign : (point.x - leaf.edge.col * DOOR_TILE) * sign;
+}
+
+/**
+ * The anchors of the door group (the whole run, `DoorLeaf.group`) whose
+ * inside tile holds the body center of an avatar at `position`, or `null`
+ * with no door within reach: only someone inside, right at the door, may
+ * lock or unlock it.
+ */
+export function doorLockGroup(items: readonly DecorItem[], width: number, position: GeometryPoint): number[] | null {
+  const center = bodyCenter(position);
+  const tx = Math.floor(center.x / DOOR_TILE);
+  const ty = Math.floor(center.y / DOOR_TILE);
+  const leaves = doorLeaves(items, width);
+  const at = leaves.find((leaf) => {
+    const inside = insideTileOf(leaf.edge, leaf.rotation);
+    return inside.tx === tx && inside.ty === ty;
+  });
+  return at === undefined ? null : leaves.filter((leaf) => leaf.group === at.group).map((leaf) => leaf.index);
+}
+
+/**
+ * The locks after someone at `position` presses the lock key: the door group
+ * they stand inside locks, or unlocks when any leaf of it was locked. `null`
+ * when no door is within reach, so nothing changes.
+ */
+export function toggleDoorLock(items: readonly DecorItem[], width: number, locked: ReadonlySet<number>, position: GeometryPoint): Set<number> | null {
+  const group = doorLockGroup(items, width, position);
+  if (group === null) return null;
+  const next = new Set(locked);
+  if (group.some((index) => locked.has(index))) for (const index of group) next.delete(index);
+  else for (const index of group) next.add(index);
+  return next;
+}
+
+/** The locks of doors that still stand: a door removed or replaced takes its lock with it. */
+export function liveDoorLocks(items: readonly DecorItem[], locked: ReadonlySet<number>): Set<number> {
+  return new Set(items.filter((item) => isDoorPiece(item.piece) && locked.has(item.index)).map((item) => item.index));
+}
+
+/** The wire form of the locks, a replicated string of the room state: anchors sorted and joined by commas, empty for none. */
+export function encodeDoorLocks(locked: ReadonlySet<number>): string {
+  return [...locked].sort((a, b) => a - b).join(',');
+}
+
+/** The locks of a wire string, or `null` unless every entry is an anchor. */
+export function decodeDoorLocks(raw: unknown): Set<number> | null {
+  if (typeof raw !== 'string') return null;
+  if (raw === '') return new Set();
+  const parts = raw.split(',');
+  if (!parts.every((part) => /^\d+$/.test(part))) return null;
+  return new Set(parts.map(Number));
+}
+
+/**
+ * Whether a body center moving from `from` to `to` walks into a locked
+ * door: it crosses a locked leaf's edge line from the outside (or the line
+ * itself) to the inside, within the leaf's segment. Walking out is never
+ * refused. Points are body centers, not network positions.
+ */
+export function crossesLockedDoor(leaves: readonly DoorLeaf[], locked: ReadonlySet<number>, from: GeometryPoint, to: GeometryPoint): boolean {
+  return leaves.some((leaf) => {
+    if (!locked.has(leaf.index)) return false;
+    const before = insideOf(leaf, from);
+    const after = insideOf(leaf, to);
+    if (before > 0 || after <= 0) return false;
+    const t = before / (before - after);
+    const horizontal = leaf.edge.axis === 'horizontal';
+    const along = horizontal ? from.x + (to.x - from.x) * t : from.y + (to.y - from.y) * t;
+    const start = (horizontal ? leaf.edge.col : leaf.edge.row) * DOOR_TILE;
+    return along >= start && along <= start + DOOR_TILE;
+  });
+}
+
+/**
+ * The locked leaves that bar an avatar at `position`, which stands outside
+ * them: each one's opening (the wall's thickness across its whole segment,
+ * the client's collider) and its inside tile (blocked for its path).
+ */
+export function lockedDoorBarriers(
+  leaves: readonly DoorLeaf[],
+  locked: ReadonlySet<number>,
+  position: GeometryPoint,
+): { index: number; rect: DecorTileRect; inside: { tx: number; ty: number } }[] {
+  const center = bodyCenter(position);
+  return leaves.flatMap((leaf) => {
+    if (!locked.has(leaf.index) || insideOf(leaf, center) > 0) return [];
+    const { col, row, axis } = leaf.edge;
+    // The wall's thickness across the whole segment, like the body the door stands in for.
+    const thick = WALL.thickness;
+    const rect = axis === 'horizontal'
+      ? { x: col * DOOR_TILE, y: row * DOOR_TILE - thick / 2, w: DOOR_TILE, h: thick }
+      : { x: col * DOOR_TILE - thick / 2, y: row * DOOR_TILE, w: thick, h: DOOR_TILE };
+    return [{ index: leaf.index, rect, inside: insideTileOf(leaf.edge, leaf.rotation) }];
+  });
 }

@@ -2471,3 +2471,94 @@ describe('OfficeRoom: desk occupancy', () => {
     expect(seventh.state.players.get(seventh.sessionId)?.seat).toBe('');
   }, 20_000);
 });
+
+describe('OfficeRoom: door locks (#223, S13)', () => {
+  const tile = (tx: number, ty: number) => ty * BASE_LAYOUT.width + tx;
+  /** A brick wall along row 22 (posts on vertices 64..69) with a door on the top edge of tile (66, 22), opening down. */
+  const DOOR = tile(66, 22);
+  const WALL = [64, 65, 66, 67, 68, 69].map((tx) => [tile(tx, 22), 'wall-brick'] as const);
+  /** The network position whose body center is (cx, cy). */
+  const at = (cx: number, cy: number) => ({ x: cx, y: cy - 11, facing: 'down' });
+  const INSIDE = at(66 * TILE + 16, 22 * TILE + 16);
+  const OUTSIDE = at(66 * TILE + 16, 22 * TILE - 16);
+  const FAR_INSIDE = at(66 * TILE + 16, 25 * TILE + 16);
+
+  beforeEach(async () => {
+    await server.shutdown();
+    server = createOfficeServer({ terrain: createMemoryTerrain([], WALL, [{ index: DOOR, piece: 'door-wood', rotation: 0 }]) });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+  });
+
+  async function moveTo(room: Awaited<ReturnType<typeof join>>, position: { x: number; y: number; facing: string }) {
+    room.send('move', position);
+    await waitFor(() => room.state.players.get(room.sessionId)?.y === position.y && room.state.players.get(room.sessionId)?.x === position.x);
+  }
+
+  /** Sends `move` and a status change after it, so the status echo proves the move was handled. */
+  async function tryMove(room: Awaited<ReturnType<typeof join>>, position: { x: number; y: number; facing: string }, status: 'g' | 'y' | 'r') {
+    room.send('move', position);
+    room.send('status', { status });
+    await waitFor(() => room.state.players.get(room.sessionId)?.status === status);
+  }
+
+  it('walks through an unlocked door both ways, as any move', async () => {
+    const ana = await join('Ana');
+    await moveTo(ana, OUTSIDE);
+    await moveTo(ana, INSIDE);
+    await moveTo(ana, OUTSIDE);
+    expect(ana.state.lockedDoors).toBe('');
+  });
+
+  it('locks and unlocks the door from its inside, next to it, and ignores the key outside or away from it', async () => {
+    const ana = await join('Ana');
+    await moveTo(ana, OUTSIDE);
+    ana.send('doorlock');
+    await tryMove(ana, OUTSIDE, 'y');
+    expect(ana.state.lockedDoors).toBe('');
+    await moveTo(ana, FAR_INSIDE);
+    ana.send('doorlock');
+    await tryMove(ana, FAR_INSIDE, 'r');
+    expect(ana.state.lockedDoors).toBe('');
+
+    await moveTo(ana, INSIDE);
+    ana.send('doorlock');
+    await waitFor(() => ana.state.lockedDoors === String(DOOR));
+    const beto = await join('Beto');
+    await waitFor(() => beto.state.lockedDoors === String(DOOR));
+
+    // Anyone inside may unlock it.
+    await moveTo(beto, at(66 * TILE + 10, 22 * TILE + 20));
+    beto.send('doorlock');
+    await waitFor(() => ana.state.lockedDoors === '');
+  });
+
+  it('keeps everyone outside a locked door from walking in, and lets whoever is inside walk out', async () => {
+    const ana = await join('Ana');
+    const beto = await join('Beto');
+    await moveTo(beto, OUTSIDE);
+    await moveTo(ana, INSIDE);
+    ana.send('doorlock');
+    await waitFor(() => beto.state.lockedDoors === String(DOOR));
+
+    await tryMove(beto, INSIDE, 'y');
+    expect(beto.state.players.get(beto.sessionId)).toMatchObject({ x: OUTSIDE.x, y: OUTSIDE.y });
+    // Moving about outside still works.
+    await moveTo(beto, at(66 * TILE + 20, 22 * TILE - 20));
+
+    await moveTo(ana, OUTSIDE);
+    // Now outside, Ana cannot walk back in either.
+    await tryMove(ana, INSIDE, 'r');
+    expect(ana.state.players.get(ana.sessionId)).toMatchObject({ x: OUTSIDE.x, y: OUTSIDE.y });
+  });
+
+  it('drops the lock of a door that is removed, and never saves it', async () => {
+    const ana = await join('Ana');
+    await moveTo(ana, INSIDE);
+    ana.send('doorlock');
+    await waitFor(() => ana.state.lockedDoors === String(DOOR));
+
+    await server.terrain.setDecor([{ index: DOOR, item: null }], null);
+    await waitFor(() => ana.state.lockedDoors === '');
+    expect(await server.terrain.decor()).toEqual([]);
+  });
+});

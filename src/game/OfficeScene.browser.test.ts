@@ -1429,6 +1429,7 @@ function fakeConnector(sessionId = 'yo', initialState = true) {
   const sentSpacesVersions: string[] = [];
   const sits: string[] = [];
   let stands = 0;
+  let doorLocks = 0;
   let captured: OfficeRoomHandlers | undefined;
   let joinedWith: PresenceStatus | undefined;
   let joinedName: string | undefined;
@@ -1450,6 +1451,9 @@ function fakeConnector(sessionId = 'yo', initialState = true) {
     sendStand: () => {
       stands++;
     },
+    sendDoorLock: () => {
+      doorLocks++;
+    },
     leave: async () => {
       left = true;
     },
@@ -1463,6 +1467,7 @@ function fakeConnector(sessionId = 'yo', initialState = true) {
     sentSpacesVersions,
     sits,
     stands: () => stands,
+    doorLocks: () => doorLocks,
     handlers: () => captured,
     joinedWith: () => joinedWith,
     joinedName: () => joinedName,
@@ -2240,6 +2245,7 @@ describe('OfficeScene: comando setStatus via el puente (#1)', () => {
       sendCallRespond: () => {},
       sendSit: () => {},
       sendStand: () => {},
+      sendDoorLock: () => {},
       leave: async () => {},
     };
 
