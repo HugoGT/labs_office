@@ -229,7 +229,10 @@ describe('handleSetTerrainWalls', () => {
 
   it('refuses with 409 to erase a post a door stands on (#223), and erases it once the door is gone', async () => {
     const { deps, terrain } = await harness();
-    await terrain.setWalls([{ index: FREE, piece: 'wall-brick' }, { index: FREE + 1, piece: 'wall-brick' }], null, async () => ({ placements: [], players: [] }));
+    // A closed room of tiles 67..69 x 22..24 (posts all round the vertices 67..70 x 22..25): a door needs one.
+    const ring = [0, 1, 2, 3].flatMap((i) => [FREE + i, FREE + 3 * BASE_LAYOUT.width + i, FREE + i * BASE_LAYOUT.width, FREE + i * BASE_LAYOUT.width + 3]);
+    const posts = [...new Set(ring)].map((index) => ({ index, piece: 'wall-brick' as const }));
+    await terrain.setWalls(posts, null, async () => ({ placements: [], players: [] }));
     await terrain.setDecor([{ index: FREE, item: { piece: 'door-wood', rotation: 0 } }], null);
 
     expect(await handleSetTerrainWalls(BEARER_ADMIN, { edits: [{ index: FREE + 1, piece: null }] }, deps)).toEqual({

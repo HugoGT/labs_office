@@ -3,8 +3,13 @@
  * that stands on a wall's grid line instead of on a tile. Its anchor tile
  * names the edge: the top edge of the tile for rotation 0 and 180, the left
  * one for 90 and 270. Its rotation is the side it opens into, the chair's
- * facing (`decorChairFacing`: 0 down, 90 right, 180 up, 270 left), and that
- * side is its inside.
+ * facing (`decorChairFacing`: 0 down, 90 right, 180 up, 270 left). A door
+ * goes only in a closed room (S16): between two standing posts of any
+ * material, with at least one side a region the walls and doors shut off from
+ * the map border (`roomMap`). Its inside is that closed side, whatever its
+ * rotation says; the rotation breaks the tie when both sides are closed, and
+ * decides it when neither is (a room an edit opened keeps its doors, which
+ * fall back to the rotation they were placed with).
  *
  * A door placed between two joined posts opens that edge of the wall: the
  * snapshot leaves its body out and clips the posts' joints along it
@@ -52,9 +57,13 @@ export function doorEndPosts(item: Pick<DecorItem, 'index' | 'rotation'>, width:
   return axis === 'horizontal' ? [row * width + col, row * width + col + 1] : [row * width + col, (row + 1) * width + col];
 }
 
-/** The tile a door opens into, its inside: the side its rotation faces. */
-export function doorInsideTile(item: Pick<DecorItem, 'index' | 'rotation'>, width: number): { tx: number; ty: number } {
-  return insideTileOf(doorEdge(item, width), item.rotation);
+/**
+ * The tile a door opens into, its inside: the closed side of its edge when
+ * `rooms` (the walls' regions) has one, else the side its rotation faces.
+ */
+export function doorInsideTile(item: Pick<DecorItem, 'index' | 'rotation'>, width: number, rooms?: RoomMap): { tx: number; ty: number } {
+  const edge = doorEdge(item, width);
+  return insideTileOf(edge, insideRotation(edge, item.rotation, rooms).rotation);
 }
 
 function insideTileOf({ col, row }: GridEdge, rotation: DecorItem['rotation']): { tx: number; ty: number } {
@@ -64,16 +73,115 @@ function insideTileOf({ col, row }: GridEdge, rotation: DecorItem['rotation']): 
   return { tx: col, ty: row };
 }
 
+// --- Rooms (S16) --------------------------------------------------------------------------------
+
 /**
- * Whether a door stands on a wall: both posts of its edge standing and joined
- * (`wallsJoin`) and of the same material. Walls of two materials join since
- * #223, but a door across them is still refused; the door rule is its own.
+ * The most tiles a region may have to count as a room. The flood stops as
+ * soon as it passes this and calls the region open: a closed room is a
+ * building's room, never the whole office, and the bound keeps every check
+ * (a ghost under the cursor, a batch of doors on the server) cheap.
  */
-export function doorOnWall(grid: WallGrid, item: Pick<DecorItem, 'index' | 'rotation'>): boolean {
+export const ROOM_MAX_TILES = 4096;
+
+/** A region of tiles the walls cut off: the same `id` for every tile of one region of one `RoomMap`. */
+export interface RoomRegion {
+  readonly id: number;
+  readonly closed: boolean;
+}
+
+/** The region of a tile, or `null` off the map. Memoized by the wall grid it was made from. */
+export type RoomMap = (tx: number, ty: number) => RoomRegion | null;
+
+/**
+ * The regions of a wall grid. Tiles are 4-connected; two neighbours are cut
+ * apart when the wall between them stands (`wallsJoin`, any material; a door
+ * edge is one, since a door shuts its room). Terrain never bounds a region.
+ * A region is closed when its flood never leaves the map and stays within
+ * `ROOM_MAX_TILES`, and open otherwise; tiles are memoized as they are
+ * visited, so asking for the same room again costs nothing. Recompute it
+ * (cheap, lazy) whenever the walls change.
+ */
+export function roomMap(grid: WallGrid): RoomMap {
+  const { width, height } = grid;
+  const regions = new Map<number, RoomRegion>();
+  const flood = (start: number): RoomRegion => {
+    const seen = new Set<number>([start]);
+    const queue = [start];
+    let closed = true;
+    for (let head = 0; head < queue.length && closed; head += 1) {
+      const tile = queue[head]!;
+      const tx = tile % width;
+      const ty = Math.floor(tile / width);
+      // The four neighbours, each with the wall edge that would cut it off.
+      const steps: readonly [number, number, boolean][] = [
+        [tx + 1, ty, wallsJoin(grid, tx + 1, ty, tx + 1, ty + 1)],
+        [tx - 1, ty, wallsJoin(grid, tx, ty, tx, ty + 1)],
+        [tx, ty + 1, wallsJoin(grid, tx, ty + 1, tx + 1, ty + 1)],
+        [tx, ty - 1, wallsJoin(grid, tx, ty, tx + 1, ty)],
+      ];
+      for (const [nx, ny, walled] of steps) {
+        if (walled) continue;
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
+          closed = false;
+          break;
+        }
+        const next = ny * width + nx;
+        if (seen.has(next)) continue;
+        seen.add(next);
+        queue.push(next);
+        if (seen.size > ROOM_MAX_TILES) {
+          closed = false;
+          break;
+        }
+      }
+    }
+    const region = { id: start, closed };
+    // An open flood may stop early: only the tiles it queued are named, the rest are asked (and found open) on their own.
+    for (const tile of seen) regions.set(tile, region);
+    return region;
+  };
+  return (tx, ty) => {
+    if (tx < 0 || ty < 0 || tx >= width || ty >= height) return null;
+    const tile = ty * width + tx;
+    return regions.get(tile) ?? flood(tile);
+  };
+}
+
+/** The two tiles on either side of an edge: the one a rotation faces (its inside) first, the other second. */
+function edgeSides(edge: GridEdge, rotation: DecorItem['rotation']): [{ tx: number; ty: number }, { tx: number; ty: number }] {
+  const facing = insideTileOf(edge, rotation);
+  const horizontal = edge.axis === 'horizontal';
+  const behind = horizontal ? { tx: edge.col, ty: facing.ty === edge.row ? edge.row - 1 : edge.row } : { tx: facing.tx === edge.col ? edge.col - 1 : edge.col, ty: edge.row };
+  return [facing, behind];
+}
+
+/**
+ * The rotation a door at `edge` is drawn and guarded with, and the region of
+ * its inside when that is a closed room: the placed rotation unless only the
+ * other side is closed, then turned half way round.
+ */
+function insideRotation(edge: GridEdge, placed: DecorItem['rotation'], rooms?: RoomMap): { rotation: DecorItem['rotation']; room: number | null } {
+  if (rooms === undefined) return { rotation: placed, room: null };
+  const [faced, behind] = edgeSides(edge, placed);
+  const facedRegion = rooms(faced.tx, faced.ty);
+  if (facedRegion?.closed === true) return { rotation: placed, room: facedRegion.id };
+  const behindRegion = rooms(behind.tx, behind.ty);
+  if (behindRegion?.closed === true) return { rotation: ((placed + 180) % 360) as DecorItem['rotation'], room: behindRegion.id };
+  return { rotation: placed, room: null };
+}
+
+/**
+ * Whether a door may stand on this edge (S16): both posts standing and
+ * joined (`wallsJoin`, whatever their materials), and at least one side of
+ * the edge a closed room (`roomMap`; the edge itself is a wall, so the door
+ * being placed already shuts it). The one rule of the editor's ghost and the
+ * room. Pass `rooms` to share the regions between many doors.
+ */
+export function doorOnWall(grid: WallGrid, item: Pick<DecorItem, 'index' | 'rotation'>, rooms: RoomMap = roomMap(grid)): boolean {
   const { col, row, axis } = doorEdge(item, grid.width);
   const [nx, ny] = axis === 'horizontal' ? [col + 1, row] : [col, row + 1];
   if (!wallsJoin(grid, col, row, nx, ny)) return false;
-  return grid.walls[row * grid.width + col] === grid.walls[ny * grid.width + nx];
+  return insideRotation({ col, row, axis }, item.rotation, rooms).room !== null;
 }
 
 /** The edges the doors of a decor layer open, in layer order. An edge with no joined wall under it opens nothing. */
@@ -112,7 +220,12 @@ export function doorPostSet(items: readonly DecorItem[], width: number): Set<num
 export interface DoorLeaf {
   readonly index: number;
   readonly piece: string;
+  /** The rotation it is drawn and guarded with: faces its inside (`insideRotation`), which is `placed` unless the room says otherwise. */
   readonly rotation: DecorItem['rotation'];
+  /** The rotation it was placed with. */
+  readonly placed: DecorItem['rotation'];
+  /** The region id (`RoomRegion.id`) of its inside when that is a closed room, else `null`: a door of an opened room locks alone. */
+  readonly room: number | null;
   readonly edge: GridEdge;
   readonly footprint: DecorTileRect;
   readonly hinge: 'start' | 'end';
@@ -132,10 +245,13 @@ function footprintOf(edge: GridEdge): DecorTileRect {
  * the handles meet in the middle, and an odd last leaf stands alone, hinged
  * at its start like a lone door.
  */
-export function doorLeaves(items: readonly DecorItem[], width: number): DoorLeaf[] {
+export function doorLeaves(items: readonly DecorItem[], width: number, rooms?: RoomMap): DoorLeaf[] {
   const doors = items
     .filter((item) => isDoorPiece(item.piece))
-    .map((item) => ({ item, edge: doorEdge(item, width) }))
+    .map((item) => {
+      const edge = doorEdge(item, width);
+      return { item: { ...item, ...insideRotation(edge, item.rotation, rooms), placed: item.rotation }, edge };
+    })
     .sort((a, b) => {
       if (a.edge.axis !== b.edge.axis) return a.edge.axis === 'horizontal' ? -1 : 1;
       const line = a.edge.axis === 'horizontal' ? a.edge.row - b.edge.row : a.edge.col - b.edge.col;
@@ -151,6 +267,8 @@ export function doorLeaves(items: readonly DecorItem[], width: number): DoorLeaf
         index: item.index,
         piece: item.piece,
         rotation: item.rotation,
+        placed: item.placed,
+        room: item.room,
         edge,
         footprint: footprintOf(edge),
         hinge: second ? 'end' : 'start',
@@ -201,12 +319,14 @@ export function openDoorLeaves(leaves: readonly DoorLeaf[], positions: readonly 
   return new Set(leaves.filter((leaf) => pairs.has(leaf.pair)).map((leaf) => leaf.index));
 }
 
-// --- Locks (S13) --------------------------------------------------------------------------------
+// --- Locks (S13, S16) --------------------------------------------------------------------------
 //
-// Someone inside a door (on the side it opens to, the tile next to its edge)
-// may lock it, or unlock it: a lock keeps everyone outside from walking in,
-// and anyone may still walk out. Locks live in the room's state only, by the
-// anchors of the leaves of the locked group, and are never saved.
+// Someone inside a room, next to one of its doors (the tile on the door's
+// inside), locks every door of that room at once, or unlocks them: a lock
+// keeps everyone outside from walking in, and anyone may still walk out.
+// Locks live in the room's state only, by the anchors of the locked doors,
+// and are never saved. A door whose room an edit opened has no room to lock:
+// it locks with its own run of doors, like before rooms.
 
 /** The body center of an avatar at a network position: what the room checks a move by. */
 function bodyCenter(position: GeometryPoint): GeometryPoint {
@@ -221,30 +341,38 @@ function insideOf(leaf: DoorLeaf, point: GeometryPoint): number {
 }
 
 /**
- * The anchors of the door group (the whole run, `DoorLeaf.group`) whose
- * inside tile holds the body center of an avatar at `position`, or `null`
- * with no door within reach: only someone inside, right at the door, may
- * lock or unlock it.
+ * The anchors the lock key at `position` locks together, or `null` with no
+ * door within reach: only someone inside, right at a door, may lock or unlock.
+ * Those are all the doors of that door's room (`DoorLeaf.room`, every door
+ * whose inside is that closed region), or its run of doors (`DoorLeaf.group`)
+ * when it has no closed room.
  */
-export function doorLockGroup(items: readonly DecorItem[], width: number, position: GeometryPoint): number[] | null {
+export function doorLockGroup(items: readonly DecorItem[], width: number, position: GeometryPoint, rooms?: RoomMap): number[] | null {
   const center = bodyCenter(position);
   const tx = Math.floor(center.x / DOOR_TILE);
   const ty = Math.floor(center.y / DOOR_TILE);
-  const leaves = doorLeaves(items, width);
+  const leaves = doorLeaves(items, width, rooms);
   const at = leaves.find((leaf) => {
     const inside = insideTileOf(leaf.edge, leaf.rotation);
     return inside.tx === tx && inside.ty === ty;
   });
-  return at === undefined ? null : leaves.filter((leaf) => leaf.group === at.group).map((leaf) => leaf.index);
+  if (at === undefined) return null;
+  return leaves.filter((leaf) => (at.room !== null ? leaf.room === at.room : leaf.group === at.group)).map((leaf) => leaf.index);
 }
 
 /**
- * The locks after someone at `position` presses the lock key: the door group
- * they stand inside locks, or unlocks when any leaf of it was locked. `null`
- * when no door is within reach, so nothing changes.
+ * The locks after someone at `position` presses the lock key: the doors they
+ * stand inside of (`doorLockGroup`) lock, or unlock when any of them was
+ * locked. `null` when no door is within reach, so nothing changes.
  */
-export function toggleDoorLock(items: readonly DecorItem[], width: number, locked: ReadonlySet<number>, position: GeometryPoint): Set<number> | null {
-  const group = doorLockGroup(items, width, position);
+export function toggleDoorLock(
+  items: readonly DecorItem[],
+  width: number,
+  locked: ReadonlySet<number>,
+  position: GeometryPoint,
+  rooms?: RoomMap,
+): Set<number> | null {
+  const group = doorLockGroup(items, width, position, rooms);
   if (group === null) return null;
   const next = new Set(locked);
   if (group.some((index) => locked.has(index))) for (const index of group) next.delete(index);

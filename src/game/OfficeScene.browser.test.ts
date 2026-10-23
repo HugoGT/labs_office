@@ -4868,6 +4868,40 @@ describe('OfficeScene: edited terrain', () => {
     await vi.waitFor(() => expect(leaf().isTinted).toBe(false), LOOP_WAIT);
   });
 
+  it('faces a door to the closed room behind it, whatever its rotation, and bars the outside of the room (#223, S16)', async () => {
+    const { scene, handlers } = await bootConnected();
+    // A closed room of tiles 67..69 x 22..24: posts all round the vertices 67..70 x 22..25.
+    const w = BASE_LAYOUT.width;
+    const ring = [0, 1, 2, 3].flatMap((i) => [lawnTile + i, lawnTile + 3 * w + i, lawnTile + i * w, lawnTile + i * w + 3]);
+    const posts = [...new Set(ring)];
+    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, posts.map((index) => ({ index, piece: 'wall-brick' as const }))));
+    // Placed turned 180 (facing up, out of the room): the room decides it opens down.
+    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 180 }]);
+    const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
+    await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
+    const frame = () => Number(leaf().frame.name);
+    expect(frame()).toBe(doorFrameIndex(0, 'start', false));
+    const body = findPlayer(scene).body as Phaser.Physics.Arcade.Body;
+    const doorway = { x: lawnVertex.x + TILE / 2, y: lawnVertex.y };
+    const outside = { x: doorway.x, y: lawnVertex.y - TILE / 2 - 11 };
+    const inside = { x: doorway.x, y: lawnVertex.y + TILE / 2 - 11 };
+    handlers.onDoorLocks!(new Set([lawnTile]));
+
+    // Outside the room (the tile its stored rotation calls inside), it stays shut and solid.
+    body.reset(outside.x, outside.y);
+    await vi.waitFor(() => expect(solidAt(scene, doorway.x, doorway.y)).toBe(true), LOOP_WAIT);
+    expect(frame()).toBe(doorFrameIndex(0, 'start', false));
+    // In the room it opens.
+    body.reset(inside.x, inside.y);
+    await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(0, 'start', true)), LOOP_WAIT);
+    await vi.waitFor(() => expect(solidAt(scene, doorway.x, doorway.y)).toBe(false), LOOP_WAIT);
+
+    // A post goes: the room is open, the door stays and falls back to the rotation it was placed with.
+    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, posts.filter((index) => index !== lawnTile + 3 + w).map((index) => ({ index, piece: 'wall-brick' as const }))));
+    body.reset(outside.x, outside.y - 3 * TILE);
+    await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(180, 'start', false)), LOOP_WAIT);
+  });
+
   it('draws pending walls for the editor without colliding with them, and drops them when it closes', async () => {
     const { scene, bridge } = await bootConnected();
     const before = wallObjects(scene).length;

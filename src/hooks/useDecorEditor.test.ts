@@ -706,7 +706,7 @@ describe('useDecorEditor', () => {
 });
 
 describe('DECOR_UNDER_PLACEMENT_MESSAGE (#223)', () => {
-  it('says where a door goes: on a wall, between two posts of one material', () => {
-    expect(DECOR_UNDER_PLACEMENT_MESSAGE).toMatch(/puerta va sobre una pared/);
+  it('says where a door goes: between two walls, closing a room', () => {
+    expect(DECOR_UNDER_PLACEMENT_MESSAGE).toMatch(/La puerta va entre dos paredes y tiene que cerrar una sala\./);
   });
 });

@@ -49,8 +49,8 @@ export const DECOR_COLORS: readonly Swatch[] = [
   { hex: '#d77fa1', label: 'Rosa' },
 ];
 
-/** Under the doors (#223, S13): how to lock one, since nothing else on the map says so. */
-const DOOR_LOCK_HINT = 'Desde dentro, junto a la puerta, pulsa X para cerrarla con llave o abrirla.';
+/** Under the doors (#223, S13, S16): where they go and how to lock a room, since nothing else on the map says so. */
+const DOOR_LOCK_HINT = 'Va entre dos paredes y cierra una sala. Desde dentro, junto a una puerta, pulsa X para cerrar con llave todas las puertas de la sala o abrirlas.';
 
 /** The thumbnail box, in pixels. */
 const THUMBNAIL_PX = 48;

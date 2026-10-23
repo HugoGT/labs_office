@@ -162,7 +162,8 @@ export function decorBrushTarget(index: number, brush: DecorBrush, width: number
  * the desk, which it replaces.
  *
  * A door (#223) is the room's door rule: on the edge between two joined
- * posts (`doorOnWall`), its two side tiles on walkable ground and free of
+ * posts of any material that closes a room on at least one side
+ * (`doorOnWall`, S16), its two side tiles on walkable ground and free of
  * other items. The tiles a wall touches do not count for it (its own posts
  * touch them), and it never goes in a desk.
  */

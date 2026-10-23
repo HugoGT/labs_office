@@ -2580,3 +2580,102 @@ describe('OfficeRoom: door locks (#223, S13)', () => {
     expect(await server.terrain.decor()).toEqual([]);
   });
 });
+
+describe('OfficeRoom: one lock for the whole room (#223, S16)', () => {
+  const tile = (tx: number, ty: number) => ty * BASE_LAYOUT.width + tx;
+  /** A closed room of tiles 64..68 x 22..25 (posts all round vertices 64..69 x 22..26), the north wall plaster, the rest brick. */
+  const POSTS: (readonly [number, 'wall-brick' | 'wall-plaster'])[] = [];
+  for (let x = 64; x <= 69; x += 1) POSTS.push([tile(x, 22), 'wall-plaster'], [tile(x, 26), 'wall-brick']);
+  for (let y = 23; y <= 25; y += 1) POSTS.push([tile(64, y), 'wall-brick'], [tile(69, y), 'wall-brick']);
+  /** North door stored turned 180 (facing out), west door stored 270 (facing out): the room decides which side is inside. */
+  const NORTH = tile(66, 22);
+  const WEST = tile(64, 24);
+  const BOTH = [NORTH, WEST].sort((a, b) => a - b).join(',');
+  const at = (cx: number, cy: number) => ({ x: cx, y: cy - 11, facing: 'down' });
+  const NEXT_TO_NORTH = at(66 * TILE + 16, 22 * TILE + 16);
+  const NEXT_TO_WEST = at(64 * TILE + 16, 24 * TILE + 16);
+  const MIDDLE = at(66 * TILE + 16, 24 * TILE + 16);
+  const OUT_NORTH = at(66 * TILE + 16, 22 * TILE - 16);
+  const OUT_WEST = at(64 * TILE - 16, 24 * TILE + 16);
+
+  beforeEach(async () => {
+    await server.shutdown();
+    server = createOfficeServer({
+      terrain: createMemoryTerrain([], POSTS, [
+        { index: NORTH, piece: 'door-wood', rotation: 180 },
+        { index: WEST, piece: 'door-wood', rotation: 270 },
+      ]),
+    });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+  });
+
+  async function moveTo(room: Awaited<ReturnType<typeof join>>, position: { x: number; y: number; facing: string }) {
+    room.send('move', position);
+    await waitFor(() => room.state.players.get(room.sessionId)?.y === position.y && room.state.players.get(room.sessionId)?.x === position.x);
+  }
+
+  async function tryMove(room: Awaited<ReturnType<typeof join>>, position: { x: number; y: number; facing: string }, status: 'g' | 'y' | 'r') {
+    room.send('move', position);
+    room.send('status', { status });
+    await waitFor(() => room.state.players.get(room.sessionId)?.status === status);
+  }
+
+  it('locks every door of the room from next to any one of them, and unlocks them all from next to another', async () => {
+    const ana = await join('Ana');
+    await moveTo(ana, NEXT_TO_WEST);
+    ana.send('doorlock');
+    await waitFor(() => ana.state.lockedDoors === BOTH);
+    await moveTo(ana, NEXT_TO_NORTH);
+    ana.send('doorlock');
+    await waitFor(() => ana.state.lockedDoors === '');
+  });
+
+  it('ignores the key from outside the room and from inside but away from its doors', async () => {
+    const ana = await join('Ana');
+    await moveTo(ana, OUT_NORTH);
+    ana.send('doorlock');
+    await tryMove(ana, OUT_NORTH, 'y');
+    expect(ana.state.lockedDoors).toBe('');
+    await moveTo(ana, MIDDLE);
+    ana.send('doorlock');
+    await tryMove(ana, MIDDLE, 'r');
+    expect(ana.state.lockedDoors).toBe('');
+  });
+
+  it('refuses walking in through any locked door of the room, and lets whoever is inside walk out', async () => {
+    const ana = await join('Ana');
+    const beto = await join('Beto');
+    await moveTo(ana, NEXT_TO_NORTH);
+    ana.send('doorlock');
+    await waitFor(() => beto.state.lockedDoors === BOTH);
+
+    await moveTo(beto, OUT_WEST);
+    await tryMove(beto, NEXT_TO_WEST, 'y');
+    expect(beto.state.players.get(beto.sessionId)).toMatchObject({ x: OUT_WEST.x, y: OUT_WEST.y });
+    const carla = await join('Carla');
+    await moveTo(carla, OUT_NORTH);
+    await tryMove(carla, NEXT_TO_NORTH, 'r');
+    expect(carla.state.players.get(carla.sessionId)).toMatchObject({ x: OUT_NORTH.x, y: OUT_NORTH.y });
+
+    await moveTo(ana, OUT_WEST);
+    await tryMove(ana, NEXT_TO_WEST, 'y');
+    expect(ana.state.players.get(ana.sessionId)).toMatchObject({ x: OUT_WEST.x, y: OUT_WEST.y });
+  });
+
+  it('keeps the doors and their locks when an edit opens the room, each locking by itself once it has no room', async () => {
+    const ana = await join('Ana');
+    await moveTo(ana, NEXT_TO_NORTH);
+    ana.send('doorlock');
+    await waitFor(() => ana.state.lockedDoors === BOTH);
+
+    // A post of the east wall goes: the room is open now.
+    await server.terrain.setWalls([{ index: tile(69, 24), piece: null }], null, async () => ({ placements: [], players: [] }));
+    expect(await server.terrain.decor()).toHaveLength(2);
+    expect(ana.state.lockedDoors).toBe(BOTH);
+    // Stored 180, no room left: its inside falls back to the rotation (the tile north of the edge), where nobody stands.
+    await moveTo(ana, NEXT_TO_NORTH);
+    ana.send('doorlock');
+    await tryMove(ana, NEXT_TO_NORTH, 'y');
+    expect(ana.state.lockedDoors).toBe(BOTH);
+  });
+});

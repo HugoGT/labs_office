@@ -787,14 +787,15 @@ describe('createTerrainRuntime doors (#223)', () => {
     { id: 'chair-wood', kind: 'chair', retired: false },
     { id: 'door-wood', kind: 'door', retired: false },
   ];
-  /** A brick wall along row 22, posts on vertices 65..68, and a glass post on 69. */
-  const WALL: [number, 'wall-brick' | 'wall-glass'][] = [
-    [at(65, 22), 'wall-brick'],
-    [at(66, 22), 'wall-brick'],
-    [at(67, 22), 'wall-brick'],
-    [at(68, 22), 'wall-brick'],
-    [at(69, 22), 'wall-glass'],
-  ];
+  /**
+   * A closed room of tiles 65..68 x 22..25: brick posts all round the vertices
+   * (65, 22)..(69, 26), the top-right corner glass (two materials in one wall).
+   */
+  const WALL: [number, 'wall-brick' | 'wall-glass'][] = [];
+  for (let tx = 65; tx <= 69; tx += 1) WALL.push([at(tx, 22), tx === 69 ? 'wall-glass' : 'wall-brick'], [at(tx, 26), 'wall-brick']);
+  for (let ty = 23; ty <= 25; ty += 1) WALL.push([at(65, ty), 'wall-brick'], [at(69, ty), 'wall-brick']);
+  /** A brick stub on row 22 (posts 72..74) that closes no room. */
+  const STUB: [number, 'wall-brick'][] = [72, 73, 74].map((tx) => [at(tx, 22), 'wall-brick']);
   const DOOR = { piece: 'door-wood', rotation: 0 } as const;
   const runtimeWith = (store = createMemoryTerrain([], WALL)) =>
     createTerrainRuntime({ layout: BASE_LAYOUT, store, seats: BASE_MAP_SEATS, decorPieces: async () => CATALOG });
@@ -822,12 +823,21 @@ describe('createTerrainRuntime doors (#223)', () => {
     expect(passes(runtime, ...through(67))).toBe(false);
   });
 
-  it('refuses a door off a wall, across two materials, on unwalkable ground, in a desk or over another item', async () => {
-    const runtime = runtimeWith(createMemoryTerrain([], WALL, [{ index: at(67, 21), piece: 'chair-wood', rotation: 0 }]));
+  it('places a door across two materials of the room and opens the wall there', async () => {
+    const runtime = runtimeWith();
+    await runtime.load();
+    // Posts (68, 22) brick and (69, 22) glass: one wall, a door fits when it closes a room.
+    await runtime.setDecor([{ index: at(68, 22), item: DOOR }], null);
+    expect(runtime.snapshot().openings).toEqual([{ col: 68, row: 22, axis: 'horizontal' }]);
+    expect(passes(runtime, ...through(68))).toBe(true);
+  });
+
+  it('refuses a door off a wall, on a wall that closes no room, on unwalkable ground, in a desk or over another item', async () => {
+    const runtime = runtimeWith(createMemoryTerrain([], [...WALL, ...STUB], [{ index: at(67, 21), piece: 'chair-wood', rotation: 0 }]));
     await runtime.load();
 
     await expect(runtime.setDecor([{ index: at(66, 25), item: DOOR }], null)).rejects.toThrow(TerrainProtectedError);
-    await expect(runtime.setDecor([{ index: at(68, 22), item: DOOR }], null)).rejects.toThrow(TerrainProtectedError);
+    await expect(runtime.setDecor([{ index: at(72, 22), item: DOOR }], null)).rejects.toThrow(TerrainProtectedError);
     await expect(runtime.setDecor([{ index: at(66, 22), item: { piece: 'door-wood', rotation: 90 } }], null)).rejects.toThrow(TerrainProtectedError);
     await expect(runtime.setDecor([{ index: at(67, 22), item: DOOR }], null)).rejects.toThrow(TerrainProtectedError);
     await expect(runtime.setDecor([{ index: at(30, 30), item: DOOR }], null)).rejects.toThrow(TerrainProtectedError);

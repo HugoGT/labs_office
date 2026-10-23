@@ -37,7 +37,7 @@ import { deskAt, deskZoneName } from './deskLayout';
 import { SPACE_SHADE_ALPHA, SPACE_SHADE_NAME, shadeAround, shadeKey } from './spaceFocus';
 import { tableFacing, tableFloorRect } from './deskTable';
 import { decorChairs, decorFootprint, encodeOfficeDecor, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
-import { doorEdge, doorLeaves, doorOpenings, lockedDoorBarriers, openDoorLeaves, type DoorLeaf } from './officeDoors';
+import { doorEdge, doorLeaves, doorOpenings, isDoorPiece, lockedDoorBarriers, openDoorLeaves, roomMap, type DoorLeaf, type RoomMap } from './officeDoors';
 import { deskEntryRefused } from './deskDecorRules';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
@@ -295,6 +295,13 @@ export class OfficeScene extends Phaser.Scene {
    * between its closed and open frame. A redraw of the layer rebuilds it.
    */
   private doorLeaves = new Map<number, DoorLeaf>();
+  /**
+   * The rooms of the live walls and the leaves of the live doors on them
+   * (S16: a door's inside is its closed room), kept for the walls and decor
+   * layer they were made from; the frame loop reads them, so they are never
+   * rebuilt per frame. The editors' pending edits are in neither.
+   */
+  private liveDoors: { walls: readonly (string | null)[]; decor: readonly DecorItem[]; rooms: RoomMap; leaves: DoorLeaf[] } | null = null;
   private doorImages = new Map<number, Phaser.GameObjects.Image>();
   /** The anchors of the leaves drawn open, as `update()` last saw the avatars. */
   private openDoors: ReadonlySet<number> = new Set();
@@ -1669,11 +1676,12 @@ export class OfficeScene extends Phaser.Scene {
     const edge = doorEdge(item, this.layout.width);
     // A leaf of the live layer knows its hinge (a double door, D7); a lone one, or the editor's ghost, hinges at its start.
     const leaf = this.doorLeaves.get(item.index);
-    const hinge = leaf !== undefined && leaf.rotation === item.rotation ? leaf.hinge : 'start';
+    const hinge = leaf !== undefined && leaf.placed === item.rotation ? leaf.hinge : 'start';
     const sheet = this.artSheet({ materialId: item.piece, color: null }, 'door', this.redrawDecor);
     if (sheet !== null) {
       const placement = doorPlacement(edge);
-      const frame = doorFrameIndex(item.rotation, hinge, this.openDoors.has(item.index));
+      // Turned to face its room, whatever the rotation it was placed with (S16).
+      const frame = doorFrameIndex(leaf?.rotation ?? item.rotation, hinge, this.openDoors.has(item.index));
       return putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(placement.depthY)).setName(decorObjectName(item.index));
     }
     const horizontal = edge.axis === 'horizontal';
@@ -1712,6 +1720,15 @@ export class OfficeScene extends Phaser.Scene {
     this.openDoors = open;
   }
 
+  /** The rooms of the live walls and the live doors' leaves on them, rebuilt only when the walls or the decor layer change. */
+  private liveDoorGeometry(): { rooms: RoomMap; leaves: DoorLeaf[] } {
+    if (this.liveDoors?.walls !== this.terrainWalls || this.liveDoors.decor !== this.officeDecor) {
+      const rooms = roomMap({ width: this.layout.width, height: this.layout.height, walls: this.terrainWalls });
+      this.liveDoors = { walls: this.terrainWalls, decor: this.officeDecor, rooms, leaves: doorLeaves(this.officeDecor, this.layout.width, rooms) };
+    }
+    return this.liveDoors;
+  }
+
   /** New door locks from the room (#223): the next frame redraws the leaves and the barriers. */
   private applyDoorLocks(locks: ReadonlySet<number>): void {
     if (!this.alive) return;
@@ -1727,7 +1744,7 @@ export class OfficeScene extends Phaser.Scene {
   private updateDoorBarriers(): void {
     const barriers = this.doorLocks.size === 0
       ? []
-      : lockedDoorBarriers(doorLeaves(this.officeDecor, this.layout.width), this.doorLocks, { x: this.player.x, y: this.player.y });
+      : lockedDoorBarriers(this.liveDoorGeometry().leaves, this.doorLocks, { x: this.player.x, y: this.player.y });
     const key = barriers.map(({ index }) => index).join(',');
     if (key === this.doorBarriers.key) return;
     if (this.doorBarriers.collider) this.physics.world.removeCollider(this.doorBarriers.collider);
@@ -1938,6 +1955,8 @@ export class OfficeScene extends Phaser.Scene {
       this.grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
       this.buildTerrainColliders(this.grid);
       this.paintWalls();
+      // A wall edit can close or open a room (S16): its doors turn to face the room that is left.
+      if (this.officeDecor.some((item) => isDoorPiece(item.piece))) this.paintDecor();
     }
     this.emitTerrain();
   }
@@ -2014,7 +2033,7 @@ export class OfficeScene extends Phaser.Scene {
     if (this.art.manifest !== this.decorCollisionsManifest && this.officeDecor.length > 0) this.placeDecorCollisions();
     for (const object of this.decorObjects) object.destroy();
     const items = this.decorPreview === null ? this.officeDecor : withDecor(this.officeDecor, this.decorPreview);
-    this.doorLeaves = new Map(doorLeaves(items, this.layout.width).map((leaf) => [leaf.index, leaf]));
+    this.doorLeaves = new Map(doorLeaves(items, this.layout.width, this.liveDoorGeometry().rooms).map((leaf) => [leaf.index, leaf]));
     this.decorObjects = items.flatMap((item) => this.drawDecorPiece(item));
     const doorNamed = new Map([...this.doorLeaves.keys()].map((index) => [decorObjectName(index), index]));
     this.doorImages = new Map();

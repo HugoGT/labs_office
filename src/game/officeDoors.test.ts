@@ -17,6 +17,8 @@ import {
   liveDoorLocks,
   lockedDoorBarriers,
   openDoorLeaves,
+  roomMap,
+  ROOM_MAX_TILES,
   toggleDoorLock,
 } from './officeDoors';
 
@@ -30,6 +32,14 @@ function wallGrid(posts: readonly (readonly [number, number, string?])[]) {
   const walls = new Array<string | null>(WIDTH * HEIGHT).fill(null);
   for (const [tx, ty, piece] of posts) walls[at(tx, ty)] = piece ?? 'wall-brick';
   return { width: WIDTH, height: HEIGHT, walls };
+}
+
+/** Posts all around the rectangle of vertices (x0, y0)..(x1, y1): a closed room of the tiles inside it, `piece` or the per-vertex override. */
+function ring(x0: number, y0: number, x1: number, y1: number, piece = 'wall-brick', overrides: Readonly<Record<string, string>> = {}) {
+  const posts: [number, number, string][] = [];
+  for (let x = x0; x <= x1; x += 1) posts.push([x, y0, piece], [x, y1, piece]);
+  for (let y = y0 + 1; y < y1; y += 1) posts.push([x0, y, piece], [x1, y, piece]);
+  return wallGrid(posts.map(([x, y, p]) => [x, y, overrides[`${x},${y}`] ?? p] as const));
 }
 
 describe('officeDoors: the edge a door stands on (#223)', () => {
@@ -58,13 +68,14 @@ describe('officeDoors: the edge a door stands on (#223)', () => {
     expect(doorInsideTile(door(4, 6, 270), WIDTH)).toEqual({ tx: 3, ty: 6 });
   });
 
-  it('stands on a wall only between two joined posts: both standing and of the same material', () => {
-    expect(doorOnWall(wallGrid([[4, 6], [5, 6]]), door(4, 6, 0))).toBe(true);
-    expect(doorOnWall(wallGrid([[4, 6], [4, 7]]), door(4, 6, 270))).toBe(true);
+  it('stands on a wall only between two joined posts that close a room on at least one side', () => {
+    const room = ring(3, 2, 8, 6);
+    expect(doorOnWall(room, door(4, 2, 0))).toBe(true);
+    expect(doorOnWall(room, door(3, 4, 90))).toBe(true);
+    // A bare wall closes no room, a lone post is no wall, and a vertical wall does not hold a horizontal door.
+    expect(doorOnWall(wallGrid([[4, 6], [5, 6]]), door(4, 6, 0))).toBe(false);
     expect(doorOnWall(wallGrid([[4, 6]]), door(4, 6, 0))).toBe(false);
-    expect(doorOnWall(wallGrid([[4, 6], [5, 6, 'wall-glass']]), door(4, 6, 0))).toBe(false);
-    // A vertical wall does not hold a horizontal door.
-    expect(doorOnWall(wallGrid([[4, 6], [4, 7]]), door(4, 6, 0))).toBe(false);
+    expect(doorOnWall(room, door(3, 3, 0))).toBe(false);
   });
 
   it('opens the edge of every door of the layer, and of nothing else', () => {
@@ -209,5 +220,161 @@ describe('officeDoors: locks (#223, S13)', () => {
     expect(openDoorLeaves(leaves, [centeredAt(144, 6 * 32 - 10)], locked)).toEqual(new Set());
     expect(openDoorLeaves(leaves, [centeredAt(144, 6 * 32 + 10)], locked)).toEqual(new Set([at(4, 6)]));
     expect(openDoorLeaves(leaves, [centeredAt(144, 6 * 32 - 10)])).toEqual(new Set([at(4, 6)]));
+  });
+});
+
+describe('officeDoors: rooms close the walls (#223, S16)', () => {
+  const room = ring(3, 2, 8, 6);
+
+  it('takes a door between posts of two materials when it closes a room', () => {
+    const mixed = ring(3, 2, 8, 6, 'wall-brick', { '4,2': 'wall-plaster', '5,2': 'wall-glass' });
+    expect(doorOnWall(mixed, door(4, 2, 0))).toBe(true);
+    // Different materials on both ends of the edge: still one wall.
+    expect(doorOnWall(ring(3, 2, 8, 6, 'wall-stone', { '5,2': 'wall-plaster' }), door(4, 2, 0))).toBe(true);
+  });
+
+  it('refuses a door when neither side is a closed room', () => {
+    // An open wall, a ring with a missing post, and a wall across the whole map: every side reaches the map border.
+    expect(doorOnWall(wallGrid([[3, 2], [4, 2], [5, 2], [6, 2]]), door(4, 2, 0))).toBe(false);
+    const gap = ring(3, 2, 8, 6);
+    gap.walls[at(8, 4)] = null;
+    expect(doorOnWall(gap, door(4, 2, 0))).toBe(false);
+    const across = wallGrid(Array.from({ length: WIDTH }, (_, x) => [x, 4] as const));
+    expect(doorOnWall(across, door(4, 4, 0))).toBe(false);
+  });
+
+  it('counts a room closed on either side, and the walls of a nested room too', () => {
+    // The ring closes its inside; the outside of its door reaches the border.
+    expect(doorOnWall(room, door(5, 6, 0))).toBe(true);
+    // An inner room inside the ring: its door has two closed sides.
+    const nested = ring(3, 2, 10, 8);
+    for (const [x, y] of [[5, 4], [6, 4], [7, 4], [5, 6], [6, 6], [7, 6], [5, 5], [7, 5]] as const) nested.walls[at(x, y)] = 'wall-stone';
+    expect(doorOnWall(nested, door(6, 4, 0))).toBe(true);
+  });
+
+  it('does not bound a room by terrain, only by walls and doors', () => {
+    // A closed ring whose edge a second door also stands on: the doors still close it.
+    expect(doorOnWall(room, door(5, 2, 0))).toBe(true);
+    const map = roomMap(room);
+    expect(map(5, 4)).toEqual(map(4, 3));
+    expect(map(5, 4)?.closed).toBe(true);
+    expect(map(1, 1)?.closed).toBe(false);
+    expect(map(-1, 0)).toBeNull();
+    expect(map(5, 4)?.id).not.toBe(map(1, 1)?.id);
+  });
+
+  it('gives up on a region past the tile bound and calls it open', () => {
+    const big = (side: number) => {
+      const size = 80;
+      const walls = new Array<string | null>(size * size).fill(null);
+      for (let i = 0; i <= side; i += 1) for (const [x, y] of [[1 + i, 1], [1 + i, 1 + side], [1, 1 + i], [1 + side, 1 + i]]) walls[y! * size + x!] = 'wall-brick';
+      return { width: size, height: size, walls };
+    };
+    expect(ROOM_MAX_TILES).toBe(4096);
+    expect(roomMap(big(60))(10, 10)?.closed).toBe(true);
+    expect(roomMap(big(65))(10, 10)?.closed).toBe(false);
+  });
+
+  it('takes the closed side as the inside, whatever the rotation', () => {
+    const rooms = roomMap(room);
+    const inside = (item: DecorItem) => doorInsideTile(item, WIDTH, rooms);
+    // Top edge of the ring (row 2): the room lies below.
+    expect(inside(door(4, 2, 0))).toEqual({ tx: 4, ty: 2 });
+    expect(inside(door(4, 2, 180))).toEqual({ tx: 4, ty: 2 });
+    // Bottom edge (row 6): the room lies above.
+    expect(inside(door(4, 6, 0))).toEqual({ tx: 4, ty: 5 });
+    expect(inside(door(4, 6, 180))).toEqual({ tx: 4, ty: 5 });
+    // Left (col 3) and right (col 8) edges.
+    expect(inside(door(3, 3, 90))).toEqual({ tx: 3, ty: 3 });
+    expect(inside(door(3, 3, 270))).toEqual({ tx: 3, ty: 3 });
+    expect(inside(door(8, 3, 90))).toEqual({ tx: 7, ty: 3 });
+    expect(inside(door(8, 3, 270))).toEqual({ tx: 7, ty: 3 });
+    // The leaf is drawn and guarded the same way: its rotation faces the room.
+    expect(doorLeaves([door(4, 6, 0)], WIDTH, rooms)[0]).toMatchObject({ rotation: 180, placed: 0 });
+    expect(doorLeaves([door(4, 2, 0)], WIDTH, rooms)[0]).toMatchObject({ rotation: 0, placed: 0 });
+  });
+
+  it('lets the rotation break the tie when both sides are closed, and decides it when neither is', () => {
+    const nested = ring(3, 2, 10, 8);
+    for (const [x, y] of [[5, 4], [6, 4], [7, 4], [5, 6], [6, 6], [7, 6], [5, 5], [7, 5]] as const) nested.walls[at(x, y)] = 'wall-stone';
+    const rooms = roomMap(nested);
+    expect(doorInsideTile(door(6, 4, 0), WIDTH, rooms)).toEqual({ tx: 6, ty: 4 });
+    expect(doorInsideTile(door(6, 4, 180), WIDTH, rooms)).toEqual({ tx: 6, ty: 3 });
+    const open = roomMap(wallGrid([[4, 6], [5, 6]]));
+    expect(doorInsideTile(door(4, 6, 180), WIDTH, open)).toEqual({ tx: 4, ty: 5 });
+    expect(doorLeaves([door(4, 6, 180)], WIDTH, open)[0]!.room).toBeNull();
+  });
+
+  it('knows the doors of one room by its id, and not the doors of another', () => {
+    const leaves = doorLeaves([door(4, 2, 0), door(3, 4, 90), door(4, 6, 0)], WIDTH, roomMap(room));
+    expect(new Set(leaves.map((leaf) => leaf.room)).size).toBe(1);
+    expect(leaves[0]!.room).not.toBeNull();
+  });
+});
+
+describe('officeDoors: one lock for the room (#223, S16)', () => {
+  const centeredAt = (cx: number, cy: number) => {
+    const body = physicalBodyRect({ x: 0, y: 0 });
+    return { x: cx - (body.x + body.width / 2), y: cy - (body.y + body.height / 2) };
+  };
+  const grid = ring(3, 2, 8, 6);
+  const rooms = roomMap(grid);
+  // Three doors of the room, turned any way: the north one (4, 2), the west one (3, 4) and the south one (6, 6).
+  const DOORS: DecorItem[] = [door(4, 2, 180), door(3, 4, 270), door(6, 6, 0)];
+  const all = new Set(DOORS.map((item) => item.index));
+  const nextToNorth = centeredAt(4 * 32 + 16, 2 * 32 + 16);
+
+  it('locks every door of the room from inside any of them, and unlocks them all at once', () => {
+    const locked = toggleDoorLock(DOORS, WIDTH, new Set(), nextToNorth, rooms);
+    expect(locked).toEqual(all);
+    expect(toggleDoorLock(DOORS, WIDTH, locked!, centeredAt(5 * 32 + 16, 4 * 32 + 16), rooms)).toBeNull();
+    expect(toggleDoorLock(DOORS, WIDTH, locked!, centeredAt(3 * 32 + 16, 4 * 32 + 16), rooms)).toEqual(new Set());
+    // One lock left means unlock: a door locked alone is not a locked room.
+    expect(toggleDoorLock(DOORS, WIDTH, new Set([DOORS[2]!.index]), nextToNorth, rooms)).toEqual(new Set());
+  });
+
+  it('ignores X from outside the room, and from inside but away from every door', () => {
+    expect(doorLockGroup(DOORS, WIDTH, centeredAt(4 * 32 + 16, 1 * 32 + 16), rooms)).toBeNull();
+    expect(doorLockGroup(DOORS, WIDTH, centeredAt(5 * 32 + 16, 4 * 32 + 16), rooms)).toBeNull();
+    expect(new Set(doorLockGroup(DOORS, WIDTH, nextToNorth, rooms))).toEqual(all);
+  });
+
+  it('leaves the doors of another room alone', () => {
+    const both = ring(3, 2, 8, 6);
+    const neighbor = ring(10, 6, 11, 9);
+    neighbor.walls.forEach((wall, tile) => {
+      if (wall != null) both.walls[tile] = wall;
+    });
+    const map = roomMap(both);
+    const items = [door(4, 2, 0), door(10, 6, 0)];
+    expect(doorLockGroup(items, WIDTH, nextToNorth, map)).toEqual([at(4, 2)]);
+    expect(toggleDoorLock(items, WIDTH, new Set([at(4, 2)]), centeredAt(10 * 32 + 16, 6 * 32 + 16), map)).toEqual(new Set([at(4, 2), at(10, 6)]));
+  });
+
+  it('refuses walking into the room through any locked door from outside, and lets people leave', () => {
+    const leaves = doorLeaves(DOORS, WIDTH, rooms);
+    // North (rotation 180 stored, the room lies below), west and south doors.
+    const north = { x: 4 * 32 + 16, y: 2 * 32 };
+    expect(crossesLockedDoor(leaves, all, { x: north.x, y: north.y - 10 }, { x: north.x, y: north.y + 4 })).toBe(true);
+    expect(crossesLockedDoor(leaves, all, { x: north.x, y: north.y + 4 }, { x: north.x, y: north.y - 10 })).toBe(false);
+    const west = { x: 3 * 32, y: 4 * 32 + 16 };
+    expect(crossesLockedDoor(leaves, all, { x: west.x - 10, y: west.y }, { x: west.x + 4, y: west.y })).toBe(true);
+    expect(crossesLockedDoor(leaves, all, { x: west.x + 4, y: west.y }, { x: west.x - 10, y: west.y })).toBe(false);
+    const south = { x: 6 * 32 + 16, y: 6 * 32 };
+    expect(crossesLockedDoor(leaves, all, { x: south.x, y: south.y + 10 }, { x: south.x, y: south.y - 4 })).toBe(true);
+    expect(crossesLockedDoor(leaves, all, { x: south.x, y: south.y - 4 }, { x: south.x, y: south.y + 10 })).toBe(false);
+    // An unlocked room lets everyone in.
+    expect(crossesLockedDoor(leaves, new Set(), { x: south.x, y: south.y + 10 }, { x: south.x, y: south.y - 4 })).toBe(false);
+  });
+
+  it('falls back to the rotation and to the double door when an edit opens the room', () => {
+    // A post of the ring is gone: no closed room is left, doors keep their stored rotation and lock as one run.
+    const broken = ring(3, 2, 8, 6);
+    broken.walls[at(8, 4)] = null;
+    const open = roomMap(broken);
+    const items = [door(4, 2, 180), door(5, 2, 180)];
+    expect(doorLeaves(items, WIDTH, open).map((leaf) => [leaf.rotation, leaf.room])).toEqual([[180, null], [180, null]]);
+    expect(doorLockGroup(items, WIDTH, centeredAt(4 * 32 + 16, 1 * 32 + 16), open)).toEqual([at(4, 2), at(5, 2)]);
+    expect(doorLockGroup(items, WIDTH, nextToNorth, open)).toBeNull();
   });
 });
