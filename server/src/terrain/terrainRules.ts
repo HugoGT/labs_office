@@ -36,7 +36,7 @@ import {
   type DecorItem,
   type DecorPieceInfo,
 } from '../../../src/game/officeDecor.ts';
-import { doorOnWall } from '../../../src/game/officeDoors.ts';
+import { doorOnWall, wallTilesAfter } from '../../../src/game/officeDoors.ts';
 import type { MapSeat } from '../../../src/game/seating.ts';
 
 /** The edit was malformed: an index off the map or an unknown material (400). */
@@ -291,16 +291,19 @@ export function parseDecorBatch(body: unknown, tileCount: number): DecorEdit[] {
  *
  * A door (#223) must stand on the edge between two joined posts
  * (`doorOnWall`, the rule the editor's ghost applies too); the tiles a wall
- * touches do not count for it, since its own posts touch them.
+ * touches do not count for it, since its own posts touch them. The wall
+ * tiles are those of `after` (`wallTilesAfter`): a door removed or replaced
+ * in the batch closes its wall for what takes its place.
  */
 export function findDecorConflict(
   after: readonly DecorItem[],
   placed: ReadonlySet<number>,
   infoOf: (piece: string) => DecorPieceInfo | null,
-  snapshot: Pick<TerrainSnapshot, 'width' | 'height' | 'walkable' | 'wallTiles' | 'walls'>,
+  snapshot: Pick<TerrainSnapshot, 'width' | 'height' | 'walkable' | 'wallTiles' | 'walls'> & Partial<Pick<TerrainSnapshot, 'openings'>>,
   staticTiles: ReadonlySet<number>,
 ): UnwalkableConflict | null {
   if (placed.size === 0) return null;
+  const wallTiles = wallTilesAfter(snapshot, after);
   const taken = new Set<number>();
   for (const item of after) {
     if (!placed.has(item.index)) for (const tile of decorTiles(item, infoOf(item.piece), snapshot.width)) taken.add(tile);
@@ -313,7 +316,7 @@ export function findDecorConflict(
     const rect = decorFootprint(item, info, snapshot.width);
     if (!insideMap(rect, snapshot.width, snapshot.height)) return 'placement';
     for (const tile of rectTiles(rect, snapshot.width)) {
-      if (!snapshot.walkable[tile] || (!door && snapshot.wallTiles[tile] === true) || staticTiles.has(tile) || taken.has(tile)) return 'placement';
+      if (!snapshot.walkable[tile] || (!door && wallTiles[tile] === true) || staticTiles.has(tile) || taken.has(tile)) return 'placement';
       taken.add(tile);
     }
   }

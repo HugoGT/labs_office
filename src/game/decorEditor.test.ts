@@ -245,6 +245,22 @@ describe('decorPlacementAllowed: doors (#223)', () => {
     expect(decorPlacementAllowed(none, infoOf, walled(), { x: 2, y: 3, w: 3, h: 3 }, at(3, 4), doorBrush(0))).toBe(false);
   });
 
+  it('keeps a piece that replaces a door off the wall the door leaves closed, as with no door there', () => {
+    const doorInfo = (piece: string): DecorPieceInfo | null => (piece.startsWith('door-') ? DOOR : infoOf(piece));
+    const door: DecorItem = { index: at(3, 4), piece: 'door-wood', rotation: 0 };
+    // The live ground with the door open: its two tiles touch no wall rectangle.
+    const plain = walled();
+    const open = { ...plain, openings: [{ col: 3, row: 4, axis: 'horizontal' as const }], wallTiles: coveredTiles(wallFootprintRects({ width: WIDTH, height: HEIGHT, walls: plain.walls!, openings: [{ col: 3, row: 4, axis: 'horizontal' }] }), WIDTH, HEIGHT) };
+    expect(open.wallTiles[at(3, 4)]).toBe(false);
+    expect(decorPlacementAllowed([], doorInfo, plain, null, at(3, 4), chairBrush())).toBe(false);
+    expect(decorPlacementAllowed([door], doorInfo, open, null, at(3, 4), chairBrush())).toBe(false);
+    // Moving the door away and a chair onto its other tile: the wall closes there too.
+    expect(decorPlacementAllowed([door], doorInfo, open, null, at(3, 3), { ...chairBrush(), from: at(3, 4) })).toBe(false);
+    // Another door over it still goes, and a chair anywhere else is judged as before.
+    expect(decorPlacementAllowed([door], doorInfo, open, null, at(3, 4), doorBrush(180))).toBe(true);
+    expect(decorPlacementAllowed([door], doorInfo, open, null, at(3, 6), chairBrush())).toBe(true);
+  });
+
   it('still keeps every other piece off the tiles a wall touches', () => {
     expect(decorPlacementAllowed(none, infoOf, walled(), null, at(3, 4), chairBrush())).toBe(false);
     expect(decorPlacementAllowed(none, infoOf, walled(), null, at(3, 6), chairBrush())).toBe(true);

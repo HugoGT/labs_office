@@ -25,7 +25,8 @@ import {
   type DecorRotation,
   type DecorTileRect,
 } from './officeDecor';
-import { doorOnWall } from './officeDoors';
+import { doorOnWall, wallTilesAfter } from './officeDoors';
+import type { GridEdge } from './artContract';
 
 /**
  * What a map click does: anchor `piece` turned `rotation` (and painted
@@ -129,6 +130,8 @@ export interface DecorGround {
   readonly walkable: readonly boolean[];
   readonly wallTiles: readonly boolean[];
   readonly walls?: readonly (string | null)[];
+  /** The edges the live doors open (`TerrainSnapshot.openings`), none when absent. */
+  readonly openings?: readonly GridEdge[];
 }
 
 /** The side of a desk, in tiles: what the desk scope may decorate. */
@@ -180,10 +183,10 @@ export function decorPlacementAllowed(
   const ignored = brush.from ?? index;
   const taken = new Set(items.filter((item) => item.index !== ignored).flatMap((item) => decorTiles(item, infoOf(item.piece), ground.width)));
   if (brush.from !== undefined && index !== brush.from && items.some((item) => item.index === index)) return false;
-  if (desks.length > 0) {
-    const placed: DecorEdit = { index, item: { piece: brush.piece, rotation: brush.rotation } };
-    const after = withDecor(items, brush.from === undefined || brush.from === index ? [placed] : [{ index: brush.from, item: null }, placed]);
-    if (deskOverChairLimit(items, after, [index], infoOf, desks, ground.width) !== null) return false;
-  }
-  return rectTiles(target, ground.width).every((tile) => ground.walkable[tile] === true && (door || ground.wallTiles[tile] !== true) && !taken.has(tile));
+  const placed: DecorEdit = { index, item: { piece: brush.piece, rotation: brush.rotation } };
+  const after = withDecor(items, brush.from === undefined || brush.from === index ? [placed] : [{ index: brush.from, item: null }, placed]);
+  if (desks.length > 0 && deskOverChairLimit(items, after, [index], infoOf, desks, ground.width) !== null) return false;
+  // A door this brush replaces or moves closes its wall again (`wallTilesAfter`, the room's rule too).
+  const wallTiles = door ? ground.wallTiles : wallTilesAfter(ground, after);
+  return rectTiles(target, ground.width).every((tile) => ground.walkable[tile] === true && (door || wallTiles[tile] !== true) && !taken.has(tile));
 }

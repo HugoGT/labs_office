@@ -20,7 +20,8 @@
 import { WALL, type GridEdge } from './artContract.ts';
 import { AVATAR_BODY_CENTER_OFFSET, physicalBodyRect, type GeometryPoint } from './avatarGeometry.ts';
 import { decorChairFacing, type DecorItem, type DecorTileRect } from './officeDecor.ts';
-import { wallsJoin, type WallGrid } from './officeLayout.ts';
+import { wallFootprintRects, wallsJoin, type WallGrid } from './officeLayout.ts';
+import { coveredTiles } from './pieceCollisions.ts';
 
 /** Same as `TILE` in mapData.ts (pinned by the tests through the footprint pixels). */
 const DOOR_TILE = 32;
@@ -72,6 +73,23 @@ export function doorOnWall(grid: WallGrid, item: Pick<DecorItem, 'index' | 'rota
 /** The edges the doors of a decor layer open, in layer order. An edge with no joined wall under it opens nothing. */
 export function doorOpenings(items: readonly DecorItem[], width: number): GridEdge[] {
   return items.flatMap((item) => (isDoorPiece(item.piece) ? [doorEdge(item, width)] : []));
+}
+
+/**
+ * The tiles a wall touches once the decor layer is `after` (#223): a door
+ * that goes away closes its wall again, so whatever takes its tiles must
+ * keep off them like off any wall. The ground's own `wallTiles` when the
+ * doors are the same (the usual case), or when it has no walls to rebuild
+ * from. Shared by the editor's ghost and the room's decor rule.
+ */
+export function wallTilesAfter(
+  ground: Pick<WallGrid, 'width' | 'height'> & { readonly walls?: WallGrid['walls']; readonly openings?: readonly GridEdge[]; readonly wallTiles: readonly boolean[] },
+  after: readonly DecorItem[],
+): readonly boolean[] {
+  const openings = doorOpenings(after, ground.width);
+  if (ground.walls === undefined || JSON.stringify(openings) === JSON.stringify(ground.openings ?? [])) return ground.wallTiles;
+  const { width, height, walls } = ground;
+  return coveredTiles(wallFootprintRects({ width, height, walls, openings }), width, height);
 }
 
 /** Every post that ends a door's edge: removing or repainting one would leave the door off its wall. */

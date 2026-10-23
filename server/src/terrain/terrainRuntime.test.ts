@@ -785,6 +785,20 @@ describe('createTerrainRuntime doors (#223)', () => {
     expect(runtime.snapshot().openings).toEqual([]);
   });
 
+  it('keeps a chair that replaces a door off the wall the door leaves closed, as with no door there', async () => {
+    const runtime = runtimeWith();
+    await runtime.load();
+    const chair = { piece: 'chair-wood', rotation: 0 } as const;
+    // Baseline: the same chair on the same tiles with no door is refused.
+    await expect(runtime.setDecor([{ index: at(66, 22), item: chair }], null)).rejects.toThrow(TerrainProtectedError);
+    await runtime.setDecor([{ index: at(66, 22), item: DOOR }], null);
+
+    await expect(runtime.setDecor([{ index: at(66, 22), item: chair }], null)).rejects.toThrow(TerrainProtectedError);
+    await expect(runtime.setDecor([{ index: at(66, 22), item: null }, { index: at(66, 21), item: chair }], null)).rejects.toThrow(TerrainProtectedError);
+    expect(runtime.decor()).toEqual([{ index: at(66, 22), ...DOOR }]);
+    expect(passes(runtime, ...through(66))).toBe(true);
+  });
+
   it('moves and removes a door like any decor item, closing the wall it leaves', async () => {
     const runtime = runtimeWith();
     await runtime.load();
