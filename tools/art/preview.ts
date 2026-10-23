@@ -10,6 +10,7 @@ import {
   CHARACTER_SEATED,
   CHARACTER_WALK,
   DESK,
+  DOOR,
   FLOOR,
   HEDGE,
   PACK_FACINGS,
@@ -433,8 +434,23 @@ function tablesPreview(sheets: PackSheets): PixelBuffer {
 }
 
 /** Preview images by file name, already upscaled. */
+/** Every door sheet over a wood floor, frame grid as the sheet lays it out (#223). */
+function doorsPreview(sheets: PackSheets): PixelBuffer {
+  const width = DOOR.columns * DOOR.frame.width;
+  const height = DOOR.rows * DOOR.frame.height;
+  const out = backdrop(GAP + sheets.doors.length * (width + GAP), GAP + height + GAP);
+  const floor = sheets.floors.find((entry) => entry.terrain === 'wood')!.image;
+  sheets.doors.forEach(({ image }, index) => {
+    const cell = tiledFloor(floor, width / ART_TILE, height / ART_TILE);
+    cell.blit(image, 0, 0);
+    out.blit(cell, GAP + index * (width + GAP), GAP);
+  });
+  return out;
+}
+
 export function renderPreviews(sheets: PackSheets): Map<string, PixelBuffer> {
   return new Map([
+    ['doors.png', upscale(doorsPreview(sheets), PREVIEW_SCALE)],
     ['characters.png', upscale(charactersPreview(sheets), PREVIEW_SCALE)],
     ['floors.png', upscale(floorsPreview(sheets), PREVIEW_SCALE)],
     ['furniture.png', upscale(furniturePreview(sheets), PREVIEW_SCALE)],

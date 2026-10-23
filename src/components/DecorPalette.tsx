@@ -19,7 +19,7 @@ import styles from './DecorPalette.module.css';
  * and what a click on the map does.
  */
 
-type DecorCatalogKind = 'chair' | 'desk' | 'table' | 'plant';
+type DecorCatalogKind = 'chair' | 'desk' | 'table' | 'plant' | 'door';
 
 /** The groups in palette order, named for the person picking. */
 const GROUPS: readonly { kind: DecorCatalogKind; label: string }[] = [
@@ -27,6 +27,8 @@ const GROUPS: readonly { kind: DecorCatalogKind; label: string }[] = [
   { kind: 'desk', label: 'Mesas de escritorio' },
   { kind: 'table', label: 'Mesas de sala' },
   { kind: 'plant', label: 'Plantas' },
+  // #223: only the office scope offers them (the desk scope's `fitsDeskArea` leaves doors out).
+  { kind: 'door', label: 'Puertas' },
 ];
 
 /**

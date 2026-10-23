@@ -126,6 +126,18 @@ describe('materialCatalogFrom: plants and room tables (#208)', () => {
   });
 });
 
+describe('materialCatalogFrom: doors (#223)', () => {
+  it('offers every door of the pack, never colorable, for the decor palette', () => {
+    expect(catalog().door.map((option) => [option.id, option.kind, option.name, option.colorable, option.sheetUrl])).toEqual([
+      ['door-wood', 'door', 'Puerta de madera', false, 'assets/pack/door/wood.png'],
+    ]);
+  });
+
+  it('a door previews its closed leaf on a horizontal edge, around the middle of the edge', () => {
+    expect(previewFrame(catalog().door[0]!)).toEqual({ x: 32 - 24, y: 32 - 12, width: 48, height: 24 });
+  });
+});
+
 describe('defaultAppearance', () => {
   it('a colorable default starts in its default color, any other one without color', () => {
     const painted = catalog().desk.find((option) => option.id === 'desk-painted');
