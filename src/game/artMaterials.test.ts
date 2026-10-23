@@ -37,12 +37,13 @@ describe('materialCatalogFrom', () => {
     expect(catalog().desk.find((option) => option.id === 'desk-painted')?.name).toBe('Escritorio pintado');
   });
 
-  it('marks only the painted desk and the plain floor as colorable, with their default colors', () => {
+  it('marks only the painted desk, the plain floor and the carpet as colorable, with their default colors', () => {
     const colorable = [...catalog().desk, ...catalog().floor].filter((option) => option.colorable);
 
     expect(colorable.map((option) => [option.id, option.defaultColor])).toEqual([
       ['desk-painted', '#4f9a8a'],
       ['floor-plain', '#b9c3cc'],
+      ['floor-carpet', '#5a6f86'],
     ]);
   });
 

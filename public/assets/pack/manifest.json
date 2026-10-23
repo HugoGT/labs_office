@@ -1384,8 +1384,8 @@
       "author": "HugoGT",
       "license": "proprietary-internal",
       "material": "carpet",
-      "colorable": false,
-      "defaultColor": null,
+      "colorable": true,
+      "defaultColor": "#5a6f86",
       "motifTiles": 3,
       "files": [
         {

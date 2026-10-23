@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { PACK_FACINGS } from '../../src/game/artContract.ts';
 import { recolorPixels } from '../../src/game/artColor.ts';
 import { DEFAULT_TABLE_COLOR, tableSprite } from './domain/tables.ts';
-import { DEFAULT_PLAIN_COLOR, plainTile } from './domain/tiles.ts';
+import { carpetTile, DEFAULT_CARPET_COLOR, DEFAULT_PLAIN_COLOR, plainTile } from './domain/tiles.ts';
 
 /**
  * The office never runs the generators: it recolors the exported default-color
@@ -41,6 +41,15 @@ test('recoloring the exported plain floor matches the exporter painting it in th
   const exported = plainTile().data;
   for (const color of COLORS) {
     const result = drift(recolorPixels(exported, DEFAULT_PLAIN_COLOR, color), plainTile(color).data);
+    assert.ok(result.mean < 0.5, `${color}: mean drift ${result.mean}`);
+    assert.equal(result.offShare, 0, `${color}: ${result.offShare} of the pixels drift`);
+  }
+});
+
+test('recoloring the exported carpet matches the exporter painting it in that color (#222)', () => {
+  const exported = carpetTile().data;
+  for (const color of COLORS) {
+    const result = drift(recolorPixels(exported, DEFAULT_CARPET_COLOR, color), carpetTile(color).data);
     assert.ok(result.mean < 0.5, `${color}: mean drift ${result.mean}`);
     assert.equal(result.offShare, 0, `${color}: ${result.offShare} of the pixels drift`);
   }
