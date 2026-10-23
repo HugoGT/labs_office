@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { physicalBodyRect } from './avatarGeometry';
 import { TILE } from './mapData';
+import { wallColliderRects } from './officeLayout';
 import { COLLISION_BODY_CENTER_OFFSET } from './pieceCollisions';
 import {
   BODY_CENTER_OFFSET,
@@ -10,6 +11,7 @@ import {
   positionForBodyTile,
   type SearchStats,
   type SolidGrid,
+  type WalkWorld,
 } from './pathfinding';
 import type { TileCoord } from './terrainGrid';
 
@@ -23,6 +25,9 @@ function openGrid(width: number, height: number): SolidGrid {
 }
 
 const tile = (tx: number, ty: number): TileCoord => ({ tx, ty });
+
+/** A world of terrain tiles only, no wall or piece rectangle. */
+const terrainOnly = (terrainSolid: SolidGrid): WalkWorld => ({ terrainSolid, rects: [] });
 
 /** Integer path cost: 10 per straight step, 14 per diagonal one. */
 function pathCost(path: readonly TileCoord[]): number {
@@ -239,20 +244,20 @@ describe('planWalk', () => {
   it('goes straight to the goal in open ground', () => {
     const goal = centerOf(6, 1);
 
-    expect(planWalk(openGrid(8, 3), centerOf(0, 1), goal)).toEqual([goal]);
+    expect(planWalk(terrainOnly(openGrid(8, 3)), centerOf(0, 1), goal)).toEqual([goal]);
   });
 
   it('ends exactly on the clicked point, not on the tile center', () => {
     const goal = atBodyCenter(6 * TILE + 20, 1 * TILE + 11);
 
-    expect(planWalk(openGrid(8, 3), centerOf(0, 1), goal)).toEqual([goal]);
+    expect(planWalk(terrainOnly(openGrid(8, 3)), centerOf(0, 1), goal)).toEqual([goal]);
   });
 
   it('walks around a wall without ever sweeping the body through a blocked tile', () => {
     const grid = gridOf(['..#..', '..#..', '..#..', '..#..', '.....']);
     const from = centerOf(0, 0);
     const goal = centerOf(4, 0);
-    const route = planWalk(grid, from, goal);
+    const route = planWalk(terrainOnly(grid), from, goal);
 
     expect(route).not.toBeNull();
     expect(route!.length).toBeGreaterThanOrEqual(2);
@@ -269,15 +274,15 @@ describe('planWalk', () => {
   it('keeps only the corners of a corridor', () => {
     const grid = gridOf(['....###', '###.###', '###....']);
 
-    expect(planWalk(grid, centerOf(0, 0), centerOf(6, 2))).toEqual([centerOf(3, 0), centerOf(3, 2), centerOf(6, 2)]);
+    expect(planWalk(terrainOnly(grid), centerOf(0, 0), centerOf(6, 2))).toEqual([centerOf(3, 0), centerOf(3, 2), centerOf(6, 2)]);
   });
 
   it('keeps the goal tile center as the last stop when the clicked point hugs a wall', () => {
     // Touching the swept margin is clear; one pixel further needs a waypoint.
     const grid = gridOf(['...#']);
     const edge = 3 * TILE - physicalBodyRect({ x: 0, y: 0 }).width / 2 - 3;
-    expect(planWalk(grid, centerOf(0, 0), atBodyCenter(edge, 16))).toEqual([atBodyCenter(edge, 16)]);
-    expect(planWalk(grid, centerOf(0, 0), atBodyCenter(edge + 1, 16))).toEqual([centerOf(2, 0), atBodyCenter(edge + 1, 16)]);
+    expect(planWalk(terrainOnly(grid), centerOf(0, 0), atBodyCenter(edge, 16))).toEqual([atBodyCenter(edge, 16)]);
+    expect(planWalk(terrainOnly(grid), centerOf(0, 0), atBodyCenter(edge + 1, 16))).toEqual([centerOf(2, 0), atBodyCenter(edge + 1, 16)]);
   });
 
   it('refuses to pull a segment whose swept body clips a wall corner the center line misses', () => {
@@ -286,25 +291,25 @@ describe('planWalk', () => {
     const grid = gridOf(['.#.', '...']);
     const from = centerOf(0, 1);
 
-    expect(planWalk(grid, from, atBodyCenter(80, 39))).toEqual([centerOf(2, 1), atBodyCenter(80, 39)]);
-    expect(planWalk(grid, from, atBodyCenter(80, 43))).toEqual([atBodyCenter(80, 43)]);
+    expect(planWalk(terrainOnly(grid), from, atBodyCenter(80, 39))).toEqual([centerOf(2, 1), atBodyCenter(80, 39)]);
+    expect(planWalk(terrainOnly(grid), from, atBodyCenter(80, 43))).toEqual([atBodyCenter(80, 43)]);
   });
 
   it('answers null for a blocked or out of bounds goal tile', () => {
     const grid = gridOf(['...', '.#.', '...']);
 
-    expect(planWalk(grid, centerOf(0, 0), centerOf(1, 1))).toBeNull();
-    expect(planWalk(grid, centerOf(0, 0), centerOf(5, 0))).toBeNull();
-    expect(planWalk(grid, centerOf(0, 0), centerOf(0, -1))).toBeNull();
+    expect(planWalk(terrainOnly(grid), centerOf(0, 0), centerOf(1, 1))).toBeNull();
+    expect(planWalk(terrainOnly(grid), centerOf(0, 0), centerOf(5, 0))).toBeNull();
+    expect(planWalk(terrainOnly(grid), centerOf(0, 0), centerOf(0, -1))).toBeNull();
   });
 
   it('answers null when no route exists, and for a goal that is not a number', () => {
     const closed = gridOf(['..#..', '..#..', '..#..']);
 
-    expect(planWalk(closed, centerOf(0, 1), centerOf(4, 1))).toBeNull();
-    expect(planWalk(openGrid(3, 3), centerOf(0, 0), { x: Number.NaN, y: 40 })).toBeNull();
-    expect(planWalk(openGrid(3, 3), centerOf(0, 0), { x: 40, y: Number.POSITIVE_INFINITY })).toBeNull();
-    expect(planWalk(openGrid(3, 3), { x: Number.NaN, y: 0 }, centerOf(2, 2))).toBeNull();
+    expect(planWalk(terrainOnly(closed), centerOf(0, 1), centerOf(4, 1))).toBeNull();
+    expect(planWalk(terrainOnly(openGrid(3, 3)), centerOf(0, 0), { x: Number.NaN, y: 40 })).toBeNull();
+    expect(planWalk(terrainOnly(openGrid(3, 3)), centerOf(0, 0), { x: 40, y: Number.POSITIVE_INFINITY })).toBeNull();
+    expect(planWalk(terrainOnly(openGrid(3, 3)), { x: Number.NaN, y: 0 }, centerOf(2, 2))).toBeNull();
   });
 
   it('escapes a blocked start tile through the nearest free tile first', () => {
@@ -312,13 +317,13 @@ describe('planWalk', () => {
     grid[4]![4] = true;
     const goal = centerOf(8, 4);
 
-    const north = planWalk(grid, centerOf(4, 4), goal);
+    const north = planWalk(terrainOnly(grid), centerOf(4, 4), goal);
     expect(north![0]).toEqual(centerOf(4, 3));
     expect(north![north!.length - 1]).toEqual(goal);
 
     // Same distance, so row then column break the tie: with the north tile gone it is the west one.
     grid[3]![4] = true;
-    expect(planWalk(grid, centerOf(4, 4), goal)![0]).toEqual(centerOf(3, 4));
+    expect(planWalk(terrainOnly(grid), centerOf(4, 4), goal)![0]).toEqual(centerOf(3, 4));
   });
 
   it('escapes a start up to 3 tiles from open ground and gives up beyond that', () => {
@@ -329,17 +334,17 @@ describe('planWalk', () => {
     };
     const goal = centerOf(13, 7);
 
-    const near = planWalk(blockedBlock(5, 9), centerOf(7, 7), goal);
+    const near = planWalk(terrainOnly(blockedBlock(5, 9)), centerOf(7, 7), goal);
     expect(near![0]).toEqual(centerOf(7, 4));
     expect(near![near!.length - 1]).toEqual(goal);
 
-    expect(planWalk(blockedBlock(4, 10), centerOf(7, 7), goal)).toBeNull();
+    expect(planWalk(terrainOnly(blockedBlock(4, 10)), centerOf(7, 7), goal)).toBeNull();
   });
 
   it('plans over a whole 126x90 map in one call', () => {
     const goal = centerOf(125, 89);
 
-    expect(planWalk(openGrid(126, 90), centerOf(0, 0), goal)).toEqual([goal]);
+    expect(planWalk(terrainOnly(openGrid(126, 90)), centerOf(0, 0), goal)).toEqual([goal]);
   });
 
   it('only returns walks that clear every wall, and finds one whenever the tiles are connected', () => {
@@ -378,7 +383,7 @@ describe('planWalk', () => {
         }
       }
 
-      const route = planWalk(grid, centerOf(start.tx, start.ty), centerOf(end.tx, end.ty));
+      const route = planWalk(terrainOnly(grid), centerOf(start.tx, start.ty), centerOf(end.tx, end.ty));
       if (!reached.has(`${end.tx},${end.ty}`)) {
         expect(route).toBeNull();
         refused++;
@@ -397,5 +402,125 @@ describe('planWalk', () => {
     // Both branches ran, so neither assertion block above was vacuous.
     expect(found).toBeGreaterThan(10);
     expect(refused).toBeGreaterThan(5);
+  });
+});
+
+/**
+ * Independent oracle for "this walk never overlaps anything Arcade collides
+ * with": samples the body (no margin) every pixel along the segment against
+ * the blocked tiles and every rectangle.
+ */
+function segmentClearOf(world: WalkWorld, from: { x: number; y: number }, to: { x: number; y: number }): boolean {
+  if (!segmentClear(world.terrainSolid, from, to)) return false;
+  const length = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.y - from.y)));
+  for (let i = 0; i <= length; i++) {
+    const body = physicalBodyRect({ x: from.x + ((to.x - from.x) * i) / length, y: from.y + ((to.y - from.y) * i) / length });
+    const hit = world.rects.some((rect) =>
+      rect.x < body.x + body.width && body.x < rect.x + rect.w && rect.y < body.y + body.height && body.y < rect.y + rect.h);
+    if (hit) return false;
+  }
+  return true;
+}
+
+function expectClearWalk(world: WalkWorld, from: { x: number; y: number }, route: readonly { x: number; y: number }[] | null) {
+  expect(route).not.toBeNull();
+  let previous = from;
+  for (const point of route!) {
+    expect(segmentClearOf(world, previous, point), `${JSON.stringify(previous)} -> ${JSON.stringify(point)}`).toBe(true);
+    previous = point;
+  }
+}
+
+describe('planWalk against wall and piece rectangles (#219, #221)', () => {
+  /**
+   * 12x12 open tiles with a room whose walls run on the grid lines from
+   * vertex (2,2) to (8,8). With a door, the bottom wall misses the post at
+   * (5,8): a one-post door, 48 px between the two joints beside it.
+   */
+  function walledRoom({ door = true } = {}): WalkWorld {
+    const width = 12;
+    const height = 12;
+    const walls: (string | null)[] = Array(width * height).fill(null);
+    for (let i = 2; i <= 8; i++) {
+      for (const [tx, ty] of [[i, 2], [i, 8], [2, i], [8, i]] as const) walls[ty * width + tx] = 'wall-brick';
+    }
+    if (door) walls[8 * width + 5] = null;
+    return { terrainSolid: openGrid(width, height), rects: wallColliderRects({ width, height, walls }) };
+  }
+
+  it('walks from the corridor into a walled room through a one-post door, and back out', () => {
+    const room = walledRoom();
+    const outside = centerOf(5, 10);
+    const inside = centerOf(5, 4);
+
+    const into = planWalk(room, outside, inside);
+    expectClearWalk(room, outside, into);
+    expect(into!.at(-1)).toEqual(inside);
+
+    const out = planWalk(room, inside, outside);
+    expectClearWalk(room, inside, out);
+    expect(out!.at(-1)).toEqual(outside);
+  });
+
+  it('reaches the spots along both sides of a wall, which the whole-tile grid blocked', () => {
+    const room = walledRoom();
+    const from = centerOf(10, 10);
+    // Inside, against the top wall (line y = 64), and outside, against the right one (line x = 256).
+    for (const goal of [centerOf(3, 2), atBodyCenter(2 * TILE + 18, 4 * TILE + 16), atBodyCenter(8 * TILE + 18, 5 * TILE + 16)]) {
+      const route = planWalk(room, from, goal);
+      expectClearWalk(room, from, route);
+      expect(route!.at(-1)).toEqual(goal);
+    }
+  });
+
+  it('answers null for a walled room with no door', () => {
+    expect(planWalk(walledRoom({ door: false }), centerOf(5, 10), centerOf(5, 4))).toBeNull();
+  });
+
+  it('never heads through a desk the body is pressed against: it walks around it', () => {
+    // A desk thinner than a tile; the body touches its bottom edge, so its
+    // center is in a tile the desk partly covers.
+    const desk = { x: 96, y: 136, w: 128, h: 16 };
+    const world: WalkWorld = { terrainSolid: openGrid(10, 10), rects: [desk] };
+    const from = atBodyCenter(160, desk.y + desk.h + 7);
+    const goal = centerOf(5, 1);
+
+    const route = planWalk(world, from, goal);
+    expectClearWalk(world, from, route);
+    expect(route!.at(-1)).toEqual(goal);
+    expect(route!.some((point) => point.x <= desk.x - 9 || point.x >= desk.x + desk.w + 9)).toBe(true);
+  });
+
+  it('judges the goal by the whole body: a body overlapping a rectangle is refused, one touching it is not', () => {
+    const world: WalkWorld = { terrainSolid: openGrid(8, 8), rects: [{ x: 96, y: 96, w: 32, h: 32 }] };
+    const from = centerOf(0, 3);
+
+    expect(planWalk(world, from, atBodyCenter(96 - 9 + 1, 112))).toBeNull();
+    const touching = atBodyCenter(96 - 9, 112);
+    expect(planWalk(world, from, touching)!.at(-1)).toEqual(touching);
+  });
+
+  it('only returns walks that clear every rectangle, around random pieces', () => {
+    let seed = 20261023;
+    const random = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 2 ** 32;
+    };
+    let found = 0;
+    for (let round = 0; round < 60; round++) {
+      const rects = Array.from({ length: 8 }, () => ({
+        x: Math.floor(random() * 300), y: Math.floor(random() * 300), w: 8 + Math.floor(random() * 60), h: 8 + Math.floor(random() * 60),
+      }));
+      const world: WalkWorld = { terrainSolid: openGrid(12, 12), rects };
+      const from = { x: Math.floor(random() * 360) + 12, y: Math.floor(random() * 360) };
+      const goal = { x: Math.floor(random() * 360) + 12, y: Math.floor(random() * 360) };
+      if (!segmentClearOf(world, from, from)) continue;
+      const route = planWalk(world, from, goal);
+      if (route === null) continue;
+      expectClearWalk(world, from, route);
+      expect(route.at(-1)).toEqual(goal);
+      found++;
+    }
+    expect(found).toBeGreaterThan(20);
   });
 });

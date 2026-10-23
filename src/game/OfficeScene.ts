@@ -7,7 +7,7 @@ import { deskPlacement } from './artPlacement';
 import { feetOf, positionForFeet } from './avatarGeometry';
 import { beginAutoWalk, isAutoWalkArrived, stepAutoWalk, type AutoWalkState } from './autoWalk';
 import { IDLE_AUTO_SIT, SIT_LOCK_MS, dropSitDwells, guardLeftSeat, sitLockActive, stepAutoSit, type AutoSitState } from './autoSit';
-import { planWalk } from './pathfinding';
+import { bodyTileOf, planWalk, positionForBodyTile } from './pathfinding';
 import { registerClick, type ClickSample } from './doubleClick';
 import { CameraPanLayer } from './CameraPanLayer';
 import { CameraZoomLayer } from './CameraZoomLayer';
@@ -2117,8 +2117,11 @@ export class OfficeScene extends Phaser.Scene {
     const peer = this.remotes?.get(sessionId);
     if (!peer) return; // se desconecto antes de que esto corriera: no-op silencioso.
 
-    const walkerTile = { tx: Math.floor(this.player.x / TILE), ty: Math.floor(this.player.y / TILE) };
-    const peerTile = { tx: Math.floor(peer.x / TILE), ty: Math.floor(peer.y / TILE) };
+    // Body tiles, like the planner: aiming at `tile * TILE + 16` put the body
+    // center 27 px down its tile and the body 2 px into the next one, so a
+    // desk below the approach tile stopped the walk short against it (#219).
+    const walkerTile = bodyTileOf(this.player);
+    const peerTile = bodyTileOf(peer);
     const peerSpace = detectSpace({ x: peer.x, y: peer.y }, this.spaces);
     const peerSpaceTiles: TileRect | null = peerSpace
       ? {
@@ -2131,18 +2134,18 @@ export class OfficeScene extends Phaser.Scene {
 
     const destination = pickApproachTile(this.grid, walkerTile, peerTile, peerSpaceTiles);
     if (!destination) return;
-    this.startWalk({ x: destination.tx * TILE + 16, y: destination.ty * TILE + 16 });
+    this.startWalk(positionForBodyTile(destination));
   }
 
   /**
    * Walks to `goal` around whatever `grid.solid` blocks (pathfinding, #2). The
    * route is planned BEFORE standing up: a goal nobody can reach leaves a
-   * seated player seated and moves nothing. The planner works on the body's
-   * tiles, so a blocked goal is judged by where the body would stand, not by
-   * the tile under the click.
+   * seated player seated and moves nothing. The planner tests the body
+   * against what Arcade collides it with, so a goal is judged by where the
+   * body would stand, not by the tile under the click.
    */
   private startWalk(goal: { x: number; y: number }): boolean {
-    const route = planWalk(this.grid.solid, this.player, goal);
+    const route = planWalk({ terrainSolid: this.grid.terrainSolid, rects: [...this.grid.wallRects, ...this.collisionRects] }, this.player, goal);
     if (route === null) return false;
     this.standUp();
     // The last stop is the goal itself: it stays the walk's destination.
