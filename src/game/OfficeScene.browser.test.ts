@@ -11,7 +11,7 @@ import {
   TILE,
   ZONE_LABELS,
 } from './mapData';
-import { TERRAIN_LAYER_COUNT } from './artContract';
+import { TERRAIN_LAYER_COUNT, doorFrameIndex } from './artContract';
 import { terrainSnapshot, withBlock, withWalls, type OfficeLayout } from './officeLayout';
 import { CHAIR_OBJECT_NAME, WALL_OBJECT_NAME } from './mapBuilder';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SPACES as BUILT_IN_SPACES } from '../test/legacyOffice';
@@ -4624,6 +4624,36 @@ describe('OfficeScene: edited terrain', () => {
     expect(solidAt(scene, doorway.x, doorway.y)).toBe(true);
     expect(grid().solid[22]![67]).toBe(true);
     expect(wallObjects(scene)).toHaveLength(walled);
+  });
+
+  it('draws a double door from the pack, hinged at its outer ends, opening while an avatar passes and closing after (#223)', async () => {
+    const { scene, handlers } = await bootConnected();
+    // Posts on vertices 67, 68 and 69 of row 22, and a door on each of the two segments.
+    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
+    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 0 }, { index: lawnTile + 1, piece: 'door-wood', rotation: 0 }]);
+    const leaf = (index: number) => scene.children.getByName(decorObjectName(index)) as Phaser.GameObjects.Image;
+    await vi.waitFor(() => expect(leaf(lawnTile).texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
+    const frames = () => [Number(leaf(lawnTile).frame.name), Number(leaf(lawnTile + 1).frame.name)];
+    const closed = [doorFrameIndex(0, 'start', false), doorFrameIndex(0, 'end', false)];
+    const open = [doorFrameIndex(0, 'start', true), doorFrameIndex(0, 'end', true)];
+    // Anchored on the middle of each edge, sorted like the wall body.
+    expect(leaf(lawnTile).x).toBe(lawnVertex.x + TILE / 2 - 32);
+    expect(leaf(lawnTile).y).toBe(lawnVertex.y - 32);
+    await vi.waitFor(() => expect(frames()).toEqual(closed), LOOP_WAIT);
+
+    // A remote avatar standing in the doorway of the second leaf opens the pair.
+    handlers.onAdd(remoteSnapshot({ sessionId: 'peer-door', x: lawnVertex.x + TILE + TILE / 2, y: lawnVertex.y - 11 }));
+    await vi.waitFor(() => expect(frames()).toEqual(open), LOOP_WAIT);
+    handlers.onRemove('peer-door');
+    await vi.waitFor(() => expect(frames()).toEqual(closed), LOOP_WAIT);
+
+    // So does the local player, and stepping away closes it again.
+    const player = findPlayer(scene);
+    const body = player.body as Phaser.Physics.Arcade.Body;
+    body.reset(lawnVertex.x + TILE / 2, lawnVertex.y + TILE / 2 - 11);
+    await vi.waitFor(() => expect(frames()).toEqual(open), LOOP_WAIT);
+    body.reset(lawnVertex.x + TILE / 2, lawnVertex.y + 5 * TILE);
+    await vi.waitFor(() => expect(frames()).toEqual(closed), LOOP_WAIT);
   });
 
   it('draws pending walls for the editor without colliding with them, and drops them when it closes', async () => {

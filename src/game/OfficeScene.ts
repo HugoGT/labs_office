@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { WALL, propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type Point } from './artContract';
+import { WALL, doorFrameIndex, doorPlacement, propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type Point } from './artContract';
 import { artUploadsManifestUrl, findPiece, type ArtAppearance } from './artPack';
 import { artCustomCharactersUrl } from './customCharacterArt';
 import { ArtPackLoader } from './artPackLoader';
@@ -37,7 +37,7 @@ import { deskAt, deskZoneName } from './deskLayout';
 import { SPACE_SHADE_ALPHA, SPACE_SHADE_NAME, shadeAround, shadeKey } from './spaceFocus';
 import { tableFacing, tableFloorRect } from './deskTable';
 import { decorChairs, decorFootprint, encodeOfficeDecor, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
-import { doorEdge, doorOpenings } from './officeDoors';
+import { doorEdge, doorLeaves, doorOpenings, openDoorLeaves, type DoorLeaf } from './officeDoors';
 import { deskEntryRefused } from './deskDecorRules';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
@@ -284,6 +284,15 @@ export class OfficeScene extends Phaser.Scene {
   private decorCollisionsManifest: ArtPackLoader['manifest'] = null;
   /** What the decor layer drew, destroyed and drawn again whenever it or its preview change. */
   private decorObjects: Phaser.GameObjects.GameObject[] = [];
+  /**
+   * The doors of the drawn decor layer (#223), by anchor: their leaf (edge,
+   * hinge, pair) and, once the sheet is in, the image `update()` switches
+   * between its closed and open frame. A redraw of the layer rebuilds it.
+   */
+  private doorLeaves = new Map<number, DoorLeaf>();
+  private doorImages = new Map<number, Phaser.GameObjects.Image>();
+  /** The anchors of the leaves drawn open, as `update()` last saw the avatars. */
+  private openDoors: ReadonlySet<number> = new Set();
   /** The static bodies of the terrain grid and their collider, replaced whole on each edit. */
   private terrainColliders?: { rects: Phaser.GameObjects.Rectangle[]; collider: Phaser.Physics.Arcade.Collider };
   /** The terrain of `terrainBlocks` and `terrainWalls`, kept to rebuild `grid` when the collisions change. */
@@ -1639,6 +1648,15 @@ export class OfficeScene extends Phaser.Scene {
    */
   private drawDoor(item: DecorItem): Phaser.GameObjects.GameObject {
     const edge = doorEdge(item, this.layout.width);
+    // A leaf of the live layer knows its hinge (a double door, D7); a lone one, or the editor's ghost, hinges at its start.
+    const leaf = this.doorLeaves.get(item.index);
+    const hinge = leaf !== undefined && leaf.rotation === item.rotation ? leaf.hinge : 'start';
+    const sheet = this.artSheet({ materialId: item.piece, color: null }, 'door', this.redrawDecor);
+    if (sheet !== null) {
+      const placement = doorPlacement(edge);
+      const frame = doorFrameIndex(item.rotation, hinge, this.openDoors.has(item.index));
+      return putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(placement.depthY)).setName(decorObjectName(item.index));
+    }
     const horizontal = edge.axis === 'horizontal';
     const x = horizontal ? (edge.col + 0.5) * TILE : edge.col * TILE;
     const y = horizontal ? edge.row * TILE : (edge.row + 0.5) * TILE;
@@ -1647,6 +1665,28 @@ export class OfficeScene extends Phaser.Scene {
       // The bottom of the wall body it replaces: half a wall below the edge's middle either way.
       .setDepth(worldAssetDepth(y + WALL.thickness / 2))
       .setName(decorObjectName(item.index));
+  }
+
+  /**
+   * Opens every door leaf an avatar (this player or a peer) stands at, and
+   * closes the rest (#223, `openDoorLeaves`): drawing only, once per frame,
+   * switching the frame of the images `paintDecor` kept. Doors never block.
+   */
+  private animateDoors(): void {
+    if (this.doorImages.size === 0) return;
+    const positions: Point[] = [{ x: this.player.x, y: this.player.y }];
+    for (const sessionId of this.remotes?.sessionIds() ?? []) {
+      const avatar = this.remotes?.get(sessionId);
+      if (avatar !== undefined) positions.push({ x: avatar.x, y: avatar.y });
+    }
+    const open = openDoorLeaves([...this.doorLeaves.values()], positions);
+    for (const [index, image] of this.doorImages) {
+      const leaf = this.doorLeaves.get(index);
+      if (leaf === undefined) continue;
+      const frame = doorFrameIndex(leaf.rotation, leaf.hinge, open.has(index));
+      if (image.frame.name !== String(frame)) image.setFrame(frame);
+    }
+    this.openDoors = open;
   }
 
   /**
@@ -1903,7 +1943,14 @@ export class OfficeScene extends Phaser.Scene {
     if (this.art.manifest !== this.decorCollisionsManifest && this.officeDecor.length > 0) this.placeDecorCollisions();
     for (const object of this.decorObjects) object.destroy();
     const items = this.decorPreview === null ? this.officeDecor : withDecor(this.officeDecor, this.decorPreview);
+    this.doorLeaves = new Map(doorLeaves(items, this.layout.width).map((leaf) => [leaf.index, leaf]));
     this.decorObjects = items.flatMap((item) => this.drawDecorPiece(item));
+    const doorNamed = new Map([...this.doorLeaves.keys()].map((index) => [decorObjectName(index), index]));
+    this.doorImages = new Map();
+    for (const object of this.decorObjects) {
+      const index = doorNamed.get(object.name);
+      if (index !== undefined && object instanceof Phaser.GameObjects.Image) this.doorImages.set(index, object);
+    }
   }
 
   /** One item of the decor layer: a chair in both layers like a base chair (`placeChairs`), anything else by `drawDecorItem`. */
@@ -2241,6 +2288,7 @@ export class OfficeScene extends Phaser.Scene {
       avatar.lastX = avatar.x;
       avatar.lastY = avatar.y;
     }
+    this.animateDoors();
     if (this.localPositionReady && this.connectionState === 'connected') {
       this.connection?.sendMove(this.player.x, this.player.y, this.facing);
     }
