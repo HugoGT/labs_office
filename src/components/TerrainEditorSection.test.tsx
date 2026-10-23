@@ -54,7 +54,11 @@ describe('TerrainEditorSection', () => {
     await open();
 
     expect(screen.getByRole('group', { name: 'Suelos' })).toBeInTheDocument();
-    expect(screen.getByText(/9 × 9/)).toBeInTheDocument();
+    expect(screen.getByText('Pintar sobre el vacío crea terreno nuevo; «Vacío» lo borra. El agua y el vacío no se pueden caminar. Con ESC sales del editor.')).toBeInTheDocument();
+    // That sentence is the menu's only explanation.
+    expect(screen.queryByText(/9 × 9/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/minimapa/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/siempre es de madera/)).not.toBeInTheDocument();
     expect(screen.queryByText(/procedural/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Semilla/)).not.toBeInTheDocument();
     expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
