@@ -4771,6 +4771,43 @@ describe('OfficeScene: edited terrain', () => {
     expect(wallObjects(scene)).toHaveLength(walled);
   });
 
+  it('opens a door only for whoever is about to cross it, swinging away from where they come from, and keeps the swing mid-crossing (#223, S14)', async () => {
+    const { scene, handlers } = await bootConnected();
+    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
+    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 0 }]);
+    const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
+    await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
+    const frame = () => Number(leaf().frame.name);
+    const body = findPlayer(scene).body as Phaser.Physics.Arcade.Body;
+    const middle = lawnVertex.x + TILE / 2;
+    // Body centers sit 11px below the network position (`AVATAR_BODY_CENTER_OFFSET`).
+    const at = (x: number, centerY: number) => body.reset(x, centerY - 11);
+
+    // Walking along the wall in the next column, on the door's own rows, opens nothing.
+    at(lawnVertex.x + TILE + TILE / 2 + 2, lawnVertex.y - 10);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(frame()).toBe(doorFrameIndex(0, 'start', false));
+    at(lawnVertex.x - TILE / 2, lawnVertex.y + 10);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(frame()).toBe(doorFrameIndex(0, 'start', false));
+
+    // Lined up from outside: it swings into the room, and stays so while the walker crosses the line and goes in.
+    at(middle, lawnVertex.y - 10);
+    await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(0, 'start', true)), LOOP_WAIT);
+    at(middle, lawnVertex.y + 10);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(frame()).toBe(doorFrameIndex(0, 'start', true));
+    at(middle, lawnVertex.y + 4 * TILE);
+    await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(0, 'start', false)), LOOP_WAIT);
+
+    // Coming out of the room it swings out of it, not into the walker.
+    at(middle, lawnVertex.y + 10);
+    await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(180, 'start', true)), LOOP_WAIT);
+    at(middle, lawnVertex.y - 10);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(frame()).toBe(doorFrameIndex(180, 'start', true));
+  });
+
   it('draws a double door from the pack, hinged at its outer ends, opening while an avatar passes and closing after (#223)', async () => {
     const { scene, handlers } = await bootConnected();
     // Posts on vertices 67, 68 and 69 of row 22, and a door on each of the two segments.
@@ -4780,7 +4817,9 @@ describe('OfficeScene: edited terrain', () => {
     await vi.waitFor(() => expect(leaf(lawnTile).texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
     const frames = () => [Number(leaf(lawnTile).frame.name), Number(leaf(lawnTile + 1).frame.name)];
     const closed = [doorFrameIndex(0, 'start', false), doorFrameIndex(0, 'end', false)];
+    // Swung into the room (rotation 0) for whoever comes from outside, out of it (180) for whoever comes from inside, the hinges where they were (S14).
     const open = [doorFrameIndex(0, 'start', true), doorFrameIndex(0, 'end', true)];
+    const openOut = [doorFrameIndex(180, 'start', true), doorFrameIndex(180, 'end', true)];
     // Anchored on the middle of each edge, sorted like the wall body.
     expect(leaf(lawnTile).x).toBe(lawnVertex.x + TILE / 2 - 32);
     expect(leaf(lawnTile).y).toBe(lawnVertex.y - 32);
@@ -4796,7 +4835,7 @@ describe('OfficeScene: edited terrain', () => {
     const player = findPlayer(scene);
     const body = player.body as Phaser.Physics.Arcade.Body;
     body.reset(lawnVertex.x + TILE / 2, lawnVertex.y + TILE / 2 - 11);
-    await vi.waitFor(() => expect(frames()).toEqual(open), LOOP_WAIT);
+    await vi.waitFor(() => expect(frames()).toEqual(openOut), LOOP_WAIT);
     body.reset(lawnVertex.x + TILE / 2, lawnVertex.y + 5 * TILE);
     await vi.waitFor(() => expect(frames()).toEqual(closed), LOOP_WAIT);
   });
@@ -4858,7 +4897,8 @@ describe('OfficeScene: edited terrain', () => {
 
     // Inside, it opens again and nothing holds the way out.
     body.reset(inside.x, inside.y);
-    await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(0, 'start', true)), LOOP_WAIT);
+    // Swung outward, away from the one who is inside (S14).
+    await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(180, 'start', true)), LOOP_WAIT);
     await vi.waitFor(() => expect(solidAt(scene, doorway.x, doorway.y)).toBe(false), LOOP_WAIT);
     expect(walk.startWalk({ x: doorway.x, y: lawnVertex.y - TILE - TILE / 2 - 11 })).toBe(true);
     walk.autoWalk = undefined;
@@ -4891,9 +4931,9 @@ describe('OfficeScene: edited terrain', () => {
     body.reset(outside.x, outside.y);
     await vi.waitFor(() => expect(solidAt(scene, doorway.x, doorway.y)).toBe(true), LOOP_WAIT);
     expect(frame()).toBe(doorFrameIndex(0, 'start', false));
-    // In the room it opens.
+    // In the room it opens, swinging out of it.
     body.reset(inside.x, inside.y);
-    await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(0, 'start', true)), LOOP_WAIT);
+    await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(180, 'start', true)), LOOP_WAIT);
     await vi.waitFor(() => expect(solidAt(scene, doorway.x, doorway.y)).toBe(false), LOOP_WAIT);
 
     // A post goes: the room is open, the door stays and falls back to the rotation it was placed with.

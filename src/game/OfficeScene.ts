@@ -37,7 +37,7 @@ import { deskAt, deskZoneName } from './deskLayout';
 import { SPACE_SHADE_ALPHA, SPACE_SHADE_NAME, shadeAround, shadeKey } from './spaceFocus';
 import { tableFacing, tableFloorRect } from './deskTable';
 import { decorChairs, decorFootprint, encodeOfficeDecor, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
-import { doorEdge, doorLeaves, doorOpenings, isDoorPiece, lockedDoorBarriers, openDoorLeaves, roomMap, type DoorLeaf, type RoomMap } from './officeDoors';
+import { doorEdge, doorLeaves, doorOpenings, doorSwingRotation, isDoorPiece, lockedDoorBarriers, openDoorLeaves, roomMap, type DoorLeaf, type DoorSwing, type RoomMap } from './officeDoors';
 import { deskEntryRefused } from './deskDecorRules';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
@@ -304,7 +304,7 @@ export class OfficeScene extends Phaser.Scene {
   private liveDoors: { walls: readonly (string | null)[]; decor: readonly DecorItem[]; rooms: RoomMap; leaves: DoorLeaf[] } | null = null;
   private doorImages = new Map<number, Phaser.GameObjects.Image>();
   /** The anchors of the leaves drawn open, as `update()` last saw the avatars. */
-  private openDoors: ReadonlySet<number> = new Set();
+  private openDoors: ReadonlyMap<number, DoorSwing> = new Map();
   /** The locked doors (#223, S13) by leaf anchor, as the room replicates them. */
   private doorLocks: ReadonlySet<number> = new Set();
   /**
@@ -1680,8 +1680,9 @@ export class OfficeScene extends Phaser.Scene {
     const sheet = this.artSheet({ materialId: item.piece, color: null }, 'door', this.redrawDecor);
     if (sheet !== null) {
       const placement = doorPlacement(edge);
-      // Turned to face its room, whatever the rotation it was placed with (S16).
-      const frame = doorFrameIndex(leaf?.rotation ?? item.rotation, hinge, this.openDoors.has(item.index));
+      // Turned to face its room, whatever the rotation it was placed with (S16), and swung away from the avatar that opened it (S14).
+      const swing = this.openDoors.get(item.index);
+      const frame = doorFrameIndex(doorSwingRotation(leaf?.rotation ?? item.rotation, swing ?? 'inside'), hinge, swing !== undefined);
       return putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(placement.depthY)).setName(decorObjectName(item.index));
     }
     const horizontal = edge.axis === 'horizontal';
@@ -1695,9 +1696,10 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
-   * Opens every door leaf an avatar (this player or a peer) stands at, and
-   * closes the rest (#223, `openDoorLeaves`): drawing only, once per frame,
-   * switching the frame of the images `paintDecor` kept. Doors never block.
+   * Opens every door leaf an avatar (this player or a peer) is about to
+   * cross, swinging it away from the avatar, and closes the rest (#223,
+   * `openDoorLeaves`): drawing only, once per frame, switching the frame of
+   * the images `paintDecor` kept. Doors never block.
    */
   private animateDoors(): void {
     if (this.doorImages.size === 0) return;
@@ -1706,12 +1708,13 @@ export class OfficeScene extends Phaser.Scene {
       const avatar = this.remotes?.get(sessionId);
       if (avatar !== undefined) positions.push({ x: avatar.x, y: avatar.y });
     }
-    // A locked leaf opens only for whoever is on its inside (S13).
-    const open = openDoorLeaves([...this.doorLeaves.values()], positions, this.doorLocks);
+    // A locked leaf opens only for whoever is on its inside (S13); an open one keeps the side it swings to until it closes (S14).
+    const open = openDoorLeaves([...this.doorLeaves.values()], positions, this.doorLocks, this.openDoors);
     for (const [index, image] of this.doorImages) {
       const leaf = this.doorLeaves.get(index);
       if (leaf === undefined) continue;
-      const frame = doorFrameIndex(leaf.rotation, leaf.hinge, open.has(index));
+      const swing = open.get(index);
+      const frame = doorFrameIndex(doorSwingRotation(leaf.rotation, swing ?? 'inside'), leaf.hinge, swing !== undefined);
       if (image.frame.name !== String(frame)) image.setFrame(frame);
       const locked = this.doorLocks.has(index);
       if (locked && !image.isTinted) image.setTint(LOCKED_DOOR_TINT);

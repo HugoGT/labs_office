@@ -12,6 +12,7 @@ import {
   doorLockGroup,
   doorOnWall,
   doorOpenings,
+  doorSwingRotation,
   encodeDoorLocks,
   isDoorPiece,
   liveDoorLocks,
@@ -129,24 +130,113 @@ describe('officeDoors: open and closed (#223)', () => {
     const body = physicalBodyRect({ x: 0, y: 0 });
     return { x: cx - (body.x + body.width / 2), y: cy - (body.y + body.height / 2) };
   };
+  /** The anchors open, whatever side they swing to. */
+  const openAnchors = (...args: Parameters<typeof openDoorLeaves>) => new Set(openDoorLeaves(...args).keys());
 
-  it('opens a leaf while an avatar stands on its tiles or within a few pixels of them, and closes it otherwise', () => {
+  it('opens a leaf while an avatar is lined up with it and on its tiles or a few pixels past them, and closes it otherwise', () => {
     const leaves = doorLeaves([door(4, 6, 0)], WIDTH);
     // The door's tiles are (4, 5) and (4, 6): x 128..160, y 160..224.
-    expect(openDoorLeaves(leaves, [])).toEqual(new Set());
-    expect(openDoorLeaves(leaves, [standingAt(144, 200)])).toEqual(new Set([at(4, 6)]));
-    expect(openDoorLeaves(leaves, [standingAt(144, 170)])).toEqual(new Set([at(4, 6)]));
-    const body = physicalBodyRect({ x: 0, y: 0 });
+    expect(openAnchors(leaves, [])).toEqual(new Set());
+    expect(openAnchors(leaves, [standingAt(144, 200)])).toEqual(new Set([at(4, 6)]));
+    expect(openAnchors(leaves, [standingAt(144, 170)])).toEqual(new Set([at(4, 6)]));
     // Just within reach below the door, then just beyond it.
-    expect(openDoorLeaves(leaves, [standingAt(144, 224 + DOOR_OPEN_REACH_PX - 1 + body.height / 2)])).toEqual(new Set([at(4, 6)]));
-    expect(openDoorLeaves(leaves, [standingAt(144, 224 + DOOR_OPEN_REACH_PX + body.height / 2)])).toEqual(new Set());
-    expect(openDoorLeaves(leaves, [standingAt(300, 300)])).toEqual(new Set());
+    expect(openAnchors(leaves, [standingAt(144, 224 + DOOR_OPEN_REACH_PX - 1)])).toEqual(new Set([at(4, 6)]));
+    expect(openAnchors(leaves, [standingAt(144, 224 + DOOR_OPEN_REACH_PX)])).toEqual(new Set());
+    expect(openAnchors(leaves, [standingAt(300, 300)])).toEqual(new Set());
   });
 
-  it('opens both leaves of a double door together, never the next pair of the run', () => {
+  it('stays shut for an avatar walking past alongside the wall, outside the door span (S14)', () => {
+    const horizontal = doorLeaves([door(4, 6, 0)], WIDTH);
+    // The neighbouring columns, on the door's own rows, one on each side of the wall line.
+    for (const cy of [6 * 32 - 10, 6 * 32 + 10]) {
+      expect(openAnchors(horizontal, [standingAt(3 * 32 + 16, cy)])).toEqual(new Set());
+      expect(openAnchors(horizontal, [standingAt(5 * 32 + 16, cy)])).toEqual(new Set());
+    }
+    // The span's ends are in, the first pixel past them is out.
+    expect(openAnchors(horizontal, [standingAt(128, 6 * 32 - 10)])).toEqual(new Set([at(4, 6)]));
+    expect(openAnchors(horizontal, [standingAt(128 - 1, 6 * 32 - 10)])).toEqual(new Set());
+    expect(openAnchors(horizontal, [standingAt(160 - 1, 6 * 32 - 10)])).toEqual(new Set([at(4, 6)]));
+    expect(openAnchors(horizontal, [standingAt(160, 6 * 32 - 10)])).toEqual(new Set());
+    // The same for a door on a vertical edge (tiles (3, 2) and (4, 2): x 96..160, y 64..96).
+    const vertical = doorLeaves([door(4, 2, 90)], WIDTH);
+    expect(openAnchors(vertical, [standingAt(4 * 32 - 10, 3 * 32 + 16)])).toEqual(new Set());
+    expect(openAnchors(vertical, [standingAt(4 * 32 + 10, 1 * 32 + 16)])).toEqual(new Set());
+    expect(openAnchors(vertical, [standingAt(4 * 32 - 10, 2 * 32 + 16)])).toEqual(new Set([at(4, 2)]));
+  });
+
+  it('opens both leaves of a double door together, over the span of the pair, never the next pair of the run', () => {
     const leaves = doorLeaves([door(1, 6), door(2, 6), door(3, 6), door(4, 6)], WIDTH);
-    expect(openDoorLeaves(leaves, [standingAt(1 * 32 + 16, 6 * 32 + 16)])).toEqual(new Set([at(1, 6), at(2, 6)]));
-    expect(openDoorLeaves(leaves, [standingAt(4 * 32 + 16, 6 * 32 + 16)])).toEqual(new Set([at(3, 6), at(4, 6)]));
+    expect(openAnchors(leaves, [standingAt(1 * 32 + 16, 6 * 32 + 10)])).toEqual(new Set([at(1, 6), at(2, 6)]));
+    expect(openAnchors(leaves, [standingAt(2 * 32 + 16, 6 * 32 + 10)])).toEqual(new Set([at(1, 6), at(2, 6)]));
+    expect(openAnchors(leaves, [standingAt(4 * 32 + 16, 6 * 32 + 10)])).toEqual(new Set([at(3, 6), at(4, 6)]));
+    // Past the pair's span on its far side: out.
+    expect(openAnchors(leaves, [standingAt(5 * 32 + 16, 6 * 32 + 10)])).toEqual(new Set());
+    expect(openAnchors(leaves, [standingAt(0 * 32 + 16, 6 * 32 + 10)])).toEqual(new Set());
+  });
+
+  it('swings away from the side the avatar comes from, whatever way the door was placed (S14)', () => {
+    // Each rotation opens into its inside; `before` is a body center outside the edge line, `after` one inside it.
+    const cases: [DecorItem['rotation'], { x: number; y: number }, { x: number; y: number }][] = [
+      [0, { x: 144, y: 6 * 32 - 10 }, { x: 144, y: 6 * 32 + 10 }],
+      [180, { x: 144, y: 6 * 32 + 10 }, { x: 144, y: 6 * 32 - 10 }],
+      [90, { x: 4 * 32 - 10, y: 6 * 32 + 16 }, { x: 4 * 32 + 10, y: 6 * 32 + 16 }],
+      [270, { x: 4 * 32 + 10, y: 6 * 32 + 16 }, { x: 4 * 32 - 10, y: 6 * 32 + 16 }],
+    ];
+    for (const [rotation, outside, inside] of cases) {
+      const leaves = doorLeaves([door(4, 6, rotation)], WIDTH);
+      // From the outside it swings into the room, from the inside out of it: never into the walker.
+      expect(openDoorLeaves(leaves, [standingAt(outside.x, outside.y)]), `rotation ${rotation} from outside`).toEqual(new Map([[at(4, 6), 'inside']]));
+      expect(openDoorLeaves(leaves, [standingAt(inside.x, inside.y)]), `rotation ${rotation} from inside`).toEqual(new Map([[at(4, 6), 'outside']]));
+    }
+  });
+
+  it('draws the swing the other way round by turning the leaf half a turn, so its hinge stays at the same end (S14)', () => {
+    const [leaf] = doorLeaves([door(4, 6, 90)], WIDTH);
+    expect(doorSwingRotation(leaf!.rotation, 'inside')).toBe(90);
+    expect(doorSwingRotation(leaf!.rotation, 'outside')).toBe(270);
+    expect(doorSwingRotation(180, 'outside')).toBe(0);
+    expect(doorSwingRotation(270, 'outside')).toBe(90);
+  });
+
+  it('keeps the swing while the avatar passes the edge line, and drops it when the door closes (S14)', () => {
+    const leaves = doorLeaves([door(4, 6, 0)], WIDTH);
+    const edgeY = 6 * 32;
+    let swings = openDoorLeaves(leaves, [standingAt(144, edgeY - 12)]);
+    expect(swings.get(at(4, 6))).toBe('inside');
+    // Mid-crossing, on the line and past it: it does not flip.
+    for (const cy of [edgeY, edgeY + 1, edgeY + 12]) {
+      swings = openDoorLeaves(leaves, [standingAt(144, cy)], new Set(), swings);
+      expect(swings.get(at(4, 6)), `at ${cy}`).toBe('inside');
+    }
+    // Walked away: closed, and the next one to come from inside gets a fresh swing.
+    swings = openDoorLeaves(leaves, [standingAt(144, edgeY + 3 * 32)], new Set(), swings);
+    expect(swings).toEqual(new Map());
+    expect(openDoorLeaves(leaves, [standingAt(144, edgeY + 12)], new Set(), swings).get(at(4, 6))).toBe('outside');
+  });
+
+  it('keeps the swing it has when two avatars come from opposite sides, else the first one to open (S14)', () => {
+    const leaves = doorLeaves([door(4, 6, 0)], WIDTH);
+    const outside = standingAt(144, 6 * 32 - 12);
+    const inside = standingAt(144, 6 * 32 + 12);
+    expect(openDoorLeaves(leaves, [outside, inside]).get(at(4, 6))).toBe('inside');
+    expect(openDoorLeaves(leaves, [inside, outside]).get(at(4, 6))).toBe('outside');
+    expect(openDoorLeaves(leaves, [outside, inside], new Set(), new Map([[at(4, 6), 'outside']])).get(at(4, 6))).toBe('outside');
+  });
+
+  it('swings both leaves of a double door the same way, from whichever leaf the avatar is at (S14)', () => {
+    const leaves = doorLeaves([door(4, 6), door(5, 6)], WIDTH);
+    expect(openDoorLeaves(leaves, [standingAt(5 * 32 + 16, 6 * 32 - 10)])).toEqual(
+      new Map([
+        [at(4, 6), 'inside'],
+        [at(5, 6), 'inside'],
+      ]),
+    );
+    expect(openDoorLeaves(leaves, [standingAt(4 * 32 + 16, 6 * 32 + 10)])).toEqual(
+      new Map([
+        [at(4, 6), 'outside'],
+        [at(5, 6), 'outside'],
+      ]),
+    );
   });
 });
 
@@ -214,12 +304,14 @@ describe('officeDoors: locks (#223, S13)', () => {
     expect(lockedDoorBarriers(leaves, locked, centeredAt(144, 6 * 32 + 20))).toEqual([]);
   });
 
-  it('opens a locked leaf only for avatars on its inside', () => {
+  it('opens a locked leaf only for avatars on its inside, and swings it outward (S13, S14)', () => {
     const leaves = doorLeaves([door(4, 6, 0)], WIDTH);
     const locked = new Set([at(4, 6)]);
-    expect(openDoorLeaves(leaves, [centeredAt(144, 6 * 32 - 10)], locked)).toEqual(new Set());
-    expect(openDoorLeaves(leaves, [centeredAt(144, 6 * 32 + 10)], locked)).toEqual(new Set([at(4, 6)]));
-    expect(openDoorLeaves(leaves, [centeredAt(144, 6 * 32 - 10)])).toEqual(new Set([at(4, 6)]));
+    expect(openDoorLeaves(leaves, [centeredAt(144, 6 * 32 - 10)], locked)).toEqual(new Map());
+    expect(openDoorLeaves(leaves, [centeredAt(144, 6 * 32 + 10)], locked)).toEqual(new Map([[at(4, 6), 'outside']]));
+    // A swing remembered from before the lock never turns it into the one who is inside.
+    expect(openDoorLeaves(leaves, [centeredAt(144, 6 * 32 + 10)], locked, new Map([[at(4, 6), 'inside']]))).toEqual(new Map([[at(4, 6), 'outside']]));
+    expect(openDoorLeaves(leaves, [centeredAt(144, 6 * 32 - 10)])).toEqual(new Map([[at(4, 6), 'inside']]));
   });
 });
 

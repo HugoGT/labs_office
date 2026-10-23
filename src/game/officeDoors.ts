@@ -23,7 +23,7 @@
  */
 
 import { WALL, type GridEdge } from './artContract.ts';
-import { AVATAR_BODY_CENTER_OFFSET, physicalBodyRect, type GeometryPoint } from './avatarGeometry.ts';
+import { AVATAR_BODY_CENTER_OFFSET, type GeometryPoint } from './avatarGeometry.ts';
 import { decorChairFacing, type DecorItem, type DecorTileRect } from './officeDecor.ts';
 import { wallFootprintRects, wallsJoin, type WallGrid } from './officeLayout.ts';
 import { coveredTiles } from './pieceCollisions.ts';
@@ -31,7 +31,7 @@ import { coveredTiles } from './pieceCollisions.ts';
 /** Same as `TILE` in mapData.ts (pinned by the tests through the footprint pixels). */
 const DOOR_TILE = 32;
 
-/** How far past its tiles an avatar's body opens a door: it swings open just before someone reaches it. */
+/** How far past its tiles, across the edge, an avatar's body center opens a door: it swings open just before someone reaches it. */
 export const DOOR_OPEN_REACH_PX = 6;
 
 const DOOR_PREFIX = 'door-';
@@ -294,29 +294,68 @@ export function doorLeaves(items: readonly DecorItem[], width: number, rooms?: R
   return leaves;
 }
 
+/** Which side of its edge an open leaf swings to: into its inside room, or out of it. */
+export type DoorSwing = 'inside' | 'outside';
+
 /**
- * The anchors of the leaves drawn open: every leaf of a pair one of whose
- * leaves has an avatar's body (`physicalBodyRect` of each network position)
- * over its tiles or within `DOOR_OPEN_REACH_PX` of them. A locked leaf
- * (S13) opens only for a body whose center is on its inside. Drawing only:
- * an unlocked door never blocks anyone, open or closed.
+ * The rotation to draw a leaf with when it swings to `swing`: its own
+ * rotation (faces the inside) for `inside`, turned half way round for
+ * `outside`. The open frame of the opposite rotation keeps the hinge at the
+ * same world end (`doorFrameIndex`), so no extra art is needed (S14).
  */
-export function openDoorLeaves(leaves: readonly DoorLeaf[], positions: readonly GeometryPoint[], locked: ReadonlySet<number> = new Set()): Set<number> {
-  const bodies = positions.map((position) => ({ box: physicalBodyRect(position), center: bodyCenter(position) }));
-  const pairs = new Set<number>();
-  for (const leaf of leaves) {
-    const { x, y, w, h } = leaf.footprint;
-    const left = x * DOOR_TILE - DOOR_OPEN_REACH_PX;
-    const top = y * DOOR_TILE - DOOR_OPEN_REACH_PX;
-    const right = (x + w) * DOOR_TILE + DOOR_OPEN_REACH_PX;
-    const bottom = (y + h) * DOOR_TILE + DOOR_OPEN_REACH_PX;
-    const opens = bodies.some(
-      ({ box, center }) =>
-        box.x < right && box.x + box.width > left && box.y < bottom && box.y + box.height > top && (!locked.has(leaf.index) || insideOf(leaf, center) > 0),
-    );
-    if (opens) pairs.add(leaf.pair);
+export function doorSwingRotation(rotation: DecorItem['rotation'], swing: DoorSwing): DecorItem['rotation'] {
+  return swing === 'inside' ? rotation : (((rotation + 180) % 360) as DecorItem['rotation']);
+}
+
+/**
+ * The leaves drawn open, each with the side it swings to (#223, S14): every
+ * leaf of a pair one of whose bodies is about to cross it. A body (the
+ * center of each network position) is about to cross when it is lined up
+ * with the pair's opening, within its span along the edge, and on the
+ * footprint's tiles across it or within `DOOR_OPEN_REACH_PX` of them; walking
+ * past alongside the wall opens nothing. A locked leaf (S13) opens only for a
+ * body on its inside, and then swings outward.
+ *
+ * A leaf swings away from the side its walker comes from. `previous` is the
+ * result of the last call: a pair already open keeps its swing until it
+ * closes, so it does not flip when the body center passes the edge line mid
+ * crossing. Two bodies from opposite sides get that kept swing, else the one
+ * of the first body (in `positions` order) that opens it. Drawing only: an
+ * unlocked door never blocks anyone, open or closed.
+ */
+export function openDoorLeaves(
+  leaves: readonly DoorLeaf[],
+  positions: readonly GeometryPoint[],
+  locked: ReadonlySet<number> = new Set(),
+  previous: ReadonlyMap<number, DoorSwing> = new Map(),
+): Map<number, DoorSwing> {
+  const centers = positions.map(bodyCenter);
+  const pairs = new Map<number, DoorLeaf[]>();
+  for (const leaf of leaves) pairs.set(leaf.pair, [...(pairs.get(leaf.pair) ?? []), leaf]);
+  const open = new Map<number, DoorSwing>();
+  for (const members of pairs.values()) {
+    const lead = members[0]!;
+    // A pair with a locked leaf is locked: the key is never bypassed through its neighbour.
+    const shut = members.some((leaf) => locked.has(leaf.index));
+    const openers = centers.filter((center) => liningUp(members, center) && (!shut || insideOf(lead, center) > 0));
+    if (openers.length === 0) continue;
+    const kept = members.map((leaf) => previous.get(leaf.index)).find((swing) => swing !== undefined);
+    const swing: DoorSwing = shut ? 'outside' : (kept ?? (insideOf(lead, openers[0]!) > 0 ? 'outside' : 'inside'));
+    for (const leaf of members) open.set(leaf.index, swing);
   }
-  return new Set(leaves.filter((leaf) => pairs.has(leaf.pair)).map((leaf) => leaf.index));
+  return open;
+}
+
+/** Whether a body center is lined up with the opening of a pair of leaves (on one line) and close to its edge across it. */
+function liningUp(members: readonly DoorLeaf[], center: GeometryPoint): boolean {
+  const horizontal = members[0]!.edge.axis === 'horizontal';
+  const [along, across] = horizontal ? [center.x, center.y] : [center.y, center.x];
+  const spans = members.map(({ footprint: { x, y, w, h } }) => (horizontal ? { start: x, end: x + w, near: y, far: y + h } : { start: y, end: y + h, near: x, far: x + w }));
+  const start = Math.min(...spans.map((span) => span.start)) * DOOR_TILE;
+  const end = Math.max(...spans.map((span) => span.end)) * DOOR_TILE;
+  const near = spans[0]!.near * DOOR_TILE - DOOR_OPEN_REACH_PX;
+  const far = spans[0]!.far * DOOR_TILE + DOOR_OPEN_REACH_PX;
+  return along >= start && along < end && across > near && across < far;
 }
 
 // --- Locks (S13, S16) --------------------------------------------------------------------------
