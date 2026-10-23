@@ -101,7 +101,7 @@ function LayoutEditorSections({
   const parts = (
     <>
       {shown('decor') && decor !== undefined && decor !== null && (
-        <DecorEditorSection bridge={bridge} decor={decor} scope="office" area={null} desks={deskAreas}
+        <DecorEditorSection bridge={bridge} decor={decor} scope="office" area={null} desks={deskAreas} terrain={terrain}
           initiallyActive={section !== undefined} onExit={onExit}
           onEditingChange={(editing) => reportEditing('decor', editing)}
           forceExit={forced('decor')}

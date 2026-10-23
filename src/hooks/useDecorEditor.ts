@@ -93,6 +93,12 @@ export interface UseDecorEditorOptions {
    * server enforces both on its own. Absent, no desk rule applies here.
    */
   desks?: readonly DecorTileRect[];
+  /**
+   * Another tool of the same menu holds the map (the wall tool, #224): the
+   * editor puts its brush and selection down, closes its overlay and leaves
+   * Escape alone until it is resumed. It stays open meanwhile.
+   */
+  paused?: boolean;
 }
 
 export interface DecorEditor {
@@ -165,7 +171,15 @@ function brushFor(option: DecorPick, rotation: DecorRotation, color: string | un
 
 const NO_DESKS: readonly DecorTileRect[] = [];
 
-export function useDecorEditor({ bridge, decor, area, infoOf = decorInfoFromPieceId, onExit, desks = NO_DESKS }: UseDecorEditorOptions): DecorEditor {
+export function useDecorEditor({
+  bridge,
+  decor,
+  area,
+  infoOf = decorInfoFromPieceId,
+  onExit,
+  desks = NO_DESKS,
+  paused = false,
+}: UseDecorEditorOptions): DecorEditor {
   const [active, setActive] = useState(false);
   const [items, setItems] = useState<readonly DecorItem[]>([]);
   const [brush, setBrush] = useState<DecorBrush | null>(null);
@@ -362,7 +376,7 @@ export function useDecorEditor({ bridge, decor, area, infoOf = decorInfoFromPiec
 
   // A fresh subscription per render keeps `placeAt` and `turn` reading the current brush.
   useEffect(() => {
-    if (!active) return undefined;
+    if (!active || paused) return undefined;
     const offs = [
       bridge.on('decorpick', ({ index }) => placeAt(index)),
       bridge.on('decorrotate', ({ step }) => turn(step)),
@@ -382,7 +396,7 @@ export function useDecorEditor({ bridge, decor, area, infoOf = decorInfoFromPiec
   // handled; without `onExit` an Escape with nothing picked is left to the sidebar.
   // Supr and Backspace delete the selected item, unless someone is typing.
   useEffect(() => {
-    if (!active) return undefined;
+    if (!active || paused) return undefined;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.defaultPrevented) return;
       if ((event.key === 'Delete' || event.key === 'Backspace') && brush === null && selected !== null) {
@@ -416,8 +430,15 @@ export function useDecorEditor({ bridge, decor, area, infoOf = decorInfoFromPiec
   const preview = useMemo<DecorEdit[] | null>(() => (edits.length === 0 ? null : edits.map(({ index, item }) => ({ index, item }))), [edits]);
   const commandKey = JSON.stringify([brush, area, selected, preview, desks]);
 
+  // A pause puts down what the next map click would act on; a move leaves the item where it was.
   useEffect(() => {
-    if (!active) return;
+    if (!paused) return;
+    setBrush(null);
+    setSelected(null);
+  }, [paused]);
+
+  useEffect(() => {
+    if (!active || paused) return;
     bridge.emitCommand('decoredit', {
       brush,
       area,
@@ -427,14 +448,14 @@ export function useDecorEditor({ bridge, decor, area, infoOf = decorInfoFromPiec
     });
     // `commandKey` stands for brush, area, desks, selection and preview: only a different drawing is worth a command.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bridge, active, commandKey]);
+  }, [bridge, active, paused, commandKey]);
 
   // Separate from the effect above so a new pick does not close and reopen
-  // the overlay: only leaving (or unmounting) does.
+  // the overlay: only leaving, a pause (or unmounting) does.
   useEffect(() => {
-    if (!active) return undefined;
+    if (!active || paused) return undefined;
     return () => bridge.emitCommand('decoredit', null);
-  }, [bridge, active]);
+  }, [bridge, active, paused]);
 
   const reset = (): void => {
     setBrush(null);

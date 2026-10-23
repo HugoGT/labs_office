@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
+import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import type { ArtPreviewCache } from '../game/artPreview';
 import { fitsDeskArea, type DecorBrush } from '../game/decorEditor';
 import type { OfficeBridge } from '../game/officeBridge';
@@ -6,8 +7,10 @@ import { decorInfoFromPieceId, type DecorTileRect } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
 import { useDecorEditor } from '../hooks/useDecorEditor';
 import { useMaterialCatalog, type LoadMaterials } from '../hooks/useMaterialCatalog';
+import { useWallEditor, type WallBrush } from '../hooks/useWallEditor';
 import { DecorPalette, catalogDecorInfo } from './DecorPalette';
 import { MultipleToggle } from './MultipleToggle';
+import { WALL_PIECE_LABELS, WallPalette } from './TerrainPalette';
 import styles from './TerrainEditorSection.module.css';
 
 /**
@@ -31,7 +34,17 @@ import styles from './TerrainEditorSection.module.css';
  *
  * The desk rules (`deskDecorRules.ts`) apply to both: `desks` lets the
  * editor and the map's ghost judge them before the server does.
+ *
+ * The admin's menu also paints the walls (#224, moved from "Editar
+ * terreno"), below the pieces: `useWallEditor` with `WallPalette`. One entry
+ * is picked at a time across both palettes, and while a wall is, the decor
+ * tool is paused so the map's clicks are the wall's.
  */
+
+/** What the picked wall brush paints, in words. */
+function wallBrushLabel(brush: WallBrush): string {
+  return brush.piece === null ? 'Quitando paredes' : `Pintando paredes de ${WALL_PIECE_LABELS[brush.piece]}`;
+}
 
 export interface DecorEditorSectionProps {
   bridge: OfficeBridge;
@@ -41,6 +54,8 @@ export interface DecorEditorSectionProps {
   area: DecorTileRect | null;
   /** Every desk area in tiles, for the desk rules; absent, none. */
   desks?: readonly DecorTileRect[];
+  /** `office` only: the terrain admin port the walls are painted through (#224); absent, no walls are offered. */
+  terrain?: TerrainAdminPort | null;
   /** `desk` only: releases the claimed desk ("Dejar escritorio"), like the desk banner's. */
   onLeaveDesk?: () => void;
   /** Reports each closed/open change, like the other sections. */
@@ -63,6 +78,7 @@ export function DecorEditorSection({
   scope,
   area,
   desks,
+  terrain = null,
   onLeaveDesk,
   onEditingChange,
   forceExit = false,
@@ -79,7 +95,10 @@ export function DecorEditorSection({
   }, [catalog]);
   const office = scope === 'office';
   const hasDesk = !office && area !== null;
-  const editor = useDecorEditor({ bridge, decor, area, infoOf, onExit, desks });
+  // Only an admin paints walls: the desk scope never gets the port, so it offers none.
+  const walls = useWallEditor({ bridge, terrain: office ? terrain : null });
+  const editor = useDecorEditor({ bridge, decor, area, infoOf, onExit, desks, paused: walls.brush !== null });
+  const offersWalls = office && terrain !== null;
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
   const names = useMemo(() => {
@@ -113,6 +132,12 @@ export function DecorEditorSection({
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [office, hasDesk]);
+
+  // Leaving the menu puts the picked wall down with everything else.
+  useEffect(() => {
+    if (!editor.active) walls.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor.active]);
 
   useEffect(() => {
     onEditingChange?.(editor.active);
@@ -188,12 +213,33 @@ export function DecorEditorSection({
         catalog={catalog}
         offers={office ? undefined : fitsDeskArea}
         colors={editor.colors}
-        onPick={editor.pick}
+        onPick={(option) => {
+          walls.unpick();
+          editor.pick(option);
+        }}
         onColorChange={editor.setColor}
         disabled={editor.blocked}
         preview={preview}
       />
 
+      {offersWalls && (
+        <>
+          <h4 className={styles.subtitle}>Paredes</h4>
+          <span className={styles.hint}>
+            Las paredes van sobre las líneas entre casillas y cortan el paso: toca o arrastra cerca de una esquina para levantarlas desde ella, y «Quitar pared» las borra. No se pueden poner sobre escritorios, muebles ni la entrada.
+          </span>
+          <WallPalette value={walls.brush} onPick={walls.pick} walls={catalog?.wall ?? null} disabled={walls.blocked} preview={preview} />
+        </>
+      )}
+
+      {walls.brush !== null && (
+        <div className={styles.row}>
+          <span>{wallBrushLabel(walls.brush)}</span>
+          <button type="button" className={styles.button} onClick={walls.unpick}>
+            Deseleccionar
+          </button>
+        </div>
+      )}
       {editor.brush !== null && (
         <div className={styles.row}>
           <span>{brushLabel(editor.brush)}</span>
@@ -207,11 +253,11 @@ export function DecorEditorSection({
           <span>Seleccionado: {names.get(selectedItem.piece) ?? selectedItem.piece}</span>
         </div>
       )}
-      {editor.pending && <span className={styles.hint}>Guardando…</span>}
+      {(editor.pending || walls.pending) && <span className={styles.hint}>Guardando…</span>}
 
-      {editor.error !== null && (
+      {(walls.error ?? editor.error) !== null && (
         <div className={styles.error} role="alert">
-          {editor.error}
+          {walls.error ?? editor.error}
         </div>
       )}
 

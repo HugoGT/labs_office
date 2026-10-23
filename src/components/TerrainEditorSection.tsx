@@ -3,25 +3,22 @@ import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import type { ArtPreviewCache } from '../game/artPreview';
 import type { OfficeBridge } from '../game/officeBridge';
 import { useMaterialCatalog, type LoadMaterials } from '../hooks/useMaterialCatalog';
-import type { TerrainBrush } from '../game/terrainEditor';
-import { useTerrainEditor } from '../hooks/useTerrainEditor';
-import { TERRAIN_MATERIAL_LABELS, TerrainPalette, WALL_PIECE_LABELS, WallPalette } from './TerrainPalette';
+import { useTerrainEditor, type FloorBrush } from '../hooks/useTerrainEditor';
+import { TERRAIN_MATERIAL_LABELS, TerrainPalette } from './TerrainPalette';
 import styles from './TerrainEditorSection.module.css';
 
 /**
  * Terrain section of the office sidebar (#123 phase 2), next to the desk and
  * room editors and behind the same role guard. Container like
- * `DeskEditorSection`: `useTerrainEditor` holds the state, the palettes
- * (`TerrainPalette`, `WallPalette`) pick a floor or a wall, the map
- * (`TerrainEditLayer`) reports the clicked blocks or vertices, and the scene
- * draws the pending paints. Chairs and the rest of the furniture are in
- * "Decoración" (#208).
+ * `DeskEditorSection`: `useTerrainEditor` holds the state, `TerrainPalette`
+ * picks a floor, the map (`TerrainEditLayer`) reports the clicked blocks, and
+ * the scene draws the pending paints. Chairs and the rest of the furniture
+ * are in "Decoración" (#208), and so are the walls (#224).
  */
 
-/** What the picked brush paints, in words. */
-function brushLabel(brush: TerrainBrush): string {
-  if (brush.kind === 'floor') return `Pintando con ${TERRAIN_MATERIAL_LABELS[brush.material]}`;
-  return brush.piece === null ? 'Quitando paredes' : `Pintando paredes de ${WALL_PIECE_LABELS[brush.piece]}`;
+/** What the picked floor paints, in words. */
+function brushLabel(brush: FloorBrush): string {
+  return `Pintando con ${TERRAIN_MATERIAL_LABELS[brush.material]}`;
 }
 
 export interface TerrainEditorSectionProps {
@@ -96,7 +93,7 @@ export function TerrainEditorSection({
       </div>
 
       <span className={styles.hint}>
-        Elige un suelo y toca bloques del mapa para pintarlos, o mantén pulsado y arrastra para pintar un área: cada bloque ocupa 9 × 9 casillas (288 × 288 px). El suelo sigue elegido hasta que lo deseleccionas o pulsas Escape; con nada elegido, Escape sale del editor. Con un suelo o una pared elegidos se ocultan el minimapa y los menús de la derecha para que puedas pintar debajo; Escape los vuelve a mostrar.
+        Elige un suelo y toca bloques del mapa para pintarlos, o mantén pulsado y arrastra para pintar un área: cada bloque ocupa 9 × 9 casillas (288 × 288 px). El suelo sigue elegido hasta que lo deseleccionas o pulsas Escape; con nada elegido, Escape sale del editor. Con un suelo elegido se ocultan el minimapa y los menús de la derecha para que puedas pintar debajo; Escape los vuelve a mostrar.
       </span>
       <span className={styles.hint}>
         Pintar sobre el vacío crea terreno nuevo; «Vacío» lo borra. El agua y el vacío no se pueden caminar. El bloque central de la entrada siempre es de madera.
@@ -108,18 +105,6 @@ export function TerrainEditorSection({
         floors={catalog?.floor ?? null}
         colors={editor.colors}
         onColorChange={editor.setColor}
-        disabled={editor.blocked}
-        preview={preview}
-      />
-
-      <h4 className={styles.subtitle}>Paredes</h4>
-      <span className={styles.hint}>
-        Las paredes van sobre las líneas entre casillas y cortan el paso: toca o arrastra cerca de una esquina para levantarlas desde ella, y «Quitar pared» las borra. No se pueden poner sobre escritorios, muebles ni la entrada.
-      </span>
-      <WallPalette
-        value={editor.brush}
-        onPick={editor.pickWall}
-        walls={catalog?.wall ?? null}
         disabled={editor.blocked}
         preview={preview}
       />

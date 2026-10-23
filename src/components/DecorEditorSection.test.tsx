@@ -3,6 +3,7 @@ import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import exportedManifest from '../../public/assets/pack/manifest.json?raw';
 import { AdminError } from '../dashboard/adminPort';
+import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import { materialCatalogFrom } from '../game/artMaterials';
 import type { ArtPreviewCache } from '../game/artPreview';
 import { MAP_W } from '../game/mapData';
@@ -18,9 +19,15 @@ function renderSection(overrides: Partial<Parameters<typeof DecorEditorSection>[
   const bridge = overrides.bridge ?? createOfficeBridge();
   const commands: OfficeCommandMap['decoredit'][] = [];
   bridge.onCommand('decoredit', (command) => commands.push(command));
+  const terrainCommands: OfficeCommandMap['terrainedit'][] = [];
+  bridge.onCommand('terrainedit', (command) => terrainCommands.push(command));
   const decor: OfficeDecorPort = overrides.decor ?? { setDecor: vi.fn(async () => undefined) };
   const props = { bridge, decor, scope: 'office' as const, area: null, loadMaterials: async () => catalog, preview: noPreview, ...overrides };
-  return { ...props, commands, ...render(<DecorEditorSection {...props} />) };
+  return { ...props, commands, terrainCommands, ...render(<DecorEditorSection {...props} />) };
+}
+
+function terrainPort(overrides: Partial<TerrainAdminPort> = {}): TerrainAdminPort {
+  return { setBlock: vi.fn(async () => undefined), setBlocks: vi.fn(async () => undefined), setWalls: vi.fn(async () => undefined), ...overrides };
 }
 
 describe('DecorEditorSection: Decoración (the whole office)', () => {
@@ -142,6 +149,65 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
     expect(second.commands.at(-1)).toBeNull();
   });
 
+  describe('walls (#224)', () => {
+    it('offers the walls below the pieces, one entry pressed at a time across both, and says what it paints', async () => {
+      const { commands, terrainCommands } = renderSection({ initiallyActive: true, terrain: terrainPort() });
+
+      expect(await screen.findByRole('group', { name: 'Paredes' })).toBeInTheDocument();
+      expect(screen.getByText(/paredes van sobre las líneas entre casillas/i)).toBeInTheDocument();
+      expect(screen.getByText(/escritorios, muebles ni la entrada/i)).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Ficus' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Ladrillo' }));
+      expect(screen.getByRole('button', { name: 'Ladrillo' })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByRole('button', { name: 'Ficus' })).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getByText('Pintando paredes de Ladrillo')).toBeInTheDocument();
+      expect(terrainCommands.at(-1)).toEqual({ brush: { kind: 'wall', piece: 'wall-brick' } });
+      // The decor tool lets go of the map while a wall is picked: its clicks are the wall's.
+      expect(commands.at(-1)).toBeNull();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Ficus' }));
+      expect(screen.getByRole('button', { name: 'Ladrillo' })).toHaveAttribute('aria-pressed', 'false');
+      expect(terrainCommands.at(-1)).toBeNull();
+      expect(commands.at(-1)).toMatchObject({ brush: { kind: 'piece', piece: 'plant-ficus' } });
+    });
+
+    it('steps out on Escape: the picked wall first, then the editor', async () => {
+      const onExit = vi.fn();
+      const { commands, terrainCommands } = renderSection({ initiallyActive: true, terrain: terrainPort(), onExit });
+      await userEvent.click(await screen.findByRole('button', { name: 'Quitar pared' }));
+      expect(screen.getByText('Quitando paredes')).toBeInTheDocument();
+
+      await userEvent.keyboard('{Escape}');
+      expect(screen.getByRole('button', { name: 'Quitar pared' })).toHaveAttribute('aria-pressed', 'false');
+      expect(terrainCommands.at(-1)).toBeNull();
+      expect(commands.at(-1)).toMatchObject({ brush: null, area: null });
+      expect(onExit).not.toHaveBeenCalled();
+
+      await userEvent.keyboard('{Escape}');
+      expect(onExit).toHaveBeenCalledTimes(1);
+    });
+
+    it('paints the clicked vertices with the picked wall, and says why the server refused one', async () => {
+      const setWalls = vi.fn(async () => {
+        throw new AdminError('terrain-under-placement');
+      });
+      const { bridge } = renderSection({ initiallyActive: true, terrain: terrainPort({ setWalls }) });
+      await userEvent.click(await screen.findByRole('button', { name: 'Piedra' }));
+
+      act(() => bridge.emit('wallpick', { index: 7 }));
+
+      await vi.waitFor(() => expect(setWalls).toHaveBeenCalledWith([{ index: 7, piece: 'wall-stone' }]));
+      expect(await screen.findByRole('alert')).toHaveTextContent(/Una pared no puede tapar un escritorio/);
+    });
+
+    it('offers no walls without the terrain port', async () => {
+      renderSection({ initiallyActive: true });
+      await screen.findByRole('group', { name: 'Sillas' });
+      expect(screen.queryByRole('group', { name: 'Paredes' })).not.toBeInTheDocument();
+    });
+  });
+
   it('leaves when another editor takes the map', async () => {
     const { rerender, bridge, decor, commands } = renderSection({ initiallyActive: true });
     await screen.findByRole('group', { name: 'Sillas' });
@@ -237,6 +303,12 @@ describe('DecorEditorSection: Decoración for one desk', () => {
     act(() => bridge.emit('decorpick', { index: at(20, 20) }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/dentro de tu escritorio/);
     expect(decor.setDecor).not.toHaveBeenCalled();
+  });
+
+  it('offers no walls: only an admin paints them (#224)', async () => {
+    renderSection({ scope: 'desk', area: DESK, terrain: terrainPort() });
+    await screen.findByRole('group', { name: 'Sillas' });
+    expect(screen.queryByRole('group', { name: 'Paredes' })).not.toBeInTheDocument();
   });
 
   it('passes the desks to the map for the desk rules', async () => {
