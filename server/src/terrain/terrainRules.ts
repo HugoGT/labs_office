@@ -223,18 +223,18 @@ export function parseWallBatch(body: unknown, tileCount: number): WallEdit[] {
  * its footprint (`wallPostTiles`: the four tiles around its vertex) touches a
  * static tile (seats, furniture, the spawn area) or a desk, never because of
  * a room or a player (players are relocated). A post that ends a door's edge
- * (`doorPosts`, #223) may not change at all, removed or repainted: the door
- * would be left off its wall.
+ * (`doorPosts`, #223) may be repainted, the door stays on it, but not
+ * `removed`: the door would be left off its wall.
  */
 export function findWallConflict(
   placed: readonly number[],
   grid: Pick<OfficeLayout, 'width' | 'height'>,
   staticTiles: ReadonlySet<number>,
   protections: TerrainProtections,
-  changed: readonly number[] = placed,
+  removed: readonly number[] = [],
   doorPosts: ReadonlySet<number> = new Set(),
 ): UnwalkableConflict | null {
-  if (changed.some((index) => doorPosts.has(index))) return 'placement';
+  if (removed.some((index) => doorPosts.has(index))) return 'placement';
   if (placed.length === 0) return null;
   const touched = placed.flatMap((index) => wallPostTiles(grid, index));
   if (touched.some((tile) => staticTiles.has(tile))) return 'placement';

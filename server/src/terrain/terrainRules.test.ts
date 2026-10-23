@@ -237,12 +237,15 @@ describe('findWallConflict', () => {
     expect(findWallConflict([spawn + 3 * W + 3], MAP, STATIC, NONE)).toBeNull();
   });
 
-  it('refuses any change to a post that ends a door (#223), removal and repaint included, never to another post', () => {
+  it('refuses to remove a post that ends a door (#223), never to repaint it or to change another post', () => {
     const doorPosts = new Set([free, free + 1]);
     expect(findWallConflict([], MAP, STATIC, NONE, [free + 1], doorPosts)).toBe('placement');
-    expect(findWallConflict([free], MAP, STATIC, NONE, [free], doorPosts)).toBe('placement');
+    expect(findWallConflict([free], MAP, STATIC, NONE, [], doorPosts)).toBeNull();
+    expect(findWallConflict([free, free + 1], MAP, STATIC, NONE, [], doorPosts)).toBeNull();
     expect(findWallConflict([], MAP, STATIC, NONE, [free + 2], doorPosts)).toBeNull();
-    expect(findWallConflict([free + 2], MAP, STATIC, NONE, [free + 2, free + 3], doorPosts)).toBeNull();
+    expect(findWallConflict([free + 2], MAP, STATIC, NONE, [], doorPosts)).toBeNull();
+    // A batch that repaints a door's posts and erases an unrelated one is not refused for the door.
+    expect(findWallConflict([free], MAP, STATIC, NONE, [free + 2], doorPosts)).toBeNull();
   });
 
   it('refuses a post on a desk, its edge lines included', () => {

@@ -239,5 +239,6 @@ describe('useWallEditor', () => {
 describe('WALL_UNDER_PLACEMENT_MESSAGE (#223)', () => {
   it('names the doors among what keeps a post in place', () => {
     expect(WALL_UNDER_PLACEMENT_MESSAGE).toMatch(/puerta/);
+    expect(WALL_UNDER_PLACEMENT_MESSAGE).not.toMatch(/cambia/);
   });
 });

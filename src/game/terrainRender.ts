@@ -17,7 +17,7 @@ import {
   type Rect,
   type TerrainMaterial,
 } from './artContract';
-import { LAYOUT_MATERIALS, orderedWallPosts, terrainMaterialAt, wallsJoin, type LayoutMaterial, type LayoutProp, type OfficeLayout, type TerrainSnapshot, type WallGrid } from './officeLayout';
+import { LAYOUT_MATERIALS, doorOnlyPost, openEdge, openingSet, orderedWallPosts, terrainMaterialAt, wallsJoin, type LayoutMaterial, type LayoutProp, type OfficeLayout, type TerrainSnapshot, type WallGrid } from './officeLayout';
 
 /**
  * The color of the void: the camera background around and under the world,
@@ -121,7 +121,8 @@ function neighborMask(cells: readonly (string | null)[], width: number, height: 
  * between two terrains, half on each. They draw exactly the rectangles the
  * wall blocks (`wallFootprintRects`). A door's opening (#223) draws no body,
  * the door stands there; its joints keep their connected frames, so the wall
- * reads as one around the door.
+ * reads as one around the door. A post only open door edges meet (between the
+ * two leaves of a double door) draws nothing: it is no wall any more.
  *
  * Neighboring posts join whatever their material (#223). Where two of
  * different materials meet, the one placed last (`wallOrder`, else the tile
@@ -134,7 +135,7 @@ export function wallSprites({ width, height, walls, openings = [], wallOrder = [
   const joints: WallSprite[] = [];
   const bodies: WallSprite[] = [];
   const grid = { width, height, walls };
-  const open = new Set(openings.map(({ col, row, axis }) => `${axis}:${col}:${row}`));
+  const open = openingSet({ width, height, walls, openings });
   const posts = orderedWallPosts(walls, wallOrder);
   const rank = new Map(posts.map((index, position) => [index, position]));
   /** A fraction of a pixel, more for a later post: what a piece laid over another material adds to its depth. */
@@ -154,6 +155,8 @@ export function wallSprites({ width, height, walls, openings = [], wallOrder = [
       const index = ty * width + tx;
       const piece = walls[index];
       if (piece === null || piece === undefined) continue;
+      // Nothing but open door edges meet here (between two doors): no wall is left to join.
+      if (doorOnlyPost(grid, open, tx, ty)) continue;
       const neighbors = [
         [NORTH, tx, ty - 1],
         [EAST, tx + 1, ty],
@@ -175,8 +178,8 @@ export function wallSprites({ width, height, walls, openings = [], wallOrder = [
         const top = later(index, next);
         bodies.push(sprite(walls[top ?? index]!, 'body', wallFrameIndex({ piece: 'body', axis }), wallBodyRect({ col: tx, row: ty, axis }), top === null ? 0 : lift(top)));
       };
-      if (mask & EAST && !open.has(`horizontal:${tx}:${ty}`)) body('horizontal', index + 1);
-      if (mask & SOUTH && !open.has(`vertical:${tx}:${ty}`)) body('vertical', index + width);
+      if (mask & EAST && !openEdge(grid, open, tx, ty, 'horizontal')) body('horizontal', index + 1);
+      if (mask & SOUTH && !openEdge(grid, open, tx, ty, 'vertical')) body('vertical', index + width);
     }
   }
   return [...joints, ...bodies];

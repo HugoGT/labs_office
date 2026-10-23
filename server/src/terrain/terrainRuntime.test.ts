@@ -866,15 +866,18 @@ describe('createTerrainRuntime doors (#223)', () => {
     expect(passes(runtime, ...through(65))).toBe(false);
   });
 
-  it('refuses to erase or repaint a post that ends a door, and lets the rest of the wall change', async () => {
-    const runtime = runtimeWith();
+  it('refuses to erase a post that ends a door, data unchanged, and lets the rest of the wall change', async () => {
+    const store = createMemoryTerrain([], WALL);
+    const runtime = runtimeWith(store);
     await runtime.load();
     await runtime.setDecor([{ index: at(66, 22), item: DOOR }], null);
+    const before = { walls: [...runtime.walls()], saved: await store.loadWalls(), openings: runtime.snapshot().openings };
 
     await expect(runtime.setWalls([{ index: at(66, 22), piece: null }], null, NONE)).rejects.toThrow(TerrainProtectedError);
-    await expect(runtime.setWalls([{ index: at(67, 22), piece: 'wall-stone' }], null, NONE)).rejects.toThrow(TerrainProtectedError);
-    expect(runtime.walls()[at(66, 22)]).toBe('wall-brick');
-    expect(runtime.walls()[at(67, 22)]).toBe('wall-brick');
+    await expect(runtime.setWalls([{ index: at(68, 22), piece: null }, { index: at(67, 22), piece: null }], null, NONE)).rejects.toThrow(TerrainProtectedError);
+    expect([...runtime.walls()]).toEqual(before.walls);
+    expect(await store.loadWalls()).toEqual(before.saved);
+    expect(runtime.snapshot().openings).toEqual(before.openings);
 
     await runtime.setWalls([{ index: at(69, 22), piece: null }], null, NONE);
     expect(runtime.walls()[at(69, 22)]).toBeNull();
@@ -884,6 +887,45 @@ describe('createTerrainRuntime doors (#223)', () => {
     await runtime.setDecor([{ index: at(66, 22), item: null }], null);
     await runtime.setWalls([{ index: at(66, 22), piece: null }], null, NONE);
     expect(runtime.walls()[at(66, 22)]).toBeNull();
+  });
+
+  it('repaints the posts a door stands on and keeps the door: still open, still on its edge, across two materials', async () => {
+    const store = createMemoryTerrain([], WALL);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+    await runtime.setDecor([{ index: at(66, 22), item: DOOR }], null);
+
+    await runtime.setWalls([{ index: at(67, 22), piece: 'wall-stone' }], null, NONE);
+    expect(runtime.walls()[at(67, 22)]).toBe('wall-stone');
+    expect(runtime.walls()[at(66, 22)]).toBe('wall-brick');
+    expect(runtime.decor()).toEqual([{ index: at(66, 22), ...DOOR }]);
+    expect(runtime.snapshot().openings).toEqual([{ col: 66, row: 22, axis: 'horizontal' }]);
+    expect(passes(runtime, ...through(66))).toBe(true);
+    expect(passes(runtime, ...through(65))).toBe(false);
+    expect(await store.loadWalls()).toContainEqual([at(67, 22), 'wall-stone']);
+
+    // Both posts, in one batch, with the wall around them: nothing in it is refused for the door.
+    const run = [65, 66, 67, 68].map((tx) => ({ index: at(tx, 22), piece: 'wall-glass' as const }));
+    await runtime.setWalls(run, null, NONE);
+    expect([65, 66, 67, 68].map((tx) => runtime.walls()[at(tx, 22)])).toEqual(['wall-glass', 'wall-glass', 'wall-glass', 'wall-glass']);
+    expect(runtime.snapshot().openings).toEqual([{ col: 66, row: 22, axis: 'horizontal' }]);
+    expect(passes(runtime, ...through(66))).toBe(true);
+    expect(runtime.decor()).toEqual([{ index: at(66, 22), ...DOOR }]);
+  });
+
+  it('repaints a wall run that crosses a door end post in one batch: the posts beside the door are not refused for its tiles', async () => {
+    const store = createMemoryTerrain([], [...WALL, [at(66, 21), 'wall-brick'], [at(66, 23), 'wall-brick']]);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+    await runtime.setDecor([{ index: at(66, 22), item: DOOR }], null);
+
+    const column = [21, 22, 23].map((ty) => ({ index: at(66, ty), piece: 'wall-stone' as const }));
+    await runtime.setWalls(column, null, NONE);
+
+    expect([21, 22, 23].map((ty) => runtime.walls()[at(66, ty)])).toEqual(['wall-stone', 'wall-stone', 'wall-stone']);
+    expect(passes(runtime, ...through(66))).toBe(true);
+    // A post the wall does not stand on yet still may not cover the door's tiles.
+    await expect(runtime.setWalls([{ index: at(67, 21), piece: 'wall-stone' }], null, NONE)).rejects.toThrow(TerrainProtectedError);
   });
 
   it('opens the stored doors at load, and keeps them open through a block edit', async () => {

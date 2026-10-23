@@ -98,7 +98,7 @@ export function wallTilesAfter(
   return coveredTiles(wallFootprintRects({ width, height, walls, openings }), width, height);
 }
 
-/** Every post that ends a door's edge: removing or repainting one would leave the door off its wall. */
+/** Every post that ends a door's edge: removing one would leave the door off its wall (repainting one keeps the door). */
 export function doorPostSet(items: readonly DecorItem[], width: number): Set<number> {
   return new Set(items.flatMap((item) => (isDoorPiece(item.piece) ? doorEndPosts(item, width) : [])));
 }

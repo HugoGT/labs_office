@@ -915,6 +915,43 @@ describe('wall openings: doors (#223)', () => {
     expect(inside(crossedColliders, 87, 64)).toBe(false);
   });
 
+  it('leaves nothing at a post whose only connections are open door edges: no remnant between two doors (#223)', () => {
+    const second = { col: 3, row: 2, axis: 'horizontal' as const };
+    // Two doors on one line, and an L of a horizontal and a vertical door: the shared post stands for nothing.
+    const l = new Array<string | null>(width * height).fill(null);
+    for (const [tx, ty] of [[1, 2], [2, 2], [2, 3]] as const) l[ty * width + tx] = 'wall-brick';
+    const corner = { width, height, walls: l, openings: [{ col: 1, row: 2, axis: 'horizontal' as const }, { col: 2, row: 2, axis: 'vertical' as const }] };
+    for (const grid of [{ width, height, walls: run(), openings: [DOOR, second] }, corner]) {
+      const [x, y] = grid === corner ? [68, 60] : [92, 60];
+      expect(inside(wallFootprintRects(grid), x, y)).toBe(false);
+      expect(inside(wallColliderRects(grid), x, y)).toBe(false);
+    }
+    // A single door's end post is not between two doors: it keeps its half away from the door.
+    expect(inside(wallFootprintRects({ width, height, walls: run(), openings: [DOOR] }), 60, 64)).toBe(true);
+    expect(inside(wallColliderRects({ width, height, walls: run(), openings: [DOOR] }), 60, 64)).toBe(true);
+  });
+
+  it('keeps the joint of a post between two doors where another wall meets it (a T)', () => {
+    const walls = run();
+    walls[3 * width + 3] = 'wall-brick';
+    const grid = { width, height, walls, openings: [DOOR, { col: 3, row: 2, axis: 'horizontal' as const }] };
+    expect(wallFootprintRects(grid)).toContainEqual({ x: 88, y: 56, w: 16, h: 16 });
+    expect(inside(wallColliderRects(grid), 96, 64)).toBe(true);
+  });
+
+  it('blocks a plain wall with no doors exactly as before', () => {
+    expect(wallFootprintRects({ width, height, walls: run() })).toEqual([
+      { x: 24, y: 56, w: 16, h: 16 },
+      { x: 56, y: 56, w: 16, h: 16 },
+      { x: 88, y: 56, w: 16, h: 16 },
+      { x: 120, y: 56, w: 16, h: 16 },
+      { x: 40, y: 56, w: 16, h: 16 },
+      { x: 72, y: 56, w: 16, h: 16 },
+      { x: 104, y: 56, w: 16, h: 16 },
+    ]);
+    expect(wallColliderRects({ width, height, walls: run() })).toEqual([{ x: 24, y: 56, w: 112, h: 16 }]);
+  });
+
   it('lets a body center and a whole 18px body through the door of a snapshot, never through the wall beside it', () => {
     const layout: OfficeLayout = {
       ...BASE_LAYOUT,

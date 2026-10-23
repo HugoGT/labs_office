@@ -244,6 +244,29 @@ describe('wallSprites', () => {
     expect(wallSprites({ ...layout, openings: [] })).toEqual(wallSprites(layout));
   });
 
+  it('draws no joint at a post whose only connections are open door edges: two doors read as one opening (#223)', () => {
+    const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '4,2': 'wall-brick', '5,2': 'wall-brick' }) });
+    const doors = [{ col: 2, row: 2, axis: 'horizontal' as const }, { col: 3, row: 2, axis: 'horizontal' as const }];
+    const joints = (grid: Parameters<typeof wallSprites>[0]) => wallSprites(grid).filter((sprite) => sprite.part === 'joint').map(({ frame, x }) => [frame, x]);
+
+    // Post 3,2 sits between the two leaves and nothing else meets it: it draws nothing. The posts at the ends of the opening stay.
+    expect(joints({ ...layout, openings: doors })).toEqual([
+      [wallFrameIndex({ piece: 'joint', mask: 2 }), 2 * TILE - 8],
+      [wallFrameIndex({ piece: 'joint', mask: 2 | 8 }), 4 * TILE - 8],
+      [wallFrameIndex({ piece: 'joint', mask: 8 }), 5 * TILE - 8],
+    ]);
+    // Neither door leaves a body behind.
+    expect(wallSprites({ ...layout, openings: doors }).filter((sprite) => sprite.part === 'body')).toHaveLength(1);
+  });
+
+  it('keeps the joint of a post between two doors where another wall meets it (a T) (#223)', () => {
+    const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '4,2': 'wall-brick', '3,3': 'wall-brick' }) });
+    const doors = [{ col: 2, row: 2, axis: 'horizontal' as const }, { col: 3, row: 2, axis: 'horizontal' as const }];
+    const tee = wallSprites({ ...layout, openings: doors }).filter((sprite) => sprite.part === 'joint' && sprite.x === 3 * TILE - 8 && sprite.y === 2 * TILE - 8);
+
+    expect(tee.map(({ frame }) => frame)).toEqual([wallFrameIndex({ piece: 'joint', mask: 2 | 4 | 8 })]);
+  });
+
   it('draws exactly the rectangles the wall blocks', () => {
     const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '3,3': 'wall-glass' }) });
     const drawn = wallSprites(layout).map(({ x, y }) => ({ x, y, w: 16, h: 16 }));

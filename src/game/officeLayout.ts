@@ -701,13 +701,37 @@ function edgeKey(col: number, row: number, axis: GridEdge['axis']): string {
  * (`vertical`) is a door's opening: listed in the grid's openings and a wall
  * under it (`wallsJoin`). An opening with no wall there opens nothing.
  */
-function openEdge(grid: WallGrid, open: ReadonlySet<string>, tx: number, ty: number, axis: GridEdge['axis']): boolean {
+export function openEdge(grid: WallGrid, open: ReadonlySet<string>, tx: number, ty: number, axis: GridEdge['axis']): boolean {
   if (!open.has(edgeKey(tx, ty, axis))) return false;
   return axis === 'horizontal' ? wallsJoin(grid, tx, ty, tx + 1, ty) : wallsJoin(grid, tx, ty, tx, ty + 1);
 }
 
-function openingSet(grid: WallGrid): ReadonlySet<string> {
+export function openingSet(grid: WallGrid): ReadonlySet<string> {
   return new Set((grid.openings ?? []).map(({ col, row, axis }) => edgeKey(col, row, axis)));
+}
+
+/**
+ * Whether the post at vertex (tx, ty) only connects through open door edges,
+ * at least two of them (the shared post between the two leaves of a double
+ * door, the corner of two doors): no wall is left there, so it neither draws
+ * nor blocks (#223). A post any other wall meets keeps its joint, and so
+ * does the end of a single door, which has the wall (or nothing) beyond.
+ */
+export function doorOnlyPost(grid: WallGrid, open: ReadonlySet<string>, tx: number, ty: number): boolean {
+  if (open.size === 0) return false;
+  let doors = 0;
+  const sides = [
+    [tx, ty - 1, tx, ty - 1, 'vertical'],
+    [tx + 1, ty, tx, ty, 'horizontal'],
+    [tx, ty + 1, tx, ty, 'vertical'],
+    [tx - 1, ty, tx - 1, ty, 'horizontal'],
+  ] as const;
+  for (const [nx, ny, col, row, axis] of sides) {
+    if (!wallsJoin(grid, tx, ty, nx, ny)) continue;
+    if (!openEdge(grid, open, col, row, axis)) return false;
+    doors += 1;
+  }
+  return doors >= 2;
 }
 
 /**
@@ -744,8 +768,9 @@ function collisionRect({ x, y, width, height }: Rect): CollisionRect {
  * neighbors (`wallsJoin`). Joints first, then bodies, like the sprites.
  *
  * A door's opening (#223) has no body, and each joint at its ends keeps only
- * the half away from it, so the passage is the whole segment; a joint
- * between two doors (a double door) keeps nothing.
+ * the half away from it, so the passage is the whole segment; a post that
+ * only connects through open edges (`doorOnlyPost`: between two doors) keeps
+ * nothing, unless another wall meets it.
  */
 export function wallFootprintRects(grid: WallGrid): CollisionRect[] {
   const { width, height, walls } = grid;
@@ -758,14 +783,15 @@ export function wallFootprintRects(grid: WallGrid): CollisionRect[] {
       const joint = collisionRect(wallJointRect({ col: tx, row: ty }));
       if (open.size === 0) {
         joints.push(joint);
-      } else {
+      } else if (!doorOnlyPost(grid, open, tx, ty)) {
         const cx = tx * LAYOUT_TILE;
         const cy = ty * LAYOUT_TILE;
         const left = openEdge(grid, open, tx - 1, ty, 'horizontal') ? cx : joint.x;
         const right = openEdge(grid, open, tx, ty, 'horizontal') ? cx : joint.x + joint.w;
         const top = openEdge(grid, open, tx, ty - 1, 'vertical') ? cy : joint.y;
         const bottom = openEdge(grid, open, tx, ty, 'vertical') ? cy : joint.y + joint.h;
-        if (right > left && bottom > top) joints.push({ x: left, y: top, w: right - left, h: bottom - top });
+        // Both sides of a post a wall also meets (a T) are open: nothing to clip to, the joint stays whole.
+        joints.push(right > left && bottom > top ? { x: left, y: top, w: right - left, h: bottom - top } : joint);
       }
       if (wallsJoin(grid, tx, ty, tx + 1, ty) && !openEdge(grid, open, tx, ty, 'horizontal')) {
         bodies.push(collisionRect(wallBodyRect({ col: tx, row: ty, axis: 'horizontal' })));
@@ -850,7 +876,7 @@ export function wallColliderRects(grid: WallGrid): CollisionRect[] {
   }
   for (let ty = 0; ty < height; ty += 1) {
     for (let tx = 0; tx < width; tx += 1) {
-      if (at(tx, ty) && !joins(tx, ty, tx - 1, ty) && !joins(tx, ty, tx + 1, ty) && !joins(tx, ty, tx, ty - 1) && !joins(tx, ty, tx, ty + 1)) {
+      if (at(tx, ty) && !doorOnlyPost(grid, open, tx, ty) && !joins(tx, ty, tx - 1, ty) && !joins(tx, ty, tx + 1, ty) && !joins(tx, ty, tx, ty - 1) && !joins(tx, ty, tx, ty + 1)) {
         lone.push(collisionRect(wallJointRect({ col: tx, row: ty })));
       }
     }
