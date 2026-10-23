@@ -126,6 +126,21 @@ describe('pgTerrain', () => {
     expect(pool.queries[0]!.values).toEqual([JSON.stringify(edits), 'user-1']);
   });
 
+  it('saves a block batch and removes its walls in one atomic statement', async () => {
+    const pool = fakePool();
+    const edits = [{ index: 0, material: 'void' as const }, { index: 1, material: 'carpet' as const, color: '#a0b1c2' }];
+
+    await createPgTerrain(pool).saveBlocksClearingWalls(edits, [3, 4], 'user-1');
+
+    expect(pool.queries).toHaveLength(1);
+    const sql = squash(pool.queries[0]!.text);
+    expect(sql).toContain('delete from terrain_walls where tile_index in (select value::integer from jsonb_array_elements_text($2::jsonb))');
+    expect(sql).toContain('insert into terrain_blocks (block_index, material, color, updated_by)');
+    expect(sql).toContain('from jsonb_to_recordset($1::jsonb) as entry(index integer, material text, color text)');
+    expect(sql).toContain('on conflict (block_index) do update set material = excluded.material, color = excluded.color');
+    expect(pool.queries[0]!.values).toEqual([JSON.stringify(edits), JSON.stringify([3, 4]), 'user-1']);
+  });
+
   it('loads every stored decor item sorted by tile, skipping a row it cannot read', async () => {
     const pool = fakePool([
       { tile_index: 40, piece_id: 'table-meeting', rotation: 0, color: null },

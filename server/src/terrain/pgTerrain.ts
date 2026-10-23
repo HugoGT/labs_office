@@ -45,6 +45,21 @@ export function createPgTerrain(pool: DirectoryPool): TerrainStore {
         [JSON.stringify(edits), actorId],
       );
     },
+    async saveBlocksClearingWalls(edits, walls, actorId) {
+      // One statement, so the blocks, their colors and the removed walls
+      // commit together. A missing `color` is NULL, as in `saveBlocks`.
+      await pool.query(
+        `WITH removed AS (
+           DELETE FROM terrain_walls WHERE tile_index IN (SELECT value::integer FROM jsonb_array_elements_text($2::jsonb))
+         )
+         INSERT INTO terrain_blocks (block_index, material, color, updated_by)
+         SELECT entry.index, entry.material, entry.color, $3::uuid
+         FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, material text, color text)
+         ON CONFLICT (block_index) DO UPDATE
+           SET material = EXCLUDED.material, color = EXCLUDED.color, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+        [JSON.stringify(edits), JSON.stringify(walls), actorId],
+      );
+    },
     async loadBlockColors() {
       const result = await pool.query('SELECT block_index, color FROM terrain_blocks WHERE color IS NOT NULL');
       const colors = new Map<number, string>();

@@ -130,6 +130,7 @@ describe('createTerrainRuntime', () => {
         throw new Error('connection lost');
       },
       saveBlocks: async () => { throw new Error('connection lost'); },
+      saveBlocksClearingWalls: async () => { throw new Error('connection lost'); },
       loadBlockColors: async () => new Map(),
       loadWalls: async () => new Map(),
       saveWalls: async () => { throw new Error('connection lost'); },
@@ -289,6 +290,89 @@ describe('createTerrainRuntime walls', () => {
     expect(runtime.walls()).toEqual(BASE_LAYOUT.walls);
     expect(isTileWalkable(runtime.snapshot(), 67, 22)).toBe(true);
     expect(listener).not.toHaveBeenCalled();
+  });
+
+  describe('when blocks turn to void (#217)', () => {
+    const lawn = blockTileRect(W, LAWN);
+    const lake = blockTileRect(W, LAKE);
+    /** A post with every tile around it inside the lawn block. */
+    const inside = at(lawn.tx + 4, lawn.ty + 4);
+
+    it('removes the posts left with void on every side in the same save as the blocks, keeping the border ones', async () => {
+      // On the shared edge of two blocks erased together, on the west border, and over an older void.
+      const shared = at(lawn.tx + BLOCK_TILES, lawn.ty + 4);
+      const border = at(lawn.tx, lawn.ty + 4);
+      const older = at(lake.tx + 4, lake.ty + 4);
+      const store = createMemoryTerrain([[LAKE, 'void']], [[inside, 'wall-brick'], [inside + 1, 'wall-brick'], [shared, 'wall-plaster'], [border, 'wall-stone'], [older, 'wall-glass']]);
+      const saveBlocks = vi.spyOn(store, 'saveBlocks');
+      const saveWalls = vi.spyOn(store, 'saveWalls');
+      const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+      await runtime.load();
+      const listener = vi.fn();
+      runtime.subscribe(listener);
+
+      await runtime.setBlocks([{ index: LAWN, material: 'void' }, { index: LAWN + 1, material: 'void' }], 'admin-1', NONE);
+
+      expect(new Map(await store.loadBlocks())).toEqual(new Map([[LAKE, 'void'], [LAWN, 'void'], [LAWN + 1, 'void']]));
+      expect(store.actorOf(LAWN)).toBe('admin-1');
+      expect(new Map(await store.loadWalls())).toEqual(new Map([[border, 'wall-stone'], [older, 'wall-glass']]));
+      expect(saveBlocks).not.toHaveBeenCalled();
+      expect(saveWalls).not.toHaveBeenCalled();
+      expect(runtime.walls()[inside]).toBeNull();
+      expect(runtime.walls()[inside + 1]).toBeNull();
+      expect(runtime.walls()[shared]).toBeNull();
+      expect(runtime.walls()[border]).toBe('wall-stone');
+      expect(runtime.walls()[older]).toBe('wall-glass');
+      expect(runtime.snapshot().walls).toEqual(runtime.walls());
+      expect(listener).toHaveBeenCalledExactlyOnceWith(runtime.blocks());
+    });
+
+    it('keeps the carpet color of a block saved in the same batch as a void that clears walls', async () => {
+      const store = createMemoryTerrain([], [[inside, 'wall-brick']]);
+      const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+      await runtime.load();
+
+      await runtime.setBlocks([{ index: LAWN, material: 'void' }, { index: LAKE, material: 'carpet', color: '#a0b1c2' }], null, NONE);
+
+      expect(runtime.walls()[inside]).toBeNull();
+      expect([...(await store.loadWalls())]).toEqual([]);
+      expect(runtime.blockColors().get(LAKE)).toBe('#a0b1c2');
+      expect([...(await store.loadBlockColors())]).toEqual([[LAKE, '#a0b1c2']]);
+    });
+
+    it('keeps every wall when a block turns into anything but void', async () => {
+      const store = createMemoryTerrain([], [[inside, 'wall-brick']]);
+      const saveWalls = vi.spyOn(store, 'saveWalls');
+      const saveBlocksClearingWalls = vi.spyOn(store, 'saveBlocksClearingWalls');
+      const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+      await runtime.load();
+
+      await runtime.setBlock({ index: LAWN, material: 'water', actorId: null }, NONE);
+      await runtime.setBlock({ index: LAWN, material: 'sand', actorId: null }, NONE);
+
+      expect([...(await store.loadWalls())]).toEqual([[inside, 'wall-brick']]);
+      expect(runtime.walls()[inside]).toBe('wall-brick');
+      expect(runtime.blocks()[LAWN]).toBe('sand');
+      expect(saveWalls).not.toHaveBeenCalled();
+      expect(saveBlocksClearingWalls).not.toHaveBeenCalled();
+    });
+
+    it('keeps the old blocks and walls when the save fails', async () => {
+      const store = createMemoryTerrain([], [[inside, 'wall-brick']]);
+      vi.spyOn(store, 'saveBlocksClearingWalls').mockRejectedValue(new Error('connection lost'));
+      const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+      await runtime.load();
+      const listener = vi.fn();
+      runtime.subscribe(listener);
+
+      await expect(runtime.setBlock({ index: LAWN, material: 'void', actorId: null }, NONE)).rejects.toThrow('connection lost');
+
+      expect(runtime.blocks()[LAWN]).toBe(BASE_LAYOUT.blocks[LAWN]);
+      expect(runtime.walls()[inside]).toBe('wall-brick');
+      expect(runtime.snapshot().walls[inside]).toBe('wall-brick');
+      expect(isTileWalkable(runtime.snapshot(), 67, 22)).toBe(true);
+      expect(listener).not.toHaveBeenCalled();
+    });
   });
 
   it('runs wall and block edits in one queue, each checked against what the previous one left', async () => {

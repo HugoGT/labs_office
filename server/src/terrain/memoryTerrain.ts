@@ -42,6 +42,11 @@ export function createMemoryTerrain(
     async loadBlockColors() {
       return new Map([...blocks].flatMap(([index, { color }]) => (color === undefined ? [] : [[index, color] as const])));
     },
+    async saveBlocksClearingWalls(edits, removed, actorId) {
+      // Synchronous between the read and the writes, like one Postgres statement.
+      for (const { index, material, color } of edits) blocks.set(index, { material, ...(color === undefined ? {} : { color }), actorId });
+      for (const index of removed) walls.delete(index);
+    },
     actorOf(index) {
       return blocks.get(index)?.actorId;
     },

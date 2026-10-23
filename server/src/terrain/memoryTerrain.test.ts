@@ -48,6 +48,16 @@ describe('memoryTerrain walls', () => {
     expect(store.wallActorOf(5)).toBeUndefined();
     expect([...(await store.loadBlocks())]).toEqual([]);
   });
+  it('saves blocks and removes walls in one save', async () => {
+    const store = createMemoryTerrain([], [[4, 'wall-brick'], [5, 'wall-glass']]);
+    await store.saveBlocksClearingWalls([{ index: 0, material: 'void' }, { index: 1, material: 'carpet', color: '#a0b1c2' }], [4], 'admin-1');
+
+    expect([...(await store.loadBlocks())]).toEqual([[0, 'void'], [1, 'carpet']]);
+    expect([...(await store.loadBlockColors())]).toEqual([[1, '#a0b1c2']]);
+    expect(store.actorOf(0)).toBe('admin-1');
+    expect([...(await store.loadWalls())]).toEqual([[5, 'wall-glass']]);
+    expect(store.wallActorOf(4)).toBeUndefined();
+  });
 });
 
 describe('memoryTerrain decor', () => {

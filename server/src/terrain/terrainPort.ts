@@ -37,6 +37,12 @@ export interface TerrainStore {
    * stored before colors existed has none and draws its default art.
    */
   loadBlockColors(): Promise<ReadonlyMap<number, string>>;
+  /**
+   * Saves blocks like `saveBlocks` and removes the walls on `walls` (post
+   * indexes) in the same step: all rows succeed or none do. A void edit uses
+   * it to drop the posts it leaves with no ground around them (#217).
+   */
+  saveBlocksClearingWalls(edits: readonly { index: number; material: LayoutMaterial; color?: string }[], walls: readonly number[], actorId: string | null): Promise<void>;
   /** Placed walls by tile. Tiles the current map no longer has are the runtime's to ignore. */
   loadWalls(): Promise<ReadonlyMap<number, WallPieceId>>;
   /** Places (`piece`) or removes (`null`) walls; all rows succeed or none do. */
