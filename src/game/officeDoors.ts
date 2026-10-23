@@ -419,6 +419,44 @@ export function toggleDoorLock(
   return next;
 }
 
+/** What the local player is told about the locks where they stand (#223, S15). */
+export interface DoorLockNotice {
+  /** What the lock key would do here: `lock` or `unlock` the doors `doorLockGroup` finds, `null` when it does nothing. */
+  readonly lockable: 'lock' | 'unlock' | null;
+  /** Whether they stand inside a locked door's room (or, for a door whose room was opened, inside its run's inside tiles). */
+  readonly insideLocked: boolean;
+}
+
+/**
+ * The hint and the notice for the avatar at `position` (a network position).
+ * `lockable` reuses `doorLockGroup`, the very rule the room applies to the
+ * key, so the hint never promises what the key will not do; `insideLocked`
+ * reads the same leaves and rooms, so everyone inside a locked room sees it.
+ */
+export function doorLockNotice(
+  items: readonly DecorItem[],
+  width: number,
+  locked: ReadonlySet<number>,
+  position: GeometryPoint,
+  rooms: RoomMap,
+): DoorLockNotice {
+  const live = liveDoorLocks(items, locked);
+  const group = doorLockGroup(items, width, position, rooms);
+  const lockable = group === null ? null : group.some((index) => live.has(index)) ? 'unlock' : 'lock';
+  if (live.size === 0) return { lockable, insideLocked: false };
+  const center = bodyCenter(position);
+  const tx = Math.floor(center.x / DOOR_TILE);
+  const ty = Math.floor(center.y / DOOR_TILE);
+  const region = rooms(tx, ty);
+  const insideLocked = doorLeaves(items, width, rooms).some((leaf) => {
+    if (!live.has(leaf.index)) return false;
+    if (leaf.room !== null) return region !== null && region.id === leaf.room;
+    const inside = insideTileOf(leaf.edge, leaf.rotation);
+    return inside.tx === tx && inside.ty === ty;
+  });
+  return { lockable, insideLocked };
+}
+
 /** The locks of doors that still stand: a door removed or replaced takes its lock with it. */
 export function liveDoorLocks(items: readonly DecorItem[], locked: ReadonlySet<number>): Set<number> {
   return new Set(items.filter((item) => isDoorPiece(item.piece) && locked.has(item.index)).map((item) => item.index));

@@ -10,6 +10,7 @@ import {
   doorInsideTile,
   doorLeaves,
   doorLockGroup,
+  doorLockNotice,
   doorOnWall,
   doorOpenings,
   doorSwingRotation,
@@ -468,5 +469,59 @@ describe('officeDoors: one lock for the room (#223, S16)', () => {
     expect(doorLeaves(items, WIDTH, open).map((leaf) => [leaf.rotation, leaf.room])).toEqual([[180, null], [180, null]]);
     expect(doorLockGroup(items, WIDTH, centeredAt(4 * 32 + 16, 1 * 32 + 16), open)).toEqual([at(4, 2), at(5, 2)]);
     expect(doorLockGroup(items, WIDTH, nextToNorth, open)).toBeNull();
+  });
+});
+
+describe('officeDoors: what the lock key offers and who is shut in (#223, S15)', () => {
+  const centeredAt = (cx: number, cy: number) => {
+    const body = physicalBodyRect({ x: 0, y: 0 });
+    return { x: cx - (body.x + body.width / 2), y: cy - (body.y + body.height / 2) };
+  };
+  const tile = (tx: number, ty: number) => centeredAt(tx * 32 + 16, ty * 32 + 16);
+  const rooms = roomMap(ring(3, 2, 8, 6));
+  const DOORS: DecorItem[] = [door(4, 2, 180), door(3, 4, 270), door(6, 6, 0)];
+  const all = new Set(DOORS.map((item) => item.index));
+  const notice = (locked: ReadonlySet<number>, position: { x: number; y: number }) => doorLockNotice(DOORS, WIDTH, locked, position, rooms);
+
+  it('offers the lock next to a door of a closed room from inside, never from outside nor two tiles away', () => {
+    expect(notice(new Set(), tile(4, 2)).lockable).toBe('lock');
+    expect(notice(new Set(), tile(3, 4)).lockable).toBe('lock');
+    // Outside the room, even right at the door.
+    expect(notice(new Set(), tile(4, 1)).lockable).toBeNull();
+    // Inside, two tiles from every door.
+    expect(notice(new Set(), tile(5, 4)).lockable).toBeNull();
+    expect(notice(new Set(), tile(4, 4)).lockable).toBeNull();
+  });
+
+  it('offers to unlock once any door of that room is locked, and keeps the rule of the lock key', () => {
+    expect(notice(all, tile(4, 2)).lockable).toBe('unlock');
+    expect(notice(new Set([DOORS[2]!.index]), tile(4, 2)).lockable).toBe('unlock');
+    // What the key does is what the notice says: the same group, the same position.
+    expect(doorLockGroup(DOORS, WIDTH, tile(4, 2), rooms)).not.toBeNull();
+    expect(toggleDoorLock(DOORS, WIDTH, all, tile(4, 2), rooms)).toEqual(new Set());
+    // The lock of a door that is gone counts for nothing.
+    expect(notice(new Set([at(9, 9)]), tile(4, 2)).lockable).toBe('lock');
+  });
+
+  it('says the avatar is shut in once the room is locked, anywhere in it and nowhere outside it', () => {
+    expect(notice(all, tile(5, 4)).insideLocked).toBe(true);
+    expect(notice(all, tile(7, 5)).insideLocked).toBe(true);
+    expect(notice(all, tile(4, 1)).insideLocked).toBe(false);
+    expect(notice(all, tile(10, 4)).insideLocked).toBe(false);
+    expect(notice(new Set(), tile(5, 4)).insideLocked).toBe(false);
+    // One door locked is the room locked, as far as the lock key is concerned.
+    expect(notice(new Set([DOORS[1]!.index]), tile(5, 4)).insideLocked).toBe(true);
+  });
+
+  it('shuts in only the inside of a locked door whose room an edit opened', () => {
+    const broken = ring(3, 2, 8, 6);
+    broken.walls[at(8, 4)] = null;
+    const open = roomMap(broken);
+    const items = [door(4, 2, 180), door(5, 2, 180)];
+    const locked = new Set([at(4, 2), at(5, 2)]);
+    // Rotation 180 faces up: its inside is the tile above the edge.
+    expect(doorLockNotice(items, WIDTH, locked, tile(4, 1), open).insideLocked).toBe(true);
+    expect(doorLockNotice(items, WIDTH, locked, tile(5, 1), open).insideLocked).toBe(true);
+    expect(doorLockNotice(items, WIDTH, locked, tile(4, 3), open).insideLocked).toBe(false);
   });
 });

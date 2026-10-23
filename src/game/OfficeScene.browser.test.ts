@@ -4942,6 +4942,80 @@ describe('OfficeScene: edited terrain', () => {
     await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(180, 'start', false)), LOOP_WAIT);
   });
 
+  describe('the lock hint and the locked-room notice (#223, S15)', () => {
+    /** A closed room of tiles 67..69 x 22..24 with a door on its top edge at (67, 22); returns where bodies stand. */
+    async function roomWithDoor() {
+      const booted = await bootConnected();
+      const { scene, handlers } = booted;
+      const w = BASE_LAYOUT.width;
+      const ring = [0, 1, 2, 3].flatMap((i) => [lawnTile + i, lawnTile + 3 * w + i, lawnTile + i * w, lawnTile + i * w + 3]);
+      handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [...new Set(ring)].map((index) => ({ index, piece: 'wall-brick' as const }))));
+      handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 0 }]);
+      const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
+      await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
+      const body = findPlayer(scene).body as Phaser.Physics.Arcade.Body;
+      const doorX = lawnVertex.x + TILE / 2;
+      return {
+        ...booted,
+        body,
+        nextToDoor: { x: doorX, y: lawnVertex.y + TILE / 2 - 11 },
+        deepInside: { x: lawnVertex.x + 2.5 * TILE, y: lawnVertex.y + 2.5 * TILE - 11 },
+        outside: { x: doorX, y: lawnVertex.y - TILE / 2 - 11 },
+      };
+    }
+
+    it('tells React what the lock key would do where the player stands, once per change and by the rule of the room', async () => {
+      const { bridge, body, nextToDoor, deepInside, outside } = await roomWithDoor();
+      const seen: OfficeEventMap['doorlocknotice'][] = [];
+      bridge.on('doorlocknotice', (notice) => seen.push(notice));
+      const last = () => seen.at(-1);
+
+      body.reset(nextToDoor.x, nextToDoor.y);
+      await vi.waitFor(() => expect(last()).toEqual({ lockable: 'lock', insideLocked: false }), LOOP_WAIT);
+      const count = seen.length;
+      // Still next to the door: nothing new to say, frame after frame.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(seen).toHaveLength(count);
+
+      // Inside but two tiles from the door, and outside it: the key does nothing, so there is no hint.
+      body.reset(deepInside.x, deepInside.y);
+      await vi.waitFor(() => expect(last()).toEqual({ lockable: null, insideLocked: false }), LOOP_WAIT);
+      body.reset(outside.x, outside.y);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(last()).toEqual({ lockable: null, insideLocked: false });
+
+      // Never while an editor holds the map: the key is ignored there too.
+      body.reset(nextToDoor.x, nextToDoor.y);
+      await vi.waitFor(() => expect(last()).toEqual({ lockable: 'lock', insideLocked: false }), LOOP_WAIT);
+      bridge.emitCommand('decoredit', { brush: { kind: 'piece', piece: 'chair-wood', info: { kind: 'chair', footprint: { w: 1, h: 1 } }, rotation: 0 }, area: null });
+      await vi.waitFor(() => expect(last()).toEqual({ lockable: null, insideLocked: false }), LOOP_WAIT);
+      bridge.emitCommand('decoredit', null);
+      await vi.waitFor(() => expect(last()).toEqual({ lockable: 'lock', insideLocked: false }), LOOP_WAIT);
+    });
+
+    it('tells everyone inside the room it is locked, and offers to unlock, from the replicated locks', async () => {
+      const { bridge, handlers, body, nextToDoor, deepInside, outside } = await roomWithDoor();
+      const seen: OfficeEventMap['doorlocknotice'][] = [];
+      bridge.on('doorlocknotice', (notice) => seen.push(notice));
+      const last = () => seen.at(-1);
+
+      body.reset(deepInside.x, deepInside.y);
+      handlers.onDoorLocks!(new Set([lawnTile]));
+      await vi.waitFor(() => expect(last()).toEqual({ lockable: null, insideLocked: true }), LOOP_WAIT);
+
+      body.reset(nextToDoor.x, nextToDoor.y);
+      await vi.waitFor(() => expect(last()).toEqual({ lockable: 'unlock', insideLocked: true }), LOOP_WAIT);
+
+      handlers.onDoorLocks!(new Set());
+      await vi.waitFor(() => expect(last()).toEqual({ lockable: 'lock', insideLocked: false }), LOOP_WAIT);
+
+      // Outside a locked room there is nothing to say; the player cannot even get in.
+      handlers.onDoorLocks!(new Set([lawnTile]));
+      body.reset(outside.x, outside.y);
+      await vi.waitFor(() => expect(last()).toEqual({ lockable: null, insideLocked: false }), LOOP_WAIT);
+    });
+  });
+
   it('draws pending walls for the editor without colliding with them, and drops them when it closes', async () => {
     const { scene, bridge } = await bootConnected();
     const before = wallObjects(scene).length;

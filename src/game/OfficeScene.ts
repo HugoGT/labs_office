@@ -4,7 +4,7 @@ import { artUploadsManifestUrl, findPiece, type ArtAppearance } from './artPack'
 import { artCustomCharactersUrl } from './customCharacterArt';
 import { ArtPackLoader } from './artPackLoader';
 import { deskPlacement } from './artPlacement';
-import { feetOf, positionForFeet } from './avatarGeometry';
+import { AVATAR_BODY_CENTER_OFFSET, feetOf, positionForFeet } from './avatarGeometry';
 import { beginAutoWalk, isAutoWalkArrived, stepAutoWalk, type AutoWalkState } from './autoWalk';
 import { IDLE_AUTO_SIT, SIT_LOCK_MS, dropSitDwells, guardLeftSeat, sitLockActive, stepAutoSit, type AutoSitState } from './autoSit';
 import { bodyTileOf, planWalk, positionForBodyTile, type WalkWorld } from './pathfinding';
@@ -37,7 +37,7 @@ import { deskAt, deskZoneName } from './deskLayout';
 import { SPACE_SHADE_ALPHA, SPACE_SHADE_NAME, shadeAround, shadeKey } from './spaceFocus';
 import { tableFacing, tableFloorRect } from './deskTable';
 import { decorChairs, decorFootprint, encodeOfficeDecor, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
-import { doorEdge, doorLeaves, doorOpenings, doorSwingRotation, isDoorPiece, lockedDoorBarriers, openDoorLeaves, roomMap, type DoorLeaf, type DoorSwing, type RoomMap } from './officeDoors';
+import { doorEdge, doorLeaves, doorLockNotice, doorOpenings, doorSwingRotation, isDoorPiece, lockedDoorBarriers, openDoorLeaves, roomMap, type DoorLeaf, type DoorLockNotice, type DoorSwing, type RoomMap } from './officeDoors';
 import { deskEntryRefused } from './deskDecorRules';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
@@ -307,6 +307,15 @@ export class OfficeScene extends Phaser.Scene {
   private openDoors: ReadonlyMap<number, DoorSwing> = new Map();
   /** The locked doors (#223, S13) by leaf anchor, as the room replicates them. */
   private doorLocks: ReadonlySet<number> = new Set();
+  /**
+   * The hint and notice last told to React (#223, S15) and what they were
+   * computed from: the player's tile, the walls, decor and locks (by
+   * identity) and whether the key is ignored, so a still frame costs nothing.
+   */
+  private doorNotice: {
+    told: DoorLockNotice;
+    from: { tile: number; walls: unknown; decor: unknown; locks: unknown; ignored: boolean } | null;
+  } = { told: { lockable: null, insideLocked: false }, from: null };
   /**
    * The colliders of the locked doors that bar this player, standing
    * outside them (`lockedDoorBarriers`), keyed by their anchors: rebuilt
@@ -1739,6 +1748,32 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
+   * Tells React what the lock key would do where this player stands and
+   * whether they are inside a locked room (#223, S15), by `doorLockNotice`:
+   * the rule the room applies to the key, on the live walls, decor and locks
+   * and the position the room tracks. The hint is off wherever the key is
+   * ignored (typing, an editor holding the map). Emits only on change.
+   */
+  private updateDoorNotice(): void {
+    // The spawn position is not the player's until the room says so.
+    if (!this.localPositionReady) return;
+    const ignored = isEditableElementFocused() || this.mapHeld;
+    // The tile of the body center, which is what the room checks the key by.
+    const tile = Math.floor((this.player.y + AVATAR_BODY_CENTER_OFFSET.y) / TILE) * this.layout.width + Math.floor((this.player.x + AVATAR_BODY_CENTER_OFFSET.x) / TILE);
+    const last = this.doorNotice.from;
+    if (last !== null && last.tile === tile && last.walls === this.terrainWalls && last.decor === this.officeDecor && last.locks === this.doorLocks && last.ignored === ignored) return;
+    this.doorNotice.from = { tile, walls: this.terrainWalls, decor: this.officeDecor, locks: this.doorLocks, ignored };
+    const { rooms } = this.liveDoorGeometry();
+    const position = { x: this.player.x, y: this.player.y };
+    const computed = doorLockNotice(this.officeDecor, this.layout.width, this.doorLocks, position, rooms);
+    const next: DoorLockNotice = { lockable: ignored ? null : computed.lockable, insideLocked: computed.insideLocked };
+    const told = this.doorNotice.told;
+    if (next.lockable === told.lockable && next.insideLocked === told.insideLocked) return;
+    this.doorNotice.told = next;
+    this.bridge.emit('doorlocknotice', next);
+  }
+
+  /**
    * Puts an Arcade collider on every locked door this player stands outside
    * of, and takes it away once they are inside (#223, S13): the room refuses
    * walking in from outside, so the client stops the body before it does
@@ -2395,6 +2430,7 @@ export class OfficeScene extends Phaser.Scene {
     }
     this.animateDoors();
     this.updateDoorBarriers();
+    this.updateDoorNotice();
     if (this.localPositionReady && this.connectionState === 'connected') {
       this.connection?.sendMove(this.player.x, this.player.y, this.facing);
     }
