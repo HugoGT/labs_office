@@ -54,7 +54,11 @@ describe('TerrainEditorSection', () => {
     await open();
 
     expect(screen.getByRole('group', { name: 'Suelos' })).toBeInTheDocument();
-    expect(screen.getByText(/9 × 9/)).toBeInTheDocument();
+    expect(screen.getByText('Pintar sobre el vacío crea terreno nuevo; «Vacío» lo borra. El agua y el vacío no se pueden caminar. Con ESC sales del editor.')).toBeInTheDocument();
+    // That sentence is the menu's only explanation.
+    expect(screen.queryByText(/9 × 9/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/minimapa/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/siempre es de madera/)).not.toBeInTheDocument();
     expect(screen.queryByText(/procedural/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Semilla/)).not.toBeInTheDocument();
     expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
@@ -100,7 +104,7 @@ describe('TerrainEditorSection', () => {
     const onEditingChange = vi.fn();
     renderSection({ onExit, onEditingChange });
     await open();
-    await userEvent.click(screen.getByRole('button', { name: 'Ladrillo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Césped' }));
 
     await userEvent.keyboard('{Escape}');
     expect(screen.getByRole('heading', { name: 'Terreno' })).toBeInTheDocument();
@@ -140,39 +144,13 @@ describe('TerrainEditorSection', () => {
     expect(terrain.setBlock).not.toHaveBeenCalled();
   });
 
-  it('offers the walls below the floors, one entry pressed at a time across both, and says what it paints', async () => {
-    const { commands } = renderSection();
+  it('offers no walls: they live in Decoración since #224', async () => {
+    renderSection();
     await open();
 
-    expect(screen.getByRole('group', { name: 'Paredes' })).toBeInTheDocument();
-    expect(screen.getByText(/paredes van sobre las líneas entre casillas/i)).toBeInTheDocument();
-    expect(screen.getByText(/escritorios, muebles ni la entrada/i)).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Césped' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Ladrillo' }));
-    expect(screen.getByRole('button', { name: 'Ladrillo' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: 'Césped' })).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByText('Pintando paredes de Ladrillo')).toBeInTheDocument();
-    expect(commands.at(-1)).toEqual({ brush: { kind: 'wall', piece: 'wall-brick' } });
-
-    await userEvent.click(screen.getByRole('button', { name: 'Quitar pared' }));
-    expect(screen.getByText('Quitando paredes')).toBeInTheDocument();
-    await userEvent.keyboard('{Escape}');
-    expect(screen.getByRole('button', { name: 'Quitar pared' })).toHaveAttribute('aria-pressed', 'false');
-  });
-
-  it('paints the clicked tiles with the picked wall, and says why the server refused one', async () => {
-    const setWalls = vi.fn(async () => {
-      throw new AdminError('terrain-under-placement');
-    });
-    const { bridge } = renderSection({ terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls } });
-    await open();
-    await userEvent.click(screen.getByRole('button', { name: 'Piedra' }));
-
-    act(() => bridge.emit('wallpick', { index: 7 }));
-
-    await vi.waitFor(() => expect(setWalls).toHaveBeenCalledWith([{ index: 7, piece: 'wall-stone' }]));
-    expect(await screen.findByRole('alert')).toHaveTextContent(/Una pared no puede tapar un escritorio/);
+    expect(screen.queryByRole('group', { name: 'Paredes' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Quitar pared' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/pared/i)).not.toBeInTheDocument();
   });
 
   it('offers no chairs: they live in Decoración since #208', async () => {

@@ -30,7 +30,8 @@ describe('DecorPalette', () => {
   it('offers every decor piece of the catalog by its full Spanish name, grouped by kind, none pressed, and no eraser', () => {
     render(<DecorPalette value={null} catalog={catalog} onPick={() => {}} preview={noPreview()} />);
 
-    expect(screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'))).toEqual(['Sillas', 'Mesas de escritorio', 'Mesas de sala', 'Plantas']);
+    expect(screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'))).toEqual(['Sillas', 'Mesas de escritorio', 'Mesas de sala', 'Plantas', 'Puertas']);
+    expect(names('Puertas')).toEqual(['Puerta de madera']);
     expect(names('Sillas')).toEqual(['Silla de madera', 'Silla de metal', 'Silla de cuero', 'Silla gamer']);
     expect(names('Mesas de escritorio')).toEqual(['Escritorio de vidrio', 'Escritorio de metal', 'Escritorio de madera', 'Escritorio pintado']);
     expect(names('Mesas de sala')).toEqual(['Mesa de reuniones', 'Mesa de cafetería', 'Mesa ovalada']);
@@ -46,7 +47,14 @@ describe('DecorPalette', () => {
     expect(tiles('Mesas de escritorio')).toEqual(['Vidrio', 'Metal', 'Madera', 'Pintado']);
     expect(tiles('Mesas de sala')).toEqual(['Reuniones', 'Cafetería', 'Ovalada']);
     expect(tiles('Plantas')).toEqual(['Ficus']);
+    expect(tiles('Puertas')).toEqual(['Madera']);
     expect(screen.getByRole('button', { name: 'Silla de madera' })).toHaveAttribute('title', 'Silla de madera');
+  });
+
+  it('tells under the doors that X locks one from the inside (#223)', () => {
+    render(<DecorPalette value={null} catalog={catalog} onPick={() => {}} preview={noPreview()} />);
+    const doors = screen.getByRole('group', { name: 'Puertas' }).parentElement!;
+    expect(within(doors).getByText('Va entre dos paredes y cierra una sala. Desde dentro, junto a una puerta, pulsa X para cerrar con llave todas las puertas de la sala o abrirlas.')).toBeInTheDocument();
   });
 
   it('shows the size of each room table on its tile, the horizontal one', () => {
@@ -107,6 +115,8 @@ describe('DecorPalette', () => {
     expect(names('Mesas de sala')).toEqual(['Mesa ovalada']);
     expect(screen.getByRole('group', { name: 'Sillas' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Plantas' })).toBeInTheDocument();
+    // Doors open walls, which only an admin edits (#223).
+    expect(screen.queryByRole('group', { name: 'Puertas' })).not.toBeInTheDocument();
   });
 
   it('cuts every thumbnail from its sheet through the shared preview generator, both layers for a chair', async () => {
@@ -136,6 +146,7 @@ describe('catalogDecorInfo', () => {
     expect(infoOf('table-oval')).toEqual({ kind: 'table', footprint: { w: 2, h: 1 } });
     expect(infoOf('desk-painted')).toEqual({ kind: 'desk', footprint: { w: 3, h: 1 }, colorable: true });
     expect(infoOf('chair-wood')).toEqual({ kind: 'chair', footprint: { w: 1, h: 1 } });
+    expect(infoOf('door-wood')).toEqual({ kind: 'door', footprint: { w: 1, h: 1 } });
     expect(infoOf('table-nope')).toBeNull();
     expect(catalogDecorInfo(null)('chair-wood')).toBeNull();
   });

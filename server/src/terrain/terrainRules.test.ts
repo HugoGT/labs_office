@@ -5,6 +5,7 @@ import {
   newlyUnwalkableTiles,
   terrainSnapshot,
   withBlock,
+  withWalls,
   type LayoutMaterial,
 } from '../../../src/game/officeLayout.ts';
 import { MAX_DECOR_EDITS, type DecorItem, type DecorPieceInfo } from '../../../src/game/officeDecor.ts';
@@ -236,6 +237,17 @@ describe('findWallConflict', () => {
     expect(findWallConflict([spawn + 3 * W + 3], MAP, STATIC, NONE)).toBeNull();
   });
 
+  it('refuses to remove a post that ends a door (#223), never to repaint it or to change another post', () => {
+    const doorPosts = new Set([free, free + 1]);
+    expect(findWallConflict([], MAP, STATIC, NONE, [free + 1], doorPosts)).toBe('placement');
+    expect(findWallConflict([free], MAP, STATIC, NONE, [], doorPosts)).toBeNull();
+    expect(findWallConflict([free, free + 1], MAP, STATIC, NONE, [], doorPosts)).toBeNull();
+    expect(findWallConflict([], MAP, STATIC, NONE, [free + 2], doorPosts)).toBeNull();
+    expect(findWallConflict([free + 2], MAP, STATIC, NONE, [], doorPosts)).toBeNull();
+    // A batch that repaints a door's posts and erases an unrelated one is not refused for the door.
+    expect(findWallConflict([free], MAP, STATIC, NONE, [free + 2], doorPosts)).toBeNull();
+  });
+
   it('refuses a post on a desk, its edge lines included', () => {
     expect(findWallConflict([free], MAP, STATIC, { ...NONE, desks: [desk] })).toBe('placement');
     // The desk's top-left and bottom-right corners: the post straddles the edge.
@@ -325,6 +337,48 @@ describe('findDecorConflict', () => {
     expect(conflict([{ index: free, piece: 'chair-wood', rotation: 0 }], [free])).toBeNull();
     expect(conflict([{ index: free, piece: 'desk-wood', rotation: 90 }], [free])).toBeNull();
     expect(conflict([], [])).toBeNull();
+  });
+
+  describe('doors (#223, S16)', () => {
+    const door = (index: number, rotation: 0 | 90 | 180 | 270 = 0): DecorItem => ({ index, piece: 'door-wood', rotation });
+    const doorInfo = (piece: string): DecorPieceInfo | null => (piece.startsWith('door-') ? { kind: 'door', footprint: { w: 1, h: 1 } } : infoOf(piece));
+    /** Posts all round the vertices (67, 22)..(71, 26): a closed room, the top wall plaster when `mixed`. */
+    const roomEdits = (mixed = false, skip: number | null = null) => {
+      const edits: { index: number; piece: 'wall-brick' | 'wall-plaster' | 'wall-glass' }[] = [];
+      for (let x = 67; x <= 71; x += 1) edits.push({ index: at(x, 22), piece: mixed ? 'wall-plaster' : 'wall-brick' }, { index: at(x, 26), piece: 'wall-brick' });
+      for (let y = 23; y <= 25; y += 1) edits.push({ index: at(67, y), piece: 'wall-brick' }, { index: at(71, y), piece: 'wall-brick' });
+      return edits.filter(({ index }) => index !== skip);
+    };
+    const snapshotOf = (edits: ReturnType<typeof roomEdits>) => terrainSnapshot(BASE_LAYOUT, BASE_LAYOUT.blocks, withWalls(BASE_LAYOUT.walls, edits));
+    const walled = snapshotOf(roomEdits());
+    const check = (after: DecorItem[], placed: number[], snapshot = walled) => findDecorConflict(after, new Set(placed), doorInfo, snapshot, STATIC);
+
+    it('takes a door on the edge between two joined posts that close a room, the tiles its own posts touch included', () => {
+      expect(check([door(free)], [free])).toBeNull();
+      // Turned out, the room is still the closed side.
+      expect(check([door(free, 180)], [free])).toBeNull();
+      expect(check([door(at(67, 24), 90)], [at(67, 24)])).toBeNull();
+      expect(check([door(at(67, 24), 270)], [at(67, 24)])).toBeNull();
+      // Not on an edge between posts, or no wall at all.
+      expect(check([door(at(69, 24), 90)], [at(69, 24)])).toBe('placement');
+      expect(check([door(free)], [free], BASE_TERRAIN)).toBe('placement');
+      // Any other piece still keeps off the tiles the wall touches.
+      expect(check([{ index: free, piece: 'chair-wood', rotation: 0 }], [free])).toBe('placement');
+      // Another item on one of its two tiles refuses it.
+      expect(check([door(free), { index: at(67, 21), piece: 'chair-wood', rotation: 0 }], [free])).toBe('placement');
+    });
+
+    it('takes a door between posts of two materials when it closes a room', () => {
+      const mixed = snapshotOf([...roomEdits(true), { index: at(68, 22), piece: 'wall-glass' }]);
+      expect(mixed.walls[at(67, 22)]).toBe('wall-plaster');
+      expect(mixed.walls[at(68, 22)]).toBe('wall-glass');
+      expect(check([door(free)], [free], mixed)).toBeNull();
+    });
+
+    it('refuses a door where neither side is a closed room: an open wall, a room with a post missing, or a wall that reaches nothing', () => {
+      expect(check([door(free)], [free], snapshotOf([{ index: free, piece: 'wall-brick' }, { index: free + 1, piece: 'wall-brick' }]))).toBe('placement');
+      expect(check([door(free)], [free], snapshotOf(roomEdits(false, at(71, 24))))).toBe('placement');
+    });
   });
 
   it('refuses any tile of a footprint on water or void, a static tile or the spawn area, or off the map', () => {

@@ -11,6 +11,7 @@ import {
   CHARACTER_SEATED,
   CHARACTER_WALK,
   DESK,
+  DOOR,
   HEDGE,
   PACK_FACINGS,
   PLANT,
@@ -130,8 +131,8 @@ describe('art pack manifest', () => {
 
   it('registers the characters, furniture, floors, walls, the terrain tileset and the map props', () => {
     const count = (kind: string): number => manifest.pieces.filter((piece) => piece.kind === kind).length;
-    const kinds = ['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table'];
-    expect(kinds.map(count)).toEqual([18, 4, 4, 9, 4, 1, 2, 1, 1, 1, 3]);
+    const kinds = ['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door'];
+    expect(kinds.map(count)).toEqual([18, 4, 4, 9, 4, 1, 2, 1, 1, 1, 3, 1]);
   });
 
   it('uses stable ids derived from the generators, unique and prefixed by kind', () => {
@@ -232,6 +233,12 @@ describe('art pack manifest', () => {
       }
       if (piece.kind === 'hedge') expect(piece.height).toBe(HEDGE.height);
     }
+  });
+
+  it('registers a wooden door (#223): one sheet of door frames, anchored on its edge, one tile of wall wide', () => {
+    const door = manifest.pieces.find((piece) => piece.kind === 'door');
+    expect(door).toMatchObject({ id: 'door-wood', name: 'Puerta de madera', material: 'wood', anchor: DOOR.anchor, footprint: { w: 1, h: 1 } });
+    expect(door!.files.map((file) => [file.role, file.imageKind, file.width, file.height])).toEqual([['sheet', 'door', 256, 256]]);
   });
 
   it('marks only the painted desk, the plain floor and the carpet as colorable', () => {

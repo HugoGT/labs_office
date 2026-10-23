@@ -13,7 +13,9 @@ import {
   type SolidGrid,
   type WalkWorld,
 } from './pathfinding';
-import type { TileCoord } from './terrainGrid';
+import { buildTerrainGrid, type TileCoord } from './terrainGrid';
+import { terrainSnapshot, type OfficeLayout } from './officeLayout';
+import { LEGACY_LAYOUT } from '../test/legacyOffice';
 
 /** Rows of text to a grid: `#` is blocked, anything else free. */
 function gridOf(rows: readonly string[]): SolidGrid {
@@ -522,5 +524,35 @@ describe('planWalk against wall and piece rectangles (#219, #221)', () => {
       found++;
     }
     expect(found).toBeGreaterThan(20);
+  });
+});
+
+describe('planWalk through a door (#221, #223)', () => {
+  /** The legacy office cut by a brick wall along row 22, from one side of the map to the other. */
+  const walled: OfficeLayout = {
+    ...LEGACY_LAYOUT,
+    props: [],
+    hedges: LEGACY_LAYOUT.hedges.map(() => null),
+    ground: LEGACY_LAYOUT.ground.map(() => 'grass'),
+    walls: LEGACY_LAYOUT.walls.map((_, index) => (Math.floor(index / LEGACY_LAYOUT.width) === 22 ? 'wall-brick' : null)),
+  };
+  const DOOR = { col: 67, row: 22, axis: 'horizontal' as const };
+  const from = positionForBodyTile(tile(67, 17));
+  const goal = positionForBodyTile(tile(67, 27));
+  /** What the scene hands the planner: the terrain tiles and the wall rectangles of a snapshot's grid. */
+  const worldOf = (grid: ReturnType<typeof buildTerrainGrid>): WalkWorld => ({ terrainSolid: grid.terrainSolid, rects: grid.wallRects });
+
+  it('finds no way across a closed wall, and walks straight through the door that opens it', () => {
+    const closed = buildTerrainGrid(terrainSnapshot(walled), walled, []);
+    expect(planWalk(worldOf(closed), from, goal)).toBeNull();
+
+    const open = buildTerrainGrid(terrainSnapshot(walled, walled.blocks, walled.walls, [DOOR]), walled, []);
+    expect(open.solid[21]![67]).toBe(false);
+    expect(open.solid[22]![67]).toBe(false);
+    expect(open.solid[22]![66]).toBe(true);
+    expect(open.solid[22]![68]).toBe(true);
+    const route = planWalk(worldOf(open), from, goal);
+    expectClearWalk(worldOf(open), from, route);
+    expect(route!.at(-1)).toEqual(goal);
   });
 });

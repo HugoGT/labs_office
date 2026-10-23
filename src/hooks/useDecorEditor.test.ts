@@ -69,6 +69,33 @@ describe('useDecorEditor', () => {
     expect(commands.at(-1)).toBeNull();
   });
 
+  it('lets go of the map while paused (#224): brush down, overlay closed, map events and Escape left alone, until resumed', () => {
+    const bridge = createOfficeBridge();
+    const commands: OfficeCommandMap['decoredit'][] = [];
+    bridge.onCommand('decoredit', (command) => commands.push(command));
+    const { decor } = deferredPort();
+    const onExit = vi.fn();
+    const { result, rerender } = renderHook(({ paused }: { paused: boolean }) => useDecorEditor({ bridge, decor, area: null, infoOf, onExit, paused }), {
+      initialProps: { paused: false },
+    });
+    act(() => result.current.enter());
+    act(() => result.current.pick(CHAIR));
+
+    rerender({ paused: true });
+    expect(result.current.active).toBe(true);
+    expect(result.current.brush).toBeNull();
+    expect(commands.at(-1)).toBeNull();
+    act(() => bridge.emit('decorpick', { index: at(40, 40) }));
+    expect(decor.setDecor).not.toHaveBeenCalled();
+    expect(escape().defaultPrevented).toBe(false);
+    expect(onExit).not.toHaveBeenCalled();
+
+    rerender({ paused: false });
+    expect(commands.at(-1)).toEqual({ brush: null, area: null });
+    expect(escape().defaultPrevented).toBe(true);
+    expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
   it('takes the live layer from the scene', () => {
     const { bridge, result } = setup();
     const items: DecorItem[] = [{ index: 5, piece: 'chair-gamer', rotation: 90 }];
@@ -675,5 +702,11 @@ describe('useDecorEditor', () => {
       expect(calls[1]!.edits).toEqual([{ index: at(20, 20), item: null }, { index: at(22, 20), item: { piece: 'chair-gamer', rotation: 270 } }]);
       await act(async () => calls[1]!.resolve());
     });
+  });
+});
+
+describe('DECOR_UNDER_PLACEMENT_MESSAGE (#223)', () => {
+  it('says where a door goes: between two walls, closing a room', () => {
+    expect(DECOR_UNDER_PLACEMENT_MESSAGE).toMatch(/La puerta va entre dos paredes y tiene que cerrar una sala\./);
   });
 });

@@ -21,6 +21,12 @@
  * item is protected like a static seat: no water, void or wall may land on
  * one.
  *
+ * Doors (#223) are decor items too, but they do change the snapshot: each
+ * one opens the wall edge it stands on (`doorOpenings`), so every snapshot
+ * this runtime builds passes the doors of the layer it holds, and a decor
+ * edit that changes the doors rebuilds it. The posts at a door's ends may
+ * not change while the door stands.
+ *
  * Blocks of a colorable material may carry a color (#222). It is part of the
  * block edit: saved in the same `saveBlocks` as the material, published with
  * it, and cleared whenever the block is painted without one.
@@ -37,6 +43,7 @@ import {
   wallPostTiles,
   withBlock,
   withTerrainColors,
+  withWallOrder,
   withWalls,
   type LayoutMaterial,
   type OfficeLayout,
@@ -59,6 +66,7 @@ import {
   type DecorTileRect,
 } from '../../../src/game/officeDecor.ts';
 import { deskOverChairLimit, displacedDeskTables } from '../../../src/game/deskDecorRules.ts';
+import { doorOpenings, doorPostSet, isDoorPiece } from '../../../src/game/officeDoors.ts';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
 import type { TerrainStore } from './terrainPort.ts';
 import {
@@ -208,8 +216,17 @@ export function createTerrainRuntime({
   let blocks: readonly LayoutMaterial[] = layout.blocks;
   let colors: TerrainColors = new Map();
   let walls: readonly (string | null)[] = layout.walls;
-  let snapshot = terrainSnapshot(layout, blocks, walls);
+  /** The painted posts in placement order, oldest first (#223); the layout's own posts are not listed. */
+  let wallOrder: readonly number[] = [];
   let decor: readonly DecorItem[] = [];
+  /** The one way the runtime builds a snapshot: the doors of `items` open their wall edges. */
+  const snapshotOf = (
+    nextBlocks: readonly LayoutMaterial[],
+    nextWalls: readonly (string | null)[],
+    items: readonly DecorItem[] = decor,
+    nextOrder: readonly number[] = wallOrder,
+  ): TerrainSnapshot => terrainSnapshot(layout, nextBlocks, nextWalls, doorOpenings(items, layout.width), nextOrder);
+  let snapshot = snapshotOf(blocks, walls);
   let catalog = new Map<string, DecorCatalogPiece>();
   let queue: Promise<unknown> = Promise.resolve();
 
@@ -272,7 +289,7 @@ export function createTerrainRuntime({
     if (changed.length === 0) return blocks;
     let next = [...blocks];
     for (const { index, material } of changed) next = withBlock(next, index, material);
-    let nextSnapshot = terrainSnapshot(layout, next, walls);
+    let nextSnapshot = snapshotOf(next, walls);
     const watered = newlyUnwalkableTiles(snapshot, nextSnapshot);
     if (watered.length > 0) {
       const conflict = findUnwalkableConflict(watered, layout.width, protectedTiles(), await protections());
@@ -283,16 +300,20 @@ export function createTerrainRuntime({
     // Posts already floating elsewhere are left for the wall eraser.
     const floating = floatingPosts(changed.flatMap(({ index, material }) => (material === 'void' ? [index] : [])), nextSnapshot);
     let nextWalls = walls;
+    let nextOrder = wallOrder;
     if (floating.length === 0) {
       await store.saveBlocks(changed, actorId);
     } else {
-      nextWalls = withWalls(walls, floating.map((index) => ({ index, piece: null })));
-      nextSnapshot = terrainSnapshot(layout, next, nextWalls);
+      const removals = floating.map((index) => ({ index, piece: null }));
+      nextWalls = withWalls(walls, removals);
+      nextOrder = withWallOrder(wallOrder, walls, removals);
+      nextSnapshot = snapshotOf(next, nextWalls, decor, nextOrder);
       await store.saveBlocksClearingWalls(changed, floating, actorId);
     }
     blocks = next;
     colors = nextColors;
     walls = nextWalls;
+    wallOrder = nextOrder;
     snapshot = nextSnapshot;
     for (const listener of listeners) listener(blocks);
     return blocks;
@@ -307,14 +328,26 @@ export function createTerrainRuntime({
     const changed = edits.filter(({ index, piece }) => walls[index] !== piece);
     if (changed.length === 0) return walls;
     const placed = changed.flatMap(({ index, piece }) => (piece === null ? [] : [index]));
-    if (placed.length > 0) {
-      const conflict = findWallConflict(placed, layout, protectedTiles(), await protections());
-      if (conflict !== null) throw new TerrainProtectedError(conflict);
-    }
+    const removed = changed.flatMap(({ index, piece }) => (piece === null ? [index] : []));
+    // A door's end post may be repainted (the door stays on it) but not removed.
+    const doorPosts = doorPostSet(decor, layout.width);
+    // Repainting a post that already stands covers nothing new, yet its footprint touches the tiles of the
+    // door beside it, which a new post could not: standing posts are checked without the doors' own tiles.
+    const standing = placed.filter((index) => walls[index] != null);
+    const fresh = placed.filter((index) => walls[index] == null);
+    const guards = placed.length > 0 ? await protections() : { placements: [], players: [] };
+    const doorTiles = new Set(decor.flatMap((item) => (isDoorPiece(item.piece) ? decorTiles(item, decorInfo(item.piece), layout.width) : [])));
+    const guarded = protectedTiles();
+    const withoutDoors = new Set([...guarded].filter((tile) => !doorTiles.has(tile)));
+    const conflict = findWallConflict(fresh, layout, guarded, guards, removed, doorPosts) ?? findWallConflict(standing, layout, withoutDoors, guards);
+    if (conflict !== null) throw new TerrainProtectedError(conflict);
     const next = withWalls(walls, changed);
-    const nextSnapshot = terrainSnapshot(layout, blocks, next);
+    // A placed or repainted post becomes the latest, the order the store keeps by `updated_at`.
+    const nextOrder = withWallOrder(wallOrder, walls, changed);
+    const nextSnapshot = snapshotOf(blocks, next, decor, nextOrder);
     await store.saveWalls(changed, actorId);
     walls = next;
+    wallOrder = nextOrder;
     snapshot = nextSnapshot;
     for (const listener of listeners) listener(blocks);
     return walls;
@@ -345,6 +378,8 @@ export function createTerrainRuntime({
       if (!decorRotationsOf(info.kind).includes(item.rotation)) throw new InvalidTerrainEditError('this piece does not turn that way');
       // A colorable piece without a color draws in its manifest default; any other piece takes none.
       if (item.color !== undefined && info.colorable !== true) throw new InvalidTerrainEditError('this piece takes no color');
+      // A door opens a wall, which only an admin edits: the desk scope never places one.
+      if (area !== undefined && info.kind === 'door') throw new InvalidTerrainEditError('a door is not for a desk');
     }
     if (area !== undefined) {
       const inside = (item: Pick<DecorItem, 'index' | 'piece' | 'rotation'>): boolean =>
@@ -370,8 +405,11 @@ export function createTerrainRuntime({
     if (conflict !== null) throw new TerrainProtectedError(conflict);
     const saved = decorChanges(decor, next);
     if (saved.length === 0) return decor;
+    const openings = (items: readonly DecorItem[]): string => JSON.stringify(doorOpenings(items, layout.width));
+    const nextSnapshot = openings(next) === openings(decor) ? snapshot : snapshotOf(blocks, walls, next);
     await store.saveDecor(saved, actorId);
     decor = next;
+    snapshot = nextSnapshot;
     for (const listener of listeners) listener(blocks);
     return decor;
   }
@@ -405,13 +443,16 @@ export function createTerrainRuntime({
         if (!wallPostTiles(layout, index).some((tile) => staticTiles.has(tile))) wallEdits.push({ index, piece });
       }
       walls = withWalls(layout.walls, wallEdits);
-      snapshot = terrainSnapshot(layout, blocks, walls);
+      // The store lists the walls oldest first; the layout's own posts stay unlisted.
+      wallOrder = wallEdits.map(({ index }) => index);
       const tileCount = layout.width * layout.height;
       await readCatalog();
       // Unlike the walls, a stored item that breaks today's rules is kept and
       // drawn: it is someone's furniture, and only new edits are checked.
-      // Only an anchor off the map is left out.
+      // Only an anchor off the map is left out. A stored door off its wall
+      // opens nothing (`terrainSnapshot` needs joined posts under it).
       decor = (await store.loadDecor()).filter(({ index }) => index >= 0 && index < tileCount);
+      snapshot = snapshotOf(blocks, walls);
     },
     blocks: () => blocks,
     blockColors: () => colors,

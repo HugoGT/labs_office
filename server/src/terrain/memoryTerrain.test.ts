@@ -48,6 +48,17 @@ describe('memoryTerrain walls', () => {
     expect(store.wallActorOf(5)).toBeUndefined();
     expect([...(await store.loadBlocks())]).toEqual([]);
   });
+  it('lists the walls in placement order: a placed or repainted wall goes to the end (#223)', async () => {
+    const store = createMemoryTerrain([], [[9, 'wall-brick'], [4, 'wall-brick'], [5, 'wall-brick']]);
+    expect([...(await store.loadWalls())].map(([index]) => index)).toEqual([9, 4, 5]);
+
+    await store.saveWalls([{ index: 9, piece: 'wall-glass' }, { index: 2, piece: 'wall-stone' }], null);
+    expect([...(await store.loadWalls())].map(([index]) => index)).toEqual([4, 5, 9, 2]);
+
+    await store.saveWalls([{ index: 4, piece: null }, { index: 4, piece: 'wall-stone' }], null);
+    expect([...(await store.loadWalls())].map(([index]) => index)).toEqual([5, 9, 2, 4]);
+  });
+
   it('saves blocks and removes walls in one save', async () => {
     const store = createMemoryTerrain([], [[4, 'wall-brick'], [5, 'wall-glass']]);
     await store.saveBlocksClearingWalls([{ index: 0, material: 'void' }, { index: 1, material: 'carpet', color: '#a0b1c2' }], [4], 'admin-1');

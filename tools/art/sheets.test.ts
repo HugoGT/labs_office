@@ -7,6 +7,8 @@ import {
   CHARACTER_SEATED,
   CHARACTER_WALK,
   DESK,
+  DOOR,
+  DOOR_HINGES,
   FLOOR,
   FLOOR_MOTIF_SIZE,
   HEDGE,
@@ -25,6 +27,7 @@ import {
   WALK_DIRECTIONS,
   WALL,
   bridgeFrameIndex,
+  doorFrameIndex,
   facingColumn,
   floorFrameAt,
   hedgeFrameIndex,
@@ -52,6 +55,7 @@ import { groupWallGeometry, resolveWallGeometry } from './domain/wallGeometry.ts
 import { WALL_MATERIALS, WallMap } from './domain/wallMap.ts';
 import { composeWalls } from './domain/wallRenderer.ts';
 import { crop } from './imageOps.ts';
+import { DOOR_MATERIALS, doorSprite } from './domain/doors.ts';
 import { bridgeSprite, hedgeSprite, PLANT_KINDS, plantSprite, TREE_KINDS, treeSprite } from './domain/props.ts';
 import { ROOM_TABLES, roomTableSprite } from './domain/tables.ts';
 import { decalTile, TERRAIN_EDGES, terrainBankTile, terrainEdgeTile, terrainVoidCapTile, terrainVoidEdgeTile } from './domain/terrainTiles.ts';
@@ -61,6 +65,7 @@ import {
   characterSeatedSheet,
   characterWalkSheet,
   deskSheet,
+  doorSheet,
   floorSheet,
   hedgeSheet,
   plantSheet,
@@ -361,6 +366,23 @@ describe('prop sheets', () => {
     for (let mask = 0; mask < 16; mask += 1) {
       const frame = tileOf(hedges, hedgeFrameIndex(mask), HEDGE.columns, HEDGE.frame.width, HEDGE.frame.height);
       expect(pixels(frame), `mask ${mask}`).toEqual(pixels(hedgeSprite(mask)));
+    }
+  });
+});
+
+describe('door sheet (#223)', () => {
+  it('validates against the contract and holds each rotation, hinge and state at its frame index', () => {
+    for (const material of DOOR_MATERIALS) {
+      const sheet = doorSheet(material);
+      expect(validateArtImage('door', sheet), material).toEqual([]);
+      for (const rotation of [0, 90, 180, 270] as const) {
+        for (const hinge of DOOR_HINGES) {
+          for (const open of [false, true]) {
+            const frame = tileOf(sheet, doorFrameIndex(rotation, hinge, open), DOOR.columns, DOOR.frame.width, DOOR.frame.height);
+            expect(pixels(frame), `${rotation} ${hinge} ${open}`).toEqual(pixels(doorSprite(material, rotation, hinge, open)));
+          }
+        }
+      }
     }
   });
 });

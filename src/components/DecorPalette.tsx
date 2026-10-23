@@ -19,7 +19,7 @@ import styles from './DecorPalette.module.css';
  * and what a click on the map does.
  */
 
-type DecorCatalogKind = 'chair' | 'desk' | 'table' | 'plant';
+type DecorCatalogKind = 'chair' | 'desk' | 'table' | 'plant' | 'door';
 
 /** The groups in palette order, named for the person picking. */
 const GROUPS: readonly { kind: DecorCatalogKind; label: string }[] = [
@@ -27,6 +27,8 @@ const GROUPS: readonly { kind: DecorCatalogKind; label: string }[] = [
   { kind: 'desk', label: 'Mesas de escritorio' },
   { kind: 'table', label: 'Mesas de sala' },
   { kind: 'plant', label: 'Plantas' },
+  // #223: only the office scope offers them (the desk scope's `fitsDeskArea` leaves doors out).
+  { kind: 'door', label: 'Puertas' },
 ];
 
 /**
@@ -46,6 +48,9 @@ export const DECOR_COLORS: readonly Swatch[] = [
   { hex: '#7a4fb0', label: 'Morado' },
   { hex: '#d77fa1', label: 'Rosa' },
 ];
+
+/** Under the doors (#223, S13, S16): where they go and how to lock a room, since nothing else on the map says so. */
+const DOOR_LOCK_HINT = 'Va entre dos paredes y cierra una sala. Desde dentro, junto a una puerta, pulsa X para cerrar con llave todas las puertas de la sala o abrirlas.';
 
 /** The thumbnail box, in pixels. */
 const THUMBNAIL_PX = 48;
@@ -170,6 +175,7 @@ export function DecorPalette({ value, catalog, offers = () => true, colors = {},
                 );
               })}
             </div>
+            {kind === 'door' && <p className={styles.size}>{DOOR_LOCK_HINT}</p>}
           </div>
         );
       })}

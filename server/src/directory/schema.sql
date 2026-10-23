@@ -328,7 +328,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_display_name_unique ON users (
 -- backfill writes ids that only exist here once the pack is registered.
 CREATE TABLE IF NOT EXISTS art_pieces (
   id text PRIMARY KEY,
-  kind text NOT NULL CHECK (kind IN ('character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table')),
+  kind text NOT NULL CHECK (kind IN ('character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door')),
   name text NOT NULL,
   -- NULL for characters and the terrain tileset; every other kind has one.
   material text,
@@ -344,9 +344,10 @@ CREATE TABLE IF NOT EXISTS art_pieces (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 -- Art contract 2 added the terrain tileset and the map props. CREATE TABLE IF
--- NOT EXISTS keeps the CHECK of a table created before, so it is replaced.
+-- NOT EXISTS keeps the CHECK of a table created before, so it is replaced;
+-- the door (#223) came later the same way.
 ALTER TABLE art_pieces DROP CONSTRAINT IF EXISTS art_pieces_kind_check;
-ALTER TABLE art_pieces ADD CONSTRAINT art_pieces_kind_check CHECK (kind IN ('character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table'));
+ALTER TABLE art_pieces ADD CONSTRAINT art_pieces_kind_check CHECK (kind IN ('character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door'));
 
 -- Admin uploads (#121) live in the same catalog, so every choice resolves
 -- them the same way. `source` is what keeps a pack registration from

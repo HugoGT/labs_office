@@ -20,6 +20,7 @@ import type { RosterPeer } from './roster';
 import type { TerrainEditCommand } from './terrainEditor';
 import type { DecorEditCommand } from './decorEditor';
 import type { DecorItem } from './officeDecor';
+import type { DoorLockNotice } from './officeDoors';
 import type { CollisionEditCommand } from './collisionEditor';
 import type { CollisionRect } from './pieceCollisions';
 import type { ActiveRecordingSnapshot, OfficeConnectionState } from './officeRoomClient';
@@ -234,6 +235,13 @@ export interface OfficeEventMap {
   collisionpick: { pieceId: string; rects: readonly CollisionRect[]; saved: boolean; defaults: readonly CollisionRect[] };
   /** A rectangle was drawn, moved or resized on the map: the whole new draft, and the rectangle it touched. */
   collisiondraft: { rects: readonly CollisionRect[]; selectedRect: number | null };
+  /**
+   * What the local player is told about door locks where they stand (#223,
+   * S15): what the lock key would do here (`lockable`) and whether they are
+   * inside a locked room. Emitted only when either changes, never per frame;
+   * the scene computes it with the rule the room applies to the key.
+   */
+  doorlocknotice: DoorLockNotice;
   /** The map zoom: the TARGET stop and what the zoom control may still do, never the animated value. */
   zoomchanged: ZoomView;
 }

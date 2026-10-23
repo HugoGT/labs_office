@@ -877,6 +877,22 @@ describe('connectOfficeRoom: seats (art migration, step 6)', () => {
     expect(seen.at(-1)![7]).toBeNull();
   });
 
+  it('reports the placement order of the walls with them, the latest last (#223)', async () => {
+    await server.shutdown();
+    const { BASE_LAYOUT: layout } = await import('./officeLayout.ts');
+    server = createOfficeServer({ layout, seats: [], terrain: createMemoryTerrain([], [[9, 'wall-glass'], [7, 'wall-stone']]) });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+    const orders: (readonly number[] | undefined)[] = [];
+    await connect('Ana', { ...recorder().handlers, onWalls: (_walls, order) => orders.push(order) });
+
+    await waitFor(() => orders.length > 0);
+    expect(orders[0]).toEqual([9, 7]);
+
+    await server.terrain.setWalls([{ index: 8, piece: 'wall-brick' }, { index: 9, piece: 'wall-brick' }], null, async () => ({ placements: [], players: [] }));
+    await waitFor(() => orders.length > 1);
+    expect(orders.at(-1)).toEqual([7, 8, 9]);
+  });
+
   it('reports the terrain colors (#222) on every color edit, each a whole map', async () => {
     await server.shutdown();
     const { BASE_LAYOUT: layout } = await import('./officeLayout.ts');
@@ -908,6 +924,29 @@ describe('connectOfficeRoom: seats (art migration, step 6)', () => {
     await server.terrain.setDecor([{ index: tile(91, 64), item: null }, { index: tile(97, 70), item: { piece: 'chair-wood', rotation: 180 } }], null);
     await waitFor(() => seen.at(-1)?.[0]?.index === tile(97, 70));
     expect(seen.at(-1)).toEqual([{ index: tile(97, 70), piece: 'chair-wood', rotation: 180 }]);
+  });
+
+  it('sendDoorLock asks to lock the door the player stands inside, and reports the locks on every change (#223)', async () => {
+    await server.shutdown();
+    const { BASE_LAYOUT: layout } = await import('./officeLayout.ts');
+    const tile = (tx: number, ty: number) => ty * layout.width + tx;
+    const walls = [90, 91, 92].map((tx) => [tile(tx, 64), 'wall-brick'] as const);
+    server = createOfficeServer({ layout, seats: [], terrain: createMemoryTerrain([], walls, [{ index: tile(91, 64), piece: 'door-wood', rotation: 0 }]) });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+    const seen: ReadonlySet<number>[] = [];
+    const local: (string | null)[] = [];
+    const ana = await connect('Ana', { ...recorder().handlers, onDoorLocks: (locks) => seen.push(locks), onLocalSeat: (seat) => local.push(seat) });
+    await waitFor(() => local.length > 0);
+    await waitFor(() => seen.length > 0);
+    expect(seen[0]).toEqual(new Set());
+
+    // Body center on the door's inside tile (91, 64).
+    ana.sendMove(91 * TILE + 16, 64 * TILE + 5, 'down');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    ana.sendDoorLock();
+    await waitFor(() => seen.at(-1)?.has(tile(91, 64)) === true);
+    ana.sendDoorLock();
+    await waitFor(() => seen.at(-1)?.size === 0);
   });
 
   it('reports the collision table on the first sync and every edit after it', async () => {

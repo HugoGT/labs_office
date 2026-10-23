@@ -108,7 +108,17 @@ describe('pgTerrain', () => {
     const walls = await createPgTerrain(pool).loadWalls();
 
     expect(new Map(walls)).toEqual(new Map([[3, 'wall-brick'], [40, 'wall-glass']]));
-    expect(squash(pool.queries[0]!.text)).toBe('select tile_index, piece_id from terrain_walls');
+    expect(squash(pool.queries[0]!.text)).toBe('select tile_index, piece_id from terrain_walls order by updated_at, tile_index');
+  });
+
+  it('loads the walls in placement order: the order the query returns them, oldest first (#223)', async () => {
+    const pool = fakePool([
+      { tile_index: 40, piece_id: 'wall-glass' },
+      { tile_index: 3, piece_id: 'wall-brick' },
+      { tile_index: 9, piece_id: 'wall-stone' },
+    ]);
+
+    expect([...(await createPgTerrain(pool).loadWalls())]).toEqual([[40, 'wall-glass'], [3, 'wall-brick'], [9, 'wall-stone']]);
   });
 
   it('places and removes a whole wall batch in one atomic statement', async () => {

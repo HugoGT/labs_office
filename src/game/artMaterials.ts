@@ -13,17 +13,20 @@
  * manifest and are offered after the pack's, each sheet next to its manifest.
  *
  * The wall pieces ride along for the terrain editor's wall palette, and the
- * chairs, desks, plants and room tables for the decor palette (#208), which
- * cut their thumbnails the same way; no creation form offers those.
+ * chairs, desks, plants, room tables and doors (#223) for the decor palette
+ * (#208), which cut their thumbnails the same way; no creation form offers
+ * those.
  */
 
 import {
   ART_IMAGE_SPECS,
   ART_TILE,
+  DOOR,
   facingColumn,
   wallFrameIndex,
   type ArtChairPiece,
   type ArtDeskPiece,
+  type ArtDoorPiece,
   type ArtFloorPiece,
   type ArtPlantPiece,
   type ArtTablePiece,
@@ -36,7 +39,7 @@ const SHEET_ROLE = 'sheet';
 
 export interface MaterialOption {
   readonly id: string;
-  readonly kind: 'desk' | 'floor' | 'wall' | 'chair' | 'plant' | 'table';
+  readonly kind: 'desk' | 'floor' | 'wall' | 'chair' | 'plant' | 'table' | 'door';
   /** Spanish name from the manifest. */
   readonly name: string;
   readonly colorable: boolean;
@@ -47,7 +50,7 @@ export interface MaterialOption {
   readonly piece: CatalogPiece;
 }
 
-type CatalogPiece = ArtDeskPiece | ArtFloorPiece | ArtWallPiece | ArtChairPiece | ArtPlantPiece | ArtTablePiece;
+type CatalogPiece = ArtDeskPiece | ArtFloorPiece | ArtWallPiece | ArtChairPiece | ArtPlantPiece | ArtTablePiece | ArtDoorPiece;
 
 export interface MaterialCatalog {
   readonly desk: readonly MaterialOption[];
@@ -60,6 +63,8 @@ export interface MaterialCatalog {
   readonly plant: readonly MaterialOption[];
   /** The room tables, for the decor palette (never colorable). */
   readonly table: readonly MaterialOption[];
+  /** The doors (#223), for the admin's decor palette (never colorable). */
+  readonly door: readonly MaterialOption[];
   /** Pack defaults, or the first offered option when the default is not offered. */
   readonly defaults: { readonly desk: string; readonly floor: string };
 }
@@ -105,17 +110,17 @@ export function materialCatalogFrom(raw: unknown, manifestUrl: string, uploads?:
     { manifest: uploads === undefined ? null : parseArtPackManifest(uploads.raw), url: uploads?.url ?? manifestUrl },
   ]);
   if (joined === null) return null;
-  const options: Record<MaterialOption['kind'], MaterialOption[]> = { desk: [], floor: [], wall: [], chair: [], plant: [], table: [] };
+  const options: Record<MaterialOption['kind'], MaterialOption[]> = { desk: [], floor: [], wall: [], chair: [], plant: [], table: [], door: [] };
   for (const piece of joined.manifest.pieces) {
     if (!(piece.kind in options)) continue;
     const option = optionOf(piece as CatalogPiece, manifestFolder(joined.sourceOf(piece.id) ?? manifestUrl));
     if (option !== null) options[option.kind].push(option);
   }
-  const { desk, floor, wall, chair, plant, table } = options;
+  const { desk, floor, wall, chair, plant, table, door } = options;
   const deskDefault = defaultOf(desk, manifest.defaults.desk);
   const floorDefault = defaultOf(floor, manifest.defaults.floor);
   if (deskDefault === null || floorDefault === null) return null;
-  return { desk, floor, wall, chair, plant, table, defaults: { desk: deskDefault, floor: floorDefault } };
+  return { desk, floor, wall, chair, plant, table, door, defaults: { desk: deskDefault, floor: floorDefault } };
 }
 
 /** What a form holds right after picking `option`: a colorable material starts in its default color. */
@@ -150,8 +155,15 @@ export interface PreviewFrame {
 const TABLE_PREVIEW_MARGIN = 2;
 const TABLE_PREVIEW_LIFT = 18;
 
+/** What a door's preview keeps around the middle of its edge: the closed leaf and its hinge and handle. */
+const DOOR_PREVIEW = { width: 48, height: 24 } as const;
+
 export function previewFrame(option: MaterialOption): PreviewFrame {
   if (option.kind === 'chair') return chairPreviewFrames()[0];
+  // Frame 0: turned 0, hinged at its start, closed (`doorFrameIndex`).
+  if (option.kind === 'door') {
+    return { x: DOOR.anchor.x - DOOR_PREVIEW.width / 2, y: DOOR.anchor.y - DOOR_PREVIEW.height / 2, ...DOOR_PREVIEW };
+  }
   if (option.kind === 'table' && option.piece.kind === 'table') {
     const { frame } = ART_IMAGE_SPECS.table;
     const { anchor, footprint } = option.piece;
