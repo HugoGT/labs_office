@@ -359,6 +359,12 @@ export interface TerrainSnapshot {
    * body there and the posts' joints clipped along it. Empty without doors.
    */
   readonly openings: readonly GridEdge[];
+  /**
+   * The placement order of the posts (#223): tiles, oldest first, only for
+   * the posts painted since the layout; every other post comes before them
+   * (`orderedWallPosts`). It only decides which wall is drawn over which.
+   */
+  readonly wallOrder: readonly number[];
   /** World rectangles the walls block (`wallFootprintRects`): what the room and Arcade collide with. */
   readonly wallRects: readonly CollisionRect[];
   /** Tiles (row major) a wall rectangle touches at all: blocked for the tile helpers. */
@@ -392,6 +398,7 @@ export function terrainSnapshot(
   blocks: readonly LayoutMaterial[] = layout.blocks,
   walls: readonly (string | null)[] = layout.walls,
   openings: readonly GridEdge[] = [],
+  wallOrder: readonly number[] = [],
 ): TerrainSnapshot {
   const { width, height } = layout;
   const expected = (width / BLOCK_TILES) * (height / BLOCK_TILES);
@@ -420,6 +427,7 @@ export function terrainSnapshot(
     blocks: [...blocks],
     walls: [...walls],
     openings: [...openings],
+    wallOrder: [...wallOrder],
     wallRects,
     wallTiles: coveredTiles(wallRects, width, height),
     materials,
@@ -637,9 +645,52 @@ export function withWalls(walls: readonly (string | null)[], edits: readonly Wal
 
 /**
  * A wall grid: one post (a wall piece) or `null` per grid vertex, row major,
- * and the edges doors open (#223), none when absent.
+ * the edges doors open (#223), none when absent, and the placement order of
+ * the posts (`wallOrder`, tiles oldest first) that decides which wall is laid
+ * over which where two materials meet. Collisions never read the order.
  */
-export type WallGrid = Pick<OfficeLayout, 'width' | 'height' | 'walls'> & { readonly openings?: readonly GridEdge[] };
+export type WallGrid = Pick<OfficeLayout, 'width' | 'height' | 'walls'> & {
+  readonly openings?: readonly GridEdge[];
+  readonly wallOrder?: readonly number[];
+};
+
+/**
+ * The standing posts in placement order, oldest first. Posts `order` does not
+ * list (the layout's own, or a wire string from before the order existed)
+ * come first by tile; then the listed ones, a tile that has no post any more
+ * or repeats being skipped.
+ */
+export function orderedWallPosts(walls: readonly (string | null)[], order: readonly number[] = []): number[] {
+  const listed = new Set<number>();
+  const placed: number[] = [];
+  for (const index of order) {
+    if (walls[index] == null || listed.has(index)) continue;
+    listed.add(index);
+    placed.push(index);
+  }
+  const unlisted: number[] = [];
+  walls.forEach((wall, index) => {
+    if (wall != null && !listed.has(index)) unlisted.push(index);
+  });
+  return [...unlisted, ...placed];
+}
+
+/**
+ * `order` after `edits` are applied to `walls`: a post that is placed or
+ * repainted goes to the end (it is the latest), a removed one leaves, and an
+ * edit that sets the piece a post already holds changes nothing.
+ */
+export function withWallOrder(order: readonly number[], walls: readonly (string | null)[], edits: readonly WallEdit[]): number[] {
+  const touched = new Map<number, WallPieceId | null>();
+  for (const { index, piece } of edits) {
+    if (walls[index] === piece) continue;
+    touched.delete(index);
+    touched.set(index, piece);
+  }
+  if (touched.size === 0) return [...order];
+  const placed = [...touched].flatMap(([index, piece]) => (piece === null ? [] : [index]));
+  return [...order.filter((index) => !touched.has(index)), ...placed];
+}
 
 function edgeKey(col: number, row: number, axis: GridEdge['axis']): string {
   return `${axis === 'horizontal' ? 'h' : 'v'}:${col}:${row}`;
@@ -673,13 +724,13 @@ function openingRect(col: number, row: number, axis: GridEdge['axis']): Collisio
 
 /**
  * Whether the posts on vertices (tx, ty) and (nx, ny) are one wall: both on
- * the map, both standing, and the same piece (#220). Posts of different
- * materials never join, so each draws and blocks as a wall of its own.
+ * the map and both standing, whatever their material (#223). Walls of two
+ * materials meet as one, the later laid over the earlier when drawn
+ * (`wallSprites`), and block as one.
  */
 export function wallsJoin({ width, height, walls }: WallGrid, tx: number, ty: number, nx: number, ny: number): boolean {
-  const at = (x: number, y: number): string | null => (x >= 0 && y >= 0 && x < width && y < height ? (walls[y * width + x] ?? null) : null);
-  const piece = at(tx, ty);
-  return piece !== null && piece === at(nx, ny);
+  const standing = (x: number, y: number): boolean => x >= 0 && y >= 0 && x < width && y < height && walls[y * width + x] != null;
+  return standing(tx, ty) && standing(nx, ny);
 }
 
 function collisionRect({ x, y, width, height }: Rect): CollisionRect {
@@ -690,7 +741,7 @@ function collisionRect({ x, y, width, height }: Rect): CollisionRect {
  * The world rectangles a wall grid blocks, the pack's own geometry
  * (`wallJointRect`, `wallBodyRect`): a 16x16 joint centered on each post,
  * then a body along the grid line between each post and its east and south
- * neighbors of the same piece (`wallsJoin`). Joints first, then bodies, like the sprites.
+ * neighbors (`wallsJoin`). Joints first, then bodies, like the sprites.
  *
  * A door's opening (#223) has no body, and each joint at its ends keeps only
  * the half away from it, so the passage is the whole segment; a joint
@@ -838,12 +889,16 @@ const WALL_PREFIX = 'wall-';
  * The wire form of the walls, a replicated string of the room state: sparse,
  * `<tile>:<material>` per wall joined by commas (`3:brick,4:brick`), empty
  * for none. A whole map of tiles would be tens of kilobytes; walls are few.
+ * The entries come in placement order, oldest first (`orderedWallPosts`), so
+ * the client draws the later wall over the earlier one; without an `order`
+ * that is the tile order, which is also how older strings read.
  */
-export function encodeTerrainWalls(walls: readonly (string | null)[]): string {
+export function encodeTerrainWalls(walls: readonly (string | null)[], order: readonly number[] = []): string {
   const parts: string[] = [];
-  walls.forEach((wall, index) => {
-    if (wall !== null && wall.startsWith(WALL_PREFIX)) parts.push(`${index}:${wall.slice(WALL_PREFIX.length)}`);
-  });
+  for (const index of orderedWallPosts(walls, order)) {
+    const wall = walls[index]!;
+    if (wall.startsWith(WALL_PREFIX)) parts.push(`${index}:${wall.slice(WALL_PREFIX.length)}`);
+  }
   return parts.join(',');
 }
 
@@ -861,6 +916,12 @@ export function decodeTerrainWalls(raw: unknown, count: number): (WallPieceId | 
     walls[index] = piece;
   }
   return walls;
+}
+
+/** The tiles of a wire string in the order it lists them (placement order, oldest first), or `null` when `decodeTerrainWalls` refuses it. */
+export function decodeTerrainWallOrder(raw: unknown, count: number): number[] | null {
+  if (decodeTerrainWalls(raw, count) === null) return null;
+  return raw === '' ? [] : (raw as string).split(',').map((part) => Number(part.slice(0, part.indexOf(':'))));
 }
 
 /** The tile under a world pixel, row major, or `null` off the map. */

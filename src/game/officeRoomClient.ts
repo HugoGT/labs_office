@@ -19,7 +19,7 @@
 
 import { Client, getStateCallbacks, type Room } from 'colyseus.js';
 import { createMoveThrottle } from './moveThrottle';
-import { BASE_LAYOUT, decodeTerrainBlocks, decodeTerrainColors, decodeTerrainWalls, type LayoutMaterial, type TerrainColors } from './officeLayout';
+import { BASE_LAYOUT, decodeTerrainBlocks, decodeTerrainColors, decodeTerrainWallOrder, decodeTerrainWalls, type LayoutMaterial, type TerrainColors } from './officeLayout';
 import { decodeCollisionTable, type CollisionTable } from './pieceCollisions';
 import {
   ACCESS_DENIED_CODE,
@@ -214,8 +214,12 @@ export interface OfficeRoomHandlers {
   onSpacesChanged?(): void;
   /** The whole terrain block list (#123 phase 2): on the first sync and after every accepted edit. */
   onTerrain?(blocks: readonly LayoutMaterial[]): void;
-  /** The live wall of every tile, row major: on the first sync and after every accepted wall edit. */
-  onWalls?(walls: readonly (string | null)[]): void;
+  /**
+   * The live wall of every tile, row major: on the first sync and after every accepted wall edit.
+   * `order` is the tiles of the posts in placement order, oldest first (#223): the later wall is
+   * drawn over the earlier one where two materials meet.
+   */
+  onWalls?(walls: readonly (string | null)[], order?: readonly number[]): void;
   /**
    * The colors of painted terrain blocks (#222), a whole map on each change.
    * Not called while the office has none: start from an empty map.
@@ -467,7 +471,7 @@ export async function connectOfficeRoom({
     // (undefined, not reported), and the scene keeps the layout's walls.
     $(target.state).listen('terrainWalls', (value) => {
       const walls = decodeTerrainWalls(value, BASE_LAYOUT.width * BASE_LAYOUT.height);
-      if (walls !== null) handlers.onWalls?.(walls);
+      if (walls !== null) handlers.onWalls?.(walls, decodeTerrainWallOrder(value, BASE_LAYOUT.width * BASE_LAYOUT.height) ?? []);
     });
     // Terrain colors (#222): same rule. An empty string may never arrive on
     // the first sync, so a client starts from no colors rather than waiting.

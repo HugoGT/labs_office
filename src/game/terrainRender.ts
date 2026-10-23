@@ -17,7 +17,7 @@ import {
   type Rect,
   type TerrainMaterial,
 } from './artContract';
-import { LAYOUT_MATERIALS, terrainMaterialAt, wallsJoin, type LayoutMaterial, type LayoutProp, type OfficeLayout, type TerrainSnapshot, type WallGrid } from './officeLayout';
+import { LAYOUT_MATERIALS, orderedWallPosts, terrainMaterialAt, wallsJoin, type LayoutMaterial, type LayoutProp, type OfficeLayout, type TerrainSnapshot, type WallGrid } from './officeLayout';
 
 /**
  * The color of the void: the camera background around and under the world,
@@ -94,7 +94,11 @@ export interface WallSprite {
   readonly frame: number;
   readonly x: number;
   readonly y: number;
-  /** Bottom edge of the piece: what it y-sorts by. */
+  /**
+   * Bottom edge of the piece: what it y-sorts by. A piece of the wall laid
+   * over another material (#223) adds a fraction of a pixel, so it covers
+   * what shares its edge without ever passing a piece a pixel below.
+   */
   readonly depthY: number;
 }
 
@@ -118,39 +122,61 @@ function neighborMask(cells: readonly (string | null)[], width: number, height: 
  * wall blocks (`wallFootprintRects`). A door's opening (#223) draws no body,
  * the door stands there; its joints keep their connected frames, so the wall
  * reads as one around the door.
+ *
+ * Neighboring posts join whatever their material (#223). Where two of
+ * different materials meet, the one placed last (`wallOrder`, else the tile
+ * order) is laid over the other: each joint keeps its own material and
+ * connected frame, and the body between them is the later material, a clean
+ * cut where one wall ends and the other begins. Same-material walls draw
+ * exactly as if the order did not exist.
  */
-export function wallSprites({ width, height, walls, openings = [] }: WallGrid): WallSprite[] {
+export function wallSprites({ width, height, walls, openings = [], wallOrder = [] }: WallGrid): WallSprite[] {
   const joints: WallSprite[] = [];
   const bodies: WallSprite[] = [];
-  const sprite = (piece: string, part: WallSprite['part'], frame: number, rect: Rect): WallSprite => ({
+  const grid = { width, height, walls };
+  const open = new Set(openings.map(({ col, row, axis }) => `${axis}:${col}:${row}`));
+  const posts = orderedWallPosts(walls, wallOrder);
+  const rank = new Map(posts.map((index, position) => [index, position]));
+  /** A fraction of a pixel, more for a later post: what a piece laid over another material adds to its depth. */
+  const lift = (index: number): number => (rank.get(index)! + 1) / (posts.length + 1);
+  const sprite = (piece: string, part: WallSprite['part'], frame: number, rect: Rect, extra = 0): WallSprite => ({
     piece,
     part,
     frame,
     x: rect.x,
     y: rect.y,
-    depthY: rect.y + rect.height,
+    depthY: rect.y + rect.height + extra,
   });
-  const grid = { width, height, walls };
-  const open = new Set(openings.map(({ col, row, axis }) => `${axis}:${col}:${row}`));
+  /** The later of two joined posts, when their materials differ: the one laid over the other. */
+  const later = (a: number, b: number): number | null => (walls[a] === walls[b] ? null : rank.get(a)! > rank.get(b)! ? a : b);
   for (let ty = 0; ty < height; ty += 1) {
     for (let tx = 0; tx < width; tx += 1) {
-      const piece = walls[ty * width + tx];
+      const index = ty * width + tx;
+      const piece = walls[index];
       if (piece === null || piece === undefined) continue;
-      // Only posts of the same piece join (#220); a post of another material stands apart.
-      const mask =
-        (wallsJoin(grid, tx, ty, tx, ty - 1) ? NORTH : 0) |
-        (wallsJoin(grid, tx, ty, tx + 1, ty) ? EAST : 0) |
-        (wallsJoin(grid, tx, ty, tx, ty + 1) ? SOUTH : 0) |
-        (wallsJoin(grid, tx, ty, tx - 1, ty) ? WEST : 0);
+      const neighbors = [
+        [NORTH, tx, ty - 1],
+        [EAST, tx + 1, ty],
+        [SOUTH, tx, ty + 1],
+        [WEST, tx - 1, ty],
+      ] as const;
+      let mask = 0;
+      let over = false;
+      for (const [bit, nx, ny] of neighbors) {
+        if (!wallsJoin(grid, tx, ty, nx, ny)) continue;
+        mask |= bit;
+        over ||= later(index, ny * width + nx) === index;
+      }
       // A lone post has no joint frame (masks start at 1): it stands as a vertical body.
       const frame = mask === 0 ? wallFrameIndex({ piece: 'body', axis: 'vertical' }) : wallFrameIndex({ piece: 'joint', mask });
-      joints.push(sprite(piece, 'joint', frame, wallJointRect({ col: tx, row: ty })));
-      if (mask & EAST && !open.has(`horizontal:${tx}:${ty}`)) {
-        bodies.push(sprite(piece, 'body', wallFrameIndex({ piece: 'body', axis: 'horizontal' }), wallBodyRect({ col: tx, row: ty, axis: 'horizontal' })));
-      }
-      if (mask & SOUTH && !open.has(`vertical:${tx}:${ty}`)) {
-        bodies.push(sprite(piece, 'body', wallFrameIndex({ piece: 'body', axis: 'vertical' }), wallBodyRect({ col: tx, row: ty, axis: 'vertical' })));
-      }
+      joints.push(sprite(piece, 'joint', frame, wallJointRect({ col: tx, row: ty }), over ? lift(index) : 0));
+      // The body between two joined posts takes the material of the later one.
+      const body = (axis: 'horizontal' | 'vertical', next: number): void => {
+        const top = later(index, next);
+        bodies.push(sprite(walls[top ?? index]!, 'body', wallFrameIndex({ piece: 'body', axis }), wallBodyRect({ col: tx, row: ty, axis }), top === null ? 0 : lift(top)));
+      };
+      if (mask & EAST && !open.has(`horizontal:${tx}:${ty}`)) body('horizontal', index + 1);
+      if (mask & SOUTH && !open.has(`vertical:${tx}:${ty}`)) body('vertical', index + width);
     }
   }
   return [...joints, ...bodies];

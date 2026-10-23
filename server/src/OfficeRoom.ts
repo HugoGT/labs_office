@@ -429,12 +429,12 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     if (options?.desks) this.desks = options.desks;
     this.state.terrainBlocks = encodeTerrainBlocks(this.terrain().blocks);
     this.state.terrainColors = encodeTerrainColors(this.terrainColors());
-    this.state.terrainWalls = encodeTerrainWalls(this.terrain().walls);
+    this.state.terrainWalls = encodeTerrainWalls(this.terrain().walls, this.terrain().wallOrder);
     this.state.officeDecor = encodeOfficeDecor(this.decor());
     this.unsubscribeTerrainChanges = options?.subscribeTerrainChanges?.((blocks) => {
       this.state.terrainBlocks = encodeTerrainBlocks(blocks);
       this.state.terrainColors = encodeTerrainColors(this.terrainColors());
-      this.state.terrainWalls = encodeTerrainWalls(this.terrain().walls);
+      this.state.terrainWalls = encodeTerrainWalls(this.terrain().walls, this.terrain().wallOrder);
       this.state.officeDecor = encodeOfficeDecor(this.decor());
       // A door removed or replaced takes its lock with it.
       this.setDoorLocks(liveDoorLocks(this.decor(), this.doorLocks));

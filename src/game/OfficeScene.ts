@@ -75,6 +75,7 @@ import {
   encodeTerrainColors,
   encodeTerrainWalls,
   terrainSnapshot,
+  withWallOrder,
   withWalls,
   type LayoutMaterial,
   type TerrainColors,
@@ -270,6 +271,8 @@ export class OfficeScene extends Phaser.Scene {
   private terrainPreviewColors: TerrainColors | null = null;
   /** The walls the room replicated last, one per tile; colliders and `grid` follow them. */
   private terrainWalls: readonly (string | null)[] = BASE_LAYOUT.walls;
+  /** The tiles of `terrainWalls` in placement order, oldest first (#223): which wall is drawn over which. */
+  private terrainWallOrder: readonly number[] = [];
   /** The terrain editor's pending wall paints, drawn over `terrainWalls` and never collided with. */
   private wallPreview: readonly WallEdit[] | null = null;
   /** What the walls drew, destroyed and drawn again whenever the walls or their preview change. */
@@ -616,6 +619,7 @@ export class OfficeScene extends Phaser.Scene {
     this.mapSeats = options.seats ?? BASE_MAP_SEATS;
     this.terrainBlocks = this.layout.blocks;
     this.terrainWalls = this.layout.walls;
+    this.terrainWallOrder = [];
     this.terrain = this.terrainOf(this.terrainBlocks, this.terrainWalls);
     this.collisionInstances = officeCollisionInstances(this.layout, this.mapSeats);
     this.collisionRects = collisionWorld(this.collisionInstances, this.collisionTable);
@@ -1008,7 +1012,7 @@ export class OfficeScene extends Phaser.Scene {
           onSpacesChanged: () => this.bridge.emit('spaceschanged', undefined),
           onTerrain: (blocks) => this.applyTerrain(blocks),
           onTerrainColors: (colors) => this.applyTerrainColors(colors),
-          onWalls: (walls) => this.applyWalls(walls),
+          onWalls: (walls, order) => this.applyWalls(walls, order),
           onDecor: (items) => this.applyDecor(items),
           onCollisions: (table) => this.applyCollisions(table),
           onDoorLocks: (locks) => this.applyDoorLocks(locks),
@@ -1924,10 +1928,12 @@ export class OfficeScene extends Phaser.Scene {
    * and the drawing follow at once. Walls of another map size (a server on
    * another layout) are not this map's and are ignored.
    */
-  private applyWalls(walls: readonly (string | null)[]): void {
+  private applyWalls(walls: readonly (string | null)[], order: readonly number[] = []): void {
     if (!this.alive || walls.length !== this.layout.width * this.layout.height) return;
-    if (encodeTerrainWalls(walls) !== encodeTerrainWalls(this.terrainWalls)) {
+    // The order is part of the walls: a repaint with the same posts still redraws which wall lies over which.
+    if (encodeTerrainWalls(walls, order) !== encodeTerrainWalls(this.terrainWalls, this.terrainWallOrder)) {
       this.terrainWalls = walls;
+      this.terrainWallOrder = order;
       this.terrain = this.terrainOf(this.terrainBlocks, walls);
       this.grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
       this.buildTerrainColliders(this.grid);
@@ -2039,7 +2045,7 @@ export class OfficeScene extends Phaser.Scene {
    * The decor editor's pending edits never collide, so they open nothing.
    */
   private terrainOf(blocks: readonly LayoutMaterial[], walls: readonly (string | null)[]): TerrainSnapshot {
-    return terrainSnapshot(this.layout, blocks, walls, doorOpenings(this.officeDecor, this.layout.width));
+    return terrainSnapshot(this.layout, blocks, walls, doorOpenings(this.officeDecor, this.layout.width), this.terrainWallOrder);
   }
 
   /**
@@ -2049,8 +2055,10 @@ export class OfficeScene extends Phaser.Scene {
   private paintWalls(): void {
     for (const object of this.wallObjects) object.destroy();
     const walls = this.wallPreview === null ? this.terrainWalls : withWalls(this.terrainWalls, this.wallPreview);
+    // The pending paints are the latest posts, as they will be once saved.
+    const wallOrder = this.wallPreview === null ? this.terrainWallOrder : withWallOrder(this.terrainWallOrder, this.terrainWalls, this.wallPreview);
     const openings = doorOpenings(this.officeDecor, this.layout.width);
-    this.wallObjects = placeWalls(this, { width: this.layout.width, height: this.layout.height, walls, openings }, this.art);
+    this.wallObjects = placeWalls(this, { width: this.layout.width, height: this.layout.height, walls, openings, wallOrder }, this.art);
   }
 
   /** Camara principal siguiendo al jugador + minimapa en la esquina superior derecha (app.js:410-431). */

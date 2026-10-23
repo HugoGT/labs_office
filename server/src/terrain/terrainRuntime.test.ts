@@ -292,6 +292,57 @@ describe('createTerrainRuntime walls', () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
+  describe('placement order (#223)', () => {
+    it('loads the stored walls in the order the store lists them, the layout ones unlisted', async () => {
+      const store = createMemoryTerrain([], [[FREE + 3, 'wall-glass'], [FREE, 'wall-brick'], [FREE + 1, 'wall-stone']]);
+      const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+
+      expect(runtime.snapshot().wallOrder).toEqual([]);
+      await runtime.load();
+
+      expect(runtime.snapshot().wallOrder).toEqual([FREE + 3, FREE, FREE + 1]);
+    });
+
+    it('puts a placed or repainted post last, drops a removed one, and ignores an edit that changes nothing', async () => {
+      const store = createMemoryTerrain();
+      const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+      await runtime.load();
+
+      await runtime.setWalls([{ index: FREE + 2, piece: 'wall-brick' }, { index: FREE, piece: 'wall-brick' }], null, NONE);
+      expect(runtime.snapshot().wallOrder).toEqual([FREE + 2, FREE]);
+      await runtime.setWalls([{ index: FREE + 1, piece: 'wall-glass' }], null, NONE);
+      expect(runtime.snapshot().wallOrder).toEqual([FREE + 2, FREE, FREE + 1]);
+      // A repaint makes the post the latest, in the runtime and in what a reload reads back.
+      await runtime.setWalls([{ index: FREE + 2, piece: 'wall-stone' }], null, NONE);
+      expect(runtime.snapshot().wallOrder).toEqual([FREE, FREE + 1, FREE + 2]);
+      await runtime.setWalls([{ index: FREE, piece: 'wall-brick' }], null, NONE);
+      expect(runtime.snapshot().wallOrder).toEqual([FREE, FREE + 1, FREE + 2]);
+      await runtime.setWalls([{ index: FREE + 1, piece: null }], null, NONE);
+      expect(runtime.snapshot().wallOrder).toEqual([FREE, FREE + 2]);
+
+      const reloaded = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+      await reloaded.load();
+      expect(reloaded.snapshot().wallOrder).toEqual([FREE, FREE + 2]);
+    });
+
+    it('keeps the order through a block edit and drops the posts a void edit removes', async () => {
+      const lawn = blockTileRect(W, LAWN);
+      const inside = at(lawn.tx + 4, lawn.ty + 4);
+      // On the west border the post keeps ground on one side, so a void edit of the block leaves it.
+      const border = at(lawn.tx, lawn.ty + 4);
+      const store = createMemoryTerrain([], [[inside, 'wall-brick'], [border, 'wall-stone']]);
+      const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+      await runtime.load();
+      expect(runtime.snapshot().wallOrder).toEqual([inside, border]);
+
+      await runtime.setBlocks([{ index: LAWN, material: 'void' }], null, NONE);
+
+      expect(runtime.walls()[inside]).toBeNull();
+      expect(runtime.walls()[border]).toBe('wall-stone');
+      expect(runtime.snapshot().wallOrder).toEqual([border]);
+    });
+  });
+
   describe('when blocks turn to void (#217)', () => {
     const lawn = blockTileRect(W, LAWN);
     const lake = blockTileRect(W, LAKE);

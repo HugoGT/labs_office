@@ -4719,6 +4719,29 @@ describe('OfficeScene: edited terrain', () => {
     expect(wallObjects(scene)).toHaveLength(before);
   });
 
+  it('lays the wall placed last over the other where two materials meet, and redraws when only the order changes (#223)', async () => {
+    const { scene, handlers } = await bootConnected();
+    const walled = withWalls(BASE_LAYOUT.walls, [{ index: lawnTile, piece: 'wall-brick' }, { index: lawnTile + 1, piece: 'wall-glass' }]);
+    // Pieces laid over another material add a fraction of a pixel to their depth: the later joint and the body between the posts.
+    const laidOver = () =>
+      wallObjects(scene)
+        .filter((child) => !Number.isInteger((child as Phaser.GameObjects.Image).depth))
+        .map((child) => (child as Phaser.GameObjects.Image).x)
+        .sort((a, b) => a - b);
+
+    handlers.onWalls!(walled, [lawnTile, lawnTile + 1]);
+    // The glass post (the east one) and the body between the posts.
+    expect(laidOver()).toEqual([lawnVertex.x + 8, lawnVertex.x + TILE - 8]);
+
+    // Only the order changes: the west post is now the latest, so its joint is laid over the body.
+    handlers.onWalls!(walled, [lawnTile + 1, lawnTile]);
+    expect(laidOver()).toEqual([lawnVertex.x - 8, lawnVertex.x + 8]);
+
+    // A wall of one material is never laid over anything.
+    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))), [lawnTile]);
+    expect(laidOver()).toHaveLength(0);
+  });
+
   it('opens the wall edge a door stands on for Arcade and the tile helpers, and closes it when the door goes (#223)', async () => {
     const { scene, handlers } = await bootConnected();
     const grid = () => (scene as unknown as { grid: { solid: boolean[][] } }).grid;

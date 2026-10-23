@@ -64,10 +64,16 @@ function insideTileOf({ col, row }: GridEdge, rotation: DecorItem['rotation']): 
   return { tx: col, ty: row };
 }
 
-/** Whether a door stands on a wall: both posts of its edge standing and joined (the same material, `wallsJoin`). */
+/**
+ * Whether a door stands on a wall: both posts of its edge standing and joined
+ * (`wallsJoin`) and of the same material. Walls of two materials join since
+ * #223, but a door across them is still refused; the door rule is its own.
+ */
 export function doorOnWall(grid: WallGrid, item: Pick<DecorItem, 'index' | 'rotation'>): boolean {
   const { col, row, axis } = doorEdge(item, grid.width);
-  return axis === 'horizontal' ? wallsJoin(grid, col, row, col + 1, row) : wallsJoin(grid, col, row, col, row + 1);
+  const [nx, ny] = axis === 'horizontal' ? [col + 1, row] : [col, row + 1];
+  if (!wallsJoin(grid, col, row, nx, ny)) return false;
+  return grid.walls[row * grid.width + col] === grid.walls[ny * grid.width + nx];
 }
 
 /** The edges the doors of a decor layer open, in layer order. An edge with no joined wall under it opens nothing. */

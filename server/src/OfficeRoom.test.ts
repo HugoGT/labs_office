@@ -381,6 +381,24 @@ describe('OfficeRoom: edited terrain', () => {
     expect(blocksOf(late)?.[LAWN]).toBe('water');
   });
 
+  it('replicates the walls in placement order, the latest last (#223)', async () => {
+    const ana = await join('Ana');
+    await waitFor(() => wallsOf(ana) !== null);
+
+    await server.terrain.setWalls([{ index: tile(21, 30), piece: 'wall-glass' }], null, nobody);
+    await server.terrain.setWalls([{ index: tile(20, 30), piece: 'wall-brick' }], null, nobody);
+    await waitFor(() => wallsOf(ana)?.[tile(20, 30)] === 'wall-brick');
+    // The layout's own posts come first; the painted ones follow in the order they were placed.
+    expect(ana.state.terrainWalls.endsWith(`,${tile(21, 30)}:glass,${tile(20, 30)}:brick`)).toBe(true);
+
+    // A repaint makes the post the latest.
+    await server.terrain.setWalls([{ index: tile(21, 30), piece: 'wall-stone' }], null, nobody);
+    const latest = `,${tile(20, 30)}:brick,${tile(21, 30)}:stone`;
+    await waitFor(() => ana.state.terrainWalls.endsWith(latest));
+    const late = await join('Beto');
+    await waitFor(() => late.state.terrainWalls?.endsWith(latest) === true);
+  });
+
   it('drops a move into a wall, and returns someone a wall lands on to the spawn', async () => {
     const room = await join('Ana');
     await waitFor(() => room.state.players.size === 1);

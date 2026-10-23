@@ -56,8 +56,9 @@ export function createMemoryTerrain(
     async saveWalls(edits, actorId) {
       // Synchronous between the read and the writes, like one Postgres statement.
       for (const { index, piece } of edits) {
-        if (piece === null) walls.delete(index);
-        else walls.set(index, { piece, actorId });
+        // Deleted first: a placed or repainted wall goes to the end of the map, like its newer `updated_at`.
+        walls.delete(index);
+        if (piece !== null) walls.set(index, { piece, actorId });
       }
     },
     wallActorOf(index) {
