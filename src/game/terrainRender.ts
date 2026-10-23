@@ -17,7 +17,7 @@ import {
   type Rect,
   type TerrainMaterial,
 } from './artContract';
-import { LAYOUT_MATERIALS, terrainMaterialAt, type LayoutMaterial, type LayoutProp, type OfficeLayout, type TerrainSnapshot } from './officeLayout';
+import { LAYOUT_MATERIALS, terrainMaterialAt, wallsJoin, type LayoutMaterial, type LayoutProp, type OfficeLayout, type TerrainSnapshot } from './officeLayout';
 
 /**
  * The color of the void: the camera background around and under the world,
@@ -128,11 +128,17 @@ export function wallSprites({ width, height, walls }: Pick<OfficeLayout, 'width'
     y: rect.y,
     depthY: rect.y + rect.height,
   });
+  const grid = { width, height, walls };
   for (let ty = 0; ty < height; ty += 1) {
     for (let tx = 0; tx < width; tx += 1) {
       const piece = walls[ty * width + tx];
       if (piece === null || piece === undefined) continue;
-      const mask = neighborMask(walls, width, height, tx, ty);
+      // Only posts of the same piece join (#220); a post of another material stands apart.
+      const mask =
+        (wallsJoin(grid, tx, ty, tx, ty - 1) ? NORTH : 0) |
+        (wallsJoin(grid, tx, ty, tx + 1, ty) ? EAST : 0) |
+        (wallsJoin(grid, tx, ty, tx, ty + 1) ? SOUTH : 0) |
+        (wallsJoin(grid, tx, ty, tx - 1, ty) ? WEST : 0);
       // A lone post has no joint frame (masks start at 1): it stands as a vertical body.
       const frame = mask === 0 ? wallFrameIndex({ piece: 'body', axis: 'vertical' }) : wallFrameIndex({ piece: 'joint', mask });
       joints.push(sprite(piece, 'joint', frame, wallJointRect({ col: tx, row: ty })));

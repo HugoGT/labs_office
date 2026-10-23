@@ -620,6 +620,17 @@ export function withWalls(walls: readonly (string | null)[], edits: readonly Wal
 /** A wall grid: one post (a wall piece) or `null` per grid vertex, row major. */
 export type WallGrid = Pick<OfficeLayout, 'width' | 'height' | 'walls'>;
 
+/**
+ * Whether the posts on vertices (tx, ty) and (nx, ny) are one wall: both on
+ * the map, both standing, and the same piece (#220). Posts of different
+ * materials never join, so each draws and blocks as a wall of its own.
+ */
+export function wallsJoin({ width, height, walls }: WallGrid, tx: number, ty: number, nx: number, ny: number): boolean {
+  const at = (x: number, y: number): string | null => (x >= 0 && y >= 0 && x < width && y < height ? (walls[y * width + x] ?? null) : null);
+  const piece = at(tx, ty);
+  return piece !== null && piece === at(nx, ny);
+}
+
 function collisionRect({ x, y, width, height }: Rect): CollisionRect {
   return { x, y, w: width, h: height };
 }
@@ -628,18 +639,18 @@ function collisionRect({ x, y, width, height }: Rect): CollisionRect {
  * The world rectangles a wall grid blocks, the pack's own geometry
  * (`wallJointRect`, `wallBodyRect`): a 16x16 joint centered on each post,
  * then a body along the grid line between each post and its east and south
- * neighbors. Joints first, then bodies, like the sprites.
+ * neighbors of the same piece (`wallsJoin`). Joints first, then bodies, like the sprites.
  */
-export function wallFootprintRects({ width, height, walls }: WallGrid): CollisionRect[] {
+export function wallFootprintRects(grid: WallGrid): CollisionRect[] {
+  const { width, height, walls } = grid;
   const joints: CollisionRect[] = [];
   const bodies: CollisionRect[] = [];
-  const at = (tx: number, ty: number): boolean => tx < width && ty < height && walls[ty * width + tx] != null;
   for (let ty = 0; ty < height; ty += 1) {
     for (let tx = 0; tx < width; tx += 1) {
-      if (!at(tx, ty)) continue;
+      if (walls[ty * width + tx] == null) continue;
       joints.push(collisionRect(wallJointRect({ col: tx, row: ty })));
-      if (at(tx + 1, ty)) bodies.push(collisionRect(wallBodyRect({ col: tx, row: ty, axis: 'horizontal' })));
-      if (at(tx, ty + 1)) bodies.push(collisionRect(wallBodyRect({ col: tx, row: ty, axis: 'vertical' })));
+      if (wallsJoin(grid, tx, ty, tx + 1, ty)) bodies.push(collisionRect(wallBodyRect({ col: tx, row: ty, axis: 'horizontal' })));
+      if (wallsJoin(grid, tx, ty, tx, ty + 1)) bodies.push(collisionRect(wallBodyRect({ col: tx, row: ty, axis: 'vertical' })));
     }
   }
   return [...joints, ...bodies];
@@ -652,8 +663,10 @@ export function wallFootprintRects({ width, height, walls }: WallGrid): Collisio
  * per post with no neighbor. A wall is then one smooth body to slide along,
  * not a row of 16px boxes whose seams could snag the avatar.
  */
-export function wallColliderRects({ width, height, walls }: WallGrid): CollisionRect[] {
-  const at = (tx: number, ty: number): boolean => tx >= 0 && ty >= 0 && tx < width && ty < height && walls[ty * width + tx] != null;
+export function wallColliderRects(grid: WallGrid): CollisionRect[] {
+  const { width, height, walls } = grid;
+  const at = (tx: number, ty: number): boolean => walls[ty * width + tx] != null;
+  const joins = (tx: number, ty: number, nx: number, ny: number): boolean => wallsJoin(grid, tx, ty, nx, ny);
   const span = (first: Rect, last: Rect): CollisionRect => ({
     x: first.x,
     y: first.y,
@@ -665,23 +678,23 @@ export function wallColliderRects({ width, height, walls }: WallGrid): Collision
   const lone: CollisionRect[] = [];
   for (let ty = 0; ty < height; ty += 1) {
     for (let tx = 0; tx < width; tx += 1) {
-      if (!at(tx, ty) || at(tx - 1, ty) || !at(tx + 1, ty)) continue;
+      if (!at(tx, ty) || joins(tx, ty, tx - 1, ty) || !joins(tx, ty, tx + 1, ty)) continue;
       let end = tx + 1;
-      while (at(end + 1, ty)) end += 1;
+      while (joins(end, ty, end + 1, ty)) end += 1;
       rows.push(span(wallJointRect({ col: tx, row: ty }), wallJointRect({ col: end, row: ty })));
     }
   }
   for (let tx = 0; tx < width; tx += 1) {
     for (let ty = 0; ty < height; ty += 1) {
-      if (!at(tx, ty) || at(tx, ty - 1) || !at(tx, ty + 1)) continue;
+      if (!at(tx, ty) || joins(tx, ty, tx, ty - 1) || !joins(tx, ty, tx, ty + 1)) continue;
       let end = ty + 1;
-      while (at(tx, end + 1)) end += 1;
+      while (joins(tx, end, tx, end + 1)) end += 1;
       columns.push(span(wallJointRect({ col: tx, row: ty }), wallJointRect({ col: tx, row: end })));
     }
   }
   for (let ty = 0; ty < height; ty += 1) {
     for (let tx = 0; tx < width; tx += 1) {
-      if (at(tx, ty) && !at(tx - 1, ty) && !at(tx + 1, ty) && !at(tx, ty - 1) && !at(tx, ty + 1)) {
+      if (at(tx, ty) && !joins(tx, ty, tx - 1, ty) && !joins(tx, ty, tx + 1, ty) && !joins(tx, ty, tx, ty - 1) && !joins(tx, ty, tx, ty + 1)) {
         lone.push(collisionRect(wallJointRect({ col: tx, row: ty })));
       }
     }

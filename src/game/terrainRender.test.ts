@@ -150,7 +150,7 @@ describe('fallbackTerrainData', () => {
 describe('wallSprites', () => {
   it('runs a wall along the grid lines between its posts: joints by their connections, bodies in between', () => {
     // An L of posts on the vertices (2,2) (3,2) (3,3): the top-left corners of those tiles.
-    const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '3,3': 'wall-glass' }) });
+    const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '3,3': 'wall-brick' }) });
     const sprites = wallSprites(layout);
     const joints = sprites.filter((sprite) => sprite.part === 'joint');
     const bodies = sprites.filter((sprite) => sprite.part === 'body');
@@ -158,11 +158,26 @@ describe('wallSprites', () => {
     expect(joints).toEqual([
       { piece: 'wall-brick', part: 'joint', frame: wallFrameIndex({ piece: 'joint', mask: 2 }), x: 2 * TILE - 8, y: 2 * TILE - 8, depthY: 2 * TILE + 8 },
       { piece: 'wall-brick', part: 'joint', frame: wallFrameIndex({ piece: 'joint', mask: 8 | 4 }), x: 3 * TILE - 8, y: 2 * TILE - 8, depthY: 2 * TILE + 8 },
-      { piece: 'wall-glass', part: 'joint', frame: wallFrameIndex({ piece: 'joint', mask: 1 }), x: 3 * TILE - 8, y: 3 * TILE - 8, depthY: 3 * TILE + 8 },
+      { piece: 'wall-brick', part: 'joint', frame: wallFrameIndex({ piece: 'joint', mask: 1 }), x: 3 * TILE - 8, y: 3 * TILE - 8, depthY: 3 * TILE + 8 },
     ]);
     expect(bodies).toEqual([
       { piece: 'wall-brick', part: 'body', frame: wallFrameIndex({ piece: 'body', axis: 'horizontal' }), x: 2 * TILE + 8, y: 2 * TILE - 8, depthY: 2 * TILE + 8 },
       { piece: 'wall-brick', part: 'body', frame: wallFrameIndex({ piece: 'body', axis: 'vertical' }), x: 3 * TILE - 8, y: 2 * TILE + 8, depthY: 2 * TILE + 24 },
+    ]);
+  });
+
+  it('keeps walls of different materials apart (#220): no shared joint, no body between them', () => {
+    // The same L, its last post glass: it stands alone next to the brick corner.
+    const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '3,3': 'wall-glass' }) });
+    const sprites = wallSprites(layout);
+
+    expect(sprites.filter((sprite) => sprite.part === 'joint')).toEqual([
+      { piece: 'wall-brick', part: 'joint', frame: wallFrameIndex({ piece: 'joint', mask: 2 }), x: 2 * TILE - 8, y: 2 * TILE - 8, depthY: 2 * TILE + 8 },
+      { piece: 'wall-brick', part: 'joint', frame: wallFrameIndex({ piece: 'joint', mask: 8 }), x: 3 * TILE - 8, y: 2 * TILE - 8, depthY: 2 * TILE + 8 },
+      { piece: 'wall-glass', part: 'joint', frame: wallFrameIndex({ piece: 'body', axis: 'vertical' }), x: 3 * TILE - 8, y: 3 * TILE - 8, depthY: 3 * TILE + 8 },
+    ]);
+    expect(sprites.filter((sprite) => sprite.part === 'body')).toEqual([
+      { piece: 'wall-brick', part: 'body', frame: wallFrameIndex({ piece: 'body', axis: 'horizontal' }), x: 2 * TILE + 8, y: 2 * TILE - 8, depthY: 2 * TILE + 8 },
     ]);
   });
 
