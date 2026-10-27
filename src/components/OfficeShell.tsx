@@ -620,8 +620,8 @@ export function OfficeShell({
    * un solo toast y `OfficeShell` ya es el unico dueno del bridge.
    */
   // A full desk refuses whoever tries to walk in (`deskDecorRules.ts`); the scene says so once per attempt.
-  // What the lock key would do where the player stands, and whether they are inside a locked room (#223, S15): the scene decides, this only shows it.
-  const [doorLock, setDoorLock] = useState<OfficeEventMap['doorlocknotice']>({ lockable: null, insideLocked: false });
+  // What the lock key would do where the player stands (#223, S15): the scene decides, this only shows it.
+  const [doorLock, setDoorLock] = useState<OfficeEventMap['doorlocknotice']>({ lockable: null });
   useEffect(() => bridge.on('doorlocknotice', setDoorLock), [bridge]);
 
   useEffect(() => bridge.on('deskfull', () => setToastMessage('Este escritorio está lleno (máximo 6 personas).')), [bridge]);
@@ -869,7 +869,7 @@ export function OfficeShell({
         <ZoomControls view={mapZoom.view} onZoomIn={mapZoom.zoomIn} onZoomOut={mapZoom.zoomOut} onReset={mapZoom.reset} />
       </div>
       <AudioUnblockPrompt blocked={audioBlocked} onUnblock={unblockAudio} />
-      <DoorLockNotice lockable={doorLock.lockable} insideLocked={doorLock.insideLocked} />
+      <DoorLockNotice lockable={doorLock.lockable} />
       <Toast message={toastMessage} />
       <CallInvitationStack invitations={invitations} onAccept={accept} onDismiss={dismiss} />
       <RecordingReadyStack

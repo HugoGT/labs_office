@@ -181,11 +181,11 @@ export function decorBrushTarget(index: number, brush: DecorBrush, width: number
  * (`deskOverChairLimit`); a desk table is never refused for another one on
  * the desk, which it replaces.
  *
- * A door (#223) is the room's door rule: on the edge between two joined
- * posts of any material that closes a room on at least one side
- * (`doorOnWall`, S16), its two side tiles on walkable ground and free of
- * other items. The tiles a wall touches do not count for it (its own posts
- * touch them), and it never goes in a desk.
+ * A door (#223, #233) is the room's door rule: its span between two wall
+ * posts of any material, one at each end (`doorOnWall`), the tiles on both
+ * sides of it on walkable ground and free of other items. The tiles a wall
+ * touches do not count for it (its own posts touch them), and it never goes
+ * in a desk.
  */
 export function decorPlacementAllowed(
   items: readonly DecorItem[],
@@ -198,7 +198,7 @@ export function decorPlacementAllowed(
 ): boolean {
   const target = decorBrushTarget(index, brush, ground.width);
   const door = brush.info.kind === 'door';
-  if (door && (area !== null || !doorOnWall({ width: ground.width, height: ground.height, walls: ground.walls ?? [] }, { index, rotation: brush.rotation }))) return false;
+  if (door && (area !== null || !doorOnWall({ width: ground.width, height: ground.height, walls: ground.walls ?? [] }, { index, rotation: brush.rotation, piece: brush.piece }))) return false;
   if (area !== null && !fitsInsideDesk(target, area)) return false;
   if (!insideMap(target, ground.width, ground.height)) return false;
   const ignored = brush.from ?? index;

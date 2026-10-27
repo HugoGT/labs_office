@@ -9,8 +9,11 @@
  * scene. Import-free on purpose, like `pieceCollisions.ts`: the server loads
  * it with Node type stripping, so callers resolve a piece through their art
  * catalog (the server's `art_pieces`, the client's manifest) and pass its
- * `DecorPieceInfo` in.
+ * `DecorPieceInfo` in. The one import is the art contract's `doorSpanOf`, a
+ * pure function of a piece id, for the doors the id alone describes.
  */
+
+import { doorSpanOf } from './artContract.ts';
 
 /** 0 is the pack's default down drawing and the rotation turns it clockwise: 90 right, 180 up, 270 left. */
 export type DecorRotation = 0 | 90 | 180 | 270;
@@ -113,13 +116,13 @@ export function decorRotationFor(kind: DecorKind, rotation: DecorRotation): Deco
 
 /**
  * A chair is 1x1 and a desk table 3x1 whatever the manifest says (its art
- * states one footprint per facing). A door is one tile wide (#223); it
- * covers a tile on each side of its edge (`decorFootprint`).
+ * states one footprint per facing). A door states its span along the wall
+ * (2 tiles, or 4 for a double door, #233) and covers a tile on each side of
+ * it (`decorFootprint`).
  */
 const FIXED_FOOTPRINTS: Partial<Record<DecorKind, { w: number; h: number }>> = {
   chair: { w: 1, h: 1 },
   desk: { w: 3, h: 1 },
-  door: { w: 1, h: 1 },
 };
 
 /**
@@ -143,12 +146,14 @@ export function decorPieceInfo(piece: {
 
 /**
  * What the id alone says when no catalog knows the piece: chairs, desk
- * tables and doors have a fixed footprint and plants take one tile; a room table's
- * footprint only its catalog entry has, so it is `null`.
+ * tables have a fixed footprint, a door's span is in its id (`doorSpanOf`) and
+ * plants take one tile; a room table's footprint only its catalog entry has,
+ * so it is `null`.
  */
 export function decorInfoFromPieceId(piece: string): DecorPieceInfo | null {
   const kind = piece.slice(0, piece.indexOf('-'));
-  if (kind === 'chair' || kind === 'desk' || kind === 'door') return decorPieceInfo({ kind });
+  if (kind === 'chair' || kind === 'desk') return decorPieceInfo({ kind });
+  if (kind === 'door') return decorPieceInfo({ kind, footprint: { w: doorSpanOf(piece), h: 1 } });
   if (kind === 'plant') return decorPieceInfo({ kind, footprint: { w: 1, h: 1 } });
   return null;
 }
@@ -159,8 +164,9 @@ export function decorInfoFromPieceId(piece: string): DecorPieceInfo | null {
  * the old decor table's edge middle; a plant or a room table is centered on
  * its anchor (`floor(w / 2)`, `floor(h / 2)` from its top-left), a room
  * table turned vertical (90) on its footprint swapped. A door (#223) stands
- * on an edge of its anchor tile, the top one for 0 and 180 and the left one
- * for 90 and 270, and covers the tile on each side of it. An unknown
+ * on the line that starts at an edge of its anchor tile, the top one for 0
+ * and 180 and the left one for 90 and 270, runs its span (`footprint.w`) along
+ * it, and covers the tile on each side of it. An unknown
  * piece (`null`) keeps its anchor tile alone, so stored rows are never lost.
  */
 export function decorFootprint(item: DecorPlacement, info: DecorPieceInfo | null, width: number): DecorTileRect {
@@ -168,7 +174,10 @@ export function decorFootprint(item: DecorPlacement, info: DecorPieceInfo | null
   const ty = Math.floor(item.index / width);
   if (info === null) return { x: tx, y: ty, w: 1, h: 1 };
   if (info.kind === 'chair') return { x: tx, y: ty, w: 1, h: 1 };
-  if (info.kind === 'door') return item.rotation === 0 || item.rotation === 180 ? { x: tx, y: ty - 1, w: 1, h: 2 } : { x: tx - 1, y: ty, w: 2, h: 1 };
+  if (info.kind === 'door') {
+    const span = info.footprint.w;
+    return item.rotation === 0 || item.rotation === 180 ? { x: tx, y: ty - 1, w: span, h: 2 } : { x: tx - 1, y: ty, w: 2, h: span };
+  }
   if (info.kind === 'desk') {
     const horizontal = item.rotation === 0 || item.rotation === 180;
     return horizontal ? { x: tx - 1, y: ty, w: 3, h: 1 } : { x: tx, y: ty - 1, w: 1, h: 3 };

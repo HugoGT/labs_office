@@ -37,7 +37,7 @@ import { deskAt, deskZoneName } from './deskLayout';
 import { SPACE_SHADE_ALPHA, SPACE_SHADE_NAME, shadeAround, shadeKey } from './spaceFocus';
 import { tableFacing, tableFloorRect } from './deskTable';
 import { decorChairs, decorFootprint, encodeOfficeDecor, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
-import { doorEdge, doorLeaves, doorLockNotice, doorOpenings, doorSwingRotation, isDoorPiece, lockedDoorBarriers, openDoorLeaves, roomMap, type DoorLeaf, type DoorLockNotice, type DoorSwing, type RoomMap } from './officeDoors';
+import { doorEdge, doorLeaves, doorLockNotice, doorOpenings, doorSpan, doorSwingRotation, lockedDoorBarriers, openDoorLeaves, type DoorLeaf, type DoorLockNotice, type DoorSwing } from './officeDoors';
 import { deskEntryRefused } from './deskDecorRules';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
@@ -292,17 +292,16 @@ export class OfficeScene extends Phaser.Scene {
   private decorObjects: Phaser.GameObjects.GameObject[] = [];
   /**
    * The doors of the drawn decor layer (#223), by anchor: their leaf (edge,
-   * hinge, pair) and, once the sheet is in, the image `update()` switches
+   * span, hinge) and, once the sheet is in, the image `update()` switches
    * between its closed and open frame. A redraw of the layer rebuilds it.
    */
   private doorLeaves = new Map<number, DoorLeaf>();
   /**
-   * The rooms of the live walls and the leaves of the live doors on them
-   * (S16: a door's inside is its closed room), kept for the walls and decor
-   * layer they were made from; the frame loop reads them, so they are never
-   * rebuilt per frame. The editors' pending edits are in neither.
+   * The leaves of the live doors, kept for the decor layer they were made
+   * from; the frame loop reads them, so they are never rebuilt per frame. The
+   * editors' pending edits are not in them.
    */
-  private liveDoors: { walls: readonly (string | null)[]; decor: readonly DecorItem[]; rooms: RoomMap; leaves: DoorLeaf[] } | null = null;
+  private liveDoors: { decor: readonly DecorItem[]; leaves: DoorLeaf[] } | null = null;
   private doorImages = new Map<number, Phaser.GameObjects.Image>();
   /** The anchors of the leaves drawn open, as `update()` last saw the avatars. */
   private openDoors: ReadonlyMap<number, DoorSwing> = new Map();
@@ -315,12 +314,12 @@ export class OfficeScene extends Phaser.Scene {
    */
   private doorNotice: {
     told: DoorLockNotice;
-    from: { tile: number; walls: unknown; decor: unknown; locks: unknown; ignored: boolean } | null;
-  } = { told: { lockable: null, insideLocked: false }, from: null };
+    from: { tile: number; decor: unknown; locks: unknown; ignored: boolean } | null;
+  } = { told: { lockable: null }, from: null };
   /**
-   * The colliders of the locked doors that bar this player, standing
-   * outside them (`lockedDoorBarriers`), keyed by their anchors: rebuilt
-   * only when that set changes. Whoever is inside walks out freely.
+   * The colliders of the locked doors (`lockedDoorBarriers`), keyed by their
+   * anchors: rebuilt only when that set changes. A locked door bars both
+   * sides.
    */
   private doorBarriers: { key: string; blocks: readonly CollisionRect[]; rects: Phaser.GameObjects.Rectangle[]; collider?: Phaser.Physics.Arcade.Collider } = {
     key: '',
@@ -1691,27 +1690,26 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
-   * A door of the decor layer (#223): a plank on the grid line it opens,
-   * sorted like the wall body it stands in for (`doorEdge`).
+   * A door of the decor layer (#223, #233): its leaf and jambs on the grid
+   * line it opens, sorted like the wall body it stands in for (`doorEdge`).
    */
   private drawDoor(item: DecorItem): Phaser.GameObjects.GameObject {
     const edge = doorEdge(item, this.layout.width);
-    // A leaf of the live layer knows its hinge (a double door, D7); a lone one, or the editor's ghost, hinges at its start.
+    const span = doorSpan(item);
     const leaf = this.doorLeaves.get(item.index);
-    const hinge = leaf !== undefined && leaf.placed === item.rotation ? leaf.hinge : 'start';
     const sheet = this.artSheet({ materialId: item.piece, color: null }, 'door', this.redrawDecor);
     if (sheet !== null) {
-      const placement = doorPlacement(edge);
-      // Turned to face its room, whatever the rotation it was placed with (S16), and swung away from the avatar that opened it (S14).
+      const placement = doorPlacement(edge, span);
+      // Swung away from the avatar that opened it (S14).
       const swing = this.openDoors.get(item.index);
-      const frame = doorFrameIndex(doorSwingRotation(leaf?.rotation ?? item.rotation, swing ?? 'inside'), hinge, swing !== undefined);
+      const frame = doorFrameIndex(doorSwingRotation(leaf?.rotation ?? item.rotation, swing ?? 'inside'), 'start', swing !== undefined);
       return putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(placement.depthY)).setName(decorObjectName(item.index));
     }
     const horizontal = edge.axis === 'horizontal';
-    const x = horizontal ? (edge.col + 0.5) * TILE : edge.col * TILE;
-    const y = horizontal ? edge.row * TILE : (edge.row + 0.5) * TILE;
+    const x = horizontal ? (edge.col + span / 2) * TILE : edge.col * TILE;
+    const y = horizontal ? edge.row * TILE : (edge.row + span / 2) * TILE;
     return this.add
-      .rectangle(x, y, horizontal ? TILE : DOOR_PLACEHOLDER_THICKNESS, horizontal ? DOOR_PLACEHOLDER_THICKNESS : TILE, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
+      .rectangle(x, y, horizontal ? span * TILE : DOOR_PLACEHOLDER_THICKNESS, horizontal ? DOOR_PLACEHOLDER_THICKNESS : span * TILE, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
       // The bottom of the wall body it replaces: half a wall below the edge's middle either way.
       .setDepth(worldAssetDepth(y + WALL.thickness / 2))
       .setName(decorObjectName(item.index));
@@ -1730,7 +1728,7 @@ export class OfficeScene extends Phaser.Scene {
       const avatar = this.remotes?.get(sessionId);
       if (avatar !== undefined) positions.push({ x: avatar.x, y: avatar.y });
     }
-    // A locked leaf opens only for whoever is on its inside (S13); an open one keeps the side it swings to until it closes (S14).
+    // A locked door stays shut (#233); an open one keeps the side it swings to until it closes (S14).
     const open = openDoorLeaves([...this.doorLeaves.values()], positions, this.doorLocks, this.openDoors);
     for (const [index, image] of this.doorImages) {
       const leaf = this.doorLeaves.get(index);
@@ -1745,12 +1743,9 @@ export class OfficeScene extends Phaser.Scene {
     this.openDoors = open;
   }
 
-  /** The rooms of the live walls and the live doors' leaves on them, rebuilt only when the walls or the decor layer change. */
-  private liveDoorGeometry(): { rooms: RoomMap; leaves: DoorLeaf[] } {
-    if (this.liveDoors?.walls !== this.terrainWalls || this.liveDoors.decor !== this.officeDecor) {
-      const rooms = roomMap({ width: this.layout.width, height: this.layout.height, walls: this.terrainWalls });
-      this.liveDoors = { walls: this.terrainWalls, decor: this.officeDecor, rooms, leaves: doorLeaves(this.officeDecor, this.layout.width, rooms) };
-    }
+  /** The live doors' leaves, rebuilt only when the decor layer changes. */
+  private liveDoorGeometry(): { leaves: DoorLeaf[] } {
+    if (this.liveDoors?.decor !== this.officeDecor) this.liveDoors = { decor: this.officeDecor, leaves: doorLeaves(this.officeDecor, this.layout.width) };
     return this.liveDoors;
   }
 
@@ -1761,10 +1756,9 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
-   * Tells React what the lock key would do where this player stands and
-   * whether they are inside a locked room (#223, S15), by `doorLockNotice`:
-   * the rule the room applies to the key, on the live walls, decor and locks
-   * and the position the room tracks. The hint is off wherever the key is
+   * Tells React what the lock key would do where this player stands (#223,
+   * S15), by `doorLockNotice`: the rule the room applies to the key, on the
+   * live decor and locks and the position the room tracks. The hint is off wherever the key is
    * ignored (typing, an editor holding the map). Emits only on change.
    */
   private updateDoorNotice(): void {
@@ -1774,28 +1768,26 @@ export class OfficeScene extends Phaser.Scene {
     // The tile of the body center, which is what the room checks the key by.
     const tile = Math.floor((this.player.y + AVATAR_BODY_CENTER_OFFSET.y) / TILE) * this.layout.width + Math.floor((this.player.x + AVATAR_BODY_CENTER_OFFSET.x) / TILE);
     const last = this.doorNotice.from;
-    if (last !== null && last.tile === tile && last.walls === this.terrainWalls && last.decor === this.officeDecor && last.locks === this.doorLocks && last.ignored === ignored) return;
-    this.doorNotice.from = { tile, walls: this.terrainWalls, decor: this.officeDecor, locks: this.doorLocks, ignored };
-    const { rooms } = this.liveDoorGeometry();
+    if (last !== null && last.tile === tile && last.decor === this.officeDecor && last.locks === this.doorLocks && last.ignored === ignored) return;
+    this.doorNotice.from = { tile, decor: this.officeDecor, locks: this.doorLocks, ignored };
     const position = { x: this.player.x, y: this.player.y };
-    const computed = doorLockNotice(this.officeDecor, this.layout.width, this.doorLocks, position, rooms);
-    const next: DoorLockNotice = { lockable: ignored ? null : computed.lockable, insideLocked: computed.insideLocked };
+    const computed = doorLockNotice(this.liveDoorGeometry().leaves, this.doorLocks, position);
+    const next: DoorLockNotice = { lockable: ignored ? null : computed.lockable };
     const told = this.doorNotice.told;
-    if (next.lockable === told.lockable && next.insideLocked === told.insideLocked) return;
+    if (next.lockable === told.lockable) return;
     this.doorNotice.told = next;
     this.bridge.emit('doorlocknotice', next);
   }
 
   /**
-   * Puts an Arcade collider on every locked door this player stands outside
-   * of, and takes it away once they are inside (#223, S13): the room refuses
-   * walking in from outside, so the client stops the body before it does
-   * (the stricter side), and lets it walk out.
+   * Puts an Arcade collider on every locked door (#223, #233): the room
+   * refuses walking through one from either side, so the client stops the
+   * body before it does (the stricter side).
    */
   private updateDoorBarriers(): void {
     const barriers = this.doorLocks.size === 0
       ? []
-      : lockedDoorBarriers(this.liveDoorGeometry().leaves, this.doorLocks, { x: this.player.x, y: this.player.y });
+      : lockedDoorBarriers(this.liveDoorGeometry().leaves, this.doorLocks);
     const key = barriers.map(({ index }) => index).join(',');
     if (key === this.doorBarriers.key) return;
     if (this.doorBarriers.collider) this.physics.world.removeCollider(this.doorBarriers.collider);
@@ -1807,8 +1799,8 @@ export class OfficeScene extends Phaser.Scene {
     });
     this.doorBarriers = {
       key,
-      // For the path: the locked edge, as Arcade has it, and the whole inside tile, stricter still.
-      blocks: barriers.flatMap(({ rect, inside }) => [rect, { x: inside.tx * TILE, y: inside.ty * TILE, w: TILE, h: TILE }]),
+      // For the path: the locked span, as Arcade has it.
+      blocks: barriers.map(({ rect }) => rect),
       rects,
       ...(rects.length === 0 ? {} : { collider: this.physics.add.collider(this.player, rects) }),
     };
@@ -1817,9 +1809,8 @@ export class OfficeScene extends Phaser.Scene {
   /**
    * What the double-click path plans against (#227): what Arcade collides
    * the body with, the terrain tiles and the wall and piece rectangles (an
-   * open door's edge is already out of the wall rectangles), plus, for each
-   * locked door this player stands outside of, its edge and its whole
-   * inside tile (#223, S13).
+   * open door's edge is already out of the wall rectangles), plus each locked
+   * door's span (#223, #233).
    */
   private walkWorld(): WalkWorld {
     this.updateDoorBarriers();
@@ -2006,8 +1997,6 @@ export class OfficeScene extends Phaser.Scene {
       this.grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
       this.buildTerrainColliders(this.grid);
       this.paintWalls();
-      // A wall edit can close or open a room (S16): its doors turn to face the room that is left.
-      if (this.officeDecor.some((item) => isDoorPiece(item.piece))) this.paintDecor();
     }
     this.emitTerrain();
   }
@@ -2084,7 +2073,7 @@ export class OfficeScene extends Phaser.Scene {
     if (this.art.manifest !== this.decorCollisionsManifest && this.officeDecor.length > 0) this.placeDecorCollisions();
     for (const object of this.decorObjects) object.destroy();
     const items = this.decorPreview === null ? this.officeDecor : withDecor(this.officeDecor, this.decorPreview);
-    this.doorLeaves = new Map(doorLeaves(items, this.layout.width, this.liveDoorGeometry().rooms).map((leaf) => [leaf.index, leaf]));
+    this.doorLeaves = new Map(doorLeaves(items, this.layout.width).map((leaf) => [leaf.index, leaf]));
     this.decorObjects = items.flatMap((item) => this.drawDecorPiece(item));
     const doorNamed = new Map([...this.doorLeaves.keys()].map((index) => [decorObjectName(index), index]));
     this.doorImages = new Map();
@@ -2196,7 +2185,7 @@ export class OfficeScene extends Phaser.Scene {
     const keyboard = this.input.keyboard as Phaser.Input.Keyboard.KeyboardPlugin;
     this.cursors = keyboard.createCursorKeys();
     this.wasd = keyboard.addKeys('W,A,S,D') as WasdKeys;
-    // X locks or unlocks the door this player stands inside (#223, S13); the
+    // X locks or unlocks the door next to this player (#223, #233); the
     // room decides which from where it tracks them. Never while typing, nor
     // while an editor holds the map.
     keyboard.on('keydown-X', () => {

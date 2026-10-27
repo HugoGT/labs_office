@@ -36,7 +36,7 @@ import {
   type DecorItem,
   type DecorPieceInfo,
 } from '../../../src/game/officeDecor.ts';
-import { doorOnWall, roomMap, wallTilesAfter, type RoomMap } from '../../../src/game/officeDoors.ts';
+import { doorOnWall, wallTilesAfter } from '../../../src/game/officeDoors.ts';
 import type { MapSeat } from '../../../src/game/seating.ts';
 
 /** The edit was malformed: an index off the map or an unknown material (400). */
@@ -289,10 +289,9 @@ export function parseDecorBatch(body: unknown, tileCount: number): DecorEdit[] {
  * over decor is allowed too. Stored items that already overlap (kept at
  * load) never veto an edit elsewhere.
  *
- * A door (#223) must stand on the edge between two joined posts that close
- * a room on at least one side (`doorOnWall`, S16, the rule the editor's
- * ghost applies too); the tiles a wall
- * touches do not count for it, since its own posts touch them. The wall
+ * A door (#223, #233) must span the line between two standing wall posts,
+ * one at each end (`doorOnWall`, the rule the editor's ghost applies too);
+ * the tiles a wall touches do not count for it, since its own posts touch them. The wall
  * tiles are those of `after` (`wallTilesAfter`): a door removed or replaced
  * in the batch closes its wall for what takes its place.
  */
@@ -305,8 +304,6 @@ export function findDecorConflict(
 ): UnwalkableConflict | null {
   if (placed.size === 0) return null;
   const wallTiles = wallTilesAfter(snapshot, after);
-  // The regions of the walls are computed once (and only if a door is placed) for the whole batch.
-  let rooms: RoomMap | undefined;
   const taken = new Set<number>();
   for (const item of after) {
     if (!placed.has(item.index)) for (const tile of decorTiles(item, infoOf(item.piece), snapshot.width)) taken.add(tile);
@@ -315,7 +312,7 @@ export function findDecorConflict(
     if (!placed.has(item.index)) continue;
     const info = infoOf(item.piece);
     const door = info?.kind === 'door';
-    if (door && !doorOnWall(snapshot, item, (rooms ??= roomMap(snapshot)))) return 'placement';
+    if (door && !doorOnWall(snapshot, item)) return 'placement';
     const rect = decorFootprint(item, info, snapshot.width);
     if (!insideMap(rect, snapshot.width, snapshot.height)) return 'placement';
     for (const tile of rectTiles(rect, snapshot.width)) {

@@ -75,7 +75,7 @@ import {
   type SeatTiles,
 } from '../../src/game/seating.ts';
 import { decorChairs, encodeOfficeDecor, type DecorItem, type DecorTileRect } from '../../src/game/officeDecor.ts';
-import { crossesLockedDoor, doorLeaves, encodeDoorLocks, liveDoorLocks, roomMap, toggleDoorLock, type DoorLeaf, type RoomMap } from '../../src/game/officeDoors.ts';
+import { crossesLockedDoor, doorLeaves, encodeDoorLocks, liveDoorLocks, toggleDoorLock, type DoorLeaf } from '../../src/game/officeDoors.ts';
 import { deskEntryRefused } from '../../src/game/deskDecorRules.ts';
 import { createCallInvitationRegistry, type CallInvitationRegistry } from './callInvitations.ts';
 import { physicalBodyRect, positionForFeet } from '../../src/game/avatarGeometry.ts';
@@ -416,11 +416,11 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   /** The locked doors (#223), by leaf anchor: room state only, replicated as `state.lockedDoors`. */
   private doorLocks: ReadonlySet<number> = new Set();
   /**
-   * The rooms of the walls and the leaves of the doors, kept for the snapshot
-   * and decor layer they were made from (both keep their identity until an
-   * edit publishes new ones): a move never floods the map again.
+   * The leaves of the doors, kept for the decor layer they were made from
+   * (it keeps its identity until an edit publishes a new one): a move never
+   * rebuilds them.
    */
-  private doorGeometry: { terrain: TerrainSnapshot; decor: readonly DecorItem[]; rooms: RoomMap; leaves: DoorLeaf[] } | null = null;
+  private doorGeometry: { decor: readonly DecorItem[]; leaves: DoorLeaf[] } | null = null;
   private collisions: () => readonly CollisionRect[] = () => BASE_COLLISION_RECTS;
   // Bridges a definitive leave and a refresh while its write is in flight.
   // Serializing per uid prevents an older slow write from undoing a newer leave.
@@ -529,7 +529,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       // A full desk takes nobody else in; whoever is inside moves freely.
       if (this.entersFullDesk(client.sessionId, player, { x, y })) return;
       // Moves are checked at their end only, so a locked door (#223) is
-      // checked on the way there: no walking in from outside, walking out is fine.
+      // checked on the way there: nobody walks through it, from either side (#233).
       if (this.entersLockedDoor(player, { x, y })) return;
 
       player.x = x;
@@ -545,13 +545,13 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       this.sessions?.moveTo(client.sessionId, x, y);
     });
 
-    // X in the office (#223, S13): whoever stands inside a door, right at it,
-    // locks or unlocks its group. The room decides from the tracked position;
-    // the message carries nothing.
+    // X in the office (#223, #233): whoever stands next to a door, on either
+    // side, locks or unlocks that door alone (a double door is one door). The
+    // room decides from the tracked position; the message carries nothing.
     this.onMessage('doorlock', (client: Client) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
-      const next = toggleDoorLock(this.decor(), this.terrain().width, this.doorLocks, player, this.doorGeometryNow().rooms);
+      const next = toggleDoorLock(this.doorGeometryNow().leaves, this.doorLocks, player);
       if (next !== null) this.setDoorLocks(next);
     });
 
@@ -1027,21 +1027,17 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     this.state.lockedDoors = encodeDoorLocks(locks);
   }
 
-  /** Whether moving from `from` to `to` (network positions) walks into a locked door from outside it. */
+  /** Whether moving from `from` to `to` (network positions) walks through a locked door, from either side. */
   private entersLockedDoor(from: { x: number; y: number }, to: { x: number; y: number }): boolean {
     if (this.doorLocks.size === 0) return false;
     const center = (p: { x: number; y: number }) => ({ x: p.x + AVATAR_BODY_CENTER_OFFSET.x, y: p.y + AVATAR_BODY_CENTER_OFFSET.y });
     return crossesLockedDoor(this.doorGeometryNow().leaves, this.doorLocks, center(from), center(to));
   }
 
-  /** The current rooms and door leaves (S16): a door's inside is its closed room, so edits to walls or doors rebuild them. */
-  private doorGeometryNow(): { rooms: RoomMap; leaves: DoorLeaf[] } {
-    const terrain = this.terrain();
+  /** The current door leaves: an edit to the decor rebuilds them. */
+  private doorGeometryNow(): { leaves: DoorLeaf[] } {
     const decor = this.decor();
-    if (this.doorGeometry?.terrain !== terrain || this.doorGeometry.decor !== decor) {
-      const rooms = roomMap(terrain);
-      this.doorGeometry = { terrain, decor, rooms, leaves: doorLeaves(decor, terrain.width, rooms) };
-    }
+    if (this.doorGeometry?.decor !== decor) this.doorGeometry = { decor, leaves: doorLeaves(decor, this.terrain().width) };
     return this.doorGeometry;
   }
 

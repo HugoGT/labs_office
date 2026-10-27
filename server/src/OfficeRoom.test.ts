@@ -2490,16 +2490,22 @@ describe('OfficeRoom: desk occupancy', () => {
   }, 20_000);
 });
 
-describe('OfficeRoom: door locks (#223, S13)', () => {
+describe('OfficeRoom: door locks (#223, #233)', () => {
   const tile = (tx: number, ty: number) => ty * BASE_LAYOUT.width + tx;
-  /** A brick wall along row 22 (posts on vertices 64..69) with a door on the top edge of tile (66, 22), opening down. */
+  /** A brick wall along row 22 (posts on vertices 64..69) with a door on tiles (66, 22) and (67, 22): posts 66 and 68 end its span. */
   const DOOR = tile(66, 22);
   const WALL = [64, 65, 66, 67, 68, 69].map((tx) => [tile(tx, 22), 'wall-brick'] as const);
   /** The network position whose body center is (cx, cy). */
   const at = (cx: number, cy: number) => ({ x: cx, y: cy - 11, facing: 'down' });
-  const INSIDE = at(66 * TILE + 16, 22 * TILE + 16);
-  const OUTSIDE = at(66 * TILE + 16, 22 * TILE - 16);
-  const FAR_INSIDE = at(66 * TILE + 16, 25 * TILE + 16);
+  /** On each side of the door's first tile, next to it. */
+  const SOUTH = at(66 * TILE + 16, 22 * TILE + 16);
+  const NORTH = at(66 * TILE + 16, 22 * TILE - 16);
+  /** On each side of its second tile. */
+  const SOUTH_2 = at(67 * TILE + 16, 22 * TILE + 16);
+  const NORTH_2 = at(67 * TILE + 16, 22 * TILE - 16);
+  const FAR_SOUTH = at(66 * TILE + 16, 25 * TILE + 16);
+  /** Level with the door but past its span, along the wall. */
+  const BESIDE = at(69 * TILE + 16, 22 * TILE - 16);
 
   beforeEach(async () => {
     await server.shutdown();
@@ -2519,91 +2525,135 @@ describe('OfficeRoom: door locks (#223, S13)', () => {
     await waitFor(() => room.state.players.get(room.sessionId)?.status === status);
   }
 
-  it('walks through an unlocked door both ways, as any move', async () => {
+  it('walks through an unlocked door both ways, along its whole span, as any move', async () => {
     const ana = await join('Ana');
-    await moveTo(ana, OUTSIDE);
-    await moveTo(ana, INSIDE);
-    await moveTo(ana, OUTSIDE);
+    await moveTo(ana, NORTH);
+    await moveTo(ana, SOUTH);
+    await moveTo(ana, NORTH);
+    await moveTo(ana, NORTH_2);
+    await moveTo(ana, SOUTH_2);
     expect(ana.state.lockedDoors).toBe('');
   });
 
-  it('locks and unlocks the door from its inside, next to it, and ignores the key outside or away from it', async () => {
+  it('locks the door from either side with the key and unlocks it from either side with the same key', async () => {
     const ana = await join('Ana');
-    await moveTo(ana, OUTSIDE);
-    ana.send('doorlock');
-    await tryMove(ana, OUTSIDE, 'y');
-    expect(ana.state.lockedDoors).toBe('');
-    await moveTo(ana, FAR_INSIDE);
-    ana.send('doorlock');
-    await tryMove(ana, FAR_INSIDE, 'r');
-    expect(ana.state.lockedDoors).toBe('');
-
-    await moveTo(ana, INSIDE);
+    await moveTo(ana, NORTH);
     ana.send('doorlock');
     await waitFor(() => ana.state.lockedDoors === String(DOOR));
     const beto = await join('Beto');
     await waitFor(() => beto.state.lockedDoors === String(DOOR));
 
-    // Anyone inside may unlock it.
-    await moveTo(beto, at(66 * TILE + 10, 22 * TILE + 20));
+    // The other side unlocks it, then locks it again; the first side unlocks it once more.
+    await moveTo(beto, SOUTH);
     beto.send('doorlock');
-    await waitFor(() => ana.state.lockedDoors === '');
+    await waitFor(() => ana.state.lockedDoors === '' && beto.state.lockedDoors === '');
+    beto.send('doorlock');
+    await waitFor(() => ana.state.lockedDoors === String(DOOR));
+    ana.send('doorlock');
+    await waitFor(() => beto.state.lockedDoors === '');
+
+    // Next to its second tile counts as next to the door.
+    await moveTo(ana, SOUTH_2);
+    ana.send('doorlock');
+    await waitFor(() => beto.state.lockedDoors === String(DOOR));
   });
 
-  it('keeps everyone outside a locked door from walking in, and lets whoever is inside walk out', async () => {
+  it('ignores the key away from the door and past its span along the wall', async () => {
+    const ana = await join('Ana');
+    await moveTo(ana, FAR_SOUTH);
+    ana.send('doorlock');
+    await tryMove(ana, FAR_SOUTH, 'y');
+    expect(ana.state.lockedDoors).toBe('');
+    await moveTo(ana, BESIDE);
+    ana.send('doorlock');
+    await tryMove(ana, BESIDE, 'r');
+    expect(ana.state.lockedDoors).toBe('');
+  });
+
+  it('keeps everyone from walking through a locked door, from either side, and lets them move about elsewhere', async () => {
     const ana = await join('Ana');
     const beto = await join('Beto');
-    await moveTo(beto, OUTSIDE);
-    await moveTo(ana, INSIDE);
+    await moveTo(beto, NORTH);
+    await moveTo(ana, SOUTH);
     ana.send('doorlock');
     await waitFor(() => beto.state.lockedDoors === String(DOOR));
 
-    await tryMove(beto, INSIDE, 'y');
-    expect(beto.state.players.get(beto.sessionId)).toMatchObject({ x: OUTSIDE.x, y: OUTSIDE.y });
-    // Moving about outside still works.
+    // From the north, in at either tile of the span.
+    await tryMove(beto, SOUTH, 'y');
+    expect(beto.state.players.get(beto.sessionId)).toMatchObject({ x: NORTH.x, y: NORTH.y });
+    await tryMove(beto, SOUTH_2, 'r');
+    expect(beto.state.players.get(beto.sessionId)).toMatchObject({ x: NORTH.x, y: NORTH.y });
+    // Moving about on the same side still works.
     await moveTo(beto, at(66 * TILE + 20, 22 * TILE - 20));
 
-    await moveTo(ana, OUTSIDE);
-    // Now outside, Ana cannot walk back in either.
-    await tryMove(ana, INSIDE, 'r');
-    expect(ana.state.players.get(ana.sessionId)).toMatchObject({ x: OUTSIDE.x, y: OUTSIDE.y });
+    // From the south, out: the one who locked it from there cannot leave through it either.
+    await tryMove(ana, NORTH, 'y');
+    expect(ana.state.players.get(ana.sessionId)).toMatchObject({ x: SOUTH.x, y: SOUTH.y });
+    await tryMove(ana, NORTH_2, 'r');
+    expect(ana.state.players.get(ana.sessionId)).toMatchObject({ x: SOUTH.x, y: SOUTH.y });
+    await moveTo(ana, SOUTH_2);
+
+    // Unlocked again, both walk through.
+    ana.send('doorlock');
+    await waitFor(() => beto.state.lockedDoors === '');
+    await moveTo(beto, SOUTH);
+    await moveTo(ana, NORTH);
   });
 
   it('drops the lock of a door that is removed, and never saves it', async () => {
     const ana = await join('Ana');
-    await moveTo(ana, INSIDE);
+    await moveTo(ana, SOUTH);
     ana.send('doorlock');
     await waitFor(() => ana.state.lockedDoors === String(DOOR));
 
     await server.terrain.setDecor([{ index: DOOR, item: null }], null);
     await waitFor(() => ana.state.lockedDoors === '');
     expect(await server.terrain.decor()).toEqual([]);
+    // With the door gone its wall is closed again: nothing is left to lock.
+    ana.send('doorlock');
+    await tryMove(ana, SOUTH, 'y');
+    expect(ana.state.lockedDoors).toBe('');
+  });
+
+  it('keeps the lock when an edit changes the walls beside the door', async () => {
+    const ana = await join('Ana');
+    await moveTo(ana, SOUTH);
+    ana.send('doorlock');
+    await waitFor(() => ana.state.lockedDoors === String(DOOR));
+
+    // A post past the door's ends goes: the door stands and stays locked.
+    await server.terrain.setWalls([{ index: tile(69, 22), piece: null }], null, async () => ({ placements: [], players: [] }));
+    expect(await server.terrain.decor()).toEqual([{ index: DOOR, piece: 'door-wood', rotation: 0 }]);
+    await tryMove(ana, SOUTH, 'y');
+    expect(ana.state.lockedDoors).toBe(String(DOOR));
+    await tryMove(ana, NORTH, 'r');
+    expect(ana.state.players.get(ana.sessionId)).toMatchObject({ x: SOUTH.x, y: SOUTH.y });
   });
 });
 
-describe('OfficeRoom: one lock for the whole room (#223, S16)', () => {
+describe('OfficeRoom: one lock per door, double doors included (#233, S4)', () => {
   const tile = (tx: number, ty: number) => ty * BASE_LAYOUT.width + tx;
-  /** A closed room of tiles 64..68 x 22..25 (posts all round vertices 64..69 x 22..26), the north wall plaster, the rest brick. */
-  const POSTS: (readonly [number, 'wall-brick' | 'wall-plaster'])[] = [];
-  for (let x = 64; x <= 69; x += 1) POSTS.push([tile(x, 22), 'wall-plaster'], [tile(x, 26), 'wall-brick']);
-  for (let y = 23; y <= 25; y += 1) POSTS.push([tile(64, y), 'wall-brick'], [tile(69, y), 'wall-brick']);
-  /** North door stored turned 180 (facing out), west door stored 270 (facing out): the room decides which side is inside. */
-  const NORTH = tile(66, 22);
-  const WEST = tile(64, 24);
-  const BOTH = [NORTH, WEST].sort((a, b) => a - b).join(',');
+  /** Posts along row 22 (64..75) and down column 64 (rows 23..26): no wall is needed between a door's end posts, but there is one. */
+  const POSTS: (readonly [number, 'wall-brick'])[] = [];
+  for (let x = 64; x <= 75; x += 1) POSTS.push([tile(x, 22), 'wall-brick']);
+  for (let y = 23; y <= 26; y += 1) POSTS.push([tile(64, y), 'wall-brick']);
+  /** A door (posts 66 and 68), a double door (posts 70 and 74) and a vertical door (posts (64, 24) and (64, 26)). */
+  const SINGLE = tile(66, 22);
+  const DOUBLE = tile(70, 22);
+  const SIDE = tile(64, 24);
   const at = (cx: number, cy: number) => ({ x: cx, y: cy - 11, facing: 'down' });
-  const NEXT_TO_NORTH = at(66 * TILE + 16, 22 * TILE + 16);
-  const NEXT_TO_WEST = at(64 * TILE + 16, 24 * TILE + 16);
-  const MIDDLE = at(66 * TILE + 16, 24 * TILE + 16);
-  const OUT_NORTH = at(66 * TILE + 16, 22 * TILE - 16);
-  const OUT_WEST = at(64 * TILE - 16, 24 * TILE + 16);
+  const north = (tx: number) => at(tx * TILE + 16, 22 * TILE - 16);
+  const south = (tx: number) => at(tx * TILE + 16, 22 * TILE + 16);
+  const east = at(64 * TILE + 16, 24 * TILE + 16);
+  const west = at(64 * TILE - 16, 24 * TILE + 16);
 
   beforeEach(async () => {
     await server.shutdown();
     server = createOfficeServer({
       terrain: createMemoryTerrain([], POSTS, [
-        { index: NORTH, piece: 'door-wood', rotation: 180 },
-        { index: WEST, piece: 'door-wood', rotation: 270 },
+        { index: SINGLE, piece: 'door-wood', rotation: 0 },
+        { index: DOUBLE, piece: 'door-wood-double', rotation: 180 },
+        { index: SIDE, piece: 'door-wood', rotation: 90 },
       ]),
     });
     endpoint = `ws://localhost:${await server.listen(0)}`;
@@ -2620,62 +2670,77 @@ describe('OfficeRoom: one lock for the whole room (#223, S16)', () => {
     await waitFor(() => room.state.players.get(room.sessionId)?.status === status);
   }
 
-  it('locks every door of the room from next to any one of them, and unlocks them all from next to another', async () => {
-    const ana = await join('Ana');
-    await moveTo(ana, NEXT_TO_WEST);
-    ana.send('doorlock');
-    await waitFor(() => ana.state.lockedDoors === BOTH);
-    await moveTo(ana, NEXT_TO_NORTH);
-    ana.send('doorlock');
-    await waitFor(() => ana.state.lockedDoors === '');
-  });
+  /** Whether the room refuses the move: the player stays where they were. */
+  async function refused(room: Awaited<ReturnType<typeof join>>, from: { x: number; y: number }, to: { x: number; y: number; facing: string }, status: 'g' | 'y' | 'r') {
+    await tryMove(room, to, status);
+    const now = room.state.players.get(room.sessionId);
+    return now?.x === from.x && now?.y === from.y;
+  }
 
-  it('ignores the key from outside the room and from inside but away from its doors', async () => {
-    const ana = await join('Ana');
-    await moveTo(ana, OUT_NORTH);
-    ana.send('doorlock');
-    await tryMove(ana, OUT_NORTH, 'y');
-    expect(ana.state.lockedDoors).toBe('');
-    await moveTo(ana, MIDDLE);
-    ana.send('doorlock');
-    await tryMove(ana, MIDDLE, 'r');
-    expect(ana.state.lockedDoors).toBe('');
-  });
-
-  it('refuses walking in through any locked door of the room, and lets whoever is inside walk out', async () => {
-    const ana = await join('Ana');
+  it('locks a double door as one door, whichever of its four tiles the key is pressed at, and it blocks along its whole span', async () => {
+    // Everyone is on their side before the lock: a teleport that crosses a locked span is refused like a step.
     const beto = await join('Beto');
-    await moveTo(ana, NEXT_TO_NORTH);
+    await moveTo(beto, north(70));
+    const ana = await join('Ana');
+    await moveTo(ana, south(70));
     ana.send('doorlock');
-    await waitFor(() => beto.state.lockedDoors === BOTH);
+    // One anchor for the whole double door, not one per leaf.
+    await waitFor(() => ana.state.lockedDoors === String(DOUBLE) && beto.state.lockedDoors === String(DOUBLE));
 
-    await moveTo(beto, OUT_WEST);
-    await tryMove(beto, NEXT_TO_WEST, 'y');
-    expect(beto.state.players.get(beto.sessionId)).toMatchObject({ x: OUT_WEST.x, y: OUT_WEST.y });
-    const carla = await join('Carla');
-    await moveTo(carla, OUT_NORTH);
-    await tryMove(carla, NEXT_TO_NORTH, 'r');
-    expect(carla.state.players.get(carla.sessionId)).toMatchObject({ x: OUT_NORTH.x, y: OUT_NORTH.y });
+    for (const tx of [70, 71, 72, 73]) {
+      await moveTo(beto, north(tx));
+      expect(await refused(beto, north(tx), south(tx), 'y')).toBe(true);
+      await moveTo(ana, south(tx));
+      expect(await refused(ana, south(tx), north(tx), 'r')).toBe(true);
+    }
 
-    await moveTo(ana, OUT_WEST);
-    await tryMove(ana, NEXT_TO_WEST, 'y');
-    expect(ana.state.players.get(ana.sessionId)).toMatchObject({ x: OUT_WEST.x, y: OUT_WEST.y });
+    // The far end of the span unlocks it, from the other side.
+    await moveTo(beto, north(73));
+    beto.send('doorlock');
+    await waitFor(() => ana.state.lockedDoors === '' && beto.state.lockedDoors === '');
+    await moveTo(beto, south(71));
+    await moveTo(beto, north(72));
   });
 
-  it('keeps the doors and their locks when an edit opens the room, each locking by itself once it has no room', async () => {
+  it('locks only the door next to the player: the others keep letting everyone through', async () => {
     const ana = await join('Ana');
-    await moveTo(ana, NEXT_TO_NORTH);
+    await moveTo(ana, south(66));
     ana.send('doorlock');
-    await waitFor(() => ana.state.lockedDoors === BOTH);
+    await waitFor(() => ana.state.lockedDoors === String(SINGLE));
 
-    // A post of the east wall goes: the room is open now.
-    await server.terrain.setWalls([{ index: tile(69, 24), piece: null }], null, async () => ({ placements: [], players: [] }));
-    expect(await server.terrain.decor()).toHaveLength(2);
-    expect(ana.state.lockedDoors).toBe(BOTH);
-    // Stored 180, no room left: its inside falls back to the rotation (the tile north of the edge), where nobody stands.
-    await moveTo(ana, NEXT_TO_NORTH);
+    // The double door is a few tiles along the same wall and stays open both ways; so does the vertical door.
+    await moveTo(ana, south(72));
+    await moveTo(ana, north(72));
+    await moveTo(ana, east);
+    await moveTo(ana, west);
+    await moveTo(ana, south(66));
+    expect(ana.state.lockedDoors).toBe(String(SINGLE));
+    // The locked one still holds.
+    expect(await refused(ana, south(66), north(66), 'y')).toBe(true);
+  });
+
+  it('keeps one lock per door: locking a second one leaves the first, unlocking one leaves the other', async () => {
+    const beto = await join('Beto');
+    await moveTo(beto, west);
+    const ana = await join('Ana');
+    await moveTo(ana, south(66));
     ana.send('doorlock');
-    await tryMove(ana, NEXT_TO_NORTH, 'y');
-    expect(ana.state.lockedDoors).toBe(BOTH);
+    await waitFor(() => ana.state.lockedDoors === String(SINGLE));
+    await moveTo(ana, east);
+    ana.send('doorlock');
+    const both = [SINGLE, SIDE].sort((a, b) => a - b).join(',');
+    await waitFor(() => ana.state.lockedDoors === both && beto.state.lockedDoors === both);
+
+    // The vertical door blocks from either side.
+    expect(await refused(ana, east, west, 'y')).toBe(true);
+    expect(await refused(beto, west, east, 'r')).toBe(true);
+
+    // Unlocking it leaves the single door locked.
+    ana.send('doorlock');
+    await waitFor(() => beto.state.lockedDoors === String(SINGLE));
+    await moveTo(beto, east);
+    await moveTo(ana, west);
+    await moveTo(ana, south(66));
+    expect(await refused(ana, south(66), north(66), 'g')).toBe(true);
   });
 });
