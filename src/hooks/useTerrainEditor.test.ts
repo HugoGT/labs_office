@@ -374,3 +374,22 @@ describe('useTerrainEditor', () => {
     });
   });
 });
+
+describe('useTerrainEditor: space outlines (#216)', () => {
+  it('asks the map to outline every room and desk it was given while open, and to stop on exit', () => {
+    const bridge = createOfficeBridge();
+    const commands: OfficeCommandMap['terrainedit'][] = [];
+    bridge.onCommand('terrainedit', (command) => commands.push(command));
+    const outlines = [{ x0: 2, y0: 3, x1: 5, y1: 6 }, { x0: 20, y0: 5, x1: 28, y1: 13 }];
+    const { result } = renderHook(() => useTerrainEditor({ bridge, terrain: port(), outlines }));
+
+    act(() => result.current.enter());
+    expect(commands.at(-1)).toEqual({ brush: null, outlines });
+
+    act(() => result.current.pick('grass'));
+    expect(commands.at(-1)).toMatchObject({ brush: floor('grass'), outlines });
+
+    act(() => result.current.exit());
+    expect(commands.at(-1)).toBeNull();
+  });
+});

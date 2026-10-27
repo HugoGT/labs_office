@@ -5,6 +5,7 @@ import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import type { OfficeBridge } from '../game/officeBridge';
 import { BASE_LAYOUT, MAX_WALL_EDITS, type WallEdit, type WallPieceId } from '../game/officeLayout';
 import type { TerrainBrush } from '../game/terrainEditor';
+import type { TileRect } from '../game/terrainGrid';
 
 /**
  * The wall tool of "Decoración" (#224; it was part of the terrain editor
@@ -49,6 +50,8 @@ export interface UseWallEditorOptions {
    * only erases posts.
    */
   eraseDoors?: (post: number) => boolean;
+  /** The outlines the map draws while a wall is picked (#216), the ones "Decoración" draws: a guide only. */
+  outlines?: readonly TileRect[];
 }
 
 export interface WallEditor {
@@ -101,7 +104,7 @@ function nextRun(paints: readonly WallPaint[]): WallPaint[] {
   return run;
 }
 
-export function useWallEditor({ bridge, terrain, eraseDoors }: UseWallEditorOptions): WallEditor {
+export function useWallEditor({ bridge, terrain, eraseDoors, outlines }: UseWallEditorOptions): WallEditor {
   const [walls, setWalls] = useState<readonly (string | null)[]>(BASE_LAYOUT.walls);
   const [brush, setBrush] = useState<WallBrush | null>(null);
   const [paints, setPaintsState] = useState<readonly WallPaint[]>([]);
@@ -202,11 +205,15 @@ export function useWallEditor({ bridge, terrain, eraseDoors }: UseWallEditorOpti
     [paints],
   );
   const shows = brush !== null || previewWalls !== null;
-  const commandKey = JSON.stringify([brush, previewWalls]);
+  const commandKey = JSON.stringify([brush, previewWalls, outlines]);
 
   useEffect(() => {
     if (!shows) return;
-    bridge.emitCommand('terrainedit', { brush, ...(previewWalls === null ? {} : { previewWalls }) });
+    bridge.emitCommand('terrainedit', {
+      brush,
+      ...(previewWalls === null ? {} : { previewWalls }),
+      ...(outlines === undefined || outlines.length === 0 ? {} : { outlines }),
+    });
     // `commandKey` stands for the brush and the preview: only a different drawing is worth a command.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridge, shows, commandKey]);

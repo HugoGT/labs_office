@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cellOutlineCenter, cellsAlongStroke, sameBrush } from './terrainEditor';
+import { cellOutlineCenter, cellsAlongStroke, sameBrush, terrainOutlines } from './terrainEditor';
 
 const GRID = { columns: 4, rows: 3, cellSize: 100 };
 
@@ -73,5 +73,18 @@ describe('sameBrush', () => {
     expect(sameBrush({ kind: 'floor', material: 'carpet', color: '#c0392b' }, { kind: 'floor', material: 'carpet', color: '#c0392b' })).toBe(true);
     expect(sameBrush({ kind: 'floor', material: 'carpet', color: '#c0392b' }, { kind: 'floor', material: 'carpet', color: '#3c6ac8' })).toBe(false);
     expect(sameBrush({ kind: 'floor', material: 'carpet' }, { kind: 'floor', material: 'carpet', color: '#3c6ac8' })).toBe(false);
+  });
+});
+
+describe('terrainOutlines (#216)', () => {
+  it('is every desk and every room, as inclusive tile corners', () => {
+    expect(terrainOutlines([{ x: 2, y: 3, w: 4, h: 4 }], [{ x: 20, y: 5, w: 9, h: 9 }])).toEqual([
+      { x0: 2, y0: 3, x1: 5, y1: 6 },
+      { x0: 20, y0: 5, x1: 28, y1: 13 },
+    ]);
+  });
+
+  it('is nothing without desks or rooms', () => {
+    expect(terrainOutlines([], [])).toEqual([]);
   });
 });

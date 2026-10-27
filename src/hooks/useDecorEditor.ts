@@ -6,6 +6,7 @@ import { deskOverChairLimit, displacedDeskTables } from '../game/deskDecorRules'
 import { isEditableElementFocused } from '../game/inputFocusGuard';
 import { MAP_W } from '../game/mapData';
 import type { OfficeBridge } from '../game/officeBridge';
+import type { TileRect } from '../game/terrainGrid';
 import {
   MAX_DECOR_EDITS,
   decorFootprint,
@@ -94,6 +95,8 @@ export interface UseDecorEditorOptions {
    * server enforces both on its own. Absent, no desk rule applies here.
    */
   desks?: readonly DecorTileRect[];
+  /** The outlines the map draws while the editor is open (`decorOutlines`, #216): a guide only. */
+  outlines?: readonly TileRect[];
   /**
    * Another tool of the same menu holds the map (the wall tool, #224): the
    * editor puts its brush and selection down, closes its overlay and leaves
@@ -178,6 +181,7 @@ function brushFor(option: DecorPick, rotation: DecorRotation, color: string | un
 }
 
 const NO_DESKS: readonly DecorTileRect[] = [];
+const NO_OUTLINES: readonly TileRect[] = [];
 
 export function useDecorEditor({
   bridge,
@@ -186,6 +190,7 @@ export function useDecorEditor({
   infoOf = decorInfoFromPieceId,
   onExit,
   desks = NO_DESKS,
+  outlines = NO_OUTLINES,
   paused = false,
 }: UseDecorEditorOptions): DecorEditor {
   const [active, setActive] = useState(false);
@@ -447,7 +452,7 @@ export function useDecorEditor({
   });
 
   const preview = useMemo<DecorEdit[] | null>(() => (edits.length === 0 ? null : edits.map(({ index, item }) => ({ index, item }))), [edits]);
-  const commandKey = JSON.stringify([brush, area, selected, preview, desks]);
+  const commandKey = JSON.stringify([brush, area, selected, preview, desks, outlines]);
 
   // A pause puts down what the next map click would act on; a move leaves the item where it was.
   useEffect(() => {
@@ -462,10 +467,11 @@ export function useDecorEditor({
       brush,
       area,
       ...(desks.length === 0 ? {} : { desks }),
+      ...(outlines.length === 0 ? {} : { outlines }),
       ...(selected === null ? {} : { selected }),
       ...(preview === null ? {} : { preview }),
     });
-    // `commandKey` stands for brush, area, desks, selection and preview: only a different drawing is worth a command.
+    // `commandKey` stands for brush, area, desks, outlines, selection and preview: only a different drawing is worth a command.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridge, active, paused, commandKey]);
 

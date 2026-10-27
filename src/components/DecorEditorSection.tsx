@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import type { ArtPreviewCache } from '../game/artPreview';
-import { fitsDeskArea, type DecorBrush } from '../game/decorEditor';
+import { decorOutlines, fitsDeskArea, type DecorBrush } from '../game/decorEditor';
 import type { OfficeBridge } from '../game/officeBridge';
 import { decorInfoFromPieceId, type DecorTileRect } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
@@ -55,6 +55,8 @@ export interface DecorEditorSectionProps {
   area: DecorTileRect | null;
   /** Every desk area in tiles, for the desk rules; absent, none. */
   desks?: readonly DecorTileRect[];
+  /** `office` only: every room in tiles, outlined for the admin like the desks (#216). */
+  rooms?: readonly DecorTileRect[];
   /** `office` only: the terrain admin port the walls are painted through (#224); absent, no walls are offered. */
   terrain?: TerrainAdminPort | null;
   /** `desk` only: releases the claimed desk ("Dejar escritorio"), like the desk banner's. */
@@ -79,6 +81,7 @@ export function DecorEditorSection({
   scope,
   area,
   desks,
+  rooms,
   terrain = null,
   onLeaveDesk,
   onEditingChange,
@@ -98,8 +101,10 @@ export function DecorEditorSection({
   const hasDesk = !office && area !== null;
   // Only an admin paints walls: the desk scope never gets the port, so it offers none.
   // Called on a map click, long after this render declared `editor` below.
-  const walls = useWallEditor({ bridge, terrain: office ? terrain : null, eraseDoors: (post) => editor.removeDoorsOn(post) });
-  const editor = useDecorEditor({ bridge, decor, area, infoOf, onExit, desks, paused: walls.brush !== null });
+  // The desk scope outlines its own desk, the office scope every desk and room (#216).
+  const outlines = useMemo(() => decorOutlines(area, desks ?? [], office ? (rooms ?? []) : []), [area, desks, rooms, office]);
+  const walls = useWallEditor({ bridge, terrain: office ? terrain : null, eraseDoors: (post) => editor.removeDoorsOn(post), outlines });
+  const editor = useDecorEditor({ bridge, decor, area, infoOf, onExit, desks, outlines, paused: walls.brush !== null });
   const offersWalls = office && terrain !== null;
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;

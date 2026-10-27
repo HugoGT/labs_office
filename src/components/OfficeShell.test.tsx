@@ -1271,7 +1271,12 @@ describe('OfficeShell: Decoración for one desk', () => {
 
     expect(vi.mocked(createOfficeDecorClient)).toHaveBeenCalledWith(expect.objectContaining({ scope: 'desk' }));
     // The desk at (320, 384) px is the 3x3 tiles from (10, 12), and the only desk the rules know.
-    expect(commands.at(-1)).toEqual({ brush: null, area: { x: 10, y: 12, w: 3, h: 3 }, desks: [{ x: 10, y: 12, w: 3, h: 3 }] });
+    expect(commands.at(-1)).toEqual({
+      brush: null,
+      area: { x: 10, y: 12, w: 3, h: 3 },
+      desks: [{ x: 10, y: 12, w: 3, h: 3 }],
+      outlines: [{ x0: 10, y0: 12, x1: 12, y1: 14 }],
+    });
 
     await user.click(screen.getByRole('button', { name: 'Dejar escritorio' }));
     expect(releaseDesk).toHaveBeenCalledTimes(1);

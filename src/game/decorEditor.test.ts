@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   decorBrushTarget,
+  decorOutlines,
   decorPickAt,
   decorPlacementAllowed,
   decorSizeLabel,
@@ -280,5 +281,22 @@ describe('decorPlacementAllowed: doors (#223)', () => {
   it('still keeps every other piece off the tiles a wall touches', () => {
     expect(decorPlacementAllowed(none, infoOf, walled(), null, at(3, 4), chairBrush())).toBe(false);
     expect(decorPlacementAllowed(none, infoOf, walled(), null, at(9, 3), chairBrush())).toBe(true);
+  });
+});
+
+describe('decorOutlines (#216)', () => {
+  const desks = [{ x: 2, y: 3, w: 4, h: 4 }, { x: 10, y: 3, w: 4, h: 4 }];
+  const rooms = [{ x: 20, y: 5, w: 9, h: 9 }];
+
+  it('is every desk and every room for an admin, who has no area', () => {
+    expect(decorOutlines(null, desks, rooms)).toEqual([
+      { x0: 2, y0: 3, x1: 5, y1: 6 },
+      { x0: 10, y0: 3, x1: 13, y1: 6 },
+      { x0: 20, y0: 5, x1: 28, y1: 13 },
+    ]);
+  });
+
+  it('is only the own desk for whoever decorates one, not the others nor the rooms', () => {
+    expect(decorOutlines(desks[1]!, desks, rooms)).toEqual([{ x0: 10, y0: 3, x1: 13, y1: 6 }]);
   });
 });

@@ -117,6 +117,11 @@ export interface TileRect {
   y1: number;
 }
 
+/** A desk or room as `x, y, w, h` in tiles, in the inclusive corner form of a `TileRect`. */
+export function tileAreaRect(area: { readonly x: number; readonly y: number; readonly w: number; readonly h: number }): TileRect {
+  return { x0: area.x, y0: area.y, x1: area.x + area.w - 1, y1: area.y + area.h - 1 };
+}
+
 function insideRect(rect: TileRect, tx: number, ty: number): boolean {
   return tx >= rect.x0 && tx <= rect.x1 && ty >= rect.y0 && ty <= rect.y1;
 }

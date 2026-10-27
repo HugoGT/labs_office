@@ -341,6 +341,26 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(minimap.visible).toBe(true);
   });
 
+  it('keeps the space outlines of every editor off the minimap, where they are noise (#216)', async () => {
+    const { scene, bridge } = await movementArena();
+    const [main, minimap] = [scene.cameras.cameras[0]!, scene.cameras.cameras[1]!];
+    const outlines = [{ x0: 2, y0: 2, x1: 4, y1: 4 }];
+    const drawn = () => scene.children.list.filter((child) => child.name === LAYOUT_OUTLINE_NAME) as Phaser.GameObjects.Rectangle[];
+
+    for (const [name, command] of [
+      ['layoutedit', { pickable: [], selectedId: null, placing: null, outlines }],
+      ['terrainedit', { brush: null, outlines }],
+      ['decoredit', { brush: null, area: null, outlines }],
+    ] as const) {
+      bridge.emitCommand(name, command as never);
+      expect(drawn(), name).toHaveLength(1);
+      expect(drawn()[0]!.cameraFilter & minimap.id, name).not.toBe(0);
+      expect(drawn()[0]!.cameraFilter & main.id, name).toBe(0);
+      bridge.emitCommand(name, null);
+      expect(drawn(), name).toEqual([]);
+    }
+  });
+
   it('hides the minimap and holds the map while a decor piece is picked, and lets go once it is not (#208)', async () => {
     const { scene, bridge, movement } = await movementArena();
     const minimap = scene.cameras.cameras[1]!;

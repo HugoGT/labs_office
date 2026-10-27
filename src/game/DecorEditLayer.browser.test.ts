@@ -18,10 +18,11 @@ import {
   type DecorEditLayerDeps,
 } from './DecorEditLayer';
 import type { DecorBrush, DecorGround } from './decorEditor';
-import { LAYOUT_GHOST_DEPTH } from './depthLayers';
+import { LAYOUT_GHOST_DEPTH, LAYOUT_OUTLINE_DEPTH } from './depthLayers';
 import { TILE } from './mapData';
 import { createOfficeBridge } from './officeBridge';
 import type { DecorItem, DecorPieceInfo } from './officeDecor';
+import { LAYOUT_OUTLINE_NAME, OUTLINE_STROKE_COLOR } from './spaceOutline';
 
 /**
  * `DecorEditLayer` (#208) draws a real Phaser ghost and turns real pointer
@@ -482,5 +483,53 @@ describe('DecorEditLayer', () => {
       expect(named(scene, DECOR_MOVE_BUTTON_NAME)).toBeNull();
       expect(named(scene, DECOR_DELETE_BUTTON_NAME)).toBeNull();
     });
+  });
+});
+
+describe('DecorEditLayer: space outlines (#216)', () => {
+  const outlines = [{ x0: 2, y0: 3, x1: 5, y1: 6 }, { x0: 10, y0: 3, x1: 13, y1: 6 }];
+  const drawnOutlines = (scene: Phaser.Scene) => scene.children.list.filter((child) => child.name === LAYOUT_OUTLINE_NAME) as Phaser.GameObjects.Rectangle[];
+
+  it('draws the command outlines as "Editar espacios" does, above the walls, and takes them off with the command', async () => {
+    const scene = await bootHostScene();
+    const { bridge } = layer(scene);
+
+    bridge.emitCommand('decoredit', { brush: null, area: null, outlines });
+
+    const rects = drawnOutlines(scene);
+    expect(rects).toHaveLength(2);
+    for (const rect of rects) {
+      expect(rect.depth).toBe(LAYOUT_OUTLINE_DEPTH);
+      expect(rect.isStroked).toBe(true);
+      expect(rect.isFilled).toBe(false);
+      expect(rect.strokeColor).toBe(OUTLINE_STROKE_COLOR);
+      expect(rect.input).toBeNull();
+    }
+    expect(rects[0]!.getBounds()).toMatchObject({ x: 2 * TILE, y: 3 * TILE, width: 4 * TILE, height: 4 * TILE });
+
+    bridge.emitCommand('decoredit', null);
+    expect(drawnOutlines(scene)).toEqual([]);
+  });
+
+  it('leaves the same outlines standing when the command is resent, and swaps them when they change', async () => {
+    const scene = await bootHostScene();
+    const { bridge } = layer(scene);
+
+    bridge.emitCommand('decoredit', { brush: null, area: null, outlines });
+    const first = drawnOutlines(scene);
+    bridge.emitCommand('decoredit', { brush: chair, area: null, outlines });
+    expect(drawnOutlines(scene)).toEqual(first);
+
+    bridge.emitCommand('decoredit', { brush: chair, area: null, outlines: [outlines[1]!] });
+    expect(drawnOutlines(scene)).toHaveLength(1);
+    expect(first.every((rect) => !rect.active)).toBe(true);
+  });
+
+  it('draws none for a command without outlines', async () => {
+    const scene = await bootHostScene();
+    const { bridge } = layer(scene);
+
+    bridge.emitCommand('decoredit', { brush: null, area: null });
+    expect(drawnOutlines(scene)).toEqual([]);
   });
 });

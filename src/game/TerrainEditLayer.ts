@@ -17,6 +17,7 @@ import { LAYOUT_GHOST_DEPTH } from './depthLayers';
 import { TILE } from './mapData';
 import type { OfficeBridge } from './officeBridge';
 import { BLOCK_TILES, type OfficeLayout } from './officeLayout';
+import { ContextOutlines } from './spaceOutline';
 import { cellOutlineCenter, cellsAlongStroke, sameBrush, type StrokeGrid, type TerrainBrush, type TerrainEditCommand } from './terrainEditor';
 
 export const TERRAIN_HOVER_NAME = 'terrain-edit:hover';
@@ -31,6 +32,7 @@ export class TerrainEditLayer {
   private readonly scene: Phaser.Scene;
   private readonly bridge: OfficeBridge;
   private command: TerrainEditCommand | null = null;
+  private readonly outlines: ContextOutlines;
   private hover: Phaser.GameObjects.Rectangle | null = null;
   /** Floors paint 9x9 blocks. */
   private readonly blocks: StrokeGrid;
@@ -57,6 +59,7 @@ export class TerrainEditLayer {
   constructor(scene: Phaser.Scene, bridge: OfficeBridge, layout: Pick<OfficeLayout, 'width' | 'height'>) {
     this.scene = scene;
     this.bridge = bridge;
+    this.outlines = new ContextOutlines(scene);
     this.blocks = { columns: layout.width / BLOCK_TILES, rows: layout.height / BLOCK_TILES, cellSize: BLOCK_TILES * TILE };
     this.vertices = { columns: layout.width, rows: layout.height, cellSize: TILE, snap: 'vertex' };
     this.unsubscribeCommand = bridge.onCommand('terrainedit', (command) => this.applyCommand(command));
@@ -98,6 +101,7 @@ export class TerrainEditLayer {
     // command for every pending paint it draws, so only a new brush ends it.
     if (!sameBrush(command?.brush, this.command?.brush)) this.stroke = null;
     this.command = command;
+    this.outlines.show(command?.outlines);
     if (command === null) {
       this.hover?.destroy();
       this.hover = null;
