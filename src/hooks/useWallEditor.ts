@@ -43,6 +43,12 @@ export interface UseWallEditorOptions {
   bridge: OfficeBridge;
   /** The admin port the walls are painted through; `null` (no admin, no terrain store), nothing can be picked. */
   terrain: TerrainAdminPort | null;
+  /**
+   * The eraser on a post (#232): takes off the doors standing on it and says
+   * whether any does, in which case the post stays. Without it the eraser
+   * only erases posts.
+   */
+  eraseDoors?: (post: number) => boolean;
 }
 
 export interface WallEditor {
@@ -95,7 +101,7 @@ function nextRun(paints: readonly WallPaint[]): WallPaint[] {
   return run;
 }
 
-export function useWallEditor({ bridge, terrain }: UseWallEditorOptions): WallEditor {
+export function useWallEditor({ bridge, terrain, eraseDoors }: UseWallEditorOptions): WallEditor {
   const [walls, setWalls] = useState<readonly (string | null)[]>(BASE_LAYOUT.walls);
   const [brush, setBrush] = useState<WallBrush | null>(null);
   const [paints, setPaintsState] = useState<readonly WallPaint[]>([]);
@@ -150,6 +156,11 @@ export function useWallEditor({ bridge, terrain }: UseWallEditorOptions): WallEd
   function paintAt(index: number): void {
     if (blockedRef.current || brush === null) return;
     if (index < 0 || index >= wallsRef.current.length) return;
+    // A door's post is never erased under it: the eraser takes the door instead, and the wall stays closed.
+    if (brush.piece === null && eraseDoors?.(index) === true) {
+      setError(null);
+      return;
+    }
     if (wallAfter(wallsRef.current, paintsRef.current, index) === brush.piece) return;
     setError(null);
     setPaints([...paintsRef.current, { index, piece: brush.piece, sent: false }]);

@@ -97,7 +97,8 @@ export function DecorEditorSection({
   const office = scope === 'office';
   const hasDesk = !office && area !== null;
   // Only an admin paints walls: the desk scope never gets the port, so it offers none.
-  const walls = useWallEditor({ bridge, terrain: office ? terrain : null });
+  // Called on a map click, long after this render declared `editor` below.
+  const walls = useWallEditor({ bridge, terrain: office ? terrain : null, eraseDoors: (post) => editor.removeDoorsOn(post) });
   const editor = useDecorEditor({ bridge, decor, area, infoOf, onExit, desks, paused: walls.brush !== null });
   const offersWalls = office && terrain !== null;
   const onExitRef = useRef(onExit);
@@ -229,7 +230,7 @@ export function DecorEditorSection({
         <>
           <h4 className={styles.subtitle}>Paredes</h4>
           <span className={styles.hint}>
-            Las paredes van sobre las líneas entre casillas y cortan el paso: toca o arrastra cerca de una esquina para levantarlas desde ella, y «Borrar» las quita. No se pueden poner sobre escritorios, muebles ni la entrada.
+            Las paredes van sobre las líneas entre casillas y cortan el paso: toca o arrastra cerca de una esquina para levantarlas desde ella, y «Borrar» las quita; sobre una puerta, quita primero la puerta. No se pueden poner sobre escritorios, muebles ni la entrada.
           </span>
           <WallPalette value={walls.brush} onPick={walls.pick} walls={catalog?.wall ?? null} disabled={walls.blocked} preview={preview} />
         </>
