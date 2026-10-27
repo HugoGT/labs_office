@@ -577,25 +577,22 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     expect(props.onLayoutEditingChange).toHaveBeenLastCalledWith(true);
   });
 
-  it('losing the collision port also clears debug outlines and drops the submenu', async () => {
+  it('losing the collision port closes the editor and drops the submenu', async () => {
     const props = { self: SELF, peers: [], ...adminProps(), collisions: { saveRects: vi.fn(), reset: vi.fn() }, onLayoutEditingChange: vi.fn() };
-    const debug = vi.fn();
     const edit = vi.fn();
-    props.bridge.onCommand('collisiondebug', debug);
     props.bridge.onCommand('collisionedit', edit);
     const { rerender } = render(<OfficeSidebar {...props} />);
     await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Editar colisiones' }));
-    await userEvent.click(await screen.findByRole('checkbox', { name: 'Mostrar colisiones' }));
-    expect(debug).toHaveBeenLastCalledWith({ show: true });
+    await screen.findByText(/Toca un objeto en el mapa/);
+    expect(edit).toHaveBeenLastCalledWith(expect.objectContaining({ pieceId: null }));
     rerender(<OfficeSidebar {...props} collisions={null} />);
-    expect(debug).toHaveBeenLastCalledWith({ show: false });
     expect(edit).toHaveBeenLastCalledWith(null);
     expect(props.onLayoutEditingChange).toHaveBeenLastCalledWith(false);
     expect(screen.getByRole('button', { name: 'Decoración' })).toBeInTheDocument();
     rerender(<OfficeSidebar {...props} />);
     expect(screen.getByRole('button', { name: 'Editar colisiones' })).toBeInTheDocument();
-    expect(screen.queryByRole('checkbox', { name: 'Mostrar colisiones' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Toca un objeto en el mapa/)).not.toBeInTheDocument();
   });
 
   it('steps out of "Editar espacios" one Escape at a time: the desk list, the default view, the menu, then the panel', async () => {

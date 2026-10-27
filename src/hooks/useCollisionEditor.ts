@@ -46,7 +46,6 @@ export interface CollisionEditor {
   /** The draft differs from what the piece collides with now. */
   dirty: boolean;
   snap: CollisionSnap;
-  showAll: boolean;
   pending: boolean;
   error: string | null;
   notice: string | null;
@@ -58,7 +57,6 @@ export interface CollisionEditor {
   /** A hand edit of one number, as the panel shows it; a value the server would refuse is ignored. */
   updateRect(index: number, field: RectField, value: number): void;
   setSnap(snap: CollisionSnap): void;
-  setShowAll(show: boolean): void;
   save(): Promise<void>;
   cancel(): void;
   restoreDefault(): Promise<void>;
@@ -97,8 +95,6 @@ export function useCollisionEditor({ bridge, collisions }: UseCollisionEditorOpt
   const [rects, setRects] = useState<readonly CollisionRect[]>([]);
   const [selectedRect, setSelectedRect] = useState<number | null>(null);
   const [snap, setSnap] = useState<CollisionSnap>(1);
-  const [showAll, setShowAllState] = useState(false);
-  const showAllRef = useRef(false);
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
@@ -133,15 +129,6 @@ export function useCollisionEditor({ bridge, collisions }: UseCollisionEditorOpt
     if (!active) return;
     bridge.emitCommand('collisionedit', { pieceId, draft: rects, selectedRect, snap });
   }, [bridge, active, pieceId, rects, selectedRect, snap]);
-
-  // The debug outlines belong to this section: unmounted (the panel closed),
-  // nobody could turn them off again.
-  useEffect(
-    () => () => {
-      if (showAllRef.current) bridge.emitCommand('collisiondebug', { show: false });
-    },
-    [bridge],
-  );
 
   // Separate from the effect above so a new draft does not close and reopen
   // the overlay: only leaving (or unmounting) does.
@@ -200,7 +187,6 @@ export function useCollisionEditor({ bridge, collisions }: UseCollisionEditorOpt
     saved: piece?.saved ?? false,
     dirty,
     snap,
-    showAll,
     pending,
     error,
     notice,
@@ -235,11 +221,6 @@ export function useCollisionEditor({ bridge, collisions }: UseCollisionEditorOpt
     },
     setSnap(next) {
       setSnap(next);
-    },
-    setShowAll(show) {
-      setShowAllState(show);
-      showAllRef.current = show;
-      bridge.emitCommand('collisiondebug', { show });
     },
     async save() {
       if (piece === null) return;
