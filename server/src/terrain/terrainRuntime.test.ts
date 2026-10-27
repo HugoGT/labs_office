@@ -876,6 +876,21 @@ describe('createTerrainRuntime doors (#223)', () => {
     expect(passes(runtime, ...through(65))).toBe(false);
   });
 
+  it('removes one leaf of a double door: its edge closes, saved, and the other leaf stays open (#232)', async () => {
+    const store = createMemoryTerrain([], WALL);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+    await runtime.setDecor([{ index: at(66, 22), item: DOOR }, { index: at(67, 22), item: DOOR }], null);
+
+    await runtime.setDecor([{ index: at(67, 22), item: null }], 'admin-1');
+
+    expect(runtime.decor()).toEqual([{ index: at(66, 22), ...DOOR }]);
+    expect(await store.loadDecor()).toEqual(runtime.decor());
+    expect(runtime.snapshot().openings).toEqual([{ col: 66, row: 22, axis: 'horizontal' }]);
+    expect(passes(runtime, ...through(67))).toBe(false);
+    expect(passes(runtime, ...through(66))).toBe(true);
+  });
+
   it('refuses to erase a post that ends a door, data unchanged, and lets the rest of the wall change', async () => {
     const store = createMemoryTerrain([], WALL);
     const runtime = runtimeWith(store);

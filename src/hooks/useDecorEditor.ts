@@ -22,6 +22,7 @@ import {
   type DecorTileRect,
 } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
+import { doorEndPosts, isDoorPiece } from '../game/officeDoors';
 
 /**
  * The decor editor (#208) of "Decoración", in both its scopes (an admin, the
@@ -127,6 +128,13 @@ export interface DecorEditor {
   /** Picks a piece, or unpicks it when it is the picked one. */
   pick(option: DecorPick): void;
   unpick(): void;
+  /**
+   * The wall eraser on a post (#232): takes off the doors standing on it and
+   * says whether any stands there, live or still on its way out. A door's
+   * post is never erased under it, so the eraser takes the door first and the
+   * wall stays closed.
+   */
+  removeDoorsOn(post: number): boolean;
 }
 
 interface PendingEdit extends DecorEdit {
@@ -336,6 +344,17 @@ export function useDecorEditor({
     setBrush({ kind: 'piece', piece: item.piece, info, rotation: item.rotation, ...(item.color === undefined ? {} : { color: item.color }), from: index });
   }
 
+  function removeDoorsOn(post: number): boolean {
+    const on = (item: DecorItem): boolean => isDoorPiece(item.piece) && doorEndPosts(item, MAP_W).includes(post);
+    const leaving = layerAfter().filter(on);
+    if (leaving.length > 0 && !blockedRef.current) {
+      setSelected(null);
+      queue(...leaving.map(({ index }): DecorEdit => ({ index, item: null })));
+    }
+    // Until the room shows a door gone, its post is still the door's.
+    return leaving.length > 0 || itemsRef.current.some(on);
+  }
+
   function remove(index: number): void {
     if (blockedRef.current) return;
     setSelected(null);
@@ -496,6 +515,7 @@ export function useDecorEditor({
       setSelected(null);
       setError(null);
     },
+    removeDoorsOn,
     unpick() {
       putDown();
     },
