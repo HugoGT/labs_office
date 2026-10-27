@@ -1599,8 +1599,8 @@ export class OfficeScene extends Phaser.Scene {
    *
    * The depth is the BOTTOM edge of the area in the world band, same
    * convention as `placeLayout` (`(y + h) * TILE`), so the desk y-sorts
-   * against the furniture around it. Avatars live in their own band above it
-   * (#70, `depthLayers.ts`), so whoever walks over the desk is never hidden.
+   * against the furniture around it, and so does whoever walks over it
+   * (#213, `depthLayers.ts`).
    */
   private drawDesk(desk: OfficeDesk): void {
     const bottom = desk.y + desk.h;

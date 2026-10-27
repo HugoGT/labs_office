@@ -140,8 +140,8 @@ export function makeCharacter(
     dot,
     label,
   ]) as CharacterContainer;
-  // Avatar band (#70): above every normal asset, y-sorted among avatars. The
-  // ring, pill, dot and label are children, so they ride this depth.
+  // Y-sorted with the world by the feet (#213), so furniture in front covers
+  // it. The ring, pill, dot and label are children, so they ride this depth.
   container.setDepth(avatarDepth(feetOf(container).y));
   // Not the sprite size: Arcade and input both subtract this display origin.
   container.setSize(AVATAR_CONTAINER_SIZE.width, AVATAR_CONTAINER_SIZE.height);
@@ -199,8 +199,8 @@ export function setCharacterSheets(character: CharacterContainer, sheets: Charac
 /**
  * One frame of animation: how far the avatar moved since the last one (its
  * velocity for the local player, its interpolated position for a peer) and
- * how long that took. Also re-sorts it: standing in the avatar band by its
- * feet, seated in the world band on its chair (`depthLayers.ts`).
+ * how long that took. Also re-sorts it with the world by its feet, standing
+ * or seated on its chair (`depthLayers.ts`).
  */
 export function animateCharacter(
   character: CharacterContainer,
