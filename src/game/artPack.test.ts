@@ -83,10 +83,18 @@ describe('parseArtPackManifest', () => {
   });
 });
 
-describe('parseArtPackManifest: doors (#223)', () => {
-  it('reads the pack door, and drops one without its anchor or footprint', () => {
-    const [door] = pack().pieces.filter((piece) => piece.id === 'door-wood');
-    expect(door).toMatchObject({ kind: 'door', anchor: { x: 32, y: 32 }, footprint: { w: 1, h: 1 } });
+describe('parseArtPackManifest: doors (#223, #233)', () => {
+  const doors = (): ArtPackManifest['pieces'] => pack().pieces.filter((piece) => piece.kind === 'door');
+
+  it('reads the pack doors: a single door two tiles wide and a double door four, each with its variant and anchor', () => {
+    expect(doors().map((piece) => piece.id)).toEqual(['door-wood', 'door-wood-double']);
+    const [single, double] = doors();
+    expect(single).toMatchObject({ kind: 'door', name: 'Puerta de madera', variant: 'single', anchor: { x: 64, y: 64 }, footprint: { w: 2, h: 1 } });
+    expect(double).toMatchObject({ kind: 'door', name: 'Puerta doble de madera', variant: 'double', anchor: { x: 64, y: 64 }, footprint: { w: 4, h: 1 } });
+  });
+
+  it('drops a door without its anchor or footprint', () => {
+    const [door] = doors();
     const broken = [
       { ...door, id: 'door-no-anchor', anchor: undefined },
       { ...door, id: 'door-no-footprint', footprint: undefined },
@@ -97,9 +105,27 @@ describe('parseArtPackManifest: doors (#223)', () => {
     expect(parsed?.pieces.map((piece) => piece.id)).toEqual(['door-wood']);
   });
 
-  it('preloads the doors with the rest of the office furniture, so a door draws at once', () => {
+  it('drops a door whose variant is missing, unknown or not the one its id says, or whose footprint is not its span', () => {
+    const [single, double] = doors();
+    const broken = [
+      { ...single, id: 'door-no-variant', variant: undefined },
+      { ...single, id: 'door-odd-variant', variant: 'triple' },
+      { ...single, id: 'door-wood-lone', variant: 'double', footprint: { w: 4, h: 1 } },
+      { ...double, id: 'door-oak-double', variant: 'single' },
+      { ...double, id: 'door-oak-narrow-double', footprint: { w: 2, h: 1 } },
+      { ...single, id: 'door-narrow', footprint: { w: 1, h: 1 } },
+      { ...single, id: 'door-oak-wide', footprint: { w: 4, h: 1 } },
+    ];
+
+    const parsed = parseArtPackManifest(withPieces([single, double, ...broken]));
+
+    expect(parsed?.pieces.map((piece) => piece.id)).toEqual(['door-wood', 'door-wood-double']);
+  });
+
+  it('preloads both doors with the rest of the office furniture, so a door draws at once', () => {
     const urls = bootLoadRequests(pack(), ART_PACK_MANIFEST_URL).map((request) => request.url);
     expect(urls.some((url) => url.endsWith('/door/wood.png'))).toBe(true);
+    expect(urls.some((url) => url.endsWith('/door/wood-double.png'))).toBe(true);
   });
 });
 
@@ -140,8 +166,8 @@ describe('load requests', () => {
 
     expect(kinds).toEqual(new Set(['floor', 'desk', 'chair', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'character']));
     // Nine floors, four desks, four chairs and four walls, the terrain tileset,
-    // two trees, a plant, a bridge, a hedge, three tables (art step 8, the oval one since #208) and a door (#223).
-    expect(requests).toHaveLength(33);
+    // two trees, a plant, a bridge, a hedge, three tables (art step 8, the oval one since #208) and two doors (#223, #233).
+    expect(requests).toHaveLength(34);
     expect(requests.filter((request) => request.key.startsWith('art:character-')).map((request) => request.key))
       .toEqual([artSheetKey(pack().defaults.character, 'walk'), artSheetKey(pack().defaults.character, 'seated')]);
     expect(requests).toContainEqual({

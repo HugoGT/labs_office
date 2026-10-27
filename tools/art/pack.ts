@@ -39,6 +39,7 @@ import {
   type ArtPackManifest,
   type ArtPiece,
   type ArtPieceFile,
+  type DoorVariant,
 } from '../../src/game/artContract.ts';
 import type { ChairMaterial } from './domain/chairs.ts';
 import type { DoorMaterial } from './domain/doors.ts';
@@ -95,7 +96,10 @@ const TABLES: Readonly<Record<RoomTable, { readonly name: string; readonly mater
   cafeteria: { name: 'Mesa de cafetería', material: 'beech' },
   oval: { name: 'Mesa ovalada', material: 'oak' },
 };
-const DOOR_NAMES: Readonly<Record<DoorMaterial, string>> = { wood: 'Puerta de madera' };
+/** The single and the double door are two items (#233), each with its own name and wall footprint. */
+const DOOR_NAMES: Readonly<Record<DoorMaterial, Readonly<Record<DoorVariant, string>>>> = {
+  wood: { single: 'Puerta de madera', double: 'Puerta doble de madera' },
+};
 /** The whole 3x3 deck is walkable in both orientations; the rails are thin enough to step along. */
 const FULL_DECK = { x: 0, y: 0, w: BRIDGE.footprint.w, h: BRIDGE.footprint.h } as const;
 
@@ -277,19 +281,21 @@ export function renderPackFiles(): Map<string, Uint8Array> {
         files: [png(`table/${kind}.png`, 'sheet', 'table', image)],
       }),
     ),
-    // Doors (#223) stand on a wall's edge: one tile of wall wide, anchored on the middle of the edge.
-    ...sheets.doors.map(
-      ({ material, image }): ArtPiece => ({
-        id: `door-${material}`,
+    // Doors (#223, #233) stand on a wall's line: 2 tiles of wall wide (single) or 4 (double), anchored on the middle of the span.
+    ...sheets.doors.map(({ material, variant, image }): ArtPiece => {
+      const suffix = variant === 'double' ? '-double' : '';
+      return {
+        id: `door-${material}${suffix}`,
         kind: 'door',
-        name: DOOR_NAMES[material],
+        name: DOOR_NAMES[material][variant],
         ...common,
         material,
+        variant,
         anchor: DOOR.anchor,
-        footprint: { w: 1, h: 1 },
-        files: [png(`door/${material}.png`, 'sheet', 'door', image)],
-      }),
-    ),
+        footprint: { w: DOOR.variants[variant].span, h: 1 },
+        files: [png(`door/${material}${suffix}.png`, 'sheet', 'door', image)],
+      };
+    }),
   ];
 
   const manifest: ArtPackManifest = {

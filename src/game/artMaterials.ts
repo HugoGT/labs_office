@@ -155,14 +155,15 @@ export interface PreviewFrame {
 const TABLE_PREVIEW_MARGIN = 2;
 const TABLE_PREVIEW_LIFT = 18;
 
-/** What a door's preview keeps around the middle of its edge: the closed leaf and its hinge and handle. */
-const DOOR_PREVIEW = { width: 48, height: 24 } as const;
+/** What a door's preview keeps across its edge: the closed leaf with its jambs, hinge and handle, over the whole span. */
+const DOOR_PREVIEW_HEIGHT = 24;
 
 export function previewFrame(option: MaterialOption): PreviewFrame {
   if (option.kind === 'chair') return chairPreviewFrames()[0];
   // Frame 0: turned 0, hinged at its start, closed (`doorFrameIndex`).
-  if (option.kind === 'door') {
-    return { x: DOOR.anchor.x - DOOR_PREVIEW.width / 2, y: DOOR.anchor.y - DOOR_PREVIEW.height / 2, ...DOOR_PREVIEW };
+  if (option.kind === 'door' && option.piece.kind === 'door') {
+    const width = DOOR.variants[option.piece.variant].span * ART_TILE;
+    return { x: DOOR.anchor.x - width / 2, y: DOOR.anchor.y - DOOR_PREVIEW_HEIGHT / 2, width, height: DOOR_PREVIEW_HEIGHT };
   }
   if (option.kind === 'table' && option.piece.kind === 'table') {
     const { frame } = ART_IMAGE_SPECS.table;

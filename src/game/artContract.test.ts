@@ -10,7 +10,10 @@ import {
   CHAIR_LAYERS,
   DOOR,
   DOOR_HINGES,
+  DOOR_VARIANTS,
   doorFrameIndex,
+  doorSpanOf,
+  doorVariantOf,
   doorPlacement,
   CHARACTER_SEATED,
   CHARACTER_WALK,
@@ -734,13 +737,13 @@ describe('tileset color bands', () => {
   });
 });
 
-describe('doors (#223)', () => {
+describe('doors (#223, #233)', () => {
   it('lays a door sheet out as one column per rotation and one row per hinge, closed then open', () => {
     expect(ART_IMAGE_KINDS).toContain('door');
     expect(ART_IMAGE_SPECS.door).toBe(DOOR);
-    expect(DOOR.frame).toEqual({ width: 64, height: 64 });
-    expect(sheetSize(DOOR)).toEqual({ width: 256, height: 256 });
-    expect(DOOR.anchor).toEqual({ x: 32, y: 32 });
+    expect(DOOR.frame).toEqual({ width: 128, height: 128 });
+    expect(sheetSize(DOOR)).toEqual({ width: 512, height: 512 });
+    expect(DOOR.anchor).toEqual({ x: 64, y: 64 });
     expect(DOOR_HINGES).toEqual(['start', 'end']);
     expect(doorFrameIndex(0, 'start', false)).toBe(0);
     expect(doorFrameIndex(270, 'start', false)).toBe(3);
@@ -749,8 +752,37 @@ describe('doors (#223)', () => {
     expect(doorFrameIndex(180, 'end', true)).toBe(14);
   });
 
-  it('draws a door with its anchor on the middle of its edge, sorted like the wall body it replaces', () => {
-    expect(doorPlacement({ col: 4, row: 6, axis: 'horizontal' })).toEqual({ x: 4 * 32 + 16 - 32, y: 6 * 32 - 32, depthY: wallBodyRect({ col: 4, row: 6, axis: 'horizontal' }).y + 16 });
-    expect(doorPlacement({ col: 4, row: 6, axis: 'vertical' })).toEqual({ x: 4 * 32 - 32, y: 6 * 32 + 16 - 32, depthY: wallBodyRect({ col: 4, row: 6, axis: 'vertical' }).y + 16 });
+  it('states the two variants: 1.4 tiles of leaf and 0.3 of jamb each side, 3.2 and 0.4 for the double door', () => {
+    expect(DOOR_VARIANTS).toEqual(['single', 'double']);
+    expect(DOOR.variants).toEqual({
+      single: { span: 2, leafLength: 44, jamb: 10 },
+      double: { span: 4, leafLength: 102, jamb: 13 },
+    });
+    // Leaf and both jambs fill the span, in pixels.
+    for (const { span, leafLength, jamb } of Object.values(DOOR.variants)) expect(leafLength + 2 * jamb).toBe(span * ART_TILE);
+  });
+
+  it('tells the double door from the single one by the piece id: 2 and 4 tiles of wall', () => {
+    expect(doorVariantOf('door-wood')).toBe('single');
+    expect(doorVariantOf('door-wood-double')).toBe('double');
+    expect(doorSpanOf('door-wood')).toBe(2);
+    expect(doorSpanOf('door-wood-double')).toBe(4);
+  });
+
+  it('draws a door with its anchor on the middle of its span, sorted like the last wall body it replaces', () => {
+    for (const span of [2, 4]) {
+      const horizontal = { col: 4, row: 6, axis: 'horizontal' } as const;
+      expect(doorPlacement(horizontal, span)).toEqual({
+        x: 4 * 32 + (span * 32) / 2 - 64,
+        y: 6 * 32 - 64,
+        depthY: wallBodyRect({ ...horizontal, col: 4 + span - 1 }).y + 16,
+      });
+      const vertical = { col: 4, row: 6, axis: 'vertical' } as const;
+      expect(doorPlacement(vertical, span)).toEqual({
+        x: 4 * 32 - 64,
+        y: 6 * 32 + (span * 32) / 2 - 64,
+        depthY: wallBodyRect({ ...vertical, row: 6 + span - 1 }).y + 16,
+      });
+    }
   });
 });

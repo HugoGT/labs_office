@@ -11,6 +11,7 @@ import {
   DESK,
   DOOR,
   DOOR_HINGES,
+  DOOR_VARIANTS,
   HEDGE,
   PACK_FACINGS,
   TABLE,
@@ -41,6 +42,7 @@ import {
   wallFrameIndex,
   wallJointRect,
   type ArtDeskFacing,
+  type DoorVariant,
   type ArtFacing,
   type TerrainMaterial,
   type WallPiece,
@@ -226,13 +228,13 @@ export function hedgeSheet(): PixelBuffer {
 }
 
 /** One frame per rotation (columns) and per hinge, closed then open (rows): `doorFrameIndex`. */
-export function doorSheet(material: DoorMaterial): PixelBuffer {
+export function doorSheet(material: DoorMaterial, variant: DoorVariant): PixelBuffer {
   const sheet = blankSheet(DOOR);
   for (const rotation of [0, 90, 180, 270] as const) {
     for (const hinge of DOOR_HINGES) {
       for (const open of [false, true]) {
         const index = doorFrameIndex(rotation, hinge, open);
-        place(sheet, doorSprite(material, rotation, hinge, open), (index % DOOR.columns) * DOOR.frame.width, Math.floor(index / DOOR.columns) * DOOR.frame.height);
+        place(sheet, doorSprite(material, variant, rotation, hinge, open), (index % DOOR.columns) * DOOR.frame.width, Math.floor(index / DOOR.columns) * DOOR.frame.height);
       }
     }
   }
@@ -252,7 +254,7 @@ export interface PackSheets {
   readonly bridge: PixelBuffer;
   readonly hedge: PixelBuffer;
   readonly tables: readonly { readonly kind: RoomTable; readonly image: PixelBuffer }[];
-  readonly doors: readonly { readonly material: DoorMaterial; readonly image: PixelBuffer }[];
+  readonly doors: readonly { readonly material: DoorMaterial; readonly variant: DoorVariant; readonly image: PixelBuffer }[];
 }
 
 export function buildPackSheets(): PackSheets {
@@ -271,6 +273,6 @@ export function buildPackSheets(): PackSheets {
     bridge: bridgeSheet(),
     hedge: hedgeSheet(),
     tables: ROOM_TABLES.map((kind) => ({ kind, image: tableSheet(kind) })),
-    doors: DOOR_MATERIALS.map((material) => ({ material, image: doorSheet(material) })),
+    doors: DOOR_MATERIALS.flatMap((material) => DOOR_VARIANTS.map((variant) => ({ material, variant, image: doorSheet(material, variant) }))),
   };
 }
