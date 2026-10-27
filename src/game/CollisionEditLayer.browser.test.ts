@@ -93,6 +93,34 @@ describe('CollisionEditLayer', () => {
     ]);
   });
 
+  it('reaches the desk table under a chair with a second click on the same spot (#213)', async () => {
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    const info = (piece: string) => (piece.startsWith('desk-') ? { kind: 'desk' as const, footprint: { w: 3, h: 1 } } : { kind: 'chair' as const, footprint: { w: 1, h: 1 } });
+    const stacked = officeDecorInstances(
+      [
+        { index: 5 * 100 + 5, piece: 'desk-glass', rotation: 0 },
+        { index: 5 * 100 + 5, piece: 'chair-wood', rotation: 0 },
+      ],
+      info,
+      100,
+    );
+    new CollisionEditLayer(scene, bridge, { instances: () => stacked, table: () => new Map() });
+    const picked: string[] = [];
+    bridge.on('collisionpick', ({ pieceId }) => picked.push(pieceId));
+    const click = (): void => {
+      scene.input.emit('pointerdown', pointer(176, 176));
+      scene.input.emit('pointerup', pointer(176, 176, false));
+    };
+    bridge.emitCommand('collisionedit', { pieceId: null, draft: [], selectedRect: null, snap: 1 });
+
+    click();
+    bridge.emitCommand('collisionedit', { pieceId: 'chair-wood', draft: [], selectedRect: null, snap: 1 });
+    click();
+
+    expect(picked).toEqual(['chair-wood', 'desk-glass']);
+  });
+
   it('draws the draft over every instance of the piece and the rest faintly', async () => {
     const { bridge, layer } = await boot();
 

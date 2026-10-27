@@ -101,7 +101,7 @@ export function CollisionEditorSection({ bridge, collisions, onEditingChange, fo
       {debugToggle}
 
       {pieceId === null ? (
-        <span className={styles.hint}>Toca un objeto en el mapa para editar su colisión.</span>
+        <span className={styles.hint}>Toca un objeto en el mapa para editar su colisión. Si hay otro debajo, vuelve a tocar en el mismo sitio.</span>
       ) : (
         <>
           <span className={styles.piece}>{`${pieceId} · ${editor.saved ? 'personalizada' : 'por defecto'}`}</span>

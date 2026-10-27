@@ -367,4 +367,50 @@ describe('pieceCollisions: editing support', () => {
     expect(pickInstance(instances, NO_EDITS, { x: 5, y: 5 })?.piece).toBe('tree-oak');
     expect(pickInstance(instances, NO_EDITS, { x: 500, y: 5 })).toBeNull();
   });
+
+  it('reaches a desk table under its chair and plants by clicking the same spot again (#213)', () => {
+    // A desk table on tiles (4..6, 5) with a chair on its middle tile and a plant on each end.
+    const width = 20;
+    const instances = officeDecorInstances(
+      [
+        { index: 5 * width + 5, piece: 'desk-glass', rotation: 0 },
+        { index: 5 * width + 5, piece: 'chair-wood', rotation: 0 },
+        { index: 5 * width + 4, piece: 'plant-ficus', rotation: 0 },
+        { index: 5 * width + 6, piece: 'plant-ficus', rotation: 0 },
+      ],
+      infoOf,
+      width,
+    );
+    const middle = { x: 5 * 32 + 16, y: 5 * 32 + 16 };
+    const end = { x: 4 * 32 + 16, y: 5 * 32 + 16 };
+
+    const chair = pickInstance(instances, NO_EDITS, middle);
+    expect(chair?.piece).toBe('chair-wood');
+    const desk = pickInstance(instances, NO_EDITS, middle, chair);
+    expect(desk?.piece).toBe('desk-glass');
+    // Round again from the bottom one.
+    expect(pickInstance(instances, NO_EDITS, middle, desk)?.piece).toBe('chair-wood');
+
+    const plant = pickInstance(instances, NO_EDITS, end);
+    expect(plant?.piece).toBe('plant-ficus');
+    expect(pickInstance(instances, NO_EDITS, end, plant)?.piece).toBe('desk-glass');
+    // A current piece that is not under the point starts from the top again.
+    expect(pickInstance(instances, NO_EDITS, end, chair)?.piece).toBe('plant-ficus');
+  });
+
+  it('tells two instances of the same piece apart when cycling', () => {
+    const width = 20;
+    const instances = officeDecorInstances(
+      [
+        { index: 5 * width + 5, piece: 'desk-glass', rotation: 0 },
+        { index: 5 * width + 5, piece: 'chair-wood', rotation: 0 },
+        { index: 9 * width + 5, piece: 'chair-wood', rotation: 0 },
+      ],
+      infoOf,
+      width,
+    );
+    const otherChair = instances[2]!;
+    // A chair elsewhere is not the one under the point: the top one is picked.
+    expect(pickInstance(instances, NO_EDITS, { x: 176, y: 176 }, otherChair)?.pivot).toEqual({ x: 176, y: 176 });
+  });
 });
