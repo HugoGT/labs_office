@@ -49,11 +49,6 @@ export interface DashboardRouteProps {
  * duplicados con la barra lateral de la oficina (#74), que edita lo mismo
  * viendo el resultado en el mapa. `deskAdminClient.ts`/`spacesAdminClient.ts`
  * y sus puertos siguen vivos: `OfficeShell` los sigue usando para esa barra.
- *
- * El catalogo de decoracion tampoco tiene puerto aqui: migro al panel
- * "Personalizar" de la barra lateral (`OfficeSidebar.tsx`), junto a
- * escritorios y salas -- `AssetsPanel`/`assetAdminClient.ts` siguen vivos,
- * `OfficeShell` los construye y los pasa para ese panel.
  */
 interface DashboardPorts {
   admin: AdminPort;

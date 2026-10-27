@@ -2,10 +2,8 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { OfficeSession } from '../auth/authPort';
 import { createCharacterClient } from '../auth/characterClient';
 import type { CharacterPort } from '../auth/characterPort';
-import { createAssetAdminClient } from '../dashboard/assetAdminClient';
 import { createArtContributionClient } from '../dashboard/artContributionClient';
 import type { ArtContributionPort } from '../dashboard/artContributionPort';
-import type { AssetAdminPort } from '../dashboard/assetAdminPort';
 import { createDeskAdminClient } from '../dashboard/deskAdminClient';
 import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import { resolveOfficeApiBaseUrl } from '../dashboard/officeApiBaseUrl';
@@ -218,18 +216,7 @@ export function OfficeShell({
     return createCollisionAdminClient({ baseUrl: apiBaseUrl, getIdToken: () => session?.getIdToken() ?? Promise.resolve(null) });
   });
   /**
-   * Puerto del catalogo de decoracion, migrado desde `DashboardRoute.tsx` a
-   * "Personalizar" (sidebar). Mismo patron y mismo motivo que
-   * `deskAdminPort`/`spacesAdminPort`: construido UNA vez, o `AssetsPanel`
-   * reiniciaria su lectura en bucle en cada render.
-   */
-  const [assetsAdminPort] = useState<AssetAdminPort | null>(() => {
-    const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
-    if (apiBaseUrl === null) return null;
-    return createAssetAdminClient({ baseUrl: apiBaseUrl, getIdToken: () => session?.getIdToken() ?? Promise.resolve(null) });
-  });
-  /**
-   * Art contributions (#122): same pattern as `assetsAdminPort`, for anyone
+   * Art contributions (#122): same pattern as `collisionAdminPort`, for anyone
    * signed in. Without a session there is nobody to credit or limit.
    */
   const [contributionsPort] = useState<ArtContributionPort | null>(() => {
@@ -839,7 +826,6 @@ export function OfficeShell({
           terrain={terrainAdminPort}
           collisions={collisionAdminPort}
           decor={decorAdminPort}
-          assets={assetsAdminPort}
           contributions={contributionsPort}
           character={characterPort}
           refreshDesks={refreshDesks}
