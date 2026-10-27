@@ -455,6 +455,20 @@ export function toPieceRect(instance: CollisionInstance, rect: CollisionRect): C
 }
 
 /**
+ * A piece-space rectangle as the editor panel shows it for an instance turned
+ * `rotation`: X and width horizontal on the map, Y and height vertical
+ * (#218). It is still measured from the anchor.
+ */
+export function rectInView(rect: CollisionRect, rotation: CollisionRotation): CollisionRect {
+  return rotateRect(rect, rotation);
+}
+
+/** A rectangle of the editor panel back in piece space, where it is saved for every orientation. */
+export function rectFromView(rect: CollisionRect, rotation: CollisionRotation): CollisionRect {
+  return rotateRect(rect, inverse(rotation));
+}
+
+/**
  * What the editor starts from for the piece of `instance`: its saved
  * rectangles, or the instance's defaults turned back into piece space.
  */

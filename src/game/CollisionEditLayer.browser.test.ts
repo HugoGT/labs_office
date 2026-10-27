@@ -89,7 +89,7 @@ describe('CollisionEditLayer', () => {
     scene.input.emit('pointerup', pointer(80, 80, false));
 
     expect(picks).toEqual([
-      { pieceId: 'tree-oak', rects: [{ x: -16, y: -32, w: 32, h: 32 }], saved: false, defaults: [{ x: -16, y: -32, w: 32, h: 32 }] },
+      { pieceId: 'tree-oak', rotation: 0, rects: [{ x: -16, y: -32, w: 32, h: 32 }], saved: false, defaults: [{ x: -16, y: -32, w: 32, h: 32 }] },
     ]);
   });
 

@@ -3,7 +3,15 @@ import { describeAdminError } from '../dashboard/adminErrors';
 import type { CollisionAdminPort } from '../dashboard/collisionAdminPort';
 import { newRectToward, type CollisionSnap } from '../game/collisionEditor';
 import type { OfficeBridge } from '../game/officeBridge';
-import { InvalidCollisionRectsError, MAX_COLLISION_RECTS, parseCollisionRects, type CollisionRect } from '../game/pieceCollisions';
+import {
+  InvalidCollisionRectsError,
+  MAX_COLLISION_RECTS,
+  parseCollisionRects,
+  rectFromView,
+  rectInView,
+  type CollisionRect,
+  type CollisionRotation,
+} from '../game/pieceCollisions';
 import { useEscapeStep } from './useEscapeStep';
 
 /**
@@ -26,6 +34,11 @@ export type RectField = keyof CollisionRect;
 export interface CollisionEditor {
   active: boolean;
   pieceId: string | null;
+  /**
+   * The draft as the panel shows it: turned like the clicked instance, so X
+   * and width are horizontal on the map (#218). The map and the server get it
+   * in piece space.
+   */
   rects: readonly CollisionRect[];
   selectedRect: number | null;
   /** Whether the piece has saved rectangles, rather than its default. */
@@ -42,7 +55,7 @@ export interface CollisionEditor {
   selectRect(index: number | null): void;
   addRect(): void;
   deleteRect(index: number): void;
-  /** A hand edit of one number; a value the server would refuse is ignored. */
+  /** A hand edit of one number, as the panel shows it; a value the server would refuse is ignored. */
   updateRect(index: number, field: RectField, value: number): void;
   setSnap(snap: CollisionSnap): void;
   setShowAll(show: boolean): void;
@@ -57,6 +70,8 @@ interface Piece {
   baseline: readonly CollisionRect[];
   defaults: readonly CollisionRect[];
   saved: boolean;
+  /** How the clicked instance is turned: the panel's numbers follow it. */
+  rotation: CollisionRotation;
 }
 
 function sameRects(a: readonly CollisionRect[], b: readonly CollisionRect[]): boolean {
@@ -96,8 +111,8 @@ export function useCollisionEditor({ bridge, collisions }: UseCollisionEditorOpt
 
   useEffect(() => {
     if (!active) return undefined;
-    const offPick = bridge.on('collisionpick', ({ pieceId, rects: current, saved, defaults }) => {
-      setPiece({ id: pieceId, baseline: current, defaults, saved });
+    const offPick = bridge.on('collisionpick', ({ pieceId, rotation, rects: current, saved, defaults }) => {
+      setPiece({ id: pieceId, baseline: current, defaults, saved, rotation });
       setRects(current);
       setSelectedRect(null);
       clearMessages();
@@ -175,10 +190,12 @@ export function useCollisionEditor({ bridge, collisions }: UseCollisionEditorOpt
     }
   }
 
+  const rotation = piece?.rotation ?? 0;
+
   return {
     active,
     pieceId,
-    rects,
+    rects: rects.map((rect) => rectInView(rect, rotation)),
     selectedRect,
     saved: piece?.saved ?? false,
     dirty,
@@ -212,7 +229,8 @@ export function useCollisionEditor({ bridge, collisions }: UseCollisionEditorOpt
     updateRect(index, field, value) {
       const rect = rects[index];
       if (rect === undefined) return;
-      const next = rects.map((candidate, candidateIndex) => (candidateIndex === index ? { ...candidate, [field]: value } : candidate));
+      const edited = rectFromView({ ...rectInView(rect, rotation), [field]: value }, rotation);
+      const next = rects.map((candidate, candidateIndex) => (candidateIndex === index ? edited : candidate));
       if (valid(next)) edit(next, index);
     },
     setSnap(next) {

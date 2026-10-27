@@ -27,6 +27,8 @@ import {
   pieceIdOfTextureKey,
   pieceRectsOf,
   officeDecorInstances,
+  rectFromView,
+  rectInView,
   rotateRect,
   rotationForFacing,
   seatInstances,
@@ -412,5 +414,32 @@ describe('pieceCollisions: editing support', () => {
     const otherChair = instances[2]!;
     // A chair elsewhere is not the one under the point: the top one is picked.
     expect(pickInstance(instances, NO_EDITS, { x: 176, y: 176 }, otherChair)?.pivot).toEqual({ x: 176, y: 176 });
+  });
+});
+
+describe('pieceCollisions: the editor panel reads rectangles as the map shows them (#218)', () => {
+  const piece = { x: -10, y: -20, w: 30, h: 8 };
+
+  it('keeps a piece that is not turned as it is', () => {
+    expect(rectInView(piece, 0)).toEqual(piece);
+    expect(rectFromView(piece, 0)).toEqual(piece);
+  });
+
+  it.each([90, 270] as const)('at %i, a larger X moves the rectangle right on the map and a larger width widens it', (rotation) => {
+    const [instance] = seatInstances([{ tx: 10, ty: 10, facing: rotation === 90 ? 'right' : 'left' }], 'chair-wood');
+    const world = (rect: CollisionRect) => worldRectsOf(instance!, new Map([['chair-wood', [rect]]]))[0]!;
+    const view = rectInView(piece, rotation);
+    // The panel shows the rectangle as the map does.
+    expect({ w: view.w, h: view.h }).toEqual({ w: world(piece).w, h: world(piece).h });
+
+    const right = rectFromView({ ...view, x: view.x + 1 }, rotation);
+    expect(world(right)).toEqual({ ...world(piece), x: world(piece).x + 1 });
+    const lower = rectFromView({ ...view, y: view.y + 1 }, rotation);
+    expect(world(lower)).toEqual({ ...world(piece), y: world(piece).y + 1 });
+    const wider = rectFromView({ ...view, w: view.w + 2 }, rotation);
+    expect(world(wider)).toEqual({ ...world(piece), w: world(piece).w + 2 });
+    const taller = rectFromView({ ...view, h: view.h + 2 }, rotation);
+    expect(world(taller)).toEqual({ ...world(piece), h: world(piece).h + 2 });
+    expect(rectFromView(view, rotation)).toEqual(piece);
   });
 });

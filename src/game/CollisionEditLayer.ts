@@ -248,6 +248,6 @@ export class CollisionEditLayer {
     if (instance === null) return;
     this.primary = instance;
     const { rects, saved } = pieceRectsOf(instance, table);
-    this.bridge.emit('collisionpick', { pieceId: instance.piece, rects, saved, defaults: pieceRectsOf(instance, new Map()).rects });
+    this.bridge.emit('collisionpick', { pieceId: instance.piece, rotation: instance.rotation, rects, saved, defaults: pieceRectsOf(instance, new Map()).rects });
   }
 }

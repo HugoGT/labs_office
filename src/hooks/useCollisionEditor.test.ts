@@ -28,7 +28,7 @@ function setup(collisions: CollisionAdminPort = port()) {
 }
 
 function pickTree(bridge: ReturnType<typeof createOfficeBridge>, saved = false) {
-  act(() => bridge.emit('collisionpick', { pieceId: 'tree-oak', rects: FOOTPRINT, saved, defaults: FOOTPRINT }));
+  act(() => bridge.emit('collisionpick', { pieceId: 'tree-oak', rotation: 0, rects: FOOTPRINT, saved, defaults: FOOTPRINT }));
 }
 
 describe('useCollisionEditor', () => {
@@ -85,6 +85,36 @@ describe('useCollisionEditor', () => {
     expect(commands.at(-1)).toEqual({ pieceId: 'tree-oak', draft: [{ x: 4, y: 0, w: 16, h: 16 }], selectedRect: null, snap: 2 });
   });
 
+  it.each([
+    { rotation: 90 as const, shown: { x: 12, y: -10, w: 8, h: 30 }, right: { x: -10, y: -21, w: 30, h: 8 }, wider: { x: -10, y: -22, w: 30, h: 10 } },
+    { rotation: 270 as const, shown: { x: -20, y: -20, w: 8, h: 30 }, right: { x: -10, y: -19, w: 30, h: 8 }, wider: { x: -10, y: -20, w: 30, h: 10 } },
+  ])('shows and edits a piece turned $rotation as the map shows it, and keeps the draft in piece space (#218)', ({ rotation, shown, right, wider }) => {
+    const piece = { x: -10, y: -20, w: 30, h: 8 };
+    const { bridge, result, commands } = setup();
+    act(() => result.current.enter());
+    act(() => bridge.emit('collisionpick', { pieceId: 'chair-wood', rotation, rects: [piece], saved: true, defaults: [] }));
+    expect(result.current.rects).toEqual([shown]);
+
+    act(() => result.current.updateRect(0, 'x', shown.x + 1));
+    expect(commands.at(-1)?.draft).toEqual([right]);
+    expect(result.current.rects).toEqual([{ ...shown, x: shown.x + 1 }]);
+
+    act(() => result.current.cancel());
+    act(() => result.current.updateRect(0, 'w', shown.w + 2));
+    expect(commands.at(-1)?.draft).toEqual([wider]);
+    expect(result.current.rects).toEqual([{ ...shown, w: shown.w + 2 }]);
+  });
+
+  it('shows a piece that is not turned exactly as it is stored', () => {
+    const { bridge, result, commands } = setup();
+    act(() => result.current.enter());
+    pickTree(bridge);
+    expect(result.current.rects).toEqual(FOOTPRINT);
+
+    act(() => result.current.updateRect(0, 'x', -15));
+    expect(commands.at(-1)?.draft).toEqual([{ ...FOOTPRINT[0], x: -15 }]);
+  });
+
   it('ignores a hand edit that the server would refuse, and stops adding at the cap', () => {
     const { bridge, result } = setup();
     act(() => result.current.enter());
@@ -115,7 +145,7 @@ describe('useCollisionEditor', () => {
   it('cancels back to the baseline, and restores the default through the server', async () => {
     const { bridge, result, collisions } = setup();
     act(() => result.current.enter());
-    act(() => bridge.emit('collisionpick', { pieceId: 'tree-oak', rects: [], saved: true, defaults: FOOTPRINT }));
+    act(() => bridge.emit('collisionpick', { pieceId: 'tree-oak', rotation: 0, rects: [], saved: true, defaults: FOOTPRINT }));
     act(() => bridge.emit('collisiondraft', { rects: [{ x: 0, y: 0, w: 4, h: 4 }], selectedRect: 0 }));
 
     act(() => result.current.cancel());
