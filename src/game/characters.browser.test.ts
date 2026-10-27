@@ -21,7 +21,7 @@ import {
   spawnPlayer,
 } from './characters';
 import { avatarDepth, chairLayerDepth, worldAssetDepth } from './depthLayers';
-import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H } from './mapData';
+import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE } from './mapData';
 import { DEFAULT_NAME, DEFAULT_STATUS } from './officeProtocol';
 import { STATUS_COLOR } from './presence';
 import { collisionWorld, isPositionBlocked, layoutPropInstances } from './pieceCollisions';
@@ -153,15 +153,16 @@ describe('setCharacterStatus', () => {
   });
 });
 
-describe('makeCharacter: render band (#70)', () => {
-  it('is born in the avatar band, above any normal asset, y-sorted by its feet', async () => {
+describe('makeCharacter: depth (#213)', () => {
+  it('is born y-sorted with the world by its feet', async () => {
     const depths = await withScene((scene) => ({
       top: makeCharacter(scene, 'Arriba', 5, 1, 'av1', DEFAULT_STATUS).depth,
       bottom: makeCharacter(scene, 'Abajo', 5, 40, 'av2', DEFAULT_STATUS).depth,
     }));
 
     expect(depths.top).toBe(avatarDepth(feetOf({ x: 0, y: 1 * TILE + 16 }).y));
-    expect(depths.top).toBeGreaterThan(worldAssetDepth(WORLD_H));
+    // An asset whose bottom edge is south of its feet covers it.
+    expect(depths.top).toBeLessThan(worldAssetDepth(3 * TILE));
     expect(depths.bottom).toBeGreaterThan(depths.top);
   });
 });

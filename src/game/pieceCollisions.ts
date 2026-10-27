@@ -455,6 +455,20 @@ export function toPieceRect(instance: CollisionInstance, rect: CollisionRect): C
 }
 
 /**
+ * A piece-space rectangle as the editor panel shows it for an instance turned
+ * `rotation`: X and width horizontal on the map, Y and height vertical
+ * (#218). It is still measured from the anchor.
+ */
+export function rectInView(rect: CollisionRect, rotation: CollisionRotation): CollisionRect {
+  return rotateRect(rect, rotation);
+}
+
+/** A rectangle of the editor panel back in piece space, where it is saved for every orientation. */
+export function rectFromView(rect: CollisionRect, rotation: CollisionRotation): CollisionRect {
+  return rotateRect(rect, inverse(rotation));
+}
+
+/**
  * What the editor starts from for the piece of `instance`: its saved
  * rectangles, or the instance's defaults turned back into piece space.
  */
@@ -464,22 +478,32 @@ export function pieceRectsOf(instance: CollisionInstance, table: CollisionTable)
   return { rects: worldRectsOf(instance, table).map((rect) => toPieceRect(instance, rect)), saved: false };
 }
 
+function sameInstance(a: CollisionInstance, b: CollisionInstance): boolean {
+  return a.piece === b.piece && a.pivot.x === b.pivot.x && a.pivot.y === b.pivot.y;
+}
+
 /**
  * The instance under a point, by its pick box or one of its rectangles. The
  * smallest hit wins, so a decor plant is picked over the desk it stands on.
+ * Decor stacks freely, so a desk table can lie under a chair and plants on
+ * every tile (#213): clicking again where `current` is picked goes one step
+ * down the stack, and back to the top after the last.
  */
-export function pickInstance(instances: readonly CollisionInstance[], table: CollisionTable, point: CollisionPoint): CollisionInstance | null {
-  let best: CollisionInstance | null = null;
-  let bestArea = Number.POSITIVE_INFINITY;
+export function pickInstance(
+  instances: readonly CollisionInstance[],
+  table: CollisionTable,
+  point: CollisionPoint,
+  current: CollisionInstance | null = null,
+): CollisionInstance | null {
+  const stack: { instance: CollisionInstance; area: number }[] = [];
   for (const instance of instances) {
-    const hits = [instance.pickBox, ...worldRectsOf(instance, table)].filter((rect) => containsPoint(rect, point.x, point.y));
-    for (const rect of hits) {
-      const area = rect.w * rect.h;
-      if (area < bestArea) {
-        best = instance;
-        bestArea = area;
-      }
-    }
+    const areas = [instance.pickBox, ...worldRectsOf(instance, table)]
+      .filter((rect) => containsPoint(rect, point.x, point.y))
+      .map((rect) => rect.w * rect.h);
+    if (areas.length > 0) stack.push({ instance, area: Math.min(...areas) });
   }
-  return best;
+  // Stable: equal areas keep the instances' order, as the first hit used to win.
+  stack.sort((a, b) => a.area - b.area);
+  const below = current === null ? -1 : stack.findIndex(({ instance }) => sameInstance(instance, current));
+  return stack[(below + 1) % Math.max(stack.length, 1)]?.instance ?? null;
 }

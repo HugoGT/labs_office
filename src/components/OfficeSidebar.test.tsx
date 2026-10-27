@@ -668,7 +668,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     await user.click(toggle);
     await user.click(screen.getByRole('button', { name: 'Editar colisiones' }));
     await screen.findByText(/Toca un objeto en el mapa/);
-    act(() => props.bridge.emit('collisionpick', { pieceId: 'tree-oak', rects: [], saved: false, defaults: [] }));
+    act(() => props.bridge.emit('collisionpick', { pieceId: 'tree-oak', rotation: 0, rects: [], saved: false, defaults: [] }));
     expect(screen.getByText('tree-oak · por defecto')).toBeInTheDocument();
 
     await user.keyboard('{Escape}');

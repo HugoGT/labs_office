@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  AVATAR_BAND_BASE,
-  BAND_SPAN,
   LAYOUT_GHOST_DEPTH,
   LAYOUT_OUTLINE_DEPTH,
   MINIMAP_MARKER_DEPTH,
@@ -14,24 +12,30 @@ import {
 } from './depthLayers';
 import { TILE, WORLD_H } from './mapData';
 
-describe('depthLayers: render bands (#70, #71)', () => {
-  it('each band is wide enough for the whole map height, so no band overflows into the next', () => {
-    expect(WORLD_H).toBeLessThan(BAND_SPAN);
-    expect(worldAssetDepth(WORLD_H)).toBeLessThan(AVATAR_BAND_BASE);
-    // Nothing drawn in the world sits over a walking avatar: the decor layer (#208) has no "above avatars" band.
-    expect(avatarDepth(WORLD_H)).toBeLessThan(MINIMAP_MARKER_DEPTH);
+describe('depthLayers: one y-sorted world (#70, #213)', () => {
+  it('keeps every y-sorted thing under the overlays', () => {
+    expect(avatarDepth(WORLD_H)).toBeLessThan(SPACE_SHADE_DEPTH);
+    expect(worldAssetDepth(WORLD_H)).toBeLessThan(SPACE_SHADE_DEPTH);
   });
 
-  it('keeps y-sorting inside each band', () => {
+  it('y-sorts avatars among themselves and assets among themselves', () => {
     expect(worldAssetDepth(100)).toBeLessThan(worldAssetDepth(200));
     expect(avatarDepth(100)).toBeLessThan(avatarDepth(200));
   });
 
-  it('a normal asset at the bottom of the map is still below an avatar at the top (#70)', () => {
-    expect(worldAssetDepth(WORLD_H)).toBeLessThan(avatarDepth(0));
+  it('a desk in front of a walking avatar covers it, and one behind it does not (#213)', () => {
+    // A desk table facing down sorts by a point 6px south of its middle tile's center.
+    const deskDepthY = 400 + 6;
+    expect(avatarDepth(deskDepthY - 1)).toBeLessThan(worldAssetDepth(deskDepthY));
+    expect(avatarDepth(deskDepthY + 1)).toBeGreaterThan(worldAssetDepth(deskDepthY));
   });
 
-  it('clamps out-of-range y so a stray coordinate cannot jump into another band', () => {
+  it('an avatar standing on the bottom edge of an asset is drawn over it', () => {
+    expect(avatarDepth(300)).toBeGreaterThan(worldAssetDepth(300));
+    expect(avatarDepth(300)).toBeLessThan(worldAssetDepth(301));
+  });
+
+  it('clamps out-of-range y so a stray coordinate cannot jump over the overlays', () => {
     expect(worldAssetDepth(-500)).toBe(worldAssetDepth(0));
     expect(avatarDepth(WORLD_H * 10)).toBe(avatarDepth(WORLD_H));
     expect(avatarDepth(Number.POSITIVE_INFINITY)).toBe(avatarDepth(WORLD_H));
@@ -70,8 +74,11 @@ describe('depthLayers: chairs and sitters (art migration, step 6)', () => {
     expect(chairLayerDepth(400, 'front')).toBeLessThan(worldAssetDepth(401));
   });
 
-  it('walking avatars stay above every seated one (#70)', () => {
-    expect(seatedAvatarDepth(WORLD_H)).toBeLessThan(avatarDepth(0));
+  it('a walking avatar on the ground of a chair passes over its sitter and its front layer', () => {
+    expect(avatarDepth(400)).toBeGreaterThan(chairLayerDepth(400, 'front'));
+    expect(avatarDepth(400)).toBeGreaterThan(seatedAvatarDepth(400));
+    // Behind the chair, the sitter covers it.
+    expect(avatarDepth(399)).toBeLessThan(seatedAvatarDepth(400));
   });
 
   it('desk zones are floor markers, under the chair and sitter of any desk', () => {

@@ -22,7 +22,7 @@ import type { DecorEditCommand } from './decorEditor';
 import type { DecorItem } from './officeDecor';
 import type { DoorLockNotice } from './officeDoors';
 import type { CollisionEditCommand } from './collisionEditor';
-import type { CollisionRect } from './pieceCollisions';
+import type { CollisionRect, CollisionRotation } from './pieceCollisions';
 import type { ActiveRecordingSnapshot, OfficeConnectionState } from './officeRoomClient';
 import type { ZoomAction, ZoomView } from './mapZoom';
 
@@ -230,9 +230,10 @@ export interface OfficeEventMap {
   /**
    * The collision editor is open and someone clicked a placed piece: its id,
    * the rectangles it collides with now (saved, or its default turned into
-   * piece space) and its default, for "Restablecer".
+   * piece space) and its default, for "Restablecer", plus how the clicked
+   * instance is turned, so the panel shows its numbers as the map does (#218).
    */
-  collisionpick: { pieceId: string; rects: readonly CollisionRect[]; saved: boolean; defaults: readonly CollisionRect[] };
+  collisionpick: { pieceId: string; rotation: CollisionRotation; rects: readonly CollisionRect[]; saved: boolean; defaults: readonly CollisionRect[] };
   /** A rectangle was drawn, moved or resized on the map: the whole new draft, and the rectangle it touched. */
   collisiondraft: { rects: readonly CollisionRect[]; selectedRect: number | null };
   /**

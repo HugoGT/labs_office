@@ -1,41 +1,32 @@
 /**
- * Render bands of the office scene (#70, #71): the single owner of every
+ * Depths of the office scene (#70, #71, #213): the single owner of every
  * Phaser depth that decides who covers whom in the world.
  *
- * Phaser draws by `depth`, so "players always above normal assets" is
- * expressed as two stacked bands, each `BAND_SPAN` wide:
+ * The world is one y-sorted band: ground, furniture, trees, walls, the office
+ * decor layer and the avatars, each by its bottom edge (an avatar by its
+ * feet). A desk or a tree in front of someone covers them, and a chair still
+ * covers the table behind it. Every avatar decoration (ring, name pill,
+ * status dot) is a child of the avatar container, so it rides the
+ * container's depth for free.
  *
- *   - world band   [0, BAND_SPAN): ground, furniture, trees, desk zones and
- *     the office decor layer. Y-sorted by the object's bottom edge, so a chair
- *     still covers the table behind it.
- *   - avatar band  [AVATAR_BAND_BASE, ...): local player and remote peers.
- *     Y-sorted by the feet, so two overlapping avatars still read right. Every
- *     avatar decoration (ring, name pill, status dot) is a child of the avatar
- *     container, so it rides the container's depth for free.
+ * #70 once gave walking avatars their own band above the world, so no
+ * furniture ever covered them; #213 dropped it because someone walking behind
+ * a desk was drawn over it. Only seated avatars sorted with the furniture
+ * before.
  *
- * A third band once held desk decor flagged `aboveAvatars` (#71). The office
- * decor layer (#208) draws art pieces, which carry no such flag, so nothing
- * covers a walking avatar any more and that band is gone.
+ * HUD overlays (shade, minimap marker, editor ghosts) sit above the world.
  *
- * HUD overlays (minimap marker, editor ghosts) sit above both.
- *
- * Every y is clamped to the map height before it is added to its band base.
- * `depthLayers.test.ts` pins `WORLD_H < BAND_SPAN`, so the clamp is what makes
- * it impossible for an out-of-range coordinate (a stale peer snapshot, a
- * tween overshoot) to leak into the band above.
+ * Every y is clamped to the map height, so an out-of-range coordinate (a
+ * stale peer snapshot, a tween overshoot) can never reach the overlays.
  */
 
 import { WORLD_H } from './mapData';
 
-/** Width of one band in world pixels. Must stay above `WORLD_H` (see the test). */
-export const BAND_SPAN = 10_000;
-
 const WORLD_BAND_BASE = 0;
-export const AVATAR_BAND_BASE = WORLD_BAND_BASE + BAND_SPAN;
 
 /**
  * Shade over everything outside the local player's space (`spaceFocus.ts`):
- * above both bands, so peers out there step back too, and under the HUD.
+ * above the world, so peers out there step back too, and under the HUD.
  */
 export const SPACE_SHADE_DEPTH = 90_000;
 /**
@@ -58,23 +49,22 @@ export function worldAssetDepth(bottomY: number): number {
   return WORLD_BAND_BASE + clampY(bottomY);
 }
 
-/** Depth of an avatar whose feet are at `y` (world px). */
-export function avatarDepth(y: number): number {
-  return AVATAR_BAND_BASE + clampY(y);
-}
-
 /**
- * A seated avatar leaves the avatar band and y-sorts with the furniture by
- * its feet, which stand on the chair ground (art migration, step 6): the desk
- * or table in front of it then covers its legs, as the pack art expects.
- * Walking avatars stay in their band above it, so the #70 rule holds for
- * whoever moves.
- *
- * Inside the world band the chair's two layers wrap it: back, sitter, front,
- * all on the same ground point.
+ * Avatars y-sort with the furniture by their feet. A seated one stands on the
+ * chair ground (art migration, step 6), so the desk or table in front of it
+ * covers its legs, as the pack art expects, and the chair's two layers wrap
+ * it: back, sitter, front, all on the same ground point. Someone walking on
+ * that same point passes over all three, and over any asset whose bottom
+ * edge is under their feet.
  */
-const CHAIR_FRONT_BIAS = 0.5;
 const SEATED_BIAS = 0.25;
+const CHAIR_FRONT_BIAS = 0.5;
+const WALKING_BIAS = 0.75;
+
+/** Depth of a walking avatar whose feet are at `y` (world px). */
+export function avatarDepth(y: number): number {
+  return worldAssetDepth(y) + WALKING_BIAS;
+}
 
 export function chairLayerDepth(groundY: number, layer: 'back' | 'front'): number {
   return worldAssetDepth(groundY) + (layer === 'front' ? CHAIR_FRONT_BIAS : 0);

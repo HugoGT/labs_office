@@ -27,6 +27,8 @@ import {
   pieceIdOfTextureKey,
   pieceRectsOf,
   officeDecorInstances,
+  rectFromView,
+  rectInView,
   rotateRect,
   rotationForFacing,
   seatInstances,
@@ -366,5 +368,78 @@ describe('pieceCollisions: editing support', () => {
     expect(pickInstance(instances, NO_EDITS, { x: 48, y: 48 })?.piece).toBe('plant-ficus');
     expect(pickInstance(instances, NO_EDITS, { x: 5, y: 5 })?.piece).toBe('tree-oak');
     expect(pickInstance(instances, NO_EDITS, { x: 500, y: 5 })).toBeNull();
+  });
+
+  it('reaches a desk table under its chair and plants by clicking the same spot again (#213)', () => {
+    // A desk table on tiles (4..6, 5) with a chair on its middle tile and a plant on each end.
+    const width = 20;
+    const instances = officeDecorInstances(
+      [
+        { index: 5 * width + 5, piece: 'desk-glass', rotation: 0 },
+        { index: 5 * width + 5, piece: 'chair-wood', rotation: 0 },
+        { index: 5 * width + 4, piece: 'plant-ficus', rotation: 0 },
+        { index: 5 * width + 6, piece: 'plant-ficus', rotation: 0 },
+      ],
+      infoOf,
+      width,
+    );
+    const middle = { x: 5 * 32 + 16, y: 5 * 32 + 16 };
+    const end = { x: 4 * 32 + 16, y: 5 * 32 + 16 };
+
+    const chair = pickInstance(instances, NO_EDITS, middle);
+    expect(chair?.piece).toBe('chair-wood');
+    const desk = pickInstance(instances, NO_EDITS, middle, chair);
+    expect(desk?.piece).toBe('desk-glass');
+    // Round again from the bottom one.
+    expect(pickInstance(instances, NO_EDITS, middle, desk)?.piece).toBe('chair-wood');
+
+    const plant = pickInstance(instances, NO_EDITS, end);
+    expect(plant?.piece).toBe('plant-ficus');
+    expect(pickInstance(instances, NO_EDITS, end, plant)?.piece).toBe('desk-glass');
+    // A current piece that is not under the point starts from the top again.
+    expect(pickInstance(instances, NO_EDITS, end, chair)?.piece).toBe('plant-ficus');
+  });
+
+  it('tells two instances of the same piece apart when cycling', () => {
+    const width = 20;
+    const instances = officeDecorInstances(
+      [
+        { index: 5 * width + 5, piece: 'desk-glass', rotation: 0 },
+        { index: 5 * width + 5, piece: 'chair-wood', rotation: 0 },
+        { index: 9 * width + 5, piece: 'chair-wood', rotation: 0 },
+      ],
+      infoOf,
+      width,
+    );
+    const otherChair = instances[2]!;
+    // A chair elsewhere is not the one under the point: the top one is picked.
+    expect(pickInstance(instances, NO_EDITS, { x: 176, y: 176 }, otherChair)?.pivot).toEqual({ x: 176, y: 176 });
+  });
+});
+
+describe('pieceCollisions: the editor panel reads rectangles as the map shows them (#218)', () => {
+  const piece = { x: -10, y: -20, w: 30, h: 8 };
+
+  it('keeps a piece that is not turned as it is', () => {
+    expect(rectInView(piece, 0)).toEqual(piece);
+    expect(rectFromView(piece, 0)).toEqual(piece);
+  });
+
+  it.each([90, 270] as const)('at %i, a larger X moves the rectangle right on the map and a larger width widens it', (rotation) => {
+    const [instance] = seatInstances([{ tx: 10, ty: 10, facing: rotation === 90 ? 'right' : 'left' }], 'chair-wood');
+    const world = (rect: CollisionRect) => worldRectsOf(instance!, new Map([['chair-wood', [rect]]]))[0]!;
+    const view = rectInView(piece, rotation);
+    // The panel shows the rectangle as the map does.
+    expect({ w: view.w, h: view.h }).toEqual({ w: world(piece).w, h: world(piece).h });
+
+    const right = rectFromView({ ...view, x: view.x + 1 }, rotation);
+    expect(world(right)).toEqual({ ...world(piece), x: world(piece).x + 1 });
+    const lower = rectFromView({ ...view, y: view.y + 1 }, rotation);
+    expect(world(lower)).toEqual({ ...world(piece), y: world(piece).y + 1 });
+    const wider = rectFromView({ ...view, w: view.w + 2 }, rotation);
+    expect(world(wider)).toEqual({ ...world(piece), w: world(piece).w + 2 });
+    const taller = rectFromView({ ...view, h: view.h + 2 }, rotation);
+    expect(world(taller)).toEqual({ ...world(piece), h: world(piece).h + 2 });
+    expect(rectFromView(view, rotation)).toEqual(piece);
   });
 });

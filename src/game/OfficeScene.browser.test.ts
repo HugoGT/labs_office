@@ -25,7 +25,7 @@ import {
   chairLayerDepth,
   worldAssetDepth,
 } from './depthLayers';
-import { feetOf, physicalBodyRect } from './avatarGeometry';
+import { feetOf, physicalBodyRect, positionForFeet } from './avatarGeometry';
 import { BODY_CENTER_OFFSET, positionForBodyTile } from './pathfinding';
 import { chairSeatId, mapSeatId } from './seating';
 import { deskZoneName } from './deskLayout';
@@ -3723,22 +3723,32 @@ describe('OfficeScene: render layers (#70, #71)', () => {
     return Math.max(...objects.map(depthOf));
   }
 
-  it('the local player covers every normal asset, even standing north of it (#70)', async () => {
+  /** Whether `depth` sorts between the world objects drawn behind feet at `feetY` and those drawn in front of them. */
+  function sortsAtFeet(scene: Phaser.Scene, depth: number, feetY: number): void {
+    const world = normalWorldObjects(scene);
+    const behind = world.filter((object) => depthOf(object) <= worldAssetDepth(feetY));
+    const inFront = world.filter((object) => depthOf(object) >= worldAssetDepth(feetY + 1));
+    expect(behind.length).toBeGreaterThan(0);
+    expect(inFront.length).toBeGreaterThan(0);
+    expect(depth).toBeGreaterThan(maxDepth(behind));
+    expect(depth).toBeLessThan(Math.min(...inFront.map(depthOf)));
+  }
+
+  it('the local player y-sorts with the world: assets south of its feet cover it, the rest do not (#213)', async () => {
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge);
     bridge.emitCommand('desks', { desks: [renderDesk()] });
     const player = findPlayer(scene);
 
-    // Near the top of the map: with plain y-sorting almost every tree, desk
-    // and chair has a larger bottom edge and would be drawn over the player.
+    // Near the top of the map: almost every tree, desk and chair has a larger
+    // bottom edge and is drawn over the player (#70 kept it above them all).
     player.setPosition(player.x, 3 * TILE + 16);
 
-    await vi.waitFor(() => {
-      expect(player.depth).toBeGreaterThan(maxDepth(normalWorldObjects(scene)));
-    }, LOOP_WAIT);
+    await vi.waitFor(() => expect(player.depth).toBe(avatarDepth(feetOf(player).y)), LOOP_WAIT);
+    sortsAtFeet(scene, player.depth, feetOf(player).y);
   });
 
-  it('a remote peer covers every normal asset too (#70)', async () => {
+  it('a remote peer y-sorts with the world too, from its creation (#213)', async () => {
     const connector = fakeConnector();
     const bridge = createOfficeBridge();
     const { scene } = await bootOfficeScene(bridge, {
@@ -3751,9 +3761,9 @@ describe('OfficeScene: render layers (#70, #71)', () => {
     const remote = findRemoteAvatars(scene)[0];
 
     // Right after creation, before any `update()` re-sorts it.
-    expect(remote.depth).toBeGreaterThan(maxDepth(normalWorldObjects(scene)));
+    sortsAtFeet(scene, remote.depth, feetOf(remote).y);
     await advanceGameClock(scene, 100);
-    expect(remote.depth).toBeGreaterThan(maxDepth(normalWorldObjects(scene)));
+    sortsAtFeet(scene, remote.depth, feetOf(remote).y);
   });
 
 });
@@ -5174,6 +5184,26 @@ describe('OfficeScene: piece collisions', () => {
     bridge.emitCommand('collisionedit', null);
     scene.input.emit('pointerdown', { worldX: treeTile.x, worldY: treeTile.y, isDown: true, event: { stopPropagation() {} } }, []);
     expect(events).toEqual(['pick:tree-oak', 'closemenu']);
+  });
+
+  it('a desk table in front of a walking avatar covers it, and one behind it does not (#213)', async () => {
+    const { scene, handlers } = await bootConnected();
+    handlers.onDecor!([{ index: lawnChair.index, piece: 'desk-glass', rotation: 0 }]);
+    const player = findPlayer(scene);
+    const body = player.body as Phaser.Physics.Arcade.Body;
+    await vi.waitFor(() => expect((scene.children.getByName(decorObjectName(lawnChair.index)) as Phaser.GameObjects.Image | null)?.texture.key).toBe(artSheetKey('desk-glass', 'sheet')), LOOP_WAIT);
+    const desk = () => scene.children.getByName(decorObjectName(lawnChair.index)) as Phaser.GameObjects.Image;
+
+    const behind = positionForFeet({ x: deskMiddle.x, y: deskMiddle.y - 20 });
+    body.reset(behind.x, behind.y);
+    await vi.waitFor(() => expect(player.depth).toBe(avatarDepth(feetOf(player).y)), LOOP_WAIT);
+    expect(player.depth).toBeLessThan(desk().depth);
+
+    const inFront = positionForFeet({ x: deskMiddle.x, y: deskMiddle.y + 24 });
+    body.reset(inFront.x, inFront.y);
+    await vi.waitFor(() => expect(feetOf(player).y).toBe(deskMiddle.y + 24), LOOP_WAIT);
+    await vi.waitFor(() => expect(player.depth).toBe(avatarDepth(feetOf(player).y)), LOOP_WAIT);
+    expect(player.depth).toBeGreaterThan(desk().depth);
   });
 
   it('keeps the tile helpers off a tile a rectangle touches', async () => {

@@ -237,13 +237,17 @@ export class CollisionEditLayer {
     this.pick({ x: pointer.worldX, y: pointer.worldY });
   }
 
-  /** A click on the map: the piece under it becomes the one edited, in the space of this instance. */
+  /**
+   * A click on the map: the piece under it becomes the one edited, in the
+   * space of this instance. A click on the one already picked reaches the
+   * piece under it (#213).
+   */
   private pick(point: CollisionPoint): void {
     const table = this.source.table();
-    const instance = pickInstance(this.source.instances(), table, point);
+    const instance = pickInstance(this.source.instances(), table, point, this.primary);
     if (instance === null) return;
     this.primary = instance;
     const { rects, saved } = pieceRectsOf(instance, table);
-    this.bridge.emit('collisionpick', { pieceId: instance.piece, rects, saved, defaults: pieceRectsOf(instance, new Map()).rects });
+    this.bridge.emit('collisionpick', { pieceId: instance.piece, rotation: instance.rotation, rects, saved, defaults: pieceRectsOf(instance, new Map()).rects });
   }
 }

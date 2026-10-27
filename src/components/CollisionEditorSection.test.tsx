@@ -20,7 +20,7 @@ function renderSection(overrides: Partial<Parameters<typeof CollisionEditorSecti
 
 async function openOnTree(bridge: ReturnType<typeof createOfficeBridge>, saved = false) {
   await userEvent.click(screen.getByRole('button', { name: 'Editar colisiones' }));
-  act(() => bridge.emit('collisionpick', { pieceId: 'tree-oak', rects: saved ? [] : FOOTPRINT, saved, defaults: FOOTPRINT }));
+  act(() => bridge.emit('collisionpick', { pieceId: 'tree-oak', rotation: 0, rects: saved ? [] : FOOTPRINT, saved, defaults: FOOTPRINT }));
 }
 
 describe('CollisionEditorSection', () => {
