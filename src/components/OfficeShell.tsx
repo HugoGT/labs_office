@@ -18,7 +18,7 @@ import type { CollisionAdminPort } from '../dashboard/collisionAdminPort';
 import { ART_PACK_MANIFEST_URL, artUploadsManifestUrl } from '../game/artPack';
 import { resolveLivekitConfig } from '../game/livekitEndpoint';
 import { decorEditHidesRail, terrainEditHoldsMap } from '../game/editorMapHold';
-import { TILE } from '../game/mapData';
+import { TILE, type SpaceArea } from '../game/mapData';
 import { createOfficeDecorClient } from '../game/officeDecorClient';
 import type { DecorTileRect } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
@@ -114,6 +114,11 @@ export interface OfficeShellProps {
 /** A desk in tiles: desks are served in world pixels, the decor layer counts tiles. */
 function deskTiles(desk: Pick<OfficeDesk, 'x' | 'y' | 'w' | 'h'>): DecorTileRect {
   return { x: Math.round(desk.x / TILE), y: Math.round(desk.y / TILE), w: Math.round(desk.w / TILE), h: Math.round(desk.h / TILE) };
+}
+
+/** A room in tiles: spaces are served in world pixels like desks. */
+function spaceTiles(space: Pick<SpaceArea, 'x' | 'y' | 'w' | 'h'>): DecorTileRect {
+  return { x: Math.round(space.x / TILE), y: Math.round(space.y / TILE), w: Math.round(space.w / TILE), h: Math.round(space.h / TILE) };
 }
 
 /** How toasts name a desk: its label, or "este escritorio" for one created empty (Editar espacios). */
@@ -364,6 +369,8 @@ export function OfficeShell({
   const myDesk = desks?.find((desk) => desk.mine) ?? null;
   /** Every desk in tiles, for the desk rules of "Decoración" (`deskDecorRules.ts`). */
   const deskAreas = useMemo(() => (desks ?? []).map(deskTiles), [desks]);
+  /** Every room in tiles, for the outlines of "Decoración" and "Editar terreno" (#216). */
+  const roomAreas = useMemo(() => (spacesConfig?.spaces ?? []).map(spaceTiles), [spacesConfig]);
 
   useEffect(() => {
     // `null` es "todavia no": mandar una lista vacia antes de tiempo pintaria
@@ -824,6 +831,7 @@ export function OfficeShell({
             onLeaveDesk: myDesk === null ? undefined : () => void leaveDesk(myDesk.label),
           }}
           deskAreas={deskAreas}
+          roomAreas={roomAreas}
           role={adminRole}
           bridge={bridge}
           desks={deskAdminPort}

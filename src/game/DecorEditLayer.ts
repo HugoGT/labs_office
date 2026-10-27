@@ -31,6 +31,7 @@ import { TILE } from './mapData';
 import { INITIAL_WHEEL_STATE, ROTATE_WHEEL_RULES, accumulateWheel, type WheelState } from './mapZoom';
 import type { OfficeBridge } from './officeBridge';
 import { decorFootprint, isRotatable, type DecorItem, type DecorPieceInfo, type DecorTileRect } from './officeDecor';
+import { ContextOutlines } from './spaceOutline';
 
 export const DECOR_HOVER_NAME = 'decor-edit:hover';
 export const DECOR_GHOST_NAME = 'decor-edit:ghost';
@@ -79,6 +80,7 @@ export class DecorEditLayer {
   private readonly deps: DecorEditLayerDeps;
   private readonly now: () => number;
   private command: DecorEditCommand | null = null;
+  private readonly outlines: ContextOutlines;
   private hover: Phaser.GameObjects.Rectangle | null = null;
   private ghost: Phaser.GameObjects.GameObject[] = [];
   /** The tile the ghost stands on, or `null` while the pointer is off the map. */
@@ -152,6 +154,7 @@ export class DecorEditLayer {
     this.scene = scene;
     this.bridge = bridge;
     this.deps = deps;
+    this.outlines = new ContextOutlines(scene);
     this.now = deps.now ?? (() => performance.now());
     this.unsubscribeCommand = bridge.onCommand('decoredit', (command) => this.applyCommand(command));
     scene.input.on('pointermove', this.onPointerMove);
@@ -211,6 +214,7 @@ export class DecorEditLayer {
   private applyCommand(command: DecorEditCommand | null): void {
     const redraw = !sameDecorBrush(command?.brush, this.command?.brush) || JSON.stringify(command?.area) !== JSON.stringify(this.command?.area);
     this.command = command;
+    this.outlines.show(command?.outlines);
     this.drawSelection();
     if (command === null) {
       this.clearGhost();

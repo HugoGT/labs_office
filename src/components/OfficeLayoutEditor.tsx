@@ -34,6 +34,8 @@ export interface OfficeLayoutEditorProps {
   decor?: OfficeDecorPort | null;
   /** Every desk area in tiles, for the desk rules of "Decoración" (`deskDecorRules.ts`). */
   deskAreas?: readonly DecorTileRect[];
+  /** Every room in tiles, outlined while editing the decor and the terrain (#216). */
+  roomAreas?: readonly DecorTileRect[];
   refreshDesks: () => void;
   refreshSpaces: () => void;
   onEditingChange?: (editing: boolean) => void;
@@ -52,7 +54,7 @@ export default function OfficeLayoutEditor(props: OfficeLayoutEditorProps) {
 }
 
 function LayoutEditorSections({
-  bridge, desks, spaces, terrain, collisions, decor, deskAreas, refreshDesks, refreshSpaces,
+  bridge, desks, spaces, terrain, collisions, decor, deskAreas, roomAreas, refreshDesks, refreshSpaces,
   onEditingChange, forceExit = false, section, onExit,
 }: OfficeLayoutEditorProps) {
   // Standalone consumers and "Editar espacios" arbitrate among their parts; the
@@ -101,7 +103,7 @@ function LayoutEditorSections({
   const parts = (
     <>
       {shown('decor') && decor !== undefined && decor !== null && (
-        <DecorEditorSection bridge={bridge} decor={decor} scope="office" area={null} desks={deskAreas} terrain={terrain}
+        <DecorEditorSection bridge={bridge} decor={decor} scope="office" area={null} desks={deskAreas} rooms={roomAreas} terrain={terrain}
           initiallyActive={section !== undefined} onExit={onExit}
           onEditingChange={(editing) => reportEditing('decor', editing)}
           forceExit={forced('decor')}
@@ -127,7 +129,7 @@ function LayoutEditorSections({
         />
       )}
       {shown('terrain') && terrain !== undefined && terrain !== null && (
-        <TerrainEditorSection bridge={bridge} terrain={terrain}
+        <TerrainEditorSection bridge={bridge} terrain={terrain} desks={deskAreas} rooms={roomAreas}
           initiallyActive={section !== undefined} onExit={onExit}
           onEditingChange={(editing) => reportEditing('terrain', editing)}
           forceExit={forced('terrain')}

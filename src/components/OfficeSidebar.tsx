@@ -96,6 +96,8 @@ export interface OfficeSidebarProps {
   mySpace?: MySpace;
   /** Every desk area in tiles, for the desk rules of "Decoración" (`deskDecorRules.ts`). */
   deskAreas?: readonly DecorTileRect[];
+  /** Every room area in tiles, outlined while an admin edits the decor or the terrain (#216). */
+  roomAreas?: readonly DecorTileRect[];
   /**
    * Rol de sesion (#74, PR3c), resuelto por `OfficeShell` via
    * `useOfficeAdminRole` y pasado por prop -- este componente sigue sin
@@ -165,6 +167,7 @@ export function OfficeSidebar({
   forceCollapsed = false,
   mySpace = NO_SPACE,
   deskAreas,
+  roomAreas,
   role = null,
   bridge,
   desks,
@@ -324,6 +327,7 @@ export function OfficeSidebar({
                 collisions={collisions}
                 decor={decor}
                 deskAreas={deskAreas}
+                roomAreas={roomAreas}
                 refreshDesks={refreshDesks}
                 refreshSpaces={refreshSpaces}
                 onEditingChange={onLayoutEditingChange}

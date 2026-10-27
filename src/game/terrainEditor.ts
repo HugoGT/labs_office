@@ -4,6 +4,8 @@
  */
 
 import type { LayoutMaterial, TerrainColors, WallEdit, WallPieceId } from './officeLayout';
+import type { DecorTileRect } from './officeDecor';
+import { tileAreaRect, type TileRect } from './terrainGrid';
 
 /**
  * What a map click paints: a floor on a whole 9x9 block, or a wall post on
@@ -41,6 +43,13 @@ export interface TerrainEditCommand {
   previewColors?: TerrainColors;
   /** Wall paints on their way to the room, applied in order over the live walls. Drawing only. */
   previewWalls?: readonly WallEdit[];
+  /** The outlines of every room and desk, drawn over the map like "Editar espacios" does (#216). A guide only. */
+  outlines?: readonly TileRect[];
+}
+
+/** The outlines "Editar terreno" draws (#216): every desk and room, so a block or a wall is not painted blind. */
+export function terrainOutlines(desks: readonly DecorTileRect[], rooms: readonly DecorTileRect[]): TileRect[] {
+  return [...desks, ...rooms].map(tileAreaRect);
 }
 
 /** A grid of square cells over the world, row major from the top-left one. */

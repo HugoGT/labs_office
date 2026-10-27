@@ -1,10 +1,12 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
+import { LAYOUT_OUTLINE_DEPTH } from './depthLayers';
 import { TILE } from './mapData';
 import { createOfficeBridge } from './officeBridge';
 import { BASE_LAYOUT } from './officeLayout';
 import { TERRAIN_HOVER_NAME, TerrainEditLayer } from './TerrainEditLayer';
+import { LAYOUT_OUTLINE_NAME, OUTLINE_STROKE_COLOR } from './spaceOutline';
 import type { TerrainBrush } from './terrainEditor';
 import type { LayoutMaterial, WallPieceId } from './officeLayout';
 
@@ -227,5 +229,43 @@ describe('TerrainEditLayer', () => {
     scene.input.emit('pointermove', pointerAt(2 * TILE + 3, TILE + 3));
     expect([hover.width, hover.height]).toEqual([9 * TILE, 9 * TILE]);
     expect([hover.x, hover.y]).toEqual([(9 * TILE) / 2, (9 * TILE) / 2]);
+  });
+});
+
+describe('TerrainEditLayer: space outlines (#216)', () => {
+  const outlines = [{ x0: 2, y0: 3, x1: 5, y1: 6 }, { x0: 20, y0: 5, x1: 28, y1: 13 }];
+  const drawnOutlines = (scene: Phaser.Scene) => scene.children.list.filter((child) => child.name === LAYOUT_OUTLINE_NAME) as Phaser.GameObjects.Rectangle[];
+
+  it('draws the command outlines as "Editar espacios" does, above the walls, with no brush picked, and takes them off with the command', async () => {
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    new TerrainEditLayer(scene, bridge, BASE_LAYOUT);
+
+    bridge.emitCommand('terrainedit', { brush: null, outlines });
+
+    const rects = drawnOutlines(scene);
+    expect(rects).toHaveLength(2);
+    for (const rect of rects) {
+      expect(rect.depth).toBe(LAYOUT_OUTLINE_DEPTH);
+      expect(rect.isStroked).toBe(true);
+      expect(rect.strokeColor).toBe(OUTLINE_STROKE_COLOR);
+      expect(rect.input).toBeNull();
+    }
+    expect(rects[1]!.getBounds()).toMatchObject({ x: 20 * TILE, y: 5 * TILE, width: 9 * TILE, height: 9 * TILE });
+
+    bridge.emitCommand('terrainedit', null);
+    expect(drawnOutlines(scene)).toEqual([]);
+  });
+
+  it('leaves the same outlines standing while a brush is picked and its preview repaints', async () => {
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    new TerrainEditLayer(scene, bridge, BASE_LAYOUT);
+
+    bridge.emitCommand('terrainedit', { brush: null, outlines });
+    const first = drawnOutlines(scene);
+    bridge.emitCommand('terrainedit', { brush: floor('grass'), previewBlocks: BASE_LAYOUT.blocks, outlines });
+
+    expect(drawnOutlines(scene)).toEqual(first);
   });
 });

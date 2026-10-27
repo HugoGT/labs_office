@@ -242,3 +242,19 @@ describe('WALL_UNDER_PLACEMENT_MESSAGE (#223)', () => {
     expect(WALL_UNDER_PLACEMENT_MESSAGE).not.toMatch(/cambia/);
   });
 });
+
+describe('useWallEditor: space outlines (#216)', () => {
+  it('keeps the outlines of "Decoración" on the map while a wall is picked, and takes them with it', () => {
+    const bridge = createOfficeBridge();
+    const commands: OfficeCommandMap['terrainedit'][] = [];
+    bridge.onCommand('terrainedit', (command) => commands.push(command));
+    const outlines = [{ x0: 2, y0: 3, x1: 5, y1: 6 }];
+    const { result } = renderHook(() => useWallEditor({ bridge, terrain: port(), outlines }));
+
+    act(() => result.current.pick('wall-brick'));
+    expect(commands.at(-1)).toEqual({ brush: { kind: 'wall', piece: 'wall-brick' }, outlines });
+
+    act(() => result.current.reset());
+    expect(commands.at(-1)).toBeNull();
+  });
+});

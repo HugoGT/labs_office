@@ -317,6 +317,7 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
  */
 describe('DecorEditorSection: Decoración for one desk', () => {
   const DESK = { x: 10, y: 10, w: 3, h: 3 };
+  const DESK_OUTLINE = { x0: 10, y0: 10, x1: 12, y1: 12 };
   const NO_DESK_TEXT = 'Reclama un escritorio libre en el mapa para decorarlo.';
 
   it('is open at once over the desk under the same header, offers only what fits it and no «Múltiple»', async () => {
@@ -328,7 +329,7 @@ describe('DecorEditorSection: Decoración for one desk', () => {
     expect(screen.queryByRole('button', { name: 'Mesa de reuniones' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Mesa ovalada' })).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /Múltiple/ })).not.toBeInTheDocument();
-    expect(commands.at(-1)).toEqual({ brush: null, area: DESK });
+    expect(commands.at(-1)).toEqual({ brush: null, area: DESK, outlines: [DESK_OUTLINE] });
   });
 
   it('places one piece per click and unpicks the brush', async () => {
@@ -383,7 +384,7 @@ describe('DecorEditorSection: Decoración for one desk', () => {
     const props = { bridge, decor, scope: 'desk' as const, loadMaterials: async () => catalog, preview: noPreview };
     rerender(<DecorEditorSection {...props} area={DESK} />);
     expect(await screen.findByRole('group', { name: 'Sillas' })).toBeInTheDocument();
-    expect(commands.at(-1)).toEqual({ brush: null, area: DESK });
+    expect(commands.at(-1)).toEqual({ brush: null, area: DESK, outlines: [DESK_OUTLINE] });
 
     rerender(<DecorEditorSection {...props} area={null} />);
     expect(commands.at(-1)).toBeNull();
@@ -409,6 +410,44 @@ describe('DecorEditorSection: Decoración for one desk', () => {
     const desks = [DESK, { x: 20, y: 10, w: 3, h: 3 }];
     const { commands } = renderSection({ scope: 'desk', area: DESK, desks });
     await screen.findByRole('group', { name: 'Sillas' });
-    expect(commands.at(-1)).toEqual({ brush: null, area: DESK, desks });
+    expect(commands.at(-1)).toEqual({ brush: null, area: DESK, desks, outlines: [DESK_OUTLINE] });
+  });
+});
+
+describe('DecorEditorSection: space outlines (#216)', () => {
+  const desks = [{ x: 2, y: 3, w: 4, h: 4 }, { x: 10, y: 3, w: 4, h: 4 }];
+  const rooms = [{ x: 20, y: 5, w: 9, h: 9 }];
+
+  it('asks the map to outline every desk and room for an admin', async () => {
+    const { commands } = renderSection({ initiallyActive: true, desks, rooms });
+    await screen.findByRole('group', { name: 'Sillas' });
+
+    expect(commands.at(-1)?.outlines).toEqual([
+      { x0: 2, y0: 3, x1: 5, y1: 6 },
+      { x0: 10, y0: 3, x1: 13, y1: 6 },
+      { x0: 20, y0: 5, x1: 28, y1: 13 },
+    ]);
+  });
+
+  it('asks the map to outline only the own desk for whoever decorates one', async () => {
+    const { commands } = renderSection({ scope: 'desk', area: desks[1]!, desks, rooms });
+    await screen.findByRole('group', { name: 'Sillas' });
+
+    expect(commands.at(-1)?.outlines).toEqual([{ x0: 10, y0: 3, x1: 13, y1: 6 }]);
+  });
+
+  it('does not change what can be placed: the area is the same with or without outlines', async () => {
+    const { commands } = renderSection({ initiallyActive: true, desks, rooms });
+    await screen.findByRole('group', { name: 'Sillas' });
+
+    expect(commands.at(-1)).toMatchObject({ area: null, desks });
+  });
+
+  it('takes the outlines down when the editor closes', async () => {
+    const { commands, rerender, ...props } = renderSection({ initiallyActive: true, desks, rooms });
+    await screen.findByRole('group', { name: 'Sillas' });
+
+    rerender(<DecorEditorSection bridge={props.bridge} decor={props.decor} scope="office" area={null} desks={desks} rooms={rooms} loadMaterials={async () => catalog} preview={noPreview} forceExit />);
+    expect(commands.at(-1)).toBeNull();
   });
 });

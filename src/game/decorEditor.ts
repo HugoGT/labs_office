@@ -27,6 +27,7 @@ import {
 } from './officeDecor';
 import { doorOnWall, wallTilesAfter } from './officeDoors';
 import type { GridEdge } from './artContract';
+import { tileAreaRect, type TileRect } from './terrainGrid';
 
 /**
  * What a map click does: anchor `piece` turned `rotation` (and painted
@@ -109,6 +110,12 @@ export interface DecorEditCommand {
   area: DecorTileRect | null;
   /** Every desk area in tiles, absent with none: the ghost turns red where a desk's chair limit refuses it. */
   desks?: readonly DecorTileRect[];
+  /**
+   * The outlines of the spaces this editor reaches, drawn over the map like
+   * "Editar espacios" does (#216): the person's desk, or every desk and room
+   * for an admin. A guide only, they change nothing about what can be placed.
+   */
+  outlines?: readonly TileRect[];
   /** Edits on their way to the room, applied in order over the live layer. Drawing only. */
   preview?: readonly DecorEdit[];
   /**
@@ -117,6 +124,19 @@ export interface DecorEditCommand {
    * `decordelete`).
    */
   selected?: number | null;
+}
+
+/**
+ * The outlines "Decoración" draws (#216): a person decorating their desk sees
+ * that one only (`area`), an admin (no `area`) every desk and room, which is
+ * where the desk rules and the rooms' furniture need telling apart.
+ */
+export function decorOutlines(
+  area: DecorTileRect | null,
+  desks: readonly DecorTileRect[],
+  rooms: readonly DecorTileRect[],
+): TileRect[] {
+  return (area === null ? [...desks, ...rooms] : [area]).map(tileAreaRect);
 }
 
 /**

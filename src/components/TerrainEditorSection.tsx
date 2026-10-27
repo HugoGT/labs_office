@@ -1,7 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import type { ArtPreviewCache } from '../game/artPreview';
 import type { OfficeBridge } from '../game/officeBridge';
+import type { DecorTileRect } from '../game/officeDecor';
+import { terrainOutlines } from '../game/terrainEditor';
 import { useMaterialCatalog, type LoadMaterials } from '../hooks/useMaterialCatalog';
 import { useTerrainEditor, type FloorBrush } from '../hooks/useTerrainEditor';
 import { TERRAIN_MATERIAL_LABELS, TerrainPalette } from './TerrainPalette';
@@ -24,6 +26,9 @@ function brushLabel(brush: FloorBrush): string {
 export interface TerrainEditorSectionProps {
   bridge: OfficeBridge;
   terrain: TerrainAdminPort;
+  /** Every desk and room area in tiles, outlined on the map while editing (#216); absent, none. */
+  desks?: readonly DecorTileRect[];
+  rooms?: readonly DecorTileRect[];
   /** Reports each closed/open change, like the other sections. */
   onEditingChange?: (editing: boolean) => void;
   /** A rising edge closes the editor: another editor took the map. */
@@ -41,6 +46,8 @@ export interface TerrainEditorSectionProps {
 export function TerrainEditorSection({
   bridge,
   terrain,
+  desks,
+  rooms,
   onEditingChange,
   forceExit = false,
   onRequestActive,
@@ -49,7 +56,8 @@ export function TerrainEditorSection({
   loadMaterials,
   preview,
 }: TerrainEditorSectionProps) {
-  const editor = useTerrainEditor({ bridge, terrain, onExit });
+  const outlines = useMemo(() => terrainOutlines(desks ?? [], rooms ?? []), [desks, rooms]);
+  const editor = useTerrainEditor({ bridge, terrain, onExit, outlines });
   const catalog = useMaterialCatalog(loadMaterials);
 
   useEffect(() => {

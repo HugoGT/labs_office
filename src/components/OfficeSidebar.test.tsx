@@ -527,7 +527,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Decoración' }));
 
-    expect(commands.at(-1)).toEqual({ brush: null, area, desks: deskAreas });
+    expect(commands.at(-1)).toEqual({ brush: null, area, desks: deskAreas, outlines: [{ x0: 10, y0: 12, x1: 12, y1: 14 }] });
     // Desk clicks stay claims and releases: this editor does not hold the desks.
     expect(onLayoutEditingChange).not.toHaveBeenCalledWith(true);
     await userEvent.click(screen.getByRole('button', { name: 'Dejar escritorio' }));

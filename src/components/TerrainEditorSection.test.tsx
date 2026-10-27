@@ -200,3 +200,29 @@ describe('TerrainEditorSection', () => {
     expect(terrain.setBlock).toHaveBeenLastCalledWith(LAWN + 1, 'carpet', '#3c6ac8');
   });
 });
+
+describe('TerrainEditorSection: space outlines (#216)', () => {
+  const desks = [{ x: 2, y: 3, w: 4, h: 4 }];
+  const rooms = [{ x: 20, y: 5, w: 9, h: 9 }];
+
+  it('asks the map to outline every desk and room while it is open, and to stop when it closes', async () => {
+    const { commands, rerender, bridge, terrain } = renderSection({ desks, rooms });
+    expect(commands).toEqual([]);
+
+    await open();
+    expect(commands.at(-1)?.outlines).toEqual([
+      { x0: 2, y0: 3, x1: 5, y1: 6 },
+      { x0: 20, y0: 5, x1: 28, y1: 13 },
+    ]);
+
+    rerender(<TerrainEditorSection bridge={bridge} terrain={terrain} desks={desks} rooms={rooms} loadMaterials={async () => catalog} preview={noPreview} forceExit />);
+    expect(commands.at(-1)).toBeNull();
+  });
+
+  it('sends no outlines when it knows no desk or room', async () => {
+    const { commands } = renderSection();
+    await open();
+
+    expect(commands.at(-1)).toEqual({ brush: null });
+  });
+});

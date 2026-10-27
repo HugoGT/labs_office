@@ -14,6 +14,7 @@ import {
   type TerrainColors,
 } from '../game/officeLayout';
 import { sameBrush, type TerrainBrush } from '../game/terrainEditor';
+import type { TileRect } from '../game/terrainGrid';
 
 /**
  * The terrain editor of the office sidebar (#123 phase 2): pick a floor in
@@ -46,6 +47,8 @@ export interface UseTerrainEditorOptions {
   terrain: TerrainAdminPort;
   /** The editor closed itself: an Escape with nothing picked, so the admin can walk and try the map. */
   onExit?: () => void;
+  /** The outlines of every room and desk the map draws while the editor is open (#216): a guide only. */
+  outlines?: readonly TileRect[];
 }
 
 export interface TerrainEditor {
@@ -91,7 +94,7 @@ function floorBrush(material: LayoutMaterial, color: string | undefined): FloorB
   return isColorableTerrainMaterial(material) && color !== undefined ? { kind: 'floor', material, color } : { kind: 'floor', material };
 }
 
-export function useTerrainEditor({ bridge, terrain, onExit }: UseTerrainEditorOptions): TerrainEditor {
+export function useTerrainEditor({ bridge, terrain, onExit, outlines }: UseTerrainEditorOptions): TerrainEditor {
   const [active, setActive] = useState(false);
   const [blocks, setBlocks] = useState<readonly LayoutMaterial[]>(BASE_LAYOUT.blocks);
   const [liveColors, setLiveColors] = useState<TerrainColors>(() => new Map());
@@ -214,6 +217,7 @@ export function useTerrainEditor({ bridge, terrain, onExit }: UseTerrainEditorOp
   const previewKey = [
     previewBlocks === null ? '' : encodeTerrainBlocks(previewBlocks),
     previewColors === null ? '' : encodeTerrainColors(previewColors),
+    JSON.stringify(outlines ?? []),
   ].join('|');
 
   useEffect(() => {
@@ -222,8 +226,9 @@ export function useTerrainEditor({ bridge, terrain, onExit }: UseTerrainEditorOp
       brush,
       ...(previewBlocks === null ? {} : { previewBlocks }),
       ...(previewColors === null ? {} : { previewColors }),
+      ...(outlines === undefined || outlines.length === 0 ? {} : { outlines }),
     });
-    // `previewKey` stands for both previews: only a different drawing is worth a command.
+    // `previewKey` stands for both previews and the outlines: only a different drawing is worth a command.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridge, active, brush, previewKey]);
 

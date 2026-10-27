@@ -46,6 +46,7 @@ import { collisionEditHoldsMap, decorEditHidesRail, decorEditHoldsMap, layoutEdi
 import { DecorEditLayer } from './DecorEditLayer';
 import { isEditableElementFocused } from './inputFocusGuard';
 import { LayoutEditLayer } from './LayoutEditLayer';
+import { LAYOUT_OUTLINE_NAME } from './spaceOutline';
 import {
   BASE_MAP_CHAIR,
   placeChairs,
@@ -543,6 +544,15 @@ export class OfficeScene extends Phaser.Scene {
     if (this.mapHeld) this.resetWalking();
   }
 
+  /**
+   * The editors draw their space outlines on the command (#216), before this
+   * runs: a few pixels wide, they are noise at minimap scale.
+   */
+  private ignoreOutlinesInMinimap(): void {
+    if (this.minimapCamera === undefined) return;
+    for (const child of this.children.list) if (child.name === LAYOUT_OUTLINE_NAME) this.minimapCamera.ignore(child);
+  }
+
   private readonly resetWalking = (): void => {
     this.autoSit = dropSitDwells(this.autoSit);
     this.walkingMs = 0;
@@ -776,6 +786,7 @@ export class OfficeScene extends Phaser.Scene {
       this.layoutCommandActive = command !== null;
       this.layoutHolds = layoutEditHoldsMap(command);
       this.syncEditing();
+      this.ignoreOutlinesInMinimap();
     });
 
     // #123 phase 2. The layer outlines and picks blocks; the scene paints the
@@ -787,6 +798,7 @@ export class OfficeScene extends Phaser.Scene {
       this.terrainHolds = terrainEditHoldsMap(command);
       // The DOM rail hides with it (`OfficeShell`), and `syncEditing` hides the minimap.
       this.syncEditing();
+      this.ignoreOutlinesInMinimap();
       const previewBlocks = command?.previewBlocks ?? null;
       const previewColors = previewBlocks === null ? null : (command?.previewColors ?? null);
       const encodePreview = (blocks: readonly LayoutMaterial[] | null, colors: TerrainColors | null): string =>
@@ -818,6 +830,7 @@ export class OfficeScene extends Phaser.Scene {
       this.decorHolds = decorEditHoldsMap(command);
       this.decorHidesRail = decorEditHidesRail(command);
       this.syncEditing();
+      this.ignoreOutlinesInMinimap();
       const preview = command?.preview ?? null;
       const repaint = JSON.stringify(preview) !== JSON.stringify(this.decorPreview);
       this.decorPreview = preview;
