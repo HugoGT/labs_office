@@ -86,11 +86,11 @@ describe('parseArtPackManifest', () => {
 describe('parseArtPackManifest: doors (#223, #233)', () => {
   const doors = (): ArtPackManifest['pieces'] => pack().pieces.filter((piece) => piece.kind === 'door');
 
-  it('reads the pack doors: a single door two tiles wide and a double door four, each with its variant and anchor', () => {
+  it('reads the pack doors: a single door two tiles wide and a double door three, each with its variant and anchor', () => {
     expect(doors().map((piece) => piece.id)).toEqual(['door-wood', 'door-wood-double']);
     const [single, double] = doors();
-    expect(single).toMatchObject({ kind: 'door', name: 'Puerta de madera', variant: 'single', anchor: { x: 64, y: 64 }, footprint: { w: 2, h: 1 } });
-    expect(double).toMatchObject({ kind: 'door', name: 'Puerta doble de madera', variant: 'double', anchor: { x: 64, y: 64 }, footprint: { w: 4, h: 1 } });
+    expect(single).toMatchObject({ kind: 'door', name: 'Puerta simple', variant: 'single', anchor: { x: 64, y: 64 }, footprint: { w: 2, h: 1 } });
+    expect(double).toMatchObject({ kind: 'door', name: 'Puerta doble', variant: 'double', anchor: { x: 64, y: 64 }, footprint: { w: 3, h: 1 } });
   });
 
   it('drops a door without its anchor or footprint', () => {
@@ -110,11 +110,11 @@ describe('parseArtPackManifest: doors (#223, #233)', () => {
     const broken = [
       { ...single, id: 'door-no-variant', variant: undefined },
       { ...single, id: 'door-odd-variant', variant: 'triple' },
-      { ...single, id: 'door-wood-lone', variant: 'double', footprint: { w: 4, h: 1 } },
+      { ...single, id: 'door-wood-lone', variant: 'double', footprint: { w: 3, h: 1 } },
       { ...double, id: 'door-oak-double', variant: 'single' },
       { ...double, id: 'door-oak-narrow-double', footprint: { w: 2, h: 1 } },
       { ...single, id: 'door-narrow', footprint: { w: 1, h: 1 } },
-      { ...single, id: 'door-oak-wide', footprint: { w: 4, h: 1 } },
+      { ...single, id: 'door-oak-wide', footprint: { w: 3, h: 1 } },
     ];
 
     const parsed = parseArtPackManifest(withPieces([single, double, ...broken]));

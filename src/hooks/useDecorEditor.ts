@@ -23,7 +23,7 @@ import {
   type DecorTileRect,
 } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
-import { doorEndPosts, isDoorPiece } from '../game/officeDoors';
+import { doorPosts, isDoorPiece } from '../game/officeDoors';
 
 /**
  * The decor editor (#208) of "Decoración", in both its scopes (an admin, the
@@ -350,7 +350,7 @@ export function useDecorEditor({
   }
 
   function removeDoorsOn(post: number): boolean {
-    const on = (item: DecorItem): boolean => isDoorPiece(item.piece) && doorEndPosts(item, MAP_W).includes(post);
+    const on = (item: DecorItem): boolean => isDoorPiece(item.piece) && doorPosts(item, MAP_W).includes(post);
     const leaving = layerAfter().filter(on);
     if (leaving.length > 0 && !blockedRef.current) {
       setSelected(null);

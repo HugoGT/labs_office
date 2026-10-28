@@ -343,14 +343,14 @@ describe('findDecorConflict', () => {
     const door = (index: number, rotation: 0 | 90 | 180 | 270 = 0, piece = 'door-wood'): DecorItem => ({ index, piece, rotation });
     const doorInfo = (piece: string): DecorPieceInfo | null => {
       if (!piece.startsWith('door-')) return infoOf(piece);
-      return { kind: 'door', footprint: { w: piece === 'door-wood-double' ? 4 : 2, h: 1 } };
+      return { kind: 'door', footprint: { w: piece === 'door-wood-double' ? 3 : 2, h: 1 } };
     };
     const posts = (...at2: [number, number][]) => at2.map(([x, y]) => ({ index: at(x, y), piece: 'wall-brick' as 'wall-brick' | 'wall-plaster' | 'wall-glass' }));
     const snapshotOf = (edits: ReturnType<typeof posts>) => terrainSnapshot(BASE_LAYOUT, BASE_LAYOUT.blocks, withWalls(BASE_LAYOUT.walls, edits));
     const check = (after: DecorItem[], placed: number[], snapshot: ReturnType<typeof snapshotOf>) => findDecorConflict(after, new Set(placed), doorInfo, snapshot, STATIC);
     /** A post at each end of a 2 tile span (67, 22)..(69, 22) and of a 4 tile one (67, 22)..(71, 22): no wall between them. */
     const single = snapshotOf(posts([67, 22], [69, 22]));
-    const double = snapshotOf(posts([67, 22], [71, 22]));
+    const double = snapshotOf(posts([67, 22], [70, 22]));
 
     it('takes a door between two posts with no wall between them, whatever the side it opens to', () => {
       expect(check([door(free)], [free], single)).toBeNull();
@@ -361,9 +361,9 @@ describe('findDecorConflict', () => {
       expect(check([door(free, 270)], [free], vertical)).toBeNull();
     });
 
-    it('takes a double door between two posts four tiles apart, and a single one does not fit there', () => {
+    it('takes a double door between two posts three tiles apart, and a single one does not fit there', () => {
       expect(check([door(free, 0, 'door-wood-double')], [free], double)).toBeNull();
-      expect(check([door(free, 90, 'door-wood-double')], [free], snapshotOf(posts([67, 22], [67, 26])))).toBeNull();
+      expect(check([door(free, 90, 'door-wood-double')], [free], snapshotOf(posts([67, 22], [67, 25])))).toBeNull();
       expect(check([door(free)], [free], double)).toBe('placement');
       expect(check([door(free, 0, 'door-wood-double')], [free], single)).toBe('placement');
     });

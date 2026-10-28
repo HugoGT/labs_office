@@ -117,7 +117,7 @@ export function decorRotationFor(kind: DecorKind, rotation: DecorRotation): Deco
 /**
  * A chair is 1x1 and a desk table 3x1 whatever the manifest says (its art
  * states one footprint per facing). A door states its span along the wall
- * (2 tiles, or 4 for a double door, #233) and covers a tile on each side of
+ * (2 tiles, or 3 for a double door, #233) and covers a tile on each side of
  * it (`decorFootprint`).
  */
 const FIXED_FOOTPRINTS: Partial<Record<DecorKind, { w: number; h: number }>> = {

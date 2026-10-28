@@ -841,7 +841,7 @@ export const DOOR: DoorSpec = {
   leafThickness: 6,
   variants: {
     single: { span: 2, leafLength: 44, jamb: 10 },
-    double: { span: 4, leafLength: 102, jamb: 13 },
+    double: { span: 3, leafLength: 70, jamb: 13 },
   },
 };
 
@@ -850,9 +850,21 @@ export function doorVariantOf(piece: string): DoorVariant {
   return piece.endsWith('-double') ? 'double' : 'single';
 }
 
-/** How many tiles of a wall's line a door piece spans (2 or 4). */
+/** How many tiles of a wall's line a door piece spans (2 or 3). */
 export function doorSpanOf(piece: string): number {
   return DOOR.variants[doorVariantOf(piece)].span;
+}
+
+/**
+ * The end of its span a door hinges at (#233). A double door always hinges
+ * its leaves at the outer ends, so it reports `start`. A single door turns as
+ * a whole with its rotation, going round clockwise from hinged at the west end
+ * and opening down (0): left (270) hinges it at the north end, up (180) at the
+ * east end and right (90) at the south end. Which side it swings to when
+ * opened is up to whoever opens it (`openDoorLeaves`).
+ */
+export function doorHingeOf(piece: string, rotation: 0 | 90 | 180 | 270): DoorHinge {
+  return doorVariantOf(piece) === 'single' && (rotation === 90 || rotation === 180) ? 'end' : 'start';
 }
 
 /**
@@ -901,6 +913,30 @@ export function doorDepthY(edge: GridEdge, piece: string, rotation: 0 | 90 | 180
   }
   const lowest = Math.max(...leaves.map(({ from, length, atStart }) => (atStart ? from + length * Math.cos(angle) : from + length)));
   return edge.row * ART_TILE + lowest + half * Math.sin(angle);
+}
+
+/**
+ * A door frame cut in three along its span (#233): the leaf, which sorts by its
+ * lowest pixel (`doorDepthY`), and the two jambs, which merge with the wall's
+ * posts at the ends and sort just under their joints, so a wall is always
+ * drawn over the door, whatever its swing. Crops are in frame pixels.
+ */
+export function doorSlices(edge: GridEdge, piece: string): { readonly leaf: Rect; readonly jambs: readonly { readonly crop: Rect; readonly depthY: number }[] } {
+  const { span, jamb } = DOOR.variants[doorVariantOf(piece)];
+  const horizontal = edge.axis === 'horizontal';
+  const length = span * ART_TILE;
+  const start = (horizontal ? DOOR.anchor.x : DOOR.anchor.y) - length / 2;
+  // `along` cuts the frame across the span from `from` for `size` pixels, whole the other way.
+  const along = (from: number, size: number): Rect =>
+    horizontal ? { x: from, y: 0, width: size, height: DOOR.frame.height } : { x: 0, y: from, width: DOOR.frame.width, height: size };
+  const joint = (vertex: GridVertex): number => wallJointRect(vertex).y + WALL.jointSize - 1;
+  return {
+    leaf: along(start + jamb, length - 2 * jamb),
+    jambs: [
+      { crop: along(start, jamb), depthY: joint(edge) },
+      { crop: along(start + length - jamb, jamb), depthY: joint(horizontal ? { col: edge.col + span, row: edge.row } : { col: edge.col, row: edge.row + span }) },
+    ],
+  };
 }
 
 export function bridgeFrameIndex(orientation: BridgeOrientation): number {
@@ -1235,7 +1271,7 @@ export type ArtPropPiece = ArtTreePiece | ArtPlantPiece | ArtTablePiece | ArtHed
  * A door of the decor layer (#223): one sheet of `DOOR` frames. It stands on
  * a wall's line, never on a tile, so it states its anchor (the middle of its
  * span in its frame) and the tiles of wall it fills along the line: 2 for a
- * single door, 4 for a double one (#233, `doorSpanOf`).
+ * single door, 3 for a double one (#233, `doorSpanOf`).
  */
 export interface ArtDoorPiece extends ArtPieceBase {
   readonly kind: 'door';

@@ -45,9 +45,9 @@ export interface UseWallEditorOptions {
   /** The admin port the walls are painted through; `null` (no admin, no terrain store), nothing can be picked. */
   terrain: TerrainAdminPort | null;
   /**
-   * The eraser on a post (#232): takes off the doors standing on it and says
-   * whether any does, in which case the post stays. Without it the eraser
-   * only erases posts.
+   * The eraser on a post (#232, #233): takes off the doors whose span holds it,
+   * at an end or in the middle, and says whether any does, in which case the
+   * post stays. Without it the eraser only erases posts.
    */
   eraseDoors?: (post: number) => boolean;
   /** The outlines the map draws while a wall is picked (#216), the ones "Decoración" draws: a guide only. */
