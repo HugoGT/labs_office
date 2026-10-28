@@ -2366,11 +2366,14 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
-   * The desk button: the closest free chair of the own desk by route length,
-   * walked to with the same planner as a double click, and asked for on
-   * arrival. The goal is a tile of the chair's reach ring, since the planner
-   * refuses a goal the body does not fit on and a chair collides. Without a
-   * free chair it walks into the desk area, like `walkToPeer` into a space.
+   * The desk button (#250): the center tile of the own desk, where its chair
+   * usually stands. A free chair on that tile is walked to with the same
+   * planner as a double click and asked for on arrival; the goal is a tile of
+   * the chair's reach ring, since the planner refuses a goal the body does not
+   * fit on and a chair collides. Chairs elsewhere on the desk are not picked:
+   * with several, the nearest one could sit the walker at the desk's edge or
+   * past it. Without a chair there it walks to the center tile itself, or
+   * next to it when the tile is blocked, like `walkToPeer` into a space.
    */
   private walkToOwnDesk(): void {
     if (!this.localPositionReady) return;
@@ -2385,36 +2388,41 @@ export class OfficeScene extends Phaser.Scene {
         .map((item) => chairSeatId(item.index)),
     );
     if (this.seat !== null && onDesk.has(this.seat.id)) return;
-    const chairs = this.freeSeats().filter((seat) => onDesk.has(seat.id));
+    const center = { tx: area.x + Math.floor(area.w / 2), ty: area.y + Math.floor(area.h / 2) };
+    const centerTile = { x: center.tx, y: center.ty, w: 1, h: 1 };
+    const onCenter = new Set(
+      this.officeDecor
+        .filter((item) => isDecorChairPiece(item.piece) && isOnDesk(item, infoOf(item.piece), centerTile, width))
+        .map((item) => chairSeatId(item.index)),
+    );
+    const chair = this.freeSeats().find((seat) => onCenter.has(seat.id));
 
-    const inReach = chairs.find((seat) => inSeatReach(this.player, seat.reach));
-    if (inReach !== undefined) {
-      this.resetWalking();
-      this.requestSeat(inReach);
-      return;
-    }
-
-    let best: { seat: ResolvedSeat; goal: { x: number; y: number }; length: number } | null = null;
-    const world = this.walkWorld();
-    for (const seat of chairs) {
-      for (let ty = seat.reach.y0 - SEAT_REACH_TILES; ty <= seat.reach.y1 + SEAT_REACH_TILES; ty++) {
-        for (let tx = seat.reach.x0 - SEAT_REACH_TILES; tx <= seat.reach.x1 + SEAT_REACH_TILES; tx++) {
+    if (chair !== undefined) {
+      if (inSeatReach(this.player, chair.reach)) {
+        this.resetWalking();
+        this.requestSeat(chair);
+        return;
+      }
+      let best: { goal: { x: number; y: number }; length: number } | null = null;
+      const world = this.walkWorld();
+      for (let ty = chair.reach.y0 - SEAT_REACH_TILES; ty <= chair.reach.y1 + SEAT_REACH_TILES; ty++) {
+        for (let tx = chair.reach.x0 - SEAT_REACH_TILES; tx <= chair.reach.x1 + SEAT_REACH_TILES; tx++) {
           const goal = positionForBodyTile({ tx, ty });
-          if (!inSeatReach(goal, seat.reach)) continue;
+          if (!inSeatReach(goal, chair.reach)) continue;
           const route = planWalk(world, this.player, goal);
           if (route === null) continue;
           const length = routeLength(this.player, route);
-          if (best === null || length < best.length) best = { seat, goal, length };
+          if (best === null || length < best.length) best = { goal, length };
         }
       }
-    }
-    if (best !== null) {
-      if (this.startWalk(best.goal)) this.seatAfterWalk = best.seat.id;
-      return;
+      if (best !== null) {
+        if (this.startWalk(best.goal)) this.seatAfterWalk = chair.id;
+        return;
+      }
     }
 
+    if (this.startWalk(positionForBodyTile(center))) return;
     const deskTiles: TileRect = { x0: area.x, y0: area.y, x1: area.x + area.w - 1, y1: area.y + area.h - 1 };
-    const center = { tx: area.x + Math.floor(area.w / 2), ty: area.y + Math.floor(area.h / 2) };
     const destination = pickApproachTile(this.grid, bodyTileOf(this.player), center, deskTiles);
     if (destination) this.startWalk(positionForBodyTile(destination));
   }
