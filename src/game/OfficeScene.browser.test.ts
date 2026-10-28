@@ -11,7 +11,7 @@ import {
   TILE,
   ZONE_LABELS,
 } from './mapData';
-import { DOOR, DOOR_STEPS, TERRAIN_LAYER_COUNT, doorDepthY, doorFrameIndex } from './artContract';
+import { DOOR, DOOR_STEPS, TERRAIN_LAYER_COUNT, doorFrameIndex, doorLeafDepthYs } from './artContract';
 import { DOOR_HOLD_MS } from './officeDoors';
 import { terrainSnapshot, wallColliderRects, withBlock, withWalls, type OfficeLayout } from './officeLayout';
 import { CHAIR_OBJECT_NAME, WALL_OBJECT_NAME } from './mapBuilder';
@@ -5109,7 +5109,7 @@ describe('OfficeScene: edited terrain', () => {
     const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
     await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
     const edge = { col: lawnVertex.x / TILE, row: lawnVertex.y / TILE, axis: 'horizontal' } as const;
-    const depthAt = (step: number) => worldAssetDepth(doorDepthY(edge, 'door-wood', 0, 'start', step));
+    const depthAt = (step: number) => worldAssetDepth(doorLeafDepthYs(edge, 'door-wood', 0, 'start', step)[0]);
     // Shut, it sorts by its closed leaf.
     expect(leaf().depth).toBeCloseTo(depthAt(0));
 
@@ -5183,8 +5183,33 @@ describe('OfficeScene: edited terrain', () => {
 
     const edge = { col: lawnVertex.x / TILE, row: lawnVertex.y / TILE, axis: 'vertical' } as const;
     // The leaf hangs from the hinge at the north end: it sorts there, well above the avatar's feet, so the avatar is drawn over it.
-    expect(leaf().depth).toBeCloseTo(worldAssetDepth(doorDepthY(edge, 'door-wood', 90, 'start', DOOR_STEPS - 1)));
+    expect(leaf().depth).toBeCloseTo(worldAssetDepth(doorLeafDepthYs(edge, 'door-wood', 90, 'start', DOOR_STEPS - 1)[0]));
     expect(leaf().depth).toBeLessThan(player.depth);
+  });
+
+  it('sorts the two leaves of a vertical double door apart, so the north one never covers an avatar standing below it', async () => {
+    const { scene, handlers } = await bootConnected();
+    // A vertical double door of 3 tiles on the line through the lawn vertex: its posts at the vertex and three rows below.
+    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 3 * BASE_LAYOUT.width].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
+    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood-double', rotation: 270 }]);
+    const leaves = () => scene.children.list.filter((child) => child.name === decorObjectName(lawnTile)) as Phaser.GameObjects.Image[];
+    await vi.waitFor(() => expect(leaves().map((leaf) => leaf.texture.key)).toEqual([artSheetKey('door-wood-double', 'sheet'), artSheetKey('door-wood-double', 'sheet')]), LOOP_WAIT);
+    const player = findPlayer(scene);
+    const body = player.body as Phaser.Physics.Arcade.Body;
+    const south = lawnVertex.y + 40;
+
+    // Comes from the west, so both leaves swing east; then stands in the doorway just below the north leaf.
+    body.reset(lawnVertex.x - TILE / 2, south - 11);
+    await vi.waitFor(() => expect(Number(leaves()[0].frame.name)).toBe(doorFrameIndex(90, 'start', DOOR_STEPS - 1)), LOOP_WAIT);
+    body.reset(lawnVertex.x + TILE / 2, south - 11);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const edge = { col: lawnVertex.x / TILE, row: lawnVertex.y / TILE, axis: 'vertical' } as const;
+    const [north, southLeaf] = doorLeafDepthYs(edge, 'door-wood-double', 90, 'start', DOOR_STEPS - 1).map(worldAssetDepth);
+    expect(leaves().map((leaf) => leaf.depth)).toEqual([north, southLeaf]);
+    // The north leaf hangs from its hinge above the avatar's feet; the south one, from the far end of the span, below them.
+    expect(leaves()[0].depth).toBeLessThan(player.depth);
+    expect(leaves()[1].depth).toBeGreaterThan(player.depth);
   });
 
   it('never bars a door: the body and the path walk through it, open or shut (#223, #233)', async () => {

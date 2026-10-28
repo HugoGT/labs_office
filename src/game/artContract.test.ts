@@ -12,7 +12,7 @@ import {
   DOOR_HINGES,
   DOOR_VARIANTS,
   DOOR_STEPS,
-  doorDepthY,
+  doorLeafDepthYs,
   doorFrameIndex,
   doorHingeOf,
   doorSpanOf,
@@ -790,39 +790,53 @@ describe('doors (#223, #233)', () => {
     }
   });
 
-  it('cuts a door frame into its leaf and the two jambs, each jamb sorted just under the post joint it merges with', () => {
+  it('cuts a door frame into its leaves and the two jambs, each jamb sorted just under the post joint it merges with', () => {
     // A single door on the horizontal edge at (4, 6): the span runs from frame x 32 to 96, the jambs are 10px.
     const horizontal = doorSlices({ col: 4, row: 6, axis: 'horizontal' }, 'door-wood');
-    expect(horizontal.leaf).toEqual({ x: 42, y: 0, width: 44, height: 128 });
+    expect(horizontal.leaves).toEqual([{ x: 42, y: 0, width: 44, height: 128 }]);
     expect(horizontal.jambs).toEqual([
       { crop: { x: 32, y: 0, width: 10, height: 128 }, depthY: 6 * 32 + 7 },
       { crop: { x: 86, y: 0, width: 10, height: 128 }, depthY: 6 * 32 + 7 },
     ]);
     // A double door down the vertical edge at (4, 6), 3 tiles: the end jamb sorts under the joint three rows down, not the first one.
     const vertical = doorSlices({ col: 4, row: 6, axis: 'vertical' }, 'door-wood-double');
-    expect(vertical.leaf).toEqual({ x: 0, y: 29, width: 128, height: 70 });
+    // Its two leaves are cut apart at the middle of the span, so each sorts on its own.
+    expect(vertical.leaves).toEqual([
+      { x: 0, y: 29, width: 128, height: 35 },
+      { x: 0, y: 64, width: 128, height: 35 },
+    ]);
     expect(vertical.jambs).toEqual([
       { crop: { x: 0, y: 16, width: 128, height: 13 }, depthY: 6 * 32 + 7 },
       { crop: { x: 0, y: 99, width: 128, height: 13 }, depthY: 9 * 32 + 7 },
     ]);
   });
 
-  it('sorts a door by the lowest pixel its leaf draws in each frame, so an avatar below the leaf stands in front of it', () => {
+  it('sorts each leaf of a door by the lowest pixel it draws in each frame, so an avatar below the leaf stands in front of it', () => {
     const horizontal = { col: 4, row: 6, axis: 'horizontal' } as const;
     const vertical = { col: 4, row: 6, axis: 'vertical' } as const;
     // Horizontal, opening down: the leaf lies on the edge, then swings its whole length below it.
-    expect(doorDepthY(horizontal, 'door-wood', 0, 'start', 0)).toBeCloseTo(6 * 32 + 3);
-    expect(doorDepthY(horizontal, 'door-wood', 0, 'start', 1)).toBeCloseTo(6 * 32 + 44 * Math.sin(Math.PI / 6) + 3);
-    expect(doorDepthY(horizontal, 'door-wood', 0, 'start', 3)).toBeCloseTo(6 * 32 + 44 + 3);
+    expect(doorLeafDepthYs(horizontal, 'door-wood', 0, 'start', 0)[0]).toBeCloseTo(6 * 32 + 3);
+    expect(doorLeafDepthYs(horizontal, 'door-wood', 0, 'start', 1)[0]).toBeCloseTo(6 * 32 + 44 * Math.sin(Math.PI / 6) + 3);
+    expect(doorLeafDepthYs(horizontal, 'door-wood', 0, 'start', 3)[0]).toBeCloseTo(6 * 32 + 44 + 3);
     // Opening up, the leaf never goes below the edge.
-    expect(doorDepthY(horizontal, 'door-wood', 180, 'start', 3)).toBeCloseTo(6 * 32 + 3);
+    expect(doorLeafDepthYs(horizontal, 'door-wood', 180, 'start', 3)[0]).toBeCloseTo(6 * 32 + 3);
     // Vertical, hinged at its north end: the leaf runs down the span when closed, and hangs from the hinge when open.
-    expect(doorDepthY(vertical, 'door-wood', 90, 'start', 0)).toBeCloseTo(6 * 32 + 10 + 44);
-    expect(doorDepthY(vertical, 'door-wood', 90, 'start', 3)).toBeCloseTo(6 * 32 + 10 + 3);
-    expect(doorDepthY(vertical, 'door-wood', 90, 'start', 2)).toBeCloseTo(6 * 32 + 10 + 44 * Math.cos(Math.PI / 3) + 3 * Math.sin(Math.PI / 3));
-    // A double door's second leaf hinges at the south end, so it keeps the depth near the end of the span.
-    expect(doorDepthY(vertical, 'door-wood-double', 90, 'start', 0)).toBeCloseTo(6 * 32 + 83);
-    expect(doorDepthY(vertical, 'door-wood-double', 90, 'start', 3)).toBeCloseTo(6 * 32 + 83 + 3);
+    expect(doorLeafDepthYs(vertical, 'door-wood', 90, 'start', 0)).toHaveLength(1);
+    expect(doorLeafDepthYs(vertical, 'door-wood', 90, 'start', 0)[0]).toBeCloseTo(6 * 32 + 10 + 44);
+    expect(doorLeafDepthYs(vertical, 'door-wood', 90, 'start', 3)[0]).toBeCloseTo(6 * 32 + 10 + 3);
+    expect(doorLeafDepthYs(vertical, 'door-wood', 90, 'start', 2)[0]).toBeCloseTo(6 * 32 + 10 + 44 * Math.cos(Math.PI / 3) + 3 * Math.sin(Math.PI / 3));
+    // A double door hinges its first leaf at the north end and its second at the south end: open, each sorts at its own hinge,
+    // so the first one no longer takes the depth of the second and covers an avatar standing below it.
+    const closed = doorLeafDepthYs(vertical, 'door-wood-double', 90, 'start', 0);
+    expect(closed[0]).toBeCloseTo(6 * 32 + 13 + 35);
+    expect(closed[1]).toBeCloseTo(6 * 32 + 83);
+    const open = doorLeafDepthYs(vertical, 'door-wood-double', 90, 'start', 3);
+    expect(open[0]).toBeCloseTo(6 * 32 + 13 + 3);
+    expect(open[1]).toBeCloseTo(6 * 32 + 83 + 3);
+    // On a horizontal edge both leaves swing the same way, so they sort together.
+    const across = doorLeafDepthYs(horizontal, 'door-wood-double', 0, 'start', 3);
+    expect(across[0]).toBeCloseTo(6 * 32 + 35 + 3);
+    expect(across[1]).toBeCloseTo(6 * 32 + 35 + 3);
   });
 
 });

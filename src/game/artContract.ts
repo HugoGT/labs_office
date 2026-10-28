@@ -889,13 +889,16 @@ export function doorPlacement(edge: GridEdge, span: number): { readonly x: numbe
 }
 
 /**
- * The depth a door sorts by in a frame: the lowest pixel its leaf draws,
- * not the end of its span, so an avatar standing below a swung leaf walks in
- * front of it instead of under it. The jambs merge with the walls' posts and
- * never count. A leaf of `rotation` swings to the side that rotation faces
- * (0 and 90 are down and right); `step` is the swing, as in `doorFrameIndex`.
+ * The depth each leaf of a door sorts by in a frame, in span order: the
+ * lowest pixel it draws, not the end of its span, so an avatar standing below
+ * a swung leaf walks in front of it instead of under it. A double door's two
+ * leaves sort apart: down a vertical edge the first one hangs from the north
+ * hinge and must not take the depth of the second. The jambs merge with the
+ * walls' posts and never count. A leaf of `rotation` swings to the side that
+ * rotation faces (0 and 90 are down and right); `step` is the swing, as in
+ * `doorFrameIndex`.
  */
-export function doorDepthY(edge: GridEdge, piece: string, rotation: 0 | 90 | 180 | 270, hinge: DoorHinge, step: number): number {
+export function doorLeafDepthYs(edge: GridEdge, piece: string, rotation: 0 | 90 | 180 | 270, hinge: DoorHinge, step: number): number[] {
   const { leafLength, jamb } = DOOR.variants[doorVariantOf(piece)];
   const double = doorVariantOf(piece) === 'double';
   const angle = (step / (DOOR_STEPS - 1)) * (Math.PI / 2);
@@ -909,19 +912,19 @@ export function doorDepthY(edge: GridEdge, piece: string, rotation: 0 | 90 | 180
     : [{ from: jamb, length: leafLength, atStart: hinge === 'start' }];
   if (edge.axis === 'horizontal') {
     const down = rotation === 0;
-    return edge.row * ART_TILE + Math.max(...leaves.map(({ length }) => (down ? length * Math.sin(angle) : 0))) + half;
+    return leaves.map(({ length }) => edge.row * ART_TILE + (down ? length * Math.sin(angle) : 0) + half);
   }
-  const lowest = Math.max(...leaves.map(({ from, length, atStart }) => (atStart ? from + length * Math.cos(angle) : from + length)));
-  return edge.row * ART_TILE + lowest + half * Math.sin(angle);
+  return leaves.map(({ from, length, atStart }) => edge.row * ART_TILE + (atStart ? from + length * Math.cos(angle) : from + length) + half * Math.sin(angle));
 }
 
 /**
- * A door frame cut in three along its span (#233): the leaf, which sorts by its
- * lowest pixel (`doorDepthY`), and the two jambs, which merge with the wall's
- * posts at the ends and sort just under their joints, so a wall is always
- * drawn over the door, whatever its swing. Crops are in frame pixels.
+ * A door frame cut along its span (#233): its leaves, each sorted by its
+ * lowest pixel (`doorLeafDepthYs`; a double door's two leaves are cut apart at
+ * the middle, where they meet), and the two jambs, which merge with the
+ * wall's posts at the ends and sort just under their joints, so a wall is
+ * always drawn over the door, whatever its swing. Crops are in frame pixels.
  */
-export function doorSlices(edge: GridEdge, piece: string): { readonly leaf: Rect; readonly jambs: readonly { readonly crop: Rect; readonly depthY: number }[] } {
+export function doorSlices(edge: GridEdge, piece: string): { readonly leaves: readonly Rect[]; readonly jambs: readonly { readonly crop: Rect; readonly depthY: number }[] } {
   const { span, jamb } = DOOR.variants[doorVariantOf(piece)];
   const horizontal = edge.axis === 'horizontal';
   const length = span * ART_TILE;
@@ -930,8 +933,12 @@ export function doorSlices(edge: GridEdge, piece: string): { readonly leaf: Rect
   const along = (from: number, size: number): Rect =>
     horizontal ? { x: from, y: 0, width: size, height: DOOR.frame.height } : { x: 0, y: from, width: DOOR.frame.width, height: size };
   const joint = (vertex: GridVertex): number => wallJointRect(vertex).y + WALL.jointSize - 1;
+  const leafLength = length - 2 * jamb;
   return {
-    leaf: along(start + jamb, length - 2 * jamb),
+    leaves:
+      doorVariantOf(piece) === 'double'
+        ? [along(start + jamb, leafLength / 2), along(start + jamb + leafLength / 2, leafLength / 2)]
+        : [along(start + jamb, leafLength)],
     jambs: [
       { crop: along(start, jamb), depthY: joint(edge) },
       { crop: along(start + length - jamb, jamb), depthY: joint(horizontal ? { col: edge.col + span, row: edge.row } : { col: edge.col, row: edge.row + span }) },

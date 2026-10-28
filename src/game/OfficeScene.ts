@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { WALL, doorDepthY, doorFrameIndex, doorHingeOf, doorPlacement, doorSlices, propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type GridEdge, type Point } from './artContract';
+import { WALL, doorFrameIndex, doorLeafDepthYs, doorHingeOf, doorPlacement, doorSlices, propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type GridEdge, type Point } from './artContract';
 import { artUploadsManifestUrl, findPiece, type ArtAppearance } from './artPack';
 import { artCustomCharactersUrl } from './customCharacterArt';
 import { ArtPackLoader } from './artPackLoader';
@@ -292,11 +292,12 @@ export class OfficeScene extends Phaser.Scene {
   private decorObjects: Phaser.GameObjects.GameObject[] = [];
   /**
    * The doors of the drawn decor layer (#223), by anchor: their leaf (edge,
-   * span, hinge) and, once the sheet is in, the image `update()` switches
-   * between its closed and open frame. A redraw of the layer rebuilds it.
+   * span, hinge) and, once the sheet is in, the image of each leaf (two for
+   * a double door) `update()` switches between its closed and open frame. A
+   * redraw of the layer rebuilds it.
    */
   private doorLeaves = new Map<number, DoorLeaf>();
-  private doorImages = new Map<number, Phaser.GameObjects.Image>();
+  private doorImages = new Map<number, Phaser.GameObjects.Image[]>();
   /** How far open each door is and the side it swings to, by leaf anchor: the doors shut and still are not in it. */
   private doorMotion: ReadonlyMap<number, DoorMotion> = new Map();
   /** The static bodies of the terrain grid and their collider, replaced whole on each edit. */
@@ -1698,8 +1699,8 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
-   * A door of the decor layer (#223, #233): its leaf and jambs on the grid
-   * line it opens (`doorEdge`). The leaf sorts by its lowest pixel; each jamb
+   * A door of the decor layer (#223, #233): its leaves and jambs on the grid
+   * line it opens (`doorEdge`). Each leaf sorts by its lowest pixel; each jamb
    * is its own crop of the same frame, sorted under the post joint it merges
    * with (`doorSlices`), so the walls are always drawn over the door.
    */
@@ -1710,13 +1711,13 @@ export class OfficeScene extends Phaser.Scene {
     const sheet = this.artSheet({ materialId: item.piece, color: null }, 'door', this.redrawDecor);
     if (sheet !== null) {
       const placement = doorPlacement(edge, span);
-      const { frame, depthY } = this.doorLook(item, leaf?.rotation ?? item.rotation, edge);
+      const { frame, depthYs } = this.doorLook(item, leaf?.rotation ?? item.rotation, edge);
       const slices = doorSlices(edge, item.piece);
       const name = decorObjectName(item.index);
       const crop = (image: Phaser.GameObjects.Image, { x, y, width, height }: { x: number; y: number; width: number; height: number }) => image.setCrop(x, y, width, height);
       // The jambs are the same in every frame of the swing, so they keep the one they were drawn with.
       return [
-        crop(putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(depthY)).setName(name), slices.leaf),
+        ...slices.leaves.map((rect, i) => crop(putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(depthYs[i])).setName(name), rect)),
         ...slices.jambs.map(({ crop: rect, depthY: jambDepthY }) => crop(putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(jambDepthY)).setName(`${name}:jamb`), rect)),
       ];
     }
@@ -1733,18 +1734,18 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
-   * The frame a door shows and the depth it sorts by: its swing so far,
-   * turned away from the avatar that opened it (S14), and the lowest pixel of
-   * the leaf in that frame (`doorDepthY`), so an avatar below a swung leaf
-   * walks in front of it.
+   * The frame a door shows and the depth each leaf sorts by: its swing so
+   * far, turned away from the avatar that opened it (S14), and the lowest
+   * pixel of each leaf in that frame (`doorLeafDepthYs`), so an avatar below
+   * a swung leaf walks in front of it.
    */
-  private doorLook(item: Pick<DecorItem, 'index' | 'piece'>, rotation: DecorItem['rotation'], edge: GridEdge): { frame: number; depthY: number } {
+  private doorLook(item: Pick<DecorItem, 'index' | 'piece'>, rotation: DecorItem['rotation'], edge: GridEdge): { frame: number; depthYs: number[] } {
     const motion = this.doorMotion.get(item.index);
     const step = motion === undefined ? 0 : doorStepOf(motion.progress);
     const turned = doorSwingRotation(rotation, motion?.swing ?? 'inside');
     // The hinge stays where the door was turned to, whichever side it swings to.
     const hinge = doorHingeOf(item.piece, rotation);
-    return { frame: doorFrameIndex(turned, hinge, step), depthY: doorDepthY(edge, item.piece, turned, hinge, step) };
+    return { frame: doorFrameIndex(turned, hinge, step), depthYs: doorLeafDepthYs(edge, item.piece, turned, hinge, step) };
   }
 
   /**
@@ -1769,13 +1770,15 @@ export class OfficeScene extends Phaser.Scene {
       (leaf, position) => lockedBehindDoor(leaf, position, this.spaces, this.lockedSpaces) !== null,
     );
     this.doorMotion = moveDoors(targets, this.doorMotion, dtMs);
-    for (const [index, image] of this.doorImages) {
+    for (const [index, images] of this.doorImages) {
       const leaf = this.doorLeaves.get(index);
       if (leaf === undefined) continue;
-      const { frame, depthY } = this.doorLook(leaf, leaf.rotation, leaf.edge);
-      if (image.frame.name !== String(frame)) image.setFrame(frame);
-      const depth = worldAssetDepth(depthY);
-      if (image.depth !== depth) image.setDepth(depth);
+      const { frame, depthYs } = this.doorLook(leaf, leaf.rotation, leaf.edge);
+      images.forEach((image, i) => {
+        if (image.frame.name !== String(frame)) image.setFrame(frame);
+        const depth = worldAssetDepth(depthYs[i]);
+        if (image.depth !== depth) image.setDepth(depth);
+      });
     }
   }
 
@@ -2051,7 +2054,7 @@ export class OfficeScene extends Phaser.Scene {
     this.doorImages = new Map();
     for (const object of this.decorObjects) {
       const index = doorNamed.get(object.name);
-      if (index !== undefined && object instanceof Phaser.GameObjects.Image) this.doorImages.set(index, object);
+      if (index !== undefined && object instanceof Phaser.GameObjects.Image) this.doorImages.set(index, [...(this.doorImages.get(index) ?? []), object]);
     }
   }
 
