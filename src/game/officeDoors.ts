@@ -93,6 +93,27 @@ export function doorPosts(item: Pick<DecorItem, 'index' | 'rotation' | 'piece'>,
   return [start, ...doorInnerPosts(item, width), end];
 }
 
+/**
+ * The vertices straight across each end of a door's span, one row (or column)
+ * to each side: the posts a wall may end at, against the door's end post
+ * (#233). Their footprint touches the door's own tiles, but a wall there
+ * stands beside the doorway, not in it, so the door keeps its swing. The ones
+ * off the map are left out.
+ */
+export function doorShoulders(item: Pick<DecorItem, 'index' | 'rotation' | 'piece'>, width: number, height: number): number[] {
+  const { col, row, axis } = doorEdge(item, width);
+  const span = doorSpan(item);
+  const horizontal = axis === 'horizontal';
+  const shoulders: number[] = [];
+  for (const along of [0, span]) {
+    for (const across of [-1, 1]) {
+      const [tx, ty] = horizontal ? [col + along, row + across] : [col + across, row + along];
+      if (tx >= 0 && ty >= 0 && tx < width && ty < height) shoulders.push(ty * width + tx);
+    }
+  }
+  return shoulders;
+}
+
 /** The grid edges a door stands on, as one key: two doors with the same one cover the same wall. */
 function doorKey(item: Pick<DecorItem, 'index' | 'rotation' | 'piece'>, width: number): string {
   const { col, row, axis } = doorEdge(item, width);

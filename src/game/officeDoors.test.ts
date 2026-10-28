@@ -10,6 +10,7 @@ import {
   doorEndPosts,
   doorInnerPosts,
   doorPosts,
+  doorShoulders,
   doorLeaves,
   doorOnWall,
   doorOpenings,
@@ -112,6 +113,21 @@ describe('officeDoors: the line a door stands on (#223, #233)', () => {
   it('protects only the two end posts of a door from being removed', () => {
     expect(doorPostSet([door(4, 6, 0)], WIDTH)).toEqual(new Set([at(4, 6), at(6, 6)]));
     expect(doorPostSet([doubleDoor(2, 6, 0)], WIDTH)).toEqual(new Set([at(2, 6), at(5, 6)]));
+  });
+});
+
+describe('officeDoors: the shoulders of a door (#233)', () => {
+  const sorted = (posts: number[]): number[] => posts.sort((a, b) => a - b);
+
+  it('are the vertices straight across its span ends, one row or column to each side', () => {
+    expect(sorted(doorShoulders(door(4, 6, 0), WIDTH, HEIGHT))).toEqual(sorted([at(4, 5), at(4, 7), at(6, 5), at(6, 7)]));
+    expect(sorted(doorShoulders(door(4, 6, 90), WIDTH, HEIGHT))).toEqual(sorted([at(3, 6), at(3, 8), at(5, 6), at(5, 8)]));
+    expect(sorted(doorShoulders(doubleDoor(2, 6, 0), WIDTH, HEIGHT))).toEqual(sorted([at(2, 5), at(2, 7), at(5, 5), at(5, 7)]));
+  });
+
+  it('leave out the ones off the map', () => {
+    expect(sorted(doorShoulders(door(0, 0, 0), WIDTH, HEIGHT))).toEqual(sorted([at(0, 1), at(2, 1)]));
+    expect(sorted(doorShoulders(door(3, HEIGHT - 1, 0), WIDTH, HEIGHT))).toEqual(sorted([at(3, HEIGHT - 2), at(5, HEIGHT - 2)]));
   });
 });
 

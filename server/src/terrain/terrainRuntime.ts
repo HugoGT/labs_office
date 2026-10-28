@@ -66,7 +66,7 @@ import {
   type DecorTileRect,
 } from '../../../src/game/officeDecor.ts';
 import { deskOverChairLimit, displacedDeskTables } from '../../../src/game/deskDecorRules.ts';
-import { doorOpenings, doorPostSet, isDoorPiece, wallsUnderLeftDoors } from '../../../src/game/officeDoors.ts';
+import { doorOpenings, doorPostSet, doorShoulders, isDoorPiece, wallsUnderLeftDoors } from '../../../src/game/officeDoors.ts';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
 import type { TerrainStore } from './terrainPort.ts';
 import {
@@ -339,7 +339,20 @@ export function createTerrainRuntime({
     const doorTiles = new Set(decor.flatMap((item) => (isDoorPiece(item.piece) ? decorTiles(item, decorInfo(item.piece), layout.width) : [])));
     const guarded = protectedTiles();
     const withoutDoors = new Set([...guarded].filter((tile) => !doorTiles.has(tile)));
-    const conflict = findWallConflict(fresh, layout, guarded, guards, removed, doorPosts) ?? findWallConflict(standing, layout, withoutDoors, guards);
+    // A new post straight across a door's end may touch that door's own tiles: it ends a wall against the
+    // door's end post, beside the doorway (#233). Any other post of a door's tiles stands in the doorway or its swing.
+    const beside = new Map<number, Set<number>>();
+    for (const item of decor) {
+      if (!isDoorPiece(item.piece)) continue;
+      const tiles = decorTiles(item, decorInfo(item.piece), layout.width);
+      for (const post of doorShoulders(item, layout.width, layout.height)) beside.set(post, new Set([...(beside.get(post) ?? []), ...tiles]));
+    }
+    let conflict = findWallConflict(fresh.filter((index) => !beside.has(index)), layout, guarded, guards, removed, doorPosts);
+    for (const index of fresh.filter((post) => beside.has(post))) {
+      const own = beside.get(index)!;
+      conflict ??= findWallConflict([index], layout, new Set([...guarded].filter((tile) => !own.has(tile))), guards);
+    }
+    conflict ??= findWallConflict(standing, layout, withoutDoors, guards);
     if (conflict !== null) throw new TerrainProtectedError(conflict);
     const next = withWalls(walls, changed);
     // A placed or repainted post becomes the latest, the order the store keeps by `updated_at`.

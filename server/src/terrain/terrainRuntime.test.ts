@@ -1027,6 +1027,27 @@ describe('createTerrainRuntime doors (#223, #233)', () => {
     expect(passes(runtime, ...through(68))).toBe(false);
   });
 
+  it('lets a wall end at the post two doors share, from either side, but not stand in front of a doorway (#233)', async () => {
+    const runtime = runtimeWith();
+    await runtime.load();
+    // Two doors side by side on the room's top wall: posts 65, 67 (shared) and 69.
+    await runtime.setDecor([{ index: at(65, 22), item: DOOR }, { index: at(67, 22), item: DOOR }], null);
+
+    // A divider from the shared post, up and down: the posts straight across it touch the doors' tiles, beside the doorways.
+    await runtime.setWalls([{ index: at(67, 23), piece: 'wall-brick' }, { index: at(67, 21), piece: 'wall-brick' }], null, NONE);
+    expect(runtime.walls()[at(67, 23)]).toBe('wall-brick');
+    expect(runtime.walls()[at(67, 21)]).toBe('wall-brick');
+    expect(runtime.snapshot().openings).toEqual(edges([65, 66, 67, 68]));
+    // The doorways themselves stay open ground.
+    expect(passes(runtime, ...through(65))).toBe(true);
+    expect(passes(runtime, ...through(68))).toBe(true);
+
+    // A post in front of the middle of a door, or past its end line, would stand in the doorway or in its swing.
+    for (const post of [at(66, 23), at(66, 21), at(68, 23), at(68, 21)]) {
+      await expect(runtime.setWalls([{ index: post, piece: 'wall-brick' }], null, NONE)).rejects.toThrow(TerrainProtectedError);
+    }
+  });
+
   it('refuses to erase a post that ends a door, data unchanged, and lets the rest of the wall change', async () => {
     const store = createMemoryTerrain([], WALL);
     const runtime = runtimeWith(store);
