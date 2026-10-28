@@ -364,9 +364,9 @@ describe('DecorEditorSection: Decoración for one desk', () => {
     expect(await screen.findByRole('group', { name: 'Sillas' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Decoración' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Salir' })).toBeInTheDocument();
-    // Of the room tables only the 2x1 oval one fits a 3x3 desk.
-    expect(screen.queryByRole('button', { name: 'Mesa de reuniones' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Mesa ovalada' })).toBeInTheDocument();
+    // A desk holds desk tables, never a room table, not even the 2x1 oval one (#116).
+    expect(screen.getByRole('group', { name: 'Mesas de escritorio' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Mesas de sala' })).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /Múltiple/ })).not.toBeInTheDocument();
     expect(commands.at(-1)).toEqual({ brush: null, area: DESK, outlines: [DESK_OUTLINE] });
   });

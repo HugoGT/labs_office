@@ -159,10 +159,12 @@ const DESK_SIDE = 3;
 
 /**
  * Whether a piece fits a 3x3 desk in some rotation, so the desk scope offers
- * it. Never a door (#223): it opens a wall, which only an admin edits.
+ * it. Never a door (#223): it opens a wall, which only an admin edits. Never
+ * a room table either (#116), even one that fits: a desk holds desk tables.
  */
 export function fitsDeskArea(info: DecorPieceInfo): boolean {
-  return info.kind !== 'door' && info.footprint.w <= DESK_SIDE && info.footprint.h <= DESK_SIDE;
+  if (info.kind === 'door' || info.kind === 'table') return false;
+  return info.footprint.w <= DESK_SIDE && info.footprint.h <= DESK_SIDE;
 }
 
 /** The tiles a brush on `index` would cover, turned the way it is. */
