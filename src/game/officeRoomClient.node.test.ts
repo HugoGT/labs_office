@@ -926,29 +926,6 @@ describe('connectOfficeRoom: seats (art migration, step 6)', () => {
     expect(seen.at(-1)).toEqual([{ index: tile(97, 70), piece: 'chair-wood', rotation: 180 }]);
   });
 
-  it('sendDoorLock asks to lock the door the player stands inside, and reports the locks on every change (#223)', async () => {
-    await server.shutdown();
-    const { BASE_LAYOUT: layout } = await import('./officeLayout.ts');
-    const tile = (tx: number, ty: number) => ty * layout.width + tx;
-    const walls = [90, 91, 92].map((tx) => [tile(tx, 64), 'wall-brick'] as const);
-    server = createOfficeServer({ layout, seats: [], terrain: createMemoryTerrain([], walls, [{ index: tile(91, 64), piece: 'door-wood', rotation: 0 }]) });
-    endpoint = `ws://localhost:${await server.listen(0)}`;
-    const seen: ReadonlySet<number>[] = [];
-    const local: (string | null)[] = [];
-    const ana = await connect('Ana', { ...recorder().handlers, onDoorLocks: (locks) => seen.push(locks), onLocalSeat: (seat) => local.push(seat) });
-    await waitFor(() => local.length > 0);
-    await waitFor(() => seen.length > 0);
-    expect(seen[0]).toEqual(new Set());
-
-    // Body center on the door's inside tile (91, 64).
-    ana.sendMove(91 * TILE + 16, 64 * TILE + 5, 'down');
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    ana.sendDoorLock();
-    await waitFor(() => seen.at(-1)?.has(tile(91, 64)) === true);
-    ana.sendDoorLock();
-    await waitFor(() => seen.at(-1)?.size === 0);
-  });
-
   it('reports the collision table on the first sync and every edit after it', async () => {
     await server.shutdown();
     server = createOfficeServer({ collisions: createMemoryCollisions([['tree-oak', []]]) });

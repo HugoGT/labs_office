@@ -11,7 +11,7 @@ import {
   TILE,
   ZONE_LABELS,
 } from './mapData';
-import { TERRAIN_LAYER_COUNT, WALL, doorFrameIndex } from './artContract';
+import { TERRAIN_LAYER_COUNT, doorFrameIndex } from './artContract';
 import { terrainSnapshot, wallColliderRects, withBlock, withWalls, type OfficeLayout } from './officeLayout';
 import { CHAIR_OBJECT_NAME, WALL_OBJECT_NAME } from './mapBuilder';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SPACES as BUILT_IN_SPACES } from '../test/legacyOffice';
@@ -1565,7 +1565,6 @@ function fakeConnector(sessionId = 'yo', initialState = true) {
   const sentSpacesVersions: string[] = [];
   const sits: string[] = [];
   let stands = 0;
-  let doorLocks = 0;
   let captured: OfficeRoomHandlers | undefined;
   let joinedWith: PresenceStatus | undefined;
   let joinedName: string | undefined;
@@ -1587,9 +1586,6 @@ function fakeConnector(sessionId = 'yo', initialState = true) {
     sendStand: () => {
       stands++;
     },
-    sendDoorLock: () => {
-      doorLocks++;
-    },
     leave: async () => {
       left = true;
     },
@@ -1603,7 +1599,6 @@ function fakeConnector(sessionId = 'yo', initialState = true) {
     sentSpacesVersions,
     sits,
     stands: () => stands,
-    doorLocks: () => doorLocks,
     handlers: () => captured,
     joinedWith: () => joinedWith,
     joinedName: () => joinedName,
@@ -2381,7 +2376,6 @@ describe('OfficeScene: comando setStatus via el puente (#1)', () => {
       sendCallRespond: () => {},
       sendSit: () => {},
       sendStand: () => {},
-      sendDoorLock: () => {},
       leave: async () => {},
     };
 
@@ -4882,146 +4876,29 @@ describe('OfficeScene: edited terrain', () => {
     await vi.waitFor(() => expect(frame()).toBe(closed), LOOP_WAIT);
   });
 
-  it('sends doorlock on X, never while typing or while an editor holds the map (#223, S13)', async () => {
-    const connector = fakeConnector();
-    const { scene, bridge } = await bootOfficeScene(createOfficeBridge(), { endpoint: 'ws://test', connect: connector.connect });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
-    const press = () => scene.input.keyboard!.emit('keydown-X', new KeyboardEvent('keydown', { key: 'x' }));
-
-    press();
-    expect(connector.doorLocks()).toBe(1);
-
-    const field = document.createElement('input');
-    document.body.append(field);
-    field.focus();
-    press();
-    field.remove();
-    expect(connector.doorLocks()).toBe(1);
-
-    bridge.emitCommand('decoredit', { brush: { kind: 'piece', piece: 'chair-wood', info: { kind: 'chair', footprint: { w: 1, h: 1 } }, rotation: 0 }, area: null });
-    press();
-    expect(connector.doorLocks()).toBe(1);
-    bridge.emitCommand('decoredit', null);
-    press();
-    expect(connector.doorLocks()).toBe(2);
-  });
-
-  it('keeps a locked door shut and solid for everyone, from either side, until it is unlocked (#223, S13, #233)', async () => {
+  it('never bars a door: the body and the path walk through it, open or shut (#223, #233)', async () => {
     const { scene, handlers } = await bootConnected();
     handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
     handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 0 }]);
     const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
     await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
-    const frame = () => Number(leaf().frame.name);
     const walk = scene as unknown as { startWalk(goal: { x: number; y: number }): boolean; autoWalk?: unknown; walkWorld(): { rects: readonly { x: number; y: number; w: number; h: number }[] } };
     const body = findPlayer(scene).body as Phaser.Physics.Arcade.Body;
     const doorway = { x: lawnVertex.x + TILE, y: lawnVertex.y };
-    // What the path plans against holds the locked span, the wall's thickness across both its tiles.
-    const barrier = { x: lawnVertex.x, y: lawnVertex.y - WALL.thickness / 2, w: 2 * TILE, h: WALL.thickness };
-    // Body centers next to the door, on the north side (tile (68, 21)) and on the south side (tile (68, 22)).
     const north = { x: doorway.x, y: lawnVertex.y - TILE / 2 - 11 };
     const south = { x: doorway.x, y: lawnVertex.y + TILE / 2 - 11 };
 
-    body.reset(north.x, north.y);
-    await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(0, 'start', true)), LOOP_WAIT);
+    // Shut: nobody is next to it, and the span is open ground.
     await vi.waitFor(() => expect(solidAt(scene, doorway.x, doorway.y)).toBe(false), LOOP_WAIT);
-    // Unlocked, the path walks through.
+    expect(leaf().isTinted).toBe(false);
+    // Open, for the one next to it: still open ground, and the path plans through it.
+    body.reset(north.x, north.y);
+    await vi.waitFor(() => expect(Number(leaf().frame.name)).toBe(doorFrameIndex(0, 'start', true)), LOOP_WAIT);
+    expect(solidAt(scene, doorway.x, doorway.y)).toBe(false);
     expect(walk.startWalk(south)).toBe(true);
     walk.autoWalk = undefined;
-    body.reset(north.x, north.y);
-
-    handlers.onDoorLocks!(new Set([lawnTile]));
-
-    await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(0, 'start', false)), LOOP_WAIT);
-    expect(leaf().isTinted).toBe(true);
-    await vi.waitFor(() => expect(solidAt(scene, doorway.x, doorway.y)).toBe(true), LOOP_WAIT);
-    expect(walk.walkWorld().rects).toContainEqual(barrier);
-
-    // From the other side it stays shut and solid too: nobody walks through a locked door.
-    body.reset(south.x, south.y);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(frame()).toBe(doorFrameIndex(0, 'start', false));
-    expect(solidAt(scene, doorway.x, doorway.y)).toBe(true);
-    expect(walk.walkWorld().rects).toContainEqual(barrier);
-
-    handlers.onDoorLocks!(new Set());
-    await vi.waitFor(() => expect(leaf().isTinted).toBe(false), LOOP_WAIT);
-    expect(walk.walkWorld().rects).not.toContainEqual(barrier);
-    // Unlocked again: it opens for the one next to it, swinging away from the south.
-    await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(180, 'start', true)), LOOP_WAIT);
-    await vi.waitFor(() => expect(solidAt(scene, doorway.x, doorway.y)).toBe(false), LOOP_WAIT);
-  });
-
-  describe('the lock hint (#223, S15, #233)', () => {
-    /** A door on a 2-tile span between the posts at vertices 67 and 69 of row 22; returns where bodies stand. */
-    async function doorBetweenPosts() {
-      const booted = await bootConnected();
-      const { scene, handlers } = booted;
-      handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
-      handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 0 }]);
-      const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
-      await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
-      const body = findPlayer(scene).body as Phaser.Physics.Arcade.Body;
-      const doorX = lawnVertex.x + TILE;
-      return {
-        ...booted,
-        body,
-        south: { x: doorX, y: lawnVertex.y + TILE / 2 - 11 },
-        north: { x: doorX, y: lawnVertex.y - TILE / 2 - 11 },
-        away: { x: lawnVertex.x + 4 * TILE, y: lawnVertex.y + 3 * TILE - 11 },
-      };
-    }
-
-    it('tells React what the lock key would do where the player stands, once per change and by the rule of the room', async () => {
-      const { bridge, body, south, north, away } = await doorBetweenPosts();
-      const seen: OfficeEventMap['doorlocknotice'][] = [];
-      bridge.on('doorlocknotice', (notice) => seen.push(notice));
-      const last = () => seen.at(-1);
-
-      body.reset(south.x, south.y);
-      await vi.waitFor(() => expect(last()).toEqual({ lockable: 'lock' }), LOOP_WAIT);
-      const count = seen.length;
-      // Still next to the door: nothing new to say, frame after frame.
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(seen).toHaveLength(count);
-
-      // The other side of the door offers it too; away from every door the key does nothing, so there is no hint.
-      body.reset(north.x, north.y);
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(last()).toEqual({ lockable: 'lock' });
-      body.reset(away.x, away.y);
-      await vi.waitFor(() => expect(last()).toEqual({ lockable: null }), LOOP_WAIT);
-
-      // Never while an editor holds the map: the key is ignored there too.
-      body.reset(south.x, south.y);
-      await vi.waitFor(() => expect(last()).toEqual({ lockable: 'lock' }), LOOP_WAIT);
-      bridge.emitCommand('decoredit', { brush: { kind: 'piece', piece: 'chair-wood', info: { kind: 'chair', footprint: { w: 1, h: 1 } }, rotation: 0 }, area: null });
-      await vi.waitFor(() => expect(last()).toEqual({ lockable: null }), LOOP_WAIT);
-      bridge.emitCommand('decoredit', null);
-      await vi.waitFor(() => expect(last()).toEqual({ lockable: 'lock' }), LOOP_WAIT);
-    });
-
-    it('offers to unlock next to a locked door, from either side, from the replicated locks', async () => {
-      const { bridge, handlers, body, south, north, away } = await doorBetweenPosts();
-      const seen: OfficeEventMap['doorlocknotice'][] = [];
-      bridge.on('doorlocknotice', (notice) => seen.push(notice));
-      const last = () => seen.at(-1);
-
-      body.reset(south.x, south.y);
-      handlers.onDoorLocks!(new Set([lawnTile]));
-      await vi.waitFor(() => expect(last()).toEqual({ lockable: 'unlock' }), LOOP_WAIT);
-
-      body.reset(north.x, north.y);
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(last()).toEqual({ lockable: 'unlock' });
-
-      body.reset(away.x, away.y);
-      await vi.waitFor(() => expect(last()).toEqual({ lockable: null }), LOOP_WAIT);
-
-      handlers.onDoorLocks!(new Set());
-      body.reset(south.x, south.y);
-      await vi.waitFor(() => expect(last()).toEqual({ lockable: 'lock' }), LOOP_WAIT);
-    });
+    // The only rectangles in the path's world are the walls' own: none spans the door.
+    expect(walk.walkWorld().rects.some((rect) => rect.x <= doorway.x && doorway.x < rect.x + rect.w && rect.y <= doorway.y && doorway.y < rect.y + rect.h)).toBe(false);
   });
 
   it('draws pending walls for the editor without colliding with them, and drops them when it closes', async () => {

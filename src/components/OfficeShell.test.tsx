@@ -185,25 +185,6 @@ describe('OfficeShell', () => {
     expect(screen.getByText(/Entraste a/)).toBeInTheDocument();
   });
 
-  it('muestra el aviso de la llave de la puerta desde el evento "doorlocknotice" y lo quita al alejarse (#223, #233)', () => {
-    render(<OfficeShell />);
-    const bridge = createGameMock.mock.calls[0][1];
-    expect(screen.queryByText('Pulsa X para bloquear la puerta')).toBeNull();
-
-    act(() => bridge.emit('doorlocknotice', { lockable: 'lock' }));
-    expect(screen.getByText('Pulsa X para bloquear la puerta')).toBeInTheDocument();
-
-    act(() => bridge.emit('doorlocknotice', { lockable: 'unlock' }));
-    expect(screen.queryByText('Pulsa X para bloquear la puerta')).toBeNull();
-    expect(screen.getByText('Pulsa X para desbloquear la puerta')).toBeInTheDocument();
-
-    act(() => bridge.emit('doorlocknotice', { lockable: null }));
-    expect(screen.queryByText('Pulsa X para desbloquear la puerta')).toBeNull();
-    expect(screen.queryByText('Pulsa X para bloquear la puerta')).toBeNull();
-    // The room-wide pill is gone with the room lock.
-    expect(screen.queryByText('Sala bloqueada')).toBeNull();
-  });
-
   it('un nombre de sala con marcado renderiza como texto literal (sin dangerouslySetInnerHTML)', () => {
     render(<OfficeShell />);
     const bridge = createGameMock.mock.calls[0][1];

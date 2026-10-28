@@ -54,7 +54,7 @@ describe('DecorPalette', () => {
   it('tells under the doors where they go, how wide they are, and that X locks or unlocks one (#223, #233)', () => {
     render(<DecorPalette value={null} catalog={catalog} onPick={() => {}} preview={noPreview()} />);
     const doors = screen.getByRole('group', { name: 'Puertas' }).parentElement!;
-    expect(within(doors).getByText('Va entre dos paredes, una en cada extremo: la puerta ocupa 2 casillas y la doble 4. Junto a una puerta, pulsa X para bloquearla o desbloquearla.')).toBeInTheDocument();
+    expect(within(doors).getByText('Va entre dos paredes, una en cada extremo: la puerta ocupa 2 casillas y la doble 4.')).toBeInTheDocument();
   });
 
   it('shows the size of each room table on its tile, the horizontal one', () => {

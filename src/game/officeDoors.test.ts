@@ -3,25 +3,17 @@ import { physicalBodyRect } from './avatarGeometry';
 import type { DecorItem } from './officeDecor';
 import {
   DOOR_OPEN_REACH_PX,
-  crossesLockedDoor,
-  decodeDoorLocks,
   doorEdge,
   doorEdges,
   doorEndPosts,
   doorLeaves,
-  doorLockNotice,
-  doorLockTarget,
   doorOnWall,
   doorOpenings,
   doorPostSet,
   doorSpan,
   doorSwingRotation,
-  encodeDoorLocks,
   isDoorPiece,
-  liveDoorLocks,
-  lockedDoorBarriers,
   openDoorLeaves,
-  toggleDoorLock,
 } from './officeDoors';
 
 const WIDTH = 12;
@@ -187,9 +179,9 @@ describe('officeDoors: open and closed (#223, #233)', () => {
   it('keeps the swing while the avatar passes the edge line, and drops it when the door closes', () => {
     const leaves = doorLeaves([door(4, 6, 0)], WIDTH);
     const first = openDoorLeaves(leaves, [standingAt(160, 6 * 32 - 10)]);
-    const crossing = openDoorLeaves(leaves, [standingAt(160, 6 * 32 + 10)], new Set(), first);
+    const crossing = openDoorLeaves(leaves, [standingAt(160, 6 * 32 + 10)], first);
     expect(crossing.get(at(4, 6))).toBe(first.get(at(4, 6)));
-    expect(openDoorLeaves(leaves, [], new Set(), crossing).size).toBe(0);
+    expect(openDoorLeaves(leaves, [], crossing).size).toBe(0);
   });
 
   it('keeps the swing it has when two avatars come from opposite sides, else the first one to open', () => {
@@ -197,91 +189,7 @@ describe('officeDoors: open and closed (#223, #233)', () => {
     const both = [standingAt(160, 6 * 32 - 10), standingAt(160, 6 * 32 + 10)];
     const fresh = openDoorLeaves(leaves, both).get(at(4, 6));
     expect(fresh).toBe(openDoorLeaves(leaves, [both[0]!]).get(at(4, 6)));
-    const kept = openDoorLeaves(leaves, both, new Set(), new Map([[at(4, 6), fresh === 'inside' ? 'outside' : 'inside']])).get(at(4, 6));
+    const kept = openDoorLeaves(leaves, both, new Map([[at(4, 6), fresh === 'inside' ? 'outside' : 'inside']])).get(at(4, 6));
     expect(kept).not.toBe(fresh);
-  });
-
-  it('never opens a locked door, for anyone', () => {
-    const leaves = doorLeaves([door(4, 6, 0)], WIDTH);
-    const locked = new Set([at(4, 6)]);
-    expect(openAnchors(leaves, [standingAt(160, 6 * 32 - 10)], locked)).toEqual(new Set());
-    expect(openAnchors(leaves, [standingAt(160, 6 * 32 + 10)], locked)).toEqual(new Set());
-  });
-});
-
-describe('officeDoors: locks (#223, S13, #233)', () => {
-  const leaves = doorLeaves([door(2, 6, 0), doubleDoor(6, 6, 0)], WIDTH);
-
-  it('finds the one door whose tiles hold the body, on either side of it, and none away from them', () => {
-    expect(doorLockTarget(leaves, standingAt(2 * 32 + 16, 6 * 32 - 10))).toBe(at(2, 6));
-    expect(doorLockTarget(leaves, standingAt(2 * 32 + 16, 6 * 32 + 10))).toBe(at(2, 6));
-    expect(doorLockTarget(leaves, standingAt(7 * 32, 6 * 32 + 10))).toBe(at(6, 6));
-    expect(doorLockTarget(leaves, standingAt(2 * 32 + 16, 6 * 32 + 40))).toBeNull();
-    expect(doorLockTarget(leaves, standingAt(5 * 32, 6 * 32 + 10))).toBeNull();
-  });
-
-  it('locks only that door, and unlocks it with the same key from the other side', () => {
-    const locked = toggleDoorLock(leaves, new Set(), standingAt(2 * 32 + 16, 6 * 32 - 10));
-    expect(locked).toEqual(new Set([at(2, 6)]));
-    expect(toggleDoorLock(leaves, locked!, standingAt(2 * 32 + 16, 6 * 32 + 10))).toEqual(new Set());
-  });
-
-  it('leaves the other doors as they are, and a double door locks as one', () => {
-    const next = toggleDoorLock(leaves, new Set([at(2, 6)]), standingAt(8 * 32, 6 * 32 + 10));
-    expect(next).toEqual(new Set([at(2, 6), at(6, 6)]));
-  });
-
-  it('changes nothing with no door next to the body', () => {
-    expect(toggleDoorLock(leaves, new Set([at(2, 6)]), standingAt(0, 0))).toBeNull();
-  });
-
-  it('keeps only the locks of doors that still stand', () => {
-    const items = [door(2, 6, 0)];
-    expect(liveDoorLocks(items, new Set([at(2, 6), at(9, 9)]))).toEqual(new Set([at(2, 6)]));
-  });
-
-  it('writes the locks as sorted anchors joined by commas, and reads them back', () => {
-    expect(encodeDoorLocks(new Set([20, 3]))).toBe('3,20');
-    expect(encodeDoorLocks(new Set())).toBe('');
-    expect(decodeDoorLocks('3,20')).toEqual(new Set([3, 20]));
-    expect(decodeDoorLocks('')).toEqual(new Set());
-    expect(decodeDoorLocks('3,x')).toBeNull();
-    expect(decodeDoorLocks(7)).toBeNull();
-  });
-
-  it('refuses a body center crossing a locked door within its span, from either side', () => {
-    const locked = new Set([at(2, 6)]);
-    const above = { x: 2 * 32 + 16, y: 6 * 32 - 8 };
-    const below = { x: 2 * 32 + 16, y: 6 * 32 + 8 };
-    expect(crossesLockedDoor(leaves, locked, above, below)).toBe(true);
-    expect(crossesLockedDoor(leaves, locked, below, above)).toBe(true);
-    // Beside it, along the same side, or through an unlocked door.
-    expect(crossesLockedDoor(leaves, locked, { x: 2 * 32 - 8, y: above.y }, { x: 2 * 32 - 8, y: below.y })).toBe(false);
-    expect(crossesLockedDoor(leaves, locked, above, { x: above.x + 20, y: above.y })).toBe(false);
-    expect(crossesLockedDoor(leaves, new Set(), above, below)).toBe(false);
-  });
-
-  it('names the colliders of the locked doors: the wall thickness across their whole span', () => {
-    const barriers = lockedDoorBarriers(leaves, new Set([at(2, 6), at(6, 6)]));
-    expect(barriers.map(({ index }) => index)).toEqual([at(2, 6), at(6, 6)]);
-    expect(barriers[0]!.rect).toMatchObject({ x: 64, w: 64 });
-    expect(barriers[1]!.rect).toMatchObject({ x: 192, w: 128 });
-    expect(lockedDoorBarriers(leaves, new Set())).toEqual([]);
-  });
-});
-
-describe('officeDoors: what the lock key offers (#223, S15, #233)', () => {
-  const leaves = doorLeaves([door(2, 6, 0)], WIDTH);
-
-  it('offers to lock next to a door, on either side, and nothing away from it', () => {
-    expect(doorLockNotice(leaves, new Set(), standingAt(2 * 32 + 16, 6 * 32 - 10))).toEqual({ lockable: 'lock' });
-    expect(doorLockNotice(leaves, new Set(), standingAt(2 * 32 + 16, 6 * 32 + 10))).toEqual({ lockable: 'lock' });
-    expect(doorLockNotice(leaves, new Set(), standingAt(0, 0))).toEqual({ lockable: null });
-  });
-
-  it('offers to unlock once that door is locked, the very rule of the key', () => {
-    const locked = new Set([at(2, 6)]);
-    expect(doorLockNotice(leaves, locked, standingAt(2 * 32 + 16, 6 * 32 + 10))).toEqual({ lockable: 'unlock' });
-    expect(toggleDoorLock(leaves, locked, standingAt(2 * 32 + 16, 6 * 32 + 10))).toEqual(new Set());
   });
 });

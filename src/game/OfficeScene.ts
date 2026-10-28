@@ -4,7 +4,7 @@ import { artUploadsManifestUrl, findPiece, type ArtAppearance } from './artPack'
 import { artCustomCharactersUrl } from './customCharacterArt';
 import { ArtPackLoader } from './artPackLoader';
 import { deskPlacement } from './artPlacement';
-import { AVATAR_BODY_CENTER_OFFSET, feetOf, positionForFeet } from './avatarGeometry';
+import { feetOf, positionForFeet } from './avatarGeometry';
 import { beginAutoWalk, isAutoWalkArrived, stepAutoWalk, type AutoWalkState } from './autoWalk';
 import { IDLE_AUTO_SIT, SIT_LOCK_MS, dropSitDwells, guardLeftSeat, sitLockActive, stepAutoSit, type AutoSitState } from './autoSit';
 import { bodyTileOf, planWalk, positionForBodyTile, type WalkWorld } from './pathfinding';
@@ -37,7 +37,7 @@ import { deskAt, deskZoneName } from './deskLayout';
 import { SPACE_SHADE_ALPHA, SPACE_SHADE_NAME, shadeAround, shadeKey } from './spaceFocus';
 import { tableFacing, tableFloorRect } from './deskTable';
 import { decorChairs, decorFootprint, encodeOfficeDecor, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
-import { doorEdge, doorLeaves, doorLockNotice, doorOpenings, doorSpan, doorSwingRotation, lockedDoorBarriers, openDoorLeaves, type DoorLeaf, type DoorLockNotice, type DoorSwing } from './officeDoors';
+import { doorEdge, doorLeaves, doorOpenings, doorSpan, doorSwingRotation, openDoorLeaves, type DoorLeaf, type DoorSwing } from './officeDoors';
 import { deskEntryRefused } from './deskDecorRules';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
@@ -156,8 +156,6 @@ export function decorObjectName(index: number): string {
 }
 const ART_FALLBACK_COLOR = 0x6b7280;
 const ART_FALLBACK_ALPHA = 0.6;
-/** A locked door's leaf (#223, S13): tinted toward iron red so it reads as shut from afar. */
-const LOCKED_DOOR_TINT = 0xd98a7a;
 /** A door's placeholder plank across its edge (#223), until its sheet loads. */
 const DOOR_PLACEHOLDER_THICKNESS = 6;
 
@@ -296,36 +294,9 @@ export class OfficeScene extends Phaser.Scene {
    * between its closed and open frame. A redraw of the layer rebuilds it.
    */
   private doorLeaves = new Map<number, DoorLeaf>();
-  /**
-   * The leaves of the live doors, kept for the decor layer they were made
-   * from; the frame loop reads them, so they are never rebuilt per frame. The
-   * editors' pending edits are not in them.
-   */
-  private liveDoors: { decor: readonly DecorItem[]; leaves: DoorLeaf[] } | null = null;
   private doorImages = new Map<number, Phaser.GameObjects.Image>();
   /** The anchors of the leaves drawn open, as `update()` last saw the avatars. */
   private openDoors: ReadonlyMap<number, DoorSwing> = new Map();
-  /** The locked doors (#223, S13) by leaf anchor, as the room replicates them. */
-  private doorLocks: ReadonlySet<number> = new Set();
-  /**
-   * The hint and notice last told to React (#223, S15) and what they were
-   * computed from: the player's tile, the walls, decor and locks (by
-   * identity) and whether the key is ignored, so a still frame costs nothing.
-   */
-  private doorNotice: {
-    told: DoorLockNotice;
-    from: { tile: number; decor: unknown; locks: unknown; ignored: boolean } | null;
-  } = { told: { lockable: null }, from: null };
-  /**
-   * The colliders of the locked doors (`lockedDoorBarriers`), keyed by their
-   * anchors: rebuilt only when that set changes. A locked door bars both
-   * sides.
-   */
-  private doorBarriers: { key: string; blocks: readonly CollisionRect[]; rects: Phaser.GameObjects.Rectangle[]; collider?: Phaser.Physics.Arcade.Collider } = {
-    key: '',
-    blocks: [],
-    rects: [],
-  };
   /** The static bodies of the terrain grid and their collider, replaced whole on each edit. */
   private terrainColliders?: { rects: Phaser.GameObjects.Rectangle[]; collider: Phaser.Physics.Arcade.Collider };
   /** The terrain of `terrainBlocks` and `terrainWalls`, kept to rebuild `grid` when the collisions change. */
@@ -1043,7 +1014,6 @@ export class OfficeScene extends Phaser.Scene {
           onWalls: (walls, order) => this.applyWalls(walls, order),
           onDecor: (items) => this.applyDecor(items),
           onCollisions: (table) => this.applyCollisions(table),
-          onDoorLocks: (locks) => this.applyDoorLocks(locks),
           onConnectionState: (state) => {
             if (!current()) return;
             if (state !== 'connected') {
@@ -1728,93 +1698,25 @@ export class OfficeScene extends Phaser.Scene {
       const avatar = this.remotes?.get(sessionId);
       if (avatar !== undefined) positions.push({ x: avatar.x, y: avatar.y });
     }
-    // A locked door stays shut (#233); an open one keeps the side it swings to until it closes (S14).
-    const open = openDoorLeaves([...this.doorLeaves.values()], positions, this.doorLocks, this.openDoors);
+    // An open door keeps the side it swings to until it closes (S14).
+    const open = openDoorLeaves([...this.doorLeaves.values()], positions, this.openDoors);
     for (const [index, image] of this.doorImages) {
       const leaf = this.doorLeaves.get(index);
       if (leaf === undefined) continue;
       const swing = open.get(index);
       const frame = doorFrameIndex(doorSwingRotation(leaf.rotation, swing ?? 'inside'), leaf.hinge, swing !== undefined);
       if (image.frame.name !== String(frame)) image.setFrame(frame);
-      const locked = this.doorLocks.has(index);
-      if (locked && !image.isTinted) image.setTint(LOCKED_DOOR_TINT);
-      else if (!locked && image.isTinted) image.clearTint();
     }
     this.openDoors = open;
-  }
-
-  /** The live doors' leaves, rebuilt only when the decor layer changes. */
-  private liveDoorGeometry(): { leaves: DoorLeaf[] } {
-    if (this.liveDoors?.decor !== this.officeDecor) this.liveDoors = { decor: this.officeDecor, leaves: doorLeaves(this.officeDecor, this.layout.width) };
-    return this.liveDoors;
-  }
-
-  /** New door locks from the room (#223): the next frame redraws the leaves and the barriers. */
-  private applyDoorLocks(locks: ReadonlySet<number>): void {
-    if (!this.alive) return;
-    this.doorLocks = locks;
-  }
-
-  /**
-   * Tells React what the lock key would do where this player stands (#223,
-   * S15), by `doorLockNotice`: the rule the room applies to the key, on the
-   * live decor and locks and the position the room tracks. The hint is off wherever the key is
-   * ignored (typing, an editor holding the map). Emits only on change.
-   */
-  private updateDoorNotice(): void {
-    // The spawn position is not the player's until the room says so.
-    if (!this.localPositionReady) return;
-    const ignored = isEditableElementFocused() || this.mapHeld;
-    // The tile of the body center, which is what the room checks the key by.
-    const tile = Math.floor((this.player.y + AVATAR_BODY_CENTER_OFFSET.y) / TILE) * this.layout.width + Math.floor((this.player.x + AVATAR_BODY_CENTER_OFFSET.x) / TILE);
-    const last = this.doorNotice.from;
-    if (last !== null && last.tile === tile && last.decor === this.officeDecor && last.locks === this.doorLocks && last.ignored === ignored) return;
-    this.doorNotice.from = { tile, decor: this.officeDecor, locks: this.doorLocks, ignored };
-    const position = { x: this.player.x, y: this.player.y };
-    const computed = doorLockNotice(this.liveDoorGeometry().leaves, this.doorLocks, position);
-    const next: DoorLockNotice = { lockable: ignored ? null : computed.lockable };
-    const told = this.doorNotice.told;
-    if (next.lockable === told.lockable) return;
-    this.doorNotice.told = next;
-    this.bridge.emit('doorlocknotice', next);
-  }
-
-  /**
-   * Puts an Arcade collider on every locked door (#223, #233): the room
-   * refuses walking through one from either side, so the client stops the
-   * body before it does (the stricter side).
-   */
-  private updateDoorBarriers(): void {
-    const barriers = this.doorLocks.size === 0
-      ? []
-      : lockedDoorBarriers(this.liveDoorGeometry().leaves, this.doorLocks);
-    const key = barriers.map(({ index }) => index).join(',');
-    if (key === this.doorBarriers.key) return;
-    if (this.doorBarriers.collider) this.physics.world.removeCollider(this.doorBarriers.collider);
-    for (const rect of this.doorBarriers.rects) rect.destroy();
-    const rects = barriers.map(({ rect: r }) => {
-      const rect = this.add.rectangle(r.x + r.w / 2, r.y + r.h / 2, r.w, r.h);
-      this.physics.add.existing(rect, true);
-      return rect;
-    });
-    this.doorBarriers = {
-      key,
-      // For the path: the locked span, as Arcade has it.
-      blocks: barriers.map(({ rect }) => rect),
-      rects,
-      ...(rects.length === 0 ? {} : { collider: this.physics.add.collider(this.player, rects) }),
-    };
   }
 
   /**
    * What the double-click path plans against (#227): what Arcade collides
    * the body with, the terrain tiles and the wall and piece rectangles (an
-   * open door's edge is already out of the wall rectangles), plus each locked
-   * door's span (#223, #233).
+   * open door's edge is already out of the wall rectangles).
    */
   private walkWorld(): WalkWorld {
-    this.updateDoorBarriers();
-    return { terrainSolid: this.grid.terrainSolid, rects: [...this.grid.wallRects, ...this.collisionRects, ...this.doorBarriers.blocks] };
+    return { terrainSolid: this.grid.terrainSolid, rects: [...this.grid.wallRects, ...this.collisionRects] };
   }
 
   /**
@@ -2185,13 +2087,6 @@ export class OfficeScene extends Phaser.Scene {
     const keyboard = this.input.keyboard as Phaser.Input.Keyboard.KeyboardPlugin;
     this.cursors = keyboard.createCursorKeys();
     this.wasd = keyboard.addKeys('W,A,S,D') as WasdKeys;
-    // X locks or unlocks the door next to this player (#223, #233); the
-    // room decides which from where it tracks them. Never while typing, nor
-    // while an editor holds the map.
-    keyboard.on('keydown-X', () => {
-      if (isEditableElementFocused() || this.mapHeld) return;
-      this.connection?.sendDoorLock();
-    });
     keyboard.addCapture('UP,DOWN,LEFT,RIGHT,SPACE');
 
     // `focusin`/`focusout` (a diferencia de `focus`/`blur`) burbujean, asi que
@@ -2431,8 +2326,6 @@ export class OfficeScene extends Phaser.Scene {
       avatar.lastY = avatar.y;
     }
     this.animateDoors();
-    this.updateDoorBarriers();
-    this.updateDoorNotice();
     if (this.localPositionReady && this.connectionState === 'connected') {
       this.connection?.sendMove(this.player.x, this.player.y, this.facing);
     }
