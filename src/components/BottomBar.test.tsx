@@ -54,15 +54,13 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
 }
 
 describe('BottomBar: own desk button', () => {
-  it('sits in the status group, between the status select and Mic', () => {
+  it('sits in the Estado group, left of the room line', () => {
     renderBar();
 
-    const button = within(screen.getByRole('group', { name: 'Identidad' })).getByRole('button', { name: 'Ir a mi escritorio' });
+    const button = within(screen.getByRole('group', { name: 'Estado' })).getByRole('button', { name: 'Ir a mi escritorio' });
     expect(button).toHaveTextContent('🪑');
-    const select = screen.getByRole('combobox', { name: 'Mi estado' });
-    const mic = screen.getByRole('button', { name: /Mic/ });
-    expect(select.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(button.compareDocumentPosition(mic) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const line = screen.getByText(/proximidad/).parentElement!;
+    expect(button.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('asks to walk to the own desk on click', async () => {
@@ -84,23 +82,22 @@ describe('BottomBar: own desk button', () => {
 });
 
 describe('BottomBar: space lock button', () => {
-  it('sits in the status group, after the desk button and before Mic', () => {
+  it('sits in the Estado group, after the desk button and left of the room name', () => {
     renderBar({ room: 'Sala 1' });
 
-    const group = screen.getByRole('group', { name: 'Identidad' });
+    const group = screen.getByRole('group', { name: 'Estado' });
     const lock = within(group).getByRole('button', { name: 'Bloquear espacio' });
     const desk = screen.getByRole('button', { name: 'Ir a mi escritorio' });
-    const mic = screen.getByRole('button', { name: /Mic/ });
     expect(desk.compareDocumentPosition(lock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(lock.compareDocumentPosition(mic) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(lock.compareDocumentPosition(screen.getByText('Sala 1')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('locks the space it stands in with the open lock', async () => {
+  it('locks the space it stands in with the closed lock, the action it takes', async () => {
     const user = userEvent.setup();
     const props = renderBar({ room: 'Sala 1' });
 
     const lock = screen.getByRole('button', { name: 'Bloquear espacio' });
-    expect(lock).toHaveTextContent('🔓');
+    expect(lock).toHaveTextContent('🔒');
     expect(lock).toHaveAttribute('aria-pressed', 'false');
     expect(lock).toHaveAttribute('title', 'Bloquear este espacio con quienes están dentro');
     await user.click(lock);
@@ -108,12 +105,12 @@ describe('BottomBar: space lock button', () => {
     expect(props.onLockRoom).toHaveBeenCalledTimes(1);
   });
 
-  it('lets whoever locked the space unlock it with the closed lock', async () => {
+  it('lets whoever locked the space unlock it with the open lock', async () => {
     const user = userEvent.setup();
     const props = renderBar({ room: 'Sala 1', roomLocked: true, roomLockedByMe: true });
 
     const lock = screen.getByRole('button', { name: 'Bloquear espacio' });
-    expect(lock).toHaveTextContent('🔒');
+    expect(lock).toHaveTextContent('🔓');
     expect(lock).toHaveAttribute('aria-pressed', 'true');
     expect(lock).toHaveAttribute('title', 'Desbloquear este espacio');
     await user.click(lock);
@@ -122,11 +119,11 @@ describe('BottomBar: space lock button', () => {
     expect(props.onLockRoom).not.toHaveBeenCalled();
   });
 
-  it('shows the closed lock to the others, pressed and disabled: they can only leave', () => {
+  it('shows the open lock to the others, pressed and disabled: they can only leave', () => {
     renderBar({ room: 'Sala 1', roomLocked: true, roomLockedByMe: false });
 
     const lock = screen.getByRole('button', { name: 'Bloquear espacio' });
-    expect(lock).toHaveTextContent('🔒');
+    expect(lock).toHaveTextContent('🔓');
     expect(lock).toHaveAttribute('aria-pressed', 'true');
     expect(lock).toBeDisabled();
     expect(lock).toHaveAttribute('title', 'Espacio bloqueado: solo quien lo bloqueó puede desbloquearlo');

@@ -205,6 +205,13 @@
   border-bottom-right-radius: 0;
 }
 
+.placeActions {
+  display: flex;
+  gap: 6px;
+  /* The room name is what gets cut on a tight bar, never these. */
+  flex-shrink: 0;
+}
+
 .status {
   font-size: 12px;
   color: #9ca3af;

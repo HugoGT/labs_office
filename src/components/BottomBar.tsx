@@ -183,27 +183,6 @@ export function BottomBar({
             </option>
           ))}
         </select>
-        <button
-          type="button"
-          className={`${styles.btn} ${styles.iconBtn}`}
-          aria-label={GO_TO_DESK_LABEL}
-          disabled={!hasDesk}
-          title={hasDesk ? GO_TO_DESK_LABEL : NO_DESK_TITLE}
-          onClick={onGoToDesk}
-        >
-          🪑
-        </button>
-        <button
-          type="button"
-          className={`${styles.btn} ${styles.iconBtn}`}
-          aria-label={LOCK_LABEL}
-          aria-pressed={locked}
-          disabled={room === null || (roomLocked && !roomLockedByMe)}
-          title={lockTitle}
-          onClick={locked ? onUnlockRoom : onLockRoom}
-        >
-          {locked ? '🔒' : '🔓'}
-        </button>
       </div>
       <div className={styles.controls} role="toolbar" aria-label="Controles de llamada">
         {/* `disabled`+`title` mientras LiveKit no esta disponible, espejando el
@@ -266,6 +245,31 @@ export function BottomBar({
         </button>
       </div>
       <div className={styles.info} role="group" aria-label="Estado">
+        {/* The place's own actions, next to its name: go to the own desk, lock the space. */}
+        <span className={styles.placeActions}>
+          <button
+            type="button"
+            className={`${styles.btn} ${styles.iconBtn}`}
+            aria-label={GO_TO_DESK_LABEL}
+            disabled={!hasDesk}
+            title={hasDesk ? GO_TO_DESK_LABEL : NO_DESK_TITLE}
+            onClick={onGoToDesk}
+          >
+            🪑
+          </button>
+          <button
+            type="button"
+            className={`${styles.btn} ${styles.iconBtn}`}
+            aria-label={LOCK_LABEL}
+            aria-pressed={locked}
+            disabled={room === null || (roomLocked && !roomLockedByMe)}
+            title={lockTitle}
+            onClick={locked ? onUnlockRoom : onLockRoom}
+          >
+            {/* The lock shows what a click does: lock, or unlock. */}
+            {locked ? '🔓' : '🔒'}
+          </button>
+        </span>
         <div className={styles.status}>
           {dnd ? (
             // Anunciar "Audio por proximidad" mientras nada es audible seria

@@ -144,7 +144,8 @@ describe('HUD layout: bottom bar (#87)', () => {
       presence: { online: false, peers: 0, state: 'offline', canRetry: false },
     });
     const buttons = controls.querySelectorAll('button');
-    const status = info.children[0]!;
+    const status = screen.getByText('Sala 1').parentElement!;
+    expect(info.contains(status)).toBe(true);
     const rec = screen.getByText('REC');
     const presence = screen.getByText(/Sin servidor/);
     const recDot = rec.firstElementChild!;
