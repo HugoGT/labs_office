@@ -39,7 +39,7 @@ import { tableFacing, tableFloorRect } from './deskTable';
 import { decorChairs, decorFootprint, encodeOfficeDecor, isDecorChairPiece, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
 import { doorEdge, doorLeaves, doorOpenings, doorSpan, doorStepOf, doorSwingRotation, keptSwings, moveDoors, openDoorLeaves, type DoorLeaf, type DoorMotion } from './officeDoors';
 import { deskEntryRefused, isOnDesk } from './deskDecorRules';
-import { lockedSpaceEntered } from './spaceLocks';
+import { lockedBehindDoor, lockedDoorAhead, lockedSpaceEntered } from './spaceLocks';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
 import { MinimapLayer } from './MinimapLayer';
@@ -1751,7 +1751,8 @@ export class OfficeScene extends Phaser.Scene {
    * Swings every door leaf an avatar (this player or a peer) is about to
    * cross, away from the avatar, and closes the rest (#223, `openDoorLeaves`,
    * `moveDoors`): drawing only, once per frame, switching the frame and the
-   * depth of the images `paintDecor` kept. Doors never block.
+   * depth of the images `paintDecor` kept. Doors never block. The door of a
+   * locked space stays shut for whoever is outside it (`spaceLocks.ts`).
    */
   private animateDoors(dtMs: number): void {
     if (this.doorImages.size === 0) return;
@@ -1761,7 +1762,12 @@ export class OfficeScene extends Phaser.Scene {
       if (avatar !== undefined) positions.push({ x: avatar.x, y: avatar.y });
     }
     // A door keeps the side it swings to until it is shut again (S14), also when it is closing.
-    const targets = openDoorLeaves([...this.doorLeaves.values()], positions, keptSwings(this.doorMotion));
+    const targets = openDoorLeaves(
+      [...this.doorLeaves.values()],
+      positions,
+      keptSwings(this.doorMotion),
+      (leaf, position) => lockedBehindDoor(leaf, position, this.spaces, this.lockedSpaces) !== null,
+    );
     this.doorMotion = moveDoors(targets, this.doorMotion, dtMs);
     for (const [index, image] of this.doorImages) {
       const leaf = this.doorLeaves.get(index);
@@ -2555,6 +2561,7 @@ export class OfficeScene extends Phaser.Scene {
     }
 
     const from = { x: this.player.x, y: this.player.y };
+    const heading = { x: body.velocity.x, y: body.velocity.y };
     const intended = body.velocity.lengthSq() > 0;
     if (intended && !body.checkCollision.none) {
       body.updateFromGameObject();
@@ -2577,8 +2584,13 @@ export class OfficeScene extends Phaser.Scene {
     // A full desk takes nobody else in (`deskDecorRules.ts`): the step that
     // would enter it is undone, and an auto-walk into it ends there.
     // So does a locked space, to whoever is not in it (`spaceLocks.ts`).
+    // Its door being the way in, walking at it already says it is locked,
+    // even for a body a post beside the door holds back from the step in.
     const fullDesk = intended && this.fullDeskOnTheWay(from, this.player) !== null;
     const lockedSpace = intended && !fullDesk ? lockedSpaceEntered(from, this.player, this.spaces, this.lockedSpaces) : null;
+    const lockedDoor = intended && !fullDesk && lockedSpace === null
+      ? lockedDoorAhead([...this.doorLeaves.values()], from, heading, this.spaces, this.lockedSpaces)
+      : null;
     if (fullDesk || lockedSpace !== null) {
       body.reset(from.x, from.y);
       body.updateFromGameObject();
@@ -2588,6 +2600,9 @@ export class OfficeScene extends Phaser.Scene {
       if (lockedSpace !== null && !this.spaceLockedTold) this.bridge.emit('spacelocked', { spaceId: lockedSpace.id });
       if (fullDesk) this.deskFullTold = true;
       else this.spaceLockedTold = true;
+    } else if (lockedDoor !== null) {
+      if (!this.spaceLockedTold) this.bridge.emit('spacelocked', { spaceId: lockedDoor.id });
+      this.spaceLockedTold = true;
     } else if (!intended || Math.hypot(this.player.x - from.x, this.player.y - from.y) > 0.000001) {
       this.deskFullTold = false;
       this.spaceLockedTold = false;

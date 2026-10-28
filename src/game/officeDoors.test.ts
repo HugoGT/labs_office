@@ -8,6 +8,7 @@ import {
   doorEdge,
   doorEdges,
   doorEndPosts,
+  doorFarSide,
   doorInnerPosts,
   doorPosts,
   doorShoulders,
@@ -267,6 +268,31 @@ describe('officeDoors: open and closed (#223, #233)', () => {
     expect(fresh).toBe(openDoorLeaves(leaves, [both[0]!]).get(at(4, 6)));
     const kept = openDoorLeaves(leaves, both, new Map([[at(4, 6), fresh === 'inside' ? 'outside' : 'inside']])).get(at(4, 6));
     expect(kept).not.toBe(fresh);
+  });
+
+  it('stays shut for an avatar it is kept shut for, and opens for the next one lined up with it', () => {
+    const leaves = doorLeaves([door(4, 6, 0)], WIDTH);
+    const north = standingAt(160, 6 * 32 - 10);
+    const south = standingAt(160, 6 * 32 + 10);
+    const shutForNorth = (_leaf: unknown, position: { x: number; y: number }) => position === north;
+    expect(openAnchors(leaves, [north], new Map(), shutForNorth)).toEqual(new Set());
+    expect(openDoorLeaves(leaves, [north, south], new Map(), shutForNorth).get(at(4, 6))).toBe(openDoorLeaves(leaves, [south]).get(at(4, 6)));
+  });
+});
+
+describe('officeDoors: where a door leads (#223)', () => {
+  it('is the middle of the door tile across the edge from the body, along the body', () => {
+    const [leaf] = doorLeaves([door(4, 6, 0)], WIDTH);
+    expect(doorFarSide(leaf!, standingAt(150, 6 * 32 - 10))).toEqual({ x: 150, y: 6 * 32 + 16 });
+    expect(doorFarSide(leaf!, standingAt(150, 6 * 32 + 10))).toEqual({ x: 150, y: 6 * 32 - 16 });
+    const [vertical] = doorLeaves([door(4, 6, 90)], WIDTH);
+    expect(doorFarSide(vertical!, standingAt(4 * 32 - 10, 200))).toEqual({ x: 4 * 32 + 16, y: 200 });
+  });
+
+  it('is nothing for a body not lined up with the door', () => {
+    const [leaf] = doorLeaves([door(4, 6, 0)], WIDTH);
+    expect(doorFarSide(leaf!, standingAt(128 - 1, 6 * 32 - 10))).toBeNull();
+    expect(doorFarSide(leaf!, standingAt(160, 224 + DOOR_OPEN_REACH_PX))).toBeNull();
   });
 });
 

@@ -795,6 +795,29 @@ describe('auto-walk around walls and desks (#219, #221)', () => {
       expect(told).toEqual([{ spaceId: 'sala' }, { spaceId: 'sala' }]);
     });
 
+    it('says a space is locked to whoever pushes at its door from outside, even held back by the post beside it', async () => {
+      const connector = fakeConnector('mi-sesion');
+      const arena = await movementArena(connector);
+      const told: unknown[] = [];
+      arena.bridge.on('spacelocked', (payload) => told.push(payload));
+      arena.bridge.emitCommand('spacesconfig', { spaces: [SALA], version: 'v1' });
+      // The room's door on its bottom line (y = 10 * TILE), over tiles 21..22, and the post at the east end of its span.
+      connector.handlers()!.onDecor?.([{ index: 10 * BASE_LAYOUT.width + 21, piece: 'door-wood', rotation: 0 }]);
+      arena.movement.collisionRects = [{ x: 23 * TILE - 8, y: 10 * TILE - 8, w: 16, h: 16 }];
+      arena.movement.buildPieceColliders();
+      connector.handlers()!.onLockedSpaces?.(new Map([['sala', 'otra-sesion']]));
+      // Lined up with the door against its east end, right under the post.
+      arena.body.reset(23 * TILE - 4, 10 * TILE + 20);
+      arena.frame();
+
+      arena.movement.cursors.up.isDown = true;
+      arena.walk(400);
+      arena.movement.cursors.up.isDown = false;
+
+      expect(arena.player.y).toBeGreaterThanOrEqual(SALA.y + SALA.h);
+      expect(told).toEqual([{ spaceId: 'sala' }]);
+    });
+
     it('lets whoever is inside a locked space walk out of it', async () => {
       const connector = fakeConnector('mi-sesion');
       const arena = await movementArena(connector);
@@ -5001,6 +5024,32 @@ describe('OfficeScene: edited terrain', () => {
     at(middle, lawnVertex.y - 10);
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(frame()).toBe(doorFrameIndex(180, 'start', DOOR_STEPS - 1));
+  });
+
+  it('keeps the door of a locked space shut for whoever is outside it, and opens it for whoever is inside', async () => {
+    const { scene, bridge, handlers } = await bootConnected();
+    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
+    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 0 }]);
+    const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
+    await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
+    const frame = () => Number(leaf().frame.name);
+    // The room the door leads into, north of its line, locked by someone else.
+    bridge.emitCommand('spacesconfig', { spaces: [{ id: 'sala', name: 'Sala 1', x: lawnVertex.x, y: lawnVertex.y - 4 * TILE, w: 2 * TILE, h: 4 * TILE }], version: 'v1' });
+    handlers.onLockedSpaces!(new Map([['sala', 'otra-sesion']]));
+    const body = findPlayer(scene).body as Phaser.Physics.Arcade.Body;
+    const middle = lawnVertex.x + TILE;
+    // Body centers sit 11px below the network position (`AVATAR_BODY_CENTER_OFFSET`).
+    const at = (x: number, centerY: number) => body.reset(x, centerY - 11);
+
+    // The local player and a peer, both outside and lined up with the door: it stays shut.
+    at(middle, lawnVertex.y + 20);
+    handlers.onAdd(remoteSnapshot({ sessionId: 'peer-door', x: middle - 8, y: lawnVertex.y + 9 }));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(frame()).toBe(doorFrameIndex(0, 'start', 0));
+
+    // Whoever is inside opens it on the way out, swung south, away from them.
+    at(middle, lawnVertex.y - 10);
+    await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(0, 'start', DOOR_STEPS - 1)), LOOP_WAIT);
   });
 
   it('draws a double door from the pack as one item over its 3-tile span, opening while an avatar passes and closing after (#233)', async () => {

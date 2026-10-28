@@ -227,17 +227,18 @@ export function doorSwingRotation(rotation: DecorItem['rotation'], swing: DoorSw
  * body center passes the edge line mid crossing. Two bodies from opposite
  * sides get that kept swing, else the one of the first body (in `positions`
  * order) that opens it. Drawing only: a door never blocks anyone, open or
- * closed.
+ * closed. `keptShut` names the avatars a door does not open for (a locked
+ * space behind it, `spaceLocks.ts`); one lined up with it opens it for no one.
  */
 export function openDoorLeaves(
   leaves: readonly DoorLeaf[],
   positions: readonly GeometryPoint[],
   previous: ReadonlyMap<number, DoorSwing> = new Map(),
+  keptShut: (leaf: DoorLeaf, position: GeometryPoint) => boolean = () => false,
 ): Map<number, DoorSwing> {
-  const centers = positions.map(bodyCenter);
   const open = new Map<number, DoorSwing>();
   for (const leaf of leaves) {
-    const openers = centers.filter((center) => liningUp(leaf, center));
+    const openers = positions.filter((position) => !keptShut(leaf, position)).map(bodyCenter).filter((center) => liningUp(leaf, center));
     if (openers.length === 0) continue;
     open.set(leaf.index, previous.get(leaf.index) ?? (sideOf(leaf, openers[0]!) > 0 ? 'outside' : 'inside'));
   }
@@ -317,6 +318,22 @@ export function moveDoors(targets: ReadonlyMap<number, DoorSwing>, motion: Reado
 /** The frame of a swing (`doorFrameIndex`'s step): the nearest of closed, the two between and open. */
 export function doorStepOf(progress: number): number {
   return Math.round(progress * (DOOR_STEPS - 1));
+}
+
+/**
+ * Where a door leads a body at network position `position` lined up with it
+ * (`openDoorLeaves`): the middle of the door's tile across its edge from the
+ * body center, along that center. `null` for a body not lined up with it.
+ */
+export function doorFarSide(leaf: DoorLeaf, position: GeometryPoint): GeometryPoint | null {
+  const center = bodyCenter(position);
+  if (!liningUp(leaf, center)) return null;
+  if (leaf.edge.axis === 'horizontal') {
+    const line = leaf.edge.row * DOOR_TILE;
+    return { x: center.x, y: center.y < line ? line + DOOR_TILE / 2 : line - DOOR_TILE / 2 };
+  }
+  const line = leaf.edge.col * DOOR_TILE;
+  return { x: center.x < line ? line + DOOR_TILE / 2 : line - DOOR_TILE / 2, y: center.y };
 }
 
 /** Whether a body center is lined up with a door's span and close to its edge across it. */

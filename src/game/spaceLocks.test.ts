@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { SpaceArea } from './mapData';
-import { decodeLockedSpaces, encodeLockedSpaces, heldLocks, lockedSpaceEntered } from './spaceLocks';
+import { physicalBodyRect } from './avatarGeometry';
+import { doorLeaves } from './officeDoors';
+import { decodeLockedSpaces, encodeLockedSpaces, heldLocks, lockedDoorAhead, lockedSpaceEntered, lockedBehindDoor } from './spaceLocks';
 
 const SALA: SpaceArea = { id: 'sala', name: 'Sala 1', x: 0, y: 0, w: 100, h: 100 };
 const MESA: SpaceArea = { id: 'mesa', name: 'Mesa 1', x: 200, y: 0, w: 96, h: 96 };
@@ -54,5 +56,38 @@ describe('locked spaces wire form', () => {
     expect(encodeLockedSpaces(new Map())).toBe('');
     expect(decodeLockedSpaces('mesa:locker-mesa,sala:locker-sala')).toEqual(locks('mesa', 'sala'));
     expect(decodeLockedSpaces('')).toEqual(new Map());
+  });
+});
+
+describe('locked doors', () => {
+  // A room above the grid line y = 192, its door on tiles 4..5 of that line (x 128..192).
+  const ROOM: SpaceArea = { id: 'room', name: 'Sala 2', x: 4 * 32, y: 0, w: 2 * 32, h: 6 * 32 };
+  const [DOOR] = doorLeaves([{ index: 6 * 20 + 4, piece: 'door-wood', rotation: 0 }], 20);
+  /** A network position whose body center is at (cx, cy). */
+  const standingAt = (cx: number, cy: number) => {
+    const body = physicalBodyRect({ x: 0, y: 0 });
+    return { x: cx - (body.x + body.width / 2), y: cy - (body.y + body.height / 2) };
+  };
+  const below = standingAt(185, 6 * 32 + 20);
+  const inside = standingAt(150, 6 * 32 - 10);
+  const up = { x: 0, y: -1 };
+
+  it('the door leads from outside into a locked room for whoever is outside it', () => {
+    expect(lockedBehindDoor(DOOR!, below, [ROOM], locks('room'))).toBe(ROOM);
+    expect(lockedBehindDoor(DOOR!, below, [ROOM], locks())).toBeNull();
+    expect(lockedBehindDoor(DOOR!, inside, [ROOM], locks('room'))).toBeNull();
+    expect(lockedBehindDoor(DOOR!, standingAt(300, 300), [ROOM], locks('room'))).toBeNull();
+  });
+
+  it('is ahead of a body lined up with the door, outside the room and heading through it, even beside its post', () => {
+    expect(lockedDoorAhead([DOOR!], below, up, [ROOM], locks('room'))).toBe(ROOM);
+    expect(lockedDoorAhead([DOOR!], standingAt(191, 6 * 32 + 20), { x: 1, y: -1 }, [ROOM], locks('room'))).toBe(ROOM);
+  });
+
+  it('is not ahead of a body walking along the wall or away from the door, nor of whoever is inside', () => {
+    expect(lockedDoorAhead([DOOR!], below, { x: 1, y: 0 }, [ROOM], locks('room'))).toBeNull();
+    expect(lockedDoorAhead([DOOR!], below, { x: 0, y: 1 }, [ROOM], locks('room'))).toBeNull();
+    expect(lockedDoorAhead([DOOR!], inside, { x: 0, y: 1 }, [ROOM], locks('room'))).toBeNull();
+    expect(lockedDoorAhead([DOOR!], below, up, [ROOM], locks())).toBeNull();
   });
 });
