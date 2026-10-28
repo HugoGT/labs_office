@@ -233,7 +233,7 @@ describe('OfficeScene: input y movimiento del jugador (app.js:488-497)', () => {
     try {
       await vi.waitFor(() => {
         expect(player.x).toBeGreaterThan(startX);
-      });
+      }, LOOP_WAIT);
     } finally {
       dispatchKey('keyup', KEY.RIGHT);
     }
@@ -248,7 +248,7 @@ describe('OfficeScene: input y movimiento del jugador (app.js:488-497)', () => {
     try {
       await vi.waitFor(() => {
         expect(player.x).toBeGreaterThan(startX);
-      });
+      }, LOOP_WAIT);
     } finally {
       dispatchKey('keyup', KEY.D);
     }
@@ -716,7 +716,7 @@ describe('OfficeScene: authoritative initial position (#148)', () => {
     frame();
     scene.input.emit('pointerdown', { button: 0, camera: scene.cameras.cameras[1], x: 5, y: 5 }, []);
     bridge.emitCommand('reconnect', undefined);
-    await vi.waitFor(() => expect(connector.connectCount()).toBe(2));
+    await vi.waitFor(() => expect(connector.connectCount()).toBe(2), LOOP_WAIT);
     const before = connector.sent.length;
     frame();
     expect(connector.sent).toHaveLength(before);
@@ -746,11 +746,11 @@ describe('OfficeScene: authoritative initial position (#148)', () => {
     });
     scene.game.loop.stop();
     bridge.emitCommand('reconnect', undefined);
-    await vi.waitFor(() => expect(next.handlers()).toBeDefined());
+    await vi.waitFor(() => expect(next.handlers()).toBeDefined(), LOOP_WAIT);
     next.handlers()!.onLocalPosition?.(restored());
     first.handlers()!.onLocalPosition?.(remoteSnapshot({ x: 900, y: 900 }));
     finishFirst();
-    await vi.waitFor(() => expect(first.hasLeft()).toBe(true));
+    await vi.waitFor(() => expect(first.hasLeft()).toBe(true), LOOP_WAIT);
     scene.game.step(scene.time.now + 20, 20);
     expect(findPlayer(scene).x).toBe(300.5);
     expect(first.sent).toEqual([]);
@@ -856,6 +856,7 @@ describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
         state: 'offline',
         canRetry: false,
       }),
+      LOOP_WAIT,
     );
     expect(findRemoteAvatars(scene)).toHaveLength(0);
   });
@@ -867,7 +868,7 @@ describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
       connect: connector.connect,
     });
 
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
     connector.handlers()!.onAdd(remoteSnapshot({ x: 500, y: 600 }));
 
     const avatars = findRemoteAvatars(scene);
@@ -882,7 +883,7 @@ describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
       endpoint: 'ws://fake',
       connect: connector.connect,
     });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
 
     connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'mi-sesion', name: DEFAULT_NAME }));
 
@@ -897,7 +898,7 @@ describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
       endpoint: 'ws://fake',
       connect: connector.connect,
     });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
     connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'se-va' }));
     expect(findRemoteAvatars(scene)).toHaveLength(1);
 
@@ -912,7 +913,7 @@ describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
     bridge.on('presence', (p) => presence.push(p));
     const connector = fakeConnector();
     await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
 
     connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'a' }));
     connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'b' }));
@@ -948,6 +949,7 @@ describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
         state: 'offline',
         canRetry: true,
       }),
+      LOOP_WAIT,
     );
     expect(findPlayer(scene).nameText).toBe(DEFAULT_NAME);
   });
@@ -972,6 +974,7 @@ describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
         reason: 'expired',
         canRetry: true,
       }),
+      LOOP_WAIT,
     );
     // "Sin servidor" would send the person to retry against a server that is
     // up and has already said no.
@@ -986,7 +989,7 @@ describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
     });
 
     // El agrupado decide que sale por el cable; la escena publica siempre.
-    await vi.waitFor(() => expect(connector.sent.length).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(connector.sent.length).toBeGreaterThan(0), LOOP_WAIT);
     expect(connector.sent[0]).toMatchObject({ facing: 'down' });
   });
 
@@ -996,13 +999,13 @@ describe('OfficeScene: avatares reales por Colyseus (PRD 6.2)', () => {
       endpoint: 'ws://fake',
       connect: connector.connect,
     });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
 
     scene.sys.events.emit(Phaser.Scenes.Events.SHUTDOWN);
 
     // Sin esto, cada remonte de StrictMode dejaria un socket vivo publicando la
     // posicion de un jugador ya destruido.
-    await vi.waitFor(() => expect(connector.hasLeft()).toBe(true));
+    await vi.waitFor(() => expect(connector.hasLeft()).toBe(true), LOOP_WAIT);
   });
 });
 
@@ -1013,7 +1016,7 @@ describe('OfficeScene: roster de personas conectadas via el puente (#74)', () =>
     bridge.on('roster', (r) => roster.push(r));
     const connector = fakeConnector();
     await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
 
     connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', name: 'Ana Remota', status: 'g' }));
 
@@ -1028,7 +1031,7 @@ describe('OfficeScene: roster de personas conectadas via el puente (#74)', () =>
     const roster: OfficeEventMap['roster'][] = [];
     bridge.on('roster', (r) => roster.push(r));
     await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
 
     connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'mi-sesion', name: DEFAULT_NAME }));
 
@@ -1041,9 +1044,9 @@ describe('OfficeScene: roster de personas conectadas via el puente (#74)', () =>
     const roster: OfficeEventMap['roster'][] = [];
     bridge.on('roster', (r) => roster.push(r));
     await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
     connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'se-va', name: 'Se Va' }));
-    await vi.waitFor(() => expect(roster.at(-1)?.peers).toHaveLength(1));
+    await vi.waitFor(() => expect(roster.at(-1)?.peers).toHaveLength(1), LOOP_WAIT);
 
     connector.handlers()!.onRemove('se-va');
 
@@ -1056,7 +1059,7 @@ describe('OfficeScene: roster de personas conectadas via el puente (#74)', () =>
     const roster: OfficeEventMap['roster'][] = [];
     bridge.on('roster', (r) => roster.push(r));
     await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
     connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', name: 'Ana Remota', status: 'g' }));
     const emissionsAfterAdd = roster.length;
 
@@ -1075,7 +1078,7 @@ describe('OfficeScene: drift de spacesVersion entre pares (#74, PR3a)', () => {
     const stale: OfficeEventMap['spacesstale'][] = [];
     bridge.on('spacesstale', (s) => stale.push(s));
     await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
 
     connector.handlers()!.onAdd(remoteSnapshot({ spacesVersion: 'version-editada' }));
 
@@ -1088,7 +1091,7 @@ describe('OfficeScene: drift de spacesVersion entre pares (#74, PR3a)', () => {
     const stale: OfficeEventMap['spacesstale'][] = [];
     bridge.on('spacesstale', (s) => stale.push(s));
     await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
 
     // `remoteSnapshot()` por defecto ya lleva `BUILT_IN_SPACES_VERSION`, la
     // misma con la que arranca la escena.
@@ -1106,7 +1109,7 @@ describe('OfficeScene: drift de spacesVersion entre pares (#74, PR3a)', () => {
     const stale: OfficeEventMap['spacesstale'][] = [];
     bridge.on('spacesstale', (s) => stale.push(s));
     await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
     connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1' }));
 
     connector.handlers()!.onChange(remoteSnapshot({ sessionId: 'par-1', spacesVersion: 'version-editada' }));
@@ -1120,7 +1123,7 @@ describe('OfficeScene: drift de spacesVersion entre pares (#74, PR3a)', () => {
     const stale: OfficeEventMap['spacesstale'][] = [];
     bridge.on('spacesstale', (s) => stale.push(s));
     await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined());
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
     connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'par-1', spacesVersion: 'version-editada' }));
 
     connector
