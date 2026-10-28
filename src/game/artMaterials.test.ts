@@ -129,8 +129,8 @@ describe('materialCatalogFrom: plants and room tables (#208)', () => {
 describe('materialCatalogFrom: doors (#223, #233)', () => {
   it('offers every door of the pack, the single and the double one apart, never colorable, for the decor palette', () => {
     expect(catalog().door.map((option) => [option.id, option.kind, option.name, option.colorable, option.sheetUrl])).toEqual([
-      ['door-wood', 'door', 'Puerta de madera', false, 'assets/pack/door/wood.png'],
-      ['door-wood-double', 'door', 'Puerta doble de madera', false, 'assets/pack/door/wood-double.png'],
+      ['door-wood', 'door', 'Puerta simple', false, 'assets/pack/door/wood.png'],
+      ['door-wood-double', 'door', 'Puerta doble', false, 'assets/pack/door/wood-double.png'],
     ]);
     expect(catalog().door.every((option) => option.defaultColor === null)).toBe(true);
   });

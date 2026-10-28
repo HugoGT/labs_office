@@ -1846,7 +1846,7 @@
     {
       "id": "door-wood",
       "kind": "door",
-      "name": "Puerta de madera",
+      "name": "Puerta simple",
       "author": "HugoGT",
       "license": "proprietary-internal",
       "material": "wood",
@@ -1873,7 +1873,7 @@
     {
       "id": "door-wood-double",
       "kind": "door",
-      "name": "Puerta doble de madera",
+      "name": "Puerta doble",
       "author": "HugoGT",
       "license": "proprietary-internal",
       "material": "wood",

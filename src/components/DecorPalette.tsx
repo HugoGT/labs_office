@@ -49,9 +49,6 @@ export const DECOR_COLORS: readonly Swatch[] = [
   { hex: '#d77fa1', label: 'Rosa' },
 ];
 
-/** Under the doors (#223, #233): where they go, since nothing else on the map says so. */
-const DOOR_HINT = 'Va entre dos paredes, una en cada extremo: la puerta ocupa 2 casillas y la doble 3.';
-
 /** The thumbnail box, in pixels. */
 const THUMBNAIL_PX = 48;
 
@@ -175,7 +172,6 @@ export function DecorPalette({ value, catalog, offers = () => true, colors = {},
                 );
               })}
             </div>
-            {kind === 'door' && <p className={styles.size}>{DOOR_HINT}</p>}
           </div>
         );
       })}

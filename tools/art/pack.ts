@@ -98,7 +98,7 @@ const TABLES: Readonly<Record<RoomTable, { readonly name: string; readonly mater
 };
 /** The single and the double door are two items (#233), each with its own name and wall footprint. */
 const DOOR_NAMES: Readonly<Record<DoorMaterial, Readonly<Record<DoorVariant, string>>>> = {
-  wood: { single: 'Puerta de madera', double: 'Puerta doble de madera' },
+  wood: { single: 'Puerta simple', double: 'Puerta doble' },
 };
 /** The whole 3x3 deck is walkable in both orientations; the rails are thin enough to step along. */
 const FULL_DECK = { x: 0, y: 0, w: BRIDGE.footprint.w, h: BRIDGE.footprint.h } as const;
