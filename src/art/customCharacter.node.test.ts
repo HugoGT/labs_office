@@ -201,6 +201,8 @@ describe('toCharacterSpec', () => {
     expect(spec.palette.inner).toBe(SPEC.top.color);
   });
 
+  // Renders every option's full walk and seated sheets: under 1s locally, but
+  // a loaded CI shard ran it past the 5s default, so it gets its own budget.
   it('draws every option of every part', () => {
     const rounds = Math.max(HAIR_STYLE_OPTIONS.length, TOP_STYLE_OPTIONS.length, CUSTOM_ACCESSORIES.length);
     for (let i = 0; i < rounds; i += 1) {
@@ -220,7 +222,7 @@ describe('toCharacterSpec', () => {
       expect(walk.countOpaque()).toBeGreaterThan(0);
       expect(seated.countOpaque()).toBeGreaterThan(0);
     }
-  });
+  }, 20000);
 
   it('draws no accessory for none', () => {
     const none = renderCharacterSheets(toCharacterSpec({ ...SPEC, accessory: 'none' })).walk;
