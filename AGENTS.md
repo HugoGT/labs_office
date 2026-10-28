@@ -130,7 +130,7 @@ Invariants:
 
 Only a `test` environment exists; `infra/gcp/README.md` is the runbook.
 
-- On a push to `main`, ci.yml skips `verify` when a same-repo PR run already passed the identical tree (`tools/ci/`); the workflow stays green and deploy starts. Keep the `tested-tree-<tree>` artifact as the last step of `verify` and never accept fork runs as proof.
+- On a push to `main`, ci.yml skips its test jobs when a same-repo PR run already passed the identical tree (`tools/ci/`); the workflow stays green and deploy starts. Only the final `verify` job uploads the `tested-tree-<tree>` artifact, and its `needs` must list every job that tests the tree. Never accept fork runs as proof.
 - `deploy-test.yml` runs after green CI on a push to `main` and deploys `workflow_run.head_sha`: images tagged with the SHA (never `latest`), then `office-deploy <sha>` over IAP and a `/health` smoke check.
 - Terraform is applied by a human, never by CI. Config reaches the VM as metadata from `terraform apply`; an image rollback does not revert config.
 - Secrets live only in Secret Manager, never in the repo, GitHub secrets or Terraform state. Values must have no trailing newline.

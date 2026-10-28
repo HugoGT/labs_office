@@ -35,17 +35,17 @@ jobs:
   # on the push to main, before deploy-test.yml could start. The PR run tests
   # `refs/pull/N/merge`; when main did not move before the merge, the commit on
   # main has that exact tree, so the second run would test the same bytes.
-  # This job proves that from the tree the PR run records (last step of
-  # `verify`) and lets `verify` skip; a skipped job still leaves the workflow
+  # This job proves that from the tree the PR run records (the final `verify`
+  # job) and lets every other job skip; a skipped job still leaves the workflow
   # green, which is what deploy-test.yml waits for. If main moved, or the check
-  # cannot tell, `verify` runs as before. Fork runs never count:
+  # cannot tell, every job runs as before. Fork runs never count:
   # tools/ci/testedTree.ts explains why.
   tested-tree:
     name: Skip if this tree already passed
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # Every step may fail without failing the job: a failed job would skip
-    # `verify` (implicit `success()` on `needs`) and leave main red with
+    # the test jobs (implicit `success()` on `needs`) and leave main red with
     # nothing deployed, while an empty output just runs the full CI. The step
     # timeouts add up to well under the job's, because `continue-on-error`
     # covers a step that times out but not a job that does.
@@ -79,12 +79,21 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           TREE_SHA: ${{ github.event.head_commit.tree_id }}
 
-  verify:
-    name: Typecheck, tests and build
+  # `test:all` took about 7 of the 10 minutes of a single job, so it runs as
+  # three Vitest shards next to `build-e2e`. Each shard pays its own ~1 minute
+  # of setup; the wall time becomes the slowest shard instead of the sum.
+  tests:
+    name: Tests (shard ${{ matrix.shard }}/3)
     needs: tested-tree
     if: needs.tested-tree.outputs.tested != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      # A red shard does not cancel the others, so one run reports every
+      # failing file instead of the first shard's.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
 
     steps:
       - name: Checkout
@@ -108,23 +117,52 @@ jobs:
       - name: Install Chromium for the browser test layer
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Typecheck
-        run: pnpm typecheck
-
       # Tres capas: `unit` (jsdom), `server` (Node, levanta un Colyseus real en
       # un puerto efimero) y `browser` (Chromium). `test:all` corre las tres.
       # CI always starts with a cold Vite cache, so a dependency the `browser`
       # project discovers mid-run shows up here as a reload that breaks
       # in-flight test imports (#196). Fail on it even when the tests survive,
-      # and add the dependency to that project's `optimizeDeps.include`.
+      # and add the dependency to that project's `optimizeDeps.include`. Every
+      # shard checks its own log: each one starts cold and discovers its own
+      # files' dependencies.
       - name: Tests (jsdom + Node + Chromium)
         run: |
           set -o pipefail
-          pnpm test:all 2>&1 | tee test-all.log
+          pnpm test:all --shard=${{ matrix.shard }}/3 2>&1 | tee test-all.log
           if grep -q 'optimized dependencies changed' test-all.log; then
             echo "::error::Vite re-optimized dependencies mid-run; add them to optimizeDeps.include of the browser project in vite.config.ts"
             exit 1
           fi
+
+  build-e2e:
+    name: Typecheck, build and E2E
+    needs: tested-tree
+    if: needs.tested-tree.outputs.tested != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The E2E layers below drive two real Chromium clients.
+      - name: Install Chromium for the E2E layers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Typecheck
+        run: pnpm typecheck
 
       # Pruebas puras del arnes E2E (extraccion de la URL de `vite preview`).
       # Van antes de los builds a proposito: no necesitan bundle y cuestan
@@ -198,8 +236,21 @@ jobs:
           docker rm -f ci-livekit || true
           rm -f infra/livekit/.env
 
-      # Last on purpose: reached only when every step above passed. The empty
-      # artifact's name is the proof the `tested-tree` job looks for on main.
+  # Last on purpose: `needs` lists every job that tests the tree, so this job
+  # runs only when all of them passed. The empty artifact's name is the proof
+  # the `tested-tree` job looks for on main; a job that tests the tree and is
+  # missing from `needs` would let a red tree record that proof.
+  verify:
+    name: Typecheck, tests and build
+    needs: [tests, build-e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v7
+
       - name: Read the tested tree
         id: tree
         if: github.event_name == 'pull_request'
