@@ -4,11 +4,11 @@ import { AdminError } from '../dashboard/adminPort';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import { MAP_W } from '../game/mapData';
 import type { OfficeBridge } from '../game/officeBridge';
-import type { DecorItem } from '../game/officeDecor';
+import { decorFootprint, decorInfoFromPieceId, type DecorItem, type DecorPieceInfo } from '../game/officeDecor';
 import { doorPosts, isDoorPiece } from '../game/officeDoors';
 import { BASE_LAYOUT, MAX_WALL_EDITS, type WallEdit, type WallPieceId } from '../game/officeLayout';
 import type { TerrainBrush } from '../game/terrainEditor';
-import type { TileRect } from '../game/terrainGrid';
+import { tileAreaRect, type TileRect } from '../game/terrainGrid';
 
 /**
  * The wall tool of "Decoración" (#224; it was part of the terrain editor
@@ -48,11 +48,14 @@ export interface UseWallEditorOptions {
   /** The admin port the walls are painted through; `null` (no admin, no terrain store), nothing can be picked. */
   terrain: TerrainAdminPort | null;
   /**
-   * The eraser on a post (#232, #233): takes off the doors whose span holds it,
-   * at an end or in the middle, and says whether any does, in which case the
+   * The eraser on a post, with the tile under the pointer: takes off the
+   * chair, table, desk or plant on that tile, else the doors whose span holds
+   * the post (#232, #233), and says whether it found any, in which case the
    * post stays. Without it the eraser only erases posts.
    */
-  eraseDoors?: (post: number) => boolean;
+  eraseDecor?: (post: number, tile: number | null) => boolean;
+  /** What a decor piece is, for the footprints the eraser outlines; the pack's pieces by default. */
+  infoOf?: (piece: string) => DecorPieceInfo | null;
   /** The outlines the map draws while a wall is picked (#216), the ones "Decoración" draws: a guide only. */
   outlines?: readonly TileRect[];
 }
@@ -107,9 +110,9 @@ function nextRun(paints: readonly WallPaint[]): WallPaint[] {
   return run;
 }
 
-export function useWallEditor({ bridge, terrain, eraseDoors, outlines }: UseWallEditorOptions): WallEditor {
+export function useWallEditor({ bridge, terrain, eraseDecor, infoOf = decorInfoFromPieceId, outlines }: UseWallEditorOptions): WallEditor {
   const [walls, setWalls] = useState<readonly (string | null)[]>(BASE_LAYOUT.walls);
-  /** The live decor layer, for the posts its doors span: what `eraseDoors` takes a door by. */
+  /** The live decor layer: the posts its doors span and the tiles its pieces cover, what `eraseDecor` takes them by. */
   const [decor, setDecor] = useState<readonly DecorItem[]>([]);
   const [brush, setBrush] = useState<WallBrush | null>(null);
   const [paints, setPaintsState] = useState<readonly WallPaint[]>([]);
@@ -161,11 +164,12 @@ export function useWallEditor({ bridge, terrain, eraseDoors, outlines }: UseWall
     }
   }
 
-  function paintAt(index: number): void {
+  function paintAt(index: number, tile: number | null): void {
     if (blockedRef.current || brush === null) return;
     if (index < 0 || index >= wallsRef.current.length) return;
-    // A door's post is never erased under it: the eraser takes the door instead, and the wall stays closed.
-    if (brush.piece === null && eraseDoors?.(index) === true) {
+    // The piece under the pointer goes before the post. A door's post is never
+    // erased under it either: the eraser takes the door instead, and the wall stays closed.
+    if (brush.piece === null && eraseDecor?.(index, tile) === true) {
       setError(null);
       return;
     }
@@ -191,7 +195,7 @@ export function useWallEditor({ bridge, terrain, eraseDoors, outlines }: UseWall
   // Only a picked wall listens to the map; a fresh subscription per render keeps `paintAt` reading it.
   useEffect(() => {
     if (brush === null) return undefined;
-    return bridge.on('wallpick', ({ index }) => paintAt(index));
+    return bridge.on('wallpick', ({ index, tile }) => paintAt(index, tile ?? null));
   });
 
   // Escape puts the picked wall down, and only that: the menu's own Escape
@@ -212,19 +216,24 @@ export function useWallEditor({ bridge, terrain, eraseDoors, outlines }: UseWall
     [paints],
   );
   // Only the eraser asks (#241): the posts it would take a wall from once every pending paint lands, and those of a door.
-  const takesDoors = eraseDoors !== undefined;
+  const takesDecor = eraseDecor !== undefined;
   const erasable = useMemo<number[] | null>(() => {
     if (brush?.piece !== null) return null;
-    const posts = new Set(takesDoors ? decor.flatMap((item) => (isDoorPiece(item.piece) ? doorPosts(item, MAP_W) : [])) : []);
+    const posts = new Set(takesDecor ? decor.flatMap((item) => (isDoorPiece(item.piece) ? doorPosts(item, MAP_W) : [])) : []);
     const after = [...walls];
     for (const paint of paints) after[paint.index] = paint.piece;
     after.forEach((wall, index) => {
       if (wall !== null) posts.add(index);
     });
     return [...posts].sort((a, b) => a - b);
-  }, [brush, walls, paints, decor, takesDoors]);
+  }, [brush, walls, paints, decor, takesDecor]);
+  // And the piece a tile under the pointer belongs to, outlined whole.
+  const erasableDecor = useMemo<TileRect[] | null>(() => {
+    if (brush?.piece !== null || !takesDecor) return null;
+    return decor.filter((item) => !isDoorPiece(item.piece)).map((item) => tileAreaRect(decorFootprint(item, infoOf(item.piece), MAP_W)));
+  }, [brush, decor, takesDecor, infoOf]);
   const shows = brush !== null || previewWalls !== null;
-  const commandKey = JSON.stringify([brush, previewWalls, outlines, erasable]);
+  const commandKey = JSON.stringify([brush, previewWalls, outlines, erasable, erasableDecor]);
 
   useEffect(() => {
     if (!shows) return;
@@ -233,6 +242,7 @@ export function useWallEditor({ bridge, terrain, eraseDoors, outlines }: UseWall
       ...(previewWalls === null ? {} : { previewWalls }),
       ...(outlines === undefined || outlines.length === 0 ? {} : { outlines }),
       ...(erasable === null ? {} : { erasable }),
+      ...(erasableDecor === null ? {} : { erasableDecor }),
     });
     // `commandKey` stands for the brush and the preview: only a different drawing is worth a command.
     // eslint-disable-next-line react-hooks/exhaustive-deps

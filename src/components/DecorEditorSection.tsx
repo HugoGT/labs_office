@@ -37,7 +37,8 @@ import styles from './TerrainEditorSection.module.css';
  *
  * The admin's menu also paints the walls (#224, moved from "Editar
  * terreno"), below the pieces: `useWallEditor` with `WallPalette`, and its
- * eraser, «Borrar» (`WallEraser`), right below «Múltiple». One entry is
+ * eraser, «Borrar» (`WallEraser`), right below «Múltiple», which takes the
+ * chair, table, desk or plant under the pointer before a wall. One entry is
  * picked at a time across the pieces, the walls and the eraser, and while a wall is, the decor
  * tool is paused so the map's clicks are the wall's.
  */
@@ -103,7 +104,7 @@ export function DecorEditorSection({
   // Called on a map click, long after this render declared `editor` below.
   // The desk scope outlines its own desk, the office scope every desk and room (#216).
   const outlines = useMemo(() => decorOutlines(area, desks ?? [], office ? (rooms ?? []) : []), [area, desks, rooms, office]);
-  const walls = useWallEditor({ bridge, terrain: office ? terrain : null, eraseDoors: (post) => editor.removeDoorsOn(post), outlines });
+  const walls = useWallEditor({ bridge, terrain: office ? terrain : null, eraseDecor: (post, tile) => editor.erase(post, tile), infoOf, outlines });
   const editor = useDecorEditor({ bridge, decor, area, infoOf, onExit, desks, outlines, paused: walls.brush !== null });
   const offersWalls = office && terrain !== null;
   const onExitRef = useRef(onExit);

@@ -1,7 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { cellOutlineCenter, cellsAlongStroke, sameBrush, terrainOutlines } from './terrainEditor';
+import { cellOutlineCenter, cellsAlongStroke, postsAlongStroke, sameBrush, terrainOutlines } from './terrainEditor';
 
 const GRID = { columns: 4, rows: 3, cellSize: 100 };
+
+describe('postsAlongStroke', () => {
+  const VERTICES = { ...GRID, snap: 'vertex' as const };
+
+  it('is the vertex nearest a press with the tile under it, what the eraser takes decor by', () => {
+    // Past the middle of tile (1, 0): its bottom-right corner, vertex (2, 1).
+    expect(postsAlongStroke(VERTICES, null, { x: 170, y: 60 })).toEqual([{ index: 6, tile: 1 }]);
+  });
+
+  it('lists every distinct vertex and tile pair a drag crosses, in order, and nothing off the grid', () => {
+    expect(postsAlongStroke(VERTICES, { x: 10, y: 10 }, { x: 190, y: 10 })).toEqual([
+      { index: 0, tile: 0 },
+      { index: 1, tile: 0 },
+      { index: 1, tile: 1 },
+      { index: 2, tile: 1 },
+    ]);
+    expect(postsAlongStroke(VERTICES, null, { x: -5, y: 10 })).toEqual([]);
+  });
+});
 
 describe('cellsAlongStroke', () => {
   it('is the cell under a press', () => {

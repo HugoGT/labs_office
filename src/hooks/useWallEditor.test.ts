@@ -245,15 +245,15 @@ describe('WALL_UNDER_PLACEMENT_MESSAGE (#223)', () => {
 });
 
 describe('useWallEditor: what the eraser would take (#241)', () => {
-  it('tells the map, only with the eraser picked, every post that holds a wall or a door once pending paints land', async () => {
+  it('tells the map, only with the eraser picked, every post that holds a wall or a door once pending paints land, and every decor piece', async () => {
     const bridge = createOfficeBridge();
     const commands: OfficeCommandMap['terrainedit'][] = [];
     bridge.onCommand('terrainedit', (command) => commands.push(command));
     const { terrain, calls } = deferredWalls();
     const empty = BASE_LAYOUT.walls.map(() => null);
-    const { result } = renderHook(() => useWallEditor({ bridge, terrain, eraseDoors: () => false }));
+    const { result } = renderHook(() => useWallEditor({ bridge, terrain, eraseDecor: () => false }));
     act(() => bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls: withWalls(empty, [{ index: TILE_A, piece: 'wall-stone' }, { index: TILE_B, piece: 'wall-brick' }]), colors: NO_COLORS }));
-    // A two-tile door anchored on DOOR spans the posts DOOR, DOOR + 1 and DOOR + 2; a chair is not the eraser's.
+    // A two-tile door anchored on DOOR spans the posts DOOR, DOOR + 1 and DOOR + 2; a chair is taken by its tile.
     act(() => bridge.emit('decor', { items: [{ index: DOOR, piece: 'door-wood', rotation: 0 }, { index: TILE_C, piece: 'chair-office', rotation: 0 }] }));
 
     act(() => result.current.pick('wall-brick'));
@@ -261,11 +261,40 @@ describe('useWallEditor: what the eraser would take (#241)', () => {
 
     act(() => result.current.pick(null));
     expect(commands.at(-1)?.erasable).toEqual([TILE_A, TILE_B, DOOR, DOOR + 1, DOOR + 2]);
+    expect(commands.at(-1)?.erasableDecor).toEqual([{ x0: 69, y0: 22, x1: 69, y1: 22 }]);
 
     // An erase on its way already leaves its post with nothing to take.
     act(() => bridge.emit('wallpick', { index: TILE_A }));
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(commands.at(-1)?.erasable).toEqual([TILE_B, DOOR, DOOR + 1, DOOR + 2]);
+  });
+});
+
+describe('useWallEditor: the eraser over decor', () => {
+  it('asks the decor first with the post and the tile under the pointer, and leaves the post alone when the decor took something', () => {
+    const terrain = port();
+    const bridge = createOfficeBridge();
+    const eraseDecor = vi.fn((_post: number, tile: number | null) => tile === TILE_C);
+    const { result } = renderHook(() => useWallEditor({ bridge, terrain, eraseDecor }));
+    act(() => bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls: withWalls(BASE_LAYOUT.walls.map(() => null), [{ index: TILE_A, piece: 'wall-stone' }]), colors: NO_COLORS }));
+    act(() => result.current.pick(null));
+
+    act(() => bridge.emit('wallpick', { index: TILE_A, tile: TILE_C }));
+    expect(eraseDecor).toHaveBeenLastCalledWith(TILE_A, TILE_C);
+    expect(terrain.setWalls).not.toHaveBeenCalled();
+
+    act(() => bridge.emit('wallpick', { index: TILE_A, tile: TILE_B }));
+    expect(eraseDecor).toHaveBeenLastCalledWith(TILE_A, TILE_B);
+    expect(terrain.setWalls).toHaveBeenCalledWith([{ index: TILE_A, piece: null }]);
+  });
+
+  it('never asks the decor while a wall is painted', () => {
+    const bridge = createOfficeBridge();
+    const eraseDecor = vi.fn(() => true);
+    const { result } = renderHook(() => useWallEditor({ bridge, terrain: port(), eraseDecor }));
+    act(() => result.current.pick('wall-brick'));
+    act(() => bridge.emit('wallpick', { index: TILE_A, tile: TILE_C }));
+    expect(eraseDecor).not.toHaveBeenCalled();
   });
 });
 

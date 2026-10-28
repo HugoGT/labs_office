@@ -47,6 +47,8 @@ export interface TerrainEditCommand {
   outlines?: readonly TileRect[];
   /** With the wall eraser: the posts a click would take a wall or a door from, which the box outlines in red (#241). */
   erasable?: readonly number[];
+  /** With the wall eraser: the footprint of every decor piece it takes by a tile under it, outlined whole in red over the post box. */
+  erasableDecor?: readonly TileRect[];
 }
 
 /** The outlines "Editar terreno" draws (#216): every desk and room, so a block or a wall is not painted blind. */
@@ -95,17 +97,41 @@ function cellAt(grid: StrokeGrid, x: number, y: number): number | null {
  * quick stroke from skipping cells. Points off the grid paint nothing.
  */
 export function cellsAlongStroke(grid: StrokeGrid, from: { x: number; y: number } | null, to: { x: number; y: number }): number[] {
+  const cells: number[] = [];
+  for (const point of strokeSamples(grid, from, to)) {
+    const cell = cellAt(grid, point.x, point.y);
+    if (cell !== null && !cells.includes(cell)) cells.push(cell);
+  }
+  return cells;
+}
+
+/**
+ * The picks of a wall stroke: like `cellsAlongStroke` on the vertex grid,
+ * with the tile under each sample, every distinct pair once. The eraser takes
+ * the decor piece on that tile before the post (it covers tiles, not posts).
+ */
+export function postsAlongStroke(grid: StrokeGrid, from: { x: number; y: number } | null, to: { x: number; y: number }): { index: number; tile: number }[] {
+  const tiles: StrokeGrid = { ...grid, snap: 'cell' };
+  const picks: { index: number; tile: number }[] = [];
+  for (const point of strokeSamples(grid, from, to)) {
+    const index = cellAt(grid, point.x, point.y);
+    const tile = cellAt(tiles, point.x, point.y);
+    if (index === null || tile === null || picks.some((pick) => pick.index === index && pick.tile === tile)) continue;
+    picks.push({ index, tile });
+  }
+  return picks;
+}
+
+/** The points a stroke samples from `from` (the press when `null`) to `to`, close enough never to step over a cell. */
+function strokeSamples(grid: StrokeGrid, from: { x: number; y: number } | null, to: { x: number; y: number }): { x: number; y: number }[] {
   const start = from ?? to;
   const dx = to.x - start.x;
   const dy = to.y - start.y;
   if (![start.x, start.y, dx, dy].every(Number.isFinite)) return [];
   const steps = Math.max(1, Math.ceil((Math.hypot(dx, dy) * STROKE_SAMPLES_PER_CELL) / grid.cellSize));
-  const cells: number[] = [];
-  for (let step = 0; step <= steps; step += 1) {
-    const cell = cellAt(grid, start.x + (dx * step) / steps, start.y + (dy * step) / steps);
-    if (cell !== null && !cells.includes(cell)) cells.push(cell);
-  }
-  return cells;
+  const points: { x: number; y: number }[] = [];
+  for (let step = 0; step <= steps; step += 1) points.push({ x: start.x + (dx * step) / steps, y: start.y + (dy * step) / steps });
+  return points;
 }
 
 /**
