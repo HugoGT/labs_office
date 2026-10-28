@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { loadEnv } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { defineConfig } from 'vitest/config';
+import { TimedSequencer } from './tools/ci/timedSequencer.ts';
 import { pwaOptions } from './tools/pwa/pwaOptions.ts';
 
 /**
@@ -64,6 +65,9 @@ export default defineConfig(({ mode }) => {
       },
     },
     test: {
+      // CI runs `--shard=N/3`; this splits files by recorded time, not by path
+      // hash (tools/ci/testShards.ts). Without `--shard` it changes nothing.
+      sequence: { sequencer: TimedSequencer },
       // Dos capas deliberadas. jsdom no implementa canvas ni WebGL, asi que todo lo
       // que necesita que Phaser *renderice* de verdad vive en la capa `browser`;
       // mockearlo en jsdom solo probaria el mock.

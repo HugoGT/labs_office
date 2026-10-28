@@ -82,6 +82,8 @@ jobs:
   # `test:all` took about 7 of the 10 minutes of a single job, so it runs as
   # three Vitest shards next to `build-e2e`. Each shard pays its own ~1 minute
   # of setup; the wall time becomes the slowest shard instead of the sum.
+  # Files go to shards by their recorded time (tools/ci/testShards.ts), not
+  # by Vitest's path hash, which once put a third of all test time in one.
   tests:
     name: Tests (shard ${{ matrix.shard }}/3)
     needs: tested-tree
