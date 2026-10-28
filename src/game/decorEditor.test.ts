@@ -97,12 +97,13 @@ describe('fitsDeskArea', () => {
     expect(fitsDeskArea({ kind: 'door', footprint: { w: 4, h: 1 } })).toBe(false);
   });
 
-  it('takes chairs, desk tables and 1x1 plants, never a room table bigger than a desk', () => {
+  it('takes chairs, desk tables and 1x1 plants, never a room table (#116): a desk holds desk tables only', () => {
     expect(fitsDeskArea(CHAIR)).toBe(true);
     expect(fitsDeskArea(DESK)).toBe(true);
     expect(fitsDeskArea(PLANT)).toBe(true);
     expect(fitsDeskArea(MEETING)).toBe(false);
     expect(fitsDeskArea(CAFETERIA)).toBe(false);
+    expect(fitsDeskArea({ kind: 'table', footprint: { w: 2, h: 1 } })).toBe(false);
     expect(fitsDeskArea({ kind: 'plant', footprint: { w: 3, h: 3 } })).toBe(true);
     expect(fitsDeskArea({ kind: 'plant', footprint: { w: 4, h: 1 } })).toBe(false);
   });

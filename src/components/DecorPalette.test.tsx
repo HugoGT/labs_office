@@ -122,9 +122,10 @@ describe('DecorPalette', () => {
     await waitFor(() => expect(preview.sheet).toHaveBeenCalledWith(painted, '#c83c3c'));
   });
 
-  it('offers only what fits a desk when asked, leaving out the room tables bigger than one', () => {
+  it('offers only what fits a desk when asked: desk tables, never a room table (#116)', () => {
     render(<DecorPalette value={null} catalog={catalog} offers={fitsDeskArea} onPick={() => {}} preview={noPreview()} />);
-    expect(names('Mesas de sala')).toEqual(['Mesa ovalada']);
+    expect(screen.getByRole('group', { name: 'Mesas de escritorio' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Mesas de sala' })).not.toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Sillas' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Plantas' })).toBeInTheDocument();
     // Doors open walls, which only an admin edits (#223).
