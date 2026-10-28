@@ -149,9 +149,10 @@ describe('createPhaserAvatarSink', () => {
     expect(avatar.x).toBeLessThan(900);
     expect(avatar.glideTween).toBeDefined();
 
+    // The glide runs on the scene clock, which a loaded CI runner slows well past 1 s.
     await vi.waitFor(() => {
       expect(avatar.x).toBe(900);
-    });
+    }, PHYSICS_WAIT);
   });
 
   it('un update encadenado cancela la interpolacion anterior', async () => {
