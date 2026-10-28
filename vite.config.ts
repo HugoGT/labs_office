@@ -2,6 +2,7 @@ import { playwright } from '@vitest/browser-playwright';
 import react from '@vitejs/plugin-react';
 import { AccessToken } from 'livekit-server-sdk';
 import { readFileSync } from 'node:fs';
+import { availableParallelism } from 'node:os';
 import { loadEnv } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { defineConfig } from 'vitest/config';
@@ -32,6 +33,16 @@ function loadLivekitEnv(): Record<string, string> {
     return {};
   }
 }
+
+/**
+ * #251: the default (one worker per core but one, and up to 12 Chromium pages
+ * running Phaser) ran a 16-core WSL machine out of memory and killed the whole
+ * VM. Four keeps a local `test:all` bounded; a 4-vCPU CI runner keeps the 3 it
+ * already had. The browser project repeats it: its page pool reads only its
+ * own `maxWorkers`, never the root one, so `--maxWorkers` moves the Node pools
+ * but not the Chromium pages.
+ */
+const TEST_WORKERS = Math.max(1, Math.min(4, availableParallelism() - 1));
 
 // PRD 6.1: Vite + React + TypeScript. PWA (PRD section 9, #13): `tools/pwa/pwaOptions.ts`.
 export default defineConfig(({ mode }) => {
@@ -68,6 +79,7 @@ export default defineConfig(({ mode }) => {
       // CI runs `--shard=N/3`; this splits files by recorded time, not by path
       // hash (tools/ci/testShards.ts). Without `--shard` it changes nothing.
       sequence: { sequencer: TimedSequencer },
+      maxWorkers: TEST_WORKERS,
       // Dos capas deliberadas. jsdom no implementa canvas ni WebGL, asi que todo lo
       // que necesita que Phaser *renderice* de verdad vive en la capa `browser`;
       // mockearlo en jsdom solo probaria el mock.
@@ -114,6 +126,7 @@ export default defineConfig(({ mode }) => {
           test: {
             name: { label: 'browser', color: 'magenta' },
             include: ['src/**/*.browser.test.{ts,tsx}'],
+            maxWorkers: TEST_WORKERS,
             // Scene waits get 20s (`SCENE_BOOT_TIMEOUT_MS`, `LOOP_WAIT`) because
             // the CI main thread stalls for whole seconds (#68). Under the 5s
             // default those budgets were cut short; this fits two boots in a row.
