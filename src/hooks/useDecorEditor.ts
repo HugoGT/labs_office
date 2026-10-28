@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { describeAdminError } from '../dashboard/adminErrors';
 import { AdminError } from '../dashboard/adminPort';
-import { decorBrushTarget, type DecorBrush } from '../game/decorEditor';
+import { decorBrushTarget, decorPickAt, type DecorBrush } from '../game/decorEditor';
 import { deskOverChairLimit, displacedDeskTables } from '../game/deskDecorRules';
 import { isEditableElementFocused } from '../game/inputFocusGuard';
 import { MAP_W } from '../game/mapData';
@@ -132,12 +132,14 @@ export interface DecorEditor {
   pick(option: DecorPick): void;
   unpick(): void;
   /**
-   * The wall eraser on a post (#232): takes off the doors standing on it and
-   * says whether any stands there, live or still on its way out. A door's
-   * post is never erased under it, so the eraser takes the door first and the
-   * wall stays closed.
+   * The wall eraser on a post, with the tile under the pointer: takes off the
+   * chair, table, desk or plant on that tile (the smallest where they stack,
+   * inside the area), else the doors standing on the post (#232), and says
+   * whether any stands there, live or still on its way out. What it finds
+   * goes first and the post stays, like a door's, which is never erased
+   * under it so the wall stays closed.
    */
-  removeDoorsOn(post: number): boolean;
+  erase(post: number, tile: number | null): boolean;
 }
 
 interface PendingEdit extends DecorEdit {
@@ -360,6 +362,19 @@ export function useDecorEditor({
     return leaving.length > 0 || itemsRef.current.some(on);
   }
 
+  function erase(post: number, tile: number | null): boolean {
+    if (tile === null) return removeDoorsOn(post);
+    const pieceOn = (items: readonly DecorItem[]): DecorItem | null =>
+      decorPickAt(items.filter((item) => !isDoorPiece(item.piece)), infoOf, MAP_W, tile, area);
+    const leaving = pieceOn(layerAfter());
+    if (leaving !== null) {
+      remove(leaving.index);
+      return true;
+    }
+    // Until the room shows a piece gone, its tile is still the piece's.
+    return pieceOn(itemsRef.current) !== null || removeDoorsOn(post);
+  }
+
   function remove(index: number): void {
     if (blockedRef.current) return;
     setSelected(null);
@@ -521,7 +536,7 @@ export function useDecorEditor({
       setSelected(null);
       setError(null);
     },
-    removeDoorsOn,
+    erase,
     unpick() {
       putDown();
     },

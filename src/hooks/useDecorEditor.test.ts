@@ -705,6 +705,75 @@ describe('useDecorEditor', () => {
   });
 });
 
+describe('useDecorEditor: the wall eraser over decor', () => {
+  it('takes the chair, desk table or room table under the pointer, smallest first, and keeps the post while one is there', async () => {
+    const { decor, calls } = deferredPort();
+    const { bridge, result } = setup({ decor });
+    const items: DecorItem[] = [
+      { index: at(10, 10), piece: CHAIR.id, rotation: 0 },
+      { index: at(20, 10), piece: DESK.id, rotation: 0 },
+      { index: at(40, 40), piece: TABLE.id, rotation: 0 },
+      { index: at(41, 41), piece: CHAIR.id, rotation: 0 },
+    ];
+    act(() => bridge.emit('decor', { items }));
+    const post = at(0, 0);
+
+    let kept = false;
+    act(() => {
+      kept = result.current.erase(post, at(10, 10));
+    });
+    expect(kept).toBe(true);
+    expect(calls.map((call) => call.edits)).toEqual([[{ index: at(10, 10), item: null }]]);
+    // On its way out it is still there to the room: the post stays, and nothing is sent twice.
+    act(() => {
+      kept = result.current.erase(post, at(10, 10));
+    });
+    expect(kept).toBe(true);
+    await act(async () => calls[0]!.resolve());
+
+    // A desk table by any tile of its span; a chair at a room table before the table.
+    act(() => void result.current.erase(post, at(21, 10)));
+    act(() => void result.current.erase(post, at(41, 41)));
+    act(() => void result.current.erase(post, at(38, 39)));
+    await act(async () => calls[1]!.resolve());
+    expect(calls.slice(1).flatMap((call) => call.edits)).toEqual([
+      { index: at(20, 10), item: null },
+      { index: at(41, 41), item: null },
+      { index: at(40, 40), item: null },
+    ]);
+  });
+
+  it('leaves the post to the walls over a tile with no decor, and still takes a door by its post', () => {
+    const { decor, calls } = deferredPort();
+    const { bridge, result } = setup({ decor });
+    act(() => bridge.emit('decor', { items: [{ index: at(60, 60), piece: 'door-wood', rotation: 0 }] }));
+
+    let kept = true;
+    act(() => {
+      kept = result.current.erase(at(5, 5), at(5, 5));
+    });
+    expect(kept).toBe(false);
+    expect(calls).toEqual([]);
+
+    act(() => {
+      kept = result.current.erase(at(60, 60), at(60, 59));
+    });
+    expect(kept).toBe(true);
+    expect(calls.map((call) => call.edits)).toEqual([[{ index: at(60, 60), item: null }]]);
+  });
+
+  it('in a desk area takes only what is wholly inside it', () => {
+    const { decor, calls } = deferredPort();
+    const { bridge, result } = setup({ decor, area: { x: 9, y: 9, w: 3, h: 3 } });
+    act(() => bridge.emit('decor', { items: [{ index: at(10, 10), piece: CHAIR.id, rotation: 0 }, { index: at(30, 30), piece: CHAIR.id, rotation: 0 }] }));
+
+    act(() => void result.current.erase(at(0, 0), at(30, 30)));
+    expect(calls).toEqual([]);
+    act(() => void result.current.erase(at(0, 0), at(10, 10)));
+    expect(calls.map((call) => call.edits)).toEqual([[{ index: at(10, 10), item: null }]]);
+  });
+});
+
 describe('DECOR_UNDER_PLACEMENT_MESSAGE (#223, #233)', () => {
   it('says where a door goes: between two walls, one at each end, and how wide it is', () => {
     expect(DECOR_UNDER_PLACEMENT_MESSAGE).toContain('La puerta va entre dos paredes, una en cada extremo: 2 casillas de ancho, 4 la puerta doble.');

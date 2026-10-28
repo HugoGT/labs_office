@@ -209,8 +209,12 @@ export interface OfficeEventMap {
   };
   /** The terrain editor has a floor picked and someone clicked a block on the map (#123 phase 2). */
   terrainpick: { index: number };
-  /** The terrain editor has a wall (or the wall eraser) picked and someone clicked a tile on the map. */
-  wallpick: { index: number };
+  /**
+   * The terrain editor has a wall (or the wall eraser) picked and someone
+   * clicked on the map: `index` is the nearest grid vertex. The eraser also
+   * sends `tile`, the tile under the pointer, which it takes a decor piece by.
+   */
+  wallpick: { index: number; tile?: number };
   /**
    * The office decor layer (#208) as the room replicates it, sorted by
    * anchor: after every change, and again when a decor editor opens, so it

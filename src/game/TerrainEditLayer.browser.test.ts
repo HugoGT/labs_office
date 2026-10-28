@@ -252,6 +252,52 @@ describe('TerrainEditLayer: the eraser outline (#241)', () => {
     expect(hover.strokeColor).toBe(HOVER_STROKE_COLOR);
   });
 
+  it('outlines in red the whole decor piece under the pointer, the smallest where they stack, and the post box again off it', async () => {
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    new TerrainEditLayer(scene, bridge, BASE_LAYOUT);
+    const table = { x0: 4, y0: 2, x1: 6, y1: 3 };
+    const chair = { x0: 5, y0: 3, x1: 5, y1: 3 };
+
+    bridge.emitCommand('terrainedit', { brush: wall(null), erasableDecor: [table, chair] });
+    scene.input.emit('pointermove', pointerAt(4 * TILE + 3, 2 * TILE + 3));
+    const hover = outline(scene, TERRAIN_HOVER_NAME)!;
+    expect([hover.x, hover.y, hover.width, hover.height]).toEqual([5.5 * TILE, 3 * TILE, 3 * TILE, 2 * TILE]);
+    expect(hover.strokeColor).toBe(HOVER_ERASE_COLOR);
+    scene.input.emit('pointermove', pointerAt(5 * TILE + 3, 3 * TILE + 3));
+    expect([hover.x, hover.y, hover.width, hover.height]).toEqual([5.5 * TILE, 3.5 * TILE, TILE, TILE]);
+
+    // Taken under a still pointer: back to the post box at once.
+    bridge.emitCommand('terrainedit', { brush: wall(null), erasableDecor: [table] });
+    scene.input.emit('pointermove', pointerAt(9 * TILE + 3, 9 * TILE + 3));
+    expect([hover.x, hover.y, hover.width, hover.height]).toEqual([9 * TILE, 9 * TILE, TILE, TILE]);
+    expect(hover.strokeColor).toBe(HOVER_STROKE_COLOR);
+  });
+
+  it('follows the command under a still pointer: a piece taken gives the post box back', async () => {
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    new TerrainEditLayer(scene, bridge, BASE_LAYOUT);
+    bridge.emitCommand('terrainedit', { brush: wall(null), erasableDecor: [{ x0: 4, y0: 2, x1: 6, y1: 3 }] });
+    scene.input.emit('pointermove', pointerAt(4 * TILE + 3, 2 * TILE + 3));
+    bridge.emitCommand('terrainedit', { brush: wall(null), erasableDecor: [] });
+    const hover = outline(scene, TERRAIN_HOVER_NAME)!;
+    expect([hover.x, hover.y, hover.width, hover.height]).toEqual([4 * TILE, 2 * TILE, TILE, TILE]);
+    expect(hover.strokeColor).toBe(HOVER_STROKE_COLOR);
+  });
+
+  it('reports with every eraser pick the tile under the pointer', async () => {
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    new TerrainEditLayer(scene, bridge, BASE_LAYOUT);
+    const picks: { index: number; tile?: number }[] = [];
+    bridge.on('wallpick', (pick) => picks.push(pick));
+    bridge.emitCommand('terrainedit', { brush: wall(null) });
+    // Past the middle of tile (3, 2): the post is its bottom-right corner, the tile itself.
+    scene.input.emit('pointerdown', pointerAt(3 * TILE + 20, 2 * TILE + 20));
+    expect(picks).toEqual([{ index: 3 * BASE_LAYOUT.width + 4, tile: 2 * BASE_LAYOUT.width + 3 }]);
+  });
+
   it('keeps the usual color for any other brush, whatever stands there', async () => {
     const scene = await bootHostScene();
     const bridge = createOfficeBridge();
