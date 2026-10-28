@@ -16,6 +16,7 @@ const NO_COLORS: TerrainColors = new Map();
 const TILE_A = 22 * BASE_LAYOUT.width + 67;
 const TILE_B = TILE_A + 1;
 const TILE_C = TILE_A + 2;
+const DOOR = TILE_A + 10;
 
 function port(overrides: Partial<TerrainAdminPort> = {}): TerrainAdminPort {
   return {
@@ -240,6 +241,31 @@ describe('WALL_UNDER_PLACEMENT_MESSAGE (#223)', () => {
   it('names the doors among what keeps a post in place', () => {
     expect(WALL_UNDER_PLACEMENT_MESSAGE).toMatch(/puerta/);
     expect(WALL_UNDER_PLACEMENT_MESSAGE).not.toMatch(/cambia/);
+  });
+});
+
+describe('useWallEditor: what the eraser would take (#241)', () => {
+  it('tells the map, only with the eraser picked, every post that holds a wall or a door once pending paints land', async () => {
+    const bridge = createOfficeBridge();
+    const commands: OfficeCommandMap['terrainedit'][] = [];
+    bridge.onCommand('terrainedit', (command) => commands.push(command));
+    const { terrain, calls } = deferredWalls();
+    const empty = BASE_LAYOUT.walls.map(() => null);
+    const { result } = renderHook(() => useWallEditor({ bridge, terrain, eraseDoors: () => false }));
+    act(() => bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls: withWalls(empty, [{ index: TILE_A, piece: 'wall-stone' }, { index: TILE_B, piece: 'wall-brick' }]), colors: NO_COLORS }));
+    // A two-tile door anchored on DOOR spans the posts DOOR, DOOR + 1 and DOOR + 2; a chair is not the eraser's.
+    act(() => bridge.emit('decor', { items: [{ index: DOOR, piece: 'door-wood', rotation: 0 }, { index: TILE_C, piece: 'chair-office', rotation: 0 }] }));
+
+    act(() => result.current.pick('wall-brick'));
+    expect(commands.at(-1)).toEqual({ brush: { kind: 'wall', piece: 'wall-brick' } });
+
+    act(() => result.current.pick(null));
+    expect(commands.at(-1)?.erasable).toEqual([TILE_A, TILE_B, DOOR, DOOR + 1, DOOR + 2]);
+
+    // An erase on its way already leaves its post with nothing to take.
+    act(() => bridge.emit('wallpick', { index: TILE_A }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(commands.at(-1)?.erasable).toEqual([TILE_B, DOOR, DOOR + 1, DOOR + 2]);
   });
 });
 

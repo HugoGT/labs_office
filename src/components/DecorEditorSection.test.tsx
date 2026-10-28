@@ -189,7 +189,7 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
       await userEvent.click(eraser);
       expect(eraser).toHaveAttribute('aria-pressed', 'true');
       expect(screen.getByRole('button', { name: 'Ladrillo' })).toHaveAttribute('aria-pressed', 'false');
-      expect(terrainCommands.at(-1)).toEqual({ brush: { kind: 'wall', piece: null } });
+      expect(terrainCommands.at(-1)?.brush).toEqual({ kind: 'wall', piece: null });
       expect(screen.getByRole('button', { name: 'Deseleccionar' }).parentElement).toHaveTextContent(/^Borrar/);
       expect(document.body.textContent).not.toMatch(/Quitando|Quitar/);
 
