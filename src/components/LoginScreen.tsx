@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { MAX_NAME_LENGTH } from '../game/officeProtocol';
 import { stripDisplayNameEmailSuffix } from '../game/displayName';
+import { EyeIcon } from './EyeIcon';
 import styles from './LoginScreen.module.css';
 
 /** The "forgot your password" flow (#94), already wired by `AuthGate`. */
@@ -75,6 +76,7 @@ export function LoginScreen({
   const [name, setName] = useState(() => stripDisplayNameEmailSuffix(initialName ?? ''));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [resetting, setResetting] = useState(false);
 
   if (resetting && passwordReset) {
@@ -199,15 +201,29 @@ export function LoginScreen({
           <label className={styles.label} htmlFor="login-password">
             Contraseña
           </label>
-          <input
-            className={styles.input}
-            id="login-password"
-            type="password"
-            autoComplete="current-password"
-            required
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
+          <div className={styles.passwordWrap}>
+            <input
+              className={`${styles.input} ${styles.passwordInput}`}
+              id="login-password"
+              type={showPassword ? 'text' : 'password'}
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+            {/* `type="button"` so it never submits; preventing the mousedown
+                keeps the caret in the field while toggling (#240). */}
+            <button
+              className={styles.reveal}
+              type="button"
+              aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+              aria-pressed={showPassword}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => setShowPassword((shown) => !shown)}
+            >
+              <EyeIcon crossed={showPassword} />
+            </button>
+          </div>
         </div>
 
         {/* `role="alert"` y no un parrafo cualquiera: el fallo aparece lejos

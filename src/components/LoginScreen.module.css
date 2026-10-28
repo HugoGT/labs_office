@@ -115,3 +115,54 @@
   font-size: 12px;
   color: #dbeafe;
 }
+
+.passwordWrap {
+  position: relative;
+  display: flex;
+}
+
+.passwordInput {
+  flex: 1;
+  min-width: 0;
+  padding-right: 44px;
+}
+
+/* Edge draws its own reveal eye, dark on this dark field and lost on the
+   autofill blue (#240): the app's toggle replaces it. */
+.passwordInput::-ms-reveal {
+  display: none;
+}
+
+/* A solid chip of its own, so the eye stays readable whatever background the
+   browser paints on the field (dark, or autofill blue). */
+.reveal {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 28px;
+  padding: 0;
+  background: #374151;
+  color: #f9fafb;
+  border: 1px solid #4b5563;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.reveal:hover {
+  background: #4b5563;
+}
+
+.reveal:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 1px;
+}
+
+.reveal[aria-pressed='true'] {
+  background: #1d4ed8;
+  border-color: #3b82f6;
+}

@@ -55,7 +55,7 @@ async function submitLogin(
 ) {
   await user.type(screen.getByLabelText(/^nombre$/i), name);
   await user.type(screen.getByLabelText(/correo/i), email);
-  await user.type(screen.getByLabelText(/contraseña/i), `${password}{Enter}`);
+  await user.type(screen.getByLabelText(/^contraseña$/i), `${password}{Enter}`);
 }
 
 /** Registra cada sesion con la que se renderizan los hijos. */
@@ -80,7 +80,7 @@ describe('AuthGate: autenticacion apagada', () => {
     // (`.env.e2e` fija las variables a vacio): tiene que costar lo mismo que
     // antes de existir el login.
     expect(screen.getByTestId('office')).toBeInTheDocument();
-    expect(screen.queryByLabelText(/contraseña/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^contraseña$/i)).not.toBeInTheDocument();
     expect(office.sessions).toEqual([null]);
   });
 });
@@ -94,7 +94,7 @@ describe('AuthGate: autenticacion encendida', () => {
 
     // Ensenar el login en este hueco lo haria parpadear en la cara de quien
     // ya habia entrado, en cada recarga.
-    expect(screen.queryByLabelText(/contraseña/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^contraseña$/i)).not.toBeInTheDocument();
     expect(screen.queryByTestId('office')).not.toBeInTheDocument();
     expect(office.sessions).toEqual([]);
   });
@@ -185,7 +185,7 @@ describe('AuthGate: autenticacion encendida', () => {
 
     emit(ANA);
 
-    expect(screen.queryByLabelText(/contraseña/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^contraseña$/i)).not.toBeInTheDocument();
     expect(screen.getByTestId('office')).toHaveTextContent('Ana');
     expect(office.sessions.at(-1)?.displayName).toBe('Ana');
   });
@@ -719,11 +719,11 @@ describe('AuthGate: character chosen at the entrance (art migration, step 5)', (
     expect(screen.queryByText('Entrando a la oficina…')).toBeNull();
     await act(async () => finishSave({ outcome: 'ok', avatarId: 'character-p01-burgundy-suit' }));
     expect(screen.getByRole('status')).toHaveTextContent('Entrando a la oficina…');
-    expect(screen.queryByLabelText(/contraseña/i)).toBeNull();
+    expect(screen.queryByLabelText(/^contraseña$/i)).toBeNull();
     expect(screen.getByRole('status').closest('form')).toBeNull();
     auth.emit(null);
     expect(screen.queryByText('Entrando a la oficina…')).toBeNull();
-    expect(screen.getByLabelText(/contraseña/i)).toBeVisible();
+    expect(screen.getByLabelText(/^contraseña$/i)).toBeVisible();
     act(() => report('ready'));
     expect(screen.queryByText('Current office')).toBeNull();
   });
