@@ -244,16 +244,25 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
         await vi.waitFor(() => expect(setWalls).toHaveBeenCalledWith([{ index: at(42, 40), piece: null }]));
       });
 
-      it('erases a post in the middle of a door, which holds it by its ends only', async () => {
+      it('takes a door off from the post in its middle, where the eraser lands when it is over the door', async () => {
         const { bridge, decor, setWalls } = onWall(LONE);
         await userEvent.click(await screen.findByRole('button', { name: 'Borrar' }));
 
         act(() => bridge.emit('wallpick', { index: at(41, 40) }));
-        await vi.waitFor(() => expect(setWalls).toHaveBeenCalledWith([{ index: at(41, 40), piece: null }]));
+        await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: null }]));
+        expect(setWalls).not.toHaveBeenCalled();
+      });
+
+      it('leaves the posts past the ends of a door to the eraser', async () => {
+        const { bridge, decor, setWalls } = onWall(LONE);
+        await userEvent.click(await screen.findByRole('button', { name: 'Borrar' }));
+
+        act(() => bridge.emit('wallpick', { index: at(43, 40) }));
+        await vi.waitFor(() => expect(setWalls).toHaveBeenCalledWith([{ index: at(43, 40), piece: null }]));
         expect(decor.setDecor).not.toHaveBeenCalled();
       });
 
-      it('takes a double door off the post at either end of its three tiles, and erases the posts between', async () => {
+      it('takes a double door off from the post at either end or in the middle of its three tiles', async () => {
         const { bridge, decor, setWalls } = onWall(DOUBLE);
         await userEvent.click(await screen.findByRole('button', { name: 'Borrar' }));
 
@@ -263,8 +272,9 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
 
         act(() => bridge.emit('decor', { items: DOUBLE }));
         act(() => bridge.emit('wallpick', { index: at(42, 40) }));
-        await vi.waitFor(() => expect(setWalls).toHaveBeenCalledWith([{ index: at(42, 40), piece: null }]));
-        expect(decor.setDecor).toHaveBeenCalledTimes(1);
+        await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledTimes(2));
+        expect(decor.setDecor).toHaveBeenLastCalledWith([{ index: at(40, 40), item: null }]);
+        expect(setWalls).not.toHaveBeenCalled();
       });
 
       it('takes off only the doors that end on the post: both of a post they share, one of a post that is only its own', async () => {
