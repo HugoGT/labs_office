@@ -127,6 +127,12 @@ export interface OfficeState {
    * client places the same rectangles from it and the decor layer.
    */
   pieceCollisions: string;
+  /**
+   * The ids of the locked spaces, in the wire form of `encodeLockedSpaces`
+   * (`spaceLocks.ts`, sorted and joined by commas, empty for none).
+   * Replicated whole like `terrainBlocks`.
+   */
+  lockedSpaces: string;
 }
 
 export class OfficeState extends Schema {
@@ -139,7 +145,8 @@ export class OfficeState extends Schema {
     this.terrainWalls = '';
     this.officeDecor = '';
     this.pieceCollisions = '';
+    this.lockedSpaces = '';
   }
 }
 
-defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState }, terrainBlocks: 'string', terrainWalls: 'string', officeDecor: 'string', pieceCollisions: 'string', terrainColors: 'string' });
+defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState }, terrainBlocks: 'string', terrainWalls: 'string', officeDecor: 'string', pieceCollisions: 'string', terrainColors: 'string', lockedSpaces: 'string' });

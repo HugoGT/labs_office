@@ -5,6 +5,8 @@ export interface UseOfficeBridgeResult {
   room: string | null;
   /** Stable id of the current space (#5); `null` on the open floor. */
   spaceId: string | null;
+  /** The current space is locked (`spaceLocks.ts`); `false` on the open floor. */
+  roomLocked: boolean;
   /** Active recordings keyed by spaceId (#5). */
   recordings: OfficeEventMap['recordings']['active'];
   /** Own Colyseus sessionId, from the `voice` snapshot; `null` while offline. */
@@ -36,6 +38,7 @@ const INITIAL_PRESENCE: OfficeEventMap['presence'] = {
 export function useOfficeBridge(bridge: OfficeBridge): UseOfficeBridgeResult {
   const [room, setRoom] = useState<string | null>(null);
   const [spaceId, setSpaceId] = useState<string | null>(null);
+  const [roomLocked, setRoomLocked] = useState(false);
   const [recordings, setRecordings] = useState<OfficeEventMap['recordings']['active']>({});
   const [selfSessionId, setSelfSessionId] = useState<string | null>(null);
   const [menu, setMenu] = useState<OfficeEventMap['peermenu'] | null>(null);
@@ -49,6 +52,7 @@ export function useOfficeBridge(bridge: OfficeBridge): UseOfficeBridgeResult {
       setRoom(payload.name);
       setSpaceId(payload.spaceId);
     });
+    const unsubscribeRoomLock = bridge.on('roomlock', (payload) => setRoomLocked(payload.locked));
     const unsubscribeRecordings = bridge.on('recordings', (payload) => setRecordings(payload.active));
     const unsubscribeVoice = bridge.on('voice', (payload) => setSelfSessionId(payload.selfSessionId));
     const unsubscribePeerMenu = bridge.on('peermenu', (payload) => setMenu(payload));
@@ -57,6 +61,7 @@ export function useOfficeBridge(bridge: OfficeBridge): UseOfficeBridgeResult {
 
     return () => {
       unsubscribeRoom();
+      unsubscribeRoomLock();
       unsubscribeRecordings();
       unsubscribeVoice();
       unsubscribePeerMenu();
@@ -67,5 +72,5 @@ export function useOfficeBridge(bridge: OfficeBridge): UseOfficeBridgeResult {
 
   const closeMenu = useCallback(() => setMenu(null), []);
 
-  return { room, spaceId, recordings, selfSessionId, menu, presence, closeMenu };
+  return { room, spaceId, roomLocked, recordings, selfSessionId, menu, presence, closeMenu };
 }

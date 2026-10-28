@@ -11,6 +11,7 @@ import { createOfficeServer as createServer, type OfficeServer, type OfficeServe
 import { createMemoryDirectory } from '../../server/src/directory/memoryDirectory.ts';
 import { createMemoryTerrain } from '../../server/src/terrain/memoryTerrain.ts';
 import { createMemoryCollisions } from '../../server/src/collisions/memoryCollisions.ts';
+import { createMemorySpaces } from '../../server/src/spaces/memorySpaces.ts';
 import type { CollisionTable } from './pieceCollisions';
 import { SESSION_EXPIRED } from '../../server/src/verifyIdToken.ts';
 import { type LayoutMaterial, type TerrainColors } from './officeLayout';
@@ -830,6 +831,25 @@ describe('connectOfficeRoom: seats (art migration, step 6)', () => {
     sitter.sendStand();
     await waitFor(() => local.at(-1) === null);
     expect(watcher.changed.at(-1)?.seat).toBeNull();
+  });
+
+  it('sendLock locks the space the sender stands in; everyone gets the locked ids', async () => {
+    await server.shutdown();
+    const room = { id: 'sala', slug: 'sala', name: 'Sala', x: CHAIR.tx, y: CHAIR.ty - 1, w: 1, h: 1, capacity: null };
+    server = createOfficeServer({ spaces: createMemorySpaces({ seed: [room] }) });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+    const watched: ReadonlySet<string>[] = [];
+    await connect('Ana', { ...recorder().handlers, onLockedSpaces: (ids) => watched.push(ids) });
+    const local: (string | null)[] = [];
+    const locker = await connect('Beto', { ...recorder().handlers, onLocalSeat: (seat) => local.push(seat) });
+    await waitFor(() => local.length > 0);
+    locker.sendMove(NEXT_TO_CHAIR.x, NEXT_TO_CHAIR.y, 'down');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    locker.sendLock();
+
+    await waitFor(() => watched.at(-1)?.has('sala') === true);
+    expect([...watched.at(-1)!]).toEqual(['sala']);
   });
 
   it('a snapshot of someone standing has no seat', async () => {

@@ -22,6 +22,7 @@ import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SP
 import { createOfficeServer as createServer, type OfficeServer, type OfficeServerOverrides } from './createOfficeServer.ts';
 const createOfficeServer = (overrides: OfficeServerOverrides = {}) => createServer({ layout: BASE_LAYOUT, seats: BASE_MAP_SEATS, ...overrides });
 import { createMemoryDesks } from './desks/memoryDesks.ts';
+import { createMemorySpaces } from './spaces/memorySpaces.ts';
 import {
   DEFAULT_NAME,
   deriveIdentityName,
@@ -2543,4 +2544,104 @@ describe('OfficeRoom: doors (#223, #233)', () => {
     await moveTo(ana, west);
     await moveTo(ana, east);
   });
+});
+
+/**
+ * Locked spaces: anyone inside a space locks it with whoever is in. Nobody
+ * outside walks or sits in while it holds; whoever is inside moves and leaves
+ * freely, and the lock goes once the space is empty.
+ */
+describe('OfficeRoom: locked spaces', () => {
+  const SALA = { id: 'sala', slug: 'sala-1', name: 'Sala 1', x: 10, y: 25, w: 3, h: 3, capacity: null };
+  /** A chair on the bottom-right tile of the space: whoever stands right of it is in reach from outside. */
+  const CHAIR = (SALA.y + 2) * BASE_LAYOUT.width + SALA.x + 2;
+  const inside = (i: number) => ({ x: (SALA.x + (i % 3)) * TILE + 16, y: (SALA.y + Math.floor(i / 3)) * TILE + 10, facing: 'down' });
+  const outside = { x: (SALA.x + 3) * TILE + 16, y: (SALA.y + 2) * TILE + 5, facing: 'down' };
+
+  beforeEach(async () => {
+    await server.shutdown();
+    server = createOfficeServer({
+      spaces: createMemorySpaces({ seed: [SALA] }),
+      terrain: createMemoryTerrain([], [], [{ index: CHAIR, piece: 'chair-wood', rotation: 270 }]),
+    });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+  });
+
+  async function moveTo(room: Awaited<ReturnType<typeof join>>, position: { x: number; y: number; facing: string }) {
+    room.send('move', position);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === position.x && room.state.players.get(room.sessionId)?.y === position.y);
+  }
+
+  /** A round trip after `room`'s last message: once the status is back, the room handled what came before it. */
+  async function settle(room: Awaited<ReturnType<typeof join>>, status: string) {
+    room.send('status', { status });
+    await waitFor(() => room.state.players.get(room.sessionId)?.status === status);
+  }
+
+  async function lockedInside() {
+    const owner = await join('Ana');
+    await moveTo(owner, inside(0));
+    owner.send('lock', {});
+    await waitFor(() => owner.state.lockedSpaces === SALA.id);
+    return owner;
+  }
+
+  it('locks the space its sender stands in and keeps whoever is outside out', async () => {
+    await lockedInside();
+    const visitor = await join('Beto');
+    await moveTo(visitor, outside);
+
+    visitor.send('move', inside(4));
+    await settle(visitor, 'y');
+
+    expect(visitor.state.lockedSpaces).toBe(SALA.id);
+    expect(visitor.state.players.get(visitor.sessionId)).toMatchObject({ x: outside.x, y: outside.y });
+    expect(server.sessions.positionOf(visitor.sessionId)).toEqual({ x: outside.x, y: outside.y });
+  }, 20_000);
+
+  it('ignores a lock asked from outside every space', async () => {
+    const visitor = await join('Beto');
+    await moveTo(visitor, outside);
+
+    visitor.send('lock', {});
+    await settle(visitor, 'y');
+
+    expect(visitor.state.lockedSpaces).toBe('');
+  }, 20_000);
+
+  it('lets whoever is inside move and leave, and drops the lock once the space is empty', async () => {
+    const guest = await join('Carla');
+    await moveTo(guest, inside(1));
+    const owner = await lockedInside();
+    // Inside since before the lock: Carla moves in it and out of it, and the lock stays for Ana.
+    await moveTo(guest, inside(4));
+    await moveTo(guest, { ...outside, y: outside.y + TILE });
+    expect(owner.state.lockedSpaces).toBe(SALA.id);
+
+    await moveTo(owner, outside);
+    await waitFor(() => owner.state.lockedSpaces === '');
+    await moveTo(guest, inside(4));
+  }, 20_000);
+
+  it('drops the lock when the last one inside leaves the office', async () => {
+    const owner = await lockedInside();
+    const visitor = await join('Beto');
+    await waitFor(() => visitor.state.lockedSpaces === SALA.id);
+
+    await owner.leave();
+
+    await waitFor(() => visitor.state.lockedSpaces === '');
+  }, 20_000);
+
+  it('refuses a seat whose sitter would stand inside a locked space', async () => {
+    await lockedInside();
+    const visitor = await join('Beto');
+    await moveTo(visitor, outside);
+
+    visitor.send('sit', { seat: chairSeatId(CHAIR) });
+    await settle(visitor, 'y');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(visitor.state.players.get(visitor.sessionId)?.seat).toBe('');
+  }, 20_000);
 });

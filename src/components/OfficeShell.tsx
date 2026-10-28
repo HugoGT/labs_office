@@ -61,6 +61,8 @@ import { ZoomControls } from './ZoomControls';
 
 /** Duracion del toast antes de auto-ocultarse (`app.js:525`, `ms || 3200`). */
 const TOAST_TIMEOUT_MS = 3200;
+/** How long walking into a locked space is told. */
+const SPACE_LOCKED_TOAST_MS = 3000;
 
 export interface OfficeShellProps {
   onEntryState?: (state: OfficeEntryState) => void;
@@ -132,7 +134,7 @@ export function OfficeShell({
   onEntryState,
 }: OfficeShellProps) {
   const [bridge] = useState(createOfficeBridge);
-  const { room, spaceId, recordings, selfSessionId, menu, presence, closeMenu } = useOfficeBridge(bridge);
+  const { room, spaceId, roomLocked, recordings, selfSessionId, menu, presence, closeMenu } = useOfficeBridge(bridge);
   /**
    * Roster en vivo para la barra lateral (#74). Vive aqui y no dentro de
    * `OfficeSidebar` por la misma razon que el resto del HUD: el puente es de
@@ -622,6 +624,16 @@ export function OfficeShell({
 
   useEffect(() => bridge.on('deskfull', () => setToastMessage('Este escritorio está lleno (máximo 6 personas).')), [bridge]);
 
+  // A locked space refuses whoever walks in from outside (`spaceLocks.ts`):
+  // told for its own 3 s, apart from the shared toast and its timeout.
+  const [spaceLockedMessage, setSpaceLockedMessage] = useState<ReactNode | null>(null);
+  useEffect(() => bridge.on('spacelocked', () => setSpaceLockedMessage('🔒 La sala está bloqueada')), [bridge]);
+  useEffect(() => {
+    if (spaceLockedMessage === null) return undefined;
+    const timer = setTimeout(() => setSpaceLockedMessage(null), SPACE_LOCKED_TOAST_MS);
+    return () => clearTimeout(timer);
+  }, [spaceLockedMessage]);
+
   useEffect(
     () =>
       bridge.on('callaccepted', ({ name }) => {
@@ -853,6 +865,8 @@ export function OfficeShell({
         onChangeCameraFilter={setCameraFilter}
         hasDesk={myDesk !== null}
         onGoToDesk={() => bridge.emitCommand('walkToOwnDesk', undefined)}
+        roomLocked={roomLocked}
+        onLockRoom={() => bridge.emitCommand('lockRoom', undefined)}
         // #52: la barra solo avisa; quien sabe reconectar es la escena, y el
         // comando viaja por `emitCommand` como el resto -- sin metodo de
         // conveniencia en el puente.
@@ -867,7 +881,8 @@ export function OfficeShell({
         <ZoomControls view={mapZoom.view} onZoomIn={mapZoom.zoomIn} onZoomOut={mapZoom.zoomOut} onReset={mapZoom.reset} />
       </div>
       <AudioUnblockPrompt blocked={audioBlocked} onUnblock={unblockAudio} />
-      <Toast message={toastMessage} />
+      {/* Inside a locked space its notice stays up, under any passing toast. */}
+      <Toast message={spaceLockedMessage ?? toastMessage ?? (roomLocked ? '🔒 El espacio está bloqueado' : null)} />
       <CallInvitationStack invitations={invitations} onAccept={accept} onDismiss={dismiss} />
       <RecordingReadyStack
         notices={readyRecordings}

@@ -197,6 +197,58 @@ describe('OfficeShell', () => {
     expect(document.querySelector('#office-shell img')).toBeNull();
   });
 
+  it('keeps a notice up while the own space is locked, under any passing toast', () => {
+    vi.useFakeTimers();
+    try {
+      render(<OfficeShell />);
+      const bridge = createGameMock.mock.calls[0][1];
+      act(() => bridge.emit('room', { spaceId: 'space-stub', name: 'Sala de Juntas' }));
+
+      act(() => bridge.emit('roomlock', { locked: true }));
+      expect(screen.queryByText('🔒 El espacio está bloqueado')).not.toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(3200));
+      expect(screen.getByText('🔒 El espacio está bloqueado')).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(screen.getByText('🔒 El espacio está bloqueado')).toBeInTheDocument();
+
+      act(() => bridge.emit('roomlock', { locked: false }));
+      expect(screen.queryByText('🔒 El espacio está bloqueado')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says for 3 seconds that a space is locked when walking into it', () => {
+    vi.useFakeTimers();
+    try {
+      render(<OfficeShell />);
+      const bridge = createGameMock.mock.calls[0][1];
+
+      act(() => bridge.emit('spacelocked', { spaceId: 'space-stub' }));
+      expect(screen.getByText('🔒 La sala está bloqueada')).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(2999));
+      expect(screen.getByText('🔒 La sala está bloqueada')).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(1));
+
+      expect(screen.queryByText('🔒 La sala está bloqueada')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('the lock button asks the scene to lock the own space', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const commands: unknown[] = [];
+    bridge.onCommand('lockRoom', (payload) => commands.push(payload));
+    act(() => bridge.emit('room', { spaceId: 'space-stub', name: 'Sala de Juntas' }));
+
+    await user.click(screen.getByRole('button', { name: 'Bloquear espacio' }));
+
+    expect(commands).toHaveLength(1);
+  });
+
   it('el toast desaparece por si solo tras su timeout', () => {
     vi.useFakeTimers();
     try {

@@ -39,6 +39,7 @@ import { tableFacing, tableFloorRect } from './deskTable';
 import { decorChairs, decorFootprint, encodeOfficeDecor, isDecorChairPiece, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
 import { doorEdge, doorLeaves, doorOpenings, doorSpan, doorStepOf, doorSwingRotation, keptSwings, moveDoors, openDoorLeaves, type DoorLeaf, type DoorMotion } from './officeDoors';
 import { deskEntryRefused, isOnDesk } from './deskDecorRules';
+import { lockedSpaceEntered } from './spaceLocks';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
 import { MinimapLayer } from './MinimapLayer';
@@ -387,6 +388,7 @@ export class OfficeScene extends Phaser.Scene {
   private unsubscribeWalkToPeer?: () => void;
   private unsubscribeToggleSeat?: () => void;
   private unsubscribeWalkToOwnDesk?: () => void;
+  private unsubscribeLockRoom?: () => void;
   private unsubscribeSpacesConfig?: () => void;
   private unsubscribeDesks?: () => void;
   private unsubscribeReconnect?: () => void;
@@ -471,6 +473,12 @@ export class OfficeScene extends Phaser.Scene {
   private deskAreas: DecorTileRect[] = [];
   /** A walk into a full desk was already told (`deskfull`) for this push: once per attempt. */
   private deskFullTold = false;
+  /** The locked space ids the room replicates (`spaceLocks.ts`). */
+  private lockedSpaces: ReadonlySet<string> = new Set();
+  /** Same as `deskFullTold`, for a walk into a locked space (`spacelocked`). */
+  private spaceLockedTold = false;
+  /** The last `roomlock` told: whether the own space is locked. */
+  private roomLocked = false;
   /** Created in `preload()`, where `this.load` first exists. */
   private art!: ArtPackLoader;
   private readonly pendingRedraws = new Set<() => void>();
@@ -741,6 +749,7 @@ export class OfficeScene extends Phaser.Scene {
     });
     this.unsubscribeToggleSeat = this.bridge.onCommand('toggleSeat', () => this.toggleSeat());
     this.unsubscribeWalkToOwnDesk = this.bridge.onCommand('walkToOwnDesk', () => this.walkToOwnDesk());
+    this.unsubscribeLockRoom = this.bridge.onCommand('lockRoom', () => this.connection?.sendLock());
 
     // #7, slice 3. Llega una sola vez por sesion, poco despues de arrancar.
     this.unsubscribeSpacesConfig = this.bridge.onCommand('spacesconfig', ({ spaces, version }) => {
@@ -898,6 +907,7 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeWalkToPeer?.();
       this.unsubscribeToggleSeat?.();
       this.unsubscribeWalkToOwnDesk?.();
+      this.unsubscribeLockRoom?.();
       this.unsubscribeSpacesConfig?.();
       this.unsubscribeDesks?.();
       this.unsubscribeReconnect?.();
@@ -1019,6 +1029,10 @@ export class OfficeScene extends Phaser.Scene {
           onTerrainColors: (colors) => this.applyTerrainColors(colors),
           onWalls: (walls, order) => this.applyWalls(walls, order),
           onDecor: (items) => this.applyDecor(items),
+          onLockedSpaces: (ids) => {
+            this.lockedSpaces = ids;
+            this.syncRoomLock();
+          },
           onCollisions: (table) => this.applyCollisions(table),
           onConnectionState: (state) => {
             if (!current()) return;
@@ -1264,7 +1278,20 @@ export class OfficeScene extends Phaser.Scene {
     }
     // A seat whose sitter would stand inside a full desk is refused by the room too.
     const here = { x: this.player.x, y: this.player.y };
-    return candidates.filter((seat) => !taken.has(seat.id) && this.fullDeskOnTheWay(here, positionForFeet(seat.ground)) === null);
+    // So is one in a locked space the player is not in.
+    return candidates.filter((seat) => {
+      const sitter = positionForFeet(seat.ground);
+      return !taken.has(seat.id) && this.fullDeskOnTheWay(here, sitter) === null
+        && lockedSpaceEntered(here, sitter, this.spaces, this.lockedSpaces) === null;
+    });
+  }
+
+  /** Tells `roomlock` when the own space became locked or stopped being so. */
+  private syncRoomLock(): void {
+    const locked = this.currentSpaceId !== null && this.lockedSpaces.has(this.currentSpaceId);
+    if (locked === this.roomLocked) return;
+    this.roomLocked = locked;
+    this.bridge.emit('roomlock', { locked });
   }
 
   /** The `toggleSeat` command: stand when seated, else ask for the seat in reach. */
@@ -2230,6 +2257,7 @@ export class OfficeScene extends Phaser.Scene {
       this.currentSpaceId = spaceId;
       // A desk created empty has no label, nor does its cubicle (Editar espacios).
       this.bridge.emit('room', { spaceId, name: space === undefined || space === null ? null : space.name || 'Escritorio' });
+      this.syncRoomLock();
     }
 
     this.emitVoice(selfSessionId, peers, spaceId);
@@ -2530,15 +2558,21 @@ export class OfficeScene extends Phaser.Scene {
     this.physics.world.postUpdate();
     // A full desk takes nobody else in (`deskDecorRules.ts`): the step that
     // would enter it is undone, and an auto-walk into it ends there.
-    if (intended && this.fullDeskOnTheWay(from, this.player) !== null) {
+    // So does a locked space, to whoever is not in it (`spaceLocks.ts`).
+    const fullDesk = intended && this.fullDeskOnTheWay(from, this.player) !== null;
+    const lockedSpace = intended && !fullDesk ? lockedSpaceEntered(from, this.player, this.spaces, this.lockedSpaces) : null;
+    if (fullDesk || lockedSpace !== null) {
       body.reset(from.x, from.y);
       body.updateFromGameObject();
       body.setVelocity(0, 0);
       this.autoWalk = undefined;
-      if (!this.deskFullTold) this.bridge.emit('deskfull', undefined);
-      this.deskFullTold = true;
+      if (fullDesk && !this.deskFullTold) this.bridge.emit('deskfull', undefined);
+      if (lockedSpace !== null && !this.spaceLockedTold) this.bridge.emit('spacelocked', { spaceId: lockedSpace.id });
+      if (fullDesk) this.deskFullTold = true;
+      else this.spaceLockedTold = true;
     } else if (!intended || Math.hypot(this.player.x - from.x, this.player.y - from.y) > 0.000001) {
       this.deskFullTold = false;
+      this.spaceLockedTold = false;
     }
     const moved = Math.hypot(this.player.x - from.x, this.player.y - from.y) > 0.000001;
     const walking = advanceWalkingTime(this.walkingMs, this.walkingIdleMs, intended && moved && this.seat === null, delta);

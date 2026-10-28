@@ -767,6 +767,72 @@ describe('auto-walk around walls and desks (#219, #221)', () => {
     expect(connector.sits).toEqual([chairSeatId(ownChair)]);
   });
 
+  describe('locked spaces', () => {
+    const SALA = { id: 'sala', name: 'Sala 1', x: 20 * TILE, y: 6 * TILE, w: 4 * TILE, h: 4 * TILE };
+
+    it('undoes the step into a locked space from outside, ends the walk and says so once per attempt', async () => {
+      const connector = fakeConnector('mi-sesion');
+      const arena = await movementArena(connector);
+      const told: unknown[] = [];
+      arena.bridge.on('spacelocked', (payload) => told.push(payload));
+      arena.bridge.emitCommand('spacesconfig', { spaces: [SALA], version: 'v1' });
+      connector.handlers()!.onLockedSpaces?.(new Set(['sala']));
+      const start = positionForBodyTile({ tx: 17, ty: 7 });
+      arena.body.reset(start.x, start.y);
+
+      arena.doubleClick(SALA.x + 2 * TILE, start.y);
+      walkUntilDone(arena);
+      expect(arena.movement.autoWalk).toBeUndefined();
+      expect(told).toEqual([{ spaceId: 'sala' }]);
+
+      // A second attempt, pushed for many frames, says it once more.
+      arena.frame();
+      arena.movement.cursors.right.isDown = true;
+      arena.walk(400);
+      arena.movement.cursors.right.isDown = false;
+
+      expect(arena.player.x).toBeLessThan(SALA.x);
+      expect(told).toEqual([{ spaceId: 'sala' }, { spaceId: 'sala' }]);
+    });
+
+    it('lets whoever is inside a locked space walk out of it', async () => {
+      const connector = fakeConnector('mi-sesion');
+      const arena = await movementArena(connector);
+      arena.bridge.emitCommand('spacesconfig', { spaces: [SALA], version: 'v1' });
+      const start = positionForBodyTile({ tx: 21, ty: 7 });
+      arena.body.reset(start.x, start.y);
+      arena.frame();
+      connector.handlers()!.onLockedSpaces?.(new Set(['sala']));
+
+      arena.movement.cursors.left.isDown = true;
+      arena.walk(800);
+      arena.movement.cursors.left.isDown = false;
+
+      expect(arena.player.x).toBeLessThan(SALA.x);
+    });
+
+    it('tells whether the own space is locked, and asks the room to lock it', async () => {
+      const connector = fakeConnector('mi-sesion');
+      const arena = await movementArena(connector);
+      const states: unknown[] = [];
+      arena.bridge.on('roomlock', (payload) => states.push(payload));
+      arena.bridge.emitCommand('spacesconfig', { spaces: [SALA], version: 'v1' });
+      const start = positionForBodyTile({ tx: 21, ty: 7 });
+      arena.body.reset(start.x, start.y);
+      // Standing still long enough for a proximity tick to place the player in the space.
+      arena.walk(300);
+
+      arena.bridge.emitCommand('lockRoom', undefined);
+      expect(connector.locks()).toBe(1);
+      connector.handlers()!.onLockedSpaces?.(new Set(['sala']));
+      arena.frame();
+      connector.handlers()!.onLockedSpaces?.(new Set());
+      arena.frame();
+
+      expect(states).toEqual([{ locked: true }, { locked: false }]);
+    });
+  });
+
   it('walkToOwnDesk does nothing without an own desk', async () => {
     const connector = fakeConnector('mi-sesion');
     const arena = await movementArena(connector);
@@ -1611,6 +1677,7 @@ function fakeConnector(sessionId = 'yo', initialState = true) {
   const sentSpacesVersions: string[] = [];
   const sits: string[] = [];
   let stands = 0;
+  let locks = 0;
   let captured: OfficeRoomHandlers | undefined;
   let joinedWith: PresenceStatus | undefined;
   let joinedName: string | undefined;
@@ -1632,6 +1699,9 @@ function fakeConnector(sessionId = 'yo', initialState = true) {
     sendStand: () => {
       stands++;
     },
+    sendLock: () => {
+      locks++;
+    },
     leave: async () => {
       left = true;
     },
@@ -1645,6 +1715,7 @@ function fakeConnector(sessionId = 'yo', initialState = true) {
     sentSpacesVersions,
     sits,
     stands: () => stands,
+    locks: () => locks,
     handlers: () => captured,
     joinedWith: () => joinedWith,
     joinedName: () => joinedName,
@@ -2422,6 +2493,7 @@ describe('OfficeScene: comando setStatus via el puente (#1)', () => {
       sendCallRespond: () => {},
       sendSit: () => {},
       sendStand: () => {},
+      sendLock: () => {},
       leave: async () => {},
     };
 

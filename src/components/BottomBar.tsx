@@ -56,6 +56,10 @@ export interface BottomBarProps {
   hasDesk: boolean;
   /** Walk to a chair of the own desk; the scene owns the route. */
   onGoToDesk: () => void;
+  /** The space the user stands in is locked (`spaceLocks.ts`). */
+  roomLocked: boolean;
+  /** Lock the space the user stands in; the room decides. */
+  onLockRoom: () => void;
 }
 
 /** Explica el `disabled` de mic/camara cuando no hay conexion viva a LiveKit. */
@@ -72,6 +76,13 @@ const SCREEN_SHARE_DND_TITLE = 'No molestar: no compartes pantalla';
 const GO_TO_DESK_LABEL = 'Ir a mi escritorio';
 
 const NO_DESK_TITLE = 'No tienes un escritorio reclamado';
+
+const LOCK_LABEL = 'Bloquear espacio';
+
+const LOCK_TITLE = 'Bloquear este espacio con quienes están dentro';
+
+/** Nobody unlocks a space: the lock goes once everyone inside has left. */
+const LOCKED_TITLE = 'Espacio bloqueado: se desbloquea cuando salgan todos';
 
 const NOTHING_TO_RECORD_TITLE = 'No hay cámaras, pantalla o audio que grabar';
 
@@ -118,6 +129,8 @@ export function BottomBar({
   onChangeCameraFilter,
   hasDesk,
   onGoToDesk,
+  roomLocked,
+  onLockRoom,
 }: BottomBarProps) {
   // Se deriva del estado en vez de recibirse como prop propia: dos fuentes
   // para el mismo hecho acabarian discrepando en algun render.
@@ -138,6 +151,7 @@ export function BottomBar({
         ? undefined
         : ONLY_IN_SPACE_TITLE;
   // Stopping never waits for media: a recording outlives a mic turned off.
+  const lockTitle = room === null ? ONLY_IN_SPACE_TITLE : roomLocked ? LOCKED_TITLE : LOCK_TITLE;
   const recordTitle =
     room === null ? ONLY_IN_SPACE_TITLE : recording || recordableMedia ? undefined : NOTHING_TO_RECORD_TITLE;
 
@@ -170,6 +184,17 @@ export function BottomBar({
           onClick={onGoToDesk}
         >
           🪑
+        </button>
+        <button
+          type="button"
+          className={`${styles.btn} ${styles.iconBtn}`}
+          aria-label={LOCK_LABEL}
+          aria-pressed={room !== null && roomLocked}
+          disabled={room === null || roomLocked}
+          title={lockTitle}
+          onClick={onLockRoom}
+        >
+          {room !== null && roomLocked ? '🔒' : '🔓'}
         </button>
       </div>
       <div className={styles.controls} role="toolbar" aria-label="Controles de llamada">

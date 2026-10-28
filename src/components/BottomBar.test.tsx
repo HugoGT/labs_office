@@ -43,6 +43,8 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
     onChangeCameraFilter: vi.fn(),
     hasDesk: true,
     onGoToDesk: vi.fn(),
+    roomLocked: false,
+    onLockRoom: vi.fn(),
     ...overrides,
   };
   render(<BottomBar {...props} />);
@@ -76,6 +78,50 @@ describe('BottomBar: own desk button', () => {
     const button = screen.getByRole('button', { name: 'Ir a mi escritorio' });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute('title', 'No tienes un escritorio reclamado');
+  });
+});
+
+describe('BottomBar: space lock button', () => {
+  it('sits in the status group, after the desk button and before Mic', () => {
+    renderBar({ room: 'Sala 1' });
+
+    const group = screen.getByRole('group', { name: 'Identidad' });
+    const lock = within(group).getByRole('button', { name: 'Bloquear espacio' });
+    const desk = screen.getByRole('button', { name: 'Ir a mi escritorio' });
+    const mic = screen.getByRole('button', { name: /Mic/ });
+    expect(desk.compareDocumentPosition(lock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(lock.compareDocumentPosition(mic) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('locks the space it stands in with the open lock', async () => {
+    const user = userEvent.setup();
+    const props = renderBar({ room: 'Sala 1' });
+
+    const lock = screen.getByRole('button', { name: 'Bloquear espacio' });
+    expect(lock).toHaveTextContent('🔓');
+    expect(lock).toHaveAttribute('aria-pressed', 'false');
+    expect(lock).toHaveAttribute('title', 'Bloquear este espacio con quienes están dentro');
+    await user.click(lock);
+
+    expect(props.onLockRoom).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the closed lock, pressed, and cannot unlock: the lock goes once everyone leaves', () => {
+    renderBar({ room: 'Sala 1', roomLocked: true });
+
+    const lock = screen.getByRole('button', { name: 'Bloquear espacio' });
+    expect(lock).toHaveTextContent('🔒');
+    expect(lock).toHaveAttribute('aria-pressed', 'true');
+    expect(lock).toBeDisabled();
+    expect(lock).toHaveAttribute('title', 'Espacio bloqueado: se desbloquea cuando salgan todos');
+  });
+
+  it('is disabled outside every space, like recording', () => {
+    renderBar({ room: null });
+
+    const lock = screen.getByRole('button', { name: 'Bloquear espacio' });
+    expect(lock).toBeDisabled();
+    expect(lock).toHaveAttribute('title', 'Solo disponible dentro de una sala');
   });
 });
 
@@ -167,6 +213,8 @@ describe('BottomBar', () => {
         onChangeCameraFilter={vi.fn()}
         hasDesk
         onGoToDesk={vi.fn()}
+        roomLocked={false}
+        onLockRoom={vi.fn()}
       />,
     );
     expect(screen.getByText('proximidad').tagName).toBe('B');
@@ -195,6 +243,8 @@ describe('BottomBar', () => {
         onChangeCameraFilter={vi.fn()}
         hasDesk
         onGoToDesk={vi.fn()}
+        roomLocked={false}
+        onLockRoom={vi.fn()}
       />,
     );
     expect(screen.getByText('Cafeteria').tagName).toBe('B');
@@ -290,6 +340,8 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
         onChangeCameraFilter={vi.fn()}
         hasDesk
         onGoToDesk={vi.fn()}
+        roomLocked={false}
+        onLockRoom={vi.fn()}
       />,
     );
     // El punto es decorativo y no lleva marcado de prueba: se alcanza desde
@@ -321,6 +373,8 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
         onChangeCameraFilter={vi.fn()}
         hasDesk
         onGoToDesk={vi.fn()}
+        roomLocked={false}
+        onLockRoom={vi.fn()}
       />,
     );
     expect(dot).toHaveStyle({ background: statusCssColor('r') });
@@ -644,6 +698,8 @@ describe('BottomBar: indicador de grabacion junto a "Sala privada" (#85)', () =>
         onChangeCameraFilter={vi.fn()}
         hasDesk
         onGoToDesk={vi.fn()}
+        roomLocked={false}
+        onLockRoom={vi.fn()}
       />,
     );
     expect(screen.getByText(/REC/)).toBeInTheDocument();
@@ -672,6 +728,8 @@ describe('BottomBar: indicador de grabacion junto a "Sala privada" (#85)', () =>
         onChangeCameraFilter={vi.fn()}
         hasDesk
         onGoToDesk={vi.fn()}
+        roomLocked={false}
+        onLockRoom={vi.fn()}
       />,
     );
     expect(screen.queryByText(/REC/)).not.toBeInTheDocument();
