@@ -2,7 +2,7 @@
  * Locked spaces: anyone inside a room or a desk cubicle may lock it with
  * whoever is in. Nobody outside walks in while it holds; whoever is inside
  * moves and leaves freely. Only whoever locked it unlocks it, and the lock
- * goes anyway once the space is empty.
+ * goes by itself once they leave (so also once the space is empty).
  *
  * Shared by the room, which enforces it, and the scene, which refuses the
  * same step locally (the client stays the stricter side). Positions are
@@ -31,19 +31,18 @@ export function lockedSpaceEntered(
 }
 
 /**
- * The locks that still hold, each with who locked it: those of an existing
- * space with at least one of `players` inside.
+ * The locks that still hold, each with who locked it: those whose locker is
+ * among `players` and inside that space, which must still exist.
  */
 export function heldLocks(
   locked: ReadonlyMap<string, string>,
   spaces: readonly SpaceArea[],
-  players: readonly Point[],
+  players: readonly (Point & { readonly sessionId: string })[],
 ): Map<string, string> {
   const held = new Map<string, string>();
   for (const player of players) {
     const space = detectSpace(player, spaces);
-    const locker = space === null ? undefined : locked.get(space.id);
-    if (space !== null && locker !== undefined) held.set(space.id, locker);
+    if (space !== null && locked.get(space.id) === player.sessionId) held.set(space.id, player.sessionId);
   }
   return held;
 }

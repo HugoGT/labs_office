@@ -32,14 +32,19 @@ describe('lockedSpaceEntered', () => {
 });
 
 describe('heldLocks', () => {
-  it('keeps a lock while someone is inside and drops it once the space is empty', () => {
-    const locked = locks('sala', 'mesa');
-    expect(heldLocks(locked, SPACES, [inSala, outside])).toEqual(locks('sala'));
-    expect(heldLocks(locked, SPACES, [outside])).toEqual(new Map());
+  const at = (sessionId: string, point: { x: number; y: number }) => ({ sessionId, ...point });
+
+  it('keeps a lock while whoever locked it is inside', () => {
+    expect(heldLocks(locks('sala'), SPACES, [at('locker-sala', inSala), at('otra', outside)])).toEqual(locks('sala'));
+  });
+
+  it('drops the lock once whoever locked it leaves, even with others still inside', () => {
+    expect(heldLocks(locks('sala'), SPACES, [at('locker-sala', outside), at('otra', inSala)])).toEqual(new Map());
+    expect(heldLocks(locks('sala'), SPACES, [at('otra', inSala)])).toEqual(new Map());
   });
 
   it('drops the lock of a space that no longer exists', () => {
-    expect(heldLocks(locks('borrada'), SPACES, [inSala])).toEqual(new Map());
+    expect(heldLocks(locks('borrada'), SPACES, [at('locker-borrada', inSala)])).toEqual(new Map());
   });
 });
 

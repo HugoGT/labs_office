@@ -86,7 +86,7 @@ const LOCK_TITLE = 'Bloquear este espacio con quienes están dentro';
 
 const UNLOCK_TITLE = 'Desbloquear este espacio';
 
-/** Only whoever locked a space unlocks it; the lock also goes once everyone inside has left. */
+/** Only whoever locked a space unlocks it; the lock also goes once they leave it. */
 const LOCKED_TITLE = 'Espacio bloqueado: solo quien lo bloqueó puede desbloquearlo';
 
 const NOTHING_TO_RECORD_TITLE = 'No hay cámaras, pantalla o audio que grabar';

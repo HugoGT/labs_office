@@ -2613,7 +2613,7 @@ describe('OfficeRoom: locked spaces', () => {
     expect(visitor.state.lockedSpaces).toBe('');
   }, 20_000);
 
-  it('lets whoever is inside move and leave, and drops the lock once the space is empty', async () => {
+  it('lets the others inside move and leave while the lock holds, and drops it once the space is empty', async () => {
     const guest = await join('Carla');
     await moveTo(guest, inside(1));
     const owner = await lockedInside();
@@ -2654,16 +2654,26 @@ describe('OfficeRoom: locked spaces', () => {
     await moveTo(visitor, inside(4));
   }, 20_000);
 
-  it('ignores an unlock from whoever locked it once they stand outside the space', async () => {
+  it('drops the lock once whoever locked it leaves, even with others still inside', async () => {
     const guest = await join('Carla');
     await moveTo(guest, inside(1));
     const owner = await lockedInside();
+
     await moveTo(owner, outside);
 
-    owner.send('unlock', {});
-    await settle(owner, 'y');
+    await waitFor(() => guest.state.lockedSpaces === '');
+    expect(guest.state.players.get(guest.sessionId)).toMatchObject({ x: inside(1).x, y: inside(1).y });
+    await moveTo(owner, inside(4));
+  }, 20_000);
 
-    expect(lockerOf(guest)).toBe(owner.sessionId);
+  it('drops the lock once whoever locked it leaves the office, even with others still inside', async () => {
+    const guest = await join('Carla');
+    await moveTo(guest, inside(1));
+    const owner = await lockedInside();
+
+    await owner.leave();
+
+    await waitFor(() => guest.state.lockedSpaces === '');
   }, 20_000);
 
   it('refuses a seat whose sitter would stand inside a locked space', async () => {

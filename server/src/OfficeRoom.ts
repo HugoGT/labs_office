@@ -592,7 +592,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     });
 
     // Only whoever locked a space unlocks it, from inside it; the others can
-    // only leave. The lock goes anyway once the space is empty.
+    // only leave. The lock goes by itself once whoever locked it leaves.
     this.onMessage('unlock', (client: Client) => {
       const space = this.spaceOf(client.sessionId);
       if (space === null || this.lockedSpaceIds.get(space.id) !== client.sessionId) return;
@@ -1042,9 +1042,9 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   }
 
   /**
-   * Drops the lock of every space nobody is in any more, and of every space
-   * that is gone. Every replicated player counts, reserved reconnects
-   * included, like the desk occupancy rule.
+   * Drops the lock of every space whoever locked it left (or the office), and
+   * of every space that is gone. A locker waiting to reconnect still holds
+   * it, like the desk occupancy rule counts reserved reconnects.
    */
   /** The space a session stands in, as the room tracks it, or `null`. */
   private spaceOf(sessionId: string): SpaceArea | null {
@@ -1054,7 +1054,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
 
   private releaseEmptyLocks(): void {
     if (this.lockedSpaceIds.size === 0) return;
-    const players = [...this.state.players.values()].map(({ x, y }) => ({ x, y }));
+    const players = [...this.state.players].map(([sessionId, { x, y }]) => ({ sessionId, x, y }));
     const held = heldLocks(this.lockedSpaceIds, this.spaces(), players);
     if (held.size === this.lockedSpaceIds.size) return;
     this.lockedSpaceIds = held;
