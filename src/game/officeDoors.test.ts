@@ -9,6 +9,7 @@ import {
   doorEdges,
   doorEndPosts,
   doorFarSide,
+  doorHingeStops,
   doorInnerPosts,
   doorPosts,
   doorShoulders,
@@ -366,5 +367,29 @@ describe('officeDoors: the swing (#233)', () => {
 
   it('draws the frame nearest to the swing: closed, two between, open', () => {
     expect([0, 0.1, 0.2, 0.5, 0.84, 1].map(doorStepOf)).toEqual([0, 0, 1, 2, 3, 3]);
+  });
+});
+
+describe('officeDoors: the hinge post (#233)', () => {
+  // A wall line along row 6 and one along column 4, posts on every vertex the doors below need.
+  const grid = wallGrid([[4, 6], [5, 6], [6, 6], [7, 6], [4, 7], [4, 8]]);
+
+  it('blocks 16px more past the hinge post of a single door, into its opening, whatever end the hinge is at', () => {
+    // The joint of the post is clipped at the vertex; the stop runs on from there, the wall's thickness across.
+    expect(doorHingeStops([door(4, 6, 0)], grid)).toEqual([{ x: 4 * 32, y: 6 * 32 - 8, w: 16, h: 16 }]);
+    expect(doorHingeStops([door(4, 6, 180)], grid)).toEqual([{ x: 6 * 32 - 16, y: 6 * 32 - 8, w: 16, h: 16 }]);
+    expect(doorHingeStops([door(4, 6, 270)], grid)).toEqual([{ x: 4 * 32 - 8, y: 6 * 32, w: 16, h: 16 }]);
+    expect(doorHingeStops([door(4, 6, 90)], grid)).toEqual([{ x: 4 * 32 - 8, y: 8 * 32 - 16, w: 16, h: 16 }]);
+  });
+
+  it('blocks past both end posts of a double door, which hinges a leaf on each', () => {
+    expect(doorHingeStops([doubleDoor(4, 6, 0)], grid)).toEqual([
+      { x: 4 * 32, y: 6 * 32 - 8, w: 16, h: 16 },
+      { x: 7 * 32 - 16, y: 6 * 32 - 8, w: 16, h: 16 },
+    ]);
+  });
+
+  it('adds nothing for a door that is not on a wall, nor for other decor', () => {
+    expect(doorHingeStops([door(8, 2, 0), { index: at(4, 6), piece: 'chair-wood', rotation: 0 }], grid)).toEqual([]);
   });
 });

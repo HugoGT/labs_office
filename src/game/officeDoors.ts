@@ -19,11 +19,11 @@
  * `officeDecor.ts`: explicit `.ts` imports of other pure modules only.
  */
 
-import { DOOR_STEPS, doorHingeOf, doorSpanOf, type DoorHinge, type GridEdge } from './artContract.ts';
+import { DOOR_STEPS, WALL, doorHingeOf, doorSpanOf, doorVariantOf, type DoorHinge, type GridEdge } from './artContract.ts';
 import { AVATAR_BODY_CENTER_OFFSET, type GeometryPoint } from './avatarGeometry.ts';
 import { decorChairFacing, type DecorItem, type DecorTileRect } from './officeDecor.ts';
 import { wallFootprintRects, type WallGrid } from './officeLayout.ts';
-import { coveredTiles } from './pieceCollisions.ts';
+import { coveredTiles, type CollisionRect } from './pieceCollisions.ts';
 
 /** Same as `TILE` in mapData.ts (pinned by the tests through the footprint pixels). */
 const DOOR_TILE = 32;
@@ -79,6 +79,39 @@ export function doorOnWall(grid: Pick<WallGrid, 'width' | 'height' | 'walls'>, i
   const [endCol, endRow] = axis === 'horizontal' ? [col + span, row] : [col, row + span];
   if (col < 0 || row < 0 || endCol >= grid.width || endRow >= grid.height) return false;
   return grid.walls[row * grid.width + col] != null && grid.walls[endRow * grid.width + endCol] != null;
+}
+
+/**
+ * How far past its post, into the opening, a door's hinge blocks: the jamb
+ * and the thickness of the open leaf (`DOOR`: 10 + 6px), so a body leaving
+ * along the hinge keeps off the open leaf.
+ */
+export const DOOR_HINGE_STOP_PX = 16;
+
+/**
+ * The strips each door on a wall (`doorOnWall`) blocks past its hinge post:
+ * the post's joint is clipped at its vertex (`wallColliderRects`), and the
+ * strip runs `DOOR_HINGE_STOP_PX` on from there along the opening, the
+ * wall's thickness across. A single door has one hinge (`doorHingeOf`), a
+ * double door one at each end. Arcade and the auto-walk only: the room
+ * checks the body center, and the client is the stricter side.
+ */
+export function doorHingeStops(items: readonly DecorItem[], grid: Pick<WallGrid, 'width' | 'height' | 'walls'>): CollisionRect[] {
+  const half = WALL.jointSize / 2;
+  return items.flatMap((item) => {
+    if (!isDoorPiece(item.piece) || !doorOnWall(grid, item)) return [];
+    const { col, row, axis } = doorEdge(item, grid.width);
+    const span = doorSpan(item);
+    const hinges: DoorHinge[] = doorVariantOf(item.piece) === 'double' ? ['start', 'end'] : [doorHingeOf(item.piece, item.rotation)];
+    return hinges.map((hinge): CollisionRect => {
+      if (axis === 'horizontal') {
+        const x = (hinge === 'start' ? col : col + span) * DOOR_TILE;
+        return { x: hinge === 'start' ? x : x - DOOR_HINGE_STOP_PX, y: row * DOOR_TILE - half, w: DOOR_HINGE_STOP_PX, h: 2 * half };
+      }
+      const y = (hinge === 'start' ? row : row + span) * DOOR_TILE;
+      return { x: col * DOOR_TILE - half, y: hinge === 'start' ? y : y - DOOR_HINGE_STOP_PX, w: 2 * half, h: DOOR_HINGE_STOP_PX };
+    });
+  });
 }
 
 /** The posts strictly between a door's two end posts, in order: the wall a door stands in front of. */

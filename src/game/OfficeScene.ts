@@ -37,7 +37,7 @@ import { deskAt, deskZoneName } from './deskLayout';
 import { SPACE_SHADE_ALPHA, SPACE_SHADE_NAME, shadeAround, shadeKey } from './spaceFocus';
 import { tableFacing, tableFloorRect } from './deskTable';
 import { decorChairs, decorFootprint, encodeOfficeDecor, isDecorChairPiece, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
-import { doorEdge, doorLeaves, doorOpenings, doorSpan, doorStepOf, doorSwingRotation, keptSwings, moveDoors, openDoorLeaves, type DoorLeaf, type DoorMotion } from './officeDoors';
+import { doorEdge, doorHingeStops, doorLeaves, doorOpenings, doorSpan, doorStepOf, doorSwingRotation, keptSwings, moveDoors, openDoorLeaves, type DoorLeaf, type DoorMotion } from './officeDoors';
 import { deskEntryRefused, isOnDesk } from './deskDecorRules';
 import { lockedBehindDoor, lockedDoorAhead, lockedSpaceEntered } from './spaceLocks';
 import type { OfficeDesk } from './desksPort';
@@ -658,7 +658,7 @@ export class OfficeScene extends Phaser.Scene {
 
     // The static office is the Tiled layout (art step 8); collisions come from
     // the same walkability rule the room enforces on every `move`.
-    const grid: TerrainGrid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
+    const grid: TerrainGrid = this.buildGrid();
     this.grid = grid;
     this.terrainTilemap = renderTerrain(this, this.terrain, this.layout, this.art, this.terrainColors);
     this.paintWalls();
@@ -1897,7 +1897,7 @@ export class OfficeScene extends Phaser.Scene {
   private refreshCollisions(): void {
     if (!this.alive || this.player === undefined) return;
     this.collisionRects = collisionWorld(this.collisionInstances, this.collisionTable);
-    this.grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
+    this.grid = this.buildGrid();
     this.buildPieceColliders();
     this.collisionEditLayer?.refresh();
   }
@@ -1921,7 +1921,7 @@ export class OfficeScene extends Phaser.Scene {
     if (encodeTerrainBlocks(blocks) !== encodeTerrainBlocks(this.terrainBlocks)) {
       this.terrainBlocks = blocks;
       this.terrain = this.terrainOf(blocks, this.terrainWalls);
-      this.grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
+      this.grid = this.buildGrid();
       this.buildTerrainColliders(this.grid);
       this.paintTerrain();
       this.cameraPanLayer?.setRegion(this.cameraRegion());
@@ -1965,7 +1965,7 @@ export class OfficeScene extends Phaser.Scene {
       this.terrainWalls = walls;
       this.terrainWallOrder = order;
       this.terrain = this.terrainOf(this.terrainBlocks, walls);
-      this.grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
+      this.grid = this.buildGrid();
       this.buildTerrainColliders(this.grid);
       this.paintWalls();
     }
@@ -1981,12 +1981,13 @@ export class OfficeScene extends Phaser.Scene {
   private applyDecor(items: readonly DecorItem[]): void {
     if (!this.alive) return;
     if (encodeOfficeDecor(items) !== encodeOfficeDecor(this.officeDecor)) {
-      const opened = JSON.stringify(doorOpenings(this.officeDecor, this.layout.width));
+      const opened = this.doorWalls();
       this.officeDecor = items;
       // A door that came or went opens or closes its wall (#223): the room's snapshot changed with it.
-      if (JSON.stringify(doorOpenings(items, this.layout.width)) !== opened) {
+      // So does a door turned to hinge at its other end: its stop moves (`doorHingeStops`).
+      if (this.doorWalls() !== opened) {
         this.terrain = this.terrainOf(this.terrainBlocks, this.terrainWalls);
-        this.grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
+        this.grid = this.buildGrid();
         this.buildTerrainColliders(this.grid);
         this.paintWalls();
       }
@@ -2067,6 +2068,21 @@ export class OfficeScene extends Phaser.Scene {
       terrainSnapshot(this.layout, this.terrainPreviewBlocks ?? this.terrainBlocks, this.terrainWalls),
       this.terrainPreviewColors ?? this.terrainColors,
     );
+  }
+
+  /**
+   * The grid of the live terrain and pieces, with the strip past each door's
+   * hinge post among the walls (`doorHingeStops`): client only, the stricter
+   * side, so the room's snapshot has none.
+   */
+  private buildGrid(): TerrainGrid {
+    const grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
+    return { ...grid, wallRects: [...grid.wallRects, ...doorHingeStops(this.officeDecor, this.terrain)] };
+  }
+
+  /** What the doors change in the walls: the edges they open and their hinge stops. */
+  private doorWalls(): string {
+    return JSON.stringify([doorOpenings(this.officeDecor, this.layout.width), doorHingeStops(this.officeDecor, this.terrain)]);
   }
 
   /**

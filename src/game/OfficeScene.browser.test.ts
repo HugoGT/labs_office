@@ -4919,7 +4919,8 @@ describe('OfficeScene: edited terrain', () => {
     const grid = () => (scene as unknown as { grid: { solid: boolean[][] } }).grid;
     // Posts on vertices 67, 68 and 69 of row 22: two segments of brick wall, the span of one door.
     handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
-    const doorways = [lawnVertex.x + TILE / 2, lawnVertex.x + TILE + TILE / 2].map((x) => ({ x, y: lawnVertex.y }));
+    // Past the 16px hinge stop of the west post (`doorHingeStops`).
+    const doorways = [lawnVertex.x + TILE / 2 + 4, lawnVertex.x + TILE + TILE / 2].map((x) => ({ x, y: lawnVertex.y }));
     for (const doorway of doorways) expect(solidAt(scene, doorway.x, doorway.y)).toBe(true);
     const walled = wallObjects(scene).length;
 
@@ -4928,8 +4929,9 @@ describe('OfficeScene: edited terrain', () => {
     // Destroyed static bodies leave the world on its next step.
     await vi.waitFor(() => expect(solidAt(scene, doorways[1]!.x, doorways[1]!.y)).toBe(false), LOOP_WAIT);
     for (const doorway of doorways) expect(solidAt(scene, doorway.x, doorway.y)).toBe(false);
-    // The 18px body fits: the passage runs from the vertex of one end post to the other's.
-    expect(solidAt(scene, lawnVertex.x + 1, lawnVertex.y)).toBe(false);
+    // The 18px body fits: the passage runs from 16px past the hinge post (west, rotation 0) to the vertex of the other end post.
+    expect(solidAt(scene, lawnVertex.x + 15, lawnVertex.y)).toBe(true);
+    expect(solidAt(scene, lawnVertex.x + 17, lawnVertex.y)).toBe(false);
     expect(solidAt(scene, lawnVertex.x + 2 * TILE - 1, lawnVertex.y)).toBe(false);
     // The outer halves of the end posts stay, the jambs of the door merge with them.
     expect(solidAt(scene, lawnVertex.x - 1, lawnVertex.y)).toBe(true);
@@ -5026,6 +5028,24 @@ describe('OfficeScene: edited terrain', () => {
     expect(frame()).toBe(doorFrameIndex(180, 'start', DOOR_STEPS - 1));
   });
 
+  it('blocks 16px past the hinge post of a door into its opening, and moves the stop when the door turns its hinge (#233)', async () => {
+    const { scene, handlers } = await bootConnected();
+    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
+    // Hinged at its west end (rotation 0), on vertex 67; the east end post is on vertex 69.
+    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 0 }]);
+    const east = lawnVertex.x + 2 * TILE;
+    // Destroyed static bodies leave the world on its next step.
+    await vi.waitFor(() => expect(solidAt(scene, lawnVertex.x + 17, lawnVertex.y)).toBe(false), LOOP_WAIT);
+    expect(solidAt(scene, lawnVertex.x + 15, lawnVertex.y)).toBe(true);
+    expect(solidAt(scene, east - 2, lawnVertex.y)).toBe(false);
+
+    // Turned up (180) it hinges at the east end: the stop goes with it.
+    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 180 }]);
+    await vi.waitFor(() => expect(solidAt(scene, lawnVertex.x + 2, lawnVertex.y)).toBe(false), LOOP_WAIT);
+    expect(solidAt(scene, east - 15, lawnVertex.y)).toBe(true);
+    expect(solidAt(scene, east - 17, lawnVertex.y)).toBe(false);
+  });
+
   it('keeps the door of a locked space shut for whoever is outside it, and opens it for whoever is inside', async () => {
     const { scene, bridge, handlers } = await bootConnected();
     handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
@@ -5065,7 +5085,8 @@ describe('OfficeScene: edited terrain', () => {
     expect(leaf().x).toBe(lawnVertex.x + (3 * TILE) / 2 - 64);
     expect(leaf().y).toBe(lawnVertex.y - 64);
     await vi.waitFor(() => expect(frame()).toBe(closed), LOOP_WAIT);
-    await vi.waitFor(() => expect(solidAt(scene, lawnVertex.x + 2 * TILE + TILE / 2, lawnVertex.y)).toBe(false), LOOP_WAIT);
+    // The last tile of the span, short of the 16px stop of the east hinge.
+    await vi.waitFor(() => expect(solidAt(scene, lawnVertex.x + 2 * TILE + 8, lawnVertex.y)).toBe(false), LOOP_WAIT);
 
     // A remote avatar in the doorway of the last tile of the span opens the whole door, swung south for whoever comes from the north.
     handlers.onAdd(remoteSnapshot({ sessionId: 'peer-door', x: lawnVertex.x + 2 * TILE + TILE / 2, y: lawnVertex.y - 11 }));
