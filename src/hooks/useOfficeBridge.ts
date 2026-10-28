@@ -5,8 +5,8 @@ export interface UseOfficeBridgeResult {
   room: string | null;
   /** Stable id of the current space (#5); `null` on the open floor. */
   spaceId: string | null;
-  /** The current space is locked (`spaceLocks.ts`); `false` on the open floor. */
-  roomLocked: boolean;
+  /** The current space is locked (`spaceLocks.ts`), and whether by the local player; never on the open floor. */
+  roomLock: OfficeEventMap['roomlock'];
   /** Active recordings keyed by spaceId (#5). */
   recordings: OfficeEventMap['recordings']['active'];
   /** Own Colyseus sessionId, from the `voice` snapshot; `null` while offline. */
@@ -35,10 +35,12 @@ const INITIAL_PRESENCE: OfficeEventMap['presence'] = {
  * crea y posee `OfficeShell`, nunca este hook). Cada evento de Phaser
  * actualiza estado local; al desmontar se llaman todas las desuscripciones.
  */
+const UNLOCKED: OfficeEventMap['roomlock'] = { locked: false, mine: false };
+
 export function useOfficeBridge(bridge: OfficeBridge): UseOfficeBridgeResult {
   const [room, setRoom] = useState<string | null>(null);
   const [spaceId, setSpaceId] = useState<string | null>(null);
-  const [roomLocked, setRoomLocked] = useState(false);
+  const [roomLock, setRoomLock] = useState<OfficeEventMap['roomlock']>(UNLOCKED);
   const [recordings, setRecordings] = useState<OfficeEventMap['recordings']['active']>({});
   const [selfSessionId, setSelfSessionId] = useState<string | null>(null);
   const [menu, setMenu] = useState<OfficeEventMap['peermenu'] | null>(null);
@@ -52,7 +54,7 @@ export function useOfficeBridge(bridge: OfficeBridge): UseOfficeBridgeResult {
       setRoom(payload.name);
       setSpaceId(payload.spaceId);
     });
-    const unsubscribeRoomLock = bridge.on('roomlock', (payload) => setRoomLocked(payload.locked));
+    const unsubscribeRoomLock = bridge.on('roomlock', (payload) => setRoomLock(payload));
     const unsubscribeRecordings = bridge.on('recordings', (payload) => setRecordings(payload.active));
     const unsubscribeVoice = bridge.on('voice', (payload) => setSelfSessionId(payload.selfSessionId));
     const unsubscribePeerMenu = bridge.on('peermenu', (payload) => setMenu(payload));
@@ -72,5 +74,5 @@ export function useOfficeBridge(bridge: OfficeBridge): UseOfficeBridgeResult {
 
   const closeMenu = useCallback(() => setMenu(null), []);
 
-  return { room, spaceId, roomLocked, recordings, selfSessionId, menu, presence, closeMenu };
+  return { room, spaceId, roomLock, recordings, selfSessionId, menu, presence, closeMenu };
 }

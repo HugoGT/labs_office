@@ -776,7 +776,7 @@ describe('auto-walk around walls and desks (#219, #221)', () => {
       const told: unknown[] = [];
       arena.bridge.on('spacelocked', (payload) => told.push(payload));
       arena.bridge.emitCommand('spacesconfig', { spaces: [SALA], version: 'v1' });
-      connector.handlers()!.onLockedSpaces?.(new Set(['sala']));
+      connector.handlers()!.onLockedSpaces?.(new Map([['sala', 'otra-sesion']]));
       const start = positionForBodyTile({ tx: 17, ty: 7 });
       arena.body.reset(start.x, start.y);
 
@@ -802,7 +802,7 @@ describe('auto-walk around walls and desks (#219, #221)', () => {
       const start = positionForBodyTile({ tx: 21, ty: 7 });
       arena.body.reset(start.x, start.y);
       arena.frame();
-      connector.handlers()!.onLockedSpaces?.(new Set(['sala']));
+      connector.handlers()!.onLockedSpaces?.(new Map([['sala', 'otra-sesion']]));
 
       arena.movement.cursors.left.isDown = true;
       arena.walk(800);
@@ -811,7 +811,7 @@ describe('auto-walk around walls and desks (#219, #221)', () => {
       expect(arena.player.x).toBeLessThan(SALA.x);
     });
 
-    it('tells whether the own space is locked, and asks the room to lock it', async () => {
+    it('tells whether the own space is locked and by whom, and asks the room to lock and unlock it', async () => {
       const connector = fakeConnector('mi-sesion');
       const arena = await movementArena(connector);
       const states: unknown[] = [];
@@ -824,12 +824,13 @@ describe('auto-walk around walls and desks (#219, #221)', () => {
 
       arena.bridge.emitCommand('lockRoom', undefined);
       expect(connector.locks()).toBe(1);
-      connector.handlers()!.onLockedSpaces?.(new Set(['sala']));
-      arena.frame();
-      connector.handlers()!.onLockedSpaces?.(new Set());
-      arena.frame();
+      connector.handlers()!.onLockedSpaces?.(new Map([['sala', 'mi-sesion']]));
+      arena.bridge.emitCommand('unlockRoom', undefined);
+      expect(connector.unlocks()).toBe(1);
+      connector.handlers()!.onLockedSpaces?.(new Map());
+      connector.handlers()!.onLockedSpaces?.(new Map([['sala', 'otra-sesion']]));
 
-      expect(states).toEqual([{ locked: true }, { locked: false }]);
+      expect(states).toEqual([{ locked: true, mine: true }, { locked: false, mine: false }, { locked: true, mine: false }]);
     });
   });
 
@@ -1678,6 +1679,7 @@ function fakeConnector(sessionId = 'yo', initialState = true) {
   const sits: string[] = [];
   let stands = 0;
   let locks = 0;
+  let unlocks = 0;
   let captured: OfficeRoomHandlers | undefined;
   let joinedWith: PresenceStatus | undefined;
   let joinedName: string | undefined;
@@ -1702,6 +1704,9 @@ function fakeConnector(sessionId = 'yo', initialState = true) {
     sendLock: () => {
       locks++;
     },
+    sendUnlock: () => {
+      unlocks++;
+    },
     leave: async () => {
       left = true;
     },
@@ -1716,6 +1721,7 @@ function fakeConnector(sessionId = 'yo', initialState = true) {
     sits,
     stands: () => stands,
     locks: () => locks,
+    unlocks: () => unlocks,
     handlers: () => captured,
     joinedWith: () => joinedWith,
     joinedName: () => joinedName,
@@ -2494,6 +2500,7 @@ describe('OfficeScene: comando setStatus via el puente (#1)', () => {
       sendSit: () => {},
       sendStand: () => {},
       sendLock: () => {},
+      sendUnlock: () => {},
       leave: async () => {},
     };
 

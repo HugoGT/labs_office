@@ -107,7 +107,9 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
       hasDesk
       onGoToDesk={vi.fn()}
       roomLocked={false}
+      roomLockedByMe={false}
       onLockRoom={vi.fn()}
+      onUnlockRoom={vi.fn()}
       {...overrides}
     />,
   );

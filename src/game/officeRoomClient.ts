@@ -227,8 +227,11 @@ export interface OfficeRoomHandlers {
   onTerrainColors?(colors: TerrainColors): void;
   /** The office decor layer (#208), sorted by anchor: on the first sync and after every accepted decor edit. */
   onDecor?(items: readonly DecorItem[]): void;
-  /** The ids of the locked spaces (`spaceLocks.ts`): on the first sync and on every lock and release. */
-  onLockedSpaces?(ids: ReadonlySet<string>): void;
+  /**
+   * The locked spaces, each with the session that locked it (`spaceLocks.ts`):
+   * on the first sync and on every lock, unlock and release.
+   */
+  onLockedSpaces?(locks: ReadonlyMap<string, string>): void;
   /** The saved collision table, replicated whole like the terrain: on the first sync and after every accepted edit. */
   onCollisions?(table: CollisionTable): void;
 }
@@ -313,6 +316,8 @@ export interface OfficeConnection {
   sendStand(): void;
   /** Asks to lock the space the player stands in; the answer is the replicated `onLockedSpaces`. */
   sendLock(): void;
+  /** Asks to unlock the space the player stands in; only whoever locked it may. */
+  sendUnlock(): void;
   leave(): Promise<void>;
 }
 
@@ -670,6 +675,9 @@ export async function connectOfficeRoom({
     },
     sendLock() {
       room.send('lock', {});
+    },
+    sendUnlock() {
+      room.send('unlock', {});
     },
     async leave() {
       // El orden importa: marcar primero es lo que hace que el `onLeave` que

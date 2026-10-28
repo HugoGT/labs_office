@@ -135,7 +135,7 @@ export function OfficeShell({
   onEntryState,
 }: OfficeShellProps) {
   const [bridge] = useState(createOfficeBridge);
-  const { room, spaceId, roomLocked, recordings, selfSessionId, menu, presence, closeMenu } = useOfficeBridge(bridge);
+  const { room, spaceId, roomLock, recordings, selfSessionId, menu, presence, closeMenu } = useOfficeBridge(bridge);
   /**
    * Roster en vivo para la barra lateral (#74). Vive aqui y no dentro de
    * `OfficeSidebar` por la misma razon que el resto del HUD: el puente es de
@@ -876,8 +876,10 @@ export function OfficeShell({
         onChangeCameraFilter={setCameraFilter}
         hasDesk={myDesk !== null}
         onGoToDesk={() => bridge.emitCommand('walkToOwnDesk', undefined)}
-        roomLocked={roomLocked}
+        roomLocked={roomLock.locked}
+        roomLockedByMe={roomLock.mine}
         onLockRoom={() => bridge.emitCommand('lockRoom', undefined)}
+        onUnlockRoom={() => bridge.emitCommand('unlockRoom', undefined)}
         // #52: la barra solo avisa; quien sabe reconectar es la escena, y el
         // comando viaja por `emitCommand` como el resto -- sin metodo de
         // conveniencia en el puente.
@@ -893,7 +895,7 @@ export function OfficeShell({
       </div>
       <AudioUnblockPrompt blocked={audioBlocked} onUnblock={unblockAudio} />
       {/* Inside a locked space its notice stays up, under any passing toast. */}
-      <Toast message={spaceLockedMessage ?? toastMessage ?? (roomLocked ? '🔒 El espacio está bloqueado' : null)} />
+      <Toast message={spaceLockedMessage ?? toastMessage ?? (roomLock.locked ? '🔒 El espacio está bloqueado' : null)} />
       <CallInvitationStack invitations={invitations} onAccept={accept} onDismiss={dismiss} />
       <RecordingReadyStack
         notices={readyRecordings}

@@ -146,8 +146,11 @@ export interface OfficeEventMap {
    * (`spaceLocks.ts`): once per attempt, like `deskfull`.
    */
   spacelocked: { spaceId: string };
-  /** Whether the space the local player stands in is locked; on every change. */
-  roomlock: { locked: boolean };
+  /**
+   * Whether the space the local player stands in is locked, and whether by
+   * the local player (only they may unlock it); on every change.
+   */
+  roomlock: { locked: boolean; mine: boolean };
   /** An admin edited the spaces (#183); refetch `/spaces` (and the desks with them). */
   spaceschanged: undefined;
   /**
@@ -282,6 +285,8 @@ export interface OfficeCommandMap {
   walkToOwnDesk: undefined;
   /** Lock the space the local player stands in; the room decides and replicates it. */
   lockRoom: undefined;
+  /** Unlock the space the local player stands in; the room only lets whoever locked it. */
+  unlockRoom: undefined;
   /**
    * Los 3 comandos de llamada (issue #2, D3) viajan solo por `emitCommand`,
    * como `setStatus`: ningun metodo de conveniencia (`bridge.callPeer()` no

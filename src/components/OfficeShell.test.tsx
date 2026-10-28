@@ -210,14 +210,14 @@ describe('OfficeShell', () => {
       const bridge = createGameMock.mock.calls[0][1];
       act(() => bridge.emit('room', { spaceId: 'space-stub', name: 'Sala de Juntas' }));
 
-      act(() => bridge.emit('roomlock', { locked: true }));
+      act(() => bridge.emit('roomlock', { locked: true, mine: false }));
       expect(screen.queryByText('🔒 El espacio está bloqueado')).not.toBeInTheDocument();
       act(() => vi.advanceTimersByTime(3200));
       expect(screen.getByText('🔒 El espacio está bloqueado')).toBeInTheDocument();
       act(() => vi.advanceTimersByTime(60_000));
       expect(screen.getByText('🔒 El espacio está bloqueado')).toBeInTheDocument();
 
-      act(() => bridge.emit('roomlock', { locked: false }));
+      act(() => bridge.emit('roomlock', { locked: false, mine: false }));
       expect(screen.queryByText('🔒 El espacio está bloqueado')).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -240,6 +240,20 @@ describe('OfficeShell', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('the lock button asks the scene to unlock a space the local player locked', async () => {
+    const user = userEvent.setup();
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const commands: unknown[] = [];
+    bridge.onCommand('unlockRoom', (payload) => commands.push(payload));
+    act(() => bridge.emit('room', { spaceId: 'space-stub', name: 'Sala de Juntas' }));
+    act(() => bridge.emit('roomlock', { locked: true, mine: true }));
+
+    await user.click(screen.getByRole('button', { name: 'Bloquear espacio' }));
+
+    expect(commands).toHaveLength(1);
   });
 
   it('the lock button asks the scene to lock the own space', async () => {

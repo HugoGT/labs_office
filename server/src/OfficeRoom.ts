@@ -422,8 +422,8 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private terrainColors: () => TerrainColors = () => new Map();
   private desks: () => readonly DecorTileRect[] = () => [];
   private spaces: () => readonly SpaceArea[] = () => [];
-  /** The locked space ids, mirrored as `state.lockedSpaces`. */
-  private lockedSpaceIds = new Set<string>();
+  /** The locked space ids, each with the session that locked it, mirrored as `state.lockedSpaces`. */
+  private lockedSpaceIds = new Map<string, string>();
   private collisions: () => readonly CollisionRect[] = () => BASE_COLLISION_RECTS;
   // Bridges a definitive leave and a refresh while its write is in flight.
   // Serializing per uid prevents an older slow write from undoing a newer leave.
@@ -582,14 +582,21 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     });
 
     // Locks the space the sender stands in, as the room tracks it: the id is
-    // never the client's. There is no unlock: the lock goes once the space
-    // is empty. Outside every space it is dropped whole.
+    // never the client's. Outside every space, or in one already locked, it
+    // is dropped whole.
     this.onMessage('lock', (client: Client) => {
-      const player = this.state.players.get(client.sessionId);
-      if (!player) return;
-      const space = detectSpace(player, this.spaces());
+      const space = this.spaceOf(client.sessionId);
       if (space === null || this.lockedSpaceIds.has(space.id)) return;
-      this.lockedSpaceIds.add(space.id);
+      this.lockedSpaceIds.set(space.id, client.sessionId);
+      this.state.lockedSpaces = encodeLockedSpaces(this.lockedSpaceIds);
+    });
+
+    // Only whoever locked a space unlocks it, from inside it; the others can
+    // only leave. The lock goes anyway once the space is empty.
+    this.onMessage('unlock', (client: Client) => {
+      const space = this.spaceOf(client.sessionId);
+      if (space === null || this.lockedSpaceIds.get(space.id) !== client.sessionId) return;
+      this.lockedSpaceIds.delete(space.id);
       this.state.lockedSpaces = encodeLockedSpaces(this.lockedSpaceIds);
     });
 
@@ -1039,6 +1046,12 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
    * that is gone. Every replicated player counts, reserved reconnects
    * included, like the desk occupancy rule.
    */
+  /** The space a session stands in, as the room tracks it, or `null`. */
+  private spaceOf(sessionId: string): SpaceArea | null {
+    const player = this.state.players.get(sessionId);
+    return player ? detectSpace(player, this.spaces()) : null;
+  }
+
   private releaseEmptyLocks(): void {
     if (this.lockedSpaceIds.size === 0) return;
     const players = [...this.state.players.values()].map(({ x, y }) => ({ x, y }));

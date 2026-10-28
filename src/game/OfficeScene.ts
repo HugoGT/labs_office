@@ -389,6 +389,7 @@ export class OfficeScene extends Phaser.Scene {
   private unsubscribeToggleSeat?: () => void;
   private unsubscribeWalkToOwnDesk?: () => void;
   private unsubscribeLockRoom?: () => void;
+  private unsubscribeUnlockRoom?: () => void;
   private unsubscribeSpacesConfig?: () => void;
   private unsubscribeDesks?: () => void;
   private unsubscribeReconnect?: () => void;
@@ -473,12 +474,12 @@ export class OfficeScene extends Phaser.Scene {
   private deskAreas: DecorTileRect[] = [];
   /** A walk into a full desk was already told (`deskfull`) for this push: once per attempt. */
   private deskFullTold = false;
-  /** The locked space ids the room replicates (`spaceLocks.ts`). */
-  private lockedSpaces: ReadonlySet<string> = new Set();
+  /** The locked space ids the room replicates, each with who locked it (`spaceLocks.ts`). */
+  private lockedSpaces: ReadonlyMap<string, string> = new Map();
   /** Same as `deskFullTold`, for a walk into a locked space (`spacelocked`). */
   private spaceLockedTold = false;
-  /** The last `roomlock` told: whether the own space is locked. */
-  private roomLocked = false;
+  /** The last `roomlock` told: whether the own space is locked, and by the local player. */
+  private roomLock = { locked: false, mine: false };
   /** Created in `preload()`, where `this.load` first exists. */
   private art!: ArtPackLoader;
   private readonly pendingRedraws = new Set<() => void>();
@@ -750,6 +751,7 @@ export class OfficeScene extends Phaser.Scene {
     this.unsubscribeToggleSeat = this.bridge.onCommand('toggleSeat', () => this.toggleSeat());
     this.unsubscribeWalkToOwnDesk = this.bridge.onCommand('walkToOwnDesk', () => this.walkToOwnDesk());
     this.unsubscribeLockRoom = this.bridge.onCommand('lockRoom', () => this.connection?.sendLock());
+    this.unsubscribeUnlockRoom = this.bridge.onCommand('unlockRoom', () => this.connection?.sendUnlock());
 
     // #7, slice 3. Llega una sola vez por sesion, poco despues de arrancar.
     this.unsubscribeSpacesConfig = this.bridge.onCommand('spacesconfig', ({ spaces, version }) => {
@@ -908,6 +910,7 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeToggleSeat?.();
       this.unsubscribeWalkToOwnDesk?.();
       this.unsubscribeLockRoom?.();
+      this.unsubscribeUnlockRoom?.();
       this.unsubscribeSpacesConfig?.();
       this.unsubscribeDesks?.();
       this.unsubscribeReconnect?.();
@@ -1029,8 +1032,8 @@ export class OfficeScene extends Phaser.Scene {
           onTerrainColors: (colors) => this.applyTerrainColors(colors),
           onWalls: (walls, order) => this.applyWalls(walls, order),
           onDecor: (items) => this.applyDecor(items),
-          onLockedSpaces: (ids) => {
-            this.lockedSpaces = ids;
+          onLockedSpaces: (locks) => {
+            this.lockedSpaces = locks;
             this.syncRoomLock();
           },
           onCollisions: (table) => this.applyCollisions(table),
@@ -1286,12 +1289,14 @@ export class OfficeScene extends Phaser.Scene {
     });
   }
 
-  /** Tells `roomlock` when the own space became locked or stopped being so. */
+  /** Tells `roomlock` when the own space became locked or stopped being so, or changed hands. */
   private syncRoomLock(): void {
-    const locked = this.currentSpaceId !== null && this.lockedSpaces.has(this.currentSpaceId);
-    if (locked === this.roomLocked) return;
-    this.roomLocked = locked;
-    this.bridge.emit('roomlock', { locked });
+    const locker = this.currentSpaceId === null ? undefined : this.lockedSpaces.get(this.currentSpaceId);
+    const locked = locker !== undefined;
+    const mine = locked && locker === this.connection?.sessionId;
+    if (locked === this.roomLock.locked && mine === this.roomLock.mine) return;
+    this.roomLock = { locked, mine };
+    this.bridge.emit('roomlock', { locked, mine });
   }
 
   /** The `toggleSeat` command: stand when seated, else ask for the seat in reach. */

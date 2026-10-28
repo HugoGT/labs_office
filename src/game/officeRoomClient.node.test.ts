@@ -833,12 +833,12 @@ describe('connectOfficeRoom: seats (art migration, step 6)', () => {
     expect(watcher.changed.at(-1)?.seat).toBeNull();
   });
 
-  it('sendLock locks the space the sender stands in; everyone gets the locked ids', async () => {
+  it('sendLock locks the space the sender stands in; everyone gets who locked it, and sendUnlock lifts it', async () => {
     await server.shutdown();
     const room = { id: 'sala', slug: 'sala', name: 'Sala', x: CHAIR.tx, y: CHAIR.ty - 1, w: 1, h: 1, capacity: null };
     server = createOfficeServer({ spaces: createMemorySpaces({ seed: [room] }) });
     endpoint = `ws://localhost:${await server.listen(0)}`;
-    const watched: ReadonlySet<string>[] = [];
+    const watched: ReadonlyMap<string, string>[] = [];
     await connect('Ana', { ...recorder().handlers, onLockedSpaces: (ids) => watched.push(ids) });
     const local: (string | null)[] = [];
     const locker = await connect('Beto', { ...recorder().handlers, onLocalSeat: (seat) => local.push(seat) });
@@ -849,7 +849,10 @@ describe('connectOfficeRoom: seats (art migration, step 6)', () => {
     locker.sendLock();
 
     await waitFor(() => watched.at(-1)?.has('sala') === true);
-    expect([...watched.at(-1)!]).toEqual(['sala']);
+    expect([...watched.at(-1)!]).toEqual([['sala', locker.sessionId]]);
+
+    locker.sendUnlock();
+    await waitFor(() => watched.at(-1)?.size === 0);
   });
 
   it('a snapshot of someone standing has no seat', async () => {

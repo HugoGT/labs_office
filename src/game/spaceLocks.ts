@@ -1,7 +1,8 @@
 /**
  * Locked spaces: anyone inside a room or a desk cubicle may lock it with
  * whoever is in. Nobody outside walks in while it holds; whoever is inside
- * moves and leaves freely, and the lock goes once the space is empty.
+ * moves and leaves freely. Only whoever locked it unlocks it, and the lock
+ * goes anyway once the space is empty.
  *
  * Shared by the room, which enforces it, and the scene, which refuses the
  * same step locally (the client stays the stricter side). Positions are
@@ -21,7 +22,7 @@ export function lockedSpaceEntered(
   from: Point,
   to: Point,
   spaces: readonly SpaceArea[],
-  locked: ReadonlySet<string>,
+  locked: ReadonlyMap<string, string>,
 ): SpaceArea | null {
   if (locked.size === 0) return null;
   const target = detectSpace(to, spaces);
@@ -29,21 +30,41 @@ export function lockedSpaceEntered(
   return detectSpace(from, spaces)?.id === target.id ? null : target;
 }
 
-/** The locks that still hold: those of an existing space with at least one of `players` inside. */
-export function heldLocks(locked: ReadonlySet<string>, spaces: readonly SpaceArea[], players: readonly Point[]): Set<string> {
-  const occupied = new Set<string>();
+/**
+ * The locks that still hold, each with who locked it: those of an existing
+ * space with at least one of `players` inside.
+ */
+export function heldLocks(
+  locked: ReadonlyMap<string, string>,
+  spaces: readonly SpaceArea[],
+  players: readonly Point[],
+): Map<string, string> {
+  const held = new Map<string, string>();
   for (const player of players) {
     const space = detectSpace(player, spaces);
-    if (space !== null && locked.has(space.id)) occupied.add(space.id);
+    const locker = space === null ? undefined : locked.get(space.id);
+    if (space !== null && locker !== undefined) held.set(space.id, locker);
   }
-  return occupied;
+  return held;
 }
 
-/** The wire form, a replicated string of the room state: the ids sorted and joined by commas, empty for none. */
-export function encodeLockedSpaces(locked: ReadonlySet<string>): string {
-  return [...locked].sort().join(',');
+/**
+ * The wire form, a replicated string of the room state: `<space id>:<locker
+ * session id>` pairs sorted by space and joined by commas, empty for none.
+ * Neither id ever holds a `:` or a `,`.
+ */
+export function encodeLockedSpaces(locked: ReadonlyMap<string, string>): string {
+  return [...locked]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([spaceId, locker]) => `${spaceId}:${locker}`)
+    .join(',');
 }
 
-export function decodeLockedSpaces(wire: string): Set<string> {
-  return new Set(wire === '' ? [] : wire.split(','));
+export function decodeLockedSpaces(wire: string): Map<string, string> {
+  const locked = new Map<string, string>();
+  for (const pair of wire === '' ? [] : wire.split(',')) {
+    const at = pair.indexOf(':');
+    if (at > 0) locked.set(pair.slice(0, at), pair.slice(at + 1));
+  }
+  return locked;
 }

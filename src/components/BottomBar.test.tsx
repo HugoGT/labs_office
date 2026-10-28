@@ -44,7 +44,9 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
     hasDesk: true,
     onGoToDesk: vi.fn(),
     roomLocked: false,
+    roomLockedByMe: false,
     onLockRoom: vi.fn(),
+    onUnlockRoom: vi.fn(),
     ...overrides,
   };
   render(<BottomBar {...props} />);
@@ -106,14 +108,28 @@ describe('BottomBar: space lock button', () => {
     expect(props.onLockRoom).toHaveBeenCalledTimes(1);
   });
 
-  it('shows the closed lock, pressed, and cannot unlock: the lock goes once everyone leaves', () => {
-    renderBar({ room: 'Sala 1', roomLocked: true });
+  it('lets whoever locked the space unlock it with the closed lock', async () => {
+    const user = userEvent.setup();
+    const props = renderBar({ room: 'Sala 1', roomLocked: true, roomLockedByMe: true });
+
+    const lock = screen.getByRole('button', { name: 'Bloquear espacio' });
+    expect(lock).toHaveTextContent('🔒');
+    expect(lock).toHaveAttribute('aria-pressed', 'true');
+    expect(lock).toHaveAttribute('title', 'Desbloquear este espacio');
+    await user.click(lock);
+
+    expect(props.onUnlockRoom).toHaveBeenCalledTimes(1);
+    expect(props.onLockRoom).not.toHaveBeenCalled();
+  });
+
+  it('shows the closed lock to the others, pressed and disabled: they can only leave', () => {
+    renderBar({ room: 'Sala 1', roomLocked: true, roomLockedByMe: false });
 
     const lock = screen.getByRole('button', { name: 'Bloquear espacio' });
     expect(lock).toHaveTextContent('🔒');
     expect(lock).toHaveAttribute('aria-pressed', 'true');
     expect(lock).toBeDisabled();
-    expect(lock).toHaveAttribute('title', 'Espacio bloqueado: se desbloquea cuando salgan todos');
+    expect(lock).toHaveAttribute('title', 'Espacio bloqueado: solo quien lo bloqueó puede desbloquearlo');
   });
 
   it('is disabled outside every space, like recording', () => {
@@ -214,7 +230,9 @@ describe('BottomBar', () => {
         hasDesk
         onGoToDesk={vi.fn()}
         roomLocked={false}
+        roomLockedByMe={false}
         onLockRoom={vi.fn()}
+        onUnlockRoom={vi.fn()}
       />,
     );
     expect(screen.getByText('proximidad').tagName).toBe('B');
@@ -244,7 +262,9 @@ describe('BottomBar', () => {
         hasDesk
         onGoToDesk={vi.fn()}
         roomLocked={false}
+        roomLockedByMe={false}
         onLockRoom={vi.fn()}
+        onUnlockRoom={vi.fn()}
       />,
     );
     expect(screen.getByText('Cafeteria').tagName).toBe('B');
@@ -341,7 +361,9 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
         hasDesk
         onGoToDesk={vi.fn()}
         roomLocked={false}
+        roomLockedByMe={false}
         onLockRoom={vi.fn()}
+        onUnlockRoom={vi.fn()}
       />,
     );
     // El punto es decorativo y no lleva marcado de prueba: se alcanza desde
@@ -374,7 +396,9 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
         hasDesk
         onGoToDesk={vi.fn()}
         roomLocked={false}
+        roomLockedByMe={false}
         onLockRoom={vi.fn()}
+        onUnlockRoom={vi.fn()}
       />,
     );
     expect(dot).toHaveStyle({ background: statusCssColor('r') });
@@ -699,7 +723,9 @@ describe('BottomBar: indicador de grabacion junto al nombre de la sala (#85)', (
         hasDesk
         onGoToDesk={vi.fn()}
         roomLocked={false}
+        roomLockedByMe={false}
         onLockRoom={vi.fn()}
+        onUnlockRoom={vi.fn()}
       />,
     );
     expect(screen.getByText(/REC/)).toBeInTheDocument();
@@ -729,7 +755,9 @@ describe('BottomBar: indicador de grabacion junto al nombre de la sala (#85)', (
         hasDesk
         onGoToDesk={vi.fn()}
         roomLocked={false}
+        roomLockedByMe={false}
         onLockRoom={vi.fn()}
+        onUnlockRoom={vi.fn()}
       />,
     );
     expect(screen.queryByText(/REC/)).not.toBeInTheDocument();
