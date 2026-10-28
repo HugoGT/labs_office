@@ -45,6 +45,8 @@ export interface TerrainEditCommand {
   previewWalls?: readonly WallEdit[];
   /** The outlines of every room and desk, drawn over the map like "Editar espacios" does (#216). A guide only. */
   outlines?: readonly TileRect[];
+  /** With the wall eraser: the posts a click would take a wall or a door from, which the box outlines in red (#241). */
+  erasable?: readonly number[];
 }
 
 /** The outlines "Editar terreno" draws (#216): every desk and room, so a block or a wall is not painted blind. */

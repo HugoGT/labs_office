@@ -13,6 +13,7 @@
  */
 
 import Phaser from 'phaser';
+import { DECOR_DELETE_COLOR } from './DecorEditLayer';
 import { LAYOUT_GHOST_DEPTH } from './depthLayers';
 import { TILE } from './mapData';
 import type { OfficeBridge } from './officeBridge';
@@ -22,7 +23,9 @@ import { cellOutlineCenter, cellsAlongStroke, sameBrush, type StrokeGrid, type T
 
 export const TERRAIN_HOVER_NAME = 'terrain-edit:hover';
 
-const HOVER_STROKE_COLOR = 0x38bdf8;
+export const HOVER_STROKE_COLOR = 0x38bdf8;
+/** The eraser over something it would take (#241): the decor layer's delete red, one red for removing. */
+export const HOVER_ERASE_COLOR = DECOR_DELETE_COLOR;
 
 /** What a pick reports, by the kind of brush that made it. */
 const PICK_EVENT = { floor: 'terrainpick', wall: 'wallpick' } as const;
@@ -34,6 +37,9 @@ export class TerrainEditLayer {
   private command: TerrainEditCommand | null = null;
   private readonly outlines: ContextOutlines;
   private hover: Phaser.GameObjects.Rectangle | null = null;
+  /** The cell the box outlines, or `null` while it is hidden. */
+  private hovered: number | null = null;
+  private erasable: ReadonlySet<number> = new Set();
   /** Floors paint 9x9 blocks. */
   private readonly blocks: StrokeGrid;
   /** Walls paint single posts, on the grid vertices. */
@@ -101,13 +107,28 @@ export class TerrainEditLayer {
     // command for every pending paint it draws, so only a new brush ends it.
     if (!sameBrush(command?.brush, this.command?.brush)) this.stroke = null;
     this.command = command;
+    this.erasable = new Set(command?.erasable);
     this.outlines.show(command?.outlines);
     if (command === null) {
       this.hover?.destroy();
       this.hover = null;
+      this.hovered = null;
       return;
     }
-    if (command.brush === null) this.hover?.setVisible(false);
+    if (command.brush === null) {
+      this.hover?.setVisible(false);
+      this.hovered = null;
+    }
+    // An erase lands under a still pointer: the box says so without waiting for a move.
+    this.colorHover();
+  }
+
+  /** Red while the eraser points at something it would take, the usual color otherwise. */
+  private colorHover(): void {
+    if (this.hover === null) return;
+    const brush = this.command?.brush;
+    const erases = brush?.kind === 'wall' && brush.piece === null && this.hovered !== null && this.erasable.has(this.hovered);
+    this.hover.setStrokeStyle(STROKE_WIDTH, erases ? HOVER_ERASE_COLOR : HOVER_STROKE_COLOR);
   }
 
   private updateHover(pointer: Phaser.Input.Pointer): void {
@@ -116,6 +137,7 @@ export class TerrainEditLayer {
     const [index] = cellsAlongStroke(grid, null, { x: pointer.worldX, y: pointer.worldY });
     if (index === undefined) {
       this.hover?.setVisible(false);
+      this.hovered = null;
       return;
     }
     const size = grid.cellSize;
@@ -127,5 +149,7 @@ export class TerrainEditLayer {
     if (this.hover.width !== size) this.hover.setSize(size, size);
     const center = cellOutlineCenter(grid, index);
     this.hover.setPosition(center.x, center.y).setVisible(true);
+    this.hovered = index;
+    this.colorHover();
   }
 }

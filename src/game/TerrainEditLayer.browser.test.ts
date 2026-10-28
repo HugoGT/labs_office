@@ -5,7 +5,7 @@ import { LAYOUT_OUTLINE_DEPTH } from './depthLayers';
 import { TILE } from './mapData';
 import { createOfficeBridge } from './officeBridge';
 import { BASE_LAYOUT } from './officeLayout';
-import { TERRAIN_HOVER_NAME, TerrainEditLayer } from './TerrainEditLayer';
+import { HOVER_ERASE_COLOR, HOVER_STROKE_COLOR, TERRAIN_HOVER_NAME, TerrainEditLayer } from './TerrainEditLayer';
 import { LAYOUT_OUTLINE_NAME, OUTLINE_STROKE_COLOR } from './spaceOutline';
 import type { TerrainBrush } from './terrainEditor';
 import type { LayoutMaterial, WallPieceId } from './officeLayout';
@@ -229,6 +229,40 @@ describe('TerrainEditLayer', () => {
     scene.input.emit('pointermove', pointerAt(2 * TILE + 3, TILE + 3));
     expect([hover.width, hover.height]).toEqual([9 * TILE, 9 * TILE]);
     expect([hover.x, hover.y]).toEqual([(9 * TILE) / 2, (9 * TILE) / 2]);
+  });
+});
+
+describe('TerrainEditLayer: the eraser outline (#241)', () => {
+  it('turns the box red over a post the eraser would take something from, and back over one with nothing', async () => {
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    new TerrainEditLayer(scene, bridge, BASE_LAYOUT);
+    const post = BASE_LAYOUT.width + 2;
+
+    bridge.emitCommand('terrainedit', { brush: wall(null), erasable: [post] });
+    scene.input.emit('pointermove', pointerAt(2 * TILE + 3, TILE + 3));
+    const hover = outline(scene, TERRAIN_HOVER_NAME)!;
+    expect(hover.strokeColor).toBe(HOVER_ERASE_COLOR);
+    scene.input.emit('pointermove', pointerAt(3 * TILE + 3, TILE + 3));
+    expect(hover.strokeColor).toBe(HOVER_STROKE_COLOR);
+
+    // Erased under a still pointer: the box follows the new command at once.
+    scene.input.emit('pointermove', pointerAt(2 * TILE + 3, TILE + 3));
+    bridge.emitCommand('terrainedit', { brush: wall(null), erasable: [] });
+    expect(hover.strokeColor).toBe(HOVER_STROKE_COLOR);
+  });
+
+  it('keeps the usual color for any other brush, whatever stands there', async () => {
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    new TerrainEditLayer(scene, bridge, BASE_LAYOUT);
+
+    bridge.emitCommand('terrainedit', { brush: wall('wall-brick'), erasable: [BASE_LAYOUT.width + 2] });
+    scene.input.emit('pointermove', pointerAt(2 * TILE + 3, TILE + 3));
+    expect(outline(scene, TERRAIN_HOVER_NAME)!.strokeColor).toBe(HOVER_STROKE_COLOR);
+    bridge.emitCommand('terrainedit', { brush: floor('sand'), erasable: [0] });
+    scene.input.emit('pointermove', pointerAt(3, 3));
+    expect(outline(scene, TERRAIN_HOVER_NAME)!.strokeColor).toBe(HOVER_STROKE_COLOR);
   });
 });
 

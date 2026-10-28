@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { describeAdminError } from '../dashboard/adminErrors';
 import { AdminError } from '../dashboard/adminPort';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
+import { MAP_W } from '../game/mapData';
 import type { OfficeBridge } from '../game/officeBridge';
+import type { DecorItem } from '../game/officeDecor';
+import { doorPosts, isDoorPiece } from '../game/officeDoors';
 import { BASE_LAYOUT, MAX_WALL_EDITS, type WallEdit, type WallPieceId } from '../game/officeLayout';
 import type { TerrainBrush } from '../game/terrainEditor';
 import type { TileRect } from '../game/terrainGrid';
@@ -106,6 +109,8 @@ function nextRun(paints: readonly WallPaint[]): WallPaint[] {
 
 export function useWallEditor({ bridge, terrain, eraseDoors, outlines }: UseWallEditorOptions): WallEditor {
   const [walls, setWalls] = useState<readonly (string | null)[]>(BASE_LAYOUT.walls);
+  /** The live decor layer, for the posts its doors span: what `eraseDoors` takes a door by. */
+  const [decor, setDecor] = useState<readonly DecorItem[]>([]);
   const [brush, setBrush] = useState<WallBrush | null>(null);
   const [paints, setPaintsState] = useState<readonly WallPaint[]>([]);
   const [draining, setDraining] = useState(false);
@@ -181,6 +186,8 @@ export function useWallEditor({ bridge, terrain, eraseDoors, outlines }: UseWall
     [bridge],
   );
 
+  useEffect(() => bridge.on('decor', ({ items }) => setDecor(items)), [bridge]);
+
   // Only a picked wall listens to the map; a fresh subscription per render keeps `paintAt` reading it.
   useEffect(() => {
     if (brush === null) return undefined;
@@ -204,8 +211,20 @@ export function useWallEditor({ bridge, terrain, eraseDoors, outlines }: UseWall
     () => (paints.length === 0 ? null : paints.map(({ index, piece }) => ({ index, piece }))),
     [paints],
   );
+  // Only the eraser asks (#241): the posts it would take a wall from once every pending paint lands, and those of a door.
+  const takesDoors = eraseDoors !== undefined;
+  const erasable = useMemo<number[] | null>(() => {
+    if (brush?.piece !== null) return null;
+    const posts = new Set(takesDoors ? decor.flatMap((item) => (isDoorPiece(item.piece) ? doorPosts(item, MAP_W) : [])) : []);
+    const after = [...walls];
+    for (const paint of paints) after[paint.index] = paint.piece;
+    after.forEach((wall, index) => {
+      if (wall !== null) posts.add(index);
+    });
+    return [...posts].sort((a, b) => a - b);
+  }, [brush, walls, paints, decor, takesDoors]);
   const shows = brush !== null || previewWalls !== null;
-  const commandKey = JSON.stringify([brush, previewWalls, outlines]);
+  const commandKey = JSON.stringify([brush, previewWalls, outlines, erasable]);
 
   useEffect(() => {
     if (!shows) return;
@@ -213,6 +232,7 @@ export function useWallEditor({ bridge, terrain, eraseDoors, outlines }: UseWall
       brush,
       ...(previewWalls === null ? {} : { previewWalls }),
       ...(outlines === undefined || outlines.length === 0 ? {} : { outlines }),
+      ...(erasable === null ? {} : { erasable }),
     });
     // `commandKey` stands for the brush and the preview: only a different drawing is worth a command.
     // eslint-disable-next-line react-hooks/exhaustive-deps
