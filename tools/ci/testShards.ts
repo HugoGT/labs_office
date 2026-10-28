@@ -1,5 +1,5 @@
 /**
- * CI splits `pnpm test:all` into shards (`--shard=N/3`, ci.yml). Vitest's own
+ * CI splits `pnpm test:all` into shards (`--shard=N/4`, ci.yml). Vitest's own
  * sharding sorts files by a hash of their path, blind to how long they take:
  * it put three of the four `OfficeScene.*.browser.test.ts` files, a third of
  * all test time, in one shard. This assigns files by their recorded wall time

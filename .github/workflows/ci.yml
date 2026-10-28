@@ -80,12 +80,15 @@ jobs:
           TREE_SHA: ${{ github.event.head_commit.tree_id }}
 
   # `test:all` took about 7 of the 10 minutes of a single job, so it runs as
-  # three Vitest shards next to `build-e2e`. Each shard pays its own ~1 minute
+  # four Vitest shards next to `build-e2e`. Each shard pays its own ~1 minute
   # of setup; the wall time becomes the slowest shard instead of the sum.
   # Files go to shards by their recorded time (tools/ci/testShards.ts), not
   # by Vitest's path hash, which once put a third of all test time in one.
+  # Four, not three: the four OfficeScene browser files each need a shard of
+  # their own. Two of them in one shard fight for the runner's CPU and took
+  # 199 s and 166 s there, against 57 s for one alone.
   tests:
-    name: Tests (shard ${{ matrix.shard }}/3)
+    name: Tests (shard ${{ matrix.shard }}/4)
     needs: tested-tree
     if: needs.tested-tree.outputs.tested != 'true'
     runs-on: ubuntu-latest
@@ -95,7 +98,7 @@ jobs:
       # failing file instead of the first shard's.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout
@@ -130,7 +133,7 @@ jobs:
       - name: Tests (jsdom + Node + Chromium)
         run: |
           set -o pipefail
-          pnpm test:all --shard=${{ matrix.shard }}/3 2>&1 | tee test-all.log
+          pnpm test:all --shard=${{ matrix.shard }}/4 2>&1 | tee test-all.log
           if grep -q 'optimized dependencies changed' test-all.log; then
             echo "::error::Vite re-optimized dependencies mid-run; add them to optimizeDeps.include of the browser project in vite.config.ts"
             exit 1
