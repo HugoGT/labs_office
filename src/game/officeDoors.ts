@@ -19,7 +19,7 @@
  * `officeDecor.ts`: explicit `.ts` imports of other pure modules only.
  */
 
-import { doorSpanOf, type GridEdge } from './artContract.ts';
+import { DOOR_STEPS, doorSpanOf, type GridEdge } from './artContract.ts';
 import { AVATAR_BODY_CENTER_OFFSET, type GeometryPoint } from './avatarGeometry.ts';
 import { decorChairFacing, type DecorItem, type DecorTileRect } from './officeDecor.ts';
 import { wallFootprintRects, type WallGrid } from './officeLayout.ts';
@@ -176,6 +176,52 @@ export function openDoorLeaves(
     open.set(leaf.index, previous.get(leaf.index) ?? (sideOf(leaf, openers[0]!) > 0 ? 'outside' : 'inside'));
   }
   return open;
+}
+
+/** How long a door takes to swing from shut to fully open, or back (#233). */
+export const DOOR_SWING_MS = 180;
+
+/** One door's swing: the side it turns to and how far open it is, 0 shut to 1 fully open. */
+export interface DoorMotion {
+  readonly swing: DoorSwing;
+  readonly progress: number;
+}
+
+/**
+ * The sides doors are still committed to: those showing a swung frame. One
+ * drawn shut is free to take the side of whoever opens it next, since the
+ * closed frames of both sides are the same. What `openDoorLeaves` gets as
+ * `previous`, and what `moveDoors` keeps.
+ */
+export function keptSwings(motion: ReadonlyMap<number, DoorMotion>): Map<number, DoorSwing> {
+  return new Map([...motion].filter(([, { progress }]) => doorStepOf(progress) > 0).map(([index, { swing }]) => [index, swing]));
+}
+
+/**
+ * The swing of every door after `dtMs` more: the ones in `targets` (those
+ * `openDoorLeaves` says someone is lined up with) open, the rest close, each
+ * at the same speed. A door keeps the side it swings to for as long as it
+ * shows a swung frame, so it never flips mid swing; one drawn shut takes the
+ * side of whoever opens it. A door that finishes shutting is dropped.
+ */
+export function moveDoors(targets: ReadonlyMap<number, DoorSwing>, motion: ReadonlyMap<number, DoorMotion>, dtMs: number): Map<number, DoorMotion> {
+  const next = new Map<number, DoorMotion>();
+  const travelled = dtMs / DOOR_SWING_MS;
+  for (const index of new Set([...targets.keys(), ...motion.keys()])) {
+    const before = motion.get(index);
+    const target = targets.get(index);
+    if (target !== undefined) {
+      next.set(index, { swing: keptSwings(motion).get(index) ?? target, progress: Math.min(1, (before?.progress ?? 0) + travelled) });
+    } else if (before !== undefined && before.progress - travelled > 0) {
+      next.set(index, { swing: before.swing, progress: before.progress - travelled });
+    }
+  }
+  return next;
+}
+
+/** The frame of a swing (`doorFrameIndex`'s step): the nearest of closed, the two between and open. */
+export function doorStepOf(progress: number): number {
+  return Math.round(progress * (DOOR_STEPS - 1));
 }
 
 /** Whether a body center is lined up with a door's span and close to its edge across it. */

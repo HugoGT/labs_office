@@ -241,8 +241,8 @@ describe('art pack manifest', () => {
     expect(doors[0]).toMatchObject({ name: 'Puerta de madera', material: 'wood', variant: 'single', anchor: DOOR.anchor, footprint: { w: 2, h: 1 } });
     expect(doors[1]).toMatchObject({ name: 'Puerta doble de madera', material: 'wood', variant: 'double', anchor: DOOR.anchor, footprint: { w: 4, h: 1 } });
     expect(doors.map((door) => door.files.map((file) => [file.path, file.role, file.imageKind, file.width, file.height]))).toEqual([
-      [['door/wood.png', 'sheet', 'door', 512, 512]],
-      [['door/wood-double.png', 'sheet', 'door', 512, 512]],
+      [['door/wood.png', 'sheet', 'door', 512, 1024]],
+      [['door/wood-double.png', 'sheet', 'door', 512, 1024]],
     ]);
   });
 

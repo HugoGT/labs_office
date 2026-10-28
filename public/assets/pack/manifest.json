@@ -1865,8 +1865,8 @@
           "path": "door/wood.png",
           "imageKind": "door",
           "width": 512,
-          "height": 512,
-          "sha256": "1a252dd443c48ec5bae05e89c553d607b019b59d2ad539a2cb284c648629d4f0"
+          "height": 1024,
+          "sha256": "9e0dcd367ab6bb3965a9223ac92e5786b26edf37a50f0b1a78e7c0bd2f264652"
         }
       ]
     },
@@ -1892,8 +1892,8 @@
           "path": "door/wood-double.png",
           "imageKind": "door",
           "width": 512,
-          "height": 512,
-          "sha256": "f0c94ec92b9c98bae4bea551cd83f686c84c6eb20ea9526f34ee06fbf2891cdf"
+          "height": 1024,
+          "sha256": "c75ed4a27c655cdba2c84d7b9736eeac7ef6371df8cd82410161d79582d27ded"
         }
       ]
     }

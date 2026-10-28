@@ -11,6 +11,7 @@ import {
   DESK,
   DOOR,
   DOOR_HINGES,
+  DOOR_STEPS,
   DOOR_VARIANTS,
   HEDGE,
   PACK_FACINGS,
@@ -227,14 +228,14 @@ export function hedgeSheet(): PixelBuffer {
   return sheet;
 }
 
-/** One frame per rotation (columns) and per hinge, closed then open (rows): `doorFrameIndex`. */
+/** One frame per rotation (columns) and, per hinge, one row per step of the swing, closed to open (`doorFrameIndex`). */
 export function doorSheet(material: DoorMaterial, variant: DoorVariant): PixelBuffer {
   const sheet = blankSheet(DOOR);
   for (const rotation of [0, 90, 180, 270] as const) {
     for (const hinge of DOOR_HINGES) {
-      for (const open of [false, true]) {
-        const index = doorFrameIndex(rotation, hinge, open);
-        place(sheet, doorSprite(material, variant, rotation, hinge, open), (index % DOOR.columns) * DOOR.frame.width, Math.floor(index / DOOR.columns) * DOOR.frame.height);
+      for (let step = 0; step < DOOR_STEPS; step += 1) {
+        const index = doorFrameIndex(rotation, hinge, step);
+        place(sheet, doorSprite(material, variant, rotation, hinge, step), (index % DOOR.columns) * DOOR.frame.width, Math.floor(index / DOOR.columns) * DOOR.frame.height);
       }
     }
   }

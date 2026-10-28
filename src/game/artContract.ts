@@ -239,6 +239,12 @@ export interface TableSpec extends PropSpecBase {
 export const DOOR_HINGES = ['start', 'end'] as const;
 export type DoorHinge = (typeof DOOR_HINGES)[number];
 
+/**
+ * The frames a door swings through, from 0 (closed) to the last (open): the
+ * leaf turns a third of a quarter turn per step, so it never jumps (#233).
+ */
+export const DOOR_STEPS = 4;
+
 /** The two doors of the pack: a single door and a double door are two items (#233). */
 export const DOOR_VARIANTS = ['single', 'double'] as const;
 export type DoorVariant = (typeof DOOR_VARIANTS)[number];
@@ -259,7 +265,7 @@ export interface DoorVariantSpec {
 /**
  * A door (#223, #233), seen from above like a wall: one column per decor
  * rotation (`DECOR_ROTATIONS` order: 0 opens down, 90 right, 180 up, 270
- * left), one row per hinge and state (`doorFrameIndex`). The anchor is the
+ * left), `DOOR_STEPS` rows per hinge from closed to open (`doorFrameIndex`). The anchor is the
  * middle of the door's span, on the grid line it stands on; a closed leaf lies
  * along it and an open one swings a quarter into the side it opens to. One
  * frame fits the widest variant, the double door; a single door is drawn in
@@ -830,7 +836,7 @@ export const DOOR: DoorSpec = {
   kind: 'door',
   frame: { width: DOOR_FRAME, height: DOOR_FRAME },
   columns: 4,
-  rows: DOOR_HINGES.length * 2,
+  rows: DOOR_HINGES.length * DOOR_STEPS,
   anchor: { x: DOOR_FRAME / 2, y: DOOR_FRAME / 2 },
   leafThickness: 6,
   variants: {
@@ -851,25 +857,50 @@ export function doorSpanOf(piece: string): number {
 
 /**
  * The frame of a door leaf: its rotation's column, and the row of its hinge
- * (`DOOR_HINGES`) closed, then open.
+ * (`DOOR_HINGES`) at `step` of the swing, 0 closed up to `DOOR_STEPS - 1` open.
  */
-export function doorFrameIndex(rotation: 0 | 90 | 180 | 270, hinge: DoorHinge, open: boolean): number {
-  const row = DOOR_HINGES.indexOf(hinge) * 2 + (open ? 1 : 0);
+export function doorFrameIndex(rotation: 0 | 90 | 180 | 270, hinge: DoorHinge, step: number): number {
+  const row = DOOR_HINGES.indexOf(hinge) * DOOR_STEPS + step;
   return row * DOOR.columns + rotation / 90;
 }
 
 /**
  * Where to draw a door of `span` tiles starting on `edge`: the frame's
- * top-left in world pixels (the anchor on the middle of the span) and the
- * depth it sorts by, the bottom of the last wall body it replaces.
+ * top-left in world pixels, the anchor on the middle of the span.
  */
-export function doorPlacement(edge: GridEdge, span: number): { readonly x: number; readonly y: number; readonly depthY: number } {
+export function doorPlacement(edge: GridEdge, span: number): { readonly x: number; readonly y: number } {
   const horizontal = edge.axis === 'horizontal';
-  const last = wallBodyRect(horizontal ? { ...edge, col: edge.col + span - 1 } : { ...edge, row: edge.row + span - 1 });
   const middle = horizontal
     ? { x: edge.col * ART_TILE + (span * ART_TILE) / 2, y: edge.row * ART_TILE }
     : { x: edge.col * ART_TILE, y: edge.row * ART_TILE + (span * ART_TILE) / 2 };
-  return { x: middle.x - DOOR.anchor.x, y: middle.y - DOOR.anchor.y, depthY: last.y + last.height };
+  return { x: middle.x - DOOR.anchor.x, y: middle.y - DOOR.anchor.y };
+}
+
+/**
+ * The depth a door sorts by in a frame: the lowest pixel its leaf draws,
+ * not the end of its span, so an avatar standing below a swung leaf walks in
+ * front of it instead of under it. The jambs merge with the walls' posts and
+ * never count. A leaf of `rotation` swings to the side that rotation faces
+ * (0 and 90 are down and right); `step` is the swing, as in `doorFrameIndex`.
+ */
+export function doorDepthY(edge: GridEdge, piece: string, rotation: 0 | 90 | 180 | 270, hinge: DoorHinge, step: number): number {
+  const { leafLength, jamb } = DOOR.variants[doorVariantOf(piece)];
+  const double = doorVariantOf(piece) === 'double';
+  const angle = (step / (DOOR_STEPS - 1)) * (Math.PI / 2);
+  const half = DOOR.leafThickness / 2;
+  // Along the span from its start: where each leaf starts, how long it is, and which end it hinges at.
+  const leaves = double
+    ? [
+        { from: jamb, length: leafLength / 2, atStart: true },
+        { from: jamb + leafLength / 2, length: leafLength / 2, atStart: false },
+      ]
+    : [{ from: jamb, length: leafLength, atStart: hinge === 'start' }];
+  if (edge.axis === 'horizontal') {
+    const down = rotation === 0;
+    return edge.row * ART_TILE + Math.max(...leaves.map(({ length }) => (down ? length * Math.sin(angle) : 0))) + half;
+  }
+  const lowest = Math.max(...leaves.map(({ from, length, atStart }) => (atStart ? from + length * Math.cos(angle) : from + length)));
+  return edge.row * ART_TILE + lowest + half * Math.sin(angle);
 }
 
 export function bridgeFrameIndex(orientation: BridgeOrientation): number {

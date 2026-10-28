@@ -3,6 +3,7 @@ import { physicalBodyRect } from './avatarGeometry';
 import type { DecorItem } from './officeDecor';
 import {
   DOOR_OPEN_REACH_PX,
+  DOOR_SWING_MS,
   doorEdge,
   doorEdges,
   doorEndPosts,
@@ -12,7 +13,10 @@ import {
   doorPostSet,
   doorSpan,
   doorSwingRotation,
+  doorStepOf,
   isDoorPiece,
+  keptSwings,
+  moveDoors,
   openDoorLeaves,
 } from './officeDoors';
 
@@ -191,5 +195,48 @@ describe('officeDoors: open and closed (#223, #233)', () => {
     expect(fresh).toBe(openDoorLeaves(leaves, [both[0]!]).get(at(4, 6)));
     const kept = openDoorLeaves(leaves, both, new Map([[at(4, 6), fresh === 'inside' ? 'outside' : 'inside']])).get(at(4, 6));
     expect(kept).not.toBe(fresh);
+  });
+});
+
+describe('officeDoors: the swing (#233)', () => {
+  const opening = new Map([[7, 'inside' as const]]);
+
+  it('opens a door a fraction per frame, up to fully open, and no further', () => {
+    const half = moveDoors(opening, new Map(), DOOR_SWING_MS / 2);
+    expect(half.get(7)).toEqual({ swing: 'inside', progress: 0.5 });
+    expect(moveDoors(opening, half, DOOR_SWING_MS * 5).get(7)).toEqual({ swing: 'inside', progress: 1 });
+  });
+
+  it('closes a door that nobody is lined up with the same way, and forgets it once shut', () => {
+    const open = new Map([[7, { swing: 'outside' as const, progress: 1 }]]);
+    const closing = moveDoors(new Map(), open, DOOR_SWING_MS / 4);
+    expect(closing.get(7)).toEqual({ swing: 'outside', progress: 0.75 });
+    expect(moveDoors(new Map(), closing, DOOR_SWING_MS).has(7)).toBe(false);
+  });
+
+  it('keeps the side it swings to while it shows a swung frame, then takes the one of whoever opens it next', () => {
+    const closing = new Map([[7, { swing: 'outside' as const, progress: 0.5 }]]);
+    expect(moveDoors(opening, closing, 0).get(7)?.swing).toBe('outside');
+    // Drawn shut already (the closed frame is the same from both sides), though not quite at rest.
+    expect(moveDoors(opening, new Map([[7, { swing: 'outside' as const, progress: 0.1 }]]), 0).get(7)?.swing).toBe('inside');
+    expect(moveDoors(opening, new Map(), 0).get(7)?.swing).toBe('inside');
+  });
+
+  it('commits a door to its side only while it shows a swung frame', () => {
+    const motion = new Map([
+      [1, { swing: 'outside' as const, progress: 0.5 }],
+      [2, { swing: 'inside' as const, progress: 0.1 }],
+    ]);
+    expect(keptSwings(motion)).toEqual(new Map([[1, 'outside']]));
+  });
+
+  it('moves every door on its own', () => {
+    const next = moveDoors(new Map([[1, 'inside' as const]]), new Map([[2, { swing: 'inside' as const, progress: 1 }]]), DOOR_SWING_MS / 2);
+    expect(next.get(1)?.progress).toBe(0.5);
+    expect(next.get(2)?.progress).toBe(0.5);
+  });
+
+  it('draws the frame nearest to the swing: closed, two between, open', () => {
+    expect([0, 0.1, 0.2, 0.5, 0.84, 1].map(doorStepOf)).toEqual([0, 0, 1, 2, 3, 3]);
   });
 });

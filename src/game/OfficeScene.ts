@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { WALL, doorFrameIndex, doorPlacement, propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type Point } from './artContract';
+import { WALL, doorDepthY, doorFrameIndex, doorPlacement, propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type GridEdge, type Point } from './artContract';
 import { artUploadsManifestUrl, findPiece, type ArtAppearance } from './artPack';
 import { artCustomCharactersUrl } from './customCharacterArt';
 import { ArtPackLoader } from './artPackLoader';
@@ -37,7 +37,7 @@ import { deskAt, deskZoneName } from './deskLayout';
 import { SPACE_SHADE_ALPHA, SPACE_SHADE_NAME, shadeAround, shadeKey } from './spaceFocus';
 import { tableFacing, tableFloorRect } from './deskTable';
 import { decorChairs, decorFootprint, encodeOfficeDecor, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
-import { doorEdge, doorLeaves, doorOpenings, doorSpan, doorSwingRotation, openDoorLeaves, type DoorLeaf, type DoorSwing } from './officeDoors';
+import { doorEdge, doorLeaves, doorOpenings, doorSpan, doorStepOf, doorSwingRotation, keptSwings, moveDoors, openDoorLeaves, type DoorLeaf, type DoorMotion } from './officeDoors';
 import { deskEntryRefused } from './deskDecorRules';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
@@ -295,8 +295,8 @@ export class OfficeScene extends Phaser.Scene {
    */
   private doorLeaves = new Map<number, DoorLeaf>();
   private doorImages = new Map<number, Phaser.GameObjects.Image>();
-  /** The anchors of the leaves drawn open, as `update()` last saw the avatars. */
-  private openDoors: ReadonlyMap<number, DoorSwing> = new Map();
+  /** How far open each door is and the side it swings to, by leaf anchor: the doors shut and still are not in it. */
+  private doorMotion: ReadonlyMap<number, DoorMotion> = new Map();
   /** The static bodies of the terrain grid and their collider, replaced whole on each edit. */
   private terrainColliders?: { rects: Phaser.GameObjects.Rectangle[]; collider: Phaser.Physics.Arcade.Collider };
   /** The terrain of `terrainBlocks` and `terrainWalls`, kept to rebuild `grid` when the collisions change. */
@@ -1670,10 +1670,8 @@ export class OfficeScene extends Phaser.Scene {
     const sheet = this.artSheet({ materialId: item.piece, color: null }, 'door', this.redrawDecor);
     if (sheet !== null) {
       const placement = doorPlacement(edge, span);
-      // Swung away from the avatar that opened it (S14).
-      const swing = this.openDoors.get(item.index);
-      const frame = doorFrameIndex(doorSwingRotation(leaf?.rotation ?? item.rotation, swing ?? 'inside'), 'start', swing !== undefined);
-      return putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(placement.depthY)).setName(decorObjectName(item.index));
+      const { frame, depthY } = this.doorLook(item, leaf?.rotation ?? item.rotation, edge);
+      return putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(depthY)).setName(decorObjectName(item.index));
     }
     const horizontal = edge.axis === 'horizontal';
     const x = horizontal ? (edge.col + span / 2) * TILE : edge.col * TILE;
@@ -1686,28 +1684,42 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
-   * Opens every door leaf an avatar (this player or a peer) is about to
-   * cross, swinging it away from the avatar, and closes the rest (#223,
-   * `openDoorLeaves`): drawing only, once per frame, switching the frame of
-   * the images `paintDecor` kept. Doors never block.
+   * The frame a door shows and the depth it sorts by: its swing so far,
+   * turned away from the avatar that opened it (S14), and the lowest pixel of
+   * the leaf in that frame (`doorDepthY`), so an avatar below a swung leaf
+   * walks in front of it.
    */
-  private animateDoors(): void {
+  private doorLook(item: Pick<DecorItem, 'index' | 'piece'>, rotation: DecorItem['rotation'], edge: GridEdge): { frame: number; depthY: number } {
+    const motion = this.doorMotion.get(item.index);
+    const step = motion === undefined ? 0 : doorStepOf(motion.progress);
+    const turned = doorSwingRotation(rotation, motion?.swing ?? 'inside');
+    return { frame: doorFrameIndex(turned, 'start', step), depthY: doorDepthY(edge, item.piece, turned, 'start', step) };
+  }
+
+  /**
+   * Swings every door leaf an avatar (this player or a peer) is about to
+   * cross, away from the avatar, and closes the rest (#223, `openDoorLeaves`,
+   * `moveDoors`): drawing only, once per frame, switching the frame and the
+   * depth of the images `paintDecor` kept. Doors never block.
+   */
+  private animateDoors(dtMs: number): void {
     if (this.doorImages.size === 0) return;
     const positions: Point[] = [{ x: this.player.x, y: this.player.y }];
     for (const sessionId of this.remotes?.sessionIds() ?? []) {
       const avatar = this.remotes?.get(sessionId);
       if (avatar !== undefined) positions.push({ x: avatar.x, y: avatar.y });
     }
-    // An open door keeps the side it swings to until it closes (S14).
-    const open = openDoorLeaves([...this.doorLeaves.values()], positions, this.openDoors);
+    // A door keeps the side it swings to until it is shut again (S14), also when it is closing.
+    const targets = openDoorLeaves([...this.doorLeaves.values()], positions, keptSwings(this.doorMotion));
+    this.doorMotion = moveDoors(targets, this.doorMotion, dtMs);
     for (const [index, image] of this.doorImages) {
       const leaf = this.doorLeaves.get(index);
       if (leaf === undefined) continue;
-      const swing = open.get(index);
-      const frame = doorFrameIndex(doorSwingRotation(leaf.rotation, swing ?? 'inside'), leaf.hinge, swing !== undefined);
+      const { frame, depthY } = this.doorLook(leaf, leaf.rotation, leaf.edge);
       if (image.frame.name !== String(frame)) image.setFrame(frame);
+      const depth = worldAssetDepth(depthY);
+      if (image.depth !== depth) image.setDepth(depth);
     }
-    this.openDoors = open;
   }
 
   /**
@@ -2325,7 +2337,7 @@ export class OfficeScene extends Phaser.Scene {
       avatar.lastX = avatar.x;
       avatar.lastY = avatar.y;
     }
-    this.animateDoors();
+    this.animateDoors(delta);
     if (this.localPositionReady && this.connectionState === 'connected') {
       this.connection?.sendMove(this.player.x, this.player.y, this.facing);
     }
