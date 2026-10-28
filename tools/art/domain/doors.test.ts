@@ -169,12 +169,15 @@ describe('door sprites (#223, #233)', () => {
         expect(rgbaOf(doorSprite('wood', 'double', rotation, 'end', open)), `${rotation} ${open}`).toEqual(rgbaOf(start));
         // Its silhouette mirrors about the anchor, across the edge (the light stays top-left).
         const horizontal = rotation === 0 || rotation === 180;
+        // One assertion per frame (not per pixel): 16k expects a frame made this test outrun its timeout on a slow runner.
+        const unmatched: string[] = [];
         for (let y = 0; y < start.height; y += 1) {
           for (let x = 0; x < start.width; x += 1) {
             const mirror = horizontal ? start.alphaAt(2 * AX - 1 - x, y) : start.alphaAt(x, 2 * AY - 1 - y);
-            expect(start.alphaAt(x, y), `${rotation} ${open} ${x},${y}`).toBe(mirror);
+            if (start.alphaAt(x, y) !== mirror) unmatched.push(`${x},${y}`);
           }
         }
+        expect(unmatched, `${rotation} ${open}`).toEqual([]);
       }
     }
   });
