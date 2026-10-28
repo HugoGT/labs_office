@@ -129,16 +129,16 @@ describe('materialCatalogFrom: plants and room tables (#208)', () => {
 describe('materialCatalogFrom: doors (#223, #233)', () => {
   it('offers every door of the pack, the single and the double one apart, never colorable, for the decor palette', () => {
     expect(catalog().door.map((option) => [option.id, option.kind, option.name, option.colorable, option.sheetUrl])).toEqual([
-      ['door-wood', 'door', 'Puerta de madera', false, 'assets/pack/door/wood.png'],
-      ['door-wood-double', 'door', 'Puerta doble de madera', false, 'assets/pack/door/wood-double.png'],
+      ['door-wood', 'door', 'Puerta simple', false, 'assets/pack/door/wood.png'],
+      ['door-wood-double', 'door', 'Puerta doble', false, 'assets/pack/door/wood-double.png'],
     ]);
     expect(catalog().door.every((option) => option.defaultColor === null)).toBe(true);
   });
 
-  it('a door previews its closed leaf over the whole span: two tiles wide for a single door, four for a double one, around the anchor', () => {
+  it('a door previews its closed leaf over the whole span: two tiles wide for a single door, three for a double one, around the anchor', () => {
     // The 128 x 128 frame has its anchor in the middle of the span (64, 64); the crop is 24 rows across the edge.
     expect(previewFrame(catalog().door[0]!)).toEqual({ x: 64 - 32, y: 64 - 12, width: 64, height: 24 });
-    expect(previewFrame(catalog().door[1]!)).toEqual({ x: 64 - 64, y: 64 - 12, width: 128, height: 24 });
+    expect(previewFrame(catalog().door[1]!)).toEqual({ x: 64 - 48, y: 64 - 12, width: 96, height: 24 });
   });
 });
 

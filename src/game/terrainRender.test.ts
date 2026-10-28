@@ -259,6 +259,15 @@ describe('wallSprites', () => {
     expect(wallSprites({ ...layout, openings: doors }).filter((sprite) => sprite.part === 'body')).toHaveLength(1);
   });
 
+  it('draws no joint at a post inside a door span, whether or not the wall continues past it', () => {
+    // A double door over edges 2, 3 and 4 of row 2: the post at 3 stands with a wall only on one side, the one at 4 is gone.
+    const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '5,2': 'wall-brick' }) });
+    const door = [2, 3, 4].map((col) => ({ col, row: 2, axis: 'horizontal' as const }));
+    const joints = wallSprites({ ...layout, openings: door }).filter((sprite) => sprite.part === 'joint').map(({ x }) => x);
+
+    expect(joints).toEqual([2 * TILE - 8, 5 * TILE - 8]);
+  });
+
   it('keeps the joint of a post between two doors where another wall meets it (a T) (#223)', () => {
     const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '4,2': 'wall-brick', '3,3': 'wall-brick' }) });
     const doors = [{ col: 2, row: 2, axis: 'horizontal' as const }, { col: 3, row: 2, axis: 'horizontal' as const }];

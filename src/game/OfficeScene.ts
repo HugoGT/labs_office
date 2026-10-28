@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { WALL, doorDepthY, doorFrameIndex, doorPlacement, propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type GridEdge, type Point } from './artContract';
+import { WALL, doorDepthY, doorFrameIndex, doorHingeOf, doorPlacement, doorSlices, propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type GridEdge, type Point } from './artContract';
 import { artUploadsManifestUrl, findPiece, type ArtAppearance } from './artPack';
 import { artCustomCharactersUrl } from './customCharacterArt';
 import { ArtPackLoader } from './artPackLoader';
@@ -1680,7 +1680,7 @@ export class OfficeScene extends Phaser.Scene {
       const placement = deskPlacement(sheet.piece, tableFacing(item.rotation), anchor);
       return [putArtSprite(this, sheet.key, placement, worldAssetDepth(placement.depthY)).setName(decorObjectName(item.index))];
     }
-    if (kind === 'door') return [this.drawDoor(item)];
+    if (kind === 'door') return this.drawDoor(item);
     const propKind = kind === 'table' ? 'table' : 'plant';
     const sheet = this.artSheet({ materialId: item.piece, color: null }, propKind, this.redrawDecor);
     if (sheet === null || (sheet.piece.kind !== 'plant' && sheet.piece.kind !== 'table')) {
@@ -1699,9 +1699,11 @@ export class OfficeScene extends Phaser.Scene {
 
   /**
    * A door of the decor layer (#223, #233): its leaf and jambs on the grid
-   * line it opens, sorted like the wall body it stands in for (`doorEdge`).
+   * line it opens (`doorEdge`). The leaf sorts by its lowest pixel; each jamb
+   * is its own crop of the same frame, sorted under the post joint it merges
+   * with (`doorSlices`), so the walls are always drawn over the door.
    */
-  private drawDoor(item: DecorItem): Phaser.GameObjects.GameObject {
+  private drawDoor(item: DecorItem): Phaser.GameObjects.GameObject[] {
     const edge = doorEdge(item, this.layout.width);
     const span = doorSpan(item);
     const leaf = this.doorLeaves.get(item.index);
@@ -1709,16 +1711,25 @@ export class OfficeScene extends Phaser.Scene {
     if (sheet !== null) {
       const placement = doorPlacement(edge, span);
       const { frame, depthY } = this.doorLook(item, leaf?.rotation ?? item.rotation, edge);
-      return putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(depthY)).setName(decorObjectName(item.index));
+      const slices = doorSlices(edge, item.piece);
+      const name = decorObjectName(item.index);
+      const crop = (image: Phaser.GameObjects.Image, { x, y, width, height }: { x: number; y: number; width: number; height: number }) => image.setCrop(x, y, width, height);
+      // The jambs are the same in every frame of the swing, so they keep the one they were drawn with.
+      return [
+        crop(putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(depthY)).setName(name), slices.leaf),
+        ...slices.jambs.map(({ crop: rect, depthY: jambDepthY }) => crop(putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(jambDepthY)).setName(`${name}:jamb`), rect)),
+      ];
     }
     const horizontal = edge.axis === 'horizontal';
     const x = horizontal ? (edge.col + span / 2) * TILE : edge.col * TILE;
     const y = horizontal ? edge.row * TILE : (edge.row + span / 2) * TILE;
-    return this.add
-      .rectangle(x, y, horizontal ? span * TILE : DOOR_PLACEHOLDER_THICKNESS, horizontal ? DOOR_PLACEHOLDER_THICKNESS : span * TILE, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
-      // The bottom of the wall body it replaces: half a wall below the edge's middle either way.
-      .setDepth(worldAssetDepth(y + WALL.thickness / 2))
-      .setName(decorObjectName(item.index));
+    return [
+      this.add
+        .rectangle(x, y, horizontal ? span * TILE : DOOR_PLACEHOLDER_THICKNESS, horizontal ? DOOR_PLACEHOLDER_THICKNESS : span * TILE, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
+        // The bottom of the wall body it replaces: half a wall below the edge's middle either way.
+        .setDepth(worldAssetDepth(y + WALL.thickness / 2))
+        .setName(decorObjectName(item.index)),
+    ];
   }
 
   /**
@@ -1731,7 +1742,9 @@ export class OfficeScene extends Phaser.Scene {
     const motion = this.doorMotion.get(item.index);
     const step = motion === undefined ? 0 : doorStepOf(motion.progress);
     const turned = doorSwingRotation(rotation, motion?.swing ?? 'inside');
-    return { frame: doorFrameIndex(turned, 'start', step), depthY: doorDepthY(edge, item.piece, turned, 'start', step) };
+    // The hinge stays where the door was turned to, whichever side it swings to.
+    const hinge = doorHingeOf(item.piece, rotation);
+    return { frame: doorFrameIndex(turned, hinge, step), depthY: doorDepthY(edge, item.piece, turned, hinge, step) };
   }
 
   /**

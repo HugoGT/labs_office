@@ -205,7 +205,7 @@ describe('decorPickAt', () => {
 
 describe('decorPlacementAllowed: doors (#223, #233)', () => {
   const DOOR: DecorPieceInfo = { kind: 'door', footprint: { w: 2, h: 1 } };
-  const DOUBLE: DecorPieceInfo = { kind: 'door', footprint: { w: 4, h: 1 } };
+  const DOUBLE: DecorPieceInfo = { kind: 'door', footprint: { w: 3, h: 1 } };
   const doorBrush = (rotation: 0 | 90 | 180 | 270 = 0): DecorBrush => ({ kind: 'piece', piece: 'door-wood', info: DOOR, rotation });
   const doubleBrush = (rotation: 0 | 90 | 180 | 270 = 0): DecorBrush => ({ kind: 'piece', piece: 'door-wood-double', info: DOUBLE, rotation });
   const doorInfo = (piece: string): DecorPieceInfo | null => (piece === 'door-wood-double' ? DOUBLE : piece.startsWith('door-') ? DOOR : infoOf(piece));
@@ -240,15 +240,15 @@ describe('decorPlacementAllowed: doors (#223, #233)', () => {
     expect(decorPlacementAllowed(none, infoOf, walled(), null, at(3, 7), doorBrush(0))).toBe(true);
   });
 
-  it('takes a double door four tiles wide between the posts at its two ends, and refuses it where its span has none', () => {
+  it('takes a double door three tiles wide between the posts at its two ends, and refuses it where its span has none', () => {
     expect(decorPlacementAllowed(none, infoOf, walled(), null, at(2, 4), doubleBrush(0))).toBe(true);
     expect(decorPlacementAllowed(none, infoOf, walled(), null, at(3, 7), doubleBrush(180))).toBe(true);
-    expect(decorPlacementAllowed(none, infoOf, withPosts([[2, 3], [2, 7]]), null, at(2, 3), doubleBrush(90))).toBe(true);
-    // The span of four needs a post four vertices away: (4, 4) has none at (8, 4), and the room's left wall has none at (2, 8).
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(4, 4), doubleBrush(0))).toBe(false);
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(2, 4), doubleBrush(90))).toBe(false);
+    expect(decorPlacementAllowed(none, infoOf, withPosts([[2, 3], [2, 6]]), null, at(2, 3), doubleBrush(90))).toBe(true);
+    // The span of three needs a post three vertices away: (5, 4) has none at (8, 4), and the room's left wall has none at (2, 8).
+    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(5, 4), doubleBrush(0))).toBe(false);
+    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(2, 5), doubleBrush(90))).toBe(false);
     // A door two tiles wide fits there, where the double one does not.
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(4, 4), doorBrush(0))).toBe(true);
+    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(5, 4), doorBrush(0))).toBe(true);
   });
 
   it('takes a door between two different materials (S16)', () => {
@@ -297,7 +297,7 @@ describe('decorPlacementAllowed: doors (#223, #233)', () => {
     expect(decorPlacementAllowed(none, infoOf, { ...wet, walkable }, null, at(3, 4), doorBrush(0))).toBe(false);
     // Water at the far end of a double door's span.
     const wetEnd = [...wet.walkable];
-    wetEnd[at(5, 3)] = false;
+    wetEnd[at(4, 3)] = false;
     expect(decorPlacementAllowed(none, infoOf, { ...wet, walkable: wetEnd }, null, at(2, 4), doubleBrush(0))).toBe(false);
     expect(decorPlacementAllowed([{ index: at(3, 3), piece: 'plant-ficus', rotation: 0 }], infoOf, walled(), null, at(3, 4), doorBrush(0))).toBe(false);
     expect(decorPlacementAllowed([{ index: at(4, 4), piece: 'plant-ficus', rotation: 0 }], infoOf, walled(), null, at(3, 4), doorBrush(0))).toBe(false);

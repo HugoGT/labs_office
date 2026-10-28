@@ -711,11 +711,13 @@ export function openingSet(grid: WallGrid): ReadonlySet<string> {
 }
 
 /**
- * Whether the post at vertex (tx, ty) only connects through open door edges,
- * at least two of them (the shared post between the two leaves of a double
- * door, the corner of two doors): no wall is left there, so it neither draws
- * nor blocks (#223). A post any other wall meets keeps its joint, and so
- * does the end of a single door, which has the wall (or nothing) beyond.
+ * Whether the post at vertex (tx, ty) is no wall any more (#223): every wall
+ * that meets it goes through an open door edge, and either at least two do
+ * (the shared post between the two leaves of a double door, the corner of two
+ * doors) or the post stands inside one door's span, an open edge on each side
+ * of it in line, whether or not the wall past it is still there. It neither
+ * draws nor blocks. A post any other wall meets keeps its joint, and so does
+ * the end of a door, which has the wall (or nothing) beyond.
  */
 export function doorOnlyPost(grid: WallGrid, open: ReadonlySet<string>, tx: number, ty: number): boolean {
   if (open.size === 0) return false;
@@ -731,7 +733,8 @@ export function doorOnlyPost(grid: WallGrid, open: ReadonlySet<string>, tx: numb
     if (!openEdge(grid, open, col, row, axis)) return false;
     doors += 1;
   }
-  return doors >= 2;
+  const [north, east, south, west] = sides.map(([, , col, row, axis]) => open.has(edgeKey(col, row, axis)));
+  return doors >= 2 || (north && south) || (east && west);
 }
 
 /**

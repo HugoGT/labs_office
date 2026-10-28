@@ -3,7 +3,7 @@
  * (`officeDecor.ts`) that stands on a wall's grid line instead of on a tile.
  * Its anchor tile names the first edge it spans: the top edge of the tile for
  * rotation 0 and 180, the left one for 90 and 270. A door spans 2 tiles of the
- * line, a double door 4 (`doorSpanOf`): the leaf in the middle and a jamb at
+ * line, a double door 3 (`doorSpanOf`): the leaf in the middle and a jamb at
  * each end that merges with the wall there. Its rotation is the side it opens
  * into, the chair's facing (`decorChairFacing`: 0 down, 90 right, 180 up, 270
  * left). A door goes between two standing wall posts (`doorOnWall`), one at
@@ -19,7 +19,7 @@
  * `officeDecor.ts`: explicit `.ts` imports of other pure modules only.
  */
 
-import { DOOR_STEPS, doorSpanOf, type GridEdge } from './artContract.ts';
+import { DOOR_STEPS, doorHingeOf, doorSpanOf, type DoorHinge, type GridEdge } from './artContract.ts';
 import { AVATAR_BODY_CENTER_OFFSET, type GeometryPoint } from './avatarGeometry.ts';
 import { decorChairFacing, type DecorItem, type DecorTileRect } from './officeDecor.ts';
 import { wallFootprintRects, type WallGrid } from './officeLayout.ts';
@@ -42,7 +42,7 @@ function anchorOf(item: Pick<DecorItem, 'index'>, width: number): { tx: number; 
   return { tx: item.index % width, ty: Math.floor(item.index / width) };
 }
 
-/** How many tiles of wall a door spans: 2 for a door, 4 for a double door. */
+/** How many tiles of wall a door spans: 2 for a door, 3 for a double door. */
 export function doorSpan(item: Pick<DecorItem, 'piece'>): number {
   return doorSpanOf(item.piece);
 }
@@ -81,6 +81,71 @@ export function doorOnWall(grid: Pick<WallGrid, 'width' | 'height' | 'walls'>, i
   return grid.walls[row * grid.width + col] != null && grid.walls[endRow * grid.width + endCol] != null;
 }
 
+/** The posts strictly between a door's two end posts, in order: the wall a door stands in front of. */
+export function doorInnerPosts(item: Pick<DecorItem, 'index' | 'rotation' | 'piece'>, width: number): number[] {
+  const { col, row, axis } = doorEdge(item, width);
+  return Array.from({ length: doorSpan(item) - 1 }, (_, step) => (axis === 'horizontal' ? row * width + col + 1 + step : (row + 1 + step) * width + col));
+}
+
+/** Every post of a door's span, the ends and the ones between, start first: the vertices the eraser takes the door by. */
+export function doorPosts(item: Pick<DecorItem, 'index' | 'rotation' | 'piece'>, width: number): number[] {
+  const [start, end] = doorEndPosts(item, width);
+  return [start, ...doorInnerPosts(item, width), end];
+}
+
+/**
+ * The vertices straight across each end of a door's span, one row (or column)
+ * to each side: the posts a wall may end at, against the door's end post
+ * (#233). Their footprint touches the door's own tiles, but a wall there
+ * stands beside the doorway, not in it, so the door keeps its swing. The ones
+ * off the map are left out.
+ */
+export function doorShoulders(item: Pick<DecorItem, 'index' | 'rotation' | 'piece'>, width: number, height: number): number[] {
+  const { col, row, axis } = doorEdge(item, width);
+  const span = doorSpan(item);
+  const horizontal = axis === 'horizontal';
+  const shoulders: number[] = [];
+  for (const along of [0, span]) {
+    for (const across of [-1, 1]) {
+      const [tx, ty] = horizontal ? [col + along, row + across] : [col + across, row + along];
+      if (tx >= 0 && ty >= 0 && tx < width && ty < height) shoulders.push(ty * width + tx);
+    }
+  }
+  return shoulders;
+}
+
+/** The grid edges a door stands on, as one key: two doors with the same one cover the same wall. */
+function doorKey(item: Pick<DecorItem, 'index' | 'rotation' | 'piece'>, width: number): string {
+  const { col, row, axis } = doorEdge(item, width);
+  return `${axis}:${col}:${row}:${doorSpan(item)}`;
+}
+
+/**
+ * The wall posts to erase when the doors of `before` become `after` (#233):
+ * the standing ones strictly between the ends of a door that no longer
+ * covers those edges (removed, or moved), so the wall that stood behind it
+ * does not come back. Not an end post of a door that stays, and not one where
+ * another wall meets it across the door's line (a T): that wall is not under
+ * the door. A door only turned in place covers the same edges and takes none.
+ */
+export function wallsUnderLeftDoors(before: readonly DecorItem[], after: readonly DecorItem[], walls: readonly (string | null)[], width: number): number[] {
+  const height = walls.length / width;
+  const stays = new Set(after.filter((item) => isDoorPiece(item.piece)).map((item) => doorKey(item, width)));
+  const ends = doorPostSet(after, width);
+  const standing = (tx: number, ty: number): boolean => tx >= 0 && ty >= 0 && tx < width && ty < height && walls[ty * width + tx] != null;
+  const erased = new Set<number>();
+  for (const item of before) {
+    if (!isDoorPiece(item.piece) || stays.has(doorKey(item, width))) continue;
+    const horizontal = doorEdge(item, width).axis === 'horizontal';
+    for (const post of doorInnerPosts(item, width)) {
+      const [tx, ty] = [post % width, Math.floor(post / width)];
+      const crossed = horizontal ? standing(tx, ty - 1) || standing(tx, ty + 1) : standing(tx - 1, ty) || standing(tx + 1, ty);
+      if (walls[post] != null && !ends.has(post) && !crossed) erased.add(post);
+    }
+  }
+  return [...erased];
+}
+
 /** The edges the doors of a decor layer open, in layer order: every edge of every door's span. */
 export function doorOpenings(items: readonly DecorItem[], width: number): GridEdge[] {
   return items.flatMap((item) => (isDoorPiece(item.piece) ? doorEdges(item, width) : []));
@@ -111,7 +176,8 @@ export function doorPostSet(items: readonly DecorItem[], width: number): Set<num
 /**
  * One door as drawn: its first edge, its span, its footprint (the tiles on
  * each side along the span) and the side it opens to (its rotation). A
- * single door hinges at its start; a double door is drawn whole.
+ * single door hinges at the end its rotation puts it at (`doorHingeOf`); a
+ * double door is drawn whole.
  */
 export interface DoorLeaf {
   readonly index: number;
@@ -120,7 +186,7 @@ export interface DoorLeaf {
   readonly edge: GridEdge;
   readonly span: number;
   readonly footprint: DecorTileRect;
-  readonly hinge: 'start';
+  readonly hinge: DoorHinge;
 }
 
 function footprintOf(edge: GridEdge, span: number): DecorTileRect {
@@ -134,7 +200,7 @@ export function doorLeaves(items: readonly DecorItem[], width: number): DoorLeaf
     .map((item) => {
       const edge = doorEdge(item, width);
       const span = doorSpan(item);
-      return { index: item.index, piece: item.piece, rotation: item.rotation, edge, span, footprint: footprintOf(edge, span), hinge: 'start' as const };
+      return { index: item.index, piece: item.piece, rotation: item.rotation, edge, span, footprint: footprintOf(edge, span), hinge: doorHingeOf(item.piece, item.rotation) };
     });
 }
 

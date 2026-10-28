@@ -235,7 +235,7 @@ export function DecorEditorSection({
         <>
           <h4 className={styles.subtitle}>Paredes</h4>
           <span className={styles.hint}>
-            Las paredes van sobre las líneas entre casillas y cortan el paso: toca o arrastra cerca de una esquina para levantarlas desde ella, y «Borrar» las quita; sobre una puerta, quita primero la puerta. No se pueden poner sobre escritorios, muebles ni la entrada.
+            Las paredes van sobre las líneas entre casillas y cortan el paso: toca o arrastra cerca de una esquina para levantarlas desde ella, y «Borrar» las quita; sobre una puerta, la quita con la pared que tenía detrás. No se pueden poner sobre escritorios, muebles ni la entrada.
           </span>
           <WallPalette value={walls.brush} onPick={walls.pick} walls={catalog?.wall ?? null} disabled={walls.blocked} preview={preview} />
         </>
