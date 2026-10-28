@@ -14,6 +14,7 @@ import {
   DOOR_STEPS,
   doorDepthY,
   doorFrameIndex,
+  doorHingeOf,
   doorSpanOf,
   doorVariantOf,
   doorPlacement,
@@ -774,6 +775,12 @@ describe('doors (#223, #233)', () => {
     expect(doorVariantOf('door-wood-double')).toBe('double');
     expect(doorSpanOf('door-wood')).toBe(2);
     expect(doorSpanOf('door-wood-double')).toBe(3);
+  });
+
+  it('hinges a single door at the end its turn puts it at, going round clockwise from the west end, and a double door at its start', () => {
+    // Down (0) hinges west, then left (270) north, up (180) east and right (90) south: the door turns as a whole.
+    expect([0, 270, 180, 90].map((rotation) => doorHingeOf('door-wood', rotation as 0 | 90 | 180 | 270))).toEqual(['start', 'start', 'end', 'end']);
+    for (const rotation of [0, 90, 180, 270] as const) expect(doorHingeOf('door-wood-double', rotation)).toBe('start');
   });
 
   it('draws a door with its anchor on the middle of its span', () => {

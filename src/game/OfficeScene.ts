@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { WALL, doorDepthY, doorFrameIndex, doorPlacement, doorSlices, propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type GridEdge, type Point } from './artContract';
+import { WALL, doorDepthY, doorFrameIndex, doorHingeOf, doorPlacement, doorSlices, propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type GridEdge, type Point } from './artContract';
 import { artUploadsManifestUrl, findPiece, type ArtAppearance } from './artPack';
 import { artCustomCharactersUrl } from './customCharacterArt';
 import { ArtPackLoader } from './artPackLoader';
@@ -1704,7 +1704,9 @@ export class OfficeScene extends Phaser.Scene {
     const motion = this.doorMotion.get(item.index);
     const step = motion === undefined ? 0 : doorStepOf(motion.progress);
     const turned = doorSwingRotation(rotation, motion?.swing ?? 'inside');
-    return { frame: doorFrameIndex(turned, 'start', step), depthY: doorDepthY(edge, item.piece, turned, 'start', step) };
+    // The hinge stays where the door was turned to, whichever side it swings to.
+    const hinge = doorHingeOf(item.piece, rotation);
+    return { frame: doorFrameIndex(turned, hinge, step), depthY: doorDepthY(edge, item.piece, turned, hinge, step) };
   }
 
   /**

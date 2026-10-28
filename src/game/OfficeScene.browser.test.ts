@@ -4936,6 +4936,20 @@ describe('OfficeScene: edited terrain', () => {
     for (const { frame, depth } of drawn) expect(depth, `frame ${frame}`).toBeCloseTo(depthAt(frame / DOOR.columns));
   });
 
+  it('hinges a single door at the end its turn puts it at, shut and swung, whichever side it opens to (#233)', async () => {
+    const { scene, handlers } = await bootConnected();
+    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
+    // Turned up (180): hinged at the east end.
+    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 180 }]);
+    const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
+    await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
+    expect(Number(leaf().frame.name)).toBe(doorFrameIndex(180, 'end', 0));
+    // For someone from the north it swings south, still hinged at the east end.
+    const body = findPlayer(scene).body as Phaser.Physics.Arcade.Body;
+    body.reset(lawnVertex.x + TILE, lawnVertex.y - TILE / 2 - 11);
+    await vi.waitFor(() => expect(Number(leaf().frame.name)).toBe(doorFrameIndex(0, 'end', DOOR_STEPS - 1)), LOOP_WAIT);
+  });
+
   it('keeps a fully open door open for a moment after the avatar leaves, then closes it through the frames between (#233)', async () => {
     const { scene, handlers } = await bootConnected();
     handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
@@ -4959,7 +4973,7 @@ describe('OfficeScene: edited terrain', () => {
     const { scene, handlers } = await bootConnected();
     // A vertical door of 2 tiles on the line through the lawn vertex: its posts at the vertex and two rows below.
     handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 2 * BASE_LAYOUT.width].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
-    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 90 }]);
+    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 270 }]);
     const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
     await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
     const player = findPlayer(scene);

@@ -856,6 +856,18 @@ export function doorSpanOf(piece: string): number {
 }
 
 /**
+ * The end of its span a door hinges at (#233). A double door always hinges
+ * its leaves at the outer ends, so it reports `start`. A single door turns as
+ * a whole with its rotation, going round clockwise from hinged at the west end
+ * and opening down (0): left (270) hinges it at the north end, up (180) at the
+ * east end and right (90) at the south end. Which side it swings to when
+ * opened is up to whoever opens it (`openDoorLeaves`).
+ */
+export function doorHingeOf(piece: string, rotation: 0 | 90 | 180 | 270): DoorHinge {
+  return doorVariantOf(piece) === 'single' && (rotation === 90 || rotation === 180) ? 'end' : 'start';
+}
+
+/**
  * The frame of a door leaf: its rotation's column, and the row of its hinge
  * (`DOOR_HINGES`) at `step` of the swing, 0 closed up to `DOOR_STEPS - 1` open.
  */

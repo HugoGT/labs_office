@@ -121,6 +121,11 @@ describe('officeDoors: leaves (#223, #233)', () => {
     ]);
   });
 
+  it('hinges a single door by its turn, at the end it points to, and a double door at its start', () => {
+    const leaves = doorLeaves([door(4, 6, 0), door(4, 6, 90), door(4, 6, 180), door(4, 6, 270), doubleDoor(2, 2, 180)], WIDTH);
+    expect(leaves.map(({ hinge }) => hinge)).toEqual(['start', 'end', 'end', 'start', 'start']);
+  });
+
   it('does not join neighbouring doors: each stays its own leaf', () => {
     const leaves = doorLeaves([door(4, 6, 0), door(6, 6, 0)], WIDTH);
     expect(leaves.map(({ index }) => index)).toEqual([at(4, 6), at(6, 6)]);

@@ -19,7 +19,7 @@
  * `officeDecor.ts`: explicit `.ts` imports of other pure modules only.
  */
 
-import { DOOR_STEPS, doorSpanOf, type GridEdge } from './artContract.ts';
+import { DOOR_STEPS, doorHingeOf, doorSpanOf, type DoorHinge, type GridEdge } from './artContract.ts';
 import { AVATAR_BODY_CENTER_OFFSET, type GeometryPoint } from './avatarGeometry.ts';
 import { decorChairFacing, type DecorItem, type DecorTileRect } from './officeDecor.ts';
 import { wallFootprintRects, type WallGrid } from './officeLayout.ts';
@@ -111,7 +111,8 @@ export function doorPostSet(items: readonly DecorItem[], width: number): Set<num
 /**
  * One door as drawn: its first edge, its span, its footprint (the tiles on
  * each side along the span) and the side it opens to (its rotation). A
- * single door hinges at its start; a double door is drawn whole.
+ * single door hinges at the end its rotation puts it at (`doorHingeOf`); a
+ * double door is drawn whole.
  */
 export interface DoorLeaf {
   readonly index: number;
@@ -120,7 +121,7 @@ export interface DoorLeaf {
   readonly edge: GridEdge;
   readonly span: number;
   readonly footprint: DecorTileRect;
-  readonly hinge: 'start';
+  readonly hinge: DoorHinge;
 }
 
 function footprintOf(edge: GridEdge, span: number): DecorTileRect {
@@ -134,7 +135,7 @@ export function doorLeaves(items: readonly DecorItem[], width: number): DoorLeaf
     .map((item) => {
       const edge = doorEdge(item, width);
       const span = doorSpan(item);
-      return { index: item.index, piece: item.piece, rotation: item.rotation, edge, span, footprint: footprintOf(edge, span), hinge: 'start' as const };
+      return { index: item.index, piece: item.piece, rotation: item.rotation, edge, span, footprint: footprintOf(edge, span), hinge: doorHingeOf(item.piece, item.rotation) };
     });
 }
 
