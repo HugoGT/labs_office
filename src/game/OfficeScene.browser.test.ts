@@ -4811,6 +4811,37 @@ describe('OfficeScene: edited terrain', () => {
     expect(solidAt(scene, lawnVertex.x - 1, lawnVertex.y)).toBe(true);
   });
 
+  it('draws the walls over a door, shut or open, horizontal or vertical: its jambs sort under the posts they merge with (#233)', async () => {
+    const { scene, handlers } = await bootConnected();
+    // A horizontal door on row 22 between posts 67 and 69, and a vertical one down from vertex (67, 24) to (67, 26).
+    const posts = [lawnTile, lawnTile + 2, lawnTile + 2 * BASE_LAYOUT.width, lawnTile + 4 * BASE_LAYOUT.width];
+    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, posts.map((index) => ({ index, piece: 'wall-brick' as const }))));
+    handlers.onDecor!([
+      { index: lawnTile, piece: 'door-wood', rotation: 0 },
+      { index: lawnTile + 2 * BASE_LAYOUT.width, piece: 'door-wood', rotation: 90 },
+    ]);
+    const jambs = (index: number) => scene.children.list.filter((child) => child.name === `${decorObjectName(index)}:jamb`) as Phaser.GameObjects.Image[];
+    await vi.waitFor(() => expect(jambs(lawnTile)).toHaveLength(2), LOOP_WAIT);
+    const jointDepth = (ty: number) => worldAssetDepth(ty * TILE + 8);
+    const check = () => {
+      // Under the joint at each end of its span, so the post is drawn over the jamb.
+      expect(jambs(lawnTile).map((jamb) => jamb.depth)).toEqual([jointDepth(22) - 1, jointDepth(22) - 1]);
+      expect(jambs(lawnTile + 2 * BASE_LAYOUT.width).map((jamb) => jamb.depth)).toEqual([jointDepth(24) - 1, jointDepth(26) - 1]);
+    };
+    check();
+
+    // Swung wide open for someone from the north, nothing about the jambs changes.
+    const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
+    const body = findPlayer(scene).body as Phaser.Physics.Arcade.Body;
+    body.reset(lawnVertex.x + TILE, lawnVertex.y - TILE / 2 - 11);
+    await vi.waitFor(() => expect(Number(leaf().frame.name)).toBe(doorFrameIndex(0, 'start', DOOR_STEPS - 1)), LOOP_WAIT);
+    check();
+    // The joint of the end post is one of the wall pieces, and it sorts over the jamb whatever the swing.
+    const joints = wallObjects(scene).filter((wall) => (wall as Phaser.GameObjects.Image).x === lawnVertex.x - 8 && (wall as Phaser.GameObjects.Image).y === lawnVertex.y - 8) as Phaser.GameObjects.Image[];
+    expect(joints).toHaveLength(1);
+    expect(joints[0]!.depth).toBeGreaterThan(jambs(lawnTile)[0]!.depth);
+  });
+
   it('opens a door only for whoever is about to cross it, swinging away from where they come from, and keeps the swing mid-crossing (#223, S14)', async () => {
     const { scene, handlers } = await bootConnected();
     handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));

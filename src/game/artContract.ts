@@ -903,6 +903,30 @@ export function doorDepthY(edge: GridEdge, piece: string, rotation: 0 | 90 | 180
   return edge.row * ART_TILE + lowest + half * Math.sin(angle);
 }
 
+/**
+ * A door frame cut in three along its span (#233): the leaf, which sorts by its
+ * lowest pixel (`doorDepthY`), and the two jambs, which merge with the wall's
+ * posts at the ends and sort just under their joints, so a wall is always
+ * drawn over the door, whatever its swing. Crops are in frame pixels.
+ */
+export function doorSlices(edge: GridEdge, piece: string): { readonly leaf: Rect; readonly jambs: readonly { readonly crop: Rect; readonly depthY: number }[] } {
+  const { span, jamb } = DOOR.variants[doorVariantOf(piece)];
+  const horizontal = edge.axis === 'horizontal';
+  const length = span * ART_TILE;
+  const start = (horizontal ? DOOR.anchor.x : DOOR.anchor.y) - length / 2;
+  // `along` cuts the frame across the span from `from` for `size` pixels, whole the other way.
+  const along = (from: number, size: number): Rect =>
+    horizontal ? { x: from, y: 0, width: size, height: DOOR.frame.height } : { x: 0, y: from, width: DOOR.frame.width, height: size };
+  const joint = (vertex: GridVertex): number => wallJointRect(vertex).y + WALL.jointSize - 1;
+  return {
+    leaf: along(start + jamb, length - 2 * jamb),
+    jambs: [
+      { crop: along(start, jamb), depthY: joint(edge) },
+      { crop: along(start + length - jamb, jamb), depthY: joint(horizontal ? { col: edge.col + span, row: edge.row } : { col: edge.col, row: edge.row + span }) },
+    ],
+  };
+}
+
 export function bridgeFrameIndex(orientation: BridgeOrientation): number {
   return BRIDGE_ORIENTATIONS.indexOf(orientation);
 }

@@ -17,6 +17,7 @@ import {
   doorSpanOf,
   doorVariantOf,
   doorPlacement,
+  doorSlices,
   CHARACTER_SEATED,
   CHARACTER_WALK,
   FLOOR,
@@ -780,6 +781,23 @@ describe('doors (#223, #233)', () => {
       expect(doorPlacement({ col: 4, row: 6, axis: 'horizontal' }, span)).toEqual({ x: 4 * 32 + (span * 32) / 2 - 64, y: 6 * 32 - 64 });
       expect(doorPlacement({ col: 4, row: 6, axis: 'vertical' }, span)).toEqual({ x: 4 * 32 - 64, y: 6 * 32 + (span * 32) / 2 - 64 });
     }
+  });
+
+  it('cuts a door frame into its leaf and the two jambs, each jamb sorted just under the post joint it merges with', () => {
+    // A single door on the horizontal edge at (4, 6): the span runs from frame x 32 to 96, the jambs are 10px.
+    const horizontal = doorSlices({ col: 4, row: 6, axis: 'horizontal' }, 'door-wood');
+    expect(horizontal.leaf).toEqual({ x: 42, y: 0, width: 44, height: 128 });
+    expect(horizontal.jambs).toEqual([
+      { crop: { x: 32, y: 0, width: 10, height: 128 }, depthY: 6 * 32 + 7 },
+      { crop: { x: 86, y: 0, width: 10, height: 128 }, depthY: 6 * 32 + 7 },
+    ]);
+    // A double door down the vertical edge at (4, 6), 3 tiles: the end jamb sorts under the joint three rows down, not the first one.
+    const vertical = doorSlices({ col: 4, row: 6, axis: 'vertical' }, 'door-wood-double');
+    expect(vertical.leaf).toEqual({ x: 0, y: 29, width: 128, height: 70 });
+    expect(vertical.jambs).toEqual([
+      { crop: { x: 0, y: 16, width: 128, height: 13 }, depthY: 6 * 32 + 7 },
+      { crop: { x: 0, y: 99, width: 128, height: 13 }, depthY: 9 * 32 + 7 },
+    ]);
   });
 
   it('sorts a door by the lowest pixel its leaf draws in each frame, so an avatar below the leaf stands in front of it', () => {
