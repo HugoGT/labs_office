@@ -1,0 +1,20 @@
+/*
+ * One fixed spot over the bottom bar for every notice. The toast and the
+ * audio unblock prompt used to be placed there each on its own, so the
+ * prompt covered whatever the toast said; stacked, both show.
+ */
+.stack {
+  position: fixed;
+  bottom: 133px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: 70vw;
+  /* The gaps between notices never swallow a click on the map. */
+  pointer-events: none;
+}

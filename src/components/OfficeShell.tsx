@@ -44,6 +44,7 @@ import { useProximityAudio } from '../hooks/useProximityAudio';
 import { useRoster } from '../hooks/useRoster';
 import { useSpacesConfig } from '../hooks/useSpacesConfig';
 import { placeLabel, placeOf } from './roomPlace';
+import { NoticeStack } from './NoticeStack';
 import { AudioUnblockPrompt } from './AudioUnblockPrompt';
 import { BottomBar } from './BottomBar';
 import { CallInvitationStack } from './CallInvitationStack';
@@ -893,9 +894,11 @@ export function OfficeShell({
         />
         <ZoomControls view={mapZoom.view} onZoomIn={mapZoom.zoomIn} onZoomOut={mapZoom.zoomOut} onReset={mapZoom.reset} />
       </div>
-      <AudioUnblockPrompt blocked={audioBlocked} onUnblock={unblockAudio} />
-      {/* Inside a locked space its notice stays up, under any passing toast. */}
-      <Toast message={spaceLockedMessage ?? toastMessage ?? (roomLock.locked ? '🔒 El espacio está bloqueado' : null)} />
+      <NoticeStack>
+        {/* Inside a locked space its notice stays up, under any passing toast. */}
+        <Toast message={spaceLockedMessage ?? toastMessage ?? (roomLock.locked ? '🔒 El espacio está bloqueado' : null)} />
+        <AudioUnblockPrompt blocked={audioBlocked} onUnblock={unblockAudio} />
+      </NoticeStack>
       <CallInvitationStack invitations={invitations} onAccept={accept} onDismiss={dismiss} />
       <RecordingReadyStack
         notices={readyRecordings}
