@@ -70,20 +70,12 @@ export function CollisionEditorSection({ bridge, collisions, onEditingChange, fo
     editor.enter();
   }
 
-  const debugToggle = (
-    <label className={styles.toggle}>
-      <input type="checkbox" checked={editor.showAll} onChange={(event) => editor.setShowAll(event.target.checked)} />
-      Mostrar colisiones
-    </label>
-  );
-
   if (!editor.active) {
     return (
       <div className={styles.section}>
         <button type="button" className={styles.enter} onClick={handleEnter}>
           Editar colisiones
         </button>
-        {debugToggle}
       </div>
     );
   }
@@ -98,7 +90,6 @@ export function CollisionEditorSection({ bridge, collisions, onEditingChange, fo
           Salir
         </button>
       </div>
-      {debugToggle}
 
       {pieceId === null ? (
         <span className={styles.hint}>Toca un objeto en el mapa para editar su colisión. Si hay otro debajo, vuelve a tocar en el mismo sitio.</span>

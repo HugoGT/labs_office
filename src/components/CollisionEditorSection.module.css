@@ -41,15 +41,6 @@
   cursor: pointer;
 }
 
-.toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: #e5e7eb;
-  cursor: pointer;
-}
-
 .piece {
   font-size: 12px;
   font-weight: 600;

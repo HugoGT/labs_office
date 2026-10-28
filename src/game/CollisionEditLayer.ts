@@ -4,15 +4,16 @@
  * `collisiondraft`), React owns the draft and decides what to save.
  *
  * While the editor is open it draws the draft of the selected piece over
- * every instance of that piece, every other collision rectangle faintly, and
- * handles on the selected rectangle of the instance that was clicked. A click
- * picks a piece (or selects one of its rectangles), a drag inside a rectangle
- * moves it, a drag from its edge or corner resizes it, and a drag anywhere
- * else draws a new one. The debug view (`collisiondebug`) outlines every
- * rectangle of the office, open or not.
+ * every instance of that piece, every other collision rectangle of the office
+ * in a softer yellow, and handles on the selected rectangle of the instance that was
+ * clicked. A click picks a piece (or selects one of its rectangles), a drag
+ * inside a rectangle moves it, a drag from its edge or corner resizes it, and
+ * a drag anywhere else draws a new one. The other collisions used to be a
+ * faint grey behind a "Mostrar colisiones" toggle that did not change them
+ * while editing; on a light floor they could not be seen at all.
  *
  * Drawn with one `Graphics` object, not one rectangle per collision: the
- * debug view shows a few hundred of them.
+ * office has a few hundred of them.
  */
 
 import Phaser from 'phaser';
@@ -46,10 +47,10 @@ const HANDLE_PX = 3;
 const DRAG_PX = 4;
 const HANDLE_SIZE = 4;
 
-const FAINT_COLOR = 0xe5e7eb;
-const FAINT_ALPHA = 0.55;
-const DEBUG_COLOR = 0xef4444;
 const PIECE_COLOR = 0xfacc15;
+/** The picked piece's yellow, thinner and half transparent: every other collision stays readable but quieter. */
+const OTHERS_COLOR = PIECE_COLOR;
+const OTHERS_ALPHA = 0.5;
 const SELECTED_COLOR = 0x38bdf8;
 
 type Drag =
@@ -63,17 +64,15 @@ export class CollisionEditLayer {
   private readonly source: CollisionSource;
   private readonly graphics: Phaser.GameObjects.Graphics;
   private command: CollisionEditCommand | null = null;
-  private debug = false;
   /** The instance that was clicked: rectangles are edited in its space and get handles on it. */
   private primary: CollisionInstance | null = null;
   /** The draft as the current drag leaves it, before React hears about it on release. */
   private draft: CollisionRect[] = [];
   private selectedRect: number | null = null;
   private drag: Drag | null = null;
-  private lastDrawing: { faint: CollisionRect[]; piece: CollisionRect[]; selected: CollisionRect | null } = { faint: [], piece: [], selected: null };
+  private lastDrawing: { others: CollisionRect[]; piece: CollisionRect[]; selected: CollisionRect | null } = { others: [], piece: [], selected: null };
 
   private readonly unsubscribeCommand: () => void;
-  private readonly unsubscribeDebug: () => void;
   private readonly onPointerDown = (pointer: Phaser.Input.Pointer): void => this.pointerDown(pointer);
   private readonly onPointerMove = (pointer: Phaser.Input.Pointer): void => this.pointerMove(pointer);
   private readonly onPointerUp = (pointer: Phaser.Input.Pointer): void => this.pointerUp(pointer);
@@ -84,17 +83,13 @@ export class CollisionEditLayer {
     this.source = source;
     this.graphics = scene.add.graphics().setDepth(LAYOUT_GHOST_DEPTH).setName(COLLISION_EDIT_GRAPHICS_NAME);
     this.unsubscribeCommand = bridge.onCommand('collisionedit', (command) => this.applyCommand(command));
-    this.unsubscribeDebug = bridge.onCommand('collisiondebug', ({ show }) => {
-      this.debug = show;
-      this.redraw();
-    });
     scene.input.on('pointerdown', this.onPointerDown);
     scene.input.on('pointermove', this.onPointerMove);
     scene.input.on('pointerup', this.onPointerUp);
   }
 
   /** What the last redraw outlined, in world pixels. Read by tests. */
-  get drawing(): { faint: CollisionRect[]; piece: CollisionRect[]; selected: CollisionRect | null } {
+  get drawing(): { others: CollisionRect[]; piece: CollisionRect[]; selected: CollisionRect | null } {
     return this.lastDrawing;
   }
 
@@ -110,7 +105,6 @@ export class CollisionEditLayer {
 
   destroy(): void {
     this.unsubscribeCommand();
-    this.unsubscribeDebug();
     this.scene.input.off('pointerdown', this.onPointerDown);
     this.scene.input.off('pointermove', this.onPointerMove);
     this.scene.input.off('pointerup', this.onPointerUp);
@@ -135,9 +129,8 @@ export class CollisionEditLayer {
   private redraw(): void {
     const pieceId = this.command?.pieceId ?? null;
     const instances = this.source.instances();
-    const showFaint = this.command !== null || this.debug;
-    const others = pieceId === null ? instances : instances.filter((instance) => instance.piece !== pieceId);
-    const faint = showFaint ? collisionWorld(others, this.source.table()).map(({ x, y, w, h }) => ({ x, y, w, h })) : [];
+    const rest = pieceId === null ? instances : instances.filter((instance) => instance.piece !== pieceId);
+    const others = this.command === null ? [] : collisionWorld(rest, this.source.table()).map(({ x, y, w, h }) => ({ x, y, w, h }));
     const shown = this.shown();
     const table = new Map(this.source.table());
     if (pieceId !== null) table.set(pieceId, shown.draft);
@@ -149,8 +142,8 @@ export class CollisionEditLayer {
     const selected = this.primary !== null && selectedPiece !== undefined ? worldRectsOf(this.primary, new Map([[this.primary.piece, [selectedPiece]]]))[0]! : null;
 
     const g = this.graphics.clear();
-    g.lineStyle(1, this.command === null ? DEBUG_COLOR : FAINT_COLOR, this.command === null ? 0.9 : FAINT_ALPHA);
-    for (const rect of faint) g.strokeRect(rect.x, rect.y, rect.w, rect.h);
+    g.lineStyle(1, OTHERS_COLOR, OTHERS_ALPHA);
+    for (const rect of others) g.strokeRect(rect.x, rect.y, rect.w, rect.h);
     g.lineStyle(2, PIECE_COLOR, 1);
     for (const rect of piece) g.strokeRect(rect.x, rect.y, rect.w, rect.h);
     if (selected !== null) {
@@ -166,7 +159,7 @@ export class CollisionEditLayer {
         g.fillRect(cx - HANDLE_SIZE / 2, cy - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
       }
     }
-    this.lastDrawing = { faint, piece, selected };
+    this.lastDrawing = { others, piece, selected };
   }
 
   private piecePoint(pointer: Phaser.Input.Pointer): CollisionPoint | null {

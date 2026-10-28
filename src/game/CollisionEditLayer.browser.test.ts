@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
-import { CollisionEditLayer } from './CollisionEditLayer';
+import { COLLISION_EDIT_GRAPHICS_NAME, CollisionEditLayer } from './CollisionEditLayer';
 import { createOfficeBridge, type OfficeEventMap } from './officeBridge';
 import { officeDecorInstances, layoutPropInstances, type CollisionInstance, type CollisionRect, type CollisionTable } from './pieceCollisions';
 
@@ -70,15 +70,27 @@ function editTree(bridge: ReturnType<typeof createOfficeBridge>, draft: Collisio
 }
 
 describe('CollisionEditLayer', () => {
-  it('draws nothing until the editor opens or the debug view is on', async () => {
+  it('draws nothing until the editor opens, then every collision of the office', async () => {
     const { bridge, layer } = await boot();
-    expect(layer.drawing.faint).toEqual([]);
+    expect(layer.drawing.others).toEqual([]);
 
-    bridge.emitCommand('collisiondebug', { show: true });
-    expect(layer.drawing.faint).toHaveLength(3);
+    bridge.emitCommand('collisionedit', { pieceId: null, draft: [], selectedRect: null, snap: 1 });
+    expect(layer.drawing.others).toHaveLength(3);
 
-    bridge.emitCommand('collisiondebug', { show: false });
-    expect(layer.drawing.faint).toEqual([]);
+    bridge.emitCommand('collisionedit', null);
+    expect(layer.drawing.others).toEqual([]);
+  });
+
+  it('outlines the other collisions in a softer yellow than the picked piece while editing', async () => {
+    const { scene, bridge } = await boot();
+
+    bridge.emitCommand('collisionedit', { pieceId: null, draft: [], selectedRect: null, snap: 1 });
+
+    const graphics = scene.children.getByName(COLLISION_EDIT_GRAPHICS_NAME) as Phaser.GameObjects.Graphics;
+    const buffer = (graphics as unknown as { commandBuffer: number[] }).commandBuffer;
+    // A line style is stored as its width, colour and alpha in a row.
+    const styled = buffer.some((value, index) => value === 0xfacc15 && buffer[index - 1] === 1 && buffer[index + 1] === 0.5);
+    expect(styled).toBe(true);
   });
 
   it('picks the piece under a click and tells React its rectangles and defaults', async () => {
@@ -121,7 +133,7 @@ describe('CollisionEditLayer', () => {
     expect(picked).toEqual(['chair-wood', 'desk-glass']);
   });
 
-  it('draws the draft over every instance of the piece and the rest faintly', async () => {
+  it('draws the draft over every instance of the piece and outlines the rest', async () => {
     const { bridge, layer } = await boot();
 
     editTree(bridge, [{ x: -4, y: -8, w: 8, h: 8 }], 0);
@@ -130,7 +142,7 @@ describe('CollisionEditLayer', () => {
       { x: 76, y: 88, w: 8, h: 8 },
       { x: 204, y: 88, w: 8, h: 8 },
     ]);
-    expect(layer.drawing.faint).toEqual([{ x: 64, y: 192, w: 96, h: 64 }]);
+    expect(layer.drawing.others).toEqual([{ x: 64, y: 192, w: 96, h: 64 }]);
     expect(layer.drawing.selected).toBeNull();
   });
 
@@ -185,11 +197,11 @@ describe('CollisionEditLayer', () => {
   it('follows a live table change while open', async () => {
     const { bridge, layer, live } = await boot();
     bridge.emitCommand('collisionedit', { pieceId: null, draft: [], selectedRect: null, snap: 1 });
-    expect(layer.drawing.faint).toHaveLength(3);
+    expect(layer.drawing.others).toHaveLength(3);
 
     live.table = new Map([['table-meeting', []]]);
     layer.refresh();
 
-    expect(layer.drawing.faint).toHaveLength(2);
+    expect(layer.drawing.others).toHaveLength(2);
   });
 });

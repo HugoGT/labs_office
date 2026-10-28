@@ -4,7 +4,6 @@ import type { ComponentProps } from 'react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { CharacterPort } from '../auth/characterPort';
 import type { ArtContributionPort } from '../dashboard/artContributionPort';
-import type { AssetAdminPort } from '../dashboard/assetAdminPort';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { AdminSpace, SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import { SIDEBAR_TOP } from '../game/hudLayout';
@@ -18,7 +17,6 @@ import { OfficeSidebar } from './OfficeSidebar';
 beforeAll(async () => {
   await Promise.all([
     import('./OfficeLayoutEditor'),
-    import('../dashboard/AssetsPanel'),
     import('./ArtContributionSection'),
     import('./MyCharacterSection'),
   ]);
@@ -207,7 +205,7 @@ describe('OfficeSidebar: calling from "Personas conectadas" (#187)', () => {
   });
 });
 
-describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/salas y el catalogo)', () => {
+describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/salas)', () => {
   const MESA: AdminDesk = { id: 'id-mesa', label: 'Mesa 4', x: 10, y: 10, w: 3, h: 3, occupant: null };
   const SALA: AdminSpace = { id: 'id-sala', name: 'Sala grande', x: 0, y: 0, w: 4, h: 4, capacity: null, kind: 'room' };
 
@@ -227,15 +225,6 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
       updateSpace: vi.fn(),
       deleteSpace: vi.fn(),
     } as unknown as SpacesAdminPort;
-  }
-
-  function fakeAssets(): AssetAdminPort {
-    return {
-      listAssets: vi.fn(async () => []),
-      createAsset: vi.fn(),
-      archiveAsset: vi.fn(),
-      updateAsset: vi.fn(),
-    };
   }
 
   function adminProps() {
@@ -265,7 +254,6 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     expect(screen.queryByRole('heading', { name: 'Decoración' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Mi espacio' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Editar espacios/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: /Catálogo/ })).not.toBeInTheDocument();
   });
 
   it('with an unresolved role, still offers the personal submenu', async () => {
@@ -357,24 +345,14 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     expect(screen.queryByRole('button', { name: 'Editar terreno' })).not.toBeInTheDocument();
   });
 
-  it('con rol admin y puerto de catalogo, ofrece TAMBIEN "Catálogo de decoración"', async () => {
-    const user = userEvent.setup();
-    renderSidebar({ ...adminProps(), assets: fakeAssets() });
-
-    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
-
-    await user.click(screen.getByRole('button', { name: 'Catálogo de decoración' }));
-    expect(await screen.findByRole('region', { name: /Catálogo de decoración/ })).toBeInTheDocument();
-  });
-
-  it('con rol admin pero sin puerto de catalogo, no ofrece "Catálogo de decoración"', async () => {
+  it('con rol admin ya no ofrece "Catálogo de decoración"', async () => {
     const user = userEvent.setup();
     renderSidebar(adminProps());
 
     await user.click(screen.getByRole('button', { name: /Personalizar/ }));
 
     await screen.findByRole('button', { name: 'Editar espacios' });
-    expect(screen.queryByRole('region', { name: /Catálogo/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Catálogo de decoración' })).not.toBeInTheDocument();
   });
 
   it('con rol admin ya no ofrece "Mi espacio": Decoración es el unico menu de decoracion', async () => {
@@ -538,23 +516,27 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
   });
 
   it('does not offer admin capabilities to guests even when all ports exist', async () => {
-    renderSidebar({ ...adminProps(), role: 'guest', assets: fakeAssets(), terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() } });
+    renderSidebar({ ...adminProps(), role: 'guest', terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() } });
     await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
     expect(screen.queryByRole('button', { name: /Editar/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Catálogo de decoración' })).not.toBeInTheDocument();
   });
 
   it('a missing optional port returns to the root without restoring a stale submenu later', async () => {
-    const props = { self: SELF, peers: [], ...adminProps(), assets: fakeAssets() };
+    const contributions: ArtContributionPort = {
+      submit: vi.fn(),
+      listMine: vi.fn(async () => ({ contributions: [], usage: { pending: 0, lastHour: 0, maxPending: 5, maxPerHour: 10 } })),
+      fileDataUrl: vi.fn(),
+    };
+    const props = { self: SELF, peers: [], ...adminProps(), contributions };
     const { rerender } = render(<OfficeSidebar {...props} />);
     await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
-    await userEvent.click(screen.getByRole('button', { name: 'Catálogo de decoración' }));
-    await screen.findByRole('region', { name: 'Catálogo de decoración' });
-    rerender(<OfficeSidebar {...props} assets={null} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Aportar arte' }));
+    await screen.findByRole('heading', { name: 'Aportar arte' });
+    rerender(<OfficeSidebar {...props} contributions={null} />);
     expect(screen.getByRole('button', { name: 'Decoración' })).toBeInTheDocument();
     rerender(<OfficeSidebar {...props} />);
-    expect(screen.getByRole('button', { name: 'Catálogo de decoración' })).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: 'Catálogo de decoración' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Aportar arte' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Aportar arte' })).not.toBeInTheDocument();
   });
 
   it('an external forceExit leaves the editing submenu at the root, which remains navigable', async () => {
@@ -577,25 +559,22 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     expect(props.onLayoutEditingChange).toHaveBeenLastCalledWith(true);
   });
 
-  it('losing the collision port also clears debug outlines and drops the submenu', async () => {
+  it('losing the collision port closes the editor and drops the submenu', async () => {
     const props = { self: SELF, peers: [], ...adminProps(), collisions: { saveRects: vi.fn(), reset: vi.fn() }, onLayoutEditingChange: vi.fn() };
-    const debug = vi.fn();
     const edit = vi.fn();
-    props.bridge.onCommand('collisiondebug', debug);
     props.bridge.onCommand('collisionedit', edit);
     const { rerender } = render(<OfficeSidebar {...props} />);
     await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Editar colisiones' }));
-    await userEvent.click(await screen.findByRole('checkbox', { name: 'Mostrar colisiones' }));
-    expect(debug).toHaveBeenLastCalledWith({ show: true });
+    await screen.findByText(/Toca un objeto en el mapa/);
+    expect(edit).toHaveBeenLastCalledWith(expect.objectContaining({ pieceId: null }));
     rerender(<OfficeSidebar {...props} collisions={null} />);
-    expect(debug).toHaveBeenLastCalledWith({ show: false });
     expect(edit).toHaveBeenLastCalledWith(null);
     expect(props.onLayoutEditingChange).toHaveBeenLastCalledWith(false);
     expect(screen.getByRole('button', { name: 'Decoración' })).toBeInTheDocument();
     rerender(<OfficeSidebar {...props} />);
     expect(screen.getByRole('button', { name: 'Editar colisiones' })).toBeInTheDocument();
-    expect(screen.queryByRole('checkbox', { name: 'Mostrar colisiones' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Toca un objeto en el mapa/)).not.toBeInTheDocument();
   });
 
   it('steps out of "Editar espacios" one Escape at a time: the desk list, the default view, the menu, then the panel', async () => {

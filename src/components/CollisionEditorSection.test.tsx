@@ -10,12 +10,10 @@ const FOOTPRINT = [{ x: -16, y: -32, w: 32, h: 32 }];
 function renderSection(overrides: Partial<Parameters<typeof CollisionEditorSection>[0]> = {}) {
   const bridge = overrides.bridge ?? createOfficeBridge();
   const commands: OfficeCommandMap['collisionedit'][] = [];
-  const debugCommands: OfficeCommandMap['collisiondebug'][] = [];
   bridge.onCommand('collisionedit', (command) => commands.push(command));
-  bridge.onCommand('collisiondebug', (command) => debugCommands.push(command));
   const collisions: CollisionAdminPort = overrides.collisions ?? { saveRects: vi.fn(async () => undefined), reset: vi.fn(async () => undefined) };
   const props = { bridge, collisions, ...overrides };
-  return { ...props, commands, debugCommands, ...render(<CollisionEditorSection {...props} />) };
+  return { ...props, commands, ...render(<CollisionEditorSection {...props} />) };
 }
 
 async function openOnTree(bridge: ReturnType<typeof createOfficeBridge>, saved = false) {
@@ -24,12 +22,12 @@ async function openOnTree(bridge: ReturnType<typeof createOfficeBridge>, saved =
 }
 
 describe('CollisionEditorSection', () => {
-  it('offers the way in and the debug outlines while closed', async () => {
-    const { debugCommands } = renderSection();
+  it('has no "Mostrar colisiones" toggle, closed or open: the map outlines them while editing', async () => {
+    renderSection();
 
-    expect(screen.getByRole('button', { name: 'Editar colisiones' })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Mostrar colisiones' }));
-    expect(debugCommands).toEqual([{ show: true }]);
+    expect(screen.queryByRole('checkbox', { name: 'Mostrar colisiones' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Editar colisiones' }));
+    expect(screen.queryByRole('checkbox', { name: 'Mostrar colisiones' })).not.toBeInTheDocument();
   });
 
   it('asks the other editors out before opening, and reports each change of mode', async () => {

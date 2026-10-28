@@ -2,7 +2,6 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type { CharacterPort } from '../auth/characterPort';
 import type { Role } from '../dashboard/adminPort';
 import type { ArtContributionPort } from '../dashboard/artContributionPort';
-import type { AssetAdminPort } from '../dashboard/assetAdminPort';
 import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
@@ -28,17 +27,6 @@ import styles from './OfficeSidebar.module.css';
  */
 const OfficeLayoutEditorLazy = lazy(() => import('./OfficeLayoutEditor'));
 
-/**
- * Migrado desde el dashboard (`DashboardRoute.tsx`): el catalogo de
- * decoracion es una pieza de "Personalizar" ahora, no del panel `/dashboard`.
- * `React.lazy` con el mismo motivo que `OfficeLayoutEditorLazy` -- quien no
- * administra nunca descarga este chunk -- y el `.then` porque `AssetsPanel`
- * es una exportacion nombrada, no la que `React.lazy` espera por defecto.
- */
-const AssetsPanelLazy = lazy(() =>
-  import('../dashboard/AssetsPanel').then((assetsModule) => ({ default: assetsModule.AssetsPanel })),
-);
-
 /** Art contributions (#122): lazy for the same reason, nobody pays for it until "Personalizar" opens. */
 const ArtContributionSectionLazy = lazy(() =>
   import('./ArtContributionSection').then((sectionModule) => ({ default: sectionModule.ArtContributionSection })),
@@ -49,7 +37,7 @@ const MyCharacterSectionLazy = lazy(() =>
   import('./MyCharacterSection').then((sectionModule) => ({ default: sectionModule.MyCharacterSection })),
 );
 
-type PersonalizeSection = LayoutEditorSection | 'assets' | 'art' | 'character';
+type PersonalizeSection = LayoutEditorSection | 'art' | 'character';
 
 /** What "Decoración" edits for whoever does not administer: the own desk (#208). */
 export interface MySpace {
@@ -126,13 +114,6 @@ export interface OfficeSidebarProps {
   onLayoutEditingChange?: (editing: boolean) => void;
   forceExitLayoutEditing?: boolean;
   /**
-   * Catalogo de decoracion, migrado desde el dashboard a "Personalizar".
-   * `undefined`/`null` -- sin servidor configurado, mismo criterio que
-   * `desks`/`spaces` -- simplemente deja sin montar esa seccion, aunque el
-   * rol si administre.
-   */
-  assets?: AssetAdminPort | null;
-  /**
    * Contributing art (#122), for anyone signed in, admin or not.
    * `undefined`/`null` (no server, or the open office without a session)
    * leaves the section out.
@@ -179,7 +160,6 @@ export function OfficeSidebar({
   refreshSpaces,
   onLayoutEditingChange,
   forceExitLayoutEditing,
-  assets,
   contributions,
   character,
   onCallPeer,
@@ -233,7 +213,6 @@ export function OfficeSidebar({
       { section: 'spaces' as const, label: 'Editar espacios' },
       ...(terrain ? [{ section: 'terrain' as const, label: 'Editar terreno' }] : []),
       ...(collisions ? [{ section: 'collision' as const, label: 'Editar colisiones' }] : []),
-      ...(assets ? [{ section: 'assets' as const, label: 'Catálogo de decoración' }] : []),
     ] : []),
     ...(character ? [{ section: 'character' as const, label: 'Mi personaje' }] : []),
     ...(contributions ? [{ section: 'art' as const, label: 'Aportar arte' }] : []),
@@ -332,11 +311,6 @@ export function OfficeSidebar({
                 refreshSpaces={refreshSpaces}
                 onEditingChange={onLayoutEditingChange}
               />
-            </Suspense>
-          )}
-          {currentSection === 'assets' && canAdminister && assets !== undefined && assets !== null && (
-            <Suspense fallback={null}>
-              <AssetsPanelLazy assets={assets} />
             </Suspense>
           )}
           {deskDecor && bridge !== undefined && (

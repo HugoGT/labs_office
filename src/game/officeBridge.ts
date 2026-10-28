@@ -360,8 +360,6 @@ export interface OfficeCommandMap {
    * `CollisionEditLayer`; the colliders change only when the room says so.
    */
   collisionedit: CollisionEditCommand | null;
-  /** Outlines every collision rectangle of the office, editing or not, to check them by eye. */
-  collisiondebug: { show: boolean };
   /**
    * Step or reset the map zoom (map-zoom). An action, not state: it is not in
    * `STATE_COMMANDS`, so a late subscriber never replays an old press.

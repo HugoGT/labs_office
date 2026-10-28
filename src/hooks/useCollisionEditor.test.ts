@@ -20,11 +20,9 @@ function port(): CollisionAdminPort {
 function setup(collisions: CollisionAdminPort = port()) {
   const bridge = createOfficeBridge();
   const commands: OfficeCommandMap['collisionedit'][] = [];
-  const debug: OfficeCommandMap['collisiondebug'][] = [];
   bridge.onCommand('collisionedit', (command) => commands.push(command));
-  bridge.onCommand('collisiondebug', (command) => debug.push(command));
   const view = renderHook(() => useCollisionEditor({ bridge, collisions }));
-  return { bridge, collisions, commands, debug, ...view };
+  return { bridge, collisions, commands, ...view };
 }
 
 function pickTree(bridge: ReturnType<typeof createOfficeBridge>, saved = false) {
@@ -172,25 +170,6 @@ describe('useCollisionEditor', () => {
     expect(result.current.error).toMatch(/alguien/);
     expect(result.current.rects).toEqual([]);
     expect(result.current.dirty).toBe(true);
-  });
-
-  it('turns the debug outlines on and off, open or not', () => {
-    const { result, debug } = setup();
-
-    act(() => result.current.setShowAll(true));
-    expect(result.current.showAll).toBe(true);
-    act(() => result.current.setShowAll(false));
-
-    expect(debug).toEqual([{ show: true }, { show: false }]);
-  });
-
-  it('turns the debug outlines off when the section goes away', () => {
-    const { result, debug, unmount } = setup();
-    act(() => result.current.setShowAll(true));
-
-    unmount();
-
-    expect(debug).toEqual([{ show: true }, { show: false }]);
   });
 });
 

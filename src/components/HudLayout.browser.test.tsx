@@ -233,11 +233,11 @@ describe('HUD layout: sidebar toggle (#90)', () => {
         role="admin" bridge={createOfficeBridge()} refreshDesks={vi.fn()} refreshSpaces={vi.fn()}
         desks={{ listDesks: vi.fn(), createDesk: vi.fn(), updateDesk: vi.fn(), deleteDesk: vi.fn() }}
         spaces={{ listSpaces: vi.fn(), createSpace: vi.fn(), updateSpace: vi.fn(), deleteSpace: vi.fn() }}
-        assets={{ listAssets: vi.fn(async () => []), createAsset: vi.fn(), archiveAsset: vi.fn(), updateAsset: vi.fn() }}
+        contributions={{ submit: vi.fn(), fileDataUrl: vi.fn(), listMine: vi.fn(async () => ({ contributions: [], usage: { pending: 0, lastHour: 0, maxPending: 5, maxPerHour: 10 } })) }}
       />);
       await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
-      await userEvent.click(screen.getByRole('button', { name: 'Catálogo de decoración' }));
-      await screen.findByRole('heading', { name: 'Catálogo de decoración' });
+      await userEvent.click(screen.getByRole('button', { name: 'Aportar arte' }));
+      await screen.findByRole('heading', { name: 'Aportar arte' });
       const panel = screen.getByRole('region', { name: 'Personalizar' });
       expect(getComputedStyle(panel).overflowY).toBe('auto');
       expect(getComputedStyle(panel).minHeight).toBe('0px');
