@@ -935,44 +935,29 @@ describe('OfficeScene: integracion camera pan y colision de peers (#53, #59)', (
   }
 
   it('walkToPeer aterriza en la tile al OESTE del peer cuando el jugador se acerca desde el oeste (#59)', async () => {
-    const bridge = createOfficeBridge();
+    // Fixed 20ms frames, not the real loop: a CI stall over MAX_WALK_FRAME_MS
+    // used to cancel the walk on its first steps, leaving the player where it
+    // started (tile 20 instead of 29).
     const connector = fakeConnector('mi-sesion');
-    const { scene } = await bootOfficeScene(bridge, {
-      endpoint: 'ws://fake',
-      connect: connector.connect,
-    });
-    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
-    const player = findPlayer(scene);
+    const arena = await movementArena(connector);
     const peerTx = 30;
     const peerTy = 30;
-    // Bien al oeste del peer, misma fila: cesped abierto, lejos de cualquier
-    // colisionador del mapa base.
-    player.setPosition((peerTx - 10) * TILE + 16, peerTy * TILE + 16);
+    // Bien al oeste del peer, misma fila, en campo abierto.
+    arena.body.reset((peerTx - 10) * TILE + 16, peerTy * TILE + 16);
     connector
       .handlers()!
       .onAdd(remoteSnapshot({ sessionId: 'peer-1', x: peerTx * TILE + 16, y: peerTy * TILE + 16 }));
 
-    bridge.emitCommand('walkToPeer', { sessionId: 'peer-1' });
+    arena.bridge.emitCommand('walkToPeer', { sessionId: 'peer-1' });
+    expect(arena.movement.autoWalk, 'walkToPeer starts a walk').toBeDefined();
+    for (let i = 0; i < 1500 && arena.movement.autoWalk !== undefined; i++) arena.frame();
 
-    // Primero confirma que la auto-caminata REALMENTE arranco (mismo chequeo
-    // que la regresion de arriba, y por la misma razon: sin el, el primer
-    // sondeo podria caer ANTES del primer `update()`, con velocidad (0,0)
-    // todavia de reposo, y el "asentado" de abajo pasaria trivialmente sin
-    // que el jugador se haya movido un pixel).
-    await vi.waitFor(() => {
-      const body = player.body as Phaser.Physics.Arcade.Body;
-      expect(body.velocity.x !== 0 || body.velocity.y !== 0).toBe(true);
-    }, LOOP_WAIT);
-    await vi.waitFor(() => {
-      const body = player.body as Phaser.Physics.Arcade.Body;
-      expect(body.velocity.x).toBe(0);
-      expect(body.velocity.y).toBe(0);
-    }, LOOP_WAIT);
+    expect(arena.movement.autoWalk).toBeUndefined();
     // Antes de #59 el primer ADJACENT_OFFSETS ([1,0], ver terrainGrid.ts) lo
     // habria aterrizado al ESTE del peer, sin enterarse de que el jugador
     // venia del oeste.
-    expect(Math.floor(player.x / TILE)).toBe(peerTx - 1);
-    expect(Math.floor(player.y / TILE)).toBe(peerTy);
+    expect(Math.floor(arena.player.x / TILE)).toBe(peerTx - 1);
+    expect(Math.floor(arena.player.y / TILE)).toBe(peerTy);
   });
 
   it('el colisionador vivo del peer bloquea al jugador (#59): no es solo la prueba aislada de remoteAvatarSink', async () => {
