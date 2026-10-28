@@ -127,12 +127,6 @@ export interface OfficeState {
    * client places the same rectangles from it and the decor layer.
    */
   pieceCollisions: string;
-  /**
-   * The locked doors (#223, S13): the anchors of their leaves, in the wire
-   * form of `encodeDoorLocks` (sorted, joined by commas, empty for none).
-   * Room state only: a lock is never saved and goes with the room.
-   */
-  lockedDoors: string;
 }
 
 export class OfficeState extends Schema {
@@ -145,8 +139,7 @@ export class OfficeState extends Schema {
     this.terrainWalls = '';
     this.officeDecor = '';
     this.pieceCollisions = '';
-    this.lockedDoors = '';
   }
 }
 
-defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState }, terrainBlocks: 'string', terrainWalls: 'string', officeDecor: 'string', pieceCollisions: 'string', terrainColors: 'string', lockedDoors: 'string' });
+defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState }, terrainBlocks: 'string', terrainWalls: 'string', officeDecor: 'string', pieceCollisions: 'string', terrainColors: 'string' });

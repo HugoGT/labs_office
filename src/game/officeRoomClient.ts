@@ -38,7 +38,6 @@ import { decideReconnect } from './reconnectPolicy';
 import type { RemotePlayerSnapshot } from './remoteAvatars';
 import { seatIdOf } from './seating';
 import { decodeOfficeDecor, type DecorItem } from './officeDecor';
-import { decodeDoorLocks } from './officeDoors';
 
 /**
  * Forma del jugador tal y como llega por el cable. El cliente no declara el
@@ -76,7 +75,6 @@ interface OfficeRoomState {
   terrainColors: string;
   officeDecor: string;
   pieceCollisions: string;
-  lockedDoors: string;
 }
 
 /**
@@ -229,8 +227,6 @@ export interface OfficeRoomHandlers {
   onDecor?(items: readonly DecorItem[]): void;
   /** The saved collision table, replicated whole like the terrain: on the first sync and after every accepted edit. */
   onCollisions?(table: CollisionTable): void;
-  /** The locked doors (#223) by leaf anchor: on the first sync and whenever someone locks or unlocks one. */
-  onDoorLocks?(locks: ReadonlySet<number>): void;
 }
 
 export interface ConnectOfficeRoomOptions {
@@ -294,11 +290,6 @@ export interface OfficeConnection {
   sessionId: string;
   sendMove(x: number, y: number, facing: Facing): void;
   sendStatus(status: PresenceStatus): void;
-  /**
-   * Locks or unlocks the door the player stands inside, next to it (#223,
-   * X). Carries nothing: the room decides from the position it tracks.
-   */
-  sendDoorLock(): void;
   /**
    * Publica una nueva version de config de espacios (#7, D4). Sin agrupar,
    * como `sendStatus`: agrupar podria tragarse justo la actualizacion que
@@ -389,7 +380,7 @@ export async function connectOfficeRoom({
       (state: OfficeRoomState): {
         players: PlayersCallbacks;
         recordings: RecordingsCallbacks;
-        listen(property: 'terrainBlocks' | 'terrainWalls' | 'terrainColors' | 'officeDecor' | 'pieceCollisions' | 'lockedDoors', handler: (value: string) => void): () => void;
+        listen(property: 'terrainBlocks' | 'terrainWalls' | 'terrainColors' | 'officeDecor' | 'pieceCollisions', handler: (value: string) => void): () => void;
       };
       (player: RemotePlayer): PlayerCallbacks;
     };
@@ -489,11 +480,6 @@ export async function connectOfficeRoom({
     $(target.state).listen('pieceCollisions', (value) => {
       const table = decodeCollisionTable(value);
       if (table !== null) handlers.onCollisions?.(table);
-    });
-    // Door locks (#223): same rule. An older server sends none, and no door is locked.
-    $(target.state).listen('lockedDoors', (value) => {
-      const locks = decodeDoorLocks(value);
-      if (locks !== null) handlers.onDoorLocks?.(locks);
     });
 
     // Mensajes sueltos del servidor (issue #2), no estado sincronizado: no hay
@@ -659,9 +645,6 @@ export async function connectOfficeRoom({
     },
     sendSpacesVersion(version) {
       room.send('spacesversion', { version });
-    },
-    sendDoorLock() {
-      room.send('doorlock');
     },
     sendCall(to) {
       room.send('call', { to });

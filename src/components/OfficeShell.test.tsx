@@ -185,22 +185,6 @@ describe('OfficeShell', () => {
     expect(screen.getByText(/Entraste a/)).toBeInTheDocument();
   });
 
-  it('muestra el aviso de la llave de puertas y «Sala bloqueada» desde el evento "doorlocknotice" (#223, S15)', () => {
-    render(<OfficeShell />);
-    const bridge = createGameMock.mock.calls[0][1];
-    expect(screen.queryByText('Pulsa X para bloquear la sala')).toBeNull();
-
-    act(() => bridge.emit('doorlocknotice', { lockable: 'lock', insideLocked: false }));
-    expect(screen.getByText('Pulsa X para bloquear la sala')).toBeInTheDocument();
-
-    act(() => bridge.emit('doorlocknotice', { lockable: null, insideLocked: true }));
-    expect(screen.queryByText('Pulsa X para bloquear la sala')).toBeNull();
-    expect(screen.getByText('Sala bloqueada')).toBeInTheDocument();
-
-    act(() => bridge.emit('doorlocknotice', { lockable: null, insideLocked: false }));
-    expect(screen.queryByText('Sala bloqueada')).toBeNull();
-  });
-
   it('un nombre de sala con marcado renderiza como texto literal (sin dangerouslySetInnerHTML)', () => {
     render(<OfficeShell />);
     const bridge = createGameMock.mock.calls[0][1];

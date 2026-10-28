@@ -212,13 +212,14 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
       await vi.waitFor(() => expect(setWalls).toHaveBeenLastCalledWith([{ index: 9, piece: 'wall-brick' }]));
     });
 
-    describe('on a door (#232)', () => {
-      // A wall along row 40, posts (39, 40)..(43, 40), and the doors on its edges.
-      const WALL = withWalls(BASE_LAYOUT.walls, [39, 40, 41, 42, 43].map((tx) => ({ index: at(tx, 40), piece: 'wall-brick' as const })));
+    describe('on a door (#232, #233)', () => {
+      // A wall along row 40, posts (39, 40)..(44, 40), and the doors on its line: a door spans 2 tiles, a double door 4.
+      const WALL = withWalls(BASE_LAYOUT.walls, [39, 40, 41, 42, 43, 44].map((tx) => ({ index: at(tx, 40), piece: 'wall-brick' as const })));
       const LONE = [{ index: at(40, 40), piece: 'door-wood', rotation: 0 as const }];
-      const DOUBLE = [...LONE, { index: at(41, 40), piece: 'door-wood', rotation: 0 as const }];
+      const DOUBLE = [{ index: at(40, 40), piece: 'door-wood-double', rotation: 0 as const }];
+      const TWO = [...LONE, { index: at(42, 40), piece: 'door-wood', rotation: 0 as const }];
 
-      function onWall(items: typeof DOUBLE) {
+      function onWall(items: typeof TWO) {
         const setWalls = vi.fn(async () => undefined);
         const decor: OfficeDecorPort = { setDecor: vi.fn(async () => undefined) };
         const view = renderSection({ initiallyActive: true, decor, terrain: terrainPort({ setWalls }) });
@@ -227,11 +228,11 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
         return { ...view, setWalls };
       }
 
-      it('takes a lone door off its post and keeps the post, then erases the post once the room shows it gone', async () => {
+      it('takes a lone door off the post at either end and keeps the post, then erases the post once the room shows it gone', async () => {
         const { bridge, decor, setWalls } = onWall(LONE);
         await userEvent.click(await screen.findByRole('button', { name: 'Borrar' }));
 
-        act(() => bridge.emit('wallpick', { index: at(41, 40) }));
+        act(() => bridge.emit('wallpick', { index: at(42, 40) }));
         await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: null }]));
         // The other end of the same door, before the room shows it gone: still the door's, never erased.
         act(() => bridge.emit('wallpick', { index: at(40, 40) }));
@@ -239,30 +240,58 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
         expect(setWalls).not.toHaveBeenCalled();
 
         act(() => bridge.emit('decor', { items: [] }));
-        act(() => bridge.emit('wallpick', { index: at(41, 40) }));
-        await vi.waitFor(() => expect(setWalls).toHaveBeenCalledWith([{ index: at(41, 40), piece: null }]));
+        act(() => bridge.emit('wallpick', { index: at(42, 40) }));
+        await vi.waitFor(() => expect(setWalls).toHaveBeenCalledWith([{ index: at(42, 40), piece: null }]));
       });
 
-      it('takes off only the leaves of a double door that stand on the post', async () => {
+      it('erases a post in the middle of a door, which holds it by its ends only', async () => {
+        const { bridge, decor, setWalls } = onWall(LONE);
+        await userEvent.click(await screen.findByRole('button', { name: 'Borrar' }));
+
+        act(() => bridge.emit('wallpick', { index: at(41, 40) }));
+        await vi.waitFor(() => expect(setWalls).toHaveBeenCalledWith([{ index: at(41, 40), piece: null }]));
+        expect(decor.setDecor).not.toHaveBeenCalled();
+      });
+
+      it('takes a double door off the post at either end of its four tiles, and erases the posts between', async () => {
         const { bridge, decor, setWalls } = onWall(DOUBLE);
         await userEvent.click(await screen.findByRole('button', { name: 'Borrar' }));
 
-        act(() => bridge.emit('wallpick', { index: at(42, 40) }));
-        await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(41, 40), item: null }]));
+        act(() => bridge.emit('wallpick', { index: at(44, 40) }));
+        await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: null }]));
+        expect(setWalls).not.toHaveBeenCalled();
 
-        act(() => bridge.emit('decor', { items: LONE }));
-        act(() => bridge.emit('wallpick', { index: at(41, 40) }));
-        await vi.waitFor(() => expect(decor.setDecor).toHaveBeenLastCalledWith([{ index: at(40, 40), item: null }]));
+        act(() => bridge.emit('decor', { items: DOUBLE }));
+        act(() => bridge.emit('wallpick', { index: at(43, 40) }));
+        await vi.waitFor(() => expect(setWalls).toHaveBeenCalledWith([{ index: at(43, 40), piece: null }]));
+        expect(decor.setDecor).toHaveBeenCalledTimes(1);
+      });
+
+      it('takes off only the doors that end on the post: both of a post they share, one of a post that is only its own', async () => {
+        const { bridge, decor, setWalls } = onWall(TWO);
+        await userEvent.click(await screen.findByRole('button', { name: 'Borrar' }));
+
+        act(() => bridge.emit('wallpick', { index: at(44, 40) }));
+        await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(42, 40), item: null }]));
+
+        act(() => bridge.emit('decor', { items: TWO }));
+        act(() => bridge.emit('wallpick', { index: at(42, 40) }));
+        await vi.waitFor(() =>
+          expect(decor.setDecor).toHaveBeenLastCalledWith([
+            { index: at(40, 40), item: null },
+            { index: at(42, 40), item: null },
+          ]),
+        );
         expect(setWalls).not.toHaveBeenCalled();
       });
 
-      it('deletes a selected leaf of a double door like any piece', async () => {
+      it('deletes a selected double door like any piece, as one item', async () => {
         const { bridge, decor } = onWall(DOUBLE);
         await screen.findByRole('group', { name: 'Sillas' });
 
-        act(() => bridge.emit('decorselect', { index: at(41, 40) }));
-        act(() => bridge.emit('decordelete', { index: at(41, 40) }));
-        await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(41, 40), item: null }]));
+        act(() => bridge.emit('decorselect', { index: at(40, 40) }));
+        act(() => bridge.emit('decordelete', { index: at(40, 40) }));
+        await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: null }]));
       });
     });
 

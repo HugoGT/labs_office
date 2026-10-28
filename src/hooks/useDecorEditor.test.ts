@@ -705,8 +705,9 @@ describe('useDecorEditor', () => {
   });
 });
 
-describe('DECOR_UNDER_PLACEMENT_MESSAGE (#223)', () => {
-  it('says where a door goes: between two walls, closing a room', () => {
-    expect(DECOR_UNDER_PLACEMENT_MESSAGE).toMatch(/La puerta va entre dos paredes y tiene que cerrar una sala\./);
+describe('DECOR_UNDER_PLACEMENT_MESSAGE (#223, #233)', () => {
+  it('says where a door goes: between two walls, one at each end, and how wide it is', () => {
+    expect(DECOR_UNDER_PLACEMENT_MESSAGE).toContain('La puerta va entre dos paredes, una en cada extremo: 2 casillas de ancho, 4 la puerta doble.');
+    expect(DECOR_UNDER_PLACEMENT_MESSAGE).not.toMatch(/cerrar una sala/);
   });
 });

@@ -231,27 +231,52 @@ export interface TableSpec extends PropSpecBase {
 }
 
 /**
- * The two ends of a door's edge its hinge may sit on (#223): `start` is the
- * west (horizontal edge) or north (vertical edge) one. A lone door hinges at
- * its start; the leaves of a double door at the outer ends.
+ * The two ends of a door's span its hinge may sit on (#223): `start` is the
+ * west (horizontal edge) or north (vertical edge) one. A single door hinges at
+ * its start. A double door is drawn whole (both leaves, hinged at the outer
+ * ends), so it only uses the `start` rows.
  */
 export const DOOR_HINGES = ['start', 'end'] as const;
 export type DoorHinge = (typeof DOOR_HINGES)[number];
 
 /**
- * A door leaf (#223), seen from above like a wall: one column per decor
+ * The frames a door swings through, from 0 (closed) to the last (open): the
+ * leaf turns a third of a quarter turn per step, so it never jumps (#233).
+ */
+export const DOOR_STEPS = 4;
+
+/** The two doors of the pack: a single door and a double door are two items (#233). */
+export const DOOR_VARIANTS = ['single', 'double'] as const;
+export type DoorVariant = (typeof DOOR_VARIANTS)[number];
+
+/**
+ * How a door variant fills the grid line it stands on, in tiles and pixels:
+ * `span` tiles between the two walls it stands between, of which the leaf (or
+ * both leaves) takes `leafLength` pixels and a jamb of `jamb` pixels on each
+ * side merges with the wall at that end (single: 1.4 + 2 x 0.3 tiles, double:
+ * 3.2 + 2 x 0.4).
+ */
+export interface DoorVariantSpec {
+  readonly span: number;
+  readonly leafLength: number;
+  readonly jamb: number;
+}
+
+/**
+ * A door (#223, #233), seen from above like a wall: one column per decor
  * rotation (`DECOR_ROTATIONS` order: 0 opens down, 90 right, 180 up, 270
- * left), one row per hinge and state (`doorFrameIndex`). The anchor is the
- * middle of the door's edge, the grid line it stands on; a closed leaf lies
- * along it and an open one swings a quarter into the side it opens to.
+ * left), `DOOR_STEPS` rows per hinge from closed to open (`doorFrameIndex`). The anchor is the
+ * middle of the door's span, on the grid line it stands on; a closed leaf lies
+ * along it and an open one swings a quarter into the side it opens to. One
+ * frame fits the widest variant, the double door; a single door is drawn in
+ * the middle of it.
  */
 export interface DoorSpec extends ImageSpecBase {
   readonly kind: 'door';
   readonly anchor: Point;
-  /** Along the edge: one grid segment. */
-  readonly leafLength: number;
   /** Across the edge: the plank's thickness. */
   readonly leafThickness: number;
+  readonly variants: Readonly<Record<DoorVariant, DoorVariantSpec>>;
 }
 
 export interface TerrainTilesetSpec extends ImageSpecBase {
@@ -803,40 +828,79 @@ export const TABLE: TableSpec = {
   collision: 'solid',
 };
 
-/** Wide enough for a leaf swung a whole segment away from its edge, either side and either axis. */
-const DOOR_FRAME = 2 * ART_TILE;
+/** Wide enough for the double door's span, and for a leaf swung across its edge, either side and either axis. */
+const DOOR_FRAME = 4 * ART_TILE;
 
 export const DOOR: DoorSpec = {
   ...PROP_BASE,
   kind: 'door',
   frame: { width: DOOR_FRAME, height: DOOR_FRAME },
   columns: 4,
-  rows: DOOR_HINGES.length * 2,
+  rows: DOOR_HINGES.length * DOOR_STEPS,
   anchor: { x: DOOR_FRAME / 2, y: DOOR_FRAME / 2 },
-  leafLength: ART_TILE,
   leafThickness: 6,
+  variants: {
+    single: { span: 2, leafLength: 44, jamb: 10 },
+    double: { span: 4, leafLength: 102, jamb: 13 },
+  },
 };
+
+/** The door piece of a variant: the single door is `door-<material>`, the double one `door-<material>-double`. */
+export function doorVariantOf(piece: string): DoorVariant {
+  return piece.endsWith('-double') ? 'double' : 'single';
+}
+
+/** How many tiles of a wall's line a door piece spans (2 or 4). */
+export function doorSpanOf(piece: string): number {
+  return DOOR.variants[doorVariantOf(piece)].span;
+}
 
 /**
  * The frame of a door leaf: its rotation's column, and the row of its hinge
- * (`DOOR_HINGES`) closed, then open.
+ * (`DOOR_HINGES`) at `step` of the swing, 0 closed up to `DOOR_STEPS - 1` open.
  */
-export function doorFrameIndex(rotation: 0 | 90 | 180 | 270, hinge: DoorHinge, open: boolean): number {
-  const row = DOOR_HINGES.indexOf(hinge) * 2 + (open ? 1 : 0);
+export function doorFrameIndex(rotation: 0 | 90 | 180 | 270, hinge: DoorHinge, step: number): number {
+  const row = DOOR_HINGES.indexOf(hinge) * DOOR_STEPS + step;
   return row * DOOR.columns + rotation / 90;
 }
 
 /**
- * Where to draw a door standing on `edge`: the frame's top-left in world
- * pixels (the anchor on the middle of the edge) and the depth it sorts by,
- * the bottom of the wall body it replaces.
+ * Where to draw a door of `span` tiles starting on `edge`: the frame's
+ * top-left in world pixels, the anchor on the middle of the span.
  */
-export function doorPlacement(edge: GridEdge): { readonly x: number; readonly y: number; readonly depthY: number } {
-  const body = wallBodyRect(edge);
-  const middle = edge.axis === 'horizontal'
-    ? { x: edge.col * ART_TILE + ART_TILE / 2, y: edge.row * ART_TILE }
-    : { x: edge.col * ART_TILE, y: edge.row * ART_TILE + ART_TILE / 2 };
-  return { x: middle.x - DOOR.anchor.x, y: middle.y - DOOR.anchor.y, depthY: body.y + body.height };
+export function doorPlacement(edge: GridEdge, span: number): { readonly x: number; readonly y: number } {
+  const horizontal = edge.axis === 'horizontal';
+  const middle = horizontal
+    ? { x: edge.col * ART_TILE + (span * ART_TILE) / 2, y: edge.row * ART_TILE }
+    : { x: edge.col * ART_TILE, y: edge.row * ART_TILE + (span * ART_TILE) / 2 };
+  return { x: middle.x - DOOR.anchor.x, y: middle.y - DOOR.anchor.y };
+}
+
+/**
+ * The depth a door sorts by in a frame: the lowest pixel its leaf draws,
+ * not the end of its span, so an avatar standing below a swung leaf walks in
+ * front of it instead of under it. The jambs merge with the walls' posts and
+ * never count. A leaf of `rotation` swings to the side that rotation faces
+ * (0 and 90 are down and right); `step` is the swing, as in `doorFrameIndex`.
+ */
+export function doorDepthY(edge: GridEdge, piece: string, rotation: 0 | 90 | 180 | 270, hinge: DoorHinge, step: number): number {
+  const { leafLength, jamb } = DOOR.variants[doorVariantOf(piece)];
+  const double = doorVariantOf(piece) === 'double';
+  const angle = (step / (DOOR_STEPS - 1)) * (Math.PI / 2);
+  const half = DOOR.leafThickness / 2;
+  // Along the span from its start: where each leaf starts, how long it is, and which end it hinges at.
+  const leaves = double
+    ? [
+        { from: jamb, length: leafLength / 2, atStart: true },
+        { from: jamb + leafLength / 2, length: leafLength / 2, atStart: false },
+      ]
+    : [{ from: jamb, length: leafLength, atStart: hinge === 'start' }];
+  if (edge.axis === 'horizontal') {
+    const down = rotation === 0;
+    return edge.row * ART_TILE + Math.max(...leaves.map(({ length }) => (down ? length * Math.sin(angle) : 0))) + half;
+  }
+  const lowest = Math.max(...leaves.map(({ from, length, atStart }) => (atStart ? from + length * Math.cos(angle) : from + length)));
+  return edge.row * ART_TILE + lowest + half * Math.sin(angle);
 }
 
 export function bridgeFrameIndex(orientation: BridgeOrientation): number {
@@ -1169,14 +1233,16 @@ export type ArtPropPiece = ArtTreePiece | ArtPlantPiece | ArtTablePiece | ArtHed
 
 /**
  * A door of the decor layer (#223): one sheet of `DOOR` frames. It stands on
- * a wall's edge, never on a tile, so it states its anchor (the middle of the
- * edge in its frame) and the one tile of wall it fills along the edge.
+ * a wall's line, never on a tile, so it states its anchor (the middle of its
+ * span in its frame) and the tiles of wall it fills along the line: 2 for a
+ * single door, 4 for a double one (#233, `doorSpanOf`).
  */
 export interface ArtDoorPiece extends ArtPieceBase {
   readonly kind: 'door';
   readonly material: string;
   readonly anchor: Point;
   readonly footprint: Footprint;
+  readonly variant: DoorVariant;
 }
 
 export type ArtPiece = ArtCharacterPiece | ArtChairPiece | ArtDeskPiece | ArtFloorPiece | ArtWallPiece | ArtTilesetPiece | ArtPropPiece | ArtDoorPiece;

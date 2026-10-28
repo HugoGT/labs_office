@@ -16,11 +16,15 @@ import {
   ART_PIECE_KINDS,
   ART_TILE,
   BRIDGE_ORIENTATIONS,
+  DOOR,
+  DOOR_VARIANTS,
   PACK_FACINGS,
   TERRAIN_MATERIALS,
   artSheetKey,
+  doorVariantOf,
   sheetSize,
   type ArtImageKind,
+  type DoorVariant,
   type ArtPackManifest,
   type ArtPiece,
   type ArtPieceFile,
@@ -210,8 +214,15 @@ function hasDrawingFields(piece: Record<string, unknown>, kind: ArtPieceKind): b
     case 'hedge':
       return isPlacedProp(piece) && Number.isFinite(piece.height);
     case 'door':
-      // A door (#223) stands on a wall's edge: its anchor on the edge's middle, one tile of wall wide.
-      return isPoint(piece.anchor) && isFootprint(piece.footprint);
+      // A door (#223) stands on a wall's line: its anchor on the middle of its span, `span` tiles of wall wide
+      // (#233), a single or a double one as its id says (`doorVariantOf`).
+      return (
+        isPoint(piece.anchor) &&
+        isFootprint(piece.footprint) &&
+        (DOOR_VARIANTS as readonly unknown[]).includes(piece.variant) &&
+        piece.variant === doorVariantOf(String(piece.id)) &&
+        (piece.footprint as { w: number }).w === DOOR.variants[piece.variant as DoorVariant].span
+      );
     case 'bridge': {
       const deck = piece.deck;
       return isPlacedProp(piece) && isRecord(deck) && BRIDGE_ORIENTATIONS.every((orientation) => isRecord(deck[orientation]) && isFootprint(deck[orientation]));
