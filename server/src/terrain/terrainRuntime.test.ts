@@ -947,7 +947,7 @@ describe('createTerrainRuntime doors (#223, #233)', () => {
     expect(passes(runtime, ...through(66))).toBe(true);
   });
 
-  it('moves and removes a door like any decor item, closing the wall it leaves', async () => {
+  it('moves and removes a door like any decor item, taking the wall behind it along', async () => {
     const store = createMemoryTerrain([], WALL);
     const runtime = runtimeWith(store);
     await runtime.load();
@@ -965,8 +965,47 @@ describe('createTerrainRuntime doors (#223, #233)', () => {
     expect(runtime.decor()).toEqual([]);
     expect(await store.loadDecor()).toEqual([]);
     expect(runtime.snapshot().openings).toEqual([]);
-    expect(passes(runtime, ...through(65))).toBe(false);
-    expect(passes(runtime, ...through(66))).toBe(false);
+    // Its middle post goes with it, saved: the wall between the two end posts does not come back.
+    expect(runtime.walls()[at(66, 22)]).toBeNull();
+    expect((await store.loadWalls()).has(at(66, 22))).toBe(false);
+    expect(runtime.walls()[at(65, 22)]).toBe('wall-brick');
+    expect(runtime.walls()[at(67, 22)]).toBe('wall-brick');
+    expect(passes(runtime, ...through(65))).toBe(true);
+    expect(passes(runtime, ...through(66))).toBe(true);
+    // The wall past its end posts stays.
+    expect(passes(runtime, ...through(67))).toBe(false);
+  });
+
+  it('keeps the wall behind a door that only turns, and behind one moved onto its own posts', async () => {
+    const runtime = runtimeWith();
+    await runtime.load();
+    await runtime.setDecor([{ index: at(66, 22), item: DOOR }], null);
+    await runtime.setDecor([{ index: at(66, 22), item: { piece: 'door-wood', rotation: 180 } }], null);
+    expect(runtime.walls()[at(67, 22)]).toBe('wall-brick');
+    // Moved one tile west, the old middle post (67) ends the new door: it stays.
+    await runtime.setDecor([{ index: at(66, 22), item: null }, { index: at(65, 22), item: DOOR }], null);
+    expect(runtime.walls()[at(67, 22)]).toBe('wall-brick');
+    // The post the new door stands in front of (66) is not the old door's: it is the new door's, and goes only with it.
+    expect(runtime.walls()[at(66, 22)]).toBe('wall-brick');
+  });
+
+  it('keeps a post on the line of a door that another wall meets, when the door goes', async () => {
+    const runtime = runtimeWith(createMemoryTerrain([], [...WALL, [at(67, 23), 'wall-brick']]));
+    await runtime.load();
+    await runtime.setDecor([{ index: at(66, 22), item: DOOR }], null);
+    await runtime.setDecor([{ index: at(66, 22), item: null }], null);
+    expect(runtime.walls()[at(67, 22)]).toBe('wall-brick');
+  });
+
+  it('leaves the walls as they were when the batch is refused', async () => {
+    const store = createMemoryTerrain([], WALL);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+    await runtime.setDecor([{ index: at(66, 22), item: DOOR }], null);
+    const before = await store.loadWalls();
+    await expect(runtime.setDecor([{ index: at(66, 22), item: null }, { index: at(30, 30), item: DOOR }], null)).rejects.toThrow(TerrainProtectedError);
+    expect(await store.loadWalls()).toEqual(before);
+    expect(runtime.walls()[at(67, 22)]).toBe('wall-brick');
   });
 
   it('removes a double door in one piece: its three edges close, saved', async () => {
@@ -981,7 +1020,11 @@ describe('createTerrainRuntime doors (#223, #233)', () => {
     expect(runtime.decor()).toEqual([]);
     expect(await store.loadDecor()).toEqual([]);
     expect(runtime.snapshot().openings).toEqual([]);
-    for (const tx of [65, 66, 67]) expect(passes(runtime, ...through(tx))).toBe(false);
+    // Both middle posts go with it; the end posts stay and so does the wall past them.
+    expect([66, 67].map((tx) => runtime.walls()[at(tx, 22)])).toEqual([null, null]);
+    expect([65, 68].map((tx) => runtime.walls()[at(tx, 22)])).toEqual(['wall-brick', 'wall-brick']);
+    for (const tx of [65, 66, 67]) expect(passes(runtime, ...through(tx))).toBe(true);
+    expect(passes(runtime, ...through(68))).toBe(false);
   });
 
   it('refuses to erase a post that ends a door, data unchanged, and lets the rest of the wall change', async () => {

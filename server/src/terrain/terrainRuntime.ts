@@ -66,7 +66,7 @@ import {
   type DecorTileRect,
 } from '../../../src/game/officeDecor.ts';
 import { deskOverChairLimit, displacedDeskTables } from '../../../src/game/deskDecorRules.ts';
-import { doorOpenings, doorPostSet, isDoorPiece } from '../../../src/game/officeDoors.ts';
+import { doorOpenings, doorPostSet, isDoorPiece, wallsUnderLeftDoors } from '../../../src/game/officeDoors.ts';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
 import type { TerrainStore } from './terrainPort.ts';
 import {
@@ -405,9 +405,17 @@ export function createTerrainRuntime({
     if (conflict !== null) throw new TerrainProtectedError(conflict);
     const saved = decorChanges(decor, next);
     if (saved.length === 0) return decor;
+    // A door that goes takes the wall that stood behind it along, so it does not come back (#233).
+    const erased = wallsUnderLeftDoors(decor, next, walls, layout.width).map((index): WallEdit => ({ index, piece: null }));
+    const nextWalls = erased.length === 0 ? walls : withWalls(walls, erased);
+    const nextOrder = erased.length === 0 ? wallOrder : withWallOrder(wallOrder, walls, erased);
     const openings = (items: readonly DecorItem[]): string => JSON.stringify(doorOpenings(items, layout.width));
-    const nextSnapshot = openings(next) === openings(decor) ? snapshot : snapshotOf(blocks, walls, next);
+    const nextSnapshot = erased.length === 0 && openings(next) === openings(decor) ? snapshot : snapshotOf(blocks, nextWalls, next, nextOrder);
+    // The walls first: a failure after them leaves the door standing over a wall it hides, never a door gone with its wall back.
+    if (erased.length > 0) await store.saveWalls(erased, actorId);
     await store.saveDecor(saved, actorId);
+    walls = nextWalls;
+    wallOrder = nextOrder;
     decor = next;
     snapshot = nextSnapshot;
     for (const listener of listeners) listener(blocks);

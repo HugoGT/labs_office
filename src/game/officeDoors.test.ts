@@ -8,6 +8,8 @@ import {
   doorEdge,
   doorEdges,
   doorEndPosts,
+  doorInnerPosts,
+  doorPosts,
   doorLeaves,
   doorOnWall,
   doorOpenings,
@@ -19,6 +21,7 @@ import {
   keptSwings,
   moveDoors,
   openDoorLeaves,
+  wallsUnderLeftDoors,
 } from './officeDoors';
 
 const WIDTH = 12;
@@ -109,6 +112,54 @@ describe('officeDoors: the line a door stands on (#223, #233)', () => {
   it('protects only the two end posts of a door from being removed', () => {
     expect(doorPostSet([door(4, 6, 0)], WIDTH)).toEqual(new Set([at(4, 6), at(6, 6)]));
     expect(doorPostSet([doubleDoor(2, 6, 0)], WIDTH)).toEqual(new Set([at(2, 6), at(5, 6)]));
+  });
+});
+
+describe('officeDoors: the wall under a door that leaves (#233)', () => {
+  /** Posts in a row on row 6, from x = 2 to x = 8, and nothing else. */
+  const row = (...extra: readonly (readonly [number, number])[]) => wallGrid([...[2, 3, 4, 5, 6, 7, 8].map((tx) => [tx, 6] as const), ...extra]).walls;
+  const gone = (before: readonly DecorItem[], after: readonly DecorItem[], walls = row()) => wallsUnderLeftDoors(before, after, walls, WIDTH);
+
+  it('lists the posts strictly between the two end posts of a door', () => {
+    expect(doorInnerPosts(door(4, 6, 0), WIDTH)).toEqual([at(5, 6)]);
+    expect(doorInnerPosts(doubleDoor(2, 6, 0), WIDTH)).toEqual([at(3, 6), at(4, 6)]);
+    expect(doorInnerPosts(doubleDoor(4, 2, 90), WIDTH)).toEqual([at(4, 3), at(4, 4)]);
+  });
+
+  it('lists every post a door spans, the ends and the ones between, start first', () => {
+    expect(doorPosts(door(4, 6, 0), WIDTH)).toEqual([at(4, 6), at(5, 6), at(6, 6)]);
+    expect(doorPosts(doubleDoor(2, 6, 0), WIDTH)).toEqual([at(2, 6), at(3, 6), at(4, 6), at(5, 6)]);
+    expect(doorPosts(doubleDoor(4, 2, 90), WIDTH)).toEqual([at(4, 2), at(4, 3), at(4, 4), at(4, 5)]);
+  });
+
+  it('takes the standing posts between the ends of a door that is gone, and leaves the end posts', () => {
+    expect(gone([door(3, 6, 0)], [])).toEqual([at(4, 6)]);
+    expect(gone([doubleDoor(3, 6, 0)], [])).toEqual([at(4, 6), at(5, 6)]);
+    // Posts already missing are not listed.
+    const hole = row();
+    hole[at(4, 6)] = null;
+    expect(gone([doubleDoor(3, 6, 0)], [], hole)).toEqual([at(5, 6)]);
+  });
+
+  it('takes nothing for a door that stays: turned in place, or still on the same edges', () => {
+    expect(gone([door(3, 6, 0)], [door(3, 6, 180)])).toEqual([]);
+    expect(gone([door(3, 6, 0)], [door(3, 6, 0)])).toEqual([]);
+    expect(gone([], [door(3, 6, 0)])).toEqual([]);
+  });
+
+  it('takes the posts of a door that moved, but never one that ends a door which stays', () => {
+    // Moved one tile west: its old middle post, 4, is the end of the new door.
+    expect(gone([door(3, 6, 0)], [door(2, 6, 0)])).toEqual([]);
+    expect(gone([door(3, 6, 0)], [door(5, 6, 0)])).toEqual([at(4, 6)]);
+  });
+
+  it('keeps a post where another wall meets it: it is not under the door', () => {
+    expect(gone([door(3, 6, 0)], [], row([4, 5]))).toEqual([]);
+    expect(gone([door(3, 6, 0)], [], row([4, 7]))).toEqual([]);
+    // A vertical door: the walls across are the ones on its row.
+    const column = wallGrid([[4, 2], [4, 3], [4, 4], [3, 3]]).walls;
+    expect(gone([door(4, 2, 90)], [], column)).toEqual([]);
+    expect(gone([door(4, 2, 90)], [], wallGrid([[4, 2], [4, 3], [4, 4]]).walls)).toEqual([at(4, 3)]);
   });
 });
 

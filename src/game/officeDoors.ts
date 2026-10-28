@@ -81,6 +81,50 @@ export function doorOnWall(grid: Pick<WallGrid, 'width' | 'height' | 'walls'>, i
   return grid.walls[row * grid.width + col] != null && grid.walls[endRow * grid.width + endCol] != null;
 }
 
+/** The posts strictly between a door's two end posts, in order: the wall a door stands in front of. */
+export function doorInnerPosts(item: Pick<DecorItem, 'index' | 'rotation' | 'piece'>, width: number): number[] {
+  const { col, row, axis } = doorEdge(item, width);
+  return Array.from({ length: doorSpan(item) - 1 }, (_, step) => (axis === 'horizontal' ? row * width + col + 1 + step : (row + 1 + step) * width + col));
+}
+
+/** Every post of a door's span, the ends and the ones between, start first: the vertices the eraser takes the door by. */
+export function doorPosts(item: Pick<DecorItem, 'index' | 'rotation' | 'piece'>, width: number): number[] {
+  const [start, end] = doorEndPosts(item, width);
+  return [start, ...doorInnerPosts(item, width), end];
+}
+
+/** The grid edges a door stands on, as one key: two doors with the same one cover the same wall. */
+function doorKey(item: Pick<DecorItem, 'index' | 'rotation' | 'piece'>, width: number): string {
+  const { col, row, axis } = doorEdge(item, width);
+  return `${axis}:${col}:${row}:${doorSpan(item)}`;
+}
+
+/**
+ * The wall posts to erase when the doors of `before` become `after` (#233):
+ * the standing ones strictly between the ends of a door that no longer
+ * covers those edges (removed, or moved), so the wall that stood behind it
+ * does not come back. Not an end post of a door that stays, and not one where
+ * another wall meets it across the door's line (a T): that wall is not under
+ * the door. A door only turned in place covers the same edges and takes none.
+ */
+export function wallsUnderLeftDoors(before: readonly DecorItem[], after: readonly DecorItem[], walls: readonly (string | null)[], width: number): number[] {
+  const height = walls.length / width;
+  const stays = new Set(after.filter((item) => isDoorPiece(item.piece)).map((item) => doorKey(item, width)));
+  const ends = doorPostSet(after, width);
+  const standing = (tx: number, ty: number): boolean => tx >= 0 && ty >= 0 && tx < width && ty < height && walls[ty * width + tx] != null;
+  const erased = new Set<number>();
+  for (const item of before) {
+    if (!isDoorPiece(item.piece) || stays.has(doorKey(item, width))) continue;
+    const horizontal = doorEdge(item, width).axis === 'horizontal';
+    for (const post of doorInnerPosts(item, width)) {
+      const [tx, ty] = [post % width, Math.floor(post / width)];
+      const crossed = horizontal ? standing(tx, ty - 1) || standing(tx, ty + 1) : standing(tx - 1, ty) || standing(tx + 1, ty);
+      if (walls[post] != null && !ends.has(post) && !crossed) erased.add(post);
+    }
+  }
+  return [...erased];
+}
+
 /** The edges the doors of a decor layer open, in layer order: every edge of every door's span. */
 export function doorOpenings(items: readonly DecorItem[], width: number): GridEdge[] {
   return items.flatMap((item) => (isDoorPiece(item.piece) ? doorEdges(item, width) : []));
