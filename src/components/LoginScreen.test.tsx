@@ -10,7 +10,7 @@ async function fillLoginForm(
 ) {
   if (name) await user.type(screen.getByLabelText(/^nombre$/i), name);
   if (email) await user.type(screen.getByLabelText(/correo/i), email);
-  if (password) await user.type(screen.getByLabelText(/contraseña/i), password);
+  if (password) await user.type(screen.getByLabelText(/^contraseña$/i), password);
 }
 
 describe('LoginScreen', () => {
@@ -21,7 +21,7 @@ describe('LoginScreen', () => {
     // encuentra: es la misma comprobacion que hace un lector de pantalla.
     expect(screen.getByLabelText(/^nombre$/i)).toHaveAttribute('type', 'text');
     expect(screen.getByLabelText(/correo/i)).toHaveAttribute('type', 'email');
-    expect(screen.getByLabelText(/contraseña/i)).toHaveAttribute('type', 'password');
+    expect(screen.getByLabelText(/^contraseña$/i)).toHaveAttribute('type', 'password');
   });
 
   it('el orden de los campos es Nombre, Correo, Contrasena (#100)', () => {
@@ -41,7 +41,7 @@ describe('LoginScreen', () => {
     render(<LoginScreen onSubmit={vi.fn()} pending={false} error={null} />);
 
     expect(screen.getByLabelText(/correo/i)).toHaveAttribute('autocomplete', 'email');
-    expect(screen.getByLabelText(/contraseña/i)).toHaveAttribute(
+    expect(screen.getByLabelText(/^contraseña$/i)).toHaveAttribute(
       'autocomplete',
       'current-password',
     );
@@ -78,7 +78,7 @@ describe('LoginScreen', () => {
 
     expect(screen.getByLabelText(/^nombre$/i)).toHaveValue('ana');
     await fillLoginForm(user, { name: '' });
-    await user.type(screen.getByLabelText(/contraseña/i), '{Enter}');
+    await user.type(screen.getByLabelText(/^contraseña$/i), '{Enter}');
 
     expect(onSubmit).toHaveBeenCalledExactlyOnceWith('ana', 'ana@example.com', 'secreta');
   });
@@ -101,7 +101,7 @@ describe('LoginScreen', () => {
 
     await user.type(screen.getByLabelText(/^nombre$/i), 'Ana Lopez');
     await user.type(screen.getByLabelText(/correo/i), 'ana@example.com');
-    await user.type(screen.getByLabelText(/contraseña/i), 'secreta{Enter}');
+    await user.type(screen.getByLabelText(/^contraseña$/i), 'secreta{Enter}');
 
     // Un <form> de verdad con `preventDefault`: sin el, Enter navegaria y se
     // perderia todo el estado de React.
@@ -149,7 +149,7 @@ describe('LoginScreen', () => {
     const onSubmit = vi.fn();
     render(<LoginScreen onSubmit={onSubmit} pending={true} error={null} />);
 
-    const submit = screen.getByRole('button');
+    const submit = screen.getByRole('button', { name: /^entra/i });
     expect(submit).toBeDisabled();
 
     await user.click(submit);
@@ -159,11 +159,11 @@ describe('LoginScreen', () => {
 
   it('el boton dice que esta ocurriendo algo mientras espera', () => {
     const { rerender } = render(<LoginScreen onSubmit={vi.fn()} pending={false} error={null} />);
-    const idle = screen.getByRole('button').textContent;
+    const idle = screen.getByRole('button', { name: /^entra/i }).textContent;
 
     rerender(<LoginScreen onSubmit={vi.fn()} pending={true} error={null} />);
 
-    expect(screen.getByRole('button').textContent).not.toBe(idle);
+    expect(screen.getByRole('button', { name: /^entra/i }).textContent).not.toBe(idle);
   });
 
   it('muestra el error como alerta, no como texto suelto', () => {
@@ -185,7 +185,7 @@ describe('LoginScreen', () => {
 
     expect(screen.getByLabelText(/^nombre$/i)).toBeRequired();
     expect(screen.getByLabelText(/correo/i)).toBeRequired();
-    expect(screen.getByLabelText(/contraseña/i)).toBeRequired();
+    expect(screen.getByLabelText(/^contraseña$/i)).toBeRequired();
   });
 
   it('es puramente presentacional: no conoce ningun servicio', async () => {
@@ -194,11 +194,65 @@ describe('LoginScreen', () => {
 
     await userEvent.type(screen.getByLabelText(/^nombre$/i), 'Ana Lopez');
     await userEvent.type(screen.getByLabelText(/correo/i), 'ana@example.com');
-    await userEvent.type(screen.getByLabelText(/contraseña/i), 'secreta{Enter}');
+    await userEvent.type(screen.getByLabelText(/^contraseña$/i), 'secreta{Enter}');
 
     // Todo lo que sabe hacer es avisar hacia arriba (D3): quien inicia sesion
     // de verdad es `AuthGate` a traves del puerto.
     expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('LoginScreen: show or hide the password (#240)', () => {
+  it('the eye button toggles the password between hidden and visible', async () => {
+    const user = userEvent.setup();
+    render(<LoginScreen onSubmit={vi.fn()} pending={false} error={null} />);
+    const input = screen.getByLabelText(/^contraseña$/i);
+
+    const show = screen.getByRole('button', { name: 'Mostrar contraseña' });
+    expect(show).toHaveAttribute('aria-pressed', 'false');
+    expect(input).toHaveAttribute('type', 'password');
+
+    await user.click(show);
+    const hide = screen.getByRole('button', { name: 'Ocultar contraseña' });
+    expect(hide).toHaveAttribute('aria-pressed', 'true');
+    expect(input).toHaveAttribute('type', 'text');
+
+    await user.click(hide);
+    expect(screen.getByRole('button', { name: 'Mostrar contraseña' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    expect(input).toHaveAttribute('type', 'password');
+  });
+
+  it('clicking it keeps the typed value and the focus in the field without submitting', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(<LoginScreen onSubmit={onSubmit} pending={false} error={null} />);
+    await fillLoginForm(user);
+    const input = screen.getByLabelText(/^contraseña$/i);
+
+    await user.click(screen.getByRole('button', { name: 'Mostrar contraseña' }));
+
+    expect(input).toHaveValue('secreta');
+    expect(input).toHaveFocus();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('works from the keyboard without submitting the form', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(<LoginScreen onSubmit={onSubmit} pending={false} error={null} />);
+    await fillLoginForm(user);
+
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Mostrar contraseña' })).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByLabelText(/^contraseña$/i)).toHaveAttribute('type', 'text');
+    await user.keyboard(' ');
+    expect(screen.getByLabelText(/^contraseña$/i)).toHaveAttribute('type', 'password');
+
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });
 
@@ -311,7 +365,7 @@ describe('LoginScreen: forgot password (#94)', () => {
 
     await user.click(screen.getByRole('button', { name: /volver/i }));
 
-    expect(screen.getByLabelText(/contraseña/i)).toHaveAttribute('type', 'password');
+    expect(screen.getByLabelText(/^contraseña$/i)).toHaveAttribute('type', 'password');
     expect(passwordReset.onClear).toHaveBeenCalled();
   });
 });

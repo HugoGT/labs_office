@@ -131,7 +131,7 @@ describe('App: autenticacion (#8)', () => {
     // Desarrollo local y suite e2e (`.env.e2e` fija las variables a vacio):
     // nadie autentica y nadie queda fuera.
     expect(createAdapterMock).not.toHaveBeenCalled();
-    expect(screen.queryByLabelText(/contraseña/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^contraseña$/i)).not.toBeInTheDocument();
     expect(createGameMock).toHaveBeenCalledTimes(1);
   });
 
@@ -163,7 +163,7 @@ describe('App: autenticacion (#8)', () => {
     render(<App />);
 
     expect(createGameMock).not.toHaveBeenCalled();
-    expect(screen.queryByLabelText(/contraseña/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^contraseña$/i)).not.toBeInTheDocument();
   });
 
   it.each(['/', '/dashboard'])('signed-out %s hides password reset and never mounts Phaser', (path) => {
@@ -176,7 +176,7 @@ describe('App: autenticacion (#8)', () => {
 
     emit(null);
 
-    const form = screen.getByLabelText(/contraseña/i);
+    const form = screen.getByLabelText(/^contraseña$/i);
     expect(container.querySelector('main')?.contains(form)).toBe(true);
     expect(createGameMock).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: /olvidaste|enviar enlace/i })).not.toBeInTheDocument();
@@ -190,7 +190,7 @@ describe('App: autenticacion (#8)', () => {
 
     render(<App />);
 
-    expect(await screen.findByLabelText(/contraseña/i)).toBeInTheDocument();
+    expect(await screen.findByLabelText(/^contraseña$/i)).toBeInTheDocument();
     expect(createAdapterMock).not.toHaveBeenCalled();
     expect(createGameMock).not.toHaveBeenCalled();
   });
@@ -270,7 +270,7 @@ describe('App: leaving the office (#66)', () => {
     expect(createGameMock.mock.calls[1][2]?.playerName).toBe('Ana');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(port.signOut).not.toHaveBeenCalled();
-    expect(screen.queryByLabelText(/contraseña/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^contraseña$/i)).not.toBeInTheDocument();
   });
 
   it('"Cerrar sesión" signs out through the auth port and brings back the login', async () => {
@@ -287,7 +287,7 @@ describe('App: leaving the office (#66)', () => {
     expect(port.signOut).toHaveBeenCalledTimes(1);
     emit(null);
 
-    expect(screen.getByLabelText(/contraseña/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^contraseña$/i)).toBeInTheDocument();
     expect(container.querySelector('#office-shell')).toBeNull();
   });
 });
@@ -371,7 +371,7 @@ describe('App: access denied at join (#129)', () => {
     expect(screen.queryByRole('button', { name: 'Salir' })).toBeNull();
     const bridge = createGameMock.mock.calls[0]![1];
     await act(async () => bridge.emit('presence', { online: false, peers: 0, state: 'denied', reason: 'not-provisioned', canRetry: false }));
-    expect(screen.getByLabelText(/contraseña/i)).toBeVisible();
+    expect(screen.getByLabelText(/^contraseña$/i)).toBeVisible();
     expect(screen.queryByText('Entrando a la oficina…')).toBeNull();
     act(() => bridge.emit('entry', { state: 'ready' }));
     expect(screen.queryByRole('button', { name: 'Salir' })).toBeNull();
