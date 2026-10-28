@@ -625,13 +625,13 @@ describe('BottomBar: one row when wide, two when narrow (#67 follow-up)', () => 
     for (const name of CALL_BUTTONS) {
       expect(within(controls).getByRole('button', { name })).toBeInTheDocument();
     }
-    expect(within(info).getByText(/Sala privada/)).toBeInTheDocument();
+    expect(within(info).getByText('Sala de Juntas')).toBeInTheDocument();
     expect(within(info).getByText(/Sin servidor/)).toBeInTheDocument();
     // Retrying is about the connection, so it sits next to the connection indicator.
     expect(within(info).getByRole('button', { name: /Reintentar/ })).toBeInTheDocument();
   });
 
-  it('keeps the same blocks in the corridor, only without the private room line', () => {
+  it('keeps the same blocks in the corridor, only without the room name', () => {
     renderBar({ room: null });
 
     expect(screen.getByRole('group', { name: 'Identidad' })).toBeInTheDocument();
@@ -640,19 +640,19 @@ describe('BottomBar: one row when wide, two when narrow (#67 follow-up)', () => 
     for (const name of CALL_BUTTONS) {
       expect(within(controls).getByRole('button', { name })).toBeInTheDocument();
     }
-    expect(screen.queryByText(/Sala privada/)).not.toBeInTheDocument();
   });
 
-  it('names the private room without the "audio aislado" suffix', () => {
+  it('names the room alone: no "Sala privada" prefix and no "audio aislado" suffix', () => {
     renderBar({ room: 'Sala de Juntas' });
 
-    const line = screen.getByText(/Sala privada/);
-    expect(line).toHaveTextContent(/^🔒 Sala privada: Sala de Juntas$/);
+    const status = screen.getByText('Sala de Juntas').parentElement!;
+    expect(status).toHaveTextContent(/^Sala de Juntas$/);
+    expect(screen.queryByText(/Sala privada/)).not.toBeInTheDocument();
     expect(screen.queryByText(/audio aislado/)).not.toBeInTheDocument();
   });
 });
 
-describe('BottomBar: indicador de grabacion junto a "Sala privada" (#85)', () => {
+describe('BottomBar: indicador de grabacion junto al nombre de la sala (#85)', () => {
   it('no muestra REC dentro de una sala que no se esta grabando', () => {
     renderBar({ room: 'Sala de Juntas', recording: false });
 
@@ -662,7 +662,7 @@ describe('BottomBar: indicador de grabacion junto a "Sala privada" (#85)', () =>
   it('muestra REC junto al nombre de la sala mientras se graba', () => {
     renderBar({ room: 'Sala de Juntas', recording: true });
 
-    expect(screen.getByText(/Sala privada/)).toHaveTextContent(/^🔒 Sala privada: Sala de Juntas$/);
+    expect(screen.getByText('Sala de Juntas').parentElement!).toHaveTextContent(/^Sala de Juntas$/);
     expect(screen.getByText('REC')).toBeInTheDocument();
   });
 
@@ -733,7 +733,7 @@ describe('BottomBar: indicador de grabacion junto a "Sala privada" (#85)', () =>
       />,
     );
     expect(screen.queryByText(/REC/)).not.toBeInTheDocument();
-    expect(screen.getByText(/Sala privada/)).toHaveTextContent(/^🔒 Sala privada: Sala de Juntas$/);
+    expect(screen.getByText('Sala de Juntas').parentElement!).toHaveTextContent(/^Sala de Juntas$/);
   });
 });
 

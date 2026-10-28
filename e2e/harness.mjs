@@ -492,13 +492,13 @@ export async function teleportToTile(page, tx, ty) {
   );
 }
 
-/** D7 W3: the private-room indicator (`BottomBar.tsx`) names the room the
- * local player is currently inside. */
+/** D7 W3: the room indicator (`BottomBar.tsx`, the bar's "Estado" group)
+ * names the room the local player is currently inside. */
 export async function waitForRoomIndicator(page, roomName) {
   await page.waitForFunction(
     (name) => {
-      const text = document.querySelector('#office-shell')?.textContent ?? '';
-      return text.includes(`\u{1F512} Sala privada: ${name}`);
+      const status = document.querySelector('#office-shell [role="group"][aria-label="Estado"] b');
+      return status?.textContent === name;
     },
     roomName,
     { timeout: READINESS_DEADLINE_MS },

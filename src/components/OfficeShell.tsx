@@ -43,6 +43,7 @@ import { useOfficeBridge } from '../hooks/useOfficeBridge';
 import { useProximityAudio } from '../hooks/useProximityAudio';
 import { useRoster } from '../hooks/useRoster';
 import { useSpacesConfig } from '../hooks/useSpacesConfig';
+import { placeLabel, placeOf } from './roomPlace';
 import { AudioUnblockPrompt } from './AudioUnblockPrompt';
 import { BottomBar } from './BottomBar';
 import { CallInvitationStack } from './CallInvitationStack';
@@ -442,20 +443,30 @@ export function OfficeShell({
   }, [bridge]);
 
   const [toastMessage, setToastMessage] = useState<ReactNode | null>(null);
-  const previousRoomRef = useRef<string | null>(null);
+  // A room by its name, a desk by whoever claimed it (`roomPlace.ts`).
+  const place = useMemo(() => placeOf(spaceId, room, spacesConfig?.spaces ?? [], desks ?? []), [spaceId, room, spacesConfig, desks]);
+  const previousSpaceRef = useRef<string | null>(null);
 
+  // Told on entering a space only: a desk claimed while standing in it is renamed, not entered again.
   useEffect(() => {
-    if (room === previousRoomRef.current) return;
-    previousRoomRef.current = room;
+    if (spaceId === previousSpaceRef.current) return;
+    previousSpaceRef.current = spaceId;
+    if (place === null) return;
 
-    if (room) {
-      setToastMessage(
+    const where =
+      place.kind === 'room' ? (
         <>
-          Entraste a <b>{room}</b>: solo escuchas a quienes están dentro
-        </>,
+          Entraste a <b>{place.name}</b>
+        </>
+      ) : place.owner === null ? (
+        <>Entraste a un escritorio</>
+      ) : (
+        <>
+          Entraste al escritorio de <b>{place.owner}</b>
+        </>
       );
-    }
-  }, [room]);
+    setToastMessage(<>{where}: solo escuchas a quienes están dentro</>);
+  }, [spaceId, place]);
 
   /**
    * Who started sharing, for everyone in the space (#20). A takeover is a new
@@ -849,7 +860,7 @@ export function OfficeShell({
         camOn={camOn}
         audioAvailable={audioAvailable}
         recording={recording}
-        room={room}
+        room={place === null ? null : placeLabel(place)}
         presence={presence}
         status={status}
         onChangeStatus={handleChangeStatus}

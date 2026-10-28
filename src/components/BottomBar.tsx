@@ -264,9 +264,7 @@ export function BottomBar({
             // mentir sobre lo unico que esta linea existe para contar.
             <>🔴 No molestar: aislado del audio de la oficina</>
           ) : room ? (
-            <>
-              🔒 Sala privada: <b>{room}</b>
-            </>
+            <b>{room}</b>
           ) : (
             <>
               Audio por <b>proximidad</b>

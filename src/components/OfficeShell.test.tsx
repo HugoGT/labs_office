@@ -1,6 +1,6 @@
 import { act, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDeskAdminClient } from '../dashboard/deskAdminClient';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
 import { createSpacesAdminClient } from '../dashboard/spacesAdminClient';
@@ -11,6 +11,7 @@ import { claimDesk, fetchOfficeDesks, releaseDesk } from '../game/desksClient';
 import type { OfficeDesk } from '../game/desksPort';
 import type { OfficeBridge } from '../game/officeBridge';
 import { BUILT_IN_SPACES_VERSION } from '../game/mapData';
+import { fetchSpacesConfig } from '../game/spacesConfig';
 import { zoomView, type ZoomAction } from '../game/mapZoom';
 import { DEFAULT_NAME } from '../game/officeProtocol';
 import { RecordingError, getRecordingUrl, startRecording, stopRecording } from '../game/recordingClient';
@@ -19,6 +20,11 @@ import { useProximityAudio } from '../hooks/useProximityAudio';
 import { OfficeShell } from './OfficeShell';
 
 vi.mock('../game/createGame', () => ({ createGame: vi.fn() }));
+// Passes through to the real read unless a test serves its own spaces.
+vi.mock('../game/spacesConfig', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../game/spacesConfig')>();
+  return { ...original, fetchSpacesConfig: vi.fn(original.fetchSpacesConfig) };
+});
 // Unico modulo del cliente que habla con `/desks`: doblarlo aqui deja este
 // archivo probando el CABLEADO -- comando, clic, peticion y aviso -- sin red.
 vi.mock('../game/desksClient', async (importOriginal) => ({
@@ -1064,6 +1070,53 @@ describe('OfficeShell: escritorios asignables (#7, slice 5)', () => {
     act(() => bridge.emit('presence', presence('reconnecting')));
     act(() => bridge.emit('presence', presence('connected')));
     await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(3));
+  });
+
+  describe('naming a desk by whoever claimed it', () => {
+    // The cubicle of a desk is the space at the desk's origin, named after its label.
+    const CUBICULO = { id: 'cubiculo', name: 'Mesa 4', x: MESA.x, y: MESA.y, w: MESA.w, h: MESA.h };
+    const deskAt = (occupant: OfficeDesk['occupant']): OfficeDesk => ({ ...MESA, occupant });
+
+    beforeEach(() => {
+      vi.mocked(fetchSpacesConfig).mockResolvedValue({ spaces: [CUBICULO], version: 'v-cubiculo' });
+    });
+
+    afterEach(async () => {
+      const original = await vi.importActual<typeof import('../game/spacesConfig')>('../game/spacesConfig');
+      vi.mocked(fetchSpacesConfig).mockImplementation(original.fetchSpacesConfig);
+    });
+
+    it('says "Entraste al escritorio de Hugo" and the bar names it "Escritorio de Hugo"', async () => {
+      vi.mocked(fetchOfficeDesks).mockResolvedValue([deskAt({ id: 'u-hugo', displayName: 'Hugo' })]);
+      render(<OfficeShell session={SESION} />);
+      const bridge = createGameMock.mock.calls[0][1];
+      const desks: unknown[] = [];
+      bridge.onCommand('desks', (payload) => desks.push(payload));
+      await vi.waitFor(() => expect(desks).not.toHaveLength(0));
+
+      act(() => bridge.emit('room', { spaceId: CUBICULO.id, name: CUBICULO.name }));
+
+      await vi.waitFor(() => expect(screen.getByText(/Entraste al escritorio de/)).toHaveTextContent(
+        /^Entraste al escritorio de Hugo: solo escuchas a quienes están dentro$/,
+      ));
+      expect(within(screen.getByRole('group', { name: 'Estado' })).getByText('Escritorio de Hugo')).toBeInTheDocument();
+    });
+
+    it('says "Entraste a un escritorio" for one nobody claimed, named "Escritorio" in the bar', async () => {
+      vi.mocked(fetchOfficeDesks).mockResolvedValue([deskAt(null)]);
+      render(<OfficeShell session={SESION} />);
+      const bridge = createGameMock.mock.calls[0][1];
+      const desks: unknown[] = [];
+      bridge.onCommand('desks', (payload) => desks.push(payload));
+      await vi.waitFor(() => expect(desks).not.toHaveLength(0));
+
+      act(() => bridge.emit('room', { spaceId: CUBICULO.id, name: CUBICULO.name }));
+
+      await vi.waitFor(() => expect(screen.getByText(/Entraste a un escritorio/)).toHaveTextContent(
+        /^Entraste a un escritorio: solo escuchas a quienes están dentro$/,
+      ));
+      expect(within(screen.getByRole('group', { name: 'Estado' })).getByText('Escritorio')).toBeInTheDocument();
+    });
   });
 
   it('the desk button sends the scene to the own desk once a desk is mine', async () => {
