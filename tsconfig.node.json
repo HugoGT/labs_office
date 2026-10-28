@@ -11,5 +11,5 @@
     "composite": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo"
   },
-  "include": ["vite.config.ts", "tools/pwa/pwaOptions.ts", "tools/pwa/pwaIcons.ts"]
+  "include": ["vite.config.ts", "tools/pwa/pwaOptions.ts", "tools/pwa/pwaIcons.ts", "tools/ci/timedSequencer.ts", "tools/ci/testShards.ts"]
 }

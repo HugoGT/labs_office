@@ -16,6 +16,7 @@
     "test:browser": "vitest run --project=browser",
     "test:all": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:timings": "vitest run --reporter=json --outputFile=node_modules/.tmp/vitest-report.json && node tools/ci/updateTestTimings.ts node_modules/.tmp/vitest-report.json",
     "server": "node server/src/main.ts",
     "test:server": "vitest run --project=server",
     "art:export": "node tools/art/export.ts",

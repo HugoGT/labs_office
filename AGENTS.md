@@ -53,6 +53,7 @@ All from the repo root.
 | `pnpm typecheck` | Client and server typecheck (the only static gate) |
 | `pnpm test` / `test:server` / `test:browser` / `test:all` | Vitest `unit` / `server` / `browser` / all three (CI) |
 | `pnpm test:harness` | Unit tests of the E2E harness |
+| `pnpm test:timings` | Run every test and rewrite `tools/ci/testTimings.json`, the per-file times CI shards by. Commit it |
 | `pnpm test:e2e` | E2E against real server + `vite preview` (needs `dist/` and `dist-e2e/`) |
 | `pnpm test:e2e:audio` | Audio E2E; needs real LiveKit and `VITE_LIVEKIT_E2E=1` |
 | `pnpm art:export` | Regenerate art pack + previews. Commit both; `tools/art/pack.test.ts` fails on drift |
@@ -145,6 +146,7 @@ Only a `test` environment exists; `infra/gcp/README.md` is the runbook.
 - Upload routes skip the global 100 KB `express.json()` for their own 1 MB parser; `POST /admin/assets/upload` is registered before `POST /admin/assets/:id`.
 - Phaser cannot load under jsdom: anything touching it must be a `*.browser.test.ts(x)`.
 - `vite.config.ts` repeats `define` per Vitest project on purpose; `__OFFICE_E2E__` must be defined in each.
+- CI shards tests by `tools/ci/testTimings.json` (`TimedSequencer`), not Vitest's path hash. A new file weighs the median; after adding or splitting a slow file, run `pnpm test:timings` (without a local `.env`: `VITE_AUTH_MODE` breaks `App.test.tsx`) and commit the JSON.
 - `VITE_COLYSEUS_URL` stays commented out in `.env.example`: an empty value disables multiplayer.
 - Stay on `@colyseus/core` 0.16.24 (0.16.25 is broken, no JS client for 0.17). Never use the `colyseus` meta-package.
 - `google_compute_instance.office` ignores `machine_type`, `metadata_startup_script` and the runtime metadata keys `office-heavy-days`/`office-hold-until`. Never declare those keys or `desired_status`. A plan touching the instance must say `update in-place`; replacing the VM is an explicit `-replace`.
