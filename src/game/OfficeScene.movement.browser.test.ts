@@ -633,38 +633,77 @@ describe('auto-walk around walls and desks (#219, #221)', () => {
     expect(overlaps(physicalBodyRect(player), desk)).toBe(false);
   });
 
-  /** An own desk at tiles (20..22, 9..11) with a chair on its top middle tile, and a free chair nearer the walker. */
-  function ownDeskWithChair(arena: Arena, connector: ReturnType<typeof fakeConnector>, mine = true) {
+  /**
+   * An own desk at tiles (20..22, 9..11), centered on (21, 10), with `chairs`
+   * on it (tile coordinates) and a free chair off the desk nearer the walker.
+   */
+  function ownDesk(
+    arena: Arena,
+    connector: ReturnType<typeof fakeConnector>,
+    chairs: readonly { tx: number; ty: number }[],
+    mine = true,
+    start = { tx: 8, ty: 10 },
+  ) {
     const desk: OfficeDesk = {
       id: 'id-mi-mesa', label: 'Mesa 1', x: 20 * TILE, y: 9 * TILE, w: 3 * TILE, h: 3 * TILE,
       occupant: mine ? { id: 'id-yo', displayName: 'Yo' } : null, mine,
     };
-    const ownChair = 9 * BASE_LAYOUT.width + 21;
     const decoyChair = 10 * BASE_LAYOUT.width + 12;
     arena.bridge.emitCommand('desks', { desks: [desk] });
     connector.handlers()!.onDecor?.([
       { index: decoyChair, piece: 'chair-wood', rotation: 0 },
-      { index: ownChair, piece: 'chair-wood', rotation: 0 },
+      ...chairs.map(({ tx, ty }) => ({ index: ty * BASE_LAYOUT.width + tx, piece: 'chair-wood', rotation: 0 as const })),
     ]);
     arena.movement.collisionRects = [];
     arena.movement.buildPieceColliders();
-    const start = positionForBodyTile({ tx: 8, ty: 10 });
-    arena.body.reset(start.x, start.y);
+    const at = positionForBodyTile(start);
+    arena.body.reset(at.x, at.y);
     arena.frame();
-    return { ownChair };
   }
 
-  it('walkToOwnDesk walks to a chair of the own desk and sits on it, not on a nearer free chair', async () => {
+  const DESK_CENTER = { tx: 21, ty: 10 };
+
+  it('walkToOwnDesk sits on the chair at the own desk center, not on a nearer free chair', async () => {
     const connector = fakeConnector('mi-sesion');
     const arena = await movementArena(connector);
-    const { ownChair } = ownDeskWithChair(arena, connector);
+    ownDesk(arena, connector, [DESK_CENTER]);
 
     arena.bridge.emitCommand('walkToOwnDesk', undefined);
     expect(arena.movement.autoWalk).toBeDefined();
     walkUntilDone(arena);
     arena.frame();
 
-    expect(connector.sits).toEqual([chairSeatId(ownChair)]);
+    expect(connector.sits).toEqual([chairSeatId(DESK_CENTER.ty * BASE_LAYOUT.width + DESK_CENTER.tx)]);
+  });
+
+  it('walkToOwnDesk with several chairs on the desk sits on the center one, even with another nearer (#250)', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    // The west chair is the one nearest a walker coming from the west.
+    ownDesk(arena, connector, [{ tx: 20, ty: 10 }, DESK_CENTER, { tx: 22, ty: 10 }]);
+
+    arena.bridge.emitCommand('walkToOwnDesk', undefined);
+    walkUntilDone(arena);
+    arena.frame();
+
+    expect(connector.sits).toEqual([chairSeatId(DESK_CENTER.ty * BASE_LAYOUT.width + DESK_CENTER.tx)]);
+  });
+
+  it.each([
+    { side: 'west', start: { tx: 8, ty: 10 } },
+    { side: 'south-east', start: { tx: 30, ty: 14 } },
+  ])('walkToOwnDesk from the $side lands on the desk center tile when no chair stands there (#250)', async ({ start }) => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    ownDesk(arena, connector, [{ tx: 20, ty: 9 }, { tx: 22, ty: 11 }], true, start);
+
+    arena.bridge.emitCommand('walkToOwnDesk', undefined);
+    walkUntilDone(arena);
+    arena.frame();
+
+    const center = positionForBodyTile(DESK_CENTER);
+    expect(Math.hypot(arena.player.x - center.x, arena.player.y - center.y)).toBeLessThanOrEqual(ARRIVE_EPSILON_PX);
+    expect(connector.sits).toEqual([]);
   });
 
   describe('locked spaces', () => {
@@ -760,7 +799,7 @@ describe('auto-walk around walls and desks (#219, #221)', () => {
   it('walkToOwnDesk does nothing without an own desk', async () => {
     const connector = fakeConnector('mi-sesion');
     const arena = await movementArena(connector);
-    ownDeskWithChair(arena, connector, false);
+    ownDesk(arena, connector, [DESK_CENTER], false);
 
     arena.bridge.emitCommand('walkToOwnDesk', undefined);
 
