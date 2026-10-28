@@ -50,7 +50,7 @@ export const DECOR_COLORS: readonly Swatch[] = [
 ];
 
 /** Under the doors (#223, #233): where they go, since nothing else on the map says so. */
-const DOOR_HINT = 'Va entre dos paredes, una en cada extremo: la puerta ocupa 2 casillas y la doble 4.';
+const DOOR_HINT = 'Va entre dos paredes, una en cada extremo: la puerta ocupa 2 casillas y la doble 3.';
 
 /** The thumbnail box, in pixels. */
 const THUMBNAIL_PX = 48;

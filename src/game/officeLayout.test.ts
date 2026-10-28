@@ -884,6 +884,15 @@ describe('wall openings: doors (#223)', () => {
     expect(double).toContainEqual({ x: 128, y: 56, w: 8, h: 16 });
   });
 
+  it('leaves no rectangle at a post inside a door span, even when the wall past it is gone', () => {
+    const walls = new Array<string | null>(width * height).fill(null);
+    for (const tx of [1, 2, 4]) walls[2 * width + tx] = 'wall-brick';
+    // Edges 1, 2 and 3 open: the post at 2 has a wall only to the west, the one at 3 is gone.
+    const openings = [1, 2, 3].map((col) => ({ col, row: 2, axis: 'horizontal' as const }));
+    const rects = wallFootprintRects({ width, height, walls, openings });
+    expect(rects.filter((rect) => rect.x >= 48 && rect.x < 112)).toEqual([]);
+  });
+
   it('opens nothing where the edge has no joined wall: a missing post', () => {
     const lone = run();
     lone[2 * width + 3] = null;

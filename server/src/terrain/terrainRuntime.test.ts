@@ -787,7 +787,7 @@ describe('createTerrainRuntime doors (#223, #233)', () => {
   const CATALOG = [
     { id: 'chair-wood', kind: 'chair', retired: false },
     { id: 'door-wood', kind: 'door', retired: false, footprint: { w: 2, h: 1 } },
-    { id: 'door-wood-double', kind: 'door', retired: false, footprint: { w: 4, h: 1 } },
+    { id: 'door-wood-double', kind: 'door', retired: false, footprint: { w: 3, h: 1 } },
   ];
   /**
    * A closed room of tiles 65..68 x 22..25: brick posts all round the vertices
@@ -796,8 +796,8 @@ describe('createTerrainRuntime doors (#223, #233)', () => {
   const WALL: [number, 'wall-brick' | 'wall-glass'][] = [];
   for (let tx = 65; tx <= 69; tx += 1) WALL.push([at(tx, 22), tx === 69 ? 'wall-glass' : 'wall-brick'], [at(tx, 26), 'wall-brick']);
   for (let ty = 23; ty <= 25; ty += 1) WALL.push([at(65, ty), 'wall-brick'], [at(69, ty), 'wall-brick']);
-  /** Posts only, no wall between them: 72 and 74 end a door, 72 and 76 a double door (row 22). */
-  const ENDS: [number, 'wall-brick'][] = [72, 74, 76].map((tx) => [at(tx, 22), 'wall-brick']);
+  /** Posts only, no wall between them: 72 and 74 end a door, 72 and 75 a double door (row 22). */
+  const ENDS: [number, 'wall-brick'][] = [72, 74, 75].map((tx) => [at(tx, 22), 'wall-brick']);
   const DOOR = { piece: 'door-wood', rotation: 0 } as const;
   const DOUBLE = { piece: 'door-wood-double', rotation: 0 } as const;
   const runtimeWith = (store = createMemoryTerrain([], WALL)) =>
@@ -851,22 +851,23 @@ describe('createTerrainRuntime doors (#223, #233)', () => {
     expect(await store.loadWalls()).toEqual(wallsBefore);
   });
 
-  it('places a double door as one decor item that opens the four edges of its span, between posts with or without a wall', async () => {
+  it('places a double door as one decor item that opens the three edges of its span, between posts with or without a wall', async () => {
     const bare = createMemoryTerrain([], ENDS);
     const free = runtimeWith(bare);
     await free.load();
     await free.setDecor([{ index: at(72, 22), item: DOUBLE }], null);
     expect(free.decor()).toEqual([{ index: at(72, 22), ...DOUBLE }]);
     expect(await bare.loadDecor()).toEqual(free.decor());
-    expect(free.snapshot().openings).toEqual(edges([72, 73, 74, 75]));
+    expect(free.snapshot().openings).toEqual(edges([72, 73, 74]));
 
-    // On the room's top wall, corner post to corner post (brick to glass): the whole wall opens, nothing past it does.
+    // On the room's top wall, from its top-left corner to the third post: three edges open, the last one stays wall.
     const runtime = runtimeWith();
     await runtime.load();
     await runtime.setDecor([{ index: at(65, 22), item: DOUBLE }], null);
     expect(runtime.decor()).toEqual([{ index: at(65, 22), ...DOUBLE }]);
-    expect(runtime.snapshot().openings).toEqual(edges([65, 66, 67, 68]));
-    for (const tx of [65, 66, 67, 68]) expect(passes(runtime, ...through(tx))).toBe(true);
+    expect(runtime.snapshot().openings).toEqual(edges([65, 66, 67]));
+    for (const tx of [65, 66, 67]) expect(passes(runtime, ...through(tx))).toBe(true);
+    expect(passes(runtime, ...through(68))).toBe(false);
     // The side walls of the room stay.
     expect(passes(runtime, 65 * TILE, 24 * TILE + TILE / 2)).toBe(false);
     expect(passes(runtime, 69 * TILE, 24 * TILE + TILE / 2)).toBe(false);
@@ -908,7 +909,7 @@ describe('createTerrainRuntime doors (#223, #233)', () => {
     const before = { decor: await store.loadDecor(), walls: await store.loadWalls(), openings: runtime.snapshot().openings };
 
     const refused = [
-      // A post missing at the start (73, 71), at the far end (a vertical span down from 72, a double door whose far end is 74 not 76).
+      // A post missing at the start (73, 71), at the far end (a vertical span down from 72, a double door at 74 has no post at its far end, 77).
       { index: at(73, 22), item: DOOR },
       { index: at(71, 22), item: DOOR },
       { index: at(72, 22), item: { piece: 'door-wood', rotation: 90 } },
@@ -968,19 +969,19 @@ describe('createTerrainRuntime doors (#223, #233)', () => {
     expect(passes(runtime, ...through(66))).toBe(false);
   });
 
-  it('removes a double door in one piece: its four edges close, saved', async () => {
+  it('removes a double door in one piece: its three edges close, saved', async () => {
     const store = createMemoryTerrain([], WALL);
     const runtime = runtimeWith(store);
     await runtime.load();
     await runtime.setDecor([{ index: at(65, 22), item: DOUBLE }], null);
-    expect(runtime.snapshot().openings).toEqual(edges([65, 66, 67, 68]));
+    expect(runtime.snapshot().openings).toEqual(edges([65, 66, 67]));
 
     await runtime.setDecor([{ index: at(65, 22), item: null }], 'admin-1');
 
     expect(runtime.decor()).toEqual([]);
     expect(await store.loadDecor()).toEqual([]);
     expect(runtime.snapshot().openings).toEqual([]);
-    for (const tx of [65, 66, 67, 68]) expect(passes(runtime, ...through(tx))).toBe(false);
+    for (const tx of [65, 66, 67]) expect(passes(runtime, ...through(tx))).toBe(false);
   });
 
   it('refuses to erase a post that ends a door, data unchanged, and lets the rest of the wall change', async () => {
@@ -1018,12 +1019,12 @@ describe('createTerrainRuntime doors (#223, #233)', () => {
     await runtime.setDecor([{ index: at(72, 22), item: DOUBLE }], null);
     const saved = await store.loadWalls();
 
-    for (const tx of [72, 76]) await expect(runtime.setWalls([{ index: at(tx, 22), piece: null }], null, NONE)).rejects.toThrow(TerrainProtectedError);
+    for (const tx of [72, 75]) await expect(runtime.setWalls([{ index: at(tx, 22), piece: null }], null, NONE)).rejects.toThrow(TerrainProtectedError);
     // The post at 74 is not one of its ends.
     await runtime.setWalls([{ index: at(74, 22), piece: null }], null, NONE);
     expect(runtime.walls()[at(74, 22)]).toBeNull();
     expect([...(await store.loadWalls())]).toEqual([...saved].filter(([index]) => index !== at(74, 22)));
-    expect(runtime.snapshot().openings).toEqual(edges([72, 73, 74, 75]));
+    expect(runtime.snapshot().openings).toEqual(edges([72, 73, 74]));
   });
 
   it('repaints the posts a door stands on and keeps the door: still open, still on its edges, across two materials', async () => {
@@ -1069,11 +1070,11 @@ describe('createTerrainRuntime doors (#223, #233)', () => {
   it('opens the stored doors at load, single and double, and keeps them open through a block edit', async () => {
     const runtime = runtimeWith(createMemoryTerrain([], [...WALL, ...ENDS], [{ index: at(66, 22), ...DOOR }, { index: at(72, 22), ...DOUBLE }]));
     await runtime.load();
-    expect(runtime.snapshot().openings).toEqual([...edges([66, 67]), ...edges([72, 73, 74, 75])]);
+    expect(runtime.snapshot().openings).toEqual([...edges([66, 67]), ...edges([72, 73, 74])]);
     expect(passes(runtime, ...through(66))).toBe(true);
 
     await runtime.setBlock({ index: LAWN, material: 'sand', actorId: null }, NONE);
-    expect(runtime.snapshot().openings).toEqual([...edges([66, 67]), ...edges([72, 73, 74, 75])]);
+    expect(runtime.snapshot().openings).toEqual([...edges([66, 67]), ...edges([72, 73, 74])]);
     expect(passes(runtime, ...through(66))).toBe(true);
   });
 });

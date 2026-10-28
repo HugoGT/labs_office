@@ -213,7 +213,7 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
     });
 
     describe('on a door (#232, #233)', () => {
-      // A wall along row 40, posts (39, 40)..(44, 40), and the doors on its line: a door spans 2 tiles, a double door 4.
+      // A wall along row 40, posts (39, 40)..(44, 40), and the doors on its line: a door spans 2 tiles, a double door 3.
       const WALL = withWalls(BASE_LAYOUT.walls, [39, 40, 41, 42, 43, 44].map((tx) => ({ index: at(tx, 40), piece: 'wall-brick' as const })));
       const LONE = [{ index: at(40, 40), piece: 'door-wood', rotation: 0 as const }];
       const DOUBLE = [{ index: at(40, 40), piece: 'door-wood-double', rotation: 0 as const }];
@@ -253,17 +253,17 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
         expect(decor.setDecor).not.toHaveBeenCalled();
       });
 
-      it('takes a double door off the post at either end of its four tiles, and erases the posts between', async () => {
+      it('takes a double door off the post at either end of its three tiles, and erases the posts between', async () => {
         const { bridge, decor, setWalls } = onWall(DOUBLE);
         await userEvent.click(await screen.findByRole('button', { name: 'Borrar' }));
 
-        act(() => bridge.emit('wallpick', { index: at(44, 40) }));
+        act(() => bridge.emit('wallpick', { index: at(43, 40) }));
         await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: null }]));
         expect(setWalls).not.toHaveBeenCalled();
 
         act(() => bridge.emit('decor', { items: DOUBLE }));
-        act(() => bridge.emit('wallpick', { index: at(43, 40) }));
-        await vi.waitFor(() => expect(setWalls).toHaveBeenCalledWith([{ index: at(43, 40), piece: null }]));
+        act(() => bridge.emit('wallpick', { index: at(42, 40) }));
+        await vi.waitFor(() => expect(setWalls).toHaveBeenCalledWith([{ index: at(42, 40), piece: null }]));
         expect(decor.setDecor).toHaveBeenCalledTimes(1);
       });
 

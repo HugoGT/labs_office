@@ -758,25 +758,25 @@ describe('doors (#223, #233)', () => {
     expect(doorFrameIndex(180, 'end', 3)).toBe(30);
   });
 
-  it('states the two variants: 1.4 tiles of leaf and 0.3 of jamb each side, 3.2 and 0.4 for the double door', () => {
+  it('states the two variants: 1.4 tiles of leaf and 0.3 of jamb each side, 2.2 and 0.4 for the double door', () => {
     expect(DOOR_VARIANTS).toEqual(['single', 'double']);
     expect(DOOR.variants).toEqual({
       single: { span: 2, leafLength: 44, jamb: 10 },
-      double: { span: 4, leafLength: 102, jamb: 13 },
+      double: { span: 3, leafLength: 70, jamb: 13 },
     });
     // Leaf and both jambs fill the span, in pixels.
     for (const { span, leafLength, jamb } of Object.values(DOOR.variants)) expect(leafLength + 2 * jamb).toBe(span * ART_TILE);
   });
 
-  it('tells the double door from the single one by the piece id: 2 and 4 tiles of wall', () => {
+  it('tells the double door from the single one by the piece id: 2 and 3 tiles of wall', () => {
     expect(doorVariantOf('door-wood')).toBe('single');
     expect(doorVariantOf('door-wood-double')).toBe('double');
     expect(doorSpanOf('door-wood')).toBe(2);
-    expect(doorSpanOf('door-wood-double')).toBe(4);
+    expect(doorSpanOf('door-wood-double')).toBe(3);
   });
 
   it('draws a door with its anchor on the middle of its span', () => {
-    for (const span of [2, 4]) {
+    for (const span of [2, 3]) {
       expect(doorPlacement({ col: 4, row: 6, axis: 'horizontal' }, span)).toEqual({ x: 4 * 32 + (span * 32) / 2 - 64, y: 6 * 32 - 64 });
       expect(doorPlacement({ col: 4, row: 6, axis: 'vertical' }, span)).toEqual({ x: 4 * 32 - 64, y: 6 * 32 + (span * 32) / 2 - 64 });
     }
@@ -796,8 +796,8 @@ describe('doors (#223, #233)', () => {
     expect(doorDepthY(vertical, 'door-wood', 90, 'start', 3)).toBeCloseTo(6 * 32 + 10 + 3);
     expect(doorDepthY(vertical, 'door-wood', 90, 'start', 2)).toBeCloseTo(6 * 32 + 10 + 44 * Math.cos(Math.PI / 3) + 3 * Math.sin(Math.PI / 3));
     // A double door's second leaf hinges at the south end, so it keeps the depth near the end of the span.
-    expect(doorDepthY(vertical, 'door-wood-double', 90, 'start', 0)).toBeCloseTo(6 * 32 + 115);
-    expect(doorDepthY(vertical, 'door-wood-double', 90, 'start', 3)).toBeCloseTo(6 * 32 + 115 + 3);
+    expect(doorDepthY(vertical, 'door-wood-double', 90, 'start', 0)).toBeCloseTo(6 * 32 + 83);
+    expect(doorDepthY(vertical, 'door-wood-double', 90, 'start', 3)).toBeCloseTo(6 * 32 + 83 + 3);
   });
 
 });

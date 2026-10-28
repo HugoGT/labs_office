@@ -275,9 +275,9 @@ describe('officeDecor: edits and wire form', () => {
 
 describe('officeDecor: doors (#223, #233)', () => {
   const DOOR: DecorPieceInfo = { kind: 'door', footprint: { w: 2, h: 1 } };
-  const DOUBLE: DecorPieceInfo = { kind: 'door', footprint: { w: 4, h: 1 } };
+  const DOUBLE: DecorPieceInfo = { kind: 'door', footprint: { w: 3, h: 1 } };
 
-  it('knows a door by its id alone: two tiles wide, a double door four, both turned four ways', () => {
+  it('knows a door by its id alone: two tiles wide, a double door three, both turned four ways', () => {
     expect(decorInfoFromPieceId('door-wood')).toEqual(DOOR);
     expect(decorInfoFromPieceId('door-wood-double')).toEqual(DOUBLE);
     expect(isRotatable('door')).toBe(true);
@@ -287,7 +287,7 @@ describe('officeDecor: doors (#223, #233)', () => {
 
   it('takes the footprint of a door from the catalog, and knows no door that states none', () => {
     expect(decorPieceInfo({ kind: 'door', footprint: { w: 2, h: 1 } })).toEqual(DOOR);
-    expect(decorPieceInfo({ kind: 'door', footprint: { w: 4, h: 1 } })).toEqual(DOUBLE);
+    expect(decorPieceInfo({ kind: 'door', footprint: { w: 3, h: 1 } })).toEqual(DOUBLE);
     // A door states its span; unlike a chair there is no fixed footprint to fall back on.
     expect(decorPieceInfo({ kind: 'door' })).toBeNull();
     expect(decorPieceInfo({ kind: 'door', footprint: { w: 0, h: 1 } })).toBeNull();
@@ -301,13 +301,13 @@ describe('officeDecor: doors (#223, #233)', () => {
     expect(decorTiles({ index: at(4, 6), rotation: 0 }, DOOR, WIDTH)).toEqual([at(4, 5), at(5, 5), at(4, 6), at(5, 6)]);
   });
 
-  it('covers the four tiles of a double door along the line, and one item holds them all', () => {
-    expect(decorFootprint({ index: at(4, 6), rotation: 0 }, DOUBLE, WIDTH)).toEqual({ x: 4, y: 5, w: 4, h: 2 });
-    expect(decorFootprint({ index: at(4, 6), rotation: 90 }, DOUBLE, WIDTH)).toEqual({ x: 3, y: 6, w: 2, h: 4 });
-    expect(decorFootprint({ index: at(4, 6), rotation: 270 }, DOUBLE, WIDTH)).toEqual({ x: 3, y: 6, w: 2, h: 4 });
+  it('covers the three tiles of a double door along the line, and one item holds them all', () => {
+    expect(decorFootprint({ index: at(4, 6), rotation: 0 }, DOUBLE, WIDTH)).toEqual({ x: 4, y: 5, w: 3, h: 2 });
+    expect(decorFootprint({ index: at(4, 6), rotation: 90 }, DOUBLE, WIDTH)).toEqual({ x: 3, y: 6, w: 2, h: 3 });
+    expect(decorFootprint({ index: at(4, 6), rotation: 270 }, DOUBLE, WIDTH)).toEqual({ x: 3, y: 6, w: 2, h: 3 });
     expect(decorTiles({ index: at(4, 6), rotation: 0 }, DOUBLE, WIDTH)).toEqual([
-      at(4, 5), at(5, 5), at(6, 5), at(7, 5),
-      at(4, 6), at(5, 6), at(6, 6), at(7, 6),
+      at(4, 5), at(5, 5), at(6, 5),
+      at(4, 6), at(5, 6), at(6, 6),
     ]);
   });
 

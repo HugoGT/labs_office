@@ -135,10 +135,10 @@ describe('materialCatalogFrom: doors (#223, #233)', () => {
     expect(catalog().door.every((option) => option.defaultColor === null)).toBe(true);
   });
 
-  it('a door previews its closed leaf over the whole span: two tiles wide for a single door, four for a double one, around the anchor', () => {
+  it('a door previews its closed leaf over the whole span: two tiles wide for a single door, three for a double one, around the anchor', () => {
     // The 128 x 128 frame has its anchor in the middle of the span (64, 64); the crop is 24 rows across the edge.
     expect(previewFrame(catalog().door[0]!)).toEqual({ x: 64 - 32, y: 64 - 12, width: 64, height: 24 });
-    expect(previewFrame(catalog().door[1]!)).toEqual({ x: 64 - 64, y: 64 - 12, width: 128, height: 24 });
+    expect(previewFrame(catalog().door[1]!)).toEqual({ x: 64 - 48, y: 64 - 12, width: 96, height: 24 });
   });
 });
 

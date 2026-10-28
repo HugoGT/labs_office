@@ -4848,23 +4848,23 @@ describe('OfficeScene: edited terrain', () => {
     expect(frame()).toBe(doorFrameIndex(180, 'start', DOOR_STEPS - 1));
   });
 
-  it('draws a double door from the pack as one item over its 4-tile span, opening while an avatar passes and closing after (#233)', async () => {
+  it('draws a double door from the pack as one item over its 3-tile span, opening while an avatar passes and closing after (#233)', async () => {
     const { scene, handlers } = await bootConnected();
-    // End posts on vertices 67 and 71 of row 22, the wall between them.
-    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1, 2, 3, 4].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
+    // End posts on vertices 67 and 70 of row 22, the wall between them.
+    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1, 2, 3].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
     handlers.onDecor!([{ index: lawnTile, piece: 'door-wood-double', rotation: 0 }]);
     const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
     await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood-double', 'sheet')), LOOP_WAIT);
     const frame = () => Number(leaf().frame.name);
     const closed = doorFrameIndex(0, 'start', 0);
-    // Anchored on the middle of the 4-tile span, sorted like the wall body.
-    expect(leaf().x).toBe(lawnVertex.x + 2 * TILE - 64);
+    // Anchored on the middle of the 3-tile span, sorted like the wall body.
+    expect(leaf().x).toBe(lawnVertex.x + (3 * TILE) / 2 - 64);
     expect(leaf().y).toBe(lawnVertex.y - 64);
     await vi.waitFor(() => expect(frame()).toBe(closed), LOOP_WAIT);
-    await vi.waitFor(() => expect(solidAt(scene, lawnVertex.x + 3 * TILE + TILE / 2, lawnVertex.y)).toBe(false), LOOP_WAIT);
+    await vi.waitFor(() => expect(solidAt(scene, lawnVertex.x + 2 * TILE + TILE / 2, lawnVertex.y)).toBe(false), LOOP_WAIT);
 
     // A remote avatar in the doorway of the last tile of the span opens the whole door, swung south for whoever comes from the north.
-    handlers.onAdd(remoteSnapshot({ sessionId: 'peer-door', x: lawnVertex.x + 3 * TILE + TILE / 2, y: lawnVertex.y - 11 }));
+    handlers.onAdd(remoteSnapshot({ sessionId: 'peer-door', x: lawnVertex.x + 2 * TILE + TILE / 2, y: lawnVertex.y - 11 }));
     await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(0, 'start', DOOR_STEPS - 1)), LOOP_WAIT);
     handlers.onRemove('peer-door');
     await vi.waitFor(() => expect(frame()).toBe(closed), LOOP_WAIT);

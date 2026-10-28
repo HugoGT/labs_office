@@ -54,7 +54,7 @@ describe('DecorPalette', () => {
   it('tells under the doors where they go, how wide they are, and that X locks or unlocks one (#223, #233)', () => {
     render(<DecorPalette value={null} catalog={catalog} onPick={() => {}} preview={noPreview()} />);
     const doors = screen.getByRole('group', { name: 'Puertas' }).parentElement!;
-    expect(within(doors).getByText('Va entre dos paredes, una en cada extremo: la puerta ocupa 2 casillas y la doble 4.')).toBeInTheDocument();
+    expect(within(doors).getByText('Va entre dos paredes, una en cada extremo: la puerta ocupa 2 casillas y la doble 3.')).toBeInTheDocument();
   });
 
   it('shows the size of each room table on its tile, the horizontal one', () => {
@@ -100,7 +100,7 @@ describe('DecorPalette', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Puerta doble de madera' }));
     expect(onPick.mock.calls).toEqual([
       [{ id: 'door-wood', info: { kind: 'door', footprint: { w: 2, h: 1 } } }],
-      [{ id: 'door-wood-double', info: { kind: 'door', footprint: { w: 4, h: 1 } } }],
+      [{ id: 'door-wood-double', info: { kind: 'door', footprint: { w: 3, h: 1 } } }],
     ]);
   });
 
@@ -159,7 +159,7 @@ describe('catalogDecorInfo', () => {
     expect(infoOf('desk-painted')).toEqual({ kind: 'desk', footprint: { w: 3, h: 1 }, colorable: true });
     expect(infoOf('chair-wood')).toEqual({ kind: 'chair', footprint: { w: 1, h: 1 } });
     expect(infoOf('door-wood')).toEqual({ kind: 'door', footprint: { w: 2, h: 1 } });
-    expect(infoOf('door-wood-double')).toEqual({ kind: 'door', footprint: { w: 4, h: 1 } });
+    expect(infoOf('door-wood-double')).toEqual({ kind: 'door', footprint: { w: 3, h: 1 } });
     expect(infoOf('table-nope')).toBeNull();
     expect(catalogDecorInfo(null)('chair-wood')).toBeNull();
   });

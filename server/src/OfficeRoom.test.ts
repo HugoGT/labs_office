@@ -2496,7 +2496,7 @@ describe('OfficeRoom: doors (#223, #233)', () => {
   const POSTS: (readonly [number, 'wall-brick'])[] = [];
   for (let x = 64; x <= 75; x += 1) POSTS.push([tile(x, 22), 'wall-brick']);
   for (let y = 23; y <= 26; y += 1) POSTS.push([tile(64, y), 'wall-brick']);
-  /** A door (posts 66 and 68), a double door (posts 70 and 74) and a vertical door (posts (64, 24) and (64, 26)). */
+  /** A door (posts 66 and 68), a double door (posts 70 and 73) and a vertical door (posts (64, 24) and (64, 26)). */
   const SINGLE = tile(66, 22);
   const DOUBLE = tile(70, 22);
   const SIDE = tile(64, 24);
@@ -2533,9 +2533,9 @@ describe('OfficeRoom: doors (#223, #233)', () => {
     await moveTo(ana, south(67));
   });
 
-  it('walks through a double door along its whole 4-tile span, and through a vertical door', async () => {
+  it('walks through a double door along its whole 3-tile span, and through a vertical door', async () => {
     const ana = await join('Ana');
-    for (const tx of [70, 71, 72, 73]) {
+    for (const tx of [70, 71, 72]) {
       await moveTo(ana, north(tx));
       await moveTo(ana, south(tx));
     }

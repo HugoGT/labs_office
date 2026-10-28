@@ -841,7 +841,7 @@ export const DOOR: DoorSpec = {
   leafThickness: 6,
   variants: {
     single: { span: 2, leafLength: 44, jamb: 10 },
-    double: { span: 4, leafLength: 102, jamb: 13 },
+    double: { span: 3, leafLength: 70, jamb: 13 },
   },
 };
 
@@ -850,7 +850,7 @@ export function doorVariantOf(piece: string): DoorVariant {
   return piece.endsWith('-double') ? 'double' : 'single';
 }
 
-/** How many tiles of a wall's line a door piece spans (2 or 4). */
+/** How many tiles of a wall's line a door piece spans (2 or 3). */
 export function doorSpanOf(piece: string): number {
   return DOOR.variants[doorVariantOf(piece)].span;
 }
@@ -1235,7 +1235,7 @@ export type ArtPropPiece = ArtTreePiece | ArtPlantPiece | ArtTablePiece | ArtHed
  * A door of the decor layer (#223): one sheet of `DOOR` frames. It stands on
  * a wall's line, never on a tile, so it states its anchor (the middle of its
  * span in its frame) and the tiles of wall it fills along the line: 2 for a
- * single door, 4 for a double one (#233, `doorSpanOf`).
+ * single door, 3 for a double one (#233, `doorSpanOf`).
  */
 export interface ArtDoorPiece extends ArtPieceBase {
   readonly kind: 'door';

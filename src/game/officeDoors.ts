@@ -3,7 +3,7 @@
  * (`officeDecor.ts`) that stands on a wall's grid line instead of on a tile.
  * Its anchor tile names the first edge it spans: the top edge of the tile for
  * rotation 0 and 180, the left one for 90 and 270. A door spans 2 tiles of the
- * line, a double door 4 (`doorSpanOf`): the leaf in the middle and a jamb at
+ * line, a double door 3 (`doorSpanOf`): the leaf in the middle and a jamb at
  * each end that merges with the wall there. Its rotation is the side it opens
  * into, the chair's facing (`decorChairFacing`: 0 down, 90 right, 180 up, 270
  * left). A door goes between two standing wall posts (`doorOnWall`), one at
@@ -42,7 +42,7 @@ function anchorOf(item: Pick<DecorItem, 'index'>, width: number): { tx: number; 
   return { tx: item.index % width, ty: Math.floor(item.index / width) };
 }
 
-/** How many tiles of wall a door spans: 2 for a door, 4 for a double door. */
+/** How many tiles of wall a door spans: 2 for a door, 3 for a double door. */
 export function doorSpan(item: Pick<DecorItem, 'piece'>): number {
   return doorSpanOf(item.piece);
 }

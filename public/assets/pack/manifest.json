@@ -1883,7 +1883,7 @@
         "y": 64
       },
       "footprint": {
-        "w": 4,
+        "w": 3,
         "h": 1
       },
       "files": [
@@ -1893,7 +1893,7 @@
           "imageKind": "door",
           "width": 512,
           "height": 1024,
-          "sha256": "c75ed4a27c655cdba2c84d7b9736eeac7ef6371df8cd82410161d79582d27ded"
+          "sha256": "84548dc6bf36a1780764fd92784dffd3dd81de629938cc8ffda483fd1d3ec180"
         }
       ]
     }
