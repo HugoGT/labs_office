@@ -41,11 +41,43 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
     cameraFilter: 'none' as const,
     cameraBlurAvailable: true,
     onChangeCameraFilter: vi.fn(),
+    hasDesk: true,
+    onGoToDesk: vi.fn(),
     ...overrides,
   };
   render(<BottomBar {...props} />);
   return props;
 }
+
+describe('BottomBar: own desk button', () => {
+  it('sits in the status group, between the status select and Mic', () => {
+    renderBar();
+
+    const button = within(screen.getByRole('group', { name: 'Identidad' })).getByRole('button', { name: 'Ir a mi escritorio' });
+    expect(button).toHaveTextContent('🪑');
+    const select = screen.getByRole('combobox', { name: 'Mi estado' });
+    const mic = screen.getByRole('button', { name: /Mic/ });
+    expect(select.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(button.compareDocumentPosition(mic) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('asks to walk to the own desk on click', async () => {
+    const user = userEvent.setup();
+    const props = renderBar();
+
+    await user.click(screen.getByRole('button', { name: 'Ir a mi escritorio' }));
+
+    expect(props.onGoToDesk).toHaveBeenCalledTimes(1);
+  });
+
+  it('is disabled with its reason without an own desk', () => {
+    renderBar({ hasDesk: false });
+
+    const button = screen.getByRole('button', { name: 'Ir a mi escritorio' });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('title', 'No tienes un escritorio reclamado');
+  });
+});
 
 describe('BottomBar: retiro de los chips de cercania (issue #17, D9)', () => {
   it('no renderiza ningun chip: cada companero audible ahora tiene su propia tile de video', () => {
@@ -133,6 +165,8 @@ describe('BottomBar', () => {
         cameraFilter="none"
         cameraBlurAvailable
         onChangeCameraFilter={vi.fn()}
+        hasDesk
+        onGoToDesk={vi.fn()}
       />,
     );
     expect(screen.getByText('proximidad').tagName).toBe('B');
@@ -159,6 +193,8 @@ describe('BottomBar', () => {
         cameraFilter="none"
         cameraBlurAvailable
         onChangeCameraFilter={vi.fn()}
+        hasDesk
+        onGoToDesk={vi.fn()}
       />,
     );
     expect(screen.getByText('Cafeteria').tagName).toBe('B');
@@ -252,6 +288,8 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
         cameraFilter="none"
         cameraBlurAvailable
         onChangeCameraFilter={vi.fn()}
+        hasDesk
+        onGoToDesk={vi.fn()}
       />,
     );
     // El punto es decorativo y no lleva marcado de prueba: se alcanza desde
@@ -281,6 +319,8 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
         cameraFilter="none"
         cameraBlurAvailable
         onChangeCameraFilter={vi.fn()}
+        hasDesk
+        onGoToDesk={vi.fn()}
       />,
     );
     expect(dot).toHaveStyle({ background: statusCssColor('r') });
@@ -602,6 +642,8 @@ describe('BottomBar: indicador de grabacion junto a "Sala privada" (#85)', () =>
         cameraFilter="none"
         cameraBlurAvailable
         onChangeCameraFilter={vi.fn()}
+        hasDesk
+        onGoToDesk={vi.fn()}
       />,
     );
     expect(screen.getByText(/REC/)).toBeInTheDocument();
@@ -628,6 +670,8 @@ describe('BottomBar: indicador de grabacion junto a "Sala privada" (#85)', () =>
         cameraFilter="none"
         cameraBlurAvailable
         onChangeCameraFilter={vi.fn()}
+        hasDesk
+        onGoToDesk={vi.fn()}
       />,
     );
     expect(screen.queryByText(/REC/)).not.toBeInTheDocument();

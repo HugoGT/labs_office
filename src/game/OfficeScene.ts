@@ -36,9 +36,9 @@ import {
 import { deskAt, deskZoneName } from './deskLayout';
 import { SPACE_SHADE_ALPHA, SPACE_SHADE_NAME, shadeAround, shadeKey } from './spaceFocus';
 import { tableFacing, tableFloorRect } from './deskTable';
-import { decorChairs, decorFootprint, encodeOfficeDecor, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
+import { decorChairs, decorFootprint, encodeOfficeDecor, isDecorChairPiece, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
 import { doorEdge, doorLeaves, doorOpenings, doorSpan, doorStepOf, doorSwingRotation, keptSwings, moveDoors, openDoorLeaves, type DoorLeaf, type DoorMotion } from './officeDoors';
-import { deskEntryRefused } from './deskDecorRules';
+import { deskEntryRefused, isOnDesk } from './deskDecorRules';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
 import { MinimapLayer } from './MinimapLayer';
@@ -120,6 +120,7 @@ import { audiblePeersWithVersionGrace, type AudioPeer } from './proximityAudio';
 import {
   BASE_MAP_SEATS,
   CHAIR_PIECES,
+  SEAT_REACH_TILES,
   chairGround,
   chairSeatId,
   chairSeatTiles,
@@ -324,6 +325,8 @@ export class OfficeScene extends Phaser.Scene {
   private seat: ResolvedSeat | null = null;
   /** Seat asked for and not answered yet; moving forgets it. */
   private pendingSeat: string | null = null;
+  /** The own desk chair a `walkToOwnDesk` walk asks for once it arrives; any other walk forgets it. */
+  private seatAfterWalk: string | null = null;
   /** Push and idle sit dwells and re-sit guards (`autoSit.ts`), fed the keyboard and the auto-walk every frame. */
   private autoSit: AutoSitState = IDLE_AUTO_SIT;
   /**
@@ -383,6 +386,7 @@ export class OfficeScene extends Phaser.Scene {
   private unsubscribeRespondCall?: () => void;
   private unsubscribeWalkToPeer?: () => void;
   private unsubscribeToggleSeat?: () => void;
+  private unsubscribeWalkToOwnDesk?: () => void;
   private unsubscribeSpacesConfig?: () => void;
   private unsubscribeDesks?: () => void;
   private unsubscribeReconnect?: () => void;
@@ -736,6 +740,7 @@ export class OfficeScene extends Phaser.Scene {
       this.walkToPeer(sessionId);
     });
     this.unsubscribeToggleSeat = this.bridge.onCommand('toggleSeat', () => this.toggleSeat());
+    this.unsubscribeWalkToOwnDesk = this.bridge.onCommand('walkToOwnDesk', () => this.walkToOwnDesk());
 
     // #7, slice 3. Llega una sola vez por sesion, poco despues de arrancar.
     this.unsubscribeSpacesConfig = this.bridge.onCommand('spacesconfig', ({ spaces, version }) => {
@@ -892,6 +897,7 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeRespondCall?.();
       this.unsubscribeWalkToPeer?.();
       this.unsubscribeToggleSeat?.();
+      this.unsubscribeWalkToOwnDesk?.();
       this.unsubscribeSpacesConfig?.();
       this.unsubscribeDesks?.();
       this.unsubscribeReconnect?.();
@@ -2279,12 +2285,67 @@ export class OfficeScene extends Phaser.Scene {
    * body would stand, not by the tile under the click.
    */
   private startWalk(goal: { x: number; y: number }): boolean {
+    this.seatAfterWalk = null;
     const route = planWalk(this.walkWorld(), this.player, goal);
     if (route === null) return false;
     this.standUp();
     // The last stop is the goal itself: it stays the walk's destination.
     this.autoWalk = beginAutoWalk(goal, this.player, route.slice(0, -1));
     return true;
+  }
+
+  /**
+   * The desk button: the closest free chair of the own desk by route length,
+   * walked to with the same planner as a double click, and asked for on
+   * arrival. The goal is a tile of the chair's reach ring, since the planner
+   * refuses a goal the body does not fit on and a chair collides. Without a
+   * free chair it walks into the desk area, like `walkToPeer` into a space.
+   */
+  private walkToOwnDesk(): void {
+    if (!this.localPositionReady) return;
+    const deskIndex = this.desks.findIndex((desk) => desk.mine);
+    const area = this.deskAreas[deskIndex];
+    if (area === undefined) return;
+    const infoOf = decorInfoFromManifest(this.art.manifest);
+    const width = this.layout.width;
+    const onDesk = new Set(
+      this.officeDecor
+        .filter((item) => isDecorChairPiece(item.piece) && isOnDesk(item, infoOf(item.piece), area, width))
+        .map((item) => chairSeatId(item.index)),
+    );
+    if (this.seat !== null && onDesk.has(this.seat.id)) return;
+    const chairs = this.freeSeats().filter((seat) => onDesk.has(seat.id));
+
+    const inReach = chairs.find((seat) => inSeatReach(this.player, seat.reach));
+    if (inReach !== undefined) {
+      this.resetWalking();
+      this.requestSeat(inReach);
+      return;
+    }
+
+    let best: { seat: ResolvedSeat; goal: { x: number; y: number }; length: number } | null = null;
+    const world = this.walkWorld();
+    for (const seat of chairs) {
+      for (let ty = seat.reach.y0 - SEAT_REACH_TILES; ty <= seat.reach.y1 + SEAT_REACH_TILES; ty++) {
+        for (let tx = seat.reach.x0 - SEAT_REACH_TILES; tx <= seat.reach.x1 + SEAT_REACH_TILES; tx++) {
+          const goal = positionForBodyTile({ tx, ty });
+          if (!inSeatReach(goal, seat.reach)) continue;
+          const route = planWalk(world, this.player, goal);
+          if (route === null) continue;
+          const length = routeLength(this.player, route);
+          if (best === null || length < best.length) best = { seat, goal, length };
+        }
+      }
+    }
+    if (best !== null) {
+      if (this.startWalk(best.goal)) this.seatAfterWalk = best.seat.id;
+      return;
+    }
+
+    const deskTiles: TileRect = { x0: area.x, y0: area.y, x1: area.x + area.w - 1, y1: area.y + area.h - 1 };
+    const center = { tx: area.x + Math.floor(area.w / 2), ty: area.y + Math.floor(area.h / 2) };
+    const destination = pickApproachTile(this.grid, bodyTileOf(this.player), center, deskTiles);
+    if (destination) this.startWalk(positionForBodyTile(destination));
   }
 
   update(time: number, delta: number): void {
@@ -2489,10 +2550,25 @@ export class OfficeScene extends Phaser.Scene {
       this.walkingMs = 0;
       this.walkingIdleMs = 0;
       body.setVelocity(0, 0);
+      // The chair may have been taken on the way: only a still free one is asked for.
+      const seat = this.freeSeats().find((candidate) => candidate.id === this.seatAfterWalk);
+      this.seatAfterWalk = null;
+      if (seat !== undefined && inSeatReach(this.player, seat.reach)) this.requestSeat(seat);
     }
   }
 }
 
 function facingFromSnapshot(facing: string): Facing {
   return facing === 'up' || facing === 'down' || facing === 'left' || facing === 'right' ? facing : DEFAULT_FACING;
+}
+
+/** Path length from `from` through every stop of a planned route. */
+function routeLength(from: { x: number; y: number }, route: readonly { x: number; y: number }[]): number {
+  let length = 0;
+  let at = from;
+  for (const stop of route) {
+    length += Math.hypot(stop.x - at.x, stop.y - at.y);
+    at = stop;
+  }
+  return length;
 }

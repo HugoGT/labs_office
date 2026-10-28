@@ -1014,6 +1014,21 @@ describe('OfficeShell: escritorios asignables (#7, slice 5)', () => {
     await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalledTimes(3));
   });
 
+  it('the desk button sends the scene to the own desk once a desk is mine', async () => {
+    const user = userEvent.setup();
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([{ ...MESA, mine: true, occupant: { id: 'id-yo', displayName: 'Yo' } }]);
+    render(<OfficeShell session={SESION} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const commands: unknown[] = [];
+    bridge.onCommand('walkToOwnDesk', (payload) => commands.push(payload));
+    const button = screen.getByRole('button', { name: 'Ir a mi escritorio' });
+    await vi.waitFor(() => expect(button).toBeEnabled());
+
+    await user.click(button);
+
+    expect(commands).toHaveLength(1);
+  });
+
   it('manda la lista resuelta a la escena por comando, no por prop', async () => {
     // Misma razon que `spacesconfig`: por prop entraria en las dependencias
     // del efecto de `GameCanvas` y recrearia Phaser entero en cada refresco,

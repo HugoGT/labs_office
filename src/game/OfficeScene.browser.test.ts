@@ -733,6 +733,51 @@ describe('auto-walk around walls and desks (#219, #221)', () => {
     expect(overlaps(physicalBodyRect(player), desk)).toBe(false);
   });
 
+  /** An own desk at tiles (20..22, 9..11) with a chair on its top middle tile, and a free chair nearer the walker. */
+  function ownDeskWithChair(arena: Arena, connector: ReturnType<typeof fakeConnector>, mine = true) {
+    const desk: OfficeDesk = {
+      id: 'id-mi-mesa', label: 'Mesa 1', x: 20 * TILE, y: 9 * TILE, w: 3 * TILE, h: 3 * TILE,
+      occupant: mine ? { id: 'id-yo', displayName: 'Yo' } : null, mine,
+    };
+    const ownChair = 9 * BASE_LAYOUT.width + 21;
+    const decoyChair = 10 * BASE_LAYOUT.width + 12;
+    arena.bridge.emitCommand('desks', { desks: [desk] });
+    connector.handlers()!.onDecor?.([
+      { index: decoyChair, piece: 'chair-wood', rotation: 0 },
+      { index: ownChair, piece: 'chair-wood', rotation: 0 },
+    ]);
+    arena.movement.collisionRects = [];
+    arena.movement.buildPieceColliders();
+    const start = positionForBodyTile({ tx: 8, ty: 10 });
+    arena.body.reset(start.x, start.y);
+    arena.frame();
+    return { ownChair };
+  }
+
+  it('walkToOwnDesk walks to a chair of the own desk and sits on it, not on a nearer free chair', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    const { ownChair } = ownDeskWithChair(arena, connector);
+
+    arena.bridge.emitCommand('walkToOwnDesk', undefined);
+    expect(arena.movement.autoWalk).toBeDefined();
+    walkUntilDone(arena);
+    arena.frame();
+
+    expect(connector.sits).toEqual([chairSeatId(ownChair)]);
+  });
+
+  it('walkToOwnDesk does nothing without an own desk', async () => {
+    const connector = fakeConnector('mi-sesion');
+    const arena = await movementArena(connector);
+    ownDeskWithChair(arena, connector, false);
+
+    arena.bridge.emitCommand('walkToOwnDesk', undefined);
+
+    expect(arena.movement.autoWalk).toBeUndefined();
+    expect(connector.sits).toEqual([]);
+  });
+
   it('walkToPeer from a body pressed against a desk walks around it instead of into it (#219)', async () => {
     const connector = fakeConnector('mi-sesion');
     const arena = await movementArena(connector);

@@ -52,6 +52,10 @@ export interface BottomBarProps {
   /** This browser can blur: without it the option is shown disabled. */
   cameraBlurAvailable: boolean;
   onChangeCameraFilter: (filter: CameraFilter) => void;
+  /** The local user claimed a desk: the desk button has somewhere to go. */
+  hasDesk: boolean;
+  /** Walk to a chair of the own desk; the scene owns the route. */
+  onGoToDesk: () => void;
 }
 
 /** Explica el `disabled` de mic/camara cuando no hay conexion viva a LiveKit. */
@@ -64,6 +68,10 @@ const DND_TITLE = 'No molestar: no publicas micrófono ni cámara';
 const ONLY_IN_SPACE_TITLE = 'Solo disponible dentro de una sala';
 
 const SCREEN_SHARE_DND_TITLE = 'No molestar: no compartes pantalla';
+
+const GO_TO_DESK_LABEL = 'Ir a mi escritorio';
+
+const NO_DESK_TITLE = 'No tienes un escritorio reclamado';
 
 const NOTHING_TO_RECORD_TITLE = 'No hay cámaras, pantalla o audio que grabar';
 
@@ -108,6 +116,8 @@ export function BottomBar({
   cameraFilter,
   cameraBlurAvailable,
   onChangeCameraFilter,
+  hasDesk,
+  onGoToDesk,
 }: BottomBarProps) {
   // Se deriva del estado en vez de recibirse como prop propia: dos fuentes
   // para el mismo hecho acabarian discrepando en algun render.
@@ -151,6 +161,16 @@ export function BottomBar({
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          className={`${styles.btn} ${styles.iconBtn}`}
+          aria-label={GO_TO_DESK_LABEL}
+          disabled={!hasDesk}
+          title={hasDesk ? GO_TO_DESK_LABEL : NO_DESK_TITLE}
+          onClick={onGoToDesk}
+        >
+          🪑
+        </button>
       </div>
       <div className={styles.controls} role="toolbar" aria-label="Controles de llamada">
         {/* `disabled`+`title` mientras LiveKit no esta disponible, espejando el

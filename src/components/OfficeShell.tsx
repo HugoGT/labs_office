@@ -851,6 +851,8 @@ export function OfficeShell({
         cameraFilter={cameraFilter}
         cameraBlurAvailable={cameraBlurAvailable}
         onChangeCameraFilter={setCameraFilter}
+        hasDesk={myDesk !== null}
+        onGoToDesk={() => bridge.emitCommand('walkToOwnDesk', undefined)}
         // #52: la barra solo avisa; quien sabe reconectar es la escena, y el
         // comando viaja por `emitCommand` como el resto -- sin metodo de
         // conveniencia en el puente.

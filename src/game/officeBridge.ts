@@ -269,6 +269,11 @@ export interface OfficeCommandMap {
    */
   toggleSeat: undefined;
   /**
+   * The bottom bar's desk button: walk with the planner to a free chair of
+   * the own desk and sit on it. Without an own desk it does nothing.
+   */
+  walkToOwnDesk: undefined;
+  /**
    * Los 3 comandos de llamada (issue #2, D3) viajan solo por `emitCommand`,
    * como `setStatus`: ningun metodo de conveniencia (`bridge.callPeer()` no
    * existe) para no regrowth-ear el `window.officeAPI` que D1 retiro.

@@ -104,6 +104,8 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
       cameraFilter="none"
       cameraBlurAvailable
       onChangeCameraFilter={vi.fn()}
+      hasDesk
+      onGoToDesk={vi.fn()}
       {...overrides}
     />,
   );
