@@ -38,6 +38,7 @@ import { decideReconnect } from './reconnectPolicy';
 import type { RemotePlayerSnapshot } from './remoteAvatars';
 import { seatIdOf } from './seating';
 import { decodeOfficeDecor, type DecorItem } from './officeDecor';
+import { decodeLockedSpaces } from './spaceLocks';
 
 /**
  * Forma del jugador tal y como llega por el cable. El cliente no declara el
@@ -75,6 +76,7 @@ interface OfficeRoomState {
   terrainColors: string;
   officeDecor: string;
   pieceCollisions: string;
+  lockedSpaces: string;
 }
 
 /**
@@ -225,6 +227,11 @@ export interface OfficeRoomHandlers {
   onTerrainColors?(colors: TerrainColors): void;
   /** The office decor layer (#208), sorted by anchor: on the first sync and after every accepted decor edit. */
   onDecor?(items: readonly DecorItem[]): void;
+  /**
+   * The locked spaces, each with the session that locked it (`spaceLocks.ts`):
+   * on the first sync and on every lock, unlock and release.
+   */
+  onLockedSpaces?(locks: ReadonlyMap<string, string>): void;
   /** The saved collision table, replicated whole like the terrain: on the first sync and after every accepted edit. */
   onCollisions?(table: CollisionTable): void;
 }
@@ -307,6 +314,10 @@ export interface OfficeConnection {
    */
   sendSit(seat: string): void;
   sendStand(): void;
+  /** Asks to lock the space the player stands in; the answer is the replicated `onLockedSpaces`. */
+  sendLock(): void;
+  /** Asks to unlock the space the player stands in; only whoever locked it may. */
+  sendUnlock(): void;
   leave(): Promise<void>;
 }
 
@@ -380,7 +391,7 @@ export async function connectOfficeRoom({
       (state: OfficeRoomState): {
         players: PlayersCallbacks;
         recordings: RecordingsCallbacks;
-        listen(property: 'terrainBlocks' | 'terrainWalls' | 'terrainColors' | 'officeDecor' | 'pieceCollisions', handler: (value: string) => void): () => void;
+        listen(property: 'terrainBlocks' | 'terrainWalls' | 'terrainColors' | 'officeDecor' | 'pieceCollisions' | 'lockedSpaces', handler: (value: string) => void): () => void;
       };
       (player: RemotePlayer): PlayerCallbacks;
     };
@@ -474,6 +485,10 @@ export async function connectOfficeRoom({
     $(target.state).listen('officeDecor', (value) => {
       const items = decodeOfficeDecor(value, BASE_LAYOUT.width * BASE_LAYOUT.height);
       if (items !== null) handlers.onDecor?.(items);
+    });
+    // Locked spaces: an older server sends none, and nothing is locked.
+    $(target.state).listen('lockedSpaces', (value) => {
+      handlers.onLockedSpaces?.(decodeLockedSpaces(value ?? ''));
     });
     // Collision areas per piece: same rule. An older server sends none, and
     // the scene keeps every piece at its default.
@@ -657,6 +672,12 @@ export async function connectOfficeRoom({
     },
     sendStand() {
       room.send('stand', {});
+    },
+    sendLock() {
+      room.send('lock', {});
+    },
+    sendUnlock() {
+      room.send('unlock', {});
     },
     async leave() {
       // El orden importa: marcar primero es lo que hace que el `onLeave` que

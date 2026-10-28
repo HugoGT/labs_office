@@ -21,6 +21,7 @@ import { BASE_LAYOUT, type OfficeLayout } from '../../src/game/officeLayout.ts';
 import { BASE_CHAIR_PIECE } from '../../src/game/pieceCollisions.ts';
 import { BASE_MAP_SEATS, type MapSeat } from '../../src/game/seating.ts';
 import type { DecorTileRect } from '../../src/game/officeDecor.ts';
+import { TILE, type SpaceArea } from '../../src/game/mapData.ts';
 import { livekitRoomFor } from '../../src/game/officeProtocol.ts';
 import {
   handleAdminSession,
@@ -663,6 +664,15 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     overrides?.spaces !== undefined ? (overrides.spaces ?? undefined) : envRuntime?.spaces;
   const recordingSpaces = spacesSource ? createRecordingSpaceSnapshot(spacesSource) : undefined;
   const spaces = recordingSpaces?.spaces;
+  // Every space in pixels, for the lock rule (`spaceLocks.ts`): the recording
+  // view already follows every read and committed space or desk write, so the
+  // room reads no `listSpaces` of its own past the warm-up in `listen`. A
+  // desk's cubicle is a space too; a new one joins with the next `/spaces`
+  // read, which every client makes on a desk change (#183).
+  let spaceAreas: readonly SpaceArea[] = [];
+  recordingSpaces?.geometry.subscribe(() => {
+    spaceAreas = recordingSpaces.geometry.list().map(({ id, name, x, y, w, h }) => ({ id, name, x: x * TILE, y: y * TILE, w: w * TILE, h: h * TILE }));
+  });
 
   const decor =
     overrides?.decor !== undefined ? (overrides.decor ?? undefined) : envRuntime?.decor;
@@ -1468,6 +1478,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     terrainColors: () => terrain.blockColors(),
     decor: () => terrain.decor(),
     desks: () => deskAreas,
+    spaces: () => spaceAreas,
     collisions: () => collisions.rects(),
     collisionTable: () => collisions.encoded(),
     subscribeCollisionChanges: collisions.subscribe,
@@ -1518,6 +1529,11 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
       await terrain.load();
       await collisions.load();
       await refreshDeskAreas();
+      // Warms the recording view the lock rule reads (see `spaceAreas`). A
+      // failed read only leaves nothing to lock until the first `/spaces`.
+      await spaces?.listSpaces().catch(() => {
+        console.error('[spaces] could not read the spaces for the lock rule');
+      });
       await gameServer.listen(port);
       return this.port();
     },

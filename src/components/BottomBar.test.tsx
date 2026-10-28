@@ -41,11 +41,102 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
     cameraFilter: 'none' as const,
     cameraBlurAvailable: true,
     onChangeCameraFilter: vi.fn(),
+    hasDesk: true,
+    onGoToDesk: vi.fn(),
+    roomLocked: false,
+    roomLockedByMe: false,
+    onLockRoom: vi.fn(),
+    onUnlockRoom: vi.fn(),
     ...overrides,
   };
   render(<BottomBar {...props} />);
   return props;
 }
+
+describe('BottomBar: own desk button', () => {
+  it('sits in the Estado group, left of the room line', () => {
+    renderBar();
+
+    const button = within(screen.getByRole('group', { name: 'Estado' })).getByRole('button', { name: 'Ir a mi escritorio' });
+    expect(button).toHaveTextContent('🪑');
+    const line = screen.getByText(/proximidad/).parentElement!;
+    expect(button.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('asks to walk to the own desk on click', async () => {
+    const user = userEvent.setup();
+    const props = renderBar();
+
+    await user.click(screen.getByRole('button', { name: 'Ir a mi escritorio' }));
+
+    expect(props.onGoToDesk).toHaveBeenCalledTimes(1);
+  });
+
+  it('is disabled with its reason without an own desk', () => {
+    renderBar({ hasDesk: false });
+
+    const button = screen.getByRole('button', { name: 'Ir a mi escritorio' });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('title', 'No tienes un escritorio reclamado');
+  });
+});
+
+describe('BottomBar: space lock button', () => {
+  it('sits in the Estado group, after the desk button and left of the room name', () => {
+    renderBar({ room: 'Sala 1' });
+
+    const group = screen.getByRole('group', { name: 'Estado' });
+    const lock = within(group).getByRole('button', { name: 'Bloquear espacio' });
+    const desk = screen.getByRole('button', { name: 'Ir a mi escritorio' });
+    expect(desk.compareDocumentPosition(lock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(lock.compareDocumentPosition(screen.getByText('Sala 1')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('locks the space it stands in with the closed lock, the action it takes', async () => {
+    const user = userEvent.setup();
+    const props = renderBar({ room: 'Sala 1' });
+
+    const lock = screen.getByRole('button', { name: 'Bloquear espacio' });
+    expect(lock).toHaveTextContent('🔒');
+    expect(lock).toHaveAttribute('aria-pressed', 'false');
+    expect(lock).toHaveAttribute('title', 'Bloquear este espacio con quienes están dentro');
+    await user.click(lock);
+
+    expect(props.onLockRoom).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets whoever locked the space unlock it with the open lock', async () => {
+    const user = userEvent.setup();
+    const props = renderBar({ room: 'Sala 1', roomLocked: true, roomLockedByMe: true });
+
+    const lock = screen.getByRole('button', { name: 'Bloquear espacio' });
+    expect(lock).toHaveTextContent('🔓');
+    expect(lock).toHaveAttribute('aria-pressed', 'true');
+    expect(lock).toHaveAttribute('title', 'Desbloquear este espacio');
+    await user.click(lock);
+
+    expect(props.onUnlockRoom).toHaveBeenCalledTimes(1);
+    expect(props.onLockRoom).not.toHaveBeenCalled();
+  });
+
+  it('shows the open lock to the others, pressed and disabled: they can only leave', () => {
+    renderBar({ room: 'Sala 1', roomLocked: true, roomLockedByMe: false });
+
+    const lock = screen.getByRole('button', { name: 'Bloquear espacio' });
+    expect(lock).toHaveTextContent('🔓');
+    expect(lock).toHaveAttribute('aria-pressed', 'true');
+    expect(lock).toBeDisabled();
+    expect(lock).toHaveAttribute('title', 'Espacio bloqueado: solo quien lo bloqueó puede desbloquearlo');
+  });
+
+  it('is disabled outside every space, like recording', () => {
+    renderBar({ room: null });
+
+    const lock = screen.getByRole('button', { name: 'Bloquear espacio' });
+    expect(lock).toBeDisabled();
+    expect(lock).toHaveAttribute('title', 'Solo disponible dentro de una sala');
+  });
+});
 
 describe('BottomBar: retiro de los chips de cercania (issue #17, D9)', () => {
   it('no renderiza ningun chip: cada companero audible ahora tiene su propia tile de video', () => {
@@ -133,6 +224,12 @@ describe('BottomBar', () => {
         cameraFilter="none"
         cameraBlurAvailable
         onChangeCameraFilter={vi.fn()}
+        hasDesk
+        onGoToDesk={vi.fn()}
+        roomLocked={false}
+        roomLockedByMe={false}
+        onLockRoom={vi.fn()}
+        onUnlockRoom={vi.fn()}
       />,
     );
     expect(screen.getByText('proximidad').tagName).toBe('B');
@@ -159,6 +256,12 @@ describe('BottomBar', () => {
         cameraFilter="none"
         cameraBlurAvailable
         onChangeCameraFilter={vi.fn()}
+        hasDesk
+        onGoToDesk={vi.fn()}
+        roomLocked={false}
+        roomLockedByMe={false}
+        onLockRoom={vi.fn()}
+        onUnlockRoom={vi.fn()}
       />,
     );
     expect(screen.getByText('Cafeteria').tagName).toBe('B');
@@ -252,6 +355,12 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
         cameraFilter="none"
         cameraBlurAvailable
         onChangeCameraFilter={vi.fn()}
+        hasDesk
+        onGoToDesk={vi.fn()}
+        roomLocked={false}
+        roomLockedByMe={false}
+        onLockRoom={vi.fn()}
+        onUnlockRoom={vi.fn()}
       />,
     );
     // El punto es decorativo y no lleva marcado de prueba: se alcanza desde
@@ -281,6 +390,12 @@ describe('BottomBar: selector de estado de presencia (#1)', () => {
         cameraFilter="none"
         cameraBlurAvailable
         onChangeCameraFilter={vi.fn()}
+        hasDesk
+        onGoToDesk={vi.fn()}
+        roomLocked={false}
+        roomLockedByMe={false}
+        onLockRoom={vi.fn()}
+        onUnlockRoom={vi.fn()}
       />,
     );
     expect(dot).toHaveStyle({ background: statusCssColor('r') });
@@ -531,13 +646,13 @@ describe('BottomBar: one row when wide, two when narrow (#67 follow-up)', () => 
     for (const name of CALL_BUTTONS) {
       expect(within(controls).getByRole('button', { name })).toBeInTheDocument();
     }
-    expect(within(info).getByText(/Sala privada/)).toBeInTheDocument();
+    expect(within(info).getByText('Sala de Juntas')).toBeInTheDocument();
     expect(within(info).getByText(/Sin servidor/)).toBeInTheDocument();
     // Retrying is about the connection, so it sits next to the connection indicator.
     expect(within(info).getByRole('button', { name: /Reintentar/ })).toBeInTheDocument();
   });
 
-  it('keeps the same blocks in the corridor, only without the private room line', () => {
+  it('keeps the same blocks in the corridor, only without the room name', () => {
     renderBar({ room: null });
 
     expect(screen.getByRole('group', { name: 'Identidad' })).toBeInTheDocument();
@@ -546,19 +661,19 @@ describe('BottomBar: one row when wide, two when narrow (#67 follow-up)', () => 
     for (const name of CALL_BUTTONS) {
       expect(within(controls).getByRole('button', { name })).toBeInTheDocument();
     }
-    expect(screen.queryByText(/Sala privada/)).not.toBeInTheDocument();
   });
 
-  it('names the private room without the "audio aislado" suffix', () => {
+  it('names the room alone: no "Sala privada" prefix and no "audio aislado" suffix', () => {
     renderBar({ room: 'Sala de Juntas' });
 
-    const line = screen.getByText(/Sala privada/);
-    expect(line).toHaveTextContent(/^🔒 Sala privada: Sala de Juntas$/);
+    const status = screen.getByText('Sala de Juntas').parentElement!;
+    expect(status).toHaveTextContent(/^Sala de Juntas$/);
+    expect(screen.queryByText(/Sala privada/)).not.toBeInTheDocument();
     expect(screen.queryByText(/audio aislado/)).not.toBeInTheDocument();
   });
 });
 
-describe('BottomBar: indicador de grabacion junto a "Sala privada" (#85)', () => {
+describe('BottomBar: indicador de grabacion junto al nombre de la sala (#85)', () => {
   it('no muestra REC dentro de una sala que no se esta grabando', () => {
     renderBar({ room: 'Sala de Juntas', recording: false });
 
@@ -568,7 +683,7 @@ describe('BottomBar: indicador de grabacion junto a "Sala privada" (#85)', () =>
   it('muestra REC junto al nombre de la sala mientras se graba', () => {
     renderBar({ room: 'Sala de Juntas', recording: true });
 
-    expect(screen.getByText(/Sala privada/)).toHaveTextContent(/^🔒 Sala privada: Sala de Juntas$/);
+    expect(screen.getByText('Sala de Juntas').parentElement!).toHaveTextContent(/^Sala de Juntas$/);
     expect(screen.getByText('REC')).toBeInTheDocument();
   });
 
@@ -602,6 +717,12 @@ describe('BottomBar: indicador de grabacion junto a "Sala privada" (#85)', () =>
         cameraFilter="none"
         cameraBlurAvailable
         onChangeCameraFilter={vi.fn()}
+        hasDesk
+        onGoToDesk={vi.fn()}
+        roomLocked={false}
+        roomLockedByMe={false}
+        onLockRoom={vi.fn()}
+        onUnlockRoom={vi.fn()}
       />,
     );
     expect(screen.getByText(/REC/)).toBeInTheDocument();
@@ -628,10 +749,16 @@ describe('BottomBar: indicador de grabacion junto a "Sala privada" (#85)', () =>
         cameraFilter="none"
         cameraBlurAvailable
         onChangeCameraFilter={vi.fn()}
+        hasDesk
+        onGoToDesk={vi.fn()}
+        roomLocked={false}
+        roomLockedByMe={false}
+        onLockRoom={vi.fn()}
+        onUnlockRoom={vi.fn()}
       />,
     );
     expect(screen.queryByText(/REC/)).not.toBeInTheDocument();
-    expect(screen.getByText(/Sala privada/)).toHaveTextContent(/^🔒 Sala privada: Sala de Juntas$/);
+    expect(screen.getByText('Sala de Juntas').parentElement!).toHaveTextContent(/^Sala de Juntas$/);
   });
 });
 

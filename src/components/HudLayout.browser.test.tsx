@@ -4,7 +4,10 @@ import { userEvent } from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import * as vitestBrowser from 'vitest/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { AudioUnblockPrompt } from './AudioUnblockPrompt';
 import { BottomBar } from './BottomBar';
+import { NoticeStack } from './NoticeStack';
+import { Toast } from './Toast';
 import { ExitControls } from './ExitControls';
 import { OfficeSidebar } from './OfficeSidebar';
 import { ZoomControls } from './ZoomControls';
@@ -104,6 +107,12 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
       cameraFilter="none"
       cameraBlurAvailable
       onChangeCameraFilter={vi.fn()}
+      hasDesk
+      onGoToDesk={vi.fn()}
+      roomLocked={false}
+      roomLockedByMe={false}
+      onLockRoom={vi.fn()}
+      onUnlockRoom={vi.fn()}
       {...overrides}
     />,
   );
@@ -135,7 +144,8 @@ describe('HUD layout: bottom bar (#87)', () => {
       presence: { online: false, peers: 0, state: 'offline', canRetry: false },
     });
     const buttons = controls.querySelectorAll('button');
-    const status = info.children[0]!;
+    const status = screen.getByText('Sala 1').parentElement!;
+    expect(info.contains(status)).toBe(true);
     const rec = screen.getByText('REC');
     const presence = screen.getByText(/Sin servidor/);
     const recDot = rec.firstElementChild!;
@@ -556,5 +566,25 @@ describe('HUD layout: map zoom control (map-zoom)', () => {
     const zoom = renderZoom();
 
     for (const button of zoom.querySelectorAll('button')) expect(hitAtCenter(button)).toBe(button);
+  });
+});
+
+describe('HUD layout: notices over the bar', () => {
+  it('shows a toast above the audio unblock prompt instead of under it', async () => {
+    await page.viewport(WIDE, 800);
+    const { bar } = renderBar();
+    render(
+      <NoticeStack>
+        <Toast message="🔒 La sala está bloqueada" />
+        <AudioUnblockPrompt blocked onUnblock={vi.fn()} />
+      </NoticeStack>,
+    );
+    const toast = screen.getByText('🔒 La sala está bloqueada');
+    const prompt = screen.getByRole('button', { name: /bloqueó el audio/ });
+
+    expect(overlaps(box(toast), box(prompt))).toBe(false);
+    expect(box(toast).bottom).toBeLessThanOrEqual(box(prompt).top);
+    expect(box(prompt).bottom).toBeLessThanOrEqual(box(bar).top);
+    expect(hitAtCenter(prompt)).toBe(prompt);
   });
 });

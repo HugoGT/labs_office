@@ -3,6 +3,8 @@ import type { Space, SpacesDirectory } from '../spaces/spacesPort.ts';
 
 export interface RecordingGeometry {
   getSpace(id: string): Space | undefined;
+  /** Every space the view knows, rooms and desk cubicles. */
+  list(): readonly Space[];
   subscribe(listener: () => void): () => void;
 }
 
@@ -95,6 +97,7 @@ export function createRecordingSpaceSnapshot(source: SpacesDirectory): {
     spaces,
     geometry: {
       getSpace: (id) => known.get(id),
+      list: () => [...known.values()],
       subscribe(listener) {
         listeners.add(listener);
         return () => { listeners.delete(listener); };

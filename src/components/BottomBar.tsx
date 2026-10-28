@@ -52,6 +52,17 @@ export interface BottomBarProps {
   /** This browser can blur: without it the option is shown disabled. */
   cameraBlurAvailable: boolean;
   onChangeCameraFilter: (filter: CameraFilter) => void;
+  /** The local user claimed a desk: the desk button has somewhere to go. */
+  hasDesk: boolean;
+  /** Walk to a chair of the own desk; the scene owns the route. */
+  onGoToDesk: () => void;
+  /** The space the user stands in is locked (`spaceLocks.ts`). */
+  roomLocked: boolean;
+  /** The user locked it: only they may unlock it, the others can only leave. */
+  roomLockedByMe: boolean;
+  /** Lock the space the user stands in; the room decides. */
+  onLockRoom: () => void;
+  onUnlockRoom: () => void;
 }
 
 /** Explica el `disabled` de mic/camara cuando no hay conexion viva a LiveKit. */
@@ -64,6 +75,19 @@ const DND_TITLE = 'No molestar: no publicas micrófono ni cámara';
 const ONLY_IN_SPACE_TITLE = 'Solo disponible dentro de una sala';
 
 const SCREEN_SHARE_DND_TITLE = 'No molestar: no compartes pantalla';
+
+const GO_TO_DESK_LABEL = 'Ir a mi escritorio';
+
+const NO_DESK_TITLE = 'No tienes un escritorio reclamado';
+
+const LOCK_LABEL = 'Bloquear espacio';
+
+const LOCK_TITLE = 'Bloquear este espacio con quienes están dentro';
+
+const UNLOCK_TITLE = 'Desbloquear este espacio';
+
+/** Only whoever locked a space unlocks it; the lock also goes once they leave it. */
+const LOCKED_TITLE = 'Espacio bloqueado: solo quien lo bloqueó puede desbloquearlo';
 
 const NOTHING_TO_RECORD_TITLE = 'No hay cámaras, pantalla o audio que grabar';
 
@@ -108,6 +132,12 @@ export function BottomBar({
   cameraFilter,
   cameraBlurAvailable,
   onChangeCameraFilter,
+  hasDesk,
+  onGoToDesk,
+  roomLocked,
+  roomLockedByMe,
+  onLockRoom,
+  onUnlockRoom,
 }: BottomBarProps) {
   // Se deriva del estado en vez de recibirse como prop propia: dos fuentes
   // para el mismo hecho acabarian discrepando en algun render.
@@ -128,6 +158,8 @@ export function BottomBar({
         ? undefined
         : ONLY_IN_SPACE_TITLE;
   // Stopping never waits for media: a recording outlives a mic turned off.
+  const locked = room !== null && roomLocked;
+  const lockTitle = room === null ? ONLY_IN_SPACE_TITLE : !roomLocked ? LOCK_TITLE : roomLockedByMe ? UNLOCK_TITLE : LOCKED_TITLE;
   const recordTitle =
     room === null ? ONLY_IN_SPACE_TITLE : recording || recordableMedia ? undefined : NOTHING_TO_RECORD_TITLE;
 
@@ -213,15 +245,38 @@ export function BottomBar({
         </button>
       </div>
       <div className={styles.info} role="group" aria-label="Estado">
+        {/* The place's own actions, next to its name: go to the own desk, lock the space. */}
+        <span className={styles.placeActions}>
+          <button
+            type="button"
+            className={`${styles.btn} ${styles.iconBtn}`}
+            aria-label={GO_TO_DESK_LABEL}
+            disabled={!hasDesk}
+            title={hasDesk ? GO_TO_DESK_LABEL : NO_DESK_TITLE}
+            onClick={onGoToDesk}
+          >
+            🪑
+          </button>
+          <button
+            type="button"
+            className={`${styles.btn} ${styles.iconBtn}`}
+            aria-label={LOCK_LABEL}
+            aria-pressed={locked}
+            disabled={room === null || (roomLocked && !roomLockedByMe)}
+            title={lockTitle}
+            onClick={locked ? onUnlockRoom : onLockRoom}
+          >
+            {/* The lock shows what a click does: lock, or unlock. */}
+            {locked ? '🔓' : '🔒'}
+          </button>
+        </span>
         <div className={styles.status}>
           {dnd ? (
             // Anunciar "Audio por proximidad" mientras nada es audible seria
             // mentir sobre lo unico que esta linea existe para contar.
             <>🔴 No molestar: aislado del audio de la oficina</>
           ) : room ? (
-            <>
-              🔒 Sala privada: <b>{room}</b>
-            </>
+            <b>{room}</b>
           ) : (
             <>
               Audio por <b>proximidad</b>

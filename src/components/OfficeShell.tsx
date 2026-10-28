@@ -43,6 +43,8 @@ import { useOfficeBridge } from '../hooks/useOfficeBridge';
 import { useProximityAudio } from '../hooks/useProximityAudio';
 import { useRoster } from '../hooks/useRoster';
 import { useSpacesConfig } from '../hooks/useSpacesConfig';
+import { placeLabel, placeOf } from './roomPlace';
+import { NoticeStack } from './NoticeStack';
 import { AudioUnblockPrompt } from './AudioUnblockPrompt';
 import { BottomBar } from './BottomBar';
 import { CallInvitationStack } from './CallInvitationStack';
@@ -61,6 +63,8 @@ import { ZoomControls } from './ZoomControls';
 
 /** Duracion del toast antes de auto-ocultarse (`app.js:525`, `ms || 3200`). */
 const TOAST_TIMEOUT_MS = 3200;
+/** How long walking into a locked space is told. */
+const SPACE_LOCKED_TOAST_MS = 3000;
 
 export interface OfficeShellProps {
   onEntryState?: (state: OfficeEntryState) => void;
@@ -132,7 +136,7 @@ export function OfficeShell({
   onEntryState,
 }: OfficeShellProps) {
   const [bridge] = useState(createOfficeBridge);
-  const { room, spaceId, recordings, selfSessionId, menu, presence, closeMenu } = useOfficeBridge(bridge);
+  const { room, spaceId, roomLock, recordings, selfSessionId, menu, presence, closeMenu } = useOfficeBridge(bridge);
   /**
    * Roster en vivo para la barra lateral (#74). Vive aqui y no dentro de
    * `OfficeSidebar` por la misma razon que el resto del HUD: el puente es de
@@ -440,20 +444,30 @@ export function OfficeShell({
   }, [bridge]);
 
   const [toastMessage, setToastMessage] = useState<ReactNode | null>(null);
-  const previousRoomRef = useRef<string | null>(null);
+  // A room by its name, a desk by whoever claimed it (`roomPlace.ts`).
+  const place = useMemo(() => placeOf(spaceId, room, spacesConfig?.spaces ?? [], desks ?? []), [spaceId, room, spacesConfig, desks]);
+  const previousSpaceRef = useRef<string | null>(null);
 
+  // Told on entering a space only: a desk claimed while standing in it is renamed, not entered again.
   useEffect(() => {
-    if (room === previousRoomRef.current) return;
-    previousRoomRef.current = room;
+    if (spaceId === previousSpaceRef.current) return;
+    previousSpaceRef.current = spaceId;
+    if (place === null) return;
 
-    if (room) {
-      setToastMessage(
+    const where =
+      place.kind === 'room' ? (
         <>
-          Entraste a <b>{room}</b>: solo escuchas a quienes están dentro
-        </>,
+          Entraste a <b>{place.name}</b>
+        </>
+      ) : place.owner === null ? (
+        <>Entraste a un escritorio</>
+      ) : (
+        <>
+          Entraste al escritorio de <b>{place.owner}</b>
+        </>
       );
-    }
-  }, [room]);
+    setToastMessage(<>{where}: solo escuchas a quienes están dentro</>);
+  }, [spaceId, place]);
 
   /**
    * Who started sharing, for everyone in the space (#20). A takeover is a new
@@ -621,6 +635,16 @@ export function OfficeShell({
   // A full desk refuses whoever tries to walk in (`deskDecorRules.ts`); the scene says so once per attempt.
 
   useEffect(() => bridge.on('deskfull', () => setToastMessage('Este escritorio está lleno (máximo 6 personas).')), [bridge]);
+
+  // A locked space refuses whoever walks in from outside (`spaceLocks.ts`):
+  // told for its own 3 s, apart from the shared toast and its timeout.
+  const [spaceLockedMessage, setSpaceLockedMessage] = useState<ReactNode | null>(null);
+  useEffect(() => bridge.on('spacelocked', () => setSpaceLockedMessage('🔒 La sala está bloqueada')), [bridge]);
+  useEffect(() => {
+    if (spaceLockedMessage === null) return undefined;
+    const timer = setTimeout(() => setSpaceLockedMessage(null), SPACE_LOCKED_TOAST_MS);
+    return () => clearTimeout(timer);
+  }, [spaceLockedMessage]);
 
   useEffect(
     () =>
@@ -837,7 +861,7 @@ export function OfficeShell({
         camOn={camOn}
         audioAvailable={audioAvailable}
         recording={recording}
-        room={room}
+        room={place === null ? null : placeLabel(place)}
         presence={presence}
         status={status}
         onChangeStatus={handleChangeStatus}
@@ -851,6 +875,12 @@ export function OfficeShell({
         cameraFilter={cameraFilter}
         cameraBlurAvailable={cameraBlurAvailable}
         onChangeCameraFilter={setCameraFilter}
+        hasDesk={myDesk !== null}
+        onGoToDesk={() => bridge.emitCommand('walkToOwnDesk', undefined)}
+        roomLocked={roomLock.locked}
+        roomLockedByMe={roomLock.mine}
+        onLockRoom={() => bridge.emitCommand('lockRoom', undefined)}
+        onUnlockRoom={() => bridge.emitCommand('unlockRoom', undefined)}
         // #52: la barra solo avisa; quien sabe reconectar es la escena, y el
         // comando viaja por `emitCommand` como el resto -- sin metodo de
         // conveniencia en el puente.
@@ -864,8 +894,11 @@ export function OfficeShell({
         />
         <ZoomControls view={mapZoom.view} onZoomIn={mapZoom.zoomIn} onZoomOut={mapZoom.zoomOut} onReset={mapZoom.reset} />
       </div>
-      <AudioUnblockPrompt blocked={audioBlocked} onUnblock={unblockAudio} />
-      <Toast message={toastMessage} />
+      <NoticeStack>
+        {/* Inside a locked space its notice stays up, under any passing toast. */}
+        <Toast message={spaceLockedMessage ?? toastMessage ?? (roomLock.locked ? '🔒 El espacio está bloqueado' : null)} />
+        <AudioUnblockPrompt blocked={audioBlocked} onUnblock={unblockAudio} />
+      </NoticeStack>
       <CallInvitationStack invitations={invitations} onAccept={accept} onDismiss={dismiss} />
       <RecordingReadyStack
         notices={readyRecordings}

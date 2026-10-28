@@ -13,6 +13,18 @@ describe('useOfficeBridge', () => {
     expect(result.current.menu).toBeNull();
   });
 
+  it('follows whether the own space is locked, and whether by the local player', () => {
+    const bridge = createOfficeBridge();
+    const { result } = renderHook(() => useOfficeBridge(bridge));
+    expect(result.current.roomLock).toEqual({ locked: false, mine: false });
+
+    act(() => bridge.emit('roomlock', { locked: true, mine: true }));
+    expect(result.current.roomLock).toEqual({ locked: true, mine: true });
+
+    act(() => bridge.emit('roomlock', { locked: true, mine: false }));
+    expect(result.current.roomLock).toEqual({ locked: true, mine: false });
+  });
+
   it('refleja los eventos emitidos por el puente (room, peermenu)', () => {
     const bridge = createOfficeBridge();
     const { result } = renderHook(() => useOfficeBridge(bridge));

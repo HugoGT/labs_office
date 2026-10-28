@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { WALL, doorDepthY, doorFrameIndex, doorHingeOf, doorPlacement, doorSlices, propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type GridEdge, type Point } from './artContract';
+import { WALL, doorFrameIndex, doorLeafDepthYs, doorHingeOf, doorPlacement, doorSlices, propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type GridEdge, type Point } from './artContract';
 import { artUploadsManifestUrl, findPiece, type ArtAppearance } from './artPack';
 import { artCustomCharactersUrl } from './customCharacterArt';
 import { ArtPackLoader } from './artPackLoader';
@@ -36,9 +36,10 @@ import {
 import { deskAt, deskZoneName } from './deskLayout';
 import { SPACE_SHADE_ALPHA, SPACE_SHADE_NAME, shadeAround, shadeKey } from './spaceFocus';
 import { tableFacing, tableFloorRect } from './deskTable';
-import { decorChairs, decorFootprint, encodeOfficeDecor, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
-import { doorEdge, doorLeaves, doorOpenings, doorSpan, doorStepOf, doorSwingRotation, keptSwings, moveDoors, openDoorLeaves, type DoorLeaf, type DoorMotion } from './officeDoors';
-import { deskEntryRefused } from './deskDecorRules';
+import { decorChairs, decorFootprint, encodeOfficeDecor, isDecorChairPiece, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
+import { doorEdge, doorHingeStops, doorLeaves, doorOpenings, doorSpan, doorStepOf, doorSwingRotation, keptSwings, moveDoors, openDoorLeaves, type DoorLeaf, type DoorMotion } from './officeDoors';
+import { deskEntryRefused, isOnDesk } from './deskDecorRules';
+import { lockedBehindDoor, lockedDoorAhead, lockedSpaceEntered } from './spaceLocks';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
 import { MinimapLayer } from './MinimapLayer';
@@ -120,6 +121,7 @@ import { audiblePeersWithVersionGrace, type AudioPeer } from './proximityAudio';
 import {
   BASE_MAP_SEATS,
   CHAIR_PIECES,
+  SEAT_REACH_TILES,
   chairGround,
   chairSeatId,
   chairSeatTiles,
@@ -290,11 +292,12 @@ export class OfficeScene extends Phaser.Scene {
   private decorObjects: Phaser.GameObjects.GameObject[] = [];
   /**
    * The doors of the drawn decor layer (#223), by anchor: their leaf (edge,
-   * span, hinge) and, once the sheet is in, the image `update()` switches
-   * between its closed and open frame. A redraw of the layer rebuilds it.
+   * span, hinge) and, once the sheet is in, the image of each leaf (two for
+   * a double door) `update()` switches between its closed and open frame. A
+   * redraw of the layer rebuilds it.
    */
   private doorLeaves = new Map<number, DoorLeaf>();
-  private doorImages = new Map<number, Phaser.GameObjects.Image>();
+  private doorImages = new Map<number, Phaser.GameObjects.Image[]>();
   /** How far open each door is and the side it swings to, by leaf anchor: the doors shut and still are not in it. */
   private doorMotion: ReadonlyMap<number, DoorMotion> = new Map();
   /** The static bodies of the terrain grid and their collider, replaced whole on each edit. */
@@ -324,6 +327,8 @@ export class OfficeScene extends Phaser.Scene {
   private seat: ResolvedSeat | null = null;
   /** Seat asked for and not answered yet; moving forgets it. */
   private pendingSeat: string | null = null;
+  /** The own desk chair a `walkToOwnDesk` walk asks for once it arrives; any other walk forgets it. */
+  private seatAfterWalk: string | null = null;
   /** Push and idle sit dwells and re-sit guards (`autoSit.ts`), fed the keyboard and the auto-walk every frame. */
   private autoSit: AutoSitState = IDLE_AUTO_SIT;
   /**
@@ -383,6 +388,9 @@ export class OfficeScene extends Phaser.Scene {
   private unsubscribeRespondCall?: () => void;
   private unsubscribeWalkToPeer?: () => void;
   private unsubscribeToggleSeat?: () => void;
+  private unsubscribeWalkToOwnDesk?: () => void;
+  private unsubscribeLockRoom?: () => void;
+  private unsubscribeUnlockRoom?: () => void;
   private unsubscribeSpacesConfig?: () => void;
   private unsubscribeDesks?: () => void;
   private unsubscribeReconnect?: () => void;
@@ -467,6 +475,12 @@ export class OfficeScene extends Phaser.Scene {
   private deskAreas: DecorTileRect[] = [];
   /** A walk into a full desk was already told (`deskfull`) for this push: once per attempt. */
   private deskFullTold = false;
+  /** The locked space ids the room replicates, each with who locked it (`spaceLocks.ts`). */
+  private lockedSpaces: ReadonlyMap<string, string> = new Map();
+  /** Same as `deskFullTold`, for a walk into a locked space (`spacelocked`). */
+  private spaceLockedTold = false;
+  /** The last `roomlock` told: whether the own space is locked, and by the local player. */
+  private roomLock = { locked: false, mine: false };
   /** Created in `preload()`, where `this.load` first exists. */
   private art!: ArtPackLoader;
   private readonly pendingRedraws = new Set<() => void>();
@@ -645,7 +659,7 @@ export class OfficeScene extends Phaser.Scene {
 
     // The static office is the Tiled layout (art step 8); collisions come from
     // the same walkability rule the room enforces on every `move`.
-    const grid: TerrainGrid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
+    const grid: TerrainGrid = this.buildGrid();
     this.grid = grid;
     this.terrainTilemap = renderTerrain(this, this.terrain, this.layout, this.art, this.terrainColors);
     this.paintWalls();
@@ -736,6 +750,9 @@ export class OfficeScene extends Phaser.Scene {
       this.walkToPeer(sessionId);
     });
     this.unsubscribeToggleSeat = this.bridge.onCommand('toggleSeat', () => this.toggleSeat());
+    this.unsubscribeWalkToOwnDesk = this.bridge.onCommand('walkToOwnDesk', () => this.walkToOwnDesk());
+    this.unsubscribeLockRoom = this.bridge.onCommand('lockRoom', () => this.connection?.sendLock());
+    this.unsubscribeUnlockRoom = this.bridge.onCommand('unlockRoom', () => this.connection?.sendUnlock());
 
     // #7, slice 3. Llega una sola vez por sesion, poco despues de arrancar.
     this.unsubscribeSpacesConfig = this.bridge.onCommand('spacesconfig', ({ spaces, version }) => {
@@ -892,6 +909,9 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeRespondCall?.();
       this.unsubscribeWalkToPeer?.();
       this.unsubscribeToggleSeat?.();
+      this.unsubscribeWalkToOwnDesk?.();
+      this.unsubscribeLockRoom?.();
+      this.unsubscribeUnlockRoom?.();
       this.unsubscribeSpacesConfig?.();
       this.unsubscribeDesks?.();
       this.unsubscribeReconnect?.();
@@ -1013,6 +1033,10 @@ export class OfficeScene extends Phaser.Scene {
           onTerrainColors: (colors) => this.applyTerrainColors(colors),
           onWalls: (walls, order) => this.applyWalls(walls, order),
           onDecor: (items) => this.applyDecor(items),
+          onLockedSpaces: (locks) => {
+            this.lockedSpaces = locks;
+            this.syncRoomLock();
+          },
           onCollisions: (table) => this.applyCollisions(table),
           onConnectionState: (state) => {
             if (!current()) return;
@@ -1258,7 +1282,22 @@ export class OfficeScene extends Phaser.Scene {
     }
     // A seat whose sitter would stand inside a full desk is refused by the room too.
     const here = { x: this.player.x, y: this.player.y };
-    return candidates.filter((seat) => !taken.has(seat.id) && this.fullDeskOnTheWay(here, positionForFeet(seat.ground)) === null);
+    // So is one in a locked space the player is not in.
+    return candidates.filter((seat) => {
+      const sitter = positionForFeet(seat.ground);
+      return !taken.has(seat.id) && this.fullDeskOnTheWay(here, sitter) === null
+        && lockedSpaceEntered(here, sitter, this.spaces, this.lockedSpaces) === null;
+    });
+  }
+
+  /** Tells `roomlock` when the own space became locked or stopped being so, or changed hands. */
+  private syncRoomLock(): void {
+    const locker = this.currentSpaceId === null ? undefined : this.lockedSpaces.get(this.currentSpaceId);
+    const locked = locker !== undefined;
+    const mine = locked && locker === this.connection?.sessionId;
+    if (locked === this.roomLock.locked && mine === this.roomLock.mine) return;
+    this.roomLock = { locked, mine };
+    this.bridge.emit('roomlock', { locked, mine });
   }
 
   /** The `toggleSeat` command: stand when seated, else ask for the seat in reach. */
@@ -1660,8 +1699,8 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
-   * A door of the decor layer (#223, #233): its leaf and jambs on the grid
-   * line it opens (`doorEdge`). The leaf sorts by its lowest pixel; each jamb
+   * A door of the decor layer (#223, #233): its leaves and jambs on the grid
+   * line it opens (`doorEdge`). Each leaf sorts by its lowest pixel; each jamb
    * is its own crop of the same frame, sorted under the post joint it merges
    * with (`doorSlices`), so the walls are always drawn over the door.
    */
@@ -1672,13 +1711,13 @@ export class OfficeScene extends Phaser.Scene {
     const sheet = this.artSheet({ materialId: item.piece, color: null }, 'door', this.redrawDecor);
     if (sheet !== null) {
       const placement = doorPlacement(edge, span);
-      const { frame, depthY } = this.doorLook(item, leaf?.rotation ?? item.rotation, edge);
+      const { frame, depthYs } = this.doorLook(item, leaf?.rotation ?? item.rotation, edge);
       const slices = doorSlices(edge, item.piece);
       const name = decorObjectName(item.index);
       const crop = (image: Phaser.GameObjects.Image, { x, y, width, height }: { x: number; y: number; width: number; height: number }) => image.setCrop(x, y, width, height);
       // The jambs are the same in every frame of the swing, so they keep the one they were drawn with.
       return [
-        crop(putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(depthY)).setName(name), slices.leaf),
+        ...slices.leaves.map((rect, i) => crop(putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(depthYs[i])).setName(name), rect)),
         ...slices.jambs.map(({ crop: rect, depthY: jambDepthY }) => crop(putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(jambDepthY)).setName(`${name}:jamb`), rect)),
       ];
     }
@@ -1695,25 +1734,26 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
-   * The frame a door shows and the depth it sorts by: its swing so far,
-   * turned away from the avatar that opened it (S14), and the lowest pixel of
-   * the leaf in that frame (`doorDepthY`), so an avatar below a swung leaf
-   * walks in front of it.
+   * The frame a door shows and the depth each leaf sorts by: its swing so
+   * far, turned away from the avatar that opened it (S14), and the lowest
+   * pixel of each leaf in that frame (`doorLeafDepthYs`), so an avatar below
+   * a swung leaf walks in front of it.
    */
-  private doorLook(item: Pick<DecorItem, 'index' | 'piece'>, rotation: DecorItem['rotation'], edge: GridEdge): { frame: number; depthY: number } {
+  private doorLook(item: Pick<DecorItem, 'index' | 'piece'>, rotation: DecorItem['rotation'], edge: GridEdge): { frame: number; depthYs: number[] } {
     const motion = this.doorMotion.get(item.index);
     const step = motion === undefined ? 0 : doorStepOf(motion.progress);
     const turned = doorSwingRotation(rotation, motion?.swing ?? 'inside');
     // The hinge stays where the door was turned to, whichever side it swings to.
     const hinge = doorHingeOf(item.piece, rotation);
-    return { frame: doorFrameIndex(turned, hinge, step), depthY: doorDepthY(edge, item.piece, turned, hinge, step) };
+    return { frame: doorFrameIndex(turned, hinge, step), depthYs: doorLeafDepthYs(edge, item.piece, turned, hinge, step) };
   }
 
   /**
    * Swings every door leaf an avatar (this player or a peer) is about to
    * cross, away from the avatar, and closes the rest (#223, `openDoorLeaves`,
    * `moveDoors`): drawing only, once per frame, switching the frame and the
-   * depth of the images `paintDecor` kept. Doors never block.
+   * depth of the images `paintDecor` kept. Doors never block. The door of a
+   * locked space stays shut for whoever is outside it (`spaceLocks.ts`).
    */
   private animateDoors(dtMs: number): void {
     if (this.doorImages.size === 0) return;
@@ -1723,15 +1763,22 @@ export class OfficeScene extends Phaser.Scene {
       if (avatar !== undefined) positions.push({ x: avatar.x, y: avatar.y });
     }
     // A door keeps the side it swings to until it is shut again (S14), also when it is closing.
-    const targets = openDoorLeaves([...this.doorLeaves.values()], positions, keptSwings(this.doorMotion));
+    const targets = openDoorLeaves(
+      [...this.doorLeaves.values()],
+      positions,
+      keptSwings(this.doorMotion),
+      (leaf, position) => lockedBehindDoor(leaf, position, this.spaces, this.lockedSpaces) !== null,
+    );
     this.doorMotion = moveDoors(targets, this.doorMotion, dtMs);
-    for (const [index, image] of this.doorImages) {
+    for (const [index, images] of this.doorImages) {
       const leaf = this.doorLeaves.get(index);
       if (leaf === undefined) continue;
-      const { frame, depthY } = this.doorLook(leaf, leaf.rotation, leaf.edge);
-      if (image.frame.name !== String(frame)) image.setFrame(frame);
-      const depth = worldAssetDepth(depthY);
-      if (image.depth !== depth) image.setDepth(depth);
+      const { frame, depthYs } = this.doorLook(leaf, leaf.rotation, leaf.edge);
+      images.forEach((image, i) => {
+        if (image.frame.name !== String(frame)) image.setFrame(frame);
+        const depth = worldAssetDepth(depthYs[i]);
+        if (image.depth !== depth) image.setDepth(depth);
+      });
     }
   }
 
@@ -1853,7 +1900,7 @@ export class OfficeScene extends Phaser.Scene {
   private refreshCollisions(): void {
     if (!this.alive || this.player === undefined) return;
     this.collisionRects = collisionWorld(this.collisionInstances, this.collisionTable);
-    this.grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
+    this.grid = this.buildGrid();
     this.buildPieceColliders();
     this.collisionEditLayer?.refresh();
   }
@@ -1877,7 +1924,7 @@ export class OfficeScene extends Phaser.Scene {
     if (encodeTerrainBlocks(blocks) !== encodeTerrainBlocks(this.terrainBlocks)) {
       this.terrainBlocks = blocks;
       this.terrain = this.terrainOf(blocks, this.terrainWalls);
-      this.grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
+      this.grid = this.buildGrid();
       this.buildTerrainColliders(this.grid);
       this.paintTerrain();
       this.cameraPanLayer?.setRegion(this.cameraRegion());
@@ -1921,7 +1968,7 @@ export class OfficeScene extends Phaser.Scene {
       this.terrainWalls = walls;
       this.terrainWallOrder = order;
       this.terrain = this.terrainOf(this.terrainBlocks, walls);
-      this.grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
+      this.grid = this.buildGrid();
       this.buildTerrainColliders(this.grid);
       this.paintWalls();
     }
@@ -1937,12 +1984,13 @@ export class OfficeScene extends Phaser.Scene {
   private applyDecor(items: readonly DecorItem[]): void {
     if (!this.alive) return;
     if (encodeOfficeDecor(items) !== encodeOfficeDecor(this.officeDecor)) {
-      const opened = JSON.stringify(doorOpenings(this.officeDecor, this.layout.width));
+      const opened = this.doorWalls();
       this.officeDecor = items;
       // A door that came or went opens or closes its wall (#223): the room's snapshot changed with it.
-      if (JSON.stringify(doorOpenings(items, this.layout.width)) !== opened) {
+      // So does a door turned to hinge at its other end: its stop moves (`doorHingeStops`).
+      if (this.doorWalls() !== opened) {
         this.terrain = this.terrainOf(this.terrainBlocks, this.terrainWalls);
-        this.grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
+        this.grid = this.buildGrid();
         this.buildTerrainColliders(this.grid);
         this.paintWalls();
       }
@@ -2006,7 +2054,7 @@ export class OfficeScene extends Phaser.Scene {
     this.doorImages = new Map();
     for (const object of this.decorObjects) {
       const index = doorNamed.get(object.name);
-      if (index !== undefined && object instanceof Phaser.GameObjects.Image) this.doorImages.set(index, object);
+      if (index !== undefined && object instanceof Phaser.GameObjects.Image) this.doorImages.set(index, [...(this.doorImages.get(index) ?? []), object]);
     }
   }
 
@@ -2023,6 +2071,21 @@ export class OfficeScene extends Phaser.Scene {
       terrainSnapshot(this.layout, this.terrainPreviewBlocks ?? this.terrainBlocks, this.terrainWalls),
       this.terrainPreviewColors ?? this.terrainColors,
     );
+  }
+
+  /**
+   * The grid of the live terrain and pieces, with the strip past each door's
+   * hinge post among the walls (`doorHingeStops`): client only, the stricter
+   * side, so the room's snapshot has none.
+   */
+  private buildGrid(): TerrainGrid {
+    const grid = buildTerrainGrid(this.terrain, this.layout, this.collisionRects);
+    return { ...grid, wallRects: [...grid.wallRects, ...doorHingeStops(this.officeDecor, this.terrain)] };
+  }
+
+  /** What the doors change in the walls: the edges they open and their hinge stops. */
+  private doorWalls(): string {
+    return JSON.stringify([doorOpenings(this.officeDecor, this.layout.width), doorHingeStops(this.officeDecor, this.terrain)]);
   }
 
   /**
@@ -2237,6 +2300,7 @@ export class OfficeScene extends Phaser.Scene {
       this.currentSpaceId = spaceId;
       // A desk created empty has no label, nor does its cubicle (Editar espacios).
       this.bridge.emit('room', { spaceId, name: space === undefined || space === null ? null : space.name || 'Escritorio' });
+      this.syncRoomLock();
     }
 
     this.emitVoice(selfSessionId, peers, spaceId);
@@ -2292,12 +2356,67 @@ export class OfficeScene extends Phaser.Scene {
    * body would stand, not by the tile under the click.
    */
   private startWalk(goal: { x: number; y: number }): boolean {
+    this.seatAfterWalk = null;
     const route = planWalk(this.walkWorld(), this.player, goal);
     if (route === null) return false;
     this.standUp();
     // The last stop is the goal itself: it stays the walk's destination.
     this.autoWalk = beginAutoWalk(goal, this.player, route.slice(0, -1));
     return true;
+  }
+
+  /**
+   * The desk button: the closest free chair of the own desk by route length,
+   * walked to with the same planner as a double click, and asked for on
+   * arrival. The goal is a tile of the chair's reach ring, since the planner
+   * refuses a goal the body does not fit on and a chair collides. Without a
+   * free chair it walks into the desk area, like `walkToPeer` into a space.
+   */
+  private walkToOwnDesk(): void {
+    if (!this.localPositionReady) return;
+    const deskIndex = this.desks.findIndex((desk) => desk.mine);
+    const area = this.deskAreas[deskIndex];
+    if (area === undefined) return;
+    const infoOf = decorInfoFromManifest(this.art.manifest);
+    const width = this.layout.width;
+    const onDesk = new Set(
+      this.officeDecor
+        .filter((item) => isDecorChairPiece(item.piece) && isOnDesk(item, infoOf(item.piece), area, width))
+        .map((item) => chairSeatId(item.index)),
+    );
+    if (this.seat !== null && onDesk.has(this.seat.id)) return;
+    const chairs = this.freeSeats().filter((seat) => onDesk.has(seat.id));
+
+    const inReach = chairs.find((seat) => inSeatReach(this.player, seat.reach));
+    if (inReach !== undefined) {
+      this.resetWalking();
+      this.requestSeat(inReach);
+      return;
+    }
+
+    let best: { seat: ResolvedSeat; goal: { x: number; y: number }; length: number } | null = null;
+    const world = this.walkWorld();
+    for (const seat of chairs) {
+      for (let ty = seat.reach.y0 - SEAT_REACH_TILES; ty <= seat.reach.y1 + SEAT_REACH_TILES; ty++) {
+        for (let tx = seat.reach.x0 - SEAT_REACH_TILES; tx <= seat.reach.x1 + SEAT_REACH_TILES; tx++) {
+          const goal = positionForBodyTile({ tx, ty });
+          if (!inSeatReach(goal, seat.reach)) continue;
+          const route = planWalk(world, this.player, goal);
+          if (route === null) continue;
+          const length = routeLength(this.player, route);
+          if (best === null || length < best.length) best = { seat, goal, length };
+        }
+      }
+    }
+    if (best !== null) {
+      if (this.startWalk(best.goal)) this.seatAfterWalk = best.seat.id;
+      return;
+    }
+
+    const deskTiles: TileRect = { x0: area.x, y0: area.y, x1: area.x + area.w - 1, y1: area.y + area.h - 1 };
+    const center = { tx: area.x + Math.floor(area.w / 2), ty: area.y + Math.floor(area.h / 2) };
+    const destination = pickApproachTile(this.grid, bodyTileOf(this.player), center, deskTiles);
+    if (destination) this.startWalk(positionForBodyTile(destination));
   }
 
   update(time: number, delta: number): void {
@@ -2461,6 +2580,7 @@ export class OfficeScene extends Phaser.Scene {
     }
 
     const from = { x: this.player.x, y: this.player.y };
+    const heading = { x: body.velocity.x, y: body.velocity.y };
     const intended = body.velocity.lengthSq() > 0;
     if (intended && !body.checkCollision.none) {
       body.updateFromGameObject();
@@ -2482,15 +2602,29 @@ export class OfficeScene extends Phaser.Scene {
     this.physics.world.postUpdate();
     // A full desk takes nobody else in (`deskDecorRules.ts`): the step that
     // would enter it is undone, and an auto-walk into it ends there.
-    if (intended && this.fullDeskOnTheWay(from, this.player) !== null) {
+    // So does a locked space, to whoever is not in it (`spaceLocks.ts`).
+    // Its door being the way in, walking at it already says it is locked,
+    // even for a body a post beside the door holds back from the step in.
+    const fullDesk = intended && this.fullDeskOnTheWay(from, this.player) !== null;
+    const lockedSpace = intended && !fullDesk ? lockedSpaceEntered(from, this.player, this.spaces, this.lockedSpaces) : null;
+    const lockedDoor = intended && !fullDesk && lockedSpace === null
+      ? lockedDoorAhead([...this.doorLeaves.values()], from, heading, this.spaces, this.lockedSpaces)
+      : null;
+    if (fullDesk || lockedSpace !== null) {
       body.reset(from.x, from.y);
       body.updateFromGameObject();
       body.setVelocity(0, 0);
       this.autoWalk = undefined;
-      if (!this.deskFullTold) this.bridge.emit('deskfull', undefined);
-      this.deskFullTold = true;
+      if (fullDesk && !this.deskFullTold) this.bridge.emit('deskfull', undefined);
+      if (lockedSpace !== null && !this.spaceLockedTold) this.bridge.emit('spacelocked', { spaceId: lockedSpace.id });
+      if (fullDesk) this.deskFullTold = true;
+      else this.spaceLockedTold = true;
+    } else if (lockedDoor !== null) {
+      if (!this.spaceLockedTold) this.bridge.emit('spacelocked', { spaceId: lockedDoor.id });
+      this.spaceLockedTold = true;
     } else if (!intended || Math.hypot(this.player.x - from.x, this.player.y - from.y) > 0.000001) {
       this.deskFullTold = false;
+      this.spaceLockedTold = false;
     }
     const moved = Math.hypot(this.player.x - from.x, this.player.y - from.y) > 0.000001;
     const walking = advanceWalkingTime(this.walkingMs, this.walkingIdleMs, intended && moved && this.seat === null, delta);
@@ -2502,10 +2636,25 @@ export class OfficeScene extends Phaser.Scene {
       this.walkingMs = 0;
       this.walkingIdleMs = 0;
       body.setVelocity(0, 0);
+      // The chair may have been taken on the way: only a still free one is asked for.
+      const seat = this.freeSeats().find((candidate) => candidate.id === this.seatAfterWalk);
+      this.seatAfterWalk = null;
+      if (seat !== undefined && inSeatReach(this.player, seat.reach)) this.requestSeat(seat);
     }
   }
 }
 
 function facingFromSnapshot(facing: string): Facing {
   return facing === 'up' || facing === 'down' || facing === 'left' || facing === 'right' ? facing : DEFAULT_FACING;
+}
+
+/** Path length from `from` through every stop of a planned route. */
+function routeLength(from: { x: number; y: number }, route: readonly { x: number; y: number }[]): number {
+  let length = 0;
+  let at = from;
+  for (const stop of route) {
+    length += Math.hypot(stop.x - at.x, stop.y - at.y);
+    at = stop;
+  }
+  return length;
 }

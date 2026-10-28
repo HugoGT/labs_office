@@ -168,7 +168,14 @@
      `.statusSelect`'s new height instead of towering over it. */
   padding: 6px 12px;
   font-size: 13px;
+  /* A tight bar cuts the room name (`.status`), never breaks a label in two. */
+  white-space: nowrap;
   cursor: pointer;
+}
+
+/* An emoji alone: the side padding matches its height, not a label's. */
+.iconBtn {
+  padding: 6px 9px;
 }
 
 .btn:disabled {
@@ -196,6 +203,13 @@
 .splitMain {
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
+}
+
+.placeActions {
+  display: flex;
+  gap: 6px;
+  /* The room name is what gets cut on a tight bar, never these. */
+  flex-shrink: 0;
 }
 
 .status {

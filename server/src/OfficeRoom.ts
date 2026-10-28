@@ -75,6 +75,9 @@ import {
 } from '../../src/game/seating.ts';
 import { decorChairs, encodeOfficeDecor, type DecorItem, type DecorTileRect } from '../../src/game/officeDecor.ts';
 import { deskEntryRefused } from '../../src/game/deskDecorRules.ts';
+import type { SpaceArea } from '../../src/game/mapData.ts';
+import { detectSpace } from '../../src/game/proximity.ts';
+import { encodeLockedSpaces, heldLocks, lockedSpaceEntered } from '../../src/game/spaceLocks.ts';
 import { createCallInvitationRegistry, type CallInvitationRegistry } from './callInvitations.ts';
 import { physicalBodyRect, positionForFeet } from '../../src/game/avatarGeometry.ts';
 import { ART_PACK_DEFAULTS } from './decor/artCatalogRules.ts';
@@ -262,6 +265,13 @@ export interface OfficeRoomOptions {
    */
   desks?: () => readonly DecorTileRect[];
   /**
+   * Every space, rooms and desk cubicles, in pixels: a locked one takes
+   * nobody in from outside (`spaceLocks.ts`), read on each `move`, `sit` and
+   * `lock`. Kept fresh by the caller on every committed space or desk
+   * change. Absent, there are no spaces to lock.
+   */
+  spaces?: () => readonly SpaceArea[];
+  /**
    * The collision rectangles every `move` is checked against, read on each
    * move. Absent is the static office with every piece at its default (the
    * footprint of each Tiled prop), exactly the tiles props blocked before.
@@ -411,6 +421,9 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private decor: () => readonly DecorItem[] = () => [];
   private terrainColors: () => TerrainColors = () => new Map();
   private desks: () => readonly DecorTileRect[] = () => [];
+  private spaces: () => readonly SpaceArea[] = () => [];
+  /** The locked space ids, each with the session that locked it, mirrored as `state.lockedSpaces`. */
+  private lockedSpaceIds = new Map<string, string>();
   private collisions: () => readonly CollisionRect[] = () => BASE_COLLISION_RECTS;
   // Bridges a definitive leave and a refresh while its write is in flight.
   // Serializing per uid prevents an older slow write from undoing a newer leave.
@@ -423,6 +436,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     if (options?.decor) this.decor = options.decor;
     if (options?.terrainColors) this.terrainColors = options.terrainColors;
     if (options?.desks) this.desks = options.desks;
+    if (options?.spaces) this.spaces = options.spaces;
     this.state.terrainBlocks = encodeTerrainBlocks(this.terrain().blocks);
     this.state.terrainColors = encodeTerrainColors(this.terrainColors());
     this.state.terrainWalls = encodeTerrainWalls(this.terrain().walls, this.terrain().wallOrder);
@@ -445,6 +459,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
         player.positionRevision++;
         this.sessions?.moveTo(sessionId, position.x, position.y);
       }
+      this.releaseEmptyLocks();
     });
     if (options?.collisions) this.collisions = options.collisions;
     this.state.pieceCollisions = options?.collisionTable?.() ?? encodeCollisionTable(new Map());
@@ -465,6 +480,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     });
     this.unsubscribeSpacesChanges = options?.subscribeSpacesChanges?.(() => {
       this.broadcast('spaceschanged');
+      this.releaseEmptyLocks();
     });
     // Late joiners get the mirror for free: it is plain synced state.
     for (const entry of this.recordings?.list() ?? []) {
@@ -516,9 +532,12 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       if (!withinSeat && (!isPositionWalkable(this.terrain(), x, y) || isPositionBlocked(this.collisions(), x, y))) return;
       // A full desk takes nobody else in; whoever is inside moves freely.
       if (this.entersFullDesk(client.sessionId, player, { x, y })) return;
+      // Same for a locked space, whoever is in it.
+      if (lockedSpaceEntered(player, { x, y }, this.spaces(), this.lockedSpaceIds) !== null) return;
 
       player.x = x;
       player.y = y;
+      this.releaseEmptyLocks();
       if (reach !== undefined && !withinSeat) this.standUp(client.sessionId);
       if (player.seat === '') player.facing = sanitizeFacing(message?.facing);
 
@@ -560,6 +579,25 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
 
     this.onMessage('stand', (client: Client) => {
       this.standUp(client.sessionId);
+    });
+
+    // Locks the space the sender stands in, as the room tracks it: the id is
+    // never the client's. Outside every space, or in one already locked, it
+    // is dropped whole.
+    this.onMessage('lock', (client: Client) => {
+      const space = this.spaceOf(client.sessionId);
+      if (space === null || this.lockedSpaceIds.has(space.id)) return;
+      this.lockedSpaceIds.set(space.id, client.sessionId);
+      this.state.lockedSpaces = encodeLockedSpaces(this.lockedSpaceIds);
+    });
+
+    // Only whoever locked a space unlocks it, from inside it; the others can
+    // only leave. The lock goes by itself once whoever locked it leaves.
+    this.onMessage('unlock', (client: Client) => {
+      const space = this.spaceOf(client.sessionId);
+      if (space === null || this.lockedSpaceIds.get(space.id) !== client.sessionId) return;
+      this.lockedSpaceIds.delete(space.id);
+      this.state.lockedSpaces = encodeLockedSpaces(this.lockedSpaceIds);
     });
 
     // El cliente no es de fiar tampoco aqui: `to`/`from` se comprueban como
@@ -721,6 +759,8 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
         } catch (error) {
           console.warn('[office] last position read failed', error);
         }
+        // A saved spot in a space locked since then is outside the lock: spawn instead.
+        if (position !== null && this.lockedSpaceIds.has(detectSpace(position, this.spaces())?.id ?? '')) position = null;
         // #78 may have closed this still-joining socket while storage waited.
         // Never resurrect its player or let it replace the newer tab.
         if (!this.clients.includes(client)) return;
@@ -906,6 +946,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       ? this.savePosition(uid, { x: player.x, y: player.y }) : Promise.resolve();
     this.state.players.delete(sessionId);
     this.seated.delete(sessionId);
+    this.releaseEmptyLocks();
     this.sessions?.remove(sessionId);
     this.stopRecordingsOf(sessionId);
 
@@ -967,7 +1008,10 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
 
     // The sitter stands with its feet on the chair's ground: a seat in a full
     // desk would take one more person in, so it is refused like the move.
-    const seatedAt = (ground: { x: number; y: number }): boolean => this.entersFullDesk(client.sessionId, player, positionForFeet(ground));
+    const seatedAt = (ground: { x: number; y: number }): boolean => {
+      const sitter = positionForFeet(ground);
+      return this.entersFullDesk(client.sessionId, player, sitter) || lockedSpaceEntered(player, sitter, this.spaces(), this.lockedSpaceIds) !== null;
+    };
 
     if (ref.kind === 'map') {
       const seat = this.mapSeats[ref.index];
@@ -995,6 +1039,26 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     const others: { x: number; y: number }[] = [];
     for (const [otherId, other] of this.state.players) if (otherId !== sessionId) others.push({ x: other.x, y: other.y });
     return deskEntryRefused(player, to, desks, others, TILE) !== null;
+  }
+
+  /**
+   * Drops the lock of every space whoever locked it left (or the office), and
+   * of every space that is gone. A locker waiting to reconnect still holds
+   * it, like the desk occupancy rule counts reserved reconnects.
+   */
+  /** The space a session stands in, as the room tracks it, or `null`. */
+  private spaceOf(sessionId: string): SpaceArea | null {
+    const player = this.state.players.get(sessionId);
+    return player ? detectSpace(player, this.spaces()) : null;
+  }
+
+  private releaseEmptyLocks(): void {
+    if (this.lockedSpaceIds.size === 0) return;
+    const players = [...this.state.players].map(([sessionId, { x, y }]) => ({ sessionId, x, y }));
+    const held = heldLocks(this.lockedSpaceIds, this.spaces(), players);
+    if (held.size === this.lockedSpaceIds.size) return;
+    this.lockedSpaceIds = held;
+    this.state.lockedSpaces = encodeLockedSpaces(held);
   }
 
   private takeSeat(

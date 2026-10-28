@@ -19,11 +19,11 @@
  * `officeDecor.ts`: explicit `.ts` imports of other pure modules only.
  */
 
-import { DOOR_STEPS, doorHingeOf, doorSpanOf, type DoorHinge, type GridEdge } from './artContract.ts';
+import { DOOR_STEPS, WALL, doorHingeOf, doorSpanOf, doorVariantOf, type DoorHinge, type GridEdge } from './artContract.ts';
 import { AVATAR_BODY_CENTER_OFFSET, type GeometryPoint } from './avatarGeometry.ts';
 import { decorChairFacing, type DecorItem, type DecorTileRect } from './officeDecor.ts';
 import { wallFootprintRects, type WallGrid } from './officeLayout.ts';
-import { coveredTiles } from './pieceCollisions.ts';
+import { coveredTiles, type CollisionRect } from './pieceCollisions.ts';
 
 /** Same as `TILE` in mapData.ts (pinned by the tests through the footprint pixels). */
 const DOOR_TILE = 32;
@@ -79,6 +79,39 @@ export function doorOnWall(grid: Pick<WallGrid, 'width' | 'height' | 'walls'>, i
   const [endCol, endRow] = axis === 'horizontal' ? [col + span, row] : [col, row + span];
   if (col < 0 || row < 0 || endCol >= grid.width || endRow >= grid.height) return false;
   return grid.walls[row * grid.width + col] != null && grid.walls[endRow * grid.width + endCol] != null;
+}
+
+/**
+ * How far past its post, into the opening, a door's hinge blocks: the jamb
+ * and the thickness of the open leaf (`DOOR`: 10 + 6px), so a body leaving
+ * along the hinge keeps off the open leaf.
+ */
+export const DOOR_HINGE_STOP_PX = 16;
+
+/**
+ * The strips each door on a wall (`doorOnWall`) blocks past its hinge post:
+ * the post's joint is clipped at its vertex (`wallColliderRects`), and the
+ * strip runs `DOOR_HINGE_STOP_PX` on from there along the opening, the
+ * wall's thickness across. A single door has one hinge (`doorHingeOf`), a
+ * double door one at each end. Arcade and the auto-walk only: the room
+ * checks the body center, and the client is the stricter side.
+ */
+export function doorHingeStops(items: readonly DecorItem[], grid: Pick<WallGrid, 'width' | 'height' | 'walls'>): CollisionRect[] {
+  const half = WALL.jointSize / 2;
+  return items.flatMap((item) => {
+    if (!isDoorPiece(item.piece) || !doorOnWall(grid, item)) return [];
+    const { col, row, axis } = doorEdge(item, grid.width);
+    const span = doorSpan(item);
+    const hinges: DoorHinge[] = doorVariantOf(item.piece) === 'double' ? ['start', 'end'] : [doorHingeOf(item.piece, item.rotation)];
+    return hinges.map((hinge): CollisionRect => {
+      if (axis === 'horizontal') {
+        const x = (hinge === 'start' ? col : col + span) * DOOR_TILE;
+        return { x: hinge === 'start' ? x : x - DOOR_HINGE_STOP_PX, y: row * DOOR_TILE - half, w: DOOR_HINGE_STOP_PX, h: 2 * half };
+      }
+      const y = (hinge === 'start' ? row : row + span) * DOOR_TILE;
+      return { x: col * DOOR_TILE - half, y: hinge === 'start' ? y : y - DOOR_HINGE_STOP_PX, w: 2 * half, h: DOOR_HINGE_STOP_PX };
+    });
+  });
 }
 
 /** The posts strictly between a door's two end posts, in order: the wall a door stands in front of. */
@@ -227,17 +260,18 @@ export function doorSwingRotation(rotation: DecorItem['rotation'], swing: DoorSw
  * body center passes the edge line mid crossing. Two bodies from opposite
  * sides get that kept swing, else the one of the first body (in `positions`
  * order) that opens it. Drawing only: a door never blocks anyone, open or
- * closed.
+ * closed. `keptShut` names the avatars a door does not open for (a locked
+ * space behind it, `spaceLocks.ts`); one lined up with it opens it for no one.
  */
 export function openDoorLeaves(
   leaves: readonly DoorLeaf[],
   positions: readonly GeometryPoint[],
   previous: ReadonlyMap<number, DoorSwing> = new Map(),
+  keptShut: (leaf: DoorLeaf, position: GeometryPoint) => boolean = () => false,
 ): Map<number, DoorSwing> {
-  const centers = positions.map(bodyCenter);
   const open = new Map<number, DoorSwing>();
   for (const leaf of leaves) {
-    const openers = centers.filter((center) => liningUp(leaf, center));
+    const openers = positions.filter((position) => !keptShut(leaf, position)).map(bodyCenter).filter((center) => liningUp(leaf, center));
     if (openers.length === 0) continue;
     open.set(leaf.index, previous.get(leaf.index) ?? (sideOf(leaf, openers[0]!) > 0 ? 'outside' : 'inside'));
   }
@@ -317,6 +351,22 @@ export function moveDoors(targets: ReadonlyMap<number, DoorSwing>, motion: Reado
 /** The frame of a swing (`doorFrameIndex`'s step): the nearest of closed, the two between and open. */
 export function doorStepOf(progress: number): number {
   return Math.round(progress * (DOOR_STEPS - 1));
+}
+
+/**
+ * Where a door leads a body at network position `position` lined up with it
+ * (`openDoorLeaves`): the middle of the door's tile across its edge from the
+ * body center, along that center. `null` for a body not lined up with it.
+ */
+export function doorFarSide(leaf: DoorLeaf, position: GeometryPoint): GeometryPoint | null {
+  const center = bodyCenter(position);
+  if (!liningUp(leaf, center)) return null;
+  if (leaf.edge.axis === 'horizontal') {
+    const line = leaf.edge.row * DOOR_TILE;
+    return { x: center.x, y: center.y < line ? line + DOOR_TILE / 2 : line - DOOR_TILE / 2 };
+  }
+  const line = leaf.edge.col * DOOR_TILE;
+  return { x: center.x < line ? line + DOOR_TILE / 2 : line - DOOR_TILE / 2, y: center.y };
 }
 
 /** Whether a body center is lined up with a door's span and close to its edge across it. */
