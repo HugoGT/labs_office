@@ -12,6 +12,7 @@ import {
   ZONE_LABELS,
 } from './mapData';
 import { DOOR, DOOR_STEPS, TERRAIN_LAYER_COUNT, doorDepthY, doorFrameIndex } from './artContract';
+import { DOOR_HOLD_MS } from './officeDoors';
 import { terrainSnapshot, wallColliderRects, withBlock, withWalls, type OfficeLayout } from './officeLayout';
 import { CHAIR_OBJECT_NAME, WALL_OBJECT_NAME } from './mapBuilder';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SPACES as BUILT_IN_SPACES } from '../test/legacyOffice';
@@ -4902,6 +4903,25 @@ describe('OfficeScene: edited terrain', () => {
     expect(steps).toEqual([...steps].sort((a, b) => a - b));
     // And each frame sorts by the leaf it shows: it grows as the leaf swings down.
     for (const { frame, depth } of drawn) expect(depth, `frame ${frame}`).toBeCloseTo(depthAt(frame / DOOR.columns));
+  });
+
+  it('keeps a fully open door open for a moment after the avatar leaves, then closes it through the frames between (#233)', async () => {
+    const { scene, handlers } = await bootConnected();
+    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
+    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 0 }]);
+    const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
+    await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
+    const frame = () => Number(leaf().frame.name);
+    const open = doorFrameIndex(0, 'start', DOOR_STEPS - 1);
+    const body = findPlayer(scene).body as Phaser.Physics.Arcade.Body;
+    body.reset(lawnVertex.x + TILE, lawnVertex.y - TILE / 2 - 11);
+    await vi.waitFor(() => expect(frame()).toBe(open), LOOP_WAIT);
+
+    // Out of range: it stays wide open while the hold runs (well under DOOR_HOLD_MS), and only then starts to close.
+    body.reset(lawnVertex.x + TILE, lawnVertex.y + 5 * TILE);
+    await new Promise((resolve) => setTimeout(resolve, DOOR_HOLD_MS / 3));
+    expect(frame()).toBe(open);
+    await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(0, 'start', 0)), LOOP_WAIT);
   });
 
   it('draws an avatar standing past a swung leaf in front of it, even inside the span of a vertical door (#233)', async () => {

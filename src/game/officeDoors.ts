@@ -181,10 +181,19 @@ export function openDoorLeaves(
 /** How long a door takes to swing from shut to fully open, or back (#233). */
 export const DOOR_SWING_MS = 180;
 
-/** One door's swing: the side it turns to and how far open it is, 0 shut to 1 fully open. */
+/** How long a door stays fully open after nobody is lined up with it any more, before it starts to close (#233). */
+export const DOOR_HOLD_MS = 360;
+
+/**
+ * One door's swing: the side it turns to, how far open it is (0 shut to 1
+ * fully open) and the hold it still owes at fully open: set while someone is
+ * lined up with it, used up once it is wide open and nobody is. A door with
+ * hold left and not yet fully open is opening; with none, closing.
+ */
 export interface DoorMotion {
   readonly swing: DoorSwing;
   readonly progress: number;
+  readonly hold: number;
 }
 
 /**
@@ -198,22 +207,42 @@ export function keptSwings(motion: ReadonlyMap<number, DoorMotion>): Map<number,
 }
 
 /**
- * The swing of every door after `dtMs` more: the ones in `targets` (those
- * `openDoorLeaves` says someone is lined up with) open, the rest close, each
- * at the same speed. A door keeps the side it swings to for as long as it
- * shows a swung frame, so it never flips mid swing; one drawn shut takes the
- * side of whoever opens it. A door that finishes shutting is dropped.
+ * The swing of every door after `dtMs` more. A door someone is lined up with
+ * (`targets`, from `openDoorLeaves`) opens. Once nobody is, it still opens
+ * the rest of the way, waits `DOOR_HOLD_MS` wide open and only then closes, so
+ * it never swings back on whoever just went through. A door keeps the side it
+ * swings to for as long as it shows a swung frame, so it never flips mid
+ * swing; one drawn shut takes the side of whoever opens it. A door that
+ * finishes shutting is dropped.
  */
 export function moveDoors(targets: ReadonlyMap<number, DoorSwing>, motion: ReadonlyMap<number, DoorMotion>, dtMs: number): Map<number, DoorMotion> {
   const next = new Map<number, DoorMotion>();
-  const travelled = dtMs / DOOR_SWING_MS;
+  const kept = keptSwings(motion);
   for (const index of new Set([...targets.keys(), ...motion.keys()])) {
     const before = motion.get(index);
     const target = targets.get(index);
     if (target !== undefined) {
-      next.set(index, { swing: keptSwings(motion).get(index) ?? target, progress: Math.min(1, (before?.progress ?? 0) + travelled) });
-    } else if (before !== undefined && before.progress - travelled > 0) {
-      next.set(index, { swing: before.swing, progress: before.progress - travelled });
+      next.set(index, { swing: kept.get(index) ?? target, progress: Math.min(1, (before?.progress ?? 0) + dtMs / DOOR_SWING_MS), hold: DOOR_HOLD_MS });
+    } else if (before !== undefined) {
+      // What is left of the time goes to each stage in turn: finish opening, wait, close.
+      let left = dtMs;
+      let { progress, hold } = before;
+      if (hold > 0) {
+        const toOpen = (1 - progress) * DOOR_SWING_MS;
+        // Exactly 1 once there, so the hold starts on the same frame whatever the float arithmetic says.
+        if (left >= toOpen) {
+          progress = 1;
+          left -= toOpen;
+        } else {
+          progress += left / DOOR_SWING_MS;
+          left = 0;
+        }
+        const waited = progress === 1 ? Math.min(left, hold) : 0;
+        hold -= waited;
+        left -= waited;
+      }
+      if (hold === 0) progress -= left / DOOR_SWING_MS;
+      if (progress > 0) next.set(index, { swing: before.swing, progress: Math.min(1, progress), hold });
     }
   }
   return next;
