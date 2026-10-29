@@ -1,0 +1,105 @@
+/* The office mock of an art review (#121, #122): 5 x 3 blocks of 3 x 3 tiles, the three middle
+   ones holding the submission. The wood floor shows through the ring around them, like the
+   "Mi personaje" preview. Sizes come inline (`--block`, scales), always whole multiples of the art. */
+.mock {
+  display: grid;
+  grid-template-columns: var(--block) auto auto auto var(--block);
+  grid-template-rows: var(--block) auto var(--block);
+  width: max-content;
+  background-color: #7a5a3a;
+  border: 1px solid #2b3444;
+  border-radius: var(--radius-control);
+  image-rendering: pixelated;
+}
+
+.block {
+  grid-row: 2;
+  min-width: var(--block);
+  min-height: var(--block);
+  box-sizing: border-box;
+  image-rendering: pixelated;
+  box-shadow: inset 0 0 0 1px #0005;
+}
+
+.characters {
+  grid-column: 2;
+  position: relative;
+}
+
+.grass {
+  grid-column: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px;
+}
+
+.terrain {
+  grid-column: 4;
+}
+
+.sprite {
+  display: block;
+  flex: none;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+
+.characters .sprite {
+  position: absolute;
+}
+
+/* The two layers of a chair, one over the other in the same box. */
+.stack {
+  position: relative;
+  display: block;
+  flex: none;
+}
+
+.layer {
+  position: absolute;
+  inset: 0;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+
+.figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+}
+
+.caption {
+  padding: 1px 5px;
+  border-radius: var(--radius-tag);
+  background: #111827cc;
+  font-size: 11px;
+  color: #e5e7eb;
+}
+
+.raw {
+  display: block;
+  max-width: 100%;
+  image-rendering: pixelated;
+}
+
+/* Same step animation as the character creator (`CharacterCreator.module.css`). */
+.walking {
+  animation: walk 1s steps(var(--sprite-steps)) infinite;
+}
+
+@keyframes walk {
+  to {
+    background-position-x: var(--sprite-travel);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .walking {
+    animation: none;
+  }
+}
