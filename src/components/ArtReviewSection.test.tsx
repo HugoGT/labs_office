@@ -1,10 +1,10 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { AdminError } from './adminPort';
-import type { Contribution, ContributionStatus } from './artContributionPort';
-import type { ArtReviewPort } from './artReviewPort';
-import { ArtReviewPanel } from './ArtReviewPanel';
+import { AdminError } from '../dashboard/adminPort';
+import type { Contribution, ContributionStatus } from '../dashboard/artContributionPort';
+import type { ArtReviewPort } from '../dashboard/artReviewPort';
+import { ArtReviewSection } from './ArtReviewSection';
 
 function contribution(overrides: Partial<Contribution> = {}): Contribution {
   return {
@@ -36,10 +36,10 @@ function fakePort(byStatus: Partial<Record<ContributionStatus, Contribution[]>> 
   };
 }
 
-describe('ArtReviewPanel (#122)', () => {
+describe('ArtReviewSection (#122)', () => {
   it('lists the pending pieces with who sent them and an animated preview of a character', async () => {
     const port = fakePort({ pending: [contribution()] });
-    render(<ArtReviewPanel reviews={port} />);
+    render(<ArtReviewSection reviews={port} />);
 
     expect(screen.getByRole('heading', { name: 'Revisión de arte' })).toBeInTheDocument();
     const row = await screen.findByRole('listitem');
@@ -55,7 +55,7 @@ describe('ArtReviewPanel (#122)', () => {
   it('approving takes the piece out of the queue', async () => {
     const user = userEvent.setup();
     const port = fakePort({ pending: [contribution()] });
-    render(<ArtReviewPanel reviews={port} />);
+    render(<ArtReviewSection reviews={port} />);
 
     await user.click(await screen.findByRole('button', { name: 'Aprobar Lucía' }));
 
@@ -67,7 +67,7 @@ describe('ArtReviewPanel (#122)', () => {
   it('rejecting asks for the reason the uploader will read', async () => {
     const user = userEvent.setup();
     const port = fakePort({ pending: [contribution()] });
-    render(<ArtReviewPanel reviews={port} />);
+    render(<ArtReviewSection reviews={port} />);
 
     await user.click(await screen.findByRole('button', { name: 'Rechazar Lucía' }));
     const confirm = screen.getByRole('button', { name: 'Confirmar rechazo' });
@@ -82,7 +82,7 @@ describe('ArtReviewPanel (#122)', () => {
   it('a decision another reviewer already took is readable', async () => {
     const user = userEvent.setup();
     const port = fakePort({ pending: [contribution()] }, { approve: vi.fn(async () => Promise.reject(new AdminError('already-reviewed'))) });
-    render(<ArtReviewPanel reviews={port} />);
+    render(<ArtReviewSection reviews={port} />);
 
     await user.click(await screen.findByRole('button', { name: 'Aprobar Lucía' }));
 
@@ -92,7 +92,7 @@ describe('ArtReviewPanel (#122)', () => {
   it('approved pieces can be withdrawn, and says how many people went back to the default character', async () => {
     const user = userEvent.setup();
     const port = fakePort({ approved: [contribution({ status: 'approved' })] });
-    render(<ArtReviewPanel reviews={port} />);
+    render(<ArtReviewSection reviews={port} />);
 
     await user.click(screen.getByRole('tab', { name: 'Aprobadas' }));
     await user.click(await screen.findByRole('button', { name: 'Retirar Lucía' }));
@@ -104,7 +104,7 @@ describe('ArtReviewPanel (#122)', () => {
 
   it('rejected pieces show their reason and no actions', async () => {
     const user = userEvent.setup();
-    render(<ArtReviewPanel reviews={fakePort({ rejected: [contribution({ status: 'rejected', reviewNote: 'Tiene fondo' })] })} />);
+    render(<ArtReviewSection reviews={fakePort({ rejected: [contribution({ status: 'rejected', reviewNote: 'Tiene fondo' })] })} />);
 
     await user.click(screen.getByRole('tab', { name: 'Rechazadas' }));
 
@@ -114,7 +114,7 @@ describe('ArtReviewPanel (#122)', () => {
   });
 
   it('an empty queue says so', async () => {
-    render(<ArtReviewPanel reviews={fakePort()} />);
+    render(<ArtReviewSection reviews={fakePort()} />);
     expect(await screen.findByText('No hay piezas pendientes de revisión.')).toBeInTheDocument();
   });
 });

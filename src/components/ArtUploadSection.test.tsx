@@ -1,9 +1,9 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { AdminError } from './adminPort';
-import { ArtUploadPanel } from './ArtUploadPanel';
-import type { ArtUploadPort } from './artUploadPort';
+import { AdminError } from '../dashboard/adminPort';
+import { ArtUploadSection } from './ArtUploadSection';
+import type { ArtUploadPort } from '../dashboard/artUploadPort';
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 const PNG_BASE64 = 'iVBORw0KGgoBAgM=';
@@ -27,11 +27,11 @@ async function fillPlant(user: ReturnType<typeof userEvent.setup>): Promise<void
   await user.upload(screen.getByLabelText(/Hoja/), png('helecho.png'));
 }
 
-describe('ArtUploadPanel (#121)', () => {
+describe('ArtUploadSection (#121)', () => {
   it('asks a character for its two sheets, each with the exact size the contract wants', () => {
-    render(<ArtUploadPanel uploads={fakePort()} />);
+    render(<ArtUploadSection uploads={fakePort()} />);
 
-    expect(screen.getByRole('heading', { name: 'Subir arte' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Aportar arte' })).toBeInTheDocument();
     expect(screen.getByLabelText(/Caminar/)).toHaveAccessibleDescription(/352 × 416 px/);
     expect(screen.getByLabelText(/Sentado/)).toHaveAccessibleDescription(/352 × 232 px/);
     // A character has no material.
@@ -41,7 +41,7 @@ describe('ArtUploadPanel (#121)', () => {
 
   it('a plant asks for one sheet and a material, and previews the chosen file', async () => {
     const user = userEvent.setup();
-    render(<ArtUploadPanel uploads={fakePort()} />);
+    render(<ArtUploadSection uploads={fakePort()} />);
 
     await fillPlant(user);
 
@@ -54,7 +54,7 @@ describe('ArtUploadPanel (#121)', () => {
   it('uploads the files in base64 with the metadata and says the piece is in the catalog', async () => {
     const user = userEvent.setup();
     const uploads = fakePort();
-    render(<ArtUploadPanel uploads={uploads} />);
+    render(<ArtUploadSection uploads={uploads} />);
 
     await fillPlant(user);
     await user.click(screen.getByRole('button', { name: 'Subir' }));
@@ -76,7 +76,7 @@ describe('ArtUploadPanel (#121)', () => {
   it('a colorable floor sends its default color', async () => {
     const user = userEvent.setup();
     const uploads = fakePort();
-    render(<ArtUploadPanel uploads={uploads} />);
+    render(<ArtUploadSection uploads={uploads} />);
 
     await user.selectOptions(screen.getByLabelText('Tipo'), 'floor');
     await user.type(screen.getByLabelText('Nombre'), 'Baldosa');
@@ -92,7 +92,7 @@ describe('ArtUploadPanel (#121)', () => {
   it('shows a refusal in Spanish, naming the file and the size it should have', async () => {
     const user = userEvent.setup();
     const uploads = fakePort({ upload: vi.fn(async () => Promise.reject(new AdminError('invalid-dimensions', 'sheet'))) });
-    render(<ArtUploadPanel uploads={uploads} />);
+    render(<ArtUploadSection uploads={uploads} />);
 
     await fillPlant(user);
     await user.click(screen.getByRole('button', { name: 'Subir' }));

@@ -4,6 +4,8 @@ import type { ComponentProps } from 'react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { CharacterPort } from '../auth/characterPort';
 import type { ArtContributionPort } from '../dashboard/artContributionPort';
+import type { ArtReviewPort } from '../dashboard/artReviewPort';
+import type { ArtUploadPort } from '../dashboard/artUploadPort';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { AdminSpace, SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import { SIDEBAR_TOP } from '../game/hudLayout';
@@ -18,6 +20,8 @@ beforeAll(async () => {
   await Promise.all([
     import('./OfficeLayoutEditor'),
     import('./ArtContributionSection'),
+    import('./ArtUploadSection'),
+    import('./ArtReviewSection'),
     import('./MyCharacterSection'),
   ]);
 });
@@ -691,6 +695,70 @@ describe('OfficeSidebar: contributing art (#122)', () => {
     await user.click(screen.getByRole('button', { name: /Personalizar/ }));
 
     expect(screen.queryByRole('heading', { name: 'Aportar arte' })).not.toBeInTheDocument();
+  });
+});
+
+describe('OfficeSidebar: art for admins', () => {
+  function fakeContributions(): ArtContributionPort {
+    return {
+      submit: vi.fn(),
+      listMine: vi.fn(async () => ({ contributions: [], usage: { pending: 0, lastHour: 0, maxPending: 5, maxPerHour: 10 } })),
+      fileDataUrl: vi.fn(),
+    };
+  }
+  const uploads: ArtUploadPort = { upload: vi.fn() };
+  const reviews: ArtReviewPort = {
+    list: vi.fn(async () => []),
+    approve: vi.fn(),
+    reject: vi.fn(),
+    retire: vi.fn(),
+    fileDataUrl: vi.fn(),
+  };
+
+  it('an admin sees "Revisión de arte" and opens the review queue from it', async () => {
+    const user = userEvent.setup();
+    renderSidebar({ role: 'admin', contributions: fakeContributions(), artAdmin: { uploads, reviews } });
+
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+    await user.click(screen.getByRole('button', { name: 'Revisión de arte' }));
+
+    expect(await screen.findByRole('heading', { name: 'Revisión de arte' })).toBeInTheDocument();
+    expect(reviews.list).toHaveBeenCalledWith('pending');
+  });
+
+  it('an admin\'s "Aportar arte" publishes straight to the catalog instead of sending it to review', async () => {
+    const user = userEvent.setup();
+    renderSidebar({ role: 'superadmin', contributions: fakeContributions(), artAdmin: { uploads, reviews } });
+
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+    await user.click(screen.getByRole('button', { name: 'Aportar arte' }));
+
+    expect(await screen.findByRole('heading', { name: 'Aportar arte' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Subir' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Enviar a revisión' })).not.toBeInTheDocument();
+  });
+
+  it('anyone else gets no "Revisión de arte", and keeps contributing for review', async () => {
+    const user = userEvent.setup();
+    renderSidebar({ role: 'employee', contributions: fakeContributions(), artAdmin: { uploads, reviews } });
+
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+    expect(screen.queryByRole('button', { name: 'Revisión de arte' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Aportar arte' }));
+    expect(await screen.findByRole('button', { name: 'Enviar a revisión' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Subir' })).not.toBeInTheDocument();
+  });
+
+  it('an admin without the art ports has no review entry and contributes for review like anyone', async () => {
+    const user = userEvent.setup();
+    renderSidebar({ role: 'admin', contributions: fakeContributions() });
+
+    await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+
+    expect(screen.queryByRole('button', { name: 'Revisión de arte' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Aportar arte' }));
+    expect(await screen.findByRole('button', { name: 'Enviar a revisión' })).toBeInTheDocument();
   });
 });
 

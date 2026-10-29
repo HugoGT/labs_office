@@ -4,6 +4,10 @@ import { createCharacterClient } from '../auth/characterClient';
 import type { CharacterPort } from '../auth/characterPort';
 import { createArtContributionClient } from '../dashboard/artContributionClient';
 import type { ArtContributionPort } from '../dashboard/artContributionPort';
+import { createArtReviewClient } from '../dashboard/artReviewClient';
+import type { ArtReviewPort } from '../dashboard/artReviewPort';
+import { createArtUploadClient } from '../dashboard/artUploadClient';
+import type { ArtUploadPort } from '../dashboard/artUploadPort';
 import { createDeskAdminClient } from '../dashboard/deskAdminClient';
 import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import { resolveOfficeApiBaseUrl } from '../dashboard/officeApiBaseUrl';
@@ -227,6 +231,21 @@ export function OfficeShell({
     if (apiBaseUrl === null || !session) return null;
     const signedIn = session;
     return createArtContributionClient({ baseUrl: apiBaseUrl, getIdToken: () => signedIn.getIdToken() });
+  });
+  /**
+   * The admin side of art (#121, #122), same pattern as `contributionsPort`.
+   * Built for anyone signed in but only offered to admins by the sidebar; the
+   * server refuses everyone else regardless.
+   */
+  const [artAdminPorts] = useState<{ uploads: ArtUploadPort; reviews: ArtReviewPort } | null>(() => {
+    const apiBaseUrl = resolveOfficeApiBaseUrl({ officeEndpoint: endpoint });
+    if (apiBaseUrl === null || !session) return null;
+    const signedIn = session;
+    const getIdToken = () => signedIn.getIdToken();
+    return {
+      uploads: createArtUploadClient({ baseUrl: apiBaseUrl, getIdToken }),
+      reviews: createArtReviewClient({ baseUrl: apiBaseUrl, getIdToken }),
+    };
   });
   /**
    * "Mi personaje" in "Personalizar": the entrance's character port, built
@@ -847,6 +866,7 @@ export function OfficeShell({
           collisions={collisionAdminPort}
           decor={decorAdminPort}
           contributions={contributionsPort}
+          artAdmin={artAdminPorts}
           character={characterPort}
           refreshDesks={refreshDesks}
           refreshSpaces={refreshSpaces}
