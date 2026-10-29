@@ -1,15 +1,15 @@
 /**
  * Art contributions (#122) as the office sees them: any signed-in user
- * uploads a character or a decor plant from "Personalizar", and follows its
- * review. Types only, like `artUploadPort.ts`; the adapter is
+ * uploads a character, a decor plant, a desk or a floor from "Personalizar",
+ * and follows its review. Types only, like `artUploadPort.ts`; the adapter is
  * `artContributionClient.ts`. The review side is `artReviewPort.ts`.
  *
  * The checks (format, limits, rights) are the server's; the form only says
  * what each kind needs and asks for the rights statement below.
  */
 
-/** What a contributor may upload; desks and floors stay the Admin's (`ArtUploadPanel`). */
-export const CONTRIBUTION_KINDS = ['character', 'plant'] as const;
+/** What a contributor may upload, the same list as `server/src/decor/artReviewRules.ts`. Walls are made from code. */
+export const CONTRIBUTION_KINDS = ['character', 'plant', 'desk', 'floor'] as const;
 export type ContributionKind = (typeof CONTRIBUTION_KINDS)[number];
 
 /** The rights statement the contributor must accept. The server refuses an upload without it. */
@@ -44,7 +44,7 @@ export interface Contribution {
 export interface ContributionInput {
   kind: ContributionKind;
   name: string;
-  /** Plants only. */
+  /** Every kind but characters. */
   material?: string;
   rightsAccepted: boolean;
   /** Base64 PNG (no `data:` prefix) per file role of the kind. */

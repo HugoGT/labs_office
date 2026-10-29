@@ -11,7 +11,7 @@
 
 import type { CharacterUpdates } from '../characterUpdates.ts';
 import { describe, expect, it } from 'vitest';
-import { ART_IMAGE_SPECS, artSheetKey, sheetSize, type ArtImageKind, type ArtPackManifest } from '../../../src/game/artContract.ts';
+import { ART_IMAGE_SPECS, artSheetKey, sheetSize, type ArtDeskPiece, type ArtImageKind, type ArtPackManifest } from '../../../src/game/artContract.ts';
 import { parseArtPackManifest } from '../../../src/game/artPack.ts';
 import { ART_PACK_DEFAULTS } from '../decor/artCatalogRules.ts';
 import { readArtPackManifest } from '../decor/artPackFile.ts';
@@ -70,14 +70,21 @@ const AS_BETO = 'Bearer valido-uid-beto';
 /** The pack's chairs and desks bring their own decor assets (chairs and tables). */
 const notPackChair = (asset: { textureKey: string }) => !/^art:(chair|desk)-(?!upload-)/.test(asset.textureKey);
 const PACK: ArtPackManifest = readArtPackManifest(new URL('../../../public/assets/pack/manifest.json', import.meta.url));
+/** What every contributed desk gets: the facings of the pack's default desk. */
+const PACK_DESK_FACINGS = (PACK.pieces.find((piece) => piece.id === ART_PACK_DEFAULTS.desk) as ArtDeskPiece).facings;
 
 /** A valid sheet; `shade` changes its pixels, so each shade is another piece. */
 function sheet(kind: ArtImageKind, shade = 0): string {
   const spec = ART_IMAGE_SPECS[kind];
   const { width, height } = sheetSize(spec);
   const data = new Uint8ClampedArray(width * height * 4);
-  for (let y = spec.frame.height >> 1; y < height; y += spec.frame.height) {
-    for (let x = spec.frame.width >> 1; x < width; x += spec.frame.width) data.set([30 + shade, 90, 160, 255], (y * width + x) * 4);
+  // A floor is opaque in every pixel; any other sheet only needs a pixel per frame.
+  if (spec.alpha === 'opaque') {
+    for (let i = 0; i < width * height; i += 1) data.set([30 + shade, 90, 160, 255], i * 4);
+  } else {
+    for (let y = spec.frame.height >> 1; y < height; y += spec.frame.height) {
+      for (let x = spec.frame.width >> 1; x < width; x += spec.frame.width) data.set([30 + shade, 90, 160, 255], (y * width + x) * 4);
+    }
   }
   return encodePng({ width, height, data }).toString('base64');
 }
@@ -179,11 +186,24 @@ describe('handleSubmitContribution', () => {
     expect(d.decor.artAuditLog()).toEqual([]);
   });
 
-  it('refuses a desk or a floor: those stay the Admin upload', async () => {
+  it('takes a desk with the facings of the pack default desk, and a floor, both pending like any piece', async () => {
     const d = await deps();
-    const desk = { kind: 'desk', name: 'Roble', author: 'Ana', material: 'roble', rightsAccepted: true, files: { sheet: sheet('desk') } };
+    const desk = { kind: 'desk', name: 'Roble', material: 'roble', rightsAccepted: true, files: { sheet: sheet('desk') } };
+    const floor = { kind: 'floor', name: 'Parquet', material: 'parquet', rightsAccepted: true, files: { sheet: sheet('floor') } };
 
-    expect(await handleSubmitContribution(AS_ANA, desk, d)).toEqual({ status: 400, body: { error: 'invalid-metadata', field: 'kind' } });
+    const sentDesk = await submit(d, AS_ANA, desk);
+    const sentFloor = await submit(d, AS_ANA, floor);
+
+    expect(sentDesk.status).toBe(201);
+    expect(sentDesk.body.contribution).toMatchObject({ kind: 'desk', status: 'pending', author: 'Ana', piece: { facings: PACK_DESK_FACINGS } });
+    expect(sentFloor.body.contribution).toMatchObject({ kind: 'floor', status: 'pending', piece: { colorable: false, defaultColor: null } });
+  });
+
+  it('refuses a wall: walls are made from code, not contributed', async () => {
+    const d = await deps();
+    const wall = { kind: 'wall', name: 'Ladrillo', material: 'brick', rightsAccepted: true, files: { sheet: sheet('wall') } };
+
+    expect(await handleSubmitContribution(AS_ANA, wall, d)).toEqual({ status: 400, body: { error: 'invalid-metadata', field: 'kind' } });
   });
 
   it('the sixth pending piece of a user is refused with too-many-pending, before any file is stored', async () => {
@@ -394,10 +414,25 @@ describe('handleRetireArtPiece', () => {
     expect(d.retiredLive).toHaveLength(2);
   });
 
-  it('refuses an Admin-uploaded desk: desks and floors are not withdrawn this way', async () => {
+  it('withdraws an approved desk or floor like a plant, and keeps them drawable for whoever uses them', async () => {
     const d = await deps();
-    const desk = PACK.pieces.find((piece) => piece.id === 'desk-wood')!;
-    const { piece } = await d.decor.registerUploadedArtPiece({ piece: { ...desk, id: 'desk-upload-0123456789abcdef' }, uploadedBy: ADMIN.id });
+    const desk = await submit(d, AS_ANA, { kind: 'desk', name: 'Roble', material: 'roble', rightsAccepted: true, files: { sheet: sheet('desk') } });
+    const floor = await submit(d, AS_ANA, { kind: 'floor', name: 'Parquet', material: 'parquet', rightsAccepted: true, files: { sheet: sheet('floor') } });
+    for (const sent of [desk, floor]) await handleApproveContribution(AS_ADMIN, sent.body.contribution.id, d);
+
+    expect((await handleRetireArtPiece(AS_ADMIN, desk.body.contribution.id, d)).status).toBe(200);
+    expect((await handleRetireArtPiece(AS_ADMIN, floor.body.contribution.id, d)).status).toBe(200);
+
+    // A retired desk is a table already placed on someone's desk and a retired floor is painted
+    // terrain: the office still has to find their sheets (a retired character is the exception).
+    const ids = parseArtPackManifest((await handleUploadedArtManifest(d.decor)).body)?.pieces.map((piece) => piece.id);
+    expect(ids).toEqual(expect.arrayContaining([desk.body.contribution.id, floor.body.contribution.id]));
+  });
+
+  it('refuses to withdraw a piece of a kind nobody contributes', async () => {
+    const d = await deps();
+    const wall = PACK.pieces.find((piece) => piece.kind === 'wall')!;
+    const { piece } = await d.decor.registerUploadedArtPiece({ piece: { ...wall, id: 'wall-upload-0123456789abcdef' }, uploadedBy: ADMIN.id });
 
     expect(await handleRetireArtPiece(AS_ADMIN, piece.id, d)).toEqual({ status: 409, body: { error: 'not-retirable' } });
   });

@@ -21,6 +21,15 @@ const MAX_NAME_LENGTH = 60;
 const KIND_LABELS: Readonly<Record<ContributionKind, string>> = {
   character: 'Personaje',
   plant: 'Planta (decoración de escritorio)',
+  desk: 'Escritorio',
+  floor: 'Suelo',
+};
+
+/** Kinds named by a material, with an example the hint shows (a lowercase word). */
+const MATERIAL_EXAMPLE: Readonly<Partial<Record<ContributionKind, string>>> = {
+  plant: 'helecho',
+  desk: 'roble',
+  floor: 'parquet',
 };
 
 /** File roles per kind, as `server/src/assets/assetUploadRules.ts` reads them. */
@@ -30,6 +39,8 @@ const FILES: Readonly<Record<ContributionKind, readonly { role: string; label: s
     { role: 'seated', label: 'Sentado', imageKind: 'character-seated' },
   ],
   plant: [{ role: 'sheet', label: 'Hoja', imageKind: 'plant' }],
+  desk: [{ role: 'sheet', label: 'Hoja', imageKind: 'desk' }],
+  floor: [{ role: 'sheet', label: 'Hoja', imageKind: 'floor' }],
 };
 
 function sizeOf(imageKind: ArtImageKind): string {
@@ -123,9 +134,10 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
   useEffect(refresh, [refresh]);
 
   const roles = FILES[kind];
+  const materialExample = MATERIAL_EXAMPLE[kind];
   const ready =
     name.trim() !== '' &&
-    (kind !== 'plant' || material.trim() !== '') &&
+    (materialExample === undefined || material.trim() !== '') &&
     rightsAccepted &&
     roles.every(({ role }) => files[role] !== undefined);
 
@@ -157,7 +169,7 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
     const input: ContributionInput = {
       kind,
       name: name.trim(),
-      ...(kind === 'plant' ? { material: material.trim() } : {}),
+      ...(materialExample === undefined ? {} : { material: material.trim() }),
       rightsAccepted,
       files: Object.fromEntries(roles.map(({ role }) => [role, (files[role] as string).slice((files[role] as string).indexOf(',') + 1)])),
     };
@@ -182,7 +194,7 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
         Aportar arte
       </h3>
       <p className={styles.hint}>
-        Sube un personaje o una planta para los escritorios. Un admin la revisa antes de que aparezca en la oficina.
+        Sube arte para la oficina. Un admin lo revisa antes de que aparezca en ella.
       </p>
       {mine !== null && (
         <p className={styles.hint}>
@@ -222,7 +234,7 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
           <input id={`${id}-name`} className={styles.input} value={name} maxLength={MAX_NAME_LENGTH} onChange={(event) => setName(event.target.value)} />
         </div>
 
-        {kind === 'plant' && (
+        {materialExample !== undefined && (
           <div className={styles.field}>
             <label className={styles.label} htmlFor={`${id}-material`}>
               Material
@@ -236,7 +248,7 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
               onChange={(event) => setMaterial(event.target.value)}
             />
             <span className={styles.hint} id={`${id}-material-hint`}>
-              Minúsculas, números y guiones, por ejemplo «helecho».
+              Minúsculas, números y guiones, por ejemplo «{materialExample}».
             </span>
           </div>
         )}

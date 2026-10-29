@@ -56,13 +56,14 @@ export type AssetFileResult =
 const NOT_FOUND = { status: 404, body: { error: 'not-found' } } as const;
 
 /** The desk facings every pack desk shares, from the pack default desk. */
-async function defaultDeskFacings(decor: DecorCatalog): Promise<ArtDeskPiece['facings'] | undefined> {
+export async function defaultDeskFacings(decor: DecorCatalog): Promise<ArtDeskPiece['facings'] | undefined> {
   const pieces = await decor.listArtPieces({ includeRetired: true });
   const desk = pieces.find((piece) => piece.id === ART_PACK_DEFAULTS.desk)?.spec;
   return desk?.kind === 'desk' ? desk.facings : undefined;
 }
 
-function wantsDefaultFacings(body: unknown): boolean {
+/** A desk body that brings no facings of its own: it takes the default desk's. */
+export function wantsDefaultFacings(body: unknown): boolean {
   return typeof body === 'object' && body !== null && (body as Record<string, unknown>).kind === 'desk' && (body as Record<string, unknown>).facings === undefined;
 }
 
@@ -97,14 +98,15 @@ export async function handleUploadAsset(authorization: unknown, body: unknown, d
 /**
  * The uploads as a manifest of their own, next to their files. Approved ones
  * only (`listArtPieces`): a contribution under review is nobody's to load
- * (#122). Active ones, like the pack's manifest, plus retired plants: a
- * withdrawn plant stops being offered through the decor catalog, but whoever
- * placed it keeps seeing it (D1b), so the office must still find its sheet.
- * A retired character is left out: nobody wears it any more.
+ * (#122). Active ones, like the pack's manifest, plus every retired piece but
+ * a character: a withdrawn plant, desk or floor stops being offered, but
+ * whoever placed or painted it keeps seeing it (D1b), so the office must
+ * still find its sheet. A retired character is left out: nobody wears it any
+ * more.
  */
 export async function handleUploadedArtManifest(decor: DecorCatalog): Promise<AdminResult> {
   const pieces = (await decor.listArtPieces({ includeRetired: true })).filter(
-    (piece) => piece.retiredAt === null || piece.kind === 'plant',
+    (piece) => piece.retiredAt === null || piece.kind !== 'character',
   );
   return {
     status: 200,

@@ -44,7 +44,7 @@ import {
   type Point,
 } from '../../../src/game/artContract.ts';
 import { uploadedPieceIdPrefix } from '../decor/artCatalogRules.ts';
-import { CONTRIBUTION_LICENSE, isContributionKind } from '../decor/artReviewRules.ts';
+import { CONTRIBUTION_KINDS, CONTRIBUTION_LICENSE, isContributionKind } from '../decor/artReviewRules.ts';
 import type { CreateAssetInput } from '../decor/decorPort.ts';
 import { AssetUploadError, MAX_UPLOAD_FILE_BYTES, prepareAssetImage, type PreparedAssetImage } from './assetImageRules.ts';
 
@@ -223,14 +223,20 @@ export function prepareAssetUpload(body: unknown, options: PrepareUploadOptions 
  * neither needs nor can set it. A display name longer than a credit is cut to
  * `MAX_CREDIT_LENGTH` rather than refusing a contribution over a name the
  * person did not type here.
+ *
+ * What an Admin sets on a desk or a floor is refused here, not ignored: a
+ * contributed desk takes the facings of the default desk (`options`, as every
+ * pack desk shares one) and neither piece is colorable.
  */
-export function prepareContribution(body: unknown, author: string): PreparedUpload {
+export function prepareContribution(body: unknown, author: string, options: PrepareUploadOptions = {}): PreparedUpload {
   if (!isRecord(body)) throw invalid(null, 'the upload is not an object');
   if (body.rightsAccepted !== true) {
     throw new AssetUploadError('rights-not-accepted', 'rightsAccepted', 'the rights statement must be accepted');
   }
-  if (!isContributionKind(body.kind)) throw invalid('kind', 'only characters and decor plants can be contributed');
-  return prepareAssetUpload({ ...body, author: author.slice(0, MAX_CREDIT_LENGTH), license: CONTRIBUTION_LICENSE });
+  if (!isContributionKind(body.kind)) throw invalid('kind', `kind must be one of ${CONTRIBUTION_KINDS.join(', ')}`);
+  if (body.colorable !== undefined || body.defaultColor !== undefined) throw invalid('colorable', 'a contribution has no color to choose');
+  if (body.facings !== undefined) throw invalid('facings', 'a contributed desk takes the facings of the default desk');
+  return prepareAssetUpload({ ...body, author: author.slice(0, MAX_CREDIT_LENGTH), license: CONTRIBUTION_LICENSE }, options);
 }
 
 /**

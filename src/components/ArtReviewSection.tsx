@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useState } from 'react';
 import { ArtPiecePreview } from './ArtPiecePreview';
 import { usePrivateArtImages } from '../hooks/usePrivateArtImages';
 import { describeAdminError } from '../dashboard/adminErrors';
-import type { Contribution, ContributionStatus } from '../dashboard/artContributionPort';
+import { CONTRIBUTION_KINDS, type Contribution, type ContributionStatus } from '../dashboard/artContributionPort';
 import type { ArtReviewPort } from '../dashboard/artReviewPort';
 import styles from './ArtAdminSection.module.css';
 
@@ -20,7 +20,7 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
 };
 
 /** What the server lets a reviewer withdraw: the contributable kinds. */
-const RETIRABLE_KINDS: ReadonlySet<string> = new Set(['character', 'plant']);
+const RETIRABLE_KINDS: ReadonlySet<string> = new Set(CONTRIBUTION_KINDS);
 
 function uploaderOf(contribution: Contribution): string {
   const uploader = contribution.uploadedBy;

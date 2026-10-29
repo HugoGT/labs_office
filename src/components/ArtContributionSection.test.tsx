@@ -49,11 +49,11 @@ async function fillCharacter(user: ReturnType<typeof userEvent.setup>): Promise<
 }
 
 describe('ArtContributionSection (#122)', () => {
-  it('offers characters and decor plants only, with the rights statement word for word', async () => {
+  it('offers every kind a user may contribute, with the rights statement word for word', async () => {
     render(<ArtContributionSection contributions={fakePort()} />);
 
     const kinds = within(screen.getByLabelText('Tipo')).getAllByRole('option').map((option) => option.getAttribute('value'));
-    expect(kinds).toEqual(['character', 'plant']);
+    expect(kinds).toEqual(['character', 'plant', 'desk', 'floor']);
     expect(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT })).not.toBeChecked();
     expect(RIGHTS_STATEMENT).toBe('Confirmo que este arte no infringe derechos de autor y que la oficina puede usarlo libremente.');
     await waitFor(() => expect(screen.getByText('Pendientes de revisión: 0 de 5')).toBeInTheDocument());
@@ -129,6 +129,25 @@ describe('ArtContributionSection (#122)', () => {
     await user.click(screen.getByRole('button', { name: 'Enviar a revisión' }));
 
     await waitFor(() => expect(port.submit).toHaveBeenCalledWith(expect.objectContaining({ kind: 'plant', material: 'helecho', files: { sheet: PNG_BASE64 } })));
+  });
+
+  it.each([
+    ['desk', 'Escritorio', 'Roble', 'roble'],
+    ['floor', 'Suelo', 'Parquet', 'parquet'],
+  ] as const)('a %s asks for its sheet and a material, and sends no color or facings', async (kind, label, name, material) => {
+    const user = userEvent.setup();
+    const port = fakePort();
+    render(<ArtContributionSection contributions={port} />);
+
+    await user.selectOptions(screen.getByLabelText('Tipo'), kind);
+    expect(screen.getByRole('option', { name: label })).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Nombre'), name);
+    await user.type(screen.getByLabelText('Material'), material);
+    await user.upload(screen.getByLabelText(/Hoja/), png('sheet.png'));
+    await user.click(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT }));
+    await user.click(screen.getByRole('button', { name: 'Enviar a revisión' }));
+
+    await waitFor(() => expect(port.submit).toHaveBeenCalledWith({ kind, name, material, rightsAccepted: true, files: { sheet: PNG_BASE64 } }));
   });
 
   it.each([

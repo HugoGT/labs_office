@@ -192,8 +192,29 @@ describe('prepareContribution (#122)', () => {
     );
   });
 
-  it.each(['desk', 'floor'])('refuses a %s: only characters and decor plants are contributed', (kind) => {
+  it.each(['wall', 'tree', 'bridge'])('refuses a %s: it is not a kind a user contributes', (kind) => {
     expect(() => prepareContribution({ ...character, kind }, 'Ana')).toThrow(expect.objectContaining({ code: 'invalid-metadata', field: 'kind' }));
+  });
+
+  it('takes a desk with the facings of the default desk: the body has no say in them', () => {
+    const body = { kind: 'desk', name: 'Roble', material: 'roble', rightsAccepted: true, files: { sheet: sheet('desk') } };
+
+    expect(() => prepareContribution(body, 'Ana')).toThrow(expect.objectContaining({ code: 'invalid-metadata', field: 'facings' }));
+    const { piece } = prepareContribution(body, 'Ana', { defaultDeskFacings: FACINGS });
+    expect(piece).toMatchObject({ kind: 'desk', material: 'roble', colorable: false, defaultColor: null, license: CONTRIBUTION_LICENSE });
+    expect((piece as ArtDeskPiece).facings).toEqual(FACINGS);
+    expect(() => prepareContribution({ ...body, facings: FACINGS }, 'Ana', { defaultDeskFacings: FACINGS })).toThrow(
+      expect.objectContaining({ code: 'invalid-metadata', field: 'facings' }),
+    );
+  });
+
+  it('takes a floor; a contributor has no color to offer, so a color is refused instead of ignored', () => {
+    const body = { kind: 'floor', name: 'Parquet', material: 'parquet', rightsAccepted: true, files: { sheet: sheet('floor') } };
+
+    expect(prepareContribution(body, 'Ana').piece).toMatchObject({ kind: 'floor', material: 'parquet', colorable: false, defaultColor: null });
+    expect(() => prepareContribution({ ...body, colorable: true, defaultColor: '#aa8844' }, 'Ana')).toThrow(
+      expect.objectContaining({ code: 'invalid-metadata', field: 'colorable' }),
+    );
   });
 
   it('takes a decor plant', () => {
