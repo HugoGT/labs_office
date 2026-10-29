@@ -102,7 +102,7 @@ describe('ArtReviewSection (#122)', () => {
     expect(await screen.findByText('Retirada')).toBeInTheDocument();
   });
 
-  it.each(['plant', 'desk', 'floor', 'chair'])('an approved %s can be withdrawn like a character', async (kind) => {
+  it.each(['plant', 'desk', 'floor', 'chair', 'table', 'door'])('an approved %s can be withdrawn like a character', async (kind) => {
     const user = userEvent.setup();
     const port = fakePort({ approved: [contribution({ kind, name: 'Pieza', status: 'approved', files: [{ role: 'sheet', path: 'a.png' }] })] });
     render(<ArtReviewSection reviews={port} />);

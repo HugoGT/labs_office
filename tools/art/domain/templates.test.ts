@@ -6,8 +6,12 @@ import {
   CHARACTER_SEATED,
   CHARACTER_WALK,
   DESK,
+  DOOR,
+  DOOR_HINGES,
+  DOOR_STEPS,
   PACK_FACINGS,
   PLANT,
+  TABLE,
   WALK_DIRECTIONS,
   sheetSize,
   validateArtImage,
@@ -60,6 +64,10 @@ function markersOf(kind: TemplateImageKind): { point: Point; arms: Rgba }[] {
       return [{ point: DESK.anchor, arms: TEMPLATE_COLORS.anchor }];
     case 'plant':
       return [{ point: PLANT.anchor, arms: TEMPLATE_COLORS.anchor }];
+    case 'table':
+      return [{ point: TABLE.anchor, arms: TEMPLATE_COLORS.anchor }];
+    case 'door':
+      return [{ point: DOOR.anchor, arms: TEMPLATE_COLORS.anchor }];
     case 'floor':
       return [];
   }
@@ -144,6 +152,13 @@ describe('art templates', () => {
     );
     expect(templateFrameLabels('floor')).toEqual(Array.from({ length: 9 }, (_, index) => [`${index}`]));
     expect(templateFrameLabels('plant')).toEqual([['PLANT']]);
+    expect(templateFrameLabels('table')).toEqual([['HORIZONTAL'], ['VERTICAL']]);
+    // One column per decor rotation, then DOOR_STEPS rows per hinge, closed to open.
+    expect(templateFrameLabels('door')).toEqual(
+      DOOR_HINGES.flatMap((hinge) =>
+        Array.from({ length: DOOR_STEPS }, (_, step) => [0, 90, 180, 270].map((rotation) => [`${rotation}`, hinge.toUpperCase(), `STEP ${step}`])).flat(),
+      ),
+    );
   });
 
   it.each(TEMPLATE_IMAGE_KINDS)('%s draws each label inside its frame, clear of the anchors', (kind) => {
@@ -180,6 +195,26 @@ describe('art templates', () => {
       for (let x = 1; x < PLANT.frame.width - 1; x += 1) {
         if (Math.abs(x - PLANT.anchor.x) <= 0 && y >= PLANT.anchor.y - 2) continue;
         if ((x + y) % 2 === 0) expect(template.getPixel(x, y), `(${x}, ${y})`).toEqual(TEMPLATE_COLORS.footprint);
+      }
+    }
+  });
+
+  it('outlines the largest table its frame fits, horizontal and swapped when standing vertical, ending at the anchor', () => {
+    const template = renderTemplate('table');
+    const { w, h } = TABLE.maxFootprint;
+    const outlines = [
+      { x0: 0, w: w * 32, h: h * 32 },
+      { x0: TABLE.frame.width, w: h * 32, h: w * 32 },
+    ];
+    for (const { x0, w: width, h: height } of outlines) {
+      const left = x0 + TABLE.anchor.x - width / 2;
+      const top = TABLE.anchor.y - height;
+      const bottom = TABLE.anchor.y - 1;
+      for (const y of [top, bottom]) {
+        for (let x = left; x < left + width; x += 1) {
+          if (Math.abs(x - (x0 + TABLE.anchor.x)) <= 2 && y >= TABLE.anchor.y - 2) continue;
+          if ((x + y) % 2 === 0) expect(template.getPixel(x, y), `(${x}, ${y})`).toEqual(TEMPLATE_COLORS.footprint);
+        }
       }
     }
   });

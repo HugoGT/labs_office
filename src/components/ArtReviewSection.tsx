@@ -18,6 +18,8 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
   desk: 'Escritorio',
   floor: 'Suelo',
   chair: 'Silla',
+  table: 'Mesa de sala',
+  door: 'Puerta',
 };
 
 /** What the server lets a reviewer withdraw: the contributable kinds. */

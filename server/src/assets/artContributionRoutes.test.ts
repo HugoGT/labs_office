@@ -215,6 +215,30 @@ describe('handleSubmitContribution', () => {
     expect(parseArtPackManifest((await handleUploadedArtManifest(d.decor)).body)?.pieces.map((piece) => piece.id)).toEqual([id]);
   });
 
+  it('takes a room table and a door; approved, they are in the uploads manifest but no decor asset: an admin places them', async () => {
+    const d = await deps();
+    const table = await submit(d, AS_ANA, { kind: 'table', name: 'Mesa larga', material: 'roble', footprint: { w: 5, h: 3 }, rightsAccepted: true, files: { sheet: sheet('table') } });
+    const door = await submit(d, AS_ANA, { kind: 'door', name: 'Puerta de roble', material: 'roble', rightsAccepted: true, files: { sheet: sheet('door') } });
+    expect([table.status, door.status]).toEqual([201, 201]);
+    expect(table.body.contribution).toMatchObject({ kind: 'table', status: 'pending', author: 'Ana', piece: { footprint: { w: 5, h: 3 } } });
+    expect(door.body.contribution).toMatchObject({ kind: 'door', status: 'pending', piece: { variant: 'single' } });
+
+    for (const sent of [table, door]) await handleApproveContribution(AS_ADMIN, sent.body.contribution.id, d);
+
+    const ids = parseArtPackManifest((await handleUploadedArtManifest(d.decor)).body)?.pieces.map((piece) => piece.id);
+    expect(ids).toEqual(expect.arrayContaining([table.body.contribution.id, door.body.contribution.id]));
+    expect(((await handleListOfficeAssets(AS_BETO, d)).body.assets as { textureKey: string }[]).filter(notPackChair)).toEqual([]);
+  });
+
+  it('refuses a room table with no footprint, and says which field', async () => {
+    const d = await deps();
+
+    expect(await handleSubmitContribution(AS_ANA, { kind: 'table', name: 'Mesa', material: 'roble', rightsAccepted: true, files: { sheet: sheet('table') } }, d)).toEqual({
+      status: 400,
+      body: { error: 'invalid-metadata', field: 'footprint' },
+    });
+  });
+
   it('refuses a wall: walls are made from code, not contributed', async () => {
     const d = await deps();
     const wall = { kind: 'wall', name: 'Ladrillo', material: 'brick', rightsAccepted: true, files: { sheet: sheet('wall') } };

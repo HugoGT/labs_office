@@ -36,9 +36,12 @@ import {
   CHARACTER_SEATED,
   CHARACTER_WALK,
   DESK,
+  DOOR,
   FLOOR,
   PACK_FACINGS,
   PLANT,
+  TABLE,
+  TABLE_FACINGS,
   type ArtDeskPiece,
   type ArtImageKind,
   type ArtPiece,
@@ -57,8 +60,10 @@ export const UPLOAD_FILE_ROLES = {
   ],
   chair: [{ role: 'sheet', imageKind: 'chair' }],
   desk: [{ role: 'sheet', imageKind: 'desk' }],
+  door: [{ role: 'sheet', imageKind: 'door' }],
   floor: [{ role: 'sheet', imageKind: 'floor' }],
   plant: [{ role: 'sheet', imageKind: 'plant' }],
+  table: [{ role: 'sheet', imageKind: 'table' }],
 } as const satisfies Readonly<Record<string, readonly { role: string; imageKind: ArtImageKind }[]>>;
 
 export type UploadableKind = keyof typeof UPLOAD_FILE_ROLES;
@@ -152,6 +157,25 @@ function deskFacings(body: Record<string, unknown>, fallback: ArtDeskPiece['faci
   return Object.fromEntries(entries) as unknown as ArtDeskPiece['facings'];
 }
 
+/** The horizontal footprint of a room table, whole tiles up to what its sheet frame fits. */
+function tableFootprint(body: Record<string, unknown>): { w: number; h: number } {
+  const { w, h } = isRecord(body.footprint) ? body.footprint : ({} as Record<string, unknown>);
+  const max = TABLE.maxFootprint;
+  const fits = (n: unknown, limit: number): n is number => Number.isInteger(n) && (n as number) >= 1 && (n as number) <= limit;
+  if (!fits(w, max.w) || !fits(h, max.h)) throw invalid('footprint', `footprint must be whole tiles, at most ${max.w}x${max.h}`);
+  return { w, h };
+}
+
+/**
+ * Only the single door: a door's variant comes from the end of its id
+ * (`doorVariantOf`), and an upload id ends in a hash. Asking for the double one
+ * is refused, not turned into a single one.
+ */
+function singleDoor(body: Record<string, unknown>): 'single' {
+  if (body.variant !== undefined && body.variant !== 'single') throw invalid('variant', 'only the single door can be uploaded');
+  return 'single';
+}
+
 function decodeFile(value: unknown, role: string): Buffer {
   if (typeof value !== 'string') throw new AssetUploadError('missing-file', role, `the ${role} file is missing`);
   // Checked on the encoded length, so an oversized body is never decoded.
@@ -188,6 +212,17 @@ export function prepareAssetUpload(body: unknown, options: PrepareUploadOptions 
         return { anchors: { walk: CHARACTER_WALK.anchor, seated: CHARACTER_SEATED.anchor }, footprint: CHARACTER_WALK.footprint };
       case 'chair':
         return { material: material(body), facings: PACK_FACINGS, layers: CHAIR_LAYERS, anchors: { seat: CHAIR.anchor, ground: CHAIR.ground }, footprint: CHAIR.footprint };
+      case 'table':
+        return {
+          material: material(body),
+          footprint: tableFootprint(body),
+          anchor: TABLE.anchor,
+          layer: TABLE.layer,
+          collision: TABLE.collision,
+          facings: TABLE_FACINGS,
+        };
+      case 'door':
+        return { material: material(body), variant: singleDoor(body), anchor: DOOR.anchor, footprint: { w: DOOR.variants.single.span, h: 1 } };
       case 'desk':
         return { material: material(body), ...colorModel(body), anchor: DESK.anchor, facings: deskFacings(body, options.defaultDeskFacings) };
       case 'floor':
@@ -248,7 +283,8 @@ export function prepareContribution(body: unknown, author: string, options: Prep
  * The desk decor asset that draws an uploaded plant, so the existing decor
  * flow (`/me/desk`) can place it with no change, or an uploaded desk or chair,
  * the table or the guest seat of a desk decor like the pack's
- * (`packDecorAsset`). Any other kind has none.
+ * (`packDecorAsset`). Any other kind has none: a room table and a door are
+ * layout pieces only an admin places, in the office editor.
  */
 export function decorAssetForPiece(piece: ArtPiece): CreateAssetInput | undefined {
   if (piece.kind === 'chair') {

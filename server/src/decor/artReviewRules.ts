@@ -28,10 +28,11 @@ export const ART_PIECE_STATUSES = ['pending', 'approved', 'rejected'] as const;
 export type ArtPieceStatus = (typeof ART_PIECE_STATUSES)[number];
 
 /**
- * What a signed-in user may contribute. Walls are not here on purpose: they are
- * geometry (joints and bodies) made from code, and their materials are fixed.
+ * What a signed-in user may contribute: every piece the office draws from one
+ * sheet. Walls are not here on purpose: they are geometry (joints and bodies)
+ * made from code, and their materials are fixed.
  */
-export const CONTRIBUTION_KINDS = ['character', 'plant', 'desk', 'floor', 'chair'] as const;
+export const CONTRIBUTION_KINDS = ['character', 'plant', 'desk', 'floor', 'chair', 'table', 'door'] as const;
 export type ContributionKind = (typeof CONTRIBUTION_KINDS)[number];
 
 export const MAX_PENDING_CONTRIBUTIONS = 5;

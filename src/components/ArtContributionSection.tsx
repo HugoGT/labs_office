@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useState, type FormEvent } from 'react';
-import { ART_IMAGE_SPECS, sheetSize, type ArtImageKind } from '../game/artContract';
+import { ART_IMAGE_SPECS, TABLE, sheetSize, type ArtImageKind } from '../game/artContract';
 import { describeAdminError } from '../dashboard/adminErrors';
 import { AdminError } from '../dashboard/adminPort';
 import {
@@ -24,7 +24,12 @@ const KIND_LABELS: Readonly<Record<ContributionKind, string>> = {
   desk: 'Escritorio',
   floor: 'Suelo',
   chair: 'Silla',
+  table: 'Mesa de sala',
+  door: 'Puerta',
 };
+
+/** Kinds only an admin can place, in the office editor: a contributor cannot put them anywhere. */
+const ADMIN_PLACED: ReadonlySet<ContributionKind> = new Set(['table', 'door']);
 
 /** Kinds named by a material, with an example the hint shows (a lowercase word). */
 const MATERIAL_EXAMPLE: Readonly<Partial<Record<ContributionKind, string>>> = {
@@ -32,6 +37,8 @@ const MATERIAL_EXAMPLE: Readonly<Partial<Record<ContributionKind, string>>> = {
   desk: 'roble',
   floor: 'parquet',
   chair: 'roble',
+  table: 'madera',
+  door: 'madera',
 };
 
 /** File roles per kind, as `server/src/assets/assetUploadRules.ts` reads them. */
@@ -44,6 +51,8 @@ const FILES: Readonly<Record<ContributionKind, readonly { role: string; label: s
   desk: [{ role: 'sheet', label: 'Hoja', imageKind: 'desk' }],
   floor: [{ role: 'sheet', label: 'Hoja', imageKind: 'floor' }],
   chair: [{ role: 'sheet', label: 'Hoja', imageKind: 'chair' }],
+  table: [{ role: 'sheet', label: 'Hoja', imageKind: 'table' }],
+  door: [{ role: 'sheet', label: 'Hoja', imageKind: 'door' }],
 };
 
 function sizeOf(imageKind: ArtImageKind): string {
@@ -54,6 +63,12 @@ function sizeOf(imageKind: ArtImageKind): string {
 /** The file name without its extension, cut to what the server accepts as a name. */
 function nameFromFile(fileName: string): string {
   return fileName.replace(/\.[^.]*$/, '').trim().slice(0, MAX_NAME_LENGTH);
+}
+
+/** Whether a field of the footprint holds a whole number of tiles from 1 to `max`. */
+function isTiles(value: string, max: number): boolean {
+  const tiles = Number(value);
+  return value.trim() !== '' && Number.isInteger(tiles) && tiles >= 1 && tiles <= max;
 }
 
 function readDataUrl(file: File): Promise<string> {
@@ -120,6 +135,8 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
   const [kind, setKind] = useState<ContributionKind>('character');
   const [name, setName] = useState('');
   const [material, setMaterial] = useState('');
+  const [width, setWidth] = useState('2');
+  const [height, setHeight] = useState('1');
   const [rightsAccepted, setRightsAccepted] = useState(false);
   const [files, setFiles] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -141,6 +158,7 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
   const ready =
     name.trim() !== '' &&
     (materialExample === undefined || material.trim() !== '') &&
+    (kind !== 'table' || (isTiles(width, TABLE.maxFootprint.w) && isTiles(height, TABLE.maxFootprint.h))) &&
     rightsAccepted &&
     roles.every(({ role }) => files[role] !== undefined);
 
@@ -173,6 +191,7 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
       kind,
       name: name.trim(),
       ...(materialExample === undefined ? {} : { material: material.trim() }),
+      ...(kind === 'table' ? { footprint: { w: Number(width), h: Number(height) } } : {}),
       rightsAccepted,
       files: Object.fromEntries(roles.map(({ role }) => [role, (files[role] as string).slice((files[role] as string).indexOf(',') + 1)])),
     };
@@ -228,6 +247,9 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
               </option>
             ))}
           </select>
+          {ADMIN_PLACED.has(kind) && (
+            <span className={styles.hint}>Solo un admin puede colocarla en la oficina, una vez aprobada.</span>
+          )}
         </div>
 
         <div className={styles.field}>
@@ -254,6 +276,43 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
               Minúsculas, números y guiones, por ejemplo «{materialExample}».
             </span>
           </div>
+        )}
+
+        {kind === 'table' && (
+          <>
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor={`${id}-width`}>
+                Ancho (casillas)
+              </label>
+              <input
+                id={`${id}-width`}
+                className={styles.input}
+                type="number"
+                min={1}
+                max={TABLE.maxFootprint.w}
+                value={width}
+                onChange={(event) => setWidth(event.target.value)}
+              />
+            </div>
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor={`${id}-height`}>
+                Alto (casillas)
+              </label>
+              <input
+                id={`${id}-height`}
+                className={styles.input}
+                type="number"
+                min={1}
+                max={TABLE.maxFootprint.h}
+                value={height}
+                aria-describedby={`${id}-footprint-hint`}
+                onChange={(event) => setHeight(event.target.value)}
+              />
+              <span className={styles.hint} id={`${id}-footprint-hint`}>
+                Mesa en horizontal, de hasta {TABLE.maxFootprint.w} × {TABLE.maxFootprint.h} casillas.
+              </span>
+            </div>
+          </>
         )}
 
         {roles.map(({ role, label, imageKind }) => (

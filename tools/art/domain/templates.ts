@@ -16,17 +16,31 @@ import {
   CHARACTER_SEATED,
   CHARACTER_WALK,
   DESK,
+  DOOR,
+  DOOR_HINGES,
+  DOOR_STEPS,
   PLANT,
+  TABLE,
   WALK_DIRECTIONS,
   sheetSize,
   type ArtImageKind,
   type Point,
 } from '../../../src/game/artContract.ts';
+import { DECOR_ROTATIONS } from '../../../src/game/officeDecor.ts';
 import { LINE_HEIGHT, drawText } from './pixelFont.ts';
 import { PixelBuffer, rgba, type Rgba } from '../../../src/art/pixelBuffer.ts';
 
-/** Kinds with a template: every image an upload takes (characters, desks, floors, plants) plus the chair. */
-export const TEMPLATE_IMAGE_KINDS = ['character-walk', 'character-seated', 'chair', 'desk', 'floor', 'plant'] as const satisfies readonly ArtImageKind[];
+/** Kinds with a template: every image an upload takes (characters, chairs, desks, floors, plants, room tables, doors). */
+export const TEMPLATE_IMAGE_KINDS = [
+  'character-walk',
+  'character-seated',
+  'chair',
+  'desk',
+  'floor',
+  'plant',
+  'table',
+  'door',
+] as const satisfies readonly ArtImageKind[];
 export type TemplateImageKind = (typeof TEMPLATE_IMAGE_KINDS)[number];
 
 /**
@@ -66,8 +80,8 @@ interface TemplateLayout {
   /** Label lines of frame `(col, row)`. */
   readonly label: (col: number, row: number) => readonly string[];
   readonly markers: readonly Marker[];
-  /** Footprint tiles the contract places relative to the anchor, in frame pixels. */
-  readonly footprint?: Rect;
+  /** Footprint tiles the contract places relative to the anchor, in frame pixels, when the frame has one. */
+  readonly footprint?: (col: number, row: number) => Rect;
 }
 
 const upper = (text: string): string => text.toUpperCase();
@@ -104,14 +118,26 @@ const LAYOUTS: Readonly<Record<TemplateImageKind, TemplateLayout>> = {
     label: () => ['PLANT'],
     markers: [{ point: PLANT.anchor, arms: TEMPLATE_COLORS.anchor }],
     // A prop's anchor is the floor pixel at the bottom middle of its footprint (`propPlacement`).
-    footprint: {
-      x: PLANT.anchor.x - (PLANT.footprint.w * ART_TILE) / 2,
-      y: PLANT.anchor.y - PLANT.footprint.h * ART_TILE,
-      w: PLANT.footprint.w * ART_TILE,
-      h: PLANT.footprint.h * ART_TILE,
-    },
+    footprint: () => footprintAbove(PLANT.anchor, PLANT.footprint),
+  },
+  table: {
+    label: (col) => [upper(TABLE.columnOrder[col]!)],
+    markers: [{ point: TABLE.anchor, arms: TEMPLATE_COLORS.anchor }],
+    // The largest table a frame fits, whose piece states a smaller one when it is: the footprint swaps
+    // when it stands vertical, on the same anchor.
+    footprint: (col) => footprintAbove(TABLE.anchor, TABLE.columnOrder[col] === 'vertical' ? { w: TABLE.maxFootprint.h, h: TABLE.maxFootprint.w } : TABLE.maxFootprint),
+  },
+  door: {
+    // One column per decor rotation, `DOOR_STEPS` rows per hinge, from closed to open (`doorFrameIndex`).
+    label: (col, row) => [`${DECOR_ROTATIONS[col]}`, upper(DOOR_HINGES[Math.floor(row / DOOR_STEPS)]!), `STEP ${row % DOOR_STEPS}`],
+    markers: [{ point: DOOR.anchor, arms: TEMPLATE_COLORS.anchor }],
   },
 };
+
+/** The footprint rectangle of a prop whose anchor is the floor pixel at the bottom middle of it. */
+function footprintAbove(anchor: Point, footprint: { readonly w: number; readonly h: number }): Rect {
+  return { x: anchor.x - (footprint.w * ART_TILE) / 2, y: anchor.y - footprint.h * ART_TILE, w: footprint.w * ART_TILE, h: footprint.h * ART_TILE };
+}
 
 /** Label lines of every frame, by frame index (`row * columns + col`). */
 export function templateFrameLabels(kind: TemplateImageKind): string[][] {
@@ -151,7 +177,7 @@ function drawFrame(image: PixelBuffer, kind: TemplateImageKind, col: number, row
     }
   }
   if (layout.footprint) {
-    const { x, y, w, h } = layout.footprint;
+    const { x, y, w, h } = layout.footprint(col, row);
     drawDashedRect(image, { x: x0 + x, y: y0 + y, w, h }, TEMPLATE_COLORS.footprint);
   }
   drawBorder(image, x0, y0, frame.width, frame.height);

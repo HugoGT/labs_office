@@ -6,8 +6,11 @@ import {
   CHAIR_LAYERS,
   CHARACTER_WALK,
   DESK,
+  DOOR,
   PACK_FACINGS,
   PLANT,
+  TABLE,
+  TABLE_FACINGS,
   sheetSize,
   type ArtDeskPiece,
   type ArtImageKind,
@@ -120,10 +123,10 @@ describe('prepareAssetUpload', () => {
   });
 
   it('refuses kinds the office cannot place from an upload', () => {
-    for (const kind of ['wall', 'tileset', 'bridge', 'table', 'nope', undefined]) {
+    for (const kind of ['wall', 'tileset', 'bridge', 'tree', 'nope', undefined]) {
       expect(codeAndField(() => prepareAssetUpload({ ...character(), kind }))).toEqual(['invalid-metadata', 'kind']);
     }
-    expect(Object.keys(UPLOAD_FILE_ROLES).sort()).toEqual(['chair', 'character', 'desk', 'floor', 'plant']);
+    expect(Object.keys(UPLOAD_FILE_ROLES).sort()).toEqual(['chair', 'character', 'desk', 'door', 'floor', 'plant', 'table']);
   });
 
   it('refuses missing or malformed credits and material', () => {
@@ -237,6 +240,42 @@ describe('prepareContribution (#122)', () => {
     expect(UPLOAD_FILE_ROLES.chair).toEqual([{ role: 'sheet', imageKind: 'chair' }]);
   });
 
+  it('takes a room table with the footprint the contributor states, up to the largest the sheet fits', () => {
+    const body = { kind: 'table', name: 'Mesa larga', material: 'roble', footprint: { w: 7, h: 5 }, rightsAccepted: true, files: { sheet: sheet('table') } };
+
+    const { piece } = prepareContribution(body, 'Ana');
+    expect(piece).toMatchObject({
+      kind: 'table',
+      material: 'roble',
+      footprint: { w: 7, h: 5 },
+      anchor: TABLE.anchor,
+      layer: TABLE.layer,
+      collision: TABLE.collision,
+      facings: TABLE_FACINGS,
+    });
+    expect(piece.id).toMatch(/^table-upload-[0-9a-f]{16}$/);
+    expect((prepareContribution({ ...body, footprint: { w: 2, h: 1 } }, 'Ana').piece as { footprint: unknown }).footprint).toEqual({ w: 2, h: 1 });
+  });
+
+  it.each([undefined, null, 'grande', {}, { w: 2 }, { w: 0, h: 1 }, { w: 1, h: 0 }, { w: 8, h: 1 }, { w: 1, h: 6 }, { w: 1.5, h: 1 }, { w: '2', h: 1 }])(
+    'refuses a room table whose footprint is %j',
+    (footprint) => {
+      const body = { kind: 'table', name: 'Mesa', material: 'roble', footprint, rightsAccepted: true, files: { sheet: sheet('table') } };
+
+      expect(() => prepareContribution(body, 'Ana')).toThrow(expect.objectContaining({ code: 'invalid-metadata', field: 'footprint' }));
+    },
+  );
+
+  it('takes a single door standing on two tiles of wall, and refuses a double one: its id cannot say so', () => {
+    const body = { kind: 'door', name: 'Puerta de roble', material: 'roble', rightsAccepted: true, files: { sheet: sheet('door') } };
+
+    const { piece } = prepareContribution(body, 'Ana');
+    expect(piece).toMatchObject({ kind: 'door', material: 'roble', variant: 'single', anchor: DOOR.anchor, footprint: { w: DOOR.variants.single.span, h: 1 } });
+    expect(piece.id).toMatch(/^door-upload-[0-9a-f]{16}$/);
+    expect(prepareContribution({ ...body, variant: 'single' }, 'Ana').piece).toMatchObject({ variant: 'single' });
+    expect(() => prepareContribution({ ...body, variant: 'double' }, 'Ana')).toThrow(expect.objectContaining({ code: 'invalid-metadata', field: 'variant' }));
+  });
+
   it('takes a decor plant', () => {
     const { piece } = prepareContribution({ kind: 'plant', name: 'Helecho', material: 'helecho', rightsAccepted: true, files: { sheet: sheet('plant') } }, 'Ana');
     expect(piece.kind).toBe('plant');
@@ -244,6 +283,14 @@ describe('prepareContribution (#122)', () => {
 });
 
 describe('decorAssetForPiece', () => {
+  it('a room table and a door are layout pieces: an admin places them, so they have no decor asset', () => {
+    const table = prepareAssetUpload({ kind: 'table', name: 'Mesa', author: 'A', license: 'L', material: 'roble', footprint: { w: 2, h: 1 }, files: { sheet: sheet('table') } }).piece;
+    const door = prepareAssetUpload({ kind: 'door', name: 'Puerta', author: 'A', license: 'L', material: 'roble', files: { sheet: sheet('door') } }).piece;
+
+    expect(decorAssetForPiece(table)).toBeUndefined();
+    expect(decorAssetForPiece(door)).toBeUndefined();
+  });
+
   it('a chair is a one tile guest seat drawing its own sheet, like a pack chair', () => {
     const { piece } = prepareAssetUpload({ kind: 'chair', name: 'Silla de roble', author: 'A', license: 'L', material: 'roble', files: { sheet: sheet('chair') } });
 
