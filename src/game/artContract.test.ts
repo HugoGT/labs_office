@@ -455,6 +455,41 @@ describe('terrain dual grid', () => {
     expect(most).toBe(TERRAIN_LAYER_COUNT);
   });
 
+  it('splits a material by group, one tile per group over only its own corners (#259)', () => {
+    const corners = { nw: 'carpet', ne: 'carpet', sw: 'carpet', se: 'carpet' } as const;
+    const groups = { nw: '#aa0000', ne: '#00bb00', sw: '#aa0000', se: null };
+
+    expect(terrainCellLayers(corners, groups)).toEqual([
+      { material: 'carpet', mask: 1 | 4, group: '#aa0000' },
+      { material: 'carpet', mask: 2, group: '#00bb00' },
+      { material: 'carpet', mask: 8 },
+    ]);
+  });
+
+  it('keeps higher corners in every tile of a split material and never splits on equal groups', () => {
+    expect(terrainCellLayers({ nw: 'wood', ne: 'wood', sw: 'carpet', se: 'carpet' }, { nw: null, ne: null, sw: 'a', se: 'b' })).toEqual([
+      { material: 'wood', mask: 15 },
+      { material: 'carpet', mask: 4, group: 'a' },
+      { material: 'carpet', mask: 8, group: 'b' },
+    ]);
+    expect(terrainCellLayers({ nw: 'carpet', ne: 'carpet', sw: 'grass', se: 'grass' }, { nw: 'a', ne: 'a', sw: null, se: null })).toEqual([
+      { material: 'grass', mask: 15 },
+      { material: 'carpet', mask: 1 | 2, group: 'a' },
+    ]);
+  });
+
+  it('still fits the layers when every carpet corner has its own group', () => {
+    const values = [...TERRAIN_MATERIALS, null];
+    const keys = ['a', 'b', 'c', null] as const;
+    let most = 0;
+    for (const nw of values) for (const ne of values) for (const sw of values) for (const se of values) {
+      for (const [gn, ge, gs, gv] of [keys, [...keys].reverse(), ['a', 'a', 'b', 'b'], [null, null, null, null]] as const) {
+        most = Math.max(most, terrainCellLayers({ nw, ne, sw, se }, { nw: gn, ne: ge, sw: gs, se: gv }).length);
+      }
+    }
+    expect(most).toBe(TERRAIN_LAYER_COUNT);
+  });
+
   it('picks the motif phase from the cell so the terrain lines up with floorFrameAt', () => {
     // Cell (1, 1) starts at world pixel (16, 16): motif pixel (16, 16).
     expect(terrainPhaseOrigin(terrainPhaseAt(1, 1))).toEqual({ x: 16, y: 16 });
