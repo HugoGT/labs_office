@@ -269,11 +269,18 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
       expect(peer.sprite.texture.key).toBe(artSheetKey('character-p05-charcoal-suit', 'walk'));
     }, LOOP_WAIT);
 
+    // #254: fixed frames, not the real loop. The `facing: 'up'` turn shows N
+    // a couple of frames before the glide moves the peer (walkMs still 0), and
+    // a slow CI frame let a `waitFor` on the direction land in that window.
+    scene.game.loop.stop();
+    let time = scene.time.now;
     connector.handlers()!.onChange(
       remoteSnapshot({ sessionId: 'par-1', avatarId: 'character-p05-charcoal-suit', x: 500, y: 520, facing: 'up' }),
     );
+    for (let frame = 0; frame < 4; frame++) scene.game.step((time += 20), 20);
 
-    await vi.waitFor(() => expect(peer.animation.direction).toBe('N'), LOOP_WAIT);
+    expect(peer.y).toBeLessThan(600);
+    expect(peer.animation.direction).toBe('N');
     expect(peer.animation.walkMs).toBeGreaterThan(0);
   });
 
