@@ -61,6 +61,8 @@ export function reduceEditorState(state: EditorState, action: EditorAction): Edi
 
     case 'selected':
       if (action.type === 'deselect') return { tag: 'idle', kind: state.kind };
+      // A pick on another item takes the selection over: no Escape in between, like the decor editor.
+      if (action.type === 'select') return action.id === state.id ? state : { tag: 'selected', kind: state.kind, id: action.id };
       if (action.type === 'startMove') {
         return { tag: 'placing', kind: state.kind, mode: 'move', id: state.id };
       }

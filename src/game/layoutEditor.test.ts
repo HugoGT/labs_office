@@ -52,6 +52,12 @@ describe('reduceEditorState', () => {
     });
   });
 
+  it('picking another item with one selected switches to it, with no step back to idle', () => {
+    const selected: EditorState = { tag: 'selected', kind: 'desk', id: 'desk-1' };
+
+    expect(reduceEditorState(selected, { type: 'select', id: 'desk-2' })).toEqual({ tag: 'selected', kind: 'desk', id: 'desk-2' });
+  });
+
   it('crear uno nuevo pasa de idle a placing en modo create', () => {
     const idle: EditorState = { tag: 'idle', kind: 'desk' };
 

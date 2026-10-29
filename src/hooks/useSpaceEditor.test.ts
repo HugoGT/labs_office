@@ -447,6 +447,16 @@ describe('useSpaceEditor: desks picked from the default view of "Editar espacios
     expect(view.result.current.state).toEqual({ tag: 'idle', kind: 'room' });
   });
 
+  it('a pick on a room with a desk selected switches to the room, no Escape in between', async () => {
+    const view = setupPicking();
+    await enterAndPickDesk(view);
+
+    act(() => view.bridge.emit('layoutpick', { id: 'id-sala' }));
+
+    expect(view.result.current.state).toEqual({ tag: 'selected', kind: 'room', id: 'id-sala' });
+    expect(view.commands.at(-1)?.selectedId).toBe('id-sala');
+  });
+
   it('turning it off drops a selected desk, and leaves a selected room alone', async () => {
     const view = setupPicking();
     await enterAndPickDesk(view);
