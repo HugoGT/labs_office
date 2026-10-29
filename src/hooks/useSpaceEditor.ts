@@ -263,6 +263,19 @@ export function useSpaceEditor({
     }
   }, [spaces, refreshDesks, refreshSpaces, reload]);
 
+  // The buttons under the selection on the map: only the room this editor holds selected answers.
+  useEffect(
+    () =>
+      bridge.on('layoutaction', ({ action, id }) => {
+        const current = stateRef.current;
+        if (current.tag !== 'selected' || current.id !== id) return;
+        if (action === 'move') startMove();
+        else if (action === 'delete') void remove();
+        else deselect();
+      }),
+    [bridge, startMove, remove, deselect],
+  );
+
   useEffect(() => {
     const placingSize =
       state.tag === 'placing'

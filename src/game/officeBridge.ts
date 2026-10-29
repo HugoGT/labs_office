@@ -196,6 +196,12 @@ export interface OfficeEventMap {
    */
   layoutplace: { tx: number; ty: number; valid: boolean };
   /**
+   * The selected desk or room (`id`) got a click on its move or trash button
+   * on the map, or the selection a click on the empty map, which lets it go.
+   * Sent by `LayoutEditLayer`; the editor that holds that selection acts.
+   */
+  layoutaction: { action: 'move' | 'delete' | 'deselect'; id: string };
+  /**
    * The live terrain blocks (#123 phase 2) and walls (one per tile, row
    * major), as the room replicates them: after every accepted edit, and
    * again when the terrain editor opens, so it starts from what the map

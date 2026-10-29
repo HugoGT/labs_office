@@ -265,8 +265,6 @@ export function SpaceEditorSection({
   }
 
   const state = editor.state;
-  const selected =
-    state.tag === 'selected' ? editor.spaces.find((space) => space.id === state.id) ?? null : null;
   const placing = state.tag === 'placing';
   const busy = editor.state.tag === 'saving' || editor.pending;
 
@@ -303,7 +301,8 @@ export function SpaceEditorSection({
         )}
       </div>
 
-      {selected === null && !placing && (
+      {/* A room picked on the map leaves the panel as it is: its move and trash are the buttons under it on the map. */}
+      {!placing && (
         <>
           {embedded && !listShown && (
             <button type="button" className={styles.button} disabled={busy} onClick={() => setListing(true)}>
@@ -401,28 +400,6 @@ export function SpaceEditorSection({
             </form>
           )}
         </>
-      )}
-
-      {selected !== null && !placing && (
-        <div className={styles.row}>
-          <span className={styles.name} title={selected.name}>{selected.name}</span>
-          <div className={styles.rowActions}>
-            <button type="button" className={styles.button} disabled={busy} onClick={() => editor.startMove()}>
-              Mover
-            </button>
-            <button
-              type="button"
-              className={styles.button}
-              disabled={busy}
-              onClick={() => void editor.remove()}
-            >
-              Eliminar
-            </button>
-            <button type="button" className={styles.button} disabled={busy} onClick={editor.deselect}>
-              Deseleccionar
-            </button>
-          </div>
-        </div>
       )}
 
       {placing && (

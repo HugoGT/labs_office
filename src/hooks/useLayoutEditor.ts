@@ -260,6 +260,19 @@ export function useLayoutEditor({
     }
   }, [desks, spaces, refreshDesks, refreshSpaces]);
 
+  // The buttons under the selection on the map: only the desk this editor holds selected answers.
+  useEffect(
+    () =>
+      bridge.on('layoutaction', ({ action, id }) => {
+        const current = stateRef.current;
+        if (current.tag !== 'selected' || current.id !== id) return;
+        if (action === 'move') startMove();
+        else if (action === 'delete') void remove();
+        else deselect();
+      }),
+    [bridge, startMove, remove, deselect],
+  );
+
   useEffect(() => {
     const moving =
       state.tag === 'placing' && state.mode === 'move'

@@ -163,6 +163,44 @@ describe('useSpaceEditor (#74, PR4)', () => {
     expect(spaces.listSpaces).toHaveBeenCalledTimes(1);
   });
 
+  describe('the buttons under the selected room on the map (layoutaction)', () => {
+    it('move starts moving the selected room, delete deletes it, and deselect lets it go', async () => {
+      const spaces = fakeSpaces();
+      const { bridge, result } = setup(spaces);
+      act(() => result.current.enter());
+      await waitFor(() => expect(result.current.spaces).toHaveLength(2));
+
+      act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
+      act(() => bridge.emit('layoutaction', { action: 'move', id: 'id-sala' }));
+      expect(result.current.state).toEqual({ tag: 'placing', kind: 'room', mode: 'move', id: 'id-sala' });
+      act(() => result.current.cancelPlacing());
+
+      act(() => bridge.emit('layoutaction', { action: 'deselect', id: 'id-sala' }));
+      expect(result.current.state).toEqual({ tag: 'idle', kind: 'room' });
+
+      act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
+      await act(async () => bridge.emit('layoutaction', { action: 'delete', id: 'id-sala' }));
+      await waitFor(() => expect(spaces.deleteSpace).toHaveBeenCalledWith('id-sala'));
+      await waitFor(() => expect(result.current.state).toEqual({ tag: 'idle', kind: 'room' }));
+    });
+
+    it('does nothing for a room that is not the selected one, or while the editor is closed', async () => {
+      const spaces = fakeSpaces();
+      const { bridge, result } = setup(spaces);
+      act(() => bridge.emit('layoutaction', { action: 'delete', id: 'id-sala' }));
+      act(() => result.current.enter());
+      await waitFor(() => expect(result.current.spaces).toHaveLength(2));
+
+      act(() => bridge.emit('layoutpick', { id: 'id-otra-sala' }));
+      act(() => bridge.emit('layoutaction', { action: 'move', id: 'id-sala' }));
+      act(() => bridge.emit('layoutaction', { action: 'deselect', id: 'id-sala' }));
+      await act(async () => bridge.emit('layoutaction', { action: 'delete', id: 'id-sala' }));
+
+      expect(spaces.deleteSpace).not.toHaveBeenCalled();
+      expect(result.current.state).toEqual({ tag: 'selected', kind: 'room', id: 'id-otra-sala' });
+    });
+  });
+
   it('borrar: llama a deleteSpace con la seleccionada y relee ambas listas', async () => {
     const spaces = fakeSpaces();
     const { bridge, refreshDesks, refreshSpaces, result } = setup(spaces);

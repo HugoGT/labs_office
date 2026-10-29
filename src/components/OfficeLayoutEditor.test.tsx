@@ -478,11 +478,15 @@ describe('OfficeLayoutEditor (#74, PR4 correction): exclusividad escritorios<->s
     await screen.findByText('Mesa 4');
     await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
     await screen.findByText('Sala grande');
+    let selectedOnMap: string | null | undefined;
+    bridge.onCommand('layoutedit', (command) => {
+      selectedOnMap = command?.selectedId;
+    });
 
     act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
 
-    // La seccion activa (salas) SI reacciona: la sala pasa a seleccionada.
-    expect(await screen.findByRole('button', { name: /^Mover/ })).toBeInTheDocument();
+    // La seccion activa (salas) SI reacciona: la sala pasa a seleccionada en el mapa.
+    await waitFor(() => expect(selectedOnMap).toBe('id-sala'));
     // Escritorios sigue fuera de edicion -- el hook, ya en `off`, ignora el
     // mismo evento en vez de "seleccionar" el id de una sala como si fuese un
     // escritorio.

@@ -1,8 +1,16 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
-import { LayoutEditLayer, layoutPickName } from './LayoutEditLayer';
-import { TILE } from './mapData';
+import { PAN_THRESHOLD_PX } from './cameraPan';
+import {
+  LAYOUT_DELETE_BUTTON_NAME,
+  LAYOUT_MOVE_BUTTON_NAME,
+  LAYOUT_SELECTION_NAME,
+  LayoutEditLayer,
+  layoutPickName,
+} from './LayoutEditLayer';
+import { MAP_H, TILE } from './mapData';
+import { SELECTION_BUTTON_PX, SELECTION_DELETE_COLOR } from './selectionButtons';
 import { createOfficeBridge } from './officeBridge';
 
 /**
@@ -252,5 +260,136 @@ describe('LayoutEditLayer: confirmar colocacion', () => {
     scene.input.emit('pointerdown', fakePointer(10 * TILE, 10 * TILE));
 
     expect(placements).toEqual([]);
+  });
+});
+
+describe('LayoutEditLayer: the selected desk or room carries its move and trash buttons on the map', () => {
+  const pickable = [
+    { id: 'desk-1', x0: 2, y0: 2, x1: 4, y1: 4 },
+    // Right under desk-1, where its buttons fall.
+    { id: 'desk-2', x0: 2, y0: 5, x1: 4, y1: 7 },
+  ];
+
+  function named<T extends Phaser.GameObjects.GameObject>(scene: Phaser.Scene, name: string): T | null {
+    return scene.children.getByName(name) as T | null;
+  }
+
+  function pointerAt(worldX: number, worldY: number, distance = 0): Phaser.Input.Pointer {
+    return { worldX, worldY, button: 0, getDistance: () => distance, event: { stopPropagation: vi.fn() } } as unknown as Phaser.Input.Pointer;
+  }
+
+  /** A whole click as Phaser reports it: the press on what is under it, then the scene's press and release. */
+  function clickAt(scene: Phaser.Scene, worldX: number, worldY: number, distance = 0): void {
+    const tx = Math.floor(worldX / TILE);
+    const ty = Math.floor(worldY / TILE);
+    const under = pickable.find((rect) => tx >= rect.x0 && tx <= rect.x1 && ty >= rect.y0 && ty <= rect.y1);
+    if (under !== undefined) findPickable(scene, under.id)!.emit('pointerdown', pointerAt(worldX, worldY));
+    scene.input.emit('pointerdown', pointerAt(worldX, worldY));
+    scene.input.emit('pointerup', pointerAt(worldX, worldY, distance));
+  }
+
+  function recorder(bridge: ReturnType<typeof createOfficeBridge>): unknown[] {
+    const seen: unknown[] = [];
+    bridge.on('layoutpick', (value) => seen.push(['pick', value]));
+    bridge.on('layoutaction', (value) => seen.push(['action', value]));
+    return seen;
+  }
+
+  it('outlines the selection and draws a move button and a red trash button under it, a screen size at any zoom', async () => {
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    new LayoutEditLayer(scene, bridge);
+    bridge.emitCommand('layoutedit', { pickable, selectedId: 'desk-1', placing: null });
+
+    const outline = named<Phaser.GameObjects.Rectangle>(scene, LAYOUT_SELECTION_NAME)!;
+    expect([outline.x, outline.y, outline.width, outline.height]).toEqual([3.5 * TILE, 3.5 * TILE, 3 * TILE, 3 * TILE]);
+    expect(outline.visible).toBe(true);
+
+    const move = named<Phaser.GameObjects.Rectangle>(scene, LAYOUT_MOVE_BUTTON_NAME)!;
+    const trash = named<Phaser.GameObjects.Rectangle>(scene, LAYOUT_DELETE_BUTTON_NAME)!;
+    expect(trash.fillColor).toBe(SELECTION_DELETE_COLOR);
+    expect(move.x).toBeLessThan(3.5 * TILE);
+    expect(trash.x).toBeGreaterThan(3.5 * TILE);
+    expect((move.x + trash.x) / 2).toBeCloseTo(3.5 * TILE);
+    expect(move.getBounds().top).toBeGreaterThanOrEqual(5 * TILE);
+    expect(move.getBounds().width).toBeCloseTo(SELECTION_BUTTON_PX);
+
+    scene.cameras.main.setZoom(2);
+    scene.events.emit(Phaser.Scenes.Events.POST_UPDATE);
+    expect(named<Phaser.GameObjects.Rectangle>(scene, LAYOUT_MOVE_BUTTON_NAME)!.getBounds().width).toBeCloseTo(SELECTION_BUTTON_PX / 2);
+  });
+
+  it('puts the buttons over a selection that reaches the bottom edge of the map', async () => {
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    new LayoutEditLayer(scene, bridge);
+    bridge.emitCommand('layoutedit', { pickable: [{ id: 'low', x0: 2, y0: MAP_H - 3, x1: 4, y1: MAP_H - 1 }], selectedId: 'low', placing: null });
+
+    expect(named<Phaser.GameObjects.Rectangle>(scene, LAYOUT_MOVE_BUTTON_NAME)!.getBounds().bottom).toBeLessThanOrEqual((MAP_H - 3) * TILE);
+  });
+
+  it('a click on the move button asks to move the selection, on the trash to delete it, and picks nothing under them', async () => {
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    new LayoutEditLayer(scene, bridge);
+    const seen = recorder(bridge);
+    bridge.emitCommand('layoutedit', { pickable, selectedId: 'desk-1', placing: null });
+
+    const move = named<Phaser.GameObjects.Rectangle>(scene, LAYOUT_MOVE_BUTTON_NAME)!;
+    const trash = named<Phaser.GameObjects.Rectangle>(scene, LAYOUT_DELETE_BUTTON_NAME)!;
+    clickAt(scene, move.x, move.y);
+    clickAt(scene, trash.x, trash.y);
+
+    expect(seen).toEqual([
+      ['action', { action: 'move', id: 'desk-1' }],
+      ['action', { action: 'delete', id: 'desk-1' }],
+    ]);
+  });
+
+  it('a click on the empty map lets the selection go; on another desk it only picks that one; a drag of the view does neither', async () => {
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    new LayoutEditLayer(scene, bridge);
+    const seen = recorder(bridge);
+    bridge.emitCommand('layoutedit', { pickable, selectedId: 'desk-1', placing: null });
+
+    clickAt(scene, 20 * TILE, 20 * TILE, PAN_THRESHOLD_PX + 1);
+    expect(seen).toEqual([]);
+
+    clickAt(scene, 3.5 * TILE, 7.5 * TILE);
+    clickAt(scene, 20 * TILE, 20 * TILE);
+
+    expect(seen).toEqual([
+      ['pick', { id: 'desk-2' }],
+      ['action', { action: 'deselect', id: 'desk-1' }],
+    ]);
+  });
+
+  it('shows no outline or buttons with nothing selected, while placing, or once the editor closes', async () => {
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    const layer = new LayoutEditLayer(scene, bridge);
+    const shown = (): boolean => named<Phaser.GameObjects.Rectangle>(scene, LAYOUT_SELECTION_NAME)?.visible === true &&
+      named<Phaser.GameObjects.Rectangle>(scene, LAYOUT_MOVE_BUTTON_NAME)?.visible === true;
+    const seen = recorder(bridge);
+
+    bridge.emitCommand('layoutedit', { pickable, selectedId: 'desk-1', placing: null });
+    expect(shown()).toBe(true);
+    bridge.emitCommand('layoutedit', { pickable, selectedId: null, placing: null });
+    expect(shown()).toBe(false);
+    // With nothing selected, a click on the empty map has nothing to let go.
+    clickAt(scene, 20 * TILE, 20 * TILE);
+    expect(seen).toEqual([]);
+
+    bridge.emitCommand('layoutedit', { pickable, selectedId: 'desk-1', placing: null });
+    bridge.emitCommand('layoutedit', { pickable, selectedId: null, placing: { w: 3, h: 3, obstacles: [] } });
+    expect(shown()).toBe(false);
+
+    bridge.emitCommand('layoutedit', { pickable, selectedId: 'desk-1', placing: null });
+    bridge.emitCommand('layoutedit', null);
+    expect(shown()).toBe(false);
+    layer.destroy();
+    expect(named(scene, LAYOUT_SELECTION_NAME)).toBeNull();
+    expect(named(scene, LAYOUT_MOVE_BUTTON_NAME)).toBeNull();
   });
 });

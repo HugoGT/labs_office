@@ -81,6 +81,44 @@ describe('useLayoutEditor (#74, PR3c)', () => {
     expect(result.current.state).toEqual({ tag: 'selected', kind: 'desk', id: 'id-mesa' });
   });
 
+  describe('the buttons under the selected desk on the map (layoutaction)', () => {
+    it('move starts moving the selected desk, delete deletes it, and deselect lets it go', async () => {
+      const desks = fakeDesks();
+      const { bridge, result } = setup(desks);
+      act(() => result.current.enter());
+      await waitFor(() => expect(result.current.desks).toHaveLength(2));
+
+      act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+      act(() => bridge.emit('layoutaction', { action: 'move', id: 'id-mesa' }));
+      expect(result.current.state).toEqual({ tag: 'placing', kind: 'desk', mode: 'move', id: 'id-mesa' });
+      act(() => result.current.cancelPlacing());
+
+      act(() => bridge.emit('layoutaction', { action: 'deselect', id: 'id-mesa' }));
+      expect(result.current.state).toEqual({ tag: 'idle', kind: 'desk' });
+
+      act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+      await act(async () => bridge.emit('layoutaction', { action: 'delete', id: 'id-mesa' }));
+      await waitFor(() => expect(desks.deleteDesk).toHaveBeenCalledWith('id-mesa'));
+      await waitFor(() => expect(result.current.state).toEqual({ tag: 'idle', kind: 'desk' }));
+    });
+
+    it('does nothing for a desk that is not the selected one, or while the editor is closed', async () => {
+      const desks = fakeDesks();
+      const { bridge, result } = setup(desks);
+      act(() => bridge.emit('layoutaction', { action: 'delete', id: 'id-mesa' }));
+      act(() => result.current.enter());
+      await waitFor(() => expect(result.current.desks).toHaveLength(2));
+
+      act(() => bridge.emit('layoutpick', { id: 'id-otra' }));
+      act(() => bridge.emit('layoutaction', { action: 'move', id: 'id-mesa' }));
+      act(() => bridge.emit('layoutaction', { action: 'deselect', id: 'id-mesa' }));
+      await act(async () => bridge.emit('layoutaction', { action: 'delete', id: 'id-mesa' }));
+
+      expect(desks.deleteDesk).not.toHaveBeenCalled();
+      expect(result.current.state).toEqual({ tag: 'selected', kind: 'desk', id: 'id-otra' });
+    });
+  });
+
   it('select() elige el mismo escritorio que un layoutpick, sin pasar por el bridge', async () => {
     const { result } = setup(fakeDesks());
     act(() => result.current.enter());
