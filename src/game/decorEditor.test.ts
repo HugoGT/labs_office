@@ -11,7 +11,6 @@ import {
   decorPickAt,
   decorPlacementAllowed,
   decorSizeLabel,
-  decorTileName,
   fitsDeskArea,
   sameDecorBrush,
   type DecorBrush,
@@ -58,29 +57,6 @@ describe('sameDecorBrush', () => {
     expect(sameDecorBrush(painted('#c83c3c'), painted('#c83c3c'))).toBe(true);
     expect(sameDecorBrush(painted('#c83c3c'), painted('#3c5ac8'))).toBe(false);
     expect(sameDecorBrush(painted('#c83c3c'), painted())).toBe(false);
-  });
-});
-
-describe('decorTileName', () => {
-  it('keeps only what tells a piece apart from the others of its group, capitalized', () => {
-    expect(decorTileName('chair', 'Silla de madera')).toBe('Madera');
-    expect(decorTileName('chair', 'Silla de metal')).toBe('Metal');
-    expect(decorTileName('chair', 'Silla de cuero')).toBe('Cuero');
-    expect(decorTileName('chair', 'Silla gamer')).toBe('Gamer');
-    expect(decorTileName('desk', 'Escritorio de vidrio')).toBe('Vidrio');
-    expect(decorTileName('desk', 'Escritorio pintado')).toBe('Pintado');
-    expect(decorTileName('table', 'Mesa de reuniones')).toBe('Reuniones');
-    expect(decorTileName('table', 'Mesa de cafetería')).toBe('Cafetería');
-    expect(decorTileName('table', 'Mesa ovalada')).toBe('Ovalada');
-  });
-
-  it('keeps the whole name of a piece not named after its kind, or named only by it', () => {
-    expect(decorTileName('plant', 'Ficus')).toBe('Ficus');
-    expect(decorTileName('chair', 'Trono de Ana')).toBe('Trono de Ana');
-    expect(decorTileName('chair', 'Sillas apiladas')).toBe('Sillas apiladas');
-    expect(decorTileName('chair', 'Silla')).toBe('Silla');
-    expect(decorTileName('chair', 'Silla de')).toBe('Silla de');
-    expect(decorTileName('chair', 'silla de bambú')).toBe('Bambú');
   });
 });
 

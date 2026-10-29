@@ -1,7 +1,7 @@
 import type { Swatch } from '../art/customCharacter';
 import { chairPreviewFrames, previewFrame, type MaterialCatalog, type MaterialOption } from '../game/artMaterials';
 import type { ArtPreviewCache } from '../game/artPreview';
-import { decorSizeLabel, decorTileName, type DecorBrush } from '../game/decorEditor';
+import { decorSizeLabel, type DecorBrush } from '../game/decorEditor';
 import { decorPieceInfo, type DecorPieceInfo } from '../game/officeDecor';
 import type { DecorPick } from '../hooks/useDecorEditor';
 import { ArtPreviewCanvas } from './ArtPreviewCanvas';
@@ -11,9 +11,9 @@ import styles from './DecorPalette.module.css';
 /**
  * The palette of the decor editor (#208): every piece the office decor layer
  * places, grouped by kind, each with a thumbnail cut from its sheet (pack and
- * approved uploads, from the same catalog as the other palettes). A tile
- * names only what tells it apart in its group (the heading says the kind);
- * a room table also shows its size, and a colorable piece carries a color
+ * approved uploads, from the same catalog as the other palettes). A tile is
+ * its picture, plus the size in tiles of a room table: the name is its
+ * tooltip and accessible name, the heading says the kind; a colorable piece carries a color
  * picker, chosen before picking because the rail steps aside once a piece is
  * picked. Presentational: the editor owns which entry is picked, the colors
  * and what a click on the map does.
@@ -96,11 +96,24 @@ export interface DecorPaletteProps {
   preview?: ArtPreviewCache;
 }
 
-function Thumbnail({ option, kind, color, preview }: { option: MaterialOption; kind: DecorCatalogKind; color: string | null; preview?: ArtPreviewCache }) {
+function Thumbnail({
+  option,
+  kind,
+  color,
+  sized,
+  preview,
+}: {
+  option: MaterialOption;
+  kind: DecorCatalogKind;
+  color: string | null;
+  /** The tile also shows a size under the picture, so the picture keeps clear of it. */
+  sized: boolean;
+  preview?: ArtPreviewCache;
+}) {
   // A chair reads whole only with both of its layers, back first.
   const frames = kind === 'chair' ? chairPreviewFrames() : [previewFrame(option)];
   return (
-    <span className={styles.thumbnail} aria-hidden="true">
+    <span className={sized ? `${styles.thumbnail} ${styles.sized}` : styles.thumbnail} aria-hidden="true">
       {frames.map((frame) => (
         <ArtPreviewCanvas
           key={frame.y}
@@ -147,15 +160,8 @@ export function DecorPalette({ value, catalog, offers = () => true, colors = {},
                       disabled={disabled}
                       onClick={() => onPick(pick)}
                     >
-                      <Thumbnail option={option} kind={kind} color={color} preview={preview} />
-                      <span className={styles.label} data-tile-name>
-                        {decorTileName(kind, option.name)}
-                      </span>
-                      {size !== null && (
-                        <span className={styles.size} data-tile-size>
-                          {size}
-                        </span>
-                      )}
+                      <Thumbnail option={option} kind={kind} color={color} preview={preview} sized={size !== null} />
+                      {size !== null && <span className={styles.size}>{size}</span>}
                     </button>
                     {colorable && color !== null && (
                       <ColorPicker

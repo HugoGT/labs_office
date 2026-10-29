@@ -59,7 +59,7 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
 
   it('explains nothing between its header and «Múltiple», and offers no turn or eraser control of its own (#207, #208)', async () => {
     const { container } = renderSection({ initiallyActive: true });
-    const multiple = await screen.findByRole('checkbox', { name: 'Múltiple: varios a la vez' });
+    const multiple = await screen.findByRole('checkbox', { name: 'Múltiple: colocar varios items' });
     expect(multiple).not.toHaveAttribute('aria-describedby');
     expect(screen.queryByText(/rueda del mouse/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Elige una pieza/)).not.toBeInTheDocument();
@@ -151,12 +151,13 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
   });
 
   describe('walls (#224)', () => {
-    it('offers the walls below the pieces, one entry pressed at a time across both, and says what it paints', async () => {
+    it('offers the walls below the pieces with no explanation, one entry pressed at a time across both, and says what it paints', async () => {
       const { commands, terrainCommands } = renderSection({ initiallyActive: true, terrain: terrainPort() });
 
-      expect(await screen.findByRole('group', { name: 'Paredes' })).toBeInTheDocument();
-      expect(screen.getByText(/paredes van sobre las líneas entre casillas/i)).toBeInTheDocument();
-      expect(screen.getByText(/escritorios, muebles ni la entrada/i)).toBeInTheDocument();
+      const walls = await screen.findByRole('group', { name: 'Paredes' });
+      // Only the heading sits between the pieces and the walls.
+      expect(walls.previousElementSibling).toHaveTextContent(/^Paredes$/);
+      expect(document.body.textContent).not.toMatch(/líneas entre casillas|muebles ni la entrada/);
 
       await userEvent.click(screen.getByRole('button', { name: 'Ficus' }));
       await userEvent.click(screen.getByRole('button', { name: 'Ladrillo' }));
@@ -173,16 +174,19 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
       expect(commands.at(-1)).toMatchObject({ brush: { kind: 'piece', piece: 'plant-ficus' } });
     });
 
-    it('puts «Borrar» right below «Múltiple», out of the walls, and says only that while it is picked (#223)', async () => {
+    it('puts «⛔ Borrador» on its own line right above «Múltiple», out of the walls, and says only that while it is picked (#223)', async () => {
       const { terrainCommands } = renderSection({ initiallyActive: true, terrain: terrainPort() });
-      const multiple = await screen.findByRole('checkbox', { name: 'Múltiple: varios a la vez' });
-      const eraser = screen.getByRole('button', { name: 'Borrar' });
+      const multiple = await screen.findByRole('checkbox', { name: 'Múltiple: colocar varios items' });
+      const eraser = screen.getByRole('button', { name: 'Borrador' });
 
-      // The row of «Múltiple» is followed straight by the eraser, before the pieces' palettes.
-      expect(multiple.closest('label')?.parentElement?.nextElementSibling).toContainElement(eraser);
-      expect(within(screen.getByRole('group', { name: 'Paredes' })).queryByRole('button', { name: 'Borrar' })).not.toBeInTheDocument();
-      expect(eraser).toHaveTextContent(/^Borrar$/);
-      expect(eraser).toHaveAttribute('title', 'Borrar');
+      // The header, then the eraser's line, then the line of «Múltiple», before the pieces' palettes.
+      const eraserLine = screen.getByRole('heading', { name: 'Decoración' }).parentElement!.nextElementSibling!;
+      expect(eraserLine).toContainElement(eraser);
+      expect(eraserLine).not.toContainElement(multiple);
+      expect(eraserLine.nextElementSibling).toContainElement(multiple);
+      expect(within(screen.getByRole('group', { name: 'Paredes' })).queryByRole('button', { name: 'Borrador' })).not.toBeInTheDocument();
+      expect(eraser).toHaveTextContent(/^\u26D4 Borrador$/);
+      expect(eraser).toHaveAttribute('title', 'Borrador');
       expect(document.body.textContent).not.toMatch(/Quitar pared|Quitando paredes|Goma/);
 
       await userEvent.click(screen.getByRole('button', { name: 'Ladrillo' }));
@@ -190,7 +194,7 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
       expect(eraser).toHaveAttribute('aria-pressed', 'true');
       expect(screen.getByRole('button', { name: 'Ladrillo' })).toHaveAttribute('aria-pressed', 'false');
       expect(terrainCommands.at(-1)?.brush).toEqual({ kind: 'wall', piece: null });
-      expect(screen.getByRole('button', { name: 'Deseleccionar' }).parentElement).toHaveTextContent(/^Borrar/);
+      expect(screen.getByRole('button', { name: 'Deseleccionar' }).parentElement).toHaveTextContent(/^Borrador/);
       expect(document.body.textContent).not.toMatch(/Quitando|Quitar/);
 
       await userEvent.click(screen.getByRole('button', { name: 'Ficus' }));
@@ -203,7 +207,7 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
       const { bridge } = renderSection({ initiallyActive: true, terrain: terrainPort({ setWalls }) });
       act(() => bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls: withWalls(BASE_LAYOUT.walls, [{ index: 7, piece: 'wall-stone' }]), colors: new Map() }));
 
-      await userEvent.click(await screen.findByRole('button', { name: 'Borrar' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'Borrador' }));
       act(() => bridge.emit('wallpick', { index: 7 }));
       await vi.waitFor(() => expect(setWalls).toHaveBeenLastCalledWith([{ index: 7, piece: null }]));
 
@@ -230,7 +234,7 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
 
       it('takes a lone door off the post at either end and keeps the post, then erases the post once the room shows it gone', async () => {
         const { bridge, decor, setWalls } = onWall(LONE);
-        await userEvent.click(await screen.findByRole('button', { name: 'Borrar' }));
+        await userEvent.click(await screen.findByRole('button', { name: 'Borrador' }));
 
         act(() => bridge.emit('wallpick', { index: at(42, 40) }));
         await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: null }]));
@@ -246,7 +250,7 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
 
       it('takes a door off from the post in its middle, where the eraser lands when it is over the door', async () => {
         const { bridge, decor, setWalls } = onWall(LONE);
-        await userEvent.click(await screen.findByRole('button', { name: 'Borrar' }));
+        await userEvent.click(await screen.findByRole('button', { name: 'Borrador' }));
 
         act(() => bridge.emit('wallpick', { index: at(41, 40) }));
         await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: null }]));
@@ -255,7 +259,7 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
 
       it('leaves the posts past the ends of a door to the eraser', async () => {
         const { bridge, decor, setWalls } = onWall(LONE);
-        await userEvent.click(await screen.findByRole('button', { name: 'Borrar' }));
+        await userEvent.click(await screen.findByRole('button', { name: 'Borrador' }));
 
         act(() => bridge.emit('wallpick', { index: at(43, 40) }));
         await vi.waitFor(() => expect(setWalls).toHaveBeenCalledWith([{ index: at(43, 40), piece: null }]));
@@ -264,7 +268,7 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
 
       it('takes a double door off from the post at either end or in the middle of its three tiles', async () => {
         const { bridge, decor, setWalls } = onWall(DOUBLE);
-        await userEvent.click(await screen.findByRole('button', { name: 'Borrar' }));
+        await userEvent.click(await screen.findByRole('button', { name: 'Borrador' }));
 
         act(() => bridge.emit('wallpick', { index: at(43, 40) }));
         await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: null }]));
@@ -279,7 +283,7 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
 
       it('takes off only the doors that end on the post: both of a post they share, one of a post that is only its own', async () => {
         const { bridge, decor, setWalls } = onWall(TWO);
-        await userEvent.click(await screen.findByRole('button', { name: 'Borrar' }));
+        await userEvent.click(await screen.findByRole('button', { name: 'Borrador' }));
 
         act(() => bridge.emit('wallpick', { index: at(44, 40) }));
         await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(42, 40), item: null }]));
@@ -308,11 +312,11 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
     it('steps out on Escape: the picked wall first, then the editor', async () => {
       const onExit = vi.fn();
       const { commands, terrainCommands } = renderSection({ initiallyActive: true, terrain: terrainPort(), onExit });
-      await userEvent.click(await screen.findByRole('button', { name: 'Borrar' }));
-      expect(screen.getByRole('button', { name: 'Deseleccionar' }).parentElement).toHaveTextContent('Borrar');
+      await userEvent.click(await screen.findByRole('button', { name: 'Borrador' }));
+      expect(screen.getByRole('button', { name: 'Deseleccionar' }).parentElement).toHaveTextContent('Borrador');
 
       await userEvent.keyboard('{Escape}');
-      expect(screen.getByRole('button', { name: 'Borrar' })).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getByRole('button', { name: 'Borrador' })).toHaveAttribute('aria-pressed', 'false');
       expect(terrainCommands.at(-1)).toBeNull();
       expect(commands.at(-1)).toMatchObject({ brush: null, area: null });
       expect(onExit).not.toHaveBeenCalled();

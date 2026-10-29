@@ -33,13 +33,14 @@
   min-width: 0;
 }
 
+/* The tile is the picture: as wide as the cell and square, on the panel's control color for contrast. */
 .entry {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
   min-width: 0;
-  padding: 6px 4px;
+  padding: 0;
   background: #1f2937;
   color: #e5e7eb;
   border: 1px solid #374151;
@@ -60,15 +61,11 @@
   cursor: default;
 }
 
-/* Every piece centered in the same box; a chair's two layers stack on each other. */
+/* Every piece centered in the tile; a chair's two layers stack on each other. */
 .thumbnail {
-  position: relative;
+  position: absolute;
+  inset: 0;
   display: block;
-  width: 48px;
-  height: 48px;
-  background: #111827;
-  border: 1px solid #374151;
-  border-radius: var(--radius-tag);
   overflow: hidden;
 }
 
@@ -82,15 +79,19 @@
   image-rendering: pixelated;
 }
 
-.label {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* A room table's picture leaves the bottom of the tile to its size. */
+.sized {
+  bottom: 16px;
 }
 
-/* A room table's size in tiles, under its name. */
+/* A room table's size in tiles, at the bottom of its tile. */
 .size {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 3px;
   font-size: 11px;
+  line-height: 13px;
   color: #9ca3af;
+  text-align: center;
 }

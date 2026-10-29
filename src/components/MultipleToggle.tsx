@@ -1,7 +1,7 @@
 import styles from './MultipleToggle.module.css';
 
 /** What the toggle does, as its visible label and accessible name; nothing else is said. */
-export const MULTIPLE_LABEL = 'Múltiple: varios a la vez';
+export const MULTIPLE_LABEL = 'Múltiple: colocar varios items';
 
 export interface MultipleToggleProps {
   checked: boolean;

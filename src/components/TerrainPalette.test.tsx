@@ -88,15 +88,17 @@ describe('TerrainPalette', () => {
 describe('WallPalette', () => {
   const WALL_NAMES = ['Ladrillo', 'Piedra', 'Yeso', 'Vidrio'];
 
-  it('offers every wall by its Spanish name and no eraser, none pressed while a floor or nothing is picked', () => {
+  it('offers every wall by its Spanish name, as title and accessible name but no text, and no eraser, none pressed while a floor or nothing is picked', () => {
     const { rerender } = render(<WallPalette value={null} onPick={() => {}} walls={catalog.wall} preview={noPreview()} />);
 
     const group = screen.getByRole('group', { name: 'Paredes' });
     const buttons = Array.from(group.querySelectorAll('button'));
-    expect(buttons.map((button) => button.textContent)).toEqual(WALL_NAMES);
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual(WALL_NAMES);
+    expect(buttons.map((button) => button.getAttribute('title'))).toEqual(WALL_NAMES);
+    expect(buttons.map((button) => button.textContent)).toEqual(WALL_NAMES.map(() => ''));
     expect(buttons.every((button) => button.getAttribute('aria-pressed') === 'false')).toBe(true);
 
-    expect(screen.queryByRole('button', { name: 'Borrar' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Borrador' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Quitar pared' })).not.toBeInTheDocument();
 
     rerender(<WallPalette value={{ kind: 'floor', material: 'void' }} onPick={() => {}} walls={catalog.wall} preview={noPreview()} />);
@@ -131,34 +133,34 @@ describe('WallPalette', () => {
 });
 
 describe('WallEraser (#223)', () => {
-  it('is one entry that says only «Borrar», in its text, its tooltip and its accessible name, and keeps its picture', () => {
+  it('is one small button, «⛔ Borrador», named «Borrador» in its tooltip and accessible name', () => {
     render(<WallEraser value={null} onPick={() => {}} />);
 
-    const button = screen.getByRole('button', { name: 'Borrar' });
-    expect(button).toHaveTextContent(/^Borrar$/);
-    expect(button).toHaveAttribute('title', 'Borrar');
+    const button = screen.getByRole('button', { name: 'Borrador' });
+    expect(button).toHaveTextContent(/^\u26D4 Borrador$/);
+    expect(button).toHaveAttribute('title', 'Borrador');
     expect(button).not.toHaveAttribute('aria-label');
-    // The picture, decorative like the thumbnails of the walls.
-    expect(button.querySelector('[aria-hidden="true"]')).not.toBeNull();
+    // The sign is decorative: the name is the word.
+    expect(button.querySelector('[aria-hidden="true"]')).toHaveTextContent('\u26D4');
     expect(button.textContent).not.toMatch(/Quitar|Goma|pared/);
   });
 
   it('is pressed only while the wall eraser is picked, and reports its click as no wall', async () => {
     const onPick = vi.fn();
     const { rerender } = render(<WallEraser value={{ kind: 'wall', piece: 'wall-stone' }} onPick={onPick} />);
-    expect(screen.getByRole('button', { name: 'Borrar' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Borrador' })).toHaveAttribute('aria-pressed', 'false');
     rerender(<WallEraser value={{ kind: 'floor', material: 'void' }} onPick={onPick} />);
-    expect(screen.getByRole('button', { name: 'Borrar' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Borrador' })).toHaveAttribute('aria-pressed', 'false');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Borrar' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Borrador' }));
     expect(onPick.mock.calls).toEqual([[null]]);
 
     rerender(<WallEraser value={{ kind: 'wall', piece: null }} onPick={onPick} />);
-    expect(screen.getByRole('button', { name: 'Borrar' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Borrador' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('can be disabled', () => {
     render(<WallEraser value={null} onPick={() => {}} disabled />);
-    expect(screen.getByRole('button', { name: 'Borrar' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Borrador' })).toBeDisabled();
   });
 });

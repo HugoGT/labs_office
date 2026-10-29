@@ -20,7 +20,6 @@ import {
   withDecor,
   type DecorEdit,
   type DecorItem,
-  type DecorKind,
   type DecorPieceInfo,
   type DecorRotation,
   type DecorTileRect,
@@ -68,29 +67,6 @@ export function decorPickAt(
 ): DecorItem | null {
   const reachable = area === null ? items : items.filter((item) => fitsInsideDesk(decorFootprint(item, infoOf(item.piece), width), area));
   return decorItemCovering(reachable, infoOf, width, tile);
-}
-
-/** The word each group's pieces are named after in Spanish ("Silla de madera"). */
-const KIND_WORDS: Readonly<Record<DecorKind, string>> = {
-  chair: 'silla',
-  desk: 'escritorio',
-  table: 'mesa',
-  plant: 'planta',
-  door: 'puerta',
-};
-
-/**
- * The name of a palette tile: only what tells a piece apart within its group,
- * whose heading already says the kind ("Silla de madera" is "Madera" under
- * "Sillas"). The kind word and a following "de " go and the rest is
- * capitalized; a name that does not start with the kind word as a word (an
- * upload named anything) or would be left empty keeps its whole name.
- */
-export function decorTileName(kind: DecorKind, name: string): string {
-  const match = new RegExp(`^${KIND_WORDS[kind]}\\s+(?:de\\s+)?(\\S.*)$`, 'iu').exec(name.trim());
-  const rest = match?.[1];
-  if (rest === undefined || /^de$/iu.test(rest)) return name;
-  return rest.charAt(0).toLocaleUpperCase('es') + rest.slice(1);
 }
 
 /** A footprint as the palette states it, columns by rows in tiles: "7x5". */
