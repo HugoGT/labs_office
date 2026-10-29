@@ -127,10 +127,12 @@ export function SpaceEditorSection({
   onExit,
   onRequestActive,
 }: SpaceEditorSectionProps) {
-  const editor = useSpaceEditor({ bridge, spaces, desks, refreshDesks, refreshSpaces });
-  const [form, setForm] = useState<CreateFormValues>(EMPTY_FORM);
   /** Embedded only: the room list ("Editar salas") instead of the default view's form. */
   const [listing, setListing] = useState(false);
+  // The default view also picks the desks on the map: their move and trash
+  // buttons work there as a room's do, with no trip to "Editar escritorios".
+  const editor = useSpaceEditor({ bridge, spaces, desks, refreshDesks, refreshSpaces, pickDesks: embedded && !listing });
+  const [form, setForm] = useState<CreateFormValues>(EMPTY_FORM);
   const listViewChangeRef = useRef(onListViewChange);
   listViewChangeRef.current = onListViewChange;
   /**

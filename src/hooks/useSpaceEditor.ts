@@ -35,6 +35,7 @@ import {
   toLayoutEditCommand,
   type EditorState,
   type LayoutObstacleItem,
+  type MovingExclusion,
 } from '../game/layoutEditor';
 import type { OfficeBridge } from '../game/officeBridge';
 import { useEscapeStep } from './useEscapeStep';
@@ -47,6 +48,13 @@ export interface UseSpaceEditorOptions {
   /** Se llaman tras cada mutacion con exito, para que la escena y el resto de la oficina converjan (paired-space sync). */
   refreshDesks: () => void;
   refreshSpaces: () => void;
+  /**
+   * The default view of "Editar espacios": the desks are picked on the map
+   * with the rooms, and their move and trash buttons act on them through
+   * `desks`, so a desk needs no trip to its own list. Turning it off drops a
+   * desk held selected.
+   */
+  pickDesks?: boolean;
 }
 
 export interface SpaceCreateInput {
@@ -100,6 +108,7 @@ export function useSpaceEditor({
   desks,
   refreshDesks,
   refreshSpaces,
+  pickDesks = false,
 }: UseSpaceEditorOptions): UseSpaceEditorResult {
   const [state, dispatch] = useReducer(reduceEditorState, OFF_STATE);
   const [roomList, setRoomList] = useState<readonly AdminSpace[]>([]);
@@ -112,6 +121,8 @@ export function useSpaceEditor({
   stateRef.current = state;
   const roomListRef = useRef(roomList);
   roomListRef.current = roomList;
+  const deskListRef = useRef(deskList);
+  deskListRef.current = deskList;
 
   const active = state.tag !== 'off';
 
@@ -158,7 +169,8 @@ export function useSpaceEditor({
         // The server moves a rectangle whole or not at all (`normalizeUpdateSpaceInput`),
         // so a move carries the room's own size: `{ x, y }` alone answered 400.
         const moved = moveId === null ? undefined : roomListRef.current.find((room) => room.id === moveId);
-        if (moveId !== null && moved === undefined) return;
+        const movedDesk = moveId === null ? undefined : deskListRef.current.find((desk) => desk.id === moveId);
+        if (moveId !== null && moved === undefined && movedDesk === undefined) return;
 
         dispatch({ type: 'confirmPlacement' });
         setError(null);
@@ -168,6 +180,8 @@ export function useSpaceEditor({
           try {
             if (moved !== undefined) {
               await spaces.updateSpace(moved.id, { x: tx, y: ty, w: moved.w, h: moved.h });
+            } else if (movedDesk !== undefined) {
+              await desks.updateDesk(movedDesk.id, { x: tx, y: ty });
             } else if (create !== null) {
               await spaces.createSpace({
                 name: create.name,
@@ -192,7 +206,7 @@ export function useSpaceEditor({
           }
         })();
       }),
-    [bridge, spaces, refreshDesks, refreshSpaces, reload],
+    [bridge, spaces, desks, refreshDesks, refreshSpaces, reload],
   );
 
   const enter = useCallback(() => {
@@ -250,7 +264,8 @@ export function useSpaceEditor({
     setError(null);
     setPending(true);
     try {
-      await spaces.deleteSpace(target);
+      if (deskListRef.current.some((desk) => desk.id === target)) await desks.deleteDesk(target);
+      else await spaces.deleteSpace(target);
       // Only the removed room's own selection goes; another one stays selected.
       if (current.tag === 'selected' && current.id === target) dispatch({ type: 'deselect' });
       refreshDesks();
@@ -261,7 +276,13 @@ export function useSpaceEditor({
     } finally {
       setPending(false);
     }
-  }, [spaces, refreshDesks, refreshSpaces, reload]);
+  }, [spaces, desks, refreshDesks, refreshSpaces, reload]);
+
+  // Off the default view the desks are not this editor's: one held selected goes.
+  useEffect(() => {
+    const current = stateRef.current;
+    if (!pickDesks && current.tag === 'selected' && deskListRef.current.some((desk) => desk.id === current.id)) deselect();
+  }, [pickDesks, deselect]);
 
   // The buttons under the selection on the map: only the room this editor holds selected answers.
   useEffect(
@@ -277,27 +298,33 @@ export function useSpaceEditor({
   );
 
   useEffect(() => {
+    const movingId = state.tag === 'placing' && state.mode === 'move' ? state.id : null;
+    const movingRoom = movingId === null ? undefined : roomList.find((room) => room.id === movingId);
+    const movingDesk = movingId === null ? undefined : deskList.find((desk) => desk.id === movingId);
+    const own = movingRoom ?? movingDesk;
     const placingSize =
       state.tag === 'placing'
         ? state.mode === 'create'
           ? (pendingCreateRef.current ?? { w: 0, h: 0 })
-          : (() => {
-              const own = roomList.find((room) => room.id === state.id);
-              return own === undefined ? { w: 0, h: 0 } : { w: own.w, h: own.h };
-            })()
+          : own === undefined ? { w: 0, h: 0 } : { w: own.w, h: own.h }
         : undefined;
 
-    const moving: { kind: 'room'; id: string } | null =
-      state.tag === 'placing' && state.mode === 'move' ? { kind: 'room', id: state.id } : null;
+    // A desk is told apart by where it stands, like in `useLayoutEditor`.
+    const moving: MovingExclusion | null =
+      movingDesk !== undefined ? { kind: 'desk', x: movingDesk.x, y: movingDesk.y }
+        : movingId !== null ? { kind: 'room', id: movingId }
+          : null;
 
+    const rooms = roomList.map(toRoomObstacleItem);
+    const deskItems = deskList.map(toDeskObstacleItem);
     const command = toLayoutEditCommand(state, {
-      items: roomList.map(toRoomObstacleItem),
-      obstacleItems: [...roomList.map(toRoomObstacleItem), ...deskList.map(toDeskObstacleItem)],
+      items: pickDesks ? [...rooms, ...deskItems] : rooms,
+      obstacleItems: [...rooms, ...deskItems],
       placingSize,
       moving,
     });
     bridge.emitCommand('layoutedit', command);
-  }, [state, roomList, deskList, bridge]);
+  }, [state, roomList, deskList, pickDesks, bridge]);
 
   return {
     state,

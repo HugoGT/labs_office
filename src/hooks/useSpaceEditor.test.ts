@@ -367,3 +367,97 @@ describe('useSpaceEditor: Escape frees the map one step at a time', () => {
     expect(escape().defaultPrevented).toBe(false);
   });
 });
+
+describe('useSpaceEditor: desks picked from the default view of "Editar espacios"', () => {
+  function setupPicking(desks: DeskAdminPort = fakeDesks()) {
+    const bridge = createOfficeBridge();
+    const spaces = fakeSpaces();
+    const refreshDesks = vi.fn();
+    const refreshSpaces = vi.fn();
+    const commands: (OfficeCommandMap['layoutedit'])[] = [];
+    bridge.onCommand('layoutedit', (command) => commands.push(command));
+    const view = renderHook(
+      ({ pickDesks }: { pickDesks: boolean }) => useSpaceEditor({ bridge, spaces, desks, refreshDesks, refreshSpaces, pickDesks }),
+      { initialProps: { pickDesks: true } },
+    );
+    return { bridge, spaces, desks, refreshDesks, refreshSpaces, commands, ...view };
+  }
+
+  async function enterAndPickDesk(view: ReturnType<typeof setupPicking>): Promise<void> {
+    act(() => view.result.current.enter());
+    await waitFor(() => expect(view.commands.at(-1)?.pickable.map((rect) => rect.id)).toContain('id-mesa'));
+    act(() => view.bridge.emit('layoutpick', { id: 'id-mesa' }));
+  }
+
+  it('makes the desks pickable with the rooms; without it they are only outlined', async () => {
+    const picking = setupPicking();
+    act(() => picking.result.current.enter());
+    await waitFor(() =>
+      expect(picking.commands.at(-1)?.pickable.map((rect) => rect.id).sort()).toEqual(['id-mesa', 'id-otra-sala', 'id-sala']),
+    );
+    expect(picking.commands.at(-1)?.outlines).toEqual([]);
+
+    const plain = setup(fakeSpaces());
+    act(() => plain.result.current.enter());
+    await waitFor(() => expect(plain.commands.at(-1)?.outlines).toEqual([{ x0: 2, y0: 2, x1: 4, y1: 4 }]));
+    expect(plain.commands.at(-1)?.pickable.map((rect) => rect.id)).not.toContain('id-mesa');
+  });
+
+  it('its move button places that desk with its own size, and a valid place moves it through the desk port', async () => {
+    const view = setupPicking();
+    await enterAndPickDesk(view);
+    expect(view.commands.at(-1)?.selectedId).toBe('id-mesa');
+
+    act(() => view.bridge.emit('layoutaction', { action: 'move', id: 'id-mesa' }));
+    const placing = view.commands.at(-1)?.placing;
+    expect(placing).toMatchObject({ w: 3, h: 3 });
+    expect(placing?.snap).toBeUndefined();
+    // The desk does not block its own move; the rooms still do.
+    expect(placing?.obstacles).not.toContainEqual({ x0: 2, y0: 2, x1: 4, y1: 4 });
+    expect(placing?.obstacles).toContainEqual({ x0: 10, y0: 10, x1: 14, y1: 14 });
+
+    act(() => view.bridge.emit('layoutplace', { tx: 20, ty: 21, valid: true }));
+    await waitFor(() => expect(view.desks.updateDesk).toHaveBeenCalledWith('id-mesa', { x: 20, y: 21 }));
+    expect(view.spaces.updateSpace).not.toHaveBeenCalled();
+    await waitFor(() => expect(view.result.current.state).toEqual({ tag: 'idle', kind: 'room' }));
+    expect(view.refreshDesks).toHaveBeenCalledTimes(1);
+    expect(view.refreshSpaces).toHaveBeenCalledTimes(1);
+  });
+
+  it('its trash deletes that desk through the desk port and drops the selection', async () => {
+    const view = setupPicking();
+    await enterAndPickDesk(view);
+
+    await act(async () => view.bridge.emit('layoutaction', { action: 'delete', id: 'id-mesa' }));
+
+    expect(view.desks.deleteDesk).toHaveBeenCalledWith('id-mesa');
+    expect(view.spaces.deleteSpace).not.toHaveBeenCalled();
+    expect(view.result.current.state).toEqual({ tag: 'idle', kind: 'room' });
+    expect(view.refreshDesks).toHaveBeenCalledTimes(1);
+  });
+
+  it('a refused desk move shows why', async () => {
+    const view = setupPicking(fakeDesks({ updateDesk: vi.fn(async () => Promise.reject(new AdminError('unknown'))) }));
+    await enterAndPickDesk(view);
+
+    act(() => view.bridge.emit('layoutaction', { action: 'move', id: 'id-mesa' }));
+    act(() => view.bridge.emit('layoutplace', { tx: 20, ty: 21, valid: true }));
+
+    await waitFor(() => expect(view.result.current.error).not.toBeNull());
+    expect(view.result.current.state).toEqual({ tag: 'idle', kind: 'room' });
+  });
+
+  it('turning it off drops a selected desk, and leaves a selected room alone', async () => {
+    const view = setupPicking();
+    await enterAndPickDesk(view);
+
+    view.rerender({ pickDesks: false });
+    expect(view.result.current.state).toEqual({ tag: 'idle', kind: 'room' });
+    expect(view.commands.at(-1)?.pickable.map((rect) => rect.id)).not.toContain('id-mesa');
+
+    act(() => view.bridge.emit('layoutpick', { id: 'id-sala' }));
+    view.rerender({ pickDesks: true });
+    view.rerender({ pickDesks: false });
+    expect(view.result.current.state).toEqual({ tag: 'selected', kind: 'room', id: 'id-sala' });
+  });
+});

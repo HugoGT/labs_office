@@ -756,3 +756,60 @@ describe('SpaceEditorSection embedded in "Editar espacios": the rooms behind "Ed
     await waitFor(() => expect(spaces.deleteSpace).toHaveBeenCalledWith('id-sala'));
   });
 });
+
+describe('SpaceEditorSection embedded: a desk picked in the default view moves and goes from the map too', () => {
+  const MESA = { id: 'id-mesa', label: '', x: 2, y: 2, w: 3, h: 3, occupant: null };
+
+  /** The ids the map lets the admin pick, as the last `layoutedit` command says. */
+  function trackPickableOnMap(bridge: OfficeBridge): () => string[] {
+    let ids: string[] = [];
+    bridge.onCommand('layoutedit', (command) => {
+      ids = command?.pickable.map((rect) => rect.id) ?? [];
+    });
+    return () => ids;
+  }
+
+  function renderWithDesk() {
+    const bridge = createOfficeBridge();
+    const pickable = trackPickableOnMap(bridge);
+    const selectedOnMap = trackSelectionOnMap(bridge);
+    const desks = fakeDesks({ listDesks: vi.fn(async () => [MESA]), updateDesk: vi.fn(async () => MESA), deleteDesk: vi.fn(async () => undefined) });
+    const view = renderSection({ bridge, desks, embedded: true, initiallyActive: true });
+    return { ...view, pickable, selectedOnMap };
+  }
+
+  it('its trash deletes the desk and the panel stays on the default view', async () => {
+    const { bridge, desks, spaces, pickable, selectedOnMap } = renderWithDesk();
+    await waitFor(() => expect(pickable()).toContain('id-mesa'));
+
+    act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+    await waitFor(() => expect(selectedOnMap()).toBe('id-mesa'));
+    expect(screen.getByRole('button', { name: 'Colocar nueva sala' })).toBeInTheDocument();
+
+    await act(async () => bridge.emit('layoutaction', { action: 'delete', id: 'id-mesa' }));
+    expect(desks.deleteDesk).toHaveBeenCalledWith('id-mesa');
+    expect(spaces.deleteSpace).not.toHaveBeenCalled();
+  });
+
+  it('its move button places it, and the click on the map moves it', async () => {
+    const { bridge, desks, pickable } = renderWithDesk();
+    await waitFor(() => expect(pickable()).toContain('id-mesa'));
+
+    act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+    act(() => bridge.emit('layoutaction', { action: 'move', id: 'id-mesa' }));
+    act(() => bridge.emit('layoutplace', { tx: 20, ty: 21, valid: true }));
+
+    await waitFor(() => expect(desks.updateDesk).toHaveBeenCalledWith('id-mesa', { x: 20, y: 21 }));
+  });
+
+  it('the room list ("Editar salas") holds only rooms: a selected desk goes and no desk is pickable', async () => {
+    const { bridge, pickable, selectedOnMap } = renderWithDesk();
+    await waitFor(() => expect(pickable()).toContain('id-mesa'));
+    act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Editar salas' }));
+
+    await waitFor(() => expect(selectedOnMap()).toBeNull());
+    expect(pickable()).toEqual(['id-sala']);
+  });
+});
