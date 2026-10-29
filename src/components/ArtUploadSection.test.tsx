@@ -48,6 +48,39 @@ describe('ArtUploadSection (#121)', () => {
     for (const gone of ['Autoría', 'Licencia', 'Material']) expect(screen.queryByLabelText(gone)).not.toBeInTheDocument();
   });
 
+  it('opens with only what the files need: the PNG rules, with no "Como admin" lead-in', () => {
+    render(<ArtUploadSection uploads={fakePort()} />);
+
+    expect(screen.getByText(/PNG de 8 bits con el tamaño exacto de su tipo, hasta 128 colores y 128 KB por archivo\.$/)).toBeInTheDocument();
+    expect(screen.queryByText(/Como admin/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/sin pasar por revisión/)).not.toBeInTheDocument();
+  });
+
+  it('names the piece after its file while the name is empty, and leaves a typed name alone', async () => {
+    const user = userEvent.setup();
+    render(<ArtUploadSection uploads={fakePort()} />);
+
+    await user.upload(screen.getByLabelText(/Caminar/), png('Mi personaje.final.PNG'));
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Mi personaje.final');
+
+    await user.upload(screen.getByLabelText(/Sentado/), png('sentado.png'));
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Mi personaje.final');
+
+    await user.clear(screen.getByLabelText('Nombre'));
+    await user.type(screen.getByLabelText('Nombre'), 'Lucía');
+    await user.upload(screen.getByLabelText(/Caminar/), png('otro.png'));
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Lucía');
+  });
+
+  it('cuts a file name longer than a name to the name limit', async () => {
+    const user = userEvent.setup();
+    render(<ArtUploadSection uploads={fakePort()} />);
+
+    await user.upload(screen.getByLabelText(/Caminar/), png(`${'a'.repeat(80)}.png`));
+
+    expect(screen.getByLabelText('Nombre')).toHaveValue('a'.repeat(60));
+  });
+
   it('a plant asks for one sheet, and previews the chosen file', async () => {
     const user = userEvent.setup();
     render(<ArtUploadSection uploads={fakePort()} />);

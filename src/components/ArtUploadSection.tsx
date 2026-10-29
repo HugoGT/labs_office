@@ -5,6 +5,7 @@ import { AdminError } from '../dashboard/adminPort';
 import { ART_UPLOAD_KINDS, type ArtUploadInput, type ArtUploadKind, type ArtUploadPort, type UploadedArt } from '../dashboard/artUploadPort';
 import { ArtOfficeMock } from './ArtOfficeMock';
 import { ArtPieceDialog } from './ArtPieceDialog';
+import { MAX_ART_NAME_LENGTH, nameFromFile } from './nameFromFile';
 import styles from './ArtAdminSection.module.css';
 
 /**
@@ -118,6 +119,9 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
       setFiles(({ [role]: _gone, ...rest }) => rest);
       return;
     }
+    // The first file names the piece, as soon as it is chosen; a name already
+    // there, typed or taken from a file, is never replaced.
+    setName((current) => (current === '' ? nameFromFile(file.name) : current));
     const dataUrl = await readDataUrl(file);
     setFiles((current) => ({ ...current, [role]: dataUrl }));
   }
@@ -159,11 +163,7 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
       <h3 className={styles.title} id={`${id}-title`}>
         Aportar arte
       </h3>
-      <p className={styles.hint}>
-        Como admin, lo que subes queda disponible para toda la oficina sin pasar por revisión, con tu
-        nombre como autoría. PNG de 8 bits con el tamaño exacto de su tipo, hasta 128 colores y 128 KB por archivo. Antes de
-        subirlo ves cómo queda en una oficina de prueba y decides si lo aceptas.
-      </p>
+      <p className={styles.hint}>PNG de 8 bits con el tamaño exacto de su tipo, hasta 128 colores y 128 KB por archivo.</p>
 
       {error !== null && (
         <div className={styles.error} role="alert">
@@ -199,7 +199,7 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
           <label className={styles.label} htmlFor={`${id}-name`}>
             Nombre
           </label>
-          <input id={`${id}-name`} className={styles.input} value={name} maxLength={60} onChange={(event) => setName(event.target.value)} />
+          <input id={`${id}-name`} className={styles.input} value={name} maxLength={MAX_ART_NAME_LENGTH} onChange={(event) => setName(event.target.value)} />
         </div>
 
         {hasColor(kind) && (

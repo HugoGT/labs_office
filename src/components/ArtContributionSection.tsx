@@ -12,10 +12,8 @@ import {
   type ContributionUsage,
 } from '../dashboard/artContributionPort';
 import { ArtPieceViewer } from './ArtPieceViewer';
+import { MAX_ART_NAME_LENGTH, nameFromFile } from './nameFromFile';
 import styles from './ArtContributionSection.module.css';
-
-/** Same limit as `MAX_NAME_LENGTH` in `server/src/assets/assetUploadRules.ts`. */
-const MAX_NAME_LENGTH = 60;
 
 const KIND_LABELS: Readonly<Record<ContributionKind, string>> = {
   character: 'Personaje',
@@ -47,11 +45,6 @@ const FILES: Readonly<Record<ContributionKind, readonly { role: string; label: s
 function sizeOf(imageKind: ArtImageKind): string {
   const { width, height } = sheetSize(ART_IMAGE_SPECS[imageKind]);
   return `${width} × ${height} px`;
-}
-
-/** The file name without its extension, cut to what the server accepts as a name. */
-function nameFromFile(fileName: string): string {
-  return fileName.replace(/\.[^.]*$/, '').trim().slice(0, MAX_NAME_LENGTH);
 }
 
 /** Whether a field of the footprint holds a whole number of tiles from 1 to `max`. */
@@ -229,7 +222,7 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
           <label className={styles.label} htmlFor={`${id}-name`}>
             Nombre
           </label>
-          <input id={`${id}-name`} className={styles.input} value={name} maxLength={MAX_NAME_LENGTH} onChange={(event) => setName(event.target.value)} />
+          <input id={`${id}-name`} className={styles.input} value={name} maxLength={MAX_ART_NAME_LENGTH} onChange={(event) => setName(event.target.value)} />
         </div>
 
         {kind === 'table' && (
