@@ -312,6 +312,23 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(player.x).toBeGreaterThan(start);
   });
 
+  it('drags the view with the right button while an editor holds the map, without walking', async () => {
+    const { scene, bridge, movement, frame } = await movementArena();
+    bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'grass' } });
+    const main = scene.cameras.main;
+    frame();
+    const startScrollX = main.scrollX;
+
+    const pointer = { button: 2, camera: main, x: 300, y: 200, worldX: 1000, worldY: 300, distance: 0, getDistance() { return this.distance; } };
+    scene.input.emit('pointerdown', pointer, []);
+    Object.assign(pointer, { x: 200, distance: 100 });
+    scene.input.emit('pointermove', pointer);
+    scene.input.emit('pointerup', pointer, []);
+
+    expect(main.scrollX).toBeGreaterThan(startScrollX);
+    expect(movement.autoWalk).toBeUndefined();
+  });
+
   it('does not turn drags, item clicks, blocked goals or minimap clicks into walking', async () => {
     const { scene, movement, click, doubleClick } = await movementArena();
     doubleClick(1000, 300, { distance: 20 });

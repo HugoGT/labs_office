@@ -732,6 +732,8 @@ export class OfficeScene extends Phaser.Scene {
       lerp: FOLLOW_LERP,
       region: this.cameraRegion(),
       isSuspended: () => this.mapHeld || !this.localPositionReady,
+      // A right drag moves the view wherever a right click would walk, a held map included.
+      rightPans: (pointer, over) => this.localPositionReady && this.rightWalks(pointer, over),
     });
 
     this.unsubscribeSetStatus = this.bridge.onCommand('setStatus', ({ status }) => {
@@ -2254,10 +2256,11 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
-   * Whether a right click there walks. Unlike the double click, it does so
-   * while an editor holds the map, so the admin can move along while placing
-   * things; it walks through the outlines Editar espacios draws to pick, which
-   * cover most of the floor, but never through anything else, like a peer.
+   * Whether a right click there walks, and a right drag moves the view.
+   * Unlike the left button, it does so while an editor holds the map, so the
+   * admin can move along while placing things; it goes through the outlines
+   * Editar espacios draws to pick, which cover most of the floor, but never
+   * through anything else, like a peer.
    */
   private rightWalks(pointer: Phaser.Input.Pointer, over: readonly Phaser.GameObjects.GameObject[] | undefined): boolean {
     return pointer.button === RIGHT_BUTTON && pointer.camera === this.cameras.main &&

@@ -38,6 +38,11 @@ export interface CameraPanLayerOptions {
   region: Rect;
   /** Verdadero mientras el pan debe quedar desarmado (editor de layout activo). */
   isSuspended: () => boolean;
+  /**
+   * Whether a right press there drags the view, whatever `isSuspended` says:
+   * the scene lets the right button move the admin while an editor holds the map.
+   */
+  rightPans?: (pointer: Phaser.Input.Pointer, currentlyOver: readonly Phaser.GameObjects.GameObject[]) => boolean;
 }
 
 type Glide = { kind: 'focus'; x: number; y: number } | { kind: 'return' };
@@ -49,6 +54,7 @@ export class CameraPanLayer {
   private readonly lerp: number;
   private region: Rect;
   private readonly isSuspended: () => boolean;
+  private readonly rightPans: NonNullable<CameraPanLayerOptions['rightPans']>;
   private state: CameraPanState = { kind: 'idle' };
   private glide: Glide | null = null;
   /**
@@ -71,11 +77,11 @@ export class CameraPanLayer {
     // Mismo criterio que `closemenu` (OfficeScene.setupInput) para el clic
     // izquierdo sobre mapa vacio, mas dos guardas propias de este gesto:
     // nunca sobre la camara del minimapa, nunca editando layout.
-    const eligible =
+    const left =
       pointer.button === 0 &&
       (!currentlyOver || currentlyOver.length === 0) &&
-      pointer.camera === this.camera &&
       !this.isSuspended();
+    const eligible = pointer.camera === this.camera && (left || (pointer.button === 2 && this.rightPans(pointer, currentlyOver ?? [])));
     this.dispatch({ kind: 'down', x: pointer.x, y: pointer.y, eligible });
   };
 
@@ -110,6 +116,7 @@ export class CameraPanLayer {
     this.lerp = options.lerp;
     this.region = options.region;
     this.isSuspended = options.isSuspended;
+    this.rightPans = options.rightPans ?? (() => false);
 
     this.scene.input.on('pointerdown', this.onPointerDown);
     this.scene.input.on('pointermove', this.onPointerMove);
