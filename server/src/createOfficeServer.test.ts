@@ -3174,6 +3174,25 @@ describe('terrain routes (#123 phase 2)', () => {
     await server.shutdown();
   });
 
+  it('puts a moved desk back when its decor fails to save, answering 500', async () => {
+    const desks = createMemoryDesks();
+    const store = createMemoryTerrain();
+    store.saveWallsAndDecor = async () => { throw new Error('connection lost'); };
+    const { server, url } = await terrainServer({ desks, terrain: store });
+    const { width } = server.terrain.snapshot();
+    const desk = await desks.createDesk({ x: 66, y: 21 });
+    expect((await setDecor(url, '/admin/decor', [{ index: 22 * width + 67, item: { piece: 'chair-metal', rotation: 90 } }])).status).toBe(200);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const moved = await fetch(`${url}/admin/desks/${desk.id}`, { method: 'POST', headers: BEARER, body: JSON.stringify({ x: 71, y: 21 }) });
+
+    expect(moved.status).toBe(500);
+    expect(await desks.getDesk(desk.id)).toMatchObject({ x: 66, y: 21 });
+    expect(server.terrain.decor()).toEqual([{ index: 22 * width + 67, piece: 'chair-metal', rotation: 90 }]);
+    errors.mockRestore();
+    await server.shutdown();
+  });
+
   it('lets a desk occupant decorate inside the desk only, through /me/decor', async () => {
     const desks = createMemoryDesks();
     const { server, url } = await terrainServer({ desks, terrain: createMemoryTerrain() });

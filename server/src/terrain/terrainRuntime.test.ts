@@ -1201,6 +1201,48 @@ describe('createTerrainRuntime carry', () => {
     expect(write).toHaveBeenCalledExactlyOnceWith({ width: W, walls: runtime.walls(), decor: runtime.decor() });
   });
 
+  it('puts the desk or room back when saving its contents fails, keeping the layer as it was', async () => {
+    const store = createMemoryTerrain([], WALL, [CHAIR, DOOR, OUTSIDE]);
+    store.saveWallsAndDecor = async () => { throw new Error('connection lost'); };
+    const runtime = runtimeWith(store);
+    await runtime.load();
+    const listener = vi.fn();
+    runtime.subscribe(listener);
+    const walls = runtime.walls();
+    const decor = runtime.decor();
+    const steps: string[] = [];
+    const write = vi.fn(async () => { steps.push('write'); return 'moved'; });
+    const undo = vi.fn(async () => { steps.push('undo'); });
+
+    await expect(runtime.carry(async () => UP, null, NONE, write, undo)).rejects.toThrow('connection lost');
+
+    expect(steps).toEqual(['write', 'undo']);
+    expect(runtime.walls()).toBe(walls);
+    expect(runtime.decor()).toBe(decor);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('still answers the save failure when putting the desk or room back fails too', async () => {
+    const store = createMemoryTerrain([], WALL, [CHAIR, DOOR, OUTSIDE]);
+    store.saveWallsAndDecor = async () => { throw new Error('connection lost'); };
+    const runtime = runtimeWith(store);
+    await runtime.load();
+
+    await expect(runtime.carry(async () => UP, null, NONE, async () => 'moved', async () => { throw new Error('undo failed'); })).rejects.toThrow('connection lost');
+  });
+
+  it('never puts back a move that saved, found nothing or was refused', async () => {
+    const runtime = runtimeWith();
+    await runtime.load();
+    const undo = vi.fn(async () => undefined);
+
+    await runtime.carry(async () => ({ from: { x: 66, y: 23, w: 1, h: 1 }, dx: 0, dy: -8 }), null, NONE, async () => 'moved', undo);
+    await runtime.carry(async () => UP, null, NONE, async () => null, undo);
+    await expect(runtime.carry(async () => UP, null, NONE, async () => { throw new Error('overlap'); }, undo)).rejects.toThrow('overlap');
+
+    expect(undo).not.toHaveBeenCalled();
+  });
+
   it('saves nothing when the write finds nothing to move or fails', async () => {
     const store = createMemoryTerrain([], WALL, [CHAIR, DOOR, OUTSIDE]);
     const runtime = runtimeWith(store);

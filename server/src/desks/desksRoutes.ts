@@ -111,9 +111,15 @@ export interface DeskWallGuard {
   /**
    * Like `run` for a move, and the walls and decor of the area `locate`
    * names go along (`carry` in `terrainRuntime.ts`): `grid` is what the move
-   * leaves, and nothing is carried unless `write` returns something.
+   * leaves, and nothing is carried unless `write` returns something. `undo`
+   * puts the desk back if its decor then fails to save.
    */
-  carry<T>(actorId: string, locate: () => Promise<AreaMove | null>, write: (grid: WallGrid) => Promise<T | null>): Promise<T | null>;
+  carry<T>(
+    actorId: string,
+    locate: () => Promise<AreaMove | null>,
+    write: (grid: WallGrid) => Promise<T | null>,
+    undo: () => Promise<unknown>,
+  ): Promise<T | null>;
 }
 
 /**
@@ -246,14 +252,19 @@ function assertClearOfWalls(position: DeskPosition, grid: WallGrid): void {
 async function movingContents<T>(id: string, position: DeskPosition, actorId: string, deps: DesksDeps, write: () => Promise<T | null>): Promise<T | null> {
   if (deps.walls === undefined) return write();
   assertValidDeskPosition(position);
+  // Where the desk stood, read in the queue: `undo` puts it back there.
+  let before: DeskPosition | null = null;
   const locate = async (): Promise<AreaMove | null> => {
     const desk = await deps.desks.getDesk(id);
-    return desk === null ? null : { from: { x: desk.x, y: desk.y, w: DESK_SIDE, h: DESK_SIDE }, dx: position.x - desk.x, dy: position.y - desk.y };
+    if (desk === null) return null;
+    before = { x: desk.x, y: desk.y };
+    return { from: { x: desk.x, y: desk.y, w: DESK_SIDE, h: DESK_SIDE }, dx: position.x - desk.x, dy: position.y - desk.y };
   };
+  const undo = async () => (before === null ? null : deps.desks.updateDesk(id, before));
   return deps.walls.carry(actorId, locate, async (grid) => {
     assertClearOfWalls(position, grid);
     return write();
-  });
+  }, undo);
 }
 
 /**

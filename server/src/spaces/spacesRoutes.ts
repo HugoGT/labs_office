@@ -46,10 +46,11 @@ import type { AreaMove } from '../terrain/terrainRuntime.ts';
 /**
  * Carries the walls and decor of the area `locate` names along with a moved
  * room (`carry` in `terrainRuntime.ts`), in the terrain edit queue; nothing
- * is carried unless `write` returns something.
+ * is carried unless `write` returns something, and `undo` puts the room back
+ * if its contents then fail to save.
  */
 export interface SpaceContentsGuard {
-  carry<T>(actorId: string, locate: () => Promise<AreaMove | null>, write: () => Promise<T | null>): Promise<T | null>;
+  carry<T>(actorId: string, locate: () => Promise<AreaMove | null>, write: () => Promise<T | null>, undo: () => Promise<unknown>): Promise<T | null>;
 }
 
 export interface SpacesDeps extends AdminDeps {
@@ -212,17 +213,21 @@ export async function handleUpdateSpace(
   // Only a move whole carries: after a resize what stood inside may not fit,
   // and a desk cubicle moves with its desk (`desksRoutes.ts`). A malformed
   // rectangle carries nothing either, so the write still answers it with 400.
+  // Where the room stood, read in the queue: `undo` puts it back there.
+  let before: UpdateSpaceInput | null = null;
   const locate = async (): Promise<AreaMove | null> => {
     const { x, y, w, h } = patch;
     if (![x, y, w, h].every(Number.isInteger)) return null;
     const space = await deps.spaces.getSpace(id);
     if (space === null || space.deskId !== null || space.w !== w || space.h !== h) return null;
+    before = { x: space.x, y: space.y, w: space.w, h: space.h };
     return { from: { x: space.x, y: space.y, w: space.w, h: space.h }, dx: x! - space.x, dy: y! - space.y };
   };
+  const undo = async () => (before === null ? null : deps.spaces.updateSpace(id, before));
 
   return translating(async () => {
     const moved = deps.contents !== undefined && ('x' in body || 'y' in body);
-    const updated = moved ? await deps.contents!.carry(authorized.user.id, locate, write) : await write();
+    const updated = moved ? await deps.contents!.carry(authorized.user.id, locate, write, undo) : await write();
     if (updated === null) return NOT_FOUND;
     return { status: 200, body: toConfigBody(updated) };
   });

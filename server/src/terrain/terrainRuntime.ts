@@ -183,6 +183,9 @@ export interface TerrainRuntime {
    * stays), then
    * `write` saves the desk or room with the layer the move leaves, and only
    * if it returns something are the walls and decor saved, in one statement.
+   * The desk or room lives in another store, so if that save fails `undo`
+   * puts it back where it was, still in the queue, and the save's error is
+   * thrown: the desk or room never stands apart from what it holds.
    * `locate` returning `null`, or nothing in the area, just runs `write`.
    */
   carry<T>(
@@ -190,6 +193,7 @@ export interface TerrainRuntime {
     actorId: string | null,
     protections: () => Promise<TerrainProtections>,
     write: (layer: CarriedLayer) => Promise<T | null>,
+    undo?: () => Promise<unknown>,
   ): Promise<T | null>;
   /** Called after each accepted edit; see `TerrainListener`. */
   subscribe(listener: TerrainListener): () => void;
@@ -476,6 +480,7 @@ export function createTerrainRuntime({
     locate: () => Promise<AreaMove | null>, actorId: string | null,
     protections: () => Promise<TerrainProtections>,
     write: (layer: CarriedLayer) => Promise<T | null>,
+    undo?: () => Promise<unknown>,
   ): Promise<T | null> {
     const { width, height } = layout;
     const move = await locate();
@@ -526,7 +531,13 @@ export function createTerrainRuntime({
 
     const result = await write({ width, walls: nextWalls, decor: nextDecor });
     if (result === null) return null;
-    await store.saveWallsAndDecor(wallEdits, decorChanges(decor, nextDecor), actorId);
+    try {
+      await store.saveWallsAndDecor(wallEdits, decorChanges(decor, nextDecor), actorId);
+    } catch (error) {
+      // Best effort: if putting it back fails too, the save's error is still the one to answer.
+      await undo?.().catch(() => console.error('[terrain] a moved desk or room could not be put back after its contents failed to save'));
+      throw error;
+    }
     walls = nextWalls;
     wallOrder = nextOrder;
     decor = nextDecor;
@@ -597,8 +608,8 @@ export function createTerrainRuntime({
     runExclusive(task) {
       return enqueue(() => task(snapshot));
     },
-    carry(locate, actorId, protections, write) {
-      return enqueue(() => applyCarry(locate, actorId, protections, write));
+    carry(locate, actorId, protections, write, undo) {
+      return enqueue(() => applyCarry(locate, actorId, protections, write, undo));
     },
     subscribe(listener) {
       listeners.add(listener);

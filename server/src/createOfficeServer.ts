@@ -900,7 +900,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
       // A moved room carries its walls and decor along (`carry`); without a
       // terrain store there is nothing to carry.
       const contents: SpaceContentsGuard | undefined = terrain.editable
-        ? { carry: (actorId, locate, write) => terrain.carry(locate, actorId, terrainProtections, write) }
+        ? { carry: (actorId, locate, write, undo) => terrain.carry(locate, actorId, terrainProtections, write, undo) }
         : undefined;
       run(req, { directory, spaces, auth, identityAdmin, decor, ...(contents === undefined ? {} : { contents }) })
         .then((result) => {
@@ -1237,7 +1237,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
             decor: terrain.decor(),
             decorInfo,
           })),
-        carry: (actorId, locate, write) => terrain.carry(locate, actorId, terrainProtections, (layer) => write({ ...layer, decorInfo })),
+        carry: (actorId, locate, write, undo) => terrain.carry(locate, actorId, terrainProtections, (layer) => write({ ...layer, decorInfo }), undo),
       };
       run(req, { directory, desks, auth, identityAdmin, decor, walls })
         .then((result) => {

@@ -734,7 +734,7 @@ describe('desks carry what stands on them', () => {
 
     expect(result.body).toMatchObject({ x: 25, y: 20 });
     expect(moves).toEqual([{ from: { x: 2, y: 3, w: 3, h: 3 }, dx: 23, dy: 17 }]);
-    expect(guard.carry).toHaveBeenCalledWith(ADMIN.id, expect.any(Function), expect.any(Function));
+    expect(guard.carry).toHaveBeenCalledWith(ADMIN.id, expect.any(Function), expect.any(Function), expect.any(Function));
   });
 
   it('answers 409 contents-blocked when what stands on the desk cannot land there, and leaves the desk', async () => {
@@ -745,6 +745,26 @@ describe('desks carry what stands on them', () => {
     const result = await handleUpdateDesk(BEARER_ADMIN, desk.id, { x: 25, y: 20 }, { ...deps, walls: guard });
 
     expect(result).toEqual({ status: 409, body: { error: 'contents-blocked' } });
+    expect(await desks.getDesk(desk.id)).toMatchObject({ x: 2, y: 3 });
+  });
+
+  it('puts the desk back where it was when its decor fails to save after the move', async () => {
+    const { deps, desks } = harness();
+    const desk = await desks.createDesk({ label: 'Mesa', x: 2, y: 3 });
+    const grid = { width: 40, walls: new Array<null>(40 * 30).fill(null) };
+    // The terrain save fails after the desk moved: the runtime then runs `undo`.
+    const guard: DeskWallGuard = {
+      run: vi.fn(async (write) => write(grid)),
+      carry: vi.fn(async (_actor, locate, write, undo) => {
+        await locate();
+        await write(grid);
+        expect(await desks.getDesk(desk.id)).toMatchObject({ x: 25, y: 20 });
+        await undo();
+        throw new Error('connection lost');
+      }),
+    };
+
+    await expect(handleUpdateDesk(BEARER_ADMIN, desk.id, { x: 25, y: 20 }, { ...deps, walls: guard })).rejects.toThrow('connection lost');
     expect(await desks.getDesk(desk.id)).toMatchObject({ x: 2, y: 3 });
   });
 

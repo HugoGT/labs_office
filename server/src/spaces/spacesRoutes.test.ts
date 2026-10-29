@@ -556,7 +556,7 @@ describe('handleUpdateSpace carries what stands in the room', () => {
     expect(result.status).toBe(200);
     expect(await spaces.getSpace(room.id)).toMatchObject({ x: 10, y: 5 });
     expect(moves).toEqual([{ from: { x: 1, y: 1, w: 6, h: 6 }, dx: 9, dy: 4 }]);
-    expect(guard.carry).toHaveBeenCalledWith(ADMIN.id, expect.any(Function), expect.any(Function));
+    expect(guard.carry).toHaveBeenCalledWith(ADMIN.id, expect.any(Function), expect.any(Function), expect.any(Function));
   });
 
   it('carries nothing on a resize, a desk cubicle or a missing room, and never asks on a rename', async () => {
@@ -574,6 +574,24 @@ describe('handleUpdateSpace carries what stands in the room', () => {
     expect(moves).toEqual([null, null, null]);
     expect((await handleUpdateSpace(BEARER_ADMIN, room.id, { name: 'Otra' }, withGuard)).status).toBe(200);
     expect(guard.carry).toHaveBeenCalledTimes(3);
+  });
+
+  it('puts the room back where it was when its walls and decor fail to save after the move', async () => {
+    const { deps, spaces } = harness();
+    const room = await spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 6, h: 6, capacity: null });
+    // The terrain save fails after the room moved: the runtime then runs `undo`.
+    const guard: SpaceContentsGuard = {
+      carry: vi.fn(async (_actor, locate, write, undo) => {
+        await locate();
+        await write();
+        expect(await spaces.getSpace(room.id)).toMatchObject({ x: 10, y: 5 });
+        await undo();
+        throw new Error('connection lost');
+      }),
+    };
+
+    await expect(handleUpdateSpace(BEARER_ADMIN, room.id, { x: 10, y: 5, w: 6, h: 6 }, { ...deps, contents: guard })).rejects.toThrow('connection lost');
+    expect(await spaces.getSpace(room.id)).toMatchObject({ x: 1, y: 1, w: 6, h: 6 });
   });
 
   it('answers 409 contents-blocked when what stands in the room cannot land there, and leaves the room', async () => {
