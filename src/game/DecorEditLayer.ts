@@ -19,7 +19,11 @@
  * arrows) and a red trash button under it, kept a fixed size on screen at
  * any zoom; a click on them reports `decormove` or `decordelete` instead of
  * selecting. Clicks act on the release, so a drag of the view selects
- * nothing, and a press that placed a piece never selects on its release.
+ * nothing, and a press that placed a piece never selects on its release. A
+ * press held on an item, or dragged, grabs it (`PressHold`): the layer reports
+ * `decormove`, the ghost follows the pointer by the tile it was grabbed by,
+ * and the release reports `decorpick` there, or `decorputdown` when it moved
+ * nowhere or may not stand there. That release selects nothing.
  */
 
 import Phaser from 'phaser';
@@ -30,6 +34,7 @@ import { isEditableElementFocused } from './inputFocusGuard';
 import { TILE } from './mapData';
 import { INITIAL_WHEEL_STATE, ROTATE_WHEEL_RULES, accumulateWheel, type WheelState } from './mapZoom';
 import type { OfficeBridge } from './officeBridge';
+import { PressHold } from './pressHold';
 import { decorFootprint, isRotatable, type DecorItem, type DecorPieceInfo, type DecorTileRect } from './officeDecor';
 import { SELECTION_BUTTON_PX, SELECTION_DELETE_COLOR, SelectionButtons } from './selectionButtons';
 import { ContextOutlines } from './spaceOutline';
@@ -63,6 +68,13 @@ export interface DecorEditLayerDeps {
   now?: () => number;
 }
 
+/** An item under a press: how far its anchor's middle is from the pointer. */
+interface Grab {
+  index: number;
+  shiftX: number;
+  shiftY: number;
+}
+
 export class DecorEditLayer {
   private readonly scene: Phaser.Scene;
   private readonly bridge: OfficeBridge;
@@ -83,19 +95,42 @@ export class DecorEditLayer {
   private shownSelection: number | null = null;
   /** Whether the press now down began with nothing picked, so its release may select. */
   private pressSelects = false;
+  /** The item under the press now down, grabbed once held long enough or dragged. */
+  private readonly hold = new PressHold<Grab>();
+  /** The item being dragged, until its release is resolved. */
+  private dragging: Grab | null = null;
+  /** Where the drag was released, kept until the move reaches the map. */
+  private drop: { worldX: number; worldY: number } | null = null;
 
   private readonly unsubscribeCommand: () => void;
   private readonly onPointerMove = (pointer: Phaser.Input.Pointer): void => {
-    this.tile = this.tileAt(pointer);
+    // A drag grabs at once; the dragged item follows by the tile it was grabbed by.
+    if ((pointer.getDistance?.() ?? 0) > PAN_THRESHOLD_PX) this.grab(this.hold.take());
+    this.tile = this.tileAtWorld(pointer.worldX + (this.dragging?.shiftX ?? 0), pointer.worldY + (this.dragging?.shiftY ?? 0));
     this.draw();
   };
   private readonly onPointerDown = (pointer: Phaser.Input.Pointer): void => {
     this.pressSelects = this.command != null && this.command.brush === null && pointer.button === 0 && this.onMainCamera(pointer);
+    this.hold.cancel();
+    this.dragging = null;
+    this.drop = null;
+    if (this.pressSelects) {
+      // A press on a selection button is the button's, whatever lies under it.
+      const onButton = this.shownSelection !== null && this.buttons.at(pointer) !== null;
+      const under = onButton ? null : this.itemAt(pointer);
+      if (under !== null) {
+        const shiftX = ((under % this.deps.width) + 0.5) * TILE - pointer.worldX;
+        const shiftY = (Math.floor(under / this.deps.width) + 0.5) * TILE - pointer.worldY;
+        this.hold.start({ index: under, shiftX, shiftY }, this.now());
+      }
+    }
     if (this.command?.brush == null || pointer.button !== 0) return;
     const index = this.tileAt(pointer);
     if (index !== null) this.bridge.emit('decorpick', { index });
   };
   private readonly onPointerUp = (pointer: Phaser.Input.Pointer): void => {
+    this.hold.cancel();
+    if (this.dragging !== null && this.drop === null) this.drop = { worldX: pointer.worldX, worldY: pointer.worldY };
     const pressed = this.pressSelects;
     this.pressSelects = false;
     const command = this.command;
@@ -107,12 +142,12 @@ export class DecorEditLayer {
       this.bridge.emit(action === 'move' ? 'decormove' : 'decordelete', { index: this.shownSelection });
       return;
     }
-    const tile = this.tileAt(pointer);
-    const picked = tile === null ? null : decorPickAt(this.deps.items(), (piece) => this.deps.infoOf(piece), this.deps.width, tile, command.area);
-    this.bridge.emit('decorselect', { index: picked?.index ?? null });
+    this.bridge.emit('decorselect', { index: this.itemAt(pointer) });
   };
   /** The buttons keep their screen size: a zoom step resizes them on the next frame. */
   private readonly onPostUpdate = (): void => {
+    this.grab(this.hold.due(this.now()));
+    this.resolveDrop();
     if (this.shownSelection !== null && this.scene.cameras.main.zoom !== this.buttons.zoom) this.drawSelection();
   };
   private readonly onWheel = (pointer: Phaser.Input.Pointer, _over: unknown, _dx: number, deltaY: number): void => {
@@ -188,9 +223,43 @@ export class DecorEditLayer {
     return pointer.camera == null || pointer.camera === this.scene.cameras.main;
   }
 
+  /** The anchor of the item under the pointer, inside the command's area, or `null`. */
+  private itemAt(pointer: Phaser.Input.Pointer): number | null {
+    const tile = this.tileAt(pointer);
+    if (tile === null || this.command == null) return null;
+    return decorPickAt(this.deps.items(), (piece) => this.deps.infoOf(piece), this.deps.width, tile, this.command.area)?.index ?? null;
+  }
+
+    /** Starts the drag of what a press grabbed: React turns it into a move, like the move button. */
+  private grab(grabbed: Grab | null): void {
+    if (grabbed === null) return;
+    this.dragging = grabbed;
+    // The drag took the press: its release selects nothing.
+    this.pressSelects = false;
+    this.bridge.emit('decormove', { index: grabbed.index });
+  }
+
+  /** Once the move of the dragged item is on the map, its release places it, or puts it down where it was. */
+  private resolveDrop(): void {
+    const { dragging, drop, command } = this;
+    const brush = command?.brush;
+    if (dragging === null || drop === null || command == null || brush == null || brush.from !== dragging.index) return;
+    this.dragging = null;
+    this.drop = null;
+    const anchor = this.tileAtWorld(drop.worldX + dragging.shiftX, drop.worldY + dragging.shiftY);
+    const allowed = anchor !== null && anchor !== dragging.index &&
+      decorPlacementAllowed(this.deps.items(), (piece) => this.deps.infoOf(piece), this.deps.ground(), command.area ?? null, anchor, brush, command.desks);
+    if (allowed) this.bridge.emit('decorpick', { index: anchor });
+    else this.bridge.emit('decorputdown', { index: dragging.index });
+  }
+
   private tileAt(pointer: Phaser.Input.Pointer): number | null {
-    const tx = Math.floor(pointer.worldX / TILE);
-    const ty = Math.floor(pointer.worldY / TILE);
+    return this.tileAtWorld(pointer.worldX, pointer.worldY);
+  }
+
+  private tileAtWorld(worldX: number, worldY: number): number | null {
+    const tx = Math.floor(worldX / TILE);
+    const ty = Math.floor(worldY / TILE);
     if (!Number.isFinite(tx) || !Number.isFinite(ty) || tx < 0 || ty < 0 || tx >= this.deps.width || ty >= this.deps.height) return null;
     return ty * this.deps.width + tx;
   }

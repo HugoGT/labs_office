@@ -102,6 +102,25 @@ describe('useLayoutEditor (#74, PR3c)', () => {
       await waitFor(() => expect(result.current.state).toEqual({ tag: 'idle', kind: 'desk' }));
     });
 
+    it('putdown, the release of a drag that moved nothing, ends the move of that desk with it selected', async () => {
+      const desks = fakeDesks();
+      const { bridge, result } = setup(desks);
+      act(() => result.current.enter());
+      await waitFor(() => expect(result.current.desks).toHaveLength(2));
+
+      // Not this desk's move, or no move at all: nothing.
+      act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+      act(() => bridge.emit('layoutaction', { action: 'putdown', id: 'id-mesa' }));
+      expect(result.current.state).toEqual({ tag: 'selected', kind: 'desk', id: 'id-mesa' });
+      act(() => bridge.emit('layoutaction', { action: 'move', id: 'id-mesa' }));
+      act(() => bridge.emit('layoutaction', { action: 'putdown', id: 'id-otra' }));
+      expect(result.current.state).toEqual({ tag: 'placing', kind: 'desk', mode: 'move', id: 'id-mesa' });
+
+      act(() => bridge.emit('layoutaction', { action: 'putdown', id: 'id-mesa' }));
+      expect(result.current.state).toEqual({ tag: 'selected', kind: 'desk', id: 'id-mesa' });
+      expect(desks.updateDesk).not.toHaveBeenCalled();
+    });
+
     it('does nothing for a desk that is not the selected one, or while the editor is closed', async () => {
       const desks = fakeDesks();
       const { bridge, result } = setup(desks);

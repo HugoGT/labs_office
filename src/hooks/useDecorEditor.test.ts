@@ -577,6 +577,20 @@ describe('useDecorEditor', () => {
       await act(async () => calls[0]!.resolve());
     });
 
+    it('decorputdown, the release of a drag that moved nothing, ends that move with the item selected where it is', () => {
+      const { bridge, result, calls } = selecting();
+      act(() => bridge.emit('decormove', { index: DESK_AT }));
+
+      // Another item's index leaves the move alone.
+      act(() => bridge.emit('decorputdown', { index: at(20, 20) }));
+      expect(result.current.brush).toMatchObject({ from: DESK_AT });
+
+      act(() => bridge.emit('decorputdown', { index: DESK_AT }));
+      expect(result.current.brush).toBeNull();
+      expect(result.current.selected).toBe(DESK_AT);
+      expect(calls).toHaveLength(0);
+    });
+
     it('turns an item in place when the move lands on its own tile, and does nothing when nothing changed', async () => {
       const { bridge, result, calls } = selecting();
       act(() => bridge.emit('decormove', { index: DESK_AT }));

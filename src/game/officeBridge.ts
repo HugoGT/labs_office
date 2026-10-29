@@ -200,7 +200,8 @@ export interface OfficeEventMap {
    * on the map, or the selection a click on the empty map, which lets it go.
    * Sent by `LayoutEditLayer`; the editor that holds that selection acts.
    */
-  layoutaction: { action: 'move' | 'delete' | 'deselect'; id: string };
+  /** `putdown`: a drag released where its item was, or where it may not stand, ends with the item selected. */
+  layoutaction: { action: 'move' | 'delete' | 'deselect' | 'putdown'; id: string };
   /**
    * The live terrain blocks (#123 phase 2) and walls (one per tile, row
    * major), as the room replicates them: after every accepted edit, and
@@ -239,6 +240,8 @@ export interface OfficeEventMap {
   decormove: { index: number };
   /** The trash button of the selected decor item was clicked: the item anchored there goes. */
   decordelete: { index: number };
+  /** A drag of the item anchored on `index` released where it was, or where it may not stand: it stays, selected. */
+  decorputdown: { index: number };
   /**
    * Turn the picked decor brush (`nextDecorRotation`): a chair or desk table
    * a quarter turn, `1` down, left, up, right, `-1` back; a room table

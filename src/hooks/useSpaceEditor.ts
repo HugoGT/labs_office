@@ -289,12 +289,20 @@ export function useSpaceEditor({
     () =>
       bridge.on('layoutaction', ({ action, id }) => {
         const current = stateRef.current;
+        if (action === 'putdown') {
+          // A drag that moved nothing: its move ends with the item selected where it is.
+          if (current.tag === 'placing' && current.mode === 'move' && current.id === id) {
+            cancelPlacing();
+            select(id);
+          }
+          return;
+        }
         if (current.tag !== 'selected' || current.id !== id) return;
         if (action === 'move') startMove();
         else if (action === 'delete') void remove();
         else deselect();
       }),
-    [bridge, startMove, remove, deselect],
+    [bridge, startMove, remove, deselect, cancelPlacing, select],
   );
 
   useEffect(() => {

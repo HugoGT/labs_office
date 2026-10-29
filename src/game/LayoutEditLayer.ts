@@ -15,7 +15,11 @@
  * trash buttons under it (`SelectionButtons`); a click on them reports
  * `layoutaction` instead of picking what lies under them, and a click on the
  * empty map lets the selection go. Like the decor editor, those act on the
- * release, so a drag of the view does nothing.
+ * release, so a drag of the view does nothing. A press held on a desk or
+ * room, or dragged, grabs it (`PressHold`): the layer asks to move it, the
+ * ghost follows the pointer by the tile it was grabbed by, and the release
+ * places it there, or puts it down selected where it was when it moved
+ * nowhere or cannot stand there.
  */
 
 import Phaser from 'phaser';
@@ -30,6 +34,7 @@ import {
 import { LAYOUT_GHOST_DEPTH } from './depthLayers';
 import { MAP_H, TILE } from './mapData';
 import type { OfficeBridge } from './officeBridge';
+import { PressHold } from './pressHold';
 import { SelectionButtons, type SelectionAction } from './selectionButtons';
 import { LAYOUT_OUTLINE_NAME, drawContextOutlines, drawOutline } from './spaceOutline';
 
@@ -43,6 +48,20 @@ const SELECTION_STROKE_WIDTH = 3;
 export const LAYOUT_SELECTION_NAME = 'layout-edit:selection';
 export const LAYOUT_MOVE_BUTTON_NAME = 'layout-edit:move';
 export const LAYOUT_DELETE_BUTTON_NAME = 'layout-edit:delete';
+
+export interface LayoutEditLayerOptions {
+  /** Clock for a held press; injectable so tests do not wait on real time. */
+  now?: () => number;
+}
+
+/** A desk or room under a press: how far its center is from the pointer, and where it stands. */
+interface Grab {
+  id: string;
+  shiftX: number;
+  shiftY: number;
+  x0: number;
+  y0: number;
+}
 
 /** Nombre Phaser del contorno pickable de un item, para volver a encontrarlo (mismo idioma que `deskZoneName`). */
 export function layoutPickName(id: string): string {
@@ -63,15 +82,27 @@ export class LayoutEditLayer {
   private pressPicked = false;
   /** What the release of the press now down does, decided on the press: the selection changes in between. */
   private pressAct: { id: string; action: SelectionAction | 'deselect' } | null = null;
+  /** The desk or room under the press now down, grabbed once held long enough or dragged. */
+  private readonly hold = new PressHold<Grab>();
+  /** The desk or room being dragged, until its release is resolved. */
+  private dragging: Grab | null = null;
+  /** Where the drag was released, kept until the move reaches the map. */
+  private drop: { worldX: number; worldY: number } | null = null;
+  private readonly now: () => number;
 
   private readonly unsubscribeCommand: () => void;
   private readonly onPointerMove = (pointer: Phaser.Input.Pointer): void => {
+    // A drag grabs at once.
+    if ((pointer.getDistance?.() ?? 0) > PAN_THRESHOLD_PX) this.grab(this.hold.take());
     this.updateGhost(pointer);
   };
   private readonly onPointerDown = (pointer: Phaser.Input.Pointer): void => {
     const picked = this.pressPicked;
     this.pressPicked = false;
     this.pressAct = null;
+    this.dragging = null;
+    this.drop = null;
+    if (!picked) this.hold.cancel();
     const shown = this.shownSelection;
     if (shown !== null && pointer.button === 0 && this.onMainCamera(pointer)) {
       const action = this.buttons.at(pointer);
@@ -81,6 +112,8 @@ export class LayoutEditLayer {
     this.confirmPlacement(pointer);
   };
   private readonly onPointerUp = (pointer: Phaser.Input.Pointer): void => {
+    this.hold.cancel();
+    if (this.dragging !== null && this.drop === null) this.drop = { worldX: pointer.worldX, worldY: pointer.worldY };
     const act = this.pressAct;
     this.pressAct = null;
     if (act === null || pointer.button !== 0) return;
@@ -90,12 +123,15 @@ export class LayoutEditLayer {
   };
   /** The buttons keep their screen size: a zoom step resizes them on the next frame. */
   private readonly onPostUpdate = (): void => {
+    this.grab(this.hold.due(this.now()));
+    this.resolveDrop();
     if (this.shownSelection !== null && this.scene.cameras.main.zoom !== this.buttons.zoom) this.drawSelection();
   };
 
-  constructor(scene: Phaser.Scene, bridge: OfficeBridge) {
+  constructor(scene: Phaser.Scene, bridge: OfficeBridge, options: LayoutEditLayerOptions = {}) {
     this.scene = scene;
     this.bridge = bridge;
+    this.now = options.now ?? (() => performance.now());
     this.buttons = new SelectionButtons(scene, { move: LAYOUT_MOVE_BUTTON_NAME, delete: LAYOUT_DELETE_BUTTON_NAME });
 
     this.unsubscribeCommand = bridge.onCommand('layoutedit', (command) => this.applyCommand(command));
@@ -154,6 +190,14 @@ export class LayoutEditLayer {
       if (this.shownSelection !== null && this.buttons.at(pointer) !== null) return;
       this.pressPicked = true;
       this.bridge.emit('layoutpick', { id: rect.id });
+      // A press that confirms a placement never turns into a move.
+      if (this.command?.placing == null && pointer.button === 0) {
+        const w = rect.x1 - rect.x0 + 1;
+        const h = rect.y1 - rect.y0 + 1;
+        const shiftX = (rect.x0 + w / 2) * TILE - pointer.worldX;
+        const shiftY = (rect.y0 + h / 2) * TILE - pointer.worldY;
+        this.hold.start({ id: rect.id, shiftX, shiftY, x0: rect.x0, y0: rect.y0 }, this.now());
+      }
     });
 
     this.pickableObjects.push(zone);
@@ -189,12 +233,38 @@ export class LayoutEditLayer {
     for (const object of this.pickableObjects.splice(0)) object.destroy();
   }
 
+  /** Starts the drag of what a press grabbed: React turns it into a move, like the move button. */
+  private grab(grabbed: Grab | null): void {
+    if (grabbed === null) return;
+    this.dragging = grabbed;
+    this.bridge.emit('layoutaction', { action: 'move', id: grabbed.id });
+  }
+
+  /** Once the move of the dragged item is on the map, its release places it, or puts it down where it was. */
+  private resolveDrop(): void {
+    const { dragging, drop } = this;
+    const placing = this.command?.placing;
+    if (dragging === null || drop === null || placing?.id !== dragging.id) return;
+    this.dragging = null;
+    this.drop = null;
+    const { tx, ty, valid } = this.placementAt(drop.worldX + dragging.shiftX, drop.worldY + dragging.shiftY);
+    if (valid && (tx !== dragging.x0 || ty !== dragging.y0)) this.bridge.emit('layoutplace', { tx, ty, valid });
+    else this.bridge.emit('layoutaction', { action: 'putdown', id: dragging.id });
+  }
+
+  /** Where the placement would stand with its center on (worldX, worldY), and whether it fits there. */
+  private placementAt(worldX: number, worldY: number): { tx: number; ty: number; valid: boolean } {
+    const { w, h, obstacles, snap } = this.command!.placing!;
+    const { tx, ty } = snap === 'block' ? snapToBlock(worldX, worldY) : snapToTile(worldX, worldY, w, h);
+    return { tx, ty, valid: isPlacementValid({ x: tx, y: ty, w, h }, obstacles) };
+  }
+
   private updateGhost(pointer: Phaser.Input.Pointer): void {
     if (!this.command?.placing || !this.ghost) return;
 
-    const { w, h, obstacles } = this.command.placing;
-    const { tx, ty } = this.command.placing.snap === 'block' ? snapToBlock(pointer.worldX, pointer.worldY) : snapToTile(pointer.worldX, pointer.worldY, w, h);
-    const valid = isPlacementValid({ x: tx, y: ty, w, h }, obstacles);
+    const { w, h } = this.command.placing;
+    // A dragged item follows the pointer by the tile it was grabbed by.
+    const { tx, ty, valid } = this.placementAt(pointer.worldX + (this.dragging?.shiftX ?? 0), pointer.worldY + (this.dragging?.shiftY ?? 0));
 
     this.ghost
       .setPosition(tx * TILE + (w * TILE) / 2, ty * TILE + (h * TILE) / 2)
@@ -205,10 +275,6 @@ export class LayoutEditLayer {
   private confirmPlacement(pointer: Phaser.Input.Pointer): void {
     if (!this.command?.placing) return;
 
-    const { w, h, obstacles } = this.command.placing;
-    const { tx, ty } = this.command.placing.snap === 'block' ? snapToBlock(pointer.worldX, pointer.worldY) : snapToTile(pointer.worldX, pointer.worldY, w, h);
-    const valid = isPlacementValid({ x: tx, y: ty, w, h }, obstacles);
-
-    this.bridge.emit('layoutplace', { tx, ty, valid });
+    this.bridge.emit('layoutplace', this.placementAt(pointer.worldX, pointer.worldY));
   }
 }

@@ -447,6 +447,22 @@ describe('useSpaceEditor: desks picked from the default view of "Editar espacios
     expect(view.result.current.state).toEqual({ tag: 'idle', kind: 'room' });
   });
 
+  it('putdown ends the move of that desk or room with it selected, and moves nothing', async () => {
+    const view = setupPicking();
+    await enterAndPickDesk(view);
+    act(() => view.bridge.emit('layoutaction', { action: 'move', id: 'id-mesa' }));
+
+    act(() => view.bridge.emit('layoutaction', { action: 'putdown', id: 'id-mesa' }));
+    expect(view.result.current.state).toEqual({ tag: 'selected', kind: 'room', id: 'id-mesa' });
+
+    act(() => view.bridge.emit('layoutpick', { id: 'id-sala' }));
+    act(() => view.bridge.emit('layoutaction', { action: 'move', id: 'id-sala' }));
+    act(() => view.bridge.emit('layoutaction', { action: 'putdown', id: 'id-sala' }));
+    expect(view.result.current.state).toEqual({ tag: 'selected', kind: 'room', id: 'id-sala' });
+    expect(view.desks.updateDesk).not.toHaveBeenCalled();
+    expect(view.spaces.updateSpace).not.toHaveBeenCalled();
+  });
+
   it('a pick on a room with a desk selected switches to the room, no Escape in between', async () => {
     const view = setupPicking();
     await enterAndPickDesk(view);

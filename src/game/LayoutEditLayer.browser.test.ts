@@ -12,6 +12,7 @@ import {
 import { MAP_H, TILE } from './mapData';
 import { SELECTION_BUTTON_PX, SELECTION_DELETE_COLOR } from './selectionButtons';
 import { createOfficeBridge } from './officeBridge';
+import { HOLD_TO_MOVE_MS } from './pressHold';
 
 /**
  * `LayoutEditLayer` dibuja overlays reales de Phaser (contornos pickable,
@@ -400,5 +401,120 @@ describe('LayoutEditLayer: the selected desk or room carries its move and trash 
     layer.destroy();
     expect(named(scene, LAYOUT_SELECTION_NAME)).toBeNull();
     expect(named(scene, LAYOUT_MOVE_BUTTON_NAME)).toBeNull();
+  });
+
+  describe('a press held on a desk or room drags it: the release puts it down', () => {
+    /** A press on what is under it, then the scene's press: no release yet. */
+    function pressAt(scene: Phaser.Scene, worldX: number, worldY: number): void {
+      const tx = Math.floor(worldX / TILE);
+      const ty = Math.floor(worldY / TILE);
+      const under = pickable.find((rect) => tx >= rect.x0 && tx <= rect.x1 && ty >= rect.y0 && ty <= rect.y1);
+      if (under !== undefined) findPickable(scene, under.id)!.emit('pointerdown', pointerAt(worldX, worldY));
+      scene.input.emit('pointerdown', pointerAt(worldX, worldY));
+    }
+
+    function frame(scene: Phaser.Scene): void {
+      scene.events.emit(Phaser.Scenes.Events.POST_UPDATE);
+    }
+
+    async function setupHold(selectedId: string | null = null) {
+      const scene = await bootHostScene();
+      const bridge = createOfficeBridge();
+      const clock = { now: 1000 };
+      new LayoutEditLayer(scene, bridge, { now: () => clock.now });
+      const seen = recorder(bridge);
+      bridge.on('layoutplace', (value) => seen.push(['place', value]));
+      bridge.emitCommand('layoutedit', { pickable, selectedId, placing: null });
+      /** What React answers to the move: the ghost of a 3x3 desk. */
+      const moving = (obstacles: { x0: number; y0: number; x1: number; y1: number }[] = []) =>
+        bridge.emitCommand('layoutedit', { pickable, selectedId: null, placing: { w: 3, h: 3, obstacles, id: 'desk-1' } });
+      return { scene, clock, seen, moving };
+    }
+
+    it('held HOLD_TO_MOVE_MS it grabs the desk; released where it was, it is put down selected and nothing moves', async () => {
+      const { scene, clock, seen, moving } = await setupHold();
+      const x = 3.5 * TILE;
+      const y = 3.5 * TILE;
+
+      pressAt(scene, x, y);
+      clock.now += HOLD_TO_MOVE_MS - 1;
+      frame(scene);
+      expect(seen).toEqual([['pick', { id: 'desk-1' }]]);
+
+      clock.now += 1;
+      frame(scene);
+      expect(seen.at(-1)).toEqual(['action', { action: 'move', id: 'desk-1' }]);
+      moving();
+      scene.input.emit('pointerup', pointerAt(x + 2, y));
+      frame(scene);
+      frame(scene);
+
+      expect(seen).toEqual([
+        ['pick', { id: 'desk-1' }],
+        ['action', { action: 'move', id: 'desk-1' }],
+        ['action', { action: 'putdown', id: 'desk-1' }],
+      ]);
+    });
+
+    it('dragged and released elsewhere it lands there, held by the tile it was grabbed by', async () => {
+      const { scene, clock, seen, moving } = await setupHold();
+
+      // Grabbed by its top-left tile.
+      pressAt(scene, 2.5 * TILE, 2.5 * TILE);
+      clock.now += HOLD_TO_MOVE_MS;
+      frame(scene);
+      moving();
+      scene.input.emit('pointermove', pointerAt(12.5 * TILE, 10.5 * TILE, 300));
+      scene.input.emit('pointerup', pointerAt(12.5 * TILE, 10.5 * TILE, 300));
+      frame(scene);
+
+      expect(seen.at(-1)).toEqual(['place', { tx: 12, ty: 10, valid: true }]);
+    });
+
+    it('a drag past the pan threshold grabs it at once, without waiting', async () => {
+      const { scene, seen } = await setupHold();
+
+      pressAt(scene, 3.5 * TILE, 3.5 * TILE);
+      scene.input.emit('pointermove', pointerAt(3.5 * TILE + 20, 3.5 * TILE, PAN_THRESHOLD_PX + 1));
+
+      expect(seen).toEqual([['pick', { id: 'desk-1' }], ['action', { action: 'move', id: 'desk-1' }]]);
+    });
+
+    it('a release before the move reaches the map waits for it; dropped where it does not fit, it is put down', async () => {
+      const { scene, clock, seen, moving } = await setupHold();
+
+      pressAt(scene, 3.5 * TILE, 3.5 * TILE);
+      clock.now += HOLD_TO_MOVE_MS;
+      frame(scene);
+      scene.input.emit('pointerup', pointerAt(12.5 * TILE, 10.5 * TILE, 300));
+      frame(scene);
+      expect(seen).toHaveLength(2);
+
+      moving([{ x0: 10, y0: 8, x1: 20, y1: 20 }]);
+      frame(scene);
+      expect(seen.at(-1)).toEqual(['action', { action: 'putdown', id: 'desk-1' }]);
+    });
+
+    it('released before HOLD_TO_MOVE_MS it stays a click; a press held on a button or the empty map grabs nothing', async () => {
+      const { scene, clock, seen } = await setupHold('desk-1');
+      const trash = named<Phaser.GameObjects.Rectangle>(scene, LAYOUT_DELETE_BUTTON_NAME)!;
+
+      pressAt(scene, 3.5 * TILE, 3.5 * TILE);
+      clock.now += HOLD_TO_MOVE_MS - 10;
+      scene.input.emit('pointerup', pointerAt(3.5 * TILE, 3.5 * TILE));
+      clock.now += HOLD_TO_MOVE_MS;
+      frame(scene);
+
+      pressAt(scene, trash.x, trash.y);
+      clock.now += HOLD_TO_MOVE_MS;
+      frame(scene);
+      scene.input.emit('pointerup', pointerAt(trash.x, trash.y));
+
+      pressAt(scene, 20 * TILE, 20 * TILE);
+      clock.now += HOLD_TO_MOVE_MS;
+      frame(scene);
+
+      expect(seen).toEqual([['pick', { id: 'desk-1' }], ['action', { action: 'delete', id: 'desk-1' }]]);
+    });
   });
 });
