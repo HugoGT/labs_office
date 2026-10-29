@@ -81,7 +81,14 @@ interface Grab {
 
 /** Nombre Phaser del contorno pickable de un item, para volver a encontrarlo (mismo idioma que `deskZoneName`). */
 export function layoutPickName(id: string): string {
-  return `layout-pick:${id}`;
+  return `${LAYOUT_PICK_PREFIX}${id}`;
+}
+
+const LAYOUT_PICK_PREFIX = 'layout-pick:';
+
+/** Whether a Phaser name is a pickable outline's: the scene lets a right click walk through them. */
+export function isLayoutPickName(name: string): boolean {
+  return name.startsWith(LAYOUT_PICK_PREFIX);
 }
 
 export class LayoutEditLayer {
@@ -203,6 +210,8 @@ export class LayoutEditLayer {
     const zone = drawOutline(this.scene, rect).setName(layoutPickName(rect.id)).setInteractive();
 
     zone.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      // A right click is the scene's, to walk: it neither picks nor confirms.
+      if (pointer.button === 2) return;
       // Mismo `stopPropagation` que el clic de un escritorio: sin el, el
       // `pointerdown` global de esta misma capa lo tomaria TAMBIEN como
       // confirmacion de colocacion.

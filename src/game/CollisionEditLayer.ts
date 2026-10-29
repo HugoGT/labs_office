@@ -181,7 +181,8 @@ export class CollisionEditLayer {
   }
 
   private pointerDown(pointer: Phaser.Input.Pointer): void {
-    if (this.command === null) return;
+    // A right click is the scene's, to walk: it never draws.
+    if (this.command === null || pointer.button === 2) return;
     const point = this.piecePoint(pointer);
     const grabbed = point === null ? null : this.grab(point);
     if (point !== null && grabbed !== null) {

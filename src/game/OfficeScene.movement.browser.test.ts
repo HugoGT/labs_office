@@ -282,6 +282,36 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect((scene as unknown as { mapHeld: boolean }).mapHeld).toBe(false);
   });
 
+  it.each([
+    ['a terrain brush', 'terrainedit', { brush: { kind: 'floor', material: 'grass' } }],
+    ['a picked decor piece', 'decoredit', { brush: { kind: 'piece', piece: 'chair-wood', info: { kind: 'chair', footprint: { w: 1, h: 1 } }, rotation: 0 }, area: null }],
+    ['a selected decor item', 'decoredit', { brush: null, area: null, selected: 4242 }],
+    ['a selected room', 'layoutedit', { pickable: [{ id: 'room-1', x0: 20, y0: 0, x1: 50, y1: 20 }], selectedId: 'room-1', placing: null }],
+  ] as const)('walks with a right click while %s holds the map, never with the keys or a double click', async (_, name, command) => {
+    const { scene, bridge, player, movement, frame, rightClick, doubleClick } = await movementArena();
+    bridge.emitCommand(name, command as never);
+    expect((scene as unknown as { mapHeld: boolean }).mapHeld).toBe(true);
+
+    doubleClick(1000, 300);
+    expect(movement.autoWalk).toBeUndefined();
+    movement.cursors.right.isDown = true;
+    const start = player.x;
+    frame();
+    expect(player.x).toBe(start);
+    movement.cursors.right.isDown = false;
+
+    // Through the outline Editar espacios draws to pick the room under the pointer.
+    const outline = scene.children.getByName('layout-pick:room-1');
+    rightClick(1000, 300, { over: outline === null ? [] : [outline] });
+    expect(movement.autoWalk?.goal).toEqual({ x: 1000, y: 300 });
+    frame();
+    // The editor saying the same again (a preview, a hover) must not stop the walk.
+    bridge.emitCommand(name, command as never);
+    frame();
+    expect(movement.autoWalk).toBeDefined();
+    expect(player.x).toBeGreaterThan(start);
+  });
+
   it('does not turn drags, item clicks, blocked goals or minimap clicks into walking', async () => {
     const { scene, movement, click, doubleClick } = await movementArena();
     doubleClick(1000, 300, { distance: 20 });

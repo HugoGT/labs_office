@@ -46,7 +46,7 @@ import { MinimapLayer } from './MinimapLayer';
 import { collisionEditHoldsMap, decorEditHidesRail, decorEditHoldsMap, layoutEditHoldsMap, terrainEditHoldsMap } from './editorMapHold';
 import { DecorEditLayer } from './DecorEditLayer';
 import { isEditableElementFocused } from './inputFocusGuard';
-import { LayoutEditLayer } from './LayoutEditLayer';
+import { isLayoutPickName, LayoutEditLayer } from './LayoutEditLayer';
 import { LAYOUT_OUTLINE_NAME } from './spaceOutline';
 import {
   BASE_MAP_CHAIR,
@@ -148,8 +148,6 @@ export const OFFICE_SCENE_KEY = 'office';
 const PLAYER_SPEED = 230;
 /** `Pointer.button` of the secondary (right) mouse button. */
 const RIGHT_BUTTON = 2;
-/** A walk starts from the primary button (double click) or the secondary one (single click). */
-const isWalkButton = (button: number): boolean => button === 0 || button === RIGHT_BUTTON;
 // Below both the 14px body height and Arcade's 4px overlap bias, even at the top speed.
 const WALK_STEP_PX = 3;
 const PROXIMITY_TICK_MS = 250;
@@ -523,13 +521,18 @@ export class OfficeScene extends Phaser.Scene {
    */
   private clickPair: ClickSample | null = null;
 
-  /** Recomputes both editing flags; the map becoming held stops any walk at once. */
+  /**
+   * Recomputes both editing flags; the map becoming held stops any walk at
+   * once. Only becoming held: a right click walks on a held map, and an
+   * editor repeating its command mid-walk must not stop it.
+   */
   private syncEditing(): void {
+    const wasHeld = this.mapHeld;
     this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing || this.decorEditing;
     this.mapHeld = this.layoutHolds || this.terrainHolds || this.collisionHolds || this.decorHolds;
     // A hidden camera takes no pointer, so the map under the minimap can be edited too.
     this.minimapCamera?.setVisible(!this.terrainHolds && !this.decorHidesRail);
-    if (this.mapHeld) this.resetWalking();
+    if (this.mapHeld && !wasHeld) this.resetWalking();
   }
 
   /**
@@ -2208,8 +2211,9 @@ export class OfficeScene extends Phaser.Scene {
         if (!currentlyOver || currentlyOver.length === 0) {
           if (!this.layoutEditing) this.bridge.emit('closemenu', undefined);
           // An open editor with nothing picked still walks: only a held map does not.
-          if (!this.mapHeld && isWalkButton(pointer.button) && pointer.camera === this.cameras.main) this.walkClick = pointer;
+          if (!this.mapHeld && pointer.button === 0 && pointer.camera === this.cameras.main) this.walkClick = pointer;
         }
+        if (this.rightWalks(pointer, currentlyOver)) this.walkClick = pointer;
       },
     );
     // The hover banner reads the pointer only once it really is on the map:
@@ -2225,7 +2229,8 @@ export class OfficeScene extends Phaser.Scene {
       this.clickPair = null;
     });
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
-      const eligible = pointer === this.walkClick && !this.mapHeld && this.localPositionReady && !over?.length &&
+      const free = pointer.button === RIGHT_BUTTON ? this.rightWalks(pointer, over) : !this.mapHeld && !over?.length;
+      const eligible = pointer === this.walkClick && free && this.localPositionReady &&
         pointer.camera === this.cameras.main && pointer.getDistance() <= PAN_THRESHOLD_PX &&
         Number.isFinite(pointer.worldX) && Number.isFinite(pointer.worldY) &&
         Number.isFinite(pointer.x) && Number.isFinite(pointer.y);
@@ -2246,6 +2251,17 @@ export class OfficeScene extends Phaser.Scene {
       this.clickPair = pending;
       if (fired) this.startWalk({ x: pointer.worldX, y: pointer.worldY });
     });
+  }
+
+  /**
+   * Whether a right click there walks. Unlike the double click, it does so
+   * while an editor holds the map, so the admin can move along while placing
+   * things; it walks through the outlines Editar espacios draws to pick, which
+   * cover most of the floor, but never through anything else, like a peer.
+   */
+  private rightWalks(pointer: Phaser.Input.Pointer, over: readonly Phaser.GameObjects.GameObject[] | undefined): boolean {
+    return pointer.button === RIGHT_BUTTON && pointer.camera === this.cameras.main &&
+      (over ?? []).every((object) => isLayoutPickName(object.name));
   }
 
   /** The same office data `checkEntry` waits for: the own position and, when asked, the served spaces. */
@@ -2469,7 +2485,8 @@ export class OfficeScene extends Phaser.Scene {
 
     const from = { x: this.player.x, y: this.player.y };
     const gap = this.lastWalkFrame === undefined ? delta : time - this.lastWalkFrame;
-    const interrupted = this.mapHeld || !this.localPositionReady || document.hidden || !Number.isFinite(delta) ||
+    // A held map is not an interruption: the keys move nothing above, and a right click walk goes on.
+    const interrupted = !this.localPositionReady || document.hidden || !Number.isFinite(delta) ||
       delta <= 0 || delta > MAX_WALK_FRAME_MS || !Number.isFinite(gap) || gap < 0 || gap > MAX_WALK_FRAME_MS;
     if (interrupted) this.resetWalking();
     this.lastWalkFrame = time;
