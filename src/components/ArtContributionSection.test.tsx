@@ -241,7 +241,9 @@ describe('ArtContributionSection (#122)', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Ver Lucía' }));
 
+    expect(screen.getByRole('dialog', { name: 'Lucía' })).toBeInTheDocument();
     expect(await screen.findByRole('img', { name: 'Lucía sentado' })).toBeInTheDocument();
+    expect(screen.getAllByRole('img', { name: /Lucía caminando/ })).toHaveLength(8);
     expect(port.fileDataUrl).toHaveBeenCalledWith('a.png');
     expect(port.fileDataUrl).toHaveBeenCalledWith('b.png');
   });

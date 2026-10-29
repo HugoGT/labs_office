@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useId, useState } from 'react';
-import { ArtPiecePreview } from './ArtPiecePreview';
-import { usePrivateArtImages } from '../hooks/usePrivateArtImages';
+import { ArtPieceViewer } from './ArtPieceViewer';
 import { describeAdminError } from '../dashboard/adminErrors';
 import { CONTRIBUTION_KINDS, type Contribution, type ContributionStatus } from '../dashboard/artContributionPort';
 import type { ArtReviewPort } from '../dashboard/artReviewPort';
@@ -42,7 +41,6 @@ interface RowProps {
 
 function ReviewRow({ contribution, read, busy, onApprove, onReject, onRetire }: RowProps) {
   const id = useId();
-  const images = usePrivateArtImages(read, contribution.files);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
   const { name, status } = contribution;
@@ -58,7 +56,9 @@ function ReviewRow({ contribution, read, busy, onApprove, onReject, onRetire }: 
         {status === 'rejected' && <span className={styles.label}>Motivo: {contribution.reviewNote}</span>}
         {contribution.retiredAt !== null && <span className={styles.label}>Retirada</span>}
       </div>
-      <ArtPiecePreview kind={contribution.kind} name={name} images={images} />
+      <div className={styles.actions}>
+        <ArtPieceViewer contribution={contribution} read={read} className={styles.button} />
+      </div>
       {status === 'pending' && !rejecting && (
         <div className={styles.actions}>
           <button type="button" className={styles.button} disabled={busy} aria-label={`Aprobar ${name}`} onClick={onApprove}>

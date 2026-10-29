@@ -11,8 +11,7 @@ import {
   type ContributionKind,
   type ContributionUsage,
 } from '../dashboard/artContributionPort';
-import { usePrivateArtImages } from '../hooks/usePrivateArtImages';
-import { ArtPiecePreview } from './ArtPiecePreview';
+import { ArtPieceViewer } from './ArtPieceViewer';
 import styles from './ArtContributionSection.module.css';
 
 /** Same limit as `MAX_NAME_LENGTH` in `server/src/assets/assetUploadRules.ts`. */
@@ -97,24 +96,13 @@ function stateOf(contribution: Contribution): string {
 }
 
 function ContributionRow({ contribution, read }: { contribution: Contribution; read: (path: string) => Promise<string> }) {
-  const [open, setOpen] = useState(false);
-  const images = usePrivateArtImages(read, open ? contribution.files : null);
   return (
     <li className={styles.row}>
       <div className={styles.rowHeader}>
         <span>{contribution.name}</span>
-        <button
-          type="button"
-          className={styles.button}
-          aria-expanded={open}
-          aria-label={`${open ? 'Ocultar' : 'Ver'} ${contribution.name}`}
-          onClick={() => setOpen((current) => !current)}
-        >
-          {open ? 'Ocultar' : 'Ver'}
-        </button>
+        <ArtPieceViewer contribution={contribution} read={read} className={styles.button} />
       </div>
       <span className={contribution.status === 'rejected' ? `${styles.state} ${styles.rejected}` : styles.state}>{stateOf(contribution)}</span>
-      {open && <ArtPiecePreview kind={contribution.kind} name={contribution.name} images={images} />}
     </li>
   );
 }
@@ -174,11 +162,11 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
       setFiles(({ [role]: _gone, ...rest }) => rest);
       return;
     }
+    // The first file names the piece, as soon as it is chosen; a name already
+    // there, typed or taken from a file, is never replaced.
+    setName((current) => (current === '' ? nameFromFile(file.name) : current));
     const dataUrl = await readDataUrl(file);
     setFiles((current) => ({ ...current, [role]: dataUrl }));
-    // The first file names the piece; a name already there, typed or taken from
-    // a file, is never replaced.
-    setName((current) => (current === '' ? nameFromFile(file.name) : current));
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {

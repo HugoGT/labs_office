@@ -1,0 +1,63 @@
+/* Same full-screen backdrop as the "Mi personaje" dialog (`CharacterCreator.module.css`): the
+   preview of a piece under review gets the whole screen, since its office mock is wide. */
+.screen {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0d1117;
+  color: #e5e7eb;
+  padding: 12px;
+  overflow: auto;
+}
+
+.screen:focus {
+  outline: none;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 100%;
+  max-height: 100%;
+  background: #111827f2;
+  border: 1px solid #2b3444;
+  border-radius: var(--radius-panel);
+  padding: 16px 20px;
+  box-shadow: 0 8px 30px #0009;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.close {
+  padding: 6px 12px;
+  border: 1px solid #2b3444;
+  border-radius: var(--radius-control);
+  background: #1f2937;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.close:hover {
+  background: #374151;
+}
+
+/* The mock is wider than a phone: it scrolls inside the card instead of the page. */
+.body {
+  overflow: auto;
+}
