@@ -457,6 +457,8 @@ export function terrainFloorPieceId(material: TerrainMaterial): string {
 
 /** Corner mask bits of a dual-grid cell, in reading order. */
 export const TERRAIN_CORNER_BITS = { nw: 1, ne: 2, sw: 4, se: 8 } as const;
+/** The corners in reading order: the order a split material lists its groups in. */
+const TERRAIN_CORNER_ORDER = ['nw', 'ne', 'sw', 'se'] as const;
 export const TERRAIN_MASKS = 16;
 /** One tileset row per motif tile: the terrain keeps the floor motif's 96px repeat. */
 export const TERRAIN_PHASES = MOTIF_TILES * MOTIF_TILES;
@@ -539,8 +541,9 @@ export const TERRAIN_TILESET: TerrainTilesetSpec = {
 
 /**
  * Terrain layers a map needs: a cell has four corners, so at most four
- * materials, plus the water bank over the lowest one; with a void corner, at
- * most three materials, the bank and the void cap.
+ * material tiles (a split material counts once per group, still one per
+ * corner at most), plus the water bank over the lowest one; with a void
+ * corner, at most three material tiles, the bank and the void cap.
  */
 export const TERRAIN_LAYER_COUNT = 5;
 /**
@@ -563,10 +566,15 @@ export interface TerrainCorners {
   readonly se: TerrainMaterial | null;
 }
 
+/** A group (a block color) per corner of a display cell, `null` for none. */
+export type TerrainCornerGroups = Readonly<Record<keyof TerrainCorners, string | null>>;
+
 /** A material over the corners in `mask`. */
 export interface TerrainMaterialTile {
   readonly material: TerrainMaterial;
   readonly mask: number;
+  /** The group of the corners it covers (a block color), set only where the caller grouped them. */
+  readonly group?: string;
 }
 
 /** The contact shadow of the built floors over water, outside the corners in `mask`. */
@@ -677,21 +685,31 @@ export function terrainVoidMask(corners: TerrainCorners): number {
  * onto any neighbor. Over water, a bank tile right above it puts that shadow
  * back on the built-floor corners: the higher materials then cover all of it
  * but what falls on the water, which keeps reading as sunk below the floors.
+ *
+ * `groups` says which group each corner belongs to (a block color, #259). A
+ * material whose own corners fall in several groups gets one tile per group,
+ * each over only its group's corners (and the higher ones, which cover it
+ * anyway), so a seam between two groups is the tile line, not a whole cell
+ * drawn for the first group. A `null` group is a group of its own.
  */
-export function terrainCellLayers(corners: TerrainCorners): TerrainLayerTile[] {
+export function terrainCellLayers(corners: TerrainCorners, groups?: TerrainCornerGroups): TerrainLayerTile[] {
   const rank = (material: TerrainMaterial | null): number => (material === null ? TERRAIN_MATERIALS.length : TERRAIN_MATERIALS.indexOf(material));
   const present = [...new Set([corners.nw, corners.ne, corners.sw, corners.se])]
     .filter((material): material is TerrainMaterial => material !== null)
     .sort((a, b) => rank(a) - rank(b));
-  const layers: TerrainLayerTile[] = present.map((material) => ({
-    material,
-    mask: terrainCornerMask({
-      nw: rank(corners.nw) >= rank(material),
-      ne: rank(corners.ne) >= rank(material),
-      sw: rank(corners.sw) >= rank(material),
-      se: rank(corners.se) >= rank(material),
-    }),
-  }));
+  const layers: TerrainLayerTile[] = present.flatMap((material): TerrainMaterialTile[] => {
+    const covers = (corner: keyof TerrainCorners): boolean => rank(corners[corner]) >= rank(material);
+    const wholeMask = terrainCornerMask({ nw: covers('nw'), ne: covers('ne'), sw: covers('sw'), se: covers('se') });
+    if (groups === undefined) return [{ material, mask: wholeMask }];
+    const own = TERRAIN_CORNER_ORDER.filter((corner) => corners[corner] === material);
+    const keys = [...new Set(own.map((corner) => groups[corner]))];
+    if (keys.length === 1 && keys[0] === null) return [{ material, mask: wholeMask }];
+    const higher = wholeMask & ~terrainCornerMask({ nw: own.includes('nw'), ne: own.includes('ne'), sw: own.includes('sw'), se: own.includes('se') });
+    return keys.map((key) => {
+      const mask = higher | terrainCornerMask({ nw: own.includes('nw') && groups.nw === key, ne: own.includes('ne') && groups.ne === key, sw: own.includes('sw') && groups.sw === key, se: own.includes('se') && groups.se === key });
+      return key === null ? { material, mask } : { material, mask, group: key };
+    });
+  });
   const built = terrainCornerMask({
     nw: isTerrainBuiltFloor(corners.nw),
     ne: isTerrainBuiltFloor(corners.ne),
@@ -716,7 +734,11 @@ export function terrainCellCorners(
   cx: number,
   cy: number,
 ): TerrainCorners {
-  const at = (tx: number, ty: number): TerrainMaterial | null => terrainAt(clamp(tx, 0, width - 1), clamp(ty, 0, height - 1));
+  return cornersOf(terrainAt, width, height, cx, cy);
+}
+
+function cornersOf<T>(valueAt: (tx: number, ty: number) => T, width: number, height: number, cx: number, cy: number): Record<keyof TerrainCorners, T> {
+  const at = (tx: number, ty: number): T => valueAt(clamp(tx, 0, width - 1), clamp(ty, 0, height - 1));
   return { nw: at(cx - 1, cy - 1), ne: at(cx, cy - 1), sw: at(cx - 1, cy), se: at(cx, cy) };
 }
 
@@ -729,26 +751,53 @@ export function terrainCellCorners(
  * cell has void corners and the layer an edge; built floors, square, only have variant 0.
  */
 export function terrainLayerData(width: number, height: number, terrainAt: (tx: number, ty: number) => TerrainMaterial | null): number[][][] {
-  const layers = Array.from({ length: TERRAIN_LAYER_COUNT }, () =>
-    Array.from({ length: height + 1 }, () => new Array<number>(width + 1).fill(-1)),
-  );
+  return terrainLayerCells(width, height, terrainAt).tiles;
+}
+
+/** The tile data of `terrainLayerData` and, in the same `[layer][cy][cx]` shape, the group of each material tile (`null` for the rest). */
+export interface TerrainLayerCells {
+  readonly tiles: number[][][];
+  readonly groups: (string | null)[][][];
+}
+
+/**
+ * `terrainLayerData` with the corners grouped by `groupAt` (`terrainCellLayers`):
+ * a cell between two groups of one material draws one tile per group.
+ */
+export function terrainLayerCells(
+  width: number,
+  height: number,
+  terrainAt: (tx: number, ty: number) => TerrainMaterial | null,
+  groupAt?: (material: TerrainMaterial, tx: number, ty: number) => string | null,
+): TerrainLayerCells {
+  const grid = <T>(empty: T): T[][][] => Array.from({ length: TERRAIN_LAYER_COUNT }, () => Array.from({ length: height + 1 }, () => new Array<T>(width + 1).fill(empty)));
+  const layers = grid(-1);
+  const groupLayers = grid<string | null>(null);
   for (let cy = 0; cy <= height; cy += 1) {
     for (let cx = 0; cx <= width; cx += 1) {
       const phase = terrainPhaseAt(cx, cy);
       const variant = terrainVariantAt(cx, cy);
       const corners = terrainCellCorners(terrainAt, width, height, cx, cy);
+      const groups =
+        groupAt === undefined
+          ? undefined
+          : cornersOf((tx, ty) => {
+              const material = terrainAt(tx, ty);
+              return material === null ? null : groupAt(material, tx, ty);
+            }, width, height, cx, cy);
       const voids = terrainVoidMask(corners);
       const materialIndex = (tile: TerrainMaterialTile): number => {
         if (isTerrainBuiltFloor(tile.material)) return terrainTileIndex(tile.material, tile.mask, phase);
         if (voids !== 0 && tile.mask !== 15) return terrainVoidEdgeIndex(tile.material, tile.mask, voids, phase);
         return terrainTileIndex(tile.material, tile.mask, phase, variant);
       };
-      terrainCellLayers(corners).forEach((tile, layer) => {
+      terrainCellLayers(corners, groups).forEach((tile, layer) => {
         layers[layer]![cy]![cx] = 'bank' in tile ? terrainBankIndex(tile.mask) : 'void' in tile ? terrainVoidCapIndex(tile.mask) : materialIndex(tile);
+        if ('material' in tile) groupLayers[layer]![cy]![cx] = tile.group ?? null;
       });
     }
   }
-  return layers;
+  return { tiles: layers, groups: groupLayers };
 }
 
 // --- Map props ---------------------------------------------------------------------------------
