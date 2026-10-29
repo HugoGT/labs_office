@@ -79,7 +79,7 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(body.velocity.length()).toBeCloseTo(690, 5);
   });
 
-  it('preserves the clock on direction changes and keyboard takeover, and resets 1 s after release and on arrival', async () => {
+  it('preserves the clock on direction changes and keyboard takeover, and resets 250 ms after release and on arrival', async () => {
     const { player, body, movement, frame, walk, doubleClick } = await movementArena();
     movement.cursors.right.isDown = true;
     walk(2100);
@@ -95,7 +95,7 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     frame();
     expect(body.velocity.x).toBeCloseTo(-460);
     movement.cursors.left.isDown = false;
-    walk(980);
+    walk(240);
     expect(movement.walkingMs).toBeGreaterThan(1500);
     frame();
     expect(movement.walkingMs).toBe(0);
@@ -109,7 +109,7 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(movement.walkingMs).toBe(0);
   });
 
-  it('keeps the speed for 1 s after a bump or a gap between keys, then drops back to 1x', async () => {
+  it('keeps the speed for 250 ms after a bump or a gap between keys, then drops back to 1x', async () => {
     const { body, movement, frame, walk } = await movementArena();
     movement.cursors.right.isDown = true;
     walk(3000);
@@ -121,19 +121,19 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     movement.cursors.down.isDown = true;
     frame();
     expect(body.velocity.y).toBeCloseTo(690, 5);
-    // A head-on bump holds the speed for under 1 s; sliding away resumes at 3x.
+    // A head-on bump holds the speed for under 250 ms; sliding away resumes at 3x.
     movement.collisionRects = [{ x: 0, y: body.bottom + 10, w: 10000, h: 1 }];
     movement.buildPieceColliders();
-    walk(900);
+    walk(200);
     expect(movement.walkingMs).toBe(3000);
     movement.cursors.down.isDown = false;
     movement.cursors.right.isDown = true;
     frame();
     expect(body.velocity.x).toBeCloseTo(690, 5);
-    // Blocked for a full second: back to normal speed.
+    // Blocked for 250 ms: back to normal speed.
     movement.cursors.right.isDown = false;
     movement.cursors.down.isDown = true;
-    walk(1000);
+    walk(260);
     expect(movement.walkingMs).toBe(0);
     movement.cursors.down.isDown = false;
     movement.cursors.right.isDown = true;
@@ -282,6 +282,53 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect((scene as unknown as { mapHeld: boolean }).mapHeld).toBe(false);
   });
 
+  it.each([
+    ['a terrain brush', 'terrainedit', { brush: { kind: 'floor', material: 'grass' } }],
+    ['a picked decor piece', 'decoredit', { brush: { kind: 'piece', piece: 'chair-wood', info: { kind: 'chair', footprint: { w: 1, h: 1 } }, rotation: 0 }, area: null }],
+    ['a selected decor item', 'decoredit', { brush: null, area: null, selected: 4242 }],
+    ['a selected room', 'layoutedit', { pickable: [{ id: 'room-1', x0: 20, y0: 0, x1: 50, y1: 20 }], selectedId: 'room-1', placing: null }],
+  ] as const)('walks with a right click while %s holds the map, never with the keys or a double click', async (_, name, command) => {
+    const { scene, bridge, player, movement, frame, rightClick, doubleClick } = await movementArena();
+    bridge.emitCommand(name, command as never);
+    expect((scene as unknown as { mapHeld: boolean }).mapHeld).toBe(true);
+
+    doubleClick(1000, 300);
+    expect(movement.autoWalk).toBeUndefined();
+    movement.cursors.right.isDown = true;
+    const start = player.x;
+    frame();
+    expect(player.x).toBe(start);
+    movement.cursors.right.isDown = false;
+
+    // Through the outline Editar espacios draws to pick the room under the pointer.
+    const outline = scene.children.getByName('layout-pick:room-1');
+    rightClick(1000, 300, { over: outline === null ? [] : [outline] });
+    expect(movement.autoWalk?.goal).toEqual({ x: 1000, y: 300 });
+    frame();
+    // The editor saying the same again (a preview, a hover) must not stop the walk.
+    bridge.emitCommand(name, command as never);
+    frame();
+    expect(movement.autoWalk).toBeDefined();
+    expect(player.x).toBeGreaterThan(start);
+  });
+
+  it('drags the view with the right button while an editor holds the map, without walking', async () => {
+    const { scene, bridge, movement, frame } = await movementArena();
+    bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'grass' } });
+    const main = scene.cameras.main;
+    frame();
+    const startScrollX = main.scrollX;
+
+    const pointer = { button: 2, camera: main, x: 300, y: 200, worldX: 1000, worldY: 300, distance: 0, getDistance() { return this.distance; } };
+    scene.input.emit('pointerdown', pointer, []);
+    Object.assign(pointer, { x: 200, distance: 100 });
+    scene.input.emit('pointermove', pointer);
+    scene.input.emit('pointerup', pointer, []);
+
+    expect(main.scrollX).toBeGreaterThan(startScrollX);
+    expect(movement.autoWalk).toBeUndefined();
+  });
+
   it('does not turn drags, item clicks, blocked goals or minimap clicks into walking', async () => {
     const { scene, movement, click, doubleClick } = await movementArena();
     doubleClick(1000, 300, { distance: 20 });
@@ -292,6 +339,28 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(movement.autoWalk).toBeUndefined();
     click(1000, 300);
     const pointer = { button: 0, camera: scene.cameras.cameras[1], x: 10, y: 10, getDistance: () => 0 };
+    scene.input.emit('pointerdown', pointer, []);
+    scene.input.emit('pointerup', pointer, []);
+    expect(movement.autoWalk).toBeUndefined();
+  });
+
+  it('walks to the world point under a single right click on the map, without the browser menu', async () => {
+    const { scene, movement, rightClick } = await movementArena();
+    rightClick(1000, 300);
+    expect(movement.autoWalk?.goal).toEqual({ x: 1000, y: 300 });
+
+    const menu = new MouseEvent('contextmenu', { cancelable: true, bubbles: true });
+    scene.game.canvas.dispatchEvent(menu);
+    expect(menu.defaultPrevented).toBe(true);
+  });
+
+  it('does not turn right drags, right clicks on an item or on the minimap into walking', async () => {
+    const { scene, movement, rightClick } = await movementArena();
+    rightClick(1000, 300, { distance: 20 });
+    expect(movement.autoWalk).toBeUndefined();
+    rightClick(1000, 300, { over: [scene.add.rectangle(0, 0, 1, 1)] });
+    expect(movement.autoWalk).toBeUndefined();
+    const pointer = { button: 2, camera: scene.cameras.cameras[1], x: 10, y: 10, getDistance: () => 0 };
     scene.input.emit('pointerdown', pointer, []);
     scene.input.emit('pointerup', pointer, []);
     expect(movement.autoWalk).toBeUndefined();
@@ -998,11 +1067,11 @@ describe('double click to walk (double-click-pathfinding, R1 and R2)', () => {
     });
   });
 
-  it('a non-primary button click clears the pair (R2)', async () => {
+  it('a middle button click clears the pair (R2)', async () => {
     const arena = await movementArena();
 
     expectNoPair(arena, () => {
-      const pointer = { button: 2, camera: arena.scene.cameras.main, x: 10, y: 10,
+      const pointer = { button: 1, camera: arena.scene.cameras.main, x: 10, y: 10,
         worldX: goal.x, worldY: goal.y, getDistance: () => 0 };
       arena.scene.input.emit('pointerdown', pointer, []);
       arena.scene.input.emit('pointerup', pointer, []);

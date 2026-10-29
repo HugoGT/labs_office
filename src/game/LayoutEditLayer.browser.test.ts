@@ -8,6 +8,7 @@ import {
   LAYOUT_MOVE_BUTTON_NAME,
   LAYOUT_REPLACED_NAME,
   LAYOUT_SELECTION_NAME,
+  isLayoutPickName,
   LayoutEditLayer,
   layoutPickName,
 } from './LayoutEditLayer';
@@ -139,6 +140,21 @@ describe('LayoutEditLayer: contorno pickable', () => {
     findPickable(scene, 'desk-1')!.emit('pointerdown', fakePointer());
 
     expect(picks).toEqual([{ id: 'desk-1' }]);
+  });
+
+  it('leaves a right click on a pickable rectangle to the scene, which walks with it', async () => {
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    new LayoutEditLayer(scene, bridge);
+    const picks: unknown[] = [];
+    bridge.on('layoutpick', (payload) => picks.push(payload));
+    bridge.emitCommand('layoutedit', { pickable: [{ id: 'desk-1', x0: 2, y0: 2, x1: 4, y1: 4 }], selectedId: null, placing: null });
+
+    const zone = findPickable(scene, 'desk-1')!;
+    expect(isLayoutPickName(zone.name)).toBe(true);
+    zone.emit('pointerdown', { ...fakePointer(), button: 2 });
+
+    expect(picks).toEqual([]);
   });
 });
 

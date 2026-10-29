@@ -251,6 +251,33 @@ describe('CameraPanLayer: guardas que impiden armar el pan', () => {
     }
   });
 
+  it('a right drag pans where `rightPans` allows it, even suspended or over an object; a middle drag never does', async () => {
+    const scene = await bootHostScene();
+    const cam = scene.cameras.main;
+    const over = [{} as Phaser.GameObjects.GameObject];
+    const rightPans = vi.fn(() => true);
+    new CameraPanLayer(layerOptions(scene, { isSuspended: () => true, rightPans }));
+
+    const startScrollX = cam.scrollX;
+    scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, button: 1, camera: cam }), []);
+    scene.input.emit('pointermove', fakePointer({ x: 200, y: 100, camera: cam }));
+    scene.input.emit('pointerup', fakePointer({ x: 200, y: 100, camera: cam }));
+    expect(cam.scrollX).toBe(startScrollX);
+
+    const down = fakePointer({ x: 300, y: 100, button: 2, camera: cam });
+    scene.input.emit('pointerdown', down, over);
+    expect(rightPans).toHaveBeenCalledWith(down, over);
+    scene.input.emit('pointermove', fakePointer({ x: 200, y: 100, camera: cam }));
+    expect(cam.scrollX).toBeGreaterThan(startScrollX);
+    scene.input.emit('pointerup', fakePointer({ x: 200, y: 100, camera: cam }));
+
+    rightPans.mockReturnValue(false);
+    const panned = cam.scrollX;
+    scene.input.emit('pointerdown', fakePointer({ x: 300, y: 100, button: 2, camera: cam }), []);
+    scene.input.emit('pointermove', fakePointer({ x: 200, y: 100, camera: cam }));
+    expect(cam.scrollX).toBe(panned);
+  });
+
   it('un down sobre la camara del minimapa no arma pan en la camara principal, y el minimapa nunca se toca', async () => {
     const scene = await bootHostScene();
     const cam = scene.cameras.main;

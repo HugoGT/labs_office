@@ -105,6 +105,16 @@ describe('CollisionEditLayer', () => {
     ]);
   });
 
+  it('leaves a right click to the scene, which walks with it: it neither picks nor draws', async () => {
+    const { scene, bridge, picks } = await boot();
+    bridge.emitCommand('collisionedit', { pieceId: null, draft: [], selectedRect: null, snap: 1 });
+
+    scene.input.emit('pointerdown', { ...pointer(80, 80), button: 2 });
+    scene.input.emit('pointerup', { ...pointer(80, 80, false), button: 2 });
+
+    expect(picks).toEqual([]);
+  });
+
   it('reaches the desk table under a chair with a second click on the same spot (#213)', async () => {
     const scene = await bootHostScene();
     const bridge = createOfficeBridge();

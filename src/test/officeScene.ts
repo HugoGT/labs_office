@@ -70,12 +70,15 @@ export async function movementArena(connector?: ReturnType<typeof fakeConnector>
     for (let left = milliseconds; left > 0; left -= 100) frame(20, Math.min(left, 100));
   };
   /** One press and release. `screenDx` moves it on screen only: the double-click distance is in screen px. */
-  const click = (x: number, y: number, distance = 0, over: Phaser.GameObjects.GameObject[] = [], screenDx = 0) => {
-    const pointer = { button: 0, camera: scene.cameras.main, x: 10 + screenDx, y: 10,
+  const click = (x: number, y: number, distance = 0, over: Phaser.GameObjects.GameObject[] = [], screenDx = 0, button = 0) => {
+    const pointer = { button, camera: scene.cameras.main, x: 10 + screenDx, y: 10,
       worldX: x, worldY: y, getDistance: () => distance };
     scene.input.emit('pointerdown', pointer, over);
     scene.input.emit('pointerup', pointer, over);
   };
+  /** One press and release of the right mouse button. */
+  const rightClick = (x: number, y: number, options: { distance?: number; over?: Phaser.GameObjects.GameObject[] } = {}) =>
+    click(x, y, options.distance, options.over, 0, 2);
   /**
    * Two clicks, the walk gesture. Both land on the same time and screen point unless `gapMs` (game clock,
    * advanced in real frames) or `screenDx` say otherwise. `distance`, `over` and `worldDx` shape the SECOND
@@ -89,7 +92,7 @@ export async function movementArena(connector?: ReturnType<typeof fakeConnector>
     wait(options.gapMs ?? 0);
     click(x + (options.worldDx ?? 0), y, options.distance, options.over, options.screenDx);
   };
-  return { scene, bridge, player, body, movement, frame, walk, wait, click, doubleClick };
+  return { scene, bridge, player, body, movement, frame, walk, wait, click, rightClick, doubleClick };
 }
 
 
