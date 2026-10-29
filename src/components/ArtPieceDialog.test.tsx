@@ -21,6 +21,16 @@ describe('ArtPieceDialog (#122)', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('can carry actions below its content', async () => {
+    render(
+      <ArtPieceDialog title="Lucía" onClose={() => undefined} actions={<button type="button">Aceptar y subir</button>}>
+        <p>contenido</p>
+      </ArtPieceDialog>,
+    );
+
+    expect(screen.getByRole('dialog')).toContainElement(screen.getByRole('button', { name: 'Aceptar y subir' }));
+  });
+
   it('takes the focus, and Escape only closes it: no key reaches the office behind', async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();

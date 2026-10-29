@@ -3,6 +3,8 @@ import { ART_IMAGE_SPECS, sheetSize, type ArtImageKind } from '../game/artContra
 import { describeAdminError } from '../dashboard/adminErrors';
 import { AdminError } from '../dashboard/adminPort';
 import { ART_UPLOAD_KINDS, type ArtUploadInput, type ArtUploadKind, type ArtUploadPort, type UploadedArt } from '../dashboard/artUploadPort';
+import { ArtOfficeMock } from './ArtOfficeMock';
+import { ArtPieceDialog } from './ArtPieceDialog';
 import styles from './ArtAdminSection.module.css';
 
 /**
@@ -104,6 +106,8 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
   const [defaultColor, setDefaultColor] = useState(DEFAULT_COLOR);
   /** Data URL per file role: the preview and, without its prefix, the upload. */
   const [files, setFiles] = useState<Record<string, string>>({});
+  /** The office mock of what was chosen is open: the piece is published when the admin accepts it there. */
+  const [previewing, setPreviewing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -133,8 +137,15 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
     setFiles((current) => ({ ...current, [role]: dataUrl }));
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+  function handleSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
+    if (!ready || busy) return;
+    setError(null);
+    setDone(null);
+    setPreviewing(true);
+  }
+
+  async function upload(): Promise<void> {
     if (!ready || busy) return;
     setBusy(true);
     setError(null);
@@ -158,6 +169,7 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
       setError(describeUploadError(uploadError, kind));
     } finally {
       setBusy(false);
+      setPreviewing(false);
     }
   }
 
@@ -168,7 +180,8 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
       </h3>
       <p className={styles.hint}>
         Como admin, lo que subes queda disponible para toda la oficina sin pasar por revisión. PNG de
-        8 bits con el tamaño exacto de su tipo, hasta 128 colores y 128 KB por archivo.
+        8 bits con el tamaño exacto de su tipo, hasta 128 colores y 128 KB por archivo. Antes de
+        subirlo ves cómo queda en una oficina de prueba y decides si lo aceptas.
       </p>
 
       {error !== null && (
@@ -182,7 +195,7 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
         </p>
       )}
 
-      <form className={styles.form} onSubmit={(event) => void handleSubmit(event)}>
+      <form className={styles.form} onSubmit={handleSubmit}>
         <div className={styles.field}>
           <label className={styles.label} htmlFor={`${id}-kind`}>
             Tipo
@@ -293,6 +306,27 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
           {busy ? 'Subiendo…' : 'Subir'}
         </button>
       </form>
+
+      {previewing && (
+        <ArtPieceDialog
+          title={name.trim()}
+          onClose={() => {
+            if (!busy) setPreviewing(false);
+          }}
+          actions={
+            <>
+              <button type="button" className={styles.button} disabled={busy} onClick={() => void upload()}>
+                {busy ? 'Subiendo…' : 'Aceptar y subir'}
+              </button>
+              <button type="button" className={styles.button} disabled={busy} onClick={() => setPreviewing(false)}>
+                Cancelar
+              </button>
+            </>
+          }
+        >
+          <ArtOfficeMock kind={kind} name={name.trim()} images={files} />
+        </ArtPieceDialog>
+      )}
     </section>
   );
 }

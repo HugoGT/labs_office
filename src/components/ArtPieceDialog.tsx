@@ -6,6 +6,8 @@ export interface ArtPieceDialogProps {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  /** Buttons below the content, to decide something about what it shows. */
+  actions?: ReactNode;
 }
 
 /**
@@ -14,7 +16,7 @@ export interface ArtPieceDialogProps {
  * reaches `window`, where the office listens (the arrow keys walk the avatar,
  * the sidebar closes on Escape). Escape only closes the dialog.
  */
-export function ArtPieceDialog({ title, onClose, children }: ArtPieceDialogProps) {
+export function ArtPieceDialog({ title, onClose, children, actions }: ArtPieceDialogProps) {
   const titleId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -42,6 +44,7 @@ export function ArtPieceDialog({ title, onClose, children }: ArtPieceDialogProps
           </button>
         </div>
         <div className={styles.body}>{children}</div>
+        {actions !== undefined && <div className={styles.actions}>{actions}</div>}
       </div>
     </div>
   );

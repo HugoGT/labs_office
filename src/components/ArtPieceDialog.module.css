@@ -61,3 +61,9 @@
 .body {
   overflow: auto;
 }
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

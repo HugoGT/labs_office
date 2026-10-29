@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { AdminError } from '../dashboard/adminPort';
@@ -27,6 +27,12 @@ async function fillPlant(user: ReturnType<typeof userEvent.setup>): Promise<void
   await user.upload(screen.getByLabelText(/Hoja/), png('helecho.png'));
 }
 
+/** "Subir" shows the office mock first; the piece is published when the admin accepts it there. */
+async function submitAndAccept(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(screen.getByRole('button', { name: 'Subir' }));
+  await user.click(await screen.findByRole('button', { name: 'Aceptar y subir' }));
+}
+
 describe('ArtUploadSection (#121)', () => {
   it('asks a character for its two sheets, each with the exact size the contract wants', () => {
     render(<ArtUploadSection uploads={fakePort()} />);
@@ -51,13 +57,54 @@ describe('ArtUploadSection (#121)', () => {
     expect(preview.getAttribute('src')).toBe(`data:image/png;base64,${PNG_BASE64}`);
   });
 
-  it('uploads the files in base64 with the metadata and says the piece is in the catalog', async () => {
+  it('"Subir" opens the office mock of what was chosen, from the local files, and publishes nothing yet', async () => {
     const user = userEvent.setup();
     const uploads = fakePort();
     render(<ArtUploadSection uploads={uploads} />);
 
     await fillPlant(user);
     await user.click(screen.getByRole('button', { name: 'Subir' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Helecho' });
+    expect(within(dialog).getByRole('group', { name: 'Helecho en la oficina' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('img', { name: 'Helecho' }).style.backgroundImage).toContain(`data:image/png;base64,${PNG_BASE64}`);
+    expect(uploads.upload).not.toHaveBeenCalled();
+  });
+
+  it('"Cancelar" goes back to the form with everything as it was, and publishes nothing', async () => {
+    const user = userEvent.setup();
+    const uploads = fakePort();
+    render(<ArtUploadSection uploads={uploads} />);
+
+    await fillPlant(user);
+    await user.click(screen.getByRole('button', { name: 'Subir' }));
+    await user.click(await screen.findByRole('button', { name: 'Cancelar' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Helecho');
+    expect(screen.getByRole('button', { name: 'Subir' })).toBeEnabled();
+    expect(uploads.upload).not.toHaveBeenCalled();
+  });
+
+  it('accepting closes the mock, empties the form and says the piece is in the catalog', async () => {
+    const user = userEvent.setup();
+    render(<ArtUploadSection uploads={fakePort()} />);
+
+    await fillPlant(user);
+    await submitAndAccept(user);
+
+    expect(await screen.findByRole('status')).toHaveTextContent('«Helecho» ya está en el catálogo');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Nombre')).toHaveValue('');
+  });
+
+  it('uploads the files in base64 with the metadata and says the piece is in the catalog', async () => {
+    const user = userEvent.setup();
+    const uploads = fakePort();
+    render(<ArtUploadSection uploads={uploads} />);
+
+    await fillPlant(user);
+    await submitAndAccept(user);
 
     await waitFor(() =>
       expect(uploads.upload).toHaveBeenCalledWith({
@@ -84,7 +131,7 @@ describe('ArtUploadSection (#121)', () => {
     await user.type(screen.getByLabelText('Material'), 'baldosa');
     await user.click(screen.getByLabelText('Admite color'));
     await user.upload(screen.getByLabelText(/Hoja/), png('baldosa.png'));
-    await user.click(screen.getByRole('button', { name: 'Subir' }));
+    await submitAndAccept(user);
 
     await waitFor(() => expect(uploads.upload).toHaveBeenCalledWith(expect.objectContaining({ kind: 'floor', colorable: true, defaultColor: '#808080' })));
   });
@@ -95,7 +142,7 @@ describe('ArtUploadSection (#121)', () => {
     render(<ArtUploadSection uploads={uploads} />);
 
     await fillPlant(user);
-    await user.click(screen.getByRole('button', { name: 'Subir' }));
+    await submitAndAccept(user);
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Hoja');
