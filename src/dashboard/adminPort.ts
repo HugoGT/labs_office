@@ -165,6 +165,12 @@ export type AdminErrorCode =
   /** A decor edit would leave a desk with more than three chairs (`deskDecorRules.ts`). */
   | 'desk-chair-limit'
   /**
+   * A moved desk or room carries its walls and decor, and they would not fit
+   * where it lands (another item, unwalkable ground, a desk). Shared by both
+   * routes: it is fixed the same way, by another spot.
+   */
+  | 'contents-blocked'
+  /**
    * Dos salas pisandose (#10 + #12, S3a). Es su propio codigo y no
    * `desk-overlap` reciclado porque las dos filas con las que puede chocar
    * una sala son de otra naturaleza -- ver `spacesRoutes.ts`.

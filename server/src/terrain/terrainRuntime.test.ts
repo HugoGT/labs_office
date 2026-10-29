@@ -136,6 +136,7 @@ describe('createTerrainRuntime', () => {
       saveWalls: async () => { throw new Error('connection lost'); },
       loadDecor: async () => [],
       saveDecor: async () => { throw new Error('connection lost'); },
+      saveWallsAndDecor: async () => { throw new Error('connection lost'); },
     };
     const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
     await runtime.load();
@@ -1140,5 +1141,138 @@ describe('createTerrainRuntime doors (#223, #233)', () => {
     await runtime.setBlock({ index: LAWN, material: 'sand', actorId: null }, NONE);
     expect(runtime.snapshot().openings).toEqual([...edges([66, 67]), ...edges([72, 73, 74])]);
     expect(passes(runtime, ...through(66))).toBe(true);
+  });
+});
+
+/**
+ * Moving a desk or a room carries what stands in it: the painted posts on or
+ * inside its outline, the items inside it and the doors on its walls. The
+ * terrain stays.
+ */
+describe('createTerrainRuntime carry', () => {
+  const W = BASE_LAYOUT.width;
+  const at = (tx: number, ty: number) => ty * W + tx;
+  const CATALOG = [
+    { id: 'chair-wood', kind: 'chair', retired: false },
+    { id: 'door-wood', kind: 'door', retired: false, footprint: { w: 2, h: 1 } },
+  ];
+  /** A closed room of tiles 65..68 x 22..25 (posts on the vertices 65..69 x 22..26), the top-right corner glass. */
+  const ROOM = { x: 65, y: 22, w: 4, h: 4 };
+  const WALL: [number, 'wall-brick' | 'wall-glass'][] = [];
+  for (let tx = 65; tx <= 69; tx += 1) WALL.push([at(tx, 22), tx === 69 ? 'wall-glass' : 'wall-brick'], [at(tx, 26), 'wall-brick']);
+  for (let ty = 23; ty <= 25; ty += 1) WALL.push([at(65, ty), 'wall-brick'], [at(69, ty), 'wall-brick']);
+  const CHAIR = { index: at(66, 23), piece: 'chair-wood', rotation: 90 } as const;
+  const DOOR = { index: at(66, 22), piece: 'door-wood', rotation: 0 } as const;
+  /** Outside the room: it stays. */
+  const OUTSIDE = { index: at(71, 23), piece: 'chair-wood', rotation: 0 } as const;
+  const runtimeWith = (store = createMemoryTerrain([], WALL, [CHAIR, DOOR, OUTSIDE])) =>
+    createTerrainRuntime({ layout: BASE_LAYOUT, store, seats: BASE_MAP_SEATS, decorPieces: async () => CATALOG });
+  /** Eight rows up: tiles 65..68 x 14..17, free lawn. */
+  const UP = { from: ROOM, dx: 0, dy: -8 };
+
+  it('carries the walls, the items and the doors of the area, saving them once and telling every subscriber once', async () => {
+    const store = createMemoryTerrain([], WALL, [CHAIR, DOOR, OUTSIDE]);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+    const listener = vi.fn();
+    runtime.subscribe(listener);
+    const write = vi.fn(async () => 'moved');
+
+    await expect(runtime.carry(async () => UP, 'admin-1', NONE, write)).resolves.toBe('moved');
+
+    const moved = (index: number) => index - 8 * W;
+    for (const [index, piece] of WALL) {
+      expect(runtime.walls()[index]).toBeNull();
+      expect(runtime.walls()[moved(index)]).toBe(piece);
+    }
+    expect(runtime.decor()).toEqual([
+      { ...DOOR, index: moved(DOOR.index) },
+      { ...CHAIR, index: moved(CHAIR.index) },
+      OUTSIDE,
+    ]);
+    expect(await store.loadWalls()).toEqual(new Map(WALL.map(([index, piece]) => [moved(index), piece])));
+    expect(await store.loadDecor()).toEqual(runtime.decor());
+    expect(store.decorActorOf(moved(CHAIR.index))).toBe('admin-1');
+    expect(store.wallActorOf(moved(at(65, 22)))).toBe('admin-1');
+    // The door opens its wall where it now stands.
+    expect(runtime.snapshot().openings).toEqual([{ col: 66, row: 14, axis: 'horizontal' }, { col: 67, row: 14, axis: 'horizontal' }]);
+    expect(listener).toHaveBeenCalledOnce();
+    // The write sees the layer the move leaves, before it is saved.
+    expect(write).toHaveBeenCalledExactlyOnceWith({ width: W, walls: runtime.walls(), decor: runtime.decor() });
+  });
+
+  it('saves nothing when the write finds nothing to move or fails', async () => {
+    const store = createMemoryTerrain([], WALL, [CHAIR, DOOR, OUTSIDE]);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+    const listener = vi.fn();
+    runtime.subscribe(listener);
+    const walls = runtime.walls();
+    const decor = runtime.decor();
+
+    await expect(runtime.carry(async () => UP, null, NONE, async () => null)).resolves.toBeNull();
+    await expect(runtime.carry(async () => UP, null, NONE, async () => { throw new Error('overlap'); })).rejects.toThrow('overlap');
+
+    expect(runtime.walls()).toBe(walls);
+    expect(runtime.decor()).toBe(decor);
+    expect(await store.loadWalls()).toEqual(new Map(WALL));
+    expect(await store.loadDecor()).toEqual(decor);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('refuses a move whose contents would land on another item or off the map, before writing', async () => {
+    const blocker = { index: CHAIR.index - 8 * W, piece: 'chair-wood', rotation: 0 } as const;
+    const store = createMemoryTerrain([], WALL, [CHAIR, DOOR, OUTSIDE, blocker]);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+    const write = vi.fn(async () => 'moved');
+
+    await expect(runtime.carry(async () => UP, null, NONE, write)).rejects.toThrow(TerrainProtectedError);
+    await expect(runtime.carry(async () => ({ from: ROOM, dx: 0, dy: -30 }), null, NONE, write)).rejects.toThrow(TerrainProtectedError);
+
+    expect(write).not.toHaveBeenCalled();
+    expect(runtime.decor()).toContainEqual(blocker);
+    expect(await store.loadWalls()).toEqual(new Map(WALL));
+  });
+
+  it('refuses walls that would land on a desk, reading the protections only to carry walls', async () => {
+    const runtime = runtimeWith();
+    await runtime.load();
+    const protections = vi.fn(async (): Promise<TerrainProtections> => ({ placements: [], players: [], desks: [{ x: 66, y: 12, w: 3, h: 3 }] }));
+
+    await expect(runtime.carry(async () => UP, null, protections, async () => 'moved')).rejects.toThrow(TerrainProtectedError);
+    expect(protections).toHaveBeenCalledOnce();
+
+    // A desk area holds no wall: its decor goes without asking.
+    protections.mockClear();
+    await runtime.carry(async () => ({ from: { x: 66, y: 23, w: 1, h: 1 }, dx: 0, dy: -8 }), null, protections, async () => 'moved');
+    expect(protections).not.toHaveBeenCalled();
+    expect(runtime.decor()).toContainEqual({ ...CHAIR, index: CHAIR.index - 8 * W });
+  });
+
+  it('leaves the posts the layout itself draws: removing one could not be stored', async () => {
+    const runtime = runtimeWith();
+    await runtime.load();
+    const walls = runtime.walls();
+    // The layout's plaster wall runs along row 3.
+    expect(walls[at(55, 3)]).toBe('wall-plaster');
+
+    await expect(runtime.carry(async () => ({ from: { x: 55, y: 2, w: 2, h: 2 }, dx: 0, dy: 10 }), null, NONE, async () => 'moved')).resolves.toBe('moved');
+
+    expect(runtime.walls()).toBe(walls);
+  });
+
+  it('just writes when there is nothing to carry or nowhere to carry it, without a store too', async () => {
+    const runtime = runtimeWith();
+    await runtime.load();
+    const write = vi.fn(async () => 'moved');
+
+    await expect(runtime.carry(async () => null, null, NONE, write)).resolves.toBe('moved');
+    await expect(runtime.carry(async () => ({ from: { x: 75, y: 12, w: 3, h: 3 }, dx: 1, dy: 0 }), null, NONE, write)).resolves.toBe('moved');
+    const bare = createTerrainRuntime({ layout: BASE_LAYOUT });
+    await expect(bare.carry(async () => UP, null, NONE, write)).resolves.toBe('moved');
+
+    expect(write).toHaveBeenCalledTimes(3);
+    expect(write).toHaveBeenCalledWith({ width: W, walls: runtime.walls(), decor: runtime.decor() });
   });
 });

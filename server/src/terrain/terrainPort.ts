@@ -56,4 +56,6 @@ export interface TerrainStore {
   loadDecor(): Promise<readonly DecorItem[]>;
   /** Places, turns or replaces (`item`) or removes (`null`) decor items; all rows succeed or none do. */
   saveDecor(edits: readonly DecorEdit[], actorId: string | null): Promise<void>;
+  /** Saves walls like `saveWalls` and decor like `saveDecor` together (a desk or room moved with its contents); all rows succeed or none do. */
+  saveWallsAndDecor(walls: readonly WallEdit[], decor: readonly DecorEdit[], actorId: string | null): Promise<void>;
 }

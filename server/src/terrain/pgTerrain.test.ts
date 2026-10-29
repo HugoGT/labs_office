@@ -199,4 +199,30 @@ describe('pgTerrain', () => {
       'user-1',
     ]);
   });
+
+  it('saves walls and decor of a carried area in one statement, removals and placements of both tables together', async () => {
+    const pool = fakePool();
+
+    await createPgTerrain(pool).saveWallsAndDecor(
+      [{ index: 3, piece: null }, { index: 7, piece: 'wall-glass' }],
+      [{ index: 4, item: null }, { index: 8, item: { piece: 'desk-painted', rotation: 90, color: '#c83c3c' } }],
+      'user-1',
+    );
+
+    expect(pool.queries).toHaveLength(1);
+    const sql = squash(pool.queries[0]!.text);
+    expect(sql).toContain('delete from terrain_walls where tile_index in (select index from wall_entries where piece is null)');
+    expect(sql).toContain('insert into terrain_walls (tile_index, piece_id, updated_by) select index, piece, $3::uuid from wall_entries where piece is not null');
+    expect(sql).toContain('on conflict (tile_index) do update set piece_id = excluded.piece_id, updated_by = excluded.updated_by, updated_at = now()');
+    expect(sql).toContain('delete from office_decor where tile_index in (select index from decor_entries where piece is null)');
+    expect(sql).toContain('insert into office_decor (tile_index, piece_id, rotation, color, updated_by) select index, piece, rotation, color, $3::uuid from decor_entries where piece is not null');
+    expect(pool.queries[0]!.values).toEqual([
+      JSON.stringify([{ index: 3, piece: null }, { index: 7, piece: 'wall-glass' }]),
+      JSON.stringify([
+        { index: 4, piece: null, rotation: null, color: null },
+        { index: 8, piece: 'desk-painted', rotation: 90, color: '#c83c3c' },
+      ]),
+      'user-1',
+    ]);
+  });
 });

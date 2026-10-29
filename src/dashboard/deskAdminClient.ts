@@ -118,7 +118,8 @@ export function createDeskAdminClient(
       // pared pintada) and `desk-between-tables` (two desk tables of the
       // decor layer); any other decor never refuses a desk (#208). `desk-taken` no esta en la lista -- lo provoca alguien
       // cogiendo sitio desde la oficina, no el panel, y esta ruta no puede darlo.
-      conflicts: ['desk-overlap', 'desk-space-overlap', 'desk-on-wall', 'desk-between-tables'],
+      // `contents-blocked`: a moved desk's decor would not fit where it lands.
+      conflicts: ['desk-overlap', 'desk-space-overlap', 'desk-on-wall', 'desk-between-tables', 'contents-blocked'],
     },
     fetchImpl,
   );

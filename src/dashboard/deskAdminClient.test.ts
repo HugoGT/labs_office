@@ -196,6 +196,12 @@ describe('createDeskAdminClient: como cuenta los fallos', () => {
     expect(await codeOf(client.updateDesk('desk-1', { x: 6, y: 9 }))).toBe('desk-between-tables');
   });
 
+  it('a moved desk whose decor would not fit where it lands is its own 409', async () => {
+    const client = clientWith(fetchWith(409, { error: 'contents-blocked' }));
+
+    expect(await codeOf(client.updateDesk('desk-1', { x: 6, y: 9 }))).toBe('contents-blocked');
+  });
+
   it('a desk over decor is never refused since #208: an older server\'s desk-on-chair reads as the first conflict', async () => {
     const client = clientWith(fetchWith(409, { error: 'desk-on-chair' }));
 

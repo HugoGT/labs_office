@@ -14,6 +14,7 @@ const CODES: AdminErrorCode[] = [
   'desk-on-wall',
   'desk-between-tables',
   'desk-chair-limit',
+  'contents-blocked',
   'space-overlap',
   'space-name-taken',
   'space-owned-by-desk',
@@ -136,6 +137,12 @@ describe('describeAdminError', () => {
       'No se puede poner un escritorio entre dos mesas de escritorio: elige otra posición.',
     );
     expect(describeAdminError(new AdminError('desk-chair-limit'))).toBe('Un escritorio admite como máximo 3 sillas.');
+  });
+
+  it('a desk or room whose contents do not fit where it lands names what stands in the way', () => {
+    expect(describeAdminError(new AdminError('contents-blocked'))).toBe(
+      'Lo que hay dentro (decoración o paredes) no cabe ahí: chocaría con otra pieza, el terreno o un escritorio. Elige otro sitio.',
+    );
   });
 
   it('cada "no configurado" nombra la pieza que falta en el despliegue', () => {

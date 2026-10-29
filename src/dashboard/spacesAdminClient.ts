@@ -97,7 +97,8 @@ export function createSpacesAdminClient(
       // `space-overlap` (otra sala), `space-name-taken` (nombre repetido) y
       // `space-owned-by-desk` (el id es en realidad un cubiculo). No incluye
       // `desk-space-overlap` -- lo provoca el panel de escritorios, no este.
-      conflicts: ['space-overlap', 'space-name-taken', 'space-owned-by-desk'],
+      // `contents-blocked`: a moved room's walls or decor would not fit where it lands.
+      conflicts: ['space-overlap', 'space-name-taken', 'space-owned-by-desk', 'contents-blocked'],
     },
     fetchImpl,
   );

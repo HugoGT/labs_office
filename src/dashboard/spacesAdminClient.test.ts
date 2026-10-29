@@ -234,6 +234,12 @@ describe('createSpacesAdminClient: como cuenta los fallos', () => {
     );
   });
 
+  it('a moved room whose walls or decor would not fit where it lands is its own 409', async () => {
+    const client = clientWith(fetchWith(409, { error: 'contents-blocked' }));
+
+    expect(await codeOf(client.updateSpace('space-2', { x: 10, y: 4, w: 6, h: 5 }))).toBe('contents-blocked');
+  });
+
   it('un 409 cuyo cuerpo trae un motivo que esta ruta no declara cae al primero de la lista', async () => {
     const client = clientWith(fetchWith(409, { error: 'desk-space-overlap' }));
 

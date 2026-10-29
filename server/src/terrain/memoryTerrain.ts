@@ -75,6 +75,17 @@ export function createMemoryTerrain(
         else decorActors.set(index, actorId);
       }
     },
+    async saveWallsAndDecor(wallEdits, decorEdits, actorId) {
+      for (const { index, piece } of wallEdits) {
+        walls.delete(index);
+        if (piece !== null) walls.set(index, { piece, actorId });
+      }
+      decor = withDecor(decor, decorEdits);
+      for (const { index, item } of decorEdits) {
+        if (item === null) decorActors.delete(index);
+        else decorActors.set(index, actorId);
+      }
+    },
     decorActorOf(index) {
       return decorActors.get(index);
     },

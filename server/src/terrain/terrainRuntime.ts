@@ -50,6 +50,7 @@ import {
   type TerrainColors,
   type TerrainSnapshot,
   type WallEdit,
+  type WallPieceId,
 } from '../../../src/game/officeLayout.ts';
 import { BASE_MAP_SEATS, type MapSeat } from '../../../src/game/seating.ts';
 import {
@@ -66,7 +67,7 @@ import {
   type DecorTileRect,
 } from '../../../src/game/officeDecor.ts';
 import { deskOverChairLimit, displacedDeskTables } from '../../../src/game/deskDecorRules.ts';
-import { doorOpenings, doorPostSet, doorShoulders, isDoorPiece, wallsUnderLeftDoors } from '../../../src/game/officeDoors.ts';
+import { doorOpenings, doorPosts, doorPostSet, doorShoulders, isDoorPiece, wallsUnderLeftDoors } from '../../../src/game/officeDoors.ts';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
 import type { TerrainStore } from './terrainPort.ts';
 import {
@@ -90,6 +91,20 @@ import {
  * new terrain.
  */
 export type TerrainListener = (blocks: readonly LayoutMaterial[]) => void;
+
+/** A desk or room moved whole: its area in tiles before the move, and how far it goes. */
+export interface AreaMove {
+  readonly from: DecorTileRect;
+  readonly dx: number;
+  readonly dy: number;
+}
+
+/** The walls and decor as a carry leaves them, what its write checks the moved desk against. */
+export interface CarriedLayer {
+  readonly width: number;
+  readonly walls: readonly (string | null)[];
+  readonly decor: readonly DecorItem[];
+}
 
 export interface TerrainRuntime {
   /** Reads the persisted blocks. Called once, after the schema is applied. */
@@ -154,6 +169,25 @@ export interface TerrainRuntime {
    * wall lands between its wall check and its save. Works without a store.
    */
   runExclusive<T>(task: (snapshot: TerrainSnapshot) => Promise<T>): Promise<T>;
+  /**
+   * Moves a desk or room with what stands in it, so reorganizing the office
+   * loses no one's decor: the painted posts on or inside the outline of the
+   * area `locate` names (a room's walls stand on it), the items wholly inside
+   * it and the doors on those posts, all shifted by the move. The terrain
+   * stays. In the edit queue: `locate` reads the area, the contents are
+   * checked where they land (`TerrainProtectedError` when an item would
+   * stand on unwalkable ground, a wall, a static tile, another item or off
+   * the map, or a post on a desk, a static tile or an item that stays), then
+   * `write` saves the desk or room with the layer the move leaves, and only
+   * if it returns something are the walls and decor saved, in one statement.
+   * `locate` returning `null`, or nothing in the area, just runs `write`.
+   */
+  carry<T>(
+    locate: () => Promise<AreaMove | null>,
+    actorId: string | null,
+    protections: () => Promise<TerrainProtections>,
+    write: (layer: CarriedLayer) => Promise<T | null>,
+  ): Promise<T | null>;
   /** Called after each accepted edit; see `TerrainListener`. */
   subscribe(listener: TerrainListener): () => void;
 }
@@ -435,6 +469,72 @@ export function createTerrainRuntime({
     return decor;
   }
 
+  async function applyCarry<T>(
+    locate: () => Promise<AreaMove | null>, actorId: string | null,
+    protections: () => Promise<TerrainProtections>,
+    write: (layer: CarriedLayer) => Promise<T | null>,
+  ): Promise<T | null> {
+    const { width, height } = layout;
+    const move = await locate();
+    if (move === null) return write({ width, walls, decor });
+    const { from, dx, dy } = move;
+    const onOutline = (post: number): boolean => {
+      const tx = post % width;
+      const ty = Math.floor(post / width);
+      return tx >= from.x && tx <= from.x + from.w && ty >= from.y && ty <= from.y + from.h;
+    };
+    // Only painted posts: the store cannot remove one the layout itself draws, so it would come back at load.
+    const posts = walls.flatMap((piece, post) => (piece != null && layout.walls[post] == null && onOutline(post) ? [post] : []));
+    const items = decor.filter((item) =>
+      isDoorPiece(item.piece) ? doorPosts(item, width).every(onOutline) : fitsInsideDesk(decorFootprint(item, decorInfo(item.piece), width), from));
+    if (posts.length === 0 && items.length === 0) return write({ width, walls, decor });
+    if (!store) throw new Error('no terrain store: the walls and decor cannot be moved');
+    // Posts and anchors share the grid's row-major indexing, so one shift serves both.
+    const shift = (index: number): number => {
+      const tx = (index % width) + dx;
+      const ty = Math.floor(index / width) + dy;
+      return tx < 0 || ty < 0 || tx >= width || ty >= height ? -1 : ty * width + tx;
+    };
+    const placedPosts = posts.map(shift);
+    const placed = items.map((item) => ({ ...item, index: shift(item.index) }));
+    if (placedPosts.includes(-1) || placed.some(({ index }) => index === -1)) throw new TerrainProtectedError('placement');
+    const carried = new Set(items.map(({ index }) => index));
+    // An item already there that stays would be overwritten, not moved aside.
+    if (placed.some(({ index }) => decor.some((item) => item.index === index && !carried.has(index)))) throw new TerrainProtectedError('placement');
+
+    const lifted = [...walls];
+    for (const post of posts) lifted[post] = null;
+    posts.forEach((post, at) => { lifted[placedPosts[at]!] = walls[post]!; });
+    const wallEdits = lifted.flatMap((piece, index): WallEdit[] => (piece === walls[index] ? [] : [{ index, piece: piece as WallPieceId | null }]));
+    const nextWalls = withWalls(walls, wallEdits);
+    const nextOrder = withWallOrder(wallOrder, walls, wallEdits);
+    const nextDecor = withDecor(
+      withDecor(decor, items.map(({ index }) => ({ index, item: null }))),
+      placed.map(({ index, ...item }) => ({ index, item })),
+    );
+    const nextSnapshot = snapshotOf(blocks, nextWalls, nextDecor, nextOrder);
+    const anchors = new Set(placed.map(({ index }) => index));
+    // What moves keeps its place against what moves with it; only what stays can be in the way.
+    const stays = nextDecor.filter(({ index }) => !anchors.has(index));
+    const guarded = new Set([...staticTiles, ...stays.flatMap((item) => decorTiles(item, decorInfo(item.piece), width))]);
+    const removed = wallEdits.flatMap(({ index, piece }) => (piece === null ? [index] : []));
+    const guards = placedPosts.length > 0 ? await protections() : { placements: [], players: [] };
+    const conflict =
+      findDecorConflict(nextDecor, anchors, decorInfo, nextSnapshot, staticTiles) ??
+      findWallConflict(placedPosts, layout, guarded, guards, removed, doorPostSet(stays, width));
+    if (conflict !== null) throw new TerrainProtectedError(conflict);
+
+    const result = await write({ width, walls: nextWalls, decor: nextDecor });
+    if (result === null) return null;
+    await store.saveWallsAndDecor(wallEdits, decorChanges(decor, nextDecor), actorId);
+    walls = nextWalls;
+    wallOrder = nextOrder;
+    decor = nextDecor;
+    snapshot = nextSnapshot;
+    for (const listener of listeners) listener(blocks);
+    return result;
+  }
+
   return {
     async load() {
       if (!store) return;
@@ -496,6 +596,9 @@ export function createTerrainRuntime({
     },
     runExclusive(task) {
       return enqueue(() => task(snapshot));
+    },
+    carry(locate, actorId, protections, write) {
+      return enqueue(() => applyCarry(locate, actorId, protections, write));
     },
     subscribe(listener) {
       listeners.add(listener);

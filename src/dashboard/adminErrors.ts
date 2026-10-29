@@ -45,6 +45,9 @@ const MESSAGES: Readonly<Record<AdminErrorCode, string>> = {
   // One desk table per desk: the same sentence for a creation and a move.
   'desk-between-tables': 'No se puede poner un escritorio entre dos mesas de escritorio: elige otra posición.',
   'desk-chair-limit': 'Un escritorio admite como máximo 3 sillas.',
+  // A desk or room moves with its decor and walls: they must fit where it lands.
+  'contents-blocked':
+    'Lo que hay dentro (decoración o paredes) no cabe ahí: chocaría con otra pieza, el terreno o un escritorio. Elige otro sitio.',
   // Dos salas pisandose (#10 + #12, S3a). Mismo criterio que `desk-overlap`:
   // se arregla escribiendo otras coordenadas, no cambiando de nombre.
   'space-overlap': 'Esas coordenadas chocan con otra sala existente.',

@@ -3072,7 +3072,7 @@ describe('terrain routes (#123 phase 2)', () => {
     await server.shutdown();
   });
 
-  it('places decor into the room state; desks are created, moved and deleted over it, never refused and never deleting it', async () => {
+  it('places decor into the room state; desks are created and deleted over it, never refused and never deleting it, and a moved desk carries it', async () => {
     const desks = createMemoryDesks();
     const { server, url, wsUrl } = await terrainServer({ desks, terrain: createMemoryTerrain() });
     const room = await new Client(wsUrl).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token: 'valido-uid-admin' });
@@ -3095,10 +3095,12 @@ describe('terrain routes (#123 phase 2)', () => {
     const overChair = await postDesk('/admin/desks', { label: 'Mesa A', x: 66, y: 21 });
     expect(overChair.status).toBe(201);
     const { id } = (await overChair.json()) as { id: string };
+    // The chair on the desk goes with it; the table it lands beside stays.
     expect((await postDesk(`/admin/desks/${id}`, { x: 71, y: 21 })).status).toBe(200);
+    await waitFor(() => decodeOfficeDecor(room.state.officeDecor, width * height)?.[0]?.index === chair + 5);
     expect((await postDesk(`/admin/desks/${id}/delete`, {})).status).toBe(200);
     expect(server.terrain.decor()).toEqual([
-      { index: chair, piece: 'chair-metal', rotation: 90 },
+      { index: chair + 5, piece: 'chair-metal', rotation: 90 },
       { index: table, piece: 'desk-wood', rotation: 0 },
     ]);
 
@@ -3136,6 +3138,38 @@ describe('terrain routes (#123 phase 2)', () => {
       { index: 19 * width + 67, piece: 'desk-wood', rotation: 0 },
       { index: 23 * width + 67, piece: 'desk-wood', rotation: 0 },
     ]);
+    await server.shutdown();
+  });
+
+  it('moves a room with its walls and decor, and refuses a move whose contents would land on another item', async () => {
+    const { server, url } = await terrainServer({ spaces: createMemorySpaces() });
+    const { width } = server.terrain.snapshot();
+    const at = (tx: number, ty: number) => ty * width + tx;
+    const post = (path: string, body: unknown) => fetch(`${url}${path}`, { method: 'POST', headers: BEARER, body: JSON.stringify(body) });
+    const created = await post('/admin/spaces', { name: 'Sala', x: 66, y: 21, w: 6, h: 6 });
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string };
+    // The room's outline: posts on the vertices 66..72 x 21..27.
+    const outline: number[] = [];
+    for (let tx = 66; tx <= 72; tx += 1) outline.push(at(tx, 21), at(tx, 27));
+    for (let ty = 22; ty <= 26; ty += 1) outline.push(at(66, ty), at(72, ty));
+    expect((await setWalls(url, outline.map((index) => ({ index, piece: 'wall-brick' })))).status).toBe(200);
+    expect((await setDecor(url, '/admin/decor', [{ index: at(68, 23), item: { piece: 'chair-metal', rotation: 90 } }])).status).toBe(200);
+
+    expect((await post(`/admin/spaces/${id}`, { x: 76, y: 21, w: 6, h: 6 })).status).toBe(200);
+    for (const index of outline) {
+      expect(server.terrain.walls()[index]).toBeNull();
+      expect(server.terrain.walls()[index + 10]).toBe('wall-brick');
+    }
+    expect(server.terrain.decor()).toEqual([{ index: at(78, 23), piece: 'chair-metal', rotation: 90 }]);
+
+    // A chair where the carried one would land: the room stays, and so does all it holds.
+    expect((await setDecor(url, '/admin/decor', [{ index: at(68, 23), item: { piece: 'chair-wood', rotation: 0 } }])).status).toBe(200);
+    const blocked = await post(`/admin/spaces/${id}`, { x: 66, y: 21, w: 6, h: 6 });
+    expect(blocked.status).toBe(409);
+    expect(await blocked.json()).toEqual({ error: 'contents-blocked' });
+    expect(server.terrain.walls()[at(76, 21)]).toBe('wall-brick');
+    expect((await (await fetch(`${url}/spaces`)).json()) as unknown).toMatchObject({ spaces: [{ id, x: 76, y: 21 }] });
     await server.shutdown();
   });
 

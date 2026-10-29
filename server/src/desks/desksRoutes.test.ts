@@ -20,6 +20,7 @@ import { createMemoryDecor } from '../decor/memoryDecor.ts';
 import type { DirectoryUser } from '../directory/directoryPort.ts';
 import { createMemoryDirectory } from '../directory/memoryDirectory.ts';
 import { createMemorySpaces } from '../spaces/memorySpaces.ts';
+import { TerrainProtectedError } from '../terrain/terrainRules.ts';
 import type { IdTokenVerifier } from '../verifyIdToken.ts';
 import type { DeskDirectory } from './desksPort.ts';
 import { createMemoryDesks } from './memoryDesks.ts';
@@ -578,7 +579,8 @@ describe('desks over painted walls', () => {
   function wallGuard(...tiles: (readonly [number, number])[]) {
     const walls: (string | null)[] = new Array(WIDTH * 30).fill(null);
     for (const [tx, ty] of tiles) walls[ty * WIDTH + tx] = 'wall-brick';
-    const guard: DeskWallGuard = { run: vi.fn(async (write) => write({ width: WIDTH, walls })) };
+    const grid = { width: WIDTH, walls };
+    const guard: DeskWallGuard = { run: vi.fn(async (write) => write(grid)), carry: vi.fn(async (_actor, _locate, write) => write(grid)) };
     return guard;
   }
 
@@ -627,7 +629,7 @@ describe('desks over painted walls', () => {
     const result = await handleUpdateDesk(BEARER_ADMIN, desk.id, { x: 25, y: 20 }, { ...deps, walls });
 
     expect(result.body).toMatchObject({ x: 25, y: 20 });
-    expect(walls.run).toHaveBeenCalledOnce();
+    expect(walls.carry).toHaveBeenCalledOnce();
   });
 
   it('renames, claims and releases without looking at the walls', async () => {
@@ -641,6 +643,7 @@ describe('desks over painted walls', () => {
     expect((await handleClaimDesk(BEARER_ANA, desk.id, { ...deps, walls })).status).toBe(200);
     expect((await handleReleaseDesk(BEARER_ANA, { ...deps, walls })).status).toBe(200);
     expect(walls.run).not.toHaveBeenCalled();
+    expect(walls.carry).not.toHaveBeenCalled();
   });
 
   it('without a guard there are no walls to refuse', async () => {
@@ -661,7 +664,8 @@ describe('desks between two desk tables', () => {
 
   function decorGuard(...decor: DecorItem[]) {
     const walls: (string | null)[] = new Array(WIDTH * 30).fill(null);
-    const guard: DeskWallGuard = { run: vi.fn(async (write) => write({ width: WIDTH, walls, decor, decorInfo: decorInfoFromPieceId })) };
+    const grid = { width: WIDTH, walls, decor, decorInfo: decorInfoFromPieceId };
+    const guard: DeskWallGuard = { run: vi.fn(async (write) => write(grid)), carry: vi.fn(async (_actor, _locate, write) => write(grid)) };
     return guard;
   }
 
@@ -697,6 +701,59 @@ describe('desks between two desk tables', () => {
 
     expect((await handleUpdateDesk(BEARER_ADMIN, desk.id, { label: 'Otra' }, { ...deps, walls })).status).toBe(200);
     expect(walls.run).not.toHaveBeenCalled();
+    expect(walls.carry).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A moved desk carries the decor standing on it (`carry` in
+ * `terrainRuntime.ts`), so whoever sits there keeps it. The guard names the
+ * area the desk stood on, read in the terrain queue.
+ */
+describe('desks carry what stands on them', () => {
+  function carryGuard(refusal?: Error) {
+    const moves: unknown[] = [];
+    const grid = { width: 40, walls: new Array<null>(40 * 30).fill(null) };
+    const guard: DeskWallGuard = {
+      run: vi.fn(async (write) => write(grid)),
+      carry: vi.fn(async (_actor, locate, write) => {
+        moves.push(await locate());
+        if (refusal !== undefined) throw refusal;
+        return write(grid);
+      }),
+    };
+    return { guard, moves };
+  }
+
+  it('moves the desk and carries the area it stood on by the same move, as the admin', async () => {
+    const { deps, desks } = harness();
+    const desk = await desks.createDesk({ label: 'Mesa', x: 2, y: 3 });
+    const { guard, moves } = carryGuard();
+
+    const result = await handleUpdateDesk(BEARER_ADMIN, desk.id, { x: 25, y: 20 }, { ...deps, walls: guard });
+
+    expect(result.body).toMatchObject({ x: 25, y: 20 });
+    expect(moves).toEqual([{ from: { x: 2, y: 3, w: 3, h: 3 }, dx: 23, dy: 17 }]);
+    expect(guard.carry).toHaveBeenCalledWith(ADMIN.id, expect.any(Function), expect.any(Function));
+  });
+
+  it('answers 409 contents-blocked when what stands on the desk cannot land there, and leaves the desk', async () => {
+    const { deps, desks } = harness();
+    const desk = await desks.createDesk({ label: 'Mesa', x: 2, y: 3 });
+    const { guard } = carryGuard(new TerrainProtectedError('placement'));
+
+    const result = await handleUpdateDesk(BEARER_ADMIN, desk.id, { x: 25, y: 20 }, { ...deps, walls: guard });
+
+    expect(result).toEqual({ status: 409, body: { error: 'contents-blocked' } });
+    expect(await desks.getDesk(desk.id)).toMatchObject({ x: 2, y: 3 });
+  });
+
+  it('carries nothing for a desk that does not exist', async () => {
+    const { deps } = harness();
+    const { guard, moves } = carryGuard();
+
+    expect((await handleUpdateDesk(BEARER_ADMIN, 'no-existe', { x: 25, y: 20 }, { ...deps, walls: guard })).status).toBe(404);
+    expect(moves).toEqual([null]);
   });
 });
 

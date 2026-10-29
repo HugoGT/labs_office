@@ -128,5 +128,36 @@ export function createPgTerrain(pool: DirectoryPool): TerrainStore {
         [JSON.stringify(entries), actorId],
       );
     },
+    async saveWallsAndDecor(walls, decor, actorId) {
+      // One statement, so a desk or room never lands with half its contents:
+      // `saveWalls` and `saveDecor` as data-modifying CTEs. A carry saves one
+      // edit per tile of each table, so no two halves touch one row.
+      const decorEntries = decor.map(({ index, item }) => ({ index, piece: item?.piece ?? null, rotation: item?.rotation ?? null, color: item?.color ?? null }));
+      await pool.query(
+        `WITH wall_entries AS (
+           SELECT entry.index, entry.piece FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, piece text)
+         ),
+         decor_entries AS (
+           SELECT entry.index, entry.piece, entry.rotation, entry.color FROM jsonb_to_recordset($2::jsonb) AS entry(index integer, piece text, rotation smallint, color text)
+         ),
+         walls_removed AS (
+           DELETE FROM terrain_walls WHERE tile_index IN (SELECT index FROM wall_entries WHERE piece IS NULL)
+         ),
+         walls_placed AS (
+           INSERT INTO terrain_walls (tile_index, piece_id, updated_by)
+           SELECT index, piece, $3::uuid FROM wall_entries WHERE piece IS NOT NULL
+           ON CONFLICT (tile_index) DO UPDATE
+             SET piece_id = EXCLUDED.piece_id, updated_by = EXCLUDED.updated_by, updated_at = now()
+         ),
+         decor_removed AS (
+           DELETE FROM office_decor WHERE tile_index IN (SELECT index FROM decor_entries WHERE piece IS NULL)
+         )
+         INSERT INTO office_decor (tile_index, piece_id, rotation, color, updated_by)
+         SELECT index, piece, rotation, color, $3::uuid FROM decor_entries WHERE piece IS NOT NULL
+         ON CONFLICT (tile_index) DO UPDATE
+           SET piece_id = EXCLUDED.piece_id, rotation = EXCLUDED.rotation, color = EXCLUDED.color, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+        [JSON.stringify(walls), JSON.stringify(decorEntries), actorId],
+      );
+    },
   };
 }
