@@ -1,10 +1,11 @@
 /* The office mock of an art review (#121, #122): 5 x 3 blocks of 3 x 3 tiles, the three middle
-   ones holding the submission. The wood floor shows through the ring around them, like the
+   ones holding the submission (the rows above and below are half as tall). The wood floor shows through the ring around them, like the
    "Mi personaje" preview. Sizes come inline (`--block`, scales), always whole multiples of the art. */
 .mock {
   display: grid;
   grid-template-columns: var(--block) auto auto auto var(--block);
-  grid-template-rows: var(--block) auto var(--block);
+  /* Half a block of wood above and below: enough to read as an office, and the whole mock fits a laptop screen. */
+  grid-template-rows: calc(var(--block) / 2) auto calc(var(--block) / 2);
   width: max-content;
   background-color: #7a5a3a;
   border: 1px solid #2b3444;
@@ -34,6 +35,15 @@
   justify-content: center;
   gap: 12px;
   padding: 12px;
+}
+
+/* Four desks or chairs side by side, with their captions, are wider than the screen leaves for the block: two by two they fit. */
+.grass[data-kind='desk'],
+.grass[data-kind='chair'] {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  justify-content: center;
+  align-items: end;
 }
 
 .terrain {

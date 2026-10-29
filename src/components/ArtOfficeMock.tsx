@@ -190,7 +190,7 @@ export function ArtOfficeMock({ kind, name, images }: ArtOfficeMockProps) {
       >
         <Characters who={who} walkUrl={walkUrl} seatedUrl={seatedUrl} />
       </div>
-      <div className={`${styles.block} ${styles.grass}`} role="region" aria-label="Césped" style={tiled(MOCK_DEFAULTS.grass, SCALE)}>
+      <div className={`${styles.block} ${styles.grass}`} data-kind={kind} role="region" aria-label="Césped" style={tiled(MOCK_DEFAULTS.grass, SCALE)}>
         <GrassPieces kind={kind} name={name} sheet={sheet ?? ''} />
       </div>
       <div className={`${styles.block} ${styles.terrain}`} role="region" aria-label="Terreno" style={tiled(terrain, SCALE)} />

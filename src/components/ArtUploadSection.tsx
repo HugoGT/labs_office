@@ -4,7 +4,7 @@ import { describeAdminError } from '../dashboard/adminErrors';
 import { AdminError } from '../dashboard/adminPort';
 import { ART_UPLOAD_KINDS, type ArtUploadInput, type ArtUploadKind, type ArtUploadPort, type UploadedArt } from '../dashboard/artUploadPort';
 import { ArtOfficeMock } from './ArtOfficeMock';
-import { ArtPieceDialog } from './ArtPieceDialog';
+import { ArtPieceDialog, DialogButton } from './ArtPieceDialog';
 import { MAX_ART_NAME_LENGTH, nameFromFile } from './nameFromFile';
 import styles from './ArtAdminSection.module.css';
 
@@ -263,12 +263,12 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
           }}
           actions={
             <>
-              <button type="button" className={styles.button} disabled={busy} onClick={() => void upload()}>
-                {busy ? 'Subiendo…' : 'Aceptar y subir'}
-              </button>
-              <button type="button" className={styles.button} disabled={busy} onClick={() => setPreviewing(false)}>
+              <DialogButton tone="cancel" disabled={busy} onClick={() => setPreviewing(false)}>
                 Cancelar
-              </button>
+              </DialogButton>
+              <DialogButton tone="accept" disabled={busy} onClick={() => void upload()}>
+                {busy ? 'Subiendo…' : 'Aceptar y subir'}
+              </DialogButton>
             </>
           }
         >
