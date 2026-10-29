@@ -95,6 +95,17 @@ describe('sameBrush', () => {
   });
 });
 
+describe('sameBrush: uploaded floors (S13)', () => {
+  const PIECE = 'floor-upload-0123456789abcdef';
+
+  it('tells an uploaded floor from plain wood and from another upload', () => {
+    expect(sameBrush({ kind: 'floor', material: 'wood', floor: PIECE }, { kind: 'floor', material: 'wood', floor: PIECE })).toBe(true);
+    expect(sameBrush({ kind: 'floor', material: 'wood', floor: PIECE }, { kind: 'floor', material: 'wood' })).toBe(false);
+    expect(sameBrush({ kind: 'floor', material: 'wood' }, { kind: 'floor', material: 'wood', floor: PIECE })).toBe(false);
+    expect(sameBrush({ kind: 'floor', material: 'wood', floor: PIECE }, { kind: 'floor', material: 'wood', floor: 'floor-upload-fedcba9876543210' })).toBe(false);
+  });
+});
+
 describe('terrainOutlines (#216)', () => {
   it('is every desk and every room, as inclusive tile corners', () => {
     expect(terrainOutlines([{ x: 2, y: 3, w: 4, h: 4 }], [{ x: 20, y: 5, w: 9, h: 9 }])).toEqual([

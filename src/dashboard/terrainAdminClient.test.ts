@@ -67,6 +67,31 @@ describe('createTerrainAdminClient', () => {
     expect(JSON.parse(fetchImpl.mock.calls[0]![1]?.body as string)).toEqual({ edits, expected: 'water,wood' });
   });
 
+  it('posts the uploaded floor of a wood block with its material, and leaves the field out otherwise (S13)', async () => {
+    const piece = 'floor-upload-0123456789abcdef';
+    const withFloor = fetchWith(200);
+    const without = fetchWith(200);
+    const withColor = fetchWith(200);
+
+    await clientWith(withFloor).setBlock(35, 'wood', undefined, piece);
+    await clientWith(without).setBlock(35, 'wood');
+    await clientWith(withColor).setBlock(35, 'carpet', '#c0392b');
+
+    expect(withFloor.mock.calls[0]![1]?.body).toBe(JSON.stringify({ material: 'wood', floor: piece }));
+    // Previous bodies, byte for byte.
+    expect(without.mock.calls[0]![1]?.body).toBe(JSON.stringify({ material: 'wood' }));
+    expect(withColor.mock.calls[0]![1]?.body).toBe(JSON.stringify({ material: 'carpet', color: '#c0392b' }));
+  });
+
+  it('carries each edit floor of a batch as given (S13)', async () => {
+    const fetchImpl = fetchWith(200);
+    const edits = [{ index: 0, material: 'wood' as const, floor: 'floor-upload-0123456789abcdef' }, { index: 1, material: 'grass' as const }];
+
+    await clientWith(fetchImpl).setBlocks(edits, 'water,wood');
+
+    expect(JSON.parse(fetchImpl.mock.calls[0]![1]?.body as string)).toEqual({ edits, expected: 'water,wood' });
+  });
+
   it('tells a placement refusal from a stale preview', async () => {
     expect(await codeOf(clientWith(fetchWith(409, { error: 'terrain-under-placement' })).setBlock(1, 'water'))).toBe(
       'terrain-under-placement',

@@ -31,6 +31,8 @@ import { TILE, ZONE_LABELS } from './mapData';
 import { LAYOUT_MATERIALS, type LayoutProp, type OfficeLayout, type TerrainColors, type TerrainSnapshot, type WallGrid } from './officeLayout';
 import { chairGround, type MapSeat, type PlacedChair } from './seating';
 import { terrainColorTileData, terrainMaterialBand, terrainRecolor } from './terrainColorTiles';
+import type { TerrainFloors } from './terrainFloors';
+import { terrainFloorTileData } from './terrainFloorTiles';
 import { TERRAIN_FLAT_COLORS, decalTileData, fallbackTerrainData, hedgeSprites, propFrame, wallSprites } from './terrainRender';
 
 /**
@@ -42,6 +44,8 @@ export const BASE_MAP_CHAIR = 'chair-wood';
 /** Terrain layers at the very bottom, decals over them, then bridges lying on the ground. */
 const TERRAIN_DEPTH = 0;
 const DECAL_DEPTH = 0.3;
+/** Uploaded floors (S13) lie over the terrain layers (up to `TERRAIN_LAYER_COUNT * 0.01`) and under the decals. */
+const TERRAIN_FLOOR_DEPTH = 0.2;
 const GROUND_PROP_DEPTH = 0.5;
 
 /** Generated when the pack is missing: one flat 32px tile per terrain material, in `LAYOUT_MATERIALS` order. */
@@ -198,6 +202,71 @@ export function renderTerrain(
   };
   draw(terrain, colors);
   return { layers, decals, refresh: draw };
+}
+
+// --- Uploaded floors ----------------------------------------------------------------------------
+
+/** The layers of the uploaded floors (S13), one per piece, kept so a block edit or a late sheet can redraw them in place. */
+export interface TerrainFloorLayers {
+  /** The layer of each piece drawn so far, by piece id. */
+  readonly layers: ReadonlyMap<string, Phaser.Tilemaps.TilemapLayer>;
+  /**
+   * Lays each piece of `floors` over its `wood` blocks. `sheetKey` is the
+   * texture of a piece's 96x96 sheet, or `null` while it is not loaded (or
+   * never will be): that piece then draws nothing and the wood below shows.
+   */
+  refresh(terrain: TerrainSnapshot, floors: TerrainFloors, sheetKey: (pieceId: string) => string | null): void;
+  destroy(): void;
+}
+
+/**
+ * The uploaded floors as tilemap layers over the terrain's, square-edged on
+ * the tile lines and never touching walkability: a layer per piece, created
+ * the first time its sheet is there, so the number of game objects follows
+ * the number of distinct pieces and not the size of the map.
+ */
+export function renderTerrainFloors(scene: Phaser.Scene): TerrainFloorLayers {
+  const entries = new Map<string, { layer: Phaser.Tilemaps.TilemapLayer; firstGid: number; key: string }>();
+  const layerOf = (pieceId: string, key: string, terrain: TerrainSnapshot): { layer: Phaser.Tilemaps.TilemapLayer; firstGid: number } | null => {
+    const known = entries.get(pieceId);
+    if (known !== undefined && known.key === key) return known;
+    known?.layer.destroy();
+    entries.delete(pieceId);
+    const map = scene.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: terrain.width, height: terrain.height });
+    const tileset = map.addTilesetImage(pieceId, key, TILE, TILE, 0, 0);
+    const layer = tileset === null ? null : map.createBlankLayer(pieceId, tileset, 0, 0, terrain.width, terrain.height);
+    if (tileset === null || layer === null) return null;
+    layer.setDepth(TERRAIN_FLOOR_DEPTH);
+    const entry = { layer, firstGid: tileset.firstgid, key };
+    entries.set(pieceId, entry);
+    return entry;
+  };
+  return {
+    get layers() {
+      return new Map([...entries].map(([id, entry]) => [id, entry.layer]));
+    },
+    refresh(terrain, floors, sheetKey) {
+      const data = terrainFloorTileData(terrain, floors);
+      for (const [pieceId, entry] of entries) if (!data.has(pieceId)) entry.layer.setVisible(false);
+      for (const [pieceId, rows] of data) {
+        const key = sheetKey(pieceId);
+        const target = key === null ? null : layerOf(pieceId, key, terrain);
+        if (target === null) {
+          entries.get(pieceId)?.layer.setVisible(false);
+          continue;
+        }
+        putRows(
+          target.layer,
+          rows.map((row) => row.map((frame) => (frame < 0 ? -1 : target.firstGid + frame))),
+        );
+        target.layer.setVisible(true);
+      }
+    },
+    destroy() {
+      for (const entry of entries.values()) entry.layer.destroy();
+      entries.clear();
+    },
+  };
 }
 
 // --- Layout pieces -----------------------------------------------------------------------------

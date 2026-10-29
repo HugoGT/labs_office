@@ -85,6 +85,69 @@ describe('TerrainPalette', () => {
   });
 });
 
+describe('TerrainPalette: uploaded floors (S13)', () => {
+  const PIECE = 'floor-upload-0123456789abcdef';
+  const OTHER_PIECE = 'floor-upload-fedcba9876543210';
+  const wood = catalog.floor.find((option) => option.id === 'floor-wood')!;
+  const upload = (id: string, name: string) => ({ ...wood, id, name });
+  const floors = [...catalog.floor, upload(PIECE, 'Parquet gris'), upload(OTHER_PIECE, 'Mármol')];
+  const BUILT_IN = NAMES.slice(0, -1);
+
+  it('appends each approved uploaded floor by its name after the built-in floors, the void eraser staying last', () => {
+    render(<TerrainPalette value={null} onPick={() => {}} floors={floors} preview={noPreview()} />);
+
+    const buttons = Array.from(screen.getByRole('group', { name: 'Suelos' }).querySelectorAll('button[aria-pressed]'));
+    expect(buttons.map((button) => button.textContent)).toEqual([...BUILT_IN, 'Parquet gris', 'Mármol', 'Vacío']);
+    expect(buttons.every((button) => button.getAttribute('aria-pressed') === 'false')).toBe(true);
+  });
+
+  it('offers no entry for the built-in floors again, nor for a floor that is not an upload', () => {
+    const stray = upload('floor-unknown', 'Raro');
+    render(<TerrainPalette value={null} onPick={() => {}} floors={[...catalog.floor, stray]} preview={noPreview()} />);
+
+    const buttons = Array.from(screen.getByRole('group', { name: 'Suelos' }).querySelectorAll('button[aria-pressed]'));
+    expect(buttons.map((button) => button.textContent)).toEqual(NAMES);
+  });
+
+  it('reports the piece of a click on an uploaded floor and not a material, and the built-ins still report theirs', async () => {
+    const onPick = vi.fn();
+    const onPickFloor = vi.fn();
+    render(<TerrainPalette value={null} onPick={onPick} onPickFloor={onPickFloor} floors={floors} preview={noPreview()} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Mármol' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Madera' }));
+
+    expect(onPickFloor.mock.calls).toEqual([[OTHER_PIECE]]);
+    expect(onPick.mock.calls).toEqual([['wood']]);
+  });
+
+  it('presses only the exact piece picked, and wood stays pressed only for the plain wood brush', () => {
+    const { rerender } = render(<TerrainPalette value={{ kind: 'floor', material: 'wood', floor: PIECE }} onPick={() => {}} floors={floors} preview={noPreview()} />);
+
+    expect(screen.getByRole('button', { name: 'Parquet gris' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Mármol' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Madera' })).toHaveAttribute('aria-pressed', 'false');
+
+    rerender(<TerrainPalette value={{ kind: 'floor', material: 'wood' }} onPick={() => {}} floors={floors} preview={noPreview()} />);
+    expect(screen.getByRole('button', { name: 'Madera' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Parquet gris' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('cuts the thumbnail of an uploaded floor from its own sheet, uncolored, and has no color picker for it', async () => {
+    const preview = noPreview();
+    render(<TerrainPalette value={null} onPick={() => {}} floors={floors} preview={preview} />);
+
+    await waitFor(() => expect(preview.sheet).toHaveBeenCalledWith(expect.objectContaining({ id: PIECE }), null));
+    expect(screen.getAllByRole('button', { name: /^Color de / })).toHaveLength(1);
+  });
+
+  it('disables the uploaded entries with the rest', () => {
+    render(<TerrainPalette value={null} onPick={() => {}} floors={floors} preview={noPreview()} disabled />);
+
+    expect(screen.getByRole('button', { name: 'Parquet gris' })).toBeDisabled();
+  });
+});
+
 describe('WallPalette', () => {
   const WALL_NAMES = ['Ladrillo', 'Piedra', 'Yeso', 'Vidrio'];
 

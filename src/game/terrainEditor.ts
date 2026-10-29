@@ -11,16 +11,19 @@ import { tileAreaRect, type TileRect } from './terrainGrid';
  * What a map click paints: a floor on a whole 9x9 block, or a wall post on
  * one grid vertex (`null`: the wall eraser). A colorable floor (carpet, #222)
  * may carry the color it paints in; without one it paints the default art.
+ * An uploaded floor (S13) is `wood` carrying the piece it lays over it; the
+ * material stays one of the closed list, so everything that previews or checks
+ * blocks by material treats it as the wood it sits on.
  * Chairs are decor since #208 (`decorEditor.ts`).
  */
 export type TerrainBrush =
-  | { readonly kind: 'floor'; readonly material: LayoutMaterial; readonly color?: string }
+  | { readonly kind: 'floor'; readonly material: LayoutMaterial; readonly color?: string; readonly floor?: string }
   | { readonly kind: 'wall'; readonly piece: WallPieceId | null };
 
 /** Whether two brushes paint the same thing (brushes are compared by value, not identity). */
 export function sameBrush(a: TerrainBrush | null | undefined, b: TerrainBrush | null | undefined): boolean {
   if (a == null || b == null) return (a ?? null) === (b ?? null);
-  if (a.kind === 'floor') return b.kind === 'floor' && a.material === b.material && a.color === b.color;
+  if (a.kind === 'floor') return b.kind === 'floor' && a.material === b.material && a.color === b.color && a.floor === b.floor;
   return b.kind === 'wall' && a.piece === b.piece;
 }
 

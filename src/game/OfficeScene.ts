@@ -57,6 +57,8 @@ import {
   placeZoneLabels,
   putArtSprite,
   renderTerrain,
+  renderTerrainFloors,
+  type TerrainFloorLayers,
   type TerrainTilemap,
 } from './mapBuilder';
 import { VOID_COLOR } from './terrainRender';
@@ -68,6 +70,7 @@ import {
   type SpaceArea,
 } from './mapData';
 import type { OfficeBridge } from './officeBridge';
+import { encodeTerrainFloors, type TerrainFloors } from './terrainFloors';
 import {
   BASE_LAYOUT,
   BASE_TERRAIN,
@@ -263,6 +266,8 @@ export class OfficeScene extends Phaser.Scene {
   private grid!: TerrainGrid;
   /** The terrain layers, redrawn in place when the terrain changes (#123 phase 2). */
   private terrainTilemap?: TerrainTilemap;
+  /** The uploaded floors over the terrain (S13). */
+  private terrainFloorLayers?: TerrainFloorLayers;
   /** The blocks the room replicated last (#123 phase 2); colliders and `grid` follow them. */
   private terrainBlocks: readonly LayoutMaterial[] = BASE_LAYOUT.blocks;
   /** The terrain editor's pending paints, drawn instead of `terrainBlocks` and never collided with. */
@@ -271,6 +276,8 @@ export class OfficeScene extends Phaser.Scene {
   private terrainColors: TerrainColors = new Map();
   /** The colors that go with the editor's pending blocks; `null` draws them with the live ones. */
   private terrainPreviewColors: TerrainColors | null = null;
+  /** The uploaded floor of each painted block, as the room replicates them (S13). */
+  private terrainFloors: TerrainFloors = new Map();
   /** The walls the room replicated last, one per tile; colliders and `grid` follow them. */
   private terrainWalls: readonly (string | null)[] = BASE_LAYOUT.walls;
   /** The tiles of `terrainWalls` in placement order, oldest first (#223): which wall is drawn over which. */
@@ -503,6 +510,8 @@ export class OfficeScene extends Phaser.Scene {
     return this.localAvatarId;
   }
   private readonly redrawDecor = (): void => this.paintDecor();
+  /** What a floor piece's sheet asks for when it lands (a stable reference, so `scheduleRedraw` batches it). */
+  private readonly redrawTerrain = (): void => this.paintTerrain();
   /**
    * Objetivo de auto-caminata en curso (issue #2, D9/D10). `undefined` cuando
    * nadie esta siendo perseguido: `update()` solo dirige al reductor mientras
@@ -668,6 +677,8 @@ export class OfficeScene extends Phaser.Scene {
     const grid: TerrainGrid = this.buildGrid();
     this.grid = grid;
     this.terrainTilemap = renderTerrain(this, this.terrain, this.layout, this.art, this.terrainColors);
+    this.terrainFloorLayers = renderTerrainFloors(this);
+    this.paintTerrainFloors(this.terrain);
     this.paintWalls();
     placeLayout(this, this.layout, this.art);
     placeSeats(this, this.mapSeats, this.art);
@@ -1046,6 +1057,7 @@ export class OfficeScene extends Phaser.Scene {
           onSpacesChanged: () => this.bridge.emit('spaceschanged', undefined),
           onTerrain: (blocks) => this.applyTerrain(blocks),
           onTerrainColors: (colors) => this.applyTerrainColors(colors),
+          onTerrainFloors: (floors) => this.applyTerrainFloors(floors),
           onWalls: (walls, order) => this.applyWalls(walls, order),
           onDecor: (items) => this.applyDecor(items),
           onLockedSpaces: (locks) => {
@@ -1963,6 +1975,19 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
+   * New uploaded floors from the room (S13): a drawing change only, like the
+   * colors. A server that predates them sends none, and the map keeps its wood.
+   */
+  private applyTerrainFloors(floors: TerrainFloors): void {
+    if (!this.alive) return;
+    if (encodeTerrainFloors(floors) !== encodeTerrainFloors(this.terrainFloors)) {
+      this.terrainFloors = floors;
+      this.paintTerrain();
+    }
+    this.emitTerrain();
+  }
+
+  /**
    * Where the main camera may look (#179): the live blocks only, never the
    * editor's preview, so a draft paint does not open the void to the camera.
    * Columns come from the layout because injected layouts have other sizes.
@@ -2042,7 +2067,13 @@ export class OfficeScene extends Phaser.Scene {
 
   /** Hands the terrain editor what the room shows: the live blocks, walls and block colors. */
   private emitTerrain(): void {
-    this.bridge.emit('terrain', { blocks: this.terrainBlocks, walls: this.terrainWalls, colors: this.terrainColors });
+    this.bridge.emit('terrain', {
+      blocks: this.terrainBlocks,
+      walls: this.terrainWalls,
+      colors: this.terrainColors,
+      // Absent while no block has one: what the editor saw before uploaded floors existed.
+      ...(this.terrainFloors.size === 0 ? {} : { floors: this.terrainFloors }),
+    });
     this.decorEditLayer?.refresh();
   }
 
@@ -2086,10 +2117,18 @@ export class OfficeScene extends Phaser.Scene {
 
   /** Redraws the tilemap from the live blocks, or from the editor's pending paints while it has some. */
   private paintTerrain(): void {
-    this.terrainTilemap?.refresh(
-      terrainSnapshot(this.layout, this.terrainPreviewBlocks ?? this.terrainBlocks, this.terrainWalls),
-      this.terrainPreviewColors ?? this.terrainColors,
-    );
+    const snapshot = terrainSnapshot(this.layout, this.terrainPreviewBlocks ?? this.terrainBlocks, this.terrainWalls);
+    this.terrainTilemap?.refresh(snapshot, this.terrainPreviewColors ?? this.terrainColors);
+    this.paintTerrainFloors(snapshot);
+  }
+
+  /**
+   * The uploaded floors over the blocks just drawn (S13). A piece's sheet is
+   * asked for here (a no-op once loaded) and the terrain redraws when it
+   * lands; until then, and for a piece that fails to load, the wood shows.
+   */
+  private paintTerrainFloors(snapshot: TerrainSnapshot): void {
+    this.terrainFloorLayers?.refresh(snapshot, this.terrainFloors, (pieceId) => this.artSheet({ materialId: pieceId, color: null }, 'floor', this.redrawTerrain)?.key ?? null);
   }
 
   /**

@@ -20,6 +20,7 @@
 import { Client, getStateCallbacks, type Room } from 'colyseus.js';
 import { createMoveThrottle } from './moveThrottle';
 import { BASE_LAYOUT, decodeTerrainBlocks, decodeTerrainColors, decodeTerrainWallOrder, decodeTerrainWalls, type LayoutMaterial, type TerrainColors } from './officeLayout';
+import { decodeTerrainFloors, type TerrainFloors } from './terrainFloors';
 import { decodeCollisionTable, type CollisionTable } from './pieceCollisions';
 import {
   ACCESS_DENIED_CODE,
@@ -74,6 +75,7 @@ interface OfficeRoomState {
   terrainBlocks: string;
   terrainWalls: string;
   terrainColors: string;
+  terrainFloors: string;
   officeDecor: string;
   pieceCollisions: string;
   lockedSpaces: string;
@@ -225,6 +227,11 @@ export interface OfficeRoomHandlers {
    * Not called while the office has none: start from an empty map.
    */
   onTerrainColors?(colors: TerrainColors): void;
+  /**
+   * The uploaded floors painted on terrain blocks (S13), a whole map on each change. Not called
+   * while the office has none, nor by a server that predates them: start from an empty map.
+   */
+  onTerrainFloors?(floors: TerrainFloors): void;
   /** The office decor layer (#208), sorted by anchor: on the first sync and after every accepted decor edit. */
   onDecor?(items: readonly DecorItem[]): void;
   /**
@@ -391,7 +398,7 @@ export async function connectOfficeRoom({
       (state: OfficeRoomState): {
         players: PlayersCallbacks;
         recordings: RecordingsCallbacks;
-        listen(property: 'terrainBlocks' | 'terrainWalls' | 'terrainColors' | 'officeDecor' | 'pieceCollisions' | 'lockedSpaces', handler: (value: string) => void): () => void;
+        listen(property: 'terrainBlocks' | 'terrainWalls' | 'terrainColors' | 'terrainFloors' | 'officeDecor' | 'pieceCollisions' | 'lockedSpaces', handler: (value: string) => void): () => void;
       };
       (player: RemotePlayer): PlayerCallbacks;
     };
@@ -480,6 +487,11 @@ export async function connectOfficeRoom({
     $(target.state).listen('terrainColors', (value) => {
       const colors = decodeTerrainColors(value, BASE_LAYOUT.blocks.length);
       if (colors !== null) handlers.onTerrainColors?.(colors);
+    });
+    // Uploaded floors (S13): same rule; a value that does not decode is not reported.
+    $(target.state).listen('terrainFloors', (value) => {
+      const floors = decodeTerrainFloors(value, BASE_LAYOUT.blocks.length);
+      if (floors !== null) handlers.onTerrainFloors?.(floors);
     });
     // The decor layer (#208): same rule. An older server sends none, and the scene draws none.
     $(target.state).listen('officeDecor', (value) => {
