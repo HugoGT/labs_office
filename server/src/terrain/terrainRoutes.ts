@@ -31,10 +31,11 @@ export interface TerrainDeps extends AdminDeps {
 const UNDER_PLACEMENT: AdminResult = { status: 409, body: { error: 'terrain-under-placement' } };
 
 /**
- * `POST /admin/terrain/blocks` `{ edits: [{ index, material, color? }], expected }`:
+ * `POST /admin/terrain/blocks` `{ edits: [{ index, material, color?, floor? }], expected }`:
  * sets several blocks, all or none, if the terrain still encodes as
  * `expected`. `color` (#222) only on a colorable material; a block painted
- * without one loses the color it had.
+ * without one loses the color it had. `floor` is an approved uploaded floor
+ * piece, only on wood and never with a color; the same loss rule applies.
  */
 export async function handleSetTerrainBlocks(authorization: unknown, body: unknown, deps: TerrainDeps): Promise<AdminResult> {
   const authorized = await authorize(authorization, deps);
@@ -51,7 +52,7 @@ export async function handleSetTerrainBlocks(authorization: unknown, body: unkno
   }
 }
 
-/** `POST /admin/terrain/blocks/:index` `{ material, color? }`: one block; same rules as a batch of one. */
+/** `POST /admin/terrain/blocks/:index` `{ material, color?, floor? }`: one block; same rules as a batch of one. */
 export async function handleSetTerrainBlock(
   authorization: unknown,
   index: unknown,
@@ -65,7 +66,8 @@ export async function handleSetTerrainBlock(
     const edit = parseTerrainEdit(index, body, deps.terrain.blocks().length);
     await deps.terrain.setBlock({ ...edit, actorId: authorized.user.id }, deps.protections);
     // `color` (#222) is always present, `null` for the default art, so a client reads one shape.
-    return { status: 200, body: { index: edit.index, material: edit.material, color: edit.color ?? null } };
+    // `floor` only when the block got one, so the answer to an edit without it keeps its old shape.
+    return { status: 200, body: { index: edit.index, material: edit.material, color: edit.color ?? null, ...(edit.floor === undefined ? {} : { floor: edit.floor }) } };
   } catch (error) {
     if (error instanceof InvalidTerrainEditError) return INVALID_REQUEST;
     if (error instanceof TerrainProtectedError) return UNDER_PLACEMENT;

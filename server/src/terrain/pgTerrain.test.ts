@@ -51,9 +51,35 @@ describe('pgTerrain', () => {
     expect(pool.queries).toHaveLength(1);
     const text = squash(pool.queries[0]!.text);
     // A missing `color` key reads as NULL in jsonb_to_recordset, so a block painted without one loses its old color.
-    expect(text).toContain('select entry.index, entry.material, entry.color, $2::uuid from jsonb_to_recordset($1::jsonb) as entry(index integer, material text, color text)');
-    expect(text).toContain('set material = excluded.material, color = excluded.color, updated_by = excluded.updated_by, updated_at = now()');
+    expect(text).toContain('select entry.index, entry.material, entry.color, entry.floor, $2::uuid from jsonb_to_recordset($1::jsonb) as entry(index integer, material text, color text, floor text)');
+    expect(text).toContain('color = excluded.color,');
     expect(pool.queries[0]!.values).toEqual([JSON.stringify(edits), 'user-1']);
+  });
+
+  it('saves each block floor with its material in the same statement, NULL where an edit carries none', async () => {
+    const pool = fakePool();
+    const edits = [{ index: 0, material: 'wood' as const, floor: 'floor-upload-0123456789abcdef' }, { index: 1, material: 'grass' as const }];
+    await createPgTerrain(pool).saveBlocks(edits, 'user-1');
+    expect(pool.queries).toHaveLength(1);
+    const text = squash(pool.queries[0]!.text);
+    expect(text).toContain('insert into terrain_blocks (block_index, material, color, floor_piece, updated_by)');
+    expect(text).toContain('select entry.index, entry.material, entry.color, entry.floor, $2::uuid from jsonb_to_recordset($1::jsonb) as entry(index integer, material text, color text, floor text)');
+    expect(text).toContain('set material = excluded.material, color = excluded.color, floor_piece = excluded.floor_piece, updated_by = excluded.updated_by, updated_at = now()');
+    expect(pool.queries[0]!.values).toEqual([JSON.stringify(edits), 'user-1']);
+  });
+
+  it('loads every stored block floor, skipping a row it cannot read; a row without one has none', async () => {
+    const pool = fakePool([
+      { block_index: 3, floor_piece: 'floor-upload-0123456789abcdef' },
+      { block_index: 4, floor_piece: null },
+      { block_index: 'x', floor_piece: 'floor-upload-0123456789abcdef' },
+      { block_index: 7, floor_piece: 'floor-wood' },
+    ]);
+
+    const floors = await createPgTerrain(pool).loadBlockFloors();
+
+    expect(new Map(floors)).toEqual(new Map([[3, 'floor-upload-0123456789abcdef']]));
+    expect(squash(pool.queries[0]!.text)).toBe('select block_index, floor_piece from terrain_blocks where floor_piece is not null');
   });
 
   it('loads every stored block color, skipping a row it cannot read; a row without one has none (#222)', async () => {
@@ -145,9 +171,9 @@ describe('pgTerrain', () => {
     expect(pool.queries).toHaveLength(1);
     const sql = squash(pool.queries[0]!.text);
     expect(sql).toContain('delete from terrain_walls where tile_index in (select value::integer from jsonb_array_elements_text($2::jsonb))');
-    expect(sql).toContain('insert into terrain_blocks (block_index, material, color, updated_by)');
-    expect(sql).toContain('from jsonb_to_recordset($1::jsonb) as entry(index integer, material text, color text)');
-    expect(sql).toContain('on conflict (block_index) do update set material = excluded.material, color = excluded.color');
+    expect(sql).toContain('insert into terrain_blocks (block_index, material, color, floor_piece, updated_by)');
+    expect(sql).toContain('from jsonb_to_recordset($1::jsonb) as entry(index integer, material text, color text, floor text)');
+    expect(sql).toContain('on conflict (block_index) do update set material = excluded.material, color = excluded.color, floor_piece = excluded.floor_piece');
     expect(pool.queries[0]!.values).toEqual([JSON.stringify(edits), JSON.stringify([3, 4]), 'user-1']);
   });
 

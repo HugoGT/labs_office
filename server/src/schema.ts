@@ -110,6 +110,13 @@ export interface OfficeState {
    */
   terrainColors: string;
   /**
+   * The live uploaded floors painted on wood blocks, in the sparse wire form of
+   * `encodeTerrainFloors` (`<block>:<piece id>` pairs, empty for none). Apart
+   * from `terrainBlocks` (an uploaded floor is `wood` there) so that field
+   * keeps its encoding and an older client ignores this one. Replicated whole.
+   */
+  terrainFloors: string;
+  /**
    * The live walls, painted per tile, in the sparse wire form of
    * `encodeTerrainWalls` (`<tile>:<material>` pairs, empty for none).
    * Replicated whole like `terrainBlocks`.
@@ -142,6 +149,7 @@ export class OfficeState extends Schema {
     this.recordings = new MapSchema<RecordingState>();
     this.terrainBlocks = '';
     this.terrainColors = '';
+    this.terrainFloors = '';
     this.terrainWalls = '';
     this.officeDecor = '';
     this.pieceCollisions = '';
@@ -149,4 +157,4 @@ export class OfficeState extends Schema {
   }
 }
 
-defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState }, terrainBlocks: 'string', terrainWalls: 'string', officeDecor: 'string', pieceCollisions: 'string', terrainColors: 'string', lockedSpaces: 'string' });
+defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState }, terrainBlocks: 'string', terrainWalls: 'string', officeDecor: 'string', pieceCollisions: 'string', terrainColors: 'string', terrainFloors: 'string', lockedSpaces: 'string' });

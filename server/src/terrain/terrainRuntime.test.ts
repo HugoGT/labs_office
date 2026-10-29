@@ -132,6 +132,7 @@ describe('createTerrainRuntime', () => {
       saveBlocks: async () => { throw new Error('connection lost'); },
       saveBlocksClearingWalls: async () => { throw new Error('connection lost'); },
       loadBlockColors: async () => new Map(),
+      loadBlockFloors: async () => new Map(),
       loadWalls: async () => new Map(),
       saveWalls: async () => { throw new Error('connection lost'); },
       loadDecor: async () => [],
@@ -390,6 +391,19 @@ describe('createTerrainRuntime walls', () => {
       expect([...(await store.loadWalls())]).toEqual([]);
       expect(runtime.blockColors().get(LAKE)).toBe('#a0b1c2');
       expect([...(await store.loadBlockColors())]).toEqual([[LAKE, '#a0b1c2']]);
+    });
+
+    it('keeps the uploaded floor of a block saved in the same batch as a void that clears walls', async () => {
+      const FLOOR = 'floor-upload-0123456789abcdef';
+      const store = createMemoryTerrain([], [[inside, 'wall-brick']]);
+      const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store, decorPieces: async () => [{ id: FLOOR, kind: 'floor', retired: false }] });
+      await runtime.load();
+
+      await runtime.setBlocks([{ index: LAWN, material: 'void' }, { index: LAKE, material: 'wood', floor: FLOOR }], null, NONE);
+
+      expect(runtime.walls()[inside]).toBeNull();
+      expect(runtime.blockFloors().get(LAKE)).toBe(FLOOR);
+      expect([...(await store.loadBlockFloors())]).toEqual([[LAKE, FLOOR]]);
     });
 
     it('keeps every wall when a block turns into anything but void', async () => {
