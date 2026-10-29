@@ -361,6 +361,62 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
   });
 });
 
+describe('sliding along walls and around corners in real Phaser frames (#252)', () => {
+  type Rect = { x: number; y: number; w: number; h: number };
+  const overlapsAny = (body: Phaser.Physics.Arcade.Body, rects: Rect[]) =>
+    rects.some((r) => body.right > r.x && body.x < r.x + r.w && body.bottom > r.y && body.y < r.y + r.h);
+
+  // A wall right of the player built from two rectangles, as merged terrain
+  // and wall runs meet in the office: Arcade alone stops a slide at the seam.
+  it.each([
+    ['down', [{ x: 400, y: 0, w: 8, h: 340 }, { x: 400, y: 340, w: 8, h: 2000 }]],
+    ['up', [{ x: 400, y: 0, w: 8, h: 260 }, { x: 400, y: 260, w: 8, h: 2000 }]],
+  ] as const)('walking diagonally %s into a seamed wall slides past the seam', async (vertical, wall) => {
+    const { player, body, movement, walk } = await movementArena();
+    movement.collisionRects = [...wall];
+    movement.buildPieceColliders();
+    body.reset(360, 300);
+    movement.cursors.right.isDown = true;
+    movement.cursors[vertical].isDown = true;
+    walk(800);
+    // 1x diagonal is ~163 px/s per axis: well past the seam 40 px away.
+    expect(Math.abs(player.y - 300)).toBeGreaterThan(100);
+    expect(body.right).toBeLessThanOrEqual(400);
+    expect(overlapsAny(body, [...wall])).toBe(false);
+  });
+
+  it('walking diagonally into a desk slides along it and off its corner', async () => {
+    const { player, body, movement, walk } = await movementArena();
+    const desk = { x: 400, y: 400, w: 64, h: 32 };
+    movement.collisionRects = [desk];
+    movement.buildPieceColliders();
+    body.reset(360, 360);
+    movement.walkingMs = 3000;
+    movement.cursors.right.isDown = true;
+    movement.cursors.down.isDown = true;
+    walk(800);
+    expect(body.y).toBeGreaterThan(desk.y + desk.h);
+    expect(body.x).toBeGreaterThan(desk.x);
+    expect(player.y - 360).toBeGreaterThan(300);
+    expect(overlapsAny(body, [desk])).toBe(false);
+  });
+
+  it('walking straight into a wall still stops at it', async () => {
+    const { player, body, movement, walk } = await movementArena();
+    const wall = { x: 400, y: 0, w: 8, h: 2000 };
+    movement.collisionRects = [wall];
+    movement.buildPieceColliders();
+    body.reset(360, 300);
+    movement.cursors.right.isDown = true;
+    walk(400);
+    const resting = { x: player.x, y: player.y };
+    walk(200);
+    expect(body.right).toBeLessThanOrEqual(400);
+    expect(body.right).toBeGreaterThan(399.99);
+    expect({ x: player.x, y: player.y }).toEqual(resting);
+  });
+});
+
 describe('waypoint walking around obstacles (double-click-pathfinding)', () => {
   it('authoritative reset cancels prediction, seat, keys and click pair without adopting ordinary echoes', async () => {
     const connector = fakeConnector('mi-sesion');

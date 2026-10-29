@@ -15,7 +15,7 @@ import { CAMERA_MARGIN_TILES, regionBounds, terrainRegion, type Rect } from './c
 import { PAN_THRESHOLD_PX } from './cameraPan';
 import { restoreZoom, type ZoomStore } from './mapZoom';
 import { advanceWalkingTime, MAX_WALK_FRAME_MS, walkingMultiplier } from './walkingSpeed';
-import { walkingSweepFraction } from './walkingCollision';
+import { slideWalking } from './walkingCollision';
 import { walkFrame } from './characterAnimation';
 import {
   animateCharacter,
@@ -2599,12 +2599,9 @@ export class OfficeScene extends Phaser.Scene {
         body.x + Math.min(0, dx), body.y + Math.min(0, dy),
         body.width + Math.abs(dx), body.height + Math.abs(dy), false, true,
       );
-      let fraction = 1;
-      for (const obstacle of candidates) {
-        if (!obstacle.enable || obstacle.checkCollision.none) continue;
-        fraction = Math.min(fraction, walkingSweepFraction(body, dx, dy, obstacle));
-      }
-      body.velocity.scale(fraction);
+      const obstacles = candidates.filter((obstacle) => obstacle.enable && !obstacle.checkCollision.none);
+      const step = slideWalking(body, dx, dy, obstacles);
+      body.setVelocity(step.dx * 1000 / delta, step.dy * 1000 / delta);
     }
     this.physics.world.update(time, delta);
     this.physics.world.postUpdate();
