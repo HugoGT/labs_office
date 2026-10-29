@@ -146,6 +146,27 @@ describe('handleSubmitContribution', () => {
     expect(d.decor.artAuditLog().map(({ action, actorId, pieceId }) => [action, actorId, pieceId])).toEqual([['submit-art', ANA.id, id]]);
   });
 
+  it('credits the uploader, whatever author the body claims or leaves out', async () => {
+    const d = await deps();
+
+    const { author: _author, ...withoutAuthor } = characterBody(0);
+    const unsigned = await submit(d, AS_ANA, withoutAuthor);
+    const forged = await submit(d, AS_BETO, characterBody(1, { author: 'Ana' }));
+
+    expect(unsigned.body.contribution).toMatchObject({ author: 'Ana' });
+    expect(forged.body.contribution).toMatchObject({ author: 'Beto' });
+  });
+
+  it('credits an account with no display name as Invitado, never by its email', async () => {
+    const d = await deps();
+    const nameless = user({ id: 'id-sin-nombre', uid: 'uid-sin-nombre' });
+    const withNameless: Harness = { ...d, directory: createMemoryDirectory({ seed: [ADMIN, ANA, BETO, nameless] }) };
+
+    const result = await submit(withNameless, 'Bearer valido-uid-sin-nombre', characterBody());
+
+    expect(result.body.contribution).toMatchObject({ author: 'Invitado' });
+  });
+
   it('without the rights statement accepted, the upload is refused and nothing is stored', async () => {
     const d = await deps();
 

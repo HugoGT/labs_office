@@ -218,14 +218,19 @@ export function prepareAssetUpload(body: unknown, options: PrepareUploadOptions 
  * only with `rightsAccepted: true`, the checkbox of the form; the license is
  * that grant (`CONTRIBUTION_LICENSE`), whatever the body says. Both checks run
  * before any file is decoded.
+ *
+ * `author` is the uploader's name from the route, like the license: the body
+ * neither needs nor can set it. A display name longer than a credit is cut to
+ * `MAX_CREDIT_LENGTH` rather than refusing a contribution over a name the
+ * person did not type here.
  */
-export function prepareContribution(body: unknown): PreparedUpload {
+export function prepareContribution(body: unknown, author: string): PreparedUpload {
   if (!isRecord(body)) throw invalid(null, 'the upload is not an object');
   if (body.rightsAccepted !== true) {
     throw new AssetUploadError('rights-not-accepted', 'rightsAccepted', 'the rights statement must be accepted');
   }
   if (!isContributionKind(body.kind)) throw invalid('kind', 'only characters and decor plants can be contributed');
-  return prepareAssetUpload({ ...body, license: CONTRIBUTION_LICENSE });
+  return prepareAssetUpload({ ...body, author: author.slice(0, MAX_CREDIT_LENGTH), license: CONTRIBUTION_LICENSE });
 }
 
 /**

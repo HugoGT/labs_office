@@ -161,30 +161,43 @@ describe('prepareContribution (#122)', () => {
   };
 
   it('builds the same piece an Admin upload would, with the contribution license whatever the body says', () => {
-    const { piece } = prepareContribution({ ...character, license: 'CC0' });
+    const { piece } = prepareContribution({ ...character, license: 'CC0' }, 'Ana');
 
     expect(piece).toMatchObject({ kind: 'character', name: 'Lucía', author: 'Ana', license: CONTRIBUTION_LICENSE });
     expect(isUploadedPieceId(piece.id)).toBe(true);
   });
 
+  it('credits the uploader it is given, not the author of the body, and needs none in the body', () => {
+    const { author: _claimed, ...unsigned } = character;
+
+    expect(prepareContribution(unsigned, 'Beto').piece).toMatchObject({ author: 'Beto' });
+    expect(prepareContribution({ ...character, author: 'Ana' }, 'Beto').piece).toMatchObject({ author: 'Beto' });
+  });
+
+  it('cuts an uploader name longer than a credit to the credit limit instead of refusing the upload', () => {
+    const { piece } = prepareContribution(character, 'x'.repeat(200));
+
+    expect(piece.author).toBe('x'.repeat(80));
+  });
+
   it.each([undefined, false, 'true', 1])('refuses rightsAccepted %j: without the rights statement there is no upload', (rightsAccepted) => {
-    expect(() => prepareContribution({ ...character, rightsAccepted })).toThrow(
+    expect(() => prepareContribution({ ...character, rightsAccepted }, 'Ana')).toThrow(
       expect.objectContaining({ code: 'rights-not-accepted', field: 'rightsAccepted' }),
     );
   });
 
   it('checks the rights before decoding any file', () => {
-    expect(() => prepareContribution({ ...character, rightsAccepted: false, files: { walk: 'not base64!' } })).toThrow(
+    expect(() => prepareContribution({ ...character, rightsAccepted: false, files: { walk: 'not base64!' } }, 'Ana')).toThrow(
       expect.objectContaining({ code: 'rights-not-accepted' }),
     );
   });
 
   it.each(['desk', 'floor'])('refuses a %s: only characters and decor plants are contributed', (kind) => {
-    expect(() => prepareContribution({ ...character, kind })).toThrow(expect.objectContaining({ code: 'invalid-metadata', field: 'kind' }));
+    expect(() => prepareContribution({ ...character, kind }, 'Ana')).toThrow(expect.objectContaining({ code: 'invalid-metadata', field: 'kind' }));
   });
 
   it('takes a decor plant', () => {
-    const { piece } = prepareContribution({ kind: 'plant', name: 'Helecho', author: 'Ana', material: 'helecho', rightsAccepted: true, files: { sheet: sheet('plant') } });
+    const { piece } = prepareContribution({ kind: 'plant', name: 'Helecho', material: 'helecho', rightsAccepted: true, files: { sheet: sheet('plant') } }, 'Ana');
     expect(piece.kind).toBe('plant');
   });
 });

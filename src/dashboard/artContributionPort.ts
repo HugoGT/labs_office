@@ -44,7 +44,6 @@ export interface Contribution {
 export interface ContributionInput {
   kind: ContributionKind;
   name: string;
-  author: string;
   /** Plants only. */
   material?: string;
   rightsAccepted: boolean;

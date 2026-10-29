@@ -15,6 +15,9 @@ import { usePrivateArtImages } from '../hooks/usePrivateArtImages';
 import { ArtPiecePreview } from './ArtPiecePreview';
 import styles from './ArtContributionSection.module.css';
 
+/** Same limit as `MAX_NAME_LENGTH` in `server/src/assets/assetUploadRules.ts`. */
+const MAX_NAME_LENGTH = 60;
+
 const KIND_LABELS: Readonly<Record<ContributionKind, string>> = {
   character: 'Personaje',
   plant: 'Planta (decoración de escritorio)',
@@ -32,6 +35,11 @@ const FILES: Readonly<Record<ContributionKind, readonly { role: string; label: s
 function sizeOf(imageKind: ArtImageKind): string {
   const { width, height } = sheetSize(ART_IMAGE_SPECS[imageKind]);
   return `${width} × ${height} px`;
+}
+
+/** The file name without its extension, cut to what the server accepts as a name. */
+function nameFromFile(fileName: string): string {
+  return fileName.replace(/\.[^.]*$/, '').trim().slice(0, MAX_NAME_LENGTH);
 }
 
 function readDataUrl(file: File): Promise<string> {
@@ -97,7 +105,6 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
   const id = useId();
   const [kind, setKind] = useState<ContributionKind>('character');
   const [name, setName] = useState('');
-  const [author, setAuthor] = useState('');
   const [material, setMaterial] = useState('');
   const [rightsAccepted, setRightsAccepted] = useState(false);
   const [files, setFiles] = useState<Record<string, string>>({});
@@ -118,7 +125,6 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
   const roles = FILES[kind];
   const ready =
     name.trim() !== '' &&
-    author.trim() !== '' &&
     (kind !== 'plant' || material.trim() !== '') &&
     rightsAccepted &&
     roles.every(({ role }) => files[role] !== undefined);
@@ -137,6 +143,9 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
     }
     const dataUrl = await readDataUrl(file);
     setFiles((current) => ({ ...current, [role]: dataUrl }));
+    // The first file names the piece; a name already there, typed or taken from
+    // a file, is never replaced.
+    setName((current) => (current === '' ? nameFromFile(file.name) : current));
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -148,7 +157,6 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
     const input: ContributionInput = {
       kind,
       name: name.trim(),
-      author: author.trim(),
       ...(kind === 'plant' ? { material: material.trim() } : {}),
       rightsAccepted,
       files: Object.fromEntries(roles.map(({ role }) => [role, (files[role] as string).slice((files[role] as string).indexOf(',') + 1)])),
@@ -211,14 +219,7 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
           <label className={styles.label} htmlFor={`${id}-name`}>
             Nombre
           </label>
-          <input id={`${id}-name`} className={styles.input} value={name} maxLength={60} onChange={(event) => setName(event.target.value)} />
-        </div>
-
-        <div className={styles.field}>
-          <label className={styles.label} htmlFor={`${id}-author`}>
-            Autoría
-          </label>
-          <input id={`${id}-author`} className={styles.input} value={author} maxLength={80} onChange={(event) => setAuthor(event.target.value)} />
+          <input id={`${id}-name`} className={styles.input} value={name} maxLength={MAX_NAME_LENGTH} onChange={(event) => setName(event.target.value)} />
         </div>
 
         {kind === 'plant' && (

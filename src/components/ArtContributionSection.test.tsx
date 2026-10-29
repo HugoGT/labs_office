@@ -44,7 +44,6 @@ function fakePort(mine: Contribution[] = [], overrides: Partial<ArtContributionP
 
 async function fillCharacter(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   await user.type(screen.getByLabelText('Nombre'), 'Lucía');
-  await user.type(screen.getByLabelText('Autoría'), 'Ana');
   await user.upload(screen.getByLabelText(/Caminar/), png('walk.png'));
   await user.upload(screen.getByLabelText(/Sentado/), png('seated.png'));
 }
@@ -58,6 +57,38 @@ describe('ArtContributionSection (#122)', () => {
     expect(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT })).not.toBeChecked();
     expect(RIGHTS_STATEMENT).toBe('Confirmo que este arte no infringe derechos de autor y que la oficina puede usarlo libremente.');
     await waitFor(() => expect(screen.getByText('Pendientes de revisión: 0 de 5')).toBeInTheDocument());
+  });
+
+  it('does not ask for an author: the credit is the uploader\'s, set by the server', () => {
+    render(<ArtContributionSection contributions={fakePort()} />);
+
+    expect(screen.queryByLabelText('Autoría')).not.toBeInTheDocument();
+  });
+
+  it('names the piece after its file while the name is empty, and leaves a typed name alone', async () => {
+    const user = userEvent.setup();
+    render(<ArtContributionSection contributions={fakePort()} />);
+
+    await user.upload(screen.getByLabelText(/Caminar/), png('Mi personaje.final.PNG'));
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Mi personaje.final');
+
+    // Another file does not rename what the person already sees as the name.
+    await user.upload(screen.getByLabelText(/Sentado/), png('sentado.png'));
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Mi personaje.final');
+
+    await user.clear(screen.getByLabelText('Nombre'));
+    await user.type(screen.getByLabelText('Nombre'), 'Lucía');
+    await user.upload(screen.getByLabelText(/Caminar/), png('otro.png'));
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Lucía');
+  });
+
+  it('cuts a file name longer than a name to the name limit', async () => {
+    const user = userEvent.setup();
+    render(<ArtContributionSection contributions={fakePort()} />);
+
+    await user.upload(screen.getByLabelText(/Caminar/), png(`${'a'.repeat(80)}.png`));
+
+    expect(screen.getByLabelText('Nombre')).toHaveValue('a'.repeat(60));
   });
 
   it('cannot be sent until the rights statement is accepted', async () => {
@@ -77,7 +108,6 @@ describe('ArtContributionSection (#122)', () => {
     expect(port.submit).toHaveBeenCalledWith({
       kind: 'character',
       name: 'Lucía',
-      author: 'Ana',
       rightsAccepted: true,
       files: { walk: PNG_BASE64, seated: PNG_BASE64 },
     });
@@ -93,7 +123,6 @@ describe('ArtContributionSection (#122)', () => {
 
     await user.selectOptions(screen.getByLabelText('Tipo'), 'plant');
     await user.type(screen.getByLabelText('Nombre'), 'Helecho');
-    await user.type(screen.getByLabelText('Autoría'), 'Ana');
     await user.type(screen.getByLabelText('Material'), 'helecho');
     await user.upload(screen.getByLabelText(/Hoja/), png('sheet.png'));
     await user.click(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT }));

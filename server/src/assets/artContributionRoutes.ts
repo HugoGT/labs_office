@@ -45,6 +45,7 @@ import {
   normalizeReviewNote,
   type ArtPieceStatus,
 } from '../decor/artReviewRules.ts';
+import { DEFAULT_NAME } from '../../../src/game/officeProtocol.ts';
 import { authenticate, authorize, NOT_FOUND, type AdminDeps, type AdminResult } from '../admin/adminRoutes.ts';
 import { ART_PACK_DEFAULTS, ArtPieceExistsError } from '../decor/artCatalogRules.ts';
 import type { ArtCatalogPiece, DecorCatalog } from '../decor/decorPort.ts';
@@ -102,10 +103,13 @@ export async function handleSubmitContribution(authorization: unknown, body: unk
   if (!authenticated.ok) return authenticated.result;
   // From the token, never the body: nobody contributes in another's name.
   const userId = authenticated.user.id;
+  // The credit is public (the uploads manifest), so never the email of an
+  // account that has no display name.
+  const author = authenticated.user.displayName ?? DEFAULT_NAME;
 
   try {
     assertContributionQuota(await deps.decor.artContributionUsage(userId));
-    const { piece, files } = prepareContribution(body);
+    const { piece, files } = prepareContribution(body, author);
     for (const file of files) await deps.storage.put(file.sha256, file.png);
     const submitted = await deps.decor.submitArtContribution({ piece, submittedBy: userId, decorAsset: decorAssetForPiece(piece) });
     return { status: 201, body: { contribution: toContributionBody(submitted) } };
