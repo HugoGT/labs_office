@@ -13,9 +13,8 @@
 export const CONTRIBUTION_KINDS = ['character', 'plant', 'desk', 'floor', 'chair', 'table', 'door'] as const;
 export type ContributionKind = (typeof CONTRIBUTION_KINDS)[number];
 
-/** The rights statement the contributor must accept. The server refuses an upload without it. */
-export const RIGHTS_STATEMENT =
-  'Confirmo que este arte no infringe derechos de autor y que la oficina puede usarlo libremente.';
+/** The rights statement the contributor declares, checked from the start. The server refuses an upload without it. */
+export const RIGHTS_STATEMENT = 'Al subir este archivo declaro que no infringe derechos de autor.';
 
 export type ContributionStatus = 'pending' | 'approved' | 'rejected';
 

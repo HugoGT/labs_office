@@ -114,7 +114,7 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
   const [name, setName] = useState('');
   const [width, setWidth] = useState('2');
   const [height, setHeight] = useState('1');
-  const [rightsAccepted, setRightsAccepted] = useState(false);
+  const [rightsAccepted, setRightsAccepted] = useState(true);
   const [files, setFiles] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -174,7 +174,7 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
       setDone(`«${sent.name}» quedó pendiente de revisión. Te avisamos aquí cuando la revisen.`);
       setName('');
       setFiles({});
-      setRightsAccepted(false);
+      setRightsAccepted(true);
       refresh();
     } catch (submitError) {
       setError(describeRefusal(submitError, kind));
@@ -234,38 +234,40 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
 
         {kind === 'table' && (
           <>
-            <div className={styles.field}>
-              <label className={styles.label} htmlFor={`${id}-width`}>
-                Ancho (casillas)
-              </label>
-              <input
-                id={`${id}-width`}
-                className={styles.input}
-                type="number"
-                min={1}
-                max={TABLE.maxFootprint.w}
-                value={width}
-                onChange={(event) => setWidth(event.target.value)}
-              />
+            <div className={styles.footprint} data-row="footprint">
+              <div className={styles.field}>
+                <label className={styles.label} htmlFor={`${id}-width`}>
+                  Ancho
+                </label>
+                <input
+                  id={`${id}-width`}
+                  className={styles.input}
+                  type="number"
+                  min={1}
+                  max={TABLE.maxFootprint.w}
+                  value={width}
+                  onChange={(event) => setWidth(event.target.value)}
+                />
+              </div>
+              <div className={styles.field}>
+                <label className={styles.label} htmlFor={`${id}-height`}>
+                  Alto
+                </label>
+                <input
+                  id={`${id}-height`}
+                  className={styles.input}
+                  type="number"
+                  min={1}
+                  max={TABLE.maxFootprint.h}
+                  value={height}
+                  aria-describedby={`${id}-footprint-hint`}
+                  onChange={(event) => setHeight(event.target.value)}
+                />
+              </div>
             </div>
-            <div className={styles.field}>
-              <label className={styles.label} htmlFor={`${id}-height`}>
-                Alto (casillas)
-              </label>
-              <input
-                id={`${id}-height`}
-                className={styles.input}
-                type="number"
-                min={1}
-                max={TABLE.maxFootprint.h}
-                value={height}
-                aria-describedby={`${id}-footprint-hint`}
-                onChange={(event) => setHeight(event.target.value)}
-              />
-              <span className={styles.hint} id={`${id}-footprint-hint`}>
-                Mesa en horizontal, de hasta {TABLE.maxFootprint.w} × {TABLE.maxFootprint.h} casillas.
-              </span>
-            </div>
+            <span className={styles.hint} id={`${id}-footprint-hint`}>
+              Mesa en horizontal, de hasta {TABLE.maxFootprint.w} × {TABLE.maxFootprint.h} casillas.
+            </span>
           </>
         )}
 

@@ -54,8 +54,8 @@ describe('ArtContributionSection (#122)', () => {
 
     const kinds = within(screen.getByLabelText('Tipo')).getAllByRole('option').map((option) => option.getAttribute('value'));
     expect(kinds).toEqual(['character', 'plant', 'desk', 'floor', 'chair', 'table', 'door']);
-    expect(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT })).not.toBeChecked();
-    expect(RIGHTS_STATEMENT).toBe('Confirmo que este arte no infringe derechos de autor y que la oficina puede usarlo libremente.');
+    expect(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT })).toBeChecked();
+    expect(RIGHTS_STATEMENT).toBe('Al subir este archivo declaro que no infringe derechos de autor.');
     await waitFor(() => expect(screen.getByText('Pendientes de revisión: 0 de 5')).toBeInTheDocument());
   });
 
@@ -96,16 +96,14 @@ describe('ArtContributionSection (#122)', () => {
     expect(screen.getByLabelText('Nombre')).toHaveValue('a'.repeat(60));
   });
 
-  it('cannot be sent until the rights statement is accepted', async () => {
+  it('sends the contribution with the rights declared, and the checkbox is back on for the next one', async () => {
     const user = userEvent.setup();
     const port = fakePort();
     render(<ArtContributionSection contributions={port} />);
 
     await fillCharacter(user);
     const send = screen.getByRole('button', { name: 'Enviar a revisión' });
-    expect(send).toBeDisabled();
 
-    await user.click(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT }));
     expect(send).toBeEnabled();
     await user.click(send);
 
@@ -129,7 +127,6 @@ describe('ArtContributionSection (#122)', () => {
     await user.selectOptions(screen.getByLabelText('Tipo'), 'plant');
     await user.type(screen.getByLabelText('Nombre'), 'Helecho');
     await user.upload(screen.getByLabelText(/Hoja/), png('sheet.png'));
-    await user.click(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT }));
     await user.click(screen.getByRole('button', { name: 'Enviar a revisión' }));
 
     await waitFor(() => expect(port.submit).toHaveBeenCalledWith({ kind: 'plant', name: 'Helecho', rightsAccepted: true, files: { sheet: PNG_BASE64 } }));
@@ -149,7 +146,6 @@ describe('ArtContributionSection (#122)', () => {
     expect(screen.getByRole('option', { name: label })).toBeInTheDocument();
     await user.type(screen.getByLabelText('Nombre'), name);
     await user.upload(screen.getByLabelText(/Hoja/), png('sheet.png'));
-    await user.click(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT }));
     await user.click(screen.getByRole('button', { name: 'Enviar a revisión' }));
 
     await waitFor(() => expect(port.submit).toHaveBeenCalledWith({ kind, name, rightsAccepted: true, files: { sheet: PNG_BASE64 } }));
@@ -164,12 +160,11 @@ describe('ArtContributionSection (#122)', () => {
     expect(screen.getByRole('option', { name: 'Mesa de sala' })).toBeInTheDocument();
     expect(screen.getByText(/Solo un admin puede colocarla/)).toBeInTheDocument();
     await user.type(screen.getByLabelText('Nombre'), 'Mesa larga');
-    await user.clear(screen.getByLabelText('Ancho (casillas)'));
-    await user.type(screen.getByLabelText('Ancho (casillas)'), '5');
-    await user.clear(screen.getByLabelText('Alto (casillas)'));
-    await user.type(screen.getByLabelText('Alto (casillas)'), '3');
+    await user.clear(screen.getByLabelText('Ancho'));
+    await user.type(screen.getByLabelText('Ancho'), '5');
+    await user.clear(screen.getByLabelText('Alto'));
+    await user.type(screen.getByLabelText('Alto'), '3');
     await user.upload(screen.getByLabelText(/Hoja/), png('sheet.png'));
-    await user.click(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT }));
     await user.click(screen.getByRole('button', { name: 'Enviar a revisión' }));
 
     await waitFor(() =>
@@ -183,16 +178,36 @@ describe('ArtContributionSection (#122)', () => {
     );
   });
 
+  it('a table asks its width and height side by side, with no unit in the labels', async () => {
+    const user = userEvent.setup();
+    render(<ArtContributionSection contributions={fakePort()} />);
+
+    await user.selectOptions(screen.getByLabelText('Tipo'), 'table');
+
+    expect(screen.getByLabelText('Ancho').closest('[data-row="footprint"]')).toBe(screen.getByLabelText('Alto').closest('[data-row="footprint"]'));
+    expect(screen.getByLabelText('Ancho').closest('[data-row="footprint"]')).not.toBeNull();
+  });
+
+  it('the rights are declared from the start, and unchecking them stops the send', async () => {
+    const user = userEvent.setup();
+    render(<ArtContributionSection contributions={fakePort()} />);
+
+    await fillCharacter(user);
+    expect(screen.getByRole('button', { name: 'Enviar a revisión' })).toBeEnabled();
+    await user.click(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT }));
+
+    expect(screen.getByRole('button', { name: 'Enviar a revisión' })).toBeDisabled();
+  });
+
   it('a table cannot be sent with a footprint the sheet does not fit', async () => {
     const user = userEvent.setup();
     render(<ArtContributionSection contributions={fakePort()} />);
 
     await user.selectOptions(screen.getByLabelText('Tipo'), 'table');
     await user.type(screen.getByLabelText('Nombre'), 'Mesa');
-    await user.clear(screen.getByLabelText('Ancho (casillas)'));
-    await user.type(screen.getByLabelText('Ancho (casillas)'), '8');
+    await user.clear(screen.getByLabelText('Ancho'));
+    await user.type(screen.getByLabelText('Ancho'), '8');
     await user.upload(screen.getByLabelText(/Hoja/), png('sheet.png'));
-    await user.click(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT }));
 
     expect(screen.getByRole('button', { name: 'Enviar a revisión' })).toBeDisabled();
   });
@@ -205,7 +220,6 @@ describe('ArtContributionSection (#122)', () => {
     render(<ArtContributionSection contributions={fakePort([], { submit: vi.fn(async () => Promise.reject(new AdminError(code))) })} />);
 
     await fillCharacter(user);
-    await user.click(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT }));
     await user.click(screen.getByRole('button', { name: 'Enviar a revisión' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(message);
