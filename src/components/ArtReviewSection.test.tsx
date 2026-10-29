@@ -65,6 +65,26 @@ describe('ArtReviewSection (#122)', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  it('tells how many pieces wait, once loaded and after each decision, but not for another tab', async () => {
+    const user = userEvent.setup();
+    const onPendingCount = vi.fn();
+    const first = contribution({ id: 'plant-upload-1111111111111111', name: 'Uno', kind: 'plant', files: [] });
+    const second = contribution({ id: 'plant-upload-2222222222222222', name: 'Dos', kind: 'plant', files: [] });
+    const port = fakePort({ pending: [first, second], approved: [contribution({ status: 'approved' })] });
+    render(<ArtReviewSection reviews={port} onPendingCount={onPendingCount} />);
+
+    await screen.findAllByRole('listitem');
+    expect(onPendingCount).toHaveBeenLastCalledWith(2);
+
+    await user.click(screen.getByRole('button', { name: 'Aprobar Uno' }));
+    await waitFor(() => expect(onPendingCount).toHaveBeenLastCalledWith(1));
+
+    onPendingCount.mockClear();
+    await user.click(screen.getByRole('tab', { name: 'Aprobadas' }));
+    await screen.findByRole('listitem');
+    expect(onPendingCount).not.toHaveBeenCalled();
+  });
+
   it('approving takes the piece out of the queue', async () => {
     const user = userEvent.setup();
     const port = fakePort({ pending: [contribution()] });

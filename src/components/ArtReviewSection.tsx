@@ -99,6 +99,8 @@ function ReviewRow({ contribution, read, busy, onApprove, onReject, onRetire }: 
 export interface ArtReviewSectionProps {
   /** Port already built (`OfficeShell`); this section knows nothing of HTTP. */
   reviews: ArtReviewPort;
+  /** How many pieces wait, each time the pending queue is read or changes (the badge of "Revisión de arte"). */
+  onPendingCount?: (count: number) => void;
 }
 
 /**
@@ -110,7 +112,7 @@ export interface ArtReviewSectionProps {
  * Approving puts it in everyone's catalog; rejecting asks for the reason its
  * uploader reads; an approved character or plant can be withdrawn.
  */
-export function ArtReviewSection({ reviews }: ArtReviewSectionProps) {
+export function ArtReviewSection({ reviews, onPendingCount }: ArtReviewSectionProps) {
   const id = useId();
   const [status, setStatus] = useState<ContributionStatus>('pending');
   const [items, setItems] = useState<Contribution[] | null>(null);
@@ -133,6 +135,12 @@ export function ArtReviewSection({ reviews }: ArtReviewSectionProps) {
   );
 
   useEffect(() => load(status), [load, status]);
+
+  // The queue tells the badge of "Revisión de arte" how many wait, never another tab's count,
+  // and not after a failed read, which would show an empty queue that is not.
+  useEffect(() => {
+    if (status === 'pending' && items !== null && error === null) onPendingCount?.(items.length);
+  }, [status, items, error, onPendingCount]);
 
   async function act(run: () => Promise<string>, update: (list: Contribution[]) => Contribution[]): Promise<void> {
     setBusy(true);
@@ -158,7 +166,7 @@ export function ArtReviewSection({ reviews }: ArtReviewSectionProps) {
         Revisión de arte
       </h3>
       <p className={styles.hint}>
-        Personajes y plantas que sube la gente desde «Personalizar». Nada pendiente se ve en la oficina hasta que lo apruebas.
+        Piezas que sube la gente desde «Personalizar». Nada pendiente se ve en la oficina hasta que lo apruebas.
       </p>
 
       <div className={styles.tabs} role="tablist" aria-label="Estado">

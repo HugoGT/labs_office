@@ -3,7 +3,7 @@ import { userEvent } from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { CharacterPort } from '../auth/characterPort';
-import type { ArtContributionPort } from '../dashboard/artContributionPort';
+import type { ArtContributionPort, Contribution } from '../dashboard/artContributionPort';
 import type { ArtReviewPort } from '../dashboard/artReviewPort';
 import type { ArtUploadPort } from '../dashboard/artUploadPort';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
@@ -736,6 +736,74 @@ describe('OfficeSidebar: art for admins', () => {
     expect(await screen.findByRole('heading', { name: 'Aportar arte' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Subir' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Enviar a revisión' })).not.toBeInTheDocument();
+  });
+
+  describe('the pending badge', () => {
+    function pending(id: string): Contribution {
+      return {
+        id,
+        kind: 'plant',
+        name: `Planta ${id}`,
+        author: 'Ana',
+        status: 'pending',
+        reviewNote: null,
+        submittedAt: '2026-10-01T10:00:00.000Z',
+        retiredAt: null,
+        files: [],
+        uploadedBy: null,
+      };
+    }
+    const waiting = (...ids: string[]): ArtReviewPort => ({
+      ...reviews,
+      list: vi.fn(async () => ids.map(pending)),
+      approve: vi.fn(async (id: string) => ({ ...pending(id), status: 'approved' as const })),
+    });
+
+    it('shows how many pieces wait for review on the Personalizar button and on "Revisión de arte"', async () => {
+      const user = userEvent.setup();
+      renderSidebar({ role: 'admin', contributions: fakeContributions(), artAdmin: { uploads, reviews: waiting('a', 'b', 'c') } });
+
+      const toggle = await screen.findByRole('button', { name: /Personalizar/ });
+      expect(await within(toggle).findByText('3')).toBeInTheDocument();
+      await user.click(toggle);
+
+      const entry = screen.getByRole('button', { name: 'Revisión de arte, 3 pendientes' });
+      expect(within(entry).getByText('3')).toBeInTheDocument();
+    });
+
+    it('shows no badge when nothing waits', async () => {
+      const none = waiting();
+      const user = userEvent.setup();
+      renderSidebar({ role: 'admin', contributions: fakeContributions(), artAdmin: { uploads, reviews: none } });
+
+      await waitFor(() => expect(none.list).toHaveBeenCalled());
+      await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+
+      expect(screen.getByRole('button', { name: 'Revisión de arte' })).toBeInTheDocument();
+      expect(screen.queryByTestId('pending-art-badge')).not.toBeInTheDocument();
+    });
+
+    it('an employee never asks for the queue and sees no badge', async () => {
+      const unseen = waiting('a');
+      const user = userEvent.setup();
+      renderSidebar({ role: 'employee', contributions: fakeContributions(), artAdmin: { uploads, reviews: unseen } });
+
+      await user.click(screen.getByRole('button', { name: /Personalizar/ }));
+
+      expect(unseen.list).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('pending-art-badge')).not.toBeInTheDocument();
+    });
+
+    it('goes down when a piece is approved in the queue, with no wait for the next poll', async () => {
+      const user = userEvent.setup();
+      renderSidebar({ role: 'admin', contributions: fakeContributions(), artAdmin: { uploads, reviews: waiting('a', 'b') } });
+
+      await user.click(await screen.findByRole('button', { name: /Personalizar/ }));
+      await user.click(await screen.findByRole('button', { name: 'Revisión de arte, 2 pendientes' }));
+      await user.click(await screen.findByRole('button', { name: 'Aprobar Planta a' }));
+
+      await waitFor(() => expect(within(screen.getByRole('button', { name: /Personalizar/ })).getByText('1')).toBeInTheDocument());
+    });
   });
 
   it('anyone else gets no "Revisión de arte", and keeps contributing for review', async () => {
