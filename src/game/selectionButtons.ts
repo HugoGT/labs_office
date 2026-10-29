@@ -17,6 +17,21 @@ export const SELECTION_BUTTON_PX = 24;
 export const SELECTION_DELETE_COLOR = 0xdc2626;
 const MOVE_COLOR = 0x1f2937;
 const ICON_COLOR = 0xffffff;
+/**
+ * Font glyphs instead of art drawn line by line, which broke apart at small
+ * sizes: ↔ moves, 🗑 deletes. The wastebasket asks the emoji fonts first so it
+ * keeps its picture; the arrow stays a plain white glyph. The wastebasket fills
+ * its whole glyph box, so it goes smaller to keep a margin in the button.
+ */
+const ICON_FONT_PX = 16;
+const ICONS: Record<SelectionAction, { glyph: string; fontFamily: string; fontPx: number }> = {
+  move: { glyph: '\u2194', fontFamily: 'system-ui, "Segoe UI Symbol", sans-serif', fontPx: ICON_FONT_PX },
+  delete: {
+    glyph: '\u{1F5D1}',
+    fontFamily: '"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", "Segoe UI Symbol", sans-serif',
+    fontPx: 10,
+  },
+};
 /** Screen gap between the footprint and the buttons, and between the two buttons. */
 const BUTTON_GAP_PX = 4;
 
@@ -30,7 +45,7 @@ export interface SelectionRect {
 
 interface SelectionButton {
   readonly background: Phaser.GameObjects.Rectangle;
-  readonly icon: Phaser.GameObjects.Graphics;
+  readonly icon: Phaser.GameObjects.Text;
 }
 
 export class SelectionButtons {
@@ -94,7 +109,7 @@ export class SelectionButtons {
     this.buttons = null;
   }
 
-  /** A button drawn at its screen size around (0, 0); `show` scales and places it. */
+  /** A button made at its screen size around (0, 0); `show` scales and places it. */
   private make(action: SelectionAction): SelectionButton {
     const depth = LAYOUT_GHOST_DEPTH + 2;
     const background = this.scene.add
@@ -102,32 +117,14 @@ export class SelectionButtons {
       .setStrokeStyle(1, ICON_COLOR, 0.6)
       .setDepth(depth)
       .setName(this.names[action]);
-    const icon = this.scene.add.graphics().setDepth(depth + 0.5).setName(`${background.name}:icon`);
-    icon.lineStyle(2, ICON_COLOR, 1);
-    icon.fillStyle(ICON_COLOR, 1);
-    if (action === 'move') drawMoveIcon(icon);
-    else drawTrashIcon(icon);
+    const { glyph, fontFamily, fontPx } = ICONS[action];
+    const icon = this.scene.add
+      .text(0, 0, glyph, { fontFamily, fontSize: `${fontPx}px`, color: '#ffffff' })
+      .setOrigin(0.5)
+      // Drawn at the screen's pixel density: scaled by 1/zoom, it stays sharp.
+      .setResolution(window.devicePixelRatio || 1)
+      .setDepth(depth + 0.5)
+      .setName(`${background.name}:icon`);
     return { background, icon };
   }
-}
-
-/** Four arrows out of the middle, like a "move" cursor. */
-function drawMoveIcon(icon: Phaser.GameObjects.Graphics): void {
-  const reach = 8;
-  const head = 3;
-  icon.lineBetween(-reach + 1, 0, reach - 1, 0);
-  icon.lineBetween(0, -reach + 1, 0, reach - 1);
-  icon.fillTriangle(0, -reach - 1, -head, -reach + head, head, -reach + head);
-  icon.fillTriangle(0, reach + 1, -head, reach - head, head, reach - head);
-  icon.fillTriangle(-reach - 1, 0, -reach + head, -head, -reach + head, head);
-  icon.fillTriangle(reach + 1, 0, reach - head, -head, reach - head, head);
-}
-
-/** A trash can: lid with its handle, and the can with two ribs. */
-function drawTrashIcon(icon: Phaser.GameObjects.Graphics): void {
-  icon.lineBetween(-7, -5, 7, -5);
-  icon.strokeRect(-2, -8, 4, 3);
-  icon.strokeRect(-5, -3, 10, 11);
-  icon.lineBetween(-1.5, -1, -1.5, 6);
-  icon.lineBetween(1.5, -1, 1.5, 6);
 }

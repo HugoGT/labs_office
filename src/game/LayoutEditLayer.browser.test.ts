@@ -308,6 +308,15 @@ describe('LayoutEditLayer: the selected desk or room carries its move and trash 
     const move = named<Phaser.GameObjects.Rectangle>(scene, LAYOUT_MOVE_BUTTON_NAME)!;
     const trash = named<Phaser.GameObjects.Rectangle>(scene, LAYOUT_DELETE_BUTTON_NAME)!;
     expect(trash.fillColor).toBe(SELECTION_DELETE_COLOR);
+    // Font glyphs, not drawn art: ↔ (U+2194) moves, 🗑 (U+1F5D1) deletes.
+    const moveIcon = named<Phaser.GameObjects.Text>(scene, `${LAYOUT_MOVE_BUTTON_NAME}:icon`)!;
+    const trashIcon = named<Phaser.GameObjects.Text>(scene, `${LAYOUT_DELETE_BUTTON_NAME}:icon`)!;
+    expect(moveIcon.type).toBe('Text');
+    expect(moveIcon.text).toBe('\u2194');
+    expect(trashIcon.text).toBe('\u{1F5D1}');
+    // The wastebasket fills its glyph box: at 10px it keeps a margin in the button.
+    expect(trashIcon.style.fontSize).toBe('10px');
+    expect([moveIcon.x, moveIcon.y, trashIcon.x, trashIcon.y]).toEqual([move.x, move.y, trash.x, trash.y]);
     expect(move.x).toBeLessThan(3.5 * TILE);
     expect(trash.x).toBeGreaterThan(3.5 * TILE);
     expect((move.x + trash.x) / 2).toBeCloseTo(3.5 * TILE);

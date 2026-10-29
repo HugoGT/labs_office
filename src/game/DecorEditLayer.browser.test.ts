@@ -417,6 +417,15 @@ describe('DecorEditLayer', () => {
       const move = named<Phaser.GameObjects.Rectangle>(scene, DECOR_MOVE_BUTTON_NAME)!;
       const trash = named<Phaser.GameObjects.Rectangle>(scene, DECOR_DELETE_BUTTON_NAME)!;
       expect(trash.fillColor).toBe(DECOR_DELETE_COLOR);
+      // Font glyphs, not drawn art: ↔ (U+2194) moves, 🗑 (U+1F5D1) deletes.
+      const moveIcon = named<Phaser.GameObjects.Text>(scene, `${DECOR_MOVE_BUTTON_NAME}:icon`)!;
+      const trashIcon = named<Phaser.GameObjects.Text>(scene, `${DECOR_DELETE_BUTTON_NAME}:icon`)!;
+      expect(moveIcon.type).toBe('Text');
+      expect(moveIcon.text).toBe('\u2194');
+      expect(trashIcon.text).toBe('\u{1F5D1}');
+      // The wastebasket fills its glyph box: at 10px it keeps a margin in the button.
+      expect(trashIcon.style.fontSize).toBe('10px');
+      expect([moveIcon.x, moveIcon.y, trashIcon.x, trashIcon.y]).toEqual([move.x, move.y, trash.x, trash.y]);
       // Side by side under the footprint, centered on it: move left, trash right.
       expect(move.x).toBeLessThan(10.5 * TILE);
       expect(trash.x).toBeGreaterThan(10.5 * TILE);
