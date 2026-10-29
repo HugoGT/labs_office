@@ -53,7 +53,7 @@ import { OFFICE_ROOM_NAME, RECONNECTION_WINDOW_SECONDS } from './OfficeRoom.ts';
 import type { EgressPort } from './recording/egressPort.ts';
 import type { RecordingStoragePort } from './recording/recordingStorage.ts';
 import type { OfficeState } from './schema.ts';
-import { blockTileRect, decodeTerrainWalls, encodeTerrainBlocks } from '../../src/game/officeLayout.ts';
+import { blockIndexAt, blockTileRect, decodeTerrainWalls, encodeTerrainBlocks } from '../../src/game/officeLayout.ts';
 import { decodeOfficeDecor } from '../../src/game/officeDecor.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 import { AuthConfigError } from './authConfigError.ts';
@@ -3095,22 +3095,20 @@ describe('terrain routes (#123 phase 2)', () => {
     const overChair = await postDesk('/admin/desks', { label: 'Mesa A', x: 66, y: 21 });
     expect(overChair.status).toBe(201);
     const { id } = (await overChair.json()) as { id: string };
-    // The chair on the desk goes with it; the table it lands beside stays.
+    // A move carries the chair on the desk and replaces the table that stood where it lands.
     expect((await postDesk(`/admin/desks/${id}`, { x: 71, y: 21 })).status).toBe(200);
-    await waitFor(() => decodeOfficeDecor(room.state.officeDecor, width * height)?.[0]?.index === chair + 5);
+    await waitFor(() => decodeOfficeDecor(room.state.officeDecor, width * height)?.length === 1);
     expect((await postDesk(`/admin/desks/${id}/delete`, {})).status).toBe(200);
-    expect(server.terrain.decor()).toEqual([
-      { index: chair + 5, piece: 'chair-metal', rotation: 90 },
-      { index: table, piece: 'desk-wood', rotation: 0 },
-    ]);
+    expect(server.terrain.decor()).toEqual([{ index: chair + 5, piece: 'chair-metal', rotation: 90 }]);
 
-    const blocked = await setBlock(url, LAWN, 'water');
+    // The chair still keeps water off its block.
+    const blocked = await setBlock(url, blockIndexAt(width, 72, 22), 'water');
     expect(blocked.status).toBe(409);
     expect(await blocked.json()).toEqual({ error: 'terrain-under-placement' });
     await server.shutdown();
   });
 
-  it('refuses a desk created or moved between two desk tables, and keeps one desk table per desk', async () => {
+  it('refuses a desk created between two desk tables, a move replaces them, and keeps one desk table per desk', async () => {
     const desks = createMemoryDesks();
     const { server, url } = await terrainServer({ desks, terrain: createMemoryTerrain() });
     const { width } = server.terrain.snapshot();
@@ -3128,20 +3126,18 @@ describe('terrain routes (#123 phase 2)', () => {
     const created = await postDesk('/admin/desks', { x: 66, y: 17 });
     expect(created.status).toBe(201);
     const { id } = (await created.json()) as { id: string };
-    const moved = await postDesk(`/admin/desks/${id}`, { x: 66, y: 21 });
-    expect(await moved.json()).toEqual({ error: 'desk-between-tables' });
+    // A move replaces what stood where the desk lands: both tables go, so it holds none.
+    expect((await postDesk(`/admin/desks/${id}`, { x: 66, y: 21 })).status).toBe(200);
+    expect(server.terrain.decor()).toEqual([]);
 
-    // On the desk at (66, 19) only the table on row 21 stands; a second one there replaces it.
-    expect((await postDesk(`/admin/desks/${id}`, { x: 66, y: 19 })).status).toBe(200);
-    expect((await setDecor(url, '/admin/decor', [{ index: 19 * width + 67, item: { piece: 'desk-wood', rotation: 0 } }])).status).toBe(200);
-    expect(server.terrain.decor()).toEqual([
-      { index: 19 * width + 67, piece: 'desk-wood', rotation: 0 },
-      { index: 23 * width + 67, piece: 'desk-wood', rotation: 0 },
-    ]);
+    // On the desk a second desk table replaces the first.
+    expect((await setDecor(url, '/admin/decor', [{ index: 21 * width + 67, item: { piece: 'desk-wood', rotation: 0 } }])).status).toBe(200);
+    expect((await setDecor(url, '/admin/decor', [{ index: 23 * width + 67, item: { piece: 'desk-wood', rotation: 0 } }])).status).toBe(200);
+    expect(server.terrain.decor()).toEqual([{ index: 23 * width + 67, piece: 'desk-wood', rotation: 0 }]);
     await server.shutdown();
   });
 
-  it('moves a room with its walls and decor, and refuses a move whose contents would land on another item', async () => {
+  it('moves a room with its walls and decor, erasing the decor that stood where it lands', async () => {
     const { server, url } = await terrainServer({ spaces: createMemorySpaces() });
     const { width } = server.terrain.snapshot();
     const at = (tx: number, ty: number) => ty * width + tx;
@@ -3163,13 +3159,18 @@ describe('terrain routes (#123 phase 2)', () => {
     }
     expect(server.terrain.decor()).toEqual([{ index: at(78, 23), piece: 'chair-metal', rotation: 90 }]);
 
-    // A chair where the carried one would land: the room stays, and so does all it holds.
-    expect((await setDecor(url, '/admin/decor', [{ index: at(68, 23), item: { piece: 'chair-wood', rotation: 0 } }])).status).toBe(200);
-    const blocked = await post(`/admin/spaces/${id}`, { x: 66, y: 21, w: 6, h: 6 });
-    expect(blocked.status).toBe(409);
-    expect(await blocked.json()).toEqual({ error: 'contents-blocked' });
-    expect(server.terrain.walls()[at(76, 21)]).toBe('wall-brick');
-    expect((await (await fetch(`${url}/spaces`)).json()) as unknown).toMatchObject({ spaces: [{ id, x: 76, y: 21 }] });
+    // Back where it was: the chairs standing inside go, the carried one taking a spot of theirs; the one outside stays.
+    expect((await setDecor(url, '/admin/decor', [
+      { index: at(68, 23), item: { piece: 'chair-wood', rotation: 0 } },
+      { index: at(70, 25), item: { piece: 'chair-wood', rotation: 180 } },
+      { index: at(63, 23), item: { piece: 'chair-wood', rotation: 0 } },
+    ])).status).toBe(200);
+    expect((await post(`/admin/spaces/${id}`, { x: 66, y: 21, w: 6, h: 6 })).status).toBe(200);
+    expect(server.terrain.decor()).toEqual([
+      { index: at(63, 23), piece: 'chair-wood', rotation: 0 },
+      { index: at(68, 23), piece: 'chair-metal', rotation: 90 },
+    ]);
+    expect(server.terrain.walls()[at(66, 21)]).toBe('wall-brick');
     await server.shutdown();
   });
 

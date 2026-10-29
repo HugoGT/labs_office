@@ -768,7 +768,14 @@ export class OfficeScene extends Phaser.Scene {
     // #74, PR3b. La capa dibuja overlays y traduce input por su cuenta
     // (mismo comando); la escena solo se queda con el flag que necesita para
     // gatear `drawDesk`.
-    this.layoutEditLayer = new LayoutEditLayer(this, this.bridge);
+    // A dragged desk or room outlines in red the decor its move would erase.
+    this.layoutEditLayer = new LayoutEditLayer(this, this.bridge, {
+      decor: {
+        items: () => this.officeDecor,
+        infoOf: (piece) => decorInfoFromManifest(this.art.manifest)(piece),
+        width: this.layout.width,
+      },
+    });
     this.unsubscribeLayoutEdit = this.bridge.onCommand('layoutedit', (command) => {
       this.layoutCommandActive = command !== null;
       this.layoutHolds = layoutEditHoldsMap(command);

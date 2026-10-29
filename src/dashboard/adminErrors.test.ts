@@ -141,7 +141,7 @@ describe('describeAdminError', () => {
 
   it('a desk or room whose contents do not fit where it lands names what stands in the way', () => {
     expect(describeAdminError(new AdminError('contents-blocked'))).toBe(
-      'Lo que hay dentro (decoración o paredes) no cabe ahí: chocaría con otra pieza, el terreno o un escritorio. Elige otro sitio.',
+      'Lo que hay dentro (decoración o paredes) no cabe ahí: quedaría fuera del terreno o una pared chocaría con algo de fuera. Elige otro sitio.',
     );
   });
 

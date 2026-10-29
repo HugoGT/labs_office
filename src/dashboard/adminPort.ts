@@ -166,7 +166,8 @@ export type AdminErrorCode =
   | 'desk-chair-limit'
   /**
    * A moved desk or room carries its walls and decor, and they would not fit
-   * where it lands (another item, unwalkable ground, a desk). Shared by both
+   * where it lands (unwalkable ground, off the map, a wall on a desk or on
+   * decor outside; the decor inside is replaced, never a refusal). Shared by both
    * routes: it is fixed the same way, by another spot.
    */
   | 'contents-blocked'

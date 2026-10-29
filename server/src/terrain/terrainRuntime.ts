@@ -67,7 +67,8 @@ import {
   type DecorTileRect,
 } from '../../../src/game/officeDecor.ts';
 import { deskOverChairLimit, displacedDeskTables } from '../../../src/game/deskDecorRules.ts';
-import { doorOpenings, doorPosts, doorPostSet, doorShoulders, isDoorPiece, wallsUnderLeftDoors } from '../../../src/game/officeDoors.ts';
+import { doorOpenings, doorPostSet, doorShoulders, isDoorPiece, wallsUnderLeftDoors } from '../../../src/game/officeDoors.ts';
+import { carriedDecor, onAreaOutline, replacedDecor } from '../../../src/game/areaCarry.ts';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
 import type { TerrainStore } from './terrainPort.ts';
 import {
@@ -173,11 +174,13 @@ export interface TerrainRuntime {
    * Moves a desk or room with what stands in it, so reorganizing the office
    * loses no one's decor: the painted posts on or inside the outline of the
    * area `locate` names (a room's walls stand on it), the items wholly inside
-   * it and the doors on those posts, all shifted by the move. The terrain
-   * stays. In the edit queue: `locate` reads the area, the contents are
-   * checked where they land (`TerrainProtectedError` when an item would
-   * stand on unwalkable ground, a wall, a static tile, another item or off
-   * the map, or a post on a desk, a static tile or an item that stays), then
+   * it and the doors on those posts, all shifted by the move (`areaCarry.ts`).
+   * The items that stood where it lands are erased: what it holds replaces
+   * them. The terrain stays. In the edit queue: `locate` reads the area, the
+   * contents are checked where they land (`TerrainProtectedError` when an
+   * item would stand on unwalkable ground, a wall, a static tile, another
+   * item or off the map, or a post on a desk, a static tile or an item that
+   * stays), then
    * `write` saves the desk or room with the layer the move leaves, and only
    * if it returns something are the walls and decor saved, in one statement.
    * `locate` returning `null`, or nothing in the area, just runs `write`.
@@ -478,16 +481,13 @@ export function createTerrainRuntime({
     const move = await locate();
     if (move === null) return write({ width, walls, decor });
     const { from, dx, dy } = move;
-    const onOutline = (post: number): boolean => {
-      const tx = post % width;
-      const ty = Math.floor(post / width);
-      return tx >= from.x && tx <= from.x + from.w && ty >= from.y && ty <= from.y + from.h;
-    };
+    const onOutline = onAreaOutline(from, width);
     // Only painted posts: the store cannot remove one the layout itself draws, so it would come back at load.
     const posts = walls.flatMap((piece, post) => (piece != null && layout.walls[post] == null && onOutline(post) ? [post] : []));
-    const items = decor.filter((item) =>
-      isDoorPiece(item.piece) ? doorPosts(item, width).every(onOutline) : fitsInsideDesk(decorFootprint(item, decorInfo(item.piece), width), from));
-    if (posts.length === 0 && items.length === 0) return write({ width, walls, decor });
+    const items = carriedDecor(decor, from, decorInfo, width);
+    // What stood where the area lands goes: what it holds replaces it.
+    const replaced = replacedDecor(decor, items, { ...from, x: from.x + dx, y: from.y + dy }, decorInfo, width);
+    if (posts.length === 0 && items.length === 0 && replaced.length === 0) return write({ width, walls, decor });
     if (!store) throw new Error('no terrain store: the walls and decor cannot be moved');
     // Posts and anchors share the grid's row-major indexing, so one shift serves both.
     const shift = (index: number): number => {
@@ -498,20 +498,20 @@ export function createTerrainRuntime({
     const placedPosts = posts.map(shift);
     const placed = items.map((item) => ({ ...item, index: shift(item.index) }));
     if (placedPosts.includes(-1) || placed.some(({ index }) => index === -1)) throw new TerrainProtectedError('placement');
-    const carried = new Set(items.map(({ index }) => index));
-    // An item already there that stays would be overwritten, not moved aside.
-    if (placed.some(({ index }) => decor.some((item) => item.index === index && !carried.has(index)))) throw new TerrainProtectedError('placement');
 
     const lifted = [...walls];
     for (const post of posts) lifted[post] = null;
     posts.forEach((post, at) => { lifted[placedPosts[at]!] = walls[post]!; });
+    const nextDecor = withDecor(
+      withDecor(decor, [...items, ...replaced].map(({ index }) => ({ index, item: null }))),
+      placed.map(({ index, ...item }) => ({ index, item })),
+    );
+    // A replaced door takes the wall behind it along, like the eraser (#233); a carried post stays.
+    const landed = new Set(placedPosts);
+    for (const post of wallsUnderLeftDoors(replaced, nextDecor, lifted, width)) if (!landed.has(post)) lifted[post] = null;
     const wallEdits = lifted.flatMap((piece, index): WallEdit[] => (piece === walls[index] ? [] : [{ index, piece: piece as WallPieceId | null }]));
     const nextWalls = withWalls(walls, wallEdits);
     const nextOrder = withWallOrder(wallOrder, walls, wallEdits);
-    const nextDecor = withDecor(
-      withDecor(decor, items.map(({ index }) => ({ index, item: null }))),
-      placed.map(({ index, ...item }) => ({ index, item })),
-    );
     const nextSnapshot = snapshotOf(blocks, nextWalls, nextDecor, nextOrder);
     const anchors = new Set(placed.map(({ index }) => index));
     // What moves keeps its place against what moves with it; only what stays can be in the way.

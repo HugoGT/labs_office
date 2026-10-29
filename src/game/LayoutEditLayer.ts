@@ -31,9 +31,12 @@ import {
   type LayoutEditCommand,
   type PickableRect,
 } from './layoutEditor';
+import { carriedDecor, replacedDecor } from './areaCarry';
+import { DECOR_DELETE_COLOR } from './DecorEditLayer';
 import { LAYOUT_GHOST_DEPTH } from './depthLayers';
 import { MAP_H, TILE } from './mapData';
 import type { OfficeBridge } from './officeBridge';
+import { decorFootprint, type DecorItem, type DecorPieceInfo } from './officeDecor';
 import { PressHold } from './pressHold';
 import { SelectionButtons, type SelectionAction } from './selectionButtons';
 import { LAYOUT_OUTLINE_NAME, drawContextOutlines, drawOutline } from './spaceOutline';
@@ -48,10 +51,23 @@ const SELECTION_STROKE_WIDTH = 3;
 export const LAYOUT_SELECTION_NAME = 'layout-edit:selection';
 export const LAYOUT_MOVE_BUTTON_NAME = 'layout-edit:move';
 export const LAYOUT_DELETE_BUTTON_NAME = 'layout-edit:delete';
+/** The outline of a decor piece a move would erase where it lands, red like the eraser's. */
+export const LAYOUT_REPLACED_NAME = 'layout-edit:replaced';
+const REPLACED_STROKE_WIDTH = 3;
 
 export interface LayoutEditLayerOptions {
   /** Clock for a held press; injectable so tests do not wait on real time. */
   now?: () => number;
+  /**
+   * The office decor layer, read while a desk or room is dragged to outline
+   * what its move would erase (`areaCarry.ts`, the server's rule). Absent
+   * outlines nothing.
+   */
+  decor?: {
+    items: () => readonly DecorItem[];
+    infoOf: (piece: string) => DecorPieceInfo | null;
+    width: number;
+  };
 }
 
 /** A desk or room under a press: how far its center is from the pointer, and where it stands. */
@@ -74,6 +90,8 @@ export class LayoutEditLayer {
   private command: LayoutEditCommand | null = null;
   private pickableObjects: Phaser.GameObjects.Rectangle[] = [];
   private ghost: Phaser.GameObjects.Rectangle | null = null;
+  private replaced: Phaser.GameObjects.Rectangle[] = [];
+  private readonly decor: LayoutEditLayerOptions['decor'];
   private selection: Phaser.GameObjects.Rectangle | null = null;
   private readonly buttons: SelectionButtons;
   /** The selected rectangle the outline and buttons stand for, or `null` while none are shown. */
@@ -132,6 +150,7 @@ export class LayoutEditLayer {
     this.scene = scene;
     this.bridge = bridge;
     this.now = options.now ?? (() => performance.now());
+    this.decor = options.decor;
     this.buttons = new SelectionButtons(scene, { move: LAYOUT_MOVE_BUTTON_NAME, delete: LAYOUT_DELETE_BUTTON_NAME });
 
     this.unsubscribeCommand = bridge.onCommand('layoutedit', (command) => this.applyCommand(command));
@@ -151,6 +170,7 @@ export class LayoutEditLayer {
     this.clearPickable();
     this.ghost?.destroy();
     this.ghost = null;
+    this.drawReplaced([]);
     this.selection?.destroy();
     this.selection = null;
     this.buttons.destroy();
@@ -161,6 +181,7 @@ export class LayoutEditLayer {
     this.clearPickable();
     this.ghost?.destroy();
     this.ghost = null;
+    this.drawReplaced([]);
     this.drawSelection();
 
     if (command === null) return;
@@ -270,6 +291,36 @@ export class LayoutEditLayer {
       .setPosition(tx * TILE + (w * TILE) / 2, ty * TILE + (h * TILE) / 2)
       .setFillStyle(valid ? GHOST_VALID_COLOR : GHOST_INVALID_COLOR, GHOST_ALPHA)
       .setVisible(true);
+    this.drawReplaced(valid ? this.replacedAt(tx, ty) : []);
+  }
+
+  /**
+   * The decor a move of the item being placed would erase if it landed at
+   * (tx, ty): what is not its own and stands where it lands. Nothing while
+   * creating one: only a move replaces.
+   */
+  private replacedAt(tx: number, ty: number): DecorItem[] {
+    const placing = this.command?.placing;
+    const origin = placing?.id === undefined ? undefined : this.command!.pickable.find((rect) => rect.id === placing.id);
+    if (this.decor === undefined || placing == null || origin === undefined) return [];
+    const { items, infoOf, width } = this.decor;
+    const from = { x: origin.x0, y: origin.y0, w: origin.x1 - origin.x0 + 1, h: origin.y1 - origin.y0 + 1 };
+    const decor = items();
+    return replacedDecor(decor, carriedDecor(decor, from, infoOf, width), { x: tx, y: ty, w: placing.w, h: placing.h }, infoOf, width);
+  }
+
+  /** One red outline per item, reusing the ones drawn before. */
+  private drawReplaced(items: readonly DecorItem[]): void {
+    while (this.replaced.length > items.length) this.replaced.pop()!.destroy();
+    items.forEach((item, at) => {
+      const { x, y, w, h } = decorFootprint(item, this.decor!.infoOf(item.piece), this.decor!.width);
+      this.replaced[at] ??= this.scene.add
+        .rectangle(0, 0, 0, 0)
+        .setStrokeStyle(REPLACED_STROKE_WIDTH, DECOR_DELETE_COLOR)
+        .setDepth(LAYOUT_GHOST_DEPTH)
+        .setName(LAYOUT_REPLACED_NAME);
+      this.replaced[at]!.setSize(w * TILE, h * TILE).setPosition((x + w / 2) * TILE, (y + h / 2) * TILE);
+    });
   }
 
   private confirmPlacement(pointer: Phaser.Input.Pointer): void {

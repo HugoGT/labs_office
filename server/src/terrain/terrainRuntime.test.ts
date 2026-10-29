@@ -1220,19 +1220,51 @@ describe('createTerrainRuntime carry', () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
-  it('refuses a move whose contents would land on another item or off the map, before writing', async () => {
+  it('erases the items that stood where the area lands, carried ones replacing them, and saves it all once', async () => {
     const blocker = { index: CHAIR.index - 8 * W, piece: 'chair-wood', rotation: 0 } as const;
-    const store = createMemoryTerrain([], WALL, [CHAIR, DOOR, OUTSIDE, blocker]);
+    const inside = { index: at(67, 16), piece: 'chair-wood', rotation: 180 } as const;
+    const clear = { index: at(63, 16), piece: 'chair-wood', rotation: 0 } as const;
+    const store = createMemoryTerrain([], WALL, [CHAIR, DOOR, OUTSIDE, blocker, inside, clear]);
     const runtime = runtimeWith(store);
     await runtime.load();
     const write = vi.fn(async () => 'moved');
 
-    await expect(runtime.carry(async () => UP, null, NONE, write)).rejects.toThrow(TerrainProtectedError);
+    await expect(runtime.carry(async () => UP, 'admin-1', NONE, write)).resolves.toBe('moved');
+
+    expect(runtime.decor()).toEqual([
+      { ...DOOR, index: DOOR.index - 8 * W },
+      { ...CHAIR, index: CHAIR.index - 8 * W },
+      clear,
+      OUTSIDE,
+    ]);
+    expect(await store.loadDecor()).toEqual(runtime.decor());
+  });
+
+  it('lands an empty area empty: what stood there goes', async () => {
+    const store = createMemoryTerrain([], [], [{ index: at(77, 20), piece: 'chair-wood', rotation: 0 }]);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+    const listener = vi.fn();
+    runtime.subscribe(listener);
+
+    await runtime.carry(async () => ({ from: { x: 75, y: 12, w: 3, h: 3 }, dx: 0, dy: 7 }), null, NONE, async () => 'moved');
+
+    expect(runtime.decor()).toEqual([]);
+    expect(await store.loadDecor()).toEqual([]);
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
+  it('refuses a move whose contents would land off the map, before writing', async () => {
+    const store = createMemoryTerrain([], WALL, [CHAIR, DOOR, OUTSIDE]);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+    const write = vi.fn(async () => 'moved');
+
     await expect(runtime.carry(async () => ({ from: ROOM, dx: 0, dy: -30 }), null, NONE, write)).rejects.toThrow(TerrainProtectedError);
 
     expect(write).not.toHaveBeenCalled();
-    expect(runtime.decor()).toContainEqual(blocker);
     expect(await store.loadWalls()).toEqual(new Map(WALL));
+    expect(await store.loadDecor()).toEqual([DOOR, CHAIR, OUTSIDE].sort((a, b) => a.index - b.index));
   });
 
   it('refuses walls that would land on a desk, reading the protections only to carry walls', async () => {

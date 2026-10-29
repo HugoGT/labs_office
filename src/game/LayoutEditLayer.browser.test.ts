@@ -2,9 +2,11 @@ import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
 import { PAN_THRESHOLD_PX } from './cameraPan';
+import { DECOR_DELETE_COLOR } from './DecorEditLayer';
 import {
   LAYOUT_DELETE_BUTTON_NAME,
   LAYOUT_MOVE_BUTTON_NAME,
+  LAYOUT_REPLACED_NAME,
   LAYOUT_SELECTION_NAME,
   LayoutEditLayer,
   layoutPickName,
@@ -12,6 +14,7 @@ import {
 import { MAP_H, TILE } from './mapData';
 import { SELECTION_BUTTON_PX, SELECTION_DELETE_COLOR } from './selectionButtons';
 import { createOfficeBridge } from './officeBridge';
+import { decorInfoFromPieceId, type DecorItem } from './officeDecor';
 import { HOLD_TO_MOVE_MS } from './pressHold';
 
 /**
@@ -229,6 +232,55 @@ describe('LayoutEditLayer: ghost de colocacion', () => {
     scene.input.emit('pointermove', fakePointer(10 * TILE, 10 * TILE));
 
     expect(findGhost(scene)).toBeUndefined();
+  });
+});
+
+describe('LayoutEditLayer: what a move would erase', () => {
+  const WIDTH = 40;
+  const chair = (tx: number, ty: number): DecorItem => ({ index: ty * WIDTH + tx, piece: 'chair-wood', rotation: 0 });
+  /** A 6x6 room at (4, 4) holding a chair; two more chairs elsewhere. */
+  const ITEMS = [chair(5, 5), chair(21, 5), chair(30, 30)];
+  const MOVING = { pickable: [{ id: 'r1', x0: 4, y0: 4, x1: 9, y1: 9 }], selectedId: null, placing: { w: 6, h: 6, obstacles: [], id: 'r1' } };
+
+  function replacedOutlines(scene: Phaser.Scene): Phaser.GameObjects.Rectangle[] {
+    return scene.children.list.filter(
+      (child): child is Phaser.GameObjects.Rectangle => child.name === LAYOUT_REPLACED_NAME && (child as Phaser.GameObjects.Rectangle).visible,
+    );
+  }
+
+  it('outlines in red the decor a moved room would erase where it lands, never what it carries', async () => {
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    new LayoutEditLayer(scene, bridge, { decor: { items: () => ITEMS, infoOf: decorInfoFromPieceId, width: WIDTH } });
+
+    bridge.emitCommand('layoutedit', MOVING);
+    // The room centered on (23, 7): tiles 20..25 x 4..9, over the chair at (21, 5).
+    scene.input.emit('pointermove', fakePointer(23 * TILE, 7 * TILE));
+
+    const [outline, ...rest] = replacedOutlines(scene);
+    expect(rest).toEqual([]);
+    expect(outline!.strokeColor).toBe(DECOR_DELETE_COLOR);
+    expect([outline!.x, outline!.y, outline!.width, outline!.height]).toEqual([21.5 * TILE, 5.5 * TILE, TILE, TILE]);
+
+    // One tile off its own place: its own chair stays under it, and nothing goes.
+    scene.input.emit('pointermove', fakePointer(8 * TILE, 7 * TILE));
+    expect(replacedOutlines(scene)).toEqual([]);
+  });
+
+  it('outlines nothing while creating, and drops the outlines when the move ends', async () => {
+    const scene = await bootHostScene();
+    const bridge = createOfficeBridge();
+    new LayoutEditLayer(scene, bridge, { decor: { items: () => ITEMS, infoOf: decorInfoFromPieceId, width: WIDTH } });
+
+    bridge.emitCommand('layoutedit', { pickable: [], selectedId: null, placing: { w: 6, h: 6, obstacles: [] } });
+    scene.input.emit('pointermove', fakePointer(23 * TILE, 7 * TILE));
+    expect(replacedOutlines(scene)).toEqual([]);
+
+    bridge.emitCommand('layoutedit', MOVING);
+    scene.input.emit('pointermove', fakePointer(23 * TILE, 7 * TILE));
+    expect(replacedOutlines(scene)).toHaveLength(1);
+    bridge.emitCommand('layoutedit', null);
+    expect(replacedOutlines(scene)).toEqual([]);
   });
 });
 
