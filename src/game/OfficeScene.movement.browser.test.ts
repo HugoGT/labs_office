@@ -79,7 +79,7 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(body.velocity.length()).toBeCloseTo(690, 5);
   });
 
-  it('preserves the clock on direction changes and keyboard takeover, and resets 1 s after release and on arrival', async () => {
+  it('preserves the clock on direction changes and keyboard takeover, and resets 250 ms after release and on arrival', async () => {
     const { player, body, movement, frame, walk, doubleClick } = await movementArena();
     movement.cursors.right.isDown = true;
     walk(2100);
@@ -95,7 +95,7 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     frame();
     expect(body.velocity.x).toBeCloseTo(-460);
     movement.cursors.left.isDown = false;
-    walk(980);
+    walk(240);
     expect(movement.walkingMs).toBeGreaterThan(1500);
     frame();
     expect(movement.walkingMs).toBe(0);
@@ -109,7 +109,7 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(movement.walkingMs).toBe(0);
   });
 
-  it('keeps the speed for 1 s after a bump or a gap between keys, then drops back to 1x', async () => {
+  it('keeps the speed for 250 ms after a bump or a gap between keys, then drops back to 1x', async () => {
     const { body, movement, frame, walk } = await movementArena();
     movement.cursors.right.isDown = true;
     walk(3000);
@@ -121,19 +121,19 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     movement.cursors.down.isDown = true;
     frame();
     expect(body.velocity.y).toBeCloseTo(690, 5);
-    // A head-on bump holds the speed for under 1 s; sliding away resumes at 3x.
+    // A head-on bump holds the speed for under 250 ms; sliding away resumes at 3x.
     movement.collisionRects = [{ x: 0, y: body.bottom + 10, w: 10000, h: 1 }];
     movement.buildPieceColliders();
-    walk(900);
+    walk(200);
     expect(movement.walkingMs).toBe(3000);
     movement.cursors.down.isDown = false;
     movement.cursors.right.isDown = true;
     frame();
     expect(body.velocity.x).toBeCloseTo(690, 5);
-    // Blocked for a full second: back to normal speed.
+    // Blocked for 250 ms: back to normal speed.
     movement.cursors.right.isDown = false;
     movement.cursors.down.isDown = true;
-    walk(1000);
+    walk(260);
     expect(movement.walkingMs).toBe(0);
     movement.cursors.down.isDown = false;
     movement.cursors.right.isDown = true;

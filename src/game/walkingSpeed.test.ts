@@ -14,12 +14,12 @@ describe('continuous walking speed', () => {
     expect(advanceWalkingTime(0, 0, true, 100)).toEqual({ continuousMs: 100, idleMs: 0 });
   });
 
-  it('holds the clock without crediting it for up to 1 s without movement, then resets', () => {
+  it('holds the clock without crediting it for up to 250 ms without movement, then resets', () => {
     expect(advanceWalkingTime(3000, 0, false, 100)).toEqual({ continuousMs: 3000, idleMs: 100 });
-    expect(advanceWalkingTime(3000, 980, false, 10)).toEqual({ continuousMs: 3000, idleMs: 990 });
-    expect(advanceWalkingTime(3000, 990, false, 10)).toEqual({ continuousMs: 0, idleMs: 0 });
-    expect(advanceWalkingTime(3000, 900, false, 250)).toEqual({ continuousMs: 0, idleMs: 0 });
-    expect(advanceWalkingTime(3000, 990, true, 10)).toEqual({ continuousMs: 3000, idleMs: 0 });
+    expect(advanceWalkingTime(3000, 230, false, 10)).toEqual({ continuousMs: 3000, idleMs: 240 });
+    expect(advanceWalkingTime(3000, 240, false, 10)).toEqual({ continuousMs: 0, idleMs: 0 });
+    expect(advanceWalkingTime(3000, 200, false, 100)).toEqual({ continuousMs: 0, idleMs: 0 });
+    expect(advanceWalkingTime(3000, 240, true, 10)).toEqual({ continuousMs: 3000, idleMs: 0 });
   });
 
   it.each([0, -1, NaN, Infinity, 251, 10000])('resets on discontinuous delta %s', (delta) => {

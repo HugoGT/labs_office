@@ -9,8 +9,8 @@ export function walkingMultiplier(continuousMs: number): number {
   return 1 + Math.floor(Math.min(MAX_WALK_RAMP_MS, Math.max(0, continuousMs)) / WALK_RAMP_STEP_MS);
 }
 
-/** A bump, a turn between keys or a short stop keeps the speed; only this long without moving drops it. */
-const WALK_GRACE_MS = 1000;
+/** A bump, a turn between keys or a brief stop keeps the speed; this long without moving drops it to 1x. */
+const WALK_GRACE_MS = 250;
 
 export interface WalkingTime {
   continuousMs: number;
