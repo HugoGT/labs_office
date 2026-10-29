@@ -435,3 +435,53 @@ describe('useLayoutEditor: Escape frees the map one step at a time', () => {
     expect(result.current.state).toEqual({ tag: 'off' });
   });
 });
+
+describe('useLayoutEditor: Supr or Backspace deletes the selected desk, like a decor item', () => {
+  function key(init: KeyboardEventInit, target: EventTarget = document.body): KeyboardEvent {
+    const event = new KeyboardEvent('keydown', { cancelable: true, bubbles: true, ...init });
+    act(() => {
+      target.dispatchEvent(event);
+    });
+    return event;
+  }
+
+  it('deletes the selected desk, unless someone is typing or a modifier is held; with none selected it does nothing', async () => {
+    const desks = fakeDesks();
+    const { bridge, result } = setup(desks);
+    act(() => result.current.enter());
+    await waitFor(() => expect(result.current.desks).toHaveLength(2));
+
+    // Nothing selected: the keys are left alone.
+    expect(key({ key: 'Delete' }).defaultPrevented).toBe(false);
+
+    act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+    const input = document.createElement('input');
+    document.body.append(input);
+    input.focus();
+    expect(key({ key: 'Backspace' }, input).defaultPrevented).toBe(false);
+    input.remove();
+    expect(key({ key: 'Delete', ctrlKey: true }).defaultPrevented).toBe(false);
+    expect(desks.deleteDesk).not.toHaveBeenCalled();
+
+    expect(key({ key: 'Delete' }).defaultPrevented).toBe(true);
+    await waitFor(() => expect(desks.deleteDesk).toHaveBeenCalledWith('id-mesa'));
+    await waitFor(() => expect(result.current.state).toEqual({ tag: 'idle', kind: 'desk' }));
+
+    act(() => bridge.emit('layoutpick', { id: 'id-otra' }));
+    key({ key: 'Backspace' });
+    await waitFor(() => expect(desks.deleteDesk).toHaveBeenLastCalledWith('id-otra'));
+  });
+
+  it('a desk being moved is not deleted, and a closed editor leaves the keys alone', async () => {
+    const desks = fakeDesks();
+    const { bridge, result } = setup(desks);
+    expect(key({ key: 'Delete' }).defaultPrevented).toBe(false);
+    act(() => result.current.enter());
+    await waitFor(() => expect(result.current.desks).toHaveLength(2));
+
+    act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+    act(() => result.current.startMove());
+    expect(key({ key: 'Delete' }).defaultPrevented).toBe(false);
+    expect(desks.deleteDesk).not.toHaveBeenCalled();
+  });
+});

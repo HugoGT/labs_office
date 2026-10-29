@@ -230,7 +230,7 @@ export class DecorEditLayer {
     return decorPickAt(this.deps.items(), (piece) => this.deps.infoOf(piece), this.deps.width, tile, this.command.area)?.index ?? null;
   }
 
-    /** Starts the drag of what a press grabbed: React turns it into a move, like the move button. */
+  /** Starts the drag of what a press grabbed: React turns it into a move, like the move button. */
   private grab(grabbed: Grab | null): void {
     if (grabbed === null) return;
     this.dragging = grabbed;

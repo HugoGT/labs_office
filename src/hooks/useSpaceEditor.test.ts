@@ -487,3 +487,34 @@ describe('useSpaceEditor: desks picked from the default view of "Editar espacios
     expect(view.result.current.state).toEqual({ tag: 'selected', kind: 'room', id: 'id-sala' });
   });
 });
+
+describe('useSpaceEditor: Supr or Backspace deletes the selected room, or desk in the default view', () => {
+  function key(init: KeyboardEventInit): KeyboardEvent {
+    const event = new KeyboardEvent('keydown', { cancelable: true, bubbles: true, ...init });
+    act(() => {
+      document.body.dispatchEvent(event);
+    });
+    return event;
+  }
+
+  it('deletes the selected room through the spaces port and a selected desk through the desk port', async () => {
+    const spaces = fakeSpaces();
+    const desks = fakeDesks();
+    const bridge = createOfficeBridge();
+    const { result } = renderHook(() =>
+      useSpaceEditor({ bridge, spaces, desks, refreshDesks: vi.fn(), refreshSpaces: vi.fn(), pickDesks: true }),
+    );
+    act(() => result.current.enter());
+    await waitFor(() => expect(result.current.spaces).toHaveLength(2));
+    await waitFor(() => expect(desks.listDesks).toHaveBeenCalled());
+
+    act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
+    expect(key({ key: 'Delete' }).defaultPrevented).toBe(true);
+    await waitFor(() => expect(spaces.deleteSpace).toHaveBeenCalledWith('id-sala'));
+
+    act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+    key({ key: 'Backspace' });
+    await waitFor(() => expect(desks.deleteDesk).toHaveBeenCalledWith('id-mesa'));
+    expect(spaces.deleteSpace).toHaveBeenCalledTimes(1);
+  });
+});

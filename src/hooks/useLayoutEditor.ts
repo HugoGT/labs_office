@@ -56,6 +56,7 @@ import {
   type LayoutObstacleItem,
 } from '../game/layoutEditor';
 import type { OfficeBridge } from '../game/officeBridge';
+import { useDeleteKey } from './useDeleteKey';
 import { useEscapeStep } from './useEscapeStep';
 
 /** Mismo tamano que el servidor fija para cada escritorio nuevo (`server/src/desks/deskRules.ts`'s `DESK_SIDE`); no se importa porque `game/`/`hooks/` no leen del servidor -- ver `deskAdminPort.ts`. */
@@ -259,6 +260,13 @@ export function useLayoutEditor({
       setPending(false);
     }
   }, [desks, spaces, refreshDesks, refreshSpaces]);
+
+  // Supr or Backspace deletes the selected one, like its trash button on the map.
+  useDeleteKey(active, () => {
+    if (stateRef.current.tag !== 'selected') return false;
+    void remove();
+    return true;
+  });
 
   // The buttons under the selection on the map: only the desk this editor holds selected answers.
   useEffect(

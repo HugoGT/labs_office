@@ -38,6 +38,7 @@ import {
   type MovingExclusion,
 } from '../game/layoutEditor';
 import type { OfficeBridge } from '../game/officeBridge';
+import { useDeleteKey } from './useDeleteKey';
 import { useEscapeStep } from './useEscapeStep';
 
 export interface UseSpaceEditorOptions {
@@ -283,6 +284,13 @@ export function useSpaceEditor({
     const current = stateRef.current;
     if (!pickDesks && current.tag === 'selected' && deskListRef.current.some((desk) => desk.id === current.id)) deselect();
   }, [pickDesks, deselect]);
+
+  // Supr or Backspace deletes the selected one, like its trash button on the map.
+  useDeleteKey(active, () => {
+    if (stateRef.current.tag !== 'selected') return false;
+    void remove();
+    return true;
+  });
 
   // The buttons under the selection on the map: only the room this editor holds selected answers.
   useEffect(
