@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useId, useState } from 'react';
-import { ArtPiecePreview } from '../components/ArtPiecePreview';
+import { ArtPiecePreview } from './ArtPiecePreview';
 import { usePrivateArtImages } from '../hooks/usePrivateArtImages';
-import { describeAdminError } from './adminErrors';
-import type { Contribution, ContributionStatus } from './artContributionPort';
-import type { ArtReviewPort } from './artReviewPort';
-import styles from './DashboardScreen.module.css';
+import { describeAdminError } from '../dashboard/adminErrors';
+import type { Contribution, ContributionStatus } from '../dashboard/artContributionPort';
+import type { ArtReviewPort } from '../dashboard/artReviewPort';
+import styles from './ArtAdminSection.module.css';
 
 const TABS: readonly { status: ContributionStatus; label: string; empty: string }[] = [
   { status: 'pending', label: 'Pendientes', empty: 'No hay piezas pendientes de revisión.' },
@@ -45,8 +45,8 @@ function ReviewRow({ contribution, read, busy, onApprove, onReject, onRetire }: 
   const { name, status } = contribution;
 
   return (
-    <li className={styles.reviewItem}>
-      <div className={styles.reviewMeta}>
+    <li className={styles.item}>
+      <div className={styles.meta}>
         <strong>{name}</strong>
         <span className={styles.label}>
           {KIND_LABELS[contribution.kind] ?? contribution.kind} · Autoría: {contribution.author}
@@ -58,33 +58,33 @@ function ReviewRow({ contribution, read, busy, onApprove, onReject, onRetire }: 
       <ArtPiecePreview kind={contribution.kind} name={name} images={images} />
       {status === 'pending' && !rejecting && (
         <div className={styles.actions}>
-          <button type="button" className={styles.submit} disabled={busy} aria-label={`Aprobar ${name}`} onClick={onApprove}>
+          <button type="button" className={styles.button} disabled={busy} aria-label={`Aprobar ${name}`} onClick={onApprove}>
             Aprobar
           </button>
-          <button type="button" className={styles.ghost} disabled={busy} aria-label={`Rechazar ${name}`} onClick={() => setRejecting(true)}>
+          <button type="button" className={styles.button} disabled={busy} aria-label={`Rechazar ${name}`} onClick={() => setRejecting(true)}>
             Rechazar
           </button>
         </div>
       )}
       {status === 'pending' && rejecting && (
         <div className={styles.form}>
-          <div className={`${styles.field} ${styles.emailField}`}>
+          <div className={styles.field}>
             <label className={styles.label} htmlFor={`${id}-reason`}>
               Motivo del rechazo
             </label>
             <input id={`${id}-reason`} className={styles.input} value={reason} maxLength={200} onChange={(event) => setReason(event.target.value)} />
           </div>
-          <button type="button" className={styles.submit} disabled={busy || reason.trim() === ''} onClick={() => onReject(reason.trim())}>
+          <button type="button" className={styles.button} disabled={busy || reason.trim() === ''} onClick={() => onReject(reason.trim())}>
             Confirmar rechazo
           </button>
-          <button type="button" className={styles.ghost} disabled={busy} onClick={() => setRejecting(false)}>
+          <button type="button" className={styles.button} disabled={busy} onClick={() => setRejecting(false)}>
             Cancelar
           </button>
         </div>
       )}
       {status === 'approved' && contribution.retiredAt === null && RETIRABLE_KINDS.has(contribution.kind) && (
         <div className={styles.actions}>
-          <button type="button" className={styles.revoke} disabled={busy} aria-label={`Retirar ${name}`} onClick={onRetire}>
+          <button type="button" className={`${styles.button} ${styles.danger}`} disabled={busy} aria-label={`Retirar ${name}`} onClick={onRetire}>
             Retirar
           </button>
         </div>
@@ -93,20 +93,21 @@ function ReviewRow({ contribution, read, busy, onApprove, onReject, onRetire }: 
   );
 }
 
-export interface ArtReviewPanelProps {
-  /** Port already built (`DashboardRoute`); this panel knows nothing of HTTP. */
+export interface ArtReviewSectionProps {
+  /** Port already built (`OfficeShell`); this section knows nothing of HTTP. */
   reviews: ArtReviewPort;
 }
 
 /**
- * Review queue of art contributions (#122), for admins and the superadmin.
- * Container like `UsersPanel`: the only one that calls the port. Each piece
+ * "Revisión de arte" inside "Personalizar" (#122), for admins and the
+ * superadmin. Container like `ArtContributionSection`: the only one that calls
+ * the port. Each piece
  * shows its animated preview (a character walks in four directions and sits)
  * read through the private route, since a pending file is not public.
  * Approving puts it in everyone's catalog; rejecting asks for the reason its
  * uploader reads; an approved character or plant can be withdrawn.
  */
-export function ArtReviewPanel({ reviews }: ArtReviewPanelProps) {
+export function ArtReviewSection({ reviews }: ArtReviewSectionProps) {
   const id = useId();
   const [status, setStatus] = useState<ContributionStatus>('pending');
   const [items, setItems] = useState<Contribution[] | null>(null);
@@ -149,22 +150,22 @@ export function ArtReviewPanel({ reviews }: ArtReviewPanelProps) {
   const tab = TABS.find((entry) => entry.status === status)!;
 
   return (
-    <section className={styles.card} aria-labelledby={`${id}-title`}>
-      <h2 className={styles.cardTitle} id={`${id}-title`}>
+    <section className={styles.section} aria-labelledby={`${id}-title`}>
+      <h3 className={styles.title} id={`${id}-title`}>
         Revisión de arte
-      </h2>
-      <p className={styles.cardSubtitle}>
+      </h3>
+      <p className={styles.hint}>
         Personajes y plantas que sube la gente desde «Personalizar». Nada pendiente se ve en la oficina hasta que lo apruebas.
       </p>
 
-      <div className={styles.actions} role="tablist" aria-label="Estado">
+      <div className={styles.tabs} role="tablist" aria-label="Estado">
         {TABS.map((entry) => (
           <button
             key={entry.status}
             type="button"
             role="tab"
             aria-selected={entry.status === status}
-            className={entry.status === status ? styles.submit : styles.ghost}
+            className={entry.status === status ? `${styles.button} ${styles.tabActive}` : styles.button}
             onClick={() => {
               setDone(null);
               setError(null);
@@ -182,14 +183,14 @@ export function ArtReviewPanel({ reviews }: ArtReviewPanelProps) {
         </div>
       )}
       {done !== null && (
-        <p className={styles.uploadDone} role="status">
+        <p className={styles.done} role="status">
           {done}
         </p>
       )}
 
       {items !== null && items.length === 0 && <p className={styles.empty}>{tab.empty}</p>}
       {items !== null && items.length > 0 && (
-        <ul className={styles.reviewList}>
+        <ul className={styles.list}>
           {items.map((contribution) => (
             <ReviewRow
               key={contribution.id}

@@ -89,7 +89,7 @@ export interface ArtContributionSectionProps {
 
 /**
  * "Aportar arte" inside "Personalizar" (#122), for anyone signed in. Container
- * like `ArtUploadPanel`: the only one that calls the port. It asks each kind
+ * like `ArtUploadSection`: the only one that calls the port. It asks each kind
  * for its sheets, the rights statement, and lists the own contributions with
  * their review state; a pending one shows only here and in the review queue.
  */

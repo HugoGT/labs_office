@@ -2,6 +2,8 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type { CharacterPort } from '../auth/characterPort';
 import type { Role } from '../dashboard/adminPort';
 import type { ArtContributionPort } from '../dashboard/artContributionPort';
+import type { ArtReviewPort } from '../dashboard/artReviewPort';
+import type { ArtUploadPort } from '../dashboard/artUploadPort';
 import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
@@ -32,12 +34,20 @@ const ArtContributionSectionLazy = lazy(() =>
   import('./ArtContributionSection').then((sectionModule) => ({ default: sectionModule.ArtContributionSection })),
 );
 
+/** Admin art (#121, #122): lazy like the contribution form, only admins ever open it. */
+const ArtUploadSectionLazy = lazy(() =>
+  import('./ArtUploadSection').then((sectionModule) => ({ default: sectionModule.ArtUploadSection })),
+);
+const ArtReviewSectionLazy = lazy(() =>
+  import('./ArtReviewSection').then((sectionModule) => ({ default: sectionModule.ArtReviewSection })),
+);
+
 /** "Mi personaje": the entrance's creator again, lazy like the others until someone opens it. */
 const MyCharacterSectionLazy = lazy(() =>
   import('./MyCharacterSection').then((sectionModule) => ({ default: sectionModule.MyCharacterSection })),
 );
 
-type PersonalizeSection = LayoutEditorSection | 'art' | 'character';
+type PersonalizeSection = LayoutEditorSection | 'art' | 'art-review' | 'character';
 
 /** What "Decoración" edits for whoever does not administer: the own desk (#208). */
 export interface MySpace {
@@ -120,6 +130,12 @@ export interface OfficeSidebarProps {
    */
   contributions?: ArtContributionPort | null;
   /**
+   * Ports of the admin side of art, used only if `role` is `admin`/`superadmin`:
+   * their "Aportar arte" publishes straight to the catalog (#121) and they get
+   * "Revisión de arte" (#122). Absent, an admin contributes for review like anyone.
+   */
+  artAdmin?: { uploads: ArtUploadPort; reviews: ArtReviewPort } | null;
+  /**
    * Editing one's own character ("Mi personaje"), for anyone signed in: the
    * entrance's port. `undefined`/`null` (no server, or no session) leaves it out.
    */
@@ -161,6 +177,7 @@ export function OfficeSidebar({
   onLayoutEditingChange,
   forceExitLayoutEditing,
   contributions,
+  artAdmin,
   character,
   onCallPeer,
   openRequest = null,
@@ -205,6 +222,7 @@ export function OfficeSidebar({
 
   // "Decoración" is one menu for everyone (#208): the whole map for an admin
   // with the decor port, the claimed desk for anyone else.
+  const adminArt = (role === 'admin' || role === 'superadmin') && artAdmin ? artAdmin : null;
   const officeDecor = canAdminister && decor !== undefined && decor !== null;
   const entries: { section: PersonalizeSection; label: string }[] = [
     // First: laying out tables and chairs is what desks are then created on top of.
@@ -215,7 +233,8 @@ export function OfficeSidebar({
       ...(collisions ? [{ section: 'collision' as const, label: 'Editar colisiones' }] : []),
     ] : []),
     ...(character ? [{ section: 'character' as const, label: 'Mi personaje' }] : []),
-    ...(contributions ? [{ section: 'art' as const, label: 'Aportar arte' }] : []),
+    ...(adminArt || contributions ? [{ section: 'art' as const, label: 'Aportar arte' }] : []),
+    ...(adminArt ? [{ section: 'art-review' as const, label: 'Revisión de arte' }] : []),
   ];
   const available = section === null || entries.some((entry) => entry.section === section);
   // Drop unavailable selections immediately, not just hide them until a port returns.
@@ -329,9 +348,19 @@ export function OfficeSidebar({
               <MyCharacterSectionLazy character={character} onClose={() => setSection(null)} />
             </Suspense>
           )}
-          {currentSection === 'art' && contributions !== undefined && contributions !== null && (
+          {currentSection === 'art' && adminArt !== null && (
+            <Suspense fallback={null}>
+              <ArtUploadSectionLazy uploads={adminArt.uploads} />
+            </Suspense>
+          )}
+          {currentSection === 'art' && adminArt === null && contributions !== undefined && contributions !== null && (
             <Suspense fallback={null}>
               <ArtContributionSectionLazy contributions={contributions} />
+            </Suspense>
+          )}
+          {currentSection === 'art-review' && adminArt !== null && (
+            <Suspense fallback={null}>
+              <ArtReviewSectionLazy reviews={adminArt.reviews} />
             </Suspense>
           )}
         </div>

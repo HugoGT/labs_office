@@ -1,0 +1,182 @@
+/* Admin art inside the expanded "Personalizar" panel: the direct upload (#121)
+   and the review queue (#122). Same vocabulary as ArtContributionSection.module.css,
+   which sits in the same panel. */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid #2b3444;
+  padding-top: 8px;
+}
+
+.title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e5e7eb;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.label,
+.hint {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.hint {
+  margin: 0;
+}
+
+.input {
+  width: 100%;
+  min-width: 0;
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.file {
+  font-size: 12px;
+  color: #e5e7eb;
+  max-width: 100%;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.colorInput {
+  width: 40px;
+  height: 28px;
+  padding: 2px;
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+}
+
+/* The sheets of one kind, in their own box under the metadata. */
+.files {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid #2b3444;
+  border-radius: var(--radius-control);
+}
+
+/* Pixel art never smoothed, on a checkerboard so transparency and a leftover
+   background read at a glance. */
+.preview {
+  max-width: 100%;
+  max-height: 160px;
+  width: auto;
+  align-self: flex-start;
+  image-rendering: pixelated;
+  border-radius: var(--radius-control);
+  background-color: #1f2937;
+  background-image:
+    linear-gradient(45deg, #374151 25%, transparent 25%),
+    linear-gradient(-45deg, #374151 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #374151 75%),
+    linear-gradient(-45deg, transparent 75%, #374151 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+.button {
+  align-self: flex-start;
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: #374151;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.danger {
+  color: #fca5a5;
+}
+
+.error {
+  font-size: 12px;
+  color: #fca5a5;
+}
+
+.done {
+  margin: 0;
+  font-size: 12px;
+  color: #a7f3d0;
+}
+
+.empty {
+  margin: 0;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.tabs,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tabActive {
+  background: #374151;
+  border-color: #4b5563;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #2b3444;
+  border-radius: var(--radius-control);
+  font-size: 12px;
+  color: #e5e7eb;
+}
+
+.meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}

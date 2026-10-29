@@ -134,6 +134,16 @@ describe('DashboardRoute: paneles legacy de escritorios y espacios (#107), y cat
     expect(screen.queryByRole('region', { name: /espacios/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: /catálogo/i })).not.toBeInTheDocument();
   });
+
+  it('ya no monta Revisión de arte ni Subir arte: viven en Personalizar', async () => {
+    createAdminClientMock.mockReturnValue(fakePort());
+
+    render(<DashboardRoute session={fakeSession()} />);
+
+    await screen.findByRole('region', { name: /nuevo usuario/i });
+    expect(screen.queryByRole('region', { name: /revisión de arte/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: /subir arte|aportar arte/i })).not.toBeInTheDocument();
+  });
 });
 
 describe('DashboardRoute: users panel (#93)', () => {

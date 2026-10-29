@@ -1,13 +1,14 @@
 import { useId, useState, type FormEvent } from 'react';
 import { ART_IMAGE_SPECS, sheetSize, type ArtImageKind } from '../game/artContract';
-import { describeAdminError } from './adminErrors';
-import { AdminError } from './adminPort';
-import { ART_UPLOAD_KINDS, type ArtUploadInput, type ArtUploadKind, type ArtUploadPort, type UploadedArt } from './artUploadPort';
-import styles from './DashboardScreen.module.css';
+import { describeAdminError } from '../dashboard/adminErrors';
+import { AdminError } from '../dashboard/adminPort';
+import { ART_UPLOAD_KINDS, type ArtUploadInput, type ArtUploadKind, type ArtUploadPort, type UploadedArt } from '../dashboard/artUploadPort';
+import styles from './ArtAdminSection.module.css';
 
 /**
- * Admin art upload (#121). Container like `UsersPanel`: the only one that
- * calls the port. Each kind asks for the files and fields the server needs,
+ * "Aportar arte" for admins inside "Personalizar" (#121): what an admin uploads
+ * is in the catalog for everyone at once, with no review. Container like
+ * `ArtContributionSection`: the only one that calls the port. Each kind asks for the files and fields the server needs,
  * with the exact size of each sheet next to its input, and a refusal names
  * the file and what to change. The checks themselves are the server's: it
  * decodes, validates and re-encodes every file before storing it.
@@ -87,12 +88,12 @@ function successMessage(uploaded: UploadedArt): string {
   return `«${uploaded.name}» ya está en el catálogo${where}. La oficina la carga sin desplegar.`;
 }
 
-export interface ArtUploadPanelProps {
-  /** Port already built (`DashboardRoute`); this panel knows nothing of HTTP. */
+export interface ArtUploadSectionProps {
+  /** Port already built (`OfficeShell`); this section knows nothing of HTTP. */
   uploads: ArtUploadPort;
 }
 
-export function ArtUploadPanel({ uploads }: ArtUploadPanelProps) {
+export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
   const id = useId();
   const [kind, setKind] = useState<ArtUploadKind>('character');
   const [name, setName] = useState('');
@@ -161,13 +162,13 @@ export function ArtUploadPanel({ uploads }: ArtUploadPanelProps) {
   }
 
   return (
-    <section className={styles.card} aria-labelledby={`${id}-title`}>
-      <h2 className={styles.cardTitle} id={`${id}-title`}>
-        Subir arte
-      </h2>
-      <p className={styles.cardSubtitle}>
-        PNG de 8 bits con el tamaño exacto de su tipo, hasta 128 colores y 128 KB por archivo. El
-        servidor lo revisa y lo vuelve a codificar, y la pieza aparece en la oficina sin desplegar.
+    <section className={styles.section} aria-labelledby={`${id}-title`}>
+      <h3 className={styles.title} id={`${id}-title`}>
+        Aportar arte
+      </h3>
+      <p className={styles.hint}>
+        Como admin, lo que subes queda disponible para toda la oficina sin pasar por revisión. PNG de
+        8 bits con el tamaño exacto de su tipo, hasta 128 colores y 128 KB por archivo.
       </p>
 
       {error !== null && (
@@ -176,7 +177,7 @@ export function ArtUploadPanel({ uploads }: ArtUploadPanelProps) {
         </div>
       )}
       {done !== null && (
-        <p className={styles.uploadDone} role="status">
+        <p className={styles.done} role="status">
           {done}
         </p>
       )}
@@ -188,7 +189,7 @@ export function ArtUploadPanel({ uploads }: ArtUploadPanelProps) {
           </label>
           <select
             id={`${id}-kind`}
-            className={`${styles.input} ${styles.roleSelect}`}
+            className={styles.input}
             value={kind}
             onChange={(event) => changeKind(event.target.value as ArtUploadKind)}
           >
@@ -242,7 +243,7 @@ export function ArtUploadPanel({ uploads }: ArtUploadPanelProps) {
 
         {hasColor(kind) && (
           <>
-            <div className={styles.checkboxField}>
+            <div className={styles.check}>
               <input id={`${id}-colorable`} type="checkbox" checked={colorable} onChange={(event) => setColorable(event.target.checked)} />
               <label className={styles.label} htmlFor={`${id}-colorable`}>
                 Admite color
@@ -265,7 +266,7 @@ export function ArtUploadPanel({ uploads }: ArtUploadPanelProps) {
           </>
         )}
 
-        <fieldset className={styles.uploadFiles}>
+        <fieldset className={styles.files}>
           <legend className={styles.label}>Archivos PNG</legend>
           {roles.map(({ role, label, imageKind }) => (
             <div className={styles.field} key={`${kind}-${role}`}>
@@ -274,6 +275,7 @@ export function ArtUploadPanel({ uploads }: ArtUploadPanelProps) {
               </label>
               <input
                 id={`${id}-file-${role}`}
+                className={styles.file}
                 type="file"
                 accept="image/png"
                 aria-describedby={`${id}-file-${role}-size`}
@@ -282,12 +284,12 @@ export function ArtUploadPanel({ uploads }: ArtUploadPanelProps) {
               <span className={styles.label} id={`${id}-file-${role}-size`}>
                 {sizeOf(imageKind)}
               </span>
-              {files[role] !== undefined && <img className={styles.uploadPreview} src={files[role]} alt={`Vista previa de ${label}`} />}
+              {files[role] !== undefined && <img className={styles.preview} src={files[role]} alt={`Vista previa de ${label}`} />}
             </div>
           ))}
         </fieldset>
 
-        <button className={styles.submit} type="submit" disabled={!ready || busy}>
+        <button className={styles.button} type="submit" disabled={!ready || busy}>
           {busy ? 'Subiendo…' : 'Subir'}
         </button>
       </form>

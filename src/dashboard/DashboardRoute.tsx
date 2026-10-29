@@ -6,12 +6,6 @@ import type { AdminPort } from './adminPort';
 import { createUsersAdminClient } from './usersAdminClient';
 import type { AdminUser, UsersAdminPort } from './usersAdminPort';
 import { UsersPanel } from './UsersPanel';
-import { ArtUploadPanel } from './ArtUploadPanel';
-import { createArtUploadClient } from './artUploadClient';
-import type { ArtUploadPort } from './artUploadPort';
-import { ArtReviewPanel } from './ArtReviewPanel';
-import { createArtReviewClient } from './artReviewClient';
-import type { ArtReviewPort } from './artReviewPort';
 import { DashboardScreen, type RenewTarget } from './DashboardScreen';
 import styles from './DashboardScreen.module.css';
 import { resolveOfficeApiBaseUrl } from './officeApiBaseUrl';
@@ -39,10 +33,10 @@ export interface DashboardRouteProps {
  * aqui evita el envoltorio `.then(m => ({ default: m.X }))` en `App`.
  */
 /**
- * Los tres puertos del panel, construidos de una vez. Van juntos porque
- * dependen de lo mismo -- el endpoint de la oficina y la sesion -- y porque
- * ninguno se puede construir si el otro no: o hay servidor y sesion para los
- * tres, o no hay panel.
+ * Los puertos del panel, construidos de una vez. Van juntos porque dependen
+ * de lo mismo -- el endpoint de la oficina y la sesion -- y porque ninguno se
+ * puede construir si el otro no: o hay servidor y sesion para todos, o no hay
+ * panel. El arte (subir y revisar) vive en "Personalizar", no aqui.
  *
  * Escritorios y espacios ya no tienen puerto propio aqui (#107): los editaba
  * `DesksPanel`/`SpacesPanel` por coordenadas escritas a mano, y quedaron
@@ -54,10 +48,6 @@ interface DashboardPorts {
   admin: AdminPort;
   /** Everyone in the directory and removing access (#93). */
   users: UsersAdminPort;
-  /** Uploading art to the catalog (#121). */
-  uploads: ArtUploadPort;
-  /** Reviewing what people contribute (#122). */
-  reviews: ArtReviewPort;
 }
 
 export default function DashboardRoute({ session, fetchImpl }: DashboardRouteProps) {
@@ -89,8 +79,6 @@ export default function DashboardRoute({ session, fetchImpl }: DashboardRoutePro
     return {
       admin: createAdminClient({ baseUrl: adminBaseUrl, getIdToken }, fetchImpl),
       users: createUsersAdminClient({ baseUrl: apiBaseUrl, getIdToken }, fetchImpl),
-      uploads: createArtUploadClient({ baseUrl: apiBaseUrl, getIdToken }, fetchImpl),
-      reviews: createArtReviewClient({ baseUrl: apiBaseUrl, getIdToken }, fetchImpl),
     };
   });
 
@@ -151,11 +139,8 @@ export default function DashboardRoute({ session, fetchImpl }: DashboardRoutePro
       renewTarget={renewTarget}
       onAccountsChanged={() => setUsersVersion((version) => version + 1)}
     >
-      {/* First of the extra panels: who is in the office is what an admin
-          looks for right after the invitations (#93). */}
+      {/* Who is in the office is what an admin looks for right after the invitations (#93). */}
       <UsersPanel users={ports.users} onRenew={handleRenew} version={usersVersion} />
-      <ArtReviewPanel reviews={ports.reviews} />
-      <ArtUploadPanel uploads={ports.uploads} />
     </DashboardScreen>
   );
 }
