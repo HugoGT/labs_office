@@ -31,6 +31,8 @@
 import { createHash } from 'node:crypto';
 import {
   artSheetKey,
+  CHAIR,
+  CHAIR_LAYERS,
   CHARACTER_SEATED,
   CHARACTER_WALK,
   DESK,
@@ -53,6 +55,7 @@ export const UPLOAD_FILE_ROLES = {
     { role: 'walk', imageKind: 'character-walk' },
     { role: 'seated', imageKind: 'character-seated' },
   ],
+  chair: [{ role: 'sheet', imageKind: 'chair' }],
   desk: [{ role: 'sheet', imageKind: 'desk' }],
   floor: [{ role: 'sheet', imageKind: 'floor' }],
   plant: [{ role: 'sheet', imageKind: 'plant' }],
@@ -183,6 +186,8 @@ export function prepareAssetUpload(body: unknown, options: PrepareUploadOptions 
     switch (uploadKind) {
       case 'character':
         return { anchors: { walk: CHARACTER_WALK.anchor, seated: CHARACTER_SEATED.anchor }, footprint: CHARACTER_WALK.footprint };
+      case 'chair':
+        return { material: material(body), facings: PACK_FACINGS, layers: CHAIR_LAYERS, anchors: { seat: CHAIR.anchor, ground: CHAIR.ground }, footprint: CHAIR.footprint };
       case 'desk':
         return { material: material(body), ...colorModel(body), anchor: DESK.anchor, facings: deskFacings(body, options.defaultDeskFacings) };
       case 'floor':
@@ -241,11 +246,14 @@ export function prepareContribution(body: unknown, author: string, options: Prep
 
 /**
  * The desk decor asset that draws an uploaded plant, so the existing decor
- * flow (`/me/desk`) can place it with no change, or an uploaded desk, the
- * table of a desk decor like the pack desks (`packDecorAsset`). Any other
- * kind has none.
+ * flow (`/me/desk`) can place it with no change, or an uploaded desk or chair,
+ * the table or the guest seat of a desk decor like the pack's
+ * (`packDecorAsset`). Any other kind has none.
  */
 export function decorAssetForPiece(piece: ArtPiece): CreateAssetInput | undefined {
+  if (piece.kind === 'chair') {
+    return { name: piece.name, kind: 'furniture', textureKey: artSheetKey(piece.id, 'sheet'), w: 1, h: 1, placeableOnDesk: true };
+  }
   if (piece.kind === 'desk') {
     return { name: piece.name, kind: 'furniture', textureKey: artSheetKey(piece.id, 'sheet'), w: 3, h: 1, placeableOnDesk: true };
   }

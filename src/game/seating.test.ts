@@ -8,7 +8,6 @@ import {
   chairGround,
   chairSeatId,
   chairSeatTiles,
-  isChairPieceId,
   SEATING_TILE,
   inSeatReach,
   mapSeatId,
@@ -160,9 +159,6 @@ describe('seating: placed chairs', () => {
   it('names exactly the chair pieces of the art pack', () => {
     const pack = JSON.parse(exportedManifest) as { pieces: { id: string; kind: string }[] };
     expect([...CHAIR_PIECES].sort()).toEqual(pack.pieces.filter((piece) => piece.kind === 'chair').map((piece) => piece.id).sort());
-    for (const piece of CHAIR_PIECES) expect(isChairPieceId(piece)).toBe(true);
-    expect(isChairPieceId('chair-throne')).toBe(false);
-    expect(isChairPieceId(null)).toBe(false);
   });
 
   it('stands on its tile: the ground point is the tile middle and the reach is that one tile', () => {

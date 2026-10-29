@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   ART_IMAGE_SPECS,
   CHARACTER_SEATED,
+  CHAIR,
+  CHAIR_LAYERS,
   CHARACTER_WALK,
   DESK,
+  PACK_FACINGS,
   PLANT,
   sheetSize,
   type ArtDeskPiece,
@@ -120,7 +123,7 @@ describe('prepareAssetUpload', () => {
     for (const kind of ['wall', 'tileset', 'bridge', 'table', 'nope', undefined]) {
       expect(codeAndField(() => prepareAssetUpload({ ...character(), kind }))).toEqual(['invalid-metadata', 'kind']);
     }
-    expect(Object.keys(UPLOAD_FILE_ROLES).sort()).toEqual(['character', 'desk', 'floor', 'plant']);
+    expect(Object.keys(UPLOAD_FILE_ROLES).sort()).toEqual(['chair', 'character', 'desk', 'floor', 'plant']);
   });
 
   it('refuses missing or malformed credits and material', () => {
@@ -217,6 +220,23 @@ describe('prepareContribution (#122)', () => {
     );
   });
 
+  it('takes a chair: the piece a pack chair is, with the contract fixing everything but the material', () => {
+    const { piece, files } = prepareContribution({ kind: 'chair', name: 'Silla de roble', material: 'roble', rightsAccepted: true, files: { sheet: sheet('chair') } }, 'Ana');
+
+    expect(piece).toMatchObject({
+      kind: 'chair',
+      material: 'roble',
+      facings: PACK_FACINGS,
+      layers: CHAIR_LAYERS,
+      anchors: { seat: CHAIR.anchor, ground: CHAIR.ground },
+      footprint: CHAIR.footprint,
+      license: CONTRIBUTION_LICENSE,
+    });
+    expect(piece.id).toMatch(/^chair-upload-[0-9a-f]{16}$/);
+    expect(files).toHaveLength(1);
+    expect(UPLOAD_FILE_ROLES.chair).toEqual([{ role: 'sheet', imageKind: 'chair' }]);
+  });
+
   it('takes a decor plant', () => {
     const { piece } = prepareContribution({ kind: 'plant', name: 'Helecho', material: 'helecho', rightsAccepted: true, files: { sheet: sheet('plant') } }, 'Ana');
     expect(piece.kind).toBe('plant');
@@ -224,6 +244,12 @@ describe('prepareContribution (#122)', () => {
 });
 
 describe('decorAssetForPiece', () => {
+  it('a chair is a one tile guest seat drawing its own sheet, like a pack chair', () => {
+    const { piece } = prepareAssetUpload({ kind: 'chair', name: 'Silla de roble', author: 'A', license: 'L', material: 'roble', files: { sheet: sheet('chair') } });
+
+    expect(decorAssetForPiece(piece)).toEqual({ name: 'Silla de roble', kind: 'furniture', textureKey: `art:${piece.id}:sheet`, w: 1, h: 1, placeableOnDesk: true });
+  });
+
   it('a plant is desk decor drawing its own sheet; any other kind has no decor asset', () => {
     const { piece: plant } = prepareAssetUpload({ kind: 'plant', name: 'Helecho', author: 'A', license: 'L', material: 'helecho', files: { sheet: sheet('plant') } });
     const { piece: person } = prepareAssetUpload({

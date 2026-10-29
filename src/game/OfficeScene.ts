@@ -126,7 +126,6 @@ import {
   chairSeatId,
   chairSeatTiles,
   inSeatReach,
-  isChairPieceId,
   mapSeatId,
   mapSeatTiles,
   parseSeatRef,
@@ -2076,9 +2075,13 @@ export class OfficeScene extends Phaser.Scene {
 
   /** One item of the decor layer: a chair in both layers like a base chair (`placeChairs`), anything else by `drawDecorItem`. */
   private drawDecorPiece(item: DecorItem): Phaser.GameObjects.GameObject[] {
-    if (!isChairPieceId(item.piece)) return this.drawDecorItem(item);
+    if (!isDecorChairPiece(item.piece)) return this.drawDecorItem(item);
     const [chair] = decorChairs([item]);
-    return chair === undefined ? [] : placeChairs(this, [{ index: chair.index, piece: item.piece, facing: chair.facing }], this.layout.width, this.art);
+    if (chair === undefined) return [];
+    // A contributed chair approved after this page loaded is not in the boot preload: ask for it (a no-op once
+    // loaded) and redraw when it lands, while `placeChairs` shows its placeholder.
+    this.artSheet({ materialId: item.piece, color: null }, 'chair', this.redrawDecor);
+    return placeChairs(this, [{ index: chair.index, piece: item.piece, facing: chair.facing }], this.layout.width, this.art);
   }
 
   /** Redraws the tilemap from the live blocks, or from the editor's pending paints while it has some. */

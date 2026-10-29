@@ -199,6 +199,22 @@ describe('handleSubmitContribution', () => {
     expect(sentFloor.body.contribution).toMatchObject({ kind: 'floor', status: 'pending', piece: { colorable: false, defaultColor: null } });
   });
 
+  it('takes a chair, and once approved it is a guest seat anyone can place, credited to its author', async () => {
+    const d = await deps();
+    const sent = await submit(d, AS_ANA, { kind: 'chair', name: 'Silla de roble', material: 'roble', rightsAccepted: true, files: { sheet: sheet('chair') } });
+    expect(sent.status).toBe(201);
+    expect(sent.body.contribution).toMatchObject({ kind: 'chair', status: 'pending', author: 'Ana' });
+    const id = sent.body.contribution.id;
+
+    await handleApproveContribution(AS_ADMIN, id, d);
+
+    const assets = await handleListOfficeAssets(AS_BETO, d);
+    expect((assets.body.assets as { textureKey: string }[]).filter(notPackChair)).toEqual([
+      expect.objectContaining({ textureKey: artSheetKey(id, 'sheet'), kind: 'furniture', w: 1, h: 1, placeableOnDesk: true, author: 'Ana' }),
+    ]);
+    expect(parseArtPackManifest((await handleUploadedArtManifest(d.decor)).body)?.pieces.map((piece) => piece.id)).toEqual([id]);
+  });
+
   it('refuses a wall: walls are made from code, not contributed', async () => {
     const d = await deps();
     const wall = { kind: 'wall', name: 'Ladrillo', material: 'brick', rightsAccepted: true, files: { sheet: sheet('wall') } };

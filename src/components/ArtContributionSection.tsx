@@ -23,6 +23,7 @@ const KIND_LABELS: Readonly<Record<ContributionKind, string>> = {
   plant: 'Planta (decoración de escritorio)',
   desk: 'Escritorio',
   floor: 'Suelo',
+  chair: 'Silla',
 };
 
 /** Kinds named by a material, with an example the hint shows (a lowercase word). */
@@ -30,6 +31,7 @@ const MATERIAL_EXAMPLE: Readonly<Partial<Record<ContributionKind, string>>> = {
   plant: 'helecho',
   desk: 'roble',
   floor: 'parquet',
+  chair: 'roble',
 };
 
 /** File roles per kind, as `server/src/assets/assetUploadRules.ts` reads them. */
@@ -41,6 +43,7 @@ const FILES: Readonly<Record<ContributionKind, readonly { role: string; label: s
   plant: [{ role: 'sheet', label: 'Hoja', imageKind: 'plant' }],
   desk: [{ role: 'sheet', label: 'Hoja', imageKind: 'desk' }],
   floor: [{ role: 'sheet', label: 'Hoja', imageKind: 'floor' }],
+  chair: [{ role: 'sheet', label: 'Hoja', imageKind: 'chair' }],
 };
 
 function sizeOf(imageKind: ArtImageKind): string {

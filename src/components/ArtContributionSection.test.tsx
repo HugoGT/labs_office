@@ -53,7 +53,7 @@ describe('ArtContributionSection (#122)', () => {
     render(<ArtContributionSection contributions={fakePort()} />);
 
     const kinds = within(screen.getByLabelText('Tipo')).getAllByRole('option').map((option) => option.getAttribute('value'));
-    expect(kinds).toEqual(['character', 'plant', 'desk', 'floor']);
+    expect(kinds).toEqual(['character', 'plant', 'desk', 'floor', 'chair']);
     expect(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT })).not.toBeChecked();
     expect(RIGHTS_STATEMENT).toBe('Confirmo que este arte no infringe derechos de autor y que la oficina puede usarlo libremente.');
     await waitFor(() => expect(screen.getByText('Pendientes de revisión: 0 de 5')).toBeInTheDocument());
@@ -134,7 +134,8 @@ describe('ArtContributionSection (#122)', () => {
   it.each([
     ['desk', 'Escritorio', 'Roble', 'roble'],
     ['floor', 'Suelo', 'Parquet', 'parquet'],
-  ] as const)('a %s asks for its sheet and a material, and sends no color or facings', async (kind, label, name, material) => {
+    ['chair', 'Silla', 'Silla de roble', 'roble'],
+  ] as const)('a %s asks for its sheet and a material, and sends nothing else', async (kind, label, name, material) => {
     const user = userEvent.setup();
     const port = fakePort();
     render(<ArtContributionSection contributions={port} />);

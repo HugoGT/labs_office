@@ -17,6 +17,7 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
   plant: 'Planta de escritorio',
   desk: 'Escritorio',
   floor: 'Suelo',
+  chair: 'Silla',
 };
 
 /** What the server lets a reviewer withdraw: the contributable kinds. */

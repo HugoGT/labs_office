@@ -60,8 +60,8 @@ describe('contribution limits', () => {
 });
 
 describe('contribution kinds', () => {
-  it('are characters, decor plants, desks and floors; walls are made from code', () => {
-    expect(CONTRIBUTION_KINDS).toEqual(['character', 'plant', 'desk', 'floor']);
+  it('are characters, decor plants, desks, floors and chairs; walls are made from code', () => {
+    expect(CONTRIBUTION_KINDS).toEqual(['character', 'plant', 'desk', 'floor', 'chair']);
     for (const kind of CONTRIBUTION_KINDS) expect(isContributionKind(kind)).toBe(true);
     expect(isContributionKind('wall')).toBe(false);
     expect(isContributionKind(undefined)).toBe(false);

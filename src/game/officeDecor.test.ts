@@ -161,6 +161,21 @@ describe('officeDecor: footprints', () => {
   });
 });
 
+describe('officeDecor: seats', () => {
+  it('every chair of the layer is a seat, an uploaded one too, facing its rotation', () => {
+    const items: DecorItem[] = [
+      { index: at(4, 5), piece: 'chair-wood', rotation: 0 },
+      { index: at(6, 5), piece: 'chair-upload-0123456789abcdef', rotation: 90 },
+      { index: at(8, 5), piece: 'plant-ficus', rotation: 0 },
+    ];
+
+    expect(decorChairs(items)).toEqual([
+      { index: at(4, 5), piece: 'chair-wood', facing: 'down' },
+      { index: at(6, 5), piece: 'chair-upload-0123456789abcdef', facing: 'right' },
+    ]);
+  });
+});
+
 describe('officeDecor: overlap and covering', () => {
   it('finds the first item whose footprint overlaps an earlier one', () => {
     const items: DecorItem[] = [

@@ -158,15 +158,12 @@ export function inSeatReach(position: { readonly x: number; readonly y: number }
 // --- Decor chairs (office decor layer) ----------------------------------------------------------
 
 /**
- * The chair pieces of the art pack (pinned by a test against the manifest):
- * uploads are never chairs, so these are every chair the decor layer holds.
+ * The chair pieces of the art pack (pinned by a test against the manifest),
+ * which the entrance waits for. The decor layer may hold more: a contributed
+ * chair is `chair-upload-<hash>`, and any `chair-` piece is a seat
+ * (`isDecorChairPiece`).
  */
 export const CHAIR_PIECES = ['chair-wood', 'chair-metal', 'chair-leather', 'chair-gamer'] as const;
-export type ChairPieceId = (typeof CHAIR_PIECES)[number];
-
-export function isChairPieceId(value: unknown): value is ChairPieceId {
-  return typeof value === 'string' && (CHAIR_PIECES as readonly string[]).includes(value);
-}
 
 /**
  * A chair of the decor layer as a seat: one per tile, `index` row major
@@ -175,7 +172,7 @@ export function isChairPieceId(value: unknown): value is ChairPieceId {
  */
 export interface PlacedChair {
   readonly index: number;
-  readonly piece: ChairPieceId;
+  readonly piece: string;
   readonly facing: SeatFacing;
 }
 
