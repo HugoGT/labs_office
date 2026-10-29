@@ -5,7 +5,7 @@ import { MULTIPLE_LABEL, MultipleToggle } from './MultipleToggle';
 
 describe('MultipleToggle (#207)', () => {
   it('says what it does in its label and nothing else: «Múltiple» places several at once', () => {
-    expect(MULTIPLE_LABEL).toBe('Múltiple: varios a la vez');
+    expect(MULTIPLE_LABEL).toBe('Múltiple: colocar varios items');
   });
 
   it('is a checkbox named after what it does, with no description, that reports the new value', async () => {
@@ -14,7 +14,7 @@ describe('MultipleToggle (#207)', () => {
     const box = screen.getByRole('checkbox', { name: MULTIPLE_LABEL });
     expect(box).not.toBeChecked();
     expect(box).not.toHaveAttribute('aria-describedby');
-    expect(container).toHaveTextContent(/^Múltiple: varios a la vez$/);
+    expect(container).toHaveTextContent(/^Múltiple: colocar varios items$/);
 
     await userEvent.click(box);
     expect(onChange).toHaveBeenCalledExactlyOnceWith(true);

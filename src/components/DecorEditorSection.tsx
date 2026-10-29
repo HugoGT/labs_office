@@ -37,7 +37,7 @@ import styles from './TerrainEditorSection.module.css';
  *
  * The admin's menu also paints the walls (#224, moved from "Editar
  * terreno"), below the pieces: `useWallEditor` with `WallPalette`, and its
- * eraser, «Borrar» (`WallEraser`), right below «Múltiple», which takes the
+ * eraser, «⛔ Borrador» (`WallEraser`), on its own line above «Múltiple», which takes the
  * chair, table, desk or plant under the pointer before a wall. One entry is
  * picked at a time across the pieces, the walls and the eraser, and while a wall is, the decor
  * tool is paused so the map's clicks are the wall's.
@@ -210,13 +210,16 @@ export function DecorEditorSection({
     <div className={styles.section}>
       {header}
 
+      {offersWalls && (
+        <div className={styles.tools}>
+          <WallEraser value={walls.brush} onPick={walls.pick} disabled={walls.blocked} />
+        </div>
+      )}
       {office && (
         <div className={styles.row}>
           <MultipleToggle checked={editor.multiple} onChange={editor.setMultiple} disabled={editor.blocked} />
         </div>
       )}
-
-      {offersWalls && <WallEraser value={walls.brush} onPick={walls.pick} disabled={walls.blocked} />}
 
       <DecorPalette
         value={editor.brush}
@@ -235,9 +238,6 @@ export function DecorEditorSection({
       {offersWalls && (
         <>
           <h4 className={styles.subtitle}>Paredes</h4>
-          <span className={styles.hint}>
-            Las paredes van sobre las líneas entre casillas y cortan el paso: toca o arrastra cerca de una esquina para levantarlas desde ella, y «Borrar» las quita; sobre una puerta, la quita con la pared que tenía detrás. No se pueden poner sobre escritorios, muebles ni la entrada.
-          </span>
           <WallPalette value={walls.brush} onPick={walls.pick} walls={catalog?.wall ?? null} disabled={walls.blocked} preview={preview} />
         </>
       )}

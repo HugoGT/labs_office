@@ -58,6 +58,13 @@
   color: #e5e7eb;
 }
 
+/* The line of «⛔ Borrador»: the button at its start, at its own size. */
+.tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .button {
   background: #1f2937;
   color: #e5e7eb;

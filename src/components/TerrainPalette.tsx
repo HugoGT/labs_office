@@ -14,9 +14,11 @@ import styles from './TerrainPalette.module.css';
  * The palettes of the terrain editor. Floors: one entry per terrain
  * material, each with a thumbnail cut from its pack floor, then the void as
  * an eraser; carpet also carries a color picker (#222), like the painted
- * desk's tile in the decor palette. Walls: one entry per wall piece, each
- * with a thumbnail cut from its pack sheet, then the wall eraser. Presentational: the editor owns which entry is picked (one across every
- * palette) and what a click on the map does with it.
+ * desk's tile in the decor palette. Walls: one picture-only tile per wall
+ * piece, cut from its pack sheet and named by its tooltip, like the decor
+ * palette's, then the wall eraser. Presentational: the editor owns which
+ * entry is picked (one across every palette) and what a click on the map
+ * does with it.
  */
 
 /** UI names of the materials. */
@@ -118,7 +120,10 @@ export const WALL_PIECE_LABELS: Readonly<Record<WallPieceId, string>> = {
 };
 
 /** The wall eraser says only this, in its text, its tooltip and its accessible name (#223). */
-export const WALL_ERASER_LABEL = 'Borrar';
+export const WALL_ERASER_LABEL = 'Borrador';
+
+/** The sign before the eraser's word (Unicode has no eraser emoji): decorative, the word names the button. */
+const WALL_ERASER_SIGN = '\u26D4';
 
 /** Flat swatches while the pack catalog is unavailable: a hint of each material, not its art. */
 const WALL_FLAT_COLORS: Readonly<Record<WallPieceId, number>> = {
@@ -149,13 +154,22 @@ export function WallPalette({ value, onPick, walls, disabled = false, preview }:
         const option = walls?.find((candidate) => candidate.id === piece);
         const label = WALL_PIECE_LABELS[piece];
         return (
-          <button key={piece} type="button" className={styles.entry} aria-pressed={pressed(piece)} disabled={disabled} onClick={() => onPick(piece)}>
-            <span className={styles.thumbnail} aria-hidden="true" style={{ background: hexColor(WALL_FLAT_COLORS[piece]) }}>
+          <button
+            key={piece}
+            type="button"
+            className={styles.tile}
+            aria-label={label}
+            title={label}
+            aria-pressed={pressed(piece)}
+            disabled={disabled}
+            onClick={() => onPick(piece)}
+          >
+            {/* The flat color stands in for the art only while the pack catalog is unavailable. */}
+            <span className={styles.tileThumbnail} aria-hidden="true" style={option === undefined ? { background: hexColor(WALL_FLAT_COLORS[piece]) } : undefined}>
               {option !== undefined && (
-                <ArtPreviewCanvas option={option} color={null} frame={previewFrame(option)} scale={WALL_THUMBNAIL_SCALE} label={label} className={styles.canvas} preview={preview} />
+                <ArtPreviewCanvas option={option} color={null} frame={previewFrame(option)} scale={WALL_THUMBNAIL_SCALE} label={label} className={styles.tileCanvas} preview={preview} />
               )}
             </span>
-            <span className={styles.label}>{label}</span>
           </button>
         );
       })}
@@ -172,24 +186,20 @@ export interface WallEraserProps {
 }
 
 /**
- * The wall eraser, one entry of its own (#223): it sits under «Múltiple», not
- * among the walls, with the crossed-out tile for a picture and «Borrar» for
- * all its words.
+ * The wall eraser, one small button of its own (#223): it sits on its own
+ * line above «Múltiple», not among the walls, with «⛔ Borrador» for all its words.
  */
 export function WallEraser({ value, onPick, disabled = false }: WallEraserProps) {
   return (
-    <div className={styles.single}>
-      <button
-        type="button"
-        className={styles.entry}
-        aria-pressed={value?.kind === 'wall' && value.piece === null}
-        disabled={disabled}
-        title={WALL_ERASER_LABEL}
-        onClick={() => onPick(null)}
-      >
-        <span className={`${styles.thumbnail} ${styles.eraser}`} aria-hidden="true" />
-        <span className={styles.label}>{WALL_ERASER_LABEL}</span>
-      </button>
-    </div>
+    <button
+      type="button"
+      className={styles.eraser}
+      aria-pressed={value?.kind === 'wall' && value.piece === null}
+      disabled={disabled}
+      title={WALL_ERASER_LABEL}
+      onClick={() => onPick(null)}
+    >
+      <span aria-hidden="true">{WALL_ERASER_SIGN}</span> {WALL_ERASER_LABEL}
+    </button>
   );
 }

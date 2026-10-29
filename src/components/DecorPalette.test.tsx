@@ -20,12 +20,6 @@ const names = (group: string): string[] =>
     .filter((button) => button.hasAttribute('aria-pressed'))
     .map((button) => button.getAttribute('aria-label') ?? '');
 
-const tiles = (group: string): string[] =>
-  within(screen.getByRole('group', { name: group }))
-    .getAllByRole('button')
-    .filter((button) => button.hasAttribute('aria-pressed'))
-    .map((button) => button.querySelector('[data-tile-name]')?.textContent ?? '');
-
 describe('DecorPalette', () => {
   it('offers every decor piece of the catalog by its full Spanish name, grouped by kind, none pressed, and no eraser', () => {
     render(<DecorPalette value={null} catalog={catalog} onPick={() => {}} preview={noPreview()} />);
@@ -40,32 +34,24 @@ describe('DecorPalette', () => {
     expect(screen.getAllByRole('button').filter((button) => button.getAttribute('aria-pressed') === 'true')).toEqual([]);
   });
 
-  it('writes on each tile only what tells it apart in its group, keeping the full name for its title', () => {
+  it('writes on a tile only the size of a room table, the full name kept for its title and accessible name', () => {
     render(<DecorPalette value={null} catalog={catalog} onPick={() => {}} preview={noPreview()} />);
 
-    expect(tiles('Sillas')).toEqual(['Madera', 'Metal', 'Cuero', 'Gamer']);
-    expect(tiles('Mesas de escritorio')).toEqual(['Vidrio', 'Metal', 'Madera', 'Pintado']);
-    expect(tiles('Mesas de sala')).toEqual(['Reuniones', 'Cafetería', 'Ovalada']);
-    expect(tiles('Plantas')).toEqual(['Ficus']);
-    expect(tiles('Puertas')).toEqual(['Simple', 'Doble']);
+    for (const group of ['Sillas', 'Mesas de escritorio', 'Plantas', 'Puertas']) {
+      for (const button of within(screen.getByRole('group', { name: group })).getAllByRole('button')) expect(button.textContent).toBe('');
+    }
     expect(screen.getByRole('button', { name: 'Silla de madera' })).toHaveAttribute('title', 'Silla de madera');
+    // Only the group headings are text.
+    expect(screen.getByRole('group', { name: 'Puertas' }).parentElement!.textContent).toBe('Puertas');
   });
 
-  it('adds nothing under the doors: the two tiles say all there is to say', () => {
-    render(<DecorPalette value={null} catalog={catalog} onPick={() => {}} preview={noPreview()} />);
-    const doors = screen.getByRole('group', { name: 'Puertas' }).parentElement!;
-    expect(doors.textContent).toBe('PuertasSimpleDoble');
-  });
-
-  it('shows the size of each room table on its tile, the horizontal one', () => {
+  it('shows the size of each room table on its tile, the horizontal one, and in its title', () => {
     render(<DecorPalette value={null} catalog={catalog} onPick={() => {}} preview={noPreview()} />);
 
-    const sizes = within(screen.getByRole('group', { name: 'Mesas de sala' }))
-      .getAllByRole('button')
-      .map((button) => button.querySelector('[data-tile-size]')?.textContent);
-    expect(sizes).toEqual(['7x5', '5x3', '2x1']);
-    expect(screen.getByRole('button', { name: 'Mesa de reuniones' })).toHaveAttribute('title', 'Mesa de reuniones (7x5)');
-    expect(screen.getByRole('button', { name: 'Silla gamer' }).querySelector('[data-tile-size]')).toBeNull();
+    const tables = within(screen.getByRole('group', { name: 'Mesas de sala' })).getAllByRole('button');
+    expect(tables.map((button) => button.textContent)).toEqual(['7x5', '5x3', '2x1']);
+    expect(tables.map((button) => button.getAttribute('title'))).toEqual(['Mesa de reuniones (7x5)', 'Mesa de cafetería (5x3)', 'Mesa ovalada (2x1)']);
+    expect(screen.getByRole('button', { name: 'Mesa de reuniones' })).toBeInTheDocument();
   });
 
   it('reports each pick with the piece info the map needs, and presses the picked piece whatever its rotation', async () => {
