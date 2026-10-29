@@ -422,6 +422,9 @@ export function useDecorEditor({
       bridge.on('decorselect', ({ index }) => select(index)),
       bridge.on('decormove', ({ index }) => startMove(index)),
       bridge.on('decordelete', ({ index }) => remove(index)),
+      bridge.on('decorputdown', ({ index }) => {
+        if (brush?.from === index) putDown();
+      }),
     ];
     return () => {
       for (const off of offs) off();

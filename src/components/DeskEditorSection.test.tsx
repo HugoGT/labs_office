@@ -4,10 +4,19 @@ import { describe, expect, it, vi } from 'vitest';
 import { AdminError } from '../dashboard/adminPort';
 import type { AdminDesk, DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { SpacesAdminPort } from '../dashboard/spacesAdminPort';
-import { createOfficeBridge } from '../game/officeBridge';
+import { createOfficeBridge, type OfficeBridge } from '../game/officeBridge';
 import { DeskEditorSection, deskName } from './DeskEditorSection';
 
 const MESA: AdminDesk = { id: 'id-mesa', label: 'Mesa 4', x: 10, y: 10, w: 3, h: 3, occupant: null };
+
+/** The desk the map outlines, with its buttons under it, as the last `layoutedit` command says. */
+function trackSelectionOnMap(bridge: OfficeBridge): () => string | null | undefined {
+  let selectedId: string | null | undefined;
+  bridge.onCommand('layoutedit', (command) => {
+    selectedId = command?.selectedId;
+  });
+  return () => selectedId;
+}
 
 function fakeDesks(overrides: Partial<DeskAdminPort> = {}): DeskAdminPort {
   return {
@@ -157,24 +166,27 @@ describe('DeskEditorSection (#74, PR3c)', () => {
     expect(screen.getByText('Mesa 5')).toBeInTheDocument();
   });
 
-  it('selecting a desk on the map still offers Mover, Eliminar and Deseleccionar', async () => {
+  it('a desk picked on the map leaves the panel as it is: its move and trash are the buttons under it on the map', async () => {
     const { desks, bridge } = await openListOfTwo();
+    const selectedOnMap = trackSelectionOnMap(bridge);
 
     act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
 
-    expect(screen.getByRole('button', { name: 'Mover' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Eliminar' })).toBeInTheDocument();
-    // The row actions give way to the selection's: one desk, three buttons.
-    expect(screen.queryByRole('button', { name: 'Mover Mesa 5' })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Mover' }));
+    expect(selectedOnMap()).toBe('id-mesa');
+    // The list stays, and no row of the selection's own takes over the panel.
+    expect(screen.getByRole('button', { name: 'Mover Mesa 4' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Eliminar Mesa 5' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mover' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Deseleccionar' })).not.toBeInTheDocument();
+
+    act(() => bridge.emit('layoutaction', { action: 'move', id: 'id-mesa' }));
+    expect(screen.getByText(/Toca el nuevo sitio/)).toBeInTheDocument();
     act(() => bridge.emit('layoutplace', { tx: 1, ty: 1, valid: true }));
     await waitFor(() => expect(desks.updateDesk).toHaveBeenCalledWith('id-mesa', { x: 1, y: 1 }));
     await screen.findByText('Mesa 5');
     act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Eliminar' }));
+    act(() => bridge.emit('layoutaction', { action: 'delete', id: 'id-mesa' }));
     await waitFor(() => expect(desks.deleteDesk).toHaveBeenCalledWith('id-mesa'));
-    act(() => bridge.emit('layoutpick', { id: 'id-mesa-b' }));
-    expect(screen.getByRole('button', { name: 'Deseleccionar' })).toBeInTheDocument();
   });
 
   it('crear: "Crear escritorio" asks nothing and a map click creates an empty desk there', async () => {
@@ -553,11 +565,12 @@ describe('DeskEditorSection inside "Editar espacios" (embedded)', () => {
       const { bridge } = renderEmbedded({ onExit });
       await userEvent.click(screen.getByRole('button', { name: 'Editar escritorios' }));
       await screen.findByText('Mesa 4');
+      const selectedOnMap = trackSelectionOnMap(bridge);
       act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
-      expect(screen.getByRole('button', { name: 'Mover' })).toBeInTheDocument();
+      expect(selectedOnMap()).toBe('id-mesa');
 
       await userEvent.keyboard('{Escape}');
-      expect(screen.queryByRole('button', { name: 'Mover' })).not.toBeInTheDocument();
+      expect(selectedOnMap()).toBeNull();
       expect(screen.getByRole('button', { name: 'Volver' })).toBeInTheDocument();
 
       await userEvent.keyboard('{Escape}');

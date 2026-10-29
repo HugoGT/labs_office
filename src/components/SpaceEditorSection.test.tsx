@@ -6,7 +6,7 @@ import type { DeskAdminPort } from '../dashboard/deskAdminPort';
 import type { AdminSpace, SpacesAdminPort } from '../dashboard/spacesAdminPort';
 import exportedManifest from '../../public/assets/pack/manifest.json?raw';
 import { materialCatalogFrom } from '../game/artMaterials';
-import { createOfficeBridge } from '../game/officeBridge';
+import { createOfficeBridge, type OfficeBridge } from '../game/officeBridge';
 import { SpaceEditorSection } from './SpaceEditorSection';
 
 // A loaded catalog everywhere: the form must still offer no floor (#182).
@@ -15,6 +15,15 @@ vi.mock('../hooks/useMaterialCatalog', () => ({
 }));
 
 const SALA: AdminSpace = { id: 'id-sala', name: 'Sala grande', x: 10, y: 10, w: 5, h: 5, capacity: 8, kind: 'room' };
+
+/** The room the map outlines, with its buttons under it, as the last `layoutedit` command says. */
+function trackSelectionOnMap(bridge: OfficeBridge): () => string | null | undefined {
+  let selectedId: string | null | undefined;
+  bridge.onCommand('layoutedit', (command) => {
+    selectedId = command?.selectedId;
+  });
+  return () => selectedId;
+}
 
 function fakeSpaces(overrides: Partial<SpacesAdminPort> = {}): SpacesAdminPort {
   return {
@@ -142,17 +151,21 @@ describe('SpaceEditorSection (#74, PR4)', () => {
     expect(spaces.deleteSpace).toHaveBeenCalledTimes(1);
   });
 
-  it('a room picked on the map still offers moving, deleting and deselecting it', async () => {
+  it('a room picked on the map leaves the panel as it is: its move and trash are the buttons under it on the map', async () => {
     const spaces = fakeSpaces();
     const bridge = createOfficeBridge();
     renderSection({ spaces, bridge });
     await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
     await screen.findByText('Sala grande');
+    const selectedOnMap = trackSelectionOnMap(bridge);
 
     act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
 
-    expect(screen.getByRole('button', { name: 'Deseleccionar' })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Mover' }));
+    expect(selectedOnMap()).toBe('id-sala');
+    expect(screen.getByRole('button', { name: 'Mover Sala grande' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Colocar nueva sala' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Deseleccionar' })).not.toBeInTheDocument();
+    act(() => bridge.emit('layoutaction', { action: 'move', id: 'id-sala' }));
     act(() => bridge.emit('layoutplace', { tx: 5, ty: 6, valid: true }));
     await waitFor(() => expect(spaces.updateSpace).toHaveBeenCalledWith('id-sala', { x: 5, y: 6, w: 5, h: 5 }));
   });
@@ -165,7 +178,7 @@ describe('SpaceEditorSection (#74, PR4)', () => {
     await screen.findByText('Sala grande');
     act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
 
-    await userEvent.click(screen.getByRole('button', { name: 'Eliminar' }));
+    act(() => bridge.emit('layoutaction', { action: 'delete', id: 'id-sala' }));
 
     await waitFor(() => expect(spaces.deleteSpace).toHaveBeenCalledWith('id-sala'));
   });
@@ -597,11 +610,12 @@ describe('SpaceEditorSection: Escape, one level per press', () => {
     const { bridge } = renderSection({ onExit, onEditingChange });
     await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
     await screen.findByText('Sala grande');
+    const selectedOnMap = trackSelectionOnMap(bridge);
     act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
-    expect(screen.getByRole('button', { name: 'Deseleccionar' })).toBeInTheDocument();
+    expect(selectedOnMap()).toBe('id-sala');
 
     await userEvent.keyboard('{Escape}');
-    expect(screen.queryByRole('button', { name: 'Deseleccionar' })).not.toBeInTheDocument();
+    expect(selectedOnMap()).toBeNull();
     expect(screen.getByRole('button', { name: /Salir/ })).toBeInTheDocument();
     expect(onExit).not.toHaveBeenCalled();
 
@@ -630,12 +644,13 @@ describe('SpaceEditorSection: Escape, one level per press', () => {
     const onExit = vi.fn();
     const { bridge, spaces } = renderSection({ embedded: true, initiallyActive: true, onExit });
     await waitFor(() => expect(spaces.listSpaces).toHaveBeenCalled());
+    const selectedOnMap = trackSelectionOnMap(bridge);
     act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
-    await screen.findByRole('button', { name: 'Deseleccionar' });
+    await waitFor(() => expect(selectedOnMap()).toBe('id-sala'));
 
     await userEvent.keyboard('{Escape}');
     expect(onExit).not.toHaveBeenCalled();
-    expect(screen.queryByRole('button', { name: 'Deseleccionar' })).not.toBeInTheDocument();
+    expect(selectedOnMap()).toBeNull();
 
     await userEvent.keyboard('{Escape}');
     expect(onExit).toHaveBeenCalledTimes(1);
@@ -723,17 +738,78 @@ describe('SpaceEditorSection embedded in "Editar espacios": the rooms behind "Ed
     expect(screen.getByRole('button', { name: 'Volver' })).toBeInTheDocument();
   });
 
-  it('a room picked on the map from the default view offers its actions there, as before', async () => {
+  it('a room picked on the map from the default view keeps the default view, and its buttons on the map act on it', async () => {
     const { spaces, bridge } = renderEmbedded();
     await waitFor(() => expect(spaces.listSpaces).toHaveBeenCalled());
     await act(async () => {});
+    const selectedOnMap = trackSelectionOnMap(bridge);
 
     act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
 
-    expect(screen.getByText('Sala grande')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Mover' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Eliminar' })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Deseleccionar' }));
+    expect(selectedOnMap()).toBe('id-sala');
     expect(screen.getByRole('button', { name: 'Colocar nueva sala' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Deseleccionar' })).not.toBeInTheDocument();
+    act(() => bridge.emit('layoutaction', { action: 'deselect', id: 'id-sala' }));
+    expect(selectedOnMap()).toBeNull();
+    act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
+    act(() => bridge.emit('layoutaction', { action: 'delete', id: 'id-sala' }));
+    await waitFor(() => expect(spaces.deleteSpace).toHaveBeenCalledWith('id-sala'));
+  });
+});
+
+describe('SpaceEditorSection embedded: a desk picked in the default view moves and goes from the map too', () => {
+  const MESA = { id: 'id-mesa', label: '', x: 2, y: 2, w: 3, h: 3, occupant: null };
+
+  /** The ids the map lets the admin pick, as the last `layoutedit` command says. */
+  function trackPickableOnMap(bridge: OfficeBridge): () => string[] {
+    let ids: string[] = [];
+    bridge.onCommand('layoutedit', (command) => {
+      ids = command?.pickable.map((rect) => rect.id) ?? [];
+    });
+    return () => ids;
+  }
+
+  function renderWithDesk() {
+    const bridge = createOfficeBridge();
+    const pickable = trackPickableOnMap(bridge);
+    const selectedOnMap = trackSelectionOnMap(bridge);
+    const desks = fakeDesks({ listDesks: vi.fn(async () => [MESA]), updateDesk: vi.fn(async () => MESA), deleteDesk: vi.fn(async () => undefined) });
+    const view = renderSection({ bridge, desks, embedded: true, initiallyActive: true });
+    return { ...view, pickable, selectedOnMap };
+  }
+
+  it('its trash deletes the desk and the panel stays on the default view', async () => {
+    const { bridge, desks, spaces, pickable, selectedOnMap } = renderWithDesk();
+    await waitFor(() => expect(pickable()).toContain('id-mesa'));
+
+    act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+    await waitFor(() => expect(selectedOnMap()).toBe('id-mesa'));
+    expect(screen.getByRole('button', { name: 'Colocar nueva sala' })).toBeInTheDocument();
+
+    await act(async () => bridge.emit('layoutaction', { action: 'delete', id: 'id-mesa' }));
+    expect(desks.deleteDesk).toHaveBeenCalledWith('id-mesa');
+    expect(spaces.deleteSpace).not.toHaveBeenCalled();
+  });
+
+  it('its move button places it, and the click on the map moves it', async () => {
+    const { bridge, desks, pickable } = renderWithDesk();
+    await waitFor(() => expect(pickable()).toContain('id-mesa'));
+
+    act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+    act(() => bridge.emit('layoutaction', { action: 'move', id: 'id-mesa' }));
+    act(() => bridge.emit('layoutplace', { tx: 20, ty: 21, valid: true }));
+
+    await waitFor(() => expect(desks.updateDesk).toHaveBeenCalledWith('id-mesa', { x: 20, y: 21 }));
+  });
+
+  it('the room list ("Editar salas") holds only rooms: a selected desk goes and no desk is pickable', async () => {
+    const { bridge, pickable, selectedOnMap } = renderWithDesk();
+    await waitFor(() => expect(pickable()).toContain('id-mesa'));
+    act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Editar salas' }));
+
+    await waitFor(() => expect(selectedOnMap()).toBeNull());
+    expect(pickable()).toEqual(['id-sala']);
   });
 });

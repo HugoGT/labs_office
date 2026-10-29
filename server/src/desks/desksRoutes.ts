@@ -82,6 +82,8 @@ import {
   type WallGrid,
 } from './deskRules.ts';
 import type { Desk, DeskDirectory, OfficeDesk, UpdateDeskInput } from './desksPort.ts';
+import { TerrainProtectedError } from '../terrain/terrainRules.ts';
+import type { AreaMove } from '../terrain/terrainRuntime.ts';
 
 export interface DesksDeps extends AdminDeps {
   desks: DeskDirectory;
@@ -106,6 +108,18 @@ export interface DesksDeps extends AdminDeps {
  */
 export interface DeskWallGuard {
   run<T>(write: (grid: WallGrid) => Promise<T>): Promise<T>;
+  /**
+   * Like `run` for a move, and the walls and decor of the area `locate`
+   * names go along (`carry` in `terrainRuntime.ts`): `grid` is what the move
+   * leaves, and nothing is carried unless `write` returns something. `undo`
+   * puts the desk back if its decor then fails to save.
+   */
+  carry<T>(
+    actorId: string,
+    locate: () => Promise<AreaMove | null>,
+    write: (grid: WallGrid) => Promise<T | null>,
+    undo: () => Promise<unknown>,
+  ): Promise<T | null>;
 }
 
 /**
@@ -123,6 +137,8 @@ const SPACE_OVERLAP: AdminResult = { status: 409, body: { error: 'desk-space-ove
 const ON_WALL: AdminResult = { status: 409, body: { error: 'desk-on-wall' } };
 /** The desk would touch two desk tables (`deskDecorRules.ts`): it holds one at most. */
 const BETWEEN_TABLES: AdminResult = { status: 409, body: { error: 'desk-between-tables' } };
+/** The decor on a moved desk would not fit where it lands (`carry` in `terrainRuntime.ts`): another spot fixes it. */
+const CONTENTS_BLOCKED: AdminResult = { status: 409, body: { error: 'contents-blocked' } };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -201,6 +217,7 @@ async function translating(run: () => Promise<AdminResult>): Promise<AdminResult
     if (error instanceof DeskTakenError) return TAKEN;
     if (error instanceof DeskOnWallError) return ON_WALL;
     if (error instanceof DeskBetweenTablesError) return BETWEEN_TABLES;
+    if (error instanceof TerrainProtectedError) return CONTENTS_BLOCKED;
     throw error;
   }
 }
@@ -216,10 +233,38 @@ async function clearOfWalls<T>(position: DeskPosition | null, deps: DesksDeps, w
   if (position === null || deps.walls === undefined) return write();
   assertValidDeskPosition(position);
   return deps.walls.run(async (grid) => {
-    if (deskCoversWall(position, grid)) throw new DeskOnWallError('a wall stands under the desk');
-    if (deskBetweenDecorTables(position, grid)) throw new DeskBetweenTablesError('the desk would touch two desk tables');
+    assertClearOfWalls(position, grid);
     return write();
   });
+}
+
+function assertClearOfWalls(position: DeskPosition, grid: WallGrid): void {
+  if (deskCoversWall(position, grid)) throw new DeskOnWallError('a wall stands under the desk');
+  if (deskBetweenDecorTables(position, grid)) throw new DeskBetweenTablesError('the desk would touch two desk tables');
+}
+
+/**
+ * Moves desk `id` to `position` like `clearOfWalls`, and the decor standing
+ * on it goes along (a desk holds no wall), so whoever sits there keeps it.
+ * The checks read the layer the move leaves: the desk's own table goes with
+ * it, so it never counts as a second one.
+ */
+async function movingContents<T>(id: string, position: DeskPosition, actorId: string, deps: DesksDeps, write: () => Promise<T | null>): Promise<T | null> {
+  if (deps.walls === undefined) return write();
+  assertValidDeskPosition(position);
+  // Where the desk stood, read in the queue: `undo` puts it back there.
+  let before: DeskPosition | null = null;
+  const locate = async (): Promise<AreaMove | null> => {
+    const desk = await deps.desks.getDesk(id);
+    if (desk === null) return null;
+    before = { x: desk.x, y: desk.y };
+    return { from: { x: desk.x, y: desk.y, w: DESK_SIDE, h: DESK_SIDE }, dx: position.x - desk.x, dy: position.y - desk.y };
+  };
+  const undo = async () => (before === null ? null : deps.desks.updateDesk(id, before));
+  return deps.walls.carry(actorId, locate, async (grid) => {
+    assertClearOfWalls(position, grid);
+    return write();
+  }, undo);
 }
 
 /**
@@ -307,7 +352,8 @@ export async function handleUpdateDesk(
   const moved = 'x' in body || 'y' in body ? { x: patch.x as number, y: patch.y as number } : null;
 
   return translating(async () => {
-    const updated = await clearOfWalls(moved, deps, () => deps.desks.updateDesk(id, patch));
+    const write = () => deps.desks.updateDesk(id, patch);
+    const updated = moved === null ? await write() : await movingContents(id, moved, authorized.user.id, deps, write);
     if (updated === null) return NOT_FOUND;
     return { status: 200, body: toAdminDeskBody(updated) };
   });

@@ -88,6 +88,7 @@ import {
   handleDeleteSpace,
   handleGetSpacesConfig,
   handleUpdateSpace,
+  type SpaceContentsGuard,
   type SpacesDeps,
 } from './spaces/spacesRoutes.ts';
 import { resolveServerAuthConfig, type ServerAuthConfig } from './authConfig.ts';
@@ -896,7 +897,12 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
 
       // `decor` only checks a chosen floor at creation (art migration, step
       // 7); without it a room still gets the pack default.
-      run(req, { directory, spaces, auth, identityAdmin, decor })
+      // A moved room carries its walls and decor along (`carry`); without a
+      // terrain store there is nothing to carry.
+      const contents: SpaceContentsGuard | undefined = terrain.editable
+        ? { carry: (actorId, locate, write, undo) => terrain.carry(locate, actorId, terrainProtections, write, undo) }
+        : undefined;
+      run(req, { directory, spaces, auth, identityAdmin, decor, ...(contents === undefined ? {} : { contents }) })
         .then((result) => {
           if (req.method === 'POST' && result.status >= 200 && result.status < 300) notifySpacesChanged();
           res.status(result.status).json(result.body);
@@ -1221,13 +1227,18 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
       // and the decor layer's desk tables (it may not stand between two)
       // inside the terrain edit queue, so no wall or decor edit lands in
       // between. Any other decor never refuses a desk (#208).
-      const walls: DeskWallGuard = { run: (write) =>
-        terrain.runExclusive((snapshot) => write({
-          width: snapshot.width,
-          walls: snapshot.walls,
-          decor: terrain.decor(),
-          decorInfo: (piece) => terrain.decorInfo(piece),
-        })) };
+      // A move carries the decor standing on the desk along (`carry`).
+      const decorInfo = (piece: string) => terrain.decorInfo(piece);
+      const walls: DeskWallGuard = {
+        run: (write) =>
+          terrain.runExclusive((snapshot) => write({
+            width: snapshot.width,
+            walls: snapshot.walls,
+            decor: terrain.decor(),
+            decorInfo,
+          })),
+        carry: (actorId, locate, write, undo) => terrain.carry(locate, actorId, terrainProtections, (layer) => write({ ...layer, decorInfo }), undo),
+      };
       run(req, { directory, desks, auth, identityAdmin, decor, walls })
         .then((result) => {
           // Adapter promises resolve after COMMIT; failures never invalidate.

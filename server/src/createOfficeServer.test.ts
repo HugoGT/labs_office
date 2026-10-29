@@ -53,7 +53,7 @@ import { OFFICE_ROOM_NAME, RECONNECTION_WINDOW_SECONDS } from './OfficeRoom.ts';
 import type { EgressPort } from './recording/egressPort.ts';
 import type { RecordingStoragePort } from './recording/recordingStorage.ts';
 import type { OfficeState } from './schema.ts';
-import { blockTileRect, decodeTerrainWalls, encodeTerrainBlocks } from '../../src/game/officeLayout.ts';
+import { blockIndexAt, blockTileRect, decodeTerrainWalls, encodeTerrainBlocks } from '../../src/game/officeLayout.ts';
 import { decodeOfficeDecor } from '../../src/game/officeDecor.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 import { AuthConfigError } from './authConfigError.ts';
@@ -3072,7 +3072,7 @@ describe('terrain routes (#123 phase 2)', () => {
     await server.shutdown();
   });
 
-  it('places decor into the room state; desks are created, moved and deleted over it, never refused and never deleting it', async () => {
+  it('places decor into the room state; desks are created and deleted over it, never refused and never deleting it, and a moved desk carries it', async () => {
     const desks = createMemoryDesks();
     const { server, url, wsUrl } = await terrainServer({ desks, terrain: createMemoryTerrain() });
     const room = await new Client(wsUrl).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token: 'valido-uid-admin' });
@@ -3095,20 +3095,20 @@ describe('terrain routes (#123 phase 2)', () => {
     const overChair = await postDesk('/admin/desks', { label: 'Mesa A', x: 66, y: 21 });
     expect(overChair.status).toBe(201);
     const { id } = (await overChair.json()) as { id: string };
+    // A move carries the chair on the desk and replaces the table that stood where it lands.
     expect((await postDesk(`/admin/desks/${id}`, { x: 71, y: 21 })).status).toBe(200);
+    await waitFor(() => decodeOfficeDecor(room.state.officeDecor, width * height)?.length === 1);
     expect((await postDesk(`/admin/desks/${id}/delete`, {})).status).toBe(200);
-    expect(server.terrain.decor()).toEqual([
-      { index: chair, piece: 'chair-metal', rotation: 90 },
-      { index: table, piece: 'desk-wood', rotation: 0 },
-    ]);
+    expect(server.terrain.decor()).toEqual([{ index: chair + 5, piece: 'chair-metal', rotation: 90 }]);
 
-    const blocked = await setBlock(url, LAWN, 'water');
+    // The chair still keeps water off its block.
+    const blocked = await setBlock(url, blockIndexAt(width, 72, 22), 'water');
     expect(blocked.status).toBe(409);
     expect(await blocked.json()).toEqual({ error: 'terrain-under-placement' });
     await server.shutdown();
   });
 
-  it('refuses a desk created or moved between two desk tables, and keeps one desk table per desk', async () => {
+  it('refuses a desk created between two desk tables, a move replaces them, and keeps one desk table per desk', async () => {
     const desks = createMemoryDesks();
     const { server, url } = await terrainServer({ desks, terrain: createMemoryTerrain() });
     const { width } = server.terrain.snapshot();
@@ -3126,16 +3126,70 @@ describe('terrain routes (#123 phase 2)', () => {
     const created = await postDesk('/admin/desks', { x: 66, y: 17 });
     expect(created.status).toBe(201);
     const { id } = (await created.json()) as { id: string };
-    const moved = await postDesk(`/admin/desks/${id}`, { x: 66, y: 21 });
-    expect(await moved.json()).toEqual({ error: 'desk-between-tables' });
+    // A move replaces what stood where the desk lands: both tables go, so it holds none.
+    expect((await postDesk(`/admin/desks/${id}`, { x: 66, y: 21 })).status).toBe(200);
+    expect(server.terrain.decor()).toEqual([]);
 
-    // On the desk at (66, 19) only the table on row 21 stands; a second one there replaces it.
-    expect((await postDesk(`/admin/desks/${id}`, { x: 66, y: 19 })).status).toBe(200);
-    expect((await setDecor(url, '/admin/decor', [{ index: 19 * width + 67, item: { piece: 'desk-wood', rotation: 0 } }])).status).toBe(200);
+    // On the desk a second desk table replaces the first.
+    expect((await setDecor(url, '/admin/decor', [{ index: 21 * width + 67, item: { piece: 'desk-wood', rotation: 0 } }])).status).toBe(200);
+    expect((await setDecor(url, '/admin/decor', [{ index: 23 * width + 67, item: { piece: 'desk-wood', rotation: 0 } }])).status).toBe(200);
+    expect(server.terrain.decor()).toEqual([{ index: 23 * width + 67, piece: 'desk-wood', rotation: 0 }]);
+    await server.shutdown();
+  });
+
+  it('moves a room with its walls and decor, erasing the decor that stood where it lands', async () => {
+    const { server, url } = await terrainServer({ spaces: createMemorySpaces() });
+    const { width } = server.terrain.snapshot();
+    const at = (tx: number, ty: number) => ty * width + tx;
+    const post = (path: string, body: unknown) => fetch(`${url}${path}`, { method: 'POST', headers: BEARER, body: JSON.stringify(body) });
+    const created = await post('/admin/spaces', { name: 'Sala', x: 66, y: 21, w: 6, h: 6 });
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string };
+    // The room's outline: posts on the vertices 66..72 x 21..27.
+    const outline: number[] = [];
+    for (let tx = 66; tx <= 72; tx += 1) outline.push(at(tx, 21), at(tx, 27));
+    for (let ty = 22; ty <= 26; ty += 1) outline.push(at(66, ty), at(72, ty));
+    expect((await setWalls(url, outline.map((index) => ({ index, piece: 'wall-brick' })))).status).toBe(200);
+    expect((await setDecor(url, '/admin/decor', [{ index: at(68, 23), item: { piece: 'chair-metal', rotation: 90 } }])).status).toBe(200);
+
+    expect((await post(`/admin/spaces/${id}`, { x: 76, y: 21, w: 6, h: 6 })).status).toBe(200);
+    for (const index of outline) {
+      expect(server.terrain.walls()[index]).toBeNull();
+      expect(server.terrain.walls()[index + 10]).toBe('wall-brick');
+    }
+    expect(server.terrain.decor()).toEqual([{ index: at(78, 23), piece: 'chair-metal', rotation: 90 }]);
+
+    // Back where it was: the chairs standing inside go, the carried one taking a spot of theirs; the one outside stays.
+    expect((await setDecor(url, '/admin/decor', [
+      { index: at(68, 23), item: { piece: 'chair-wood', rotation: 0 } },
+      { index: at(70, 25), item: { piece: 'chair-wood', rotation: 180 } },
+      { index: at(63, 23), item: { piece: 'chair-wood', rotation: 0 } },
+    ])).status).toBe(200);
+    expect((await post(`/admin/spaces/${id}`, { x: 66, y: 21, w: 6, h: 6 })).status).toBe(200);
     expect(server.terrain.decor()).toEqual([
-      { index: 19 * width + 67, piece: 'desk-wood', rotation: 0 },
-      { index: 23 * width + 67, piece: 'desk-wood', rotation: 0 },
+      { index: at(63, 23), piece: 'chair-wood', rotation: 0 },
+      { index: at(68, 23), piece: 'chair-metal', rotation: 90 },
     ]);
+    expect(server.terrain.walls()[at(66, 21)]).toBe('wall-brick');
+    await server.shutdown();
+  });
+
+  it('puts a moved desk back when its decor fails to save, answering 500', async () => {
+    const desks = createMemoryDesks();
+    const store = createMemoryTerrain();
+    store.saveWallsAndDecor = async () => { throw new Error('connection lost'); };
+    const { server, url } = await terrainServer({ desks, terrain: store });
+    const { width } = server.terrain.snapshot();
+    const desk = await desks.createDesk({ x: 66, y: 21 });
+    expect((await setDecor(url, '/admin/decor', [{ index: 22 * width + 67, item: { piece: 'chair-metal', rotation: 90 } }])).status).toBe(200);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const moved = await fetch(`${url}/admin/desks/${desk.id}`, { method: 'POST', headers: BEARER, body: JSON.stringify({ x: 71, y: 21 }) });
+
+    expect(moved.status).toBe(500);
+    expect(await desks.getDesk(desk.id)).toMatchObject({ x: 66, y: 21 });
+    expect(server.terrain.decor()).toEqual([{ index: 22 * width + 67, piece: 'chair-metal', rotation: 90 }]);
+    errors.mockRestore();
     await server.shutdown();
   });
 

@@ -10,11 +10,12 @@
  * donde hay un espacio.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readArtPackManifest } from '../decor/artPackFile.ts';
 import { createMemoryDecor } from '../decor/memoryDecor.ts';
 import type { DirectoryUser } from '../directory/directoryPort.ts';
 import { createMemoryDirectory } from '../directory/memoryDirectory.ts';
+import { TerrainProtectedError } from '../terrain/terrainRules.ts';
 import type { IdTokenVerifier } from '../verifyIdToken.ts';
 import { createMemorySpaces } from './memorySpaces.ts';
 import { SpaceOwnedByDeskError, hashSpaces } from './spaceRules.ts';
@@ -24,6 +25,7 @@ import {
   handleDeleteSpace,
   handleGetSpacesConfig,
   handleUpdateSpace,
+  type SpaceContentsGuard,
   type SpacesDeps,
 } from './spacesRoutes.ts';
 
@@ -523,6 +525,84 @@ describe('handleUpdateSpace', () => {
     );
 
     expect(result).toEqual({ status: 409, body: { error: 'space-owned-by-desk' } });
+  });
+});
+
+/**
+ * A moved room carries its walls and decor (`carry` in `terrainRuntime.ts`):
+ * the guard names the area it stood on, read in the terrain queue. Only a
+ * move whole carries: a resize or a desk cubicle carries nothing.
+ */
+describe('handleUpdateSpace carries what stands in the room', () => {
+  function contentsGuard(refusal?: Error) {
+    const moves: unknown[] = [];
+    const guard: SpaceContentsGuard = {
+      carry: vi.fn(async (_actor, locate, write) => {
+        moves.push(await locate());
+        if (refusal !== undefined) throw refusal;
+        return write();
+      }),
+    };
+    return { guard, moves };
+  }
+
+  it('moves the room and carries the area it stood on by the same move, as the admin', async () => {
+    const { deps, spaces } = harness();
+    const room = await spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 6, h: 6, capacity: null });
+    const { guard, moves } = contentsGuard();
+
+    const result = await handleUpdateSpace(BEARER_ADMIN, room.id, { x: 10, y: 5, w: 6, h: 6 }, { ...deps, contents: guard });
+
+    expect(result.status).toBe(200);
+    expect(await spaces.getSpace(room.id)).toMatchObject({ x: 10, y: 5 });
+    expect(moves).toEqual([{ from: { x: 1, y: 1, w: 6, h: 6 }, dx: 9, dy: 4 }]);
+    expect(guard.carry).toHaveBeenCalledWith(ADMIN.id, expect.any(Function), expect.any(Function), expect.any(Function));
+  });
+
+  it('carries nothing on a resize, a desk cubicle or a missing room, and never asks on a rename', async () => {
+    const { deps, spaces } = harness();
+    const room = await spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 6, h: 6, capacity: null });
+    spaces.deskSpaces.upsertDeskSpace({ id: 'desk-1', label: 'Mesa', x: 30, y: 30 });
+    const cubicle = (await spaces.listSpaces()).find((space) => space.deskId === 'desk-1')!;
+    const { guard, moves } = contentsGuard();
+    const withGuard = { ...deps, contents: guard };
+
+    expect((await handleUpdateSpace(BEARER_ADMIN, room.id, { x: 10, y: 5, w: 7, h: 6 }, withGuard)).status).toBe(200);
+    // A cubicle is smaller than any room, so the write refuses it as before.
+    expect((await handleUpdateSpace(BEARER_ADMIN, cubicle.id, { x: 40, y: 30, w: 3, h: 3 }, withGuard)).status).toBe(400);
+    expect((await handleUpdateSpace(BEARER_ADMIN, 'no-existe', { x: 40, y: 30, w: 6, h: 6 }, withGuard)).status).toBe(404);
+    expect(moves).toEqual([null, null, null]);
+    expect((await handleUpdateSpace(BEARER_ADMIN, room.id, { name: 'Otra' }, withGuard)).status).toBe(200);
+    expect(guard.carry).toHaveBeenCalledTimes(3);
+  });
+
+  it('puts the room back where it was when its walls and decor fail to save after the move', async () => {
+    const { deps, spaces } = harness();
+    const room = await spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 6, h: 6, capacity: null });
+    // The terrain save fails after the room moved: the runtime then runs `undo`.
+    const guard: SpaceContentsGuard = {
+      carry: vi.fn(async (_actor, locate, write, undo) => {
+        await locate();
+        await write();
+        expect(await spaces.getSpace(room.id)).toMatchObject({ x: 10, y: 5 });
+        await undo();
+        throw new Error('connection lost');
+      }),
+    };
+
+    await expect(handleUpdateSpace(BEARER_ADMIN, room.id, { x: 10, y: 5, w: 6, h: 6 }, { ...deps, contents: guard })).rejects.toThrow('connection lost');
+    expect(await spaces.getSpace(room.id)).toMatchObject({ x: 1, y: 1, w: 6, h: 6 });
+  });
+
+  it('answers 409 contents-blocked when what stands in the room cannot land there, and leaves the room', async () => {
+    const { deps, spaces } = harness();
+    const room = await spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 6, h: 6, capacity: null });
+    const { guard } = contentsGuard(new TerrainProtectedError('placement'));
+
+    const result = await handleUpdateSpace(BEARER_ADMIN, room.id, { x: 10, y: 5, w: 6, h: 6 }, { ...deps, contents: guard });
+
+    expect(result).toEqual({ status: 409, body: { error: 'contents-blocked' } });
+    expect(await spaces.getSpace(room.id)).toMatchObject({ x: 1, y: 1 });
   });
 });
 

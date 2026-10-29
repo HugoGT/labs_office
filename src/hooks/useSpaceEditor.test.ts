@@ -163,6 +163,44 @@ describe('useSpaceEditor (#74, PR4)', () => {
     expect(spaces.listSpaces).toHaveBeenCalledTimes(1);
   });
 
+  describe('the buttons under the selected room on the map (layoutaction)', () => {
+    it('move starts moving the selected room, delete deletes it, and deselect lets it go', async () => {
+      const spaces = fakeSpaces();
+      const { bridge, result } = setup(spaces);
+      act(() => result.current.enter());
+      await waitFor(() => expect(result.current.spaces).toHaveLength(2));
+
+      act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
+      act(() => bridge.emit('layoutaction', { action: 'move', id: 'id-sala' }));
+      expect(result.current.state).toEqual({ tag: 'placing', kind: 'room', mode: 'move', id: 'id-sala' });
+      act(() => result.current.cancelPlacing());
+
+      act(() => bridge.emit('layoutaction', { action: 'deselect', id: 'id-sala' }));
+      expect(result.current.state).toEqual({ tag: 'idle', kind: 'room' });
+
+      act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
+      await act(async () => bridge.emit('layoutaction', { action: 'delete', id: 'id-sala' }));
+      await waitFor(() => expect(spaces.deleteSpace).toHaveBeenCalledWith('id-sala'));
+      await waitFor(() => expect(result.current.state).toEqual({ tag: 'idle', kind: 'room' }));
+    });
+
+    it('does nothing for a room that is not the selected one, or while the editor is closed', async () => {
+      const spaces = fakeSpaces();
+      const { bridge, result } = setup(spaces);
+      act(() => bridge.emit('layoutaction', { action: 'delete', id: 'id-sala' }));
+      act(() => result.current.enter());
+      await waitFor(() => expect(result.current.spaces).toHaveLength(2));
+
+      act(() => bridge.emit('layoutpick', { id: 'id-otra-sala' }));
+      act(() => bridge.emit('layoutaction', { action: 'move', id: 'id-sala' }));
+      act(() => bridge.emit('layoutaction', { action: 'deselect', id: 'id-sala' }));
+      await act(async () => bridge.emit('layoutaction', { action: 'delete', id: 'id-sala' }));
+
+      expect(spaces.deleteSpace).not.toHaveBeenCalled();
+      expect(result.current.state).toEqual({ tag: 'selected', kind: 'room', id: 'id-otra-sala' });
+    });
+  });
+
   it('borrar: llama a deleteSpace con la seleccionada y relee ambas listas', async () => {
     const spaces = fakeSpaces();
     const { bridge, refreshDesks, refreshSpaces, result } = setup(spaces);
@@ -327,5 +365,156 @@ describe('useSpaceEditor: Escape frees the map one step at a time', () => {
     expect(escape().defaultPrevented).toBe(true);
     expect(result.current.state).toEqual({ tag: 'idle', kind: 'room' });
     expect(escape().defaultPrevented).toBe(false);
+  });
+});
+
+describe('useSpaceEditor: desks picked from the default view of "Editar espacios"', () => {
+  function setupPicking(desks: DeskAdminPort = fakeDesks()) {
+    const bridge = createOfficeBridge();
+    const spaces = fakeSpaces();
+    const refreshDesks = vi.fn();
+    const refreshSpaces = vi.fn();
+    const commands: (OfficeCommandMap['layoutedit'])[] = [];
+    bridge.onCommand('layoutedit', (command) => commands.push(command));
+    const view = renderHook(
+      ({ pickDesks }: { pickDesks: boolean }) => useSpaceEditor({ bridge, spaces, desks, refreshDesks, refreshSpaces, pickDesks }),
+      { initialProps: { pickDesks: true } },
+    );
+    return { bridge, spaces, desks, refreshDesks, refreshSpaces, commands, ...view };
+  }
+
+  async function enterAndPickDesk(view: ReturnType<typeof setupPicking>): Promise<void> {
+    act(() => view.result.current.enter());
+    await waitFor(() => expect(view.commands.at(-1)?.pickable.map((rect) => rect.id)).toContain('id-mesa'));
+    act(() => view.bridge.emit('layoutpick', { id: 'id-mesa' }));
+  }
+
+  it('makes the desks pickable with the rooms; without it they are only outlined', async () => {
+    const picking = setupPicking();
+    act(() => picking.result.current.enter());
+    await waitFor(() =>
+      expect(picking.commands.at(-1)?.pickable.map((rect) => rect.id).sort()).toEqual(['id-mesa', 'id-otra-sala', 'id-sala']),
+    );
+    expect(picking.commands.at(-1)?.outlines).toEqual([]);
+
+    const plain = setup(fakeSpaces());
+    act(() => plain.result.current.enter());
+    await waitFor(() => expect(plain.commands.at(-1)?.outlines).toEqual([{ x0: 2, y0: 2, x1: 4, y1: 4 }]));
+    expect(plain.commands.at(-1)?.pickable.map((rect) => rect.id)).not.toContain('id-mesa');
+  });
+
+  it('its move button places that desk with its own size, and a valid place moves it through the desk port', async () => {
+    const view = setupPicking();
+    await enterAndPickDesk(view);
+    expect(view.commands.at(-1)?.selectedId).toBe('id-mesa');
+
+    act(() => view.bridge.emit('layoutaction', { action: 'move', id: 'id-mesa' }));
+    const placing = view.commands.at(-1)?.placing;
+    expect(placing).toMatchObject({ w: 3, h: 3 });
+    expect(placing?.snap).toBeUndefined();
+    // The desk does not block its own move; the rooms still do.
+    expect(placing?.obstacles).not.toContainEqual({ x0: 2, y0: 2, x1: 4, y1: 4 });
+    expect(placing?.obstacles).toContainEqual({ x0: 10, y0: 10, x1: 14, y1: 14 });
+
+    act(() => view.bridge.emit('layoutplace', { tx: 20, ty: 21, valid: true }));
+    await waitFor(() => expect(view.desks.updateDesk).toHaveBeenCalledWith('id-mesa', { x: 20, y: 21 }));
+    expect(view.spaces.updateSpace).not.toHaveBeenCalled();
+    await waitFor(() => expect(view.result.current.state).toEqual({ tag: 'idle', kind: 'room' }));
+    expect(view.refreshDesks).toHaveBeenCalledTimes(1);
+    expect(view.refreshSpaces).toHaveBeenCalledTimes(1);
+  });
+
+  it('its trash deletes that desk through the desk port and drops the selection', async () => {
+    const view = setupPicking();
+    await enterAndPickDesk(view);
+
+    await act(async () => view.bridge.emit('layoutaction', { action: 'delete', id: 'id-mesa' }));
+
+    expect(view.desks.deleteDesk).toHaveBeenCalledWith('id-mesa');
+    expect(view.spaces.deleteSpace).not.toHaveBeenCalled();
+    expect(view.result.current.state).toEqual({ tag: 'idle', kind: 'room' });
+    expect(view.refreshDesks).toHaveBeenCalledTimes(1);
+  });
+
+  it('a refused desk move shows why', async () => {
+    const view = setupPicking(fakeDesks({ updateDesk: vi.fn(async () => Promise.reject(new AdminError('unknown'))) }));
+    await enterAndPickDesk(view);
+
+    act(() => view.bridge.emit('layoutaction', { action: 'move', id: 'id-mesa' }));
+    act(() => view.bridge.emit('layoutplace', { tx: 20, ty: 21, valid: true }));
+
+    await waitFor(() => expect(view.result.current.error).not.toBeNull());
+    expect(view.result.current.state).toEqual({ tag: 'idle', kind: 'room' });
+  });
+
+  it('putdown ends the move of that desk or room with it selected, and moves nothing', async () => {
+    const view = setupPicking();
+    await enterAndPickDesk(view);
+    act(() => view.bridge.emit('layoutaction', { action: 'move', id: 'id-mesa' }));
+
+    act(() => view.bridge.emit('layoutaction', { action: 'putdown', id: 'id-mesa' }));
+    expect(view.result.current.state).toEqual({ tag: 'selected', kind: 'room', id: 'id-mesa' });
+
+    act(() => view.bridge.emit('layoutpick', { id: 'id-sala' }));
+    act(() => view.bridge.emit('layoutaction', { action: 'move', id: 'id-sala' }));
+    act(() => view.bridge.emit('layoutaction', { action: 'putdown', id: 'id-sala' }));
+    expect(view.result.current.state).toEqual({ tag: 'selected', kind: 'room', id: 'id-sala' });
+    expect(view.desks.updateDesk).not.toHaveBeenCalled();
+    expect(view.spaces.updateSpace).not.toHaveBeenCalled();
+  });
+
+  it('a pick on a room with a desk selected switches to the room, no Escape in between', async () => {
+    const view = setupPicking();
+    await enterAndPickDesk(view);
+
+    act(() => view.bridge.emit('layoutpick', { id: 'id-sala' }));
+
+    expect(view.result.current.state).toEqual({ tag: 'selected', kind: 'room', id: 'id-sala' });
+    expect(view.commands.at(-1)?.selectedId).toBe('id-sala');
+  });
+
+  it('turning it off drops a selected desk, and leaves a selected room alone', async () => {
+    const view = setupPicking();
+    await enterAndPickDesk(view);
+
+    view.rerender({ pickDesks: false });
+    expect(view.result.current.state).toEqual({ tag: 'idle', kind: 'room' });
+    expect(view.commands.at(-1)?.pickable.map((rect) => rect.id)).not.toContain('id-mesa');
+
+    act(() => view.bridge.emit('layoutpick', { id: 'id-sala' }));
+    view.rerender({ pickDesks: true });
+    view.rerender({ pickDesks: false });
+    expect(view.result.current.state).toEqual({ tag: 'selected', kind: 'room', id: 'id-sala' });
+  });
+});
+
+describe('useSpaceEditor: Supr or Backspace deletes the selected room, or desk in the default view', () => {
+  function key(init: KeyboardEventInit): KeyboardEvent {
+    const event = new KeyboardEvent('keydown', { cancelable: true, bubbles: true, ...init });
+    act(() => {
+      document.body.dispatchEvent(event);
+    });
+    return event;
+  }
+
+  it('deletes the selected room through the spaces port and a selected desk through the desk port', async () => {
+    const spaces = fakeSpaces();
+    const desks = fakeDesks();
+    const bridge = createOfficeBridge();
+    const { result } = renderHook(() =>
+      useSpaceEditor({ bridge, spaces, desks, refreshDesks: vi.fn(), refreshSpaces: vi.fn(), pickDesks: true }),
+    );
+    act(() => result.current.enter());
+    await waitFor(() => expect(result.current.spaces).toHaveLength(2));
+    await waitFor(() => expect(desks.listDesks).toHaveBeenCalled());
+
+    act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
+    expect(key({ key: 'Delete' }).defaultPrevented).toBe(true);
+    await waitFor(() => expect(spaces.deleteSpace).toHaveBeenCalledWith('id-sala'));
+
+    act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+    key({ key: 'Backspace' });
+    await waitFor(() => expect(desks.deleteDesk).toHaveBeenCalledWith('id-mesa'));
+    expect(spaces.deleteSpace).toHaveBeenCalledTimes(1);
   });
 });

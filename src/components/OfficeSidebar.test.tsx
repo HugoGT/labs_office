@@ -478,7 +478,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     const { rerender } = render(<OfficeSidebar {...props} />);
     await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Editar espacios' }));
-    await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }] }));
+    await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }, { id: 'id-mesa' }] }));
     if (reason === 'people') await userEvent.click(screen.getByRole('button', { name: /Personas conectadas/ }));
     if (reason === 'toggle') await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
     if (reason === 'forceCollapsed') rerender(<OfficeSidebar {...props} forceCollapsed />);
@@ -550,7 +550,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     const { rerender } = render(<OfficeSidebar {...props} />);
     await userEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Editar espacios' }));
-    await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }] }));
+    await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }, { id: 'id-mesa' }] }));
     rerender(<OfficeSidebar {...props} forceExitLayoutEditing />);
     expect(props.onLayoutEditingChange).toHaveBeenLastCalledWith(false);
     expect(commands.at(-1)).toBeNull();
@@ -559,7 +559,7 @@ describe('OfficeSidebar: panel "Personalizar" (migra la edicion de escritorios/s
     expect(screen.getByRole('button', { name: 'Salir' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Salir' }));
     await userEvent.click(screen.getByRole('button', { name: 'Editar espacios' }));
-    await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }] }));
+    await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }, { id: 'id-mesa' }] }));
     expect(props.onLayoutEditingChange).toHaveBeenLastCalledWith(true);
   });
 

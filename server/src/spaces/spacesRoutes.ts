@@ -40,6 +40,18 @@ import {
 } from '../decor/artAppearanceBody.ts';
 import { hashSpaces, InvalidSpaceError, SpaceNameTakenError, SpaceOverlapError, SpaceOwnedByDeskError } from './spaceRules.ts';
 import type { Space, SpacesDirectory, UpdateSpaceInput } from './spacesPort.ts';
+import { TerrainProtectedError } from '../terrain/terrainRules.ts';
+import type { AreaMove } from '../terrain/terrainRuntime.ts';
+
+/**
+ * Carries the walls and decor of the area `locate` names along with a moved
+ * room (`carry` in `terrainRuntime.ts`), in the terrain edit queue; nothing
+ * is carried unless `write` returns something, and `undo` puts the room back
+ * if its contents then fail to save.
+ */
+export interface SpaceContentsGuard {
+  carry<T>(actorId: string, locate: () => Promise<AreaMove | null>, write: () => Promise<T | null>, undo: () => Promise<unknown>): Promise<T | null>;
+}
 
 export interface SpacesDeps extends AdminDeps {
   spaces: SpacesDirectory;
@@ -48,6 +60,8 @@ export interface SpacesDeps extends AdminDeps {
    * 7). Optional: a body without a floor needs none.
    */
   decor?: ArtCatalogReader;
+  /** Absent (no terrain store), a moved room leaves its walls and decor where they were. */
+  contents?: SpaceContentsGuard;
 }
 
 const CONFLICT: AdminResult = { status: 409, body: { error: 'space-overlap' } };
@@ -68,6 +82,9 @@ const NAME_TAKEN: AdminResult = { status: 409, body: { error: 'space-name-taken'
  * necesita su propio codigo y no uno de los dos de arriba.
  */
 const OWNED_BY_DESK: AdminResult = { status: 409, body: { error: 'space-owned-by-desk' } };
+
+/** The walls or decor of a moved room would not fit where it lands (`carry` in `terrainRuntime.ts`). */
+const CONTENTS_BLOCKED: AdminResult = { status: 409, body: { error: 'contents-blocked' } };
 
 /**
  * Los mismos ocho campos que entran en el hash de version (`CanonicalSpace`),
@@ -108,6 +125,7 @@ async function translating(run: () => Promise<AdminResult>): Promise<AdminResult
     if (error instanceof SpaceOverlapError) return CONFLICT;
     if (error instanceof SpaceNameTakenError) return NAME_TAKEN;
     if (error instanceof SpaceOwnedByDeskError) return OWNED_BY_DESK;
+    if (error instanceof TerrainProtectedError) return CONTENTS_BLOCKED;
     throw error;
   }
 }
@@ -191,8 +209,25 @@ export async function handleUpdateSpace(
   if ('h' in body) patch.h = body.h as number;
   if ('capacity' in body) patch.capacity = body.capacity as number | null;
 
+  const write = () => deps.spaces.updateSpace(id, patch);
+  // Only a move whole carries: after a resize what stood inside may not fit,
+  // and a desk cubicle moves with its desk (`desksRoutes.ts`). A malformed
+  // rectangle carries nothing either, so the write still answers it with 400.
+  // Where the room stood, read in the queue: `undo` puts it back there.
+  let before: UpdateSpaceInput | null = null;
+  const locate = async (): Promise<AreaMove | null> => {
+    const { x, y, w, h } = patch;
+    if (![x, y, w, h].every(Number.isInteger)) return null;
+    const space = await deps.spaces.getSpace(id);
+    if (space === null || space.deskId !== null || space.w !== w || space.h !== h) return null;
+    before = { x: space.x, y: space.y, w: space.w, h: space.h };
+    return { from: { x: space.x, y: space.y, w: space.w, h: space.h }, dx: x! - space.x, dy: y! - space.y };
+  };
+  const undo = async () => (before === null ? null : deps.spaces.updateSpace(id, before));
+
   return translating(async () => {
-    const updated = await deps.spaces.updateSpace(id, patch);
+    const moved = deps.contents !== undefined && ('x' in body || 'y' in body);
+    const updated = moved ? await deps.contents!.carry(authorized.user.id, locate, write, undo) : await write();
     if (updated === null) return NOT_FOUND;
     return { status: 200, body: toConfigBody(updated) };
   });

@@ -81,6 +81,63 @@ describe('useLayoutEditor (#74, PR3c)', () => {
     expect(result.current.state).toEqual({ tag: 'selected', kind: 'desk', id: 'id-mesa' });
   });
 
+  describe('the buttons under the selected desk on the map (layoutaction)', () => {
+    it('move starts moving the selected desk, delete deletes it, and deselect lets it go', async () => {
+      const desks = fakeDesks();
+      const { bridge, result } = setup(desks);
+      act(() => result.current.enter());
+      await waitFor(() => expect(result.current.desks).toHaveLength(2));
+
+      act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+      act(() => bridge.emit('layoutaction', { action: 'move', id: 'id-mesa' }));
+      expect(result.current.state).toEqual({ tag: 'placing', kind: 'desk', mode: 'move', id: 'id-mesa' });
+      act(() => result.current.cancelPlacing());
+
+      act(() => bridge.emit('layoutaction', { action: 'deselect', id: 'id-mesa' }));
+      expect(result.current.state).toEqual({ tag: 'idle', kind: 'desk' });
+
+      act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+      await act(async () => bridge.emit('layoutaction', { action: 'delete', id: 'id-mesa' }));
+      await waitFor(() => expect(desks.deleteDesk).toHaveBeenCalledWith('id-mesa'));
+      await waitFor(() => expect(result.current.state).toEqual({ tag: 'idle', kind: 'desk' }));
+    });
+
+    it('putdown, the release of a drag that moved nothing, ends the move of that desk with it selected', async () => {
+      const desks = fakeDesks();
+      const { bridge, result } = setup(desks);
+      act(() => result.current.enter());
+      await waitFor(() => expect(result.current.desks).toHaveLength(2));
+
+      // Not this desk's move, or no move at all: nothing.
+      act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+      act(() => bridge.emit('layoutaction', { action: 'putdown', id: 'id-mesa' }));
+      expect(result.current.state).toEqual({ tag: 'selected', kind: 'desk', id: 'id-mesa' });
+      act(() => bridge.emit('layoutaction', { action: 'move', id: 'id-mesa' }));
+      act(() => bridge.emit('layoutaction', { action: 'putdown', id: 'id-otra' }));
+      expect(result.current.state).toEqual({ tag: 'placing', kind: 'desk', mode: 'move', id: 'id-mesa' });
+
+      act(() => bridge.emit('layoutaction', { action: 'putdown', id: 'id-mesa' }));
+      expect(result.current.state).toEqual({ tag: 'selected', kind: 'desk', id: 'id-mesa' });
+      expect(desks.updateDesk).not.toHaveBeenCalled();
+    });
+
+    it('does nothing for a desk that is not the selected one, or while the editor is closed', async () => {
+      const desks = fakeDesks();
+      const { bridge, result } = setup(desks);
+      act(() => bridge.emit('layoutaction', { action: 'delete', id: 'id-mesa' }));
+      act(() => result.current.enter());
+      await waitFor(() => expect(result.current.desks).toHaveLength(2));
+
+      act(() => bridge.emit('layoutpick', { id: 'id-otra' }));
+      act(() => bridge.emit('layoutaction', { action: 'move', id: 'id-mesa' }));
+      act(() => bridge.emit('layoutaction', { action: 'deselect', id: 'id-mesa' }));
+      await act(async () => bridge.emit('layoutaction', { action: 'delete', id: 'id-mesa' }));
+
+      expect(desks.deleteDesk).not.toHaveBeenCalled();
+      expect(result.current.state).toEqual({ tag: 'selected', kind: 'desk', id: 'id-otra' });
+    });
+  });
+
   it('select() elige el mismo escritorio que un layoutpick, sin pasar por el bridge', async () => {
     const { result } = setup(fakeDesks());
     act(() => result.current.enter());
@@ -376,5 +433,55 @@ describe('useLayoutEditor: Escape frees the map one step at a time', () => {
 
     expect(escape().defaultPrevented).toBe(false);
     expect(result.current.state).toEqual({ tag: 'off' });
+  });
+});
+
+describe('useLayoutEditor: Supr or Backspace deletes the selected desk, like a decor item', () => {
+  function key(init: KeyboardEventInit, target: EventTarget = document.body): KeyboardEvent {
+    const event = new KeyboardEvent('keydown', { cancelable: true, bubbles: true, ...init });
+    act(() => {
+      target.dispatchEvent(event);
+    });
+    return event;
+  }
+
+  it('deletes the selected desk, unless someone is typing or a modifier is held; with none selected it does nothing', async () => {
+    const desks = fakeDesks();
+    const { bridge, result } = setup(desks);
+    act(() => result.current.enter());
+    await waitFor(() => expect(result.current.desks).toHaveLength(2));
+
+    // Nothing selected: the keys are left alone.
+    expect(key({ key: 'Delete' }).defaultPrevented).toBe(false);
+
+    act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+    const input = document.createElement('input');
+    document.body.append(input);
+    input.focus();
+    expect(key({ key: 'Backspace' }, input).defaultPrevented).toBe(false);
+    input.remove();
+    expect(key({ key: 'Delete', ctrlKey: true }).defaultPrevented).toBe(false);
+    expect(desks.deleteDesk).not.toHaveBeenCalled();
+
+    expect(key({ key: 'Delete' }).defaultPrevented).toBe(true);
+    await waitFor(() => expect(desks.deleteDesk).toHaveBeenCalledWith('id-mesa'));
+    await waitFor(() => expect(result.current.state).toEqual({ tag: 'idle', kind: 'desk' }));
+
+    act(() => bridge.emit('layoutpick', { id: 'id-otra' }));
+    key({ key: 'Backspace' });
+    await waitFor(() => expect(desks.deleteDesk).toHaveBeenLastCalledWith('id-otra'));
+  });
+
+  it('a desk being moved is not deleted, and a closed editor leaves the keys alone', async () => {
+    const desks = fakeDesks();
+    const { bridge, result } = setup(desks);
+    expect(key({ key: 'Delete' }).defaultPrevented).toBe(false);
+    act(() => result.current.enter());
+    await waitFor(() => expect(result.current.desks).toHaveLength(2));
+
+    act(() => bridge.emit('layoutpick', { id: 'id-mesa' }));
+    act(() => result.current.startMove());
+    expect(key({ key: 'Delete' }).defaultPrevented).toBe(false);
+    expect(desks.deleteDesk).not.toHaveBeenCalled();
   });
 });

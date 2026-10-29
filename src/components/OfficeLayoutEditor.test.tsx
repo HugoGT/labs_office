@@ -65,7 +65,7 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
     const onEditingChange = vi.fn();
     const props = { bridge, desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn(), onEditingChange };
     render(<OfficeLayoutEditor {...props} section="spaces" />);
-    await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }] }));
+    await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }, { id: 'id-mesa' }] }));
     commands.length = 0;
     onEditingChange.mockClear();
 
@@ -92,7 +92,7 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
     expect(screen.getByRole('button', { name: 'Editar salas' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Editar escritorios' })).toBeInTheDocument();
     expect(screen.queryByText('Mesa 4')).not.toBeInTheDocument();
-    await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }] }));
+    await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }, { id: 'id-mesa' }] }));
     await waitFor(() => expect(onEditingChange).toHaveBeenLastCalledWith(true));
   });
 
@@ -103,7 +103,7 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
     const onEditingChange = vi.fn();
     const props = { bridge, desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn(), onEditingChange };
     render(<OfficeLayoutEditor {...props} section="spaces" />);
-    await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }] }));
+    await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }, { id: 'id-mesa' }] }));
     commands.length = 0;
     onEditingChange.mockClear();
 
@@ -118,8 +118,9 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
     expect(screen.queryByRole('button', { name: 'Crear escritorio' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Colocar nueva sala' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Salir' })).toHaveLength(1);
-    // The rooms keep the map: nothing nulls their overlay.
+    // The rooms keep the map: nothing nulls their overlay. The list picks only rooms.
     expect(commands).not.toContain(null);
+    expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }] });
     expect(onEditingChange).not.toHaveBeenCalledWith(false);
 
     await userEvent.click(screen.getByRole('button', { name: 'Volver' }));
@@ -170,7 +171,7 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
       expect(screen.getByRole('button', { name: 'Editar escritorios' })).toBeInTheDocument();
       expect(screen.queryByText(/Toca el nuevo sitio/)).not.toBeInTheDocument();
       expect(screen.queryByText('Mesa 4')).not.toBeInTheDocument();
-      await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }] }));
+      await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }, { id: 'id-mesa' }] }));
       await waitFor(() => expect(onEditingChange).toHaveBeenLastCalledWith(true));
     });
 
@@ -266,7 +267,7 @@ describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
     bridge.onCommand('layoutedit', (value) => commands.push(value));
     const props = { bridge, desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn() };
     render(<OfficeLayoutEditor {...props} section="spaces" />);
-    await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }] }));
+    await waitFor(() => expect(commands.at(-1)).toMatchObject({ pickable: [{ id: 'id-sala' }, { id: 'id-mesa' }] }));
     await userEvent.type(screen.getByLabelText('Nombre de la nueva sala'), 'Office');
     await userEvent.click(screen.getByRole('button', { name: 'Colocar nueva sala' }));
     await waitFor(() => expect(commands.at(-1)).toMatchObject({ placing: expect.anything() }));
@@ -478,11 +479,15 @@ describe('OfficeLayoutEditor (#74, PR4 correction): exclusividad escritorios<->s
     await screen.findByText('Mesa 4');
     await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
     await screen.findByText('Sala grande');
+    let selectedOnMap: string | null | undefined;
+    bridge.onCommand('layoutedit', (command) => {
+      selectedOnMap = command?.selectedId;
+    });
 
     act(() => bridge.emit('layoutpick', { id: 'id-sala' }));
 
-    // La seccion activa (salas) SI reacciona: la sala pasa a seleccionada.
-    expect(await screen.findByRole('button', { name: /^Mover/ })).toBeInTheDocument();
+    // La seccion activa (salas) SI reacciona: la sala pasa a seleccionada en el mapa.
+    await waitFor(() => expect(selectedOnMap).toBe('id-sala'));
     // Escritorios sigue fuera de edicion -- el hook, ya en `off`, ignora el
     // mismo evento en vez de "seleccionar" el id de una sala como si fuese un
     // escritorio.

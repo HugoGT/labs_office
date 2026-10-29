@@ -21,6 +21,7 @@ import type { DecorBrush, DecorGround } from './decorEditor';
 import { LAYOUT_GHOST_DEPTH, LAYOUT_OUTLINE_DEPTH } from './depthLayers';
 import { TILE } from './mapData';
 import { createOfficeBridge } from './officeBridge';
+import { HOLD_TO_MOVE_MS } from './pressHold';
 import type { DecorItem, DecorPieceInfo } from './officeDecor';
 import { LAYOUT_OUTLINE_NAME, OUTLINE_STROKE_COLOR } from './spaceOutline';
 
@@ -417,6 +418,15 @@ describe('DecorEditLayer', () => {
       const move = named<Phaser.GameObjects.Rectangle>(scene, DECOR_MOVE_BUTTON_NAME)!;
       const trash = named<Phaser.GameObjects.Rectangle>(scene, DECOR_DELETE_BUTTON_NAME)!;
       expect(trash.fillColor).toBe(DECOR_DELETE_COLOR);
+      // Font glyphs, not drawn art: ↔ (U+2194) moves, 🗑 (U+1F5D1) deletes.
+      const moveIcon = named<Phaser.GameObjects.Text>(scene, `${DECOR_MOVE_BUTTON_NAME}:icon`)!;
+      const trashIcon = named<Phaser.GameObjects.Text>(scene, `${DECOR_DELETE_BUTTON_NAME}:icon`)!;
+      expect(moveIcon.type).toBe('Text');
+      expect(moveIcon.text).toBe('\u2194');
+      expect(trashIcon.text).toBe('\u{1F5D1}');
+      // The wastebasket fills its glyph box: at 10px it keeps a margin in the button.
+      expect(trashIcon.style.fontSize).toBe('10px');
+      expect([moveIcon.x, moveIcon.y, trashIcon.x, trashIcon.y]).toEqual([move.x, move.y, trash.x, trash.y]);
       // Side by side under the footprint, centered on it: move left, trash right.
       expect(move.x).toBeLessThan(10.5 * TILE);
       expect(trash.x).toBeGreaterThan(10.5 * TILE);
@@ -482,6 +492,114 @@ describe('DecorEditLayer', () => {
       expect(named(scene, DECOR_SELECTION_NAME)).toBeNull();
       expect(named(scene, DECOR_MOVE_BUTTON_NAME)).toBeNull();
       expect(named(scene, DECOR_DELETE_BUTTON_NAME)).toBeNull();
+    });
+
+    describe('a press held on an item drags it: the release puts it down', () => {
+      function frame(scene: Phaser.Scene): void {
+        scene.events.emit(Phaser.Scenes.Events.POST_UPDATE);
+      }
+
+      async function setupHold() {
+        const scene = await bootHostScene();
+        const clock = { now: 1000 };
+        const { bridge } = layer(scene, placed, clock);
+        const seen = selections(bridge);
+        const events: unknown[] = [];
+        bridge.on('decormove', (value) => events.push(['move', value]));
+        bridge.on('decorpick', (value) => events.push(['pick', value]));
+        bridge.on('decorputdown', (value) => events.push(['putdown', value]));
+        bridge.emitCommand('decoredit', { brush: null, area: null });
+        /** What React answers to the move of `from`: its brush. */
+        const moving = (from: number, brush: DecorBrush) => bridge.emitCommand('decoredit', { brush: { ...brush, from }, area: null });
+        return { scene, bridge, clock, seen, events, moving };
+      }
+
+      it('held HOLD_TO_MOVE_MS it grabs the item; released where it was, it is put down and nothing moves or selects', async () => {
+        const { scene, clock, seen, events, moving } = await setupHold();
+
+        scene.input.emit('pointerdown', pointerAt(mid(3), mid(3)));
+        clock.now += HOLD_TO_MOVE_MS - 1;
+        frame(scene);
+        expect(events).toEqual([]);
+
+        clock.now += 1;
+        frame(scene);
+        moving(at(3, 3), plant);
+        scene.input.emit('pointerup', pointerAt(mid(3) + 2, mid(3)));
+        frame(scene);
+        frame(scene);
+
+        expect(events).toEqual([['move', { index: at(3, 3) }], ['putdown', { index: at(3, 3) }]]);
+        expect(seen).toEqual([]);
+      });
+
+      it('dragged and released elsewhere it lands there, held by the tile it was grabbed by', async () => {
+        const { scene, clock, events, moving } = await setupHold();
+
+        // The room table anchored on (10, 7), grabbed two tiles left of and one above its anchor.
+        scene.input.emit('pointerdown', pointerAt(mid(8), mid(6)));
+        clock.now += HOLD_TO_MOVE_MS;
+        frame(scene);
+        moving(at(10, 7), meeting);
+        scene.input.emit('pointermove', pointerAt(mid(14), mid(10), 0, 300));
+        scene.input.emit('pointerup', pointerAt(mid(14), mid(10), 0, 300));
+        frame(scene);
+
+        expect(events).toEqual([['move', { index: at(10, 7) }], ['pick', { index: at(16, 11) }]]);
+      });
+
+      it('a drag past the pan threshold grabs it at once; a release before the move reaches the map waits for it', async () => {
+        const { scene, events, moving } = await setupHold();
+
+        scene.input.emit('pointerdown', pointerAt(mid(3), mid(3)));
+        scene.input.emit('pointermove', pointerAt(mid(5), mid(3), 0, PAN_THRESHOLD_PX + 1));
+        expect(events).toEqual([['move', { index: at(3, 3) }]]);
+
+        scene.input.emit('pointerup', pointerAt(mid(5), mid(4), 0, 100));
+        frame(scene);
+        expect(events).toHaveLength(1);
+        moving(at(3, 3), plant);
+        frame(scene);
+        expect(events.at(-1)).toEqual(['pick', { index: at(5, 4) }]);
+      });
+
+      it('dropped where it may not stand, it is put down', async () => {
+        const { scene, clock, events, moving } = await setupHold();
+
+        scene.input.emit('pointerdown', pointerAt(mid(3), mid(3)));
+        clock.now += HOLD_TO_MOVE_MS;
+        frame(scene);
+        moving(at(3, 3), plant);
+        // Column 0 is water.
+        scene.input.emit('pointerup', pointerAt(mid(0), mid(3), 0, 100));
+        frame(scene);
+
+        expect(events.at(-1)).toEqual(['putdown', { index: at(3, 3) }]);
+      });
+
+      it('released before HOLD_TO_MOVE_MS it is a click; a press held on bare ground or a button grabs nothing', async () => {
+        const { scene, bridge, clock, seen, events } = await setupHold();
+
+        scene.input.emit('pointerdown', pointerAt(mid(3), mid(3)));
+        clock.now += HOLD_TO_MOVE_MS - 10;
+        scene.input.emit('pointerup', pointerAt(mid(3), mid(3)));
+        clock.now += HOLD_TO_MOVE_MS;
+        frame(scene);
+
+        scene.input.emit('pointerdown', pointerAt(mid(16), mid(12)));
+        clock.now += HOLD_TO_MOVE_MS;
+        frame(scene);
+        scene.input.emit('pointerup', pointerAt(mid(16), mid(12)));
+
+        bridge.emitCommand('decoredit', { brush: null, area: null, selected: at(10, 7) });
+        const trash = named<Phaser.GameObjects.Rectangle>(scene, DECOR_DELETE_BUTTON_NAME)!;
+        scene.input.emit('pointerdown', pointerAt(trash.x, trash.y));
+        clock.now += HOLD_TO_MOVE_MS;
+        frame(scene);
+
+        expect(events).toEqual([]);
+        expect(seen).toEqual([at(3, 3), null]);
+      });
     });
   });
 });

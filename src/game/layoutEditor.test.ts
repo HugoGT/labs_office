@@ -52,6 +52,12 @@ describe('reduceEditorState', () => {
     });
   });
 
+  it('picking another item with one selected switches to it, with no step back to idle', () => {
+    const selected: EditorState = { tag: 'selected', kind: 'desk', id: 'desk-1' };
+
+    expect(reduceEditorState(selected, { type: 'select', id: 'desk-2' })).toEqual({ tag: 'selected', kind: 'desk', id: 'desk-2' });
+  });
+
   it('crear uno nuevo pasa de idle a placing en modo create', () => {
     const idle: EditorState = { tag: 'idle', kind: 'desk' };
 
@@ -231,6 +237,14 @@ describe('toLayoutEditCommand', () => {
     );
 
     expect(command?.placing?.obstacles).toEqual([{ x0: 2, y0: 2, x1: 4, y1: 4 }]);
+  });
+
+  it('placing names the item being moved, so a drag released on the map knows it is its own move; creating names none', () => {
+    const moving = toLayoutEditCommand({ tag: 'placing', kind: 'room', mode: 'move', id: 'room-1' }, { items, placingSize: { w: 5, h: 5 } });
+    const creating = toLayoutEditCommand({ tag: 'placing', kind: 'room', mode: 'create' }, { items, placingSize: { w: 5, h: 5 } });
+
+    expect(moving?.placing?.id).toBe('room-1');
+    expect(creating?.placing).not.toHaveProperty('id');
   });
 
   it('placing usa obstacleItems (si se da) para el pre-chequeo, no items: pickable sigue viniendo de items', () => {

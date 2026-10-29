@@ -127,10 +127,12 @@ export function SpaceEditorSection({
   onExit,
   onRequestActive,
 }: SpaceEditorSectionProps) {
-  const editor = useSpaceEditor({ bridge, spaces, desks, refreshDesks, refreshSpaces });
-  const [form, setForm] = useState<CreateFormValues>(EMPTY_FORM);
   /** Embedded only: the room list ("Editar salas") instead of the default view's form. */
   const [listing, setListing] = useState(false);
+  // The default view also picks the desks on the map: their move and trash
+  // buttons work there as a room's do, with no trip to "Editar escritorios".
+  const editor = useSpaceEditor({ bridge, spaces, desks, refreshDesks, refreshSpaces, pickDesks: embedded && !listing });
+  const [form, setForm] = useState<CreateFormValues>(EMPTY_FORM);
   const listViewChangeRef = useRef(onListViewChange);
   listViewChangeRef.current = onListViewChange;
   /**
@@ -265,8 +267,6 @@ export function SpaceEditorSection({
   }
 
   const state = editor.state;
-  const selected =
-    state.tag === 'selected' ? editor.spaces.find((space) => space.id === state.id) ?? null : null;
   const placing = state.tag === 'placing';
   const busy = editor.state.tag === 'saving' || editor.pending;
 
@@ -303,7 +303,8 @@ export function SpaceEditorSection({
         )}
       </div>
 
-      {selected === null && !placing && (
+      {/* A room picked on the map leaves the panel as it is: its move and trash are the buttons under it on the map. */}
+      {!placing && (
         <>
           {embedded && !listShown && (
             <button type="button" className={styles.button} disabled={busy} onClick={() => setListing(true)}>
@@ -401,28 +402,6 @@ export function SpaceEditorSection({
             </form>
           )}
         </>
-      )}
-
-      {selected !== null && !placing && (
-        <div className={styles.row}>
-          <span className={styles.name} title={selected.name}>{selected.name}</span>
-          <div className={styles.rowActions}>
-            <button type="button" className={styles.button} disabled={busy} onClick={() => editor.startMove()}>
-              Mover
-            </button>
-            <button
-              type="button"
-              className={styles.button}
-              disabled={busy}
-              onClick={() => void editor.remove()}
-            >
-              Eliminar
-            </button>
-            <button type="button" className={styles.button} disabled={busy} onClick={editor.deselect}>
-              Deseleccionar
-            </button>
-          </div>
-        </div>
       )}
 
       {placing && (

@@ -209,8 +209,6 @@ export function DeskEditorSection({
   }
 
   const state = editor.state;
-  const selected =
-    state.tag === 'selected' ? editor.desks.find((desk) => desk.id === state.id) ?? null : null;
   const placing = state.tag === 'placing';
   const busy = editor.state.tag === 'saving' || editor.pending;
 
@@ -233,9 +231,13 @@ export function DeskEditorSection({
         )}
       </div>
 
-      {selected === null && !placing && !creating && (
+      {!placing && !creating && (
         <>
-          {/* One line per desk: no selection step, each button acts on its own row. */}
+          {/*
+            One line per desk: no selection step, each button acts on its own row.
+            A desk picked on the map leaves it as it is: its move and trash are
+            the buttons under it on the map (`LayoutEditLayer`).
+          */}
           <LayoutItemList
             items={editor.desks.map((desk) => ({ id: desk.id, name: deskName(desk) }))}
             busy={busy}
@@ -253,28 +255,6 @@ export function DeskEditorSection({
             </>
           )}
         </>
-      )}
-
-      {selected !== null && !placing && (
-        <div className={styles.row}>
-          <span className={styles.name} title={deskName(selected)}>{deskName(selected)}</span>
-          <div className={styles.rowActions}>
-            <button type="button" className={styles.button} disabled={busy} onClick={() => editor.startMove()}>
-              Mover
-            </button>
-            <button
-              type="button"
-              className={styles.button}
-              disabled={busy}
-              onClick={() => void editor.remove()}
-            >
-              Eliminar
-            </button>
-            <button type="button" className={styles.button} disabled={busy} onClick={editor.deselect}>
-              Deseleccionar
-            </button>
-          </div>
-        </div>
       )}
 
       {placing && (
