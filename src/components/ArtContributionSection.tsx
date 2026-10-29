@@ -30,16 +30,6 @@ const KIND_LABELS: Readonly<Record<ContributionKind, string>> = {
 /** Kinds only an admin can place, in the office editor: a contributor cannot put them anywhere. */
 const ADMIN_PLACED: ReadonlySet<ContributionKind> = new Set(['table', 'door']);
 
-/** Kinds named by a material, with an example the hint shows (a lowercase word). */
-const MATERIAL_EXAMPLE: Readonly<Partial<Record<ContributionKind, string>>> = {
-  plant: 'helecho',
-  desk: 'roble',
-  floor: 'parquet',
-  chair: 'roble',
-  table: 'madera',
-  door: 'madera',
-};
-
 /** File roles per kind, as `server/src/assets/assetUploadRules.ts` reads them. */
 const FILES: Readonly<Record<ContributionKind, readonly { role: string; label: string; imageKind: ArtImageKind }[]>> = {
   character: [
@@ -122,7 +112,6 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
   const id = useId();
   const [kind, setKind] = useState<ContributionKind>('character');
   const [name, setName] = useState('');
-  const [material, setMaterial] = useState('');
   const [width, setWidth] = useState('2');
   const [height, setHeight] = useState('1');
   const [rightsAccepted, setRightsAccepted] = useState(false);
@@ -142,10 +131,8 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
   useEffect(refresh, [refresh]);
 
   const roles = FILES[kind];
-  const materialExample = MATERIAL_EXAMPLE[kind];
   const ready =
     name.trim() !== '' &&
-    (materialExample === undefined || material.trim() !== '') &&
     (kind !== 'table' || (isTiles(width, TABLE.maxFootprint.w) && isTiles(height, TABLE.maxFootprint.h))) &&
     rightsAccepted &&
     roles.every(({ role }) => files[role] !== undefined);
@@ -178,7 +165,6 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
     const input: ContributionInput = {
       kind,
       name: name.trim(),
-      ...(materialExample === undefined ? {} : { material: material.trim() }),
       ...(kind === 'table' ? { footprint: { w: Number(width), h: Number(height) } } : {}),
       rightsAccepted,
       files: Object.fromEntries(roles.map(({ role }) => [role, (files[role] as string).slice((files[role] as string).indexOf(',') + 1)])),
@@ -187,7 +173,6 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
       const sent = await contributions.submit(input);
       setDone(`«${sent.name}» quedó pendiente de revisión. Te avisamos aquí cuando la revisen.`);
       setName('');
-      setMaterial('');
       setFiles({});
       setRightsAccepted(false);
       refresh();
@@ -246,25 +231,6 @@ export function ArtContributionSection({ contributions }: ArtContributionSection
           </label>
           <input id={`${id}-name`} className={styles.input} value={name} maxLength={MAX_NAME_LENGTH} onChange={(event) => setName(event.target.value)} />
         </div>
-
-        {materialExample !== undefined && (
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor={`${id}-material`}>
-              Material
-            </label>
-            <input
-              id={`${id}-material`}
-              className={styles.input}
-              value={material}
-              maxLength={40}
-              aria-describedby={`${id}-material-hint`}
-              onChange={(event) => setMaterial(event.target.value)}
-            />
-            <span className={styles.hint} id={`${id}-material-hint`}>
-              Minúsculas, números y guiones, por ejemplo «{materialExample}».
-            </span>
-          </div>
-        )}
 
         {kind === 'table' && (
           <>

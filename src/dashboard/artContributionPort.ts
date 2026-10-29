@@ -44,9 +44,8 @@ export interface Contribution {
 
 export interface ContributionInput {
   kind: ContributionKind;
+  /** The credit is the uploader's and the material is the name's: the server sets both. */
   name: string;
-  /** Every kind but characters. */
-  material?: string;
   /** Room tables only: whole tiles, horizontal, up to `TABLE.maxFootprint`. */
   footprint?: { w: number; h: number };
   rightsAccepted: boolean;

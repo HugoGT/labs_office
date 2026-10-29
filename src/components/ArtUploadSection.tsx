@@ -37,22 +37,13 @@ const FILES: Readonly<Record<ArtUploadKind, readonly { role: string; label: stri
 const FIELD_LABELS: Readonly<Record<string, string>> = {
   kind: 'Tipo',
   name: 'Nombre',
-  author: 'Autoría',
-  license: 'Licencia',
-  material: 'Material',
   colorable: 'Admite color',
   defaultColor: 'Color por defecto',
   facings: 'Geometría del escritorio',
   files: 'Archivos',
 };
 
-/** The pack's own license: what an upload made in-house carries unless told otherwise. */
-const DEFAULT_LICENSE = 'proprietary-internal';
 const DEFAULT_COLOR = '#808080';
-
-function hasMaterial(kind: ArtUploadKind): boolean {
-  return kind !== 'character';
-}
 
 function hasColor(kind: ArtUploadKind): boolean {
   return kind === 'desk' || kind === 'floor';
@@ -99,9 +90,6 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
   const id = useId();
   const [kind, setKind] = useState<ArtUploadKind>('character');
   const [name, setName] = useState('');
-  const [author, setAuthor] = useState('');
-  const [license, setLicense] = useState(DEFAULT_LICENSE);
-  const [material, setMaterial] = useState('');
   const [colorable, setColorable] = useState(false);
   const [defaultColor, setDefaultColor] = useState(DEFAULT_COLOR);
   /** Data URL per file role: the preview and, without its prefix, the upload. */
@@ -115,9 +103,6 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
   const roles = FILES[kind];
   const ready =
     name.trim() !== '' &&
-    author.trim() !== '' &&
-    license.trim() !== '' &&
-    (!hasMaterial(kind) || material.trim() !== '') &&
     roles.every(({ role }) => files[role] !== undefined);
 
   function changeKind(next: ArtUploadKind): void {
@@ -153,9 +138,6 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
     const input: ArtUploadInput = {
       kind,
       name: name.trim(),
-      author: author.trim(),
-      license: license.trim(),
-      ...(hasMaterial(kind) ? { material: material.trim() } : {}),
       ...(hasColor(kind) && colorable ? { colorable: true, defaultColor } : {}),
       files: Object.fromEntries(roles.map(({ role }) => [role, (files[role] as string).slice((files[role] as string).indexOf(',') + 1)])),
     };
@@ -163,7 +145,6 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
       const uploaded = await uploads.upload(input);
       setDone(successMessage(uploaded));
       setName('');
-      setMaterial('');
       setFiles({});
     } catch (uploadError) {
       setError(describeUploadError(uploadError, kind));
@@ -179,8 +160,8 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
         Aportar arte
       </h3>
       <p className={styles.hint}>
-        Como admin, lo que subes queda disponible para toda la oficina sin pasar por revisión. PNG de
-        8 bits con el tamaño exacto de su tipo, hasta 128 colores y 128 KB por archivo. Antes de
+        Como admin, lo que subes queda disponible para toda la oficina sin pasar por revisión, con tu
+        nombre como autoría. PNG de 8 bits con el tamaño exacto de su tipo, hasta 128 colores y 128 KB por archivo. Antes de
         subirlo ves cómo queda en una oficina de prueba y decides si lo aceptas.
       </p>
 
@@ -220,39 +201,6 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
           </label>
           <input id={`${id}-name`} className={styles.input} value={name} maxLength={60} onChange={(event) => setName(event.target.value)} />
         </div>
-
-        <div className={styles.field}>
-          <label className={styles.label} htmlFor={`${id}-author`}>
-            Autoría
-          </label>
-          <input id={`${id}-author`} className={styles.input} value={author} maxLength={80} onChange={(event) => setAuthor(event.target.value)} />
-        </div>
-
-        <div className={styles.field}>
-          <label className={styles.label} htmlFor={`${id}-license`}>
-            Licencia
-          </label>
-          <input id={`${id}-license`} className={styles.input} value={license} maxLength={80} onChange={(event) => setLicense(event.target.value)} />
-        </div>
-
-        {hasMaterial(kind) && (
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor={`${id}-material`}>
-              Material
-            </label>
-            <input
-              id={`${id}-material`}
-              className={styles.input}
-              value={material}
-              maxLength={40}
-              aria-describedby={`${id}-material-hint`}
-              onChange={(event) => setMaterial(event.target.value)}
-            />
-            <span className={styles.label} id={`${id}-material-hint`}>
-              Minúsculas, números y guiones, por ejemplo «roble».
-            </span>
-          </div>
-        )}
 
         {hasColor(kind) && (
           <>

@@ -199,6 +199,15 @@ describe('handleSubmitContribution', () => {
     expect(sentFloor.body.contribution).toMatchObject({ kind: 'floor', status: 'pending', piece: { colorable: false, defaultColor: null } });
   });
 
+  it('names the material after the piece: a contribution that sends none still goes through', async () => {
+    const d = await deps();
+
+    const sent = await submit(d, AS_ANA, { kind: 'floor', name: 'Suelo de prueba', rightsAccepted: true, files: { sheet: sheet('floor') } });
+
+    expect(sent.status).toBe(201);
+    expect(sent.body.contribution).toMatchObject({ kind: 'floor', author: 'Ana', piece: { material: 'suelo-de-prueba' } });
+  });
+
   it('takes a chair, and once approved it is a guest seat anyone can place, credited to its author', async () => {
     const d = await deps();
     const sent = await submit(d, AS_ANA, { kind: 'chair', name: 'Silla de roble', material: 'roble', rightsAccepted: true, files: { sheet: sheet('chair') } });

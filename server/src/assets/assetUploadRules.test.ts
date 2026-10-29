@@ -136,8 +136,25 @@ describe('prepareAssetUpload', () => {
     expect(codeAndField(() => prepareAssetUpload(character({ author: undefined })))).toEqual(['invalid-metadata', 'author']);
     expect(codeAndField(() => prepareAssetUpload(character({ license: 3 })))).toEqual(['invalid-metadata', 'license']);
     const plant = { kind: 'plant', ...CREDITS, files: { sheet: sheet('plant') } };
-    expect(codeAndField(() => prepareAssetUpload(plant))).toEqual(['invalid-metadata', 'material']);
     expect(codeAndField(() => prepareAssetUpload({ ...plant, material: 'Con Espacios' }))).toEqual(['invalid-metadata', 'material']);
+  });
+
+  it('takes the material from the name when the body brings none: lowercase, no accents, dashes between words', () => {
+    const plant = { kind: 'plant', author: 'A', license: 'L', files: { sheet: sheet('plant') } };
+    const materialOf = (name: string, kind = 'plant') => (prepareAssetUpload({ ...plant, kind, name, files: { sheet: sheet(kind as ArtImageKind) } }).piece as { material: string }).material;
+
+    expect(materialOf('Helecho')).toBe('helecho');
+    expect(materialOf('  Césped  Ñandú! ')).toBe('cesped-nandu');
+    expect(materialOf('suelo-prueba')).toBe('suelo-prueba');
+    expect(materialOf('Mesa de 2 m', 'chair')).toBe('mesa-de-2-m');
+    expect(materialOf('x'.repeat(60))).toBe('x'.repeat(40));
+    // A material in the body still wins, and is still checked.
+    expect(prepareAssetUpload({ ...plant, name: 'Helecho', material: 'ficus' }).piece).toMatchObject({ material: 'ficus' });
+  });
+
+  it('refuses, naming the name, one that has no letter or digit to make a material of', () => {
+    const plant = { kind: 'plant', author: 'A', license: 'L', files: { sheet: sheet('plant') } };
+    expect(codeAndField(() => prepareAssetUpload({ ...plant, name: '★ ★' }))).toEqual(['invalid-metadata', 'name']);
   });
 
   it('names the missing, extra or unreadable file', () => {

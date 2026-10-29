@@ -59,10 +59,15 @@ describe('ArtContributionSection (#122)', () => {
     await waitFor(() => expect(screen.getByText('Pendientes de revisión: 0 de 5')).toBeInTheDocument());
   });
 
-  it('does not ask for an author: the credit is the uploader\'s, set by the server', () => {
+  it('does not ask for an author or a material: the credit is the uploader\'s and the material the name\'s, both set by the server', async () => {
+    const user = userEvent.setup();
     render(<ArtContributionSection contributions={fakePort()} />);
 
-    expect(screen.queryByLabelText('Autoría')).not.toBeInTheDocument();
+    for (const kind of ['character', 'plant', 'desk', 'floor', 'chair', 'table', 'door']) {
+      await user.selectOptions(screen.getByLabelText('Tipo'), kind);
+      expect(screen.queryByLabelText('Autoría')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Material')).not.toBeInTheDocument();
+    }
   });
 
   it('names the piece after its file while the name is empty, and leaves a typed name alone', async () => {
@@ -116,27 +121,26 @@ describe('ArtContributionSection (#122)', () => {
     expect(port.listMine).toHaveBeenCalledTimes(2);
   });
 
-  it('a plant asks for its sheet and a material', async () => {
+  it('a plant asks for its sheet', async () => {
     const user = userEvent.setup();
     const port = fakePort();
     render(<ArtContributionSection contributions={port} />);
 
     await user.selectOptions(screen.getByLabelText('Tipo'), 'plant');
     await user.type(screen.getByLabelText('Nombre'), 'Helecho');
-    await user.type(screen.getByLabelText('Material'), 'helecho');
     await user.upload(screen.getByLabelText(/Hoja/), png('sheet.png'));
     await user.click(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT }));
     await user.click(screen.getByRole('button', { name: 'Enviar a revisión' }));
 
-    await waitFor(() => expect(port.submit).toHaveBeenCalledWith(expect.objectContaining({ kind: 'plant', material: 'helecho', files: { sheet: PNG_BASE64 } })));
+    await waitFor(() => expect(port.submit).toHaveBeenCalledWith({ kind: 'plant', name: 'Helecho', rightsAccepted: true, files: { sheet: PNG_BASE64 } }));
   });
 
   it.each([
-    ['desk', 'Escritorio', 'Roble', 'roble'],
-    ['floor', 'Suelo', 'Parquet', 'parquet'],
-    ['chair', 'Silla', 'Silla de roble', 'roble'],
-    ['door', 'Puerta', 'Puerta de roble', 'roble'],
-  ] as const)('a %s asks for its sheet and a material, and sends nothing else', async (kind, label, name, material) => {
+    ['desk', 'Escritorio', 'Roble'],
+    ['floor', 'Suelo', 'Parquet'],
+    ['chair', 'Silla', 'Silla de roble'],
+    ['door', 'Puerta', 'Puerta de roble'],
+  ] as const)('a %s asks for its sheet, and sends nothing but the kind, the name and the rights', async (kind, label, name) => {
     const user = userEvent.setup();
     const port = fakePort();
     render(<ArtContributionSection contributions={port} />);
@@ -144,12 +148,11 @@ describe('ArtContributionSection (#122)', () => {
     await user.selectOptions(screen.getByLabelText('Tipo'), kind);
     expect(screen.getByRole('option', { name: label })).toBeInTheDocument();
     await user.type(screen.getByLabelText('Nombre'), name);
-    await user.type(screen.getByLabelText('Material'), material);
     await user.upload(screen.getByLabelText(/Hoja/), png('sheet.png'));
     await user.click(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT }));
     await user.click(screen.getByRole('button', { name: 'Enviar a revisión' }));
 
-    await waitFor(() => expect(port.submit).toHaveBeenCalledWith({ kind, name, material, rightsAccepted: true, files: { sheet: PNG_BASE64 } }));
+    await waitFor(() => expect(port.submit).toHaveBeenCalledWith({ kind, name, rightsAccepted: true, files: { sheet: PNG_BASE64 } }));
   });
 
   it('a room table asks for its footprint in tiles, and says only an admin places it', async () => {
@@ -161,7 +164,6 @@ describe('ArtContributionSection (#122)', () => {
     expect(screen.getByRole('option', { name: 'Mesa de sala' })).toBeInTheDocument();
     expect(screen.getByText(/Solo un admin puede colocarla/)).toBeInTheDocument();
     await user.type(screen.getByLabelText('Nombre'), 'Mesa larga');
-    await user.type(screen.getByLabelText('Material'), 'roble');
     await user.clear(screen.getByLabelText('Ancho (casillas)'));
     await user.type(screen.getByLabelText('Ancho (casillas)'), '5');
     await user.clear(screen.getByLabelText('Alto (casillas)'));
@@ -174,7 +176,6 @@ describe('ArtContributionSection (#122)', () => {
       expect(port.submit).toHaveBeenCalledWith({
         kind: 'table',
         name: 'Mesa larga',
-        material: 'roble',
         footprint: { w: 5, h: 3 },
         rightsAccepted: true,
         files: { sheet: PNG_BASE64 },
@@ -188,7 +189,6 @@ describe('ArtContributionSection (#122)', () => {
 
     await user.selectOptions(screen.getByLabelText('Tipo'), 'table');
     await user.type(screen.getByLabelText('Nombre'), 'Mesa');
-    await user.type(screen.getByLabelText('Material'), 'roble');
     await user.clear(screen.getByLabelText('Ancho (casillas)'));
     await user.type(screen.getByLabelText('Ancho (casillas)'), '8');
     await user.upload(screen.getByLabelText(/Hoja/), png('sheet.png'));

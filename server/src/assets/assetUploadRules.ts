@@ -116,8 +116,22 @@ function text(body: Record<string, unknown>, field: string, max: number): string
   return trimmed;
 }
 
-function material(body: Record<string, unknown>): string {
-  const value = body.material;
+/** A name as a material: lowercase, no accents, dashes between the words; empty when it has no letter or digit. */
+function materialFromName(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+    .replace(/-+$/, '');
+}
+
+/** The body's material, or, when it brings none, the one the name makes. */
+function material(body: Record<string, unknown>, name: string): string {
+  const value = body.material ?? materialFromName(name);
+  if (body.material === undefined && value === '') throw invalid('name', 'name needs a letter or a digit');
   if (typeof value !== 'string' || !MATERIAL.test(value)) throw invalid('material', 'material must be lowercase letters, digits and dashes');
   return value;
 }
@@ -211,10 +225,10 @@ export function prepareAssetUpload(body: unknown, options: PrepareUploadOptions 
       case 'character':
         return { anchors: { walk: CHARACTER_WALK.anchor, seated: CHARACTER_SEATED.anchor }, footprint: CHARACTER_WALK.footprint };
       case 'chair':
-        return { material: material(body), facings: PACK_FACINGS, layers: CHAIR_LAYERS, anchors: { seat: CHAIR.anchor, ground: CHAIR.ground }, footprint: CHAIR.footprint };
+        return { material: material(body, credits.name), facings: PACK_FACINGS, layers: CHAIR_LAYERS, anchors: { seat: CHAIR.anchor, ground: CHAIR.ground }, footprint: CHAIR.footprint };
       case 'table':
         return {
-          material: material(body),
+          material: material(body, credits.name),
           footprint: tableFootprint(body),
           anchor: TABLE.anchor,
           layer: TABLE.layer,
@@ -222,13 +236,13 @@ export function prepareAssetUpload(body: unknown, options: PrepareUploadOptions 
           facings: TABLE_FACINGS,
         };
       case 'door':
-        return { material: material(body), variant: singleDoor(body), anchor: DOOR.anchor, footprint: { w: DOOR.variants.single.span, h: 1 } };
+        return { material: material(body, credits.name), variant: singleDoor(body), anchor: DOOR.anchor, footprint: { w: DOOR.variants.single.span, h: 1 } };
       case 'desk':
-        return { material: material(body), ...colorModel(body), anchor: DESK.anchor, facings: deskFacings(body, options.defaultDeskFacings) };
+        return { material: material(body, credits.name), ...colorModel(body), anchor: DESK.anchor, facings: deskFacings(body, options.defaultDeskFacings) };
       case 'floor':
-        return { material: material(body), ...colorModel(body), motifTiles: FLOOR.motifTiles };
+        return { material: material(body, credits.name), ...colorModel(body), motifTiles: FLOOR.motifTiles };
       case 'plant':
-        return { material: material(body), footprint: PLANT.footprint, anchor: PLANT.anchor, layer: PLANT.layer, collision: PLANT.collision };
+        return { material: material(body, credits.name), footprint: PLANT.footprint, anchor: PLANT.anchor, layer: PLANT.layer, collision: PLANT.collision };
     }
   })();
 

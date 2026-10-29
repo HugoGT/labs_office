@@ -15,6 +15,7 @@ import {
   type ArtPackManifest,
 } from '../../../src/game/artContract.ts';
 import { parseArtPackManifest } from '../../../src/game/artPack.ts';
+import { DEFAULT_NAME } from '../../../src/game/officeProtocol.ts';
 import { readArtPackManifest } from '../decor/artPackFile.ts';
 import type { DecorCatalog } from '../decor/decorPort.ts';
 import { createMemoryDecor } from '../decor/memoryDecor.ts';
@@ -123,6 +124,26 @@ describe('handleUploadAsset', () => {
     expect(piece.files[0]!.path).toBe(`${piece.files[0]!.sha256}.png`);
     const listed = (await d.decor.listArtPieces()).find((entry) => entry.id === piece.id);
     expect(listed).toMatchObject({ source: 'upload', uploadedBy: ADMIN.id, name: 'Helecho' });
+  });
+
+  it('signs the piece with the Admin and the in-house license when the body names no author or license, and takes its material from the name', async () => {
+    const named = user({ id: 'id-nombrada', uid: 'uid-nombrada', role: 'admin', displayName: 'Marta Díaz' });
+    const d = { ...(await deps()), directory: createMemoryDirectory({ seed: [ADMIN, EMPLEADO, named] }) };
+    const body = { kind: 'plant', name: 'Helecho Grande', files: { sheet: sheet('plant').toString('base64') } };
+
+    const result = await handleUploadAsset('Bearer valido-uid-nombrada', body, d);
+
+    expect(result.status).toBe(201);
+    expect(result.body.piece).toMatchObject({ author: 'Marta Díaz', license: 'proprietary-internal', material: 'helecho-grande', name: 'Helecho Grande' });
+  });
+
+  it('an Admin with no display name signs with the default name; an author or license in the body still wins', async () => {
+    const d = await deps();
+    const bare = { kind: 'plant', name: 'Helecho', files: { sheet: sheet('plant').toString('base64') } };
+
+    expect((await handleUploadAsset(BEARER_ADMIN, bare, d)).body.piece).toMatchObject({ author: DEFAULT_NAME, license: 'proprietary-internal' });
+    const credited = { kind: 'floor', name: 'Baldosa', author: 'Equipo de arte', license: 'CC0', files: { sheet: sheet('floor').toString('base64') } };
+    expect((await handleUploadAsset(BEARER_ADMIN, credited, d)).body.piece).toMatchObject({ author: 'Equipo de arte', license: 'CC0', material: 'baldosa' });
   });
 
   it('gives an uploaded plant its desk decor asset, drawn from the art texture', async () => {

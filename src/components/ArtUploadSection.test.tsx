@@ -22,8 +22,6 @@ function fakePort(overrides: Partial<ArtUploadPort> = {}): ArtUploadPort {
 async function fillPlant(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   await user.selectOptions(screen.getByLabelText('Tipo'), 'plant');
   await user.type(screen.getByLabelText('Nombre'), 'Helecho');
-  await user.type(screen.getByLabelText('Autoría'), 'Equipo de arte');
-  await user.type(screen.getByLabelText('Material'), 'helecho');
   await user.upload(screen.getByLabelText(/Hoja/), png('helecho.png'));
 }
 
@@ -40,12 +38,17 @@ describe('ArtUploadSection (#121)', () => {
     expect(screen.getByRole('heading', { name: 'Aportar arte' })).toBeInTheDocument();
     expect(screen.getByLabelText(/Caminar/)).toHaveAccessibleDescription(/352 × 416 px/);
     expect(screen.getByLabelText(/Sentado/)).toHaveAccessibleDescription(/352 × 232 px/);
-    // A character has no material.
-    expect(screen.queryByLabelText('Material')).toBeNull();
     expect(screen.getByRole('button', { name: 'Subir' })).toBeDisabled();
   });
 
-  it('a plant asks for one sheet and a material, and previews the chosen file', async () => {
+  it('asks only for the kind and the name: the credit is the uploader\'s and the license and material come from the server', () => {
+    render(<ArtUploadSection uploads={fakePort()} />);
+
+    expect(screen.getAllByRole('textbox').map((field) => field.getAttribute('id'))).toHaveLength(1);
+    for (const gone of ['Autoría', 'Licencia', 'Material']) expect(screen.queryByLabelText(gone)).not.toBeInTheDocument();
+  });
+
+  it('a plant asks for one sheet, and previews the chosen file', async () => {
     const user = userEvent.setup();
     render(<ArtUploadSection uploads={fakePort()} />);
 
@@ -110,9 +113,6 @@ describe('ArtUploadSection (#121)', () => {
       expect(uploads.upload).toHaveBeenCalledWith({
         kind: 'plant',
         name: 'Helecho',
-        author: 'Equipo de arte',
-        license: 'proprietary-internal',
-        material: 'helecho',
         files: { sheet: PNG_BASE64 },
       }),
     );
@@ -127,8 +127,6 @@ describe('ArtUploadSection (#121)', () => {
 
     await user.selectOptions(screen.getByLabelText('Tipo'), 'floor');
     await user.type(screen.getByLabelText('Nombre'), 'Baldosa');
-    await user.type(screen.getByLabelText('Autoría'), 'Equipo');
-    await user.type(screen.getByLabelText('Material'), 'baldosa');
     await user.click(screen.getByLabelText('Admite color'));
     await user.upload(screen.getByLabelText(/Hoja/), png('baldosa.png'));
     await submitAndAccept(user);
