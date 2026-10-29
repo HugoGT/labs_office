@@ -297,6 +297,28 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(movement.autoWalk).toBeUndefined();
   });
 
+  it('walks to the world point under a single right click on the map, without the browser menu', async () => {
+    const { scene, movement, rightClick } = await movementArena();
+    rightClick(1000, 300);
+    expect(movement.autoWalk?.goal).toEqual({ x: 1000, y: 300 });
+
+    const menu = new MouseEvent('contextmenu', { cancelable: true, bubbles: true });
+    scene.game.canvas.dispatchEvent(menu);
+    expect(menu.defaultPrevented).toBe(true);
+  });
+
+  it('does not turn right drags, right clicks on an item or on the minimap into walking', async () => {
+    const { scene, movement, rightClick } = await movementArena();
+    rightClick(1000, 300, { distance: 20 });
+    expect(movement.autoWalk).toBeUndefined();
+    rightClick(1000, 300, { over: [scene.add.rectangle(0, 0, 1, 1)] });
+    expect(movement.autoWalk).toBeUndefined();
+    const pointer = { button: 2, camera: scene.cameras.cameras[1], x: 10, y: 10, getDistance: () => 0 };
+    scene.input.emit('pointerdown', pointer, []);
+    scene.input.emit('pointerup', pointer, []);
+    expect(movement.autoWalk).toBeUndefined();
+  });
+
   it('walks to the world point under a double click on the minimap', async () => {
     const { scene, movement } = await movementArena();
     const minimap = scene.cameras.cameras[1]!;
@@ -998,11 +1020,11 @@ describe('double click to walk (double-click-pathfinding, R1 and R2)', () => {
     });
   });
 
-  it('a non-primary button click clears the pair (R2)', async () => {
+  it('a middle button click clears the pair (R2)', async () => {
     const arena = await movementArena();
 
     expectNoPair(arena, () => {
-      const pointer = { button: 2, camera: arena.scene.cameras.main, x: 10, y: 10,
+      const pointer = { button: 1, camera: arena.scene.cameras.main, x: 10, y: 10,
         worldX: goal.x, worldY: goal.y, getDistance: () => 0 };
       arena.scene.input.emit('pointerdown', pointer, []);
       arena.scene.input.emit('pointerup', pointer, []);

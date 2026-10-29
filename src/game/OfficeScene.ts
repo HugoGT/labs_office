@@ -146,6 +146,10 @@ import { AVATAR_KEYS, PLAYER_TEXTURE, avatarTextureKey, createOfficeTextures } f
 export const OFFICE_SCENE_KEY = 'office';
 
 const PLAYER_SPEED = 230;
+/** `Pointer.button` of the secondary (right) mouse button. */
+const RIGHT_BUTTON = 2;
+/** A walk starts from the primary button (double click) or the secondary one (single click). */
+const isWalkButton = (button: number): boolean => button === 0 || button === RIGHT_BUTTON;
 // Below both the 14px body height and Arcade's 4px overlap bias, even at the top speed.
 const WALK_STEP_PX = 3;
 const PROXIMITY_TICK_MS = 250;
@@ -2183,6 +2187,8 @@ export class OfficeScene extends Phaser.Scene {
     this.cursors = keyboard.createCursorKeys();
     this.wasd = keyboard.addKeys('W,A,S,D') as WasdKeys;
     keyboard.addCapture('UP,DOWN,LEFT,RIGHT,SPACE');
+    // A right click on the map walks, so the browser's own menu must not open over it.
+    this.input.mouse?.disableContextMenu();
 
     // `focusin`/`focusout` (a diferencia de `focus`/`blur`) burbujean, asi que
     // un solo listener en `window` ve cualquier campo de la pagina, sin
@@ -2202,7 +2208,7 @@ export class OfficeScene extends Phaser.Scene {
         if (!currentlyOver || currentlyOver.length === 0) {
           if (!this.layoutEditing) this.bridge.emit('closemenu', undefined);
           // An open editor with nothing picked still walks: only a held map does not.
-          if (!this.mapHeld && pointer.button === 0 && pointer.camera === this.cameras.main) this.walkClick = pointer;
+          if (!this.mapHeld && isWalkButton(pointer.button) && pointer.camera === this.cameras.main) this.walkClick = pointer;
         }
       },
     );
@@ -2227,6 +2233,12 @@ export class OfficeScene extends Phaser.Scene {
       // Any click that cannot walk also breaks a pending pair.
       if (!eligible) {
         this.clickPair = null;
+        return;
+      }
+      // A right click walks at once, like the second click of a double click.
+      if (pointer.button === RIGHT_BUTTON) {
+        this.clickPair = null;
+        this.startWalk({ x: pointer.worldX, y: pointer.worldY });
         return;
       }
       // Screen coordinates and the game clock: world points glide with the camera between the clicks.
