@@ -34,6 +34,18 @@ describe('DecorPalette', () => {
     expect(screen.getAllByRole('button').filter((button) => button.getAttribute('aria-pressed') === 'true')).toEqual([]);
   });
 
+  it('leaves a retired upload out, while an active upload is offered (#264)', () => {
+    const ficus = catalog.plant.find((option) => option.id === 'plant-ficus')!;
+    const plant = [
+      ...catalog.plant,
+      { ...ficus, id: 'plant-upload-0123456789abcdef', name: 'Monstera' },
+      { ...ficus, id: 'plant-upload-fedcba9876543210', name: 'Helecho', retired: true },
+    ];
+    render(<DecorPalette value={null} catalog={{ ...catalog, plant }} onPick={() => {}} preview={noPreview()} />);
+
+    expect(names('Plantas')).toEqual(['Ficus', 'Monstera']);
+  });
+
   it('writes on a tile only the size of a room table, the full name kept for its title and accessible name', () => {
     render(<DecorPalette value={null} catalog={catalog} onPick={() => {}} preview={noPreview()} />);
 

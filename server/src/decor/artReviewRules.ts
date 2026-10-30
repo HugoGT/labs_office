@@ -11,6 +11,12 @@
  * keeps it" of every other piece, and only an approved piece was ever offered.
  * Pack pieces and Admin uploads (#121) are `approved` from the start.
  *
+ * A retired piece may be uploaded again (#264): an Admin upload brings it
+ * back at once, a contribution sends it back to `pending` with `retiredAt`
+ * kept, so it is not offered until approved. Since only an approved piece is
+ * ever retired, `retiredAt` alone means "was in the catalog": what was placed
+ * with it keeps drawing whatever the status of its comeback.
+ *
  * ## Limits
  *
  * At most `MAX_PENDING_CONTRIBUTIONS` waiting per user (rejected ones free
@@ -117,6 +123,15 @@ export function retireTransition(piece: { status: ArtPieceStatus; retiredAt: Dat
   return piece.retiredAt === null ? 'retire' : 'already-retired';
 }
 
+/**
+ * What uploading the same pixels again does to the piece that has them
+ * (#264): a retired piece revives, unless its comeback is already waiting for
+ * a review; anything else is the same pixels uploaded twice.
+ */
+export function reuploadTransition(piece: { status: ArtPieceStatus; retiredAt: Date | null }): 'revive' | 'exists' {
+  return piece.retiredAt !== null && piece.status !== 'pending' ? 'revive' : 'exists';
+}
+
 /** Same rank criterion as the rest of `/admin` (`canAdminister`). */
 export function canReviewArt(role: Role): boolean {
   return canAdminister(role);
@@ -134,15 +149,19 @@ export function normalizeReviewNote(raw: unknown): string {
 export interface ArtFileOwner {
   status: ArtPieceStatus;
   uploadedBy: string | null;
+  retiredAt: Date | null;
 }
 
 /**
  * A stored file is public (served immutable to anyone) only once an approved
  * piece carries it. Files are content-addressed, so the same pixels can sit
  * under a pending and an approved piece: the approved one makes them public.
+ * A retired piece was approved, and stays public while its comeback is
+ * reviewed (#264): those very pixels were public before, and placed copies
+ * still draw them.
  */
 export function isPublicArtFile(pieces: readonly ArtFileOwner[]): boolean {
-  return pieces.some((piece) => piece.status === 'approved');
+  return pieces.some((piece) => piece.status === 'approved' || piece.retiredAt !== null);
 }
 
 /** The authenticated preview: public files, plus the viewer's own and, for reviewers, every one. */
