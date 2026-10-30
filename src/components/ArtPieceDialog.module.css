@@ -1,0 +1,99 @@
+/* Same full-screen backdrop as the "Mi personaje" dialog (`CharacterCreator.module.css`): the
+   preview of a piece under review gets the whole screen, since its office mock is wide. */
+.screen {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0d1117;
+  color: #e5e7eb;
+  padding: 12px;
+  overflow: auto;
+}
+
+.screen:focus {
+  outline: none;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 100%;
+  max-height: 100%;
+  background: #111827f2;
+  border: 1px solid #2b3444;
+  border-radius: var(--radius-panel);
+  padding: 16px 20px;
+  box-shadow: 0 8px 30px #0009;
+}
+
+/* The mock is wider than a phone: it scrolls inside the card instead of the page. */
+.body {
+  overflow: auto;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Same size and shape as the buttons of "Mi personaje" (`CharacterCreator.module.css`). */
+.button {
+  padding: 9px 12px;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  background: #1f2937;
+  color: #e5e7eb;
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  border-color: #4b5563;
+}
+
+.button[data-tone='accept'] {
+  min-width: 200px;
+  background: #1d4ed8;
+  color: #eff6ff;
+  border-color: #3b82f6;
+}
+
+.button[data-tone='accept']:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+/* Red like the dashboard's revoke button. */
+.button[data-tone='cancel'] {
+  background: #7f1d1d66;
+  color: #fecaca;
+  border-color: #b91c1c;
+}
+
+.button[data-tone='cancel']:hover:not(:disabled) {
+  background: #7f1d1daa;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

@@ -10,11 +10,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createOfficeServer as createServer, type OfficeServer, type OfficeServerOverrides } from '../../server/src/createOfficeServer.ts';
 import { createMemoryDirectory } from '../../server/src/directory/memoryDirectory.ts';
 import { createMemoryTerrain } from '../../server/src/terrain/memoryTerrain.ts';
+import { createMemoryDecor } from '../../server/src/decor/memoryDecor.ts';
+import { prepareAssetUpload } from '../../server/src/assets/assetUploadRules.ts';
+import { encodePng } from '../../server/src/assets/pngCodec.ts';
+import { ART_IMAGE_SPECS, sheetSize } from './artContract';
 import { createMemoryCollisions } from '../../server/src/collisions/memoryCollisions.ts';
 import { createMemorySpaces } from '../../server/src/spaces/memorySpaces.ts';
 import type { CollisionTable } from './pieceCollisions';
 import { SESSION_EXPIRED } from '../../server/src/verifyIdToken.ts';
 import { type LayoutMaterial, type TerrainColors } from './officeLayout';
+import { type TerrainFloors } from './terrainFloors';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS } from '../test/legacyOffice.ts';
 const createOfficeServer = (overrides: OfficeServerOverrides = {}) => createServer({ layout: BASE_LAYOUT, seats: BASE_MAP_SEATS, ...overrides });
 import { TILE } from './mapData';
@@ -927,6 +932,28 @@ describe('connectOfficeRoom: seats (art migration, step 6)', () => {
 
     await server.terrain.setBlocks([{ index: 0, material: 'carpet', color: '#c0392b' }], null, noProtections);
     await waitFor(() => seen.at(-1)?.get(0) === '#c0392b');
+
+    await server.terrain.setBlocks([{ index: 0, material: 'wood' }], null, noProtections);
+    await waitFor(() => seen.at(-1)?.size === 0);
+  });
+
+  it('reports the uploaded floors (S13) on every floor edit, each a whole map', async () => {
+    await server.shutdown();
+    const { BASE_LAYOUT: layout } = await import('./officeLayout.ts');
+    // A floor only paints when the catalog offers it, so an approved upload goes in first.
+    const decor = createMemoryDecor();
+    const { width, height } = sheetSize(ART_IMAGE_SPECS.floor);
+    const body = { kind: 'floor', name: 'Parquet', author: 'Equipo de arte', license: 'proprietary-internal', material: 'parquet', files: { sheet: encodePng({ width, height, data: new Uint8ClampedArray(width * height * 4).fill(255) }).toString('base64') } };
+    const { piece } = prepareAssetUpload(body);
+    await decor.registerUploadedArtPiece({ piece, uploadedBy: 'id-admin' });
+    server = createOfficeServer({ layout, seats: [], terrain: createMemoryTerrain(), decor });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+    const seen: TerrainFloors[] = [];
+    await connect('Ana', { ...recorder().handlers, onTerrainFloors: (floors) => seen.push(floors) });
+    const noProtections = async () => ({ placements: [], players: [] });
+
+    await server.terrain.setBlocks([{ index: 0, material: 'wood', floor: piece.id }], null, noProtections);
+    await waitFor(() => seen.at(-1)?.get(0) === piece.id);
 
     await server.terrain.setBlocks([{ index: 0, material: 'wood' }], null, noProtections);
     await waitFor(() => seen.at(-1)?.size === 0);

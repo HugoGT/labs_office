@@ -15,10 +15,12 @@ import {
   placeWalls,
   placeZoneLabels,
   renderTerrain,
+  renderTerrainFloors,
   type TerrainTilemap,
 } from './mapBuilder';
 import { terrainSnapshot, wallFootprintRects, type OfficeLayout, type TerrainColors } from './officeLayout';
 import { terrainMaterialBand, terrainRecolor } from './terrainColorTiles';
+import { terrainFloorTileData } from './terrainFloorTiles';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN, LEGACY_SEATS as BASE_MAP_SEATS } from '../test/legacyOffice';
 
 /** The legacy fixture keeps the 126x90 world it was drawn in. */
@@ -157,6 +159,68 @@ describe('renderTerrain', () => {
     expect(result.layers).toEqual([{ x: 0, y: 0, width: MAP_W, height: MAP_H, texture: FALLBACK_TERRAIN_KEY }]);
     expect(result.tiles).toEqual([fallbackTerrainData(BASE_TERRAIN)]);
     expect(result.decals).toBeNull();
+  });
+});
+
+describe('renderTerrainFloors (S13)', () => {
+  const PIECE = 'floor-upload-0123456789abcdef';
+  const empty = new Array<null>(18 * 9).fill(null);
+  /** Two wood blocks side by side. */
+  const woods: OfficeLayout = { width: 18, height: 9, blocks: ['wood', 'wood'], ground: empty, walls: empty, hedges: empty, decals: empty, props: [] };
+  const terrain = terrainSnapshot(woods);
+  const sheet = artSheetKey('floor-wood', 'sheet');
+
+  it('lays the frames of the piece sheet on one layer between the terrain and the decals, only over the floored block', async () => {
+    const result = await withArtScene((scene, art) => {
+      const tilemap = renderTerrain(scene, terrain, woods, art);
+      const before = scene.children.list.length;
+      const floors = renderTerrainFloors(scene);
+      floors.refresh(terrain, new Map([[1, PIECE]]), () => sheet);
+      const layer = floors.layers.get(PIECE)!;
+      return {
+        added: scene.children.list.length - before,
+        depth: layer.depth,
+        under: tilemap.layers.map((entry) => entry.depth),
+        decals: tilemap.decals?.depth,
+        texture: layer.tileset[0]?.image?.key,
+        tiles: layerIndices(layer),
+        visible: layer.visible,
+      };
+    });
+
+    expect(result.added).toBe(1);
+    expect(result.texture).toBe(sheet);
+    expect(result.depth).toBeGreaterThan(Math.max(...result.under));
+    expect(result.depth).toBeLessThan(result.decals!);
+    expect(result.tiles).toEqual(terrainFloorTileData(terrain, new Map([[1, PIECE]])).get(PIECE));
+    expect(result.visible).toBe(true);
+  });
+
+  it('draws nothing until the sheet is there, and the layer appears when a later refresh finds it', async () => {
+    const result = await withArtScene((scene) => {
+      const floors = renderTerrainFloors(scene);
+      const floored = new Map([[0, PIECE]]);
+      floors.refresh(terrain, floored, () => null);
+      const waiting = floors.layers.size;
+      floors.refresh(terrain, floored, () => sheet);
+      return { waiting, landed: floors.layers.size };
+    });
+
+    expect(result).toEqual({ waiting: 0, landed: 1 });
+  });
+
+  it('hides the layer of a piece that no block shows any more, and keeps the rest in place', async () => {
+    const result = await withArtScene((scene) => {
+      const floors = renderTerrainFloors(scene);
+      floors.refresh(terrain, new Map([[0, PIECE]]), () => sheet);
+      const layer = floors.layers.get(PIECE)!;
+      floors.refresh(terrain, new Map(), () => sheet);
+      const hidden = !layer.visible;
+      floors.refresh(terrainSnapshot({ ...woods, blocks: ['grass', 'wood'] }), new Map([[0, PIECE]]), () => sheet);
+      return { hidden, stillHidden: !layer.visible, layers: floors.layers.size };
+    });
+
+    expect(result).toEqual({ hidden: true, stillHidden: true, layers: 1 });
   });
 });
 

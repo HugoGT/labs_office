@@ -29,8 +29,9 @@ export function createTerrainAdminClient(
   );
 
   return {
-    async setBlock(index: number, material: LayoutMaterial, color?: string): Promise<void> {
-      await request(`/admin/terrain/blocks/${index}`, jsonBody(color === undefined ? { material } : { material, color }));
+    async setBlock(index: number, material: LayoutMaterial, color?: string, floor?: string): Promise<void> {
+      // Optional fields are left out, so a paint without them sends the body it always did.
+      await request(`/admin/terrain/blocks/${index}`, jsonBody({ material, ...(color === undefined ? {} : { color }), ...(floor === undefined ? {} : { floor }) }));
     },
     async setBlocks(edits, expected) {
       await request('/admin/terrain/blocks', jsonBody({ edits, expected }));

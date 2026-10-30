@@ -58,12 +58,18 @@
   max-width: 100%;
 }
 
+.footprint {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 .rights {
   display: flex;
   align-items: flex-start;
   gap: 6px;
   font-size: 12px;
-  color: #e5e7eb;
+  color: #fff;
 }
 
 .button {

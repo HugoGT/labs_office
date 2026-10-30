@@ -686,6 +686,17 @@ describe('schema.sql: terrain block colors (#222)', () => {
   });
 });
 
+describe('schema.sql: terrain block floors (uploaded floor pieces)', () => {
+  const squashed = squash(schema);
+
+  it('adds the nullable floor piece of a block as a column of its own, only an uploaded floor id, so existing rows keep none and the material list stays closed', () => {
+    expect(squashed).toContain("alter table terrain_blocks add column if not exists floor_piece text check (floor_piece is null or floor_piece ~ '^floor-upload-[0-9a-f]{16}$');");
+    expect(squashed.indexOf('alter table terrain_blocks add column if not exists floor_piece')).toBeGreaterThan(squashed.indexOf('create table if not exists terrain_blocks ('));
+    // The closed material list is untouched: an uploaded floor lies on wood.
+    expect(squashed).toContain("alter table terrain_blocks add constraint terrain_blocks_material_check check (material in ('void', 'water', 'sand', 'dirt', 'cobblestone', 'grass', 'wood', 'tile', 'carpet'));");
+  });
+});
+
 describe('schema.sql: painted terrain walls', () => {
   const squashed = squash(schema);
   const pieces = WALL_PIECES.map((piece) => `'${piece}'`).join(', ');

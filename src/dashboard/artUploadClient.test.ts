@@ -20,9 +20,6 @@ function clientWith(fetchImpl: ReturnType<typeof fetchWith>) {
 const INPUT: ArtUploadInput = {
   kind: 'plant',
   name: 'Helecho',
-  author: 'Equipo de arte',
-  license: 'proprietary-internal',
-  material: 'helecho',
   files: { sheet: 'iVBORw0KGgo=' },
 };
 

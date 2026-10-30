@@ -70,7 +70,6 @@ const PARSED = {
 const INPUT: ContributionInput = {
   kind: 'character',
   name: 'Lucía',
-  author: 'Ana',
   rightsAccepted: true,
   files: { walk: 'iVBORw0KGgo=', seated: 'iVBORw0KGgo=' },
 };

@@ -440,6 +440,13 @@ ALTER TABLE terrain_blocks ADD CONSTRAINT terrain_blocks_material_check CHECK (m
 -- case like the art pack. Which materials take one is the server's rule
 -- (`COLORABLE_TERRAIN_MATERIALS`), not a CHECK.
 ALTER TABLE terrain_blocks ADD COLUMN IF NOT EXISTS color text CHECK (color IS NULL OR color ~ '^#[0-9a-f]{6}$');
+-- The uploaded floor piece painted over a block (an approved art piece of kind
+-- floor, `terrainFloors.ts`), NULL for none. The material list above stays
+-- closed on purpose: such a block is `wood` underneath, which every client
+-- already draws and walks, and the piece shows over it. Only the id shape is a
+-- CHECK; that the piece is an approved floor is the server's rule, read from
+-- the art catalog when the block is painted.
+ALTER TABLE terrain_blocks ADD COLUMN IF NOT EXISTS floor_piece text CHECK (floor_piece IS NULL OR floor_piece ~ '^floor-upload-[0-9a-f]{16}$');
 
 -- Painted walls (terrain editor). One row per TILE holding a wall an admin
 -- painted, the wall piece of the art pack on it (`WALL_PIECES` in

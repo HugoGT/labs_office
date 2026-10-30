@@ -4,8 +4,8 @@
  * (same body format, checks, re-encoding and hash storage).
  *
  *   - `POST /me/art/contributions` (`authenticate`): anyone signed in
- *     contributes a character or a decor plant, with the rights statement
- *     accepted. It waits as `pending`.
+ *     contributes a character, a decor plant, a desk or a floor, with the
+ *     rights statement accepted. It waits as `pending`.
  *   - `GET /me/art/contributions` (`authenticate`): the caller's own
  *     contributions with their state and, if rejected, the reason.
  *   - `GET /me/art/files/<sha256>.png` (`authenticate`): the preview of a
@@ -14,7 +14,7 @@
  *   - `GET /admin/art/contributions?status=` (`authorize`): the review queue.
  *   - `POST /admin/art/contributions/:id/approve|reject` (`authorize`).
  *   - `POST /admin/art/pieces/:id/retire` (`authorize`): withdraws an
- *     approved character or plant.
+ *     approved contribution.
  *
  * ## Pending is private, files included
  *
@@ -45,6 +45,7 @@ import {
   normalizeReviewNote,
   type ArtPieceStatus,
 } from '../decor/artReviewRules.ts';
+import { DEFAULT_NAME } from '../../../src/game/officeProtocol.ts';
 import { authenticate, authorize, NOT_FOUND, type AdminDeps, type AdminResult } from '../admin/adminRoutes.ts';
 import { ART_PACK_DEFAULTS, ArtPieceExistsError } from '../decor/artCatalogRules.ts';
 import type { ArtCatalogPiece, DecorCatalog } from '../decor/decorPort.ts';
@@ -52,7 +53,7 @@ import { AssetNameTakenError, InvalidAssetError } from '../decor/decorRules.ts';
 import type { CharacterUpdates } from '../characterUpdates.ts';
 import { AssetUploadError } from './assetImageRules.ts';
 import { isAssetHash, type AssetStoragePort } from './assetStoragePort.ts';
-import { ASSET_FILE_HEADERS, type AssetFileResult } from './assetUploadRoutes.ts';
+import { ASSET_FILE_HEADERS, defaultDeskFacings, wantsDefaultFacings, type AssetFileResult } from './assetUploadRoutes.ts';
 import { decorAssetForPiece, prepareContribution } from './assetUploadRules.ts';
 
 export interface ArtContributionDeps extends AdminDeps {
@@ -102,10 +103,14 @@ export async function handleSubmitContribution(authorization: unknown, body: unk
   if (!authenticated.ok) return authenticated.result;
   // From the token, never the body: nobody contributes in another's name.
   const userId = authenticated.user.id;
+  // The credit is public (the uploads manifest), so never the email of an
+  // account that has no display name.
+  const author = authenticated.user.displayName ?? DEFAULT_NAME;
 
   try {
     assertContributionQuota(await deps.decor.artContributionUsage(userId));
-    const { piece, files } = prepareContribution(body);
+    const facings = wantsDefaultFacings(body) ? await defaultDeskFacings(deps.decor) : undefined;
+    const { piece, files } = prepareContribution(body, author, { defaultDeskFacings: facings });
     for (const file of files) await deps.storage.put(file.sha256, file.png);
     const submitted = await deps.decor.submitArtContribution({ piece, submittedBy: userId, decorAsset: decorAssetForPiece(piece) });
     return { status: 201, body: { contribution: toContributionBody(submitted) } };
@@ -221,11 +226,11 @@ export async function handleRejectContribution(authorization: unknown, id: unkno
 }
 
 /**
- * Withdraws an approved character or plant: the same "stops being offered,
+ * Withdraws an approved contribution: the same "stops being offered,
  * whoever has it keeps it" as retiring a decor asset, except a character in
  * use, whose wearers go back to the pack default, persisted and live, so a
- * session never shows a piece that is gone. Desks and floors are not
- * withdrawn this way: a desk keeps its material for good (step 7).
+ * session never shows a piece that is gone. A desk or a floor in use stays as
+ * it is (its material is chosen once, step 7); only new choices are refused.
  *
  * Retrying converges: an already retired piece is not audited again, but its
  * wearers are moved again, in case a first attempt stopped halfway.

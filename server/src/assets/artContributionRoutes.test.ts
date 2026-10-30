@@ -11,7 +11,7 @@
 
 import type { CharacterUpdates } from '../characterUpdates.ts';
 import { describe, expect, it } from 'vitest';
-import { ART_IMAGE_SPECS, artSheetKey, sheetSize, type ArtImageKind, type ArtPackManifest } from '../../../src/game/artContract.ts';
+import { ART_IMAGE_SPECS, artSheetKey, sheetSize, type ArtDeskPiece, type ArtImageKind, type ArtPackManifest } from '../../../src/game/artContract.ts';
 import { parseArtPackManifest } from '../../../src/game/artPack.ts';
 import { ART_PACK_DEFAULTS } from '../decor/artCatalogRules.ts';
 import { readArtPackManifest } from '../decor/artPackFile.ts';
@@ -70,14 +70,21 @@ const AS_BETO = 'Bearer valido-uid-beto';
 /** The pack's chairs and desks bring their own decor assets (chairs and tables). */
 const notPackChair = (asset: { textureKey: string }) => !/^art:(chair|desk)-(?!upload-)/.test(asset.textureKey);
 const PACK: ArtPackManifest = readArtPackManifest(new URL('../../../public/assets/pack/manifest.json', import.meta.url));
+/** What every contributed desk gets: the facings of the pack's default desk. */
+const PACK_DESK_FACINGS = (PACK.pieces.find((piece) => piece.id === ART_PACK_DEFAULTS.desk) as ArtDeskPiece).facings;
 
 /** A valid sheet; `shade` changes its pixels, so each shade is another piece. */
 function sheet(kind: ArtImageKind, shade = 0): string {
   const spec = ART_IMAGE_SPECS[kind];
   const { width, height } = sheetSize(spec);
   const data = new Uint8ClampedArray(width * height * 4);
-  for (let y = spec.frame.height >> 1; y < height; y += spec.frame.height) {
-    for (let x = spec.frame.width >> 1; x < width; x += spec.frame.width) data.set([30 + shade, 90, 160, 255], (y * width + x) * 4);
+  // A floor is opaque in every pixel; any other sheet only needs a pixel per frame.
+  if (spec.alpha === 'opaque') {
+    for (let i = 0; i < width * height; i += 1) data.set([30 + shade, 90, 160, 255], i * 4);
+  } else {
+    for (let y = spec.frame.height >> 1; y < height; y += spec.frame.height) {
+      for (let x = spec.frame.width >> 1; x < width; x += spec.frame.width) data.set([30 + shade, 90, 160, 255], (y * width + x) * 4);
+    }
   }
   return encodePng({ width, height, data }).toString('base64');
 }
@@ -146,6 +153,27 @@ describe('handleSubmitContribution', () => {
     expect(d.decor.artAuditLog().map(({ action, actorId, pieceId }) => [action, actorId, pieceId])).toEqual([['submit-art', ANA.id, id]]);
   });
 
+  it('credits the uploader, whatever author the body claims or leaves out', async () => {
+    const d = await deps();
+
+    const { author: _author, ...withoutAuthor } = characterBody(0);
+    const unsigned = await submit(d, AS_ANA, withoutAuthor);
+    const forged = await submit(d, AS_BETO, characterBody(1, { author: 'Ana' }));
+
+    expect(unsigned.body.contribution).toMatchObject({ author: 'Ana' });
+    expect(forged.body.contribution).toMatchObject({ author: 'Beto' });
+  });
+
+  it('credits an account with no display name as Invitado, never by its email', async () => {
+    const d = await deps();
+    const nameless = user({ id: 'id-sin-nombre', uid: 'uid-sin-nombre' });
+    const withNameless: Harness = { ...d, directory: createMemoryDirectory({ seed: [ADMIN, ANA, BETO, nameless] }) };
+
+    const result = await submit(withNameless, 'Bearer valido-uid-sin-nombre', characterBody());
+
+    expect(result.body.contribution).toMatchObject({ author: 'Invitado' });
+  });
+
   it('without the rights statement accepted, the upload is refused and nothing is stored', async () => {
     const d = await deps();
 
@@ -158,11 +186,73 @@ describe('handleSubmitContribution', () => {
     expect(d.decor.artAuditLog()).toEqual([]);
   });
 
-  it('refuses a desk or a floor: those stay the Admin upload', async () => {
+  it('takes a desk with the facings of the pack default desk, and a floor, both pending like any piece', async () => {
     const d = await deps();
-    const desk = { kind: 'desk', name: 'Roble', author: 'Ana', material: 'roble', rightsAccepted: true, files: { sheet: sheet('desk') } };
+    const desk = { kind: 'desk', name: 'Roble', material: 'roble', rightsAccepted: true, files: { sheet: sheet('desk') } };
+    const floor = { kind: 'floor', name: 'Parquet', material: 'parquet', rightsAccepted: true, files: { sheet: sheet('floor') } };
 
-    expect(await handleSubmitContribution(AS_ANA, desk, d)).toEqual({ status: 400, body: { error: 'invalid-metadata', field: 'kind' } });
+    const sentDesk = await submit(d, AS_ANA, desk);
+    const sentFloor = await submit(d, AS_ANA, floor);
+
+    expect(sentDesk.status).toBe(201);
+    expect(sentDesk.body.contribution).toMatchObject({ kind: 'desk', status: 'pending', author: 'Ana', piece: { facings: PACK_DESK_FACINGS } });
+    expect(sentFloor.body.contribution).toMatchObject({ kind: 'floor', status: 'pending', piece: { colorable: false, defaultColor: null } });
+  });
+
+  it('names the material after the piece: a contribution that sends none still goes through', async () => {
+    const d = await deps();
+
+    const sent = await submit(d, AS_ANA, { kind: 'floor', name: 'Suelo de prueba', rightsAccepted: true, files: { sheet: sheet('floor') } });
+
+    expect(sent.status).toBe(201);
+    expect(sent.body.contribution).toMatchObject({ kind: 'floor', author: 'Ana', piece: { material: 'suelo-de-prueba' } });
+  });
+
+  it('takes a chair, and once approved it is a guest seat anyone can place, credited to its author', async () => {
+    const d = await deps();
+    const sent = await submit(d, AS_ANA, { kind: 'chair', name: 'Silla de roble', material: 'roble', rightsAccepted: true, files: { sheet: sheet('chair') } });
+    expect(sent.status).toBe(201);
+    expect(sent.body.contribution).toMatchObject({ kind: 'chair', status: 'pending', author: 'Ana' });
+    const id = sent.body.contribution.id;
+
+    await handleApproveContribution(AS_ADMIN, id, d);
+
+    const assets = await handleListOfficeAssets(AS_BETO, d);
+    expect((assets.body.assets as { textureKey: string }[]).filter(notPackChair)).toEqual([
+      expect.objectContaining({ textureKey: artSheetKey(id, 'sheet'), kind: 'furniture', w: 1, h: 1, placeableOnDesk: true, author: 'Ana' }),
+    ]);
+    expect(parseArtPackManifest((await handleUploadedArtManifest(d.decor)).body)?.pieces.map((piece) => piece.id)).toEqual([id]);
+  });
+
+  it('takes a room table and a door; approved, they are in the uploads manifest but no decor asset: an admin places them', async () => {
+    const d = await deps();
+    const table = await submit(d, AS_ANA, { kind: 'table', name: 'Mesa larga', material: 'roble', footprint: { w: 5, h: 3 }, rightsAccepted: true, files: { sheet: sheet('table') } });
+    const door = await submit(d, AS_ANA, { kind: 'door', name: 'Puerta de roble', material: 'roble', rightsAccepted: true, files: { sheet: sheet('door') } });
+    expect([table.status, door.status]).toEqual([201, 201]);
+    expect(table.body.contribution).toMatchObject({ kind: 'table', status: 'pending', author: 'Ana', piece: { footprint: { w: 5, h: 3 } } });
+    expect(door.body.contribution).toMatchObject({ kind: 'door', status: 'pending', piece: { variant: 'single' } });
+
+    for (const sent of [table, door]) await handleApproveContribution(AS_ADMIN, sent.body.contribution.id, d);
+
+    const ids = parseArtPackManifest((await handleUploadedArtManifest(d.decor)).body)?.pieces.map((piece) => piece.id);
+    expect(ids).toEqual(expect.arrayContaining([table.body.contribution.id, door.body.contribution.id]));
+    expect(((await handleListOfficeAssets(AS_BETO, d)).body.assets as { textureKey: string }[]).filter(notPackChair)).toEqual([]);
+  });
+
+  it('refuses a room table with no footprint, and says which field', async () => {
+    const d = await deps();
+
+    expect(await handleSubmitContribution(AS_ANA, { kind: 'table', name: 'Mesa', material: 'roble', rightsAccepted: true, files: { sheet: sheet('table') } }, d)).toEqual({
+      status: 400,
+      body: { error: 'invalid-metadata', field: 'footprint' },
+    });
+  });
+
+  it('refuses a wall: walls are made from code, not contributed', async () => {
+    const d = await deps();
+    const wall = { kind: 'wall', name: 'Ladrillo', material: 'brick', rightsAccepted: true, files: { sheet: sheet('wall') } };
+
+    expect(await handleSubmitContribution(AS_ANA, wall, d)).toEqual({ status: 400, body: { error: 'invalid-metadata', field: 'kind' } });
   });
 
   it('the sixth pending piece of a user is refused with too-many-pending, before any file is stored', async () => {
@@ -373,10 +463,25 @@ describe('handleRetireArtPiece', () => {
     expect(d.retiredLive).toHaveLength(2);
   });
 
-  it('refuses an Admin-uploaded desk: desks and floors are not withdrawn this way', async () => {
+  it('withdraws an approved desk or floor like a plant, and keeps them drawable for whoever uses them', async () => {
     const d = await deps();
-    const desk = PACK.pieces.find((piece) => piece.id === 'desk-wood')!;
-    const { piece } = await d.decor.registerUploadedArtPiece({ piece: { ...desk, id: 'desk-upload-0123456789abcdef' }, uploadedBy: ADMIN.id });
+    const desk = await submit(d, AS_ANA, { kind: 'desk', name: 'Roble', material: 'roble', rightsAccepted: true, files: { sheet: sheet('desk') } });
+    const floor = await submit(d, AS_ANA, { kind: 'floor', name: 'Parquet', material: 'parquet', rightsAccepted: true, files: { sheet: sheet('floor') } });
+    for (const sent of [desk, floor]) await handleApproveContribution(AS_ADMIN, sent.body.contribution.id, d);
+
+    expect((await handleRetireArtPiece(AS_ADMIN, desk.body.contribution.id, d)).status).toBe(200);
+    expect((await handleRetireArtPiece(AS_ADMIN, floor.body.contribution.id, d)).status).toBe(200);
+
+    // A retired desk is a table already placed on someone's desk and a retired floor is painted
+    // terrain: the office still has to find their sheets (a retired character is the exception).
+    const ids = parseArtPackManifest((await handleUploadedArtManifest(d.decor)).body)?.pieces.map((piece) => piece.id);
+    expect(ids).toEqual(expect.arrayContaining([desk.body.contribution.id, floor.body.contribution.id]));
+  });
+
+  it('refuses to withdraw a piece of a kind nobody contributes', async () => {
+    const d = await deps();
+    const wall = PACK.pieces.find((piece) => piece.kind === 'wall')!;
+    const { piece } = await d.decor.registerUploadedArtPiece({ piece: { ...wall, id: 'wall-upload-0123456789abcdef' }, uploadedBy: ADMIN.id });
 
     expect(await handleRetireArtPiece(AS_ADMIN, piece.id, d)).toEqual({ status: 409, body: { error: 'not-retirable' } });
   });

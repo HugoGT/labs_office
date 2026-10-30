@@ -18,6 +18,7 @@
 }
 
 .toggle {
+  position: relative;
   pointer-events: auto;
   /* Same column as the panel below it (#90). */
   align-self: stretch;
@@ -218,4 +219,36 @@
   .close {
     display: block;
   }
+}
+
+/* Notification of the art contributions waiting for review: a white circle with the number in
+   its middle, on the "Personalizar" button and on the "Revisión de arte" entry. */
+.badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: #fff;
+  color: #111827;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.withBadge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.toggleBadge {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
 }

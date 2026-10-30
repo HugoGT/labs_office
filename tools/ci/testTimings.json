@@ -100,7 +100,6 @@
   "src/auth/localAuthAdapter.test.ts": 18,
   "src/auth/sessionExpiry.test.ts": 13,
   "src/components/ArtContributionSection.test.tsx": 1459,
-  "src/components/ArtPiecePreview.test.tsx": 180,
   "src/components/ArtPreviewCanvas.test.tsx": 368,
   "src/components/AudioUnblockPrompt.test.tsx": 193,
   "src/components/AuthGate.test.tsx": 9256,

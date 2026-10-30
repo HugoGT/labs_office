@@ -12,11 +12,8 @@ export type ArtUploadKind = (typeof ART_UPLOAD_KINDS)[number];
 
 export interface ArtUploadInput {
   kind: ArtUploadKind;
+  /** The credit is the uploader's and the material is the name's: the server sets both. */
   name: string;
-  author: string;
-  license: string;
-  /** Desks, floors and plants. */
-  material?: string;
   /** Desks and floors: a colorable piece is exported in `defaultColor`. */
   colorable?: boolean;
   defaultColor?: string | null;

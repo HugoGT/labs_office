@@ -49,9 +49,18 @@ const verifier: IdTokenVerifier = {
 const BEARER_ADMIN = 'Bearer valido-uid-admin';
 const BEARER_EMPLEADO = 'Bearer valido-uid-empleado';
 
-async function harness(protections: TerrainProtections = { placements: [], players: [] }) {
+const FLOOR = 'floor-upload-0123456789abcdef';
+
+/** The art catalog of a floor test; the other tests wire none, so decor pieces resolve by id as before. */
+const FLOOR_CATALOG = [
+  { id: FLOOR, kind: 'floor', retired: false },
+  { id: 'floor-upload-fedcba9876543210', kind: 'floor', retired: true },
+  { id: 'plant-upload-0123456789abcdef', kind: 'plant', retired: false },
+];
+
+async function harness(protections: TerrainProtections = { placements: [], players: [] }, catalog?: typeof FLOOR_CATALOG) {
   const store = createMemoryTerrain();
-  const terrain = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+  const terrain = createTerrainRuntime({ layout: BASE_LAYOUT, store, ...(catalog === undefined ? {} : { decorPieces: async () => catalog }) });
   await terrain.load();
   const readProtections = vi.fn(async () => protections);
   const deps: TerrainDeps = {
@@ -110,6 +119,58 @@ describe('handleSetTerrainBlock', () => {
     expect(new Map(await store.loadBlockColors())).toEqual(new Map([[0, '#a0b1c2']]));
   });
 
+  it('applies a batch with a floor, and refuses the whole batch for one bad floor', async () => {
+    const { deps, terrain, store } = await harness(undefined, FLOOR_CATALOG);
+    const expected = encodeTerrainBlocks(terrain.blocks());
+
+    for (const edits of [
+      [{ index: 0, material: 'wood', floor: FLOOR }, { index: 1, material: 'grass', floor: FLOOR }],
+      [{ index: 0, material: 'wood', floor: FLOOR }, { index: 1, material: 'wood', floor: 'floor-upload-fedcba9876543210' }],
+    ]) {
+      expect(await handleSetTerrainBlocks(BEARER_ADMIN, { expected, edits }, deps)).toEqual({ status: 400, body: { error: 'invalid-request' } });
+    }
+    expect([...(await store.loadBlocks())]).toEqual([]);
+
+    const edits = [{ index: 0, material: 'wood', floor: FLOOR }, { index: 1, material: 'wood' }];
+    expect(await handleSetTerrainBlocks(BEARER_ADMIN, { expected, edits }, deps)).toEqual({ status: 200, body: { updated: 2 } });
+    expect(terrain.blockFloors()).toEqual(new Map([[0, FLOOR]]));
+    expect(new Map(await store.loadBlockFloors())).toEqual(new Map([[0, FLOOR]]));
+  });
+
+  it('paints a wood block with an uploaded floor and answers it; an edit without one answers as before', async () => {
+    const { deps, store, terrain } = await harness(undefined, FLOOR_CATALOG);
+
+    const result = await handleSetTerrainBlock(BEARER_ADMIN, LAWN, { material: 'wood', floor: FLOOR }, deps);
+
+    expect(result).toStrictEqual({ status: 200, body: { index: 35, material: 'wood', color: null, floor: FLOOR } });
+    expect(terrain.blockFloors()).toEqual(new Map([[35, FLOOR]]));
+    expect(new Map(await store.loadBlockFloors())).toEqual(new Map([[35, FLOOR]]));
+
+    const plain = await handleSetTerrainBlock(BEARER_ADMIN, LAWN, { material: 'wood' }, deps);
+    expect(plain).toStrictEqual({ status: 200, body: { index: 35, material: 'wood', color: null } });
+    expect(terrain.blockFloors()).toEqual(new Map());
+    expect([...(await store.loadBlockFloors())]).toEqual([]);
+  });
+
+  it('answers 400 to a floor that is malformed, off wood, with a color, or not an approved floor of the catalog, changing nothing', async () => {
+    const { deps, store, terrain } = await harness(undefined, FLOOR_CATALOG);
+
+    for (const body of [
+      { material: 'wood', floor: 'floor-wood' },
+      { material: 'grass', floor: FLOOR },
+      { material: 'wood', floor: FLOOR, color: '#a0b1c2' },
+      { material: 'wood', floor: 'floor-upload-fedcba9876543210' },
+      { material: 'wood', floor: 'floor-upload-1111111111111111' },
+      { material: 'wood', floor: 'plant-upload-0123456789abcdef' },
+      { material: 'lava', floor: FLOOR },
+    ]) {
+      expect(await handleSetTerrainBlock(BEARER_ADMIN, LAWN, body, deps), JSON.stringify(body)).toEqual({ status: 400, body: { error: 'invalid-request' } });
+    }
+    expect(terrain.blocks()[35]).toBe('grass');
+    expect([...(await store.loadBlocks())]).toEqual([]);
+    expect([...(await store.loadBlockFloors())]).toEqual([]);
+  });
+
   it('lets an admin set a block, recording who did it', async () => {
     const { deps, store, terrain } = await harness();
 
@@ -129,6 +190,12 @@ describe('handleSetTerrainBlock', () => {
     expect(terrain.blocks()[35]).toBe('carpet');
     expect(terrain.blockColors()).toEqual(new Map([[35, '#a0b1c2']]));
     expect(new Map(await store.loadBlockColors())).toEqual(new Map([[35, '#a0b1c2']]));
+  });
+
+  it('still answers 400 to an unknown material and keeps a color working beside floors', async () => {
+    const { deps } = await harness();
+    expect(await handleSetTerrainBlock(BEARER_ADMIN, LAWN, { material: 'lava' }, deps)).toEqual({ status: 400, body: { error: 'invalid-request' } });
+    expect(await handleSetTerrainBlock(BEARER_ADMIN, LAWN, { material: 'carpet', color: '#A0B1C2' }, deps)).toEqual({ status: 200, body: { index: 35, material: 'carpet', color: '#a0b1c2' } });
   });
 
   it('answers 400 to a malformed color or a color on a material that takes none, changing nothing (#222)', async () => {

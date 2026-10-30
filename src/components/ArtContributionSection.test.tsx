@@ -44,32 +44,66 @@ function fakePort(mine: Contribution[] = [], overrides: Partial<ArtContributionP
 
 async function fillCharacter(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   await user.type(screen.getByLabelText('Nombre'), 'Lucía');
-  await user.type(screen.getByLabelText('Autoría'), 'Ana');
   await user.upload(screen.getByLabelText(/Caminar/), png('walk.png'));
   await user.upload(screen.getByLabelText(/Sentado/), png('seated.png'));
 }
 
 describe('ArtContributionSection (#122)', () => {
-  it('offers characters and decor plants only, with the rights statement word for word', async () => {
+  it('offers every kind a user may contribute, with the rights statement word for word', async () => {
     render(<ArtContributionSection contributions={fakePort()} />);
 
     const kinds = within(screen.getByLabelText('Tipo')).getAllByRole('option').map((option) => option.getAttribute('value'));
-    expect(kinds).toEqual(['character', 'plant']);
-    expect(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT })).not.toBeChecked();
-    expect(RIGHTS_STATEMENT).toBe('Confirmo que este arte no infringe derechos de autor y que la oficina puede usarlo libremente.');
+    expect(kinds).toEqual(['character', 'plant', 'desk', 'floor', 'chair', 'table', 'door']);
+    expect(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT })).toBeChecked();
+    expect(RIGHTS_STATEMENT).toBe('Al subir este archivo declaro que no infringe derechos de autor.');
     await waitFor(() => expect(screen.getByText('Pendientes de revisión: 0 de 5')).toBeInTheDocument());
   });
 
-  it('cannot be sent until the rights statement is accepted', async () => {
+  it('does not ask for an author or a material: the credit is the uploader\'s and the material the name\'s, both set by the server', async () => {
+    const user = userEvent.setup();
+    render(<ArtContributionSection contributions={fakePort()} />);
+
+    for (const kind of ['character', 'plant', 'desk', 'floor', 'chair', 'table', 'door']) {
+      await user.selectOptions(screen.getByLabelText('Tipo'), kind);
+      expect(screen.queryByLabelText('Autoría')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Material')).not.toBeInTheDocument();
+    }
+  });
+
+  it('names the piece after its file while the name is empty, and leaves a typed name alone', async () => {
+    const user = userEvent.setup();
+    render(<ArtContributionSection contributions={fakePort()} />);
+
+    await user.upload(screen.getByLabelText(/Caminar/), png('Mi personaje.final.PNG'));
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Mi personaje.final');
+
+    // Another file does not rename what the person already sees as the name.
+    await user.upload(screen.getByLabelText(/Sentado/), png('sentado.png'));
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Mi personaje.final');
+
+    await user.clear(screen.getByLabelText('Nombre'));
+    await user.type(screen.getByLabelText('Nombre'), 'Lucía');
+    await user.upload(screen.getByLabelText(/Caminar/), png('otro.png'));
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Lucía');
+  });
+
+  it('cuts a file name longer than a name to the name limit', async () => {
+    const user = userEvent.setup();
+    render(<ArtContributionSection contributions={fakePort()} />);
+
+    await user.upload(screen.getByLabelText(/Caminar/), png(`${'a'.repeat(80)}.png`));
+
+    expect(screen.getByLabelText('Nombre')).toHaveValue('a'.repeat(60));
+  });
+
+  it('sends the contribution with the rights declared, and the checkbox is back on for the next one', async () => {
     const user = userEvent.setup();
     const port = fakePort();
     render(<ArtContributionSection contributions={port} />);
 
     await fillCharacter(user);
     const send = screen.getByRole('button', { name: 'Enviar a revisión' });
-    expect(send).toBeDisabled();
 
-    await user.click(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT }));
     expect(send).toBeEnabled();
     await user.click(send);
 
@@ -77,7 +111,6 @@ describe('ArtContributionSection (#122)', () => {
     expect(port.submit).toHaveBeenCalledWith({
       kind: 'character',
       name: 'Lucía',
-      author: 'Ana',
       rightsAccepted: true,
       files: { walk: PNG_BASE64, seated: PNG_BASE64 },
     });
@@ -86,20 +119,97 @@ describe('ArtContributionSection (#122)', () => {
     expect(port.listMine).toHaveBeenCalledTimes(2);
   });
 
-  it('a plant asks for its sheet and a material', async () => {
+  it('a plant asks for its sheet', async () => {
     const user = userEvent.setup();
     const port = fakePort();
     render(<ArtContributionSection contributions={port} />);
 
     await user.selectOptions(screen.getByLabelText('Tipo'), 'plant');
     await user.type(screen.getByLabelText('Nombre'), 'Helecho');
-    await user.type(screen.getByLabelText('Autoría'), 'Ana');
-    await user.type(screen.getByLabelText('Material'), 'helecho');
     await user.upload(screen.getByLabelText(/Hoja/), png('sheet.png'));
-    await user.click(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT }));
     await user.click(screen.getByRole('button', { name: 'Enviar a revisión' }));
 
-    await waitFor(() => expect(port.submit).toHaveBeenCalledWith(expect.objectContaining({ kind: 'plant', material: 'helecho', files: { sheet: PNG_BASE64 } })));
+    await waitFor(() => expect(port.submit).toHaveBeenCalledWith({ kind: 'plant', name: 'Helecho', rightsAccepted: true, files: { sheet: PNG_BASE64 } }));
+  });
+
+  it.each([
+    ['desk', 'Escritorio', 'Roble'],
+    ['floor', 'Suelo', 'Parquet'],
+    ['chair', 'Silla', 'Silla de roble'],
+    ['door', 'Puerta', 'Puerta de roble'],
+  ] as const)('a %s asks for its sheet, and sends nothing but the kind, the name and the rights', async (kind, label, name) => {
+    const user = userEvent.setup();
+    const port = fakePort();
+    render(<ArtContributionSection contributions={port} />);
+
+    await user.selectOptions(screen.getByLabelText('Tipo'), kind);
+    expect(screen.getByRole('option', { name: label })).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Nombre'), name);
+    await user.upload(screen.getByLabelText(/Hoja/), png('sheet.png'));
+    await user.click(screen.getByRole('button', { name: 'Enviar a revisión' }));
+
+    await waitFor(() => expect(port.submit).toHaveBeenCalledWith({ kind, name, rightsAccepted: true, files: { sheet: PNG_BASE64 } }));
+  });
+
+  it('a room table asks for its footprint in tiles, and says only an admin places it', async () => {
+    const user = userEvent.setup();
+    const port = fakePort();
+    render(<ArtContributionSection contributions={port} />);
+
+    await user.selectOptions(screen.getByLabelText('Tipo'), 'table');
+    expect(screen.getByRole('option', { name: 'Mesa de sala' })).toBeInTheDocument();
+    expect(screen.getByText(/Solo un admin puede colocarla/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Nombre'), 'Mesa larga');
+    await user.clear(screen.getByLabelText('Ancho'));
+    await user.type(screen.getByLabelText('Ancho'), '5');
+    await user.clear(screen.getByLabelText('Alto'));
+    await user.type(screen.getByLabelText('Alto'), '3');
+    await user.upload(screen.getByLabelText(/Hoja/), png('sheet.png'));
+    await user.click(screen.getByRole('button', { name: 'Enviar a revisión' }));
+
+    await waitFor(() =>
+      expect(port.submit).toHaveBeenCalledWith({
+        kind: 'table',
+        name: 'Mesa larga',
+        footprint: { w: 5, h: 3 },
+        rightsAccepted: true,
+        files: { sheet: PNG_BASE64 },
+      }),
+    );
+  });
+
+  it('a table asks its width and height side by side, with no unit in the labels', async () => {
+    const user = userEvent.setup();
+    render(<ArtContributionSection contributions={fakePort()} />);
+
+    await user.selectOptions(screen.getByLabelText('Tipo'), 'table');
+
+    expect(screen.getByLabelText('Ancho').closest('[data-row="footprint"]')).toBe(screen.getByLabelText('Alto').closest('[data-row="footprint"]'));
+    expect(screen.getByLabelText('Ancho').closest('[data-row="footprint"]')).not.toBeNull();
+  });
+
+  it('the rights are declared from the start, and unchecking them stops the send', async () => {
+    const user = userEvent.setup();
+    render(<ArtContributionSection contributions={fakePort()} />);
+
+    await fillCharacter(user);
+    expect(screen.getByRole('button', { name: 'Enviar a revisión' })).toBeEnabled();
+    await user.click(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT }));
+
+    expect(screen.getByRole('button', { name: 'Enviar a revisión' })).toBeDisabled();
+  });
+
+  it('a table cannot be sent with a footprint the sheet does not fit', async () => {
+    const user = userEvent.setup();
+    render(<ArtContributionSection contributions={fakePort()} />);
+
+    await user.selectOptions(screen.getByLabelText('Tipo'), 'table');
+    await user.type(screen.getByLabelText('Nombre'), 'Mesa');
+    await user.clear(screen.getByLabelText('Ancho'));
+    await user.type(screen.getByLabelText('Ancho'), '8');
+    await user.upload(screen.getByLabelText(/Hoja/), png('sheet.png'));
+
+    expect(screen.getByRole('button', { name: 'Enviar a revisión' })).toBeDisabled();
   });
 
   it.each([
@@ -110,7 +220,6 @@ describe('ArtContributionSection (#122)', () => {
     render(<ArtContributionSection contributions={fakePort([], { submit: vi.fn(async () => Promise.reject(new AdminError(code))) })} />);
 
     await fillCharacter(user);
-    await user.click(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT }));
     await user.click(screen.getByRole('button', { name: 'Enviar a revisión' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(message);
@@ -146,7 +255,9 @@ describe('ArtContributionSection (#122)', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Ver Lucía' }));
 
+    expect(screen.getByRole('dialog', { name: 'Lucía' })).toBeInTheDocument();
     expect(await screen.findByRole('img', { name: 'Lucía sentado' })).toBeInTheDocument();
+    expect(screen.getAllByRole('img', { name: /Lucía caminando/ })).toHaveLength(8);
     expect(port.fileDataUrl).toHaveBeenCalledWith('a.png');
     expect(port.fileDataUrl).toHaveBeenCalledWith('b.png');
   });

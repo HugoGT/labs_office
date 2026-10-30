@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { AdminError } from '../dashboard/adminPort';
@@ -22,9 +22,13 @@ function fakePort(overrides: Partial<ArtUploadPort> = {}): ArtUploadPort {
 async function fillPlant(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   await user.selectOptions(screen.getByLabelText('Tipo'), 'plant');
   await user.type(screen.getByLabelText('Nombre'), 'Helecho');
-  await user.type(screen.getByLabelText('Autoría'), 'Equipo de arte');
-  await user.type(screen.getByLabelText('Material'), 'helecho');
   await user.upload(screen.getByLabelText(/Hoja/), png('helecho.png'));
+}
+
+/** "Subir" shows the office mock first; the piece is published when the admin accepts it there. */
+async function submitAndAccept(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(screen.getByRole('button', { name: 'Subir' }));
+  await user.click(await screen.findByRole('button', { name: 'Aceptar y subir' }));
 }
 
 describe('ArtUploadSection (#121)', () => {
@@ -34,12 +38,50 @@ describe('ArtUploadSection (#121)', () => {
     expect(screen.getByRole('heading', { name: 'Aportar arte' })).toBeInTheDocument();
     expect(screen.getByLabelText(/Caminar/)).toHaveAccessibleDescription(/352 × 416 px/);
     expect(screen.getByLabelText(/Sentado/)).toHaveAccessibleDescription(/352 × 232 px/);
-    // A character has no material.
-    expect(screen.queryByLabelText('Material')).toBeNull();
     expect(screen.getByRole('button', { name: 'Subir' })).toBeDisabled();
   });
 
-  it('a plant asks for one sheet and a material, and previews the chosen file', async () => {
+  it('asks only for the kind and the name: the credit is the uploader\'s and the license and material come from the server', () => {
+    render(<ArtUploadSection uploads={fakePort()} />);
+
+    expect(screen.getAllByRole('textbox').map((field) => field.getAttribute('id'))).toHaveLength(1);
+    for (const gone of ['Autoría', 'Licencia', 'Material']) expect(screen.queryByLabelText(gone)).not.toBeInTheDocument();
+  });
+
+  it('opens with only what the files need: the PNG rules, with no "Como admin" lead-in', () => {
+    render(<ArtUploadSection uploads={fakePort()} />);
+
+    expect(screen.getByText(/PNG de 8 bits con el tamaño exacto de su tipo, hasta 128 colores y 128 KB por archivo\.$/)).toBeInTheDocument();
+    expect(screen.queryByText(/Como admin/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/sin pasar por revisión/)).not.toBeInTheDocument();
+  });
+
+  it('names the piece after its file while the name is empty, and leaves a typed name alone', async () => {
+    const user = userEvent.setup();
+    render(<ArtUploadSection uploads={fakePort()} />);
+
+    await user.upload(screen.getByLabelText(/Caminar/), png('Mi personaje.final.PNG'));
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Mi personaje.final');
+
+    await user.upload(screen.getByLabelText(/Sentado/), png('sentado.png'));
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Mi personaje.final');
+
+    await user.clear(screen.getByLabelText('Nombre'));
+    await user.type(screen.getByLabelText('Nombre'), 'Lucía');
+    await user.upload(screen.getByLabelText(/Caminar/), png('otro.png'));
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Lucía');
+  });
+
+  it('cuts a file name longer than a name to the name limit', async () => {
+    const user = userEvent.setup();
+    render(<ArtUploadSection uploads={fakePort()} />);
+
+    await user.upload(screen.getByLabelText(/Caminar/), png(`${'a'.repeat(80)}.png`));
+
+    expect(screen.getByLabelText('Nombre')).toHaveValue('a'.repeat(60));
+  });
+
+  it('a plant asks for one sheet, and previews the chosen file', async () => {
     const user = userEvent.setup();
     render(<ArtUploadSection uploads={fakePort()} />);
 
@@ -51,7 +93,7 @@ describe('ArtUploadSection (#121)', () => {
     expect(preview.getAttribute('src')).toBe(`data:image/png;base64,${PNG_BASE64}`);
   });
 
-  it('uploads the files in base64 with the metadata and says the piece is in the catalog', async () => {
+  it('"Subir" opens the office mock of what was chosen, from the local files, and publishes nothing yet', async () => {
     const user = userEvent.setup();
     const uploads = fakePort();
     render(<ArtUploadSection uploads={uploads} />);
@@ -59,13 +101,51 @@ describe('ArtUploadSection (#121)', () => {
     await fillPlant(user);
     await user.click(screen.getByRole('button', { name: 'Subir' }));
 
+    const dialog = await screen.findByRole('dialog', { name: 'Helecho' });
+    expect(within(dialog).getByRole('group', { name: 'Helecho en la oficina' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('img', { name: 'Helecho' }).style.backgroundImage).toContain(`data:image/png;base64,${PNG_BASE64}`);
+    expect(uploads.upload).not.toHaveBeenCalled();
+  });
+
+  it('"Cancelar" goes back to the form with everything as it was, and publishes nothing', async () => {
+    const user = userEvent.setup();
+    const uploads = fakePort();
+    render(<ArtUploadSection uploads={uploads} />);
+
+    await fillPlant(user);
+    await user.click(screen.getByRole('button', { name: 'Subir' }));
+    await user.click(await screen.findByRole('button', { name: 'Cancelar' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Helecho');
+    expect(screen.getByRole('button', { name: 'Subir' })).toBeEnabled();
+    expect(uploads.upload).not.toHaveBeenCalled();
+  });
+
+  it('accepting closes the mock, empties the form and says the piece is in the catalog', async () => {
+    const user = userEvent.setup();
+    render(<ArtUploadSection uploads={fakePort()} />);
+
+    await fillPlant(user);
+    await submitAndAccept(user);
+
+    expect(await screen.findByRole('status')).toHaveTextContent('«Helecho» ya está en el catálogo');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Nombre')).toHaveValue('');
+  });
+
+  it('uploads the files in base64 with the metadata and says the piece is in the catalog', async () => {
+    const user = userEvent.setup();
+    const uploads = fakePort();
+    render(<ArtUploadSection uploads={uploads} />);
+
+    await fillPlant(user);
+    await submitAndAccept(user);
+
     await waitFor(() =>
       expect(uploads.upload).toHaveBeenCalledWith({
         kind: 'plant',
         name: 'Helecho',
-        author: 'Equipo de arte',
-        license: 'proprietary-internal',
-        material: 'helecho',
         files: { sheet: PNG_BASE64 },
       }),
     );
@@ -80,11 +160,9 @@ describe('ArtUploadSection (#121)', () => {
 
     await user.selectOptions(screen.getByLabelText('Tipo'), 'floor');
     await user.type(screen.getByLabelText('Nombre'), 'Baldosa');
-    await user.type(screen.getByLabelText('Autoría'), 'Equipo');
-    await user.type(screen.getByLabelText('Material'), 'baldosa');
     await user.click(screen.getByLabelText('Admite color'));
     await user.upload(screen.getByLabelText(/Hoja/), png('baldosa.png'));
-    await user.click(screen.getByRole('button', { name: 'Subir' }));
+    await submitAndAccept(user);
 
     await waitFor(() => expect(uploads.upload).toHaveBeenCalledWith(expect.objectContaining({ kind: 'floor', colorable: true, defaultColor: '#808080' })));
   });
@@ -95,7 +173,7 @@ describe('ArtUploadSection (#121)', () => {
     render(<ArtUploadSection uploads={uploads} />);
 
     await fillPlant(user);
-    await user.click(screen.getByRole('button', { name: 'Subir' }));
+    await submitAndAccept(user);
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Hoja');

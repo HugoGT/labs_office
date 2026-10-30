@@ -14,6 +14,7 @@
 import type { OfficeDesk } from './desksPort';
 import type { LayoutEditCommand } from './layoutEditor';
 import type { LayoutMaterial, TerrainColors } from './officeLayout';
+import type { TerrainFloors } from './terrainFloors';
 import type { SpaceArea } from './mapData';
 import type { AccessDeniedReason, PresenceStatus, RecordingReadyPayload } from './officeProtocol';
 import type { RosterPeer } from './roster';
@@ -213,6 +214,8 @@ export interface OfficeEventMap {
     walls: readonly (string | null)[];
     /** The color of each painted block (#222); a block absent draws its material's default art. */
     colors: TerrainColors;
+    /** The uploaded floor of each painted block (S13); absent when the scene knows none. */
+    floors?: TerrainFloors;
   };
   /** The terrain editor has a floor picked and someone clicked a block on the map (#123 phase 2). */
   terrainpick: { index: number };

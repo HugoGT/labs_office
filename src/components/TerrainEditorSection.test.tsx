@@ -201,6 +201,38 @@ describe('TerrainEditorSection', () => {
   });
 });
 
+describe('TerrainEditorSection: uploaded floors (S13)', () => {
+  const PIECE = 'floor-upload-0123456789abcdef';
+  const wood = catalog.floor.find((option) => option.id === 'floor-wood')!;
+  const withUpload = { ...catalog, floor: [...catalog.floor, { ...wood, id: PIECE, name: 'Parquet gris' }] };
+
+  it('picks an approved uploaded floor from the palette and paints every clicked block with it over wood', async () => {
+    const { bridge, terrain, commands } = renderSection({ loadMaterials: async () => withUpload });
+    await open();
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Parquet gris' }));
+    expect(screen.getByRole('button', { name: 'Parquet gris' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Madera' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByText('Pintando con Parquet gris')).toBeInTheDocument();
+    expect(commands.at(-1)).toEqual({ brush: { kind: 'floor', material: 'wood', floor: PIECE } });
+
+    act(() => bridge.emit('terrainpick', { index: LAWN }));
+    await vi.waitFor(() => expect(terrain.setBlock).toHaveBeenCalledTimes(1));
+    expect(terrain.setBlock).toHaveBeenLastCalledWith(LAWN, 'wood', undefined, PIECE);
+  });
+
+  it('keeps the plain wood label and paint when the built-in wood is picked', async () => {
+    const { bridge, terrain } = renderSection({ loadMaterials: async () => withUpload });
+    await open();
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Madera' }));
+    expect(screen.getByText('Pintando con Madera')).toBeInTheDocument();
+    act(() => bridge.emit('terrainpick', { index: LAWN }));
+    await vi.waitFor(() => expect(terrain.setBlock).toHaveBeenCalledTimes(1));
+    expect(terrain.setBlock).toHaveBeenLastCalledWith(LAWN, 'wood');
+  });
+});
+
 describe('TerrainEditorSection: space outlines (#216)', () => {
   const desks = [{ x: 2, y: 3, w: 4, h: 4 }];
   const rooms = [{ x: 20, y: 5, w: 9, h: 9 }];

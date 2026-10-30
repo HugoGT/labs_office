@@ -375,6 +375,74 @@ describe('useTerrainEditor', () => {
   });
 });
 
+describe('useTerrainEditor: uploaded floors (S13)', () => {
+  const PIECE = 'floor-upload-0123456789abcdef';
+  const OTHER_PIECE = 'floor-upload-fedcba9876543210';
+  const uploaded = (floorId: string): TerrainBrush => ({ kind: 'floor', material: 'wood', floor: floorId });
+
+  it('picks an uploaded floor as a wood brush carrying the piece, unpicks it on a second pick, and tells the map', () => {
+    const { result, commands } = setup();
+    act(() => result.current.enter());
+
+    act(() => result.current.pickFloor(PIECE));
+    expect(result.current.brush).toEqual(uploaded(PIECE));
+    expect(commands.at(-1)).toEqual({ brush: uploaded(PIECE) });
+
+    // The built-in wood and another upload are other brushes, not the same one toggled off.
+    act(() => result.current.pick('wood'));
+    expect(result.current.brush).toEqual(floor('wood'));
+    act(() => result.current.pickFloor(PIECE));
+    act(() => result.current.pickFloor(OTHER_PIECE));
+    expect(result.current.brush).toEqual(uploaded(OTHER_PIECE));
+    act(() => result.current.pickFloor(OTHER_PIECE));
+    expect(result.current.brush).toBeNull();
+  });
+
+  it('sends the piece with each paint and previews the block as wood', async () => {
+    const { bridge, result, terrain, commands } = setup();
+    act(() => result.current.enter());
+    act(() => result.current.pickFloor(PIECE));
+
+    act(() => bridge.emit('terrainpick', { index: LAWN }));
+
+    await waitFor(() => expect(terrain.setBlock).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(terrain.setBlock).mock.calls).toEqual([[LAWN, 'wood', undefined, PIECE]]);
+    expect(commands.at(-1)).toEqual({ brush: uploaded(PIECE), previewBlocks: withBlock(BASE_LAYOUT.blocks, LAWN, 'wood') });
+  });
+
+  it('skips a block that already has the piece, but sends another piece and plain wood over it', async () => {
+    const { bridge, result, terrain } = setup();
+    act(() => result.current.enter());
+    act(() => bridge.emit('terrain', { blocks: withBlock(BASE_LAYOUT.blocks, LAWN, 'wood'), walls: BASE_LAYOUT.walls, colors: NO_COLORS, floors: new Map([[LAWN, PIECE]]) }));
+
+    act(() => result.current.pickFloor(PIECE));
+    act(() => bridge.emit('terrainpick', { index: LAWN }));
+    expect(terrain.setBlock).not.toHaveBeenCalled();
+
+    act(() => result.current.pickFloor(OTHER_PIECE));
+    act(() => bridge.emit('terrainpick', { index: LAWN }));
+    act(() => result.current.pick('wood'));
+    act(() => bridge.emit('terrainpick', { index: LAWN }));
+
+    await waitFor(() => expect(terrain.setBlock).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(terrain.setBlock).mock.calls).toEqual([[LAWN, 'wood', undefined, OTHER_PIECE], [LAWN, 'wood']]);
+  });
+
+  it('does not skip an upload over the same wood without it, and paints over the central entrance block, which stays wood', async () => {
+    const { bridge, result, terrain } = setup();
+    act(() => result.current.enter());
+    act(() => bridge.emit('terrain', { blocks: withBlock(BASE_LAYOUT.blocks, LAWN, 'wood'), walls: BASE_LAYOUT.walls, colors: NO_COLORS }));
+    act(() => result.current.pickFloor(PIECE));
+
+    act(() => bridge.emit('terrainpick', { index: LAWN }));
+    act(() => bridge.emit('terrainpick', { index: SPAWN_BLOCK_INDEX }));
+
+    await waitFor(() => expect(terrain.setBlock).toHaveBeenCalledTimes(2));
+    expect(result.current.error).toBeNull();
+    expect(vi.mocked(terrain.setBlock).mock.calls).toEqual([[LAWN, 'wood', undefined, PIECE], [SPAWN_BLOCK_INDEX, 'wood', undefined, PIECE]]);
+  });
+});
+
 describe('useTerrainEditor: space outlines (#216)', () => {
   it('asks the map to outline every room and desk it was given while open, and to stop on exit', () => {
     const bridge = createOfficeBridge();

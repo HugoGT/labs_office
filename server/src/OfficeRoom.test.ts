@@ -19,6 +19,7 @@ import { chairSeatId, mapSeatId } from '../../src/game/seating.ts';
 import { decodeOfficeDecor } from '../../src/game/officeDecor.ts';
 import { decodeLockedSpaces } from '../../src/game/spaceLocks.ts';
 import { decodeTerrainBlocks, decodeTerrainColors, decodeTerrainWalls } from '../../src/game/officeLayout.ts';
+import { decodeTerrainFloors } from '../../src/game/terrainFloors.ts';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_SPACES as BUILT_IN_SPACES } from '../../src/test/legacyOffice.ts';
 import { createOfficeServer as createServer, type OfficeServer, type OfficeServerOverrides } from './createOfficeServer.ts';
 const createOfficeServer = (overrides: OfficeServerOverrides = {}) => createServer({ layout: BASE_LAYOUT, seats: BASE_MAP_SEATS, ...overrides });
@@ -38,6 +39,10 @@ import { createMemoryDirectory } from './directory/memoryDirectory.ts';
 import { ART_PACK_DEFAULTS } from './decor/artCatalogRules.ts';
 import type { OfficeState } from './schema.ts';
 import { createMemoryTerrain } from './terrain/memoryTerrain.ts';
+import { createMemoryDecor } from './decor/memoryDecor.ts';
+import { prepareAssetUpload } from './assets/assetUploadRules.ts';
+import { encodePng } from './assets/pngCodec.ts';
+import { ART_IMAGE_SPECS, sheetSize } from '../../src/game/artContract.ts';
 import { createMemoryCollisions } from './collisions/memoryCollisions.ts';
 import { decodeCollisionTable } from '../../src/game/pieceCollisions.ts';
 import {
@@ -364,6 +369,44 @@ describe('OfficeRoom: edited terrain', () => {
 
     await waitFor(() => blocksOf(ana)?.[36] === 'tile');
     await waitFor(() => ana.state.terrainColors === '');
+  });
+
+  /** An approved uploaded floor in the catalog: the only way a block gets one. */
+  async function approvedFloor(decor: ReturnType<typeof createMemoryDecor>): Promise<string> {
+    const { width, height } = sheetSize(ART_IMAGE_SPECS.floor);
+    const data = new Uint8ClampedArray(width * height * 4).fill(255);
+    const body = { kind: 'floor', name: 'Parquet', author: 'Equipo de arte', license: 'proprietary-internal', material: 'parquet', files: { sheet: encodePng({ width, height, data }).toString('base64') } };
+    const { piece } = prepareAssetUpload(body);
+    await decor.registerUploadedArtPiece({ piece, uploadedBy: 'id-admin' });
+    return piece.id;
+  }
+  const floorsOf = (room: Awaited<ReturnType<typeof join>>) =>
+    decodeTerrainFloors(room.state.terrainFloors, BASE_LAYOUT.blocks.length);
+
+  it('replicates uploaded floors apart from the blocks, to whoever is inside and whoever joins after, and drops one when its block changes', async () => {
+    await server.shutdown();
+    const decor = createMemoryDecor();
+    const FLOOR = await approvedFloor(decor);
+    server = createOfficeServer({ terrain: createMemoryTerrain([[LAWN, 'water']]), decor });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+    const ana = await join('Ana');
+    // Blocks stored before floors existed replicate with none (an empty field may not even reach the client).
+    await waitFor(() => blocksOf(ana)?.[LAWN] === 'water');
+    expect(ana.state.terrainFloors ?? '').toBe('');
+
+    await server.terrain.setBlocks([{ index: 36, material: 'wood', floor: FLOOR }, { index: 37, material: 'wood' }], null, nobody);
+
+    await waitFor(() => floorsOf(ana)?.get(36) === FLOOR);
+    expect(ana.state.terrainFloors).toBe(`36:${FLOOR}`);
+    // The material list on the wire is untouched: an uploaded floor is wood to every client.
+    expect(blocksOf(ana)?.slice(36, 38)).toEqual(['wood', 'wood']);
+    const late = await join('Beto');
+    await waitFor(() => late.state.terrainFloors === `36:${FLOOR}`);
+
+    await server.terrain.setBlock({ index: 36, material: 'tile', actorId: null }, nobody);
+
+    await waitFor(() => blocksOf(ana)?.[36] === 'tile');
+    await waitFor(() => ana.state.terrainFloors === '');
   });
 
   const wallsOf = (room: Awaited<ReturnType<typeof join>>) =>

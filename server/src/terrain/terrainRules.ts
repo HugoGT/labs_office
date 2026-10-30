@@ -38,6 +38,7 @@ import {
 } from '../../../src/game/officeDecor.ts';
 import { doorOnWall, wallTilesAfter } from '../../../src/game/officeDoors.ts';
 import type { MapSeat } from '../../../src/game/seating.ts';
+import { TERRAIN_FLOOR_BASE, isTerrainFloorPieceId } from '../../../src/game/terrainFloors.ts';
 
 /** The edit was malformed: an index off the map or an unknown material (400). */
 export class InvalidTerrainEditError extends Error {
@@ -69,6 +70,8 @@ export interface TerrainEdit {
   material: LayoutMaterial;
   /** Only on a colorable material (#222); absent, the block draws its default art. */
   color?: string;
+  /** Only on wood, never with a color: the id of an approved uploaded floor drawn over the block. */
+  floor?: string;
 }
 
 export class TerrainStaleError extends Error {}
@@ -126,14 +129,23 @@ export interface TerrainProtections {
  * The block of `/admin/terrain/blocks/:index` and the `material` and optional
  * `color` (#222) of the body. A color is normalized to lower case like a
  * decor one, and only a colorable material takes it; `null` is no color.
+ * An optional `floor` is an uploaded floor id, only on wood and never beside
+ * a color; `null` is none. Whether that piece is an approved floor of the
+ * catalog is the runtime's to check, not a shape rule.
  */
 export function parseTerrainEdit(index: unknown, body: unknown, count: number): TerrainEdit {
   if (typeof index !== 'string' || !/^\d+$/.test(index)) throw new InvalidTerrainEditError('the block index is not a number');
   const parsed = Number(index);
   if (parsed >= count) throw new InvalidTerrainEditError(`block ${parsed} is not on the map`);
   if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new InvalidTerrainEditError('the body is not an object');
-  const { material, color } = body as Record<string, unknown>;
+  const { material, color, floor } = body as Record<string, unknown>;
   if (!isLayoutMaterial(material)) throw new InvalidTerrainEditError('unknown material');
+  if (floor !== undefined && floor !== null) {
+    if (!isTerrainFloorPieceId(floor)) throw new InvalidTerrainEditError('invalid floor');
+    if (material !== TERRAIN_FLOOR_BASE) throw new InvalidTerrainEditError('a floor lies on wood');
+    if (color !== undefined && color !== null) throw new InvalidTerrainEditError('a floor takes no color');
+    return { index: parsed, material, floor };
+  }
   if (color === undefined || color === null) return { index: parsed, material };
   const normalized = typeof color === 'string' ? color.toLowerCase() : color;
   if (!isTerrainColor(normalized)) throw new InvalidTerrainEditError('invalid color');

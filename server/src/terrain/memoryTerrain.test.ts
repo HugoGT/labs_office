@@ -19,6 +19,31 @@ describe('memoryTerrain', () => {
   });
 });
 
+describe('memoryTerrain block floors (uploaded floor pieces)', () => {
+  const FLOOR = 'floor-upload-0123456789abcdef';
+
+  it('keeps the floor saved with a block, and drops it when the block is saved without one', async () => {
+    const store = createMemoryTerrain([[3, 'wood']]);
+    expect([...(await store.loadBlockFloors())]).toEqual([]);
+
+    await store.saveBlocks([{ index: 3, material: 'wood', floor: FLOOR }, { index: 4, material: 'wood', floor: FLOOR }], 'admin-1');
+    expect(new Map(await store.loadBlockFloors())).toEqual(new Map([[3, FLOOR], [4, FLOOR]]));
+
+    await store.saveBlocks([{ index: 4, material: 'grass' }], 'admin-2');
+    expect(new Map(await store.loadBlockFloors())).toEqual(new Map([[3, FLOOR]]));
+    expect(new Map(await store.loadBlocks())).toEqual(new Map([[3, 'wood'], [4, 'grass']]));
+  });
+
+  it('keeps colors and floors apart, and saves a floor with a batch that clears walls', async () => {
+    const store = createMemoryTerrain([], [[4, 'wall-brick']]);
+    await store.saveBlocksClearingWalls([{ index: 0, material: 'wood', floor: FLOOR }, { index: 1, material: 'carpet', color: '#a0b1c2' }], [4], 'admin-1');
+
+    expect([...(await store.loadBlockFloors())]).toEqual([[0, FLOOR]]);
+    expect([...(await store.loadBlockColors())]).toEqual([[1, '#a0b1c2']]);
+    expect([...(await store.loadWalls())]).toEqual([]);
+  });
+});
+
 describe('memoryTerrain block colors (#222)', () => {
   it('keeps the color saved with a block, and drops it when the block is saved without one', async () => {
     const store = createMemoryTerrain([[3, 'carpet']]);

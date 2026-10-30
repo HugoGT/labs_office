@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
+import type { MaterialOption } from '../game/artMaterials';
 import type { ArtPreviewCache } from '../game/artPreview';
 import type { OfficeBridge } from '../game/officeBridge';
 import type { DecorTileRect } from '../game/officeDecor';
@@ -18,9 +19,10 @@ import styles from './TerrainEditorSection.module.css';
  * are in "Decoración" (#208), and so are the walls (#224).
  */
 
-/** What the picked floor paints, in words. */
-function brushLabel(brush: FloorBrush): string {
-  return `Pintando con ${TERRAIN_MATERIAL_LABELS[brush.material]}`;
+/** What the picked floor paints, in words: an uploaded floor by the name of its piece (S13). */
+function brushLabel(brush: FloorBrush, floors: readonly MaterialOption[] | null): string {
+  const uploaded = brush.floor === undefined ? undefined : floors?.find((option) => option.id === brush.floor);
+  return `Pintando con ${uploaded?.name ?? TERRAIN_MATERIAL_LABELS[brush.material]}`;
 }
 
 export interface TerrainEditorSectionProps {
@@ -107,6 +109,7 @@ export function TerrainEditorSection({
       <TerrainPalette
         value={editor.brush}
         onPick={editor.pick}
+        onPickFloor={editor.pickFloor}
         floors={catalog?.floor ?? null}
         colors={editor.colors}
         onColorChange={editor.setColor}
@@ -116,7 +119,7 @@ export function TerrainEditorSection({
 
       {editor.brush !== null && (
         <div className={styles.row}>
-          <span>{brushLabel(editor.brush)}</span>
+          <span>{brushLabel(editor.brush, catalog?.floor ?? null)}</span>
           <button type="button" className={styles.button} onClick={editor.unpick}>
             Deseleccionar
           </button>

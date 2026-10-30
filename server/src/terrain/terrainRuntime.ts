@@ -30,6 +30,11 @@
  * Blocks of a colorable material may carry a color (#222). It is part of the
  * block edit: saved in the same `saveBlocks` as the material, published with
  * it, and cleared whenever the block is painted without one.
+ *
+ * A wood block may instead carry an uploaded floor piece (`terrainFloors.ts`),
+ * handled exactly like a color: part of the block edit, saved with it,
+ * published with it, and cleared whenever the block is painted without one.
+ * The piece must be an approved, not retired floor of the art catalog today.
  */
 
 import {
@@ -53,6 +58,7 @@ import {
   type WallPieceId,
 } from '../../../src/game/officeLayout.ts';
 import { BASE_MAP_SEATS, type MapSeat } from '../../../src/game/seating.ts';
+import { TERRAIN_FLOOR_BASE, isTerrainFloorPieceId, withTerrainFloors, type TerrainFloors } from '../../../src/game/terrainFloors.ts';
 import {
   decorFootprint,
   decorInfoFromPieceId,
@@ -113,6 +119,8 @@ export interface TerrainRuntime {
   blocks(): readonly LayoutMaterial[];
   /** The live block colors (#222): only colorable blocks painted in a color of their own. */
   blockColors(): TerrainColors;
+  /** The live uploaded floors: only wood blocks painted with an approved floor piece. */
+  blockFloors(): TerrainFloors;
   snapshot(): TerrainSnapshot;
   /** False without a store (no `DATABASE_URL`): the terrain is the layout's for good. */
   readonly editable: boolean;
@@ -256,6 +264,7 @@ export function createTerrainRuntime({
   const listeners = new Set<TerrainListener>();
   let blocks: readonly LayoutMaterial[] = layout.blocks;
   let colors: TerrainColors = new Map();
+  let floors: TerrainFloors = new Map();
   let walls: readonly (string | null)[] = layout.walls;
   /** The painted posts in placement order, oldest first (#223); the layout's own posts are not listed. */
   let wallOrder: readonly number[] = [];
@@ -325,9 +334,19 @@ export function createTerrainRuntime({
     parseTerrainBatch({ edits, expected: expected ?? encodeTerrainBlocks(blocks) }, blocks.length);
     if (expected !== undefined && expected !== encodeTerrainBlocks(blocks)) throw new TerrainStaleError('terrain changed since preview');
     if (edits.some(({ index, material }) => index === spawn && material !== 'wood')) throw new TerrainProtectedError('placement');
-    // A color change alone is a change too; parsing already refused a color on a material that takes none.
-    const changed = edits.filter(({ index, material, color }) => blocks[index] !== material || colors.get(index) !== color);
+    // A color or floor change alone is a change too; parsing already refused a color on a material that takes none, and a floor off wood.
+    const changed = edits.filter(({ index, material, color, floor }) => blocks[index] !== material || colors.get(index) !== color || floors.get(index) !== floor);
     if (changed.length === 0) return blocks;
+    // A new floor needs a piece the catalog offers today; one already painted keeps drawing after it is retired.
+    // Without a catalog nothing can vouch for the piece, so no floor is accepted.
+    if (changed.some(({ floor }) => floor !== undefined)) {
+      await readCatalog();
+      for (const { floor } of changed) {
+        if (floor === undefined) continue;
+        const known = catalog.get(floor);
+        if (known === undefined || known.kind !== 'floor' || known.retired) throw new InvalidTerrainEditError('unknown floor piece');
+      }
+    }
     let next = [...blocks];
     for (const { index, material } of changed) next = withBlock(next, index, material);
     let nextSnapshot = snapshotOf(next, walls);
@@ -337,6 +356,7 @@ export function createTerrainRuntime({
       if (conflict !== null) throw new TerrainProtectedError(conflict);
     }
     const nextColors = withTerrainColors(colors, changed);
+    const nextFloors = withTerrainFloors(floors, changed);
     // Erasing ground erases the walls left floating over it, in the same save.
     // Posts already floating elsewhere are left for the wall eraser.
     const floating = floatingPosts(changed.flatMap(({ index, material }) => (material === 'void' ? [index] : [])), nextSnapshot);
@@ -353,6 +373,7 @@ export function createTerrainRuntime({
     }
     blocks = next;
     colors = nextColors;
+    floors = nextFloors;
     walls = nextWalls;
     wallOrder = nextOrder;
     snapshot = nextSnapshot;
@@ -566,6 +587,14 @@ export function createTerrainRuntime({
         if (index >= 0 && index < count && saved.get(index) === blocks[index] && isColorableTerrainMaterial(blocks[index]!)) savedColors.set(index, color);
       }
       colors = savedColors;
+      // Floors load like colors: a row on any material but wood, or whose id is
+      // not an uploaded floor, is ignored, never rewritten. A piece retired
+      // since keeps drawing; only a new paint is checked against the catalog.
+      const savedFloors = new Map<number, string>();
+      for (const [index, piece] of await store.loadBlockFloors()) {
+        if (index >= 0 && index < count && saved.get(index) === blocks[index] && blocks[index] === TERRAIN_FLOOR_BASE && isTerrainFloorPieceId(piece)) savedFloors.set(index, piece);
+      }
+      floors = savedFloors;
       const savedWalls = await store.loadWalls();
       const wallEdits: WallEdit[] = [];
       for (const [index, piece] of savedWalls) {
@@ -588,6 +617,7 @@ export function createTerrainRuntime({
     },
     blocks: () => blocks,
     blockColors: () => colors,
+    blockFloors: () => floors,
     walls: () => walls,
     decor: () => decor,
     decorInfo,

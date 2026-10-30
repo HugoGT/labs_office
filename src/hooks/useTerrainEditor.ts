@@ -14,6 +14,7 @@ import {
   type TerrainColors,
 } from '../game/officeLayout';
 import { sameBrush, type TerrainBrush } from '../game/terrainEditor';
+import { TERRAIN_FLOOR_BASE, withTerrainFloors, type TerrainFloors } from '../game/terrainFloors';
 import type { TileRect } from '../game/terrainGrid';
 
 /**
@@ -33,6 +34,11 @@ import type { TileRect } from '../game/terrainGrid';
  * Carpet takes a color (#222), chosen on its palette tile the way the
  * painted desk's is (`useDecorEditor`): the choice is kept per material and
  * goes with every later pick, and with the picked brush when it is carpet.
+ *
+ * An approved uploaded floor (S13) is a brush too: `wood` carrying the piece
+ * (`pickFloor`). It paints the block as wood with that piece over it, which is
+ * how the room stores it, so a paint's material, the spawn check and the
+ * preview all stay the closed list's.
  */
 
 /** The admin refused with these may not edit at all any more: no further writes. */
@@ -68,6 +74,8 @@ export interface TerrainEditor {
   exit(): void;
   /** Picks the floor `material`, or unpicks it when it is the picked one. */
   pick(material: LayoutMaterial): void;
+  /** Picks the uploaded floor `pieceId`, or unpicks it when it is the picked one. */
+  pickFloor(pieceId: string): void;
   unpick(): void;
 }
 
@@ -75,6 +83,7 @@ interface PendingPaint {
   readonly index: number;
   readonly material: LayoutMaterial;
   readonly color?: string;
+  readonly floor?: string;
   readonly sent: boolean;
 }
 
@@ -87,6 +96,11 @@ function applyPaints(blocks: readonly LayoutMaterial[], paints: readonly Pending
 /** The block colors once every pending paint lands: a paint without a color leaves its block the default art. */
 function colorsAfter(colors: TerrainColors, paints: readonly PendingPaint[]): Map<number, string> {
   return withTerrainColors(colors, paints);
+}
+
+/** The uploaded floors once every pending paint lands: a paint without one (or of another material) leaves its block bare. */
+function floorsAfter(floors: TerrainFloors, paints: readonly PendingPaint[]): Map<number, string> {
+  return withTerrainFloors(floors, paints);
 }
 
 /** The floor brush a pick makes: a colorable one carries the color chosen for it, if any. */
@@ -108,6 +122,7 @@ export function useTerrainEditor({ bridge, terrain, onExit, outlines }: UseTerra
   const paintsRef = useRef<readonly PendingPaint[]>([]);
   const blocksRef = useRef<readonly LayoutMaterial[]>(BASE_LAYOUT.blocks);
   const colorsRef = useRef<TerrainColors>(new Map());
+  const floorsRef = useRef<TerrainFloors>(new Map());
   const drainingRef = useRef(false);
   const blockedRef = useRef(false);
   const onExitRef = useRef(onExit);
@@ -134,7 +149,8 @@ export function useTerrainEditor({ bridge, terrain, onExit, outlines }: UseTerra
       for (let next = paintsRef.current.find((paint) => !paint.sent); next !== undefined; next = paintsRef.current.find((paint) => !paint.sent)) {
         const paint = next;
         try {
-          if (paint.color === undefined) await terrain.setBlock(paint.index, paint.material);
+          if (paint.floor !== undefined) await terrain.setBlock(paint.index, paint.material, paint.color, paint.floor);
+          else if (paint.color === undefined) await terrain.setBlock(paint.index, paint.material);
           else await terrain.setBlock(paint.index, paint.material, paint.color);
           setPaints(paintsRef.current.map((candidate) => (candidate === paint ? { ...candidate, sent: true } : candidate)));
         } catch (cause) {
@@ -162,10 +178,23 @@ export function useTerrainEditor({ bridge, terrain, onExit, outlines }: UseTerra
       setError(SPAWN_BLOCK_MESSAGE);
       return;
     }
-    // Carpet in another color (or the default art) is a different paint, so it is sent.
+    // Carpet in another color (or the default art) is a different paint, so it is sent; so is wood
+    // with another uploaded floor, or with none over one.
     const sameMaterial = applyPaints(blocksRef.current, paintsRef.current)[index] === brush.material;
-    if (sameMaterial && colorsAfter(colorsRef.current, paintsRef.current).get(index) === brush.color) return;
-    queue({ index, material: brush.material, ...(brush.color === undefined ? {} : { color: brush.color }), sent: false });
+    if (
+      sameMaterial &&
+      colorsAfter(colorsRef.current, paintsRef.current).get(index) === brush.color &&
+      floorsAfter(floorsRef.current, paintsRef.current).get(index) === brush.floor
+    ) {
+      return;
+    }
+    queue({
+      index,
+      material: brush.material,
+      ...(brush.color === undefined ? {} : { color: brush.color }),
+      ...(brush.floor === undefined ? {} : { floor: brush.floor }),
+      sent: false,
+    });
   }
 
   useEffect(
@@ -173,6 +202,7 @@ export function useTerrainEditor({ bridge, terrain, onExit, outlines }: UseTerra
       bridge.on('terrain', (payload) => {
         blocksRef.current = payload.blocks;
         colorsRef.current = payload.colors;
+        floorsRef.current = payload.floors ?? new Map();
         setBlocks(payload.blocks);
         setLiveColors(payload.colors);
         // The room shows every saved paint from here on, or something newer.
@@ -273,6 +303,9 @@ export function useTerrainEditor({ bridge, terrain, onExit, outlines }: UseTerra
     },
     pick(material) {
       toggle(floorBrush(material, colors[material]));
+    },
+    pickFloor(pieceId) {
+      toggle({ kind: 'floor', material: TERRAIN_FLOOR_BASE, floor: pieceId });
     },
     unpick() {
       setBrush(null);

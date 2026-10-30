@@ -60,12 +60,10 @@ describe('contribution limits', () => {
 });
 
 describe('contribution kinds', () => {
-  it('are characters and decor plants; desks and floors stay admin-only', () => {
-    expect(CONTRIBUTION_KINDS).toEqual(['character', 'plant']);
-    expect(isContributionKind('character')).toBe(true);
-    expect(isContributionKind('plant')).toBe(true);
-    expect(isContributionKind('desk')).toBe(false);
-    expect(isContributionKind('floor')).toBe(false);
+  it('are everything the office draws from a sheet but walls, which are made from code', () => {
+    expect(CONTRIBUTION_KINDS).toEqual(['character', 'plant', 'desk', 'floor', 'chair', 'table', 'door']);
+    for (const kind of CONTRIBUTION_KINDS) expect(isContributionKind(kind)).toBe(true);
+    expect(isContributionKind('wall')).toBe(false);
     expect(isContributionKind(undefined)).toBe(false);
   });
 });

@@ -1,20 +1,20 @@
 /**
  * Art contributions (#122) as the office sees them: any signed-in user
- * uploads a character or a decor plant from "Personalizar", and follows its
- * review. Types only, like `artUploadPort.ts`; the adapter is
+ * uploads a character or a piece of the office (decor plant, desk, floor, chair,
+ * room table or door) from "Personalizar",
+ * and follows its review. Types only, like `artUploadPort.ts`; the adapter is
  * `artContributionClient.ts`. The review side is `artReviewPort.ts`.
  *
  * The checks (format, limits, rights) are the server's; the form only says
  * what each kind needs and asks for the rights statement below.
  */
 
-/** What a contributor may upload; desks and floors stay the Admin's (`ArtUploadPanel`). */
-export const CONTRIBUTION_KINDS = ['character', 'plant'] as const;
+/** What a contributor may upload, the same list as `server/src/decor/artReviewRules.ts`. Walls are made from code. */
+export const CONTRIBUTION_KINDS = ['character', 'plant', 'desk', 'floor', 'chair', 'table', 'door'] as const;
 export type ContributionKind = (typeof CONTRIBUTION_KINDS)[number];
 
-/** The rights statement the contributor must accept. The server refuses an upload without it. */
-export const RIGHTS_STATEMENT =
-  'Confirmo que este arte no infringe derechos de autor y que la oficina puede usarlo libremente.';
+/** The rights statement the contributor declares, checked from the start. The server refuses an upload without it. */
+export const RIGHTS_STATEMENT = 'Al subir este archivo declaro que no infringe derechos de autor.';
 
 export type ContributionStatus = 'pending' | 'approved' | 'rejected';
 
@@ -43,10 +43,10 @@ export interface Contribution {
 
 export interface ContributionInput {
   kind: ContributionKind;
+  /** The credit is the uploader's and the material is the name's: the server sets both. */
   name: string;
-  author: string;
-  /** Plants only. */
-  material?: string;
+  /** Room tables only: whole tiles, horizontal, up to `TABLE.maxFootprint`. */
+  footprint?: { w: number; h: number };
   rightsAccepted: boolean;
   /** Base64 PNG (no `data:` prefix) per file role of the kind. */
   files: Record<string, string>;

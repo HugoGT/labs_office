@@ -17,6 +17,7 @@ import { DO_NOT_DISTURB } from '../game/officeProtocol';
 import { statusCssColor } from '../game/presence';
 import type { RosterPeer } from '../game/roster';
 import { CALL_DISABLED_TITLE } from './ContextMenu';
+import { usePendingArtCount } from '../hooks/usePendingArtCount';
 import { DecorEditorSection } from './DecorEditorSection';
 import { PhoneIcon } from './PhoneIcon';
 import { visibleRoster } from './rosterView';
@@ -48,6 +49,15 @@ const MyCharacterSectionLazy = lazy(() =>
 );
 
 type PersonalizeSection = LayoutEditorSection | 'art' | 'art-review' | 'character';
+
+/** The white circle with the number of pieces waiting for review; the entry it sits on already says it in its name. */
+function PendingBadge({ count, className }: { count: number; className: string }) {
+  return (
+    <span className={className} data-testid="pending-art-badge" aria-hidden="true">
+      {count > 99 ? '99+' : count}
+    </span>
+  );
+}
 
 /** What "Decoración" edits for whoever does not administer: the own desk (#208). */
 export interface MySpace {
@@ -224,6 +234,8 @@ export function OfficeSidebar({
   // with the decor port, the claimed desk for anyone else.
   const adminArt = (role === 'admin' || role === 'superadmin') && artAdmin ? artAdmin : null;
   const officeDecor = canAdminister && decor !== undefined && decor !== null;
+  /** Art contributions waiting for review: only whoever reviews asks, and sees the number. */
+  const { count: pendingArt, report: reportPendingArt } = usePendingArtCount(adminArt === null ? null : adminArt.reviews);
   const entries: { section: PersonalizeSection; label: string }[] = [
     // First: laying out tables and chairs is what desks are then created on top of.
     ...(bridge !== undefined ? [{ section: 'decor' as const, label: 'Decoración' }] : []),
@@ -291,6 +303,7 @@ export function OfficeSidebar({
         onClick={() => togglePanel('personalize')}
       >
         🎨 Personalizar
+        {pendingArt > 0 && <PendingBadge count={pendingArt} className={`${styles.badge} ${styles.toggleBadge}`} />}
       </button>
       {openPanel === 'personalize' && (
         <div className={styles.panel} role="region" aria-label="Personalizar">
@@ -303,11 +316,21 @@ export function OfficeSidebar({
           >
             ×
           </button>
-          {currentSection === null && entries.map((entry) => (
-            <button key={entry.section} type="button" className={styles.menuEntry} onClick={() => setSection(entry.section)}>
-              {entry.label}
-            </button>
-          ))}
+          {currentSection === null && entries.map((entry) => {
+            const waiting = entry.section === 'art-review' && pendingArt > 0;
+            return (
+              <button
+                key={entry.section}
+                type="button"
+                className={waiting ? `${styles.menuEntry} ${styles.withBadge}` : styles.menuEntry}
+                aria-label={waiting ? `${entry.label}, ${pendingArt === 1 ? '1 pendiente' : `${pendingArt} pendientes`}` : undefined}
+                onClick={() => setSection(entry.section)}
+              >
+                {entry.label}
+                {waiting && <PendingBadge count={pendingArt} className={styles.badge} />}
+              </button>
+            );
+          })}
           {currentSection !== null && layoutSection === null && !deskDecor && (
             <button type="button" className={styles.back} onClick={() => setSection(null)}>
               Salir
@@ -360,7 +383,7 @@ export function OfficeSidebar({
           )}
           {currentSection === 'art-review' && adminArt !== null && (
             <Suspense fallback={null}>
-              <ArtReviewSectionLazy reviews={adminArt.reviews} />
+              <ArtReviewSectionLazy reviews={adminArt.reviews} onPendingCount={reportPendingArt} />
             </Suspense>
           )}
         </div>

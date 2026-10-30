@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useId, useState } from 'react';
-import { ArtPiecePreview } from './ArtPiecePreview';
-import { usePrivateArtImages } from '../hooks/usePrivateArtImages';
+import { ArtPieceViewer } from './ArtPieceViewer';
 import { describeAdminError } from '../dashboard/adminErrors';
-import type { Contribution, ContributionStatus } from '../dashboard/artContributionPort';
+import { CONTRIBUTION_KINDS, type Contribution, type ContributionStatus } from '../dashboard/artContributionPort';
 import type { ArtReviewPort } from '../dashboard/artReviewPort';
 import styles from './ArtAdminSection.module.css';
 
@@ -17,10 +16,13 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
   plant: 'Planta de escritorio',
   desk: 'Escritorio',
   floor: 'Suelo',
+  chair: 'Silla',
+  table: 'Mesa de sala',
+  door: 'Puerta',
 };
 
 /** What the server lets a reviewer withdraw: the contributable kinds. */
-const RETIRABLE_KINDS: ReadonlySet<string> = new Set(['character', 'plant']);
+const RETIRABLE_KINDS: ReadonlySet<string> = new Set(CONTRIBUTION_KINDS);
 
 function uploaderOf(contribution: Contribution): string {
   const uploader = contribution.uploadedBy;
@@ -39,7 +41,6 @@ interface RowProps {
 
 function ReviewRow({ contribution, read, busy, onApprove, onReject, onRetire }: RowProps) {
   const id = useId();
-  const images = usePrivateArtImages(read, contribution.files);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
   const { name, status } = contribution;
@@ -55,7 +56,9 @@ function ReviewRow({ contribution, read, busy, onApprove, onReject, onRetire }: 
         {status === 'rejected' && <span className={styles.label}>Motivo: {contribution.reviewNote}</span>}
         {contribution.retiredAt !== null && <span className={styles.label}>Retirada</span>}
       </div>
-      <ArtPiecePreview kind={contribution.kind} name={name} images={images} />
+      <div className={styles.actions}>
+        <ArtPieceViewer contribution={contribution} read={read} className={styles.button} />
+      </div>
       {status === 'pending' && !rejecting && (
         <div className={styles.actions}>
           <button type="button" className={styles.button} disabled={busy} aria-label={`Aprobar ${name}`} onClick={onApprove}>
@@ -96,6 +99,8 @@ function ReviewRow({ contribution, read, busy, onApprove, onReject, onRetire }: 
 export interface ArtReviewSectionProps {
   /** Port already built (`OfficeShell`); this section knows nothing of HTTP. */
   reviews: ArtReviewPort;
+  /** How many pieces wait, each time the pending queue is read or changes (the badge of "Revisión de arte"). */
+  onPendingCount?: (count: number) => void;
 }
 
 /**
@@ -107,7 +112,7 @@ export interface ArtReviewSectionProps {
  * Approving puts it in everyone's catalog; rejecting asks for the reason its
  * uploader reads; an approved character or plant can be withdrawn.
  */
-export function ArtReviewSection({ reviews }: ArtReviewSectionProps) {
+export function ArtReviewSection({ reviews, onPendingCount }: ArtReviewSectionProps) {
   const id = useId();
   const [status, setStatus] = useState<ContributionStatus>('pending');
   const [items, setItems] = useState<Contribution[] | null>(null);
@@ -130,6 +135,12 @@ export function ArtReviewSection({ reviews }: ArtReviewSectionProps) {
   );
 
   useEffect(() => load(status), [load, status]);
+
+  // The queue tells the badge of "Revisión de arte" how many wait, never another tab's count,
+  // and not after a failed read, which would show an empty queue that is not.
+  useEffect(() => {
+    if (status === 'pending' && items !== null && error === null) onPendingCount?.(items.length);
+  }, [status, items, error, onPendingCount]);
 
   async function act(run: () => Promise<string>, update: (list: Contribution[]) => Contribution[]): Promise<void> {
     setBusy(true);
@@ -155,7 +166,7 @@ export function ArtReviewSection({ reviews }: ArtReviewSectionProps) {
         Revisión de arte
       </h3>
       <p className={styles.hint}>
-        Personajes y plantas que sube la gente desde «Personalizar». Nada pendiente se ve en la oficina hasta que lo apruebas.
+        Piezas que sube la gente desde «Personalizar». Nada pendiente se ve en la oficina hasta que lo apruebas.
       </p>
 
       <div className={styles.tabs} role="tablist" aria-label="Estado">

@@ -4,6 +4,7 @@ import type { Swatch } from '../art/customCharacter';
 import type { ArtPreviewCache } from '../game/artPreview';
 import { LAYOUT_MATERIALS, WALL_PIECES, isColorableTerrainMaterial, type LayoutMaterial, type WallPieceId } from '../game/officeLayout';
 import type { TerrainBrush } from '../game/terrainEditor';
+import { isTerrainFloorPieceId } from '../game/terrainFloors';
 import { TERRAIN_FLAT_COLORS } from '../game/terrainRender';
 import { ArtPreviewCanvas } from './ArtPreviewCanvas';
 import { ColorPicker } from './ColorPicker';
@@ -19,6 +20,10 @@ import styles from './TerrainPalette.module.css';
  * palette's, then the wall eraser. Presentational: the editor owns which
  * entry is picked (one across every palette) and what a click on the map
  * does with it.
+ *
+ * An approved uploaded floor (S13) is an entry too, after the built-in floors
+ * and before the eraser: it paints wood with that piece over it, so it has
+ * the thumbnail and the name of its own sheet and no color.
  */
 
 /** UI names of the materials. */
@@ -56,7 +61,12 @@ export interface TerrainPaletteProps {
   /** The editor's brush: an entry here is pressed only while its floor is picked. */
   value: TerrainBrush | null;
   onPick: (material: LayoutMaterial) => void;
-  /** Floor pieces of the pack catalog, or `null` while it is unavailable: flat swatches then. */
+  /** An approved uploaded floor was clicked (S13), by its piece id. */
+  onPickFloor?: (pieceId: string) => void;
+  /**
+   * Floor pieces of the pack catalog, or `null` while it is unavailable: flat swatches then.
+   * The uploaded ones among them become entries of their own.
+   */
   floors: readonly MaterialOption[] | null;
   /** The color chosen per colorable floor; one without starts in its pack default. */
   colors?: Readonly<Partial<Record<LayoutMaterial, string>>>;
@@ -65,48 +75,69 @@ export interface TerrainPaletteProps {
   preview?: ArtPreviewCache;
 }
 
-export function TerrainPalette({ value, onPick, floors, colors = {}, onColorChange, disabled = false, preview }: TerrainPaletteProps) {
+export function TerrainPalette({ value, onPick, onPickFloor, floors, colors = {}, onColorChange, disabled = false, preview }: TerrainPaletteProps) {
+  const builtInIds = new Set<string>(LAYOUT_MATERIALS.flatMap((kind) => (kind === 'void' ? [] : [terrainFloorPieceId(kind)])));
+  const uploaded = (floors ?? []).filter((option) => isTerrainFloorPieceId(option.id) && !builtInIds.has(option.id));
+  const material = (kind: LayoutMaterial) => {
+    const option = kind === 'void' ? undefined : floors?.find((candidate) => candidate.id === terrainFloorPieceId(kind));
+    const label = TERRAIN_MATERIAL_LABELS[kind];
+    const defaultColor = isColorableTerrainMaterial(kind) ? (option?.defaultColor ?? null) : null;
+    const color = defaultColor === null ? null : (colors[kind] ?? defaultColor);
+    const entry = (
+      <button
+        key={kind}
+        type="button"
+        className={styles.entry}
+        // The plain wood brush only: an uploaded floor is wood underneath but its own entry's.
+        aria-pressed={value?.kind === 'floor' && value.material === kind && value.floor === undefined}
+        disabled={disabled}
+        title={kind === 'void' ? 'Goma: devuelve el bloque al vacío' : undefined}
+        onClick={() => onPick(kind)}
+      >
+        {/* Decorative: the button is named by its label. */}
+        <span className={styles.thumbnail} aria-hidden="true" style={{ background: hexColor(TERRAIN_FLAT_COLORS[kind]) }}>
+          {option !== undefined && <ArtPreviewCanvas option={option} color={color} frame={THUMBNAIL} label={label} className={styles.canvas} preview={preview} />}
+        </span>
+        <span className={styles.label}>{label}</span>
+      </button>
+    );
+    if (defaultColor === null || color === null) return entry;
+    // Chosen before or after picking, like the painted desk's tile (#222).
+    return (
+      <div key={kind} className={styles.cell}>
+        {entry}
+        <ColorPicker
+          label={`Color de ${label}`}
+          caption=""
+          presets={floorColors(defaultColor)}
+          value={color}
+          compact
+          disabled={disabled}
+          onChange={(hex) => onColorChange?.(kind, hex)}
+        />
+      </div>
+    );
+  };
   return (
     <div className={styles.palette} role="group" aria-label="Suelos">
-      {PALETTE_ORDER.map((material) => {
-        const option = material === 'void' ? undefined : floors?.find((candidate) => candidate.id === terrainFloorPieceId(material));
-        const label = TERRAIN_MATERIAL_LABELS[material];
-        const defaultColor = isColorableTerrainMaterial(material) ? (option?.defaultColor ?? null) : null;
-        const color = defaultColor === null ? null : (colors[material] ?? defaultColor);
-        const entry = (
-          <button
-            key={material}
-            type="button"
-            className={styles.entry}
-            aria-pressed={value?.kind === 'floor' && value.material === material}
-            disabled={disabled}
-            title={material === 'void' ? 'Goma: devuelve el bloque al vacío' : undefined}
-            onClick={() => onPick(material)}
-          >
-            {/* Decorative: the button is named by its label. */}
-            <span className={styles.thumbnail} aria-hidden="true" style={{ background: hexColor(TERRAIN_FLAT_COLORS[material]) }}>
-              {option !== undefined && <ArtPreviewCanvas option={option} color={color} frame={THUMBNAIL} label={label} className={styles.canvas} preview={preview} />}
-            </span>
-            <span className={styles.label}>{label}</span>
-          </button>
-        );
-        if (defaultColor === null || color === null) return entry;
-        // Chosen before or after picking, like the painted desk's tile (#222).
-        return (
-          <div key={material} className={styles.cell}>
-            {entry}
-            <ColorPicker
-              label={`Color de ${label}`}
-              caption=""
-              presets={floorColors(defaultColor)}
-              value={color}
-              compact
-              disabled={disabled}
-              onChange={(hex) => onColorChange?.(material, hex)}
-            />
-          </div>
-        );
-      })}
+      {PALETTE_ORDER.filter((kind) => kind !== 'void').map(material)}
+      {uploaded.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          className={styles.entry}
+          aria-pressed={value?.kind === 'floor' && value.floor === option.id}
+          disabled={disabled}
+          onClick={() => onPickFloor?.(option.id)}
+        >
+          {/* Decorative: the button is named by its label. */}
+          <span className={styles.thumbnail} aria-hidden="true" style={{ background: hexColor(TERRAIN_FLAT_COLORS.wood) }}>
+            <ArtPreviewCanvas option={option} color={null} frame={THUMBNAIL} label={option.name} className={styles.canvas} preview={preview} />
+          </span>
+          <span className={styles.label}>{option.name}</span>
+        </button>
+      ))}
+      {material('void')}
     </div>
   );
 }

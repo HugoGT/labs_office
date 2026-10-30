@@ -17,14 +17,16 @@ export interface TerrainAdminPort {
    * placement or spawn. Affected players are relocated after persistence,
    * including reconnects. `color` (#222, lower-case `#rrggbb`) only goes with
    * a colorable material; without it the block draws its default art.
+   * `floor` (S13, an approved uploaded floor's id) only goes with `wood`: the
+   * block then shows that piece over its wood; without it the block has none.
    */
-  setBlock(index: number, material: LayoutMaterial, color?: string): Promise<void>;
+  setBlock(index: number, material: LayoutMaterial, color?: string, floor?: string): Promise<void>;
   /**
    * Sets many blocks atomically (emptying the terrain), refused with
    * `terrain-stale` unless the live blocks still encode to `expected`. Each
-   * edit's `color` follows the same rule as `setBlock`'s.
+   * edit's `color` and `floor` follow the same rules as `setBlock`'s.
    */
-  setBlocks(edits: readonly { index: number; material: LayoutMaterial; color?: string }[], expected: string): Promise<void>;
+  setBlocks(edits: readonly { index: number; material: LayoutMaterial; color?: string; floor?: string }[], expected: string): Promise<void>;
   /**
    * Places (`piece`) or removes (`null`) walls on single tiles, all or none,
    * at most `MAX_WALL_EDITS` per call. Refused with `terrain-under-placement`

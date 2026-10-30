@@ -53,7 +53,7 @@ import { OFFICE_ROOM_NAME, RECONNECTION_WINDOW_SECONDS } from './OfficeRoom.ts';
 import type { EgressPort } from './recording/egressPort.ts';
 import type { RecordingStoragePort } from './recording/recordingStorage.ts';
 import type { OfficeState } from './schema.ts';
-import { blockIndexAt, blockTileRect, decodeTerrainWalls, encodeTerrainBlocks } from '../../src/game/officeLayout.ts';
+import { blockIndexAt, blockTileRect, decodeTerrainBlocks, decodeTerrainWalls, encodeTerrainBlocks } from '../../src/game/officeLayout.ts';
 import { decodeOfficeDecor } from '../../src/game/officeDecor.ts';
 import type { IdTokenVerifier, VerifiedIdentity } from './verifyIdToken.ts';
 import { AuthConfigError } from './authConfigError.ts';
@@ -2871,13 +2871,15 @@ describe('terrain routes (#123 phase 2)', () => {
     throw new Error('condition not met before the timeout');
   }
 
-  async function terrainServer(overrides: { terrain?: TerrainStore | null; spaces?: SpacesDirectory; desks?: OfficeServerOverrides['desks'] } = {}) {
+  async function terrainServer(overrides: { terrain?: TerrainStore | null; spaces?: SpacesDirectory; desks?: OfficeServerOverrides['desks']; decor?: OfficeServerOverrides['decor']; assetStorage?: OfficeServerOverrides['assetStorage'] } = {}) {
     const terrain = overrides.terrain === undefined ? createMemoryTerrain() : overrides.terrain;
     const server = createOfficeServer({
       auth: terrainVerifier,
       directory: createMemoryDirectory({ seed: [ADMIN_TERRAIN] }),
       spaces: overrides.spaces ?? createMemorySpaces(),
       ...(overrides.desks !== undefined ? { desks: overrides.desks } : {}),
+      ...(overrides.decor !== undefined ? { decor: overrides.decor } : {}),
+      ...(overrides.assetStorage !== undefined ? { assetStorage: overrides.assetStorage } : {}),
       terrain,
       identityAdmin: null,
     });
@@ -2970,6 +2972,49 @@ describe('terrain routes (#123 phase 2)', () => {
     expect(await batch.json()).toEqual({ updated: 2 });
     await waitFor(() => room.state.terrainColors === `${LAWN + 1}:#0055ff`);
     expect(new Map(await store.loadBlockColors())).toEqual(new Map([[LAWN + 1, '#0055ff']]));
+    await server.shutdown();
+  });
+
+  it('paints an uploaded floor on a wood block over HTTP, persists it and replicates it apart from the blocks; an unknown piece is refused (uploaded floors)', async () => {
+    const store = createMemoryTerrain();
+    const decor = createMemoryDecor();
+    const { server, url, wsUrl } = await terrainServer({ terrain: store, decor, assetStorage: createMemoryAssetStorage() });
+    const room = await new Client(wsUrl).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token: 'valido-uid-admin' });
+    openRooms.push(room);
+    await waitFor(() => room.state.terrainBlocks !== '');
+    expect(room.state.terrainFloors ?? '').toBe('');
+
+    const { width, height } = sheetSize(ART_IMAGE_SPECS.floor);
+    const sheet = encodePng({ width, height, data: new Uint8ClampedArray(width * height * 4).fill(255) }).toString('base64');
+    const upload = await fetch(`${url}/admin/assets/upload`, {
+      method: 'POST',
+      headers: BEARER,
+      body: JSON.stringify({ kind: 'floor', name: 'Parquet', author: 'Equipo de arte', license: 'proprietary-internal', material: 'parquet', files: { sheet } }),
+    });
+    expect(upload.status).toBe(201);
+    const { piece } = (await upload.json()) as { piece: { id: string } };
+
+    const unknown = await fetch(`${url}/admin/terrain/blocks/${LAWN}`, { method: 'POST', headers: BEARER, body: JSON.stringify({ material: 'wood', floor: 'floor-upload-0123456789abcdef' }) });
+    expect(unknown.status).toBe(400);
+    expect(await unknown.json()).toEqual({ error: 'invalid-request' });
+
+    const single = await fetch(`${url}/admin/terrain/blocks/${LAWN}`, { method: 'POST', headers: BEARER, body: JSON.stringify({ material: 'wood', floor: piece.id }) });
+    expect(single.status).toBe(200);
+    expect(await single.json()).toEqual({ index: LAWN, material: 'wood', color: null, floor: piece.id });
+    await waitFor(() => room.state.terrainFloors === `${LAWN}:${piece.id}`);
+    expect(new Map(await store.loadBlockFloors())).toEqual(new Map([[LAWN, piece.id]]));
+    // The wire list of materials is untouched: every client already draws wood.
+    expect(decodeTerrainBlocks(room.state.terrainBlocks, server.terrain.blocks().length)?.[LAWN]).toBe('wood');
+
+    const expected = encodeTerrainBlocks(server.terrain.blocks());
+    const batch = await fetch(`${url}/admin/terrain/blocks`, {
+      method: 'POST',
+      headers: BEARER,
+      body: JSON.stringify({ expected, edits: [{ index: LAWN, material: 'grass' }, { index: LAWN + 1, material: 'wood', floor: piece.id }] }),
+    });
+    expect(batch.status).toBe(200);
+    await waitFor(() => room.state.terrainFloors === `${LAWN + 1}:${piece.id}`);
+    expect(new Map(await store.loadBlockFloors())).toEqual(new Map([[LAWN + 1, piece.id]]));
     await server.shutdown();
   });
 

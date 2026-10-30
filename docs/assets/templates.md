@@ -6,10 +6,12 @@ Guide PNGs for drawing a piece that passes the upload checks. There is one templ
 |---|---|---|---|---|
 | `character-walk.png` | character `walk` | 352x416 | 32x52 | 11 x 8 |
 | `character-seated.png` | character `seated` | 352x232 | 44x58 | 8 x 4 |
-| `chair.png` | none (pack only) | 144x76 | 36x38 | 4 x 2 |
+| `chair.png` | chair `sheet` | 144x76 | 36x38 | 4 x 2 |
 | `desk.png` | desk `sheet` | 384x104 | 96x104 | 4 x 1 |
 | `floor.png` | floor `sheet` | 96x96 | 32x32 | 3 x 3 |
 | `plant.png` | plant `sheet` | 32x48 | 32x48 | 1 x 1 |
+| `table.png` | room table `sheet` | 512x256 | 256x256 | 2 x 1 |
+| `door.png` | door `sheet` | 512x1024 | 128x128 | 4 x 8 |
 
 ## How to use a template
 
@@ -27,7 +29,7 @@ The guides are meant to be thrown away. If you upload a template with its guides
 | Checker | Translucent blue, 4px squares | The drawable area. Use the squares to count pixels. |
 | Anchor | Red cross, black center | The black pixel is the exact anchor: the feet, the pelvis on the seat, the seat of a chair, or the floor point of a desk or plant. Keep it at the same place in every frame. |
 | Chair ground | Cyan cross, black center | The floor pixel under the seat. A chair and its sitter are depth sorted by it. |
-| Footprint | Green dashed line | The tile a plant stands on. The plant anchor is the middle of its bottom edge. |
+| Footprint | Green dashed line | The tile a plant stands on, or the largest room table the frame fits (7x5 tiles). The anchor is the middle of its bottom edge. |
 | Label | Dark text, top left | The place of the frame in the order of its sheet. |
 
 ## Frame order
@@ -40,6 +42,8 @@ The labels follow the contract's order. Draw each frame in the cell that has its
 - **Desk**: one column per facing, `UP, DOWN, LEFT, RIGHT`. The second line is its footprint in tiles (`3X1` or `1X3`): the desk edge the table stands on. Keep the top about 80px long so it sits centered on that edge.
 - **Floor**: frame `row * 3 + col` is a 32x32 tile of one 96x96 motif. The whole sheet must tile seamlessly and be fully opaque.
 - **Plant**: one frame.
+- **Room table**: two columns, `HORIZONTAL` and `VERTICAL`. The dashed line is the largest table (7x5 tiles, or 5x7 standing vertical); a smaller table keeps the same anchor and states its own footprint in tiles when it is contributed. The top stays above the anchor row.
+- **Door**: one column per rotation (`0` opens down, `90` right, `180` up, `270` left) and four rows per hinge (`START`, then `END`), from `STEP 0` closed to `STEP 3` open. The anchor is the middle of the span on the wall line; draw a single door in the middle of the frame. Only single doors can be contributed.
 
 ## Rules the template cannot show
 

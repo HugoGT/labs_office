@@ -25,6 +25,7 @@ import {
   ART_TILE,
   type ArtDeskPiece,
 } from '../../../src/game/artContract.ts';
+import { DEFAULT_NAME } from '../../../src/game/officeProtocol.ts';
 import { authorize, type AdminDeps, type AdminResult } from '../admin/adminRoutes.ts';
 import { ART_PACK_DEFAULTS, ArtPieceExistsError } from '../decor/artCatalogRules.ts';
 import { isPublicArtFile } from '../decor/artReviewRules.ts';
@@ -33,7 +34,7 @@ import { toAssetBody } from '../decor/decorRoutes.ts';
 import { AssetNameTakenError, InvalidAssetError } from '../decor/decorRules.ts';
 import { AssetUploadError } from './assetImageRules.ts';
 import { isAssetHash, type AssetStoragePort } from './assetStoragePort.ts';
-import { decorAssetForPiece, prepareAssetUpload } from './assetUploadRules.ts';
+import { MAX_CREDIT_LENGTH, decorAssetForPiece, prepareAssetUpload } from './assetUploadRules.ts';
 
 export interface AssetUploadDeps extends AdminDeps {
   decor: DecorCatalog;
@@ -56,14 +57,24 @@ export type AssetFileResult =
 const NOT_FOUND = { status: 404, body: { error: 'not-found' } } as const;
 
 /** The desk facings every pack desk shares, from the pack default desk. */
-async function defaultDeskFacings(decor: DecorCatalog): Promise<ArtDeskPiece['facings'] | undefined> {
+export async function defaultDeskFacings(decor: DecorCatalog): Promise<ArtDeskPiece['facings'] | undefined> {
   const pieces = await decor.listArtPieces({ includeRetired: true });
   const desk = pieces.find((piece) => piece.id === ART_PACK_DEFAULTS.desk)?.spec;
   return desk?.kind === 'desk' ? desk.facings : undefined;
 }
 
-function wantsDefaultFacings(body: unknown): boolean {
+/** A desk body that brings no facings of its own: it takes the default desk's. */
+export function wantsDefaultFacings(body: unknown): boolean {
   return typeof body === 'object' && body !== null && (body as Record<string, unknown>).kind === 'desk' && (body as Record<string, unknown>).facings === undefined;
+}
+
+/** What an in-house upload carries when the body names no license (what the form of #121 used to preset). */
+const ADMIN_UPLOAD_LICENSE = 'proprietary-internal';
+
+/** The body, signed by the Admin who sends it unless it names an author and a license of its own. */
+function signedBy(body: unknown, uploader: { displayName: string | null }): unknown {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return body;
+  return { author: (uploader.displayName ?? DEFAULT_NAME).slice(0, MAX_CREDIT_LENGTH), license: ADMIN_UPLOAD_LICENSE, ...body };
 }
 
 export async function handleUploadAsset(authorization: unknown, body: unknown, deps: AssetUploadDeps): Promise<AdminResult> {
@@ -74,7 +85,7 @@ export async function handleUploadAsset(authorization: unknown, body: unknown, d
 
   try {
     const facings = wantsDefaultFacings(body) ? await defaultDeskFacings(deps.decor) : undefined;
-    const { piece, files } = prepareAssetUpload(body, { defaultDeskFacings: facings });
+    const { piece, files } = prepareAssetUpload(signedBy(body, authorized.user), { defaultDeskFacings: facings });
     for (const file of files) await deps.storage.put(file.sha256, file.png);
 
     // A plant is desk decor: its catalog asset draws the uploaded sheet.
@@ -97,14 +108,15 @@ export async function handleUploadAsset(authorization: unknown, body: unknown, d
 /**
  * The uploads as a manifest of their own, next to their files. Approved ones
  * only (`listArtPieces`): a contribution under review is nobody's to load
- * (#122). Active ones, like the pack's manifest, plus retired plants: a
- * withdrawn plant stops being offered through the decor catalog, but whoever
- * placed it keeps seeing it (D1b), so the office must still find its sheet.
- * A retired character is left out: nobody wears it any more.
+ * (#122). Active ones, like the pack's manifest, plus every retired piece but
+ * a character: a withdrawn plant, desk or floor stops being offered, but
+ * whoever placed or painted it keeps seeing it (D1b), so the office must
+ * still find its sheet. A retired character is left out: nobody wears it any
+ * more.
  */
 export async function handleUploadedArtManifest(decor: DecorCatalog): Promise<AdminResult> {
   const pieces = (await decor.listArtPieces({ includeRetired: true })).filter(
-    (piece) => piece.retiredAt === null || piece.kind === 'plant',
+    (piece) => piece.retiredAt === null || piece.kind !== 'character',
   );
   return {
     status: 200,

@@ -31,12 +31,17 @@
 import { createHash } from 'node:crypto';
 import {
   artSheetKey,
+  CHAIR,
+  CHAIR_LAYERS,
   CHARACTER_SEATED,
   CHARACTER_WALK,
   DESK,
+  DOOR,
   FLOOR,
   PACK_FACINGS,
   PLANT,
+  TABLE,
+  TABLE_FACINGS,
   type ArtDeskPiece,
   type ArtImageKind,
   type ArtPiece,
@@ -44,7 +49,7 @@ import {
   type Point,
 } from '../../../src/game/artContract.ts';
 import { uploadedPieceIdPrefix } from '../decor/artCatalogRules.ts';
-import { CONTRIBUTION_LICENSE, isContributionKind } from '../decor/artReviewRules.ts';
+import { CONTRIBUTION_KINDS, CONTRIBUTION_LICENSE, isContributionKind } from '../decor/artReviewRules.ts';
 import type { CreateAssetInput } from '../decor/decorPort.ts';
 import { AssetUploadError, MAX_UPLOAD_FILE_BYTES, prepareAssetImage, type PreparedAssetImage } from './assetImageRules.ts';
 
@@ -53,9 +58,12 @@ export const UPLOAD_FILE_ROLES = {
     { role: 'walk', imageKind: 'character-walk' },
     { role: 'seated', imageKind: 'character-seated' },
   ],
+  chair: [{ role: 'sheet', imageKind: 'chair' }],
   desk: [{ role: 'sheet', imageKind: 'desk' }],
+  door: [{ role: 'sheet', imageKind: 'door' }],
   floor: [{ role: 'sheet', imageKind: 'floor' }],
   plant: [{ role: 'sheet', imageKind: 'plant' }],
+  table: [{ role: 'sheet', imageKind: 'table' }],
 } as const satisfies Readonly<Record<string, readonly { role: string; imageKind: ArtImageKind }[]>>;
 
 export type UploadableKind = keyof typeof UPLOAD_FILE_ROLES;
@@ -108,8 +116,22 @@ function text(body: Record<string, unknown>, field: string, max: number): string
   return trimmed;
 }
 
-function material(body: Record<string, unknown>): string {
-  const value = body.material;
+/** A name as a material: lowercase, no accents, dashes between the words; empty when it has no letter or digit. */
+function materialFromName(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+    .replace(/-+$/, '');
+}
+
+/** The body's material, or, when it brings none, the one the name makes. */
+function material(body: Record<string, unknown>, name: string): string {
+  const value = body.material ?? materialFromName(name);
+  if (body.material === undefined && value === '') throw invalid('name', 'name needs a letter or a digit');
   if (typeof value !== 'string' || !MATERIAL.test(value)) throw invalid('material', 'material must be lowercase letters, digits and dashes');
   return value;
 }
@@ -149,6 +171,25 @@ function deskFacings(body: Record<string, unknown>, fallback: ArtDeskPiece['faci
   return Object.fromEntries(entries) as unknown as ArtDeskPiece['facings'];
 }
 
+/** The horizontal footprint of a room table, whole tiles up to what its sheet frame fits. */
+function tableFootprint(body: Record<string, unknown>): { w: number; h: number } {
+  const { w, h } = isRecord(body.footprint) ? body.footprint : ({} as Record<string, unknown>);
+  const max = TABLE.maxFootprint;
+  const fits = (n: unknown, limit: number): n is number => Number.isInteger(n) && (n as number) >= 1 && (n as number) <= limit;
+  if (!fits(w, max.w) || !fits(h, max.h)) throw invalid('footprint', `footprint must be whole tiles, at most ${max.w}x${max.h}`);
+  return { w, h };
+}
+
+/**
+ * Only the single door: a door's variant comes from the end of its id
+ * (`doorVariantOf`), and an upload id ends in a hash. Asking for the double one
+ * is refused, not turned into a single one.
+ */
+function singleDoor(body: Record<string, unknown>): 'single' {
+  if (body.variant !== undefined && body.variant !== 'single') throw invalid('variant', 'only the single door can be uploaded');
+  return 'single';
+}
+
 function decodeFile(value: unknown, role: string): Buffer {
   if (typeof value !== 'string') throw new AssetUploadError('missing-file', role, `the ${role} file is missing`);
   // Checked on the encoded length, so an oversized body is never decoded.
@@ -183,12 +224,25 @@ export function prepareAssetUpload(body: unknown, options: PrepareUploadOptions 
     switch (uploadKind) {
       case 'character':
         return { anchors: { walk: CHARACTER_WALK.anchor, seated: CHARACTER_SEATED.anchor }, footprint: CHARACTER_WALK.footprint };
+      case 'chair':
+        return { material: material(body, credits.name), facings: PACK_FACINGS, layers: CHAIR_LAYERS, anchors: { seat: CHAIR.anchor, ground: CHAIR.ground }, footprint: CHAIR.footprint };
+      case 'table':
+        return {
+          material: material(body, credits.name),
+          footprint: tableFootprint(body),
+          anchor: TABLE.anchor,
+          layer: TABLE.layer,
+          collision: TABLE.collision,
+          facings: TABLE_FACINGS,
+        };
+      case 'door':
+        return { material: material(body, credits.name), variant: singleDoor(body), anchor: DOOR.anchor, footprint: { w: DOOR.variants.single.span, h: 1 } };
       case 'desk':
-        return { material: material(body), ...colorModel(body), anchor: DESK.anchor, facings: deskFacings(body, options.defaultDeskFacings) };
+        return { material: material(body, credits.name), ...colorModel(body), anchor: DESK.anchor, facings: deskFacings(body, options.defaultDeskFacings) };
       case 'floor':
-        return { material: material(body), ...colorModel(body), motifTiles: FLOOR.motifTiles };
+        return { material: material(body, credits.name), ...colorModel(body), motifTiles: FLOOR.motifTiles };
       case 'plant':
-        return { material: material(body), footprint: PLANT.footprint, anchor: PLANT.anchor, layer: PLANT.layer, collision: PLANT.collision };
+        return { material: material(body, credits.name), footprint: PLANT.footprint, anchor: PLANT.anchor, layer: PLANT.layer, collision: PLANT.collision };
     }
   })();
 
@@ -218,23 +272,38 @@ export function prepareAssetUpload(body: unknown, options: PrepareUploadOptions 
  * only with `rightsAccepted: true`, the checkbox of the form; the license is
  * that grant (`CONTRIBUTION_LICENSE`), whatever the body says. Both checks run
  * before any file is decoded.
+ *
+ * `author` is the uploader's name from the route, like the license: the body
+ * neither needs nor can set it. A display name longer than a credit is cut to
+ * `MAX_CREDIT_LENGTH` rather than refusing a contribution over a name the
+ * person did not type here.
+ *
+ * What an Admin sets on a desk or a floor is refused here, not ignored: a
+ * contributed desk takes the facings of the default desk (`options`, as every
+ * pack desk shares one) and neither piece is colorable.
  */
-export function prepareContribution(body: unknown): PreparedUpload {
+export function prepareContribution(body: unknown, author: string, options: PrepareUploadOptions = {}): PreparedUpload {
   if (!isRecord(body)) throw invalid(null, 'the upload is not an object');
   if (body.rightsAccepted !== true) {
     throw new AssetUploadError('rights-not-accepted', 'rightsAccepted', 'the rights statement must be accepted');
   }
-  if (!isContributionKind(body.kind)) throw invalid('kind', 'only characters and decor plants can be contributed');
-  return prepareAssetUpload({ ...body, license: CONTRIBUTION_LICENSE });
+  if (!isContributionKind(body.kind)) throw invalid('kind', `kind must be one of ${CONTRIBUTION_KINDS.join(', ')}`);
+  if (body.colorable !== undefined || body.defaultColor !== undefined) throw invalid('colorable', 'a contribution has no color to choose');
+  if (body.facings !== undefined) throw invalid('facings', 'a contributed desk takes the facings of the default desk');
+  return prepareAssetUpload({ ...body, author: author.slice(0, MAX_CREDIT_LENGTH), license: CONTRIBUTION_LICENSE }, options);
 }
 
 /**
  * The desk decor asset that draws an uploaded plant, so the existing decor
- * flow (`/me/desk`) can place it with no change, or an uploaded desk, the
- * table of a desk decor like the pack desks (`packDecorAsset`). Any other
- * kind has none.
+ * flow (`/me/desk`) can place it with no change, or an uploaded desk or chair,
+ * the table or the guest seat of a desk decor like the pack's
+ * (`packDecorAsset`). Any other kind has none: a room table and a door are
+ * layout pieces only an admin places, in the office editor.
  */
 export function decorAssetForPiece(piece: ArtPiece): CreateAssetInput | undefined {
+  if (piece.kind === 'chair') {
+    return { name: piece.name, kind: 'furniture', textureKey: artSheetKey(piece.id, 'sheet'), w: 1, h: 1, placeableOnDesk: true };
+  }
   if (piece.kind === 'desk') {
     return { name: piece.name, kind: 'furniture', textureKey: artSheetKey(piece.id, 'sheet'), w: 3, h: 1, placeableOnDesk: true };
   }

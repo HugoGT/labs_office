@@ -97,6 +97,44 @@ describe('terrain block colors (#222)', () => {
   });
 });
 
+describe('terrain block floors (uploaded floor pieces)', () => {
+  const FLOOR = 'floor-upload-0123456789abcdef';
+
+  it('reads an uploaded floor on wood, and an edit without one as before', () => {
+    expect(parseTerrainEdit('3', { material: 'wood', floor: FLOOR }, COUNT)).toStrictEqual({ index: 3, material: 'wood', floor: FLOOR });
+    expect(parseTerrainEdit('3', { material: 'wood', floor: null }, COUNT)).toStrictEqual({ index: 3, material: 'wood' });
+    expect(parseTerrainEdit('3', { material: 'wood' }, COUNT)).toStrictEqual({ index: 3, material: 'wood' });
+    expect(parseTerrainEdit('3', { material: 'carpet', color: '#A0B1C2' }, COUNT)).toStrictEqual({ index: 3, material: 'carpet', color: '#a0b1c2' });
+  });
+
+  it('refuses anything that is not an uploaded floor id', () => {
+    for (const floor of ['floor-wood', 'floor-upload-0123456789ABCDEF', 'floor-upload-0123', 'plant-upload-0123456789abcdef', `${FLOOR} `, 3, true, {}]) {
+      expect(() => parseTerrainEdit('3', { material: 'wood', floor }, COUNT), JSON.stringify(floor)).toThrow(new InvalidTerrainEditError('invalid floor'));
+    }
+  });
+
+  it('refuses a floor on any material but wood, and a floor together with a color', () => {
+    for (const material of ['grass', 'carpet', 'tile', 'water', 'void', 'sand']) {
+      expect(() => parseTerrainEdit('3', { material, floor: FLOOR }, COUNT), material).toThrow(new InvalidTerrainEditError('a floor lies on wood'));
+    }
+    expect(() => parseTerrainEdit('3', { material: 'wood', floor: FLOOR, color: '#a0b1c2' }, COUNT)).toThrow(InvalidTerrainEditError);
+  });
+
+  it('still refuses an unknown material, with or without a floor', () => {
+    expect(() => parseTerrainEdit('3', { material: 'lava' }, COUNT)).toThrow(new InvalidTerrainEditError('unknown material'));
+    expect(() => parseTerrainEdit('3', { material: 'lava', floor: FLOOR }, COUNT)).toThrow(new InvalidTerrainEditError('unknown material'));
+  });
+
+  it('carries each edit floor through a batch, and refuses the whole batch for one bad floor', () => {
+    const expected = 'grass';
+    expect(parseTerrainBatch({ edits: [{ index: 1, material: 'wood', floor: FLOOR }, { index: 2, material: 'sand' }], expected }, COUNT).edits).toStrictEqual([
+      { index: 1, material: 'wood', floor: FLOOR },
+      { index: 2, material: 'sand' },
+    ]);
+    expect(() => parseTerrainBatch({ edits: [{ index: 1, material: 'wood', floor: FLOOR }, { index: 2, material: 'sand', floor: FLOOR }], expected }, COUNT)).toThrow(InvalidTerrainEditError);
+  });
+});
+
 describe('staticProtectedTiles', () => {
   it('holds every map chair, the furniture people use and the spawn area, but not the scenery', () => {
     for (const seat of BASE_MAP_SEATS) expect(STATIC.has(seat.ty * W + seat.tx)).toBe(true);

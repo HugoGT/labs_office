@@ -13,7 +13,9 @@
  * (#223), which decides which of two materials is drawn over the other.
  *
  * A block may carry a color of its own (#222), stored on its row and only
- * for a colorable material (`COLORABLE_TERRAIN_MATERIALS`).
+ * for a colorable material (`COLORABLE_TERRAIN_MATERIALS`). A wood block may
+ * instead carry an uploaded floor piece (`terrainFloors.ts`), stored the same
+ * way and never together with a color.
  *
  * The office decor layer (#208, `officeDecor.ts`) is stored the same way, one
  * item per anchor tile and only where one stands. The layout has none of its
@@ -30,21 +32,27 @@ export interface TerrainStore {
   saveBlock(index: number, material: LayoutMaterial, actorId: string | null): Promise<void>;
   /**
    * All rows succeed or none do; the runtime publishes only after this
-   * resolves. Each row takes its edit's `color` (#222), and loses any color
-   * it had when the edit carries none.
+   * resolves. Each row takes its edit's `color` (#222) and `floor`, and loses
+   * any it had when the edit carries none.
    */
-  saveBlocks(edits: readonly { index: number; material: LayoutMaterial; color?: string }[], actorId: string | null): Promise<void>;
+  saveBlocks(edits: readonly { index: number; material: LayoutMaterial; color?: string; floor?: string }[], actorId: string | null): Promise<void>;
   /**
    * The color of each stored block that has one (#222), by index. A row
    * stored before colors existed has none and draws its default art.
    */
   loadBlockColors(): Promise<ReadonlyMap<number, string>>;
   /**
+   * The uploaded floor piece of each stored block that has one, by index. A
+   * row stored before floors existed has none; an id that is not an uploaded
+   * floor id is skipped like an unreadable material.
+   */
+  loadBlockFloors(): Promise<ReadonlyMap<number, string>>;
+  /**
    * Saves blocks like `saveBlocks` and removes the walls on `walls` (post
    * indexes) in the same step: all rows succeed or none do. A void edit uses
    * it to drop the posts it leaves with no ground around them (#217).
    */
-  saveBlocksClearingWalls(edits: readonly { index: number; material: LayoutMaterial; color?: string }[], walls: readonly number[], actorId: string | null): Promise<void>;
+  saveBlocksClearingWalls(edits: readonly { index: number; material: LayoutMaterial; color?: string; floor?: string }[], walls: readonly number[], actorId: string | null): Promise<void>;
   /**
    * Placed walls by tile, in placement order, oldest first: the order of the map's entries. Tiles the
    * current map no longer has are the runtime's to ignore.

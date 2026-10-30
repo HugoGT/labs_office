@@ -37,7 +37,7 @@ function fakePort(byStatus: Partial<Record<ContributionStatus, Contribution[]>> 
 }
 
 describe('ArtReviewSection (#122)', () => {
-  it('lists the pending pieces with who sent them and an animated preview of a character', async () => {
+  it('lists the pending pieces with who sent them, and reads no file until one is opened', async () => {
     const port = fakePort({ pending: [contribution()] });
     render(<ArtReviewSection reviews={port} />);
 
@@ -46,10 +46,43 @@ describe('ArtReviewSection (#122)', () => {
     expect(row).toHaveTextContent('Lucía');
     expect(row).toHaveTextContent('Autoría: Ana');
     expect(row).toHaveTextContent('Enviado por Ana López (ana@example.com)');
-    for (const label of ['caminando hacia abajo', 'caminando hacia la izquierda', 'caminando hacia la derecha', 'caminando hacia arriba', 'sentado']) {
-      expect(await within(row).findByRole('img', { name: `Lucía ${label}` })).toBeInTheDocument();
-    }
     expect(port.list).toHaveBeenCalledWith('pending');
+    expect(port.fileDataUrl).not.toHaveBeenCalled();
+  });
+
+  it('opens the office mock of a piece: the character walks all 8 directions around one sitting', async () => {
+    const user = userEvent.setup();
+    const port = fakePort({ pending: [contribution()] });
+    render(<ArtReviewSection reviews={port} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Ver Lucía' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Lucía' });
+    expect(await within(dialog).findByRole('group', { name: 'Lucía en la oficina' })).toBeInTheDocument();
+    expect(within(dialog).getAllByRole('img', { name: /Lucía caminando/ })).toHaveLength(8);
+    expect(within(dialog).getByRole('img', { name: 'Lucía sentado' })).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Cerrar' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('tells how many pieces wait, once loaded and after each decision, but not for another tab', async () => {
+    const user = userEvent.setup();
+    const onPendingCount = vi.fn();
+    const first = contribution({ id: 'plant-upload-1111111111111111', name: 'Uno', kind: 'plant', files: [] });
+    const second = contribution({ id: 'plant-upload-2222222222222222', name: 'Dos', kind: 'plant', files: [] });
+    const port = fakePort({ pending: [first, second], approved: [contribution({ status: 'approved' })] });
+    render(<ArtReviewSection reviews={port} onPendingCount={onPendingCount} />);
+
+    await screen.findAllByRole('listitem');
+    expect(onPendingCount).toHaveBeenLastCalledWith(2);
+
+    await user.click(screen.getByRole('button', { name: 'Aprobar Uno' }));
+    await waitFor(() => expect(onPendingCount).toHaveBeenLastCalledWith(1));
+
+    onPendingCount.mockClear();
+    await user.click(screen.getByRole('tab', { name: 'Aprobadas' }));
+    await screen.findByRole('listitem');
+    expect(onPendingCount).not.toHaveBeenCalled();
   });
 
   it('approving takes the piece out of the queue', async () => {
@@ -100,6 +133,16 @@ describe('ArtReviewSection (#122)', () => {
     expect(port.retire).toHaveBeenCalledWith('character-upload-0123456789abcdef');
     expect(await screen.findByRole('status')).toHaveTextContent('«Lucía» ya no se ofrece. 2 personas vuelven al personaje por defecto.');
     expect(await screen.findByText('Retirada')).toBeInTheDocument();
+  });
+
+  it.each(['plant', 'desk', 'floor', 'chair', 'table', 'door'])('an approved %s can be withdrawn like a character', async (kind) => {
+    const user = userEvent.setup();
+    const port = fakePort({ approved: [contribution({ kind, name: 'Pieza', status: 'approved', files: [{ role: 'sheet', path: 'a.png' }] })] });
+    render(<ArtReviewSection reviews={port} />);
+
+    await user.click(screen.getByRole('tab', { name: 'Aprobadas' }));
+
+    expect(await screen.findByRole('button', { name: 'Retirar Pieza' })).toBeInTheDocument();
   });
 
   it('rejected pieces show their reason and no actions', async () => {
