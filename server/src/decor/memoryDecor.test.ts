@@ -667,3 +667,93 @@ describe('createMemoryDecor: contributions and review (#122)', () => {
     expect((await catalog.listUploadedArtPieces()).map((entry) => entry.id)).toEqual([piece.id]);
   });
 });
+
+describe('createMemoryDecor: uploading a retired piece again (#264)', () => {
+  const PACK: ArtPackManifest = JSON.parse(
+    readFileSync(new URL('../../../public/assets/pack/manifest.json', import.meta.url), 'utf8'),
+  );
+  const FICUS = PACK.pieces.find((piece) => piece.id === 'plant-ficus')!;
+  const PIECE: ArtPiece = { ...FICUS, id: 'plant-upload-0123456789abcdef', name: 'Helecho', license: 'office-contribution' };
+  const ANA = 'id-ana';
+  const BETO = 'id-beto';
+  const REVIEWER = 'id-admin';
+  const decorAsset = { name: 'Helecho', kind: 'plant' as const, textureKey: `art:${PIECE.id}:sheet`, w: 1, h: 1, placeableOnDesk: true };
+  const LATER = new Date(NOW.getTime() + 60_000);
+
+  /** A plant Ana contributed, approved with its decor asset and then retired; the clock then moves on. */
+  async function retiredPlant() {
+    let at = NOW;
+    const catalog = createMemoryDecor({ seed: [PLANTA], now: () => at });
+    await catalog.submitArtContribution({ piece: PIECE, submittedBy: ANA, decorAsset });
+    const { asset } = (await catalog.reviewArtContribution({ id: PIECE.id, reviewerId: REVIEWER, decision: 'approve', note: null, decorAsset }))!;
+    await catalog.retireUploadedArtPiece({ id: PIECE.id, actorId: REVIEWER });
+    at = LATER;
+    return { catalog, asset: asset! };
+  }
+
+  it('an Admin upload of the same pixels brings it back at once, with the same decor asset', async () => {
+    const { catalog, asset } = await retiredPlant();
+
+    const revived = await catalog.registerUploadedArtPiece({ piece: { ...PIECE, name: 'Helecho grande' }, uploadedBy: REVIEWER, decorAsset });
+
+    expect(revived.piece).toMatchObject({ id: PIECE.id, name: 'Helecho grande', status: 'approved', retiredAt: null, uploadedBy: REVIEWER, updatedAt: LATER });
+    expect(revived.asset).toMatchObject({ id: asset.id, archivedAt: null });
+    expect((await catalog.listArtPieces()).map((entry) => entry.id)).toEqual([PIECE.id]);
+    expect((await catalog.listAssets()).map((entry) => entry.id)).toEqual([asset.id, PLANTA.id]);
+    expect(catalog.artAuditLog().at(-1)).toMatchObject({ actorId: REVIEWER, action: 'upload-art', pieceId: PIECE.id });
+  });
+
+  it('a contribution of the same pixels goes back to review, not offered but still drawable', async () => {
+    const { catalog } = await retiredPlant();
+
+    const back = await catalog.submitArtContribution({ piece: { ...PIECE, name: 'Sin revisar', author: 'Beto' }, submittedBy: BETO, decorAsset });
+
+    // Unreviewed metadata never reaches the drawable piece: it keeps the approved fields.
+    expect(back).toMatchObject({ name: 'Helecho', author: PIECE.author, spec: PIECE });
+    expect(back).toMatchObject({ status: 'pending', retiredAt: NOW, uploadedBy: BETO, licenseAcceptedAt: LATER, reviewedBy: null, reviewedAt: null, reviewNote: null });
+    expect(await catalog.listArtPieces()).toEqual([]);
+    expect((await catalog.listArtPieces({ includeRetired: true })).map((entry) => entry.id)).toEqual([PIECE.id]);
+    expect((await catalog.listUploadedArtPieces({ status: 'pending' })).map((entry) => entry.id)).toEqual([PIECE.id]);
+    expect(await catalog.artContributionUsage(BETO)).toEqual({ pending: 1, lastHour: 1 });
+    expect((await catalog.listAssets()).map((entry) => entry.id)).toEqual([PLANTA.id]);
+    // Its comeback is already waiting: the same pixels again are refused.
+    await expect(catalog.submitArtContribution({ piece: PIECE, submittedBy: ANA })).rejects.toBeInstanceOf(ArtPieceExistsError);
+  });
+
+  it('approving the comeback offers it again and unarchives its decor asset instead of making another', async () => {
+    const { catalog, asset } = await retiredPlant();
+    await catalog.submitArtContribution({ piece: PIECE, submittedBy: BETO, decorAsset });
+
+    const reviewed = await catalog.reviewArtContribution({ id: PIECE.id, reviewerId: REVIEWER, decision: 'approve', note: null, decorAsset });
+
+    expect(reviewed?.piece).toMatchObject({ status: 'approved', retiredAt: null, reviewedBy: REVIEWER });
+    expect(reviewed?.asset).toMatchObject({ id: asset.id, archivedAt: null });
+    expect((await catalog.listArtPieces()).map((entry) => entry.id)).toEqual([PIECE.id]);
+    expect((await catalog.listAssets({ includeArchived: true })).map((entry) => entry.id)).toEqual([asset.id, PLANTA.id]);
+  });
+
+  it('rejecting the comeback leaves it retired and drawable, and it may come back again', async () => {
+    const { catalog } = await retiredPlant();
+    await catalog.submitArtContribution({ piece: PIECE, submittedBy: BETO, decorAsset });
+
+    const reviewed = await catalog.reviewArtContribution({ id: PIECE.id, reviewerId: REVIEWER, decision: 'reject', note: 'no' });
+
+    expect(reviewed?.piece).toMatchObject({ status: 'rejected', retiredAt: NOW, reviewNote: 'no' });
+    expect(await catalog.listArtPieces()).toEqual([]);
+    expect((await catalog.listArtPieces({ includeRetired: true })).map((entry) => entry.id)).toEqual([PIECE.id]);
+    await expect(catalog.submitArtContribution({ piece: PIECE, submittedBy: BETO })).resolves.toMatchObject({ status: 'pending' });
+  });
+
+  it('the same pixels as an active, pending or rejected piece are still refused', async () => {
+    const catalog = createMemoryDecor({ seed: [PLANTA], now: () => NOW });
+    await catalog.registerUploadedArtPiece({ piece: PIECE, uploadedBy: REVIEWER });
+    await expect(catalog.registerUploadedArtPiece({ piece: PIECE, uploadedBy: REVIEWER })).rejects.toBeInstanceOf(ArtPieceExistsError);
+    await expect(catalog.submitArtContribution({ piece: PIECE, submittedBy: ANA })).rejects.toBeInstanceOf(ArtPieceExistsError);
+
+    const other: ArtPiece = { ...PIECE, id: 'plant-upload-fedcba9876543210' };
+    await catalog.submitArtContribution({ piece: other, submittedBy: ANA });
+    await expect(catalog.submitArtContribution({ piece: other, submittedBy: ANA })).rejects.toBeInstanceOf(ArtPieceExistsError);
+    await catalog.reviewArtContribution({ id: other.id, reviewerId: REVIEWER, decision: 'reject', note: 'no' });
+    await expect(catalog.submitArtContribution({ piece: other, submittedBy: ANA })).rejects.toBeInstanceOf(ArtPieceExistsError);
+  });
+});
