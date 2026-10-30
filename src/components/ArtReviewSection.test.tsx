@@ -122,7 +122,7 @@ describe('ArtReviewSection (#122)', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Otra persona ya revisó esta pieza.');
   });
 
-  it('approved pieces can be withdrawn, and says how many people went back to the default character', async () => {
+  it('approved pieces can be withdrawn, and says how many people went back to the default character; the row leaves the list (#264)', async () => {
     const user = userEvent.setup();
     const port = fakePort({ approved: [contribution({ status: 'approved' })] });
     render(<ArtReviewSection reviews={port} />);
@@ -132,7 +132,8 @@ describe('ArtReviewSection (#122)', () => {
 
     expect(port.retire).toHaveBeenCalledWith('character-upload-0123456789abcdef');
     expect(await screen.findByRole('status')).toHaveTextContent('«Lucía» ya no se ofrece. 2 personas vuelven al personaje por defecto.');
-    expect(await screen.findByText('Retirada')).toBeInTheDocument();
+    expect(screen.queryByRole('listitem')).not.toBeInTheDocument();
+    expect(screen.queryByText('Retirada')).not.toBeInTheDocument();
   });
 
   it.each(['plant', 'desk', 'floor', 'chair', 'table', 'door'])('an approved %s can be withdrawn like a character', async (kind) => {

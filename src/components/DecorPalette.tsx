@@ -136,6 +136,8 @@ export function DecorPalette({ value, catalog, offers = () => true, colors = {},
     <div className={styles.palettes}>
       {GROUPS.map(({ kind, label }) => {
         const entries = (catalog?.[kind] ?? []).flatMap((option) => {
+          // A retired upload still draws where it was placed (#264), but is not offered.
+          if (option.retired) return [];
           const pick = decorPickOf(option);
           return pick !== null && offers(pick.info) ? [{ option, pick }] : [];
         });
