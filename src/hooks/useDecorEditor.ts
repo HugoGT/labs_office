@@ -522,7 +522,15 @@ export function useDecorEditor({
     colors,
     setColor(piece, color) {
       saveColor(piece, color);
-      setBrush((current) => (current !== null && current.piece === piece && current.info.colorable === true ? { ...current, color } : current));
+      // A color chosen on a tile puts that piece in hand, in that color, so the next click on the map places it (the
+      // rail hides then, which also closes the browser's picker). A piece already in hand just takes the color.
+      setBrush((current) => {
+        if (current !== null && current.piece === piece) return current.info.colorable === true ? { ...current, color } : current;
+        const info = infoOf(piece);
+        return info !== null && info.colorable === true ? brushFor({ id: piece, info }, turned ?? defaultDecorRotation(info.kind), color) : current;
+      });
+      setSelected(null);
+      setError(null);
     },
     pending: draining,
     multiple,

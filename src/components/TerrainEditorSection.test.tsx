@@ -184,8 +184,8 @@ describe('TerrainEditorSection', () => {
     const { bridge, terrain, commands } = renderSection();
     await open();
 
+    // Choosing the color is enough: the carpet is picked, with no click on its tile.
     fireEvent.change(await screen.findByLabelText(/^Color de Moqueta/), { target: { value: '#c0392b' } });
-    await userEvent.click(screen.getByRole('button', { name: 'Moqueta' }));
     expect(commands.at(-1)).toEqual({ brush: { kind: 'floor', material: 'carpet', color: '#c0392b' } });
     act(() => bridge.emit('terrainpick', { index: LAWN }));
     await vi.waitFor(() => expect(terrain.setBlock).toHaveBeenCalledTimes(1));

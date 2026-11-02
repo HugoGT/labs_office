@@ -290,7 +290,12 @@ export function useTerrainEditor({ bridge, terrain, onExit, outlines }: UseTerra
     colors,
     setColor(material, color) {
       saveColor(material, color);
-      setBrush((current) => (current?.material === material ? floorBrush(material, color) : current));
+      // A color chosen on its tile picks the floor, so the next click on the map paints it (the rail hides then, which also
+      // closes the browser's picker). Uncolorable materials never get here, but never pick on a color.
+      if (isColorableTerrainMaterial(material)) {
+        setBrush(floorBrush(material, color));
+        setError(null);
+      }
     },
     pending: draining,
     blocked,

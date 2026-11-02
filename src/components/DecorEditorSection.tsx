@@ -230,7 +230,10 @@ export function DecorEditorSection({
           walls.unpick();
           editor.pick(option);
         }}
-        onColorChange={editor.setColor}
+        onColorChange={(piece, color) => {
+          walls.unpick();
+          editor.setColor(piece, color);
+        }}
         disabled={editor.blocked}
         preview={preview}
       />

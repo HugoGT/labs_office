@@ -108,8 +108,8 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
     const decor: OfficeDecorPort = { setDecor: vi.fn(async () => undefined) };
     const { bridge, commands } = renderSection({ decor, initiallyActive: true });
 
+    // Choosing the color is enough: the piece is in hand, with no click on its tile.
     fireEvent.change(await screen.findByLabelText(/^Color de Escritorio pintado/), { target: { value: '#c0392b' } });
-    await userEvent.click(screen.getByRole('button', { name: 'Escritorio pintado' }));
     expect(commands.at(-1)).toMatchObject({ brush: { piece: 'desk-painted', color: '#c0392b' } });
 
     act(() => bridge.emit('decorpick', { index: at(40, 40) }));

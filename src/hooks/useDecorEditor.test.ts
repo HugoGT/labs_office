@@ -236,6 +236,28 @@ describe('useDecorEditor', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('puts a colorable piece in hand as soon as its color is chosen, in that color, ready to place; a piece already in hand only changes color', async () => {
+    const { decor, calls } = deferredPort();
+    const { bridge, result, commands } = setup({ decor });
+    act(() => result.current.enter());
+
+    act(() => result.current.setColor('desk-painted', '#c83c3c'));
+    expect(result.current.brush).toEqual({ kind: 'piece', piece: 'desk-painted', info: PAINTED.info, rotation: 180, color: '#c83c3c' });
+    expect(commands.at(-1)?.brush).toMatchObject({ piece: 'desk-painted', color: '#c83c3c' });
+    act(() => bridge.emit('decorpick', { index: at(5, 5) }));
+    expect(calls[0]!.edits).toEqual([{ index: at(5, 5), item: { piece: 'desk-painted', rotation: 180, color: '#c83c3c' } }]);
+
+    // Dragging the picker keeps changing the color of the piece in hand; it is not put down.
+    act(() => result.current.setColor('desk-painted', '#3c5ac8'));
+    expect(result.current.brush).toMatchObject({ piece: 'desk-painted', color: '#3c5ac8' });
+
+    // The color of another piece takes its place in hand, in the turn the palette holds.
+    act(() => result.current.pick(CHAIR));
+    act(() => bridge.emit('decorrotate', { step: 1 }));
+    act(() => result.current.setColor('desk-painted', '#c0392b'));
+    expect(result.current.brush).toMatchObject({ piece: 'desk-painted', color: '#c0392b', rotation: 270 });
+  });
+
   it('repaints a piece of another color on the same tile, but skips one already in that color', async () => {
     const { decor, calls } = deferredPort();
     const { bridge, result } = setup({ decor });

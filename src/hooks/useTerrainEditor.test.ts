@@ -277,6 +277,23 @@ describe('useTerrainEditor', () => {
     const BLUE = '#3c6ac8';
     const carpet = (color?: string): TerrainBrush => ({ kind: 'floor', material: 'carpet', ...(color === undefined ? {} : { color }) });
 
+    it('picks carpet as soon as its color is chosen, ready to paint; carpet already picked only changes color', () => {
+      const { result, commands } = setup();
+      act(() => result.current.enter());
+
+      act(() => result.current.setColor('carpet', RED));
+      expect(result.current.brush).toEqual(carpet(RED));
+      expect(commands.at(-1)).toEqual({ brush: carpet(RED) });
+
+      act(() => result.current.setColor('carpet', BLUE));
+      expect(result.current.brush).toEqual(carpet(BLUE));
+
+      // Another floor in hand is replaced by the carpet in its new color.
+      act(() => result.current.pick('grass'));
+      act(() => result.current.setColor('carpet', RED));
+      expect(result.current.brush).toEqual(carpet(RED));
+    });
+
     it('remembers the carpet color across a reload, in this browser only', () => {
       const first = setup();
       act(() => first.result.current.setColor('carpet', RED));
@@ -299,13 +316,14 @@ describe('useTerrainEditor', () => {
       expect(result.current.brush).toEqual(carpet(RED));
       expect(commands.at(-1)).toEqual({ brush: carpet(RED) });
 
+      // A color chosen for the carpet takes it in hand, whatever floor was (see «picks carpet as soon as its color is chosen»).
       act(() => result.current.pick('grass'));
       act(() => result.current.setColor('carpet', BLUE));
-      expect(result.current.brush).toEqual(floor('grass'));
-      act(() => result.current.pick('carpet'));
       expect(result.current.brush).toEqual(carpet(BLUE));
       act(() => result.current.pick('carpet'));
       expect(result.current.brush).toBeNull();
+      act(() => result.current.pick('carpet'));
+      expect(result.current.brush).toEqual(carpet(BLUE));
     });
 
     it('sends the color with each carpet paint, skipping a block already that carpet but not one in another color', async () => {
