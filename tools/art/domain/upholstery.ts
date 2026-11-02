@@ -8,7 +8,7 @@
  * model is built longer by 1 / DEPTH_SCALE there and still covers its tiles on screen.
  */
 import { makeRamp, mixRgba, type Ramp } from './color.ts';
-import { DEPTH_SCALE, type Box, type FurnitureModel, type Layer, type Part, type Span, type SurfacePoint } from './furnitureModel.ts';
+import { DEPTH_SCALE, floorSpans, type Box, type FurnitureModel, type Layer, type Part, type Span, type SurfacePoint } from './furnitureModel.ts';
 import type { Rgba } from '../../../src/art/pixelBuffer.ts';
 import { SEAT_HEIGHT, type Facing } from '../../../src/art/seating.ts';
 
@@ -140,6 +140,21 @@ function narrow(screen: number, seats: number): number {
   return screen < column ? 0 : screen - column;
 }
 
+/** A span along the sofa, laid out on screen without the middle column, as the model places it. */
+function placed([a, b]: Span, seats: number, facing: Facing): Span {
+  const place = (screen: number): number => Math.round(lengthen(widen(screen, seats), seats, facing));
+  return [place(a), place(b)];
+}
+
+/**
+ * Screen x span and floor row span, from the floor under the model origin, of the backrest of a piece of `seats`
+ * places turned `facing`: what a sofa's default collision covers (`sofaBackrestRect` of src/game/pieceCollisions.ts).
+ */
+export function backrestFloor(seats: number, facing: Facing): { readonly x: Span; readonly z: Span } {
+  const half = halfWidth(seats);
+  return floorSpans(facing, [BACK_REAR, BACK_FACE], placed([-half, half], seats, facing));
+}
+
 function lengthen(screen: number, seats: number, facing: Facing): number {
   return seats > 1 && (facing === 'left' || facing === 'right') ? screen / DEPTH_SCALE : screen;
 }
@@ -174,9 +189,8 @@ function style(kind: UpholsteryStyle, color: string): Style {
 export function upholsteredModel(kind: UpholsteryStyle, seats: number, facing: Facing, color = DEFAULT_FABRIC_COLOR): FurnitureModel {
   const s = style(kind, color);
   const half = halfWidth(seats);
-  const place = (screen: number): number => Math.round(lengthen(widen(screen, seats), seats, facing));
   // Spans are laid out on screen without the middle column (mirror them before `along`), then placed.
-  const along = ([a, b]: Span): Span => [place(a), place(b)];
+  const along = (span: Span): Span => placed(span, seats, facing);
   const mirror = ([a, b]: Span): Span => [-b, -a];
   // A sofa's arms are broader than the armchair's, in keeping with its length.
   const armWidth = seats === 1 ? 3 : 5;

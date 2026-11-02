@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { SOFA } from '../../../src/game/artContract.ts';
 import { chairSprite } from './chairs.ts';
 import { SOFA_MATERIALS, SOFA_SEATS, sofaSprite, type SofaSprite } from './sofas.ts';
-import { DEFAULT_FABRIC_COLOR, LEATHER } from './upholstery.ts';
+import { DEFAULT_FABRIC_COLOR, LEATHER, backrestFloor } from './upholstery.ts';
+import { sofaBackrestRect } from '../../../src/game/pieceCollisions.ts';
 import { makeRamp } from './color.ts';
 import { PixelBuffer } from '../../../src/art/pixelBuffer.ts';
 import { FACINGS, SEAT_HEIGHT } from '../../../src/art/seating.ts';
@@ -389,5 +390,14 @@ test('a two-seat sofa parts its cushions with a seam one pixel wide', () => {
     let seam = 0;
     for (let x = left!.x; x <= right!.x; x += 1) if (luma(image.getPixel(x, left!.y)) < luma(image.getPixel(left!.x, left!.y)) * 0.75) seam += 1;
     assert.equal(seam, 1, `${material}: ${seam}px seam between the seats`);
+  }
+});
+
+test('a sofa keeps walkers out of the floor under its backrest, as the shared collision states it', () => {
+  for (const seats of SOFA_SEATS) {
+    for (const facing of FACINGS) {
+      const { x, z } = backrestFloor(seats, facing);
+      assert.deepEqual(sofaBackrestRect(seats, facing), { x: x[0], y: z[0], w: x[1] - x[0], h: z[1] - z[0] }, `${seats} seats ${facing}`);
+    }
   }
 });

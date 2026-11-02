@@ -28,6 +28,7 @@ import {
   pieceRectsOf,
   officeDecorInstances,
   rectFromView,
+  sofaBackrestRect,
   rectInView,
   rotateRect,
   rotationForFacing,
@@ -53,6 +54,7 @@ const DECOR_INFO: Record<string, DecorPieceInfo> = {
   'plant-ficus': { kind: 'plant', footprint: { w: 1, h: 1 } },
   'table-meeting': { kind: 'table', footprint: { w: 7, h: 5 } },
   'sofa-leather-3': { kind: 'sofa', footprint: { w: 3, h: 1 } },
+  'sofa-fabric-2': { kind: 'sofa', footprint: { w: 2, h: 1 }, colorable: true },
 };
 const infoOf = (piece: string): DecorPieceInfo | null => DECOR_INFO[piece] ?? null;
 
@@ -191,17 +193,41 @@ describe('pieceCollisions: instances', () => {
     expect(worldRectsOf(instances[1]!, new Map([['chair-metal', [{ x: -4, y: -4, w: 8, h: 8 }]]]))).toEqual([{ x: 12, y: 12, w: 8, h: 8 }]);
   });
 
-  it('stands a decor sofa on the middle of its footprint, turned by its facing, walk-through by default, picked anywhere on it', () => {
+  it('stands a decor sofa on the middle of its footprint, turned by its facing, its backrest solid by default, picked anywhere on it', () => {
     const [across] = officeDecorInstances([{ index: 5 * 20 + 10, piece: 'sofa-leather-3', rotation: 0 }], infoOf, 20);
     const [sideways] = officeDecorInstances([{ index: 5 * 20 + 10, piece: 'sofa-leather-3', rotation: 270 }], infoOf, 20);
 
-    expect(across).toMatchObject({ piece: 'sofa-leather-3', pivot: { x: 10.5 * 32, y: 5.5 * 32 }, rotation: 0, defaults: [] });
+    expect(across).toMatchObject({ piece: 'sofa-leather-3', pivot: { x: 10.5 * 32, y: 5.5 * 32 }, rotation: 0, defaults: [sofaBackrestRect(3, 'down')] });
     expect(across!.pickBox).toEqual({ x: 9 * 32, y: 5 * 32, w: 3 * 32, h: 32 });
-    expect(sideways).toMatchObject({ pivot: { x: 10.5 * 32, y: 5.5 * 32 }, rotation: rotationForFacing('left'), defaults: [] });
+    expect(sideways).toMatchObject({ pivot: { x: 10.5 * 32, y: 5.5 * 32 }, rotation: rotationForFacing('left'), defaults: [sofaBackrestRect(3, 'left')] });
     expect(sideways!.pickBox).toEqual({ x: 10 * 32, y: 4 * 32, w: 32, h: 3 * 32 });
-    expect(worldRectsOf(across!, NO_EDITS)).toEqual([]);
+    // The floor under the backrest, behind the seats: north of the middle facing down, east of it facing left.
+    expect(worldRectsOf(across!, NO_EDITS)).toEqual([{ x: 10.5 * 32 - 43, y: 5.5 * 32 - 6, w: 86, h: 3 }]);
+    expect(worldRectsOf(sideways!, NO_EDITS)).toEqual([{ x: 10.5 * 32 + 5, y: 5.5 * 32 - 43, w: 5, h: 86 }]);
     // An edit of the piece, stated facing down, turns with a sideways sofa like a chair's.
     expect(worldRectsOf(sideways!, new Map([['sofa-leather-3', [{ x: -48, y: -8, w: 96, h: 8 }]]]))).toEqual([{ x: 10.5 * 32 - 8, y: 5.5 * 32 - 48, w: 8, h: 96 }]);
+  });
+
+  it('lays a sofa backrest behind its seats in every facing, the two-seat one over its middle column too', () => {
+    expect(sofaBackrestRect(2, 'down')).toEqual({ x: -28, y: -6, w: 55, h: 3 });
+    expect(sofaBackrestRect(2, 'up')).toEqual({ x: -27, y: 3, w: 55, h: 3 });
+    expect(sofaBackrestRect(2, 'right')).toEqual({ x: -10, y: -27, w: 5, h: 55 });
+    expect(sofaBackrestRect(2, 'left')).toEqual({ x: 5, y: -28, w: 5, h: 55 });
+    expect(sofaBackrestRect(3, 'up')).toEqual({ x: -43, y: 3, w: 86, h: 3 });
+    expect(sofaBackrestRect(3, 'right')).toEqual({ x: -10, y: -43, w: 5, h: 86 });
+  });
+
+  it('keeps anyone from walking through a sofa backrest, never off its seats', () => {
+    const items = [{ index: 5 * 20 + 10, piece: 'sofa-fabric-2', rotation: 0 as const }];
+    const [sofa] = officeDecorInstances(items, infoOf, 20);
+    const world = collisionWorld([sofa!], NO_EDITS);
+    const middle = sofa!.pivot;
+    // A body center on the backrest strip is kept out, from either side of the sofa.
+    expect(isPositionBlocked(world, middle.x, middle.y - 5 - COLLISION_BODY_CENTER_OFFSET.y)).toBe(true);
+    expect(boxOverlapsRects(world, bodyBoxAt({ x: middle.x, y: middle.y - 32 }))).toBe(false);
+    expect(boxOverlapsRects(world, bodyBoxAt({ x: middle.x, y: middle.y - 16 }))).toBe(true);
+    // A sitter's feet on the middle of a seat tile put the body center in front of it.
+    expect(isPositionBlocked(world, middle.x - 16, middle.y - 18)).toBe(false);
   });
 
   it('turns a chair facing up like its drawing: up keeps the down rectangles', () => {
