@@ -108,6 +108,15 @@ export function decorRotationsOf(kind: DecorKind): readonly DecorRotation[] {
   return isRotatable(kind) ? DECOR_ROTATIONS : [0];
 }
 
+/**
+ * The turn a fresh brush of `kind` starts in. A desk table shows its sitter's
+ * side (drawer and open knee space, facing up), the one its palette thumbnail
+ * shows, instead of the closed panel a turn of 0 draws; the rest start at 0.
+ */
+export function defaultDecorRotation(kind: DecorKind): DecorRotation {
+  return kind === 'desk' ? 180 : 0;
+}
+
 /** `rotation` as `kind` can take it: a room table's symmetric turn, 0 for a plant. */
 export function decorRotationFor(kind: DecorKind, rotation: DecorRotation): DecorRotation {
   if (kind === 'table') return rotation === 90 || rotation === 270 ? 90 : 0;

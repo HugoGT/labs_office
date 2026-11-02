@@ -190,8 +190,9 @@ export function previewFrame(option: MaterialOption): PreviewFrame {
     const { frame, columns, rows } = ART_IMAGE_SPECS.floor;
     return { x: 0, y: 0, width: frame.width * columns, height: frame.height * rows };
   }
+  // A desk is shown from its sitter's side (drawer and open knee space, the cell facing up), not from the closed panel the map shows.
   const { frame } = ART_IMAGE_SPECS.desk;
-  return { x: frame.width * facingColumn('down'), y: 0, width: frame.width, height: frame.height };
+  return { x: frame.width * facingColumn('up'), y: 0, width: frame.width, height: frame.height };
 }
 
 /**

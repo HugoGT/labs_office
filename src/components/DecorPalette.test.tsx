@@ -1,11 +1,11 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import exportedManifest from '../../public/assets/pack/manifest.json?raw';
 import { materialCatalogFrom } from '../game/artMaterials';
 import type { ArtPreviewCache } from '../game/artPreview';
 import { fitsDeskArea } from '../game/decorEditor';
-import { DECOR_COLORS, DecorPalette, catalogDecorInfo } from './DecorPalette';
+import { DecorPalette, catalogDecorInfo } from './DecorPalette';
 
 const catalog = materialCatalogFrom(JSON.parse(exportedManifest), 'assets/pack/manifest.json')!;
 
@@ -102,21 +102,23 @@ describe('DecorPalette', () => {
     ]);
   });
 
-  it('gives a colorable piece a color picker on its tile, starting in its default, and draws the tile in the color chosen', async () => {
+  it('gives a colorable piece a color input on its tile, starting in its default, and draws the tile in the color chosen', async () => {
     const onColorChange = vi.fn();
     const preview = noPreview();
     const { rerender } = render(<DecorPalette value={null} catalog={catalog} onPick={() => {}} onColorChange={onColorChange} preview={preview} />);
 
-    const picker = screen.getByRole('button', { name: /^Color de Escritorio pintado:/ });
-    expect(picker).toHaveAttribute('aria-label', 'Color de Escritorio pintado: Verde azulado');
-    expect(screen.getAllByRole('button', { name: /^Color de/ })).toHaveLength(1);
-    await userEvent.click(picker);
-    await userEvent.click(screen.getByRole('button', { name: 'Rojo' }));
-    expect(onColorChange).toHaveBeenCalledWith('desk-painted', DECOR_COLORS.find((swatch) => swatch.label === 'Rojo')!.hex);
+    // The native picker opens straight from the input: no list of suggested colors in between.
+    const input = screen.getByLabelText(/^Color de Escritorio pintado:/);
+    expect(input).toHaveAttribute('type', 'color');
+    expect(input).toHaveAttribute('aria-label', 'Color de Escritorio pintado: #4f9a8a');
+    expect(screen.getAllByLabelText(/^Color de/)).toHaveLength(1);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.change(input, { target: { value: '#C83C3C' } });
+    expect(onColorChange).toHaveBeenCalledWith('desk-painted', '#c83c3c');
 
     const painted = catalog.desk.find((option) => option.id === 'desk-painted')!;
     rerender(<DecorPalette value={null} catalog={catalog} colors={{ 'desk-painted': '#c83c3c' }} onPick={() => {}} onColorChange={onColorChange} preview={preview} />);
-    expect(screen.getByRole('button', { name: 'Color de Escritorio pintado: #c83c3c' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Color de Escritorio pintado: #c83c3c')).toHaveValue('#c83c3c');
     await waitFor(() => expect(preview.sheet).toHaveBeenCalledWith(painted, '#c83c3c'));
   });
 
@@ -146,7 +148,7 @@ describe('DecorPalette', () => {
 
     render(<DecorPalette value={null} catalog={catalog} onPick={() => {}} preview={noPreview()} disabled />);
     expect(screen.getByRole('button', { name: 'Silla gamer' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /^Color de Escritorio pintado/ })).toBeDisabled();
+    expect(screen.getByLabelText(/^Color de Escritorio pintado/)).toBeDisabled();
   });
 });
 

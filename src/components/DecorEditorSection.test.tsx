@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import exportedManifest from '../../public/assets/pack/manifest.json?raw';
@@ -108,13 +108,12 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
     const decor: OfficeDecorPort = { setDecor: vi.fn(async () => undefined) };
     const { bridge, commands } = renderSection({ decor, initiallyActive: true });
 
-    await userEvent.click(await screen.findByRole('button', { name: /^Color de Escritorio pintado/ }));
-    await userEvent.click(screen.getByRole('button', { name: 'Rojo' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Escritorio pintado' }));
+    // Choosing the color is enough: the piece is in hand, with no click on its tile.
+    fireEvent.change(await screen.findByLabelText(/^Color de Escritorio pintado/), { target: { value: '#c0392b' } });
     expect(commands.at(-1)).toMatchObject({ brush: { piece: 'desk-painted', color: '#c0392b' } });
 
     act(() => bridge.emit('decorpick', { index: at(40, 40) }));
-    await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: { piece: 'desk-painted', rotation: 0, color: '#c0392b' } }]));
+    await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: { piece: 'desk-painted', rotation: 180, color: '#c0392b' } }]));
   });
 
   it('unpicks with «Deseleccionar», and shows why the server refused', async () => {

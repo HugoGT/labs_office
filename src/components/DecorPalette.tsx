@@ -1,12 +1,11 @@
-import type { Swatch } from '../art/customCharacter';
 import { chairPreviewFrames, previewFrame, type MaterialCatalog, type MaterialOption } from '../game/artMaterials';
 import type { ArtPreviewCache } from '../game/artPreview';
 import { decorSizeLabel, type DecorBrush } from '../game/decorEditor';
 import { decorPieceInfo, type DecorPieceInfo } from '../game/officeDecor';
 import type { DecorPick } from '../hooks/useDecorEditor';
 import { ArtPreviewCanvas } from './ArtPreviewCanvas';
-import { ColorPicker } from './ColorPicker';
 import styles from './DecorPalette.module.css';
+import { TileColorInput } from './TileColorInput';
 
 /**
  * The palette of the decor editor (#208): every piece the office decor layer
@@ -14,7 +13,7 @@ import styles from './DecorPalette.module.css';
  * approved uploads, from the same catalog as the other palettes). A tile is
  * its picture, plus the size in tiles of a room table: the name is its
  * tooltip and accessible name, the heading says the kind; a colorable piece carries a color
- * picker, chosen before picking because the rail steps aside once a piece is
+ * input, chosen before picking because the rail steps aside once a piece is
  * picked. Presentational: the editor owns which entry is picked, the colors
  * and what a click on the map does.
  */
@@ -29,24 +28,6 @@ const GROUPS: readonly { kind: DecorCatalogKind; label: string }[] = [
   { kind: 'plant', label: 'Plantas' },
   // #223: only the office scope offers them (the desk scope's `fitsDeskArea` leaves doors out).
   { kind: 'door', label: 'Puertas' },
-];
-
-/**
- * Quick picks for a colorable piece, the painted desk's default first; any
- * other color comes from the picker's own "Otro color".
- */
-export const DECOR_COLORS: readonly Swatch[] = [
-  { hex: '#4f9a8a', label: 'Verde azulado' },
-  { hex: '#f3efe6', label: 'Blanco' },
-  { hex: '#9aa3ad', label: 'Gris' },
-  { hex: '#3a3f45', label: 'Grafito' },
-  { hex: '#c0392b', label: 'Rojo' },
-  { hex: '#e08a3c', label: 'Naranja' },
-  { hex: '#e6c84a', label: 'Amarillo' },
-  { hex: '#5a9a4f', label: 'Verde' },
-  { hex: '#3c6ac8', label: 'Azul' },
-  { hex: '#7a4fb0', label: 'Morado' },
-  { hex: '#d77fa1', label: 'Rosa' },
 ];
 
 /** The thumbnail box, in pixels. */
@@ -89,7 +70,7 @@ export interface DecorPaletteProps {
   /** Which pieces to offer (the desk scope: what fits a desk); every one by default. */
   offers?: (info: DecorPieceInfo) => boolean;
   /** The color chosen per colorable piece; one without starts in its manifest default. */
-  colors?: Readonly<Record<string, string>>;
+  colors?: Readonly<Partial<Record<string, string>>>;
   onPick: (pick: DecorPick) => void;
   onColorChange?: (piece: string, color: string) => void;
   disabled?: boolean;
@@ -166,12 +147,9 @@ export function DecorPalette({ value, catalog, offers = () => true, colors = {},
                       {size !== null && <span className={styles.size}>{size}</span>}
                     </button>
                     {colorable && color !== null && (
-                      <ColorPicker
+                      <TileColorInput
                         label={`Color de ${option.name}`}
-                        caption=""
-                        presets={DECOR_COLORS}
                         value={color}
-                        compact
                         disabled={disabled}
                         onChange={(hex) => onColorChange?.(option.id, hex)}
                       />

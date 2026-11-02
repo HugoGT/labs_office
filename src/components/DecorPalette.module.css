@@ -24,8 +24,9 @@
   gap: 6px;
 }
 
-/* A tile and, for a colorable piece, its color picker under it. */
+/* A tile and, for a colorable piece, its color input in the tile's top-right corner. */
 .cell {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: stretch;

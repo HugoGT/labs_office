@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import exportedManifest from '../../public/assets/pack/manifest.json?raw';
@@ -46,17 +46,16 @@ describe('TerrainPalette', () => {
     expect(preview.sheet).toHaveBeenCalledTimes(8);
   });
 
-  it('gives carpet, and only carpet, a color picker starting at its pack default, and reports the chosen color (#222)', async () => {
+  it('gives carpet, and only carpet, a color input starting at its pack default, and reports the chosen color (#222)', async () => {
     const onColorChange = vi.fn();
     render(<TerrainPalette value={null} onPick={() => {}} floors={catalog.floor} preview={noPreview()} onColorChange={onColorChange} />);
 
-    const pickers = screen.getAllByRole('button', { name: /^Color de / });
-    expect(pickers).toHaveLength(1);
-    expect(pickers[0]).toHaveAccessibleName('Color de Moqueta: Por defecto');
+    const inputs = screen.getAllByLabelText(/^Color de /);
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]).toHaveAttribute('aria-label', 'Color de Moqueta: #5a6f86');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
-    await userEvent.click(pickers[0]!);
-    expect(screen.getByRole('button', { name: 'Por defecto' })).toHaveAttribute('aria-pressed', 'true');
-    await userEvent.click(screen.getByRole('button', { name: 'Rojo' }));
+    fireEvent.change(inputs[0]!, { target: { value: '#C0392B' } });
 
     expect(onColorChange.mock.calls).toEqual([['carpet', '#c0392b']]);
   });
@@ -65,7 +64,7 @@ describe('TerrainPalette', () => {
     const preview = noPreview();
     render(<TerrainPalette value={null} onPick={() => {}} floors={catalog.floor} preview={preview} colors={{ carpet: '#3c6ac8' }} />);
 
-    expect(screen.getByRole('button', { name: 'Color de Moqueta: Azul' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Color de Moqueta: #3c6ac8')).toHaveValue('#3c6ac8');
     await waitFor(() => expect(preview.sheet).toHaveBeenCalledWith(expect.objectContaining({ id: 'floor-carpet' }), '#3c6ac8'));
     expect(preview.sheet).toHaveBeenCalledWith(expect.objectContaining({ id: 'floor-grass' }), null);
   });
@@ -145,7 +144,7 @@ describe('TerrainPalette: uploaded floors (S13)', () => {
     render(<TerrainPalette value={null} onPick={() => {}} floors={floors} preview={preview} />);
 
     await waitFor(() => expect(preview.sheet).toHaveBeenCalledWith(expect.objectContaining({ id: PIECE }), null));
-    expect(screen.getAllByRole('button', { name: /^Color de / })).toHaveLength(1);
+    expect(screen.getAllByLabelText(/^Color de /)).toHaveLength(1);
   });
 
   it('disables the uploaded entries with the rest', () => {

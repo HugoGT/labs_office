@@ -1,20 +1,18 @@
 import { terrainFloorPieceId } from '../game/artContract';
 import { previewFrame, type MaterialOption, type PreviewFrame } from '../game/artMaterials';
-import type { Swatch } from '../art/customCharacter';
 import type { ArtPreviewCache } from '../game/artPreview';
 import { LAYOUT_MATERIALS, WALL_PIECES, isColorableTerrainMaterial, type LayoutMaterial, type WallPieceId } from '../game/officeLayout';
 import type { TerrainBrush } from '../game/terrainEditor';
 import { isTerrainFloorPieceId } from '../game/terrainFloors';
 import { TERRAIN_FLAT_COLORS } from '../game/terrainRender';
 import { ArtPreviewCanvas } from './ArtPreviewCanvas';
-import { ColorPicker } from './ColorPicker';
-import { DECOR_COLORS } from './DecorPalette';
 import styles from './TerrainPalette.module.css';
+import { TileColorInput } from './TileColorInput';
 
 /**
  * The palettes of the terrain editor. Floors: one entry per terrain
  * material, each with a thumbnail cut from its pack floor, then the void as
- * an eraser; carpet also carries a color picker (#222), like the painted
+ * an eraser; carpet also carries a color input (#222), like the painted
  * desk's tile in the decor palette. Walls: one picture-only tile per wall
  * piece, cut from its pack sheet and named by its tooltip, like the decor
  * palette's, then the wall eraser. Presentational: the editor owns which
@@ -44,14 +42,6 @@ const PALETTE_ORDER: readonly LayoutMaterial[] = [...LAYOUT_MATERIALS].reverse()
 
 /** A corner of the 96px floor motif at 1:1: enough to read the texture, small enough for a grid. */
 const THUMBNAIL: PreviewFrame = { x: 0, y: 0, width: 48, height: 48 };
-
-/**
- * Quick picks for a colorable floor: its pack default first, then the decor
- * palette's colors (#222), so carpet and painted desks share one set.
- */
-function floorColors(defaultColor: string): readonly Swatch[] {
-  return [{ hex: defaultColor, label: 'Por defecto' }, ...DECOR_COLORS.filter((swatch) => swatch.hex !== defaultColor)];
-}
 
 function hexColor(color: number): string {
   return `#${color.toString(16).padStart(6, '0')}`;
@@ -106,15 +96,7 @@ export function TerrainPalette({ value, onPick, onPickFloor, floors, colors = {}
     return (
       <div key={kind} className={styles.cell}>
         {entry}
-        <ColorPicker
-          label={`Color de ${label}`}
-          caption=""
-          presets={floorColors(defaultColor)}
-          value={color}
-          compact
-          disabled={disabled}
-          onChange={(hex) => onColorChange?.(kind, hex)}
-        />
+        <TileColorInput label={`Color de ${label}`} value={color} disabled={disabled} onChange={(hex) => onColorChange?.(kind, hex)} />
       </div>
     );
   };

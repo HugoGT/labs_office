@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import exportedManifest from '../../public/assets/pack/manifest.json?raw';
@@ -184,17 +184,15 @@ describe('TerrainEditorSection', () => {
     const { bridge, terrain, commands } = renderSection();
     await open();
 
-    await userEvent.click(await screen.findByRole('button', { name: /^Color de Moqueta/ }));
-    await userEvent.click(screen.getByRole('button', { name: 'Rojo' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Moqueta' }));
+    // Choosing the color is enough: the carpet is picked, with no click on its tile.
+    fireEvent.change(await screen.findByLabelText(/^Color de Moqueta/), { target: { value: '#c0392b' } });
     expect(commands.at(-1)).toEqual({ brush: { kind: 'floor', material: 'carpet', color: '#c0392b' } });
     act(() => bridge.emit('terrainpick', { index: LAWN }));
     await vi.waitFor(() => expect(terrain.setBlock).toHaveBeenCalledTimes(1));
     expect(terrain.setBlock).toHaveBeenLastCalledWith(LAWN, 'carpet', '#c0392b');
 
     // Recoloring the picked carpet changes what the next click paints.
-    await userEvent.click(screen.getByRole('button', { name: 'Color de Moqueta: Rojo' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Azul' }));
+    fireEvent.change(screen.getByLabelText('Color de Moqueta: #c0392b'), { target: { value: '#3c6ac8' } });
     act(() => bridge.emit('terrainpick', { index: LAWN + 1 }));
     await vi.waitFor(() => expect(terrain.setBlock).toHaveBeenCalledTimes(2));
     expect(terrain.setBlock).toHaveBeenLastCalledWith(LAWN + 1, 'carpet', '#3c6ac8');

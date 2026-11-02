@@ -97,6 +97,7 @@ import {
   type CollisionTable,
 } from './pieceCollisions';
 import { TerrainEditLayer } from './TerrainEditLayer';
+import { TerrainGhost } from './TerrainGhost';
 import { COLLISION_EDIT_GRAPHICS_NAME, CollisionEditLayer } from './CollisionEditLayer';
 import {
   DEFAULT_FACING,
@@ -804,7 +805,10 @@ export class OfficeScene extends Phaser.Scene {
 
     // #123 phase 2. The layer outlines and picks blocks; the scene paints the
     // preview, and hands the editor the live blocks when it opens.
-    this.terrainEditLayer = new TerrainEditLayer(this, this.bridge, this.layout);
+    // The ghost of the picked floor over the block under the pointer, drawn like the map itself (an uploaded floor
+    // asks for its sheet like a painted one, and shows its wood until it lands).
+    const terrainGhost = new TerrainGhost(this, this.art, (pieceId) => this.artSheet({ materialId: pieceId, color: null }, 'floor', this.redrawTerrain)?.key ?? null);
+    this.terrainEditLayer = new TerrainEditLayer(this, this.bridge, this.layout, terrainGhost);
     this.unsubscribeTerrainEdit = this.bridge.onCommand('terrainedit', (command) => {
       const opening = command !== null && !this.terrainEditing;
       this.terrainEditing = command !== null;
