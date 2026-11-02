@@ -163,7 +163,7 @@ export function inSeatReach(position: { readonly x: number; readonly y: number }
  * chair is `chair-upload-<hash>`, and any `chair-` piece is a seat
  * (`isDecorChairPiece`).
  */
-export const CHAIR_PIECES = ['chair-wood', 'chair-metal', 'chair-leather', 'chair-gamer', 'chair-office', 'chair-task', 'chair-fabric', 'chair-executive'] as const;
+export const CHAIR_PIECES = ['chair-wood', 'chair-metal', 'chair-leather', 'chair-gamer', 'chair-office', 'chair-task', 'chair-fabric'] as const;
 
 /**
  * The sofa pieces of the art pack (pinned by a test against the manifest),

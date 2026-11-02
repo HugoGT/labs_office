@@ -26,7 +26,7 @@ describe('DecorPalette', () => {
 
     expect(screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'))).toEqual(['Sillas', 'Mesas de escritorio', 'Muebles de sala', 'Plantas', 'Puertas']);
     expect(names('Puertas')).toEqual(['Puerta simple', 'Puerta doble']);
-    expect(names('Sillas')).toEqual(['Silla de madera', 'Silla de metal', 'Silla de cuero', 'Silla gamer', 'Silla de oficina', 'Silla giratoria', 'Sillón tapizado', 'Silla gerencial']);
+    expect(names('Sillas')).toEqual(['Silla de madera', 'Silla de metal', 'Silla de cuero', 'Silla gamer', 'Silla de oficina', 'Silla giratoria', 'Sillón tapizado']);
     expect(names('Mesas de escritorio')).toEqual(['Escritorio de vidrio', 'Escritorio de metal', 'Escritorio de madera', 'Escritorio pintado']);
     // A room's furniture together: its tables, then its sofas.
     expect(names('Muebles de sala')).toEqual([

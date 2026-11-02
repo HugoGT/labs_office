@@ -1,6 +1,7 @@
 /**
- * Chairs in eight materials (wood, metal, leather, gamer, office, task, fabric, executive) and the
- * four facings of seating.ts, built from boxes by furnitureModel.ts. Every chair shares one seat: 14x14 pixels, its surface
+ * Chairs in seven materials (wood, metal, leather, gamer, office, task, fabric) and the four
+ * facings of seating.ts, built
+ * from boxes by furnitureModel.ts. Every chair shares one seat: 14x14 pixels, its surface
  * SEAT_HEIGHT above the floor, its backrest's inner face 5 pixels behind the seat center, so any
  * seated pose fits any chair.
  *
@@ -15,11 +16,11 @@
  */
 import { makeRamp, mixRgba, type Ramp } from './color.ts';
 import { renderFurniture, type Box, type FurnitureModel, type Part } from './furnitureModel.ts';
-import { ARM_TOP, BACK_FACE, DEFAULT_FABRIC_COLOR, LEATHER_FEET, SEAT_HALF, SEAT_SPAN, SEAT_UNDER, armLayer, backrestLayer, upholsteredModel } from './upholstery.ts';
+import { ARM_TOP, BACK_FACE, DEFAULT_FABRIC_COLOR, SEAT_HALF, SEAT_SPAN, SEAT_UNDER, armLayer, backrestLayer, upholsteredModel } from './upholstery.ts';
 import type { PixelBuffer, Rgba } from '../../../src/art/pixelBuffer.ts';
 import { SEAT_HEIGHT, type Facing, type SeatPoint } from '../../../src/art/seating.ts';
 
-export const CHAIR_MATERIALS = ['wood', 'metal', 'leather', 'gamer', 'office', 'task', 'fabric', 'executive'] as const;
+export const CHAIR_MATERIALS = ['wood', 'metal', 'leather', 'gamer', 'office', 'task', 'fabric'] as const;
 export type ChairMaterial = (typeof CHAIR_MATERIALS)[number];
 
 export interface ChairSprite {
@@ -251,62 +252,6 @@ function taskChair(): FurnitureModel {
   };
 }
 
-// --- Executive ---------------------------------------------------------------------------------
-
-const CREAM = makeRamp('#d8c6a8');
-const EXECUTIVE_TOP = SEAT_HEIGHT + 13;
-const EXECUTIVE_HALF = 10;
-
-/** A button sunk in the padding: a dark center in a cross of shade. */
-function button(col: number, row: number, atCol: number, atRow: number): 'center' | 'arm' | null {
-  const dc = Math.abs(col - atCol);
-  const dr = Math.abs(row - atRow);
-  if (dc === 0 && dr === 0) return 'center';
-  return dc + dr === 1 ? 'arm' : null;
-}
-
-/** The high back: two stacked cushions, each buttoned twice, parted by a seam. */
-function executiveBack(point: { face: string; col: number; row: number; width: number; height: number }, color: Rgba): Rgba {
-  if (point.face !== 'forward') return color;
-  if (point.row === 6) return CREAM.shadow;
-  for (const atRow of [3, 9]) {
-    for (const atCol of [6, point.width - 7]) {
-      const hit = button(point.col, point.row, atCol, atRow);
-      if (hit !== null) return hit === 'center' ? CREAM.deep : CREAM.shadow;
-    }
-  }
-  return color;
-}
-
-/** The seat cushion: two buttons across it, shaded where the back meets it. */
-function executiveSeat(point: { face: string; u: number; v: number }, color: Rgba): Rgba {
-  if (point.face !== 'top') return color;
-  if (point.u < BACK_FACE + 2) return CREAM.shadow;
-  return Math.abs(point.u - 2) < 0.9 && Math.abs(Math.abs(point.v) - 3.7) < 0.75 ? CREAM.deep : color;
-}
-
-/** Executive chair: a tall buttoned back in two cushions, rolled arms and a buttoned seat on short dark feet. */
-function executiveChair(): FurnitureModel {
-  const half = EXECUTIVE_HALF;
-  const feet: Box[] = [];
-  for (const u of [[5, 7], [-7, -5]] as const) for (const v of [[half - 3, half - 1], [1 - half, 3 - half]] as const) feet.push({ u, v, y: [0, 3], ramp: LEATHER_FEET, side: 'base' });
-  return {
-    shadow: { u: [-8, 8], v: [-(half + 1), half + 1], shape: 'ellipse' },
-    parts: [
-      { boxes: feet },
-      { boxes: [{ u: [-7, 7], v: [1 - half, half - 1], y: [3, SEAT_UNDER], ramp: CREAM, side: 'shadow', rounded: true }] },
-      { boxes: [{ u: [BACK_FACE + 1, 7], v: [3 - half, half - 3], y: [SEAT_UNDER, SEAT_HEIGHT], ramp: CREAM, top: 'base', side: 'base', rounded: true, shade: executiveSeat }] },
-      { layer: backrestLayer, boxes: [{ u: [-8, BACK_FACE], v: [-half, half], y: [SEAT_UNDER, EXECUTIVE_TOP], ramp: CREAM, top: 'base', side: 'base', rounded: true, shade: executiveBack }] },
-      ...([1, -1] as const).map(
-        (side): Part => ({
-          layer: armLayer(side),
-          boxes: [{ u: [-7, 7], v: side > 0 ? [half - 3, half] : [-half, 3 - half], y: [3, ARM_TOP], ramp: CREAM, top: 'base', side: 'base', rounded: true }],
-        }),
-      ),
-    ],
-  };
-}
-
 /** The color a colorable chair is exported in; a chair without one keeps its materials. */
 export const CHAIR_DEFAULT_COLORS: Readonly<Partial<Record<ChairMaterial, string>>> = {
   gamer: DEFAULT_GAMER_ACCENT,
@@ -322,7 +267,6 @@ const MODELS: Readonly<Record<ChairMaterial, (facing: Facing, color: string) => 
   office: officeChair,
   task: taskChair,
   fabric: (facing, color) => upholsteredModel('fabric', 1, facing, color),
-  executive: executiveChair,
 };
 
 const cache = new Map<string, ChairSprite>();

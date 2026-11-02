@@ -1022,50 +1022,6 @@
       ]
     },
     {
-      "id": "chair-executive",
-      "kind": "chair",
-      "name": "Silla gerencial",
-      "author": "HugoGT",
-      "license": "proprietary-internal",
-      "material": "executive",
-      "facings": [
-        "up",
-        "down",
-        "left",
-        "right"
-      ],
-      "layers": [
-        "back",
-        "front"
-      ],
-      "anchors": {
-        "seat": {
-          "x": 18,
-          "y": 22
-        },
-        "ground": {
-          "x": 18,
-          "y": 31
-        }
-      },
-      "footprint": {
-        "w": 1,
-        "h": 1
-      },
-      "colorable": false,
-      "defaultColor": null,
-      "files": [
-        {
-          "role": "sheet",
-          "path": "chair/executive.png",
-          "imageKind": "chair",
-          "width": 144,
-          "height": 76,
-          "sha256": "0b7e317ad584b955e0f6e2cb8af981d8f1d075158d2787985e09130aa667619a"
-        }
-      ]
-    },
-    {
       "id": "sofa-leather-2",
       "kind": "sofa",
       "name": "Sofá de cuero (2 plazas)",

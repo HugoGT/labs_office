@@ -71,7 +71,6 @@ const CHAIR_NAMES: Readonly<Record<ChairMaterial, string>> = {
   office: 'Silla de oficina',
   task: 'Silla giratoria',
   fabric: 'Sillón tapizado',
-  executive: 'Silla gerencial',
 };
 const SOFA_NAMES: Readonly<Record<SofaMaterial, string>> = {
   leather: 'Sofá de cuero',

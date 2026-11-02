@@ -160,20 +160,3 @@ test('only the gamer chair and the fabric armchair take a color, and the silhoue
     }
   }
 });
-
-test('the executive chair rises above the leather one, its back buttoned twice on each of its two cushions', () => {
-  for (const facing of FACINGS) {
-    assert.ok(chairSprite('executive', facing).ground.y > chairSprite('leather', facing).ground.y, `${facing}: taller than the leather chair`);
-  }
-  const { back, seat } = chairSprite('executive', 'down');
-  // A button is a dark pixel ringed by lighter upholstery.
-  let buttons = 0;
-  for (let y = 1; y < seat.y - 2; y += 1) {
-    for (let x = 1; x < back.width - 1; x += 1) {
-      const center = luma(back.getPixel(x, y));
-      const ring = [back.getPixel(x - 2, y), back.getPixel(x + 2, y), back.getPixel(x, y - 2), back.getPixel(x, y + 2)];
-      if (ring.every((p) => p.a === 255 && luma(p) > center + 40)) buttons += 1;
-    }
-  }
-  assert.equal(buttons, 4);
-});
