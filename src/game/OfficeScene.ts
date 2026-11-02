@@ -614,6 +614,12 @@ export class OfficeScene extends Phaser.Scene {
   private initialDesks = false;
   private entryReported = false;
   private readonly entrancePieces = new Set<string>();
+  /**
+   * What the decor layer and the floors placed before entry asked for. The entry waits for them to
+   * settle, but one that cannot load (in no catalog, or its file missing) leaves the office as if it
+   * were not placed instead of failing it.
+   */
+  private readonly entrancePlacements = new Set<string>();
 
   /** Runs after a real render, never on a timer or just on scene creation. */
   private readonly checkEntry = (): void => {
@@ -628,14 +634,15 @@ export class OfficeScene extends Phaser.Scene {
       .map((id) => ({ id, status: this.art.status(id) }))
       .filter(({ id, status }) => status !== 'failed' || !id.startsWith('character-'))
       .map(({ status }) => status);
-    if (this.art.manifest !== null && !statuses.includes('failed') && statuses.includes('loading')) return;
+    const placing = [...this.entrancePlacements].some((id) => !this.entrancePieces.has(id) && this.art.status(id) === 'loading');
+    if (this.art.manifest !== null && !statuses.includes('failed') && (statuses.includes('loading') || placing)) return;
     this.entryReported = true;
     const failed = this.art.manifest === null || statuses.includes('failed') || this.player.sheets === null;
     this.bridge.emit('entry', { state: failed ? 'failed' : 'ready' });
   };
 
-  private requestArt(pieceId: string, onSettled: () => void): ReturnType<ArtPackLoader['request']> {
-    if (!this.entryReported) this.entrancePieces.add(pieceId);
+  private requestArt(pieceId: string, onSettled: () => void, placed = false): ReturnType<ArtPackLoader['request']> {
+    if (!this.entryReported) (placed ? this.entrancePlacements : this.entrancePieces).add(pieceId);
     return this.art.request(pieceId, onSettled);
   }
 
@@ -1619,7 +1626,8 @@ export class OfficeScene extends Phaser.Scene {
   /**
    * Loaded sheet of an appearance, or `null`. When the piece is not loaded yet
    * it asks the loader for it and redraws once it settles; a piece of the
-   * wrong kind (a chair id as a desk) never draws.
+   * wrong kind (a chair id as a desk) never draws. Asked for before entry, a
+   * piece that fails to load leaves the office instead of failing it.
    */
   private artSheet(appearance: ArtAppearance, kind: ArtPiece['kind'], redraw: () => void): { key: string; piece: ArtPiece } | null {
     const known = (): ArtPiece | undefined =>
@@ -1634,7 +1642,7 @@ export class OfficeScene extends Phaser.Scene {
     if (now !== null) return now;
     const piece = known();
     if (piece !== undefined && piece.kind !== kind) return null;
-    return this.requestArt(appearance.materialId, () => this.scheduleRedraw(redraw)) === 'ready' ? ready() : null;
+    return this.requestArt(appearance.materialId, () => this.scheduleRedraw(redraw), true) === 'ready' ? ready() : null;
   }
 
   /**
@@ -2119,6 +2127,8 @@ export class OfficeScene extends Phaser.Scene {
    * anything else by `drawDecorItem`.
    */
   private drawDecorPiece(item: DecorItem): Phaser.GameObjects.GameObject[] {
+    // A piece in no catalog, or whose file is missing, is not in the office: not even its placeholder.
+    if (this.art.status(item.piece) === 'failed') return [];
     if (isDecorSofaPiece(item.piece)) return this.drawSofa(item);
     if (!isDecorChairPiece(item.piece)) return this.drawDecorItem(item);
     const [chair] = decorChairs([item]);

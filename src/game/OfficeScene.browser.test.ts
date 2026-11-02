@@ -102,12 +102,31 @@ describe('office entry art readiness', () => {
     connector.handlers()!.onDecor?.([{ index, piece: alias.id, rotation: 0 }]);
     connector.handlers()!.onLocalAvatar?.('character-p01-burgundy-suit');
 
-    await vi.waitFor(() => expect(entry).toHaveBeenCalledWith({ state: broken ? 'failed' : 'ready' }), LOOP_WAIT);
-    if (!broken) {
-      expect(art.status(alias.id)).toBe('ready');
-      const plant = scene.children.getByName(decorObjectName(index)) as Phaser.GameObjects.Image;
-      expect(plant.texture.key).toBe(artSheetKey(alias.id, 'sheet'));
-    }
+    // A placed piece whose sheet cannot load leaves the office as if it were not there: no placeholder, no failed entry.
+    await vi.waitFor(() => expect(entry).toHaveBeenCalledWith({ state: 'ready' }), LOOP_WAIT);
+    expect(entry).not.toHaveBeenCalledWith({ state: 'failed' });
+    expect(art.status(alias.id)).toBe(broken ? 'failed' : 'ready');
+    const plant = scene.children.getByName(decorObjectName(index)) as Phaser.GameObjects.Image | null;
+    if (broken) expect(plant).toBeNull();
+    else expect(plant!.texture.key).toBe(artSheetKey(alias.id, 'sheet'));
+  });
+
+  it('enters without the decor items and floors whose piece no catalog has, drawing none of them', async () => {
+    const bridge = createOfficeBridge();
+    const entry = vi.fn();
+    bridge.on('entry', entry);
+    const connector = fakeConnector();
+    const { scene } = await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect, artUploadsUrl: null });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    const index = 40 * BASE_LAYOUT.width + 30;
+
+    connector.handlers()!.onDecor?.([{ index, piece: 'plant-upload-0123456789abcdef', rotation: 0 }]);
+    connector.handlers()!.onTerrainFloors?.(new Map([[0, 'floor-upload-0123456789abcdef']]));
+    connector.handlers()!.onLocalAvatar?.('character-p01-burgundy-suit');
+
+    await vi.waitFor(() => expect(entry).toHaveBeenCalledWith({ state: 'ready' }), LOOP_WAIT);
+    expect(entry).not.toHaveBeenCalledWith({ state: 'failed' });
+    expect(scene.children.getByName(decorObjectName(index))).toBeNull();
   });
 
   it('never reveals after a denied join and removes its render listener when stopped', async () => {
