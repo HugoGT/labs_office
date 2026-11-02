@@ -110,14 +110,12 @@ export class DecorEditLayer {
     this.draw();
   };
   private readonly onPointerDown = (pointer: Phaser.Input.Pointer): void => {
-    this.pressSelects = this.command != null && this.command.brush === null && pointer.button === 0 && this.onMainCamera(pointer);
+    this.pressSelects = this.pressActs(pointer);
     this.hold.cancel();
     this.dragging = null;
     this.drop = null;
     if (this.pressSelects) {
-      // A press on a selection button is the button's, whatever lies under it.
-      const onButton = this.shownSelection !== null && this.buttons.at(pointer) !== null;
-      const under = onButton ? null : this.itemAt(pointer);
+      const under = this.pressedItem(pointer);
       if (under !== null) {
         const shiftX = ((under % this.deps.width) + 0.5) * TILE - pointer.worldX;
         const shiftY = (Math.floor(under / this.deps.width) + 0.5) * TILE - pointer.worldY;
@@ -216,6 +214,27 @@ export class DecorEditLayer {
     this.drawnKey = '';
     this.draw();
     this.drawSelection();
+  }
+
+  /**
+   * Whether a primary press on an item of the map is this editor's: it grabs
+   * the item (or selects it on a click), so the view must not drag with it.
+   * `CameraPanLayer` asks this before it arms, the same question the press
+   * itself answers, so the two cannot disagree about who owns a drag.
+   */
+  claimsPress(pointer: Phaser.Input.Pointer): boolean {
+    return this.pressActs(pointer) && this.pressedItem(pointer) !== null;
+  }
+
+  /** Whether a press there is one this editor acts on: nothing picked, the primary button, the main camera. */
+  private pressActs(pointer: Phaser.Input.Pointer): boolean {
+    return this.command != null && this.command.brush === null && pointer.button === 0 && this.onMainCamera(pointer);
+  }
+
+  /** The item a press there would grab, or `null`: a press on a selection button is the button's, whatever lies under it. */
+  private pressedItem(pointer: Phaser.Input.Pointer): number | null {
+    const onButton = this.shownSelection !== null && this.buttons.at(pointer) !== null;
+    return onButton ? null : this.itemAt(pointer);
   }
 
   private onMainCamera(pointer: Phaser.Input.Pointer): boolean {

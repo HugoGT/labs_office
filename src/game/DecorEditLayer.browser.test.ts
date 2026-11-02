@@ -494,6 +494,37 @@ describe('DecorEditLayer', () => {
       expect(named(scene, DECOR_DELETE_BUTTON_NAME)).toBeNull();
     });
 
+    it('claims a primary press on an item with nothing picked, so the view does not drag along with it', async () => {
+      const scene = await bootHostScene();
+      const items = [...placed];
+      const { bridge, decorLayer } = layer(scene, items);
+      const claims = (worldX: number, worldY: number, button = 0): boolean => decorLayer.claimsPress(pointerAt(worldX, worldY, button));
+
+      // The editor closed: the map is the office's.
+      expect(claims(mid(3), mid(3))).toBe(false);
+
+      bridge.emitCommand('decoredit', { brush: null, area: null });
+      expect(claims(mid(3), mid(3))).toBe(true);
+      // Anywhere on a footprint, not only its anchor.
+      expect(claims(mid(8), mid(6))).toBe(true);
+      // Bare ground and off the map are the view's.
+      expect(claims(mid(16), mid(12))).toBe(false);
+      expect(claims(-5, mid(2))).toBe(false);
+      // Only the primary button grabs; the right one drags the view.
+      expect(claims(mid(3), mid(3), 2)).toBe(false);
+
+      // A picked piece places instead of grabbing.
+      bridge.emitCommand('decoredit', { brush: plant, area: null });
+      expect(claims(mid(3), mid(3))).toBe(false);
+
+      // A press on a selection button is the button's, whatever lies under it.
+      bridge.emitCommand('decoredit', { brush: null, area: null, selected: at(3, 3) });
+      expect(claims(mid(3), mid(3))).toBe(true);
+      const trash = named<Phaser.GameObjects.Rectangle>(scene, DECOR_DELETE_BUTTON_NAME)!;
+      items.push({ index: at(Math.floor(trash.x / TILE), Math.floor(trash.y / TILE)), piece: 'plant-ficus', rotation: 0 });
+      expect(claims(trash.x, trash.y)).toBe(false);
+    });
+
     describe('a press held on an item drags it: the release puts it down', () => {
       function frame(scene: Phaser.Scene): void {
         scene.events.emit(Phaser.Scenes.Events.POST_UPDATE);
