@@ -20,6 +20,7 @@ import { TILE } from './mapData';
 import type { OfficeBridge } from './officeBridge';
 import { BLOCK_TILES, type OfficeLayout } from './officeLayout';
 import { ContextOutlines } from './spaceOutline';
+import type { TerrainGhost } from './TerrainGhost';
 import { cellOutlineCenter, cellsAlongStroke, postsAlongStroke, sameBrush, type StrokeGrid, type TerrainBrush, type TerrainEditCommand } from './terrainEditor';
 import type { TileRect } from './terrainGrid';
 
@@ -36,6 +37,8 @@ export class TerrainEditLayer {
   private readonly bridge: OfficeBridge;
   private command: TerrainEditCommand | null = null;
   private readonly outlines: ContextOutlines;
+  /** Draws the picked floor over the block under the pointer; absent in a scene without a map to draw it on. */
+  private readonly ghost: TerrainGhost | undefined;
   private hover: Phaser.GameObjects.Rectangle | null = null;
   /** The cell the box outlines, or `null` while it is hidden. */
   private hovered: number | null = null;
@@ -68,9 +71,10 @@ export class TerrainEditLayer {
     this.stroke = null;
   };
 
-  constructor(scene: Phaser.Scene, bridge: OfficeBridge, layout: Pick<OfficeLayout, 'width' | 'height'>) {
+  constructor(scene: Phaser.Scene, bridge: OfficeBridge, layout: Pick<OfficeLayout, 'width' | 'height'>, ghost?: TerrainGhost) {
     this.scene = scene;
     this.bridge = bridge;
+    this.ghost = ghost;
     this.outlines = new ContextOutlines(scene);
     this.blocks = { columns: layout.width / BLOCK_TILES, rows: layout.height / BLOCK_TILES, cellSize: BLOCK_TILES * TILE };
     this.vertices = { columns: layout.width, rows: layout.height, cellSize: TILE, snap: 'vertex' };
@@ -88,6 +92,7 @@ export class TerrainEditLayer {
     this.scene.input.off('pointerup', this.onPointerUp);
     this.scene.input.off('pointerupoutside', this.onPointerUp);
     this.applyCommand(null);
+    this.ghost?.destroy();
   }
 
   /** The grid a brush paints on: blocks for a floor, vertices for a wall. */
@@ -130,16 +135,29 @@ export class TerrainEditLayer {
       this.hover = null;
       this.hovered = null;
       this.hoveredDecor = null;
+      this.ghost?.hide();
       return;
     }
     if (command.brush === null) {
       this.hover?.setVisible(false);
       this.hovered = null;
       this.hoveredDecor = null;
+      this.ghost?.hide();
       return;
     }
     // An erase lands under a still pointer: the box says so without waiting for a move.
     this.updateHover();
+  }
+
+  /** The picked floor drawn over the block at `index`; a wall or the void eraser shows only the box. */
+  private showGhost(brush: TerrainBrush, index: number): void {
+    if (this.ghost === undefined) return;
+    if (brush.kind !== 'floor') {
+      this.ghost.hide();
+      return;
+    }
+    const { columns, cellSize } = this.blocks;
+    this.ghost.show(brush, (index % columns) * cellSize, Math.floor(index / columns) * cellSize);
   }
 
   /** Red while the eraser points at something it would take, the usual color otherwise. */
@@ -158,6 +176,7 @@ export class TerrainEditLayer {
       this.hover?.setVisible(false);
       this.hovered = null;
       this.hoveredDecor = null;
+      this.ghost?.hide();
       return;
     }
     this.hovered = index;
@@ -174,6 +193,7 @@ export class TerrainEditLayer {
     const center = rect === null ? cellOutlineCenter(grid, index) : { x: ((rect.x0 + rect.x1 + 1) / 2) * TILE, y: ((rect.y0 + rect.y1 + 1) / 2) * TILE };
     this.hover.setPosition(center.x, center.y).setVisible(true);
     this.colorHover();
+    this.showGhost(this.command.brush, index);
   }
 
   /**
