@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { SOFA } from '../../../src/game/artContract.ts';
 import { chairSprite } from './chairs.ts';
 import { SOFA_MATERIALS, SOFA_SEATS, sofaSprite, type SofaSprite } from './sofas.ts';
-import { DEFAULT_FABRIC_COLOR } from './upholstery.ts';
+import { DEFAULT_FABRIC_COLOR, LEATHER } from './upholstery.ts';
 import { PixelBuffer } from '../../../src/art/pixelBuffer.ts';
 import { FACINGS, SEAT_HEIGHT } from '../../../src/art/seating.ts';
 
@@ -168,6 +168,104 @@ test('seen from the front, a dark contour parts every upholstered backrest from 
       assert.ok(contour > 0, `${name} seat at ${seat.x}: no contour above the seat`);
       assert.equal(image.alphaAt(seat.x, contour - 2), 255, `${name}: the backrest goes on above the contour`);
       assert.ok(luma(image.getPixel(seat.x, contour - 2)) > cushion * 0.6, `${name}: above the contour is upholstery, not ink`);
+    }
+  }
+});
+
+/**
+ * The front view of a leather piece: its backrest buttons per cushion, the seams between cushions left out, and the
+ * middle of the seat cushion under each one, doubled (its first plus its last pixel across the pelvis row).
+ */
+function leatherCushions(back: PixelBuffer, front: PixelBuffer, seatY: number): { lo: number; hi: number; buttons: number[][]; middle: number }[] {
+  const image = composite({ back, front });
+  const deep = LEATHER.deep;
+  const isDeep = (x: number, y: number): boolean => {
+    const p = image.getPixel(x, y);
+    return p.a === 255 && p.r === deep.r && p.g === deep.g && p.b === deep.b;
+  };
+  let top = 0;
+  while (top < image.height && opaqueIn(image, 0, top, image.width, top + 1) === 0) top += 1;
+  const rows = seatY - 6 - top;
+  // A seam runs down the whole backrest; a button is a lone deep pixel.
+  const seams = new Set<number>();
+  for (let x = 0; x < image.width; x += 1) {
+    let count = 0;
+    for (let y = top; y < top + rows; y += 1) if (isDeep(x, y)) count += 1;
+    if (count > rows / 2) seams.add(x);
+  }
+  // The backrest face spans the row under its top edge, between its outline pixels.
+  const row = top + 2;
+  let left = 0;
+  while (image.alphaAt(left, row) < 255) left += 1;
+  let right = image.width - 1;
+  while (image.alphaAt(right, row) < 255) right -= 1;
+  const bounds = [left, ...[...seams].sort((a, b) => a - b), right];
+  const cushions: { lo: number; hi: number; buttons: number[][]; middle: number }[] = [];
+  for (let i = 0; i + 1 < bounds.length; i += 1) {
+    const lo = bounds[i]! + 1;
+    const hi = bounds[i + 1]! - 1;
+    if (hi < lo) continue;
+    const buttons: number[][] = [];
+    for (let y = top; y < top + rows; y += 1) for (let x = lo; x <= hi; x += 1) if (isDeep(x, y)) buttons.push([x, y]);
+    // Across the pelvis the seat cushion is the longest run between the ink by the arm and the seams.
+    let seat = { from: lo, length: 0 };
+    for (let x = lo, from = lo; x <= hi + 1; x += 1) {
+      if (x <= hi && !isDeep(x, seatY) && luma(image.getPixel(x, seatY)) >= 40) continue;
+      if (x - from > seat.length) seat = { from, length: x - from };
+      from = x + 1;
+    }
+    cushions.push({ lo, hi, buttons, middle: 2 * seat.from + seat.length - 1 });
+  }
+  return cushions;
+}
+
+test('the leather buttons sit mirrored on every cushion of the armchair and the sofas, centered over its seat cushion', () => {
+  const pieces = [
+    { name: 'chair-leather', ...chairSprite('leather', 'down'), seatY: chairSprite('leather', 'down').seat.y, cushions: 1 },
+    ...SOFA_SEATS.map((seats) => ({ name: `leather-${seats}`, ...sofaSprite('leather', seats, 'down'), seatY: sofaSprite('leather', seats, 'down').seats[0]!.y, cushions: seats })),
+  ];
+  const key = (x: number, y: number): string => `${x},${y}`;
+  const mirrored = (buttons: number[][], axis: number): number[][] => {
+    const set = new Set(buttons.map(([x, y]) => key(x!, y!)));
+    return buttons.filter(([x, y]) => !set.has(key(axis - x!, y!)));
+  };
+  for (const { name, back, front, seatY, cushions: expected } of pieces) {
+    const cushions = leatherCushions(back, front, seatY);
+    assert.equal(cushions.length, expected, `${name}: one backrest cushion per seat`);
+    for (const { lo, hi, buttons, middle } of cushions) {
+      assert.ok(buttons.length >= 4, `${name} cushion ${lo}-${hi}: buttoned`);
+      assert.deepEqual(mirrored(buttons, middle), [], `${name} cushion ${lo}-${hi}: buttons without a mirror across the seat cushion`);
+    }
+    const all = cushions.flatMap(({ buttons }) => buttons);
+    assert.deepEqual(mirrored(all, cushions[0]!.lo + cushions.at(-1)!.hi), [], `${name}: the backrest reads the same from either end`);
+  }
+});
+
+test('a sofa of two or three seats has wider arms than its armchair', () => {
+  // Across the seat, from the outer outline in: the arm runs until the ink that parts it from the cushion.
+  const armWidth = (image: PixelBuffer, y: number, from: 'left' | 'right'): number => {
+    const step = from === 'left' ? 1 : -1;
+    let x = from === 'left' ? 0 : image.width - 1;
+    while (image.alphaAt(x, y) < 255) x += step;
+    x += step;
+    let width = 0;
+    while (luma(image.getPixel(x, y)) >= 40) {
+      width += 1;
+      x += step;
+    }
+    return width;
+  };
+  for (const material of SOFA_MATERIALS) {
+    const chair = chairSprite(material, 'down');
+    const chairImage = composite(chair);
+    for (const seats of SOFA_SEATS) {
+      const sofa = sofaSprite(material, seats, 'down');
+      const image = composite(sofa);
+      for (const side of ['left', 'right'] as const) {
+        const wide = armWidth(image, sofa.seats[0]!.y, side);
+        const narrow = armWidth(chairImage, chair.seat.y, side);
+        assert.ok(wide > narrow, `${material}-${seats} ${side}: arm ${wide}px, armchair ${narrow}px`);
+      }
     }
   }
 });

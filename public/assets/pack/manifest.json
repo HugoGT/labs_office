@@ -841,7 +841,7 @@
           "imageKind": "chair",
           "width": 144,
           "height": 76,
-          "sha256": "7813e493398893361211b727cd19ee69e612571ab3e38776664a48aacabc7e8d"
+          "sha256": "df3bb2141aacf62222ff58cea675bcdedeb96cf23be57127ee06e881bc332a4c"
         }
       ]
     },
@@ -1056,7 +1056,7 @@
           "imageKind": "sofa",
           "width": 384,
           "height": 224,
-          "sha256": "840924229c93811f01a2cc40b2ea661900d0b5ea689cdcb9754f4b00bac92ddc"
+          "sha256": "2f8299fdb8acc1ecfa655d38ba1ce4a5fd8864d9d11018e53b7b471fc1a0cd8b"
         }
       ]
     },
@@ -1095,7 +1095,7 @@
           "imageKind": "sofa",
           "width": 384,
           "height": 224,
-          "sha256": "6726083bcfb41ebc89bccd8dc66018427c246798dca8992568ba9e0ec1708e14"
+          "sha256": "ddb4c245ea7653f85ca1b4d3feaa92d3adc7ffd796e2796da788216526448b5d"
         }
       ]
     },
@@ -1134,7 +1134,7 @@
           "imageKind": "sofa",
           "width": 384,
           "height": 224,
-          "sha256": "5fff7a0639a09f269af0fbc1c5ed7323d0cdd04be243c9147114fcfc7ed32f26"
+          "sha256": "6a46fc2b8f5443fc8ede9c2a5bfcdfb84a58570aa959ba7777826a9c7ef97c41"
         }
       ]
     },
@@ -1173,7 +1173,7 @@
           "imageKind": "sofa",
           "width": 384,
           "height": 224,
-          "sha256": "2dcc269489c818d9b7327cf58d4b28ecc2e571055e11ab73788d332437eb0377"
+          "sha256": "41f258831aea846787ce041c3fd5365584940f5aac7b56b0fd0186b1d3d5eed2"
         }
       ]
     },
