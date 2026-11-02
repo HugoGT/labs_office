@@ -890,6 +890,138 @@
       ]
     },
     {
+      "id": "chair-office",
+      "kind": "chair",
+      "name": "Silla de oficina",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "office",
+      "facings": [
+        "up",
+        "down",
+        "left",
+        "right"
+      ],
+      "layers": [
+        "back",
+        "front"
+      ],
+      "anchors": {
+        "seat": {
+          "x": 18,
+          "y": 22
+        },
+        "ground": {
+          "x": 18,
+          "y": 31
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "colorable": false,
+      "defaultColor": null,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "chair/office.png",
+          "imageKind": "chair",
+          "width": 144,
+          "height": 76,
+          "sha256": "efa76a3bae9ed6cb409be0c908527e21abd0d5e2b6e27131dd8b2fae57839834"
+        }
+      ]
+    },
+    {
+      "id": "chair-task",
+      "kind": "chair",
+      "name": "Silla giratoria",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "task",
+      "facings": [
+        "up",
+        "down",
+        "left",
+        "right"
+      ],
+      "layers": [
+        "back",
+        "front"
+      ],
+      "anchors": {
+        "seat": {
+          "x": 18,
+          "y": 22
+        },
+        "ground": {
+          "x": 18,
+          "y": 31
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "colorable": false,
+      "defaultColor": null,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "chair/task.png",
+          "imageKind": "chair",
+          "width": 144,
+          "height": 76,
+          "sha256": "22a7ee73487bb779d96733bced4613c44df8fe1404e093f1db20538c4ae9abe6"
+        }
+      ]
+    },
+    {
+      "id": "chair-fabric",
+      "kind": "chair",
+      "name": "Sillón tapizado",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "fabric",
+      "facings": [
+        "up",
+        "down",
+        "left",
+        "right"
+      ],
+      "layers": [
+        "back",
+        "front"
+      ],
+      "anchors": {
+        "seat": {
+          "x": 18,
+          "y": 22
+        },
+        "ground": {
+          "x": 18,
+          "y": 31
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "colorable": true,
+      "defaultColor": "#c4ab8c",
+      "files": [
+        {
+          "role": "sheet",
+          "path": "chair/fabric.png",
+          "imageKind": "chair",
+          "width": 144,
+          "height": 76,
+          "sha256": "5ebc9dd5b2451ddf8a31e2c085ee166f51d40ba166be9c4ca3a930f884234b7e"
+        }
+      ]
+    },
+    {
       "id": "desk-glass",
       "kind": "desk",
       "name": "Escritorio de vidrio",

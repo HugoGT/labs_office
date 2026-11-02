@@ -75,16 +75,22 @@ describe('materialCatalogFrom: chairs', () => {
       ['chair-metal', 'chair'],
       ['chair-leather', 'chair'],
       ['chair-gamer', 'chair'],
+      ['chair-office', 'chair'],
+      ['chair-task', 'chair'],
+      ['chair-fabric', 'chair'],
     ]);
     expect(catalog().chair[0]!.sheetUrl).toBe('assets/pack/chair/wood.png');
   });
 
-  it('marks only the gamer chair as colorable, in its red accent', () => {
+  it('marks only the gamer chair (its red accent) and the fabric armchair as colorable', () => {
     expect(catalog().chair.map((option) => [option.id, option.colorable, option.defaultColor])).toEqual([
       ['chair-wood', false, null],
       ['chair-metal', false, null],
       ['chair-leather', false, null],
       ['chair-gamer', true, '#d8433b'],
+      ['chair-office', false, null],
+      ['chair-task', false, null],
+      ['chair-fabric', true, '#c4ab8c'],
     ]);
   });
 

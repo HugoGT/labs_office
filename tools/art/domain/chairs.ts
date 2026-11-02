@@ -1,5 +1,6 @@
 /**
- * Chairs in four materials (wood, metal, leather, gamer) and the four facings of seating.ts, built
+ * Chairs in seven materials (wood, metal, leather, gamer, office, task, fabric) and the four
+ * facings of seating.ts, built
  * from boxes by furnitureModel.ts. Every chair shares one seat: 14x14 pixels, its surface
  * SEAT_HEIGHT above the floor, its backrest's inner face 5 pixels behind the seat center, so any
  * seated pose fits any chair.
@@ -14,11 +15,12 @@
  *   always `ground` moved SEAT_HEIGHT pixels up.
  */
 import { makeRamp, mixRgba, type Ramp } from './color.ts';
-import { renderFurniture, type Box, type FurnitureModel, type Layer, type Part, type Span } from './furnitureModel.ts';
+import { renderFurniture, type Box, type FurnitureModel, type Part } from './furnitureModel.ts';
+import { ARM_TOP, BACK_FACE, DEFAULT_FABRIC_COLOR, SEAT_HALF, SEAT_SPAN, SEAT_UNDER, armLayer, backrestLayer, upholsteredModel } from './upholstery.ts';
 import type { PixelBuffer, Rgba } from '../../../src/art/pixelBuffer.ts';
 import { SEAT_HEIGHT, type Facing, type SeatPoint } from '../../../src/art/seating.ts';
 
-export const CHAIR_MATERIALS = ['wood', 'metal', 'leather', 'gamer'] as const;
+export const CHAIR_MATERIALS = ['wood', 'metal', 'leather', 'gamer', 'office', 'task', 'fabric'] as const;
 export type ChairMaterial = (typeof CHAIR_MATERIALS)[number];
 
 export interface ChairSprite {
@@ -26,22 +28,6 @@ export interface ChairSprite {
   readonly front: PixelBuffer;
   readonly seat: SeatPoint;
   readonly ground: SeatPoint;
-}
-
-/** Half the seat size; the seat spans -SEAT_HALF..SEAT_HALF on both floor axes. */
-const SEAT_HALF = 7;
-/** Model u of the backrest's inner face: where a sitter's back rests. */
-const BACK_FACE = -5;
-const SEAT_UNDER = SEAT_HEIGHT - 2;
-
-const SEAT_SPAN: Span = [-SEAT_HALF, SEAT_HALF];
-
-/** Seen from behind, the backrest covers the sitter's back. */
-const backrestLayer = (facing: Facing): Layer => (facing === 'up' ? 'front' : 'back');
-
-/** An armrest on the sitter's right (+1) or left (-1) side covers the sitter when it is the near one. */
-function armLayer(side: 1 | -1): (facing: Facing) => Layer {
-  return (facing) => (facing === 'up' || facing === (side > 0 ? 'right' : 'left') ? 'front' : 'back');
 }
 
 function mirrorV(box: Box): Box {
@@ -113,40 +99,6 @@ function metalChair(): FurnitureModel {
   };
 }
 
-// --- Leather -----------------------------------------------------------------------------------
-
-const LEATHER = makeRamp('#8c4a31');
-const FEET = makeRamp('#4a2e22');
-const LEATHER_TOP = 9 + 12;
-const ARM_TOP = SEAT_HEIGHT + 4;
-
-/** Buttoned upholstery: a dimple on a diamond grid, lit just above it. */
-function tufted(point: { face: string; col: number; row: number; width: number; height: number }, color: Rgba): Rgba {
-  // Only the side the sitter leans on is buttoned.
-  if (point.face !== 'forward' || point.width < 8) return color;
-  const { col, row } = point;
-  if (row < 2 || row > point.height - 3 || col < 2 || col > point.width - 3) return color;
-  if ((row % 6 === 2 && col % 6 === 3) || (row % 6 === 5 && col % 6 === 0)) return LEATHER.deep;
-  return color;
-}
-
-/** Club armchair: a padded body on short dark feet, a cushion, rolled arms and a buttoned back. */
-function leatherChair(): FurnitureModel {
-  const cushion = (point: { face: string; col: number; row: number; width: number; height: number }, color: Rgba): Rgba =>
-    point.face === 'top' && point.row === point.height - 1 ? mixRgba(color, LEATHER.light, 0.3) : color;
-  return {
-    shadow: { u: [-8, 7], v: [-10, 10], shape: 'ellipse' },
-    parts: [
-      { boxes: [...pair({ u: [5, 7], v: [7, 9], y: [0, 3], ramp: FEET, side: 'base' }), ...pair({ u: [-7, -5], v: [7, 9], y: [0, 3], ramp: FEET, side: 'base' })] },
-      { boxes: [{ u: [-7, 7], v: [-9, 9], y: [3, SEAT_UNDER], ramp: LEATHER, side: 'shadow', rounded: true }] },
-      { boxes: [{ u: [-6, 7], v: SEAT_SPAN, y: [SEAT_UNDER, SEAT_HEIGHT], ramp: LEATHER, top: 'base', side: 'base', rounded: true, shade: cushion }] },
-      { layer: backrestLayer, boxes: [{ u: [-8, BACK_FACE], v: [-10, 10], y: [SEAT_UNDER, LEATHER_TOP], ramp: LEATHER, top: 'light', side: 'base', rounded: true, shade: tufted }] },
-      { layer: armLayer(1), boxes: [{ u: [-7, 6], v: [7, 10], y: [3, ARM_TOP], ramp: LEATHER, top: 'light', side: 'base', rounded: true }] },
-      { layer: armLayer(-1), boxes: [{ u: [-7, 6], v: [-10, -7], y: [3, ARM_TOP], ramp: LEATHER, top: 'light', side: 'base', rounded: true }] },
-    ],
-  };
-}
-
 // --- Gamer -------------------------------------------------------------------------------------
 
 const SHELL = makeRamp('#363944');
@@ -173,16 +125,16 @@ function racing(accent: Ramp): (point: { face: string; u: number; v: number; y: 
   };
 }
 
-/** Five spokes from the gas lift, one pointing back, each ending on a caster. */
-function starBase(): Box[] {
-  const boxes: Box[] = [{ u: [-1, 1], v: [-1, 1], y: [1, 3], ramp: BASE, top: 'light', side: 'base' }];
-  for (let k = 0; k < 5; k += 1) {
-    const angle = Math.PI + (2 * Math.PI * k) / 5;
+/** Spokes from the gas lift (five by default, one pointing back), each ending on a caster. */
+function starBase(ramp: Ramp = BASE, spokes = 5, start = Math.PI): Box[] {
+  const boxes: Box[] = [{ u: [-1, 1], v: [-1, 1], y: [1, 3], ramp, top: 'light', side: 'base' }];
+  for (let k = 0; k < spokes; k += 1) {
+    const angle = start + (2 * Math.PI * k) / spokes;
     for (let t = 1.5; t <= STAR_RADIUS; t += 0.5) {
       const u = Math.floor(t * Math.cos(angle));
       const v = Math.floor(t * Math.sin(angle));
       const tip = t === STAR_RADIUS;
-      boxes.push({ u: [u, u + 1], v: [v, v + 1], y: tip ? [0, 2] : [1, 2], ramp: BASE, top: tip ? 'base' : 'light', side: 'base' });
+      boxes.push({ u: [u, u + 1], v: [v, v + 1], y: tip ? [0, 2] : [1, 2], ramp, top: tip ? 'base' : 'light', side: 'base' });
     }
   }
   return boxes;
@@ -225,24 +177,110 @@ function gamerChair(accentHex: string): FurnitureModel {
   };
 }
 
-/** Only the gamer chair reads the accent; the other materials keep their own colors. */
-const MODELS: Readonly<Record<ChairMaterial, (accent: string) => FurnitureModel>> = {
+// --- Office ------------------------------------------------------------------------------------
+
+const SLATE = makeRamp('#4a5466');
+const SLATE_DARK = makeRamp('#353b48');
+const OFFICE_TOP = SEAT_HEIGHT + 14;
+
+/** Mesh: a fine checker on the face the sitter leans on. */
+function mesh(point: { face: string; col: number; row: number; width: number; height: number }, color: Rgba): Rgba {
+  if (point.face !== 'forward' && point.face !== 'backward') return color;
+  const inner = point.col > 0 && point.row > 0 && point.col < point.width - 1 && point.row < point.height - 1;
+  return inner && (point.col + point.row) % 2 === 0 ? mixRgba(color, SLATE.shadow, 0.4) : color;
+}
+
+/** Ergonomic office chair: star base on casters, a padded seat, a mesh back on a spine and T armrests. */
+function officeChair(): FurnitureModel {
+  return {
+    shadow: { u: [-STAR_RADIUS, STAR_RADIUS], v: [-STAR_RADIUS, STAR_RADIUS], shape: 'ellipse' },
+    parts: [
+      { boxes: starBase() },
+      { boxes: [{ u: [-1, 1], v: [-1, 1], y: [2, 6], ramp: BASE, top: 'light', side: 'base' }, { u: [-3, 3], v: [-3, 3], y: [5, SEAT_UNDER - 1], ramp: BASE, side: 'base' }] },
+      { boxes: [{ u: SEAT_SPAN, v: SEAT_SPAN, y: [SEAT_UNDER - 1, SEAT_HEIGHT], ramp: SLATE, top: 'base', side: 'base', rounded: true }] },
+      {
+        layer: backrestLayer,
+        boxes: [
+          { u: [-8, -6], v: [-1, 1], y: [SEAT_UNDER - 1, SEAT_HEIGHT + 3], ramp: BASE, top: 'light', side: 'base' },
+          { u: [-8, BACK_FACE], v: [-6, 6], y: [SEAT_HEIGHT + 2, OFFICE_TOP], ramp: SLATE, top: 'light', side: 'base', rounded: true, shade: mesh },
+        ],
+      },
+      ...([1, -1] as const).map(
+        (side): Part => ({
+          layer: armLayer(side),
+          boxes: [
+            { u: [-1, 1], v: side > 0 ? [8, 9] : [-9, -8], y: [SEAT_UNDER - 1, ARM_TOP], ramp: BASE, side: 'base' },
+            { u: [-4, 3], v: side > 0 ? [8, 10] : [-10, -8], y: [ARM_TOP, ARM_TOP + 1], ramp: SLATE_DARK, top: 'light', side: 'base' },
+          ],
+        }),
+      ),
+    ],
+  };
+}
+
+// --- Task --------------------------------------------------------------------------------------
+
+const TASK_FRAME = makeRamp('#2a2c31');
+const TASK_PANEL = makeRamp('#9a9ea4');
+const TASK_SEAT = makeRamp('#3b3e45');
+const TASK_TOP = SEAT_HEIGHT + 14;
+
+/** A light panel set in the black back frame, on the faces front and back. */
+function panel(point: { face: string; col: number; row: number; width: number; height: number }, color: Rgba): Rgba {
+  if (point.face !== 'forward' && point.face !== 'backward') return color;
+  const inner = point.col > 0 && point.row > 0 && point.col < point.width - 1 && point.row < point.height - 1;
+  if (!inner) return color;
+  return point.col === 1 || point.row === 1 ? TASK_PANEL.light : TASK_PANEL.base;
+}
+
+/** Armless swivel chair: a four-spoke base, one column, a dark seat and a framed light back panel. */
+function taskChair(): FurnitureModel {
+  return {
+    shadow: { u: [-STAR_RADIUS, STAR_RADIUS], v: [-STAR_RADIUS, STAR_RADIUS], shape: 'ellipse' },
+    parts: [
+      { boxes: starBase(TASK_FRAME, 4, Math.PI / 4) },
+      { boxes: [{ u: [-1, 1], v: [-1, 1], y: [2, SEAT_UNDER - 1], ramp: CHROME, top: 'light', side: 'base' }] },
+      { boxes: [{ u: SEAT_SPAN, v: SEAT_SPAN, y: [SEAT_UNDER - 1, SEAT_HEIGHT], ramp: TASK_SEAT, top: 'base', side: 'shadow', rounded: true }] },
+      {
+        layer: backrestLayer,
+        boxes: [
+          { u: [-8, -6], v: [-1, 1], y: [SEAT_UNDER - 1, SEAT_HEIGHT + 3], ramp: TASK_FRAME, top: 'light', side: 'base' },
+          { u: [-8, BACK_FACE], v: [-6, 6], y: [SEAT_HEIGHT + 3, TASK_TOP], ramp: TASK_FRAME, top: 'light', side: 'base', rounded: true, shade: panel },
+        ],
+      },
+    ],
+  };
+}
+
+/** The color a colorable chair is exported in; a chair without one keeps its materials. */
+export const CHAIR_DEFAULT_COLORS: Readonly<Partial<Record<ChairMaterial, string>>> = {
+  gamer: DEFAULT_GAMER_ACCENT,
+  fabric: DEFAULT_FABRIC_COLOR,
+};
+
+/** Only the gamer chair (its accent) and the fabric armchair read the color; the rest keep their own. */
+const MODELS: Readonly<Record<ChairMaterial, (facing: Facing, color: string) => FurnitureModel>> = {
   wood: woodChair,
   metal: metalChair,
-  leather: leatherChair,
-  gamer: gamerChair,
+  leather: (facing) => upholsteredModel('leather', 1, facing),
+  gamer: (_facing, color) => gamerChair(color),
+  office: officeChair,
+  task: taskChair,
+  fabric: (facing, color) => upholsteredModel('fabric', 1, facing, color),
 };
 
 const cache = new Map<string, ChairSprite>();
 
-/** `accent` only paints the gamer chair's red parts; the other chairs ignore it. */
-export function chairSprite(material: ChairMaterial, facing: Facing, accent = DEFAULT_GAMER_ACCENT): ChairSprite {
-  const id = `${material}:${facing}:${material === 'gamer' ? accent : ''}`;
+/** `color` paints a colorable chair (CHAIR_DEFAULT_COLORS); the other chairs ignore it. */
+export function chairSprite(material: ChairMaterial, facing: Facing, color?: string): ChairSprite {
+  const fallback = CHAIR_DEFAULT_COLORS[material];
+  const painted = fallback === undefined ? '' : (color ?? fallback);
+  const id = `${material}:${facing}:${painted}`;
   const cached = cache.get(id);
   if (cached) return cached;
-  const { back, front, origin } = renderFurniture(MODELS[material](accent), facing);
+  const { back, front, origin } = renderFurniture(MODELS[material](facing, painted), facing);
   const sprite: ChairSprite = { back, front, ground: origin, seat: { x: origin.x, y: origin.y - SEAT_HEIGHT } };
-  if (material === 'gamer' && cache.size > 64) cache.clear();
+  if (painted !== '' && cache.size > 64) cache.clear();
   cache.set(id, sprite);
   return sprite;
 }

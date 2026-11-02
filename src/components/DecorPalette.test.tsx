@@ -26,7 +26,7 @@ describe('DecorPalette', () => {
 
     expect(screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'))).toEqual(['Sillas', 'Mesas de escritorio', 'Mesas de sala', 'Plantas', 'Puertas']);
     expect(names('Puertas')).toEqual(['Puerta simple', 'Puerta doble']);
-    expect(names('Sillas')).toEqual(['Silla de madera', 'Silla de metal', 'Silla de cuero', 'Silla gamer']);
+    expect(names('Sillas')).toEqual(['Silla de madera', 'Silla de metal', 'Silla de cuero', 'Silla gamer', 'Silla de oficina', 'Silla giratoria', 'Sillón tapizado']);
     expect(names('Mesas de escritorio')).toEqual(['Escritorio de vidrio', 'Escritorio de metal', 'Escritorio de madera', 'Escritorio pintado']);
     expect(names('Mesas de sala')).toEqual(['Mesa de reuniones', 'Mesa de cafetería', 'Mesa ovalada']);
     expect(names('Plantas')).toEqual(['Ficus']);
@@ -111,10 +111,11 @@ describe('DecorPalette', () => {
     const input = screen.getByLabelText(/^Color de Escritorio pintado:/);
     expect(input).toHaveAttribute('type', 'color');
     expect(input).toHaveAttribute('aria-label', 'Color de Escritorio pintado: #4f9a8a');
-    // Only the painted desk and the gamer chair (its red accent) take a color; every other tile has none.
+    // Only the painted desk, the gamer chair (its red accent) and the fabric armchair take a color; every other tile has none.
     expect(screen.getAllByLabelText(/^Color de/).map((color) => color.getAttribute('aria-label')).sort()).toEqual([
       'Color de Escritorio pintado: #4f9a8a',
       'Color de Silla gamer: #d8433b',
+      'Color de Sillón tapizado: #c4ab8c',
     ]);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     fireEvent.change(input, { target: { value: '#C83C3C' } });

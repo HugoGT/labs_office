@@ -333,7 +333,15 @@ describe('createMemoryDecor: art pack catalog (art migration, step 3)', () => {
     });
   });
 
-  const CHAIR_KEYS = ['art:chair-gamer:sheet', 'art:chair-leather:sheet', 'art:chair-metal:sheet', 'art:chair-wood:sheet'];
+  const CHAIR_KEYS = [
+    'art:chair-fabric:sheet',
+    'art:chair-gamer:sheet',
+    'art:chair-leather:sheet',
+    'art:chair-metal:sheet',
+    'art:chair-office:sheet',
+    'art:chair-task:sheet',
+    'art:chair-wood:sheet',
+  ];
   const chairAssets = async (catalog: ReturnType<typeof decor>, includeArchived = false) =>
     (await catalog.listAssets({ includeArchived })).filter((entry) => entry.textureKey.startsWith('art:chair-'));
 
@@ -377,7 +385,7 @@ describe('createMemoryDecor: art pack catalog (art migration, step 3)', () => {
     await catalog.registerArtPack(PACK);
 
     const all = await chairAssets(catalog, true);
-    expect(all).toHaveLength(4);
+    expect(all).toHaveLength(CHAIR_KEYS.length);
     expect(all.find((entry) => entry.id === wood.id)?.archivedAt).toEqual(NOW);
   });
 

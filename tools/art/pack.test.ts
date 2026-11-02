@@ -132,7 +132,7 @@ describe('art pack manifest', () => {
   it('registers the characters, furniture, floors, walls, the terrain tileset and the map props', () => {
     const count = (kind: string): number => manifest.pieces.filter((piece) => piece.kind === kind).length;
     const kinds = ['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door'];
-    expect(kinds.map(count)).toEqual([18, 4, 4, 9, 4, 1, 2, 1, 1, 1, 3, 2]);
+    expect(kinds.map(count)).toEqual([18, 7, 4, 9, 4, 1, 2, 1, 1, 1, 3, 2]);
   });
 
   it('uses stable ids derived from the generators, unique and prefixed by kind', () => {
@@ -246,13 +246,14 @@ describe('art pack manifest', () => {
     ]);
   });
 
-  it('marks only the gamer chair, the painted desk, the plain floor and the carpet as colorable', () => {
+  it('marks only the gamer chair, the fabric armchair, the painted desk, the plain floor and the carpet as colorable', () => {
     const colorable = manifest.pieces
       .filter((piece): piece is ArtChairPiece | ArtDeskPiece | ArtFloorPiece => piece.kind === 'chair' || piece.kind === 'desk' || piece.kind === 'floor')
       .filter((piece) => piece.colorable)
       .map((piece) => [piece.id, piece.defaultColor]);
     expect(colorable).toEqual([
       ['chair-gamer', '#d8433b'],
+      ['chair-fabric', '#c4ab8c'],
       ['desk-painted', '#4f9a8a'],
       ['floor-plain', '#b9c3cc'],
       ['floor-carpet', '#5a6f86'],
