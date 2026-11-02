@@ -39,6 +39,13 @@ export interface CameraPanLayerOptions {
   /** Verdadero mientras el pan debe quedar desarmado (editor de layout activo). */
   isSuspended: () => boolean;
   /**
+   * Whether a left press there belongs to something on the map (an item an
+   * editor grabs), so it must not arm the pan: its drag moves that thing and
+   * the view stays. Not asked of the right button, which drags the view
+   * through `rightPans` even across an item.
+   */
+  claimsPress?: (pointer: Phaser.Input.Pointer) => boolean;
+  /**
    * Whether a right press there drags the view, whatever `isSuspended` says:
    * the scene lets the right button move the admin while an editor holds the map.
    */
@@ -55,6 +62,7 @@ export class CameraPanLayer {
   private region: Rect;
   private readonly isSuspended: () => boolean;
   private readonly rightPans: NonNullable<CameraPanLayerOptions['rightPans']>;
+  private readonly claimsPress: NonNullable<CameraPanLayerOptions['claimsPress']>;
   private state: CameraPanState = { kind: 'idle' };
   private glide: Glide | null = null;
   /**
@@ -80,7 +88,8 @@ export class CameraPanLayer {
     const left =
       pointer.button === 0 &&
       (!currentlyOver || currentlyOver.length === 0) &&
-      !this.isSuspended();
+      !this.isSuspended() &&
+      !this.claimsPress(pointer);
     const eligible = pointer.camera === this.camera && (left || (pointer.button === 2 && this.rightPans(pointer, currentlyOver ?? [])));
     this.dispatch({ kind: 'down', x: pointer.x, y: pointer.y, eligible });
   };
@@ -117,6 +126,7 @@ export class CameraPanLayer {
     this.region = options.region;
     this.isSuspended = options.isSuspended;
     this.rightPans = options.rightPans ?? (() => false);
+    this.claimsPress = options.claimsPress ?? (() => false);
 
     this.scene.input.on('pointerdown', this.onPointerDown);
     this.scene.input.on('pointermove', this.onPointerMove);

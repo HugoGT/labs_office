@@ -15,6 +15,7 @@ import { buildTerrainGrid } from './terrainGrid';
 import { coveredTiles } from './pieceCollisions';
 import type { OfficeDesk } from './desksPort';
 import type { OfficeEventMap } from './officeBridge';
+import type { DecorItem } from './officeDecor';
 import { ARRIVE_EPSILON_PX, beginAutoWalk } from './autoWalk';
 import {
   destroyOfficeGames,
@@ -349,6 +350,38 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
 
     expect(main.scrollX).toBeGreaterThan(startScrollX);
     expect(movement.autoWalk).toBeUndefined();
+  });
+
+  it('drags a placed decor item without dragging the view, while a drag from bare ground still moves the view', async () => {
+    const { scene, bridge, frame } = await movementArena();
+    const tx = 12;
+    const ty = 9;
+    const internals = scene as unknown as { layout: { width: number }; applyDecor(items: DecorItem[]): void; mapHeld: boolean };
+    const index = ty * internals.layout.width + tx;
+    internals.applyDecor([{ index, piece: 'chair-wood', rotation: 0 }]);
+    // Open with nothing picked or selected: the map is not held, the view may be dragged.
+    bridge.emitCommand('decoredit', { brush: null, area: null });
+    expect(internals.mapHeld).toBe(false);
+    const main = scene.cameras.main;
+    frame();
+    const moves: unknown[] = [];
+    bridge.on('decormove', (value) => moves.push(value));
+
+    const drag = (worldX: number, worldY: number): void => {
+      const pointer = { button: 0, camera: main, x: 300, y: 200, worldX, worldY, distance: 0, getDistance() { return this.distance; } };
+      scene.input.emit('pointerdown', pointer, []);
+      Object.assign(pointer, { x: 200, distance: 100 });
+      scene.input.emit('pointermove', pointer);
+      scene.input.emit('pointerup', pointer, []);
+    };
+
+    const startScrollX = main.scrollX;
+    drag(tx * TILE + TILE / 2, ty * TILE + TILE / 2);
+    expect(moves).toEqual([{ index }]);
+    expect(main.scrollX).toBe(startScrollX);
+
+    drag((tx + 6) * TILE, ty * TILE);
+    expect(main.scrollX).toBeGreaterThan(startScrollX);
   });
 
   it('does not turn drags, item clicks, blocked goals or minimap clicks into walking', async () => {

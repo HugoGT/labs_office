@@ -745,6 +745,8 @@ export class OfficeScene extends Phaser.Scene {
       lerp: FOLLOW_LERP,
       region: this.cameraRegion(),
       isSuspended: () => this.mapHeld || !this.localPositionReady,
+      // With the decor editor open and nothing picked, a press on a placed item grabs it: only a press on bare ground drags the view.
+      claimsPress: (pointer) => this.decorEditLayer?.claimsPress(pointer) ?? false,
       // A right drag moves the view wherever a right click would walk, a held map included.
       rightPans: (pointer, over) => this.localPositionReady && this.rightWalks(pointer, over),
     });

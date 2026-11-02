@@ -278,6 +278,38 @@ describe('CameraPanLayer: guardas que impiden armar el pan', () => {
     expect(cam.scrollX).toBe(panned);
   });
 
+  it('a left press that `claimsPress` says belongs to something on the map never arms the pan, while an unclaimed one still pans and a right drag pans across it', async () => {
+    const scene = await bootHostScene();
+    const cam = scene.cameras.main;
+    const stopFollow = vi.spyOn(cam, 'stopFollow');
+    const claimsPress = vi.fn(() => false);
+    new CameraPanLayer(layerOptions(scene, { claimsPress, rightPans: () => true }));
+
+    // Nothing claims it: the usual pan.
+    const startScrollX = cam.scrollX;
+    scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, camera: cam }), []);
+    scene.input.emit('pointermove', fakePointer({ x: 200, y: 100, camera: cam }));
+    scene.input.emit('pointerup', fakePointer({ x: 200, y: 100, camera: cam }));
+    const panned = cam.scrollX;
+    expect(panned).toBeLessThan(startScrollX);
+    expect(stopFollow).toHaveBeenCalledTimes(1);
+
+    // An item an editor grabs is under it: the drag is the item's, the view stays.
+    claimsPress.mockReturnValue(true);
+    const down = fakePointer({ x: 100, y: 100, camera: cam });
+    scene.input.emit('pointerdown', down, []);
+    expect(claimsPress).toHaveBeenLastCalledWith(down);
+    scene.input.emit('pointermove', fakePointer({ x: 200, y: 100, camera: cam }));
+    scene.input.emit('pointerup', fakePointer({ x: 200, y: 100, camera: cam }));
+    expect(cam.scrollX).toBe(panned);
+    expect(stopFollow).toHaveBeenCalledTimes(1);
+
+    // The right button moves the view wherever it is pressed, an item included.
+    scene.input.emit('pointerdown', fakePointer({ x: 100, y: 100, button: 2, camera: cam }), []);
+    scene.input.emit('pointermove', fakePointer({ x: 200, y: 100, camera: cam }));
+    expect(cam.scrollX).toBeLessThan(panned);
+  });
+
   it('un down sobre la camara del minimapa no arma pan en la camara principal, y el minimapa nunca se toca', async () => {
     const scene = await bootHostScene();
     const cam = scene.cameras.main;
