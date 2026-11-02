@@ -150,20 +150,27 @@ function leatherChair(): FurnitureModel {
 // --- Gamer -------------------------------------------------------------------------------------
 
 const SHELL = makeRamp('#363944');
-const ACCENT = makeRamp('#d8433b');
 const BASE = makeRamp('#2b2d34');
 const CHROME = makeRamp('#aab3bd');
 const GAMER_TOP = 9 + 16;
 const STAR_RADIUS = 7;
 
+/**
+ * The red of the gamer chair's stripes and side bolsters, and the color the pack exports it in.
+ * It is the only part of the chair that takes a color: the shell, base and chrome stay as drawn.
+ */
+export const DEFAULT_GAMER_ACCENT = '#d8433b';
+
 /** Racing stripes down the seat and the backrest, and harness slots near the top. */
-function racing(point: { face: string; u: number; v: number; y: number }, color: Rgba): Rgba {
-  const stripe = Math.abs(Math.abs(point.v) - 3.5) < 0.9;
-  if (point.face === 'top' || point.face === 'forward' || point.face === 'backward') {
-    if (point.face !== 'top' && point.y > GAMER_TOP - 4 && point.y < GAMER_TOP - 2 && stripe) return SHELL.outline;
-    if (stripe && point.y < GAMER_TOP - 4) return point.face === 'top' ? ACCENT.base : ACCENT.shadow;
-  }
-  return color;
+function racing(accent: Ramp): (point: { face: string; u: number; v: number; y: number }, color: Rgba) => Rgba {
+  return (point, color) => {
+    const stripe = Math.abs(Math.abs(point.v) - 3.5) < 0.9;
+    if (point.face === 'top' || point.face === 'forward' || point.face === 'backward') {
+      if (point.face !== 'top' && point.y > GAMER_TOP - 4 && point.y < GAMER_TOP - 2 && stripe) return SHELL.outline;
+      if (stripe && point.y < GAMER_TOP - 4) return point.face === 'top' ? accent.base : accent.shadow;
+    }
+    return color;
+  };
 }
 
 /** Five spokes from the gas lift, one pointing back, each ending on a caster. */
@@ -181,8 +188,10 @@ function starBase(): Box[] {
   return boxes;
 }
 
-/** Racing-style gaming chair: star base, bucket seat and tall winged backrest with red accents. */
-function gamerChair(): FurnitureModel {
+/** Racing-style gaming chair: star base, bucket seat and tall winged backrest with accents (red by default). */
+function gamerChair(accentHex: string): FurnitureModel {
+  const ACCENT = makeRamp(accentHex);
+  const racingStripes = racing(ACCENT);
   const pad = { ramp: SHELL, top: 'light', side: 'base' } as const;
   return {
     shadow: { u: [-STAR_RADIUS, STAR_RADIUS], v: [-STAR_RADIUS, STAR_RADIUS], shape: 'ellipse' },
@@ -191,15 +200,15 @@ function gamerChair(): FurnitureModel {
       { boxes: [{ u: [-1, 1], v: [-1, 1], y: [2, 6], ramp: CHROME, top: 'light', side: 'base' }, { u: [-4, 3], v: [-4, 4], y: [5, SEAT_UNDER], ramp: BASE, side: 'base' }] },
       {
         boxes: [
-          { u: SEAT_SPAN, v: SEAT_SPAN, y: [SEAT_UNDER, SEAT_HEIGHT], ramp: SHELL, top: 'base', side: 'base', shade: racing },
+          { u: SEAT_SPAN, v: SEAT_SPAN, y: [SEAT_UNDER, SEAT_HEIGHT], ramp: SHELL, top: 'base', side: 'base', shade: racingStripes },
           ...pair({ u: [-6, 7], v: [6, 8], y: [SEAT_UNDER, SEAT_HEIGHT + 1], ramp: ACCENT, top: 'base', side: 'shadow', rounded: true }),
         ],
       },
       {
         layer: backrestLayer,
         boxes: [
-          { u: [-8, BACK_FACE], v: [-7, 7], y: [SEAT_UNDER + 1, GAMER_TOP - 4], ...pad, shade: racing },
-          { u: [-8, BACK_FACE], v: [-5, 5], y: [GAMER_TOP - 4, GAMER_TOP], ...pad, rounded: true, shade: racing },
+          { u: [-8, BACK_FACE], v: [-7, 7], y: [SEAT_UNDER + 1, GAMER_TOP - 4], ...pad, shade: racingStripes },
+          { u: [-8, BACK_FACE], v: [-5, 5], y: [GAMER_TOP - 4, GAMER_TOP], ...pad, rounded: true, shade: racingStripes },
           ...pair({ u: [-7, -4], v: [6, 9], y: [SEAT_HEIGHT + 2, GAMER_TOP - 5], ramp: ACCENT, top: 'base', side: 'shadow', rounded: true }),
         ],
       },
@@ -216,7 +225,8 @@ function gamerChair(): FurnitureModel {
   };
 }
 
-const MODELS: Readonly<Record<ChairMaterial, () => FurnitureModel>> = {
+/** Only the gamer chair reads the accent; the other materials keep their own colors. */
+const MODELS: Readonly<Record<ChairMaterial, (accent: string) => FurnitureModel>> = {
   wood: woodChair,
   metal: metalChair,
   leather: leatherChair,
@@ -225,12 +235,14 @@ const MODELS: Readonly<Record<ChairMaterial, () => FurnitureModel>> = {
 
 const cache = new Map<string, ChairSprite>();
 
-export function chairSprite(material: ChairMaterial, facing: Facing): ChairSprite {
-  const id = `${material}:${facing}`;
+/** `accent` only paints the gamer chair's red parts; the other chairs ignore it. */
+export function chairSprite(material: ChairMaterial, facing: Facing, accent = DEFAULT_GAMER_ACCENT): ChairSprite {
+  const id = `${material}:${facing}:${material === 'gamer' ? accent : ''}`;
   const cached = cache.get(id);
   if (cached) return cached;
-  const { back, front, origin } = renderFurniture(MODELS[material](), facing);
+  const { back, front, origin } = renderFurniture(MODELS[material](accent), facing);
   const sprite: ChairSprite = { back, front, ground: origin, seat: { x: origin.x, y: origin.y - SEAT_HEIGHT } };
+  if (material === 'gamer' && cache.size > 64) cache.clear();
   cache.set(id, sprite);
   return sprite;
 }

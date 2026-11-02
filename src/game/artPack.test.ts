@@ -61,6 +61,21 @@ describe('parseArtPackManifest', () => {
     expect(parsed?.pieces.map((piece) => piece.id)).toEqual(['desk-wood']);
   });
 
+  it('reads a chair with or without a color pair, and drops one whose pair is half there or malformed', () => {
+    const [gamer] = pack().pieces.filter((piece) => piece.id === 'chair-gamer');
+    const withoutPair = { ...gamer, id: 'chair-old-upload', colorable: undefined, defaultColor: undefined };
+    const broken = [
+      { ...gamer, id: 'chair-no-default', defaultColor: undefined },
+      { ...gamer, id: 'chair-bad-color', defaultColor: 'red' },
+      { ...gamer, id: 'chair-plain-with-color', colorable: false },
+      { ...gamer, id: 'chair-colorless-pair', colorable: undefined },
+    ];
+
+    const parsed = parseArtPackManifest(withPieces([gamer, withoutPair, ...broken]));
+
+    expect(parsed?.pieces.map((piece) => piece.id)).toEqual(['chair-gamer', 'chair-old-upload']);
+  });
+
   it('reads the terrain tileset and the map props, and drops one that lacks its placement', () => {
     const manifest = pack();
     const kinds = new Set(manifest.pieces.map((piece) => piece.kind));
@@ -201,6 +216,18 @@ describe('recolorFor', () => {
     expect(recolorFor(wood, '#c0392b')).toBeNull();
     // A malformed color falls back to the exported one instead of a broken texture key.
     expect(recolorFor(painted, 'red')).toBeNull();
+  });
+
+  it('paints the gamer chair from its red accent, and leaves the other chairs as exported', () => {
+    const manifest = pack();
+    const gamer = findPiece(manifest, 'chair-gamer');
+    const wood = findPiece(manifest, 'chair-wood');
+    if (gamer === undefined || wood === undefined) throw new Error('missing pieces');
+
+    expect(recolorFor(gamer, '#2a9d8f')).toEqual({ from: '#d8433b', to: '#2a9d8f' });
+    expect(recolorFor(gamer, '#D8433B')).toBeNull();
+    expect(recolorFor(gamer, null)).toBeNull();
+    expect(recolorFor(wood, '#2a9d8f')).toBeNull();
   });
 });
 

@@ -111,7 +111,11 @@ describe('DecorPalette', () => {
     const input = screen.getByLabelText(/^Color de Escritorio pintado:/);
     expect(input).toHaveAttribute('type', 'color');
     expect(input).toHaveAttribute('aria-label', 'Color de Escritorio pintado: #4f9a8a');
-    expect(screen.getAllByLabelText(/^Color de/)).toHaveLength(1);
+    // Only the painted desk and the gamer chair (its red accent) take a color; every other tile has none.
+    expect(screen.getAllByLabelText(/^Color de/).map((color) => color.getAttribute('aria-label')).sort()).toEqual([
+      'Color de Escritorio pintado: #4f9a8a',
+      'Color de Silla gamer: #d8433b',
+    ]);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     fireEvent.change(input, { target: { value: '#C83C3C' } });
     expect(onColorChange).toHaveBeenCalledWith('desk-painted', '#c83c3c');

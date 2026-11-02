@@ -744,6 +744,8 @@
         "w": 1,
         "h": 1
       },
+      "colorable": false,
+      "defaultColor": null,
       "files": [
         {
           "role": "sheet",
@@ -786,6 +788,8 @@
         "w": 1,
         "h": 1
       },
+      "colorable": false,
+      "defaultColor": null,
       "files": [
         {
           "role": "sheet",
@@ -828,6 +832,8 @@
         "w": 1,
         "h": 1
       },
+      "colorable": false,
+      "defaultColor": null,
       "files": [
         {
           "role": "sheet",
@@ -870,6 +876,8 @@
         "w": 1,
         "h": 1
       },
+      "colorable": true,
+      "defaultColor": "#d8433b",
       "files": [
         {
           "role": "sheet",

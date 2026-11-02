@@ -69,15 +69,23 @@ describe('materialCatalogFrom', () => {
 });
 
 describe('materialCatalogFrom: chairs', () => {
-  it('offers every chair piece of the pack, never colorable, next to the manifest', () => {
+  it('offers every chair piece of the pack, next to the manifest', () => {
     expect(catalog().chair.map((option) => [option.id, option.kind])).toEqual([
       ['chair-wood', 'chair'],
       ['chair-metal', 'chair'],
       ['chair-leather', 'chair'],
       ['chair-gamer', 'chair'],
     ]);
-    expect(catalog().chair.every((option) => !option.colorable && option.defaultColor === null)).toBe(true);
     expect(catalog().chair[0]!.sheetUrl).toBe('assets/pack/chair/wood.png');
+  });
+
+  it('marks only the gamer chair as colorable, in its red accent', () => {
+    expect(catalog().chair.map((option) => [option.id, option.colorable, option.defaultColor])).toEqual([
+      ['chair-wood', false, null],
+      ['chair-metal', false, null],
+      ['chair-leather', false, null],
+      ['chair-gamer', true, '#d8433b'],
+    ]);
   });
 
   it('a chair previews both layers of its down-facing cell, back first', () => {

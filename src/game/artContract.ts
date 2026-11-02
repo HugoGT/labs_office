@@ -1222,6 +1222,13 @@ export interface ArtChairPiece extends ArtPieceBase {
   readonly layers: readonly ChairLayer[];
   readonly anchors: { readonly seat: Point; readonly ground: Point };
   readonly footprint: Footprint;
+  /**
+   * Only the gamer chair takes a color, its accent (the red stripes and bolsters); it is exported in
+   * `defaultColor`, like a painted desk. Absent, as on a chair uploaded before chairs had colors, means
+   * not colorable.
+   */
+  readonly colorable?: boolean;
+  readonly defaultColor?: string | null;
 }
 
 /** Per facing, as offsets from the desk anchor: its depth point and where a matching chair's ground goes. */

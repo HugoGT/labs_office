@@ -146,8 +146,10 @@ export function decorPieceInfo(piece: {
 }): DecorPieceInfo | null {
   if (!isDecorKind(piece.kind)) return null;
   const fixed = FIXED_FOOTPRINTS[piece.kind];
-  // Only desk tables are colorable in the art contract (`ArtDeskPiece.colorable`).
-  if (fixed !== undefined) return { kind: piece.kind, footprint: fixed, ...(piece.kind === 'desk' && piece.colorable === true ? { colorable: true as const } : {}) };
+  // Only desk tables and the gamer chair are colorable in the art contract (`colorable` of `ArtDeskPiece` and `ArtChairPiece`).
+  if (fixed !== undefined) {
+    return { kind: piece.kind, footprint: fixed, ...((piece.kind === 'desk' || piece.kind === 'chair') && piece.colorable === true ? { colorable: true as const } : {}) };
+  }
   const footprint = piece.footprint;
   if (footprint === undefined || !Number.isInteger(footprint.w) || !Number.isInteger(footprint.h) || footprint.w < 1 || footprint.h < 1) return null;
   return { kind: piece.kind, footprint: { w: footprint.w, h: footprint.h } };
@@ -284,8 +286,10 @@ export function isDecorChairPiece(piece: string): boolean {
 }
 
 /** The seats of the layer: every chair, by its anchor tile, facing its rotation. */
-export function decorChairs(items: readonly DecorItem[]): { index: number; piece: string; facing: DecorFacing }[] {
-  return items.flatMap(({ index, piece, rotation }) => (isDecorChairPiece(piece) ? [{ index, piece, facing: decorChairFacing(rotation) }] : []));
+export function decorChairs(items: readonly DecorItem[]): { index: number; piece: string; facing: DecorFacing; color?: string }[] {
+  return items.flatMap(({ index, piece, rotation, color }) =>
+    isDecorChairPiece(piece) ? [{ index, piece, facing: decorChairFacing(rotation), ...(color === undefined ? {} : { color }) }] : [],
+  );
 }
 
 /** A copy of `items` with every edit applied in order, sorted by anchor. */

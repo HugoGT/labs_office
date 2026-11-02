@@ -59,7 +59,7 @@ export interface MaterialCatalog {
   readonly floor: readonly MaterialOption[];
   /** The wall pieces, for the terrain editor (never colorable). */
   readonly wall: readonly MaterialOption[];
-  /** The chair pieces, for the decor palette (never colorable). */
+  /** The chair pieces, for the decor palette (colorable only for the gamer chair's accent). */
   readonly chair: readonly MaterialOption[];
   /** The plants (pack and uploads), for the decor palette (never colorable). */
   readonly plant: readonly MaterialOption[];
@@ -82,8 +82,8 @@ function optionOf(piece: CatalogPiece, folder: string): MaterialOption | null {
     id: piece.id,
     kind: piece.kind,
     name: piece.name,
-    colorable: piece.kind === 'desk' || piece.kind === 'floor' ? piece.colorable : false,
-    defaultColor: piece.kind === 'desk' || piece.kind === 'floor' ? piece.defaultColor : null,
+    colorable: piece.kind === 'desk' || piece.kind === 'floor' || piece.kind === 'chair' ? piece.colorable === true : false,
+    defaultColor: piece.kind === 'desk' || piece.kind === 'floor' || piece.kind === 'chair' ? (piece.defaultColor ?? null) : null,
     sheetUrl: `${folder}${sheet.path}`,
     piece,
     retired: isRetiredArtPiece(piece),

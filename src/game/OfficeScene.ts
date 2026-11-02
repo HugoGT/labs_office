@@ -2116,7 +2116,7 @@ export class OfficeScene extends Phaser.Scene {
     // A contributed chair approved after this page loaded is not in the boot preload: ask for it (a no-op once
     // loaded) and redraw when it lands, while `placeChairs` shows its placeholder.
     this.artSheet({ materialId: item.piece, color: null }, 'chair', this.redrawDecor);
-    return placeChairs(this, [{ index: chair.index, piece: item.piece, facing: chair.facing }], this.layout.width, this.art);
+    return placeChairs(this, [{ index: chair.index, piece: item.piece, facing: chair.facing, ...(chair.color === undefined ? {} : { color: chair.color }) }], this.layout.width, this.art);
   }
 
   /** Redraws the tilemap from the live blocks, or from the editor's pending paints while it has some. */
