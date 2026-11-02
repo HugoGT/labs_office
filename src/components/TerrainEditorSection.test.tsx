@@ -28,6 +28,35 @@ async function open() {
   await userEvent.click(screen.getByRole('button', { name: 'Editar terreno' }));
 }
 
+describe('TerrainEditorSection: carpet picker', () => {
+  it('a click on carpet keeps the rail while its picker is open and follows the color live; one Escape closes the picker keeping the color, a second puts the floor down', async () => {
+    Object.defineProperty(HTMLInputElement.prototype, 'showPicker', { configurable: true, value: vi.fn() });
+    try {
+      const { commands } = renderSection();
+      await open();
+
+      await userEvent.click(await screen.findByRole('button', { name: 'Moqueta' }));
+      expect(commands.at(-1)).toMatchObject({ brush: { kind: 'floor', material: 'carpet', color: '#5a6f86' }, pickingColor: true });
+
+      fireEvent.input(screen.getByLabelText(/^Color de Moqueta:/), { target: { value: '#c0392b' } });
+      await vi.waitFor(() => expect(commands.at(-1)).toMatchObject({ brush: { material: 'carpet', color: '#c0392b' }, pickingColor: true }));
+
+      // The first Escape is the browser's picker's: it closes and sends back the color it opened with, which is not kept.
+      fireEvent.input(screen.getByLabelText(/^Color de Moqueta:/), { target: { value: '#5a6f86' } });
+      await vi.waitFor(() => expect(commands.at(-1)).not.toHaveProperty('pickingColor'));
+      expect(commands.at(-1)).toMatchObject({ brush: { material: 'carpet', color: '#c0392b' } });
+      expect(screen.getByLabelText('Color de Moqueta: #c0392b')).toHaveValue('#c0392b');
+
+      // The second one reaches the page and puts the floor down, like any Escape does.
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+      await vi.waitFor(() => expect(commands.at(-1)?.brush).toBeNull());
+      expect(screen.getByLabelText('Color de Moqueta: #c0392b')).toHaveValue('#c0392b');
+    } finally {
+      Reflect.deleteProperty(HTMLInputElement.prototype, 'showPicker');
+    }
+  });
+});
+
 describe('TerrainEditorSection', () => {
   it('offers only the way in while closed', () => {
     renderSection();

@@ -242,6 +242,28 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(minimap.visible).toBe(true);
   });
 
+  it('keeps the minimap, with the rail it belongs to, while a color picker is open, and still holds the map', async () => {
+    const { scene, bridge } = await movementArena();
+    const minimap = scene.cameras.cameras[1]!;
+    const held = () => (scene as unknown as { mapHeld: boolean }).mapHeld;
+    const chair = { kind: 'piece', piece: 'chair-gamer', info: { kind: 'chair', footprint: { w: 1, h: 1 }, colorable: true }, rotation: 0, color: '#2a9d8f' } as const;
+
+    bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'carpet', color: '#2a9d8f' }, pickingColor: true });
+    expect(minimap.visible).toBe(true);
+    expect(held()).toBe(true);
+    bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'carpet', color: '#2a9d8f' } });
+    expect(minimap.visible).toBe(false);
+    bridge.emitCommand('terrainedit', null);
+
+    bridge.emitCommand('decoredit', { brush: chair, area: null, pickingColor: true });
+    expect(minimap.visible).toBe(true);
+    expect(held()).toBe(true);
+    bridge.emitCommand('decoredit', { brush: chair, area: null });
+    expect(minimap.visible).toBe(false);
+    bridge.emitCommand('decoredit', null);
+    expect(minimap.visible).toBe(true);
+  });
+
   it('keeps the space outlines of every editor off the minimap, where they are noise (#216)', async () => {
     const { scene, bridge } = await movementArena();
     const [main, minimap] = [scene.cameras.cameras[0]!, scene.cameras.cameras[1]!];

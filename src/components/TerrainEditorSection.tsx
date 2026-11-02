@@ -113,6 +113,7 @@ export function TerrainEditorSection({
         floors={catalog?.floor ?? null}
         colors={editor.colors}
         onColorChange={editor.setColor}
+        onColorPicking={editor.setPickingColor}
         disabled={editor.blocked}
         preview={preview}
       />

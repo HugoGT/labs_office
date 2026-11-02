@@ -67,6 +67,8 @@ export interface TerrainEditor {
   colors: Readonly<Partial<Record<LayoutMaterial, string>>>;
   /** Chooses the color of a colorable floor: its next pick, and the picked brush if it is that floor. */
   setColor(material: LayoutMaterial, color: string): void;
+  /** A color picker of a palette tile opened or closed: with a brush in hand, the map keeps the rail while it is open. */
+  setPickingColor(open: boolean): void;
   /** A paint is on its way to the server. */
   pending: boolean;
   blocked: boolean;
@@ -114,6 +116,9 @@ export function useTerrainEditor({ bridge, terrain, onExit, outlines }: UseTerra
   const [blocks, setBlocks] = useState<readonly LayoutMaterial[]>(BASE_LAYOUT.blocks);
   const [liveColors, setLiveColors] = useState<TerrainColors>(() => new Map());
   const [brush, setBrush] = useState<FloorBrush | null>(null);
+  // A palette tile's color picker is open: the rail it hangs from must stay while a brush is in hand.
+  const [pickingColor, setPickingColor] = useState(false);
+  const holdingPicker = brush !== null && pickingColor;
   // Remembered in this browser, never sent: a painted block carries its own color.
   const [colors, saveColor] = usePersistedColors<LayoutMaterial>('office:terrain-colors');
   const [paints, setPaintsState] = useState<readonly PendingPaint[]>([]);
@@ -259,10 +264,11 @@ export function useTerrainEditor({ bridge, terrain, onExit, outlines }: UseTerra
       ...(previewBlocks === null ? {} : { previewBlocks }),
       ...(previewColors === null ? {} : { previewColors }),
       ...(outlines === undefined || outlines.length === 0 ? {} : { outlines }),
+      ...(holdingPicker ? { pickingColor: true as const } : {}),
     });
     // `previewKey` stands for both previews and the outlines: only a different drawing is worth a command.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bridge, active, brush, previewKey]);
+  }, [bridge, active, brush, previewKey, holdingPicker]);
 
   // Separate from the effect above so a new pick does not close and reopen
   // the overlay: only leaving (or unmounting) does.
@@ -273,6 +279,7 @@ export function useTerrainEditor({ bridge, terrain, onExit, outlines }: UseTerra
 
   const reset = (): void => {
     setBrush(null);
+    setPickingColor(false);
     setPaints([]);
     setError(null);
     setBlockedBoth(false);
@@ -288,6 +295,7 @@ export function useTerrainEditor({ bridge, terrain, onExit, outlines }: UseTerra
     blocks,
     brush,
     colors,
+    setPickingColor,
     setColor(material, color) {
       saveColor(material, color);
       // A color settled on its tile (its picker was dismissed) picks the floor, so the next click on the map paints it (the

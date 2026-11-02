@@ -121,6 +121,8 @@ export interface DecorEditor {
   colors: Readonly<Partial<Record<string, string>>>;
   /** Chooses the color of a colorable piece: the next pick of it, and the picked brush if it is that piece. */
   setColor(piece: string, color: string): void;
+  /** A color picker of a palette tile opened or closed: with a piece in hand, the map keeps the rail while it is open. */
+  setPickingColor(open: boolean): void;
   /** An edit is on its way to the server. */
   pending: boolean;
   /** "Múltiple" (#207): the brush stays picked after a click. Off by default; kept across enter and exit. */
@@ -200,6 +202,8 @@ export function useDecorEditor({
   const [active, setActive] = useState(false);
   const [items, setItems] = useState<readonly DecorItem[]>([]);
   const [brush, setBrush] = useState<DecorBrush | null>(null);
+  // A palette tile's color picker is open: the rail it hangs from must stay while a piece is in hand.
+  const [pickingColor, setPickingColor] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   // The turn the person gave the palette; until they turn something each kind starts in its own (`defaultDecorRotation`).
   const [turned, setRotation] = useState<DecorRotation | null>(null);
@@ -475,7 +479,8 @@ export function useDecorEditor({
   });
 
   const preview = useMemo<DecorEdit[] | null>(() => (edits.length === 0 ? null : edits.map(({ index, item }) => ({ index, item }))), [edits]);
-  const commandKey = JSON.stringify([brush, area, selected, preview, desks, outlines]);
+  const holdingPicker = brush !== null && pickingColor;
+  const commandKey = JSON.stringify([brush, area, selected, preview, desks, outlines, holdingPicker]);
 
   // A pause puts down what the next map click would act on; a move leaves the item where it was.
   useEffect(() => {
@@ -493,6 +498,7 @@ export function useDecorEditor({
       ...(outlines.length === 0 ? {} : { outlines }),
       ...(selected === null ? {} : { selected }),
       ...(preview === null ? {} : { preview }),
+      ...(holdingPicker ? { pickingColor: true as const } : {}),
     });
     // `commandKey` stands for brush, area, desks, outlines, selection and preview: only a different drawing is worth a command.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -507,6 +513,7 @@ export function useDecorEditor({
 
   const reset = (): void => {
     setBrush(null);
+    setPickingColor(false);
     setSelected(null);
     setEdits([]);
     setError(null);
@@ -520,6 +527,7 @@ export function useDecorEditor({
     selected,
     rotation,
     colors,
+    setPickingColor,
     setColor(piece, color) {
       saveColor(piece, color);
       // A color settled on a tile (its picker was dismissed) puts that piece in hand, in that color, so the next click

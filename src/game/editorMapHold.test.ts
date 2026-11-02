@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collisionEditHoldsMap, decorEditHidesRail, decorEditHoldsMap, layoutEditHoldsMap, terrainEditHoldsMap } from './editorMapHold';
+import { collisionEditHoldsMap, decorEditHidesRail, decorEditHoldsMap, layoutEditHoldsMap, terrainEditHidesRail, terrainEditHoldsMap } from './editorMapHold';
 
 describe('editorMapHold', () => {
   it('the layout editor holds the map only with an item selected or being placed', () => {
@@ -32,6 +32,21 @@ describe('editorMapHold', () => {
     expect(decorEditHidesRail({ brush: chair, area: null })).toBe(true);
     expect(decorEditHidesRail({ brush: null, area: null })).toBe(false);
     expect(decorEditHidesRail(null)).toBe(false);
+  });
+
+  it('an open color picker keeps the rail it hangs from, and the map stays held all the same', () => {
+    const chair = { kind: 'piece', piece: 'chair-gamer', info: { kind: 'chair', footprint: { w: 1, h: 1 }, colorable: true }, rotation: 0 } as const;
+    const grass = { kind: 'floor', material: 'grass' } as const;
+
+    expect(terrainEditHidesRail(null)).toBe(false);
+    expect(terrainEditHidesRail({ brush: null })).toBe(false);
+    expect(terrainEditHidesRail({ brush: grass })).toBe(true);
+    expect(terrainEditHidesRail({ brush: grass, pickingColor: true })).toBe(false);
+    expect(terrainEditHoldsMap({ brush: grass, pickingColor: true })).toBe(true);
+
+    expect(decorEditHidesRail({ brush: chair, area: null })).toBe(true);
+    expect(decorEditHidesRail({ brush: chair, area: null, pickingColor: true })).toBe(false);
+    expect(decorEditHoldsMap({ brush: chair, area: null, pickingColor: true })).toBe(true);
   });
 
   it('the collision editor holds the map only with a piece picked', () => {

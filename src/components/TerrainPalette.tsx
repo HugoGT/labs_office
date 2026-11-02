@@ -7,7 +7,7 @@ import { isTerrainFloorPieceId } from '../game/terrainFloors';
 import { TERRAIN_FLAT_COLORS } from '../game/terrainRender';
 import { ArtPreviewCanvas } from './ArtPreviewCanvas';
 import styles from './TerrainPalette.module.css';
-import { TileColorInput } from './TileColorInput';
+import { ColorableTile } from './ColorableTile';
 
 /**
  * The palettes of the terrain editor. Floors: one entry per terrain
@@ -60,12 +60,15 @@ export interface TerrainPaletteProps {
   floors: readonly MaterialOption[] | null;
   /** The color chosen per colorable floor; one without starts in its pack default. */
   colors?: Readonly<Partial<Record<LayoutMaterial, string>>>;
+  /** A colorable floor's color, live while its picker is dragged; also what its tile reports when clicked (picked, in its current color). */
   onColorChange?: (material: LayoutMaterial, color: string) => void;
+  /** A colorable tile's color picker opened (`true`) or closed: the editor keeps its rail on screen while it is open. */
+  onColorPicking?: (open: boolean) => void;
   disabled?: boolean;
   preview?: ArtPreviewCache;
 }
 
-export function TerrainPalette({ value, onPick, onPickFloor, floors, colors = {}, onColorChange, disabled = false, preview }: TerrainPaletteProps) {
+export function TerrainPalette({ value, onPick, onPickFloor, floors, colors = {}, onColorChange, onColorPicking, disabled = false, preview }: TerrainPaletteProps) {
   const builtInIds = new Set<string>(LAYOUT_MATERIALS.flatMap((kind) => (kind === 'void' ? [] : [terrainFloorPieceId(kind)])));
   const uploaded = (floors ?? []).filter((option) => isTerrainFloorPieceId(option.id) && !builtInIds.has(option.id) && !option.retired);
   const material = (kind: LayoutMaterial) => {
@@ -82,7 +85,8 @@ export function TerrainPalette({ value, onPick, onPickFloor, floors, colors = {}
         aria-pressed={value?.kind === 'floor' && value.material === kind && value.floor === undefined}
         disabled={disabled}
         title={kind === 'void' ? 'Goma: devuelve el bloque al vacío' : undefined}
-        onClick={() => onPick(kind)}
+        // A colorable floor picks in the color it has, never toggling off: its click also opens the picker.
+        onClick={() => (color !== null && onColorChange !== undefined ? onColorChange(kind, color) : onPick(kind))}
       >
         {/* Decorative: the button is named by its label. */}
         <span className={styles.thumbnail} aria-hidden="true" style={{ background: hexColor(TERRAIN_FLAT_COLORS[kind]) }}>
@@ -92,12 +96,11 @@ export function TerrainPalette({ value, onPick, onPickFloor, floors, colors = {}
       </button>
     );
     if (defaultColor === null || color === null) return entry;
-    // Chosen before or after picking, like the painted desk's tile (#222).
+    // Its click picks the floor and opens the picker, whose colors change the picked floor live (#222).
     return (
-      <div key={kind} className={styles.cell}>
+      <ColorableTile key={kind} className={styles.cell} label={`Color de ${label}`} value={color} disabled={disabled} onChange={(hex) => onColorChange?.(kind, hex)} onPicking={onColorPicking}>
         {entry}
-        <TileColorInput label={`Color de ${label}`} value={color} disabled={disabled} onChange={(hex) => onColorChange?.(kind, hex)} />
-      </div>
+      </ColorableTile>
     );
   };
   return (
