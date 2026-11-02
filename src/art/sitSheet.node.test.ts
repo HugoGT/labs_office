@@ -1,10 +1,10 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { ANCHOR_X, ANCHOR_Y, FRAME_HEIGHT, FRAME_WIDTH } from './camera.ts';
-import { CHARACTERS } from './characters.ts';
+import { CHARACTERS, type CharacterSpec } from './characters.ts';
 import { facingYaw } from './directions.ts';
 import { PixelBuffer } from './pixelBuffer.ts';
-import { buildScene } from './rig.ts';
+import { buildScene, rampsFor } from './rig.ts';
 import { FACING_DIRECTION, FACINGS, type Facing } from './seating.ts';
 import {
   SIT_ANCHOR_X,
@@ -19,7 +19,7 @@ import {
   sitFrameGeometry,
   sitPose,
 } from './sitCycle.ts';
-import { projectPoint } from './spriteRenderer.ts';
+import { projectPoint, renderScene } from './spriteRenderer.ts';
 import { buildCharacterSprites, frameRect, sitFrameRect } from './spriteSheet.ts';
 
 const sprites = CHARACTERS.map((character) => ({ character, ...buildCharacterSprites(character) }));
@@ -107,7 +107,8 @@ test('the rendered pelvis sits on the anchor pixel', () => {
           // Side view: the bottom of the pelvis, outline included, is on the seat line. The near
           // thigh sits a little closer to the camera, so it may reach half a pixel lower.
           let lowest = -1;
-          for (let y = 0; y < image.height; y += 1) if (image.alphaAt(SIT_ANCHOR_X, y) > 0) lowest = y;
+          // Opaque only: the translucent seat shadow below the thighs is not part of the pelvis.
+          for (let y = 0; y < image.height; y += 1) if (image.alphaAt(SIT_ANCHOR_X, y) === 255) lowest = y;
           assert.ok(Math.abs(lowest - SIT_ANCHOR_Y) <= 1, `${label}: pelvis bottom at row ${lowest}`);
         }
       }
@@ -207,27 +208,109 @@ function insideShadow(pixel: { x: number; y: number }, contact: { x: number; y: 
 
 function assertShadowAt(image: PixelBuffer, contact: { x: number; y: number }, label: string): void {
   const shadow = translucentPixels(image);
-  // Seen from the front the thighs cover most of a seat shadow: a sliver beside the hips is enough.
   assert.ok(shadow.length > 0, `${label}: no shadow pixel shows`);
   const stray = shadow.filter((pixel) => !insideShadow(pixel, contact));
   assert.deepEqual(stray, [], `${label}: shadow pixels away from (${contact.x}, ${contact.y})`);
 }
 
-test('once the pelvis rests on the seat the contact shadow is under it, not under the feet', () => {
+function isSeated(column: number): boolean {
+  const pose = sitPose(column);
+  return 'sit' in pose && pose.sit.lower === 1;
+}
+
+/** The whole shadow of a sit cell, rendered without the body that covers most of it. */
+function shadowMask(character: CharacterSpec, facing: Facing, column: number): { x: number; y: number }[] {
+  const scene = buildScene(character, sitPose(column), seatBack(facing));
+  const yaw = facingYaw(FACING_DIRECTION[facing]);
+  const image = renderScene({ ...scene, primitives: [], decals: [] }, rampsFor(character), yaw, sitFrameGeometry(facing));
+  return translucentPixels(image);
+}
+
+function mean(values: readonly number[]): number {
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+/** Parts wrapped around the pelvis: its back is the sitter's back, whatever hangs behind it. */
+const PELVIS_PARTS: ReadonlySet<string> = new Set(['hips', 'skirt', 'coat']);
+
+/**
+ * Side views: the screen column of the back of the pelvis, from a render of the pelvis parts
+ * alone, so long hair or a handbag set down behind the sitter does not count as the back.
+ */
+function pelvisBack(character: CharacterSpec, facing: Facing, column: number, backToward: 1 | -1): number {
+  const scene = buildScene(character, sitPose(column), seatBack(facing));
+  const pelvis = { ...scene, primitives: scene.primitives.filter((primitive) => PELVIS_PARTS.has(primitive.part)), decals: [] };
+  const image = renderScene(pelvis, rampsFor(character), facingYaw(FACING_DIRECTION[facing]), sitFrameGeometry(facing));
+  let back = backToward > 0 ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+  for (let y = 0; y < image.height; y += 1) {
+    for (let x = 0; x < image.width; x += 1) {
+      if (image.alphaAt(x, y) === 255) back = backToward > 0 ? Math.max(back, x) : Math.min(back, x);
+    }
+  }
+  return back;
+}
+
+test('sit-down frames before the pelvis rests keep the one shadow under the planted feet', () => {
   for (const { character, sit } of sample) {
     for (const facing of FACINGS) {
       for (let column = 0; column < SIT_FRAME_COUNT; column += 1) {
-        const pose = sitPose(column);
-        const label = `${character.id} ${facing} ${column}`;
-        const image = cell(sit, facing, column);
-        if ('sit' in pose && pose.sit.lower === 1) {
-          assertShadowAt(image, { x: SIT_ANCHOR_X, y: SIT_ANCHOR_Y }, label);
-        } else {
-          // Still on its feet (or rising): the shadow stays on the floor under the planted feet.
-          const feet = sitFrameGeometry(facing);
-          assertShadowAt(image, { x: feet.anchorX, y: feet.anchorY }, label);
-        }
+        if (isSeated(column)) continue;
+        const feet = sitFrameGeometry(facing);
+        assertShadowAt(cell(sit, facing, column), { x: feet.anchorX, y: feet.anchorY }, `${character.id} ${facing} ${column}`);
       }
+    }
+  }
+});
+
+test('seated, the one shadow sits lower than the seat point and none is left under the feet', () => {
+  for (const { character, sit } of sample) {
+    for (const facing of FACINGS) {
+      for (let column = 0; column < SIT_FRAME_COUNT; column += 1) {
+        if (!isSeated(column)) continue;
+        const label = `${character.id} ${facing} ${column}`;
+        const mask = shadowMask(character, facing, column);
+        assert.ok(mask.length > 0, `${label}: no shadow`);
+        const centerY = mean(mask.map((pixel) => pixel.y + 0.5));
+        assert.ok(centerY > SIT_ANCHOR_Y, `${label}: shadow centered at row ${centerY}, not below the seat`);
+        // Every translucent pixel of the real cell belongs to that one shadow.
+        const inMask = new Set(mask.map((pixel) => `${pixel.x},${pixel.y}`));
+        const stray = translucentPixels(cell(sit, facing, column)).filter((pixel) => !inMask.has(`${pixel.x},${pixel.y}`));
+        assert.deepEqual(stray, [], `${label}: a second shadow`);
+      }
+    }
+  }
+});
+
+test('seen from the side, the seated shadow starts at the back of the pelvis and runs forward under the thighs', () => {
+  for (const { character } of sample) {
+    for (const facing of ['left', 'right'] as const) {
+      // Facing left (W) the back is toward screen right, facing right (E) toward screen left.
+      const backToward = facing === 'left' ? 1 : -1;
+      for (let column = 0; column < SIT_FRAME_COUNT; column += 1) {
+        if (!isSeated(column)) continue;
+        const label = `${character.id} ${facing} ${column}`;
+        const xs = shadowMask(character, facing, column).map((pixel) => pixel.x);
+        const back = pelvisBack(character, facing, column, backToward);
+        const rearmost = backToward > 0 ? Math.max(...xs) : Math.min(...xs);
+        const frontmost = backToward > 0 ? Math.min(...xs) : Math.max(...xs);
+        assert.ok((rearmost - back) * backToward <= 0, `${label}: shadow reaches column ${rearmost}, behind the back at ${back}`);
+        // The silhouette's 1px outline lies outside the hips, and a pixel joins the shadow only when
+        // its center is inside: the shadow's rear column may fall up to 2 columns inside the edge.
+        assert.ok((back - rearmost) * backToward <= 2, `${label}: shadow starts at column ${rearmost}, short of the back at ${back}`);
+        assert.ok((SIT_ANCHOR_X - frontmost) * backToward >= 6, `${label}: shadow front at column ${frontmost}, not under the thighs`);
+      }
+    }
+  }
+});
+
+test('seen from the front or the back, the seated shadow lies ahead of the seat point in depth', () => {
+  // The same footprint ahead of the seat shows lower on screen facing down (toward the viewer)
+  // than facing up (away from the viewer); centered on the seat it would show at the same row.
+  for (const { character } of sample) {
+    for (let column = 0; column < SIT_FRAME_COUNT; column += 1) {
+      if (!isSeated(column)) continue;
+      const row = (facing: Facing): number => mean(shadowMask(character, facing, column).map((pixel) => pixel.y + 0.5));
+      assert.ok(row('down') - row('up') >= 1.5, `${character.id} ${column}: down ${row('down')}, up ${row('up')}`);
     }
   }
 });

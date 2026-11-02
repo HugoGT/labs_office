@@ -83,12 +83,29 @@ export interface Scene {
   readonly decals: readonly Decal[];
   /** Seated poses only: the point under the pelvis center, on the seat once fully seated. */
   readonly seat?: Vec3;
-  /**
-   * Where the body rests its weight, if not on the ground under the feet: the soft contact
-   * shadow is centered here, so a seated character reads as sitting on the seat.
-   */
-  readonly contact?: Vec3;
+  /** Fully seated poses only: the soft contact shadow, instead of the round one under the feet. */
+  readonly shadow?: SeatedShadow;
 }
+
+/**
+ * A flat ellipse on a horizontal plane, in character space: the footprint the seated body casts
+ * from the back of the pelvis forward to the knees, as wide as the hips.
+ */
+export interface SeatedShadow {
+  /** Center of the ellipse; its y is the height of the plane it lies on. */
+  readonly center: Vec3;
+  /** Half extent along the facing direction (+z). */
+  readonly halfLength: number;
+  /** Half extent across it (x). */
+  readonly halfWidth: number;
+}
+
+/**
+ * Height of the plane a seated shadow lies on: halfway between the floor and the seat surface.
+ * On the seat itself the thighs hide it; on the floor it would leave the body and, under a
+ * sofa, land on the sofa's own front. Halfway it shows just below the thighs and buttocks.
+ */
+export const SEATED_SHADOW_Y = SEAT_SURFACE_Y / 2;
 
 const DEG = Math.PI / 180;
 const LEFT = 1;
@@ -161,11 +178,21 @@ interface LegJoints {
 }
 
 /** Extra state of a seated pose. The upper body is built in its own space, see buildSeatedScene. */
+/** An upright ellipsoid (round) or elliptic cylinder around the hips, by its vertical and depth half extents. */
+interface HipShell {
+  readonly center: Vec3;
+  readonly halfHeight: number;
+  readonly depth: number;
+  readonly round: boolean;
+}
+
 interface SeatedRig {
   readonly pose: SitPose;
   readonly legs: Readonly<Record<Side, LegJoints>>;
   /** Parts placed straight in character space, outside the moving upper body (lap, floor). */
   readonly fixed: Primitive[];
+  /** Shapes wrapped around the pelvis, in upper-body space: the back of the outermost one is the sitter's back. */
+  readonly hipShells: HipShell[];
   /** Character space to upper-body space. */
   toBody(point: Vec3): Vec3;
 }
@@ -302,6 +329,7 @@ function buildSeatedScene(spec: CharacterSpec, pose: SeatedPose, seatBack: numbe
     pose: sit,
     legs,
     fixed: [],
+    hipShells: [],
     toBody(point) {
       const q = sub(point, offset);
       return v3(dot(q, lean.ax), dot(q, lean.ay), dot(q, lean.az));
@@ -334,8 +362,27 @@ function buildSeatedScene(spec: CharacterSpec, pose: SeatedPose, seatBack: numbe
     })),
     seat,
     // Mid-transition the pelvis hangs in the air and the weight is still on the feet.
-    ...(sit.lower === 1 ? { contact: seat } : {}),
+    ...(sit.lower === 1 ? { shadow: seatedShadow(p, rig, lean, offset) } : {}),
   };
+}
+
+/**
+ * From the back of the pelvis (the rearmost point of the leaned shapes around the hips, garments
+ * included) forward to the knees, as wide as the hips.
+ */
+function seatedShadow(p: Proportions, rig: SeatedRig, lean: Basis, offset: Vec3): SeatedShadow {
+  // pitchDown tips the up axis forward by sin(lean) and keeps cos(lean) of the depth axis.
+  const sin = Math.abs(lean.ay.z);
+  const cos = lean.az.z;
+  const rear = Math.min(
+    ...rig.hipShells.map((shell) => {
+      const z = add(applyBasis(lean, shell.center), offset).z;
+      const reach = shell.round ? Math.hypot(shell.halfHeight * sin, shell.depth * cos) : shell.halfHeight * sin + shell.depth * cos;
+      return z - reach;
+    }),
+  );
+  const front = rig.legs[LEFT].knee.z;
+  return { center: v3(0, SEATED_SHADOW_Y, (rear + front) / 2), halfLength: (front - rear) / 2, halfWidth: p.hipHalf };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -419,10 +466,11 @@ function addLeg(prims: Primitive[], body: Body, side: Side, joints: LegJoints): 
 
 function addHips(body: Body): void {
   const { p, spec, hipY, waistY } = body;
-  body.prims.push(
-    ellipsoid(v3(0, hipY + 0.9, -0.1), v3(p.hipHalf, 3.0, p.torsoDepth - 0.2), { material: solid('bottom'), part: 'hips' }),
-  );
+  const center = v3(0, hipY + 0.9, -0.1);
+  const radii = v3(p.hipHalf, 3.0, p.torsoDepth - 0.2);
+  body.prims.push(ellipsoid(center, radii, { material: solid('bottom'), part: 'hips' }));
   if (body.sit) {
+    body.sit.hipShells.push({ center, halfHeight: radii.y, depth: radii.z, round: true });
     addSeatedSkirtAndCoat(body, body.sit);
     return;
   }
@@ -506,12 +554,14 @@ function addSeatedSkirtAndCoat(body: Body, rig: SeatedRig): void {
   if (spec.bottom === 'skirt') {
     const bottom = hipY - 1.6;
     const top = waistY + 0.6;
+    const center = v3(0, (bottom + top) / 2, 0.1);
     body.prims.push(
-      cylinder(v3(0, (bottom + top) / 2, 0.1), p.hipHalf + 0.35, (top - bottom) / 2, p.torsoDepth + 0.55, {
+      cylinder(center, p.hipHalf + 0.35, (top - bottom) / 2, p.torsoDepth + 0.55, {
         material: solid('bottom'),
         part: 'skirt',
       }),
     );
+    rig.hipShells.push({ center, halfHeight: (top - bottom) / 2, depth: p.torsoDepth + 0.55, round: false });
     rig.fixed.push(
       lapCover(body, rig, p.hipHalf + 0.35, thighRadius(body) + 0.55, 0.8, {
         material: (_point, _normal, local) => ({ key: 'bottom', shift: local.y > 0.86 ? -1 : 0 }),
@@ -527,12 +577,14 @@ function addSeatedSkirtAndCoat(body: Body, rig: SeatedRig): void {
       if (normal.z > 0.4 && Math.abs(point.x) < 1.9) return { key: 'top', shift: -1 };
       return { key: 'top' };
     };
+    const center = v3(0, (bottom + top) / 2, 0);
     body.prims.push(
-      cylinder(v3(0, (bottom + top) / 2, 0), p.hipHalf + 0.95, (top - bottom) / 2, p.torsoDepth + 0.95, {
+      cylinder(center, p.hipHalf + 0.95, (top - bottom) / 2, p.torsoDepth + 0.95, {
         material: opening,
         part: 'coat',
       }),
     );
+    rig.hipShells.push({ center, halfHeight: (top - bottom) / 2, depth: p.torsoDepth + 0.95, round: false });
     rig.fixed.push(
       lapCover(body, rig, p.hipHalf + 0.95, thighRadius(body) + 0.85, 0.92, {
         material: (point, normal, local) => {
