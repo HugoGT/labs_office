@@ -15,6 +15,7 @@ import {
   HEDGE,
   PACK_FACINGS,
   PLANT,
+  SOFA,
   TABLE,
   TABLE_FACINGS,
   TERRAIN_MATERIALS,
@@ -448,6 +449,48 @@ function doorsPreview(sheets: PackSheets): PixelBuffer {
   return out;
 }
 
+const SOFA_CELL = { cols: 4, rows: 5 } as const;
+
+/**
+ * One sofa in one facing on a cell of floor, a sitter on every seat between its two layers: the
+ * back layer, the sitters by their ground, then the front layer. Its footprint is laid on the tile
+ * grid like the office does, the floor under its middle on SOFA.anchor, each sitter on the middle
+ * of its own tile.
+ */
+function sofaCell(sheets: PackSheets, floor: PixelBuffer, sheet: PixelBuffer, seats: number, facing: ArtFacing, sitter: number): PixelBuffer {
+  const cell = tiledFloor(floor, SOFA_CELL.cols, SOFA_CELL.rows);
+  const sideways = facing === 'left' || facing === 'right';
+  const rect = sideways ? { x: 1, y: 1, w: 1, h: seats } : { x: Math.floor((SOFA_CELL.cols - seats) / 2), y: 3, w: seats, h: 1 };
+  const center = { x: (rect.x + rect.w / 2) * ART_TILE, y: (rect.y + rect.h / 2) * ART_TILE };
+  const x = center.x - SOFA.anchor.x;
+  const y = center.y - SOFA.anchor.y;
+  const column = facingColumn(facing);
+  cell.blit(frameOf(sheet, SOFA, column, 0), x, y);
+  const idle = CHARACTER_SEATED.idleColumns[0] as number;
+  for (let index = 0; index < seats; index += 1) {
+    const ground = sideways ? { x: (rect.x + 0.5) * ART_TILE, y: (rect.y + index + 0.5) * ART_TILE } : { x: (rect.x + index + 0.5) * ART_TILE, y: (rect.y + 0.5) * ART_TILE };
+    const character = sheets.characters[(sitter + index) % sheets.characters.length]!;
+    const pose = frameOf(character.seated, CHARACTER_SEATED, idle, seatedRowForFacing(facing));
+    cell.blit(pose, ground.x - CHARACTER_SEATED.anchor.x + CHAIR.anchor.x - CHAIR.ground.x, ground.y - CHARACTER_SEATED.anchor.y + CHAIR.anchor.y - CHAIR.ground.y);
+  }
+  cell.blit(frameOf(sheet, SOFA, column, 1), x, y);
+  return cell;
+}
+
+/** Every sofa in the four facings on the wood floor, a sitter on each seat. */
+function sofasPreview(sheets: PackSheets): PixelBuffer {
+  const floor = sheets.floors.find((entry) => entry.terrain === 'wood')!.image;
+  const width = SOFA_CELL.cols * ART_TILE;
+  const height = SOFA_CELL.rows * ART_TILE;
+  const out = backdrop(GAP + PACK_FACINGS.length * (width + GAP), GAP + sheets.sofas.length * (height + GAP));
+  sheets.sofas.forEach(({ seats, image }, row) => {
+    PACK_FACINGS.forEach((facing, column) => {
+      out.blit(sofaCell(sheets, floor, image, seats, facing, (row * PACK_FACINGS.length + column) * 3), GAP + column * (width + GAP), GAP + row * (height + GAP));
+    });
+  });
+  return out;
+}
+
 export function renderPreviews(sheets: PackSheets): Map<string, PixelBuffer> {
   return new Map([
     ['doors.png', upscale(doorsPreview(sheets), PREVIEW_SCALE)],
@@ -455,6 +498,7 @@ export function renderPreviews(sheets: PackSheets): Map<string, PixelBuffer> {
     ['floors.png', upscale(floorsPreview(sheets), PREVIEW_SCALE)],
     ['furniture.png', upscale(furniturePreview(sheets), PREVIEW_SCALE)],
     ['props.png', upscale(propsPreview(sheets), PREVIEW_SCALE)],
+    ['sofas.png', upscale(sofasPreview(sheets), PREVIEW_SCALE)],
     ['tables.png', upscale(tablesPreview(sheets), PREVIEW_SCALE)],
     ['terrain-pairs.png', upscale(terrainPairsPreview(sheets), PREVIEW_SCALE)],
     ['terrain.png', upscale(terrainScene(sheets), PREVIEW_SCALE)],

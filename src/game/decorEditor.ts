@@ -142,9 +142,10 @@ const DESK_SIDE = 3;
  * Whether a piece fits a 3x3 desk in some rotation, so the desk scope offers
  * it. Never a door (#223): it opens a wall, which only an admin edits. Never
  * a room table either (#116), even one that fits: a desk holds desk tables.
+ * Nor a sofa: it furnishes the office, a desk seats one at its table.
  */
 export function fitsDeskArea(info: DecorPieceInfo): boolean {
-  if (info.kind === 'door' || info.kind === 'table') return false;
+  if (info.kind === 'door' || info.kind === 'table' || info.kind === 'sofa') return false;
   return info.footprint.w <= DESK_SIDE && info.footprint.h <= DESK_SIDE;
 }
 

@@ -92,6 +92,7 @@ export const ART_IMAGE_KINDS = [
   'hedge',
   'table',
   'door',
+  'sofa',
 ] as const;
 export type ArtImageKind = (typeof ART_IMAGE_KINDS)[number];
 
@@ -145,6 +146,21 @@ export interface ChairSpec extends ImageSpecBase {
   /** Floor pixel under the seat: the depth used to sort the chair against characters. */
   readonly ground: Point;
   readonly footprint: Footprint;
+}
+
+/**
+ * A sofa: an armchair widened one seat per tile, laid out like a chair sheet
+ * (facings by layers). Every cell holds the floor pixel under the middle of
+ * the sofa (the middle of its footprint) on `anchor`; its seats lie a whole
+ * tile apart on screen, each SEAT_HEIGHT above the middle of its own tile.
+ */
+export interface SofaSpec extends ImageSpecBase {
+  readonly kind: 'sofa';
+  readonly columnOrder: readonly ArtFacing[];
+  readonly rowOrder: readonly ChairLayer[];
+  readonly anchor: Point;
+  /** The most seats a sofa of this frame holds. */
+  readonly maxSeats: number;
 }
 
 export interface DeskSpec extends ImageSpecBase {
@@ -299,7 +315,8 @@ export type ArtImageSpec =
   | BridgeSpec
   | HedgeSpec
   | TableSpec
-  | DoorSpec;
+  | DoorSpec
+  | SofaSpec;
 
 export const CHARACTER_WALK: CharacterWalkSpec = {
   kind: 'character-walk',
@@ -350,6 +367,41 @@ export const CHAIR: ChairSpec = {
   transparentCorners: true,
   maxColors: MAX_COLORS_PER_IMAGE,
 };
+
+/**
+ * Sofas of up to three seats in every facing: a three-seat one spans 90
+ * pixels across, or 109 rows turned sideways (45 below the middle of the
+ * sofa, 64 above it with the backrest). The anchor leaves a free row and
+ * column around the largest, so every frame corner stays transparent.
+ */
+export const SOFA: SofaSpec = {
+  kind: 'sofa',
+  frame: { width: 96, height: 112 },
+  columns: PACK_FACINGS.length,
+  rows: CHAIR_LAYERS.length,
+  columnOrder: PACK_FACINGS,
+  rowOrder: CHAIR_LAYERS,
+  anchor: { x: 48, y: 66 },
+  maxSeats: 3,
+  alpha: 'partial',
+  transparentCorners: true,
+  maxColors: MAX_COLORS_PER_IMAGE,
+};
+
+const SOFA_ID = /^sofa-[a-z0-9]+-([0-9])$/;
+
+/**
+ * How many seats (tiles) a sofa piece holds, read from its id
+ * (`sofa-<material>-<seats>`), like a door's span: the decor rules size a sofa
+ * without its catalog entry. `null` for an id that states none from 2 up to
+ * `SOFA.maxSeats`.
+ */
+export function sofaSeatsOf(piece: string): number | null {
+  const match = SOFA_ID.exec(piece);
+  if (match === null) return null;
+  const seats = Number(match[1]);
+  return seats >= 2 && seats <= SOFA.maxSeats ? seats : null;
+}
 
 /**
  * A desk piece is the table a person places on one 3-tile edge of their desk
@@ -1037,6 +1089,7 @@ export const ART_IMAGE_SPECS: Readonly<{
   hedge: HedgeSpec;
   table: TableSpec;
   door: DoorSpec;
+  sofa: SofaSpec;
 }> = {
   'character-walk': CHARACTER_WALK,
   'character-seated': CHARACTER_SEATED,
@@ -1051,6 +1104,7 @@ export const ART_IMAGE_SPECS: Readonly<{
   hedge: HEDGE,
   table: TABLE,
   door: DOOR,
+  sofa: SOFA,
 };
 
 export function sheetSize(spec: Pick<ImageSpecBase, 'frame' | 'columns' | 'rows'>): Size {
@@ -1185,7 +1239,7 @@ export function artSheetKey(pieceId: string, role: string): string {
 /** `format` of `public/assets/pack/manifest.json`. */
 export const ART_PACK_FORMAT = 'oficina-art-pack';
 
-export const ART_PIECE_KINDS = ['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door'] as const;
+export const ART_PIECE_KINDS = ['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa'] as const;
 export type ArtPieceKind = (typeof ART_PIECE_KINDS)[number];
 
 /** One PNG of a piece. Paths are relative to the manifest; `sha256` is of the file bytes. */
@@ -1227,6 +1281,25 @@ export interface ArtChairPiece extends ArtPieceBase {
    * `defaultColor`, like a painted desk. Absent, as on a chair uploaded before chairs had colors, means
    * not colorable.
    */
+  readonly colorable?: boolean;
+  readonly defaultColor?: string | null;
+}
+
+/**
+ * A sofa of `seats` places (`sofaSeatsOf` its id), one per tile: `footprint`
+ * is `seats` x 1 facing down (0), swapped when it is turned sideways. Its
+ * `anchor` is the floor under the middle of that footprint in every cell of
+ * its `SOFA` sheet, the seats a tile apart around it. Like a chair it may take
+ * a color (the fabric one), exported in `defaultColor`.
+ */
+export interface ArtSofaPiece extends ArtPieceBase {
+  readonly kind: 'sofa';
+  readonly material: string;
+  readonly seats: number;
+  readonly facings: readonly ArtFacing[];
+  readonly layers: readonly ChairLayer[];
+  readonly anchor: Point;
+  readonly footprint: Footprint;
   readonly colorable?: boolean;
   readonly defaultColor?: string | null;
 }
@@ -1344,7 +1417,16 @@ export interface ArtDoorPiece extends ArtPieceBase {
   readonly variant: DoorVariant;
 }
 
-export type ArtPiece = ArtCharacterPiece | ArtChairPiece | ArtDeskPiece | ArtFloorPiece | ArtWallPiece | ArtTilesetPiece | ArtPropPiece | ArtDoorPiece;
+export type ArtPiece =
+  | ArtCharacterPiece
+  | ArtChairPiece
+  | ArtDeskPiece
+  | ArtFloorPiece
+  | ArtWallPiece
+  | ArtTilesetPiece
+  | ArtPropPiece
+  | ArtDoorPiece
+  | ArtSofaPiece;
 
 export interface ArtPackManifest {
   readonly format: typeof ART_PACK_FORMAT;

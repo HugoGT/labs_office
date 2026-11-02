@@ -455,6 +455,8 @@ export function createTerrainRuntime({
       if (item.color !== undefined && info.colorable !== true) throw new InvalidTerrainEditError('this piece takes no color');
       // A door opens a wall, which only an admin edits: the desk scope never places one.
       if (area !== undefined && info.kind === 'door') throw new InvalidTerrainEditError('a door is not for a desk');
+      // A sofa furnishes the office: the desk scope never places one either (`fitsDeskArea` does not offer it).
+      if (area !== undefined && info.kind === 'sofa') throw new InvalidTerrainEditError('a sofa is not for a desk');
     }
     if (area !== undefined) {
       const inside = (item: Pick<DecorItem, 'index' | 'piece' | 'rotation'>): boolean =>

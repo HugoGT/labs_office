@@ -111,7 +111,7 @@ export function DecorEditorSection({
   onExitRef.current = onExit;
   const names = useMemo(() => {
     const byId = new Map<string, string>();
-    for (const kind of ['chair', 'desk', 'table', 'plant'] as const) for (const option of catalog?.[kind] ?? []) byId.set(option.id, option.name);
+    for (const kind of ['chair', 'sofa', 'desk', 'table', 'plant'] as const) for (const option of catalog?.[kind] ?? []) byId.set(option.id, option.name);
     return byId;
   }, [catalog]);
 

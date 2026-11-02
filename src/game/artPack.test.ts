@@ -144,6 +144,34 @@ describe('parseArtPackManifest: doors (#223, #233)', () => {
   });
 });
 
+describe('parseArtPackManifest: sofas', () => {
+  const sofas = (): ArtPackManifest['pieces'] => pack().pieces.filter((piece) => piece.kind === 'sofa');
+
+  it('reads the pack sofas: leather and fabric, two and three seats, one tile per seat', () => {
+    expect(sofas().map((piece) => piece.id)).toEqual(['sofa-leather-2', 'sofa-leather-3', 'sofa-fabric-2', 'sofa-fabric-3']);
+    expect(findPiece(pack(), 'sofa-fabric-3')).toMatchObject({ kind: 'sofa', seats: 3, footprint: { w: 3, h: 1 }, colorable: true, defaultColor: '#c4ab8c' });
+  });
+
+  it('drops a sofa without its anchor, whose footprint is not its seats in a row, or whose seats are not the ones its id says', () => {
+    const [two] = sofas();
+    const broken = [
+      { ...two, id: 'sofa-oak-2', anchor: undefined },
+      { ...two, id: 'sofa-elm-2', footprint: { w: 1, h: 2 } },
+      { ...two, id: 'sofa-ash-2', seats: 3, footprint: { w: 3, h: 1 } },
+      { ...two, id: 'sofa-fir-2', colorable: true, defaultColor: 'beige' },
+    ];
+
+    const parsed = parseArtPackManifest(withPieces([two, ...broken]));
+
+    expect(parsed?.pieces.map((piece) => piece.id)).toEqual(['sofa-leather-2']);
+  });
+
+  it('preloads every sofa with the rest of the office furniture, so a sofa draws at once', () => {
+    const urls = bootLoadRequests(pack(), ART_PACK_MANIFEST_URL).map((request) => request.url);
+    for (const sheet of ['leather-2', 'leather-3', 'fabric-2', 'fabric-3']) expect(urls).toContain(`assets/pack/sofa/${sheet}.png`);
+  });
+});
+
 describe('load requests', () => {
   it('turns each piece file into a spritesheet with the frame size of its image kind', () => {
     const manifest = pack();
@@ -179,10 +207,11 @@ describe('load requests', () => {
     const requests = bootLoadRequests(pack(), ART_PACK_MANIFEST_URL);
     const kinds = new Set(requests.map((request) => request.key.split(':')[1]?.split('-')[0]));
 
-    expect(kinds).toEqual(new Set(['floor', 'desk', 'chair', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'character']));
+    expect(kinds).toEqual(new Set(['floor', 'desk', 'chair', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa', 'character']));
     // Nine floors, four desks, seven chairs and four walls, the terrain tileset,
-    // two trees, a plant, a bridge, a hedge, three tables (art step 8, the oval one since #208) and two doors (#223, #233).
-    expect(requests).toHaveLength(37);
+    // two trees, a plant, a bridge, a hedge, three tables (art step 8, the oval one since #208), two doors (#223, #233)
+    // and four sofas.
+    expect(requests).toHaveLength(41);
     expect(requests.filter((request) => request.key.startsWith('art:character-')).map((request) => request.key))
       .toEqual([artSheetKey(pack().defaults.character, 'walk'), artSheetKey(pack().defaults.character, 'seated')]);
     expect(requests).toContainEqual({
@@ -228,6 +257,19 @@ describe('recolorFor', () => {
     expect(recolorFor(gamer, '#D8433B')).toBeNull();
     expect(recolorFor(gamer, null)).toBeNull();
     expect(recolorFor(wood, '#2a9d8f')).toBeNull();
+  });
+});
+
+describe('recolorFor: sofas', () => {
+  it('paints the fabric sofas from their beige, and leaves the leather ones as exported', () => {
+    const manifest = pack();
+    const fabric = findPiece(manifest, 'sofa-fabric-2');
+    const leather = findPiece(manifest, 'sofa-leather-3');
+    if (fabric === undefined || leather === undefined) throw new Error('missing pieces');
+
+    expect(recolorFor(fabric, '#2a9d8f')).toEqual({ from: '#c4ab8c', to: '#2a9d8f' });
+    expect(recolorFor(fabric, '#C4AB8C')).toBeNull();
+    expect(recolorFor(leather, '#2a9d8f')).toBeNull();
   });
 });
 

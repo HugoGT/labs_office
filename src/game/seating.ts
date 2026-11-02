@@ -166,6 +166,14 @@ export function inSeatReach(position: { readonly x: number; readonly y: number }
 export const CHAIR_PIECES = ['chair-wood', 'chair-metal', 'chair-leather', 'chair-gamer', 'chair-office', 'chair-task', 'chair-fabric'] as const;
 
 /**
+ * The sofa pieces of the art pack (pinned by a test against the manifest),
+ * which the entrance waits for like the chairs. Each tile of a sofa is a seat
+ * (`decorSeats` of officeDecor.ts), grounded on that tile's middle like a
+ * chair (`chairGround`).
+ */
+export const SOFA_PIECES = ['sofa-leather-2', 'sofa-leather-3', 'sofa-fabric-2', 'sofa-fabric-3'] as const;
+
+/**
  * A chair of the decor layer as a seat: one per tile, `index` row major
  * (`ty * width + tx`), its ground point the middle of that tile, like a base
  * map chair.

@@ -76,7 +76,7 @@ function lengthen(screen: number, seats: number, facing: Facing): number {
   return seats > 1 && (facing === 'left' || facing === 'right') ? screen / DEPTH_SCALE : screen;
 }
 
-/** Seams between cushions, at the seat boundaries on screen. */
+/** Seams between cushions, at the seat boundaries on screen, in the ramp's own deep tone: a recolor moves them with the rest. */
 function seamed(seats: number, facing: Facing, inner: number, ramp: Ramp, shade?: (point: SurfacePoint, color: Rgba) => Rgba): (point: SurfacePoint, color: Rgba) => Rgba {
   const scale = lengthen(1, seats, facing);
   return (point, color) => {
@@ -85,7 +85,7 @@ function seamed(seats: number, facing: Facing, inner: number, ramp: Ramp, shade?
     const screen = point.v / scale;
     for (let k = 1; k < seats; k += 1) {
       const seam = -inner + (2 * inner * k) / seats;
-      if (Math.abs(screen - seam) < 0.6) return mixRgba(shaded, ramp.deep, 0.55);
+      if (Math.abs(screen - seam) < 0.6) return ramp.deep;
     }
     return shaded;
   };

@@ -22,6 +22,7 @@ import {
   TERRAIN_MATERIALS,
   artSheetKey,
   doorVariantOf,
+  sofaSeatsOf,
   sheetSize,
   type ArtImageKind,
   type DoorVariant,
@@ -118,7 +119,7 @@ export interface ArtLoadRequest {
  * and every piece of the Tiled layout (art step 8). The default character
  * also boots with the office; other characters load once somebody wears them.
  */
-export const BOOT_PIECE_KINDS: readonly ArtPieceKind[] = ['floor', 'desk', 'chair', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door'];
+export const BOOT_PIECE_KINDS: readonly ArtPieceKind[] = ['floor', 'desk', 'chair', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa'];
 
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/;
 
@@ -229,6 +230,16 @@ function hasDrawingFields(piece: Record<string, unknown>, kind: ArtPieceKind): b
         piece.variant === doorVariantOf(String(piece.id)) &&
         (piece.footprint as { w: number }).w === DOOR.variants[piece.variant as DoorVariant].span
       );
+    case 'sofa':
+      // One seat per tile, in a row facing down, as many as its id says (`sofaSeatsOf`).
+      return (
+        isPoint(piece.anchor) &&
+        isFootprint(piece.footprint) &&
+        piece.seats === sofaSeatsOf(String(piece.id)) &&
+        (piece.footprint as { w: number; h: number }).w === piece.seats &&
+        (piece.footprint as { w: number; h: number }).h === 1 &&
+        (piece.colorable === undefined ? piece.defaultColor === undefined : isColorModel(piece))
+      );
     case 'bridge': {
       const deck = piece.deck;
       return isPlacedProp(piece) && isRecord(deck) && BRIDGE_ORIENTATIONS.every((orientation) => isRecord(deck[orientation]) && isFootprint(deck[orientation]));
@@ -313,7 +324,7 @@ export interface Recolor {
  * there, and anything else is a row this client should not tint.
  */
 export function recolorFor(piece: ArtPiece, color: string | null): Recolor | null {
-  if ((piece.kind !== 'desk' && piece.kind !== 'floor' && piece.kind !== 'chair') || piece.colorable !== true) return null;
+  if ((piece.kind !== 'desk' && piece.kind !== 'floor' && piece.kind !== 'chair' && piece.kind !== 'sofa') || piece.colorable !== true) return null;
   if (piece.defaultColor === null || piece.defaultColor === undefined) return null;
   if (color === null) return null;
   const to = color.toLowerCase();

@@ -45,6 +45,21 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
     expect(screen.getByRole('group', { name: 'Mesas de sala' })).toBeInTheDocument();
   });
 
+  it('places a picked sofa over its seats on the clicked tile, says what it places, and a fabric one in its color', async () => {
+    const decor: OfficeDecorPort = { setDecor: vi.fn(async () => undefined) };
+    const { bridge, commands } = renderSection({ decor, initiallyActive: true });
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Sofá de cuero (3 plazas)' }));
+    expect(screen.getByText('Poniendo Sofá de cuero (3 plazas)')).toBeInTheDocument();
+    expect(commands.at(-1)).toMatchObject({ brush: { kind: 'piece', piece: 'sofa-leather-3', info: { kind: 'sofa', footprint: { w: 3, h: 1 } }, rotation: 0 }, area: null });
+    act(() => bridge.emit('decorpick', { index: at(40, 40) }));
+    await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: { piece: 'sofa-leather-3', rotation: 0 } }]));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sofá tapizado (2 plazas)' }));
+    act(() => bridge.emit('decorpick', { index: at(44, 40) }));
+    await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(44, 40), item: { piece: 'sofa-fabric-2', rotation: 0, color: '#c4ab8c' } }]));
+  });
+
   it('opens directly from the sidebar, places the picked piece on the clicked tile and says what it places', async () => {
     const decor: OfficeDecorPort = { setDecor: vi.fn(async () => undefined) };
     const { bridge, commands } = renderSection({ decor, initiallyActive: true });

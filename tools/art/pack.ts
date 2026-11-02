@@ -24,6 +24,7 @@ import {
   HEDGE,
   PACK_FACINGS,
   PLANT,
+  SOFA,
   TABLE,
   TABLE_FACINGS,
   TERRAIN_DECALS,
@@ -42,6 +43,7 @@ import {
   type DoorVariant,
 } from '../../src/game/artContract.ts';
 import { CHAIR_DEFAULT_COLORS, type ChairMaterial } from './domain/chairs.ts';
+import { SOFA_DEFAULT_COLORS, type SofaMaterial } from './domain/sofas.ts';
 import type { DoorMaterial } from './domain/doors.ts';
 import type { PixelBuffer } from '../../src/art/pixelBuffer.ts';
 import type { PlantKind, TreeKind } from './domain/props.ts';
@@ -69,6 +71,10 @@ const CHAIR_NAMES: Readonly<Record<ChairMaterial, string>> = {
   office: 'Silla de oficina',
   task: 'Silla giratoria',
   fabric: 'Sillón tapizado',
+};
+const SOFA_NAMES: Readonly<Record<SofaMaterial, string>> = {
+  leather: 'Sofá de cuero',
+  fabric: 'Sofá tapizado',
 };
 const DESK_NAMES: Readonly<Record<TableMaterial, string>> = {
   glass: 'Escritorio de vidrio',
@@ -156,6 +162,24 @@ export function renderPackFiles(): Map<string, Uint8Array> {
         colorable: CHAIR_DEFAULT_COLORS[material] !== undefined,
         defaultColor: CHAIR_DEFAULT_COLORS[material] ?? null,
         files: [png(`chair/${material}.png`, 'sheet', 'chair', image)],
+      }),
+    ),
+    ...sheets.sofas.map(
+      ({ material, seats, image }): ArtPiece => ({
+        id: `sofa-${material}-${seats}`,
+        kind: 'sofa',
+        name: `${SOFA_NAMES[material]} (${seats} plazas)`,
+        ...common,
+        material,
+        seats,
+        facings: PACK_FACINGS,
+        layers: CHAIR_LAYERS,
+        anchor: SOFA.anchor,
+        footprint: { w: seats, h: 1 },
+        // Only the fabric sofas take a color, like the fabric armchair.
+        colorable: SOFA_DEFAULT_COLORS[material] !== undefined,
+        defaultColor: SOFA_DEFAULT_COLORS[material] ?? null,
+        files: [png(`sofa/${material}-${seats}.png`, 'sheet', 'sofa', image)],
       }),
     ),
     ...sheets.desks.map(

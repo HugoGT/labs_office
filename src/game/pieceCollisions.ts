@@ -37,9 +37,9 @@ export const COLLISION_COORD_LIMIT = 512;
 export const COLLISION_BODY_CENTER_OFFSET = AVATAR_BODY_CENTER_OFFSET;
 
 /** Pieces that stand in the world. Walls and hedges stay tile based; bridges are decks. */
-export const EDITABLE_PIECE_KINDS = ['tree', 'plant', 'table', 'desk', 'chair'] as const;
+export const EDITABLE_PIECE_KINDS = ['tree', 'plant', 'table', 'desk', 'chair', 'sofa'] as const;
 export type EditablePieceKind = (typeof EDITABLE_PIECE_KINDS)[number];
-const PIECE_ID = /^(tree|plant|table|desk|chair)-[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const PIECE_ID = /^(tree|plant|table|desk|chair|sofa)-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_PIECE_ID_LENGTH = 100;
 
 export interface CollisionPoint {
@@ -271,8 +271,10 @@ export function staticCollisionInstances(
  * stands on the bottom middle of its footprint like a Tiled prop, the plant
  * walk-through and the table solid by default; a vertical room table (90)
  * stands on its swapped footprint, its rectangles turned a quarter about its
- * center. A piece the caller cannot resolve places nothing, and neither
- * does a door (#223), which opens a wall rather than blocking.
+ * center. A sofa stands on the middle of its footprint like a chair on its
+ * tile, turned by its facing, walk-through by default and picked anywhere on
+ * it. A piece the caller cannot resolve places nothing, and neither does a
+ * door (#223), which opens a wall rather than blocking.
  */
 export function officeDecorInstances(
   items: readonly DecorItem[],
@@ -290,6 +292,18 @@ export function officeDecorInstances(
     const ty = Math.floor(item.index / width);
     if (info.kind === 'chair') {
       instances.push(...seatInstances([{ tx, ty, facing: decorChairFacing(item.rotation) }], item.piece));
+      continue;
+    }
+    if (info.kind === 'sofa') {
+      instances.push({
+        piece: item.piece,
+        pivot: { x: (rect.x + rect.w / 2) * COLLISION_TILE, y: (rect.y + rect.h / 2) * COLLISION_TILE },
+        rotation: rotationForFacing(decorChairFacing(item.rotation)),
+        scale: UNIT,
+        offset: ORIGIN,
+        defaults: [],
+        pickBox,
+      });
       continue;
     }
     if (info.kind === 'desk') {

@@ -36,7 +36,7 @@ import {
 import { deskAt, deskZoneName } from './deskLayout';
 import { SPACE_SHADE_ALPHA, SPACE_SHADE_NAME, shadeAround, shadeKey } from './spaceFocus';
 import { tableFacing, tableFloorRect } from './deskTable';
-import { decorChairs, decorFootprint, encodeOfficeDecor, isDecorChairPiece, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
+import { decorChairFacing, decorChairs, decorFootprint, decorSeats, encodeOfficeDecor, isDecorChairPiece, isDecorSofaPiece, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
 import { doorEdge, doorHingeStops, doorLeaves, doorOpenings, doorSpan, doorStepOf, doorSwingRotation, keptSwings, moveDoors, openDoorLeaves, type DoorLeaf, type DoorMotion } from './officeDoors';
 import { deskEntryRefused, isOnDesk } from './deskDecorRules';
 import { lockedBehindDoor, lockedDoorAhead, lockedSpaceEntered } from './spaceLocks';
@@ -53,6 +53,7 @@ import {
   placeChairs,
   placeLayout,
   placeSeats,
+  placeSofa,
   placeWalls,
   placeZoneLabels,
   putArtSprite,
@@ -126,6 +127,7 @@ import {
   BASE_MAP_SEATS,
   CHAIR_PIECES,
   SEAT_REACH_TILES,
+  SOFA_PIECES,
   chairGround,
   chairSeatId,
   chairSeatTiles,
@@ -693,8 +695,8 @@ export class OfficeScene extends Phaser.Scene {
     // llama el servidor a quien entra sin identidad verificada.
     this.player = spawnPlayer(this, this.options.playerName ?? DEFAULT_NAME, this.characterSheets(null));
     // Only art the initial office actually draws; an unused broken upload cannot block entry.
-    // Every wall and chair piece, not only the layout's: a wall painted or a chair placed live draws at once.
-    for (const id of ['tileset-terrain', ...(this.mapSeats.length > 0 ? [BASE_MAP_CHAIR] : []), ...WALL_PIECES, ...CHAIR_PIECES, ...this.layout.walls, ...this.layout.hedges,
+    // Every wall, chair and sofa piece, not only the layout's: a wall painted or a chair or sofa placed live draws at once.
+    for (const id of ['tileset-terrain', ...(this.mapSeats.length > 0 ? [BASE_MAP_CHAIR] : []), ...WALL_PIECES, ...CHAIR_PIECES, ...SOFA_PIECES, ...this.layout.walls, ...this.layout.hedges,
       ...this.layout.props.map((prop) => prop.piece)]) {
       if (id !== null) this.entrancePieces.add(id);
     }
@@ -1271,10 +1273,10 @@ export class OfficeScene extends Phaser.Scene {
       const seat = this.mapSeats[ref.index];
       return { id, ground: { x: (seat.tx + 0.5) * TILE, y: (seat.ty + 0.5) * TILE }, facing: seat.facing, reach: mapSeatTiles(seat) };
     }
-    // A chair of the decor layer (#208); a desk has no seat of its own.
-    const chair = decorChairs(this.officeDecor).find((candidate) => candidate.index === ref.index);
-    if (chair === undefined) return null;
+    // A chair of the decor layer (#208), or a tile of a sofa; a desk has no seat of its own.
     const width = this.layout.width;
+    const chair = decorSeats(this.officeDecor, width).find((candidate) => candidate.index === ref.index);
+    if (chair === undefined) return null;
     return { id, ground: chairGround(width, chair.index), facing: chair.facing, reach: chairSeatTiles(width, chair.index) };
   }
 
@@ -1298,7 +1300,7 @@ export class OfficeScene extends Phaser.Scene {
     return best;
   }
 
-  /** Every seat no peer sits on: map chairs and every decor chair. */
+  /** Every seat no peer sits on: map chairs, every decor chair and every tile of a sofa. */
   private freeSeats(): ResolvedSeat[] {
     const taken = new Set<string>();
     for (const sessionId of this.remotes?.sessionIds() ?? []) {
@@ -1310,7 +1312,7 @@ export class OfficeScene extends Phaser.Scene {
       const seat = this.resolveSeat(mapSeatId(index));
       if (seat) candidates.push(seat);
     });
-    for (const chair of decorChairs(this.officeDecor)) {
+    for (const chair of decorSeats(this.officeDecor, this.layout.width)) {
       const seat = this.resolveSeat(chairSeatId(chair.index));
       if (seat) candidates.push(seat);
     }
@@ -2111,8 +2113,13 @@ export class OfficeScene extends Phaser.Scene {
     }
   }
 
-  /** One item of the decor layer: a chair in both layers like a base chair (`placeChairs`), anything else by `drawDecorItem`. */
+  /**
+   * One item of the decor layer: a chair in both layers like a base chair
+   * (`placeChairs`), a sofa in both layers over its footprint (`placeSofa`),
+   * anything else by `drawDecorItem`.
+   */
   private drawDecorPiece(item: DecorItem): Phaser.GameObjects.GameObject[] {
+    if (isDecorSofaPiece(item.piece)) return this.drawSofa(item);
     if (!isDecorChairPiece(item.piece)) return this.drawDecorItem(item);
     const [chair] = decorChairs([item]);
     if (chair === undefined) return [];
@@ -2120,6 +2127,17 @@ export class OfficeScene extends Phaser.Scene {
     // loaded) and redraw when it lands, while `placeChairs` shows its placeholder.
     this.artSheet({ materialId: item.piece, color: null }, 'chair', this.redrawDecor);
     return placeChairs(this, [{ index: chair.index, piece: item.piece, facing: chair.facing, ...(chair.color === undefined ? {} : { color: chair.color }) }], this.layout.width, this.art);
+  }
+
+  /**
+   * A sofa of the decor layer over its footprint, the tiles its seats stand
+   * on (`decorSeats`), painted in its color, the placement ghost included.
+   */
+  private drawSofa(item: DecorItem): Phaser.GameObjects.GameObject[] {
+    // A sofa not in the boot preload (an upload) is asked for, and the decor redrawn when it lands.
+    this.artSheet({ materialId: item.piece, color: item.color ?? null }, 'sofa', this.redrawDecor);
+    const footprint = decorFootprint(item, decorInfoFromManifest(this.art.manifest)(item.piece), this.layout.width);
+    return placeSofa(this, { piece: item.piece, facing: decorChairFacing(item.rotation), footprint, ...(item.color === undefined ? {} : { color: item.color }) }, this.art);
   }
 
   /** Redraws the tilemap from the live blocks, or from the editor's pending paints while it has some. */

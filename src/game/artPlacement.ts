@@ -9,11 +9,14 @@
  */
 
 import {
+  ART_TILE,
   CHAIR,
   DESK,
+  SOFA,
   facingColumn,
   type ArtChairPiece,
   type ArtDeskPiece,
+  type ArtSofaPiece,
   type ArtFacing,
   type Point,
 } from './artContract';
@@ -70,4 +73,24 @@ export function chairPlacement(piece: ArtChairPiece, facing: ArtFacing, ground: 
     depthY: ground.y,
   };
   return { back, front: { ...back, frame: CHAIR.columns + column } };
+}
+
+/**
+ * Both layers of a sofa standing on `footprint` (world pixels): the anchor on
+ * its middle, a seat on the middle of each tile. The back layer sorts with the
+ * first seat and the front layer with the last one, so every sitter lands
+ * between them, even on a sideways sofa whose seats sort on different rows.
+ */
+export function sofaPlacement(piece: ArtSofaPiece, facing: ArtFacing, footprint: PixelRect): { back: SpritePlacement; front: SpritePlacement } {
+  const anchor = footprintAnchor(footprint);
+  const column = facingColumn(facing);
+  const back: SpritePlacement = {
+    x: anchor.x - piece.anchor.x,
+    y: anchor.y - piece.anchor.y,
+    width: SOFA.frame.width,
+    height: SOFA.frame.height,
+    frame: column,
+    depthY: footprint.y + ART_TILE / 2,
+  };
+  return { back, front: { ...back, frame: SOFA.columns + column, depthY: footprint.y + footprint.h - ART_TILE / 2 } };
 }

@@ -73,6 +73,11 @@ describe('fitsDeskArea', () => {
     expect(fitsDeskArea({ kind: 'door', footprint: { w: 4, h: 1 } })).toBe(false);
   });
 
+  it('never offers a sofa to a desk, even one that fits: sofas furnish the office', () => {
+    expect(fitsDeskArea({ kind: 'sofa', footprint: { w: 2, h: 1 } })).toBe(false);
+    expect(fitsDeskArea({ kind: 'sofa', footprint: { w: 3, h: 1 }, colorable: true })).toBe(false);
+  });
+
   it('takes chairs, desk tables and 1x1 plants, never a room table (#116): a desk holds desk tables only', () => {
     expect(fitsDeskArea(CHAIR)).toBe(true);
     expect(fitsDeskArea(DESK)).toBe(true);

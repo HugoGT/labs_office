@@ -1,4 +1,4 @@
-import { chairPreviewFrames, previewFrame, type MaterialCatalog, type MaterialOption } from '../game/artMaterials';
+import { chairPreviewFrames, previewFrame, sofaPreviewFrames, type MaterialCatalog, type MaterialOption } from '../game/artMaterials';
 import type { ArtPreviewCache } from '../game/artPreview';
 import { decorSizeLabel, type DecorBrush } from '../game/decorEditor';
 import { decorPieceInfo, type DecorPieceInfo } from '../game/officeDecor';
@@ -19,11 +19,13 @@ import { ColorableTile } from './ColorableTile';
  * the colors and what a click on the map does.
  */
 
-type DecorCatalogKind = 'chair' | 'desk' | 'table' | 'plant' | 'door';
+type DecorCatalogKind = 'chair' | 'sofa' | 'desk' | 'table' | 'plant' | 'door';
 
 /** The groups in palette order, named for the person picking. */
 const GROUPS: readonly { kind: DecorCatalogKind; label: string }[] = [
   { kind: 'chair', label: 'Sillas' },
+  // Only the office scope offers them (`fitsDeskArea` leaves sofas out).
+  { kind: 'sofa', label: 'Sofás' },
   { kind: 'desk', label: 'Mesas de escritorio' },
   { kind: 'table', label: 'Mesas de sala' },
   { kind: 'plant', label: 'Plantas' },
@@ -40,7 +42,7 @@ const THUMBNAIL_PX = 48;
  * reads as big as it can.
  */
 function shrinkFor(kind: DecorCatalogKind, frame: { readonly width: number; readonly height: number }): number {
-  if (kind === 'desk') return 2;
+  if (kind === 'desk' || kind === 'sofa') return 2;
   if (kind === 'table') return Math.max(1, Math.ceil(Math.max(frame.width, frame.height) / THUMBNAIL_PX));
   return 1;
 }
@@ -95,8 +97,8 @@ function Thumbnail({
   sized: boolean;
   preview?: ArtPreviewCache;
 }) {
-  // A chair reads whole only with both of its layers, back first.
-  const frames = kind === 'chair' ? chairPreviewFrames() : [previewFrame(option)];
+  // A chair or a sofa reads whole only with both of its layers, back first.
+  const frames = kind === 'chair' ? chairPreviewFrames() : kind === 'sofa' ? sofaPreviewFrames() : [previewFrame(option)];
   return (
     <span className={sized ? `${styles.thumbnail} ${styles.sized}` : styles.thumbnail} aria-hidden="true">
       {frames.map((frame) => (

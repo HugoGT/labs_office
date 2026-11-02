@@ -52,6 +52,7 @@ const DECOR_INFO: Record<string, DecorPieceInfo> = {
   'desk-glass': { kind: 'desk', footprint: { w: 3, h: 1 } },
   'plant-ficus': { kind: 'plant', footprint: { w: 1, h: 1 } },
   'table-meeting': { kind: 'table', footprint: { w: 7, h: 5 } },
+  'sofa-leather-3': { kind: 'sofa', footprint: { w: 3, h: 1 } },
 };
 const infoOf = (piece: string): DecorPieceInfo | null => DECOR_INFO[piece] ?? null;
 
@@ -103,8 +104,8 @@ describe('pieceCollisions: validation', () => {
     for (const raw of bad) expect(() => parseCollisionRects(raw), JSON.stringify(raw)).toThrow(InvalidCollisionRectsError);
   });
 
-  it('only edits pieces that stand in the world: trees, plants, tables, desks and chairs', () => {
-    for (const id of ['tree-oak', 'plant-ficus', 'plant-upload-0123456789abcdef', 'table-meeting', 'desk-wood', 'chair-wood']) {
+  it('only edits pieces that stand in the world: trees, plants, tables, desks, chairs and sofas', () => {
+    for (const id of ['tree-oak', 'plant-ficus', 'plant-upload-0123456789abcdef', 'table-meeting', 'desk-wood', 'chair-wood', 'sofa-fabric-3']) {
       expect(isEditablePieceId(id), id).toBe(true);
     }
     for (const id of ['bridge-wood', 'hedge-boxwood', 'wall-brick', 'floor-oak', 'character-p01', 'tree', 'tree-', 'Tree-oak', 'tree oak', 1, null]) {
@@ -188,6 +189,19 @@ describe('pieceCollisions: instances', () => {
     expect(instances.every((instance) => worldRectsOf(instance, NO_EDITS).length === 0)).toBe(true);
     // An edit of the piece reaches every chair of it, decor or base.
     expect(worldRectsOf(instances[1]!, new Map([['chair-metal', [{ x: -4, y: -4, w: 8, h: 8 }]]]))).toEqual([{ x: 12, y: 12, w: 8, h: 8 }]);
+  });
+
+  it('stands a decor sofa on the middle of its footprint, turned by its facing, walk-through by default, picked anywhere on it', () => {
+    const [across] = officeDecorInstances([{ index: 5 * 20 + 10, piece: 'sofa-leather-3', rotation: 0 }], infoOf, 20);
+    const [sideways] = officeDecorInstances([{ index: 5 * 20 + 10, piece: 'sofa-leather-3', rotation: 270 }], infoOf, 20);
+
+    expect(across).toMatchObject({ piece: 'sofa-leather-3', pivot: { x: 10.5 * 32, y: 5.5 * 32 }, rotation: 0, defaults: [] });
+    expect(across!.pickBox).toEqual({ x: 9 * 32, y: 5 * 32, w: 3 * 32, h: 32 });
+    expect(sideways).toMatchObject({ pivot: { x: 10.5 * 32, y: 5.5 * 32 }, rotation: rotationForFacing('left'), defaults: [] });
+    expect(sideways!.pickBox).toEqual({ x: 10 * 32, y: 4 * 32, w: 32, h: 3 * 32 });
+    expect(worldRectsOf(across!, NO_EDITS)).toEqual([]);
+    // An edit of the piece, stated facing down, turns with a sideways sofa like a chair's.
+    expect(worldRectsOf(sideways!, new Map([['sofa-leather-3', [{ x: -48, y: -8, w: 96, h: 8 }]]]))).toEqual([{ x: 10.5 * 32 - 8, y: 5.5 * 32 - 48, w: 8, h: 96 }]);
   });
 
   it('turns a chair facing up like its drawing: up keeps the down rectangles', () => {

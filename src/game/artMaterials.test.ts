@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import exportedManifest from '../../public/assets/pack/manifest.json?raw';
-import { facingColumn } from './artContract';
+import { SOFA, facingColumn } from './artContract';
 import {
   chairPreviewFrames,
+  sofaPreviewFrames,
   defaultAppearance,
   defaultChoice,
   loadMaterialCatalog,
@@ -102,6 +103,29 @@ describe('materialCatalogFrom: chairs', () => {
       { x: column, y: 38, width: 36, height: 38 },
     ]);
     expect(previewFrame(chair)).toEqual(chairPreviewFrames()[0]);
+  });
+});
+
+describe('materialCatalogFrom: sofas', () => {
+  it('offers every sofa piece of the pack, the fabric ones colorable in their beige', () => {
+    expect(catalog().sofa.map((option) => [option.id, option.kind, option.name, option.colorable, option.defaultColor])).toEqual([
+      ['sofa-leather-2', 'sofa', 'Sofá de cuero (2 plazas)', false, null],
+      ['sofa-leather-3', 'sofa', 'Sofá de cuero (3 plazas)', false, null],
+      ['sofa-fabric-2', 'sofa', 'Sofá tapizado (2 plazas)', true, '#c4ab8c'],
+      ['sofa-fabric-3', 'sofa', 'Sofá tapizado (3 plazas)', true, '#c4ab8c'],
+    ]);
+    expect(catalog().sofa[0]!.sheetUrl).toBe('assets/pack/sofa/leather-2.png');
+  });
+
+  it('a sofa previews both layers of the part of its down-facing cell it covers, back first', () => {
+    const sofa = catalog().sofa[1]!;
+    const [back, front] = sofaPreviewFrames();
+    expect(back).toMatchObject({ x: SOFA.frame.width * facingColumn('down'), width: SOFA.frame.width });
+    expect(back.y).toBeLessThan(SOFA.anchor.y - 27);
+    expect(back.y + back.height).toBeGreaterThan(SOFA.anchor.y + 5);
+    expect(back.y + back.height).toBeLessThanOrEqual(SOFA.frame.height);
+    expect(front).toEqual({ ...back, y: back.y + SOFA.frame.height });
+    expect(previewFrame(sofa)).toEqual(back);
   });
 });
 

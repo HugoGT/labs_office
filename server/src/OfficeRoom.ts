@@ -74,7 +74,7 @@ import {
   parseSeatRef,
   type SeatTiles,
 } from '../../src/game/seating.ts';
-import { decorChairs, encodeOfficeDecor, type DecorItem, type DecorTileRect } from '../../src/game/officeDecor.ts';
+import { decorSeats, encodeOfficeDecor, type DecorItem, type DecorTileRect } from '../../src/game/officeDecor.ts';
 import { deskEntryRefused } from '../../src/game/deskDecorRules.ts';
 import type { SpaceArea } from '../../src/game/mapData.ts';
 import { detectSpace } from '../../src/game/proximity.ts';
@@ -1004,7 +1004,8 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
 
   /**
    * Seats `client` on `raw` if the room agrees (step 6): a base map chair, or
-   * a chair of the decor layer (#208) that stands there now. A desk has no
+   * a chair of the decor layer (#208) or a tile of a sofa that stands there
+   * now (`decorSeats`). A desk has no
    * seat of its own: its seats are the decor chairs on it, guest seats anyone
    * may take whoever owns the desk.
    */
@@ -1030,11 +1031,12 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       return;
     }
 
-    // A decor chair seats anyone, like a base map chair, if it stands there now.
-    const chair = decorChairs(this.decor()).find((candidate) => candidate.index === ref.index);
+    // A decor chair or a sofa tile seats anyone, like a base map chair, if it stands there now.
+    const width = this.terrain().width;
+    const chair = decorSeats(this.decor(), width).find((candidate) => candidate.index === ref.index);
     if (chair === undefined) return;
-    if (seatedAt(chairGround(this.terrain().width, chair.index))) return;
-    this.takeSeat(client.sessionId, seatId, { reach: chairSeatTiles(this.terrain().width, chair.index), userId }, chair.facing);
+    if (seatedAt(chairGround(width, chair.index))) return;
+    this.takeSeat(client.sessionId, seatId, { reach: chairSeatTiles(width, chair.index), userId }, chair.facing);
   }
 
   /**
@@ -1111,12 +1113,12 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   }
 
   /**
-   * The decor layer changed: whoever sits on a chair that is gone (removed or
-   * replaced by another piece) stands up, and whoever sits on a turned one
-   * turns with it.
+   * The decor layer changed: whoever sits on a seat that is gone (a chair
+   * removed or replaced by another piece, a sofa that no longer covers the
+   * tile) stands up, and whoever sits on a turned one turns with it.
    */
   private recheckChairSeats(): void {
-    const byTile = new Map(decorChairs(this.decor()).map((chair) => [chair.index, chair]));
+    const byTile = new Map(decorSeats(this.decor(), this.terrain().width).map((chair) => [chair.index, chair]));
     for (const [sessionId] of this.seated) {
       const player = this.state.players.get(sessionId);
       const ref = parseSeatRef(player?.seat);

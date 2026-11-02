@@ -5,7 +5,7 @@ import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, SPAWN_BLOCK_INDEX, TILE } from './map
 import { DOOR, DOOR_STEPS, doorFrameIndex, doorLeafDepthYs } from './artContract';
 import { DOOR_HOLD_MS } from './officeDoors';
 import { withBlock, withWalls } from './officeLayout';
-import { CHAIR_OBJECT_NAME, WALL_OBJECT_NAME } from './mapBuilder';
+import { CHAIR_OBJECT_NAME, SOFA_OBJECT_NAME, WALL_OBJECT_NAME } from './mapBuilder';
 import {
   LEGACY_LAYOUT as BASE_LAYOUT,
   LEGACY_SEATS as BASE_MAP_SEATS,
@@ -188,6 +188,35 @@ describe('OfficeScene: pack characters, walking and seats (art migration, step 6
     connector.handlers()!.onDecor?.([]);
     expect(player.seatFacing).toBeNull();
     expect(chairObjects()).toHaveLength(0);
+  });
+
+  it('seats people on every tile of a sofa the room sends, one seat per tile, and stands them up when it turns away or goes', async () => {
+    const { connector, scene, player } = await connected();
+    // A three-seat sofa facing down on the open lawn: tiles (66..68, 22), anchored on the middle one.
+    const anchor = 22 * BASE_LAYOUT.width + 67;
+    const sofaObjects = () => scene.children.list.filter((child) => child.name === SOFA_OBJECT_NAME);
+    connector.handlers()!.onDecor?.([{ index: anchor, piece: 'sofa-leather-3', rotation: 0 }]);
+    expect(sofaObjects().length).toBeGreaterThan(0);
+    const leftSeat = anchor - 1;
+    const ground = { x: 66.5 * TILE, y: 22.5 * TILE };
+    // Right below the left end of the sofa: the closest free seat is that end's.
+    player.setPosition(ground.x, ground.y + TILE);
+    await advanceGameClock(scene, 50);
+
+    (scene as unknown as { bridge: ReturnType<typeof createOfficeBridge> }).bridge.emitCommand('toggleSeat', undefined);
+    expect(connector.sits).toEqual([chairSeatId(leftSeat)]);
+    connector.handlers()!.onLocalSeat?.(chairSeatId(leftSeat));
+    expect(feetOf(player)).toEqual(ground);
+    expect(player.seatFacing).toBe('down');
+
+    // Turned the other way round on the same anchor, the seat stays and the sitter turns with it.
+    connector.handlers()!.onDecor?.([{ index: anchor, piece: 'sofa-leather-3', rotation: 180 }]);
+    expect(player.seatFacing).toBe('up');
+    // Turned sideways the sofa leaves that tile: the sitter stands up.
+    connector.handlers()!.onDecor?.([{ index: anchor, piece: 'sofa-leather-3', rotation: 90 }]);
+    expect(player.seatFacing).toBeNull();
+    connector.handlers()!.onDecor?.([]);
+    expect(sofaObjects()).toHaveLength(0);
   });
 
   it('toggleSeat again stands up; walking stands up too', async () => {
@@ -1433,6 +1462,20 @@ describe('OfficeScene: the office decor layer (#208)', () => {
         chairLayerDepth(30.5 * TILE, 'back'),
         chairLayerDepth(30.5 * TILE, 'front'),
       ]);
+    }, LOOP_WAIT);
+  });
+
+  it('draws a sideways sofa in both of its layers, the back one under its top seat and the front one over its bottom seat', async () => {
+    const { scene, handlers } = await bootConnected();
+    handlers.onDecor!([{ index: at(30, 30), piece: 'sofa-fabric-3', rotation: 90, color: '#2a9d8f' }]);
+
+    await vi.waitFor(() => {
+      const layers = scene.children.list.filter((child) => child.name === SOFA_OBJECT_NAME && child.type === 'Image') as Phaser.GameObjects.Image[];
+      expect(layers.map((layer) => layer.texture.key)).toEqual([
+        recoloredSheetKey('sofa-fabric-3', 'sheet', '#2a9d8f'),
+        recoloredSheetKey('sofa-fabric-3', 'sheet', '#2a9d8f'),
+      ]);
+      expect(layers.map((layer) => layer.depth)).toEqual([chairLayerDepth(29.5 * TILE, 'back'), chairLayerDepth(31.5 * TILE, 'front')]);
     }, LOOP_WAIT);
   });
 

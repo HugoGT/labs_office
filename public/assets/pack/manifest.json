@@ -1022,6 +1022,162 @@
       ]
     },
     {
+      "id": "sofa-leather-2",
+      "kind": "sofa",
+      "name": "Sofá de cuero (2 plazas)",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "leather",
+      "seats": 2,
+      "facings": [
+        "up",
+        "down",
+        "left",
+        "right"
+      ],
+      "layers": [
+        "back",
+        "front"
+      ],
+      "anchor": {
+        "x": 48,
+        "y": 66
+      },
+      "footprint": {
+        "w": 2,
+        "h": 1
+      },
+      "colorable": false,
+      "defaultColor": null,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "sofa/leather-2.png",
+          "imageKind": "sofa",
+          "width": 384,
+          "height": 224,
+          "sha256": "c386bb193f7fb7b517eae6ac50765fed819d20358b4a6b2143262bd8d1316095"
+        }
+      ]
+    },
+    {
+      "id": "sofa-leather-3",
+      "kind": "sofa",
+      "name": "Sofá de cuero (3 plazas)",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "leather",
+      "seats": 3,
+      "facings": [
+        "up",
+        "down",
+        "left",
+        "right"
+      ],
+      "layers": [
+        "back",
+        "front"
+      ],
+      "anchor": {
+        "x": 48,
+        "y": 66
+      },
+      "footprint": {
+        "w": 3,
+        "h": 1
+      },
+      "colorable": false,
+      "defaultColor": null,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "sofa/leather-3.png",
+          "imageKind": "sofa",
+          "width": 384,
+          "height": 224,
+          "sha256": "f0bfbfdf25f677923b44aa382d98d063fe8eedc09c199419cede44e28aff3496"
+        }
+      ]
+    },
+    {
+      "id": "sofa-fabric-2",
+      "kind": "sofa",
+      "name": "Sofá tapizado (2 plazas)",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "fabric",
+      "seats": 2,
+      "facings": [
+        "up",
+        "down",
+        "left",
+        "right"
+      ],
+      "layers": [
+        "back",
+        "front"
+      ],
+      "anchor": {
+        "x": 48,
+        "y": 66
+      },
+      "footprint": {
+        "w": 2,
+        "h": 1
+      },
+      "colorable": true,
+      "defaultColor": "#c4ab8c",
+      "files": [
+        {
+          "role": "sheet",
+          "path": "sofa/fabric-2.png",
+          "imageKind": "sofa",
+          "width": 384,
+          "height": 224,
+          "sha256": "033aabcf341c6230b669c2a505050cfbf547b55df73c5462c6c95dc3781539ba"
+        }
+      ]
+    },
+    {
+      "id": "sofa-fabric-3",
+      "kind": "sofa",
+      "name": "Sofá tapizado (3 plazas)",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "fabric",
+      "seats": 3,
+      "facings": [
+        "up",
+        "down",
+        "left",
+        "right"
+      ],
+      "layers": [
+        "back",
+        "front"
+      ],
+      "anchor": {
+        "x": 48,
+        "y": 66
+      },
+      "footprint": {
+        "w": 3,
+        "h": 1
+      },
+      "colorable": true,
+      "defaultColor": "#c4ab8c",
+      "files": [
+        {
+          "role": "sheet",
+          "path": "sofa/fabric-3.png",
+          "imageKind": "sofa",
+          "width": 384,
+          "height": 224,
+          "sha256": "dd15adc56d36a864d734f7014f5f3d1bd5822800167b83bb82808d91944b192f"
+        }
+      ]
+    },
+    {
       "id": "desk-glass",
       "kind": "desk",
       "name": "Escritorio de vidrio",
