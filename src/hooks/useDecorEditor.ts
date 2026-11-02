@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { describeAdminError } from '../dashboard/adminErrors';
 import { AdminError } from '../dashboard/adminPort';
-import { decorBrushTarget, decorPickAt, type DecorBrush } from '../game/decorEditor';
+import { decorBrushTarget, decorColorKey, decorPickAt, type DecorBrush } from '../game/decorEditor';
 import { deskOverChairLimit, displacedDeskTables } from '../game/deskDecorRules';
 import { isEditableElementFocused } from '../game/inputFocusGuard';
 import { MAP_W } from '../game/mapData';
@@ -117,7 +117,7 @@ export interface DecorEditor {
   selected: number | null;
   /** The way the next rotatable piece turns; R or the wheel on the map turns it. */
   rotation: DecorRotation;
-  /** The color chosen per colorable piece on its palette tile; a piece without one draws in its manifest default. */
+  /** The color chosen per colorable piece on its palette tile, keyed by `decorColorKey` (the fabric armchair and sofas share one); a piece without one draws in its manifest default. */
   colors: Readonly<Partial<Record<string, string>>>;
   /** Chooses the color of a colorable piece: the next pick of it, and the picked brush if it is that piece. */
   setColor(piece: string, color: string): void;
@@ -529,7 +529,7 @@ export function useDecorEditor({
     colors,
     setPickingColor,
     setColor(piece, color) {
-      saveColor(piece, color);
+      saveColor(decorColorKey(piece), color);
       // A color settled on a tile (its picker was dismissed) puts that piece in hand, in that color, so the next click
       // on the map places it (the rail hides then). A piece already in hand just takes the color.
       setBrush((current) => {
@@ -556,7 +556,7 @@ export function useDecorEditor({
     pick(option) {
       // Another turn of the same piece is the same entry: a second pick unpicks it.
       // A move in progress is put down too: the palette starts a new piece.
-      setBrush((current) => (current?.piece === option.id && current.from === undefined ? null : brushFor(option, turned ?? defaultDecorRotation(option.info.kind), colors[option.id])));
+      setBrush((current) => (current?.piece === option.id && current.from === undefined ? null : brushFor(option, turned ?? defaultDecorRotation(option.info.kind), colors[decorColorKey(option.id)])));
       setSelected(null);
       setError(null);
     },

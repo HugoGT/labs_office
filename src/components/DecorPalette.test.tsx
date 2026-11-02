@@ -107,10 +107,15 @@ describe('DecorPalette', () => {
     expect(screen.getByRole('button', { name: 'Silla gamer' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('picks each sofa with its seats as its width, and a fabric one in its color', async () => {
+  it('picks each sofa with its seats as its width, and a fabric one in the color of the fabric armchair', async () => {
     const onPick = vi.fn();
     const onColorChange = vi.fn();
-    render(<DecorPalette value={null} catalog={catalog} colors={{ 'sofa-fabric-3': '#2a9d8f' }} onPick={onPick} onColorChange={onColorChange} preview={noPreview()} />);
+    render(<DecorPalette value={null} catalog={catalog} colors={{ 'chair-fabric': '#2a9d8f' }} onPick={onPick} onColorChange={onColorChange} preview={noPreview()} />);
+    expect(screen.getAllByLabelText(/^Color de (Sillón|Sofá) tapizado/).map((color) => color.getAttribute('aria-label'))).toEqual([
+      'Color de Sillón tapizado: #2a9d8f',
+      'Color de Sofá tapizado (2 plazas): #2a9d8f',
+      'Color de Sofá tapizado (3 plazas): #2a9d8f',
+    ]);
 
     await userEvent.click(screen.getByRole('button', { name: 'Sofá de cuero (2 plazas)' }));
     await userEvent.click(screen.getByRole('button', { name: 'Sofá de cuero (3 plazas)' }));

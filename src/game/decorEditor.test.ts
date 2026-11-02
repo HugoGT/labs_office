@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   decorBrushTarget,
+  decorColorKey,
   decorOutlines,
   decorPickAt,
   decorPlacementAllowed,
@@ -64,6 +65,16 @@ describe('decorSizeLabel', () => {
   it('states a footprint in tiles, columns by rows', () => {
     expect(decorSizeLabel(MEETING)).toBe('7x5');
     expect(decorSizeLabel({ kind: 'table', footprint: { w: 2, h: 1 } })).toBe('2x1');
+  });
+});
+
+describe('decorColorKey', () => {
+  it('gives a sofa the color of the armchair of its upholstery, and every other piece its own', () => {
+    expect(decorColorKey('sofa-fabric-2')).toBe('chair-fabric');
+    expect(decorColorKey('sofa-fabric-3')).toBe('chair-fabric');
+    expect(decorColorKey('chair-fabric')).toBe('chair-fabric');
+    expect(decorColorKey('chair-gamer')).toBe('chair-gamer');
+    expect(decorColorKey('desk-painted')).toBe('desk-painted');
   });
 });
 

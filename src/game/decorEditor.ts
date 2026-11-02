@@ -75,6 +75,15 @@ export function decorSizeLabel(info: DecorPieceInfo): string {
 }
 
 /**
+ * Which remembered palette color a piece takes: a sofa `sofa-<material>-<seats>` shares the one of its armchair
+ * `chair-<material>`, so the fabric armchair and both fabric sofas come in the same color; any other piece keeps its own.
+ */
+export function decorColorKey(piece: string): string {
+  const sofa = /^sofa-(.+)-\d+$/.exec(piece);
+  return sofa === null ? piece : `chair-${sofa[1]}`;
+}
+
+/**
  * What the decor editor asks the map to show while it is open. `null` (the
  * whole command) closes it. The preview is drawn for this person only and is
  * never sat on or collided with: the room decides once each edit lands.

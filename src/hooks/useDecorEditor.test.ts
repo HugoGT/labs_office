@@ -21,7 +21,10 @@ const PLANT: DecorPick = { id: 'plant-ficus', info: { kind: 'plant', footprint: 
 const TABLE: DecorPick = { id: 'table-meeting', info: { kind: 'table', footprint: { w: 7, h: 5 } } };
 const OVAL: DecorPick = { id: 'table-oval', info: { kind: 'table', footprint: { w: 2, h: 1 } } };
 const PAINTED: DecorPick = { id: 'desk-painted', info: { kind: 'desk', footprint: { w: 3, h: 1 }, colorable: true } };
-const PICKS = [CHAIR, DESK, PLANT, TABLE, OVAL, PAINTED];
+const FABRIC: DecorPick = { id: 'chair-fabric', info: { kind: 'chair', footprint: { w: 1, h: 1 }, colorable: true } };
+const FABRIC_2: DecorPick = { id: 'sofa-fabric-2', info: { kind: 'sofa', footprint: { w: 2, h: 1 }, colorable: true } };
+const FABRIC_3: DecorPick = { id: 'sofa-fabric-3', info: { kind: 'sofa', footprint: { w: 3, h: 1 }, colorable: true } };
+const PICKS = [CHAIR, DESK, PLANT, TABLE, OVAL, PAINTED, FABRIC, FABRIC_2, FABRIC_3];
 const infoOf = (piece: string): DecorPieceInfo | null => PICKS.find((pick) => pick.id === piece)?.info ?? null;
 
 /** A deferred `setDecor`, resolved or rejected by the test. */
@@ -218,6 +221,26 @@ describe('useDecorEditor', () => {
     act(() => result.current.pick(DESK));
     expect(result.current.brush).not.toHaveProperty('color');
     await act(async () => calls[1]!.resolve());
+  });
+
+  it('shares one color between the fabric armchair and the fabric sofas', () => {
+    const { result } = setup({});
+    act(() => result.current.enter());
+
+    act(() => result.current.setColor('sofa-fabric-2', '#2a9d8f'));
+    expect(result.current.colors).toEqual({ 'chair-fabric': '#2a9d8f' });
+    expect(result.current.brush).toMatchObject({ piece: 'sofa-fabric-2', color: '#2a9d8f' });
+    act(() => result.current.unpick());
+    act(() => result.current.pick(FABRIC));
+    expect(result.current.brush).toMatchObject({ piece: 'chair-fabric', color: '#2a9d8f' });
+    act(() => result.current.pick(FABRIC_3));
+    expect(result.current.brush).toMatchObject({ piece: 'sofa-fabric-3', color: '#2a9d8f' });
+
+    // The armchair's color is the sofas' too.
+    act(() => result.current.setColor('chair-fabric', '#c83c3c'));
+    act(() => result.current.unpick());
+    act(() => result.current.pick(FABRIC_2));
+    expect(result.current.brush).toMatchObject({ piece: 'sofa-fabric-2', color: '#c83c3c' });
   });
 
   it('tells the map while a color picker is open, only with a piece in hand, so the rail it hangs from stays', () => {

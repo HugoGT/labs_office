@@ -1,6 +1,6 @@
 import { chairPreviewFrames, previewFrame, sofaPreviewFrames, type MaterialCatalog, type MaterialOption } from '../game/artMaterials';
 import type { ArtPreviewCache } from '../game/artPreview';
-import { decorSizeLabel, type DecorBrush } from '../game/decorEditor';
+import { decorColorKey, decorSizeLabel, type DecorBrush } from '../game/decorEditor';
 import { decorPieceInfo, type DecorPieceInfo } from '../game/officeDecor';
 import type { DecorPick } from '../hooks/useDecorEditor';
 import { ArtPreviewCanvas } from './ArtPreviewCanvas';
@@ -76,7 +76,7 @@ export interface DecorPaletteProps {
   catalog: MaterialCatalog | null;
   /** Which pieces to offer (the desk scope: what fits a desk); every one by default. */
   offers?: (info: DecorPieceInfo) => boolean;
-  /** The color chosen per colorable piece; one without starts in its manifest default. */
+  /** The color chosen per colorable piece, keyed by `decorColorKey` (a fabric sofa reads its armchair's); one without starts in its manifest default. */
   colors?: Readonly<Partial<Record<string, string>>>;
   onPick: (pick: DecorPick) => void;
   /** A colorable piece's color, live while its picker is dragged; also what its tile reports when clicked (picked, in its current color). */
@@ -141,7 +141,7 @@ export function DecorPalette({ value, catalog, offers = () => true, colors = {},
             <div className={styles.palette} role="group" aria-label={label}>
               {entries.map(({ kind, option, pick }) => {
                 const colorable = pick.info.colorable === true && option.defaultColor !== null;
-                const color = colorable ? (colors[option.id] ?? option.defaultColor) : null;
+                const color = colorable ? (colors[decorColorKey(option.id)] ?? option.defaultColor) : null;
                 // Room tables and sofas tell their size apart; the horizontal one, as the catalog states it.
                 const size = SIZED.has(kind) ? decorSizeLabel(pick.info) : null;
                 // A colorable tile picks its piece in the color it has, never toggling it off: its click also opens the picker.
