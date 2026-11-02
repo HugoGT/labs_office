@@ -120,8 +120,9 @@ test('every sofa is its own drawing, a three-seat one wider (or longer) than a t
   const keys = new Set(ALL.map(({ sprite }) => [sprite.back.data.join(), sprite.front.data.join()].join('|')));
   assert.equal(keys.size, ALL.length);
   for (const material of SOFA_MATERIALS) {
-    assert.equal(sofaSprite(material, 3, 'down').back.width - sofaSprite(material, 2, 'down').back.width, TILE, `${material}: one tile wider`);
-    assert.equal(sofaSprite(material, 3, 'left').back.height - sofaSprite(material, 2, 'left').back.height, TILE, `${material}: one tile longer`);
+    // Less the one-pixel middle column a two-seat sofa takes for its seam.
+    assert.equal(sofaSprite(material, 3, 'down').back.width - sofaSprite(material, 2, 'down').back.width, TILE - 1, `${material}: one tile wider`);
+    assert.equal(sofaSprite(material, 3, 'left').back.height - sofaSprite(material, 2, 'left').back.height, TILE - 1, `${material}: one tile longer`);
   }
 });
 
@@ -345,12 +346,48 @@ test('a fabric arm ends in a roll that curls outward, a spiral on its front, the
     const left: string[] = [];
     const right: string[] = [];
     for (let y = 0; y < image.height; y += 1) {
-      for (let dx = 0; dx < 7; dx += 1) {
+      for (let dx = 0; dx < 10; dx += 1) {
         if (spiral(roll[0] + dx, y)) left.push(`${dx},${y}`);
         if (spiral(roll[1] - dx, y)) right.push(`${dx},${y}`);
       }
     }
     assert.ok(left.length >= 8, `${name}: ${left.length} spiral pixels`);
     assert.deepEqual(right, left, `${name}: the arms mirror each other`);
+    // The spiral spans the roll, from its outer outline in to the ink that parts it from the seat.
+    const ramp = makeRamp(DEFAULT_FABRIC_COLOR);
+    // Two rows into the spiral, clear of the roll's lit top edge.
+    const top = Math.min(...left.map((pixel) => Number(pixel.split(',')[1]))) + 2;
+    const face = (x: number): boolean => [ramp.base, ramp.deep].some((tone) => {
+      const p = image.getPixel(x, top);
+      return p.r === tone.r && p.g === tone.g && p.b === tone.b;
+    });
+    let rollWidth = 0;
+    while (face(roll[0] + 1 + rollWidth)) rollWidth += 1;
+    const columns = new Set(left.map((pixel) => Number(pixel.split(',')[0])));
+    assert.equal(Math.max(...columns) - Math.min(...columns) + 1, rollWidth, `${name}: spiral over ${[...columns].sort()} of a ${rollWidth}px roll`);
+  }
+});
+
+test('seen from behind, the fabric armchair and sofas stand square on the floor, no corner cut off', () => {
+  for (const { name, material, sprite } of UPHOLSTERED) {
+    if (material !== 'fabric') continue;
+    const image = composite(sprite('up'));
+    let bottom = image.height - 1;
+    while (rowSpan(image, bottom) === null) bottom -= 1;
+    // The base's last row is as wide as it is higher up; the ink under it only leaves out the outline's own corners.
+    const base = rowSpan(image, bottom - 3)!;
+    assert.deepEqual(rowSpan(image, bottom - 1), base, `${name}: the base's last row`);
+    assert.deepEqual(rowSpan(image, bottom), [base[0] + 1, base[1] - 1], `${name}: the ink under it`);
+  }
+});
+
+test('a two-seat sofa parts its cushions with a seam one pixel wide', () => {
+  for (const material of SOFA_MATERIALS) {
+    const sofa = sofaSprite(material, 2, 'down');
+    const image = composite(sofa);
+    const [left, right] = sofa.seats;
+    let seam = 0;
+    for (let x = left!.x; x <= right!.x; x += 1) if (luma(image.getPixel(x, left!.y)) < luma(image.getPixel(left!.x, left!.y)) * 0.75) seam += 1;
+    assert.equal(seam, 1, `${material}: ${seam}px seam between the seats`);
   }
 });

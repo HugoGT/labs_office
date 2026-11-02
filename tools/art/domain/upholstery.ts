@@ -40,7 +40,7 @@ export const DEFAULT_FABRIC_COLOR = '#c4ab8c';
 
 /**
  * Buttoned upholstery: a dimple on a diamond grid, laid out per backrest cushion from its middle out, so the buttons
- * of every cushion mirror each other across it. A cushion runs between the seam pixels `seamed` draws (within 0.6
+ * of every cushion mirror each other across it. A cushion runs between the seam pixels `seamed` draws (within 0.5
  * of a seam) and, at the ends, the ink that parts the seat cushion from the arms, which cover the back below their
  * tops: the buttons then line up with the seat cushion under them. The armchair's narrow arms leave its buttons
  * clear, so it spans its whole face.
@@ -48,15 +48,15 @@ export const DEFAULT_FABRIC_COLOR = '#c4ab8c';
 function tufted(seats: number, facing: Facing, inner: number, half: number): (point: SurfacePoint, color: Rgba) => Rgba {
   const scale = lengthen(1, seats, facing);
   const seams = Array.from({ length: seats - 1 }, (_, k) => -inner + (2 * inner * (k + 1)) / seats);
-  // Pixel centers sit on halves: the first one at least 0.6 past a boundary, and the last one before it.
+  // Pixel centers sit on halves: the first one at least 0.5 past a boundary, and the last one before it.
   const end = seats === 1 ? half : inner - 1;
-  const lows = [0.5 - end, ...seams.map((b) => Math.ceil(b + 0.1) + 0.5)];
-  const highs = [...seams.map((b) => Math.floor(b - 1.1) + 0.5), end - 0.5];
+  const lows = [0.5 - end, ...seams.map((b) => Math.ceil(b) + 0.5)];
+  const highs = [...seams.map((b) => Math.floor(b - 1) + 0.5), end - 0.5];
   return (point, color) => {
     // Only the side the sitter leans on is buttoned.
     if (point.face !== 'forward' || point.width < 8) return color;
     if (point.row < 2 || point.row > point.height - 3) return color;
-    const screen = point.v / scale;
+    const screen = narrow(point.v / scale, seats);
     const k = lows.findIndex((lo, i) => screen >= lo && screen <= highs[i]!);
     if (k < 0) return color;
     const distance = Math.abs(screen - (lows[k]! + highs[k]!) / 2);
@@ -73,17 +73,21 @@ const ROLL_HEIGHT = 6;
 const ROLL_OUT = 2;
 
 /**
- * The spiral on the front of a roll, as seen from the front, counted from the arm's outer edge; `#` is the deep tone
- * of the ramp, so a recolor moves it with the rest.
+ * The spiral on the front of a roll, as seen from the front, counted from the arm's outer edge, one per roll width
+ * (the armchair's and the sofas'), so it fills the roll; `#` is the deep tone of the ramp, so a recolor moves it with
+ * the rest.
  */
-const SCROLL = ['.###.', '#...#', '#.#.#', '#..#.', '.##..'];
+const SCROLLS: Readonly<Record<number, readonly string[]>> = {
+  5: ['.###.', '#...#', '#.#.#', '#..#.', '.##..'],
+  7: ['.#####.', '#.....#', '#.###.#', '#.#..#.', '#..##..', '.###...'],
+};
 
 /** The front of a roll curls in from its outer side; on the sitter's right (+1) that is the left of the screen. */
 function scroll(side: 1 | -1, ramp: Ramp): (point: SurfacePoint, color: Rgba) => Rgba {
   return (point, color) => {
     if (point.face !== 'forward') return color;
     const fromOuter = side > 0 ? point.col : point.width - 1 - point.col;
-    return SCROLL[point.row]?.[fromOuter] === '#' ? ramp.deep : color;
+    return SCROLLS[point.width]?.[point.row]?.[fromOuter] === '#' ? ramp.deep : color;
   };
 }
 
@@ -116,6 +120,26 @@ export function seatV(seats: number, index: number, facing: Facing): number {
   return lengthen((index - (seats - 1) / 2) * SEAT_PITCH, seats, facing);
 }
 
+/**
+ * A sofa of an even number of seats has its middle seam on the middle of the piece, which falls between two pixels;
+ * it is drawn one pixel wider, a column inserted at v 0..1, so that seam takes that column alone and both halves stay
+ * mirrors. Shapes are laid out without that column and `widen` puts it in; `narrow` turns a drawn screen position
+ * back, the column itself to 0.
+ */
+function middleColumn(seats: number): number {
+  return seats % 2 === 0 ? 1 : 0;
+}
+
+function widen(screen: number, seats: number): number {
+  return screen > 0 ? screen + middleColumn(seats) : screen;
+}
+
+function narrow(screen: number, seats: number): number {
+  const column = middleColumn(seats);
+  if (screen <= 0 || column === 0) return screen;
+  return screen < column ? 0 : screen - column;
+}
+
 function lengthen(screen: number, seats: number, facing: Facing): number {
   return seats > 1 && (facing === 'left' || facing === 'right') ? screen / DEPTH_SCALE : screen;
 }
@@ -126,10 +150,10 @@ function seamed(seats: number, facing: Facing, inner: number, ramp: Ramp, shade?
   return (point, color) => {
     const shaded = shade ? shade(point, color) : color;
     if (point.face === 'right' || point.face === 'left') return shaded;
-    const screen = point.v / scale;
+    const screen = narrow(point.v / scale, seats);
     for (let k = 1; k < seats; k += 1) {
       const seam = -inner + (2 * inner * k) / seats;
-      if (Math.abs(screen - seam) < 0.6) return ramp.deep;
+      if (Math.abs(screen - seam) < 0.5) return ramp.deep;
     }
     return shaded;
   };
@@ -150,24 +174,28 @@ function style(kind: UpholsteryStyle, color: string): Style {
 export function upholsteredModel(kind: UpholsteryStyle, seats: number, facing: Facing, color = DEFAULT_FABRIC_COLOR): FurnitureModel {
   const s = style(kind, color);
   const half = halfWidth(seats);
-  const along = ([a, b]: Span): Span => [Math.round(lengthen(a, seats, facing)), Math.round(lengthen(b, seats, facing))];
+  const place = (screen: number): number => Math.round(lengthen(widen(screen, seats), seats, facing));
+  // Spans are laid out on screen without the middle column (mirror them before `along`), then placed.
+  const along = ([a, b]: Span): Span => [place(a), place(b)];
   const mirror = ([a, b]: Span): Span => [-b, -a];
   // A sofa's arms are broader than the armchair's, in keeping with its length.
   const armWidth = seats === 1 ? 3 : 5;
   const innerHalf = half - armWidth;
   // The backrest shades the back of the cushion, so the seat reads apart from the back from the front.
+  // Down to the floor, the body and arm posts stand square on it from behind; their cut corners read as curves there.
+  const softBase = s.feet !== null || facing !== 'up';
   const cushion = (point: SurfacePoint, c: Rgba): Rgba => {
     if (point.face !== 'top') return c;
     if (point.u < BACK_FACE + 2) return s.ramp.shadow;
     return point.row === point.height - 1 ? mixRgba(c, s.ramp.light, 0.3) : c;
   };
-  const feetV = along([half - 3, half - 1]);
+  const feetV: Span = [half - 3, half - 1];
   const feet: Box[] = [];
   if (s.feet !== null) {
-    for (const u of [[5, 7], [BACK_REAR + 1, BACK_REAR + 3]] as const) for (const v of [feetV, mirror(feetV)]) feet.push({ u, v, y: [0, s.body[0]], ramp: s.feet, side: 'base' });
+    for (const u of [[5, 7], [BACK_REAR + 1, BACK_REAR + 3]] as const) for (const v of [along(feetV), along(mirror(feetV))]) feet.push({ u, v, y: [0, s.body[0]], ramp: s.feet, side: 'base' });
   }
   const arm = (side: 1 | -1): Part => {
-    const onSide = (span: Span): Span => (side > 0 ? along(span) : mirror(along(span)));
+    const onSide = (span: Span): Span => along(side > 0 ? span : mirror(span));
     const v = onSide([half - armWidth, half]);
     if (!s.scrolled) {
       return { layer: armLayer(side), boxes: [{ u: s.armU, v, y: [s.body[0], ARM_TOP], ramp: s.ramp, top: 'light', side: 'base', rounded: true }] };
@@ -177,7 +205,7 @@ export function upholsteredModel(kind: UpholsteryStyle, seats: number, facing: F
       layer: armLayer(side),
       boxes: [
         // From behind the post is the body's own back, in its tone, so it does not read as a leg.
-        { u: s.armU, v, y: [s.body[0], ARM_TOP - ROLL_HEIGHT], ramp: s.ramp, side: 'base', rounded: true, shade: (point, c) => (point.face === 'backward' ? s.ramp.shadow : c) },
+        { u: s.armU, v, y: [s.body[0], ARM_TOP - ROLL_HEIGHT], ramp: s.ramp, side: 'base', rounded: softBase, shade: (point, c) => (point.face === 'backward' ? s.ramp.shadow : c) },
         { u: s.armU, v: onSide([half - armWidth, half + ROLL_OUT]), y: [ARM_TOP - ROLL_HEIGHT, ARM_TOP], ramp: s.ramp, top: 'light', side: 'base', rounded: true, shade: scroll(side, s.ramp) },
       ],
     };
@@ -188,7 +216,7 @@ export function upholsteredModel(kind: UpholsteryStyle, seats: number, facing: F
     parts: [
       ...(feet.length > 0 ? [{ boxes: feet }] : []),
       // On feet the body sits a pixel in from the back; down to the floor it is flush with it, one block from behind.
-      { boxes: [{ u: [s.feet === null ? BACK_REAR : BACK_REAR + 1, 7], v: along([-(half - 1), half - 1]), y: s.body, ramp: s.ramp, side: 'shadow', rounded: true }] },
+      { boxes: [{ u: [s.feet === null ? BACK_REAR : BACK_REAR + 1, 7], v: along([-(half - 1), half - 1]), y: s.body, ramp: s.ramp, side: 'shadow', rounded: softBase }] },
       {
         boxes: [
           { u: [BACK_FACE + 1, 7], v: along([-innerHalf, innerHalf]), y: [SEAT_UNDER, SEAT_HEIGHT], ramp: s.ramp, top: 'base', side: 'base', rounded: true, shade: seamed(seats, facing, innerHalf, s.ramp, cushion) },
