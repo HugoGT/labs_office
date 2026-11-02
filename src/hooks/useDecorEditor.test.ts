@@ -138,6 +138,25 @@ describe('useDecorEditor', () => {
     expect(result.current.brush).toMatchObject({ piece: 'desk-wood', rotation: 270 });
   });
 
+  it('starts a desk table showing its drawer side, like its thumbnail, and a chair as it always did, until the person turns something', () => {
+    const { bridge, result, commands } = setup();
+    act(() => result.current.enter());
+
+    act(() => result.current.pick(DESK));
+    expect(result.current.brush).toMatchObject({ piece: 'desk-wood', rotation: 180 });
+    expect(commands.at(-1)?.brush).toMatchObject({ rotation: 180 });
+    act(() => result.current.pick(PAINTED));
+    expect(result.current.brush).toMatchObject({ piece: 'desk-painted', rotation: 180 });
+    act(() => result.current.pick(CHAIR));
+    expect(result.current.brush).toMatchObject({ piece: 'chair-gamer', rotation: 0 });
+    expect(result.current.rotation).toBe(0);
+
+    // Once turned, the turn is the palette's for every piece, as before: a chair and a desk with the same turn pair up.
+    act(() => bridge.emit('decorrotate', { step: 1 }));
+    act(() => result.current.pick(DESK));
+    expect(result.current.brush).toMatchObject({ piece: 'desk-wood', rotation: 270 });
+  });
+
   it('never turns a plant, and with nothing picked the map turns nothing', () => {
     const { bridge, result } = setup();
     act(() => result.current.enter());
@@ -181,7 +200,7 @@ describe('useDecorEditor', () => {
     act(() => result.current.pick(PAINTED));
     expect(result.current.brush).not.toHaveProperty('color');
     act(() => bridge.emit('decorpick', { index: at(5, 5) }));
-    expect(calls[0]!.edits).toEqual([{ index: at(5, 5), item: { piece: 'desk-painted', rotation: 0 } }]);
+    expect(calls[0]!.edits).toEqual([{ index: at(5, 5), item: { piece: 'desk-painted', rotation: 180 } }]);
 
     act(() => result.current.setColor('desk-painted', '#c83c3c'));
     expect(result.current.colors).toEqual({ 'desk-painted': '#c83c3c' });
@@ -189,7 +208,7 @@ describe('useDecorEditor', () => {
     expect(commands.at(-1)?.brush).toMatchObject({ color: '#c83c3c' });
     act(() => bridge.emit('decorpick', { index: at(9, 5) }));
     await act(async () => calls[0]!.resolve());
-    expect(calls[1]!.edits).toEqual([{ index: at(9, 5), item: { piece: 'desk-painted', rotation: 0, color: '#c83c3c' } }]);
+    expect(calls[1]!.edits).toEqual([{ index: at(9, 5), item: { piece: 'desk-painted', rotation: 180, color: '#c83c3c' } }]);
 
     // Kept for the next pick; a piece that takes no color never carries one.
     act(() => result.current.unpick());
@@ -220,7 +239,7 @@ describe('useDecorEditor', () => {
   it('repaints a piece of another color on the same tile, but skips one already in that color', async () => {
     const { decor, calls } = deferredPort();
     const { bridge, result } = setup({ decor });
-    act(() => bridge.emit('decor', { items: [{ index: at(5, 5), piece: 'desk-painted', rotation: 0, color: '#c83c3c' }] }));
+    act(() => bridge.emit('decor', { items: [{ index: at(5, 5), piece: 'desk-painted', rotation: 180, color: '#c83c3c' }] }));
     act(() => result.current.enter());
     act(() => result.current.setMultiple(true));
     act(() => result.current.setColor('desk-painted', '#c83c3c'));
@@ -230,7 +249,7 @@ describe('useDecorEditor', () => {
 
     act(() => result.current.setColor('desk-painted', '#3c5ac8'));
     act(() => bridge.emit('decorpick', { index: at(5, 5) }));
-    expect(calls.map((call) => call.edits)).toEqual([[{ index: at(5, 5), item: { piece: 'desk-painted', rotation: 0, color: '#3c5ac8' } }]]);
+    expect(calls.map((call) => call.edits)).toEqual([[{ index: at(5, 5), item: { piece: 'desk-painted', rotation: 180, color: '#3c5ac8' } }]]);
     await act(async () => calls[0]!.resolve());
   });
 
@@ -358,7 +377,7 @@ describe('useDecorEditor', () => {
     expect(result.current.error).toBeNull();
     act(() => result.current.pick(DESK));
     act(() => bridge.emit('decorpick', { index: at(11, 12) }));
-    expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(11, 12), item: { piece: 'desk-wood', rotation: 0 } }]);
+    expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(11, 12), item: { piece: 'desk-wood', rotation: 180 } }]);
   });
 
   it('follows a new area, so a desk that moved is decorated where it is now', () => {
@@ -387,7 +406,7 @@ describe('useDecorEditor', () => {
       act(() => result.current.pick(DESK));
       act(() => bridge.emit('decorpick', { index: at(11, 12) }));
 
-      const edits = [{ index: at(11, 12), item: { piece: 'desk-wood', rotation: 0 } }, { index: at(11, 10), item: null }];
+      const edits = [{ index: at(11, 12), item: { piece: 'desk-wood', rotation: 180 } }, { index: at(11, 10), item: null }];
       expect(calls.map((call) => call.edits)).toEqual([edits]);
       expect(commands.at(-1)?.preview).toEqual(edits);
       await act(async () => calls[0]!.resolve());

@@ -12,6 +12,7 @@ import {
   decorFootprint,
   decorInfoFromPieceId,
   decorRotationFor,
+  defaultDecorRotation,
   fitsInsideDesk,
   isRotatable,
   nextDecorRotation,
@@ -200,7 +201,9 @@ export function useDecorEditor({
   const [items, setItems] = useState<readonly DecorItem[]>([]);
   const [brush, setBrush] = useState<DecorBrush | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
-  const [rotation, setRotation] = useState<DecorRotation>(0);
+  // The turn the person gave the palette; until they turn something each kind starts in its own (`defaultDecorRotation`).
+  const [turned, setRotation] = useState<DecorRotation | null>(null);
+  const rotation = turned ?? 0;
   // Remembered in this browser per scope, never sent: a placed item carries its own color.
   const [colors, saveColor] = usePersistedColors<string>(area === null ? 'office:decor-colors' : 'office:desk-decor-colors');
   const [multiple, setMultiple] = useState(false);
@@ -537,7 +540,7 @@ export function useDecorEditor({
     pick(option) {
       // Another turn of the same piece is the same entry: a second pick unpicks it.
       // A move in progress is put down too: the palette starts a new piece.
-      setBrush((current) => (current?.piece === option.id && current.from === undefined ? null : brushFor(option, rotation, colors[option.id])));
+      setBrush((current) => (current?.piece === option.id && current.from === undefined ? null : brushFor(option, turned ?? defaultDecorRotation(option.info.kind), colors[option.id])));
       setSelected(null);
       setError(null);
     },

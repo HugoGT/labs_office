@@ -113,7 +113,7 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
     expect(commands.at(-1)).toMatchObject({ brush: { piece: 'desk-painted', color: '#c0392b' } });
 
     act(() => bridge.emit('decorpick', { index: at(40, 40) }));
-    await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: { piece: 'desk-painted', rotation: 0, color: '#c0392b' } }]));
+    await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: { piece: 'desk-painted', rotation: 180, color: '#c0392b' } }]));
   });
 
   it('unpicks with «Deseleccionar», and shows why the server refused', async () => {
