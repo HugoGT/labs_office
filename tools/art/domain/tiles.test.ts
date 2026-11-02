@@ -153,6 +153,24 @@ test('sand and cobblestone stay calm so characters read over them', () => {
   assert.ok(average(cobblestoneTile()).spread < 22, `cobblestone spread ${average(cobblestoneTile()).spread}`);
 });
 
+test('carpet is flat: no worn patches lighter than its base, and only soft weave and seams that still show', () => {
+  const tile = carpetTile();
+  const luma = (p: { r: number; g: number; b: number }): number => p.r * 0.3 + p.g * 0.59 + p.b * 0.11;
+  const counts = new Map<number, number>();
+  for (let y = 0; y < TILE_SIZE; y += 1) {
+    for (let x = 0; x < TILE_SIZE; x += 1) {
+      const value = luma(tile.getPixel(x, y));
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+  }
+  const base = [...counts].sort((a, b) => b[1] - a[1])[0]![0];
+  assert.ok(Math.max(...counts.keys()) <= base + 0.5, `a pixel is lighter than the base: ${Math.max(...counts.keys())} vs ${base}`);
+  // The seams are what is darkest: visible lines (not a solid color), well short of the busy 15 levels it once had.
+  assert.ok(Math.min(...counts.keys()) <= base - 8, `the seams are too faint: ${Math.min(...counts.keys())} vs ${base}`);
+  assert.ok(Math.min(...counts.keys()) >= base - 12, `a seam is too dark: ${Math.min(...counts.keys())} vs ${base}`);
+  assert.ok(average(tile).spread < 3.5, `carpet spread ${average(tile).spread}`);
+});
+
 test('the motifs keep few colors, leaving room for edge shading in the tileset band', () => {
   for (const terrain of TERRAINS) assert.ok(countColors(terrainTile(terrain)) <= 40, `${terrain} has ${countColors(terrainTile(terrain))}`);
 });

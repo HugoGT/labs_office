@@ -325,15 +325,15 @@ const CARPET_SQUARE = TILE_SIZE / 2;
 
 /**
  * Office carpet tiles: four 48px squares whose woven pile alternates direction, so the floor
- * reads as laid tiles, with a few soft worn patches. Low contrast on purpose. Painted from one
- * ramp only, so the office can recolor it like the plain floor.
+ * reads as laid tiles. Flat on purpose: only a faint weave and seam, never a lighter or darker
+ * blotch, so a large carpeted room does not look stained. Painted from one ramp only, so the
+ * office can recolor it like the plain floor.
  */
-export function carpetTile(hex = DEFAULT_CARPET_COLOR, seed = 29): PixelBuffer {
-  const rng = createRng(seed);
+export function carpetTile(hex = DEFAULT_CARPET_COLOR): PixelBuffer {
   const CARPET = makeRamp(hex);
   const tile = solidTile(CARPET.base);
-  const weave = mixRgba(CARPET.base, CARPET.shadow, 0.28);
-  const seam = mixRgba(CARPET.base, CARPET.shadow, 0.45);
+  const weave = mixRgba(CARPET.base, CARPET.shadow, 0.16);
+  const seam = mixRgba(CARPET.base, CARPET.shadow, 0.32);
   for (let y = 0; y < TILE_SIZE; y += 1) {
     for (let x = 0; x < TILE_SIZE; x += 1) {
       const horizontal = (Math.floor(x / CARPET_SQUARE) + Math.floor(y / CARPET_SQUARE)) % 2 === 0;
@@ -342,8 +342,6 @@ export function carpetTile(hex = DEFAULT_CARPET_COLOR, seed = 29): PixelBuffer {
       else if (line) tile.setPixel(x, y, weave);
     }
   }
-  const worn = mixRgba(CARPET.base, CARPET.light, 0.12);
-  for (let i = 0; i < 3; i += 1) softPatch(tile, rng, randomInt(rng, TILE_SIZE), randomInt(rng, TILE_SIZE), 6 + randomInt(rng, 4), worn);
   return tile;
 }
 
