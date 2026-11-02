@@ -185,3 +185,60 @@ test('each transition frame is a distinct drawing', () => {
     }
   }
 });
+
+/** Pixels the soft contact shadow shows through: neither empty nor part of the opaque figure. */
+function translucentPixels(image: PixelBuffer): { x: number; y: number }[] {
+  const pixels: { x: number; y: number }[] = [];
+  for (let y = 0; y < image.height; y += 1) {
+    for (let x = 0; x < image.width; x += 1) {
+      const alpha = image.alphaAt(x, y);
+      if (alpha > 0 && alpha < 255) pixels.push({ x, y });
+    }
+  }
+  return pixels;
+}
+
+/** Same footprint the renderer stamps: an ellipse centered half a pixel above a contact point. */
+function insideShadow(pixel: { x: number; y: number }, contact: { x: number; y: number }): boolean {
+  const u = (pixel.x + 0.5 - contact.x) / 7.5;
+  const w = (pixel.y + 0.5 - (contact.y - 0.5)) / 2.4;
+  return u * u + w * w <= 1;
+}
+
+function assertShadowAt(image: PixelBuffer, contact: { x: number; y: number }, label: string): void {
+  const shadow = translucentPixels(image);
+  // Seen from the front the thighs cover most of a seat shadow: a sliver beside the hips is enough.
+  assert.ok(shadow.length > 0, `${label}: no shadow pixel shows`);
+  const stray = shadow.filter((pixel) => !insideShadow(pixel, contact));
+  assert.deepEqual(stray, [], `${label}: shadow pixels away from (${contact.x}, ${contact.y})`);
+}
+
+test('once the pelvis rests on the seat the contact shadow is under it, not under the feet', () => {
+  for (const { character, sit } of sample) {
+    for (const facing of FACINGS) {
+      for (let column = 0; column < SIT_FRAME_COUNT; column += 1) {
+        const pose = sitPose(column);
+        const label = `${character.id} ${facing} ${column}`;
+        const image = cell(sit, facing, column);
+        if ('sit' in pose && pose.sit.lower === 1) {
+          assertShadowAt(image, { x: SIT_ANCHOR_X, y: SIT_ANCHOR_Y }, label);
+        } else {
+          // Still on its feet (or rising): the shadow stays on the floor under the planted feet.
+          const feet = sitFrameGeometry(facing);
+          assertShadowAt(image, { x: feet.anchorX, y: feet.anchorY }, label);
+        }
+      }
+    }
+  }
+});
+
+test('standing idle frames keep the contact shadow under the feet', () => {
+  for (const { character, idle } of sample) {
+    for (const facing of FACINGS) {
+      const rect = frameRect(FACING_DIRECTION[facing], 0);
+      const image = new PixelBuffer(rect.width, rect.height);
+      image.blit(idle, -rect.x, -rect.y);
+      assertShadowAt(image, { x: ANCHOR_X, y: ANCHOR_Y }, `${character.id} ${facing} idle`);
+    }
+  }
+});

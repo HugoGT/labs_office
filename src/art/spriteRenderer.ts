@@ -4,7 +4,8 @@
  * 2. cel shading into a hue-shifted ramp (plus cast shadows from a second ray),
  * 3. contour lines where a nearer part overlaps a farther one,
  * 4. crisp decals (eyes, badge, lanyard...) stamped where their anchor is visible,
- * 5. a dark outline around the silhouette and a soft contact shadow under the feet.
+ * 5. a dark outline around the silhouette and a soft contact shadow under the feet, or under the
+ *    pelvis once a seated pose rests on the seat (Scene.contact).
  */
 import { CAMERA_PITCH, LIGHT_DIRECTION, WALK_FRAME, type FrameGeometry } from './camera.ts';
 import { hexToRgba, mixRgba, TONES, type Ramp, type Tone } from '../game/artColor.ts';
@@ -235,14 +236,16 @@ export function renderScene(scene: Scene, ramps: Ramps, yaw: number, frame: Fram
   figure.addOutline((neighbor) => mixRgba(neighbor, OUTLINE_INK, 0.78));
 
   const image = new PixelBuffer(width, height);
-  drawContactShadow(image, frame);
+  const contact = scene.contact ? { x: projectX(camera, scene.contact), y: projectY(camera, scene.contact) } : { x: frame.anchorX, y: frame.anchorY };
+  drawContactShadow(image, contact);
   image.blit(figure, 0, 0);
   return image;
 }
 
-function drawContactShadow(image: PixelBuffer, frame: FrameGeometry): void {
-  const cx = frame.anchorX;
-  const cy = frame.anchorY - 0.5;
+/** `contact` is the screen point the weight rests on; the ellipse sits in the pixel row above it. */
+function drawContactShadow(image: PixelBuffer, contact: { readonly x: number; readonly y: number }): void {
+  const cx = contact.x;
+  const cy = contact.y - 0.5;
   const rx = 7.5;
   const ry = 2.4;
   for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y += 1) {

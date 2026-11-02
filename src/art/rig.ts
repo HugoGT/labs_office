@@ -83,6 +83,11 @@ export interface Scene {
   readonly decals: readonly Decal[];
   /** Seated poses only: the point under the pelvis center, on the seat once fully seated. */
   readonly seat?: Vec3;
+  /**
+   * Where the body rests its weight, if not on the ground under the feet: the soft contact
+   * shadow is centered here, so a seated character reads as sitting on the seat.
+   */
+  readonly contact?: Vec3;
 }
 
 const DEG = Math.PI / 180;
@@ -319,6 +324,7 @@ function buildSeatedScene(spec: CharacterSpec, pose: SeatedPose, seatBack: numbe
   addLeg(rig.fixed, body, LEFT, legs[LEFT]);
   addLeg(rig.fixed, body, RIGHT, legs[RIGHT]);
   addUpperBody(body);
+  const seat = v3(0, hipY - HIP_ABOVE_SEAT, hipZ);
   return {
     primitives: [...rig.fixed, ...body.prims.map((primitive) => transformed(primitive, lean, offset))],
     decals: body.decals.map((decal) => ({
@@ -326,7 +332,9 @@ function buildSeatedScene(spec: CharacterSpec, pose: SeatedPose, seatBack: numbe
       anchor: add(applyBasis(lean, decal.anchor), offset),
       normal: applyBasis(lean, decal.normal),
     })),
-    seat: v3(0, hipY - HIP_ABOVE_SEAT, hipZ),
+    seat,
+    // Mid-transition the pelvis hangs in the air and the weight is still on the feet.
+    ...(sit.lower === 1 ? { contact: seat } : {}),
   };
 }
 
