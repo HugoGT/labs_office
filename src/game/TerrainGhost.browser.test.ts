@@ -56,12 +56,16 @@ describe('TerrainGhost', () => {
     for (const layer of layers) {
       expect(layer.visible).toBe(true);
       expect(layer.alpha).toBe(TERRAIN_GHOST_ALPHA);
+      // Cut to the block itself: the drawing's own edges would spill half a tile outside it.
+      expect(layer.mask).not.toBeNull();
     }
-    // The dual-grid layers sit half a tile before the block, like the map's own.
-    expect(layers.some((layer) => layer.x === 2 * BLOCK + TERRAIN_LAYER_ORIGIN || layer.x === 2 * BLOCK)).toBe(true);
+    expect(ghost.clip()).toEqual({ x: 2 * BLOCK, y: BLOCK, width: BLOCK, height: BLOCK });
+    // The ghost map has a block of the same floor all around, so the block shown is its middle one.
+    expect(layers.some((layer) => layer.x === 2 * BLOCK - BLOCK + TERRAIN_LAYER_ORIGIN)).toBe(true);
 
     ghost.show({ material: 'grass' }, 3 * BLOCK, BLOCK);
-    expect(ghost.layers().some((layer) => layer.x === 3 * BLOCK + TERRAIN_LAYER_ORIGIN || layer.x === 3 * BLOCK)).toBe(true);
+    expect(ghost.clip()).toEqual({ x: 3 * BLOCK, y: BLOCK, width: BLOCK, height: BLOCK });
+    expect(ghost.layers().some((layer) => layer.x === 3 * BLOCK - BLOCK + TERRAIN_LAYER_ORIGIN)).toBe(true);
     expect(ghost.layers().length).toBe(layers.length);
 
     ghost.hide();
@@ -81,7 +85,7 @@ describe('TerrainEditLayer with a ghost', () => {
     const ghost = new TerrainGhost(scene, undefined, () => null);
     new TerrainEditLayer(scene, bridge, BASE_LAYOUT, ghost);
     const visible = (): boolean => ghost.layers().some((layer) => layer.visible);
-    const atBlock = (col: number, row: number): boolean => ghost.layers().some((layer) => layer.visible && (layer.x === col * BLOCK + TERRAIN_LAYER_ORIGIN || layer.x === col * BLOCK) && (layer.y === row * BLOCK + TERRAIN_LAYER_ORIGIN || layer.y === row * BLOCK));
+    const atBlock = (col: number, row: number): boolean => ghost.layers().some((layer) => layer.visible) && ghost.clip()?.x === col * BLOCK && ghost.clip()?.y === row * BLOCK;
 
     scene.input.emit('pointermove', pointerAt(BLOCK + 10, 2 * BLOCK + 10));
     expect(visible()).toBe(false);
