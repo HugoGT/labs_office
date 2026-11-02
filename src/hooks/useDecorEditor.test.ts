@@ -201,6 +201,22 @@ describe('useDecorEditor', () => {
     await act(async () => calls[1]!.resolve());
   });
 
+  it('remembers the color chosen for a piece across a reload, per scope, without touching the server', () => {
+    const { decor, calls } = deferredPort();
+    const first = setup({ decor });
+    act(() => first.result.current.setColor('desk-painted', '#c83c3c'));
+    first.unmount();
+
+    const office = setup({ decor });
+    expect(office.result.current.colors).toEqual({ 'desk-painted': '#c83c3c' });
+    office.unmount();
+
+    // A person decorating a desk keeps a palette of their own: the admin's choice is not theirs.
+    const desk = setup({ decor, area: { x: 4, y: 4, w: 4, h: 3 } });
+    expect(desk.result.current.colors).toEqual({});
+    expect(calls).toHaveLength(0);
+  });
+
   it('repaints a piece of another color on the same tile, but skips one already in that color', async () => {
     const { decor, calls } = deferredPort();
     const { bridge, result } = setup({ decor });

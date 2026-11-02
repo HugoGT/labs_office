@@ -24,6 +24,7 @@ import {
 } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
 import { doorPosts, isDoorPiece } from '../game/officeDoors';
+import { usePersistedColors } from './usePersistedColors';
 
 /**
  * The decor editor (#208) of "Decoración", in both its scopes (an admin, the
@@ -116,7 +117,7 @@ export interface DecorEditor {
   /** The way the next rotatable piece turns; R or the wheel on the map turns it. */
   rotation: DecorRotation;
   /** The color chosen per colorable piece on its palette tile; a piece without one draws in its manifest default. */
-  colors: Readonly<Record<string, string>>;
+  colors: Readonly<Partial<Record<string, string>>>;
   /** Chooses the color of a colorable piece: the next pick of it, and the picked brush if it is that piece. */
   setColor(piece: string, color: string): void;
   /** An edit is on its way to the server. */
@@ -200,7 +201,8 @@ export function useDecorEditor({
   const [brush, setBrush] = useState<DecorBrush | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [rotation, setRotation] = useState<DecorRotation>(0);
-  const [colors, setColors] = useState<Readonly<Record<string, string>>>({});
+  // Remembered in this browser per scope, never sent: a placed item carries its own color.
+  const [colors, saveColor] = usePersistedColors<string>(area === null ? 'office:decor-colors' : 'office:desk-decor-colors');
   const [multiple, setMultiple] = useState(false);
   const [edits, setEditsState] = useState<readonly PendingEdit[]>([]);
   const [draining, setDraining] = useState(false);
@@ -516,7 +518,7 @@ export function useDecorEditor({
     rotation,
     colors,
     setColor(piece, color) {
-      setColors((current) => ({ ...current, [piece]: color }));
+      saveColor(piece, color);
       setBrush((current) => (current !== null && current.piece === piece && current.info.colorable === true ? { ...current, color } : current));
     },
     pending: draining,

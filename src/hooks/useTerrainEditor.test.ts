@@ -277,6 +277,16 @@ describe('useTerrainEditor', () => {
     const BLUE = '#3c6ac8';
     const carpet = (color?: string): TerrainBrush => ({ kind: 'floor', material: 'carpet', ...(color === undefined ? {} : { color }) });
 
+    it('remembers the carpet color across a reload, in this browser only', () => {
+      const first = setup();
+      act(() => first.result.current.setColor('carpet', RED));
+      first.unmount();
+
+      const second = setup();
+      expect(second.result.current.colors).toEqual({ carpet: RED });
+      expect(second.terrain.setBlock).not.toHaveBeenCalled();
+    });
+
     it('picks carpet in the color chosen so far, the default art until one is, and recolors the picked brush', () => {
       const { result, commands } = setup();
       act(() => result.current.enter());

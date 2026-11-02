@@ -6,4 +6,6 @@ import { afterEach } from 'vitest';
 // hay que desmontar a mano o cada test hereda el DOM del anterior.
 afterEach(() => {
   cleanup();
+  // Palettes remember their colors in the browser (usePersistedColors): no test inherits another's.
+  window.localStorage.clear();
 });

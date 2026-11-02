@@ -5,8 +5,9 @@
   gap: 6px;
 }
 
-/* A colorable floor's tile with its color picker under it (#222), like DecorPalette's cell. */
+/* A colorable floor's tile with its color input in its top-right corner (#222), like DecorPalette's cell. */
 .cell {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: stretch;

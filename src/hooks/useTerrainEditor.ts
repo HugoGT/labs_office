@@ -16,6 +16,7 @@ import {
 import { sameBrush, type TerrainBrush } from '../game/terrainEditor';
 import { TERRAIN_FLOOR_BASE, withTerrainFloors, type TerrainFloors } from '../game/terrainFloors';
 import type { TileRect } from '../game/terrainGrid';
+import { usePersistedColors } from './usePersistedColors';
 
 /**
  * The terrain editor of the office sidebar (#123 phase 2): pick a floor in
@@ -113,7 +114,8 @@ export function useTerrainEditor({ bridge, terrain, onExit, outlines }: UseTerra
   const [blocks, setBlocks] = useState<readonly LayoutMaterial[]>(BASE_LAYOUT.blocks);
   const [liveColors, setLiveColors] = useState<TerrainColors>(() => new Map());
   const [brush, setBrush] = useState<FloorBrush | null>(null);
-  const [colors, setColors] = useState<Readonly<Partial<Record<LayoutMaterial, string>>>>({});
+  // Remembered in this browser, never sent: a painted block carries its own color.
+  const [colors, saveColor] = usePersistedColors<LayoutMaterial>('office:terrain-colors');
   const [paints, setPaintsState] = useState<readonly PendingPaint[]>([]);
   const [draining, setDraining] = useState(false);
   const [blocked, setBlocked] = useState(false);
@@ -287,7 +289,7 @@ export function useTerrainEditor({ bridge, terrain, onExit, outlines }: UseTerra
     brush,
     colors,
     setColor(material, color) {
-      setColors((current) => ({ ...current, [material]: color }));
+      saveColor(material, color);
       setBrush((current) => (current?.material === material ? floorBrush(material, color) : current));
     },
     pending: draining,
