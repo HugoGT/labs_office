@@ -32,7 +32,7 @@ import {
   type ArtTablePiece,
   type ArtWallPiece,
 } from './artContract';
-import { combineArtManifests, parseArtPackManifest, type ArtAppearance } from './artPack';
+import { combineArtManifests, isRetiredArtPiece, parseArtPackManifest, type ArtAppearance } from './artPack';
 
 /** The role of the one sheet a desk, floor, wall, chair, plant or table piece ships, as `mapBuilder.ts` reads it. */
 const SHEET_ROLE = 'sheet';
@@ -48,6 +48,8 @@ export interface MaterialOption {
   readonly sheetUrl: string;
   /** The manifest entry, so the preview decides recolors with `recolorFor` like the office. */
   readonly piece: CatalogPiece;
+  /** A retired upload (#264): still drawn where it was placed, never offered by a palette. */
+  readonly retired: boolean;
 }
 
 type CatalogPiece = ArtDeskPiece | ArtFloorPiece | ArtWallPiece | ArtChairPiece | ArtPlantPiece | ArtTablePiece | ArtDoorPiece;
@@ -84,6 +86,7 @@ function optionOf(piece: CatalogPiece, folder: string): MaterialOption | null {
     defaultColor: piece.kind === 'desk' || piece.kind === 'floor' ? piece.defaultColor : null,
     sheetUrl: `${folder}${sheet.path}`,
     piece,
+    retired: isRetiredArtPiece(piece),
   };
 }
 

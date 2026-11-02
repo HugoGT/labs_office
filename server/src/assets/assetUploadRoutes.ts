@@ -112,7 +112,8 @@ export async function handleUploadAsset(authorization: unknown, body: unknown, d
  * a character: a withdrawn plant, desk or floor stops being offered, but
  * whoever placed or painted it keeps seeing it (D1b), so the office must
  * still find its sheet. A retired character is left out: nobody wears it any
- * more.
+ * more. A retired piece carries `retired: true` (#264), so the palettes stop
+ * offering it while the office keeps drawing it.
  */
 export async function handleUploadedArtManifest(decor: DecorCatalog): Promise<AdminResult> {
   const pieces = (await decor.listArtPieces({ includeRetired: true })).filter(
@@ -129,7 +130,9 @@ export async function handleUploadedArtManifest(decor: DecorCatalog): Promise<Ad
       author: 'per-piece',
       license: 'per-piece',
       defaults: ART_PACK_DEFAULTS,
-      pieces: pieces.filter((piece) => piece.source === 'upload').map((piece) => piece.spec),
+      pieces: pieces
+        .filter((piece) => piece.source === 'upload')
+        .map((piece) => (piece.retiredAt === null ? piece.spec : { ...piece.spec, retired: true })),
     },
   };
 }

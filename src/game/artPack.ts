@@ -258,6 +258,14 @@ export function parseArtPackManifest(raw: unknown): ArtPackManifest | null {
   return { ...(raw as unknown as ArtPackManifest), pieces };
 }
 
+/**
+ * Whether the uploads manifest marks this piece retired (#264): still shipped
+ * so whatever was placed or painted with it keeps drawing, but never offered.
+ */
+export function isRetiredArtPiece(piece: ArtPiece): boolean {
+  return (piece as { retired?: unknown }).retired === true;
+}
+
 export function findPiece(manifest: ArtPackManifest, id: string): ArtPiece | undefined {
   return manifest.pieces.find((piece) => piece.id === id);
 }

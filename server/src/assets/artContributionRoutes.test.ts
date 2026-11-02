@@ -32,7 +32,7 @@ import {
   type ArtContributionDeps,
 } from './artContributionRoutes.ts';
 import type { AssetStoragePort } from './assetStoragePort.ts';
-import { handleGetAssetFile, handleUploadedArtManifest } from './assetUploadRoutes.ts';
+import { handleGetAssetFile, handleUploadAsset, handleUploadedArtManifest } from './assetUploadRoutes.ts';
 import { createMemoryAssetStorage } from './memoryAssetStorage.ts';
 import { encodePng } from './pngCodec.ts';
 
@@ -484,6 +484,85 @@ describe('handleRetireArtPiece', () => {
     const { piece } = await d.decor.registerUploadedArtPiece({ piece: { ...wall, id: 'wall-upload-0123456789abcdef' }, uploadedBy: ADMIN.id });
 
     expect(await handleRetireArtPiece(AS_ADMIN, piece.id, d)).toEqual({ status: 409, body: { error: 'not-retirable' } });
+  });
+});
+
+describe('retired pieces (#264)', () => {
+  const idsOf = (result: { body: Record<string, unknown> }) => (result.body.contributions as { id: string }[]).map((entry) => entry.id);
+  const manifestOf = async (d: Harness) => parseArtPackManifest((await handleUploadedArtManifest(d.decor)).body)?.pieces ?? [];
+  const offeredTextures = async (d: Harness) => ((await handleListOfficeAssets(AS_BETO, d)).body.assets as { textureKey: string }[]).map((asset) => asset.textureKey);
+
+  async function retiredPlant(d: Harness): Promise<string> {
+    const { body } = await submit(d, AS_ANA, plantBody());
+    const id = body.contribution.id as string;
+    await handleApproveContribution(AS_ADMIN, id, d);
+    await handleRetireArtPiece(AS_ADMIN, id, d);
+    return id;
+  }
+
+  it('a retired piece leaves the review queue, while its uploader still sees it as retired', async () => {
+    const d = await deps();
+    const id = await retiredPlant(d);
+
+    for (const status of ['pending', 'approved', 'rejected']) expect(idsOf(await handleListReviewQueue(AS_ADMIN, status, d))).toEqual([]);
+    expect((await handleListMyContributions(AS_ANA, d)).body.contributions).toEqual([expect.objectContaining({ id, retiredAt: expect.any(String) })]);
+  });
+
+  it('the uploads manifest still carries a retired piece, marked so no palette offers it', async () => {
+    const d = await deps();
+    const id = await retiredPlant(d);
+    const { body } = await submit(d, AS_ANA, plantBody(1));
+    await handleApproveContribution(AS_ADMIN, body.contribution.id, d);
+
+    const pieces = await manifestOf(d);
+
+    expect(pieces.find((piece) => piece.id === id)).toMatchObject({ id, retired: true });
+    expect(pieces.find((piece) => piece.id === body.contribution.id)).not.toHaveProperty('retired');
+  });
+
+  it('a user uploading the same file again sends it back to review, still drawn where it was placed', async () => {
+    const d = await deps();
+    const id = await retiredPlant(d);
+    const file = (await manifestOf(d))[0]!.files[0]!.path;
+
+    const again = await submit(d, AS_BETO, { ...plantBody(), name: 'Sin revisar' });
+
+    expect(again).toMatchObject({ status: 201, body: { contribution: { id, status: 'pending', retiredAt: expect.any(String) } } });
+    // Pending metadata is never public (#122): the drawn piece keeps its approved name.
+    expect((await manifestOf(d)).map((piece) => piece.name)).toEqual(['Helecho 0']);
+    expect(idsOf(await handleListReviewQueue(AS_ADMIN, 'pending', d))).toEqual([id]);
+    expect(idsOf(await handleListMyContributions(AS_BETO, d))).toEqual([id]);
+    expect((await manifestOf(d)).map((piece) => [piece.id, (piece as { retired?: boolean }).retired])).toEqual([[id, true]]);
+    expect((await handleGetAssetFile(file, d)).status).toBe(200);
+    expect(await offeredTextures(d)).not.toContain(artSheetKey(id, 'sheet'));
+    // Already waiting: the same file once more is the same pixels twice.
+    expect(await handleSubmitContribution(AS_ANA, plantBody(), d)).toEqual({ status: 409, body: { error: 'asset-already-uploaded' } });
+
+    expect((await handleApproveContribution(AS_ADMIN, id, d)).status).toBe(200);
+
+    expect(await manifestOf(d)).toEqual([expect.not.objectContaining({ retired: true })]);
+    expect(await offeredTextures(d)).toContain(artSheetKey(id, 'sheet'));
+  });
+
+  it('an Admin uploading the same file again brings it back at once with its decor asset', async () => {
+    const d = await deps();
+    const id = await retiredPlant(d);
+
+    const again = await handleUploadAsset(AS_ADMIN, plantBody(), d);
+
+    expect(again).toMatchObject({ status: 201, body: { piece: { id }, asset: { textureKey: artSheetKey(id, 'sheet'), archivedAt: null } } });
+    expect(await manifestOf(d)).toEqual([expect.not.objectContaining({ retired: true })]);
+    expect(await offeredTextures(d)).toContain(artSheetKey(id, 'sheet'));
+    expect(idsOf(await handleListReviewQueue(AS_ADMIN, 'approved', d))).toEqual([id]);
+  });
+
+  it('the same file as an active piece is still refused', async () => {
+    const d = await deps();
+    const { body } = await submit(d, AS_ANA, plantBody());
+    await handleApproveContribution(AS_ADMIN, body.contribution.id, d);
+
+    expect(await handleSubmitContribution(AS_BETO, plantBody(), d)).toEqual({ status: 409, body: { error: 'asset-already-uploaded' } });
+    expect(await handleUploadAsset(AS_ADMIN, plantBody(), d)).toEqual({ status: 409, body: { error: 'asset-already-uploaded' } });
   });
 });
 

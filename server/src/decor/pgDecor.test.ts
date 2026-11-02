@@ -353,13 +353,13 @@ describe('createPgDecor: art pack catalog (art migration, step 3)', () => {
     ]);
   });
 
-  it('listArtPieces({ includeRetired: true }) drops the retired filter, never the approved one (#122)', async () => {
+  it('listArtPieces({ includeRetired: true }) adds the retired pieces, whatever their comeback status, and no other (#122, #264)', async () => {
     const pool = fakePool();
 
     await createPgDecor(pool).listArtPieces({ includeRetired: true });
 
     expect(squash(pool.queries[0].text)).not.toContain('retired_at is null');
-    expect(squash(pool.queries[0].text)).toContain("where status = 'approved'");
+    expect(squash(pool.queries[0].text)).toContain("where status = 'approved' or retired_at is not null");
   });
 
   function registrationPool(retired: readonly string[] = []): FakePool {
@@ -710,6 +710,109 @@ describe('createPgDecor: contributions and review (#122)', () => {
       AssetNameTakenError,
     );
     expect(taken.queries.some((query) => /insert into art_pieces/i.test(query.text))).toBe(false);
+    // A piece that already has its own decor asset gets it back: its name is not checked (#264).
+    const check = taken.queries.find((query) => /from assets where lower\(slug\)/i.test(query.text))!;
+    expect(squash(check.text)).toContain('and not exists (select 1 from assets where texture_key = $2)');
+    expect(check.values).toEqual(['helecho', DECOR.textureKey]);
+  });
+
+  describe('uploading a retired piece again (#264)', () => {
+    const RETIRED_AT = new Date('2026-01-02T00:00:00.000Z');
+    const OWN_ASSET = { ...ASSET_ROW, name: 'Helecho', slug: 'helecho', texture_key: DECOR.textureKey, archived_at: null };
+
+    /** The insert finds the id taken; the lock reads `existing`; the revive and the unarchive answer. */
+    function comebackPool(existing: Record<string, unknown>, ownAsset: Record<string, unknown> | null = OWN_ASSET): FakePool {
+      return fakePool((text, values) => {
+        if (/as pending/i.test(text)) return usage(0, 0);
+        if (/for update/i.test(text) && /from art_pieces/i.test(text)) return { rows: [existing], rowCount: 1 };
+        if (/update art_pieces set name/i.test(text)) return { rows: [{ ...existing, status: 'approved', retired_at: null, uploaded_by: values[11] }], rowCount: 1 };
+        if (/update art_pieces set uploaded_by/i.test(text)) return { rows: [{ ...existing, status: 'pending', uploaded_by: values[2] }], rowCount: 1 };
+        if (/update art_pieces set status/i.test(text)) return { rows: [{ ...existing, status: values[1], retired_at: values[1] === 'approved' ? null : existing.retired_at }], rowCount: 1 };
+        if (/update assets set archived_at = null/i.test(text)) return ownAsset === null ? { rows: [], rowCount: 0 } : { rows: [ownAsset], rowCount: 1 };
+        if (/insert into assets/i.test(text)) return { rows: [OWN_ASSET], rowCount: 1 };
+        return { rows: [], rowCount: 0 };
+      });
+    }
+
+    it('an Admin upload revives the retired row under its lock and unarchives its own decor asset', async () => {
+      const pool = comebackPool({ ...ROW, status: 'approved', retired_at: RETIRED_AT });
+
+      const { piece, asset } = await createPgDecor(pool).registerUploadedArtPiece({ piece: PIECE, uploadedBy: REVIEWER, decorAsset: DECOR });
+
+      const texts = pool.queries.map((query) => squash(query.text));
+      const revive = pool.queries.find((query) => /update art_pieces set name/i.test(query.text))!;
+      expect(squash(revive.text)).toContain("status = 'approved', retired_at = null, reviewed_by = null, reviewed_at = null, review_note = null, license_accepted_at = null");
+      expect(squash(revive.text)).toContain('where id = $1 and kind = $2');
+      expect(revive.values.at(-1)).toBe(REVIEWER);
+      expect(texts.findIndex((text) => text.includes('for update'))).toBeLessThan(texts.findIndex((text) => text.includes('update art_pieces set name')));
+      const unarchive = pool.queries.find((query) => /update assets set archived_at = null/i.test(query.text))!;
+      expect(unarchive.values).toEqual([DECOR.textureKey]);
+      expect(texts.some((text) => text.includes('insert into assets'))).toBe(false);
+      expect(pool.queries.find((query) => /insert into audit_log/i.test(query.text))!.values).toEqual([REVIEWER, 'upload-art', PIECE.id]);
+      expect(texts.at(-1)).toBe('commit');
+      expect(piece).toMatchObject({ status: 'approved', retiredAt: null, uploadedBy: REVIEWER });
+      expect(asset).toMatchObject({ slug: 'helecho', archivedAt: null });
+    });
+
+    it('a revived piece that never had a decor asset gets a new one', async () => {
+      const pool = comebackPool({ ...ROW, status: 'approved', retired_at: RETIRED_AT }, null);
+
+      const { asset } = await createPgDecor(pool).registerUploadedArtPiece({ piece: PIECE, uploadedBy: REVIEWER, decorAsset: DECOR });
+
+      expect(pool.queries.some((query) => /insert into assets/i.test(query.text))).toBe(true);
+      expect(asset).toMatchObject({ slug: 'helecho' });
+    });
+
+    it.each([
+      ['active', { status: 'approved', retired_at: null }],
+      ['pending', { status: 'pending', retired_at: null }],
+      ['back in review', { status: 'pending', retired_at: RETIRED_AT }],
+    ])('the same pixels as a %s piece are still refused, writing nothing', async (_label, state) => {
+      const admin = comebackPool({ ...ROW, ...state });
+      await expect(createPgDecor(admin).registerUploadedArtPiece({ piece: PIECE, uploadedBy: REVIEWER })).rejects.toBeInstanceOf(ArtPieceExistsError);
+      expect(admin.queries.some((query) => /^\s*update/i.test(query.text))).toBe(false);
+      expect(squash(admin.queries.at(-1)!.text)).toBe('rollback');
+
+      const user = comebackPool({ ...ROW, ...state });
+      await expect(createPgDecor(user).submitArtContribution({ piece: PIECE, submittedBy: ANA })).rejects.toBeInstanceOf(ArtPieceExistsError);
+      expect(user.queries.some((query) => /^\s*update/i.test(query.text))).toBe(false);
+    });
+
+    it('a contribution sends it back to review, still retired, stamped and audited as submit-art', async () => {
+      const pool = comebackPool({ ...ROW, status: 'approved', retired_at: RETIRED_AT, uploaded_by: REVIEWER });
+
+      const piece = await createPgDecor(pool).submitArtContribution({ piece: PIECE, submittedBy: ANA, decorAsset: DECOR });
+
+      const revive = pool.queries.find((query) => /update art_pieces set uploaded_by/i.test(query.text))!;
+      expect(squash(revive.text)).toContain("uploaded_by = $3, status = 'pending', reviewed_by = null, reviewed_at = null, review_note = null, license_accepted_at = now()");
+      // Unreviewed metadata never reaches the drawable piece: the approved fields stay.
+      expect(squash(revive.text)).not.toMatch(/retired_at =|name =|spec =|author =/);
+      expect(revive.values).toEqual([PIECE.id, 'plant', ANA]);
+      expect(pool.queries.some((query) => /update assets/i.test(query.text))).toBe(false);
+      expect(pool.queries.find((query) => /insert into audit_log/i.test(query.text))!.values).toEqual([ANA, 'submit-art', PIECE.id]);
+      expect(piece).toMatchObject({ status: 'pending', retiredAt: RETIRED_AT, uploadedBy: ANA });
+    });
+
+    it('approving the comeback clears retired_at and unarchives its decor asset instead of inserting one', async () => {
+      const pool = comebackPool({ ...ROW, status: 'pending', retired_at: RETIRED_AT });
+
+      const reviewed = await createPgDecor(pool).reviewArtContribution({ id: PIECE.id, reviewerId: REVIEWER, decision: 'approve', note: null, decorAsset: DECOR });
+
+      const update = pool.queries.find((query) => /update art_pieces set status/i.test(query.text))!;
+      expect(squash(update.text)).toContain("retired_at = case when $2 = 'approved' then null else retired_at end");
+      expect(pool.queries.find((query) => /update assets set archived_at = null/i.test(query.text))!.values).toEqual([DECOR.textureKey]);
+      expect(pool.queries.some((query) => /insert into assets/i.test(query.text))).toBe(false);
+      expect(reviewed).toMatchObject({ piece: { status: 'approved', retiredAt: null }, asset: { slug: 'helecho' } });
+    });
+
+    it('a first approval never touches an archived asset', async () => {
+      const pool = comebackPool({ ...ROW, status: 'pending', retired_at: null });
+
+      await createPgDecor(pool).reviewArtContribution({ id: PIECE.id, reviewerId: REVIEWER, decision: 'approve', note: null, decorAsset: DECOR });
+
+      expect(pool.queries.some((query) => /update assets/i.test(query.text))).toBe(false);
+      expect(pool.queries.some((query) => /insert into assets/i.test(query.text))).toBe(true);
+    });
   });
 
   it('artContributionUsage runs the same count outside any transaction', async () => {

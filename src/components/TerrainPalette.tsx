@@ -77,7 +77,7 @@ export interface TerrainPaletteProps {
 
 export function TerrainPalette({ value, onPick, onPickFloor, floors, colors = {}, onColorChange, disabled = false, preview }: TerrainPaletteProps) {
   const builtInIds = new Set<string>(LAYOUT_MATERIALS.flatMap((kind) => (kind === 'void' ? [] : [terrainFloorPieceId(kind)])));
-  const uploaded = (floors ?? []).filter((option) => isTerrainFloorPieceId(option.id) && !builtInIds.has(option.id));
+  const uploaded = (floors ?? []).filter((option) => isTerrainFloorPieceId(option.id) && !builtInIds.has(option.id) && !option.retired);
   const material = (kind: LayoutMaterial) => {
     const option = kind === 'void' ? undefined : floors?.find((candidate) => candidate.id === terrainFloorPieceId(kind));
     const label = TERRAIN_MATERIAL_LABELS[kind];

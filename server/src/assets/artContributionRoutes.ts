@@ -178,7 +178,11 @@ export async function handleListReviewQueue(authorization: unknown, status: unkn
 
   const wanted = status === undefined ? 'pending' : status;
   if (!(ART_PIECE_STATUSES as readonly unknown[]).includes(wanted)) return { status: 400, body: { error: 'invalid-request' } };
-  const pieces = await deps.decor.listUploadedArtPieces({ status: wanted as ArtPieceStatus });
+  // A retired piece is done with review (#264); only its comeback, pending
+  // again, is the reviewer's business. Its uploader still sees it in "Mis aportaciones".
+  const pieces = (await deps.decor.listUploadedArtPieces({ status: wanted as ArtPieceStatus })).filter(
+    (piece) => piece.retiredAt === null || piece.status === 'pending',
+  );
   return { status: 200, body: { contributions: await withUploaders(pieces, deps) } };
 }
 

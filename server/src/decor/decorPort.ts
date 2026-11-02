@@ -187,7 +187,9 @@ export interface ListArtPiecesOptions {
   /**
    * Includes retired pieces. Off by default: the normal read is "what can be
    * chosen today". Never includes pending or rejected contributions (#122):
-   * those are not part of the catalog at all.
+   * those are not part of the catalog at all, except a retired piece whose
+   * comeback is under review or was rejected (#264): it was approved, and
+   * whatever was placed with it keeps drawing.
    */
   includeRetired?: boolean;
 }
@@ -218,8 +220,10 @@ export interface DecorCatalog {
   listArtPieces(options?: ListArtPiecesOptions): Promise<ArtCatalogPiece[]>;
   /**
    * Adds one Admin upload (#121), active at once, with its optional decor
-   * asset. Never overwrites: an id already in the catalog, retired or not,
-   * throws `ArtPieceExistsError`, and a taken decor name throws
+   * asset. An id already in the catalog throws `ArtPieceExistsError`, unless
+   * that piece is retired (`reuploadTransition`, #264): then it takes this
+   * upload's fields and comes back with its own decor asset unarchived. A
+   * taken decor name throws
    * `AssetNameTakenError` with nothing written. Throws `InvalidArtPackError`
    * for an id outside the upload id space. Audited as `upload-art`.
    */
@@ -235,8 +239,9 @@ export interface DecorCatalog {
    * `submit-art` audit entry. The limits (`assertContributionQuota`) are
    * checked and the row written atomically per user, so parallel uploads
    * cannot exceed them. Throws `ContributionLimitError`, `ArtPieceExistsError`
-   * (the same pixels are in the catalog already, whatever their status) or
-   * `AssetNameTakenError` (a plant whose decor name is taken).
+   * (the same pixels are in the catalog already and not retired) or
+   * `AssetNameTakenError` (a plant whose decor name is taken). The same
+   * pixels as a retired piece send it back to `pending`, still retired (#264).
    */
   submitArtContribution(input: ArtContributionInput): Promise<ArtCatalogPiece>;
   /** Uploads only (never pack pieces), whatever their status, oldest first. */
@@ -246,7 +251,8 @@ export interface DecorCatalog {
   findArtPiecesWithFile(sha256: string): Promise<ArtCatalogPiece[]>;
   /**
    * Approves or rejects a pending contribution, with its audit entry and, for
-   * an approved plant, its decor asset, atomically. `null` if no upload has
+   * an approved plant, its decor asset, atomically. Approving the comeback of
+   * a retired piece (#264) clears `retiredAt` and unarchives its own asset. `null` if no upload has
    * that id. Throws `InvalidArtTransitionError` if it is not pending and
    * `AssetNameTakenError` if the decor name was taken meanwhile.
    */

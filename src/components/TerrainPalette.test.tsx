@@ -109,6 +109,13 @@ describe('TerrainPalette: uploaded floors (S13)', () => {
     expect(buttons.map((button) => button.textContent)).toEqual(NAMES);
   });
 
+  it('leaves a retired uploaded floor out: painted terrain keeps it, the palette no longer offers it (#264)', () => {
+    render(<TerrainPalette value={null} onPick={() => {}} floors={[...floors, { ...upload('floor-upload-1111111111111111', 'Suelo prueba'), retired: true }]} preview={noPreview()} />);
+
+    const buttons = Array.from(screen.getByRole('group', { name: 'Suelos' }).querySelectorAll('button[aria-pressed]'));
+    expect(buttons.map((button) => button.textContent)).toEqual([...BUILT_IN, 'Parquet gris', 'Mármol', 'Vacío']);
+  });
+
   it('reports the piece of a click on an uploaded floor and not a material, and the built-ins still report theirs', async () => {
     const onPick = vi.fn();
     const onPickFloor = vi.fn();

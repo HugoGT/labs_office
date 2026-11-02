@@ -22,6 +22,7 @@ import {
   CONTRIBUTION_QUOTA_WINDOW_MS,
   assertContributionQuota,
   retireTransition,
+  reuploadTransition,
   reviewTransition,
   type ArtAuditAction,
   type ArtPieceStatus,
@@ -119,6 +120,32 @@ const CONTRIBUTION_INSERT = `
 `;
 
 /**
+ * The same pixels as a retired piece, uploaded again by an Admin (#264): the
+ * row takes the new upload's fields and is offered at once. `$1..$12` are
+ * `uploadValues`; the kind is only matched, since the id prefix fixes it.
+ */
+const UPLOADED_ART_PIECE_REVIVE = `
+  UPDATE art_pieces SET name = $3, material = $4, colorable = $5, default_color = $6, author = $7, license = $8,
+    files = $9::jsonb, spec = $10::jsonb, contract_version = $11, uploaded_by = $12,
+    status = 'approved', retired_at = NULL, reviewed_by = NULL, reviewed_at = NULL, review_note = NULL, license_accepted_at = NULL,
+    updated_at = now()
+  WHERE id = $1 AND kind = $2
+  RETURNING ${ART_PIECE_COLUMNS}
+`;
+
+/**
+ * The same, contributed (#264): back to `pending` with `retired_at` kept, so it
+ * is not offered until approved, and with the approved fields kept, so placed
+ * copies draw what was reviewed (pending metadata is never public, #122).
+ */
+const CONTRIBUTION_REVIVE = `
+  UPDATE art_pieces SET uploaded_by = $3, status = 'pending', reviewed_by = NULL, reviewed_at = NULL, review_note = NULL, license_accepted_at = now(),
+    updated_at = now()
+  WHERE id = $1 AND kind = $2
+  RETURNING ${ART_PIECE_COLUMNS}
+`;
+
+/**
  * What a user has in flight: pending pieces, and accepted submissions of the
  * last window read from the audit trail, so a rejected or retired piece still
  * counts for the hour. Run under the user's row lock when it is binding.
@@ -134,8 +161,10 @@ const ART_AUDIT_INSERT = 'INSERT INTO audit_log (actor_id, action, piece_id) VAL
 
 const UPLOADED_ART_PIECE_LOCK = `SELECT ${ART_PIECE_COLUMNS} FROM art_pieces WHERE id = $1 AND source = 'upload' FOR UPDATE`;
 
+/** An approval also ends a retirement: a comeback (#264) is offered again. */
 const ART_REVIEW_UPDATE = `
-  UPDATE art_pieces SET status = $2, reviewed_by = $3, review_note = $4, reviewed_at = now(), updated_at = now()
+  UPDATE art_pieces SET status = $2, reviewed_by = $3, review_note = $4, reviewed_at = now(), updated_at = now(),
+    retired_at = CASE WHEN $2 = 'approved' THEN NULL ELSE retired_at END
   WHERE id = $1
   RETURNING ${ART_PIECE_COLUMNS}
 `;
@@ -145,6 +174,9 @@ const UPLOADED_ART_PIECE_RETIRE = `
   WHERE id = $1
   RETURNING ${ART_PIECE_COLUMNS}
 `;
+
+/** The decor asset of a piece coming back (#264): its own, so placed copies keep it. */
+const DECOR_ASSET_UNARCHIVE_BY_TEXTURE = `UPDATE assets SET archived_at = NULL WHERE texture_key = $1 RETURNING ${ASSET_COLUMNS}`;
 
 /** Archived, never deleted: whoever placed the plant keeps seeing it (D1b). */
 const DECOR_ASSET_ARCHIVE_BY_TEXTURE = 'UPDATE assets SET archived_at = now() WHERE texture_key = $1 AND archived_at IS NULL';
@@ -281,6 +313,25 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
     await client.query(ART_AUDIT_INSERT, [actorId, action, pieceId]);
   }
 
+  /**
+   * After an upload's insert found its id taken: the retired row it revives
+   * with `revive`, under its lock, or `ArtPieceExistsError` (#264).
+   */
+  async function revive(client: DirectoryQueryable, piece: ArtPiece, sql: string, values: unknown[]): Promise<Record<string, unknown>> {
+    const locked = await client.query(UPLOADED_ART_PIECE_LOCK, [piece.id]);
+    const current = locked.rows[0];
+    if (current === undefined || reuploadTransition(toArtPiece(current)) === 'exists') throw new ArtPieceExistsError(piece.id);
+    const revived = await client.query(sql, values);
+    return revived.rows[0]!;
+  }
+
+  /** A piece back in the catalog offers its own decor asset again; a new one only if it never had one. */
+  async function offeredAsset(client: DirectoryQueryable, pieceId: string, asset: NormalizedCreateAssetInput | undefined): Promise<Asset | null> {
+    const unarchived = await client.query(DECOR_ASSET_UNARCHIVE_BY_TEXTURE, [artSheetKey(pieceId, 'sheet')]);
+    if (unarchived.rows[0] !== undefined) return toAsset(unarchived.rows[0]);
+    return asset === undefined ? null : insertAsset(client, asset);
+  }
+
   async function insertAsset(client: DirectoryQueryable, normalized: NormalizedCreateAssetInput): Promise<Asset> {
     try {
       const result = await client.query(ASSET_INSERT, [
@@ -397,7 +448,9 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
     async listArtPieces(options: ListArtPiecesOptions = {}) {
       // Composed in the text for the same reason as `listAssets`. Approved
       // only, always: a contribution under review is not part of the catalog.
-      const where = options.includeRetired ? "WHERE status = 'approved'" : "WHERE status = 'approved' AND retired_at IS NULL";
+      // A retired piece was approved: it stays drawable while a comeback of it
+      // is reviewed (#264).
+      const where = options.includeRetired ? "WHERE status = 'approved' OR retired_at IS NOT NULL" : "WHERE status = 'approved' AND retired_at IS NULL";
       const result = await pool.query(`SELECT ${ART_PIECE_COLUMNS} FROM art_pieces ${where} ORDER BY kind, id`);
       return result.rows.map(toArtPiece);
     },
@@ -409,10 +462,10 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
 
       return inTransaction(async (client) => {
         const inserted = await client.query(UPLOADED_ART_PIECE_INSERT, uploadValues(piece, uploadedBy));
-        const row = inserted.rows[0];
-        if (row === undefined) throw new ArtPieceExistsError(piece.id);
+        const row = inserted.rows[0] ?? (await revive(client, piece, UPLOADED_ART_PIECE_REVIVE, uploadValues(piece, uploadedBy)));
         // Same transaction: a taken decor name rolls the piece back too.
-        const created = asset === undefined ? null : await insertAsset(client, asset);
+        const created =
+          inserted.rows[0] === undefined ? await offeredAsset(client, piece.id, asset) : asset === undefined ? null : await insertAsset(client, asset);
         await audit(client, uploadedBy, 'upload-art', piece.id);
         return { piece: toArtPiece(row), asset: created };
       });
@@ -436,13 +489,16 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
         const counted = await client.query(CONTRIBUTION_USAGE, [submittedBy, CONTRIBUTION_QUOTA_WINDOW_MS / 1000]);
         assertContributionQuota(toUsage(counted.rows[0]));
         if (asset !== undefined) {
-          // Only checked: the asset itself is created by the approval.
-          const taken = await client.query('SELECT id FROM assets WHERE lower(slug) = lower($1)', [asset.slug]);
+          // Only checked: the asset itself is created by the approval. A
+          // comeback gets its own asset back instead, so its name is not checked.
+          const taken = await client.query(
+            'SELECT id FROM assets WHERE lower(slug) = lower($1) AND NOT EXISTS (SELECT 1 FROM assets WHERE texture_key = $2)',
+            [asset.slug, asset.textureKey],
+          );
           if (taken.rows.length > 0) throw new AssetNameTakenError('ya existe un asset con ese nombre');
         }
         const inserted = await client.query(CONTRIBUTION_INSERT, uploadValues(piece, submittedBy));
-        const row = inserted.rows[0];
-        if (row === undefined) throw new ArtPieceExistsError(piece.id);
+        const row = inserted.rows[0] ?? (await revive(client, piece, CONTRIBUTION_REVIVE, [piece.id, piece.kind, submittedBy]));
         await audit(client, submittedBy, 'submit-art', piece.id);
         return toArtPiece(row);
       });
@@ -482,9 +538,12 @@ export function createPgDecor(pool: DirectoryPool): DecorCatalog {
         const locked = await client.query(UPLOADED_ART_PIECE_LOCK, [id]);
         const current = locked.rows[0];
         if (current === undefined) return null;
-        const status = reviewTransition(toArtPiece(current).status, decision);
+        const before = toArtPiece(current);
+        const status = reviewTransition(before.status, decision);
         const updated = await client.query(ART_REVIEW_UPDATE, [id, status, reviewerId, status === 'rejected' ? note : null]);
-        const created = status === 'approved' && asset !== undefined ? await insertAsset(client, asset) : null;
+        // An approved comeback (#264) is offered again with its own decor asset.
+        const created =
+          status !== 'approved' ? null : before.retiredAt !== null ? await offeredAsset(client, id, asset) : asset === undefined ? null : await insertAsset(client, asset);
         await audit(client, reviewerId, status === 'approved' ? 'approve-art' : 'reject-art', id);
         return { piece: toArtPiece(updated.rows[0]), asset: created };
       });

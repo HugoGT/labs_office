@@ -54,7 +54,6 @@ function ReviewRow({ contribution, read, busy, onApprove, onReject, onRetire }: 
         </span>
         <span className={styles.label}>{uploaderOf(contribution)}</span>
         {status === 'rejected' && <span className={styles.label}>Motivo: {contribution.reviewNote}</span>}
-        {contribution.retiredAt !== null && <span className={styles.label}>Retirada</span>}
       </div>
       <div className={styles.actions}>
         <ArtPieceViewer contribution={contribution} read={read} className={styles.button} />
@@ -229,7 +228,8 @@ export function ArtReviewSection({ reviews, onPendingCount }: ArtReviewSectionPr
                       ? `«${contribution.name}» ya no se ofrece.`
                       : `«${contribution.name}» ya no se ofrece. ${people} al personaje por defecto.`;
                   },
-                  (list) => list.map((entry) => (entry.id === contribution.id ? { ...entry, retiredAt: new Date().toISOString() } : entry)),
+                  // A retired piece leaves the review lists (#264).
+                  without(contribution.id),
                 )
               }
             />

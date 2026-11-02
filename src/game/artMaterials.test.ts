@@ -210,6 +210,17 @@ describe('uploaded materials (#121)', () => {
     expect(result?.defaults.desk).toBe('desk-wood');
   });
 
+  it('marks a retired upload, which the manifest still ships for whoever placed it (#264)', () => {
+    const retired = { ...UPLOADED, id: 'desk-upload-fedcba9876543210', retired: true };
+    const result = materialCatalogFrom(PACK, MANIFEST_URL, { raw: { ...UPLOADS, pieces: [UPLOADED, retired] }, url: UPLOADS_URL });
+
+    expect(result?.desk.slice(-2).map((option) => [option.id, option.retired])).toEqual([
+      [UPLOADED.id, false],
+      [retired.id, true],
+    ]);
+    expect(result?.desk.filter((option) => option.retired)).toHaveLength(1);
+  });
+
   it('reads both manifests, and a missing uploads manifest leaves the pack', async () => {
     const both = vi.fn(async (url: string) => ({ ok: true, json: async () => (url === UPLOADS_URL ? UPLOADS : PACK) }) as Response);
     expect((await loadMaterialCatalog({ manifestUrl: MANIFEST_URL, uploadsUrl: UPLOADS_URL, fetchImpl: both as unknown as typeof fetch }))?.desk).toHaveLength(5);

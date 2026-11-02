@@ -22,6 +22,7 @@ import {
   normalizeReviewNote,
   reviewTransition,
   retireTransition,
+  reuploadTransition,
 } from './artReviewRules.ts';
 
 describe('contribution limits', () => {
@@ -98,6 +99,25 @@ describe('retireTransition', () => {
   });
 });
 
+describe('reuploadTransition (#264)', () => {
+  it('revives a retired piece: the same pixels may come back', () => {
+    expect(reuploadTransition({ status: 'approved', retiredAt: new Date() })).toBe('revive');
+  });
+
+  it('revives a retired piece whose earlier comeback was rejected', () => {
+    expect(reuploadTransition({ status: 'rejected', retiredAt: new Date() })).toBe('revive');
+  });
+
+  it.each([
+    ['an active approved', { status: 'approved', retiredAt: null }],
+    ['a pending', { status: 'pending', retiredAt: null }],
+    ['a rejected', { status: 'rejected', retiredAt: null }],
+    ['a retired piece already back in review, so a', { status: 'pending', retiredAt: new Date() }],
+  ] as const)('refuses %s piece: those pixels are already uploaded', (_label, piece) => {
+    expect(reuploadTransition(piece)).toBe('exists');
+  });
+});
+
 describe('canReviewArt', () => {
   it('is the admin rank criterion: admin and superadmin review, nobody else', () => {
     expect(canReviewArt('superadmin')).toBe(true);
@@ -121,9 +141,9 @@ describe('file visibility', () => {
   const ana = { id: 'id-ana', role: 'employee' as const };
   const beto = { id: 'id-beto', role: 'employee' as const };
   const admin = { id: 'id-admin', role: 'admin' as const };
-  const pendingOfAna = { status: 'pending' as const, uploadedBy: 'id-ana' };
-  const rejectedOfAna = { status: 'rejected' as const, uploadedBy: 'id-ana' };
-  const approved = { status: 'approved' as const, uploadedBy: 'id-beto' };
+  const pendingOfAna = { status: 'pending' as const, uploadedBy: 'id-ana', retiredAt: null };
+  const rejectedOfAna = { status: 'rejected' as const, uploadedBy: 'id-ana', retiredAt: null };
+  const approved = { status: 'approved' as const, uploadedBy: 'id-beto', retiredAt: null };
 
   it('a file is public only when an approved piece carries it', () => {
     expect(isPublicArtFile([approved])).toBe(true);
@@ -132,6 +152,12 @@ describe('file visibility', () => {
     expect(isPublicArtFile([])).toBe(false);
     // The same pixels already approved under another piece are public anyway.
     expect(isPublicArtFile([pendingOfAna, approved])).toBe(true);
+  });
+
+  it('a retired piece back in review keeps its file public: what was placed keeps drawing (#264)', () => {
+    const retiredAt = new Date();
+    expect(isPublicArtFile([{ ...pendingOfAna, retiredAt }])).toBe(true);
+    expect(isPublicArtFile([{ ...rejectedOfAna, retiredAt }])).toBe(true);
   });
 
   it('a pending file is seen by its uploader and by reviewers, nobody else', () => {

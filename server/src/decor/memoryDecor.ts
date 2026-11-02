@@ -32,6 +32,7 @@ import {
   CONTRIBUTION_QUOTA_WINDOW_MS,
   assertContributionQuota,
   retireTransition,
+  reuploadTransition,
   reviewTransition,
   type ArtAuditAction,
   type ContributionUsage,
@@ -112,6 +113,34 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): MemoryDecor
   function uploadedPiece(id: string): ArtCatalogPiece | null {
     const piece = artPieces.get(id);
     return piece === undefined || piece.source !== 'upload' ? null : piece;
+  }
+
+  /**
+   * The piece an upload of these pixels would replace (#264): `null` when the
+   * id is new, the retired piece it revives, or `ArtPieceExistsError`.
+   */
+  function revivable(id: string): ArtCatalogPiece | null {
+    const current = artPieces.get(id);
+    if (current === undefined) return null;
+    if (reuploadTransition(current) === 'exists') throw new ArtPieceExistsError(id);
+    return current;
+  }
+
+  /** The decor asset that draws a piece's sheet, archived or not. */
+  function assetDrawing(pieceId: string): Asset | undefined {
+    const textureKey = artSheetKey(pieceId, 'sheet');
+    return [...assets.values()].find((entry) => entry.textureKey === textureKey);
+  }
+
+  /**
+   * The decor asset a piece coming back to the catalog offers: its own one,
+   * unarchived, so placed copies keep their asset; a new one only if it never
+   * had one. Prepared without writing, like `prepareAsset`.
+   */
+  function offeredAsset(pieceId: string, input: CreateAssetInput | undefined): Asset | null {
+    const existing = assetDrawing(pieceId);
+    if (existing !== undefined) return { ...existing, archivedAt: null };
+    return input === undefined ? null : prepareAsset(input);
   }
 
   function byRegistration(list: readonly ArtCatalogPiece[]): ArtCatalogPiece[] {
@@ -259,8 +288,9 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): MemoryDecor
 
     async listArtPieces(options: ListArtPiecesOptions = {}) {
       // Only approved pieces are the catalog (#122): a contribution under
-      // review is not choosable, retired or not.
-      const all = [...artPieces.values()].filter((piece) => piece.status === 'approved');
+      // review is not choosable. A retired piece was approved, so it stays
+      // drawable while a comeback of it is reviewed (#264).
+      const all = [...artPieces.values()].filter((piece) => piece.status === 'approved' || (options.includeRetired && piece.retiredAt !== null));
       return (options.includeRetired ? all : all.filter((piece) => piece.retiredAt === null)).sort(
         (a, b) => a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id),
       );
@@ -269,14 +299,14 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): MemoryDecor
     async registerUploadedArtPiece({ piece, uploadedBy, decorAsset }: UploadedArtPieceInput) {
       assertUploadedArtPiece(piece);
       // Everything that can fail runs before either map is written.
-      if (artPieces.has(piece.id)) throw new ArtPieceExistsError(piece.id);
-      const asset = decorAsset === undefined ? null : prepareAsset(decorAsset);
+      const previous = revivable(piece.id);
+      const asset = previous === null ? (decorAsset === undefined ? null : prepareAsset(decorAsset)) : offeredAsset(piece.id, decorAsset);
       const at = now();
       const stored: ArtCatalogPiece = {
         ...artPieceFields(piece),
         contractVersion: ART_CONTRACT_VERSION,
         retiredAt: null,
-        registeredAt: at,
+        registeredAt: previous?.registeredAt ?? at,
         updatedAt: at,
         source: 'upload',
         uploadedBy,
@@ -299,14 +329,15 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): MemoryDecor
       assertUploadedArtPiece(piece);
       const at = now();
       assertContributionQuota(usageOf(submittedBy, at));
-      if (artPieces.has(piece.id)) throw new ArtPieceExistsError(piece.id);
-      // Only checked: the asset itself is created by the approval.
-      if (decorAsset !== undefined) prepareAsset(decorAsset);
+      const previous = revivable(piece.id);
+      // Only checked: the asset itself is created by the approval. A comeback
+      // gets its own asset back instead, so its name is not checked again.
+      if (decorAsset !== undefined && assetDrawing(piece.id) === undefined) prepareAsset(decorAsset);
+      // A comeback keeps the approved fields and stays retired until approved:
+      // not offered, and placed copies keep drawing exactly what was reviewed,
+      // since pending metadata is never public (#122).
       const stored: ArtCatalogPiece = {
-        ...artPieceFields(piece),
-        contractVersion: ART_CONTRACT_VERSION,
-        retiredAt: null,
-        registeredAt: at,
+        ...(previous ?? { ...artPieceFields(piece), contractVersion: ART_CONTRACT_VERSION, retiredAt: null, registeredAt: at }),
         updatedAt: at,
         source: 'upload',
         uploadedBy: submittedBy,
@@ -346,10 +377,13 @@ export function createMemoryDecor(options: MemoryDecorOptions = {}): MemoryDecor
       const current = uploadedPiece(id);
       if (current === null) return null;
       const status = reviewTransition(current.status, decision);
-      const asset = status === 'approved' && decorAsset !== undefined ? prepareAsset(decorAsset) : null;
+      // An approved comeback (#264) is offered again with its own decor asset.
+      const comeback = status === 'approved' && current.retiredAt !== null;
+      const asset = status !== 'approved' ? null : comeback ? offeredAsset(id, decorAsset) : decorAsset === undefined ? null : prepareAsset(decorAsset);
       const at = now();
       const reviewed: ArtCatalogPiece = {
         ...current,
+        retiredAt: comeback ? null : current.retiredAt,
         status,
         reviewedBy: reviewerId,
         reviewedAt: at,
