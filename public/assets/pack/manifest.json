@@ -841,7 +841,7 @@
           "imageKind": "chair",
           "width": 144,
           "height": 76,
-          "sha256": "a26d2ab4744fbf36b00224cabb0cb677135384b4bbb1c2f9317aa4ffa5037c37"
+          "sha256": "7813e493398893361211b727cd19ee69e612571ab3e38776664a48aacabc7e8d"
         }
       ]
     },
@@ -1017,7 +1017,51 @@
           "imageKind": "chair",
           "width": 144,
           "height": 76,
-          "sha256": "5ebc9dd5b2451ddf8a31e2c085ee166f51d40ba166be9c4ca3a930f884234b7e"
+          "sha256": "23c49b70513f5f580f26ccdb9d5c2f8bb61ba4e80dcf5d091d49d6c2dd0a4068"
+        }
+      ]
+    },
+    {
+      "id": "chair-executive",
+      "kind": "chair",
+      "name": "Silla gerencial",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "executive",
+      "facings": [
+        "up",
+        "down",
+        "left",
+        "right"
+      ],
+      "layers": [
+        "back",
+        "front"
+      ],
+      "anchors": {
+        "seat": {
+          "x": 18,
+          "y": 22
+        },
+        "ground": {
+          "x": 18,
+          "y": 31
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "colorable": false,
+      "defaultColor": null,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "chair/executive.png",
+          "imageKind": "chair",
+          "width": 144,
+          "height": 76,
+          "sha256": "0b7e317ad584b955e0f6e2cb8af981d8f1d075158d2787985e09130aa667619a"
         }
       ]
     },
@@ -1056,7 +1100,7 @@
           "imageKind": "sofa",
           "width": 384,
           "height": 224,
-          "sha256": "c386bb193f7fb7b517eae6ac50765fed819d20358b4a6b2143262bd8d1316095"
+          "sha256": "840924229c93811f01a2cc40b2ea661900d0b5ea689cdcb9754f4b00bac92ddc"
         }
       ]
     },
@@ -1095,7 +1139,7 @@
           "imageKind": "sofa",
           "width": 384,
           "height": 224,
-          "sha256": "f0bfbfdf25f677923b44aa382d98d063fe8eedc09c199419cede44e28aff3496"
+          "sha256": "6726083bcfb41ebc89bccd8dc66018427c246798dca8992568ba9e0ec1708e14"
         }
       ]
     },
@@ -1134,7 +1178,7 @@
           "imageKind": "sofa",
           "width": 384,
           "height": 224,
-          "sha256": "033aabcf341c6230b669c2a505050cfbf547b55df73c5462c6c95dc3781539ba"
+          "sha256": "5fff7a0639a09f269af0fbc1c5ed7323d0cdd04be243c9147114fcfc7ed32f26"
         }
       ]
     },
@@ -1173,7 +1217,7 @@
           "imageKind": "sofa",
           "width": 384,
           "height": 224,
-          "sha256": "dd15adc56d36a864d734f7014f5f3d1bd5822800167b83bb82808d91944b192f"
+          "sha256": "2dcc269489c818d9b7327cf58d4b28ecc2e571055e11ab73788d332437eb0377"
         }
       ]
     },

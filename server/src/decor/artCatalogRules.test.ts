@@ -341,7 +341,7 @@ describe('normalizeStoredAppearance', () => {
 describe('packDecorAsset', () => {
   it('offers every pack chair as a one-tile desk decor asset under its Spanish name', () => {
     const chairs = MANIFEST.pieces.filter((piece) => piece.kind === 'chair');
-    expect(chairs.map((piece) => piece.id).sort()).toEqual(['chair-fabric', 'chair-gamer', 'chair-leather', 'chair-metal', 'chair-office', 'chair-task', 'chair-wood']);
+    expect(chairs.map((piece) => piece.id).sort()).toEqual(['chair-executive', 'chair-fabric', 'chair-gamer', 'chair-leather', 'chair-metal', 'chair-office', 'chair-task', 'chair-wood']);
     for (const chair of chairs) {
       expect(packDecorAsset(chair)).toEqual({
         name: chair.name,

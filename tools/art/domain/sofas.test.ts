@@ -152,3 +152,22 @@ test('only the fabric sofa takes a color, and the silhouette does not change wit
     }
   }
 });
+
+test('seen from the front, a dark contour parts every upholstered backrest from its seat', () => {
+  const sprites = [
+    ...SOFA_MATERIALS.map((material) => ({ name: `chair-${material}`, back: chairSprite(material, 'down').back, front: chairSprite(material, 'down').front, seats: [chairSprite(material, 'down').seat] })),
+    ...SOFA_MATERIALS.flatMap((material) => SOFA_SEATS.map((seats) => ({ name: `${material}-${seats}`, ...sofaSprite(material, seats, 'down') }))),
+  ];
+  for (const { name, back, front, seats } of sprites) {
+    const image = composite({ back, front });
+    for (const seat of seats) {
+      const cushion = luma(image.getPixel(seat.x, seat.y));
+      // Up from the pelvis, the seat ends in an ink line before the backrest starts.
+      let contour = -1;
+      for (let y = seat.y - 1; y > seat.y - 8 && contour < 0; y -= 1) if (luma(image.getPixel(seat.x, y)) < cushion * 0.6) contour = y;
+      assert.ok(contour > 0, `${name} seat at ${seat.x}: no contour above the seat`);
+      assert.equal(image.alphaAt(seat.x, contour - 2), 255, `${name}: the backrest goes on above the contour`);
+      assert.ok(luma(image.getPixel(seat.x, contour - 2)) > cushion * 0.6, `${name}: above the contour is upholstery, not ink`);
+    }
+  }
+});

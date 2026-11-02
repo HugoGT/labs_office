@@ -108,7 +108,12 @@ export function upholsteredModel(kind: UpholsteryStyle, seats: number, facing: F
   const along = ([a, b]: Span): Span => [Math.round(lengthen(a, seats, facing)), Math.round(lengthen(b, seats, facing))];
   const mirror = ([a, b]: Span): Span => [-b, -a];
   const innerHalf = half - 3;
-  const cushion = (point: SurfacePoint, c: Rgba): Rgba => (point.face === 'top' && point.row === point.height - 1 ? mixRgba(c, s.ramp.light, 0.3) : c);
+  // The backrest shades the back of the cushion, so the seat reads apart from the back from the front.
+  const cushion = (point: SurfacePoint, c: Rgba): Rgba => {
+    if (point.face !== 'top') return c;
+    if (point.u < BACK_FACE + 2) return s.ramp.shadow;
+    return point.row === point.height - 1 ? mixRgba(c, s.ramp.light, 0.3) : c;
+  };
   const feetV = along([half - 3, half - 1]);
   const feet: Box[] = [];
   for (const u of [[5, 7], [-7, -5]] as const) for (const v of [feetV, mirror(feetV)]) feet.push({ u, v, y: [0, s.body[0]], ramp: s.feet, side: 'base' });
@@ -123,7 +128,7 @@ export function upholsteredModel(kind: UpholsteryStyle, seats: number, facing: F
       { boxes: [{ u: [-7, 7], v: along([-(half - 1), half - 1]), y: s.body, ramp: s.ramp, side: 'shadow', rounded: true }] },
       {
         boxes: [
-          { u: [-6, 7], v: along([-innerHalf, innerHalf]), y: [SEAT_UNDER, SEAT_HEIGHT], ramp: s.ramp, top: 'base', side: 'base', rounded: true, shade: seamed(seats, facing, innerHalf, s.ramp, cushion) },
+          { u: [BACK_FACE + 1, 7], v: along([-innerHalf, innerHalf]), y: [SEAT_UNDER, SEAT_HEIGHT], ramp: s.ramp, top: 'base', side: 'base', rounded: true, shade: seamed(seats, facing, innerHalf, s.ramp, cushion) },
         ],
       },
       {

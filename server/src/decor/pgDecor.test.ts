@@ -444,6 +444,7 @@ describe('createPgDecor: art pack catalog (art migration, step 3)', () => {
 
     const inserts = pool.queries.filter((query) => /insert into assets/i.test(query.text));
     expect(inserts.map((query) => query.values[3]).sort()).toEqual([
+      'art:chair-executive:sheet',
       'art:chair-fabric:sheet',
       'art:chair-gamer:sheet',
       'art:chair-leather:sheet',

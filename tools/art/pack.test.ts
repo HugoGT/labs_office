@@ -134,7 +134,7 @@ describe('art pack manifest', () => {
   it('registers the characters, furniture, floors, walls, the terrain tileset and the map props', () => {
     const count = (kind: string): number => manifest.pieces.filter((piece) => piece.kind === kind).length;
     const kinds = ['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa'];
-    expect(kinds.map(count)).toEqual([18, 7, 4, 9, 4, 1, 2, 1, 1, 1, 3, 2, 4]);
+    expect(kinds.map(count)).toEqual([18, 8, 4, 9, 4, 1, 2, 1, 1, 1, 3, 2, 4]);
   });
 
   it('uses stable ids derived from the generators, unique and prefixed by kind', () => {

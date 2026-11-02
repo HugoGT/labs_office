@@ -334,6 +334,7 @@ describe('createMemoryDecor: art pack catalog (art migration, step 3)', () => {
   });
 
   const CHAIR_KEYS = [
+    'art:chair-executive:sheet',
     'art:chair-fabric:sheet',
     'art:chair-gamer:sheet',
     'art:chair-leather:sheet',

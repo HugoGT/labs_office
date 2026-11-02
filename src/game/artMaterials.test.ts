@@ -79,6 +79,7 @@ describe('materialCatalogFrom: chairs', () => {
       ['chair-office', 'chair'],
       ['chair-task', 'chair'],
       ['chair-fabric', 'chair'],
+      ['chair-executive', 'chair'],
     ]);
     expect(catalog().chair[0]!.sheetUrl).toBe('assets/pack/chair/wood.png');
   });
@@ -92,6 +93,7 @@ describe('materialCatalogFrom: chairs', () => {
       ['chair-office', false, null],
       ['chair-task', false, null],
       ['chair-fabric', true, '#c4ab8c'],
+      ['chair-executive', false, null],
     ]);
   });
 
