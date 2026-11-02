@@ -167,6 +167,61 @@ describe('ArtUploadSection (#121)', () => {
     await waitFor(() => expect(uploads.upload).toHaveBeenCalledWith(expect.objectContaining({ kind: 'floor', colorable: true, defaultColor: '#808080' })));
   });
 
+  it('offers an admin every kind a contributor can upload', () => {
+    render(<ArtUploadSection uploads={fakePort()} />);
+
+    const options = within(screen.getByLabelText('Tipo')).getAllByRole('option').map((option) => option.textContent);
+    expect(options).toEqual(['Personaje', 'Planta (decoración de escritorio)', 'Escritorio', 'Suelo', 'Silla', 'Mesa de sala', 'Puerta']);
+  });
+
+  it.each([
+    ['chair', 'Silla'],
+    ['door', 'Puerta'],
+  ])('a %s asks for its one sheet and uploads it with no extra fields', async (kind, name) => {
+    const user = userEvent.setup();
+    const uploads = fakePort();
+    render(<ArtUploadSection uploads={uploads} />);
+
+    await user.selectOptions(screen.getByLabelText('Tipo'), kind);
+    expect(screen.queryByLabelText('Admite color')).toBeNull();
+    expect(screen.queryByLabelText('Ancho')).toBeNull();
+    await user.type(screen.getByLabelText('Nombre'), name);
+    await user.upload(screen.getByLabelText(/Hoja/), png(`${kind}.png`));
+    await submitAndAccept(user);
+
+    await waitFor(() => expect(uploads.upload).toHaveBeenCalledWith({ kind, name, files: { sheet: PNG_BASE64 } }));
+  });
+
+  it('a room table asks for its footprint in tiles and sends it', async () => {
+    const user = userEvent.setup();
+    const uploads = fakePort();
+    render(<ArtUploadSection uploads={uploads} />);
+
+    await user.selectOptions(screen.getByLabelText('Tipo'), 'table');
+    await user.type(screen.getByLabelText('Nombre'), 'Mesa larga');
+    await user.upload(screen.getByLabelText(/Hoja/), png('mesa.png'));
+    await user.clear(screen.getByLabelText('Ancho'));
+    await user.type(screen.getByLabelText('Ancho'), '3');
+    await submitAndAccept(user);
+
+    await waitFor(() =>
+      expect(uploads.upload).toHaveBeenCalledWith({ kind: 'table', name: 'Mesa larga', footprint: { w: 3, h: 1 }, files: { sheet: PNG_BASE64 } }),
+    );
+  });
+
+  it('a room table with a footprint out of range cannot be uploaded', async () => {
+    const user = userEvent.setup();
+    render(<ArtUploadSection uploads={fakePort()} />);
+
+    await user.selectOptions(screen.getByLabelText('Tipo'), 'table');
+    await user.type(screen.getByLabelText('Nombre'), 'Mesa');
+    await user.upload(screen.getByLabelText(/Hoja/), png('mesa.png'));
+    await user.clear(screen.getByLabelText('Alto'));
+    await user.type(screen.getByLabelText('Alto'), '0');
+
+    expect(screen.getByRole('button', { name: 'Subir' })).toBeDisabled();
+  });
+
   it('shows a refusal in Spanish, naming the file and the size it should have', async () => {
     const user = userEvent.setup();
     const uploads = fakePort({ upload: vi.fn(async () => Promise.reject(new AdminError('invalid-dimensions', 'sheet'))) });
