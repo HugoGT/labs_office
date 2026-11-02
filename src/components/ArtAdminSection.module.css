@@ -56,6 +56,12 @@
   max-width: 100%;
 }
 
+.footprint {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 .check {
   display: flex;
   align-items: center;

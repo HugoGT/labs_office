@@ -1,5 +1,5 @@
 import { useId, useState, type FormEvent } from 'react';
-import { ART_IMAGE_SPECS, sheetSize, type ArtImageKind } from '../game/artContract';
+import { ART_IMAGE_SPECS, TABLE, sheetSize, type ArtImageKind } from '../game/artContract';
 import { describeAdminError } from '../dashboard/adminErrors';
 import { AdminError } from '../dashboard/adminPort';
 import { ART_UPLOAD_KINDS, type ArtUploadInput, type ArtUploadKind, type ArtUploadPort, type UploadedArt } from '../dashboard/artUploadPort';
@@ -19,9 +19,12 @@ import styles from './ArtAdminSection.module.css';
 
 const KIND_LABELS: Readonly<Record<ArtUploadKind, string>> = {
   character: 'Personaje',
+  plant: 'Planta (decoración de escritorio)',
   desk: 'Escritorio',
   floor: 'Suelo',
-  plant: 'Planta (decoración de escritorio)',
+  chair: 'Silla',
+  table: 'Mesa de sala',
+  door: 'Puerta',
 };
 
 /** File roles per kind, as `server/src/assets/assetUploadRules.ts` reads them. */
@@ -30,9 +33,12 @@ const FILES: Readonly<Record<ArtUploadKind, readonly { role: string; label: stri
     { role: 'walk', label: 'Caminar', imageKind: 'character-walk' },
     { role: 'seated', label: 'Sentado', imageKind: 'character-seated' },
   ],
+  plant: [{ role: 'sheet', label: 'Hoja', imageKind: 'plant' }],
   desk: [{ role: 'sheet', label: 'Hoja', imageKind: 'desk' }],
   floor: [{ role: 'sheet', label: 'Hoja', imageKind: 'floor' }],
-  plant: [{ role: 'sheet', label: 'Hoja', imageKind: 'plant' }],
+  chair: [{ role: 'sheet', label: 'Hoja', imageKind: 'chair' }],
+  table: [{ role: 'sheet', label: 'Hoja', imageKind: 'table' }],
+  door: [{ role: 'sheet', label: 'Hoja', imageKind: 'door' }],
 };
 
 const FIELD_LABELS: Readonly<Record<string, string>> = {
@@ -41,6 +47,7 @@ const FIELD_LABELS: Readonly<Record<string, string>> = {
   colorable: 'Admite color',
   defaultColor: 'Color por defecto',
   facings: 'Geometría del escritorio',
+  footprint: 'Tamaño de la mesa',
   files: 'Archivos',
 };
 
@@ -48,6 +55,12 @@ const DEFAULT_COLOR = '#808080';
 
 function hasColor(kind: ArtUploadKind): boolean {
   return kind === 'desk' || kind === 'floor';
+}
+
+/** Whether a field of the footprint holds a whole number of tiles from 1 to `max`. */
+function isTiles(value: string, max: number): boolean {
+  const tiles = Number(value);
+  return value.trim() !== '' && Number.isInteger(tiles) && tiles >= 1 && tiles <= max;
 }
 
 function sizeOf(imageKind: ArtImageKind): string {
@@ -93,6 +106,8 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
   const [name, setName] = useState('');
   const [colorable, setColorable] = useState(false);
   const [defaultColor, setDefaultColor] = useState(DEFAULT_COLOR);
+  const [width, setWidth] = useState('2');
+  const [height, setHeight] = useState('1');
   /** Data URL per file role: the preview and, without its prefix, the upload. */
   const [files, setFiles] = useState<Record<string, string>>({});
   /** The office mock of what was chosen is open: the piece is published when the admin accepts it there. */
@@ -104,6 +119,7 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
   const roles = FILES[kind];
   const ready =
     name.trim() !== '' &&
+    (kind !== 'table' || (isTiles(width, TABLE.maxFootprint.w) && isTiles(height, TABLE.maxFootprint.h))) &&
     roles.every(({ role }) => files[role] !== undefined);
 
   function changeKind(next: ArtUploadKind): void {
@@ -143,6 +159,7 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
       kind,
       name: name.trim(),
       ...(hasColor(kind) && colorable ? { colorable: true, defaultColor } : {}),
+      ...(kind === 'table' ? { footprint: { w: Number(width), h: Number(height) } } : {}),
       files: Object.fromEntries(roles.map(({ role }) => [role, (files[role] as string).slice((files[role] as string).indexOf(',') + 1)])),
     };
     try {
@@ -224,6 +241,45 @@ export function ArtUploadSection({ uploads }: ArtUploadSectionProps) {
                 />
               </div>
             )}
+          </>
+        )}
+
+        {kind === 'table' && (
+          <>
+            <div className={styles.footprint} data-row="footprint">
+              <div className={styles.field}>
+                <label className={styles.label} htmlFor={`${id}-width`}>
+                  Ancho
+                </label>
+                <input
+                  id={`${id}-width`}
+                  className={styles.input}
+                  type="number"
+                  min={1}
+                  max={TABLE.maxFootprint.w}
+                  value={width}
+                  onChange={(event) => setWidth(event.target.value)}
+                />
+              </div>
+              <div className={styles.field}>
+                <label className={styles.label} htmlFor={`${id}-height`}>
+                  Alto
+                </label>
+                <input
+                  id={`${id}-height`}
+                  className={styles.input}
+                  type="number"
+                  min={1}
+                  max={TABLE.maxFootprint.h}
+                  value={height}
+                  aria-describedby={`${id}-footprint-hint`}
+                  onChange={(event) => setHeight(event.target.value)}
+                />
+              </div>
+            </div>
+            <span className={styles.hint} id={`${id}-footprint-hint`}>
+              Mesa en horizontal, de hasta {TABLE.maxFootprint.w} × {TABLE.maxFootprint.h} casillas.
+            </span>
           </>
         )}
 

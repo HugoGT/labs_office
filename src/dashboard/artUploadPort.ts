@@ -6,8 +6,11 @@
  * and re-encodes every file; the panel only says what each kind needs.
  */
 
-/** The kinds the server accepts from an upload (`server/src/assets/assetUploadRules.ts`). */
-export const ART_UPLOAD_KINDS = ['character', 'desk', 'floor', 'plant'] as const;
+/**
+ * The kinds the server accepts from an upload (`server/src/assets/assetUploadRules.ts`),
+ * the same list and order a contributor sees (`CONTRIBUTION_KINDS`).
+ */
+export const ART_UPLOAD_KINDS = ['character', 'plant', 'desk', 'floor', 'chair', 'table', 'door'] as const;
 export type ArtUploadKind = (typeof ART_UPLOAD_KINDS)[number];
 
 export interface ArtUploadInput {
@@ -17,6 +20,8 @@ export interface ArtUploadInput {
   /** Desks and floors: a colorable piece is exported in `defaultColor`. */
   colorable?: boolean;
   defaultColor?: string | null;
+  /** Room tables only: whole tiles, horizontal, up to `TABLE.maxFootprint`. */
+  footprint?: { w: number; h: number };
   /** Base64 PNG (no `data:` prefix) per file role of the kind. */
   files: Record<string, string>;
 }
