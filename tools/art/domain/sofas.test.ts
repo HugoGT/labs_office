@@ -4,6 +4,7 @@ import { SOFA } from '../../../src/game/artContract.ts';
 import { chairSprite } from './chairs.ts';
 import { SOFA_MATERIALS, SOFA_SEATS, sofaSprite, type SofaSprite } from './sofas.ts';
 import { DEFAULT_FABRIC_COLOR, LEATHER } from './upholstery.ts';
+import { makeRamp } from './color.ts';
 import { PixelBuffer } from '../../../src/art/pixelBuffer.ts';
 import { FACINGS, SEAT_HEIGHT } from '../../../src/art/seating.ts';
 
@@ -267,5 +268,89 @@ test('a sofa of two or three seats has wider arms than its armchair', () => {
         assert.ok(wide > narrow, `${material}-${seats} ${side}: arm ${wide}px, armchair ${narrow}px`);
       }
     }
+  }
+});
+
+const UPHOLSTERED = SOFA_MATERIALS.flatMap((material) => [
+  { name: `chair-${material}`, material, sprite: (facing: (typeof FACINGS)[number]) => chairSprite(material, facing) },
+  ...SOFA_SEATS.map((seats) => ({ name: `${material}-${seats}`, material, sprite: (facing: (typeof FACINGS)[number]) => sofaSprite(material, seats, facing) })),
+]);
+
+/** First and last opaque column of a row, or null when the row is empty. */
+function rowSpan(image: PixelBuffer, y: number): readonly [number, number] | null {
+  let first = -1;
+  let last = -1;
+  for (let x = 0; x < image.width; x += 1) {
+    if (image.alphaAt(x, y) !== 255) continue;
+    if (first < 0) first = x;
+    last = x;
+  }
+  return first < 0 ? null : [first, last];
+}
+
+function topRow(image: PixelBuffer): number {
+  let y = 0;
+  while (y < image.height && rowSpan(image, y) === null) y += 1;
+  return y;
+}
+
+test('seen from the side, every upholstered backrest is 5px thick and the near arm runs back to its rear', () => {
+  for (const { name, sprite } of UPHOLSTERED) {
+    const image = composite(sprite('right'));
+    const top = topRow(image);
+    // Under its rounded top edge the backrest alone stands above the arms: ink, 5px of upholstery, ink.
+    const back = rowSpan(image, top + 2)!;
+    assert.equal(back[1] - back[0] + 1, 5 + 2, `${name}: backrest ${back[1] - back[0] - 1}px thick`);
+    // Down at the seat, the arm in front starts where the backrest does.
+    const seatY = sprite('right').ground.y;
+    const arm = rowSpan(image, seatY)!;
+    assert.equal(arm[0], back[0], `${name}: the arm starts at x ${arm[0]}, the backrest at ${back[0]}`);
+  }
+});
+
+test('the fabric armchair and sofas go down to the floor, the leather ones stand on feet', () => {
+  for (const { name, material, sprite } of UPHOLSTERED) {
+    for (const facing of FACINGS) {
+      const image = composite(sprite(facing));
+      let bottom = image.height - 1;
+      while (rowSpan(image, bottom) === null) bottom -= 1;
+      let opaque = 0;
+      for (let x = 0; x < image.width; x += 1) if (image.alphaAt(x, bottom) === 255) opaque += 1;
+      // Feet leave gaps under the body; a body down to the floor fills the row but for its rounded corners.
+      let widest = 0;
+      for (let y = 0; y < image.height; y += 1) {
+        const span = rowSpan(image, y);
+        if (span !== null) widest = Math.max(widest, span[1] - span[0] + 1);
+      }
+      const full = opaque >= widest * 0.6;
+      assert.equal(full, material === 'fabric', `${name} ${facing}: ${opaque}px of ${widest} on the floor`);
+    }
+  }
+});
+
+test('a fabric arm ends in a roll that curls outward, a spiral on its front, the same on both sides', () => {
+  const deep = makeRamp(DEFAULT_FABRIC_COLOR).deep;
+  for (const { name, material, sprite } of UPHOLSTERED) {
+    if (material !== 'fabric') continue;
+    const { back, front, ground } = sprite('down');
+    const image = composite({ back, front });
+    // Across the roll the silhouette is wider than at the floor.
+    const roll = rowSpan(image, ground.y - 9)!;
+    const floor = rowSpan(image, ground.y - 1)!;
+    assert.ok(roll[0] < floor[0] && roll[1] > floor[1], `${name}: roll ${roll}, floor ${floor}`);
+    const spiral = (x: number, y: number): boolean => {
+      const p = image.getPixel(x, y);
+      return p.a === 255 && p.r === deep.r && p.g === deep.g && p.b === deep.b;
+    };
+    const left: string[] = [];
+    const right: string[] = [];
+    for (let y = 0; y < image.height; y += 1) {
+      for (let dx = 0; dx < 7; dx += 1) {
+        if (spiral(roll[0] + dx, y)) left.push(`${dx},${y}`);
+        if (spiral(roll[1] - dx, y)) right.push(`${dx},${y}`);
+      }
+    }
+    assert.ok(left.length >= 8, `${name}: ${left.length} spiral pixels`);
+    assert.deepEqual(right, left, `${name}: the arms mirror each other`);
   }
 });

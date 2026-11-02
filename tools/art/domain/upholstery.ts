@@ -16,6 +16,8 @@ import { SEAT_HEIGHT, type Facing } from '../../../src/art/seating.ts';
 export const SEAT_HALF = 7;
 /** Model u of the backrest's inner face: where a sitter's back rests. */
 export const BACK_FACE = -5;
+/** Model u of the backrest's rear: a backrest 5px thick, behind the face the sitter leans on. */
+const BACK_REAR = -10;
 export const SEAT_UNDER = SEAT_HEIGHT - 2;
 export const ARM_TOP = SEAT_HEIGHT + 4;
 export const SEAT_SPAN: Span = [-SEAT_HALF, SEAT_HALF];
@@ -32,7 +34,6 @@ export function armLayer(side: 1 | -1): (facing: Facing) => Layer {
 
 export const LEATHER = makeRamp('#8c4a31');
 export const LEATHER_FEET = makeRamp('#4a2e22');
-const FABRIC_FEET = makeRamp('#2b2f3a');
 
 /** The beige of the fabric armchair and sofas (the reference sofa), and the color the pack exports them in. */
 export const DEFAULT_FABRIC_COLOR = '#c4ab8c';
@@ -67,15 +68,37 @@ function tufted(seats: number, facing: Facing, inner: number, half: number): (po
   };
 }
 
+/** The roll that tops a fabric arm: how tall it is and how far it curls out past the post under it. */
+const ROLL_HEIGHT = 6;
+const ROLL_OUT = 2;
+
+/**
+ * The spiral on the front of a roll, as seen from the front, counted from the arm's outer edge; `#` is the deep tone
+ * of the ramp, so a recolor moves it with the rest.
+ */
+const SCROLL = ['.###.', '#...#', '#.#.#', '#..#.', '.##..'];
+
+/** The front of a roll curls in from its outer side; on the sitter's right (+1) that is the left of the screen. */
+function scroll(side: 1 | -1, ramp: Ramp): (point: SurfacePoint, color: Rgba) => Rgba {
+  return (point, color) => {
+    if (point.face !== 'forward') return color;
+    const fromOuter = side > 0 ? point.col : point.width - 1 - point.col;
+    return SCROLL[point.row]?.[fromOuter] === '#' ? ramp.deep : color;
+  };
+}
+
 export type UpholsteryStyle = 'leather' | 'fabric';
 
 interface Style {
   readonly ramp: Ramp;
-  readonly feet: Ramp;
+  /** Leather stands on short dark feet; the fabric body goes down to the floor. */
+  readonly feet: Ramp | null;
   readonly top: number;
-  /** Rolled leather arms stop short of the back; fabric ones are boxes from back to front. */
+  /** Arms run from the backrest's rear; the leather ones stop short of the front. */
   readonly armU: Span;
   readonly body: Span;
+  /** Fabric arms end in a roll that curls outward, a spiral on its front. */
+  readonly scrolled: boolean;
   /** Leather backs are buttoned; fabric ones plain. */
   readonly buttoned: boolean;
   /** Contact shadow reach: the boxy fabric body covers more of the floor, so its shadow spreads further. */
@@ -114,14 +137,15 @@ function seamed(seats: number, facing: Facing, inner: number, ramp: Ramp, shade?
 
 function style(kind: UpholsteryStyle, color: string): Style {
   if (kind === 'leather') {
-    return { ramp: LEATHER, feet: LEATHER_FEET, top: SEAT_HEIGHT + 12, armU: [-7, 6], body: [3, SEAT_UNDER], buttoned: true, shadowU: [-8, 7], shadowMargin: 0 };
+    return { ramp: LEATHER, feet: LEATHER_FEET, top: SEAT_HEIGHT + 12, armU: [BACK_REAR, 6], body: [3, SEAT_UNDER], scrolled: false, buttoned: true, shadowU: [BACK_REAR, 7], shadowMargin: 0 };
   }
-  return { ramp: makeRamp(color), feet: FABRIC_FEET, top: SEAT_HEIGHT + 11, armU: [-8, 7], body: [2, SEAT_UNDER], buttoned: false, shadowU: [-10, 10], shadowMargin: 2 };
+  return { ramp: makeRamp(color), feet: null, top: SEAT_HEIGHT + 11, armU: [BACK_REAR, 7], body: [0, SEAT_UNDER], scrolled: true, buttoned: false, shadowU: [BACK_REAR - 2, 10], shadowMargin: 2 };
 }
 
 /**
- * A padded seat of `seats` places on short dark feet: a body, one cushion per seat, a back and an
- * arm at each end. `color` paints the fabric one; the leather keeps its own.
+ * A padded seat of `seats` places: a body, one cushion per seat, a back and an arm at each end, the leather one on
+ * short dark feet, the fabric one down to the floor with rolled arms. `color` paints the fabric one; the leather keeps
+ * its own.
  */
 export function upholsteredModel(kind: UpholsteryStyle, seats: number, facing: Facing, color = DEFAULT_FABRIC_COLOR): FurnitureModel {
   const s = style(kind, color);
@@ -139,16 +163,32 @@ export function upholsteredModel(kind: UpholsteryStyle, seats: number, facing: F
   };
   const feetV = along([half - 3, half - 1]);
   const feet: Box[] = [];
-  for (const u of [[5, 7], [-7, -5]] as const) for (const v of [feetV, mirror(feetV)]) feet.push({ u, v, y: [0, s.body[0]], ramp: s.feet, side: 'base' });
+  if (s.feet !== null) {
+    for (const u of [[5, 7], [BACK_REAR + 1, BACK_REAR + 3]] as const) for (const v of [feetV, mirror(feetV)]) feet.push({ u, v, y: [0, s.body[0]], ramp: s.feet, side: 'base' });
+  }
   const arm = (side: 1 | -1): Part => {
-    const v = along([half - armWidth, half]);
-    return { layer: armLayer(side), boxes: [{ u: s.armU, v: side > 0 ? v : mirror(v), y: [s.body[0], ARM_TOP], ramp: s.ramp, top: 'light', side: 'base', rounded: true }] };
+    const onSide = (span: Span): Span => (side > 0 ? along(span) : mirror(along(span)));
+    const v = onSide([half - armWidth, half]);
+    if (!s.scrolled) {
+      return { layer: armLayer(side), boxes: [{ u: s.armU, v, y: [s.body[0], ARM_TOP], ramp: s.ramp, top: 'light', side: 'base', rounded: true }] };
+    }
+    // A post up from the floor, and on it the roll, wider by ROLL_OUT toward the outside.
+    return {
+      layer: armLayer(side),
+      boxes: [
+        // From behind the post is the body's own back, in its tone, so it does not read as a leg.
+        { u: s.armU, v, y: [s.body[0], ARM_TOP - ROLL_HEIGHT], ramp: s.ramp, side: 'base', rounded: true, shade: (point, c) => (point.face === 'backward' ? s.ramp.shadow : c) },
+        { u: s.armU, v: onSide([half - armWidth, half + ROLL_OUT]), y: [ARM_TOP - ROLL_HEIGHT, ARM_TOP], ramp: s.ramp, top: 'light', side: 'base', rounded: true, shade: scroll(side, s.ramp) },
+      ],
+    };
   };
   return {
-    shadow: { u: s.shadowU, v: along([-(half + s.shadowMargin), half + s.shadowMargin]), shape: seats === 1 ? 'ellipse' : 'rect' },
+    // A body down to the floor is a box on it: its shadow is square like the sofas', or it would hide behind it.
+    shadow: { u: s.shadowU, v: along([-(half + s.shadowMargin), half + s.shadowMargin]), shape: seats === 1 && s.feet !== null ? 'ellipse' : 'rect' },
     parts: [
-      { boxes: feet },
-      { boxes: [{ u: [-7, 7], v: along([-(half - 1), half - 1]), y: s.body, ramp: s.ramp, side: 'shadow', rounded: true }] },
+      ...(feet.length > 0 ? [{ boxes: feet }] : []),
+      // On feet the body sits a pixel in from the back; down to the floor it is flush with it, one block from behind.
+      { boxes: [{ u: [s.feet === null ? BACK_REAR : BACK_REAR + 1, 7], v: along([-(half - 1), half - 1]), y: s.body, ramp: s.ramp, side: 'shadow', rounded: true }] },
       {
         boxes: [
           { u: [BACK_FACE + 1, 7], v: along([-innerHalf, innerHalf]), y: [SEAT_UNDER, SEAT_HEIGHT], ramp: s.ramp, top: 'base', side: 'base', rounded: true, shade: seamed(seats, facing, innerHalf, s.ramp, cushion) },
@@ -156,7 +196,7 @@ export function upholsteredModel(kind: UpholsteryStyle, seats: number, facing: F
       },
       {
         layer: backrestLayer,
-        boxes: [{ u: [-8, BACK_FACE], v: along([-half, half]), y: [SEAT_UNDER, s.top], ramp: s.ramp, top: 'light', side: 'base', rounded: true, shade: seamed(seats, facing, innerHalf, s.ramp, s.buttoned ? tufted(seats, facing, innerHalf, half) : undefined) }],
+        boxes: [{ u: [BACK_REAR, BACK_FACE], v: along([-half, half]), y: [SEAT_UNDER, s.top], ramp: s.ramp, top: 'light', side: 'base', rounded: true, shade: seamed(seats, facing, innerHalf, s.ramp, s.buttoned ? tufted(seats, facing, innerHalf, half) : undefined) }],
       },
       arm(1),
       arm(-1),
